@@ -28,7 +28,7 @@
         <googleApiClientVersion>2.9.0</googleApiClientVersion>
         <googleApiServicesSafebrowsingVersion>v5-rev20251214-2.0.0</googleApiServicesSafebrowsingVersion>
         <zxingVersion>3.5.3</zxingVersion>
-        <jsoupVersion>1.19.1</jsoupVersion>
+        <jsoupVersion>1.23.2</jsoupVersion>
     </properties>
 
     <dependencies>
