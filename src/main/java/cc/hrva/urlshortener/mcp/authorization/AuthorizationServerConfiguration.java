@@ -31,6 +31,7 @@ import org.springframework.security.oauth2.server.authorization.JdbcOAuth2Author
 import org.springframework.security.oauth2.server.authorization.OAuth2AuthorizationConsentService;
 import org.springframework.security.oauth2.server.authorization.OAuth2AuthorizationService;
 import org.springframework.security.oauth2.server.authorization.authentication.OAuth2ClientRegistrationAuthenticationProvider;
+import org.springframework.security.oauth2.server.authorization.authentication.OAuth2ClientRegistrationAuthenticationValidator;
 import org.springframework.security.oauth2.server.authorization.client.JdbcRegisteredClientRepository;
 import org.springframework.security.oauth2.server.authorization.client.RegisteredClientRepository;
 import org.springframework.security.oauth2.server.authorization.settings.AuthorizationServerSettings;
@@ -67,6 +68,9 @@ public class AuthorizationServerConfiguration {
         http.authorizeHttpRequests(authorize -> authorize.anyRequest().authenticated())
                 .with(McpAuthorizationServerConfigurer.mcpAuthorizationServer(), mcp -> mcp
                         .authorizationCodeRequestValidator(new LocalhostWildcardPortValidator().andThen(DEFAULT_SCOPE_VALIDATOR))
+                        .dynamicClientRegistrationValidator(OAuth2ClientRegistrationAuthenticationValidator.DEFAULT_REDIRECT_URI_VALIDATOR
+                                .andThen(OAuth2ClientRegistrationAuthenticationValidator.DEFAULT_JWK_SET_URI_VALIDATOR)
+                                .andThen(new DcrScopeValidator()))
                         .authorizationServer(authorizationServer -> {
                             http.securityMatcher(new OrRequestMatcher(authorizationServer.getEndpointsMatcher(), unsupportedDiscovery));
                             authorizationServer

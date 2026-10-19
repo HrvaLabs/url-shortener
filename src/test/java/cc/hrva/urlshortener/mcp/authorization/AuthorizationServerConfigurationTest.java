@@ -91,6 +91,9 @@ class AuthorizationServerConfigurationTest {
     private static final String CODE_VERIFIER = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
     private static final String CODE_CHALLENGE = s256(CODE_VERIFIER);
     private static final RSAKey SIGNING_KEY = generateSigningKey();
+    private static final String REGISTRATION_WITH_SCOPE = """
+            {"redirect_uris":["http://localhost:53682/callback"],"token_endpoint_auth_method":"none","scope":"%s"}""";
+    private static final String SCOPED_REGISTRATION = REGISTRATION_WITH_SCOPE.formatted("claudeai");
     private static final String EMPTY_SCOPE_REGISTRATION = """
             {"redirect_uris":["http://localhost:53682/callback"],"token_endpoint_auth_method":"none","scope":""}""";
 
@@ -192,6 +195,73 @@ class AuthorizationServerConfigurationTest {
         assertThat(authorization.<Authentication>getAttribute(Principal.class.getName()))
                 .extracting(Authentication::getName)
                 .isEqualTo("user@localhost");
+    }
+
+    @Test
+    void dcrAcceptsAndStoresNonEmptyScope() throws Exception {
+        final var body = mockMvc.perform(post("/oauth2/register")
+                        .contentType(APPLICATION_JSON)
+                        .content(SCOPED_REGISTRATION))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.scope").value("claudeai"))
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+
+        final var registeredClient = registeredClientRepository.findByClientId(JsonPath.read(body, "$.client_id"));
+
+        assertThat(registeredClient).isNotNull();
+        assertThat(registeredClient.getScopes()).containsExactly("claudeai");
+    }
+
+    @Test
+    void authorizeAcceptsScopeTheClientRegistered() throws Exception {
+        final var clientId = registerClient(SCOPED_REGISTRATION);
+
+        final var location = mockMvc.perform(get("/oauth2/authorize")
+                        .queryParam("response_type", "code")
+                        .queryParam("client_id", clientId)
+                        .queryParam("redirect_uri", "http://localhost:61112/callback")
+                        .queryParam("scope", "claudeai")
+                        .queryParam("code_challenge", CODE_CHALLENGE)
+                        .queryParam("code_challenge_method", "S256")
+                        .queryParam("state", "state-2")
+                        .session(signedInSession()))
+                .andExpect(status().isFound())
+                .andReturn()
+                .getResponse()
+                .getHeader(HttpHeaders.LOCATION);
+
+        assertThat(location)
+                .startsWith("http://localhost:61112/callback?code=")
+                .contains("state=state-2")
+                .doesNotContain("error");
+
+        final var code = UriComponentsBuilder.fromUriString(location).build().getQueryParams().getFirst("code");
+        final var authorization = authorizationService.findByToken(code, new OAuth2TokenType(OAuth2ParameterNames.CODE));
+        assertThat(authorization).isNotNull();
+        assertThat(authorization.getAuthorizedScopes()).containsExactly("claudeai");
+    }
+
+    @Test
+    void dcrRejectsOpenidScope() throws Exception {
+        for (final var scope : List.of("openid", "claudeai openid")) {
+            mockMvc.perform(post("/oauth2/register")
+                            .contentType(APPLICATION_JSON)
+                            .content(REGISTRATION_WITH_SCOPE.formatted(scope)))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.error").value("invalid_scope"));
+        }
+    }
+
+    @Test
+    void dcrStillValidatesRedirectUris() throws Exception {
+        mockMvc.perform(post("/oauth2/register")
+                        .contentType(APPLICATION_JSON)
+                        .content("""
+                                {"redirect_uris":["javascript:alert(1)"],"token_endpoint_auth_method":"none"}"""))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("invalid_redirect_uri"));
     }
 
     @Test
@@ -298,9 +368,13 @@ class AuthorizationServerConfigurationTest {
     }
 
     private String registerClient() throws Exception {
+        return registerClient(EMPTY_SCOPE_REGISTRATION);
+    }
+
+    private String registerClient(final String registration) throws Exception {
         final var body = mockMvc.perform(post("/oauth2/register")
                         .contentType(APPLICATION_JSON)
-                        .content(EMPTY_SCOPE_REGISTRATION))
+                        .content(registration))
                 .andExpect(status().isCreated())
                 .andReturn()
                 .getResponse()
