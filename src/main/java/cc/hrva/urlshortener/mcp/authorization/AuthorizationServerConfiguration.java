@@ -69,6 +69,7 @@ public class AuthorizationServerConfiguration {
                 .with(McpAuthorizationServerConfigurer.mcpAuthorizationServer(), mcp -> mcp
                         .authorizationCodeRequestValidator(new LocalhostWildcardPortValidator().andThen(DEFAULT_SCOPE_VALIDATOR))
                         .dynamicClientRegistrationValidator(OAuth2ClientRegistrationAuthenticationValidator.DEFAULT_REDIRECT_URI_VALIDATOR
+                                .andThen(new DcrRedirectUriValidator())
                                 .andThen(OAuth2ClientRegistrationAuthenticationValidator.DEFAULT_JWK_SET_URI_VALIDATOR)
                                 .andThen(new DcrScopeValidator()))
                         .authorizationServer(authorizationServer -> {

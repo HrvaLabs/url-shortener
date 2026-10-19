@@ -255,6 +255,51 @@ class AuthorizationServerConfigurationTest {
     }
 
     @Test
+    void dcrRejectsMalformedScopeTokens() throws Exception {
+        for (final var scope : List.of("claudeai,openid", ",openid,", "claudeai  x", " claudeai", "clau\\\"deai", "clau\\\\deai")) {
+            mockMvc.perform(post("/oauth2/register")
+                            .contentType(APPLICATION_JSON)
+                            .content(REGISTRATION_WITH_SCOPE.formatted(scope)))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.error").value("invalid_scope"))
+                    .andExpect(jsonPath("$.error_description").value("Invalid Client Registration: scope"));
+        }
+    }
+
+    @Test
+    void dcrRejectsScopeSentAsJsonArray() throws Exception {
+        mockMvc.perform(post("/oauth2/register")
+                        .contentType(APPLICATION_JSON)
+                        .content("""
+                                {"redirect_uris":["http://localhost:53682/callback"],"token_endpoint_auth_method":"none","scope":["claudeai","openid"]}"""))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("invalid_scope"));
+    }
+
+    @Test
+    void registeredScopesReloadExactlyAsRegistered() throws Exception {
+        final var clientId = registerClient(REGISTRATION_WITH_SCOPE.formatted("claudeai mcp:tools"));
+
+        final var registeredClient = registeredClientRepository.findByClientId(clientId);
+
+        assertThat(registeredClient).isNotNull();
+        assertThat(registeredClient.getScopes())
+                .containsExactlyInAnyOrder("claudeai", "mcp:tools")
+                .doesNotContain("openid");
+    }
+
+    @Test
+    void dcrRejectsRedirectUriContainingComma() throws Exception {
+        mockMvc.perform(post("/oauth2/register")
+                        .contentType(APPLICATION_JSON)
+                        .content("""
+                                {"redirect_uris":["http://localhost:1/cb,https://evil.example/cb"],"token_endpoint_auth_method":"none"}"""))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("invalid_redirect_uri"))
+                .andExpect(content().string(not(containsString("evil.example"))));
+    }
+
+    @Test
     void dcrStillValidatesRedirectUris() throws Exception {
         mockMvc.perform(post("/oauth2/register")
                         .contentType(APPLICATION_JSON)
