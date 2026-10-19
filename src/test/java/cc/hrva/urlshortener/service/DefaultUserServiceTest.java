@@ -30,6 +30,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
@@ -171,6 +173,37 @@ class DefaultUserServiceTest {
         assertThatThrownBy(() -> userService.fetchUserFromEmail("test@example.com"))
                 .isInstanceOf(UserNotFoundException.class)
                 .hasMessage("User is inactive, please contact administrator");
+    }
+
+    @Test
+    @ExtendWith(OutputCaptureExtension.class)
+    void shouldFetchActiveUserByEmailWithoutLoggingTheEmail(final CapturedOutput output) {
+        final var user = User.builder().id(1L).email("quiet@example.com").active(true).build();
+        when(userRepository.findByEmail("quiet@example.com")).thenReturn(Optional.of(user));
+
+        final var result = userService.fetchActiveUserByEmail("quiet@example.com");
+
+        assertThat(result).isEqualTo(user);
+        assertThat(output).doesNotContain("quiet@example.com");
+    }
+
+    @Test
+    void shouldFailFetchActiveUserByEmailWhenInactive() {
+        final var user = User.builder().id(1L).email("test@example.com").active(false).build();
+        when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
+
+        assertThatThrownBy(() -> userService.fetchActiveUserByEmail("test@example.com"))
+                .isInstanceOf(UserNotFoundException.class)
+                .hasMessage("User is inactive, please contact administrator");
+    }
+
+    @Test
+    void shouldFailFetchActiveUserByEmailWhenUnknown() {
+        when(userRepository.findByEmail("missing@example.com")).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> userService.fetchActiveUserByEmail("missing@example.com"))
+                .isInstanceOf(UserNotFoundException.class)
+                .hasMessage("User not found");
     }
 
     @Test

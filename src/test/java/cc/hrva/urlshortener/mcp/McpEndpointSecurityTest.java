@@ -29,10 +29,13 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.SpringBootConfiguration;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
 import org.springframework.data.domain.PageImpl;
@@ -80,6 +83,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
                 "app.server-url=localhost"
         })
 @AutoConfigureMockMvc
+@ExtendWith(OutputCaptureExtension.class)
 class McpEndpointSecurityTest {
 
     private static final String ISSUER = "https://hrva.cc";
@@ -91,6 +95,9 @@ class McpEndpointSecurityTest {
             {"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}""";
     private static final String LIST_LINKS_CALL = """
             {"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"list_links","arguments":{}}}""";
+    private static final String INITIALIZE = """
+            {"jsonrpc":"2.0","id":3,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"1.0.0"}}}""";
+    private static final String GENERIC_TOOL_ERROR = "Something went wrong on hrva.cc. Try again in a moment.";
     private static final RSAKey SIGNING_KEY = generateSigningKey();
 
     @Autowired
@@ -197,22 +204,75 @@ class McpEndpointSecurityTest {
     }
 
     @Test
-    void listLinksRunsAsTheTokenSubject() throws Exception {
+    void listLinksRunsAsTheTokenSubject(final CapturedOutput output) throws Exception {
         final var token = accessTokens.issue(EMAIL, RESOURCE);
         final var callerDuringLookup = new AtomicReference<String>();
-        when(userService.fetchUserFromEmail(EMAIL)).thenReturn(User.builder().id(7L).email(EMAIL).active(true).build());
+        when(userService.fetchActiveUserByEmail(EMAIL)).thenReturn(User.builder().id(7L).email(EMAIL).active(true).build());
         when(urlService.getAllMyUrls(isNull(), any(), any())).thenAnswer(invocation -> {
             callerDuringLookup.set(SecurityContextHolder.getContext().getAuthentication().getName());
             return new PageImpl<>(List.of(link("abc12", "https://example.com/a")));
         });
 
+        final var outputBeforeCall = output.length();
         mockMvc.perform(mcpRequest(LIST_LINKS_CALL).header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.result.isError").value(false))
                 .andExpect(jsonPath("$.result.content[0].text", containsString(ISSUER + "/abc12")));
 
-        verify(userService).fetchUserFromEmail(EMAIL);
+        verify(userService).fetchActiveUserByEmail(EMAIL);
+        verify(userService, never()).fetchUserFromEmail(any());
         assertThat(callerDuringLookup.get()).isEqualTo(EMAIL);
+        assertThat(output.toString().substring(outputBeforeCall))
+                .contains("MCP list_links userId=7")
+                .doesNotContain(EMAIL);
+    }
+
+    @Test
+    void toolFailureReturnsGenericErrorWithoutInternals() throws Exception {
+        final var token = accessTokens.issue(EMAIL, RESOURCE);
+        when(userService.fetchActiveUserByEmail(EMAIL)).thenReturn(User.builder().id(7L).email(EMAIL).active(true).build());
+        when(urlService.getAllMyUrls(isNull(), any(), any())).thenThrow(new IllegalStateException("internal-detail-from-the-database"));
+
+        mockMvc.perform(mcpRequest(LIST_LINKS_CALL).header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.result.isError").value(true))
+                .andExpect(jsonPath("$.result.content.length()").value(1))
+                .andExpect(jsonPath("$.result.content[0].text").value(GENERIC_TOOL_ERROR))
+                .andExpect(content().string(not(containsString("internal-detail-from-the-database"))));
+    }
+
+    @Test
+    void initializeAdvertisesToolsOnly() throws Exception {
+        final var token = accessTokens.issue(EMAIL, RESOURCE);
+
+        final var body = mockMvc.perform(mcpRequest(INITIALIZE).header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.result.serverInfo.name").value("hrva.cc"))
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+
+        final Map<String, Object> capabilities = JsonPath.read(body, "$.result.capabilities");
+        assertThat(capabilities).containsOnlyKeys("tools");
+    }
+
+    @Test
+    void malformedMcpBodyIsNotLogged(final CapturedOutput output) throws Exception {
+        final var token = accessTokens.issue(EMAIL, RESOURCE);
+        final var notJsonRpc = """
+                {"jsonrpc":"2.0","params":{"name":"list_links","arguments":{"search":"https://secret-argument.example/path"}}}""";
+        final var truncated = """
+                {"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"list_links","arguments":{"search":"https://secret-argument.example/path""";
+
+        for (final var invalidBody : List.of(notJsonRpc, truncated)) {
+            mockMvc.perform(mcpRequest(invalidBody).header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+                    .andExpect(status().isBadRequest());
+        }
+
+        assertThat(output)
+                .doesNotContain("secret-argument.example")
+                .doesNotContain("Failed to deserialize message")
+                .contains("Rejected an MCP message that is not valid JSON-RPC");
     }
 
     @Test
@@ -279,6 +339,7 @@ class McpEndpointSecurityTest {
             GlobalExceptionHandler.class,
             AuthorizationServerConfiguration.class,
             McpResourceServerConfiguration.class,
+            McpMessageBodyLogFilter.class,
             JwtFilter.class,
             ClientIpResolver.class,
             UrlRedirectController.class,

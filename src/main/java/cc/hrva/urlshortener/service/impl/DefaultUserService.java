@@ -99,6 +99,11 @@ public class DefaultUserService implements UserService {
     public User fetchUserFromEmail(final String email) {
         log.info("User login email={}", email);
 
+        return fetchActiveUserByEmail(email);
+    }
+
+    @Override
+    public User fetchActiveUserByEmail(final String email) {
         final var user = userRepository.findByEmail(email)
                 .orElseThrow(() -> new UserNotFoundException("User not found"));
 

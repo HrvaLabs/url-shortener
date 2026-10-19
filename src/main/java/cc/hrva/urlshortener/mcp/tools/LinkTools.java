@@ -4,6 +4,7 @@ import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.dto.UrlResponse;
 import cc.hrva.urlshortener.dto.UrlSearchDto;
 import cc.hrva.urlshortener.service.UrlService;
+import io.modelcontextprotocol.spec.McpSchema.CallToolResult;
 import java.util.Objects;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
@@ -19,6 +20,7 @@ import org.springframework.stereotype.Component;
 @RequiredArgsConstructor
 public class LinkTools {
 
+    private static final String LIST_LINKS = "list_links";
     private static final int PAGE_SIZE = 20;
     private static final Sort NEWEST_FIRST = Sort.by(Sort.Direction.DESC, "createDate");
 
@@ -27,7 +29,7 @@ public class LinkTools {
     private final McpUserResolver mcpUserResolver;
 
     @McpTool(
-            name = "list_links",
+            name = LIST_LINKS,
             title = "List my links",
             description = "Lists the signed-in user's hrva.cc short links, newest first, 20 per page. "
                     + "Each line shows the short link, its destination, its visit count and its status.",
@@ -39,10 +41,14 @@ public class LinkTools {
                     openWorldHint = false
             )
     )
-    public String listLinks(
+    public CallToolResult listLinks(
             @McpToolParam(required = false, description = "Only links whose destination or alias contains this text") final String search,
             @McpToolParam(required = false, description = "Only links with this tag") final String tag,
             @McpToolParam(required = false, description = "Zero-based page number, 0 by default") final Integer page) {
+        return McpToolResults.run(LIST_LINKS, () -> describeLinks(search, tag, page));
+    }
+
+    private String describeLinks(final String search, final String tag, final Integer page) {
         final var user = mcpUserResolver.currentUser();
         final var pageable = PageRequest.of(Math.max(0, Objects.requireNonNullElse(page, 0)), PAGE_SIZE, NEWEST_FIRST);
         final var links = urlService.getAllMyUrls(null, pageable, new UrlSearchDto(search, null, null, tag, null, null));

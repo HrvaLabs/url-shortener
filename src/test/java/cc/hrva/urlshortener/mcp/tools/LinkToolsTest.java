@@ -6,6 +6,8 @@ import cc.hrva.urlshortener.dto.UrlSearchDto;
 import cc.hrva.urlshortener.exception.UserNotFoundException;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.service.UrlService;
+import io.modelcontextprotocol.spec.McpSchema.CallToolResult;
+import io.modelcontextprotocol.spec.McpSchema.TextContent;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Set;
@@ -15,13 +17,15 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.tuple;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.isNull;
@@ -60,7 +64,8 @@ class LinkToolsTest {
 
         final var result = linkTools.listLinks(null, null, null);
 
-        assertThat(result.lines()).containsExactly(
+        assertThat(result.isError()).isFalse();
+        assertThat(text(result).lines()).containsExactly(
                 "https://hrva.cc/abc12 -> https://example.com/first | 3 visits | ACTIVE",
                 "https://hrva.cc/xyz89 -> https://example.org/second | 0 visits | EXPIRED");
         final var order = inOrder(mcpUserResolver, urlService);
@@ -103,16 +108,43 @@ class LinkToolsTest {
         when(mcpUserResolver.currentUser()).thenReturn(CURRENT_USER);
         when(urlService.getAllMyUrls(isNull(), any(), any())).thenReturn(page());
 
-        assertThat(linkTools.listLinks("nothing", null, 5)).isEqualTo("No links found.");
+        final var result = linkTools.listLinks("nothing", null, 5);
+
+        assertThat(result.isError()).isFalse();
+        assertThat(text(result)).isEqualTo("No links found.");
     }
 
     @Test
-    void inactiveUserGetsNoLinks() {
+    void inactiveUserGetsTheUserFacingMessageOnce() {
         when(mcpUserResolver.currentUser()).thenThrow(new UserNotFoundException("User is inactive, please contact administrator"));
 
-        assertThatThrownBy(() -> linkTools.listLinks(null, null, null))
-                .isInstanceOf(UserNotFoundException.class);
+        final var result = linkTools.listLinks(null, null, null);
+
+        assertThat(result.isError()).isTrue();
+        assertThat(result.content()).hasSize(1);
+        assertThat(text(result)).isEqualTo("User is inactive, please contact administrator");
         verifyNoInteractions(urlService);
+    }
+
+    @Test
+    @ExtendWith(OutputCaptureExtension.class)
+    void unexpectedFailureReturnsGenericErrorAndLogsNoDetails(final CapturedOutput output) {
+        when(mcpUserResolver.currentUser()).thenReturn(CURRENT_USER);
+        when(urlService.getAllMyUrls(isNull(), any(), any()))
+                .thenThrow(new DataIntegrityViolationException("Key (search)=(secret-search-term) violates something"));
+
+        final var result = linkTools.listLinks("secret-search-term", null, null);
+
+        assertThat(result.isError()).isTrue();
+        assertThat(result.content()).hasSize(1);
+        assertThat(text(result)).isEqualTo("Something went wrong on hrva.cc. Try again in a moment.");
+        assertThat(output)
+                .contains("tool=list_links")
+                .doesNotContain("secret-search-term");
+    }
+
+    private static String text(final CallToolResult result) {
+        return ((TextContent) result.content().getFirst()).text();
     }
 
     private static Page<UrlResponse> page(final UrlResponse... links) {

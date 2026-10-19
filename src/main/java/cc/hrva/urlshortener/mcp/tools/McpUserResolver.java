@@ -19,7 +19,7 @@ public class McpUserResolver {
             throw new NoAuthorizationException("Not signed in");
         }
 
-        return userService.fetchUserFromEmail(authentication.getToken().getSubject());
+        return userService.fetchActiveUserByEmail(authentication.getToken().getSubject());
     }
 
 }
