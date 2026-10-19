@@ -119,7 +119,7 @@ public class DefaultUrlService implements UrlService {
     public UrlResponse saveUrlWithApiKey(final @Valid CreateUrlDto createUrlDto, final String key) {
         final var url = createUrlToUrlConverter.convert(createUrlDto);
 
-        log.info("Creating URL with API key longUrl={}", createUrlDto.getLongUrl());
+        log.info("Creating URL with API key");
 
         validateUrl(url);
 

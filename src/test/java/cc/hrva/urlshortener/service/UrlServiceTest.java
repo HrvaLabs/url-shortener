@@ -164,6 +164,27 @@ class UrlServiceTest {
     }
 
     @Test
+    @ExtendWith(OutputCaptureExtension.class)
+    void savingWithApiKeyLogsNoDestinationOrAlias(final CapturedOutput output) {
+        final var createUrlDto = CreateUrlDto.builder().longUrl("https://secret-destination.example/path").build();
+        final var url = Url.builder().longUrl("https://secret-destination.example/path").build();
+        final var api = "apikey";
+        final var apiKey = ApiKey.builder().owner(User.builder().id(1L).build()).build();
+
+        when(urlRepository.save(url)).thenReturn(url);
+        when(apiKeyService.fetchApiKeyByKey(api)).thenReturn(apiKey);
+        when(createUrlToUrlConverter.convert(createUrlDto)).thenReturn(url);
+        when(appProperties.getShortUrlLength()).thenReturn(24L);
+
+        final var result = urlService.saveUrlWithApiKey(createUrlDto, api);
+
+        assertThat(output)
+                .contains("Saving URL for owner id=1")
+                .doesNotContain("secret-destination.example")
+                .doesNotContain(result.shortUrl());
+    }
+
+    @Test
     void shouldFetchUrls() {
         final var apiKey = "apikey";
         final var user = User.builder().build();
