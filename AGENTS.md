@@ -1,7 +1,7 @@
 # URL-Shortener Agent Guide
 
 ## Build & Run
-- **Java 25**, **Spring Boot 4.0.6**, **Maven**. No Gverifyradle artifacts.
+- **Java 25**, **Spring Boot 4.1.1**, **Maven**. No Gverifyradle artifacts.
 - `.mvn/wrapper/` exists but `mvnw` is missing — use system `mvn`.
 - Entry point: `cc.hrva.urlshortener.UrlShortenerApplication`
 - Local dev:
@@ -30,7 +30,7 @@ Idempotent — safe on restart. Liquibase seeds `ROLE_USER` and `ROLE_ADMIN` aut
 - **MailHog** (`localhost:8025`, SMTP on `localhost:1025`)
 
 ## Testing
-- `mvn test` — 140 tests, JUnit 5 + Mockito + AssertJ
+- `mvn test` — 244 tests, JUnit 5 + Mockito + AssertJ
 - No `@ActiveProfiles`, no Testcontainers, no test slicing — all plain `@ExtendWith(MockitoExtension.class)` unit tests
 - `src/test/` mirrors `src/main/` package structure
 
