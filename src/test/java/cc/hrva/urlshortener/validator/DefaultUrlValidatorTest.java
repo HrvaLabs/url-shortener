@@ -159,8 +159,103 @@ class DefaultUrlValidatorTest {
     }
 
     @Test
-    void shouldAcceptLongUrlWithUnencodedCharactersInQuery() {
-        assertLongUrlAccepted("https://fonts.googleapis.com/css?family=Roboto|Open+Sans&a[]={x}");
+    void shouldRejectLongUrlWithUnencodedPipeInQuery() {
+        assertLongUrlRejected("https://fonts.googleapis.com/css?family=Roboto|Open+Sans");
+    }
+
+    @Test
+    void shouldRejectLongUrlWithBarePercentInPath() {
+        assertLongUrlRejected("https://example.com/%");
+    }
+
+    @Test
+    void shouldRejectLongUrlWithUnencodedQuotesInQuery() {
+        assertLongUrlRejected("https://example.com/?q=\"quoted\"");
+    }
+
+    @Test
+    void shouldRejectLongUrlWithUnencodedAngleBracketsInPath() {
+        assertLongUrlRejected("https://example.com/<x>");
+    }
+
+    @Test
+    void shouldRejectLongUrlWithBracesInHost() {
+        assertLongUrlRejected("https://ex{}ample.com");
+    }
+
+    @Test
+    void shouldRejectLongUrlWithNonBreakingSpaceInPath() {
+        assertLongUrlRejected("https://example.com/a b");
+    }
+
+    @Test
+    void shouldRejectLongUrlWithOnlyDotAsHost() {
+        assertLongUrlRejected("https://.");
+    }
+
+    @Test
+    void shouldRejectLongUrlWithOnlyDotsAsHost() {
+        assertLongUrlRejected("https://..");
+    }
+
+    @Test
+    void shouldRejectLongUrlWithHostStartingWithDot() {
+        assertLongUrlRejected("https://.com");
+    }
+
+    @Test
+    void shouldRejectLongUrlWithEmptyHostLabel() {
+        assertLongUrlRejected("https://example..com");
+    }
+
+    @Test
+    void shouldRejectLongUrlWithHostLabelStartingWithHyphen() {
+        assertLongUrlRejected("https://-x.com");
+    }
+
+    @Test
+    void shouldRejectLongUrlWithHostLabelEndingWithHyphen() {
+        assertLongUrlRejected("https://x-.com");
+    }
+
+    @Test
+    void shouldRejectLongUrlWithNonNumericPort() {
+        assertLongUrlRejected("https://example.com:abc");
+    }
+
+    @Test
+    void shouldRejectEmptyLongUrl() {
+        assertLongUrlRejected("");
+    }
+
+    @Test
+    void shouldRejectWhitespaceOnlyLongUrl() {
+        assertLongUrlRejected("   ");
+    }
+
+    @Test
+    void shouldAcceptUnderscoreHostLongUrl() {
+        assertLongUrlAccepted("https://my_site.example.com/");
+    }
+
+    @Test
+    void shouldAcceptIpv6LongUrlWithPort() {
+        assertLongUrlAccepted("https://[::1]:8080/x");
+    }
+
+    @Test
+    void shouldAcceptLongUrlWithPort() {
+        assertLongUrlAccepted("https://example.com:8080/p");
+    }
+
+    @Test
+    void shouldAcceptLongUrlWithPercentEncodedPath() {
+        assertLongUrlAccepted("https://example.com/%E2%82%AC");
+    }
+
+    @Test
+    void shouldAcceptLongUrlWithTrailingDotInHost() {
+        assertLongUrlAccepted("https://example.com.");
     }
 
     private void assertLongUrlRejected(final String longUrl) {

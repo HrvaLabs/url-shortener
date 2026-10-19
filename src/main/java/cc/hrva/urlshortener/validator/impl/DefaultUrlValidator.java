@@ -7,12 +7,12 @@ import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.service.SafeBrowsingService;
 import cc.hrva.urlshortener.service.UserService;
 import cc.hrva.urlshortener.validator.UrlValidator;
+import java.net.URI;
 import java.util.List;
 import java.util.regex.Pattern;
 import lombok.RequiredArgsConstructor;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Component;
-import org.springframework.web.util.InvalidUrlException;
 import org.springframework.web.util.UriComponentsBuilder;
 
 import java.time.LocalDateTime;
@@ -31,6 +31,9 @@ public class DefaultUrlValidator implements UrlValidator {
             "swagger-ui", "v3", "webjars", "auth");
 
     private static final Pattern WEB_ADDRESS_PREFIX = Pattern.compile("^https?://[^/]", Pattern.CASE_INSENSITIVE);
+
+    private static final Pattern HOST_NAME = Pattern.compile(
+            "^(?!-)[a-z0-9_-]+(?<!-)(?:\\.(?!-)[a-z0-9_-]+(?<!-))+\\.?$", Pattern.CASE_INSENSITIVE);
 
     @Override
     public void longUrlInUrl(final Url url) {
@@ -51,11 +54,12 @@ public class DefaultUrlValidator implements UrlValidator {
             return false;
         }
         try {
+            URI.create(longUrl);
             final var host = UriComponentsBuilder.fromUriString(longUrl, UriComponentsBuilder.ParserType.WHAT_WG)
                     .build()
                     .getHost();
-            return StringUtils.isNotEmpty(host) && (host.contains(".") || host.startsWith("["));
-        } catch (final InvalidUrlException exception) {
+            return StringUtils.isNotEmpty(host) && (host.startsWith("[") || HOST_NAME.matcher(host).matches());
+        } catch (final IllegalArgumentException exception) {
             return false;
         }
     }
