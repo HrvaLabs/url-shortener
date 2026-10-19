@@ -143,6 +143,7 @@ public class DefaultUrlService implements UrlService {
 
     private void validateUrl(final Url url) {
         urlValidator.longUrlInUrl(url);
+        urlValidator.checkIfLongUrlIsValid(url);
         urlValidator.checkIfUrlSafe(url);
         urlValidator.checkIfUrlExpirationDateIsInThePast(url);
     }

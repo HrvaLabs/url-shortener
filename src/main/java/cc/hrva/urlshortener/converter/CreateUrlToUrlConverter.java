@@ -3,12 +3,16 @@ package cc.hrva.urlshortener.converter;
 import cc.hrva.urlshortener.dto.CreateUrlDto;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.util.TagNormalizer;
+import java.util.regex.Pattern;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.core.convert.converter.Converter;
 import org.springframework.stereotype.Component;
 
 @Component
 public class CreateUrlToUrlConverter implements Converter<CreateUrlDto, Url> {
+
+  private static final Pattern SCHEME_PREFIX = Pattern.compile(
+      "^(?:[a-z][a-z0-9+.-]*:(?!\\d+(?:[/?#]|$))|https?/)", Pattern.CASE_INSENSITIVE);
 
   @Override
   public Url convert(final CreateUrlDto createUrlDto) {
@@ -26,8 +30,7 @@ public class CreateUrlToUrlConverter implements Converter<CreateUrlDto, Url> {
       return longUrl;
     }
     final var trimmed = longUrl.trim();
-    final var lower = trimmed.toLowerCase();
-    if (lower.startsWith("http://") || lower.startsWith("https://")) {
+    if (SCHEME_PREFIX.matcher(trimmed).find()) {
       return trimmed;
     }
     return "https://" + trimmed;

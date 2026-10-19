@@ -8,8 +8,12 @@ import cc.hrva.urlshortener.service.SafeBrowsingService;
 import cc.hrva.urlshortener.service.UserService;
 import cc.hrva.urlshortener.validator.UrlValidator;
 import java.util.List;
+import java.util.regex.Pattern;
 import lombok.RequiredArgsConstructor;
+import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Component;
+import org.springframework.web.util.InvalidUrlException;
+import org.springframework.web.util.UriComponentsBuilder;
 
 import java.time.LocalDateTime;
 
@@ -26,10 +30,33 @@ public class DefaultUrlValidator implements UrlValidator {
             "api", "login", "logout", "oauth2", "actuator", "error",
             "swagger-ui", "v3", "webjars", "auth");
 
+    private static final Pattern WEB_ADDRESS_PREFIX = Pattern.compile("^https?://[^/]", Pattern.CASE_INSENSITIVE);
+
     @Override
     public void longUrlInUrl(final Url url) {
         if (url.getLongUrl() == null) {
             throw new LongUrlNotSpecifiedException("URL is required");
+        }
+    }
+
+    @Override
+    public void checkIfLongUrlIsValid(final Url url) {
+        if (!isWebAddress(url.getLongUrl())) {
+            throw new UrlValidationException("That doesn't look like a valid web address. Check the URL and try again.");
+        }
+    }
+
+    private static boolean isWebAddress(final String longUrl) {
+        if (longUrl == null || StringUtils.containsWhitespace(longUrl) || !WEB_ADDRESS_PREFIX.matcher(longUrl).find()) {
+            return false;
+        }
+        try {
+            final var host = UriComponentsBuilder.fromUriString(longUrl, UriComponentsBuilder.ParserType.WHAT_WG)
+                    .build()
+                    .getHost();
+            return StringUtils.isNotEmpty(host) && (host.contains(".") || host.startsWith("["));
+        } catch (final InvalidUrlException exception) {
+            return false;
         }
     }
 
