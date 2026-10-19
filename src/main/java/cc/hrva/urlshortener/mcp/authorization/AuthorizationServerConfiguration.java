@@ -71,7 +71,8 @@ public class AuthorizationServerConfiguration {
                         .dynamicClientRegistrationValidator(OAuth2ClientRegistrationAuthenticationValidator.DEFAULT_REDIRECT_URI_VALIDATOR
                                 .andThen(new DcrRedirectUriValidator())
                                 .andThen(OAuth2ClientRegistrationAuthenticationValidator.DEFAULT_JWK_SET_URI_VALIDATOR)
-                                .andThen(new DcrScopeValidator()))
+                                .andThen(new DcrScopeValidator())
+                                .andThen(new DcrGrantTypeValidator()))
                         .authorizationServer(authorizationServer -> {
                             http.securityMatcher(new OrRequestMatcher(authorizationServer.getEndpointsMatcher(), unsupportedDiscovery));
                             authorizationServer

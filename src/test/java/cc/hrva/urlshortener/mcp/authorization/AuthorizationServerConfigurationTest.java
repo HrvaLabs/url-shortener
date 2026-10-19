@@ -38,6 +38,7 @@ import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.User;
 import org.springframework.security.core.userdetails.UserDetailsService;
+import org.springframework.security.oauth2.core.AuthorizationGrantType;
 import org.springframework.security.oauth2.core.endpoint.OAuth2ParameterNames;
 import org.springframework.security.oauth2.jwt.JwtClaimsSet;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
@@ -63,6 +64,7 @@ import static org.hamcrest.Matchers.startsWith;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.springframework.http.MediaType.APPLICATION_FORM_URLENCODED;
 import static org.springframework.http.MediaType.APPLICATION_JSON;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -94,6 +96,8 @@ class AuthorizationServerConfigurationTest {
     private static final String REGISTRATION_WITH_SCOPE = """
             {"redirect_uris":["http://localhost:53682/callback"],"token_endpoint_auth_method":"none","scope":"%s"}""";
     private static final String SCOPED_REGISTRATION = REGISTRATION_WITH_SCOPE.formatted("claudeai");
+    private static final String REGISTRATION_WITH_METADATA = """
+            {"redirect_uris":["http://localhost:53682/callback"],"token_endpoint_auth_method":"none",%s}""";
     private static final String EMPTY_SCOPE_REGISTRATION = """
             {"redirect_uris":["http://localhost:53682/callback"],"token_endpoint_auth_method":"none","scope":""}""";
 
@@ -297,6 +301,78 @@ class AuthorizationServerConfigurationTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error").value("invalid_redirect_uri"))
                 .andExpect(content().string(not(containsString("evil.example"))));
+    }
+
+    @Test
+    void dcrRejectsGrantTypesOtherThanAuthorizationCodeAndRefreshToken() throws Exception {
+        for (final var grantTypes : List.of(
+                "[\"client_credentials\"]",
+                "[\"authorization_code\",\"client_credentials\"]",
+                "[\"authorization_code,client_credentials\"]",
+                "[\"password\"]",
+                "[\"urn:ietf:params:oauth:grant-type:jwt-bearer\"]",
+                "[\"urn:ietf:params:oauth:grant-type:device_code\"]")) {
+            mockMvc.perform(post("/oauth2/register")
+                            .contentType(APPLICATION_JSON)
+                            .content(REGISTRATION_WITH_METADATA.formatted("\"grant_types\":" + grantTypes)))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.error").value("invalid_client_metadata"))
+                    .andExpect(jsonPath("$.error_description").value("Invalid Client Registration: grant_types"));
+        }
+    }
+
+    @Test
+    void dcrAcceptsAuthorizationCodeWithRefreshToken() throws Exception {
+        final var clientId = registerClient(REGISTRATION_WITH_METADATA.formatted("\"grant_types\":[\"authorization_code\",\"refresh_token\"]"));
+
+        assertThat(registeredClientRepository.findByClientId(clientId).getAuthorizationGrantTypes())
+                .containsExactlyInAnyOrder(AuthorizationGrantType.AUTHORIZATION_CODE, AuthorizationGrantType.REFRESH_TOKEN);
+    }
+
+    @Test
+    void dcrDefaultsToAuthorizationCodeWhenGrantTypesAreAbsent() throws Exception {
+        final var clientId = registerClient();
+
+        assertThat(registeredClientRepository.findByClientId(clientId).getAuthorizationGrantTypes())
+                .containsExactly(AuthorizationGrantType.AUTHORIZATION_CODE);
+    }
+
+    @Test
+    void dcrRejectsResponseTypesOtherThanCode() throws Exception {
+        for (final var responseTypes : List.of("[\"token\"]", "[\"code\",\"token\"]", "[\"code id_token\"]")) {
+            mockMvc.perform(post("/oauth2/register")
+                            .contentType(APPLICATION_JSON)
+                            .content(REGISTRATION_WITH_METADATA.formatted("\"response_types\":" + responseTypes)))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.error").value("invalid_client_metadata"))
+                    .andExpect(jsonPath("$.error_description").value("Invalid Client Registration: response_types"));
+        }
+
+        registerClient(REGISTRATION_WITH_METADATA.formatted("\"response_types\":[\"code\"]"));
+    }
+
+    @Test
+    void clientCredentialsTokenRequestFailsForDcrClient() throws Exception {
+        final var body = mockMvc.perform(post("/oauth2/register")
+                        .contentType(APPLICATION_JSON)
+                        .content("""
+                                {"redirect_uris":["http://localhost:53682/callback"],"token_endpoint_auth_method":"client_secret_basic"}"""))
+                .andExpect(status().isCreated())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        final String clientId = JsonPath.read(body, "$.client_id");
+        final String clientSecret = JsonPath.read(body, "$.client_secret");
+        final var basic = Base64.getEncoder().encodeToString((clientId + ":" + clientSecret).getBytes(StandardCharsets.UTF_8));
+
+        mockMvc.perform(post("/oauth2/token")
+                        .header(HttpHeaders.AUTHORIZATION, "Basic " + basic)
+                        .contentType(APPLICATION_FORM_URLENCODED)
+                        .param("grant_type", "client_credentials")
+                        .param("resource", ISSUER + "/mcp"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("unauthorized_client"))
+                .andExpect(jsonPath("$.access_token").doesNotExist());
     }
 
     @Test
