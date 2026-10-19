@@ -71,4 +71,11 @@ class DefaultUrlValidatorTest {
                 .isInstanceOf(ShortUrlAlreadyExistsException.class)
                 .hasMessage("This short URL is already taken. Try another.");
     }
+
+    @Test
+    void shouldRejectMcpAsReservedAlias() {
+        assertThatThrownBy(() -> urlValidator.checkIfShortUrlIsReserved("MCP"))
+                .isInstanceOf(ShortUrlAlreadyExistsException.class)
+                .hasMessage("This short URL is reserved. Try another.");
+    }
 }

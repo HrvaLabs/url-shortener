@@ -24,7 +24,7 @@ public class DefaultUrlValidator implements UrlValidator {
 
     private static final List<String> RESERVED_WORDS = List.of(
             "api", "login", "logout", "oauth2", "actuator", "error",
-            "swagger-ui", "v3", "webjars", "auth");
+            "swagger-ui", "v3", "webjars", "auth", "mcp");
 
     @Override
     public void longUrlInUrl(final Url url) {

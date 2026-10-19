@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.configuration.properties;
 
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
@@ -81,5 +82,20 @@ public class AppProperties {
     private boolean registrationEnabled = true;
     private boolean anonymousUrlCreationEnabled = true;
     private boolean safeBrowsingFailClosed = false;
+
+    @Valid
+    @NotNull
+    private Mcp mcp = new Mcp();
+
+    @Data
+    public static class Mcp {
+
+        @NotBlank
+        private String issuer;
+
+        @NotBlank
+        private String signingKey;
+
+    }
 
 }

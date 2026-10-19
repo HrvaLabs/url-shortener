@@ -7,8 +7,11 @@ import jakarta.servlet.http.HttpServletResponse;
 import java.util.Arrays;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
+import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.Ordered;
+import org.springframework.core.annotation.Order;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.AuthenticationProvider;
 import org.springframework.security.authentication.dao.DaoAuthenticationProvider;
@@ -49,6 +52,15 @@ public class SecurityConfiguration {
     }
 
     @Bean
+    public FilterRegistrationBean<JwtFilter> jwtFilterRegistration() {
+        final var registration = new FilterRegistrationBean<>(jwtFilter);
+        registration.setEnabled(false);
+
+        return registration;
+    }
+
+    @Bean
+    @Order(Ordered.LOWEST_PRECEDENCE)
     public SecurityFilterChain filterChain(final HttpSecurity http) throws Exception {
         http.csrf(AbstractHttpConfigurer::disable)
                 .cors(Customizer.withDefaults())
