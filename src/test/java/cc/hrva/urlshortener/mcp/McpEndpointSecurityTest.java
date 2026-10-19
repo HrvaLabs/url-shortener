@@ -6,6 +6,8 @@ import cc.hrva.urlshortener.configuration.JacksonConfiguration;
 import cc.hrva.urlshortener.configuration.SecurityConfiguration;
 import cc.hrva.urlshortener.configuration.WebConfiguration;
 import cc.hrva.urlshortener.controller.UrlRedirectController;
+import cc.hrva.urlshortener.dto.CreateUrlDto;
+import cc.hrva.urlshortener.dto.UrlAnalyticsDto;
 import cc.hrva.urlshortener.dto.UrlResponse;
 import cc.hrva.urlshortener.mcp.authorization.AuthorizationServerConfiguration;
 import cc.hrva.urlshortener.mcp.tools.LinkTools;
@@ -16,6 +18,7 @@ import cc.hrva.urlshortener.security.ClientIpResolver;
 import cc.hrva.urlshortener.security.JwtFilter;
 import cc.hrva.urlshortener.security.OAuth2LoginSuccessHandler;
 import cc.hrva.urlshortener.security.TokenProvider;
+import cc.hrva.urlshortener.service.AnalyticsService;
 import cc.hrva.urlshortener.service.UrlService;
 import cc.hrva.urlshortener.service.UserService;
 import com.jayway.jsonpath.JsonPath;
@@ -54,6 +57,7 @@ import org.springframework.web.servlet.view.RedirectView;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.hasItem;
+import static org.hamcrest.Matchers.hasItems;
 import static org.hamcrest.Matchers.not;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -95,6 +99,10 @@ class McpEndpointSecurityTest {
             {"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}""";
     private static final String LIST_LINKS_CALL = """
             {"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"list_links","arguments":{}}}""";
+    private static final String SHORTEN_URL_CALL = """
+            {"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"shorten_url","arguments":{"url":"https://secret-destination.example/path","alias":"secret-alias","visitLimit":5,"expiresAt":"2030-06-30T21:59:00Z","tags":["secret-tag"]}}}""";
+    private static final String LINK_STATS_CALL = """
+            {"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"link_stats","arguments":{"link":"https://hrva.cc/secret-alias"}}}""";
     private static final String INITIALIZE = """
             {"jsonrpc":"2.0","id":3,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"1.0.0"}}}""";
     private static final String GENERIC_TOOL_ERROR = "Something went wrong on hrva.cc. Try again in a moment.";
@@ -111,6 +119,9 @@ class McpEndpointSecurityTest {
 
     @MockitoBean
     private UserService userService;
+
+    @MockitoBean
+    private AnalyticsService analyticsService;
 
     @MockitoBean
     private TokenProvider tokenProvider;
@@ -193,7 +204,7 @@ class McpEndpointSecurityTest {
 
         final var body = mockMvc.perform(mcpRequest(TOOLS_LIST).header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.result.tools[*].name", hasItem("list_links")))
+                .andExpect(jsonPath("$.result.tools[*].name", hasItems("list_links", "shorten_url", "link_stats")))
                 .andReturn()
                 .getResponse()
                 .getContentAsString();
@@ -201,6 +212,71 @@ class McpEndpointSecurityTest {
         final List<Map<String, Object>> inputProperties = JsonPath.read(body, "$.result.tools[?(@.name == 'list_links')].inputSchema.properties");
         assertThat(inputProperties).singleElement()
                 .satisfies(properties -> assertThat(properties).containsOnlyKeys("search", "tag", "page"));
+        final List<Map<String, Object>> shortenProperties = JsonPath.read(body, "$.result.tools[?(@.name == 'shorten_url')].inputSchema.properties");
+        assertThat(shortenProperties).singleElement()
+                .satisfies(properties -> assertThat(properties).containsOnlyKeys("url", "alias", "visitLimit", "expiresAt", "tags"));
+        final List<List<String>> shortenRequired = JsonPath.read(body, "$.result.tools[?(@.name == 'shorten_url')].inputSchema.required");
+        assertThat(shortenRequired).singleElement().satisfies(required -> assertThat(required).containsExactly("url"));
+        final List<Map<String, Object>> statsProperties = JsonPath.read(body, "$.result.tools[?(@.name == 'link_stats')].inputSchema.properties");
+        assertThat(statsProperties).singleElement()
+                .satisfies(properties -> assertThat(properties).containsOnlyKeys("link"));
+    }
+
+    @Test
+    void shortenUrlCreatesTheLinkAsTheTokenSubject(final CapturedOutput output) throws Exception {
+        final var token = accessTokens.issue(EMAIL, RESOURCE);
+        final var callerDuringCreate = new AtomicReference<String>();
+        final var request = new AtomicReference<CreateUrlDto>();
+        when(userService.fetchActiveUserByEmail(EMAIL)).thenReturn(User.builder().id(7L).email(EMAIL).active(true).build());
+        when(urlService.saveUrlRouting(any())).thenAnswer(invocation -> {
+            callerDuringCreate.set(SecurityContextHolder.getContext().getAuthentication().getName());
+            request.set(invocation.getArgument(0));
+            return new UrlResponse(11L, "https://secret-destination.example/path", "secret-alias", LocalDateTime.now(), null, 0L, 5L,
+                    true, "ACTIVE", Set.of("claude", "secret-tag"), false, EMAIL);
+        });
+
+        final var outputBeforeCall = output.length();
+        mockMvc.perform(mcpRequest(SHORTEN_URL_CALL).header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.result.isError").value(false))
+                .andExpect(jsonPath("$.result.content[0].text", containsString(ISSUER + "/secret-alias")));
+
+        assertThat(callerDuringCreate.get()).isEqualTo(EMAIL);
+        assertThat(request.get().getShortUrl()).isEqualTo("secret-alias");
+        assertThat(request.get().getVisitLimit()).isEqualTo(5L);
+        assertThat(request.get().getExpirationDate()).isNotNull();
+        assertThat(request.get().getTags()).containsExactly("claude", "secret-tag");
+        assertThat(output.toString().substring(outputBeforeCall))
+                .contains("MCP shorten_url userId=7 urlId=11")
+                .doesNotContain("secret-destination.example")
+                .doesNotContain("secret-alias")
+                .doesNotContain("secret-tag")
+                .doesNotContain(EMAIL);
+    }
+
+    @Test
+    void linkStatsReadsOwnerOnlyStatsAsTheTokenSubject(final CapturedOutput output) throws Exception {
+        final var token = accessTokens.issue(EMAIL, RESOURCE);
+        final var callerDuringStats = new AtomicReference<String>();
+        when(userService.fetchActiveUserByEmail(EMAIL)).thenReturn(User.builder().id(7L).email(EMAIL).active(true).build());
+        when(urlService.getAllMyUrls(isNull(), any(), any())).thenReturn(new PageImpl<>(List.of(link("secret-alias", "https://example.com/a"))));
+        when(analyticsService.getUrlAnalyticsForOwner(1L)).thenAnswer(invocation -> {
+            callerDuringStats.set(SecurityContextHolder.getContext().getAuthentication().getName());
+            return new UrlAnalyticsDto(1L, "secret-alias", "https://example.com/a", "ACTIVE", 3L, 1L, 2L, null, LocalDateTime.now(), List.of());
+        });
+
+        final var outputBeforeCall = output.length();
+        mockMvc.perform(mcpRequest(LINK_STATS_CALL).header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.result.isError").value(false))
+                .andExpect(jsonPath("$.result.content[0].text", containsString(
+                        "Visitor details are kept for about 48 hours, so the recent figures cover roughly the last two days.")));
+
+        verify(analyticsService, never()).getUrlAnalytics(any());
+        assertThat(callerDuringStats.get()).isEqualTo(EMAIL);
+        assertThat(output.toString().substring(outputBeforeCall))
+                .contains("MCP link_stats userId=7 urlId=1")
+                .doesNotContain("secret-alias");
     }
 
     @Test

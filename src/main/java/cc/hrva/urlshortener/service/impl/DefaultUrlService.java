@@ -83,7 +83,7 @@ public class DefaultUrlService implements UrlService {
         final var url = createUrlToUrlConverter.convert(createUrlDto);
         final var currentUser = userService.getUserFromToken();
 
-        log.info("Creating URL longUrl={} authenticated={}", createUrlDto.getLongUrl(), currentUser != null);
+        log.info("Creating URL authenticated={}", currentUser != null);
 
         validateUrl(url);
 
@@ -150,7 +150,7 @@ public class DefaultUrlService implements UrlService {
     private void assignShortUrl(final Url url) {
         if (StringUtils.isEmpty(url.getShortUrl())) {
             url.setShortUrl(generateShortUrl(appProperties.getShortUrlLength()));
-            log.info("URL got generated short URL {}", url.getShortUrl());
+            log.info("URL got a generated short URL");
         }
         urlValidator.checkIfShortUrlIsUnique(url.getShortUrl());
         urlValidator.checkIfShortUrlIsReserved(url.getShortUrl());

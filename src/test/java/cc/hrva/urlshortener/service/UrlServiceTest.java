@@ -27,6 +27,8 @@ import cc.hrva.urlshortener.validator.UrlValidator;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.core.task.TaskExecutor;
@@ -273,6 +275,26 @@ class UrlServiceTest {
 
         verify(apiKeyValidator, org.mockito.Mockito.never()).apiKeyExistsByKeyAndIsValid(any());
         verify(apiKeyService, org.mockito.Mockito.never()).apiKeyUseAction(any(ApiKey.class));
+    }
+
+    @Test
+    @ExtendWith(OutputCaptureExtension.class)
+    void savingForSignedInUserLogsNoDestinationOrAlias(final CapturedOutput output) {
+        final var createUrlDto = CreateUrlDto.builder().longUrl("https://secret-destination.example/path").build();
+        final var url = Url.builder().longUrl("https://secret-destination.example/path").build();
+        final var user = User.builder().id(1L).build();
+
+        when(createUrlToUrlConverter.convert(createUrlDto)).thenReturn(url);
+        when(userService.getUserFromToken()).thenReturn(user);
+        when(urlRepository.save(url)).thenReturn(url);
+        when(appProperties.getShortUrlLength()).thenReturn(24L);
+
+        final var result = urlService.saveUrlRouting(createUrlDto);
+
+        assertThat(output)
+                .contains("Saving URL for owner id=1")
+                .doesNotContain("secret-destination.example")
+                .doesNotContain(result.shortUrl());
     }
 
     @Test

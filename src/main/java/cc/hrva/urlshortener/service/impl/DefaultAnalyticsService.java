@@ -35,6 +35,7 @@ public class DefaultAnalyticsService implements AnalyticsService {
     private static final int TOP_URLS_LIMIT = 5;
     private static final int DAILY_SERIES_DAYS = 30;
     private static final String ROLE_ADMIN = "ROLE_ADMIN";
+    private static final String NO_AUTHORIZATION = "You don't have authorization for this action";
 
     private final UserService userService;
     private final UrlRepository urlRepository;
@@ -64,13 +65,33 @@ public class DefaultAnalyticsService implements AnalyticsService {
     @Override
     public UrlAnalyticsDto getUrlAnalytics(final Long urlId) {
         final var user = currentUser();
-        final var url = urlRepository.findById(urlId)
-                .orElseThrow(() -> new UrlNotFoundException("URL not found"));
+        final var url = findUrl(urlId);
 
-        if (!isOwnerOrAdmin(url, user)) {
-            throw new NoAuthorizationException("You don't have authorization for this action");
+        if (!isOwner(url, user) && !isAdmin(user)) {
+            throw new NoAuthorizationException(NO_AUTHORIZATION);
         }
 
+        return buildAnalytics(url);
+    }
+
+    @Override
+    public UrlAnalyticsDto getUrlAnalyticsForOwner(final Long urlId) {
+        final var user = currentUser();
+        final var url = findUrl(urlId);
+
+        if (!isOwner(url, user)) {
+            throw new NoAuthorizationException(NO_AUTHORIZATION);
+        }
+
+        return buildAnalytics(url);
+    }
+
+    private Url findUrl(final Long urlId) {
+        return urlRepository.findById(urlId)
+                .orElseThrow(() -> new UrlNotFoundException("URL not found"));
+    }
+
+    private UrlAnalyticsDto buildAnalytics(final Url url) {
         final var ipAddresses = ipAddressRepository.findAllByUrl(url);
         final var uniqueRecentVisitors = ipAddresses.size();
         final var totalRecentClicks = ipAddresses.stream().mapToLong(ip -> safeLong(ip.getVisits())).sum();
@@ -101,10 +122,11 @@ public class DefaultAnalyticsService implements AnalyticsService {
                 .toList();
     }
 
-    private boolean isOwnerOrAdmin(final Url url, final User user) {
-        if (url.getOwner() != null && Objects.equals(url.getOwner().getId(), user.getId())) {
-            return true;
-        }
+    private boolean isOwner(final Url url, final User user) {
+        return url.getOwner() != null && Objects.equals(url.getOwner().getId(), user.getId());
+    }
+
+    private boolean isAdmin(final User user) {
         return user.getAuthorities().stream().anyMatch(authority -> ROLE_ADMIN.equals(authority.getName()));
     }
 

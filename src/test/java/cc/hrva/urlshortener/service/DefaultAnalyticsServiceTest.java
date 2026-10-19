@@ -21,6 +21,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -119,6 +120,57 @@ class DefaultAnalyticsServiceTest {
         when(urlRepository.findById(7L)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> analyticsService.getUrlAnalytics(7L))
+                .isInstanceOf(UrlNotFoundException.class);
+    }
+
+    @Test
+    void ownerOnlyStatsRejectAdminReadingForeignUrl() {
+        final var admin = User.builder().id(2L).email("admin@example.com")
+                .authorities(Collections.singletonList(Authorities.builder().id(1L).name("ROLE_ADMIN").build()))
+                .build();
+        final var url = Url.builder().id(7L).shortUrl("a").longUrl("https://a.com").visits(1L).active(true)
+                .owner(User.builder().id(99L).build()).build();
+        when(userService.getUserFromToken()).thenReturn(admin);
+        when(urlRepository.findById(7L)).thenReturn(Optional.of(url));
+
+        assertThatThrownBy(() -> analyticsService.getUrlAnalyticsForOwner(7L))
+                .isInstanceOf(NoAuthorizationException.class);
+        verifyNoInteractions(ipAddressRepository);
+    }
+
+    @Test
+    void ownerOnlyStatsRejectUrlWithoutOwner() {
+        final var url = Url.builder().id(7L).shortUrl("a").longUrl("https://a.com").active(true).build();
+        when(userService.getUserFromToken()).thenReturn(owner);
+        when(urlRepository.findById(7L)).thenReturn(Optional.of(url));
+
+        assertThatThrownBy(() -> analyticsService.getUrlAnalyticsForOwner(7L))
+                .isInstanceOf(NoAuthorizationException.class);
+        verifyNoInteractions(ipAddressRepository);
+    }
+
+    @Test
+    void ownerOnlyStatsBuildAnalyticsForOwner() {
+        final var url = Url.builder().id(7L).shortUrl("a").longUrl("https://a.com").visits(3L).active(true).owner(owner).build();
+        final var ip = IPAddress.builder().id(1L).visits(4L).createDate(LocalDateTime.now()).build();
+        when(userService.getUserFromToken()).thenReturn(owner);
+        when(urlRepository.findById(7L)).thenReturn(Optional.of(url));
+        when(ipAddressRepository.findAllByUrl(url)).thenReturn(List.of(ip));
+
+        final var analytics = analyticsService.getUrlAnalyticsForOwner(7L);
+
+        assertThat(analytics.id()).isEqualTo(7L);
+        assertThat(analytics.visits()).isEqualTo(3);
+        assertThat(analytics.uniqueRecentVisitors()).isEqualTo(1);
+        assertThat(analytics.totalRecentClicks()).isEqualTo(4);
+    }
+
+    @Test
+    void ownerOnlyStatsFailWhenUrlMissing() {
+        when(userService.getUserFromToken()).thenReturn(owner);
+        when(urlRepository.findById(7L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> analyticsService.getUrlAnalyticsForOwner(7L))
                 .isInstanceOf(UrlNotFoundException.class);
     }
 }

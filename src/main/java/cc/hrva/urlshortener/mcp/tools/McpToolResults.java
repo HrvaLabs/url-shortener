@@ -1,6 +1,7 @@
 package cc.hrva.urlshortener.mcp.tools;
 
 import cc.hrva.urlshortener.exception.CommonException;
+import io.modelcontextprotocol.spec.McpError;
 import io.modelcontextprotocol.spec.McpSchema.CallToolResult;
 import java.util.function.Supplier;
 import lombok.extern.slf4j.Slf4j;
@@ -18,6 +19,8 @@ public final class McpToolResults {
             return text(tool.get());
         } catch (final CommonException exception) {
             return error(StringUtils.defaultIfBlank(exception.getMessage(), GENERIC_ERROR));
+        } catch (final McpError exception) {
+            throw exception;
         } catch (final RuntimeException exception) {
             log.error("MCP tool failed tool={} exception={}", toolName, exception.getClass().getName());
             return error(GENERIC_ERROR);
