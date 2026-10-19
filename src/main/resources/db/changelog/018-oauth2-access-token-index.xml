@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.9.xsd">
+
+    <changeSet author="khrvacic" id="oauth2-authorization-access-token-index" dbms="postgresql">
+        <sql>CREATE INDEX idx_oauth2_authorization_access_token_value ON oauth2_authorization USING hash (access_token_value)</sql>
+        <rollback>
+            <dropIndex tableName="oauth2_authorization" indexName="idx_oauth2_authorization_access_token_value"/>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>

@@ -20,6 +20,13 @@ spring:
   web:
     error:
       include-message: always
+  ai:
+    mcp:
+      server:
+        name: hrva.cc
+        protocol: STATELESS
+        streamable-http:
+          mcp-endpoint: /mcp
 
 management:
   endpoints:

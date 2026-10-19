@@ -23,5 +23,6 @@
     <include file="classpath:/db/changelog/015-two-factor.xml"/>
     <include file="classpath:/db/changelog/016-url-password.xml"/>
     <include file="classpath:/db/changelog/017-oauth2-authorization-server.xml"/>
+    <include file="classpath:/db/changelog/018-oauth2-access-token-index.xml"/>
 
 </databaseChangeLog>
