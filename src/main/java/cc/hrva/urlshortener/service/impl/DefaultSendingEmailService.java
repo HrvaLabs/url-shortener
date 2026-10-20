@@ -1,16 +1,23 @@
 package cc.hrva.urlshortener.service.impl;
 
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
+import cc.hrva.urlshortener.dto.LinkDigestEntry;
+import cc.hrva.urlshortener.exception.EmailLogNotFoundException;
+import cc.hrva.urlshortener.exception.EmailNotResendableException;
 import cc.hrva.urlshortener.model.EmailLog;
 import cc.hrva.urlshortener.repository.EmailLogRepository;
 import jakarta.mail.MessagingException;
 import java.text.MessageFormat;
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Optional;
+import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
+import org.apache.commons.lang3.StringUtils;
 import lombok.extern.slf4j.Slf4j;
 import cc.hrva.urlshortener.model.Email;
 import cc.hrva.urlshortener.model.ResetToken;
@@ -19,6 +26,7 @@ import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.service.SendingEmailService;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
+import org.springframework.web.util.HtmlUtils;
 import org.thymeleaf.TemplateEngine;
 import org.thymeleaf.context.Context;
 
@@ -26,6 +34,9 @@ import org.thymeleaf.context.Context;
 @Slf4j
 @RequiredArgsConstructor
 public class DefaultSendingEmailService implements SendingEmailService {
+
+    private static final String RECIPIENT_SEPARATOR = ", ";
+    private static final Duration INTERRUPTED_AFTER = Duration.ofMinutes(10);
 
     private final AppProperties appProperties;
     private final TemplateEngine templateEngine;
@@ -152,15 +163,95 @@ public class DefaultSendingEmailService implements SendingEmailService {
         tryToSendEmail(email);
     }
 
-    public void tryToSendEmail(final Email email) {
+    @Override
+    @Async
+    public void sendLinkDigestToAdmin(final List<LinkDigestEntry> entries) {
+        final var rows = entries.stream()
+                .map(entry -> """
+                        <tr>
+                          <td>%s/%s</td>
+                          <td>%s</td>
+                          <td>%s</td>
+                          <td>%s</td>
+                        </tr>
+                        """.formatted(
+                        HtmlUtils.htmlEscape(StringUtils.defaultString(appProperties.getServerUrl())),
+                        HtmlUtils.htmlEscape(entry.shortUrl()),
+                        HtmlUtils.htmlEscape(entry.longUrl()),
+                        entry.ownerEmail() != null ? HtmlUtils.htmlEscape(entry.ownerEmail()) : "anonymous",
+                        HtmlUtils.htmlEscape(String.join("; ", entry.notes()))))
+                .collect(Collectors.joining());
+        final var body = """
+                <p>These links were created on %s in the last 24 hours and may need a look.</p>
+                <table border="1" cellpadding="6" cellspacing="0">
+                  <tr><th>Short link</th><th>Destination</th><th>Owner</th><th>Why</th></tr>
+                %s</table>
+                <p>Deactivate anything unwanted in the admin URL list.</p>
+                """.formatted(HtmlUtils.htmlEscape(StringUtils.defaultString(appProperties.getAppName())), rows);
+
+        final var email = Email.builder()
+                .sender(appProperties.getEmailSenderAddress())
+                .receivers(new String[]{appProperties.getContactEmail()})
+                .subject(entries.size() == 1 ? "1 new link to review" : "%d new links to review".formatted(entries.size()))
+                .text(body)
+                .build();
+
+        tryToSendEmail(email);
+    }
+
+    @Override
+    public EmailLog resendEmail(final Long emailLogId) {
+        final var failed = emailLogRepository.findById(emailLogId)
+                .orElseThrow(() -> new EmailLogNotFoundException("Email log entry doesn't exist"));
+
+        if (!failed.isResendable()) {
+            throw new EmailNotResendableException("Only failed emails whose content was kept can be resent");
+        }
+
+        final var email = Email.builder()
+                .sender(failed.getSender())
+                .receivers(failed.getRecipient().split(RECIPIENT_SEPARATOR))
+                .subject(failed.getSubject())
+                .text(failed.getBody())
+                .build();
+
+        failed.setStatus(EmailLog.STATUS_RESENT);
+        failed.setBody(null);
+        emailLogRepository.save(failed);
+
+        log.info("Resending email log id={}", emailLogId);
+        return tryToSendEmail(email);
+    }
+
+    @Override
+    public void failInterruptedEmails() {
+        final var interrupted = emailLogRepository.findAllByStatusAndCreatedAtBefore(
+                EmailLog.STATUS_SENDING, LocalDateTime.now().minus(INTERRUPTED_AFTER));
+
+        if (interrupted.isEmpty()) {
+            return;
+        }
+
+        interrupted.forEach(entry -> {
+            entry.setStatus(EmailLog.STATUS_FAILED);
+            entry.setErrorMessage("Sending was interrupted before it finished");
+        });
+        emailLogRepository.saveAll(interrupted);
+        log.warn("Marked {} interrupted emails as failed", interrupted.size());
+    }
+
+    public EmailLog tryToSendEmail(final Email email) {
         final var logEntry = emailLogRepository.save(EmailLog.builder()
-                .recipient(Arrays.toString(email.getReceivers()))
+                .sender(email.getSender())
+                .recipient(String.join(RECIPIENT_SEPARATOR, email.getReceivers()))
                 .subject(email.getSubject())
-                .status("SENDING")
+                .body(email.getText())
+                .status(EmailLog.STATUS_SENDING)
                 .build());
 
         log.info("Sending {} email to {}", email.getSubject(), Arrays.toString(email.getReceivers()));
         sendEmailWithRetries(email, logEntry);
+        return logEntry;
     }
 
     private void sendEmailWithRetries(final Email email, final EmailLog logEntry) {
@@ -168,8 +259,9 @@ public class DefaultSendingEmailService implements SendingEmailService {
         while (attempts < 3) {
             final var exception = attemptSendEmail(email);
             if (exception.isEmpty()) {
-                logEntry.setStatus("SENT");
+                logEntry.setStatus(EmailLog.STATUS_SENT);
                 logEntry.setSentAt(LocalDateTime.now());
+                logEntry.setBody(null);
                 emailLogRepository.save(logEntry);
                 return;
             }
@@ -177,7 +269,7 @@ public class DefaultSendingEmailService implements SendingEmailService {
             attempts++;
             if (attempts >= 3) {
                 log.error("Failed to send email after {} attempts", attempts, exception.get());
-                logEntry.setStatus("FAILED");
+                logEntry.setStatus(EmailLog.STATUS_FAILED);
                 logEntry.setErrorMessage(exception.get().getMessage());
                 emailLogRepository.save(logEntry);
             } else {
@@ -189,11 +281,11 @@ public class DefaultSendingEmailService implements SendingEmailService {
         }
     }
 
-    private Optional<MessagingException> attemptSendEmail(final Email email) {
+    private Optional<Exception> attemptSendEmail(final Email email) {
         try {
             emailService.sendEmail(email, null);
             return Optional.empty();
-        } catch (final MessagingException e) {
+        } catch (final MessagingException | RuntimeException e) {
             return Optional.of(e);
         }
     }

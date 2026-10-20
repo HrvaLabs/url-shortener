@@ -35,9 +35,27 @@ class DefaultScheduledServiceTest {
     @Mock
     private SafeBrowsingRecheckService safeBrowsingRecheckService;
 
+    @Mock
+    private SendingEmailService sendingEmailService;
+
+    @Mock
+    private LinkDigestService linkDigestService;
+
     @BeforeEach
     void setUp() {
-        this.scheduledService = new DefaultScheduledService(urlService, userService, apiKeyService, ipAddressService, resetTokenService, urlNotificationService, safeBrowsingRecheckService);
+        this.scheduledService = new DefaultScheduledService(urlService, userService, apiKeyService, ipAddressService, resetTokenService, urlNotificationService, safeBrowsingRecheckService, sendingEmailService, linkDigestService);
+    }
+
+    @Test
+    void shouldSendLinkDigest() {
+        scheduledService.sendLinkDigest();
+        verify(linkDigestService).sendDailyDigest();
+    }
+
+    @Test
+    void shouldFailInterruptedEmails() {
+        scheduledService.failInterruptedEmails();
+        verify(sendingEmailService).failInterruptedEmails();
     }
 
     @Test

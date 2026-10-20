@@ -5,6 +5,7 @@ import cc.hrva.urlshortener.exception.*;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.service.SafeBrowsingService;
+import cc.hrva.urlshortener.service.SuspiciousUrlService;
 import cc.hrva.urlshortener.service.UserService;
 import cc.hrva.urlshortener.validator.UrlValidator;
 import java.net.URI;
@@ -25,6 +26,7 @@ public class DefaultUrlValidator implements UrlValidator {
     private final UrlRepository urlRepository;
     private final AppProperties appProperties;
     private final SafeBrowsingService safeBrowsingService;
+    private final SuspiciousUrlService suspiciousUrlService;
 
     private static final List<String> RESERVED_WORDS = List.of(
             "api", "login", "logout", "oauth2", "actuator", "error",
@@ -46,6 +48,13 @@ public class DefaultUrlValidator implements UrlValidator {
     public void checkIfLongUrlIsValid(final Url url) {
         if (!isWebAddress(url.getLongUrl())) {
             throw new UrlValidationException("That doesn't look like a valid web address. Check the URL and try again.");
+        }
+    }
+
+    @Override
+    public void checkIfLongUrlIsNotAShortener(final Url url) {
+        if (suspiciousUrlService.isShortener(url.getLongUrl())) {
+            throw new UrlValidationException("Links to other URL shorteners can't be shortened. Use the final destination instead.");
         }
     }
 

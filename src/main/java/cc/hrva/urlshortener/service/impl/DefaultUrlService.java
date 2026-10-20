@@ -19,6 +19,7 @@ import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.specification.UrlSpecification;
 import cc.hrva.urlshortener.service.ApiKeyService;
 import cc.hrva.urlshortener.service.IPAddressService;
+import cc.hrva.urlshortener.service.SuspiciousUrlService;
 import cc.hrva.urlshortener.service.UrlService;
 import cc.hrva.urlshortener.service.UserService;
 import cc.hrva.urlshortener.validator.ApiKeyValidator;
@@ -77,6 +78,7 @@ public class DefaultUrlService implements UrlService {
     private final ObjectMapper objectMapper;
     private final MeterRegistry meterRegistry;
     private final org.springframework.security.crypto.password.PasswordEncoder passwordEncoder;
+    private final SuspiciousUrlService suspiciousUrlService;
 
     @Override
     @Transactional
@@ -145,6 +147,7 @@ public class DefaultUrlService implements UrlService {
     private void validateUrl(final Url url) {
         urlValidator.longUrlInUrl(url);
         urlValidator.checkIfLongUrlIsValid(url);
+        urlValidator.checkIfLongUrlIsNotAShortener(url);
         urlValidator.checkIfUrlSafe(url);
         urlValidator.checkIfUrlExpirationDateIsInThePast(url);
     }
@@ -198,10 +201,13 @@ public class DefaultUrlService implements UrlService {
         var spec = (Specification<Url>) null;
 
         if (StringUtils.isNotEmpty(search.getSearch())) {
-            spec = UrlSpecification.search(search.getSearch());
+            spec = UrlSpecification.searchIncludingOwner(search.getSearch());
         }
         if (search.getActive() != null) {
             spec = (spec == null) ? UrlSpecification.hasActive(search.getActive()) : spec.and(UrlSpecification.hasActive(search.getActive()));
+        }
+        if (Boolean.TRUE.equals(search.getAnonymous())) {
+            spec = (spec == null) ? UrlSpecification.hasNoOwner() : spec.and(UrlSpecification.hasNoOwner());
         }
         if (search.getExpired() != null && search.getExpired()) {
             spec = (spec == null) ? UrlSpecification.isExpired() : spec.and(UrlSpecification.isExpired());
@@ -213,10 +219,8 @@ public class DefaultUrlService implements UrlService {
             spec = (spec == null) ? UrlSpecification.createdBefore(search.getDateTo()) : spec.and(UrlSpecification.createdBefore(search.getDateTo()));
         }
 
-        if (spec == null) {
-            return urlRepository.findAll(pageable).map(UrlResponse::from);
-        }
-        return urlRepository.findAll(spec, pageable).map(UrlResponse::from);
+        final var urls = spec == null ? urlRepository.findAll(pageable) : urlRepository.findAll(spec, pageable);
+        return urls.map(url -> UrlResponse.from(url).withSuspiciousReasons(suspiciousUrlService.findReasons(url.getLongUrl())));
     }
 
     @Override
@@ -274,6 +278,7 @@ public class DefaultUrlService implements UrlService {
         if (!Objects.equals(previousLongUrl, url.getLongUrl())) {
             urlValidator.verifyUserAdmin();
             urlValidator.checkIfLongUrlIsValid(url);
+            urlValidator.checkIfLongUrlIsNotAShortener(url);
             urlValidator.checkIfUrlSafe(url);
             log.info("Changed destination of URL id={}", url.getId());
         }

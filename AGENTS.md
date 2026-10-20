@@ -31,7 +31,7 @@ Idempotent — safe on restart. Liquibase seeds `ROLE_USER` and `ROLE_ADMIN` aut
 - **MailHog** (`localhost:8025`, SMTP on `localhost:1025`)
 
 ## Testing
-- `mvn test` (or `mvn -B verify`) — 427 tests, JUnit 5 + Mockito + AssertJ
+- `mvn test` (or `mvn -B verify`) — 553 tests, JUnit 5 + Mockito + AssertJ
 - Mostly plain `@ExtendWith(MockitoExtension.class)` unit tests. The MCP connector's security tests are `@SpringBootTest` + MockMvc through the real filter chains: each class boots its own nested `TestApplication` on embedded H2 with a subset Liquibase changelog (`db/changelog/017-oauth2-authorization-server.xml` or `db/mcp-connector-test-changelog.xml`) and mocks the rest
 - No `@ActiveProfiles`, no Testcontainers
 - `src/test/` mirrors `src/main/` package structure
@@ -246,29 +246,39 @@ Not automatable (interactive sign-in). With the local dev stack, the app on port
 - **API key deactivation**: Every hour, deactivates expired API keys.
 - **User deactivation**: Daily at 10 AM, deactivates unused accounts after configured inactivity period.
 - **MCP cleanup**: Daily at 03:30, deletes expired OAuth authorizations and DCR clients unused for 30 days (`DcrClientCleanupJob`).
+- **SafeBrowsing recheck**: Daily at 02:00, rechecks every active link (by id, so deactivations mid-run don't skip rows); flagged links are deactivated, evicted from the cache and their owner emailed.
+- **Interrupted emails**: Every 5 minutes, `email_log` rows still `SENDING` after 10 minutes become `FAILED` ("interrupted") so they can be resent.
+- **Link digest**: Daily at 9 AM, emails `app.contact-email` the links created in the last 24 h that come from accounts younger than 7 days or that `SuspiciousUrlService` flags. Nothing is sent when there is nothing to review.
 
 ## Config Profiles
 - **`local`**: `localhost` Postgres/Redis/MailHog, hardcoded JWT secret, dev users auto-created, verbose SQL logging. MCP issuer `http://localhost:8080`, a committed dev-only signing key (not a secret; refused at startup outside `local`) and anonymous link creation on, so `/mcp/anon` works. Auto-imports `application-oauth.yaml` for SSO secrets.
 - **`prod`**: Remote Postgres, no dev defaults. Secrets injected externally.
 - **`oauth`**: Optional profile holding OAuth2 client credentials. Imported by `local` profile via `spring.config.import`.
 - Default: `application.yaml` sets base values (cache TTL, URL length, API limits, etc.).
-- Tests run without any profile; only the MCP `@SpringBootTest` classes start a (trimmed) application context.
+- Tests run without any profile; only the MCP `@SpringBootTest` classes and `UrlSpecificationTest` (JPA on H2 with Hibernate-generated schema, no Liquibase) start a (trimmed) application context.
 
 ## New Models (recently added)
 
 ### AuditLog (`audit_log` table, migration `008-audit-log.xml`)
 - Tracks admin actions: performedBy, action, targetType, targetIdentifier, details, performedAt
-- Auto-logged via `AdminAuditAspect` (AOP around admin controller methods)
+- Auto-logged via `AdminAuditAspect` (AOP around admin controller methods). `targetType` is the controller name without `Controller` and a leading `Admin` (`AdminEmailLogController` → `EmailLog`).
+- `details` lists only the submitted, non-null fields of the request body, alphabetically (`longUrl: …, visitLimit: 10`); a password is written as `changed`/`removed`, never its value. Failed actions are `<method>_FAILED` with the exception message. Migration `023-audit-log-redact-url-passwords.xml` redacted the link passwords older rows held in plain text.
 - Endpoint: `GET /api/v1/admin/audit-log`
 
 ### EmailLog (`email_log` table, migration `009-email-log.xml`)
-- Records email sending: recipient, subject, status (SENDING/SENT/FAILED), errorMessage, sentAt, createdAt
-- Populated automatically by `tryToSendEmail` in `DefaultSendingEmailService`
-- Endpoint: `GET /api/v1/admin/email-log`
+- Records email sending: sender, recipient (comma-separated), subject, status (SENDING/SENT/FAILED/RESENT), errorMessage, sentAt, createdAt, body
+- Populated automatically by `tryToSendEmail` in `DefaultSendingEmailService`, which retries 3 times and records any failure (checked or runtime) as FAILED with its message
+- `body` (migration `022-email-log-resend.xml`) holds the rendered HTML only until the email is sent; it is `@JsonIgnore`d and exposed as the `resendable` flag (FAILED with a body)
+- Endpoints: `GET /api/v1/admin/email-log`; `POST /api/v1/admin/email-log/{id}/resend` (admin, synchronous) sends a stored failed email again as a new row and marks the old one RESENT
 
 ### VerificationToken (`verification_token` table, migration `013-email-verification.xml`)
 - Email verification on register; `user_account.email_verified` (existing users grandfathered `true`). OAuth users auto-verified.
 - Flow: register → unverified + verification email; `POST /auth/verify-email/confirm` activates; `/resend` reissues.
+
+### Abuse handling
+- `SuspiciousUrlService` flags destinations by host: other shorteners (and our own host), free dynamic-DNS hosts, raw IPs, punycode, lookalikes of known brands on someone else's domain (`njuskaio.cam`, `jofogas.cards`), login/verification lures, high-risk TLDs. Flags only; it never deactivates anything.
+- `GET /urls/all` (admin) returns `suspiciousReasons` per link (omitted when empty); searching matches the short link, destination and owner email; `?anonymous=true` keeps links without an owner; sort by owner with `sort=owner.email,asc`.
+- New links and admin destination changes pointing at another shortener or at hrva.cc are rejected (`checkIfLongUrlIsNotAShortener`).
 
 ### URL tags (`url_tags` table, migration `014-url-tags.xml`)
 - `Url.tags` `@ElementCollection` of normalized strings (`TagNormalizer`: lowercase, ≤10 × ≤30 chars). Filter via `?tag=`; list via `GET /urls/tags`.

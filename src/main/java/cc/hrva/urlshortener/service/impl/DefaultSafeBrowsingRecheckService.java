@@ -2,7 +2,6 @@ package cc.hrva.urlshortener.service.impl;
 
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.repository.UrlRepository;
-import cc.hrva.urlshortener.repository.specification.UrlSpecification;
 import cc.hrva.urlshortener.service.SafeBrowsingRecheckService;
 import cc.hrva.urlshortener.service.SafeBrowsingService;
 import cc.hrva.urlshortener.service.SendingEmailService;
@@ -11,9 +10,6 @@ import java.util.List;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.cache.CacheManager;
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageRequest;
-import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -34,15 +30,18 @@ public class DefaultSafeBrowsingRecheckService implements SafeBrowsingRecheckSer
     public void recheckActiveUrls() {
         log.info("Starting SafeBrowsing recheck of active URLs");
 
-        final var spec = Specification.where(UrlSpecification.hasActive(true));
-        final var totalPages = urlRepository.findAll(spec, PageRequest.of(0, BATCH_SIZE)).getTotalPages();
+        final var ids = urlRepository.findActiveIds();
         var checked = 0;
         var flagged = 0;
 
-        for (int page = 0; page < totalPages; page++) {
-            final var urls = urlRepository.findAll(spec, PageRequest.of(page, BATCH_SIZE));
+        for (int from = 0; from < ids.size(); from += BATCH_SIZE) {
+            final var urls = urlRepository.findAllById(ids.subList(from, Math.min(from + BATCH_SIZE, ids.size())));
 
-            for (final var url : urls.getContent()) {
+            for (final var url : urls) {
+                if (!url.isActive()) {
+                    continue;
+                }
+
                 final var threats = safeBrowsingService.checkUrlsForThreats(url.getLongUrl());
 
                 if (!threats.isEmpty()) {
@@ -54,8 +53,8 @@ public class DefaultSafeBrowsingRecheckService implements SafeBrowsingRecheckSer
                 checked++;
             }
 
-            urlRepository.saveAll(urls.getContent());
-            log.debug("SafeBrowsing recheck progress: {}/{} checked, {} flagged", checked, totalPages * BATCH_SIZE, flagged);
+            urlRepository.saveAll(urls);
+            log.debug("SafeBrowsing recheck progress: {}/{} checked, {} flagged", checked, ids.size(), flagged);
         }
 
         log.info("SafeBrowsing recheck complete — {} checked, {} flagged and deactivated", checked, flagged);

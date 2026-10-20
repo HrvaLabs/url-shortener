@@ -22,4 +22,6 @@ public class UrlSearchDto {
     @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
     private LocalDateTime dateTo;
 
+    private Boolean anonymous;
+
 }

@@ -11,6 +11,7 @@ import cc.hrva.urlshortener.exception.UrlValidationException;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.service.SafeBrowsingService;
+import cc.hrva.urlshortener.service.SuspiciousUrlService;
 import cc.hrva.urlshortener.service.UserService;
 import cc.hrva.urlshortener.validator.impl.DefaultUrlValidator;
 import org.junit.jupiter.api.BeforeEach;
@@ -40,9 +41,30 @@ class DefaultUrlValidatorTest {
     @Mock
     private SafeBrowsingService safeBrowsingService;
 
+    @Mock
+    private SuspiciousUrlService suspiciousUrlService;
+
     @BeforeEach
     void setUp() {
-        this.urlValidator = new DefaultUrlValidator(userService, urlRepository, appProperties, safeBrowsingService);
+        this.urlValidator = new DefaultUrlValidator(userService, urlRepository, appProperties, safeBrowsingService, suspiciousUrlService);
+    }
+
+    @Test
+    void rejectsLinksToOtherShorteners() {
+        final var url = Url.builder().longUrl("https://bit.ly/3abc").build();
+        when(suspiciousUrlService.isShortener("https://bit.ly/3abc")).thenReturn(true);
+
+        assertThatThrownBy(() -> urlValidator.checkIfLongUrlIsNotAShortener(url))
+                .isInstanceOf(UrlValidationException.class)
+                .hasMessage("Links to other URL shorteners can't be shortened. Use the final destination instead.");
+    }
+
+    @Test
+    void acceptsDestinationsThatAreNotShorteners() {
+        final var url = Url.builder().longUrl("https://example.com").build();
+        when(suspiciousUrlService.isShortener("https://example.com")).thenReturn(false);
+
+        urlValidator.checkIfLongUrlIsNotAShortener(url);
     }
 
     @Test

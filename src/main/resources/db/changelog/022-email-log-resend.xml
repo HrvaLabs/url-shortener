@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.9.xsd">
+
+    <changeSet author="khrvacic" id="email-log-resend">
+        <addColumn tableName="email_log">
+            <column name="sender" type="VARCHAR(255)"/>
+            <column name="body" type="TEXT"/>
+        </addColumn>
+        <rollback>
+            <dropColumn tableName="email_log" columnName="body"/>
+            <dropColumn tableName="email_log" columnName="sender"/>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>

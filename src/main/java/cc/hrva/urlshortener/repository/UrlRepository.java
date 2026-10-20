@@ -25,8 +25,12 @@ public interface UrlRepository extends JpaRepository<Url, Long>, JpaSpecificatio
     List<Url> findByExpirationDateLessThanEqualAndActiveTrue(LocalDateTime expirationDate);
     List<Url> findByExpirationDateBetweenAndActiveTrueAndOwnerIsNotNull(LocalDateTime start, LocalDateTime end);
     long countByActiveTrue();
+    List<Url> findByCreateDateAfter(LocalDateTime createdAfter);
     List<Url> findByOwner(User owner);
     void deleteByOwner(User owner);
+
+    @Query("select u.id from Url u where u.active = true order by u.id")
+    List<Long> findActiveIds();
 
     @Query("select distinct t from Url u join u.tags t where u.owner = :owner order by t")
     List<String> findDistinctTagsByOwner(@Param("owner") User owner);

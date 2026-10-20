@@ -9,5 +9,7 @@ public interface ScheduledService {
     void cleanupExpiredPasswordResetTokens();
     void notifyExpiringUrls();
     void recheckUrlsSafeBrowsing();
+    void failInterruptedEmails();
+    void sendLinkDigest();
 
 }

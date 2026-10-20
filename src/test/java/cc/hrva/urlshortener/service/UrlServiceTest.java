@@ -2,6 +2,7 @@ package cc.hrva.urlshortener.service;
 
 import java.time.LocalDateTime;
 import java.util.Collections;
+import java.util.List;
 import java.util.Optional;
 import io.micrometer.core.instrument.MeterRegistry;
 import tools.jackson.databind.ObjectMapper;
@@ -24,6 +25,7 @@ import cc.hrva.urlshortener.model.ApiKey;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.repository.UrlRepository;
+import cc.hrva.urlshortener.service.impl.DefaultSuspiciousUrlService;
 import cc.hrva.urlshortener.service.impl.DefaultUrlService;
 import cc.hrva.urlshortener.validator.ApiKeyValidator;
 import cc.hrva.urlshortener.validator.UrlValidator;
@@ -99,6 +101,9 @@ class UrlServiceTest {
     @Mock
     private SafeBrowsingService safeBrowsingService;
 
+    @Mock
+    private SuspiciousUrlService suspiciousUrlService;
+
     @BeforeEach
     void setUp() {
         this.urlService = new DefaultUrlService(
@@ -116,7 +121,8 @@ class UrlServiceTest {
                 cacheManager,
                 objectMapper,
                 meterRegistry,
-                passwordEncoder
+                passwordEncoder,
+                suspiciousUrlService
         );
     }
 
@@ -181,6 +187,7 @@ class UrlServiceTest {
         final var order = org.mockito.Mockito.inOrder(urlValidator, urlRepository);
         order.verify(urlValidator).verifyUserAdmin();
         order.verify(urlValidator).checkIfLongUrlIsValid(changed);
+        order.verify(urlValidator).checkIfLongUrlIsNotAShortener(changed);
         order.verify(urlValidator).checkIfUrlSafe(changed);
         order.verify(urlRepository).save(changed);
     }
@@ -506,10 +513,35 @@ class UrlServiceTest {
         verify(urlRepository, never()).save(any(Url.class));
     }
 
+    @Test
+    void shouldRejectLinksToOtherShortenersWhenSavingUrlWithApiKey() {
+        final var service = urlServiceWithRealLongUrlHandling();
+        final var createUrlDto = CreateUrlDto.builder().longUrl("https://bit.ly/3abc").build();
+
+        assertThatThrownBy(() -> service.saveUrlWithApiKey(createUrlDto, "apikey"))
+                .isInstanceOf(UrlValidationException.class)
+                .hasMessage("Links to other URL shorteners can't be shortened. Use the final destination instead.");
+
+        verify(safeBrowsingService, never()).checkUrlsForThreats(anyString());
+        verify(urlRepository, never()).save(any(Url.class));
+    }
+
+    @Test
+    void adminListFlagsSuspiciousLinks() {
+        final var pageable = PageRequest.of(0, 20);
+        final var url = Url.builder().id(287L).shortUrl("njuskaio_verify").longUrl("https://njuskaio.cam/a/MAUB3").build();
+        when(urlRepository.findAll(pageable)).thenReturn(new PageImpl<>(List.of(url)));
+        when(suspiciousUrlService.findReasons("https://njuskaio.cam/a/MAUB3")).thenReturn(List.of("imitates njuskalo"));
+
+        final var result = urlService.getAllUrls(pageable, new UrlSearchDto());
+
+        assertThat(result.getContent().getFirst().suspiciousReasons()).containsExactly("imitates njuskalo");
+    }
+
     private UrlService urlServiceWithRealLongUrlHandling() {
         return new DefaultUrlService(
                 userService,
-                new DefaultUrlValidator(userService, urlRepository, appProperties, safeBrowsingService),
+                new DefaultUrlValidator(userService, urlRepository, appProperties, safeBrowsingService, new DefaultSuspiciousUrlService(appProperties)),
                 apiKeyService,
                 urlRepository,
                 appProperties,
@@ -522,7 +554,8 @@ class UrlServiceTest {
                 cacheManager,
                 objectMapper,
                 meterRegistry,
-                passwordEncoder
+                passwordEncoder,
+                suspiciousUrlService
         );
     }
 

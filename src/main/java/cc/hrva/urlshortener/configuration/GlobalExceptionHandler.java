@@ -7,6 +7,7 @@ import cc.hrva.urlshortener.exception.ConnectRequestAlreadyApprovedException;
 import cc.hrva.urlshortener.exception.ConnectRequestExpiredException;
 import cc.hrva.urlshortener.exception.ConnectedAppNotFoundException;
 import cc.hrva.urlshortener.exception.EmailExistsException;
+import cc.hrva.urlshortener.exception.EmailLogNotFoundException;
 import cc.hrva.urlshortener.exception.EmailNotVerifiedException;
 import cc.hrva.urlshortener.exception.InvalidApiKeyException;
 import cc.hrva.urlshortener.exception.ShortUrlAlreadyExistsException;
@@ -106,6 +107,11 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(ApiKeyNotFoundException.class)
     public ResponseEntity<Map<String, String>> handleApiKeyNotFound(final ApiKeyNotFoundException ex) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", safeMessage(ex)));
+    }
+
+    @ExceptionHandler(EmailLogNotFoundException.class)
+    public ResponseEntity<Map<String, String>> handleEmailLogNotFound(final EmailLogNotFoundException ex) {
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", safeMessage(ex)));
     }
 

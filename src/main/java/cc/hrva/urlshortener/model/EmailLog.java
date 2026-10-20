@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.model;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
@@ -23,9 +24,15 @@ import lombok.Setter;
 @Table(name = "email_log")
 public class EmailLog {
 
+    public static final String STATUS_SENDING = "SENDING";
+    public static final String STATUS_SENT = "SENT";
+    public static final String STATUS_FAILED = "FAILED";
+    public static final String STATUS_RESENT = "RESENT";
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
+    private String sender;
     private String recipient;
     private String subject;
     private String status;
@@ -33,10 +40,17 @@ public class EmailLog {
     private String errorMessage;
     private LocalDateTime sentAt;
     private LocalDateTime createdAt;
+    @JsonIgnore
+    @Column(columnDefinition = "TEXT")
+    private String body;
 
     @PrePersist
     public void onCreate() {
         this.createdAt = LocalDateTime.now();
+    }
+
+    public boolean isResendable() {
+        return STATUS_FAILED.equals(status) && body != null;
     }
 
 }
