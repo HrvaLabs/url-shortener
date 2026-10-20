@@ -39,14 +39,18 @@ public final class McpAccessTokens {
         final var clientId = register(REGISTRATION);
         final var code = authorize(clientId, email, resource);
 
-        final var body = mockMvc.perform(post("/oauth2/token")
-                        .contentType(APPLICATION_FORM_URLENCODED)
-                        .param("grant_type", "authorization_code")
-                        .param("client_id", clientId)
-                        .param("code", code)
-                        .param("redirect_uri", REDIRECT_URI)
-                        .param("code_verifier", CODE_VERIFIER)
-                        .param("resource", resource))
+        final var tokenRequest = post("/oauth2/token")
+                .contentType(APPLICATION_FORM_URLENCODED)
+                .param("grant_type", "authorization_code")
+                .param("client_id", clientId)
+                .param("code", code)
+                .param("redirect_uri", REDIRECT_URI)
+                .param("code_verifier", CODE_VERIFIER);
+        if (resource != null) {
+            tokenRequest.param("resource", resource);
+        }
+
+        final var body = mockMvc.perform(tokenRequest)
                 .andExpect(status().isOk())
                 .andReturn()
                 .getResponse()
@@ -68,15 +72,19 @@ public final class McpAccessTokens {
     }
 
     public String authorize(final String clientId, final String email, final String resource) throws Exception {
-        final var location = mockMvc.perform(get("/oauth2/authorize")
-                        .queryParam("response_type", "code")
-                        .queryParam("client_id", clientId)
-                        .queryParam("redirect_uri", REDIRECT_URI)
-                        .queryParam("code_challenge", s256(CODE_VERIFIER))
-                        .queryParam("code_challenge_method", "S256")
-                        .queryParam("resource", resource)
-                        .queryParam("state", "state")
-                        .session(signedInSession(email)))
+        final var authorizationRequest = get("/oauth2/authorize")
+                .queryParam("response_type", "code")
+                .queryParam("client_id", clientId)
+                .queryParam("redirect_uri", REDIRECT_URI)
+                .queryParam("code_challenge", s256(CODE_VERIFIER))
+                .queryParam("code_challenge_method", "S256")
+                .queryParam("state", "state")
+                .session(signedInSession(email));
+        if (resource != null) {
+            authorizationRequest.queryParam("resource", resource);
+        }
+
+        final var location = mockMvc.perform(authorizationRequest)
                 .andExpect(status().isFound())
                 .andReturn()
                 .getResponse()

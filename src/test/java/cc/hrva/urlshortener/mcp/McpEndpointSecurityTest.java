@@ -176,7 +176,7 @@ class McpEndpointSecurityTest {
 
     @Test
     void tokenWithWrongAudienceIs401() throws Exception {
-        final var token = accessTokens.issue(EMAIL, "https://evil.example/mcp");
+        final var token = accessTokens.issue(EMAIL, null);
 
         mockMvc.perform(mcpRequest(TOOLS_LIST).header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
                 .andExpect(status().isUnauthorized())

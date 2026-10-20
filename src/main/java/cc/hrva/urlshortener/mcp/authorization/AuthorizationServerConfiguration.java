@@ -17,6 +17,7 @@ import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.annotation.Order;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcOperations;
 import org.springframework.security.authentication.AuthenticationProvider;
@@ -59,17 +60,26 @@ public class AuthorizationServerConfiguration {
     private static final String CLIENT_REGISTRATION_ENDPOINT = "/oauth2/register";
     private static final String OPENID_CONFIGURATION = "/.well-known/openid-configuration";
     private static final String PATH_SUFFIXED_AUTHORIZATION_SERVER_METADATA = "/.well-known/oauth-authorization-server/**";
+    private static final String MCP_RESOURCE_PATH = "/mcp";
 
     private final AppProperties appProperties;
 
     @Bean
     @Order(1)
     public SecurityFilterChain authorizationServerSecurityFilterChain(final HttpSecurity http,
-                                                                      final RegisteredClientRepository registeredClientRepository) throws Exception {
+                                                                      final RegisteredClientRepository registeredClientRepository,
+                                                                      final AuthorizationServerSettings authorizationServerSettings) throws Exception {
         final var unsupportedDiscovery = new OrRequestMatcher(
                 path(OPENID_CONFIGURATION),
                 path(PATH_SUFFIXED_AUTHORIZATION_SERVER_METADATA)
         );
+        final var tokenEndpoint = post(authorizationServerSettings.getTokenEndpoint());
+        final var clientAuthenticatedEndpoints = new OrRequestMatcher(
+                tokenEndpoint,
+                post(authorizationServerSettings.getTokenIntrospectionEndpoint()),
+                post(authorizationServerSettings.getTokenRevocationEndpoint())
+        );
+        final var mcpResource = appProperties.getMcp().getIssuer() + MCP_RESOURCE_PATH;
 
         http.authorizeHttpRequests(authorize -> authorize.anyRequest().authenticated())
                 .with(McpAuthorizationServerConfigurer.mcpAuthorizationServer(), mcp -> mcp
@@ -84,8 +94,11 @@ public class AuthorizationServerConfiguration {
                             authorizationServer
                                     .tokenGenerator(withPublicClientRefreshTokens(http.getSharedObject(OAuth2TokenGenerator.class)))
                                     .clientAuthentication(clientAuthentication -> clientAuthentication
-                                            .authenticationConverters(converters -> converters.add(new PublicClientRefreshTokenAuthenticationConverter()))
+                                            .authenticationConverters(converters -> converters.add(new PublicClientRefreshTokenAuthenticationConverter(tokenEndpoint)))
                                             .authenticationProvider(new PublicClientRefreshTokenAuthenticationProvider(registeredClientRepository)))
+                                    .tokenEndpoint(tokenEndpointConfigurer -> tokenEndpointConfigurer
+                                            .authenticationProviders(providers -> providers
+                                                    .replaceAll(provider -> new ResourceIndicatorValidatingProvider(provider, mcpResource))))
                                     .authorizationServerMetadataEndpoint(metadata -> metadata
                                             .authorizationServerMetadataCustomizer(builder -> builder
                                                     .tokenEndpointAuthenticationMethods(AuthorizationServerConfiguration::advertisePublicClients)))
@@ -94,7 +107,8 @@ public class AuthorizationServerConfiguration {
                         }))
                 .exceptionHandling(exceptionHandling -> exceptionHandling
                         .defaultAuthenticationEntryPointFor(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED), path(AUTHORIZATION_ENDPOINT))
-                        .defaultAuthenticationEntryPointFor(new HttpStatusEntryPoint(HttpStatus.NOT_FOUND), unsupportedDiscovery))
+                        .defaultAuthenticationEntryPointFor(new HttpStatusEntryPoint(HttpStatus.NOT_FOUND), unsupportedDiscovery)
+                        .defaultAuthenticationEntryPointFor(new InvalidClientEntryPoint(), clientAuthenticatedEndpoints))
                 .cors(Customizer.withDefaults());
 
         return http.build();
@@ -198,6 +212,10 @@ public class AuthorizationServerConfiguration {
 
     private static RequestMatcher path(final String pattern) {
         return PathPatternRequestMatcher.withDefaults().matcher(pattern);
+    }
+
+    private static RequestMatcher post(final String pattern) {
+        return PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, pattern);
     }
 
 }

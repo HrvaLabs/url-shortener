@@ -57,6 +57,7 @@ import org.springframework.web.util.UriComponentsBuilder;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.hamcrest.Matchers.containsInAnyOrder;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.not;
@@ -332,11 +333,27 @@ class AuthorizationServerConfigurationTest {
     }
 
     @Test
-    void dcrDefaultsToAuthorizationCodeWhenGrantTypesAreAbsent() throws Exception {
-        final var clientId = registerClient();
+    void dcrGrantsRefreshTokenAlongsideAuthorizationCodeWhenGrantTypesAreAbsent() throws Exception {
+        final var body = mockMvc.perform(post("/oauth2/register")
+                        .contentType(APPLICATION_JSON)
+                        .content(EMPTY_SCOPE_REGISTRATION))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.grant_types", containsInAnyOrder("authorization_code", "refresh_token")))
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        final String clientId = JsonPath.read(body, "$.client_id");
 
         assertThat(registeredClientRepository.findByClientId(clientId).getAuthorizationGrantTypes())
-                .containsExactly(AuthorizationGrantType.AUTHORIZATION_CODE);
+                .containsExactlyInAnyOrder(AuthorizationGrantType.AUTHORIZATION_CODE, AuthorizationGrantType.REFRESH_TOKEN);
+    }
+
+    @Test
+    void dcrGrantsRefreshTokenAlongsideExplicitAuthorizationCodeOnly() throws Exception {
+        final var clientId = registerClient(REGISTRATION_WITH_METADATA.formatted("\"grant_types\":[\"authorization_code\"]"));
+
+        assertThat(registeredClientRepository.findByClientId(clientId).getAuthorizationGrantTypes())
+                .containsExactlyInAnyOrder(AuthorizationGrantType.AUTHORIZATION_CODE, AuthorizationGrantType.REFRESH_TOKEN);
     }
 
     @Test

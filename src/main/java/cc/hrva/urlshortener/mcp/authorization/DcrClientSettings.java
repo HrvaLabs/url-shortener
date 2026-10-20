@@ -1,7 +1,9 @@
 package cc.hrva.urlshortener.mcp.authorization;
 
 import java.time.Duration;
+import java.util.Set;
 import org.springframework.core.convert.converter.Converter;
+import org.springframework.security.oauth2.core.AuthorizationGrantType;
 import org.springframework.security.oauth2.server.authorization.OAuth2ClientRegistration;
 import org.springframework.security.oauth2.server.authorization.client.RegisteredClient;
 import org.springframework.security.oauth2.server.authorization.converter.OAuth2ClientRegistrationRegisteredClientConverter;
@@ -30,8 +32,15 @@ public class DcrClientSettings implements Converter<OAuth2ClientRegistration, Re
                 .build();
 
         return RegisteredClient.from(registeredClient)
+                .authorizationGrantTypes(DcrClientSettings::grantRefreshTokenWithAuthorizationCode)
                 .clientSettings(clientSettings)
                 .build();
+    }
+
+    private static void grantRefreshTokenWithAuthorizationCode(final Set<AuthorizationGrantType> grantTypes) {
+        if (grantTypes.contains(AuthorizationGrantType.AUTHORIZATION_CODE)) {
+            grantTypes.add(AuthorizationGrantType.REFRESH_TOKEN);
+        }
     }
 
 }

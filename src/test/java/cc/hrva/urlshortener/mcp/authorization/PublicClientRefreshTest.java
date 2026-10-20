@@ -72,8 +72,9 @@ class PublicClientRefreshTest {
     private static final Duration REFRESH_TOKEN_TIME_TO_LIVE = Duration.ofDays(30);
     private static final String PUBLIC_REGISTRATION = """
             {"redirect_uris":["http://localhost:53682/callback"],"token_endpoint_auth_method":"none","grant_types":["authorization_code","refresh_token"]}""";
-    private static final String CODE_ONLY_PUBLIC_REGISTRATION = """
+    private static final String PUBLIC_REGISTRATION_WITHOUT_GRANT_TYPES = """
             {"redirect_uris":["http://localhost:53682/callback"],"token_endpoint_auth_method":"none"}""";
+    private static final String FOREIGN_RESOURCE = "https://evil.example/mcp";
     private static final String CONFIDENTIAL_REGISTRATION = """
             {"redirect_uris":["http://localhost:53682/callback"],"token_endpoint_auth_method":"client_secret_basic","grant_types":["authorization_code","refresh_token"]}""";
     private static final String TOOLS_LIST = """
@@ -210,12 +211,125 @@ class PublicClientRefreshTest {
     }
 
     @Test
-    void codeOnlyPublicClientGetsNoRefreshToken() throws Exception {
-        final var clientId = accessTokens.register(CODE_ONLY_PUBLIC_REGISTRATION);
+    void publicClientRegisteredWithoutGrantTypesStillGetsRefreshToken() throws Exception {
+        final var clientId = accessTokens.register(PUBLIC_REGISTRATION_WITHOUT_GRANT_TYPES);
 
         final var tokens = exchangeCode(clientId);
 
-        assertThat(tokens).containsKey("access_token").doesNotContainKey("refresh_token");
+        assertThat(tokens).containsKeys("access_token", "refresh_token");
+        assertThat(refresh(clientId, (String) tokens.get("refresh_token"), RESOURCE)).containsKeys("access_token", "refresh_token");
+    }
+
+    @Test
+    void introspectionDoesNotAcceptPublicClientRefreshAuthentication() throws Exception {
+        final var clientId = accessTokens.register(PUBLIC_REGISTRATION);
+        final var refreshToken = (String) exchangeCode(clientId).get("refresh_token");
+
+        mockMvc.perform(post("/oauth2/introspect")
+                        .contentType(APPLICATION_FORM_URLENCODED)
+                        .param("client_id", clientId)
+                        .param("grant_type", "refresh_token")
+                        .param("token", refreshToken))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.error").value("invalid_client"))
+                .andExpect(jsonPath("$.active").doesNotExist());
+    }
+
+    @Test
+    void revocationDoesNotAcceptPublicClientRefreshAuthentication() throws Exception {
+        final var clientId = accessTokens.register(PUBLIC_REGISTRATION);
+        final var refreshToken = (String) exchangeCode(clientId).get("refresh_token");
+
+        mockMvc.perform(post("/oauth2/revoke")
+                        .contentType(APPLICATION_FORM_URLENCODED)
+                        .param("client_id", clientId)
+                        .param("grant_type", "refresh_token")
+                        .param("token", refreshToken))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.error").value("invalid_client"));
+
+        assertThat(authorizationService.findByToken(refreshToken, OAuth2TokenType.REFRESH_TOKEN)).isNotNull();
+    }
+
+    @Test
+    void credentialLessRefreshWithoutClientIdIsInvalidClient() throws Exception {
+        final var clientId = accessTokens.register(PUBLIC_REGISTRATION);
+        final var refreshToken = (String) exchangeCode(clientId).get("refresh_token");
+
+        mockMvc.perform(post("/oauth2/token")
+                        .contentType(APPLICATION_FORM_URLENCODED)
+                        .param("grant_type", "refresh_token")
+                        .param("refresh_token", refreshToken)
+                        .param("resource", RESOURCE))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.error").value("invalid_client"))
+                .andExpect(jsonPath("$.access_token").doesNotExist());
+    }
+
+    @Test
+    void refreshWithEmptyClientSecretIsTreatedAsPublicClient() throws Exception {
+        final var clientId = accessTokens.register(PUBLIC_REGISTRATION);
+        final var refreshToken = (String) exchangeCode(clientId).get("refresh_token");
+
+        mockMvc.perform(refreshRequest(clientId, refreshToken, RESOURCE).param("client_secret", ""))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.access_token").isNotEmpty())
+                .andExpect(jsonPath("$.refresh_token").isNotEmpty());
+    }
+
+    @Test
+    void refreshWithScopeBeyondOriginalGrantIsInvalidScope() throws Exception {
+        final var clientId = accessTokens.register(PUBLIC_REGISTRATION);
+        final var refreshToken = (String) exchangeCode(clientId).get("refresh_token");
+
+        mockMvc.perform(refreshRequest(clientId, refreshToken, RESOURCE).param("scope", "claudeai"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("invalid_scope"))
+                .andExpect(jsonPath("$.access_token").doesNotExist());
+    }
+
+    @Test
+    void codeExchangeWithForeignResourceIsInvalidTarget() throws Exception {
+        final var clientId = accessTokens.register(PUBLIC_REGISTRATION);
+        final var code = accessTokens.authorize(clientId, EMAIL, RESOURCE);
+
+        mockMvc.perform(codeExchangeRequestWithoutResource(clientId, code).param("resource", FOREIGN_RESOURCE))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("invalid_target"))
+                .andExpect(jsonPath("$.access_token").doesNotExist());
+    }
+
+    @Test
+    void codeExchangeWithDuplicateResourceIsInvalidTarget() throws Exception {
+        final var clientId = accessTokens.register(PUBLIC_REGISTRATION);
+        final var code = accessTokens.authorize(clientId, EMAIL, RESOURCE);
+
+        mockMvc.perform(codeExchangeRequestWithoutResource(clientId, code).param("resource", RESOURCE, RESOURCE))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("invalid_target"))
+                .andExpect(jsonPath("$.access_token").doesNotExist());
+    }
+
+    @Test
+    void refreshWithForeignResourceIsInvalidTarget() throws Exception {
+        final var clientId = accessTokens.register(PUBLIC_REGISTRATION);
+        final var refreshToken = (String) exchangeCode(clientId).get("refresh_token");
+
+        mockMvc.perform(refreshRequest(clientId, refreshToken, FOREIGN_RESOURCE))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("invalid_target"))
+                .andExpect(jsonPath("$.access_token").doesNotExist());
+    }
+
+    @Test
+    void refreshWithDuplicateResourceIsInvalidTarget() throws Exception {
+        final var clientId = accessTokens.register(PUBLIC_REGISTRATION);
+        final var refreshToken = (String) exchangeCode(clientId).get("refresh_token");
+
+        mockMvc.perform(refreshRequest(clientId, refreshToken, RESOURCE).param("resource", FOREIGN_RESOURCE))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("invalid_target"))
+                .andExpect(jsonPath("$.access_token").doesNotExist());
     }
 
     @Test
@@ -284,14 +398,17 @@ class PublicClientRefreshTest {
     }
 
     private static MockHttpServletRequestBuilder codeExchangeRequest(final String clientId, final String code) {
+        return codeExchangeRequestWithoutResource(clientId, code).param("resource", RESOURCE);
+    }
+
+    private static MockHttpServletRequestBuilder codeExchangeRequestWithoutResource(final String clientId, final String code) {
         return post("/oauth2/token")
                 .contentType(APPLICATION_FORM_URLENCODED)
                 .param("grant_type", "authorization_code")
                 .param("client_id", clientId)
                 .param("code", code)
                 .param("redirect_uri", McpAccessTokens.REDIRECT_URI)
-                .param("code_verifier", McpAccessTokens.CODE_VERIFIER)
-                .param("resource", RESOURCE);
+                .param("code_verifier", McpAccessTokens.CODE_VERIFIER);
     }
 
     private static MockHttpServletRequestBuilder refreshRequest(final String clientId, final String refreshToken, final String resource) {
