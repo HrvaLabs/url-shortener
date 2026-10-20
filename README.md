@@ -36,6 +36,27 @@ Welcome to the URL-Shortener project! This application allows you to shorten URL
 - **Integration with Other Services**: Integrate with popular services like Slack, Discord, and Microsoft Teams for easier sharing and notifications.
 - **Dark Mode**: Add a dark mode option for the dashboard to reduce eye strain and improve usability in low-light environments.
 
+## Production Checklist: MCP Connector
+Before the first deploy of the MCP connector (AI apps such as Claude using hrva.cc at `https://hrva.cc/mcp`). How it works: `AGENTS.md` → MCP connector.
+
+1. **Signing key.** Generate a private RSA JWK and set it as the secret env var `APP_MCP_SIGNING_KEY`; the app doesn't start without it. Keep it out of git and logs, and never reuse the committed `local` profile key.
+   ```bash
+   node -e "const {generateKeyPairSync, randomUUID} = require('node:crypto'); const {privateKey} = generateKeyPairSync('rsa', {modulusLength: 2048}); console.log(JSON.stringify({...privateKey.export({format: 'jwk'}), kid: randomUUID(), use: 'sig', alg: 'RS256'}))"
+   ```
+2. **Cloudflare-only origin.** The per-IP limits (anonymous MCP links, app registrations, logins) trust the `CF-Connecting-IP` header, so the origin must accept traffic from Cloudflare only: a Cloudflare Tunnel, or a firewall that lets only [Cloudflare's IP ranges](https://www.cloudflare.com/ips/) reach the app. Otherwise anyone can forge the header.
+3. **Redis 6.2 or newer.** The login bridge redeems one-time codes with `GETDEL`.
+4. **Anonymous MCP.** Decide `APP_ANONYMOUS_URL_CREATION_ENABLED` (`app.anonymous-url-creation-enabled`, `false` in `application.yaml`). While it is off, `/mcp/anon` refuses every call ("Sign in to create short URLs"), yet the frontend `/mcp` page advertises it. The same flag controls anonymous links on the website.
+5. **The `mcp` alias.** `mcp` is now reserved and `/mcp` no longer redirects. Run `select short_url from url where lower(short_url) = 'mcp';` and resolve any row before deploying.
+6. **Merge `fix/long-url-validation` first.** It gives the tools specific errors for malformed URLs instead of a generic one.
+7. **Deploy the backend, then the frontend** `feature/mcp-connector`: the `/connect` page, Settings → Connected apps, and the `/mcp` page.
+8. **Smoke test.** Expect issuer `https://hrva.cc`, resource `https://hrva.cc/mcp`, and 401 from `/mcp` without a token.
+   ```bash
+   curl -s https://hrva.cc/.well-known/oauth-authorization-server | jq '{issuer, registration_endpoint}'
+   curl -s https://hrva.cc/.well-known/oauth-protected-resource/mcp | jq '{resource, authorization_servers}'
+   curl -s -o /dev/null -w '%{http_code}\n' -X POST https://hrva.cc/mcp
+   ```
+9. **Sign in once from each Claude client.** In Claude Code, `claude mcp add --transport http hrva https://hrva.cc/mcp`, then `/mcp` → authenticate. In the Claude app, Settings → Connectors → Add custom connector with `https://hrva.cc/mcp`.
+
 ## Contribution
 We welcome contributions from the community!
 
