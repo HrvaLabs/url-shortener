@@ -264,6 +264,10 @@ public class DefaultUrlService implements UrlService {
     public UrlResponse updateUrl(final UrlUpdateDto updateDto) {
         log.info("Update URL id={}", updateDto.getId());
 
+        final var existing = urlRepository.findById(updateDto.getId())
+                .orElseThrow(() -> new UrlNotFoundException(String.format("Url with id %d doesn't exist", updateDto.getId())));
+        urlValidator.verifyUserAdminOrOwner(existing);
+
         final var url = urlUpdateDtoToUrlConverter.convert(updateDto);
         urlValidator.checkIfUrlExpirationDateIsInThePast(url);
 

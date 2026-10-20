@@ -81,10 +81,14 @@ public class DefaultUrlValidator implements UrlValidator {
     @Override
     public void verifyUserAdminOrOwner(final Url url) {
         final var currentUser = userService.getUserFromToken();
+        if (currentUser == null) {
+            throw new NoAuthorizationException("You don't have authorization for this action");
+        }
+
         final var isCurrentUserAdmin = currentUser.getAuthorities().stream()
                 .anyMatch(authorities -> authorities.getName().equals("ROLE_ADMIN"));
 
-        if (!url.getOwner().equals(currentUser) && !isCurrentUserAdmin) {
+        if (!currentUser.equals(url.getOwner()) && !isCurrentUserAdmin) {
             throw new NoAuthorizationException("You don't have authorization for this action");
         }
     }

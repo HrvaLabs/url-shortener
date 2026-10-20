@@ -17,6 +17,8 @@ import cc.hrva.urlshortener.converter.UrlUpdateDtoToUrlConverter;
 import cc.hrva.urlshortener.dto.CreateUrlDto;
 import cc.hrva.urlshortener.dto.UrlResponse;
 import cc.hrva.urlshortener.dto.UrlSearchDto;
+import cc.hrva.urlshortener.dto.UrlUpdateDto;
+import cc.hrva.urlshortener.exception.NoAuthorizationException;
 import cc.hrva.urlshortener.exception.UrlValidationException;
 import cc.hrva.urlshortener.model.ApiKey;
 import cc.hrva.urlshortener.model.Url;
@@ -116,6 +118,36 @@ class UrlServiceTest {
                 meterRegistry,
                 passwordEncoder
         );
+    }
+
+    @Test
+    void updateRefusesCallersWhoAreNeitherOwnerNorAdminBeforeChangingAnything() {
+        final var url = Url.builder().id(7L).shortUrl("abc").longUrl("https://example.com").build();
+        final var update = UrlUpdateDto.builder().id(7L).password("locked").visitLimit(1L).build();
+        when(urlRepository.findById(7L)).thenReturn(Optional.of(url));
+        org.mockito.Mockito.doThrow(new NoAuthorizationException("You don't have authorization for this action"))
+                .when(urlValidator).verifyUserAdminOrOwner(url);
+
+        assertThatThrownBy(() -> urlService.updateUrl(update))
+                .isInstanceOf(NoAuthorizationException.class);
+
+        verify(urlUpdateDtoToUrlConverter, never()).convert(any());
+        verify(urlRepository, never()).save(any());
+    }
+
+    @Test
+    void updateChecksOwnershipThenAppliesTheChanges() {
+        final var url = Url.builder().id(7L).shortUrl("abc").longUrl("https://example.com").visits(0L).active(true).build();
+        final var update = UrlUpdateDto.builder().id(7L).visitLimit(10L).build();
+        when(urlRepository.findById(7L)).thenReturn(Optional.of(url));
+        when(urlUpdateDtoToUrlConverter.convert(update)).thenReturn(url);
+        when(urlRepository.save(url)).thenReturn(url);
+
+        urlService.updateUrl(update);
+
+        final var order = org.mockito.Mockito.inOrder(urlValidator, urlUpdateDtoToUrlConverter);
+        order.verify(urlValidator).verifyUserAdminOrOwner(url);
+        order.verify(urlUpdateDtoToUrlConverter).convert(update);
     }
 
     @Test

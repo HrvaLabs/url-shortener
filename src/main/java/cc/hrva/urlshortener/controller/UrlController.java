@@ -137,6 +137,7 @@ public class UrlController {
     @ApiResponse(responseCode = "400", description = "Validation error or bad request")
     @ApiResponse(responseCode = "404", description = "URL not found")
     @PutMapping("/{id}")
+    @PreAuthorize("hasAnyRole('ROLE_ADMIN', 'ROLE_USER')")
     public ResponseEntity<UrlResponse> updateUrl(
             @PathVariable final Long id,
             @Valid @RequestBody final UrlUpdateDto urlUpdateDto) {

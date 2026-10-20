@@ -2,6 +2,10 @@ package cc.hrva.urlshortener.validator;
 
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.exception.LongUrlNotSpecifiedException;
+import cc.hrva.urlshortener.exception.NoAuthorizationException;
+import cc.hrva.urlshortener.model.User;
+import cc.hrva.urlshortener.model.codebook.Authorities;
+import java.util.List;
 import cc.hrva.urlshortener.exception.ShortUrlAlreadyExistsException;
 import cc.hrva.urlshortener.exception.UrlValidationException;
 import cc.hrva.urlshortener.model.Url;
@@ -71,6 +75,52 @@ class DefaultUrlValidatorTest {
         assertThatThrownBy(() -> urlValidator.checkIfShortUrlIsUnique(shortUrl))
                 .isInstanceOf(ShortUrlAlreadyExistsException.class)
                 .hasMessage("This short URL is already taken. Try another.");
+    }
+
+    @Test
+    void shouldRefuseOwnershipCheckWithoutSignedInUser() {
+        final Url url = Url.builder().owner(userWithRole(1L, "ROLE_USER")).build();
+        when(userService.getUserFromToken()).thenReturn(null);
+
+        assertThatThrownBy(() -> urlValidator.verifyUserAdminOrOwner(url))
+                .isInstanceOf(NoAuthorizationException.class);
+    }
+
+    @Test
+    void shouldRefuseUserWhoDoesNotOwnTheUrl() {
+        final Url url = Url.builder().owner(userWithRole(1L, "ROLE_USER")).build();
+        when(userService.getUserFromToken()).thenReturn(userWithRole(2L, "ROLE_USER"));
+
+        assertThatThrownBy(() -> urlValidator.verifyUserAdminOrOwner(url))
+                .isInstanceOf(NoAuthorizationException.class);
+    }
+
+    @Test
+    void shouldRefuseRegularUserOnAnonymousUrl() {
+        final Url url = Url.builder().build();
+        when(userService.getUserFromToken()).thenReturn(userWithRole(2L, "ROLE_USER"));
+
+        assertThatThrownBy(() -> urlValidator.verifyUserAdminOrOwner(url))
+                .isInstanceOf(NoAuthorizationException.class);
+    }
+
+    @Test
+    void shouldLetAdminManageAnonymousUrl() {
+        final Url url = Url.builder().build();
+        when(userService.getUserFromToken()).thenReturn(userWithRole(3L, "ROLE_ADMIN"));
+
+        assertThatCode(() -> urlValidator.verifyUserAdminOrOwner(url))
+                .doesNotThrowAnyException();
+    }
+
+    @Test
+    void shouldLetOwnerManageTheirUrl() {
+        final var owner = userWithRole(1L, "ROLE_USER");
+        final Url url = Url.builder().owner(owner).build();
+        when(userService.getUserFromToken()).thenReturn(owner);
+
+        assertThatCode(() -> urlValidator.verifyUserAdminOrOwner(url))
+                .doesNotThrowAnyException();
     }
 
     @Test
@@ -276,5 +326,12 @@ class DefaultUrlValidatorTest {
         final Url url = Url.builder().longUrl(longUrl).build();
         assertThatCode(() -> urlValidator.checkIfLongUrlIsValid(url))
                 .doesNotThrowAnyException();
+    }
+
+    private static User userWithRole(final Long id, final String role) {
+        return User.builder()
+                .id(id)
+                .authorities(List.of(Authorities.builder().name(role).build()))
+                .build();
     }
 }
