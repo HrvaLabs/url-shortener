@@ -60,3 +60,26 @@ jobs:
             ${{ steps.image.outputs.name }}:latest
             ${{ steps.image.outputs.name }}:${{ github.sha }}
           platforms: linux/amd64,linux/arm64
+
+      - name: Redeploy on Portainer
+        if: github.event_name == 'push'
+        shell: bash
+        env:
+          PORTAINER_WEBHOOK_URL: ${{ secrets.PORTAINER_WEBHOOK_URL }}
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+        run: |
+          if [ -z "$PORTAINER_WEBHOOK_URL" ]; then
+            echo "::notice::PORTAINER_WEBHOOK_URL is not set, skipping the redeploy"
+            exit 0
+          fi
+          status=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
+            --retry 3 --retry-all-errors --max-time 30 -X POST \
+            -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" \
+            -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" \
+            "$PORTAINER_WEBHOOK_URL")
+          if [[ "$status" != 2* ]]; then
+            echo "::error::Portainer webhook answered HTTP $status"
+            exit 1
+          fi
+          echo "Portainer redeploy triggered (HTTP $status)"
