@@ -109,6 +109,8 @@ class AnonymousMcpTest {
     private static final String EMAIL = "user@localhost";
     private static final String CLIENT_IP = "203.0.113.7";
     private static final String OTHER_CLIENT_IP = "198.51.100.23";
+    private static final String PROXY_IP = "10.0.0.1";
+    private static final String CF_CONNECTING_IP = "CF-Connecting-IP";
     private static final String DESTINATION = "https://secret-destination.example/path";
     private static final String RATE_LIMIT_KEY_PATTERN = "rate-limit:mcp-anon:[0-9a-f]{64}";
     private static final Duration RATE_LIMIT_WINDOW = Duration.ofSeconds(60);
@@ -322,6 +324,30 @@ class AnonymousMcpTest {
                 .contains("MCP anonymous shorten_url refused by the rate limit")
                 .doesNotContain(CLIENT_IP)
                 .doesNotContain(OTHER_CLIENT_IP);
+    }
+
+    @Test
+    void rateLimitCountsTheCloudflareClientNotTheProxy() throws Exception {
+        for (int call = 1; call <= 10; call++) {
+            mockMvc.perform(anonymousMcpRequest(SHORTEN_URL_CALL).with(from(PROXY_IP)).header(CF_CONNECTING_IP, CLIENT_IP))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.result.isError").value(false));
+        }
+
+        mockMvc.perform(anonymousMcpRequest(SHORTEN_URL_CALL).with(from(PROXY_IP)).header(CF_CONNECTING_IP, CLIENT_IP))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.result.isError").value(true))
+                .andExpect(jsonPath("$.result.content[0].text").value(REFUSAL));
+        mockMvc.perform(anonymousMcpRequest(SHORTEN_URL_CALL).with(from(PROXY_IP)).header(CF_CONNECTING_IP, OTHER_CLIENT_IP))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.result.isError").value(false));
+
+        verify(urlService, times(11)).saveUrlRouting(any());
+        assertThat(redis.keys()).hasSize(2).allSatisfy(key -> assertThat(key)
+                .matches(RATE_LIMIT_KEY_PATTERN)
+                .doesNotContain(CLIENT_IP)
+                .doesNotContain(OTHER_CLIENT_IP)
+                .doesNotContain(PROXY_IP));
     }
 
     @Test

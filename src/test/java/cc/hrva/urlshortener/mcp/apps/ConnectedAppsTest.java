@@ -28,6 +28,8 @@ import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -38,6 +40,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.data.redis.RedisConnectionFailureException;
@@ -48,6 +51,13 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.userdetails.UserDetailsService;
+import org.springframework.security.oauth2.core.OAuth2AuthenticationException;
+import org.springframework.security.oauth2.core.OAuth2ErrorCodes;
+import org.springframework.security.oauth2.server.authorization.OAuth2Authorization;
+import org.springframework.security.oauth2.server.authorization.OAuth2AuthorizationService;
+import org.springframework.security.oauth2.server.authorization.OAuth2TokenType;
+import org.springframework.security.oauth2.server.authorization.token.JwtEncodingContext;
+import org.springframework.security.oauth2.server.authorization.token.OAuth2TokenCustomizer;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -97,6 +107,8 @@ class ConnectedAppsTest {
     private static final String OTHER_EMAIL = "other@localhost";
     private static final String CLIENT_IP = "203.0.113.7";
     private static final String OTHER_CLIENT_IP = "198.51.100.23";
+    private static final String PROXY_IP = "10.0.0.1";
+    private static final String CF_CONNECTING_IP = "CF-Connecting-IP";
     private static final String NAMED_REGISTRATION = """
             {"client_name":"%s","redirect_uris":["http://localhost:53682/callback"],"token_endpoint_auth_method":"none"}""";
     private static final String INVALID_REGISTRATION = """
@@ -126,6 +138,12 @@ class ConnectedAppsTest {
     @Autowired
     private DcrClientCleanupJob dcrClientCleanupJob;
 
+    @Autowired
+    private OAuth2AuthorizationService authorizationService;
+
+    @Autowired
+    private TokenIssueHook tokenIssueHook;
+
     @MockitoBean
     private StringRedisTemplate redisTemplate;
 
@@ -151,6 +169,7 @@ class ConnectedAppsTest {
 
     @BeforeEach
     void setUp() {
+        tokenIssueHook.disarm();
         jdbcTemplate.update("DELETE FROM oauth2_authorization_consent");
         jdbcTemplate.update("DELETE FROM oauth2_authorization");
         jdbcTemplate.update("DELETE FROM oauth2_registered_client");
@@ -262,6 +281,67 @@ class ConnectedAppsTest {
     }
 
     @Test
+    void refreshRacingADisconnectCannotRestoreTheApp(final CapturedOutput output) throws Exception {
+        final var app = connect("Claude", EMAIL);
+        tokenIssueHook.armOnce(() -> connectedAppsService.disconnect(EMAIL, app.clientId()));
+        final var outputBeforeRefresh = output.length();
+
+        mockMvc.perform(refreshRequest(app))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("invalid_grant"))
+                .andExpect(jsonPath("$.access_token").doesNotExist())
+                .andExpect(jsonPath("$.refresh_token").doesNotExist());
+
+        assertThat(tokenIssueHook.fired()).isTrue();
+        assertThat(rowsOf("oauth2_authorization", EMAIL)).isZero();
+        mockMvc.perform(get(CONNECTED_APPS).header(HttpHeaders.AUTHORIZATION, bearer(appJwt(EMAIL))))
+                .andExpect(jsonPath("$.length()").value(0));
+        mockMvc.perform(mcpRequest(app.accessToken()))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(refreshRequest(app))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("invalid_grant"));
+        assertThat(rowsOf("oauth2_authorization", EMAIL)).isZero();
+        assertThat(output.toString().substring(outputBeforeRefresh))
+                .doesNotContain(EMAIL)
+                .doesNotContain(app.accessToken())
+                .doesNotContain(app.refreshToken());
+    }
+
+    @Test
+    void savingAnAuthorizationWithTokensNeverReinsertsADeletedRow() throws Exception {
+        final var app = connect("Claude", EMAIL);
+        final var authorization = authorizationService.findByToken(app.refreshToken(), OAuth2TokenType.REFRESH_TOKEN);
+        assertThat(authorization).isNotNull();
+        final var refreshed = OAuth2Authorization.from(authorization)
+                .invalidate(authorization.getRefreshToken().getToken())
+                .build();
+        jdbcTemplate.update("DELETE FROM oauth2_authorization WHERE id = ?", authorization.getId());
+
+        assertThatThrownBy(() -> authorizationService.save(refreshed))
+                .isInstanceOfSatisfying(OAuth2AuthenticationException.class,
+                        exception -> assertThat(exception.getError().getErrorCode()).isEqualTo(OAuth2ErrorCodes.INVALID_GRANT));
+
+        assertThat(authorizationService.findById(authorization.getId())).isNull();
+        assertThat(rowsOf("oauth2_authorization", EMAIL)).isZero();
+    }
+
+    @Test
+    void savingAnExistingAuthorizationWithTokensStillUpdatesIt() throws Exception {
+        final var app = connect("Claude", EMAIL);
+        final var authorization = authorizationService.findByToken(app.refreshToken(), OAuth2TokenType.REFRESH_TOKEN);
+        assertThat(authorization).isNotNull();
+
+        authorizationService.save(OAuth2Authorization.from(authorization).invalidate(authorization.getRefreshToken().getToken()).build());
+
+        final var saved = authorizationService.findById(authorization.getId());
+        assertThat(saved).isNotNull();
+        assertThat(saved.getRefreshToken()).isNotNull();
+        assertThat(saved.getRefreshToken().isInvalidated()).isTrue();
+        assertThat(rowsOf("oauth2_authorization", EMAIL)).isEqualTo(1);
+    }
+
+    @Test
     void disconnectOtherUsersAppIs404() throws Exception {
         final var othersApp = connect("Other app", OTHER_EMAIL);
         final var registeredButUnused = accessTokens.register(NAMED_REGISTRATION.formatted("Unused"));
@@ -324,6 +404,19 @@ class ConnectedAppsTest {
                 .contains("Client registration refused by the rate limit")
                 .doesNotContain(CLIENT_IP)
                 .doesNotContain(OTHER_CLIENT_IP);
+    }
+
+    @Test
+    void registrationRateLimitCountsTheCloudflareClientNotTheProxy() throws Exception {
+        for (int attempt = 1; attempt <= 20; attempt++) {
+            mockMvc.perform(registration(NAMED_REGISTRATION.formatted("App " + attempt)).with(from(PROXY_IP)).header(CF_CONNECTING_IP, CLIENT_IP))
+                    .andExpect(status().isCreated());
+        }
+
+        mockMvc.perform(registration(NAMED_REGISTRATION.formatted("App 21")).with(from(PROXY_IP)).header(CF_CONNECTING_IP, CLIENT_IP))
+                .andExpect(status().isTooManyRequests());
+        mockMvc.perform(registration(NAMED_REGISTRATION.formatted("Other network")).with(from(PROXY_IP)).header(CF_CONNECTING_IP, OTHER_CLIENT_IP))
+                .andExpect(status().isCreated());
     }
 
     @Test
@@ -526,6 +619,42 @@ class ConnectedAppsTest {
             DcrClientCleanupJob.class
     })
     static class TestApplication {
+
+        @Bean
+        TokenIssueHook tokenIssueHook() {
+            return new TokenIssueHook();
+        }
+
+    }
+
+    static final class TokenIssueHook implements OAuth2TokenCustomizer<JwtEncodingContext> {
+
+        private final AtomicReference<Runnable> pending = new AtomicReference<>();
+        private final AtomicBoolean fired = new AtomicBoolean();
+
+        @Override
+        public void customize(final JwtEncodingContext context) {
+            final var action = pending.getAndSet(null);
+            if (action != null) {
+                fired.set(true);
+                action.run();
+            }
+        }
+
+        void armOnce(final Runnable action) {
+            fired.set(false);
+            pending.set(action);
+        }
+
+        void disarm() {
+            pending.set(null);
+            fired.set(false);
+        }
+
+        boolean fired() {
+            return fired.get();
+        }
+
     }
 
 }

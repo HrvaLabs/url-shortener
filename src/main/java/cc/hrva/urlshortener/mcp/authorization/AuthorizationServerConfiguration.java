@@ -36,7 +36,6 @@ import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.JwtValidators;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.oauth2.server.authorization.JdbcOAuth2AuthorizationConsentService;
-import org.springframework.security.oauth2.server.authorization.JdbcOAuth2AuthorizationService;
 import org.springframework.security.oauth2.server.authorization.OAuth2AuthorizationConsentService;
 import org.springframework.security.oauth2.server.authorization.OAuth2AuthorizationService;
 import org.springframework.security.oauth2.server.authorization.authentication.OAuth2ClientRegistrationAuthenticationProvider;
@@ -54,6 +53,7 @@ import org.springframework.security.web.authentication.HttpStatusEntryPoint;
 import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher;
 import org.springframework.security.web.util.matcher.OrRequestMatcher;
 import org.springframework.security.web.util.matcher.RequestMatcher;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.web.filter.CorsFilter;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -175,8 +175,9 @@ public class AuthorizationServerConfiguration {
 
     @Bean
     public OAuth2AuthorizationService authorizationService(final JdbcOperations jdbcOperations,
-                                                           final RegisteredClientRepository registeredClientRepository) {
-        return new JdbcOAuth2AuthorizationService(jdbcOperations, registeredClientRepository);
+                                                           final RegisteredClientRepository registeredClientRepository,
+                                                           final PlatformTransactionManager transactionManager) {
+        return new DisconnectSafeAuthorizationService(jdbcOperations, registeredClientRepository, transactionManager);
     }
 
     @Bean

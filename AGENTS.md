@@ -122,7 +122,7 @@ cc.hrva.urlshortener
 - JWT in `Authorization: Bearer` header. Stateless sessions.
 - Login rate limiting: Guava cache, 20 attempts/day per IP, 1-day expiry.
 - CORS via `CorsConfigurationSource` bean (not headers in JwtFilter). Allowed: frontend origin + all standard methods.
-- Client IP resolved via `ClientIpResolver` + `ForwardedHeaderFilter` (never read X-Forwarded-For manually).
+- Client IP resolved via `ClientIpResolver` (never read X-Forwarded-For manually): a single `CF-Connecting-IP` header that parses as an IP literal wins (set by Cloudflare; trustworthy only while the origin accepts traffic from Cloudflare alone), otherwise `request.getRemoteAddr()` as rewritten by `ForwardedHeaderFilter`. `ForwardedHeaderFilter` runs after the Spring Security chains, so filters inside them see the proxy address unless `CF-Connecting-IP` is present.
 - Logging: SLF4J via `@Slf4j`, parameterized `{}` format.
 - Actuator endpoints: `/actuator/health` public, all others ROLE_ADMIN only.
 - **Login gating** (in order): password auth → `emailVerified` check (`EmailNotVerifiedException` → 403) → if `twoFactorEnabled`, require `code` in `LoginDto` (missing → `{twoFactorRequired:true}`, no token; invalid → 401). `active` enforced at `UserDetails.enabled` (password) + `OAuth2LoginSuccessHandler` + per-request in `JwtFilter`.
