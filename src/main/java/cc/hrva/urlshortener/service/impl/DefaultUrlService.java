@@ -47,6 +47,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 
@@ -267,8 +268,15 @@ public class DefaultUrlService implements UrlService {
         final var existing = urlRepository.findById(updateDto.getId())
                 .orElseThrow(() -> new UrlNotFoundException(String.format("Url with id %d doesn't exist", updateDto.getId())));
         urlValidator.verifyUserAdminOrOwner(existing);
+        final var previousLongUrl = existing.getLongUrl();
 
         final var url = urlUpdateDtoToUrlConverter.convert(updateDto);
+        if (!Objects.equals(previousLongUrl, url.getLongUrl())) {
+            urlValidator.verifyUserAdmin();
+            urlValidator.checkIfLongUrlIsValid(url);
+            urlValidator.checkIfUrlSafe(url);
+            log.info("Changed destination of URL id={}", url.getId());
+        }
         urlValidator.checkIfUrlExpirationDateIsInThePast(url);
 
         url.verifyUrlValidity(url);

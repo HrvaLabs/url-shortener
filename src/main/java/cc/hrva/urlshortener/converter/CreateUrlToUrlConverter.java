@@ -25,7 +25,7 @@ public class CreateUrlToUrlConverter implements Converter<CreateUrlDto, Url> {
         .build();
   }
 
-  private static String normalizeScheme(final String longUrl) {
+  static String normalizeScheme(final String longUrl) {
     if (StringUtils.isBlank(longUrl)) {
       return longUrl;
     }

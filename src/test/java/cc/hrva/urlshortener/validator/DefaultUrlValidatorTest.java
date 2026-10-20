@@ -78,6 +78,30 @@ class DefaultUrlValidatorTest {
     }
 
     @Test
+    void shouldLetAdminsChangeDestinations() {
+        when(userService.getUserFromToken()).thenReturn(userWithRole(3L, "ROLE_ADMIN"));
+
+        assertThatCode(() -> urlValidator.verifyUserAdmin()).doesNotThrowAnyException();
+    }
+
+    @Test
+    void shouldRefuseRegularUsersChangingDestinations() {
+        when(userService.getUserFromToken()).thenReturn(userWithRole(2L, "ROLE_USER"));
+
+        assertThatThrownBy(() -> urlValidator.verifyUserAdmin())
+                .isInstanceOf(NoAuthorizationException.class)
+                .hasMessage("Only admins can change where a link points");
+    }
+
+    @Test
+    void shouldRefuseDestinationChangesWithoutSignedInUser() {
+        when(userService.getUserFromToken()).thenReturn(null);
+
+        assertThatThrownBy(() -> urlValidator.verifyUserAdmin())
+                .isInstanceOf(NoAuthorizationException.class);
+    }
+
+    @Test
     void shouldRefuseOwnershipCheckWithoutSignedInUser() {
         final Url url = Url.builder().owner(userWithRole(1L, "ROLE_USER")).build();
         when(userService.getUserFromToken()).thenReturn(null);

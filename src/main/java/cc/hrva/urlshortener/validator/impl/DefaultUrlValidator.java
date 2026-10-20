@@ -94,6 +94,17 @@ public class DefaultUrlValidator implements UrlValidator {
     }
 
     @Override
+    public void verifyUserAdmin() {
+        final var currentUser = userService.getUserFromToken();
+        final var isCurrentUserAdmin = currentUser != null && currentUser.getAuthorities().stream()
+                .anyMatch(authorities -> authorities.getName().equals("ROLE_ADMIN"));
+
+        if (!isCurrentUserAdmin) {
+            throw new NoAuthorizationException("Only admins can change where a link points");
+        }
+    }
+
+    @Override
     public void checkIfUrlExpirationDateIsInThePast(final Url url) {
         if (url.getExpirationDate() != null && LocalDateTime.now().isAfter(url.getExpirationDate())) {
             throw new UrlValidationException("Expiration date can't be in the past");

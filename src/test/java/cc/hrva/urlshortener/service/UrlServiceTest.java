@@ -151,6 +151,55 @@ class UrlServiceTest {
     }
 
     @Test
+    void changingTheDestinationRequiresAnAdminAndNeverSaves() {
+        final var url = Url.builder().id(7L).shortUrl("abc").longUrl("https://old.example").visits(0L).active(true).build();
+        final var update = UrlUpdateDto.builder().id(7L).longUrl("https://new.example").build();
+        final var changed = Url.builder().id(7L).shortUrl("abc").longUrl("https://new.example").visits(0L).active(true).build();
+        when(urlRepository.findById(7L)).thenReturn(Optional.of(url));
+        when(urlUpdateDtoToUrlConverter.convert(update)).thenReturn(changed);
+        org.mockito.Mockito.doThrow(new NoAuthorizationException("Only admins can change where a link points"))
+                .when(urlValidator).verifyUserAdmin();
+
+        assertThatThrownBy(() -> urlService.updateUrl(update))
+                .isInstanceOf(NoAuthorizationException.class);
+
+        verify(urlRepository, never()).save(any());
+    }
+
+    @Test
+    void adminDestinationChangeIsValidatedLikeANewLink() {
+        final var url = Url.builder().id(7L).shortUrl("abc").longUrl("https://old.example").visits(0L).active(true).build();
+        final var update = UrlUpdateDto.builder().id(7L).longUrl("https://new.example").build();
+        final var changed = Url.builder().id(7L).shortUrl("abc").longUrl("https://new.example").visits(0L).active(true).build();
+        when(urlRepository.findById(7L)).thenReturn(Optional.of(url));
+        when(urlUpdateDtoToUrlConverter.convert(update)).thenReturn(changed);
+        when(urlRepository.save(changed)).thenReturn(changed);
+
+        final var result = urlService.updateUrl(update);
+
+        assertThat(result.longUrl()).isEqualTo("https://new.example");
+        final var order = org.mockito.Mockito.inOrder(urlValidator, urlRepository);
+        order.verify(urlValidator).verifyUserAdmin();
+        order.verify(urlValidator).checkIfLongUrlIsValid(changed);
+        order.verify(urlValidator).checkIfUrlSafe(changed);
+        order.verify(urlRepository).save(changed);
+    }
+
+    @Test
+    void keepingTheSameDestinationDoesNotNeedAnAdmin() {
+        final var url = Url.builder().id(7L).shortUrl("abc").longUrl("https://same.example").visits(0L).active(true).build();
+        final var update = UrlUpdateDto.builder().id(7L).longUrl("https://same.example").visitLimit(5L).build();
+        when(urlRepository.findById(7L)).thenReturn(Optional.of(url));
+        when(urlUpdateDtoToUrlConverter.convert(update)).thenReturn(url);
+        when(urlRepository.save(url)).thenReturn(url);
+
+        urlService.updateUrl(update);
+
+        verify(urlValidator, never()).verifyUserAdmin();
+        verify(urlValidator, never()).checkIfUrlSafe(any());
+    }
+
+    @Test
     void shouldSaveUrlRandomShortUrl() {
         final var createUrlDto = CreateUrlDto.builder().longUrl("long").build();
         final var url = Url.builder().longUrl("long").build();

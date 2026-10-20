@@ -16,6 +16,8 @@ public class UrlUpdateDto {
     @NotNull(message = "ID is required")
     @Schema(description = "Unique identifier of the URL to update", example = "1")
     private Long id;
+    @Schema(description = "New destination URL. Admins only; null leaves it unchanged", example = "https://example.com/new-page")
+    private String longUrl;
     @Schema(description = "Maximum number of visits allowed", example = "200")
     private Long visitLimit;
     @Schema(description = "Expiration date and time", example = "2026-12-31T23:59:59")

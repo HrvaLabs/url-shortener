@@ -8,6 +8,7 @@ public interface UrlValidator {
     void checkIfUrlSafe(Url url);
     void checkIfLongUrlIsValid(Url url);
     void verifyUserAdminOrOwner(Url url);
+    void verifyUserAdmin();
     void checkIfAnonymousUrlCreationEnabled();
     void checkIfShortUrlIsUnique(String shortUrl);
     void checkIfShortUrlIsReserved(String shortUrl);

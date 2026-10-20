@@ -23,6 +23,10 @@ public class UrlUpdateDtoToUrlConverter implements Converter<UrlUpdateDto, Url> 
         final var existingUrl = urlRepository.findById(urlUpdateDto.getId())
                 .orElseThrow(() -> new UrlNotFoundException(String.format("Url with id %d doesn't exist", urlUpdateDto.getId())));
 
+        if (StringUtils.isNotBlank(urlUpdateDto.getLongUrl())) {
+            existingUrl.setLongUrl(CreateUrlToUrlConverter.normalizeScheme(urlUpdateDto.getLongUrl()));
+        }
+
         if (urlUpdateDto.getVisitLimit() == null || urlUpdateDto.getVisitLimit() <= 0) {
             existingUrl.setVisitLimit(null);
         } else {
