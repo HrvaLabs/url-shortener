@@ -413,6 +413,32 @@ class McpEndpointSecurityTest {
     }
 
     @Test
+    void modernDiscoveryProbeIsChallengedThenAnsweredAsALegacyServer() throws Exception {
+        mockMvc.perform(modernDiscoveryProbe())
+                .andExpect(status().isUnauthorized());
+
+        final var token = accessTokens.issue(EMAIL, RESOURCE);
+        mockMvc.perform(modernDiscoveryProbe().header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value(-32601));
+        mockMvc.perform(mcpRequest(INITIALIZE).header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.result.serverInfo.name").value("hrva.cc"));
+    }
+
+    @Test
+    void unknownMethodIsAJsonRpcErrorNotAServerError() throws Exception {
+        final var token = accessTokens.issue(EMAIL, RESOURCE);
+
+        mockMvc.perform(mcpRequest("""
+                        {"jsonrpc":"2.0","id":11,"method":"logging/setLevel","params":{"level":"info"}}""")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(11))
+                .andExpect(jsonPath("$.error.code").value(-32601));
+    }
+
+    @Test
     void clientDiscoveryListsAreEmptyNotErrors() throws Exception {
         final var token = accessTokens.issue(EMAIL, RESOURCE);
 
@@ -500,6 +526,13 @@ class McpEndpointSecurityTest {
                 .build());
 
         return jwt.getTokenValue();
+    }
+
+    private static MockHttpServletRequestBuilder modernDiscoveryProbe() {
+        return mcpRequest("""
+                {"jsonrpc":"2.0","id":1,"method":"server/discover","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28"}}}""")
+                .header("MCP-Protocol-Version", "2026-07-28")
+                .header("Mcp-Method", "server/discover");
     }
 
     private static MockHttpServletRequestBuilder mcpRequest(final String body) {

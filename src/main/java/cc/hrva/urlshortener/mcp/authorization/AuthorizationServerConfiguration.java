@@ -1,6 +1,7 @@
 package cc.hrva.urlshortener.mcp.authorization;
 
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
+import cc.hrva.urlshortener.mcp.McpModernProbeFilter;
 import cc.hrva.urlshortener.mcp.McpRequestBodyLimitFilter;
 import cc.hrva.urlshortener.mcp.anon.AnonymousMcpConfiguration;
 import cc.hrva.urlshortener.mcp.anon.RateLimiter;
@@ -77,6 +78,7 @@ public class AuthorizationServerConfiguration {
     private static final String MCP_RESOURCE_PATH = "/mcp";
     private static final int REQUEST_BODY_LIMIT_FILTER_ORDER = SecurityFilterProperties.DEFAULT_FILTER_ORDER - 200;
     private static final int DCR_EMPTY_SCOPE_FILTER_ORDER = SecurityFilterProperties.DEFAULT_FILTER_ORDER - 100;
+    private static final int MODERN_PROBE_FILTER_ORDER = SecurityFilterProperties.DEFAULT_FILTER_ORDER + 100;
 
     private final AppProperties appProperties;
     private final Environment environment;
@@ -205,6 +207,15 @@ public class AuthorizationServerConfiguration {
         final var registration = new FilterRegistrationBean<>(new McpRequestBodyLimitFilter());
         registration.addUrlPatterns(CLIENT_REGISTRATION_ENDPOINT, MCP_RESOURCE_PATH, AnonymousMcpConfiguration.ANONYMOUS_MCP_ENDPOINT);
         registration.setOrder(REQUEST_BODY_LIMIT_FILTER_ORDER);
+
+        return registration;
+    }
+
+    @Bean
+    public FilterRegistrationBean<McpModernProbeFilter> mcpModernProbeFilterRegistration() {
+        final var registration = new FilterRegistrationBean<>(new McpModernProbeFilter());
+        registration.addUrlPatterns(MCP_RESOURCE_PATH, AnonymousMcpConfiguration.ANONYMOUS_MCP_ENDPOINT);
+        registration.setOrder(MODERN_PROBE_FILTER_ORDER);
 
         return registration;
     }

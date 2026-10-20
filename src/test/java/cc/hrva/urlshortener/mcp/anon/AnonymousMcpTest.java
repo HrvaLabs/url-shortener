@@ -128,6 +128,13 @@ class AnonymousMcpTest {
             {"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}""";
     private static final String INITIALIZE = """
             {"jsonrpc":"2.0","id":3,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"1.0.0"}}}""";
+    private static final int METHOD_NOT_FOUND = -32601;
+    private static final String MCP_PROTOCOL_VERSION_HEADER = "MCP-Protocol-Version";
+    private static final String MCP_METHOD_HEADER = "Mcp-Method";
+    private static final String MODERN_PROTOCOL_VERSION = "2026-07-28";
+    private static final String SERVER_DISCOVER_METHOD = "server/discover";
+    private static final String SERVER_DISCOVER = """
+            {"jsonrpc":"2.0","id":1,"method":"server/discover","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28"}}}""";
     private static final String RESOURCES_LIST = """
             {"jsonrpc":"2.0","id":7,"method":"resources/list","params":{}}""";
     private static final String RESOURCE_TEMPLATES_LIST = """
@@ -569,18 +576,38 @@ class AnonymousMcpTest {
     }
 
     @Test
+    void modernDiscoveryProbeGets400SoClientsFallBackToInitialize() throws Exception {
+        mockMvc.perform(post("/mcp/anon")
+                        .header(HttpHeaders.ACCEPT, MCP_ACCEPT)
+                        .header(MCP_PROTOCOL_VERSION_HEADER, MODERN_PROTOCOL_VERSION)
+                        .header(MCP_METHOD_HEADER, SERVER_DISCOVER_METHOD)
+                        .contentType(APPLICATION_JSON)
+                        .content(SERVER_DISCOVER)
+                        .with(from(CLIENT_IP)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value(METHOD_NOT_FOUND))
+                .andExpect(jsonPath("$.error.message", containsString("2025-11-25")));
+
+        mockMvc.perform(anonymousMcpRequest(INITIALIZE).with(from(CLIENT_IP)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.result.protocolVersion").exists());
+    }
+
+    @Test
     void unknownMethodNamesAreNeverLogged(final CapturedOutput output) throws Exception {
         final var outputBeforeCalls = output.length();
 
         mockMvc.perform(anonymousMcpRequest("""
                         {"jsonrpc":"2.0","id":9,"method":"secret/unknown-method","params":{}}""").with(from(CLIENT_IP)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(9))
+                .andExpect(jsonPath("$.error.code").value(METHOD_NOT_FOUND))
                 .andExpect(this::hasNoJavaInternals);
         mockMvc.perform(anonymousMcpRequest("""
                         {"jsonrpc":"2.0","method":"notifications/secret-unknown"}""").with(from(CLIENT_IP)))
                 .andExpect(status().isAccepted());
 
         assertThat(output.toString().substring(outputBeforeCalls))
-                .contains("Rejected an MCP request for an unknown method")
                 .doesNotContain("secret/unknown-method")
                 .doesNotContain("notifications/secret-unknown")
                 .doesNotContain("Missing handler");
