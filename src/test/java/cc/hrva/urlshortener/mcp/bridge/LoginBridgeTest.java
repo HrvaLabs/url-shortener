@@ -55,6 +55,7 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContext;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.oauth2.core.endpoint.OAuth2ParameterNames;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
@@ -109,6 +110,10 @@ class LoginBridgeTest {
     private static final String ALREADY_APPROVED = "{\"error\":\"already_approved\"}";
     private static final Duration REQUEST_TIME_TO_LIVE = Duration.ofMinutes(10);
     private static final Duration CODE_TIME_TO_LIVE = Duration.ofSeconds(60);
+    private static final Duration AUTHORIZED_SESSION_TIME_TO_LIVE = Duration.ofSeconds(60);
+    private static final String VIEW_PATH = "/api/v1/connect/requests/{handle}";
+    private static final String APPROVE_PATH = "/api/v1/connect/requests/{handle}/approve";
+    private static final String DENY_PATH = "/api/v1/connect/requests/{handle}/deny";
     private static final RSAKey SIGNING_KEY = generateSigningKey();
 
     @LocalServerPort
@@ -170,6 +175,7 @@ class LoginBridgeTest {
 
         assertThat(started.handle()).matches("[A-Za-z0-9_-]{43}");
         assertThat(started.session().getAttribute(ConnectRedirectEntryPoint.HANDLE_ATTRIBUTE)).isEqualTo(started.handle());
+        assertThat(started.session().getMaxInactiveInterval()).isEqualTo((int) REQUEST_TIME_TO_LIVE.toSeconds());
         assertThat(redis.timeToLiveOfKeyContaining(started.handle())).isEqualTo(REQUEST_TIME_TO_LIVE);
         assertThat(startAuthorization(clientId, REGISTERED_REDIRECT_URI).handle()).isNotEqualTo(started.handle());
     }
@@ -239,18 +245,30 @@ class LoginBridgeTest {
     }
 
     @Test
-    void connectApisRequireRoleUser() throws Exception {
-        final var started = startAuthorization(accessTokens.register(REGISTRATION), REGISTERED_REDIRECT_URI);
+    void adminOnlyAccountsCanUseConnectApis() throws Exception {
+        final var clientId = accessTokens.register(REGISTRATION);
+        final var approved = startAuthorization(clientId, REGISTERED_REDIRECT_URI);
+        final var denied = startAuthorization(clientId, REGISTERED_REDIRECT_URI);
         final var adminOnly = bearer(appJwt(EMAIL, "ROLE_ADMIN"));
+        final var neitherRole = bearer(appJwt(EMAIL, "ROLE_OTHER"));
 
-        assertThat(perform(get("/api/v1/connect/requests/{handle}", started.handle())
-                .header(HttpHeaders.AUTHORIZATION, adminOnly)).getStatus()).isEqualTo(403);
-        assertThat(perform(post("/api/v1/connect/requests/{handle}/approve", started.handle())
-                .header(HttpHeaders.AUTHORIZATION, adminOnly)).getStatus()).isEqualTo(403);
-        assertThat(perform(post("/api/v1/connect/requests/{handle}/deny", started.handle())
-                .header(HttpHeaders.AUTHORIZATION, adminOnly)).getStatus()).isEqualTo(403);
-        assertThat(perform(post("/api/v1/connect/requests/{handle}/deny", started.handle())).getStatus()).isEqualTo(401);
-        assertThat(perform(view(started.handle())).getStatus()).isEqualTo(200);
+        assertThat(perform(get(VIEW_PATH, approved.handle())).getStatus()).isEqualTo(401);
+        assertThat(perform(post(APPROVE_PATH, approved.handle())).getStatus()).isEqualTo(401);
+        assertThat(perform(post(DENY_PATH, denied.handle())).getStatus()).isEqualTo(401);
+        assertThat(perform(get(VIEW_PATH, approved.handle()).header(HttpHeaders.AUTHORIZATION, neitherRole)).getStatus()).isEqualTo(403);
+        assertThat(perform(post(APPROVE_PATH, approved.handle()).header(HttpHeaders.AUTHORIZATION, neitherRole)).getStatus()).isEqualTo(403);
+        assertThat(perform(post(DENY_PATH, denied.handle()).header(HttpHeaders.AUTHORIZATION, neitherRole)).getStatus()).isEqualTo(403);
+
+        final var view = perform(get(VIEW_PATH, approved.handle()).header(HttpHeaders.AUTHORIZATION, adminOnly));
+        final var approval = perform(post(APPROVE_PATH, approved.handle()).header(HttpHeaders.AUTHORIZATION, adminOnly));
+        final var denial = perform(post(DENY_PATH, denied.handle()).header(HttpHeaders.AUTHORIZATION, adminOnly));
+
+        assertThat(view.getStatus()).isEqualTo(200);
+        assertThat(view.getContentAsString()).isEqualTo("{\"clientName\":\"" + CLIENT_NAME + "\"}");
+        assertThat(continueUrl(approval)).startsWith(CONTINUE_URL);
+        assertThat(denial.getStatus()).isEqualTo(200);
+        assertThat(JsonPath.<String>read(denial.getContentAsString(), "$.redirectTo"))
+                .isEqualTo(REGISTERED_REDIRECT_URI + "?error=access_denied&state=" + ENCODED_STATE);
     }
 
     @Test
@@ -352,7 +370,45 @@ class LoginBridgeTest {
     }
 
     @Test
+    void continuedSessionOnlyAuthorizesTheApprovedRequest() throws Exception {
+        final var clientId = accessTokens.register(REGISTRATION);
+        final var otherClientId = accessTokens.register(REGISTRATION);
+        final var started = startAuthorization(clientId, REGISTERED_REDIRECT_URI);
+        final var session = started.session();
+        final var continued = perform(get(URI.create(continueUrl(perform(approve(started.handle()))))).session(session));
+        assertThat(continued.getStatus()).isEqualTo(302);
+
+        final var otherAuthorization = mockMvc.perform(authorizationRequest(otherClientId, REGISTERED_REDIRECT_URI).session(session)).andReturn();
+
+        final var location = otherAuthorization.getResponse().getHeader(HttpHeaders.LOCATION);
+        assertThat(otherAuthorization.getResponse().getStatus()).isEqualTo(302);
+        assertThat(location).startsWith(CONNECT_PAGE).doesNotContain("code=");
+        assertThat(session.isInvalid()).isTrue();
+        final var newSession = (MockHttpSession) otherAuthorization.getRequest().getSession(false);
+        assertThat(newSession).isNotNull().isNotSameAs(session);
+        assertThat(newSession.getAttribute(HttpSessionSecurityContextRepository.SPRING_SECURITY_CONTEXT_KEY)).isNull();
+        assertThat(newSession.getAttribute(ConnectRedirectEntryPoint.HANDLE_ATTRIBUTE)).isEqualTo(location.substring(CONNECT_PAGE.length()));
+        assertThat(redis.timeToLiveOfKeyContaining(location.substring(CONNECT_PAGE.length()))).isEqualTo(REQUEST_TIME_TO_LIVE);
+    }
+
+    @Test
+    void authenticatedSessionWithoutApprovedQueryIsSentToConnect() throws Exception {
+        final var clientId = accessTokens.register(REGISTRATION);
+        final var securityContext = SecurityContextHolder.createEmptyContext();
+        securityContext.setAuthentication(UsernamePasswordAuthenticationToken.authenticated(EMAIL, null, List.of(new SimpleGrantedAuthority("ROLE_USER"))));
+        final var session = new MockHttpSession();
+        session.setAttribute(HttpSessionSecurityContextRepository.SPRING_SECURITY_CONTEXT_KEY, securityContext);
+
+        final var authorization = perform(authorizationRequest(clientId, REGISTERED_REDIRECT_URI).session(session));
+
+        assertThat(authorization.getStatus()).isEqualTo(302);
+        assertThat(authorization.getHeader(HttpHeaders.LOCATION)).startsWith(CONNECT_PAGE).doesNotContain("code=");
+        assertThat(session.isInvalid()).isTrue();
+    }
+
+    @Test
     void fullFlowIssuesCodeForApprovingUserAndEndsSession(final CapturedOutput output) throws Exception {
+        final var outputBeforeFlow = output.getAll().length();
         final var clientId = accessTokens.register(REGISTRATION);
         final var started = startAuthorization(clientId, OTHER_PORT_REDIRECT_URI);
         final var session = started.session();
@@ -366,6 +422,7 @@ class LoginBridgeTest {
         assertThat(continued.getStatus()).isEqualTo(302);
         assertThat(continued.getHeader(HttpHeaders.LOCATION)).isEqualTo(ISSUER + "/oauth2/authorize?" + started.query());
         assertThat(session.getId()).isNotEqualTo(sessionIdBeforeContinue);
+        assertThat(session.getMaxInactiveInterval()).isEqualTo((int) AUTHORIZED_SESSION_TIME_TO_LIVE.toSeconds());
         assertThat(session.isInvalid()).isFalse();
         assertThat(session.getAttribute(ConnectRedirectEntryPoint.HANDLE_ATTRIBUTE)).isNull();
         final var securityContext = (SecurityContext) session.getAttribute(HttpSessionSecurityContextRepository.SPRING_SECURITY_CONTEXT_KEY);
@@ -406,7 +463,7 @@ class LoginBridgeTest {
 
         assertThat(refreshed.getStatus()).isEqualTo(200);
         assertThat(mcpJwtDecoder.decode(JsonPath.read(refreshed.getContentAsString(), "$.access_token")).getSubject()).isEqualTo(EMAIL);
-        assertThat(output.toString())
+        assertThat(output.getAll().substring(outputBeforeFlow))
                 .doesNotContain(started.handle())
                 .doesNotContain(continueUrl.substring(CONTINUE_URL.length()))
                 .doesNotContain(appJwt)

@@ -3,7 +3,6 @@ package cc.hrva.urlshortener.mcp.bridge;
 import cc.hrva.urlshortener.exception.ConnectRequestAlreadyApprovedException;
 import cc.hrva.urlshortener.exception.ConnectRequestExpiredException;
 import java.security.SecureRandom;
-import java.time.Duration;
 import java.util.Base64;
 import java.util.Optional;
 import lombok.RequiredArgsConstructor;
@@ -14,9 +13,6 @@ import tools.jackson.databind.json.JsonMapper;
 @Component
 @RequiredArgsConstructor
 public class RedisConnectRequestStore implements ConnectRequestStore {
-
-    public static final Duration REQUEST_TIME_TO_LIVE = Duration.ofMinutes(10);
-    public static final Duration CODE_TIME_TO_LIVE = Duration.ofSeconds(60);
 
     private static final String REQUEST_KEY_PREFIX = "mcp:connect:request:";
     private static final String DECISION_KEY_PREFIX = "mcp:connect:decision:";

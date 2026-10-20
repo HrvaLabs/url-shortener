@@ -83,7 +83,7 @@ public class SecurityConfiguration {
                                 .requestMatchers("/actuator/**", "/api/v1/admin/**")
                                 .hasRole("ADMIN")
                                 .requestMatchers("/api/v1/connect/**")
-                                .hasRole("USER")
+                                .hasAnyRole("ADMIN", "USER")
                                 .anyRequest()
                                 .authenticated()
                 ).exceptionHandling(exceptionHandling ->

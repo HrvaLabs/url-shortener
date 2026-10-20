@@ -3,6 +3,7 @@ package cc.hrva.urlshortener.mcp.authorization;
 import cc.hrva.urlshortener.configuration.AppConfiguration;
 import cc.hrva.urlshortener.configuration.SecurityConfiguration;
 import cc.hrva.urlshortener.configuration.WebConfiguration;
+import cc.hrva.urlshortener.mcp.McpAccessTokens;
 import cc.hrva.urlshortener.mcp.bridge.ConnectRequestStore;
 import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.security.JwtFilter;
@@ -191,7 +192,8 @@ class AuthorizationServerConfigurationTest {
                         .queryParam("code_challenge", CODE_CHALLENGE)
                         .queryParam("code_challenge_method", "S256")
                         .queryParam("state", "state-1")
-                        .session(signedInSession()))
+                        .session(signedInSession())
+                        .with(McpAccessTokens.approvedAuthorizationQuery()))
                 .andExpect(status().isFound())
                 .andReturn()
                 .getResponse();
@@ -240,7 +242,8 @@ class AuthorizationServerConfigurationTest {
                         .queryParam("code_challenge", CODE_CHALLENGE)
                         .queryParam("code_challenge_method", "S256")
                         .queryParam("state", "state-2")
-                        .session(signedInSession()))
+                        .session(signedInSession())
+                        .with(McpAccessTokens.approvedAuthorizationQuery()))
                 .andExpect(status().isFound())
                 .andReturn()
                 .getResponse()

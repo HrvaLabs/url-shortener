@@ -4,6 +4,7 @@ import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import io.swagger.v3.oas.annotations.Hidden;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -32,6 +33,7 @@ public class ConnectContinueController {
 
     private static final String AUTHORIZATION_ENDPOINT = "/oauth2/authorize";
     private static final String USER_AUTHORITY = "ROLE_USER";
+    private static final Duration AUTHORIZED_SESSION_TIME_TO_LIVE = Duration.ofSeconds(60);
 
     private final ConnectRequestStore connectRequestStore;
     private final AppProperties appProperties;
@@ -57,6 +59,8 @@ public class ConnectContinueController {
 
         session.removeAttribute(ConnectRedirectEntryPoint.HANDLE_ATTRIBUTE);
         request.changeSessionId();
+        session.setMaxInactiveInterval((int) AUTHORIZED_SESSION_TIME_TO_LIVE.toSeconds());
+        session.setAttribute(BridgedAuthorizationRequestFilter.AUTHORIZATION_QUERY_ATTRIBUTE, approvedConnectRequest.authorizationQuery());
         final var securityContext = securityContextHolderStrategy.createEmptyContext();
         securityContext.setAuthentication(UsernamePasswordAuthenticationToken.authenticated(
                 approvedConnectRequest.email(),

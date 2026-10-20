@@ -1,6 +1,7 @@
 package cc.hrva.urlshortener.mcp.authorization;
 
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
+import cc.hrva.urlshortener.mcp.bridge.BridgedAuthorizationRequestFilter;
 import cc.hrva.urlshortener.mcp.bridge.ConnectContinueController;
 import cc.hrva.urlshortener.mcp.bridge.ConnectRedirectEntryPoint;
 import cc.hrva.urlshortener.mcp.bridge.ConnectRequestStore;
@@ -46,6 +47,7 @@ import org.springframework.security.oauth2.server.authorization.token.JwtEncodin
 import org.springframework.security.oauth2.server.authorization.token.OAuth2TokenCustomizer;
 import org.springframework.security.oauth2.server.authorization.token.OAuth2TokenGenerator;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.authentication.AnonymousAuthenticationFilter;
 import org.springframework.security.web.authentication.HttpStatusEntryPoint;
 import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher;
 import org.springframework.security.web.util.matcher.OrRequestMatcher;
@@ -122,6 +124,7 @@ public class AuthorizationServerConfiguration {
                         .defaultAuthenticationEntryPointFor(connectRedirectEntryPoint, path(AUTHORIZATION_ENDPOINT))
                         .defaultAuthenticationEntryPointFor(new HttpStatusEntryPoint(HttpStatus.NOT_FOUND), unsupportedDiscovery)
                         .defaultAuthenticationEntryPointFor(new InvalidClientEntryPoint(), clientAuthenticatedEndpoints))
+                .addFilterBefore(new BridgedAuthorizationRequestFilter(path(AUTHORIZATION_ENDPOINT)), AnonymousAuthenticationFilter.class)
                 .cors(Customizer.withDefaults());
 
         return http.build();

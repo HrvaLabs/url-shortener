@@ -52,7 +52,9 @@ public class ConnectRedirectEntryPoint implements AuthenticationEntryPoint {
                 authorizationRequest.getState(),
                 request.getQueryString()
         ));
-        request.getSession().setAttribute(HANDLE_ATTRIBUTE, handle);
+        final var session = request.getSession();
+        session.setMaxInactiveInterval((int) ConnectRequestStore.REQUEST_TIME_TO_LIVE.toSeconds());
+        session.setAttribute(HANDLE_ATTRIBUTE, handle);
 
         response.sendRedirect(UriComponentsBuilder.fromUriString(frontendUrl)
                 .path(CONNECT_PAGE_PATH)

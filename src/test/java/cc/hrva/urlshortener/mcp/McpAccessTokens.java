@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.mcp;
 
+import cc.hrva.urlshortener.mcp.bridge.BridgedAuthorizationRequestFilter;
 import com.jayway.jsonpath.JsonPath;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -14,6 +15,7 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.User;
 import org.springframework.security.web.context.HttpSessionSecurityContextRepository;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.request.RequestPostProcessor;
 import org.springframework.web.util.UriComponentsBuilder;
 
 import static org.springframework.http.MediaType.APPLICATION_FORM_URLENCODED;
@@ -79,7 +81,8 @@ public final class McpAccessTokens {
                 .queryParam("code_challenge", s256(CODE_VERIFIER))
                 .queryParam("code_challenge_method", "S256")
                 .queryParam("state", "state")
-                .session(signedInSession(email));
+                .session(signedInSession(email))
+                .with(approvedAuthorizationQuery());
         if (resource != null) {
             authorizationRequest.queryParam("resource", resource);
         }
@@ -91,6 +94,13 @@ public final class McpAccessTokens {
                 .getHeader(HttpHeaders.LOCATION);
 
         return UriComponentsBuilder.fromUriString(location).build().getQueryParams().getFirst("code");
+    }
+
+    public static RequestPostProcessor approvedAuthorizationQuery() {
+        return request -> {
+            request.getSession().setAttribute(BridgedAuthorizationRequestFilter.AUTHORIZATION_QUERY_ATTRIBUTE, request.getQueryString());
+            return request;
+        };
     }
 
     private static MockHttpSession signedInSession(final String email) {
