@@ -31,7 +31,7 @@ Idempotent — safe on restart. Liquibase seeds `ROLE_USER` and `ROLE_ADMIN` aut
 - **MailHog** (`localhost:8025`, SMTP on `localhost:1025`)
 
 ## Testing
-- `mvn test` (or `mvn -B verify`) — 405 tests, JUnit 5 + Mockito + AssertJ
+- `mvn test` (or `mvn -B verify`) — 427 tests, JUnit 5 + Mockito + AssertJ
 - Mostly plain `@ExtendWith(MockitoExtension.class)` unit tests. The MCP connector's security tests are `@SpringBootTest` + MockMvc through the real filter chains: each class boots its own nested `TestApplication` on embedded H2 with a subset Liquibase changelog (`db/changelog/017-oauth2-authorization-server.xml` or `db/mcp-connector-test-changelog.xml`) and mocks the rest
 - No `@ActiveProfiles`, no Testcontainers
 - `src/test/` mirrors `src/main/` package structure
@@ -146,7 +146,7 @@ AI apps (Claude, Claude Code, the MCP Inspector) use hrva.cc over MCP. The app i
 | GET | `/.well-known/oauth-authorization-server` | Public | Authorization server metadata (adds `none` to `token_endpoint_auth_methods_supported`). `/.well-known/openid-configuration` and `/.well-known/oauth-authorization-server/**` → 404 |
 | POST | `/oauth2/register` | Public, 20/h per IP | Open dynamic client registration (RFC 7591) |
 | GET | `/oauth2/authorize` | AS session | Authorization code + PKCE (S256). Without a session → login bridge (below) |
-| POST | `/oauth2/token` | Client; a public client sends only `client_id` | `authorization_code` and `refresh_token`. `resource` must be `${app.mcp.issuer}/mcp`, else `invalid_target` |
+| POST | `/oauth2/token` | Client; a public client sends only `client_id` | `authorization_code` and `refresh_token`. `resource` is optional; when sent it must be `${app.mcp.issuer}/mcp`, else `invalid_target`. Access tokens always get `aud` = `${app.mcp.issuer}/mcp` |
 | GET | `/oauth2/connect/continue?otc=…` | Public | Login bridge: redeems the one-time code |
 | GET | `/api/v1/connect/requests/{handle}` | ROLE_ADMIN or ROLE_USER | `{clientName}` for the consent screen; 410 when expired or used |
 | POST | `/api/v1/connect/requests/{handle}/approve` | ROLE_ADMIN or ROLE_USER | `{continueUrl}`; 409 when already approved |
@@ -161,9 +161,9 @@ AI apps (Claude, Claude Code, the MCP Inspector) use hrva.cc over MCP. The app i
    - `LocalhostWildcardPortValidator`: a localhost redirect URI matches on any port (CLIs such as Claude Code pick a new port per sign-in).
    - DCR validators: redirect URIs (no commas), scope (stored as requested; `openid` and commas rejected), grant types `authorization_code` and `refresh_token` only (`refresh_token` is always granted), response type `code`, size caps (`client_name` ≤ 100, ≤ 5 redirect URIs, column limits). `DcrEmptyScopeFilter` drops `"scope": ""`, which the Inspector sends.
    - `DcrClientSettings`: access token 1 hour, refresh token 30 days and rotated on every refresh, no consent screen (the frontend `/connect` page is the consent).
-   - Public-client refresh (`PublicClientRefreshToken*`, token endpoint only), `ResourceIndicatorValidatingProvider` (the `resource` check), `RefreshAudienceCustomizer` (a refresh without `resource` keeps `aud`).
+   - Public-client refresh (`PublicClientRefreshToken*`, token endpoint only), `ResourceIndicatorValidatingProvider` (the `resource` check), `AccessTokenAudienceCustomizer` (a code exchange or refresh without `resource` still gets `aud` = `${app.mcp.issuer}/mcp`; it runs after the library's `resource` customizer).
    - `DisconnectSafeAuthorizationService`: a refresh racing a disconnect gets `invalid_grant` instead of re-creating the authorization.
-2. **`@Order(2)` `/mcp` resource server** (`McpResourceServerConfiguration`): `/mcp` and `/.well-known/oauth-protected-resource/**`. RS256 JWTs are checked against the local signing key (no issuer discovery): `iss` = `app.mcp.issuer`, `aud` must contain `${app.mcp.issuer}/mcp`, and `StillAuthorizedValidator` looks the token up in `oauth2_authorization` on every request, so Disconnect is immediate. STATELESS, CSRF off.
+2. **`@Order(2)` `/mcp` resource server** (`McpResourceServerConfiguration`): `/mcp` and `/.well-known/oauth-protected-resource/**`. RS256 JWTs are checked against the local signing key (no issuer discovery): `iss` = `app.mcp.issuer`, `aud` must contain `${app.mcp.issuer}/mcp`, and `StillAuthorizedValidator` looks the token up in `oauth2_authorization` on every request, so Disconnect is immediate; a database error fails closed as 401 `invalid_token` without infrastructure text. STATELESS, CSRF off.
 3. **`@Order(3)` `/mcp/anon`** (`AnonymousMcpConfiguration`): permitAll, STATELESS, CSRF off. Its MCP server is built by hand (only its `RouterFunction` is a bean), so it never picks up the signed-in tools.
 4. **`@Order(LOWEST_PRECEDENCE)` API chain** (`SecurityConfiguration`): the existing JWT API and OAuth2 login, plus `/api/v1/connect/**`. `JwtFilter`'s servlet registration is disabled, so it only runs inside this chain.
 
@@ -173,13 +173,13 @@ AI apps (Claude, Claude Code, the MCP Inspector) use hrva.cc over MCP. The app i
 | Property | Env var | Production | `local` profile |
 |----------|---------|------------|-----------------|
 | `app.mcp.issuer` | `APP_MCP_ISSUER` | `https://hrva.cc` (`application.yaml`) | `http://localhost:8080` |
-| `app.mcp.signing-key` | `APP_MCP_SIGNING_KEY` | Required: a private RSA JWK (JSON, ≥ 2048 bits). Startup fails without it | Committed dev-only key, not a secret |
+| `app.mcp.signing-key` | `APP_MCP_SIGNING_KEY` | Required: a private RSA JWK (JSON, ≥ 2048 bits). Startup fails without it, and with the committed dev key (`kid` `hrva-local-dev`) | Committed dev-only key, not a secret; refused at startup outside `local` |
 | `app.anonymous-url-creation-enabled` | `APP_ANONYMOUS_URL_CREATION_ENABLED` | `false` (`application.yaml`); also gates anonymous links on the web | `true` |
 | `app.frontend-url` | `APP_FRONTEND_URL` | The frontend origin; the bridge redirects to its `/connect` page | `http://localhost:3000` |
 
 - The issuer is never derived from request headers: discovery, `WWW-Authenticate`, `iss`, `resource` and `aud` all come from `app.mcp.issuer`.
 - `spring.ai.mcp.server.*` (`application.yaml`): STATELESS protocol at `/mcp`; resources, prompts and completions off.
-- Session cookie (authorization server chain only): `HttpOnly`, `SameSite=Lax`, `Secure` (off in `local`).
+- Session cookie (the authorization server chain's login bridge, and Google `oauth2Login`, which keeps its authorization request in a session; the API chain never reads a session for authentication): `HttpOnly`, `SameSite=Lax`, `Secure` (off in `local`).
 - Generate a signing key (prints one line of JSON; store it as a secret in `APP_MCP_SIGNING_KEY`):
   ```bash
   node -e "const {generateKeyPairSync, randomUUID} = require('node:crypto'); const {privateKey} = generateKeyPairSync('rsa', {modulusLength: 2048}); console.log(JSON.stringify({...privateKey.export({format: 'jwk'}), kid: randomUUID(), use: 'sig', alg: 'RS256'}))"
@@ -187,7 +187,7 @@ AI apps (Claude, Claude Code, the MCP Inspector) use hrva.cc over MCP. The app i
   Changing the key invalidates issued access tokens only; clients refresh, because refresh tokens are opaque database rows.
 
 ### Login bridge
-1. `GET /oauth2/authorize` without a session: `ConnectRedirectEntryPoint` stores the pending request in Redis (`mcp:connect:request:<handle>`, 10 min) and ties the handle to the new session → 302 `${app.frontend-url}/connect?request=<handle>`.
+1. `GET /oauth2/authorize` without a session: `ConnectRedirectEntryPoint` stores the pending request in Redis (`mcp:connect:request:<handle>`, 10 min) and ties the handle to the new session → 302 `${app.frontend-url}/connect?request=<handle>`. Redis down → 503 without infrastructure text.
 2. The frontend `/connect` page calls `GET /api/v1/connect/requests/{handle}` with the user's app JWT for the client name, then approve or deny.
 3. Approve returns `continueUrl` = `${app.mcp.issuer}/oauth2/connect/continue?otc=<one-time code>` (60 s, single use, redeemed with Redis `GETDEL`). The app JWT never appears in a URL.
 4. The frontend navigates the top-level window to `continueUrl`. The code must belong to this browser's session (another browser → 403, a replay → 400). The session id rotates, the session is authenticated as the approving user for 60 s and bound to the approved authorization query → 302 to `/oauth2/authorize?<original query>`.
@@ -198,22 +198,23 @@ Redis fixed windows (`RedisFixedWindowRateLimiter`, key `rate-limit:<name>:<sha2
 - **`/mcp/anon` `shorten_url`**: 10 per 60 s per network (`mcp-anon`). Every attempt counts. The refusal is a tool error: "Too many anonymous links from this network. Try again in a minute, or connect https://hrva.cc/mcp to use your account."
 - **`/oauth2/register`**: 20 per hour per network (`dcr`) → 429 with `Retry-After: 3600`; 503 when Redis is down.
 - The client IP comes from `ClientIpResolver`, which trusts `CF-Connecting-IP` (see Security). That is safe only while the origin accepts traffic from Cloudflare alone.
+- **Body size**: `McpRequestBodyLimitFilter` (a servlet filter before `DcrEmptyScopeFilter` and Spring Security) caps POST bodies on `/oauth2/register`, `/mcp` and `/mcp/anon` at 64 KB. A larger `Content-Length` → 413 `{"error":"request_too_large"}`; a body without a length (chunked) fails once it passes 64 KB: 413 on `/oauth2/register`, 400 "Invalid message format" from the MCP transport. `DcrEmptyScopeFilter` also reads at most 64 KB on its own.
 - Redis must be 6.2 or newer (`GETDEL`).
 
 ### Cleanup and revocation
 - **`DcrClientCleanupJob`**, daily at 03:30: deletes fully expired `oauth2_authorization` rows, then DCR clients registered more than 30 days ago that have no authorization left (with their consent rows). It never deletes a client with a live authorization.
 - Disconnect removes all of the user's authorizations for that client. Deleting or deactivating a user, or changing their email, removes all of their authorizations (`DefaultUserService`).
-- Tables (Liquibase 017–020): `oauth2_registered_client`, `oauth2_authorization`, `oauth2_authorization_consent`, with indexes for the token, principal and client lookups.
+- Tables (Liquibase 017–021): `oauth2_registered_client`, `oauth2_authorization`, `oauth2_authorization_consent`, with indexes for the token, authorization code, principal and client lookups.
 
 ### Tests
 Security tests go through the real filter chains (`@SpringBootTest` + MockMvc, never `standaloneSetup`):
-- `mcp/authorization/AuthorizationServerConfigurationTest`: fixed issuer despite forged forwarded headers, DCR validators, localhost port wildcard, 404 discovery paths.
-- `mcp/authorization/PublicClientRefreshTest`: public-client refresh, rotation and replay, `resource` and `invalid_target`, introspect and revoke closed to public clients.
-- `mcp/McpEndpointSecurityTest`: `/mcp` 401 with resource metadata, audience, revoked tokens, tools as the token's user, no stack traces or logged bodies.
-- `mcp/bridge/LoginBridgeTest`: the bridge (410, 409, 403 in another browser, 400 on replay, session binding, JWT never in a `Location`).
-- `mcp/anon/AnonymousMcpTest`: `/mcp/anon` tool set, ignored tokens, rate limit (exact text, Cloudflare client, fails closed).
+- `mcp/authorization/AuthorizationServerConfigurationTest`: fixed issuer despite forged forwarded headers, DCR validators, localhost port wildcard, 404 discovery paths, the dev signing key refused outside `local`.
+- `mcp/authorization/PublicClientRefreshTest`: public-client refresh, rotation and replay, `resource` and `invalid_target`, the `/mcp` audience without `resource`, introspect and revoke closed to public clients.
+- `mcp/McpEndpointSecurityTest` (real port): `/mcp` 401 with resource metadata, audience, revoked tokens, a database failure as 401 without infrastructure text, tools as the token's user, no stack traces or logged bodies.
+- `mcp/bridge/LoginBridgeTest` (real port): the bridge (410, 409, 403 in another browser, 400 on replay, session binding, JWT never in a `Location`, 503 when Redis is down), and neither an MCP token nor the bridged session authenticates the API.
+- `mcp/anon/AnonymousMcpTest`: `/mcp/anon` tool set, ignored tokens, rate limit (exact text, Cloudflare client, fails closed), the 64 KB body cap on all three unauthenticated endpoints, unknown method names never logged.
 - `mcp/apps/ConnectedAppsTest`: list, disconnect, refresh racing a disconnect, DCR rate limit, cleanup.
-- Unit tests: `mcp/tools/LinkToolsTest`, `McpToolResultsTest`, `mcp/anon/RateLimiterTest`, `McpMessageBodyLogFilterTest`, `security/ClientIpResolverTest`. Helpers: `mcp/McpAccessTokens`, `mcp/bridge/InMemoryRedis`.
+- Unit tests: `mcp/tools/LinkToolsTest`, `McpToolResultsTest`, `mcp/anon/RateLimiterTest`, `McpMessageBodyLogFilterTest`, `McpRequestBodyLimitFilterTest`, `security/ClientIpResolverTest`, `configuration/properties/AppPropertiesTest`. Helpers: `mcp/McpAccessTokens`, `mcp/bridge/InMemoryRedis`.
 
 ### End-to-end check (`scripts/mcp-e2e.sh`)
 Runs the whole flow against a throwaway stack: Postgres 18 and Redis 8 in disposable containers (`docker run --rm`, random `127.0.0.1` ports, label `hrva-mcp-e2e`) and the jar with the `local` profile on port 8091 (issuer `http://localhost:8091`). It never touches `docker/docker-compose.yml`, its `db` volume or ports 5432, 6379 and 8080, and a `trap` removes the containers, the app and the temp files on exit.
@@ -247,7 +248,7 @@ Not automatable (interactive sign-in). With the local dev stack, the app on port
 - **MCP cleanup**: Daily at 03:30, deletes expired OAuth authorizations and DCR clients unused for 30 days (`DcrClientCleanupJob`).
 
 ## Config Profiles
-- **`local`**: `localhost` Postgres/Redis/MailHog, hardcoded JWT secret, dev users auto-created, verbose SQL logging. MCP issuer `http://localhost:8080`, a committed dev-only signing key (not a secret) and anonymous link creation on, so `/mcp/anon` works. Auto-imports `application-oauth.yaml` for SSO secrets.
+- **`local`**: `localhost` Postgres/Redis/MailHog, hardcoded JWT secret, dev users auto-created, verbose SQL logging. MCP issuer `http://localhost:8080`, a committed dev-only signing key (not a secret; refused at startup outside `local`) and anonymous link creation on, so `/mcp/anon` works. Auto-imports `application-oauth.yaml` for SSO secrets.
 - **`prod`**: Remote Postgres, no dev defaults. Secrets injected externally.
 - **`oauth`**: Optional profile holding OAuth2 client credentials. Imported by `local` profile via `spring.config.import`.
 - Default: `application.yaml` sets base values (cache TTL, URL length, API limits, etc.).

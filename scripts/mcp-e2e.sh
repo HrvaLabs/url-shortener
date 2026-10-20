@@ -39,7 +39,7 @@ TOOLS_LIST='{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'
 export MCP_E2E_WORK=$WORK
 
 cleanup() {
-    local status=$?
+    local status=$?; trap '' INT TERM
     trap - EXIT
     if [[ -n $INSPECTOR_PID ]]; then
         kill -- "-$INSPECTOR_PID" 2>/dev/null || true
