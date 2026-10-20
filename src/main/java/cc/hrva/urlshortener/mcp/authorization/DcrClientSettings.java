@@ -10,12 +10,16 @@ import org.springframework.security.oauth2.server.authorization.settings.ClientS
 public class DcrClientSettings implements Converter<OAuth2ClientRegistration, RegisteredClient> {
 
     public static final Duration ACCESS_TOKEN_TIME_TO_LIVE = Duration.ofHours(1);
+    public static final Duration REFRESH_TOKEN_TIME_TO_LIVE = Duration.ofDays(30);
 
     private final OAuth2ClientRegistrationRegisteredClientConverter delegate =
             new OAuth2ClientRegistrationRegisteredClientConverter();
 
     public DcrClientSettings() {
-        delegate.setTokenSettingsCustomizer(tokenSettings -> tokenSettings.accessTokenTimeToLive(ACCESS_TOKEN_TIME_TO_LIVE));
+        delegate.setTokenSettingsCustomizer(tokenSettings -> tokenSettings
+                .accessTokenTimeToLive(ACCESS_TOKEN_TIME_TO_LIVE)
+                .refreshTokenTimeToLive(REFRESH_TOKEN_TIME_TO_LIVE)
+                .reuseRefreshTokens(false));
     }
 
     @Override

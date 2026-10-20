@@ -23,6 +23,7 @@ import org.springframework.security.authentication.AuthenticationProvider;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.oauth2.core.ClientAuthenticationMethod;
+import org.springframework.security.oauth2.core.OAuth2Token;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.JwtValidators;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
@@ -35,6 +36,10 @@ import org.springframework.security.oauth2.server.authorization.authentication.O
 import org.springframework.security.oauth2.server.authorization.client.JdbcRegisteredClientRepository;
 import org.springframework.security.oauth2.server.authorization.client.RegisteredClientRepository;
 import org.springframework.security.oauth2.server.authorization.settings.AuthorizationServerSettings;
+import org.springframework.security.oauth2.server.authorization.token.DelegatingOAuth2TokenGenerator;
+import org.springframework.security.oauth2.server.authorization.token.JwtEncodingContext;
+import org.springframework.security.oauth2.server.authorization.token.OAuth2TokenCustomizer;
+import org.springframework.security.oauth2.server.authorization.token.OAuth2TokenGenerator;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.HttpStatusEntryPoint;
 import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher;
@@ -59,7 +64,8 @@ public class AuthorizationServerConfiguration {
 
     @Bean
     @Order(1)
-    public SecurityFilterChain authorizationServerSecurityFilterChain(final HttpSecurity http) throws Exception {
+    public SecurityFilterChain authorizationServerSecurityFilterChain(final HttpSecurity http,
+                                                                      final RegisteredClientRepository registeredClientRepository) throws Exception {
         final var unsupportedDiscovery = new OrRequestMatcher(
                 path(OPENID_CONFIGURATION),
                 path(PATH_SUFFIXED_AUTHORIZATION_SERVER_METADATA)
@@ -76,6 +82,10 @@ public class AuthorizationServerConfiguration {
                         .authorizationServer(authorizationServer -> {
                             http.securityMatcher(new OrRequestMatcher(authorizationServer.getEndpointsMatcher(), unsupportedDiscovery));
                             authorizationServer
+                                    .tokenGenerator(withPublicClientRefreshTokens(http.getSharedObject(OAuth2TokenGenerator.class)))
+                                    .clientAuthentication(clientAuthentication -> clientAuthentication
+                                            .authenticationConverters(converters -> converters.add(new PublicClientRefreshTokenAuthenticationConverter()))
+                                            .authenticationProvider(new PublicClientRefreshTokenAuthenticationProvider(registeredClientRepository)))
                                     .authorizationServerMetadataEndpoint(metadata -> metadata
                                             .authorizationServerMetadataCustomizer(builder -> builder
                                                     .tokenEndpointAuthenticationMethods(AuthorizationServerConfiguration::advertisePublicClients)))
@@ -113,6 +123,11 @@ public class AuthorizationServerConfiguration {
         jwtDecoder.setJwtValidator(JwtValidators.createDefaultWithIssuer(appProperties.getMcp().getIssuer()));
 
         return jwtDecoder;
+    }
+
+    @Bean
+    public OAuth2TokenCustomizer<JwtEncodingContext> refreshAudienceCustomizer() {
+        return new RefreshAudienceCustomizer();
     }
 
     @Bean
@@ -157,6 +172,14 @@ public class AuthorizationServerConfiguration {
         }
 
         return rsaKey;
+    }
+
+    private static OAuth2TokenGenerator<OAuth2Token> withPublicClientRefreshTokens(final OAuth2TokenGenerator<?> mcpTokenGenerator) {
+        if (mcpTokenGenerator == null) {
+            throw new IllegalStateException("The MCP authorization server did not configure a token generator");
+        }
+
+        return new DelegatingOAuth2TokenGenerator(mcpTokenGenerator, new PublicClientRefreshTokenGenerator());
     }
 
     private static void advertisePublicClients(final List<String> authenticationMethods) {

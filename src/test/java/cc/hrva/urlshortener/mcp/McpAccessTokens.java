@@ -22,21 +22,21 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-final class McpAccessTokens {
+public final class McpAccessTokens {
 
-    private static final String REDIRECT_URI = "http://localhost:53682/callback";
-    private static final String CODE_VERIFIER = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
+    public static final String REDIRECT_URI = "http://localhost:53682/callback";
+    public static final String CODE_VERIFIER = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
     private static final String REGISTRATION = """
             {"redirect_uris":["http://localhost:53682/callback"],"token_endpoint_auth_method":"none"}""";
 
     private final MockMvc mockMvc;
 
-    McpAccessTokens(final MockMvc mockMvc) {
+    public McpAccessTokens(final MockMvc mockMvc) {
         this.mockMvc = mockMvc;
     }
 
     String issue(final String email, final String resource) throws Exception {
-        final var clientId = register();
+        final var clientId = register(REGISTRATION);
         final var code = authorize(clientId, email, resource);
 
         final var body = mockMvc.perform(post("/oauth2/token")
@@ -55,10 +55,10 @@ final class McpAccessTokens {
         return JsonPath.read(body, "$.access_token");
     }
 
-    private String register() throws Exception {
+    public String register(final String registration) throws Exception {
         final var body = mockMvc.perform(post("/oauth2/register")
                         .contentType(APPLICATION_JSON)
-                        .content(REGISTRATION))
+                        .content(registration))
                 .andExpect(status().isCreated())
                 .andReturn()
                 .getResponse()
@@ -67,7 +67,7 @@ final class McpAccessTokens {
         return JsonPath.read(body, "$.client_id");
     }
 
-    private String authorize(final String clientId, final String email, final String resource) throws Exception {
+    public String authorize(final String clientId, final String email, final String resource) throws Exception {
         final var location = mockMvc.perform(get("/oauth2/authorize")
                         .queryParam("response_type", "code")
                         .queryParam("client_id", clientId)

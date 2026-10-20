@@ -165,6 +165,8 @@ class AuthorizationServerConfigurationTest {
 
         assertThat(registeredClient).isNotNull();
         assertThat(registeredClient.getTokenSettings().getAccessTokenTimeToLive()).isEqualTo(Duration.ofHours(1));
+        assertThat(registeredClient.getTokenSettings().getRefreshTokenTimeToLive()).isEqualTo(Duration.ofDays(30));
+        assertThat(registeredClient.getTokenSettings().isReuseRefreshTokens()).isFalse();
         assertThat(registeredClient.getClientSettings().isRequireAuthorizationConsent()).isFalse();
         assertThat(registeredClient.getClientSettings().isRequireProofKey()).isTrue();
         assertThat(registeredClient.getRedirectUris()).containsExactly(REGISTERED_REDIRECT_URI);
