@@ -1,5 +1,7 @@
 package cc.hrva.urlshortener.mcp.authorization;
 
+import cc.hrva.urlshortener.mcp.McpRequestBodyLimitFilter;
+import cc.hrva.urlshortener.mcp.RequestBodyTooLargeException;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ReadListener;
 import jakarta.servlet.ServletException;
@@ -36,7 +38,11 @@ public class DcrEmptyScopeFilter extends OncePerRequestFilter {
     @Override
     protected void doFilterInternal(final HttpServletRequest request, final HttpServletResponse response, final FilterChain filterChain)
             throws ServletException, IOException {
-        final var body = request.getInputStream().readAllBytes();
+        final var body = request.getInputStream().readNBytes(McpRequestBodyLimitFilter.MAX_BODY_BYTES + 1);
+        if (body.length > McpRequestBodyLimitFilter.MAX_BODY_BYTES) {
+            throw new RequestBodyTooLargeException();
+        }
+
         filterChain.doFilter(new BodyReplacingRequest(request, withoutBlankScope(body)), response);
     }
 

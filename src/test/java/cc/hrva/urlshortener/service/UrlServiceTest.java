@@ -144,6 +144,27 @@ class UrlServiceTest {
     }
 
     @Test
+    @ExtendWith(OutputCaptureExtension.class)
+    void reusingAnAnonymousLinkLogsNoAliasOrDestination(final CapturedOutput output) {
+        final var createUrlDto = CreateUrlDto.builder().longUrl("https://secret-destination.example/path").build();
+        final var url = Url.builder().longUrl("https://secret-destination.example/path").build();
+        final var existingLongUrl = Url.builder().shortUrl("secret-alias").longUrl("https://secret-destination.example/path").active(true).build();
+
+        when(createUrlToUrlConverter.convert(createUrlDto)).thenReturn(url);
+        when(userService.getUserFromToken()).thenReturn(null);
+        when(urlRepository.existsUrlByLongUrlAndActiveTrueAndOwnerIsNull(url.getLongUrl())).thenReturn(true);
+        when(urlRepository.findByLongUrlAndActiveTrue(url.getLongUrl())).thenReturn(Optional.of(existingLongUrl));
+
+        final var result = urlService.saveUrlRouting(createUrlDto);
+
+        assertThat(result.shortUrl()).isEqualTo("secret-alias");
+        assertThat(output)
+                .contains("Long url already exists in DB")
+                .doesNotContain("secret-alias")
+                .doesNotContain("secret-destination.example");
+    }
+
+    @Test
     void shouldSaveUrlWithApiKey() {
         final var createUrlDto = CreateUrlDto.builder().shortUrl("").build();
         final var url = Url.builder().shortUrl("").build();

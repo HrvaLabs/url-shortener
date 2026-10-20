@@ -5,6 +5,8 @@ import cc.hrva.urlshortener.configuration.GlobalExceptionHandler;
 import cc.hrva.urlshortener.configuration.JacksonConfiguration;
 import cc.hrva.urlshortener.configuration.SecurityConfiguration;
 import cc.hrva.urlshortener.configuration.WebConfiguration;
+import cc.hrva.urlshortener.controller.UserController;
+import cc.hrva.urlshortener.dto.UserDto;
 import cc.hrva.urlshortener.mcp.McpAccessTokens;
 import cc.hrva.urlshortener.mcp.McpResourceServerConfiguration;
 import cc.hrva.urlshortener.mcp.anon.RateLimiter;
@@ -49,6 +51,7 @@ import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
+import org.springframework.data.redis.RedisConnectionFailureException;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.http.HttpHeaders;
 import org.springframework.mock.web.MockHttpServletResponse;
@@ -76,6 +79,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.http.MediaType.APPLICATION_FORM_URLENCODED;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -119,6 +124,8 @@ class LoginBridgeTest {
     private static final String VIEW_PATH = "/api/v1/connect/requests/{handle}";
     private static final String APPROVE_PATH = "/api/v1/connect/requests/{handle}/approve";
     private static final String DENY_PATH = "/api/v1/connect/requests/{handle}/deny";
+    private static final String CURRENT_USER_PATH = "/api/v1/users/me";
+    private static final String INFRASTRUCTURE_HOST = "redis.internal.example:6379";
     private static final RSAKey SIGNING_KEY = generateSigningKey();
 
     @LocalServerPort
@@ -481,6 +488,30 @@ class LoginBridgeTest {
     }
 
     @Test
+    void mcpAccessTokenIsNotAcceptedByTheApi() throws Exception {
+        final var accessToken = accessTokens.issue(EMAIL, RESOURCE);
+        when(userService.fetchCurrentUser()).thenReturn(UserDto.builder().email(EMAIL).build());
+
+        assertThat(perform(get(CURRENT_USER_PATH).header(HttpHeaders.AUTHORIZATION, bearer(accessToken))).getStatus()).isEqualTo(401);
+        assertThat(perform(get(CURRENT_USER_PATH).header(HttpHeaders.AUTHORIZATION, bearer(appJwt))).getStatus()).isEqualTo(200);
+    }
+
+    @Test
+    void bridgedSessionDoesNotAuthenticateTheApi() throws Exception {
+        final var started = startAuthorization(accessTokens.register(REGISTRATION), REGISTERED_REDIRECT_URI);
+        final var session = started.session();
+        final var continued = perform(get(URI.create(continueUrl(perform(approve(started.handle()))))).session(session));
+        assertThat(continued.getStatus()).isEqualTo(302);
+        final var securityContext = (SecurityContext) session.getAttribute(HttpSessionSecurityContextRepository.SPRING_SECURITY_CONTEXT_KEY);
+        assertThat(securityContext.getAuthentication().getName()).isEqualTo(EMAIL);
+
+        final var currentUser = perform(get(CURRENT_USER_PATH).session(session));
+
+        assertThat(currentUser.getStatus()).isEqualTo(401);
+        verify(userService, never()).fetchCurrentUser();
+    }
+
+    @Test
     void jwtNeverAppearsInAnyLocationHeader() throws Exception {
         final var clientId = accessTokens.register(REGISTRATION);
         final var approved = startAuthorization(clientId, REGISTERED_REDIRECT_URI);
@@ -500,16 +531,7 @@ class LoginBridgeTest {
     @Test
     void sessionCookieIsHttpOnlyAndSameSiteLax() throws Exception {
         final var clientId = accessTokens.register(REGISTRATION);
-        final var authorizeUri = UriComponentsBuilder.fromUriString("http://localhost:" + port + "/oauth2/authorize")
-                .queryParam("response_type", "code")
-                .queryParam("client_id", clientId)
-                .queryParam("redirect_uri", REGISTERED_REDIRECT_URI)
-                .queryParam("code_challenge", CODE_CHALLENGE)
-                .queryParam("code_challenge_method", "S256")
-                .queryParam("state", STATE)
-                .encode()
-                .build()
-                .toUri();
+        final var authorizeUri = authorizeUri(clientId);
         final var googleLoginUri = URI.create("http://localhost:" + port + "/oauth2/authorization/google");
 
         try (final var httpClient = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NEVER).build()) {
@@ -523,6 +545,37 @@ class LoginBridgeTest {
             assertThat(googleLogin.headers().firstValue(HttpHeaders.LOCATION)).hasValueSatisfying(location -> assertThat(location).startsWith("https://accounts.google.com/"));
             assertSessionCookieIsHttpOnlySecureAndLax(googleLogin);
         }
+    }
+
+    @Test
+    void redisFailureWhileStartingAConnectIs503WithoutInfrastructureDetails(final CapturedOutput output) throws Exception {
+        final var clientId = accessTokens.register(REGISTRATION);
+        when(redisTemplate.opsForValue()).thenThrow(new RedisConnectionFailureException("Unable to connect to Redis at " + INFRASTRUCTURE_HOST));
+
+        try (final var httpClient = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NEVER).build()) {
+            final var authorize = httpClient.send(HttpRequest.newBuilder(authorizeUri(clientId))
+                    .header(HttpHeaders.ACCEPT, "application/json")
+                    .GET()
+                    .build(), HttpResponse.BodyHandlers.ofString());
+
+            assertThat(authorize.statusCode()).isEqualTo(503);
+            assertThat(authorize.headers().firstValue(HttpHeaders.LOCATION)).isEmpty();
+            assertThat(authorize.body()).doesNotContain(INFRASTRUCTURE_HOST);
+        }
+        assertThat(output.getAll()).doesNotContain(INFRASTRUCTURE_HOST);
+    }
+
+    private URI authorizeUri(final String clientId) {
+        return UriComponentsBuilder.fromUriString("http://localhost:" + port + "/oauth2/authorize")
+                .queryParam("response_type", "code")
+                .queryParam("client_id", clientId)
+                .queryParam("redirect_uri", REGISTERED_REDIRECT_URI)
+                .queryParam("code_challenge", CODE_CHALLENGE)
+                .queryParam("code_challenge_method", "S256")
+                .queryParam("state", STATE)
+                .encode()
+                .build()
+                .toUri();
     }
 
     private static void assertSessionCookieIsHttpOnlySecureAndLax(final HttpResponse<?> response) {
@@ -634,7 +687,8 @@ class LoginBridgeTest {
             TokenProvider.class,
             RedisConnectRequestStore.class,
             ConnectController.class,
-            ConnectContinueController.class
+            ConnectContinueController.class,
+            UserController.class
     })
     static class TestApplication {
     }

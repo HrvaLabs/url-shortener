@@ -25,12 +25,22 @@ import cc.hrva.urlshortener.service.UrlService;
 import cc.hrva.urlshortener.service.UserService;
 import com.jayway.jsonpath.JsonPath;
 import com.nimbusds.jose.JOSEException;
+import com.nimbusds.jose.jwk.JWKSet;
 import com.nimbusds.jose.jwk.RSAKey;
 import com.nimbusds.jose.jwk.gen.RSAKeyGenerator;
+import com.nimbusds.jose.jwk.source.ImmutableJWKSet;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -41,17 +51,25 @@ import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
+import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
+import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.http.HttpHeaders;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.oauth2.core.OAuth2AccessToken;
+import org.springframework.security.oauth2.jwt.JwtClaimsSet;
+import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
+import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
+import org.springframework.security.oauth2.server.authorization.OAuth2Authorization;
 import org.springframework.security.oauth2.server.authorization.OAuth2AuthorizationService;
 import org.springframework.security.oauth2.server.authorization.OAuth2TokenType;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.springframework.web.servlet.view.RedirectView;
@@ -66,11 +84,13 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.http.MediaType.APPLICATION_JSON;
+import static org.springframework.http.MediaType.APPLICATION_JSON_VALUE;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
@@ -80,6 +100,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @SpringBootTest(
         classes = McpEndpointSecurityTest.TestApplication.class,
+        webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
         properties = {
                 "spring.liquibase.change-log=classpath:db/changelog/017-oauth2-authorization-server.xml",
                 "spring.security.oauth2.client.registration.google.client-id=test-google-client",
@@ -99,6 +120,8 @@ class McpEndpointSecurityTest {
     private static final String RESOURCE_METADATA = ISSUER + "/.well-known/oauth-protected-resource/mcp";
     private static final String EMAIL = "user@localhost";
     private static final String MCP_ACCEPT = "application/json, text/event-stream";
+    private static final String REGISTRATION = """
+            {"redirect_uris":["http://localhost:53682/callback"],"token_endpoint_auth_method":"none"}""";
     private static final String TOOLS_LIST = """
             {"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}""";
     private static final String LIST_LINKS_CALL = """
@@ -110,12 +133,16 @@ class McpEndpointSecurityTest {
     private static final String INITIALIZE = """
             {"jsonrpc":"2.0","id":3,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"1.0.0"}}}""";
     private static final String GENERIC_TOOL_ERROR = "Something went wrong on hrva.cc. Try again in a moment.";
+    private static final String INFRASTRUCTURE_HOST = "db.internal.example:5432";
     private static final RSAKey SIGNING_KEY = generateSigningKey();
+
+    @LocalServerPort
+    private int port;
 
     @Autowired
     private MockMvc mockMvc;
 
-    @Autowired
+    @MockitoSpyBean
     private OAuth2AuthorizationService authorizationService;
 
     @MockitoBean
@@ -187,11 +214,19 @@ class McpEndpointSecurityTest {
 
     @Test
     void tokenWithWrongAudienceIs401() throws Exception {
-        final var token = accessTokens.issue(EMAIL, null);
+        final var clientId = accessTokens.register(REGISTRATION);
+        final var issued = (String) accessTokens.issueTokens(clientId, EMAIL, RESOURCE).get("access_token");
+        final var wrongAudience = replaceAccessToken(issued, clientId);
 
-        mockMvc.perform(mcpRequest(TOOLS_LIST).header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+        mockMvc.perform(mcpRequest(TOOLS_LIST).header(HttpHeaders.AUTHORIZATION, "Bearer " + wrongAudience))
                 .andExpect(status().isUnauthorized())
-                .andExpect(header().string(HttpHeaders.WWW_AUTHENTICATE, containsString("error=\"invalid_token\"")));
+                .andExpect(header().string(HttpHeaders.WWW_AUTHENTICATE, containsString("error=\"invalid_token\"")))
+                .andExpect(header().string(HttpHeaders.WWW_AUTHENTICATE, containsString("error_description=\"The aud claim is not valid\"")));
+
+        final var rightAudience = replaceAccessToken(wrongAudience, RESOURCE);
+
+        mockMvc.perform(mcpRequest(TOOLS_LIST).header(HttpHeaders.AUTHORIZATION, "Bearer " + rightAudience))
+                .andExpect(status().isOk());
     }
 
     @Test
@@ -207,6 +242,34 @@ class McpEndpointSecurityTest {
         mockMvc.perform(mcpRequest(TOOLS_LIST).header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
                 .andExpect(status().isUnauthorized())
                 .andExpect(header().string(HttpHeaders.WWW_AUTHENTICATE, containsString("error=\"invalid_token\"")));
+    }
+
+    @Test
+    void databaseFailureWhileCheckingTheTokenIs401WithoutInfrastructureDetails(final CapturedOutput output) throws Exception {
+        final var token = accessTokens.issue(EMAIL, RESOURCE);
+        doThrow(new DataAccessResourceFailureException("Connection to " + INFRASTRUCTURE_HOST + " refused"))
+                .when(authorizationService).findByToken(token, OAuth2TokenType.ACCESS_TOKEN);
+
+        try (final var httpClient = HttpClient.newHttpClient()) {
+            final var response = httpClient.send(HttpRequest.newBuilder(URI.create("http://localhost:" + port + "/mcp"))
+                    .header(HttpHeaders.ACCEPT, MCP_ACCEPT)
+                    .header(HttpHeaders.CONTENT_TYPE, APPLICATION_JSON_VALUE)
+                    .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                    .POST(HttpRequest.BodyPublishers.ofString(TOOLS_LIST))
+                    .build(), HttpResponse.BodyHandlers.ofString());
+
+            assertThat(response.body()).doesNotContain(INFRASTRUCTURE_HOST);
+            assertThat(response.statusCode()).isEqualTo(401);
+            assertThat(response.headers().firstValue(HttpHeaders.WWW_AUTHENTICATE)).hasValueSatisfying(challenge -> assertThat(challenge)
+                    .contains("error=\"invalid_token\"")
+                    .contains("resource_metadata=\"" + RESOURCE_METADATA + "\"")
+                    .doesNotContain(INFRASTRUCTURE_HOST));
+        }
+        assertThat(output.getAll())
+                .contains("Could not check whether an MCP access token is still authorized")
+                .doesNotContain(INFRASTRUCTURE_HOST)
+                .doesNotContain(token);
+        verifyNoInteractions(urlService, userService);
     }
 
     @Test
@@ -395,6 +458,27 @@ class McpEndpointSecurityTest {
                     .andExpect(content().string(not(containsString("at cc."))))
                     .andExpect(content().string(not(containsString("\"cause\""))));
         }
+    }
+
+    private String replaceAccessToken(final String accessToken, final String audience) {
+        final var authorization = authorizationService.findByToken(accessToken, OAuth2TokenType.ACCESS_TOKEN);
+        assertThat(authorization).isNotNull();
+        final var issuedAt = Instant.now();
+        final var jwt = new NimbusJwtEncoder(new ImmutableJWKSet<>(new JWKSet(SIGNING_KEY))).encode(JwtEncoderParameters.from(JwtClaimsSet.builder()
+                .issuer(ISSUER)
+                .subject(EMAIL)
+                .audience(new ArrayList<>(List.of(audience)))
+                .issuedAt(issuedAt)
+                .notBefore(issuedAt)
+                .expiresAt(issuedAt.plus(Duration.ofHours(1)))
+                .id(UUID.randomUUID().toString())
+                .build()));
+        final var replacement = new OAuth2AccessToken(OAuth2AccessToken.TokenType.BEARER, jwt.getTokenValue(), jwt.getIssuedAt(), jwt.getExpiresAt());
+        authorizationService.save(OAuth2Authorization.from(authorization)
+                .token(replacement, metadata -> metadata.put(OAuth2Authorization.Token.CLAIMS_METADATA_NAME, jwt.getClaims()))
+                .build());
+
+        return jwt.getTokenValue();
     }
 
     private static MockHttpServletRequestBuilder mcpRequest(final String body) {

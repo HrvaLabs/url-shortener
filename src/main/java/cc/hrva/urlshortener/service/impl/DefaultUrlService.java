@@ -513,7 +513,7 @@ public class DefaultUrlService implements UrlService {
 
         if (urlRepository.existsUrlByLongUrlAndActiveTrueAndOwnerIsNull(url.getLongUrl())) {
             final var existingLongUrl = getUrlByLongUrl(url.getLongUrl());
-            log.warn("Long url already exists in DB, will return URL from long URL {}", existingLongUrl.getShortUrl());
+            log.warn("Long url already exists in DB, will return the existing anonymous URL");
             cacheUrlResponse(existingLongUrl);
             return existingLongUrl;
         }

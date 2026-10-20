@@ -4,6 +4,8 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataAccessException;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.AuthenticationException;
@@ -13,6 +15,7 @@ import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.util.StringUtils;
 import org.springframework.web.util.UriComponentsBuilder;
 
+@Slf4j
 @RequiredArgsConstructor
 public class ConnectRedirectEntryPoint implements AuthenticationEntryPoint {
 
@@ -46,12 +49,20 @@ public class ConnectRedirectEntryPoint implements AuthenticationEntryPoint {
         final var redirectUri = StringUtils.hasText(authorizationRequest.getRedirectUri())
                 ? authorizationRequest.getRedirectUri()
                 : registeredClient.getRedirectUris().iterator().next();
-        final var handle = connectRequestStore.save(new ConnectRequest(
-                registeredClient.getClientId(),
-                redirectUri,
-                authorizationRequest.getState(),
-                request.getQueryString()
-        ));
+        final String handle;
+        try {
+            handle = connectRequestStore.save(new ConnectRequest(
+                    registeredClient.getClientId(),
+                    redirectUri,
+                    authorizationRequest.getState(),
+                    request.getQueryString()
+            ));
+        } catch (final DataAccessException exception) {
+            log.warn("Could not store a connect request: {}", exception.getClass().getSimpleName());
+            response.sendError(HttpStatus.SERVICE_UNAVAILABLE.value());
+            return;
+        }
+
         final var session = request.getSession();
         session.setMaxInactiveInterval((int) ConnectRequestStore.REQUEST_TIME_TO_LIVE.toSeconds());
         session.setAttribute(HANDLE_ATTRIBUTE, handle);

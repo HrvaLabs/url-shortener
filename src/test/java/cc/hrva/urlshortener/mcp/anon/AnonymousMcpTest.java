@@ -73,7 +73,9 @@ import static org.hamcrest.Matchers.not;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -115,6 +117,10 @@ class AnonymousMcpTest {
     private static final String RATE_LIMIT_KEY_PATTERN = "rate-limit:mcp-anon:[0-9a-f]{64}";
     private static final Duration RATE_LIMIT_WINDOW = Duration.ofSeconds(60);
     private static final String MCP_ACCEPT = "application/json, text/event-stream";
+    private static final int BODY_LIMIT = 64 * 1024;
+    private static final String REQUEST_TOO_LARGE = "{\"error\":\"request_too_large\"}";
+    private static final String REGISTRATION = """
+            {"redirect_uris":["http://localhost:53682/callback"],"token_endpoint_auth_method":"none"}""";
     private static final String REFUSAL = "Too many anonymous links from this network. Try again in a minute, "
             + "or connect https://hrva.cc/mcp to use your account.";
     private static final String GENERIC_TOOL_ERROR = "Something went wrong on hrva.cc. Try again in a moment.";
@@ -497,6 +503,75 @@ class AnonymousMcpTest {
     }
 
     @Test
+    void oversizedBodiesAre413OnEveryUnauthenticatedEndpoint() throws Exception {
+        final var registration = padded(REGISTRATION, BODY_LIMIT + 1);
+        final var toolsList = padded(TOOLS_LIST, BODY_LIMIT + 1);
+
+        for (final var request : List.of(jsonPost("/oauth2/register", registration), jsonPost("/mcp", toolsList), jsonPost(ANONYMOUS_MCP, toolsList))) {
+            mockMvc.perform(request.with(from(CLIENT_IP)))
+                    .andExpect(status().isContentTooLarge())
+                    .andExpect(content().contentTypeCompatibleWith(APPLICATION_JSON))
+                    .andExpect(content().string(REQUEST_TOO_LARGE));
+        }
+
+        assertThat(redis.isEmpty()).isTrue();
+    }
+
+    @Test
+    void oversizedBodiesOfUnknownLengthNeverReachTheHandlers() throws Exception {
+        final var token = accessTokens.issue(EMAIL, RESOURCE);
+        final var registration = padded(REGISTRATION, BODY_LIMIT + 1);
+        final var toolsList = padded(TOOLS_LIST, BODY_LIMIT + 1);
+
+        mockMvc.perform(jsonPost("/oauth2/register", registration).with(unknownLength()))
+                .andExpect(status().isContentTooLarge())
+                .andExpect(content().string(REQUEST_TOO_LARGE));
+        mockMvc.perform(jsonPost(ANONYMOUS_MCP, toolsList).with(unknownLength()))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().string(containsString("Invalid message format")));
+        mockMvc.perform(jsonPost("/mcp", toolsList).header(HttpHeaders.AUTHORIZATION, "Bearer " + token).with(unknownLength()))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().string(containsString("Invalid message format")));
+        mockMvc.perform(jsonPost("/mcp", toolsList).with(unknownLength()))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void bodiesAtTheLimitStillWork() throws Exception {
+        final var registration = padded(REGISTRATION, BODY_LIMIT);
+        final var toolsList = padded(TOOLS_LIST, BODY_LIMIT);
+
+        mockMvc.perform(jsonPost("/oauth2/register", registration).with(from(CLIENT_IP)))
+                .andExpect(status().isCreated());
+        mockMvc.perform(jsonPost("/oauth2/register", registration).with(from(CLIENT_IP)).with(unknownLength()))
+                .andExpect(status().isCreated());
+        mockMvc.perform(jsonPost(ANONYMOUS_MCP, toolsList))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.result.tools[0].name").value("shorten_url"));
+        mockMvc.perform(jsonPost(ANONYMOUS_MCP, toolsList).with(unknownLength()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.result.tools[0].name").value("shorten_url"));
+    }
+
+    @Test
+    void unknownMethodNamesAreNeverLogged(final CapturedOutput output) throws Exception {
+        final var outputBeforeCalls = output.length();
+
+        mockMvc.perform(anonymousMcpRequest("""
+                        {"jsonrpc":"2.0","id":9,"method":"secret/unknown-method","params":{}}""").with(from(CLIENT_IP)))
+                .andExpect(this::hasNoJavaInternals);
+        mockMvc.perform(anonymousMcpRequest("""
+                        {"jsonrpc":"2.0","method":"notifications/secret-unknown"}""").with(from(CLIENT_IP)))
+                .andExpect(status().isAccepted());
+
+        assertThat(output.toString().substring(outputBeforeCalls))
+                .contains("Rejected an MCP request for an unknown method")
+                .doesNotContain("secret/unknown-method")
+                .doesNotContain("notifications/secret-unknown")
+                .doesNotContain("Missing handler");
+    }
+
+    @Test
     void malformedBodiesAndUnknownMethodsReturnNoStackTrace(final CapturedOutput output) throws Exception {
         final var truncated = """
                 {"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"shorten_url","arguments":{"url":"https://secret-argument.example/path""";
@@ -542,6 +617,26 @@ class AnonymousMcpTest {
                 .header(HttpHeaders.ACCEPT, MCP_ACCEPT)
                 .contentType(APPLICATION_JSON)
                 .content(body);
+    }
+
+    private static MockHttpServletRequestBuilder jsonPost(final String path, final String body) {
+        return post(path)
+                .header(HttpHeaders.ACCEPT, MCP_ACCEPT)
+                .contentType(APPLICATION_JSON)
+                .content(body);
+    }
+
+    private static String padded(final String json, final int length) {
+        return json + " ".repeat(length - json.length());
+    }
+
+    private static RequestPostProcessor unknownLength() {
+        return request -> {
+            final var chunked = spy(request);
+            doReturn(-1).when(chunked).getContentLength();
+            doReturn(-1L).when(chunked).getContentLengthLong();
+            return chunked;
+        };
     }
 
     private static RequestPostProcessor from(final String clientIp) {

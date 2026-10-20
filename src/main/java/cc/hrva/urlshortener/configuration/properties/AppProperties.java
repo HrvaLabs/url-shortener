@@ -5,6 +5,7 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
 import lombok.Data;
+import lombok.ToString;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.validation.annotation.Validated;
 
@@ -94,6 +95,7 @@ public class AppProperties {
         private String issuer;
 
         @NotBlank
+        @ToString.Exclude
         private String signingKey;
 
     }

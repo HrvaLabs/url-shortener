@@ -3,6 +3,7 @@ package cc.hrva.urlshortener.mcp.authorization;
 import cc.hrva.urlshortener.configuration.AppConfiguration;
 import cc.hrva.urlshortener.configuration.SecurityConfiguration;
 import cc.hrva.urlshortener.configuration.WebConfiguration;
+import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.mcp.McpAccessTokens;
 import cc.hrva.urlshortener.mcp.anon.RateLimiter;
 import cc.hrva.urlshortener.mcp.bridge.ConnectRequestStore;
@@ -26,18 +27,23 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Base64;
 import java.util.List;
+import java.util.Objects;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.config.YamlPropertiesFactoryBean;
 import org.springframework.boot.SpringBootConfiguration;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
+import org.springframework.core.env.Environment;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.http.HttpHeaders;
+import org.springframework.mock.env.MockEnvironment;
 import org.springframework.mock.web.MockHttpSession;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
@@ -106,6 +112,7 @@ class AuthorizationServerConfigurationTest {
     private static final String CODE_VERIFIER = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
     private static final String CODE_CHALLENGE = s256(CODE_VERIFIER);
     private static final RSAKey SIGNING_KEY = generateSigningKey();
+    private static final String LOCAL_DEV_SIGNING_KEY = localDevSigningKey();
     private static final String REGISTRATION_WITH_SCOPE = """
             {"redirect_uris":["http://localhost:53682/callback"],"token_endpoint_auth_method":"none","scope":"%s"}""";
     private static final String SCOPED_REGISTRATION = REGISTRATION_WITH_SCOPE.formatted("claudeai");
@@ -545,6 +552,33 @@ class AuthorizationServerConfigurationTest {
     }
 
     @Test
+    void committedLocalDevKeyIsRefusedOutsideTheLocalProfile() {
+        final var otherProfile = new MockEnvironment();
+        otherProfile.setActiveProfiles("prod");
+
+        for (final var environment : List.of(new MockEnvironment(), otherProfile)) {
+            assertThatThrownBy(() -> configuration(LOCAL_DEV_SIGNING_KEY, environment).mcpSigningKey())
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("app.mcp.signing-key")
+                    .hasMessageContaining("local");
+        }
+    }
+
+    @Test
+    void committedLocalDevKeyIsAcceptedWithTheLocalProfile() {
+        final var local = new MockEnvironment();
+        local.setActiveProfiles("local");
+
+        assertThat(configuration(LOCAL_DEV_SIGNING_KEY, local).mcpSigningKey().getKeyID()).isEqualTo("hrva-local-dev");
+    }
+
+    @Test
+    void ownSigningKeyIsAcceptedWithoutTheLocalProfile() {
+        assertThat(configuration(SIGNING_KEY.toJSONString(), new MockEnvironment()).mcpSigningKey().getKeyID())
+                .isEqualTo(SIGNING_KEY.getKeyID());
+    }
+
+    @Test
     void googleOauthLoginStillRedirects() throws Exception {
         mockMvc.perform(get("/oauth2/authorization/google"))
                 .andExpect(status().isFound())
@@ -618,6 +652,21 @@ class AuthorizationServerConfigurationTest {
         session.setAttribute(HttpSessionSecurityContextRepository.SPRING_SECURITY_CONTEXT_KEY, securityContext);
 
         return session;
+    }
+
+    private static AuthorizationServerConfiguration configuration(final String signingKey, final Environment environment) {
+        final var appProperties = new AppProperties();
+        appProperties.getMcp().setIssuer(ISSUER);
+        appProperties.getMcp().setSigningKey(signingKey);
+
+        return new AuthorizationServerConfiguration(appProperties, environment);
+    }
+
+    private static String localDevSigningKey() {
+        final var localProfile = new YamlPropertiesFactoryBean();
+        localProfile.setResources(new ClassPathResource("application-local.yaml"));
+
+        return Objects.requireNonNull(localProfile.getObject()).getProperty("app.mcp.signing-key");
     }
 
     private static String encode(final String issuer) {

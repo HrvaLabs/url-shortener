@@ -1,6 +1,8 @@
 package cc.hrva.urlshortener.mcp.authorization;
 
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
+import cc.hrva.urlshortener.mcp.McpRequestBodyLimitFilter;
+import cc.hrva.urlshortener.mcp.anon.AnonymousMcpConfiguration;
 import cc.hrva.urlshortener.mcp.anon.RateLimiter;
 import cc.hrva.urlshortener.mcp.bridge.BridgedAuthorizationRequestFilter;
 import cc.hrva.urlshortener.mcp.bridge.ConnectContinueController;
@@ -24,6 +26,7 @@ import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.annotation.Order;
+import org.springframework.core.env.Environment;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcOperations;
@@ -65,13 +68,18 @@ public class AuthorizationServerConfiguration {
 
     private static final String SIGNING_KEY_PROPERTY = "app.mcp.signing-key";
     private static final int MINIMUM_SIGNING_KEY_SIZE = 2048;
+    private static final String LOCAL_DEV_SIGNING_KEY_ID = "hrva-local-dev";
+    private static final String LOCAL_PROFILE = "local";
     private static final String AUTHORIZATION_ENDPOINT = "/oauth2/authorize";
     private static final String CLIENT_REGISTRATION_ENDPOINT = "/oauth2/register";
     private static final String OPENID_CONFIGURATION = "/.well-known/openid-configuration";
     private static final String PATH_SUFFIXED_AUTHORIZATION_SERVER_METADATA = "/.well-known/oauth-authorization-server/**";
     private static final String MCP_RESOURCE_PATH = "/mcp";
+    private static final int REQUEST_BODY_LIMIT_FILTER_ORDER = SecurityFilterProperties.DEFAULT_FILTER_ORDER - 200;
+    private static final int DCR_EMPTY_SCOPE_FILTER_ORDER = SecurityFilterProperties.DEFAULT_FILTER_ORDER - 100;
 
     private final AppProperties appProperties;
+    private final Environment environment;
 
     @Bean
     @Order(1)
@@ -147,7 +155,13 @@ public class AuthorizationServerConfiguration {
 
     @Bean
     public RSAKey mcpSigningKey() {
-        return parseSigningKey(appProperties.getMcp().getSigningKey());
+        final var signingKey = parseSigningKey(appProperties.getMcp().getSigningKey());
+        if (LOCAL_DEV_SIGNING_KEY_ID.equals(signingKey.getKeyID()) && !environment.matchesProfiles(LOCAL_PROFILE)) {
+            throw new IllegalStateException(SIGNING_KEY_PROPERTY + " is the committed development key (kid " + LOCAL_DEV_SIGNING_KEY_ID
+                    + "), which is allowed only with the " + LOCAL_PROFILE + " profile. Set APP_MCP_SIGNING_KEY to a key of your own (see README.md)");
+        }
+
+        return signingKey;
     }
 
     @Bean
@@ -164,8 +178,8 @@ public class AuthorizationServerConfiguration {
     }
 
     @Bean
-    public OAuth2TokenCustomizer<JwtEncodingContext> refreshAudienceCustomizer() {
-        return new RefreshAudienceCustomizer();
+    public OAuth2TokenCustomizer<JwtEncodingContext> accessTokenAudienceCustomizer() {
+        return new AccessTokenAudienceCustomizer(appProperties.getMcp().getIssuer() + MCP_RESOURCE_PATH);
     }
 
     @Bean
@@ -187,10 +201,19 @@ public class AuthorizationServerConfiguration {
     }
 
     @Bean
+    public FilterRegistrationBean<McpRequestBodyLimitFilter> mcpRequestBodyLimitFilterRegistration() {
+        final var registration = new FilterRegistrationBean<>(new McpRequestBodyLimitFilter());
+        registration.addUrlPatterns(CLIENT_REGISTRATION_ENDPOINT, MCP_RESOURCE_PATH, AnonymousMcpConfiguration.ANONYMOUS_MCP_ENDPOINT);
+        registration.setOrder(REQUEST_BODY_LIMIT_FILTER_ORDER);
+
+        return registration;
+    }
+
+    @Bean
     public FilterRegistrationBean<DcrEmptyScopeFilter> dcrEmptyScopeFilterRegistration(final JsonMapper jsonMapper) {
         final var registration = new FilterRegistrationBean<>(new DcrEmptyScopeFilter(jsonMapper));
         registration.addUrlPatterns(CLIENT_REGISTRATION_ENDPOINT);
-        registration.setOrder(SecurityFilterProperties.DEFAULT_FILTER_ORDER - 100);
+        registration.setOrder(DCR_EMPTY_SCOPE_FILTER_ORDER);
 
         return registration;
     }

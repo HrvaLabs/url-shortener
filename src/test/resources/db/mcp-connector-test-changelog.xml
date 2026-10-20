@@ -9,5 +9,6 @@
     <include file="classpath:/db/changelog/018-oauth2-access-token-index.xml"/>
     <include file="classpath:/db/changelog/019-oauth2-refresh-token-index.xml"/>
     <include file="classpath:/db/changelog/020-oauth2-connected-apps-indexes.xml"/>
+    <include file="classpath:/db/changelog/021-oauth2-authorization-code-index.xml"/>
 
 </databaseChangeLog>

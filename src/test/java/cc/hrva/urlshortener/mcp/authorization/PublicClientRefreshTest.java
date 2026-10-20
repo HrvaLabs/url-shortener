@@ -187,6 +187,29 @@ class PublicClientRefreshTest {
     }
 
     @Test
+    void codeExchangeWithoutResourceStillYieldsMcpAudience() throws Exception {
+        final var clientId = accessTokens.register(PUBLIC_REGISTRATION);
+        final var code = accessTokens.authorize(clientId, EMAIL, null);
+        final var body = mockMvc.perform(codeExchangeRequestWithoutResource(clientId, code))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        final String accessToken = JsonPath.read(body, "$.access_token");
+        final String refreshToken = JsonPath.read(body, "$.refresh_token");
+
+        assertThat(mcpJwtDecoder.decode(accessToken).getAudience()).containsExactly(RESOURCE);
+        mockMvc.perform(mcpRequest().header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken))
+                .andExpect(status().isOk());
+
+        final var refreshed = refresh(clientId, refreshToken, null);
+
+        assertThat(mcpJwtDecoder.decode((String) refreshed.get("access_token")).getAudience()).containsExactly(RESOURCE);
+        mockMvc.perform(mcpRequest().header(HttpHeaders.AUTHORIZATION, "Bearer " + refreshed.get("access_token")))
+                .andExpect(status().isOk());
+    }
+
+    @Test
     void refreshForRemovedAuthorizationIsInvalidGrant() throws Exception {
         final var clientId = accessTokens.register(PUBLIC_REGISTRATION);
         final var refreshToken = (String) exchangeCode(clientId).get("refresh_token");

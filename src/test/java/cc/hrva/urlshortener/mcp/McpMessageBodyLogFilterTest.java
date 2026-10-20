@@ -12,6 +12,7 @@ class McpMessageBodyLogFilterTest {
 
     private static final String STATELESS_TRANSPORT = "org.springframework.ai.mcp.server.webmvc.transport.WebMvcStatelessServerTransport";
     private static final String STREAMABLE_TRANSPORT = "org.springframework.ai.mcp.server.webmvc.transport.WebMvcStreamableServerTransportProvider";
+    private static final String STATELESS_HANDLER = "io.modelcontextprotocol.server.DefaultMcpStatelessServerHandler";
 
     private final McpMessageBodyLogFilter filter = new McpMessageBodyLogFilter();
 
@@ -24,11 +25,24 @@ class McpMessageBodyLogFilterTest {
     }
 
     @Test
+    void dropsUnknownMethodLinesThatCarryClientSuppliedMethodNames() {
+        for (final var transport : new String[]{STATELESS_TRANSPORT, STREAMABLE_TRANSPORT}) {
+            assertThat(decide(transport, "Failed to handle request: Missing handler for request type: secret/unknown-method"))
+                    .isEqualTo(FilterReply.DENY);
+        }
+        assertThat(filter.decide(null, (Logger) LoggerFactory.getLogger(STATELESS_HANDLER), Level.WARN,
+                "Missing handler for notification type: {}", new Object[]{"notifications/secret-unknown"}, null))
+                .isEqualTo(FilterReply.DENY);
+    }
+
+    @Test
     void keepsHandlerFailuresAndOtherLoggers() {
         assertThat(decide(STATELESS_TRANSPORT, "Failed to handle request: Unknown tool")).isEqualTo(FilterReply.NEUTRAL);
         assertThat(decide(STATELESS_TRANSPORT, "Unexpected error handling message: boom")).isEqualTo(FilterReply.NEUTRAL);
         assertThat(decide(STATELESS_TRANSPORT, null)).isEqualTo(FilterReply.NEUTRAL);
         assertThat(decide("cc.hrva.urlshortener.SomethingElse", "Failed to deserialize message: x")).isEqualTo(FilterReply.NEUTRAL);
+        assertThat(decide("cc.hrva.urlshortener.SomethingElse", "Failed to handle request: Missing handler for request type: x")).isEqualTo(FilterReply.NEUTRAL);
+        assertThat(decide(STATELESS_HANDLER, "Something else entirely: {}")).isEqualTo(FilterReply.NEUTRAL);
     }
 
     private FilterReply decide(final String loggerName, final String message) {

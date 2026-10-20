@@ -31,7 +31,7 @@ import tools.jackson.databind.json.JsonMapper;
 @RequiredArgsConstructor
 public class AnonymousMcpConfiguration {
 
-    private static final String ANONYMOUS_MCP_ENDPOINT = "/mcp/anon";
+    public static final String ANONYMOUS_MCP_ENDPOINT = "/mcp/anon";
     private static final String SERVER_NAME = "hrva.cc anonymous";
     private static final String SERVER_VERSION = "1.0.0";
 
