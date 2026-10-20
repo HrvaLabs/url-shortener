@@ -8,7 +8,7 @@
     <parent>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-starter-parent</artifactId>
-        <version>4.0.6</version>
+        <version>4.1.1</version>
         <relativePath/>
     </parent>
 
@@ -21,14 +21,14 @@
     <properties>
         <java.version>25</java.version>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <springdocVersion>3.0.3</springdocVersion>
+        <springdocVersion>3.1.1</springdocVersion>
         <jsonwebtokenVersion>0.13.0</jsonwebtokenVersion>
-        <apacheCommonsVersion>3.20.0</apacheCommonsVersion>
+        <apacheCommonsVersion>3.21.0</apacheCommonsVersion>
         <commonsIoVersion>2.22.0</commonsIoVersion>
-        <googleApiClientVersion>2.9.0</googleApiClientVersion>
+        <googleApiClientVersion>2.9.1</googleApiClientVersion>
         <googleApiServicesSafebrowsingVersion>v5-rev20251214-2.0.0</googleApiServicesSafebrowsingVersion>
-        <zxingVersion>3.5.3</zxingVersion>
-        <jsoupVersion>1.19.1</jsoupVersion>
+        <zxingVersion>3.5.4</zxingVersion>
+        <jsoupVersion>1.23.2</jsoupVersion>
     </properties>
 
     <dependencies>

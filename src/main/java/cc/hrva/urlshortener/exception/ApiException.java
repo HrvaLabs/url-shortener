@@ -9,7 +9,7 @@ import lombok.AllArgsConstructor;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.Setter;
-import org.hibernate.validator.internal.engine.path.PathImpl;
+import org.hibernate.validator.path.Path;
 import org.springframework.http.HttpStatus;
 import org.springframework.validation.FieldError;
 import org.springframework.validation.ObjectError;
@@ -82,7 +82,7 @@ public class ApiException extends CommonException {
     private void addValidationError(final ConstraintViolation<?> cv) {
         this.addValidationError(
                 cv.getRootBeanClass().getSimpleName(),
-                ((PathImpl) cv.getPropertyPath()).getLeafNode().asString(),
+                ((Path) cv.getPropertyPath()).getLeafNode().toString(),
                 cv.getInvalidValue(),
                 cv.getMessage());
     }
