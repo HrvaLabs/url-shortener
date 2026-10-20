@@ -72,6 +72,8 @@ public class LocalDataInitializer implements CommandLineRunner {
                 .authorities(authorities)
                 .createDate(LocalDateTime.now())
                 .active(true)
+                .emailVerified(true)
+                .authProvider("local")
                 .build();
 
         userRepository.save(user);
