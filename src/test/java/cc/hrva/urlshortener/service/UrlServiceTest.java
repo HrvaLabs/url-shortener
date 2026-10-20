@@ -17,6 +17,7 @@ import cc.hrva.urlshortener.converter.UrlUpdateDtoToUrlConverter;
 import cc.hrva.urlshortener.dto.CreateUrlDto;
 import cc.hrva.urlshortener.dto.UrlResponse;
 import cc.hrva.urlshortener.dto.UrlSearchDto;
+import cc.hrva.urlshortener.exception.UrlValidationException;
 import cc.hrva.urlshortener.model.ApiKey;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.User;
@@ -24,6 +25,7 @@ import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.service.impl.DefaultUrlService;
 import cc.hrva.urlshortener.validator.ApiKeyValidator;
 import cc.hrva.urlshortener.validator.UrlValidator;
+import cc.hrva.urlshortener.validator.impl.DefaultUrlValidator;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -36,7 +38,9 @@ import org.springframework.core.task.TaskExecutor;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -89,6 +93,9 @@ class UrlServiceTest {
 
     @Mock
     private org.springframework.security.crypto.password.PasswordEncoder passwordEncoder;
+
+    @Mock
+    private SafeBrowsingService safeBrowsingService;
 
     @BeforeEach
     void setUp() {
@@ -390,6 +397,52 @@ class UrlServiceTest {
         final var tags = urlService.getMyTags(null);
 
         assertThat(tags).containsExactly("work", "campaign");
+    }
+
+    @Test
+    void shouldRejectMalformedLongUrlWhenSavingUrl() {
+        final var service = urlServiceWithRealLongUrlHandling();
+        final var createUrlDto = CreateUrlDto.builder().longUrl("https//wedding.hrva.cc").build();
+
+        assertThatThrownBy(() -> service.saveUrlRouting(createUrlDto))
+                .isInstanceOf(UrlValidationException.class)
+                .hasMessage("That doesn't look like a valid web address. Check the URL and try again.");
+
+        verify(safeBrowsingService, never()).checkUrlsForThreats(anyString());
+        verify(urlRepository, never()).save(any(Url.class));
+    }
+
+    @Test
+    void shouldRejectMalformedLongUrlWhenSavingUrlWithApiKey() {
+        final var service = urlServiceWithRealLongUrlHandling();
+        final var createUrlDto = CreateUrlDto.builder().longUrl("https//wedding.hrva.cc").build();
+
+        assertThatThrownBy(() -> service.saveUrlWithApiKey(createUrlDto, "apikey"))
+                .isInstanceOf(UrlValidationException.class)
+                .hasMessage("That doesn't look like a valid web address. Check the URL and try again.");
+
+        verify(safeBrowsingService, never()).checkUrlsForThreats(anyString());
+        verify(urlRepository, never()).save(any(Url.class));
+    }
+
+    private UrlService urlServiceWithRealLongUrlHandling() {
+        return new DefaultUrlService(
+                userService,
+                new DefaultUrlValidator(userService, urlRepository, appProperties, safeBrowsingService),
+                apiKeyService,
+                urlRepository,
+                appProperties,
+                apiKeyValidator,
+                ipAddressService,
+                taskExecutor,
+                urlToPeekUrlConverter,
+                new CreateUrlToUrlConverter(),
+                urlUpdateDtoToUrlConverter,
+                cacheManager,
+                objectMapper,
+                meterRegistry,
+                passwordEncoder
+        );
     }
 
 }

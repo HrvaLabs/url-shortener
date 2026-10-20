@@ -54,4 +54,58 @@ class CreateUrlToUrlConverterTest {
 
         assertThat(url.getTags()).containsExactlyInAnyOrder("work", "big");
     }
+
+    @Test
+    void shouldPrependHttpsWhenSchemeIsMissing() {
+        assertThat(convertLongUrl("example.com")).isEqualTo("https://example.com");
+    }
+
+    @Test
+    void shouldPrependHttpsWhenHostHasPort() {
+        assertThat(convertLongUrl("example.com:8080/path")).isEqualTo("https://example.com:8080/path");
+    }
+
+    @Test
+    void shouldTrimLongUrl() {
+        assertThat(convertLongUrl("  https://example.com  ")).isEqualTo("https://example.com");
+    }
+
+    @Test
+    void shouldKeepUppercaseHttpScheme() {
+        assertThat(convertLongUrl("HTTP://Example.com/a")).isEqualTo("HTTP://Example.com/a");
+    }
+
+    @Test
+    void shouldNotPrependHttpsWhenColonIsMissingAfterHttps() {
+        assertThat(convertLongUrl("https//wedding.hrva.cc")).isEqualTo("https//wedding.hrva.cc");
+    }
+
+    @Test
+    void shouldNotPrependHttpsWhenColonIsMissingAfterHttp() {
+        assertThat(convertLongUrl("http//example.com")).isEqualTo("http//example.com");
+    }
+
+    @Test
+    void shouldNotPrependHttpsToFtpScheme() {
+        assertThat(convertLongUrl("ftp://x.com")).isEqualTo("ftp://x.com");
+    }
+
+    @Test
+    void shouldNotPrependHttpsToMailtoScheme() {
+        assertThat(convertLongUrl("mailto:a@b.c")).isEqualTo("mailto:a@b.c");
+    }
+
+    @Test
+    void shouldNotPrependHttpsWhenSlashIsMissingAfterHttps() {
+        assertThat(convertLongUrl("https:/x.com")).isEqualTo("https:/x.com");
+    }
+
+    @Test
+    void shouldNotPrependHttpsWhenSlashesAreMissingAfterHttps() {
+        assertThat(convertLongUrl("https:x.com")).isEqualTo("https:x.com");
+    }
+
+    private String convertLongUrl(final String longUrl) {
+        return converter.convert(CreateUrlDto.builder().longUrl(longUrl).build()).getLongUrl();
+    }
 }
