@@ -82,6 +82,8 @@ public class SecurityConfiguration {
                                 .permitAll()
                                 .requestMatchers("/actuator/**", "/api/v1/admin/**")
                                 .hasRole("ADMIN")
+                                .requestMatchers("/api/v1/connect/**")
+                                .hasRole("USER")
                                 .anyRequest()
                                 .authenticated()
                 ).exceptionHandling(exceptionHandling ->

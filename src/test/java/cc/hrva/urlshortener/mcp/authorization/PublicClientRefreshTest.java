@@ -6,6 +6,7 @@ import cc.hrva.urlshortener.configuration.SecurityConfiguration;
 import cc.hrva.urlshortener.configuration.WebConfiguration;
 import cc.hrva.urlshortener.mcp.McpAccessTokens;
 import cc.hrva.urlshortener.mcp.McpResourceServerConfiguration;
+import cc.hrva.urlshortener.mcp.bridge.ConnectRequestStore;
 import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.security.JwtFilter;
 import cc.hrva.urlshortener.security.OAuth2LoginSuccessHandler;
@@ -90,6 +91,9 @@ class PublicClientRefreshTest {
     @Autowired
     @Qualifier("mcpJwtDecoder")
     private JwtDecoder mcpJwtDecoder;
+
+    @MockitoBean
+    private ConnectRequestStore connectRequestStore;
 
     @MockitoBean
     private TokenProvider tokenProvider;

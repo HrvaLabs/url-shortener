@@ -3,6 +3,8 @@ package cc.hrva.urlshortener.configuration;
 import cc.hrva.urlshortener.exception.ApiException;
 import cc.hrva.urlshortener.exception.ApiKeyNotFoundException;
 import cc.hrva.urlshortener.exception.CommonException;
+import cc.hrva.urlshortener.exception.ConnectRequestAlreadyApprovedException;
+import cc.hrva.urlshortener.exception.ConnectRequestExpiredException;
 import cc.hrva.urlshortener.exception.EmailExistsException;
 import cc.hrva.urlshortener.exception.EmailNotVerifiedException;
 import cc.hrva.urlshortener.exception.InvalidApiKeyException;
@@ -132,6 +134,16 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(EmailNotVerifiedException.class)
     public ResponseEntity<Map<String, String>> handleEmailNotVerified(final EmailNotVerifiedException ex) {
         return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", safeMessage(ex)));
+    }
+
+    @ExceptionHandler(ConnectRequestExpiredException.class)
+    public ResponseEntity<Map<String, String>> handleConnectRequestExpired(final ConnectRequestExpiredException ex) {
+        return ResponseEntity.status(HttpStatus.GONE).body(Map.of("error", safeMessage(ex)));
+    }
+
+    @ExceptionHandler(ConnectRequestAlreadyApprovedException.class)
+    public ResponseEntity<Map<String, String>> handleConnectRequestAlreadyApproved(final ConnectRequestAlreadyApprovedException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("error", safeMessage(ex)));
     }
 
     @ExceptionHandler(CommonException.class)

@@ -48,6 +48,12 @@ management:
 
 server:
   forward-headers-strategy: framework
+  servlet:
+    session:
+      cookie:
+        same-site: lax
+        http-only: true
+        secure: true
 
 app:
   app-name: hrva.cc Url Shortener

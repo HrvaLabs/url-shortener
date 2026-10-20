@@ -37,3 +37,7 @@ app:
 
 server:
   port: 8080
+  servlet:
+    session:
+      cookie:
+        secure: false

@@ -10,6 +10,7 @@ import cc.hrva.urlshortener.dto.CreateUrlDto;
 import cc.hrva.urlshortener.dto.UrlAnalyticsDto;
 import cc.hrva.urlshortener.dto.UrlResponse;
 import cc.hrva.urlshortener.mcp.authorization.AuthorizationServerConfiguration;
+import cc.hrva.urlshortener.mcp.bridge.ConnectRequestStore;
 import cc.hrva.urlshortener.mcp.tools.LinkTools;
 import cc.hrva.urlshortener.mcp.tools.McpUserResolver;
 import cc.hrva.urlshortener.model.User;
@@ -122,6 +123,9 @@ class McpEndpointSecurityTest {
 
     @MockitoBean
     private AnalyticsService analyticsService;
+
+    @MockitoBean
+    private ConnectRequestStore connectRequestStore;
 
     @MockitoBean
     private TokenProvider tokenProvider;

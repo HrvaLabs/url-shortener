@@ -3,6 +3,7 @@ package cc.hrva.urlshortener.mcp.authorization;
 import cc.hrva.urlshortener.configuration.AppConfiguration;
 import cc.hrva.urlshortener.configuration.SecurityConfiguration;
 import cc.hrva.urlshortener.configuration.WebConfiguration;
+import cc.hrva.urlshortener.mcp.bridge.ConnectRequestStore;
 import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.security.JwtFilter;
 import cc.hrva.urlshortener.security.OAuth2LoginSuccessHandler;
@@ -62,9 +63,12 @@ import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.startsWith;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 import static org.springframework.http.MediaType.APPLICATION_FORM_URLENCODED;
 import static org.springframework.http.MediaType.APPLICATION_JSON;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -114,6 +118,9 @@ class AuthorizationServerConfigurationTest {
     @Autowired
     @Qualifier("mcpJwtDecoder")
     private JwtDecoder mcpJwtDecoder;
+
+    @MockitoBean
+    private ConnectRequestStore connectRequestStore;
 
     @MockitoBean
     private TokenProvider tokenProvider;
@@ -405,8 +412,9 @@ class AuthorizationServerConfigurationTest {
     }
 
     @Test
-    void authorizeWithoutSignInAnswers401() throws Exception {
+    void authorizeWithoutSignInRedirectsToConnect() throws Exception {
         final var clientId = registerClient();
+        when(connectRequestStore.save(any())).thenReturn("connect-handle");
 
         mockMvc.perform(get("/oauth2/authorize")
                         .queryParam("response_type", "code")
@@ -414,8 +422,11 @@ class AuthorizationServerConfigurationTest {
                         .queryParam("redirect_uri", REGISTERED_REDIRECT_URI)
                         .queryParam("code_challenge", CODE_CHALLENGE)
                         .queryParam("code_challenge_method", "S256"))
-                .andExpect(status().isUnauthorized())
-                .andExpect(header().doesNotExist(HttpHeaders.LOCATION));
+                .andExpect(status().isFound())
+                .andExpect(header().string(HttpHeaders.LOCATION, "http://localhost:3000/connect?request=connect-handle"));
+
+        verify(connectRequestStore).save(argThat(connectRequest ->
+                connectRequest.clientId().equals(clientId) && connectRequest.redirectUri().equals(REGISTERED_REDIRECT_URI)));
     }
 
     @Test
@@ -444,6 +455,7 @@ class AuthorizationServerConfigurationTest {
         mockMvc.perform(get("/error").requestAttr(RequestDispatcher.ERROR_STATUS_CODE, 400))
                 .andExpect(status().isBadRequest())
                 .andExpect(header().doesNotExist(HttpHeaders.LOCATION));
+        verifyNoInteractions(connectRequestStore);
     }
 
     @Test

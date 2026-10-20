@@ -1,6 +1,10 @@
 package cc.hrva.urlshortener.mcp.authorization;
 
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
+import cc.hrva.urlshortener.mcp.bridge.ConnectContinueController;
+import cc.hrva.urlshortener.mcp.bridge.ConnectRedirectEntryPoint;
+import cc.hrva.urlshortener.mcp.bridge.ConnectRequestStore;
+import cc.hrva.urlshortener.mcp.bridge.SessionEndingAuthorizationResponseHandler;
 import com.nimbusds.jose.JOSEException;
 import com.nimbusds.jose.jwk.JWKSet;
 import com.nimbusds.jose.jwk.RSAKey;
@@ -68,7 +72,8 @@ public class AuthorizationServerConfiguration {
     @Order(1)
     public SecurityFilterChain authorizationServerSecurityFilterChain(final HttpSecurity http,
                                                                       final RegisteredClientRepository registeredClientRepository,
-                                                                      final AuthorizationServerSettings authorizationServerSettings) throws Exception {
+                                                                      final AuthorizationServerSettings authorizationServerSettings,
+                                                                      final ConnectRequestStore connectRequestStore) throws Exception {
         final var unsupportedDiscovery = new OrRequestMatcher(
                 path(OPENID_CONFIGURATION),
                 path(PATH_SUFFIXED_AUTHORIZATION_SERVER_METADATA)
@@ -80,8 +85,13 @@ public class AuthorizationServerConfiguration {
                 post(authorizationServerSettings.getTokenRevocationEndpoint())
         );
         final var mcpResource = appProperties.getMcp().getIssuer() + MCP_RESOURCE_PATH;
+        final var connectContinue = path(ConnectContinueController.CONTINUE_PATH);
+        final var connectRedirectEntryPoint = new ConnectRedirectEntryPoint(connectRequestStore, registeredClientRepository, appProperties.getFrontendUrl());
+        final var authorizationResponseHandler = new SessionEndingAuthorizationResponseHandler();
 
-        http.authorizeHttpRequests(authorize -> authorize.anyRequest().authenticated())
+        http.authorizeHttpRequests(authorize -> authorize
+                        .requestMatchers(connectContinue).permitAll()
+                        .anyRequest().authenticated())
                 .with(McpAuthorizationServerConfigurer.mcpAuthorizationServer(), mcp -> mcp
                         .authorizationCodeRequestValidator(new LocalhostWildcardPortValidator().andThen(DEFAULT_SCOPE_VALIDATOR))
                         .dynamicClientRegistrationValidator(OAuth2ClientRegistrationAuthenticationValidator.DEFAULT_REDIRECT_URI_VALIDATOR
@@ -90,8 +100,11 @@ public class AuthorizationServerConfiguration {
                                 .andThen(new DcrScopeValidator())
                                 .andThen(new DcrGrantTypeValidator()))
                         .authorizationServer(authorizationServer -> {
-                            http.securityMatcher(new OrRequestMatcher(authorizationServer.getEndpointsMatcher(), unsupportedDiscovery));
+                            http.securityMatcher(new OrRequestMatcher(authorizationServer.getEndpointsMatcher(), unsupportedDiscovery, connectContinue));
                             authorizationServer
+                                    .authorizationEndpoint(authorizationEndpoint -> authorizationEndpoint
+                                            .authorizationResponseHandler(authorizationResponseHandler)
+                                            .errorResponseHandler(authorizationResponseHandler))
                                     .tokenGenerator(withPublicClientRefreshTokens(http.getSharedObject(OAuth2TokenGenerator.class)))
                                     .clientAuthentication(clientAuthentication -> clientAuthentication
                                             .authenticationConverters(converters -> converters.add(new PublicClientRefreshTokenAuthenticationConverter(tokenEndpoint)))
@@ -106,7 +119,7 @@ public class AuthorizationServerConfiguration {
                                             .authenticationProviders(AuthorizationServerConfiguration::useDcrClientSettings));
                         }))
                 .exceptionHandling(exceptionHandling -> exceptionHandling
-                        .defaultAuthenticationEntryPointFor(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED), path(AUTHORIZATION_ENDPOINT))
+                        .defaultAuthenticationEntryPointFor(connectRedirectEntryPoint, path(AUTHORIZATION_ENDPOINT))
                         .defaultAuthenticationEntryPointFor(new HttpStatusEntryPoint(HttpStatus.NOT_FOUND), unsupportedDiscovery)
                         .defaultAuthenticationEntryPointFor(new InvalidClientEntryPoint(), clientAuthenticatedEndpoints))
                 .cors(Customizer.withDefaults());
