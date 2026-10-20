@@ -7,9 +7,11 @@ import cc.hrva.urlshortener.configuration.SecurityConfiguration;
 import cc.hrva.urlshortener.configuration.WebConfiguration;
 import cc.hrva.urlshortener.mcp.McpAccessTokens;
 import cc.hrva.urlshortener.mcp.McpResourceServerConfiguration;
+import cc.hrva.urlshortener.mcp.anon.RateLimiter;
 import cc.hrva.urlshortener.mcp.authorization.AuthorizationServerConfiguration;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.repository.UserRepository;
+import cc.hrva.urlshortener.security.ClientIpResolver;
 import cc.hrva.urlshortener.security.JwtFilter;
 import cc.hrva.urlshortener.security.OAuth2LoginSuccessHandler;
 import cc.hrva.urlshortener.security.TokenProvider;
@@ -71,6 +73,9 @@ import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilde
 import org.springframework.web.util.UriComponentsBuilder;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
 import static org.springframework.http.MediaType.APPLICATION_FORM_URLENCODED;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -147,6 +152,9 @@ class LoginBridgeTest {
     @MockitoBean
     private OAuth2LoginSuccessHandler oAuth2LoginSuccessHandler;
 
+    @MockitoBean
+    private RateLimiter rateLimiter;
+
     private final InMemoryRedis redis = new InMemoryRedis();
     private final List<String> locations = new ArrayList<>();
     private McpAccessTokens accessTokens;
@@ -159,6 +167,7 @@ class LoginBridgeTest {
 
     @BeforeEach
     void setUp() {
+        when(rateLimiter.tryAcquire(anyString(), anyInt(), any())).thenReturn(true);
         redis.backing(redisTemplate);
         accessTokens = new McpAccessTokens(mockMvc);
         final var user = User.builder().email(EMAIL).active(true).build();
@@ -621,6 +630,7 @@ class LoginBridgeTest {
             AuthorizationServerConfiguration.class,
             McpResourceServerConfiguration.class,
             JwtFilter.class,
+            ClientIpResolver.class,
             TokenProvider.class,
             RedisConnectRequestStore.class,
             ConnectController.class,

@@ -442,6 +442,35 @@ class AnonymousMcpTest {
     }
 
     @Test
+    void unsupportedMethodsAre405AndUnknownPathsAre404WithoutErrorLogs(final CapturedOutput output) throws Exception {
+        final var appJwt = tokenProvider.createToken(UsernamePasswordAuthenticationToken.authenticated(
+                EMAIL, null, List.of(new SimpleGrantedAuthority("ROLE_USER"))));
+        final var outputBeforeRequests = output.length();
+
+        mockMvc.perform(delete(ANONYMOUS_MCP))
+                .andExpect(status().isMethodNotAllowed())
+                .andExpect(header().string(HttpHeaders.ALLOW, containsString("POST")))
+                .andExpect(jsonPath("$.error").value("Method not allowed"))
+                .andExpect(this::hasNoJavaInternals);
+        mockMvc.perform(post("/some-alias"))
+                .andExpect(status().isMethodNotAllowed())
+                .andExpect(header().string(HttpHeaders.ALLOW, containsString("GET")))
+                .andExpect(jsonPath("$.error").value("Method not allowed"))
+                .andExpect(this::hasNoJavaInternals);
+        mockMvc.perform(get("/no/such/path").header(HttpHeaders.AUTHORIZATION, "Bearer " + appJwt))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error").value("Not found"))
+                .andExpect(this::hasNoJavaInternals);
+
+        verify(urlService, never()).redirectResultUrl(any(), any());
+        assertThat(output.toString().substring(outputBeforeRequests))
+                .doesNotContain("ERROR")
+                .doesNotContain("Unhandled exception")
+                .doesNotContain("\tat ")
+                .doesNotContain("/no/such/path");
+    }
+
+    @Test
     void malformedBodiesAndUnknownMethodsReturnNoStackTrace(final CapturedOutput output) throws Exception {
         final var truncated = """
                 {"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"shorten_url","arguments":{"url":"https://secret-argument.example/path""";

@@ -4,8 +4,10 @@ import cc.hrva.urlshortener.configuration.AppConfiguration;
 import cc.hrva.urlshortener.configuration.SecurityConfiguration;
 import cc.hrva.urlshortener.configuration.WebConfiguration;
 import cc.hrva.urlshortener.mcp.McpAccessTokens;
+import cc.hrva.urlshortener.mcp.anon.RateLimiter;
 import cc.hrva.urlshortener.mcp.bridge.ConnectRequestStore;
 import cc.hrva.urlshortener.repository.UserRepository;
+import cc.hrva.urlshortener.security.ClientIpResolver;
 import cc.hrva.urlshortener.security.JwtFilter;
 import cc.hrva.urlshortener.security.OAuth2LoginSuccessHandler;
 import cc.hrva.urlshortener.security.TokenProvider;
@@ -24,6 +26,9 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Base64;
 import java.util.List;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -65,6 +70,8 @@ import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.startsWith;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -135,9 +142,17 @@ class AuthorizationServerConfigurationTest {
     @MockitoBean
     private OAuth2LoginSuccessHandler oAuth2LoginSuccessHandler;
 
+    @MockitoBean
+    private RateLimiter rateLimiter;
+
     @DynamicPropertySource
     static void signingKey(final DynamicPropertyRegistry registry) {
         registry.add("app.mcp.signing-key", SIGNING_KEY::toJSONString);
+    }
+
+    @BeforeEach
+    void setUp() {
+        when(rateLimiter.tryAcquire(anyString(), anyInt(), any())).thenReturn(true);
     }
 
     @Test
@@ -381,6 +396,41 @@ class AuthorizationServerConfigurationTest {
     }
 
     @Test
+    void dcrRejectsMetadataThatWouldNotFitItsStorage() throws Exception {
+        final var halfColumnRedirectUri = "\"http://localhost:53682/" + "a".repeat(477) + "\"";
+        final var otherHalfColumnRedirectUri = "\"http://localhost:53682/" + "c".repeat(477) + "\"";
+        final var justUnderHalfColumnRedirectUri = "\"http://localhost:53682/" + "b".repeat(476) + "\"";
+        final var callback = "\"http://localhost:53682/callback\"";
+        final var rejected = List.of(
+                new RejectedMetadata(registration("n".repeat(101), callback, null, null), "client_name"),
+                new RejectedMetadata(registration("n".repeat(300), callback, null, null), "client_name"),
+                new RejectedMetadata(registration(null, localhostRedirectUris(6), null, null), "redirect_uris"),
+                new RejectedMetadata(registration(null, halfColumnRedirectUri + "," + otherHalfColumnRedirectUri, null, null), "redirect_uris"),
+                new RejectedMetadata(registration(null, callback, "s".repeat(500) + " " + "t".repeat(500), null), "scope"),
+                new RejectedMetadata(registration(null, callback, null, "https://keys.example/" + "k".repeat(1000)), "jwks_uri"));
+
+        for (final var metadata : rejected) {
+            mockMvc.perform(post("/oauth2/register")
+                            .contentType(APPLICATION_JSON)
+                            .content(metadata.registration()))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.error").value("invalid_client_metadata"))
+                    .andExpect(jsonPath("$.error_description").value("Invalid Client Registration: " + metadata.field()));
+        }
+
+        final var longestName = "n".repeat(100);
+        final var clientId = registerClient(registration(longestName, halfColumnRedirectUri + "," + justUnderHalfColumnRedirectUri,
+                "s".repeat(500) + " " + "t".repeat(499), null));
+        registerClient(registration(null, localhostRedirectUris(5), null, null));
+
+        final var registeredClient = registeredClientRepository.findByClientId(clientId);
+        assertThat(registeredClient).isNotNull();
+        assertThat(registeredClient.getClientName()).isEqualTo(longestName);
+        assertThat(String.join(",", registeredClient.getRedirectUris())).hasSize(1000);
+        assertThat(String.join(",", registeredClient.getScopes())).hasSize(1000);
+    }
+
+    @Test
     void clientCredentialsTokenRequestFailsForDcrClient() throws Exception {
         final var body = mockMvc.perform(post("/oauth2/register")
                         .contentType(APPLICATION_JSON)
@@ -538,6 +588,27 @@ class AuthorizationServerConfigurationTest {
         return JsonPath.read(body, "$.client_id");
     }
 
+    private static String registration(final String clientName, final String redirectUris, final String scope, final String jwksUri) {
+        final var registration = new StringBuilder("{\"redirect_uris\":[").append(redirectUris).append("],\"token_endpoint_auth_method\":\"none\"");
+        if (clientName != null) {
+            registration.append(",\"client_name\":\"").append(clientName).append('"');
+        }
+        if (scope != null) {
+            registration.append(",\"scope\":\"").append(scope).append('"');
+        }
+        if (jwksUri != null) {
+            registration.append(",\"jwks_uri\":\"").append(jwksUri).append('"');
+        }
+
+        return registration.append('}').toString();
+    }
+
+    private static String localhostRedirectUris(final int count) {
+        return IntStream.rangeClosed(1, count)
+                .mapToObj(port -> "\"http://localhost:" + (53680 + port) + "/callback\"")
+                .collect(Collectors.joining(","));
+    }
+
     private static MockHttpSession signedInSession() {
         final var authorities = List.of(new SimpleGrantedAuthority("ROLE_USER"));
         final var principal = new User("user@localhost", "", authorities);
@@ -578,6 +649,9 @@ class AuthorizationServerConfigurationTest {
         }
     }
 
+    private record RejectedMetadata(String registration, String field) {
+    }
+
     @SpringBootConfiguration
     @EnableAutoConfiguration
     @Import({
@@ -585,7 +659,8 @@ class AuthorizationServerConfigurationTest {
             WebConfiguration.class,
             SecurityConfiguration.class,
             AuthorizationServerConfiguration.class,
-            JwtFilter.class
+            JwtFilter.class,
+            ClientIpResolver.class
     })
     static class TestApplication {
     }

@@ -9,6 +9,7 @@ import cc.hrva.urlshortener.controller.UrlRedirectController;
 import cc.hrva.urlshortener.dto.CreateUrlDto;
 import cc.hrva.urlshortener.dto.UrlAnalyticsDto;
 import cc.hrva.urlshortener.dto.UrlResponse;
+import cc.hrva.urlshortener.mcp.anon.RateLimiter;
 import cc.hrva.urlshortener.mcp.authorization.AuthorizationServerConfiguration;
 import cc.hrva.urlshortener.mcp.bridge.ConnectRequestStore;
 import cc.hrva.urlshortener.mcp.tools.LinkTools;
@@ -61,6 +62,8 @@ import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.hasItems;
 import static org.hamcrest.Matchers.not;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.never;
@@ -139,6 +142,9 @@ class McpEndpointSecurityTest {
     @MockitoBean
     private OAuth2LoginSuccessHandler oAuth2LoginSuccessHandler;
 
+    @MockitoBean
+    private RateLimiter rateLimiter;
+
     private McpAccessTokens accessTokens;
 
     @DynamicPropertySource
@@ -148,6 +154,7 @@ class McpEndpointSecurityTest {
 
     @BeforeEach
     void setUp() {
+        when(rateLimiter.tryAcquire(anyString(), anyInt(), any())).thenReturn(true);
         accessTokens = new McpAccessTokens(mockMvc);
     }
 

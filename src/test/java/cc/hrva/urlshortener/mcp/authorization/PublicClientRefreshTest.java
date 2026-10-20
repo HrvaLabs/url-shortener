@@ -6,8 +6,10 @@ import cc.hrva.urlshortener.configuration.SecurityConfiguration;
 import cc.hrva.urlshortener.configuration.WebConfiguration;
 import cc.hrva.urlshortener.mcp.McpAccessTokens;
 import cc.hrva.urlshortener.mcp.McpResourceServerConfiguration;
+import cc.hrva.urlshortener.mcp.anon.RateLimiter;
 import cc.hrva.urlshortener.mcp.bridge.ConnectRequestStore;
 import cc.hrva.urlshortener.repository.UserRepository;
+import cc.hrva.urlshortener.security.ClientIpResolver;
 import cc.hrva.urlshortener.security.JwtFilter;
 import cc.hrva.urlshortener.security.OAuth2LoginSuccessHandler;
 import cc.hrva.urlshortener.security.TokenProvider;
@@ -45,6 +47,10 @@ import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilde
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.when;
 import static org.springframework.http.MediaType.APPLICATION_FORM_URLENCODED;
 import static org.springframework.http.MediaType.APPLICATION_JSON;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -107,6 +113,9 @@ class PublicClientRefreshTest {
     @MockitoBean
     private OAuth2LoginSuccessHandler oAuth2LoginSuccessHandler;
 
+    @MockitoBean
+    private RateLimiter rateLimiter;
+
     private McpAccessTokens accessTokens;
 
     @DynamicPropertySource
@@ -116,6 +125,7 @@ class PublicClientRefreshTest {
 
     @BeforeEach
     void setUp() {
+        when(rateLimiter.tryAcquire(anyString(), anyInt(), any())).thenReturn(true);
         accessTokens = new McpAccessTokens(mockMvc);
     }
 
@@ -449,7 +459,8 @@ class PublicClientRefreshTest {
             SecurityConfiguration.class,
             AuthorizationServerConfiguration.class,
             McpResourceServerConfiguration.class,
-            JwtFilter.class
+            JwtFilter.class,
+            ClientIpResolver.class
     })
     static class TestApplication {
     }

@@ -1,11 +1,13 @@
 package cc.hrva.urlshortener.mcp.authorization;
 
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
+import cc.hrva.urlshortener.mcp.anon.RateLimiter;
 import cc.hrva.urlshortener.mcp.bridge.BridgedAuthorizationRequestFilter;
 import cc.hrva.urlshortener.mcp.bridge.ConnectContinueController;
 import cc.hrva.urlshortener.mcp.bridge.ConnectRedirectEntryPoint;
 import cc.hrva.urlshortener.mcp.bridge.ConnectRequestStore;
 import cc.hrva.urlshortener.mcp.bridge.SessionEndingAuthorizationResponseHandler;
+import cc.hrva.urlshortener.security.ClientIpResolver;
 import com.nimbusds.jose.JOSEException;
 import com.nimbusds.jose.jwk.JWKSet;
 import com.nimbusds.jose.jwk.RSAKey;
@@ -52,6 +54,7 @@ import org.springframework.security.web.authentication.HttpStatusEntryPoint;
 import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher;
 import org.springframework.security.web.util.matcher.OrRequestMatcher;
 import org.springframework.security.web.util.matcher.RequestMatcher;
+import org.springframework.web.filter.CorsFilter;
 import tools.jackson.databind.json.JsonMapper;
 
 import static org.springframework.security.oauth2.server.authorization.authentication.OAuth2AuthorizationCodeRequestAuthenticationValidator.DEFAULT_SCOPE_VALIDATOR;
@@ -75,7 +78,9 @@ public class AuthorizationServerConfiguration {
     public SecurityFilterChain authorizationServerSecurityFilterChain(final HttpSecurity http,
                                                                       final RegisteredClientRepository registeredClientRepository,
                                                                       final AuthorizationServerSettings authorizationServerSettings,
-                                                                      final ConnectRequestStore connectRequestStore) throws Exception {
+                                                                      final ConnectRequestStore connectRequestStore,
+                                                                      final RateLimiter rateLimiter,
+                                                                      final ClientIpResolver clientIpResolver) throws Exception {
         final var unsupportedDiscovery = new OrRequestMatcher(
                 path(OPENID_CONFIGURATION),
                 path(PATH_SUFFIXED_AUTHORIZATION_SERVER_METADATA)
@@ -90,6 +95,7 @@ public class AuthorizationServerConfiguration {
         final var connectContinue = path(ConnectContinueController.CONTINUE_PATH);
         final var connectRedirectEntryPoint = new ConnectRedirectEntryPoint(connectRequestStore, registeredClientRepository, appProperties.getFrontendUrl());
         final var authorizationResponseHandler = new SessionEndingAuthorizationResponseHandler();
+        final var dcrRateLimitFilter = new DcrRateLimitFilter(post(authorizationServerSettings.getClientRegistrationEndpoint()), rateLimiter, clientIpResolver);
 
         http.authorizeHttpRequests(authorize -> authorize
                         .requestMatchers(connectContinue).permitAll()
@@ -100,7 +106,8 @@ public class AuthorizationServerConfiguration {
                                 .andThen(new DcrRedirectUriValidator())
                                 .andThen(OAuth2ClientRegistrationAuthenticationValidator.DEFAULT_JWK_SET_URI_VALIDATOR)
                                 .andThen(new DcrScopeValidator())
-                                .andThen(new DcrGrantTypeValidator()))
+                                .andThen(new DcrGrantTypeValidator())
+                                .andThen(new DcrMetadataSizeValidator()))
                         .authorizationServer(authorizationServer -> {
                             http.securityMatcher(new OrRequestMatcher(authorizationServer.getEndpointsMatcher(), unsupportedDiscovery, connectContinue));
                             authorizationServer
@@ -125,6 +132,7 @@ public class AuthorizationServerConfiguration {
                         .defaultAuthenticationEntryPointFor(new HttpStatusEntryPoint(HttpStatus.NOT_FOUND), unsupportedDiscovery)
                         .defaultAuthenticationEntryPointFor(new InvalidClientEntryPoint(), clientAuthenticatedEndpoints))
                 .addFilterBefore(new BridgedAuthorizationRequestFilter(path(AUTHORIZATION_ENDPOINT)), AnonymousAuthenticationFilter.class)
+                .addFilterAfter(dcrRateLimitFilter, CorsFilter.class)
                 .cors(Customizer.withDefaults());
 
         return http.build();

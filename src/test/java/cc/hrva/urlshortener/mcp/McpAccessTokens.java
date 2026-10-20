@@ -7,6 +7,7 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.Base64;
 import java.util.List;
+import java.util.Map;
 import org.springframework.http.HttpHeaders;
 import org.springframework.mock.web.MockHttpSession;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -38,7 +39,10 @@ public final class McpAccessTokens {
     }
 
     public String issue(final String email, final String resource) throws Exception {
-        final var clientId = register(REGISTRATION);
+        return (String) issueTokens(register(REGISTRATION), email, resource).get("access_token");
+    }
+
+    public Map<String, Object> issueTokens(final String clientId, final String email, final String resource) throws Exception {
         final var code = authorize(clientId, email, resource);
 
         final var tokenRequest = post("/oauth2/token")
@@ -58,7 +62,7 @@ public final class McpAccessTokens {
                 .getResponse()
                 .getContentAsString();
 
-        return JsonPath.read(body, "$.access_token");
+        return JsonPath.read(body, "$");
     }
 
     public String register(final String registration) throws Exception {

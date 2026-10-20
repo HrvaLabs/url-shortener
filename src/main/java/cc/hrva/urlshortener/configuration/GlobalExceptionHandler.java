@@ -5,6 +5,7 @@ import cc.hrva.urlshortener.exception.ApiKeyNotFoundException;
 import cc.hrva.urlshortener.exception.CommonException;
 import cc.hrva.urlshortener.exception.ConnectRequestAlreadyApprovedException;
 import cc.hrva.urlshortener.exception.ConnectRequestExpiredException;
+import cc.hrva.urlshortener.exception.ConnectedAppNotFoundException;
 import cc.hrva.urlshortener.exception.EmailExistsException;
 import cc.hrva.urlshortener.exception.EmailNotVerifiedException;
 import cc.hrva.urlshortener.exception.InvalidApiKeyException;
@@ -17,6 +18,7 @@ import java.util.Map;
 import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
@@ -24,9 +26,11 @@ import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.DisabledException;
 import org.springframework.transaction.TransactionSystemException;
 import org.springframework.validation.FieldError;
+import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ControllerAdvice;
 import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 @ControllerAdvice
 public class GlobalExceptionHandler {
@@ -144,6 +148,26 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(ConnectRequestAlreadyApprovedException.class)
     public ResponseEntity<Map<String, String>> handleConnectRequestAlreadyApproved(final ConnectRequestAlreadyApprovedException ex) {
         return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("error", safeMessage(ex)));
+    }
+
+    @ExceptionHandler(ConnectedAppNotFoundException.class)
+    public ResponseEntity<Map<String, String>> handleConnectedAppNotFound(final ConnectedAppNotFoundException ex) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", safeMessage(ex)));
+    }
+
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ResponseEntity<Map<String, String>> handleNoResourceFound(final NoResourceFoundException ex) {
+        log.info("No handler found method={}", ex.getHttpMethod());
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", "Not found"));
+    }
+
+    @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
+    public ResponseEntity<Map<String, String>> handleMethodNotSupported(final HttpRequestMethodNotSupportedException ex) {
+        log.info("Method not supported method={}", ex.getMethod());
+        final var supportedMethods = ex.getSupportedHttpMethods();
+        return ResponseEntity.status(HttpStatus.METHOD_NOT_ALLOWED)
+                .allow(supportedMethods == null ? new HttpMethod[0] : supportedMethods.toArray(HttpMethod[]::new))
+                .body(Map.of("error", "Method not allowed"));
     }
 
     @ExceptionHandler(CommonException.class)
