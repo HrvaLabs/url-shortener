@@ -312,7 +312,7 @@ class McpEndpointSecurityTest {
             callerDuringCreate.set(SecurityContextHolder.getContext().getAuthentication().getName());
             request.set(invocation.getArgument(0));
             return new UrlResponse(11L, "https://secret-destination.example/path", "secret-alias", LocalDateTime.now(), null, 0L, 5L,
-                    true, "ACTIVE", Set.of("claude", "secret-tag"), false, EMAIL);
+                    true, "ACTIVE", Set.of("ai", "secret-tag"), false, EMAIL);
         });
 
         final var outputBeforeCall = output.length();
@@ -325,7 +325,7 @@ class McpEndpointSecurityTest {
         assertThat(request.get().getShortUrl()).isEqualTo("secret-alias");
         assertThat(request.get().getVisitLimit()).isEqualTo(5L);
         assertThat(request.get().getExpirationDate()).isNotNull();
-        assertThat(request.get().getTags()).containsExactly("claude", "secret-tag");
+        assertThat(request.get().getTags()).containsExactly("ai", "secret-tag");
         assertThat(output.toString().substring(outputBeforeCall))
                 .contains("MCP shorten_url userId=7 urlId=11")
                 .doesNotContain("secret-destination.example")

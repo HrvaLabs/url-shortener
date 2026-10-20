@@ -83,7 +83,7 @@ public class LinkTools {
             title = "Shorten a URL",
             description = "Creates a hrva.cc short link in the signed-in user's account. "
                     + "Returns the full short URL and its destination, plus the visit limit and expiry when set. "
-                    + "Every link created here gets the tag claude.",
+                    + "Every link created here gets the tag ai.",
             annotations = @McpTool.McpAnnotations(
                     title = "Shorten a URL",
                     readOnlyHint = false,
@@ -99,7 +99,7 @@ public class LinkTools {
             @McpToolParam(required = false, description = "Number of visits after which the link stops working") final Long visitLimit,
             @McpToolParam(required = false, description = "When the link stops working, as an ISO-8601 date-time with a time zone, "
                     + "for example 2026-12-31T23:59:00Z or 2026-12-31T23:59:00+01:00") final String expiresAt,
-            @McpToolParam(required = false, description = "Tags for the link. The tag claude is always added, "
+            @McpToolParam(required = false, description = "Tags for the link. The tag ai is always added, "
                     + "and a link keeps at most 10 tags of up to 30 characters each.") final List<String> tags) {
         return McpToolResults.run(SHORTEN_URL, () -> createLink(url, alias, visitLimit, expiresAt, tags));
     }
@@ -155,7 +155,7 @@ public class LinkTools {
                 .shortUrl(StringUtils.trimToNull(alias))
                 .visitLimit(visitLimit)
                 .expirationDate(parseExpiry(expiresAt))
-                .tags(McpLinks.withClaudeTag(tags))
+                .tags(McpLinks.withAiTag(tags))
                 .build();
         McpLinks.validate(validator, createUrlDto);
 

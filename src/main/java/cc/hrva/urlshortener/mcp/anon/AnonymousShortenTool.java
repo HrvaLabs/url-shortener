@@ -78,7 +78,7 @@ public class AnonymousShortenTool {
 
         final var createUrlDto = CreateUrlDto.builder()
                 .longUrl(url)
-                .tags(McpLinks.withClaudeTag(List.of()))
+                .tags(McpLinks.withAiTag(List.of()))
                 .build();
         McpLinks.validate(validator, createUrlDto);
 

@@ -301,7 +301,7 @@ inspector 60 "$RESOURCE" --transport http --stored-auth-only --method tools/call
 show_tool_result
 expect_eq "$(jq -r .isError <<<"$INSPECTOR_RESULT")" false "list_links succeeded"
 
-section "8. shorten_url (Inspector CLI): the new link carries the claude tag"
+section "8. shorten_url (Inspector CLI): the new link carries the ai tag"
 ALIAS=e2e-$(openssl rand -hex 3)
 DESTINATION="https://example.com/hrva-mcp-e2e/$(date +%s)"
 show "arguments: {\"url\":\"$DESTINATION\",\"alias\":\"$ALIAS\",\"tags\":[\"docs\"]}"
@@ -310,14 +310,14 @@ inspector 60 "$RESOURCE" --transport http --stored-auth-only --method tools/call
 show_tool_result
 expect_eq "$(jq -r .isError <<<"$INSPECTOR_RESULT")" false "shorten_url succeeded"
 expect_contains "$(tool_text)" "Short link: $BASE/$ALIAS" "returns the full short link"
-inspector 60 "$RESOURCE" --transport http --stored-auth-only --method tools/call --tool-name list_links --tool-arg tag=claude
-show "list_links tag=claude:"
+inspector 60 "$RESOURCE" --transport http --stored-auth-only --method tools/call --tool-name list_links --tool-arg tag=ai
+show "list_links tag=ai:"
 show_tool_result
-expect_contains "$(tool_text)" "$BASE/$ALIAS -> $DESTINATION" "list_links tag=claude finds it"
-http -H "Authorization: Bearer $APP_JWT" "$BASE/api/v1/urls?tag=claude"
+expect_contains "$(tool_text)" "$BASE/$ALIAS -> $DESTINATION" "list_links tag=ai finds it"
+http -H "Authorization: Bearer $APP_JWT" "$BASE/api/v1/urls?tag=ai"
 LINK_TAGS=$(jq -c --arg alias "$ALIAS" '[.content[] | select(.shortUrl == $alias) | .tags | sort] | first' <<<"$HTTP_BODY")
-show "GET /api/v1/urls?tag=claude -> $ALIAS tags $LINK_TAGS"
-expect_eq "$LINK_TAGS" '["claude","docs"]' "stored tags are claude + the requested one"
+show "GET /api/v1/urls?tag=ai -> $ALIAS tags $LINK_TAGS"
+expect_eq "$LINK_TAGS" '["ai","docs"]' "stored tags are ai + the requested one"
 
 section "9. link_stats (Inspector CLI)"
 show "visiting $BASE/$ALIAS once -> $(curl -s -o /dev/null -w '%{http_code}' "$BASE/$ALIAS")"

@@ -140,7 +140,7 @@ AI apps (Claude, Claude Code, the MCP Inspector) use hrva.cc over MCP. The app i
 ### Endpoints
 | Method | Path | Auth | Notes |
 |--------|------|------|-------|
-| POST | `/mcp` | Bearer MCP access token | Signed-in MCP server, STATELESS protocol. Tools `list_links` (20 per page), `shorten_url` (always adds the tag `claude`), `link_stats` (owner only, even for admins). Run as the token's user. Other methods → 405 |
+| POST | `/mcp` | Bearer MCP access token | Signed-in MCP server, STATELESS protocol. Tools `list_links` (20 per page), `shorten_url` (always adds the tag `ai`), `link_stats` (owner only, even for admins). Run as the token's user. Other methods → 405 |
 | POST | `/mcp/anon` | None (a bearer token is ignored) | Anonymous MCP server, STATELESS, tool `shorten_url` only. Refuses every call unless `app.anonymous-url-creation-enabled` is true |
 | GET | `/.well-known/oauth-protected-resource/mcp` | Public | Resource metadata; the 401 from `/mcp` points here in `WWW-Authenticate` |
 | GET | `/.well-known/oauth-authorization-server` | Public | Authorization server metadata (adds `none` to `token_endpoint_auth_methods_supported`). `/.well-known/openid-configuration` and `/.well-known/oauth-authorization-server/**` → 404 |
@@ -225,7 +225,7 @@ MCP_E2E_PORT=8092 scripts/mcp-e2e.sh      # another app port
 ```
 - Needs Docker, Java 25, Maven, Node (`npx`), `jq`, `curl` and `openssl`. It runs MCP Inspector CLI 2.11.0 (`MCP_E2E_INSPECTOR` overrides), with the Inspector's state in the temp dir.
 - **curl** plays the client, browser and frontend: discovery, DCR, `/oauth2/authorize` → 302 to `/connect`, sign-in as `user@localhost` via `/api/v1/auth/login`, approve, continue, code → token with PKCE and `resource`, one refresh (rotation, replay refused), the connected-apps list, and a disconnect after which `/mcp` returns 401.
-- **The Inspector CLI** signs in on its own (discovery, DCR, PKCE). `scripts/mcp-e2e/fake-browser/open` stands in for the browser and the frontend, so this step needs macOS. It then calls `tools/list`, `list_links`, `shorten_url` (the link must carry `claude`) and `link_stats`, and finally `/mcp/anon` `shorten_url` without a token.
+- **The Inspector CLI** signs in on its own (discovery, DCR, PKCE). `scripts/mcp-e2e/fake-browser/open` stands in for the browser and the frontend, so this step needs macOS. It then calls `tools/list`, `list_links`, `shorten_url` (the link must carry `ai`) and `link_stats`, and finally `/mcp/anon` `shorten_url` without a token.
 - Every step asserts its result and the script exits non-zero on the first failure. Tokens, one-time codes and handles are redacted in the output.
 
 ### Owner acceptance with the real Claude client

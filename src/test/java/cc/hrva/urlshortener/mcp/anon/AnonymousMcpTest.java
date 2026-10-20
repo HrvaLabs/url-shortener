@@ -207,7 +207,7 @@ class AnonymousMcpTest {
             callersDuringCreate.add(SecurityContextHolder.getContext().getAuthentication());
             createRequests.add(invocation.getArgument(0));
             return new UrlResponse(11L, DESTINATION, "abc12", LocalDateTime.now(), null, 0L, null,
-                    true, "ACTIVE", Set.of("claude"), false, null);
+                    true, "ACTIVE", Set.of("ai"), false, null);
         });
     }
 
@@ -279,7 +279,7 @@ class AnonymousMcpTest {
             assertThat(request.getVisitLimit()).isNull();
             assertThat(request.getExpirationDate()).isNull();
             assertThat(request.getPassword()).isNull();
-            assertThat(request.getTags()).containsExactly("claude");
+            assertThat(request.getTags()).containsExactly("ai");
         });
         assertThat(redis.keys()).singleElement().satisfies(key -> {
             assertThat(key).matches(RATE_LIMIT_KEY_PATTERN);

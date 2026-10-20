@@ -160,23 +160,23 @@ class LinkToolsTest {
     }
 
     @Test
-    void shortenAddsClaudeTagOnce() {
+    void shortenAddsAiTagOnce() {
         when(mcpUserResolver.currentUser()).thenReturn(CURRENT_USER);
         when(urlService.saveUrlRouting(any())).thenReturn(created("abc12", null, null));
 
-        linkTools.shortenUrl("https://example.com/page", null, null, null, List.of("claude", "work"));
-        linkTools.shortenUrl("https://example.com/page", null, null, null, List.of("Work", "CLAUDE", "work"));
+        linkTools.shortenUrl("https://example.com/page", null, null, null, List.of("ai", "work"));
+        linkTools.shortenUrl("https://example.com/page", null, null, null, List.of("Work", "AI", "work"));
         linkTools.shortenUrl("https://example.com/page", null, null, null, null);
 
         final var request = ArgumentCaptor.forClass(CreateUrlDto.class);
         verify(urlService, times(3)).saveUrlRouting(request.capture());
-        assertThat(request.getAllValues().get(0).getTags()).containsExactly("claude", "work");
-        assertThat(request.getAllValues().get(1).getTags()).containsExactly("claude", "work");
-        assertThat(request.getAllValues().get(2).getTags()).containsExactly("claude");
+        assertThat(request.getAllValues().get(0).getTags()).containsExactly("ai", "work");
+        assertThat(request.getAllValues().get(1).getTags()).containsExactly("ai", "work");
+        assertThat(request.getAllValues().get(2).getTags()).containsExactly("ai");
     }
 
     @Test
-    void shortenKeepsClaudeTagWhenTheTagLimitIsReached() {
+    void shortenKeepsAiTagWhenTheTagLimitIsReached() {
         when(mcpUserResolver.currentUser()).thenReturn(CURRENT_USER);
         when(urlService.saveUrlRouting(any())).thenReturn(created("abc12", null, null));
         final var tenTags = IntStream.rangeClosed(1, 10).mapToObj(index -> "tag" + index).toList();
@@ -185,7 +185,7 @@ class LinkToolsTest {
 
         final var request = ArgumentCaptor.forClass(CreateUrlDto.class);
         verify(urlService).saveUrlRouting(request.capture());
-        assertThat(request.getValue().getTags()).hasSize(10).contains("claude");
+        assertThat(request.getValue().getTags()).hasSize(10).contains("ai");
     }
 
     @Test
@@ -304,7 +304,7 @@ class LinkToolsTest {
     void shortenLogsIdsOnly(final CapturedOutput output) {
         when(mcpUserResolver.currentUser()).thenReturn(CURRENT_USER);
         when(urlService.saveUrlRouting(any())).thenReturn(new UrlResponse(11L, "https://secret-destination.example/path", "secret-alias",
-                LocalDateTime.now(), null, 0L, null, true, "ACTIVE", Set.of("claude", "secret-tag"), false, "user@localhost"));
+                LocalDateTime.now(), null, 0L, null, true, "ACTIVE", Set.of("ai", "secret-tag"), false, "user@localhost"));
 
         linkTools.shortenUrl("https://secret-destination.example/path", "secret-alias", null, null, List.of("secret-tag"));
 
@@ -442,7 +442,7 @@ class LinkToolsTest {
     private static UrlResponse created(final String alias, final Long visitLimit, final LocalDateTime expirationDate) {
         final var destination = "menu".equals(alias) ? "https://example.com/menu" : "https://example.com/page";
         return new UrlResponse(11L, destination, alias, LocalDateTime.now(), expirationDate, 0L, visitLimit, true, "ACTIVE",
-                Set.of("claude"), false, "user@localhost");
+                Set.of("ai"), false, "user@localhost");
     }
 
     private static UrlAnalyticsDto analytics(final Long id, final String alias) {

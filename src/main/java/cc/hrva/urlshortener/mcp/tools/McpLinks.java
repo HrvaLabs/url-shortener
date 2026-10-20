@@ -13,13 +13,13 @@ import java.util.stream.Stream;
 
 public final class McpLinks {
 
-    private static final String CLAUDE_TAG = "claude";
+    private static final String AI_TAG = "ai";
 
     private McpLinks() {}
 
-    public static Set<String> withClaudeTag(final List<String> tags) {
+    public static Set<String> withAiTag(final List<String> tags) {
         final var requested = Objects.requireNonNullElse(tags, List.<String>of());
-        return TagNormalizer.normalize(Stream.concat(Stream.of(CLAUDE_TAG), requested.stream()).toList());
+        return TagNormalizer.normalize(Stream.concat(Stream.of(AI_TAG), requested.stream()).toList());
     }
 
     public static void validate(final Validator validator, final CreateUrlDto createUrlDto) {
