@@ -128,6 +128,12 @@ class AnonymousMcpTest {
             {"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}""";
     private static final String INITIALIZE = """
             {"jsonrpc":"2.0","id":3,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"1.0.0"}}}""";
+    private static final String RESOURCES_LIST = """
+            {"jsonrpc":"2.0","id":7,"method":"resources/list","params":{}}""";
+    private static final String RESOURCE_TEMPLATES_LIST = """
+            {"jsonrpc":"2.0","id":8,"method":"resources/templates/list","params":{}}""";
+    private static final String PROMPTS_LIST = """
+            {"jsonrpc":"2.0","id":9,"method":"prompts/list","params":{}}""";
     private static final String SHORTEN_URL_CALL = """
             {"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"shorten_url","arguments":{"url":"https://secret-destination.example/path","alias":"chosen-alias","tags":["chosen-tag"]}}}""";
     private static final List<String> INVALID_SHORTEN_URL_CALLS = List.of(
@@ -221,7 +227,16 @@ class AnonymousMcpTest {
                 .getResponse()
                 .getContentAsString();
         final Map<String, Object> capabilities = JsonPath.read(initialize, "$.result.capabilities");
-        assertThat(capabilities).containsOnlyKeys("tools");
+        assertThat(capabilities).containsOnlyKeys("tools", "resources", "prompts");
+        mockMvc.perform(anonymousMcpRequest(RESOURCES_LIST))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.result.resources").isEmpty());
+        mockMvc.perform(anonymousMcpRequest(RESOURCE_TEMPLATES_LIST))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.result.resourceTemplates").isEmpty());
+        mockMvc.perform(anonymousMcpRequest(PROMPTS_LIST))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.result.prompts").isEmpty());
 
         final var token = accessTokens.issue(EMAIL, RESOURCE);
         final var signedIn = mockMvc.perform(post("/mcp")

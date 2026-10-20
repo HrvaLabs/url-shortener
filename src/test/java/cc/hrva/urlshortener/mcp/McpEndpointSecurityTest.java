@@ -132,6 +132,12 @@ class McpEndpointSecurityTest {
             {"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"link_stats","arguments":{"link":"https://hrva.cc/secret-alias"}}}""";
     private static final String INITIALIZE = """
             {"jsonrpc":"2.0","id":3,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"1.0.0"}}}""";
+    private static final String RESOURCES_LIST = """
+            {"jsonrpc":"2.0","id":7,"method":"resources/list","params":{}}""";
+    private static final String RESOURCE_TEMPLATES_LIST = """
+            {"jsonrpc":"2.0","id":8,"method":"resources/templates/list","params":{}}""";
+    private static final String PROMPTS_LIST = """
+            {"jsonrpc":"2.0","id":9,"method":"prompts/list","params":{}}""";
     private static final String GENERIC_TOOL_ERROR = "Something went wrong on hrva.cc. Try again in a moment.";
     private static final String INFRASTRUCTURE_HOST = "db.internal.example:5432";
     private static final RSAKey SIGNING_KEY = generateSigningKey();
@@ -392,7 +398,7 @@ class McpEndpointSecurityTest {
     }
 
     @Test
-    void initializeAdvertisesToolsOnly() throws Exception {
+    void initializeAdvertisesToolsAndEmptyResourcesAndPrompts() throws Exception {
         final var token = accessTokens.issue(EMAIL, RESOURCE);
 
         final var body = mockMvc.perform(mcpRequest(INITIALIZE).header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
@@ -403,7 +409,22 @@ class McpEndpointSecurityTest {
                 .getContentAsString();
 
         final Map<String, Object> capabilities = JsonPath.read(body, "$.result.capabilities");
-        assertThat(capabilities).containsOnlyKeys("tools");
+        assertThat(capabilities).containsOnlyKeys("tools", "resources", "prompts");
+    }
+
+    @Test
+    void clientDiscoveryListsAreEmptyNotErrors() throws Exception {
+        final var token = accessTokens.issue(EMAIL, RESOURCE);
+
+        mockMvc.perform(mcpRequest(RESOURCES_LIST).header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.result.resources").isEmpty());
+        mockMvc.perform(mcpRequest(RESOURCE_TEMPLATES_LIST).header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.result.resourceTemplates").isEmpty());
+        mockMvc.perform(mcpRequest(PROMPTS_LIST).header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.result.prompts").isEmpty());
     }
 
     @Test

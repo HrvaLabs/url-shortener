@@ -61,7 +61,7 @@ public class AnonymousMcpConfiguration {
 
         McpServer.sync(transport)
                 .serverInfo(SERVER_NAME, SERVER_VERSION)
-                .capabilities(ServerCapabilities.builder().tools(false).build())
+                .capabilities(ServerCapabilities.builder().tools(false).resources(false, false).prompts(false).build())
                 .jsonMapper(mcpJsonMapper)
                 .immediateExecution(true)
                 .validateToolInputs(false)

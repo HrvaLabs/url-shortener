@@ -26,8 +26,8 @@ spring:
         name: hrva.cc
         protocol: STATELESS
         capabilities:
-          resource: false
-          prompt: false
+          resource: true
+          prompt: true
           completion: false
         streamable-http:
           mcp-endpoint: /mcp
