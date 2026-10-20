@@ -32,6 +32,7 @@ public class User {
     @Email(message = "Enter a valid email address (e.g. you@example.com)")
     private String email;
 
+    @JsonIgnore
     @NotBlank(message = "Password is required")
     @Length(min = 8, message = "Password must be at least 8 characters long")
     private String password;
