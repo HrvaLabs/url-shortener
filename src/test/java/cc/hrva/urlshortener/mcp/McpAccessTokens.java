@@ -37,7 +37,7 @@ public final class McpAccessTokens {
         this.mockMvc = mockMvc;
     }
 
-    String issue(final String email, final String resource) throws Exception {
+    public String issue(final String email, final String resource) throws Exception {
         final var clientId = register(REGISTRATION);
         final var code = authorize(clientId, email, resource);
 

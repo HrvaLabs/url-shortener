@@ -9,9 +9,7 @@ import cc.hrva.urlshortener.exception.UrlNotFoundException;
 import cc.hrva.urlshortener.exception.UrlValidationException;
 import cc.hrva.urlshortener.service.AnalyticsService;
 import cc.hrva.urlshortener.service.UrlService;
-import cc.hrva.urlshortener.util.TagNormalizer;
 import io.modelcontextprotocol.spec.McpSchema.CallToolResult;
-import jakarta.validation.ConstraintViolation;
 import jakarta.validation.Validator;
 import java.net.URI;
 import java.time.LocalDateTime;
@@ -25,10 +23,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.Set;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
@@ -47,7 +43,6 @@ public class LinkTools {
     private static final String LIST_LINKS = "list_links";
     private static final String SHORTEN_URL = "shorten_url";
     private static final String LINK_STATS = "link_stats";
-    private static final String CLAUDE_TAG = "claude";
     private static final int PAGE_SIZE = 20;
     private static final Sort NEWEST_FIRST = Sort.by(Sort.Direction.DESC, "createDate");
     private static final Pattern SCHEME = Pattern.compile("^[a-zA-Z][a-zA-Z0-9+.-]*://");
@@ -160,9 +155,9 @@ public class LinkTools {
                 .shortUrl(StringUtils.trimToNull(alias))
                 .visitLimit(visitLimit)
                 .expirationDate(parseExpiry(expiresAt))
-                .tags(withClaudeTag(tags))
+                .tags(McpLinks.withClaudeTag(tags))
                 .build();
-        validate(createUrlDto);
+        McpLinks.validate(validator, createUrlDto);
 
         final var created = urlService.saveUrlRouting(createUrlDto);
 
@@ -181,21 +176,6 @@ public class LinkTools {
                     .toLocalDateTime();
         } catch (final DateTimeParseException exception) {
             throw new UrlValidationException(EXPIRY_FORMAT_ERROR);
-        }
-    }
-
-    private static Set<String> withClaudeTag(final List<String> tags) {
-        final var requested = Objects.requireNonNullElse(tags, List.<String>of());
-        return TagNormalizer.normalize(Stream.concat(Stream.of(CLAUDE_TAG), requested.stream()).toList());
-    }
-
-    private void validate(final CreateUrlDto createUrlDto) {
-        final var violations = validator.validate(createUrlDto);
-        if (!violations.isEmpty()) {
-            throw new UrlValidationException(violations.stream()
-                    .map(ConstraintViolation::getMessage)
-                    .sorted()
-                    .collect(Collectors.joining("; ")));
         }
     }
 
@@ -265,7 +245,7 @@ public class LinkTools {
     }
 
     private String shortLink(final String alias) {
-        return "%s/%s".formatted(appProperties.getMcp().getIssuer(), alias);
+        return McpLinks.shortLink(appProperties.getMcp().getIssuer(), alias);
     }
 
     private String host() {
