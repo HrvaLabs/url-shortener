@@ -16,6 +16,7 @@ import cc.hrva.urlshortener.dto.UserUpdateDto;
 import cc.hrva.urlshortener.exception.ApiException;
 import cc.hrva.urlshortener.exception.NoAuthorizationException;
 import cc.hrva.urlshortener.exception.UserNotFoundException;
+import cc.hrva.urlshortener.mcp.apps.ConnectedAppsService;
 import cc.hrva.urlshortener.model.ApiKey;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.repository.ApiKeyRepository;
@@ -67,6 +68,7 @@ public class DefaultUserService implements UserService {
     private final VerificationTokenService verificationTokenService;
     private final VerificationTokenRepository verificationTokenRepository;
     private final UserUpdateDtoToUserConverter userUpdateDtoToUserConverter;
+    private final ConnectedAppsService connectedAppsService;
 
     @Override
     @Transactional
@@ -99,6 +101,11 @@ public class DefaultUserService implements UserService {
     public User fetchUserFromEmail(final String email) {
         log.info("User login email={}", email);
 
+        return fetchActiveUserByEmail(email);
+    }
+
+    @Override
+    public User fetchActiveUserByEmail(final String email) {
         final var user = userRepository.findByEmail(email)
                 .orElseThrow(() -> new UserNotFoundException("User not found"));
 
@@ -198,6 +205,7 @@ public class DefaultUserService implements UserService {
         verificationTokenRepository.deleteByUser(user);
         twoFactorRecoveryCodeRepository.deleteByUser(user);
         urlRepository.deleteByOwner(user);
+        disconnectConnectedApps(user.getId(), user.getEmail());
         // API keys are removed via CascadeType.ALL on User.apiKeys when the user is deleted.
         userRepository.delete(user);
         log.info("Deleted user id={} and all owned URLs and API keys", user.getId());
@@ -220,9 +228,13 @@ public class DefaultUserService implements UserService {
             throw new ApiException("Email cannot be changed for %s accounts".formatted(existingUser.getAuthProvider()));
         }
 
+        final var previousEmail = existingUser.getEmail();
         final var wasActive = !Boolean.FALSE.equals(existingUser.getActive());
         final var updatedUser = userRepository.save(Objects.requireNonNull(userUpdateDtoToUserConverter.convert(userUpdateDto)));
 
+        if (!Objects.equals(previousEmail, updatedUser.getEmail())) {
+            disconnectConnectedApps(updatedUser.getId(), previousEmail);
+        }
         if (wasActive && Boolean.FALSE.equals(updatedUser.getActive())) {
             cascadeDeactivation(updatedUser);
         }
@@ -311,7 +323,15 @@ public class DefaultUserService implements UserService {
             log.info("Revoked {} API keys for deactivated user id={}", activeKeys.size(), user.getId());
         }
 
+        disconnectConnectedApps(user.getId(), user.getEmail());
         sendingEmailService.sendEmailAccountDeactivated(user);
+    }
+
+    private void disconnectConnectedApps(final Long userId, final String email) {
+        final var authorizations = connectedAppsService.disconnectAll(email);
+        if (authorizations > 0) {
+            log.info("Removed {} MCP authorizations for user id={}", authorizations, userId);
+        }
     }
 
 }

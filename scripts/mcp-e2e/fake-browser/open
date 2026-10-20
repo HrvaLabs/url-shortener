@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# Stands in for the user's browser when the MCP Inspector opens its authorization URL with macOS `open`.
+# It follows /oauth2/authorize to the frontend /connect page, plays the frontend (approve with the app JWT),
+# follows continueUrl back to /oauth2/authorize and delivers the code to the Inspector's callback.
+# scripts/mcp-e2e.sh puts this directory first on PATH and exports the MCP_E2E_* variables.
+set -euo pipefail
+
+: "${MCP_E2E_BASE:?}" "${MCP_E2E_FRONTEND_URL:?}" "${MCP_E2E_APP_JWT:?}" "${MCP_E2E_BROWSER_LOG:?}" "${MCP_E2E_WORK:?}"
+
+# shellcheck source-path=SCRIPTDIR/.. source=lib.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib.sh"
+
+browse() {
+    local cookies handle continue_url
+    cookies=$(mktemp "$MCP_E2E_WORK/browser-cookies.XXXXXX")
+
+    echo "[browser] open $1"
+    http -c "$cookies" -b "$cookies" "$1"
+    echo "[browser] GET /oauth2/authorize -> $HTTP_STATUS $HTTP_LOCATION"
+    [[ $HTTP_LOCATION == "$MCP_E2E_FRONTEND_URL/connect?request="* ]] || fail "expected a redirect to the frontend /connect page"
+    handle=${HTTP_LOCATION##*request=}
+
+    http -H "Authorization: Bearer $MCP_E2E_APP_JWT" "$MCP_E2E_BASE/api/v1/connect/requests/$handle"
+    echo "[frontend] GET /api/v1/connect/requests/<handle> -> $HTTP_STATUS $HTTP_BODY"
+    http -X POST -H "Authorization: Bearer $MCP_E2E_APP_JWT" -H "Origin: $MCP_E2E_FRONTEND_URL" \
+        "$MCP_E2E_BASE/api/v1/connect/requests/$handle/approve"
+    echo "[frontend] POST /api/v1/connect/requests/<handle>/approve (Bearer app JWT) -> $HTTP_STATUS $HTTP_BODY"
+    continue_url=$(jq -r .continueUrl <<<"$HTTP_BODY")
+
+    http -c "$cookies" -b "$cookies" "$continue_url"
+    echo "[browser] GET continueUrl -> $HTTP_STATUS $HTTP_LOCATION"
+    http -c "$cookies" -b "$cookies" "$HTTP_LOCATION"
+    echo "[browser] GET /oauth2/authorize -> $HTTP_STATUS $HTTP_LOCATION"
+    http "$HTTP_LOCATION"
+    echo "[browser] GET the Inspector's callback -> $HTTP_STATUS"
+}
+
+{ browse "${!#}" 2>&1 | redact; } </dev/null >>"$MCP_E2E_BROWSER_LOG" 2>&1 &

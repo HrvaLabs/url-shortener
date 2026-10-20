@@ -22,14 +22,14 @@ public class DefaultSafeBrowsingService implements SafeBrowsingService {
 
     @Override
     public List<String> checkUrlsForThreats(final List<String> urls) {
-        log.debug("SafeBrowsing check urls={}", urls);
+        log.debug("SafeBrowsing check count={}", urls.size());
         try {
             final var searchRequest = googleSafeBrowsingApi.createUrlSearchRequest(safebrowsing, urls);
             final var response = googleSafeBrowsingApi.executeSearch(searchRequest);
             return googleSafeBrowsingApi.extractThreatUrls(response);
         } catch (final IOException exception) {
-            log.error("ALERT Safe Browsing API unreachable failClosed={} urls={}",
-                    appProperties.isSafeBrowsingFailClosed(), urls, exception);
+            log.error("ALERT Safe Browsing API unreachable failClosed={} count={}",
+                    appProperties.isSafeBrowsingFailClosed(), urls.size(), exception);
             if (appProperties.isSafeBrowsingFailClosed()) {
                 throw new UrlValidationException("URL safety check is temporarily unavailable. Please try again later.");
             }

@@ -29,7 +29,17 @@ app:
   contact-email: info@localhost
   server-url: localhost
   frontend-url: http://localhost:3000
-  anonymous-url-creation-enabled: false
+  # Local profile only, so /mcp/anon works locally; production keeps application.yaml's value.
+  anonymous-url-creation-enabled: true
+  mcp:
+    issuer: http://localhost:8080
+    # NOT A SECRET: a committed dev-only key for the local profile. Never use it anywhere else;
+    # every other environment sets its own key in APP_MCP_SIGNING_KEY (see README.md).
+    signing-key: '{"p":"-vpM59sZD6CvoA7KQSG_SScurf04A16BWK47hI0iEGTispZlr1NvA2HwjNGOYagfCuwBHWvhqHHtuOQ0g7nOnqPVHu_N0iA8Iwy2T87y9PskGa3DWuz1NbB84zioxt7CQTCnRZW_0XVz2_AyFao7QYJUZ1O-t_fw-qYVrAAwiTc","kty":"RSA","q":"04nqfefId7wysM59uFRwmAjdTDF3QksU3ErjypSu6PEZrM6bo5pi_C1fXAeCypec-OnKtFSI8czMp3loWeUu0DHnUH7C3M9ni8JccC37qmJQPOTuHSfVVkjXtLygGKEqhqlZHQdQoUDoHXm1OPstbFxRddRj5OUJfg__LrrLqZU","d":"JxeReXkg7_SbOdFmuzqymYeanEErPZY-DE9ClejS9zKQkVDkYQYNmRE_j6I--SNf33NCs115IYErA7aEAnIxqyxxdd60b7Q4ub9W4c4UgypuYdEm-XpXzBdD1YePnewdNssjx6tAjfsVJAfidUbKXkDolhK0Ls6i4w3rNj2fhNLKsqhztnA6m0lVP_pUfgezARNxeIt-17BympOQ85zkQuPx9Mq7EFY5BHN0hJaGIhxTf-3OKxep4HY3lKOWgPiTG_m63lt_rl6nc72l32iVzavdk1zo_DvwL7kPem20YQEt2rju9GLGD44vmUGK-1G3HE4C6X6lRy_Yx2u4wRTD1Q","e":"AQAB","use":"sig","kid":"hrva-local-dev","qi":"wDXTGxlME72te8OhmHWJpXjxxoYNebdRNjwynOQsJJA-hvEResoxLDGpEXzKvvrIh4jnpYGMZQKhxdzIeNTWrXJoyrBFXatnvNHN51Tys1lCOHRb8PrxOqmThigfbZSmfb717rlbr8owIV0p8vIoKTpU2jyw4oI8N72iIw_XuMo","dp":"s3nfGUbTCxvru9gXxq_tbNC6Tu3v6mjgspwWL9oFbBfZDcEDgnd1wcN-FBWfbjKd0F-pBHMrchvW1gtLio-LNGMQewkd9I_csWvbzALAN3SJAlwCgblGOVi2Vn8kIuMVoyy50cce3xjQ-40vI9MSgOxEk4eNsV17VKMEiHWyP80","alg":"RS256","dq":"zgdnYdVcBHJCFL4o6F0lhI4tq0YKV4D1AlHWZrpFWQ9p6Esaf0-g1OgEFogiNNtRwYVDLjufXZIQSZUPs25qF9Bi8J1lgNZojVBx47iFgr9aUtTNrYvcVrt_i8KjUxm1Z46NAp7bQxMKf5rIjITnCsEnfdGssYT5p9RAv-yi67k","n":"z2ODOntpyBnYXa4tQEfnonYPpJDs4Mp_EDjXNeX4MBvYv5esu9dQKz7Vm-JBKSG6CTQm-NK4bt-hmteIaFK6Y53-c8g4aod5bM6JhRzSXOuReCbke5O6i8GfYr4IIiVN0qUcat5XH7AoRFLm0I9lGPIaHEWiV9x5gzPtOndWiaJTllzEvgUu8vKNkW_lfgY050b_OmcaNd2qW7xRCC3KArxohyO93EN7697LCflTTdM8vC28p1PxAQHEgYdrpX-i7EItbm1_KCMKu72qCIaTzpgu-fHUxxGIBOtt3qi5AuUJqlWh5b58739SALTx-Hhiup-sGHL995QsIARM63IsAw"}'
 
 server:
   port: 8080
+  servlet:
+    session:
+      cookie:
+        secure: false

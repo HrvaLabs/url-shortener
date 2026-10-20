@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.9.xsd">
+
+    <changeSet author="khrvacic" id="oauth2-authorization-principal-client-index">
+        <createIndex tableName="oauth2_authorization" indexName="idx_oauth2_authorization_principal_client">
+            <column name="principal_name"/>
+            <column name="registered_client_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="oauth2_authorization" indexName="idx_oauth2_authorization_principal_client"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet author="khrvacic" id="oauth2-registered-client-client-id-unique-index">
+        <createIndex tableName="oauth2_registered_client" indexName="ux_oauth2_registered_client_client_id" unique="true">
+            <column name="client_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="oauth2_registered_client" indexName="ux_oauth2_registered_client_client_id"/>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>

@@ -25,6 +25,7 @@ public interface UserService {
     void userHasLoggedIn(User user);
     void deactivateUnusedUserAccounts();
     User fetchUserFromEmail(String email);
+    User fetchActiveUserByEmail(String email);
     User updateUser(UserUpdateDto userUpdateDto);
     User updatePassword(UpdatePasswordDto updatePasswordDto);
     User resetPassword(PasswordResetDto passwordResetDto);

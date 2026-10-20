@@ -7,5 +7,6 @@ public interface AnalyticsService {
 
     AnalyticsOverviewDto getOverview();
     UrlAnalyticsDto getUrlAnalytics(Long urlId);
+    UrlAnalyticsDto getUrlAnalyticsForOwner(Long urlId);
 
 }

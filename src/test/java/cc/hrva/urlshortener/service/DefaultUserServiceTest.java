@@ -14,6 +14,7 @@ import cc.hrva.urlshortener.dto.UserSearchDto;
 import cc.hrva.urlshortener.dto.UserUpdateDto;
 import cc.hrva.urlshortener.exception.NoAuthorizationException;
 import cc.hrva.urlshortener.exception.UserNotFoundException;
+import cc.hrva.urlshortener.mcp.apps.ConnectedAppsService;
 import cc.hrva.urlshortener.model.ApiKey;
 import cc.hrva.urlshortener.model.ResetToken;
 import cc.hrva.urlshortener.model.User;
@@ -30,6 +31,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
@@ -45,6 +48,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -100,12 +104,15 @@ class DefaultUserServiceTest {
     @Mock
     private UserUpdateDtoToUserConverter userUpdateDtoToUserConverter;
 
+    @Mock
+    private ConnectedAppsService connectedAppsService;
+
     @BeforeEach
     void setUp() {
         this.userService = new DefaultUserService(appProperties, authValidator, urlRepository, userRepository,
                 passwordEncoder, apiKeyRepository, emailLogRepository, ipAddressRepository, resetTokenService,
                 resetTokenRepository, twoFactorRecoveryCodeRepository, userToUserDtoConverter, sendingEmailService,
-                verificationTokenService, verificationTokenRepository, userUpdateDtoToUserConverter);
+                verificationTokenService, verificationTokenRepository, userUpdateDtoToUserConverter, connectedAppsService);
         lenient().when(userRepository.findByEmail(null)).thenReturn(Optional.empty());
     }
 
@@ -171,6 +178,37 @@ class DefaultUserServiceTest {
         assertThatThrownBy(() -> userService.fetchUserFromEmail("test@example.com"))
                 .isInstanceOf(UserNotFoundException.class)
                 .hasMessage("User is inactive, please contact administrator");
+    }
+
+    @Test
+    @ExtendWith(OutputCaptureExtension.class)
+    void shouldFetchActiveUserByEmailWithoutLoggingTheEmail(final CapturedOutput output) {
+        final var user = User.builder().id(1L).email("quiet@example.com").active(true).build();
+        when(userRepository.findByEmail("quiet@example.com")).thenReturn(Optional.of(user));
+
+        final var result = userService.fetchActiveUserByEmail("quiet@example.com");
+
+        assertThat(result).isEqualTo(user);
+        assertThat(output).doesNotContain("quiet@example.com");
+    }
+
+    @Test
+    void shouldFailFetchActiveUserByEmailWhenInactive() {
+        final var user = User.builder().id(1L).email("test@example.com").active(false).build();
+        when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
+
+        assertThatThrownBy(() -> userService.fetchActiveUserByEmail("test@example.com"))
+                .isInstanceOf(UserNotFoundException.class)
+                .hasMessage("User is inactive, please contact administrator");
+    }
+
+    @Test
+    void shouldFailFetchActiveUserByEmailWhenUnknown() {
+        when(userRepository.findByEmail("missing@example.com")).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> userService.fetchActiveUserByEmail("missing@example.com"))
+                .isInstanceOf(UserNotFoundException.class)
+                .hasMessage("User not found");
     }
 
     @Test
@@ -475,5 +513,109 @@ class DefaultUserServiceTest {
 
         verify(userRepository, org.mockito.Mockito.never()).delete(any(User.class));
         SecurityContextHolder.clearContext();
+    }
+
+    @Test
+    void shouldDisconnectConnectedAppsWhenAdminDeletesUser() {
+        final var user = User.builder().id(1L).email("test@example.com").build();
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(urlRepository.findByOwner(user)).thenReturn(Collections.emptyList());
+
+        userService.deleteUserById(1L);
+
+        verify(connectedAppsService).disconnectAll("test@example.com");
+    }
+
+    @Test
+    void shouldDisconnectConnectedAppsWhenUserDeletesOwnAccount() {
+        final var user = User.builder().id(1L).email("g@example.com").authProvider("google").build();
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken("g@example.com", null));
+        when(userRepository.findByEmail("g@example.com")).thenReturn(Optional.of(user));
+
+        userService.deleteOwnAccount(new DeleteAccountDto());
+
+        verify(connectedAppsService).disconnectAll("g@example.com");
+        SecurityContextHolder.clearContext();
+    }
+
+    @Test
+    void shouldKeepConnectedAppsWhenSelfDeleteIsRefused() {
+        final var user = User.builder().id(1L).email("test@example.com").authProvider("local").password("enc").build();
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken("test@example.com", null));
+        when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
+        org.mockito.Mockito.doThrow(new NoAuthorizationException("Current password is incorrect"))
+                .when(authValidator).passwordMatchesCurrentPassword(user, "wrong");
+
+        assertThatThrownBy(() -> userService.deleteOwnAccount(DeleteAccountDto.builder().password("wrong").build()))
+                .isInstanceOf(NoAuthorizationException.class);
+
+        verifyNoInteractions(connectedAppsService);
+        SecurityContextHolder.clearContext();
+    }
+
+    @Test
+    void shouldDisconnectConnectedAppsWhenDeactivatingUnusedAccount() {
+        final var user = User.builder().id(1L).email("idle@example.com").active(true).build();
+        when(appProperties.getDeactivateUserAccountAfterDays()).thenReturn(30L);
+        when(userRepository.findByLastLoginIsLessThanEqualAndActiveTrue(any(java.time.LocalDateTime.class)))
+                .thenReturn(Collections.singletonList(user));
+        when(userRepository.saveAll(any())).thenReturn(Collections.singletonList(user));
+        when(apiKeyRepository.findByOwnerAndActiveTrue(user)).thenReturn(Collections.emptyList());
+
+        userService.deactivateUnusedUserAccounts();
+
+        verify(connectedAppsService).disconnectAll("idle@example.com");
+    }
+
+    @Test
+    void shouldDisconnectConnectedAppsWhenAdminDeactivatesUser() {
+        final var updateDto = UserUpdateDto.builder().id(1L).active(false).build();
+        final var existingUser = User.builder().id(1L).email("test@example.com").authProvider("local").active(true).build();
+        when(userRepository.findById(1L)).thenReturn(Optional.of(existingUser));
+        when(userUpdateDtoToUserConverter.convert(updateDto)).thenAnswer(invocation -> {
+            existingUser.setActive(false);
+            return existingUser;
+        });
+        when(userRepository.save(existingUser)).thenReturn(existingUser);
+        when(apiKeyRepository.findByOwnerAndActiveTrue(existingUser)).thenReturn(Collections.emptyList());
+
+        userService.updateUser(updateDto);
+
+        verify(connectedAppsService).disconnectAll("test@example.com");
+    }
+
+    @Test
+    void shouldDisconnectConnectedAppsUnderPreviousEmailWhenAdminChangesEmail() {
+        final var updateDto = UserUpdateDto.builder().id(1L).email("new@example.com").build();
+        final var existingUser = User.builder().id(1L).email("old@example.com").authProvider("local").active(true).build();
+        when(userRepository.findById(1L)).thenReturn(Optional.of(existingUser));
+        when(userUpdateDtoToUserConverter.convert(updateDto)).thenAnswer(invocation -> {
+            existingUser.setEmail("new@example.com");
+            return existingUser;
+        });
+        when(userRepository.save(existingUser)).thenReturn(existingUser);
+
+        userService.updateUser(updateDto);
+
+        verify(connectedAppsService).disconnectAll("old@example.com");
+        verify(connectedAppsService, org.mockito.Mockito.never()).disconnectAll("new@example.com");
+    }
+
+    @Test
+    void shouldKeepConnectedAppsWhenUpdateKeepsEmailAndActive() {
+        final var updateDto = UserUpdateDto.builder().id(1L).email("test@example.com").apiKeySlots(6L).active(true).build();
+        final var existingUser = User.builder().id(1L).email("test@example.com").authProvider("local").active(true).build();
+        when(userRepository.findById(1L)).thenReturn(Optional.of(existingUser));
+        when(userUpdateDtoToUserConverter.convert(updateDto)).thenAnswer(invocation -> {
+            existingUser.setApiKeySlots(6L);
+            return existingUser;
+        });
+        when(userRepository.save(existingUser)).thenReturn(existingUser);
+
+        userService.updateUser(updateDto);
+
+        verifyNoInteractions(connectedAppsService);
     }
 }

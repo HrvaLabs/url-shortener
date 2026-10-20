@@ -20,6 +20,21 @@ spring:
   web:
     error:
       include-message: always
+  ai:
+    mcp:
+      server:
+        name: hrva.cc
+        protocol: STATELESS
+        capabilities:
+          resource: false
+          prompt: false
+          completion: false
+        streamable-http:
+          mcp-endpoint: /mcp
+
+logging:
+  level:
+    io.modelcontextprotocol: INFO
 
 management:
   endpoints:
@@ -33,6 +48,12 @@ management:
 
 server:
   forward-headers-strategy: framework
+  servlet:
+    session:
+      cookie:
+        same-site: lax
+        http-only: true
+        secure: true
 
 app:
   app-name: hrva.cc Url Shortener
@@ -52,3 +73,5 @@ app:
   url-expiration-notification-hours: 24
   registration-enabled: true
   anonymous-url-creation-enabled: false
+  mcp:
+    issuer: https://hrva.cc

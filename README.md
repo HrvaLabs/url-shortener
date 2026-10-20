@@ -36,6 +36,31 @@ Welcome to the URL-Shortener project! This application allows you to shorten URL
 - **Integration with Other Services**: Integrate with popular services like Slack, Discord, and Microsoft Teams for easier sharing and notifications.
 - **Dark Mode**: Add a dark mode option for the dashboard to reduce eye strain and improve usability in low-light environments.
 
+## Production Checklist: MCP Connector
+Before the first deploy of the MCP connector (AI apps such as Claude using hrva.cc at `https://hrva.cc/mcp`). How it works: `AGENTS.md` → MCP connector.
+
+1. **Signing key.** Generate a private RSA JWK and set it as the secret env var `APP_MCP_SIGNING_KEY`; the app doesn't start without it. Keep it out of git and logs, and never reuse the committed `local` profile key.
+   ```bash
+   node -e "const {generateKeyPairSync, randomUUID} = require('node:crypto'); const {privateKey} = generateKeyPairSync('rsa', {modulusLength: 2048}); console.log(JSON.stringify({...privateKey.export({format: 'jwk'}), kid: randomUUID(), use: 'sig', alg: 'RS256'}))"
+   ```
+2. **Cloudflare-only origin.** The per-IP limits (anonymous MCP links, app registrations, logins) trust the `CF-Connecting-IP` header, so the origin must accept traffic from Cloudflare only: a Cloudflare Tunnel, or a firewall that lets only [Cloudflare's IP ranges](https://www.cloudflare.com/ips/) reach the app. Otherwise anyone can forge the header.
+3. **Cloudflare rules for the MCP paths.** MCP clients are not browsers: a Cloudflare challenge hands them an HTML page where they expect JSON, and the connection fails.
+   - Exempt `/mcp`, `/mcp/anon`, `/oauth2/*` and `/.well-known/*` from WAF managed challenges and from Super Bot Fight Mode (a custom rule with the Skip action), or verify that nothing challenges them. Bot Fight Mode on the Free plan can't be skipped per path; if it challenges these paths, turn it off. The smoke test (step 9) shows it: a challenge returns HTML instead of JSON or a bare 401.
+   - Don't cache `GET /oauth2/authorize` or `/.well-known/*` at the edge (no Cache Everything rule over them). Every `/oauth2/authorize` response sets its own session cookie and connect handle.
+   - Optional: a Cloudflare rate-limiting rule on `GET /oauth2/authorize`. Each unauthenticated hit allocates a 10-minute session and a Redis key, and the app has no per-IP limit there.
+4. **Redis 6.2 or newer.** The login bridge redeems one-time codes with `GETDEL`.
+5. **Anonymous MCP.** Decide `APP_ANONYMOUS_URL_CREATION_ENABLED` (`app.anonymous-url-creation-enabled`, `false` in `application.yaml`). While it is off, `/mcp/anon` refuses every call ("Sign in to create short URLs"), yet the frontend `/mcp` page advertises it. The same flag controls anonymous links on the website.
+6. **The `mcp` alias.** `mcp` is now reserved and `/mcp` no longer redirects. Run `select short_url from url where lower(short_url) = 'mcp';` and resolve any row before deploying.
+7. **Merge `fix/long-url-validation` first.** It gives the tools specific errors for malformed URLs instead of a generic one.
+8. **Deploy the backend, then the frontend** `feature/mcp-connector`: the `/connect` page, Settings → Connected apps, and the `/mcp` page.
+9. **Smoke test.** Expect issuer `https://hrva.cc`, resource `https://hrva.cc/mcp`, and 401 from `/mcp` without a token. HTML instead of JSON, or a 403, means a Cloudflare challenge (step 3).
+   ```bash
+   curl -s https://hrva.cc/.well-known/oauth-authorization-server | jq '{issuer, registration_endpoint}'
+   curl -s https://hrva.cc/.well-known/oauth-protected-resource/mcp | jq '{resource, authorization_servers}'
+   curl -s -o /dev/null -w '%{http_code}\n' -X POST https://hrva.cc/mcp
+   ```
+10. **Sign in once from each Claude client.** In Claude Code, `claude mcp add --transport http hrva https://hrva.cc/mcp`, then `/mcp` → authenticate. In the Claude app, Settings → Connectors → Add custom connector with `https://hrva.cc/mcp`.
+
 ## Contribution
 We welcome contributions from the community!
 

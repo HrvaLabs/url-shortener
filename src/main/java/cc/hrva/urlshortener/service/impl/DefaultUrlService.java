@@ -83,7 +83,7 @@ public class DefaultUrlService implements UrlService {
         final var url = createUrlToUrlConverter.convert(createUrlDto);
         final var currentUser = userService.getUserFromToken();
 
-        log.info("Creating URL longUrl={} authenticated={}", createUrlDto.getLongUrl(), currentUser != null);
+        log.info("Creating URL authenticated={}", currentUser != null);
 
         validateUrl(url);
 
@@ -119,7 +119,7 @@ public class DefaultUrlService implements UrlService {
     public UrlResponse saveUrlWithApiKey(final @Valid CreateUrlDto createUrlDto, final String key) {
         final var url = createUrlToUrlConverter.convert(createUrlDto);
 
-        log.info("Creating URL with API key longUrl={}", createUrlDto.getLongUrl());
+        log.info("Creating URL with API key");
 
         validateUrl(url);
 
@@ -150,7 +150,7 @@ public class DefaultUrlService implements UrlService {
     private void assignShortUrl(final Url url) {
         if (StringUtils.isEmpty(url.getShortUrl())) {
             url.setShortUrl(generateShortUrl(appProperties.getShortUrlLength()));
-            log.info("URL got generated short URL {}", url.getShortUrl());
+            log.info("URL got a generated short URL");
         }
         urlValidator.checkIfShortUrlIsUnique(url.getShortUrl());
         urlValidator.checkIfShortUrlIsReserved(url.getShortUrl());
@@ -513,7 +513,7 @@ public class DefaultUrlService implements UrlService {
 
         if (urlRepository.existsUrlByLongUrlAndActiveTrueAndOwnerIsNull(url.getLongUrl())) {
             final var existingLongUrl = getUrlByLongUrl(url.getLongUrl());
-            log.warn("Long url already exists in DB, will return URL from long URL {}", existingLongUrl.getShortUrl());
+            log.warn("Long url already exists in DB, will return the existing anonymous URL");
             cacheUrlResponse(existingLongUrl);
             return existingLongUrl;
         }
