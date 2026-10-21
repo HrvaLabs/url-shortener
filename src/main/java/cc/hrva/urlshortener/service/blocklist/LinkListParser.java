@@ -12,7 +12,7 @@ import org.springframework.stereotype.Component;
 public class LinkListParser {
 
     private static final Pattern LINK_START = Pattern.compile("^https?://", Pattern.CASE_INSENSITIVE);
-    private static final Pattern CSV_FIELD = Pattern.compile("(?:^|,)(?:\"([^\"]*+(?:\"\"[^\"]*+)*+)\"|([^,]*+))");
+    private static final Pattern CSV_FIELD = Pattern.compile(",(?:\"([^\"]*+(?:\"\"[^\"]*+)*+)\"|([^,]*+))");
 
     public ParsedBlocklist parse(final BufferedReader reader, final int maxLinks) {
         final var collector = new BlocklistCollector(maxLinks, "links");
@@ -44,8 +44,8 @@ public class LinkListParser {
                 .findFirst();
     }
 
-    private static List<String> csvFields(final String row) {
-        return CSV_FIELD.matcher(row).results()
+    static List<String> csvFields(final String row) {
+        return CSV_FIELD.matcher("," + row).results()
                 .map(field -> field.group(1) != null ? field.group(1).replace("\"\"", "\"") : field.group(2))
                 .map(String::strip)
                 .toList();

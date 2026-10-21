@@ -79,6 +79,24 @@ class LinkListParserTest {
     }
 
     @Test
+    void csvSplitKeepsEmptyFieldsInTheirColumns() {
+        assertThat(LinkListParser.csvFields(",a,b")).containsExactly("", "a", "b");
+        assertThat(LinkListParser.csvFields("a,,b")).containsExactly("a", "", "b");
+        assertThat(LinkListParser.csvFields("\"\",a,b")).containsExactly("", "a", "b");
+        assertThat(LinkListParser.csvFields("4,")).containsExactly("4", "");
+    }
+
+    @Test
+    void phishTankRowWithAnEmptyIdStillGivesTheUrlColumn() {
+        final var parsed = linkListParser.parse(linesOf(
+                "phish_id,url,phish_detail_url,submission_time,verified,verification_time,online,target",
+                ",https://login.example.com/verify,http://www.phishtank.com/phish_detail.php?phish_id=9001,"
+                        + "2026-10-21T08:00:00+00:00,yes,2026-10-21T08:10:00+00:00,yes,Other"), 100);
+
+        assertThat(parsed.entries()).containsExactly("login.example.com/verify");
+    }
+
+    @Test
     void firstLineDecidesBetweenLinksAndCsv() {
         final var linksWithCommas = linkListParser.parse(linesOf(
                 "http://ex.com/a,url,b",

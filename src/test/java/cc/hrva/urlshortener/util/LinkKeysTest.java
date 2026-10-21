@@ -36,7 +36,8 @@ class LinkKeysTest {
 
     @Test
     void httpAndHttpsGiveTheSameKey() {
-        assertThat(LinkKeys.of("http://ex.com/a")).isEqualTo(LinkKeys.of("https://ex.com/a"));
+        assertThat(LinkKeys.of("http://ex.com/a")).containsExactly("ex.com/a");
+        assertThat(LinkKeys.of("https://ex.com/a")).containsExactly("ex.com/a");
     }
 
     @Test
