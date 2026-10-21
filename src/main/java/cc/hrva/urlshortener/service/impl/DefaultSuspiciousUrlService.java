@@ -2,6 +2,7 @@ package cc.hrva.urlshortener.service.impl;
 
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.service.SuspiciousUrlService;
+import cc.hrva.urlshortener.util.DomainNames;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -68,7 +69,6 @@ public class DefaultSuspiciousUrlService implements SuspiciousUrlService {
     private static final Set<String> PATH_LURE_WORDS = Set.of(
             "verify", "verification", "login", "signin", "secure", "auth", "wallet", "unlock");
 
-    private static final Set<String> SECOND_LEVEL_LABELS = Set.of("co", "com", "net", "org", "gov", "edu", "ac", "or", "ne", "go");
     private static final Pattern IPV4 = Pattern.compile("^\\d{1,3}(\\.\\d{1,3}){3}$");
     private static final Pattern NON_ALPHANUMERIC = Pattern.compile("[^a-z0-9]+");
 
@@ -92,7 +92,7 @@ public class DefaultSuspiciousUrlService implements SuspiciousUrlService {
         }
 
         final var labels = host.split("\\.");
-        final var domain = registrableDomain(labels);
+        final var domain = DomainNames.registrableDomain(host);
 
         if (isShortenerHost(host) || matchesDomain(host, PLATFORM_SHARE_DOMAINS) && !matchesDomain(host, TRUSTED_SHARE_DOMAINS)) {
             reasons.add("hides its destination behind another shortener");
@@ -163,14 +163,6 @@ public class DefaultSuspiciousUrlService implements SuspiciousUrlService {
         } catch (final IllegalArgumentException exception) {
             return false;
         }
-    }
-
-    private static String registrableDomain(final String[] labels) {
-        final var count = labels.length;
-        if (count >= 3 && labels[count - 1].length() == 2 && SECOND_LEVEL_LABELS.contains(labels[count - 2])) {
-            return String.join(".", labels[count - 3], labels[count - 2], labels[count - 1]);
-        }
-        return count >= 2 ? labels[count - 2] + "." + labels[count - 1] : labels[0];
     }
 
     private static boolean differsByOneLetter(final String first, final String second) {

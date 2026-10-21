@@ -1,6 +1,7 @@
 package cc.hrva.urlshortener.model;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import cc.hrva.urlshortener.model.enums.BlockReason;
 import cc.hrva.urlshortener.model.enums.PlatformType;
 import cc.hrva.urlshortener.model.enums.ThreatEntryType;
 import cc.hrva.urlshortener.model.enums.ThreatType;
@@ -52,6 +53,12 @@ public class Url {
 
     @Enumerated(EnumType.STRING)
     private ThreatType threatType;
+
+    @Enumerated(EnumType.STRING)
+    private BlockReason blockReason;
+
+    private String blockDetail;
+    private LocalDateTime blockedAt;
 
     @ElementCollection(fetch = FetchType.EAGER)
     @CollectionTable(name = "url_tags", joinColumns = @JoinColumn(name = "URL_ID"))

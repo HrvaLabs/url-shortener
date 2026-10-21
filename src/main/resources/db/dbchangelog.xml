@@ -29,5 +29,6 @@
     <include file="classpath:/db/changelog/021-oauth2-authorization-code-index.xml"/>
     <include file="classpath:/db/changelog/022-email-log-resend.xml"/>
     <include file="classpath:/db/changelog/023-audit-log-redact-url-passwords.xml"/>
+    <include file="classpath:/db/changelog/024-dynamic-link-checks.xml"/>
 
 </databaseChangeLog>

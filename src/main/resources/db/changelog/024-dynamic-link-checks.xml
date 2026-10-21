@@ -1,0 +1,189 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.9.xsd">
+
+    <changeSet author="khrvacic" id="024-url-block-reason">
+        <addColumn tableName="URL">
+            <column name="BLOCK_REASON" type="VARCHAR(30)"/>
+            <column name="BLOCK_DETAIL" type="VARCHAR(255)"/>
+            <column name="BLOCKED_AT" type="TIMESTAMP"/>
+        </addColumn>
+        <rollback>
+            <dropColumn tableName="URL" columnName="BLOCKED_AT"/>
+            <dropColumn tableName="URL" columnName="BLOCK_DETAIL"/>
+            <dropColumn tableName="URL" columnName="BLOCK_REASON"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet author="khrvacic" id="024-url-block-reason-safe-browsing-backfill">
+        <update tableName="URL">
+            <column name="BLOCK_REASON" value="SAFE_BROWSING"/>
+            <where>THREAT_TYPE IS NOT NULL</where>
+        </update>
+        <rollback/>
+    </changeSet>
+
+    <changeSet author="khrvacic" id="024-blocklist-source-table">
+        <createTable tableName="blocklist_source">
+            <column name="id" type="BIGINT" autoIncrement="true">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="name" type="VARCHAR(100)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="url" type="VARCHAR(1000)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="action" type="VARCHAR(10)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="enabled" type="BOOLEAN" defaultValueBoolean="true">
+                <constraints nullable="false"/>
+            </column>
+            <column name="last_fetched_at" type="TIMESTAMP"/>
+            <column name="last_success_at" type="TIMESTAMP"/>
+            <column name="domain_count" type="BIGINT"/>
+            <column name="last_error" type="TEXT"/>
+            <column name="etag" type="VARCHAR(255)"/>
+            <column name="last_modified" type="VARCHAR(100)"/>
+        </createTable>
+        <rollback>
+            <dropTable tableName="blocklist_source"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet author="khrvacic" id="024-blocklist-source-seed">
+        <insert tableName="blocklist_source">
+            <column name="name" value="HaGeZi TIF medium"/>
+            <column name="url" value="https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/tif.medium-onlydomains.txt"/>
+            <column name="action" value="BLOCK"/>
+            <column name="enabled" valueBoolean="true"/>
+        </insert>
+        <insert tableName="blocklist_source">
+            <column name="name" value="HaGeZi Fake"/>
+            <column name="url" value="https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/fake-onlydomains.txt"/>
+            <column name="action" value="BLOCK"/>
+            <column name="enabled" valueBoolean="true"/>
+        </insert>
+        <insert tableName="blocklist_source">
+            <column name="name" value="HaGeZi badware hosters"/>
+            <column name="url" value="https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/hoster-onlydomains.txt"/>
+            <column name="action" value="FLAG"/>
+            <column name="enabled" valueBoolean="true"/>
+        </insert>
+        <insert tableName="blocklist_source">
+            <column name="name" value="HaGeZi DynDNS"/>
+            <column name="url" value="https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/dyndns-onlydomains.txt"/>
+            <column name="action" value="FLAG"/>
+            <column name="enabled" valueBoolean="true"/>
+        </insert>
+        <insert tableName="blocklist_source">
+            <column name="name" value="HaGeZi URL shorteners"/>
+            <column name="url" value="https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/urlshortener-onlydomains.txt"/>
+            <column name="action" value="FLAG"/>
+            <column name="enabled" valueBoolean="true"/>
+        </insert>
+        <rollback>
+            <delete tableName="blocklist_source">
+                <where>name IN ('HaGeZi TIF medium', 'HaGeZi Fake', 'HaGeZi badware hosters', 'HaGeZi DynDNS', 'HaGeZi URL shorteners')</where>
+            </delete>
+        </rollback>
+    </changeSet>
+
+    <changeSet author="khrvacic" id="024-domain-rule-table">
+        <createTable tableName="domain_rule">
+            <column name="id" type="BIGINT" autoIncrement="true">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="domain" type="VARCHAR(255)">
+                <constraints nullable="false" unique="true" uniqueConstraintName="ux_domain_rule_domain"/>
+            </column>
+            <column name="type" type="VARCHAR(10)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="reason" type="VARCHAR(255)"/>
+            <column name="created_by" type="VARCHAR(255)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_at" type="TIMESTAMP" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+        <rollback>
+            <dropTable tableName="domain_rule"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet author="khrvacic" id="024-domain-rule-seed">
+        <insert tableName="domain_rule">
+            <column name="domain" value="njuskaio.cam"/>
+            <column name="type" value="BLOCK"/>
+            <column name="reason" value="phishing campaign, September 2026"/>
+            <column name="created_by" value="system"/>
+        </insert>
+        <insert tableName="domain_rule">
+            <column name="domain" value="jofogas.cards"/>
+            <column name="type" value="BLOCK"/>
+            <column name="reason" value="phishing campaign, September 2026"/>
+            <column name="created_by" value="system"/>
+        </insert>
+        <insert tableName="domain_rule">
+            <column name="domain" value="info-auth.com"/>
+            <column name="type" value="BLOCK"/>
+            <column name="reason" value="phishing campaign, September 2026"/>
+            <column name="created_by" value="system"/>
+        </insert>
+        <insert tableName="domain_rule">
+            <column name="domain" value="app-onlinebanking.de"/>
+            <column name="type" value="BLOCK"/>
+            <column name="reason" value="phishing campaign, September 2026"/>
+            <column name="created_by" value="system"/>
+        </insert>
+        <rollback>
+            <delete tableName="domain_rule">
+                <where>domain IN ('njuskaio.cam', 'jofogas.cards', 'info-auth.com', 'app-onlinebanking.de')</where>
+            </delete>
+        </rollback>
+    </changeSet>
+
+    <changeSet author="khrvacic" id="024-link-review-table">
+        <createTable tableName="link_review">
+            <column name="id" type="BIGINT" autoIncrement="true">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="url_id" type="BIGINT">
+                <constraints nullable="false" foreignKeyName="LINK_REVIEW_URL_FK" referencedTableName="URL"
+                             referencedColumnNames="ID" deleteCascade="true"/>
+            </column>
+            <column name="reasons" type="TEXT">
+                <constraints nullable="false"/>
+            </column>
+            <column name="flagged_at" type="TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="resolved_at" type="TIMESTAMP"/>
+            <column name="resolved_by" type="VARCHAR(255)"/>
+            <column name="resolution" type="VARCHAR(30)"/>
+        </createTable>
+        <rollback>
+            <dropTable tableName="link_review"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet author="khrvacic" id="024-link-review-indexes">
+        <createIndex tableName="link_review" indexName="idx_link_review_resolved_at">
+            <column name="resolved_at"/>
+        </createIndex>
+        <createIndex tableName="link_review" indexName="idx_link_review_url_id">
+            <column name="url_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="link_review" indexName="idx_link_review_url_id"/>
+            <dropIndex tableName="link_review" indexName="idx_link_review_resolved_at"/>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>

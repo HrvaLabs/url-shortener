@@ -2,6 +2,7 @@ package cc.hrva.urlshortener.dto;
 
 import java.time.LocalDateTime;
 import cc.hrva.urlshortener.model.Url;
+import cc.hrva.urlshortener.model.enums.BlockReason;
 import cc.hrva.urlshortener.model.enums.ThreatType;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.redis.serializer.GenericJacksonJsonRedisSerializer;
@@ -54,6 +55,33 @@ class UrlResponseTest {
     }
 
     @Test
+    void blockReasonSurvivesTheRedisRoundTrip() {
+        final var mapper = JsonMapper.builder().build();
+        final var serializer = new GenericJacksonJsonRedisSerializer(mapper);
+        final var response = UrlResponse.from(baseUrl().active(false).blockReason(BlockReason.BLOCKLIST).build())
+                .withBlockReason(BlockReason.BLOCKLIST);
+
+        final var cached = serializer.deserialize(serializer.serialize(response));
+
+        assertThat(mapper.convertValue(cached, UrlResponse.class)).isEqualTo(response);
+    }
+
+    @Test
+    void omitsBlockReasonWhenThereIsNone() {
+        final var json = JsonMapper.builder().build().writeValueAsString(UrlResponse.from(baseUrl().active(true).build()));
+
+        assertThat(json).doesNotContain("blockReason");
+    }
+
+    @Test
+    void keepsTheBlockReasonOutOfOwnerAndPublicResponses() {
+        final var url = baseUrl().active(false).blockReason(BlockReason.BLOCKLIST).build();
+
+        assertThat(UrlResponse.from(url).blockReason()).isNull();
+        assertThat(UrlResponse.from(url).withBlockReason(BlockReason.BLOCKLIST).publicView().blockReason()).isNull();
+    }
+
+    @Test
     void shouldBeActive() {
         assertThat(UrlResponse.from(baseUrl().active(true).build()).status()).isEqualTo("ACTIVE");
     }
@@ -61,6 +89,12 @@ class UrlResponseTest {
     @Test
     void shouldBeBlockedWhenThreatPresent() {
         final var url = baseUrl().active(false).threatType(ThreatType.MALWARE).build();
+        assertThat(UrlResponse.from(url).status()).isEqualTo("BLOCKED");
+    }
+
+    @Test
+    void shouldBeBlockedWhenBlockReasonPresent() {
+        final var url = baseUrl().active(false).blockReason(BlockReason.DOMAIN_RULE).build();
         assertThat(UrlResponse.from(url).status()).isEqualTo("BLOCKED");
     }
 

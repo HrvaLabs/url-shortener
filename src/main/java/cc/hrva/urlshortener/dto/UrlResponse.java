@@ -1,6 +1,7 @@
 package cc.hrva.urlshortener.dto;
 
 import cc.hrva.urlshortener.model.Url;
+import cc.hrva.urlshortener.model.enums.BlockReason;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.LocalDateTime;
@@ -34,7 +35,10 @@ public record UrlResponse(
         String ownerEmail,
         @Schema(description = "Why the destination looks like phishing or spam (admin list only)", example = "[\"imitates njuskalo\"]")
         @JsonInclude(JsonInclude.Include.NON_EMPTY)
-        List<String> suspiciousReasons) {
+        List<String> suspiciousReasons,
+        @Schema(description = "Why the link is blocked (admin list only)", example = "BLOCKLIST")
+        @JsonInclude(JsonInclude.Include.NON_NULL)
+        BlockReason blockReason) {
 
     public UrlResponse {
         suspiciousReasons = suspiciousReasons == null ? List.of() : suspiciousReasons;
@@ -44,17 +48,22 @@ public record UrlResponse(
                        final LocalDateTime expirationDate, final Long visits, final Long visitLimit, final boolean active,
                        final String status, final Set<String> tags, final boolean passwordProtected, final String ownerEmail) {
         this(id, longUrl, shortUrl, createDate, expirationDate, visits, visitLimit, active, status, tags, passwordProtected,
-                ownerEmail, List.of());
+                ownerEmail, List.of(), null);
     }
 
     public UrlResponse publicView() {
         return new UrlResponse(id, passwordProtected ? null : longUrl, shortUrl, createDate, expirationDate, visits, visitLimit,
-                active, status, Set.of(), passwordProtected, null, List.of());
+                active, status, Set.of(), passwordProtected, null, List.of(), null);
     }
 
     public UrlResponse withSuspiciousReasons(final List<String> reasons) {
         return new UrlResponse(id, longUrl, shortUrl, createDate, expirationDate, visits, visitLimit, active, status, tags,
-                passwordProtected, ownerEmail, reasons);
+                passwordProtected, ownerEmail, reasons, blockReason);
+    }
+
+    public UrlResponse withBlockReason(final BlockReason reason) {
+        return new UrlResponse(id, longUrl, shortUrl, createDate, expirationDate, visits, visitLimit, active, status, tags,
+                passwordProtected, ownerEmail, suspiciousReasons, reason);
     }
 
     public static UrlResponse from(final Url url) {
@@ -77,7 +86,7 @@ public record UrlResponse(
         if (url.isActive()) {
             return "ACTIVE";
         }
-        if (url.getThreatType() != null) {
+        if (url.getBlockReason() != null || url.getThreatType() != null) {
             return "BLOCKED";
         }
         if (url.getVisitLimit() != null && url.getVisits() != null

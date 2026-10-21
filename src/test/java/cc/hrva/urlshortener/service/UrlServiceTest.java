@@ -443,7 +443,9 @@ class UrlServiceTest {
     @Test
     void reactivationChecksTheBlockTheAliasAndSafetyBeforeSaving() {
         final var url = Url.builder().id(1L).shortUrl("promo").longUrl("https://example.com")
-                .threatType(cc.hrva.urlshortener.model.enums.ThreatType.MALWARE).active(false).build();
+                .threatType(cc.hrva.urlshortener.model.enums.ThreatType.MALWARE)
+                .blockReason(cc.hrva.urlshortener.model.enums.BlockReason.SAFE_BROWSING).blockDetail("MALWARE")
+                .blockedAt(java.time.LocalDateTime.now()).active(false).build();
         when(urlRepository.findById(1L)).thenReturn(Optional.of(url));
         when(urlRepository.save(any(Url.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
@@ -457,6 +459,9 @@ class UrlServiceTest {
         order.verify(urlRepository).save(url);
         assertThat(result.active()).isTrue();
         assertThat(url.getThreatType()).isNull();
+        assertThat(url.getBlockReason()).isNull();
+        assertThat(url.getBlockDetail()).isNull();
+        assertThat(url.getBlockedAt()).isNull();
     }
 
     @Test
