@@ -694,6 +694,38 @@ class UrlServiceTest {
     }
 
     @Test
+    void anApiKeyCreateOverTheRateLimitIsRefusedBeforeTheSlowLinkCheck() {
+        final var service = urlServiceWithRealLongUrlHandling();
+        final var createUrlDto = CreateUrlDto.builder().longUrl("https://example.com/menu").build();
+        when(apiKeyService.fetchApiKeyByKey("apikey")).thenReturn(ApiKey.builder().owner(User.builder().id(1L).build()).build());
+        when(rateLimiter.tryAcquire(eq("create:user:1"), anyInt(), any())).thenReturn(false);
+
+        assertThatThrownBy(() -> service.saveUrlWithApiKey(createUrlDto, "apikey"))
+                .isInstanceOf(RateLimitExceededException.class)
+                .hasMessage(CREATE_LIMIT_REFUSAL);
+
+        verify(linkCheckService, never()).check(anyString());
+        verify(safeBrowsingService, never()).checkUrlsForThreats(anyString());
+        verify(apiKeyService, never()).apiKeyUseAction(any());
+        verify(urlRepository, never()).save(any(Url.class));
+    }
+
+    @Test
+    void anAnonymousCreateOverTheRateLimitIsRefusedBeforeTheSlowLinkCheck() {
+        final var service = urlServiceWithRealLongUrlHandling();
+        final var createUrlDto = CreateUrlDto.builder().longUrl("https://example.com/menu").build();
+        when(rateLimiter.tryAcquire(startsWith("create:anon"), anyInt(), any())).thenReturn(false);
+
+        assertThatThrownBy(() -> service.saveUrlRouting(createUrlDto, CLIENT_IP))
+                .isInstanceOf(RateLimitExceededException.class)
+                .hasMessage(CREATE_LIMIT_REFUSAL);
+
+        verify(linkCheckService, never()).check(anyString());
+        verify(safeBrowsingService, never()).checkUrlsForThreats(anyString());
+        verify(urlRepository, never()).save(any(Url.class));
+    }
+
+    @Test
     void aFlaggedDestinationThatReusesAnAnonymousLinkQueuesThatLink() {
         final var createUrlDto = CreateUrlDto.builder().longUrl("https://findfavoritedate.life/?u=f6yp608").build();
         final var url = Url.builder().longUrl("https://findfavoritedate.life/?u=f6yp608").build();
