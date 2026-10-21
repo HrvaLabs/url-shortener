@@ -34,8 +34,7 @@ class AdminAuditPointcutTest {
     private static final String LONG_URL = "https://hagezi-mirror.dnsbunker.org/" + "a".repeat(900) + ".txt";
     private static final BlocklistSourceDto SOURCE = new BlocklistSourceDto("HaGeZi TIF medium", LONG_URL, SourceKind.DOMAINS,
             BlocklistAction.BLOCK, true, 6, List.of(LONG_URL, LONG_URL, LONG_URL));
-    private static final String SOURCE_DETAILS = "action: BLOCK, enabled: true, fallbackUrls: [" + LONG_URL + ", " + LONG_URL + ", " + LONG_URL
-            + "], kind: DOMAINS, name: HaGeZi TIF medium, refreshIntervalHours: 6, url: " + LONG_URL;
+    private static final String SOURCE_DETAILS = "action: BLOCK, enabled: true, kind: DOMAINS, name: HaGeZi TIF medium, refreshIntervalHours: 6";
 
     @Mock
     private AuditLogService auditLogService;
@@ -65,6 +64,17 @@ class AdminAuditPointcutTest {
         controller.createSource(SOURCE);
 
         verify(auditLogService).log(ADMIN, "createSource", "Blocklist", "17", SOURCE_DETAILS);
+    }
+
+    @Test
+    void aSourceUrlThatCarriesAnAccessKeyStaysOutOfTheAuditLog() {
+        final var keyed = new BlocklistSourceDto("URLhaus", "https://urlhaus.abuse.ch/downloads/text_online/?auth-key=0123456789abcdef",
+                SourceKind.LINKS, BlocklistAction.BLOCK, true, 1, List.of("https://mirror.example/urlhaus.txt?key=fedcba9876543210"));
+
+        controller.updateSource(6L, keyed);
+
+        verify(auditLogService).log(ADMIN, "updateSource", "Blocklist", "6",
+                "action: BLOCK, enabled: true, kind: LINKS, name: URLhaus, refreshIntervalHours: 1");
     }
 
     @Test

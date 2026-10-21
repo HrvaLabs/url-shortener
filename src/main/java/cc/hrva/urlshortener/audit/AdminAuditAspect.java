@@ -4,6 +4,7 @@ import cc.hrva.urlshortener.service.AuditLogService;
 import cc.hrva.urlshortener.service.UserService;
 import java.util.Arrays;
 import java.util.Objects;
+import java.util.Set;
 import java.util.TreeMap;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
@@ -24,6 +25,7 @@ public class AdminAuditAspect {
 
     private static final String ADMIN_PREFIX = "Admin";
     private static final String ID = "id";
+    private static final Set<String> UNAUDITED_FIELDS = Set.of(ID, "url", "fallbackUrls");
 
     private final AuditLogService auditLogService;
     private final UserService userService;
@@ -93,7 +95,7 @@ public class AdminAuditAspect {
 
         final var fields = jsonMapper.convertValue(arg, new TypeReference<TreeMap<String, Object>>() {});
         return fields.entrySet().stream()
-                .filter(field -> field.getValue() != null && !ID.equals(field.getKey()))
+                .filter(field -> field.getValue() != null && !UNAUDITED_FIELDS.contains(field.getKey()))
                 .map(field -> field.getKey() + ": " + describeValue(field.getKey(), field.getValue()))
                 .collect(Collectors.joining(", "));
     }

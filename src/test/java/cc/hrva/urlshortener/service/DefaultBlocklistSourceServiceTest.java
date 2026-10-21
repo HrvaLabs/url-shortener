@@ -506,6 +506,32 @@ class DefaultBlocklistSourceServiceTest {
     }
 
     @Test
+    @ExtendWith(OutputCaptureExtension.class)
+    void downloadLogLinesNameTheSourceAndTheAttemptButNeverTheUrlWhichMayCarryAKey(final CapturedOutput output) {
+        final var keyed = "https://urlhaus.abuse.ch/downloads/text_online/?auth-key=0123456789abcdef";
+        final var keyedFallback = "https://mirror.example/urlhaus.txt?key=fedcba9876543210";
+        final var source = stored(source(1).url(keyed).fallbackUrls(List.of(keyedFallback)).build());
+        fetcher.fails(keyed, "HTTP 503");
+        fetcher.serves(keyedFallback, LIST, ETAG, LAST_MODIFIED);
+        redisHasRoom();
+        blocklistSourceService.refresh(1);
+        when(blocklistStore.exists(1)).thenReturn(true);
+        fetcher.notModified(keyedFallback);
+
+        blocklistSourceService.refresh(1);
+
+        assertThat(source.getLastSuccessUrl()).isEqualTo(keyedFallback);
+        assertThat(output)
+                .contains("Blocklist source HaGeZi Fake could not be loaded (main): HTTP 503")
+                .contains("Blocklist source HaGeZi Fake loaded 3 entries (fallback 1)")
+                .contains("Blocklist source HaGeZi Fake is unchanged (fallback 1)")
+                .doesNotContain("urlhaus.abuse.ch")
+                .doesNotContain("mirror.example")
+                .doesNotContain("0123456789abcdef")
+                .doesNotContain("fedcba9876543210");
+    }
+
+    @Test
     void aFallbackIsUsedWhenTheMainUrlServesAnHtmlPage() {
         final var source = stored(source(1).fallbackUrls(List.of(FALLBACK)).build());
         fetcher.serves(MAIN, ERROR_PAGE);

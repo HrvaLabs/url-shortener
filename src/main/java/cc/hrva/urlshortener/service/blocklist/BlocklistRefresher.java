@@ -81,16 +81,16 @@ public class BlocklistRefresher {
                 final var fetched = publicHttpFetcher.fetch(attempt.url(), MAX_BYTES,
                         conditional ? source.getEtag() : null, conditional ? source.getLastModified() : null, REQUEST_TIMEOUT);
                 if (fetched.notModified()) {
-                    log.info("Blocklist source {} is unchanged at {}", source.getName(), attempt.url());
+                    log.info("Blocklist source {} is unchanged ({})", source.getName(), attempt.label());
                     return new Download(errors, null);
                 }
                 final var parsed = parse(source.getKind(), fetched.body());
                 refuseShrunkenList(source, parsed, trigger);
-                return new Download(errors, new Loaded(attempt.url(), parsed, fetched));
+                return new Download(errors, new Loaded(attempt, parsed, fetched));
             } catch (final RuntimeException exception) {
                 final var message = describe(exception);
                 log.warn("Blocklist source {} could not be loaded ({}): {}", source.getName(), attempt.label(), message);
-                log.debug("Blocklist source {} download from {} failed", source.getName(), attempt.url(), exception);
+                log.debug("Blocklist source {} download failed ({})", source.getName(), attempt.label(), exception);
                 errors.add(attempts.size() == 1 ? message : attempt.label() + ": " + message);
             }
         }
@@ -120,13 +120,13 @@ public class BlocklistRefresher {
             log.warn("Blocklist source {} could not be stored in Redis", source.getName(), exception);
             return Optional.of("could not store the list in Redis");
         }
-        source.setLastSuccessUrl(loaded.url());
+        source.setLastSuccessUrl(loaded.attempt().url());
         source.setLastSuccessAt(LocalDateTime.now());
         source.setDomainCount((long) entries.size());
         source.setListVersion(loaded.list().version());
         source.setEtag(fitting(loaded.fetched().etag(), MAX_ETAG_LENGTH));
         source.setLastModified(fitting(loaded.fetched().lastModified(), MAX_LAST_MODIFIED_LENGTH));
-        log.info("Blocklist source {} loaded {} entries from {}", source.getName(), entries.size(), loaded.url());
+        log.info("Blocklist source {} loaded {} entries ({})", source.getName(), entries.size(), loaded.attempt().label());
         return Optional.empty();
     }
 
@@ -206,7 +206,7 @@ public class BlocklistRefresher {
 
     private record Attempt(String label, String url) {}
 
-    private record Loaded(String url, ParsedBlocklist list, FetchResult fetched) {}
+    private record Loaded(Attempt attempt, ParsedBlocklist list, FetchResult fetched) {}
 
     private record Download(List<String> errors, Loaded loaded) {}
 
