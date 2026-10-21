@@ -299,7 +299,7 @@ public class DefaultUrlService implements UrlService {
     }
 
     @Override
-    @Transactional
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     @CacheEvict(value = "urls", key = "#result.shortUrl")
     public UrlResponse activateUrl(final Long id) {
         log.info("Activate URL id={}", id);
@@ -316,7 +316,7 @@ public class DefaultUrlService implements UrlService {
         url.setBlockDetail(null);
         url.setBlockedAt(null);
 
-        return UrlResponse.from(urlRepository.save(activateUrl(url)));
+        return transactionOperations.execute(status -> UrlResponse.from(urlRepository.save(activateUrl(url))));
     }
 
     @Override

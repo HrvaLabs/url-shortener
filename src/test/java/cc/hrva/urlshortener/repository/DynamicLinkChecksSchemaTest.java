@@ -6,6 +6,7 @@ import cc.hrva.urlshortener.model.DomainRule;
 import cc.hrva.urlshortener.model.LinkReview;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.User;
+import cc.hrva.urlshortener.model.codebook.Authorities;
 import cc.hrva.urlshortener.model.enums.BlockReason;
 import cc.hrva.urlshortener.model.enums.BlocklistAction;
 import cc.hrva.urlshortener.model.enums.DomainRuleType;
@@ -59,6 +60,9 @@ class DynamicLinkChecksSchemaTest {
 
     @Autowired
     private UrlRepository urlRepository;
+
+    @Autowired
+    private UserRepository userRepository;
 
     @Autowired
     private EntityManager entityManager;
@@ -298,6 +302,19 @@ class DynamicLinkChecksSchemaTest {
         assertThat(urlRepository.findIdsByOwnerAndBlockReason(owner, BlockReason.USER_BLOCKED)).containsExactly(blocked.getId());
     }
 
+    @Test
+    void anAdminAccountIsRecognisedByItsAuthority() {
+        final var admin = savedUser("admin@example.com");
+        admin.setAuthorities(List.of(entityManager.find(Authorities.class, 2L)));
+        final var user = savedUser("alice@example.com");
+        user.setAuthorities(List.of(entityManager.find(Authorities.class, 1L)));
+        entityManager.flush();
+        entityManager.clear();
+
+        assertThat(userRepository.existsByIdAndAuthoritiesName(admin.getId(), "ROLE_ADMIN")).isTrue();
+        assertThat(userRepository.existsByIdAndAuthoritiesName(user.getId(), "ROLE_ADMIN")).isFalse();
+    }
+
     private Url savedLink(final String shortUrl, final String longUrl, final User owner) {
         return urlRepository.saveAndFlush(Url.builder().shortUrl(shortUrl).longUrl(longUrl).owner(owner).build());
     }
@@ -327,7 +344,8 @@ class DynamicLinkChecksSchemaTest {
             basePackageClasses = UrlRepository.class,
             includeFilters = @ComponentScan.Filter(
                     type = FilterType.ASSIGNABLE_TYPE,
-                    classes = {UrlRepository.class, BlocklistSourceRepository.class, DomainRuleRepository.class, LinkReviewRepository.class}))
+                    classes = {UrlRepository.class, BlocklistSourceRepository.class, DomainRuleRepository.class, LinkReviewRepository.class,
+                            UserRepository.class}))
     static class TestApplication {
     }
 

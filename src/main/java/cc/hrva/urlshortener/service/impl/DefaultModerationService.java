@@ -27,6 +27,7 @@ import cc.hrva.urlshortener.service.ReviewQueueService;
 import cc.hrva.urlshortener.service.SendingEmailService;
 import cc.hrva.urlshortener.service.UserService;
 import cc.hrva.urlshortener.util.DomainNames;
+import jakarta.persistence.EntityManager;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -75,6 +76,8 @@ public class DefaultModerationService implements ModerationService {
     private static final String OVER_THE_CAP = "This would affect %d links, more than the %d allowed here. Use the dashboard.";
     private static final String NOT_COVERED = "%s doesn't cover this link's destination %s.";
     private static final String NO_OWNER = "This link has no owner to block.";
+    private static final String ADMIN_ACCOUNT = "Admin accounts can't be blocked here.";
+    private static final String ROLE_ADMIN = "ROLE_ADMIN";
     private static final Set<BlockReason> RESTORED_BY_ALLOW = EnumSet.of(BlockReason.BLOCKLIST, BlockReason.SCAM_SIGNALS, BlockReason.DOMAIN_RULE);
 
     private final UrlRepository urlRepository;
@@ -88,6 +91,7 @@ public class DefaultModerationService implements ModerationService {
     private final IPAddressService ipAddressService;
     private final CacheManager cacheManager;
     private final TransactionOperations transactionOperations;
+    private final EntityManager entityManager;
 
     @Override
     public UrlResponse blockLink(final long urlId, final BlockReason reason, final String detail, final String performedBy, final String via) {
@@ -248,6 +252,9 @@ public class DefaultModerationService implements ModerationService {
     }
 
     private int blockLinksOf(final User user, final String performedBy, final Integer maxLinks) {
+        if (userRepository.existsByIdAndAuthoritiesName(user.getId(), ROLE_ADMIN)) {
+            throw new UrlValidationException(ADMIN_ACCOUNT);
+        }
         final var ids = urlRepository.findActiveIdsByOwner(user);
         refuseOverTheCap(ids.size(), maxLinks);
         if (!Boolean.FALSE.equals(user.getActive())) {
@@ -315,6 +322,7 @@ public class DefaultModerationService implements ModerationService {
                 .orElse(null)));
         blocked.ifPresent(url -> {
             log.info("Link blocked urlId={} reason={}", url.getId(), reason);
+            entityManager.detach(url);
             evictFromCache(url.getShortUrl());
         });
         return blocked;
@@ -323,6 +331,7 @@ public class DefaultModerationService implements ModerationService {
     private boolean reactivate(final long urlId, final Predicate<Url> stillApplies) {
         final var restored = Optional.ofNullable(transactionOperations.execute(status -> urlRepository.findById(urlId)
                 .filter(url -> !url.isActive() && stillApplies.test(url))
+                .filter(this::aliasIsFree)
                 .map(url -> {
                     url.setActive(true);
                     url.setBlockReason(null);
@@ -333,9 +342,18 @@ public class DefaultModerationService implements ModerationService {
                 .orElse(null)));
         restored.ifPresent(url -> {
             log.info("Link reactivated urlId={}", url.getId());
+            entityManager.detach(url);
             evictFromCache(url.getShortUrl());
         });
         return restored.isPresent();
+    }
+
+    private boolean aliasIsFree(final Url url) {
+        if (urlRepository.existsUrlByShortUrlAndActiveTrue(url.getShortUrl())) {
+            log.warn("Link stays inactive because another active link holds its alias urlId={}", url.getId());
+            return false;
+        }
+        return true;
     }
 
     private <T> int eachLink(final List<T> links, final ToLongFunction<T> idOf, final Predicate<T> action) {
@@ -366,11 +384,12 @@ public class DefaultModerationService implements ModerationService {
 
     private void saveRule(final String domain, final DomainRuleType type, final String reason, final String performedBy) {
         transactionOperations.executeWithoutResult(status -> {
-            final var rule = domainRuleRepository.findByDomain(domain).orElseGet(() -> DomainRule.builder().domain(domain).build());
+            final var rule = domainRuleRepository.findByDomain(domain)
+                    .orElseGet(() -> DomainRule.builder().domain(domain).createdBy(performedBy).build());
             rule.setType(type);
-            rule.setReason(reason);
-            rule.setCreatedBy(performedBy);
-            rule.setCreatedAt(LocalDateTime.now());
+            if (StringUtils.isNotBlank(reason)) {
+                rule.setReason(reason);
+            }
             domainRuleRepository.save(rule);
         });
         log.info("Domain rule saved domain={} type={}", domain, type);

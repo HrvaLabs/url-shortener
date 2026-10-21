@@ -12,6 +12,7 @@ import org.springframework.stereotype.Repository;
 public interface UserRepository extends JpaRepository<User, Long>, JpaSpecificationExecutor<User> {
 
     boolean existsByEmail(String email);
+    boolean existsByIdAndAuthoritiesName(Long id, String name);
     Optional<User> findByEmail(String email);
     List<User> findByLastLoginIsLessThanEqualAndActiveTrue(LocalDateTime limitDate);
     long countByCreateDateAfter(LocalDateTime dateTime);

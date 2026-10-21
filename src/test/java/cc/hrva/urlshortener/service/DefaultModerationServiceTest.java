@@ -19,6 +19,7 @@ import cc.hrva.urlshortener.repository.DomainRuleRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.service.impl.DefaultModerationService;
+import jakarta.persistence.EntityManager;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -77,6 +78,7 @@ class DefaultModerationServiceTest {
     private static final String ADMIN = "admin@hrva.cc";
     private static final String NOT_A_DOMAIN = "Enter a domain such as example.com, not a top-level domain or an IP address.";
     private static final LocalDateTime BLOCKED_AT = LocalDateTime.of(2026, 10, 20, 2, 0);
+    private static final LocalDateTime RULE_CREATED_AT = LocalDateTime.of(2026, 10, 1, 9, 0);
     private static final LinkVerdict ALLOWED = new LinkVerdict(Outcome.ALLOWED, List.of("allowed domain jofogas.cards"), null, null);
 
     @Mock
@@ -112,6 +114,9 @@ class DefaultModerationServiceTest {
     @Mock
     private Cache cache;
 
+    @Mock
+    private EntityManager entityManager;
+
     private final Map<Long, Url> links = new TreeMap<>();
     private final Map<String, DomainRule> rules = new HashMap<>();
     private final List<List<Long>> savedPerTransaction = new ArrayList<>();
@@ -132,6 +137,8 @@ class DefaultModerationServiceTest {
             }
             return url;
         });
+        lenient().when(urlRepository.existsUrlByShortUrlAndActiveTrue(anyString())).thenAnswer(invocation ->
+                links.values().stream().anyMatch(url -> url.isActive() && url.getShortUrl().equals(invocation.getArgument(0))));
         lenient().when(urlRepository.findActiveDestinationsAfter(anyLong(), any(Pageable.class)))
                 .thenAnswer(invocation -> page(invocation.getArgument(0), invocation.getArgument(1), Url::isActive));
         lenient().when(urlRepository.findBlockedDestinationsAfter(anyCollection(), anyLong(), any(Pageable.class))).thenAnswer(invocation -> {
@@ -162,8 +169,15 @@ class DefaultModerationServiceTest {
             }
             return null;
         }).when(cache).evict(any());
+        lenient().doAnswer(invocation -> {
+            if (inTransaction) {
+                outOfPlace.add("link " + invocation.<Url>getArgument(0).getId() + " detached before its transaction committed");
+            }
+            return null;
+        }).when(entityManager).detach(any());
         moderationService = new DefaultModerationService(urlRepository, userRepository, domainRuleRepository, linkCheckService,
-                reviewQueueService, userService, sendingEmailService, auditLogService, ipAddressService, cacheManager, recordingTransactions());
+                reviewQueueService, userService, sendingEmailService, auditLogService, ipAddressService, cacheManager, recordingTransactions(),
+                entityManager);
     }
 
     @Test
@@ -214,6 +228,27 @@ class DefaultModerationServiceTest {
     }
 
     @Test
+    void eachChangedLinkLeavesThePersistenceContextOnceItsTransactionCommits() {
+        final var first = link(10L, "https://jofogas.cards/a", null);
+        final var second = link(11L, "https://jofogas.cards/b", null);
+        final var single = link(12L, "https://example.org/", null);
+        final var user = user(5L, "alice@example.com");
+        user.setActive(false);
+        when(userRepository.findById(5L)).thenReturn(Optional.of(user));
+        final var restored = blocked(13L, "https://a.example/", BlockReason.USER_BLOCKED, user);
+
+        moderationService.blockDomain("jofogas.cards", null, ADMIN, "admin", null);
+        moderationService.blockLink(12L, BlockReason.ADMIN, null, ADMIN, "admin");
+        moderationService.reactivateUser(5L, ADMIN, "admin");
+
+        verify(entityManager).detach(first);
+        verify(entityManager).detach(second);
+        verify(entityManager).detach(single);
+        verify(entityManager).detach(restored);
+        assertThat(outOfPlace).isEmpty();
+    }
+
+    @Test
     void blockingADomainTurnsItsAllowRuleIntoABlock() {
         final var existing = rule("jofogas.cards", DomainRuleType.ALLOW);
 
@@ -240,6 +275,30 @@ class DefaultModerationServiceTest {
         assertThat(blocked).isEqualTo(3);
         assertThat(trusted.isActive()).isTrue();
         assertThat(List.of(underABlock, sites, apex)).allSatisfy(url -> assertThat(url.getBlockReason()).isEqualTo(BlockReason.DOMAIN_RULE));
+    }
+
+    @Test
+    void aBlockFromTheReviewQueueKeepsTheRulesReasonAndWhoCreatedIt() {
+        final var existing = rule("jofogas.cards", DomainRuleType.ALLOW);
+        link(62L, "https://www.jofogas.cards/login", null);
+
+        moderationService.resolveReview(62L, ReviewAction.BLOCK_DOMAIN, null, ADMIN, "admin");
+
+        assertThat(existing.getType()).isEqualTo(DomainRuleType.BLOCK);
+        assertThat(existing)
+                .extracting(DomainRule::getReason, DomainRule::getCreatedBy, DomainRule::getCreatedAt)
+                .containsExactly("seeded", "system", RULE_CREATED_AT);
+    }
+
+    @Test
+    void aNewReasonReplacesTheOldOneButTheRuleKeepsItsCreator() {
+        final var existing = rule("jofogas.cards", DomainRuleType.ALLOW);
+
+        moderationService.blockDomain("jofogas.cards", "it was a scam after all", ADMIN, "admin", null);
+
+        assertThat(existing)
+                .extracting(DomainRule::getReason, DomainRule::getCreatedBy, DomainRule::getCreatedAt)
+                .containsExactly("it was a scam after all", "system", RULE_CREATED_AT);
     }
 
     @Test
@@ -593,6 +652,56 @@ class DefaultModerationServiceTest {
     }
 
     @Test
+    void anAdminAccountIsNotBlockedEvenUnderTheCap() {
+        final var admin = user(5L, ADMIN);
+        when(userRepository.findById(5L)).thenReturn(Optional.of(admin));
+        when(userRepository.existsByIdAndAuthoritiesName(5L, "ROLE_ADMIN")).thenReturn(true);
+        final var url = link(40L, "https://a.example/", admin);
+
+        assertThatThrownBy(() -> moderationService.blockUser(5L, ADMIN, "mcp", 0))
+                .isInstanceOf(UrlValidationException.class)
+                .hasMessage("Admin accounts can't be blocked here.");
+        assertThatThrownBy(() -> moderationService.resolveReview(40L, ReviewAction.BLOCK_USER, null, ADMIN, "admin"))
+                .isInstanceOf(UrlValidationException.class)
+                .hasMessage("Admin accounts can't be blocked here.");
+
+        assertThat(url.isActive()).isTrue();
+        verifyNoInteractions(userService, sendingEmailService, auditLogService, reviewQueueService);
+        verify(urlRepository, never()).save(any());
+    }
+
+    @Test
+    void reactivatingAUserLeavesALinkBlockedWhenAnotherActiveLinkHoldsItsAlias() {
+        final var user = user(5L, "alice@example.com");
+        when(userRepository.findById(5L)).thenReturn(Optional.of(user));
+        final var clashing = blocked(50L, "https://a.example/", BlockReason.USER_BLOCKED, user);
+        clashing.setShortUrl("promo");
+        link(51L, "https://legacy.example/", null).setShortUrl("promo");
+        final var free = blocked(52L, "https://b.example/", BlockReason.USER_BLOCKED, user);
+
+        assertThat(moderationService.reactivateUser(5L, ADMIN, "admin")).isEqualTo(1);
+
+        assertThat(clashing.isActive()).isFalse();
+        assertThat(clashing.getBlockReason()).isEqualTo(BlockReason.USER_BLOCKED);
+        verify(cache, never()).evict("promo");
+        assertThat(free.isActive()).isTrue();
+    }
+
+    @Test
+    void trustingADomainLeavesALinkBlockedWhenAnotherActiveLinkHoldsItsAlias() {
+        final var clashing = blocked(20L, "https://jofogas.cards/a", BlockReason.BLOCKLIST, null);
+        clashing.setShortUrl("promo");
+        link(21L, "https://example.org/", null).setShortUrl("promo");
+        when(linkCheckService.check(anyString())).thenReturn(ALLOWED);
+
+        moderationService.allowDomain("jofogas.cards", null, ADMIN, "admin");
+
+        assertThat(clashing.isActive()).isFalse();
+        assertThat(clashing.getBlockReason()).isEqualTo(BlockReason.BLOCKLIST);
+        verify(auditLogService).log(ADMIN, "ALLOW_DOMAIN", "Domain", "jofogas.cards", "reviews: 0, links: 0, via: admin");
+    }
+
+    @Test
     void lookingFineResolvesTheReviewAsOk() {
         final var url = link(60L, "https://www.jofogas.cards/login", null);
 
@@ -802,7 +911,8 @@ class DefaultModerationServiceTest {
     }
 
     private DomainRule rule(final String domain, final DomainRuleType type) {
-        final var rule = DomainRule.builder().id((long) rules.size() + 1).domain(domain).type(type).reason("seeded").createdBy("system").build();
+        final var rule = DomainRule.builder().id((long) rules.size() + 1).domain(domain).type(type).reason("seeded").createdBy("system")
+                .createdAt(RULE_CREATED_AT).build();
         rules.put(domain, rule);
         return rule;
     }

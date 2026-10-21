@@ -587,6 +587,25 @@ class UrlServiceTest {
     }
 
     @Test
+    void theLinkCheckRunsBeforeTheTransactionThatReactivatesALink() {
+        final var checkedInTransaction = new AtomicReference<Boolean>();
+        final var savedInTransaction = new AtomicReference<Boolean>();
+        final var url = Url.builder().id(7L).shortUrl("abc").longUrl("https://example.com/menu").visits(0L)
+                .blockReason(BlockReason.BLOCKLIST).blockDetail("HaGeZi TIF medium").active(false).build();
+        when(userService.getUserFromToken()).thenReturn(admin());
+        when(urlRepository.findById(7L)).thenReturn(Optional.of(url));
+        recordTransactionDuringCheck("https://example.com/menu", checkedInTransaction);
+        recordTransactionDuringSave(savedInTransaction);
+
+        final var result = transactionalUrlService().activateUrl(7L);
+
+        assertThat(checkedInTransaction).hasValue(false);
+        assertThat(savedInTransaction).hasValue(true);
+        assertThat(result.active()).isTrue();
+        assertThat(url.getBlockReason()).isNull();
+    }
+
+    @Test
     void shouldSaveUrlRandomShortUrl() {
         final var createUrlDto = CreateUrlDto.builder().longUrl("long").build();
         final var url = Url.builder().longUrl("long").build();
