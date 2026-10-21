@@ -1,6 +1,10 @@
 spring:
   liquibase:
     change-log: classpath:/db/dbchangelog.xml
+  task:
+    scheduling:
+      pool:
+        size: 4
   data:
     redis:
       host: redis.hrvalabs.net

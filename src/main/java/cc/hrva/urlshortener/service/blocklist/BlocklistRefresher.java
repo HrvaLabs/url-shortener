@@ -53,10 +53,12 @@ public class BlocklistRefresher {
             return source;
         }
         try {
+            final var kind = source.getKind();
             final var download = download(source);
             final var current = blocklistSourceRepository.findById(source.getId());
-            if (current.isEmpty() || !current.get().isEnabled()) {
-                log.info("Blocklist source {} was disabled or deleted while it downloaded, discarding the download", source.getName());
+            if (current.isEmpty() || !current.get().isEnabled() || current.get().getKind() != kind) {
+                log.info("Blocklist source {} was disabled, deleted or changed kind while it downloaded, discarding the download",
+                        source.getName());
                 return current.orElse(source);
             }
             return record(current.get(), download);

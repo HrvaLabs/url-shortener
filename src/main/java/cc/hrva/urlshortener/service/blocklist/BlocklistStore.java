@@ -25,7 +25,7 @@ public class BlocklistStore {
     private static final String KEY_PREFIX = "blocklist:source:";
     private static final String LOADING_SUFFIX = ":loading";
     private static final int BATCH_SIZE = 10_000;
-    private static final Duration LOADING_TTL = Duration.ofMinutes(10);
+    private static final Duration LOADING_TTL = Duration.ofMinutes(2);
     private static final RedisScript<Long> MEMORY_USAGE = RedisScript.of("return redis.call('MEMORY', 'USAGE', KEYS[1])", Long.class);
     private static final RedisScript<Long> RENAME_IF_COMPLETE = RedisScript.of("""
             local size = redis.call('SCARD', KEYS[1])

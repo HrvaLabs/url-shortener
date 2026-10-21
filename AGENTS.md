@@ -244,6 +244,7 @@ Not automatable (interactive sign-in). With the local dev stack, the app on port
 3. If no new row appears and the authorize request carries an `https://` `client_id`, Claude used Client ID Metadata Documents instead of DCR: open a follow-up to enable `mcp.cimd(true)`.
 
 ## Scheduled Tasks
+Jobs run on a 4-thread scheduler (`spring.task.scheduling.pool.size: 4` in `application.yaml`), so a long job such as the hourly blocklist refresh can't stall the per-minute ones.
 - **URL expiry**: Daily at 8 AM, sends email notification for URLs expiring within 24 hours (configurable via `app.url-expiration-notification-hours`).
 - **IP cleanup**: Every minute, deactivates and deletes old IP address records.
 - **Reset tokens**: Every minute, deactivates and deletes expired password reset tokens.

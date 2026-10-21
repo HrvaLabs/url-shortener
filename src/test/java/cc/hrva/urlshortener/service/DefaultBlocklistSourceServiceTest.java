@@ -614,6 +614,17 @@ class DefaultBlocklistSourceServiceTest {
     }
 
     @Test
+    void aSourceWhoseKindChangedDuringTheDownloadIsNotLoaded() {
+        final var source = stored(source(1).build());
+        fetcher.serves(MAIN, LIST, () -> source.setKind(SourceKind.LINKS));
+
+        blocklistSourceService.refresh(1);
+
+        verify(blocklistStore, never()).replace(anyLong(), anySet());
+        verify(blocklistSourceRepository, never()).save(any());
+    }
+
+    @Test
     void aSourceDeletedDuringTheDownloadIsNotLoaded() {
         when(blocklistSourceRepository.findById(1L)).thenReturn(Optional.of(source(1).build()), Optional.empty());
         fetcher.serves(MAIN, LIST);
@@ -720,6 +731,38 @@ class DefaultBlocklistSourceServiceTest {
 
         assertThat(source.getKind()).isEqualTo(SourceKind.LINKS);
         verify(blocklistStore).remove(1);
+    }
+
+    @Test
+    void changingTheKindForgetsTheStateOfTheListLoadedUnderTheOldKind() {
+        final var fetchedAt = LocalDateTime.now().minusHours(1);
+        final var source = stored(source(1)
+                .lastFetchedAt(fetchedAt).lastSuccessAt(fetchedAt).lastSuccessUrl(MAIN)
+                .domainCount(17_512L).listVersion(VERSION).etag(ETAG).lastModified(LAST_MODIFIED)
+                .build());
+
+        blocklistSourceService.update(1, new BlocklistSourceDto("HaGeZi Fake", MAIN, SourceKind.LINKS, BlocklistAction.BLOCK, null, null, null));
+
+        assertThat(source)
+                .extracting(BlocklistSource::getDomainCount, BlocklistSource::getListVersion, BlocklistSource::getLastSuccessAt,
+                        BlocklistSource::getLastSuccessUrl, BlocklistSource::getEtag, BlocklistSource::getLastModified)
+                .containsOnlyNulls();
+    }
+
+    @Test
+    void anUpdateThatKeepsTheKindKeepsTheStateOfTheLoadedList() {
+        final var fetchedAt = LocalDateTime.now().minusHours(1);
+        final var source = stored(source(1)
+                .lastSuccessAt(fetchedAt).lastSuccessUrl(MAIN).domainCount(17_512L).listVersion(VERSION).etag(ETAG)
+                .build());
+
+        blocklistSourceService.update(1, new BlocklistSourceDto("Renamed", MAIN, SourceKind.DOMAINS, BlocklistAction.FLAG, null, 12, null));
+
+        assertThat(source)
+                .extracting(BlocklistSource::getDomainCount, BlocklistSource::getListVersion, BlocklistSource::getLastSuccessAt,
+                        BlocklistSource::getLastSuccessUrl, BlocklistSource::getEtag)
+                .containsExactly(17_512L, VERSION, fetchedAt, MAIN, ETAG);
+        verify(blocklistStore, never()).remove(anyLong());
     }
 
     @Test

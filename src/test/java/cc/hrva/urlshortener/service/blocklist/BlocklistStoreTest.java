@@ -108,9 +108,9 @@ class BlocklistStoreTest {
 
         final InOrder order = inOrder(setCommands, keyCommands);
         order.verify(setCommands).sAdd(eq(bytes(LOADING_KEY)), any(byte[][].class));
-        order.verify(keyCommands).expire(bytes(LOADING_KEY), 600);
+        order.verify(keyCommands).expire(bytes(LOADING_KEY), 120);
         order.verify(setCommands).sAdd(eq(bytes(LOADING_KEY)), any(byte[][].class));
-        order.verify(keyCommands).expire(bytes(LOADING_KEY), 600);
+        order.verify(keyCommands).expire(bytes(LOADING_KEY), 120);
     }
 
     @Test

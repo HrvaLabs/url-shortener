@@ -80,6 +80,9 @@ public class DefaultBlocklistSourceService implements BlocklistSourceService {
         Optional.ofNullable(blocklistSourceDto.enabled()).ifPresent(source::setEnabled);
         Optional.ofNullable(blocklistSourceDto.refreshIntervalHours()).ifPresent(source::setRefreshIntervalHours);
         fallbackUrlsOf(blocklistSourceDto).ifPresent(source::setFallbackUrls);
+        if (kindChanged) {
+            forgetLoadedList(source);
+        }
         if (kindChanged || !source.isEnabled()) {
             blocklistStore.remove(id);
         }
@@ -135,6 +138,15 @@ public class DefaultBlocklistSourceService implements BlocklistSourceService {
         final var lastFetchedAt = source.getLastFetchedAt();
         final var dueAfter = LocalDateTime.now().minusHours(source.getRefreshIntervalHours()).plus(DUE_TOLERANCE);
         return lastFetchedAt == null || !lastFetchedAt.isAfter(dueAfter) || !blocklistStore.exists(source.getId());
+    }
+
+    private static void forgetLoadedList(final BlocklistSource source) {
+        source.setDomainCount(null);
+        source.setListVersion(null);
+        source.setLastSuccessAt(null);
+        source.setLastSuccessUrl(null);
+        source.setEtag(null);
+        source.setLastModified(null);
     }
 
     private BlocklistSource find(final long id) {
