@@ -28,6 +28,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -81,6 +82,15 @@ class AdminDomainRuleControllerTest {
                 .andExpect(jsonPath("$.length()").value(2))
                 .andExpect(jsonPath("$[1].reason").value(nullValue()))
                 .andExpect(jsonPath("$[1].createdBy").value(nullValue()));
+    }
+
+    @Test
+    void listingAnUnknownRuleTypeIsABadRequest() throws Exception {
+        mockMvc.perform(get("/api/v1/admin/domain-rules").param("type", "MAYBE").principal(SIGNED_IN_ADMIN))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("Invalid value for type"));
+
+        verifyNoInteractions(moderationService);
     }
 
     @Test

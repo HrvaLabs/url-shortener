@@ -34,7 +34,11 @@ public class AdminAuditAspect {
             "execution(* cc.hrva.urlshortener.controller.UrlController.revokeUrl(..)) || " +
             "execution(* cc.hrva.urlshortener.controller.UrlController.activateUrl(..)) || " +
             "execution(* cc.hrva.urlshortener.controller.UrlController.deleteUrl(..)) || " +
-            "execution(* cc.hrva.urlshortener.controller.UrlController.updateUrl(..))")
+            "execution(* cc.hrva.urlshortener.controller.UrlController.updateUrl(..)) || " +
+            "execution(* cc.hrva.urlshortener.controller.AdminBlocklistController.createSource(..)) || " +
+            "execution(* cc.hrva.urlshortener.controller.AdminBlocklistController.updateSource(..)) || " +
+            "execution(* cc.hrva.urlshortener.controller.AdminBlocklistController.deleteSource(..)) || " +
+            "execution(* cc.hrva.urlshortener.controller.AdminBlocklistController.refreshSource(..))")
     public Object logAdminAction(final ProceedingJoinPoint joinPoint) throws Throwable {
         final var user = userService.getUserFromToken();
         final var performedBy = user != null ? user.getEmail() : "anonymous";
@@ -42,8 +46,9 @@ public class AdminAuditAspect {
         final var methodName = signature.getName();
         final var args = joinPoint.getArgs();
         final var targetType = targetType(signature.getDeclaringType());
-        final var targetIdentifier = args.length > 0 ? String.valueOf(args[0]) : "";
-        final var details = describeChanges(args);
+        final var targeted = args.length > 0 && args[0] != null && BeanUtils.isSimpleValueType(args[0].getClass());
+        final var targetIdentifier = targeted ? String.valueOf(args[0]) : "";
+        final var details = describeChanges(args, targeted ? 1 : 0);
 
         try {
             final var result = joinPoint.proceed();
@@ -62,9 +67,9 @@ public class AdminAuditAspect {
                 : name;
     }
 
-    private String describeChanges(final Object[] args) {
+    private String describeChanges(final Object[] args, final int targetArguments) {
         return Arrays.stream(args)
-                .skip(1)
+                .skip(targetArguments)
                 .filter(Objects::nonNull)
                 .map(this::describe)
                 .filter(StringUtils::isNotEmpty)

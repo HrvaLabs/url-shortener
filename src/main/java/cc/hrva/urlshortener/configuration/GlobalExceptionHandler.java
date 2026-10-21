@@ -36,8 +36,10 @@ import org.springframework.validation.FieldError;
 import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ControllerAdvice;
 import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 @ControllerAdvice
@@ -202,6 +204,18 @@ public class GlobalExceptionHandler {
     public ResponseEntity<Map<String, String>> handleMessageNotReadable(final HttpMessageNotReadableException ex) {
         log.info("Malformed request body");
         return ResponseEntity.badRequest().body(Map.of("error", "Malformed request body"));
+    }
+
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    public ResponseEntity<Map<String, String>> handleArgumentTypeMismatch(final MethodArgumentTypeMismatchException ex) {
+        log.info("Invalid request parameter name={}", ex.getName());
+        return ResponseEntity.badRequest().body(Map.of("error", "Invalid value for " + ex.getName()));
+    }
+
+    @ExceptionHandler(MissingServletRequestParameterException.class)
+    public ResponseEntity<Map<String, String>> handleMissingParameter(final MissingServletRequestParameterException ex) {
+        log.info("Missing request parameter name={}", ex.getParameterName());
+        return ResponseEntity.badRequest().body(Map.of("error", "Missing parameter " + ex.getParameterName()));
     }
 
     @ExceptionHandler(HttpMediaTypeNotSupportedException.class)

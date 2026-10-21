@@ -11,6 +11,8 @@ import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -111,6 +113,17 @@ class AdminReviewQueueControllerTest {
                 .andExpect(status().isOk());
 
         verify(reviewQueueService).openEntries(any(Pageable.class), isNull(), eq(7));
+    }
+
+    @Test
+    @ExtendWith(OutputCaptureExtension.class)
+    void aLinkAgeThatIsNotANumberIsABadRequestWithoutAStackTrace(final CapturedOutput output) throws Exception {
+        mockMvc.perform(get("/api/v1/admin/review-queue").param("olderThanDays", "abc").principal(SIGNED_IN_ADMIN))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("Invalid value for olderThanDays"));
+
+        verifyNoInteractions(reviewQueueService);
+        assertThat(output).doesNotContain("Unhandled exception").doesNotContain("\tat ");
     }
 
     @Test
