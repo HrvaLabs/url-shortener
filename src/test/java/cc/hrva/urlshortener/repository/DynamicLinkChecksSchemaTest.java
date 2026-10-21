@@ -580,6 +580,76 @@ class DynamicLinkChecksSchemaTest {
     }
 
     @Test
+    void activeLinksDueForARedirectCheckComeNeverCheckedFirstThenOldestUpToTheLimit() {
+        final var checkedBefore = LocalDateTime.of(2026, 10, 14, 4, 30);
+        final var recent = savedLink("recent", "https://example.org/recent", null);
+        recent.setChainCheckedAt(checkedBefore.plusDays(1));
+        final var old = savedLink("old", "https://example.org/old", null);
+        old.setChainCheckedAt(checkedBefore.minusDays(3));
+        final var oldest = savedLink("oldest", "https://example.org/oldest", null);
+        oldest.setChainCheckedAt(checkedBefore.minusDays(10));
+        final var never = savedLink("never", "https://example.org/never", null);
+        savedBlockedLink("blocked", "https://jofogas.cards/b", BlockReason.BLOCKLIST);
+        entityManager.flush();
+        entityManager.clear();
+
+        assertThat(urlRepository.findIdsDueForRedirectCheck(checkedBefore, PageRequest.ofSize(10)))
+                .containsExactly(never.getId(), oldest.getId(), old.getId());
+        assertThat(urlRepository.findIdsDueForRedirectCheck(checkedBefore, PageRequest.ofSize(2)))
+                .containsExactly(never.getId(), oldest.getId());
+    }
+
+    @Test
+    void recordingAChainChangesOnlyItsColumnsAndOnlyWhileTheDestinationIsTheOneChecked() {
+        final var checkedAt = LocalDateTime.of(2026, 10, 21, 4, 30);
+        final var blocked = savedBlockedLink("chained", "https://bit.example/abc", BlockReason.BLOCKLIST);
+        blocked.setBlockDetail("URLhaus via redirect to njuskaio.cam");
+        final var repointed = savedLink("repointed", "https://new.example/", null);
+        entityManager.flush();
+        entityManager.clear();
+
+        final var recorded = urlRepository.recordRedirectChain(blocked.getId(), "https://bit.example/abc", "https://njuskaio.cam/a", checkedAt);
+        final var stale = urlRepository.recordRedirectChain(repointed.getId(), "https://old.example/", "https://old-landing.example/", checkedAt);
+        entityManager.clear();
+
+        assertThat(recorded).isEqualTo(1);
+        assertThat(stale).isZero();
+        assertThat(urlRepository.findById(blocked.getId())).hasValueSatisfying(stored -> {
+            assertThat(stored.getFinalUrl()).isEqualTo("https://njuskaio.cam/a");
+            assertThat(stored.getChainCheckedAt()).isEqualTo(checkedAt);
+            assertThat(stored.isActive()).isFalse();
+            assertThat(stored.getBlockReason()).isEqualTo(BlockReason.BLOCKLIST);
+            assertThat(stored.getBlockDetail()).isEqualTo("URLhaus via redirect to njuskaio.cam");
+        });
+        assertThat(urlRepository.findById(repointed.getId())).hasValueSatisfying(stored -> {
+            assertThat(stored.getFinalUrl()).isNull();
+            assertThat(stored.getChainCheckedAt()).isNull();
+        });
+    }
+
+    @Test
+    void markingAChainCheckedKeepsTheLastKnownFinalUrl() {
+        final var earlier = LocalDateTime.of(2026, 10, 14, 4, 30);
+        final var checkedAt = LocalDateTime.of(2026, 10, 21, 4, 30);
+        final var url = savedLink("unreachable", "https://bit.example/down", null);
+        url.setFinalUrl("https://landing.example/");
+        url.setChainCheckedAt(earlier);
+        entityManager.flush();
+        entityManager.clear();
+
+        final var marked = urlRepository.markRedirectChainChecked(url.getId(), "https://bit.example/down", checkedAt);
+        final var stale = urlRepository.markRedirectChainChecked(url.getId(), "https://bit.example/other", checkedAt.plusDays(1));
+        entityManager.clear();
+
+        assertThat(marked).isEqualTo(1);
+        assertThat(stale).isZero();
+        assertThat(urlRepository.findById(url.getId())).hasValueSatisfying(stored -> {
+            assertThat(stored.getFinalUrl()).isEqualTo("https://landing.example/");
+            assertThat(stored.getChainCheckedAt()).isEqualTo(checkedAt);
+        });
+    }
+
+    @Test
     void domainRulesAreFoundByType() {
         domainRuleRepository.saveAndFlush(DomainRule.builder().domain("trusted.example").type(DomainRuleType.ALLOW).createdBy("admin@localhost").build());
         entityManager.clear();

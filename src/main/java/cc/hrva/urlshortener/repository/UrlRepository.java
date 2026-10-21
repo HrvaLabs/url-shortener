@@ -103,6 +103,21 @@ public interface UrlRepository extends JpaRepository<Url, Long>, JpaSpecificatio
     @Query("update Url u set u.lastSafeBrowsingCheck = :checkedAt where u.id in :ids")
     int markSafeBrowsingChecked(@Param("ids") Collection<Long> ids, @Param("checkedAt") LocalDateTime checkedAt);
 
+    @Query("select u.id from Url u where u.active = true and (u.chainCheckedAt is null or u.chainCheckedAt < :checkedBefore) "
+            + "order by u.chainCheckedAt asc nulls first, u.id")
+    List<Long> findIdsDueForRedirectCheck(@Param("checkedBefore") LocalDateTime checkedBefore, Pageable pageable);
+
+    @Modifying
+    @Transactional
+    @Query("update Url u set u.finalUrl = :finalUrl, u.chainCheckedAt = :checkedAt where u.id = :id and u.longUrl = :longUrl")
+    int recordRedirectChain(@Param("id") long id, @Param("longUrl") String longUrl, @Param("finalUrl") String finalUrl,
+            @Param("checkedAt") LocalDateTime checkedAt);
+
+    @Modifying
+    @Transactional
+    @Query("update Url u set u.chainCheckedAt = :checkedAt where u.id = :id and u.longUrl = :longUrl")
+    int markRedirectChainChecked(@Param("id") long id, @Param("longUrl") String longUrl, @Param("checkedAt") LocalDateTime checkedAt);
+
     @Modifying
     @Transactional
     @Query("update Url u set u.visits = u.visits + 1, u.lastAccessed = :visitedAt where u.id = :id")

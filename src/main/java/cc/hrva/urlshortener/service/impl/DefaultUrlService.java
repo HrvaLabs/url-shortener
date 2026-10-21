@@ -25,6 +25,7 @@ import cc.hrva.urlshortener.repository.specification.UrlSpecification;
 import cc.hrva.urlshortener.service.ApiKeyService;
 import cc.hrva.urlshortener.service.ClickCheckService;
 import cc.hrva.urlshortener.service.IPAddressService;
+import cc.hrva.urlshortener.service.RedirectChainService;
 import cc.hrva.urlshortener.service.ReviewQueueService;
 import cc.hrva.urlshortener.service.ScammerSignalService;
 import cc.hrva.urlshortener.service.SuspiciousUrlService;
@@ -110,6 +111,7 @@ public class DefaultUrlService implements UrlService {
     private final ReviewQueueService reviewQueueService;
     private final ScammerSignalService scammerSignalService;
     private final ClickCheckService clickCheckService;
+    private final RedirectChainService redirectChainService;
     private final TransactionOperations transactionOperations;
 
     @Override
@@ -125,13 +127,15 @@ public class DefaultUrlService implements UrlService {
         }
         final var verdict = validateUrl(url);
 
-        return transactionOperations.execute(status -> {
+        final var created = transactionOperations.execute(status -> {
             if (currentUser != null) {
                 applyPassword(url, createUrlDto.getPassword());
                 return saveUrlForUser(url, currentUser, verdict);
             }
             return UrlResponse.from(createUrlForAnonymousUser(url, verdict));
         });
+        checkRedirectsLater(created.id());
+        return created;
     }
 
     private boolean unlockAttemptAllowed(final String shortUrl, final String clientIP) {
@@ -182,12 +186,14 @@ public class DefaultUrlService implements UrlService {
         apiKeyValidator.apiKeyExistsByKeyAndIsValid(key);
         final var verdict = validateUrl(url);
 
-        return transactionOperations.execute(status -> {
+        final var created = transactionOperations.execute(status -> {
             apiKeyService.apiKeyUseAction(apiKey);
 
             applyPassword(url, createUrlDto.getPassword());
             return saveUrlForUser(url, apiKey.getOwner(), verdict);
         });
+        checkRedirectsLater(created.id());
+        return created;
     }
 
     private UrlResponse saveUrlForUser(final Url url, final User owner, final LinkVerdict verdict) {
@@ -373,7 +379,11 @@ public class DefaultUrlService implements UrlService {
         urlValidator.checkIfUrlExpirationDateIsInThePast(url);
 
         url.verifyUrlValidity(url);
-        return transactionOperations.execute(status -> {
+        if (destinationChanged) {
+            url.setFinalUrl(null);
+            url.setChainCheckedAt(null);
+        }
+        final var updated = transactionOperations.execute(status -> {
             final var saved = urlRepository.save(url);
             if (destinationChanged) {
                 reviewQueueService.resolveOpen(saved, ReviewResolution.DESTINATION_CHANGED, SYSTEM);
@@ -381,6 +391,18 @@ public class DefaultUrlService implements UrlService {
             queueIfFlagged(saved, verdict);
             return UrlResponse.from(saved);
         });
+        if (destinationChanged) {
+            checkRedirectsLater(updated.id());
+        }
+        return updated;
+    }
+
+    private void checkRedirectsLater(final long urlId) {
+        try {
+            redirectChainService.checkLater(urlId);
+        } catch (final RuntimeException exception) {
+            log.warn("Could not schedule the redirect check, the nightly scan picks it up urlId={}", urlId, exception);
+        }
     }
 
     private LinkVerdict validateNewDestination(final Url url) {

@@ -6,6 +6,7 @@ import cc.hrva.urlshortener.model.enums.BlockReason;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.service.LinkCheckService;
 import cc.hrva.urlshortener.service.ModerationService;
+import cc.hrva.urlshortener.service.RedirectChainService;
 import cc.hrva.urlshortener.service.ReviewQueueService;
 import cc.hrva.urlshortener.service.SafeBrowsingRecheckService;
 import cc.hrva.urlshortener.service.SafeBrowsingService;
@@ -19,6 +20,7 @@ import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -29,6 +31,8 @@ import org.springframework.transaction.annotation.Transactional;
 public class DefaultSafeBrowsingRecheckService implements SafeBrowsingRecheckService {
 
     private static final int BATCH_SIZE = 20;
+    private static final int REDIRECT_CHECKS_PER_RUN = 500;
+    private static final int REDIRECT_CHECK_INTERVAL_DAYS = 7;
     private static final String PERFORMED_BY = "system";
     private static final String VIA = "nightly";
     private static final String THREAT_SEPARATOR = ", ";
@@ -39,6 +43,7 @@ public class DefaultSafeBrowsingRecheckService implements SafeBrowsingRecheckSer
     private final LinkCheckService linkCheckService;
     private final ModerationService moderationService;
     private final ReviewQueueService reviewQueueService;
+    private final RedirectChainService redirectChainService;
 
     @Override
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
@@ -79,6 +84,21 @@ public class DefaultSafeBrowsingRecheckService implements SafeBrowsingRecheckSer
 
         log.info("Nightly scan complete — {} checked, {} blocked, {} queued for review, safeBrowsingAvailable={}",
                 checked, tally.getOrDefault(ScanResult.BLOCKED, 0), tally.getOrDefault(ScanResult.QUEUED, 0), safeBrowsingAvailable.get());
+
+        checkRedirectChains();
+    }
+
+    private void checkRedirectChains() {
+        final var checkedBefore = LocalDateTime.now().minusDays(REDIRECT_CHECK_INTERVAL_DAYS);
+        final var ids = urlRepository.findIdsDueForRedirectCheck(checkedBefore, PageRequest.ofSize(REDIRECT_CHECKS_PER_RUN));
+        for (final var id : ids) {
+            try {
+                redirectChainService.check(id);
+            } catch (final RuntimeException exception) {
+                log.warn("Redirect check of a link failed, continuing with the next one urlId={}", id, exception);
+            }
+        }
+        log.info("Nightly redirect checks complete — {} links followed", ids.size());
     }
 
     private Optional<List<String>> threatsOf(final Url url, final AtomicBoolean safeBrowsingAvailable) {

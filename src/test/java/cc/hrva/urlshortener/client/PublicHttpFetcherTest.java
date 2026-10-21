@@ -8,6 +8,7 @@ import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
+import java.net.ServerSocket;
 import java.net.http.HttpTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -371,6 +372,176 @@ class PublicHttpFetcherTest {
         }
     }
 
+    @Test
+    void redirectPolicyAllowsHttpAndHttpsToPublicAddressesOnly() {
+        final var policy = PublicHttpFetcher.httpOrHttpsPublicOnly();
+
+        assertThat(policy.test("https://1.1.1.1/landing")).isTrue();
+        assertThat(policy.test("http://1.1.1.1/landing")).isTrue();
+        assertThat(policy.test("HTTP://1.1.1.1/landing")).isTrue();
+        assertThat(policy.test("http://127.0.0.1/admin")).isFalse();
+        assertThat(policy.test("http://10.1.2.3/admin")).isFalse();
+        assertThat(policy.test("http://169.254.169.254/latest/meta-data/")).isFalse();
+        assertThat(policy.test("http://[::1]/admin")).isFalse();
+        assertThat(policy.test("http://[::ffff:127.0.0.1]/admin")).isFalse();
+        assertThat(policy.test("ftp://1.1.1.1/landing")).isFalse();
+        assertThat(policy.test("javascript:alert(1)")).isFalse();
+        assertThat(policy.test("not a url")).isFalse();
+    }
+
+    @Test
+    void applicationRedirectFollowerNeverRequestsAPrivateAddress() {
+        respond("/start", exchange -> redirect(exchange, "/landing"));
+        final var follower = new PublicHttpFetcherConfiguration().redirectFollower();
+
+        final var chain = follower.followRedirects(baseUrl + "/start", 5, TIMEOUT);
+
+        assertThat(chain).containsExactly(baseUrl + "/start");
+        assertThat(requestedPaths).isEmpty();
+    }
+
+    @Test
+    void followsARedirectChainToItsEnd() {
+        respond("/go/a", exchange -> redirect(exchange, 301, "b"));
+        respond("/go/b", exchange -> redirect(exchange, 302, baseUrl + "/landing"));
+        respond("/landing", exchange -> send(exchange, 200, "<html>offer</html>"));
+
+        final var chain = permissiveFetcher.followRedirects(baseUrl + "/go/a", 5, TIMEOUT);
+
+        assertThat(chain).containsExactly(baseUrl + "/go/a", baseUrl + "/go/b", baseUrl + "/landing");
+        assertThat(requestedPaths).containsExactly("/go/a", "/go/b", "/landing");
+    }
+
+    @Test
+    void stopsAfterTheLastAllowedHopWithoutRequestingIt() {
+        for (int hop = 0; hop < 7; hop++) {
+            final var next = "/r" + (hop + 1);
+            respond("/r" + hop, exchange -> redirect(exchange, next));
+        }
+
+        final var chain = permissiveFetcher.followRedirects(baseUrl + "/r0", 5, TIMEOUT);
+
+        assertThat(chain).containsExactly(
+                baseUrl + "/r0", baseUrl + "/r1", baseUrl + "/r2", baseUrl + "/r3", baseUrl + "/r4", baseUrl + "/r5");
+        assertThat(requestedPaths).containsExactly("/r0", "/r1", "/r2", "/r3", "/r4");
+    }
+
+    @Test
+    void stopsAtTheBudgetKeepingTheHopsLearnedSoFar() {
+        respond("/h1", exchange -> {
+            sleep(Duration.ofMillis(600));
+            redirect(exchange, "/h2");
+        });
+        respond("/h2", exchange -> {
+            sleep(Duration.ofMillis(600));
+            redirect(exchange, "/h3");
+        });
+        respond("/h3", exchange -> send(exchange, 200, ""));
+        final var startedAt = System.nanoTime();
+
+        final var chain = permissiveFetcher.followRedirects(baseUrl + "/h1", 5, Duration.ofSeconds(1));
+
+        assertThat(chain).containsExactly(baseUrl + "/h1", baseUrl + "/h2");
+        assertThat(requestedPaths).containsExactly("/h1", "/h2");
+        assertThat(Duration.ofNanos(System.nanoTime() - startedAt)).isLessThan(Duration.ofSeconds(2));
+    }
+
+    @Test
+    void aRefusedHopEndsTheChainWithoutBeingRequested() {
+        respond("/start", exchange -> redirect(exchange, "/private/admin"));
+        respond("/private/admin", exchange -> send(exchange, 200, ""));
+        final var fetcher = new PublicHttpFetcher(url -> !url.contains("/private"));
+
+        final var chain = fetcher.followRedirects(baseUrl + "/start", 5, TIMEOUT);
+
+        assertThat(chain).containsExactly(baseUrl + "/start", baseUrl + "/private/admin");
+        assertThat(requestedPaths).containsExactly("/start");
+    }
+
+    @Test
+    void sendsTheLinkCheckUserAgentOnEveryHop() {
+        final var userAgents = new CopyOnWriteArrayList<String>();
+        respond("/start", exchange -> {
+            userAgents.add(exchange.getRequestHeaders().getFirst("User-Agent"));
+            redirect(exchange, "/landing");
+        });
+        respond("/landing", exchange -> {
+            userAgents.add(exchange.getRequestHeaders().getFirst("User-Agent"));
+            send(exchange, 200, "");
+        });
+
+        permissiveFetcher.followRedirects(baseUrl + "/start", 5, TIMEOUT);
+
+        assertThat(userAgents).containsExactly(
+                "hrva.cc-linkcheck/1.0 (+https://hrva.cc/.well-known/security.txt)",
+                "hrva.cc-linkcheck/1.0 (+https://hrva.cc/.well-known/security.txt)");
+    }
+
+    @Test
+    void neverReadsAResponseBody() {
+        respond("/start", exchange -> {
+            exchange.getResponseHeaders().add("Location", "/landing");
+            stallAfterHeaders(exchange, 302);
+        });
+        respond("/landing", exchange -> stallAfterHeaders(exchange, 200));
+        final var startedAt = System.nanoTime();
+
+        final var chain = permissiveFetcher.followRedirects(baseUrl + "/start", 5, TIMEOUT);
+
+        assertThat(chain).containsExactly(baseUrl + "/start", baseUrl + "/landing");
+        assertThat(Duration.ofNanos(System.nanoTime() - startedAt)).isLessThan(Duration.ofSeconds(2));
+    }
+
+    @Test
+    void anAnswerThatIsNotARedirectEndsTheChain() {
+        respond("/start", exchange -> redirect(exchange, "/gone"));
+        respond("/gone", exchange -> send(exchange, 404, "<html>not found</html>"));
+
+        final var chain = permissiveFetcher.followRedirects(baseUrl + "/start", 5, TIMEOUT);
+
+        assertThat(chain).containsExactly(baseUrl + "/start", baseUrl + "/gone");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"", "http://[invalid"})
+    void aRedirectWithoutAUsableLocationEndsTheChain(final String location) {
+        respond("/start", exchange -> {
+            if (!location.isEmpty()) {
+                exchange.getResponseHeaders().add("Location", location);
+            }
+            send(exchange, 302, "");
+        });
+
+        final var chain = permissiveFetcher.followRedirects(baseUrl + "/start", 5, TIMEOUT);
+
+        assertThat(chain).containsExactly(baseUrl + "/start");
+    }
+
+    @Test
+    void aHopThatCannotBeReachedStillEndsTheChain() throws IOException {
+        final var unreachable = "http://127.0.0.1:" + closedPort() + "/landing";
+        respond("/start", exchange -> redirect(exchange, unreachable));
+
+        final var chain = permissiveFetcher.followRedirects(baseUrl + "/start", 5, TIMEOUT);
+
+        assertThat(chain).containsExactly(baseUrl + "/start", unreachable);
+    }
+
+    @Test
+    void aFirstRequestThatFailsIsAnError() throws IOException {
+        respond("/slow", exchange -> {
+            sleep(Duration.ofSeconds(3));
+            send(exchange, 200, "");
+        });
+
+        assertThatThrownBy(() -> permissiveFetcher.followRedirects(baseUrl + "/slow", 5, Duration.ofMillis(300)))
+                .isInstanceOf(UrlValidationException.class)
+                .hasMessage("timed out");
+        assertThatThrownBy(() -> permissiveFetcher.followRedirects("http://127.0.0.1:" + closedPort() + "/", 5, TIMEOUT))
+                .isInstanceOf(UrlValidationException.class)
+                .hasMessage("connection failed");
+    }
+
     private void respond(final String path, final HttpHandler handler) {
         server.createContext(path, exchange -> {
             if (!exchange.getRequestURI().getPath().equals(path)) {
@@ -383,8 +554,26 @@ class PublicHttpFetcherTest {
     }
 
     private static void redirect(final HttpExchange exchange, final String location) throws IOException {
+        redirect(exchange, 302, location);
+    }
+
+    private static void redirect(final HttpExchange exchange, final int status, final String location) throws IOException {
         exchange.getResponseHeaders().add("Location", location);
-        send(exchange, 302, "");
+        send(exchange, status, "");
+    }
+
+    private static void stallAfterHeaders(final HttpExchange exchange, final int status) throws IOException {
+        exchange.sendResponseHeaders(status, 1_000_000);
+        exchange.getResponseBody().write("<html>".getBytes(StandardCharsets.UTF_8));
+        exchange.getResponseBody().flush();
+        sleep(Duration.ofSeconds(3));
+        exchange.close();
+    }
+
+    private static int closedPort() throws IOException {
+        try (final var socket = new ServerSocket(0, 0, InetAddress.getLoopbackAddress())) {
+            return socket.getLocalPort();
+        }
     }
 
     private static void slowRedirect(final HttpExchange exchange, final String location) throws IOException {

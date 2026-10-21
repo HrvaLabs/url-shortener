@@ -19,8 +19,10 @@ import java.util.stream.LongStream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.domain.Pageable;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -34,6 +36,8 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -61,6 +65,9 @@ class DefaultSafeBrowsingRecheckServiceTest {
     @Mock
     private ReviewQueueService reviewQueueService;
 
+    @Mock
+    private RedirectChainService redirectChainService;
+
     private SafeBrowsingRecheckService recheckService;
 
     private final Map<Long, Url> database = new TreeMap<>();
@@ -69,7 +76,7 @@ class DefaultSafeBrowsingRecheckServiceTest {
     @BeforeEach
     void setUp() {
         recheckService = new DefaultSafeBrowsingRecheckService(urlRepository, safeBrowsingService, linkCheckService, moderationService,
-                reviewQueueService);
+                reviewQueueService, redirectChainService);
         LongStream.rangeClosed(1, 45).forEach(id -> database.put(id,
                 Url.builder().id(id).shortUrl("s" + id).longUrl("https://site" + id + ".example").active(true).build()));
         lenient().when(urlRepository.findActiveIds()).thenAnswer(invocation -> new ArrayList<>(database.keySet()));
@@ -299,6 +306,38 @@ class DefaultSafeBrowsingRecheckServiceTest {
         verify(safeBrowsingService, times(5)).checkUrlsForThreats(anyString());
         verify(linkCheckService, times(45)).check(anyString());
         assertThat(stamped).containsExactly(1L, 2L, 3L, 4L);
+    }
+
+    @Test
+    void afterTheScanFollowsTheRedirectsOfUpToFiveHundredLinksNotCheckedForAWeekOldestFirst() {
+        when(urlRepository.findIdsDueForRedirectCheck(any(LocalDateTime.class), any(Pageable.class))).thenReturn(List.of(12L, 3L, 40L));
+        final var earliest = LocalDateTime.now().minusDays(7);
+
+        recheckService.recheckActiveUrls();
+
+        final var checkedBefore = ArgumentCaptor.forClass(LocalDateTime.class);
+        final var page = ArgumentCaptor.forClass(Pageable.class);
+        final var order = inOrder(urlRepository, redirectChainService);
+        order.verify(urlRepository, times(3)).markSafeBrowsingChecked(anyCollection(), any(LocalDateTime.class));
+        order.verify(urlRepository).findIdsDueForRedirectCheck(checkedBefore.capture(), page.capture());
+        order.verify(redirectChainService).check(12L);
+        order.verify(redirectChainService).check(3L);
+        order.verify(redirectChainService).check(40L);
+        assertThat(checkedBefore.getValue()).isBetween(earliest, LocalDateTime.now().minusDays(7));
+        assertThat(page.getValue().getPageNumber()).isZero();
+        assertThat(page.getValue().getPageSize()).isEqualTo(500);
+        verify(urlRepository, never()).saveAll(anyIterable());
+        verify(urlRepository, never()).save(any(Url.class));
+    }
+
+    @Test
+    void aRedirectCheckThatFailsDoesNotStopTheRest() {
+        when(urlRepository.findIdsDueForRedirectCheck(any(LocalDateTime.class), any(Pageable.class))).thenReturn(List.of(1L, 2L));
+        doThrow(new IllegalStateException("database unavailable")).when(redirectChainService).check(1L);
+
+        recheckService.recheckActiveUrls();
+
+        verify(redirectChainService).check(2L);
     }
 
     @Test

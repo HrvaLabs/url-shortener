@@ -12,6 +12,9 @@ import java.net.http.HttpTimeoutException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
@@ -51,6 +54,32 @@ public class PublicHttpFetcher {
         return url -> isHttps(url) && PublicAddresses.isPublicTarget(url);
     }
 
+    public static Predicate<String> httpOrHttpsPublicOnly() {
+        return PublicAddresses::isPublicTarget;
+    }
+
+    public List<String> followRedirects(final String url, final int maxHops, final Duration budget) {
+        final var deadline = System.nanoTime() + budget.toNanos();
+        final var chain = new ArrayList<String>();
+        chain.add(url);
+        while (chain.size() <= maxHops && targetPolicy.test(chain.getLast())) {
+            try {
+                final var next = nextHop(chain.getLast(), deadline);
+                if (next.isEmpty()) {
+                    break;
+                }
+                chain.add(next.get());
+            } catch (final UrlValidationException exception) {
+                if (chain.size() == 1) {
+                    throw exception;
+                }
+                log.debug("Redirect chain ends at hop {} reason={}", chain.size() - 1, exception.getMessage());
+                break;
+            }
+        }
+        return List.copyOf(chain);
+    }
+
     public FetchResult fetch(final String url, final long maxBytes, final String etag, final String lastModified,
             final Duration requestTimeout) {
         final var deadline = System.nanoTime() + requestTimeout.toNanos();
@@ -75,6 +104,24 @@ public class PublicHttpFetcher {
                 throw new UrlValidationException("too many redirects");
             }
             target = resolve(target, location.get());
+        }
+    }
+
+    private Optional<String> nextHop(final String url, final long deadline) {
+        final var remaining = deadline - System.nanoTime();
+        if (remaining <= 0) {
+            throw new UrlValidationException(TIMED_OUT);
+        }
+        final var response = send(request(url, null, null, Duration.ofNanos(remaining)));
+        IOUtils.closeQuietly(response.body());
+        final var location = response.headers().firstValue(HttpHeaders.LOCATION);
+        if (!REDIRECT_STATUSES.contains(response.statusCode()) || location.isEmpty()) {
+            return Optional.empty();
+        }
+        try {
+            return Optional.of(URI.create(url).resolve(location.get()).toString());
+        } catch (final IllegalArgumentException exception) {
+            return Optional.empty();
         }
     }
 

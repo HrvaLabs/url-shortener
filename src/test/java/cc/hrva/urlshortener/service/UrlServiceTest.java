@@ -144,6 +144,9 @@ class UrlServiceTest {
     @Mock
     private ScammerSignalService scammerSignalService;
 
+    @Mock
+    private RedirectChainService redirectChainService;
+
     @BeforeEach
     void setUp() {
         org.mockito.Mockito.lenient().when(rateLimiter.tryAcquire(any(), org.mockito.ArgumentMatchers.anyInt(), any())).thenReturn(true);
@@ -170,6 +173,7 @@ class UrlServiceTest {
                 reviewQueueService,
                 scammerSignalService,
                 clickCheckService,
+                redirectChainService,
                 TransactionOperations.withoutTransaction()
         );
     }
@@ -304,7 +308,7 @@ class UrlServiceTest {
         when(createUrlToUrlConverter.convert(createUrlDto)).thenReturn(url);
         when(userService.getUserFromToken()).thenReturn(User.builder().id(1L).build());
         when(appProperties.getShortUrlLength()).thenReturn(5L);
-        when(urlRepository.save(url)).thenReturn(url);
+        when(urlRepository.save(url)).thenReturn(persisted(url));
 
         urlService.saveUrlRouting(createUrlDto);
 
@@ -342,7 +346,7 @@ class UrlServiceTest {
         when(createUrlToUrlConverter.convert(createUrlDto)).thenReturn(url);
         when(urlValidator.checkIfLongUrlIsNotBlocklisted(url)).thenReturn(new LinkVerdict(Outcome.FLAG, YOUNG_DOMAIN, null, null));
         when(appProperties.getShortUrlLength()).thenReturn(5L);
-        when(urlRepository.save(url)).thenReturn(url);
+        when(urlRepository.save(url)).thenReturn(persisted(url));
 
         urlService.saveUrlRouting(createUrlDto);
 
@@ -360,7 +364,7 @@ class UrlServiceTest {
         when(urlValidator.checkIfLongUrlIsNotBlocklisted(url)).thenReturn(new LinkVerdict(Outcome.FLAG, YOUNG_DOMAIN, null, null));
         when(apiKeyService.fetchApiKeyByKey("apikey")).thenReturn(apiKey);
         when(appProperties.getShortUrlLength()).thenReturn(5L);
-        when(urlRepository.save(url)).thenReturn(url);
+        when(urlRepository.save(url)).thenReturn(persisted(url));
 
         urlService.saveUrlWithApiKey(createUrlDto, "apikey");
 
@@ -381,7 +385,7 @@ class UrlServiceTest {
         when(urlValidator.checkIfLongUrlIsNotBlocklisted(url))
                 .thenReturn(new LinkVerdict(Outcome.ALLOWED, List.of("allowed domain github.com"), null, null));
         when(appProperties.getShortUrlLength()).thenReturn(5L);
-        when(urlRepository.save(url)).thenReturn(url);
+        when(urlRepository.save(url)).thenReturn(persisted(url));
 
         urlService.saveUrlRouting(createUrlDto);
 
@@ -481,7 +485,7 @@ class UrlServiceTest {
         when(userService.getUserFromToken()).thenReturn(User.builder().id(1L).build());
         when(appProperties.getShortUrlLength()).thenReturn(5L);
         when(linkCheckService.check("https://findfavoritedate.life/?u=f6yp608")).thenReturn(new LinkVerdict(Outcome.FLAG, YOUNG_DOMAIN, null, null));
-        when(urlRepository.save(any(Url.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(urlRepository.save(any(Url.class))).thenAnswer(invocation -> persisted(invocation.getArgument(0)));
         org.mockito.Mockito.doAnswer(invocation -> {
             queuedInTransaction.set(TransactionSynchronizationManager.isActualTransactionActive());
             return null;
@@ -517,6 +521,118 @@ class UrlServiceTest {
 
         assertThat(resolvedInTransaction).hasValue(true);
         assertThat(queuedInTransaction).hasValue(true);
+    }
+
+    @Test
+    void aSignedInUsersNewLinkHasItsRedirectsCheckedInTheBackgroundOnceItIsCommitted() {
+        final var checkedInTransaction = new AtomicReference<Boolean>();
+        final var createUrlDto = CreateUrlDto.builder().longUrl("https://example.com/menu").build();
+        when(userService.getUserFromToken()).thenReturn(User.builder().id(1L).build());
+        when(appProperties.getShortUrlLength()).thenReturn(5L);
+        when(urlRepository.save(any(Url.class))).thenAnswer(invocation -> persisted(invocation.getArgument(0)));
+        when(linkCheckService.check("https://example.com/menu")).thenReturn(LinkVerdict.clean());
+        recordTransactionDuringChainCheck(1L, checkedInTransaction);
+
+        transactionalUrlService().saveUrlRouting(createUrlDto);
+
+        assertThat(checkedInTransaction).hasValue(false);
+    }
+
+    @Test
+    void anAnonymousLinkHasItsRedirectsCheckedInTheBackgroundOnceItIsCommitted() {
+        final var checkedInTransaction = new AtomicReference<Boolean>();
+        final var createUrlDto = CreateUrlDto.builder().longUrl("https://example.com/menu").build();
+        when(appProperties.isAnonymousUrlCreationEnabled()).thenReturn(true);
+        when(appProperties.getShortUrlLength()).thenReturn(5L);
+        when(urlRepository.save(any(Url.class))).thenAnswer(invocation -> persisted(invocation.getArgument(0)));
+        when(linkCheckService.check("https://example.com/menu")).thenReturn(LinkVerdict.clean());
+        recordTransactionDuringChainCheck(1L, checkedInTransaction);
+
+        transactionalUrlService().saveUrlRouting(createUrlDto);
+
+        assertThat(checkedInTransaction).hasValue(false);
+    }
+
+    @Test
+    void aLinkMadeWithAnApiKeyHasItsRedirectsCheckedInTheBackgroundOnceItIsCommitted() {
+        final var checkedInTransaction = new AtomicReference<Boolean>();
+        final var createUrlDto = CreateUrlDto.builder().longUrl("https://example.com/menu").build();
+        when(apiKeyService.fetchApiKeyByKey("apikey")).thenReturn(ApiKey.builder().owner(User.builder().id(1L).build()).build());
+        when(appProperties.getShortUrlLength()).thenReturn(5L);
+        when(urlRepository.save(any(Url.class))).thenAnswer(invocation -> persisted(invocation.getArgument(0)));
+        when(linkCheckService.check("https://example.com/menu")).thenReturn(LinkVerdict.clean());
+        recordTransactionDuringChainCheck(1L, checkedInTransaction);
+
+        transactionalUrlService().saveUrlWithApiKey(createUrlDto, "apikey");
+
+        assertThat(checkedInTransaction).hasValue(false);
+    }
+
+    @Test
+    void aNewDestinationForgetsTheOldChainAndHasItsRedirectsCheckedOnceItIsCommitted() {
+        final var checkedInTransaction = new AtomicReference<Boolean>();
+        final var url = Url.builder().id(7L).shortUrl("abc").longUrl("https://old.example").visits(0L).active(true).build();
+        final var update = UrlUpdateDto.builder().id(7L).longUrl("https://example.com/menu").build();
+        final var changed = Url.builder().id(7L).shortUrl("abc").longUrl("https://example.com/menu").visits(0L).active(true)
+                .finalUrl("https://old-landing.example/").chainCheckedAt(LocalDateTime.of(2026, 10, 20, 4, 30)).build();
+        when(userService.getUserFromToken()).thenReturn(admin());
+        when(urlRepository.findById(7L)).thenReturn(Optional.of(url));
+        when(urlUpdateDtoToUrlConverter.convert(update)).thenReturn(changed);
+        when(urlRepository.save(any(Url.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(linkCheckService.check("https://example.com/menu")).thenReturn(LinkVerdict.clean());
+        recordTransactionDuringChainCheck(7L, checkedInTransaction);
+
+        transactionalUrlService().updateUrl(update);
+
+        assertThat(checkedInTransaction).hasValue(false);
+        assertThat(changed.getFinalUrl()).isNull();
+        assertThat(changed.getChainCheckedAt()).isNull();
+    }
+
+    @Test
+    void keepingTheDestinationKeepsTheChainAndChecksNoRedirects() {
+        final var checkedAt = LocalDateTime.of(2026, 10, 20, 4, 30);
+        final var url = Url.builder().id(7L).shortUrl("abc").longUrl("https://same.example").visits(0L).active(true)
+                .finalUrl("https://landing.example/").chainCheckedAt(checkedAt).build();
+        final var update = UrlUpdateDto.builder().id(7L).longUrl("https://same.example").visitLimit(5L).build();
+        when(urlRepository.findById(7L)).thenReturn(Optional.of(url));
+        when(urlUpdateDtoToUrlConverter.convert(update)).thenReturn(url);
+        when(urlRepository.save(url)).thenReturn(url);
+
+        urlService.updateUrl(update);
+
+        verify(redirectChainService, never()).checkLater(org.mockito.ArgumentMatchers.anyLong());
+        assertThat(url.getFinalUrl()).isEqualTo("https://landing.example/");
+        assertThat(url.getChainCheckedAt()).isEqualTo(checkedAt);
+    }
+
+    @Test
+    void aRedirectCheckThatCannotBeScheduledNeverFailsTheCommittedLink() {
+        final var createUrlDto = CreateUrlDto.builder().longUrl("https://example.com/menu").build();
+        final var url = Url.builder().longUrl("https://example.com/menu").build();
+        when(createUrlToUrlConverter.convert(createUrlDto)).thenReturn(url);
+        when(userService.getUserFromToken()).thenReturn(User.builder().id(1L).build());
+        when(appProperties.getShortUrlLength()).thenReturn(5L);
+        when(urlRepository.save(url)).thenReturn(persisted(url));
+        org.mockito.Mockito.doThrow(new org.springframework.core.task.TaskRejectedException("executor is shutting down"))
+                .when(redirectChainService).checkLater(1L);
+
+        final var result = urlService.saveUrlRouting(createUrlDto);
+
+        assertThat(result.id()).isEqualTo(1L);
+    }
+
+    @Test
+    void aRefusedLinkHasNoRedirectsChecked() {
+        final var createUrlDto = CreateUrlDto.builder().longUrl("https://njuskaio.cam/a/MAUB3").build();
+        final var url = Url.builder().longUrl("https://njuskaio.cam/a/MAUB3").build();
+        when(createUrlToUrlConverter.convert(createUrlDto)).thenReturn(url);
+        when(userService.getUserFromToken()).thenReturn(User.builder().id(1L).build());
+        when(urlValidator.checkIfLongUrlIsNotBlocklisted(url)).thenThrow(new UrlValidationException(BLOCKLIST_REFUSAL));
+
+        assertThatThrownBy(() -> urlService.saveUrlRouting(createUrlDto)).isInstanceOf(UrlValidationException.class);
+
+        verify(redirectChainService, never()).checkLater(org.mockito.ArgumentMatchers.anyLong());
     }
 
     @Test
@@ -624,7 +740,7 @@ class UrlServiceTest {
         final var url = Url.builder().longUrl("long").build();
 
         when(appProperties.getShortUrlLength()).thenReturn(1L);
-        when(urlRepository.save(url)).thenReturn(url);
+        when(urlRepository.save(url)).thenReturn(persisted(url));
         when(createUrlToUrlConverter.convert(createUrlDto)).thenReturn(url);
 
         final var result = urlService.saveUrlRouting(createUrlDto);
@@ -638,7 +754,7 @@ class UrlServiceTest {
     void shouldReturnSavedUrlRandomShortUrl() {
         final var createUrlDto = CreateUrlDto.builder().longUrl("long").build();
         final var url = Url.builder().longUrl("long").build();
-        final var existingLongUrl = Url.builder().longUrl("long").active(true).build();
+        final var existingLongUrl = Url.builder().id(12L).longUrl("long").active(true).build();
 
         when(createUrlToUrlConverter.convert(createUrlDto)).thenReturn(url);
         when(userService.getUserFromToken()).thenReturn(null);
@@ -655,7 +771,7 @@ class UrlServiceTest {
     void reusingAnAnonymousLinkLogsNoAliasOrDestination(final CapturedOutput output) {
         final var createUrlDto = CreateUrlDto.builder().longUrl("https://secret-destination.example/path").build();
         final var url = Url.builder().longUrl("https://secret-destination.example/path").build();
-        final var existingLongUrl = Url.builder().shortUrl("secret-alias").longUrl("https://secret-destination.example/path").active(true).build();
+        final var existingLongUrl = Url.builder().id(12L).shortUrl("secret-alias").longUrl("https://secret-destination.example/path").active(true).build();
 
         when(createUrlToUrlConverter.convert(createUrlDto)).thenReturn(url);
         when(userService.getUserFromToken()).thenReturn(null);
@@ -679,7 +795,7 @@ class UrlServiceTest {
         final var owner = User.builder().id(1L).build();
         final var apiKey = ApiKey.builder().owner(owner).build();
 
-        when(urlRepository.save(url)).thenReturn(url);
+        when(urlRepository.save(url)).thenReturn(persisted(url));
         when(apiKeyService.fetchApiKeyByKey(api)).thenReturn(apiKey);
         when(createUrlToUrlConverter.convert(createUrlDto)).thenReturn(url);
         when(appProperties.getShortUrlLength()).thenReturn(1L);
@@ -699,7 +815,7 @@ class UrlServiceTest {
         final var api = "apikey";
         final var apiKey = ApiKey.builder().owner(User.builder().id(1L).build()).build();
 
-        when(urlRepository.save(url)).thenReturn(url);
+        when(urlRepository.save(url)).thenReturn(persisted(url));
         when(apiKeyService.fetchApiKeyByKey(api)).thenReturn(apiKey);
         when(createUrlToUrlConverter.convert(createUrlDto)).thenReturn(url);
         when(appProperties.getShortUrlLength()).thenReturn(24L);
@@ -816,7 +932,7 @@ class UrlServiceTest {
 
         when(createUrlToUrlConverter.convert(createUrlDto)).thenReturn(url);
         when(userService.getUserFromToken()).thenReturn(user);
-        when(urlRepository.save(url)).thenReturn(url);
+        when(urlRepository.save(url)).thenReturn(persisted(url));
         when(appProperties.getShortUrlLength()).thenReturn(1L);
 
         final var result = urlService.saveUrlRouting(createUrlDto);
@@ -835,7 +951,7 @@ class UrlServiceTest {
 
         when(createUrlToUrlConverter.convert(createUrlDto)).thenReturn(url);
         when(userService.getUserFromToken()).thenReturn(user);
-        when(urlRepository.save(url)).thenReturn(url);
+        when(urlRepository.save(url)).thenReturn(persisted(url));
         when(appProperties.getShortUrlLength()).thenReturn(24L);
 
         final var result = urlService.saveUrlRouting(createUrlDto);
@@ -1420,6 +1536,7 @@ class UrlServiceTest {
                 reviewQueueService,
                 scammerSignalService,
                 clickCheckService,
+                redirectChainService,
                 TransactionOperations.withoutTransaction()
         );
     }
@@ -1431,10 +1548,24 @@ class UrlServiceTest {
         });
     }
 
+    private void recordTransactionDuringChainCheck(final long urlId, final AtomicReference<Boolean> transactionActive) {
+        org.mockito.Mockito.doAnswer(invocation -> {
+            transactionActive.set(TransactionSynchronizationManager.isActualTransactionActive());
+            return null;
+        }).when(redirectChainService).checkLater(urlId);
+    }
+
+    private static Url persisted(final Url url) {
+        if (url.getId() == null) {
+            url.setId(1L);
+        }
+        return url;
+    }
+
     private void recordTransactionDuringSave(final AtomicReference<Boolean> transactionActive) {
         when(urlRepository.save(any(Url.class))).thenAnswer(invocation -> {
             transactionActive.set(TransactionSynchronizationManager.isActualTransactionActive());
-            return invocation.getArgument(0);
+            return persisted(invocation.getArgument(0));
         });
     }
 
@@ -1469,6 +1600,7 @@ class UrlServiceTest {
                 reviewQueueService,
                 scammerSignalService,
                 clickCheckService,
+                redirectChainService,
                 new TransactionTemplate(transactionManager)
         );
         final var proxyFactory = new ProxyFactory(service);
@@ -1498,6 +1630,7 @@ class UrlServiceTest {
                 reviewQueueService,
                 scammerSignalService,
                 clickCheckService,
+                redirectChainService,
                 TransactionOperations.withoutTransaction()
         );
     }
