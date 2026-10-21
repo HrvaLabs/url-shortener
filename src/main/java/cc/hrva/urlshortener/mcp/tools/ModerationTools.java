@@ -70,6 +70,7 @@ public class ModerationTools {
     private static final String MISSING_URL = "Give the URL to check, for example https://example.com/page.";
     private static final String NOT_A_DOMAIN = "Enter a domain such as example.com, not a top-level domain or an IP address.";
     private static final String NO_EVIDENCE = "No flagged or blocked links on this domain. Use the dashboard to block it.";
+    private static final String SHARED_HOSTING = "That's a shared hosting domain. Use the dashboard to block it.";
     private static final String UNFLAGGED_LINKS = "This would also block %s nobody flagged. Use the dashboard to block this domain.";
 
     private final McpUserResolver mcpUserResolver;
@@ -200,7 +201,8 @@ public class ModerationTools {
                     + "call; when more would be affected it changes nothing and asks you to use the dashboard. Every affected link owner "
                     + "is emailed. Use it only for a domain that exists to scam, such as a lookalike registered days ago, and never for a "
                     + "shared host such as google.com, github.io, a cloud storage host or another link shortener, because every link there "
-                    + "would be blocked. Only the hrva.cc dashboard can undo it.",
+                    + "would be blocked. A shared hosting domain such as github.io, pages.dev or ddns.net is always refused; block the one "
+                    + "site on it instead, such as evil.github.io. Only the hrva.cc dashboard can undo it.",
             annotations = @McpTool.McpAnnotations(
                     title = "Block a domain",
                     readOnlyHint = false,
@@ -401,6 +403,10 @@ public class ModerationTools {
                 .filter(host -> !DomainNames.isIpLiteral(host))
                 .filter(DomainNames::isUnderRegistrySuffix)
                 .orElseThrow(() -> new UrlValidationException(NOT_A_DOMAIN));
+        if (DomainNames.isPublicSuffix(domain)) {
+            log.info("MCP block_domain refused for a shared hosting domain adminId={}", admin.getId());
+            throw new UrlValidationException(SHARED_HOSTING);
+        }
         final var unicodeDomain = IDN.toUnicode(domain).toLowerCase(Locale.ROOT);
         if (!hasFlaggedOrBlockedLinksOn(domain, unicodeDomain)) {
             log.info("MCP block_domain refused without flagged or blocked links adminId={}", admin.getId());

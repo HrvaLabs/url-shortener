@@ -58,6 +58,10 @@ public final class DomainNames {
         return internetDomainName(host).filter(InternetDomainName::isUnderRegistrySuffix).isPresent();
     }
 
+    public static boolean isPublicSuffix(final String host) {
+        return internetDomainName(host).filter(InternetDomainName::isPublicSuffix).isPresent();
+    }
+
     public static boolean isIpLiteral(final String host) {
         try {
             InetAddress.ofLiteral(host);

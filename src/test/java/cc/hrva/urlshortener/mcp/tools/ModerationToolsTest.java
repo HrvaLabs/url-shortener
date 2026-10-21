@@ -37,6 +37,8 @@ import java.util.stream.LongStream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -68,6 +70,7 @@ class ModerationToolsTest {
     private static final User NON_ADMIN = User.builder().id(7L).email("user@localhost").active(true).build();
     private static final String ADMINS_ONLY = "Moderation tools are for hrva.cc admins only.";
     private static final String NO_EVIDENCE = "No flagged or blocked links on this domain. Use the dashboard to block it.";
+    private static final String SHARED_HOSTING = "That's a shared hosting domain. Use the dashboard to block it.";
     private static final String OVER_THE_CAP = "This would affect 51 links, more than the 50 allowed here. Use the dashboard.";
     private static final List<String> TOOL_NAMES = List.of("moderation_summary", "review_queue", "possible_scammers", "check_url",
             "block_link", "block_domain", "block_user", "delete_link");
@@ -333,6 +336,34 @@ class ModerationToolsTest {
         assertThat(result.isError()).isTrue();
         assertThat(text(result)).isEqualTo("This would also block 1200 links nobody flagged. Use the dashboard to block this domain.");
         verifyNoInteractions(moderationService);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"ddns.net", "pages.dev", "github.io", "DuckDNS.org", "https://pages.dev/login"})
+    void blockDomainOnASharedHostingDomainIsRefusedBeforeAnyLookup(final String domain) {
+        signedInAs(ADMIN, true);
+
+        final var result = moderationTools.blockDomain(domain, "phishing");
+
+        assertThat(result.isError()).isTrue();
+        assertThat(text(result)).isEqualTo(SHARED_HOSTING);
+        verifyNoInteractions(moderationService);
+        verify(urlRepository, never()).findFlaggedOrBlockedDestinationsMentioning(anyString(), anyString());
+        verify(urlRepository, never()).countActiveUnflaggedLinksMentioning(anyString(), anyString());
+    }
+
+    @Test
+    void blockDomainOnOneSiteOfASharedHostingDomainStillWorks() {
+        signedInAs(ADMIN, true);
+        when(urlRepository.findFlaggedOrBlockedDestinationsMentioning("scam-login.pages.dev", "scam-login.pages.dev"))
+                .thenReturn(List.of("https://scam-login.pages.dev/verify"));
+        when(urlRepository.countActiveUnflaggedLinksMentioning("scam-login.pages.dev", "scam-login.pages.dev")).thenReturn(0L);
+        when(moderationService.blockDomain("scam-login.pages.dev", null, ADMIN_EMAIL, "mcp", 50)).thenReturn(1);
+
+        final var result = moderationTools.blockDomain("scam-login.pages.dev", null);
+
+        assertThat(result.isError()).isFalse();
+        assertThat(text(result)).isEqualTo("Blocked scam-login.pages.dev and its subdomains. Links blocked now: 1.");
     }
 
     @Test

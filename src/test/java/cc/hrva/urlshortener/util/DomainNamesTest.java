@@ -114,6 +114,19 @@ class DomainNamesTest {
     }
 
     @ParameterizedTest
+    @ValueSource(strings = {"ddns.net", "pages.dev", "github.io", "duckdns.org", "co.uk", "com"})
+    void sharedHostingDomainOrTopLevelEndingIsAPublicSuffix(final String host) {
+        assertThat(DomainNames.isPublicSuffix(host)).isTrue();
+    }
+
+    @ParameterizedTest
+    @NullAndEmptySource
+    @ValueSource(strings = {"x.pages.dev", "scam.ddns.net", "jofogas.cards", "amazon.co.uk", "localhost", "1.2.3.4", "exa mple.com"})
+    void aSiteOrSomethingThatIsNotADomainIsNotAPublicSuffix(final String host) {
+        assertThat(DomainNames.isPublicSuffix(host)).isFalse();
+    }
+
+    @ParameterizedTest
     @ValueSource(strings = {"1.2.3.4", "127.0.0.1", "::1", "[::1]", "2001:db8::1", "::ffff:1.2.3.4"})
     void addressLiteralIsAnIpLiteral(final String host) {
         assertThat(DomainNames.isIpLiteral(host)).isTrue();
