@@ -272,6 +272,20 @@ class DefaultBlocklistSourceServiceTest {
     }
 
     @Test
+    void whileRedisIsDownTheMissingCheckStopsAtTheFirstFailedLookupAndDownloadsNothing() {
+        final var first = source(1).build();
+        final var second = source(2).url(OTHER).build();
+        when(blocklistSourceRepository.findByEnabledTrue()).thenReturn(List.of(first, second));
+        when(blocklistStore.exists(1)).thenThrow(new RedisConnectionFailureException("Connection refused"));
+
+        blocklistSourceService.reloadMissing();
+
+        verify(blocklistStore, times(1)).exists(anyLong());
+        assertThat(fetcher.requestedUrls()).isEmpty();
+        verify(blocklistStore, never()).replace(anyLong(), anySet());
+    }
+
+    @Test
     void theHourlyRunRefreshesSourcesPastTheirIntervalAndSkipsTheRest() {
         final var now = LocalDateTime.now();
         final var overdue = stored(source(1).refreshIntervalHours(6).lastFetchedAt(now.minusHours(7)).build());

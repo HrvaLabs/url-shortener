@@ -113,4 +113,11 @@ public class DefaultScheduledService implements ScheduledService {
         blocklistSourceService.refreshDue();
     }
 
+    @Override
+    @Scheduled(cron = "30 */5 * * * *")
+    public void reloadMissingBlocklists() {
+        log.info("Scheduled: missing blocklists");
+        blocklistSourceService.reloadMissing();
+    }
+
 }

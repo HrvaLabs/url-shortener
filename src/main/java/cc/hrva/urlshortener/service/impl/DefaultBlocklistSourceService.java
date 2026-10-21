@@ -25,6 +25,7 @@ import org.apache.commons.lang3.StringUtils;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.event.EventListener;
+import org.springframework.dao.DataAccessException;
 import org.springframework.data.domain.Sort;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
@@ -126,11 +127,24 @@ public class DefaultBlocklistSourceService implements BlocklistSourceService {
     @EventListener(ApplicationReadyEvent.class)
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public void reloadMissing() {
-        refreshEnabled(source -> !blocklistStore.exists(source.getId()));
+        withoutSets(blocklistSourceRepository.findByEnabledTrue()).ifPresent(missing -> refreshEach(missing, source -> true));
+    }
+
+    private Optional<List<BlocklistSource>> withoutSets(final List<BlocklistSource> sources) {
+        try {
+            return Optional.of(sources.stream().filter(source -> !blocklistStore.exists(source.getId())).toList());
+        } catch (final DataAccessException exception) {
+            log.warn("Could not check which blocklist sets are missing, Redis is unavailable exception={}", exception.getClass().getName());
+            return Optional.empty();
+        }
     }
 
     private void refreshEnabled(final Predicate<BlocklistSource> selected) {
-        for (final var source : blocklistSourceRepository.findByEnabledTrue()) {
+        refreshEach(blocklistSourceRepository.findByEnabledTrue(), selected);
+    }
+
+    private void refreshEach(final List<BlocklistSource> sources, final Predicate<BlocklistSource> selected) {
+        for (final var source : sources) {
             try {
                 if (selected.test(source)) {
                     blocklistRefresher.refresh(source);

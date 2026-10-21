@@ -70,6 +70,12 @@ class DefaultScheduledServiceTest {
     }
 
     @Test
+    void shouldReloadMissingBlocklists() {
+        scheduledService.reloadMissingBlocklists();
+        verify(blocklistSourceService).reloadMissing();
+    }
+
+    @Test
     void shouldFailInterruptedEmails() {
         scheduledService.failInterruptedEmails();
         verify(sendingEmailService).failInterruptedEmails();

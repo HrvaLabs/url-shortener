@@ -300,7 +300,7 @@ Not automatable (interactive sign-in). With the local dev stack, the app on port
 
 ## Scheduled Tasks
 Jobs run on a 4-thread scheduler (`spring.task.scheduling.pool.size: 4` in `application.yaml`, threads `scheduling-1`…`4`), so a long job such as the hourly blocklist refresh can't stall the per-minute ones.
-- **Blocklist refresh**: Every hour, `refreshDue` downloads each enabled source whose own interval (`refreshIntervalHours`, 1–168, default 6; 5 minutes' tolerance) has passed or whose Redis set is missing. At startup `reloadMissing` (`@Async`, on `ApplicationReadyEvent`) downloads every enabled source without a set, so a Redis restart or `FLUSHALL` heals itself.
+- **Blocklist refresh**: Every hour, `refreshDue` downloads each enabled source whose own interval (`refreshIntervalHours`, 1–168, default 6; 5 minutes' tolerance) has passed or whose Redis set is missing. `reloadMissing` (`@Async`) downloads every enabled source whose set is missing, at startup (`ApplicationReadyEvent`) and every 5 minutes (`reloadMissingBlocklists`, 30 s past the minute): one `EXISTS` per source, and while Redis is down one warn line and nothing else until the next run. So a Redis restart or `FLUSHALL` heals itself within minutes, without an app restart.
 - **Click-check lists**: Every 5 minutes, at startup and after any source or rule change (`BlocklistConfigurationChangedEvent`), `DefaultClickCheckService.reload` re-reads the enabled `BLOCK` source ids and the Allow-rule domains into memory.
 - **URL expiry**: Daily at 8 AM, sends email notification for URLs expiring within 24 hours (configurable via `app.url-expiration-notification-hours`).
 - **IP cleanup**: Every minute, deactivates and deletes old IP address records.

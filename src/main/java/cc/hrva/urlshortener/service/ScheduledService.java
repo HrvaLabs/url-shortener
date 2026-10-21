@@ -13,5 +13,6 @@ public interface ScheduledService {
     void forgetOldEmailContent();
     void sendLinkDigest();
     void refreshDueBlocklists();
+    void reloadMissingBlocklists();
 
 }
