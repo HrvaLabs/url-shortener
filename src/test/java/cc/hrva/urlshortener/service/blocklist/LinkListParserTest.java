@@ -37,10 +37,17 @@ class LinkListParserTest {
                 "example.com",
                 "ftp://ex.com/file",
                 "http://",
-                "https://ex.com/a b",
+                "https://exa mple.com/a",
                 "http://ex.com/ok"), 100);
 
         assertThat(parsed.entries()).containsExactly("ex.com/ok");
+    }
+
+    @Test
+    void rawAndPercentEncodedSpellingsOfOneLinkAreOneEntry() {
+        final var parsed = linkListParser.parse(linesOf("https://jofogas.cards/oglas/ž", "https://jofogas.cards/oglas/%C5%BE"), 100);
+
+        assertThat(parsed.entries()).containsExactly("jofogas.cards/oglas/%C5%BE");
     }
 
     @Test
@@ -75,7 +82,7 @@ class LinkListParserTest {
 
         assertThat(parsed.entries()).containsExactlyInAnyOrder(
                 "docs.google.com/presentation/d/e/X/pub?start=false&loop=false&delayms=3000",
-                "ex.com/q?a=\"b\"&c='d'",
+                "ex.com/q?a=%22b%22&c='d'",
                 "ex.com/twice?a=1&amp;b=2");
     }
 
@@ -96,7 +103,7 @@ class LinkListParserTest {
                 "4,",
                 "5,http://ok.example/x"), 100);
 
-        assertThat(parsed.entries()).containsExactlyInAnyOrder("ex.com/q?a=\"b\"", "ok.example/x");
+        assertThat(parsed.entries()).containsExactlyInAnyOrder("ex.com/q?a=%22b%22", "ok.example/x");
     }
 
     @Test

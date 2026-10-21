@@ -9,7 +9,7 @@ public final class LinkKeys {
 
     private static final Pattern LINK = Pattern.compile(
             "^(?<scheme>https?)://(?:[^/?#\\s]*@)?(?<host>\\[[^\\]/?#\\s]*\\]|[^/?#\\s:@\\[\\]]+)(?::(?<port>\\d{0,5}))?"
-                    + "(?<path>/[^?#\\s]*)?(?:\\?(?<query>[^#\\s]*))?(?:#\\S*)?$",
+                    + "(?<path>/[^?#]*)?(?:\\?(?<query>[^#]*))?(?:#.*)?$",
             Pattern.CASE_INSENSITIVE);
 
     private LinkKeys() {}
@@ -32,8 +32,10 @@ public final class LinkKeys {
             final String scheme, final String host, final String port, final String path, final String query) {
         final var withoutQuery = (host.contains(":") ? "[" + host + "]" : host)
                 + portOf(scheme, port)
-                + StringUtils.defaultIfEmpty(path, "/");
-        return StringUtils.isEmpty(query) ? List.of(withoutQuery) : List.of(withoutQuery + "?" + query, withoutQuery);
+                + RedirectLocations.percentEncoded(StringUtils.defaultIfEmpty(path, "/"));
+        return StringUtils.isEmpty(query)
+                ? List.of(withoutQuery)
+                : List.of(withoutQuery + "?" + RedirectLocations.percentEncoded(query), withoutQuery);
     }
 
     private static String portOf(final String scheme, final String port) {

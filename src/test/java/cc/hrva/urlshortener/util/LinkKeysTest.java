@@ -65,8 +65,22 @@ class LinkKeysTest {
     }
 
     @Test
-    void encodedAndNonAsciiPathsAreKeptAsWritten() {
-        assertThat(LinkKeys.of("https://ex.com/a%20b/čaj")).containsExactly("ex.com/a%20b/čaj");
+    void spacesAndNonAsciiInThePathAndQueryArePercentEncodedAndEscapesAreKept() {
+        assertThat(LinkKeys.of("https://ex.com/a%20b/čaj")).containsExactly("ex.com/a%20b/%C4%8Daj");
+        assertThat(LinkKeys.of("https://ex.com/a b?q=ž ž&r=%7C")).containsExactly("ex.com/a%20b?q=%C5%BE%20%C5%BE&r=%7C", "ex.com/a%20b");
+    }
+
+    @Test
+    void aLinkMatchesWhetherItIsWrittenRawOrPercentEncoded() {
+        assertThat(LinkKeys.of("https://jofogas.cards/oglas/ž")).containsExactly("jofogas.cards/oglas/%C5%BE");
+        assertThat(LinkKeys.of("https://jofogas.cards/oglas/%C5%BE")).containsExactly("jofogas.cards/oglas/%C5%BE");
+    }
+
+    @Test
+    void theEncodingIsTheOneRedirectLocationsUse() {
+        final var location = RedirectLocations.normalized("https://ex.com/šuma i more?q=\"ž\"|^");
+
+        assertThat(LinkKeys.of("https://ex.com/šuma i more?q=\"ž\"|^").getFirst()).isEqualTo(location.substring("https://".length()));
     }
 
     @Test
@@ -78,7 +92,7 @@ class LinkKeysTest {
         assertThat(LinkKeys.of("ftp://ex.com/a")).isEmpty();
         assertThat(LinkKeys.of("https://")).isEmpty();
         assertThat(LinkKeys.of("https://ex.com:abc/")).isEmpty();
-        assertThat(LinkKeys.of("https://ex.com/a b")).isEmpty();
+        assertThat(LinkKeys.of("https://exa mple.com/a")).isEmpty();
         assertThat(LinkKeys.of("https://[zz/")).isEmpty();
     }
 

@@ -22,19 +22,19 @@ public final class RedirectLocations {
         final var schemeEnd = scheme.find() ? scheme.end() : 0;
         final var rest = slashed.substring(schemeEnd);
         if (!rest.startsWith(AUTHORITY_START)) {
-            return slashed.substring(0, schemeEnd) + encoded(rest);
+            return slashed.substring(0, schemeEnd) + percentEncoded(rest);
         }
 
         final var afterSlashes = rest.substring(AUTHORITY_START.length());
         final var authorityEnd = StringUtils.indexOfAny(afterSlashes, AUTHORITY_END);
         final var authority = authorityEnd < 0 ? afterSlashes : afterSlashes.substring(0, authorityEnd);
         final var tail = authorityEnd < 0 ? "" : afterSlashes.substring(authorityEnd);
-        return slashed.substring(0, schemeEnd) + AUTHORITY_START + asciiAuthority(authority) + encoded(tail);
+        return slashed.substring(0, schemeEnd) + AUTHORITY_START + asciiAuthority(authority) + percentEncoded(tail);
     }
 
     private static String asciiAuthority(final String authority) {
         final var hostStart = authority.lastIndexOf('@') + 1;
-        final var userInfo = encoded(authority.substring(0, hostStart));
+        final var userInfo = percentEncoded(authority.substring(0, hostStart));
         final var hostAndPort = authority.substring(hostStart);
         if (hostAndPort.startsWith("[")) {
             return userInfo + hostAndPort;
@@ -45,7 +45,7 @@ public final class RedirectLocations {
         return userInfo + IDN.toASCII(host) + port;
     }
 
-    private static String encoded(final String part) {
+    public static String percentEncoded(final String part) {
         final var bytes = part.getBytes(StandardCharsets.UTF_8);
         final var encoded = new StringBuilder(bytes.length);
         for (int index = 0; index < bytes.length; index++) {

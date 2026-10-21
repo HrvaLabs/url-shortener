@@ -13,7 +13,10 @@ import cc.hrva.urlshortener.model.enums.SourceKind;
 import cc.hrva.urlshortener.repository.BlocklistSourceRepository;
 import cc.hrva.urlshortener.repository.DomainRuleRepository;
 import cc.hrva.urlshortener.service.blocklist.BlocklistStore;
+import cc.hrva.urlshortener.service.blocklist.LinkListParser;
 import cc.hrva.urlshortener.service.impl.DefaultLinkCheckService;
+import java.io.BufferedReader;
+import java.io.StringReader;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
@@ -237,6 +240,19 @@ class DefaultLinkCheckServiceTest {
         assertThat(linkCheckService.explain(url)).isEqualTo(unreadable);
         verifyNoInteractions(
                 domainRuleRepository, blocklistSourceRepository, blocklistStore, domainAgeService, domainReputationService, suspiciousUrlService);
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            "https://jofogas.cards/oglas/%C5%BE, https://jofogas.cards/oglas/ž",
+            "https://jofogas.cards/oglas/ž, https://jofogas.cards/oglas/%C5%BE"
+    })
+    void aListedLinkMatchesWhetherTheFeedOrTheLinkWritesItRawOrPercentEncoded(final String feedLine, final String destination) {
+        final var entries = new LinkListParser().parse(new BufferedReader(new StringReader(feedLine)), 10).entries();
+        source(3, URLHAUS, SourceKind.LINKS, BlocklistAction.BLOCK, entries.toArray(String[]::new));
+
+        assertThat(verdictOf(destination))
+                .isEqualTo(new LinkVerdict(Outcome.BLOCK, List.of("on list URLhaus"), BlockReason.BLOCKLIST, URLHAUS));
     }
 
     @Test
