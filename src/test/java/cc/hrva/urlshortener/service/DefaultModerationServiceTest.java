@@ -125,6 +125,9 @@ class DefaultModerationServiceTest {
     @Mock
     private ApplicationEventPublisher eventPublisher;
 
+    @Mock
+    private ScammerSignalService scammerSignalService;
+
     private final Map<Long, Url> links = new TreeMap<>();
     private final Map<String, DomainRule> rules = new HashMap<>();
     private final List<List<Long>> savedPerTransaction = new ArrayList<>();
@@ -170,6 +173,12 @@ class DefaultModerationServiceTest {
             }
             return null;
         }).when(reviewQueueService).resolveOpen(any(Url.class), any(ReviewResolution.class), anyString());
+        lenient().doAnswer(invocation -> {
+            if (inTransaction) {
+                outOfPlace.add("possible scammers refreshed before the change committed");
+            }
+            return null;
+        }).when(scammerSignalService).invalidate();
         lenient().when(cacheManager.getCache("urls")).thenReturn(cache);
         lenient().doAnswer(invocation -> {
             if (inTransaction) {
@@ -185,7 +194,7 @@ class DefaultModerationServiceTest {
         }).when(entityManager).detach(any());
         moderationService = new DefaultModerationService(urlRepository, userRepository, domainRuleRepository, linkCheckService,
                 reviewQueueService, userService, sendingEmailService, auditLogService, ipAddressService, cacheManager, eventPublisher, recordingTransactions(),
-                entityManager);
+                entityManager, scammerSignalService);
     }
 
     @Test
@@ -647,6 +656,59 @@ class DefaultModerationServiceTest {
 
         verify(userService, never()).deactivate(any());
         assertThat(url.getBlockReason()).isEqualTo(BlockReason.USER_BLOCKED);
+    }
+
+    @Test
+    void blockingAUserRefreshesThePossibleScammersOnceTheBlockIsSaved() {
+        final var user = user(5L, "rhea@gmail.com");
+        when(userRepository.findById(5L)).thenReturn(Optional.of(user));
+        link(40L, "https://a.example/", user);
+
+        moderationService.blockUser(5L, ADMIN, "admin", null);
+
+        final var order = inOrder(userService, urlRepository, scammerSignalService);
+        order.verify(userService).deactivate(user);
+        order.verify(urlRepository).save(argThat(url -> url.getId() == 40L));
+        order.verify(scammerSignalService).invalidate();
+        assertThat(outOfPlace).isEmpty();
+    }
+
+    @Test
+    void blockingTheUserFromAReviewRefreshesThePossibleScammers() {
+        final var user = user(5L, "rhea@gmail.com");
+        link(40L, "https://a.example/", user);
+
+        moderationService.resolveReview(40L, ReviewAction.BLOCK_USER, null, ADMIN, "admin");
+
+        verify(scammerSignalService).invalidate();
+        assertThat(outOfPlace).isEmpty();
+    }
+
+    @Test
+    void reactivatingAUserRefreshesThePossibleScammersOnceTheAccountAndLinksAreSaved() {
+        final var user = user(5L, "rhea@gmail.com");
+        user.setActive(false);
+        when(userRepository.findById(5L)).thenReturn(Optional.of(user));
+        blocked(50L, "https://a.example/", BlockReason.USER_BLOCKED, user);
+
+        moderationService.reactivateUser(5L, ADMIN, "admin");
+
+        final var order = inOrder(userService, urlRepository, scammerSignalService);
+        order.verify(userService).persistUser(user);
+        order.verify(urlRepository).save(argThat(url -> url.getId() == 50L));
+        order.verify(scammerSignalService).invalidate();
+        assertThat(outOfPlace).isEmpty();
+    }
+
+    @Test
+    void aRefusedUserBlockLeavesThePossibleScammersAlone() {
+        final var admin = user(5L, ADMIN);
+        when(userRepository.findById(5L)).thenReturn(Optional.of(admin));
+        when(userRepository.existsByIdAndAuthoritiesName(5L, "ROLE_ADMIN")).thenReturn(true);
+
+        assertThatThrownBy(() -> moderationService.blockUser(5L, ADMIN, "admin", null)).isInstanceOf(UrlValidationException.class);
+
+        verifyNoInteractions(scammerSignalService);
     }
 
     @Test

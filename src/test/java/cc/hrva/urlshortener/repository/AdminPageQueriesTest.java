@@ -4,6 +4,7 @@ import cc.hrva.urlshortener.dto.UrlResponse;
 import cc.hrva.urlshortener.model.LinkReview;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.User;
+import cc.hrva.urlshortener.model.codebook.Authorities;
 import cc.hrva.urlshortener.repository.specification.UrlSpecification;
 import cc.hrva.urlshortener.service.ScammerSignalService;
 import cc.hrva.urlshortener.service.impl.DefaultReviewQueueService;
@@ -11,6 +12,7 @@ import jakarta.persistence.EntityManager;
 import jakarta.persistence.EntityManagerFactory;
 import java.time.Clock;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Set;
 import java.util.stream.IntStream;
 import org.hibernate.Hibernate;
@@ -29,6 +31,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 import org.springframework.transaction.annotation.Transactional;
+import tools.jackson.databind.json.JsonMapper;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
@@ -56,6 +59,9 @@ class AdminPageQueriesTest {
 
     @Autowired
     private LinkReviewRepository linkReviewRepository;
+
+    @Autowired
+    private UserRepository userRepository;
 
     @Autowired
     private EntityManager entityManager;
@@ -124,8 +130,19 @@ class AdminPageQueriesTest {
         assertThat(statistics.getPrepareStatementCount()).isEqualTo(3);
     }
 
+    @Test
+    void anAdminUserPageLoadsEveryUsersRolesInOneQuery() {
+        final var json = JsonMapper.builder().build().writeValueAsString(userRepository.findAll(PageRequest.of(0, 10)).getContent());
+
+        assertThat(json).contains("ROLE_USER");
+        assertThat(statistics.getPrepareStatementCount()).isEqualTo(2);
+    }
+
     private User owner(final int index) {
-        final var user = User.builder().email("owner" + index + "@example.com").password("correct horse battery").apiKeySlots(4L).build();
+        final var role = Authorities.builder().id(index + 1L).name("ROLE_USER").active(true).build();
+        entityManager.persist(role);
+        final var user = User.builder().email("owner" + index + "@example.com").password("correct horse battery").apiKeySlots(4L)
+                .authorities(List.of(role)).build();
         entityManager.persist(user);
         return user;
     }
@@ -135,7 +152,7 @@ class AdminPageQueriesTest {
     @EntityScan(basePackageClasses = Url.class)
     @EnableJpaRepositories(
             basePackageClasses = UrlRepository.class,
-            includeFilters = @ComponentScan.Filter(type = FilterType.ASSIGNABLE_TYPE, classes = {UrlRepository.class, LinkReviewRepository.class}))
+            includeFilters = @ComponentScan.Filter(type = FilterType.ASSIGNABLE_TYPE, classes = {UrlRepository.class, LinkReviewRepository.class, UserRepository.class}))
     static class TestApplication {
     }
 

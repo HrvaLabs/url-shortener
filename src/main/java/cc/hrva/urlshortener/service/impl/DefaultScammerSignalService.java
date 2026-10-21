@@ -57,6 +57,11 @@ public class DefaultScammerSignalService implements ScammerSignalService {
         return ids;
     }
 
+    @Override
+    public void invalidate() {
+        snapshot = null;
+    }
+
     private Set<Long> queryPossibleScammerIds() {
         final var youngSince = LocalDateTime.now(clock.withZone(ZoneId.systemDefault())).minus(YOUNG_ACCOUNT);
         return Stream.of(

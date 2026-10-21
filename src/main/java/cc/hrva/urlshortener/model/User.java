@@ -9,6 +9,7 @@ import jakarta.persistence.*;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import lombok.*;
+import org.hibernate.annotations.BatchSize;
 import org.hibernate.validator.constraints.Length;
 
 import java.time.LocalDateTime;
@@ -48,6 +49,7 @@ public class User {
     @OneToMany(mappedBy = "owner")
     private List<Url> urls;
 
+    @BatchSize(size = 100)
     @OneToMany
     private List<Authorities> authorities;
 

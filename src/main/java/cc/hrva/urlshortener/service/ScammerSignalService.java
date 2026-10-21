@@ -8,5 +8,6 @@ public interface ScammerSignalService {
 
     Set<Long> possibleScammers(Collection<User> users);
     Set<Long> possibleScammerIds();
+    void invalidate();
 
 }

@@ -61,6 +61,17 @@ class DefaultScammerSignalServiceSnapshotTest {
     }
 
     @Test
+    void invalidatingWorksThePossibleScammersOutAgainOnTheNextAsk() {
+        scammerSignalService.possibleScammerIds();
+        when(urlRepository.findOwnerIdsWithBlockedLinks(anyLong())).thenReturn(List.of());
+
+        scammerSignalService.invalidate();
+
+        assertThat(scammerSignalService.possibleScammerIds()).containsExactly(27L);
+        verifyQueriedTimes(2);
+    }
+
+    @Test
     void aClockThatJumpsBackDoesNotKeepAnOldAnswer() {
         scammerSignalService.possibleScammerIds();
         clock.advance(Duration.ofHours(-1));

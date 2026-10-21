@@ -27,6 +27,7 @@ import cc.hrva.urlshortener.service.IPAddressService;
 import cc.hrva.urlshortener.service.LinkCheckService;
 import cc.hrva.urlshortener.service.ModerationService;
 import cc.hrva.urlshortener.service.ReviewQueueService;
+import cc.hrva.urlshortener.service.ScammerSignalService;
 import cc.hrva.urlshortener.service.SendingEmailService;
 import cc.hrva.urlshortener.service.UserService;
 import cc.hrva.urlshortener.service.blocklist.BlocklistConfigurationChangedEvent;
@@ -101,6 +102,7 @@ public class DefaultModerationService implements ModerationService {
     private final ApplicationEventPublisher eventPublisher;
     private final TransactionOperations transactionOperations;
     private final EntityManager entityManager;
+    private final ScammerSignalService scammerSignalService;
 
     @Override
     public UrlResponse blockLink(final long urlId, final BlockReason reason, final String detail, final String performedBy, final String via) {
@@ -188,6 +190,7 @@ public class DefaultModerationService implements ModerationService {
         }
         final var restored = eachLink(urlRepository.findIdsByOwnerAndBlockReason(user, BlockReason.USER_BLOCKED), Long::longValue,
                 id -> reactivate(id, url -> url.getBlockReason() == BlockReason.USER_BLOCKED && url.getThreatType() == null));
+        scammerSignalService.invalidate();
         auditLogService.log(performedBy, "REACTIVATE_USER", TARGET_USER, String.valueOf(userId), details(via, restored));
         return restored;
     }
@@ -299,8 +302,10 @@ public class DefaultModerationService implements ModerationService {
         if (!Boolean.FALSE.equals(user.getActive())) {
             userService.deactivate(user);
         }
-        return eachLink(ids, Long::longValue, id -> block(id, BlockReason.USER_BLOCKED, null, ReviewResolution.USER_BLOCKED, performedBy,
+        final var blocked = eachLink(ids, Long::longValue, id -> block(id, BlockReason.USER_BLOCKED, null, ReviewResolution.USER_BLOCKED, performedBy,
                 url -> url.isActive() && ownedBy(url, user)).isPresent());
+        scammerSignalService.invalidate();
+        return blocked;
     }
 
     private Trusted trust(final String domain, final String reason, final String performedBy) {
