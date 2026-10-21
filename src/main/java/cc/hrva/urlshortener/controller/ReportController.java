@@ -29,16 +29,18 @@ import org.springframework.web.bind.annotation.RestController;
 @Slf4j
 @RestController
 @RequiredArgsConstructor
-@RequestMapping("api/v1/reports")
+@RequestMapping(ReportController.REPORTS_ENDPOINT)
 public class ReportController {
+
+    public static final String REPORTS_ENDPOINT = "/api/v1/reports";
 
     private static final String RATE_LIMIT_NAME = "report";
     private static final int REPORTS_PER_CLIENT = 5;
     private static final Duration REPORT_WINDOW = Duration.ofHours(1);
     private static final int DETAILS_LIMIT = 500;
     private static final Pattern SCHEME = Pattern.compile("^https?://", Pattern.CASE_INSENSITIVE);
-    private static final Pattern SHORT_CODE = Pattern.compile("^[a-zA-Z0-9_-]+$");
-    private static final Pattern CONTROL_CHARACTERS = Pattern.compile("[\\p{Cc}&&[^\\s]]");
+    private static final Pattern SHORT_CODE = Pattern.compile("^[a-zA-Z0-9_-]{1,32}$");
+    private static final Pattern CONTROL_CHARACTERS = Pattern.compile("[\\p{Cc}\\p{Cf}&&[^\\s]]");
     private static final String SHORT_LINK_INVALID = "Enter a hrva.cc short link, like hrva.cc/abc";
     private static final String CATEGORY_INVALID = "Category must be PHISHING, MALWARE, SPAM or OTHER";
     private static final String DETAILS_TOO_LONG = "Details must be 500 characters or fewer";

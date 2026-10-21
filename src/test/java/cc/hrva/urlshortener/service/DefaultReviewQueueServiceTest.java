@@ -10,6 +10,7 @@ import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Optional;
+import java.util.stream.IntStream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -281,6 +282,30 @@ class DefaultReviewQueueServiceTest {
     }
 
     @Test
+    void anOpenReviewHoldingTwentyVisitorReportsTakesNoMore() {
+        final var reasons = YOUNG + "\n" + visitorReports(20);
+        final var open = LinkReview.builder().id(1L).url(url).reasons(reasons).flaggedAt(LocalDateTime.now()).build();
+        when(linkReviewRepository.findFirstByUrlAndResolvedAtIsNullOrderByFlaggedAtDesc(url)).thenReturn(Optional.of(open));
+
+        reviewQueueService.report(url, ReportCategory.PHISHING, "asks for my bank login");
+
+        verify(linkReviewRepository, never()).save(any());
+        assertThat(open.getReasons()).isEqualTo(reasons);
+    }
+
+    @Test
+    void anOpenReviewWithNineteenVisitorReportsTakesOneMoreWhateverElseItHolds() {
+        final var reasons = YOUNG + "\n" + ON_LIST + "\n" + visitorReports(19);
+        final var open = LinkReview.builder().id(1L).url(url).reasons(reasons).flaggedAt(LocalDateTime.now()).build();
+        when(linkReviewRepository.findFirstByUrlAndResolvedAtIsNullOrderByFlaggedAtDesc(url)).thenReturn(Optional.of(open));
+
+        reviewQueueService.report(url, ReportCategory.PHISHING, "asks for my bank login");
+
+        verify(linkReviewRepository).save(open);
+        assertThat(open.getReasons()).isEqualTo(reasons + "\n" + REPORTED_PHISHING);
+    }
+
+    @Test
     void aReportNeverChangesTheLink() {
         reviewQueueService.report(url, ReportCategory.PHISHING, "asks for my bank login");
 
@@ -305,6 +330,10 @@ class DefaultReviewQueueServiceTest {
         when(linkReviewRepository.countByResolvedAtIsNullAndReasonsContaining("reported by a visitor")).thenReturn(2L);
 
         assertThat(reviewQueueService.openReportCount()).isEqualTo(2L);
+    }
+
+    private static String visitorReports(final int count) {
+        return String.join("\n", IntStream.range(0, count).mapToObj(report -> "reported by a visitor: spam: report " + report).toList());
     }
 
     private LinkReview resolved(final ReviewResolution resolution, final String reasons) {

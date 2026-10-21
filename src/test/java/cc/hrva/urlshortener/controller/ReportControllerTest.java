@@ -26,12 +26,16 @@ import org.junit.jupiter.params.provider.NullAndEmptySource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.containsString;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
@@ -42,6 +46,7 @@ import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -127,7 +132,7 @@ class ReportControllerTest {
 
     @ParameterizedTest
     @NullAndEmptySource
-    @ValueSource(strings = {"   ", "https://bit.ly/v0DB3", "hrva.cc", "hrva.cc/", "hrva.cc/v0DB3/stats", "v0DB3.html"})
+    @ValueSource(strings = {"   ", "https://bit.ly/v0DB3", "hrva.cc", "hrva.cc/", "hrva.cc/v0DB3/stats", "v0DB3.html", "abcdefghijklmnopqrstuvwxyz0123456", "hrva.cc/abcdefghijklmnopqrstuvwxyz0123456"})
     void anythingButAShortLinkIsRefused(final String shortUrl) throws Exception {
         report(shortUrl, "PHISHING", DETAILS)
                 .andExpect(status().isBadRequest())
@@ -135,6 +140,16 @@ class ReportControllerTest {
 
         verifyNoInteractions(urlRepository, reviewQueueService);
         assertThat(attempts).isEmpty();
+    }
+
+    @Test
+    void aShortCodeCanBeAsLongAsACustomAlias() throws Exception {
+        final var longest = "abcdefghijklmnopqrstuvwxyz012345";
+        when(urlRepository.findByShortUrlAndActiveTrue(longest)).thenReturn(Optional.empty());
+
+        report("hrva.cc/" + longest, "SPAM", null).andExpect(status().isAccepted());
+
+        verify(urlRepository).findByShortUrlAndActiveTrue(longest);
     }
 
     @Test
@@ -188,12 +203,47 @@ class ReportControllerTest {
     }
 
     @Test
+    void detailsAreStrippedOfFormatCharactersSoTheyCannotReorderOrHideText() throws Exception {
+        when(urlRepository.findByShortUrlAndActiveTrue(SHORT)).thenReturn(Optional.of(url));
+
+        report(SHORT, "PHISHING", "\u202Easks for\u200B my\u2066 bank\u200D login\uFEFF").andExpect(status().isAccepted());
+
+        verify(reviewQueueService).report(url, ReportCategory.PHISHING, DETAILS);
+    }
+
+    @Test
     void blankDetailsCountAsNoDetails() throws Exception {
         when(urlRepository.findByShortUrlAndActiveTrue(SHORT)).thenReturn(Optional.of(url));
 
         report(SHORT, "SPAM", " \t\u0000 ").andExpect(status().isAccepted());
 
         verify(reviewQueueService).report(url, ReportCategory.SPAM, null);
+    }
+
+    @Test
+    @ExtendWith(OutputCaptureExtension.class)
+    void aMalformedBodyIsRefusedWithoutLoggingAStackTrace(final CapturedOutput output) throws Exception {
+        for (final var body : List.of("{\"shortUrl\":\"v0DB3\",", "", "{\"shortUrl\":{\"nested\":true},\"category\":\"SPAM\"}")) {
+            mockMvc.perform(post(REPORTS).contentType(MediaType.APPLICATION_JSON).content(body))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.error").value("Malformed request body"));
+        }
+
+        verifyNoInteractions(urlRepository, reviewQueueService);
+        assertThat(attempts).isEmpty();
+        assertThat(output).doesNotContain("Unhandled exception").doesNotContain("\tat ");
+    }
+
+    @Test
+    @ExtendWith(OutputCaptureExtension.class)
+    void aBodyThatIsNotJsonIsAnUnsupportedMediaType(final CapturedOutput output) throws Exception {
+        mockMvc.perform(post(REPORTS).contentType(MediaType.TEXT_PLAIN).content("hrva.cc/v0DB3 is phishing"))
+                .andExpect(status().isUnsupportedMediaType())
+                .andExpect(header().string(HttpHeaders.ACCEPT, containsString(MediaType.APPLICATION_JSON_VALUE)))
+                .andExpect(jsonPath("$.error").value("Unsupported media type"));
+
+        verifyNoInteractions(urlRepository, reviewQueueService);
+        assertThat(output).doesNotContain("Unhandled exception").doesNotContain("\tat ");
     }
 
     @Test

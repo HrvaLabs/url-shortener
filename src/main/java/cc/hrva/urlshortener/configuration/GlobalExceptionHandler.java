@@ -22,14 +22,18 @@ import java.util.Map;
 import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.DisabledException;
 import org.springframework.transaction.TransactionSystemException;
 import org.springframework.validation.FieldError;
+import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ControllerAdvice;
@@ -192,6 +196,20 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.METHOD_NOT_ALLOWED)
                 .allow(supportedMethods == null ? new HttpMethod[0] : supportedMethods.toArray(HttpMethod[]::new))
                 .body(Map.of("error", "Method not allowed"));
+    }
+
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<Map<String, String>> handleMessageNotReadable(final HttpMessageNotReadableException ex) {
+        log.info("Malformed request body");
+        return ResponseEntity.badRequest().body(Map.of("error", "Malformed request body"));
+    }
+
+    @ExceptionHandler(HttpMediaTypeNotSupportedException.class)
+    public ResponseEntity<Map<String, String>> handleMediaTypeNotSupported(final HttpMediaTypeNotSupportedException ex) {
+        log.info("Media type not supported contentType={}", ex.getContentType());
+        return ResponseEntity.status(HttpStatus.UNSUPPORTED_MEDIA_TYPE)
+                .header(HttpHeaders.ACCEPT, MediaType.toString(ex.getSupportedMediaTypes()))
+                .body(Map.of("error", "Unsupported media type"));
     }
 
     @ExceptionHandler(CommonException.class)

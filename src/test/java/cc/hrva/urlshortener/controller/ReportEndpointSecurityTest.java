@@ -22,6 +22,7 @@ import com.nimbusds.jose.JOSEException;
 import com.nimbusds.jose.jwk.RSAKey;
 import com.nimbusds.jose.jwk.gen.RSAKeyGenerator;
 import java.time.Duration;
+import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -37,16 +38,20 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.request.RequestPostProcessor;
 
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @SpringBootTest(
@@ -67,6 +72,8 @@ class ReportEndpointSecurityTest {
     private static final String REPORTS = "/api/v1/reports";
     private static final String REPORT = """
             {"shortUrl":"v0DB3","category":"PHISHING","details":"asks for my bank login"}""";
+    private static final int BODY_LIMIT = 64 * 1024;
+    private static final String REQUEST_TOO_LARGE = "{\"error\":\"request_too_large\"}";
     private static final RSAKey SIGNING_KEY = generateSigningKey();
 
     @Autowired
@@ -127,6 +134,45 @@ class ReportEndpointSecurityTest {
                 .andExpect(status().isUnauthorized());
 
         verifyNoInteractions(reviewQueueService);
+    }
+
+    @Test
+    void anOversizedReportIsRefusedBeforeItIsRead() throws Exception {
+        mockMvc.perform(post(REPORTS).contentType(MediaType.APPLICATION_JSON).content(padded(REPORT, BODY_LIMIT + 1)))
+                .andExpect(status().isContentTooLarge())
+                .andExpect(content().string(REQUEST_TOO_LARGE));
+
+        verifyNoInteractions(rateLimiter, urlRepository, reviewQueueService);
+    }
+
+    @Test
+    void anOversizedReportOfUnknownLengthIsRefusedOnceItPassesTheLimit() throws Exception {
+        mockMvc.perform(post(REPORTS).contentType(MediaType.APPLICATION_JSON).content(padded(REPORT, BODY_LIMIT + 1)).with(unknownLength()))
+                .andExpect(status().isBadRequest());
+
+        verifyNoInteractions(rateLimiter, urlRepository, reviewQueueService);
+    }
+
+    @Test
+    void aReportAtTheLimitStillWorks() throws Exception {
+        for (final var request : List.of(
+                post(REPORTS).contentType(MediaType.APPLICATION_JSON).content(padded(REPORT, BODY_LIMIT)),
+                post(REPORTS).contentType(MediaType.APPLICATION_JSON).content(padded(REPORT, BODY_LIMIT)).with(unknownLength()))) {
+            mockMvc.perform(request).andExpect(status().isAccepted());
+        }
+    }
+
+    private static String padded(final String json, final int length) {
+        return json + " ".repeat(length - json.length());
+    }
+
+    private static RequestPostProcessor unknownLength() {
+        return request -> {
+            final var chunked = spy(request);
+            doReturn(-1).when(chunked).getContentLength();
+            doReturn(-1L).when(chunked).getContentLengthLong();
+            return chunked;
+        };
     }
 
     private static RSAKey generateSigningKey() {

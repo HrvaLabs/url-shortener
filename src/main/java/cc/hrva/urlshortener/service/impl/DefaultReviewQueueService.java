@@ -31,6 +31,7 @@ public class DefaultReviewQueueService implements ReviewQueueService {
 
     private static final String REASON_SEPARATOR = "\n";
     private static final String REPORTED_BY_A_VISITOR = "reported by a visitor";
+    private static final int MAX_VISITOR_REPORTS_PER_REVIEW = 20;
     private static final Sort NEWEST_FIRST = Sort.by(Sort.Order.desc("flaggedAt"), Sort.Order.desc("id"));
 
     private final LinkReviewRepository linkReviewRepository;
@@ -83,8 +84,17 @@ public class DefaultReviewQueueService implements ReviewQueueService {
         final var incoming = normalized(List.of(reportReason(category, details)));
         log.info("Visitor report received urlId={} category={}", url.getId(), category);
         linkReviewRepository.findFirstByUrlAndResolvedAtIsNullOrderByFlaggedAtDesc(url).ifPresentOrElse(
-                review -> extend(review, incoming),
+                review -> extendUnlessFullOfReports(review, incoming),
                 () -> openReview(url, incoming));
+    }
+
+    private void extendUnlessFullOfReports(final LinkReview review, final List<String> incoming) {
+        final var visitorReports = reasonsOf(review).stream().filter(reason -> reason.startsWith(REPORTED_BY_A_VISITOR)).count();
+        if (visitorReports >= MAX_VISITOR_REPORTS_PER_REVIEW) {
+            log.info("Review already holds the most visitor reports urlId={} reviewId={}", review.getUrl().getId(), review.getId());
+            return;
+        }
+        extend(review, incoming);
     }
 
     private static String reportReason(final ReportCategory category, final String details) {

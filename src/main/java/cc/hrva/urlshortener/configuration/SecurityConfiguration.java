@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.configuration;
 
+import cc.hrva.urlshortener.controller.ReportController;
 import cc.hrva.urlshortener.security.JwtFilter;
 import cc.hrva.urlshortener.security.OAuth2LoginSuccessHandler;
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
@@ -80,7 +81,7 @@ public class SecurityConfiguration {
                                         "/*"
                                 )
                                 .permitAll()
-                                .requestMatchers(HttpMethod.POST, "/api/v1/reports")
+                                .requestMatchers(HttpMethod.POST, ReportController.REPORTS_ENDPOINT)
                                 .permitAll()
                                 .requestMatchers("/actuator/health")
                                 .permitAll()

@@ -1,6 +1,7 @@
 package cc.hrva.urlshortener.mcp.authorization;
 
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
+import cc.hrva.urlshortener.controller.ReportController;
 import cc.hrva.urlshortener.mcp.McpModernProbeFilter;
 import cc.hrva.urlshortener.mcp.McpRequestBodyLimitFilter;
 import cc.hrva.urlshortener.mcp.anon.AnonymousMcpConfiguration;
@@ -205,7 +206,8 @@ public class AuthorizationServerConfiguration {
     @Bean
     public FilterRegistrationBean<McpRequestBodyLimitFilter> mcpRequestBodyLimitFilterRegistration() {
         final var registration = new FilterRegistrationBean<>(new McpRequestBodyLimitFilter());
-        registration.addUrlPatterns(CLIENT_REGISTRATION_ENDPOINT, MCP_RESOURCE_PATH, AnonymousMcpConfiguration.ANONYMOUS_MCP_ENDPOINT);
+        registration.addUrlPatterns(
+                CLIENT_REGISTRATION_ENDPOINT, MCP_RESOURCE_PATH, AnonymousMcpConfiguration.ANONYMOUS_MCP_ENDPOINT, ReportController.REPORTS_ENDPOINT);
         registration.setOrder(REQUEST_BODY_LIMIT_FILTER_ORDER);
 
         return registration;
