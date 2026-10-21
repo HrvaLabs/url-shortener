@@ -6,6 +6,7 @@ import cc.hrva.urlshortener.dto.LinkVerdict;
 import cc.hrva.urlshortener.dto.UrlResponse;
 import cc.hrva.urlshortener.exception.UrlNotFoundException;
 import cc.hrva.urlshortener.exception.UrlValidationException;
+import cc.hrva.urlshortener.exception.UserNotFoundException;
 import cc.hrva.urlshortener.model.LinkReview;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.User;
@@ -75,6 +76,8 @@ class ModerationToolsTest {
     private static final String SHARED_HOSTING = "That's a shared hosting domain. Use the dashboard to block it.";
     private static final String OVER_THE_CAP = "This would affect 51 links, more than the 50 allowed here. Use the dashboard.";
     private static final String NOT_BLOCKED_OR_FLAGGED = "Only blocked or flagged links can be deleted here. Use the dashboard.";
+    private static final String NO_FLAGGED_LINKS = "This account has no blocked or flagged links. Use the dashboard to block it.";
+    private static final User SUSPECT = User.builder().id(27L).email("rade.scam@gmail.com").active(true).build();
     private static final List<String> TOOL_NAMES = List.of("moderation_summary", "review_queue", "possible_scammers", "check_url",
             "block_link", "block_domain", "block_user", "delete_link");
     private static final List<String> DESTRUCTIVE_TOOLS = List.of("block_link", "block_domain", "block_user", "delete_link");
@@ -427,6 +430,8 @@ class ModerationToolsTest {
     @Test
     void blockUserDelegatesAsTheAdminViaMcpWithACapOf50() {
         signedInAs(ADMIN, true);
+        when(userRepository.findById(27L)).thenReturn(Optional.of(SUSPECT));
+        when(urlRepository.countByOwnerAndBlockReasonIsNotNull(SUSPECT)).thenReturn(1L);
         when(moderationService.blockUser(27L, ADMIN_EMAIL, "mcp", 50)).thenReturn(5);
 
         final var result = moderationTools.blockUser(27L);
@@ -438,12 +443,41 @@ class ModerationToolsTest {
     @Test
     void blockUserOverTheCapTellsTheAdminToUseTheDashboard() {
         signedInAs(ADMIN, true);
+        when(userRepository.findById(27L)).thenReturn(Optional.of(SUSPECT));
+        when(urlRepository.countByOwnerAndBlockReasonIsNotNull(SUSPECT)).thenReturn(0L);
+        when(linkReviewRepository.existsByUrlOwnerAndResolvedAtIsNullAndSystemFlaggedTrue(SUSPECT)).thenReturn(true);
         when(moderationService.blockUser(anyLong(), anyString(), anyString(), anyInt())).thenThrow(new UrlValidationException(OVER_THE_CAP));
 
         final var result = moderationTools.blockUser(27L);
 
         assertThat(result.isError()).isTrue();
         assertThat(text(result)).isEqualTo(OVER_THE_CAP);
+    }
+
+    @Test
+    void blockUserRefusesAnAccountWhoseLinksOnlyVisitorsReportedOrNobodyFlagged() {
+        signedInAs(ADMIN, true);
+        when(userRepository.findById(27L)).thenReturn(Optional.of(SUSPECT));
+        when(urlRepository.countByOwnerAndBlockReasonIsNotNull(SUSPECT)).thenReturn(0L);
+        when(linkReviewRepository.existsByUrlOwnerAndResolvedAtIsNullAndSystemFlaggedTrue(SUSPECT)).thenReturn(false);
+
+        final var result = moderationTools.blockUser(27L);
+
+        assertThat(result.isError()).isTrue();
+        assertThat(text(result)).isEqualTo(NO_FLAGGED_LINKS);
+        verify(moderationService, never()).blockUser(anyLong(), anyString(), anyString(), anyInt());
+    }
+
+    @Test
+    void blockUserOfAnUnknownAccountGetsTheServiceMessage() {
+        signedInAs(ADMIN, true);
+        when(userRepository.findById(999L)).thenReturn(Optional.empty());
+        when(moderationService.blockUser(999L, ADMIN_EMAIL, "mcp", 50)).thenThrow(new UserNotFoundException("User not found"));
+
+        final var result = moderationTools.blockUser(999L);
+
+        assertThat(result.isError()).isTrue();
+        assertThat(text(result)).isEqualTo("User not found");
     }
 
     @Test

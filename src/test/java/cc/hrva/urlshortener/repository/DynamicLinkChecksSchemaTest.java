@@ -302,6 +302,24 @@ class DynamicLinkChecksSchemaTest {
     }
 
     @Test
+    void anOpenSystemFlagIsFoundThroughTheLinksOwner() {
+        final var flaggedOwner = savedUser("scammer@example.com");
+        final var reportedOwner = savedUser("alice@example.com");
+        final var settledOwner = savedUser("bob@example.com");
+        linkReviewRepository.saveAndFlush(LinkReview.builder().url(savedLink("flagged", "https://a.example/", flaggedOwner))
+                .reasons("imitates jofogas").systemFlagged(true).build());
+        linkReviewRepository.saveAndFlush(LinkReview.builder().url(savedLink("reported", "https://b.example/", reportedOwner))
+                .reasons("reported by a visitor: phishing: block this account").build());
+        linkReviewRepository.saveAndFlush(LinkReview.builder().url(savedLink("settled", "https://c.example/", settledOwner))
+                .reasons("imitates jofogas").systemFlagged(true).resolvedAt(LocalDateTime.now()).build());
+        entityManager.clear();
+
+        assertThat(linkReviewRepository.existsByUrlOwnerAndResolvedAtIsNullAndSystemFlaggedTrue(flaggedOwner)).isTrue();
+        assertThat(linkReviewRepository.existsByUrlOwnerAndResolvedAtIsNullAndSystemFlaggedTrue(reportedOwner)).isFalse();
+        assertThat(linkReviewRepository.existsByUrlOwnerAndResolvedAtIsNullAndSystemFlaggedTrue(settledOwner)).isFalse();
+    }
+
+    @Test
     void aReviewWithoutAFlagTimeIsFlaggedWhenSaved() {
         final var url = urlRepository.saveAndFlush(Url.builder().shortUrl("jofogas").longUrl("https://www.jofogas.cards/login").build());
         final var review = linkReviewRepository.saveAndFlush(LinkReview.builder().url(url).reasons("imitates jofogas").build());

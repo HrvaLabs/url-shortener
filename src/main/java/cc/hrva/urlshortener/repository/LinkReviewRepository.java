@@ -28,6 +28,7 @@ public interface LinkReviewRepository extends JpaRepository<LinkReview, Long>, J
     long countByResolvedAtIsNullAndReasonsContaining(String reason);
     long countByUrlOwnerAndResolvedAtIsNull(User owner);
     boolean existsByUrlAndResolvedAtIsNullAndSystemFlaggedTrue(Url url);
+    boolean existsByUrlOwnerAndResolvedAtIsNullAndSystemFlaggedTrue(User owner);
 
     @Query("select distinct r.url.id from LinkReview r where r.resolvedAt is null and r.url.id in :urlIds")
     List<Long> findOpenUrlIds(@Param("urlIds") Collection<Long> urlIds);

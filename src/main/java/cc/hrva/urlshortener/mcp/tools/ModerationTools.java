@@ -74,6 +74,7 @@ public class ModerationTools {
     private static final String SHARED_HOSTING = "That's a shared hosting domain. Use the dashboard to block it.";
     private static final String UNFLAGGED_LINKS = "This would also block %s nobody flagged. Use the dashboard to block this domain.";
     private static final String NOT_BLOCKED_OR_FLAGGED = "Only blocked or flagged links can be deleted here. Use the dashboard.";
+    private static final String NO_FLAGGED_LINKS = "This account has no blocked or flagged links. Use the dashboard to block it.";
 
     private final McpUserResolver mcpUserResolver;
     private final ModerationService moderationService;
@@ -227,8 +228,9 @@ public class ModerationTools {
             description = "Admin only. Blocks an hrva.cc account by its user id, the number after # in review_queue or possible_scammers. "
                     + "It deactivates the account, so it can no longer sign in or create links, and blocks all its active links, at most "
                     + "50 per call; when it has more it changes nothing and asks you to use the dashboard. The owner isn't emailed about "
-                    + "each link. Admin accounts can't be blocked. Use it only when the account itself is clearly a scammer, not for one "
-                    + "bad link. Only the hrva.cc dashboard can undo it.",
+                    + "each link. Admin accounts can't be blocked. It only works for an account with at least one blocked link or one that "
+                    + "hrva.cc's own checks flagged and that still waits in review_queue; a visitor report alone doesn't count. Use it only "
+                    + "when the account itself is clearly a scammer, not for one bad link. Only the hrva.cc dashboard can undo it.",
             annotations = @McpTool.McpAnnotations(
                     title = "Block a user",
                     readOnlyHint = false,
@@ -439,6 +441,10 @@ public class ModerationTools {
     private String blockAccount(final Long userId) {
         final var admin = requireAdmin(BLOCK_USER);
         final var id = required(userId, MISSING_USER_ID);
+        if (userRepository.findById(id).filter(user -> !hasBlockedOrFlaggedLinks(user)).isPresent()) {
+            log.info("MCP block_user refused for an account without blocked or flagged links adminId={} userId={}", admin.getId(), id);
+            throw new UrlValidationException(NO_FLAGGED_LINKS);
+        }
 
         final var blocked = moderationService.blockUser(id, admin.getEmail(), VIA, MAX_LINKS);
 
@@ -460,6 +466,11 @@ public class ModerationTools {
         log.info("MCP delete_link adminId={} urlId={}", admin.getId(), id);
 
         return "Deleted urlId %d permanently.".formatted(id);
+    }
+
+    private boolean hasBlockedOrFlaggedLinks(final User user) {
+        return urlRepository.countByOwnerAndBlockReasonIsNotNull(user) > 0
+                || linkReviewRepository.existsByUrlOwnerAndResolvedAtIsNullAndSystemFlaggedTrue(user);
     }
 
     private boolean isBlockedOrFlagged(final Url url) {
