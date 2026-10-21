@@ -1,5 +1,9 @@
 package cc.hrva.urlshortener.service;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import cc.hrva.urlshortener.client.FetchResult;
 import cc.hrva.urlshortener.client.PublicHttpFetcher;
 import cc.hrva.urlshortener.exception.UrlValidationException;
@@ -19,8 +23,13 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.IntStream;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -31,6 +40,7 @@ import org.junit.jupiter.params.provider.NullAndEmptySource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.slf4j.LoggerFactory;
 import org.springframework.data.redis.RedisConnectionFailureException;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
@@ -73,6 +83,9 @@ class DefaultDomainAgeServiceTest {
             """;
 
     private final FakeFetcher fetcher = new FakeFetcher();
+    private final ExecutorService callers = Executors.newCachedThreadPool();
+    private final Logger serviceLogger = (Logger) LoggerFactory.getLogger(DefaultDomainAgeService.class);
+    private final ListAppender<ILoggingEvent> logEvents = new ListAppender<>();
 
     @Mock
     private StringRedisTemplate redisTemplate;
@@ -86,6 +99,8 @@ class DefaultDomainAgeServiceTest {
     void setUp() {
         lenient().when(redisTemplate.opsForValue()).thenReturn(valueOperations);
         lenient().when(valueOperations.get(anyString())).thenReturn(null);
+        logEvents.start();
+        serviceLogger.addAppender(logEvents);
         domainAgeService = new DefaultDomainAgeService(fetcher, redisTemplate, JsonMapper.builder().build(), Clock.fixed(NOW, ZoneOffset.UTC));
     }
 
@@ -93,6 +108,8 @@ class DefaultDomainAgeServiceTest {
     void tearDown() {
         fetcher.release();
         domainAgeService.shutDown();
+        callers.shutdownNow();
+        serviceLogger.detachAppender(logEvents);
     }
 
     @Test
@@ -221,9 +238,76 @@ class DefaultDomainAgeServiceTest {
         final var elapsed = Duration.ofNanos(System.nanoTime() - startedAt);
 
         assertThat(registeredOn).isEmpty();
-        assertThat(elapsed).isGreaterThanOrEqualTo(THREE_SECONDS).isLessThan(Duration.ofSeconds(4));
+        assertThat(elapsed).isGreaterThanOrEqualTo(THREE_SECONDS).isLessThan(Duration.ofSeconds(6));
         verify(valueOperations).set(KEY, UNKNOWN, Duration.ofHours(1));
         assertThat(fetcher.interrupted.await(2, TimeUnit.SECONDS)).isTrue();
+    }
+
+    @Test
+    void lookupStillQueuedWhenItTimesOutIsNotCached() throws Exception {
+        fetcher.answer(BOOTSTRAP_URL, BOOTSTRAP);
+        final var busy = occupyBothWorkers();
+
+        final var startedAt = System.nanoTime();
+        final var registeredOn = domainAgeService.registeredOn("queued.cam");
+        final var elapsed = Duration.ofNanos(System.nanoTime() - startedAt);
+
+        assertThat(registeredOn).isEmpty();
+        assertThat(elapsed).isGreaterThanOrEqualTo(THREE_SECONDS).isLessThan(Duration.ofSeconds(6));
+        assertThat(fetcher.requestedUrls()).doesNotContain("https://rdap.example/domain/queued.cam");
+        CompletableFuture.allOf(busy).get(6, TimeUnit.SECONDS);
+        verify(valueOperations).set("rdap:busy0.cam", UNKNOWN, Duration.ofHours(1));
+        verify(valueOperations).set("rdap:busy1.cam", UNKNOWN, Duration.ofHours(1));
+        verify(valueOperations, never()).set(eq("rdap:queued.cam"), anyString(), any(Duration.class));
+    }
+
+    @Test
+    void lookupRejectedBecauseTheQueueIsFullIsNotCached() throws Exception {
+        fetcher.answer(BOOTSTRAP_URL, BOOTSTRAP);
+        final var busy = occupyBothWorkers();
+
+        final var queued = IntStream.range(0, 17)
+                .mapToObj(index -> CompletableFuture.supplyAsync(() -> timed("queued" + index + ".cam"), callers))
+                .toList();
+        final var outcomes = queued.stream().map(CompletableFuture::join).toList();
+
+        assertThat(outcomes).allMatch(outcome -> outcome.registeredOn().isEmpty());
+        assertThat(outcomes).filteredOn(outcome -> outcome.elapsed().compareTo(Duration.ofSeconds(1)) < 0).hasSize(1);
+        assertThat(outcomes).filteredOn(outcome -> outcome.elapsed().compareTo(THREE_SECONDS) >= 0).hasSize(16);
+        CompletableFuture.allOf(busy).get(6, TimeUnit.SECONDS);
+        IntStream.range(0, 17).forEach(index ->
+                verify(valueOperations, never()).set(eq("rdap:queued" + index + ".cam"), anyString(), any(Duration.class)));
+    }
+
+    @Test
+    void registryRefusingTheLookupIsLoggedAtInfo() {
+        fetcher.answer(BOOTSTRAP_URL, BOOTSTRAP);
+
+        assertThat(domainAgeService.registeredOn(HOST)).isEmpty();
+
+        verify(valueOperations).set(KEY, UNKNOWN, Duration.ofHours(1));
+        assertThat(logEvents.list).extracting(ILoggingEvent::getLevel).containsExactly(Level.INFO);
+    }
+
+    @Test
+    void unreadableRegistryAnswerIsLoggedAtWarn() {
+        fetcher.answer(BOOTSTRAP_URL, BOOTSTRAP);
+        fetcher.answer(DOMAIN_URL, "<html>Service unavailable</html>");
+
+        assertThat(domainAgeService.registeredOn(HOST)).isEmpty();
+
+        assertThat(logEvents.list).extracting(ILoggingEvent::getLevel).containsExactly(Level.WARN);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"2026-09-15T08:30:00+0000", "2026-09-15T08:30:00", "2026-09-15"})
+    void registrationTimestampWithoutAStandardOffsetFallsBackToItsDate(final String timestamp) {
+        fetcher.answer(BOOTSTRAP_URL, BOOTSTRAP);
+        fetcher.answer(DOMAIN_URL, "{\"events\": [{\"eventAction\": \"registration\", \"eventDate\": \"" + timestamp + "\"}]}");
+
+        assertThat(domainAgeService.registeredOn(HOST)).contains(LocalDate.of(2026, 9, 15));
+
+        verify(valueOperations).set(KEY, "2026-09-15", Duration.ofDays(30));
     }
 
     @Test
@@ -321,16 +405,37 @@ class DefaultDomainAgeServiceTest {
         assertThat(domainAgeService.isYoung(HOST)).isEqualTo(young);
     }
 
+    private CompletableFuture<?>[] occupyBothWorkers() throws InterruptedException {
+        fetcher.stick("https://rdap.example/domain/busy0.cam");
+        fetcher.stick("https://rdap.example/domain/busy1.cam");
+        final var busy = new CompletableFuture<?>[] {
+                CompletableFuture.runAsync(() -> domainAgeService.registeredOn("busy0.cam"), callers),
+                CompletableFuture.runAsync(() -> domainAgeService.registeredOn("busy1.cam"), callers)
+        };
+        assertThat(fetcher.awaitHung(2)).isTrue();
+        return busy;
+    }
+
+    private Outcome timed(final String host) {
+        final var startedAt = System.nanoTime();
+        final var registeredOn = domainAgeService.registeredOn(host);
+        return new Outcome(registeredOn, Duration.ofNanos(System.nanoTime() - startedAt));
+    }
+
+    private record Outcome(Optional<LocalDate> registeredOn, Duration elapsed) {}
+
     private record Request(String url, long maxBytes, Duration requestTimeout) {}
 
     private static final class FakeFetcher extends PublicHttpFetcher {
 
         private final Map<String, String> answers = new ConcurrentHashMap<>();
         private final Set<String> hangingUrls = ConcurrentHashMap.newKeySet();
+        private final Set<String> stuckUrls = ConcurrentHashMap.newKeySet();
         private final List<Request> requests = new CopyOnWriteArrayList<>();
         private final List<Path> bodies = new CopyOnWriteArrayList<>();
         private final CountDownLatch released = new CountDownLatch(1);
         private final CountDownLatch interrupted = new CountDownLatch(1);
+        private final Semaphore hung = new Semaphore(0);
 
         private FakeFetcher() {
             super(url -> true);
@@ -342,6 +447,9 @@ class DefaultDomainAgeServiceTest {
             requests.add(new Request(url, maxBytes, requestTimeout));
             if (hangingUrls.contains(url)) {
                 awaitRelease();
+            }
+            if (stuckUrls.contains(url)) {
+                awaitReleaseIgnoringInterrupts();
             }
             return Optional.ofNullable(answers.get(url))
                     .map(answer -> new FetchResult(false, bodyOf(answer), null, null))
@@ -356,6 +464,14 @@ class DefaultDomainAgeServiceTest {
             hangingUrls.add(url);
         }
 
+        private void stick(final String url) {
+            stuckUrls.add(url);
+        }
+
+        private boolean awaitHung(final int lookups) throws InterruptedException {
+            return hung.tryAcquire(lookups, 2, TimeUnit.SECONDS);
+        }
+
         private void release() {
             released.countDown();
         }
@@ -365,10 +481,28 @@ class DefaultDomainAgeServiceTest {
         }
 
         private void awaitRelease() {
+            hung.release();
             try {
                 released.await(10, TimeUnit.SECONDS);
             } catch (final InterruptedException exception) {
                 interrupted.countDown();
+                Thread.currentThread().interrupt();
+            }
+            throw new UrlValidationException("timed out");
+        }
+
+        private void awaitReleaseIgnoringInterrupts() {
+            hung.release();
+            final var deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+            var wasInterrupted = false;
+            while (released.getCount() > 0 && System.nanoTime() < deadline) {
+                try {
+                    released.await(deadline - System.nanoTime(), TimeUnit.NANOSECONDS);
+                } catch (final InterruptedException exception) {
+                    wasInterrupted = true;
+                }
+            }
+            if (wasInterrupted) {
                 Thread.currentThread().interrupt();
             }
             throw new UrlValidationException("timed out");

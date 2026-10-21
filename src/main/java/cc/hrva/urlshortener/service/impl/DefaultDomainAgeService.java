@@ -1,6 +1,7 @@
 package cc.hrva.urlshortener.service.impl;
 
 import cc.hrva.urlshortener.client.PublicHttpFetcher;
+import cc.hrva.urlshortener.exception.UrlValidationException;
 import cc.hrva.urlshortener.service.DomainAgeService;
 import cc.hrva.urlshortener.util.DomainNames;
 import jakarta.annotation.PreDestroy;
@@ -25,6 +26,8 @@ import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import lombok.RequiredArgsConstructor;
@@ -47,6 +50,8 @@ public class DefaultDomainAgeService implements DomainAgeService {
     private static final String UNKNOWN = "unknown";
     private static final String REGISTRATION = "registration";
     private static final String HTTPS = "https://";
+    private static final Pattern CLIENT_ERROR = Pattern.compile("HTTP 4\\d\\d");
+    private static final int ISO_DATE_LENGTH = 10;
     private static final long MAX_BYTES = 1024L * 1024L;
     private static final Duration TIMEOUT = Duration.ofSeconds(3);
     private static final Duration REGISTERED_TIME_TO_LIVE = Duration.ofDays(30);
@@ -103,7 +108,11 @@ public class DefaultDomainAgeService implements DomainAgeService {
     }
 
     private Optional<LocalDate> lookUp(final String domain, final boolean caching) {
-        final var lookup = new FutureTask<>(() -> registrationDateOf(domain, caching));
+        final var started = new AtomicBoolean();
+        final var lookup = new FutureTask<>(() -> {
+            started.set(true);
+            return registrationDateOf(domain, caching);
+        });
         try {
             lookupExecutor.execute(lookup);
             final var registeredOn = lookup.get(TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
@@ -117,9 +126,15 @@ public class DefaultDomainAgeService implements DomainAgeService {
             return Optional.empty();
         } catch (final TimeoutException exception) {
             lookup.cancel(true);
-            return failed(domain, caching, "timed out");
+            if (!started.get()) {
+                log.warn("RDAP lookup waited too long for a free worker, domain age unknown");
+                return Optional.empty();
+            }
+            log.warn("RDAP lookup timed out, domain age unknown for an hour");
+            return failed(domain, caching);
         } catch (final ExecutionException exception) {
-            return failed(domain, caching, exception.getCause().getClass().getSimpleName() + ": " + exception.getCause().getMessage());
+            logFailure(exception.getCause());
+            return failed(domain, caching);
         } catch (final InterruptedException exception) {
             lookup.cancel(true);
             Thread.currentThread().interrupt();
@@ -127,12 +142,19 @@ public class DefaultDomainAgeService implements DomainAgeService {
         }
     }
 
-    private Optional<LocalDate> failed(final String domain, final boolean caching, final String reason) {
-        log.warn("RDAP lookup failed, domain age unknown for an hour reason={}", reason);
+    private Optional<LocalDate> failed(final String domain, final boolean caching) {
         if (caching) {
             write(KEY_PREFIX + domain, UNKNOWN, FAILED_TIME_TO_LIVE);
         }
         return Optional.empty();
+    }
+
+    private static void logFailure(final Throwable failure) {
+        if (failure instanceof UrlValidationException && failure.getMessage() != null && CLIENT_ERROR.matcher(failure.getMessage()).matches()) {
+            log.info("RDAP registry refused the lookup, domain age unknown for an hour reason={}", failure.getMessage());
+            return;
+        }
+        log.warn("RDAP lookup failed, domain age unknown for an hour reason={}: {}", failure.getClass().getSimpleName(), failure.getMessage());
     }
 
     private Optional<LocalDate> registrationDateOf(final String domain, final boolean caching) {
@@ -248,7 +270,7 @@ public class DefaultDomainAgeService implements DomainAgeService {
         try {
             return Optional.of(OffsetDateTime.parse(timestamp).withOffsetSameInstant(ZoneOffset.UTC).toLocalDate());
         } catch (final DateTimeParseException exception) {
-            return Optional.empty();
+            return timestamp.length() >= ISO_DATE_LENGTH ? isoDateOf(timestamp.substring(0, ISO_DATE_LENGTH)) : Optional.empty();
         }
     }
 
