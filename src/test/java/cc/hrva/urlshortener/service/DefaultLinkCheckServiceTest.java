@@ -220,10 +220,21 @@ class DefaultLinkCheckServiceTest {
 
     @ParameterizedTest
     @NullAndEmptySource
-    @ValueSource(strings = {"not a url", "http://", "https://exa mple.com/x"})
-    void aMalformedUrlIsCleanWithoutAnyLookup(final String url) {
+    @ValueSource(strings = {" ", "\t\n"})
+    void aMissingUrlIsCleanWithoutAnyLookup(final String url) {
         assertThat(linkCheckService.check(url)).isEqualTo(CLEAN);
         assertThat(linkCheckService.explain(url)).isEqualTo(CLEAN);
+        verifyNoInteractions(
+                domainRuleRepository, blocklistSourceRepository, blocklistStore, domainAgeService, domainReputationService, suspiciousUrlService);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"not a url", "http://", "https:///login", "https://exa mple.com/x"})
+    void aUrlWhoseHostCannotBeReadIsFlaggedWithoutAnyLookup(final String url) {
+        final var unreadable = new LinkVerdict(Outcome.FLAG, List.of("destination host could not be read"), null, null);
+
+        assertThat(linkCheckService.check(url)).isEqualTo(unreadable);
+        assertThat(linkCheckService.explain(url)).isEqualTo(unreadable);
         verifyNoInteractions(
                 domainRuleRepository, blocklistSourceRepository, blocklistStore, domainAgeService, domainReputationService, suspiciousUrlService);
     }

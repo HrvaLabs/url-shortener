@@ -28,6 +28,7 @@ import java.util.stream.Stream;
 import lombok.RequiredArgsConstructor;
 import lombok.With;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Service;
 
 @Slf4j
@@ -36,6 +37,7 @@ import org.springframework.stereotype.Service;
 public class DefaultLinkCheckService implements LinkCheckService {
 
     private static final String YOUNG_DOMAIN = "domain registered in the last 30 days";
+    private static final String UNREADABLE_HOST = "destination host could not be read";
     private static final String SPAMHAUS = "Spamhaus DBL: ";
     private static final String DETAIL_SEPARATOR = ", ";
     private static final Comparator<DomainRule> MOST_SPECIFIC_FIRST =
@@ -68,9 +70,12 @@ public class DefaultLinkCheckService implements LinkCheckService {
     }
 
     private LinkVerdict evaluate(final String longUrl, final boolean everySignal) {
+        if (StringUtils.isBlank(longUrl)) {
+            return LinkVerdict.clean();
+        }
         final var host = DomainNames.hostOf(longUrl).orElse(null);
         if (host == null) {
-            return LinkVerdict.clean();
+            return new LinkVerdict(Outcome.FLAG, List.of(UNREADABLE_HOST), null, null);
         }
 
         final var ipLiteral = DomainNames.isIpLiteral(host);

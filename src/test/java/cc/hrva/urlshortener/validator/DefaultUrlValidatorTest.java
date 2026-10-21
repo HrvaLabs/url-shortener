@@ -17,9 +17,12 @@ import cc.hrva.urlshortener.service.LinkCheckService;
 import cc.hrva.urlshortener.service.SafeBrowsingService;
 import cc.hrva.urlshortener.service.SuspiciousUrlService;
 import cc.hrva.urlshortener.service.UserService;
+import cc.hrva.urlshortener.util.DomainNames;
 import cc.hrva.urlshortener.validator.impl.DefaultUrlValidator;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -30,6 +33,7 @@ import static org.assertj.core.api.AssertionsForClassTypes.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -364,6 +368,14 @@ class DefaultUrlValidatorTest {
     @Test
     void shouldRejectLongUrlWithWhitespaceInPath() {
         assertLongUrlRejected("https://example.com/a b");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"not a url", "http://", "https:///login", "https://exa mple.com/x", "https://[zz/x"})
+    void destinationsWhoseHostCannotBeReadAreRefusedBeforeTheLinkCheck(final String longUrl) {
+        assertThat(DomainNames.hostOf(longUrl)).isEmpty();
+        assertLongUrlRejected(longUrl);
+        verifyNoInteractions(linkCheckService);
     }
 
     @Test
