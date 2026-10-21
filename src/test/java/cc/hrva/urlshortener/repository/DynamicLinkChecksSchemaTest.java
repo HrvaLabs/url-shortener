@@ -628,6 +628,16 @@ class DynamicLinkChecksSchemaTest {
     }
 
     @Test
+    void aLinksCurrentDestinationIsReadByItsId() {
+        final var url = savedLink("current", "https://example.org/current", null);
+        entityManager.flush();
+        entityManager.clear();
+
+        assertThat(urlRepository.findLongUrlById(url.getId())).contains("https://example.org/current");
+        assertThat(urlRepository.findLongUrlById(-1L)).isEmpty();
+    }
+
+    @Test
     void markingAChainCheckedKeepsTheLastKnownFinalUrl() {
         final var earlier = LocalDateTime.of(2026, 10, 14, 4, 30);
         final var checkedAt = LocalDateTime.of(2026, 10, 21, 4, 30);

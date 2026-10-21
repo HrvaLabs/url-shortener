@@ -85,20 +85,29 @@ public class DefaultSafeBrowsingRecheckService implements SafeBrowsingRecheckSer
         log.info("Nightly scan complete — {} checked, {} blocked, {} queued for review, safeBrowsingAvailable={}",
                 checked, tally.getOrDefault(ScanResult.BLOCKED, 0), tally.getOrDefault(ScanResult.QUEUED, 0), safeBrowsingAvailable.get());
 
+        if (!safeBrowsingAvailable.get()) {
+            log.warn("Safe Browsing is unavailable, the redirect checks wait for the next nightly scan");
+            return;
+        }
         checkRedirectChains();
     }
 
     private void checkRedirectChains() {
         final var checkedBefore = LocalDateTime.now().minusDays(REDIRECT_CHECK_INTERVAL_DAYS);
         final var ids = urlRepository.findIdsDueForRedirectCheck(checkedBefore, PageRequest.ofSize(REDIRECT_CHECKS_PER_RUN));
+        var followed = 0;
         for (final var id : ids) {
             try {
-                redirectChainService.check(id);
+                if (redirectChainService.check(id) == RedirectChainService.Result.SAFE_BROWSING_UNAVAILABLE) {
+                    log.warn("Safe Browsing became unavailable, the remaining redirect checks wait for the next nightly scan urlId={}", id);
+                    break;
+                }
+                followed++;
             } catch (final RuntimeException exception) {
                 log.warn("Redirect check of a link failed, continuing with the next one urlId={}", id, exception);
             }
         }
-        log.info("Nightly redirect checks complete — {} links followed", ids.size());
+        log.info("Nightly redirect checks complete — {} of {} due links followed", followed, ids.size());
     }
 
     private Optional<List<String>> threatsOf(final Url url, final AtomicBoolean safeBrowsingAvailable) {

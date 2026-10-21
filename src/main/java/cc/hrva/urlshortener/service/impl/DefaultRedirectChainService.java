@@ -1,6 +1,7 @@
 package cc.hrva.urlshortener.service.impl;
 
 import cc.hrva.urlshortener.client.RedirectFollower;
+import cc.hrva.urlshortener.configuration.AsyncExecutorConfiguration;
 import cc.hrva.urlshortener.dto.LinkVerdict;
 import cc.hrva.urlshortener.exception.UrlValidationException;
 import cc.hrva.urlshortener.model.Url;
@@ -54,31 +55,37 @@ public class DefaultRedirectChainService implements RedirectChainService {
     private final Clock clock;
 
     @Override
-    public void check(final long urlId) {
+    public Result check(final long urlId) {
         final var url = urlRepository.findById(urlId).filter(Url::isActive);
         if (url.isEmpty()) {
             log.info("Link is no longer active, its redirects are not followed urlId={}", urlId);
-            return;
+            return Result.SKIPPED;
         }
 
         final var longUrl = url.get().getLongUrl();
         final var chain = chainOf(url.get());
         if (chain.isEmpty()) {
             urlRepository.markRedirectChainChecked(urlId, longUrl, now());
-            return;
+            return Result.UNREACHABLE;
         }
 
         final var hops = chain.get().stream().skip(1).filter(hop -> !hop.equals(longUrl)).distinct().toList();
         final var threats = hops.isEmpty() ? Optional.of(List.<String>of()) : threatsOf(urlId, hops);
-        judge(url.get(), hops, threats.orElse(List.of()));
+        final var finding = findingOf(hops, threats.orElse(List.of()));
+        if (finding.isPresent() && !stillPointsAt(urlId, longUrl)) {
+            log.info("Link was repointed while its redirects were followed, the old chain is dropped urlId={}", urlId);
+            return Result.SKIPPED;
+        }
+        finding.ifPresent(found -> act(url.get(), found));
         if (threats.isEmpty()) {
             log.info("Safe Browsing was unavailable, the redirects are checked again in the next nightly scan urlId={}", urlId);
-            return;
+            return Result.SAFE_BROWSING_UNAVAILABLE;
         }
         urlRepository.recordRedirectChain(urlId, longUrl, StringUtils.truncate(chain.get().getLast(), FINAL_URL_LENGTH), now());
+        return Result.CHECKED;
     }
 
-    @Async
+    @Async(AsyncExecutorConfiguration.REDIRECT_CHECK_EXECUTOR)
     @Override
     public void checkLater(final long urlId) {
         check(urlId);
@@ -97,37 +104,41 @@ public class DefaultRedirectChainService implements RedirectChainService {
         try {
             return Optional.of(safeBrowsingService.checkUrlsForThreats(hops));
         } catch (final RuntimeException exception) {
-            log.warn("Safe Browsing failed, the redirects are checked with the link checks only urlId={}", urlId, exception);
+            log.warn("Safe Browsing failed, the redirects are checked with the link checks only urlId={} reason={}", urlId, exception.getMessage());
             return Optional.empty();
         }
     }
 
-    private void judge(final Url url, final List<String> hops, final List<String> threats) {
+    private Optional<Finding> findingOf(final List<String> hops, final List<String> threats) {
         if (!threats.isEmpty()) {
             final var detail = threats.stream().distinct().collect(Collectors.joining(THREAT_SEPARATOR));
-            block(url, BlockReason.SAFE_BROWSING, detail, hostOf(threats.getFirst()));
-            return;
+            return Optional.of(Finding.block(BlockReason.SAFE_BROWSING, detail, hostOf(threats.getFirst())));
         }
 
         final var reasons = new ArrayList<String>();
         for (final var hop : hops) {
             final var verdict = linkCheckService.check(hop);
             if (blocksExistingLinks(verdict)) {
-                block(url, verdict.blockReason(), verdict.blockDetail(), hostOf(hop));
-                return;
+                return Optional.of(Finding.block(verdict.blockReason(), verdict.blockDetail(), hostOf(hop)));
             }
             if (verdict.outcome() == LinkVerdict.Outcome.BLOCK || verdict.outcome() == LinkVerdict.Outcome.FLAG) {
                 verdict.reasons().forEach(reason -> reasons.add(REDIRECTS_TO + hostOf(hop) + REASON_SEPARATOR + reason));
             }
         }
-        if (!reasons.isEmpty()) {
-            reviewQueueService.flag(url, reasons);
-        }
+        return reasons.isEmpty() ? Optional.empty() : Optional.of(Finding.review(reasons));
     }
 
-    private void block(final Url url, final BlockReason reason, final String detail, final String host) {
-        log.warn("Link blocked via a redirect urlId={} reason={} host={}", url.getId(), reason, host);
-        moderationService.blockLink(url.getId(), reason, viaRedirect(detail, host), PERFORMED_BY, VIA);
+    private boolean stillPointsAt(final long urlId, final String longUrl) {
+        return urlRepository.findLongUrlById(urlId).filter(longUrl::equals).isPresent();
+    }
+
+    private void act(final Url url, final Finding finding) {
+        if (finding.blockReason() == null) {
+            reviewQueueService.flag(url, finding.reviewReasons());
+            return;
+        }
+        log.warn("Link blocked via a redirect urlId={} reason={} detail={}", url.getId(), finding.blockReason(), finding.blockDetail());
+        moderationService.blockLink(url.getId(), finding.blockReason(), finding.blockDetail(), PERFORMED_BY, VIA);
     }
 
     private static boolean blocksExistingLinks(final LinkVerdict verdict) {
@@ -146,6 +157,18 @@ public class DefaultRedirectChainService implements RedirectChainService {
 
     private LocalDateTime now() {
         return LocalDateTime.now(clock.withZone(ZoneId.systemDefault()));
+    }
+
+    private record Finding(BlockReason blockReason, String blockDetail, List<String> reviewReasons) {
+
+        private static Finding block(final BlockReason reason, final String detail, final String host) {
+            return new Finding(reason, viaRedirect(detail, host), List.of());
+        }
+
+        private static Finding review(final List<String> reasons) {
+            return new Finding(null, null, List.copyOf(reasons));
+        }
+
     }
 
 }

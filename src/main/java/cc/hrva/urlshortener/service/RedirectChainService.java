@@ -2,7 +2,11 @@ package cc.hrva.urlshortener.service;
 
 public interface RedirectChainService {
 
-    void check(long urlId);
+    Result check(long urlId);
     void checkLater(long urlId);
+
+    enum Result {
+        CHECKED, SKIPPED, UNREACHABLE, SAFE_BROWSING_UNAVAILABLE
+    }
 
 }

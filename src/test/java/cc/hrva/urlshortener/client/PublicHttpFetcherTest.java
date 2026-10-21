@@ -394,10 +394,65 @@ class PublicHttpFetcherTest {
         respond("/start", exchange -> redirect(exchange, "/landing"));
         final var follower = new PublicHttpFetcherConfiguration().redirectFollower();
 
-        final var chain = follower.followRedirects(baseUrl + "/start", 5, TIMEOUT);
-
-        assertThat(chain).containsExactly(baseUrl + "/start");
+        assertThatThrownBy(() -> follower.followRedirects(baseUrl + "/start", 5, TIMEOUT))
+                .isInstanceOf(UrlValidationException.class)
+                .hasMessage("not a public address");
         assertThat(requestedPaths).isEmpty();
+    }
+
+    @Test
+    void aDestinationThePolicyRefusesIsAnErrorWithoutARequest() {
+        respond("/start", exchange -> send(exchange, 200, ""));
+        final var fetcher = new PublicHttpFetcher(url -> false);
+
+        assertThatThrownBy(() -> fetcher.followRedirects(baseUrl + "/start", 5, TIMEOUT))
+                .isInstanceOf(UrlValidationException.class)
+                .hasMessage("not a public address");
+        assertThat(requestedPaths).isEmpty();
+    }
+
+    @Test
+    void aLocationWithASpaceIsJudgedPercentEncoded() {
+        respond("/start", exchange -> redirect(exchange, "https://evil.example/login page"));
+
+        final var chain = loopbackOnlyFetcher().followRedirects(baseUrl + "/start", 5, TIMEOUT);
+
+        assertThat(chain).containsExactly(baseUrl + "/start", "https://evil.example/login%20page");
+        assertThat(requestedPaths).containsExactly("/start");
+    }
+
+    @Test
+    void aBackslashLocationLeavesForAnotherHostLikeInABrowser() {
+        respond("/start", exchange -> redirect(exchange, "/\\evil.example/"));
+
+        final var chain = loopbackOnlyFetcher().followRedirects(baseUrl + "/start", 5, TIMEOUT);
+
+        assertThat(chain).containsExactly(baseUrl + "/start", "http://evil.example/");
+        assertThat(requestedPaths).containsExactly("/start");
+    }
+
+    @Test
+    void aNonAsciiPathIsFollowedPercentEncoded() {
+        respond("/start", exchange -> redirect(exchange, inUtf8("/prijava/čćž")));
+        respond("/prijava/čćž", exchange -> send(exchange, 200, ""));
+
+        final var chain = loopbackOnlyFetcher().followRedirects(baseUrl + "/start", 5, TIMEOUT);
+
+        assertThat(chain).containsExactly(baseUrl + "/start", baseUrl + "/prijava/%C4%8D%C4%87%C5%BE");
+        assertThat(requestedPaths).containsExactly("/start", "/prijava/čćž");
+    }
+
+    @Test
+    void aHostThatIsPrivateOnceNormalisedIsStillRefused() {
+        final var port = server.getAddress().getPort();
+        respond("/start", exchange -> redirect(exchange, inUtf8("http://ｌｏｃａｌｈｏｓｔ:" + port + "/admin")));
+        respond("/admin", exchange -> send(exchange, 200, ""));
+        final var fetcher = new PublicHttpFetcher(url -> url.startsWith(baseUrl) || PublicHttpFetcher.httpOrHttpsPublicOnly().test(url));
+
+        final var chain = fetcher.followRedirects(baseUrl + "/start", 5, TIMEOUT);
+
+        assertThat(chain).containsExactly(baseUrl + "/start", "http://localhost:" + port + "/admin");
+        assertThat(requestedPaths).containsExactly("/start");
     }
 
     @Test
@@ -542,6 +597,10 @@ class PublicHttpFetcherTest {
                 .hasMessage("connection failed");
     }
 
+    private PublicHttpFetcher loopbackOnlyFetcher() {
+        return new PublicHttpFetcher(url -> url.startsWith(baseUrl));
+    }
+
     private void respond(final String path, final HttpHandler handler) {
         server.createContext(path, exchange -> {
             if (!exchange.getRequestURI().getPath().equals(path)) {
@@ -560,6 +619,10 @@ class PublicHttpFetcherTest {
     private static void redirect(final HttpExchange exchange, final int status, final String location) throws IOException {
         exchange.getResponseHeaders().add("Location", location);
         send(exchange, status, "");
+    }
+
+    private static String inUtf8(final String headerValue) {
+        return new String(headerValue.getBytes(StandardCharsets.UTF_8), StandardCharsets.ISO_8859_1);
     }
 
     private static void stallAfterHeaders(final HttpExchange exchange, final int status) throws IOException {

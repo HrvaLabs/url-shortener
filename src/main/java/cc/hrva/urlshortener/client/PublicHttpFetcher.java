@@ -2,6 +2,7 @@ package cc.hrva.urlshortener.client;
 
 import cc.hrva.urlshortener.exception.UrlValidationException;
 import cc.hrva.urlshortener.util.PublicAddresses;
+import cc.hrva.urlshortener.util.RedirectLocations;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
@@ -9,6 +10,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.net.http.HttpTimeoutException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -38,6 +40,7 @@ public class PublicHttpFetcher {
     private static final String USER_AGENT = "hrva.cc-linkcheck/1.0 (+https://hrva.cc/.well-known/security.txt)";
     private static final String TEMP_FILE_PREFIX = "hrva-fetch-";
     private static final String NOT_ALLOWED = "not a public https address";
+    private static final String NOT_PUBLIC = "not a public address";
     private static final String TIMED_OUT = "timed out";
 
     private final HttpClient httpClient = HttpClient.newBuilder()
@@ -59,21 +62,20 @@ public class PublicHttpFetcher {
     }
 
     public List<String> followRedirects(final String url, final int maxHops, final Duration budget) {
+        if (!targetPolicy.test(url)) {
+            throw new UrlValidationException(NOT_PUBLIC);
+        }
+
         final var deadline = System.nanoTime() + budget.toNanos();
         final var chain = new ArrayList<String>();
         chain.add(url);
-        while (chain.size() <= maxHops && targetPolicy.test(chain.getLast())) {
-            try {
-                final var next = nextHop(chain.getLast(), deadline);
-                if (next.isEmpty()) {
-                    break;
-                }
-                chain.add(next.get());
-            } catch (final UrlValidationException exception) {
-                if (chain.size() == 1) {
-                    throw exception;
-                }
-                log.debug("Redirect chain ends at hop {} reason={}", chain.size() - 1, exception.getMessage());
+        while (chain.size() <= maxHops) {
+            final var next = nextHop(chain, deadline);
+            if (next.isEmpty()) {
+                break;
+            }
+            chain.add(next.get());
+            if (!targetPolicy.test(next.get())) {
                 break;
             }
         }
@@ -107,7 +109,19 @@ public class PublicHttpFetcher {
         }
     }
 
-    private Optional<String> nextHop(final String url, final long deadline) {
+    private Optional<String> nextHop(final List<String> chain, final long deadline) {
+        try {
+            return redirectTarget(chain.getLast(), deadline);
+        } catch (final UrlValidationException exception) {
+            if (chain.size() == 1) {
+                throw exception;
+            }
+            log.debug("Redirect chain ends at hop {} reason={}", chain.size() - 1, exception.getMessage());
+            return Optional.empty();
+        }
+    }
+
+    private Optional<String> redirectTarget(final String url, final long deadline) {
         final var remaining = deadline - System.nanoTime();
         if (remaining <= 0) {
             throw new UrlValidationException(TIMED_OUT);
@@ -119,10 +133,14 @@ public class PublicHttpFetcher {
             return Optional.empty();
         }
         try {
-            return Optional.of(URI.create(url).resolve(location.get()).toString());
+            return Optional.of(URI.create(url).resolve(RedirectLocations.normalized(readAsUtf8(location.get()))).toString());
         } catch (final IllegalArgumentException exception) {
             return Optional.empty();
         }
+    }
+
+    private static String readAsUtf8(final String headerValue) {
+        return new String(headerValue.getBytes(StandardCharsets.ISO_8859_1), StandardCharsets.UTF_8);
     }
 
     private static boolean isHttps(final String url) {

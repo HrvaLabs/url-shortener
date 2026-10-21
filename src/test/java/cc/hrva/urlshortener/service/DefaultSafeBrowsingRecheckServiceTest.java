@@ -42,6 +42,7 @@ import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -114,6 +115,7 @@ class DefaultSafeBrowsingRecheckServiceTest {
         }).when(moderationService).blockLink(anyLong(), any(BlockReason.class), any(), anyString(), anyString());
         lenient().when(safeBrowsingService.checkUrlsForThreats(anyString())).thenReturn(List.of());
         lenient().when(linkCheckService.check(anyString())).thenReturn(LinkVerdict.clean());
+        lenient().when(redirectChainService.check(anyLong())).thenReturn(RedirectChainService.Result.CHECKED);
     }
 
     @Test
@@ -338,6 +340,28 @@ class DefaultSafeBrowsingRecheckServiceTest {
         recheckService.recheckActiveUrls();
 
         verify(redirectChainService).check(2L);
+    }
+
+    @Test
+    void whenSafeBrowsingFailedDuringTheScanTheRedirectChecksWaitForTheNextNight() {
+        when(safeBrowsingService.checkUrlsForThreats("https://site5.example")).thenThrow(new UrlValidationException(SAFE_BROWSING_DOWN));
+
+        recheckService.recheckActiveUrls();
+
+        verify(urlRepository, never()).findIdsDueForRedirectCheck(any(LocalDateTime.class), any(Pageable.class));
+        verifyNoInteractions(redirectChainService);
+    }
+
+    @Test
+    void theRedirectChecksStopAtTheFirstSafeBrowsingFailure() {
+        when(urlRepository.findIdsDueForRedirectCheck(any(LocalDateTime.class), any(Pageable.class))).thenReturn(List.of(1L, 2L, 3L));
+        when(redirectChainService.check(2L)).thenReturn(RedirectChainService.Result.SAFE_BROWSING_UNAVAILABLE);
+
+        recheckService.recheckActiveUrls();
+
+        verify(redirectChainService).check(1L);
+        verify(redirectChainService).check(2L);
+        verify(redirectChainService, never()).check(3L);
     }
 
     @Test
