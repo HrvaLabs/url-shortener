@@ -117,6 +117,19 @@ class DefaultUserServiceTest {
     }
 
     @Test
+    void deletingAnAccountClearsItsLinksFromTheRedirectCache() throws NoSuchMethodException {
+        for (final var method : java.util.List.of(
+                DefaultUserService.class.getMethod("deleteUserById", Long.class),
+                DefaultUserService.class.getMethod("deleteOwnAccount", cc.hrva.urlshortener.dto.DeleteAccountDto.class))) {
+            final var evict = method.getAnnotation(org.springframework.cache.annotation.CacheEvict.class);
+
+            assertThat(evict).as(method.getName()).isNotNull();
+            assertThat(evict.value()).containsExactly("urls");
+            assertThat(evict.allEntries()).isTrue();
+        }
+    }
+
+    @Test
     void shouldRegisterUser() {
         final var user = User.builder().email("test@example.com").build();
         when(userRepository.save(user)).thenReturn(user);

@@ -19,6 +19,7 @@ public interface UrlRepository extends JpaRepository<Url, Long>, JpaSpecificatio
     Page<Url> findAllByOwner(User owner, Pageable pageable);
     boolean existsUrlByLongUrlAndActiveTrue(String longUrl);
     Optional<Url> findByLongUrlAndActiveTrue(String longUrl);
+    boolean existsUrlByShortUrl(String shortUrl);
     boolean existsUrlByShortUrlAndActiveTrue(String shortUrl);
     Optional<Url> findByShortUrlAndActiveTrue(String shortUrl);
     boolean existsUrlByLongUrlAndActiveTrueAndOwnerIsNull(String longUrl);

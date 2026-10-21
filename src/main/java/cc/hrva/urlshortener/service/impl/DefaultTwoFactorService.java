@@ -41,6 +41,9 @@ public class DefaultTwoFactorService implements TwoFactorService {
     public TwoFactorSetupResponse setup() {
         final var user = currentUser();
         requireLocalAccount(user);
+        if (Boolean.TRUE.equals(user.getTwoFactorEnabled())) {
+            throw new ApiException("Two-factor authentication is already enabled. Disable it first.");
+        }
 
         final var secret = Totp.generateSecret();
         user.setTwoFactorSecret(secret);

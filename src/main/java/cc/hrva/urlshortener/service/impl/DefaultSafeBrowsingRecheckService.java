@@ -1,6 +1,7 @@
 package cc.hrva.urlshortener.service.impl;
 
 import cc.hrva.urlshortener.model.Url;
+import cc.hrva.urlshortener.model.enums.ThreatType;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.service.SafeBrowsingRecheckService;
 import cc.hrva.urlshortener.service.SafeBrowsingService;
@@ -64,6 +65,7 @@ public class DefaultSafeBrowsingRecheckService implements SafeBrowsingRecheckSer
         log.warn("URL /{} flagged as malicious: {}", url.getShortUrl(), threats);
 
         url.setActive(false);
+        url.setThreatType(ThreatType.MALWARE);
         evictFromCache(url.getShortUrl());
 
         if (url.getOwner() != null) {

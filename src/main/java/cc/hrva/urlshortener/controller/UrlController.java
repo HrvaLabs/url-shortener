@@ -8,6 +8,7 @@ import jakarta.validation.Valid;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.dto.CreateUrlDto;
 import cc.hrva.urlshortener.dto.LinkPreviewResponse;
 import cc.hrva.urlshortener.dto.UnlockResponse;
@@ -46,11 +47,15 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("api/v1/urls")
 public class UrlController {
 
+    private static final int MIN_QR_SIZE = 64;
+    private static final int MAX_QR_SIZE = 1024;
+
     private final UrlService urlService;
     private final QrCodeService qrCodeService;
     private final LinkPreviewService linkPreviewService;
     private final ClientIpResolver clientIpResolver;
     private final HttpServletRequest request;
+    private final AppProperties appProperties;
 
     @Operation(summary = "Create a short URL", description = "Create a short URL. Requires X-Api-Key header for programmatic access, otherwise optional for authenticated users.")
     @ApiResponse(responseCode = "400", description = "Validation error or bad request")
@@ -96,9 +101,11 @@ public class UrlController {
     @GetMapping("/{short}/preview")
     public ResponseEntity<LinkPreviewResponse> previewUrl(@PathVariable("short") final String shortUrl) {
         final var urlInfo = urlService.peekUrlByShortUrl(shortUrl);
-        final var preview = linkPreviewService.fetchPreview(urlInfo.getLongUrl());
+        if (urlInfo.isPasswordProtected()) {
+            return ResponseEntity.ok(new LinkPreviewResponse(null, null, null, null));
+        }
 
-        return ResponseEntity.ok(preview);
+        return ResponseEntity.ok(linkPreviewService.fetchPreview(urlInfo.getLongUrl()));
     }
 
     @Operation(summary = "Generate QR code", description = "Generate a QR code PNG for the short URL. Optional size parameter.")
@@ -108,7 +115,9 @@ public class UrlController {
             @PathVariable("short") final String shortUrl,
             @RequestParam(defaultValue = "300") final int size) {
         final var urlInfo = urlService.peekUrlByShortUrl(shortUrl);
-        final var qrBytes = qrCodeService.generateQrCode(urlInfo.getLongUrl(), size, size);
+        final var boundedSize = Math.clamp(size, MIN_QR_SIZE, MAX_QR_SIZE);
+        final var shortLink = appProperties.getServerUrl() + "/" + urlInfo.getShortUrl();
+        final var qrBytes = qrCodeService.generateQrCode(shortLink, boundedSize, boundedSize);
 
         return ResponseEntity.ok().contentType(MediaType.IMAGE_PNG).body(qrBytes);
     }

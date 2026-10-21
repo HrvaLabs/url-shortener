@@ -38,6 +38,8 @@ import org.springframework.transaction.annotation.Transactional;
 @RequiredArgsConstructor
 public class DefaultAuthService implements AuthService {
 
+    private static final String TWO_FACTOR_ATTEMPTS_PREFIX = "2fa:";
+
     private final UserService userService;
     private final UserValidator userValidator;
     private final TokenProvider tokenProvider;
@@ -68,7 +70,8 @@ public class DefaultAuthService implements AuthService {
     public ResponseEntity<JWTTokenDto> login(final LoginDto loginDto, final HttpServletRequest request) {
         log.info("User logged in email={}", loginDto.getEmail());
 
-        if (loginAttemptService.isBlocked(clientIpResolver.getClientIp(request))) {
+        final var clientIp = clientIpResolver.getClientIp(request);
+        if (loginAttemptService.isBlocked(clientIp)) {
             throw new NoAuthorizationException("Request has been blocked");
         }
         final var token = getToken(loginDto);
@@ -83,9 +86,16 @@ public class DefaultAuthService implements AuthService {
             if (StringUtils.isBlank(loginDto.getCode())) {
                 return new ResponseEntity<>(JWTTokenDto.twoFactorRequired(), HttpStatus.OK);
             }
+            final var twoFactorAttemptsKey = TWO_FACTOR_ATTEMPTS_PREFIX + user.getId();
+            if (loginAttemptService.isBlocked(twoFactorAttemptsKey)) {
+                throw new NoAuthorizationException("Too many invalid two-factor codes. Try again later.");
+            }
             if (!twoFactorService.verifyLoginCode(user, loginDto.getCode())) {
+                loginAttemptService.loginFailed(twoFactorAttemptsKey);
+                loginAttemptService.loginFailed(clientIp);
                 throw new NoAuthorizationException("Invalid two-factor code");
             }
+            loginAttemptService.loginSucceeded(twoFactorAttemptsKey);
         }
 
         userService.userHasLoggedIn(user);

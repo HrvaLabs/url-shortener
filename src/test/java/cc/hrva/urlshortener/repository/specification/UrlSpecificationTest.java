@@ -93,6 +93,17 @@ class UrlSpecificationTest {
         assertThat(order.indexOf("gableci")).isLessThan(order.indexOf("njuskaio_verify"));
     }
 
+    @Test
+    void ownerSortCanKeepAnonymousLinksLastInBothDirections() {
+        for (final var direction : Sort.Direction.values()) {
+            final var page = urlRepository.findAll(
+                    UrlSpecification.searchIncludingOwner("https"),
+                    PageRequest.of(0, 10, Sort.by(new Sort.Order(direction, "owner.email").nullsLast())));
+
+            assertThat(page.getContent().getLast().getShortUrl()).as(direction.name()).isEqualTo("v0DB3");
+        }
+    }
+
     @SpringBootConfiguration
     @EnableAutoConfiguration
     @EntityScan(basePackageClasses = Url.class)

@@ -2,6 +2,7 @@ package cc.hrva.urlshortener.service;
 
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.User;
+import cc.hrva.urlshortener.model.enums.ThreatType;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.service.impl.DefaultSafeBrowsingRecheckService;
 import java.util.ArrayList;
@@ -84,6 +85,7 @@ class DefaultSafeBrowsingRecheckServiceTest {
         recheckService.recheckActiveUrls();
 
         assertThat(urls.get(7L).isActive()).isFalse();
+        assertThat(urls.get(7L).getThreatType()).isEqualTo(ThreatType.MALWARE);
         verify(cache).evict("s7");
         verify(sendingEmailService).sendEmailUrlMalwareDetected(eq(owner), eq(urls.get(7L)), anyString());
     }

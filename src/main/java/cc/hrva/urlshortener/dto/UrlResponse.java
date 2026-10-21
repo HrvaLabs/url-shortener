@@ -47,6 +47,11 @@ public record UrlResponse(
                 ownerEmail, List.of());
     }
 
+    public UrlResponse publicView() {
+        return new UrlResponse(id, passwordProtected ? null : longUrl, shortUrl, createDate, expirationDate, visits, visitLimit,
+                active, status, Set.of(), passwordProtected, null, List.of());
+    }
+
     public UrlResponse withSuspiciousReasons(final List<String> reasons) {
         return new UrlResponse(id, longUrl, shortUrl, createDate, expirationDate, visits, visitLimit, active, status, tags,
                 passwordProtected, ownerEmail, reasons);

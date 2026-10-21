@@ -1,5 +1,8 @@
 package cc.hrva.urlshortener.service.impl;
 
+import cc.hrva.urlshortener.mcp.anon.RateLimiterUnavailableException;
+import cc.hrva.urlshortener.mcp.anon.RateLimiter;
+import cc.hrva.urlshortener.exception.RateLimitExceededException;
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.converter.CreateUrlToUrlConverter;
 import cc.hrva.urlshortener.converter.UrlToPeekUrlConverter;
@@ -38,13 +41,16 @@ import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.core.task.TaskExecutor;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.servlet.view.RedirectView;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -57,6 +63,12 @@ import java.util.Set;
 @Transactional(readOnly = true)
 @RequiredArgsConstructor
 public class DefaultUrlService implements UrlService {
+
+    private static final String OWNER_EMAIL = "owner.email";
+    private static final String URLS_CACHE = "urls";
+    private static final int UNLOCK_ATTEMPTS_PER_CLIENT = 10;
+    private static final int UNLOCK_ATTEMPTS_PER_LINK = 50;
+    private static final Duration UNLOCK_WINDOW = Duration.ofMinutes(15);
 
     private static final Set<String> BOT_PROBE_PATHS = Set.of(
             "favicon.ico", "favicon.png", "robots.txt", "sitemap.xml",
@@ -79,6 +91,7 @@ public class DefaultUrlService implements UrlService {
     private final MeterRegistry meterRegistry;
     private final org.springframework.security.crypto.password.PasswordEncoder passwordEncoder;
     private final SuspiciousUrlService suspiciousUrlService;
+    private final RateLimiter rateLimiter;
 
     @Override
     @Transactional
@@ -97,6 +110,16 @@ public class DefaultUrlService implements UrlService {
         return UrlResponse.from(createUrlForAnonymousUser(url));
     }
 
+    private boolean unlockAttemptAllowed(final String shortUrl, final String clientIP) {
+        try {
+            return rateLimiter.tryAcquire(RateLimiter.clientKey("unlock:" + shortUrl, clientIP), UNLOCK_ATTEMPTS_PER_CLIENT, UNLOCK_WINDOW)
+                    && rateLimiter.tryAcquire("unlock:" + shortUrl, UNLOCK_ATTEMPTS_PER_LINK, UNLOCK_WINDOW);
+        } catch (final RateLimiterUnavailableException exception) {
+            log.warn("Unlock rate limit unavailable, allowing the attempt");
+            return true;
+        }
+    }
+
     private void applyPassword(final Url url, final String rawPassword) {
         if (StringUtils.isNotBlank(rawPassword)) {
             url.setPasswordHash(passwordEncoder.encode(rawPassword));
@@ -106,6 +129,10 @@ public class DefaultUrlService implements UrlService {
     @Override
     @Transactional
     public UnlockResponse unlockUrl(final String shortUrl, final String password, final String clientIP) {
+        if (!unlockAttemptAllowed(shortUrl, clientIP)) {
+            throw new RateLimitExceededException("Too many password attempts. Try again in a few minutes.");
+        }
+
         final var url = urlRepository.findByShortUrlAndActiveTrue(shortUrl)
                 .orElseThrow(() -> new UrlNotFoundException("URL doesn't exist"));
 
@@ -219,8 +246,19 @@ public class DefaultUrlService implements UrlService {
             spec = (spec == null) ? UrlSpecification.createdBefore(search.getDateTo()) : spec.and(UrlSpecification.createdBefore(search.getDateTo()));
         }
 
-        final var urls = spec == null ? urlRepository.findAll(pageable) : urlRepository.findAll(spec, pageable);
+        final var ownerLastPageable = withAnonymousOwnersLast(pageable);
+        final var urls = spec == null ? urlRepository.findAll(ownerLastPageable) : urlRepository.findAll(spec, ownerLastPageable);
         return urls.map(url -> UrlResponse.from(url).withSuspiciousReasons(suspiciousUrlService.findReasons(url.getLongUrl())));
+    }
+
+    private static Pageable withAnonymousOwnersLast(final Pageable pageable) {
+        if (pageable.getSort().getOrderFor(OWNER_EMAIL) == null) {
+            return pageable;
+        }
+        final var sort = Sort.by(pageable.getSort().stream()
+                .map(order -> OWNER_EMAIL.equals(order.getProperty()) ? order.nullsLast() : order)
+                .toList());
+        return PageRequest.of(pageable.getPageNumber(), pageable.getPageSize(), sort);
     }
 
     @Override
@@ -245,6 +283,10 @@ public class DefaultUrlService implements UrlService {
         final var url = urlRepository.findById(id).orElseThrow(() -> new UrlNotFoundException("Url doesn't exist"));
 
         urlValidator.verifyUserAdminOrOwner(url);
+        urlValidator.checkIfUrlNotBlocked(url);
+        urlValidator.checkIfShortUrlIsFreeToReactivate(url.getShortUrl());
+        urlValidator.checkIfUrlSafe(url);
+        url.setThreatType(null);
 
         return UrlResponse.from(urlRepository.save(activateUrl(url)));
     }
@@ -295,8 +337,10 @@ public class DefaultUrlService implements UrlService {
 
         final var url = findUrlByShortUrlAndActive(shortUrl);
 
-        asyncCheckIfVisitUnique(clientIP, url);
-        return UrlResponse.from(url);
+        if (url.getPasswordHash() == null) {
+            asyncCheckIfVisitUnique(clientIP, url);
+        }
+        return UrlResponse.from(url).publicView();
     }
 
     @Override
@@ -341,20 +385,7 @@ public class DefaultUrlService implements UrlService {
 
     @Override
     public PeekUrl peekUrlByShortUrl(final String shortUrl) {
-        final var cached = getFromCache(shortUrl);
-        if (cached instanceof PeekUrl peekUrl) {
-            return peekUrl;
-        }
-
-        final var url = findUrlByShortUrlAndActive(shortUrl);
-        final var peekUrl = urlToPeekUrlConverter.convert(url);
-
-        final var cache = cacheManager.getCache("urls");
-        if (cache != null) {
-            cache.put(shortUrl, peekUrl);
-        }
-
-        return peekUrl;
+        return urlToPeekUrlConverter.convert(findUrlByShortUrlAndActive(shortUrl));
     }
 
     @Override
@@ -420,10 +451,7 @@ public class DefaultUrlService implements UrlService {
                 fireVisitTracking(shortUrl, clientIP);
                 return redirectView;
             }
-            final var cache = cacheManager.getCache("urls");
-            if (cache != null) {
-                cache.evict(shortUrl);
-            }
+            evictFromCache(shortUrl);
         }
         return null;
     }
@@ -433,10 +461,7 @@ public class DefaultUrlService implements UrlService {
         if (urlOpt.isPresent()) {
             final var url = urlOpt.get();
             final var response = UrlResponse.from(url);
-            final var cache = cacheManager.getCache("urls");
-            if (cache != null) {
-                cache.put(shortUrl, response);
-            }
+            putInCache(shortUrl, response);
             if (response.passwordProtected()) {
                 return protectedPageUrl(shortUrl);
             }
@@ -451,13 +476,39 @@ public class DefaultUrlService implements UrlService {
     }
 
     private Object getFromCache(final String shortUrl) {
-        final var cache = cacheManager.getCache("urls");
-        if (cache != null) {
-            return Optional.ofNullable(cache.get(shortUrl))
-                    .map(Cache.ValueWrapper::get)
-                    .orElse(null);
+        try {
+            final var cache = cacheManager.getCache(URLS_CACHE);
+            if (cache != null) {
+                return Optional.ofNullable(cache.get(shortUrl))
+                        .map(Cache.ValueWrapper::get)
+                        .orElse(null);
+            }
+        } catch (final RuntimeException exception) {
+            log.warn("URL cache read failed, using the database", exception);
         }
         return null;
+    }
+
+    private void putInCache(final String shortUrl, final Object value) {
+        try {
+            final var cache = cacheManager.getCache(URLS_CACHE);
+            if (cache != null) {
+                cache.put(shortUrl, value);
+            }
+        } catch (final RuntimeException exception) {
+            log.warn("URL cache write failed", exception);
+        }
+    }
+
+    private void evictFromCache(final String shortUrl) {
+        try {
+            final var cache = cacheManager.getCache(URLS_CACHE);
+            if (cache != null) {
+                cache.evict(shortUrl);
+            }
+        } catch (final RuntimeException exception) {
+            log.warn("URL cache eviction failed", exception);
+        }
     }
 
     private boolean isUrlRedirectValid(final UrlResponse response) {
@@ -494,21 +545,14 @@ public class DefaultUrlService implements UrlService {
         applicationTaskExecutor.execute(() -> {
             urlRepository.findByShortUrlAndActiveTrue(shortUrl).ifPresent(url -> {
                 if (!ipAddressService.urlAlreadyVisitedByIP(url, clientIP)) {
-                    urlRepository.save(url.onVisit());
+                    incrementVisitForUrl(url);
                 }
             });
         });
     }
 
     private void cacheUrlResponse(final Url url) {
-        try {
-            final var cache = cacheManager.getCache("urls");
-            if (cache != null) {
-                cache.put(url.getShortUrl(), UrlResponse.from(url));
-            }
-        } catch (final Exception e) {
-            log.debug("Failed to cache newly created URL", e);
-        }
+        putInCache(url.getShortUrl(), UrlResponse.from(url));
     }
 
     @Override
@@ -556,7 +600,10 @@ public class DefaultUrlService implements UrlService {
     }
 
     private void incrementVisitForUrl(final Url url) {
-        urlRepository.save(url.onVisit());
+        final var visited = urlRepository.save(url.onVisit());
+        if (!visited.isActive()) {
+            evictFromCache(visited.getShortUrl());
+        }
     }
 
     public Url deactivateUrl(final Url url) {

@@ -12,6 +12,8 @@ public interface UrlValidator {
     void verifyUserAdmin();
     void checkIfAnonymousUrlCreationEnabled();
     void checkIfShortUrlIsUnique(String shortUrl);
+    void checkIfShortUrlIsFreeToReactivate(String shortUrl);
+    void checkIfUrlNotBlocked(Url url);
     void checkIfShortUrlIsReserved(String shortUrl);
     void checkIfUrlExpirationDateIsInThePast(Url url);
 

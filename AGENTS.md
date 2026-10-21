@@ -125,7 +125,12 @@ MCP, OAuth 2.1, login-bridge and Connected-apps endpoints: see MCP connector.
 
 ## Security
 - JWT in `Authorization: Bearer` header. Stateless sessions on the API chain; the MCP authorization server chain keeps a short HTTP session for the login bridge (see MCP connector).
-- Login rate limiting: Guava cache, 20 attempts/day per IP, 1-day expiry.
+- Login rate limiting: Guava cache, 20 attempts/day per IP, 1-day expiry. Wrong 2FA codes also count per account (`2fa:<userId>` key) and stop further checks once the limit is hit.
+- Public lookups (`GET /urls/{short}`, `/peek`, `/preview`, `/qr`) never return the owner's email or tags; a password-protected link's destination is left out (no preview fetched, no visit recorded) until `/unlock`. `/qr` encodes the short link (`app.server-url` + alias), size clamped to 64–1024.
+- `/unlock` is rate limited through `RedisFixedWindowRateLimiter`: 10 attempts per client network and 50 per link per 15 minutes (allowed if Redis is down).
+- Link previews only fetch public addresses: loopback, private, link-local, CGNAT and ULA targets are refused, and each redirect hop (max 3) is re-checked.
+- New passwords need at least 8 characters (register, reset, change). `User.password` is `@JsonIgnore`d.
+- Direct `Cache` calls in `DefaultUrlService` go through `getFromCache`/`putInCache`/`evictFromCache`, which log and fall back to the database when Redis fails; a visit that reaches the limit evicts the cached entry.
 - CORS via `CorsConfigurationSource` bean (not headers in JwtFilter). Allowed: frontend origin + all standard methods.
 - Client IP resolved via `ClientIpResolver` (never read X-Forwarded-For manually): a single `CF-Connecting-IP` header that parses as an IP literal wins (set by Cloudflare; trustworthy only while the origin accepts traffic from Cloudflare alone), otherwise `request.getRemoteAddr()` as rewritten by `ForwardedHeaderFilter`. `ForwardedHeaderFilter` runs after the Spring Security chains, so filters inside them see the proxy address unless `CF-Connecting-IP` is present.
 - Logging: SLF4J via `@Slf4j`, parameterized `{}` format.
@@ -279,6 +284,8 @@ Not automatable (interactive sign-in). With the local dev stack, the app on port
 - `SuspiciousUrlService` flags destinations by host: other shorteners (and our own host), free dynamic-DNS hosts, raw IPs, punycode, lookalikes of known brands on someone else's domain (`njuskaio.cam`, `jofogas.cards`), login/verification lures, high-risk TLDs. Flags only; it never deactivates anything.
 - `GET /urls/all` (admin) returns `suspiciousReasons` per link (omitted when empty); searching matches the short link, destination and owner email; `?anonymous=true` keeps links without an owner; sort by owner with `sort=owner.email,asc`.
 - New links and admin destination changes pointing at another shortener or at hrva.cc are rejected (`checkIfLongUrlIsNotAShortener`).
+- Links flagged by the nightly Safe Browsing recheck get `threatType` (status BLOCKED); owners can't reactivate them, admins can after a fresh Safe Browsing check. Every reactivation re-checks Safe Browsing and that no other active link holds the alias.
+- A custom alias stays taken while any row (active or not) holds it, so an expired link's alias can't be claimed by someone else.
 
 ### URL tags (`url_tags` table, migration `014-url-tags.xml`)
 - `Url.tags` `@ElementCollection` of normalized strings (`TagNormalizer`: lowercase, ≤10 × ≤30 chars). Filter via `?tag=`; list via `GET /urls/tags`.

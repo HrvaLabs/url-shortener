@@ -75,8 +75,22 @@ public class DefaultUrlValidator implements UrlValidator {
 
     @Override
     public void checkIfShortUrlIsUnique(final String shortUrl) {
-        if (urlRepository.existsUrlByShortUrlAndActiveTrue(shortUrl)) {
+        if (urlRepository.existsUrlByShortUrl(shortUrl)) {
             throw new ShortUrlAlreadyExistsException("This short URL is already taken. Try another.");
+        }
+    }
+
+    @Override
+    public void checkIfShortUrlIsFreeToReactivate(final String shortUrl) {
+        if (urlRepository.existsUrlByShortUrlAndActiveTrue(shortUrl)) {
+            throw new ShortUrlAlreadyExistsException("Another active link already uses this short URL.");
+        }
+    }
+
+    @Override
+    public void checkIfUrlNotBlocked(final Url url) {
+        if (url.getThreatType() != null && !isCurrentUserAdmin()) {
+            throw new UrlValidationException("This link was blocked as unsafe. Contact support if you think that's a mistake.");
         }
     }
 
@@ -104,13 +118,15 @@ public class DefaultUrlValidator implements UrlValidator {
 
     @Override
     public void verifyUserAdmin() {
-        final var currentUser = userService.getUserFromToken();
-        final var isCurrentUserAdmin = currentUser != null && currentUser.getAuthorities().stream()
-                .anyMatch(authorities -> authorities.getName().equals("ROLE_ADMIN"));
-
-        if (!isCurrentUserAdmin) {
+        if (!isCurrentUserAdmin()) {
             throw new NoAuthorizationException("Only admins can change where a link points");
         }
+    }
+
+    private boolean isCurrentUserAdmin() {
+        final var currentUser = userService.getUserFromToken();
+        return currentUser != null && currentUser.getAuthorities().stream()
+                .anyMatch(authorities -> authorities.getName().equals("ROLE_ADMIN"));
     }
 
     @Override

@@ -18,8 +18,10 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -60,6 +62,20 @@ class DefaultTwoFactorServiceTest {
         assertThat(response.secret()).isNotBlank();
         assertThat(response.otpauthUri()).contains("otpauth://totp/");
         assertThat(user.getTwoFactorSecret()).isEqualTo(response.secret());
+    }
+
+    @Test
+    void refusesToRestartSetupWhileTwoFactorIsOn() {
+        final var user = User.builder().id(1L).email("u@example.com").authProvider("local")
+                .twoFactorEnabled(true).twoFactorSecret("EXISTINGSECRET").build();
+        when(userService.getUserFromToken()).thenReturn(user);
+
+        assertThatThrownBy(() -> twoFactorService.setup())
+                .isInstanceOf(ApiException.class)
+                .hasMessage("Two-factor authentication is already enabled. Disable it first.");
+        assertThat(user.getTwoFactorEnabled()).isTrue();
+        assertThat(user.getTwoFactorSecret()).isEqualTo("EXISTINGSECRET");
+        verify(userRepository, never()).save(any());
     }
 
     @Test
