@@ -159,7 +159,7 @@ public class LinkTools {
                 .build();
         McpLinks.validate(validator, createUrlDto);
 
-        final var created = urlService.saveUrlRouting(createUrlDto);
+        final var created = urlService.saveUrlRouting(createUrlDto, null);
 
         log.info("MCP shorten_url userId={} urlId={}", user.getId(), created.id());
 

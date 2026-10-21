@@ -414,7 +414,7 @@ class McpEndpointSecurityTest {
         final var callerDuringCreate = new AtomicReference<String>();
         final var request = new AtomicReference<CreateUrlDto>();
         when(userService.fetchActiveUserByEmail(EMAIL)).thenReturn(User.builder().id(7L).email(EMAIL).active(true).build());
-        when(urlService.saveUrlRouting(any())).thenAnswer(invocation -> {
+        when(urlService.saveUrlRouting(any(), any())).thenAnswer(invocation -> {
             callerDuringCreate.set(SecurityContextHolder.getContext().getAuthentication().getName());
             request.set(invocation.getArgument(0));
             return new UrlResponse(11L, "https://secret-destination.example/path", "secret-alias", LocalDateTime.now(), null, 0L, 5L,

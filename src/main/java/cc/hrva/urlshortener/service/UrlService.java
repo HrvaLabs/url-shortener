@@ -22,7 +22,7 @@ public interface UrlService {
     UrlResponse updateUrl(UrlUpdateDto url);
     Url getUrlByLongUrl(String longUrl);
     String generateShortUrl(Long length);
-    UrlResponse saveUrlRouting(CreateUrlDto url);
+    UrlResponse saveUrlRouting(CreateUrlDto url, String clientIP);
     Page<UrlResponse> getAllMyUrls(String apiKey, Pageable pageable, UrlSearchDto search);
     List<String> getMyTags(String apiKey);
     PeekUrl peekUrlByShortUrl(String shortUrl);
