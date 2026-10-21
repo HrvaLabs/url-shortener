@@ -543,6 +543,30 @@ class DefaultModerationServiceTest {
     }
 
     @Test
+    void aBlockDetailLongerThanItsColumnIsShortenedSoTheBlockStillGoesThrough() {
+        final var url = link(30L, "https://example.org/x", null);
+        final var detail = "reported by a visitor: " + "x".repeat(300);
+
+        final var response = moderationService.blockLink(30L, BlockReason.ADMIN, detail, ADMIN, "mcp");
+
+        assertThat(response.active()).isFalse();
+        assertThat(url.getBlockDetail()).hasSize(255).startsWith("reported by a visitor: xxx").endsWith("...");
+        verify(auditLogService).log(ADMIN, "BLOCK_LINK", "Url", "30", "reason: ADMIN, detail: " + detail + ", links: 1, via: mcp");
+    }
+
+    @Test
+    void aRuleReasonLongerThanItsColumnIsShortenedSoTheRuleStillSaves() {
+        final var reason = "phishing wave: " + "y".repeat(300);
+
+        moderationService.blockDomain("jofogas.cards", reason, ADMIN, "mcp", null);
+        moderationService.allowDomain("example.org", reason, ADMIN, "mcp");
+
+        assertThat(rules.values()).allSatisfy(rule ->
+                assertThat(rule.getReason()).hasSize(255).startsWith("phishing wave: yyy").endsWith("..."));
+        assertThat(rules).containsOnlyKeys("jofogas.cards", "example.org");
+    }
+
+    @Test
     void aSafeBrowsingBlockTellsTheOwnerWithTheMalwareEmail() {
         final var owner = user(1L, "alice@example.com");
         final var url = link(30L, "https://example.org/x", owner);

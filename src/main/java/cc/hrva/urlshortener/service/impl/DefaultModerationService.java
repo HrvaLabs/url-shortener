@@ -92,6 +92,7 @@ public class DefaultModerationService implements ModerationService {
     private static final Sort NEWEST_RULES_FIRST = Sort.by(Sort.Order.desc("createdAt"), Sort.Order.desc("id"));
     private static final Set<BlockReason> RESTORED_BY_ALLOW = EnumSet.of(BlockReason.BLOCKLIST, BlockReason.SCAM_SIGNALS, BlockReason.DOMAIN_RULE);
     private static final Duration SECOND_EVICTION_DELAY = Duration.ofSeconds(2);
+    private static final int MAX_COLUMN_LENGTH = 255;
 
     private final UrlRepository urlRepository;
     private final UserRepository userRepository;
@@ -362,7 +363,7 @@ public class DefaultModerationService implements ModerationService {
                 .map(url -> {
                     url.setActive(false);
                     url.setBlockReason(reason);
-                    url.setBlockDetail(detail);
+                    url.setBlockDetail(StringUtils.abbreviate(detail, MAX_COLUMN_LENGTH));
                     url.setBlockedAt(LocalDateTime.now());
                     if (reason == BlockReason.SAFE_BROWSING) {
                         url.setThreatType(ThreatType.MALWARE);
@@ -440,7 +441,7 @@ public class DefaultModerationService implements ModerationService {
                     .orElseGet(() -> DomainRule.builder().domain(domain).createdBy(performedBy).build());
             rule.setType(type);
             if (StringUtils.isNotBlank(reason)) {
-                rule.setReason(reason);
+                rule.setReason(StringUtils.abbreviate(reason, MAX_COLUMN_LENGTH));
             }
             domainRuleRepository.save(rule);
         });
