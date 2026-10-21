@@ -19,6 +19,7 @@ import cc.hrva.urlshortener.model.ApiKey;
 import cc.hrva.urlshortener.model.PeekUrl;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.User;
+import cc.hrva.urlshortener.model.enums.ReviewResolution;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.specification.UrlSpecification;
 import cc.hrva.urlshortener.service.ApiKeyService;
@@ -70,6 +71,7 @@ public class DefaultUrlService implements UrlService {
 
     private static final String OWNER_EMAIL = "owner.email";
     private static final String URLS_CACHE = "urls";
+    private static final String SYSTEM = "system";
     private static final int UNLOCK_ATTEMPTS_PER_CLIENT = 10;
     private static final int UNLOCK_ATTEMPTS_PER_LINK = 50;
     private static final Duration UNLOCK_WINDOW = Duration.ofMinutes(15);
@@ -107,6 +109,9 @@ public class DefaultUrlService implements UrlService {
 
         log.info("Creating URL authenticated={}", currentUser != null);
 
+        if (currentUser == null) {
+            urlValidator.checkIfAnonymousUrlCreationEnabled();
+        }
         final var verdict = validateUrl(url);
 
         return transactionOperations.execute(status -> {
@@ -159,11 +164,11 @@ public class DefaultUrlService implements UrlService {
 
         log.info("Creating URL with API key");
 
+        final var apiKey = apiKeyService.fetchApiKeyByKey(key);
+        apiKeyValidator.apiKeyExistsByKeyAndIsValid(key);
         final var verdict = validateUrl(url);
 
         return transactionOperations.execute(status -> {
-            final var apiKey = apiKeyService.fetchApiKeyByKey(key);
-            apiKeyValidator.apiKeyExistsByKeyAndIsValid(key);
             apiKeyService.apiKeyUseAction(apiKey);
 
             applyPassword(url, createUrlDto.getPassword());
@@ -339,12 +344,16 @@ public class DefaultUrlService implements UrlService {
         final var previousLongUrl = existing.getLongUrl();
 
         final var url = urlUpdateDtoToUrlConverter.convert(updateDto);
-        final var verdict = Objects.equals(previousLongUrl, url.getLongUrl()) ? LinkVerdict.clean() : validateNewDestination(url);
+        final var destinationChanged = !Objects.equals(previousLongUrl, url.getLongUrl());
+        final var verdict = destinationChanged ? validateNewDestination(url) : LinkVerdict.clean();
         urlValidator.checkIfUrlExpirationDateIsInThePast(url);
 
         url.verifyUrlValidity(url);
         return transactionOperations.execute(status -> {
             final var saved = urlRepository.save(url);
+            if (destinationChanged) {
+                reviewQueueService.resolveOpen(saved, ReviewResolution.DESTINATION_CHANGED, SYSTEM);
+            }
             queueIfFlagged(saved, verdict);
             return UrlResponse.from(saved);
         });
@@ -600,12 +609,12 @@ public class DefaultUrlService implements UrlService {
     }
 
     private Url createUrlForAnonymousUser(final Url url, final LinkVerdict verdict) {
-        urlValidator.checkIfAnonymousUrlCreationEnabled();
         url.clearForAnonymousUser();
 
         if (urlRepository.existsUrlByLongUrlAndActiveTrueAndOwnerIsNull(url.getLongUrl())) {
             final var existingLongUrl = getUrlByLongUrl(url.getLongUrl());
             log.warn("Long url already exists in DB, will return the existing anonymous URL");
+            queueIfFlagged(existingLongUrl, verdict);
             cacheUrlResponse(existingLongUrl);
             return existingLongUrl;
         }

@@ -62,7 +62,7 @@ class DefaultReviewQueueServiceTest {
     @Test
     void flaggingTwiceKeepsOneOpenEntry() {
         final var open = LinkReview.builder().id(1L).url(url).reasons(YOUNG + "\n" + LURE).flaggedAt(LocalDateTime.now()).build();
-        when(linkReviewRepository.findByUrlAndResolvedAtIsNull(url)).thenReturn(Optional.of(open));
+        when(linkReviewRepository.findFirstByUrlAndResolvedAtIsNullOrderByFlaggedAtDesc(url)).thenReturn(Optional.of(open));
 
         reviewQueueService.flag(url, List.of(LURE, YOUNG));
 
@@ -73,7 +73,7 @@ class DefaultReviewQueueServiceTest {
     @Test
     void aNewReasonForAnOpenEntryIsAddedToThatEntry() {
         final var open = LinkReview.builder().id(1L).url(url).reasons(YOUNG).flaggedAt(LocalDateTime.now()).build();
-        when(linkReviewRepository.findByUrlAndResolvedAtIsNull(url)).thenReturn(Optional.of(open));
+        when(linkReviewRepository.findFirstByUrlAndResolvedAtIsNullOrderByFlaggedAtDesc(url)).thenReturn(Optional.of(open));
 
         reviewQueueService.flag(url, List.of(YOUNG, ON_LIST));
 
@@ -140,7 +140,7 @@ class DefaultReviewQueueServiceTest {
     @Test
     void resolvingRecordsWhoResolvedTheOpenEntryHowAndWhen() {
         final var open = LinkReview.builder().id(1L).url(url).reasons(YOUNG).flaggedAt(LocalDateTime.now()).build();
-        when(linkReviewRepository.findByUrlAndResolvedAtIsNull(url)).thenReturn(Optional.of(open));
+        when(linkReviewRepository.findByUrlAndResolvedAtIsNull(url)).thenReturn(List.of(open));
 
         reviewQueueService.resolveOpen(url, ReviewResolution.DOMAIN_TRUSTED, "admin@localhost");
 
@@ -148,6 +148,36 @@ class DefaultReviewQueueServiceTest {
         assertThat(open.getResolution()).isEqualTo(ReviewResolution.DOMAIN_TRUSTED);
         assertThat(open.getResolvedBy()).isEqualTo("admin@localhost");
         assertThat(open.getResolvedAt()).isCloseTo(LocalDateTime.now(), within(5, ChronoUnit.SECONDS));
+    }
+
+    @Test
+    void resolvingClosesEveryOpenEntryOfTheLinkEvenADuplicate() {
+        final var newer = LinkReview.builder().id(2L).url(url).reasons(LURE).flaggedAt(LocalDateTime.now()).build();
+        final var older = LinkReview.builder().id(1L).url(url).reasons(YOUNG).flaggedAt(LocalDateTime.now().minusMinutes(1)).build();
+        when(linkReviewRepository.findByUrlAndResolvedAtIsNull(url)).thenReturn(List.of(newer, older));
+
+        reviewQueueService.resolveOpen(url, ReviewResolution.DESTINATION_CHANGED, "system");
+
+        verify(linkReviewRepository).save(newer);
+        verify(linkReviewRepository).save(older);
+        assertThat(List.of(newer, older)).allSatisfy(review -> {
+            assertThat(review.getResolution()).isEqualTo(ReviewResolution.DESTINATION_CHANGED);
+            assertThat(review.getResolvedBy()).isEqualTo("system");
+            assertThat(review.getResolvedAt()).isNotNull();
+        });
+    }
+
+    @Test
+    void flaggingAfterADestinationChangeOpensANewEntryEvenForTheSameReasons() {
+        final var saved = ArgumentCaptor.forClass(LinkReview.class);
+        when(linkReviewRepository.findFirstByUrlOrderByFlaggedAtDesc(url))
+                .thenReturn(Optional.of(resolved(ReviewResolution.DESTINATION_CHANGED, YOUNG)));
+
+        reviewQueueService.flag(url, List.of(YOUNG));
+
+        verify(linkReviewRepository).save(saved.capture());
+        assertThat(saved.getValue().getId()).isNull();
+        assertThat(saved.getValue().getReasons()).isEqualTo(YOUNG);
     }
 
     @Test

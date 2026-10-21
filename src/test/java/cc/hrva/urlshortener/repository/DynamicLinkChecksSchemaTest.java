@@ -21,7 +21,6 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.FilterType;
 import org.springframework.dao.DataIntegrityViolationException;
-import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 import org.springframework.transaction.annotation.Transactional;
@@ -213,12 +212,25 @@ class DynamicLinkChecksSchemaTest {
                 .build());
         entityManager.clear();
 
-        assertThat(linkReviewRepository.findByUrlAndResolvedAtIsNull(url))
+        assertThat(linkReviewRepository.findFirstByUrlAndResolvedAtIsNullOrderByFlaggedAtDesc(url))
                 .map(LinkReview::getReasons)
                 .contains("high-risk domain ending .life\nlogin or verification lure");
+        assertThat(linkReviewRepository.findByUrlAndResolvedAtIsNull(url)).hasSize(1);
         assertThat(linkReviewRepository.findFirstByUrlOrderByFlaggedAtDesc(url)).isPresent();
-        assertThat(linkReviewRepository.findByResolvedAtIsNull(PageRequest.of(0, 20))).hasSize(1);
         assertThat(linkReviewRepository.countByResolvedAtIsNull()).isEqualTo(1);
+    }
+
+    @Test
+    void twoOpenReviewsForOneLinkStillGiveTheNewestOneBack() {
+        final var url = urlRepository.saveAndFlush(Url.builder().shortUrl("dup").longUrl("https://findfavoritedate.life/?u=dup").build());
+        linkReviewRepository.saveAndFlush(LinkReview.builder().url(url).reasons("older").flaggedAt(LocalDateTime.now().minusMinutes(5)).build());
+        linkReviewRepository.saveAndFlush(LinkReview.builder().url(url).reasons("newer").flaggedAt(LocalDateTime.now()).build());
+        entityManager.clear();
+
+        assertThat(linkReviewRepository.findFirstByUrlAndResolvedAtIsNullOrderByFlaggedAtDesc(url))
+                .map(LinkReview::getReasons)
+                .contains("newer");
+        assertThat(linkReviewRepository.findByUrlAndResolvedAtIsNull(url)).hasSize(2);
     }
 
     @Test

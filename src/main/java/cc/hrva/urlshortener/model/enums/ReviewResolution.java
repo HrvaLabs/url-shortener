@@ -6,6 +6,7 @@ public enum ReviewResolution {
     DOMAIN_TRUSTED,
     LINK_BLOCKED,
     DOMAIN_BLOCKED,
-    USER_BLOCKED
+    USER_BLOCKED,
+    DESTINATION_CHANGED
 
 }

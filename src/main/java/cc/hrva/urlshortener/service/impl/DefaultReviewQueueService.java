@@ -36,7 +36,7 @@ public class DefaultReviewQueueService implements ReviewQueueService {
     @Transactional
     public void flag(final Url url, final List<String> reasons) {
         final var incoming = normalized(reasons);
-        linkReviewRepository.findByUrlAndResolvedAtIsNull(url).ifPresentOrElse(
+        linkReviewRepository.findFirstByUrlAndResolvedAtIsNullOrderByFlaggedAtDesc(url).ifPresentOrElse(
                 review -> extend(review, incoming),
                 () -> openUnlessReviewedFine(url, incoming));
     }
@@ -73,12 +73,13 @@ public class DefaultReviewQueueService implements ReviewQueueService {
     @Override
     @Transactional
     public void resolveOpen(final Url url, final ReviewResolution resolution, final String resolvedBy) {
-        linkReviewRepository.findByUrlAndResolvedAtIsNull(url).ifPresent(review -> {
+        final var resolvedAt = LocalDateTime.now();
+        linkReviewRepository.findByUrlAndResolvedAtIsNull(url).forEach(review -> {
             review.setResolution(resolution);
             review.setResolvedBy(resolvedBy);
-            review.setResolvedAt(LocalDateTime.now());
+            review.setResolvedAt(resolvedAt);
             linkReviewRepository.save(review);
-            log.info("Review resolved urlId={} resolution={}", url.getId(), resolution);
+            log.info("Review resolved urlId={} reviewId={} resolution={}", url.getId(), review.getId(), resolution);
         });
     }
 

@@ -23,6 +23,9 @@ import cc.hrva.urlshortener.dto.LinkVerdict.Outcome;
 import cc.hrva.urlshortener.dto.UrlResponse;
 import cc.hrva.urlshortener.dto.UrlSearchDto;
 import cc.hrva.urlshortener.dto.UrlUpdateDto;
+import cc.hrva.urlshortener.exception.ApiException;
+import cc.hrva.urlshortener.exception.ApiKeyNotFoundException;
+import cc.hrva.urlshortener.exception.InvalidApiKeyException;
 import cc.hrva.urlshortener.exception.NoAuthorizationException;
 import cc.hrva.urlshortener.exception.UrlValidationException;
 import cc.hrva.urlshortener.model.ApiKey;
@@ -30,6 +33,7 @@ import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.codebook.Authorities;
 import cc.hrva.urlshortener.model.enums.BlockReason;
+import cc.hrva.urlshortener.model.enums.ReviewResolution;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.service.impl.DefaultSuspiciousUrlService;
 import cc.hrva.urlshortener.service.impl.DefaultUrlService;
@@ -222,6 +226,7 @@ class UrlServiceTest {
         order.verify(urlValidator).checkIfLongUrlIsNotBlocklisted(changed);
         order.verify(urlValidator).checkIfUrlSafe(changed);
         order.verify(urlRepository).save(changed);
+        verify(reviewQueueService).resolveOpen(changed, ReviewResolution.DESTINATION_CHANGED, "system");
         verify(reviewQueueService, never()).flag(any(), any());
     }
 
@@ -239,6 +244,7 @@ class UrlServiceTest {
 
         final var order = org.mockito.Mockito.inOrder(urlRepository, reviewQueueService);
         order.verify(urlRepository).save(changed);
+        order.verify(reviewQueueService).resolveOpen(changed, ReviewResolution.DESTINATION_CHANGED, "system");
         order.verify(reviewQueueService).flag(changed, YOUNG_DOMAIN);
     }
 
@@ -257,6 +263,7 @@ class UrlServiceTest {
 
         verify(urlValidator, never()).checkIfUrlSafe(any());
         verify(urlRepository, never()).save(any());
+        verify(reviewQueueService, never()).resolveOpen(any(), any(), any());
         verify(reviewQueueService, never()).flag(any(), any());
     }
 
@@ -273,6 +280,7 @@ class UrlServiceTest {
         verify(urlValidator, never()).verifyUserAdmin();
         verify(urlValidator, never()).checkIfLongUrlIsNotBlocklisted(any());
         verify(urlValidator, never()).checkIfUrlSafe(any());
+        verify(reviewQueueService, never()).resolveOpen(any(), any(), any());
         verify(reviewQueueService, never()).flag(any(), any());
     }
 
@@ -372,6 +380,7 @@ class UrlServiceTest {
     void aBlocklistedDestinationIsRefusedBeforeSafeBrowsingAndNeverSaved() {
         final var service = urlServiceWithRealLongUrlHandling();
         final var createUrlDto = CreateUrlDto.builder().longUrl("https://njuskaio.cam/a/MAUB3").build();
+        when(appProperties.isAnonymousUrlCreationEnabled()).thenReturn(true);
         when(linkCheckService.check("https://njuskaio.cam/a/MAUB3")).thenReturn(blocked());
 
         assertThatThrownBy(() -> service.saveUrlRouting(createUrlDto))
@@ -434,8 +443,13 @@ class UrlServiceTest {
     void theLinkCheckRunsBeforeTheTransactionThatSavesALinkMadeWithAnApiKey() {
         final var checkedInTransaction = new AtomicReference<Boolean>();
         final var savedInTransaction = new AtomicReference<Boolean>();
+        final var keyUsedInTransaction = new AtomicReference<Boolean>();
         final var createUrlDto = CreateUrlDto.builder().longUrl("https://example.com/menu").build();
         when(apiKeyService.fetchApiKeyByKey("apikey")).thenReturn(ApiKey.builder().owner(User.builder().id(1L).build()).build());
+        when(apiKeyService.apiKeyUseAction(any())).thenAnswer(invocation -> {
+            keyUsedInTransaction.set(TransactionSynchronizationManager.isActualTransactionActive());
+            return invocation.getArgument(0);
+        });
         when(appProperties.getShortUrlLength()).thenReturn(5L);
         recordTransactionDuringCheck("https://example.com/menu", checkedInTransaction);
         recordTransactionDuringSave(savedInTransaction);
@@ -444,6 +458,113 @@ class UrlServiceTest {
 
         assertThat(checkedInTransaction).hasValue(false);
         assertThat(savedInTransaction).hasValue(true);
+        assertThat(keyUsedInTransaction).hasValue(true);
+    }
+
+    @Test
+    void theReviewIsQueuedInsideTheTransactionThatSavesTheLink() {
+        final var queuedInTransaction = new AtomicReference<Boolean>();
+        final var createUrlDto = CreateUrlDto.builder().longUrl("https://findfavoritedate.life/?u=f6yp608").build();
+        when(userService.getUserFromToken()).thenReturn(User.builder().id(1L).build());
+        when(appProperties.getShortUrlLength()).thenReturn(5L);
+        when(linkCheckService.check("https://findfavoritedate.life/?u=f6yp608")).thenReturn(new LinkVerdict(Outcome.FLAG, YOUNG_DOMAIN, null, null));
+        when(urlRepository.save(any(Url.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        org.mockito.Mockito.doAnswer(invocation -> {
+            queuedInTransaction.set(TransactionSynchronizationManager.isActualTransactionActive());
+            return null;
+        }).when(reviewQueueService).flag(any(), any());
+
+        transactionalUrlService().saveUrlRouting(createUrlDto);
+
+        assertThat(queuedInTransaction).hasValue(true);
+    }
+
+    @Test
+    void theOldReviewIsClosedAndTheNewOneQueuedInsideTheTransactionThatSavesANewDestination() {
+        final var resolvedInTransaction = new AtomicReference<Boolean>();
+        final var queuedInTransaction = new AtomicReference<Boolean>();
+        final var url = Url.builder().id(7L).shortUrl("abc").longUrl("https://old.example").visits(0L).active(true).build();
+        final var update = UrlUpdateDto.builder().id(7L).longUrl("https://findfavoritedate.life/?u=f6yp608").build();
+        final var changed = Url.builder().id(7L).shortUrl("abc").longUrl("https://findfavoritedate.life/?u=f6yp608").visits(0L).active(true).build();
+        when(userService.getUserFromToken()).thenReturn(admin());
+        when(urlRepository.findById(7L)).thenReturn(Optional.of(url));
+        when(urlUpdateDtoToUrlConverter.convert(update)).thenReturn(changed);
+        when(linkCheckService.check("https://findfavoritedate.life/?u=f6yp608")).thenReturn(new LinkVerdict(Outcome.FLAG, YOUNG_DOMAIN, null, null));
+        when(urlRepository.save(any(Url.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        org.mockito.Mockito.doAnswer(invocation -> {
+            resolvedInTransaction.set(TransactionSynchronizationManager.isActualTransactionActive());
+            return null;
+        }).when(reviewQueueService).resolveOpen(any(), any(), any());
+        org.mockito.Mockito.doAnswer(invocation -> {
+            queuedInTransaction.set(TransactionSynchronizationManager.isActualTransactionActive());
+            return null;
+        }).when(reviewQueueService).flag(any(), any());
+
+        transactionalUrlService().updateUrl(update);
+
+        assertThat(resolvedInTransaction).hasValue(true);
+        assertThat(queuedInTransaction).hasValue(true);
+    }
+
+    @Test
+    void anUnknownApiKeyIsRefusedBeforeTheSlowLinkCheck() {
+        final var service = urlServiceWithRealLongUrlHandling();
+        final var createUrlDto = CreateUrlDto.builder().longUrl("https://example.com/menu").build();
+        when(apiKeyService.fetchApiKeyByKey("junk")).thenThrow(new ApiKeyNotFoundException("Sent API key doesn't exist"));
+
+        assertThatThrownBy(() -> service.saveUrlWithApiKey(createUrlDto, "junk"))
+                .isInstanceOf(ApiKeyNotFoundException.class);
+
+        verify(linkCheckService, never()).check(anyString());
+        verify(safeBrowsingService, never()).checkUrlsForThreats(anyString());
+        verify(urlRepository, never()).save(any(Url.class));
+    }
+
+    @Test
+    void anInvalidApiKeyIsRefusedBeforeTheSlowLinkCheck() {
+        final var service = urlServiceWithRealLongUrlHandling();
+        final var createUrlDto = CreateUrlDto.builder().longUrl("https://example.com/menu").build();
+        org.mockito.Mockito.doThrow(new InvalidApiKeyException("API key has expired")).when(apiKeyValidator).apiKeyExistsByKeyAndIsValid("expired");
+
+        assertThatThrownBy(() -> service.saveUrlWithApiKey(createUrlDto, "expired"))
+                .isInstanceOf(InvalidApiKeyException.class)
+                .hasMessage("API key has expired");
+
+        verify(linkCheckService, never()).check(anyString());
+        verify(safeBrowsingService, never()).checkUrlsForThreats(anyString());
+        verify(apiKeyService, never()).apiKeyUseAction(any());
+        verify(urlRepository, never()).save(any(Url.class));
+    }
+
+    @Test
+    void anonymousCreationWhileItIsSwitchedOffIsRefusedBeforeTheSlowLinkCheck() {
+        final var service = urlServiceWithRealLongUrlHandling();
+        final var createUrlDto = CreateUrlDto.builder().longUrl("https://example.com/menu").build();
+
+        assertThatThrownBy(() -> service.saveUrlRouting(createUrlDto))
+                .isInstanceOf(ApiException.class)
+                .hasMessage("Sign in to create short URLs");
+
+        verify(linkCheckService, never()).check(anyString());
+        verify(safeBrowsingService, never()).checkUrlsForThreats(anyString());
+        verify(urlRepository, never()).save(any(Url.class));
+    }
+
+    @Test
+    void aFlaggedDestinationThatReusesAnAnonymousLinkQueuesThatLink() {
+        final var createUrlDto = CreateUrlDto.builder().longUrl("https://findfavoritedate.life/?u=f6yp608").build();
+        final var url = Url.builder().longUrl("https://findfavoritedate.life/?u=f6yp608").build();
+        final var existing = Url.builder().id(12L).shortUrl("v0DB3").longUrl("https://findfavoritedate.life/?u=f6yp608").active(true).build();
+        when(createUrlToUrlConverter.convert(createUrlDto)).thenReturn(url);
+        when(urlValidator.checkIfLongUrlIsNotBlocklisted(url)).thenReturn(new LinkVerdict(Outcome.FLAG, YOUNG_DOMAIN, null, null));
+        when(urlRepository.existsUrlByLongUrlAndActiveTrueAndOwnerIsNull(url.getLongUrl())).thenReturn(true);
+        when(urlRepository.findByLongUrlAndActiveTrue(url.getLongUrl())).thenReturn(Optional.of(existing));
+
+        final var result = urlService.saveUrlRouting(createUrlDto);
+
+        assertThat(result.shortUrl()).isEqualTo("v0DB3");
+        verify(reviewQueueService).flag(existing, YOUNG_DOMAIN);
+        verify(urlRepository, never()).save(any(Url.class));
     }
 
     @Test
@@ -795,6 +916,7 @@ class UrlServiceTest {
     void shouldRejectMalformedLongUrlWhenSavingUrl() {
         final var service = urlServiceWithRealLongUrlHandling();
         final var createUrlDto = CreateUrlDto.builder().longUrl("https//wedding.hrva.cc").build();
+        when(appProperties.isAnonymousUrlCreationEnabled()).thenReturn(true);
 
         assertThatThrownBy(() -> service.saveUrlRouting(createUrlDto))
                 .isInstanceOf(UrlValidationException.class)
