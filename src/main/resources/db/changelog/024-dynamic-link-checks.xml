@@ -135,7 +135,7 @@
             <column name="url" value="https://urlhaus.abuse.ch/downloads/text_online/"/>
             <column name="kind" value="LINKS"/>
             <column name="action" value="BLOCK"/>
-            <column name="enabled" valueBoolean="true"/>
+            <column name="enabled" valueBoolean="false"/>
             <column name="refresh_interval_hours" valueNumeric="1"/>
         </insert>
         <insert tableName="blocklist_source">

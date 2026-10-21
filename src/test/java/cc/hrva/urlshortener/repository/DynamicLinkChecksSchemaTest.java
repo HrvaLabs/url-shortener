@@ -97,7 +97,15 @@ class DynamicLinkChecksSchemaTest {
                                 "https://raw.githubusercontent.com/Phishing-Database/Phishing.Database/master/phishing-domains-ACTIVE.txt",
                                 List.of(), 24));
         assertThat(blocklistSourceRepository.findAll()).hasSize(9);
-        assertThat(blocklistSourceRepository.findByEnabledTrue()).hasSize(9);
+        assertThat(blocklistSourceRepository.findByEnabledTrue()).hasSize(8);
+    }
+
+    @Test
+    void seedsUrlhausSwitchedOffBecauseItsDownloadsNeedAnAuthKey() {
+        assertThat(blocklistSourceRepository.findAll())
+                .filteredOn(source -> !source.isEnabled())
+                .extracting(BlocklistSource::getName)
+                .containsExactly("URLhaus");
     }
 
     @Test
