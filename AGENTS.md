@@ -100,6 +100,7 @@ cc.hrva.urlshortener
 | GET | `/api/v1/admin/login-attempts` | ROLE_ADMIN | IP → attempt count map |
 | DELETE | `/api/v1/admin/login-attempts` | ROLE_ADMIN | Clear all rate limits |
 | GET | `/api/changelog` | Public | Changelog JSON |
+| GET | `/.well-known/security.txt` | Public | RFC 9116 abuse contact (`abuse@hrva.cc`), `text/plain; charset=utf-8`; `Expires` is 365 days from the request |
 | GET | `/actuator/health` | Public | Health check |
 | GET | `/actuator/**` | ROLE_ADMIN | Metrics, caches, env, beans |
 

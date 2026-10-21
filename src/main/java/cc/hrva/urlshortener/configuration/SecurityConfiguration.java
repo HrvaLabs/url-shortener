@@ -74,6 +74,7 @@ public class SecurityConfiguration {
                                         "/login/**",
                                         "/swagger-ui/**",
                                         "/v3/api-docs/**",
+                                        "/.well-known/security.txt",
                                         "/",
                                         "/*"
                                 )
