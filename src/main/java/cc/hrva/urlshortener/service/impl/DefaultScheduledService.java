@@ -91,6 +91,13 @@ public class DefaultScheduledService implements ScheduledService {
     }
 
     @Override
+    @Scheduled(cron = "0 15 3 * * *")
+    public void forgetOldEmailContent() {
+        log.info("Scheduled cleanup: old email content");
+        sendingEmailService.forgetOldEmailContent();
+    }
+
+    @Override
     @Scheduled(cron = "0 0 9 * * *")
     public void sendLinkDigest() {
         log.info("Scheduled: link digest");

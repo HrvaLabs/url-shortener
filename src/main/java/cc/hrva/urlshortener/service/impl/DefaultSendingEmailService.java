@@ -37,6 +37,7 @@ public class DefaultSendingEmailService implements SendingEmailService {
 
     private static final String RECIPIENT_SEPARATOR = ", ";
     private static final Duration INTERRUPTED_AFTER = Duration.ofMinutes(10);
+    private static final Duration CONTENT_RETENTION = Duration.ofDays(7);
 
     private final AppProperties appProperties;
     private final TemplateEngine templateEngine;
@@ -175,7 +176,7 @@ public class DefaultSendingEmailService implements SendingEmailService {
                           <td>%s</td>
                         </tr>
                         """.formatted(
-                        HtmlUtils.htmlEscape(StringUtils.defaultString(appProperties.getServerUrl())),
+                        HtmlUtils.htmlEscape(StringUtils.removeEnd(StringUtils.defaultString(appProperties.getServerUrl()), "/")),
                         HtmlUtils.htmlEscape(entry.shortUrl()),
                         HtmlUtils.htmlEscape(entry.longUrl()),
                         entry.ownerEmail() != null ? HtmlUtils.htmlEscape(entry.ownerEmail()) : "anonymous",
@@ -215,12 +216,25 @@ public class DefaultSendingEmailService implements SendingEmailService {
                 .text(failed.getBody())
                 .build();
 
+        log.info("Resending email log id={}", emailLogId);
+        final var resent = tryToSendEmail(email);
+
         failed.setStatus(EmailLog.STATUS_RESENT);
         failed.setBody(null);
         emailLogRepository.save(failed);
+        return resent;
+    }
 
-        log.info("Resending email log id={}", emailLogId);
-        return tryToSendEmail(email);
+    @Override
+    public void forgetOldEmailContent() {
+        final var old = emailLogRepository.findAllByBodyIsNotNullAndCreatedAtBefore(LocalDateTime.now().minus(CONTENT_RETENTION));
+        if (old.isEmpty()) {
+            return;
+        }
+
+        old.forEach(entry -> entry.setBody(null));
+        emailLogRepository.saveAll(old);
+        log.info("Dropped the stored content of {} old emails", old.size());
     }
 
     @Override

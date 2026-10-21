@@ -29,7 +29,9 @@ class DefaultSuspiciousUrlServiceTest {
             "https://www.google.co.uk/search?q=currahee",
             "https://drive.proton.me/urls/ABC",
             "https://www.jutarnji.hr/life/zdravlje/svaka-deseta-zena",
-            "https://cloud.hrvalabs.net/s/N6TBS5yZ69FRxxy"
+            "https://cloud.hrvalabs.net/s/N6TBS5yZ69FRxxy",
+            "https://maps.app.goo.gl/Ux7Qm1aBcD",
+            "https://photos.app.goo.gl/q2WzXk"
     })
     void leavesOrdinaryLinksAlone(final String longUrl) {
         assertThat(suspiciousUrlService.findReasons(longUrl)).isEmpty();
@@ -71,6 +73,12 @@ class DefaultSuspiciousUrlServiceTest {
     }
 
     @Test
+    void stillFlagsPlatformShareShortenersForReview() {
+        assertThat(suspiciousUrlService.findReasons("https://t.co/AbC123")).contains("hides its destination behind another shortener");
+        assertThat(suspiciousUrlService.findReasons("https://lnkd.in/dX9yZ")).contains("hides its destination behind another shortener");
+    }
+
+    @Test
     void flagsRawIpAddressesAndPunycode() {
         assertThat(suspiciousUrlService.findReasons("http://185.12.4.9/login")).contains("IP address instead of a domain");
         assertThat(suspiciousUrlService.findReasons("https://xn--pypal-4ve.com/")).contains("punycode domain");
@@ -83,8 +91,9 @@ class DefaultSuspiciousUrlServiceTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"https://app.hrva.cc/", "https://www.youtube.com/watch?v=1", "not a url"})
-    void doesNotMistakeOrdinarySitesForShorteners(final String longUrl) {
+    @ValueSource(strings = {"https://app.hrva.cc/", "https://www.youtube.com/watch?v=1", "not a url",
+            "https://maps.app.goo.gl/Ux7Qm1aBcD", "https://t.co/AbC123", "https://lnkd.in/dX9yZ"})
+    void doesNotRefuseOrdinarySitesOrPlatformShareLinks(final String longUrl) {
         assertThat(suspiciousUrlService.isShortener(longUrl)).isFalse();
     }
 

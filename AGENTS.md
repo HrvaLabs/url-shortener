@@ -273,7 +273,7 @@ Not automatable (interactive sign-in). With the local dev stack, the app on port
 ### EmailLog (`email_log` table, migration `009-email-log.xml`)
 - Records email sending: sender, recipient (comma-separated), subject, status (SENDING/SENT/FAILED/RESENT), errorMessage, sentAt, createdAt, body
 - Populated automatically by `tryToSendEmail` in `DefaultSendingEmailService`, which retries 3 times and records any failure (checked or runtime) as FAILED with its message
-- `body` (migration `022-email-log-resend.xml`) holds the rendered HTML only until the email is sent; it is `@JsonIgnore`d and exposed as the `resendable` flag (FAILED with a body)
+- `body` (migration `022-email-log-resend.xml`) holds the rendered HTML only until the email is sent, and at most 7 days for failed ones (daily 03:15 cleanup); it is `@JsonIgnore`d and exposed as the `resendable` flag (FAILED with a body)
 - Endpoints: `GET /api/v1/admin/email-log`; `POST /api/v1/admin/email-log/{id}/resend` (admin, synchronous) sends a stored failed email again as a new row and marks the old one RESENT
 
 ### VerificationToken (`verification_token` table, migration `013-email-verification.xml`)
@@ -283,7 +283,7 @@ Not automatable (interactive sign-in). With the local dev stack, the app on port
 ### Abuse handling
 - `SuspiciousUrlService` flags destinations by host: other shorteners (and our own host), free dynamic-DNS hosts, raw IPs, punycode, lookalikes of known brands on someone else's domain (`njuskaio.cam`, `jofogas.cards`), login/verification lures, high-risk TLDs. Flags only; it never deactivates anything.
 - `GET /urls/all` (admin) returns `suspiciousReasons` per link (omitted when empty); searching matches the short link, destination and owner email; `?anonymous=true` keeps links without an owner; sort by owner with `sort=owner.email,asc`.
-- New links and admin destination changes pointing at another shortener or at hrva.cc are rejected (`checkIfLongUrlIsNotAShortener`).
+- New links and admin destination changes pointing at a generic shortener (bit.ly, tinyurl, …) or at hrva.cc are rejected (`checkIfLongUrlIsNotAShortener`). Platform share links (t.co, lnkd.in, goo.gl) are only flagged, and Google's `*.app.goo.gl` share links are neither.
 - Links flagged by the nightly Safe Browsing recheck get `threatType` (status BLOCKED); owners can't reactivate them, admins can after a fresh Safe Browsing check. Every reactivation re-checks Safe Browsing and that no other active link holds the alias.
 - A custom alias stays taken while any row (active or not) holds it, so an expired link's alias can't be claimed by someone else.
 

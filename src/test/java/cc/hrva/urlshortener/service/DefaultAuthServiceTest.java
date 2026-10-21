@@ -187,6 +187,16 @@ class DefaultAuthServiceTest {
     }
 
     @Test
+    void registrationRunsInAWritableTransaction() throws NoSuchMethodException {
+        final var transactional = cc.hrva.urlshortener.service.impl.DefaultAuthService.class
+                .getMethod("register", cc.hrva.urlshortener.dto.UserRegisterDto.class)
+                .getAnnotation(org.springframework.transaction.annotation.Transactional.class);
+
+        assertThat(transactional).isNotNull();
+        assertThat(transactional.readOnly()).isFalse();
+    }
+
+    @Test
     void shouldLoginWhenTwoFactorCodeValid() {
         final var loginDto = LoginDto.builder().email("test@example.com").password("password123").code("123456").build();
         final var user = User.builder().id(1L).email("test@example.com").emailVerified(true).twoFactorEnabled(true).build();

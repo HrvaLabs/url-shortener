@@ -10,6 +10,7 @@ public interface ScheduledService {
     void notifyExpiringUrls();
     void recheckUrlsSafeBrowsing();
     void failInterruptedEmails();
+    void forgetOldEmailContent();
     void sendLinkDigest();
 
 }

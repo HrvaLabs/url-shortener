@@ -47,6 +47,12 @@ class DefaultScheduledServiceTest {
     }
 
     @Test
+    void shouldForgetOldEmailContent() {
+        scheduledService.forgetOldEmailContent();
+        verify(sendingEmailService).forgetOldEmailContent();
+    }
+
+    @Test
     void shouldSendLinkDigest() {
         scheduledService.sendLinkDigest();
         verify(linkDigestService).sendDailyDigest();

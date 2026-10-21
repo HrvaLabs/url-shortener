@@ -55,8 +55,9 @@ public class DefaultAuthService implements AuthService {
     private final AppProperties appProperties;
 
     @Override
+    @Transactional
     public String register(final UserRegisterDto userRegisterDto) {
-        log.info("User registered email={}", userRegisterDto.getEmail());
+        log.info("Registration requested email={}", userRegisterDto.getEmail());
 
         userValidator.checkRegistrationEnabled();
         userValidator.checkEmailUniqueness(userRegisterDto.getEmail());

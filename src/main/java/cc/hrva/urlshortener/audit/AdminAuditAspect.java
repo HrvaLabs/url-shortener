@@ -43,10 +43,11 @@ public class AdminAuditAspect {
         final var args = joinPoint.getArgs();
         final var targetType = targetType(signature.getDeclaringType());
         final var targetIdentifier = args.length > 0 ? String.valueOf(args[0]) : "";
+        final var details = describeChanges(args);
 
         try {
             final var result = joinPoint.proceed();
-            auditLogService.log(performedBy, methodName, targetType, targetIdentifier, describeChanges(args));
+            auditLogService.log(performedBy, methodName, targetType, targetIdentifier, details);
             return result;
         } catch (final Throwable e) {
             auditLogService.log(performedBy, methodName + "_FAILED", targetType, targetIdentifier, e.getMessage());

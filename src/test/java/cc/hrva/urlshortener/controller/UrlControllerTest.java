@@ -121,6 +121,15 @@ class UrlControllerTest {
     }
 
     @Test
+    void qrCodeShortLinkHasNoDoubleSlashWhenTheServerUrlEndsWithOne() throws Exception {
+        appProperties.setServerUrl("https://hrva.cc/");
+        when(urlService.peekUrlByShortUrl("board")).thenReturn(PeekUrl.builder().shortUrl("board").build());
+        when(qrCodeService.generateQrCode("https://hrva.cc/board", 300, 300)).thenReturn(new byte[]{1});
+
+        mockMvc.perform(get("/api/v1/urls/board/qr")).andExpect(status().isOk());
+    }
+
+    @Test
     void qrCodeSizeIsKeptWithinLimits() throws Exception {
         when(urlService.peekUrlByShortUrl("board")).thenReturn(PeekUrl.builder().shortUrl("board").build());
         when(qrCodeService.generateQrCode("https://hrva.cc/board", 1024, 1024)).thenReturn(new byte[]{1});

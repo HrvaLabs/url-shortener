@@ -70,6 +70,20 @@ class AdminAuditAspectTest {
     }
 
     @Test
+    void recordsWhatWasSubmittedEvenIfTheActionChangesItsArguments() throws Throwable {
+        final var update = UrlUpdateDto.builder().id(265L).visitLimit(10L).build();
+        invoking(UrlController.class, "updateUrl", 265L, update);
+        when(joinPoint.proceed()).thenAnswer(invocation -> {
+            update.setVisitLimit(99L);
+            return null;
+        });
+
+        aspect.logAdminAction(joinPoint);
+
+        verify(auditLogService).log("admin@hrva.cc", "updateUrl", "Url", "265", "visitLimit: 10");
+    }
+
+    @Test
     void neverRecordsTheLinkPassword() throws Throwable {
         invoking(UrlController.class, "updateUrl", 265L, UrlUpdateDto.builder().id(265L).password("s3cret").build());
 

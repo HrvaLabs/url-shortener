@@ -45,10 +45,14 @@ public class DefaultSuspiciousUrlService implements SuspiciousUrlService {
             Map.entry("binance", Set.of("binance.com")));
 
     private static final Set<String> SHORTENER_DOMAINS = Set.of(
-            "bit.ly", "bitly.com", "bit.do", "t.co", "t.ly", "tinyurl.com", "goo.gl", "ow.ly", "is.gd", "v.gd",
+            "bit.ly", "bitly.com", "bit.do", "t.ly", "tinyurl.com", "ow.ly", "is.gd", "v.gd",
             "buff.ly", "rebrand.ly", "cutt.ly", "shorturl.at", "rb.gy", "tiny.cc", "s.id", "bl.ink", "short.io",
-            "shorte.st", "adf.ly", "lnkd.in", "qrco.de", "clck.ru", "u.to", "x.co", "ift.tt", "dlvr.it", "soo.gd",
+            "shorte.st", "adf.ly", "qrco.de", "clck.ru", "u.to", "x.co", "soo.gd",
             "shrtco.de", "urlz.fr", "gg.gg", "cli.re", "han.gl", "t9y.me", "kaywa.me", "linklyhq.com", "iiil.io");
+
+    private static final Set<String> PLATFORM_SHARE_DOMAINS = Set.of("goo.gl", "t.co", "lnkd.in", "ift.tt", "dlvr.it");
+
+    private static final Set<String> TRUSTED_SHARE_DOMAINS = Set.of("app.goo.gl");
 
     private static final Set<String> DYNAMIC_DNS_DOMAINS = Set.of(
             "work.gd", "duckdns.org", "ddns.net", "hopto.org", "zapto.org", "sytes.net", "no-ip.org", "no-ip.biz",
@@ -90,7 +94,7 @@ public class DefaultSuspiciousUrlService implements SuspiciousUrlService {
         final var labels = host.split("\\.");
         final var domain = registrableDomain(labels);
 
-        if (isShortenerHost(host)) {
+        if (isShortenerHost(host) || matchesDomain(host, PLATFORM_SHARE_DOMAINS) && !matchesDomain(host, TRUSTED_SHARE_DOMAINS)) {
             reasons.add("hides its destination behind another shortener");
         }
         if (matchesDomain(host, DYNAMIC_DNS_DOMAINS)) {
@@ -151,10 +155,14 @@ public class DefaultSuspiciousUrlService implements SuspiciousUrlService {
             return true;
         }
 
-        final var uri = URI.create(longUrl);
-        final var pathAndQuery = (StringUtils.defaultString(uri.getRawPath()) + " " + StringUtils.defaultString(uri.getRawQuery()))
-                .toLowerCase(Locale.ROOT);
-        return Arrays.stream(NON_ALPHANUMERIC.split(pathAndQuery)).anyMatch(PATH_LURE_WORDS::contains);
+        try {
+            final var uri = URI.create(longUrl);
+            final var pathAndQuery = (StringUtils.defaultString(uri.getRawPath()) + " " + StringUtils.defaultString(uri.getRawQuery()))
+                    .toLowerCase(Locale.ROOT);
+            return Arrays.stream(NON_ALPHANUMERIC.split(pathAndQuery)).anyMatch(PATH_LURE_WORDS::contains);
+        } catch (final IllegalArgumentException exception) {
+            return false;
+        }
     }
 
     private static String registrableDomain(final String[] labels) {

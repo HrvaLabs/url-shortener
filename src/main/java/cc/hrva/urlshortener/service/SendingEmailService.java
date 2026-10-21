@@ -18,5 +18,6 @@ public interface SendingEmailService {
     void sendLinkDigestToAdmin(List<LinkDigestEntry> entries);
     EmailLog resendEmail(Long emailLogId);
     void failInterruptedEmails();
+    void forgetOldEmailContent();
 
 }

@@ -12,5 +12,6 @@ public interface EmailLogRepository extends JpaRepository<EmailLog, Long> {
     Page<EmailLog> findAllByOrderByCreatedAtDesc(Pageable pageable);
     List<EmailLog> findByRecipientContainingIgnoreCase(String recipient);
     List<EmailLog> findAllByStatusAndCreatedAtBefore(String status, LocalDateTime createdBefore);
+    List<EmailLog> findAllByBodyIsNotNullAndCreatedAtBefore(LocalDateTime createdBefore);
 
 }

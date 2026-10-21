@@ -151,6 +151,23 @@ class DefaultSendingEmailServiceTest {
         assertThat(result).isNotSameAs(failed);
         assertThat(result.getStatus()).isEqualTo(EmailLog.STATUS_SENT);
         assertThat(result.getRecipient()).isEqualTo("a@example.com, b@example.com");
+        final var order = org.mockito.Mockito.inOrder(emailService, emailLogRepository);
+        order.verify(emailService).sendEmail(any(Email.class), eq(null));
+        order.verify(emailLogRepository).save(org.mockito.ArgumentMatchers.same(failed));
+    }
+
+    @Test
+    void forgetsTheContentOfFailedEmailsAfterAWeek() {
+        final var old = EmailLog.builder().id(12L).status(EmailLog.STATUS_FAILED).body("<p>reset link</p>").build();
+        final var cutoff = ArgumentCaptor.forClass(LocalDateTime.class);
+        when(emailLogRepository.findAllByBodyIsNotNullAndCreatedAtBefore(cutoff.capture())).thenReturn(List.of(old));
+
+        sendingEmailService.forgetOldEmailContent();
+
+        assertThat(cutoff.getValue()).isBetween(LocalDateTime.now().minusDays(7).minusMinutes(1), LocalDateTime.now().minusDays(7).plusMinutes(1));
+        assertThat(old.getBody()).isNull();
+        assertThat(old.isResendable()).isFalse();
+        verify(emailLogRepository).saveAll(List.of(old));
     }
 
     @Test
