@@ -3,7 +3,9 @@ package cc.hrva.urlshortener.service.blocklist;
 import cc.hrva.urlshortener.util.LinkKeys;
 import java.io.BufferedReader;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.IntStream;
 import org.springframework.stereotype.Component;
@@ -14,6 +16,8 @@ public class LinkListParser {
     private static final String NO_LINKS = "No links found. Use a list with one link per line or a CSV with a url column.";
     private static final Pattern LINK_START = Pattern.compile("^https?://", Pattern.CASE_INSENSITIVE);
     private static final Pattern CSV_FIELD = Pattern.compile(",(?:\"([^\"]*+(?:\"\"[^\"]*+)*+)\"|([^,]*+))");
+    private static final Pattern HTML_ENTITY = Pattern.compile("&(amp|quot|#39);");
+    private static final Map<String, String> HTML_ENTITY_VALUES = Map.of("amp", "&", "quot", "\"", "#39", "'");
 
     public ParsedBlocklist parse(final BufferedReader reader, final int maxLinks) {
         final var collector = new BlocklistCollector(maxLinks, "links", NO_LINKS);
@@ -27,11 +31,16 @@ public class LinkListParser {
             }
             if (!line.isEmpty()) {
                 rows.linkOf(line)
+                        .map(LinkListParser::withHtmlEntitiesDecoded)
                         .flatMap(link -> LinkKeys.of(link).stream().findFirst())
                         .ifPresent(collector::add);
             }
         }
         return collector.parsed();
+    }
+
+    private static String withHtmlEntitiesDecoded(final String link) {
+        return HTML_ENTITY.matcher(link).replaceAll(entity -> Matcher.quoteReplacement(HTML_ENTITY_VALUES.get(entity.group(1))));
     }
 
     private static Optional<Integer> urlColumnOf(final String row) {

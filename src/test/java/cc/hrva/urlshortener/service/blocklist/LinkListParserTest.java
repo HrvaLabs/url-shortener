@@ -66,6 +66,27 @@ class LinkListParserTest {
     }
 
     @Test
+    void htmlEntitiesInCsvLinksAreDecodedOnce() {
+        final var parsed = linkListParser.parse(linesOf(
+                "phish_id,url,phish_detail_url",
+                "9003,https://docs.google.com/presentation/d/e/X/pub?start=false&amp;loop=false&amp;delayms=3000,http://www.phishtank.com/phish_detail.php?phish_id=9003",
+                "9004,https://ex.com/q?a=&quot;b&quot;&amp;c=&#39;d&#39;,http://www.phishtank.com/phish_detail.php?phish_id=9004",
+                "9005,https://ex.com/twice?a=1&amp;amp;b=2,http://www.phishtank.com/phish_detail.php?phish_id=9005"), 100);
+
+        assertThat(parsed.entries()).containsExactlyInAnyOrder(
+                "docs.google.com/presentation/d/e/X/pub?start=false&loop=false&delayms=3000",
+                "ex.com/q?a=\"b\"&c='d'",
+                "ex.com/twice?a=1&amp;b=2");
+    }
+
+    @Test
+    void htmlEscapedAmpersandsInPlainLinksAreDecoded() {
+        final var parsed = linkListParser.parse(linesOf("https://plain.example/p?x=1&amp;y=2", "https://plain.example/q?x=1&y=2"), 100);
+
+        assertThat(parsed.entries()).containsExactlyInAnyOrder("plain.example/p?x=1&y=2", "plain.example/q?x=1&y=2");
+    }
+
+    @Test
     void csvFieldsUnescapeQuotesAndShortOrInvalidRowsAreSkipped() {
         final var parsed = linkListParser.parse(linesOf(
                 "\"id\",\"URL\"",
