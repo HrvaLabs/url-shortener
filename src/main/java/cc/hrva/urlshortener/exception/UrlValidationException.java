@@ -10,4 +10,8 @@ public class UrlValidationException extends CommonException {
         super(message);
     }
 
+    public UrlValidationException(final String message, final Throwable cause) {
+        super(message, cause);
+    }
+
 }

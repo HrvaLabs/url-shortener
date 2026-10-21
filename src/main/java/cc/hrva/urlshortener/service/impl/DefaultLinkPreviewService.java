@@ -3,12 +3,9 @@ package cc.hrva.urlshortener.service.impl;
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.dto.LinkPreviewResponse;
 import cc.hrva.urlshortener.service.LinkPreviewService;
-import java.net.Inet6Address;
-import java.net.InetAddress;
+import cc.hrva.urlshortener.util.PublicAddresses;
 import java.net.URI;
-import java.net.UnknownHostException;
 import java.time.Duration;
-import java.util.Arrays;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.slf4j.Logger;
@@ -60,30 +57,7 @@ public class DefaultLinkPreviewService implements LinkPreviewService {
     }
 
     public static boolean isPublicTarget(final String url) {
-        try {
-            final var uri = URI.create(url);
-            if (!"http".equalsIgnoreCase(uri.getScheme()) && !"https".equalsIgnoreCase(uri.getScheme()) || uri.getHost() == null) {
-                return false;
-            }
-            final var host = uri.getHost().startsWith("[") ? uri.getHost().substring(1, uri.getHost().length() - 1) : uri.getHost();
-            final var addresses = InetAddress.getAllByName(host);
-            return addresses.length > 0 && Arrays.stream(addresses).allMatch(DefaultLinkPreviewService::isPublicAddress);
-        } catch (final IllegalArgumentException | UnknownHostException exception) {
-            return false;
-        }
-    }
-
-    private static boolean isPublicAddress(final InetAddress address) {
-        if (address.isAnyLocalAddress() || address.isLoopbackAddress() || address.isLinkLocalAddress()
-                || address.isSiteLocalAddress() || address.isMulticastAddress()) {
-            return false;
-        }
-        final var bytes = address.getAddress();
-        if (address instanceof Inet6Address) {
-            return (bytes[0] & 0xFE) != 0xFC;
-        }
-        final var carrierGradeNat = (bytes[0] & 0xFF) == 100 && (bytes[1] & 0xC0) == 64;
-        return !carrierGradeNat;
+        return PublicAddresses.isPublicTarget(url);
     }
 
     private String extractMeta(final Document doc, final String... metaNames) {
