@@ -305,6 +305,12 @@ public class DefaultUserService implements UserService {
 
     @Override
     @Transactional
+    public void deactivate(final User user) {
+        userRepository.save(deactivateUser(user));
+    }
+
+    @Override
+    @Transactional
     public void userHasLoggedIn(final User user) {
         user.userLoggedIn();
         persistUser(user);

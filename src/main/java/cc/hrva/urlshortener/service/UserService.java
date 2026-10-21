@@ -24,6 +24,7 @@ public interface UserService {
     DataExportDto exportMyData();
     void userHasLoggedIn(User user);
     void deactivateUnusedUserAccounts();
+    void deactivate(User user);
     User fetchUserFromEmail(String email);
     User fetchActiveUserByEmail(String email);
     User updateUser(UserUpdateDto userUpdateDto);

@@ -58,6 +58,15 @@ public class DefaultLinkCheckService implements LinkCheckService {
         return evaluate(longUrl, true);
     }
 
+    @Override
+    public boolean isAllowListed(final String longUrl) {
+        return DomainNames.hostOf(longUrl)
+                .filter(host -> !DomainNames.isIpLiteral(host))
+                .flatMap(host -> matchingRules(DomainNames.candidates(host)).stream().findFirst())
+                .filter(rule -> rule.getType() == DomainRuleType.ALLOW)
+                .isPresent();
+    }
+
     private LinkVerdict evaluate(final String longUrl, final boolean everySignal) {
         final var host = DomainNames.hostOf(longUrl).orElse(null);
         if (host == null) {

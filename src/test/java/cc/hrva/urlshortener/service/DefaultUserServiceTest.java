@@ -421,6 +421,22 @@ class DefaultUserServiceTest {
     }
 
     @Test
+    void deactivatingAUserSavesItInactiveRevokesItsKeysDisconnectsItsAppsAndTellsIt() {
+        final var user = User.builder().id(1L).email("scammer@example.com").active(true).build();
+        final var key = ApiKey.builder().id(5L).active(true).owner(user).build();
+        when(apiKeyRepository.findByOwnerAndActiveTrue(user)).thenReturn(Collections.singletonList(key));
+
+        userService.deactivate(user);
+
+        assertThat(user.getActive()).isFalse();
+        verify(userRepository).save(user);
+        assertThat(key.isActive()).isFalse();
+        verify(apiKeyRepository).saveAll(Collections.singletonList(key));
+        verify(connectedAppsService).disconnectAll("scammer@example.com");
+        verify(sendingEmailService).sendEmailAccountDeactivated(user);
+    }
+
+    @Test
     void shouldExportMyData() {
         final var user = User.builder().id(1L).email("test@example.com").build();
         SecurityContextHolder.getContext().setAuthentication(

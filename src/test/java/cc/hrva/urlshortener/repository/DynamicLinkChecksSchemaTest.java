@@ -1,9 +1,11 @@
 package cc.hrva.urlshortener.repository;
 
+import cc.hrva.urlshortener.dto.LinkDestination;
 import cc.hrva.urlshortener.model.BlocklistSource;
 import cc.hrva.urlshortener.model.DomainRule;
 import cc.hrva.urlshortener.model.LinkReview;
 import cc.hrva.urlshortener.model.Url;
+import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.enums.BlockReason;
 import cc.hrva.urlshortener.model.enums.BlocklistAction;
 import cc.hrva.urlshortener.model.enums.DomainRuleType;
@@ -21,6 +23,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.FilterType;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 import org.springframework.transaction.annotation.Transactional;
@@ -241,6 +244,76 @@ class DynamicLinkChecksSchemaTest {
 
         assertThat(linkReviewRepository.findById(review.getId()))
                 .hasValueSatisfying(stored -> assertThat(stored.getFlaggedAt()).isNotNull());
+    }
+
+    @Test
+    void activeDestinationsComeInIdOrderAfterTheGivenId() {
+        final var first = savedLink("first", "https://jofogas.cards/a", null);
+        final var switchedOff = savedLink("off", "https://jofogas.cards/b", null);
+        switchedOff.setActive(false);
+        final var second = savedLink("second", "https://www.jofogas.cards/c", null);
+        final var third = savedLink("third", "https://example.org/", null);
+        entityManager.flush();
+        entityManager.clear();
+
+        assertThat(urlRepository.findActiveDestinationsAfter(0L, PageRequest.ofSize(2))).containsExactly(
+                new LinkDestination(first.getId(), "https://jofogas.cards/a"),
+                new LinkDestination(second.getId(), "https://www.jofogas.cards/c"));
+        assertThat(urlRepository.findActiveDestinationsAfter(second.getId(), PageRequest.ofSize(2)))
+                .containsExactly(new LinkDestination(third.getId(), "https://example.org/"));
+    }
+
+    @Test
+    void blockedDestinationsAreFoundByReasonInIdOrder() {
+        final var listed = savedBlockedLink("listed", "https://jofogas.cards/a", BlockReason.BLOCKLIST);
+        savedBlockedLink("malware", "https://jofogas.cards/b", BlockReason.SAFE_BROWSING);
+        final var ruled = savedBlockedLink("ruled", "https://jofogas.cards/c", BlockReason.DOMAIN_RULE);
+        savedLink("active", "https://jofogas.cards/d", null);
+        entityManager.flush();
+        entityManager.clear();
+
+        assertThat(urlRepository.findBlockedDestinationsAfter(
+                List.of(BlockReason.BLOCKLIST, BlockReason.SCAM_SIGNALS, BlockReason.DOMAIN_RULE), 0L, PageRequest.ofSize(500)))
+                .containsExactly(
+                        new LinkDestination(listed.getId(), "https://jofogas.cards/a"),
+                        new LinkDestination(ruled.getId(), "https://jofogas.cards/c"));
+    }
+
+    @Test
+    void aUsersLinksAreFoundByStateAndBlockReason() {
+        final var owner = savedUser("scammer@example.com");
+        final var someoneElse = savedUser("alice@example.com");
+        final var active = savedLink("mine", "https://a.example/", owner);
+        final var blocked = savedLink("blocked", "https://b.example/", owner);
+        blocked.setActive(false);
+        blocked.setBlockReason(BlockReason.USER_BLOCKED);
+        final var byRule = savedLink("by-rule", "https://c.example/", owner);
+        byRule.setActive(false);
+        byRule.setBlockReason(BlockReason.DOMAIN_RULE);
+        savedLink("theirs", "https://d.example/", someoneElse);
+        entityManager.flush();
+        entityManager.clear();
+
+        assertThat(urlRepository.findActiveIdsByOwner(owner)).containsExactly(active.getId());
+        assertThat(urlRepository.findIdsByOwnerAndBlockReason(owner, BlockReason.USER_BLOCKED)).containsExactly(blocked.getId());
+    }
+
+    private Url savedLink(final String shortUrl, final String longUrl, final User owner) {
+        return urlRepository.saveAndFlush(Url.builder().shortUrl(shortUrl).longUrl(longUrl).owner(owner).build());
+    }
+
+    private Url savedBlockedLink(final String shortUrl, final String longUrl, final BlockReason reason) {
+        final var url = savedLink(shortUrl, longUrl, null);
+        url.setActive(false);
+        url.setBlockReason(reason);
+        url.setBlockedAt(LocalDateTime.of(2026, 10, 21, 2, 0));
+        return url;
+    }
+
+    private User savedUser(final String email) {
+        final var user = User.builder().email(email).password("correct horse battery").apiKeySlots(4L).build();
+        entityManager.persist(user);
+        return user;
     }
 
     private static Tuple hagezi(final String name, final BlocklistAction action, final String file) {

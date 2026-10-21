@@ -829,6 +829,7 @@ class UrlServiceTest {
         order.verify(urlValidator).verifyUserAdminOrOwner(url);
         order.verify(urlValidator).checkIfUrlNotBlocked(url);
         order.verify(urlValidator).checkIfShortUrlIsFreeToReactivate("promo");
+        order.verify(urlValidator).checkIfDestinationNotBlocked(url);
         order.verify(urlValidator).checkIfUrlSafe(url);
         order.verify(urlRepository).save(url);
         assertThat(result.active()).isTrue();

@@ -16,6 +16,7 @@ public interface UrlValidator {
     void checkIfShortUrlIsUnique(String shortUrl);
     void checkIfShortUrlIsFreeToReactivate(String shortUrl);
     void checkIfUrlNotBlocked(Url url);
+    void checkIfDestinationNotBlocked(Url url);
     void checkIfShortUrlIsReserved(String shortUrl);
     void checkIfUrlExpirationDateIsInThePast(Url url);
 

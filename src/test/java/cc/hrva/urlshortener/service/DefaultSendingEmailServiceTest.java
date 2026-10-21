@@ -7,7 +7,9 @@ import cc.hrva.urlshortener.exception.EmailNotResendableException;
 import cc.hrva.urlshortener.exception.MailingException;
 import cc.hrva.urlshortener.model.Email;
 import cc.hrva.urlshortener.model.EmailLog;
+import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.User;
+import cc.hrva.urlshortener.model.enums.BlockReason;
 import cc.hrva.urlshortener.repository.EmailLogRepository;
 import cc.hrva.urlshortener.service.impl.DefaultEmailService;
 import cc.hrva.urlshortener.service.impl.DefaultSendingEmailService;
@@ -22,6 +24,10 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.thymeleaf.TemplateEngine;
+import org.thymeleaf.context.IContext;
+import org.thymeleaf.spring6.SpringTemplateEngine;
+import org.thymeleaf.templatemode.TemplateMode;
+import org.thymeleaf.templateresolver.ClassLoaderTemplateResolver;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -37,6 +43,10 @@ import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class DefaultSendingEmailServiceTest {
+
+    private static final User OWNER = User.builder().email("alice@example.com").apiKeySlots(4L).build();
+    private static final Url BLOCKED_LINK = Url.builder().shortUrl("promo").longUrl("https://jofogas.cards/login")
+            .blockReason(BlockReason.BLOCKLIST).blockDetail("HaGeZi Fake").active(false).build();
 
     @Mock
     private TemplateEngine templateEngine;
@@ -69,6 +79,18 @@ class DefaultSendingEmailServiceTest {
             }
             return entry;
         });
+    }
+
+    private DefaultSendingEmailService blockedLinkEmailService(final TemplateEngine engine) {
+        final var appProperties = new AppProperties();
+        appProperties.setEmailSenderAddress("noreply@hrva.cc");
+        appProperties.setContactEmail("support@hrva.cc");
+        appProperties.setAppName("hrva.cc");
+        appProperties.setServerUrl("https://hrva.cc/");
+        appProperties.setFrontendUrl("https://hrva.cc");
+        appProperties.setDeactivateUserAccountAfterDays(180L);
+        appProperties.setResetTokenExpirationInHours(1L);
+        return new DefaultSendingEmailService(appProperties, engine, emailService, emailLogRepository);
     }
 
     private EmailLog lastSavedEntry() {
@@ -212,6 +234,49 @@ class DefaultSendingEmailServiceTest {
                 .doesNotContain("<script>")
                 .contains("anonymous")
                 .contains("login or verification lure");
+    }
+
+    @Test
+    void aBlockedLinkEmailGoesToTheOwnerWithTheShortLinkAndNothingAboutTheBlock() throws Exception {
+        saveReturnsArgument();
+        final var sent = ArgumentCaptor.forClass(Email.class);
+        doAnswer(invocation -> null).when(emailService).sendEmail(sent.capture(), eq(null));
+        final var context = ArgumentCaptor.forClass(IContext.class);
+        when(templateEngine.process(eq("url_blocked"), context.capture())).thenReturn("<p>blocked</p>");
+
+        blockedLinkEmailService(templateEngine).sendEmailUrlBlocked(OWNER, BLOCKED_LINK);
+
+        assertThat(sent.getValue().getReceivers()).containsExactly("alice@example.com");
+        assertThat(sent.getValue().getSubject()).isEqualTo("Your link was blocked as unsafe");
+        assertThat(sent.getValue().getText()).isEqualTo("<p>blocked</p>");
+        assertThat(context.getValue().getVariable("short_link")).isEqualTo("https://hrva.cc/promo");
+        assertThat(context.getValue().getVariableNames()).allSatisfy(name -> assertThat(String.valueOf(context.getValue().getVariable(name)))
+                .doesNotContain("HaGeZi")
+                .doesNotContain("jofogas.cards"));
+    }
+
+    @Test
+    void theBlockedLinkEmailSaysWhatHappenedWithoutNamingAListOrARule() throws Exception {
+        saveReturnsArgument();
+        final var sent = ArgumentCaptor.forClass(Email.class);
+        doAnswer(invocation -> null).when(emailService).sendEmail(sent.capture(), eq(null));
+        final var resolver = new ClassLoaderTemplateResolver();
+        resolver.setPrefix("templates/");
+        resolver.setSuffix(".html");
+        resolver.setTemplateMode(TemplateMode.HTML);
+        final var engine = new SpringTemplateEngine();
+        engine.setTemplateResolver(resolver);
+
+        blockedLinkEmailService(engine).sendEmailUrlBlocked(OWNER, BLOCKED_LINK);
+
+        assertThat(sent.getValue().getText())
+                .contains("hrva.cc disabled your link because it led to a site reported for phishing, malware or scams.")
+                .contains("https://hrva.cc/promo")
+                .contains("alice@example.com")
+                .contains("support@hrva.cc")
+                .doesNotContain("HaGeZi")
+                .doesNotContain("jofogas.cards")
+                .doesNotContain("BLOCKLIST");
     }
 
     @Test

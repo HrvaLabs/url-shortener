@@ -27,6 +27,9 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
 import static org.assertj.core.api.AssertionsForClassTypes.assertThatCode;
 import static org.assertj.core.api.AssertionsForClassTypes.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -167,6 +170,69 @@ class DefaultUrlValidatorTest {
     @Test
     void unblockedLinksPassTheBlockCheck() {
         assertThatCode(() -> urlValidator.checkIfUrlNotBlocked(Url.builder().build())).doesNotThrowAnyException();
+    }
+
+    @Test
+    void ownersCannotReactivateALinkWithOnlyABlockReason() {
+        final var owner = userWithRole(2L, "ROLE_USER");
+        final var url = Url.builder().owner(owner).blockReason(BlockReason.DOMAIN_RULE).build();
+        when(userService.getUserFromToken()).thenReturn(owner);
+
+        assertThatThrownBy(() -> urlValidator.checkIfUrlNotBlocked(url))
+                .isInstanceOf(UrlValidationException.class)
+                .hasMessage("This link was blocked as unsafe. Contact support if you think that's a mistake.");
+    }
+
+    @Test
+    void adminsMayReactivateALinkWithOnlyABlockReason() {
+        final var url = Url.builder().blockReason(BlockReason.SCAM_SIGNALS).build();
+        when(userService.getUserFromToken()).thenReturn(userWithRole(3L, "ROLE_ADMIN"));
+
+        assertThatCode(() -> urlValidator.checkIfUrlNotBlocked(url)).doesNotThrowAnyException();
+    }
+
+    @Test
+    void anAdminReactivatesALinkOnAnAllowListedDomainWithoutTheChecks() {
+        final var url = Url.builder().longUrl("https://docs.google.com/x").blockReason(BlockReason.BLOCKLIST).build();
+        when(userService.getUserFromToken()).thenReturn(userWithRole(3L, "ROLE_ADMIN"));
+        when(linkCheckService.isAllowListed("https://docs.google.com/x")).thenReturn(true);
+
+        assertThatCode(() -> urlValidator.checkIfDestinationNotBlocked(url)).doesNotThrowAnyException();
+        verify(linkCheckService, never()).check(anyString());
+    }
+
+    @Test
+    void anAdminIsToldWhyADestinationIsStillBlocked() {
+        final var url = Url.builder().longUrl("https://jofogas.cards/x").blockReason(BlockReason.DOMAIN_RULE).build();
+        when(userService.getUserFromToken()).thenReturn(userWithRole(3L, "ROLE_ADMIN"));
+        when(linkCheckService.check("https://jofogas.cards/x")).thenReturn(new LinkVerdict(
+                Outcome.BLOCK, List.of("blocked domain jofogas.cards", "on list HaGeZi Fake"), BlockReason.DOMAIN_RULE, "jofogas.cards"));
+
+        assertThatThrownBy(() -> urlValidator.checkIfDestinationNotBlocked(url))
+                .isInstanceOf(UrlValidationException.class)
+                .hasMessage("This destination is still blocked: blocked domain jofogas.cards, on list HaGeZi Fake");
+    }
+
+    @Test
+    void anOwnerReactivatingABlockedDestinationIsNotToldWhichListHasIt() {
+        final var url = Url.builder().longUrl("https://jofogas.cards/x").build();
+        when(userService.getUserFromToken()).thenReturn(userWithRole(2L, "ROLE_USER"));
+        when(linkCheckService.check("https://jofogas.cards/x")).thenReturn(new LinkVerdict(
+                Outcome.BLOCK, List.of("on list HaGeZi Fake"), BlockReason.BLOCKLIST, "HaGeZi Fake"));
+
+        assertThatThrownBy(() -> urlValidator.checkIfDestinationNotBlocked(url))
+                .isInstanceOf(UrlValidationException.class)
+                .hasMessage("This destination is on a blocklist and can't be shortened. If you think that's a mistake, contact us.");
+        verify(linkCheckService, never()).isAllowListed(anyString());
+    }
+
+    @Test
+    void aDestinationTheCheckNoLongerBlocksCanBeReactivated() {
+        final var url = Url.builder().longUrl("https://example.org/x").blockReason(BlockReason.BLOCKLIST).build();
+        when(userService.getUserFromToken()).thenReturn(userWithRole(3L, "ROLE_ADMIN"));
+        when(linkCheckService.check("https://example.org/x")).thenReturn(new LinkVerdict(Outcome.FLAG, List.of("login or verification lure"), null, null));
+
+        assertThatCode(() -> urlValidator.checkIfDestinationNotBlocked(url)).doesNotThrowAnyException();
     }
 
     @Test

@@ -7,6 +7,7 @@ import cc.hrva.urlshortener.exception.CommonException;
 import cc.hrva.urlshortener.exception.ConnectRequestAlreadyApprovedException;
 import cc.hrva.urlshortener.exception.ConnectRequestExpiredException;
 import cc.hrva.urlshortener.exception.ConnectedAppNotFoundException;
+import cc.hrva.urlshortener.exception.DomainRuleNotFoundException;
 import cc.hrva.urlshortener.exception.EmailExistsException;
 import cc.hrva.urlshortener.exception.EmailLogNotFoundException;
 import cc.hrva.urlshortener.exception.EmailNotVerifiedException;
@@ -118,6 +119,11 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(BlocklistSourceNotFoundException.class)
     public ResponseEntity<Map<String, String>> handleBlocklistSourceNotFound(final BlocklistSourceNotFoundException ex) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", safeMessage(ex)));
+    }
+
+    @ExceptionHandler(DomainRuleNotFoundException.class)
+    public ResponseEntity<Map<String, String>> handleDomainRuleNotFound(final DomainRuleNotFoundException ex) {
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", safeMessage(ex)));
     }
 

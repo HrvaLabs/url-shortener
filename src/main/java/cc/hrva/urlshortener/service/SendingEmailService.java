@@ -13,6 +13,7 @@ public interface SendingEmailService {
     void sendVerificationEmail(User user, cc.hrva.urlshortener.model.VerificationToken token);
     void sendNewUserNotificationToAdmin(User user);
     void sendEmailUrlMalwareDetected(User user, Url url, String threatType);
+    void sendEmailUrlBlocked(User owner, Url url);
     void sendEmailAccountDeactivated(User user);
     void sendEmailForgotPassword(User user, ResetToken resetToken);
     void sendLinkDigestToAdmin(List<LinkDigestEntry> entries);

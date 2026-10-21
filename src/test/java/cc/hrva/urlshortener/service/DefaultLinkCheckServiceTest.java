@@ -298,6 +298,33 @@ class DefaultLinkCheckServiceTest {
     }
 
     @Test
+    void aDestinationIsAllowListedWhenItsMostSpecificRuleIsAnAllow() {
+        rule("example.com", DomainRuleType.ALLOW);
+        rule("evil.example.com", DomainRuleType.BLOCK);
+
+        assertThat(linkCheckService.isAllowListed("https://docs.example.com/page")).isTrue();
+        assertThat(linkCheckService.isAllowListed("https://cdn.evil.example.com/page")).isFalse();
+        assertThat(linkCheckService.isAllowListed("https://example.org/")).isFalse();
+        verifyNoInteractions(blocklistStore, domainAgeService, domainReputationService, suspiciousUrlService);
+    }
+
+    @ParameterizedTest
+    @NullAndEmptySource
+    @ValueSource(strings = {"https://203.0.113.7/login", "not a url"})
+    void aDestinationWithoutADomainIsNeverAllowListed(final String longUrl) {
+        rule("example.com", DomainRuleType.ALLOW);
+
+        assertThat(linkCheckService.isAllowListed(longUrl)).isFalse();
+    }
+
+    @Test
+    void aFailingRuleLookupMeansNotAllowListed() {
+        when(domainRuleRepository.findByDomainIn(anyCollection())).thenThrow(new DataAccessResourceFailureException("connection reset"));
+
+        assertThat(linkCheckService.isAllowListed("https://docs.example.com/page")).isFalse();
+    }
+
+    @Test
     void anExactLinkOnALinksBlockSourceBeatsAnAllowRuleOnItsDomain() {
         rule("github.com", DomainRuleType.ALLOW);
         source(1, HAGEZI_FAKE, SourceKind.DOMAINS, BlocklistAction.BLOCK, "github.com");

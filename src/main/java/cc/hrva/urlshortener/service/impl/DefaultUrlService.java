@@ -309,6 +309,7 @@ public class DefaultUrlService implements UrlService {
         urlValidator.verifyUserAdminOrOwner(url);
         urlValidator.checkIfUrlNotBlocked(url);
         urlValidator.checkIfShortUrlIsFreeToReactivate(url.getShortUrl());
+        urlValidator.checkIfDestinationNotBlocked(url);
         urlValidator.checkIfUrlSafe(url);
         url.setThreatType(null);
         url.setBlockReason(null);

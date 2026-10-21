@@ -166,6 +166,24 @@ public class DefaultSendingEmailService implements SendingEmailService {
 
     @Override
     @Async
+    public void sendEmailUrlBlocked(final User owner, final Url url) {
+        final var ctx = getContext(owner);
+        ctx.setVariable("short_link", shortLink(url));
+
+        final var htmlContent = templateEngine.process("url_blocked", ctx);
+
+        final var email = Email.builder()
+                .sender(appProperties.getEmailSenderAddress())
+                .receivers(new String[]{owner.getEmail()})
+                .subject("Your link was blocked as unsafe")
+                .text(htmlContent)
+                .build();
+
+        tryToSendEmail(email);
+    }
+
+    @Override
+    @Async
     public void sendLinkDigestToAdmin(final List<LinkDigestEntry> entries) {
         final var rows = entries.stream()
                 .map(entry -> """
@@ -312,6 +330,10 @@ public class DefaultSendingEmailService implements SendingEmailService {
             Thread.currentThread().interrupt();
             return false;
         }
+    }
+
+    private String shortLink(final Url url) {
+        return StringUtils.removeEnd(StringUtils.defaultString(appProperties.getServerUrl()), "/") + "/" + url.getShortUrl();
     }
 
     private Context getContext(final User user) {

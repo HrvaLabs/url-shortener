@@ -37,6 +37,8 @@ public class DefaultUrlValidator implements UrlValidator {
             "swagger-ui", "v3", "webjars", "auth", "mcp");
 
     private static final String BLOCKLISTED = "This destination is on a blocklist and can't be shortened. If you think that's a mistake, contact us.";
+    private static final String STILL_BLOCKED = "This destination is still blocked: ";
+    private static final String REASON_SEPARATOR = ", ";
 
     private static final Pattern WEB_ADDRESS_PREFIX = Pattern.compile("^https?://[^/]", Pattern.CASE_INSENSITIVE);
 
@@ -101,8 +103,20 @@ public class DefaultUrlValidator implements UrlValidator {
 
     @Override
     public void checkIfUrlNotBlocked(final Url url) {
-        if (url.getThreatType() != null && !isCurrentUserAdmin()) {
+        if ((url.getThreatType() != null || url.getBlockReason() != null) && !isCurrentUserAdmin()) {
             throw new UrlValidationException("This link was blocked as unsafe. Contact support if you think that's a mistake.");
+        }
+    }
+
+    @Override
+    public void checkIfDestinationNotBlocked(final Url url) {
+        final var admin = isCurrentUserAdmin();
+        if (admin && linkCheckService.isAllowListed(url.getLongUrl())) {
+            return;
+        }
+        final var verdict = linkCheckService.check(url.getLongUrl());
+        if (verdict.outcome() == LinkVerdict.Outcome.BLOCK) {
+            throw new UrlValidationException(admin ? STILL_BLOCKED + String.join(REASON_SEPARATOR, verdict.reasons()) : BLOCKLISTED);
         }
     }
 
