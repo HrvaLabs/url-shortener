@@ -386,7 +386,7 @@ public class DefaultUrlService implements UrlService {
     public UrlResponse checkIPUniquenessAndReturnUrl(final String shortUrl, final String clientIP) {
         log.info("URL access shortUrl={} clientIP={}", shortUrl, clientIP);
 
-        final var url = findUrlByShortUrlAndActive(shortUrl);
+        final var url = findUrlToReveal(shortUrl);
 
         if (url.getPasswordHash() == null) {
             asyncCheckIfVisitUnique(clientIP, url);
@@ -436,7 +436,7 @@ public class DefaultUrlService implements UrlService {
 
     @Override
     public PeekUrl peekUrlByShortUrl(final String shortUrl) {
-        return urlToPeekUrlConverter.convert(findUrlByShortUrlAndActive(shortUrl));
+        return urlToPeekUrlConverter.convert(findUrlToReveal(shortUrl));
     }
 
     @Override
@@ -643,8 +643,12 @@ public class DefaultUrlService implements UrlService {
         return RandomStringUtils.secureStrong().nextAlphanumeric(Math.toIntExact(length));
     }
 
-    private Url findUrlByShortUrlAndActive(final String shortUrl) {
-        return urlRepository.findByShortUrlAndActiveTrue(shortUrl).orElseThrow(() -> new UrlNotFoundException("URL doesn't exist"));
+    private Url findUrlToReveal(final String shortUrl) {
+        final var url = urlRepository.findByShortUrlAndActiveTrue(shortUrl).orElseThrow(() -> new UrlNotFoundException("URL doesn't exist"));
+        if (url.getPasswordHash() == null && !clickCheckService.mayRedirect(url.getId(), url.getLongUrl())) {
+            throw new UrlNotFoundException("URL doesn't exist");
+        }
+        return url;
     }
 
     @Override

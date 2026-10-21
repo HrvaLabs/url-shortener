@@ -1005,6 +1005,55 @@ class UrlServiceTest {
     }
 
     @Test
+    void publicLookupOfALinkFoundOnABlocklistIsNotFoundAndRecordsNoVisit() {
+        final var url = Url.builder().id(3L).shortUrl("menu").longUrl("https://jofogas.cards/login").active(true).build();
+        when(urlRepository.findByShortUrlAndActiveTrue("menu")).thenReturn(Optional.of(url));
+        when(clickCheckService.mayRedirect(3L, "https://jofogas.cards/login")).thenReturn(false);
+
+        assertThatThrownBy(() -> urlService.checkIPUniquenessAndReturnUrl("menu", "1.2.3.4"))
+                .isInstanceOf(cc.hrva.urlshortener.exception.UrlNotFoundException.class)
+                .hasMessage("URL doesn't exist");
+
+        verify(taskExecutor, never()).execute(any(Runnable.class));
+    }
+
+    @Test
+    void peekingAtALinkFoundOnABlocklistIsNotFound() {
+        final var url = Url.builder().id(3L).shortUrl("menu").longUrl("https://jofogas.cards/login").active(true).build();
+        when(urlRepository.findByShortUrlAndActiveTrue("menu")).thenReturn(Optional.of(url));
+        when(clickCheckService.mayRedirect(3L, "https://jofogas.cards/login")).thenReturn(false);
+
+        assertThatThrownBy(() -> urlService.peekUrlByShortUrl("menu"))
+                .isInstanceOf(cc.hrva.urlshortener.exception.UrlNotFoundException.class)
+                .hasMessage("URL doesn't exist");
+
+        verify(urlToPeekUrlConverter, never()).convert(any());
+    }
+
+    @Test
+    void peekingAtALinkThatPassesTheClickCheckShowsIt() {
+        final var url = Url.builder().id(3L).shortUrl("menu").longUrl("https://gableci.hrva.cc").active(true).build();
+        final var peek = cc.hrva.urlshortener.model.PeekUrl.builder().shortUrl("menu").longUrl("https://gableci.hrva.cc").build();
+        when(urlRepository.findByShortUrlAndActiveTrue("menu")).thenReturn(Optional.of(url));
+        when(urlToPeekUrlConverter.convert(url)).thenReturn(peek);
+
+        assertThat(urlService.peekUrlByShortUrl("menu")).isSameAs(peek);
+
+        verify(clickCheckService).mayRedirect(3L, "https://gableci.hrva.cc");
+    }
+
+    @Test
+    void lookingUpAPasswordProtectedLinkRevealsNothingSoSkipsTheClickCheck() {
+        final var url = Url.builder().id(4L).shortUrl("board").longUrl("https://secret.example/board").passwordHash("$2a$10$hash").active(true).build();
+        when(urlRepository.findByShortUrlAndActiveTrue("board")).thenReturn(Optional.of(url));
+
+        urlService.checkIPUniquenessAndReturnUrl("board", "1.2.3.4");
+        urlService.peekUrlByShortUrl("board");
+
+        verify(clickCheckService, never()).mayRedirect(org.mockito.ArgumentMatchers.anyLong(), any());
+    }
+
+    @Test
     void publicLookupOfAPasswordProtectedLinkRevealsNoDestinationAndRecordsNoVisit() {
         final var url = Url.builder().id(4L).shortUrl("board").longUrl("https://secret.example/board").passwordHash("$2a$10$hash").active(true).build();
         when(urlRepository.findByShortUrlAndActiveTrue("board")).thenReturn(Optional.of(url));
