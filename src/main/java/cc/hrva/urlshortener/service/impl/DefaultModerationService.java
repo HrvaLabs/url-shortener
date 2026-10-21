@@ -33,6 +33,8 @@ import cc.hrva.urlshortener.service.UserService;
 import cc.hrva.urlshortener.service.blocklist.BlocklistConfigurationChangedEvent;
 import cc.hrva.urlshortener.util.DomainNames;
 import jakarta.persistence.EntityManager;
+import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -58,6 +60,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
+import org.springframework.scheduling.TaskScheduler;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -88,6 +91,7 @@ public class DefaultModerationService implements ModerationService {
     private static final String NO_RULE_TYPE = "Choose whether the rule blocks or allows the domain";
     private static final Sort NEWEST_RULES_FIRST = Sort.by(Sort.Order.desc("createdAt"), Sort.Order.desc("id"));
     private static final Set<BlockReason> RESTORED_BY_ALLOW = EnumSet.of(BlockReason.BLOCKLIST, BlockReason.SCAM_SIGNALS, BlockReason.DOMAIN_RULE);
+    private static final Duration SECOND_EVICTION_DELAY = Duration.ofSeconds(2);
 
     private final UrlRepository urlRepository;
     private final UserRepository userRepository;
@@ -103,6 +107,7 @@ public class DefaultModerationService implements ModerationService {
     private final TransactionOperations transactionOperations;
     private final EntityManager entityManager;
     private final ScammerSignalService scammerSignalService;
+    private final TaskScheduler taskScheduler;
 
     @Override
     public UrlResponse blockLink(final long urlId, final BlockReason reason, final String detail, final String performedBy, final String via) {
@@ -370,7 +375,7 @@ public class DefaultModerationService implements ModerationService {
         blocked.ifPresent(url -> {
             log.info("Link blocked urlId={} reason={}", url.getId(), reason);
             entityManager.detach(url);
-            evictFromCache(url.getShortUrl());
+            evictNowAndAgainLater(url.getShortUrl());
         });
         return blocked;
     }
@@ -390,7 +395,7 @@ public class DefaultModerationService implements ModerationService {
         restored.ifPresent(url -> {
             log.info("Link reactivated urlId={}", url.getId());
             entityManager.detach(url);
-            evictFromCache(url.getShortUrl());
+            evictNowAndAgainLater(url.getShortUrl());
         });
         return restored.isPresent();
     }
@@ -456,6 +461,15 @@ public class DefaultModerationService implements ModerationService {
             }
         } catch (final RuntimeException exception) {
             log.warn("Telling the owner about a blocked link failed urlId={}", url.getId(), exception);
+        }
+    }
+
+    private void evictNowAndAgainLater(final String shortUrl) {
+        evictFromCache(shortUrl);
+        try {
+            taskScheduler.schedule(() -> evictFromCache(shortUrl), Instant.now().plus(SECOND_EVICTION_DELAY));
+        } catch (final RuntimeException exception) {
+            log.warn("Scheduling the second URL cache eviction failed", exception);
         }
     }
 

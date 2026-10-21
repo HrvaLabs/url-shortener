@@ -50,7 +50,7 @@ java -jar "$E2E/app.jar" --spring.profiles.active=local --server.port=18080 \
 - Run the jar from a copy, so `mvn clean` doesn't pull it from under the running app.
 
 ## Testing
-- `mvn test` (or `mvn -B verify`) — 1535 tests, JUnit 5 + Mockito + AssertJ
+- `mvn test` (or `mvn -B verify`) — 1539 tests, JUnit 5 + Mockito + AssertJ
 - Mostly plain `@ExtendWith(MockitoExtension.class)` unit tests. Each `@SpringBootTest` class boots its own nested `TestApplication` (a trimmed context) on embedded H2 and mocks the rest:
   - MockMvc through the real filter chains, with a subset Liquibase changelog (`db/changelog/017-oauth2-authorization-server.xml` or `db/mcp-connector-test-changelog.xml`): the MCP connector's security tests, `SecurityTxtControllerTest`, `ReportEndpointSecurityTest`
   - the full Liquibase changelog: `DynamicLinkChecksSchemaTest` (024's tables, seeds and constraints), `DefaultScammerSignalServiceTest`
@@ -159,7 +159,7 @@ MCP, OAuth 2.1, login-bridge and Connected-apps endpoints: see MCP connector.
 - User accounts have `AUTH_PROVIDER` column — `"local"` for email/password users, `"google"`/`"github"` for SSO.
 
 ## Performance
-- **Redis caching**: `@Cacheable("urls")` on URL lookup (`peekUrlByShortUrl` only). 60-min TTL. `@CacheEvict` on mutations.
+- **Redis caching**: `@Cacheable("urls")` on URL lookup (`peekUrlByShortUrl` only). 1-hour TTL. `@CacheEvict` on mutations.
 - **Graceful degradation**: `CacheErrorHandler` logs and falls through to DB when Redis is down — no 500s.
 - **Redis fails fast**: Lettuce rejects commands while its connection is down (`RedisClientConfiguration`: `REJECT_COMMANDS`, auto-reconnect kept), so a dropped Redis fails each call at once; `spring.data.redis.timeout: 3s` only bounds a hung Redis. Every Redis caller must therefore stay fail-soft, catching the failure and degrading on purpose (cache → database, click-time blocklist check → let the visitor through, `/unlock` rate limit → allow). Only the documented rate limits under MCP connector fail closed.
 - **Read-only transactions**: `@Transactional(readOnly = true)` at class level on all services, overridden with `@Transactional` on write methods.
@@ -378,10 +378,10 @@ Jobs run on a 4-thread scheduler (`spring.task.scheduling.pool.size: 4` in `appl
 
 ## Cache Architecture
 - **Cache name**: `urls`
-- **TTL**: 7 days (configurable in `AppCacheConfiguration`)
+- **TTL**: 1 hour (configurable in `AppCacheConfiguration`), which bounds how long a stale entry can outlive a missed eviction, as a cached hit never rereads the block fields
 - **Used by**: `redirectResultUrl` (redirect) and `peekUrlByShortUrl` (peek) — both use manual `CacheManager` access
 - **Validation on cache hit**: `isUrlRedirectValid()` checks active, expirationDate, visitLimit/visits before serving
-- **Eviction**: `@CacheEvict` on revokeUrl, activateUrl, updateUrl (by key), deleteUrl (all entries)
+- **Eviction**: `@CacheEvict` on revokeUrl, activateUrl, updateUrl (by key), deleteUrl (all entries). A moderation block or reactivation evicts once it commits and again 2 s later on the scheduler (`TaskScheduler`, fail-soft), so a click that read the row just before the commit can't leave the old answer cached
 - **Warmup**: `CacheWarmup` loads top 20 most visited, most recent, and recently accessed URLs on startup
 - **Priming**: New URLs cached immediately on creation via `cacheUrlResponse()`
 - **Graceful degradation**: `CacheErrorHandler` logs and falls through to DB on Redis failure

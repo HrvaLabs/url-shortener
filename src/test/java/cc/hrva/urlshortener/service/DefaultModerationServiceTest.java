@@ -23,6 +23,7 @@ import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.service.blocklist.BlocklistConfigurationChangedEvent;
 import cc.hrva.urlshortener.service.impl.DefaultModerationService;
 import jakarta.persistence.EntityManager;
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -47,11 +48,13 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.cache.Cache;
 import org.springframework.cache.CacheManager;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.core.task.TaskRejectedException;
 import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
+import org.springframework.scheduling.TaskScheduler;
 import org.springframework.transaction.support.SimpleTransactionStatus;
 import org.springframework.transaction.support.TransactionCallback;
 import org.springframework.transaction.support.TransactionOperations;
@@ -128,6 +131,9 @@ class DefaultModerationServiceTest {
     @Mock
     private ScammerSignalService scammerSignalService;
 
+    @Mock
+    private TaskScheduler taskScheduler;
+
     private final Map<Long, Url> links = new TreeMap<>();
     private final Map<String, DomainRule> rules = new HashMap<>();
     private final List<List<Long>> savedPerTransaction = new ArrayList<>();
@@ -194,7 +200,7 @@ class DefaultModerationServiceTest {
         }).when(entityManager).detach(any());
         moderationService = new DefaultModerationService(urlRepository, userRepository, domainRuleRepository, linkCheckService,
                 reviewQueueService, userService, sendingEmailService, auditLogService, ipAddressService, cacheManager, eventPublisher, recordingTransactions(),
-                entityManager, scammerSignalService);
+                entityManager, scammerSignalService, taskScheduler);
     }
 
     @Test
@@ -263,6 +269,53 @@ class DefaultModerationServiceTest {
         verify(entityManager).detach(single);
         verify(entityManager).detach(restored);
         assertThat(outOfPlace).isEmpty();
+    }
+
+    @Test
+    void aBlockedLinkIsEvictedAgainTwoSecondsLaterSoARacingClickCannotKeepItCached() {
+        link(12L, "https://example.org/", null);
+        final var eviction = ArgumentCaptor.forClass(Runnable.class);
+        final var evictAt = ArgumentCaptor.forClass(Instant.class);
+        final var before = Instant.now();
+
+        moderationService.blockLink(12L, BlockReason.ADMIN, null, ADMIN, "admin");
+
+        verify(taskScheduler).schedule(eviction.capture(), evictAt.capture());
+        assertThat(evictAt.getValue()).isBetween(before.plusSeconds(2), Instant.now().plusSeconds(2));
+        verify(cache).evict("s12");
+        eviction.getValue().run();
+        verify(cache, times(2)).evict("s12");
+        assertThat(outOfPlace).isEmpty();
+    }
+
+    @Test
+    void aReactivatedLinkIsEvictedAgainTwoSecondsLater() {
+        final var user = user(5L, "alice@example.com");
+        user.setActive(false);
+        when(userRepository.findById(5L)).thenReturn(Optional.of(user));
+        blocked(13L, "https://a.example/", BlockReason.USER_BLOCKED, user);
+        final var eviction = ArgumentCaptor.forClass(Runnable.class);
+        final var evictAt = ArgumentCaptor.forClass(Instant.class);
+        final var before = Instant.now();
+
+        moderationService.reactivateUser(5L, ADMIN, "admin");
+
+        verify(taskScheduler).schedule(eviction.capture(), evictAt.capture());
+        assertThat(evictAt.getValue()).isBetween(before.plusSeconds(2), Instant.now().plusSeconds(2));
+        eviction.getValue().run();
+        verify(cache, times(2)).evict("s13");
+    }
+
+    @Test
+    void aBlockStillGoesThroughWhenTheSecondEvictionCannotBeScheduled() {
+        final var url = link(12L, "https://example.org/", null);
+        when(taskScheduler.schedule(any(Runnable.class), any(Instant.class))).thenThrow(new TaskRejectedException("shutting down"));
+
+        final var response = moderationService.blockLink(12L, BlockReason.ADMIN, null, ADMIN, "admin");
+
+        assertThat(response.active()).isFalse();
+        assertThat(url.getBlockReason()).isEqualTo(BlockReason.ADMIN);
+        verify(cache).evict("s12");
     }
 
     @Test
