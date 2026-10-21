@@ -31,7 +31,7 @@ Idempotent — safe on restart. Liquibase seeds `ROLE_USER` and `ROLE_ADMIN` aut
 - **MailHog** (`localhost:8025`, SMTP on `localhost:1025`)
 
 ## Testing
-- `mvn test` (or `mvn -B verify`) — 427 tests, JUnit 5 + Mockito + AssertJ
+- `mvn test` (or `mvn -B verify`) — 553 tests, JUnit 5 + Mockito + AssertJ
 - Mostly plain `@ExtendWith(MockitoExtension.class)` unit tests. The MCP connector's security tests are `@SpringBootTest` + MockMvc through the real filter chains: each class boots its own nested `TestApplication` on embedded H2 with a subset Liquibase changelog (`db/changelog/017-oauth2-authorization-server.xml` or `db/mcp-connector-test-changelog.xml`) and mocks the rest
 - No `@ActiveProfiles`, no Testcontainers
 - `src/test/` mirrors `src/main/` package structure
@@ -125,7 +125,12 @@ MCP, OAuth 2.1, login-bridge and Connected-apps endpoints: see MCP connector.
 
 ## Security
 - JWT in `Authorization: Bearer` header. Stateless sessions on the API chain; the MCP authorization server chain keeps a short HTTP session for the login bridge (see MCP connector).
-- Login rate limiting: Guava cache, 20 attempts/day per IP, 1-day expiry.
+- Login rate limiting: Guava cache, 20 attempts/day per IP, 1-day expiry. Wrong 2FA codes also count per account (`2fa:<userId>` key) and stop further checks once the limit is hit.
+- Public lookups (`GET /urls/{short}`, `/peek`, `/preview`, `/qr`) never return the owner's email or tags; a password-protected link's destination is left out (no preview fetched, no visit recorded) until `/unlock`. `/qr` encodes the short link (`app.server-url` + alias), size clamped to 64–1024.
+- `/unlock` is rate limited through `RedisFixedWindowRateLimiter`: 10 attempts per client network and 50 per link per 15 minutes (allowed if Redis is down).
+- Link previews only fetch public addresses: loopback, private, link-local, CGNAT and ULA targets are refused, and each redirect hop (max 3) is re-checked.
+- New passwords need at least 8 characters (register, reset, change). `User.password` is `@JsonIgnore`d.
+- Direct `Cache` calls in `DefaultUrlService` go through `getFromCache`/`putInCache`/`evictFromCache`, which log and fall back to the database when Redis fails; a visit that reaches the limit evicts the cached entry.
 - CORS via `CorsConfigurationSource` bean (not headers in JwtFilter). Allowed: frontend origin + all standard methods.
 - Client IP resolved via `ClientIpResolver` (never read X-Forwarded-For manually): a single `CF-Connecting-IP` header that parses as an IP literal wins (set by Cloudflare; trustworthy only while the origin accepts traffic from Cloudflare alone), otherwise `request.getRemoteAddr()` as rewritten by `ForwardedHeaderFilter`. `ForwardedHeaderFilter` runs after the Spring Security chains, so filters inside them see the proxy address unless `CF-Connecting-IP` is present.
 - Logging: SLF4J via `@Slf4j`, parameterized `{}` format.
@@ -246,29 +251,41 @@ Not automatable (interactive sign-in). With the local dev stack, the app on port
 - **API key deactivation**: Every hour, deactivates expired API keys.
 - **User deactivation**: Daily at 10 AM, deactivates unused accounts after configured inactivity period.
 - **MCP cleanup**: Daily at 03:30, deletes expired OAuth authorizations and DCR clients unused for 30 days (`DcrClientCleanupJob`).
+- **SafeBrowsing recheck**: Daily at 02:00, rechecks every active link (by id, so deactivations mid-run don't skip rows); flagged links are deactivated, evicted from the cache and their owner emailed.
+- **Interrupted emails**: Every 5 minutes, `email_log` rows still `SENDING` after 10 minutes become `FAILED` ("interrupted") so they can be resent.
+- **Link digest**: Daily at 9 AM, emails `app.contact-email` the links created in the last 24 h that come from accounts younger than 7 days or that `SuspiciousUrlService` flags. Nothing is sent when there is nothing to review.
 
 ## Config Profiles
 - **`local`**: `localhost` Postgres/Redis/MailHog, hardcoded JWT secret, dev users auto-created, verbose SQL logging. MCP issuer `http://localhost:8080`, a committed dev-only signing key (not a secret; refused at startup outside `local`) and anonymous link creation on, so `/mcp/anon` works. Auto-imports `application-oauth.yaml` for SSO secrets.
 - **`prod`**: Remote Postgres, no dev defaults. Secrets injected externally.
 - **`oauth`**: Optional profile holding OAuth2 client credentials. Imported by `local` profile via `spring.config.import`.
 - Default: `application.yaml` sets base values (cache TTL, URL length, API limits, etc.).
-- Tests run without any profile; only the MCP `@SpringBootTest` classes start a (trimmed) application context.
+- Tests run without any profile; only the MCP `@SpringBootTest` classes and `UrlSpecificationTest` (JPA on H2 with Hibernate-generated schema, no Liquibase) start a (trimmed) application context.
 
 ## New Models (recently added)
 
 ### AuditLog (`audit_log` table, migration `008-audit-log.xml`)
 - Tracks admin actions: performedBy, action, targetType, targetIdentifier, details, performedAt
-- Auto-logged via `AdminAuditAspect` (AOP around admin controller methods)
+- Auto-logged via `AdminAuditAspect` (AOP around admin controller methods). `targetType` is the controller name without `Controller` and a leading `Admin` (`AdminEmailLogController` → `EmailLog`).
+- `details` lists only the submitted, non-null fields of the request body, alphabetically (`longUrl: …, visitLimit: 10`); a password is written as `changed`/`removed`, never its value. Failed actions are `<method>_FAILED` with the exception message. Migration `023-audit-log-redact-url-passwords.xml` redacted the link passwords older rows held in plain text.
 - Endpoint: `GET /api/v1/admin/audit-log`
 
 ### EmailLog (`email_log` table, migration `009-email-log.xml`)
-- Records email sending: recipient, subject, status (SENDING/SENT/FAILED), errorMessage, sentAt, createdAt
-- Populated automatically by `tryToSendEmail` in `DefaultSendingEmailService`
-- Endpoint: `GET /api/v1/admin/email-log`
+- Records email sending: sender, recipient (comma-separated), subject, status (SENDING/SENT/FAILED/RESENT), errorMessage, sentAt, createdAt, body
+- Populated automatically by `tryToSendEmail` in `DefaultSendingEmailService`, which retries 3 times and records any failure (checked or runtime) as FAILED with its message
+- `body` (migration `022-email-log-resend.xml`) holds the rendered HTML only until the email is sent, and at most 7 days for failed ones (daily 03:15 cleanup); it is `@JsonIgnore`d and exposed as the `resendable` flag (FAILED with a body)
+- Endpoints: `GET /api/v1/admin/email-log`; `POST /api/v1/admin/email-log/{id}/resend` (admin, synchronous) sends a stored failed email again as a new row and marks the old one RESENT
 
 ### VerificationToken (`verification_token` table, migration `013-email-verification.xml`)
 - Email verification on register; `user_account.email_verified` (existing users grandfathered `true`). OAuth users auto-verified.
 - Flow: register → unverified + verification email; `POST /auth/verify-email/confirm` activates; `/resend` reissues.
+
+### Abuse handling
+- `SuspiciousUrlService` flags destinations by host: other shorteners (and our own host), free dynamic-DNS hosts, raw IPs, punycode, lookalikes of known brands on someone else's domain (`njuskaio.cam`, `jofogas.cards`), login/verification lures, high-risk TLDs. Flags only; it never deactivates anything.
+- `GET /urls/all` (admin) returns `suspiciousReasons` per link (omitted when empty); searching matches the short link, destination and owner email; `?anonymous=true` keeps links without an owner; sort by owner with `sort=owner.email,asc`.
+- New links and admin destination changes pointing at a generic shortener (bit.ly, tinyurl, …) or at hrva.cc are rejected (`checkIfLongUrlIsNotAShortener`). Platform share links (t.co, lnkd.in, goo.gl) are only flagged, and Google's `*.app.goo.gl` share links are neither.
+- Links flagged by the nightly Safe Browsing recheck get `threatType` (status BLOCKED); owners can't reactivate them, admins can after a fresh Safe Browsing check. Every reactivation re-checks Safe Browsing and that no other active link holds the alias.
+- A custom alias stays taken while any row (active or not) holds it, so an expired link's alias can't be claimed by someone else.
 
 ### URL tags (`url_tags` table, migration `014-url-tags.xml`)
 - `Url.tags` `@ElementCollection` of normalized strings (`TagNormalizer`: lowercase, ≤10 × ≤30 chars). Filter via `?tag=`; list via `GET /urls/tags`.

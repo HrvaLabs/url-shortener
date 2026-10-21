@@ -1,6 +1,7 @@
 package cc.hrva.urlshortener.controller;
 
 import java.util.Collections;
+import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.dto.CreateUrlDto;
 import cc.hrva.urlshortener.dto.UrlResponse;
 import cc.hrva.urlshortener.dto.UrlSearchDto;
@@ -29,6 +30,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -59,11 +61,14 @@ class UrlControllerTest {
     @Mock
     private HttpServletRequest request;
 
+    private final AppProperties appProperties = new AppProperties();
+
     private ObjectMapper objectMapper;
 
     @BeforeEach
     void setUp() {
-        this.mockMvc = MockMvcBuilders.standaloneSetup(new UrlController(urlService, qrCodeService, linkPreviewService, clientIpResolver, request))
+        appProperties.setServerUrl("https://hrva.cc");
+        this.mockMvc = MockMvcBuilders.standaloneSetup(new UrlController(urlService, qrCodeService, linkPreviewService, clientIpResolver, request, appProperties))
                 .setCustomArgumentResolvers(new PageableHandlerMethodArgumentResolver())
                 .build();
         this.objectMapper = new ObjectMapper();
@@ -105,6 +110,43 @@ class UrlControllerTest {
         mockMvc.perform(get("/api/v1/urls/short"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(1));
+    }
+
+    @Test
+    void qrCodeEncodesTheShortLinkNotTheDestination() throws Exception {
+        when(urlService.peekUrlByShortUrl("board")).thenReturn(PeekUrl.builder().shortUrl("board").build());
+        when(qrCodeService.generateQrCode("https://hrva.cc/board", 300, 300)).thenReturn(new byte[]{1});
+
+        mockMvc.perform(get("/api/v1/urls/board/qr")).andExpect(status().isOk());
+    }
+
+    @Test
+    void qrCodeShortLinkHasNoDoubleSlashWhenTheServerUrlEndsWithOne() throws Exception {
+        appProperties.setServerUrl("https://hrva.cc/");
+        when(urlService.peekUrlByShortUrl("board")).thenReturn(PeekUrl.builder().shortUrl("board").build());
+        when(qrCodeService.generateQrCode("https://hrva.cc/board", 300, 300)).thenReturn(new byte[]{1});
+
+        mockMvc.perform(get("/api/v1/urls/board/qr")).andExpect(status().isOk());
+    }
+
+    @Test
+    void qrCodeSizeIsKeptWithinLimits() throws Exception {
+        when(urlService.peekUrlByShortUrl("board")).thenReturn(PeekUrl.builder().shortUrl("board").build());
+        when(qrCodeService.generateQrCode("https://hrva.cc/board", 1024, 1024)).thenReturn(new byte[]{1});
+        when(qrCodeService.generateQrCode("https://hrva.cc/board", 64, 64)).thenReturn(new byte[]{1});
+
+        mockMvc.perform(get("/api/v1/urls/board/qr").param("size", "20000")).andExpect(status().isOk());
+        mockMvc.perform(get("/api/v1/urls/board/qr").param("size", "-5")).andExpect(status().isOk());
+    }
+
+    @Test
+    void previewOfAPasswordProtectedLinkFetchesNothing() throws Exception {
+        when(urlService.peekUrlByShortUrl("board")).thenReturn(PeekUrl.builder().shortUrl("board").passwordProtected(true).build());
+
+        mockMvc.perform(get("/api/v1/urls/board/preview"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.url").doesNotExist());
+        verify(linkPreviewService, never()).fetchPreview(any());
     }
 
     @Test

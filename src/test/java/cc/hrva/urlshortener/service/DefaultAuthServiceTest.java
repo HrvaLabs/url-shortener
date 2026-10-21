@@ -187,6 +187,16 @@ class DefaultAuthServiceTest {
     }
 
     @Test
+    void registrationRunsInAWritableTransaction() throws NoSuchMethodException {
+        final var transactional = cc.hrva.urlshortener.service.impl.DefaultAuthService.class
+                .getMethod("register", cc.hrva.urlshortener.dto.UserRegisterDto.class)
+                .getAnnotation(org.springframework.transaction.annotation.Transactional.class);
+
+        assertThat(transactional).isNotNull();
+        assertThat(transactional.readOnly()).isFalse();
+    }
+
+    @Test
     void shouldLoginWhenTwoFactorCodeValid() {
         final var loginDto = LoginDto.builder().email("test@example.com").password("password123").code("123456").build();
         final var user = User.builder().id(1L).email("test@example.com").emailVerified(true).twoFactorEnabled(true).build();
@@ -205,6 +215,7 @@ class DefaultAuthServiceTest {
 
         assertThat(response.getBody().getToken()).isEqualTo("Bearer jwtToken");
         verify(userService).userHasLoggedIn(user);
+        verify(loginAttemptService).loginSucceeded("2fa:1");
     }
 
     @Test
@@ -223,6 +234,28 @@ class DefaultAuthServiceTest {
 
         assertThatThrownBy(() -> authService.login(loginDto, request))
                 .isInstanceOf(NoAuthorizationException.class);
+        verify(loginAttemptService).loginFailed("2fa:1");
+        verify(loginAttemptService).loginFailed("127.0.0.1");
+    }
+
+    @Test
+    void stopsCheckingTwoFactorCodesForAnAccountAfterTooManyWrongOnes() {
+        final var loginDto = LoginDto.builder().email("test@example.com").password("password123").code("111111").build();
+        final var user = User.builder().id(1L).email("test@example.com").emailVerified(true).twoFactorEnabled(true).build();
+
+        when(clientIpResolver.getClientIp(request)).thenReturn("127.0.0.1");
+        when(loginAttemptService.isBlocked("127.0.0.1")).thenReturn(false);
+        when(loginAttemptService.isBlocked("2fa:1")).thenReturn(true);
+        when(authenticationManagerBuilder.getObject()).thenReturn(authenticationManager);
+        when(authenticationManager.authenticate(any(UsernamePasswordAuthenticationToken.class))).thenReturn(authentication);
+        when(appProperties.getJwtTokenValiditySeconds()).thenReturn(36000L);
+        when(tokenProvider.createToken(authentication, 36000L)).thenReturn("jwtToken");
+        when(userService.fetchUserFromEmail("test@example.com")).thenReturn(user);
+
+        assertThatThrownBy(() -> authService.login(loginDto, request))
+                .isInstanceOf(NoAuthorizationException.class)
+                .hasMessage("Too many invalid two-factor codes. Try again later.");
+        verify(twoFactorService, org.mockito.Mockito.never()).verifyLoginCode(any(), any());
     }
 
     @Test

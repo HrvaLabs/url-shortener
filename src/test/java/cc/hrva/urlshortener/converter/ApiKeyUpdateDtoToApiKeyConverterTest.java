@@ -40,6 +40,30 @@ class ApiKeyUpdateDtoToApiKeyConverterTest {
     }
 
     @Test
+    void changesOnlyTheLimitWhenOnlyTheLimitIsSent() {
+        final var expiry = java.time.LocalDateTime.now().plusDays(30);
+        final var apiKey = ApiKey.builder().id(1L).apiCallsLimit(100L).apiCallsUsed(42L).expirationDate(expiry).active(true).build();
+        when(apiKeyRepository.findById(1L)).thenReturn(java.util.Optional.of(apiKey));
+
+        final var result = converter.convert(ApiKeyUpdateDto.builder().id(1L).apiCallsLimit(500L).build());
+
+        org.assertj.core.api.Assertions.assertThat(result.getApiCallsLimit()).isEqualTo(500L);
+        org.assertj.core.api.Assertions.assertThat(result.getApiCallsUsed()).isEqualTo(42L);
+        org.assertj.core.api.Assertions.assertThat(result.getExpirationDate()).isEqualTo(expiry);
+        org.assertj.core.api.Assertions.assertThat(result.isActive()).isTrue();
+    }
+
+    @Test
+    void aZeroLimitMeansUnlimited() {
+        final var apiKey = ApiKey.builder().id(1L).apiCallsLimit(100L).apiCallsUsed(0L).active(true).build();
+        when(apiKeyRepository.findById(1L)).thenReturn(java.util.Optional.of(apiKey));
+
+        final var result = converter.convert(ApiKeyUpdateDto.builder().id(1L).apiCallsLimit(0L).build());
+
+        org.assertj.core.api.Assertions.assertThat(result.getApiCallsLimit()).isNull();
+    }
+
+    @Test
     void shouldFailConvert() {
         final ApiKeyUpdateDto apiKeyUpdateDto = ApiKeyUpdateDto.builder().id(1L).build();
 

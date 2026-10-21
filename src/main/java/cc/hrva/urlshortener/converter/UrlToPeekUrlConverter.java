@@ -10,10 +10,12 @@ public class UrlToPeekUrlConverter implements Converter<Url, PeekUrl> {
 
     @Override
     public PeekUrl convert(final Url url) {
+        final var passwordProtected = url.getPasswordHash() != null;
         return PeekUrl.builder()
-                .longUrl(url.getLongUrl())
+                .longUrl(passwordProtected ? null : url.getLongUrl())
                 .shortUrl(url.getShortUrl())
                 .createDate(url.getCreateDate())
+                .passwordProtected(passwordProtected)
                 .build();
     }
 

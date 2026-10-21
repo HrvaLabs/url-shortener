@@ -132,7 +132,7 @@ class UserControllerTest {
 
         mockMvc.perform(patch("/api/v1/users/password")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(UpdatePasswordDto.builder().oldPassword("old").newPassword("new").build())))
+                        .content(objectMapper.writeValueAsString(UpdatePasswordDto.builder().oldPassword("old").newPassword("newPassword1").build())))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(1));
     }

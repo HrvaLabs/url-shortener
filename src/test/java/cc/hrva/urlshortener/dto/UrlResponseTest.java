@@ -4,6 +4,8 @@ import java.time.LocalDateTime;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.enums.ThreatType;
 import org.junit.jupiter.api.Test;
+import org.springframework.data.redis.serializer.GenericJacksonJsonRedisSerializer;
+import tools.jackson.databind.json.JsonMapper;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -18,6 +20,37 @@ class UrlResponseTest {
                 .expirationDate(LocalDateTime.now().plusDays(1))
                 .visits(5L)
                 .visitLimit(100L);
+    }
+
+    @Test
+    void cachedResponsesSurviveTheRedisRoundTrip() {
+        final var mapper = JsonMapper.builder().build();
+        final var serializer = new GenericJacksonJsonRedisSerializer(mapper);
+        final var response = UrlResponse.from(baseUrl().active(true).build());
+
+        final var cached = serializer.deserialize(serializer.serialize(response));
+
+        assertThat(mapper.convertValue(cached, UrlResponse.class)).isEqualTo(response);
+    }
+
+    @Test
+    void responsesCachedBeforeSuspiciousReasonsExistedStillLoad() {
+        final var mapper = JsonMapper.builder().build();
+        final var serializer = new GenericJacksonJsonRedisSerializer(mapper);
+        final var legacyJson = "{\"id\":1,\"longUrl\":\"https://example.com\",\"shortUrl\":\"abc\",\"visits\":5,"
+                + "\"active\":true,\"status\":\"ACTIVE\",\"tags\":[],\"passwordProtected\":false,\"ownerEmail\":null}";
+
+        final var cached = mapper.convertValue(serializer.deserialize(legacyJson.getBytes()), UrlResponse.class);
+
+        assertThat(cached.shortUrl()).isEqualTo("abc");
+        assertThat(cached.active()).isTrue();
+    }
+
+    @Test
+    void omitsSuspiciousReasonsWhenThereAreNone() {
+        final var json = JsonMapper.builder().build().writeValueAsString(UrlResponse.from(baseUrl().active(true).build()));
+
+        assertThat(json).doesNotContain("suspiciousReasons");
     }
 
     @Test

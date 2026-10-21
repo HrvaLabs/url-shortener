@@ -2,12 +2,14 @@ package cc.hrva.urlshortener.service;
 
 import java.time.LocalDateTime;
 import java.util.Collections;
+import java.util.List;
 import java.util.Optional;
 import io.micrometer.core.instrument.MeterRegistry;
 import tools.jackson.databind.ObjectMapper;
 import org.springframework.cache.CacheManager;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.Sort;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.jpa.domain.Specification;
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
@@ -24,6 +26,7 @@ import cc.hrva.urlshortener.model.ApiKey;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.repository.UrlRepository;
+import cc.hrva.urlshortener.service.impl.DefaultSuspiciousUrlService;
 import cc.hrva.urlshortener.service.impl.DefaultUrlService;
 import cc.hrva.urlshortener.validator.ApiKeyValidator;
 import cc.hrva.urlshortener.validator.UrlValidator;
@@ -99,8 +102,15 @@ class UrlServiceTest {
     @Mock
     private SafeBrowsingService safeBrowsingService;
 
+    @Mock
+    private SuspiciousUrlService suspiciousUrlService;
+
+    @Mock
+    private cc.hrva.urlshortener.mcp.anon.RateLimiter rateLimiter;
+
     @BeforeEach
     void setUp() {
+        org.mockito.Mockito.lenient().when(rateLimiter.tryAcquire(any(), org.mockito.ArgumentMatchers.anyInt(), any())).thenReturn(true);
         this.urlService = new DefaultUrlService(
                 userService,
                 urlValidator,
@@ -116,7 +126,9 @@ class UrlServiceTest {
                 cacheManager,
                 objectMapper,
                 meterRegistry,
-                passwordEncoder
+                passwordEncoder,
+                suspiciousUrlService,
+                rateLimiter
         );
     }
 
@@ -181,6 +193,7 @@ class UrlServiceTest {
         final var order = org.mockito.Mockito.inOrder(urlValidator, urlRepository);
         order.verify(urlValidator).verifyUserAdmin();
         order.verify(urlValidator).checkIfLongUrlIsValid(changed);
+        order.verify(urlValidator).checkIfLongUrlIsNotAShortener(changed);
         order.verify(urlValidator).checkIfUrlSafe(changed);
         order.verify(urlRepository).save(changed);
     }
@@ -428,6 +441,25 @@ class UrlServiceTest {
     }
 
     @Test
+    void reactivationChecksTheBlockTheAliasAndSafetyBeforeSaving() {
+        final var url = Url.builder().id(1L).shortUrl("promo").longUrl("https://example.com")
+                .threatType(cc.hrva.urlshortener.model.enums.ThreatType.MALWARE).active(false).build();
+        when(urlRepository.findById(1L)).thenReturn(Optional.of(url));
+        when(urlRepository.save(any(Url.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        final var result = urlService.activateUrl(1L);
+
+        final var order = org.mockito.Mockito.inOrder(urlValidator, urlRepository);
+        order.verify(urlValidator).verifyUserAdminOrOwner(url);
+        order.verify(urlValidator).checkIfUrlNotBlocked(url);
+        order.verify(urlValidator).checkIfShortUrlIsFreeToReactivate("promo");
+        order.verify(urlValidator).checkIfUrlSafe(url);
+        order.verify(urlRepository).save(url);
+        assertThat(result.active()).isTrue();
+        assertThat(url.getThreatType()).isNull();
+    }
+
+    @Test
     void shouldActivateUrl() {
         final var url = Url.builder().id(1L).active(false).build();
         final var activatedUrl = Url.builder().id(1L).active(true).build();
@@ -436,6 +468,27 @@ class UrlServiceTest {
 
         final var result = urlService.activateUrl(1L);
         assertThat(result.active()).isTrue();
+    }
+
+    @Test
+    void unlockStopsGuessingAfterTooManyAttempts() {
+        when(rateLimiter.tryAcquire(org.mockito.ArgumentMatchers.startsWith("unlock:"), org.mockito.ArgumentMatchers.anyInt(), any())).thenReturn(false);
+
+        assertThatThrownBy(() -> urlService.unlockUrl("board", "guess", "1.2.3.4"))
+                .isInstanceOf(cc.hrva.urlshortener.exception.RateLimitExceededException.class)
+                .hasMessage("Too many password attempts. Try again in a few minutes.");
+        verify(passwordEncoder, never()).matches(any(), any());
+    }
+
+    @Test
+    void unlockStillWorksWhenTheRateLimiterIsDown() {
+        final var url = Url.builder().id(1L).shortUrl("a").longUrl("https://a.com").active(true).passwordHash("hash").build();
+        when(rateLimiter.tryAcquire(any(), org.mockito.ArgumentMatchers.anyInt(), any()))
+                .thenThrow(new cc.hrva.urlshortener.mcp.anon.RateLimiterUnavailableException(new RuntimeException("down")));
+        when(urlRepository.findByShortUrlAndActiveTrue("a")).thenReturn(Optional.of(url));
+        when(passwordEncoder.matches("secret", "hash")).thenReturn(true);
+
+        assertThat(urlService.unlockUrl("a", "secret", "1.2.3.4").longUrl()).isEqualTo("https://a.com");
     }
 
     @Test
@@ -506,10 +559,129 @@ class UrlServiceTest {
         verify(urlRepository, never()).save(any(Url.class));
     }
 
+    @Test
+    void shouldRejectLinksToOtherShortenersWhenSavingUrlWithApiKey() {
+        final var service = urlServiceWithRealLongUrlHandling();
+        final var createUrlDto = CreateUrlDto.builder().longUrl("https://bit.ly/3abc").build();
+
+        assertThatThrownBy(() -> service.saveUrlWithApiKey(createUrlDto, "apikey"))
+                .isInstanceOf(UrlValidationException.class)
+                .hasMessage("Links to other URL shorteners can't be shortened. Use the final destination instead.");
+
+        verify(safeBrowsingService, never()).checkUrlsForThreats(anyString());
+        verify(urlRepository, never()).save(any(Url.class));
+    }
+
+    @Test
+    void adminListFlagsSuspiciousLinks() {
+        final var pageable = PageRequest.of(0, 20);
+        final var url = Url.builder().id(287L).shortUrl("njuskaio_verify").longUrl("https://njuskaio.cam/a/MAUB3").build();
+        when(urlRepository.findAll(pageable)).thenReturn(new PageImpl<>(List.of(url)));
+        when(suspiciousUrlService.findReasons("https://njuskaio.cam/a/MAUB3")).thenReturn(List.of("imitates njuskalo"));
+
+        final var result = urlService.getAllUrls(pageable, new UrlSearchDto());
+
+        assertThat(result.getContent().getFirst().suspiciousReasons()).containsExactly("imitates njuskalo");
+    }
+
+    @Test
+    void publicLookupHidesTheOwnerAndTags() {
+        final var owner = User.builder().email("owner@example.com").build();
+        final var url = Url.builder().id(3L).shortUrl("menu").longUrl("https://gableci.hrva.cc").owner(owner).tags(java.util.Set.of("client-x")).active(true).build();
+        when(urlRepository.findByShortUrlAndActiveTrue("menu")).thenReturn(Optional.of(url));
+
+        final var result = urlService.checkIPUniquenessAndReturnUrl("menu", "1.2.3.4");
+
+        assertThat(result.longUrl()).isEqualTo("https://gableci.hrva.cc");
+        assertThat(result.ownerEmail()).isNull();
+        assertThat(result.tags()).isEmpty();
+    }
+
+    @Test
+    void publicLookupOfAPasswordProtectedLinkRevealsNoDestinationAndRecordsNoVisit() {
+        final var url = Url.builder().id(4L).shortUrl("board").longUrl("https://secret.example/board").passwordHash("$2a$10$hash").active(true).build();
+        when(urlRepository.findByShortUrlAndActiveTrue("board")).thenReturn(Optional.of(url));
+
+        final var result = urlService.checkIPUniquenessAndReturnUrl("board", "1.2.3.4");
+
+        assertThat(result.longUrl()).isNull();
+        assertThat(result.passwordProtected()).isTrue();
+        verify(taskExecutor, never()).execute(any(Runnable.class));
+    }
+
+    @Test
+    void adminListSortsAnonymousLinksLastWhenOrderingByOwner() {
+        final var pageable = PageRequest.of(0, 20, Sort.by(Sort.Order.desc("owner.email"), Sort.Order.asc("visits")));
+        final var sent = org.mockito.ArgumentCaptor.forClass(org.springframework.data.domain.Pageable.class);
+        when(urlRepository.findAll(sent.capture())).thenReturn(new PageImpl<>(List.of()));
+
+        urlService.getAllUrls(pageable, new UrlSearchDto());
+
+        assertThat(sent.getValue().getSort().getOrderFor("owner.email").getNullHandling()).isEqualTo(Sort.NullHandling.NULLS_LAST);
+        assertThat(sent.getValue().getSort().getOrderFor("owner.email").getDirection()).isEqualTo(Sort.Direction.DESC);
+        assertThat(sent.getValue().getSort().getOrderFor("visits").getNullHandling()).isEqualTo(Sort.NullHandling.NATIVE);
+    }
+
+    @Test
+    void redirectFallsBackToTheDatabaseWhenTheCacheIsDown() {
+        final var cache = org.mockito.Mockito.mock(org.springframework.cache.Cache.class);
+        when(cacheManager.getCache("urls")).thenReturn(cache);
+        when(cache.get("abc")).thenThrow(new IllegalStateException("Redis is down"));
+        org.mockito.Mockito.doThrow(new IllegalStateException("Redis is down")).when(cache).put(any(), any());
+        final var url = Url.builder().id(5L).shortUrl("abc").longUrl("https://example.com/a").visits(0L).active(true).build();
+        when(urlRepository.findByShortUrlAndActiveTrue("abc")).thenReturn(Optional.of(url));
+
+        final var redirect = urlServiceWithMeters().redirectResultUrl("abc", "1.2.3.4");
+
+        assertThat(redirect.getUrl()).isEqualTo("https://example.com/a");
+    }
+
+    @Test
+    void aVisitThatReachesTheLimitEvictsTheCachedLink() {
+        final var cache = org.mockito.Mockito.mock(org.springframework.cache.Cache.class);
+        when(cacheManager.getCache("urls")).thenReturn(cache);
+        final var cached = new UrlResponse(5L, "https://example.com/a", "abc", null, null, 0L, 3L, true, "ACTIVE", java.util.Set.of(), false, null);
+        when(cache.get("abc")).thenReturn(() -> cached);
+        final var url = Url.builder().id(5L).shortUrl("abc").longUrl("https://example.com/a").visits(2L).visitLimit(3L).active(true).build();
+        when(urlRepository.findByShortUrlAndActiveTrue("abc")).thenReturn(Optional.of(url));
+        when(urlRepository.save(url)).thenReturn(url);
+        org.mockito.Mockito.doAnswer(invocation -> {
+            invocation.<Runnable>getArgument(0).run();
+            return null;
+        }).when(taskExecutor).execute(any(Runnable.class));
+
+        urlServiceWithMeters().redirectResultUrl("abc", "1.2.3.4");
+
+        assertThat(url.isActive()).isFalse();
+        verify(cache).evict("abc");
+    }
+
+    private UrlService urlServiceWithMeters() {
+        return new DefaultUrlService(
+                userService,
+                urlValidator,
+                apiKeyService,
+                urlRepository,
+                appProperties,
+                apiKeyValidator,
+                ipAddressService,
+                taskExecutor,
+                urlToPeekUrlConverter,
+                createUrlToUrlConverter,
+                urlUpdateDtoToUrlConverter,
+                cacheManager,
+                objectMapper,
+                new io.micrometer.core.instrument.simple.SimpleMeterRegistry(),
+                passwordEncoder,
+                suspiciousUrlService,
+                rateLimiter
+        );
+    }
+
     private UrlService urlServiceWithRealLongUrlHandling() {
         return new DefaultUrlService(
                 userService,
-                new DefaultUrlValidator(userService, urlRepository, appProperties, safeBrowsingService),
+                new DefaultUrlValidator(userService, urlRepository, appProperties, safeBrowsingService, new DefaultSuspiciousUrlService(appProperties)),
                 apiKeyService,
                 urlRepository,
                 appProperties,
@@ -522,7 +694,9 @@ class UrlServiceTest {
                 cacheManager,
                 objectMapper,
                 meterRegistry,
-                passwordEncoder
+                passwordEncoder,
+                suspiciousUrlService,
+                rateLimiter
         );
     }
 

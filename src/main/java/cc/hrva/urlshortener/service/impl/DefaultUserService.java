@@ -43,6 +43,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -147,6 +148,7 @@ public class DefaultUserService implements UserService {
 
     @Override
     @Transactional
+    @CacheEvict(value = "urls", allEntries = true)
     public void deleteUserById(final Long id) {
         log.info("Delete user id={}", id);
         final var user = userRepository.findById(id)
@@ -156,6 +158,7 @@ public class DefaultUserService implements UserService {
 
     @Override
     @Transactional
+    @CacheEvict(value = "urls", allEntries = true)
     public void deleteOwnAccount(final DeleteAccountDto deleteAccountDto) {
         final var user = getUserFromToken();
         if (user == null) {

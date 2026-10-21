@@ -99,7 +99,7 @@ class LinkToolsTest {
 
         final var search = ArgumentCaptor.forClass(UrlSearchDto.class);
         verify(urlService).getAllMyUrls(isNull(), any(), search.capture());
-        assertThat(search.getValue()).isEqualTo(new UrlSearchDto("example", null, null, "work", null, null));
+        assertThat(search.getValue()).isEqualTo(new UrlSearchDto("example", null, null, "work", null, null, null));
     }
 
     @Test
@@ -333,7 +333,7 @@ class LinkToolsTest {
         final var search = ArgumentCaptor.forClass(UrlSearchDto.class);
         verify(urlService).getAllMyUrls(isNull(), pageable.capture(), search.capture());
         assertThat(pageable.getValue().isUnpaged()).isTrue();
-        assertThat(search.getValue()).isEqualTo(new UrlSearchDto("menu", null, null, null, null, null));
+        assertThat(search.getValue()).isEqualTo(new UrlSearchDto("menu", null, null, null, null, null, null));
     }
 
     @Test

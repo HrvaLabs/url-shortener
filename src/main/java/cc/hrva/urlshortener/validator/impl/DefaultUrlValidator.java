@@ -5,6 +5,7 @@ import cc.hrva.urlshortener.exception.*;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.service.SafeBrowsingService;
+import cc.hrva.urlshortener.service.SuspiciousUrlService;
 import cc.hrva.urlshortener.service.UserService;
 import cc.hrva.urlshortener.validator.UrlValidator;
 import java.net.URI;
@@ -25,6 +26,7 @@ public class DefaultUrlValidator implements UrlValidator {
     private final UrlRepository urlRepository;
     private final AppProperties appProperties;
     private final SafeBrowsingService safeBrowsingService;
+    private final SuspiciousUrlService suspiciousUrlService;
 
     private static final List<String> RESERVED_WORDS = List.of(
             "api", "login", "logout", "oauth2", "actuator", "error",
@@ -49,6 +51,13 @@ public class DefaultUrlValidator implements UrlValidator {
         }
     }
 
+    @Override
+    public void checkIfLongUrlIsNotAShortener(final Url url) {
+        if (suspiciousUrlService.isShortener(url.getLongUrl())) {
+            throw new UrlValidationException("Links to other URL shorteners can't be shortened. Use the final destination instead.");
+        }
+    }
+
     private static boolean isWebAddress(final String longUrl) {
         if (longUrl == null || StringUtils.containsWhitespace(longUrl) || !WEB_ADDRESS_PREFIX.matcher(longUrl).find()) {
             return false;
@@ -66,8 +75,22 @@ public class DefaultUrlValidator implements UrlValidator {
 
     @Override
     public void checkIfShortUrlIsUnique(final String shortUrl) {
-        if (urlRepository.existsUrlByShortUrlAndActiveTrue(shortUrl)) {
+        if (urlRepository.existsUrlByShortUrl(shortUrl)) {
             throw new ShortUrlAlreadyExistsException("This short URL is already taken. Try another.");
+        }
+    }
+
+    @Override
+    public void checkIfShortUrlIsFreeToReactivate(final String shortUrl) {
+        if (urlRepository.existsUrlByShortUrlAndActiveTrue(shortUrl)) {
+            throw new ShortUrlAlreadyExistsException("Another active link already uses this short URL.");
+        }
+    }
+
+    @Override
+    public void checkIfUrlNotBlocked(final Url url) {
+        if (url.getThreatType() != null && !isCurrentUserAdmin()) {
+            throw new UrlValidationException("This link was blocked as unsafe. Contact support if you think that's a mistake.");
         }
     }
 
@@ -95,13 +118,15 @@ public class DefaultUrlValidator implements UrlValidator {
 
     @Override
     public void verifyUserAdmin() {
-        final var currentUser = userService.getUserFromToken();
-        final var isCurrentUserAdmin = currentUser != null && currentUser.getAuthorities().stream()
-                .anyMatch(authorities -> authorities.getName().equals("ROLE_ADMIN"));
-
-        if (!isCurrentUserAdmin) {
+        if (!isCurrentUserAdmin()) {
             throw new NoAuthorizationException("Only admins can change where a link points");
         }
+    }
+
+    private boolean isCurrentUserAdmin() {
+        final var currentUser = userService.getUserFromToken();
+        return currentUser != null && currentUser.getAuthorities().stream()
+                .anyMatch(authorities -> authorities.getName().equals("ROLE_ADMIN"));
     }
 
     @Override

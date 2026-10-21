@@ -2,6 +2,7 @@ package cc.hrva.urlshortener.repository.specification;
 
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.User;
+import jakarta.persistence.criteria.JoinType;
 import java.time.LocalDateTime;
 import org.springframework.data.jpa.domain.Specification;
 
@@ -20,6 +21,21 @@ public final class UrlSpecification {
                     cb.like(cb.lower(root.get("longUrl")), pattern),
                     cb.like(cb.lower(root.get("shortUrl")), pattern));
         };
+    }
+
+    public static Specification<Url> searchIncludingOwner(final String keyword) {
+        return (root, query, cb) -> {
+            final var pattern = "%" + keyword.toLowerCase() + "%";
+            final var owner = root.join("owner", JoinType.LEFT);
+            return cb.or(
+                    cb.like(cb.lower(root.get("longUrl")), pattern),
+                    cb.like(cb.lower(root.get("shortUrl")), pattern),
+                    cb.like(cb.lower(owner.get("email")), pattern));
+        };
+    }
+
+    public static Specification<Url> hasNoOwner() {
+        return (root, query, cb) -> root.get("owner").isNull();
     }
 
     public static Specification<Url> hasActive(final Boolean active) {

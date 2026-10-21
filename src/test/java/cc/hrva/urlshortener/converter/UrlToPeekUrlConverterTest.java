@@ -28,6 +28,17 @@ class UrlToPeekUrlConverterTest {
     }
 
     @Test
+    void hidesTheDestinationOfAPasswordProtectedLink() {
+        final var url = Url.builder().longUrl("https://secret.example/board").shortUrl("board").passwordHash("$2a$10$hash").build();
+
+        final var peekUrl = converter.convert(url);
+
+        assertThat(peekUrl.getLongUrl()).isNull();
+        assertThat(peekUrl.isPasswordProtected()).isTrue();
+        assertThat(peekUrl.getShortUrl()).isEqualTo("board");
+    }
+
+    @Test
     void shouldConvertWithNullValues() {
         final var url = Url.builder().build();
 

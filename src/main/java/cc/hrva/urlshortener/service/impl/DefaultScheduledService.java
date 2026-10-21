@@ -4,9 +4,11 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import cc.hrva.urlshortener.service.ApiKeyService;
 import cc.hrva.urlshortener.service.IPAddressService;
+import cc.hrva.urlshortener.service.LinkDigestService;
 import cc.hrva.urlshortener.service.ResetTokenService;
 import cc.hrva.urlshortener.service.SafeBrowsingRecheckService;
 import cc.hrva.urlshortener.service.ScheduledService;
+import cc.hrva.urlshortener.service.SendingEmailService;
 import cc.hrva.urlshortener.service.UrlNotificationService;
 import cc.hrva.urlshortener.service.UrlService;
 import cc.hrva.urlshortener.service.UserService;
@@ -27,6 +29,8 @@ public class DefaultScheduledService implements ScheduledService {
     private final ResetTokenService resetTokenService;
     private final UrlNotificationService urlNotificationService;
     private final SafeBrowsingRecheckService safeBrowsingRecheckService;
+    private final SendingEmailService sendingEmailService;
+    private final LinkDigestService linkDigestService;
 
     @Override
     @Scheduled(cron = "0 */1 * * * *")
@@ -77,6 +81,27 @@ public class DefaultScheduledService implements ScheduledService {
     public void recheckUrlsSafeBrowsing() {
         log.info("Scheduled: SafeBrowsing recheck");
         safeBrowsingRecheckService.recheckActiveUrls();
+    }
+
+    @Override
+    @Scheduled(cron = "0 */5 * * * *")
+    public void failInterruptedEmails() {
+        log.info("Scheduled cleanup: interrupted emails");
+        sendingEmailService.failInterruptedEmails();
+    }
+
+    @Override
+    @Scheduled(cron = "0 15 3 * * *")
+    public void forgetOldEmailContent() {
+        log.info("Scheduled cleanup: old email content");
+        sendingEmailService.forgetOldEmailContent();
+    }
+
+    @Override
+    @Scheduled(cron = "0 0 9 * * *")
+    public void sendLinkDigest() {
+        log.info("Scheduled: link digest");
+        linkDigestService.sendDailyDigest();
     }
 
 }

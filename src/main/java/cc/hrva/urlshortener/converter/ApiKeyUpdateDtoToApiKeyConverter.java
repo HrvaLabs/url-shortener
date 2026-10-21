@@ -19,10 +19,18 @@ public class ApiKeyUpdateDtoToApiKeyConverter implements Converter<ApiKeyUpdateD
         final var existingApiKey = apiKeyRepository.findById(apiKeyUpdateDto.getId())
                 .orElseThrow(() -> new ApiKeyNotFoundException(String.format("API key with ID %d has not been found",
                         apiKeyUpdateDto.getId())));
-        existingApiKey.setApiCallsLimit(apiKeyUpdateDto.getApiCallsLimit());
-        existingApiKey.setApiCallsUsed(apiKeyUpdateDto.getApiCallsUsed());
-        existingApiKey.setExpirationDate(apiKeyUpdateDto.getExpirationDate());
-        existingApiKey.setActive(apiKeyUpdateDto.getActive());
+        if (apiKeyUpdateDto.getApiCallsLimit() != null) {
+            existingApiKey.setApiCallsLimit(apiKeyUpdateDto.getApiCallsLimit() > 0 ? apiKeyUpdateDto.getApiCallsLimit() : null);
+        }
+        if (apiKeyUpdateDto.getApiCallsUsed() != null) {
+            existingApiKey.setApiCallsUsed(apiKeyUpdateDto.getApiCallsUsed());
+        }
+        if (apiKeyUpdateDto.getExpirationDate() != null) {
+            existingApiKey.setExpirationDate(apiKeyUpdateDto.getExpirationDate());
+        }
+        if (apiKeyUpdateDto.getActive() != null) {
+            existingApiKey.setActive(apiKeyUpdateDto.getActive());
+        }
 
         return existingApiKey;
     }

@@ -11,6 +11,7 @@ import cc.hrva.urlshortener.exception.UrlValidationException;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.service.SafeBrowsingService;
+import cc.hrva.urlshortener.service.SuspiciousUrlService;
 import cc.hrva.urlshortener.service.UserService;
 import cc.hrva.urlshortener.validator.impl.DefaultUrlValidator;
 import org.junit.jupiter.api.BeforeEach;
@@ -40,9 +41,30 @@ class DefaultUrlValidatorTest {
     @Mock
     private SafeBrowsingService safeBrowsingService;
 
+    @Mock
+    private SuspiciousUrlService suspiciousUrlService;
+
     @BeforeEach
     void setUp() {
-        this.urlValidator = new DefaultUrlValidator(userService, urlRepository, appProperties, safeBrowsingService);
+        this.urlValidator = new DefaultUrlValidator(userService, urlRepository, appProperties, safeBrowsingService, suspiciousUrlService);
+    }
+
+    @Test
+    void rejectsLinksToOtherShorteners() {
+        final var url = Url.builder().longUrl("https://bit.ly/3abc").build();
+        when(suspiciousUrlService.isShortener("https://bit.ly/3abc")).thenReturn(true);
+
+        assertThatThrownBy(() -> urlValidator.checkIfLongUrlIsNotAShortener(url))
+                .isInstanceOf(UrlValidationException.class)
+                .hasMessage("Links to other URL shorteners can't be shortened. Use the final destination instead.");
+    }
+
+    @Test
+    void acceptsDestinationsThatAreNotShorteners() {
+        final var url = Url.builder().longUrl("https://example.com").build();
+        when(suspiciousUrlService.isShortener("https://example.com")).thenReturn(false);
+
+        urlValidator.checkIfLongUrlIsNotAShortener(url);
     }
 
     @Test
@@ -63,15 +85,57 @@ class DefaultUrlValidatorTest {
     @Test
     void shouldValidateShortUrlIsUnique() {
         final String shortUrl = "test";
-        when(urlRepository.existsUrlByShortUrlAndActiveTrue(shortUrl)).thenReturn(false);
+        when(urlRepository.existsUrlByShortUrl(shortUrl)).thenReturn(false);
         assertThatCode(() -> urlValidator.checkIfShortUrlIsUnique(shortUrl))
                 .doesNotThrowAnyException();
     }
 
     @Test
+    void anAliasStaysTakenAfterItsLinkIsDeactivated() {
+        when(urlRepository.existsUrlByShortUrl("promo")).thenReturn(true);
+
+        assertThatThrownBy(() -> urlValidator.checkIfShortUrlIsUnique("promo"))
+                .isInstanceOf(ShortUrlAlreadyExistsException.class)
+                .hasMessage("This short URL is already taken. Try another.");
+    }
+
+    @Test
+    void reactivationIsRefusedWhileAnotherActiveLinkUsesTheAlias() {
+        when(urlRepository.existsUrlByShortUrlAndActiveTrue("promo")).thenReturn(true);
+
+        assertThatThrownBy(() -> urlValidator.checkIfShortUrlIsFreeToReactivate("promo"))
+                .isInstanceOf(ShortUrlAlreadyExistsException.class)
+                .hasMessage("Another active link already uses this short URL.");
+    }
+
+    @Test
+    void ownersCannotReactivateALinkBlockedAsUnsafe() {
+        final var owner = userWithRole(2L, "ROLE_USER");
+        final var url = Url.builder().owner(owner).threatType(cc.hrva.urlshortener.model.enums.ThreatType.MALWARE).build();
+        when(userService.getUserFromToken()).thenReturn(owner);
+
+        assertThatThrownBy(() -> urlValidator.checkIfUrlNotBlocked(url))
+                .isInstanceOf(UrlValidationException.class)
+                .hasMessage("This link was blocked as unsafe. Contact support if you think that's a mistake.");
+    }
+
+    @Test
+    void adminsMayReactivateABlockedLink() {
+        final var url = Url.builder().threatType(cc.hrva.urlshortener.model.enums.ThreatType.MALWARE).build();
+        when(userService.getUserFromToken()).thenReturn(userWithRole(3L, "ROLE_ADMIN"));
+
+        assertThatCode(() -> urlValidator.checkIfUrlNotBlocked(url)).doesNotThrowAnyException();
+    }
+
+    @Test
+    void unblockedLinksPassTheBlockCheck() {
+        assertThatCode(() -> urlValidator.checkIfUrlNotBlocked(Url.builder().build())).doesNotThrowAnyException();
+    }
+
+    @Test
     void shouldFailValidateShortUrlIsUnique() {
         final String shortUrl = "test";
-        when(urlRepository.existsUrlByShortUrlAndActiveTrue(shortUrl)).thenReturn(true);
+        when(urlRepository.existsUrlByShortUrl(shortUrl)).thenReturn(true);
         assertThatThrownBy(() -> urlValidator.checkIfShortUrlIsUnique(shortUrl))
                 .isInstanceOf(ShortUrlAlreadyExistsException.class)
                 .hasMessage("This short URL is already taken. Try another.");

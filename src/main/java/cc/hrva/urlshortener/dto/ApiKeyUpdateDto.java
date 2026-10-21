@@ -15,7 +15,7 @@ public class ApiKeyUpdateDto {
     @NotNull(message = "API key ID is required")
     @Schema(description = "Unique identifier of the API key to update", example = "1")
     private Long id;
-    @Schema(description = "Maximum number of API calls allowed", example = "2000")
+    @Schema(description = "Maximum number of API calls allowed; 0 means unlimited, null leaves it unchanged", example = "2000")
     private Long apiCallsLimit;
     @Schema(description = "Number of API calls used", example = "100")
     private Long apiCallsUsed;
