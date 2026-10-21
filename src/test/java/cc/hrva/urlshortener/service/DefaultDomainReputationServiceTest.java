@@ -41,8 +41,8 @@ class DefaultDomainReputationServiceTest {
 
     private static final String KEY = "dqs0secret0key";
     private static final String QUERY_SUFFIX = "." + KEY + ".dbl.dq.spamhaus.net";
-    private static final String HOST = "login.secret-destination.example";
-    private static final String DOMAIN = "secret-destination.example";
+    private static final String HOST = "login.secret-destination.com";
+    private static final String DOMAIN = "secret-destination.com";
     private static final Duration ONE_HOUR = Duration.ofHours(1);
 
     private final InMemoryRedis redis = new InMemoryRedis();
@@ -239,7 +239,7 @@ class DefaultDomainReputationServiceTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"Login.Secret-Destination.EXAMPLE.", "https://LOGIN.secret-destination.example:443/path?q=1"})
+    @ValueSource(strings = {"Login.Secret-Destination.COM.", "https://LOGIN.secret-destination.com:443/path?q=1"})
     void hostIsNormalisedBeforeTheLookup(final String host) {
         domainReputationService.lookup(host);
 
