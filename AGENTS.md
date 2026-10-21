@@ -27,20 +27,44 @@ Idempotent — safe on restart. Liquibase seeds `ROLE_USER` and `ROLE_ADMIN` aut
 
 ## Local Dependencies
 - **Postgres** (`localhost:5432`, `root:root`, db `url_shortener`)
-- **Redis** (`localhost:6379` — overridden in `application-local.yaml`, no longer needed to set manually)
+- **Redis** (`localhost:6379` — overridden in `application-local.yaml`, no longer needed to set manually), 6.2 or newer
 - **MailHog** (`localhost:8025`, SMTP on `localhost:1025`)
+- The app downloads the enabled blocklist sources into Redis at startup (each source's `memoryBytes` shows the cost) and needs outbound https for them, RDAP and the redirect checks.
+
+## End-to-end check of the link checks
+No test boots the whole app, so check it by hand on a throwaway Postgres 18 and Redis 8 without Docker (Homebrew binaries; any free ports, kept off 5432, 6379 and 8080):
+```bash
+E2E=$(mktemp -d)
+/opt/homebrew/opt/postgresql@18/bin/initdb -D "$E2E/pg" -U e2e --auth=trust
+/opt/homebrew/opt/postgresql@18/bin/pg_ctl -D "$E2E/pg" -l "$E2E/pg.log" -o "-p 55432 -c listen_addresses=127.0.0.1 -c unix_socket_directories=''" start
+/opt/homebrew/opt/postgresql@18/bin/createdb -h 127.0.0.1 -p 55432 -U e2e url_shortener
+redis-server --port 56379 --save '' --appendonly no --daemonize yes --logfile "$E2E/redis.log"
+mvn -q -DskipTests package && cp target/url-shortener-*.jar "$E2E/app.jar"
+java -jar "$E2E/app.jar" --spring.profiles.active=local --server.port=18080 \
+  --spring.datasource.url=jdbc:postgresql://127.0.0.1:55432/url_shortener --spring.datasource.username=e2e --spring.datasource.password= \
+  --spring.data.redis.port=56379 --app.mcp.issuer=http://localhost:18080 \
+  --spring.security.oauth2.client.registration.google.client-id=dummy --spring.security.oauth2.client.registration.google.client-secret=dummy
+```
+- Sign in as `admin@localhost` / `admin123` (`POST /api/v1/auth/login`) for the admin endpoints; `GET /api/v1/admin/blocklist-sources` shows each source's download.
+- Send `CF-Connecting-IP: <ip>` to act as different visitors: every anonymous create counts toward that network's 10 per hour, refusals included.
+- Run the jar from a copy, so `mvn clean` doesn't pull it from under the running app.
 
 ## Testing
-- `mvn test` (or `mvn -B verify`) — 553 tests, JUnit 5 + Mockito + AssertJ
-- Mostly plain `@ExtendWith(MockitoExtension.class)` unit tests. The MCP connector's security tests are `@SpringBootTest` + MockMvc through the real filter chains: each class boots its own nested `TestApplication` on embedded H2 with a subset Liquibase changelog (`db/changelog/017-oauth2-authorization-server.xml` or `db/mcp-connector-test-changelog.xml`) and mocks the rest
+- `mvn test` (or `mvn -B verify`) — 1508 tests, JUnit 5 + Mockito + AssertJ
+- Mostly plain `@ExtendWith(MockitoExtension.class)` unit tests. Each `@SpringBootTest` class boots its own nested `TestApplication` (a trimmed context) on embedded H2 and mocks the rest:
+  - MockMvc through the real filter chains, with a subset Liquibase changelog (`db/changelog/017-oauth2-authorization-server.xml` or `db/mcp-connector-test-changelog.xml`): the MCP connector's security tests, `SecurityTxtControllerTest`, `ReportEndpointSecurityTest`
+  - the full Liquibase changelog: `DynamicLinkChecksSchemaTest` (024's tables, seeds and constraints), `DefaultScammerSignalServiceTest`
+  - a Hibernate-generated schema, no Liquibase: `UrlSpecificationTest`, `LinkReviewSpecificationTest`, `AdminPageQueriesTest` (statement counts of the admin pages)
+- `UrlShortenerApplicationTests` has no test methods, so no test boots the whole app. The real app on Postgres and Redis is checked by hand (see End-to-end check of the link checks).
 - No `@ActiveProfiles`, no Testcontainers
 - `src/test/` mirrors `src/main/` package structure
 
 ## Package Structure
 ```
 cc.hrva.urlshortener
-├── client/          # GoogleSafeBrowsingApi (external API client)
-├── configuration/   # Beans, props, cache, security, web config, exception handler
+├── audit/           # AdminAuditAspect
+├── client/          # GoogleSafeBrowsingApi, PublicHttpFetcher (public-address guard), RedirectFollower
+├── configuration/   # Beans, props, cache, security, web config, exception handler, executors, Redis client
 ├── controller/      # REST controllers
 ├── converter/       # DTO↔entity converters (Spring Converter interface)
 ├── dto/             # Request/response DTOs (records and classes)
@@ -50,7 +74,8 @@ cc.hrva.urlshortener
 ├── model/           # JPA entities, codebook, enums
 ├── repository/      # Spring Data JPA repositories
 ├── security/        # JWT filter, token provider, auth entry point, ClientIpResolver
-├── service/         # Interfaces + impl/ implementations
+├── service/         # Interfaces + impl/ implementations; blocklist/ (download, parse, Redis sets)
+├── util/            # DomainNames, LinkKeys, PublicAddresses, RedirectLocations
 └── validator/       # Interfaces + impl/ validators
 ```
 **No `beans/` package** — contents split into `security/`, `client/`, `configuration/`.
@@ -62,7 +87,7 @@ cc.hrva.urlshortener
 - **Pagination**: `@PageableDefault(size=20)` on all list endpoints — pass `?page=0&size=20` query params
 - **Response DTOs**: Controllers return `UrlResponse`, `ApiKeyResponse`, `UserDto` — NOT JPA entities directly
 - **Error format**: `{"error": "message"}` via `GlobalExceptionHandler` (`@ControllerAdvice`)
-- **Exception → HTTP status mapping**: `UserNotFoundException`/`ApiKeyNotFoundException` → 404, `EmailExistsException`/`ShortUrlAlreadyExistsException` → 409, `NoAuthorizationException` → 403, `BadCredentialsException` → 401, `CommonException` (catch-all for all custom exceptions not handled above) → 400, everything else → 500.
+- **Exception → HTTP status mapping**: `UserNotFoundException`/`ApiKeyNotFoundException`/`BlocklistSourceNotFoundException`/`DomainRuleNotFoundException` → 404, `EmailExistsException`/`ShortUrlAlreadyExistsException` → 409, `NoAuthorizationException` → 403, `BadCredentialsException` → 401, `RateLimitExceededException` → 429, a malformed body, a mistyped or missing parameter → 400, an unsupported media type → 415, `CommonException` (catch-all for all custom exceptions not handled above) → 400, everything else → 500.
 - **Validation errors**: Return `{"field": "message"}` map on 400.
 
 ## Key Endpoints
@@ -99,6 +124,21 @@ cc.hrva.urlshortener
 | GET | `/api/v1/admin/email-log` | ROLE_ADMIN | Paginated email delivery log |
 | GET | `/api/v1/admin/login-attempts` | ROLE_ADMIN | IP → attempt count map |
 | DELETE | `/api/v1/admin/login-attempts` | ROLE_ADMIN | Clear all rate limits |
+| GET | `/api/v1/users` | ROLE_ADMIN | Users page; `?possibleScammer=true` keeps the accounts with the signal (filtered in SQL, so totals are right) |
+| GET | `/api/v1/admin/blocklist-sources` | ROLE_ADMIN | Sources with `domainCount`, `listVersion`, `lastSuccessUrl`, `lastError` and `memoryBytes` (Redis `MEMORY USAGE`) |
+| POST | `/api/v1/admin/blocklist-sources` | ROLE_ADMIN | Add `{name, url, kind, action, enabled, refreshIntervalHours, fallbackUrls}`; https and public addresses only, up to 3 fallbacks, interval 1–168 h |
+| PUT / DELETE | `/api/v1/admin/blocklist-sources/{id}` | ROLE_ADMIN | Edit / remove; disabling or removing drops the Redis set |
+| POST | `/api/v1/admin/blocklist-sources/{id}/refresh` | ROLE_ADMIN | Download now (synchronous), returns the source |
+| GET | `/api/v1/admin/domain-rules` | ROLE_ADMIN | `?type=BLOCK` or `ALLOW` |
+| POST | `/api/v1/admin/domain-rules` | ROLE_ADMIN | `{domain, type, reason}` → `{rule, linksAffected}`. A Block deactivates the matching links at once; an Allow resolves the domain's queue entries and restores its `BLOCKLIST`, `SCAM_SIGNALS` and `DOMAIN_RULE` blocks after a fresh check |
+| DELETE | `/api/v1/admin/domain-rules/{id}` | ROLE_ADMIN | Remove a rule (links stay as they are) |
+| GET | `/api/v1/admin/review-queue` | ROLE_ADMIN | Open entries, newest first; `?reason=` (substring) and `?olderThanDays=` |
+| POST | `/api/v1/admin/review-queue/{urlId}/resolve` | ROLE_ADMIN | By link id. `{action: OK \| TRUST_DOMAIN \| BLOCK_LINK \| BLOCK_DOMAIN \| BLOCK_USER, domain?}` → 204. Block domain defaults to the registrable domain, Trust domain to the exact host |
+| POST | `/api/v1/admin/users/{id}/block`, `/unblock` | ROLE_ADMIN | Deactivate the account and block its links (`USER_BLOCKED`), or undo both → `{linksAffected}` |
+| GET | `/api/v1/admin/possible-scammers` | ROLE_ADMIN | Ids of the accounts with the signal |
+| POST | `/api/v1/admin/url-check` | ROLE_ADMIN | `{url}` → `{outcome, reasons, blockReason, blockDetail, host, registrableDomain}`, every matching rule, list and heuristic |
+| POST | `/api/v1/reports` | Public, 5/h per network | Report a link `{shortUrl, category: PHISHING \| MALWARE \| SPAM \| OTHER, details (≤ 500)}`: opens or extends its review entry. Always 202 for a well-formed report, whether or not the link exists; never blocks by itself. Body capped at 64 KB |
+| GET | `/{short}` | None | Redirect after the click check. A blocked, expired, over-limit, deactivated or missing link → 302 `{frontendUrl}/unavailable?s={short}&reason=blocked\|expired\|limit\|inactive\|missing` (the list is never named) |
 | GET | `/api/changelog` | Public | Changelog JSON |
 | GET | `/.well-known/security.txt` | Public | RFC 9116 abuse contact (`abuse@hrva.cc`), `text/plain; charset=utf-8`; `Expires` is 365 days from the request |
 | GET | `/actuator/health` | Public | Health check |
@@ -130,7 +170,7 @@ MCP, OAuth 2.1, login-bridge and Connected-apps endpoints: see MCP connector.
 - Login rate limiting: Guava cache, 20 attempts/day per IP, 1-day expiry. Wrong 2FA codes also count per account (`2fa:<userId>` key) and stop further checks once the limit is hit.
 - Public lookups (`GET /urls/{short}`, `/peek`, `/preview`, `/qr`) never return the owner's email or tags; a password-protected link's destination is left out (no preview fetched, no visit recorded) until `/unlock`. `/qr` encodes the short link (`app.server-url` + alias), size clamped to 64–1024.
 - `/unlock` is rate limited through `RedisFixedWindowRateLimiter`: 10 attempts per client network and 50 per link per 15 minutes (allowed if Redis is down).
-- Link creation is rate limited in `DefaultUrlService` through `RedisFixedWindowRateLimiter`, per hour: 10 links per client network without an account (`create:anon`, IP from `ClientIpResolver` in `UrlController`), 60 per account with one (`create:user:<id>`, shared by the web, API keys and the signed-in MCP `shorten_url`). Admins are exempt and each link of `/urls/bulk` counts. Over the limit → 429 `"You've created a lot of links in a short time. Try again in an hour."` Allowed if Redis is down. Web and MCP creates are counted before the URL checks; API-key creates after the key checks, before the key's use is recorded. `/mcp/anon` passes no client IP, so only its own limit applies. `RateLimitExceededException` is a 429 everywhere, `/unlock` included.
+- Link creation is rate limited in `DefaultUrlService` through `RedisFixedWindowRateLimiter`, per hour: 10 links per client network without an account (`create:anon`, IP from `ClientIpResolver` in `UrlController`), 60 per account with one (`create:user:<id>`, shared by the web, API keys and the signed-in MCP `shorten_url`). Admins are exempt and each link of `/urls/bulk` counts. Over the limit → 429 `"You've created a lot of links in a short time. Try again in an hour."` Allowed if Redis is down. Cheap refusals come first, so junk can't trigger the slow link check: an API key is checked (unknown, expired, revoked, over its limit) → the create rate limit → the anonymous-disabled refusal → the URL checks (`validateUrl`, up to a few seconds on a cold RDAP or Spamhaus cache) → the write transaction, where an API key's use is recorded. `/mcp/anon` passes no client IP, so only its own limit applies. `RateLimitExceededException` is a 429 everywhere, `/unlock` included.
 - Link previews only fetch public addresses: loopback, private, link-local, CGNAT and ULA targets are refused, and each redirect hop (max 3) is re-checked.
 - New passwords need at least 8 characters (register, reset, change). `User.password` is `@JsonIgnore`d.
 - Direct `Cache` calls in `DefaultUrlService` go through `getFromCache`/`putInCache`/`evictFromCache`, which log and fall back to the database when Redis fails; a visit that reaches the limit evicts the cached entry.
@@ -148,7 +188,7 @@ AI apps (Claude, Claude Code, the MCP Inspector) use hrva.cc over MCP. The app i
 ### Endpoints
 | Method | Path | Auth | Notes |
 |--------|------|------|-------|
-| POST | `/mcp` | Bearer MCP access token | Signed-in MCP server, STATELESS protocol. Tools `list_links` (20 per page), `shorten_url` (always adds the tag `ai`), `link_stats` (owner only, even for admins). Run as the token's user. Other methods → 405 |
+| POST | `/mcp` | Bearer MCP access token | Signed-in MCP server, STATELESS protocol. Tools `list_links` (20 per page), `shorten_url` (always adds the tag `ai`), `link_stats` (owner only, even for admins), and the admin-only moderation tools (see Moderation tools). Run as the token's user. Other methods → 405 |
 | POST | `/mcp/anon` | None (a bearer token is ignored) | Anonymous MCP server, STATELESS, tool `shorten_url` only. Refuses every call unless `app.anonymous-url-creation-enabled` is true |
 | GET | `/.well-known/oauth-protected-resource/mcp` | Public | Resource metadata; the 401 from `/mcp` points here in `WWW-Authenticate` |
 | GET | `/.well-known/oauth-authorization-server` | Public | Authorization server metadata (adds `none` to `token_endpoint_auth_methods_supported`). `/.well-known/openid-configuration` and `/.well-known/oauth-authorization-server/**` → 404 |
@@ -208,7 +248,18 @@ Redis fixed windows (`RedisFixedWindowRateLimiter`, key `rate-limit:<name>:<sha2
 - **Signed-in `/mcp` `shorten_url`**: counts toward the account's 60 links per hour (see Security). That limit is not MCP-specific and lets the create through when Redis is down; the refusal is a tool error with its text.
 - The client IP comes from `ClientIpResolver`, which trusts `CF-Connecting-IP` (see Security). That is safe only while the origin accepts traffic from Cloudflare alone.
 - **Body size**: `McpRequestBodyLimitFilter` (a servlet filter before `DcrEmptyScopeFilter` and Spring Security) caps POST bodies on `/oauth2/register`, `/mcp` and `/mcp/anon` at 64 KB. A larger `Content-Length` → 413 `{"error":"request_too_large"}`; a body without a length (chunked) fails once it passes 64 KB: 413 on `/oauth2/register`, 400 "Invalid message format" from the MCP transport. `DcrEmptyScopeFilter` also reads at most 64 KB on its own.
-- Redis must be 6.2 or newer (`GETDEL`).
+- Redis must be 6.2 or newer (`GETDEL`, and `SMISMEMBER` for the blocklists).
+
+### Moderation tools
+`mcp/tools/ModerationTools`, beside `LinkTools` on `/mcp` only (never on `/mcp/anon`), so an admin can moderate from Claude or ChatGPT. The queue holds text written by scammers that could carry instructions aimed at the assistant, so MCP may only **read and block**:
+- Read-only: `moderation_summary` (queue size and visitor reports, blocks in 24 h, possible scammers, failing enabled sources), `review_queue` (20 per page, `reason` filter; visitor report text is left out), `possible_scammers`, `check_url` (the `explain` verdict).
+- Destructive: `block_link`, `block_domain`, `block_user`, `delete_link`.
+- **Admin only:** every tool first requires `ROLE_ADMIN` on the token's user (`McpUserResolver`) and otherwise refuses with "Moderation tools are for hrva.cc admins only." The tools are still listed to non-admin sessions.
+- **Nothing loosens protection:** no Looks fine, Trust domain, Allow rules or unblocking; those stay in the dashboard. Only the dashboard can undo an MCP block.
+- **Cap:** `block_domain` and `block_user` refuse, changing nothing, when more than 50 active links would be affected, and point to the dashboard. `block_user` refuses admin accounts.
+- **`block_domain` needs evidence:** at least one link on the domain (subdomains included) open in the queue or already blocked (R52), and every affected active link open in the queue (R52b), so a flagged subdomain can't unlock a big parent domain such as `github.io`.
+- **Masking:** users appear as a masked email plus id (`r***@gmail.com #27`) and tools take user ids, never emails; destinations appear as host plus path (at most 80 characters, delimited and percent-encoded), never the query or fragment; no IPs or visit details.
+- Every action goes through `ModerationService` into the audit log with `via: mcp`.
 
 ### Cleanup and revocation
 - **`DcrClientCleanupJob`**, daily at 03:30: deletes fully expired `oauth2_authorization` rows, then DCR clients registered more than 30 days ago that have no authorization left (with their consent rows). It never deletes a client with a live authorization.
@@ -223,7 +274,7 @@ Security tests go through the real filter chains (`@SpringBootTest` + MockMvc, n
 - `mcp/bridge/LoginBridgeTest` (real port): the bridge (410, 409, 403 in another browser, 400 on replay, session binding, JWT never in a `Location`, 503 when Redis is down), and neither an MCP token nor the bridged session authenticates the API.
 - `mcp/anon/AnonymousMcpTest`: `/mcp/anon` tool set, ignored tokens, rate limit (exact text, Cloudflare client, fails closed), the 64 KB body cap on all three unauthenticated endpoints, unknown method names never logged.
 - `mcp/apps/ConnectedAppsTest`: list, disconnect, refresh racing a disconnect, DCR rate limit, cleanup.
-- Unit tests: `mcp/tools/LinkToolsTest`, `McpToolResultsTest`, `mcp/anon/RateLimiterTest`, `McpMessageBodyLogFilterTest`, `McpRequestBodyLimitFilterTest`, `security/ClientIpResolverTest`, `configuration/properties/AppPropertiesTest`. Helpers: `mcp/McpAccessTokens`, `mcp/bridge/InMemoryRedis`.
+- Unit tests: `mcp/tools/LinkToolsTest`, `ModerationToolsTest` (admin gate, masking, cap, evidence), `McpToolResultsTest`, `mcp/anon/RateLimiterTest`, `McpMessageBodyLogFilterTest`, `McpRequestBodyLimitFilterTest`, `security/ClientIpResolverTest`, `configuration/properties/AppPropertiesTest`. Helpers: `mcp/McpAccessTokens`, `mcp/bridge/InMemoryRedis`.
 
 ### End-to-end check (`scripts/mcp-e2e.sh`)
 Runs the whole flow against a throwaway stack: Postgres 18 and Redis 8 in disposable containers (`docker run --rm`, random `127.0.0.1` ports, label `hrva-mcp-e2e`) and the jar with the `local` profile on port 8091 (issuer `http://localhost:8091`). It never touches `docker/docker-compose.yml`, its `db` volume or ports 5432, 6379 and 8080, and a `trap` removes the containers, the app and the temp files on exit.
@@ -248,7 +299,9 @@ Not automatable (interactive sign-in). With the local dev stack, the app on port
 3. If no new row appears and the authorize request carries an `https://` `client_id`, Claude used Client ID Metadata Documents instead of DCR: open a follow-up to enable `mcp.cimd(true)`.
 
 ## Scheduled Tasks
-Jobs run on a 4-thread scheduler (`spring.task.scheduling.pool.size: 4` in `application.yaml`), so a long job such as the hourly blocklist refresh can't stall the per-minute ones.
+Jobs run on a 4-thread scheduler (`spring.task.scheduling.pool.size: 4` in `application.yaml`, threads `scheduling-1`…`4`), so a long job such as the hourly blocklist refresh can't stall the per-minute ones.
+- **Blocklist refresh**: Every hour, `refreshDue` downloads each enabled source whose own interval (`refreshIntervalHours`, 1–168, default 6; 5 minutes' tolerance) has passed or whose Redis set is missing. At startup `reloadMissing` (`@Async`, on `ApplicationReadyEvent`) downloads every enabled source without a set, so a Redis restart or `FLUSHALL` heals itself.
+- **Click-check lists**: Every 5 minutes, at startup and after any source or rule change (`BlocklistConfigurationChangedEvent`), `DefaultClickCheckService.reload` re-reads the enabled `BLOCK` source ids and the Allow-rule domains into memory.
 - **URL expiry**: Daily at 8 AM, sends email notification for URLs expiring within 24 hours (configurable via `app.url-expiration-notification-hours`).
 - **IP cleanup**: Every minute, deactivates and deletes old IP address records.
 - **Reset tokens**: Every minute, deactivates and deletes expired password reset tokens.
@@ -256,16 +309,17 @@ Jobs run on a 4-thread scheduler (`spring.task.scheduling.pool.size: 4` in `appl
 - **API key deactivation**: Every hour, deactivates expired API keys.
 - **User deactivation**: Daily at 10 AM, deactivates unused accounts after configured inactivity period.
 - **MCP cleanup**: Daily at 03:30, deletes expired OAuth authorizations and DCR clients unused for 30 days (`DcrClientCleanupJob`).
-- **SafeBrowsing recheck**: Daily at 02:00, rechecks every active link (by id, so deactivations mid-run don't skip rows); flagged links are deactivated, evicted from the cache and their owner emailed.
+- **Nightly scan** (`DefaultSafeBrowsingRecheckService`): Daily at 04:30, walks every active link by id (so deactivations mid-run don't skip rows) through the link check and Safe Browsing. List hits, admin Block rules and Safe Browsing block the link (deactivated, evicted from the cache, owner emailed); a `SCAM_SIGNALS` verdict and every flag go to the review queue instead, unless the same reasons were already marked fine. It then follows the redirect chains of up to 500 active links whose `chainCheckedAt` is null or over 7 days old, oldest first. Once Safe Browsing fails, the run stops calling it, finishes with the link checks only and skips the redirect checks.
 - **Interrupted emails**: Every 5 minutes, `email_log` rows still `SENDING` after 10 minutes become `FAILED` ("interrupted") so they can be resent.
-- **Link digest**: Daily at 9 AM, emails `app.contact-email` the links created in the last 24 h that come from accounts younger than 7 days or that `SuspiciousUrlService` flags. Nothing is sent when there is nothing to review.
+- **Decisions email** (`DefaultLinkDigestService`): Daily at 9 AM, emails `app.contact-email` "N decisions waiting on hrva.cc", only when something needs a decision: an open review entry, a link blocked automatically in the last 24 h (any block reason but `ADMIN` and `USER_BLOCKED`), or an enabled source whose last download failed. It lists the open count and the visitor reports among them, the newest 10 entries (each linking to the queue page), up to 10 possible scammers, the automatic blocks and the failing sources, plus an information-only section of links from accounts younger than 7 days that never triggers sending alone. No link in it acts by itself (mail scanners prefetch links).
 
 ## Config Profiles
 - **`local`**: `localhost` Postgres/Redis/MailHog, hardcoded JWT secret, dev users auto-created, verbose SQL logging. MCP issuer `http://localhost:8080`, a committed dev-only signing key (not a secret; refused at startup outside `local`) and anonymous link creation on, so `/mcp/anon` works. Auto-imports `application-oauth.yaml` for SSO secrets.
 - **`prod`**: Remote Postgres, no dev defaults. Secrets injected externally.
 - **`oauth`**: Optional profile holding OAuth2 client credentials. Imported by `local` profile via `spring.config.import`.
 - Default: `application.yaml` sets base values (cache TTL, URL length, API limits, etc.).
-- Tests run without any profile; only the MCP `@SpringBootTest` classes and `UrlSpecificationTest` (JPA on H2 with Hibernate-generated schema, no Liquibase) start a (trimmed) application context.
+- Tests run without any profile; only the `@SpringBootTest` classes listed under Testing start a (trimmed) application context.
+- `app.blocklists.max-redis-mb` (default 256): the Redis budget across all blocklist sets when Redis has no `maxmemory`.
 
 ## New Models (recently added)
 
@@ -287,12 +341,30 @@ Jobs run on a 4-thread scheduler (`spring.task.scheduling.pool.size: 4` in `appl
 
 ### Abuse handling
 - `SuspiciousUrlService` flags destinations by host: other shorteners (and our own host), free dynamic-DNS hosts, raw IPs, punycode, lookalikes of known brands on someone else's domain (`njuskaio.cam`, `jofogas.cards`), login/verification lures, high-risk TLDs. Flags only; it never deactivates anything.
-- `GET /urls/all` (admin) returns `suspiciousReasons` per link (omitted when empty); searching matches the short link, destination and owner email; `?anonymous=true` keeps links without an owner; sort by owner with `sort=owner.email,asc`.
+- `GET /urls/all` (admin) returns `suspiciousReasons` per link (omitted when empty), and `blockReason`, `reviewOpen`, `ownerPossibleScammer` and `finalUrl` (omitted when null); searching matches the short link, destination and owner email; `?anonymous=true` keeps links without an owner; sort by owner with `sort=owner.email,asc`.
 - New links and admin destination changes pointing at a generic shortener (bit.ly, tinyurl, …) or at hrva.cc are rejected (`checkIfLongUrlIsNotAShortener`). Platform share links (t.co, lnkd.in, goo.gl) are only flagged, and Google's `*.app.goo.gl` share links are neither.
-- Links flagged by the nightly Safe Browsing recheck get `threatType` (status BLOCKED); owners can't reactivate them, admins can after a fresh Safe Browsing check. Every reactivation re-checks Safe Browsing and that no other active link holds the alias.
+- A blocked link has a `blockReason` (`SAFE_BROWSING`, which also sets `threatType`, `BLOCKLIST`, `DOMAIN_RULE`, `ADMIN`, `USER_BLOCKED`, `SCAM_SIGNALS`), a `blockDetail` (the list, rule or signal) and `blockedAt`; its status is BLOCKED. Owners can't reactivate it; admins can, which re-runs the checks unless the domain is allow-listed. Every reactivation re-checks Safe Browsing and that no other active link holds the alias. A blocked link's owner is emailed (`url_blocked.html`), except when the whole account is blocked.
 - A custom alias stays taken while any row (active or not) holds it, so an expired link's alias can't be claimed by someone else.
+- **Link checks** (`LinkCheckService.check`, called by `validateUrl` and `updateUrl` on every create path, MCP included, before the write transaction; `explain` runs every lookup and lists every match for the url-check and `check_url`). The verdict is for the destination host, matched on the host and each parent domain, lowercased, trailing dot stripped. In order:
+  1. **Allowed**: an admin Allow rule skips the domain lists, domain age, Spamhaus and the heuristics. The most specific matching rule wins, so a Block on `evil.example.com` beats an Allow on `example.com`. Exception (R35): an exact-link entry on an enabled `LINKS` Block source still blocks, because it names that one URL.
+  2. **Block**: an admin Block rule (`DOMAIN_RULE`), an enabled `BLOCK` source (`BLOCKLIST`, the source name), Spamhaus DBL phish, malware or botnet (`BLOCKLIST`, `Spamhaus DBL: <type>`), or a domain younger than 30 days with a lookalike or login-lure heuristic (`SCAM_SIGNALS`).
+  3. **Flag**: a lookalike plus a lure on an older domain, an enabled `FLAG` source, Spamhaus spam or an abused legitimate domain, a domain younger than 30 days, or any other `SuspiciousUrlService` reason.
+  4. Otherwise clean. An unknown domain age never counts. Safe Browsing and the shortener refusals run whatever the verdict.
+- On create or a destination change, a Block → 400 "This destination is on a blocklist and can't be shortened. If you think that's a mistake, contact us." (the list is never named); a Flag saves the link and opens a review entry with its reasons.
+- **Domain age** (`DefaultDomainAgeService`): RDAP through the IANA bootstrap registry for the registry domain, 3 s timeout; failures and registries without dates (`.de`, `.hr`) are unknown. **Spamhaus DBL** (`DefaultDomainReputationService`): only with `SPAMHAUS_DQS_KEY`, `<name>.<key>.dbl.dq.spamhaus.net` for the host and its registrable domain, 2 s timeout; on create and nightly, never on a click.
+- **Blocklist sources** (`blocklist_source`, managed in the dashboard; nothing depends on HaGeZi). Kind `DOMAINS`: plain, hosts (`0.0.0.0 d`), adblock (`||d^`) and wildcard (`*.d`) lines; `@@` exceptions and full-URL lines are skipped. Kind `LINKS`: one `http(s)://` link per line, or a CSV's `url` column; keys drop the scheme, default port and fragment (`LinkKeys`) and match with or without the query. Downloads: https and public addresses only (re-checked on every hop), the main URL then up to 3 fallbacks in order, ETag/Last-Modified sent only to `lastSuccessUrl`, caps of 100 MB and 5 M entries. Zero entries, or fewer than 90 % of the count a header declares, fail. A failure keeps the old set and records `lastError` (every failed attempt, even when a fallback then succeeded). **Memory guard**: a load that would take Redis past 80 % of `maxmemory`, or past `app.blocklists.max-redis-mb` across all sets when there is no `maxmemory` (estimated at 100 bytes per domain, 200 per link), is refused.
+- **Seeds** (024): HaGeZi TIF medium and Fake (`BLOCK`), badware hosters, DynDNS and URL shorteners (`FLAG`), every 6 h from `hagezi-mirror.dnsbunker.org` with the same GitHub path as fallback; URLhaus (1 h), OpenPhish (12 h) and PhishTank (6 h) as `LINKS` `BLOCK`; Phishing.Database active domains (`FLAG`, 24 h). Block rules for `njuskaio.cam`, `jofogas.cards`, `info-auth.com` and `app-onlinebanking.de`.
+- **Click check** (`ClickCheckService.mayRedirect`): before a visitor is sent anywhere (the redirect from the cache or the database, `/unlock`), the destination's domains and link keys are looked up in the enabled `BLOCK` sources' sets in one pipelined `SMISMEMBER` round trip. A match blocks the link (`BLOCKLIST`, the source name, via `click`) and the visitor goes to `/unavailable?reason=blocked`; `GET /urls/{short}`, `/peek`, `/preview` and `/qr` answer a match like a missing link. An Allow rule skips the domain sets. A Redis failure lets the visitor through; a failure while blocking still refuses. `FLAG` sources, RDAP, Spamhaus, heuristics and Safe Browsing are never used on a click.
+- **Domain rules** (`domain_rule`, a rule covers the domain and its subdomains): a Block deactivates and blocks every active matching link (evicted from the cache, owner emailed, audited), sparing links a more specific Allow trusts; an Allow resolves the domain's open queue entries as `DOMAIN_TRUSTED` and restores its `BLOCKLIST`, `SCAM_SIGNALS` and `DOMAIN_RULE` blocks after a fresh check, never `SAFE_BROWSING` or `ADMIN` ones. Block user deactivates the account and blocks its links as `USER_BLOCKED` (one account email, no per-link emails, never an admin); unblocking restores those links.
+- **Review queue** (`link_review`): one open entry per link with newline-joined reasons; a new reason extends it. After Looks fine (`OK`) the link re-enters only with a new reason. A destination change resolves the open entry as `DESTINATION_CHANGED` and re-flags if needed. Visitor reports add `reported by a visitor: <category>[: details]` (at most 20 report lines). `ReviewQueueService.flag` and `resolveOpen` must never run inside a read-only transaction, which would silently drop the write.
+- **Possible scammer** (`ScammerSignalService`, computed, never acted on automatically): an account younger than 7 days with 2 or more flagged or blocked links, 3 or more blocked links in total, or 10 or more links within 24 h of signup. Deactivated accounts are left out. The id set is a 60 s snapshot, refreshed on block and unblock.
+- **Redis keys** (all through `StringRedisTemplate`; every caller is fail-soft, see Performance):
+  - `blocklist:source:<id>`: one set per source (domains, or link keys without the scheme), loaded into `blocklist:source:<id>:loading` (expires after 2 minutes) and swapped in by a Lua script that checks `SCARD`, then `RENAME`s and `PERSIST`s. Memory is read with `MEMORY USAGE` inside Lua.
+  - `rdap:<registry domain>` (30 days with a date, 1 day without one, 1 hour after a failure) and `rdap:bootstrap` (1 day)
+  - `dbl:<name>`: Spamhaus answers, 1 hour
+  - `rate-limit:create:anon:<sha256 of the network>`, `rate-limit:create:user:<id>`, `rate-limit:report:<sha256 of the network>`, beside the MCP and `/unlock` ones
 - **Redirect chains** (`RedirectChainService`): after a create or a destination change (`@Async("redirectCheckExecutor")`, 2 threads and a 200-check queue, once the save has committed; a full queue is logged and left to the nightly), and in the nightly scan for up to 500 active links whose `chainCheckedAt` is null or over 7 days old, the destination's HTTP redirects are followed: at most 5 hops in 5 s, GET with headers only, http or https, each hop through the public-address guard (a refused destination is a fetch error; a refused later hop ends the chain unrequested). A `Location` is read like a browser does before the guard sees it (`RedirectLocations`: UTF-8 bytes, `\` as `/`, space, non-ASCII and `"<>{}|^` percent-encoded, IDN host to ASCII). Every hop after the destination goes through `LinkCheckService.check` and Safe Browsing and the worst hop wins: a block blocks the link (`via redirect to <host>`), a flag or scam signals queue it (`redirects to <host>: <reason>`), unless the link was repointed meanwhile. `finalUrl` and `chainCheckedAt` are stamped with targeted updates; a fetch error stamps only `chainCheckedAt`, and a Safe Browsing outage stamps nothing (the nightly skips or stops its redirect checks) so a later run retries. The fetcher is the `RedirectFollower` bean (not a second `PublicHttpFetcher` bean, which would break by-type injection).
-- **Executors** (`AsyncExecutorConfiguration`): declaring `redirectCheckExecutor` switches off Boot's own `applicationTaskExecutor` and its `@Async` default, so the configuration declares `applicationTaskExecutor` itself from Boot's `ThreadPoolTaskExecutorBuilder` (still `spring.task.execution.*`), also named `taskExecutor` so unqualified `@Async` (emails) keeps using it.
+- **Executors** (`AsyncExecutorConfiguration`): declaring `redirectCheckExecutor` switches off Boot's own `applicationTaskExecutor` and its `@Async` default, so the configuration declares `applicationTaskExecutor` itself from Boot's `ThreadPoolTaskExecutorBuilder` (still `spring.task.execution.*`), also named `taskExecutor` so unqualified `@Async` (emails, `reloadMissing`) and visit counting keep using it. `redirectCheckExecutor` (threads `redirect-check-1`, `-2`) waits up to 15 s on shutdown for running checks.
 
 ### URL tags (`url_tags` table, migration `014-url-tags.xml`)
 - `Url.tags` `@ElementCollection` of normalized strings (`TagNormalizer`: lowercase, ≤10 × ≤30 chars). Filter via `?tag=`; list via `GET /urls/tags`.
