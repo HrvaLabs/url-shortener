@@ -53,23 +53,29 @@ public class PublicHttpFetcher {
 
     public FetchResult fetch(final String url, final long maxBytes, final String etag, final String lastModified,
             final Duration requestTimeout) {
+        final var deadline = System.nanoTime() + requestTimeout.toNanos();
         var target = url;
-        for (int redirects = 0; redirects <= MAX_REDIRECTS; redirects++) {
+        for (int redirects = 0; ; redirects++) {
             if (!targetPolicy.test(target)) {
                 throw new UrlValidationException(NOT_ALLOWED);
             }
 
-            final var deadline = System.nanoTime() + requestTimeout.toNanos();
-            final var response = send(request(target, etag, lastModified, requestTimeout));
+            final var remaining = deadline - System.nanoTime();
+            if (remaining <= 0) {
+                throw new UrlValidationException(TIMED_OUT);
+            }
+            final var response = send(request(target, etag, lastModified, Duration.ofNanos(remaining)));
             final var location = response.headers().firstValue(HttpHeaders.LOCATION);
             if (!REDIRECT_STATUSES.contains(response.statusCode()) || location.isEmpty()) {
                 return result(response, maxBytes, deadline);
             }
 
             IOUtils.closeQuietly(response.body());
+            if (redirects == MAX_REDIRECTS) {
+                throw new UrlValidationException("too many redirects");
+            }
             target = resolve(target, location.get());
         }
-        throw new UrlValidationException("too many redirects");
     }
 
     private static boolean isHttps(final String url) {
@@ -81,10 +87,10 @@ public class PublicHttpFetcher {
     }
 
     private static HttpRequest request(final String url, final String etag, final String lastModified,
-            final Duration requestTimeout) {
+            final Duration timeout) {
         try {
             final var builder = HttpRequest.newBuilder(URI.create(url))
-                    .timeout(requestTimeout)
+                    .timeout(timeout)
                     .header(HttpHeaders.USER_AGENT, USER_AGENT)
                     .GET();
             if (StringUtils.isNotBlank(etag)) {
@@ -132,11 +138,10 @@ public class PublicHttpFetcher {
             IOUtils.closeQuietly(response.body());
             throw new UrlValidationException("HTTP " + response.statusCode());
         }
-        if (headers.firstValueAsLong(HttpHeaders.CONTENT_LENGTH).orElse(0) > maxBytes) {
-            IOUtils.closeQuietly(response.body());
-            throw tooLarge(maxBytes);
-        }
         try {
+            if (headers.firstValueAsLong(HttpHeaders.CONTENT_LENGTH).orElse(0) > maxBytes) {
+                throw tooLarge(maxBytes);
+            }
             return new FetchResult(false, download(response.body(), maxBytes, deadline), etag, lastModified);
         } catch (final RuntimeException exception) {
             IOUtils.closeQuietly(response.body());

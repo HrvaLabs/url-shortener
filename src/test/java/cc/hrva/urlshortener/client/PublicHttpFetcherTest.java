@@ -143,6 +143,18 @@ class PublicHttpFetcherTest {
     }
 
     @Test
+    void fourthRedirectIsRefusedEvenWhenItsLocationIsInvalid() {
+        respond("/r1", exchange -> redirect(exchange, "/r2"));
+        respond("/r2", exchange -> redirect(exchange, "/r3"));
+        respond("/r3", exchange -> redirect(exchange, "/r4"));
+        respond("/r4", exchange -> redirect(exchange, "http://[invalid"));
+
+        assertThatThrownBy(() -> permissiveFetcher.fetch(baseUrl + "/r1", 100, null, null, TIMEOUT))
+                .isInstanceOf(UrlValidationException.class)
+                .hasMessage("too many redirects");
+    }
+
+    @Test
     void threeRedirectsAreFollowedResolvingEachLocationAgainstTheCurrentUrl() throws IOException {
         respond("/lists/a", exchange -> redirect(exchange, "b"));
         respond("/lists/b", exchange -> redirect(exchange, "/mirror/c"));
@@ -294,6 +306,38 @@ class PublicHttpFetcherTest {
     }
 
     @Test
+    void oneDeadlineCoversEveryRedirectHop() {
+        respond("/h1", exchange -> slowRedirect(exchange, "/h2"));
+        respond("/h2", exchange -> slowRedirect(exchange, "/h3"));
+        respond("/h3", exchange -> slowRedirect(exchange, "/list"));
+        respond("/list", exchange -> send(exchange, 200, "example.com\n"));
+        final var startedAt = System.nanoTime();
+
+        assertThatThrownBy(() -> permissiveFetcher.fetch(baseUrl + "/h1", 100, null, null, Duration.ofSeconds(1)))
+                .isInstanceOf(UrlValidationException.class)
+                .hasMessage("timed out");
+        assertThat(Duration.ofNanos(System.nanoTime() - startedAt)).isLessThan(Duration.ofSeconds(2));
+        assertThat(requestedPaths).doesNotContain("/list");
+    }
+
+    @Test
+    void deadlineSpentBeforeAHopIsReportedAsTimedOut() {
+        respond("/start", exchange -> redirect(exchange, "/next"));
+        respond("/next", exchange -> send(exchange, 200, "example.com\n"));
+        final var fetcher = new PublicHttpFetcher(url -> {
+            if (url.endsWith("/next")) {
+                sleep(Duration.ofMillis(1200));
+            }
+            return true;
+        });
+
+        assertThatThrownBy(() -> fetcher.fetch(baseUrl + "/start", 100, null, null, Duration.ofSeconds(1)))
+                .isInstanceOf(UrlValidationException.class)
+                .hasMessage("timed out");
+        assertThat(requestedPaths).containsExactly("/start");
+    }
+
+    @Test
     void bodyThatStallsPastTheTimeoutIsRefusedAndLeavesNoTempFile() throws IOException {
         respond("/list", exchange -> {
             exchange.sendResponseHeaders(200, 0);
@@ -341,6 +385,11 @@ class PublicHttpFetcherTest {
     private static void redirect(final HttpExchange exchange, final String location) throws IOException {
         exchange.getResponseHeaders().add("Location", location);
         send(exchange, 302, "");
+    }
+
+    private static void slowRedirect(final HttpExchange exchange, final String location) throws IOException {
+        sleep(Duration.ofMillis(400));
+        redirect(exchange, location);
     }
 
     private static void send(final HttpExchange exchange, final int status, final String body) throws IOException {
