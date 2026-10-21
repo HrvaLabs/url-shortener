@@ -11,6 +11,7 @@ import cc.hrva.urlshortener.service.BlocklistSourceService;
 import cc.hrva.urlshortener.service.blocklist.BlocklistConfigurationChangedEvent;
 import cc.hrva.urlshortener.service.blocklist.BlocklistRefresher;
 import cc.hrva.urlshortener.service.blocklist.BlocklistStore;
+import cc.hrva.urlshortener.service.blocklist.RefreshTrigger;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.time.Duration;
@@ -107,7 +108,7 @@ public class DefaultBlocklistSourceService implements BlocklistSourceService {
     @Override
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public BlocklistSourceResponse refresh(final long id) {
-        return responseOf(blocklistRefresher.refresh(find(id)));
+        return responseOf(blocklistRefresher.refresh(find(id), RefreshTrigger.MANUAL));
     }
 
     @Override
@@ -147,7 +148,7 @@ public class DefaultBlocklistSourceService implements BlocklistSourceService {
         for (final var source : sources) {
             try {
                 if (selected.test(source)) {
-                    blocklistRefresher.refresh(source);
+                    blocklistRefresher.refresh(source, RefreshTrigger.SCHEDULED);
                 }
             } catch (final RuntimeException exception) {
                 log.warn("Could not refresh blocklist source {}", source.getName(), exception);

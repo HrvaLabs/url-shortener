@@ -2,6 +2,7 @@ package cc.hrva.urlshortener.service.blocklist;
 
 import cc.hrva.urlshortener.client.FetchResult;
 import cc.hrva.urlshortener.client.PublicHttpFetcher;
+import cc.hrva.urlshortener.exception.BlocklistFormatException;
 import cc.hrva.urlshortener.exception.CommonException;
 import cc.hrva.urlshortener.model.BlocklistSource;
 import cc.hrva.urlshortener.model.enums.SourceKind;
@@ -17,6 +18,7 @@ import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
@@ -38,6 +40,9 @@ public class BlocklistRefresher {
     private static final String ERROR_SEPARATOR = "; ";
     private static final int MAX_ETAG_LENGTH = 255;
     private static final int MAX_LAST_MODIFIED_LENGTH = 100;
+    private static final long MIN_GUARDED_ENTRIES = 1000;
+    private static final double MIN_KEPT_SHARE = 0.5;
+    private static final String SHRUNK = "The new download has %,d entries, less than half of the %,d loaded before. Kept the old list.";
 
     private final BlocklistSourceRepository blocklistSourceRepository;
     private final BlocklistStore blocklistStore;
@@ -47,14 +52,14 @@ public class BlocklistRefresher {
     private final LinkListParser linkListParser;
     private final Set<Long> refreshing = ConcurrentHashMap.newKeySet();
 
-    public BlocklistSource refresh(final BlocklistSource source) {
+    public BlocklistSource refresh(final BlocklistSource source, final RefreshTrigger trigger) {
         if (!refreshing.add(source.getId())) {
             log.info("Blocklist source {} is already refreshing", source.getName());
             return source;
         }
         try {
             final var kind = source.getKind();
-            final var download = download(source);
+            final var download = download(source, trigger);
             final var current = blocklistSourceRepository.findById(source.getId());
             if (current.isEmpty() || !current.get().isEnabled() || current.get().getKind() != kind) {
                 log.info("Blocklist source {} was disabled, deleted or changed kind while it downloaded, discarding the download",
@@ -67,7 +72,7 @@ public class BlocklistRefresher {
         }
     }
 
-    private Download download(final BlocklistSource source) {
+    private Download download(final BlocklistSource source, final RefreshTrigger trigger) {
         final var attempts = attemptsOf(source);
         final var errors = new ArrayList<String>();
         for (final var attempt : attempts) {
@@ -79,7 +84,9 @@ public class BlocklistRefresher {
                     log.info("Blocklist source {} is unchanged at {}", source.getName(), attempt.url());
                     return new Download(errors, null);
                 }
-                return new Download(errors, new Loaded(attempt.url(), parse(source.getKind(), fetched.body()), fetched));
+                final var parsed = parse(source.getKind(), fetched.body());
+                refuseShrunkenList(source, parsed, trigger);
+                return new Download(errors, new Loaded(attempt.url(), parsed, fetched));
             } catch (final RuntimeException exception) {
                 final var message = describe(exception);
                 log.warn("Blocklist source {} could not be loaded ({}): {}", source.getName(), attempt.label(), message);
@@ -121,6 +128,25 @@ public class BlocklistRefresher {
         source.setLastModified(fitting(loaded.fetched().lastModified(), MAX_LAST_MODIFIED_LENGTH));
         log.info("Blocklist source {} loaded {} entries from {}", source.getName(), entries.size(), loaded.url());
         return Optional.empty();
+    }
+
+    private void refuseShrunkenList(final BlocklistSource source, final ParsedBlocklist list, final RefreshTrigger trigger) {
+        final var loadedBefore = source.getDomainCount();
+        if (trigger != RefreshTrigger.SCHEDULED || list.declaredEntries() != null || loadedBefore == null
+                || loadedBefore < MIN_GUARDED_ENTRIES || list.entries().size() >= loadedBefore * MIN_KEPT_SHARE || !holdsASet(source)) {
+            return;
+        }
+        throw new BlocklistFormatException(String.format(Locale.ROOT, SHRUNK, list.entries().size(), loadedBefore));
+    }
+
+    private boolean holdsASet(final BlocklistSource source) {
+        try {
+            return blocklistStore.exists(source.getId());
+        } catch (final DataAccessException exception) {
+            log.warn("Could not check the Redis set of blocklist source {}, keeping it exception={}",
+                    source.getName(), exception.getClass().getName());
+            return true;
+        }
     }
 
     private boolean sendsValidators(final BlocklistSource source, final String url) {

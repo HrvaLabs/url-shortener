@@ -32,6 +32,8 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -84,6 +86,13 @@ class DefaultBlocklistSourceServiceTest {
             *.jofogas.cards
             """;
     private static final Set<String> LIST_DOMAINS = Set.of("fake-shop.example", "njuskaio.cam", "jofogas.cards");
+    private static final String LIST_WITHOUT_A_COUNT = """
+            # Title: HaGeZi's Fake DNS Blocklist
+            *.fake-shop.example
+            *.njuskaio.cam
+            *.jofogas.cards
+            """;
+    private static final String SHRUNK = "The new download has 3 entries, less than half of the 17,512 loaded before. Kept the old list.";
     private static final String ERROR_PAGE = """
             <html>
             <head><title>502 Bad Gateway</title></head>
@@ -346,6 +355,123 @@ class DefaultBlocklistSourceServiceTest {
 
         verify(blocklistStore).replace(2, LIST_DOMAINS);
         verify(blocklistStore, never()).replace(eq(1L), anySet());
+    }
+
+    @Test
+    void aScheduledRefreshThatShrinksABigListToLessThanHalfKeepsTheOldSet() {
+        final var lastSuccessAt = LocalDateTime.now().minusHours(7);
+        final var source = stored(source(1).lastFetchedAt(lastSuccessAt).lastSuccessAt(lastSuccessAt).domainCount(17_512L).build());
+        when(blocklistSourceRepository.findByEnabledTrue()).thenReturn(List.of(source));
+        when(blocklistStore.exists(1)).thenReturn(true);
+        fetcher.serves(MAIN, LIST_WITHOUT_A_COUNT);
+
+        blocklistSourceService.refreshDue();
+
+        verify(blocklistStore, never()).replace(anyLong(), anySet());
+        assertThat(source.getLastError()).isEqualTo(SHRUNK);
+        assertThat(source.getDomainCount()).isEqualTo(17_512L);
+        assertThat(source.getLastSuccessAt()).isEqualTo(lastSuccessAt);
+        assertThat(source.getLastFetchedAt()).isCloseTo(LocalDateTime.now(), within(5, SECONDS));
+    }
+
+    @Test
+    void refreshNowAcceptsABigListThatReallyShrank() {
+        final var source = stored(source(1).domainCount(17_512L).build());
+        lenient().when(blocklistStore.exists(1)).thenReturn(true);
+        fetcher.serves(MAIN, LIST_WITHOUT_A_COUNT);
+        redisHasRoom();
+
+        blocklistSourceService.refresh(1);
+
+        verify(blocklistStore).replace(1, LIST_DOMAINS);
+        assertThat(source.getDomainCount()).isEqualTo(3L);
+        assertThat(source.getLastError()).isNull();
+    }
+
+    @Test
+    void aScheduledRefreshKeepingHalfOfABigListReplacesTheSet() {
+        final var source = stored(source(1).domainCount(2_000L).build());
+        when(blocklistSourceRepository.findByEnabledTrue()).thenReturn(List.of(source));
+        fetcher.serves(MAIN, domains(1_000));
+        redisHasRoom();
+
+        blocklistSourceService.refreshAll();
+
+        verify(blocklistStore).replace(eq(1L), anySet());
+        assertThat(source.getDomainCount()).isEqualTo(1_000L);
+        assertThat(source.getLastError()).isNull();
+    }
+
+    @Test
+    void aScheduledRefreshMayShrinkAListOfFewerThanAThousandEntries() {
+        final var source = stored(source(1).domainCount(999L).build());
+        when(blocklistSourceRepository.findByEnabledTrue()).thenReturn(List.of(source));
+        fetcher.serves(MAIN, LIST_WITHOUT_A_COUNT);
+        redisHasRoom();
+
+        blocklistSourceService.refreshAll();
+
+        verify(blocklistStore).replace(1, LIST_DOMAINS);
+        assertThat(source.getLastError()).isNull();
+    }
+
+    @Test
+    void aScheduledRefreshOfAListThatDeclaresItsCountIsJudgedByThatCount() {
+        final var source = stored(source(1).domainCount(17_512L).build());
+        when(blocklistSourceRepository.findByEnabledTrue()).thenReturn(List.of(source));
+        fetcher.serves(MAIN, LIST);
+        redisHasRoom();
+
+        blocklistSourceService.refreshAll();
+
+        verify(blocklistStore).replace(1, LIST_DOMAINS);
+        assertThat(source.getLastError()).isNull();
+    }
+
+    @Test
+    void aScheduledReloadOfAMissingSetTakesAShrunkenListBecauseThereIsNoOldSetToKeep() {
+        final var source = stored(source(1).domainCount(17_512L).build());
+        when(blocklistSourceRepository.findByEnabledTrue()).thenReturn(List.of(source));
+        when(blocklistStore.exists(1)).thenReturn(false);
+        fetcher.serves(MAIN, LIST_WITHOUT_A_COUNT);
+        redisHasRoom();
+
+        blocklistSourceService.reloadMissing();
+
+        verify(blocklistStore).replace(1, LIST_DOMAINS);
+        assertThat(source.getDomainCount()).isEqualTo(3L);
+        assertThat(source.getLastError()).isNull();
+    }
+
+    @Test
+    void whileRedisCannotSayWhetherTheOldSetIsThereAShrunkenListIsStillRefused() {
+        final var source = stored(source(1).domainCount(17_512L).build());
+        when(blocklistSourceRepository.findByEnabledTrue()).thenReturn(List.of(source));
+        when(blocklistStore.exists(1)).thenThrow(new RedisConnectionFailureException("Connection refused"));
+        fetcher.serves(MAIN, LIST_WITHOUT_A_COUNT);
+
+        blocklistSourceService.refreshAll();
+
+        verify(blocklistStore, never()).replace(anyLong(), anySet());
+        assertThat(source.getLastError()).isEqualTo(SHRUNK);
+    }
+
+    @Test
+    void aShrunkenDownloadFromTheMainUrlFallsBackToAMirror() {
+        final var source = stored(source(1).fallbackUrls(List.of(FALLBACK)).domainCount(1_000L).build());
+        when(blocklistSourceRepository.findByEnabledTrue()).thenReturn(List.of(source));
+        when(blocklistStore.exists(1)).thenReturn(true);
+        fetcher.serves(MAIN, LIST_WITHOUT_A_COUNT);
+        fetcher.serves(FALLBACK, domains(1_000));
+        redisHasRoom();
+
+        blocklistSourceService.refreshAll();
+
+        verify(blocklistStore).replace(eq(1L), anySet());
+        assertThat(source.getLastSuccessUrl()).isEqualTo(FALLBACK);
+        assertThat(source.getDomainCount()).isEqualTo(1_000L);
+        assertThat(source.getLastError())
+                .isEqualTo("main: The new download has 3 entries, less than half of the 1,000 loaded before. Kept the old list.");
     }
 
     @Test
@@ -867,6 +993,10 @@ class DefaultBlocklistSourceServiceTest {
     private void assertRefused(final BlocklistSourceDto dto) {
         assertThatThrownBy(() -> blocklistSourceService.create(dto)).isInstanceOf(UrlValidationException.class);
         verify(blocklistSourceRepository, never()).save(any(BlocklistSource.class));
+    }
+
+    private static String domains(final int count) {
+        return IntStream.range(0, count).mapToObj(index -> "scam-" + index + ".example\n").collect(Collectors.joining());
     }
 
     private void redisHasRoom() {
