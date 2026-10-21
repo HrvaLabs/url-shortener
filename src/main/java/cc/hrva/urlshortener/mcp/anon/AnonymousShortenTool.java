@@ -82,7 +82,7 @@ public class AnonymousShortenTool {
                 .build();
         McpLinks.validate(validator, createUrlDto);
 
-        final var created = urlService.saveUrlRouting(createUrlDto);
+        final var created = urlService.saveUrlRouting(createUrlDto, null);
 
         log.info("MCP anonymous shorten_url urlId={}", created.id());
 

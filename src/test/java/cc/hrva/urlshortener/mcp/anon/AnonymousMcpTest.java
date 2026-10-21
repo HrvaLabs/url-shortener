@@ -73,6 +73,7 @@ import static org.hamcrest.Matchers.not;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
@@ -203,7 +204,7 @@ class AnonymousMcpTest {
         final var user = User.builder().id(7L).email(EMAIL).active(true).build();
         when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.of(user));
         when(userService.fetchActiveUserByEmail(EMAIL)).thenReturn(user);
-        when(urlService.saveUrlRouting(any())).thenAnswer(invocation -> {
+        when(urlService.saveUrlRouting(any(), any())).thenAnswer(invocation -> {
             callersDuringCreate.add(SecurityContextHolder.getContext().getAuthentication());
             createRequests.add(invocation.getArgument(0));
             return new UrlResponse(11L, DESTINATION, "abc12", LocalDateTime.now(), null, 0L, null,
@@ -336,7 +337,7 @@ class AnonymousMcpTest {
                 .andExpect(jsonPath("$.result.isError").value(true))
                 .andExpect(jsonPath("$.result.content.length()").value(1))
                 .andExpect(jsonPath("$.result.content[0].text").value(REFUSAL));
-        verify(urlService, times(10)).saveUrlRouting(any());
+        verify(urlService, times(10)).saveUrlRouting(any(), isNull());
 
         mockMvc.perform(anonymousMcpRequest(SHORTEN_URL_CALL).with(from(OTHER_CLIENT_IP)))
                 .andExpect(status().isOk())
@@ -347,7 +348,7 @@ class AnonymousMcpTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.result.isError").value(false));
 
-        verify(urlService, times(12)).saveUrlRouting(any());
+        verify(urlService, times(12)).saveUrlRouting(any(), any());
         assertThat(output.toString().substring(outputBeforeCalls))
                 .contains("MCP anonymous shorten_url refused by the rate limit")
                 .doesNotContain(CLIENT_IP)
@@ -370,7 +371,7 @@ class AnonymousMcpTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.result.isError").value(false));
 
-        verify(urlService, times(11)).saveUrlRouting(any());
+        verify(urlService, times(11)).saveUrlRouting(any(), any());
         assertThat(redis.keys()).hasSize(2).allSatisfy(key -> assertThat(key)
                 .matches(RATE_LIMIT_KEY_PATTERN)
                 .doesNotContain(CLIENT_IP)
@@ -392,7 +393,7 @@ class AnonymousMcpTest {
                 .andExpect(jsonPath("$.result.isError").value(true))
                 .andExpect(jsonPath("$.result.content[0].text").value(REFUSAL));
 
-        verify(urlService, never()).saveUrlRouting(any());
+        verify(urlService, never()).saveUrlRouting(any(), any());
     }
 
     @Test
@@ -423,7 +424,7 @@ class AnonymousMcpTest {
                 .andExpect(jsonPath("$.result.content[0].text").value(GENERIC_TOOL_ERROR))
                 .andExpect(content().string(not(containsString("redis.internal"))));
 
-        verify(urlService, never()).saveUrlRouting(any());
+        verify(urlService, never()).saveUrlRouting(any(), any());
         final var logged = output.toString().substring(outputBeforeCall);
         assertThat(logged.lines())
                 .anySatisfy(line -> assertThat(line).contains("WARN").contains("Rate limit check failed"));
@@ -434,7 +435,7 @@ class AnonymousMcpTest {
 
     @Test
     void serviceFailuresBecomeToolErrors() throws Exception {
-        when(urlService.saveUrlRouting(any()))
+        when(urlService.saveUrlRouting(any(), any()))
                 .thenThrow(new ApiException("Sign in to create short URLs"))
                 .thenThrow(new IllegalStateException("internal-detail-from-the-database"));
 

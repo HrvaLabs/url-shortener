@@ -12,6 +12,7 @@ import cc.hrva.urlshortener.exception.EmailNotVerifiedException;
 import cc.hrva.urlshortener.exception.InvalidApiKeyException;
 import cc.hrva.urlshortener.exception.ShortUrlAlreadyExistsException;
 import cc.hrva.urlshortener.exception.NoAuthorizationException;
+import cc.hrva.urlshortener.exception.RateLimitExceededException;
 import cc.hrva.urlshortener.exception.UrlNotFoundException;
 import cc.hrva.urlshortener.exception.UserNotFoundException;
 import jakarta.validation.ConstraintViolationException;
@@ -174,6 +175,11 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.METHOD_NOT_ALLOWED)
                 .allow(supportedMethods == null ? new HttpMethod[0] : supportedMethods.toArray(HttpMethod[]::new))
                 .body(Map.of("error", "Method not allowed"));
+    }
+
+    @ExceptionHandler(RateLimitExceededException.class)
+    public ResponseEntity<Map<String, String>> handleRateLimitExceeded(final RateLimitExceededException ex) {
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS).body(Map.of("error", safeMessage(ex)));
     }
 
     @ExceptionHandler(CommonException.class)

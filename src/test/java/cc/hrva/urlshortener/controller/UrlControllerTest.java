@@ -1,11 +1,14 @@
 package cc.hrva.urlshortener.controller;
 
 import java.util.Collections;
+import java.util.List;
+import cc.hrva.urlshortener.configuration.GlobalExceptionHandler;
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.dto.CreateUrlDto;
 import cc.hrva.urlshortener.dto.UrlResponse;
 import cc.hrva.urlshortener.dto.UrlSearchDto;
 import cc.hrva.urlshortener.dto.UrlUpdateDto;
+import cc.hrva.urlshortener.exception.RateLimitExceededException;
 import cc.hrva.urlshortener.model.PeekUrl;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.security.ClientIpResolver;
@@ -31,6 +34,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -70,6 +74,7 @@ class UrlControllerTest {
         appProperties.setServerUrl("https://hrva.cc");
         this.mockMvc = MockMvcBuilders.standaloneSetup(new UrlController(urlService, qrCodeService, linkPreviewService, clientIpResolver, request, appProperties))
                 .setCustomArgumentResolvers(new PageableHandlerMethodArgumentResolver())
+                .setControllerAdvice(new GlobalExceptionHandler())
                 .build();
         this.objectMapper = new ObjectMapper();
         this.objectMapper.registerModule(new JavaTimeModule());
@@ -78,7 +83,8 @@ class UrlControllerTest {
     @Test
     void shouldSaveUrl() throws Exception {
         final var url = Url.builder().id(1L).longUrl("https://example.com").shortUrl("ex").build();
-        when(urlService.saveUrlRouting(any(CreateUrlDto.class))).thenReturn(UrlResponse.from(url));
+        when(clientIpResolver.getClientIp(request)).thenReturn("203.0.113.7");
+        when(urlService.saveUrlRouting(any(CreateUrlDto.class), eq("203.0.113.7"))).thenReturn(UrlResponse.from(url));
 
         mockMvc.perform(post("/api/v1/urls")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -99,6 +105,41 @@ class UrlControllerTest {
                         .content(objectMapper.writeValueAsString(CreateUrlDto.builder().longUrl("https://example.com").build())))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.shortUrl").value("ex"));
+    }
+
+    @Test
+    void aCreateRefusedByTheRateLimitIsA429WithTheReason() throws Exception {
+        when(clientIpResolver.getClientIp(request)).thenReturn("203.0.113.7");
+        when(urlService.saveUrlRouting(any(CreateUrlDto.class), eq("203.0.113.7")))
+                .thenThrow(new RateLimitExceededException("You've created a lot of links in a short time. Try again in an hour."));
+
+        mockMvc.perform(post("/api/v1/urls")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(CreateUrlDto.builder().longUrl("https://example.com").build())))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.error").value("You've created a lot of links in a short time. Try again in an hour."));
+    }
+
+    @Test
+    void bulkSendsEveryLinkThroughTheLimitAndStopsWithA429() throws Exception {
+        final var created = UrlResponse.from(Url.builder().id(1L).longUrl("https://example.com").shortUrl("ex").build());
+        when(clientIpResolver.getClientIp(request)).thenReturn("203.0.113.7");
+        when(urlService.saveUrlRouting(any(CreateUrlDto.class), eq("203.0.113.7")))
+                .thenReturn(created)
+                .thenReturn(created)
+                .thenThrow(new RateLimitExceededException("You've created a lot of links in a short time. Try again in an hour."));
+        final var links = List.of(
+                CreateUrlDto.builder().longUrl("https://example.com/1").build(),
+                CreateUrlDto.builder().longUrl("https://example.com/2").build(),
+                CreateUrlDto.builder().longUrl("https://example.com/3").build());
+
+        mockMvc.perform(post("/api/v1/urls/bulk")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(links)))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.error").value("You've created a lot of links in a short time. Try again in an hour."));
+
+        verify(urlService, times(3)).saveUrlRouting(any(CreateUrlDto.class), eq("203.0.113.7"));
     }
 
     @Test

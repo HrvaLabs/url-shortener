@@ -69,6 +69,11 @@ public class DefaultUrlService implements UrlService {
     private static final int UNLOCK_ATTEMPTS_PER_CLIENT = 10;
     private static final int UNLOCK_ATTEMPTS_PER_LINK = 50;
     private static final Duration UNLOCK_WINDOW = Duration.ofMinutes(15);
+    private static final int CREATES_PER_ANONYMOUS_CLIENT = 10;
+    private static final int CREATES_PER_USER = 60;
+    private static final Duration CREATE_WINDOW = Duration.ofHours(1);
+    private static final String CREATE_LIMIT_REFUSAL = "You've created a lot of links in a short time. Try again in an hour.";
+    private static final String ROLE_ADMIN = "ROLE_ADMIN";
 
     private static final Set<String> BOT_PROBE_PATHS = Set.of(
             "favicon.ico", "favicon.png", "robots.txt", "sitemap.xml",
@@ -95,12 +100,13 @@ public class DefaultUrlService implements UrlService {
 
     @Override
     @Transactional
-    public UrlResponse saveUrlRouting(final @Valid CreateUrlDto createUrlDto) {
+    public UrlResponse saveUrlRouting(final @Valid CreateUrlDto createUrlDto, final String clientIP) {
         final var url = createUrlToUrlConverter.convert(createUrlDto);
         final var currentUser = userService.getUserFromToken();
 
         log.info("Creating URL authenticated={}", currentUser != null);
 
+        ensureCreateAllowed(currentUser, clientIP);
         validateUrl(url);
 
         if (currentUser != null) {
@@ -108,6 +114,31 @@ public class DefaultUrlService implements UrlService {
             return saveUrlForUser(url, currentUser);
         }
         return UrlResponse.from(createUrlForAnonymousUser(url));
+    }
+
+    private void ensureCreateAllowed(final User creator, final String clientIP) {
+        if (!createAllowed(creator, clientIP)) {
+            log.info("Link creation refused by the rate limit userId={}", creator != null ? creator.getId() : null);
+            throw new RateLimitExceededException(CREATE_LIMIT_REFUSAL);
+        }
+    }
+
+    private boolean createAllowed(final User creator, final String clientIP) {
+        try {
+            if (creator != null) {
+                return isAdmin(creator) || rateLimiter.tryAcquire("create:user:" + creator.getId(), CREATES_PER_USER, CREATE_WINDOW);
+            }
+            return clientIP == null
+                    || rateLimiter.tryAcquire(RateLimiter.clientKey("create:anon", clientIP), CREATES_PER_ANONYMOUS_CLIENT, CREATE_WINDOW);
+        } catch (final RateLimiterUnavailableException exception) {
+            log.warn("Create rate limit unavailable, allowing the link");
+            return true;
+        }
+    }
+
+    private static boolean isAdmin(final User user) {
+        return user.getAuthorities() != null && user.getAuthorities().stream()
+                .anyMatch(authority -> ROLE_ADMIN.equals(authority.getName()));
     }
 
     private boolean unlockAttemptAllowed(final String shortUrl, final String clientIP) {
@@ -155,6 +186,7 @@ public class DefaultUrlService implements UrlService {
 
         final var apiKey = apiKeyService.fetchApiKeyByKey(key);
         apiKeyValidator.apiKeyExistsByKeyAndIsValid(key);
+        ensureCreateAllowed(apiKey.getOwner(), null);
         apiKeyService.apiKeyUseAction(apiKey);
 
         applyPassword(url, createUrlDto.getPassword());
