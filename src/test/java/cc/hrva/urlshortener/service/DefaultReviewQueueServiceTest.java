@@ -2,6 +2,7 @@ package cc.hrva.urlshortener.service;
 
 import cc.hrva.urlshortener.model.LinkReview;
 import cc.hrva.urlshortener.model.Url;
+import cc.hrva.urlshortener.model.enums.ReportCategory;
 import cc.hrva.urlshortener.model.enums.ReviewResolution;
 import cc.hrva.urlshortener.repository.LinkReviewRepository;
 import cc.hrva.urlshortener.service.impl.DefaultReviewQueueService;
@@ -20,10 +21,12 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
+import org.springframework.transaction.annotation.Transactional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -34,13 +37,14 @@ class DefaultReviewQueueServiceTest {
     private static final String YOUNG = "domain registered in the last 30 days";
     private static final String LURE = "login or verification lure";
     private static final String ON_LIST = "on list Phishing.Database domains";
+    private static final String REPORTED_PHISHING = "reported by a visitor: phishing: asks for my bank login";
 
     @Mock
     private LinkReviewRepository linkReviewRepository;
 
     private ReviewQueueService reviewQueueService;
 
-    private final Url url = Url.builder().id(287L).shortUrl("v0DB3").longUrl("https://findfavoritedate.life/?u=f6yp608").build();
+    private final Url url = Url.builder().id(287L).shortUrl("v0DB3").longUrl("https://findfavoritedate.life/?u=f6yp608").active(true).build();
 
     @BeforeEach
     void setUp() {
@@ -205,6 +209,102 @@ class DefaultReviewQueueServiceTest {
         when(linkReviewRepository.countByResolvedAtIsNull()).thenReturn(4L);
 
         assertThat(reviewQueueService.openCount()).isEqualTo(4L);
+    }
+
+    @Test
+    void aVisitorReportOpensAReviewWithTheCategoryAndDetails() {
+        final var saved = ArgumentCaptor.forClass(LinkReview.class);
+
+        reviewQueueService.report(url, ReportCategory.PHISHING, "asks for my bank login");
+
+        verify(linkReviewRepository).save(saved.capture());
+        assertThat(saved.getValue().getUrl()).isSameAs(url);
+        assertThat(saved.getValue().getReasons()).isEqualTo(REPORTED_PHISHING);
+        assertThat(saved.getValue().getResolvedAt()).isNull();
+    }
+
+    @Test
+    void aReportWithoutDetailsNamesOnlyTheCategory() {
+        final var saved = ArgumentCaptor.forClass(LinkReview.class);
+
+        reviewQueueService.report(url, ReportCategory.SPAM, null);
+
+        verify(linkReviewRepository).save(saved.capture());
+        assertThat(saved.getValue().getReasons()).isEqualTo("reported by a visitor: spam");
+    }
+
+    @Test
+    void blankDetailsAreLeftOutOfTheReason() {
+        final var saved = ArgumentCaptor.forClass(LinkReview.class);
+
+        reviewQueueService.report(url, ReportCategory.OTHER, "   ");
+
+        verify(linkReviewRepository).save(saved.capture());
+        assertThat(saved.getValue().getReasons()).isEqualTo("reported by a visitor: other");
+    }
+
+    @Test
+    void aSecondReportAddsItsReasonToTheOpenReviewInsteadOfOpeningAnother() {
+        final var open = LinkReview.builder().id(1L).url(url).reasons(REPORTED_PHISHING).flaggedAt(LocalDateTime.now()).build();
+        when(linkReviewRepository.findFirstByUrlAndResolvedAtIsNullOrderByFlaggedAtDesc(url)).thenReturn(Optional.of(open));
+
+        reviewQueueService.report(url, ReportCategory.MALWARE, "downloads an exe");
+
+        verify(linkReviewRepository).save(open);
+        assertThat(open.getId()).isEqualTo(1L);
+        assertThat(open.getReasons()).isEqualTo(REPORTED_PHISHING + "\nreported by a visitor: malware: downloads an exe");
+    }
+
+    @Test
+    void aReportExtendsAnOpenReviewTheChecksOpened() {
+        final var open = LinkReview.builder().id(1L).url(url).reasons(YOUNG).flaggedAt(LocalDateTime.now()).build();
+        when(linkReviewRepository.findFirstByUrlAndResolvedAtIsNullOrderByFlaggedAtDesc(url)).thenReturn(Optional.of(open));
+
+        reviewQueueService.report(url, ReportCategory.PHISHING, "asks for my bank login");
+
+        verify(linkReviewRepository).save(open);
+        assertThat(open.getReasons()).isEqualTo(YOUNG + "\n" + REPORTED_PHISHING);
+    }
+
+    @Test
+    void aReportOpensANewEntryEvenAfterTheLinkWasReviewedOkForTheSameReason() {
+        final var saved = ArgumentCaptor.forClass(LinkReview.class);
+        lenient().when(linkReviewRepository.findFirstByUrlOrderByFlaggedAtDesc(url))
+                .thenReturn(Optional.of(resolved(ReviewResolution.OK, REPORTED_PHISHING)));
+
+        reviewQueueService.report(url, ReportCategory.PHISHING, "asks for my bank login");
+
+        verify(linkReviewRepository).save(saved.capture());
+        assertThat(saved.getValue().getId()).isNull();
+        assertThat(saved.getValue().getReasons()).isEqualTo(REPORTED_PHISHING);
+        assertThat(saved.getValue().getResolution()).isNull();
+    }
+
+    @Test
+    void aReportNeverChangesTheLink() {
+        reviewQueueService.report(url, ReportCategory.PHISHING, "asks for my bank login");
+
+        assertThat(url.isActive()).isTrue();
+        assertThat(url.getBlockReason()).isNull();
+        assertThat(url.getBlockDetail()).isNull();
+        assertThat(url.getBlockedAt()).isNull();
+    }
+
+    @Test
+    void aReportRunsInAWritableTransaction() throws NoSuchMethodException {
+        final var transactional = DefaultReviewQueueService.class
+                .getMethod("report", Url.class, ReportCategory.class, String.class)
+                .getAnnotation(Transactional.class);
+
+        assertThat(transactional).isNotNull();
+        assertThat(transactional.readOnly()).isFalse();
+    }
+
+    @Test
+    void openReportCountCountsTheOpenEntriesAVisitorReported() {
+        when(linkReviewRepository.countByResolvedAtIsNullAndReasonsContaining("reported by a visitor")).thenReturn(2L);
+
+        assertThat(reviewQueueService.openReportCount()).isEqualTo(2L);
     }
 
     private LinkReview resolved(final ReviewResolution resolution, final String reasons) {

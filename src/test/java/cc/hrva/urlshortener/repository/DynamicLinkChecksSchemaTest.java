@@ -241,6 +241,26 @@ class DynamicLinkChecksSchemaTest {
     }
 
     @Test
+    void openReviewsAVisitorReportedAreCountedByTheirReason() {
+        final var reported = urlRepository.saveAndFlush(Url.builder().shortUrl("reported").longUrl("https://findfavoritedate.life/?u=r").build());
+        final var flagged = urlRepository.saveAndFlush(Url.builder().shortUrl("flagged").longUrl("https://findfavoritedate.life/?u=f").build());
+        final var settled = urlRepository.saveAndFlush(Url.builder().shortUrl("settled").longUrl("https://findfavoritedate.life/?u=s").build());
+        linkReviewRepository.saveAndFlush(LinkReview.builder()
+                .url(reported)
+                .reasons("domain registered in the last 30 days\nreported by a visitor: phishing: asks for my bank login")
+                .build());
+        linkReviewRepository.saveAndFlush(LinkReview.builder().url(flagged).reasons("domain registered in the last 30 days").build());
+        linkReviewRepository.saveAndFlush(LinkReview.builder()
+                .url(settled)
+                .reasons("reported by a visitor: spam")
+                .resolvedAt(LocalDateTime.now())
+                .build());
+        entityManager.clear();
+
+        assertThat(linkReviewRepository.countByResolvedAtIsNullAndReasonsContaining("reported by a visitor")).isEqualTo(1);
+    }
+
+    @Test
     void aReviewWithoutAFlagTimeIsFlaggedWhenSaved() {
         final var url = urlRepository.saveAndFlush(Url.builder().shortUrl("jofogas").longUrl("https://www.jofogas.cards/login").build());
         final var review = linkReviewRepository.saveAndFlush(LinkReview.builder().url(url).reasons("imitates jofogas").build());

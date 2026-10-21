@@ -12,6 +12,7 @@ import cc.hrva.urlshortener.exception.EmailExistsException;
 import cc.hrva.urlshortener.exception.EmailLogNotFoundException;
 import cc.hrva.urlshortener.exception.EmailNotVerifiedException;
 import cc.hrva.urlshortener.exception.InvalidApiKeyException;
+import cc.hrva.urlshortener.exception.RateLimitExceededException;
 import cc.hrva.urlshortener.exception.ShortUrlAlreadyExistsException;
 import cc.hrva.urlshortener.exception.NoAuthorizationException;
 import cc.hrva.urlshortener.exception.UrlNotFoundException;
@@ -171,6 +172,11 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(ConnectedAppNotFoundException.class)
     public ResponseEntity<Map<String, String>> handleConnectedAppNotFound(final ConnectedAppNotFoundException ex) {
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", safeMessage(ex)));
+    }
+
+    @ExceptionHandler(RateLimitExceededException.class)
+    public ResponseEntity<Map<String, String>> handleRateLimitExceeded(final RateLimitExceededException ex) {
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS).body(Map.of("error", safeMessage(ex)));
     }
 
     @ExceptionHandler(NoResourceFoundException.class)

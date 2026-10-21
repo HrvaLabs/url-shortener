@@ -2,6 +2,7 @@ package cc.hrva.urlshortener.service.impl;
 
 import cc.hrva.urlshortener.model.LinkReview;
 import cc.hrva.urlshortener.model.Url;
+import cc.hrva.urlshortener.model.enums.ReportCategory;
 import cc.hrva.urlshortener.model.enums.ReviewResolution;
 import cc.hrva.urlshortener.repository.LinkReviewRepository;
 import cc.hrva.urlshortener.repository.specification.LinkReviewSpecification;
@@ -9,6 +10,7 @@ import cc.hrva.urlshortener.service.ReviewQueueService;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.stream.Stream;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -28,6 +30,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class DefaultReviewQueueService implements ReviewQueueService {
 
     private static final String REASON_SEPARATOR = "\n";
+    private static final String REPORTED_BY_A_VISITOR = "reported by a visitor";
     private static final Sort NEWEST_FIRST = Sort.by(Sort.Order.desc("flaggedAt"), Sort.Order.desc("id"));
 
     private final LinkReviewRepository linkReviewRepository;
@@ -56,9 +59,13 @@ public class DefaultReviewQueueService implements ReviewQueueService {
         if (reviewedFineFor(url, incoming)) {
             return;
         }
+        openReview(url, incoming);
+    }
+
+    private void openReview(final Url url, final List<String> reasons) {
         linkReviewRepository.save(LinkReview.builder()
                 .url(url)
-                .reasons(joined(incoming))
+                .reasons(joined(reasons))
                 .build());
         log.info("Link queued for review urlId={}", url.getId());
     }
@@ -68,6 +75,21 @@ public class DefaultReviewQueueService implements ReviewQueueService {
                 .filter(review -> review.getResolution() == ReviewResolution.OK)
                 .map(review -> reasonsOf(review).containsAll(incoming))
                 .orElse(false);
+    }
+
+    @Override
+    @Transactional
+    public void report(final Url url, final ReportCategory category, final String details) {
+        final var incoming = normalized(List.of(reportReason(category, details)));
+        log.info("Visitor report received urlId={} category={}", url.getId(), category);
+        linkReviewRepository.findFirstByUrlAndResolvedAtIsNullOrderByFlaggedAtDesc(url).ifPresentOrElse(
+                review -> extend(review, incoming),
+                () -> openReview(url, incoming));
+    }
+
+    private static String reportReason(final ReportCategory category, final String details) {
+        final var reason = REPORTED_BY_A_VISITOR + ": " + category.name().toLowerCase(Locale.ROOT);
+        return StringUtils.isBlank(details) ? reason : reason + ": " + details;
     }
 
     @Override
@@ -96,6 +118,11 @@ public class DefaultReviewQueueService implements ReviewQueueService {
     @Override
     public long openCount() {
         return linkReviewRepository.countByResolvedAtIsNull();
+    }
+
+    @Override
+    public long openReportCount() {
+        return linkReviewRepository.countByResolvedAtIsNullAndReasonsContaining(REPORTED_BY_A_VISITOR);
     }
 
     private static Pageable newestFirst(final Pageable pageable) {
