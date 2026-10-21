@@ -4,6 +4,7 @@ import java.util.List;
 import java.util.Optional;
 import cc.hrva.urlshortener.model.LinkReview;
 import cc.hrva.urlshortener.model.Url;
+import cc.hrva.urlshortener.model.User;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 
@@ -14,5 +15,6 @@ public interface LinkReviewRepository extends JpaRepository<LinkReview, Long>, J
     Optional<LinkReview> findFirstByUrlOrderByFlaggedAtDesc(Url url);
     long countByResolvedAtIsNull();
     long countByResolvedAtIsNullAndReasonsContaining(String reason);
+    long countByUrlOwnerAndResolvedAtIsNull(User owner);
 
 }

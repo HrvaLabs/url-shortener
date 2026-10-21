@@ -381,6 +381,32 @@ class DynamicLinkChecksSchemaTest {
     }
 
     @Test
+    void moderationCountsCoverRecentBlocksAndAnOwnersBlockedAndWaitingLinks() {
+        final var owner = savedUser("scammer@example.com");
+        final var someoneElse = savedUser("alice@example.com");
+        final var recent = savedBlockedLink("recent", "https://a.example/", BlockReason.DOMAIN_RULE);
+        recent.setOwner(owner);
+        recent.setBlockedAt(LocalDateTime.of(2026, 10, 21, 9, 0));
+        final var older = savedBlockedLink("older", "https://b.example/", BlockReason.ADMIN);
+        older.setOwner(owner);
+        older.setBlockedAt(LocalDateTime.of(2026, 10, 19, 9, 0));
+        savedBlockedLink("anonymous", "https://c.example/", BlockReason.BLOCKLIST).setBlockedAt(LocalDateTime.of(2026, 10, 21, 8, 0));
+        final var waiting = savedLink("waiting", "https://d.example/", owner);
+        final var settled = savedLink("settled", "https://e.example/", owner);
+        final var theirs = savedLink("theirs", "https://f.example/", someoneElse);
+        linkReviewRepository.saveAndFlush(LinkReview.builder().url(waiting).reasons("punycode domain").build());
+        linkReviewRepository.saveAndFlush(LinkReview.builder().url(settled).reasons("punycode domain").resolvedAt(LocalDateTime.now()).build());
+        linkReviewRepository.saveAndFlush(LinkReview.builder().url(theirs).reasons("punycode domain").build());
+        entityManager.flush();
+        entityManager.clear();
+
+        assertThat(urlRepository.countByBlockReasonIsNotNullAndBlockedAtAfter(LocalDateTime.of(2026, 10, 20, 10, 0))).isEqualTo(2);
+        assertThat(urlRepository.countByOwnerAndBlockReasonIsNotNull(owner)).isEqualTo(2);
+        assertThat(urlRepository.countByOwnerAndBlockReasonIsNotNull(someoneElse)).isZero();
+        assertThat(linkReviewRepository.countByUrlOwnerAndResolvedAtIsNull(owner)).isEqualTo(1);
+    }
+
+    @Test
     void anAdminAccountIsRecognisedByItsAuthority() {
         final var admin = savedUser("admin@example.com");
         admin.setAuthorities(List.of(entityManager.find(Authorities.class, 2L)));

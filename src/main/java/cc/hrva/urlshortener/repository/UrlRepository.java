@@ -35,6 +35,7 @@ public interface UrlRepository extends JpaRepository<Url, Long>, JpaSpecificatio
     List<Url> findTop10ByCreateDateAfterAndOwnerCreateDateAfterOrderByCreateDateDesc(LocalDateTime createdAfter, LocalDateTime ownerCreatedAfter);
     List<Url> findTop20ByBlockedAtAfterAndBlockReasonNotInOrderByBlockedAtDesc(LocalDateTime blockedAfter, Collection<BlockReason> excludedReasons);
     long countByOwnerAndBlockReasonIsNotNull(User owner);
+    long countByBlockReasonIsNotNullAndBlockedAtAfter(LocalDateTime blockedAfter);
     List<Url> findByOwner(User owner);
     void deleteByOwner(User owner);
 

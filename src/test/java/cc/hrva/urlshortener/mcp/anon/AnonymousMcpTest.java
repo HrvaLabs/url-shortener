@@ -1,6 +1,7 @@
 package cc.hrva.urlshortener.mcp.anon;
 
 import cc.hrva.urlshortener.configuration.AppConfiguration;
+import cc.hrva.urlshortener.configuration.ClockConfiguration;
 import cc.hrva.urlshortener.configuration.GlobalExceptionHandler;
 import cc.hrva.urlshortener.configuration.JacksonConfiguration;
 import cc.hrva.urlshortener.configuration.SecurityConfiguration;
@@ -17,13 +18,21 @@ import cc.hrva.urlshortener.mcp.bridge.ConnectRequestStore;
 import cc.hrva.urlshortener.mcp.bridge.InMemoryRedis;
 import cc.hrva.urlshortener.mcp.tools.LinkTools;
 import cc.hrva.urlshortener.mcp.tools.McpUserResolver;
+import cc.hrva.urlshortener.mcp.tools.ModerationTools;
 import cc.hrva.urlshortener.model.User;
+import cc.hrva.urlshortener.repository.LinkReviewRepository;
+import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.security.ClientIpResolver;
 import cc.hrva.urlshortener.security.JwtFilter;
 import cc.hrva.urlshortener.security.OAuth2LoginSuccessHandler;
 import cc.hrva.urlshortener.security.TokenProvider;
 import cc.hrva.urlshortener.service.AnalyticsService;
+import cc.hrva.urlshortener.service.BlocklistSourceService;
+import cc.hrva.urlshortener.service.LinkCheckService;
+import cc.hrva.urlshortener.service.ModerationService;
+import cc.hrva.urlshortener.service.ReviewQueueService;
+import cc.hrva.urlshortener.service.ScammerSignalService;
 import cc.hrva.urlshortener.service.UrlService;
 import cc.hrva.urlshortener.service.UserService;
 import com.jayway.jsonpath.JsonPath;
@@ -154,6 +163,8 @@ class AnonymousMcpTest {
             {"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"list_links","arguments":{}}}""";
     private static final String LINK_STATS_CALL = """
             {"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"link_stats","arguments":{"link":"https://hrva.cc/abc12"}}}""";
+    private static final String BLOCK_DOMAIN_CALL = """
+            {"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"block_domain","arguments":{"domain":"evil.example"}}}""";
     private static final RSAKey SIGNING_KEY = generateSigningKey();
 
     @Autowired
@@ -185,6 +196,27 @@ class AnonymousMcpTest {
 
     @MockitoBean
     private OAuth2LoginSuccessHandler oAuth2LoginSuccessHandler;
+
+    @MockitoBean
+    private ModerationService moderationService;
+
+    @MockitoBean
+    private ReviewQueueService reviewQueueService;
+
+    @MockitoBean
+    private ScammerSignalService scammerSignalService;
+
+    @MockitoBean
+    private LinkCheckService linkCheckService;
+
+    @MockitoBean
+    private BlocklistSourceService blocklistSourceService;
+
+    @MockitoBean
+    private UrlRepository urlRepository;
+
+    @MockitoBean
+    private LinkReviewRepository linkReviewRepository;
 
     private final InMemoryRedis redis = new InMemoryRedis();
     private final List<Authentication> callersDuringCreate = new CopyOnWriteArrayList<>();
@@ -256,7 +288,8 @@ class AnonymousMcpTest {
                 .getResponse()
                 .getContentAsString();
         final List<String> signedInTools = JsonPath.read(signedIn, "$.result.tools[*].name");
-        assertThat(signedInTools).containsExactlyInAnyOrder("list_links", "shorten_url", "link_stats");
+        assertThat(signedInTools).containsExactlyInAnyOrder("list_links", "shorten_url", "link_stats", "moderation_summary", "review_queue",
+                "possible_scammers", "check_url", "block_link", "block_domain", "block_user", "delete_link");
         final List<Map<String, Object>> signedInShortenProperties =
                 JsonPath.read(signedIn, "$.result.tools[?(@.name == 'shorten_url')].inputSchema.properties");
         assertThat(signedInShortenProperties).singleElement()
@@ -453,7 +486,7 @@ class AnonymousMcpTest {
     void signedInToolsNotReachableOnAnon() throws Exception {
         final var token = accessTokens.issue(EMAIL, RESOURCE);
 
-        for (final var signedInCall : List.of(LIST_LINKS_CALL, LINK_STATS_CALL)) {
+        for (final var signedInCall : List.of(LIST_LINKS_CALL, LINK_STATS_CALL, BLOCK_DOMAIN_CALL)) {
             mockMvc.perform(anonymousMcpRequest(signedInCall).with(from(CLIENT_IP)))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.result").doesNotExist())
@@ -467,7 +500,7 @@ class AnonymousMcpTest {
         }
 
         verify(urlService, never()).getAllMyUrls(any(), any(), any());
-        verifyNoInteractions(analyticsService);
+        verifyNoInteractions(analyticsService, moderationService);
         verify(userService, never()).fetchActiveUserByEmail(any());
     }
 
@@ -711,8 +744,10 @@ class AnonymousMcpTest {
             TokenProvider.class,
             ClientIpResolver.class,
             UrlRedirectController.class,
+            ClockConfiguration.class,
             McpUserResolver.class,
             LinkTools.class,
+            ModerationTools.class,
             AnonymousMcpConfiguration.class,
             AnonymousShortenTool.class,
             RedisFixedWindowRateLimiter.class
