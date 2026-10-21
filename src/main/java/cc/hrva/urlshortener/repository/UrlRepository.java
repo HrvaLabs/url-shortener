@@ -12,9 +12,11 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 
 @Repository
 public interface UrlRepository extends JpaRepository<Url, Long>, JpaSpecificationExecutor<Url> {
@@ -52,5 +54,22 @@ public interface UrlRepository extends JpaRepository<Url, Long>, JpaSpecificatio
 
     @Query("select distinct t from Url u join u.tags t where u.owner = :owner order by t")
     List<String> findDistinctTagsByOwner(@Param("owner") User owner);
+
+    @Query("select o.id from Url u join u.owner o where u.blockReason is not null group by o.id having count(u) >= :links")
+    List<Long> findOwnerIdsWithBlockedLinks(@Param("links") long links);
+
+    @Query("select o.id from Url u join u.owner o where o.createDate > :signedUpAfter "
+            + "and (u.blockReason is not null or exists (select r.id from LinkReview r where r.url = u)) "
+            + "group by o.id having count(u) >= :links")
+    List<Long> findOwnerIdsSignedUpAfterWithFlaggedOrBlockedLinks(@Param("signedUpAfter") LocalDateTime signedUpAfter, @Param("links") long links);
+
+    @Query("select o.id from Url u join u.owner o where (u.createDate - o.createDate) by second < :windowSeconds "
+            + "group by o.id having count(u) >= :links")
+    List<Long> findOwnerIdsWithLinksSoonAfterSignup(@Param("windowSeconds") long windowSeconds, @Param("links") long links);
+
+    @Modifying
+    @Transactional
+    @Query("update Url u set u.lastSafeBrowsingCheck = :checkedAt where u.id in :ids")
+    int markSafeBrowsingChecked(@Param("ids") Collection<Long> ids, @Param("checkedAt") LocalDateTime checkedAt);
 
 }

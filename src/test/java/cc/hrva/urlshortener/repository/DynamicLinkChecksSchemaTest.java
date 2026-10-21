@@ -335,6 +335,32 @@ class DynamicLinkChecksSchemaTest {
         assertThat(userRepository.existsByIdAndAuthoritiesName(user.getId(), "ROLE_ADMIN")).isFalse();
     }
 
+    @Test
+    void stampingTheCheckTimeLeavesABlockThatHappenedMeanwhileInPlace() {
+        final var checkedAt = LocalDateTime.of(2026, 10, 21, 4, 30);
+        final var blocked = savedBlockedLink("malware", "https://jofogas.cards/b", BlockReason.SAFE_BROWSING);
+        final var clean = savedLink("clean", "https://example.org/", null);
+        final var untouched = savedLink("untouched", "https://example.net/", null);
+        entityManager.flush();
+        entityManager.clear();
+
+        final var stamped = urlRepository.markSafeBrowsingChecked(List.of(blocked.getId(), clean.getId()), checkedAt);
+        entityManager.clear();
+
+        assertThat(stamped).isEqualTo(2);
+        assertThat(urlRepository.findById(blocked.getId())).hasValueSatisfying(stored -> {
+            assertThat(stored.getLastSafeBrowsingCheck()).isEqualTo(checkedAt);
+            assertThat(stored.isActive()).isFalse();
+            assertThat(stored.getBlockReason()).isEqualTo(BlockReason.SAFE_BROWSING);
+        });
+        assertThat(urlRepository.findById(clean.getId())).hasValueSatisfying(stored -> {
+            assertThat(stored.getLastSafeBrowsingCheck()).isEqualTo(checkedAt);
+            assertThat(stored.isActive()).isTrue();
+        });
+        assertThat(urlRepository.findById(untouched.getId()))
+                .hasValueSatisfying(stored -> assertThat(stored.getLastSafeBrowsingCheck()).isNull());
+    }
+
     private Url savedLink(final String shortUrl, final String longUrl, final User owner) {
         return urlRepository.saveAndFlush(Url.builder().shortUrl(shortUrl).longUrl(longUrl).owner(owner).build());
     }

@@ -483,6 +483,31 @@ class DefaultModerationServiceTest {
     }
 
     @Test
+    void aSafeBrowsingBlockMarksTheLinkAsMalwareInTheSameTransaction() {
+        final var url = link(30L, "https://example.org/x", user(1L, "alice@example.com"));
+
+        moderationService.blockLink(30L, BlockReason.SAFE_BROWSING, "https://example.org/x", "system", "nightly");
+
+        assertThat(url.isActive()).isFalse();
+        assertThat(url.getBlockReason()).isEqualTo(BlockReason.SAFE_BROWSING);
+        assertThat(url.getThreatType()).isEqualTo(cc.hrva.urlshortener.model.enums.ThreatType.MALWARE);
+        assertThat(url.getBlockDetail()).isEqualTo("https://example.org/x");
+        assertThat(url.getBlockedAt()).isNotNull();
+        assertThat(savedPerTransaction).filteredOn(saved -> !saved.isEmpty()).containsExactly(List.of(30L));
+        assertThat(outOfPlace).isEmpty();
+    }
+
+    @Test
+    void onlyASafeBrowsingBlockSetsAThreatType() {
+        final var url = link(30L, "https://example.org/x", user(1L, "alice@example.com"));
+
+        moderationService.blockLink(30L, BlockReason.BLOCKLIST, "URLhaus", "system", "nightly");
+
+        assertThat(url.getBlockReason()).isEqualTo(BlockReason.BLOCKLIST);
+        assertThat(url.getThreatType()).isNull();
+    }
+
+    @Test
     void blockingAnAlreadyBlockedLinkChangesNothingAndSendsNoSecondEmail() {
         final var owner = user(1L, "alice@example.com");
         final var url = blocked(30L, "https://example.org/x", BlockReason.BLOCKLIST, owner);

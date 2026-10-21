@@ -79,7 +79,7 @@ public class DefaultScheduledService implements ScheduledService {
     }
 
     @Override
-    @Scheduled(cron = "0 0 2 * * *")
+    @Scheduled(cron = "0 30 4 * * *")
     public void recheckUrlsSafeBrowsing() {
         log.info("Scheduled: SafeBrowsing recheck");
         safeBrowsingRecheckService.recheckActiveUrls();

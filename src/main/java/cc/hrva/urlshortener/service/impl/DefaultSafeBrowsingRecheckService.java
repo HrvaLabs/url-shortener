@@ -1,17 +1,23 @@
 package cc.hrva.urlshortener.service.impl;
 
+import cc.hrva.urlshortener.dto.LinkVerdict;
 import cc.hrva.urlshortener.model.Url;
-import cc.hrva.urlshortener.model.enums.ThreatType;
+import cc.hrva.urlshortener.model.enums.BlockReason;
 import cc.hrva.urlshortener.repository.UrlRepository;
+import cc.hrva.urlshortener.service.LinkCheckService;
+import cc.hrva.urlshortener.service.ModerationService;
+import cc.hrva.urlshortener.service.ReviewQueueService;
 import cc.hrva.urlshortener.service.SafeBrowsingRecheckService;
 import cc.hrva.urlshortener.service.SafeBrowsingService;
-import cc.hrva.urlshortener.service.SendingEmailService;
 import java.time.LocalDateTime;
-import java.util.List;
+import java.util.ArrayList;
+import java.util.EnumMap;
+import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.cache.CacheManager;
+import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 @Slf4j
@@ -20,68 +26,83 @@ import org.springframework.transaction.annotation.Transactional;
 public class DefaultSafeBrowsingRecheckService implements SafeBrowsingRecheckService {
 
     private static final int BATCH_SIZE = 20;
+    private static final String PERFORMED_BY = "system";
+    private static final String VIA = "nightly";
+    private static final String THREAT_SEPARATOR = ", ";
+    private static final int BLOCK_DETAIL_LENGTH = 255;
 
     private final UrlRepository urlRepository;
     private final SafeBrowsingService safeBrowsingService;
-    private final SendingEmailService sendingEmailService;
-    private final CacheManager cacheManager;
+    private final LinkCheckService linkCheckService;
+    private final ModerationService moderationService;
+    private final ReviewQueueService reviewQueueService;
 
     @Override
-    @Transactional
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public void recheckActiveUrls() {
-        log.info("Starting SafeBrowsing recheck of active URLs");
+        log.info("Starting nightly scan of active URLs");
 
         final var ids = urlRepository.findActiveIds();
+        final var tally = new EnumMap<ScanResult, Integer>(ScanResult.class);
         var checked = 0;
-        var flagged = 0;
 
         for (int from = 0; from < ids.size(); from += BATCH_SIZE) {
             final var urls = urlRepository.findAllById(ids.subList(from, Math.min(from + BATCH_SIZE, ids.size())));
+            final var scanned = new ArrayList<Long>();
 
             for (final var url : urls) {
                 if (!url.isActive()) {
                     continue;
                 }
 
-                final var threats = safeBrowsingService.checkUrlsForThreats(url.getLongUrl());
-
-                if (!threats.isEmpty()) {
-                    flagged++;
-                    handleFlaggedUrl(url, threats);
+                try {
+                    tally.merge(scan(url), 1, Integer::sum);
+                    scanned.add(url.getId());
+                    checked++;
+                } catch (final RuntimeException exception) {
+                    log.warn("Nightly scan of a link failed, continuing with the next one urlId={}", url.getId(), exception);
                 }
-
-                url.setLastSafeBrowsingCheck(LocalDateTime.now());
-                checked++;
             }
 
-            urlRepository.saveAll(urls);
-            log.debug("SafeBrowsing recheck progress: {}/{} checked, {} flagged", checked, ids.size(), flagged);
-        }
-
-        log.info("SafeBrowsing recheck complete — {} checked, {} flagged and deactivated", checked, flagged);
-    }
-
-    private void handleFlaggedUrl(final Url url, final List<String> threats) {
-        log.warn("URL /{} flagged as malicious: {}", url.getShortUrl(), threats);
-
-        url.setActive(false);
-        url.setThreatType(ThreatType.MALWARE);
-        evictFromCache(url.getShortUrl());
-
-        if (url.getOwner() != null) {
-            sendingEmailService.sendEmailUrlMalwareDetected(url.getOwner(), url, String.join(", ", threats));
-        }
-    }
-
-    private void evictFromCache(final String shortUrl) {
-        try {
-            final var cache = cacheManager.getCache("urls");
-            if (cache != null) {
-                cache.evict(shortUrl);
+            if (!scanned.isEmpty()) {
+                urlRepository.markSafeBrowsingChecked(scanned, LocalDateTime.now());
             }
-        } catch (final Exception e) {
-            log.debug("Failed to evict from cache", e);
+            log.debug("Nightly scan progress: {}/{} checked, {}", checked, ids.size(), tally);
         }
+
+        log.info("Nightly scan complete — {} checked, {} blocked, {} queued for review",
+                checked, tally.getOrDefault(ScanResult.BLOCKED, 0), tally.getOrDefault(ScanResult.QUEUED, 0));
+    }
+
+    private ScanResult scan(final Url url) {
+        final var threats = safeBrowsingService.checkUrlsForThreats(url.getLongUrl());
+        if (!threats.isEmpty()) {
+            log.warn("URL /{} flagged as malicious: {}", url.getShortUrl(), threats);
+            final var detail = threats.stream().distinct().collect(Collectors.joining(THREAT_SEPARATOR));
+            moderationService.blockLink(url.getId(), BlockReason.SAFE_BROWSING, StringUtils.truncate(detail, BLOCK_DETAIL_LENGTH), PERFORMED_BY, VIA);
+            return ScanResult.BLOCKED;
+        }
+
+        final var verdict = linkCheckService.check(url.getLongUrl());
+        if (blocksExistingLinks(verdict)) {
+            log.warn("URL /{} blocked by the link check reason={} detail={}", url.getShortUrl(), verdict.blockReason(), verdict.blockDetail());
+            moderationService.blockLink(url.getId(), verdict.blockReason(), verdict.blockDetail(), PERFORMED_BY, VIA);
+            return ScanResult.BLOCKED;
+        }
+
+        if (verdict.outcome() == LinkVerdict.Outcome.BLOCK || verdict.outcome() == LinkVerdict.Outcome.FLAG) {
+            reviewQueueService.flag(url, verdict.reasons());
+            return ScanResult.QUEUED;
+        }
+        return ScanResult.PASSED;
+    }
+
+    private static boolean blocksExistingLinks(final LinkVerdict verdict) {
+        return verdict.outcome() == LinkVerdict.Outcome.BLOCK && verdict.blockReason() != BlockReason.SCAM_SIGNALS;
+    }
+
+    private enum ScanResult {
+        BLOCKED, QUEUED, PASSED
     }
 
 }

@@ -315,6 +315,9 @@ public class DefaultModerationService implements ModerationService {
                     url.setBlockReason(reason);
                     url.setBlockDetail(detail);
                     url.setBlockedAt(LocalDateTime.now());
+                    if (reason == BlockReason.SAFE_BROWSING) {
+                        url.setThreatType(ThreatType.MALWARE);
+                    }
                     final var saved = urlRepository.save(url);
                     reviewQueueService.resolveOpen(saved, resolution, performedBy);
                     return saved;
