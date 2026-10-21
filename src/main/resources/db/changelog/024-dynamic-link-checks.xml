@@ -26,6 +26,15 @@
         <rollback/>
     </changeSet>
 
+    <changeSet author="khrvacic" id="024-url-blocked-at-index">
+        <createIndex tableName="URL" indexName="idx_url_blocked_at">
+            <column name="BLOCKED_AT"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="URL" indexName="idx_url_blocked_at"/>
+        </rollback>
+    </changeSet>
+
     <changeSet author="khrvacic" id="024-url-redirect-chain">
         <addColumn tableName="URL">
             <column name="FINAL_URL" type="VARCHAR(2048)"/>

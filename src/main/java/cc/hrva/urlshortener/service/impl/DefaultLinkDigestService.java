@@ -101,7 +101,7 @@ public class DefaultLinkDigestService implements LinkDigestService {
 
     private List<DecisionsDigest.FailingSource> failingSources() {
         return blocklistSourceService.list().stream()
-                .filter(source -> source.lastError() != null)
+                .filter(source -> source.enabled() && source.lastError() != null)
                 .map(source -> new DecisionsDigest.FailingSource(source.name(), source.lastError()))
                 .toList();
     }

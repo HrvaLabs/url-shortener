@@ -82,8 +82,12 @@ class DefaultLinkDigestServiceTest {
     }
 
     private static BlocklistSourceResponse source(final String name, final String lastError) {
+        return source(name, true, lastError);
+    }
+
+    private static BlocklistSourceResponse source(final String name, final boolean enabled, final String lastError) {
         return new BlocklistSourceResponse(1L, name, "https://hagezi-mirror.dnsbunker.org/wildcard/fake-onlydomains.txt", List.of(),
-                SourceKind.DOMAINS, BlocklistAction.BLOCK, true, 6, null, null, null, null, null, lastError, null);
+                SourceKind.DOMAINS, BlocklistAction.BLOCK, enabled, 6, null, null, null, null, null, lastError, null);
     }
 
     private void openEntries(final long openCount, final LinkReview... newest) {
@@ -173,6 +177,28 @@ class DefaultLinkDigestServiceTest {
         final var digest = sentDigest();
         assertThat(digest.openCount()).isZero();
         assertThat(digest.failingSources()).containsExactly(new DecisionsDigest.FailingSource("HaGeZi Fake", "HTTP 503 from every mirror"));
+    }
+
+    @Test
+    void aDisabledListThatOnceFailedToLoadSendsNothing() {
+        openEntries(0L);
+        blockedAutomatically();
+        sources(source("HaGeZi Fake", false, "HTTP 503 from every mirror"));
+
+        linkDigestService.sendDailyDigest();
+
+        verify(sendingEmailService, never()).sendDecisionsEmailToAdmin(any());
+    }
+
+    @Test
+    void aDisabledListIsLeftOutOfTheFailingLists() {
+        openEntries(1L, review(link(41L, "njuskaio_verify", "https://njuskaio.cam/a/MAUB3", NEWCOMER), "imitates njuskalo"));
+        blockedAutomatically();
+        sources(source("HaGeZi Fake", false, "HTTP 503 from every mirror"), source("URLhaus", "HTTP 429"));
+
+        linkDigestService.sendDailyDigest();
+
+        assertThat(sentDigest().failingSources()).containsExactly(new DecisionsDigest.FailingSource("URLhaus", "HTTP 429"));
     }
 
     @Test
