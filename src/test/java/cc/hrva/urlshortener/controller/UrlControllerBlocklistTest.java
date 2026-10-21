@@ -31,6 +31,7 @@ import cc.hrva.urlshortener.service.impl.DefaultUrlService;
 import cc.hrva.urlshortener.validator.ApiKeyValidator;
 import cc.hrva.urlshortener.validator.UrlValidator;
 import io.micrometer.core.instrument.MeterRegistry;
+import jakarta.persistence.EntityManager;
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.List;
 import java.util.Optional;
@@ -145,6 +146,9 @@ class UrlControllerBlocklistTest {
     @Mock
     private HttpServletRequest request;
 
+    @Mock
+    private EntityManager entityManager;
+
     @BeforeEach
     void setUp() {
         final var appProperties = new AppProperties();
@@ -155,7 +159,7 @@ class UrlControllerBlocklistTest {
         final var urlService = new DefaultUrlService(userService, urlValidator, apiKeyService, urlRepository, appProperties, apiKeyValidator,
                 ipAddressService, taskExecutor, new UrlToPeekUrlConverter(), createUrlToUrlConverter, urlUpdateDtoToUrlConverter, cacheManager,
                 objectMapper, meterRegistry, passwordEncoder, suspiciousUrlService, rateLimiter, reviewQueueService, scammerSignalService, clickCheckService,
-                redirectChainService, TransactionOperations.withoutTransaction());
+                redirectChainService, TransactionOperations.withoutTransaction(), entityManager);
         mockMvc = MockMvcBuilders.standaloneSetup(new UrlController(urlService, qrCodeService, linkPreviewService, clientIpResolver, request, appProperties))
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .build();

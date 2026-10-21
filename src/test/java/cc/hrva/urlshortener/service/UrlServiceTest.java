@@ -49,6 +49,7 @@ import cc.hrva.urlshortener.service.impl.DefaultUrlService;
 import cc.hrva.urlshortener.validator.ApiKeyValidator;
 import cc.hrva.urlshortener.validator.UrlValidator;
 import cc.hrva.urlshortener.validator.impl.DefaultUrlValidator;
+import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -88,6 +89,7 @@ class UrlServiceTest {
     private static final String FRONTEND = "https://hrva.cc";
     private static final String CLIENT_IP = "203.0.113.7";
     private static final String CREATE_LIMIT_REFUSAL = "You've created a lot of links in a short time. Try again in an hour.";
+    private static final String BLOCKED_WHILE_EDITING = "This link was blocked while you were editing it. Reload and try again.";
 
     private UrlService urlService;
 
@@ -160,6 +162,9 @@ class UrlServiceTest {
     @Mock
     private RedirectChainService redirectChainService;
 
+    @Mock
+    private EntityManager entityManager;
+
     @BeforeEach
     void setUp() {
         org.mockito.Mockito.lenient().when(rateLimiter.tryAcquire(any(), org.mockito.ArgumentMatchers.anyInt(), any())).thenReturn(true);
@@ -187,7 +192,8 @@ class UrlServiceTest {
                 scammerSignalService,
                 clickCheckService,
                 redirectChainService,
-                TransactionOperations.withoutTransaction()
+                TransactionOperations.withoutTransaction(),
+                entityManager
         );
     }
 
@@ -244,7 +250,7 @@ class UrlServiceTest {
         final var changed = Url.builder().id(7L).shortUrl("abc").longUrl("https://new.example").visits(0L).active(true).build();
         when(urlRepository.findById(7L)).thenReturn(Optional.of(url));
         when(urlUpdateDtoToUrlConverter.convert(update)).thenReturn(changed);
-        when(urlRepository.save(changed)).thenReturn(changed);
+        when(urlRepository.save(url)).thenReturn(url);
 
         final var result = urlService.updateUrl(update);
 
@@ -255,8 +261,8 @@ class UrlServiceTest {
         order.verify(urlValidator).checkIfLongUrlIsNotAShortener(changed);
         order.verify(urlValidator).checkIfLongUrlIsNotBlocklisted(changed);
         order.verify(urlValidator).checkIfUrlSafe(changed);
-        order.verify(urlRepository).save(changed);
-        verify(reviewQueueService).resolveOpen(changed, ReviewResolution.DESTINATION_CHANGED, "system");
+        order.verify(urlRepository).save(url);
+        verify(reviewQueueService).resolveOpen(url, ReviewResolution.DESTINATION_CHANGED, "system");
         verify(reviewQueueService, never()).flag(any(), any());
     }
 
@@ -268,14 +274,15 @@ class UrlServiceTest {
         when(urlRepository.findById(7L)).thenReturn(Optional.of(url));
         when(urlUpdateDtoToUrlConverter.convert(update)).thenReturn(changed);
         when(urlValidator.checkIfLongUrlIsNotBlocklisted(changed)).thenReturn(new LinkVerdict(Outcome.FLAG, YOUNG_DOMAIN, null, null));
-        when(urlRepository.save(changed)).thenReturn(changed);
+        when(urlRepository.save(url)).thenReturn(url);
 
         urlService.updateUrl(update);
 
         final var order = org.mockito.Mockito.inOrder(urlRepository, reviewQueueService);
-        order.verify(urlRepository).save(changed);
-        order.verify(reviewQueueService).resolveOpen(changed, ReviewResolution.DESTINATION_CHANGED, "system");
-        order.verify(reviewQueueService).flag(changed, YOUNG_DOMAIN);
+        order.verify(urlRepository).save(url);
+        order.verify(reviewQueueService).resolveOpen(url, ReviewResolution.DESTINATION_CHANGED, "system");
+        order.verify(reviewQueueService).flag(url, YOUNG_DOMAIN);
+        assertThat(url.getLongUrl()).isEqualTo("https://findfavoritedate.life/?u=f6yp608");
     }
 
     @Test
@@ -312,6 +319,133 @@ class UrlServiceTest {
         verify(urlValidator, never()).checkIfUrlSafe(any());
         verify(reviewQueueService, never()).resolveOpen(any(), any(), any());
         verify(reviewQueueService, never()).flag(any(), any());
+    }
+
+    @Test
+    void aBlockThatLandsWhileAnEditIsCheckedIsNeverUndone() {
+        final var loaded = Url.builder().id(7L).shortUrl("abc").longUrl("https://old.example").visits(0L).active(true).build();
+        final var update = UrlUpdateDto.builder().id(7L).longUrl("https://example.com/menu").build();
+        final var changed = Url.builder().id(7L).shortUrl("abc").longUrl("https://example.com/menu").visits(0L).active(true).build();
+        final var blockedMeanwhile = Url.builder().id(7L).shortUrl("abc").longUrl("https://old.example").visits(0L).active(false)
+                .blockReason(BlockReason.DOMAIN_RULE).blockDetail("old.example").blockedAt(LocalDateTime.of(2026, 10, 22, 9, 0)).build();
+        when(urlRepository.findById(7L)).thenReturn(Optional.of(loaded), Optional.of(blockedMeanwhile));
+        when(urlUpdateDtoToUrlConverter.convert(update)).thenReturn(changed);
+
+        assertThatThrownBy(() -> urlService.updateUrl(update))
+                .isInstanceOf(UrlValidationException.class)
+                .hasMessage(BLOCKED_WHILE_EDITING);
+
+        verify(urlRepository, never()).save(any());
+        verify(reviewQueueService, never()).resolveOpen(any(), any(), any());
+        verify(reviewQueueService, never()).flag(any(), any());
+        verify(redirectChainService, never()).checkLater(org.mockito.ArgumentMatchers.anyLong());
+        assertThat(blockedMeanwhile.getLongUrl()).isEqualTo("https://old.example");
+        assertThat(blockedMeanwhile.isActive()).isFalse();
+    }
+
+    @Test
+    void anEditLandsOnTheLinkAsItIsNowAndNotOnTheCopyLoadedBeforeTheChecks() {
+        final var loaded = Url.builder().id(7L).shortUrl("abc").longUrl("https://same.example").visits(0L).active(true).build();
+        final var update = UrlUpdateDto.builder().id(7L).visitLimit(10L).tags(Set.of("work")).password("s3cret").build();
+        final var edited = Url.builder().id(7L).shortUrl("abc").longUrl("https://same.example").visits(0L).active(true)
+                .visitLimit(10L).tags(Set.of("work")).passwordHash("hash").build();
+        final var current = Url.builder().id(7L).shortUrl("abc").longUrl("https://same.example").visits(3L).active(false).build();
+        when(urlRepository.findById(7L)).thenReturn(Optional.of(loaded), Optional.of(current));
+        when(urlUpdateDtoToUrlConverter.convert(update)).thenReturn(edited);
+        when(urlRepository.save(any(Url.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        urlService.updateUrl(update);
+
+        final var order = org.mockito.Mockito.inOrder(entityManager, urlRepository);
+        order.verify(urlRepository).findById(7L);
+        order.verify(entityManager).detach(edited);
+        order.verify(urlRepository).findById(7L);
+        order.verify(urlRepository).save(current);
+        assertThat(current)
+                .extracting(Url::getVisitLimit, Url::getTags, Url::getPasswordHash, Url::isActive, Url::getVisits)
+                .containsExactly(10L, Set.of("work"), "hash", false, 3L);
+    }
+
+    @Test
+    void anEditOfALinkThatWasAlreadyBlockedKeepsItsBlock() {
+        final var blockedAt = LocalDateTime.of(2026, 10, 22, 9, 0);
+        final var loaded = Url.builder().id(7L).shortUrl("abc").longUrl("https://same.example").visits(0L).active(false)
+                .blockReason(BlockReason.ADMIN).blockedAt(blockedAt).build();
+        final var current = Url.builder().id(7L).shortUrl("abc").longUrl("https://same.example").visits(0L).active(false)
+                .blockReason(BlockReason.ADMIN).blockedAt(blockedAt).build();
+        final var update = UrlUpdateDto.builder().id(7L).tags(Set.of("work")).build();
+        when(urlRepository.findById(7L)).thenReturn(Optional.of(loaded), Optional.of(current));
+        when(urlUpdateDtoToUrlConverter.convert(update)).thenAnswer(invocation -> {
+            loaded.setTags(Set.of("work"));
+            return loaded;
+        });
+        when(urlRepository.save(any(Url.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        urlService.updateUrl(update);
+
+        verify(urlRepository).save(current);
+        assertThat(current)
+                .extracting(Url::getTags, Url::isActive, Url::getBlockReason, Url::getBlockedAt)
+                .containsExactly(Set.of("work"), false, BlockReason.ADMIN, blockedAt);
+    }
+
+    @Test
+    void aBlockThatLandsWhileALinkIsReactivatedIsNeverUndone() {
+        final var loaded = Url.builder().id(7L).shortUrl("abc").longUrl("https://example.com/menu").visits(0L).active(false).build();
+        final var blockedMeanwhile = Url.builder().id(7L).shortUrl("abc").longUrl("https://example.com/menu").visits(0L).active(false)
+                .threatType(cc.hrva.urlshortener.model.enums.ThreatType.MALWARE).blockReason(BlockReason.SAFE_BROWSING)
+                .blockDetail("MALWARE").blockedAt(LocalDateTime.of(2026, 10, 22, 4, 31)).build();
+        when(urlRepository.findById(7L)).thenReturn(Optional.of(loaded), Optional.of(blockedMeanwhile));
+
+        assertThatThrownBy(() -> urlService.activateUrl(7L))
+                .isInstanceOf(UrlValidationException.class)
+                .hasMessage(BLOCKED_WHILE_EDITING);
+
+        verify(entityManager).detach(loaded);
+        verify(urlRepository, never()).save(any());
+        assertThat(blockedMeanwhile)
+                .extracting(Url::isActive, Url::getBlockReason, Url::getThreatType)
+                .containsExactly(false, BlockReason.SAFE_BROWSING, cc.hrva.urlshortener.model.enums.ThreatType.MALWARE);
+    }
+
+    @Test
+    void anAdminCanStillReactivateALinkWhoseBlockIsUnchangedSinceTheChecks() {
+        final var blockedAt = LocalDateTime.of(2026, 10, 20, 2, 0);
+        final var loaded = Url.builder().id(7L).shortUrl("abc").longUrl("https://example.com/menu").visits(0L).active(false)
+                .blockReason(BlockReason.BLOCKLIST).blockDetail("HaGeZi TIF medium").blockedAt(blockedAt).build();
+        final var current = Url.builder().id(7L).shortUrl("abc").longUrl("https://example.com/menu").visits(0L).active(false)
+                .blockReason(BlockReason.BLOCKLIST).blockDetail("HaGeZi TIF medium").blockedAt(blockedAt).build();
+        when(urlRepository.findById(7L)).thenReturn(Optional.of(loaded), Optional.of(current));
+        when(urlRepository.save(any(Url.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        final var result = urlService.activateUrl(7L);
+
+        verify(urlRepository).save(current);
+        assertThat(result.active()).isTrue();
+        assertThat(current)
+                .extracting(Url::isActive, Url::getBlockReason, Url::getBlockDetail, Url::getBlockedAt)
+                .containsExactly(true, null, null, null);
+    }
+
+    @Test
+    void expiredLinksAreSwitchedOffByIdWithoutWritingBackLoadedCopies() {
+        when(urlRepository.findExpiredActiveIds(any(LocalDateTime.class))).thenReturn(List.of(3L, 4L));
+        when(urlRepository.deactivateIfActive(List.of(3L, 4L))).thenReturn(2);
+
+        urlService.deactivateExpiredUrls();
+
+        verify(urlRepository).deactivateIfActive(List.of(3L, 4L));
+        verify(urlRepository, never()).save(any());
+        verify(urlRepository, never()).saveAll(any());
+    }
+
+    @Test
+    void nothingIsUpdatedWhenNoLinkHasExpired() {
+        when(urlRepository.findExpiredActiveIds(any(LocalDateTime.class))).thenReturn(List.of());
+
+        urlService.deactivateExpiredUrls();
+
+        verify(urlRepository, never()).deactivateIfActive(any());
     }
 
     @Test
@@ -585,7 +719,8 @@ class UrlServiceTest {
     @Test
     void aNewDestinationForgetsTheOldChainAndHasItsRedirectsCheckedOnceItIsCommitted() {
         final var checkedInTransaction = new AtomicReference<Boolean>();
-        final var url = Url.builder().id(7L).shortUrl("abc").longUrl("https://old.example").visits(0L).active(true).build();
+        final var url = Url.builder().id(7L).shortUrl("abc").longUrl("https://old.example").visits(0L).active(true)
+                .finalUrl("https://old-landing.example/").chainCheckedAt(LocalDateTime.of(2026, 10, 20, 4, 30)).build();
         final var update = UrlUpdateDto.builder().id(7L).longUrl("https://example.com/menu").build();
         final var changed = Url.builder().id(7L).shortUrl("abc").longUrl("https://example.com/menu").visits(0L).active(true)
                 .finalUrl("https://old-landing.example/").chainCheckedAt(LocalDateTime.of(2026, 10, 20, 4, 30)).build();
@@ -599,8 +734,9 @@ class UrlServiceTest {
         transactionalUrlService().updateUrl(update);
 
         assertThat(checkedInTransaction).hasValue(false);
-        assertThat(changed.getFinalUrl()).isNull();
-        assertThat(changed.getChainCheckedAt()).isNull();
+        assertThat(url.getLongUrl()).isEqualTo("https://example.com/menu");
+        assertThat(url.getFinalUrl()).isNull();
+        assertThat(url.getChainCheckedAt()).isNull();
     }
 
     @Test
@@ -1686,7 +1822,8 @@ class UrlServiceTest {
                 scammerSignalService,
                 clickCheckService,
                 redirectChainService,
-                TransactionOperations.withoutTransaction()
+                TransactionOperations.withoutTransaction(),
+                entityManager
         );
     }
 
@@ -1750,7 +1887,8 @@ class UrlServiceTest {
                 scammerSignalService,
                 clickCheckService,
                 redirectChainService,
-                new TransactionTemplate(transactionManager)
+                new TransactionTemplate(transactionManager),
+                entityManager
         );
         final var proxyFactory = new ProxyFactory(service);
         proxyFactory.addAdvice(new TransactionInterceptor(transactionManager, new AnnotationTransactionAttributeSource()));
@@ -1780,7 +1918,8 @@ class UrlServiceTest {
                 scammerSignalService,
                 clickCheckService,
                 redirectChainService,
-                TransactionOperations.withoutTransaction()
+                TransactionOperations.withoutTransaction(),
+                entityManager
         );
     }
 
@@ -1807,7 +1946,8 @@ class UrlServiceTest {
                 scammerSignalService,
                 clickCheckService,
                 redirectChainService,
-                TransactionOperations.withoutTransaction()
+                TransactionOperations.withoutTransaction(),
+                entityManager
         );
     }
 

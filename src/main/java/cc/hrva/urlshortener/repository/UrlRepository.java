@@ -39,7 +39,6 @@ public interface UrlRepository extends JpaRepository<Url, Long>, JpaSpecificatio
     Optional<Url> findByShortUrlAndActiveTrue(String shortUrl);
     Optional<Url> findFirstByShortUrlOrderByActiveDescIdDesc(String shortUrl);
     boolean existsUrlByLongUrlAndActiveTrueAndOwnerIsNull(String longUrl);
-    List<Url> findByExpirationDateLessThanEqualAndActiveTrue(LocalDateTime expirationDate);
     List<Url> findByExpirationDateBetweenAndActiveTrueAndOwnerIsNotNull(LocalDateTime start, LocalDateTime end);
     long countByActiveTrue();
     List<Url> findTop10ByCreateDateAfterAndOwnerCreateDateAfterOrderByCreateDateDesc(LocalDateTime createdAfter, LocalDateTime ownerCreatedAfter);
@@ -51,6 +50,9 @@ public interface UrlRepository extends JpaRepository<Url, Long>, JpaSpecificatio
 
     @Query("select u.id from Url u where u.active = true order by u.id")
     List<Long> findActiveIds();
+
+    @Query("select u.id from Url u where u.expirationDate <= :now and u.active = true order by u.id")
+    List<Long> findExpiredActiveIds(@Param("now") LocalDateTime now);
 
     @Query("select new cc.hrva.urlshortener.dto.LinkDestination(u.id, u.longUrl) from Url u where u.active = true and u.id > :afterId order by u.id")
     List<LinkDestination> findActiveDestinationsAfter(@Param("afterId") long afterId, Pageable pageable);
@@ -130,5 +132,10 @@ public interface UrlRepository extends JpaRepository<Url, Long>, JpaSpecificatio
     @Transactional
     @Query("update Url u set u.active = false where u.id = :id and u.active = true and u.visitLimit is not null and u.visits >= u.visitLimit")
     int deactivateAtVisitLimit(@Param("id") long id);
+
+    @Modifying
+    @Transactional
+    @Query("update Url u set u.active = false where u.id in :ids and u.active = true")
+    int deactivateIfActive(@Param("ids") Collection<Long> ids);
 
 }

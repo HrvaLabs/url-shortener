@@ -15,11 +15,14 @@ import cc.hrva.urlshortener.dto.UrlUpdateDto;
 import cc.hrva.urlshortener.dto.UnlockResponse;
 import cc.hrva.urlshortener.exception.NoAuthorizationException;
 import cc.hrva.urlshortener.exception.UrlNotFoundException;
+import cc.hrva.urlshortener.exception.UrlValidationException;
 import cc.hrva.urlshortener.model.ApiKey;
 import cc.hrva.urlshortener.model.PeekUrl;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.User;
+import cc.hrva.urlshortener.model.enums.BlockReason;
 import cc.hrva.urlshortener.model.enums.ReviewResolution;
+import cc.hrva.urlshortener.model.enums.ThreatType;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.specification.UrlSpecification;
 import cc.hrva.urlshortener.service.ApiKeyService;
@@ -33,6 +36,7 @@ import cc.hrva.urlshortener.service.UrlService;
 import cc.hrva.urlshortener.service.UserService;
 import cc.hrva.urlshortener.validator.ApiKeyValidator;
 import cc.hrva.urlshortener.validator.UrlValidator;
+import jakarta.persistence.EntityManager;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -90,6 +94,7 @@ public class DefaultUrlService implements UrlService {
     private static final Duration CREATE_WINDOW = Duration.ofHours(1);
     private static final String CREATE_LIMIT_REFUSAL = "You've created a lot of links in a short time. Try again in an hour.";
     private static final String ROLE_ADMIN = "ROLE_ADMIN";
+    private static final String BLOCKED_WHILE_EDITING = "This link was blocked while you were editing it. Reload and try again.";
 
     private static final Set<String> BOT_PROBE_PATHS = Set.of(
             "favicon.ico", "favicon.png", "robots.txt", "sitemap.xml",
@@ -118,6 +123,7 @@ public class DefaultUrlService implements UrlService {
     private final ClickCheckService clickCheckService;
     private final RedirectChainService redirectChainService;
     private final TransactionOperations transactionOperations;
+    private final EntityManager entityManager;
 
     @Override
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
@@ -366,18 +372,22 @@ public class DefaultUrlService implements UrlService {
         log.info("Activate URL id={}", id);
 
         final var url = urlRepository.findById(id).orElseThrow(() -> new UrlNotFoundException("Url doesn't exist"));
+        final var blockAtStart = BlockState.of(url);
 
         urlValidator.verifyUserAdminOrOwner(url);
         urlValidator.checkIfUrlNotBlocked(url);
         urlValidator.checkIfShortUrlIsFreeToReactivate(url.getShortUrl());
         urlValidator.checkIfDestinationNotBlocked(url);
         urlValidator.checkIfUrlSafe(url);
-        url.setThreatType(null);
-        url.setBlockReason(null);
-        url.setBlockDetail(null);
-        url.setBlockedAt(null);
 
-        return transactionOperations.execute(status -> UrlResponse.from(urlRepository.save(activateUrl(url))));
+        return transactionOperations.execute(status -> {
+            final var current = reloadUnlessBlockedSince(url, blockAtStart);
+            current.setThreatType(null);
+            current.setBlockReason(null);
+            current.setBlockDetail(null);
+            current.setBlockedAt(null);
+            return UrlResponse.from(urlRepository.save(activateUrl(current)));
+        });
     }
 
     @Override
@@ -404,19 +414,17 @@ public class DefaultUrlService implements UrlService {
                 .orElseThrow(() -> new UrlNotFoundException(String.format("Url with id %d doesn't exist", updateDto.getId())));
         urlValidator.verifyUserAdminOrOwner(existing);
         final var previousLongUrl = existing.getLongUrl();
+        final var blockAtStart = BlockState.of(existing);
 
         final var url = urlUpdateDtoToUrlConverter.convert(updateDto);
         final var destinationChanged = !Objects.equals(previousLongUrl, url.getLongUrl());
         final var verdict = destinationChanged ? validateNewDestination(url) : LinkVerdict.clean();
         urlValidator.checkIfUrlExpirationDateIsInThePast(url);
 
-        url.verifyUrlValidity(url);
-        if (destinationChanged) {
-            url.setFinalUrl(null);
-            url.setChainCheckedAt(null);
-        }
         final var updated = transactionOperations.execute(status -> {
-            final var saved = urlRepository.save(url);
+            final var current = reloadUnlessBlockedSince(url, blockAtStart);
+            applyEdit(updateDto, url, current, destinationChanged);
+            final var saved = urlRepository.save(current);
             if (destinationChanged) {
                 reviewQueueService.resolveOpen(saved, ReviewResolution.DESTINATION_CHANGED, SYSTEM);
             }
@@ -427,6 +435,34 @@ public class DefaultUrlService implements UrlService {
             checkRedirectsLater(updated.id());
         }
         return updated;
+    }
+
+    private Url reloadUnlessBlockedSince(final Url loaded, final BlockState blockAtStart) {
+        entityManager.detach(loaded);
+        final var current = urlRepository.findById(loaded.getId()).orElseThrow(() -> new UrlNotFoundException("Url doesn't exist"));
+        final var blockNow = BlockState.of(current);
+        if (blockNow.isBlocked() && !blockNow.equals(blockAtStart)) {
+            log.info("Link was blocked while it was being edited urlId={}", current.getId());
+            throw new UrlValidationException(BLOCKED_WHILE_EDITING);
+        }
+        return current;
+    }
+
+    private static void applyEdit(final UrlUpdateDto updateDto, final Url edited, final Url current, final boolean destinationChanged) {
+        if (destinationChanged) {
+            current.setLongUrl(edited.getLongUrl());
+            current.setFinalUrl(null);
+            current.setChainCheckedAt(null);
+        }
+        current.setVisitLimit(edited.getVisitLimit());
+        current.setExpirationDate(edited.getExpirationDate());
+        if (updateDto.getTags() != null) {
+            current.setTags(edited.getTags());
+        }
+        if (updateDto.getPassword() != null) {
+            current.setPasswordHash(edited.getPasswordHash());
+        }
+        current.verifyUrlValidity(current);
     }
 
     private void checkRedirectsLater(final long urlId) {
@@ -508,14 +544,11 @@ public class DefaultUrlService implements UrlService {
     @Override
     @Transactional
     public void deactivateExpiredUrls() {
-        final var urls = urlRepository.findByExpirationDateLessThanEqualAndActiveTrue(LocalDateTime.now()).stream()
-                .map(this::deactivateUrl)
-                .toList();
-
-        urlRepository.saveAll(urls);
-        if (!urls.isEmpty()) {
-            log.info("Deactivated {} urls", urls.size());
+        final var ids = urlRepository.findExpiredActiveIds(LocalDateTime.now());
+        if (ids.isEmpty()) {
+            return;
         }
+        log.info("Deactivated {} urls", urlRepository.deactivateIfActive(ids));
     }
 
     @Override
@@ -769,6 +802,18 @@ public class DefaultUrlService implements UrlService {
     public Url activateUrl(final Url url) {
         url.setActive(true);
         return url;
+    }
+
+    private record BlockState(BlockReason reason, ThreatType threatType, LocalDateTime blockedAt) {
+
+        private static BlockState of(final Url url) {
+            return new BlockState(url.getBlockReason(), url.getThreatType(), url.getBlockedAt());
+        }
+
+        private boolean isBlocked() {
+            return reason != null || threatType != null;
+        }
+
     }
 
 }
