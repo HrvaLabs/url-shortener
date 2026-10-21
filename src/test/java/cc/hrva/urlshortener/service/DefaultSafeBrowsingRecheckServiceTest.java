@@ -3,6 +3,7 @@ package cc.hrva.urlshortener.service;
 import cc.hrva.urlshortener.dto.LinkVerdict;
 import cc.hrva.urlshortener.dto.LinkVerdict.Outcome;
 import cc.hrva.urlshortener.exception.UrlNotFoundException;
+import cc.hrva.urlshortener.exception.UrlValidationException;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.enums.BlockReason;
 import cc.hrva.urlshortener.model.enums.ThreatType;
@@ -42,6 +43,7 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class DefaultSafeBrowsingRecheckServiceTest {
 
+    private static final String SAFE_BROWSING_DOWN = "URL safety check is temporarily unavailable. Please try again later.";
     private static final List<String> YOUNG_LOOKALIKE = List.of("domain registered in the last 30 days", "imitates njuskalo");
 
     @Mock
@@ -266,6 +268,37 @@ class DefaultSafeBrowsingRecheckServiceTest {
 
         assertThat(stamped).hasSize(43).doesNotContain(2L, 5L);
         verify(linkCheckService).check("https://site45.example");
+    }
+
+    @Test
+    void whenSafeBrowsingIsDownTheListsStillApplyToEveryLinkAndNothingIsStampedAsChecked() {
+        final var reasons = List.of("on list Phishing.Database domains");
+        when(safeBrowsingService.checkUrlsForThreats(anyString())).thenThrow(new UrlValidationException(SAFE_BROWSING_DOWN));
+        verdict(3L, blocked(BlockReason.BLOCKLIST, "URLhaus"));
+        verdict(11L, new LinkVerdict(Outcome.FLAG, reasons, null, null));
+        verdict(44L, blocked(BlockReason.DOMAIN_RULE, "jofogas.cards"));
+
+        recheckService.recheckActiveUrls();
+
+        verify(safeBrowsingService, times(1)).checkUrlsForThreats(anyString());
+        verify(linkCheckService, times(45)).check(anyString());
+        verify(moderationService).blockLink(3L, BlockReason.BLOCKLIST, "URLhaus", "system", "nightly");
+        verify(moderationService).blockLink(44L, BlockReason.DOMAIN_RULE, "jofogas.cards", "system", "nightly");
+        verify(moderationService, times(2)).blockLink(anyLong(), any(BlockReason.class), any(), anyString(), anyString());
+        verify(reviewQueueService).flag(linkWithId(11L), eq(reasons));
+        assertThat(stamped).isEmpty();
+        assertThat(database.values()).allSatisfy(url -> assertThat(url.getLastSafeBrowsingCheck()).isNull());
+    }
+
+    @Test
+    void safeBrowsingGoingDownMidScanStampsOnlyTheLinksItReallyChecked() {
+        when(safeBrowsingService.checkUrlsForThreats("https://site5.example")).thenThrow(new UrlValidationException(SAFE_BROWSING_DOWN));
+
+        recheckService.recheckActiveUrls();
+
+        verify(safeBrowsingService, times(5)).checkUrlsForThreats(anyString());
+        verify(linkCheckService, times(45)).check(anyString());
+        assertThat(stamped).containsExactly(1L, 2L, 3L, 4L);
     }
 
     @Test

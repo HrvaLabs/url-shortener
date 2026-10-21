@@ -2,9 +2,11 @@ package cc.hrva.urlshortener.service;
 
 import cc.hrva.urlshortener.model.LinkReview;
 import cc.hrva.urlshortener.model.Url;
+import cc.hrva.urlshortener.model.enums.BlockReason;
 import cc.hrva.urlshortener.model.enums.ReportCategory;
 import cc.hrva.urlshortener.model.enums.ReviewResolution;
 import cc.hrva.urlshortener.repository.LinkReviewRepository;
+import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.service.impl.DefaultReviewQueueService;
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
@@ -30,6 +32,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -43,13 +46,37 @@ class DefaultReviewQueueServiceTest {
     @Mock
     private LinkReviewRepository linkReviewRepository;
 
+    @Mock
+    private UrlRepository urlRepository;
+
     private ReviewQueueService reviewQueueService;
 
     private final Url url = Url.builder().id(287L).shortUrl("v0DB3").longUrl("https://findfavoritedate.life/?u=f6yp608").active(true).build();
 
     @BeforeEach
     void setUp() {
-        reviewQueueService = new DefaultReviewQueueService(linkReviewRepository);
+        reviewQueueService = new DefaultReviewQueueService(linkReviewRepository, urlRepository);
+        lenient().when(urlRepository.findById(287L)).thenReturn(Optional.of(url));
+    }
+
+    @Test
+    void aLinkBlockedBeforeItIsQueuedGetsNoReview() {
+        final var blockedMeanwhile = Url.builder().id(287L).shortUrl("v0DB3").longUrl(url.getLongUrl())
+                .active(false).blockReason(BlockReason.BLOCKLIST).build();
+        when(urlRepository.findById(287L)).thenReturn(Optional.of(blockedMeanwhile));
+
+        reviewQueueService.flag(url, List.of(YOUNG, LURE));
+
+        verifyNoInteractions(linkReviewRepository);
+    }
+
+    @Test
+    void aLinkDeletedBeforeItIsQueuedGetsNoReview() {
+        when(urlRepository.findById(287L)).thenReturn(Optional.empty());
+
+        reviewQueueService.flag(url, List.of(YOUNG));
+
+        verifyNoInteractions(linkReviewRepository);
     }
 
     @Test

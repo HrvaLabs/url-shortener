@@ -12,6 +12,9 @@ import cc.hrva.urlshortener.service.SafeBrowsingService;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.EnumMap;
+import java.util.List;
+import java.util.Optional;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -44,11 +47,12 @@ public class DefaultSafeBrowsingRecheckService implements SafeBrowsingRecheckSer
 
         final var ids = urlRepository.findActiveIds();
         final var tally = new EnumMap<ScanResult, Integer>(ScanResult.class);
+        final var safeBrowsingAvailable = new AtomicBoolean(true);
         var checked = 0;
 
         for (int from = 0; from < ids.size(); from += BATCH_SIZE) {
             final var urls = urlRepository.findAllById(ids.subList(from, Math.min(from + BATCH_SIZE, ids.size())));
-            final var scanned = new ArrayList<Long>();
+            final var safeBrowsingChecked = new ArrayList<Long>();
 
             for (final var url : urls) {
                 if (!url.isActive()) {
@@ -56,26 +60,41 @@ public class DefaultSafeBrowsingRecheckService implements SafeBrowsingRecheckSer
                 }
 
                 try {
-                    tally.merge(scan(url), 1, Integer::sum);
-                    scanned.add(url.getId());
+                    final var threats = threatsOf(url, safeBrowsingAvailable);
+                    tally.merge(scan(url, threats.orElse(List.of())), 1, Integer::sum);
+                    if (threats.isPresent()) {
+                        safeBrowsingChecked.add(url.getId());
+                    }
                     checked++;
                 } catch (final RuntimeException exception) {
                     log.warn("Nightly scan of a link failed, continuing with the next one urlId={}", url.getId(), exception);
                 }
             }
 
-            if (!scanned.isEmpty()) {
-                urlRepository.markSafeBrowsingChecked(scanned, LocalDateTime.now());
+            if (!safeBrowsingChecked.isEmpty()) {
+                urlRepository.markSafeBrowsingChecked(safeBrowsingChecked, LocalDateTime.now());
             }
             log.debug("Nightly scan progress: {}/{} checked, {}", checked, ids.size(), tally);
         }
 
-        log.info("Nightly scan complete — {} checked, {} blocked, {} queued for review",
-                checked, tally.getOrDefault(ScanResult.BLOCKED, 0), tally.getOrDefault(ScanResult.QUEUED, 0));
+        log.info("Nightly scan complete — {} checked, {} blocked, {} queued for review, safeBrowsingAvailable={}",
+                checked, tally.getOrDefault(ScanResult.BLOCKED, 0), tally.getOrDefault(ScanResult.QUEUED, 0), safeBrowsingAvailable.get());
     }
 
-    private ScanResult scan(final Url url) {
-        final var threats = safeBrowsingService.checkUrlsForThreats(url.getLongUrl());
+    private Optional<List<String>> threatsOf(final Url url, final AtomicBoolean safeBrowsingAvailable) {
+        if (!safeBrowsingAvailable.get()) {
+            return Optional.empty();
+        }
+        try {
+            return Optional.of(safeBrowsingService.checkUrlsForThreats(url.getLongUrl()));
+        } catch (final RuntimeException exception) {
+            safeBrowsingAvailable.set(false);
+            log.warn("Safe Browsing failed, the nightly scan goes on with the link checks only urlId={}", url.getId(), exception);
+            return Optional.empty();
+        }
+    }
+
+    private ScanResult scan(final Url url, final List<String> threats) {
         if (!threats.isEmpty()) {
             log.warn("URL /{} flagged as malicious: {}", url.getShortUrl(), threats);
             final var detail = threats.stream().distinct().collect(Collectors.joining(THREAT_SEPARATOR));

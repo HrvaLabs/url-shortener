@@ -5,6 +5,7 @@ import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.enums.ReportCategory;
 import cc.hrva.urlshortener.model.enums.ReviewResolution;
 import cc.hrva.urlshortener.repository.LinkReviewRepository;
+import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.specification.LinkReviewSpecification;
 import cc.hrva.urlshortener.service.ReviewQueueService;
 import java.time.LocalDateTime;
@@ -35,10 +36,15 @@ public class DefaultReviewQueueService implements ReviewQueueService {
     private static final Sort NEWEST_FIRST = Sort.by(Sort.Order.desc("flaggedAt"), Sort.Order.desc("id"));
 
     private final LinkReviewRepository linkReviewRepository;
+    private final UrlRepository urlRepository;
 
     @Override
     @Transactional
     public void flag(final Url url, final List<String> reasons) {
+        if (urlRepository.findById(url.getId()).filter(Url::isActive).isEmpty()) {
+            log.info("Link is no longer active, not queued for review urlId={}", url.getId());
+            return;
+        }
         final var incoming = normalized(reasons);
         linkReviewRepository.findFirstByUrlAndResolvedAtIsNullOrderByFlaggedAtDesc(url).ifPresentOrElse(
                 review -> extend(review, incoming),

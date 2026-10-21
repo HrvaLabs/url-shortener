@@ -131,6 +131,23 @@ class DefaultScammerSignalServiceTest {
     }
 
     @Test
+    void aDeactivatedAccountIsNotAPossibleScammer() {
+        final var repeatOffender = user(NOW.minusDays(30));
+        IntStream.range(0, 3).forEach(day -> blocked(link(repeatOffender, NOW.minusDays(20 - day)), BlockReason.USER_BLOCKED));
+        final var young = user(NOW.minusDays(3));
+        flagged(link(young, NOW.minusDays(2)), null);
+        flagged(link(young, NOW.minusDays(1)), null);
+        final var signup = NOW.minusDays(30);
+        final var burst = user(signup);
+        IntStream.range(0, 10).forEach(index -> link(burst, signup.plusHours(index)));
+        List.of(repeatOffender, young, burst).forEach(user -> user.setActive(false));
+        entityManager.flush();
+
+        assertThat(scammerSignalService.possibleScammerIds()).isEmpty();
+        assertThat(scammerSignalService.possibleScammers(List.of(repeatOffender, young, burst))).isEmpty();
+    }
+
+    @Test
     void blockedAnonymousLinksBelongToNoAccount() {
         IntStream.range(0, 3).forEach(day -> blocked(link(null, NOW.minusDays(day)), BlockReason.BLOCKLIST));
         entityManager.flush();

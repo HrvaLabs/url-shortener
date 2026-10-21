@@ -6,6 +6,7 @@ import cc.hrva.urlshortener.service.ScammerSignalService;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.Collection;
 import java.util.List;
 import java.util.Objects;
@@ -42,7 +43,7 @@ public class DefaultScammerSignalService implements ScammerSignalService {
 
     @Override
     public Set<Long> possibleScammerIds() {
-        final var youngSince = LocalDateTime.now(clock).minus(YOUNG_ACCOUNT);
+        final var youngSince = LocalDateTime.now(clock.withZone(ZoneId.systemDefault())).minus(YOUNG_ACCOUNT);
         return Stream.of(
                         urlRepository.findOwnerIdsSignedUpAfterWithFlaggedOrBlockedLinks(youngSince, FLAGGED_OR_BLOCKED_LINKS_WHILE_YOUNG),
                         urlRepository.findOwnerIdsWithBlockedLinks(BLOCKED_LINKS),

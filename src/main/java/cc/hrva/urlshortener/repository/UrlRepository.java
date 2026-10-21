@@ -55,15 +55,17 @@ public interface UrlRepository extends JpaRepository<Url, Long>, JpaSpecificatio
     @Query("select distinct t from Url u join u.tags t where u.owner = :owner order by t")
     List<String> findDistinctTagsByOwner(@Param("owner") User owner);
 
-    @Query("select o.id from Url u join u.owner o where u.blockReason is not null group by o.id having count(u) >= :links")
+    @Query("select o.id from Url u join u.owner o where coalesce(o.active, true) = true and u.blockReason is not null "
+            + "group by o.id having count(u) >= :links")
     List<Long> findOwnerIdsWithBlockedLinks(@Param("links") long links);
 
-    @Query("select o.id from Url u join u.owner o where o.createDate > :signedUpAfter "
+    @Query("select o.id from Url u join u.owner o where coalesce(o.active, true) = true and o.createDate > :signedUpAfter "
             + "and (u.blockReason is not null or exists (select r.id from LinkReview r where r.url = u)) "
             + "group by o.id having count(u) >= :links")
     List<Long> findOwnerIdsSignedUpAfterWithFlaggedOrBlockedLinks(@Param("signedUpAfter") LocalDateTime signedUpAfter, @Param("links") long links);
 
-    @Query("select o.id from Url u join u.owner o where (u.createDate - o.createDate) by second < :windowSeconds "
+    @Query("select o.id from Url u join u.owner o where coalesce(o.active, true) = true "
+            + "and (u.createDate - o.createDate) by second < :windowSeconds "
             + "group by o.id having count(u) >= :links")
     List<Long> findOwnerIdsWithLinksSoonAfterSignup(@Param("windowSeconds") long windowSeconds, @Param("links") long links);
 
