@@ -121,6 +121,7 @@ MCP, OAuth 2.1, login-bridge and Connected-apps endpoints: see MCP connector.
 ## Performance
 - **Redis caching**: `@Cacheable("urls")` on URL lookup (`peekUrlByShortUrl` only). 60-min TTL. `@CacheEvict` on mutations.
 - **Graceful degradation**: `CacheErrorHandler` logs and falls through to DB when Redis is down — no 500s.
+- **Redis fails fast**: Lettuce rejects commands while its connection is down (`RedisClientConfiguration`: `REJECT_COMMANDS`, auto-reconnect kept), so a dropped Redis fails each call at once; `spring.data.redis.timeout: 3s` only bounds a hung Redis. Every Redis caller must therefore stay fail-soft, catching the failure and degrading on purpose (cache → database, click-time blocklist check → let the visitor through, `/unlock` rate limit → allow). Only the documented rate limits under MCP connector fail closed.
 - **Read-only transactions**: `@Transactional(readOnly = true)` at class level on all services, overridden with `@Transactional` on write methods.
 - **SafeBrowsing client**: Singleton bean (not built per-request). Graceful degradation on API error (returns `List.of()`).
 

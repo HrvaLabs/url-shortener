@@ -1085,7 +1085,7 @@ class UrlServiceTest {
         when(cache.get("abc")).thenThrow(new IllegalStateException("Redis is down"));
         org.mockito.Mockito.doThrow(new IllegalStateException("Redis is down")).when(cache).put(any(), any());
         final var url = Url.builder().id(5L).shortUrl("abc").longUrl("https://example.com/a").visits(0L).active(true).build();
-        when(urlRepository.findByShortUrlAndActiveTrue("abc")).thenReturn(Optional.of(url));
+        when(urlRepository.findFirstByShortUrlOrderByActiveDescIdDesc("abc")).thenReturn(Optional.of(url));
 
         final var redirect = urlServiceWithMeters().redirectResultUrl("abc", "1.2.3.4");
 
@@ -1129,7 +1129,7 @@ class UrlServiceTest {
     @Test
     void aVisitCountedAfterTheLinkWasBlockedNeverWritesTheLoadedLinkBack() {
         final var url = Url.builder().id(5L).shortUrl("abc").longUrl("https://example.com/a").visits(0L).active(true).build();
-        when(urlRepository.findByShortUrlAndActiveTrue("abc")).thenReturn(Optional.of(url));
+        when(urlRepository.findFirstByShortUrlOrderByActiveDescIdDesc("abc")).thenReturn(Optional.of(url));
         final var visitTracking = org.mockito.ArgumentCaptor.forClass(Runnable.class);
 
         urlServiceWithMeters().redirectResultUrl("abc", "1.2.3.4");
@@ -1163,7 +1163,7 @@ class UrlServiceTest {
         final var cache = org.mockito.Mockito.mock(org.springframework.cache.Cache.class);
         when(cacheManager.getCache("urls")).thenReturn(cache);
         final var url = Url.builder().id(5L).shortUrl("abc").longUrl("https://jofogas.cards/login").visits(0L).active(true).build();
-        when(urlRepository.findByShortUrlAndActiveTrue("abc")).thenReturn(Optional.of(url));
+        when(urlRepository.findFirstByShortUrlOrderByActiveDescIdDesc("abc")).thenReturn(Optional.of(url));
         when(appProperties.getFrontendUrl()).thenReturn(FRONTEND);
         when(clickCheckService.mayRedirect(5L, "https://jofogas.cards/login")).thenReturn(false);
 
@@ -1179,7 +1179,7 @@ class UrlServiceTest {
         final var cache = org.mockito.Mockito.mock(org.springframework.cache.Cache.class);
         when(cacheManager.getCache("urls")).thenReturn(cache);
         final var url = Url.builder().id(5L).shortUrl("abc").longUrl("https://example.com/a").visits(0L).active(true).build();
-        when(urlRepository.findByShortUrlAndActiveTrue("abc")).thenReturn(Optional.of(url));
+        when(urlRepository.findFirstByShortUrlOrderByActiveDescIdDesc("abc")).thenReturn(Optional.of(url));
 
         final var redirect = urlServiceWithMeters().redirectResultUrl("abc", "1.2.3.4");
 
@@ -1192,7 +1192,7 @@ class UrlServiceTest {
     @Test
     void aPasswordProtectedLinkGoesToItsGateWithoutTheClickCheck() {
         final var url = Url.builder().id(5L).shortUrl("abc").longUrl("https://example.com/a").visits(0L).active(true).passwordHash("hash").build();
-        when(urlRepository.findByShortUrlAndActiveTrue("abc")).thenReturn(Optional.of(url));
+        when(urlRepository.findFirstByShortUrlOrderByActiveDescIdDesc("abc")).thenReturn(Optional.of(url));
         when(appProperties.getFrontendUrl()).thenReturn(FRONTEND);
 
         final var redirect = urlServiceWithMeters().redirectResultUrl("abc", "1.2.3.4");
@@ -1283,6 +1283,38 @@ class UrlServiceTest {
     }
 
     @Test
+    void anUnknownShortLinkCostsOneQuery() {
+        when(appProperties.getFrontendUrl()).thenReturn(FRONTEND);
+
+        urlServiceWithMeters().redirectResultUrl("nope", "1.2.3.4");
+
+        verify(urlRepository).findFirstByShortUrlOrderByActiveDescIdDesc("nope");
+        org.mockito.Mockito.verifyNoMoreInteractions(urlRepository);
+    }
+
+    @Test
+    void anActiveLinkCostsOneQueryEvenWithAnOlderInactiveDuplicate() {
+        final var cache = org.mockito.Mockito.mock(org.springframework.cache.Cache.class);
+        when(cacheManager.getCache("urls")).thenReturn(cache);
+        final var url = Url.builder().id(5L).shortUrl("abc").longUrl("https://example.com/a").visits(0L).active(true).build();
+        when(urlRepository.findFirstByShortUrlOrderByActiveDescIdDesc("abc")).thenReturn(Optional.of(url));
+
+        assertThat(urlServiceWithMeters().redirectResultUrl("abc", "1.2.3.4").getUrl()).isEqualTo("https://example.com/a");
+
+        verify(urlRepository).findFirstByShortUrlOrderByActiveDescIdDesc("abc");
+        org.mockito.Mockito.verifyNoMoreInteractions(urlRepository);
+    }
+
+    @Test
+    void aLongAbusivePathIsCutTo32CharactersOnTheUnavailablePage() {
+        when(appProperties.getFrontendUrl()).thenReturn(FRONTEND);
+
+        final var redirect = urlServiceWithMeters().redirectResultUrl("a".repeat(31) + "é" + "b".repeat(8000), "1.2.3.4");
+
+        assertThat(redirect.getUrl()).isEqualTo(FRONTEND + "/unavailable?s=" + "a".repeat(31) + "%C3%A9&reason=missing");
+    }
+
+    @Test
     void theShortLinkIsUrlEncodedOnTheUnavailablePage() {
         when(appProperties.getFrontendUrl()).thenReturn(FRONTEND);
 
@@ -1303,7 +1335,7 @@ class UrlServiceTest {
         assertThatThrownBy(() -> urlServiceWithMeters().redirectResultUrl("favicon.ico", "1.2.3.4"))
                 .isInstanceOf(cc.hrva.urlshortener.exception.UrlNotFoundException.class);
 
-        verify(urlRepository, never()).findByShortUrlAndActiveTrue(anyString());
+        org.mockito.Mockito.verifyNoInteractions(urlRepository);
     }
 
     private static Url.UrlBuilder storedLink() {
@@ -1312,11 +1344,7 @@ class UrlServiceTest {
 
     private String redirectOf(final Url url) {
         when(appProperties.getFrontendUrl()).thenReturn(FRONTEND);
-        if (url.isActive()) {
-            when(urlRepository.findByShortUrlAndActiveTrue(url.getShortUrl())).thenReturn(Optional.of(url));
-        } else {
-            when(urlRepository.findFirstByShortUrlOrderByIdDesc(url.getShortUrl())).thenReturn(Optional.of(url));
-        }
+        when(urlRepository.findFirstByShortUrlOrderByActiveDescIdDesc(url.getShortUrl())).thenReturn(Optional.of(url));
         return urlServiceWithMeters().redirectResultUrl(url.getShortUrl(), "1.2.3.4").getUrl();
     }
 

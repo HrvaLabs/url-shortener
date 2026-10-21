@@ -430,17 +430,21 @@ class DynamicLinkChecksSchemaTest {
     }
 
     @Test
-    void theNewestLinkWithAShortUrlIsTheOneThatExplainsWhyItIsUnavailable() {
-        final var older = savedLink("reused", "https://example.org/old", null);
+    void oneQueryFindsTheActiveLinkOrElseTheNewestOneThatExplainsWhyItIsUnavailable() {
+        final var active = savedLink("reused", "https://example.org/live", null);
+        final var newerSwitchedOff = savedLink("reused", "https://example.org/off", null);
+        newerSwitchedOff.setActive(false);
+        final var older = savedLink("gone", "https://example.org/old", null);
         older.setActive(false);
-        final var newer = savedLink("reused", "https://example.org/new", null);
+        final var newer = savedLink("gone", "https://example.org/new", null);
         newer.setActive(false);
         newer.setBlockReason(BlockReason.ADMIN);
         entityManager.flush();
         entityManager.clear();
 
-        assertThat(urlRepository.findFirstByShortUrlOrderByIdDesc("reused")).map(Url::getId).contains(newer.getId());
-        assertThat(urlRepository.findFirstByShortUrlOrderByIdDesc("unknown")).isEmpty();
+        assertThat(urlRepository.findFirstByShortUrlOrderByActiveDescIdDesc("reused")).map(Url::getId).contains(active.getId());
+        assertThat(urlRepository.findFirstByShortUrlOrderByActiveDescIdDesc("gone")).map(Url::getId).contains(newer.getId());
+        assertThat(urlRepository.findFirstByShortUrlOrderByActiveDescIdDesc("unknown")).isEmpty();
     }
 
     @Test

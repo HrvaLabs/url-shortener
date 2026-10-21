@@ -27,7 +27,7 @@ public interface UrlRepository extends JpaRepository<Url, Long>, JpaSpecificatio
     boolean existsUrlByShortUrl(String shortUrl);
     boolean existsUrlByShortUrlAndActiveTrue(String shortUrl);
     Optional<Url> findByShortUrlAndActiveTrue(String shortUrl);
-    Optional<Url> findFirstByShortUrlOrderByIdDesc(String shortUrl);
+    Optional<Url> findFirstByShortUrlOrderByActiveDescIdDesc(String shortUrl);
     boolean existsUrlByLongUrlAndActiveTrueAndOwnerIsNull(String longUrl);
     List<Url> findByExpirationDateLessThanEqualAndActiveTrue(LocalDateTime expirationDate);
     List<Url> findByExpirationDateBetweenAndActiveTrueAndOwnerIsNotNull(LocalDateTime start, LocalDateTime end);

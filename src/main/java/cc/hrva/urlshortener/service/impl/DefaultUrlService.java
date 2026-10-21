@@ -79,6 +79,7 @@ public class DefaultUrlService implements UrlService {
     private static final String REASON_LIMIT = "limit";
     private static final String REASON_INACTIVE = "inactive";
     private static final String REASON_MISSING = "missing";
+    private static final int MAX_SHORT_URL_LENGTH = 32;
     private static final int UNLOCK_ATTEMPTS_PER_CLIENT = 10;
     private static final int UNLOCK_ATTEMPTS_PER_LINK = 50;
     private static final Duration UNLOCK_WINDOW = Duration.ofMinutes(15);
@@ -512,12 +513,9 @@ public class DefaultUrlService implements UrlService {
     }
 
     private String fetchAndRedirectFromDb(final String shortUrl, final String clientIP) {
-        final var urlOpt = urlRepository.findByShortUrlAndActiveTrue(shortUrl);
+        final var urlOpt = urlRepository.findFirstByShortUrlOrderByActiveDescIdDesc(shortUrl);
         if (urlOpt.isEmpty()) {
-            final var reason = urlRepository.findFirstByShortUrlOrderByIdDesc(shortUrl)
-                    .flatMap(DefaultUrlService::unavailableReason)
-                    .orElse(REASON_MISSING);
-            return unavailablePageUrl(shortUrl, reason);
+            return unavailablePageUrl(shortUrl, REASON_MISSING);
         }
         final var url = urlOpt.get();
         final var unavailable = unavailableReason(url);
@@ -555,7 +553,8 @@ public class DefaultUrlService implements UrlService {
     }
 
     private String unavailablePageUrl(final String shortUrl, final String reason) {
-        return appProperties.getFrontendUrl() + "/unavailable?s=" + URLEncoder.encode(shortUrl, StandardCharsets.UTF_8) + "&reason=" + reason;
+        return appProperties.getFrontendUrl() + "/unavailable?s=" + URLEncoder.encode(StringUtils.left(shortUrl, MAX_SHORT_URL_LENGTH), StandardCharsets.UTF_8)
+                + "&reason=" + reason;
     }
 
     private Object getFromCache(final String shortUrl) {
