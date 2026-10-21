@@ -63,6 +63,22 @@ class DefaultSuspiciousUrlServiceTest {
     }
 
     @ParameterizedTest
+    @CsvSource({
+            "https://amazon.evil.unknowntld/login, imitates amazon",
+            "https://amazon.evil.unknowntld/login, login or verification lure",
+            "https://amazon.unknowntld, imitates amazon"
+    })
+    void flagsABrandNameUnderAnUnknownDomainEnding(final String longUrl, final String reason) {
+        assertThat(suspiciousUrlService.findReasons(longUrl)).contains(reason);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"https://login.amazon.de/", "https://amazon.co.uk/"})
+    void trustsABrandsOwnDomainUnderAKnownEnding(final String longUrl) {
+        assertThat(suspiciousUrlService.findReasons(longUrl)).isEmpty();
+    }
+
+    @ParameterizedTest
     @ValueSource(strings = {"https://www.amazon.de/dp/B0CX23V2ZK", "https://www.ebay.co.uk/itm/1234", "https://www.olx.pl/oferta"})
     void trustsABrandThatAcceptsAnyEndingUnderEachCountryEnding(final String longUrl) {
         assertThat(suspiciousUrlService.findReasons(longUrl)).isEmpty();

@@ -147,7 +147,8 @@ public class DefaultSuspiciousUrlService implements SuspiciousUrlService {
     private static boolean isOfficialDomainOf(final String brand, final String domain) {
         final var official = BRAND_DOMAINS.get(brand);
         return official.contains(domain)
-                || official.contains(ANY_ENDING) && domain.split("\\.")[0].equals(brand) && DomainNames.registryDomain(domain).equals(domain);
+                || official.contains(ANY_ENDING) && domain.split("\\.")[0].equals(brand)
+                && DomainNames.isUnderRegistrySuffix(domain) && DomainNames.registryDomain(domain).equals(domain);
     }
 
     private static boolean hasLure(final String[] labels, final String longUrl) {

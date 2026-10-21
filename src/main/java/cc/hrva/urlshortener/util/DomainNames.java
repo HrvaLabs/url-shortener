@@ -53,6 +53,10 @@ public final class DomainNames {
                 .orElse(host);
     }
 
+    public static boolean isUnderRegistrySuffix(final String host) {
+        return internetDomainName(host).filter(InternetDomainName::isUnderRegistrySuffix).isPresent();
+    }
+
     private static Optional<InternetDomainName> internetDomainName(final String host) {
         if (host == null) {
             return Optional.empty();

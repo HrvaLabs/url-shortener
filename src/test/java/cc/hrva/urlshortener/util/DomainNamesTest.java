@@ -3,6 +3,7 @@ package cc.hrva.urlshortener.util;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.NullAndEmptySource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -97,6 +98,19 @@ class DomainNamesTest {
     @ValueSource(strings = {"1.2.3.4", "::1", "localhost", "example.unknowntld", "co.uk", "exa mple.com", ""})
     void registryDomainFallsBackToTheHostItself(final String host) {
         assertThat(DomainNames.registryDomain(host)).isEqualTo(host);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"amazon.co.uk", "login.amazon.de", "x.pages.dev", "pages.dev", "njuskalo.hr"})
+    void nameUnderAKnownRegistrySuffixIsUnderARegistrySuffix(final String host) {
+        assertThat(DomainNames.isUnderRegistrySuffix(host)).isTrue();
+    }
+
+    @ParameterizedTest
+    @NullAndEmptySource
+    @ValueSource(strings = {"amazon.unknowntld", "amazon.evil.unknowntld", "localhost", "co.uk", "1.2.3.4", "::1", "exa mple.com"})
+    void nameUnderAnUnknownEndingOrNotADomainIsNotUnderARegistrySuffix(final String host) {
+        assertThat(DomainNames.isUnderRegistrySuffix(host)).isFalse();
     }
 
     @Test
