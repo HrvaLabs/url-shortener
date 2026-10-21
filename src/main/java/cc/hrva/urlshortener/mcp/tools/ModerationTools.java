@@ -70,6 +70,7 @@ public class ModerationTools {
     private static final String MISSING_URL = "Give the URL to check, for example https://example.com/page.";
     private static final String NOT_A_DOMAIN = "Enter a domain such as example.com, not a top-level domain or an IP address.";
     private static final String NO_EVIDENCE = "No flagged or blocked links on this domain. Use the dashboard to block it.";
+    private static final String UNFLAGGED_LINKS = "This would also block %s nobody flagged. Use the dashboard to block this domain.";
 
     private final McpUserResolver mcpUserResolver;
     private final ModerationService moderationService;
@@ -193,13 +194,13 @@ public class ModerationTools {
             name = BLOCK_DOMAIN,
             title = "Block a domain",
             description = "Admin only. Blocks a domain and all its subdomains, so blocking evil.example also blocks www.evil.example and "
-                    + "login.evil.example. It only works when at least one link on the domain is waiting in review_queue or already "
-                    + "blocked; otherwise it changes nothing and asks you to use the dashboard. It saves a block rule that refuses new links "
-                    + "to the domain, and blocks every active link on it, at most 50 per call; when more would be affected it changes "
-                    + "nothing and asks you to use the dashboard. Every affected link owner is emailed. Use it only for a domain that exists "
-                    + "to scam, such as a lookalike registered days ago, and never for a shared host such as google.com, github.io, a cloud "
-                    + "storage host or another link shortener, because every link there would be blocked. Only the hrva.cc dashboard can "
-                    + "undo it.",
+                    + "login.evil.example. It only works when every active link on the domain is waiting in review_queue and at least one "
+                    + "link on it is waiting there or already blocked; otherwise it changes nothing and asks you to use the dashboard. "
+                    + "It saves a block rule that refuses new links to the domain, and blocks every active link on it, at most 50 per "
+                    + "call; when more would be affected it changes nothing and asks you to use the dashboard. Every affected link owner "
+                    + "is emailed. Use it only for a domain that exists to scam, such as a lookalike registered days ago, and never for a "
+                    + "shared host such as google.com, github.io, a cloud storage host or another link shortener, because every link there "
+                    + "would be blocked. Only the hrva.cc dashboard can undo it.",
             annotations = @McpTool.McpAnnotations(
                     title = "Block a domain",
                     readOnlyHint = false,
@@ -400,9 +401,15 @@ public class ModerationTools {
                 .filter(host -> !DomainNames.isIpLiteral(host))
                 .filter(DomainNames::isUnderRegistrySuffix)
                 .orElseThrow(() -> new UrlValidationException(NOT_A_DOMAIN));
-        if (!hasFlaggedOrBlockedLinksOn(domain)) {
+        final var unicodeDomain = IDN.toUnicode(domain).toLowerCase(Locale.ROOT);
+        if (!hasFlaggedOrBlockedLinksOn(domain, unicodeDomain)) {
             log.info("MCP block_domain refused without flagged or blocked links adminId={}", admin.getId());
             throw new UrlValidationException(NO_EVIDENCE);
+        }
+        final var unflagged = urlRepository.countActiveUnflaggedLinksMentioning(domain, unicodeDomain);
+        if (unflagged > 0) {
+            log.info("MCP block_domain refused with unflagged links adminId={} unflagged={}", admin.getId(), unflagged);
+            throw new UrlValidationException(UNFLAGGED_LINKS.formatted(counted(unflagged, "link", "links")));
         }
 
         final var blocked = moderationService.blockDomain(domain, StringUtils.trimToNull(reason), admin.getEmail(), VIA, MAX_LINKS);
@@ -412,8 +419,8 @@ public class ModerationTools {
         return "Blocked %s and its subdomains. Links blocked now: %d.".formatted(domain, blocked);
     }
 
-    private boolean hasFlaggedOrBlockedLinksOn(final String domain) {
-        return urlRepository.findFlaggedOrBlockedDestinationsMentioning(domain, IDN.toUnicode(domain).toLowerCase(Locale.ROOT)).stream()
+    private boolean hasFlaggedOrBlockedLinksOn(final String domain, final String unicodeDomain) {
+        return urlRepository.findFlaggedOrBlockedDestinationsMentioning(domain, unicodeDomain).stream()
                 .map(DomainNames::hostOf)
                 .flatMap(Optional::stream)
                 .anyMatch(host -> host.equals(domain) || host.endsWith("." + domain));

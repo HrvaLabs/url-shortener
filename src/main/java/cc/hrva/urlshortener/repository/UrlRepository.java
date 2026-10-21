@@ -55,6 +55,13 @@ public interface UrlRepository extends JpaRepository<Url, Long>, JpaSpecificatio
             + "and (u.blockReason is not null or exists (select r.id from LinkReview r where r.url = u and r.resolvedAt is null))")
     List<String> findFlaggedOrBlockedDestinationsMentioning(@Param("domain") String domain, @Param("unicodeDomain") String unicodeDomain);
 
+    @Query("select count(u) from Url u where u.active = true "
+            + "and not exists (select r.id from LinkReview r where r.url = u and r.resolvedAt is null) "
+            + "and (lower(u.longUrl) like concat('%/', :domain, '%') or lower(u.longUrl) like concat('%.', :domain, '%') "
+            + "or lower(u.longUrl) like concat('%@', :domain, '%') or lower(u.longUrl) like concat('%/', :unicodeDomain, '%') "
+            + "or lower(u.longUrl) like concat('%.', :unicodeDomain, '%') or lower(u.longUrl) like concat('%@', :unicodeDomain, '%'))")
+    long countActiveUnflaggedLinksMentioning(@Param("domain") String domain, @Param("unicodeDomain") String unicodeDomain);
+
     @Query("select u.id from Url u where u.owner = :owner and u.active = true order by u.id")
     List<Long> findActiveIdsByOwner(@Param("owner") User owner);
 

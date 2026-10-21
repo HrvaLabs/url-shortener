@@ -267,10 +267,11 @@ class ModerationToolsTest {
     }
 
     @Test
-    void blockDomainDelegatesAsTheAdminViaMcpWithACapOf50() {
+    void blockDomainWhereEveryActiveLinkIsFlaggedDelegatesAsTheAdminViaMcpWithACapOf50() {
         signedInAs(ADMIN, true);
         when(urlRepository.findFlaggedOrBlockedDestinationsMentioning("jofogas.cards", "jofogas.cards"))
                 .thenReturn(List.of("https://notjofogas.cards/a", "https://www.jofogas.cards/login?step=2"));
+        when(urlRepository.countActiveUnflaggedLinksMentioning("jofogas.cards", "jofogas.cards")).thenReturn(0L);
         when(moderationService.blockDomain("jofogas.cards", "lookalike of njuskalo.hr", ADMIN_EMAIL, "mcp", 50)).thenReturn(3);
 
         final var result = moderationTools.blockDomain(" jofogas.cards ", " lookalike of njuskalo.hr ");
@@ -304,6 +305,34 @@ class ModerationToolsTest {
 
         assertThat(text(result)).isEqualTo("Blocked jofogas.cards and its subdomains. Links blocked now: 1.");
         verify(moderationService).blockDomain("jofogas.cards", null, ADMIN_EMAIL, "mcp", 50);
+    }
+
+    @Test
+    void blockDomainWithOneUnflaggedActiveLinkIsRefused() {
+        signedInAs(ADMIN, true);
+        when(urlRepository.findFlaggedOrBlockedDestinationsMentioning("jofogas.cards", "jofogas.cards"))
+                .thenReturn(List.of("https://www.jofogas.cards/login"));
+        when(urlRepository.countActiveUnflaggedLinksMentioning("jofogas.cards", "jofogas.cards")).thenReturn(1L);
+
+        final var result = moderationTools.blockDomain("jofogas.cards", null);
+
+        assertThat(result.isError()).isTrue();
+        assertThat(text(result)).isEqualTo("This would also block 1 link nobody flagged. Use the dashboard to block this domain.");
+        verifyNoInteractions(moderationService);
+    }
+
+    @Test
+    void aFlaggedFormOnASubdomainDoesNotUnlockBlockingTheWholeParentDomain() {
+        signedInAs(ADMIN, true);
+        when(urlRepository.findFlaggedOrBlockedDestinationsMentioning("google.com", "google.com"))
+                .thenReturn(List.of("https://docs.google.com/forms/d/e/1FAIpQL/viewform"));
+        when(urlRepository.countActiveUnflaggedLinksMentioning("google.com", "google.com")).thenReturn(1200L);
+
+        final var result = moderationTools.blockDomain("google.com", "phishing form");
+
+        assertThat(result.isError()).isTrue();
+        assertThat(text(result)).isEqualTo("This would also block 1200 links nobody flagged. Use the dashboard to block this domain.");
+        verifyNoInteractions(moderationService);
     }
 
     @Test

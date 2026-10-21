@@ -430,6 +430,31 @@ class DynamicLinkChecksSchemaTest {
     }
 
     @Test
+    void activeLinksWithoutAnOpenReviewAreCountedForTheDomainAndItsSubdomains() {
+        final var form = savedLink("form", "https://docs.google.com/forms/d/e/1FAIpQL/viewform", null);
+        final var checkedFine = savedLink("fine", "https://Google.com/search?q=hrva", null);
+        savedLink("maps", "https://www.google.com/maps", null);
+        savedLink("signed-in", "https://someone@google.com:443/", null);
+        savedLink("lookalike", "https://notgoogle.com/", null);
+        savedLink("elsewhere", "https://example.org/?q=google", null);
+        final var expired = savedLink("expired", "https://google.com/old", null);
+        expired.setActive(false);
+        savedBlockedLink("blocked", "https://www.google.com/blocked", BlockReason.ADMIN);
+        final var jofogas = savedLink("jofogas", "https://jofogas.cards/login", null);
+        final var jofogasPay = savedLink("jofogas-pay", "https://pay.jofogas.cards/", null);
+        linkReviewRepository.saveAndFlush(LinkReview.builder().url(form).reasons("reported by a visitor: phishing").build());
+        linkReviewRepository.saveAndFlush(LinkReview.builder().url(checkedFine).reasons("login lure").resolvedAt(LocalDateTime.now()).build());
+        linkReviewRepository.saveAndFlush(LinkReview.builder().url(jofogas).reasons("imitates jofogas").build());
+        linkReviewRepository.saveAndFlush(LinkReview.builder().url(jofogasPay).reasons("imitates jofogas").build());
+        entityManager.flush();
+        entityManager.clear();
+
+        assertThat(urlRepository.countActiveUnflaggedLinksMentioning("google.com", "google.com")).isEqualTo(3);
+        assertThat(urlRepository.countActiveUnflaggedLinksMentioning("docs.google.com", "docs.google.com")).isZero();
+        assertThat(urlRepository.countActiveUnflaggedLinksMentioning("jofogas.cards", "jofogas.cards")).isZero();
+    }
+
+    @Test
     void anAdminAccountIsRecognisedByItsAuthority() {
         final var admin = savedUser("admin@example.com");
         admin.setAuthorities(List.of(entityManager.find(Authorities.class, 2L)));
