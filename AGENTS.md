@@ -13,7 +13,7 @@
   ```
 - MCP end-to-end check on its own throwaway containers: `scripts/mcp-e2e.sh` (see MCP connector)
 - Build: `mvn clean package` → output in `target/`
-- Docker: `Dockerfile` copies `target/*.jar`, multi-arch CI build
+- Docker: `Dockerfile` copies `target/*.jar`, multi-arch CI build; runs with `-XX:MaxRAMPercentage=75` (the JVM default is 25 % of the container limit), as a blocklist refresh holds up to millions of entries in memory
 
 ## Local Dev Users
 `LocalDataInitializer` (only with `local` profile) bootstraps two email-verified local accounts:
