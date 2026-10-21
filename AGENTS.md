@@ -38,7 +38,7 @@ E2E=$(mktemp -d)
 /opt/homebrew/opt/postgresql@18/bin/initdb -D "$E2E/pg" -U e2e --auth=trust
 /opt/homebrew/opt/postgresql@18/bin/pg_ctl -D "$E2E/pg" -l "$E2E/pg.log" -o "-p 55432 -c listen_addresses=127.0.0.1 -c unix_socket_directories=''" start
 /opt/homebrew/opt/postgresql@18/bin/createdb -h 127.0.0.1 -p 55432 -U e2e url_shortener
-redis-server --port 56379 --save '' --appendonly no --daemonize yes --logfile "$E2E/redis.log"
+redis-server --port 56379 --bind 127.0.0.1 --save '' --appendonly no --daemonize yes --logfile "$E2E/redis.log"
 mvn -q -DskipTests package && cp target/url-shortener-*.jar "$E2E/app.jar"
 java -jar "$E2E/app.jar" --spring.profiles.active=local --server.port=18080 \
   --spring.datasource.url=jdbc:postgresql://127.0.0.1:55432/url_shortener --spring.datasource.username=e2e --spring.datasource.password= \
