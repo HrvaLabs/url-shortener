@@ -82,7 +82,8 @@ public class BlocklistRefresher {
                 return new Download(errors, new Loaded(attempt.url(), parse(source.getKind(), fetched.body()), fetched));
             } catch (final RuntimeException exception) {
                 final var message = describe(exception);
-                log.warn("Blocklist source {} could not be loaded from {}: {}", source.getName(), attempt.url(), message, exception);
+                log.warn("Blocklist source {} could not be loaded ({}): {}", source.getName(), attempt.label(), message);
+                log.debug("Blocklist source {} download from {} failed", source.getName(), attempt.url(), exception);
                 errors.add(attempts.size() == 1 ? message : attempt.label() + ": " + message);
             }
         }

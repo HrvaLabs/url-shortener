@@ -39,6 +39,8 @@ import org.junit.jupiter.api.io.TempDir;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.data.domain.Sort;
@@ -359,6 +361,22 @@ class DefaultBlocklistSourceServiceTest {
         assertThat(source.getLastSuccessUrl()).isEqualTo(FALLBACK);
         assertThat(source.getLastSuccessAt()).isCloseTo(LocalDateTime.now(), within(5, SECONDS));
         assertThat(source.getLastError()).isEqualTo("main: HTTP 503");
+    }
+
+    @Test
+    @ExtendWith(OutputCaptureExtension.class)
+    void aFailedDownloadIsOneWarnLineWithTheSourceAttemptAndReasonButNoStackTrace(final CapturedOutput output) {
+        stored(source(1).fallbackUrls(List.of(FALLBACK)).lastSuccessUrl(MAIN).build());
+        fetcher.fails(MAIN, "HTTP 503");
+        fetcher.serves(FALLBACK, LIST);
+        redisHasRoom();
+
+        blocklistSourceService.refresh(1);
+
+        assertThat(output)
+                .contains("Blocklist source HaGeZi Fake could not be loaded (main): HTTP 503")
+                .doesNotContain("UrlValidationException")
+                .doesNotContain("\tat ");
     }
 
     @Test

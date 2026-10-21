@@ -50,7 +50,7 @@ java -jar "$E2E/app.jar" --spring.profiles.active=local --server.port=18080 \
 - Run the jar from a copy, so `mvn clean` doesn't pull it from under the running app.
 
 ## Testing
-- `mvn test` (or `mvn -B verify`) — 1509 tests, JUnit 5 + Mockito + AssertJ
+- `mvn test` (or `mvn -B verify`) — 1535 tests, JUnit 5 + Mockito + AssertJ
 - Mostly plain `@ExtendWith(MockitoExtension.class)` unit tests. Each `@SpringBootTest` class boots its own nested `TestApplication` (a trimmed context) on embedded H2 and mocks the rest:
   - MockMvc through the real filter chains, with a subset Liquibase changelog (`db/changelog/017-oauth2-authorization-server.xml` or `db/mcp-connector-test-changelog.xml`): the MCP connector's security tests, `SecurityTxtControllerTest`, `ReportEndpointSecurityTest`
   - the full Liquibase changelog: `DynamicLinkChecksSchemaTest` (024's tables, seeds and constraints), `DefaultScammerSignalServiceTest`
