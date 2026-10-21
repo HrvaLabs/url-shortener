@@ -14,6 +14,7 @@ import cc.hrva.urlshortener.service.ReviewQueueService;
 import cc.hrva.urlshortener.service.ScammerSignalService;
 import cc.hrva.urlshortener.service.SendingEmailService;
 import cc.hrva.urlshortener.util.DomainNames;
+import cc.hrva.urlshortener.util.ReviewReasons;
 import java.time.LocalDateTime;
 import java.util.Comparator;
 import java.util.List;
@@ -76,8 +77,8 @@ public class DefaultLinkDigestService implements LinkDigestService {
 
     private static LinkDigestEntry toEntry(final LinkReview review) {
         final var url = review.getUrl();
-        final var reasons = review.getReasons().lines().map(String::strip).filter(StringUtils::isNotEmpty).toList();
-        return new LinkDigestEntry(url.getId(), url.getShortUrl(), destinationOf(url), ownerEmailOf(url), reasons);
+        return new LinkDigestEntry(url.getId(), url.getShortUrl(), destinationOf(url), ownerEmailOf(url),
+                ReviewReasons.withoutVisitorText(review.getReasons()));
     }
 
     private List<DecisionsDigest.PossibleScammer> possibleScammers() {

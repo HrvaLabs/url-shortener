@@ -18,6 +18,7 @@ import cc.hrva.urlshortener.service.ModerationService;
 import cc.hrva.urlshortener.service.ReviewQueueService;
 import cc.hrva.urlshortener.service.ScammerSignalService;
 import cc.hrva.urlshortener.util.DomainNames;
+import cc.hrva.urlshortener.util.ReviewReasons;
 import io.modelcontextprotocol.spec.McpSchema.CallToolResult;
 import java.net.IDN;
 import java.time.Clock;
@@ -27,14 +28,11 @@ import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
-import java.util.function.Function;
 import java.util.regex.Pattern;
-import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
@@ -62,7 +60,6 @@ public class ModerationTools {
     private static final int PAGE_SIZE = 20;
     private static final int MAX_PATH_LENGTH = 80;
     private static final Duration RECENT_BLOCKS = Duration.ofHours(24);
-    private static final String VISITOR_REPORT = "reported by a visitor: ";
     private static final Pattern SCHEME = Pattern.compile("^[a-zA-Z][a-zA-Z0-9+.-]*://");
     private static final Pattern NOT_PLAIN_TEXT = Pattern.compile("[<>\\s\\p{Cntrl}]", Pattern.UNICODE_CHARACTER_CLASS);
     private static final String ADMINS_ONLY = "Moderation tools are for hrva.cc admins only.";
@@ -316,7 +313,7 @@ public class ModerationTools {
                 shortLink(url.getShortUrl()),
                 destination(url.getLongUrl()),
                 describeOwner(url.getOwner(), possibleScammers),
-                reasons(review.getReasons()));
+                String.join("; ", ReviewReasons.withoutVisitorText(review.getReasons())));
     }
 
     private String describeOwner(final User owner, final Set<Long> possibleScammers) {
@@ -525,26 +522,6 @@ public class ModerationTools {
 
     private static String plainText(final String path) {
         return NOT_PLAIN_TEXT.matcher(path).replaceAll(character -> "%%%02X".formatted((int) character.group().charAt(0)));
-    }
-
-    private static String reasons(final String reasons) {
-        return Objects.requireNonNullElse(reasons, "").lines()
-                .map(String::strip)
-                .filter(StringUtils::isNotEmpty)
-                .map(ModerationTools::withoutVisitorText)
-                .collect(Collectors.groupingBy(Function.identity(), LinkedHashMap::new, Collectors.counting()))
-                .entrySet().stream()
-                .map(occurrences -> occurrences.getValue() == 1
-                        ? occurrences.getKey()
-                        : "%s (%d times)".formatted(occurrences.getKey(), occurrences.getValue()))
-                .collect(Collectors.joining("; "));
-    }
-
-    private static String withoutVisitorText(final String reason) {
-        if (!reason.startsWith(VISITOR_REPORT)) {
-            return reason;
-        }
-        return VISITOR_REPORT + StringUtils.substringBefore(reason.substring(VISITOR_REPORT.length()), ":");
     }
 
     private static String blockOf(final LinkVerdict verdict) {

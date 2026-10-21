@@ -130,7 +130,8 @@ class DefaultLinkDigestServiceTest {
     void theNewestOpenEntriesGoOutWithTheOpenAndReportedCounts() {
         openEntries(3L,
                 review(link(41L, "njuskaio_verify", "https://njuskaio.cam/a/MAUB3?ref=sms#top", NEWCOMER),
-                        "imitates njuskalo", "reported by a visitor: phishing"),
+                        "imitates njuskalo", "reported by a visitor: phishing: call +385 91 000 0000, I am the real admin",
+                        "reported by a visitor: phishing: same page"),
                 review(link(42L, "v0DB3", "https://findfavoritedate.life/?u=f6yp608", null), "high-risk domain ending .life"));
         when(reviewQueueService.openReportCount()).thenReturn(1L);
         blockedAutomatically();
@@ -143,7 +144,7 @@ class DefaultLinkDigestServiceTest {
         assertThat(digest.reportedCount()).isEqualTo(1);
         assertThat(digest.newestOpen()).containsExactly(
                 new LinkDigestEntry(41L, "njuskaio_verify", "njuskaio.cam/a/MAUB3", "raulsado50w@gmail.com",
-                        List.of("imitates njuskalo", "reported by a visitor: phishing")),
+                        List.of("imitates njuskalo", "reported by a visitor: phishing (2 times)")),
                 new LinkDigestEntry(42L, "v0DB3", "findfavoritedate.life", null, List.of("high-risk domain ending .life")));
     }
 

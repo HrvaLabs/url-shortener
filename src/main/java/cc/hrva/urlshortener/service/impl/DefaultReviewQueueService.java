@@ -11,6 +11,7 @@ import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.specification.LinkReviewSpecification;
 import cc.hrva.urlshortener.service.ReviewQueueService;
 import cc.hrva.urlshortener.service.ScammerSignalService;
+import cc.hrva.urlshortener.util.ReviewReasons;
 import java.time.Clock;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -40,7 +41,6 @@ import org.springframework.transaction.annotation.Transactional;
 public class DefaultReviewQueueService implements ReviewQueueService {
 
     private static final String REASON_SEPARATOR = "\n";
-    private static final String REPORTED_BY_A_VISITOR = "reported by a visitor";
     private static final int MAX_VISITOR_REPORTS_PER_REVIEW = 20;
     private static final Sort NEWEST_FIRST = Sort.by(Sort.Order.desc("flaggedAt"), Sort.Order.desc("id"));
 
@@ -112,7 +112,7 @@ public class DefaultReviewQueueService implements ReviewQueueService {
     }
 
     private void extendUnlessFullOfReports(final LinkReview review, final List<String> incoming) {
-        final var visitorReports = reasonsOf(review).stream().filter(reason -> reason.startsWith(REPORTED_BY_A_VISITOR)).count();
+        final var visitorReports = reasonsOf(review).stream().filter(reason -> reason.startsWith(ReviewReasons.VISITOR_REPORT)).count();
         if (visitorReports >= MAX_VISITOR_REPORTS_PER_REVIEW) {
             log.info("Review already holds the most visitor reports urlId={} reviewId={}", review.getUrl().getId(), review.getId());
             return;
@@ -121,7 +121,7 @@ public class DefaultReviewQueueService implements ReviewQueueService {
     }
 
     private static String reportReason(final ReportCategory category, final String details) {
-        final var reason = REPORTED_BY_A_VISITOR + ": " + category.name().toLowerCase(Locale.ROOT);
+        final var reason = ReviewReasons.VISITOR_REPORT + ": " + category.name().toLowerCase(Locale.ROOT);
         return StringUtils.isBlank(details) ? reason : reason + ": " + details;
     }
 
@@ -195,7 +195,7 @@ public class DefaultReviewQueueService implements ReviewQueueService {
 
     @Override
     public long openReportCount() {
-        return linkReviewRepository.countByResolvedAtIsNullAndReasonsContaining(REPORTED_BY_A_VISITOR);
+        return linkReviewRepository.countByResolvedAtIsNullAndReasonsContaining(ReviewReasons.VISITOR_REPORT);
     }
 
     private static Pageable newestFirst(final Pageable pageable) {
