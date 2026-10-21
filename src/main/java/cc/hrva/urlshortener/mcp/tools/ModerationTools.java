@@ -195,14 +195,15 @@ public class ModerationTools {
             name = BLOCK_DOMAIN,
             title = "Block a domain",
             description = "Admin only. Blocks a domain and all its subdomains, so blocking evil.example also blocks www.evil.example and "
-                    + "login.evil.example. It only works when every active link on the domain is waiting in review_queue and at least one "
-                    + "link on it is waiting there or already blocked; otherwise it changes nothing and asks you to use the dashboard. "
-                    + "It saves a block rule that refuses new links to the domain, and blocks every active link on it, at most 50 per "
-                    + "call; when more would be affected it changes nothing and asks you to use the dashboard. Every affected link owner "
-                    + "is emailed. Use it only for a domain that exists to scam, such as a lookalike registered days ago, and never for a "
-                    + "shared host such as google.com, github.io, a cloud storage host or another link shortener, because every link there "
-                    + "would be blocked. A shared hosting domain such as github.io, pages.dev or ddns.net is always refused; block the one "
-                    + "site on it instead, such as evil.github.io. Only the hrva.cc dashboard can undo it.",
+                    + "login.evil.example. It only works when hrva.cc's own checks flagged every active link on the domain and at least one "
+                    + "link on it is flagged that way or already blocked; a visitor report alone doesn't count. Otherwise it changes nothing "
+                    + "and asks you to use the dashboard. It saves a block rule that refuses new links to the domain, and blocks every "
+                    + "active link on it, at most 50 per call; when more would be affected it changes nothing and asks you to use the "
+                    + "dashboard. Every affected link owner is emailed. Use it only for a domain that exists to scam, such as a lookalike "
+                    + "registered days ago, and never for a shared host such as google.com, github.io, a cloud storage host or another link "
+                    + "shortener, because every link there would be blocked. A shared hosting domain such as github.io, pages.dev or "
+                    + "ddns.net is always refused; block the one site on it instead, such as evil.github.io. Only the hrva.cc dashboard can "
+                    + "undo it.",
             annotations = @McpTool.McpAnnotations(
                     title = "Block a domain",
                     readOnlyHint = false,

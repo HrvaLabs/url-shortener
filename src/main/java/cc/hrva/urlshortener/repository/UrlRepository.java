@@ -64,11 +64,12 @@ public interface UrlRepository extends JpaRepository<Url, Long>, JpaSpecificatio
 
     @Query("select u.longUrl from Url u where (lower(u.longUrl) like concat('%', :domain, '%') "
             + "or lower(u.longUrl) like concat('%', :unicodeDomain, '%')) "
-            + "and (u.blockReason is not null or exists (select r.id from LinkReview r where r.url = u and r.resolvedAt is null))")
+            + "and (u.blockReason is not null "
+            + "or exists (select r.id from LinkReview r where r.url = u and r.resolvedAt is null and r.systemFlagged = true))")
     List<String> findFlaggedOrBlockedDestinationsMentioning(@Param("domain") String domain, @Param("unicodeDomain") String unicodeDomain);
 
     @Query("select count(u) from Url u where u.active = true "
-            + "and not exists (select r.id from LinkReview r where r.url = u and r.resolvedAt is null) "
+            + "and not exists (select r.id from LinkReview r where r.url = u and r.resolvedAt is null and r.systemFlagged = true) "
             + "and (lower(u.longUrl) like concat('%/', :domain, '%') or lower(u.longUrl) like concat('%.', :domain, '%') "
             + "or lower(u.longUrl) like concat('%@', :domain, '%') or lower(u.longUrl) like concat('%/', :unicodeDomain, '%') "
             + "or lower(u.longUrl) like concat('%.', :unicodeDomain, '%') or lower(u.longUrl) like concat('%@', :unicodeDomain, '%'))")
@@ -83,7 +84,8 @@ public interface UrlRepository extends JpaRepository<Url, Long>, JpaSpecificatio
     @Query("select distinct t from Url u join u.tags t where u.owner = :owner order by t")
     List<String> findDistinctTagsByOwner(@Param("owner") User owner);
 
-    @Query("select count(u) from Url u where u.owner = :owner and exists (select r.id from LinkReview r where r.url = u)")
+    @Query("select count(u) from Url u where u.owner = :owner and exists (select r.id from LinkReview r where r.url = u "
+            + "and r.systemFlagged = true and (r.resolution is null or r.resolution <> cc.hrva.urlshortener.model.enums.ReviewResolution.OK))")
     long countFlaggedByOwner(@Param("owner") User owner);
 
     @Query("select o.id from Url u join u.owner o where coalesce(o.active, true) = true and u.blockReason is not null "
@@ -91,7 +93,8 @@ public interface UrlRepository extends JpaRepository<Url, Long>, JpaSpecificatio
     List<Long> findOwnerIdsWithBlockedLinks(@Param("links") long links);
 
     @Query("select o.id from Url u join u.owner o where coalesce(o.active, true) = true and o.createDate > :signedUpAfter "
-            + "and (u.blockReason is not null or exists (select r.id from LinkReview r where r.url = u)) "
+            + "and (u.blockReason is not null or exists (select r.id from LinkReview r where r.url = u and r.systemFlagged = true "
+            + "and (r.resolution is null or r.resolution <> cc.hrva.urlshortener.model.enums.ReviewResolution.OK))) "
             + "group by o.id having count(u) >= :links")
     List<Long> findOwnerIdsSignedUpAfterWithFlaggedOrBlockedLinks(@Param("signedUpAfter") LocalDateTime signedUpAfter, @Param("links") long links);
 

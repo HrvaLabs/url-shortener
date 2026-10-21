@@ -105,11 +105,12 @@ class DefaultReviewQueueServiceTest {
         assertThat(saved.getValue().getUrl()).isSameAs(url);
         assertThat(saved.getValue().getReasons()).isEqualTo(YOUNG + "\n" + LURE);
         assertThat(saved.getValue().getResolvedAt()).isNull();
+        assertThat(saved.getValue().isSystemFlagged()).isTrue();
     }
 
     @Test
     void flaggingTwiceKeepsOneOpenEntry() {
-        final var open = LinkReview.builder().id(1L).url(url).reasons(YOUNG + "\n" + LURE).flaggedAt(LocalDateTime.now()).build();
+        final var open = LinkReview.builder().id(1L).url(url).reasons(YOUNG + "\n" + LURE).systemFlagged(true).flaggedAt(LocalDateTime.now()).build();
         when(linkReviewRepository.findFirstByUrlAndResolvedAtIsNullOrderByFlaggedAtDesc(url)).thenReturn(Optional.of(open));
 
         reviewQueueService.flag(url, List.of(LURE, YOUNG));
@@ -128,6 +129,41 @@ class DefaultReviewQueueServiceTest {
         verify(linkReviewRepository).save(open);
         assertThat(open.getReasons()).isEqualTo(YOUNG + "\n" + ON_LIST);
         assertThat(open.getId()).isEqualTo(1L);
+    }
+
+    @Test
+    void aCheckFlaggingAnEntryOnlyVisitorsReportedMakesItASystemFlag() {
+        final var open = LinkReview.builder().id(1L).url(url).reasons(REPORTED_PHISHING).flaggedAt(LocalDateTime.now()).build();
+        when(linkReviewRepository.findFirstByUrlAndResolvedAtIsNullOrderByFlaggedAtDesc(url)).thenReturn(Optional.of(open));
+
+        reviewQueueService.flag(url, List.of(YOUNG));
+
+        verify(linkReviewRepository).save(open);
+        assertThat(open.getReasons()).isEqualTo(REPORTED_PHISHING + "\n" + YOUNG);
+        assertThat(open.isSystemFlagged()).isTrue();
+    }
+
+    @Test
+    void aCheckFlaggingAnEntryWithReasonsItAlreadyHoldsStillMakesItASystemFlag() {
+        final var open = LinkReview.builder().id(1L).url(url).reasons(YOUNG).flaggedAt(LocalDateTime.now()).build();
+        when(linkReviewRepository.findFirstByUrlAndResolvedAtIsNullOrderByFlaggedAtDesc(url)).thenReturn(Optional.of(open));
+
+        reviewQueueService.flag(url, List.of(YOUNG));
+
+        verify(linkReviewRepository).save(open);
+        assertThat(open.getReasons()).isEqualTo(YOUNG);
+        assertThat(open.isSystemFlagged()).isTrue();
+    }
+
+    @Test
+    void flaggingWithoutAReasonLeavesAnEntryOnlyVisitorsReportedAlone() {
+        final var open = LinkReview.builder().id(1L).url(url).reasons(REPORTED_PHISHING).flaggedAt(LocalDateTime.now()).build();
+        lenient().when(linkReviewRepository.findFirstByUrlAndResolvedAtIsNullOrderByFlaggedAtDesc(url)).thenReturn(Optional.of(open));
+
+        reviewQueueService.flag(url, List.of("  "));
+
+        verify(linkReviewRepository, never()).save(any());
+        assertThat(open.isSystemFlagged()).isFalse();
     }
 
     @Test
@@ -367,6 +403,7 @@ class DefaultReviewQueueServiceTest {
         assertThat(saved.getValue().getUrl()).isSameAs(url);
         assertThat(saved.getValue().getReasons()).isEqualTo(REPORTED_PHISHING);
         assertThat(saved.getValue().getResolvedAt()).isNull();
+        assertThat(saved.getValue().isSystemFlagged()).isFalse();
     }
 
     @Test
@@ -399,17 +436,19 @@ class DefaultReviewQueueServiceTest {
         verify(linkReviewRepository).save(open);
         assertThat(open.getId()).isEqualTo(1L);
         assertThat(open.getReasons()).isEqualTo(REPORTED_PHISHING + "\nreported by a visitor: malware: downloads an exe");
+        assertThat(open.isSystemFlagged()).isFalse();
     }
 
     @Test
-    void aReportExtendsAnOpenReviewTheChecksOpened() {
-        final var open = LinkReview.builder().id(1L).url(url).reasons(YOUNG).flaggedAt(LocalDateTime.now()).build();
+    void aReportExtendsAnOpenReviewTheChecksOpenedAndKeepsItASystemFlag() {
+        final var open = LinkReview.builder().id(1L).url(url).reasons(YOUNG).systemFlagged(true).flaggedAt(LocalDateTime.now()).build();
         when(linkReviewRepository.findFirstByUrlAndResolvedAtIsNullOrderByFlaggedAtDesc(url)).thenReturn(Optional.of(open));
 
         reviewQueueService.report(url, ReportCategory.PHISHING, "asks for my bank login");
 
         verify(linkReviewRepository).save(open);
         assertThat(open.getReasons()).isEqualTo(YOUNG + "\n" + REPORTED_PHISHING);
+        assertThat(open.isSystemFlagged()).isTrue();
     }
 
     @Test

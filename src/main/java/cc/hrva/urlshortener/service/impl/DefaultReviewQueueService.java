@@ -57,18 +57,23 @@ public class DefaultReviewQueueService implements ReviewQueueService {
             return;
         }
         final var incoming = normalized(reasons);
+        if (incoming.isEmpty()) {
+            return;
+        }
         linkReviewRepository.findFirstByUrlAndResolvedAtIsNullOrderByFlaggedAtDesc(url).ifPresentOrElse(
-                review -> extend(review, incoming),
+                review -> extend(review, incoming, true),
                 () -> openUnlessReviewedFine(url, incoming));
     }
 
-    private void extend(final LinkReview review, final List<String> incoming) {
+    private void extend(final LinkReview review, final List<String> incoming, final boolean systemFlagged) {
         final var known = reasonsOf(review);
         final var added = incoming.stream().filter(reason -> !known.contains(reason)).toList();
-        if (added.isEmpty()) {
+        final var newlySystemFlagged = systemFlagged && !review.isSystemFlagged();
+        if (added.isEmpty() && !newlySystemFlagged) {
             return;
         }
         review.setReasons(joined(Stream.concat(known.stream(), added.stream()).toList()));
+        review.setSystemFlagged(review.isSystemFlagged() || systemFlagged);
         linkReviewRepository.save(review);
         log.info("Review got new reasons urlId={} reviewId={}", review.getUrl().getId(), review.getId());
     }
@@ -77,13 +82,14 @@ public class DefaultReviewQueueService implements ReviewQueueService {
         if (reviewedFineFor(url, incoming)) {
             return;
         }
-        openReview(url, incoming);
+        openReview(url, incoming, true);
     }
 
-    private void openReview(final Url url, final List<String> reasons) {
+    private void openReview(final Url url, final List<String> reasons, final boolean systemFlagged) {
         linkReviewRepository.save(LinkReview.builder()
                 .url(url)
                 .reasons(joined(reasons))
+                .systemFlagged(systemFlagged)
                 .build());
         log.info("Link queued for review urlId={}", url.getId());
     }
@@ -102,7 +108,7 @@ public class DefaultReviewQueueService implements ReviewQueueService {
         log.info("Visitor report received urlId={} category={}", url.getId(), category);
         linkReviewRepository.findFirstByUrlAndResolvedAtIsNullOrderByFlaggedAtDesc(url).ifPresentOrElse(
                 review -> extendUnlessFullOfReports(review, incoming),
-                () -> openReview(url, incoming));
+                () -> openReview(url, incoming, false));
     }
 
     private void extendUnlessFullOfReports(final LinkReview review, final List<String> incoming) {
@@ -111,7 +117,7 @@ public class DefaultReviewQueueService implements ReviewQueueService {
             log.info("Review already holds the most visitor reports urlId={} reviewId={}", review.getUrl().getId(), review.getId());
             return;
         }
-        extend(review, incoming);
+        extend(review, incoming, false);
     }
 
     private static String reportReason(final ReportCategory category, final String details) {

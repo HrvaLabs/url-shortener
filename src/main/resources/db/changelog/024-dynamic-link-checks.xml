@@ -262,4 +262,27 @@
         </rollback>
     </changeSet>
 
+    <changeSet author="khrvacic" id="024-link-review-system-flagged">
+        <addColumn tableName="link_review">
+            <column name="system_flagged" type="BOOLEAN" defaultValueBoolean="false">
+                <constraints nullable="false"/>
+            </column>
+        </addColumn>
+        <rollback>
+            <dropColumn tableName="link_review" columnName="system_flagged"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet author="khrvacic" id="024-link-review-system-flagged-backfill" dbms="postgresql">
+        <sql>
+            UPDATE link_review
+            SET system_flagged = TRUE
+            WHERE EXISTS (SELECT 1
+                          FROM regexp_split_to_table(reasons, E'\n') AS reason
+                          WHERE btrim(reason) != ''
+                            AND btrim(reason) NOT LIKE 'reported by a visitor%')
+        </sql>
+        <rollback/>
+    </changeSet>
+
 </databaseChangeLog>

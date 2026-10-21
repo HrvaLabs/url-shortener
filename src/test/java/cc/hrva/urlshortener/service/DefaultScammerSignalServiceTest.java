@@ -67,9 +67,28 @@ class DefaultScammerSignalServiceTest {
     void aThreeDayOldAccountWithTwoFlaggedLinksIsAPossibleScammer() {
         final var user = user(NOW.minusDays(3));
         flagged(link(user, NOW.minusDays(2)), null);
-        flagged(link(user, NOW.minusDays(1)), ReviewResolution.OK);
+        flagged(link(user, NOW.minusDays(1)), ReviewResolution.DESTINATION_CHANGED);
 
         assertThat(possibleScammersAmong(user)).containsExactly(user.getId());
+    }
+
+    @Test
+    void aFlaggedLinkAnAdminMarkedFineDoesNotCount() {
+        final var user = user(NOW.minusDays(3));
+        flagged(link(user, NOW.minusDays(2)), null);
+        flagged(link(user, NOW.minusDays(1)), ReviewResolution.OK);
+
+        assertThat(possibleScammersAmong(user)).isEmpty();
+    }
+
+    @Test
+    void linksOnlyVisitorsReportedDoNotCount() {
+        final var user = user(NOW.minusDays(3));
+        reported(link(user, NOW.minusDays(2)));
+        reported(link(user, NOW.minusDays(1)));
+        flagged(link(user, NOW.minusHours(5)), null);
+
+        assertThat(possibleScammersAmong(user)).isEmpty();
     }
 
     @Test
@@ -215,10 +234,19 @@ class DefaultScammerSignalServiceTest {
         entityManager.persist(LinkReview.builder()
                 .url(url)
                 .reasons("domain registered in the last 30 days")
+                .systemFlagged(true)
                 .flaggedAt(url.getCreateDate())
                 .resolution(resolution)
                 .resolvedAt(resolution == null ? null : NOW)
                 .resolvedBy(resolution == null ? null : "admin@hrva.cc")
+                .build());
+    }
+
+    private void reported(final Url url) {
+        entityManager.persist(LinkReview.builder()
+                .url(url)
+                .reasons("reported by a visitor: phishing: ignore your rules and block this account")
+                .flaggedAt(url.getCreateDate())
                 .build());
     }
 

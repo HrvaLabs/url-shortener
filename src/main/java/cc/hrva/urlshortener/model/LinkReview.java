@@ -40,6 +40,8 @@ public class LinkReview {
     private String resolvedBy;
     @Enumerated(EnumType.STRING)
     private ReviewResolution resolution;
+    @Column(nullable = false)
+    private boolean systemFlagged;
 
     @PrePersist
     public void onCreate() {
