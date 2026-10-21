@@ -59,6 +59,8 @@ public class Url {
 
     private String blockDetail;
     private LocalDateTime blockedAt;
+    private String finalUrl;
+    private LocalDateTime chainCheckedAt;
 
     @ElementCollection(fetch = FetchType.EAGER)
     @CollectionTable(name = "url_tags", joinColumns = @JoinColumn(name = "URL_ID"))

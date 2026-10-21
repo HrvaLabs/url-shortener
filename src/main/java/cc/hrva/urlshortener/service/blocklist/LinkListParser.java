@@ -11,11 +11,12 @@ import org.springframework.stereotype.Component;
 @Component
 public class LinkListParser {
 
+    private static final String NO_LINKS = "No links found. Use a list with one link per line or a CSV with a url column.";
     private static final Pattern LINK_START = Pattern.compile("^https?://", Pattern.CASE_INSENSITIVE);
     private static final Pattern CSV_FIELD = Pattern.compile(",(?:\"([^\"]*+(?:\"\"[^\"]*+)*+)\"|([^,]*+))");
 
     public ParsedBlocklist parse(final BufferedReader reader, final int maxLinks) {
-        final var collector = new BlocklistCollector(maxLinks, "links");
+        final var collector = new BlocklistCollector(maxLinks, "links", NO_LINKS);
         final var rows = new Rows();
         final var lines = reader.lines().iterator();
         while (lines.hasNext()) {

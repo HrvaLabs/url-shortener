@@ -20,12 +20,14 @@ final class BlocklistCollector {
     private final Set<String> entries = new HashSet<>();
     private final int maxEntries;
     private final String entryName;
+    private final String emptyMessage;
     private String version;
     private Long declaredEntries;
 
-    BlocklistCollector(final int maxEntries, final String entryName) {
+    BlocklistCollector(final int maxEntries, final String entryName, final String emptyMessage) {
         this.maxEntries = maxEntries;
         this.entryName = entryName;
+        this.emptyMessage = emptyMessage;
     }
 
     static boolean isComment(final String line) {
@@ -52,7 +54,7 @@ final class BlocklistCollector {
 
     ParsedBlocklist parsed() {
         if (entries.isEmpty()) {
-            throw new BlocklistFormatException("The list has no valid " + entryName);
+            throw new BlocklistFormatException(emptyMessage);
         }
         if (declaredEntries != null && entries.size() < declaredEntries * MIN_PARSED_SHARE) {
             throw new BlocklistFormatException("Only " + entries.size() + " of the " + declaredEntries + " "

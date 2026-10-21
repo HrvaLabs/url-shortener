@@ -121,7 +121,8 @@ class LinkListParserTest {
                 "</html>");
 
         assertThatThrownBy(() -> linkListParser.parse(errorPage, 100))
-                .isInstanceOf(BlocklistFormatException.class);
+                .isInstanceOf(BlocklistFormatException.class)
+                .hasMessage("No links found. Use a list with one link per line or a CSV with a url column.");
     }
 
     @Test

@@ -12,5 +12,6 @@ public interface ScheduledService {
     void failInterruptedEmails();
     void forgetOldEmailContent();
     void sendLinkDigest();
+    void refreshDueBlocklists();
 
 }

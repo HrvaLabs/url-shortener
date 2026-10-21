@@ -3,6 +3,7 @@ package cc.hrva.urlshortener.service.impl;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import cc.hrva.urlshortener.service.ApiKeyService;
+import cc.hrva.urlshortener.service.BlocklistSourceService;
 import cc.hrva.urlshortener.service.IPAddressService;
 import cc.hrva.urlshortener.service.LinkDigestService;
 import cc.hrva.urlshortener.service.ResetTokenService;
@@ -31,6 +32,7 @@ public class DefaultScheduledService implements ScheduledService {
     private final SafeBrowsingRecheckService safeBrowsingRecheckService;
     private final SendingEmailService sendingEmailService;
     private final LinkDigestService linkDigestService;
+    private final BlocklistSourceService blocklistSourceService;
 
     @Override
     @Scheduled(cron = "0 */1 * * * *")
@@ -102,6 +104,13 @@ public class DefaultScheduledService implements ScheduledService {
     public void sendLinkDigest() {
         log.info("Scheduled: link digest");
         linkDigestService.sendDailyDigest();
+    }
+
+    @Override
+    @Scheduled(cron = "0 0 * * * *")
+    public void refreshDueBlocklists() {
+        log.info("Scheduled: blocklist refresh");
+        blocklistSourceService.refreshDue();
     }
 
 }

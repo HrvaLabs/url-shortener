@@ -90,7 +90,8 @@ class BlocklistParserTest {
                 "</html>");
 
         assertThatThrownBy(() -> blocklistParser.parse(errorPage, 100))
-                .isInstanceOf(BlocklistFormatException.class);
+                .isInstanceOf(BlocklistFormatException.class)
+                .hasMessage("No domains found. Use the list's domains, hosts or adblock format.");
     }
 
     @Test

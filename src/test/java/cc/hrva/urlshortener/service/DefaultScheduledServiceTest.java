@@ -41,9 +41,12 @@ class DefaultScheduledServiceTest {
     @Mock
     private LinkDigestService linkDigestService;
 
+    @Mock
+    private BlocklistSourceService blocklistSourceService;
+
     @BeforeEach
     void setUp() {
-        this.scheduledService = new DefaultScheduledService(urlService, userService, apiKeyService, ipAddressService, resetTokenService, urlNotificationService, safeBrowsingRecheckService, sendingEmailService, linkDigestService);
+        this.scheduledService = new DefaultScheduledService(urlService, userService, apiKeyService, ipAddressService, resetTokenService, urlNotificationService, safeBrowsingRecheckService, sendingEmailService, linkDigestService, blocklistSourceService);
     }
 
     @Test
@@ -56,6 +59,12 @@ class DefaultScheduledServiceTest {
     void shouldSendLinkDigest() {
         scheduledService.sendLinkDigest();
         verify(linkDigestService).sendDailyDigest();
+    }
+
+    @Test
+    void shouldRefreshDueBlocklists() {
+        scheduledService.refreshDueBlocklists();
+        verify(blocklistSourceService).refreshDue();
     }
 
     @Test

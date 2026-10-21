@@ -26,6 +26,17 @@
         <rollback/>
     </changeSet>
 
+    <changeSet author="khrvacic" id="024-url-redirect-chain">
+        <addColumn tableName="URL">
+            <column name="FINAL_URL" type="VARCHAR(2048)"/>
+            <column name="CHAIN_CHECKED_AT" type="TIMESTAMP"/>
+        </addColumn>
+        <rollback>
+            <dropColumn tableName="URL" columnName="CHAIN_CHECKED_AT"/>
+            <dropColumn tableName="URL" columnName="FINAL_URL"/>
+        </rollback>
+    </changeSet>
+
     <changeSet author="khrvacic" id="024-blocklist-source-table">
         <createTable tableName="blocklist_source">
             <column name="id" type="BIGINT" autoIncrement="true">
@@ -37,15 +48,24 @@
             <column name="url" type="VARCHAR(1000)">
                 <constraints nullable="false"/>
             </column>
+            <column name="fallback_urls" type="TEXT"/>
+            <column name="kind" type="VARCHAR(16)" defaultValue="DOMAINS">
+                <constraints nullable="false"/>
+            </column>
             <column name="action" type="VARCHAR(10)">
                 <constraints nullable="false"/>
             </column>
             <column name="enabled" type="BOOLEAN" defaultValueBoolean="true">
                 <constraints nullable="false"/>
             </column>
+            <column name="refresh_interval_hours" type="INT" defaultValueNumeric="6">
+                <constraints nullable="false"/>
+            </column>
             <column name="last_fetched_at" type="TIMESTAMP"/>
             <column name="last_success_at" type="TIMESTAMP"/>
+            <column name="last_success_url" type="VARCHAR(2048)"/>
             <column name="domain_count" type="BIGINT"/>
+            <column name="list_version" type="VARCHAR(64)"/>
             <column name="last_error" type="TEXT"/>
             <column name="etag" type="VARCHAR(255)"/>
             <column name="last_modified" type="VARCHAR(100)"/>
@@ -58,37 +78,84 @@
     <changeSet author="khrvacic" id="024-blocklist-source-seed">
         <insert tableName="blocklist_source">
             <column name="name" value="HaGeZi TIF medium"/>
-            <column name="url" value="https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/tif.medium-onlydomains.txt"/>
+            <column name="url" value="https://hagezi-mirror.dnsbunker.org/wildcard/tif.medium-onlydomains.txt"/>
+            <column name="fallback_urls" value="https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/tif.medium-onlydomains.txt"/>
+            <column name="kind" value="DOMAINS"/>
             <column name="action" value="BLOCK"/>
             <column name="enabled" valueBoolean="true"/>
+            <column name="refresh_interval_hours" valueNumeric="6"/>
         </insert>
         <insert tableName="blocklist_source">
             <column name="name" value="HaGeZi Fake"/>
-            <column name="url" value="https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/fake-onlydomains.txt"/>
+            <column name="url" value="https://hagezi-mirror.dnsbunker.org/wildcard/fake-onlydomains.txt"/>
+            <column name="fallback_urls" value="https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/fake-onlydomains.txt"/>
+            <column name="kind" value="DOMAINS"/>
             <column name="action" value="BLOCK"/>
             <column name="enabled" valueBoolean="true"/>
+            <column name="refresh_interval_hours" valueNumeric="6"/>
         </insert>
         <insert tableName="blocklist_source">
             <column name="name" value="HaGeZi badware hosters"/>
-            <column name="url" value="https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/hoster-onlydomains.txt"/>
+            <column name="url" value="https://hagezi-mirror.dnsbunker.org/wildcard/hoster-onlydomains.txt"/>
+            <column name="fallback_urls" value="https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/hoster-onlydomains.txt"/>
+            <column name="kind" value="DOMAINS"/>
             <column name="action" value="FLAG"/>
             <column name="enabled" valueBoolean="true"/>
+            <column name="refresh_interval_hours" valueNumeric="6"/>
         </insert>
         <insert tableName="blocklist_source">
             <column name="name" value="HaGeZi DynDNS"/>
-            <column name="url" value="https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/dyndns-onlydomains.txt"/>
+            <column name="url" value="https://hagezi-mirror.dnsbunker.org/wildcard/dyndns-onlydomains.txt"/>
+            <column name="fallback_urls" value="https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/dyndns-onlydomains.txt"/>
+            <column name="kind" value="DOMAINS"/>
             <column name="action" value="FLAG"/>
             <column name="enabled" valueBoolean="true"/>
+            <column name="refresh_interval_hours" valueNumeric="6"/>
         </insert>
         <insert tableName="blocklist_source">
             <column name="name" value="HaGeZi URL shorteners"/>
-            <column name="url" value="https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/urlshortener-onlydomains.txt"/>
+            <column name="url" value="https://hagezi-mirror.dnsbunker.org/wildcard/urlshortener-onlydomains.txt"/>
+            <column name="fallback_urls" value="https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/urlshortener-onlydomains.txt"/>
+            <column name="kind" value="DOMAINS"/>
             <column name="action" value="FLAG"/>
             <column name="enabled" valueBoolean="true"/>
+            <column name="refresh_interval_hours" valueNumeric="6"/>
+        </insert>
+        <insert tableName="blocklist_source">
+            <column name="name" value="URLhaus"/>
+            <column name="url" value="https://urlhaus.abuse.ch/downloads/text_online/"/>
+            <column name="kind" value="LINKS"/>
+            <column name="action" value="BLOCK"/>
+            <column name="enabled" valueBoolean="true"/>
+            <column name="refresh_interval_hours" valueNumeric="1"/>
+        </insert>
+        <insert tableName="blocklist_source">
+            <column name="name" value="OpenPhish"/>
+            <column name="url" value="https://raw.githubusercontent.com/openphish/public_feed/refs/heads/main/feed.txt"/>
+            <column name="kind" value="LINKS"/>
+            <column name="action" value="BLOCK"/>
+            <column name="enabled" valueBoolean="true"/>
+            <column name="refresh_interval_hours" valueNumeric="12"/>
+        </insert>
+        <insert tableName="blocklist_source">
+            <column name="name" value="PhishTank"/>
+            <column name="url" value="https://data.phishtank.com/data/online-valid.csv"/>
+            <column name="kind" value="LINKS"/>
+            <column name="action" value="BLOCK"/>
+            <column name="enabled" valueBoolean="true"/>
+            <column name="refresh_interval_hours" valueNumeric="6"/>
+        </insert>
+        <insert tableName="blocklist_source">
+            <column name="name" value="Phishing.Database domains"/>
+            <column name="url" value="https://raw.githubusercontent.com/Phishing-Database/Phishing.Database/master/phishing-domains-ACTIVE.txt"/>
+            <column name="kind" value="DOMAINS"/>
+            <column name="action" value="FLAG"/>
+            <column name="enabled" valueBoolean="true"/>
+            <column name="refresh_interval_hours" valueNumeric="24"/>
         </insert>
         <rollback>
             <delete tableName="blocklist_source">
-                <where>name IN ('HaGeZi TIF medium', 'HaGeZi Fake', 'HaGeZi badware hosters', 'HaGeZi DynDNS', 'HaGeZi URL shorteners')</where>
+                <where>name IN ('HaGeZi TIF medium', 'HaGeZi Fake', 'HaGeZi badware hosters', 'HaGeZi DynDNS', 'HaGeZi URL shorteners', 'URLhaus', 'OpenPhish', 'PhishTank', 'Phishing.Database domains')</where>
             </delete>
         </rollback>
     </changeSet>

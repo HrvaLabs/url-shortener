@@ -2,6 +2,7 @@ package cc.hrva.urlshortener.configuration;
 
 import cc.hrva.urlshortener.exception.ApiException;
 import cc.hrva.urlshortener.exception.ApiKeyNotFoundException;
+import cc.hrva.urlshortener.exception.BlocklistSourceNotFoundException;
 import cc.hrva.urlshortener.exception.CommonException;
 import cc.hrva.urlshortener.exception.ConnectRequestAlreadyApprovedException;
 import cc.hrva.urlshortener.exception.ConnectRequestExpiredException;
@@ -112,6 +113,11 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(EmailLogNotFoundException.class)
     public ResponseEntity<Map<String, String>> handleEmailLogNotFound(final EmailLogNotFoundException ex) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", safeMessage(ex)));
+    }
+
+    @ExceptionHandler(BlocklistSourceNotFoundException.class)
+    public ResponseEntity<Map<String, String>> handleBlocklistSourceNotFound(final BlocklistSourceNotFoundException ex) {
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", safeMessage(ex)));
     }
 

@@ -88,6 +88,10 @@ public class AppProperties {
     @NotNull
     private Mcp mcp = new Mcp();
 
+    @Valid
+    @NotNull
+    private Blocklists blocklists = new Blocklists();
+
     @Data
     public static class Mcp {
 
@@ -97,6 +101,15 @@ public class AppProperties {
         @NotBlank
         @ToString.Exclude
         private String signingKey;
+
+    }
+
+    @Data
+    public static class Blocklists {
+
+        @NotNull
+        @Positive
+        private Long maxRedisMb = 256L;
 
     }
 

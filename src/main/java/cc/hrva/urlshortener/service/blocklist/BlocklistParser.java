@@ -13,6 +13,7 @@ import org.springframework.stereotype.Component;
 @Component
 public class BlocklistParser {
 
+    private static final String NO_DOMAINS = "No domains found. Use the list's domains, hosts or adblock format.";
     private static final Set<String> UNCONDITIONAL_OPTIONS = Set.of("important", "all", "document", "doc");
 
     private static final Pattern INLINE_COMMENT = Pattern.compile("\\s+#.*$");
@@ -21,7 +22,7 @@ public class BlocklistParser {
     private static final Pattern IPV4_ADDRESS = Pattern.compile("^\\d{1,3}(?:\\.\\d{1,3}){3}$");
 
     public ParsedBlocklist parse(final BufferedReader reader, final int maxDomains) {
-        final var collector = new BlocklistCollector(maxDomains, "domains");
+        final var collector = new BlocklistCollector(maxDomains, "domains", NO_DOMAINS);
         final var lines = reader.lines().iterator();
         while (lines.hasNext()) {
             final var line = lines.next().strip();
