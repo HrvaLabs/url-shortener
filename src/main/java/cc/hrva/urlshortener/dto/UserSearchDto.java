@@ -11,5 +11,6 @@ public class UserSearchDto {
 
     private String search;
     private Boolean active;
+    private Boolean possibleScammer;
 
 }

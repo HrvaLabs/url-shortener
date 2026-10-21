@@ -1,5 +1,7 @@
 package cc.hrva.urlshortener.service;
 
+import cc.hrva.urlshortener.dto.DomainRuleDto;
+import cc.hrva.urlshortener.dto.DomainRuleResponse;
 import cc.hrva.urlshortener.dto.LinkDestination;
 import cc.hrva.urlshortener.dto.LinkVerdict;
 import cc.hrva.urlshortener.dto.LinkVerdict.Outcome;
@@ -49,6 +51,7 @@ import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.transaction.support.SimpleTransactionStatus;
 import org.springframework.transaction.support.TransactionCallback;
 import org.springframework.transaction.support.TransactionOperations;
@@ -407,8 +410,9 @@ class DefaultModerationServiceTest {
         when(reviewQueueService.open(any(Pageable.class), isNull())).thenReturn(new PageImpl<>(List.of(review(flagged), review(flaggedElsewhere))));
         when(linkCheckService.check(anyString())).thenReturn(ALLOWED);
 
-        moderationService.allowDomain("jofogas.cards", "false positive", ADMIN, "admin");
+        final var restored = moderationService.allowDomain("jofogas.cards", "false positive", ADMIN, "admin");
 
+        assertThat(restored).isEqualTo(3);
         assertThat(rules.get("jofogas.cards")).isSameAs(existing);
         assertThat(existing.getType()).isEqualTo(DomainRuleType.ALLOW);
         assertThat(existing.getReason()).isEqualTo("false positive");
@@ -851,6 +855,113 @@ class DefaultModerationServiceTest {
         verify(auditLogService).log(eq(ADMIN), eq("RESOLVE_REVIEW"), eq("Url"), eq("70"),
                 argThat(details -> details.startsWith("action: " + action.name()) && details.endsWith("via: mcp")));
         verifyNoMoreInteractions(auditLogService);
+    }
+
+    @Test
+    void addingABlockRuleBlocksTheDomainAndReturnsTheSavedRuleWithTheLinksBlocked() {
+        link(10L, "https://jofogas.cards/login", user(1L, "alice@example.com"));
+        link(11L, "https://www.jofogas.cards/item/7", null);
+        link(12L, "https://example.org/", null);
+
+        final var created = moderationService.createDomainRule(new DomainRuleDto(" JOFOGAS.cards ", DomainRuleType.BLOCK, "phishing wave"), ADMIN, "admin");
+
+        assertThat(created.linksAffected()).isEqualTo(2);
+        assertThat(created.rule())
+                .extracting(DomainRuleResponse::domain, DomainRuleResponse::type, DomainRuleResponse::reason, DomainRuleResponse::createdBy)
+                .containsExactly("jofogas.cards", DomainRuleType.BLOCK, "phishing wave", ADMIN);
+        verify(auditLogService).log(ADMIN, "BLOCK_DOMAIN", "Domain", "jofogas.cards", "reason: phishing wave, links: 2, via: admin");
+        verifyNoMoreInteractions(auditLogService);
+    }
+
+    @Test
+    void addingABlockRuleBlocksEveryMatchingLinkWithoutACap() {
+        LongStream.rangeClosed(1, 60).forEach(id -> link(id, "https://jofogas.cards/" + id, null));
+
+        final var created = moderationService.createDomainRule(new DomainRuleDto("jofogas.cards", DomainRuleType.BLOCK, null), ADMIN, "admin");
+
+        assertThat(created.linksAffected()).isEqualTo(60);
+    }
+
+    @Test
+    void addingAnAllowRuleTrustsTheDomainAndReturnsTheRestoredLinks() {
+        final var existing = rule("jofogas.cards", DomainRuleType.BLOCK);
+        blocked(20L, "https://jofogas.cards/a", BlockReason.BLOCKLIST, null);
+        blocked(21L, "https://jofogas.cards/b", BlockReason.ADMIN, null);
+        when(linkCheckService.check("https://jofogas.cards/a")).thenReturn(ALLOWED);
+
+        final var created = moderationService.createDomainRule(new DomainRuleDto("jofogas.cards", DomainRuleType.ALLOW, null), ADMIN, "admin");
+
+        assertThat(created.linksAffected()).isEqualTo(1);
+        assertThat(created.rule())
+                .extracting(DomainRuleResponse::id, DomainRuleResponse::domain, DomainRuleResponse::type, DomainRuleResponse::reason,
+                        DomainRuleResponse::createdBy, DomainRuleResponse::createdAt)
+                .containsExactly(existing.getId(), "jofogas.cards", DomainRuleType.ALLOW, "seeded", "system", RULE_CREATED_AT);
+    }
+
+    @Test
+    void aRuleWithoutATypeIsRefusedBeforeAnythingChanges() {
+        link(10L, "https://jofogas.cards/login", null);
+
+        assertThatThrownBy(() -> moderationService.createDomainRule(new DomainRuleDto("jofogas.cards", null, "phishing wave"), ADMIN, "admin"))
+                .isInstanceOf(UrlValidationException.class)
+                .hasMessage("Choose whether the rule blocks or allows the domain");
+
+        assertThat(rules).isEmpty();
+        assertThat(links.get(10L).isActive()).isTrue();
+        verifyNoInteractions(auditLogService, eventPublisher);
+    }
+
+    @Test
+    void aRuleForSomethingThatIsNotADomainIsRefused() {
+        assertThatThrownBy(() -> moderationService.createDomainRule(new DomainRuleDto("com", DomainRuleType.BLOCK, null), ADMIN, "admin"))
+                .isInstanceOf(UrlValidationException.class)
+                .hasMessage(NOT_A_DOMAIN);
+
+        assertThat(rules).isEmpty();
+    }
+
+    @Test
+    void removingADomainRuleByIdRemovesThatRule() {
+        rule("njuskaio.cam", DomainRuleType.BLOCK);
+        final var existing = rule("jofogas.cards", DomainRuleType.ALLOW);
+        when(domainRuleRepository.findById(existing.getId())).thenReturn(Optional.of(existing));
+
+        moderationService.removeDomainRule(existing.getId(), ADMIN, "admin");
+
+        verify(domainRuleRepository).delete(existing);
+        verify(eventPublisher).publishEvent(any(BlocklistConfigurationChangedEvent.class));
+        verify(auditLogService).log(ADMIN, "REMOVE_DOMAIN_RULE", "Domain", "jofogas.cards", "type: ALLOW, links: 0, via: admin");
+    }
+
+    @Test
+    void removingAnUnknownRuleByIdIsNotFound() {
+        when(domainRuleRepository.findById(99L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> moderationService.removeDomainRule(99L, ADMIN, "admin"))
+                .isInstanceOf(DomainRuleNotFoundException.class)
+                .hasMessage("There is no rule with id 99.");
+        verify(domainRuleRepository, never()).delete(any());
+        verifyNoInteractions(auditLogService, eventPublisher);
+    }
+
+    @Test
+    void domainRulesOfOneTypeComeNewestFirstWithEveryField() {
+        final var older = rule("jofogas.cards", DomainRuleType.BLOCK);
+        final var newer = rule("njuskaio.cam", DomainRuleType.BLOCK);
+        when(domainRuleRepository.findByTypeOrderByCreatedAtDescIdDesc(DomainRuleType.BLOCK)).thenReturn(List.of(newer, older));
+
+        assertThat(moderationService.domainRules(DomainRuleType.BLOCK)).containsExactly(
+                new DomainRuleResponse(newer.getId(), "njuskaio.cam", DomainRuleType.BLOCK, "seeded", "system", RULE_CREATED_AT),
+                new DomainRuleResponse(older.getId(), "jofogas.cards", DomainRuleType.BLOCK, "seeded", "system", RULE_CREATED_AT));
+    }
+
+    @Test
+    void domainRulesWithoutATypeListEveryRuleNewestFirst() {
+        final var block = rule("jofogas.cards", DomainRuleType.BLOCK);
+        final var allow = rule("gableci.hrva.cc", DomainRuleType.ALLOW);
+        when(domainRuleRepository.findAll(Sort.by(Sort.Order.desc("createdAt"), Sort.Order.desc("id")))).thenReturn(List.of(allow, block));
+
+        assertThat(moderationService.domainRules(null)).extracting(DomainRuleResponse::domain).containsExactly("gableci.hrva.cc", "jofogas.cards");
     }
 
     @Test

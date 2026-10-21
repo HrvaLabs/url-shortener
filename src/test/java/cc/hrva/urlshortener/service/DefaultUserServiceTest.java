@@ -1,7 +1,9 @@
 package cc.hrva.urlshortener.service;
 
 import java.util.Collections;
+import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.converter.UserToUserDtoConverter;
 import cc.hrva.urlshortener.converter.UserUpdateDtoToUserConverter;
@@ -47,6 +49,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -107,12 +110,15 @@ class DefaultUserServiceTest {
     @Mock
     private ConnectedAppsService connectedAppsService;
 
+    @Mock
+    private ScammerSignalService scammerSignalService;
+
     @BeforeEach
     void setUp() {
         this.userService = new DefaultUserService(appProperties, authValidator, urlRepository, userRepository,
                 passwordEncoder, apiKeyRepository, emailLogRepository, ipAddressRepository, resetTokenService,
                 resetTokenRepository, twoFactorRecoveryCodeRepository, userToUserDtoConverter, sendingEmailService,
-                verificationTokenService, verificationTokenRepository, userUpdateDtoToUserConverter, connectedAppsService);
+                verificationTokenService, verificationTokenRepository, userUpdateDtoToUserConverter, connectedAppsService, scammerSignalService);
         lenient().when(userRepository.findByEmail(null)).thenReturn(Optional.empty());
     }
 
@@ -231,6 +237,50 @@ class DefaultUserServiceTest {
         when(userRepository.findAll(pageable)).thenReturn(users);
 
         assertThat(userService.fetchAllUsers(pageable, new UserSearchDto())).isEqualTo(users);
+    }
+
+    @Test
+    void theUserListMarksEachPossibleScammerFromOneLookup() {
+        final var pageable = PageRequest.of(0, 20);
+        final var scammer = User.builder().id(27L).email("rhea@gmail.com").build();
+        final var honest = User.builder().id(28L).email("ana@example.com").build();
+        when(userRepository.findAll(pageable)).thenReturn(new PageImpl<>(List.of(scammer, honest)));
+        when(scammerSignalService.possibleScammerIds()).thenReturn(Set.of(27L, 41L));
+
+        final var users = userService.fetchAllUsers(pageable, new UserSearchDto());
+
+        assertThat(users.getContent()).extracting(User::getId, User::getPossibleScammer)
+                .containsExactly(org.assertj.core.groups.Tuple.tuple(27L, true), org.assertj.core.groups.Tuple.tuple(28L, false));
+        verify(scammerSignalService).possibleScammerIds();
+    }
+
+    @Test
+    void thePossibleScammerFilterIsAppliedInTheQuerySoTheTotalsStayRight() {
+        final var pageable = PageRequest.of(0, 20);
+        final var scammer = User.builder().id(27L).email("rhea@gmail.com").build();
+        final var search = new UserSearchDto();
+        search.setPossibleScammer(true);
+        when(scammerSignalService.possibleScammerIds()).thenReturn(Set.of(27L));
+        when(userRepository.findAll(any(Specification.class), eq(pageable))).thenReturn(new PageImpl<>(List.of(scammer), pageable, 1));
+
+        final var users = userService.fetchAllUsers(pageable, search);
+
+        assertThat(users.getTotalElements()).isEqualTo(1);
+        assertThat(users.getContent()).singleElement().extracting(User::getPossibleScammer).isEqualTo(true);
+        verify(userRepository, never()).findAll(pageable);
+    }
+
+    @Test
+    void thePossibleScammerFilterWithNoPossibleScammersIsAnEmptyPageWithoutAQuery() {
+        final var pageable = PageRequest.of(0, 20);
+        final var search = new UserSearchDto();
+        search.setPossibleScammer(true);
+
+        final var users = userService.fetchAllUsers(pageable, search);
+
+        assertThat(users.getContent()).isEmpty();
+        assertThat(users.getTotalElements()).isZero();
+        verifyNoInteractions(userRepository);
     }
 
     @Test

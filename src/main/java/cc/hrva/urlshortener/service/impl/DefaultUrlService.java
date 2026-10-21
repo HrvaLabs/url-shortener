@@ -26,6 +26,7 @@ import cc.hrva.urlshortener.service.ApiKeyService;
 import cc.hrva.urlshortener.service.ClickCheckService;
 import cc.hrva.urlshortener.service.IPAddressService;
 import cc.hrva.urlshortener.service.ReviewQueueService;
+import cc.hrva.urlshortener.service.ScammerSignalService;
 import cc.hrva.urlshortener.service.SuspiciousUrlService;
 import cc.hrva.urlshortener.service.UrlService;
 import cc.hrva.urlshortener.service.UserService;
@@ -107,6 +108,7 @@ public class DefaultUrlService implements UrlService {
     private final SuspiciousUrlService suspiciousUrlService;
     private final RateLimiter rateLimiter;
     private final ReviewQueueService reviewQueueService;
+    private final ScammerSignalService scammerSignalService;
     private final ClickCheckService clickCheckService;
     private final TransactionOperations transactionOperations;
 
@@ -284,7 +286,16 @@ public class DefaultUrlService implements UrlService {
 
         final var ownerLastPageable = withAnonymousOwnersLast(pageable);
         final var urls = spec == null ? urlRepository.findAll(ownerLastPageable) : urlRepository.findAll(spec, ownerLastPageable);
-        return urls.map(url -> UrlResponse.from(url).withSuspiciousReasons(suspiciousUrlService.findReasons(url.getLongUrl())));
+        final var inReview = reviewQueueService.openUrlIds(urls.map(Url::getId).getContent());
+        final var possibleScammers = urls.stream().anyMatch(url -> url.getOwner() != null)
+                ? scammerSignalService.possibleScammerIds()
+                : Set.<Long>of();
+        return urls.map(url -> UrlResponse.from(url)
+                .withSuspiciousReasons(suspiciousUrlService.findReasons(url.getLongUrl()))
+                .withBlockReason(url.getBlockReason())
+                .withModeration(inReview.contains(url.getId()),
+                        url.getOwner() != null && possibleScammers.contains(url.getOwner().getId()),
+                        url.getFinalUrl()));
     }
 
     private static Pageable withAnonymousOwnersLast(final Pageable pageable) {

@@ -4,6 +4,7 @@ import java.time.LocalDateTime;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 import io.micrometer.core.instrument.MeterRegistry;
 import tools.jackson.databind.ObjectMapper;
@@ -59,11 +60,13 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.tuple;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -138,6 +141,9 @@ class UrlServiceTest {
     @Mock
     private ClickCheckService clickCheckService;
 
+    @Mock
+    private ScammerSignalService scammerSignalService;
+
     @BeforeEach
     void setUp() {
         org.mockito.Mockito.lenient().when(rateLimiter.tryAcquire(any(), org.mockito.ArgumentMatchers.anyInt(), any())).thenReturn(true);
@@ -162,6 +168,7 @@ class UrlServiceTest {
                 suspiciousUrlService,
                 rateLimiter,
                 reviewQueueService,
+                scammerSignalService,
                 clickCheckService,
                 TransactionOperations.withoutTransaction()
         );
@@ -992,6 +999,42 @@ class UrlServiceTest {
     }
 
     @Test
+    void adminListShowsWhyALinkIsBlockedItsOpenReviewItsOwnersScammerSignalAndWhereItEnds() {
+        final var pageable = PageRequest.of(0, 20);
+        final var scammer = User.builder().id(27L).email("rhea@gmail.com").build();
+        final var honest = User.builder().id(28L).email("ana@example.com").build();
+        final var blocked = Url.builder().id(287L).shortUrl("v0DB3").longUrl("https://findfavoritedate.life/?u=f6yp608").owner(scammer)
+                .blockReason(BlockReason.BLOCKLIST).finalUrl("https://findfavoritedate.life/landing").build();
+        final var inReview = Url.builder().id(288L).shortUrl("menu").longUrl("https://gableci.hrva.cc").owner(honest).active(true).build();
+        final var anonymous = Url.builder().id(289L).shortUrl("anon").longUrl("https://example.org").active(true).build();
+        when(urlRepository.findAll(pageable)).thenReturn(new PageImpl<>(List.of(blocked, inReview, anonymous)));
+        when(reviewQueueService.openUrlIds(List.of(287L, 288L, 289L))).thenReturn(Set.of(288L));
+        when(scammerSignalService.possibleScammerIds()).thenReturn(Set.of(27L));
+
+        final var rows = urlService.getAllUrls(pageable, new UrlSearchDto()).getContent();
+
+        assertThat(rows).extracting(UrlResponse::blockReason, UrlResponse::reviewOpen, UrlResponse::ownerPossibleScammer, UrlResponse::finalUrl)
+                .containsExactly(
+                        tuple(BlockReason.BLOCKLIST, false, true, "https://findfavoritedate.life/landing"),
+                        tuple(null, true, false, null),
+                        tuple(null, false, false, null));
+        verify(reviewQueueService).openUrlIds(any());
+        verify(scammerSignalService).possibleScammerIds();
+    }
+
+    @Test
+    void adminListOfAnonymousLinksAsksNothingAboutScammers() {
+        final var pageable = PageRequest.of(0, 20);
+        final var anonymous = Url.builder().id(289L).shortUrl("anon").longUrl("https://example.org").active(true).build();
+        when(urlRepository.findAll(pageable)).thenReturn(new PageImpl<>(List.of(anonymous)));
+
+        final var rows = urlService.getAllUrls(pageable, new UrlSearchDto()).getContent();
+
+        assertThat(rows).singleElement().extracting(UrlResponse::ownerPossibleScammer).isEqualTo(false);
+        verifyNoInteractions(scammerSignalService);
+    }
+
+    @Test
     void publicLookupHidesTheOwnerAndTags() {
         final var owner = User.builder().email("owner@example.com").build();
         final var url = Url.builder().id(3L).shortUrl("menu").longUrl("https://gableci.hrva.cc").owner(owner).tags(java.util.Set.of("client-x")).active(true).build();
@@ -1375,6 +1418,7 @@ class UrlServiceTest {
                 suspiciousUrlService,
                 rateLimiter,
                 reviewQueueService,
+                scammerSignalService,
                 clickCheckService,
                 TransactionOperations.withoutTransaction()
         );
@@ -1423,6 +1467,7 @@ class UrlServiceTest {
                 suspiciousUrlService,
                 rateLimiter,
                 reviewQueueService,
+                scammerSignalService,
                 clickCheckService,
                 new TransactionTemplate(transactionManager)
         );
@@ -1451,6 +1496,7 @@ class UrlServiceTest {
                 suspiciousUrlService,
                 rateLimiter,
                 reviewQueueService,
+                scammerSignalService,
                 clickCheckService,
                 TransactionOperations.withoutTransaction()
         );

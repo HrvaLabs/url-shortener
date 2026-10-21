@@ -1,10 +1,13 @@
 package cc.hrva.urlshortener.service;
 
+import cc.hrva.urlshortener.dto.ReviewEntryResponse;
 import cc.hrva.urlshortener.model.LinkReview;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.enums.ReportCategory;
 import cc.hrva.urlshortener.model.enums.ReviewResolution;
+import java.util.Collection;
 import java.util.List;
+import java.util.Set;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 
@@ -14,6 +17,8 @@ public interface ReviewQueueService {
     void report(Url url, ReportCategory category, String details);
     void resolveOpen(Url url, ReviewResolution resolution, String resolvedBy);
     Page<LinkReview> open(Pageable pageable, String reason);
+    Page<ReviewEntryResponse> openEntries(Pageable pageable, String reason, Integer olderThanDays);
+    Set<Long> openUrlIds(Collection<Long> urlIds);
     long openCount();
     long openReportCount();
 

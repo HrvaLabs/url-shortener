@@ -38,7 +38,16 @@ public record UrlResponse(
         List<String> suspiciousReasons,
         @Schema(description = "Why the link is blocked (admin list only)", example = "BLOCKLIST")
         @JsonInclude(JsonInclude.Include.NON_NULL)
-        BlockReason blockReason) {
+        BlockReason blockReason,
+        @Schema(description = "Whether the link waits in the review queue (admin list only)", example = "false")
+        @JsonInclude(JsonInclude.Include.NON_NULL)
+        Boolean reviewOpen,
+        @Schema(description = "Whether the owner looks like a possible scammer (admin list only)", example = "false")
+        @JsonInclude(JsonInclude.Include.NON_NULL)
+        Boolean ownerPossibleScammer,
+        @Schema(description = "Where the link's redirect chain ends (admin list only)", example = "https://example.com/landing")
+        @JsonInclude(JsonInclude.Include.NON_NULL)
+        String finalUrl) {
 
     public UrlResponse {
         suspiciousReasons = suspiciousReasons == null ? List.of() : suspiciousReasons;
@@ -48,22 +57,27 @@ public record UrlResponse(
                        final LocalDateTime expirationDate, final Long visits, final Long visitLimit, final boolean active,
                        final String status, final Set<String> tags, final boolean passwordProtected, final String ownerEmail) {
         this(id, longUrl, shortUrl, createDate, expirationDate, visits, visitLimit, active, status, tags, passwordProtected,
-                ownerEmail, List.of(), null);
+                ownerEmail, List.of(), null, null, null, null);
     }
 
     public UrlResponse publicView() {
         return new UrlResponse(id, passwordProtected ? null : longUrl, shortUrl, createDate, expirationDate, visits, visitLimit,
-                active, status, Set.of(), passwordProtected, null, List.of(), null);
+                active, status, Set.of(), passwordProtected, null, List.of(), null, null, null, null);
     }
 
     public UrlResponse withSuspiciousReasons(final List<String> reasons) {
         return new UrlResponse(id, longUrl, shortUrl, createDate, expirationDate, visits, visitLimit, active, status, tags,
-                passwordProtected, ownerEmail, reasons, blockReason);
+                passwordProtected, ownerEmail, reasons, blockReason, reviewOpen, ownerPossibleScammer, finalUrl);
     }
 
     public UrlResponse withBlockReason(final BlockReason reason) {
         return new UrlResponse(id, longUrl, shortUrl, createDate, expirationDate, visits, visitLimit, active, status, tags,
-                passwordProtected, ownerEmail, suspiciousReasons, reason);
+                passwordProtected, ownerEmail, suspiciousReasons, reason, reviewOpen, ownerPossibleScammer, finalUrl);
+    }
+
+    public UrlResponse withModeration(final boolean inReview, final boolean ownerLooksLikeAScammer, final String chainEnd) {
+        return new UrlResponse(id, longUrl, shortUrl, createDate, expirationDate, visits, visitLimit, active, status, tags,
+                passwordProtected, ownerEmail, suspiciousReasons, blockReason, inReview, ownerLooksLikeAScammer, chainEnd);
     }
 
     public static UrlResponse from(final Url url) {

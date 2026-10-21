@@ -21,6 +21,7 @@ import cc.hrva.urlshortener.service.LinkPreviewService;
 import cc.hrva.urlshortener.service.ModerationService;
 import cc.hrva.urlshortener.service.QrCodeService;
 import cc.hrva.urlshortener.service.ReviewQueueService;
+import cc.hrva.urlshortener.service.ScammerSignalService;
 import cc.hrva.urlshortener.service.SuspiciousUrlService;
 import cc.hrva.urlshortener.service.UserService;
 import cc.hrva.urlshortener.service.blocklist.BlocklistStore;
@@ -132,6 +133,9 @@ class UrlControllerBlocklistTest {
     private ReviewQueueService reviewQueueService;
 
     @Mock
+    private ScammerSignalService scammerSignalService;
+
+    @Mock
     private ClientIpResolver clientIpResolver;
 
     @Mock
@@ -146,7 +150,7 @@ class UrlControllerBlocklistTest {
         clickCheckService.reload();
         final var urlService = new DefaultUrlService(userService, urlValidator, apiKeyService, urlRepository, appProperties, apiKeyValidator,
                 ipAddressService, taskExecutor, new UrlToPeekUrlConverter(), createUrlToUrlConverter, urlUpdateDtoToUrlConverter, cacheManager,
-                objectMapper, meterRegistry, passwordEncoder, suspiciousUrlService, rateLimiter, reviewQueueService, clickCheckService,
+                objectMapper, meterRegistry, passwordEncoder, suspiciousUrlService, rateLimiter, reviewQueueService, scammerSignalService, clickCheckService,
                 TransactionOperations.withoutTransaction());
         mockMvc = MockMvcBuilders.standaloneSetup(new UrlController(urlService, qrCodeService, linkPreviewService, clientIpResolver, request, appProperties))
                 .setControllerAdvice(new GlobalExceptionHandler())

@@ -82,6 +82,37 @@ class UrlResponseTest {
     }
 
     @Test
+    void keepsTheModerationDetailsOutOfOwnerAndPublicResponses() {
+        final var url = baseUrl().active(false).blockReason(BlockReason.BLOCKLIST).finalUrl("https://example.com/landing").build();
+
+        final var json = JsonMapper.builder().build().writeValueAsString(UrlResponse.from(url));
+        final var publicView = UrlResponse.from(url).withModeration(true, true, "https://example.com/landing").publicView();
+
+        assertThat(json).doesNotContain("reviewOpen").doesNotContain("ownerPossibleScammer").doesNotContain("finalUrl");
+        assertThat(publicView.reviewOpen()).isNull();
+        assertThat(publicView.ownerPossibleScammer()).isNull();
+        assertThat(publicView.finalUrl()).isNull();
+    }
+
+    @Test
+    void anAdminRowSpellsOutFalseModerationDetailsAndLeavesOutAMissingFinalUrl() {
+        final var json = JsonMapper.builder().build().writeValueAsString(UrlResponse.from(baseUrl().active(true).build()).withModeration(false, false, null));
+
+        assertThat(json).contains("\"reviewOpen\":false").contains("\"ownerPossibleScammer\":false").doesNotContain("finalUrl");
+    }
+
+    @Test
+    void moderationDetailsSurviveTheRedisRoundTrip() {
+        final var mapper = JsonMapper.builder().build();
+        final var serializer = new GenericJacksonJsonRedisSerializer(mapper);
+        final var response = UrlResponse.from(baseUrl().active(true).build()).withModeration(true, false, "https://example.com/landing");
+
+        final var cached = serializer.deserialize(serializer.serialize(response));
+
+        assertThat(mapper.convertValue(cached, UrlResponse.class)).isEqualTo(response);
+    }
+
+    @Test
     void shouldBeActive() {
         assertThat(UrlResponse.from(baseUrl().active(true).build()).status()).isEqualTo("ACTIVE");
     }

@@ -1,8 +1,10 @@
 package cc.hrva.urlshortener.controller;
 
 import java.util.Collections;
+import java.util.List;
 import cc.hrva.urlshortener.dto.UpdatePasswordDto;
 import cc.hrva.urlshortener.dto.UserDto;
+import cc.hrva.urlshortener.dto.UserSearchDto;
 import cc.hrva.urlshortener.dto.UserUpdateDto;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.service.UserService;
@@ -11,6 +13,7 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.PageImpl;
@@ -21,6 +24,7 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -70,6 +74,32 @@ class UserControllerTest {
         mockMvc.perform(get("/api/v1/users").param("page", "0").param("size", "20"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content.size()").value(1));
+    }
+
+    @Test
+    void theUserListFiltersPossibleScammersServerSideAndMarksEachRow() throws Exception {
+        final var scammer = User.builder().id(27L).email("rhea@gmail.com").possibleScammer(true).build();
+        final var search = ArgumentCaptor.forClass(UserSearchDto.class);
+        when(userService.fetchAllUsers(any(Pageable.class), search.capture())).thenReturn(new PageImpl<>(List.of(scammer), PageRequest.of(0, 20), 1));
+
+        mockMvc.perform(get("/api/v1/users").param("possibleScammer", "true"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].id").value(27))
+                .andExpect(jsonPath("$.content[0].possibleScammer").value(true))
+                .andExpect(jsonPath("$.totalElements").value(1));
+
+        assertThat(search.getValue().getPossibleScammer()).isTrue();
+    }
+
+    @Test
+    void aUserRowOutsideTheAdminListHasNoPossibleScammerField() throws Exception {
+        when(userService.updateUser(any(UserUpdateDto.class))).thenReturn(User.builder().id(1L).email("test@example.com").build());
+
+        mockMvc.perform(put("/api/v1/users/1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(UserUpdateDto.builder().id(1L).build())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.possibleScammer").doesNotHaveJsonPath());
     }
 
     @Test

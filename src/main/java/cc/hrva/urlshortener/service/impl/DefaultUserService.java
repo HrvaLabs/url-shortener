@@ -30,11 +30,13 @@ import cc.hrva.urlshortener.repository.VerificationTokenRepository;
 import cc.hrva.urlshortener.service.VerificationTokenService;
 import cc.hrva.urlshortener.repository.specification.UserSpecification;
 import cc.hrva.urlshortener.service.ResetTokenService;
+import cc.hrva.urlshortener.service.ScammerSignalService;
 import cc.hrva.urlshortener.service.UserService;
 import cc.hrva.urlshortener.validator.AuthValidator;
 import java.time.LocalDateTime;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -70,6 +72,7 @@ public class DefaultUserService implements UserService {
     private final VerificationTokenRepository verificationTokenRepository;
     private final UserUpdateDtoToUserConverter userUpdateDtoToUserConverter;
     private final ConnectedAppsService connectedAppsService;
+    private final ScammerSignalService scammerSignalService;
 
     @Override
     @Transactional
@@ -125,15 +128,19 @@ public class DefaultUserService implements UserService {
 
     @Override
     public Page<User> fetchAllUsers(final Pageable pageable, final UserSearchDto search) {
-        final var spec = buildSpecification(search);
-
-        if (spec == null) {
-            return userRepository.findAll(pageable);
+        final var possibleScammers = scammerSignalService.possibleScammerIds();
+        final var onlyPossibleScammers = Boolean.TRUE.equals(search.getPossibleScammer());
+        if (onlyPossibleScammers && possibleScammers.isEmpty()) {
+            return Page.empty(pageable);
         }
-        return userRepository.findAll(spec, pageable);
+
+        final var spec = buildSpecification(search, onlyPossibleScammers ? possibleScammers : null);
+        final var users = spec == null ? userRepository.findAll(pageable) : userRepository.findAll(spec, pageable);
+        users.forEach(user -> user.setPossibleScammer(possibleScammers.contains(user.getId())));
+        return users;
     }
 
-    private Specification<User> buildSpecification(final UserSearchDto search) {
+    private Specification<User> buildSpecification(final UserSearchDto search, final Set<Long> possibleScammers) {
         Specification<User> spec = null;
 
         if (StringUtils.isNotEmpty(search.getSearch())) {
@@ -141,6 +148,9 @@ public class DefaultUserService implements UserService {
         }
         if (search.getActive() != null) {
             spec = (spec == null) ? UserSpecification.hasActive(search.getActive()) : spec.and(UserSpecification.hasActive(search.getActive()));
+        }
+        if (possibleScammers != null) {
+            spec = (spec == null) ? UserSpecification.idIn(possibleScammers) : spec.and(UserSpecification.idIn(possibleScammers));
         }
 
         return spec;

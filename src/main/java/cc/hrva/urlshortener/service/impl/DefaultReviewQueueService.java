@@ -1,17 +1,26 @@
 package cc.hrva.urlshortener.service.impl;
 
+import cc.hrva.urlshortener.dto.ReviewEntryResponse;
 import cc.hrva.urlshortener.model.LinkReview;
 import cc.hrva.urlshortener.model.Url;
+import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.enums.ReportCategory;
 import cc.hrva.urlshortener.model.enums.ReviewResolution;
 import cc.hrva.urlshortener.repository.LinkReviewRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.specification.LinkReviewSpecification;
 import cc.hrva.urlshortener.service.ReviewQueueService;
+import cc.hrva.urlshortener.service.ScammerSignalService;
+import java.time.Clock;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Optional;
+import java.util.Set;
 import java.util.stream.Stream;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -37,6 +46,8 @@ public class DefaultReviewQueueService implements ReviewQueueService {
 
     private final LinkReviewRepository linkReviewRepository;
     private final UrlRepository urlRepository;
+    private final ScammerSignalService scammerSignalService;
+    private final Clock clock;
 
     @Override
     @Transactional
@@ -123,12 +134,52 @@ public class DefaultReviewQueueService implements ReviewQueueService {
 
     @Override
     public Page<LinkReview> open(final Pageable pageable, final String reason) {
+        return open(pageable, reason, null);
+    }
+
+    @Override
+    public Page<ReviewEntryResponse> openEntries(final Pageable pageable, final String reason, final Integer olderThanDays) {
+        final var reviews = open(pageable, reason, olderThanDays);
+        final var possibleScammers = reviews.stream().anyMatch(review -> review.getUrl().getOwner() != null)
+                ? scammerSignalService.possibleScammerIds()
+                : Set.<Long>of();
+        return reviews.map(review -> entryOf(review, possibleScammers));
+    }
+
+    @Override
+    public Set<Long> openUrlIds(final Collection<Long> urlIds) {
+        if (urlIds.isEmpty()) {
+            return Set.of();
+        }
+        return new HashSet<>(linkReviewRepository.findOpenUrlIds(urlIds));
+    }
+
+    private Page<LinkReview> open(final Pageable pageable, final String reason, final Integer olderThanDays) {
         final var filters = new ArrayList<Specification<LinkReview>>();
         filters.add(LinkReviewSpecification.isOpen());
         if (StringUtils.isNotBlank(reason)) {
             filters.add(LinkReviewSpecification.reasonContains(reason.trim()));
         }
+        if (olderThanDays != null) {
+            filters.add(LinkReviewSpecification.linkCreatedBefore(LocalDateTime.now(clock.withZone(ZoneId.systemDefault())).minusDays(olderThanDays)));
+        }
         return linkReviewRepository.findAll(Specification.allOf(filters), newestFirst(pageable));
+    }
+
+    private static ReviewEntryResponse entryOf(final LinkReview review, final Set<Long> possibleScammers) {
+        final var url = review.getUrl();
+        final var owner = Optional.ofNullable(url.getOwner());
+        return new ReviewEntryResponse(
+                url.getId(),
+                url.getShortUrl(),
+                url.getLongUrl(),
+                owner.map(User::getId).orElse(null),
+                owner.map(User::getEmail).orElse(null),
+                owner.map(User::getCreateDate).orElse(null),
+                owner.map(User::getId).filter(possibleScammers::contains).isPresent(),
+                url.getCreateDate(),
+                reasonsOf(review),
+                review.getFlaggedAt());
     }
 
     @Override

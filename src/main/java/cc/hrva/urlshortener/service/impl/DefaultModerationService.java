@@ -1,5 +1,8 @@
 package cc.hrva.urlshortener.service.impl;
 
+import cc.hrva.urlshortener.dto.DomainRuleCreatedResponse;
+import cc.hrva.urlshortener.dto.DomainRuleDto;
+import cc.hrva.urlshortener.dto.DomainRuleResponse;
 import cc.hrva.urlshortener.dto.LinkDestination;
 import cc.hrva.urlshortener.dto.LinkVerdict;
 import cc.hrva.urlshortener.dto.UrlResponse;
@@ -53,6 +56,7 @@ import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -80,6 +84,8 @@ public class DefaultModerationService implements ModerationService {
     private static final String NO_OWNER = "This link has no owner to block.";
     private static final String ADMIN_ACCOUNT = "Admin accounts can't be blocked here.";
     private static final String ROLE_ADMIN = "ROLE_ADMIN";
+    private static final String NO_RULE_TYPE = "Choose whether the rule blocks or allows the domain";
+    private static final Sort NEWEST_RULES_FIRST = Sort.by(Sort.Order.desc("createdAt"), Sort.Order.desc("id"));
     private static final Set<BlockReason> RESTORED_BY_ALLOW = EnumSet.of(BlockReason.BLOCKLIST, BlockReason.SCAM_SIGNALS, BlockReason.DOMAIN_RULE);
 
     private final UrlRepository urlRepository;
@@ -114,11 +120,33 @@ public class DefaultModerationService implements ModerationService {
     }
 
     @Override
-    public void allowDomain(final String domain, final String reason, final String performedBy, final String via) {
+    public int allowDomain(final String domain, final String reason, final String performedBy, final String via) {
         final var ruleDomain = ruleDomain(domain);
         final var trusted = trust(ruleDomain, reason, performedBy);
         auditLogService.log(performedBy, "ALLOW_DOMAIN", TARGET_DOMAIN, ruleDomain,
                 details(via, trusted.links(), field(REASON, reason), field("reviews", trusted.reviews())));
+        return trusted.links();
+    }
+
+    @Override
+    public DomainRuleCreatedResponse createDomainRule(final DomainRuleDto domainRuleDto, final String performedBy, final String via) {
+        final var type = Optional.ofNullable(domainRuleDto.type()).orElseThrow(() -> new UrlValidationException(NO_RULE_TYPE));
+        final var ruleDomain = ruleDomain(domainRuleDto.domain());
+        final var linksAffected = switch (type) {
+            case BLOCK -> blockDomain(ruleDomain, domainRuleDto.reason(), performedBy, via, null);
+            case ALLOW -> allowDomain(ruleDomain, domainRuleDto.reason(), performedBy, via);
+        };
+        final var rule = domainRuleRepository.findByDomain(ruleDomain)
+                .orElseThrow(() -> new DomainRuleNotFoundException("There is no rule for %s.".formatted(ruleDomain)));
+        return new DomainRuleCreatedResponse(DomainRuleResponse.from(rule), linksAffected);
+    }
+
+    @Override
+    public List<DomainRuleResponse> domainRules(final DomainRuleType type) {
+        final var rules = type == null
+                ? domainRuleRepository.findAll(NEWEST_RULES_FIRST)
+                : domainRuleRepository.findByTypeOrderByCreatedAtDescIdDesc(type);
+        return rules.stream().map(DomainRuleResponse::from).toList();
     }
 
     @Override
@@ -133,6 +161,13 @@ public class DefaultModerationService implements ModerationService {
         log.info("Domain rule removed domain={} type={}", ruleDomain, removedType);
         eventPublisher.publishEvent(new BlocklistConfigurationChangedEvent());
         auditLogService.log(performedBy, "REMOVE_DOMAIN_RULE", TARGET_DOMAIN, ruleDomain, details(via, 0, field("type", removedType)));
+    }
+
+    @Override
+    public void removeDomainRule(final long ruleId, final String performedBy, final String via) {
+        final var rule = domainRuleRepository.findById(ruleId)
+                .orElseThrow(() -> new DomainRuleNotFoundException("There is no rule with id %d.".formatted(ruleId)));
+        removeDomainRule(rule.getDomain(), performedBy, via);
     }
 
     @Override

@@ -12,5 +12,6 @@ public interface DomainRuleRepository extends JpaRepository<DomainRule, Long> {
     List<DomainRule> findByDomainIn(Collection<String> domains);
     Optional<DomainRule> findByDomain(String domain);
     List<DomainRule> findByType(DomainRuleType type);
+    List<DomainRule> findByTypeOrderByCreatedAtDescIdDesc(DomainRuleType type);
 
 }

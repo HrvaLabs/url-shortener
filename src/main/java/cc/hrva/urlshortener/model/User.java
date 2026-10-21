@@ -3,6 +3,7 @@ package cc.hrva.urlshortener.model;
 import cc.hrva.urlshortener.model.codebook.Authorities;
 import com.fasterxml.jackson.annotation.JsonIdentityInfo;
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.ObjectIdGenerators;
 import jakarta.persistence.*;
 import jakarta.validation.constraints.Email;
@@ -64,6 +65,10 @@ public class User {
     private String twoFactorSecret;
 
     private String authProvider;
+
+    @Transient
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private Boolean possibleScammer;
 
     @PrePersist
     public void onCreate() {

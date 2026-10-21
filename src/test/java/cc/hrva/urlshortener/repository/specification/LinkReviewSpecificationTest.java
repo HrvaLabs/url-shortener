@@ -6,7 +6,9 @@ import cc.hrva.urlshortener.model.enums.ReviewResolution;
 import cc.hrva.urlshortener.repository.LinkReviewRepository;
 import jakarta.persistence.EntityManager;
 import java.time.LocalDateTime;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -42,6 +44,8 @@ class LinkReviewSpecificationTest {
     @Autowired
     private EntityManager entityManager;
 
+    private final Map<String, Url> links = new HashMap<>();
+
     @BeforeEach
     void setUp() {
         persistReview("v0DB3", "high-risk domain ending .life\nLogin or verification lure", false);
@@ -53,6 +57,7 @@ class LinkReviewSpecificationTest {
     private void persistReview(final String shortUrl, final String reasons, final boolean resolved) {
         final var url = Url.builder().shortUrl(shortUrl).longUrl("https://" + shortUrl + ".example").build();
         entityManager.persist(url);
+        links.put(shortUrl, url);
         entityManager.persist(LinkReview.builder()
                 .url(url)
                 .reasons(reasons)
@@ -80,6 +85,22 @@ class LinkReviewSpecificationTest {
         assertThat(shortUrls(LinkReviewSpecification.isOpen().and(LinkReviewSpecification.reasonContains("REGISTERED in"))))
                 .containsExactly("njuskaio_verify");
         assertThat(shortUrls(LinkReviewSpecification.isOpen().and(LinkReviewSpecification.reasonContains("login"))))
+                .containsExactly("v0DB3");
+    }
+
+    @Test
+    void theAgeFilterKeepsOnlyEntriesWhoseLinkWasCreatedBeforeTheCutoff() {
+        final var cutoff = LocalDateTime.now().minusDays(7);
+        links.get("v0DB3").setCreateDate(cutoff.minusDays(1));
+        links.get("njuskaio_verify").setCreateDate(cutoff.plusHours(1));
+        links.get("gableci").setCreateDate(cutoff.minusDays(30));
+        entityManager.flush();
+
+        assertThat(shortUrls(LinkReviewSpecification.isOpen().and(LinkReviewSpecification.linkCreatedBefore(cutoff))))
+                .containsExactly("v0DB3");
+        assertThat(shortUrls(LinkReviewSpecification.isOpen()
+                .and(LinkReviewSpecification.linkCreatedBefore(cutoff))
+                .and(LinkReviewSpecification.reasonContains("login"))))
                 .containsExactly("v0DB3");
     }
 

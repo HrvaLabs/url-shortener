@@ -1,23 +1,32 @@
 package cc.hrva.urlshortener.service;
 
+import cc.hrva.urlshortener.dto.ReviewEntryResponse;
 import cc.hrva.urlshortener.model.LinkReview;
 import cc.hrva.urlshortener.model.Url;
+import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.enums.BlockReason;
 import cc.hrva.urlshortener.model.enums.ReportCategory;
 import cc.hrva.urlshortener.model.enums.ReviewResolution;
 import cc.hrva.urlshortener.repository.LinkReviewRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
+import cc.hrva.urlshortener.repository.specification.LinkReviewSpecification;
 import cc.hrva.urlshortener.service.impl.DefaultReviewQueueService;
+import java.time.Clock;
+import java.time.Instant;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.stream.IntStream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
+import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
@@ -29,6 +38,8 @@ import org.springframework.transaction.annotation.Transactional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -49,13 +60,18 @@ class DefaultReviewQueueServiceTest {
     @Mock
     private UrlRepository urlRepository;
 
+    @Mock
+    private ScammerSignalService scammerSignalService;
+
+    private final Clock clock = Clock.fixed(Instant.parse("2026-10-21T10:00:00Z"), ZoneOffset.UTC);
+
     private ReviewQueueService reviewQueueService;
 
     private final Url url = Url.builder().id(287L).shortUrl("v0DB3").longUrl("https://findfavoritedate.life/?u=f6yp608").active(true).build();
 
     @BeforeEach
     void setUp() {
-        reviewQueueService = new DefaultReviewQueueService(linkReviewRepository, urlRepository);
+        reviewQueueService = new DefaultReviewQueueService(linkReviewRepository, urlRepository, scammerSignalService, clock);
         lenient().when(urlRepository.findById(287L)).thenReturn(Optional.of(url));
     }
 
@@ -233,6 +249,108 @@ class DefaultReviewQueueServiceTest {
     }
 
     @Test
+    @SuppressWarnings("unchecked")
+    void aQueueEntryCarriesTheLinkItsOwnerAndEachReasonOnItsOwnLine() {
+        final var owner = User.builder().id(27L).email("rhea@gmail.com").createDate(LocalDateTime.of(2026, 10, 19, 12, 0)).build();
+        final var link = Url.builder().id(287L).shortUrl("v0DB3").longUrl("https://findfavoritedate.life/?u=f6yp608").owner(owner)
+                .createDate(LocalDateTime.of(2026, 10, 20, 7, 15)).build();
+        final var review = LinkReview.builder().id(5L).url(link).reasons(YOUNG + "\n " + LURE + " \n\n").flaggedAt(LocalDateTime.of(2026, 10, 20, 7, 16)).build();
+        when(linkReviewRepository.findAll(any(Specification.class), any(Pageable.class))).thenReturn(new PageImpl<>(List.of(review)));
+        when(scammerSignalService.possibleScammerIds()).thenReturn(Set.of(27L));
+
+        final var entries = reviewQueueService.openEntries(PageRequest.of(0, 20), null, null);
+
+        assertThat(entries.getContent()).containsExactly(new ReviewEntryResponse(287L, "v0DB3", "https://findfavoritedate.life/?u=f6yp608", 27L,
+                "rhea@gmail.com", LocalDateTime.of(2026, 10, 19, 12, 0), true, LocalDateTime.of(2026, 10, 20, 7, 15), List.of(YOUNG, LURE),
+                LocalDateTime.of(2026, 10, 20, 7, 16)));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void possibleScammersAreLookedUpOnceForTheWholePage() {
+        final var scammer = User.builder().id(27L).email("rhea@gmail.com").build();
+        final var honest = User.builder().id(28L).email("ana@example.com").build();
+        final var reviews = List.of(openReview(1L, scammer), openReview(2L, honest), openReview(3L, scammer), openReview(4L, null));
+        when(linkReviewRepository.findAll(any(Specification.class), any(Pageable.class))).thenReturn(new PageImpl<>(reviews));
+        when(scammerSignalService.possibleScammerIds()).thenReturn(Set.of(27L));
+
+        final var entries = reviewQueueService.openEntries(PageRequest.of(0, 20), null, null);
+
+        assertThat(entries.getContent()).extracting(ReviewEntryResponse::possibleScammer).containsExactly(true, false, true, false);
+        verify(scammerSignalService, Mockito.times(1)).possibleScammerIds();
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void anAnonymousEntryHasNoOwnerAndAPageWithoutOwnersAsksNothingAboutScammers() {
+        when(linkReviewRepository.findAll(any(Specification.class), any(Pageable.class))).thenReturn(new PageImpl<>(List.of(openReview(4L, null))));
+
+        final var entry = reviewQueueService.openEntries(PageRequest.of(0, 1), null, null).getContent().getFirst();
+
+        assertThat(entry.ownerId()).isNull();
+        assertThat(entry.ownerEmail()).isNull();
+        assertThat(entry.ownerCreatedAt()).isNull();
+        assertThat(entry.possibleScammer()).isFalse();
+        verifyNoInteractions(scammerSignalService);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void queueEntriesComeNewestFirstWhateverSortIsAsked() {
+        final var sent = ArgumentCaptor.forClass(Pageable.class);
+        when(linkReviewRepository.findAll(any(Specification.class), sent.capture())).thenReturn(new PageImpl<>(List.of()));
+
+        reviewQueueService.openEntries(PageRequest.of(1, 5, Sort.by("reasons")), null, null);
+
+        assertThat(sent.getValue().getPageNumber()).isEqualTo(1);
+        assertThat(sent.getValue().getPageSize()).isEqualTo(5);
+        assertThat(sent.getValue().getSort()).isEqualTo(Sort.by(Sort.Order.desc("flaggedAt"), Sort.Order.desc("id")));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void theAgeFilterKeepsLinksCreatedMoreThanThatManyDaysAgoAlongsideTheReasonFilter() {
+        when(linkReviewRepository.findAll(any(Specification.class), any(Pageable.class))).thenReturn(new PageImpl<>(List.of()));
+        final var cutoff = LocalDateTime.now(clock.withZone(ZoneId.systemDefault())).minusDays(7);
+
+        try (final var specifications = mockStatic(LinkReviewSpecification.class, Mockito.CALLS_REAL_METHODS)) {
+            reviewQueueService.openEntries(PageRequest.of(0, 20), " young ", 7);
+
+            specifications.verify(LinkReviewSpecification::isOpen);
+            specifications.verify(() -> LinkReviewSpecification.reasonContains("young"));
+            specifications.verify(() -> LinkReviewSpecification.linkCreatedBefore(cutoff));
+        }
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void withoutAnAgeOrReasonOnlyOpenEntriesAreAsked() {
+        when(linkReviewRepository.findAll(any(Specification.class), any(Pageable.class))).thenReturn(new PageImpl<>(List.of()));
+
+        try (final var specifications = mockStatic(LinkReviewSpecification.class, Mockito.CALLS_REAL_METHODS)) {
+            reviewQueueService.openEntries(PageRequest.of(0, 20), " ", null);
+
+            specifications.verify(LinkReviewSpecification::isOpen);
+            specifications.verify(() -> LinkReviewSpecification.reasonContains(anyString()), never());
+            specifications.verify(() -> LinkReviewSpecification.linkCreatedBefore(any()), never());
+        }
+    }
+
+    @Test
+    void theLinksWithAnOpenReviewAreFoundInOneQuery() {
+        when(linkReviewRepository.findOpenUrlIds(List.of(287L, 288L, 289L))).thenReturn(List.of(288L, 288L));
+
+        assertThat(reviewQueueService.openUrlIds(List.of(287L, 288L, 289L))).containsExactly(288L);
+    }
+
+    @Test
+    void noLinksMeansNoQueryForOpenReviews() {
+        assertThat(reviewQueueService.openUrlIds(List.of())).isEmpty();
+
+        verifyNoInteractions(linkReviewRepository);
+    }
+
+    @Test
     void openCountCountsTheUnresolvedEntries() {
         when(linkReviewRepository.countByResolvedAtIsNull()).thenReturn(4L);
 
@@ -361,6 +479,11 @@ class DefaultReviewQueueServiceTest {
 
     private static String visitorReports(final int count) {
         return String.join("\n", IntStream.range(0, count).mapToObj(report -> "reported by a visitor: spam: report " + report).toList());
+    }
+
+    private static LinkReview openReview(final long id, final User owner) {
+        final var link = Url.builder().id(id).shortUrl("s" + id).longUrl("https://example.org/" + id).owner(owner).createDate(LocalDateTime.now()).build();
+        return LinkReview.builder().id(id).url(link).reasons(LURE).flaggedAt(LocalDateTime.now()).build();
     }
 
     private LinkReview resolved(final ReviewResolution resolution, final String reasons) {
