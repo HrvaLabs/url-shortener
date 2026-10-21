@@ -78,6 +78,28 @@ class DefaultDomainReputationServiceTest {
     }
 
     @ParameterizedTest
+    @NullAndEmptySource
+    @ValueSource(strings = {"  "})
+    void missingKeyIsLoggedOnceAtStartup(final String key, final CapturedOutput output) {
+        appProperties.setSpamhausDqsKey(key);
+
+        domainReputationService.logWhenOff();
+        domainReputationService.lookup(DOMAIN);
+        domainReputationService.lookup(HOST);
+
+        assertThat(output)
+                .containsOnlyOnce("Spamhaus DBL check is off: no SPAMHAUS_DQS_KEY")
+                .contains("INFO");
+    }
+
+    @Test
+    void configuredKeyIsNotLoggedAtStartup(final CapturedOutput output) {
+        domainReputationService.logWhenOff();
+
+        assertThat(output).doesNotContain("Spamhaus DBL check is off").doesNotContain(KEY);
+    }
+
+    @ParameterizedTest
     @CsvSource({
             "127.0.1.4, BLOCK, phishing",
             "127.0.1.5, BLOCK, malware",
@@ -157,13 +179,24 @@ class DefaultDomainReputationServiceTest {
     }
 
     @Test
-    void firstMatchingAddressDecides() {
+    void worstMatchingAddressDecides() {
         answer(DOMAIN, "127.0.0.9", "127.0.1.2", "127.0.1.4");
+
+        final var result = domainReputationService.lookup(DOMAIN);
+
+        assertThat(result).isEqualTo(new ReputationResult(Verdict.BLOCK, "phishing"));
+        assertThat(cached(DOMAIN)).isEqualTo("127.0.1.4");
+    }
+
+    @Test
+    void listedCodeWinsOverAnErrorCodeInTheSameAnswer(final CapturedOutput output) {
+        answer(DOMAIN, "127.255.255.254", "127.0.1.2");
 
         final var result = domainReputationService.lookup(DOMAIN);
 
         assertThat(result).isEqualTo(new ReputationResult(Verdict.FLAG, "spam"));
         assertThat(cached(DOMAIN)).isEqualTo("127.0.1.2");
+        assertThat(output).contains("127.255.255.254");
     }
 
     @Test
@@ -227,14 +260,7 @@ class DefaultDomainReputationServiceTest {
     @Test
     void slowResolverGivesNoneAfterTwoSeconds() {
         final var release = new CountDownLatch(1);
-        final var slowService = serviceResolvingWith(name -> {
-            try {
-                release.await(10, TimeUnit.SECONDS);
-            } catch (final InterruptedException exception) {
-                Thread.currentThread().interrupt();
-            }
-            return List.of(InetAddress.ofLiteral("127.0.1.4"));
-        });
+        final var slowService = serviceResolvingWith(name -> waitIgnoringInterrupts(release, List.of()));
 
         try {
             final var started = System.nanoTime();
@@ -242,7 +268,45 @@ class DefaultDomainReputationServiceTest {
             final var elapsed = Duration.ofNanos(System.nanoTime() - started);
 
             assertThat(result).isEqualTo(ReputationResult.none());
-            assertThat(elapsed).isBetween(Duration.ofMillis(1900), Duration.ofSeconds(8));
+            assertThat(elapsed).isBetween(Duration.ofMillis(1900), Duration.ofSeconds(5));
+        } finally {
+            release.countDown();
+        }
+    }
+
+    @Test
+    void answerArrivingAfterTheTimeoutIsNotCached() throws InterruptedException {
+        final var release = new CountDownLatch(1);
+        final var lookupThreads = new CopyOnWriteArrayList<Thread>();
+        final var slowService = serviceResolvingWith(name -> {
+            lookupThreads.add(Thread.currentThread());
+            return waitIgnoringInterrupts(release, List.of());
+        });
+
+        final var result = slowService.lookup(HOST);
+        release.countDown();
+        slowService.shutdown();
+        for (final var thread : lookupThreads) {
+            thread.join(Duration.ofSeconds(5));
+        }
+
+        assertThat(result).isEqualTo(ReputationResult.none());
+        assertThat(lookupThreads).hasSize(2).noneMatch(Thread::isAlive);
+        assertThat(redis.keys()).isEmpty();
+    }
+
+    @Test
+    void blockedHostCountsWhenTheDomainQueryTimesOut() {
+        final var release = new CountDownLatch(1);
+        final var halfSlowService = serviceResolvingWith(name -> name.startsWith(HOST)
+                ? List.of(InetAddress.ofLiteral("127.0.1.4"))
+                : waitIgnoringInterrupts(release, List.of()));
+
+        try {
+            final var result = halfSlowService.lookup(HOST);
+
+            assertThat(result).isEqualTo(new ReputationResult(Verdict.BLOCK, "phishing"));
+            assertThat(cached(HOST)).isEqualTo("127.0.1.4");
         } finally {
             release.countDown();
         }
@@ -316,6 +380,22 @@ class DefaultDomainReputationServiceTest {
 
     private void answer(final String name, final String... addresses) {
         answers.put(name + QUERY_SUFFIX, Arrays.stream(addresses).map(InetAddress::ofLiteral).toList());
+    }
+
+    private static List<InetAddress> waitIgnoringInterrupts(final CountDownLatch release, final List<InetAddress> answer) {
+        final var deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        var interrupted = false;
+        while (release.getCount() > 0 && System.nanoTime() < deadline) {
+            try {
+                release.await(deadline - System.nanoTime(), TimeUnit.NANOSECONDS);
+            } catch (final InterruptedException exception) {
+                interrupted = true;
+            }
+        }
+        if (interrupted) {
+            Thread.currentThread().interrupt();
+        }
+        return answer;
     }
 
     private String cached(final String name) {

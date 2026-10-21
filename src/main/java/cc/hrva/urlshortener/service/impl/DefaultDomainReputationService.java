@@ -5,6 +5,7 @@ import cc.hrva.urlshortener.dto.ReputationResult;
 import cc.hrva.urlshortener.dto.ReputationResult.Verdict;
 import cc.hrva.urlshortener.service.DomainReputationService;
 import cc.hrva.urlshortener.util.DomainNames;
+import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import java.net.Inet4Address;
 import java.net.InetAddress;
@@ -40,6 +41,7 @@ public class DefaultDomainReputationService implements DomainReputationService {
     private static final Duration IDLE_THREAD_TIME_TO_LIVE = Duration.ofMinutes(1);
     private static final int LOOKUP_THREADS = 2;
     private static final int LOOKUP_QUEUE_CAPACITY = 32;
+    private static final Comparator<ReputationResult> WORST_FIRST = Comparator.comparing(ReputationResult::verdict);
     private static final ReputationResult ABUSED_LEGITIMATE_DOMAIN = new ReputationResult(Verdict.FLAG, "abused legitimate domain");
     private static final Map<String, ReputationResult> ANSWERS = Map.ofEntries(
             Map.entry("127.0.1.4", new ReputationResult(Verdict.BLOCK, "phishing")),
@@ -73,7 +75,7 @@ public class DefaultDomainReputationService implements DomainReputationService {
             }
             return lookupExecutor.invokeAll(lookups, LOOKUP_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS).stream()
                     .map(DefaultDomainReputationService::resultOf)
-                    .min(Comparator.comparing(ReputationResult::verdict))
+                    .min(WORST_FIRST)
                     .orElseGet(ReputationResult::none);
         } catch (final InterruptedException exception) {
             Thread.currentThread().interrupt();
@@ -81,6 +83,13 @@ public class DefaultDomainReputationService implements DomainReputationService {
         } catch (final RuntimeException exception) {
             log.warn("Spamhaus DBL lookup skipped exception={}", exception.getClass().getName());
             return ReputationResult.none();
+        }
+    }
+
+    @PostConstruct
+    public void logWhenOff() {
+        if (StringUtils.isBlank(appProperties.getSpamhausDqsKey())) {
+            log.info("Spamhaus DBL check is off: no SPAMHAUS_DQS_KEY");
         }
     }
 
@@ -119,23 +128,25 @@ public class DefaultDomainReputationService implements DomainReputationService {
         }
 
         final var code = query(name, key);
-        if (!code.startsWith(ERROR_CODE_PREFIX)) {
+        if (!code.startsWith(ERROR_CODE_PREFIX) && !Thread.currentThread().isInterrupted()) {
             cache(cacheKey, code);
         }
         return answerFor(code);
     }
 
     private String query(final String name, final String key) {
-        final var code = dblResolver.apply(name + "." + key + QUERY_ZONE).stream()
+        final var codes = dblResolver.apply(name + "." + key + QUERY_ZONE).stream()
                 .filter(Inet4Address.class::isInstance)
                 .map(InetAddress::getHostAddress)
                 .filter(address -> ANSWERS.containsKey(address) || address.startsWith(ERROR_CODE_PREFIX))
+                .toList();
+        codes.stream()
+                .filter(code -> code.startsWith(ERROR_CODE_PREFIX))
                 .findFirst()
+                .ifPresent(code -> log.warn("Spamhaus DBL answered with an error code={}", code));
+        return codes.stream()
+                .min(Comparator.comparing(DefaultDomainReputationService::answerFor, WORST_FIRST))
                 .orElse(NOT_LISTED);
-        if (code.startsWith(ERROR_CODE_PREFIX)) {
-            log.warn("Spamhaus DBL answered with an error code={}", code);
-        }
-        return code;
     }
 
     private void cache(final String cacheKey, final String code) {
