@@ -30,6 +30,7 @@ import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -56,6 +57,7 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -72,6 +74,7 @@ class ModerationToolsTest {
     private static final String NO_EVIDENCE = "No flagged or blocked links on this domain. Use the dashboard to block it.";
     private static final String SHARED_HOSTING = "That's a shared hosting domain. Use the dashboard to block it.";
     private static final String OVER_THE_CAP = "This would affect 51 links, more than the 50 allowed here. Use the dashboard.";
+    private static final String NOT_BLOCKED_OR_FLAGGED = "Only blocked or flagged links can be deleted here. Use the dashboard.";
     private static final List<String> TOOL_NAMES = List.of("moderation_summary", "review_queue", "possible_scammers", "check_url",
             "block_link", "block_domain", "block_user", "delete_link");
     private static final List<String> DESTRUCTIVE_TOOLS = List.of("block_link", "block_domain", "block_user", "delete_link");
@@ -497,14 +500,55 @@ class ModerationToolsTest {
     }
 
     @Test
-    void deleteLinkDelegatesAsTheAdminViaMcp() {
+    void deleteLinkDelegatesAsTheAdminViaMcpForALinkTheChecksFlagged() {
         signedInAs(ADMIN, true);
+        final var flagged = Url.builder().id(42L).shortUrl("abc12").longUrl("https://evil.example/pay").active(true).build();
+        when(urlRepository.findById(42L)).thenReturn(Optional.of(flagged));
+        when(linkReviewRepository.existsByUrlAndResolvedAtIsNullAndSystemFlaggedTrue(flagged)).thenReturn(true);
 
         final var result = moderationTools.deleteLink(42L);
 
         assertThat(result.isError()).isFalse();
         assertThat(text(result)).isEqualTo("Deleted urlId 42 permanently.");
         verify(moderationService).deleteLink(42L, ADMIN_EMAIL, "mcp");
+    }
+
+    @Test
+    void deleteLinkDeletesABlockedLink() {
+        signedInAs(ADMIN, true);
+        when(urlRepository.findById(42L)).thenReturn(Optional.of(Url.builder().id(42L).shortUrl("abc12").longUrl("https://evil.example/pay")
+                .active(false).blockReason(BlockReason.BLOCKLIST).build()));
+
+        final var result = moderationTools.deleteLink(42L);
+
+        assertThat(result.isError()).isFalse();
+        verify(moderationService).deleteLink(42L, ADMIN_EMAIL, "mcp");
+    }
+
+    @Test
+    void deleteLinkRefusesALinkOnlyVisitorsReportedOrNobodyFlagged() {
+        signedInAs(ADMIN, true);
+        final var reported = Url.builder().id(42L).shortUrl("abc12").longUrl("https://docs.google.com/forms/x").active(true).build();
+        when(urlRepository.findById(42L)).thenReturn(Optional.of(reported));
+        when(linkReviewRepository.existsByUrlAndResolvedAtIsNullAndSystemFlaggedTrue(reported)).thenReturn(false);
+
+        final var result = moderationTools.deleteLink(42L);
+
+        assertThat(result.isError()).isTrue();
+        assertThat(text(result)).isEqualTo(NOT_BLOCKED_OR_FLAGGED);
+        verify(moderationService, never()).deleteLink(anyLong(), anyString(), anyString());
+    }
+
+    @Test
+    void deleteLinkOfAnUnknownLinkGetsTheServiceMessage() {
+        signedInAs(ADMIN, true);
+        when(urlRepository.findById(999L)).thenReturn(Optional.empty());
+        doThrow(new UrlNotFoundException("Url doesn't exist")).when(moderationService).deleteLink(999L, ADMIN_EMAIL, "mcp");
+
+        final var result = moderationTools.deleteLink(999L);
+
+        assertThat(result.isError()).isTrue();
+        assertThat(text(result)).isEqualTo("Url doesn't exist");
     }
 
     @Test

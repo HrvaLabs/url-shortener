@@ -6,6 +6,7 @@ import cc.hrva.urlshortener.dto.LinkVerdict;
 import cc.hrva.urlshortener.exception.NoAuthorizationException;
 import cc.hrva.urlshortener.exception.UrlValidationException;
 import cc.hrva.urlshortener.model.LinkReview;
+import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.enums.BlockReason;
 import cc.hrva.urlshortener.repository.LinkReviewRepository;
@@ -72,6 +73,7 @@ public class ModerationTools {
     private static final String NO_EVIDENCE = "No flagged or blocked links on this domain. Use the dashboard to block it.";
     private static final String SHARED_HOSTING = "That's a shared hosting domain. Use the dashboard to block it.";
     private static final String UNFLAGGED_LINKS = "This would also block %s nobody flagged. Use the dashboard to block this domain.";
+    private static final String NOT_BLOCKED_OR_FLAGGED = "Only blocked or flagged links can be deleted here. Use the dashboard.";
 
     private final McpUserResolver mcpUserResolver;
     private final ModerationService moderationService;
@@ -244,8 +246,9 @@ public class ModerationTools {
             name = DELETE_LINK,
             title = "Delete a link",
             description = "Admin only. Permanently deletes one hrva.cc short link and its visit records by urlId. It can't be undone, the "
-                    + "owner isn't told, and the short link's name can be taken again. For scams prefer block_link, which keeps the record "
-                    + "and tells the owner.",
+                    + "owner isn't told, and the short link's name can be taken again. It only works for a link that is already blocked or "
+                    + "that hrva.cc's own checks flagged and that still waits in review_queue; a visitor report alone doesn't count. For "
+                    + "scams prefer block_link, which keeps the record and tells the owner.",
             annotations = @McpTool.McpAnnotations(
                     title = "Delete a link",
                     readOnlyHint = false,
@@ -447,12 +450,20 @@ public class ModerationTools {
     private String delete(final Long urlId) {
         final var admin = requireAdmin(DELETE_LINK);
         final var id = required(urlId, MISSING_URL_ID);
+        if (urlRepository.findById(id).filter(url -> !isBlockedOrFlagged(url)).isPresent()) {
+            log.info("MCP delete_link refused for a link that is neither blocked nor flagged adminId={} urlId={}", admin.getId(), id);
+            throw new UrlValidationException(NOT_BLOCKED_OR_FLAGGED);
+        }
 
         moderationService.deleteLink(id, admin.getEmail(), VIA);
 
         log.info("MCP delete_link adminId={} urlId={}", admin.getId(), id);
 
         return "Deleted urlId %d permanently.".formatted(id);
+    }
+
+    private boolean isBlockedOrFlagged(final Url url) {
+        return url.getBlockReason() != null || linkReviewRepository.existsByUrlAndResolvedAtIsNullAndSystemFlaggedTrue(url);
     }
 
     private User requireAdmin(final String toolName) {
