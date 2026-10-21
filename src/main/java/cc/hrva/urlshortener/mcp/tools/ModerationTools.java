@@ -18,6 +18,7 @@ import cc.hrva.urlshortener.service.ReviewQueueService;
 import cc.hrva.urlshortener.service.ScammerSignalService;
 import cc.hrva.urlshortener.util.DomainNames;
 import io.modelcontextprotocol.spec.McpSchema.CallToolResult;
+import java.net.IDN;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.LocalDateTime;
@@ -26,6 +27,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
@@ -57,13 +59,17 @@ public class ModerationTools {
     private static final String VIA = "mcp";
     private static final int MAX_LINKS = 50;
     private static final int PAGE_SIZE = 20;
+    private static final int MAX_PATH_LENGTH = 80;
     private static final Duration RECENT_BLOCKS = Duration.ofHours(24);
     private static final String VISITOR_REPORT = "reported by a visitor: ";
     private static final Pattern SCHEME = Pattern.compile("^[a-zA-Z][a-zA-Z0-9+.-]*://");
+    private static final Pattern NOT_PLAIN_TEXT = Pattern.compile("[<>\\s\\p{Cntrl}]", Pattern.UNICODE_CHARACTER_CLASS);
     private static final String ADMINS_ONLY = "Moderation tools are for hrva.cc admins only.";
     private static final String MISSING_URL_ID = "Give the link's urlId, as review_queue shows it.";
     private static final String MISSING_USER_ID = "Give the account's user id, the number after # in review_queue or possible_scammers.";
     private static final String MISSING_URL = "Give the URL to check, for example https://example.com/page.";
+    private static final String NOT_A_DOMAIN = "Enter a domain such as example.com, not a top-level domain or an IP address.";
+    private static final String NO_EVIDENCE = "No flagged or blocked links on this domain. Use the dashboard to block it.";
 
     private final McpUserResolver mcpUserResolver;
     private final ModerationService moderationService;
@@ -187,11 +193,13 @@ public class ModerationTools {
             name = BLOCK_DOMAIN,
             title = "Block a domain",
             description = "Admin only. Blocks a domain and all its subdomains, so blocking evil.example also blocks www.evil.example and "
-                    + "login.evil.example. It saves a block rule that refuses new links to the domain, and blocks every active link on it, "
-                    + "at most 50 per call; when more would be affected it changes nothing and asks you to use the dashboard. Every "
-                    + "affected link owner is emailed. Use it only for a domain that exists to scam, such as a lookalike registered days "
-                    + "ago, and never for a shared host such as google.com, github.io, a cloud storage host or another link shortener, "
-                    + "because every link there would be blocked. Only the hrva.cc dashboard can undo it.",
+                    + "login.evil.example. It only works when at least one link on the domain is waiting in review_queue or already "
+                    + "blocked; otherwise it changes nothing and asks you to use the dashboard. It saves a block rule that refuses new links "
+                    + "to the domain, and blocks every active link on it, at most 50 per call; when more would be affected it changes "
+                    + "nothing and asks you to use the dashboard. Every affected link owner is emailed. Use it only for a domain that exists "
+                    + "to scam, such as a lookalike registered days ago, and never for a shared host such as google.com, github.io, a cloud "
+                    + "storage host or another link shortener, because every link there would be blocked. Only the hrva.cc dashboard can "
+                    + "undo it.",
             annotations = @McpTool.McpAnnotations(
                     title = "Block a domain",
                     readOnlyHint = false,
@@ -277,6 +285,10 @@ public class ModerationTools {
             return filter == null ? "The review queue has no open entries." : "No open entries match \"%s\".".formatted(filter);
         }
 
+        if (!entries.hasContent()) {
+            return "No open entries on page %d.".formatted(entries.getNumber() + 1);
+        }
+
         final var possibleScammers = scammerSignalService.possibleScammerIds();
         final var lines = new ArrayList<String>();
         lines.add("%s%s, newest first, page %d of %d.".formatted(
@@ -325,6 +337,10 @@ public class ModerationTools {
 
         final var pageNumber = pageNumber(page);
         final var pageIds = ids.stream().skip((long) pageNumber * PAGE_SIZE).limit(PAGE_SIZE).toList();
+        if (pageIds.isEmpty()) {
+            return "No accounts on page %d.".formatted(pageNumber + 1);
+        }
+
         final var lines = new ArrayList<String>();
         lines.add("%s the possible-scammer signal, newest first, page %d of %d.".formatted(
                 counted(ids.size(), "account matches", "accounts match"), pageNumber + 1, (ids.size() + PAGE_SIZE - 1) / PAGE_SIZE));
@@ -378,15 +394,29 @@ public class ModerationTools {
         return "urlId %d | %s -> %s | %s".formatted(blocked.id(), shortLink(blocked.shortUrl()), destination(blocked.longUrl()), blocked.status());
     }
 
-    private String blockLinksOn(final String domain, final String reason) {
+    private String blockLinksOn(final String requested, final String reason) {
         final var admin = requireAdmin(BLOCK_DOMAIN);
-        final var requested = StringUtils.trimToEmpty(domain);
+        final var domain = DomainNames.hostOf(StringUtils.trimToEmpty(requested))
+                .filter(host -> !DomainNames.isIpLiteral(host))
+                .filter(DomainNames::isUnderRegistrySuffix)
+                .orElseThrow(() -> new UrlValidationException(NOT_A_DOMAIN));
+        if (!hasFlaggedOrBlockedLinksOn(domain)) {
+            log.info("MCP block_domain refused without flagged or blocked links adminId={}", admin.getId());
+            throw new UrlValidationException(NO_EVIDENCE);
+        }
 
-        final var blocked = moderationService.blockDomain(requested, StringUtils.trimToNull(reason), admin.getEmail(), VIA, MAX_LINKS);
+        final var blocked = moderationService.blockDomain(domain, StringUtils.trimToNull(reason), admin.getEmail(), VIA, MAX_LINKS);
 
         log.info("MCP block_domain adminId={} links={}", admin.getId(), blocked);
 
-        return "Blocked %s and its subdomains. Links blocked now: %d.".formatted(DomainNames.hostOf(requested).orElse(requested), blocked);
+        return "Blocked %s and its subdomains. Links blocked now: %d.".formatted(domain, blocked);
+    }
+
+    private boolean hasFlaggedOrBlockedLinksOn(final String domain) {
+        return urlRepository.findFlaggedOrBlockedDestinationsMentioning(domain, IDN.toUnicode(domain).toLowerCase(Locale.ROOT)).stream()
+                .map(DomainNames::hostOf)
+                .flatMap(Optional::stream)
+                .anyMatch(host -> host.equals(domain) || host.endsWith("." + domain));
     }
 
     private String blockAccount(final Long userId) {
@@ -448,11 +478,17 @@ public class ModerationTools {
     }
 
     private static String destination(final String longUrl) {
-        final var host = DomainNames.hostOf(longUrl).orElse("unknown host");
         final var withoutScheme = SCHEME.matcher(StringUtils.trimToEmpty(longUrl)).replaceFirst("");
         final var beforeQuery = StringUtils.substringBefore(StringUtils.substringBefore(withoutScheme, "#"), "?");
         final var pathStart = beforeQuery.indexOf('/');
-        return pathStart < 0 ? host : host + beforeQuery.substring(pathStart);
+        final var authority = pathStart < 0 ? beforeQuery : beforeQuery.substring(0, pathStart);
+        final var host = DomainNames.hostOf(authority).orElse("unknown host");
+        final var path = pathStart < 0 ? "" : StringUtils.abbreviate(plainText(beforeQuery.substring(pathStart)), MAX_PATH_LENGTH);
+        return "<" + host + path + ">";
+    }
+
+    private static String plainText(final String path) {
+        return NOT_PLAIN_TEXT.matcher(path).replaceAll(character -> "%%%02X".formatted((int) character.group().charAt(0)));
     }
 
     private static String reasons(final String reasons) {

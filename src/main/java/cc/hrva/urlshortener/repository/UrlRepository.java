@@ -50,6 +50,11 @@ public interface UrlRepository extends JpaRepository<Url, Long>, JpaSpecificatio
     List<LinkDestination> findBlockedDestinationsAfter(
             @Param("reasons") Collection<BlockReason> reasons, @Param("afterId") long afterId, Pageable pageable);
 
+    @Query("select u.longUrl from Url u where (lower(u.longUrl) like concat('%', :domain, '%') "
+            + "or lower(u.longUrl) like concat('%', :unicodeDomain, '%')) "
+            + "and (u.blockReason is not null or exists (select r.id from LinkReview r where r.url = u and r.resolvedAt is null))")
+    List<String> findFlaggedOrBlockedDestinationsMentioning(@Param("domain") String domain, @Param("unicodeDomain") String unicodeDomain);
+
     @Query("select u.id from Url u where u.owner = :owner and u.active = true order by u.id")
     List<Long> findActiveIdsByOwner(@Param("owner") User owner);
 

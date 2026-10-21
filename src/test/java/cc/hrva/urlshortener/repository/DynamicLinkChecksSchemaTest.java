@@ -407,6 +407,29 @@ class DynamicLinkChecksSchemaTest {
     }
 
     @Test
+    void flaggedOrBlockedDestinationsAreFoundByTheDomainTheyMention() {
+        savedBlockedLink("blocked", "https://JOFOGAS.cards/login", BlockReason.DOMAIN_RULE);
+        savedBlockedLink("unicode", "https://www.njuškalo.hr/login", BlockReason.SCAM_SIGNALS);
+        final var waiting = savedLink("waiting", "https://www.evil.example/pay", null);
+        final var settled = savedLink("settled", "https://settled.example/", null);
+        savedLink("clean", "https://clean.example/", null);
+        savedLink("unflagged", "https://evil.example/other", null);
+        linkReviewRepository.saveAndFlush(LinkReview.builder().url(waiting).reasons("punycode domain").build());
+        linkReviewRepository.saveAndFlush(LinkReview.builder().url(settled).reasons("punycode domain").resolvedAt(LocalDateTime.now()).build());
+        entityManager.flush();
+        entityManager.clear();
+
+        assertThat(urlRepository.findFlaggedOrBlockedDestinationsMentioning("jofogas.cards", "jofogas.cards"))
+                .containsExactly("https://JOFOGAS.cards/login");
+        assertThat(urlRepository.findFlaggedOrBlockedDestinationsMentioning("evil.example", "evil.example"))
+                .containsExactly("https://www.evil.example/pay");
+        assertThat(urlRepository.findFlaggedOrBlockedDestinationsMentioning("xn--njukalo-sqb.hr", "njuškalo.hr"))
+                .containsExactly("https://www.njuškalo.hr/login");
+        assertThat(urlRepository.findFlaggedOrBlockedDestinationsMentioning("settled.example", "settled.example")).isEmpty();
+        assertThat(urlRepository.findFlaggedOrBlockedDestinationsMentioning("clean.example", "clean.example")).isEmpty();
+    }
+
+    @Test
     void anAdminAccountIsRecognisedByItsAuthority() {
         final var admin = savedUser("admin@example.com");
         admin.setAuthorities(List.of(entityManager.find(Authorities.class, 2L)));

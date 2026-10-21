@@ -140,7 +140,7 @@ class McpEndpointSecurityTest {
     private static final String LINK_STATS_CALL = """
             {"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"link_stats","arguments":{"link":"https://hrva.cc/secret-alias"}}}""";
     private static final String BLOCK_DOMAIN_CALL = """
-            {"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"block_domain","arguments":{"domain":"evil.example","reason":"lookalike"}}}""";
+            {"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"block_domain","arguments":{"domain":"jofogas.cards","reason":"lookalike"}}}""";
     private static final String INITIALIZE = """
             {"jsonrpc":"2.0","id":3,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"1.0.0"}}}""";
     private static final String RESOURCES_LIST = """
@@ -389,7 +389,9 @@ class McpEndpointSecurityTest {
         final var callerDuringBlock = new AtomicReference<String>();
         when(userService.fetchActiveUserByEmail(EMAIL)).thenReturn(User.builder().id(7L).email(EMAIL).active(true).build());
         when(userRepository.existsByIdAndAuthoritiesName(7L, "ROLE_ADMIN")).thenReturn(true);
-        when(moderationService.blockDomain("evil.example", "lookalike", EMAIL, "mcp", 50)).thenAnswer(invocation -> {
+        when(urlRepository.findFlaggedOrBlockedDestinationsMentioning("jofogas.cards", "jofogas.cards"))
+                .thenReturn(List.of("https://login.jofogas.cards/pay"));
+        when(moderationService.blockDomain("jofogas.cards", "lookalike", EMAIL, "mcp", 50)).thenAnswer(invocation -> {
             callerDuringBlock.set(SecurityContextHolder.getContext().getAuthentication().getName());
             return 2;
         });
@@ -398,7 +400,7 @@ class McpEndpointSecurityTest {
         mockMvc.perform(mcpRequest(BLOCK_DOMAIN_CALL).header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.result.isError").value(false))
-                .andExpect(jsonPath("$.result.content[0].text").value("Blocked evil.example and its subdomains. Links blocked now: 2."));
+                .andExpect(jsonPath("$.result.content[0].text").value("Blocked jofogas.cards and its subdomains. Links blocked now: 2."));
 
         assertThat(callerDuringBlock.get()).isEqualTo(EMAIL);
         assertThat(output.toString().substring(outputBeforeCall))
