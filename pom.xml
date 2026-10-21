@@ -30,8 +30,19 @@
         <zxingVersion>3.5.4</zxingVersion>
         <jsoupVersion>1.23.2</jsoupVersion>
         <springAiVersion>2.0.1</springAiVersion>
+        <!-- Held at 2.0.1: Spring AI 2.0.1 is built against SDK 2.0.0 and breaks on 2.1.0 -->
         <mcpSdkVersion>2.0.1</mcpSdkVersion>
         <mcpSecurityVersion>0.1.14</mcpSecurityVersion>
+
+        <!-- Newer than Spring Boot 4.1.1 manages; drop each once Boot manages the same or newer -->
+        <h2.version>2.5.252</h2.version>
+        <postgresql.version>42.7.14</postgresql.version>
+        <lombok.version>1.18.48</lombok.version>
+        <maven-compiler-plugin.version>3.16.0</maven-compiler-plugin.version>
+        <maven-surefire-plugin.version>3.6.0</maven-surefire-plugin.version>
+        <maven-failsafe-plugin.version>3.6.0</maven-failsafe-plugin.version>
+        <maven-install-plugin.version>3.2.0</maven-install-plugin.version>
+        <maven-deploy-plugin.version>3.2.0</maven-deploy-plugin.version>
     </properties>
 
     <dependencyManagement>
