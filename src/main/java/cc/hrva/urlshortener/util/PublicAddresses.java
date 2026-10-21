@@ -16,6 +16,7 @@ public final class PublicAddresses {
                     "::/96", "64:ff9b::/96", "64:ff9b:1::/48", "2001::/32", "2001:db8::/32", "2002::/16", "fc00::/7")
             .map(AddressBlock::of)
             .toList();
+    private static final byte[] IPV4_MAPPED_PREFIX = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, (byte) 0xFF, (byte) 0xFF};
 
     private PublicAddresses() {}
 
@@ -33,13 +34,24 @@ public final class PublicAddresses {
         }
     }
 
-    private static boolean isPublicAddress(final InetAddress address) {
+    static boolean isPublicAddress(final InetAddress address) {
+        final var bytes = address.getAddress();
+        if (isIpv4Mapped(bytes)) {
+            try {
+                return isPublicAddress(InetAddress.getByAddress(Arrays.copyOfRange(bytes, 12, 16)));
+            } catch (final UnknownHostException exception) {
+                return false;
+            }
+        }
         if (address.isAnyLocalAddress() || address.isLoopbackAddress() || address.isLinkLocalAddress()
                 || address.isSiteLocalAddress() || address.isMulticastAddress()) {
             return false;
         }
-        final var bytes = address.getAddress();
         return NON_PUBLIC_BLOCKS.stream().noneMatch(block -> block.contains(bytes));
+    }
+
+    private static boolean isIpv4Mapped(final byte[] bytes) {
+        return bytes.length == 16 && Arrays.equals(bytes, 0, IPV4_MAPPED_PREFIX.length, IPV4_MAPPED_PREFIX, 0, IPV4_MAPPED_PREFIX.length);
     }
 
     private record AddressBlock(byte[] network, int prefixLength) {

@@ -1,6 +1,10 @@
 package cc.hrva.urlshortener.util;
 
+import java.net.Inet6Address;
+import java.net.InetAddress;
+import java.net.UnknownHostException;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -48,6 +52,19 @@ class PublicAddressesTest {
     })
     void allowsPublicAddressesNextToTheReservedBlocks(final String url) {
         assertThat(PublicAddresses.isPublicTarget(url)).isTrue();
+    }
+
+    @ParameterizedTest
+    @CsvSource({"127.0.0.1, false", "10.0.0.1, false", "169.254.169.254, false", "1.1.1.1, true"})
+    void ipv4MappedDnsAnswerIsJudgedByItsIpv4Address(final String ipv4, final boolean expectedPublic) throws UnknownHostException {
+        final var mapped = new byte[16];
+        mapped[10] = (byte) 0xFF;
+        mapped[11] = (byte) 0xFF;
+        System.arraycopy(InetAddress.ofLiteral(ipv4).getAddress(), 0, mapped, 12, 4);
+        final var address = Inet6Address.getByAddress("h", mapped, 0);
+
+        assertThat(address.getAddress()).hasSize(16);
+        assertThat(PublicAddresses.isPublicAddress(address)).isEqualTo(expectedPublic);
     }
 
 }
