@@ -77,6 +77,9 @@ public class User {
         if (this.twoFactorEnabled == null) {
             this.twoFactorEnabled = false;
         }
+        if (this.authProvider == null) {
+            this.authProvider = "local";
+        }
     }
 
     public void userLoggedIn() {

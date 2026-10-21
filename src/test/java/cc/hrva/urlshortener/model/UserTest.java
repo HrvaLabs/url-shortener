@@ -18,6 +18,24 @@ class UserTest {
     }
 
     @Test
+    void newAccountsWithoutAProviderAreLocal() {
+        final var user = new User();
+
+        user.onCreate();
+
+        assertThat(user.getAuthProvider()).isEqualTo("local");
+    }
+
+    @Test
+    void keepsTheProviderOfAnOauthAccount() {
+        final var user = User.builder().authProvider("google").build();
+
+        user.onCreate();
+
+        assertThat(user.getAuthProvider()).isEqualTo("google");
+    }
+
+    @Test
     void shouldSetLastLoginOnUserLoggedIn() {
         final var user = new User();
         user.userLoggedIn();
