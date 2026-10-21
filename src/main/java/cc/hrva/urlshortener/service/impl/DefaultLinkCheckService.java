@@ -36,8 +36,6 @@ import org.springframework.stereotype.Service;
 public class DefaultLinkCheckService implements LinkCheckService {
 
     private static final String YOUNG_DOMAIN = "domain registered in the last 30 days";
-    private static final String IMITATES = "imitates ";
-    private static final String LOGIN_LURE = "login or verification lure";
     private static final String SPAMHAUS = "Spamhaus DBL: ";
     private static final String DETAIL_SEPARATOR = ", ";
     private static final Comparator<DomainRule> MOST_SPECIFIC_FIRST =
@@ -209,7 +207,7 @@ public class DefaultLinkCheckService implements LinkCheckService {
         }
 
         private static boolean isScamSignal(final String reason) {
-            return reason.startsWith(IMITATES) || reason.equals(LOGIN_LURE);
+            return reason.startsWith(SuspiciousUrlService.IMITATES_PREFIX) || reason.equals(SuspiciousUrlService.LOGIN_LURE);
         }
 
         private static LinkVerdict blocked(final List<String> reasons, final BlockReason blockReason, final String detail) {

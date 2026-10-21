@@ -103,9 +103,9 @@ public class DefaultSuspiciousUrlService implements SuspiciousUrlService {
         if (Arrays.stream(labels).anyMatch(label -> label.startsWith("xn--"))) {
             reasons.add("punycode domain");
         }
-        imitatedBrand(labels, domain).ifPresent(brand -> reasons.add("imitates " + brand));
+        imitatedBrand(labels, domain).ifPresent(brand -> reasons.add(IMITATES_PREFIX + brand));
         if (!isOfficialBrandDomain(domain) && hasLure(labels, longUrl)) {
-            reasons.add("login or verification lure");
+            reasons.add(LOGIN_LURE);
         }
         final var ending = labels[labels.length - 1];
         if (HIGH_RISK_ENDINGS.contains(ending)) {

@@ -156,6 +156,19 @@ class DefaultLinkCheckServiceTest {
     }
 
     @Test
+    void theHeuristicsOwnScamSignalWordingBlocksAYoungDomain() {
+        final var imitation = SuspiciousUrlService.IMITATES_PREFIX + "njuskalo";
+        young(SCAM_HOST);
+        heuristics(SCAM_URL, imitation, SuspiciousUrlService.LOGIN_LURE);
+
+        assertThat(verdictOf(SCAM_URL)).isEqualTo(new LinkVerdict(
+                Outcome.BLOCK,
+                List.of(YOUNG, imitation, SuspiciousUrlService.LOGIN_LURE),
+                BlockReason.SCAM_SIGNALS,
+                String.join(", ", YOUNG, imitation, SuspiciousUrlService.LOGIN_LURE)));
+    }
+
+    @Test
     void aBrandImitationWithALoginLureOnAnOldDomainIsOnlyFlagged() {
         final var url = "https://jofogas-belepes.com/login";
         heuristics(url, "imitates jofogas", LURE);
