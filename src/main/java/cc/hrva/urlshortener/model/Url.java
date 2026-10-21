@@ -8,6 +8,7 @@ import cc.hrva.urlshortener.model.enums.ThreatType;
 import jakarta.persistence.*;
 import jakarta.validation.constraints.NotBlank;
 import lombok.*;
+import org.hibernate.annotations.BatchSize;
 import org.hibernate.validator.constraints.URL;
 import org.springframework.cache.annotation.CacheEvict;
 
@@ -62,6 +63,7 @@ public class Url {
     private String finalUrl;
     private LocalDateTime chainCheckedAt;
 
+    @BatchSize(size = 100)
     @ElementCollection(fetch = FetchType.EAGER)
     @CollectionTable(name = "url_tags", joinColumns = @JoinColumn(name = "URL_ID"))
     @Column(name = "TAG")

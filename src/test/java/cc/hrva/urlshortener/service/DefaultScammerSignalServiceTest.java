@@ -15,6 +15,7 @@ import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.IntStream;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.SpringBootConfiguration;
@@ -24,7 +25,6 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.FilterType;
-import org.springframework.context.annotation.Import;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -45,13 +45,23 @@ class DefaultScammerSignalServiceTest {
     private static final LocalDateTime NOW = LocalDateTime.of(2026, 10, 21, 9, 0);
 
     @Autowired
-    private ScammerSignalService scammerSignalService;
+    private UrlRepository urlRepository;
+
+    @Autowired
+    private Clock clock;
 
     @Autowired
     private EntityManager entityManager;
 
+    private ScammerSignalService scammerSignalService;
+
     private int users;
     private int links;
+
+    @BeforeEach
+    void setUp() {
+        scammerSignalService = new DefaultScammerSignalService(urlRepository, clock);
+    }
 
     @Test
     void aThreeDayOldAccountWithTwoFlaggedLinksIsAPossibleScammer() {
@@ -224,7 +234,6 @@ class DefaultScammerSignalServiceTest {
     @EnableJpaRepositories(
             basePackageClasses = UrlRepository.class,
             includeFilters = @ComponentScan.Filter(type = FilterType.ASSIGNABLE_TYPE, classes = {UrlRepository.class, LinkReviewRepository.class}))
-    @Import(DefaultScammerSignalService.class)
     static class TestApplication {
 
         @Bean

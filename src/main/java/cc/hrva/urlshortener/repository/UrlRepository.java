@@ -10,6 +10,8 @@ import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.enums.BlockReason;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.domain.Specification;
+import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Modifying;
@@ -20,6 +22,14 @@ import org.springframework.transaction.annotation.Transactional;
 
 @Repository
 public interface UrlRepository extends JpaRepository<Url, Long>, JpaSpecificationExecutor<Url> {
+
+    @Override
+    @EntityGraph(attributePaths = "owner", type = EntityGraph.EntityGraphType.LOAD)
+    Page<Url> findAll(Pageable pageable);
+
+    @Override
+    @EntityGraph(attributePaths = "owner", type = EntityGraph.EntityGraphType.LOAD)
+    Page<Url> findAll(Specification<Url> spec, Pageable pageable);
 
     Page<Url> findAllByOwner(User owner, Pageable pageable);
     boolean existsUrlByLongUrlAndActiveTrue(String longUrl);

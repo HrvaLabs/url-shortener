@@ -12,6 +12,7 @@ import org.aspectj.lang.ProceedingJoinPoint;
 import org.aspectj.lang.annotation.Around;
 import org.aspectj.lang.annotation.Aspect;
 import org.springframework.beans.BeanUtils;
+import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
 import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.json.JsonMapper;
@@ -22,6 +23,7 @@ import tools.jackson.databind.json.JsonMapper;
 public class AdminAuditAspect {
 
     private static final String ADMIN_PREFIX = "Admin";
+    private static final String ID = "id";
 
     private final AuditLogService auditLogService;
     private final UserService userService;
@@ -52,7 +54,7 @@ public class AdminAuditAspect {
 
         try {
             final var result = joinPoint.proceed();
-            auditLogService.log(performedBy, methodName, targetType, targetIdentifier, details);
+            auditLogService.log(performedBy, methodName, targetType, targeted ? targetIdentifier : createdIdentifier(result), details);
             return result;
         } catch (final Throwable e) {
             auditLogService.log(performedBy, methodName + "_FAILED", targetType, targetIdentifier, e.getMessage());
@@ -65,6 +67,14 @@ public class AdminAuditAspect {
         return name.startsWith(ADMIN_PREFIX) && name.length() > ADMIN_PREFIX.length()
                 ? name.substring(ADMIN_PREFIX.length())
                 : name;
+    }
+
+    private String createdIdentifier(final Object result) {
+        if (!(result instanceof ResponseEntity<?> response) || response.getBody() == null) {
+            return "";
+        }
+        final var id = jsonMapper.valueToTree(response.getBody()).path(ID);
+        return id.isValueNode() ? id.asString() : "";
     }
 
     private String describeChanges(final Object[] args, final int targetArguments) {
@@ -83,7 +93,7 @@ public class AdminAuditAspect {
 
         final var fields = jsonMapper.convertValue(arg, new TypeReference<TreeMap<String, Object>>() {});
         return fields.entrySet().stream()
-                .filter(field -> field.getValue() != null && !"id".equals(field.getKey()))
+                .filter(field -> field.getValue() != null && !ID.equals(field.getKey()))
                 .map(field -> field.getKey() + ": " + describeValue(field.getKey(), field.getValue()))
                 .collect(Collectors.joining(", "));
     }

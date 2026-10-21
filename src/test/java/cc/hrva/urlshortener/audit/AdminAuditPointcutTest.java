@@ -2,7 +2,9 @@ package cc.hrva.urlshortener.audit;
 
 import cc.hrva.urlshortener.controller.AdminBlocklistController;
 import cc.hrva.urlshortener.dto.BlocklistSourceDto;
+import cc.hrva.urlshortener.dto.BlocklistSourceResponse;
 import cc.hrva.urlshortener.exception.BlocklistSourceNotFoundException;
+import cc.hrva.urlshortener.exception.UrlValidationException;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.enums.BlocklistAction;
 import cc.hrva.urlshortener.model.enums.SourceKind;
@@ -23,6 +25,7 @@ import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class AdminAuditPointcutTest {
@@ -55,11 +58,22 @@ class AdminAuditPointcutTest {
     }
 
     @Test
-    void addingABlocklistSourceIsAuditedWithWhatWasSubmittedAndNoTargetYet() {
+    void addingABlocklistSourceIsAuditedWithTheCreatedIdAndWhatWasSubmitted() {
+        when(blocklistSourceService.create(SOURCE)).thenReturn(new BlocklistSourceResponse(17L, SOURCE.name(), SOURCE.url(), SOURCE.fallbackUrls(),
+                SOURCE.kind(), SOURCE.action(), true, 6, null, null, null, null, null, null, null));
+
         controller.createSource(SOURCE);
 
-        verify(blocklistSourceService).create(SOURCE);
-        verify(auditLogService).log(ADMIN, "createSource", "Blocklist", "", SOURCE_DETAILS);
+        verify(auditLogService).log(ADMIN, "createSource", "Blocklist", "17", SOURCE_DETAILS);
+    }
+
+    @Test
+    void aRefusedBlocklistSourceIsAuditedAsFailedWithoutATarget() {
+        when(blocklistSourceService.create(SOURCE)).thenThrow(new UrlValidationException("Enter a name for the list"));
+
+        assertThatThrownBy(() -> controller.createSource(SOURCE)).isInstanceOf(UrlValidationException.class);
+
+        verify(auditLogService).log(ADMIN, "createSource_FAILED", "Blocklist", "", "Enter a name for the list");
     }
 
     @Test
