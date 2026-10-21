@@ -5,6 +5,7 @@ import cc.hrva.urlshortener.service.impl.DefaultSuspiciousUrlService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -46,6 +47,25 @@ class DefaultSuspiciousUrlServiceTest {
     void flagsABrandNameOnSomeoneElsesDomain() {
         assertThat(suspiciousUrlService.findReasons("https://jofogas.cards/r/49134101")).contains("imitates jofogas");
         assertThat(suspiciousUrlService.findReasons("https://jofogas.info-auth.com/a/mCuyFSXkNHWYOl3t")).contains("imitates jofogas");
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            "https://dhl.pages.dev/track, imitates dhl",
+            "https://olx.github.io/, imitates olx",
+            "https://amazon.blogspot.com/, imitates amazon",
+            "https://google.web.app/, imitates google",
+            "https://vinted.netlify.app/login, imitates vinted",
+            "https://vinted.netlify.app/login, login or verification lure"
+    })
+    void flagsABrandNameOnASharedHostingSite(final String longUrl, final String reason) {
+        assertThat(suspiciousUrlService.findReasons(longUrl)).contains(reason);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"https://www.amazon.de/dp/B0CX23V2ZK", "https://www.ebay.co.uk/itm/1234", "https://www.olx.pl/oferta"})
+    void trustsABrandThatAcceptsAnyEndingUnderEachCountryEnding(final String longUrl) {
+        assertThat(suspiciousUrlService.findReasons(longUrl)).isEmpty();
     }
 
     @Test

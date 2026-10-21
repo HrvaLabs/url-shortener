@@ -151,6 +151,19 @@ class DefaultDomainAgeServiceTest {
     }
 
     @Test
+    void sharedHostingSiteIsLookedUpUnderTheDomainItsRegistryKnows() {
+        fetcher.answer(BOOTSTRAP_URL, """
+                {"services": [[["dev"], ["https://rdap.example/"]]]}
+                """);
+        fetcher.answer("https://rdap.example/domain/pages.dev", REGISTERED);
+
+        assertThat(domainAgeService.registeredOn("x.pages.dev")).contains(LocalDate.of(2026, 9, 15));
+
+        assertThat(fetcher.requestedUrls()).containsExactly(BOOTSTRAP_URL, "https://rdap.example/domain/pages.dev");
+        verify(valueOperations).set("rdap:pages.dev", "2026-09-15", Duration.ofDays(30));
+    }
+
+    @Test
     void readsTheRegistrationTimestampInUtc() {
         fetcher.answer(BOOTSTRAP_URL, BOOTSTRAP);
         fetcher.answer(DOMAIN_URL, """

@@ -1,12 +1,12 @@
 package cc.hrva.urlshortener.util;
 
+import com.google.common.net.InternetDomainName;
 import java.net.IDN;
 import java.net.URI;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
-import java.util.Set;
 import java.util.regex.Pattern;
 import java.util.stream.IntStream;
 import org.apache.commons.lang3.StringUtils;
@@ -15,8 +15,6 @@ public final class DomainNames {
 
     public static final Pattern HOST_NAME = Pattern.compile(
             "^(?!-)[a-z0-9_-]+(?<!-)(?:\\.(?!-)[a-z0-9_-]+(?<!-))+\\.?$", Pattern.CASE_INSENSITIVE);
-
-    private static final Set<String> SECOND_LEVEL_LABELS = Set.of("co", "com", "net", "org", "gov", "edu", "ac", "or", "ne", "go");
 
     private DomainNames() {}
 
@@ -42,12 +40,28 @@ public final class DomainNames {
     }
 
     public static String registrableDomain(final String host) {
-        final var labels = host.split("\\.");
-        final var count = labels.length;
-        if (count >= 3 && labels[count - 1].length() == 2 && SECOND_LEVEL_LABELS.contains(labels[count - 2])) {
-            return String.join(".", labels[count - 3], labels[count - 2], labels[count - 1]);
+        return internetDomainName(host)
+                .filter(InternetDomainName::isUnderPublicSuffix)
+                .map(name -> name.topPrivateDomain().toString())
+                .orElse(host);
+    }
+
+    public static String registryDomain(final String host) {
+        return internetDomainName(host)
+                .filter(InternetDomainName::isUnderRegistrySuffix)
+                .map(name -> name.topDomainUnderRegistrySuffix().toString())
+                .orElse(host);
+    }
+
+    private static Optional<InternetDomainName> internetDomainName(final String host) {
+        if (host == null) {
+            return Optional.empty();
         }
-        return count >= 2 ? labels[count - 2] + "." + labels[count - 1] : labels[0];
+        try {
+            return Optional.of(InternetDomainName.from(host));
+        } catch (final IllegalArgumentException exception) {
+            return Optional.empty();
+        }
     }
 
     private static String hostOfAuthority(final String authority) {

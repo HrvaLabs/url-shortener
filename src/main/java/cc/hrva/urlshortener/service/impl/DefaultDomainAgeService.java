@@ -71,7 +71,7 @@ public class DefaultDomainAgeService implements DomainAgeService {
 
     @Override
     public Optional<LocalDate> registeredOn(final String host) {
-        return registrableDomainOf(host).flatMap(this::registeredOnDomain);
+        return registryDomainOf(host).flatMap(this::registeredOnDomain);
     }
 
     @Override
@@ -85,12 +85,12 @@ public class DefaultDomainAgeService implements DomainAgeService {
         lookupExecutor.shutdownNow();
     }
 
-    private static Optional<String> registrableDomainOf(final String host) {
+    private static Optional<String> registryDomainOf(final String host) {
         return Optional.ofNullable(host)
                 .map(value -> Strings.CS.removeEnd(value.toLowerCase(Locale.ROOT), "."))
                 .filter(value -> DomainNames.HOST_NAME.matcher(value).matches())
                 .filter(value -> !StringUtils.isNumeric(StringUtils.substringAfterLast(value, ".")))
-                .map(DomainNames::registrableDomain);
+                .map(DomainNames::registryDomain);
     }
 
     private Optional<LocalDate> registeredOnDomain(final String domain) {
