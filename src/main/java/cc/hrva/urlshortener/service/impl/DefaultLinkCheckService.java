@@ -19,7 +19,6 @@ import cc.hrva.urlshortener.service.SuspiciousUrlService;
 import cc.hrva.urlshortener.service.blocklist.BlocklistStore;
 import cc.hrva.urlshortener.util.DomainNames;
 import cc.hrva.urlshortener.util.LinkKeys;
-import java.net.InetAddress;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -67,7 +66,7 @@ public class DefaultLinkCheckService implements LinkCheckService {
             return LinkVerdict.clean();
         }
 
-        final var ipLiteral = isIpLiteral(host);
+        final var ipLiteral = DomainNames.isIpLiteral(host);
         final var domains = ipLiteral ? List.<String>of() : DomainNames.candidates(host);
         final var cheapSignals = new Signals(
                 matchingRules(domains), matchingSources(domains, longUrl), heuristicReasons(longUrl), ReputationResult.none(), false);
@@ -139,15 +138,6 @@ public class DefaultLinkCheckService implements LinkCheckService {
         }
     }
 
-    private static boolean isIpLiteral(final String host) {
-        try {
-            InetAddress.ofLiteral(host);
-            return true;
-        } catch (final IllegalArgumentException exception) {
-            return false;
-        }
-    }
-
     @With
     private record Signals(
             List<DomainRule> rules, List<BlocklistSource> sources, List<String> heuristics, ReputationResult reputation, boolean young) {
@@ -167,7 +157,19 @@ public class DefaultLinkCheckService implements LinkCheckService {
         }
 
         private boolean allowed() {
+            return allowRuleDecides() && blockingSource().isEmpty();
+        }
+
+        private boolean allowRuleDecides() {
             return rules.stream().findFirst().filter(rule -> rule.getType() == DomainRuleType.ALLOW).isPresent();
+        }
+
+        private Optional<BlocklistSource> blockingSource() {
+            final var exactLinksOnly = allowRuleDecides();
+            return sources.stream()
+                    .filter(source -> source.getAction() == BlocklistAction.BLOCK)
+                    .filter(source -> !exactLinksOnly || source.getKind() == SourceKind.LINKS)
+                    .findFirst();
         }
 
         private Optional<LinkVerdict> blockOf(final List<String> reasons) {
@@ -175,7 +177,7 @@ public class DefaultLinkCheckService implements LinkCheckService {
             if (blockingRule.isPresent()) {
                 return Optional.of(blocked(reasons, BlockReason.DOMAIN_RULE, blockingRule.get().getDomain()));
             }
-            final var blockingSource = sources.stream().filter(source -> source.getAction() == BlocklistAction.BLOCK).findFirst();
+            final var blockingSource = blockingSource();
             if (blockingSource.isPresent()) {
                 return Optional.of(blocked(reasons, BlockReason.BLOCKLIST, blockingSource.get().getName()));
             }

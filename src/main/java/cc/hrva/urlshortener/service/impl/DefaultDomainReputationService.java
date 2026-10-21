@@ -101,18 +101,9 @@ public class DefaultDomainReputationService implements DomainReputationService {
     private static List<String> namesToQuery(final String host) {
         return DomainNames.hostOf(host)
                 .filter(DomainNames.HOST_NAME.asMatchPredicate())
-                .filter(name -> !isIpLiteral(name))
+                .filter(name -> !DomainNames.isIpLiteral(name))
                 .map(name -> Stream.of(name, DomainNames.registrableDomain(name)).distinct().toList())
                 .orElseGet(List::of);
-    }
-
-    private static boolean isIpLiteral(final String name) {
-        try {
-            InetAddress.ofLiteral(name);
-            return true;
-        } catch (final IllegalArgumentException exception) {
-            return false;
-        }
     }
 
     private ReputationResult lookupName(final String name, final String key) {

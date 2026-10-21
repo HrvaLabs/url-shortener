@@ -113,6 +113,18 @@ class DomainNamesTest {
         assertThat(DomainNames.isUnderRegistrySuffix(host)).isFalse();
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"1.2.3.4", "127.0.0.1", "::1", "[::1]", "2001:db8::1", "::ffff:1.2.3.4"})
+    void addressLiteralIsAnIpLiteral(final String host) {
+        assertThat(DomainNames.isIpLiteral(host)).isTrue();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"example.com", "1.2.3.example", "localhost", "999.1.1.1", ""})
+    void hostNameIsNotAnIpLiteral(final String host) {
+        assertThat(DomainNames.isIpLiteral(host)).isFalse();
+    }
+
     @Test
     void missingHostHasNoDomain() {
         assertThat(DomainNames.registrableDomain(null)).isNull();

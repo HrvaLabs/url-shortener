@@ -2,6 +2,7 @@ package cc.hrva.urlshortener.util;
 
 import com.google.common.net.InternetDomainName;
 import java.net.IDN;
+import java.net.InetAddress;
 import java.net.URI;
 import java.util.Arrays;
 import java.util.List;
@@ -55,6 +56,15 @@ public final class DomainNames {
 
     public static boolean isUnderRegistrySuffix(final String host) {
         return internetDomainName(host).filter(InternetDomainName::isUnderRegistrySuffix).isPresent();
+    }
+
+    public static boolean isIpLiteral(final String host) {
+        try {
+            InetAddress.ofLiteral(host);
+            return true;
+        } catch (final IllegalArgumentException exception) {
+            return false;
+        }
     }
 
     private static Optional<InternetDomainName> internetDomainName(final String host) {

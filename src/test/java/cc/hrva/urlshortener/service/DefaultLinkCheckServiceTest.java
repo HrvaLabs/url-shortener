@@ -285,6 +285,36 @@ class DefaultLinkCheckServiceTest {
     }
 
     @Test
+    void anExactLinkOnALinksBlockSourceBeatsAnAllowRuleOnItsDomain() {
+        rule("github.com", DomainRuleType.ALLOW);
+        source(1, HAGEZI_FAKE, SourceKind.DOMAINS, BlocklistAction.BLOCK, "github.com");
+        source(3, URLHAUS, SourceKind.LINKS, BlocklistAction.BLOCK, "github.com/x/y/raw/evil.exe");
+
+        assertThat(verdictOf("https://github.com/x/y/raw/evil.exe")).isEqualTo(new LinkVerdict(
+                Outcome.BLOCK, List.of("allowed domain github.com", "on list HaGeZi Fake", "on list URLhaus"), BlockReason.BLOCKLIST, URLHAUS));
+        assertThat(linkCheckService.explain("https://github.com/x/y/raw/evil.exe").reasons())
+                .containsExactly("allowed domain github.com", "on list HaGeZi Fake", "on list URLhaus");
+    }
+
+    @Test
+    void checkSkipsTheSlowLookupsWhenAnExactLinkBlockBeatsAnAllowRule() {
+        rule("github.com", DomainRuleType.ALLOW);
+        source(3, URLHAUS, SourceKind.LINKS, BlocklistAction.BLOCK, "github.com/x/y/raw/evil.exe");
+
+        assertThat(linkCheckService.check("https://github.com/x/y/raw/evil.exe").outcome()).isEqualTo(Outcome.BLOCK);
+        verifyNoInteractions(domainAgeService, domainReputationService);
+    }
+
+    @Test
+    void anExactLinkOnALinksFlagSourceStaysAllowedUnderAnAllowRule() {
+        rule("github.com", DomainRuleType.ALLOW);
+        source(4, SUSPICIOUS_LINKS, SourceKind.LINKS, BlocklistAction.FLAG, "github.com/x/y/raw/evil.exe");
+
+        assertThat(verdictOf("https://github.com/x/y/raw/evil.exe")).isEqualTo(new LinkVerdict(
+                Outcome.ALLOWED, List.of("allowed domain github.com", "on list Suspicious links"), null, null));
+    }
+
+    @Test
     void checkSkipsTheSlowLookupsOnceTheCheapSignalsAllow() {
         rule("example.com", DomainRuleType.ALLOW);
         heuristics("https://example.com/login", LURE);
