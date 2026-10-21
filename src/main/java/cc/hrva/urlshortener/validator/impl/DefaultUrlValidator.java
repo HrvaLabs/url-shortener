@@ -1,9 +1,11 @@
 package cc.hrva.urlshortener.validator.impl;
 
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
+import cc.hrva.urlshortener.dto.LinkVerdict;
 import cc.hrva.urlshortener.exception.*;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.repository.UrlRepository;
+import cc.hrva.urlshortener.service.LinkCheckService;
 import cc.hrva.urlshortener.service.SafeBrowsingService;
 import cc.hrva.urlshortener.service.SuspiciousUrlService;
 import cc.hrva.urlshortener.service.UserService;
@@ -28,10 +30,13 @@ public class DefaultUrlValidator implements UrlValidator {
     private final AppProperties appProperties;
     private final SafeBrowsingService safeBrowsingService;
     private final SuspiciousUrlService suspiciousUrlService;
+    private final LinkCheckService linkCheckService;
 
     private static final List<String> RESERVED_WORDS = List.of(
             "api", "login", "logout", "oauth2", "actuator", "error",
             "swagger-ui", "v3", "webjars", "auth", "mcp");
+
+    private static final String BLOCKLISTED = "This destination is on a blocklist and can't be shortened. If you think that's a mistake, contact us.";
 
     private static final Pattern WEB_ADDRESS_PREFIX = Pattern.compile("^https?://[^/]", Pattern.CASE_INSENSITIVE);
 
@@ -54,6 +59,15 @@ public class DefaultUrlValidator implements UrlValidator {
         if (suspiciousUrlService.isShortener(url.getLongUrl())) {
             throw new UrlValidationException("Links to other URL shorteners can't be shortened. Use the final destination instead.");
         }
+    }
+
+    @Override
+    public LinkVerdict checkIfLongUrlIsNotBlocklisted(final Url url) {
+        final var verdict = linkCheckService.check(url.getLongUrl());
+        if (verdict.outcome() == LinkVerdict.Outcome.BLOCK) {
+            throw new UrlValidationException(BLOCKLISTED);
+        }
+        return verdict;
     }
 
     private static boolean isWebAddress(final String longUrl) {

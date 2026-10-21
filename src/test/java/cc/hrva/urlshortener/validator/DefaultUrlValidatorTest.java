@@ -1,15 +1,19 @@
 package cc.hrva.urlshortener.validator;
 
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
+import cc.hrva.urlshortener.dto.LinkVerdict;
+import cc.hrva.urlshortener.dto.LinkVerdict.Outcome;
 import cc.hrva.urlshortener.exception.LongUrlNotSpecifiedException;
 import cc.hrva.urlshortener.exception.NoAuthorizationException;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.codebook.Authorities;
+import cc.hrva.urlshortener.model.enums.BlockReason;
 import java.util.List;
 import cc.hrva.urlshortener.exception.ShortUrlAlreadyExistsException;
 import cc.hrva.urlshortener.exception.UrlValidationException;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.repository.UrlRepository;
+import cc.hrva.urlshortener.service.LinkCheckService;
 import cc.hrva.urlshortener.service.SafeBrowsingService;
 import cc.hrva.urlshortener.service.SuspiciousUrlService;
 import cc.hrva.urlshortener.service.UserService;
@@ -20,6 +24,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
 import static org.assertj.core.api.AssertionsForClassTypes.assertThatCode;
 import static org.assertj.core.api.AssertionsForClassTypes.assertThatThrownBy;
 import static org.mockito.Mockito.when;
@@ -44,9 +49,41 @@ class DefaultUrlValidatorTest {
     @Mock
     private SuspiciousUrlService suspiciousUrlService;
 
+    @Mock
+    private LinkCheckService linkCheckService;
+
     @BeforeEach
     void setUp() {
-        this.urlValidator = new DefaultUrlValidator(userService, urlRepository, appProperties, safeBrowsingService, suspiciousUrlService);
+        this.urlValidator = new DefaultUrlValidator(userService, urlRepository, appProperties, safeBrowsingService, suspiciousUrlService, linkCheckService);
+    }
+
+    @Test
+    void refusesBlocklistedDestinationsWithoutNamingTheList() {
+        final var url = Url.builder().longUrl("https://njuskaio.cam/a/MAUB3").build();
+        when(linkCheckService.check("https://njuskaio.cam/a/MAUB3")).thenReturn(new LinkVerdict(
+                Outcome.BLOCK, List.of("on list HaGeZi TIF medium"), BlockReason.BLOCKLIST, "HaGeZi TIF medium"));
+
+        assertThatThrownBy(() -> urlValidator.checkIfLongUrlIsNotBlocklisted(url))
+                .isInstanceOf(UrlValidationException.class)
+                .hasMessage("This destination is on a blocklist and can't be shortened. If you think that's a mistake, contact us.");
+    }
+
+    @Test
+    void passesFlaggedDestinationsWithTheirVerdict() {
+        final var url = Url.builder().longUrl("https://findfavoritedate.life/?u=f6yp608").build();
+        final var verdict = new LinkVerdict(Outcome.FLAG, List.of("domain registered in the last 30 days"), null, null);
+        when(linkCheckService.check("https://findfavoritedate.life/?u=f6yp608")).thenReturn(verdict);
+
+        assertThat(urlValidator.checkIfLongUrlIsNotBlocklisted(url)).isEqualTo(verdict);
+    }
+
+    @Test
+    void passesAllowedDestinationsWithTheirVerdict() {
+        final var url = Url.builder().longUrl("https://github.com/HrvaLabs").build();
+        final var verdict = new LinkVerdict(Outcome.ALLOWED, List.of("allowed domain github.com"), null, null);
+        when(linkCheckService.check("https://github.com/HrvaLabs")).thenReturn(verdict);
+
+        assertThat(urlValidator.checkIfLongUrlIsNotBlocklisted(url)).isEqualTo(verdict);
     }
 
     @Test

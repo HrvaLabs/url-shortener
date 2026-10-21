@@ -8,6 +8,7 @@ import cc.hrva.urlshortener.converter.CreateUrlToUrlConverter;
 import cc.hrva.urlshortener.converter.UrlToPeekUrlConverter;
 import cc.hrva.urlshortener.converter.UrlUpdateDtoToUrlConverter;
 import cc.hrva.urlshortener.dto.CreateUrlDto;
+import cc.hrva.urlshortener.dto.LinkVerdict;
 import cc.hrva.urlshortener.dto.UrlResponse;
 import cc.hrva.urlshortener.dto.UrlSearchDto;
 import cc.hrva.urlshortener.dto.UrlUpdateDto;
@@ -22,6 +23,7 @@ import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.specification.UrlSpecification;
 import cc.hrva.urlshortener.service.ApiKeyService;
 import cc.hrva.urlshortener.service.IPAddressService;
+import cc.hrva.urlshortener.service.ReviewQueueService;
 import cc.hrva.urlshortener.service.SuspiciousUrlService;
 import cc.hrva.urlshortener.service.UrlService;
 import cc.hrva.urlshortener.service.UserService;
@@ -46,7 +48,9 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionOperations;
 import org.springframework.web.servlet.view.RedirectView;
 
 import java.nio.charset.StandardCharsets;
@@ -92,22 +96,26 @@ public class DefaultUrlService implements UrlService {
     private final org.springframework.security.crypto.password.PasswordEncoder passwordEncoder;
     private final SuspiciousUrlService suspiciousUrlService;
     private final RateLimiter rateLimiter;
+    private final ReviewQueueService reviewQueueService;
+    private final TransactionOperations transactionOperations;
 
     @Override
-    @Transactional
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public UrlResponse saveUrlRouting(final @Valid CreateUrlDto createUrlDto) {
         final var url = createUrlToUrlConverter.convert(createUrlDto);
         final var currentUser = userService.getUserFromToken();
 
         log.info("Creating URL authenticated={}", currentUser != null);
 
-        validateUrl(url);
+        final var verdict = validateUrl(url);
 
-        if (currentUser != null) {
-            applyPassword(url, createUrlDto.getPassword());
-            return saveUrlForUser(url, currentUser);
-        }
-        return UrlResponse.from(createUrlForAnonymousUser(url));
+        return transactionOperations.execute(status -> {
+            if (currentUser != null) {
+                applyPassword(url, createUrlDto.getPassword());
+                return saveUrlForUser(url, currentUser, verdict);
+            }
+            return UrlResponse.from(createUrlForAnonymousUser(url, verdict));
+        });
     }
 
     private boolean unlockAttemptAllowed(final String shortUrl, final String clientIP) {
@@ -145,38 +153,49 @@ public class DefaultUrlService implements UrlService {
     }
 
     @Override
-    @Transactional
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public UrlResponse saveUrlWithApiKey(final @Valid CreateUrlDto createUrlDto, final String key) {
         final var url = createUrlToUrlConverter.convert(createUrlDto);
 
         log.info("Creating URL with API key");
 
-        validateUrl(url);
+        final var verdict = validateUrl(url);
 
-        final var apiKey = apiKeyService.fetchApiKeyByKey(key);
-        apiKeyValidator.apiKeyExistsByKeyAndIsValid(key);
-        apiKeyService.apiKeyUseAction(apiKey);
+        return transactionOperations.execute(status -> {
+            final var apiKey = apiKeyService.fetchApiKeyByKey(key);
+            apiKeyValidator.apiKeyExistsByKeyAndIsValid(key);
+            apiKeyService.apiKeyUseAction(apiKey);
 
-        applyPassword(url, createUrlDto.getPassword());
-        return saveUrlForUser(url, apiKey.getOwner());
+            applyPassword(url, createUrlDto.getPassword());
+            return saveUrlForUser(url, apiKey.getOwner(), verdict);
+        });
     }
 
-    private UrlResponse saveUrlForUser(final Url url, final User owner) {
+    private UrlResponse saveUrlForUser(final Url url, final User owner, final LinkVerdict verdict) {
         assignShortUrl(url);
         url.setOwner(owner);
 
         log.info("Saving URL for owner id={}", owner.getId());
         final var saved = urlRepository.save(url);
+        queueIfFlagged(saved, verdict);
         cacheUrlResponse(saved);
         return UrlResponse.from(saved);
     }
 
-    private void validateUrl(final Url url) {
+    private LinkVerdict validateUrl(final Url url) {
         urlValidator.longUrlInUrl(url);
         urlValidator.checkIfLongUrlIsValid(url);
         urlValidator.checkIfLongUrlIsNotAShortener(url);
+        final var verdict = urlValidator.checkIfLongUrlIsNotBlocklisted(url);
         urlValidator.checkIfUrlSafe(url);
         urlValidator.checkIfUrlExpirationDateIsInThePast(url);
+        return verdict;
+    }
+
+    private void queueIfFlagged(final Url url, final LinkVerdict verdict) {
+        if (verdict.outcome() == LinkVerdict.Outcome.FLAG) {
+            reviewQueueService.flag(url, verdict.reasons());
+        }
     }
 
     private void assignShortUrl(final Url url) {
@@ -309,7 +328,7 @@ public class DefaultUrlService implements UrlService {
     }
 
     @Override
-    @Transactional
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     @CacheEvict(value = "urls", key = "#result.shortUrl")
     public UrlResponse updateUrl(final UrlUpdateDto updateDto) {
         log.info("Update URL id={}", updateDto.getId());
@@ -320,17 +339,25 @@ public class DefaultUrlService implements UrlService {
         final var previousLongUrl = existing.getLongUrl();
 
         final var url = urlUpdateDtoToUrlConverter.convert(updateDto);
-        if (!Objects.equals(previousLongUrl, url.getLongUrl())) {
-            urlValidator.verifyUserAdmin();
-            urlValidator.checkIfLongUrlIsValid(url);
-            urlValidator.checkIfLongUrlIsNotAShortener(url);
-            urlValidator.checkIfUrlSafe(url);
-            log.info("Changed destination of URL id={}", url.getId());
-        }
+        final var verdict = Objects.equals(previousLongUrl, url.getLongUrl()) ? LinkVerdict.clean() : validateNewDestination(url);
         urlValidator.checkIfUrlExpirationDateIsInThePast(url);
 
         url.verifyUrlValidity(url);
-        return UrlResponse.from(urlRepository.save(url));
+        return transactionOperations.execute(status -> {
+            final var saved = urlRepository.save(url);
+            queueIfFlagged(saved, verdict);
+            return UrlResponse.from(saved);
+        });
+    }
+
+    private LinkVerdict validateNewDestination(final Url url) {
+        urlValidator.verifyUserAdmin();
+        urlValidator.checkIfLongUrlIsValid(url);
+        urlValidator.checkIfLongUrlIsNotAShortener(url);
+        final var verdict = urlValidator.checkIfLongUrlIsNotBlocklisted(url);
+        urlValidator.checkIfUrlSafe(url);
+        log.info("Changed destination of URL id={}", url.getId());
+        return verdict;
     }
 
     @Override
@@ -572,7 +599,7 @@ public class DefaultUrlService implements UrlService {
         return urlRepository.findByLongUrlAndActiveTrue(longUrl).orElseThrow(() -> new UrlNotFoundException("URL doesn't exist"));
     }
 
-    private Url createUrlForAnonymousUser(final Url url) {
+    private Url createUrlForAnonymousUser(final Url url, final LinkVerdict verdict) {
         urlValidator.checkIfAnonymousUrlCreationEnabled();
         url.clearForAnonymousUser();
 
@@ -590,6 +617,7 @@ public class DefaultUrlService implements UrlService {
 
         log.info("Saving URL");
         final var saved = urlRepository.save(url);
+        queueIfFlagged(saved, verdict);
         cacheUrlResponse(saved);
         return saved;
     }
