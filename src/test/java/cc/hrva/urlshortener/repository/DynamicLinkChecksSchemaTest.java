@@ -135,6 +135,16 @@ class DynamicLinkChecksSchemaTest {
         assertThat(linkReviewRepository.countByResolvedAtIsNull()).isEqualTo(1);
     }
 
+    @Test
+    void aReviewWithoutAFlagTimeIsFlaggedWhenSaved() {
+        final var url = urlRepository.saveAndFlush(Url.builder().shortUrl("jofogas").longUrl("https://www.jofogas.cards/login").build());
+        final var review = linkReviewRepository.saveAndFlush(LinkReview.builder().url(url).reasons("imitates jofogas").build());
+        entityManager.clear();
+
+        assertThat(linkReviewRepository.findById(review.getId()))
+                .hasValueSatisfying(stored -> assertThat(stored.getFlaggedAt()).isNotNull());
+    }
+
     @SpringBootConfiguration
     @EnableAutoConfiguration
     @EntityScan(basePackageClasses = Url.class)

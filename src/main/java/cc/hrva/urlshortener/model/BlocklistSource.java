@@ -32,7 +32,8 @@ public class BlocklistSource {
     private String url;
     @Enumerated(EnumType.STRING)
     private BlocklistAction action;
-    private boolean enabled;
+    @Builder.Default
+    private boolean enabled = true;
     private LocalDateTime lastFetchedAt;
     private LocalDateTime lastSuccessAt;
     private Long domainCount;

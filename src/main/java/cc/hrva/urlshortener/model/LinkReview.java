@@ -9,6 +9,7 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.ManyToOne;
+import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
 import java.time.LocalDateTime;
 import lombok.AllArgsConstructor;
@@ -31,12 +32,20 @@ public class LinkReview {
     private Long id;
     @ManyToOne
     private Url url;
-    @Column(columnDefinition = "TEXT")
+    @Column(columnDefinition = "TEXT", nullable = false)
     private String reasons;
+    @Column(nullable = false)
     private LocalDateTime flaggedAt;
     private LocalDateTime resolvedAt;
     private String resolvedBy;
     @Enumerated(EnumType.STRING)
     private ReviewResolution resolution;
+
+    @PrePersist
+    public void onCreate() {
+        if (this.flaggedAt == null) {
+            this.flaggedAt = LocalDateTime.now();
+        }
+    }
 
 }
