@@ -7,10 +7,14 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.Set;
+import java.util.regex.Pattern;
 import java.util.stream.IntStream;
 import org.apache.commons.lang3.StringUtils;
 
 public final class DomainNames {
+
+    public static final Pattern HOST_NAME = Pattern.compile(
+            "^(?!-)[a-z0-9_-]+(?<!-)(?:\\.(?!-)[a-z0-9_-]+(?<!-))+\\.?$", Pattern.CASE_INSENSITIVE);
 
     private static final Set<String> SECOND_LEVEL_LABELS = Set.of("co", "com", "net", "org", "gov", "edu", "ac", "or", "ne", "go");
 
