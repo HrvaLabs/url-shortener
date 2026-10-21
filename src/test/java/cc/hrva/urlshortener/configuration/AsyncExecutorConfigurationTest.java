@@ -3,6 +3,7 @@ package cc.hrva.urlshortener.configuration;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.IntStream;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
@@ -11,6 +12,7 @@ import org.springframework.boot.autoconfigure.task.TaskSchedulingAutoConfigurati
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.support.DefaultLifecycleProcessor;
 import org.springframework.core.task.TaskRejectedException;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.scheduling.annotation.EnableAsync;
@@ -66,6 +68,32 @@ class AsyncExecutorConfigurationTest {
                 release.countDown();
             }
         });
+    }
+
+    @Test
+    void aShutdownNeverInterruptsARunningRedirectCheckEvenPastTheLifecycleTimeout() {
+        final var finished = new AtomicBoolean();
+        final var interrupted = new AtomicBoolean();
+
+        contextRunner.withBean("lifecycleProcessor", DefaultLifecycleProcessor.class, AsyncExecutorConfigurationTest::impatientLifecycle)
+                .run(context -> context.getBean(AsyncExecutorConfiguration.REDIRECT_CHECK_EXECUTOR, ThreadPoolTaskExecutor.class)
+                        .execute(() -> {
+                            try {
+                                Thread.sleep(500);
+                                finished.set(true);
+                            } catch (final InterruptedException exception) {
+                                interrupted.set(true);
+                            }
+                        }));
+
+        assertThat(interrupted).isFalse();
+        assertThat(finished).isTrue();
+    }
+
+    private static DefaultLifecycleProcessor impatientLifecycle() {
+        final var lifecycleProcessor = new DefaultLifecycleProcessor();
+        lifecycleProcessor.setTimeoutPerShutdownPhase(100);
+        return lifecycleProcessor;
     }
 
     private static void awaitQuietly(final CountDownLatch latch) {

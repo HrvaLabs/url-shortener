@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.configuration;
 
+import java.time.Duration;
 import org.springframework.boot.autoconfigure.task.TaskExecutionAutoConfiguration;
 import org.springframework.boot.task.ThreadPoolTaskExecutorBuilder;
 import org.springframework.context.annotation.Bean;
@@ -14,6 +15,7 @@ public class AsyncExecutorConfiguration {
     private static final int REDIRECT_CHECK_THREADS = 2;
     private static final int REDIRECT_CHECK_QUEUE_CAPACITY = 200;
     private static final String REDIRECT_CHECK_THREAD_PREFIX = "redirect-check-";
+    private static final Duration REDIRECT_CHECK_SHUTDOWN_GRACE = Duration.ofSeconds(15);
 
     @Bean(name = {TaskExecutionAutoConfiguration.APPLICATION_TASK_EXECUTOR_BEAN_NAME, AsyncAnnotationBeanPostProcessor.DEFAULT_TASK_EXECUTOR_BEAN_NAME})
     public ThreadPoolTaskExecutor applicationTaskExecutor(final ThreadPoolTaskExecutorBuilder threadPoolTaskExecutorBuilder) {
@@ -27,6 +29,8 @@ public class AsyncExecutorConfiguration {
                 .maxPoolSize(REDIRECT_CHECK_THREADS)
                 .queueCapacity(REDIRECT_CHECK_QUEUE_CAPACITY)
                 .threadNamePrefix(REDIRECT_CHECK_THREAD_PREFIX)
+                .awaitTermination(true)
+                .awaitTerminationPeriod(REDIRECT_CHECK_SHUTDOWN_GRACE)
                 .build();
     }
 
