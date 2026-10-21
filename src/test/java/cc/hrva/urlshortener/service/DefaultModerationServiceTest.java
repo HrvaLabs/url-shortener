@@ -501,13 +501,30 @@ class DefaultModerationServiceTest {
             assertThat(url.getBlockedAt()).isNotNull();
             verify(cache).evict(url.getShortUrl());
             verify(reviewQueueService).resolveOpen(url, ReviewResolution.USER_BLOCKED, ADMIN);
-            verify(sendingEmailService).sendEmailUrlBlocked(scammer, url);
         });
         assertThat(switchedOff.getBlockReason()).isNull();
         assertThat(someoneElses.isActive()).isTrue();
         verify(auditLogService).log(ADMIN, "BLOCK_USER", "User", "5", "links: 2, via: admin");
         verifyNoMoreInteractions(auditLogService);
         assertThat(outOfPlace).isEmpty();
+    }
+
+    @Test
+    void blockingAUserWithThreeLinksSendsOnlyTheAccountDeactivatedEmail() {
+        final var scammer = user(5L, "scammer@example.com");
+        when(userRepository.findById(5L)).thenReturn(Optional.of(scammer));
+        doAnswer(invocation -> {
+            sendingEmailService.sendEmailAccountDeactivated(invocation.getArgument(0));
+            return null;
+        }).when(userService).deactivate(scammer);
+        link(40L, "https://a.example/", scammer);
+        link(41L, "https://b.example/", scammer);
+        link(42L, "https://c.example/", scammer);
+
+        assertThat(moderationService.blockUser(5L, ADMIN, "admin", null)).isEqualTo(3);
+
+        verify(sendingEmailService, times(1)).sendEmailAccountDeactivated(scammer);
+        verifyNoMoreInteractions(sendingEmailService);
     }
 
     @Test
@@ -679,6 +696,7 @@ class DefaultModerationServiceTest {
         verify(userService).deactivate(owner);
         assertThat(url.getBlockReason()).isEqualTo(BlockReason.USER_BLOCKED);
         assertThat(other.getBlockReason()).isEqualTo(BlockReason.USER_BLOCKED);
+        verifyNoInteractions(sendingEmailService);
         verify(reviewQueueService, atLeastOnce()).resolveOpen(url, ReviewResolution.USER_BLOCKED, ADMIN);
         verify(auditLogService).log(ADMIN, "RESOLVE_REVIEW", "Url", "66", "action: BLOCK_USER, user: 5, links: 2, via: admin");
     }

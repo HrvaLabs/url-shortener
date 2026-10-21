@@ -92,7 +92,7 @@ public class DefaultModerationService implements ModerationService {
     @Override
     public UrlResponse blockLink(final long urlId, final BlockReason reason, final String detail, final String performedBy, final String via) {
         final var url = findUrl(urlId);
-        final var blocked = block(urlId, reason, detail, ReviewResolution.LINK_BLOCKED, performedBy, candidate -> true);
+        final var blocked = blockAndTellOwner(urlId, reason, detail, ReviewResolution.LINK_BLOCKED, performedBy, candidate -> true);
         auditLogService.log(performedBy, "BLOCK_LINK", TARGET_URL, String.valueOf(urlId),
                 details(via, blocked.isPresent() ? 1 : 0, field(REASON, reason), field("detail", detail)));
         return UrlResponse.from(blocked.orElse(url));
@@ -182,7 +182,7 @@ public class DefaultModerationService implements ModerationService {
     }
 
     private String blockLinkFromReview(final Url url, final String performedBy, final String via) {
-        final var blocked = block(url.getId(), BlockReason.ADMIN, null, ReviewResolution.LINK_BLOCKED, performedBy, candidate -> true);
+        final var blocked = blockAndTellOwner(url.getId(), BlockReason.ADMIN, null, ReviewResolution.LINK_BLOCKED, performedBy, candidate -> true);
         return details(via, blocked.isPresent() ? 1 : 0, field(ACTION, ReviewAction.BLOCK_LINK));
     }
 
@@ -228,8 +228,8 @@ public class DefaultModerationService implements ModerationService {
                 .toList();
         refuseOverTheCap(ids.size(), maxLinks);
         saveRule(domain, DomainRuleType.BLOCK, reason, performedBy);
-        return eachLink(ids, Long::longValue, id -> block(id, BlockReason.DOMAIN_RULE, domain, ReviewResolution.DOMAIN_BLOCKED, performedBy,
-                url -> url.isActive() && isOn(url.getLongUrl(), domain) && !isAllowedBy(rulesBelow, url.getLongUrl())).isPresent());
+        return eachLink(ids, Long::longValue, id -> blockAndTellOwner(id, BlockReason.DOMAIN_RULE, domain, ReviewResolution.DOMAIN_BLOCKED,
+                performedBy, url -> url.isActive() && isOn(url.getLongUrl(), domain) && !isAllowedBy(rulesBelow, url.getLongUrl())).isPresent());
     }
 
     private List<DomainRule> rulesBelow(final String domain) {
@@ -292,6 +292,13 @@ public class DefaultModerationService implements ModerationService {
         });
     }
 
+    private Optional<Url> blockAndTellOwner(final long urlId, final BlockReason reason, final String detail, final ReviewResolution resolution,
+                                            final String performedBy, final Predicate<Url> stillApplies) {
+        final var blocked = block(urlId, reason, detail, resolution, performedBy, stillApplies);
+        blocked.ifPresent(this::notifyOwner);
+        return blocked;
+    }
+
     private Optional<Url> block(final long urlId, final BlockReason reason, final String detail, final ReviewResolution resolution,
                                 final String performedBy, final Predicate<Url> stillApplies) {
         final var blocked = Optional.ofNullable(transactionOperations.execute(status -> urlRepository.findById(urlId)
@@ -309,7 +316,6 @@ public class DefaultModerationService implements ModerationService {
         blocked.ifPresent(url -> {
             log.info("Link blocked urlId={} reason={}", url.getId(), reason);
             evictFromCache(url.getShortUrl());
-            notifyOwner(url);
         });
         return blocked;
     }
