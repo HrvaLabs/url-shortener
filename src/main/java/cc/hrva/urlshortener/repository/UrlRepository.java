@@ -27,6 +27,7 @@ public interface UrlRepository extends JpaRepository<Url, Long>, JpaSpecificatio
     boolean existsUrlByShortUrl(String shortUrl);
     boolean existsUrlByShortUrlAndActiveTrue(String shortUrl);
     Optional<Url> findByShortUrlAndActiveTrue(String shortUrl);
+    Optional<Url> findFirstByShortUrlOrderByIdDesc(String shortUrl);
     boolean existsUrlByLongUrlAndActiveTrueAndOwnerIsNull(String longUrl);
     List<Url> findByExpirationDateLessThanEqualAndActiveTrue(LocalDateTime expirationDate);
     List<Url> findByExpirationDateBetweenAndActiveTrueAndOwnerIsNotNull(LocalDateTime start, LocalDateTime end);
@@ -73,5 +74,15 @@ public interface UrlRepository extends JpaRepository<Url, Long>, JpaSpecificatio
     @Transactional
     @Query("update Url u set u.lastSafeBrowsingCheck = :checkedAt where u.id in :ids")
     int markSafeBrowsingChecked(@Param("ids") Collection<Long> ids, @Param("checkedAt") LocalDateTime checkedAt);
+
+    @Modifying
+    @Transactional
+    @Query("update Url u set u.visits = u.visits + 1, u.lastAccessed = :visitedAt where u.id = :id")
+    int recordVisit(@Param("id") long id, @Param("visitedAt") LocalDateTime visitedAt);
+
+    @Modifying
+    @Transactional
+    @Query("update Url u set u.active = false where u.id = :id and u.active = true and u.visitLimit is not null and u.visits >= u.visitLimit")
+    int deactivateAtVisitLimit(@Param("id") long id);
 
 }

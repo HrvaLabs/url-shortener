@@ -79,13 +79,6 @@ public class Url {
         this.active = true;
     }
 
-    public Url onVisit() {
-        this.visits++;
-        this.lastAccessed = LocalDateTime.now();
-        verifyUrlValidity(this);
-        return this;
-    }
-
     public void verifyUrlValidity(final Url url) {
         if (this.visits >= Optional.ofNullable(visitLimit).orElse(this.visits + 1)) {
             this.active = false;

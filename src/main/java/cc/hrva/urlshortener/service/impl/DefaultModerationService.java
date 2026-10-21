@@ -26,6 +26,7 @@ import cc.hrva.urlshortener.service.ModerationService;
 import cc.hrva.urlshortener.service.ReviewQueueService;
 import cc.hrva.urlshortener.service.SendingEmailService;
 import cc.hrva.urlshortener.service.UserService;
+import cc.hrva.urlshortener.service.blocklist.BlocklistConfigurationChangedEvent;
 import cc.hrva.urlshortener.util.DomainNames;
 import jakarta.persistence.EntityManager;
 import java.time.LocalDateTime;
@@ -48,6 +49,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.cache.CacheManager;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -90,6 +92,7 @@ public class DefaultModerationService implements ModerationService {
     private final AuditLogService auditLogService;
     private final IPAddressService ipAddressService;
     private final CacheManager cacheManager;
+    private final ApplicationEventPublisher eventPublisher;
     private final TransactionOperations transactionOperations;
     private final EntityManager entityManager;
 
@@ -128,6 +131,7 @@ public class DefaultModerationService implements ModerationService {
             return rule.getType();
         });
         log.info("Domain rule removed domain={} type={}", ruleDomain, removedType);
+        eventPublisher.publishEvent(new BlocklistConfigurationChangedEvent());
         auditLogService.log(performedBy, "REMOVE_DOMAIN_RULE", TARGET_DOMAIN, ruleDomain, details(via, 0, field("type", removedType)));
     }
 
@@ -396,6 +400,7 @@ public class DefaultModerationService implements ModerationService {
             domainRuleRepository.save(rule);
         });
         log.info("Domain rule saved domain={} type={}", domain, type);
+        eventPublisher.publishEvent(new BlocklistConfigurationChangedEvent());
     }
 
     private void notifyOwner(final Url url) {

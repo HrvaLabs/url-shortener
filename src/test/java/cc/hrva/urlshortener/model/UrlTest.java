@@ -8,46 +8,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 class UrlTest {
 
     @Test
-    void shouldIncrementVisitsOnVisit() {
-        final var url = Url.builder().visits(5L).build();
-
-        url.onVisit();
-
-        assertThat(url.getVisits()).isEqualTo(6L);
-        assertThat(url.getLastAccessed()).isNotNull();
-    }
-
-    @Test
-    void shouldDeactivateUrlWhenVisitLimitReached() {
-        final var url = Url.builder().visits(9L).visitLimit(10L).active(true).build();
-
-        url.onVisit();
-
-        assertThat(url.getVisits()).isEqualTo(10L);
-        assertThat(url.isActive()).isFalse();
-    }
-
-    @Test
-    void shouldNotDeactivateUrlWhenVisitLimitNotReached() {
-        final var url = Url.builder().visits(5L).visitLimit(10L).active(true).build();
-
-        url.onVisit();
-
-        assertThat(url.getVisits()).isEqualTo(6L);
-        assertThat(url.isActive()).isTrue();
-    }
-
-    @Test
-    void shouldNotDeactivateWhenNoVisitLimit() {
-        final var url = Url.builder().visits(100L).visitLimit(null).active(true).build();
-
-        url.onVisit();
-
-        assertThat(url.getVisits()).isEqualTo(101L);
-        assertThat(url.isActive()).isTrue();
-    }
-
-    @Test
     void shouldClearForAnonymousUser() {
         final var owner = User.builder().id(1L).build();
         final var url = Url.builder().owner(owner).build();

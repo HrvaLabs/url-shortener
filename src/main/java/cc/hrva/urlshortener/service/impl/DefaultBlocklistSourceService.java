@@ -8,6 +8,7 @@ import cc.hrva.urlshortener.model.BlocklistSource;
 import cc.hrva.urlshortener.model.enums.SourceKind;
 import cc.hrva.urlshortener.repository.BlocklistSourceRepository;
 import cc.hrva.urlshortener.service.BlocklistSourceService;
+import cc.hrva.urlshortener.service.blocklist.BlocklistConfigurationChangedEvent;
 import cc.hrva.urlshortener.service.blocklist.BlocklistRefresher;
 import cc.hrva.urlshortener.service.blocklist.BlocklistStore;
 import java.net.URI;
@@ -22,6 +23,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.event.EventListener;
 import org.springframework.data.domain.Sort;
 import org.springframework.scheduling.annotation.Async;
@@ -45,6 +47,7 @@ public class DefaultBlocklistSourceService implements BlocklistSourceService {
     private final BlocklistSourceRepository blocklistSourceRepository;
     private final BlocklistStore blocklistStore;
     private final BlocklistRefresher blocklistRefresher;
+    private final ApplicationEventPublisher eventPublisher;
 
     @Override
     public List<BlocklistSourceResponse> list() {
@@ -64,6 +67,7 @@ public class DefaultBlocklistSourceService implements BlocklistSourceService {
                 .refreshIntervalHours(Objects.requireNonNullElse(blocklistSourceDto.refreshIntervalHours(), DEFAULT_REFRESH_INTERVAL_HOURS))
                 .fallbackUrls(fallbackUrlsOf(blocklistSourceDto).orElse(List.of()))
                 .build());
+        eventPublisher.publishEvent(new BlocklistConfigurationChangedEvent());
         return BlocklistSourceResponse.from(source, null);
     }
 
@@ -86,7 +90,9 @@ public class DefaultBlocklistSourceService implements BlocklistSourceService {
         if (kindChanged || !source.isEnabled()) {
             blocklistStore.remove(id);
         }
-        return responseOf(blocklistSourceRepository.save(source));
+        final var saved = blocklistSourceRepository.save(source);
+        eventPublisher.publishEvent(new BlocklistConfigurationChangedEvent());
+        return responseOf(saved);
     }
 
     @Override
@@ -94,6 +100,7 @@ public class DefaultBlocklistSourceService implements BlocklistSourceService {
     public void delete(final long id) {
         blocklistSourceRepository.delete(find(id));
         blocklistStore.remove(id);
+        eventPublisher.publishEvent(new BlocklistConfigurationChangedEvent());
     }
 
     @Override

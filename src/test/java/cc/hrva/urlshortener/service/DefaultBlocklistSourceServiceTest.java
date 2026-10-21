@@ -11,6 +11,7 @@ import cc.hrva.urlshortener.model.BlocklistSource;
 import cc.hrva.urlshortener.model.enums.BlocklistAction;
 import cc.hrva.urlshortener.model.enums.SourceKind;
 import cc.hrva.urlshortener.repository.BlocklistSourceRepository;
+import cc.hrva.urlshortener.service.blocklist.BlocklistConfigurationChangedEvent;
 import cc.hrva.urlshortener.service.blocklist.BlocklistMemoryGuard;
 import cc.hrva.urlshortener.service.blocklist.BlocklistParser;
 import cc.hrva.urlshortener.service.blocklist.BlocklistRefresher;
@@ -38,6 +39,7 @@ import org.junit.jupiter.api.io.TempDir;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.redis.RedisConnectionFailureException;
@@ -56,6 +58,7 @@ import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -101,6 +104,9 @@ class DefaultBlocklistSourceServiceTest {
     @Mock
     private BlocklistStore blocklistStore;
 
+    @Mock
+    private ApplicationEventPublisher eventPublisher;
+
     private FakeFetcher fetcher;
     private BlocklistSourceService blocklistSourceService;
 
@@ -110,7 +116,7 @@ class DefaultBlocklistSourceServiceTest {
         final var memoryGuard = new BlocklistMemoryGuard(blocklistStore, blocklistSourceRepository, new AppProperties());
         final var refresher = new BlocklistRefresher(blocklistSourceRepository, blocklistStore, memoryGuard, fetcher,
                 new BlocklistParser(), new LinkListParser());
-        blocklistSourceService = new DefaultBlocklistSourceService(blocklistSourceRepository, blocklistStore, refresher);
+        blocklistSourceService = new DefaultBlocklistSourceService(blocklistSourceRepository, blocklistStore, refresher, eventPublisher);
         lenient().when(blocklistSourceRepository.save(any(BlocklistSource.class))).thenAnswer(invocation -> invocation.getArgument(0));
     }
 
@@ -222,6 +228,29 @@ class DefaultBlocklistSourceServiceTest {
 
         verify(blocklistSourceRepository).delete(source);
         verify(blocklistStore).remove(1);
+    }
+
+    @Test
+    void creatingUpdatingOrDeletingASourceTellsTheClickCheckToReload() {
+        stored(source(1).build());
+
+        blocklistSourceService.create(new BlocklistSourceDto("Phishing Army", OTHER, null, BlocklistAction.BLOCK, null, null, null));
+        blocklistSourceService.update(1, new BlocklistSourceDto("HaGeZi Fake", MAIN, null, BlocklistAction.BLOCK, false, null, null));
+        blocklistSourceService.delete(1);
+
+        verify(eventPublisher, times(3)).publishEvent(any(BlocklistConfigurationChangedEvent.class));
+    }
+
+    @Test
+    void anInvalidOrUnknownSourceChangeTellsTheClickCheckNothing() {
+        stored(source(1).build());
+
+        assertThatThrownBy(() -> blocklistSourceService.update(1,
+                new BlocklistSourceDto("HaGeZi Fake", "http://insecure.example/list.txt", null, BlocklistAction.BLOCK, false, null, null)))
+                .isInstanceOf(UrlValidationException.class);
+        assertThatThrownBy(() -> blocklistSourceService.delete(99)).isInstanceOf(BlocklistSourceNotFoundException.class);
+
+        verifyNoInteractions(eventPublisher);
     }
 
     @Test

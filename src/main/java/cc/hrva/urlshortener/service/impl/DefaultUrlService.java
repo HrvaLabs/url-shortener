@@ -23,6 +23,7 @@ import cc.hrva.urlshortener.model.enums.ReviewResolution;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.specification.UrlSpecification;
 import cc.hrva.urlshortener.service.ApiKeyService;
+import cc.hrva.urlshortener.service.ClickCheckService;
 import cc.hrva.urlshortener.service.IPAddressService;
 import cc.hrva.urlshortener.service.ReviewQueueService;
 import cc.hrva.urlshortener.service.SuspiciousUrlService;
@@ -54,6 +55,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionOperations;
 import org.springframework.web.servlet.view.RedirectView;
 
+import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.LocalDateTime;
@@ -72,6 +74,11 @@ public class DefaultUrlService implements UrlService {
     private static final String OWNER_EMAIL = "owner.email";
     private static final String URLS_CACHE = "urls";
     private static final String SYSTEM = "system";
+    private static final String REASON_BLOCKED = "blocked";
+    private static final String REASON_EXPIRED = "expired";
+    private static final String REASON_LIMIT = "limit";
+    private static final String REASON_INACTIVE = "inactive";
+    private static final String REASON_MISSING = "missing";
     private static final int UNLOCK_ATTEMPTS_PER_CLIENT = 10;
     private static final int UNLOCK_ATTEMPTS_PER_LINK = 50;
     private static final Duration UNLOCK_WINDOW = Duration.ofMinutes(15);
@@ -99,6 +106,7 @@ public class DefaultUrlService implements UrlService {
     private final SuspiciousUrlService suspiciousUrlService;
     private final RateLimiter rateLimiter;
     private final ReviewQueueService reviewQueueService;
+    private final ClickCheckService clickCheckService;
     private final TransactionOperations transactionOperations;
 
     @Override
@@ -151,6 +159,9 @@ public class DefaultUrlService implements UrlService {
 
         if (url.getPasswordHash() != null && !passwordEncoder.matches(password, url.getPasswordHash())) {
             throw new NoAuthorizationException("Incorrect password");
+        }
+        if (!clickCheckService.mayRedirect(url.getId(), url.getLongUrl())) {
+            return new UnlockResponse(unavailablePageUrl(shortUrl, REASON_BLOCKED));
         }
 
         asyncCheckIfVisitUnique(clientIP, url);
@@ -487,6 +498,10 @@ public class DefaultUrlService implements UrlService {
                     return gate;
                 }
                 final var redirectView = new RedirectView();
+                if (!clickCheckService.mayRedirect(cachedValue.id(), cachedValue.longUrl())) {
+                    redirectView.setUrl(unavailablePageUrl(shortUrl, REASON_BLOCKED));
+                    return redirectView;
+                }
                 redirectView.setUrl(cachedValue.longUrl());
                 fireVisitTracking(shortUrl, clientIP);
                 return redirectView;
@@ -498,21 +513,49 @@ public class DefaultUrlService implements UrlService {
 
     private String fetchAndRedirectFromDb(final String shortUrl, final String clientIP) {
         final var urlOpt = urlRepository.findByShortUrlAndActiveTrue(shortUrl);
-        if (urlOpt.isPresent()) {
-            final var url = urlOpt.get();
-            final var response = UrlResponse.from(url);
-            putInCache(shortUrl, response);
-            if (response.passwordProtected()) {
-                return protectedPageUrl(shortUrl);
-            }
-            asyncCheckIfVisitUnique(clientIP, url);
-            return response.longUrl();
+        if (urlOpt.isEmpty()) {
+            final var reason = urlRepository.findFirstByShortUrlOrderByIdDesc(shortUrl)
+                    .flatMap(DefaultUrlService::unavailableReason)
+                    .orElse(REASON_MISSING);
+            return unavailablePageUrl(shortUrl, reason);
         }
-        return appProperties.getFrontendUrl();
+        final var url = urlOpt.get();
+        final var unavailable = unavailableReason(url);
+        if (unavailable.isPresent()) {
+            return unavailablePageUrl(shortUrl, unavailable.get());
+        }
+        final var response = UrlResponse.from(url);
+        if (response.passwordProtected()) {
+            putInCache(shortUrl, response);
+            return protectedPageUrl(shortUrl);
+        }
+        if (!clickCheckService.mayRedirect(url.getId(), url.getLongUrl())) {
+            return unavailablePageUrl(shortUrl, REASON_BLOCKED);
+        }
+        putInCache(shortUrl, response);
+        asyncCheckIfVisitUnique(clientIP, url);
+        return response.longUrl();
+    }
+
+    private static Optional<String> unavailableReason(final Url url) {
+        if (url.getBlockReason() != null || url.getThreatType() != null) {
+            return Optional.of(REASON_BLOCKED);
+        }
+        if (hasReachedVisitLimit(url.getVisits(), url.getVisitLimit())) {
+            return Optional.of(REASON_LIMIT);
+        }
+        if (isExpired(url.getExpirationDate())) {
+            return Optional.of(REASON_EXPIRED);
+        }
+        return url.isActive() ? Optional.empty() : Optional.of(REASON_INACTIVE);
     }
 
     private String protectedPageUrl(final String shortUrl) {
         return appProperties.getFrontendUrl() + "/protected/" + shortUrl;
+    }
+
+    private String unavailablePageUrl(final String shortUrl, final String reason) {
+        return appProperties.getFrontendUrl() + "/unavailable?s=" + URLEncoder.encode(shortUrl, StandardCharsets.UTF_8) + "&reason=" + reason;
     }
 
     private Object getFromCache(final String shortUrl) {
@@ -551,18 +594,18 @@ public class DefaultUrlService implements UrlService {
         }
     }
 
-    private boolean isUrlRedirectValid(final UrlResponse response) {
-        if (!response.active()) {
-            return false;
-        }
-        if (response.expirationDate() != null && LocalDateTime.now().isAfter(response.expirationDate())) {
-            return false;
-        }
-        if (response.visitLimit() != null && response.visitLimit() > 0
-                && response.visits() != null && response.visits() >= response.visitLimit()) {
-            return false;
-        }
-        return true;
+    private static boolean isUrlRedirectValid(final UrlResponse response) {
+        return response.active()
+                && !isExpired(response.expirationDate())
+                && !hasReachedVisitLimit(response.visits(), response.visitLimit());
+    }
+
+    private static boolean isExpired(final LocalDateTime expirationDate) {
+        return expirationDate != null && LocalDateTime.now().isAfter(expirationDate);
+    }
+
+    private static boolean hasReachedVisitLimit(final Long visits, final Long visitLimit) {
+        return visitLimit != null && visitLimit > 0 && visits != null && visits >= visitLimit;
     }
 
     @SuppressWarnings("unchecked")
@@ -641,9 +684,12 @@ public class DefaultUrlService implements UrlService {
     }
 
     private void incrementVisitForUrl(final Url url) {
-        final var visited = urlRepository.save(url.onVisit());
-        if (!visited.isActive()) {
-            evictFromCache(visited.getShortUrl());
+        final var switchedOff = transactionOperations.execute(status -> {
+            urlRepository.recordVisit(url.getId(), LocalDateTime.now());
+            return urlRepository.deactivateAtVisitLimit(url.getId()) > 0;
+        });
+        if (Boolean.TRUE.equals(switchedOff)) {
+            evictFromCache(url.getShortUrl());
         }
     }
 

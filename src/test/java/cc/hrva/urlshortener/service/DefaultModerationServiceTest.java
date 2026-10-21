@@ -18,6 +18,7 @@ import cc.hrva.urlshortener.model.enums.ReviewResolution;
 import cc.hrva.urlshortener.repository.DomainRuleRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
+import cc.hrva.urlshortener.service.blocklist.BlocklistConfigurationChangedEvent;
 import cc.hrva.urlshortener.service.impl.DefaultModerationService;
 import jakarta.persistence.EntityManager;
 import java.time.LocalDateTime;
@@ -43,6 +44,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.cache.Cache;
 import org.springframework.cache.CacheManager;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
@@ -117,6 +119,9 @@ class DefaultModerationServiceTest {
     @Mock
     private EntityManager entityManager;
 
+    @Mock
+    private ApplicationEventPublisher eventPublisher;
+
     private final Map<Long, Url> links = new TreeMap<>();
     private final Map<String, DomainRule> rules = new HashMap<>();
     private final List<List<Long>> savedPerTransaction = new ArrayList<>();
@@ -176,7 +181,7 @@ class DefaultModerationServiceTest {
             return null;
         }).when(entityManager).detach(any());
         moderationService = new DefaultModerationService(urlRepository, userRepository, domainRuleRepository, linkCheckService,
-                reviewQueueService, userService, sendingEmailService, auditLogService, ipAddressService, cacheManager, recordingTransactions(),
+                reviewQueueService, userService, sendingEmailService, auditLogService, ipAddressService, cacheManager, eventPublisher, recordingTransactions(),
                 entityManager);
     }
 
@@ -856,6 +861,38 @@ class DefaultModerationServiceTest {
 
         verify(domainRuleRepository).delete(existing);
         verify(auditLogService).log(ADMIN, "REMOVE_DOMAIN_RULE", "Domain", "jofogas.cards", "type: BLOCK, links: 0, via: admin");
+    }
+
+    @Test
+    void everyDomainRuleChangeTellsTheClickCheckToReloadAfterTheRuleIsSaved() {
+        moderationService.blockDomain("jofogas.cards", null, ADMIN, "admin", null);
+        moderationService.allowDomain("njuskaio.cam", null, ADMIN, "admin");
+        moderationService.removeDomainRule("jofogas.cards", ADMIN, "admin");
+
+        final var order = inOrder(domainRuleRepository, eventPublisher);
+        order.verify(domainRuleRepository).save(argThat(rule -> rule.getDomain().equals("jofogas.cards")));
+        order.verify(eventPublisher).publishEvent(any(BlocklistConfigurationChangedEvent.class));
+        order.verify(domainRuleRepository).save(argThat(rule -> rule.getDomain().equals("njuskaio.cam")));
+        order.verify(eventPublisher).publishEvent(any(BlocklistConfigurationChangedEvent.class));
+        order.verify(domainRuleRepository).delete(argThat(rule -> rule.getDomain().equals("jofogas.cards")));
+        order.verify(eventPublisher).publishEvent(any(BlocklistConfigurationChangedEvent.class));
+    }
+
+    @Test
+    void blockingOneLinkLeavesTheClickCheckAlone() {
+        link(30L, "https://jofogas.cards/login", null);
+
+        moderationService.blockLink(30L, BlockReason.ADMIN, null, ADMIN, "admin");
+
+        verifyNoInteractions(eventPublisher);
+    }
+
+    @Test
+    void removingARuleThatDoesNotExistTellsTheClickCheckNothing() {
+        assertThatThrownBy(() -> moderationService.removeDomainRule("example.org", ADMIN, "admin"))
+                .isInstanceOf(DomainRuleNotFoundException.class);
+
+        verifyNoInteractions(eventPublisher);
     }
 
     @Test

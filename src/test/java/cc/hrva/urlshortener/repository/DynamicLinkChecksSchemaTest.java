@@ -361,6 +361,99 @@ class DynamicLinkChecksSchemaTest {
                 .hasValueSatisfying(stored -> assertThat(stored.getLastSafeBrowsingCheck()).isNull());
     }
 
+    @Test
+    void aVisitOnlyCountsAndNeverBringsBackALinkBlockedSinceItWasLoaded() {
+        final var loadedByTheRedirect = savedLink("visited", "https://jofogas.cards/login", null);
+        entityManager.flush();
+        entityManager.clear();
+        final var blockedMeanwhile = urlRepository.findById(loadedByTheRedirect.getId()).orElseThrow();
+        blockedMeanwhile.setActive(false);
+        blockedMeanwhile.setBlockReason(BlockReason.BLOCKLIST);
+        blockedMeanwhile.setBlockDetail("HaGeZi TIF medium");
+        entityManager.flush();
+        entityManager.clear();
+
+        urlRepository.recordVisit(loadedByTheRedirect.getId(), LocalDateTime.of(2026, 10, 21, 9, 15));
+        final var switchedOff = urlRepository.deactivateAtVisitLimit(loadedByTheRedirect.getId());
+        entityManager.clear();
+
+        assertThat(switchedOff).isZero();
+        assertThat(urlRepository.findById(loadedByTheRedirect.getId())).hasValueSatisfying(stored -> {
+            assertThat(stored.isActive()).isFalse();
+            assertThat(stored.getBlockReason()).isEqualTo(BlockReason.BLOCKLIST);
+            assertThat(stored.getBlockDetail()).isEqualTo("HaGeZi TIF medium");
+            assertThat(stored.getVisits()).isEqualTo(1L);
+            assertThat(stored.getLastAccessed()).isEqualTo(LocalDateTime.of(2026, 10, 21, 9, 15));
+        });
+    }
+
+    @Test
+    void theVisitThatReachesTheLimitSwitchesTheLinkOffOnce() {
+        final var limited = savedLink("limited", "https://example.org/", null);
+        limited.setVisits(2L);
+        limited.setVisitLimit(3L);
+        entityManager.flush();
+        entityManager.clear();
+
+        urlRepository.recordVisit(limited.getId(), LocalDateTime.now());
+        final var first = urlRepository.deactivateAtVisitLimit(limited.getId());
+        final var second = urlRepository.deactivateAtVisitLimit(limited.getId());
+        entityManager.clear();
+
+        assertThat(first).isEqualTo(1);
+        assertThat(second).isZero();
+        assertThat(urlRepository.findById(limited.getId())).hasValueSatisfying(stored -> {
+            assertThat(stored.getVisits()).isEqualTo(3L);
+            assertThat(stored.isActive()).isFalse();
+        });
+    }
+
+    @Test
+    void aVisitBelowTheLimitOrWithoutOneKeepsTheLinkActive() {
+        final var belowTheLimit = savedLink("below", "https://example.org/a", null);
+        belowTheLimit.setVisits(1L);
+        belowTheLimit.setVisitLimit(3L);
+        final var withoutALimit = savedLink("unlimited", "https://example.org/b", null);
+        withoutALimit.setVisits(100L);
+        entityManager.flush();
+        entityManager.clear();
+
+        urlRepository.recordVisit(belowTheLimit.getId(), LocalDateTime.now());
+        urlRepository.recordVisit(withoutALimit.getId(), LocalDateTime.now());
+        final var switchedOff = urlRepository.deactivateAtVisitLimit(belowTheLimit.getId()) + urlRepository.deactivateAtVisitLimit(withoutALimit.getId());
+        entityManager.clear();
+
+        assertThat(switchedOff).isZero();
+        assertThat(urlRepository.findAllById(List.of(belowTheLimit.getId(), withoutALimit.getId())))
+                .extracting(Url::getShortUrl, Url::getVisits, Url::isActive)
+                .containsExactlyInAnyOrder(tuple("below", 2L, true), tuple("unlimited", 101L, true));
+    }
+
+    @Test
+    void theNewestLinkWithAShortUrlIsTheOneThatExplainsWhyItIsUnavailable() {
+        final var older = savedLink("reused", "https://example.org/old", null);
+        older.setActive(false);
+        final var newer = savedLink("reused", "https://example.org/new", null);
+        newer.setActive(false);
+        newer.setBlockReason(BlockReason.ADMIN);
+        entityManager.flush();
+        entityManager.clear();
+
+        assertThat(urlRepository.findFirstByShortUrlOrderByIdDesc("reused")).map(Url::getId).contains(newer.getId());
+        assertThat(urlRepository.findFirstByShortUrlOrderByIdDesc("unknown")).isEmpty();
+    }
+
+    @Test
+    void domainRulesAreFoundByType() {
+        domainRuleRepository.saveAndFlush(DomainRule.builder().domain("trusted.example").type(DomainRuleType.ALLOW).createdBy("admin@localhost").build());
+        entityManager.clear();
+
+        assertThat(domainRuleRepository.findByType(DomainRuleType.ALLOW)).extracting(DomainRule::getDomain).containsExactly("trusted.example");
+        assertThat(domainRuleRepository.findByType(DomainRuleType.BLOCK)).extracting(DomainRule::getDomain)
+                .contains("njuskaio.cam")
+                .doesNotContain("trusted.example");
+    }
+
     private Url savedLink(final String shortUrl, final String longUrl, final User owner) {
         return urlRepository.saveAndFlush(Url.builder().shortUrl(shortUrl).longUrl(longUrl).owner(owner).build());
     }

@@ -71,6 +71,7 @@ class UrlServiceTest {
 
     private static final String BLOCKLIST_REFUSAL = "This destination is on a blocklist and can't be shortened. If you think that's a mistake, contact us.";
     private static final List<String> YOUNG_DOMAIN = List.of("domain registered in the last 30 days");
+    private static final String FRONTEND = "https://hrva.cc";
 
     private UrlService urlService;
 
@@ -134,10 +135,14 @@ class UrlServiceTest {
     @Mock
     private LinkCheckService linkCheckService;
 
+    @Mock
+    private ClickCheckService clickCheckService;
+
     @BeforeEach
     void setUp() {
         org.mockito.Mockito.lenient().when(rateLimiter.tryAcquire(any(), org.mockito.ArgumentMatchers.anyInt(), any())).thenReturn(true);
         org.mockito.Mockito.lenient().when(urlValidator.checkIfLongUrlIsNotBlocklisted(any())).thenReturn(LinkVerdict.clean());
+        org.mockito.Mockito.lenient().when(clickCheckService.mayRedirect(org.mockito.ArgumentMatchers.anyLong(), any())).thenReturn(true);
         this.urlService = new DefaultUrlService(
                 userService,
                 urlValidator,
@@ -157,6 +162,7 @@ class UrlServiceTest {
                 suspiciousUrlService,
                 rateLimiter,
                 reviewQueueService,
+                clickCheckService,
                 TransactionOperations.withoutTransaction()
         );
     }
@@ -1045,16 +1051,231 @@ class UrlServiceTest {
         when(cache.get("abc")).thenReturn(() -> cached);
         final var url = Url.builder().id(5L).shortUrl("abc").longUrl("https://example.com/a").visits(2L).visitLimit(3L).active(true).build();
         when(urlRepository.findByShortUrlAndActiveTrue("abc")).thenReturn(Optional.of(url));
-        when(urlRepository.save(url)).thenReturn(url);
+        when(urlRepository.deactivateAtVisitLimit(5L)).thenReturn(1);
+        runVisitTrackingInline();
+
+        urlServiceWithMeters().redirectResultUrl("abc", "1.2.3.4");
+
+        verify(urlRepository).recordVisit(eq(5L), any(LocalDateTime.class));
+        verify(cache).evict("abc");
+        verify(urlRepository, never()).save(any());
+    }
+
+    @Test
+    void aVisitBelowTheLimitKeepsTheCachedLink() {
+        final var cache = org.mockito.Mockito.mock(org.springframework.cache.Cache.class);
+        when(cacheManager.getCache("urls")).thenReturn(cache);
+        final var cached = new UrlResponse(5L, "https://example.com/a", "abc", null, null, 0L, 3L, true, "ACTIVE", java.util.Set.of(), false, null);
+        when(cache.get("abc")).thenReturn(() -> cached);
+        final var url = Url.builder().id(5L).shortUrl("abc").longUrl("https://example.com/a").visits(0L).visitLimit(3L).active(true).build();
+        when(urlRepository.findByShortUrlAndActiveTrue("abc")).thenReturn(Optional.of(url));
+        runVisitTrackingInline();
+
+        urlServiceWithMeters().redirectResultUrl("abc", "1.2.3.4");
+
+        verify(urlRepository).recordVisit(eq(5L), any(LocalDateTime.class));
+        verify(cache, never()).evict(any());
+    }
+
+    @Test
+    void aVisitCountedAfterTheLinkWasBlockedNeverWritesTheLoadedLinkBack() {
+        final var url = Url.builder().id(5L).shortUrl("abc").longUrl("https://example.com/a").visits(0L).active(true).build();
+        when(urlRepository.findByShortUrlAndActiveTrue("abc")).thenReturn(Optional.of(url));
+        final var visitTracking = org.mockito.ArgumentCaptor.forClass(Runnable.class);
+
+        urlServiceWithMeters().redirectResultUrl("abc", "1.2.3.4");
+        verify(taskExecutor).execute(visitTracking.capture());
+        url.setActive(false);
+        url.setBlockReason(BlockReason.BLOCKLIST);
+        visitTracking.getValue().run();
+
+        verify(urlRepository).recordVisit(eq(5L), any(LocalDateTime.class));
+        verify(urlRepository).deactivateAtVisitLimit(5L);
+        verify(urlRepository, never()).save(any());
+    }
+
+    @Test
+    void aCachedLinkFoundOnABlocklistAtClickTimeGoesToTheUnavailablePageWithoutCountingTheVisit() {
+        final var cache = org.mockito.Mockito.mock(org.springframework.cache.Cache.class);
+        when(cacheManager.getCache("urls")).thenReturn(cache);
+        final var cached = new UrlResponse(5L, "https://jofogas.cards/login", "abc", null, null, 0L, null, true, "ACTIVE", java.util.Set.of(), false, null);
+        when(cache.get("abc")).thenReturn(() -> cached);
+        when(appProperties.getFrontendUrl()).thenReturn(FRONTEND);
+        when(clickCheckService.mayRedirect(5L, "https://jofogas.cards/login")).thenReturn(false);
+
+        final var redirect = urlServiceWithMeters().redirectResultUrl("abc", "1.2.3.4");
+
+        assertThat(redirect.getUrl()).isEqualTo(FRONTEND + "/unavailable?s=abc&reason=blocked");
+        verify(taskExecutor, never()).execute(any(Runnable.class));
+    }
+
+    @Test
+    void aDatabaseLinkFoundOnABlocklistAtClickTimeGoesToTheUnavailablePageAndIsNeverCached() {
+        final var cache = org.mockito.Mockito.mock(org.springframework.cache.Cache.class);
+        when(cacheManager.getCache("urls")).thenReturn(cache);
+        final var url = Url.builder().id(5L).shortUrl("abc").longUrl("https://jofogas.cards/login").visits(0L).active(true).build();
+        when(urlRepository.findByShortUrlAndActiveTrue("abc")).thenReturn(Optional.of(url));
+        when(appProperties.getFrontendUrl()).thenReturn(FRONTEND);
+        when(clickCheckService.mayRedirect(5L, "https://jofogas.cards/login")).thenReturn(false);
+
+        final var redirect = urlServiceWithMeters().redirectResultUrl("abc", "1.2.3.4");
+
+        assertThat(redirect.getUrl()).isEqualTo(FRONTEND + "/unavailable?s=abc&reason=blocked");
+        verify(cache, never()).put(any(), any());
+        verify(taskExecutor, never()).execute(any(Runnable.class));
+    }
+
+    @Test
+    void aDatabaseLinkThatPassesTheClickCheckIsCachedAndCounted() {
+        final var cache = org.mockito.Mockito.mock(org.springframework.cache.Cache.class);
+        when(cacheManager.getCache("urls")).thenReturn(cache);
+        final var url = Url.builder().id(5L).shortUrl("abc").longUrl("https://example.com/a").visits(0L).active(true).build();
+        when(urlRepository.findByShortUrlAndActiveTrue("abc")).thenReturn(Optional.of(url));
+
+        final var redirect = urlServiceWithMeters().redirectResultUrl("abc", "1.2.3.4");
+
+        assertThat(redirect.getUrl()).isEqualTo("https://example.com/a");
+        verify(clickCheckService).mayRedirect(5L, "https://example.com/a");
+        verify(cache).put(eq("abc"), any(UrlResponse.class));
+        verify(taskExecutor).execute(any(Runnable.class));
+    }
+
+    @Test
+    void aPasswordProtectedLinkGoesToItsGateWithoutTheClickCheck() {
+        final var url = Url.builder().id(5L).shortUrl("abc").longUrl("https://example.com/a").visits(0L).active(true).passwordHash("hash").build();
+        when(urlRepository.findByShortUrlAndActiveTrue("abc")).thenReturn(Optional.of(url));
+        when(appProperties.getFrontendUrl()).thenReturn(FRONTEND);
+
+        final var redirect = urlServiceWithMeters().redirectResultUrl("abc", "1.2.3.4");
+
+        assertThat(redirect.getUrl()).isEqualTo(FRONTEND + "/protected/abc");
+        verify(clickCheckService, never()).mayRedirect(org.mockito.ArgumentMatchers.anyLong(), any());
+    }
+
+    @Test
+    void unlockingALinkFoundOnABlocklistAtClickTimeSendsTheVisitorToTheUnavailablePage() {
+        final var url = Url.builder().id(1L).shortUrl("a").longUrl("https://a.com").active(true).passwordHash("hash").build();
+        when(urlRepository.findByShortUrlAndActiveTrue("a")).thenReturn(Optional.of(url));
+        when(passwordEncoder.matches("pw", "hash")).thenReturn(true);
+        when(appProperties.getFrontendUrl()).thenReturn(FRONTEND);
+        when(clickCheckService.mayRedirect(1L, "https://a.com")).thenReturn(false);
+
+        final var result = urlService.unlockUrl("a", "pw", "127.0.0.1");
+
+        assertThat(result.longUrl()).isEqualTo(FRONTEND + "/unavailable?s=a&reason=blocked");
+        verify(taskExecutor, never()).execute(any(Runnable.class));
+    }
+
+    @Test
+    void aWrongPasswordNeverReachesTheClickCheck() {
+        final var url = Url.builder().id(1L).shortUrl("a").longUrl("https://a.com").active(true).passwordHash("hash").build();
+        when(urlRepository.findByShortUrlAndActiveTrue("a")).thenReturn(Optional.of(url));
+        when(passwordEncoder.matches("nope", "hash")).thenReturn(false);
+
+        assertThatThrownBy(() -> urlService.unlockUrl("a", "nope", "127.0.0.1"))
+                .isInstanceOf(NoAuthorizationException.class);
+
+        verify(clickCheckService, never()).mayRedirect(org.mockito.ArgumentMatchers.anyLong(), any());
+    }
+
+    @Test
+    void aBlockedLinkGoesToTheUnavailablePageSayingItWasBlocked() {
+        final var url = storedLink().active(false).blockReason(BlockReason.BLOCKLIST).build();
+
+        assertThat(redirectOf(url)).isEqualTo(FRONTEND + "/unavailable?s=abc&reason=blocked");
+    }
+
+    @Test
+    void aLinkSafeBrowsingFlaggedBeforeBlockReasonsExistedSaysBlocked() {
+        final var url = storedLink().active(false).threatType(cc.hrva.urlshortener.model.enums.ThreatType.MALWARE).build();
+
+        assertThat(redirectOf(url)).isEqualTo(FRONTEND + "/unavailable?s=abc&reason=blocked");
+    }
+
+    @Test
+    void anExpiredLinkSaysExpired() {
+        final var url = storedLink().active(false).expirationDate(LocalDateTime.now().minusDays(1)).build();
+
+        assertThat(redirectOf(url)).isEqualTo(FRONTEND + "/unavailable?s=abc&reason=expired");
+    }
+
+    @Test
+    void anExpiredLinkTheSchedulerHasNotSwitchedOffYetSaysExpiredAndIsNotCached() {
+        final var cache = org.mockito.Mockito.mock(org.springframework.cache.Cache.class);
+        when(cacheManager.getCache("urls")).thenReturn(cache);
+        final var url = storedLink().active(true).expirationDate(LocalDateTime.now().minusSeconds(10)).build();
+
+        assertThat(redirectOf(url)).isEqualTo(FRONTEND + "/unavailable?s=abc&reason=expired");
+        verify(cache, never()).put(any(), any());
+        verify(clickCheckService, never()).mayRedirect(org.mockito.ArgumentMatchers.anyLong(), any());
+    }
+
+    @Test
+    void aLinkThatReachedItsVisitLimitSaysLimit() {
+        final var url = storedLink().active(false).visits(3L).visitLimit(3L).build();
+
+        assertThat(redirectOf(url)).isEqualTo(FRONTEND + "/unavailable?s=abc&reason=limit");
+    }
+
+    @Test
+    void aLinkItsOwnerSwitchedOffSaysInactive() {
+        final var url = storedLink().active(false).build();
+
+        assertThat(redirectOf(url)).isEqualTo(FRONTEND + "/unavailable?s=abc&reason=inactive");
+    }
+
+    @Test
+    void anUnknownShortLinkSaysMissing() {
+        when(appProperties.getFrontendUrl()).thenReturn(FRONTEND);
+
+        final var redirect = urlServiceWithMeters().redirectResultUrl("nope", "1.2.3.4");
+
+        assertThat(redirect.getUrl()).isEqualTo(FRONTEND + "/unavailable?s=nope&reason=missing");
+    }
+
+    @Test
+    void theShortLinkIsUrlEncodedOnTheUnavailablePage() {
+        when(appProperties.getFrontendUrl()).thenReturn(FRONTEND);
+
+        final var redirect = urlServiceWithMeters().redirectResultUrl("a b&c=d+é", "1.2.3.4");
+
+        assertThat(redirect.getUrl()).isEqualTo(FRONTEND + "/unavailable?s=a+b%26c%3Dd%2B%C3%A9&reason=missing");
+    }
+
+    @Test
+    void theRootStillGoesToTheBareFrontend() {
+        when(appProperties.getFrontendUrl()).thenReturn(FRONTEND);
+
+        assertThat(urlServiceWithMeters().redirectResultUrl(null, null).getUrl()).isEqualTo(FRONTEND);
+    }
+
+    @Test
+    void botProbesStillGetANotFound() {
+        assertThatThrownBy(() -> urlServiceWithMeters().redirectResultUrl("favicon.ico", "1.2.3.4"))
+                .isInstanceOf(cc.hrva.urlshortener.exception.UrlNotFoundException.class);
+
+        verify(urlRepository, never()).findByShortUrlAndActiveTrue(anyString());
+    }
+
+    private static Url.UrlBuilder storedLink() {
+        return Url.builder().id(5L).shortUrl("abc").longUrl("https://example.com/a").visits(0L);
+    }
+
+    private String redirectOf(final Url url) {
+        when(appProperties.getFrontendUrl()).thenReturn(FRONTEND);
+        if (url.isActive()) {
+            when(urlRepository.findByShortUrlAndActiveTrue(url.getShortUrl())).thenReturn(Optional.of(url));
+        } else {
+            when(urlRepository.findFirstByShortUrlOrderByIdDesc(url.getShortUrl())).thenReturn(Optional.of(url));
+        }
+        return urlServiceWithMeters().redirectResultUrl(url.getShortUrl(), "1.2.3.4").getUrl();
+    }
+
+    private void runVisitTrackingInline() {
         org.mockito.Mockito.doAnswer(invocation -> {
             invocation.<Runnable>getArgument(0).run();
             return null;
         }).when(taskExecutor).execute(any(Runnable.class));
-
-        urlServiceWithMeters().redirectResultUrl("abc", "1.2.3.4");
-
-        assertThat(url.isActive()).isFalse();
-        verify(cache).evict("abc");
     }
 
     private UrlService urlServiceWithMeters() {
@@ -1077,6 +1298,7 @@ class UrlServiceTest {
                 suspiciousUrlService,
                 rateLimiter,
                 reviewQueueService,
+                clickCheckService,
                 TransactionOperations.withoutTransaction()
         );
     }
@@ -1124,6 +1346,7 @@ class UrlServiceTest {
                 suspiciousUrlService,
                 rateLimiter,
                 reviewQueueService,
+                clickCheckService,
                 new TransactionTemplate(transactionManager)
         );
         final var proxyFactory = new ProxyFactory(service);
@@ -1151,6 +1374,7 @@ class UrlServiceTest {
                 suspiciousUrlService,
                 rateLimiter,
                 reviewQueueService,
+                clickCheckService,
                 TransactionOperations.withoutTransaction()
         );
     }

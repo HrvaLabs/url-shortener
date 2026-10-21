@@ -8,6 +8,7 @@ spring:
   data:
     redis:
       host: redis.hrvalabs.net
+      timeout: 3s
     web:
       pageable:
         default-page-size: 20
