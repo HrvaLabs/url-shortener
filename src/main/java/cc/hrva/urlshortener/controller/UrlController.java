@@ -61,6 +61,7 @@ public class UrlController {
     @Operation(summary = "Create a short URL", description = "Create a short URL. Requires X-Api-Key header for programmatic access, otherwise optional for authenticated users.")
     @ApiResponse(responseCode = "400", description = "Validation error or bad request")
     @ApiResponse(responseCode = "409", description = "Short URL already exists")
+    @ApiResponse(responseCode = "429", description = "Too many links created in the last hour")
     @PostMapping
     public ResponseEntity<UrlResponse> saveUrl(
             @Valid @RequestBody final CreateUrlDto createUrlDto,
@@ -68,7 +69,7 @@ public class UrlController {
         if (apiKey != null) {
             return ResponseEntity.ok(urlService.saveUrlWithApiKey(createUrlDto, apiKey));
         }
-        return ResponseEntity.ok(urlService.saveUrlRouting(createUrlDto));
+        return ResponseEntity.ok(urlService.saveUrlRouting(createUrlDto, clientIpResolver.getClientIp(request)));
     }
 
     @Operation(summary = "Redirect to short URL", description = "Look up a short URL and return its details. Records a visit.")
@@ -126,6 +127,7 @@ public class UrlController {
     @Operation(summary = "Bulk create short URLs", description = "Create multiple short URLs in a single request. Requires ROLE_USER.")
     @ApiResponse(responseCode = "400", description = "Validation error or bad request")
     @ApiResponse(responseCode = "409", description = "Short URL already exists")
+    @ApiResponse(responseCode = "429", description = "Too many links created in the last hour")
     @PostMapping("/bulk")
     @PreAuthorize("hasRole('ROLE_USER')")
     public ResponseEntity<List<UrlResponse>> createBulkUrls(
@@ -134,10 +136,11 @@ public class UrlController {
         if (createUrlDtos == null || createUrlDtos.isEmpty()) {
             throw new ApiException("Request must contain at least one URL");
         }
+        final var clientIp = clientIpResolver.getClientIp(request);
         final var urls = createUrlDtos.stream()
                 .map(dto -> apiKey != null
                         ? urlService.saveUrlWithApiKey(dto, apiKey)
-                        : urlService.saveUrlRouting(dto))
+                        : urlService.saveUrlRouting(dto, clientIp))
                 .toList();
 
         return ResponseEntity.ok(urls);

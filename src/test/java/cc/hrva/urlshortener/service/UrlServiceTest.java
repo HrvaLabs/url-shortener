@@ -1,9 +1,15 @@
 package cc.hrva.urlshortener.service;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
+import java.util.stream.IntStream;
 import io.micrometer.core.instrument.MeterRegistry;
 import tools.jackson.databind.ObjectMapper;
 import org.springframework.cache.CacheManager;
@@ -21,10 +27,14 @@ import cc.hrva.urlshortener.dto.UrlResponse;
 import cc.hrva.urlshortener.dto.UrlSearchDto;
 import cc.hrva.urlshortener.dto.UrlUpdateDto;
 import cc.hrva.urlshortener.exception.NoAuthorizationException;
+import cc.hrva.urlshortener.exception.RateLimitExceededException;
 import cc.hrva.urlshortener.exception.UrlValidationException;
+import cc.hrva.urlshortener.mcp.anon.RateLimiter;
+import cc.hrva.urlshortener.mcp.anon.RateLimiterUnavailableException;
 import cc.hrva.urlshortener.model.ApiKey;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.User;
+import cc.hrva.urlshortener.model.codebook.Authorities;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.service.impl.DefaultSuspiciousUrlService;
 import cc.hrva.urlshortener.service.impl.DefaultUrlService;
@@ -43,14 +53,20 @@ import org.springframework.core.task.TaskExecutor;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.startsWith;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class UrlServiceTest {
+
+    private static final String CLIENT_IP = "203.0.113.7";
+    private static final String CREATE_LIMIT_REFUSAL = "You've created a lot of links in a short time. Try again in an hour.";
 
     private UrlService urlService;
 
@@ -221,7 +237,7 @@ class UrlServiceTest {
         when(urlRepository.save(url)).thenReturn(url);
         when(createUrlToUrlConverter.convert(createUrlDto)).thenReturn(url);
 
-        final var result = urlService.saveUrlRouting(createUrlDto);
+        final var result = urlService.saveUrlRouting(createUrlDto, CLIENT_IP);
         assertThat(result.longUrl()).isEqualTo("long");
 
         verify(urlValidator).checkIfShortUrlIsUnique(url.getShortUrl());
@@ -239,7 +255,7 @@ class UrlServiceTest {
         when(urlRepository.existsUrlByLongUrlAndActiveTrueAndOwnerIsNull(url.getLongUrl())).thenReturn(true);
         when(urlRepository.findByLongUrlAndActiveTrue(url.getLongUrl())).thenReturn(Optional.ofNullable(existingLongUrl));
 
-        final var result = urlService.saveUrlRouting(createUrlDto);
+        final var result = urlService.saveUrlRouting(createUrlDto, CLIENT_IP);
         assertThat(result.longUrl()).isEqualTo("long");
         assertThat(result.active()).isTrue();
     }
@@ -256,7 +272,7 @@ class UrlServiceTest {
         when(urlRepository.existsUrlByLongUrlAndActiveTrueAndOwnerIsNull(url.getLongUrl())).thenReturn(true);
         when(urlRepository.findByLongUrlAndActiveTrue(url.getLongUrl())).thenReturn(Optional.of(existingLongUrl));
 
-        final var result = urlService.saveUrlRouting(createUrlDto);
+        final var result = urlService.saveUrlRouting(createUrlDto, CLIENT_IP);
 
         assertThat(result.shortUrl()).isEqualTo("secret-alias");
         assertThat(output)
@@ -413,7 +429,7 @@ class UrlServiceTest {
         when(urlRepository.save(url)).thenReturn(url);
         when(appProperties.getShortUrlLength()).thenReturn(1L);
 
-        final var result = urlService.saveUrlRouting(createUrlDto);
+        final var result = urlService.saveUrlRouting(createUrlDto, CLIENT_IP);
         assertThat(result).isInstanceOf(UrlResponse.class);
 
         verify(apiKeyValidator, org.mockito.Mockito.never()).apiKeyExistsByKeyAndIsValid(any());
@@ -432,12 +448,113 @@ class UrlServiceTest {
         when(urlRepository.save(url)).thenReturn(url);
         when(appProperties.getShortUrlLength()).thenReturn(24L);
 
-        final var result = urlService.saveUrlRouting(createUrlDto);
+        final var result = urlService.saveUrlRouting(createUrlDto, CLIENT_IP);
 
         assertThat(output)
                 .contains("Saving URL for owner id=1")
                 .doesNotContain("secret-destination.example")
                 .doesNotContain(result.shortUrl());
+    }
+
+    @Test
+    void theEleventhAnonymousLinkFromOneNetworkWithinAnHourIsRefusedAndNotSaved() {
+        final var limiter = new CountingRateLimiter();
+        final var service = urlServiceLimitedBy(limiter);
+        stubLinkCreation();
+
+        IntStream.range(0, 10).forEach(index -> service.saveUrlRouting(link(index), CLIENT_IP));
+
+        assertThatThrownBy(() -> service.saveUrlRouting(link(10), CLIENT_IP))
+                .isInstanceOf(RateLimitExceededException.class)
+                .hasMessage(CREATE_LIMIT_REFUSAL);
+        verify(urlRepository, times(10)).save(any(Url.class));
+
+        assertThat(service.saveUrlRouting(link(11), "198.51.100.4").longUrl()).isEqualTo("https://example.com/11");
+        assertThat(limiter.counts).containsOnlyKeys(
+                RateLimiter.clientKey("create:anon", CLIENT_IP),
+                RateLimiter.clientKey("create:anon", "198.51.100.4"));
+        assertThat(limiter.windows).containsOnly(Duration.ofHours(1));
+    }
+
+    @Test
+    void theSixtyFirstLinkByOneAccountWithinAnHourIsRefusedOnTheWebAndWithAnApiKey() {
+        final var limiter = new CountingRateLimiter();
+        final var service = urlServiceLimitedBy(limiter);
+        final var owner = User.builder().id(1L).authorities(List.of(Authorities.builder().name("ROLE_USER").build())).build();
+        final var apiKey = ApiKey.builder().owner(owner).build();
+        stubLinkCreation();
+        when(userService.getUserFromToken()).thenReturn(owner);
+        when(apiKeyService.fetchApiKeyByKey("apikey")).thenReturn(apiKey);
+
+        IntStream.range(0, 30).forEach(index -> service.saveUrlRouting(link(index), CLIENT_IP));
+        IntStream.range(30, 60).forEach(index -> service.saveUrlWithApiKey(link(index), "apikey"));
+
+        assertThatThrownBy(() -> service.saveUrlWithApiKey(link(60), "apikey"))
+                .isInstanceOf(RateLimitExceededException.class)
+                .hasMessage(CREATE_LIMIT_REFUSAL);
+        assertThatThrownBy(() -> service.saveUrlRouting(link(61), CLIENT_IP))
+                .isInstanceOf(RateLimitExceededException.class)
+                .hasMessage(CREATE_LIMIT_REFUSAL);
+        verify(urlRepository, times(60)).save(any(Url.class));
+        verify(apiKeyService, times(30)).apiKeyUseAction(apiKey);
+        assertThat(limiter.counts).containsOnlyKeys("create:user:1");
+        assertThat(limiter.windows).containsOnly(Duration.ofHours(1));
+    }
+
+    @Test
+    void adminsAreNeverLimited() {
+        final var limiter = new CountingRateLimiter();
+        final var service = urlServiceLimitedBy(limiter);
+        final var admin = User.builder().id(2L).authorities(List.of(Authorities.builder().name("ROLE_ADMIN").build())).build();
+        stubLinkCreation();
+        when(userService.getUserFromToken()).thenReturn(admin);
+        when(apiKeyService.fetchApiKeyByKey("apikey")).thenReturn(ApiKey.builder().owner(admin).build());
+
+        IntStream.range(0, 61).forEach(index -> service.saveUrlRouting(link(index), CLIENT_IP));
+        IntStream.range(61, 122).forEach(index -> service.saveUrlWithApiKey(link(index), "apikey"));
+
+        verify(urlRepository, times(122)).save(any(Url.class));
+        assertThat(limiter.counts).isEmpty();
+    }
+
+    @Test
+    void eachCreateCountsOnceSoABulkRequestCountsEveryLink() {
+        final var limiter = new CountingRateLimiter();
+        final var service = urlServiceLimitedBy(limiter);
+        final var owner = User.builder().id(1L).build();
+        stubLinkCreation();
+        when(userService.getUserFromToken()).thenReturn(owner);
+
+        List.of(link(0), link(1), link(2)).forEach(dto -> service.saveUrlRouting(dto, CLIENT_IP));
+
+        assertThat(limiter.counts).containsExactlyEntriesOf(Map.of("create:user:1", 3));
+    }
+
+    @Test
+    void linksAreStillCreatedWhenTheRateLimiterIsDown() {
+        stubLinkCreation();
+        when(rateLimiter.tryAcquire(startsWith("create:"), anyInt(), any()))
+                .thenThrow(new RateLimiterUnavailableException(new RuntimeException("down")));
+
+        final var anonymous = urlService.saveUrlRouting(link(0), CLIENT_IP);
+        when(userService.getUserFromToken()).thenReturn(User.builder().id(1L).build());
+        final var signedIn = urlService.saveUrlRouting(link(1), CLIENT_IP);
+
+        assertThat(anonymous.longUrl()).isEqualTo("https://example.com/0");
+        assertThat(signedIn.longUrl()).isEqualTo("https://example.com/1");
+        verify(rateLimiter).tryAcquire(RateLimiter.clientKey("create:anon", CLIENT_IP), 10, Duration.ofHours(1));
+        verify(rateLimiter).tryAcquire("create:user:1", 60, Duration.ofHours(1));
+        verify(urlRepository, times(2)).save(any(Url.class));
+    }
+
+    @Test
+    void anonymousLinksWithoutAClientIpAreLeftToTheCallersOwnLimit() {
+        stubLinkCreation();
+
+        urlService.saveUrlRouting(link(0), null);
+
+        verify(rateLimiter, never()).tryAcquire(startsWith("create:"), anyInt(), any());
+        verify(urlRepository).save(any(Url.class));
     }
 
     @Test
@@ -538,7 +655,7 @@ class UrlServiceTest {
         final var service = urlServiceWithRealLongUrlHandling();
         final var createUrlDto = CreateUrlDto.builder().longUrl("https//wedding.hrva.cc").build();
 
-        assertThatThrownBy(() -> service.saveUrlRouting(createUrlDto))
+        assertThatThrownBy(() -> service.saveUrlRouting(createUrlDto, CLIENT_IP))
                 .isInstanceOf(UrlValidationException.class)
                 .hasMessage("That doesn't look like a valid web address. Check the URL and try again.");
 
@@ -698,6 +815,52 @@ class UrlServiceTest {
                 suspiciousUrlService,
                 rateLimiter
         );
+    }
+
+    private UrlService urlServiceLimitedBy(final RateLimiter limiter) {
+        return new DefaultUrlService(
+                userService,
+                urlValidator,
+                apiKeyService,
+                urlRepository,
+                appProperties,
+                apiKeyValidator,
+                ipAddressService,
+                taskExecutor,
+                urlToPeekUrlConverter,
+                createUrlToUrlConverter,
+                urlUpdateDtoToUrlConverter,
+                cacheManager,
+                objectMapper,
+                meterRegistry,
+                passwordEncoder,
+                suspiciousUrlService,
+                limiter
+        );
+    }
+
+    private void stubLinkCreation() {
+        when(appProperties.getShortUrlLength()).thenReturn(8L);
+        when(createUrlToUrlConverter.convert(any(CreateUrlDto.class)))
+                .thenAnswer(invocation -> Url.builder().longUrl(invocation.<CreateUrlDto>getArgument(0).getLongUrl()).build());
+        when(urlRepository.save(any(Url.class))).thenAnswer(invocation -> invocation.getArgument(0));
+    }
+
+    private static CreateUrlDto link(final int index) {
+        return CreateUrlDto.builder().longUrl("https://example.com/" + index).build();
+    }
+
+    private static final class CountingRateLimiter implements RateLimiter {
+
+        private final Map<String, Integer> counts = new HashMap<>();
+        private final Set<Duration> windows = new HashSet<>();
+
+        @Override
+        public boolean tryAcquire(final String key, final int limit, final Duration window) {
+            windows.add(window);
+            return counts.merge(key, 1, Integer::sum) <= limit;
+        }
+
     }
 
 }
