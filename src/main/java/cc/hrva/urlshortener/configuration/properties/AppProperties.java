@@ -84,6 +84,9 @@ public class AppProperties {
     private boolean anonymousUrlCreationEnabled = true;
     private boolean safeBrowsingFailClosed = false;
 
+    @ToString.Exclude
+    private String spamhausDqsKey;
+
     @Valid
     @NotNull
     private Mcp mcp = new Mcp();

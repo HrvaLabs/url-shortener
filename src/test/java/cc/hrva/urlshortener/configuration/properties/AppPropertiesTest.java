@@ -20,4 +20,12 @@ class AppPropertiesTest {
         assertThat(appProperties.toString()).doesNotContain(KEY_MATERIAL);
     }
 
+    @Test
+    void toStringNeverContainsTheSpamhausDqsKey() {
+        final var appProperties = new AppProperties();
+        appProperties.setSpamhausDqsKey(KEY_MATERIAL);
+
+        assertThat(appProperties.toString()).doesNotContain(KEY_MATERIAL);
+    }
+
 }

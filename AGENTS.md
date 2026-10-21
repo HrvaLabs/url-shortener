@@ -313,5 +313,5 @@ Jobs run on a 4-thread scheduler (`spring.task.scheduling.pool.size: 4` in `appl
 - `.github/workflows/build.yml`: `mvn clean package` → Docker build/push to `ghcr.io`
 - Multi-arch: `linux/amd64,linux/arm64`
 - Pushes on `main` branch. PRs only build (no push).
-- Portainer env vars: `OAUTH2_GOOGLE_CLIENT_ID`, `OAUTH2_GOOGLE_CLIENT_SECRET`, `OAUTH2_GITHUB_CLIENT_ID`, `OAUTH2_GITHUB_CLIENT_SECRET`, `APP_MCP_SIGNING_KEY` (required), `APP_ANONYMOUS_URL_CREATION_ENABLED` (optional).
+- Portainer env vars: `OAUTH2_GOOGLE_CLIENT_ID`, `OAUTH2_GOOGLE_CLIENT_SECRET`, `OAUTH2_GITHUB_CLIENT_ID`, `OAUTH2_GITHUB_CLIENT_SECRET`, `APP_MCP_SIGNING_KEY` (required), `APP_ANONYMOUS_URL_CREATION_ENABLED` (optional), `SPAMHAUS_DQS_KEY` (optional; the Spamhaus DBL lookups are off without it).
 - Before the first MCP connector deploy: the production checklist in `README.md`.

@@ -77,5 +77,6 @@ app:
   url-expiration-notification-hours: 24
   registration-enabled: true
   anonymous-url-creation-enabled: false
+  spamhaus-dqs-key: ${SPAMHAUS_DQS_KEY:}
   mcp:
     issuer: https://hrva.cc
