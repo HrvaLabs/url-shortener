@@ -1,7 +1,7 @@
 package cc.hrva.urlshortener.service.impl;
 
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
-import cc.hrva.urlshortener.dto.LinkDigestEntry;
+import cc.hrva.urlshortener.dto.DecisionsDigest;
 import cc.hrva.urlshortener.exception.EmailLogNotFoundException;
 import cc.hrva.urlshortener.exception.EmailNotResendableException;
 import cc.hrva.urlshortener.model.EmailLog;
@@ -13,9 +13,7 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
 import java.util.Arrays;
-import java.util.List;
 import java.util.Optional;
-import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.apache.commons.lang3.StringUtils;
 import lombok.extern.slf4j.Slf4j;
@@ -26,7 +24,6 @@ import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.service.SendingEmailService;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
-import org.springframework.web.util.HtmlUtils;
 import org.thymeleaf.TemplateEngine;
 import org.thymeleaf.context.Context;
 
@@ -184,35 +181,23 @@ public class DefaultSendingEmailService implements SendingEmailService {
 
     @Override
     @Async
-    public void sendLinkDigestToAdmin(final List<LinkDigestEntry> entries) {
-        final var rows = entries.stream()
-                .map(entry -> """
-                        <tr>
-                          <td>%s/%s</td>
-                          <td>%s</td>
-                          <td>%s</td>
-                          <td>%s</td>
-                        </tr>
-                        """.formatted(
-                        HtmlUtils.htmlEscape(StringUtils.removeEnd(StringUtils.defaultString(appProperties.getServerUrl()), "/")),
-                        HtmlUtils.htmlEscape(entry.shortUrl()),
-                        HtmlUtils.htmlEscape(entry.longUrl()),
-                        entry.ownerEmail() != null ? HtmlUtils.htmlEscape(entry.ownerEmail()) : "anonymous",
-                        HtmlUtils.htmlEscape(String.join("; ", entry.notes()))))
-                .collect(Collectors.joining());
-        final var body = """
-                <p>These links were created on %s in the last 24 hours and may need a look.</p>
-                <table border="1" cellpadding="6" cellspacing="0">
-                  <tr><th>Short link</th><th>Destination</th><th>Owner</th><th>Why</th></tr>
-                %s</table>
-                <p>Deactivate anything unwanted in the admin URL list.</p>
-                """.formatted(HtmlUtils.htmlEscape(StringUtils.defaultString(appProperties.getAppName())), rows);
+    public void sendDecisionsEmailToAdmin(final DecisionsDigest digest) {
+        final var subject = decisionsSubject(digest.openCount());
+        final var ctx = new Context();
+        ctx.setVariable("digest", digest);
+        ctx.setVariable("headline", subject);
+        ctx.setVariable("app_name", appProperties.getAppName());
+        ctx.setVariable("short_link_host", shortLinkHost());
+        ctx.setVariable("review_page", frontendPage("/admin/review"));
+        ctx.setVariable("blocklists_page", frontendPage("/admin/blocklists"));
+
+        final var htmlContent = templateEngine.process("decisions", ctx);
 
         final var email = Email.builder()
                 .sender(appProperties.getEmailSenderAddress())
                 .receivers(new String[]{appProperties.getContactEmail()})
-                .subject(entries.size() == 1 ? "1 new link to review" : "%d new links to review".formatted(entries.size()))
-                .text(body)
+                .subject(subject)
+                .text(htmlContent)
                 .build();
 
         tryToSendEmail(email);
@@ -330,6 +315,22 @@ public class DefaultSendingEmailService implements SendingEmailService {
             Thread.currentThread().interrupt();
             return false;
         }
+    }
+
+    private static String decisionsSubject(final long openCount) {
+        if (openCount == 0) {
+            return "No decisions waiting on hrva.cc, but there's news";
+        }
+        return openCount == 1 ? "1 decision waiting on hrva.cc" : "%d decisions waiting on hrva.cc".formatted(openCount);
+    }
+
+    private String shortLinkHost() {
+        final var serverUrl = StringUtils.removeEnd(StringUtils.defaultString(appProperties.getServerUrl()), "/");
+        return serverUrl.contains("://") ? StringUtils.substringAfter(serverUrl, "://") : serverUrl;
+    }
+
+    private String frontendPage(final String path) {
+        return StringUtils.removeEnd(StringUtils.defaultString(appProperties.getFrontendUrl()), "/") + path;
     }
 
     private String shortLink(final Url url) {

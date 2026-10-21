@@ -1,11 +1,10 @@
 package cc.hrva.urlshortener.service;
 
-import cc.hrva.urlshortener.dto.LinkDigestEntry;
+import cc.hrva.urlshortener.dto.DecisionsDigest;
 import cc.hrva.urlshortener.model.EmailLog;
 import cc.hrva.urlshortener.model.ResetToken;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.User;
-import java.util.List;
 
 public interface SendingEmailService {
 
@@ -16,7 +15,7 @@ public interface SendingEmailService {
     void sendEmailUrlBlocked(User owner, Url url);
     void sendEmailAccountDeactivated(User user);
     void sendEmailForgotPassword(User user, ResetToken resetToken);
-    void sendLinkDigestToAdmin(List<LinkDigestEntry> entries);
+    void sendDecisionsEmailToAdmin(DecisionsDigest digest);
     EmailLog resendEmail(Long emailLogId);
     void failInterruptedEmails();
     void forgetOldEmailContent();

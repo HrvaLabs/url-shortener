@@ -32,7 +32,9 @@ public interface UrlRepository extends JpaRepository<Url, Long>, JpaSpecificatio
     List<Url> findByExpirationDateLessThanEqualAndActiveTrue(LocalDateTime expirationDate);
     List<Url> findByExpirationDateBetweenAndActiveTrueAndOwnerIsNotNull(LocalDateTime start, LocalDateTime end);
     long countByActiveTrue();
-    List<Url> findByCreateDateAfter(LocalDateTime createdAfter);
+    List<Url> findTop10ByCreateDateAfterAndOwnerCreateDateAfterOrderByCreateDateDesc(LocalDateTime createdAfter, LocalDateTime ownerCreatedAfter);
+    List<Url> findTop20ByBlockedAtAfterAndBlockReasonNotInOrderByBlockedAtDesc(LocalDateTime blockedAfter, Collection<BlockReason> excludedReasons);
+    long countByOwnerAndBlockReasonIsNotNull(User owner);
     List<Url> findByOwner(User owner);
     void deleteByOwner(User owner);
 
@@ -55,6 +57,9 @@ public interface UrlRepository extends JpaRepository<Url, Long>, JpaSpecificatio
 
     @Query("select distinct t from Url u join u.tags t where u.owner = :owner order by t")
     List<String> findDistinctTagsByOwner(@Param("owner") User owner);
+
+    @Query("select count(u) from Url u where u.owner = :owner and exists (select r.id from LinkReview r where r.url = u)")
+    long countFlaggedByOwner(@Param("owner") User owner);
 
     @Query("select o.id from Url u join u.owner o where coalesce(o.active, true) = true and u.blockReason is not null "
             + "group by o.id having count(u) >= :links")

@@ -14,6 +14,7 @@ import cc.hrva.urlshortener.model.enums.SourceKind;
 import jakarta.persistence.EntityManager;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Set;
 import org.assertj.core.groups.Tuple;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -320,6 +321,63 @@ class DynamicLinkChecksSchemaTest {
 
         assertThat(urlRepository.findActiveIdsByOwner(owner)).containsExactly(active.getId());
         assertThat(urlRepository.findIdsByOwnerAndBlockReason(owner, BlockReason.USER_BLOCKED)).containsExactly(blocked.getId());
+    }
+
+    @Test
+    void linksBlockedAutomaticallySinceACutoffComeNewestFirstWithoutManualBlocks() {
+        final var cutoff = LocalDateTime.of(2026, 10, 20, 9, 0);
+        savedBlockedLink("listed", "https://jofogas.cards/a", BlockReason.BLOCKLIST).setBlockedAt(cutoff.plusHours(2));
+        savedBlockedLink("scam", "https://fresh.example/login", BlockReason.SCAM_SIGNALS).setBlockedAt(cutoff.plusHours(20));
+        savedBlockedLink("by-admin", "https://b.example/", BlockReason.ADMIN).setBlockedAt(cutoff.plusHours(3));
+        savedBlockedLink("by-user-block", "https://c.example/", BlockReason.USER_BLOCKED).setBlockedAt(cutoff.plusHours(4));
+        savedBlockedLink("day-before", "https://d.example/", BlockReason.SAFE_BROWSING).setBlockedAt(cutoff.minusHours(1));
+        savedLink("clean", "https://e.example/", null);
+        entityManager.flush();
+        entityManager.clear();
+
+        assertThat(urlRepository.findTop20ByBlockedAtAfterAndBlockReasonNotInOrderByBlockedAtDesc(cutoff, Set.of(BlockReason.ADMIN, BlockReason.USER_BLOCKED)))
+                .extracting(Url::getShortUrl)
+                .containsExactly("scam", "listed");
+    }
+
+    @Test
+    void theLastDaysLinksFromYoungAccountsComeNewestFirst() {
+        final var now = LocalDateTime.of(2026, 10, 21, 9, 0);
+        final var newcomer = savedUser("newcomer@example.com");
+        newcomer.setCreateDate(now.minusDays(2));
+        final var regular = savedUser("regular@example.com");
+        regular.setCreateDate(now.minusYears(2));
+        savedLink("older", "https://a.example/", newcomer).setCreateDate(now.minusHours(5));
+        savedLink("newer", "https://b.example/", newcomer).setCreateDate(now.minusHours(1));
+        savedLink("day-before", "https://c.example/", newcomer).setCreateDate(now.minusDays(2));
+        savedLink("regular", "https://d.example/", regular).setCreateDate(now.minusHours(1));
+        savedLink("anonymous", "https://e.example/", null).setCreateDate(now.minusHours(1));
+        entityManager.flush();
+        entityManager.clear();
+
+        assertThat(urlRepository.findTop10ByCreateDateAfterAndOwnerCreateDateAfterOrderByCreateDateDesc(now.minusDays(1), now.minusDays(7)))
+                .extracting(Url::getShortUrl)
+                .containsExactly("newer", "older");
+    }
+
+    @Test
+    void aUsersBlockedAndFlaggedLinksAreCountedOncePerLink() {
+        final var owner = savedUser("scammer@example.com");
+        final var someoneElse = savedUser("alice@example.com");
+        savedLink("clean", "https://a.example/", owner);
+        savedLink("blocked", "https://b.example/", owner).setBlockReason(BlockReason.BLOCKLIST);
+        final var flaggedTwice = savedLink("flagged", "https://c.example/", owner);
+        final var flaggedThenBlocked = savedLink("both", "https://d.example/", owner);
+        flaggedThenBlocked.setBlockReason(BlockReason.SCAM_SIGNALS);
+        final var theirs = savedLink("theirs", "https://e.example/", someoneElse);
+        theirs.setBlockReason(BlockReason.BLOCKLIST);
+        List.of(flaggedTwice, flaggedTwice, flaggedThenBlocked, theirs)
+                .forEach(url -> entityManager.persist(LinkReview.builder().url(url).reasons("domain registered in the last 30 days").build()));
+        entityManager.flush();
+        entityManager.clear();
+
+        assertThat(urlRepository.countByOwnerAndBlockReasonIsNotNull(owner)).isEqualTo(2);
+        assertThat(urlRepository.countFlaggedByOwner(owner)).isEqualTo(2);
     }
 
     @Test
