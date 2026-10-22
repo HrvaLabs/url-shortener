@@ -85,7 +85,7 @@ public interface UrlRepository extends JpaRepository<Url, Long>, JpaSpecificatio
     List<String> findDistinctTagsByOwner(@Param("owner") User owner);
 
     @Query("select count(u) from Url u where u.owner = :owner and exists (select r.id from LinkReview r where r.url = u "
-            + "and r.systemFlagged = true and (r.resolution is null or r.resolution <> cc.hrva.urlshortener.model.enums.ReviewResolution.OK))")
+            + "and r.systemFlagged = true and (r.resolution is null or r.resolution not in (cc.hrva.urlshortener.model.enums.ReviewResolution.OK, cc.hrva.urlshortener.model.enums.ReviewResolution.DOMAIN_TRUSTED)))")
     long countFlaggedByOwner(@Param("owner") User owner);
 
     @Query("select o.id from Url u join u.owner o where coalesce(o.active, true) = true and u.blockReason is not null "
@@ -94,7 +94,7 @@ public interface UrlRepository extends JpaRepository<Url, Long>, JpaSpecificatio
 
     @Query("select o.id from Url u join u.owner o where coalesce(o.active, true) = true and o.createDate > :signedUpAfter "
             + "and (u.blockReason is not null or exists (select r.id from LinkReview r where r.url = u and r.systemFlagged = true "
-            + "and (r.resolution is null or r.resolution <> cc.hrva.urlshortener.model.enums.ReviewResolution.OK))) "
+            + "and (r.resolution is null or r.resolution not in (cc.hrva.urlshortener.model.enums.ReviewResolution.OK, cc.hrva.urlshortener.model.enums.ReviewResolution.DOMAIN_TRUSTED)))) "
             + "group by o.id having count(u) >= :links")
     List<Long> findOwnerIdsSignedUpAfterWithFlaggedOrBlockedLinks(@Param("signedUpAfter") LocalDateTime signedUpAfter, @Param("links") long links);
 

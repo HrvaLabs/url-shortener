@@ -443,10 +443,13 @@ class DynamicLinkChecksSchemaTest {
         final var owner = savedUser("scammer@example.com");
         final var reported = savedLink("reported", "https://a.example/", owner);
         final var fine = savedLink("fine", "https://b.example/", owner);
+        final var trusted = savedLink("trusted", "https://t.example/", owner);
         final var flagged = savedLink("flagged", "https://c.example/", owner);
         entityManager.persist(LinkReview.builder().url(reported).reasons("reported by a visitor: phishing: block this account").build());
         entityManager.persist(LinkReview.builder().url(fine).reasons("login or verification lure").systemFlagged(true)
                 .resolution(ReviewResolution.OK).resolvedAt(LocalDateTime.now()).resolvedBy("admin@hrva.cc").build());
+        entityManager.persist(LinkReview.builder().url(trusted).reasons("domain registered in the last 30 days").systemFlagged(true)
+                .resolution(ReviewResolution.DOMAIN_TRUSTED).resolvedAt(LocalDateTime.now()).resolvedBy("admin@hrva.cc").build());
         entityManager.persist(LinkReview.builder().url(flagged).reasons("login or verification lure").systemFlagged(true)
                 .resolution(ReviewResolution.DOMAIN_BLOCKED).resolvedAt(LocalDateTime.now()).resolvedBy("admin@hrva.cc").build());
         entityManager.flush();
