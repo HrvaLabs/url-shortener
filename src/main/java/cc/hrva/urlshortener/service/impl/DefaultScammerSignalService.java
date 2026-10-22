@@ -27,6 +27,7 @@ public class DefaultScammerSignalService implements ScammerSignalService {
     private static final long FLAGGED_OR_BLOCKED_LINKS_WHILE_YOUNG = 2;
     private static final long BLOCKED_LINKS = 3;
     private static final Duration SIGNUP_BURST_WINDOW = Duration.ofHours(24);
+    private static final Duration SIGNUP_BURST_ACCOUNT_AGE = Duration.ofDays(30);
     private static final long LINKS_IN_SIGNUP_BURST = 10;
     private static final Duration SNAPSHOT_LIFETIME = Duration.ofSeconds(60);
 
@@ -63,11 +64,13 @@ public class DefaultScammerSignalService implements ScammerSignalService {
     }
 
     private Set<Long> queryPossibleScammerIds() {
-        final var youngSince = LocalDateTime.now(clock.withZone(ZoneId.systemDefault())).minus(YOUNG_ACCOUNT);
+        final var now = LocalDateTime.now(clock.withZone(ZoneId.systemDefault()));
+        final var youngSince = now.minus(YOUNG_ACCOUNT);
         return Stream.of(
                         urlRepository.findOwnerIdsSignedUpAfterWithFlaggedOrBlockedLinks(youngSince, FLAGGED_OR_BLOCKED_LINKS_WHILE_YOUNG),
                         urlRepository.findOwnerIdsWithBlockedLinks(BLOCKED_LINKS),
-                        urlRepository.findOwnerIdsWithLinksSoonAfterSignup(SIGNUP_BURST_WINDOW.toSeconds(), LINKS_IN_SIGNUP_BURST))
+                        urlRepository.findOwnerIdsWithLinksSoonAfterSignup(now.minus(SIGNUP_BURST_ACCOUNT_AGE), SIGNUP_BURST_WINDOW.toSeconds(),
+                                LINKS_IN_SIGNUP_BURST))
                 .flatMap(List::stream)
                 .collect(Collectors.toUnmodifiableSet());
     }

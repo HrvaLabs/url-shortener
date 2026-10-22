@@ -3,6 +3,7 @@ package cc.hrva.urlshortener.service;
 import cc.hrva.urlshortener.model.LinkReview;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.User;
+import cc.hrva.urlshortener.model.codebook.Authorities;
 import cc.hrva.urlshortener.model.enums.BlockReason;
 import cc.hrva.urlshortener.model.enums.ReviewResolution;
 import cc.hrva.urlshortener.repository.LinkReviewRepository;
@@ -101,7 +102,7 @@ class DefaultScammerSignalServiceTest {
 
     @Test
     void tenLinksCreatedWithinADayOfSignupMakeAPossibleScammer() {
-        final var signup = NOW.minusDays(30);
+        final var signup = NOW.minusDays(10);
         final var user = user(signup);
         IntStream.range(0, 10).forEach(index -> link(user, signup.plusHours(index * 2L + 1)));
 
@@ -151,7 +152,7 @@ class DefaultScammerSignalServiceTest {
 
     @Test
     void theTenthLinkHasToComeWithinTheFirstDay() {
-        final var signup = NOW.minusDays(30);
+        final var signup = NOW.minusDays(10);
         final var user = user(signup);
         IntStream.range(0, 9).forEach(hour -> link(user, signup.plusHours(hour)));
         link(user, signup.plusHours(25));
@@ -166,7 +167,7 @@ class DefaultScammerSignalServiceTest {
         final var young = user(NOW.minusDays(3));
         flagged(link(young, NOW.minusDays(2)), null);
         flagged(link(young, NOW.minusDays(1)), null);
-        final var signup = NOW.minusDays(30);
+        final var signup = NOW.minusDays(10);
         final var burst = user(signup);
         IntStream.range(0, 10).forEach(index -> link(burst, signup.plusHours(index)));
         List.of(repeatOffender, young, burst).forEach(user -> user.setActive(false));
@@ -191,8 +192,8 @@ class DefaultScammerSignalServiceTest {
         flagged(link(young, NOW.minusHours(5)), null);
         final var repeatOffender = user(NOW.minusDays(90));
         IntStream.range(0, 4).forEach(day -> blocked(link(repeatOffender, NOW.minusDays(60 - day)), BlockReason.DOMAIN_RULE));
-        final var burst = user(NOW.minusDays(40));
-        IntStream.range(0, 12).forEach(index -> link(burst, NOW.minusDays(40).plusMinutes(index * 10L)));
+        final var burst = user(NOW.minusDays(20));
+        IntStream.range(0, 12).forEach(index -> link(burst, NOW.minusDays(20).plusMinutes(index * 10L)));
         final var innocent = user(NOW.minusDays(2));
         link(innocent, NOW.minusDays(1));
         entityManager.flush();
@@ -200,6 +201,30 @@ class DefaultScammerSignalServiceTest {
         assertThat(scammerSignalService.possibleScammerIds())
                 .containsExactlyInAnyOrder(young.getId(), repeatOffender.getId(), burst.getId());
         assertThat(scammerSignalService.possibleScammers(List.of(innocent, burst))).containsExactly(burst.getId());
+    }
+
+    @Test
+    void aBurstOfLinksOnSignupLongAgoNoLongerCounts() {
+        final var signup = NOW.minusDays(400);
+        final var longStanding = user(signup);
+        IntStream.range(0, 12).forEach(index -> link(longStanding, signup.plusHours(index)));
+
+        assertThat(possibleScammersAmong(longStanding)).isEmpty();
+        assertThat(scammerSignalService.possibleScammerIds()).isEmpty();
+    }
+
+    @Test
+    void adminsAreNeverPossibleScammers() {
+        final var signup = NOW.minusDays(3);
+        final var admin = user(signup);
+        admin.setAuthorities(List.of(entityManager.find(Authorities.class, 2L)));
+        IntStream.range(0, 12).forEach(index -> link(admin, signup.plusHours(index)));
+        IntStream.range(0, 3).forEach(day -> blocked(link(admin, NOW.minusDays(day)), BlockReason.ADMIN));
+        flagged(link(admin, NOW.minusDays(1)), null);
+        flagged(link(admin, NOW.minusHours(5)), null);
+
+        assertThat(possibleScammersAmong(admin)).isEmpty();
+        assertThat(scammerSignalService.possibleScammerIds()).isEmpty();
     }
 
     @Test

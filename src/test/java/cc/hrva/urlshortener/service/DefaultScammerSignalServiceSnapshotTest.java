@@ -37,7 +37,7 @@ class DefaultScammerSignalServiceSnapshotTest {
         scammerSignalService = new DefaultScammerSignalService(urlRepository, clock);
         when(urlRepository.findOwnerIdsSignedUpAfterWithFlaggedOrBlockedLinks(any(), anyLong())).thenReturn(List.of(27L));
         when(urlRepository.findOwnerIdsWithBlockedLinks(anyLong())).thenReturn(List.of(41L));
-        when(urlRepository.findOwnerIdsWithLinksSoonAfterSignup(anyLong(), anyLong())).thenReturn(List.of());
+        when(urlRepository.findOwnerIdsWithLinksSoonAfterSignup(any(), anyLong(), anyLong())).thenReturn(List.of());
     }
 
     @Test
@@ -84,7 +84,7 @@ class DefaultScammerSignalServiceSnapshotTest {
     private void verifyQueriedTimes(final int times) {
         verify(urlRepository, times(times)).findOwnerIdsSignedUpAfterWithFlaggedOrBlockedLinks(any(), anyLong());
         verify(urlRepository, times(times)).findOwnerIdsWithBlockedLinks(anyLong());
-        verify(urlRepository, times(times)).findOwnerIdsWithLinksSoonAfterSignup(anyLong(), anyLong());
+        verify(urlRepository, times(times)).findOwnerIdsWithLinksSoonAfterSignup(any(), anyLong(), anyLong());
     }
 
     private static final class MovableClock extends Clock {
