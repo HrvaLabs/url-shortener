@@ -29,7 +29,7 @@
         <googleApiServicesSafebrowsingVersion>v5-rev20251214-2.0.0</googleApiServicesSafebrowsingVersion>
         <zxingVersion>3.5.4</zxingVersion>
         <jsoupVersion>1.23.2</jsoupVersion>
-        <guavaVersion>33.6.0-jre</guavaVersion>
+        <guavaVersion>33.7.2-jre</guavaVersion>
         <springAiVersion>2.0.1</springAiVersion>
         <!-- Held at 2.0.1: Spring AI 2.0.1 is built against SDK 2.0.0 and breaks on 2.1.0 -->
         <mcpSdkVersion>2.0.1</mcpSdkVersion>
