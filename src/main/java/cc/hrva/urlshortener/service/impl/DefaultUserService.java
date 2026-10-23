@@ -32,6 +32,7 @@ import cc.hrva.urlshortener.repository.specification.UserSpecification;
 import cc.hrva.urlshortener.service.ResetTokenService;
 import cc.hrva.urlshortener.service.ScammerSignalService;
 import cc.hrva.urlshortener.service.UserService;
+import cc.hrva.urlshortener.service.alert.AdminAlertEvent;
 import cc.hrva.urlshortener.validator.AuthValidator;
 import java.time.LocalDateTime;
 import java.util.Objects;
@@ -46,6 +47,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -73,6 +75,7 @@ public class DefaultUserService implements UserService {
     private final UserUpdateDtoToUserConverter userUpdateDtoToUserConverter;
     private final ConnectedAppsService connectedAppsService;
     private final ScammerSignalService scammerSignalService;
+    private final ApplicationEventPublisher eventPublisher;
 
     @Override
     @Transactional
@@ -83,6 +86,7 @@ public class DefaultUserService implements UserService {
         final var verificationToken = verificationTokenService.createTokenForUser(savedUser);
         sendingEmailService.sendVerificationEmail(savedUser, verificationToken);
         sendingEmailService.sendNewUserNotificationToAdmin(savedUser);
+        eventPublisher.publishEvent(new AdminAlertEvent.UserSignedUp(savedUser.getId(), savedUser.getAuthProvider()));
 
         return savedUser;
     }

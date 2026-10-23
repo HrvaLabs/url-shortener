@@ -20,6 +20,8 @@ import cc.hrva.urlshortener.model.enums.ReviewResolution;
 import cc.hrva.urlshortener.repository.DomainRuleRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
+import cc.hrva.urlshortener.service.alert.AdminAlertEvent;
+import cc.hrva.urlshortener.service.alert.AlertedLink;
 import cc.hrva.urlshortener.service.blocklist.BlocklistConfigurationChangedEvent;
 import cc.hrva.urlshortener.service.impl.DefaultModerationService;
 import jakarta.persistence.EntityManager;
@@ -654,6 +656,46 @@ class DefaultModerationServiceTest {
     }
 
     @Test
+    void aBlockedLinkAlertsTheAdminWithTheDestinationHostAndTheReason() {
+        link(30L, "https://login-paypa1.top/verify?account=alice@example.com", null);
+
+        moderationService.blockLink(30L, BlockReason.BLOCKLIST, "HaGeZi TIF medium", "system", "click");
+
+        verify(eventPublisher).publishEvent(new AdminAlertEvent.LinkBlocked(
+                new AlertedLink(30L, "s30", "login-paypa1.top", null), BlockReason.BLOCKLIST, "HaGeZi TIF medium"));
+    }
+
+    @Test
+    void aBlockedLinkAlertNamesTheOwnerById() {
+        link(30L, "https://example.org/x", user(7L, "alice@example.com"));
+
+        moderationService.blockLink(30L, BlockReason.SAFE_BROWSING, "SOCIAL_ENGINEERING", "system", "nightly");
+
+        verify(eventPublisher).publishEvent(new AdminAlertEvent.LinkBlocked(
+                new AlertedLink(30L, "s30", "example.org", 7L), BlockReason.SAFE_BROWSING, "SOCIAL_ENGINEERING"));
+    }
+
+    @Test
+    void blockingAnAlreadyBlockedLinkSendsNoAlert() {
+        blocked(30L, "https://example.org/x", BlockReason.BLOCKLIST, null);
+
+        moderationService.blockLink(30L, BlockReason.ADMIN, "again", ADMIN, "admin");
+
+        verify(eventPublisher, never()).publishEvent(any(AdminAlertEvent.class));
+    }
+
+    @Test
+    void blockingAUserSendsNoAlertPerLink() {
+        final var scammer = user(5L, "scammer@example.com");
+        when(userRepository.findById(5L)).thenReturn(Optional.of(scammer));
+        link(40L, "https://a.example/", scammer);
+
+        moderationService.blockUser(5L, ADMIN, "admin", null);
+
+        verify(eventPublisher, never()).publishEvent(any(AdminAlertEvent.class));
+    }
+
+    @Test
     void blockingAnUnknownLinkIsNotFound() {
         assertThatThrownBy(() -> moderationService.blockLink(404L, BlockReason.ADMIN, null, ADMIN, "admin"))
                 .isInstanceOf(UrlNotFoundException.class);
@@ -1134,7 +1176,7 @@ class DefaultModerationServiceTest {
 
         moderationService.blockLink(30L, BlockReason.ADMIN, null, ADMIN, "admin");
 
-        verifyNoInteractions(eventPublisher);
+        verify(eventPublisher, never()).publishEvent(any(BlocklistConfigurationChangedEvent.class));
     }
 
     @Test

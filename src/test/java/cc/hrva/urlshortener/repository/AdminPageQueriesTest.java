@@ -25,6 +25,7 @@ import org.springframework.boot.SpringBootConfiguration;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.persistence.autoconfigure.EntityScan;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.FilterType;
 import org.springframework.data.domain.PageRequest;
@@ -90,7 +91,8 @@ class AdminPageQueriesTest {
     void aReviewQueuePageLoadsItsLinksAndOwnersWithoutAQueryPerRow() {
         final var scammerSignalService = mock(ScammerSignalService.class);
         when(scammerSignalService.possibleScammerIds()).thenReturn(Set.of());
-        final var reviewQueueService = new DefaultReviewQueueService(linkReviewRepository, urlRepository, scammerSignalService, Clock.systemUTC());
+        final var reviewQueueService = new DefaultReviewQueueService(linkReviewRepository, urlRepository, scammerSignalService, Clock.systemUTC(),
+                mock(ApplicationEventPublisher.class));
 
         final var entries = reviewQueueService.openEntries(PageRequest.of(0, 10), null, null);
 

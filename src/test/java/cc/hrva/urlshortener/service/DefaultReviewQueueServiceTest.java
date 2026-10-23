@@ -10,6 +10,8 @@ import cc.hrva.urlshortener.model.enums.ReviewResolution;
 import cc.hrva.urlshortener.repository.LinkReviewRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.specification.LinkReviewSpecification;
+import cc.hrva.urlshortener.service.alert.AdminAlertEvent;
+import cc.hrva.urlshortener.service.alert.AlertedLink;
 import cc.hrva.urlshortener.service.impl.DefaultReviewQueueService;
 import java.time.Clock;
 import java.time.Instant;
@@ -28,6 +30,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -63,6 +66,9 @@ class DefaultReviewQueueServiceTest {
     @Mock
     private ScammerSignalService scammerSignalService;
 
+    @Mock
+    private ApplicationEventPublisher eventPublisher;
+
     private final Clock clock = Clock.fixed(Instant.parse("2026-10-21T10:00:00Z"), ZoneOffset.UTC);
 
     private ReviewQueueService reviewQueueService;
@@ -71,7 +77,7 @@ class DefaultReviewQueueServiceTest {
 
     @BeforeEach
     void setUp() {
-        reviewQueueService = new DefaultReviewQueueService(linkReviewRepository, urlRepository, scammerSignalService, clock);
+        reviewQueueService = new DefaultReviewQueueService(linkReviewRepository, urlRepository, scammerSignalService, clock, eventPublisher);
         lenient().when(urlRepository.findById(287L)).thenReturn(Optional.of(url));
     }
 
@@ -514,6 +520,85 @@ class DefaultReviewQueueServiceTest {
         when(linkReviewRepository.countByResolvedAtIsNullAndReasonsContaining("reported by a visitor")).thenReturn(2L);
 
         assertThat(reviewQueueService.openReportCount()).isEqualTo(2L);
+    }
+
+    @Test
+    void aNewlyOpenedReviewAlertsTheAdminWithTheDestinationHostOnly() {
+        reviewQueueService.flag(url, List.of(YOUNG, LURE));
+
+        verify(eventPublisher).publishEvent(new AdminAlertEvent.ReviewOpened(
+                new AlertedLink(287L, "v0DB3", "findfavoritedate.life", null), List.of(YOUNG, LURE)));
+    }
+
+    @Test
+    void anAlertNamesTheOwnerByIdNeverByEmail() {
+        final var owned = Url.builder().id(288L).shortUrl("k3Xa1").longUrl("https://paypa1-login.top/verify")
+                .owner(User.builder().id(27L).email("scammer@example.com").build()).active(true).build();
+        when(urlRepository.findById(288L)).thenReturn(Optional.of(owned));
+
+        reviewQueueService.flag(owned, List.of(LURE));
+
+        verify(eventPublisher).publishEvent(new AdminAlertEvent.ReviewOpened(
+                new AlertedLink(288L, "k3Xa1", "paypa1-login.top", 27L), List.of(LURE)));
+    }
+
+    @Test
+    void newReasonsOnAnOpenReviewSendNoAlert() {
+        final var open = LinkReview.builder().id(1L).url(url).reasons(YOUNG).systemFlagged(true).flaggedAt(LocalDateTime.now()).build();
+        when(linkReviewRepository.findFirstByUrlAndResolvedAtIsNullOrderByFlaggedAtDesc(url)).thenReturn(Optional.of(open));
+
+        reviewQueueService.flag(url, List.of(YOUNG, ON_LIST));
+
+        verify(linkReviewRepository).save(open);
+        verifyNoInteractions(eventPublisher);
+    }
+
+    @Test
+    void reasonsAlreadyMarkedFineSendNoAlert() {
+        when(linkReviewRepository.findFirstByUrlOrderByFlaggedAtDesc(url)).thenReturn(Optional.of(resolved(ReviewResolution.OK, YOUNG + "\n" + LURE)));
+
+        reviewQueueService.flag(url, List.of(YOUNG));
+
+        verifyNoInteractions(eventPublisher);
+    }
+
+    @Test
+    void aVisitorReportThatOpensAReviewAlertsTheAdmin() {
+        reviewQueueService.report(url, ReportCategory.PHISHING, "asks for my bank login");
+
+        verify(eventPublisher).publishEvent(new AdminAlertEvent.VisitorReported(
+                new AlertedLink(287L, "v0DB3", "findfavoritedate.life", null), ReportCategory.PHISHING, "asks for my bank login", true));
+    }
+
+    @Test
+    void aVisitorReportOnAnOpenReviewAlertsTheAdmin() {
+        final var open = LinkReview.builder().id(1L).url(url).reasons(YOUNG).systemFlagged(true).flaggedAt(LocalDateTime.now()).build();
+        when(linkReviewRepository.findFirstByUrlAndResolvedAtIsNullOrderByFlaggedAtDesc(url)).thenReturn(Optional.of(open));
+
+        reviewQueueService.report(url, ReportCategory.MALWARE, "downloads an exe");
+
+        verify(eventPublisher).publishEvent(new AdminAlertEvent.VisitorReported(
+                new AlertedLink(287L, "v0DB3", "findfavoritedate.life", null), ReportCategory.MALWARE, "downloads an exe", false));
+    }
+
+    @Test
+    void aRepeatOfAReportTheReviewAlreadyHoldsSendsNoAlert() {
+        final var open = LinkReview.builder().id(1L).url(url).reasons(REPORTED_PHISHING).flaggedAt(LocalDateTime.now()).build();
+        when(linkReviewRepository.findFirstByUrlAndResolvedAtIsNullOrderByFlaggedAtDesc(url)).thenReturn(Optional.of(open));
+
+        reviewQueueService.report(url, ReportCategory.PHISHING, "asks for my bank login");
+
+        verifyNoInteractions(eventPublisher);
+    }
+
+    @Test
+    void aReportOnAReviewFullOfVisitorReportsSendsNoAlert() {
+        final var open = LinkReview.builder().id(1L).url(url).reasons(visitorReports(20)).flaggedAt(LocalDateTime.now()).build();
+        when(linkReviewRepository.findFirstByUrlAndResolvedAtIsNullOrderByFlaggedAtDesc(url)).thenReturn(Optional.of(open));
+
+        reviewQueueService.report(url, ReportCategory.PHISHING, "asks for my bank login");
+
+        verifyNoInteractions(eventPublisher);
     }
 
     private static String visitorReports(final int count) {

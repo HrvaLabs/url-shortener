@@ -7,6 +7,7 @@ import cc.hrva.urlshortener.exception.CommonException;
 import cc.hrva.urlshortener.model.BlocklistSource;
 import cc.hrva.urlshortener.model.enums.SourceKind;
 import cc.hrva.urlshortener.repository.BlocklistSourceRepository;
+import cc.hrva.urlshortener.service.alert.AdminAlertEvent;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -26,6 +27,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Component;
 
@@ -50,6 +52,7 @@ public class BlocklistRefresher {
     private final PublicHttpFetcher publicHttpFetcher;
     private final BlocklistParser blocklistParser;
     private final LinkListParser linkListParser;
+    private final ApplicationEventPublisher eventPublisher;
     private final Set<Long> refreshing = ConcurrentHashMap.newKeySet();
 
     public BlocklistSource refresh(final BlocklistSource source, final RefreshTrigger trigger) {
@@ -99,12 +102,26 @@ public class BlocklistRefresher {
 
     private BlocklistSource record(final BlocklistSource source, final Download download) {
         final var errors = new ArrayList<>(download.errors());
+        final var previousError = source.getLastError();
         source.setLastFetchedAt(LocalDateTime.now());
+        var stored = false;
         if (download.loaded() != null) {
-            store(source, download.loaded()).ifPresent(errors::add);
+            final var refusal = store(source, download.loaded());
+            refusal.ifPresent(errors::add);
+            stored = refusal.isEmpty();
         }
         source.setLastError(errors.isEmpty() ? null : String.join(ERROR_SEPARATOR, errors));
-        return blocklistSourceRepository.save(source);
+        final var saved = blocklistSourceRepository.save(source);
+        alertWhenHealthChanged(saved, previousError, stored);
+        return saved;
+    }
+
+    private void alertWhenHealthChanged(final BlocklistSource source, final String previousError, final boolean stored) {
+        if (previousError == null && source.getLastError() != null) {
+            eventPublisher.publishEvent(new AdminAlertEvent.BlocklistSourceFailed(source.getName(), source.getLastError(), stored));
+        } else if (previousError != null && source.getLastError() == null) {
+            eventPublisher.publishEvent(new AdminAlertEvent.BlocklistSourceRecovered(source.getName()));
+        }
     }
 
     private Optional<String> store(final BlocklistSource source, final Loaded loaded) {

@@ -25,6 +25,7 @@ import cc.hrva.urlshortener.repository.IPAddressRepository;
 import cc.hrva.urlshortener.repository.ResetTokenRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
+import cc.hrva.urlshortener.service.alert.AdminAlertEvent;
 import cc.hrva.urlshortener.service.impl.DefaultSendingEmailService;
 import cc.hrva.urlshortener.service.impl.DefaultUserService;
 import cc.hrva.urlshortener.validator.AuthValidator;
@@ -35,6 +36,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
@@ -113,12 +115,15 @@ class DefaultUserServiceTest {
     @Mock
     private ScammerSignalService scammerSignalService;
 
+    @Mock
+    private ApplicationEventPublisher eventPublisher;
+
     @BeforeEach
     void setUp() {
         this.userService = new DefaultUserService(appProperties, authValidator, urlRepository, userRepository,
                 passwordEncoder, apiKeyRepository, emailLogRepository, ipAddressRepository, resetTokenService,
                 resetTokenRepository, twoFactorRecoveryCodeRepository, userToUserDtoConverter, sendingEmailService,
-                verificationTokenService, verificationTokenRepository, userUpdateDtoToUserConverter, connectedAppsService, scammerSignalService);
+                verificationTokenService, verificationTokenRepository, userUpdateDtoToUserConverter, connectedAppsService, scammerSignalService, eventPublisher);
         lenient().when(userRepository.findByEmail(null)).thenReturn(Optional.empty());
     }
 
@@ -147,6 +152,16 @@ class DefaultUserServiceTest {
         verify(sendingEmailService).sendVerificationEmail(eq(user), any());
         verify(sendingEmailService).sendNewUserNotificationToAdmin(user);
         verify(sendingEmailService, org.mockito.Mockito.never()).sendWelcomeEmail(any());
+    }
+
+    @Test
+    void aRegistrationAlertsTheAdminWithTheAccountIdButNotTheEmail() {
+        final var user = User.builder().id(31L).email("test@example.com").authProvider("local").build();
+        when(userRepository.save(user)).thenReturn(user);
+
+        userService.register(user);
+
+        verify(eventPublisher).publishEvent(new AdminAlertEvent.UserSignedUp(31L, "local"));
     }
 
     @Test

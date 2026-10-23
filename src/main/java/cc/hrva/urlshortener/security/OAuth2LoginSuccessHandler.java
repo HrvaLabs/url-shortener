@@ -5,6 +5,7 @@ import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.service.AuthoritiesService;
 import cc.hrva.urlshortener.service.SendingEmailService;
+import cc.hrva.urlshortener.service.alert.AdminAlertEvent;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
@@ -14,6 +15,7 @@ import java.util.List;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
@@ -32,18 +34,21 @@ public class OAuth2LoginSuccessHandler implements AuthenticationSuccessHandler {
     private final TokenProvider tokenProvider;
     private final AppProperties appProperties;
     private final SendingEmailService sendingEmailService;
+    private final ApplicationEventPublisher eventPublisher;
 
     public OAuth2LoginSuccessHandler(
             final UserRepository userRepository,
             final AuthoritiesService authoritiesService,
             final TokenProvider tokenProvider,
             final AppProperties appProperties,
-            final SendingEmailService sendingEmailService) {
+            final SendingEmailService sendingEmailService,
+            final ApplicationEventPublisher eventPublisher) {
         this.userRepository = userRepository;
         this.authoritiesService = authoritiesService;
         this.tokenProvider = tokenProvider;
         this.appProperties = appProperties;
         this.sendingEmailService = sendingEmailService;
+        this.eventPublisher = eventPublisher;
     }
 
     @Override
@@ -108,6 +113,7 @@ public class OAuth2LoginSuccessHandler implements AuthenticationSuccessHandler {
         final var saved = userRepository.save(newUser);
         log.info("Created OAuth2 user email={}", email);
         sendingEmailService.sendNewUserNotificationToAdmin(saved);
+        eventPublisher.publishEvent(new AdminAlertEvent.UserSignedUp(saved.getId(), provider));
         return saved;
     }
 

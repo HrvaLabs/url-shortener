@@ -87,6 +87,9 @@ public class AppProperties {
     @ToString.Exclude
     private String spamhausDqsKey;
 
+    @ToString.Exclude
+    private String discordWebhookUrl;
+
     @Valid
     @NotNull
     private Mcp mcp = new Mcp();

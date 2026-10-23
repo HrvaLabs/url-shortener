@@ -11,6 +11,8 @@ import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.specification.LinkReviewSpecification;
 import cc.hrva.urlshortener.service.ReviewQueueService;
 import cc.hrva.urlshortener.service.ScammerSignalService;
+import cc.hrva.urlshortener.service.alert.AdminAlertEvent;
+import cc.hrva.urlshortener.service.alert.AlertedLink;
 import cc.hrva.urlshortener.util.ReviewReasons;
 import java.time.Clock;
 import java.time.LocalDateTime;
@@ -26,6 +28,7 @@ import java.util.stream.Stream;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -48,6 +51,7 @@ public class DefaultReviewQueueService implements ReviewQueueService {
     private final UrlRepository urlRepository;
     private final ScammerSignalService scammerSignalService;
     private final Clock clock;
+    private final ApplicationEventPublisher eventPublisher;
 
     @Override
     @Transactional
@@ -65,17 +69,18 @@ public class DefaultReviewQueueService implements ReviewQueueService {
                 () -> openUnlessReviewedFine(url, incoming));
     }
 
-    private void extend(final LinkReview review, final List<String> incoming, final boolean systemFlagged) {
+    private boolean extend(final LinkReview review, final List<String> incoming, final boolean systemFlagged) {
         final var known = reasonsOf(review);
         final var added = incoming.stream().filter(reason -> !known.contains(reason)).toList();
         final var newlySystemFlagged = systemFlagged && !review.isSystemFlagged();
         if (added.isEmpty() && !newlySystemFlagged) {
-            return;
+            return false;
         }
         review.setReasons(joined(Stream.concat(known.stream(), added.stream()).toList()));
         review.setSystemFlagged(review.isSystemFlagged() || systemFlagged);
         linkReviewRepository.save(review);
         log.info("Review got new reasons urlId={} reviewId={}", review.getUrl().getId(), review.getId());
+        return !added.isEmpty();
     }
 
     private void openUnlessReviewedFine(final Url url, final List<String> incoming) {
@@ -83,6 +88,7 @@ public class DefaultReviewQueueService implements ReviewQueueService {
             return;
         }
         openReview(url, incoming, true);
+        eventPublisher.publishEvent(new AdminAlertEvent.ReviewOpened(AlertedLink.of(url), incoming));
     }
 
     private void openReview(final Url url, final List<String> reasons, final boolean systemFlagged) {
@@ -107,17 +113,25 @@ public class DefaultReviewQueueService implements ReviewQueueService {
         final var incoming = normalized(List.of(reportReason(category, details)));
         log.info("Visitor report received urlId={} category={}", url.getId(), category);
         linkReviewRepository.findFirstByUrlAndResolvedAtIsNullOrderByFlaggedAtDesc(url).ifPresentOrElse(
-                review -> extendUnlessFullOfReports(review, incoming),
-                () -> openReview(url, incoming, false));
+                review -> extendUnlessFullOfReports(review, incoming, category, details),
+                () -> openFromReport(url, incoming, category, details));
     }
 
-    private void extendUnlessFullOfReports(final LinkReview review, final List<String> incoming) {
+    private void extendUnlessFullOfReports(final LinkReview review, final List<String> incoming, final ReportCategory category,
+                                           final String details) {
         final var visitorReports = reasonsOf(review).stream().filter(reason -> reason.startsWith(ReviewReasons.VISITOR_REPORT)).count();
         if (visitorReports >= MAX_VISITOR_REPORTS_PER_REVIEW) {
             log.info("Review already holds the most visitor reports urlId={} reviewId={}", review.getUrl().getId(), review.getId());
             return;
         }
-        extend(review, incoming, false);
+        if (extend(review, incoming, false)) {
+            eventPublisher.publishEvent(new AdminAlertEvent.VisitorReported(AlertedLink.of(review.getUrl()), category, details, false));
+        }
+    }
+
+    private void openFromReport(final Url url, final List<String> incoming, final ReportCategory category, final String details) {
+        openReview(url, incoming, false);
+        eventPublisher.publishEvent(new AdminAlertEvent.VisitorReported(AlertedLink.of(url), category, details, true));
     }
 
     private static String reportReason(final ReportCategory category, final String details) {

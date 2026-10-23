@@ -79,5 +79,6 @@ app:
   registration-enabled: true
   anonymous-url-creation-enabled: false
   spamhaus-dqs-key: ${SPAMHAUS_DQS_KEY:}
+  discord-webhook-url: ${DISCORD_WEBHOOK_URL:}
   mcp:
     issuer: https://hrva.cc

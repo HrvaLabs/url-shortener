@@ -30,6 +30,8 @@ import cc.hrva.urlshortener.service.ReviewQueueService;
 import cc.hrva.urlshortener.service.ScammerSignalService;
 import cc.hrva.urlshortener.service.SendingEmailService;
 import cc.hrva.urlshortener.service.UserService;
+import cc.hrva.urlshortener.service.alert.AdminAlertEvent;
+import cc.hrva.urlshortener.service.alert.AlertedLink;
 import cc.hrva.urlshortener.service.blocklist.BlocklistConfigurationChangedEvent;
 import cc.hrva.urlshortener.util.DomainNames;
 import jakarta.persistence.EntityManager;
@@ -352,7 +354,10 @@ public class DefaultModerationService implements ModerationService {
     private Optional<Url> blockAndTellOwner(final long urlId, final BlockReason reason, final String detail, final ReviewResolution resolution,
                                             final String performedBy, final Predicate<Url> stillApplies) {
         final var blocked = block(urlId, reason, detail, resolution, performedBy, stillApplies);
-        blocked.ifPresent(this::notifyOwner);
+        blocked.ifPresent(url -> {
+            notifyOwner(url);
+            eventPublisher.publishEvent(new AdminAlertEvent.LinkBlocked(AlertedLink.of(url), url.getBlockReason(), url.getBlockDetail()));
+        });
         return blocked;
     }
 

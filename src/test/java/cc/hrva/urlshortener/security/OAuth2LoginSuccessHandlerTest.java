@@ -8,6 +8,7 @@ import cc.hrva.urlshortener.model.codebook.Authorities;
 import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.service.AuthoritiesService;
 import cc.hrva.urlshortener.service.SendingEmailService;
+import cc.hrva.urlshortener.service.alert.AdminAlertEvent;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.junit.jupiter.api.BeforeEach;
@@ -15,6 +16,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.oauth2.core.user.OAuth2User;
 
@@ -58,10 +60,13 @@ class OAuth2LoginSuccessHandlerTest {
     @Mock
     private OAuth2User oAuth2User;
 
+    @Mock
+    private ApplicationEventPublisher eventPublisher;
+
     @BeforeEach
     void setUp() {
         this.handler = new OAuth2LoginSuccessHandler(userRepository, authoritiesService, tokenProvider,
-                appProperties, sendingEmailService);
+                appProperties, sendingEmailService, eventPublisher);
         lenient().when(authentication.getPrincipal()).thenReturn(oAuth2User);
         lenient().when(appProperties.getFrontendUrl()).thenReturn("http://fe");
     }
@@ -102,6 +107,7 @@ class OAuth2LoginSuccessHandlerTest {
         verify(userRepository).save(argThat(saved -> saved.getLastLogin() != null));
         verify(response).sendRedirect(contains("http://fe/auth/callback?token=jwt-token"));
         verify(sendingEmailService, never()).sendNewUserNotificationToAdmin(any());
+        verify(eventPublisher, never()).publishEvent(any());
     }
 
     @Test
@@ -118,5 +124,24 @@ class OAuth2LoginSuccessHandlerTest {
 
         verify(sendingEmailService).sendNewUserNotificationToAdmin(any());
         verify(response).sendRedirect(contains("token=jwt-token"));
+    }
+
+    @Test
+    void aNewAccountAlertsTheAdminWithItsIdAndProviderButNotItsEmail() throws Exception {
+        when(oAuth2User.getAttribute("email")).thenReturn("new@example.com");
+        when(userRepository.findByEmail("new@example.com")).thenReturn(Optional.empty());
+        when(authoritiesService.getDefaultAuthority())
+                .thenReturn(Authorities.builder().id(1L).name("ROLE_USER").build());
+        when(appProperties.getUserApiKeySlots()).thenReturn(2L);
+        when(userRepository.save(any())).thenAnswer(invocation -> {
+            final User saved = invocation.getArgument(0);
+            saved.setId(31L);
+            return saved;
+        });
+        when(tokenProvider.createToken(any())).thenReturn("jwt-token");
+
+        handler.onAuthenticationSuccess(request, response, authentication);
+
+        verify(eventPublisher).publishEvent(new AdminAlertEvent.UserSignedUp(31L, "google"));
     }
 }

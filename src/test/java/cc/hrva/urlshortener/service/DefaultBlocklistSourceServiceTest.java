@@ -11,6 +11,7 @@ import cc.hrva.urlshortener.model.BlocklistSource;
 import cc.hrva.urlshortener.model.enums.BlocklistAction;
 import cc.hrva.urlshortener.model.enums.SourceKind;
 import cc.hrva.urlshortener.repository.BlocklistSourceRepository;
+import cc.hrva.urlshortener.service.alert.AdminAlertEvent;
 import cc.hrva.urlshortener.service.blocklist.BlocklistConfigurationChangedEvent;
 import cc.hrva.urlshortener.service.blocklist.BlocklistMemoryGuard;
 import cc.hrva.urlshortener.service.blocklist.BlocklistParser;
@@ -63,6 +64,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -118,6 +120,9 @@ class DefaultBlocklistSourceServiceTest {
     @Mock
     private ApplicationEventPublisher eventPublisher;
 
+    @Mock
+    private ApplicationEventPublisher alertPublisher;
+
     private FakeFetcher fetcher;
     private BlocklistSourceService blocklistSourceService;
 
@@ -126,7 +131,7 @@ class DefaultBlocklistSourceServiceTest {
         fetcher = new FakeFetcher(downloads);
         final var memoryGuard = new BlocklistMemoryGuard(blocklistStore, blocklistSourceRepository, new AppProperties());
         final var refresher = new BlocklistRefresher(blocklistSourceRepository, blocklistStore, memoryGuard, fetcher,
-                new BlocklistParser(), new LinkListParser());
+                new BlocklistParser(), new LinkListParser(), alertPublisher);
         blocklistSourceService = new DefaultBlocklistSourceService(blocklistSourceRepository, blocklistStore, refresher, eventPublisher);
         lenient().when(blocklistSourceRepository.save(any(BlocklistSource.class))).thenAnswer(invocation -> invocation.getArgument(0));
     }
@@ -1019,6 +1024,62 @@ class DefaultBlocklistSourceServiceTest {
     private void assertRefused(final BlocklistSourceDto dto) {
         assertThatThrownBy(() -> blocklistSourceService.create(dto)).isInstanceOf(UrlValidationException.class);
         verify(blocklistSourceRepository, never()).save(any(BlocklistSource.class));
+    }
+
+    @Test
+    void aSourceThatStartsFailingAlertsOnceAndNotOnTheNextFailure() {
+        stored(source(1).build());
+        fetcher.fails(MAIN, "HTTP 503");
+
+        blocklistSourceService.refresh(1);
+        blocklistSourceService.refresh(1);
+
+        verify(alertPublisher, times(1)).publishEvent(new AdminAlertEvent.BlocklistSourceFailed("HaGeZi Fake", "HTTP 503", false));
+        verifyNoMoreInteractions(alertPublisher);
+    }
+
+    @Test
+    void aFailingSourceWhoseErrorChangesSendsNoNewAlert() {
+        stored(source(1).lastError("HTTP 503").build());
+        fetcher.fails(MAIN, "timed out");
+
+        blocklistSourceService.refresh(1);
+
+        verifyNoInteractions(alertPublisher);
+    }
+
+    @Test
+    void aFailingSourceThatLoadsAgainAlertsItsRecovery() {
+        stored(source(1).lastError("HTTP 503").build());
+        fetcher.serves(MAIN, LIST);
+        redisHasRoom();
+
+        blocklistSourceService.refresh(1);
+
+        verify(alertPublisher).publishEvent(new AdminAlertEvent.BlocklistSourceRecovered("HaGeZi Fake"));
+    }
+
+    @Test
+    void aHealthySourceThatLoadsAgainSendsNoAlert() {
+        stored(source(1).build());
+        fetcher.serves(MAIN, LIST);
+        redisHasRoom();
+
+        blocklistSourceService.refresh(1);
+
+        verifyNoInteractions(alertPublisher);
+    }
+
+    @Test
+    void aFailingMainUrlAFallbackCoveredSaysTheFallbackLoaded() {
+        stored(source(1).fallbackUrls(List.of(FALLBACK)).build());
+        fetcher.fails(MAIN, "HTTP 503");
+        fetcher.serves(FALLBACK, LIST);
+        redisHasRoom();
+
+        blocklistSourceService.refresh(1);
+
+        verify(alertPublisher).publishEvent(new AdminAlertEvent.BlocklistSourceFailed("HaGeZi Fake", "main: HTTP 503", true));
     }
 
     private static String domains(final int count) {

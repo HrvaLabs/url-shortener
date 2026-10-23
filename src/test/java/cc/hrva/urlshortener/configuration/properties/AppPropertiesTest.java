@@ -28,4 +28,12 @@ class AppPropertiesTest {
         assertThat(appProperties.toString()).doesNotContain(KEY_MATERIAL);
     }
 
+    @Test
+    void toStringNeverContainsTheDiscordWebhookUrl() {
+        final var appProperties = new AppProperties();
+        appProperties.setDiscordWebhookUrl("https://discord.com/api/webhooks/1234567890/" + KEY_MATERIAL);
+
+        assertThat(appProperties.toString()).doesNotContain(KEY_MATERIAL).doesNotContain("discord.com");
+    }
+
 }
