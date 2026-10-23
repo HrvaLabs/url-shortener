@@ -4,6 +4,7 @@ import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.dto.ClickRequest;
 import java.util.Collections;
 import java.util.stream.Stream;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
@@ -13,7 +14,16 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class ReferrerClassifierTest {
 
-    private final ReferrerClassifier referrerClassifier = new ReferrerClassifier(appProperties());
+    private ReferrerClassifier referrerClassifier;
+
+    @BeforeEach
+    void setUp() {
+        final var appProperties = new AppProperties();
+        appProperties.setServerUrl("https://hrva.cc");
+        appProperties.setFrontendUrl("https://app.hrva.cc");
+        referrerClassifier = new ReferrerClassifier(appProperties);
+        referrerClassifier.init();
+    }
 
     @ParameterizedTest
     @MethodSource("referers")
@@ -57,14 +67,6 @@ class ReferrerClassifierTest {
 
     private static ClickRequest click(final String referer) {
         return ClickRequest.of("203.0.113.7", "ua", referer, "HR");
-    }
-
-    private static AppProperties appProperties() {
-        final var appProperties = new AppProperties();
-        appProperties.setServerUrl("https://hrva.cc");
-        appProperties.setFrontendUrl("https://app.hrva.cc");
-
-        return appProperties;
     }
 
 }

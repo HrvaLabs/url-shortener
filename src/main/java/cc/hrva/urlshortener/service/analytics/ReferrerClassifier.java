@@ -3,6 +3,7 @@ package cc.hrva.urlshortener.service.analytics;
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.dto.ClickRequest;
 import cc.hrva.urlshortener.util.DomainNames;
+import jakarta.annotation.PostConstruct;
 import java.util.Locale;
 import lombok.RequiredArgsConstructor;
 import org.apache.commons.lang3.StringUtils;
@@ -23,6 +24,15 @@ public class ReferrerClassifier {
     private static final int MAX_LENGTH = 255;
 
     private final AppProperties appProperties;
+
+    private String serverHost;
+    private String frontendHost;
+
+    @PostConstruct
+    public void init() {
+        serverHost = hostWithoutWww(appProperties.getServerUrl());
+        frontendHost = hostWithoutWww(appProperties.getFrontendUrl());
+    }
 
     public String classify(final ClickRequest click) {
         if (!click.referrerKnown()) {
@@ -56,12 +66,7 @@ public class ReferrerClassifier {
     }
 
     private String ownHostOr(final String host) {
-        final var serverHost = hostWithoutWww(appProperties.getServerUrl());
-        if (host.equals(serverHost) || host.equals(hostWithoutWww(appProperties.getFrontendUrl()))) {
-            return serverHost;
-        }
-
-        return host;
+        return host.equals(serverHost) || host.equals(frontendHost) ? serverHost : host;
     }
 
     private static String hostWithoutWww(final String url) {
