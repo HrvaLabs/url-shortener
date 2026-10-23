@@ -1,6 +1,7 @@
 package cc.hrva.urlshortener.security;
 
 import java.util.Collections;
+import java.util.List;
 import java.util.Optional;
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.model.User;
@@ -18,11 +19,13 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.oauth2.client.authentication.OAuth2AuthenticationToken;
 import org.springframework.security.oauth2.core.user.OAuth2User;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.contains;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -143,5 +146,42 @@ class OAuth2LoginSuccessHandlerTest {
         handler.onAuthenticationSuccess(request, response, authentication);
 
         verify(eventPublisher).publishEvent(new AdminAlertEvent.UserSignedUp(31L, "google"));
+    }
+
+    @Test
+    void aGitHubSignUpIsStoredAndAlertedAsGitHub() throws Exception {
+        final var gitHub = new OAuth2AuthenticationToken(oAuth2User, List.of(), "github");
+        when(oAuth2User.getAttribute("email")).thenReturn("octo@example.com");
+        when(userRepository.findByEmail("octo@example.com")).thenReturn(Optional.empty());
+        when(authoritiesService.getDefaultAuthority())
+                .thenReturn(Authorities.builder().id(1L).name("ROLE_USER").build());
+        when(appProperties.getUserApiKeySlots()).thenReturn(2L);
+        when(userRepository.save(any())).thenAnswer(invocation -> {
+            final User saved = invocation.getArgument(0);
+            saved.setId(32L);
+            return saved;
+        });
+        when(tokenProvider.createToken(any())).thenReturn("jwt-token");
+
+        handler.onAuthenticationSuccess(request, response, gitHub);
+
+        verify(userRepository, atLeastOnce()).save(argThat(saved -> "github".equals(saved.getAuthProvider())));
+        verify(eventPublisher).publishEvent(new AdminAlertEvent.UserSignedUp(32L, "github"));
+    }
+
+    @Test
+    void aGoogleSignUpIsStoredAsGoogle() throws Exception {
+        final var google = new OAuth2AuthenticationToken(oAuth2User, List.of(), "google");
+        when(oAuth2User.getAttribute("email")).thenReturn("new@example.com");
+        when(userRepository.findByEmail("new@example.com")).thenReturn(Optional.empty());
+        when(authoritiesService.getDefaultAuthority())
+                .thenReturn(Authorities.builder().id(1L).name("ROLE_USER").build());
+        when(appProperties.getUserApiKeySlots()).thenReturn(2L);
+        when(userRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(tokenProvider.createToken(any())).thenReturn("jwt-token");
+
+        handler.onAuthenticationSuccess(request, response, google);
+
+        verify(userRepository, atLeastOnce()).save(argThat(saved -> "google".equals(saved.getAuthProvider())));
     }
 }

@@ -19,6 +19,7 @@ import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.oauth2.client.authentication.OAuth2AuthenticationToken;
 import org.springframework.security.oauth2.core.user.OAuth2User;
 import org.springframework.security.web.authentication.AuthenticationSuccessHandler;
 import org.springframework.stereotype.Component;
@@ -28,6 +29,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class OAuth2LoginSuccessHandler implements AuthenticationSuccessHandler {
 
     private static final Logger log = LoggerFactory.getLogger(OAuth2LoginSuccessHandler.class);
+    private static final String DEFAULT_PROVIDER = "google";
 
     private final UserRepository userRepository;
     private final AuthoritiesService authoritiesService;
@@ -68,7 +70,7 @@ public class OAuth2LoginSuccessHandler implements AuthenticationSuccessHandler {
         }
 
         final var user = userRepository.findByEmail(email)
-                .orElseGet(() -> createOAuth2User(email, "google"));
+                .orElseGet(() -> createOAuth2User(email, providerOf(authentication)));
 
         if (Boolean.FALSE.equals(user.getActive())) {
             log.warn("OAuth2 login blocked: inactive account email={}", email);
@@ -92,6 +94,10 @@ public class OAuth2LoginSuccessHandler implements AuthenticationSuccessHandler {
 
         log.info("OAuth2 login success email={}", email);
         response.sendRedirect(redirectUrl);
+    }
+
+    private static String providerOf(final Authentication authentication) {
+        return authentication instanceof OAuth2AuthenticationToken token ? token.getAuthorizedClientRegistrationId() : DEFAULT_PROVIDER;
     }
 
     private String extractEmail(final OAuth2User oAuth2User) {
