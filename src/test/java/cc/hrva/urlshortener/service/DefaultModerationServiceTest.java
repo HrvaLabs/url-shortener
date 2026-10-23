@@ -5,6 +5,7 @@ import cc.hrva.urlshortener.dto.DomainRuleResponse;
 import cc.hrva.urlshortener.dto.LinkDestination;
 import cc.hrva.urlshortener.dto.LinkVerdict;
 import cc.hrva.urlshortener.dto.LinkVerdict.Outcome;
+import cc.hrva.urlshortener.dto.ReviewBulkResolveResponse;
 import cc.hrva.urlshortener.exception.DomainRuleNotFoundException;
 import cc.hrva.urlshortener.exception.UrlNotFoundException;
 import cc.hrva.urlshortener.exception.UrlValidationException;
@@ -35,6 +36,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.TreeMap;
 import java.util.function.Predicate;
 import java.util.stream.LongStream;
@@ -1257,6 +1259,139 @@ class DefaultModerationServiceTest {
         verifyNoInteractions(auditLogService);
     }
 
+    @Test
+    void resolvingSeveralReviewsResolvesEachOneAndListsTheFailuresWithoutStopping() {
+        final var scammer = user(5L, "scammer@example.com");
+        final var admin = user(6L, "other-admin@hrva.cc");
+        when(userRepository.existsByIdAndAuthoritiesName(5L, "ROLE_ADMIN")).thenReturn(false);
+        when(userRepository.existsByIdAndAuthoritiesName(6L, "ROLE_ADMIN")).thenReturn(true);
+        final var owned = link(70L, "https://example.org/a", scammer);
+        link(71L, "https://example.org/b", null);
+        final var adminLink = link(72L, "https://example.org/c", admin);
+        link(73L, "https://example.org/d", scammer);
+        openReviews(70L, 71L, 72L, 404L);
+
+        final var result = moderationService.resolveReviews(List.of(70L, 71L, 72L, 404L, 73L), ReviewAction.BLOCK_USER, ADMIN, "admin");
+
+        assertThat(result.resolved()).containsExactly(70L);
+        assertThat(result.failed()).containsExactly(
+                new ReviewBulkResolveResponse.Failure(71L, "This link has no owner to block."),
+                new ReviewBulkResolveResponse.Failure(72L, "Admin accounts can't be blocked here."),
+                new ReviewBulkResolveResponse.Failure(404L, "Url doesn't exist"),
+                new ReviewBulkResolveResponse.Failure(73L, "This link is no longer in the review queue."));
+        assertThat(owned.getBlockReason()).isEqualTo(BlockReason.USER_BLOCKED);
+        assertThat(adminLink.isActive()).isTrue();
+        verify(userService).deactivate(scammer);
+        verify(userService, never()).deactivate(admin);
+        verify(auditLogService).log(ADMIN, AuditAction.RESOLVE_REVIEW, "Url", "70", "action: BLOCK_USER, user: 5, links: 2, via: admin");
+        verifyNoMoreInteractions(auditLogService);
+        assertThat(outOfPlace).isEmpty();
+    }
+
+    @Test
+    void eachResolvedLinkGetsTheSameAuditEntryAsASingleResolve() {
+        link(70L, "https://example.org/a", null);
+        link(71L, "https://example.net/b", null);
+        openReviews(70L, 71L);
+
+        moderationService.resolveReviews(List.of(70L, 71L), ReviewAction.BLOCK_LINK, ADMIN, "admin");
+
+        verify(auditLogService).log(ADMIN, AuditAction.RESOLVE_REVIEW, "Url", "70", "action: BLOCK_LINK, links: 1, via: admin");
+        verify(auditLogService).log(ADMIN, AuditAction.RESOLVE_REVIEW, "Url", "71", "action: BLOCK_LINK, links: 1, via: admin");
+        verifyNoMoreInteractions(auditLogService);
+        assertThat(savedPerTransaction).filteredOn(saved -> !saved.isEmpty()).containsExactly(List.of(70L), List.of(71L));
+    }
+
+    @Test
+    void aDomainSharedBySeveralSelectedLinksIsBlockedOnceAndTheirReviewsAreResolvedUnderIt() {
+        final var alice = user(1L, "alice@example.com");
+        final var first = link(62L, "https://www.jofogas.cards/login", alice);
+        final var second = link(63L, "https://m.jofogas.cards/", alice);
+        final var third = link(64L, "https://jofogas.cards/x", null);
+        final var inactive = link(65L, "https://jofogas.cards/old", null);
+        inactive.setActive(false);
+        final var other = link(66L, "https://example.org/", null);
+        openReviews(62L, 63L, 64L, 65L, 66L);
+
+        final var result = moderationService.resolveReviews(List.of(62L, 63L, 64L, 65L, 66L), ReviewAction.BLOCK_DOMAIN, ADMIN, "admin");
+
+        assertThat(result.resolved()).containsExactly(62L, 63L, 64L, 65L, 66L);
+        assertThat(result.failed()).isEmpty();
+        assertThat(rules).containsOnlyKeys("jofogas.cards", "example.org");
+        verify(domainRuleRepository, times(2)).save(any(DomainRule.class));
+        verify(eventPublisher, times(2)).publishEvent(any(BlocklistConfigurationChangedEvent.class));
+        assertThat(List.of(first, second, third)).allSatisfy(url -> assertThat(url.getBlockDetail()).isEqualTo("jofogas.cards"));
+        assertThat(other.getBlockDetail()).isEqualTo("example.org");
+        verify(sendingEmailService).sendEmailUrlBlocked(alice, first);
+        verify(sendingEmailService).sendEmailUrlBlocked(alice, second);
+        verifyNoMoreInteractions(sendingEmailService);
+        verify(reviewQueueService).resolveOpen(inactive, ReviewResolution.DOMAIN_BLOCKED, ADMIN);
+        verify(auditLogService).log(ADMIN, AuditAction.RESOLVE_REVIEW, "Url", "62", "action: BLOCK_DOMAIN, domain: jofogas.cards, links: 3, via: admin");
+        verify(auditLogService).log(ADMIN, AuditAction.RESOLVE_REVIEW, "Url", "63", "action: BLOCK_DOMAIN, domain: jofogas.cards, links: 0, via: admin");
+        verify(auditLogService).log(ADMIN, AuditAction.RESOLVE_REVIEW, "Url", "64", "action: BLOCK_DOMAIN, domain: jofogas.cards, links: 0, via: admin");
+        verify(auditLogService).log(ADMIN, AuditAction.RESOLVE_REVIEW, "Url", "65", "action: BLOCK_DOMAIN, domain: jofogas.cards, links: 0, via: admin");
+        verify(auditLogService).log(ADMIN, AuditAction.RESOLVE_REVIEW, "Url", "66", "action: BLOCK_DOMAIN, domain: example.org, links: 1, via: admin");
+        verifyNoMoreInteractions(auditLogService);
+        assertThat(outOfPlace).isEmpty();
+    }
+
+    @Test
+    void aHostSharedBySeveralSelectedLinksIsTrustedOnceAndAnotherHostOnItsOwn() {
+        link(61L, "https://docs.google.com/forms/d/x", null);
+        link(62L, "https://docs.google.com/forms/d/y", null);
+        link(63L, "https://drive.google.com/file/z", null);
+        openReviews(61L, 62L, 63L);
+
+        final var result = moderationService.resolveReviews(List.of(61L, 62L, 63L), ReviewAction.TRUST_DOMAIN, ADMIN, "admin");
+
+        assertThat(result.resolved()).containsExactly(61L, 62L, 63L);
+        assertThat(rules).containsOnlyKeys("docs.google.com", "drive.google.com");
+        assertThat(rules.values()).allSatisfy(rule -> assertThat(rule.getType()).isEqualTo(DomainRuleType.ALLOW));
+        verify(domainRuleRepository, times(2)).save(any(DomainRule.class));
+        verify(auditLogService).log(ADMIN, AuditAction.RESOLVE_REVIEW, "Url", "62", "action: TRUST_DOMAIN, domain: docs.google.com, links: 0, via: admin");
+    }
+
+    @Test
+    void aLinkWithoutADomainFailsAloneInABulkDomainBlock() {
+        link(62L, "https://jofogas.cards/login", null);
+        link(63L, "http://203.0.113.7/login", null);
+        openReviews(62L, 63L);
+
+        final var result = moderationService.resolveReviews(List.of(63L, 62L), ReviewAction.BLOCK_DOMAIN, ADMIN, "admin");
+
+        assertThat(result.resolved()).containsExactly(62L);
+        assertThat(result.failed()).containsExactly(new ReviewBulkResolveResponse.Failure(63L, NOT_A_DOMAIN));
+        assertThat(rules).containsOnlyKeys("jofogas.cards");
+    }
+
+    @Test
+    void anUnexpectedFailureIsReportedWithoutItsInternalsAndTheRestGoOn() {
+        final var broken = link(70L, "https://example.org/a", null);
+        final var fine = link(71L, "https://example.org/b", null);
+        openReviews(70L, 71L);
+        doThrow(new DataAccessResourceFailureException("connection to 10.0.0.5:5432 refused"))
+                .when(reviewQueueService).resolveOpen(broken, ReviewResolution.OK, ADMIN);
+
+        final var result = moderationService.resolveReviews(List.of(70L, 71L), ReviewAction.OK, ADMIN, "admin");
+
+        assertThat(result.resolved()).containsExactly(71L);
+        assertThat(result.failed()).containsExactly(new ReviewBulkResolveResponse.Failure(70L, "Resolving this link failed. Try again."));
+        verify(reviewQueueService).resolveOpen(fine, ReviewResolution.OK, ADMIN);
+    }
+
+    @Test
+    void anAdminResolvingSeveralReviewsSendsNoAlert() {
+        link(30L, "https://example.org/x", null);
+        link(31L, "https://jofogas.cards/y", null);
+        openReviews(30L, 31L);
+
+        moderationService.resolveReviews(List.of(30L), ReviewAction.BLOCK_LINK, ADMIN, "admin");
+        moderationService.resolveReviews(List.of(31L), ReviewAction.BLOCK_DOMAIN, ADMIN, "admin");
+
+        assertThat(links.values()).allSatisfy(url -> assertThat(url.isActive()).isFalse());
+        verify(eventPublisher, never()).publishEvent(any(AdminAlertEvent.class));
+    }
+
     private TransactionOperations recordingTransactions() {
         return new TransactionOperations() {
             @Override
@@ -1270,6 +1405,10 @@ class DefaultModerationServiceTest {
                 }
             }
         };
+    }
+
+    private void openReviews(final Long... urlIds) {
+        when(reviewQueueService.openUrlIds(anyCollection())).thenReturn(Set.of(urlIds));
     }
 
     private List<LinkDestination> page(final long afterId, final Pageable pageable, final Predicate<Url> filter) {

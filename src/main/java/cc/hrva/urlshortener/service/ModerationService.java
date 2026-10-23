@@ -3,6 +3,7 @@ package cc.hrva.urlshortener.service;
 import cc.hrva.urlshortener.dto.DomainRuleCreatedResponse;
 import cc.hrva.urlshortener.dto.DomainRuleDto;
 import cc.hrva.urlshortener.dto.DomainRuleResponse;
+import cc.hrva.urlshortener.dto.ReviewBulkResolveResponse;
 import cc.hrva.urlshortener.dto.UrlResponse;
 import cc.hrva.urlshortener.model.enums.BlockReason;
 import cc.hrva.urlshortener.model.enums.DomainRuleType;
@@ -21,6 +22,7 @@ public interface ModerationService {
     int blockUser(long userId, String performedBy, String via, Integer maxLinks);
     int reactivateUser(long userId, String performedBy, String via);
     void resolveReview(long urlId, ReviewAction action, String domain, String performedBy, String via);
+    ReviewBulkResolveResponse resolveReviews(List<Long> urlIds, ReviewAction action, String performedBy, String via);
     void deleteLink(long urlId, String performedBy, String via);
 
 }

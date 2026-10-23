@@ -2,6 +2,7 @@ package cc.hrva.urlshortener.controller;
 
 import cc.hrva.urlshortener.configuration.GlobalExceptionHandler;
 import cc.hrva.urlshortener.configuration.JacksonConfiguration;
+import cc.hrva.urlshortener.dto.ReviewBulkResolveResponse;
 import cc.hrva.urlshortener.dto.ReviewEntryResponse;
 import cc.hrva.urlshortener.exception.UrlNotFoundException;
 import cc.hrva.urlshortener.model.enums.ReviewAction;
@@ -9,6 +10,7 @@ import cc.hrva.urlshortener.service.ModerationService;
 import cc.hrva.urlshortener.service.ReviewQueueService;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.stream.LongStream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -48,13 +50,15 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class AdminReviewQueueControllerTest {
 
     private static final String ADMIN = "admin@hrva.cc";
+    private static final String BULK_RESOLVE = "/api/v1/admin/review-queue/resolve";
     private static final UsernamePasswordAuthenticationToken SIGNED_IN_ADMIN =
             UsernamePasswordAuthenticationToken.authenticated(ADMIN, null, List.of(new SimpleGrantedAuthority("ROLE_ADMIN")));
-    private static final ReviewEntryResponse ENTRY = new ReviewEntryResponse(287L, "v0DB3", "https://findfavoritedate.life/?u=f6yp608", 27L,
+    private static final ReviewEntryResponse ENTRY = new ReviewEntryResponse(287L, "v0DB3", "https://findfavoritedate.life/?u=f6yp608",
+            "findfavoritedate.life", "findfavoritedate.life", 27L,
             "rhea@gmail.com", LocalDateTime.of(2026, 10, 19, 12, 0), true, LocalDateTime.of(2026, 10, 20, 7, 15),
             List.of("domain registered in the last 30 days", "high-risk domain ending .life"), LocalDateTime.of(2026, 10, 20, 7, 16));
     private static final ReviewEntryResponse ANONYMOUS_ENTRY = new ReviewEntryResponse(288L, "njuskaio_verify", "https://njuskaio.cam/a/MAUB3",
-            null, null, null, false, LocalDateTime.of(2026, 10, 20, 6, 0), List.of("imitates njuskalo"), LocalDateTime.of(2026, 10, 20, 6, 1));
+            "njuskaio.cam", "njuskaio.cam", null, null, null, false, LocalDateTime.of(2026, 10, 20, 6, 0), List.of("imitates njuskalo"), LocalDateTime.of(2026, 10, 20, 6, 1));
 
     private MockMvc mockMvc;
 
@@ -85,6 +89,8 @@ class AdminReviewQueueControllerTest {
                 .andExpect(jsonPath("$.content[0].urlId").value(287))
                 .andExpect(jsonPath("$.content[0].shortUrl").value("v0DB3"))
                 .andExpect(jsonPath("$.content[0].longUrl").value("https://findfavoritedate.life/?u=f6yp608"))
+                .andExpect(jsonPath("$.content[0].host").value("findfavoritedate.life"))
+                .andExpect(jsonPath("$.content[0].registrableDomain").value("findfavoritedate.life"))
                 .andExpect(jsonPath("$.content[0].ownerId").value(27))
                 .andExpect(jsonPath("$.content[0].ownerEmail").value("rhea@gmail.com"))
                 .andExpect(jsonPath("$.content[0].ownerCreatedAt").exists())
@@ -207,6 +213,102 @@ class AdminReviewQueueControllerTest {
                         .content("{\"action\":\"OK\"}"))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.error").value("Url doesn't exist"));
+    }
+
+    @Test
+    void resolvingSeveralEntriesDelegatesTheIdsAndActionAsTheSignedInAdminAndListsWhatFailed() throws Exception {
+        when(moderationService.resolveReviews(List.of(287L, 288L, 404L), ReviewAction.BLOCK_DOMAIN, ADMIN, "admin"))
+                .thenReturn(new ReviewBulkResolveResponse(List.of(287L, 288L), List.of(new ReviewBulkResolveResponse.Failure(404L, "Url doesn't exist"))));
+
+        mockMvc.perform(post(BULK_RESOLVE).principal(SIGNED_IN_ADMIN)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"urlIds\":[287,288,404],\"action\":\"BLOCK_DOMAIN\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.resolved").value(contains(287, 288)))
+                .andExpect(jsonPath("$.failed[0].urlId").value(404))
+                .andExpect(jsonPath("$.failed[0].error").value("Url doesn't exist"));
+    }
+
+    @Test
+    void aHundredEntriesCanBeResolvedAtOnce() throws Exception {
+        final var hundred = LongStream.rangeClosed(1, 100).boxed().toList();
+        when(moderationService.resolveReviews(hundred, ReviewAction.OK, ADMIN, "admin")).thenReturn(new ReviewBulkResolveResponse(hundred, List.of()));
+
+        mockMvc.perform(post(BULK_RESOLVE).principal(SIGNED_IN_ADMIN)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(bulkBody(hundred, "OK")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.resolved.length()").value(100))
+                .andExpect(jsonPath("$.failed").isEmpty());
+    }
+
+    @Test
+    void moreThanAHundredEntriesAreABadRequest() throws Exception {
+        mockMvc.perform(post(BULK_RESOLVE).principal(SIGNED_IN_ADMIN)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(bulkBody(LongStream.rangeClosed(1, 101).boxed().toList(), "OK")))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.urlIds").value("Select between 1 and 100 links"));
+
+        verifyNoInteractions(moderationService);
+    }
+
+    @Test
+    void noEntriesAreABadRequest() throws Exception {
+        for (final var body : List.of("{\"urlIds\":[],\"action\":\"OK\"}", "{\"action\":\"OK\"}")) {
+            mockMvc.perform(post(BULK_RESOLVE).principal(SIGNED_IN_ADMIN).contentType(MediaType.APPLICATION_JSON).content(body))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.urlIds").value("Select between 1 and 100 links"));
+        }
+
+        verifyNoInteractions(moderationService);
+    }
+
+    @Test
+    void theSameEntryTwiceIsABadRequest() throws Exception {
+        mockMvc.perform(post(BULK_RESOLVE).principal(SIGNED_IN_ADMIN)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"urlIds\":[287,288,287],\"action\":\"OK\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.urlIds").value("Select each link only once"));
+
+        verifyNoInteractions(moderationService);
+    }
+
+    @Test
+    void anEmptyIdIsABadRequest() throws Exception {
+        mockMvc.perform(post(BULK_RESOLVE).principal(SIGNED_IN_ADMIN)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"urlIds\":[287,null],\"action\":\"OK\"}"))
+                .andExpect(status().isBadRequest());
+
+        verifyNoInteractions(moderationService);
+    }
+
+    @Test
+    void anUnknownBulkActionIsABadRequestListingTheActions() throws Exception {
+        mockMvc.perform(post(BULK_RESOLVE).principal(SIGNED_IN_ADMIN)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"urlIds\":[287],\"action\":\"DELETE_EVERYTHING\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("Action must be OK, TRUST_DOMAIN, BLOCK_LINK, BLOCK_DOMAIN or BLOCK_USER"));
+
+        verifyNoInteractions(moderationService);
+    }
+
+    @Test
+    void aMissingBulkActionIsABadRequest() throws Exception {
+        mockMvc.perform(post(BULK_RESOLVE).principal(SIGNED_IN_ADMIN)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"urlIds\":[287]}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.action").value("Action must be OK, TRUST_DOMAIN, BLOCK_LINK, BLOCK_DOMAIN or BLOCK_USER"));
+
+        verifyNoInteractions(moderationService);
+    }
+
+    private static String bulkBody(final List<Long> urlIds, final String action) {
+        return "{\"urlIds\":" + urlIds + ",\"action\":\"" + action + "\"}";
     }
 
 }

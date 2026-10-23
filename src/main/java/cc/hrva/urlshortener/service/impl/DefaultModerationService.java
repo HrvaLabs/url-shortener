@@ -5,7 +5,9 @@ import cc.hrva.urlshortener.dto.DomainRuleDto;
 import cc.hrva.urlshortener.dto.DomainRuleResponse;
 import cc.hrva.urlshortener.dto.LinkDestination;
 import cc.hrva.urlshortener.dto.LinkVerdict;
+import cc.hrva.urlshortener.dto.ReviewBulkResolveResponse;
 import cc.hrva.urlshortener.dto.UrlResponse;
+import cc.hrva.urlshortener.exception.CommonException;
 import cc.hrva.urlshortener.exception.DomainRuleNotFoundException;
 import cc.hrva.urlshortener.exception.UrlNotFoundException;
 import cc.hrva.urlshortener.exception.UrlValidationException;
@@ -90,6 +92,10 @@ public class DefaultModerationService implements ModerationService {
     private static final String NOT_COVERED = "%s doesn't cover this link's destination %s.";
     private static final String NO_OWNER = "This link has no owner to block.";
     private static final String ADMIN_ACCOUNT = "Admin accounts can't be blocked here.";
+    private static final String NOT_IN_QUEUE = "This link is no longer in the review queue.";
+    private static final String RESOLVE_FAILED = "Resolving this link failed. Try again.";
+    private static final UnaryOperator<String> TRUSTED_BY_DEFAULT = UnaryOperator.identity();
+    private static final UnaryOperator<String> BLOCKED_BY_DEFAULT = DomainNames::registrableDomain;
     private static final String ROLE_ADMIN = "ROLE_ADMIN";
     private static final String SYSTEM = "system";
     private static final String NO_RULE_TYPE = "Choose whether the rule blocks or allows the domain";
@@ -215,8 +221,55 @@ public class DefaultModerationService implements ModerationService {
             case BLOCK_DOMAIN -> blockDomainFromReview(url, domain, performedBy, via);
             case BLOCK_USER -> blockUserFromReview(url, performedBy, via);
         };
+        closeReview(url, action, details, performedBy);
+    }
+
+    @Override
+    public ReviewBulkResolveResponse resolveReviews(final List<Long> urlIds, final ReviewAction action, final String performedBy, final String via) {
+        final var open = reviewQueueService.openUrlIds(urlIds);
+        final var domainsDone = new ArrayList<String>();
+        final var resolved = new ArrayList<Long>();
+        final var failed = new ArrayList<ReviewBulkResolveResponse.Failure>();
+        for (final var urlId : urlIds) {
+            if (!open.contains(urlId)) {
+                failed.add(new ReviewBulkResolveResponse.Failure(urlId, NOT_IN_QUEUE));
+                continue;
+            }
+            try {
+                resolveInBulk(urlId, action, domainsDone, performedBy, via);
+                resolved.add(urlId);
+            } catch (final CommonException exception) {
+                failed.add(new ReviewBulkResolveResponse.Failure(urlId, exception.getMessage()));
+            } catch (final RuntimeException exception) {
+                log.warn("Resolving a review failed, continuing with the next one urlId={}", urlId, exception);
+                failed.add(new ReviewBulkResolveResponse.Failure(urlId, RESOLVE_FAILED));
+            }
+        }
+        log.info("Reviews resolved in bulk action={} resolved={} failed={}", action, resolved.size(), failed.size());
+        return new ReviewBulkResolveResponse(resolved, failed);
+    }
+
+    private void resolveInBulk(final long urlId, final ReviewAction action, final List<String> domainsDone, final String performedBy,
+                               final String via) {
+        if (action != ReviewAction.TRUST_DOMAIN && action != ReviewAction.BLOCK_DOMAIN) {
+            resolveReview(urlId, action, null, performedBy, via);
+            return;
+        }
+        final var url = findUrl(urlId);
+        final var doneDomain = DomainNames.hostOf(url.getLongUrl())
+                .flatMap(host -> domainsDone.stream().filter(domain -> covers(host, domain)).findFirst());
+        if (doneDomain.isPresent()) {
+            closeReview(url, action, details(via, 0, field(ACTION, action), field(DOMAIN, doneDomain.get())), performedBy);
+            return;
+        }
+        final var ruleDomain = domainForReview(url, null, action == ReviewAction.BLOCK_DOMAIN ? BLOCKED_BY_DEFAULT : TRUSTED_BY_DEFAULT);
+        resolveReview(urlId, action, ruleDomain, performedBy, via);
+        domainsDone.add(ruleDomain);
+    }
+
+    private void closeReview(final Url url, final ReviewAction action, final String details, final String performedBy) {
         transactionOperations.executeWithoutResult(status -> reviewQueueService.resolveOpen(url, resolutionOf(action), performedBy));
-        auditLogService.log(performedBy, AuditAction.RESOLVE_REVIEW, TARGET_URL, String.valueOf(urlId), details);
+        auditLogService.log(performedBy, AuditAction.RESOLVE_REVIEW, TARGET_URL, String.valueOf(url.getId()), details);
     }
 
     @Override
@@ -232,7 +285,7 @@ public class DefaultModerationService implements ModerationService {
     }
 
     private String trustFromReview(final Url url, final String domain, final String performedBy, final String via) {
-        final var ruleDomain = domainForReview(url, domain, UnaryOperator.identity());
+        final var ruleDomain = domainForReview(url, domain, TRUSTED_BY_DEFAULT);
         final var trusted = trust(ruleDomain, null, performedBy);
         return details(via, trusted.links(), field(ACTION, ReviewAction.TRUST_DOMAIN), field(DOMAIN, ruleDomain), field("reviews", trusted.reviews()));
     }
@@ -243,7 +296,7 @@ public class DefaultModerationService implements ModerationService {
     }
 
     private String blockDomainFromReview(final Url url, final String domain, final String performedBy, final String via) {
-        final var ruleDomain = domainForReview(url, domain, DomainNames::registrableDomain);
+        final var ruleDomain = domainForReview(url, domain, BLOCKED_BY_DEFAULT);
         final var blocked = blockLinksOn(ruleDomain, null, performedBy, null);
         return details(via, blocked, field(ACTION, ReviewAction.BLOCK_DOMAIN), field(DOMAIN, ruleDomain));
     }

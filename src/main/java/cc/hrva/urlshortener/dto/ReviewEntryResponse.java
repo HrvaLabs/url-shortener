@@ -7,6 +7,8 @@ public record ReviewEntryResponse(
         Long urlId,
         String shortUrl,
         String longUrl,
+        String host,
+        String registrableDomain,
         Long ownerId,
         String ownerEmail,
         LocalDateTime ownerCreatedAt,

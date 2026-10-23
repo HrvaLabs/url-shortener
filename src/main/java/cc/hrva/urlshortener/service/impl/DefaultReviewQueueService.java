@@ -13,6 +13,7 @@ import cc.hrva.urlshortener.service.ReviewQueueService;
 import cc.hrva.urlshortener.service.ScammerSignalService;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent;
 import cc.hrva.urlshortener.service.alert.AlertedLink;
+import cc.hrva.urlshortener.util.DomainNames;
 import cc.hrva.urlshortener.util.ReviewReasons;
 import java.time.Clock;
 import java.time.LocalDateTime;
@@ -189,10 +190,13 @@ public class DefaultReviewQueueService implements ReviewQueueService {
     private static ReviewEntryResponse entryOf(final LinkReview review, final Set<Long> possibleScammers) {
         final var url = review.getUrl();
         final var owner = Optional.ofNullable(url.getOwner());
+        final var host = DomainNames.hostOf(url.getLongUrl());
         return new ReviewEntryResponse(
                 url.getId(),
                 url.getShortUrl(),
                 url.getLongUrl(),
+                host.orElse(null),
+                host.map(DomainNames::registrableDomain).orElse(null),
                 owner.map(User::getId).orElse(null),
                 owner.map(User::getEmail).orElse(null),
                 owner.map(User::getCreateDate).orElse(null),

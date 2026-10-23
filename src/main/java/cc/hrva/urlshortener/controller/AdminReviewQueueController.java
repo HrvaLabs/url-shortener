@@ -1,5 +1,7 @@
 package cc.hrva.urlshortener.controller;
 
+import cc.hrva.urlshortener.dto.ReviewBulkResolveDto;
+import cc.hrva.urlshortener.dto.ReviewBulkResolveResponse;
 import cc.hrva.urlshortener.dto.ReviewEntryResponse;
 import cc.hrva.urlshortener.dto.ReviewResolveDto;
 import cc.hrva.urlshortener.service.ModerationService;
@@ -48,6 +50,14 @@ public class AdminReviewQueueController {
         moderationService.resolveReview(urlId, reviewResolveDto.action(), reviewResolveDto.domain(), authentication.getName(), VIA);
 
         return ResponseEntity.noContent().build();
+    }
+
+    @PostMapping("/resolve")
+    @PreAuthorize("hasRole('ROLE_ADMIN')")
+    public ResponseEntity<ReviewBulkResolveResponse> resolveAll(@Valid @RequestBody final ReviewBulkResolveDto reviewBulkResolveDto,
+                                                                final Authentication authentication) {
+        return ResponseEntity.ok(moderationService.resolveReviews(reviewBulkResolveDto.urlIds(), reviewBulkResolveDto.action(),
+                authentication.getName(), VIA));
     }
 
 }

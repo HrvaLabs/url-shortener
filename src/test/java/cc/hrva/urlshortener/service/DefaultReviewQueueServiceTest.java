@@ -39,6 +39,7 @@ import org.springframework.data.jpa.domain.Specification;
 import org.springframework.transaction.annotation.Transactional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.tuple;
 import static org.assertj.core.api.Assertions.within;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -302,9 +303,25 @@ class DefaultReviewQueueServiceTest {
 
         final var entries = reviewQueueService.openEntries(PageRequest.of(0, 20), null, null);
 
-        assertThat(entries.getContent()).containsExactly(new ReviewEntryResponse(287L, "v0DB3", "https://findfavoritedate.life/?u=f6yp608", 27L,
-                "rhea@gmail.com", LocalDateTime.of(2026, 10, 19, 12, 0), true, LocalDateTime.of(2026, 10, 20, 7, 15), List.of(YOUNG, LURE),
+        assertThat(entries.getContent()).containsExactly(new ReviewEntryResponse(287L, "v0DB3", "https://findfavoritedate.life/?u=f6yp608",
+                "findfavoritedate.life", "findfavoritedate.life", 27L, "rhea@gmail.com", LocalDateTime.of(2026, 10, 19, 12, 0), true, LocalDateTime.of(2026, 10, 20, 7, 15), List.of(YOUNG, LURE),
                 LocalDateTime.of(2026, 10, 20, 7, 16)));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void aQueueEntryNamesTheHostAndTheRegistrableDomainTheDomainActionsWouldUse() {
+        final var subdomain = Url.builder().id(290L).shortUrl("bank").longUrl("https://Login.Secure-Bank.co.uk:443/verify").build();
+        final var unreadable = Url.builder().id(291L).shortUrl("odd").longUrl("https://exa mple.com/").build();
+        when(linkReviewRepository.findAll(any(Specification.class), any(Pageable.class))).thenReturn(new PageImpl<>(List.of(
+                LinkReview.builder().id(8L).url(subdomain).reasons(LURE).build(),
+                LinkReview.builder().id(9L).url(unreadable).reasons(LURE).build())));
+
+        final var entries = reviewQueueService.openEntries(PageRequest.of(0, 20), null, null);
+
+        assertThat(entries.getContent())
+                .extracting(ReviewEntryResponse::host, ReviewEntryResponse::registrableDomain)
+                .containsExactly(tuple("login.secure-bank.co.uk", "secure-bank.co.uk"), tuple(null, null));
     }
 
     @Test
