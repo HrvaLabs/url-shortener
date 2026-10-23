@@ -50,7 +50,7 @@ java -jar "$E2E/app.jar" --spring.profiles.active=local --server.port=18080 \
 - Run the jar from a copy, so `mvn clean` doesn't pull it from under the running app.
 
 ## Testing
-- `mvn test` (or `mvn -B verify`) — 1596 tests, JUnit 5 + Mockito + AssertJ
+- `mvn test` (or `mvn -B verify`) — 1662 tests, JUnit 5 + Mockito + AssertJ
 - Mostly plain `@ExtendWith(MockitoExtension.class)` unit tests. Each `@SpringBootTest` class boots its own nested `TestApplication` (a trimmed context) on embedded H2 and mocks the rest:
   - MockMvc through the real filter chains, with a subset Liquibase changelog (`db/changelog/017-oauth2-authorization-server.xml` or `db/mcp-connector-test-changelog.xml`): the MCP connector's security tests, `SecurityTxtControllerTest`, `ReportEndpointSecurityTest`
   - the full Liquibase changelog: `DynamicLinkChecksSchemaTest` (024's tables, seeds and constraints), `DefaultScammerSignalServiceTest`
@@ -63,7 +63,7 @@ java -jar "$E2E/app.jar" --spring.profiles.active=local --server.port=18080 \
 ```
 cc.hrva.urlshortener
 ├── audit/           # AdminAuditAspect
-├── client/          # GoogleSafeBrowsingApi, PublicHttpFetcher (public-address guard), RedirectFollower
+├── client/          # GoogleSafeBrowsingApi, PublicHttpFetcher (public-address guard), RedirectFollower, DiscordWebhookClient
 ├── configuration/   # Beans, props, cache, security, web config, exception handler, executors, Redis client
 ├── controller/      # REST controllers
 ├── converter/       # DTO↔entity converters (Spring Converter interface)
@@ -74,7 +74,7 @@ cc.hrva.urlshortener
 ├── model/           # JPA entities, codebook, enums
 ├── repository/      # Spring Data JPA repositories
 ├── security/        # JWT filter, token provider, auth entry point, ClientIpResolver
-├── service/         # Interfaces + impl/ implementations; blocklist/ (download, parse, Redis sets)
+├── service/         # Interfaces + impl/ implementations; blocklist/ (download, parse, Redis sets); alert/ (Discord alert events and lines)
 ├── util/            # DomainNames, LinkKeys, PublicAddresses, RedirectLocations
 └── validator/       # Interfaces + impl/ validators
 ```
@@ -313,6 +313,7 @@ Jobs run on a 4-thread scheduler (`spring.task.scheduling.pool.size: 4` in `appl
 - **Nightly scan** (`DefaultSafeBrowsingRecheckService`): Daily at 04:30, walks every active link by id (so deactivations mid-run don't skip rows) through the link check and Safe Browsing. List hits, admin Block rules and Safe Browsing block the link (deactivated, evicted from the cache, owner emailed); a `SCAM_SIGNALS` verdict and every flag go to the review queue instead, unless the same reasons were already marked fine. It then follows the redirect chains of up to 500 active links whose `chainCheckedAt` is null or over 7 days old, oldest first. Once Safe Browsing fails, the run stops calling it, finishes with the link checks only and skips the redirect checks.
 - **Interrupted emails**: Every 5 minutes, `email_log` rows still `SENDING` after 10 minutes become `FAILED` ("interrupted") so they can be resent.
 - **Decisions email** (`DefaultLinkDigestService`): Daily at 9 AM, emails `app.contact-email` "N decisions waiting on hrva.cc", only when something needs a decision: an open review entry, a link blocked automatically in the last 24 h (any block reason but `ADMIN` and `USER_BLOCKED`), or an enabled source whose last download failed. It lists the open count and the visitor reports among them, the newest 10 entries (each linking to the queue page; a visitor report shows only its category, never the visitor's text, through `ReviewReasons.withoutVisitorText`, which `review_queue` uses too), up to 10 possible scammers, the automatic blocks and the failing sources, plus an information-only section of links from accounts younger than 7 days that never triggers sending alone. No link in it acts by itself (mail scanners prefetch links).
+- **Discord alerts** (`DefaultDiscordAlertService`): every 30 s, posts what happened since the last flush to the Discord webhook in `app.discord-webhook-url` (`DISCORD_WEBHOOK_URL`) as one message, and once more when the app shuts down (see Discord alerts).
 
 ## Config Profiles
 - **`local`**: `localhost` Postgres/Redis/MailHog, hardcoded JWT secret, dev users auto-created, verbose SQL logging. MCP issuer `http://localhost:8080`, a committed dev-only signing key (not a secret; refused at startup outside `local`) and anonymous link creation on, so `/mcp/anon` works. Auto-imports `application-oauth.yaml` for SSO secrets.
@@ -321,6 +322,7 @@ Jobs run on a 4-thread scheduler (`spring.task.scheduling.pool.size: 4` in `appl
 - Default: `application.yaml` sets base values (cache TTL, URL length, API limits, etc.).
 - Tests run without any profile; only the `@SpringBootTest` classes listed under Testing start a (trimmed) application context.
 - `app.blocklists.max-redis-mb` (default 256): the Redis budget across all blocklist sets when Redis has no `maxmemory`.
+- `app.discord-webhook-url` (`DISCORD_WEBHOOK_URL`, blank by default): the owner's Discord webhook for admin alerts; blank turns them off (see Discord alerts). A secret: excluded from `AppProperties.toString()`, never logged or returned.
 
 ## New Models (recently added)
 
@@ -367,6 +369,17 @@ Jobs run on a 4-thread scheduler (`spring.task.scheduling.pool.size: 4` in `appl
 - **Redirect chains** (`RedirectChainService`): after a create or a destination change (`@Async("redirectCheckExecutor")`, 2 threads and a 200-check queue, once the save has committed; a full queue is logged and left to the nightly), and in the nightly scan for up to 500 active links whose `chainCheckedAt` is null or over 7 days old, the destination's HTTP redirects are followed: at most 5 hops in 5 s, GET with headers only, http or https, each hop through the public-address guard (a refused destination is a fetch error; a refused later hop ends the chain unrequested). A `Location` is read like a browser does before the guard sees it (`RedirectLocations`: UTF-8 bytes, `\` as `/`, space, non-ASCII and `"<>{}|^` percent-encoded, IDN host to ASCII). Every hop after the destination goes through `LinkCheckService.check` and Safe Browsing and the worst hop wins: a block blocks the link (`via redirect to <host>`), a flag or scam signals queue it (`redirects to <host>: <reason>`), unless the link was repointed meanwhile. `finalUrl` and `chainCheckedAt` are stamped with targeted updates; a fetch error stamps only `chainCheckedAt`, and a Safe Browsing outage stamps nothing (the nightly skips or stops its redirect checks) so a later run retries. The fetcher is the `RedirectFollower` bean (not a second `PublicHttpFetcher` bean, which would break by-type injection).
 - **Executors** (`AsyncExecutorConfiguration`): declaring `redirectCheckExecutor` switches off Boot's own `applicationTaskExecutor` and its `@Async` default, so the configuration declares `applicationTaskExecutor` itself from Boot's `ThreadPoolTaskExecutorBuilder` (still `spring.task.execution.*`), also named `taskExecutor` so unqualified `@Async` (emails, `reloadMissing`) and visit counting keep using it. `redirectCheckExecutor` (threads `redirect-check-1`, `-2`) waits up to 15 s on shutdown for running checks.
 
+### Discord alerts
+An owner-facing alert channel next to the emails, which stay as they are: hrva.cc pings one Discord webhook (created by the owner, set in `DISCORD_WEBHOOK_URL`) when something needs the admin's attention. Blank means off: no buffering, no HTTP calls, and one startup line "Discord alerts are off: no DISCORD_WEBHOOK_URL".
+- **Events** (`service/alert/AdminAlertEvent`, published with `ApplicationEventPublisher` at the chokepoints and taken by one listener, `DefaultDiscordAlertService`, through `@TransactionalEventListener(fallbackExecution = true)`, so nothing goes out for a rolled-back change):
+  - a review newly opened (`DefaultReviewQueueService`: a flag from link creation, a redirect check, the Safe Browsing recheck or the nightly scan, or a visitor report that opens one). New reasons on an open review don't alert, except a visitor report that adds a line to it; a repeat of a report the entry already holds, or one past the 20-report cap, doesn't.
+  - a link blocked (`DefaultModerationService.blockAndTellOwner`, where the owner is emailed: automatic blocks and the admin's own Block link / Block domain / MCP blocks; a Block user doesn't alert per link).
+  - a new account (`DefaultUserService.register`, `OAuth2LoginSuccessHandler`).
+  - a blocklist source whose `lastError` goes from none to some ("HaGeZi Fake failed to load: main: HTTP 503", "(a fallback loaded)" when a fallback still stored the list) or back to none ("HaGeZi Fake loads again"), never on a repeated failure (`BlocklistRefresher`).
+- **Delivery**: the listener only buffers (200 at most; the rest are counted as dropped). `flush` (every 30 s, and `@PreDestroy` on shutdown, since a redeploy restarts the single container) drains the buffer into one message through `DiscordWebhookClient` (`java.net.http`, each call capped at 5 s). A message holds at most 10 lines and 2,000 characters; what doesn't fit, plus the dropped count, becomes "…and N more, see <{frontendUrl}/admin/review>" and is not carried over. Fire and forget: on failure one warn line with the exception class or HTTP status (never the webhook URL), and the batch is dropped. Only an HTTP 429 with `retry_after` under 10 s is retried, once, and never on shutdown, so shutdown waits at most 5 s.
+- **Payload** (`DiscordAlertFormatter`): `content` only, one plain line per item, with `"allowed_mentions": {"parse": []}` (a visitor's `@everyone` can't ping) and `"flags": 4` (suppress embeds, so Discord never previews a destination; it would hide embeds too, hence no embeds). A link shows as `hrva.cc/<alias> → <destination host>` (never the path or query; an IP destination is "an IP address"), its reasons, `anonymous` or `account #<id>`, and the admin page: `/admin/review?entry=<urlId>` for reviews, `/admin/urls` for blocks, `/admin` for new accounts, `/admin/blocklists` for sources. Free text (visitor details cut to 200 characters, reasons, block details, errors) loses newlines, backticks, `<>` and `[text](url)` link syntax, gets Discord markdown escaped and web addresses wrapped in `<…>`; email addresses and IP addresses become "(email removed)" and "(IP removed)". Never an email address: a new account is its id and sign-up method (email, Google, GitHub).
+- Tests: `service/alert/DiscordAlertFormatterTest` (payload rules, overflow), `client/DiscordWebhookClientTest` (a local `HttpServer`: refusals, 429, timeouts, nothing secret in the log), `service/DefaultDiscordAlertServiceTest` (off when blank, buffer cap, after-commit only, shutdown flush, end to end against a local webhook), and the publisher tests in `DefaultReviewQueueServiceTest`, `DefaultModerationServiceTest`, `DefaultBlocklistSourceServiceTest`, `DefaultUserServiceTest`, `OAuth2LoginSuccessHandlerTest`.
+
 ### URL tags (`url_tags` table, migration `014-url-tags.xml`)
 - `Url.tags` `@ElementCollection` of normalized strings (`TagNormalizer`: lowercase, ≤10 × ≤30 chars). Filter via `?tag=`; list via `GET /urls/tags`.
 
@@ -391,5 +404,5 @@ Jobs run on a 4-thread scheduler (`spring.task.scheduling.pool.size: 4` in `appl
 - `.github/workflows/build.yml`: `mvn clean package` → Docker build/push to `ghcr.io`
 - Multi-arch: `linux/amd64,linux/arm64`
 - Pushes on `main` branch. PRs only build (no push).
-- Portainer env vars: `OAUTH2_GOOGLE_CLIENT_ID`, `OAUTH2_GOOGLE_CLIENT_SECRET`, `OAUTH2_GITHUB_CLIENT_ID`, `OAUTH2_GITHUB_CLIENT_SECRET`, `APP_MCP_SIGNING_KEY` (required), `APP_ANONYMOUS_URL_CREATION_ENABLED` (optional), `SPAMHAUS_DQS_KEY` (optional; the Spamhaus DBL lookups are off without it).
+- Portainer env vars: `OAUTH2_GOOGLE_CLIENT_ID`, `OAUTH2_GOOGLE_CLIENT_SECRET`, `OAUTH2_GITHUB_CLIENT_ID`, `OAUTH2_GITHUB_CLIENT_SECRET`, `APP_MCP_SIGNING_KEY` (required), `APP_ANONYMOUS_URL_CREATION_ENABLED` (optional), `SPAMHAUS_DQS_KEY` (optional; the Spamhaus DBL lookups are off without it), `DISCORD_WEBHOOK_URL` (optional; the Discord admin alerts are off without it).
 - Before the first MCP connector deploy: the production checklist in `README.md`.
