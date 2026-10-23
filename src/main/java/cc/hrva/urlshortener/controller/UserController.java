@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.controller;
 
+import cc.hrva.urlshortener.audit.Audited;
 import cc.hrva.urlshortener.dto.DataExportDto;
 import cc.hrva.urlshortener.dto.DeleteAccountDto;
 import cc.hrva.urlshortener.dto.UpdatePasswordDto;
@@ -7,6 +8,7 @@ import cc.hrva.urlshortener.dto.UserDto;
 import cc.hrva.urlshortener.dto.UserSearchDto;
 import cc.hrva.urlshortener.dto.UserUpdateDto;
 import cc.hrva.urlshortener.model.User;
+import cc.hrva.urlshortener.model.enums.AuditAction;
 import cc.hrva.urlshortener.service.UserService;
 import io.swagger.v3.oas.annotations.Hidden;
 import io.swagger.v3.oas.annotations.Operation;
@@ -56,6 +58,7 @@ public class UserController {
     @ApiResponse(responseCode = "404", description = "User not found")
     @DeleteMapping("/{id}")
     @PreAuthorize("hasRole('ROLE_ADMIN')")
+    @Audited(AuditAction.DELETE_USER)
     public ResponseEntity<Void> deleteUser(@PathVariable("id") final Long id) {
         userService.deleteUserById(id);
 
@@ -68,6 +71,7 @@ public class UserController {
     @ApiResponse(responseCode = "404", description = "User not found")
     @PutMapping("/{id}")
     @PreAuthorize("hasRole('ROLE_ADMIN')")
+    @Audited(AuditAction.UPDATE_USER)
     public ResponseEntity<User> updateUser(
             @PathVariable final Long id,
             @Valid @RequestBody final UserUpdateDto userUpdateDto) {

@@ -1,6 +1,7 @@
 package cc.hrva.urlshortener.controller;
 
 import cc.hrva.urlshortener.configuration.GlobalExceptionHandler;
+import cc.hrva.urlshortener.configuration.JacksonConfiguration;
 import cc.hrva.urlshortener.dto.ReviewEntryResponse;
 import cc.hrva.urlshortener.exception.UrlNotFoundException;
 import cc.hrva.urlshortener.model.enums.ReviewAction;
@@ -21,10 +22,12 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.web.PageableHandlerMethodArgumentResolver;
 import org.springframework.http.MediaType;
+import org.springframework.http.converter.json.JacksonJsonHttpMessageConverter;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import tools.jackson.databind.json.JsonMapper;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.contains;
@@ -63,7 +66,10 @@ class AdminReviewQueueControllerTest {
 
     @BeforeEach
     void setUp() {
+        final var jsonMapper = JsonMapper.builder();
+        new JacksonConfiguration().enumsByNameOnly().customize(jsonMapper);
         mockMvc = MockMvcBuilders.standaloneSetup(new AdminReviewQueueController(reviewQueueService, moderationService))
+                .setMessageConverters(new JacksonJsonHttpMessageConverter(jsonMapper))
                 .setCustomArgumentResolvers(new PageableHandlerMethodArgumentResolver())
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .build();
@@ -147,7 +153,8 @@ class AdminReviewQueueControllerTest {
     }
 
     @Test
-    void anUnknownActionIsABadRequest() throws Exception {
+    @ExtendWith(OutputCaptureExtension.class)
+    void anUnknownActionIsABadRequestListingTheActionsWithoutAStackTrace(final CapturedOutput output) throws Exception {
         mockMvc.perform(post("/api/v1/admin/review-queue/287/resolve").principal(SIGNED_IN_ADMIN)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"action\":\"DELETE_EVERYTHING\"}"))
@@ -155,13 +162,36 @@ class AdminReviewQueueControllerTest {
                 .andExpect(jsonPath("$.error").value("Action must be OK, TRUST_DOMAIN, BLOCK_LINK, BLOCK_DOMAIN or BLOCK_USER"));
 
         verifyNoInteractions(moderationService);
+        assertThat(output).doesNotContain("DELETE_EVERYTHING").doesNotContain("Unhandled exception").doesNotContain("\tat ");
     }
 
     @Test
-    void aMissingActionIsABadRequest() throws Exception {
+    void aMissingActionIsABadRequestNamingTheField() throws Exception {
         mockMvc.perform(post("/api/v1/admin/review-queue/287/resolve").principal(SIGNED_IN_ADMIN)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.action").value("Action must be OK, TRUST_DOMAIN, BLOCK_LINK, BLOCK_DOMAIN or BLOCK_USER"));
+
+        verifyNoInteractions(moderationService);
+    }
+
+    @Test
+    void anActionInTheWrongCaseIsABadRequest() throws Exception {
+        mockMvc.perform(post("/api/v1/admin/review-queue/287/resolve").principal(SIGNED_IN_ADMIN)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"action\":\"ok\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("Action must be OK, TRUST_DOMAIN, BLOCK_LINK, BLOCK_DOMAIN or BLOCK_USER"));
+
+        verifyNoInteractions(moderationService);
+    }
+
+    @Test
+    void aNumberIsNotAnAction() throws Exception {
+        mockMvc.perform(post("/api/v1/admin/review-queue/287/resolve").principal(SIGNED_IN_ADMIN)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"action\":4}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error").value("Action must be OK, TRUST_DOMAIN, BLOCK_LINK, BLOCK_DOMAIN or BLOCK_USER"));
 

@@ -1,6 +1,8 @@
 package cc.hrva.urlshortener.controller;
 
+import cc.hrva.urlshortener.audit.Audited;
 import cc.hrva.urlshortener.dto.AdminStatsResponse;
+import cc.hrva.urlshortener.model.enums.AuditAction;
 import cc.hrva.urlshortener.service.AdminService;
 import cc.hrva.urlshortener.service.LoginAttemptService;
 import io.swagger.v3.oas.annotations.Hidden;
@@ -54,6 +56,7 @@ public class AdminController {
 
     @Operation(summary = "Clear login attempts", description = "Clear all rate limit data for all IPs. Requires ROLE_ADMIN.")
     @DeleteMapping("/login-attempts")
+    @Audited(AuditAction.CLEAR_LOGIN_ATTEMPTS)
     public ResponseEntity<Void> clearLoginAttempts() {
         loginAttemptService.clearLoginAttempts();
         return ResponseEntity.noContent().build();

@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.9.xsd">
+
+    <changeSet author="khrvacic" id="025-audit-log-failed">
+        <addColumn tableName="audit_log">
+            <column name="failed" type="BOOLEAN" defaultValueBoolean="false">
+                <constraints nullable="false"/>
+            </column>
+        </addColumn>
+        <rollback>
+            <dropColumn tableName="audit_log" columnName="failed"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet author="khrvacic" id="025-audit-log-typed-action">
+        <update tableName="audit_log">
+            <column name="failed" valueBoolean="true"/>
+            <column name="action" valueComputed="LEFT(action, LENGTH(action) - 7)"/>
+            <where>RIGHT(action, 7) = '_FAILED'</where>
+        </update>
+        <update tableName="audit_log">
+            <column name="action" value="CLEAR_LOGIN_ATTEMPTS"/>
+            <where>action = 'clearLoginAttempts'</where>
+        </update>
+        <update tableName="audit_log">
+            <column name="action" value="RESEND_EMAIL"/>
+            <where>action = 'resendEmail'</where>
+        </update>
+        <update tableName="audit_log">
+            <column name="action" value="UPDATE_USER"/>
+            <where>action = 'updateUser'</where>
+        </update>
+        <update tableName="audit_log">
+            <column name="action" value="DELETE_USER"/>
+            <where>action = 'deleteUser'</where>
+        </update>
+        <update tableName="audit_log">
+            <column name="action" value="UPDATE_URL"/>
+            <where>action = 'updateUrl'</where>
+        </update>
+        <update tableName="audit_log">
+            <column name="action" value="REVOKE_URL"/>
+            <where>action IN ('revokeUrl', 'deactivateUrl')</where>
+        </update>
+        <update tableName="audit_log">
+            <column name="action" value="ACTIVATE_URL"/>
+            <where>action = 'activateUrl'</where>
+        </update>
+        <update tableName="audit_log">
+            <column name="action" value="DELETE_URL"/>
+            <where>action = 'deleteUrl'</where>
+        </update>
+        <update tableName="audit_log">
+            <column name="action" value="CREATE_SOURCE"/>
+            <where>action = 'createSource'</where>
+        </update>
+        <update tableName="audit_log">
+            <column name="action" value="UPDATE_SOURCE"/>
+            <where>action = 'updateSource'</where>
+        </update>
+        <update tableName="audit_log">
+            <column name="action" value="DELETE_SOURCE"/>
+            <where>action = 'deleteSource'</where>
+        </update>
+        <update tableName="audit_log">
+            <column name="action" value="REFRESH_SOURCE"/>
+            <where>action = 'refreshSource'</where>
+        </update>
+        <update tableName="audit_log">
+            <column name="details" valueComputed="CASE WHEN failed THEN action || '_FAILED' ELSE action END"/>
+            <where>
+                action NOT IN ('CLEAR_LOGIN_ATTEMPTS', 'RESEND_EMAIL', 'UPDATE_USER', 'DELETE_USER', 'UPDATE_URL', 'REVOKE_URL', 'ACTIVATE_URL',
+                    'DELETE_URL', 'CREATE_SOURCE', 'UPDATE_SOURCE', 'DELETE_SOURCE', 'REFRESH_SOURCE', 'RESOLVE_REVIEW', 'BLOCK_LINK', 'BLOCK_DOMAIN',
+                    'ALLOW_DOMAIN', 'REMOVE_DOMAIN_RULE', 'BLOCK_USER', 'REACTIVATE_USER', 'DELETE_LINK')
+                AND (details IS NULL OR details = '')
+            </where>
+        </update>
+        <update tableName="audit_log">
+            <column name="action" value="UNKNOWN"/>
+            <where>
+                action NOT IN ('CLEAR_LOGIN_ATTEMPTS', 'RESEND_EMAIL', 'UPDATE_USER', 'DELETE_USER', 'UPDATE_URL', 'REVOKE_URL', 'ACTIVATE_URL',
+                    'DELETE_URL', 'CREATE_SOURCE', 'UPDATE_SOURCE', 'DELETE_SOURCE', 'REFRESH_SOURCE', 'RESOLVE_REVIEW', 'BLOCK_LINK', 'BLOCK_DOMAIN',
+                    'ALLOW_DOMAIN', 'REMOVE_DOMAIN_RULE', 'BLOCK_USER', 'REACTIVATE_USER', 'DELETE_LINK')
+            </where>
+        </update>
+        <rollback/>
+    </changeSet>
+
+</databaseChangeLog>

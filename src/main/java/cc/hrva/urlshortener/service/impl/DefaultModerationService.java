@@ -14,6 +14,7 @@ import cc.hrva.urlshortener.model.DomainRule;
 import cc.hrva.urlshortener.model.LinkReview;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.User;
+import cc.hrva.urlshortener.model.enums.AuditAction;
 import cc.hrva.urlshortener.model.enums.BlockReason;
 import cc.hrva.urlshortener.model.enums.DomainRuleType;
 import cc.hrva.urlshortener.model.enums.ReviewAction;
@@ -117,7 +118,7 @@ public class DefaultModerationService implements ModerationService {
     public UrlResponse blockLink(final long urlId, final BlockReason reason, final String detail, final String performedBy, final String via) {
         final var url = findUrl(urlId);
         final var blocked = blockAndTellOwner(urlId, reason, detail, ReviewResolution.LINK_BLOCKED, performedBy, candidate -> true);
-        auditLogService.log(performedBy, "BLOCK_LINK", TARGET_URL, String.valueOf(urlId),
+        auditLogService.log(performedBy, AuditAction.BLOCK_LINK, TARGET_URL, String.valueOf(urlId),
                 details(via, blocked.isPresent() ? 1 : 0, field(REASON, reason), field("detail", detail)));
         return UrlResponse.from(blocked.orElse(url));
     }
@@ -126,7 +127,7 @@ public class DefaultModerationService implements ModerationService {
     public int blockDomain(final String domain, final String reason, final String performedBy, final String via, final Integer maxLinks) {
         final var ruleDomain = ruleDomain(domain);
         final var blocked = blockLinksOn(ruleDomain, reason, performedBy, maxLinks);
-        auditLogService.log(performedBy, "BLOCK_DOMAIN", TARGET_DOMAIN, ruleDomain, details(via, blocked, field(REASON, reason)));
+        auditLogService.log(performedBy, AuditAction.BLOCK_DOMAIN, TARGET_DOMAIN, ruleDomain, details(via, blocked, field(REASON, reason)));
         return blocked;
     }
 
@@ -134,7 +135,7 @@ public class DefaultModerationService implements ModerationService {
     public int allowDomain(final String domain, final String reason, final String performedBy, final String via) {
         final var ruleDomain = ruleDomain(domain);
         final var trusted = trust(ruleDomain, reason, performedBy);
-        auditLogService.log(performedBy, "ALLOW_DOMAIN", TARGET_DOMAIN, ruleDomain,
+        auditLogService.log(performedBy, AuditAction.ALLOW_DOMAIN, TARGET_DOMAIN, ruleDomain,
                 details(via, trusted.links(), field(REASON, reason), field("reviews", trusted.reviews())));
         return trusted.links();
     }
@@ -171,7 +172,7 @@ public class DefaultModerationService implements ModerationService {
         });
         log.info("Domain rule removed domain={} type={}", ruleDomain, removedType);
         eventPublisher.publishEvent(new BlocklistConfigurationChangedEvent());
-        auditLogService.log(performedBy, "REMOVE_DOMAIN_RULE", TARGET_DOMAIN, ruleDomain, details(via, 0, field("type", removedType)));
+        auditLogService.log(performedBy, AuditAction.REMOVE_DOMAIN_RULE, TARGET_DOMAIN, ruleDomain, details(via, 0, field("type", removedType)));
     }
 
     @Override
@@ -185,7 +186,7 @@ public class DefaultModerationService implements ModerationService {
     public int blockUser(final long userId, final String performedBy, final String via, final Integer maxLinks) {
         final var user = findUser(userId);
         final var blocked = blockLinksOf(user, performedBy, maxLinks);
-        auditLogService.log(performedBy, "BLOCK_USER", TARGET_USER, String.valueOf(userId), details(via, blocked));
+        auditLogService.log(performedBy, AuditAction.BLOCK_USER, TARGET_USER, String.valueOf(userId), details(via, blocked));
         return blocked;
     }
 
@@ -200,7 +201,7 @@ public class DefaultModerationService implements ModerationService {
         final var restored = eachLink(urlRepository.findIdsByOwnerAndBlockReason(user, BlockReason.USER_BLOCKED), Long::longValue,
                 id -> reactivate(id, url -> url.getBlockReason() == BlockReason.USER_BLOCKED && url.getThreatType() == null));
         scammerSignalService.invalidate();
-        auditLogService.log(performedBy, "REACTIVATE_USER", TARGET_USER, String.valueOf(userId), details(via, restored));
+        auditLogService.log(performedBy, AuditAction.REACTIVATE_USER, TARGET_USER, String.valueOf(userId), details(via, restored));
         return restored;
     }
 
@@ -215,7 +216,7 @@ public class DefaultModerationService implements ModerationService {
             case BLOCK_USER -> blockUserFromReview(url, performedBy, via);
         };
         transactionOperations.executeWithoutResult(status -> reviewQueueService.resolveOpen(url, resolutionOf(action), performedBy));
-        auditLogService.log(performedBy, "RESOLVE_REVIEW", TARGET_URL, String.valueOf(urlId), details);
+        auditLogService.log(performedBy, AuditAction.RESOLVE_REVIEW, TARGET_URL, String.valueOf(urlId), details);
     }
 
     @Override
@@ -227,7 +228,7 @@ public class DefaultModerationService implements ModerationService {
         });
         evictFromCache(url.getShortUrl());
         log.info("Link deleted urlId={}", urlId);
-        auditLogService.log(performedBy, "DELETE_LINK", TARGET_URL, String.valueOf(urlId), details(via, 1, field("shortUrl", url.getShortUrl())));
+        auditLogService.log(performedBy, AuditAction.DELETE_LINK, TARGET_URL, String.valueOf(urlId), details(via, 1, field("shortUrl", url.getShortUrl())));
     }
 
     private String trustFromReview(final Url url, final String domain, final String performedBy, final String via) {

@@ -8,6 +8,7 @@ import jakarta.validation.Valid;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import cc.hrva.urlshortener.audit.Audited;
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.dto.CreateUrlDto;
 import cc.hrva.urlshortener.dto.LinkPreviewResponse;
@@ -18,6 +19,7 @@ import cc.hrva.urlshortener.dto.UrlSearchDto;
 import cc.hrva.urlshortener.dto.UrlUpdateDto;
 import cc.hrva.urlshortener.exception.ApiException;
 import cc.hrva.urlshortener.model.PeekUrl;
+import cc.hrva.urlshortener.model.enums.AuditAction;
 import cc.hrva.urlshortener.security.ClientIpResolver;
 import cc.hrva.urlshortener.service.LinkPreviewService;
 import cc.hrva.urlshortener.service.QrCodeService;
@@ -151,6 +153,7 @@ public class UrlController {
     @ApiResponse(responseCode = "404", description = "URL not found")
     @PutMapping("/{id}")
     @PreAuthorize("hasAnyRole('ROLE_ADMIN', 'ROLE_USER')")
+    @Audited(AuditAction.UPDATE_URL)
     public ResponseEntity<UrlResponse> updateUrl(
             @PathVariable final Long id,
             @Valid @RequestBody final UrlUpdateDto urlUpdateDto) {
@@ -201,6 +204,7 @@ public class UrlController {
     @Operation(summary = "Deactivate a short URL", description = "Deactivate a short URL by its ID. Authentication required.")
     @ApiResponse(responseCode = "404", description = "URL not found")
     @PatchMapping("/{id}/deactivate")
+    @Audited(AuditAction.REVOKE_URL)
     public ResponseEntity<UrlResponse> revokeUrl(@PathVariable("id") final Long id) {
         return ResponseEntity.ok(urlService.revokeUrl(id));
     }
@@ -208,6 +212,7 @@ public class UrlController {
     @Operation(summary = "Activate a short URL", description = "Reactivate a previously deactivated short URL by its ID. Authentication required.")
     @ApiResponse(responseCode = "404", description = "URL not found")
     @PatchMapping("/{id}/activate")
+    @Audited(AuditAction.ACTIVATE_URL)
     public ResponseEntity<UrlResponse> activateUrl(@PathVariable("id") final Long id) {
         return ResponseEntity.ok(urlService.activateUrl(id));
     }
@@ -215,6 +220,7 @@ public class UrlController {
     @Operation(summary = "Delete a short URL", description = "Permanently delete a short URL by its ID. Authentication required.")
     @ApiResponse(responseCode = "404", description = "URL not found")
     @DeleteMapping("/{id}")
+    @Audited(AuditAction.DELETE_URL)
     public ResponseEntity<Void> deleteUrl(@PathVariable("id") final Long id) {
         urlService.deleteUrl(id);
 

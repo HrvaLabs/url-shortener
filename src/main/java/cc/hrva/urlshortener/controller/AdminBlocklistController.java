@@ -1,7 +1,9 @@
 package cc.hrva.urlshortener.controller;
 
+import cc.hrva.urlshortener.audit.Audited;
 import cc.hrva.urlshortener.dto.BlocklistSourceDto;
 import cc.hrva.urlshortener.dto.BlocklistSourceResponse;
+import cc.hrva.urlshortener.model.enums.AuditAction;
 import cc.hrva.urlshortener.service.BlocklistSourceService;
 import io.swagger.v3.oas.annotations.Hidden;
 import java.util.List;
@@ -33,12 +35,14 @@ public class AdminBlocklistController {
 
     @PostMapping
     @PreAuthorize("hasRole('ROLE_ADMIN')")
+    @Audited(AuditAction.CREATE_SOURCE)
     public ResponseEntity<BlocklistSourceResponse> createSource(@RequestBody final BlocklistSourceDto blocklistSourceDto) {
         return ResponseEntity.ok(blocklistSourceService.create(blocklistSourceDto));
     }
 
     @PutMapping("/{id}")
     @PreAuthorize("hasRole('ROLE_ADMIN')")
+    @Audited(AuditAction.UPDATE_SOURCE)
     public ResponseEntity<BlocklistSourceResponse> updateSource(@PathVariable("id") final long id,
                                                                 @RequestBody final BlocklistSourceDto blocklistSourceDto) {
         return ResponseEntity.ok(blocklistSourceService.update(id, blocklistSourceDto));
@@ -46,6 +50,7 @@ public class AdminBlocklistController {
 
     @DeleteMapping("/{id}")
     @PreAuthorize("hasRole('ROLE_ADMIN')")
+    @Audited(AuditAction.DELETE_SOURCE)
     public ResponseEntity<Void> deleteSource(@PathVariable("id") final long id) {
         blocklistSourceService.delete(id);
 
@@ -54,6 +59,7 @@ public class AdminBlocklistController {
 
     @PostMapping("/{id}/refresh")
     @PreAuthorize("hasRole('ROLE_ADMIN')")
+    @Audited(AuditAction.REFRESH_SOURCE)
     public ResponseEntity<BlocklistSourceResponse> refreshSource(@PathVariable("id") final long id) {
         return ResponseEntity.ok(blocklistSourceService.refresh(id));
     }

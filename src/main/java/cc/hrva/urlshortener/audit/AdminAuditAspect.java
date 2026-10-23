@@ -31,23 +31,11 @@ public class AdminAuditAspect {
     private final UserService userService;
     private final JsonMapper jsonMapper;
 
-    @Around("execution(* cc.hrva.urlshortener.controller.AdminController.clearLoginAttempts(..)) || " +
-            "execution(* cc.hrva.urlshortener.controller.AdminEmailLogController.resendEmail(..)) || " +
-            "execution(* cc.hrva.urlshortener.controller.UserController.deleteUser(..)) || " +
-            "execution(* cc.hrva.urlshortener.controller.UserController.updateUser(..)) || " +
-            "execution(* cc.hrva.urlshortener.controller.UrlController.revokeUrl(..)) || " +
-            "execution(* cc.hrva.urlshortener.controller.UrlController.activateUrl(..)) || " +
-            "execution(* cc.hrva.urlshortener.controller.UrlController.deleteUrl(..)) || " +
-            "execution(* cc.hrva.urlshortener.controller.UrlController.updateUrl(..)) || " +
-            "execution(* cc.hrva.urlshortener.controller.AdminBlocklistController.createSource(..)) || " +
-            "execution(* cc.hrva.urlshortener.controller.AdminBlocklistController.updateSource(..)) || " +
-            "execution(* cc.hrva.urlshortener.controller.AdminBlocklistController.deleteSource(..)) || " +
-            "execution(* cc.hrva.urlshortener.controller.AdminBlocklistController.refreshSource(..))")
-    public Object logAdminAction(final ProceedingJoinPoint joinPoint) throws Throwable {
+    @Around("@annotation(audited)")
+    public Object logAdminAction(final ProceedingJoinPoint joinPoint, final Audited audited) throws Throwable {
         final var user = userService.getUserFromToken();
         final var performedBy = user != null ? user.getEmail() : "anonymous";
         final var signature = joinPoint.getSignature();
-        final var methodName = signature.getName();
         final var args = joinPoint.getArgs();
         final var targetType = targetType(signature.getDeclaringType());
         final var targeted = args.length > 0 && args[0] != null && BeanUtils.isSimpleValueType(args[0].getClass());
@@ -56,10 +44,10 @@ public class AdminAuditAspect {
 
         try {
             final var result = joinPoint.proceed();
-            auditLogService.log(performedBy, methodName, targetType, targeted ? targetIdentifier : createdIdentifier(result), details);
+            auditLogService.log(performedBy, audited.value(), targetType, targeted ? targetIdentifier : createdIdentifier(result), details);
             return result;
         } catch (final Throwable e) {
-            auditLogService.log(performedBy, methodName + "_FAILED", targetType, targetIdentifier, e.getMessage());
+            auditLogService.logFailure(performedBy, audited.value(), targetType, targetIdentifier, e.getMessage());
             throw e;
         }
     }

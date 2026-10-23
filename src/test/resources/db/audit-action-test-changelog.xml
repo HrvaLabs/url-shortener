@@ -1,0 +1,173 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.9.xsd">
+
+    <include file="classpath:/db/changelog/008-audit-log.xml"/>
+
+    <changeSet author="test" id="audit-log-legacy-actions">
+        <insert tableName="audit_log">
+            <column name="performed_by" value="admin@hrva.cc"/>
+            <column name="action" value="clearLoginAttempts"/>
+            <column name="target_type" value="Legacy"/>
+            <column name="target_identifier" value="clearLoginAttempts"/>
+            <column name="details" value=""/>
+            <column name="performed_at" valueDate="2026-05-17T10:00:00"/>
+        </insert>
+        <insert tableName="audit_log">
+            <column name="performed_by" value="admin@hrva.cc"/>
+            <column name="action" value="resendEmail"/>
+            <column name="target_type" value="Legacy"/>
+            <column name="target_identifier" value="resendEmail"/>
+            <column name="details" value=""/>
+            <column name="performed_at" valueDate="2026-05-17T11:00:00"/>
+        </insert>
+        <insert tableName="audit_log">
+            <column name="performed_by" value="admin@hrva.cc"/>
+            <column name="action" value="updateUser"/>
+            <column name="target_type" value="Legacy"/>
+            <column name="target_identifier" value="updateUser"/>
+            <column name="details" value="active: false"/>
+            <column name="performed_at" valueDate="2026-05-17T12:00:00"/>
+        </insert>
+        <insert tableName="audit_log">
+            <column name="performed_by" value="admin@hrva.cc"/>
+            <column name="action" value="deleteUser"/>
+            <column name="target_type" value="Legacy"/>
+            <column name="target_identifier" value="deleteUser"/>
+            <column name="details" value=""/>
+            <column name="performed_at" valueDate="2026-05-17T13:00:00"/>
+        </insert>
+        <insert tableName="audit_log">
+            <column name="performed_by" value="admin@hrva.cc"/>
+            <column name="action" value="updateUrl"/>
+            <column name="target_type" value="Legacy"/>
+            <column name="target_identifier" value="updateUrl"/>
+            <column name="details" value="visitLimit: 10"/>
+            <column name="performed_at" valueDate="2026-05-17T14:00:00"/>
+        </insert>
+        <insert tableName="audit_log">
+            <column name="performed_by" value="admin@hrva.cc"/>
+            <column name="action" value="revokeUrl"/>
+            <column name="target_type" value="Legacy"/>
+            <column name="target_identifier" value="revokeUrl"/>
+            <column name="details" value=""/>
+            <column name="performed_at" valueDate="2026-05-17T15:00:00"/>
+        </insert>
+        <insert tableName="audit_log">
+            <column name="performed_by" value="admin@hrva.cc"/>
+            <column name="action" value="deactivateUrl"/>
+            <column name="target_type" value="Legacy"/>
+            <column name="target_identifier" value="deactivateUrl"/>
+            <column name="details" value=""/>
+            <column name="performed_at" valueDate="2026-05-17T16:00:00"/>
+        </insert>
+        <insert tableName="audit_log">
+            <column name="performed_by" value="admin@hrva.cc"/>
+            <column name="action" value="activateUrl"/>
+            <column name="target_type" value="Legacy"/>
+            <column name="target_identifier" value="activateUrl"/>
+            <column name="details" value=""/>
+            <column name="performed_at" valueDate="2026-05-17T17:00:00"/>
+        </insert>
+        <insert tableName="audit_log">
+            <column name="performed_by" value="admin@hrva.cc"/>
+            <column name="action" value="deleteUrl"/>
+            <column name="target_type" value="Legacy"/>
+            <column name="target_identifier" value="deleteUrl"/>
+            <column name="details" value=""/>
+            <column name="performed_at" valueDate="2026-05-17T18:00:00"/>
+        </insert>
+        <insert tableName="audit_log">
+            <column name="performed_by" value="admin@hrva.cc"/>
+            <column name="action" value="createSource"/>
+            <column name="target_type" value="Legacy"/>
+            <column name="target_identifier" value="createSource"/>
+            <column name="details" value="name: HaGeZi Fake"/>
+            <column name="performed_at" valueDate="2026-05-17T19:00:00"/>
+        </insert>
+        <insert tableName="audit_log">
+            <column name="performed_by" value="admin@hrva.cc"/>
+            <column name="action" value="updateSource"/>
+            <column name="target_type" value="Legacy"/>
+            <column name="target_identifier" value="updateSource"/>
+            <column name="details" value=""/>
+            <column name="performed_at" valueDate="2026-05-18T10:00:00"/>
+        </insert>
+        <insert tableName="audit_log">
+            <column name="performed_by" value="admin@hrva.cc"/>
+            <column name="action" value="deleteSource"/>
+            <column name="target_type" value="Legacy"/>
+            <column name="target_identifier" value="deleteSource"/>
+            <column name="details" value=""/>
+            <column name="performed_at" valueDate="2026-05-18T11:00:00"/>
+        </insert>
+        <insert tableName="audit_log">
+            <column name="performed_by" value="admin@hrva.cc"/>
+            <column name="action" value="refreshSource"/>
+            <column name="target_type" value="Legacy"/>
+            <column name="target_identifier" value="refreshSource"/>
+            <column name="details" value=""/>
+            <column name="performed_at" valueDate="2026-05-18T12:00:00"/>
+        </insert>
+        <insert tableName="audit_log">
+            <column name="performed_by" value="admin@hrva.cc"/>
+            <column name="action" value="updateUrl_FAILED"/>
+            <column name="target_type" value="Legacy"/>
+            <column name="target_identifier" value="updateUrl_FAILED"/>
+            <column name="details" value="Url with id 9 doesn&apos;t exist"/>
+            <column name="performed_at" valueDate="2026-05-18T13:00:00"/>
+        </insert>
+        <insert tableName="audit_log">
+            <column name="performed_by" value="admin@hrva.cc"/>
+            <column name="action" value="createSource_FAILED"/>
+            <column name="target_type" value="Legacy"/>
+            <column name="target_identifier" value="createSource_FAILED"/>
+            <column name="performed_at" valueDate="2026-05-18T14:00:00"/>
+        </insert>
+        <insert tableName="audit_log">
+            <column name="performed_by" value="admin@hrva.cc"/>
+            <column name="action" value="RESOLVE_REVIEW"/>
+            <column name="target_type" value="Legacy"/>
+            <column name="target_identifier" value="RESOLVE_REVIEW"/>
+            <column name="details" value="action: OK, links: 0, via: admin"/>
+            <column name="performed_at" valueDate="2026-05-18T15:00:00"/>
+        </insert>
+        <insert tableName="audit_log">
+            <column name="performed_by" value="admin@hrva.cc"/>
+            <column name="action" value="BLOCK_DOMAIN"/>
+            <column name="target_type" value="Legacy"/>
+            <column name="target_identifier" value="BLOCK_DOMAIN"/>
+            <column name="details" value="reason: phishing wave, links: 3, via: mcp"/>
+            <column name="performed_at" valueDate="2026-05-18T16:00:00"/>
+        </insert>
+        <insert tableName="audit_log">
+            <column name="performed_by" value="admin@hrva.cc"/>
+            <column name="action" value="ancientThing"/>
+            <column name="target_type" value="Legacy"/>
+            <column name="target_identifier" value="ancientThing"/>
+            <column name="details" value=""/>
+            <column name="performed_at" valueDate="2026-05-18T17:00:00"/>
+        </insert>
+        <insert tableName="audit_log">
+            <column name="performed_by" value="admin@hrva.cc"/>
+            <column name="action" value="ancientThing_FAILED"/>
+            <column name="target_type" value="Legacy"/>
+            <column name="target_identifier" value="ancientThing_FAILED"/>
+            <column name="performed_at" valueDate="2026-05-18T18:00:00"/>
+        </insert>
+        <insert tableName="audit_log">
+            <column name="performed_by" value="admin@hrva.cc"/>
+            <column name="action" value="mysteryAction"/>
+            <column name="target_type" value="Legacy"/>
+            <column name="target_identifier" value="mysteryAction"/>
+            <column name="details" value="kept as it was"/>
+            <column name="performed_at" valueDate="2026-05-18T19:00:00"/>
+        </insert>
+    </changeSet>
+
+    <include file="classpath:/db/changelog/025-audit-log-typed-action.xml"/>
+
+</databaseChangeLog>

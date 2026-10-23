@@ -2,14 +2,11 @@ package cc.hrva.urlshortener.controller;
 
 import cc.hrva.urlshortener.dto.ReviewEntryResponse;
 import cc.hrva.urlshortener.dto.ReviewResolveDto;
-import cc.hrva.urlshortener.exception.ApiException;
-import cc.hrva.urlshortener.model.enums.ReviewAction;
 import cc.hrva.urlshortener.service.ModerationService;
 import cc.hrva.urlshortener.service.ReviewQueueService;
 import io.swagger.v3.oas.annotations.Hidden;
-import java.util.Optional;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
-import org.apache.commons.lang3.EnumUtils;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.web.PageableDefault;
@@ -31,7 +28,6 @@ import org.springframework.web.bind.annotation.RestController;
 public class AdminReviewQueueController {
 
     private static final String VIA = "admin";
-    private static final String ACTION_INVALID = "Action must be OK, TRUST_DOMAIN, BLOCK_LINK, BLOCK_DOMAIN or BLOCK_USER";
 
     private final ReviewQueueService reviewQueueService;
     private final ModerationService moderationService;
@@ -47,11 +43,9 @@ public class AdminReviewQueueController {
 
     @PostMapping("/{urlId}/resolve")
     @PreAuthorize("hasRole('ROLE_ADMIN')")
-    public ResponseEntity<Void> resolve(@PathVariable("urlId") final long urlId, @RequestBody final ReviewResolveDto reviewResolveDto,
+    public ResponseEntity<Void> resolve(@PathVariable("urlId") final long urlId, @Valid @RequestBody final ReviewResolveDto reviewResolveDto,
                                         final Authentication authentication) {
-        final var action = Optional.ofNullable(EnumUtils.getEnum(ReviewAction.class, reviewResolveDto.action()))
-                .orElseThrow(() -> new ApiException(ACTION_INVALID));
-        moderationService.resolveReview(urlId, action, reviewResolveDto.domain(), authentication.getName(), VIA);
+        moderationService.resolveReview(urlId, reviewResolveDto.action(), reviewResolveDto.domain(), authentication.getName(), VIA);
 
         return ResponseEntity.noContent().build();
     }

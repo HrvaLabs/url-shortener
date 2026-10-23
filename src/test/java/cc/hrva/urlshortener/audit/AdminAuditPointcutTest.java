@@ -6,6 +6,7 @@ import cc.hrva.urlshortener.dto.BlocklistSourceResponse;
 import cc.hrva.urlshortener.exception.BlocklistSourceNotFoundException;
 import cc.hrva.urlshortener.exception.UrlValidationException;
 import cc.hrva.urlshortener.model.User;
+import cc.hrva.urlshortener.model.enums.AuditAction;
 import cc.hrva.urlshortener.model.enums.BlocklistAction;
 import cc.hrva.urlshortener.model.enums.SourceKind;
 import cc.hrva.urlshortener.service.AuditLogService;
@@ -63,7 +64,7 @@ class AdminAuditPointcutTest {
 
         controller.createSource(SOURCE);
 
-        verify(auditLogService).log(ADMIN, "createSource", "Blocklist", "17", SOURCE_DETAILS);
+        verify(auditLogService).log(ADMIN, AuditAction.CREATE_SOURCE, "Blocklist", "17", SOURCE_DETAILS);
     }
 
     @Test
@@ -73,7 +74,7 @@ class AdminAuditPointcutTest {
 
         controller.updateSource(6L, keyed);
 
-        verify(auditLogService).log(ADMIN, "updateSource", "Blocklist", "6",
+        verify(auditLogService).log(ADMIN, AuditAction.UPDATE_SOURCE, "Blocklist", "6",
                 "action: BLOCK, enabled: true, kind: LINKS, name: URLhaus, refreshIntervalHours: 1");
     }
 
@@ -83,14 +84,14 @@ class AdminAuditPointcutTest {
 
         assertThatThrownBy(() -> controller.createSource(SOURCE)).isInstanceOf(UrlValidationException.class);
 
-        verify(auditLogService).log(ADMIN, "createSource_FAILED", "Blocklist", "", "Enter a name for the list");
+        verify(auditLogService).logFailure(ADMIN, AuditAction.CREATE_SOURCE, "Blocklist", "", "Enter a name for the list");
     }
 
     @Test
     void editingABlocklistSourceIsAuditedWithItsIdAndTheSubmittedFields() {
         controller.updateSource(3L, SOURCE);
 
-        verify(auditLogService).log(ADMIN, "updateSource", "Blocklist", "3", SOURCE_DETAILS);
+        verify(auditLogService).log(ADMIN, AuditAction.UPDATE_SOURCE, "Blocklist", "3", SOURCE_DETAILS);
     }
 
     @Test
@@ -98,14 +99,14 @@ class AdminAuditPointcutTest {
         controller.deleteSource(3L);
 
         verify(blocklistSourceService).delete(3L);
-        verify(auditLogService).log(ADMIN, "deleteSource", "Blocklist", "3", "");
+        verify(auditLogService).log(ADMIN, AuditAction.DELETE_SOURCE, "Blocklist", "3", "");
     }
 
     @Test
     void refreshingABlocklistSourceIsAudited() {
         controller.refreshSource(3L);
 
-        verify(auditLogService).log(ADMIN, "refreshSource", "Blocklist", "3", "");
+        verify(auditLogService).log(ADMIN, AuditAction.REFRESH_SOURCE, "Blocklist", "3", "");
     }
 
     @Test
@@ -114,7 +115,7 @@ class AdminAuditPointcutTest {
 
         assertThatThrownBy(() -> controller.deleteSource(99L)).isInstanceOf(BlocklistSourceNotFoundException.class);
 
-        verify(auditLogService).log(ADMIN, "deleteSource_FAILED", "Blocklist", "99", "Blocklist source not found");
+        verify(auditLogService).logFailure(ADMIN, AuditAction.DELETE_SOURCE, "Blocklist", "99", "Blocklist source not found");
     }
 
     @Test

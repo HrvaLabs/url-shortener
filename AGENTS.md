@@ -62,7 +62,7 @@ java -jar "$E2E/app.jar" --spring.profiles.active=local --server.port=18080 \
 ## Package Structure
 ```
 cc.hrva.urlshortener
-├── audit/           # AdminAuditAspect
+├── audit/           # AdminAuditAspect, @Audited
 ├── client/          # GoogleSafeBrowsingApi, PublicHttpFetcher (public-address guard), RedirectFollower, DiscordWebhookClient
 ├── configuration/   # Beans, props, cache, security, web config, exception handler, executors, Redis client
 ├── controller/      # REST controllers
@@ -87,7 +87,7 @@ cc.hrva.urlshortener
 - **Pagination**: `@PageableDefault(size=20)` on all list endpoints — pass `?page=0&size=20` query params
 - **Response DTOs**: Controllers return `UrlResponse`, `ApiKeyResponse`, `UserDto` — NOT JPA entities directly
 - **Error format**: `{"error": "message"}` via `GlobalExceptionHandler` (`@ControllerAdvice`)
-- **Exception → HTTP status mapping**: `UserNotFoundException`/`ApiKeyNotFoundException`/`BlocklistSourceNotFoundException`/`DomainRuleNotFoundException` → 404, `EmailExistsException`/`ShortUrlAlreadyExistsException` → 409, `NoAuthorizationException` → 403, `BadCredentialsException` → 401, `RateLimitExceededException` → 429, a malformed body, a mistyped or missing parameter → 400, an unsupported media type → 415, `CommonException` (catch-all for all custom exceptions not handled above) → 400, everything else → 500.
+- **Exception → HTTP status mapping**: `UserNotFoundException`/`ApiKeyNotFoundException`/`BlocklistSourceNotFoundException`/`DomainRuleNotFoundException` → 404, `EmailExistsException`/`ShortUrlAlreadyExistsException` → 409, `NoAuthorizationException` → 403, `BadCredentialsException` → 401, `RateLimitExceededException` → 429, a malformed body, a mistyped or missing parameter → 400 (an unknown enum value in a body names the allowed ones: `{"error": "Action must be OK, TRUST_DOMAIN, BLOCK_LINK, BLOCK_DOMAIN or BLOCK_USER"}`; enums are read by name only, never by number), an unsupported media type → 415, `CommonException` (catch-all for all custom exceptions not handled above) → 400, everything else → 500.
 - **Validation errors**: Return `{"field": "message"}` map on 400.
 
 ## Key Endpoints
@@ -120,7 +120,7 @@ cc.hrva.urlshortener
 | GET | `/api/v1/analytics/overview` | Required | Aggregate URL analytics for current user |
 | GET | `/api/v1/analytics/urls/{id}` | Required | Per-URL analytics (owner/admin) |
 | GET | `/api/v1/admin/stats` | ROLE_ADMIN | Dashboard stats (users, URLs, cache, etc.) |
-| GET | `/api/v1/admin/audit-log` | ROLE_ADMIN | Paginated admin audit trail |
+| GET | `/api/v1/admin/audit-log` | ROLE_ADMIN | Paginated admin audit trail, newest first; each entry has `action` (an `AuditAction` name) and `failed`. `?action=` keeps one action (an unknown name → 400) |
 | GET | `/api/v1/admin/email-log` | ROLE_ADMIN | Paginated email delivery log |
 | GET | `/api/v1/admin/login-attempts` | ROLE_ADMIN | IP → attempt count map |
 | DELETE | `/api/v1/admin/login-attempts` | ROLE_ADMIN | Clear all rate limits |
@@ -326,11 +326,13 @@ Jobs run on a 4-thread scheduler (`spring.task.scheduling.pool.size: 4` in `appl
 
 ## New Models (recently added)
 
-### AuditLog (`audit_log` table, migration `008-audit-log.xml`)
-- Tracks admin actions: performedBy, action, targetType, targetIdentifier, details, performedAt
-- Auto-logged via `AdminAuditAspect` (AOP around admin controller methods). `targetType` is the controller name without `Controller` and a leading `Admin` (`AdminEmailLogController` → `EmailLog`).
-- `details` lists only the submitted, non-null fields of the request body, alphabetically (`longUrl: …, visitLimit: 10`); a password is written as `changed`/`removed`, never its value. Failed actions are `<method>_FAILED` with the exception message. Migration `023-audit-log-redact-url-passwords.xml` redacted the link passwords older rows held in plain text.
-- Endpoint: `GET /api/v1/admin/audit-log`
+### AuditLog (`audit_log` table, migrations `008-audit-log.xml`, `025-audit-log-typed-action.xml`)
+- Tracks admin actions: performedBy, action, failed, targetType, targetIdentifier, details, performedAt
+- `action` is an `AuditAction` (`model/enums`), stored by name (`@Enumerated(EnumType.STRING)`): one constant per audited controller method (`REVOKE_URL`, `UPDATE_USER`, `CREATE_SOURCE`, …), the `ModerationService` actions (`RESOLVE_REVIEW`, `BLOCK_LINK`, `BLOCK_DOMAIN`, `ALLOW_DOMAIN`, `REMOVE_DOMAIN_RULE`, `BLOCK_USER`, `REACTIVATE_USER`, `DELETE_LINK`) and `UNKNOWN`, which only migrated rows carry.
+- Auto-logged via `AdminAuditAspect` around the controller methods annotated `@Audited(AuditAction.…)`; the annotation names the action, so a method can't be audited without one. `AuditedMethodsTest` pins the audited methods and their actions, so adding or dropping one fails until the test is updated. `targetType` is the controller name without `Controller` and a leading `Admin` (`AdminEmailLogController` → `EmailLog`).
+- `details` lists only the submitted, non-null fields of the request body, alphabetically (`longUrl: …, visitLimit: 10`); a password is written as `changed`/`removed`, never its value. A failed action keeps its action with `failed = true` (`AuditLogService.logFailure`) and the exception message as details. Migration `023-audit-log-redact-url-passwords.xml` redacted the link passwords older rows held in plain text.
+- Migration 025 added `failed` and rewrote the old free-text actions: the aspect's camelCase method names (every one it ever audited) became their constants, a `…_FAILED` suffix became the base action with `failed = true`, and anything else became `UNKNOWN`, its old value copied into `details` when those were empty. `AuditActionMigrationTest` runs it on legacy rows.
+- Endpoint: `GET /api/v1/admin/audit-log` (`?action=`)
 
 ### EmailLog (`email_log` table, migration `009-email-log.xml`)
 - Records email sending: sender, recipient (comma-separated), subject, status (SENDING/SENT/FAILED/RESENT), errorMessage, sentAt, createdAt, body

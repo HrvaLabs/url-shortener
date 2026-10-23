@@ -30,5 +30,6 @@
     <include file="classpath:/db/changelog/022-email-log-resend.xml"/>
     <include file="classpath:/db/changelog/023-audit-log-redact-url-passwords.xml"/>
     <include file="classpath:/db/changelog/024-dynamic-link-checks.xml"/>
+    <include file="classpath:/db/changelog/025-audit-log-typed-action.xml"/>
 
 </databaseChangeLog>

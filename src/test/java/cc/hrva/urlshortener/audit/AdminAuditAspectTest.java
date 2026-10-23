@@ -7,8 +7,10 @@ import cc.hrva.urlshortener.dto.UrlUpdateDto;
 import cc.hrva.urlshortener.dto.UserUpdateDto;
 import cc.hrva.urlshortener.exception.UrlNotFoundException;
 import cc.hrva.urlshortener.model.User;
+import cc.hrva.urlshortener.model.enums.AuditAction;
 import cc.hrva.urlshortener.service.AuditLogService;
 import cc.hrva.urlshortener.service.UserService;
+import java.util.Arrays;
 import java.util.Set;
 import org.aspectj.lang.ProceedingJoinPoint;
 import org.aspectj.lang.Signature;
@@ -48,94 +50,98 @@ class AdminAuditAspectTest {
         when(joinPoint.getSignature()).thenReturn(signature);
     }
 
-    private void invoking(final Class<?> controller, final String method, final Object... args) {
+    private Audited invoking(final Class<?> controller, final String method, final Object... args) {
         doReturn(controller).when(signature).getDeclaringType();
-        when(signature.getName()).thenReturn(method);
         when(joinPoint.getArgs()).thenReturn(args);
+        return Arrays.stream(controller.getDeclaredMethods())
+                .filter(candidate -> candidate.getName().equals(method))
+                .findFirst()
+                .map(candidate -> candidate.getAnnotation(Audited.class))
+                .orElseThrow();
     }
 
     @Test
     void describesOnlyTheSubmittedFieldsOfAnUpdate() throws Throwable {
-        invoking(UrlController.class, "updateUrl", 265L, UrlUpdateDto.builder()
+        final var audited = invoking(UrlController.class, "updateUrl", 265L, UrlUpdateDto.builder()
                 .id(265L)
                 .longUrl("https://new.example/page")
                 .visitLimit(10L)
                 .tags(Set.of("work"))
                 .build());
 
-        aspect.logAdminAction(joinPoint);
+        aspect.logAdminAction(joinPoint, audited);
 
-        verify(auditLogService).log("admin@hrva.cc", "updateUrl", "Url", "265",
+        verify(auditLogService).log("admin@hrva.cc", AuditAction.UPDATE_URL, "Url", "265",
                 "longUrl: https://new.example/page, tags: [work], visitLimit: 10");
     }
 
     @Test
     void recordsWhatWasSubmittedEvenIfTheActionChangesItsArguments() throws Throwable {
         final var update = UrlUpdateDto.builder().id(265L).visitLimit(10L).build();
-        invoking(UrlController.class, "updateUrl", 265L, update);
+        final var audited = invoking(UrlController.class, "updateUrl", 265L, update);
         when(joinPoint.proceed()).thenAnswer(invocation -> {
             update.setVisitLimit(99L);
             return null;
         });
 
-        aspect.logAdminAction(joinPoint);
+        aspect.logAdminAction(joinPoint, audited);
 
-        verify(auditLogService).log("admin@hrva.cc", "updateUrl", "Url", "265", "visitLimit: 10");
+        verify(auditLogService).log("admin@hrva.cc", AuditAction.UPDATE_URL, "Url", "265", "visitLimit: 10");
     }
 
     @Test
     void neverRecordsTheLinkPassword() throws Throwable {
-        invoking(UrlController.class, "updateUrl", 265L, UrlUpdateDto.builder().id(265L).password("s3cret").build());
+        final var audited = invoking(UrlController.class, "updateUrl", 265L, UrlUpdateDto.builder().id(265L).password("s3cret").build());
 
-        aspect.logAdminAction(joinPoint);
+        aspect.logAdminAction(joinPoint, audited);
 
-        verify(auditLogService).log("admin@hrva.cc", "updateUrl", "Url", "265", "password: changed");
+        verify(auditLogService).log("admin@hrva.cc", AuditAction.UPDATE_URL, "Url", "265", "password: changed");
     }
 
     @Test
     void recordsThatTheLinkPasswordWasRemoved() throws Throwable {
-        invoking(UrlController.class, "updateUrl", 265L, UrlUpdateDto.builder().id(265L).password("").build());
+        final var audited = invoking(UrlController.class, "updateUrl", 265L, UrlUpdateDto.builder().id(265L).password("").build());
 
-        aspect.logAdminAction(joinPoint);
+        aspect.logAdminAction(joinPoint, audited);
 
-        verify(auditLogService).log("admin@hrva.cc", "updateUrl", "Url", "265", "password: removed");
+        verify(auditLogService).log("admin@hrva.cc", AuditAction.UPDATE_URL, "Url", "265", "password: removed");
     }
 
     @Test
     void describesAUserUpdate() throws Throwable {
-        invoking(UserController.class, "updateUser", 26L, UserUpdateDto.builder().id(26L).active(false).build());
+        final var audited = invoking(UserController.class, "updateUser", 26L, UserUpdateDto.builder().id(26L).active(false).build());
 
-        aspect.logAdminAction(joinPoint);
+        aspect.logAdminAction(joinPoint, audited);
 
-        verify(auditLogService).log("admin@hrva.cc", "updateUser", "User", "26", "active: false");
+        verify(auditLogService).log("admin@hrva.cc", AuditAction.UPDATE_USER, "User", "26", "active: false");
     }
 
     @Test
     void leavesDetailsEmptyWhenTheTargetIsTheOnlyArgument() throws Throwable {
-        invoking(UrlController.class, "revokeUrl", 12L);
+        final var audited = invoking(UrlController.class, "revokeUrl", 12L);
 
-        aspect.logAdminAction(joinPoint);
+        aspect.logAdminAction(joinPoint, audited);
 
-        verify(auditLogService).log("admin@hrva.cc", "revokeUrl", "Url", "12", "");
+        verify(auditLogService).log("admin@hrva.cc", AuditAction.REVOKE_URL, "Url", "12", "");
     }
 
     @Test
     void namesAdminControllersByWhatTheyManage() throws Throwable {
-        invoking(AdminEmailLogController.class, "resendEmail", 7L);
+        final var audited = invoking(AdminEmailLogController.class, "resendEmail", 7L);
 
-        aspect.logAdminAction(joinPoint);
+        aspect.logAdminAction(joinPoint, audited);
 
-        verify(auditLogService).log("admin@hrva.cc", "resendEmail", "EmailLog", "7", "");
+        verify(auditLogService).log("admin@hrva.cc", AuditAction.RESEND_EMAIL, "EmailLog", "7", "");
     }
 
     @Test
     void recordsAFailedActionWithItsReason() throws Throwable {
-        invoking(UrlController.class, "updateUrl", 9L, UrlUpdateDto.builder().id(9L).visitLimit(1L).build());
+        final var audited = invoking(UrlController.class, "updateUrl", 9L, UrlUpdateDto.builder().id(9L).visitLimit(1L).build());
         when(joinPoint.proceed()).thenThrow(new UrlNotFoundException("Url with id 9 doesn't exist"));
 
-        assertThatThrownBy(() -> aspect.logAdminAction(joinPoint)).isInstanceOf(UrlNotFoundException.class);
+        assertThatThrownBy(() -> aspect.logAdminAction(joinPoint, audited)).isInstanceOf(UrlNotFoundException.class);
 
-        verify(auditLogService).log("admin@hrva.cc", "updateUrl_FAILED", "Url", "9", "Url with id 9 doesn't exist");
+        verify(auditLogService).logFailure("admin@hrva.cc", AuditAction.UPDATE_URL, "Url", "9", "Url with id 9 doesn't exist");
     }
 
 }

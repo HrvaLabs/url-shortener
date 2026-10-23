@@ -13,6 +13,7 @@ import cc.hrva.urlshortener.model.DomainRule;
 import cc.hrva.urlshortener.model.LinkReview;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.User;
+import cc.hrva.urlshortener.model.enums.AuditAction;
 import cc.hrva.urlshortener.model.enums.BlockReason;
 import cc.hrva.urlshortener.model.enums.DomainRuleType;
 import cc.hrva.urlshortener.model.enums.ReviewAction;
@@ -234,7 +235,7 @@ class DefaultModerationServiceTest {
         assertThat(rules.get("jofogas.cards"))
                 .extracting(DomainRule::getType, DomainRule::getReason, DomainRule::getCreatedBy)
                 .containsExactly(DomainRuleType.BLOCK, "phishing wave", ADMIN);
-        verify(auditLogService).log(ADMIN, "BLOCK_DOMAIN", "Domain", "jofogas.cards", "reason: phishing wave, links: 3, via: admin");
+        verify(auditLogService).log(ADMIN, AuditAction.BLOCK_DOMAIN, "Domain", "jofogas.cards", "reason: phishing wave, links: 3, via: admin");
         verifyNoMoreInteractions(auditLogService);
         assertThat(outOfPlace).isEmpty();
     }
@@ -413,7 +414,7 @@ class DefaultModerationServiceTest {
         assertThat(after.getBlockReason()).isEqualTo(BlockReason.DOMAIN_RULE);
         verify(cache, never()).evict("s11");
         verify(sendingEmailService, never()).sendEmailUrlBlocked(owner, failing);
-        verify(auditLogService).log(ADMIN, "BLOCK_DOMAIN", "Domain", "jofogas.cards", "links: 2, via: admin");
+        verify(auditLogService).log(ADMIN, AuditAction.BLOCK_DOMAIN, "Domain", "jofogas.cards", "links: 2, via: admin");
     }
 
     @Test
@@ -497,7 +498,7 @@ class DefaultModerationServiceTest {
         assertThat(byAdmin.getBlockReason()).isEqualTo(BlockReason.ADMIN);
         verify(reviewQueueService).resolveOpen(flagged, ReviewResolution.DOMAIN_TRUSTED, ADMIN);
         verify(reviewQueueService, never()).resolveOpen(eq(flaggedElsewhere), any(), any());
-        verify(auditLogService).log(ADMIN, "ALLOW_DOMAIN", "Domain", "jofogas.cards", "reason: false positive, reviews: 1, links: 3, via: admin");
+        verify(auditLogService).log(ADMIN, AuditAction.ALLOW_DOMAIN, "Domain", "jofogas.cards", "reason: false positive, reviews: 1, links: 3, via: admin");
         verifyNoMoreInteractions(auditLogService);
         verifyNoInteractions(sendingEmailService);
         assertThat(outOfPlace).isEmpty();
@@ -521,7 +522,7 @@ class DefaultModerationServiceTest {
         final var order = inOrder(domainRuleRepository, linkCheckService);
         order.verify(domainRuleRepository).save(any(DomainRule.class));
         order.verify(linkCheckService).check("https://jofogas.cards/phish");
-        verify(auditLogService).log(ADMIN, "ALLOW_DOMAIN", "Domain", "jofogas.cards", "reviews: 0, links: 1, via: admin");
+        verify(auditLogService).log(ADMIN, AuditAction.ALLOW_DOMAIN, "Domain", "jofogas.cards", "reviews: 0, links: 1, via: admin");
     }
 
     @Test
@@ -540,7 +541,7 @@ class DefaultModerationServiceTest {
         verify(reviewQueueService).resolveOpen(url, ReviewResolution.LINK_BLOCKED, ADMIN);
         verify(sendingEmailService).sendEmailUrlBlocked(owner, url);
         verifyNoMoreInteractions(sendingEmailService);
-        verify(auditLogService).log(ADMIN, "BLOCK_LINK", "Url", "30", "reason: ADMIN, detail: reported by a visitor, links: 1, via: admin");
+        verify(auditLogService).log(ADMIN, AuditAction.BLOCK_LINK, "Url", "30", "reason: ADMIN, detail: reported by a visitor, links: 1, via: admin");
         assertThat(outOfPlace).isEmpty();
     }
 
@@ -553,7 +554,7 @@ class DefaultModerationServiceTest {
 
         assertThat(response.active()).isFalse();
         assertThat(url.getBlockDetail()).hasSize(255).startsWith("reported by a visitor: xxx").endsWith("...");
-        verify(auditLogService).log(ADMIN, "BLOCK_LINK", "Url", "30", "reason: ADMIN, detail: " + detail + ", links: 1, via: mcp");
+        verify(auditLogService).log(ADMIN, AuditAction.BLOCK_LINK, "Url", "30", "reason: ADMIN, detail: " + detail + ", links: 1, via: mcp");
     }
 
     @Test
@@ -617,7 +618,7 @@ class DefaultModerationServiceTest {
         assertThat(url.getBlockedAt()).isEqualTo(BLOCKED_AT);
         verify(urlRepository, never()).save(any());
         verifyNoInteractions(sendingEmailService, cache);
-        verify(auditLogService).log(ADMIN, "BLOCK_LINK", "Url", "30", "reason: ADMIN, detail: again, links: 0, via: admin");
+        verify(auditLogService).log(ADMIN, AuditAction.BLOCK_LINK, "Url", "30", "reason: ADMIN, detail: again, links: 0, via: admin");
     }
 
     @Test
@@ -642,7 +643,7 @@ class DefaultModerationServiceTest {
 
         assertThat(url.getBlockReason()).isEqualTo(BlockReason.ADMIN);
         assertThat(url.getBlockedAt()).isNotNull();
-        verify(auditLogService).log(ADMIN, "BLOCK_LINK", "Url", "30", "reason: ADMIN, links: 1, via: admin");
+        verify(auditLogService).log(ADMIN, AuditAction.BLOCK_LINK, "Url", "30", "reason: ADMIN, links: 1, via: admin");
     }
 
     @Test
@@ -764,7 +765,7 @@ class DefaultModerationServiceTest {
         });
         assertThat(switchedOff.getBlockReason()).isNull();
         assertThat(someoneElses.isActive()).isTrue();
-        verify(auditLogService).log(ADMIN, "BLOCK_USER", "User", "5", "links: 2, via: admin");
+        verify(auditLogService).log(ADMIN, AuditAction.BLOCK_USER, "User", "5", "links: 2, via: admin");
         verifyNoMoreInteractions(auditLogService);
         assertThat(outOfPlace).isEmpty();
     }
@@ -901,7 +902,7 @@ class DefaultModerationServiceTest {
         });
         assertThat(byRule.isActive()).isFalse();
         assertThat(byRule.getBlockReason()).isEqualTo(BlockReason.DOMAIN_RULE);
-        verify(auditLogService).log(ADMIN, "REACTIVATE_USER", "User", "5", "links: 2, via: admin");
+        verify(auditLogService).log(ADMIN, AuditAction.REACTIVATE_USER, "User", "5", "links: 2, via: admin");
         assertThat(outOfPlace).isEmpty();
     }
 
@@ -952,7 +953,7 @@ class DefaultModerationServiceTest {
 
         assertThat(clashing.isActive()).isFalse();
         assertThat(clashing.getBlockReason()).isEqualTo(BlockReason.BLOCKLIST);
-        verify(auditLogService).log(ADMIN, "ALLOW_DOMAIN", "Domain", "jofogas.cards", "reviews: 0, links: 0, via: admin");
+        verify(auditLogService).log(ADMIN, AuditAction.ALLOW_DOMAIN, "Domain", "jofogas.cards", "reviews: 0, links: 0, via: admin");
     }
 
     @Test
@@ -964,7 +965,7 @@ class DefaultModerationServiceTest {
         verify(reviewQueueService).resolveOpen(url, ReviewResolution.OK, ADMIN);
         assertThat(url.isActive()).isTrue();
         assertThat(rules).isEmpty();
-        verify(auditLogService).log(ADMIN, "RESOLVE_REVIEW", "Url", "60", "action: OK, links: 0, via: admin");
+        verify(auditLogService).log(ADMIN, AuditAction.RESOLVE_REVIEW, "Url", "60", "action: OK, links: 0, via: admin");
     }
 
     @Test
@@ -976,7 +977,7 @@ class DefaultModerationServiceTest {
         assertThat(rules).containsOnlyKeys("docs.google.com");
         assertThat(rules.get("docs.google.com").getType()).isEqualTo(DomainRuleType.ALLOW);
         verify(reviewQueueService).resolveOpen(url, ReviewResolution.DOMAIN_TRUSTED, ADMIN);
-        verify(auditLogService).log(ADMIN, "RESOLVE_REVIEW", "Url", "61", "action: TRUST_DOMAIN, domain: docs.google.com, reviews: 0, links: 0, via: admin");
+        verify(auditLogService).log(ADMIN, AuditAction.RESOLVE_REVIEW, "Url", "61", "action: TRUST_DOMAIN, domain: docs.google.com, reviews: 0, links: 0, via: admin");
     }
 
     @Test
@@ -1000,7 +1001,7 @@ class DefaultModerationServiceTest {
         assertThat(url.getBlockReason()).isEqualTo(BlockReason.DOMAIN_RULE);
         assertThat(sibling.getBlockReason()).isEqualTo(BlockReason.DOMAIN_RULE);
         verify(reviewQueueService, atLeastOnce()).resolveOpen(url, ReviewResolution.DOMAIN_BLOCKED, ADMIN);
-        verify(auditLogService).log(ADMIN, "RESOLVE_REVIEW", "Url", "62", "action: BLOCK_DOMAIN, domain: jofogas.cards, links: 2, via: admin");
+        verify(auditLogService).log(ADMIN, AuditAction.RESOLVE_REVIEW, "Url", "62", "action: BLOCK_DOMAIN, domain: jofogas.cards, links: 2, via: admin");
     }
 
     @Test
@@ -1034,7 +1035,7 @@ class DefaultModerationServiceTest {
 
         assertThat(url.getBlockReason()).isEqualTo(BlockReason.ADMIN);
         verify(reviewQueueService, atLeastOnce()).resolveOpen(url, ReviewResolution.LINK_BLOCKED, ADMIN);
-        verify(auditLogService).log(ADMIN, "RESOLVE_REVIEW", "Url", "64", "action: BLOCK_LINK, links: 1, via: admin");
+        verify(auditLogService).log(ADMIN, AuditAction.RESOLVE_REVIEW, "Url", "64", "action: BLOCK_LINK, links: 1, via: admin");
     }
 
     @Test
@@ -1061,7 +1062,7 @@ class DefaultModerationServiceTest {
         assertThat(other.getBlockReason()).isEqualTo(BlockReason.USER_BLOCKED);
         verifyNoInteractions(sendingEmailService);
         verify(reviewQueueService, atLeastOnce()).resolveOpen(url, ReviewResolution.USER_BLOCKED, ADMIN);
-        verify(auditLogService).log(ADMIN, "RESOLVE_REVIEW", "Url", "66", "action: BLOCK_USER, user: 5, links: 2, via: admin");
+        verify(auditLogService).log(ADMIN, AuditAction.RESOLVE_REVIEW, "Url", "66", "action: BLOCK_USER, user: 5, links: 2, via: admin");
     }
 
     @ParameterizedTest
@@ -1072,7 +1073,7 @@ class DefaultModerationServiceTest {
 
         moderationService.resolveReview(70L, action, null, ADMIN, "mcp");
 
-        verify(auditLogService).log(eq(ADMIN), eq("RESOLVE_REVIEW"), eq("Url"), eq("70"),
+        verify(auditLogService).log(eq(ADMIN), eq(AuditAction.RESOLVE_REVIEW), eq("Url"), eq("70"),
                 argThat(details -> details.startsWith("action: " + action.name()) && details.endsWith("via: mcp")));
         verifyNoMoreInteractions(auditLogService);
     }
@@ -1089,7 +1090,7 @@ class DefaultModerationServiceTest {
         assertThat(created.rule())
                 .extracting(DomainRuleResponse::domain, DomainRuleResponse::type, DomainRuleResponse::reason, DomainRuleResponse::createdBy)
                 .containsExactly("jofogas.cards", DomainRuleType.BLOCK, "phishing wave", ADMIN);
-        verify(auditLogService).log(ADMIN, "BLOCK_DOMAIN", "Domain", "jofogas.cards", "reason: phishing wave, links: 2, via: admin");
+        verify(auditLogService).log(ADMIN, AuditAction.BLOCK_DOMAIN, "Domain", "jofogas.cards", "reason: phishing wave, links: 2, via: admin");
         verifyNoMoreInteractions(auditLogService);
     }
 
@@ -1150,7 +1151,7 @@ class DefaultModerationServiceTest {
 
         verify(domainRuleRepository).delete(existing);
         verify(eventPublisher).publishEvent(any(BlocklistConfigurationChangedEvent.class));
-        verify(auditLogService).log(ADMIN, "REMOVE_DOMAIN_RULE", "Domain", "jofogas.cards", "type: ALLOW, links: 0, via: admin");
+        verify(auditLogService).log(ADMIN, AuditAction.REMOVE_DOMAIN_RULE, "Domain", "jofogas.cards", "type: ALLOW, links: 0, via: admin");
     }
 
     @Test
@@ -1191,7 +1192,7 @@ class DefaultModerationServiceTest {
         moderationService.removeDomainRule("JOFOGAS.cards", ADMIN, "admin");
 
         verify(domainRuleRepository).delete(existing);
-        verify(auditLogService).log(ADMIN, "REMOVE_DOMAIN_RULE", "Domain", "jofogas.cards", "type: BLOCK, links: 0, via: admin");
+        verify(auditLogService).log(ADMIN, AuditAction.REMOVE_DOMAIN_RULE, "Domain", "jofogas.cards", "type: BLOCK, links: 0, via: admin");
     }
 
     @Test
@@ -1245,7 +1246,7 @@ class DefaultModerationServiceTest {
         order.verify(ipAddressService).deleteRecordsForUrl(url);
         order.verify(urlRepository).delete(url);
         order.verify(cache).evict("s80");
-        verify(auditLogService).log(ADMIN, "DELETE_LINK", "Url", "80", "shortUrl: s80, links: 1, via: mcp");
+        verify(auditLogService).log(ADMIN, AuditAction.DELETE_LINK, "Url", "80", "shortUrl: s80, links: 1, via: mcp");
         assertThat(outOfPlace).isEmpty();
     }
 

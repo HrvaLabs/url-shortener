@@ -1,6 +1,8 @@
 package cc.hrva.urlshortener.controller;
 
+import cc.hrva.urlshortener.audit.Audited;
 import cc.hrva.urlshortener.model.EmailLog;
+import cc.hrva.urlshortener.model.enums.AuditAction;
 import cc.hrva.urlshortener.repository.EmailLogRepository;
 import cc.hrva.urlshortener.service.SendingEmailService;
 import lombok.RequiredArgsConstructor;
@@ -33,6 +35,7 @@ public class AdminEmailLogController {
 
     @PostMapping("/{id}/resend")
     @PreAuthorize("hasRole('ROLE_ADMIN')")
+    @Audited(AuditAction.RESEND_EMAIL)
     public ResponseEntity<EmailLog> resendEmail(@PathVariable("id") final Long id) {
         return ResponseEntity.ok(sendingEmailService.resendEmail(id));
     }

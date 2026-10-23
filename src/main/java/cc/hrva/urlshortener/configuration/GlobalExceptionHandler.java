@@ -18,8 +18,12 @@ import cc.hrva.urlshortener.exception.NoAuthorizationException;
 import cc.hrva.urlshortener.exception.UrlNotFoundException;
 import cc.hrva.urlshortener.exception.UserNotFoundException;
 import jakarta.validation.ConstraintViolationException;
+import java.util.Arrays;
+import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
+import org.apache.commons.lang3.StringUtils;
+import org.apache.commons.lang3.exception.ExceptionUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
@@ -41,6 +45,8 @@ import org.springframework.web.bind.annotation.ControllerAdvice;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.exc.InvalidFormatException;
 
 @ControllerAdvice
 public class GlobalExceptionHandler {
@@ -202,8 +208,28 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(HttpMessageNotReadableException.class)
     public ResponseEntity<Map<String, String>> handleMessageNotReadable(final HttpMessageNotReadableException ex) {
+        final var invalidFormat = ExceptionUtils.throwableOfType(ex, InvalidFormatException.class);
+        if (invalidFormat != null && invalidFormat.getTargetType() != null && invalidFormat.getTargetType().isEnum()) {
+            final var field = fieldOf(invalidFormat.getPath());
+            log.info("Unknown value in request body field={}", field);
+            return ResponseEntity.badRequest().body(Map.of("error", StringUtils.capitalize(field) + " must be " + oneOf(invalidFormat.getTargetType())));
+        }
         log.info("Malformed request body");
         return ResponseEntity.badRequest().body(Map.of("error", "Malformed request body"));
+    }
+
+    private static String fieldOf(final List<JacksonException.Reference> path) {
+        final var field = path.stream()
+                .map(reference -> reference.getPropertyName() != null ? "." + reference.getPropertyName() : "[" + reference.getIndex() + "]")
+                .collect(Collectors.joining());
+        return StringUtils.defaultIfEmpty(StringUtils.removeStart(field, "."), "value");
+    }
+
+    private static String oneOf(final Class<?> enumType) {
+        final var names = Arrays.stream(enumType.getEnumConstants()).map(constant -> ((Enum<?>) constant).name()).toList();
+        return names.size() == 1
+                ? names.getFirst()
+                : String.join(", ", names.subList(0, names.size() - 1)) + " or " + names.getLast();
     }
 
     @ExceptionHandler(MethodArgumentTypeMismatchException.class)

@@ -1,0 +1,27 @@
+package cc.hrva.urlshortener.model.enums;
+
+public enum AuditAction {
+
+    CLEAR_LOGIN_ATTEMPTS,
+    RESEND_EMAIL,
+    UPDATE_USER,
+    DELETE_USER,
+    UPDATE_URL,
+    REVOKE_URL,
+    ACTIVATE_URL,
+    DELETE_URL,
+    CREATE_SOURCE,
+    UPDATE_SOURCE,
+    DELETE_SOURCE,
+    REFRESH_SOURCE,
+    RESOLVE_REVIEW,
+    BLOCK_LINK,
+    BLOCK_DOMAIN,
+    ALLOW_DOMAIN,
+    REMOVE_DOMAIN_RULE,
+    BLOCK_USER,
+    REACTIVATE_USER,
+    DELETE_LINK,
+    UNKNOWN
+
+}

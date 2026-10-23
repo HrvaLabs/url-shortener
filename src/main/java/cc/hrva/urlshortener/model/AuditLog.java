@@ -1,7 +1,10 @@
 package cc.hrva.urlshortener.model;
 
+import cc.hrva.urlshortener.model.enums.AuditAction;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
@@ -27,7 +30,9 @@ public class AuditLog {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
     private String performedBy;
-    private String action;
+    @Enumerated(EnumType.STRING)
+    private AuditAction action;
+    private boolean failed;
     private String targetType;
     private String targetIdentifier;
     @Column(columnDefinition = "TEXT")
