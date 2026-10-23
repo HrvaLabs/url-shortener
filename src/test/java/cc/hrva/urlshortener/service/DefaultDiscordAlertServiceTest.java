@@ -17,8 +17,10 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.IntStream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -289,6 +291,110 @@ class DefaultDiscordAlertServiceTest {
         context.close();
 
         verify(discordWebhookClient).sendWithoutWaiting(eq(WEBHOOK_URL), any(DiscordMessage.class), eq(Duration.ofSeconds(5)));
+    }
+
+    @Test
+    void aFlushInterruptedMidSendKeepsItsAlertsInOrderForTheShutdownFlush() {
+        when(discordWebhookClient.send(anyString(), any(DiscordMessage.class), any(Duration.class))).thenAnswer(invocation -> {
+            discordAlertService.onAdminAlert(NEW_USER);
+            Thread.currentThread().interrupt();
+            return false;
+        });
+        discordAlertService.onAdminAlert(NEW_REVIEW);
+        discordAlertService.onAdminAlert(BLOCKED);
+        try {
+            discordAlertService.flush();
+        } finally {
+            assertThat(Thread.interrupted()).isTrue();
+        }
+
+        ((DefaultDiscordAlertService) discordAlertService).flushBeforeShutdown();
+
+        final var message = ArgumentCaptor.forClass(DiscordMessage.class);
+        verify(discordWebhookClient).sendWithoutWaiting(eq(WEBHOOK_URL), message.capture(), eq(Duration.ofSeconds(5)));
+        assertThat(message.getValue().content().lines().toList()).containsExactly(
+                "New review: hrva.cc/abc12 → example-login.top (imitates paypal, domain registered in the last 30 days), anonymous, "
+                        + "<https://app.hrva.cc/admin/review?entry=42>",
+                "Blocked: hrva.cc/k3Xa1 → paypa1-login.top (on HaGeZi TIF medium), account #27, <https://app.hrva.cc/admin/urls>",
+                "New user: account #31 signed up with email, <https://app.hrva.cc/admin>");
+    }
+
+    @Test
+    void alertsKeptAfterAnInterruptStillRespectTheBufferCapAndTheDroppedCount() {
+        when(discordWebhookClient.send(anyString(), any(DiscordMessage.class), any(Duration.class))).thenAnswer(invocation -> {
+            Thread.currentThread().interrupt();
+            return false;
+        });
+        IntStream.range(0, 205).forEach(index -> discordAlertService.onAdminAlert(NEW_USER));
+        try {
+            discordAlertService.flush();
+        } finally {
+            Thread.interrupted();
+        }
+
+        ((DefaultDiscordAlertService) discordAlertService).flushBeforeShutdown();
+
+        final var message = ArgumentCaptor.forClass(DiscordMessage.class);
+        verify(discordWebhookClient).sendWithoutWaiting(anyString(), message.capture(), any(Duration.class));
+        assertThat(message.getValue().content().lines().toList().getLast()).isEqualTo("…and 195 more, see <https://app.hrva.cc/admin/review>");
+    }
+
+    @Test
+    void aFailedSendThatWasNotInterruptedIsNotKept() {
+        when(discordWebhookClient.send(anyString(), any(DiscordMessage.class), any(Duration.class))).thenReturn(false);
+        discordAlertService.onAdminAlert(NEW_USER);
+        discordAlertService.flush();
+
+        ((DefaultDiscordAlertService) discordAlertService).flushBeforeShutdown();
+
+        verify(discordWebhookClient, never()).sendWithoutWaiting(anyString(), any(DiscordMessage.class), any(Duration.class));
+    }
+
+    @Test
+    void aScheduledFlushInterruptedWhileTalkingToTheWebhookLeavesItsAlertsForTheShutdownFlush() throws Exception {
+        final var bodies = new CopyOnWriteArrayList<String>();
+        final var stuckRequestArrived = new CountDownLatch(1);
+        final ExecutorService executor = Executors.newCachedThreadPool();
+        final var server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
+        server.setExecutor(executor);
+        server.createContext("/api/webhooks/1/token", exchange -> {
+            bodies.add(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+            exchange.sendResponseHeaders(204, -1);
+            exchange.close();
+        });
+        server.createContext("/api/webhooks/2/stuck", exchange -> {
+            stuckRequestArrived.countDown();
+            try {
+                Thread.sleep(30_000);
+            } catch (final InterruptedException exception) {
+                Thread.currentThread().interrupt();
+            }
+            exchange.close();
+        });
+        server.start();
+        final var baseUrl = "http://127.0.0.1:" + server.getAddress().getPort();
+        try {
+            appProperties.setDiscordWebhookUrl(baseUrl + "/api/webhooks/2/stuck");
+            final var service = (DefaultDiscordAlertService) service(new DiscordWebhookClient(JsonMapper.builder().build()));
+            service.onAdminAlert(NEW_USER);
+            final var scheduledFlush = new Thread(service::flush);
+            scheduledFlush.start();
+            assertThat(stuckRequestArrived.await(5, TimeUnit.SECONDS)).isTrue();
+
+            scheduledFlush.interrupt();
+            scheduledFlush.join(5_000);
+            appProperties.setDiscordWebhookUrl(baseUrl + "/api/webhooks/1/token");
+            service.flushBeforeShutdown();
+
+            assertThat(scheduledFlush.isAlive()).isFalse();
+        } finally {
+            server.stop(0);
+            executor.shutdownNow();
+        }
+
+        assertThat(bodies).hasSize(1);
+        assertThat(JsonMapper.builder().build().readTree(bodies.getFirst()).path("content").asString())
+                .isEqualTo("New user: account #31 signed up with email, <https://app.hrva.cc/admin>");
     }
 
     @Test

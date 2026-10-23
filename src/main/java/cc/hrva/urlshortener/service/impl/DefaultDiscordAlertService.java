@@ -9,9 +9,11 @@ import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Stream;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
@@ -80,10 +82,24 @@ public class DefaultDiscordAlertService implements DiscordAlertService {
                     : discordWebhookClient.sendWithoutWaiting(webhookUrl, message, TIMEOUT);
             if (sent) {
                 log.info("Sent admin alerts to Discord alerts={} dropped={}", alerts.size(), droppedSinceLastFlush);
+            } else if (Thread.currentThread().isInterrupted()) {
+                keepForTheNextFlush(alerts, droppedSinceLastFlush);
             }
         } catch (final RuntimeException exception) {
             log.warn("Discord alerts dropped exception={}", exception.getClass().getName());
         }
+    }
+
+    private void keepForTheNextFlush(final List<AdminAlertEvent> alerts, final int droppedSinceLastFlush) {
+        final var newer = new ArrayList<AdminAlertEvent>();
+        buffer.drainTo(newer);
+        dropped.addAndGet(droppedSinceLastFlush);
+        Stream.concat(alerts.stream(), newer.stream()).forEach(alert -> {
+            if (!buffer.offer(alert)) {
+                dropped.incrementAndGet();
+            }
+        });
+        log.info("Discord alerts were interrupted, keeping them for the next flush alerts={}", alerts.size());
     }
 
     private boolean isOff() {
