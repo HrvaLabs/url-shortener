@@ -1,6 +1,6 @@
 package cc.hrva.urlshortener.audit;
 
-import cc.hrva.urlshortener.controller.UrlController;
+import cc.hrva.urlshortener.UrlShortenerApplication;
 import cc.hrva.urlshortener.model.enums.AuditAction;
 import java.util.Arrays;
 import java.util.Map;
@@ -43,7 +43,7 @@ class AuditedMethodsTest {
     private static Map<String, AuditAction> auditedControllerMethods() {
         final var scanner = new ClassPathScanningCandidateComponentProvider(false);
         scanner.addIncludeFilter(new AnnotationTypeFilter(RestController.class));
-        return scanner.findCandidateComponents(UrlController.class.getPackageName()).stream()
+        return scanner.findCandidateComponents(UrlShortenerApplication.class.getPackageName()).stream()
                 .map(candidate -> ClassUtils.resolveClassName(Objects.requireNonNull(candidate.getBeanClassName()), null))
                 .flatMap(controller -> Arrays.stream(controller.getDeclaredMethods())
                         .filter(method -> method.isAnnotationPresent(Audited.class))
