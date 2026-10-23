@@ -656,7 +656,7 @@ class DefaultModerationServiceTest {
     }
 
     @Test
-    void aBlockedLinkAlertsTheAdminWithTheDestinationHostAndTheReason() {
+    void anAutomaticBlockAlertsTheAdminWithTheDestinationHostAndTheReason() {
         link(30L, "https://login-paypa1.top/verify?account=alice@example.com", null);
 
         moderationService.blockLink(30L, BlockReason.BLOCKLIST, "HaGeZi TIF medium", "system", "click");
@@ -666,13 +666,52 @@ class DefaultModerationServiceTest {
     }
 
     @Test
-    void aBlockedLinkAlertNamesTheOwnerById() {
+    void anAutomaticBlockAlertNamesTheOwnerById() {
         link(30L, "https://example.org/x", user(7L, "alice@example.com"));
 
         moderationService.blockLink(30L, BlockReason.SAFE_BROWSING, "SOCIAL_ENGINEERING", "system", "nightly");
 
         verify(eventPublisher).publishEvent(new AdminAlertEvent.LinkBlocked(
                 new AlertedLink(30L, "s30", "example.org", 7L), BlockReason.SAFE_BROWSING, "SOCIAL_ENGINEERING"));
+    }
+
+    @Test
+    void anAdminBlockingALinkOrADomainFromTheDashboardOrMcpSendsNoAlert() {
+        link(30L, "https://example.org/x", null);
+        link(31L, "https://example.net/y", user(7L, "alice@example.com"));
+        link(32L, "https://jofogas.cards/login", null);
+        link(33L, "https://njuskaio.cam/login", null);
+
+        moderationService.blockLink(30L, BlockReason.ADMIN, null, ADMIN, "admin");
+        moderationService.blockLink(31L, BlockReason.ADMIN, "phishing", ADMIN, "mcp");
+        moderationService.blockDomain("jofogas.cards", "phishing wave", ADMIN, "mcp", 50);
+        moderationService.createDomainRule(new DomainRuleDto("njuskaio.cam", DomainRuleType.BLOCK, null), ADMIN, "admin");
+
+        assertThat(links.values()).allSatisfy(url -> assertThat(url.isActive()).isFalse());
+        verify(eventPublisher, never()).publishEvent(any(AdminAlertEvent.class));
+    }
+
+    @Test
+    void anAdminBlockingTheLinkFromTheReviewQueueSendsNoAlert() {
+        link(30L, "https://example.org/x", null);
+
+        moderationService.resolveReview(30L, ReviewAction.BLOCK_LINK, null, ADMIN, "admin");
+
+        assertThat(links.get(30L).getBlockReason()).isEqualTo(BlockReason.ADMIN);
+        verify(eventPublisher, never()).publishEvent(any(AdminAlertEvent.class));
+    }
+
+    @Test
+    void onlyTheAutomaticOfTwoBlocksAlerts() {
+        link(30L, "https://login-paypa1.top/verify", null);
+        link(31L, "https://example.org/x", null);
+
+        moderationService.blockLink(30L, BlockReason.SAFE_BROWSING, "SOCIAL_ENGINEERING", "system", "nightly");
+        moderationService.blockLink(31L, BlockReason.ADMIN, null, ADMIN, "admin");
+
+        verify(eventPublisher).publishEvent(new AdminAlertEvent.LinkBlocked(
+                new AlertedLink(30L, "s30", "login-paypa1.top", null), BlockReason.SAFE_BROWSING, "SOCIAL_ENGINEERING"));
+        verify(eventPublisher, times(1)).publishEvent(any(AdminAlertEvent.class));
     }
 
     @Test

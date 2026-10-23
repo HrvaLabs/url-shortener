@@ -90,6 +90,7 @@ public class DefaultModerationService implements ModerationService {
     private static final String NO_OWNER = "This link has no owner to block.";
     private static final String ADMIN_ACCOUNT = "Admin accounts can't be blocked here.";
     private static final String ROLE_ADMIN = "ROLE_ADMIN";
+    private static final String SYSTEM = "system";
     private static final String NO_RULE_TYPE = "Choose whether the rule blocks or allows the domain";
     private static final Sort NEWEST_RULES_FIRST = Sort.by(Sort.Order.desc("createdAt"), Sort.Order.desc("id"));
     private static final Set<BlockReason> RESTORED_BY_ALLOW = EnumSet.of(BlockReason.BLOCKLIST, BlockReason.SCAM_SIGNALS, BlockReason.DOMAIN_RULE);
@@ -356,7 +357,9 @@ public class DefaultModerationService implements ModerationService {
         final var blocked = block(urlId, reason, detail, resolution, performedBy, stillApplies);
         blocked.ifPresent(url -> {
             notifyOwner(url);
-            eventPublisher.publishEvent(new AdminAlertEvent.LinkBlocked(AlertedLink.of(url), url.getBlockReason(), url.getBlockDetail()));
+            if (SYSTEM.equals(performedBy)) {
+                eventPublisher.publishEvent(new AdminAlertEvent.LinkBlocked(AlertedLink.of(url), url.getBlockReason(), url.getBlockDetail()));
+            }
         });
         return blocked;
     }
