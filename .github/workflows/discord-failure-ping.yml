@@ -1,0 +1,42 @@
+name: Discord failure ping
+
+on:
+  workflow_run:
+    workflows:
+      - Build and Publish Docker Image
+    types:
+      - completed
+
+permissions: {}
+
+jobs:
+  ping:
+    if: >-
+      github.event.workflow_run.event != 'pull_request' &&
+      contains(fromJSON('["failure", "timed_out", "startup_failure"]'), github.event.workflow_run.conclusion)
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Post the failure to Discord
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          REPOSITORY: ${{ github.event.repository.name }}
+          WORKFLOW: ${{ github.event.workflow_run.name }}
+          CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          BRANCH: ${{ github.event.workflow_run.head_branch }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+          TITLE: ${{ github.event.workflow_run.display_title }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+        run: |
+          if [ -z "$DISCORD_WEBHOOK_URL" ]; then
+            echo "DISCORD_WEBHOOK_URL is not set, skipping"
+            exit 0
+          fi
+          case "$CONCLUSION" in
+            timed_out) outcome="timed out" ;;
+            startup_failure) outcome="could not start" ;;
+            *) outcome="failed" ;;
+          esac
+          content="❌ **${REPOSITORY}**: ${WORKFLOW} ${outcome} on \`${BRANCH}\`"$'\n'"${TITLE:0:200} (${SHA:0:7})"$'\n'"<${RUN_URL}>"
+          jq -n --arg content "$content" '{content: $content, allowed_mentions: {parse: []}, flags: 4}' |
+            curl -fsS --max-time 10 -H 'Content-Type: application/json' -d @- -o /dev/null "$DISCORD_WEBHOOK_URL"
