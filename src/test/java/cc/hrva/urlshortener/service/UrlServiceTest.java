@@ -1621,7 +1621,6 @@ class UrlServiceTest {
         assertThat(urlServiceWithMeters().redirectResultUrl("abc", CLICK).getUrl()).isEqualTo("https://example.com/a");
 
         verify(clickAnalyticsService).recordClick(5L, "abc", CLICK);
-        verify(urlRepository, never()).findByShortUrlAndActiveTrue(any());
         verifyNoInteractions(urlRepository);
     }
 
