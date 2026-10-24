@@ -465,7 +465,7 @@ class McpEndpointSecurityTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.result.isError").value(false))
                 .andExpect(jsonPath("$.result.content[0].text", containsString(
-                        "Unique visitors are counted per day, so one person on two days counts twice.")));
+                        "Unique visitors are counted per day, so one person on two different days counts twice.")));
 
         verify(analyticsService, never()).getUrlAnalytics(any(), any());
         assertThat(callerDuringStats.get()).isEqualTo(EMAIL);

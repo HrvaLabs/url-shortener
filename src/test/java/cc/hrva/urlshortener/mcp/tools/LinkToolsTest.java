@@ -56,7 +56,7 @@ import static org.mockito.Mockito.when;
 class LinkToolsTest {
 
     private static final User CURRENT_USER = User.builder().id(7L).email("user@localhost").active(true).build();
-    private static final String DAILY_UNIQUE_NOTE = "Unique visitors are counted per day, so one person on two days counts twice. "
+    private static final String DAILY_UNIQUE_NOTE = "Unique visitors are counted per day, so one person on two different days counts twice. "
             + "Bot clicks aren't in the clicks or visitor counts.";
     private static final Breakdowns NO_BREAKDOWNS = new Breakdowns(List.of(), List.of(), List.of(), List.of(), List.of());
 

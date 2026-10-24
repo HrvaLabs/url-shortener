@@ -51,7 +51,7 @@ public class LinkTools {
     private static final String EXPIRY_FORMAT_ERROR = "expiresAt must be an ISO-8601 date-time with a time zone, "
             + "for example 2026-12-31T23:59:00Z or 2026-12-31T23:59:00+01:00.";
     private static final String MISSING_LINK_ERROR = "Give the short link, for example menu, hrva.cc/menu or https://hrva.cc/menu.";
-    private static final String DAILY_UNIQUE_NOTE = "Unique visitors are counted per day, so one person on two days counts twice. "
+    private static final String DAILY_UNIQUE_NOTE = "Unique visitors are counted per day, so one person on two different days counts twice. "
             + "Bot clicks aren't in the clicks or visitor counts.";
 
     private final UrlService urlService;
