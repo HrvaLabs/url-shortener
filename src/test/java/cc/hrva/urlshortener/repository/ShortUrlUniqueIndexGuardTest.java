@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.repository;
 
+import org.apache.commons.lang3.StringUtils;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -27,6 +28,8 @@ import static org.assertj.core.api.Assertions.tuple;
                 "spring.security.oauth2.client.registration.google.client-secret=test-google-secret"
         })
 class ShortUrlUniqueIndexGuardTest {
+
+    private static final String NOT_ENFORCED = "short_url uniqueness not enforced";
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
@@ -57,10 +60,11 @@ class ShortUrlUniqueIndexGuardTest {
     @Test
     void notEnforcedAndSaysSo(final CapturedOutput output) {
         assertThat(shortUrlUniqueIndex.enforced()).isFalse();
+        assertThat(output).containsOnlyOnce(NOT_ENFORCED);
 
         shortUrlUniqueIndex.warnIfNotEnforced();
 
-        assertThat(output).contains("short_url uniqueness not enforced");
+        assertThat(StringUtils.countMatches(output, NOT_ENFORCED)).isEqualTo(2);
     }
 
     @SpringBootConfiguration

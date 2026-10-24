@@ -68,7 +68,7 @@
             <column name="SHORT_URL"/>
         </createIndex>
         <rollback>
-            <dropIndex tableName="URL" indexName="UX_URL_SHORT_URL"/>
+            <sql>drop index if exists UX_URL_SHORT_URL</sql>
         </rollback>
     </changeSet>
 

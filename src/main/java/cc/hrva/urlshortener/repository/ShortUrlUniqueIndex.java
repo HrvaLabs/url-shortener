@@ -22,6 +22,7 @@ public class ShortUrlUniqueIndex {
         try {
             return EXECUTED.equals(jdbcTemplate.queryForObject(FIND_EXEC_TYPE, String.class));
         } catch (final DataAccessException exception) {
+            log.debug("could not read 027-url-short-url-unique from databasechangelog", exception);
             return false;
         }
     }
