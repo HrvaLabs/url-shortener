@@ -7,8 +7,11 @@ import cc.hrva.urlshortener.configuration.JacksonConfiguration;
 import cc.hrva.urlshortener.configuration.SecurityConfiguration;
 import cc.hrva.urlshortener.configuration.WebConfiguration;
 import cc.hrva.urlshortener.controller.UrlRedirectController;
+import cc.hrva.urlshortener.dto.AnalyticsTotals;
 import cc.hrva.urlshortener.dto.CreateUrlDto;
 import cc.hrva.urlshortener.dto.UrlAnalyticsDto;
+import cc.hrva.urlshortener.dto.UrlAnalyticsDto.Breakdowns;
+import cc.hrva.urlshortener.dto.UrlAnalyticsDto.LinkSummary;
 import cc.hrva.urlshortener.dto.UrlResponse;
 import cc.hrva.urlshortener.mcp.anon.RateLimiter;
 import cc.hrva.urlshortener.mcp.authorization.AuthorizationServerConfiguration;
@@ -45,6 +48,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -338,7 +342,9 @@ class McpEndpointSecurityTest {
         assertThat(shortenRequired).singleElement().satisfies(required -> assertThat(required).containsExactly("url"));
         final List<Map<String, Object>> statsProperties = JsonPath.read(body, "$.result.tools[?(@.name == 'link_stats')].inputSchema.properties");
         assertThat(statsProperties).singleElement()
-                .satisfies(properties -> assertThat(properties).containsOnlyKeys("link"));
+                .satisfies(properties -> assertThat(properties).containsOnlyKeys("link", "days"));
+        final List<List<String>> statsRequired = JsonPath.read(body, "$.result.tools[?(@.name == 'link_stats')].inputSchema.required");
+        assertThat(statsRequired).singleElement().satisfies(required -> assertThat(required).containsExactly("link"));
     }
 
     @Test
@@ -447,9 +453,11 @@ class McpEndpointSecurityTest {
         final var callerDuringStats = new AtomicReference<String>();
         when(userService.fetchActiveUserByEmail(EMAIL)).thenReturn(User.builder().id(7L).email(EMAIL).active(true).build());
         when(urlService.getAllMyUrls(isNull(), any(), any())).thenReturn(new PageImpl<>(List.of(link("secret-alias", "https://example.com/a"))));
-        when(analyticsService.getUrlAnalyticsForOwner(1L)).thenAnswer(invocation -> {
+        when(analyticsService.getUrlAnalyticsForOwner(1L, null)).thenAnswer(invocation -> {
             callerDuringStats.set(SecurityContextHolder.getContext().getAuthentication().getName());
-            return new UrlAnalyticsDto(1L, "secret-alias", "https://example.com/a", "ACTIVE", 3L, 1L, 2L, null, LocalDateTime.now(), List.of());
+            return new UrlAnalyticsDto(new LinkSummary(1L, "secret-alias", "example.com", "ACTIVE", false, LocalDateTime.now(), null, 3L),
+                    30, LocalDate.of(2026, 9, 25), LocalDate.of(2026, 10, 24), new AnalyticsTotals(2L, 1L, 0L), List.of(),
+                    new Breakdowns(List.of(), List.of(), List.of(), List.of(), List.of()));
         });
 
         final var outputBeforeCall = output.length();
@@ -457,9 +465,9 @@ class McpEndpointSecurityTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.result.isError").value(false))
                 .andExpect(jsonPath("$.result.content[0].text", containsString(
-                        "Visitor details are kept for about 48 hours, so the recent figures cover roughly the last two days.")));
+                        "Unique visitors are counted per day, so one person on two days counts twice.")));
 
-        verify(analyticsService, never()).getUrlAnalytics(any());
+        verify(analyticsService, never()).getUrlAnalytics(any(), any());
         assertThat(callerDuringStats.get()).isEqualTo(EMAIL);
         assertThat(output.toString().substring(outputBeforeCall))
                 .contains("MCP link_stats userId=7 urlId=1")

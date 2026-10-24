@@ -1,8 +1,11 @@
 package cc.hrva.urlshortener.repository;
 
+import cc.hrva.urlshortener.dto.AnalyticsDay;
+import cc.hrva.urlshortener.dto.BreakdownEntry;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.enums.StatDimension;
 import java.time.LocalDate;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
@@ -123,6 +126,43 @@ class LinkStatsRepositoryTest {
         linkStatsRepository.incrementBreakdown(url.getId(), DAY, Map.of());
 
         assertThat(linkStatsRepository.findBreakdownValues(url.getId(), DAY)).isEmpty();
+    }
+
+    @Test
+    void findDailyReturnsStoredDaysInTheRangeInOrder() {
+        final var url = savedLink("range");
+        final var otherLink = savedLink("range-other");
+        linkStatsRepository.incrementDailyStats(url.getId(), DAY.plusDays(1), 1, 1, 0);
+        linkStatsRepository.incrementDailyStats(url.getId(), DAY, 2, 1, 1);
+        linkStatsRepository.incrementDailyStats(url.getId(), DAY.minusDays(6), 0, 0, 3);
+        linkStatsRepository.incrementDailyStats(url.getId(), DAY.minusDays(7), 9, 9, 9);
+        linkStatsRepository.incrementDailyStats(url.getId(), DAY.plusDays(2), 9, 9, 9);
+        linkStatsRepository.incrementDailyStats(otherLink.getId(), DAY, 5, 5, 5);
+
+        assertThat(linkStatsRepository.findDaily(url.getId(), DAY.minusDays(6), DAY.plusDays(1))).containsExactly(
+                new AnalyticsDay(DAY.minusDays(6), 0, 0, 3),
+                new AnalyticsDay(DAY, 2, 1, 1),
+                new AnalyticsDay(DAY.plusDays(1), 1, 1, 0));
+        assertThat(linkStatsRepository.findDaily(url.getId(), DAY.minusDays(30), DAY.minusDays(8))).isEmpty();
+    }
+
+    @Test
+    void breakdownTotalsSumAcrossTheRangePerDimension() {
+        final var url = savedLink("totals");
+        final var otherLink = savedLink("totals-other");
+        linkStatsRepository.incrementBreakdown(url.getId(), DAY, Map.of(REFERRER, "direct", COUNTRY, "HR"));
+        linkStatsRepository.incrementBreakdown(url.getId(), DAY, Map.of(REFERRER, "direct", COUNTRY, "HR"));
+        linkStatsRepository.incrementBreakdown(url.getId(), DAY.plusDays(1), Map.of(REFERRER, "direct", COUNTRY, "DE"));
+        linkStatsRepository.incrementBreakdown(url.getId(), DAY.plusDays(1), Map.of(REFERRER, "t.co", COUNTRY, "AT"));
+        linkStatsRepository.incrementBreakdown(url.getId(), DAY.minusDays(1), Map.of(REFERRER, "t.co", DEVICE, "mobile"));
+        linkStatsRepository.incrementBreakdown(url.getId(), DAY.minusDays(1), Map.of(REFERRER, "t.co", DEVICE, "mobile"));
+        linkStatsRepository.incrementBreakdown(url.getId(), DAY.plusDays(2), Map.of(REFERRER, "outside.example", OS, "ios"));
+        linkStatsRepository.incrementBreakdown(otherLink.getId(), DAY, Map.of(REFERRER, "elsewhere.example", BROWSER, "chrome"));
+
+        assertThat(linkStatsRepository.findBreakdownTotals(url.getId(), DAY, DAY.plusDays(1))).isEqualTo(Map.of(
+                REFERRER, List.of(new BreakdownEntry("direct", 3), new BreakdownEntry("t.co", 1)),
+                COUNTRY, List.of(new BreakdownEntry("HR", 2), new BreakdownEntry("AT", 1), new BreakdownEntry("DE", 1))));
+        assertThat(linkStatsRepository.findBreakdownTotals(url.getId(), DAY.plusDays(3), DAY.plusDays(9))).isEmpty();
     }
 
     @Test

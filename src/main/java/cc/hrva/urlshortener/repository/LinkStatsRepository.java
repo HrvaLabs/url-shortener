@@ -1,10 +1,14 @@
 package cc.hrva.urlshortener.repository;
 
+import cc.hrva.urlshortener.dto.AnalyticsDay;
+import cc.hrva.urlshortener.dto.BreakdownEntry;
 import cc.hrva.urlshortener.model.enums.StatDimension;
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.StringJoiner;
@@ -22,6 +26,8 @@ public class LinkStatsRepository {
     private static final String DAY = "day";
     private static final String DIMENSION = "dimension";
     private static final String VALUE = "value";
+    private static final String FROM = "from";
+    private static final String TO = "to";
 
     private static final String INCREMENT_DAILY_STATS = """
             MERGE INTO link_daily_stats t
@@ -50,6 +56,19 @@ public class LinkStatsRepository {
 
     private static final String FIND_BREAKDOWN_VALUES =
             "select dimension, dimension_value from link_daily_breakdown where url_id = :urlId and stat_date = :day";
+
+    private static final String FIND_DAILY = """
+            select stat_date, clicks, unique_visitors, bot_clicks from link_daily_stats
+            where url_id = :urlId and stat_date between :from and :to
+            order by stat_date
+            """;
+
+    private static final String FIND_BREAKDOWN_TOTALS = """
+            select dimension, dimension_value, sum(clicks) as total_clicks from link_daily_breakdown
+            where url_id = :urlId and stat_date between :from and :to
+            group by dimension, dimension_value
+            order by dimension, sum(clicks) desc, dimension_value
+            """;
 
     private final NamedParameterJdbcTemplate jdbcTemplate;
 
@@ -85,6 +104,22 @@ public class LinkStatsRepository {
                 values.computeIfAbsent(StatDimension.valueOf(row.getString("dimension")), dimension -> new HashSet<>())
                         .add(row.getString("dimension_value")));
         return values;
+    }
+
+    public List<AnalyticsDay> findDaily(final long urlId, final LocalDate from, final LocalDate to) {
+        return jdbcTemplate.query(FIND_DAILY, Map.of(URL_ID, urlId, FROM, from, TO, to), (row, rowNumber) -> new AnalyticsDay(
+                row.getObject("stat_date", LocalDate.class),
+                row.getLong("clicks"),
+                row.getLong("unique_visitors"),
+                row.getLong("bot_clicks")));
+    }
+
+    public Map<StatDimension, List<BreakdownEntry>> findBreakdownTotals(final long urlId, final LocalDate from, final LocalDate to) {
+        final var totals = new EnumMap<StatDimension, List<BreakdownEntry>>(StatDimension.class);
+        jdbcTemplate.query(FIND_BREAKDOWN_TOTALS, Map.of(URL_ID, urlId, FROM, from, TO, to), (RowCallbackHandler) row ->
+                totals.computeIfAbsent(StatDimension.valueOf(row.getString("dimension")), dimension -> new ArrayList<>())
+                        .add(new BreakdownEntry(row.getString("dimension_value"), row.getLong("total_clicks"))));
+        return totals;
     }
 
     private void updateRetryingOnce(final String sql, final Map<String, ?> parameters) {

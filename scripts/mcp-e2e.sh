@@ -102,6 +102,10 @@ psql_query() {
     docker exec "$POSTGRES_CONTAINER" psql -U "$DB_USER" -d url_shortener -P pager=off -c "$1" | sed 's/^/  /'
 }
 
+psql_value() {
+    docker exec "$POSTGRES_CONTAINER" psql -U "$DB_USER" -d url_shortener -tAq -c "$1"
+}
+
 # mcp_post <path> <access token, or empty for none> <JSON-RPC body>
 mcp_post() {
     if [[ -n $2 ]]; then
@@ -292,7 +296,9 @@ echo "  --- fake browser log"
 sed 's/^/  /' "$MCP_E2E_BROWSER_LOG"
 echo "  --- tools/list result"
 show "$(jq -r '.tools[] | "\(.name): \(.title // "")"' <<<"$INSPECTOR_RESULT")"
-expect_eq "$(jq -r '[.tools[].name] | sort | join(",")' <<<"$INSPECTOR_RESULT")" "link_stats,list_links,shorten_url" "the three signed-in tools"
+expect_eq "$(jq -r '[.tools[].name] | sort | join(",")' <<<"$INSPECTOR_RESULT")" \
+    "block_domain,block_link,block_user,check_url,delete_link,link_stats,list_links,moderation_summary,possible_scammers,review_queue,shorten_url" \
+    "the three link tools and the eight moderation tools (admin only when called)"
 echo "  --- what the Inspector registered (oauth2_registered_client)"
 psql_query "select client_name, client_authentication_methods, authorization_grant_types, redirect_uris, scopes from oauth2_registered_client order by client_id_issued_at;"
 
@@ -319,12 +325,28 @@ LINK_TAGS=$(jq -c --arg alias "$ALIAS" '[.content[] | select(.shortUrl == $alias
 show "GET /api/v1/urls?tag=ai -> $ALIAS tags $LINK_TAGS"
 expect_eq "$LINK_TAGS" '["ai","docs"]' "stored tags are ai + the requested one"
 
-section "9. link_stats (Inspector CLI)"
-show "visiting $BASE/$ALIAS once -> $(curl -s -o /dev/null -w '%{http_code}' "$BASE/$ALIAS")"
+section "9. link_stats (Inspector CLI) after a browser visit and a bot visit"
+show "visiting $BASE/$ALIAS as Chrome on Windows from t.co in HR -> $(curl -s -o /dev/null -w '%{http_code}' \
+    -A 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36' \
+    -H 'Referer: https://t.co/x' -H 'CF-IPCountry: HR' "$BASE/$ALIAS")"
+show "visiting $BASE/$ALIAS with plain curl, a bot -> $(curl -s -o /dev/null -w '%{http_code}' "$BASE/$ALIAS")"
+sleep 2
 inspector 60 "$RESOURCE" --transport http --stored-auth-only --method tools/call --tool-name link_stats --tool-arg "link=$BASE/$ALIAS"
 show_tool_result
 expect_eq "$(jq -r .isError <<<"$INSPECTOR_RESULT")" false "link_stats succeeded"
-expect_contains "$(tool_text)" "Visitor details are kept for about 48 hours" "states the 48-hour window"
+STATS=$(tool_text)
+expect_contains "$STATS" "Clicks: 1" "one human click"
+expect_contains "$STATS" "Daily unique visitors: 1" "one daily unique visitor"
+expect_contains "$STATS" "Bot clicks: 1" "the plain curl counts as a bot click"
+expect_contains "$STATS" "Top referrers: t.co 1" "referrer t.co"
+expect_contains "$STATS" "Top countries: HR 1" "country HR"
+expect_contains "$STATS" "Devices: desktop 1" "device desktop"
+expect_contains "$STATS" "Unique visitors are counted per day" "explains the daily unique visitors"
+echo "  --- link_daily_stats and link_daily_breakdown for $ALIAS"
+psql_query "select s.stat_date, s.clicks, s.unique_visitors, s.bot_clicks from link_daily_stats s join url u on u.id = s.url_id where u.short_url = '$ALIAS';"
+psql_query "select b.stat_date, b.dimension, b.dimension_value, b.clicks from link_daily_breakdown b join url u on u.id = b.url_id where u.short_url = '$ALIAS' order by b.dimension;"
+expect_eq "$(psql_value "select s.clicks || ',' || s.unique_visitors || ',' || s.bot_clicks from link_daily_stats s join url u on u.id = s.url_id where u.short_url = '$ALIAS';")" "1,1,1" "link_daily_stats: clicks 1, unique_visitors 1, bot_clicks 1"
+expect_eq "$(psql_value "select count(*) from link_daily_breakdown b join url u on u.id = b.url_id where u.short_url = '$ALIAS';")" 5 "link_daily_breakdown: 5 rows"
 
 section "10. Refresh (curl): rotation, replay refused"
 http -X POST "$BASE/oauth2/token" \

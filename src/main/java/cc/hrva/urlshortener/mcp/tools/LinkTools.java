@@ -1,6 +1,7 @@
 package cc.hrva.urlshortener.mcp.tools;
 
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
+import cc.hrva.urlshortener.dto.BreakdownEntry;
 import cc.hrva.urlshortener.dto.CreateUrlDto;
 import cc.hrva.urlshortener.dto.UrlAnalyticsDto;
 import cc.hrva.urlshortener.dto.UrlResponse;
@@ -44,13 +45,14 @@ public class LinkTools {
     private static final String SHORTEN_URL = "shorten_url";
     private static final String LINK_STATS = "link_stats";
     private static final int PAGE_SIZE = 20;
+    private static final int TOP_VALUES_SHOWN = 5;
     private static final Sort NEWEST_FIRST = Sort.by(Sort.Direction.DESC, "createDate");
     private static final Pattern SCHEME = Pattern.compile("^[a-zA-Z][a-zA-Z0-9+.-]*://");
     private static final String EXPIRY_FORMAT_ERROR = "expiresAt must be an ISO-8601 date-time with a time zone, "
             + "for example 2026-12-31T23:59:00Z or 2026-12-31T23:59:00+01:00.";
     private static final String MISSING_LINK_ERROR = "Give the short link, for example menu, hrva.cc/menu or https://hrva.cc/menu.";
-    private static final String RETENTION_NOTE =
-            "Visitor details are kept for about 48 hours, so the recent figures cover roughly the last two days.";
+    private static final String DAILY_UNIQUE_NOTE = "Unique visitors are counted per day, so one person on two days counts twice. "
+            + "Bot clicks aren't in the clicks or visitor counts.";
 
     private final UrlService urlService;
     private final AppProperties appProperties;
@@ -107,9 +109,9 @@ public class LinkTools {
     @McpTool(
             name = LINK_STATS,
             title = "Link stats",
-            description = "Shows visit statistics for one of the signed-in user's hrva.cc short links: status, total visits, "
-                    + "recent unique visitors, recent clicks, last visit and creation time (times in UTC). "
-                    + "Visitor details are kept for about 48 hours, so the recent figures cover roughly the last two days.",
+            description = "Shows click statistics for one of the signed-in user's hrva.cc short links over the last 7, 30, 90 or 365 days "
+                    + "(30 by default): clicks, daily unique visitors, bot clicks, top referrers, countries and devices, all-time visits, "
+                    + "last visit and creation time (times in UTC).",
             annotations = @McpTool.McpAnnotations(
                     title = "Link stats",
                     readOnlyHint = true,
@@ -119,8 +121,9 @@ public class LinkTools {
             )
     )
     public CallToolResult linkStats(
-            @McpToolParam(description = "The short link as menu, hrva.cc/menu or https://hrva.cc/menu") final String link) {
-        return McpToolResults.run(LINK_STATS, () -> describeStats(link));
+            @McpToolParam(description = "The short link as menu, hrva.cc/menu or https://hrva.cc/menu") final String link,
+            @McpToolParam(required = false, description = "Number of days to cover: 7, 30, 90 or 365 (30 by default)") final Integer days) {
+        return McpToolResults.run(LINK_STATS, () -> describeStats(link, days));
     }
 
     private String describeLinks(final String search, final String tag, final Integer page) {
@@ -192,7 +195,7 @@ public class LinkTools {
         return String.join("\n", lines);
     }
 
-    private String describeStats(final String link) {
+    private String describeStats(final String link, final Integer days) {
         final var user = mcpUserResolver.currentUser();
         final var alias = aliasOf(link);
         if (alias.isEmpty()) {
@@ -201,7 +204,7 @@ public class LinkTools {
 
         final var match = findOwnLink(alias)
                 .orElseThrow(() -> new UrlNotFoundException("No link %s/%s in your account.".formatted(host(), alias)));
-        final var analytics = analyticsService.getUrlAnalyticsForOwner(match.id());
+        final var analytics = analyticsService.getUrlAnalyticsForOwner(match.id(), days);
 
         log.info("MCP link_stats userId={} urlId={}", user.getId(), match.id());
 
@@ -233,15 +236,33 @@ public class LinkTools {
     }
 
     private String describeAnalytics(final UrlAnalyticsDto analytics) {
+        final var link = analytics.link();
+        final var totals = analytics.totals();
+        final var breakdowns = analytics.breakdowns();
         return String.join("\n",
-                "%s -> %s".formatted(shortLink(analytics.shortUrl()), analytics.longUrl()),
-                "Status: " + analytics.status(),
-                "Total visits: " + analytics.visits(),
-                "Recent unique visitors: " + analytics.uniqueRecentVisitors(),
-                "Recent clicks: " + analytics.totalRecentClicks(),
-                "Last visit: " + (analytics.lastAccessed() != null ? utc(analytics.lastAccessed()) : "none"),
-                "Created: " + (analytics.createDate() != null ? utc(analytics.createDate()) : "unknown"),
-                RETENTION_NOTE);
+                "%s -> %s".formatted(shortLink(link.shortUrl()), link.destinationHost()),
+                "Status: " + link.status(),
+                "Range: last %d days, %s to %s".formatted(analytics.days(), analytics.from(), analytics.to()),
+                "Clicks: " + totals.clicks(),
+                "Daily unique visitors: " + totals.uniqueVisitors(),
+                "Bot clicks: " + totals.botClicks(),
+                "Top referrers: " + topValues(breakdowns.referrers()),
+                "Top countries: " + topValues(breakdowns.countries()),
+                "Devices: " + topValues(breakdowns.devices()),
+                "All-time visits: " + link.visits(),
+                "Last visit: " + (link.lastAccessed() != null ? utc(link.lastAccessed()) : "none"),
+                "Created: " + (link.createDate() != null ? utc(link.createDate()) : "unknown"),
+                DAILY_UNIQUE_NOTE);
+    }
+
+    private static String topValues(final List<BreakdownEntry> entries) {
+        if (entries.isEmpty()) {
+            return "none";
+        }
+        return entries.stream()
+                .limit(TOP_VALUES_SHOWN)
+                .map(entry -> entry.value() + " " + entry.clicks())
+                .collect(Collectors.joining(", "));
     }
 
     private String shortLink(final String alias) {

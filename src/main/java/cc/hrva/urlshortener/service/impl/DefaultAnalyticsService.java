@@ -1,25 +1,34 @@
 package cc.hrva.urlshortener.service.impl;
 
+import cc.hrva.urlshortener.dto.AnalyticsDay;
 import cc.hrva.urlshortener.dto.AnalyticsOverviewDto;
 import cc.hrva.urlshortener.dto.AnalyticsOverviewDto.TopUrl;
+import cc.hrva.urlshortener.dto.AnalyticsTotals;
+import cc.hrva.urlshortener.dto.BreakdownEntry;
 import cc.hrva.urlshortener.dto.UrlAnalyticsDto;
-import cc.hrva.urlshortener.dto.UrlAnalyticsDto.DailyCount;
+import cc.hrva.urlshortener.dto.UrlAnalyticsDto.Breakdowns;
+import cc.hrva.urlshortener.dto.UrlAnalyticsDto.LinkSummary;
 import cc.hrva.urlshortener.dto.UrlResponse;
 import cc.hrva.urlshortener.exception.NoAuthorizationException;
 import cc.hrva.urlshortener.exception.UrlNotFoundException;
-import cc.hrva.urlshortener.model.IPAddress;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.User;
-import cc.hrva.urlshortener.repository.IPAddressRepository;
+import cc.hrva.urlshortener.model.enums.AnalyticsRange;
+import cc.hrva.urlshortener.model.enums.StatDimension;
+import cc.hrva.urlshortener.repository.LinkStatsRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.service.AnalyticsService;
 import cc.hrva.urlshortener.service.UserService;
+import cc.hrva.urlshortener.service.analytics.AnalyticsDays;
+import cc.hrva.urlshortener.util.DomainNames;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -33,13 +42,15 @@ import org.springframework.transaction.annotation.Transactional;
 public class DefaultAnalyticsService implements AnalyticsService {
 
     private static final int TOP_URLS_LIMIT = 5;
-    private static final int DAILY_SERIES_DAYS = 30;
+    private static final int TOP_VALUES_LIMIT = 10;
+    private static final String OTHER = "other";
     private static final String ROLE_ADMIN = "ROLE_ADMIN";
     private static final String NO_AUTHORIZATION = "You don't have authorization for this action";
 
     private final UserService userService;
     private final UrlRepository urlRepository;
-    private final IPAddressRepository ipAddressRepository;
+    private final LinkStatsRepository linkStatsRepository;
+    private final AnalyticsDays analyticsDays;
 
     @Override
     public AnalyticsOverviewDto getOverview() {
@@ -63,7 +74,8 @@ public class DefaultAnalyticsService implements AnalyticsService {
     }
 
     @Override
-    public UrlAnalyticsDto getUrlAnalytics(final Long urlId) {
+    public UrlAnalyticsDto getUrlAnalytics(final Long urlId, final Integer days) {
+        final var range = AnalyticsRange.fromDays(days);
         final var user = currentUser();
         final var url = findUrl(urlId);
 
@@ -71,11 +83,12 @@ public class DefaultAnalyticsService implements AnalyticsService {
             throw new NoAuthorizationException(NO_AUTHORIZATION);
         }
 
-        return buildAnalytics(url);
+        return buildAnalytics(url, range);
     }
 
     @Override
-    public UrlAnalyticsDto getUrlAnalyticsForOwner(final Long urlId) {
+    public UrlAnalyticsDto getUrlAnalyticsForOwner(final Long urlId, final Integer days) {
+        final var range = AnalyticsRange.fromDays(days);
         final var user = currentUser();
         final var url = findUrl(urlId);
 
@@ -83,7 +96,7 @@ public class DefaultAnalyticsService implements AnalyticsService {
             throw new NoAuthorizationException(NO_AUTHORIZATION);
         }
 
-        return buildAnalytics(url);
+        return buildAnalytics(url, range);
     }
 
     private Url findUrl(final Long urlId) {
@@ -91,35 +104,66 @@ public class DefaultAnalyticsService implements AnalyticsService {
                 .orElseThrow(() -> new UrlNotFoundException("URL not found"));
     }
 
-    private UrlAnalyticsDto buildAnalytics(final Url url) {
-        final var ipAddresses = ipAddressRepository.findAllByUrl(url);
-        final var uniqueRecentVisitors = ipAddresses.size();
-        final var totalRecentClicks = ipAddresses.stream().mapToLong(ip -> safeLong(ip.getVisits())).sum();
+    private UrlAnalyticsDto buildAnalytics(final Url url, final AnalyticsRange range) {
+        final var to = analyticsDays.today();
+        final var from = to.minusDays(range.days() - 1L);
+        final var stored = linkStatsRepository.findDaily(url.getId(), from, to);
+        final var breakdowns = linkStatsRepository.findBreakdownTotals(url.getId(), from, to);
 
         return new UrlAnalyticsDto(
-                url.getId(),
-                url.getShortUrl(),
-                url.getLongUrl(),
-                UrlResponse.from(url).status(),
-                safeLong(url.getVisits()),
-                uniqueRecentVisitors,
-                totalRecentClicks,
-                url.getLastAccessed(),
-                url.getCreateDate(),
-                buildDailySeries(ipAddresses));
+                summaryOf(url),
+                range.days(),
+                from,
+                to,
+                totalsOf(stored),
+                zeroFilled(stored, from, to),
+                new Breakdowns(
+                        topValues(breakdowns, StatDimension.REFERRER),
+                        topValues(breakdowns, StatDimension.COUNTRY),
+                        topValues(breakdowns, StatDimension.DEVICE),
+                        topValues(breakdowns, StatDimension.BROWSER),
+                        topValues(breakdowns, StatDimension.OS)));
     }
 
-    private List<DailyCount> buildDailySeries(final List<IPAddress> ipAddresses) {
-        final Map<LocalDate, Long> countsByDay = ipAddresses.stream()
-                .filter(ip -> ip.getCreateDate() != null)
-                .collect(Collectors.groupingBy(ip -> ip.getCreateDate().toLocalDate(), Collectors.counting()));
+    private LinkSummary summaryOf(final Url url) {
+        return new LinkSummary(
+                url.getId(),
+                url.getShortUrl(),
+                DomainNames.hostOf(url.getLongUrl()).orElse(""),
+                UrlResponse.from(url).status(),
+                url.getPasswordHash() != null,
+                url.getCreateDate(),
+                url.getLastAccessed(),
+                safeLong(url.getVisits()));
+    }
 
-        final var today = LocalDate.now();
-        final var firstDay = today.minusDays(DAILY_SERIES_DAYS - 1L);
+    private static AnalyticsTotals totalsOf(final List<AnalyticsDay> stored) {
+        return new AnalyticsTotals(
+                stored.stream().mapToLong(AnalyticsDay::clicks).sum(),
+                stored.stream().mapToLong(AnalyticsDay::uniqueVisitors).sum(),
+                stored.stream().mapToLong(AnalyticsDay::botClicks).sum());
+    }
 
-        return firstDay.datesUntil(today.plusDays(1))
-                .map(day -> new DailyCount(day, countsByDay.getOrDefault(day, 0L)))
+    private static List<AnalyticsDay> zeroFilled(final List<AnalyticsDay> stored, final LocalDate from, final LocalDate to) {
+        final var storedByDate = stored.stream()
+                .collect(Collectors.toMap(AnalyticsDay::date, Function.identity()));
+
+        return from.datesUntil(to.plusDays(1))
+                .map(date -> storedByDate.getOrDefault(date, new AnalyticsDay(date, 0, 0, 0)))
                 .toList();
+    }
+
+    private static List<BreakdownEntry> topValues(final Map<StatDimension, List<BreakdownEntry>> breakdowns, final StatDimension dimension) {
+        final var entries = breakdowns.getOrDefault(dimension, List.of());
+        final var named = entries.stream().filter(entry -> !OTHER.equals(entry.value())).toList();
+        final var storedOther = entries.stream().filter(entry -> OTHER.equals(entry.value())).mapToLong(BreakdownEntry::clicks).sum();
+        final var leftover = named.stream().skip(TOP_VALUES_LIMIT).mapToLong(BreakdownEntry::clicks).sum();
+
+        final var top = new ArrayList<>(named.stream().limit(TOP_VALUES_LIMIT).toList());
+        if (storedOther + leftover > 0) {
+            top.add(new BreakdownEntry(OTHER, storedOther + leftover));
+        }
+        return List.copyOf(top);
     }
 
     private boolean isOwner(final Url url, final User user) {

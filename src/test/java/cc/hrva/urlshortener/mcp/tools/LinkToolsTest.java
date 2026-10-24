@@ -1,10 +1,15 @@
 package cc.hrva.urlshortener.mcp.tools;
 
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
+import cc.hrva.urlshortener.dto.AnalyticsTotals;
+import cc.hrva.urlshortener.dto.BreakdownEntry;
 import cc.hrva.urlshortener.dto.CreateUrlDto;
 import cc.hrva.urlshortener.dto.UrlAnalyticsDto;
+import cc.hrva.urlshortener.dto.UrlAnalyticsDto.Breakdowns;
+import cc.hrva.urlshortener.dto.UrlAnalyticsDto.LinkSummary;
 import cc.hrva.urlshortener.dto.UrlResponse;
 import cc.hrva.urlshortener.dto.UrlSearchDto;
+import cc.hrva.urlshortener.exception.InvalidAnalyticsRangeException;
 import cc.hrva.urlshortener.exception.RateLimitExceededException;
 import cc.hrva.urlshortener.exception.ShortUrlAlreadyExistsException;
 import cc.hrva.urlshortener.exception.UrlValidationException;
@@ -16,6 +21,7 @@ import io.modelcontextprotocol.spec.McpSchema.CallToolResult;
 import io.modelcontextprotocol.spec.McpSchema.TextContent;
 import jakarta.validation.Validation;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.List;
@@ -50,8 +56,9 @@ import static org.mockito.Mockito.when;
 class LinkToolsTest {
 
     private static final User CURRENT_USER = User.builder().id(7L).email("user@localhost").active(true).build();
-    private static final String RETENTION_SENTENCE =
-            "Visitor details are kept for about 48 hours, so the recent figures cover roughly the last two days.";
+    private static final String DAILY_UNIQUE_NOTE = "Unique visitors are counted per day, so one person on two days counts twice. "
+            + "Bot clicks aren't in the clicks or visitor counts.";
+    private static final Breakdowns NO_BREAKDOWNS = new Breakdowns(List.of(), List.of(), List.of(), List.of(), List.of());
 
     @Mock
     private UrlService urlService;
@@ -336,12 +343,12 @@ class LinkToolsTest {
                 link(32L, "mymenu", true),
                 link(34L, "MENU", true),
                 link(33L, "menu", true)));
-        when(analyticsService.getUrlAnalyticsForOwner(33L)).thenReturn(analytics(33L, "menu"));
+        when(analyticsService.getUrlAnalyticsForOwner(33L, null)).thenReturn(analytics(33L, "menu"));
 
-        final var result = linkTools.linkStats("menu");
+        final var result = linkTools.linkStats("menu", null);
 
         assertThat(result.isError()).isFalse();
-        verify(analyticsService).getUrlAnalyticsForOwner(33L);
+        verify(analyticsService).getUrlAnalyticsForOwner(33L, null);
         final var pageable = ArgumentCaptor.forClass(Pageable.class);
         final var search = ArgumentCaptor.forClass(UrlSearchDto.class);
         verify(urlService).getAllMyUrls(isNull(), pageable.capture(), search.capture());
@@ -355,27 +362,27 @@ class LinkToolsTest {
         when(urlService.getAllMyUrls(isNull(), any(), any())).thenReturn(page(
                 link(40L, "menu", false),
                 link(33L, "menu", true)));
-        when(analyticsService.getUrlAnalyticsForOwner(33L)).thenReturn(analytics(33L, "menu"));
+        when(analyticsService.getUrlAnalyticsForOwner(33L, null)).thenReturn(analytics(33L, "menu"));
 
-        linkTools.linkStats("menu");
+        linkTools.linkStats("menu", null);
 
-        verify(analyticsService).getUrlAnalyticsForOwner(33L);
+        verify(analyticsService).getUrlAnalyticsForOwner(33L, null);
     }
 
     @Test
     void statsAcceptsHostAndUrlForms() {
         when(mcpUserResolver.currentUser()).thenReturn(CURRENT_USER);
         when(urlService.getAllMyUrls(isNull(), any(), any())).thenReturn(page(link(33L, "menu", true)));
-        when(analyticsService.getUrlAnalyticsForOwner(33L)).thenReturn(analytics(33L, "menu"));
+        when(analyticsService.getUrlAnalyticsForOwner(33L, null)).thenReturn(analytics(33L, "menu"));
 
         for (final var form : List.of("menu", "hrva.cc/menu", "https://hrva.cc/menu", " HTTP://HRVA.CC/menu/ ", "/menu")) {
-            assertThat(linkTools.linkStats(form).isError()).as(form).isFalse();
+            assertThat(linkTools.linkStats(form, null).isError()).as(form).isFalse();
         }
 
         final var search = ArgumentCaptor.forClass(UrlSearchDto.class);
         verify(urlService, times(5)).getAllMyUrls(isNull(), any(), search.capture());
         assertThat(search.getAllValues()).extracting(UrlSearchDto::getSearch).containsOnly("menu");
-        verify(analyticsService, times(5)).getUrlAnalyticsForOwner(33L);
+        verify(analyticsService, times(5)).getUrlAnalyticsForOwner(33L, null);
     }
 
     @Test
@@ -383,7 +390,7 @@ class LinkToolsTest {
         when(mcpUserResolver.currentUser()).thenReturn(CURRENT_USER);
         when(urlService.getAllMyUrls(isNull(), any(), any())).thenReturn(page(link(31L, "menu-2", true)));
 
-        final var result = linkTools.linkStats("https://hrva.cc/menu");
+        final var result = linkTools.linkStats("https://hrva.cc/menu", null);
 
         assertThat(result.isError()).isTrue();
         assertThat(result.content()).hasSize(1);
@@ -395,7 +402,7 @@ class LinkToolsTest {
     void statsWithoutAnAliasAsksForOne() {
         when(mcpUserResolver.currentUser()).thenReturn(CURRENT_USER);
 
-        final var result = linkTools.linkStats(" https://hrva.cc/ ");
+        final var result = linkTools.linkStats(" https://hrva.cc/ ", null);
 
         assertThat(result.isError()).isTrue();
         assertThat(text(result)).isEqualTo("Give the short link, for example menu, hrva.cc/menu or https://hrva.cc/menu.");
@@ -403,35 +410,96 @@ class LinkToolsTest {
     }
 
     @Test
-    void statsTextIncludes48HourSentence() {
+    void statsDescribesTheRangeTopValuesAndTheDailyNote() {
         when(mcpUserResolver.currentUser()).thenReturn(CURRENT_USER);
         when(urlService.getAllMyUrls(isNull(), any(), any())).thenReturn(page(link(33L, "menu", true)));
-        when(analyticsService.getUrlAnalyticsForOwner(33L)).thenReturn(analytics(33L, "menu"));
+        when(analyticsService.getUrlAnalyticsForOwner(33L, null)).thenReturn(analytics(33L, "menu"));
 
-        final var result = linkTools.linkStats("menu");
+        final var result = linkTools.linkStats("menu", null);
 
         assertThat(result.isError()).isFalse();
         assertThat(text(result).lines()).containsExactly(
-                "https://hrva.cc/menu -> https://example.com/menu",
+                "https://hrva.cc/menu -> example.com",
                 "Status: ACTIVE",
-                "Total visits: 42",
-                "Recent unique visitors: 5",
-                "Recent clicks: 9",
-                "Last visit: 2026-10-19T08:30:00Z",
+                "Range: last 30 days, 2026-09-25 to 2026-10-24",
+                "Clicks: 120",
+                "Daily unique visitors: 95",
+                "Bot clicks: 14",
+                "Top referrers: direct 60, t.co 20, other 3",
+                "Top countries: HR 50, DE 20",
+                "Devices: mobile 80, desktop 38",
+                "All-time visits: 412",
+                "Last visit: 2026-10-24T07:15:00Z",
                 "Created: 2026-10-01T12:00:00Z",
-                RETENTION_SENTENCE);
+                DAILY_UNIQUE_NOTE);
     }
 
     @Test
-    void statsWithoutVisitsSaysSo() {
+    void statsShowsTheFirstFiveValuesOfEachList() {
         when(mcpUserResolver.currentUser()).thenReturn(CURRENT_USER);
         when(urlService.getAllMyUrls(isNull(), any(), any())).thenReturn(page(link(33L, "menu", true)));
-        when(analyticsService.getUrlAnalyticsForOwner(33L)).thenReturn(new UrlAnalyticsDto(33L, "menu", "https://example.com/menu",
-                "ACTIVE", 0L, 0L, 0L, null, systemTime("2026-10-01T12:00:00Z"), List.of()));
+        final var referrers = IntStream.rangeClosed(1, 7).mapToObj(index -> new BreakdownEntry("r" + index, 10 - index)).toList();
+        final var countries = List.of(new BreakdownEntry("HR", 9), new BreakdownEntry("DE", 8), new BreakdownEntry("AT", 7),
+                new BreakdownEntry("SI", 6), new BreakdownEntry("RS", 5), new BreakdownEntry("other", 4));
+        final var devices = List.of(new BreakdownEntry("mobile", 3), new BreakdownEntry("desktop", 2), new BreakdownEntry("tablet", 1),
+                new BreakdownEntry("unknown", 1));
+        when(analyticsService.getUrlAnalyticsForOwner(33L, null)).thenReturn(analytics(33L, "menu",
+                new Breakdowns(referrers, countries, devices, List.of(new BreakdownEntry("chrome", 7)), List.of(new BreakdownEntry("ios", 7)))));
 
-        final var result = linkTools.linkStats("menu");
+        final var lines = text(linkTools.linkStats("menu", null)).lines().toList();
 
-        assertThat(text(result).lines()).contains("Last visit: none", RETENTION_SENTENCE);
+        assertThat(lines).contains(
+                "Top referrers: r1 9, r2 8, r3 7, r4 6, r5 5",
+                "Top countries: HR 9, DE 8, AT 7, SI 6, RS 5",
+                "Devices: mobile 3, desktop 2, tablet 1, unknown 1");
+        assertThat(lines).noneMatch(line -> line.contains("chrome") || line.contains("ios"));
+    }
+
+    @Test
+    void statsPassesTheRequestedDays() {
+        when(mcpUserResolver.currentUser()).thenReturn(CURRENT_USER);
+        when(urlService.getAllMyUrls(isNull(), any(), any())).thenReturn(page(link(33L, "menu", true)));
+        when(analyticsService.getUrlAnalyticsForOwner(33L, 7)).thenReturn(analytics(33L, "menu"));
+
+        final var result = linkTools.linkStats("menu", 7);
+
+        assertThat(result.isError()).isFalse();
+        verify(analyticsService).getUrlAnalyticsForOwner(33L, 7);
+    }
+
+    @Test
+    void statsWithAnUnsupportedRangeReturnsTheMessage() {
+        when(mcpUserResolver.currentUser()).thenReturn(CURRENT_USER);
+        when(urlService.getAllMyUrls(isNull(), any(), any())).thenReturn(page(link(33L, "menu", true)));
+        when(analyticsService.getUrlAnalyticsForOwner(33L, 14)).thenThrow(new InvalidAnalyticsRangeException("days must be 7, 30, 90 or 365"));
+
+        final var result = linkTools.linkStats("menu", 14);
+
+        assertThat(result.isError()).isTrue();
+        assertThat(result.content()).hasSize(1);
+        assertThat(text(result)).isEqualTo("days must be 7, 30, 90 or 365");
+    }
+
+    @Test
+    void statsWithoutClicksSaysNone() {
+        when(mcpUserResolver.currentUser()).thenReturn(CURRENT_USER);
+        when(urlService.getAllMyUrls(isNull(), any(), any())).thenReturn(page(link(33L, "menu", true)));
+        when(analyticsService.getUrlAnalyticsForOwner(33L, null)).thenReturn(new UrlAnalyticsDto(
+                new LinkSummary(33L, "menu", "example.com", "ACTIVE", false, null, null, 0),
+                30, LocalDate.of(2026, 9, 25), LocalDate.of(2026, 10, 24), new AnalyticsTotals(0, 0, 0), List.of(), NO_BREAKDOWNS));
+
+        final var result = linkTools.linkStats("menu", null);
+
+        assertThat(result.isError()).isFalse();
+        assertThat(text(result).lines()).contains(
+                "Clicks: 0",
+                "Top referrers: none",
+                "Top countries: none",
+                "Devices: none",
+                "All-time visits: 0",
+                "Last visit: none",
+                "Created: unknown",
+                DAILY_UNIQUE_NOTE);
     }
 
     private static String text(final CallToolResult result) {
@@ -459,8 +527,19 @@ class LinkToolsTest {
     }
 
     private static UrlAnalyticsDto analytics(final Long id, final String alias) {
-        return new UrlAnalyticsDto(id, alias, "https://example.com/" + alias, "ACTIVE", 42L, 5L, 9L,
-                systemTime("2026-10-19T08:30:00Z"), systemTime("2026-10-01T12:00:00Z"), List.of());
+        return analytics(id, alias, new Breakdowns(
+                List.of(new BreakdownEntry("direct", 60), new BreakdownEntry("t.co", 20), new BreakdownEntry("other", 3)),
+                List.of(new BreakdownEntry("HR", 50), new BreakdownEntry("DE", 20)),
+                List.of(new BreakdownEntry("mobile", 80), new BreakdownEntry("desktop", 38)),
+                List.of(new BreakdownEntry("chrome", 70)),
+                List.of(new BreakdownEntry("android", 60))));
+    }
+
+    private static UrlAnalyticsDto analytics(final Long id, final String alias, final Breakdowns breakdowns) {
+        final var link = new LinkSummary(id, alias, "example.com", "ACTIVE", false,
+                systemTime("2026-10-01T12:00:00Z"), systemTime("2026-10-24T07:15:00Z"), 412);
+        return new UrlAnalyticsDto(link, 30, LocalDate.of(2026, 9, 25), LocalDate.of(2026, 10, 24), new AnalyticsTotals(120, 95, 14),
+                List.of(), breakdowns);
     }
 
     private static LocalDateTime systemTime(final String instant) {

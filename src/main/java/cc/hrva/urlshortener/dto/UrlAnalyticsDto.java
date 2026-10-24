@@ -5,17 +5,29 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 public record UrlAnalyticsDto(
-        Long id,
-        String shortUrl,
-        String longUrl,
-        String status,
-        long visits,
-        long uniqueRecentVisitors,
-        long totalRecentClicks,
-        LocalDateTime lastAccessed,
-        LocalDateTime createDate,
-        List<DailyCount> dailyNewVisitors) {
+        LinkSummary link,
+        int days,
+        LocalDate from,
+        LocalDate to,
+        AnalyticsTotals totals,
+        List<AnalyticsDay> daily,
+        Breakdowns breakdowns) {
 
-    public record DailyCount(LocalDate date, long count) {}
+    public record LinkSummary(
+            Long id,
+            String shortUrl,
+            String destinationHost,
+            String status,
+            boolean passwordProtected,
+            LocalDateTime createDate,
+            LocalDateTime lastAccessed,
+            long visits) {}
+
+    public record Breakdowns(
+            List<BreakdownEntry> referrers,
+            List<BreakdownEntry> countries,
+            List<BreakdownEntry> devices,
+            List<BreakdownEntry> browsers,
+            List<BreakdownEntry> operatingSystems) {}
 
 }

@@ -53,7 +53,7 @@ java -jar "$E2E/app.jar" --spring.profiles.active=local --server.port=18080 \
 - `mvn test` (or `mvn -B verify`) — 1708 tests, JUnit 5 + Mockito + AssertJ
 - Mostly plain `@ExtendWith(MockitoExtension.class)` unit tests. Each `@SpringBootTest` class boots its own nested `TestApplication` (a trimmed context) on embedded H2 and mocks the rest:
   - MockMvc through the real filter chains, with a subset Liquibase changelog (`db/changelog/017-oauth2-authorization-server.xml` or `db/mcp-connector-test-changelog.xml`): the MCP connector's security tests, `SecurityTxtControllerTest`, `ReportEndpointSecurityTest`, `AdminReviewQueueSecurityTest`
-  - the full Liquibase changelog: `DynamicLinkChecksSchemaTest` (024's tables, seeds and constraints), `DefaultScammerSignalServiceTest`, `LinkStatsRepositoryTest` (026's daily stats tables and their `MERGE` upserts)
+  - the full Liquibase changelog: `DynamicLinkChecksSchemaTest` (024's tables, seeds and constraints), `DefaultScammerSignalServiceTest`, `LinkStatsRepositoryTest` (026's daily stats tables, their `MERGE` upserts and the range reads)
   - 008, legacy audit rows, then 025 (`db/audit-action-test-changelog.xml`): `AuditActionMigrationTest`
   - a Hibernate-generated schema, no Liquibase: `UrlSpecificationTest`, `LinkReviewSpecificationTest`, `AdminPageQueriesTest` (statement counts of the admin pages)
 - `UrlShortenerApplicationTests` has no test methods, so no test boots the whole app. The real app on Postgres and Redis is checked by hand (see End-to-end check of the link checks).
@@ -119,7 +119,7 @@ cc.hrva.urlshortener
 | DELETE | `/api/v1/users/me` | Required | Self-delete (password-confirmed for local) |
 | GET | `/api/v1/urls/tags` | ROLE_USER | Distinct tags for current user |
 | GET | `/api/v1/analytics/overview` | Required | Aggregate URL analytics for current user |
-| GET | `/api/v1/analytics/urls/{id}` | Required | Per-URL analytics (owner/admin) |
+| GET | `/api/v1/analytics/urls/{id}` | Required | Per-link analytics (owner/admin), `?days=7\|30\|90\|365` (default 30): summary, range totals, zero-filled daily series, top 10 + other per dimension |
 | GET | `/api/v1/admin/stats` | ROLE_ADMIN | Dashboard stats (users, URLs, cache, etc.) |
 | GET | `/api/v1/admin/audit-log` | ROLE_ADMIN | Paginated admin audit trail, newest first; each entry has `action` (an `AuditAction` name) and `failed`. `?action=` keeps one action (an unknown name → 400) |
 | GET | `/api/v1/admin/email-log` | ROLE_ADMIN | Paginated email delivery log |
@@ -190,7 +190,7 @@ AI apps (Claude, Claude Code, the MCP Inspector) use hrva.cc over MCP. The app i
 ### Endpoints
 | Method | Path | Auth | Notes |
 |--------|------|------|-------|
-| POST | `/mcp` | Bearer MCP access token | Signed-in MCP server, STATELESS protocol. Tools `list_links` (20 per page), `shorten_url` (always adds the tag `ai`), `link_stats` (owner only, even for admins), and the admin-only moderation tools (see Moderation tools). Run as the token's user. Other methods → 405 |
+| POST | `/mcp` | Bearer MCP access token | Signed-in MCP server, STATELESS protocol. Tools `list_links` (20 per page), `shorten_url` (always adds the tag `ai`), `link_stats` (owner only, even for admins, optional `days`), and the admin-only moderation tools (see Moderation tools). Run as the token's user. Other methods → 405 |
 | POST | `/mcp/anon` | None (a bearer token is ignored) | Anonymous MCP server, STATELESS, tool `shorten_url` only. Refuses every call unless `app.anonymous-url-creation-enabled` is true |
 | GET | `/.well-known/oauth-protected-resource/mcp` | Public | Resource metadata; the 401 from `/mcp` points here in `WWW-Authenticate` |
 | GET | `/.well-known/oauth-authorization-server` | Public | Authorization server metadata (adds `none` to `token_endpoint_auth_methods_supported`). `/.well-known/openid-configuration` and `/.well-known/oauth-authorization-server/**` → 404 |
@@ -288,7 +288,7 @@ MCP_E2E_PORT=8092 scripts/mcp-e2e.sh      # another app port
 ```
 - Needs Docker, Java 25, Maven, Node (`npx`), `jq`, `curl` and `openssl`. It runs MCP Inspector CLI 2.11.0 (`MCP_E2E_INSPECTOR` overrides), with the Inspector's state in the temp dir.
 - **curl** plays the client, browser and frontend: discovery, DCR, `/oauth2/authorize` → 302 to `/connect`, sign-in as `user@localhost` via `/api/v1/auth/login`, approve, continue, code → token with PKCE and `resource`, one refresh (rotation, replay refused), the connected-apps list, and a disconnect after which `/mcp` returns 401.
-- **The Inspector CLI** signs in on its own (discovery, DCR, PKCE). `scripts/mcp-e2e/fake-browser/open` stands in for the browser and the frontend, so this step needs macOS. It then calls `tools/list`, `list_links`, `shorten_url` (the link must carry `ai`) and `link_stats`, and finally `/mcp/anon` `shorten_url` without a token.
+- **The Inspector CLI** signs in on its own (discovery, DCR, PKCE). `scripts/mcp-e2e/fake-browser/open` stands in for the browser and the frontend, so this step needs macOS. It then calls `tools/list`, `list_links`, `shorten_url` (the link must carry `ai`) and `link_stats` after one browser visit (Chrome on Windows, `Referer: https://t.co/x`, `CF-IPCountry: HR`) and one plain `curl` visit, which must show one click, one daily unique visitor, one bot click, `t.co`, `HR` and `desktop`, with the matching `link_daily_stats` row and 5 `link_daily_breakdown` rows; and finally `/mcp/anon` `shorten_url` without a token.
 - Every step asserts its result and the script exits non-zero on the first failure. Tokens, one-time codes and handles are redacted in the output.
 
 ### Owner acceptance with the real Claude client
@@ -424,6 +424,7 @@ Daily per-link counts with no raw IP, full User-Agent, full Referer or salt ever
 - **Tables** (`026-privacy-first-analytics.xml`, `LinkStatsRepository`, deleted with the link): `LINK_DAILY_STATS(URL_ID, STAT_DATE, CLICKS, UNIQUE_VISITORS, BOT_CLICKS)` and `LINK_DAILY_BREAKDOWN(URL_ID, STAT_DATE, DIMENSION, DIMENSION_VALUE, CLICKS)`, `DIMENSION` one of `REFERRER`, `COUNTRY`, `DEVICE`, `BROWSER`, `OS`.
   - Upserts are standard SQL `MERGE … USING (VALUES …) AS s(…)` with every parameter wrapped in `CAST(:p AS <type>)`, because Postgres can't type bare parameters inside `VALUES`. Never `ON CONFLICT` or H2's `MERGE … KEY`: the same SQL runs on H2 in the tests and on Postgres 15 or newer. A duplicate-key race is retried once.
   - Caps: at most 50 named values per dimension per link per day; a further new value, or one over 255 characters, is stored as `other`. The per-link view shows the top 10 named values per dimension plus one `other` (stored `other` plus the rest), left out when 0.
+- **Reads** (`DefaultAnalyticsService`, for `GET /api/v1/analytics/urls/{id}` and MCP `link_stats`): `days` 7, 30, 90 or 365 (`AnalyticsRange`, default 30; anything else → 400 `days must be 7, 30, 90 or 365`, which the service checks before it reads the caller or the link). The range ends today in the analytics zone and starts `days − 1` days earlier. `findDaily` returns only the stored days and the service zero-fills the rest, so `daily` always has `days` entries; the totals are their sums. `findBreakdownTotals` sums each value over the range, clicks descending then value ascending; the service keeps the top 10 named values and appends `other` last. The summary has the destination host only, never the full URL.
 - **Day**: `app.analytics.zone` (`APP_ANALYTICS_ZONE`, default `Europe/Zagreb`; the container runs in UTC), taken by `AnalyticsDays` on the request thread when the click arrives. The salt and set expiry follow the same day boundary.
 - **Write budget per human click**: one stats `MERGE`, one 5-row breakdown `MERGE` and one read for the cap; a new unique visitor adds `recordVisit` and `deactivateAtVisitLimit`. A bot click is one statement. Counts go straight to Postgres, never buffered in memory (a redeploy would lose them).
 - **No IP logging**: click-path log lines name the short code or link id only.
