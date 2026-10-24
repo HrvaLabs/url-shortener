@@ -1,10 +1,239 @@
 {
   "releases": [
     {
-      "version": "v2.3",
-      "date": "2026-05-31",
+      "version": "v2.8",
+      "date": "2026-10-24",
       "badge": "Latest",
       "badgeVariant": "default",
+      "summary": "Privacy-first link analytics with referrers, countries and devices, plus Discord alerts and bulk review for the admin.",
+      "sections": [
+        {
+          "title": "Analytics",
+          "icon": "bar-chart",
+          "items": [
+            "Rebuilt analytics for each link: clicks per day, daily unique visitors and bot clicks, with its top referrers, countries, devices, browsers and operating systems.",
+            "Rebuilt analytics overview across all your links, with a daily trend and your top 10 links by clicks.",
+            "Pick a range of 7, 30, 90 or 365 days. Times are shown in your own time zone.",
+            "Bots, link previews and crawlers, including the check Outlook runs before it opens a link, are counted separately and never as clicks or visits.",
+            "Bots and link previews can no longer use up a visit-limited link: they aren't sent to its destination.",
+            "A link's visit count now counts each person once per day and leaves bots out.",
+            "Daily statistics start on 24 October 2026. Earlier clicks are included only in a link's all-time visit count."
+          ]
+        },
+        {
+          "title": "Privacy",
+          "icon": "lock",
+          "items": [
+            "Link statistics are daily totals per link. Nothing is recorded about an individual click, and IP addresses are never stored for link statistics.",
+            "To count unique visitors, the IP address and browser identifier are combined with the link and a random key that changes every day into a one-way hash. The hashes and the key are kept only in Redis, never in the database, and expire a few hours after the day ends, so a visitor can't be followed across days or links.",
+            "The country comes from Cloudflare, which carries hrva.cc's traffic; hrva.cc doesn't look up locations itself.",
+            "The old visit records, which held a hashed IP address for each visitor, have been deleted.",
+            "The privacy policy and the home page describe the new daily statistics."
+          ]
+        },
+        {
+          "title": "AI Connector",
+          "icon": "sparkles",
+          "items": [
+            "link_stats now takes a range of 7, 30, 90 or 365 days and shows a link's top referrers, countries and devices, next to its clicks, daily unique visitors and bot clicks."
+          ]
+        },
+        {
+          "title": "Admin",
+          "icon": "wrench",
+          "items": [
+            "Discord alerts: hrva.cc posts to the admin's Discord channel when a link is flagged for review or reported by a visitor, when a link is blocked automatically, when someone signs up, and when a blocklist fails to load or loads again. Alerts are sent together every 30 seconds and never include email or IP addresses.",
+            "Review queue: select up to 100 entries and resolve them in one go. A domain they share is blocked or trusted once for all of them.",
+            "Audit log: every entry has a readable action name, failed actions are marked, and the log can be filtered by action."
+          ]
+        }
+      ]
+    },
+    {
+      "version": "v2.7",
+      "date": "2026-10-22",
+      "summary": "Layered checks against phishing and malware, a page for reporting links, and a review queue for doubtful ones.",
+      "sections": [
+        {
+          "title": "Link Safety",
+          "icon": "shield",
+          "description": "hrva.cc now checks where links lead when they're created, every night, and on every click.",
+          "items": [
+            "New links are checked against public blocklists of harmful domains and exact links (HaGeZi, OpenPhish, PhishTank, URLhaus and Phishing.Database). hrva.cc downloads the lists to its own server and refreshes them regularly, so checking a link against them sends it nowhere.",
+            "hrva.cc also checks how old a destination's domain is, looks it up in the Spamhaus domain blocklist, and watches for names that imitate well-known brands or pose as login pages.",
+            "A destination known to be harmful can't be shortened. A doubtful one is saved and sent to a person for review instead of being blocked.",
+            "After a link is created, hrva.cc follows its redirects in the background and checks every address along the way.",
+            "Every night, all active links are checked again against Google Safe Browsing and the latest lists.",
+            "Every click is checked against the blocking lists first. A link whose destination has been listed since it was created stops working on that click.",
+            "If one of your links is blocked, you get an email. If a whole account is blocked, its owner gets a single email."
+          ]
+        },
+        {
+          "title": "Reports & Unavailable Links",
+          "icon": "globe",
+          "items": [
+            "Anyone can report a hrva.cc link for phishing, malware, spam or other abuse on the new Report a link page. Reports go to a person for review and never block a link on their own.",
+            "A short link that doesn't work now opens a page saying why: it was disabled for leading to a harmful site, it expired, it reached its visit limit, its owner turned it off, or it doesn't exist. The page has a button to report the link.",
+            "hrva.cc publishes its abuse contact, abuse@hrva.cc, at hrva.cc/.well-known/security.txt."
+          ]
+        },
+        {
+          "title": "Blog & Policies",
+          "icon": "lock",
+          "items": [
+            "New blog post: How hrva.cc stops phishing links. It covers the scam links found in September, what hrva.cc checks now, and what it still can't catch.",
+            "The privacy policy and terms of use have new sections on how links are checked, reported and moderated, and on which services see a destination's domain or URL."
+          ]
+        },
+        {
+          "title": "Admin",
+          "icon": "wrench",
+          "items": [
+            "Blocklists page: add, edit and refresh list sources, each with fallback mirrors and its own refresh interval; see each list's size and last error; manage Block and Allow rules for domains; and test any URL to see every check that matches it.",
+            "Review queue for flagged and reported links, with Looks fine, Trust domain, Block link, Block domain and Block user. The admin menu shows how many entries are waiting.",
+            "Blocking a domain switches off every active link to it and its subdomains at once. Trusting a domain clears its reviews and, after checking them again, restores its links that a blocklist, scam signals or a domain rule had blocked.",
+            "Blocking a user deactivates the account and blocks its links; unblocking restores both, after a confirmation that names the user.",
+            "All URLs shows why a link was blocked, and domains and users can be blocked straight from the table.",
+            "Accounts that behave like typical scam accounts are marked as possible scammers, with a filter on the Users page. The marker never blocks anything by itself.",
+            "The daily admin email became a decisions email: it's sent only when something needs a decision and lists open reviews, automatic blocks, possible scammers and failing lists, without the text visitors wrote.",
+            "Admins can moderate from Claude or ChatGPT through the AI connector: read the review queue and possible scammers, check a URL, block links, domains and users, and delete links. These tools can't unblock or trust anything and won't change more than 50 links at once. Deleting a link, blocking a domain or blocking a user needs a flag or block from the automatic checks first, since a visitor report alone isn't enough. Users appear only as masked email addresses."
+          ]
+        }
+      ]
+    },
+    {
+      "version": "v2.6",
+      "date": "2026-10-21",
+      "summary": "Fixes from a security scan, working email sign-up, an hourly limit on new links, and admin tools for spotting abuse.",
+      "sections": [
+        {
+          "title": "Security",
+          "icon": "shield",
+          "items": [
+            "Account details returned by the API, including the response to a password reset, no longer include the password hash.",
+            "Previews, QR codes and other public lookups of a short link no longer show the owner's email or tags, and keep a password-protected link's destination hidden until it's unlocked.",
+            "Wrong passwords on protected links are rate limited, and wrong two-factor codes count against the account.",
+            "Setting up two-factor authentication again no longer switches off the one that's already active.",
+            "A custom alias stays taken after its link expires or is turned off, so nobody else can claim it.",
+            "Link previews never fetch private or internal network addresses, on any redirect.",
+            "New passwords need at least 8 characters.",
+            "Link passwords are no longer written to the admin audit log, and older entries were cleaned up."
+          ]
+        },
+        {
+          "title": "Links",
+          "icon": "link",
+          "items": [
+            "Each account can create up to 60 links an hour, across the website, API keys and AI apps. Every link in a bulk upload counts.",
+            "Links to other URL shorteners, or back to hrva.cc, are refused. Share links such as t.co, lnkd.in and Google's share links still work.",
+            "You can reactivate links you turned off yourself.",
+            "The nightly Safe Browsing check no longer skips links, and a link it blocks can't be reactivated by its owner.",
+            "Reactivating a link checks it with Safe Browsing again and makes sure no other link holds its alias.",
+            "Short links keep working when the cache is down, and a link stops as soon as it reaches its visit limit."
+          ]
+        },
+        {
+          "title": "Fixes",
+          "icon": "bug",
+          "items": [
+            "Signing up with email and password works again. The form now confirms the sign-up and shows what to fix in each field instead of \"Request failed\".",
+            "Reminder emails for links that are about to expire are sent again.",
+            "Signing in or out clears data left over from the previous session, and a network error no longer signs you out.",
+            "Deleting the last link on the last page goes back a page, and selecting links for a bulk action only picks the ones on the page you see.",
+            "Check a link says when a link is password protected instead of showing an empty destination.",
+            "Settings shows your sign-in email as read-only, instead of an email form that couldn't save."
+          ]
+        },
+        {
+          "title": "Admin",
+          "icon": "wrench",
+          "items": [
+            "Resend failed emails from the email log. Emails stuck sending for 10 minutes are marked failed, and stored email content is deleted once it's sent, or after 7 days if sending failed.",
+            "All URLs: search by owner email or a pasted hrva.cc/abc link, show anonymous links only, sort by owner, and see a Suspicious marker with its reasons. The delete button works again.",
+            "Suspicious-link flags for lookalike brand names, login lures, high-risk domain endings, dynamic DNS hosts, raw IP addresses, punycode and chained shorteners. They only flag; nothing is switched off automatically.",
+            "A daily email lists new links from accounts younger than a week and links flagged as suspicious.",
+            "Audit log entries list only the fields that were sent, show a password as changed or removed, and label failed actions clearly.",
+            "Editing an API key's limits works again, and the health page reports email delivery from the latest email."
+          ]
+        }
+      ]
+    },
+    {
+      "version": "v2.5",
+      "date": "2026-10-20",
+      "summary": "Connect Claude, ChatGPT and other AI apps to your hrva.cc account.",
+      "sections": [
+        {
+          "title": "AI Connector (MCP)",
+          "icon": "sparkles",
+          "description": "hrva.cc now has an MCP server at hrva.cc/mcp.",
+          "items": [
+            "Connect Claude (web, desktop and phone), Claude Code, ChatGPT, Cursor, VS Code or another MCP app that supports remote servers with sign-in, and it can shorten links into your account, list them and check their visits.",
+            "The app signs in through hrva.cc: you log in as usual, with your password and two-factor code or with Google, then allow or deny the app on a consent page.",
+            "Links an AI app creates are tagged \"ai\".",
+            "Settings → Connected apps lists each connected app with when it was first connected and last used. Disconnecting an app cuts off its access at once.",
+            "New MCP server page with setup steps for each app.",
+            "The privacy policy explains what is stored for connected apps and for how long."
+          ]
+        },
+        {
+          "title": "Links & Sign-in",
+          "icon": "link",
+          "items": [
+            "A destination must be a real web address: http or https with a proper domain name. Anything else gets a clear error instead of becoming a broken link. A bare domain such as example.com still gets https:// added.",
+            "Signing in takes you back to the page you were trying to open."
+          ]
+        },
+        {
+          "title": "Security",
+          "icon": "shield",
+          "items": [
+            "Fixed a gap that let a signed-in user edit a link they didn't own. Only a link's owner or an admin can edit it now."
+          ]
+        },
+        {
+          "title": "Admin",
+          "icon": "wrench",
+          "items": [
+            "Admins can change where a short link points. The new destination is checked with Google Safe Browsing first."
+          ]
+        }
+      ]
+    },
+    {
+      "version": "v2.4",
+      "date": "2026-10-19",
+      "summary": "A new look, a new logo, and privacy and terms pages.",
+      "sections": [
+        {
+          "title": "Redesign",
+          "icon": "paintbrush",
+          "items": [
+            "A fresh, modern design across the site, with a new logo and a cleaner light theme. Dark mode is still there and follows your system setting.",
+            "Every public page now shares the same header and footer.",
+            "The dashboard, admin pages, blog and changelog were restyled to match."
+          ]
+        },
+        {
+          "title": "Privacy & Terms",
+          "icon": "lock",
+          "items": [
+            "New Privacy Policy and Terms of Use pages, linked from the footer.",
+            "hrva.cc is a non-commercial hobby project of HrvaLabs, and the footer, privacy policy and terms link to the HrvaLabs website."
+          ]
+        },
+        {
+          "title": "Fixes",
+          "icon": "bug",
+          "items": [
+            "The home page fits on narrow phones, and the footer links wrap onto a new line instead of running off the screen."
+          ]
+        }
+      ]
+    },
+    {
+      "version": "v2.3",
+      "date": "2026-05-31",
       "summary": "Email verification, two-factor auth, account self-service, analytics, and URL tags.",
       "sections": [
         {
