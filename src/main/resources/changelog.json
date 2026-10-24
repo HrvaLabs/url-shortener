@@ -1,10 +1,33 @@
 {
   "releases": [
     {
-      "version": "v2.8",
-      "date": "2026-10-24",
+      "version": "v2.8.1",
+      "date": "2026-10-25",
       "badge": "Latest",
       "badgeVariant": "default",
+      "summary": "Small fixes: header links when signed in, an accurate AI connector page and an up-to-date changelog.",
+      "sections": [
+        {
+          "title": "Fixes",
+          "icon": "bug",
+          "items": [
+            "The Features and API links in the header now work when you're signed in: the home page shows those sections below your shorten form.",
+            "The AI connector page no longer lists the no-account server, which can't create links while anonymous link creation is turned off.",
+            "This changelog covers everything since May again."
+          ]
+        },
+        {
+          "title": "Site",
+          "icon": "globe",
+          "items": [
+            "Blog posts and the privacy and terms pages link to the author's site, karlo.cc."
+          ]
+        }
+      ]
+    },
+    {
+      "version": "v2.8",
+      "date": "2026-10-24",
       "summary": "Privacy-first link analytics with referrers, countries and devices, plus Discord alerts and bulk review for the admin.",
       "sections": [
         {
@@ -399,10 +422,10 @@
           "icon": "sparkles",
           "description": "Hidden surprises for the curious.",
           "items": [
-            "Konami code (\u2191\u2191\u2193\u2193\u2190\u2192\u2190\u2192BA) — turns the page into a rainbow overlay for 5 seconds.",
+            "Konami code (↑↑↓↓←→←→BA) — turns the page into a rainbow overlay for 5 seconds.",
             "/fortune page — random URL-themed fortunes that refresh on each visit.",
             "/egg page — a duck that quacks. Quack it 10 times for a surprise QR code.",
-            "Console message — opens dev tools to find a hint. \u2728",
+            "Console message — opens dev tools to find a hint. ✨",
             "Changelog footer — the see-no-evil monkey wiggles on hover."
           ]
         },

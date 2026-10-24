@@ -430,6 +430,9 @@ Daily per-link counts with no raw IP, full User-Agent, full Referer or salt ever
 - **No IP logging**: click-path log lines name the short code or link id only.
 - **Never cache redirects**: every click has to reach the backend through Cloudflare (`cf-cache-status: DYNAMIC`), or analytics silently undercounts.
 
+## Changelog
+Every user-facing change, in this repo or in URL-Shortener-FE, adds an entry to the public changelog in the same push: `src/main/resources/changelog.json`, which the FE `/changelog` page renders via `GET /api/changelog`, and its Markdown twin `CHANGELOG.md`, kept item for item in sync. Add to the newest release, or start a new version and move `"badge": "Latest"` onto it. Write plain user-facing English, put admin-only features in an "Admin" section, and leave out internals (dependency bumps, refactors, test counts). The page currently ignores `icon`, but keep using names from the existing entries.
+
 ## CI / Deploy
 - `.github/workflows/build.yml`: `mvn clean package` → Docker build/push to `ghcr.io`
 - Multi-arch: `linux/amd64,linux/arm64`

@@ -4,6 +4,20 @@ All notable changes to hrva.cc — the URL shortener.
 
 ---
 
+## [v2.8.1] — 2026-10-25
+
+Small fixes: header links when signed in, an accurate AI connector page and an up-to-date changelog.
+
+### 🐛 Fixes
+- The Features and API links in the header now work when you're signed in: the home page shows those sections below your shorten form.
+- The AI connector page no longer lists the no-account server, which can't create links while anonymous link creation is turned off.
+- This changelog covers everything since May again.
+
+### 🌐 Site
+- Blog posts and the privacy and terms pages link to the author's site, karlo.cc.
+
+---
+
 ## [v2.8] — 2026-10-24
 
 Privacy-first link analytics with referrers, countries and devices, plus Discord alerts and bulk review for the admin.
