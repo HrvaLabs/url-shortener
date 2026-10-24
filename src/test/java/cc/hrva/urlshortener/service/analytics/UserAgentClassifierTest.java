@@ -40,7 +40,7 @@ class UserAgentClassifierTest {
                         "linux"),
                 human("Mozilla/5.0 (X11; CrOS x86_64 14541.0.0) AppleWebKit/537.36 (KHTML, like Gecko) "
                         + "Chrome/141.0.0.0 Safari/537.36", "desktop", "chrome", "chromeos"),
-                human("Microsoft Office/16.0 (Windows NT 10.0; Microsoft Outlook 16.0.17928; Pro)", "desktop", "other",
+                human(WINDOWS_CHROME.replace("Win64; x64", "Microsoft Windows 10.0.26100; Win64; x64"), "desktop", "chrome",
                         "windows"),
                 human(IPHONE_APP + " Instagram 400.0.0.0.0", "mobile", "in-app", "ios"),
                 human(IPHONE_APP + " [FBAN/FBIOS;FBAV/500.0.0.0]", "mobile", "in-app", "ios"),
@@ -74,7 +74,8 @@ class UserAgentClassifierTest {
                 bot("AhrefsBot/7.0"),
                 bot("Some Crawler 1.0"),
                 bot("MySpider"),
-                bot("LinkPreview/1.0"));
+                bot("LinkPreview/1.0"),
+                bot("Microsoft Office/16.0 (Windows NT 10.0; Microsoft Outlook 16.0.17928; Pro)"));
     }
 
     private static Arguments human(final String userAgent, final String device, final String browser, final String os) {

@@ -10,7 +10,7 @@ public final class UserAgentClassifier {
     private static final List<String> NAMED_BOTS = List.of(
             "discordbot", "whatsapp", "telegrambot", "slackbot", "slack-imgproxy", "facebookexternalhit", "facebot",
             "twitterbot", "linkedinbot", "skypeuripreview", "googlebot", "bingbot", "applebot", "curl/", "wget/",
-            "python-requests", "go-http-client", "okhttp", "java-http-client", "java/", "headlesschrome");
+            "python-requests", "go-http-client", "okhttp", "java-http-client", "java/", "headlesschrome", "microsoft office/");
     private static final List<String> GENERIC_BOTS = List.of("bot", "crawler", "spider", "preview");
     private static final String CUBOT = "cubot";
 
