@@ -5,7 +5,7 @@ import cc.hrva.urlshortener.dto.UrlAnalyticsDto;
 
 public interface AnalyticsService {
 
-    AnalyticsOverviewDto getOverview();
+    AnalyticsOverviewDto getOverview(Integer days);
     UrlAnalyticsDto getUrlAnalytics(Long urlId, Integer days);
     UrlAnalyticsDto getUrlAnalyticsForOwner(Long urlId, Integer days);
 

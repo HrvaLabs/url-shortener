@@ -6,7 +6,7 @@ import java.util.List;
 import cc.hrva.urlshortener.configuration.GlobalExceptionHandler;
 import cc.hrva.urlshortener.dto.AnalyticsDay;
 import cc.hrva.urlshortener.dto.AnalyticsOverviewDto;
-import cc.hrva.urlshortener.dto.AnalyticsOverviewDto.TopUrl;
+import cc.hrva.urlshortener.dto.AnalyticsOverviewDto.TopLink;
 import cc.hrva.urlshortener.dto.AnalyticsTotals;
 import cc.hrva.urlshortener.dto.BreakdownEntry;
 import cc.hrva.urlshortener.dto.UrlAnalyticsDto;
@@ -47,15 +47,50 @@ class AnalyticsControllerTest {
     }
 
     @Test
-    void shouldReturnOverview() throws Exception {
-        final var overview = new AnalyticsOverviewDto(2, 1, 1, 60,
-                List.of(new TopUrl(1L, "a", "https://a.com", 50)));
-        when(analyticsService.getOverview()).thenReturn(overview);
+    void shouldReturnOverviewForTheRequestedRange() throws Exception {
+        when(analyticsService.getOverview(90)).thenReturn(overview());
+
+        mockMvc.perform(get("/api/v1/analytics/overview").param("days", "90"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.days").value(90))
+                .andExpect(jsonPath("$.from").value("2026-07-27"))
+                .andExpect(jsonPath("$.to").value("2026-10-24"))
+                .andExpect(jsonPath("$.totals.clicks").value(300))
+                .andExpect(jsonPath("$.totals.uniqueVisitors").value(250))
+                .andExpect(jsonPath("$.totals.botClicks").value(40))
+                .andExpect(jsonPath("$.daily[0].date").value("2026-07-27"))
+                .andExpect(jsonPath("$.daily[0].clicks").value(4))
+                .andExpect(jsonPath("$.daily[0].uniqueVisitors").value(3))
+                .andExpect(jsonPath("$.daily[0].botClicks").value(1))
+                .andExpect(jsonPath("$.topLinks[0].id").value(7))
+                .andExpect(jsonPath("$.topLinks[0].shortUrl").value("menu"))
+                .andExpect(jsonPath("$.topLinks[0].destinationHost").value("example.com"))
+                .andExpect(jsonPath("$.topLinks[0].clicks").value(120))
+                .andExpect(jsonPath("$.topLinks[0].uniqueVisitors").value(95))
+                .andExpect(jsonPath("$.topLinks[0].longUrl").doesNotExist())
+                .andExpect(jsonPath("$.totalUrls").value(12))
+                .andExpect(jsonPath("$.activeUrls").value(9))
+                .andExpect(jsonPath("$.expiredUrls").value(2))
+                .andExpect(jsonPath("$.totalVisits").value(4120));
+    }
+
+    @Test
+    void overviewWithoutDaysLetsTheServicePickTheDefaultRange() throws Exception {
+        when(analyticsService.getOverview(null)).thenReturn(overview());
 
         mockMvc.perform(get("/api/v1/analytics/overview"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.totalVisits").value(60))
-                .andExpect(jsonPath("$.topUrls[0].visits").value(50));
+                .andExpect(status().isOk());
+
+        verify(analyticsService).getOverview(null);
+    }
+
+    @Test
+    void anUnsupportedOverviewRangeIsABadRequest() throws Exception {
+        when(analyticsService.getOverview(14)).thenThrow(new InvalidAnalyticsRangeException(RANGE_ERROR));
+
+        mockMvc.perform(get("/api/v1/analytics/overview").param("days", "14"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value(RANGE_ERROR));
     }
 
     @Test
@@ -116,6 +151,13 @@ class AnalyticsControllerTest {
                 .andExpect(status().isBadRequest());
 
         verifyNoInteractions(analyticsService);
+    }
+
+    private static AnalyticsOverviewDto overview() {
+        return new AnalyticsOverviewDto(90, LocalDate.of(2026, 7, 27), LocalDate.of(2026, 10, 24), new AnalyticsTotals(300, 250, 40),
+                List.of(new AnalyticsDay(LocalDate.of(2026, 7, 27), 4, 3, 1)),
+                List.of(new TopLink(7L, "menu", "example.com", 120, 95)),
+                12, 9, 2, 4120);
     }
 
     private static UrlAnalyticsDto analytics() {

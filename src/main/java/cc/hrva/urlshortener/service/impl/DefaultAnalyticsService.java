@@ -2,9 +2,10 @@ package cc.hrva.urlshortener.service.impl;
 
 import cc.hrva.urlshortener.dto.AnalyticsDay;
 import cc.hrva.urlshortener.dto.AnalyticsOverviewDto;
-import cc.hrva.urlshortener.dto.AnalyticsOverviewDto.TopUrl;
+import cc.hrva.urlshortener.dto.AnalyticsOverviewDto.TopLink;
 import cc.hrva.urlshortener.dto.AnalyticsTotals;
 import cc.hrva.urlshortener.dto.BreakdownEntry;
+import cc.hrva.urlshortener.dto.LinkClicks;
 import cc.hrva.urlshortener.dto.UrlAnalyticsDto;
 import cc.hrva.urlshortener.dto.UrlAnalyticsDto.Breakdowns;
 import cc.hrva.urlshortener.dto.UrlAnalyticsDto.LinkSummary;
@@ -24,7 +25,6 @@ import cc.hrva.urlshortener.util.DomainNames;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -41,7 +41,7 @@ import org.springframework.transaction.annotation.Transactional;
 @RequiredArgsConstructor
 public class DefaultAnalyticsService implements AnalyticsService {
 
-    private static final int TOP_URLS_LIMIT = 5;
+    private static final int TOP_LINKS_LIMIT = 10;
     private static final int TOP_VALUES_LIMIT = 10;
     private static final String OTHER = "other";
     private static final String ROLE_ADMIN = "ROLE_ADMIN";
@@ -53,10 +53,20 @@ public class DefaultAnalyticsService implements AnalyticsService {
     private final AnalyticsDays analyticsDays;
 
     @Override
-    public AnalyticsOverviewDto getOverview() {
+    public AnalyticsOverviewDto getOverview(final Integer days) {
+        final var range = AnalyticsRange.fromDays(days);
         final var user = currentUser();
         final var urls = urlRepository.findByOwner(user);
         final var now = LocalDateTime.now();
+        final var to = analyticsDays.today();
+        final var from = firstDayOf(range, to);
+        final var stored = linkStatsRepository.findOwnerDaily(user.getId(), from, to);
+
+        final var urlsById = urls.stream().collect(Collectors.toMap(Url::getId, Function.identity()));
+        final var topLinks = linkStatsRepository.findOwnerTopLinks(user.getId(), from, to, TOP_LINKS_LIMIT).stream()
+                .filter(link -> urlsById.containsKey(link.urlId()))
+                .map(link -> topLinkOf(urlsById.get(link.urlId()), link))
+                .toList();
 
         final var totalVisits = urls.stream().mapToLong(url -> safeLong(url.getVisits())).sum();
         final var activeUrls = urls.stream().filter(Url::isActive).count();
@@ -64,13 +74,17 @@ public class DefaultAnalyticsService implements AnalyticsService {
                 .filter(url -> url.getExpirationDate() != null && url.getExpirationDate().isBefore(now))
                 .count();
 
-        final var topUrls = urls.stream()
-                .sorted(Comparator.comparingLong((Url url) -> safeLong(url.getVisits())).reversed())
-                .limit(TOP_URLS_LIMIT)
-                .map(url -> new TopUrl(url.getId(), url.getShortUrl(), url.getLongUrl(), safeLong(url.getVisits())))
-                .toList();
-
-        return new AnalyticsOverviewDto(urls.size(), activeUrls, expiredUrls, totalVisits, topUrls);
+        return new AnalyticsOverviewDto(
+                range.days(),
+                from,
+                to,
+                totalsOf(stored),
+                zeroFilled(stored, from, to),
+                topLinks,
+                urls.size(),
+                activeUrls,
+                expiredUrls,
+                totalVisits);
     }
 
     @Override
@@ -106,7 +120,7 @@ public class DefaultAnalyticsService implements AnalyticsService {
 
     private UrlAnalyticsDto buildAnalytics(final Url url, final AnalyticsRange range) {
         final var to = analyticsDays.today();
-        final var from = to.minusDays(range.days() - 1L);
+        final var from = firstDayOf(range, to);
         final var stored = linkStatsRepository.findDaily(url.getId(), from, to);
         final var breakdowns = linkStatsRepository.findBreakdownTotals(url.getId(), from, to);
 
@@ -129,12 +143,24 @@ public class DefaultAnalyticsService implements AnalyticsService {
         return new LinkSummary(
                 url.getId(),
                 url.getShortUrl(),
-                DomainNames.hostOf(url.getLongUrl()).orElse(""),
+                destinationHostOf(url),
                 UrlResponse.from(url).status(),
                 url.getPasswordHash() != null,
                 url.getCreateDate(),
                 url.getLastAccessed(),
                 safeLong(url.getVisits()));
+    }
+
+    private static TopLink topLinkOf(final Url url, final LinkClicks link) {
+        return new TopLink(url.getId(), url.getShortUrl(), destinationHostOf(url), link.clicks(), link.uniqueVisitors());
+    }
+
+    private static String destinationHostOf(final Url url) {
+        return DomainNames.hostOf(url.getLongUrl()).orElse("");
+    }
+
+    private static LocalDate firstDayOf(final AnalyticsRange range, final LocalDate to) {
+        return to.minusDays(range.days() - 1L);
     }
 
     private static AnalyticsTotals totalsOf(final List<AnalyticsDay> stored) {

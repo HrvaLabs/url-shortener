@@ -21,11 +21,13 @@ public class AnalyticsController {
 
     private final AnalyticsService analyticsService;
 
-    @Operation(summary = "Analytics overview", description = "Aggregate analytics across the authenticated user's URLs.")
+    @Operation(summary = "Analytics overview", description = "Analytics across the authenticated user's URLs over the last 7, 30, 90 "
+            + "or 365 days (30 by default): range totals, a zero-filled daily series, the top 10 links by clicks and the all-time counters.")
+    @ApiResponse(responseCode = "400", description = "days is not 7, 30, 90 or 365")
     @GetMapping("/overview")
     @PreAuthorize("hasAnyRole('ROLE_ADMIN', 'ROLE_USER')")
-    public ResponseEntity<AnalyticsOverviewDto> getOverview() {
-        return ResponseEntity.ok(analyticsService.getOverview());
+    public ResponseEntity<AnalyticsOverviewDto> getOverview(@RequestParam(name = "days", required = false) final Integer days) {
+        return ResponseEntity.ok(analyticsService.getOverview(days));
     }
 
     @Operation(summary = "URL analytics", description = "Analytics for a single URL owned by the authenticated user (or any URL for admins) "

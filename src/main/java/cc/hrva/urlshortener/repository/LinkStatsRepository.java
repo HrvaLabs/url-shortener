@@ -2,6 +2,7 @@ package cc.hrva.urlshortener.repository;
 
 import cc.hrva.urlshortener.dto.AnalyticsDay;
 import cc.hrva.urlshortener.dto.BreakdownEntry;
+import cc.hrva.urlshortener.dto.LinkClicks;
 import cc.hrva.urlshortener.model.enums.StatDimension;
 import java.time.LocalDate;
 import java.util.ArrayList;
@@ -28,6 +29,8 @@ public class LinkStatsRepository {
     private static final String VALUE = "value";
     private static final String FROM = "from";
     private static final String TO = "to";
+    private static final String OWNER_ID = "ownerId";
+    private static final String LIMIT = "limit";
 
     private static final String INCREMENT_DAILY_STATS = """
             MERGE INTO link_daily_stats t
@@ -68,6 +71,25 @@ public class LinkStatsRepository {
             where url_id = :urlId and stat_date between :from and :to
             group by dimension, dimension_value
             order by dimension, sum(clicks) desc, dimension_value
+            """;
+
+    private static final String FIND_OWNER_DAILY = """
+            select s.stat_date, sum(s.clicks) as total_clicks, sum(s.unique_visitors) as total_unique_visitors,
+                   sum(s.bot_clicks) as total_bot_clicks
+            from link_daily_stats s join url u on u.id = s.url_id
+            where u.owner_id = :ownerId and s.stat_date between :from and :to
+            group by s.stat_date
+            order by s.stat_date
+            """;
+
+    private static final String FIND_OWNER_TOP_LINKS = """
+            select s.url_id, sum(s.clicks) as total_clicks, sum(s.unique_visitors) as total_unique_visitors
+            from link_daily_stats s join url u on u.id = s.url_id
+            where u.owner_id = :ownerId and s.stat_date between :from and :to
+            group by s.url_id
+            having sum(s.clicks) > 0
+            order by sum(s.clicks) desc, s.url_id
+            fetch first :limit rows only
             """;
 
     private final NamedParameterJdbcTemplate jdbcTemplate;
@@ -120,6 +142,22 @@ public class LinkStatsRepository {
                 totals.computeIfAbsent(StatDimension.valueOf(row.getString("dimension")), dimension -> new ArrayList<>())
                         .add(new BreakdownEntry(row.getString("dimension_value"), row.getLong("total_clicks"))));
         return totals;
+    }
+
+    public List<AnalyticsDay> findOwnerDaily(final long ownerId, final LocalDate from, final LocalDate to) {
+        return jdbcTemplate.query(FIND_OWNER_DAILY, Map.of(OWNER_ID, ownerId, FROM, from, TO, to), (row, rowNumber) -> new AnalyticsDay(
+                row.getObject("stat_date", LocalDate.class),
+                row.getLong("total_clicks"),
+                row.getLong("total_unique_visitors"),
+                row.getLong("total_bot_clicks")));
+    }
+
+    public List<LinkClicks> findOwnerTopLinks(final long ownerId, final LocalDate from, final LocalDate to, final int limit) {
+        return jdbcTemplate.query(FIND_OWNER_TOP_LINKS, Map.of(OWNER_ID, ownerId, FROM, from, TO, to, LIMIT, limit),
+                (row, rowNumber) -> new LinkClicks(
+                        row.getLong("url_id"),
+                        row.getLong("total_clicks"),
+                        row.getLong("total_unique_visitors")));
     }
 
     private void updateRetryingOnce(final String sql, final Map<String, ?> parameters) {

@@ -2,8 +2,11 @@ package cc.hrva.urlshortener.repository;
 
 import cc.hrva.urlshortener.dto.AnalyticsDay;
 import cc.hrva.urlshortener.dto.BreakdownEntry;
+import cc.hrva.urlshortener.dto.LinkClicks;
 import cc.hrva.urlshortener.model.Url;
+import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.enums.StatDimension;
+import jakarta.persistence.EntityManager;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
@@ -55,6 +58,9 @@ class LinkStatsRepositoryTest {
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
+
+    @Autowired
+    private EntityManager entityManager;
 
     @Test
     void incrementsTheDayRowInPlace() {
@@ -166,6 +172,56 @@ class LinkStatsRepositoryTest {
     }
 
     @Test
+    void ownerDailySumsOnlyTheOwnersLinks() {
+        final var owner = savedOwner("daily-owner@example.com");
+        final var otherOwner = savedOwner("daily-other@example.com");
+        final var first = savedLink("owner-daily-1", owner);
+        final var second = savedLink("owner-daily-2", owner);
+        final var foreign = savedLink("owner-daily-foreign", otherOwner);
+        final var anonymous = savedLink("owner-daily-anonymous");
+        linkStatsRepository.incrementDailyStats(second.getId(), DAY.plusDays(1), 1, 1, 0);
+        linkStatsRepository.incrementDailyStats(first.getId(), DAY, 2, 1, 1);
+        linkStatsRepository.incrementDailyStats(second.getId(), DAY, 3, 2, 0);
+        linkStatsRepository.incrementDailyStats(first.getId(), DAY.minusDays(1), 9, 9, 9);
+        linkStatsRepository.incrementDailyStats(foreign.getId(), DAY, 5, 4, 3);
+        linkStatsRepository.incrementDailyStats(anonymous.getId(), DAY, 7, 7, 7);
+
+        assertThat(linkStatsRepository.findOwnerDaily(owner.getId(), DAY, DAY.plusDays(1))).containsExactly(
+                new AnalyticsDay(DAY, 5, 3, 1),
+                new AnalyticsDay(DAY.plusDays(1), 1, 1, 0));
+        assertThat(linkStatsRepository.findOwnerDaily(otherOwner.getId(), DAY, DAY.plusDays(1))).containsExactly(
+                new AnalyticsDay(DAY, 5, 4, 3));
+        assertThat(linkStatsRepository.findOwnerDaily(owner.getId(), DAY.plusDays(2), DAY.plusDays(9))).isEmpty();
+    }
+
+    @Test
+    void ownerTopLinksOrderByClicksAndSkipBotOnlyLinks() {
+        final var owner = savedOwner("top-owner@example.com");
+        final var otherOwner = savedOwner("top-other@example.com");
+        final var tiedFirst = savedLink("top-tied-1", owner);
+        final var tiedSecond = savedLink("top-tied-2", owner);
+        final var busiest = savedLink("top-busiest", owner);
+        final var botOnly = savedLink("top-bots", owner);
+        final var foreign = savedLink("top-foreign", otherOwner);
+        linkStatsRepository.incrementDailyStats(tiedSecond.getId(), DAY, 4, 2, 0);
+        linkStatsRepository.incrementDailyStats(tiedFirst.getId(), DAY, 1, 1, 2);
+        linkStatsRepository.incrementDailyStats(tiedFirst.getId(), DAY.plusDays(1), 3, 2, 0);
+        linkStatsRepository.incrementDailyStats(busiest.getId(), DAY, 6, 5, 0);
+        linkStatsRepository.incrementDailyStats(busiest.getId(), DAY.plusDays(2), 50, 50, 0);
+        linkStatsRepository.incrementDailyStats(botOnly.getId(), DAY, 0, 0, 3);
+        linkStatsRepository.incrementDailyStats(foreign.getId(), DAY, 20, 20, 0);
+
+        assertThat(tiedFirst.getId()).isLessThan(tiedSecond.getId());
+        assertThat(linkStatsRepository.findOwnerTopLinks(owner.getId(), DAY, DAY.plusDays(1), 10)).containsExactly(
+                new LinkClicks(busiest.getId(), 6, 5),
+                new LinkClicks(tiedFirst.getId(), 4, 3),
+                new LinkClicks(tiedSecond.getId(), 4, 2));
+        assertThat(linkStatsRepository.findOwnerTopLinks(owner.getId(), DAY, DAY.plusDays(1), 2)).containsExactly(
+                new LinkClicks(busiest.getId(), 6, 5),
+                new LinkClicks(tiedFirst.getId(), 4, 3));
+    }
+
+    @Test
     void deletingTheLinkDeletesItsStats() {
         final var url = savedLink("deleted");
         linkStatsRepository.incrementDailyStats(url.getId(), DAY, 1, 1, 0);
@@ -189,7 +245,17 @@ class LinkStatsRepositoryTest {
     }
 
     private Url savedLink(final String shortUrl) {
-        return urlRepository.saveAndFlush(Url.builder().shortUrl(shortUrl).longUrl("https://example.org/" + shortUrl).build());
+        return savedLink(shortUrl, null);
+    }
+
+    private Url savedLink(final String shortUrl, final User owner) {
+        return urlRepository.saveAndFlush(Url.builder().shortUrl(shortUrl).longUrl("https://example.org/" + shortUrl).owner(owner).build());
+    }
+
+    private User savedOwner(final String email) {
+        final var owner = User.builder().email(email).password("correct horse battery").build();
+        entityManager.persist(owner);
+        return owner;
     }
 
     @SpringBootConfiguration

@@ -9,8 +9,10 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.stream.IntStream;
 import cc.hrva.urlshortener.dto.AnalyticsDay;
+import cc.hrva.urlshortener.dto.AnalyticsOverviewDto.TopLink;
 import cc.hrva.urlshortener.dto.AnalyticsTotals;
 import cc.hrva.urlshortener.dto.BreakdownEntry;
+import cc.hrva.urlshortener.dto.LinkClicks;
 import cc.hrva.urlshortener.dto.UrlAnalyticsDto.LinkSummary;
 import cc.hrva.urlshortener.exception.InvalidAnalyticsRangeException;
 import cc.hrva.urlshortener.exception.NoAuthorizationException;
@@ -72,22 +74,108 @@ class DefaultAnalyticsServiceTest {
     }
 
     @Test
-    void shouldAggregateOverview() {
+    void overviewZeroFillsAndTotalsTheRange() {
+        givenOwnLinks(List.of(ownLink()));
+        when(analyticsDays.today()).thenReturn(TODAY);
+        when(linkStatsRepository.findOwnerDaily(1L, LocalDate.of(2026, 10, 18), TODAY)).thenReturn(List.of(
+                new AnalyticsDay(LocalDate.of(2026, 10, 19), 4, 3, 1),
+                new AnalyticsDay(TODAY, 6, 5, 2)));
+        when(linkStatsRepository.findOwnerTopLinks(1L, LocalDate.of(2026, 10, 18), TODAY, 10)).thenReturn(List.of());
+
+        final var overview = analyticsService.getOverview(7);
+
+        assertThat(overview.days()).isEqualTo(7);
+        assertThat(overview.from()).isEqualTo(LocalDate.of(2026, 10, 18));
+        assertThat(overview.to()).isEqualTo(TODAY);
+        assertThat(overview.daily()).containsExactly(
+                new AnalyticsDay(LocalDate.of(2026, 10, 18), 0, 0, 0),
+                new AnalyticsDay(LocalDate.of(2026, 10, 19), 4, 3, 1),
+                new AnalyticsDay(LocalDate.of(2026, 10, 20), 0, 0, 0),
+                new AnalyticsDay(LocalDate.of(2026, 10, 21), 0, 0, 0),
+                new AnalyticsDay(LocalDate.of(2026, 10, 22), 0, 0, 0),
+                new AnalyticsDay(LocalDate.of(2026, 10, 23), 0, 0, 0),
+                new AnalyticsDay(TODAY, 6, 5, 2));
+        assertThat(overview.totals()).isEqualTo(new AnalyticsTotals(10, 8, 3));
+        assertThat(overview.topLinks()).isEmpty();
+    }
+
+    @Test
+    void overviewDefaultRangeIs30Days() {
+        givenOwnLinks(List.of(ownLink()));
+        givenNoOwnerStats();
+
+        final var overview = analyticsService.getOverview(null);
+
+        assertThat(overview.days()).isEqualTo(30);
+        assertThat(overview.from()).isEqualTo(LocalDate.of(2026, 9, 25));
+        assertThat(overview.to()).isEqualTo(TODAY);
+        assertThat(overview.daily()).hasSize(30);
+        assertThat(overview.totals()).isEqualTo(new AnalyticsTotals(0, 0, 0));
+        verify(linkStatsRepository).findOwnerDaily(1L, LocalDate.of(2026, 9, 25), TODAY);
+        verify(linkStatsRepository).findOwnerTopLinks(1L, LocalDate.of(2026, 9, 25), TODAY, 10);
+    }
+
+    @Test
+    void overviewTopLinksCarryShortUrlAndHost() {
+        final var menu = Url.builder().id(8L).shortUrl("menu").longUrl("https://shop.example.com/a?b=c").visits(200L).active(true)
+                .owner(owner).build();
+        givenOwnLinks(List.of(ownLink(), menu));
+        when(analyticsDays.today()).thenReturn(TODAY);
+        when(linkStatsRepository.findOwnerDaily(eq(1L), any(), any())).thenReturn(List.of());
+        when(linkStatsRepository.findOwnerTopLinks(1L, LocalDate.of(2026, 9, 25), TODAY, 10)).thenReturn(List.of(
+                new LinkClicks(8L, 120, 95),
+                new LinkClicks(7L, 4, 3)));
+
+        final var overview = analyticsService.getOverview(30);
+
+        assertThat(overview.topLinks()).containsExactly(
+                new TopLink(8L, "menu", "shop.example.com", 120, 95),
+                new TopLink(7L, "a", "a.com", 4, 3));
+    }
+
+    @Test
+    void overviewSkipsATopLinkMissingFromTheOwnersLinks() {
+        givenOwnLinks(List.of(ownLink()));
+        when(analyticsDays.today()).thenReturn(TODAY);
+        when(linkStatsRepository.findOwnerDaily(eq(1L), any(), any())).thenReturn(List.of());
+        when(linkStatsRepository.findOwnerTopLinks(eq(1L), any(), any(), eq(10))).thenReturn(List.of(
+                new LinkClicks(9L, 5, 4),
+                new LinkClicks(7L, 4, 3)));
+
+        final var overview = analyticsService.getOverview(30);
+
+        assertThat(overview.topLinks()).containsExactly(new TopLink(7L, "a", "a.com", 4, 3));
+    }
+
+    @Test
+    void overviewKeepsTheAllTimeCounters() {
         final var now = LocalDateTime.now();
-        final var active = Url.builder().id(1L).shortUrl("a").longUrl("https://a.com").visits(10L).active(true).build();
+        final var active = Url.builder().id(1L).shortUrl("a").longUrl("https://a.com").visits(10L).active(true)
+                .expirationDate(now.plusDays(1)).build();
         final var expired = Url.builder().id(2L).shortUrl("b").longUrl("https://b.com").visits(50L).active(false)
                 .expirationDate(now.minusDays(1)).build();
-        when(userService.getUserFromToken()).thenReturn(owner);
-        when(urlRepository.findByOwner(owner)).thenReturn(List.of(active, expired));
+        final var deactivated = Url.builder().id(3L).shortUrl("c").longUrl("https://c.com").active(false).build();
+        givenOwnLinks(List.of(active, expired, deactivated));
+        givenNoOwnerStats();
 
-        final var overview = analyticsService.getOverview();
+        final var overview = analyticsService.getOverview(30);
 
-        assertThat(overview.totalUrls()).isEqualTo(2);
+        assertThat(overview.totalUrls()).isEqualTo(3);
         assertThat(overview.activeUrls()).isEqualTo(1);
         assertThat(overview.expiredUrls()).isEqualTo(1);
         assertThat(overview.totalVisits()).isEqualTo(60);
-        assertThat(overview.topUrls()).hasSize(2);
-        assertThat(overview.topUrls().get(0).visits()).isEqualTo(50);
+    }
+
+    @Test
+    void overviewRejectsOtherRanges() {
+        for (final var days : List.of(0, 14, -7, 31, 366)) {
+            assertThatThrownBy(() -> analyticsService.getOverview(days))
+                    .as("days %d", days)
+                    .isInstanceOf(InvalidAnalyticsRangeException.class)
+                    .hasMessage(RANGE_ERROR);
+        }
+
+        verifyNoInteractions(userService, urlRepository, linkStatsRepository, analyticsDays);
     }
 
     @Test
@@ -370,6 +458,17 @@ class DefaultAnalyticsServiceTest {
     private void givenOwnLink(final Url url) {
         when(userService.getUserFromToken()).thenReturn(owner);
         when(urlRepository.findById(7L)).thenReturn(Optional.of(url));
+    }
+
+    private void givenOwnLinks(final List<Url> urls) {
+        when(userService.getUserFromToken()).thenReturn(owner);
+        when(urlRepository.findByOwner(owner)).thenReturn(urls);
+    }
+
+    private void givenNoOwnerStats() {
+        when(analyticsDays.today()).thenReturn(TODAY);
+        when(linkStatsRepository.findOwnerDaily(eq(1L), any(), any())).thenReturn(List.of());
+        when(linkStatsRepository.findOwnerTopLinks(eq(1L), any(), any(), eq(10))).thenReturn(List.of());
     }
 
     private void givenNoStoredStats(final LocalDate today) {
