@@ -4,7 +4,6 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import cc.hrva.urlshortener.service.ApiKeyService;
 import cc.hrva.urlshortener.service.BlocklistSourceService;
-import cc.hrva.urlshortener.service.IPAddressService;
 import cc.hrva.urlshortener.service.LinkDigestService;
 import cc.hrva.urlshortener.service.ResetTokenService;
 import cc.hrva.urlshortener.service.SafeBrowsingRecheckService;
@@ -26,21 +25,12 @@ public class DefaultScheduledService implements ScheduledService {
     private final UrlService urlService;
     private final UserService userService;
     private final ApiKeyService apiKeyService;
-    private final IPAddressService ipAddressService;
     private final ResetTokenService resetTokenService;
     private final UrlNotificationService urlNotificationService;
     private final SafeBrowsingRecheckService safeBrowsingRecheckService;
     private final SendingEmailService sendingEmailService;
     private final LinkDigestService linkDigestService;
     private final BlocklistSourceService blocklistSourceService;
-
-    @Override
-    @Scheduled(cron = "0 */1 * * * *")
-    public void cleanupIpAddresses() {
-        log.info("Scheduled cleanup: IP addresses");
-        ipAddressService.deactivateDeprecatedIps();
-        ipAddressService.deleteDeactivatedIps();
-    }
 
     @Override
     @Scheduled(cron = "0 */1 * * * *")

@@ -26,9 +26,6 @@ class DefaultScheduledServiceTest {
     private ApiKeyService apiKeyService;
 
     @Mock
-    private IPAddressService ipAddressService;
-
-    @Mock
     private ResetTokenService resetTokenService;
 
     @Mock
@@ -48,7 +45,7 @@ class DefaultScheduledServiceTest {
 
     @BeforeEach
     void setUp() {
-        this.scheduledService = new DefaultScheduledService(urlService, userService, apiKeyService, ipAddressService, resetTokenService, urlNotificationService, safeBrowsingRecheckService, sendingEmailService, linkDigestService, blocklistSourceService);
+        this.scheduledService = new DefaultScheduledService(urlService, userService, apiKeyService, resetTokenService, urlNotificationService, safeBrowsingRecheckService, sendingEmailService, linkDigestService, blocklistSourceService);
     }
 
     @Test
@@ -79,13 +76,6 @@ class DefaultScheduledServiceTest {
     void shouldFailInterruptedEmails() {
         scheduledService.failInterruptedEmails();
         verify(sendingEmailService).failInterruptedEmails();
-    }
-
-    @Test
-    void shouldCleanupIpAddresses() {
-        scheduledService.cleanupIpAddresses();
-        verify(ipAddressService).deactivateDeprecatedIps();
-        verify(ipAddressService).deleteDeactivatedIps();
     }
 
     @Test

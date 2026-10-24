@@ -114,9 +114,6 @@ class UrlServiceTest {
     private AppProperties appProperties;
 
     @Mock
-    private IPAddressService ipAddressService;
-
-    @Mock
     private UrlUpdateDtoToUrlConverter urlUpdateDtoToUrlConverter;
 
     @Mock
@@ -179,7 +176,6 @@ class UrlServiceTest {
                 urlRepository,
                 appProperties,
                 apiKeyValidator,
-                ipAddressService,
                 clickAnalyticsService,
                 urlToPeekUrlConverter,
                 createUrlToUrlConverter,
@@ -1899,7 +1895,6 @@ class UrlServiceTest {
                 urlRepository,
                 appProperties,
                 apiKeyValidator,
-                ipAddressService,
                 clickAnalyticsService,
                 urlToPeekUrlConverter,
                 createUrlToUrlConverter,
@@ -1964,7 +1959,6 @@ class UrlServiceTest {
                 urlRepository,
                 appProperties,
                 apiKeyValidator,
-                ipAddressService,
                 clickAnalyticsService,
                 urlToPeekUrlConverter,
                 new CreateUrlToUrlConverter(),
@@ -1995,7 +1989,6 @@ class UrlServiceTest {
                 urlRepository,
                 appProperties,
                 apiKeyValidator,
-                ipAddressService,
                 clickAnalyticsService,
                 urlToPeekUrlConverter,
                 new CreateUrlToUrlConverter(),
@@ -2023,7 +2016,6 @@ class UrlServiceTest {
                 urlRepository,
                 appProperties,
                 apiKeyValidator,
-                ipAddressService,
                 clickAnalyticsService,
                 urlToPeekUrlConverter,
                 createUrlToUrlConverter,

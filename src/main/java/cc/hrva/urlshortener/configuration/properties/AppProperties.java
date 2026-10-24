@@ -54,10 +54,6 @@ public class AppProperties {
 
     @NotNull
     @Positive
-    private Long inactiveVisitIncrementPerIpInHours;
-
-    @NotNull
-    @Positive
     private Long ipRetentionDurationInHours;
 
     @NotNull

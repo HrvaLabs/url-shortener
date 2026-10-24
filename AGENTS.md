@@ -50,10 +50,10 @@ java -jar "$E2E/app.jar" --spring.profiles.active=local --server.port=18080 \
 - Run the jar from a copy, so `mvn clean` doesn't pull it from under the running app.
 
 ## Testing
-- `mvn test` (or `mvn -B verify`) — 1708 tests, JUnit 5 + Mockito + AssertJ
+- `mvn test` (or `mvn -B verify`) — 1861 tests, JUnit 5 + Mockito + AssertJ
 - Mostly plain `@ExtendWith(MockitoExtension.class)` unit tests. Each `@SpringBootTest` class boots its own nested `TestApplication` (a trimmed context) on embedded H2 and mocks the rest:
   - MockMvc through the real filter chains, with a subset Liquibase changelog (`db/changelog/017-oauth2-authorization-server.xml` or `db/mcp-connector-test-changelog.xml`): the MCP connector's security tests, `SecurityTxtControllerTest`, `ReportEndpointSecurityTest`, `AdminReviewQueueSecurityTest`
-  - the full Liquibase changelog: `DynamicLinkChecksSchemaTest` (024's tables, seeds and constraints), `DefaultScammerSignalServiceTest`, `LinkStatsRepositoryTest` (026's daily stats tables, their `MERGE` upserts and the range reads)
+  - the full Liquibase changelog: `DynamicLinkChecksSchemaTest` (024's tables, seeds and constraints), `DefaultScammerSignalServiceTest`, `LinkStatsRepositoryTest` (026's daily stats tables, their `MERGE` upserts, the range reads, the owner index and the `ip_address` drop)
   - 008, legacy audit rows, then 025 (`db/audit-action-test-changelog.xml`): `AuditActionMigrationTest`
   - a Hibernate-generated schema, no Liquibase: `UrlSpecificationTest`, `LinkReviewSpecificationTest`, `AdminPageQueriesTest` (statement counts of the admin pages)
 - `UrlShortenerApplicationTests` has no test methods, so no test boots the whole app. The real app on Postgres and Redis is checked by hand (see End-to-end check of the link checks).
@@ -306,7 +306,6 @@ Jobs run on a 4-thread scheduler (`spring.task.scheduling.pool.size: 4` in `appl
 - **Blocklist refresh**: Every hour, `refreshDue` downloads each enabled source whose own interval (`refreshIntervalHours`, 1–168, default 6; 5 minutes' tolerance) has passed or whose Redis set is missing. `reloadMissing` (`@Async`) downloads every enabled source whose set is missing, at startup (`ApplicationReadyEvent`) and every 5 minutes (`reloadMissingBlocklists`, 30 s past the minute): one `EXISTS` per source, and while Redis is down one warn line and nothing else until the next run. So a Redis restart or `FLUSHALL` heals itself within minutes, without an app restart.
 - **Click-check lists**: Every 5 minutes, at startup and after any source or rule change (`BlocklistConfigurationChangedEvent`), `DefaultClickCheckService.reload` re-reads the enabled `BLOCK` source ids and the Allow-rule domains into memory.
 - **URL expiry**: Daily at 8 AM, sends email notification for URLs expiring within 24 hours (configurable via `app.url-expiration-notification-hours`).
-- **IP cleanup**: Every minute, deactivates and deletes old IP address records.
 - **Reset tokens**: Every minute, deactivates and deletes expired password reset tokens.
 - **URL deactivation**: Every minute, deactivates expired URLs with a targeted update by id (`deactivateIfActive`), never by saving loaded copies, so a block landing meanwhile stays.
 - **API key deactivation**: Every hour, deactivates expired API keys.
@@ -392,7 +391,7 @@ An owner-facing alert channel next to the emails, which stay as they are: hrva.c
 - 2FA recovery codes (bcrypt-hashed, one-time). `user_account.two_factor_enabled` / `two_factor_secret`.
 
 ### Account self-service
-- `GET /users/me/export` (GDPR JSON: profile + urls + api keys + emails); `DELETE /users/me` (hard delete; clears reset/verification/recovery tokens, ip_address rows, urls, api keys).
+- `GET /users/me/export` (GDPR JSON: profile + urls + api keys + emails); `DELETE /users/me` (hard delete; clears reset/verification/recovery tokens, urls, api keys).
 - URL/API-key responses carry a `status` reason (ACTIVE / EXPIRED / LIMIT_REACHED / REVOKED / DEACTIVATED / BLOCKED).
 
 ## Cache Architecture
@@ -421,7 +420,7 @@ Daily per-link counts with no raw IP, full User-Agent, full Referer or salt ever
 - **Unique visitors** (`UniqueVisitorCounter`): `HMAC-SHA256(daySalt, ip + "\n" + userAgent + "\n" + urlId)`, its first 16 bytes as 22 Base64url characters, added to the link's set for the day. A new member adds one `UNIQUE_VISITORS` plus `recordVisit` (`visits` + 1 and `lastAccessed`, active links only) and `deactivateAtVisitLimit`, which evicts the cached entry when it switches the link off. `Url.visits` is therefore daily unique human visitors, summed.
   - `analytics:salt:<yyyy-MM-dd>`: Base64 of 32 `SecureRandom` bytes, created with set-if-absent. `analytics:visitors:<urlId>:<yyyy-MM-dd>`: the set. Both expire at the next midnight in the zone plus 4 hours; every write sets the expiry, so no analytics key lives without one.
   - Redis down, or a failing check → a new visitor, so a visit-limited link closes early rather than late (one warn line, without the IP). A lost salt is recreated and that day over-counts once.
-- **Tables** (`026-privacy-first-analytics.xml`, `LinkStatsRepository`, deleted with the link): `LINK_DAILY_STATS(URL_ID, STAT_DATE, CLICKS, UNIQUE_VISITORS, BOT_CLICKS)` and `LINK_DAILY_BREAKDOWN(URL_ID, STAT_DATE, DIMENSION, DIMENSION_VALUE, CLICKS)`, `DIMENSION` one of `REFERRER`, `COUNTRY`, `DEVICE`, `BROWSER`, `OS`.
+- **Tables** (`026-privacy-first-analytics.xml`, `LinkStatsRepository`, deleted with the link): `LINK_DAILY_STATS(URL_ID, STAT_DATE, CLICKS, UNIQUE_VISITORS, BOT_CLICKS)` and `LINK_DAILY_BREAKDOWN(URL_ID, STAT_DATE, DIMENSION, DIMENSION_VALUE, CLICKS)`, `DIMENSION` one of `REFERRER`, `COUNTRY`, `DEVICE`, `BROWSER`, `OS`. 026 also drops the old `ip_address` table (`026-drop-ip-address`, no rollback); `table/ip_address.xml` stays in the changelog, so a fresh database creates it and 026 drops it.
   - Upserts are standard SQL `MERGE … USING (VALUES …) AS s(…)` with every parameter wrapped in `CAST(:p AS <type>)`, because Postgres can't type bare parameters inside `VALUES`. Never `ON CONFLICT` or H2's `MERGE … KEY`: the same SQL runs on H2 in the tests and on Postgres 15 or newer. A duplicate-key race is retried once.
   - Caps: at most 50 named values per dimension per link per day; a further new value, or one over 255 characters, is stored as `other`. The per-link view shows the top 10 named values per dimension plus one `other` (stored `other` plus the rest), left out when 0.
 - **Reads** (`DefaultAnalyticsService`, for `GET /api/v1/analytics/urls/{id}`, MCP `link_stats` and `GET /api/v1/analytics/overview`): `days` 7, 30, 90 or 365 (`AnalyticsRange`, default 30; anything else → 400 `days must be 7, 30, 90 or 365`, which the service checks before it reads the caller or the link). The range ends today in the analytics zone and starts `days − 1` days earlier. `findDaily` returns only the stored days and the service zero-fills the rest, so `daily` always has `days` entries; the totals are their sums. `findBreakdownTotals` sums each value over the range, clicks descending then value ascending; the service keeps the top 10 named values and appends `other` last. The summary has the destination host only, never the full URL. The overview sums the caller's links per day (`findOwnerDaily`) and lists the top 10 links by clicks in the range (`findOwnerTopLinks`: clicks descending then link id, bot-only links left out), each with the short URL and destination host from the caller's own links; its unique visitors are a sum over links and days, so one person on two links counts twice. `IDX_URL_OWNER_ID` (026) indexes `URL.OWNER_ID` for these owner-scoped reads, as Postgres doesn't index a foreign key column by itself.

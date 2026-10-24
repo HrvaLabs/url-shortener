@@ -71,7 +71,6 @@ app:
   api-key-expiration-in-months: 12
   reset-token-expiration-in-hours: 24
   user-api-key-slots: 4
-  inactive-visit-increment-per-ip-in-hours: 2
   ip-retention-duration-in-hours: 48
   deactivate-user-account-after-days: 1825
   max-login-attempts: 20

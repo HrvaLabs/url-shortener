@@ -119,9 +119,6 @@ class DefaultModerationServiceTest {
     private AuditLogService auditLogService;
 
     @Mock
-    private IPAddressService ipAddressService;
-
-    @Mock
     private CacheManager cacheManager;
 
     @Mock
@@ -204,7 +201,7 @@ class DefaultModerationServiceTest {
             return null;
         }).when(entityManager).detach(any());
         moderationService = new DefaultModerationService(urlRepository, userRepository, domainRuleRepository, linkCheckService,
-                reviewQueueService, userService, sendingEmailService, auditLogService, ipAddressService, cacheManager, eventPublisher, recordingTransactions(),
+                reviewQueueService, userService, sendingEmailService, auditLogService, cacheManager, eventPublisher, recordingTransactions(),
                 entityManager, scammerSignalService, taskScheduler);
     }
 
@@ -1239,13 +1236,12 @@ class DefaultModerationServiceTest {
     }
 
     @Test
-    void deletingALinkRemovesItsVisitsAndTheLinkThenEvictsIt() {
+    void deletingALinkDeletesItThenEvictsIt() {
         final var url = link(80L, "https://example.org/x", user(1L, "alice@example.com"));
 
         moderationService.deleteLink(80L, ADMIN, "mcp");
 
-        final var order = inOrder(ipAddressService, urlRepository, cache);
-        order.verify(ipAddressService).deleteRecordsForUrl(url);
+        final var order = inOrder(urlRepository, cache);
         order.verify(urlRepository).delete(url);
         order.verify(cache).evict("s80");
         verify(auditLogService).log(ADMIN, AuditAction.DELETE_LINK, "Url", "80", "shortUrl: s80, links: 1, via: mcp");

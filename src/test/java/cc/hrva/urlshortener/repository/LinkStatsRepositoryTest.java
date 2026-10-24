@@ -242,6 +242,14 @@ class LinkStatsRepositoryTest {
                 .containsExactly(tuple("URL", "OWNER_ID"));
     }
 
+    @Test
+    void theIpAddressTableIsGone() {
+        assertThat(jdbcTemplate.queryForObject(
+                "select count(*) from information_schema.tables where upper(table_name) = 'IP_ADDRESS'", Integer.class)).isZero();
+        assertThat(jdbcTemplate.queryForObject(
+                "select count(*) from information_schema.sequences where upper(sequence_name) = 'IP_ADDRESS_ID_SEQ'", Integer.class)).isZero();
+    }
+
     private void recordBreakdowns(final Url url) {
         linkStatsRepository.incrementBreakdown(url.getId(), DAY, CROATIAN_IPHONE);
         linkStatsRepository.incrementBreakdown(url.getId(), DAY, CROATIAN_IPHONE);

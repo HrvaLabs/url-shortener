@@ -67,4 +67,10 @@
         </rollback>
     </changeSet>
 
+    <changeSet author="khrvacic" id="026-drop-ip-address">
+        <dropTable tableName="IP_ADDRESS" cascadeConstraints="true"/>
+        <dropSequence sequenceName="IP_ADDRESS_ID_SEQ"/>
+        <rollback/>
+    </changeSet>
+
 </databaseChangeLog>

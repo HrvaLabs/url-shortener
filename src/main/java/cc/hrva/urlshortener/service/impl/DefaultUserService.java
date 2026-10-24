@@ -21,7 +21,6 @@ import cc.hrva.urlshortener.model.ApiKey;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.repository.ApiKeyRepository;
 import cc.hrva.urlshortener.repository.EmailLogRepository;
-import cc.hrva.urlshortener.repository.IPAddressRepository;
 import cc.hrva.urlshortener.repository.ResetTokenRepository;
 import cc.hrva.urlshortener.repository.TwoFactorRecoveryCodeRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
@@ -64,7 +63,6 @@ public class DefaultUserService implements UserService {
     private final PasswordEncoder passwordEncoder;
     private final ApiKeyRepository apiKeyRepository;
     private final EmailLogRepository emailLogRepository;
-    private final IPAddressRepository ipAddressRepository;
     private final ResetTokenService resetTokenService;
     private final ResetTokenRepository resetTokenRepository;
     private final TwoFactorRecoveryCodeRepository twoFactorRecoveryCodeRepository;
@@ -214,10 +212,6 @@ public class DefaultUserService implements UserService {
     }
 
     private void deleteUserAndOwnedData(final User user) {
-        final var urls = urlRepository.findByOwner(user);
-        if (!urls.isEmpty()) {
-            ipAddressRepository.deleteByUrlIn(urls);
-        }
         resetTokenRepository.deleteByUser(user);
         verificationTokenRepository.deleteByUser(user);
         twoFactorRecoveryCodeRepository.deleteByUser(user);

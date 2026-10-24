@@ -29,7 +29,6 @@ import cc.hrva.urlshortener.repository.specification.UrlSpecification;
 import cc.hrva.urlshortener.service.ApiKeyService;
 import cc.hrva.urlshortener.service.ClickAnalyticsService;
 import cc.hrva.urlshortener.service.ClickCheckService;
-import cc.hrva.urlshortener.service.IPAddressService;
 import cc.hrva.urlshortener.service.RedirectChainService;
 import cc.hrva.urlshortener.service.ReviewQueueService;
 import cc.hrva.urlshortener.service.ScammerSignalService;
@@ -108,7 +107,6 @@ public class DefaultUrlService implements UrlService {
     private final UrlRepository urlRepository;
     private final AppProperties appProperties;
     private final ApiKeyValidator apiKeyValidator;
-    private final IPAddressService ipAddressService;
     private final ClickAnalyticsService clickAnalyticsService;
     private final UrlToPeekUrlConverter urlToPeekUrlConverter;
     private final CreateUrlToUrlConverter createUrlToUrlConverter;
@@ -405,7 +403,6 @@ public class DefaultUrlService implements UrlService {
 
         urlValidator.verifyUserAdminOrOwner(url);
 
-        ipAddressService.deleteRecordsForUrl(url);
         urlRepository.delete(url);
     }
 

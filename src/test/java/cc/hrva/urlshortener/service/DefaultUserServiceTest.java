@@ -21,7 +21,6 @@ import cc.hrva.urlshortener.model.ApiKey;
 import cc.hrva.urlshortener.model.ResetToken;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.repository.ApiKeyRepository;
-import cc.hrva.urlshortener.repository.IPAddressRepository;
 import cc.hrva.urlshortener.repository.ResetTokenRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
@@ -83,9 +82,6 @@ class DefaultUserServiceTest {
     private cc.hrva.urlshortener.repository.EmailLogRepository emailLogRepository;
 
     @Mock
-    private IPAddressRepository ipAddressRepository;
-
-    @Mock
     private ResetTokenService resetTokenService;
 
     @Mock
@@ -121,7 +117,7 @@ class DefaultUserServiceTest {
     @BeforeEach
     void setUp() {
         this.userService = new DefaultUserService(appProperties, authValidator, urlRepository, userRepository,
-                passwordEncoder, apiKeyRepository, emailLogRepository, ipAddressRepository, resetTokenService,
+                passwordEncoder, apiKeyRepository, emailLogRepository, resetTokenService,
                 resetTokenRepository, twoFactorRecoveryCodeRepository, userToUserDtoConverter, sendingEmailService,
                 verificationTokenService, verificationTokenRepository, userUpdateDtoToUserConverter, connectedAppsService, scammerSignalService, eventPublisher);
         lenient().when(userRepository.findByEmail(null)).thenReturn(Optional.empty());
@@ -327,27 +323,12 @@ class DefaultUserServiceTest {
     @Test
     void shouldDeleteUserByIdWithOwnedData() {
         final var user = User.builder().id(1L).email("test@example.com").build();
-        final var urls = Collections.singletonList(cc.hrva.urlshortener.model.Url.builder().id(7L).build());
         when(userRepository.findById(1L)).thenReturn(Optional.of(user));
-        when(urlRepository.findByOwner(user)).thenReturn(urls);
 
         userService.deleteUserById(1L);
 
-        verify(ipAddressRepository).deleteByUrlIn(urls);
         verify(resetTokenRepository).deleteByUser(user);
         verify(urlRepository).deleteByOwner(user);
-        verify(userRepository).delete(user);
-    }
-
-    @Test
-    void shouldDeleteUserByIdWithoutUrlsSkipsIpAddressCleanup() {
-        final var user = User.builder().id(1L).email("test@example.com").build();
-        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
-        when(urlRepository.findByOwner(user)).thenReturn(Collections.emptyList());
-
-        userService.deleteUserById(1L);
-
-        verify(ipAddressRepository, org.mockito.Mockito.never()).deleteByUrlIn(any());
         verify(userRepository).delete(user);
     }
 
@@ -613,7 +594,6 @@ class DefaultUserServiceTest {
     void shouldDisconnectConnectedAppsWhenAdminDeletesUser() {
         final var user = User.builder().id(1L).email("test@example.com").build();
         when(userRepository.findById(1L)).thenReturn(Optional.of(user));
-        when(urlRepository.findByOwner(user)).thenReturn(Collections.emptyList());
 
         userService.deleteUserById(1L);
 

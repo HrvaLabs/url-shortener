@@ -26,7 +26,6 @@ import cc.hrva.urlshortener.repository.DomainRuleRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.service.AuditLogService;
-import cc.hrva.urlshortener.service.IPAddressService;
 import cc.hrva.urlshortener.service.LinkCheckService;
 import cc.hrva.urlshortener.service.ModerationService;
 import cc.hrva.urlshortener.service.ReviewQueueService;
@@ -112,7 +111,6 @@ public class DefaultModerationService implements ModerationService {
     private final UserService userService;
     private final SendingEmailService sendingEmailService;
     private final AuditLogService auditLogService;
-    private final IPAddressService ipAddressService;
     private final CacheManager cacheManager;
     private final ApplicationEventPublisher eventPublisher;
     private final TransactionOperations transactionOperations;
@@ -275,10 +273,7 @@ public class DefaultModerationService implements ModerationService {
     @Override
     public void deleteLink(final long urlId, final String performedBy, final String via) {
         final var url = findUrl(urlId);
-        transactionOperations.executeWithoutResult(status -> {
-            ipAddressService.deleteRecordsForUrl(url);
-            urlRepository.delete(url);
-        });
+        transactionOperations.executeWithoutResult(status -> urlRepository.delete(url));
         evictFromCache(url.getShortUrl());
         log.info("Link deleted urlId={}", urlId);
         auditLogService.log(performedBy, AuditAction.DELETE_LINK, TARGET_URL, String.valueOf(urlId), details(via, 1, field("shortUrl", url.getShortUrl())));

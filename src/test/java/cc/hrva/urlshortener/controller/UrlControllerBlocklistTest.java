@@ -18,7 +18,6 @@ import cc.hrva.urlshortener.security.ClickRequestResolver;
 import cc.hrva.urlshortener.security.ClientIpResolver;
 import cc.hrva.urlshortener.service.ApiKeyService;
 import cc.hrva.urlshortener.service.ClickAnalyticsService;
-import cc.hrva.urlshortener.service.IPAddressService;
 import cc.hrva.urlshortener.service.LinkPreviewService;
 import cc.hrva.urlshortener.service.ModerationService;
 import cc.hrva.urlshortener.service.QrCodeService;
@@ -106,9 +105,6 @@ class UrlControllerBlocklistTest {
     private ApiKeyValidator apiKeyValidator;
 
     @Mock
-    private IPAddressService ipAddressService;
-
-    @Mock
     private CreateUrlToUrlConverter createUrlToUrlConverter;
 
     @Mock
@@ -158,7 +154,7 @@ class UrlControllerBlocklistTest {
         when(blocklistSourceRepository.findByEnabledTrue()).thenReturn(List.of(TIF));
         clickCheckService.reload();
         final var urlService = new DefaultUrlService(userService, urlValidator, apiKeyService, urlRepository, appProperties, apiKeyValidator,
-                ipAddressService, clickAnalyticsService, new UrlToPeekUrlConverter(), createUrlToUrlConverter, urlUpdateDtoToUrlConverter, cacheManager,
+                clickAnalyticsService, new UrlToPeekUrlConverter(), createUrlToUrlConverter, urlUpdateDtoToUrlConverter, cacheManager,
                 objectMapper, meterRegistry, passwordEncoder, suspiciousUrlService, rateLimiter, reviewQueueService, scammerSignalService, clickCheckService,
                 redirectChainService, TransactionOperations.withoutTransaction(), entityManager);
         mockMvc = MockMvcBuilders.standaloneSetup(new UrlController(urlService, qrCodeService, linkPreviewService, clientIpResolver,
