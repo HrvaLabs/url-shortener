@@ -53,7 +53,7 @@ java -jar "$E2E/app.jar" --spring.profiles.active=local --server.port=18080 \
 - `mvn test` (or `mvn -B verify`) — 1708 tests, JUnit 5 + Mockito + AssertJ
 - Mostly plain `@ExtendWith(MockitoExtension.class)` unit tests. Each `@SpringBootTest` class boots its own nested `TestApplication` (a trimmed context) on embedded H2 and mocks the rest:
   - MockMvc through the real filter chains, with a subset Liquibase changelog (`db/changelog/017-oauth2-authorization-server.xml` or `db/mcp-connector-test-changelog.xml`): the MCP connector's security tests, `SecurityTxtControllerTest`, `ReportEndpointSecurityTest`, `AdminReviewQueueSecurityTest`
-  - the full Liquibase changelog: `DynamicLinkChecksSchemaTest` (024's tables, seeds and constraints), `DefaultScammerSignalServiceTest`
+  - the full Liquibase changelog: `DynamicLinkChecksSchemaTest` (024's tables, seeds and constraints), `DefaultScammerSignalServiceTest`, `LinkStatsRepositoryTest` (026's daily stats tables and their `MERGE` upserts)
   - 008, legacy audit rows, then 025 (`db/audit-action-test-changelog.xml`): `AuditActionMigrationTest`
   - a Hibernate-generated schema, no Liquibase: `UrlSpecificationTest`, `LinkReviewSpecificationTest`, `AdminPageQueriesTest` (statement counts of the admin pages)
 - `UrlShortenerApplicationTests` has no test methods, so no test boots the whole app. The real app on Postgres and Redis is checked by hand (see End-to-end check of the link checks).

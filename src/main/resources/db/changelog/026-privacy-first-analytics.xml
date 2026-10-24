@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.9.xsd">
+
+    <changeSet author="khrvacic" id="026-link-daily-stats">
+        <createTable tableName="LINK_DAILY_STATS">
+            <column name="URL_ID" type="BIGINT">
+                <constraints nullable="false"/>
+            </column>
+            <column name="STAT_DATE" type="DATE">
+                <constraints nullable="false"/>
+            </column>
+            <column name="CLICKS" type="BIGINT" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+            <column name="UNIQUE_VISITORS" type="BIGINT" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+            <column name="BOT_CLICKS" type="BIGINT" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+        <addPrimaryKey tableName="LINK_DAILY_STATS" columnNames="URL_ID, STAT_DATE" constraintName="PK_LINK_DAILY_STATS"/>
+        <addForeignKeyConstraint baseTableName="LINK_DAILY_STATS" baseColumnNames="URL_ID" constraintName="FK_LINK_DAILY_STATS_URL"
+                                 referencedTableName="URL" referencedColumnNames="ID" onDelete="CASCADE"/>
+        <rollback>
+            <dropTable tableName="LINK_DAILY_STATS"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet author="khrvacic" id="026-link-daily-breakdown">
+        <createTable tableName="LINK_DAILY_BREAKDOWN">
+            <column name="URL_ID" type="BIGINT">
+                <constraints nullable="false"/>
+            </column>
+            <column name="STAT_DATE" type="DATE">
+                <constraints nullable="false"/>
+            </column>
+            <column name="DIMENSION" type="VARCHAR(10)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="DIMENSION_VALUE" type="VARCHAR(255)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="CLICKS" type="BIGINT" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+        <addPrimaryKey tableName="LINK_DAILY_BREAKDOWN" columnNames="URL_ID, STAT_DATE, DIMENSION, DIMENSION_VALUE"
+                       constraintName="PK_LINK_DAILY_BREAKDOWN"/>
+        <addForeignKeyConstraint baseTableName="LINK_DAILY_BREAKDOWN" baseColumnNames="URL_ID" constraintName="FK_LINK_DAILY_BREAKDOWN_URL"
+                                 referencedTableName="URL" referencedColumnNames="ID" onDelete="CASCADE"/>
+        <rollback>
+            <dropTable tableName="LINK_DAILY_BREAKDOWN"/>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>

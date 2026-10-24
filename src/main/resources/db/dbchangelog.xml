@@ -31,5 +31,6 @@
     <include file="classpath:/db/changelog/023-audit-log-redact-url-passwords.xml"/>
     <include file="classpath:/db/changelog/024-dynamic-link-checks.xml"/>
     <include file="classpath:/db/changelog/025-audit-log-typed-action.xml"/>
+    <include file="classpath:/db/changelog/026-privacy-first-analytics.xml"/>
 
 </databaseChangeLog>
