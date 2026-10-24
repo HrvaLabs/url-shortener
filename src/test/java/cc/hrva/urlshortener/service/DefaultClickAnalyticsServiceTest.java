@@ -293,6 +293,15 @@ class DefaultClickAnalyticsServiceTest {
     }
 
     @Test
+    void aTorExitAndANoCountryHeaderAreStoredAsTorAndUnknown() {
+        clickAnalyticsService.recordClick(URL_ID, SHORT_URL, ClickRequest.of(CLIENT_IP, SAFARI_IPHONE, "https://t.co/x", "t1"));
+        clickAnalyticsService.recordClick(URL_ID, SHORT_URL, ClickRequest.of(CLIENT_IP, SAFARI_IPHONE, "https://t.co/x", "xx"));
+
+        verify(linkStatsRepository, times(2)).incrementBreakdown(eq(URL_ID), eq(DAY), breakdown.capture());
+        assertThat(breakdown.getAllValues()).extracting(values -> values.get(COUNTRY)).containsExactly("tor", "unknown");
+    }
+
+    @Test
     void dayIsTakenWhenTheClickArrives() {
         final var tasks = new ArrayList<Runnable>();
         when(analyticsDays.today()).thenReturn(DAY, DAY.plusDays(1));
@@ -300,6 +309,7 @@ class DefaultClickAnalyticsServiceTest {
         service(tasks::add).recordClick(URL_ID, SHORT_URL, CLICK);
 
         verifyNoInteractions(linkStatsRepository);
+        verifyNoInteractions(uniqueVisitorCounter, urlRepository);
         assertThat(tasks).hasSize(1);
         tasks.getFirst().run();
         verify(uniqueVisitorCounter).isNewVisitor(URL_ID, DAY, CLICK);
