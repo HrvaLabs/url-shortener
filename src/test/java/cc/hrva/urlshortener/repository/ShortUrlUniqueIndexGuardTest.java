@@ -1,0 +1,72 @@
+package cc.hrva.urlshortener.repository;
+
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.SpringBootConfiguration;
+import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
+import org.springframework.context.annotation.Import;
+import org.springframework.jdbc.core.JdbcTemplate;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.tuple;
+
+@ExtendWith(OutputCaptureExtension.class)
+@SpringBootTest(
+        classes = ShortUrlUniqueIndexGuardTest.TestApplication.class,
+        webEnvironment = SpringBootTest.WebEnvironment.NONE,
+        properties = {
+                "spring.liquibase.enabled=true",
+                "spring.liquibase.change-log=classpath:db/short-url-duplicates-test-changelog.xml",
+                "spring.datasource.url=jdbc:h2:mem:short-url-unique-index-guard;DB_CLOSE_DELAY=-1;NON_KEYWORDS=KEY,VALUE",
+                "spring.data.jpa.repositories.enabled=false",
+                "spring.security.oauth2.client.registration.google.client-id=test-google-client",
+                "spring.security.oauth2.client.registration.google.client-secret=test-google-secret"
+        })
+class ShortUrlUniqueIndexGuardTest {
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
+    @Autowired
+    private ShortUrlUniqueIndex shortUrlUniqueIndex;
+
+    @Test
+    void theUniqueIndexIsSkippedWhenDuplicatesExist() {
+        assertThat(jdbcTemplate.queryForList("select id, exectype from databasechangelog where id like '027-%' order by orderexecuted"))
+                .extracting(row -> row.get("ID"), row -> row.get("EXECTYPE"))
+                .containsExactly(
+                        tuple("027-link-daily-stats-date-index", "EXECUTED"),
+                        tuple("027-link-daily-breakdown-date-index", "EXECUTED"),
+                        tuple("027-url-create-date-index", "EXECUTED"),
+                        tuple("027-user-account-create-date-index", "EXECUTED"),
+                        tuple("027-link-review-flagged-at-index", "EXECUTED"),
+                        tuple("027-url-created-via", "EXECUTED"),
+                        tuple("027-url-short-url-unique", "MARK_RAN"),
+                        tuple("027-reserved-alias", "EXECUTED"));
+    }
+
+    @Test
+    void bothDuplicatesSurvive() {
+        assertThat(jdbcTemplate.queryForObject("select count(*) from url where short_url = 'dup'", Integer.class)).isEqualTo(2);
+    }
+
+    @Test
+    void notEnforcedAndSaysSo(final CapturedOutput output) {
+        assertThat(shortUrlUniqueIndex.enforced()).isFalse();
+
+        shortUrlUniqueIndex.warnIfNotEnforced();
+
+        assertThat(output).contains("short_url uniqueness not enforced");
+    }
+
+    @SpringBootConfiguration
+    @EnableAutoConfiguration
+    @Import(ShortUrlUniqueIndex.class)
+    static class TestApplication {
+    }
+
+}

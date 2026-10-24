@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.9.xsd">
+
+    <include file="/db/changelog/codebook/authorities.xml"/>
+    <include file="/db/changelog/table/user.xml"/>
+    <include file="/db/changelog/table/api_key.xml"/>
+    <include file="/db/changelog/table/url.xml"/>
+    <include file="/db/changelog/table/user_authorities.xml"/>
+    <include file="/db/changelog/table/reset_token.xml"/>
+    <include file="/db/changelog/table/ip_address.xml"/>
+    <include file="/db/changelog/table/google_safe_browsing.xml"/>
+    <include file="/db/changelog/table/V1.0.0_remove_name_from_user_table.xml"/>
+    <include file="classpath:/db/changelog/table/user_auth_provider.xml"/>
+    <include file="classpath:/db/changelog/008-audit-log.xml"/>
+    <include file="classpath:/db/changelog/009-email-log.xml"/>
+    <include file="classpath:/db/changelog/010-drop-url-api-key.xml"/>
+    <include file="classpath:/db/changelog/013-email-verification.xml"/>
+    <include file="classpath:/db/changelog/014-url-tags.xml"/>
+    <include file="classpath:/db/changelog/015-two-factor.xml"/>
+    <include file="classpath:/db/changelog/016-url-password.xml"/>
+    <include file="classpath:/db/changelog/017-oauth2-authorization-server.xml"/>
+    <include file="classpath:/db/changelog/018-oauth2-access-token-index.xml"/>
+    <include file="classpath:/db/changelog/019-oauth2-refresh-token-index.xml"/>
+    <include file="classpath:/db/changelog/020-oauth2-connected-apps-indexes.xml"/>
+    <include file="classpath:/db/changelog/021-oauth2-authorization-code-index.xml"/>
+    <include file="classpath:/db/changelog/022-email-log-resend.xml"/>
+    <include file="classpath:/db/changelog/023-audit-log-redact-url-passwords.xml"/>
+    <include file="classpath:/db/changelog/024-dynamic-link-checks.xml"/>
+    <include file="classpath:/db/changelog/025-audit-log-typed-action.xml"/>
+    <include file="classpath:/db/changelog/026-privacy-first-analytics.xml"/>
+
+    <changeSet author="test" id="short-url-duplicates-by-hand">
+        <insert tableName="URL">
+            <column name="ID" valueNumeric="1"/>
+            <column name="SHORT_URL" value="dup"/>
+            <column name="LONG_URL" value="https://example.com/a"/>
+        </insert>
+        <insert tableName="URL">
+            <column name="ID" valueNumeric="2"/>
+            <column name="SHORT_URL" value="dup"/>
+            <column name="LONG_URL" value="https://example.com/b"/>
+        </insert>
+    </changeSet>
+
+    <include file="classpath:/db/changelog/027-admin-stats-and-reserved-aliases.xml"/>
+
+</databaseChangeLog>

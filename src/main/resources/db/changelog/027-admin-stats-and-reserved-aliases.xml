@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.9.xsd">
+
+    <changeSet author="khrvacic" id="027-link-daily-stats-date-index">
+        <createIndex tableName="LINK_DAILY_STATS" indexName="IDX_LINK_DAILY_STATS_STAT_DATE">
+            <column name="STAT_DATE"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="LINK_DAILY_STATS" indexName="IDX_LINK_DAILY_STATS_STAT_DATE"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet author="khrvacic" id="027-link-daily-breakdown-date-index">
+        <createIndex tableName="LINK_DAILY_BREAKDOWN" indexName="IDX_LINK_DAILY_BREAKDOWN_DATE_DIMENSION">
+            <column name="STAT_DATE"/>
+            <column name="DIMENSION"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="LINK_DAILY_BREAKDOWN" indexName="IDX_LINK_DAILY_BREAKDOWN_DATE_DIMENSION"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet author="khrvacic" id="027-url-create-date-index">
+        <createIndex tableName="URL" indexName="IDX_URL_CREATE_DATE">
+            <column name="CREATE_DATE"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="URL" indexName="IDX_URL_CREATE_DATE"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet author="khrvacic" id="027-user-account-create-date-index">
+        <createIndex tableName="USER_ACCOUNT" indexName="IDX_USER_ACCOUNT_CREATE_DATE">
+            <column name="CREATE_DATE"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="USER_ACCOUNT" indexName="IDX_USER_ACCOUNT_CREATE_DATE"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet author="khrvacic" id="027-link-review-flagged-at-index">
+        <createIndex tableName="LINK_REVIEW" indexName="IDX_LINK_REVIEW_FLAGGED_AT">
+            <column name="FLAGGED_AT"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="LINK_REVIEW" indexName="IDX_LINK_REVIEW_FLAGGED_AT"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet author="khrvacic" id="027-url-created-via">
+        <addColumn tableName="URL">
+            <column name="CREATED_VIA" type="VARCHAR(20)"/>
+        </addColumn>
+        <rollback>
+            <dropColumn tableName="URL" columnName="CREATED_VIA"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet author="khrvacic" id="027-url-short-url-unique">
+        <preConditions onFail="MARK_RAN">
+            <sqlCheck expectedResult="0">select count(*) from (select short_url from url group by short_url having count(*) > 1) d</sqlCheck>
+        </preConditions>
+        <createIndex tableName="URL" indexName="UX_URL_SHORT_URL" unique="true">
+            <column name="SHORT_URL"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="URL" indexName="UX_URL_SHORT_URL"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet author="khrvacic" id="027-reserved-alias">
+        <createTable tableName="RESERVED_ALIAS">
+            <column name="ID" type="BIGINT" autoIncrement="true">
+                <constraints primaryKey="true" primaryKeyName="PK_RESERVED_ALIAS" nullable="false"/>
+            </column>
+            <column name="ALIAS" type="VARCHAR(32)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="REASON" type="VARCHAR(200)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="CREATED_AT" type="TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="CREATED_BY" type="VARCHAR(255)">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+        <addUniqueConstraint tableName="RESERVED_ALIAS" columnNames="ALIAS" constraintName="UX_RESERVED_ALIAS_ALIAS"/>
+        <rollback>
+            <dropTable tableName="RESERVED_ALIAS"/>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>
