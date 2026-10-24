@@ -2,6 +2,10 @@ spring:
   liquibase:
     change-log: classpath:/db/dbchangelog.xml
   task:
+    execution:
+      shutdown:
+        await-termination: true
+        await-termination-period: 10s
     scheduling:
       pool:
         size: 4

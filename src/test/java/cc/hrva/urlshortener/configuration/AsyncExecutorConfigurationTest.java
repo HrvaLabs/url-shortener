@@ -1,14 +1,18 @@
 package cc.hrva.urlshortener.configuration;
 
+import java.time.Duration;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.IntStream;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.autoconfigure.task.TaskExecutionAutoConfiguration;
+import org.springframework.boot.autoconfigure.task.TaskExecutionProperties;
 import org.springframework.boot.autoconfigure.task.TaskSchedulingAutoConfiguration;
+import org.springframework.boot.test.context.ConfigDataApplicationContextInitializer;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -42,6 +46,38 @@ class AsyncExecutorConfigurationTest {
     void theApplicationExecutorStillFollowsTheTaskExecutionProperties() {
         contextRunner.withPropertyValues("spring.task.execution.pool.core-size=3").run(context ->
                 assertThat(context.getBean("applicationTaskExecutor", ThreadPoolTaskExecutor.class).getCorePoolSize()).isEqualTo(3));
+    }
+
+    @Test
+    void theApplicationExecutorWaitsUpToTenSecondsOnShutdown() {
+        contextRunner.withInitializer(new ConfigDataApplicationContextInitializer()).run(context ->
+                assertThat(context.getBean(TaskExecutionProperties.class).getShutdown())
+                        .extracting(TaskExecutionProperties.Shutdown::isAwaitTermination,
+                                TaskExecutionProperties.Shutdown::getAwaitTerminationPeriod)
+                        .containsExactly(true, Duration.ofSeconds(10)));
+    }
+
+    @Test
+    void aShutdownLetsTheQueuedClicksOnTheApplicationExecutorFinish() {
+        final var finished = new AtomicInteger();
+        final var interrupted = new AtomicBoolean();
+
+        contextRunner.withInitializer(new ConfigDataApplicationContextInitializer())
+                .withPropertyValues("spring.task.execution.pool.core-size=1")
+                .run(context -> {
+                    final var executor = context.getBean("applicationTaskExecutor", ThreadPoolTaskExecutor.class);
+                    IntStream.range(0, 3).forEach(task -> executor.execute(() -> {
+                        try {
+                            Thread.sleep(200);
+                            finished.incrementAndGet();
+                        } catch (final InterruptedException exception) {
+                            interrupted.set(true);
+                        }
+                    }));
+                });
+
+        assertThat(interrupted).isFalse();
+        assertThat(finished).hasValue(3);
     }
 
     @Test
