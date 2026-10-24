@@ -14,8 +14,10 @@ import cc.hrva.urlshortener.model.enums.SourceKind;
 import cc.hrva.urlshortener.repository.BlocklistSourceRepository;
 import cc.hrva.urlshortener.repository.DomainRuleRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
+import cc.hrva.urlshortener.security.ClickRequestResolver;
 import cc.hrva.urlshortener.security.ClientIpResolver;
 import cc.hrva.urlshortener.service.ApiKeyService;
+import cc.hrva.urlshortener.service.ClickAnalyticsService;
 import cc.hrva.urlshortener.service.IPAddressService;
 import cc.hrva.urlshortener.service.LinkPreviewService;
 import cc.hrva.urlshortener.service.ModerationService;
@@ -42,7 +44,6 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.cache.CacheManager;
-import org.springframework.core.task.TaskExecutor;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
@@ -90,7 +91,7 @@ class UrlControllerBlocklistTest {
     private QrCodeService qrCodeService;
 
     @Mock
-    private TaskExecutor taskExecutor;
+    private ClickAnalyticsService clickAnalyticsService;
 
     @Mock
     private UserService userService;
@@ -157,10 +158,11 @@ class UrlControllerBlocklistTest {
         when(blocklistSourceRepository.findByEnabledTrue()).thenReturn(List.of(TIF));
         clickCheckService.reload();
         final var urlService = new DefaultUrlService(userService, urlValidator, apiKeyService, urlRepository, appProperties, apiKeyValidator,
-                ipAddressService, taskExecutor, new UrlToPeekUrlConverter(), createUrlToUrlConverter, urlUpdateDtoToUrlConverter, cacheManager,
+                ipAddressService, clickAnalyticsService, new UrlToPeekUrlConverter(), createUrlToUrlConverter, urlUpdateDtoToUrlConverter, cacheManager,
                 objectMapper, meterRegistry, passwordEncoder, suspiciousUrlService, rateLimiter, reviewQueueService, scammerSignalService, clickCheckService,
                 redirectChainService, TransactionOperations.withoutTransaction(), entityManager);
-        mockMvc = MockMvcBuilders.standaloneSetup(new UrlController(urlService, qrCodeService, linkPreviewService, clientIpResolver, request, appProperties))
+        mockMvc = MockMvcBuilders.standaloneSetup(new UrlController(urlService, qrCodeService, linkPreviewService, clientIpResolver,
+                        new ClickRequestResolver(clientIpResolver), request, appProperties))
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .build();
         when(urlRepository.findByShortUrlAndActiveTrue("item7")).thenReturn(Optional.of(
@@ -178,7 +180,7 @@ class UrlControllerBlocklistTest {
 
         assertThat(body).doesNotContain(DESTINATION_HOST);
         verify(moderationService).blockLink(10L, BlockReason.BLOCKLIST, "HaGeZi TIF medium", "system", "click");
-        verifyNoInteractions(taskExecutor);
+        verifyNoInteractions(clickAnalyticsService);
     }
 
     @Test

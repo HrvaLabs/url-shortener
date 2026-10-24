@@ -10,6 +10,7 @@ import cc.hrva.urlshortener.mcp.anon.RateLimiter;
 import cc.hrva.urlshortener.mcp.authorization.AuthorizationServerConfiguration;
 import cc.hrva.urlshortener.mcp.bridge.ConnectRequestStore;
 import cc.hrva.urlshortener.repository.UserRepository;
+import cc.hrva.urlshortener.security.ClickRequestResolver;
 import cc.hrva.urlshortener.security.ClientIpResolver;
 import cc.hrva.urlshortener.security.JwtFilter;
 import cc.hrva.urlshortener.security.OAuth2LoginSuccessHandler;
@@ -147,6 +148,7 @@ class SecurityTxtControllerTest {
             McpResourceServerConfiguration.class,
             JwtFilter.class,
             ClientIpResolver.class,
+            ClickRequestResolver.class,
             UrlRedirectController.class,
             SecurityTxtController.class
     })

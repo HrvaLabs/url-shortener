@@ -32,6 +32,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class UrlRepositoryTest {
 
     private static final LocalDateTime BLOCKED_AT = LocalDateTime.of(2026, 10, 22, 9, 0);
+    private static final LocalDateTime VISITED_AT = LocalDateTime.of(2026, 10, 24, 18, 30);
 
     @Autowired
     private UrlRepository urlRepository;
@@ -78,6 +79,33 @@ class UrlRepositoryTest {
                 .extracting(Url::isActive, Url::getLongUrl, Url::getBlockReason, Url::getBlockedAt)
                 .containsExactly(false, "https://old.example/", null, null);
         assertThat(urlRepository.findById(other.getId()).orElseThrow().isActive()).isTrue();
+    }
+
+    @Test
+    void aVisitToALinkSwitchedOffMeanwhileChangesNothing() {
+        final var switchedOff = link("off", null);
+        urlRepository.deactivateIfActive(List.of(switchedOff.getId()));
+
+        final var recorded = urlRepository.recordVisit(switchedOff.getId(), VISITED_AT);
+
+        entityManager.clear();
+        assertThat(recorded).isZero();
+        assertThat(urlRepository.findById(switchedOff.getId()).orElseThrow())
+                .extracting(Url::getVisits, Url::getLastAccessed)
+                .containsExactly(0L, null);
+    }
+
+    @Test
+    void aVisitToAnActiveLinkCountsItAndStampsTheTime() {
+        final var active = link("live", null);
+
+        final var recorded = urlRepository.recordVisit(active.getId(), VISITED_AT);
+
+        entityManager.clear();
+        assertThat(recorded).isEqualTo(1);
+        assertThat(urlRepository.findById(active.getId()).orElseThrow())
+                .extracting(Url::getVisits, Url::getLastAccessed)
+                .containsExactly(1L, VISITED_AT);
     }
 
     private Url link(final String shortUrl, final LocalDateTime expirationDate) {

@@ -4,6 +4,7 @@ import java.util.Collections;
 import java.util.List;
 import cc.hrva.urlshortener.configuration.GlobalExceptionHandler;
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
+import cc.hrva.urlshortener.dto.ClickRequest;
 import cc.hrva.urlshortener.dto.CreateUrlDto;
 import cc.hrva.urlshortener.dto.UrlResponse;
 import cc.hrva.urlshortener.dto.UrlSearchDto;
@@ -11,6 +12,7 @@ import cc.hrva.urlshortener.dto.UrlUpdateDto;
 import cc.hrva.urlshortener.exception.RateLimitExceededException;
 import cc.hrva.urlshortener.model.PeekUrl;
 import cc.hrva.urlshortener.model.Url;
+import cc.hrva.urlshortener.security.ClickRequestResolver;
 import cc.hrva.urlshortener.security.ClientIpResolver;
 import cc.hrva.urlshortener.service.LinkPreviewService;
 import cc.hrva.urlshortener.service.QrCodeService;
@@ -48,6 +50,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @ExtendWith(MockitoExtension.class)
 class UrlControllerTest {
 
+    private static final ClickRequest CLICK = ClickRequest.of("203.0.113.7", "UA", "https://t.co/x", "HR");
+
     private MockMvc mockMvc;
 
     @Mock
@@ -63,6 +67,9 @@ class UrlControllerTest {
     private ClientIpResolver clientIpResolver;
 
     @Mock
+    private ClickRequestResolver clickRequestResolver;
+
+    @Mock
     private HttpServletRequest request;
 
     private final AppProperties appProperties = new AppProperties();
@@ -72,7 +79,7 @@ class UrlControllerTest {
     @BeforeEach
     void setUp() {
         appProperties.setServerUrl("https://hrva.cc");
-        this.mockMvc = MockMvcBuilders.standaloneSetup(new UrlController(urlService, qrCodeService, linkPreviewService, clientIpResolver, request, appProperties))
+        this.mockMvc = MockMvcBuilders.standaloneSetup(new UrlController(urlService, qrCodeService, linkPreviewService, clientIpResolver, clickRequestResolver, request, appProperties))
                 .setCustomArgumentResolvers(new PageableHandlerMethodArgumentResolver())
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .build();
@@ -145,8 +152,8 @@ class UrlControllerTest {
     @Test
     void shouldFetchUrlByShort() throws Exception {
         final var url = Url.builder().id(1L).longUrl("https://example.com").build();
-        when(clientIpResolver.getClientIp(request)).thenReturn("127.0.0.1");
-        when(urlService.checkIPUniquenessAndReturnUrl("short", "127.0.0.1")).thenReturn(UrlResponse.from(url));
+        when(clickRequestResolver.resolve(any())).thenReturn(CLICK);
+        when(urlService.revealUrlAndRecordClick("short", CLICK)).thenReturn(UrlResponse.from(url));
 
         mockMvc.perform(get("/api/v1/urls/short"))
                 .andExpect(status().isOk())
@@ -230,8 +237,8 @@ class UrlControllerTest {
 
     @Test
     void shouldUnlockUrl() throws Exception {
-        when(clientIpResolver.getClientIp(request)).thenReturn("127.0.0.1");
-        when(urlService.unlockUrl(eq("abc"), eq("pw"), eq("127.0.0.1")))
+        when(clickRequestResolver.resolve(any())).thenReturn(CLICK);
+        when(urlService.unlockUrl(eq("abc"), eq("pw"), eq(CLICK)))
                 .thenReturn(new cc.hrva.urlshortener.dto.UnlockResponse("https://example.com"));
 
         mockMvc.perform(post("/api/v1/urls/abc/unlock")

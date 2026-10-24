@@ -132,7 +132,7 @@ public interface UrlRepository extends JpaRepository<Url, Long>, JpaSpecificatio
 
     @Modifying
     @Transactional
-    @Query("update Url u set u.visits = u.visits + 1, u.lastAccessed = :visitedAt where u.id = :id")
+    @Query("update Url u set u.visits = u.visits + 1, u.lastAccessed = :visitedAt where u.id = :id and u.active = true")
     int recordVisit(@Param("id") long id, @Param("visitedAt") LocalDateTime visitedAt);
 
     @Modifying

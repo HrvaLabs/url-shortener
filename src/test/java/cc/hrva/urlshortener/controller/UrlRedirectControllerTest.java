@@ -1,6 +1,7 @@
 package cc.hrva.urlshortener.controller;
 
-import cc.hrva.urlshortener.security.ClientIpResolver;
+import cc.hrva.urlshortener.dto.ClickRequest;
+import cc.hrva.urlshortener.security.ClickRequestResolver;
 import cc.hrva.urlshortener.service.UrlService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -12,6 +13,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.servlet.view.RedirectView;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.redirectedUrl;
@@ -20,24 +22,26 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @ExtendWith(MockitoExtension.class)
 class UrlRedirectControllerTest {
 
+    private static final ClickRequest CLICK = ClickRequest.of("203.0.113.7", "UA", "https://t.co/x", "HR");
+
     private MockMvc mockMvc;
 
     @Mock
     private UrlService urlService;
 
     @Mock
-    private ClientIpResolver clientIpResolver;
+    private ClickRequestResolver clickRequestResolver;
 
     @BeforeEach
     void setUp() {
-        this.mockMvc = MockMvcBuilders.standaloneSetup(new UrlRedirectController(urlService, clientIpResolver, null)).build();
+        this.mockMvc = MockMvcBuilders.standaloneSetup(new UrlRedirectController(urlService, clickRequestResolver, null)).build();
     }
 
     @Test
     void shouldRedirectToLongUrl() throws Exception {
         final var redirectView = new RedirectView("https://example.com");
-        when(clientIpResolver.getClientIp(any())).thenReturn("127.0.0.1");
-        when(urlService.redirectResultUrl("short", "127.0.0.1")).thenReturn(redirectView);
+        when(clickRequestResolver.resolve(any())).thenReturn(CLICK);
+        when(urlService.redirectResultUrl("short", CLICK)).thenReturn(redirectView);
 
         mockMvc.perform(get("/short"))
                 .andExpect(status().isFound())
@@ -52,5 +56,7 @@ class UrlRedirectControllerTest {
         mockMvc.perform(get("/"))
                 .andExpect(status().isFound())
                 .andExpect(redirectedUrl("https://frontend.com"));
+
+        verifyNoInteractions(clickRequestResolver);
     }
 }

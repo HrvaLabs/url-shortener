@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.service;
 
+import cc.hrva.urlshortener.dto.ClickRequest;
 import cc.hrva.urlshortener.dto.CreateUrlDto;
 import cc.hrva.urlshortener.dto.UnlockResponse;
 import cc.hrva.urlshortener.dto.UrlResponse;
@@ -27,9 +28,9 @@ public interface UrlService {
     List<String> getMyTags(String apiKey);
     PeekUrl peekUrlByShortUrl(String shortUrl);
     UrlResponse saveUrlWithApiKey(CreateUrlDto createUrlDto, String apiKey);
-    UnlockResponse unlockUrl(String shortUrl, String password, String clientIP);
-    RedirectView redirectResultUrl(String shortUrl, String clientIP);
-    UrlResponse checkIPUniquenessAndReturnUrl(String shortUrl, String clientIP);
+    UnlockResponse unlockUrl(String shortUrl, String password, ClickRequest click);
+    RedirectView redirectResultUrl(String shortUrl, ClickRequest click);
+    UrlResponse revealUrlAndRecordClick(String shortUrl, ClickRequest click);
     byte[] exportMyUrlsAsCsv(String apiKey);
 
 }

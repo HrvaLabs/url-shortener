@@ -589,7 +589,7 @@ class DynamicLinkChecksSchemaTest {
     }
 
     @Test
-    void aVisitOnlyCountsAndNeverBringsBackALinkBlockedSinceItWasLoaded() {
+    void aVisitToALinkBlockedSinceItWasLoadedIsNotCountedAndNeverBringsItBack() {
         final var loadedByTheRedirect = savedLink("visited", "https://jofogas.cards/login", null);
         entityManager.flush();
         entityManager.clear();
@@ -600,17 +600,18 @@ class DynamicLinkChecksSchemaTest {
         entityManager.flush();
         entityManager.clear();
 
-        urlRepository.recordVisit(loadedByTheRedirect.getId(), LocalDateTime.of(2026, 10, 21, 9, 15));
+        final var recorded = urlRepository.recordVisit(loadedByTheRedirect.getId(), LocalDateTime.of(2026, 10, 21, 9, 15));
         final var switchedOff = urlRepository.deactivateAtVisitLimit(loadedByTheRedirect.getId());
         entityManager.clear();
 
+        assertThat(recorded).isZero();
         assertThat(switchedOff).isZero();
         assertThat(urlRepository.findById(loadedByTheRedirect.getId())).hasValueSatisfying(stored -> {
             assertThat(stored.isActive()).isFalse();
             assertThat(stored.getBlockReason()).isEqualTo(BlockReason.BLOCKLIST);
             assertThat(stored.getBlockDetail()).isEqualTo("HaGeZi TIF medium");
-            assertThat(stored.getVisits()).isEqualTo(1L);
-            assertThat(stored.getLastAccessed()).isEqualTo(LocalDateTime.of(2026, 10, 21, 9, 15));
+            assertThat(stored.getVisits()).isZero();
+            assertThat(stored.getLastAccessed()).isNull();
         });
     }
 

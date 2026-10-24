@@ -74,8 +74,8 @@ cc.hrva.urlshortener
 ├── mcp/             # MCP connector: authorization/, bridge/, tools/, anon/, apps/
 ├── model/           # JPA entities, codebook, enums
 ├── repository/      # Spring Data JPA repositories
-├── security/        # JWT filter, token provider, auth entry point, ClientIpResolver
-├── service/         # Interfaces + impl/ implementations; blocklist/ (download, parse, Redis sets); alert/ (Discord alert events and lines)
+├── security/        # JWT filter, token provider, auth entry point, ClientIpResolver, ClickRequestResolver
+├── service/         # Interfaces + impl/ implementations; blocklist/ (download, parse, Redis sets); alert/ (Discord alert events and lines); analytics/ (click classifiers, unique visitors, analytics day)
 ├── util/            # DomainNames, LinkKeys, PublicAddresses, RedirectLocations
 └── validator/       # Interfaces + impl/ validators
 ```
@@ -95,7 +95,7 @@ cc.hrva.urlshortener
 | Method | Path | Auth | Notes |
 |--------|------|------|-------|
 | POST | `/api/v1/urls` | Optional `X-Api-Key` | Create short URL |
-| GET | `/api/v1/urls/{short}` | None | Redirect info (records visit) |
+| GET | `/api/v1/urls/{short}` | None | Redirect info (records a click (bots are counted separately and refused on visit-limited links)) |
 | GET | `/api/v1/urls/{short}/peek` | None | Quick peek (longUrl, shortUrl, createDate) |
 | GET | `/api/v1/urls/{short}/preview` | None | Rich preview (title, description, og:image) |
 | GET | `/api/v1/urls/{short}/qr` | None | QR code PNG (`?size=300`) |
@@ -140,7 +140,7 @@ cc.hrva.urlshortener
 | GET | `/api/v1/admin/possible-scammers` | ROLE_ADMIN | Ids of the accounts with the signal |
 | POST | `/api/v1/admin/url-check` | ROLE_ADMIN | `{url}` → `{outcome, reasons, blockReason, blockDetail, host, registrableDomain}`, every matching rule, list and heuristic |
 | POST | `/api/v1/reports` | Public, 5/h per network | Report a link `{shortUrl, category: PHISHING \| MALWARE \| SPAM \| OTHER, details (≤ 500)}`: opens or extends its review entry. Always 202 for a well-formed report, whether or not the link exists; never blocks by itself. Body capped at 64 KB |
-| GET | `/{short}` | None | Redirect after the click check. A blocked, expired, over-limit, deactivated or missing link → 302 `{frontendUrl}/unavailable?s={short}&reason=blocked\|expired\|limit\|inactive\|missing` (the list is never named) |
+| GET | `/{short}` | None | Redirect after the click check. A blocked, expired, over-limit, deactivated or missing link → 302 `{frontendUrl}/unavailable?s={short}&reason=blocked\|expired\|limit\|inactive\|missing` (the list is never named); a bot on a visit-limited link → `reason=missing` |
 | GET | `/api/changelog` | Public | Changelog JSON |
 | GET | `/.well-known/security.txt` | Public | RFC 9116 abuse contact (`abuse@hrva.cc`), `text/plain; charset=utf-8`; `Expires` is 365 days from the request |
 | GET | `/actuator/health` | Public | Health check |
@@ -163,19 +163,19 @@ MCP, OAuth 2.1, login-bridge and Connected-apps endpoints: see MCP connector.
 ## Performance
 - **Redis caching**: `@Cacheable("urls")` on URL lookup (`peekUrlByShortUrl` only). 1-hour TTL. `@CacheEvict` on mutations.
 - **Graceful degradation**: `CacheErrorHandler` logs and falls through to DB when Redis is down — no 500s.
-- **Redis fails fast**: Lettuce rejects commands while its connection is down (`RedisClientConfiguration`: `REJECT_COMMANDS`, auto-reconnect kept), so a dropped Redis fails each call at once; `spring.data.redis.timeout: 3s` only bounds a hung Redis. Every Redis caller must therefore stay fail-soft, catching the failure and degrading on purpose (cache → database, click-time blocklist check → let the visitor through, `/unlock` rate limit → allow). Only the documented rate limits under MCP connector fail closed.
+- **Redis fails fast**: Lettuce rejects commands while its connection is down (`RedisClientConfiguration`: `REJECT_COMMANDS`, auto-reconnect kept), so a dropped Redis fails each call at once; `spring.data.redis.timeout: 3s` only bounds a hung Redis. Every Redis caller must therefore stay fail-soft, catching the failure and degrading on purpose (cache → database, click-time blocklist check → let the visitor through, `/unlock` rate limit → allow, unique visitor check → a new visitor). Only the documented rate limits under MCP connector fail closed.
 - **Read-only transactions**: `@Transactional(readOnly = true)` at class level on all services, overridden with `@Transactional` on write methods.
 - **SafeBrowsing client**: Singleton bean (not built per-request). Graceful degradation on API error (returns `List.of()`).
 
 ## Security
 - JWT in `Authorization: Bearer` header. Stateless sessions on the API chain; the MCP authorization server chain keeps a short HTTP session for the login bridge (see MCP connector).
 - Login rate limiting: Guava cache, 20 attempts/day per IP, 1-day expiry. Wrong 2FA codes also count per account (`2fa:<userId>` key) and stop further checks once the limit is hit.
-- Public lookups (`GET /urls/{short}`, `/peek`, `/preview`, `/qr`) never return the owner's email or tags; a password-protected link's destination is left out (no preview fetched, no visit recorded) until `/unlock`. `/qr` encodes the short link (`app.server-url` + alias), size clamped to 64–1024.
+- Public lookups (`GET /urls/{short}`, `/peek`, `/preview`, `/qr`) never return the owner's email or tags; a password-protected link's destination is left out (no preview fetched, no click recorded) until `/unlock`. `/qr` encodes the short link (`app.server-url` + alias), size clamped to 64–1024.
 - `/unlock` is rate limited through `RedisFixedWindowRateLimiter`: 10 attempts per client network and 50 per link per 15 minutes (allowed if Redis is down).
 - Link creation is rate limited in `DefaultUrlService` through `RedisFixedWindowRateLimiter`, per hour: 10 links per client network without an account (`create:anon`, IP from `ClientIpResolver` in `UrlController`), 60 per account with one (`create:user:<id>`, shared by the web, API keys and the signed-in MCP `shorten_url`). Admins are exempt and each link of `/urls/bulk` counts. Over the limit → 429 `"You've created a lot of links in a short time. Try again in an hour."` Allowed if Redis is down. Cheap refusals come first, so junk can't trigger the slow link check: an API key is checked (unknown, expired, revoked, over its limit) → the create rate limit → the anonymous-disabled refusal → the URL checks (`validateUrl`, up to a few seconds on a cold RDAP or Spamhaus cache) → the write transaction, where an API key's use is recorded. `/mcp/anon` passes no client IP, so only its own limit applies. `RateLimitExceededException` is a 429 everywhere, `/unlock` included.
 - Link previews only fetch public addresses: loopback, private, link-local, CGNAT and ULA targets are refused, and each redirect hop (max 3) is re-checked.
 - New passwords need at least 8 characters (register, reset, change). `User.password` is `@JsonIgnore`d.
-- Direct `Cache` calls in `DefaultUrlService` go through `getFromCache`/`putInCache`/`evictFromCache`, which log and fall back to the database when Redis fails; a visit that reaches the limit evicts the cached entry.
+- Direct `Cache` calls in `DefaultUrlService` go through `getFromCache`/`putInCache`/`evictFromCache`, which log and fall back to the database when Redis fails; a unique visit that reaches the limit evicts the cached entry (`DefaultClickAnalyticsService`, see Click analytics).
 - CORS via `CorsConfigurationSource` bean (not headers in JwtFilter). Allowed: frontend origin + all standard methods.
 - Client IP resolved via `ClientIpResolver` (never read X-Forwarded-For manually): a single `CF-Connecting-IP` header that parses as an IP literal wins (set by Cloudflare; trustworthy only while the origin accepts traffic from Cloudflare alone), otherwise `request.getRemoteAddr()` as rewritten by `ForwardedHeaderFilter`. `ForwardedHeaderFilter` runs after the Spring Security chains, so filters inside them see the proxy address unless `CF-Connecting-IP` is present.
 - Logging: SLF4J via `@Slf4j`, parameterized `{}` format.
@@ -370,8 +370,9 @@ Jobs run on a 4-thread scheduler (`spring.task.scheduling.pool.size: 4` in `appl
   - `rdap:<registry domain>` (30 days with a date, 1 day without one, 1 hour after a failure) and `rdap:bootstrap` (1 day)
   - `dbl:<name>`: Spamhaus answers, 1 hour
   - `rate-limit:create:anon:<sha256 of the network>`, `rate-limit:create:user:<id>`, `rate-limit:report:<sha256 of the network>`, beside the MCP and `/unlock` ones
+  - `analytics:salt:<yyyy-MM-dd>` and `analytics:visitors:<urlId>:<yyyy-MM-dd>`: the day's salt and each link's visitor set, both expiring at the next midnight in `app.analytics.zone` plus 4 hours (see Click analytics)
 - **Redirect chains** (`RedirectChainService`): after a create or a destination change (`@Async("redirectCheckExecutor")`, 2 threads and a 200-check queue, once the save has committed; a full queue is logged and left to the nightly), and in the nightly scan for up to 500 active links whose `chainCheckedAt` is null or over 7 days old, the destination's HTTP redirects are followed: at most 5 hops in 5 s, GET with headers only, http or https, each hop through the public-address guard (a refused destination is a fetch error; a refused later hop ends the chain unrequested). A `Location` is read like a browser does before the guard sees it (`RedirectLocations`: UTF-8 bytes, `\` as `/`, space, non-ASCII and `"<>{}|^` percent-encoded, IDN host to ASCII). Every hop after the destination goes through `LinkCheckService.check` and Safe Browsing and the worst hop wins: a block blocks the link (`via redirect to <host>`), a flag or scam signals queue it (`redirects to <host>: <reason>`), unless the link was repointed meanwhile. `finalUrl` and `chainCheckedAt` are stamped with targeted updates; a fetch error stamps only `chainCheckedAt`, and a Safe Browsing outage stamps nothing (the nightly skips or stops its redirect checks) so a later run retries. The fetcher is the `RedirectFollower` bean (not a second `PublicHttpFetcher` bean, which would break by-type injection).
-- **Executors** (`AsyncExecutorConfiguration`): declaring `redirectCheckExecutor` switches off Boot's own `applicationTaskExecutor` and its `@Async` default, so the configuration declares `applicationTaskExecutor` itself from Boot's `ThreadPoolTaskExecutorBuilder` (still `spring.task.execution.*`), also named `taskExecutor` so unqualified `@Async` (emails, `reloadMissing`) and visit counting keep using it. `redirectCheckExecutor` (threads `redirect-check-1`, `-2`) waits up to 15 s on shutdown for running checks.
+- **Executors** (`AsyncExecutorConfiguration`): declaring `redirectCheckExecutor` switches off Boot's own `applicationTaskExecutor` and its `@Async` default, so the configuration declares `applicationTaskExecutor` itself from Boot's `ThreadPoolTaskExecutorBuilder` (still `spring.task.execution.*`), also named `taskExecutor` so unqualified `@Async` (emails, `reloadMissing`) and click recording keep using it. `redirectCheckExecutor` (threads `redirect-check-1`, `-2`) waits up to 15 s on shutdown for running checks.
 
 ### Discord alerts
 An owner-facing alert channel next to the emails, which stay as they are: hrva.cc pings one Discord webhook (created by the owner, set in `DISCORD_WEBHOOK_URL`) when something needs the admin's attention. Blank means off: no buffering, no HTTP calls, and one startup line "Discord alerts are off: no DISCORD_WEBHOOK_URL".
@@ -403,6 +404,30 @@ An owner-facing alert channel next to the emails, which stay as they are: hrva.c
 - **Warmup**: `CacheWarmup` loads top 20 most visited, most recent, and recently accessed URLs on startup
 - **Priming**: New URLs cached immediately on creation via `cacheUrlResponse()`
 - **Graceful degradation**: `CacheErrorHandler` logs and falls through to DB on Redis failure
+
+## Click analytics
+Daily per-link counts with no raw IP, full User-Agent, full Referer or salt ever stored in Postgres, logged, put in a metric or returned.
+- **A click** is a request that sends someone on to the destination: the redirect `/{short}` (from the database or a cache hit), `GET /api/v1/urls/{short}` for a link without a password, and a successful `/unlock`. `/peek`, `/preview`, `/qr` and the admin views are not clicks, and a click the click check refuses (`reason=blocked`) records nothing. A password-protected link's `GET /urls/{short}` records nothing; its click is the unlock.
+- **Recording**: the controllers build a `ClickRequest` with `ClickRequestResolver` (the IP from `ClientIpResolver`, `User-Agent`, `Referer`, a single `CF-IPCountry`; `toString()` redacts), and `DefaultUrlService` hands it to `ClickAnalyticsService.recordClick(urlId, shortUrl, click)`. The recorder takes the day on the request thread and does the rest on `applicationTaskExecutor`. It never throws; each write is fail-soft and a failure logs the link id, the step and the exception class only.
+- **Derived and stored** (the full User-Agent and Referer are dropped after classification):
+  - day, and bot or human
+  - referrer: the host lowercased without `www.`, `direct` (no header), `unknown` (unlock), `app:<package>` (`android-app://`), `hrva.cc` for our own hosts, `other` (unparsable)
+  - country: from `CF-IPCountry` only, never from the IP: ISO alpha-2 upper case, `unknown` (missing or `XX`), `tor` (`T1`)
+  - device `mobile`, `tablet`, `desktop`, `unknown`; browser `chrome`, `safari`, `firefox`, `edge`, `samsung`, `opera`, `in-app`, `other`; os `ios`, `android`, `windows`, `macos`, `linux`, `chromeos`, `other`
+- **Counting rules**:
+  - A bot (`UserAgentClassifier`: a blank User-Agent, a named bot, link-preview fetcher or HTTP library, or the generic `bot`, `crawler`, `spider`, `preview` once the phone brand `cubot` is removed) adds one `BOT_CLICKS` and nothing else: no breakdowns, no unique visitor, no `Url.visits`, no `lastAccessed`.
+  - On a visit-limited link (`visitLimit > 0`) a bot never gets the destination: the redirect (database or cache hit) goes to `reason=missing`, `GET /urls/{short}` and `/unlock` answer 404 `URL doesn't exist`. The request is still recorded, as a bot click. The check runs on the request thread before the click check, and a classifier failure counts as human. Links without a limit redirect bots as before.
+  - A human click adds one `CLICKS` and one breakdown row per dimension. Unlock clicks record the referrer as `unknown`, since the unlock comes from the frontend.
+- **Unique visitors** (`UniqueVisitorCounter`): `HMAC-SHA256(daySalt, ip + "\n" + userAgent + "\n" + urlId)`, its first 16 bytes as 22 Base64url characters, added to the link's set for the day. A new member adds one `UNIQUE_VISITORS` plus `recordVisit` (`visits` + 1 and `lastAccessed`, active links only) and `deactivateAtVisitLimit`, which evicts the cached entry when it switches the link off. `Url.visits` is therefore daily unique human visitors, summed.
+  - `analytics:salt:<yyyy-MM-dd>`: Base64 of 32 `SecureRandom` bytes, created with set-if-absent. `analytics:visitors:<urlId>:<yyyy-MM-dd>`: the set. Both expire at the next midnight in the zone plus 4 hours; every write sets the expiry, so no analytics key lives without one.
+  - Redis down, or a failing check → a new visitor, so a visit-limited link closes early rather than late (one warn line, without the IP). A lost salt is recreated and that day over-counts once.
+- **Tables** (`026-privacy-first-analytics.xml`, `LinkStatsRepository`, deleted with the link): `LINK_DAILY_STATS(URL_ID, STAT_DATE, CLICKS, UNIQUE_VISITORS, BOT_CLICKS)` and `LINK_DAILY_BREAKDOWN(URL_ID, STAT_DATE, DIMENSION, DIMENSION_VALUE, CLICKS)`, `DIMENSION` one of `REFERRER`, `COUNTRY`, `DEVICE`, `BROWSER`, `OS`.
+  - Upserts are standard SQL `MERGE … USING (VALUES …) AS s(…)` with every parameter wrapped in `CAST(:p AS <type>)`, because Postgres can't type bare parameters inside `VALUES`. Never `ON CONFLICT` or H2's `MERGE … KEY`: the same SQL runs on H2 in the tests and on Postgres 15 or newer. A duplicate-key race is retried once.
+  - Caps: at most 50 named values per dimension per link per day; a further new value, or one over 255 characters, is stored as `other`. The per-link view shows the top 10 named values per dimension plus one `other` (stored `other` plus the rest), left out when 0.
+- **Day**: `app.analytics.zone` (`APP_ANALYTICS_ZONE`, default `Europe/Zagreb`; the container runs in UTC), taken by `AnalyticsDays` on the request thread when the click arrives. The salt and set expiry follow the same day boundary.
+- **Write budget per human click**: one stats `MERGE`, one 5-row breakdown `MERGE` and one read for the cap; a new unique visitor adds `recordVisit` and `deactivateAtVisitLimit`. A bot click is one statement. Counts go straight to Postgres, never buffered in memory (a redeploy would lose them).
+- **No IP logging**: click-path log lines name the short code or link id only.
+- **Never cache redirects**: every click has to reach the backend through Cloudflare (`cf-cache-status: DYNAMIC`), or analytics silently undercounts.
 
 ## CI / Deploy
 - `.github/workflows/build.yml`: `mvn clean package` → Docker build/push to `ghcr.io`

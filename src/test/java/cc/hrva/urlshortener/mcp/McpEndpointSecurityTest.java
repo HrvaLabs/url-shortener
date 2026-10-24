@@ -20,6 +20,7 @@ import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.repository.LinkReviewRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
+import cc.hrva.urlshortener.security.ClickRequestResolver;
 import cc.hrva.urlshortener.security.ClientIpResolver;
 import cc.hrva.urlshortener.security.JwtFilter;
 import cc.hrva.urlshortener.security.OAuth2LoginSuccessHandler;
@@ -673,6 +674,7 @@ class McpEndpointSecurityTest {
             McpMessageBodyLogFilter.class,
             JwtFilter.class,
             ClientIpResolver.class,
+            ClickRequestResolver.class,
             UrlRedirectController.class,
             ClockConfiguration.class,
             McpUserResolver.class,

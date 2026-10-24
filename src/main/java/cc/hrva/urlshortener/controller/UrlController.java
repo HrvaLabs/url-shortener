@@ -20,6 +20,7 @@ import cc.hrva.urlshortener.dto.UrlUpdateDto;
 import cc.hrva.urlshortener.exception.ApiException;
 import cc.hrva.urlshortener.model.PeekUrl;
 import cc.hrva.urlshortener.model.enums.AuditAction;
+import cc.hrva.urlshortener.security.ClickRequestResolver;
 import cc.hrva.urlshortener.security.ClientIpResolver;
 import cc.hrva.urlshortener.service.LinkPreviewService;
 import cc.hrva.urlshortener.service.QrCodeService;
@@ -57,6 +58,7 @@ public class UrlController {
     private final QrCodeService qrCodeService;
     private final LinkPreviewService linkPreviewService;
     private final ClientIpResolver clientIpResolver;
+    private final ClickRequestResolver clickRequestResolver;
     private final HttpServletRequest request;
     private final AppProperties appProperties;
 
@@ -74,12 +76,11 @@ public class UrlController {
         return ResponseEntity.ok(urlService.saveUrlRouting(createUrlDto, clientIpResolver.getClientIp(request)));
     }
 
-    @Operation(summary = "Redirect to short URL", description = "Look up a short URL and return its details. Records a visit.")
+    @Operation(summary = "Redirect to short URL", description = "Look up a short URL and return its details. Records a click (bots are counted separately and refused on visit-limited links).")
     @ApiResponse(responseCode = "404", description = "URL not found")
     @GetMapping("/{short}")
     public ResponseEntity<UrlResponse> fetchUrlByShort(@PathVariable("short") final String shortUrl) {
-        final var remoteAddress = clientIpResolver.getClientIp(request);
-        return ResponseEntity.ok(urlService.checkIPUniquenessAndReturnUrl(shortUrl, remoteAddress));
+        return ResponseEntity.ok(urlService.revealUrlAndRecordClick(shortUrl, clickRequestResolver.resolve(request)));
     }
 
     @Operation(summary = "Peek at a short URL", description = "Quickly retrieve longUrl, shortUrl, and createDate without recording a visit.")
@@ -89,15 +90,14 @@ public class UrlController {
         return ResponseEntity.ok(urlService.peekUrlByShortUrl(shortUrl));
     }
 
-    @Operation(summary = "Unlock a password-protected URL", description = "Submit the password for a protected short URL to receive its destination and record the visit.")
+    @Operation(summary = "Unlock a password-protected URL", description = "Submit the password for a protected short URL to receive its destination and record the click.")
     @ApiResponse(responseCode = "403", description = "Incorrect password")
     @ApiResponse(responseCode = "404", description = "URL not found")
     @PostMapping("/{short}/unlock")
     public ResponseEntity<UnlockResponse> unlockUrl(
             @PathVariable("short") final String shortUrl,
             @Valid @RequestBody final UnlockUrlDto dto) {
-        final var clientIp = clientIpResolver.getClientIp(request);
-        return ResponseEntity.ok(urlService.unlockUrl(shortUrl, dto.getPassword(), clientIp));
+        return ResponseEntity.ok(urlService.unlockUrl(shortUrl, dto.getPassword(), clickRequestResolver.resolve(request)));
     }
 
     @Operation(summary = "Get rich link preview", description = "Fetch Open Graph metadata (title, description, image) for a short URL.")
