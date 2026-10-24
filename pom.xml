@@ -32,7 +32,7 @@
         <guavaVersion>33.6.0-jre</guavaVersion>
         <springAiVersion>2.0.1</springAiVersion>
         <!-- Held at 2.0.1: Spring AI 2.0.1 is built against SDK 2.0.0 and breaks on 2.1.0 -->
-        <mcpSdkVersion>2.0.1</mcpSdkVersion>
+        <mcpSdkVersion>2.1.0</mcpSdkVersion>
         <mcpSecurityVersion>0.1.14</mcpSecurityVersion>
 
         <!-- Newer than Spring Boot 4.1.1 manages; drop each once Boot manages the same or newer -->
