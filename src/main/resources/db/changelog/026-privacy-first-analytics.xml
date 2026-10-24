@@ -58,4 +58,13 @@
         </rollback>
     </changeSet>
 
+    <changeSet author="khrvacic" id="026-url-owner-index">
+        <createIndex tableName="URL" indexName="IDX_URL_OWNER_ID">
+            <column name="OWNER_ID"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="URL" indexName="IDX_URL_OWNER_ID"/>
+        </rollback>
+    </changeSet>
+
 </databaseChangeLog>

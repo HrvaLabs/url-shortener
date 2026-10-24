@@ -234,6 +234,14 @@ class LinkStatsRepositoryTest {
         assertThat(countRows("link_daily_breakdown", url.getId())).isZero();
     }
 
+    @Test
+    void linksAreIndexedByOwnerForTheOverview() {
+        assertThat(jdbcTemplate.queryForList(
+                "select table_name, column_name from information_schema.index_columns where upper(index_name) = 'IDX_URL_OWNER_ID'"))
+                .extracting(row -> row.get("TABLE_NAME"), row -> row.get("COLUMN_NAME"))
+                .containsExactly(tuple("URL", "OWNER_ID"));
+    }
+
     private void recordBreakdowns(final Url url) {
         linkStatsRepository.incrementBreakdown(url.getId(), DAY, CROATIAN_IPHONE);
         linkStatsRepository.incrementBreakdown(url.getId(), DAY, CROATIAN_IPHONE);
