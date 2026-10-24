@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.9.xsd">
+
+    <include file="classpath:/db/changelog/table/user.xml"/>
+    <include file="classpath:/db/changelog/table/api_key.xml"/>
+    <include file="classpath:/db/changelog/table/url.xml"/>
+    <include file="classpath:/db/changelog/table/ip_address.xml"/>
+
+    <changeSet author="test" id="ip-address-dropped-by-hand">
+        <dropTable tableName="IP_ADDRESS" cascadeConstraints="true"/>
+        <dropSequence sequenceName="IP_ADDRESS_ID_SEQ"/>
+    </changeSet>
+
+    <include file="classpath:/db/changelog/026-privacy-first-analytics.xml"/>
+
+</databaseChangeLog>

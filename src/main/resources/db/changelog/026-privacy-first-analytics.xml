@@ -68,7 +68,17 @@
     </changeSet>
 
     <changeSet author="khrvacic" id="026-drop-ip-address">
+        <preConditions onFail="MARK_RAN">
+            <tableExists tableName="IP_ADDRESS"/>
+        </preConditions>
         <dropTable tableName="IP_ADDRESS" cascadeConstraints="true"/>
+        <rollback/>
+    </changeSet>
+
+    <changeSet author="khrvacic" id="026-drop-ip-address-seq">
+        <preConditions onFail="MARK_RAN">
+            <sequenceExists sequenceName="IP_ADDRESS_ID_SEQ"/>
+        </preConditions>
         <dropSequence sequenceName="IP_ADDRESS_ID_SEQ"/>
         <rollback/>
     </changeSet>

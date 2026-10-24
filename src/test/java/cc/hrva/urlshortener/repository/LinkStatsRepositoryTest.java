@@ -250,6 +250,16 @@ class LinkStatsRepositoryTest {
                 "select count(*) from information_schema.sequences where upper(sequence_name) = 'IP_ADDRESS_ID_SEQ'", Integer.class)).isZero();
     }
 
+    @Test
+    void bothIpAddressDropsRunOnAFreshDatabase() {
+        assertThat(jdbcTemplate.queryForList(
+                "select id, exectype from databasechangelog where id like '026-drop-ip-address%' order by orderexecuted"))
+                .extracting(row -> row.get("ID"), row -> row.get("EXECTYPE"))
+                .containsExactly(
+                        tuple("026-drop-ip-address", "EXECUTED"),
+                        tuple("026-drop-ip-address-seq", "EXECUTED"));
+    }
+
     private void recordBreakdowns(final Url url) {
         linkStatsRepository.incrementBreakdown(url.getId(), DAY, CROATIAN_IPHONE);
         linkStatsRepository.incrementBreakdown(url.getId(), DAY, CROATIAN_IPHONE);

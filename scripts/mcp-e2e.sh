@@ -201,6 +201,10 @@ for (( second = 0; second < 180; second++ )); do
 done
 (( second < 180 )) || fail "the app did not start within 180s"
 echo "  app $(basename "$JAR") on $BASE (profile local, issuer $BASE)"
+expect_eq "$(psql_value "select string_agg(id || ' ' || exectype, ', ' order by orderexecuted) from databasechangelog where id like '026-drop-ip-address%';")" \
+    "026-drop-ip-address EXECUTED, 026-drop-ip-address-seq EXECUTED" "026 ran both ip_address drops"
+expect_eq "$(psql_value "select (select count(*) from information_schema.tables where table_name = 'ip_address') + (select count(*) from information_schema.sequences where sequence_name = 'ip_address_id_seq');")" \
+    0 "no ip_address table or sequence is left"
 
 section "0. Discovery"
 mcp_post /mcp "" "$INITIALIZE"
