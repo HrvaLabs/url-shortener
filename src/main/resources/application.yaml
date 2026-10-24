@@ -82,3 +82,5 @@ app:
   discord-webhook-url: ${DISCORD_WEBHOOK_URL:}
   mcp:
     issuer: https://hrva.cc
+  analytics:
+    zone: ${APP_ANALYTICS_ZONE:Europe/Zagreb}

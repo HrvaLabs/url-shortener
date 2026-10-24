@@ -4,6 +4,7 @@ import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
+import java.time.ZoneId;
 import lombok.Data;
 import lombok.ToString;
 import org.springframework.boot.context.properties.ConfigurationProperties;
@@ -98,6 +99,10 @@ public class AppProperties {
     @NotNull
     private Blocklists blocklists = new Blocklists();
 
+    @Valid
+    @NotNull
+    private Analytics analytics = new Analytics();
+
     @Data
     public static class Mcp {
 
@@ -116,6 +121,14 @@ public class AppProperties {
         @NotNull
         @Positive
         private Long maxRedisMb = 256L;
+
+    }
+
+    @Data
+    public static class Analytics {
+
+        @NotNull
+        private ZoneId zone = ZoneId.of("Europe/Zagreb");
 
     }
 
