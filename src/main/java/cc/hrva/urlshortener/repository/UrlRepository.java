@@ -31,7 +31,7 @@ public interface UrlRepository extends JpaRepository<Url, Long>, JpaSpecificatio
     @EntityGraph(attributePaths = "owner", type = EntityGraph.EntityGraphType.LOAD)
     Page<Url> findAll(Specification<Url> spec, Pageable pageable);
 
-    @EntityGraph(attributePaths = "owner")
+    @EntityGraph(attributePaths = "owner", type = EntityGraph.EntityGraphType.LOAD)
     List<Url> findTop10ByOrderByCreateDateDescIdDesc();
 
     Page<Url> findAllByOwner(User owner, Pageable pageable);

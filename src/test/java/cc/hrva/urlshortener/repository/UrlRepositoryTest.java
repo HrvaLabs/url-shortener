@@ -1,10 +1,13 @@
 package cc.hrva.urlshortener.repository;
 
 import cc.hrva.urlshortener.model.Url;
+import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.enums.BlockReason;
 import jakarta.persistence.EntityManager;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.stream.IntStream;
+import org.hibernate.Hibernate;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.SpringBootConfiguration;
@@ -33,6 +36,7 @@ class UrlRepositoryTest {
 
     private static final LocalDateTime BLOCKED_AT = LocalDateTime.of(2026, 10, 22, 9, 0);
     private static final LocalDateTime VISITED_AT = LocalDateTime.of(2026, 10, 24, 18, 30);
+    private static final LocalDateTime CREATED_AT = LocalDateTime.of(2026, 10, 20, 12, 0);
 
     @Autowired
     private UrlRepository urlRepository;
@@ -108,11 +112,55 @@ class UrlRepositoryTest {
                 .containsExactly(1L, VISITED_AT);
     }
 
+    @Test
+    void recentLinksAreTheNewestTenWithTheirOwner() {
+        final var owner = savedOwner("recent-owner@example.com");
+        final var links = IntStream.rangeClosed(1, 12).mapToObj(index -> link("recent-" + index, null)).toList();
+        links.getFirst().setOwner(owner);
+        entityManager.flush();
+        createdAt(links.getFirst(), CREATED_AT.plusHours(1));
+        IntStream.rangeClosed(1, 10).forEach(index -> createdAt(links.get(index), CREATED_AT.plusMinutes(index)));
+        createdAt(links.get(11), CREATED_AT.plusMinutes(10));
+
+        entityManager.clear();
+        final var recent = urlRepository.findTop10ByOrderByCreateDateDescIdDesc();
+
+        assertThat(links.get(10).getId()).isLessThan(links.get(11).getId());
+        assertThat(recent).hasSize(10);
+        assertThat(recent).extracting(Url::getId).containsExactly(
+                links.get(0).getId(),
+                links.get(11).getId(),
+                links.get(10).getId(),
+                links.get(9).getId(),
+                links.get(8).getId(),
+                links.get(7).getId(),
+                links.get(6).getId(),
+                links.get(5).getId(),
+                links.get(4).getId(),
+                links.get(3).getId());
+        assertThat(Hibernate.isInitialized(recent.getFirst().getOwner())).isTrue();
+        assertThat(recent.getFirst().getOwner().getEmail()).isEqualTo("recent-owner@example.com");
+        assertThat(recent.subList(1, 10)).extracting(Url::getOwner).containsOnlyNulls();
+    }
+
     private Url link(final String shortUrl, final LocalDateTime expirationDate) {
         final var url = Url.builder().shortUrl(shortUrl).longUrl("https://" + shortUrl + ".example/").expirationDate(expirationDate).build();
         entityManager.persist(url);
         entityManager.flush();
         return url;
+    }
+
+    private User savedOwner(final String email) {
+        final var owner = User.builder().email(email).password("correct horse battery").build();
+        entityManager.persist(owner);
+        return owner;
+    }
+
+    private void createdAt(final Url url, final LocalDateTime createDate) {
+        entityManager.createQuery("update Url u set u.createDate = :createDate where u.id = :id")
+                .setParameter("createDate", createDate)
+                .setParameter("id", url.getId())
+                .executeUpdate();
     }
 
     private void blockMeanwhile(final Url url) {
