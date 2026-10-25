@@ -2,54 +2,43 @@ package cc.hrva.urlshortener.service.impl;
 
 import cc.hrva.urlshortener.dto.AdminStatsResponse;
 import cc.hrva.urlshortener.dto.AdminStatsResponse.RecentUrl;
+import cc.hrva.urlshortener.dto.stats.CacheStats;
+import cc.hrva.urlshortener.dto.stats.RedirectTiming;
 import cc.hrva.urlshortener.repository.ApiKeyRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.service.AdminService;
-import io.micrometer.core.instrument.MeterRegistry;
-import java.lang.management.ManagementFactory;
+import cc.hrva.urlshortener.service.stats.AppVersion;
+import cc.hrva.urlshortener.service.stats.HealthStatuses;
+import cc.hrva.urlshortener.service.stats.RuntimeMetrics;
 import java.nio.charset.StandardCharsets;
-import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.concurrent.TimeUnit;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.cache.CacheManager;
+import java.util.Locale;
+import java.util.Objects;
+import lombok.RequiredArgsConstructor;
+import org.springframework.boot.health.contributor.Status;
 import org.springframework.core.env.Environment;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 
 @Service
+@RequiredArgsConstructor
 public class DefaultAdminService implements AdminService {
 
-    private static final Logger log = LoggerFactory.getLogger(DefaultAdminService.class);
+    private static final String NO_VALUE = "—";
+    private static final String UP = Status.UP.getCode();
+    private static final String DATABASE = "db";
+    private static final String REDIS = "redis";
+    private static final long BYTES_PER_MB = 1024 * 1024;
 
     private final UserRepository userRepository;
     private final UrlRepository urlRepository;
     private final ApiKeyRepository apiKeyRepository;
-    private final MeterRegistry meterRegistry;
-    private final CacheManager cacheManager;
     private final Environment environment;
-
-    @Value("${spring.application.name:url-shortener}")
-    private String appName;
-
-    public DefaultAdminService(
-            final UserRepository userRepository,
-            final UrlRepository urlRepository,
-            final ApiKeyRepository apiKeyRepository,
-            final MeterRegistry meterRegistry,
-            final CacheManager cacheManager,
-            final Environment environment) {
-        this.userRepository = userRepository;
-        this.urlRepository = urlRepository;
-        this.apiKeyRepository = apiKeyRepository;
-        this.meterRegistry = meterRegistry;
-        this.cacheManager = cacheManager;
-        this.environment = environment;
-    }
+    private final RuntimeMetrics runtimeMetrics;
+    private final HealthStatuses healthStatuses;
+    private final AppVersion appVersion;
 
     @Override
     public byte[] exportAllUrlsAsCsv() {
@@ -84,28 +73,36 @@ public class DefaultAdminService implements AdminService {
     @Override
     public AdminStatsResponse getDashboardStats() {
         final var now = LocalDateTime.now();
-        final var totalUsers = userRepository.count();
-        final var newUsers7d = userRepository.countByCreateDateAfter(now.minusDays(7));
-        final var newUsers30d = userRepository.countByCreateDateAfter(now.minusDays(30));
-        final var totalUrls = urlRepository.count();
-        final var activeUrls = urlRepository.countByActiveTrue();
-        final var totalApiKeys = apiKeyRepository.count();
-        final var uptimeFormatted = formatUptime(ManagementFactory.getRuntimeMXBean().getUptime());
-        final var recentUrls = fetchRecentUrls();
-        final var cacheHitRatio = getCacheHitRatio();
-        final var activeProfiles = List.of(environment.getActiveProfiles());
-        final var jvmMemory = getJvmMemory();
-        final var requestsCount = getRequestCount();
-        final var redirectTimer = getRedirectTimer();
+        final var redirectTimings = runtimeMetrics.redirectTimings();
+        final var redirectCount = redirectTimings.stream().mapToLong(RedirectTiming::count).sum();
+        final var heap = runtimeMetrics.heap();
 
-        return buildAdminStatsResponse(
-                totalUsers, newUsers7d, newUsers30d, totalUrls, activeUrls, totalApiKeys,
-                uptimeFormatted, recentUrls, cacheHitRatio, activeProfiles,
-                jvmMemory, requestsCount, redirectTimer);
+        return new AdminStatsResponse(
+                userRepository.count(),
+                userRepository.countByCreateDateAfter(now.minusDays(7)),
+                userRepository.countByCreateDateAfter(now.minusDays(30)),
+                urlRepository.count(),
+                urlRepository.countByActiveTrue(),
+                apiKeyRepository.count(),
+                appVersion.current(),
+                RuntimeMetrics.formatUptime(runtimeMetrics.uptime()),
+                UP.equals(healthStatuses.status(REDIS)),
+                UP.equals(healthStatuses.status(DATABASE)),
+                System.getProperty("java.version"),
+                now,
+                fetchRecentUrls(),
+                formatHitRatio(runtimeMetrics.urlCacheStats()),
+                List.of(environment.getActiveProfiles()),
+                formatMegabytes(heap.usedBytes()),
+                formatMegabytes(heap.maxBytes()),
+                runtimeMetrics.requestCounts().total(),
+                formatRedirectAvgMs(redirectTimings, redirectCount),
+                formatRedirectMaxMs(redirectTimings, redirectCount),
+                redirectCount);
     }
 
     private List<RecentUrl> fetchRecentUrls() {
-        return urlRepository.findAll(PageRequest.of(0, 10)).stream()
+        return urlRepository.findTop10ByOrderByCreateDateDescIdDesc().stream()
                 .map(url -> new RecentUrl(
                         url.getId(),
                         url.getShortUrl(),
@@ -116,135 +113,39 @@ public class DefaultAdminService implements AdminService {
                 .toList();
     }
 
-    private AdminStatsResponse buildAdminStatsResponse(
-            final long totalUsers,
-            final long newUsers7d,
-            final long newUsers30d,
-            final long totalUrls,
-            final long activeUrls,
-            final long totalApiKeys,
-            final String uptimeFormatted,
-            final List<RecentUrl> recentUrls,
-            final String cacheHitRatio,
-            final List<String> activeProfiles,
-            final JvmMemory jvmMemory,
-            final long requestsCount,
-            final RedirectTiming redirectTimer) {
-        return new AdminStatsResponse(
-                totalUsers,
-                newUsers7d,
-                newUsers30d,
-                totalUrls,
-                activeUrls,
-                totalApiKeys,
-                "1.4.2",
-                uptimeFormatted,
-                true,
-                true,
-                System.getProperty("java.version"),
-                LocalDateTime.now(),
-                recentUrls,
-                cacheHitRatio,
-                activeProfiles,
-                jvmMemory.used,
-                jvmMemory.max,
-                requestsCount,
-                redirectTimer.avgMs,
-                redirectTimer.maxMs,
-                redirectTimer.count);
+    private static String formatRedirectAvgMs(final List<RedirectTiming> redirectTimings, final long redirectCount) {
+        if (redirectCount == 0) {
+            return NO_VALUE;
+        }
+        final var totalMs = redirectTimings.stream()
+                .filter(timing -> timing.meanMs() != null)
+                .mapToDouble(timing -> timing.meanMs() * timing.count())
+                .sum();
+        return formatMs(totalMs / redirectCount);
     }
 
-    private record RedirectTiming(String avgMs, String maxMs, long count) {}
-
-    private RedirectTiming getRedirectTimer() {
-        try {
-            return readRedirectTimer();
-        } catch (final Exception e) {
-            return new RedirectTiming("—", "—", 0);
+    private static String formatRedirectMaxMs(final List<RedirectTiming> redirectTimings, final long redirectCount) {
+        if (redirectCount == 0) {
+            return NO_VALUE;
         }
+        return redirectTimings.stream()
+                .map(RedirectTiming::maxMs)
+                .filter(Objects::nonNull)
+                .max(Double::compare)
+                .map(DefaultAdminService::formatMs)
+                .orElse(NO_VALUE);
     }
 
-    private RedirectTiming readRedirectTimer() {
-        final var timer = meterRegistry.find("redirect.duration").timer();
-        if (timer == null || timer.count() == 0) {
-            return new RedirectTiming("—", "—", 0);
-        }
-        final var avgMs = String.format("%.0f", timer.mean(TimeUnit.MILLISECONDS));
-        final var maxMs = String.format("%.0f", timer.max(TimeUnit.MILLISECONDS));
-        return new RedirectTiming(avgMs, maxMs, timer.count());
+    private static String formatMs(final double millis) {
+        return String.format(Locale.ROOT, "%.0f", millis);
     }
 
-    private String getCacheHitRatio() {
-        final var ratio = getCacheHitRatioFromMeterRegistry();
-        if (ratio != null) {
-            return ratio;
-        }
-
-        final var cache = cacheManager.getCache("urls");
-        if (cache != null) {
-            try {
-                cache.get("__health__");
-                return "Active";
-            } catch (final Exception e) {
-                return "Unreachable";
-            }
-        }
-
-        return "—";
+    private static String formatHitRatio(final CacheStats cacheStats) {
+        return cacheStats.hitRatio() != null ? String.format(Locale.ROOT, "%.1f%%", cacheStats.hitRatio()) : NO_VALUE;
     }
 
-    private String getCacheHitRatioFromMeterRegistry() {
-        try {
-            final var gets = meterRegistry.find("cache.gets").tag("result", "hit").counters();
-            final var hits = gets.stream().mapToLong(counter -> (long) counter.count()).sum();
-            final var misses = meterRegistry.find("cache.gets").tag("result", "miss").counters().stream()
-                    .mapToLong(counter -> (long) counter.count()).sum();
-            final var total = hits + misses;
-            if (total > 0) {
-                return String.format("%.1f%%", (double) hits / total * 100);
-            }
-        } catch (final Exception e) {
-            log.debug("Failed to read Micrometer cache metrics", e);
-        }
-
-        return null;
-    }
-
-    private JvmMemory getJvmMemory() {
-        try {
-            final var memoryBean = ManagementFactory.getMemoryMXBean();
-            final var heap = memoryBean.getHeapMemoryUsage();
-            final var used = heap.getUsed() / (1024 * 1024);
-            final var max = heap.getMax() / (1024 * 1024);
-            return new JvmMemory(used + " MB", max + " MB");
-        } catch (final Exception e) {
-            return new JvmMemory("—", "—");
-        }
-    }
-
-    private record JvmMemory(String used, String max) {}
-
-    private long getRequestCount() {
-        try {
-            final var counter = meterRegistry.find("http.server.requests").counter();
-            return counter != null ? (long) counter.count() : 0;
-        } catch (final Exception e) {
-            return 0;
-        }
-    }
-
-    private String formatUptime(final long uptimeMillis) {
-        final var duration = Duration.ofMillis(uptimeMillis);
-        final var days = duration.toDays();
-        final var hours = duration.toHours() % 24;
-        final var minutes = duration.toMinutes() % 60;
-
-        if (days > 0) {
-            return String.format("%dd %dh %dm", days, hours, minutes);
-        } else if (hours > 0) {
-            return String.format("%dh %dm", hours, minutes);
-        }
-        return String.format("%dm", Math.max(1, minutes));
+    private static String formatMegabytes(final long bytes) {
+        return String.format(Locale.ROOT, "%d MB", bytes / BYTES_PER_MB);
     }
 
 }
