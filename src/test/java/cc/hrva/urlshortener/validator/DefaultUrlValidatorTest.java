@@ -542,6 +542,38 @@ class DefaultUrlValidatorTest {
         assertLongUrlAccepted("https://example.com.");
     }
 
+    @Test
+    void acceptsADestinationOfExactly2048Characters() {
+        final var destination = "https://example.com/" + "a".repeat(2028);
+
+        assertThat(destination.length()).isEqualTo(2048);
+        assertLongUrlAccepted(destination);
+    }
+
+    @Test
+    void refusesADestinationOver2048CharactersBeforeAnyLinkCheck() {
+        final var url = Url.builder().longUrl("https://example.com/" + "a".repeat(2029)).build();
+
+        assertThatThrownBy(() -> urlValidator.checkIfLongUrlIsValid(url))
+                .isInstanceOf(UrlValidationException.class)
+                .hasMessage("Destination URL must be 2048 characters or fewer");
+        verifyNoInteractions(linkCheckService, suspiciousUrlService, safeBrowsingService);
+    }
+
+    @Test
+    void refusesAnOverlongDestinationForItsLengthBeforeItsFormat() {
+        final var url = Url.builder().longUrl("not a url " + "a".repeat(2039)).build();
+
+        assertThatThrownBy(() -> urlValidator.checkIfLongUrlIsValid(url))
+                .isInstanceOf(UrlValidationException.class)
+                .hasMessage("Destination URL must be 2048 characters or fewer");
+    }
+
+    @Test
+    void aMissingDestinationIsStillRefusedAsNotAWebAddress() {
+        assertLongUrlRejected(null);
+    }
+
     private void assertLongUrlRejected(final String longUrl) {
         final Url url = Url.builder().longUrl(longUrl).build();
         assertThatThrownBy(() -> urlValidator.checkIfLongUrlIsValid(url))

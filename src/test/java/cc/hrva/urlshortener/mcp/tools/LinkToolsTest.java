@@ -285,6 +285,17 @@ class LinkToolsTest {
     }
 
     @Test
+    void shortenRefusesADestinationOver2048CharactersAsAToolError() {
+        when(mcpUserResolver.currentUser()).thenReturn(CURRENT_USER);
+
+        final var result = linkTools.shortenUrl("https://example.com/" + "a".repeat(2029), null, null, null, null);
+
+        assertThat(result.isError()).isTrue();
+        assertThat(text(result)).isEqualTo("Destination URL must be 2048 characters or fewer");
+        verify(urlService, never()).saveUrlRouting(any(), any());
+    }
+
+    @Test
     void shortenReturnsToolErrorWithBackendMessageWhenAliasTaken() {
         when(mcpUserResolver.currentUser()).thenReturn(CURRENT_USER);
         when(urlService.saveUrlRouting(any(), any())).thenThrow(new ShortUrlAlreadyExistsException("This short URL is already taken. Try another."));

@@ -96,4 +96,9 @@
         </rollback>
     </changeSet>
 
+    <changeSet author="khrvacic" id="027-url-long-url-length">
+        <modifyDataType tableName="URL" columnName="LONG_URL" newDataType="VARCHAR(2048)"/>
+        <rollback/>
+    </changeSet>
+
 </databaseChangeLog>

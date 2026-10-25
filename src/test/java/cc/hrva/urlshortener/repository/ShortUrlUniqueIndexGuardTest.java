@@ -49,7 +49,8 @@ class ShortUrlUniqueIndexGuardTest {
                         tuple("027-link-review-flagged-at-index", "EXECUTED"),
                         tuple("027-url-created-via", "EXECUTED"),
                         tuple("027-url-short-url-unique", "MARK_RAN"),
-                        tuple("027-reserved-alias", "EXECUTED"));
+                        tuple("027-reserved-alias", "EXECUTED"),
+                        tuple("027-url-long-url-length", "EXECUTED"));
     }
 
     @Test

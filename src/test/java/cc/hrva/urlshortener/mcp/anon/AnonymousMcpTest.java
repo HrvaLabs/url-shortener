@@ -330,6 +330,20 @@ class AnonymousMcpTest {
     }
 
     @Test
+    void anonShortenRefusesADestinationOver2048CharactersAsAToolError() throws Exception {
+        final var call = """
+                {"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"shorten_url","arguments":{"url":"https://example.com/%s"}}}"""
+                .formatted("a".repeat(2029));
+
+        mockMvc.perform(anonymousMcpRequest(call).with(from(CLIENT_IP)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.result.isError").value(true))
+                .andExpect(jsonPath("$.result.content[0].text").value("Destination URL must be 2048 characters or fewer"));
+
+        verify(urlService, never()).saveUrlRouting(any(), any());
+    }
+
+    @Test
     void anonIgnoresBearerToken() throws Exception {
         final var mcpAccessToken = accessTokens.issue(EMAIL, RESOURCE);
         final var appJwt = tokenProvider.createToken(UsernamePasswordAuthenticationToken.authenticated(

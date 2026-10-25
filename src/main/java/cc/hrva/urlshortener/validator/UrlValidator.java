@@ -6,6 +6,8 @@ import cc.hrva.urlshortener.model.Url;
 public interface UrlValidator {
 
     String SHORT_URL_TAKEN = "This short URL is already taken. Try another.";
+    int MAX_LONG_URL_LENGTH = 2048;
+    String LONG_URL_TOO_LONG = "Destination URL must be 2048 characters or fewer";
 
     void longUrlInUrl(Url url);
     void checkIfUrlSafe(Url url);

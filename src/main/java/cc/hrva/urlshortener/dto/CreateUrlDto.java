@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.dto;
 
+import cc.hrva.urlshortener.validator.UrlValidator;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
@@ -16,6 +17,7 @@ import lombok.Data;
 public class CreateUrlDto {
 
   @NotBlank(message = "Long URL is required")
+  @Size(max = UrlValidator.MAX_LONG_URL_LENGTH, message = UrlValidator.LONG_URL_TOO_LONG)
   @Schema(description = "The original long URL to shorten", example = "https://example.com/very-long-url")
   private String longUrl;
   @Pattern(regexp = "^[a-zA-Z0-9_-]*$", message = "Custom short URL can only contain letters, numbers, hyphens and underscores")

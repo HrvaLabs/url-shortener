@@ -31,6 +31,7 @@ public class Url {
 
     @URL(message = "Enter a valid URL (e.g. https://example.com)")
     @NotBlank(message = "URL is required")
+    @Column(length = 2048)
     private String longUrl;
 
     @Column(unique = true)

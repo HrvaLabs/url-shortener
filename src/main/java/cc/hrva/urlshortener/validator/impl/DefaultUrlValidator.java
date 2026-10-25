@@ -48,6 +48,9 @@ public class DefaultUrlValidator implements UrlValidator {
 
     @Override
     public void checkIfLongUrlIsValid(final Url url) {
+        if (StringUtils.length(url.getLongUrl()) > MAX_LONG_URL_LENGTH) {
+            throw new UrlValidationException(LONG_URL_TOO_LONG);
+        }
         if (!isWebAddress(url.getLongUrl())) {
             throw new UrlValidationException("That doesn't look like a valid web address. Check the URL and try again.");
         }

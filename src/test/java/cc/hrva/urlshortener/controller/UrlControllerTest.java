@@ -38,6 +38,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -51,6 +52,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class UrlControllerTest {
 
     private static final ClickRequest CLICK = ClickRequest.of("203.0.113.7", "UA", "https://t.co/x", "HR");
+    private static final String TOO_LONG_DESTINATION = "https://example.com/" + "a".repeat(2029);
+    private static final String DESTINATION_TOO_LONG = "Destination URL must be 2048 characters or fewer";
 
     private MockMvc mockMvc;
 
@@ -147,6 +150,41 @@ class UrlControllerTest {
                 .andExpect(jsonPath("$.error").value("You've created a lot of links in a short time. Try again in an hour."));
 
         verify(urlService, times(3)).saveUrlRouting(any(CreateUrlDto.class), eq("203.0.113.7"));
+    }
+
+    @Test
+    void aDestinationOf2048CharactersIsAccepted() throws Exception {
+        final var destination = "https://example.com/" + "a".repeat(2028);
+        when(urlService.saveUrlRouting(any(CreateUrlDto.class), any()))
+                .thenReturn(UrlResponse.from(Url.builder().id(1L).longUrl(destination).shortUrl("ex").build()));
+
+        mockMvc.perform(post("/api/v1/urls")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(CreateUrlDto.builder().longUrl(destination).build())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.longUrl").value(destination));
+    }
+
+    @Test
+    void aDestinationOver2048CharactersIsRefusedWithTheLimit() throws Exception {
+        mockMvc.perform(post("/api/v1/urls")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(CreateUrlDto.builder().longUrl(TOO_LONG_DESTINATION).build())))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.longUrl").value(DESTINATION_TOO_LONG));
+
+        verifyNoInteractions(urlService);
+    }
+
+    @Test
+    void aNewDestinationOver2048CharactersIsRefusedWithTheLimit() throws Exception {
+        mockMvc.perform(put("/api/v1/urls/1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(UrlUpdateDto.builder().id(1L).longUrl(TOO_LONG_DESTINATION).build())))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.longUrl").value(DESTINATION_TOO_LONG));
+
+        verifyNoInteractions(urlService);
     }
 
     @Test

@@ -38,6 +38,8 @@ class AdminStatsAndReservedAliasesSchemaTest {
     private static final String INSERT_RESERVED_ALIAS =
             "insert into reserved_alias (alias, reason, created_by, created_at) values (?, ?, ?, CURRENT_TIMESTAMP)";
     private static final String ADMIN = "admin@hrva.cc";
+    private static final String LONG_URL_COLUMN =
+            "select %s from information_schema.columns where upper(table_name) = 'URL' and upper(column_name) = 'LONG_URL'";
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
@@ -66,7 +68,8 @@ class AdminStatsAndReservedAliasesSchemaTest {
                         tuple("027-link-review-flagged-at-index", "EXECUTED"),
                         tuple("027-url-created-via", "EXECUTED"),
                         tuple("027-url-short-url-unique", "EXECUTED"),
-                        tuple("027-reserved-alias", "EXECUTED"));
+                        tuple("027-reserved-alias", "EXECUTED"),
+                        tuple("027-url-long-url-length", "EXECUTED"));
     }
 
     @Test
@@ -156,8 +159,27 @@ class AdminStatsAndReservedAliasesSchemaTest {
     }
 
     @Test
+    void aDestinationOf2048CharactersIsStoredWhole() {
+        final var destination = "https://example.com/" + "a".repeat(2028);
+        final var id = urlRepository.saveAndFlush(Url.builder().shortUrl("long-link").longUrl(destination).build()).getId();
+        entityManager.clear();
+
+        assertThat(urlRepository.findById(id))
+                .get()
+                .extracting(Url::getLongUrl)
+                .isEqualTo(destination);
+        assertThat(destination).hasSize(2048);
+    }
+
+    @Test
+    void theDestinationColumnIsWideAndStillRequired() {
+        assertThat(jdbcTemplate.queryForObject(LONG_URL_COLUMN.formatted("character_maximum_length"), Long.class)).isEqualTo(2048L);
+        assertThat(jdbcTemplate.queryForObject(LONG_URL_COLUMN.formatted("is_nullable"), String.class)).isEqualTo("NO");
+    }
+
+    @Test
     void aDestinationTooLongForItsColumnIsNotTakenForTheUniqueIndex() {
-        final var tooLong = Url.builder().shortUrl("too-long").longUrl("https://example.com/" + "a".repeat(300)).build();
+        final var tooLong = Url.builder().shortUrl("too-long").longUrl("https://example.com/" + "a".repeat(2029)).build();
 
         assertThatThrownBy(() -> urlRepository.saveAndFlush(tooLong))
                 .isInstanceOfSatisfying(DataIntegrityViolationException.class,
