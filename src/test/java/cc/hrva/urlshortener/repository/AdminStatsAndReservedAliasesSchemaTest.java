@@ -19,6 +19,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.annotation.Transactional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.tuple;
 
@@ -133,6 +134,34 @@ class AdminStatsAndReservedAliasesSchemaTest {
         assertThat(urlRepository.findByLowerShortUrlIn(Set.of("promo")))
                 .extracting(Url::getShortUrl)
                 .containsExactly("Promo");
+    }
+
+    @Test
+    void aSecondReservationOfTheSameAliasFailsInSaveItself() {
+        reservedAliasRepository.save(ReservedAlias.builder().alias("promo").reason("Kept for the spring campaign").createdBy(ADMIN).build());
+
+        assertThatThrownBy(() -> reservedAliasRepository.save(ReservedAlias.builder().alias("promo").reason("Again").createdBy(ADMIN).build()))
+                .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    @Test
+    void aSecondLinkWithTheSameShortUrlIsInsertedOnlyAtFlushWhereItViolatesTheUniqueIndex() {
+        urlRepository.saveAndFlush(Url.builder().shortUrl("race").longUrl("https://example.com/first").build());
+
+        assertThatCode(() -> urlRepository.save(Url.builder().shortUrl("race").longUrl("https://example.com/second").build()))
+                .doesNotThrowAnyException();
+        assertThatThrownBy(() -> urlRepository.flush())
+                .isInstanceOfSatisfying(DataIntegrityViolationException.class,
+                        exception -> assertThat(ShortUrlUniqueIndex.violatedBy(exception)).isTrue());
+    }
+
+    @Test
+    void aDestinationTooLongForItsColumnIsNotTakenForTheUniqueIndex() {
+        final var tooLong = Url.builder().shortUrl("too-long").longUrl("https://example.com/" + "a".repeat(300)).build();
+
+        assertThatThrownBy(() -> urlRepository.saveAndFlush(tooLong))
+                .isInstanceOfSatisfying(DataIntegrityViolationException.class,
+                        exception -> assertThat(ShortUrlUniqueIndex.violatedBy(exception)).isFalse());
     }
 
     @Test

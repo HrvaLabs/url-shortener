@@ -5,6 +5,8 @@ import cc.hrva.urlshortener.model.Url;
 
 public interface UrlValidator {
 
+    String SHORT_URL_TAKEN = "This short URL is already taken. Try another.";
+
     void longUrlInUrl(Url url);
     void checkIfUrlSafe(Url url);
     void checkIfLongUrlIsValid(Url url);

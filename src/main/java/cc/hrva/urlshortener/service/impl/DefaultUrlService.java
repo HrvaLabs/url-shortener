@@ -25,6 +25,7 @@ import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.enums.BlockReason;
 import cc.hrva.urlshortener.model.enums.ReviewResolution;
 import cc.hrva.urlshortener.model.enums.ThreatType;
+import cc.hrva.urlshortener.repository.ShortUrlUniqueIndex;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.specification.UrlSpecification;
 import cc.hrva.urlshortener.service.ApiKeyService;
@@ -52,6 +53,7 @@ import org.springframework.cache.Cache;
 import org.springframework.cache.CacheManager;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -244,11 +246,12 @@ public class DefaultUrlService implements UrlService {
     }
 
     private UrlResponse saveUrlForUser(final Url url, final User owner, final LinkVerdict verdict) {
+        final var customAlias = StringUtils.isNotEmpty(url.getShortUrl());
         assignShortUrl(url);
         url.setOwner(owner);
 
         log.info("Saving URL for owner id={}", owner.getId());
-        final var saved = urlRepository.save(url);
+        final var saved = insertNewLink(url, customAlias ? UrlValidator.SHORT_URL_TAKEN : NO_FREE_ALIAS);
         queueIfFlagged(saved, verdict);
         cacheUrlResponse(saved);
         return UrlResponse.from(saved);
@@ -277,6 +280,20 @@ public class DefaultUrlService implements UrlService {
         } else {
             urlValidator.checkIfShortUrlIsUnique(url.getShortUrl());
             urlValidator.checkIfShortUrlIsReserved(url.getShortUrl());
+        }
+    }
+
+    private Url insertNewLink(final Url url, final String lostRaceRefusal) {
+        try {
+            final var saved = urlRepository.save(url);
+            urlRepository.flush();
+            return saved;
+        } catch (final DataIntegrityViolationException exception) {
+            if (!ShortUrlUniqueIndex.violatedBy(exception)) {
+                throw exception;
+            }
+            log.info("Short URL was taken by a concurrent create");
+            throw new ShortUrlAlreadyExistsException(lostRaceRefusal);
         }
     }
 
@@ -793,7 +810,7 @@ public class DefaultUrlService implements UrlService {
         url.setShortUrl(nextFreeShortUrl());
 
         log.info("Saving URL");
-        final var saved = urlRepository.save(url);
+        final var saved = insertNewLink(url, NO_FREE_ALIAS);
         queueIfFlagged(saved, verdict);
         cacheUrlResponse(saved);
         return saved;

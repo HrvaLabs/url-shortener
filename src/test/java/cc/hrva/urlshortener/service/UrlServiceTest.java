@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.service;
 
+import java.sql.SQLException;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.Collections;
@@ -13,7 +14,10 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.IntStream;
 import io.micrometer.core.instrument.MeterRegistry;
 import tools.jackson.databind.ObjectMapper;
+import org.hibernate.exception.ConstraintViolationException;
+import org.hibernate.exception.DataException;
 import org.springframework.cache.CacheManager;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Sort;
@@ -1016,6 +1020,70 @@ class UrlServiceTest {
         order.verify(urlRepository).save(url);
         assertThat(url.getShortUrl()).isEqualTo("promo");
         verifyNoInteractions(reservedAliasService);
+    }
+
+    @Test
+    void aCustomAliasLostToAConcurrentCreateIsTakenAndNeverCached() {
+        final var createUrlDto = CreateUrlDto.builder().longUrl("https://example.com/menu").shortUrl("promo").build();
+        final var url = Url.builder().longUrl("https://example.com/menu").shortUrl("promo").build();
+        when(createUrlToUrlConverter.convert(createUrlDto)).thenReturn(url);
+        when(userService.getUserFromToken()).thenReturn(User.builder().id(1L).build());
+        when(urlRepository.save(url)).thenReturn(persisted(url));
+        org.mockito.Mockito.doThrow(shortUrlTakenMeanwhile()).when(urlRepository).flush();
+
+        assertThatThrownBy(() -> urlService.saveUrlRouting(createUrlDto, CLIENT_IP))
+                .isInstanceOf(ShortUrlAlreadyExistsException.class)
+                .hasMessage("This short URL is already taken. Try another.");
+
+        verify(cacheManager, never()).getCache(any());
+        verify(redirectChainService, never()).checkLater(org.mockito.ArgumentMatchers.anyLong());
+    }
+
+    @Test
+    void aGeneratedAliasLostToAConcurrentCreateIsTheNoFreeAliasRefusalAndNeverCached() {
+        final var url = signedInCreate();
+        org.mockito.Mockito.doThrow(shortUrlTakenMeanwhile()).when(urlRepository).flush();
+
+        assertThatThrownBy(() -> urlService.saveUrlRouting(CreateUrlDto.builder().longUrl("https://example.com/menu").build(), CLIENT_IP))
+                .isInstanceOf(ShortUrlAlreadyExistsException.class)
+                .hasMessage("Couldn't pick a free short URL. Try again.");
+
+        verify(urlRepository).save(url);
+        verify(cacheManager, never()).getCache(any());
+    }
+
+    @Test
+    void anAnonymousGeneratedAliasLostToAConcurrentCreateIsTheNoFreeAliasRefusalAndNeverCached() {
+        final var createUrlDto = CreateUrlDto.builder().longUrl("https://example.com/menu").build();
+        final var url = Url.builder().longUrl("https://example.com/menu").build();
+        when(createUrlToUrlConverter.convert(createUrlDto)).thenReturn(url);
+        when(userService.getUserFromToken()).thenReturn(null);
+        when(appProperties.getShortUrlLength()).thenReturn(5L);
+        when(urlRepository.save(url)).thenReturn(persisted(url));
+        org.mockito.Mockito.doThrow(shortUrlTakenMeanwhile()).when(urlRepository).flush();
+
+        assertThatThrownBy(() -> urlService.saveUrlRouting(createUrlDto, CLIENT_IP))
+                .isInstanceOf(ShortUrlAlreadyExistsException.class)
+                .hasMessage("Couldn't pick a free short URL. Try again.");
+
+        verify(cacheManager, never()).getCache(any());
+    }
+
+    @Test
+    void anotherIntegrityViolationOnCreateIsNotReportedAsATakenAlias() {
+        final var tooLong = new DataIntegrityViolationException("could not execute statement",
+                new DataException("Value too long for column \"LONG_URL CHARACTER VARYING(255)\"", new SQLException("Value too long", "22001")));
+        signedInCreate();
+        org.mockito.Mockito.doThrow(tooLong).when(urlRepository).flush();
+
+        assertThatThrownBy(() -> urlService.saveUrlRouting(CreateUrlDto.builder().longUrl("https://example.com/menu").build(), CLIENT_IP))
+                .isSameAs(tooLong);
+    }
+
+    private static DataIntegrityViolationException shortUrlTakenMeanwhile() {
+        return new DataIntegrityViolationException("could not execute statement", new ConstraintViolationException(
+                "could not execute statement", new SQLException("duplicate key value violates unique constraint \"ux_url_short_url\"", "23505"),
+                "ux_url_short_url"));
     }
 
     private Url signedInCreate() {
