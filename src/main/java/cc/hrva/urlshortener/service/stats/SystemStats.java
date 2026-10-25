@@ -17,6 +17,7 @@ import java.time.ZoneId;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.health.contributor.Status;
 import org.springframework.core.env.Environment;
 import org.springframework.stereotype.Component;
 
@@ -29,6 +30,8 @@ public class SystemStats {
             List.of(EmailLog.STATUS_SENT, EmailLog.STATUS_FAILED, EmailLog.STATUS_SENDING, EmailLog.STATUS_RESENT);
     private static final String DATABASE = "db";
     private static final String REDIS = "redis";
+    private static final String DOWN = Status.DOWN.getCode();
+    private static final String OUT_OF_SERVICE = Status.OUT_OF_SERVICE.getCode();
     private static final String JAVA_VERSION = "java.version";
 
     private final RuntimeMetrics runtimeMetrics;
@@ -46,6 +49,7 @@ public class SystemStats {
         final var heap = runtimeMetrics.heap();
         final var database = systemStatsRepository.databaseInfo();
         final var emails = hourlyCountRepository.count(HourlySeries.EMAILS_BY_STATUS, window.start(), window.end());
+        final var health = new ComponentHealth(healthStatuses.status(DATABASE), healthStatuses.status(REDIS));
 
         return new SystemStatsResponse(
                 window.days(),
@@ -61,13 +65,16 @@ public class SystemStats {
                 runtimeMetrics.redirectTimings(),
                 runtimeMetrics.requestCounts(),
                 runtimeMetrics.urlCacheStats(),
-                new ComponentHealth(healthStatuses.status(DATABASE), healthStatuses.status(REDIS)),
-                redisStats(),
+                health,
+                redisStats(health.redis()),
                 new DatabaseStats(database.product(), database.version(), database.sizeBytes(), shortUrlUniqueIndex.enforced()),
                 dailyBuckets.stack(emails, STATUS_KEYS, window));
     }
 
-    private RedisStats redisStats() {
+    private RedisStats redisStats(final String redisHealth) {
+        if (DOWN.equals(redisHealth) || OUT_OF_SERVICE.equals(redisHealth)) {
+            return new RedisStats(null, null, null);
+        }
         final var memory = redisMemory();
         final var keys = redisKeys();
         if (memory == null) {

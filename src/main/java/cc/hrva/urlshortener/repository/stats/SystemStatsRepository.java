@@ -20,7 +20,8 @@ public class SystemStatsRepository {
         final var withoutSize = Objects.requireNonNull(jdbcTemplate.getJdbcOperations().execute(
                 (ConnectionCallback<DatabaseInfo>) connection -> {
                     final var metaData = connection.getMetaData();
-                    return new DatabaseInfo(metaData.getDatabaseProductName(), metaData.getDatabaseProductVersion(), null);
+                    final var version = metaData.getDatabaseMajorVersion() + "." + metaData.getDatabaseMinorVersion();
+                    return new DatabaseInfo(metaData.getDatabaseProductName(), version, null);
                 }));
         if (!POSTGRESQL.equals(withoutSize.product())) {
             return withoutSize;

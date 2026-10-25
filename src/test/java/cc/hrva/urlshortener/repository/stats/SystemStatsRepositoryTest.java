@@ -30,7 +30,7 @@ class SystemStatsRepositoryTest {
         final var database = systemStatsRepository.databaseInfo();
 
         assertThat(database.product()).isEqualTo("H2");
-        assertThat(database.version()).isNotBlank();
+        assertThat(database.version()).matches("\\d+\\.\\d+");
         assertThat(database.sizeBytes()).isNull();
     }
 

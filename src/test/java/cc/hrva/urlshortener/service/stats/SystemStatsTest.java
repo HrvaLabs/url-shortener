@@ -31,6 +31,8 @@ import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.boot.test.system.CapturedOutput;
@@ -42,6 +44,7 @@ import static cc.hrva.urlshortener.repository.stats.HourlySeries.EMAILS_BY_STATU
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.entry;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -134,18 +137,55 @@ class SystemStatsTest {
         when(blocklistStore.memory()).thenThrow(refused);
         when(redisKeyCounter.count()).thenThrow(refused);
         when(healthStatuses.status("db")).thenReturn("UP");
-        when(healthStatuses.status("redis")).thenReturn("DOWN");
+        when(healthStatuses.status("redis")).thenReturn("UP");
 
         final var system = systemStats.collect(WINDOW);
 
         assertThat(system.redis()).isEqualTo(new RedisStats(null, null, null));
-        assertThat(system.health()).isEqualTo(new ComponentHealth("UP", "DOWN"));
+        assertThat(system.health()).isEqualTo(new ComponentHealth("UP", "UP"));
         assertThat(system).hasNoNullFieldsOrPropertiesExcept("redis");
         assertThat(system.database()).hasNoNullFieldsOrProperties();
         assertThat(system.emails().daily()).hasSize(7);
         assertThat(output)
                 .contains("exception=" + RedisConnectionFailureException.class.getName())
                 .doesNotContain(REDIS_ADDRESS);
+    }
+
+    @Test
+    void failingRedisMemoryKeepsTheKeyCount() {
+        when(blocklistStore.memory()).thenThrow(new RedisConnectionFailureException("Unable to connect to " + REDIS_ADDRESS));
+
+        assertThat(systemStats.collect(WINDOW).redis()).isEqualTo(new RedisStats(null, null, noKeys()));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"DOWN", "OUT_OF_SERVICE"})
+    void unhealthyRedisSkipsTheRedisLookups(final String status) {
+        when(healthStatuses.status("db")).thenReturn("UP");
+        when(healthStatuses.status("redis")).thenReturn(status);
+
+        final var system = systemStats.collect(WINDOW);
+
+        assertThat(system.redis()).isEqualTo(new RedisStats(null, null, null));
+        assertThat(system.health()).isEqualTo(new ComponentHealth("UP", status));
+        assertThat(system).hasNoNullFieldsOrPropertiesExcept("redis");
+        assertThat(system.database()).hasNoNullFieldsOrProperties();
+        assertThat(system.emails().daily()).hasSize(7);
+        verify(blocklistStore, never()).memory();
+        verify(redisKeyCounter, never()).count();
+    }
+
+    @Test
+    void unknownRedisHealthStillAsksRedis() {
+        when(healthStatuses.status("db")).thenReturn("UP");
+        when(healthStatuses.status("redis")).thenReturn("UNKNOWN");
+
+        final var system = systemStats.collect(WINDOW);
+
+        assertThat(system.redis()).isEqualTo(new RedisStats(0L, 0L, noKeys()));
+        assertThat(system.health()).isEqualTo(new ComponentHealth("UP", "UNKNOWN"));
+        verify(blocklistStore).memory();
+        verify(redisKeyCounter).count();
     }
 
     @Test
