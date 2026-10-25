@@ -66,6 +66,27 @@ class SafetyStatsRepositoryTest {
     }
 
     @Test
+    void aResolvedReviewWithoutAResolutionIsUnknown() {
+        resolved(9301, START.plusDays(1), START.plusDays(2), "OK");
+        resolved(9302, START.plusDays(1), START.plusDays(2), null);
+        resolved(9303, START.plusDays(2), START.plusDays(3), null);
+        resolved(9304, START.minusDays(2), START.minusDays(1), null);
+
+        assertThat(safetyStatsRepository.countResolvedByResolution(START, END)).containsExactly(
+                new CountEntry("unknown", 2),
+                new CountEntry("OK", 1));
+    }
+
+    @Test
+    void aReviewResolvedBeforeItWasFlaggedTakesNoMinutes() {
+        final var day = START.toLocalDate().plusDays(2);
+        resolved(9401, day.atTime(12, 0), day.atTime(11, 0), "OK");
+        resolved(9402, day.atTime(10, 0), day.atTime(10, 30), "OK");
+
+        assertThat(safetyStatsRepository.findResolveMinutes(START, END)).containsExactly(0L, 30L);
+    }
+
+    @Test
     void anEmptySiteHasNoResolvedReviews() {
         assertThat(safetyStatsRepository.countResolvedByResolution(START, END)).isEmpty();
         assertThat(safetyStatsRepository.findResolveMinutes(START, END)).isEmpty();

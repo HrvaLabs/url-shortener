@@ -17,10 +17,10 @@ public class SafetyStatsRepository {
     private static final String END = "end";
 
     private static final String COUNT_RESOLVED_BY_RESOLUTION = """
-            select resolution, count(*) as total_reviews from link_review
+            select coalesce(resolution, 'unknown') as review_resolution, count(*) as total_reviews from link_review
             where resolved_at >= :start and resolved_at < :end
-            group by resolution
-            order by count(*) desc, resolution
+            group by coalesce(resolution, 'unknown')
+            order by count(*) desc, coalesce(resolution, 'unknown')
             """;
 
     private static final String FIND_RESOLVED_TIMES = """
@@ -32,13 +32,13 @@ public class SafetyStatsRepository {
 
     public List<CountEntry> countResolvedByResolution(final LocalDateTime start, final LocalDateTime end) {
         return jdbcTemplate.query(COUNT_RESOLVED_BY_RESOLUTION, Map.of(START, start, END, end), (row, rowNumber) ->
-                new CountEntry(row.getString("resolution"), row.getLong("total_reviews")));
+                new CountEntry(row.getString("review_resolution"), row.getLong("total_reviews")));
     }
 
     public List<Long> findResolveMinutes(final LocalDateTime start, final LocalDateTime end) {
         return jdbcTemplate.query(FIND_RESOLVED_TIMES, Map.of(START, start, END, end), (row, rowNumber) ->
-                        Duration.between(row.getObject("flagged_at", LocalDateTime.class), row.getObject("resolved_at", LocalDateTime.class))
-                                .toMinutes())
+                        Math.max(0, Duration.between(row.getObject("flagged_at", LocalDateTime.class),
+                                row.getObject("resolved_at", LocalDateTime.class)).toMinutes()))
                 .stream()
                 .sorted()
                 .toList();

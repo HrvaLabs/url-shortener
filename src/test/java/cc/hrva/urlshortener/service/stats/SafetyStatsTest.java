@@ -30,6 +30,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 import java.util.stream.LongStream;
+import org.apache.commons.lang3.StringUtils;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -56,6 +57,8 @@ class SafetyStatsTest {
     private static final LocalDateTime LAST_SUCCESS = LocalDateTime.of(2026, 10, 26, 6, 0);
     private static final String URLHAUS_KEY = "7f3a9c2e5b8d4f1a";
     private static final String URLHAUS_URL = "https://urlhaus-api.abuse.ch/v2/files/exports/" + URLHAUS_KEY + "/text_online";
+    private static final String FALLBACK_URL = "https://urlhaus.abuse.ch/downloads/text_online;auth-key=" + URLHAUS_KEY;
+    private static final String LAST_SUCCESS_URL = "https://mirror.abuse.ch/urlhaus/" + URLHAUS_KEY + "/text_online";
 
     @Mock
     private SafetyStatsRepository safetyStatsRepository;
@@ -167,6 +170,19 @@ class SafetyStatsTest {
     }
 
     @Test
+    void sourceErrorsNeverShowTheSourceUrlWithoutItsScheme() {
+        when(blocklistSourceService.list()).thenReturn(List.of(source(6L, "URLhaus", BlocklistAction.BLOCK, true, 4200L, 840000L,
+                "main: could not read " + withoutScheme(URLHAUS_URL) + "; fallback 1: HTTP 503 from "
+                        + withoutScheme(FALLBACK_URL).toUpperCase(Locale.ROOT) + "; last good copy " + withoutScheme(LAST_SUCCESS_URL)
+                        + " is stale")));
+
+        final var lastError = safetyStats.collect(WINDOW).sources().getFirst().lastError();
+
+        assertThat(lastError).isEqualTo("main: could not read [url]; fallback 1: HTTP 503 from [url]; last good copy [url] is stale");
+        assertThat(lastError).doesNotContainIgnoringCase(URLHAUS_KEY).doesNotContainIgnoringCase("abuse.ch");
+    }
+
+    @Test
     void openCountsAndScammersComeFromTheExistingQueries() {
         when(linkReviewRepository.countByResolvedAtIsNull()).thenReturn(5L);
         when(linkReviewRepository.countByResolvedAtIsNullAndReasonsContaining("reported by a visitor")).thenReturn(2L);
@@ -223,8 +239,12 @@ class SafetyStatsTest {
 
     private static BlocklistSourceResponse source(final Long id, final String name, final BlocklistAction action, final boolean enabled,
                                                   final Long domainCount, final Long memoryBytes, final String lastError) {
-        return new BlocklistSourceResponse(id, name, URLHAUS_URL, List.of(URLHAUS_URL), SourceKind.LINKS, action, enabled, 1,
-                LAST_SUCCESS, LAST_SUCCESS, URLHAUS_URL, domainCount, "2026-10-26", lastError, memoryBytes);
+        return new BlocklistSourceResponse(id, name, URLHAUS_URL, List.of(FALLBACK_URL), SourceKind.LINKS, action, enabled, 1,
+                LAST_SUCCESS, LAST_SUCCESS, LAST_SUCCESS_URL, domainCount, "2026-10-26", lastError, memoryBytes);
+    }
+
+    private static String withoutScheme(final String url) {
+        return StringUtils.substringAfter(url, "://");
     }
 
 }

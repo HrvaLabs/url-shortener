@@ -16,9 +16,14 @@ import cc.hrva.urlshortener.service.BlocklistSourceService;
 import cc.hrva.urlshortener.service.ScammerSignalService;
 import cc.hrva.urlshortener.util.ReviewReasons;
 import java.util.Arrays;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Objects;
 import java.util.regex.Pattern;
+import java.util.stream.Stream;
 import lombok.RequiredArgsConstructor;
+import org.apache.commons.lang3.StringUtils;
+import org.apache.commons.lang3.Strings;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -31,6 +36,7 @@ public class SafetyStats {
     private static final double P90 = 0.9;
     private static final Pattern WEB_ADDRESS = Pattern.compile("https?://\\S+?(?=;?(?:\\s|$))", Pattern.CASE_INSENSITIVE);
     private static final String REDACTED_ADDRESS = "[url]";
+    private static final String SCHEME_SEPARATOR = "://";
 
     private final SafetyStatsRepository safetyStatsRepository;
     private final HourlyCountRepository hourlyCountRepository;
@@ -81,11 +87,29 @@ public class SafetyStats {
                 source.domainCount(),
                 source.memoryBytes(),
                 source.lastSuccessAt(),
-                withoutWebAddresses(source.lastError()));
+                withoutWebAddresses(source.lastError(), sourceAddressesOf(source)));
     }
 
-    private static String withoutWebAddresses(final String text) {
-        return text == null ? null : WEB_ADDRESS.matcher(text).replaceAll(REDACTED_ADDRESS);
+    private static List<String> sourceAddressesOf(final BlocklistSourceResponse source) {
+        final var fallbackUrls = Objects.requireNonNullElse(source.fallbackUrls(), List.<String>of());
+        return Stream.concat(Stream.of(source.url(), source.lastSuccessUrl()), fallbackUrls.stream())
+                .filter(StringUtils::isNotBlank)
+                .flatMap(address -> Stream.of(address, StringUtils.substringAfter(address, SCHEME_SEPARATOR)))
+                .filter(StringUtils::isNotBlank)
+                .distinct()
+                .sorted(Comparator.comparingInt(String::length).reversed())
+                .toList();
+    }
+
+    private static String withoutWebAddresses(final String text, final List<String> sourceAddresses) {
+        if (text == null) {
+            return null;
+        }
+        var redacted = text;
+        for (final var address : sourceAddresses) {
+            redacted = Strings.CI.replace(redacted, address, REDACTED_ADDRESS);
+        }
+        return WEB_ADDRESS.matcher(redacted).replaceAll(REDACTED_ADDRESS);
     }
 
 }
