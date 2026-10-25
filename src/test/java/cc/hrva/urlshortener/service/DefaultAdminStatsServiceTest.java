@@ -2,9 +2,14 @@ package cc.hrva.urlshortener.service;
 
 import cc.hrva.urlshortener.dto.AnalyticsTotals;
 import cc.hrva.urlshortener.dto.UrlAnalyticsDto.Breakdowns;
+import cc.hrva.urlshortener.dto.stats.LinksStatsResponse;
+import cc.hrva.urlshortener.dto.stats.LinksStatsResponse.CreatedInRange;
+import cc.hrva.urlshortener.dto.stats.LinksStatsResponse.LinkInventory;
+import cc.hrva.urlshortener.dto.stats.StackedSeries;
 import cc.hrva.urlshortener.dto.stats.TrafficStatsResponse;
 import cc.hrva.urlshortener.exception.InvalidAnalyticsRangeException;
 import cc.hrva.urlshortener.service.impl.DefaultAdminStatsService;
+import cc.hrva.urlshortener.service.stats.LinksStats;
 import cc.hrva.urlshortener.service.stats.StatsDays;
 import cc.hrva.urlshortener.service.stats.StatsWindow;
 import cc.hrva.urlshortener.service.stats.TrafficStats;
@@ -39,11 +44,14 @@ class DefaultAdminStatsServiceTest {
     @Mock
     private TrafficStats trafficStats;
 
+    @Mock
+    private LinksStats linksStats;
+
     private AdminStatsService adminStatsService;
 
     @BeforeEach
     void setUp() {
-        this.adminStatsService = new DefaultAdminStatsService(statsDays, trafficStats);
+        this.adminStatsService = new DefaultAdminStatsService(statsDays, trafficStats, linksStats);
     }
 
     @Test
@@ -51,8 +59,11 @@ class DefaultAdminStatsServiceTest {
         assertThatThrownBy(() -> adminStatsService.traffic(14))
                 .isInstanceOf(InvalidAnalyticsRangeException.class)
                 .hasMessage(RANGE_ERROR);
+        assertThatThrownBy(() -> adminStatsService.links(14))
+                .isInstanceOf(InvalidAnalyticsRangeException.class)
+                .hasMessage(RANGE_ERROR);
 
-        verifyNoInteractions(statsDays, trafficStats);
+        verifyNoInteractions(statsDays, trafficStats, linksStats);
     }
 
     @Test
@@ -72,9 +83,23 @@ class DefaultAdminStatsServiceTest {
         assertThat(adminStatsService.traffic(7)).isSameAs(traffic);
     }
 
+    @Test
+    void passesTheWindowToTheLinksTab() {
+        final var links = emptyLinks(LAST_7);
+        when(statsDays.window(LAST_7_DAYS)).thenReturn(LAST_7);
+        when(linksStats.collect(LAST_7)).thenReturn(links);
+
+        assertThat(adminStatsService.links(7)).isSameAs(links);
+    }
+
     private static TrafficStatsResponse emptyTraffic(final StatsWindow window) {
         return new TrafficStatsResponse(window.days(), window.from(), window.to(), new AnalyticsTotals(0, 0, 0), List.of(), 0, 0,
                 List.of(), new Breakdowns(List.of(), List.of(), List.of(), List.of(), List.of()), 0);
+    }
+
+    private static LinksStatsResponse emptyLinks(final StatsWindow window) {
+        return new LinksStatsResponse(window.days(), window.from(), window.to(), new StackedSeries(List.of(), List.of()),
+                new CreatedInRange(0, 0, 0, 0), new LinkInventory(0, 0, 0, 0, 0, 0, 0, List.of()), List.of(), List.of(), List.of());
     }
 
 }
