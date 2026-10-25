@@ -1,13 +1,9 @@
 package cc.hrva.urlshortener.service.impl;
 
-import cc.hrva.urlshortener.dto.AnalyticsDay;
 import cc.hrva.urlshortener.dto.AnalyticsOverviewDto;
 import cc.hrva.urlshortener.dto.AnalyticsOverviewDto.TopLink;
-import cc.hrva.urlshortener.dto.AnalyticsTotals;
-import cc.hrva.urlshortener.dto.BreakdownEntry;
 import cc.hrva.urlshortener.dto.LinkClicks;
 import cc.hrva.urlshortener.dto.UrlAnalyticsDto;
-import cc.hrva.urlshortener.dto.UrlAnalyticsDto.Breakdowns;
 import cc.hrva.urlshortener.dto.UrlAnalyticsDto.LinkSummary;
 import cc.hrva.urlshortener.dto.UrlResponse;
 import cc.hrva.urlshortener.exception.NoAuthorizationException;
@@ -15,18 +11,15 @@ import cc.hrva.urlshortener.exception.UrlNotFoundException;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.enums.AnalyticsRange;
-import cc.hrva.urlshortener.model.enums.StatDimension;
 import cc.hrva.urlshortener.repository.LinkStatsRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.service.AnalyticsService;
 import cc.hrva.urlshortener.service.UserService;
 import cc.hrva.urlshortener.service.analytics.AnalyticsDays;
+import cc.hrva.urlshortener.service.analytics.AnalyticsSeries;
 import cc.hrva.urlshortener.util.DomainNames;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -42,8 +35,6 @@ import org.springframework.transaction.annotation.Transactional;
 public class DefaultAnalyticsService implements AnalyticsService {
 
     private static final int TOP_LINKS_LIMIT = 10;
-    private static final int TOP_VALUES_LIMIT = 10;
-    private static final String OTHER = "other";
     private static final String ROLE_ADMIN = "ROLE_ADMIN";
     private static final String NO_AUTHORIZATION = "You don't have authorization for this action";
 
@@ -78,8 +69,8 @@ public class DefaultAnalyticsService implements AnalyticsService {
                 range.days(),
                 from,
                 to,
-                totalsOf(stored),
-                zeroFilled(stored, from, to),
+                AnalyticsSeries.totalsOf(stored),
+                AnalyticsSeries.zeroFilled(stored, from, to),
                 topLinks,
                 urls.size(),
                 activeUrls,
@@ -129,14 +120,9 @@ public class DefaultAnalyticsService implements AnalyticsService {
                 range.days(),
                 from,
                 to,
-                totalsOf(stored),
-                zeroFilled(stored, from, to),
-                new Breakdowns(
-                        topValues(breakdowns, StatDimension.REFERRER),
-                        topValues(breakdowns, StatDimension.COUNTRY),
-                        topValues(breakdowns, StatDimension.DEVICE),
-                        topValues(breakdowns, StatDimension.BROWSER),
-                        topValues(breakdowns, StatDimension.OS)));
+                AnalyticsSeries.totalsOf(stored),
+                AnalyticsSeries.zeroFilled(stored, from, to),
+                AnalyticsSeries.breakdownsOf(breakdowns));
     }
 
     private LinkSummary summaryOf(final Url url) {
@@ -161,35 +147,6 @@ public class DefaultAnalyticsService implements AnalyticsService {
 
     private static LocalDate firstDayOf(final AnalyticsRange range, final LocalDate to) {
         return to.minusDays(range.days() - 1L);
-    }
-
-    private static AnalyticsTotals totalsOf(final List<AnalyticsDay> stored) {
-        return new AnalyticsTotals(
-                stored.stream().mapToLong(AnalyticsDay::clicks).sum(),
-                stored.stream().mapToLong(AnalyticsDay::uniqueVisitors).sum(),
-                stored.stream().mapToLong(AnalyticsDay::botClicks).sum());
-    }
-
-    private static List<AnalyticsDay> zeroFilled(final List<AnalyticsDay> stored, final LocalDate from, final LocalDate to) {
-        final var storedByDate = stored.stream()
-                .collect(Collectors.toMap(AnalyticsDay::date, Function.identity()));
-
-        return from.datesUntil(to.plusDays(1))
-                .map(date -> storedByDate.getOrDefault(date, new AnalyticsDay(date, 0, 0, 0)))
-                .toList();
-    }
-
-    private static List<BreakdownEntry> topValues(final Map<StatDimension, List<BreakdownEntry>> breakdowns, final StatDimension dimension) {
-        final var entries = breakdowns.getOrDefault(dimension, List.of());
-        final var named = entries.stream().filter(entry -> !OTHER.equals(entry.value())).toList();
-        final var storedOther = entries.stream().filter(entry -> OTHER.equals(entry.value())).mapToLong(BreakdownEntry::clicks).sum();
-        final var leftover = named.stream().skip(TOP_VALUES_LIMIT).mapToLong(BreakdownEntry::clicks).sum();
-
-        final var top = new ArrayList<>(named.stream().limit(TOP_VALUES_LIMIT).toList());
-        if (storedOther + leftover > 0) {
-            top.add(new BreakdownEntry(OTHER, storedOther + leftover));
-        }
-        return List.copyOf(top);
     }
 
     private boolean isOwner(final Url url, final User user) {
