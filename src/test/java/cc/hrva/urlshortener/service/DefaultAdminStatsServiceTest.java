@@ -2,13 +2,19 @@ package cc.hrva.urlshortener.service;
 
 import cc.hrva.urlshortener.dto.AnalyticsTotals;
 import cc.hrva.urlshortener.dto.UrlAnalyticsDto.Breakdowns;
+import cc.hrva.urlshortener.dto.stats.CacheStats;
 import cc.hrva.urlshortener.dto.stats.LinksStatsResponse;
 import cc.hrva.urlshortener.dto.stats.LinksStatsResponse.CreatedInRange;
 import cc.hrva.urlshortener.dto.stats.LinksStatsResponse.LinkInventory;
+import cc.hrva.urlshortener.dto.stats.RequestCounts;
 import cc.hrva.urlshortener.dto.stats.SafetyStatsResponse;
 import cc.hrva.urlshortener.dto.stats.SafetyStatsResponse.DomainRuleCounts;
 import cc.hrva.urlshortener.dto.stats.SafetyStatsResponse.ResolveTimes;
 import cc.hrva.urlshortener.dto.stats.StackedSeries;
+import cc.hrva.urlshortener.dto.stats.SystemStatsResponse;
+import cc.hrva.urlshortener.dto.stats.SystemStatsResponse.ComponentHealth;
+import cc.hrva.urlshortener.dto.stats.SystemStatsResponse.DatabaseStats;
+import cc.hrva.urlshortener.dto.stats.SystemStatsResponse.RedisStats;
 import cc.hrva.urlshortener.dto.stats.TrafficStatsResponse;
 import cc.hrva.urlshortener.dto.stats.UsersStatsResponse;
 import cc.hrva.urlshortener.dto.stats.UsersStatsResponse.ApiKeyCounts;
@@ -20,6 +26,7 @@ import cc.hrva.urlshortener.service.stats.LinksStats;
 import cc.hrva.urlshortener.service.stats.SafetyStats;
 import cc.hrva.urlshortener.service.stats.StatsDays;
 import cc.hrva.urlshortener.service.stats.StatsWindow;
+import cc.hrva.urlshortener.service.stats.SystemStats;
 import cc.hrva.urlshortener.service.stats.TrafficStats;
 import cc.hrva.urlshortener.service.stats.UsersStats;
 import java.time.LocalDate;
@@ -62,11 +69,14 @@ class DefaultAdminStatsServiceTest {
     @Mock
     private SafetyStats safetyStats;
 
+    @Mock
+    private SystemStats systemStats;
+
     private AdminStatsService adminStatsService;
 
     @BeforeEach
     void setUp() {
-        this.adminStatsService = new DefaultAdminStatsService(statsDays, trafficStats, linksStats, usersStats, safetyStats);
+        this.adminStatsService = new DefaultAdminStatsService(statsDays, trafficStats, linksStats, usersStats, safetyStats, systemStats);
     }
 
     @Test
@@ -83,8 +93,11 @@ class DefaultAdminStatsServiceTest {
         assertThatThrownBy(() -> adminStatsService.safety(14))
                 .isInstanceOf(InvalidAnalyticsRangeException.class)
                 .hasMessage(RANGE_ERROR);
+        assertThatThrownBy(() -> adminStatsService.system(14))
+                .isInstanceOf(InvalidAnalyticsRangeException.class)
+                .hasMessage(RANGE_ERROR);
 
-        verifyNoInteractions(statsDays, trafficStats, linksStats, usersStats, safetyStats);
+        verifyNoInteractions(statsDays, trafficStats, linksStats, usersStats, safetyStats, systemStats);
     }
 
     @Test
@@ -131,6 +144,24 @@ class DefaultAdminStatsServiceTest {
         assertThat(adminStatsService.safety(7)).isSameAs(safety);
     }
 
+    @Test
+    void passesTheWindowToTheSystemTab() {
+        final var system = emptySystem(LAST_7);
+        when(statsDays.window(LAST_7_DAYS)).thenReturn(LAST_7);
+        when(systemStats.collect(LAST_7)).thenReturn(system);
+
+        assertThat(adminStatsService.system(7)).isSameAs(system);
+    }
+
+    @Test
+    void theSystemTabValidatesTheRangeToo() {
+        assertThatThrownBy(() -> adminStatsService.system(14))
+                .isInstanceOf(InvalidAnalyticsRangeException.class)
+                .hasMessage(RANGE_ERROR);
+
+        verifyNoInteractions(statsDays, systemStats);
+    }
+
     private static TrafficStatsResponse emptyTraffic(final StatsWindow window) {
         return new TrafficStatsResponse(window.days(), window.from(), window.to(), new AnalyticsTotals(0, 0, 0), List.of(), 0, 0,
                 List.of(), new Breakdowns(List.of(), List.of(), List.of(), List.of(), List.of()), 0);
@@ -149,6 +180,12 @@ class DefaultAdminStatsServiceTest {
     private static SafetyStatsResponse emptySafety(final StatsWindow window) {
         return new SafetyStatsResponse(window.days(), window.from(), window.to(), new StackedSeries(List.of(), List.of()), 0, 0, List.of(),
                 new ResolveTimes(0, null, null), new StackedSeries(List.of(), List.of()), new DomainRuleCounts(0, 0), 0, List.of());
+    }
+
+    private static SystemStatsResponse emptySystem(final StatsWindow window) {
+        return new SystemStatsResponse(window.days(), window.from(), window.to(), "2.9", LocalDateTime.of(2026, 10, 26, 8, 0), "1m",
+                "25", List.of(), 0, 0, List.of(), new RequestCounts(0, 0), CacheStats.of(0, 0), new ComponentHealth("UP", "UP"),
+                new RedisStats(null, null, null), new DatabaseStats("H2", "2.5.252", null, true), new StackedSeries(List.of(), List.of()));
     }
 
 }

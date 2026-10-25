@@ -14,6 +14,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.annotation.Transactional;
 
 import static cc.hrva.urlshortener.repository.stats.HourlySeries.BLOCKS_BY_REASON;
+import static cc.hrva.urlshortener.repository.stats.HourlySeries.EMAILS_BY_STATUS;
 import static cc.hrva.urlshortener.repository.stats.HourlySeries.LINKS_BY_CHANNEL;
 import static cc.hrva.urlshortener.repository.stats.HourlySeries.REVIEWS_BY_SOURCE;
 import static cc.hrva.urlshortener.repository.stats.HourlySeries.SIGNUPS_BY_PROVIDER;
@@ -118,6 +119,24 @@ class HourlyCountRepositoryTest {
                         new HourlyCount(DAY, 20, "unknown", 1));
     }
 
+    @Test
+    void countsEmailsPerHourAndStatus() {
+        email(9401, DAY.atTime(7, 10), "SENT");
+        email(9402, DAY.atTime(7, 40), "SENT");
+        email(9403, DAY.atTime(7, 55), "FAILED");
+        email(9404, DAY.atTime(19, 5), "RESENT");
+        email(9405, DAY.atTime(19, 30), "SENDING");
+        email(9406, DAY.plusDays(1).atStartOfDay(), "SENT");
+        email(9407, DAY.minusDays(1).atTime(23, 59), "FAILED");
+
+        assertThat(hourlyCountRepository.count(EMAILS_BY_STATUS, DAY.atStartOfDay(), DAY.plusDays(1).atStartOfDay()))
+                .containsExactlyInAnyOrder(
+                        new HourlyCount(DAY, 7, "SENT", 2),
+                        new HourlyCount(DAY, 7, "FAILED", 1),
+                        new HourlyCount(DAY, 19, "RESENT", 1),
+                        new HourlyCount(DAY, 19, "SENDING", 1));
+    }
+
     private void link(final long id, final LocalDateTime createDate, final String createdVia) {
         jdbcTemplate.update("insert into url (id, long_url, short_url, create_date, created_via) values (?, ?, ?, ?, ?)",
                 id, "https://example.org/" + id, "hourly-" + id, createDate, createdVia);
@@ -142,6 +161,11 @@ class HourlyCountRepositoryTest {
     private void accountWithoutProvider(final long id, final LocalDateTime createDate) {
         jdbcTemplate.update("insert into user_account (id, email, password, create_date) values (?, ?, ?, ?)",
                 id, "signup-" + id + "@example.com", "correct horse battery", createDate);
+    }
+
+    private void email(final long id, final LocalDateTime createdAt, final String status) {
+        jdbcTemplate.update("insert into email_log (id, recipient, subject, status, created_at) values (?, ?, ?, ?, ?)",
+                id, "reader-" + id + "@example.com", "Verify your email", status, createdAt);
     }
 
     @SpringBootConfiguration

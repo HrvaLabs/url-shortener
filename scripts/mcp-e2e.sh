@@ -205,6 +205,8 @@ expect_eq "$(psql_value "select string_agg(id || ' ' || exectype, ', ' order by 
     "026-drop-ip-address EXECUTED, 026-drop-ip-address-seq EXECUTED" "026 ran both ip_address drops"
 expect_eq "$(psql_value "select (select count(*) from information_schema.tables where table_name = 'ip_address') + (select count(*) from information_schema.sequences where sequence_name = 'ip_address_id_seq');")" \
     0 "no ip_address table or sequence is left"
+expect_eq "$(psql_value "select count(*) from databasechangelog where id like '027-%' and exectype = 'EXECUTED';")" 9 "027 ran all nine changesets"
+expect_eq "$(psql_value "select count(*) from pg_indexes where indexname = 'ux_url_short_url';")" 1 "short_url has its unique index"
 
 section "0. Discovery"
 mcp_post /mcp "" "$INITIALIZE"
@@ -409,5 +411,83 @@ expect_eq "$(jq -r .isError <<<"$INSPECTOR_RESULT")" false "anonymous shorten_ur
 expect_contains "$(tool_text)" "Short link: $BASE/" "returns the full short link"
 echo "  --- links in the database"
 psql_query "select u.short_url, u.owner_id is null as anonymous, string_agg(t.tag, ',' order by t.tag) as tags from url u left join url_tags t on t.url_id = u.id group by u.id order by u.id;"
+expect_eq "$(psql_value "select created_via from url where short_url = '$ALIAS';")" MCP "the signed-in shorten_url is created via MCP"
+expect_eq "$(psql_value "select created_via from url where long_url = '$ANONYMOUS_DESTINATION';")" ANONYMOUS_MCP "the anonymous shorten_url is created via ANONYMOUS_MCP"
+
+section "14. Admin stats and reserved aliases"
+http -X POST "$BASE/api/v1/auth/login" -H 'Content-Type: application/json' \
+    -d '{"email":"admin@localhost","password":"admin123"}'
+expect_eq "$HTTP_STATUS" 200 "POST /api/v1/auth/login as admin@localhost"
+ADMIN_JWT=$(jq -r .token <<<"$HTTP_BODY")
+ADMIN_JWT=${ADMIN_JWT#Bearer }
+show "admin JWT: $(redact <<<"$ADMIN_JWT")"
+
+http -H "Authorization: Bearer $ADMIN_JWT" "$BASE/api/v1/admin/stats/traffic?days=7"
+expect_eq "$HTTP_STATUS" 200 "GET /api/v1/admin/stats/traffic?days=7"
+show "$(jq -c '{totals, anonymousClicks, accountClicks, topLinks: [.topLinks[] | {shortUrl, clicks}], referrers: .breakdowns.referrers}' <<<"$HTTP_BODY")"
+expect_eq "$(jq -r .totals.clicks <<<"$HTTP_BODY")" 1 "traffic: one human click"
+expect_eq "$(jq -r .totals.botClicks <<<"$HTTP_BODY")" 1 "traffic: one bot click"
+expect_eq "$(jq -r '.topLinks[0].shortUrl' <<<"$HTTP_BODY")" "$ALIAS" "traffic: $ALIAS is the top link"
+expect_eq "$(jq -r .anonymousClicks <<<"$HTTP_BODY")" 0 "traffic: no clicks on anonymous links"
+expect_eq "$(jq -r '.accountClicks >= 1' <<<"$HTTP_BODY")" true "traffic: account links have clicks"
+expect_eq "$(jq -r '.breakdowns.referrers | length > 0' <<<"$HTTP_BODY")" true "traffic: the referrer breakdown is filled"
+http -H "Authorization: Bearer $ADMIN_JWT" "$BASE/api/v1/admin/stats/traffic?days=14"
+expect_eq "$HTTP_STATUS" 400 "days=14 is refused"
+expect_eq "$(jq -r .error <<<"$HTTP_BODY")" "days must be 7, 30, 90 or 365" "with the range message"
+
+http -H "Authorization: Bearer $ADMIN_JWT" "$BASE/api/v1/admin/stats/links?days=7"
+expect_eq "$HTTP_STATUS" 200 "GET /api/v1/admin/stats/links?days=7"
+show "$(jq -c '{createdInRange, keys: .created.keys}' <<<"$HTTP_BODY")"
+expect_eq "$(jq -r '[.created.daily[].counts.MCP] | add' <<<"$HTTP_BODY")" 1 "links: one link created via MCP"
+expect_eq "$(jq -r '[.created.daily[].counts.ANONYMOUS_MCP] | add' <<<"$HTTP_BODY")" 1 "links: one link created via ANONYMOUS_MCP"
+
+http -H "Authorization: Bearer $ADMIN_JWT" "$BASE/api/v1/admin/stats/users?days=7"
+expect_eq "$HTTP_STATUS" 200 "GET /api/v1/admin/stats/users?days=7"
+show "$(jq -c '{now: (.now | {total, admins}), apiKeys, mcp}' <<<"$HTTP_BODY")"
+expect_eq "$(jq -r '.mcp.connectedUsers >= 1' <<<"$HTTP_BODY")" true "users: the Inspector's user counts as connected"
+expect_eq "$(jq -r '.mcp.registeredClients >= 1' <<<"$HTTP_BODY")" true "users: registered MCP clients are counted"
+
+http -H "Authorization: Bearer $ADMIN_JWT" "$BASE/api/v1/admin/stats/safety?days=7"
+expect_eq "$HTTP_STATUS" 200 "GET /api/v1/admin/stats/safety?days=7"
+show "$(jq -c '{openReviews, resolved, resolveTimes, domainRules, possibleScammers, sources: (.sources | length)}' <<<"$HTTP_BODY")"
+
+http -H "Authorization: Bearer $ADMIN_JWT" "$BASE/api/v1/admin/stats/system?days=7"
+expect_eq "$HTTP_STATUS" 200 "GET /api/v1/admin/stats/system?days=7"
+show "$(jq -c '{appVersion, uptime, javaVersion, activeProfiles, health, database, redis}' <<<"$HTTP_BODY")"
+expect_eq "$(jq -r .health.database <<<"$HTTP_BODY")" UP "system: database UP"
+expect_eq "$(jq -r .health.redis <<<"$HTTP_BODY")" UP "system: Redis UP"
+expect_eq "$(jq -r .database.product <<<"$HTTP_BODY")" PostgreSQL "system: the database is PostgreSQL"
+expect_eq "$(jq -r .database.shortUrlUnique <<<"$HTTP_BODY")" true "system: short_url uniqueness is enforced"
+expect_eq "$(jq -r '.database.sizeBytes > 0' <<<"$HTTP_BODY")" true "system: the database size is known"
+expect_eq "$(jq -r '.redis.usedMemoryBytes > 0 and .redis.keys.scanned > 0' <<<"$HTTP_BODY")" true "system: Redis memory and keys are read"
+expect_eq "$(jq -r .redis.keys.capped <<<"$HTTP_BODY")" false "system: the key scan is not capped"
+expect_eq "$(jq -r '.emails.daily | length' <<<"$HTTP_BODY")" 7 "system: 7 days of emails"
+expect_eq "$(jq -r '[.. | strings | select(test("jdbc:|redis://|127\\.0\\.0\\.1|localhost"))] | length' <<<"$HTTP_BODY")" 0 \
+    "system: no connection URL or host in the answer"
+echo "  Postgres version: $(jq -r .database.version <<<"$HTTP_BODY")"
+
+http -H "Authorization: Bearer $ADMIN_JWT" "$BASE/api/v1/admin/stats"
+expect_eq "$HTTP_STATUS" 200 "GET /api/v1/admin/stats (legacy)"
+expect_eq "$(jq -r .databaseActive <<<"$HTTP_BODY")" true "legacy: databaseActive"
+expect_eq "$(jq -r .cacheActive <<<"$HTTP_BODY")" true "legacy: cacheActive"
+expect_eq "$(jq -r .appVersion <<<"$HTTP_BODY")" "$(jq -r '.releases[0].version | ltrimstr("v")' "$ROOT/src/main/resources/changelog.json")" \
+    "legacy: appVersion is the newest changelog release"
+
+http -H "Authorization: Bearer $ADMIN_JWT" "$BASE/api/v1/admin/reserved-aliases"
+expect_eq "$HTTP_STATUS" 200 "GET /api/v1/admin/reserved-aliases"
+expect_eq "$(jq -r 'any(.[]; .alias == "mcp" and .builtIn == true)' <<<"$HTTP_BODY")" true "mcp is a built-in reserved alias"
+http -X POST "$BASE/api/v1/admin/reserved-aliases" -H "Authorization: Bearer $ADMIN_JWT" -H 'Content-Type: application/json' \
+    -d '{"alias":"E2E-Reserved","reason":"e2e check"}'
+show "POST /api/v1/admin/reserved-aliases -> $HTTP_STATUS $(jq -c '{id, alias, reason, builtIn}' <<<"$HTTP_BODY")"
+expect_eq "$HTTP_STATUS" 200 "reserved E2E-Reserved"
+expect_eq "$(jq -r .alias <<<"$HTTP_BODY")" e2e-reserved "stored in lower case"
+RESERVED_ID=$(jq -r .id <<<"$HTTP_BODY")
+http -X POST "$BASE/api/v1/urls" -H "Authorization: Bearer $APP_JWT" -H 'Content-Type: application/json' \
+    -d '{"longUrl":"https://example.com/hrva-mcp-e2e-reserved","shortUrl":"e2e-RESERVED"}'
+show "POST /api/v1/urls shortUrl=e2e-RESERVED as $USER_EMAIL -> $HTTP_STATUS $HTTP_BODY"
+expect_eq "$HTTP_STATUS" 409 "the user cannot take the reserved alias in another case"
+expect_eq "$(jq -r .error <<<"$HTTP_BODY")" "This short URL is reserved. Try another." "with the usual refusal"
+http -X DELETE "$BASE/api/v1/admin/reserved-aliases/$RESERVED_ID" -H "Authorization: Bearer $ADMIN_JWT"
+expect_eq "$HTTP_STATUS" 204 "DELETE /api/v1/admin/reserved-aliases/{id}"
 
 section "Done: every step passed"

@@ -7,13 +7,19 @@ import cc.hrva.urlshortener.configuration.SecurityConfiguration;
 import cc.hrva.urlshortener.configuration.WebConfiguration;
 import cc.hrva.urlshortener.dto.AnalyticsTotals;
 import cc.hrva.urlshortener.dto.UrlAnalyticsDto.Breakdowns;
+import cc.hrva.urlshortener.dto.stats.CacheStats;
 import cc.hrva.urlshortener.dto.stats.LinksStatsResponse;
 import cc.hrva.urlshortener.dto.stats.LinksStatsResponse.CreatedInRange;
 import cc.hrva.urlshortener.dto.stats.LinksStatsResponse.LinkInventory;
+import cc.hrva.urlshortener.dto.stats.RequestCounts;
 import cc.hrva.urlshortener.dto.stats.SafetyStatsResponse;
 import cc.hrva.urlshortener.dto.stats.SafetyStatsResponse.DomainRuleCounts;
 import cc.hrva.urlshortener.dto.stats.SafetyStatsResponse.ResolveTimes;
 import cc.hrva.urlshortener.dto.stats.StackedSeries;
+import cc.hrva.urlshortener.dto.stats.SystemStatsResponse;
+import cc.hrva.urlshortener.dto.stats.SystemStatsResponse.ComponentHealth;
+import cc.hrva.urlshortener.dto.stats.SystemStatsResponse.DatabaseStats;
+import cc.hrva.urlshortener.dto.stats.SystemStatsResponse.RedisStats;
 import cc.hrva.urlshortener.dto.stats.TrafficStatsResponse;
 import cc.hrva.urlshortener.dto.stats.UsersStatsResponse;
 import cc.hrva.urlshortener.dto.stats.UsersStatsResponse.ApiKeyCounts;
@@ -36,6 +42,7 @@ import com.nimbusds.jose.JOSEException;
 import com.nimbusds.jose.jwk.RSAKey;
 import com.nimbusds.jose.jwk.gen.RSAKeyGenerator;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
@@ -123,7 +130,7 @@ class AdminStatsSecurityTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"traffic", "links", "users", "safety"})
+    @ValueSource(strings = {"traffic", "links", "users", "safety", "system"})
     void anAdminGetsTheTab(final String tab) throws Exception {
         respond(tab);
 
@@ -133,7 +140,7 @@ class AdminStatsSecurityTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"traffic", "links", "users", "safety"})
+    @ValueSource(strings = {"traffic", "links", "users", "safety", "system"})
     void aSignedInUserWhoIsNotAnAdminIsForbidden(final String tab) throws Exception {
         mockMvc.perform(tabRequest(tab, "user-token").param("days", "7"))
                 .andExpect(status().isForbidden());
@@ -142,7 +149,7 @@ class AdminStatsSecurityTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"traffic", "links", "users", "safety"})
+    @ValueSource(strings = {"traffic", "links", "users", "safety", "system"})
     void nobodySignedInIsUnauthorized(final String tab) throws Exception {
         mockMvc.perform(get(STATS + tab).param("days", "7"))
                 .andExpect(status().isUnauthorized());
@@ -151,7 +158,7 @@ class AdminStatsSecurityTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"traffic", "links", "users", "safety"})
+    @ValueSource(strings = {"traffic", "links", "users", "safety", "system"})
     void anUnsupportedRangeIsABadRequest(final String tab) throws Exception {
         refuseRange(tab);
 
@@ -161,7 +168,7 @@ class AdminStatsSecurityTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"traffic", "links", "users", "safety"})
+    @ValueSource(strings = {"traffic", "links", "users", "safety", "system"})
     void aMistypedRangeIsABadRequest(final String tab) throws Exception {
         mockMvc.perform(tabRequest(tab, "admin-token").param("days", "abc"))
                 .andExpect(status().isBadRequest())
@@ -183,6 +190,10 @@ class AdminStatsSecurityTest {
             case "safety" -> when(adminStatsService.safety(7)).thenReturn(new SafetyStatsResponse(7, LocalDate.of(2026, 10, 20),
                     LocalDate.of(2026, 10, 26), new StackedSeries(List.of(), List.of()), 0, 0, List.of(), new ResolveTimes(0, null, null),
                     new StackedSeries(List.of(), List.of()), new DomainRuleCounts(0, 0), 0, List.of()));
+            case "system" -> when(adminStatsService.system(7)).thenReturn(new SystemStatsResponse(7, LocalDate.of(2026, 10, 20),
+                    LocalDate.of(2026, 10, 26), "2.9", LocalDateTime.of(2026, 10, 26, 8, 0), "1m", "25", List.of(), 0, 0, List.of(),
+                    new RequestCounts(0, 0), CacheStats.of(0, 0), new ComponentHealth("UP", "UP"), new RedisStats(null, null, null),
+                    new DatabaseStats("H2", "2.5.252", null, true), new StackedSeries(List.of(), List.of())));
             default -> throw new IllegalArgumentException("No response for the " + tab + " tab");
         }
     }
@@ -194,6 +205,7 @@ class AdminStatsSecurityTest {
             case "links" -> when(adminStatsService.links(14)).thenThrow(refusal);
             case "users" -> when(adminStatsService.users(14)).thenThrow(refusal);
             case "safety" -> when(adminStatsService.safety(14)).thenThrow(refusal);
+            case "system" -> when(adminStatsService.system(14)).thenThrow(refusal);
             default -> throw new IllegalArgumentException("No refusal for the " + tab + " tab");
         }
     }
