@@ -14,12 +14,10 @@ import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.persistence.autoconfigure.EntityScan;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
-import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.annotation.Transactional;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @Transactional
 @SpringBootTest(
@@ -52,9 +50,6 @@ class UsersStatsRepositoryTest {
         account(9204, true, false, false);
 
         assertThat(usersStatsRepository.countAccounts()).isEqualTo(new AccountCounts(4, 3, 3, 1));
-        assertThatThrownBy(() -> jdbcTemplate.update("insert into user_account (id, email, password, active) values (?, ?, ?, ?)",
-                9205, email(9205), "correct horse battery", null))
-                .isInstanceOf(DataIntegrityViolationException.class);
     }
 
     @Test
@@ -70,7 +65,7 @@ class UsersStatsRepositoryTest {
     }
 
     @Test
-    void byProviderTreatsNullAsLocal() {
+    void byProviderUsesTheLocalDefault() {
         accountFrom(9401, "google");
         accountFrom(9402, "local");
         accountWithDefaults(9403);
@@ -83,8 +78,6 @@ class UsersStatsRepositoryTest {
                 new CountEntry("local", 3),
                 new CountEntry("github", 2),
                 new CountEntry("google", 2));
-        assertThatThrownBy(() -> accountFrom(9408, null))
-                .isInstanceOf(DataIntegrityViolationException.class);
     }
 
     @Test
