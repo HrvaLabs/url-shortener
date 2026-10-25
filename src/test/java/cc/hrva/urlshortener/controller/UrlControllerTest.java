@@ -177,6 +177,36 @@ class UrlControllerTest {
     }
 
     @Test
+    void aBulkLinkOver2048CharactersIsRefusedWithTheLimitAndNothingIsCreated() throws Exception {
+        final var links = List.of(
+                CreateUrlDto.builder().longUrl("https://example.com/1").build(),
+                CreateUrlDto.builder().longUrl(TOO_LONG_DESTINATION).build());
+
+        mockMvc.perform(post("/api/v1/urls/bulk")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(links)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.longUrl").value(DESTINATION_TOO_LONG));
+
+        verifyNoInteractions(urlService);
+    }
+
+    @Test
+    void aBulkLinkWithoutADestinationIsRefusedAndNothingIsCreated() throws Exception {
+        final var links = List.of(
+                CreateUrlDto.builder().longUrl("https://example.com/1").build(),
+                CreateUrlDto.builder().longUrl(" ").build());
+
+        mockMvc.perform(post("/api/v1/urls/bulk")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(links)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.longUrl").value("Long URL is required"));
+
+        verifyNoInteractions(urlService);
+    }
+
+    @Test
     void aNewDestinationOver2048CharactersIsRefusedWithTheLimit() throws Exception {
         mockMvc.perform(put("/api/v1/urls/1")
                         .contentType(MediaType.APPLICATION_JSON)

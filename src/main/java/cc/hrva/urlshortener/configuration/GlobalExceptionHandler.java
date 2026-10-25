@@ -44,6 +44,7 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ControllerAdvice;
 import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.method.annotation.HandlerMethodValidationException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 import tools.jackson.core.JacksonException;
@@ -57,6 +58,17 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<Map<String, String>> handleValidation(final MethodArgumentNotValidException ex) {
         final var errors = ex.getBindingResult().getFieldErrors().stream()
+                .collect(Collectors.toMap(
+                        FieldError::getField,
+                        e -> e.getDefaultMessage() != null ? e.getDefaultMessage() : "Invalid value",
+                        (a, b) -> b));
+        return ResponseEntity.badRequest().body(errors);
+    }
+
+    @ExceptionHandler(HandlerMethodValidationException.class)
+    public ResponseEntity<Map<String, String>> handleMethodValidation(final HandlerMethodValidationException ex) {
+        final var errors = ex.getBeanResults().stream()
+                .flatMap(result -> result.getFieldErrors().stream())
                 .collect(Collectors.toMap(
                         FieldError::getField,
                         e -> e.getDefaultMessage() != null ? e.getDefaultMessage() : "Invalid value",
