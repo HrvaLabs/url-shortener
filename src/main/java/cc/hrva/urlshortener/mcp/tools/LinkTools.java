@@ -8,6 +8,7 @@ import cc.hrva.urlshortener.dto.UrlResponse;
 import cc.hrva.urlshortener.dto.UrlSearchDto;
 import cc.hrva.urlshortener.exception.UrlNotFoundException;
 import cc.hrva.urlshortener.exception.UrlValidationException;
+import cc.hrva.urlshortener.model.enums.CreatedVia;
 import cc.hrva.urlshortener.service.AnalyticsService;
 import cc.hrva.urlshortener.service.UrlService;
 import io.modelcontextprotocol.spec.McpSchema.CallToolResult;
@@ -162,7 +163,7 @@ public class LinkTools {
                 .build();
         McpLinks.validate(validator, createUrlDto);
 
-        final var created = urlService.saveUrlRouting(createUrlDto, null);
+        final var created = urlService.saveUrlRouting(createUrlDto, null, CreatedVia.MCP);
 
         log.info("MCP shorten_url userId={} urlId={}", user.getId(), created.id());
 

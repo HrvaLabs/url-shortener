@@ -5,6 +5,7 @@ import cc.hrva.urlshortener.dto.CreateUrlDto;
 import cc.hrva.urlshortener.exception.RateLimitExceededException;
 import cc.hrva.urlshortener.mcp.tools.McpLinks;
 import cc.hrva.urlshortener.mcp.tools.McpToolResults;
+import cc.hrva.urlshortener.model.enums.CreatedVia;
 import cc.hrva.urlshortener.service.UrlService;
 import io.modelcontextprotocol.common.McpTransportContext;
 import io.modelcontextprotocol.server.McpStatelessServerFeatures.SyncToolSpecification;
@@ -82,7 +83,7 @@ public class AnonymousShortenTool {
                 .build();
         McpLinks.validate(validator, createUrlDto);
 
-        final var created = urlService.saveUrlRouting(createUrlDto, null);
+        final var created = urlService.saveUrlRouting(createUrlDto, null, CreatedVia.MCP);
 
         log.info("MCP anonymous shorten_url urlId={}", created.id());
 

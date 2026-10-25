@@ -2,6 +2,7 @@ package cc.hrva.urlshortener.repository;
 
 import cc.hrva.urlshortener.model.ReservedAlias;
 import cc.hrva.urlshortener.model.Url;
+import cc.hrva.urlshortener.model.enums.CreatedVia;
 import jakarta.persistence.EntityManager;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
@@ -99,6 +100,18 @@ class AdminStatsAndReservedAliasesSchemaTest {
 
         assertThat(createdVia("unknown-channel")).isNull();
         assertThat(createdVia("anonymous-mcp")).isEqualTo("ANONYMOUS_MCP");
+    }
+
+    @Test
+    void createdViaIsStoredByName() {
+        final var id = urlRepository.saveAndFlush(Url.builder()
+                .shortUrl("via-mcp")
+                .longUrl("https://example.com/via-mcp")
+                .createdVia(CreatedVia.ANONYMOUS_MCP)
+                .build()).getId();
+
+        assertThat(jdbcTemplate.queryForObject("select created_via from url where id = ?", String.class, id))
+                .isEqualTo("ANONYMOUS_MCP");
     }
 
     @Test

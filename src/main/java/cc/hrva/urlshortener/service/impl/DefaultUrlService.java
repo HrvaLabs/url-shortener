@@ -23,6 +23,7 @@ import cc.hrva.urlshortener.model.PeekUrl;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.enums.BlockReason;
+import cc.hrva.urlshortener.model.enums.CreatedVia;
 import cc.hrva.urlshortener.model.enums.ReviewResolution;
 import cc.hrva.urlshortener.model.enums.ThreatType;
 import cc.hrva.urlshortener.repository.ShortUrlUniqueIndex;
@@ -134,7 +135,7 @@ public class DefaultUrlService implements UrlService {
 
     @Override
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
-    public UrlResponse saveUrlRouting(final @Valid CreateUrlDto createUrlDto, final String clientIP) {
+    public UrlResponse saveUrlRouting(final @Valid CreateUrlDto createUrlDto, final String clientIP, final CreatedVia createdVia) {
         final var url = createUrlToUrlConverter.convert(createUrlDto);
         final var currentUser = userService.getUserFromToken();
 
@@ -148,9 +149,11 @@ public class DefaultUrlService implements UrlService {
 
         final var created = transactionOperations.execute(status -> {
             if (currentUser != null) {
+                url.setCreatedVia(createdVia);
                 applyPassword(url, createUrlDto.getPassword());
                 return saveUrlForUser(url, currentUser, verdict);
             }
+            url.setCreatedVia(createdVia.anonymous());
             return UrlResponse.from(createUrlForAnonymousUser(url, verdict));
         });
         checkRedirectsLater(created.id());
@@ -225,7 +228,7 @@ public class DefaultUrlService implements UrlService {
 
     @Override
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
-    public UrlResponse saveUrlWithApiKey(final @Valid CreateUrlDto createUrlDto, final String key) {
+    public UrlResponse saveUrlWithApiKey(final @Valid CreateUrlDto createUrlDto, final String key, final CreatedVia createdVia) {
         final var url = createUrlToUrlConverter.convert(createUrlDto);
 
         log.info("Creating URL with API key");
@@ -238,6 +241,7 @@ public class DefaultUrlService implements UrlService {
         final var created = transactionOperations.execute(status -> {
             apiKeyService.apiKeyUseAction(apiKey);
 
+            url.setCreatedVia(createdVia);
             applyPassword(url, createUrlDto.getPassword());
             return saveUrlForUser(url, apiKey.getOwner(), verdict);
         });

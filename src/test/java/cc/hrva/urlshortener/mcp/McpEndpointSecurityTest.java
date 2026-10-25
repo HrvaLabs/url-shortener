@@ -20,6 +20,7 @@ import cc.hrva.urlshortener.mcp.tools.LinkTools;
 import cc.hrva.urlshortener.mcp.tools.McpUserResolver;
 import cc.hrva.urlshortener.mcp.tools.ModerationTools;
 import cc.hrva.urlshortener.model.User;
+import cc.hrva.urlshortener.model.enums.CreatedVia;
 import cc.hrva.urlshortener.repository.LinkReviewRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
@@ -421,7 +422,7 @@ class McpEndpointSecurityTest {
         final var callerDuringCreate = new AtomicReference<String>();
         final var request = new AtomicReference<CreateUrlDto>();
         when(userService.fetchActiveUserByEmail(EMAIL)).thenReturn(User.builder().id(7L).email(EMAIL).active(true).build());
-        when(urlService.saveUrlRouting(any(), any())).thenAnswer(invocation -> {
+        when(urlService.saveUrlRouting(any(), any(), eq(CreatedVia.MCP))).thenAnswer(invocation -> {
             callerDuringCreate.set(SecurityContextHolder.getContext().getAuthentication().getName());
             request.set(invocation.getArgument(0));
             return new UrlResponse(11L, "https://secret-destination.example/path", "secret-alias", LocalDateTime.now(), null, 0L, 5L,
@@ -434,6 +435,7 @@ class McpEndpointSecurityTest {
                 .andExpect(jsonPath("$.result.isError").value(false))
                 .andExpect(jsonPath("$.result.content[0].text", containsString(ISSUER + "/secret-alias")));
 
+        verify(urlService).saveUrlRouting(any(), isNull(), eq(CreatedVia.MCP));
         assertThat(callerDuringCreate.get()).isEqualTo(EMAIL);
         assertThat(request.get().getShortUrl()).isEqualTo("secret-alias");
         assertThat(request.get().getVisitLimit()).isEqualTo(5L);

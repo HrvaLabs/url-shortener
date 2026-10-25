@@ -2,6 +2,7 @@ package cc.hrva.urlshortener.model;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import cc.hrva.urlshortener.model.enums.BlockReason;
+import cc.hrva.urlshortener.model.enums.CreatedVia;
 import cc.hrva.urlshortener.model.enums.PlatformType;
 import cc.hrva.urlshortener.model.enums.ThreatEntryType;
 import cc.hrva.urlshortener.model.enums.ThreatType;
@@ -63,6 +64,9 @@ public class Url {
     private LocalDateTime blockedAt;
     private String finalUrl;
     private LocalDateTime chainCheckedAt;
+
+    @Enumerated(EnumType.STRING)
+    private CreatedVia createdVia;
 
     @BatchSize(size = 100)
     @ElementCollection(fetch = FetchType.EAGER)

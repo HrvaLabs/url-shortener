@@ -20,6 +20,7 @@ import cc.hrva.urlshortener.dto.UrlUpdateDto;
 import cc.hrva.urlshortener.exception.ApiException;
 import cc.hrva.urlshortener.model.PeekUrl;
 import cc.hrva.urlshortener.model.enums.AuditAction;
+import cc.hrva.urlshortener.model.enums.CreatedVia;
 import cc.hrva.urlshortener.security.ClickRequestResolver;
 import cc.hrva.urlshortener.security.ClientIpResolver;
 import cc.hrva.urlshortener.service.LinkPreviewService;
@@ -71,9 +72,9 @@ public class UrlController {
             @Valid @RequestBody final CreateUrlDto createUrlDto,
             @RequestHeader(value = "X-Api-Key", required = false) final String apiKey) {
         if (apiKey != null) {
-            return ResponseEntity.ok(urlService.saveUrlWithApiKey(createUrlDto, apiKey));
+            return ResponseEntity.ok(urlService.saveUrlWithApiKey(createUrlDto, apiKey, CreatedVia.API_KEY));
         }
-        return ResponseEntity.ok(urlService.saveUrlRouting(createUrlDto, clientIpResolver.getClientIp(request)));
+        return ResponseEntity.ok(urlService.saveUrlRouting(createUrlDto, clientIpResolver.getClientIp(request), CreatedVia.WEB));
     }
 
     @Operation(summary = "Redirect to short URL", description = "Look up a short URL and return its details. Records a click (bots are counted separately and refused on visit-limited links).")
@@ -141,8 +142,8 @@ public class UrlController {
         final var clientIp = clientIpResolver.getClientIp(request);
         final var urls = createUrlDtos.stream()
                 .map(dto -> apiKey != null
-                        ? urlService.saveUrlWithApiKey(dto, apiKey)
-                        : urlService.saveUrlRouting(dto, clientIp))
+                        ? urlService.saveUrlWithApiKey(dto, apiKey, CreatedVia.BULK)
+                        : urlService.saveUrlRouting(dto, clientIp, CreatedVia.BULK))
                 .toList();
 
         return ResponseEntity.ok(urls);

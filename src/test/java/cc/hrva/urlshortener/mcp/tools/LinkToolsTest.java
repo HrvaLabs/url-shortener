@@ -15,6 +15,7 @@ import cc.hrva.urlshortener.exception.ShortUrlAlreadyExistsException;
 import cc.hrva.urlshortener.exception.UrlValidationException;
 import cc.hrva.urlshortener.exception.UserNotFoundException;
 import cc.hrva.urlshortener.model.User;
+import cc.hrva.urlshortener.model.enums.CreatedVia;
 import cc.hrva.urlshortener.service.AnalyticsService;
 import cc.hrva.urlshortener.service.UrlService;
 import io.modelcontextprotocol.spec.McpSchema.CallToolResult;
@@ -44,6 +45,7 @@ import org.springframework.data.domain.Sort;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.tuple;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
@@ -170,29 +172,39 @@ class LinkToolsTest {
     @Test
     void shortenAddsAiTagOnce() {
         when(mcpUserResolver.currentUser()).thenReturn(CURRENT_USER);
-        when(urlService.saveUrlRouting(any(), any())).thenReturn(created("abc12", null, null));
+        when(urlService.saveUrlRouting(any(), any(), any())).thenReturn(created("abc12", null, null));
 
         linkTools.shortenUrl("https://example.com/page", null, null, null, List.of("ai", "work"));
         linkTools.shortenUrl("https://example.com/page", null, null, null, List.of("Work", "AI", "work"));
         linkTools.shortenUrl("https://example.com/page", null, null, null, null);
 
         final var request = ArgumentCaptor.forClass(CreateUrlDto.class);
-        verify(urlService, times(3)).saveUrlRouting(request.capture(), isNull());
+        verify(urlService, times(3)).saveUrlRouting(request.capture(), isNull(), any());
         assertThat(request.getAllValues().get(0).getTags()).containsExactly("ai", "work");
         assertThat(request.getAllValues().get(1).getTags()).containsExactly("ai", "work");
         assertThat(request.getAllValues().get(2).getTags()).containsExactly("ai");
     }
 
     @Test
+    void shortenUrlIsCreatedViaMcp() {
+        when(mcpUserResolver.currentUser()).thenReturn(CURRENT_USER);
+        when(urlService.saveUrlRouting(any(), any(), any())).thenReturn(created("abc12", null, null));
+
+        linkTools.shortenUrl("https://example.com/page", null, null, null, null);
+
+        verify(urlService).saveUrlRouting(any(), isNull(), eq(CreatedVia.MCP));
+    }
+
+    @Test
     void shortenKeepsAiTagWhenTheTagLimitIsReached() {
         when(mcpUserResolver.currentUser()).thenReturn(CURRENT_USER);
-        when(urlService.saveUrlRouting(any(), any())).thenReturn(created("abc12", null, null));
+        when(urlService.saveUrlRouting(any(), any(), any())).thenReturn(created("abc12", null, null));
         final var tenTags = IntStream.rangeClosed(1, 10).mapToObj(index -> "tag" + index).toList();
 
         linkTools.shortenUrl("https://example.com/page", null, null, null, tenTags);
 
         final var request = ArgumentCaptor.forClass(CreateUrlDto.class);
-        verify(urlService).saveUrlRouting(request.capture(), isNull());
+        verify(urlService).saveUrlRouting(request.capture(), isNull(), any());
         assertThat(request.getValue().getTags()).hasSize(10).contains("ai");
     }
 
@@ -200,14 +212,14 @@ class LinkToolsTest {
     void shortenPassesAliasLimitAndExpiry() {
         final var expiry = systemTime("2030-06-30T21:59:00Z");
         when(mcpUserResolver.currentUser()).thenReturn(CURRENT_USER);
-        when(urlService.saveUrlRouting(any(), any())).thenReturn(created("menu", 100L, expiry));
+        when(urlService.saveUrlRouting(any(), any(), any())).thenReturn(created("menu", 100L, expiry));
 
         final var result = linkTools.shortenUrl("https://example.com/menu", "menu", 100L, "2030-06-30T23:59:00+02:00", List.of("food"));
 
         final var request = ArgumentCaptor.forClass(CreateUrlDto.class);
         final var order = inOrder(mcpUserResolver, urlService);
         order.verify(mcpUserResolver).currentUser();
-        order.verify(urlService).saveUrlRouting(request.capture(), isNull());
+        order.verify(urlService).saveUrlRouting(request.capture(), isNull(), any());
         assertThat(request.getValue().getLongUrl()).isEqualTo("https://example.com/menu");
         assertThat(request.getValue().getShortUrl()).isEqualTo("menu");
         assertThat(request.getValue().getVisitLimit()).isEqualTo(100L);
@@ -224,14 +236,14 @@ class LinkToolsTest {
     @Test
     void shortenAcceptsUtcAndOffsetExpiry() {
         when(mcpUserResolver.currentUser()).thenReturn(CURRENT_USER);
-        when(urlService.saveUrlRouting(any(), any())).thenReturn(created("abc12", null, null));
+        when(urlService.saveUrlRouting(any(), any(), any())).thenReturn(created("abc12", null, null));
 
         linkTools.shortenUrl("https://example.com", null, null, "2030-06-30T21:59:00Z", null);
         linkTools.shortenUrl("https://example.com", null, null, " 2030-06-30T23:59:00+02:00 ", null);
         linkTools.shortenUrl("https://example.com", null, null, "2030-06-30T23:59:00+02:00[Europe/Zagreb]", null);
 
         final var request = ArgumentCaptor.forClass(CreateUrlDto.class);
-        verify(urlService, times(3)).saveUrlRouting(request.capture(), isNull());
+        verify(urlService, times(3)).saveUrlRouting(request.capture(), isNull(), any());
         assertThat(request.getAllValues())
                 .extracting(CreateUrlDto::getExpirationDate)
                 .containsOnly(systemTime("2030-06-30T21:59:00Z"));
@@ -248,18 +260,18 @@ class LinkToolsTest {
             assertThat(text(result)).isEqualTo("expiresAt must be an ISO-8601 date-time with a time zone, "
                     + "for example 2026-12-31T23:59:00Z or 2026-12-31T23:59:00+01:00.");
         }
-        verify(urlService, never()).saveUrlRouting(any(), any());
+        verify(urlService, never()).saveUrlRouting(any(), any(), any());
     }
 
     @Test
     void shortenWithoutOptionsReportsOnlyTheLink() {
         when(mcpUserResolver.currentUser()).thenReturn(CURRENT_USER);
-        when(urlService.saveUrlRouting(any(), any())).thenReturn(created("abc12", null, null));
+        when(urlService.saveUrlRouting(any(), any(), any())).thenReturn(created("abc12", null, null));
 
         final var result = linkTools.shortenUrl("https://example.com/page", " ", null, "", null);
 
         final var request = ArgumentCaptor.forClass(CreateUrlDto.class);
-        verify(urlService).saveUrlRouting(request.capture(), isNull());
+        verify(urlService).saveUrlRouting(request.capture(), isNull(), any());
         assertThat(request.getValue().getShortUrl()).isNull();
         assertThat(request.getValue().getExpirationDate()).isNull();
         assertThat(text(result).lines()).containsExactly(
@@ -281,7 +293,7 @@ class LinkToolsTest {
         assertThat(text(tooLong)).isEqualTo("Custom short URL must be 32 characters or fewer");
         assertThat(missingUrl.isError()).isTrue();
         assertThat(text(missingUrl)).isEqualTo("Long URL is required");
-        verify(urlService, never()).saveUrlRouting(any(), any());
+        verify(urlService, never()).saveUrlRouting(any(), any(), any());
     }
 
     @Test
@@ -292,13 +304,13 @@ class LinkToolsTest {
 
         assertThat(result.isError()).isTrue();
         assertThat(text(result)).isEqualTo("Destination URL must be 2048 characters or fewer");
-        verify(urlService, never()).saveUrlRouting(any(), any());
+        verify(urlService, never()).saveUrlRouting(any(), any(), any());
     }
 
     @Test
     void shortenReturnsToolErrorWithBackendMessageWhenAliasTaken() {
         when(mcpUserResolver.currentUser()).thenReturn(CURRENT_USER);
-        when(urlService.saveUrlRouting(any(), any())).thenThrow(new ShortUrlAlreadyExistsException("This short URL is already taken. Try another."));
+        when(urlService.saveUrlRouting(any(), any(), any())).thenThrow(new ShortUrlAlreadyExistsException("This short URL is already taken. Try another."));
 
         final var result = linkTools.shortenUrl("https://example.com/menu", "menu", null, null, null);
 
@@ -310,7 +322,7 @@ class LinkToolsTest {
     @Test
     void shortenReturnsToolErrorWithBackendMessageWhenUrlIsUnsafe() {
         when(mcpUserResolver.currentUser()).thenReturn(CURRENT_USER);
-        when(urlService.saveUrlRouting(any(), any())).thenThrow(new UrlValidationException("This URL was flagged as unsafe and cannot be shortened"));
+        when(urlService.saveUrlRouting(any(), any(), any())).thenThrow(new UrlValidationException("This URL was flagged as unsafe and cannot be shortened"));
 
         final var result = linkTools.shortenUrl("https://malware.example", null, null, null, null);
 
@@ -321,7 +333,7 @@ class LinkToolsTest {
     @Test
     void shortenReturnsToolErrorWithTheRefusalWhenTheAccountHitsTheCreateLimit() {
         when(mcpUserResolver.currentUser()).thenReturn(CURRENT_USER);
-        when(urlService.saveUrlRouting(any(), isNull()))
+        when(urlService.saveUrlRouting(any(), isNull(), any()))
                 .thenThrow(new RateLimitExceededException("You've created a lot of links in a short time. Try again in an hour."));
 
         final var result = linkTools.shortenUrl("https://example.com/menu", null, null, null, null);
@@ -334,7 +346,7 @@ class LinkToolsTest {
     @ExtendWith(OutputCaptureExtension.class)
     void shortenLogsIdsOnly(final CapturedOutput output) {
         when(mcpUserResolver.currentUser()).thenReturn(CURRENT_USER);
-        when(urlService.saveUrlRouting(any(), any())).thenReturn(new UrlResponse(11L, "https://secret-destination.example/path", "secret-alias",
+        when(urlService.saveUrlRouting(any(), any(), any())).thenReturn(new UrlResponse(11L, "https://secret-destination.example/path", "secret-alias",
                 LocalDateTime.now(), null, 0L, null, true, "ACTIVE", Set.of("ai", "secret-tag"), false, "user@localhost"));
 
         linkTools.shortenUrl("https://secret-destination.example/path", "secret-alias", null, null, List.of("secret-tag"));

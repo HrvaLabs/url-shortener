@@ -12,6 +12,7 @@ import cc.hrva.urlshortener.dto.UrlUpdateDto;
 import cc.hrva.urlshortener.exception.RateLimitExceededException;
 import cc.hrva.urlshortener.model.PeekUrl;
 import cc.hrva.urlshortener.model.Url;
+import cc.hrva.urlshortener.model.enums.CreatedVia;
 import cc.hrva.urlshortener.security.ClickRequestResolver;
 import cc.hrva.urlshortener.security.ClientIpResolver;
 import cc.hrva.urlshortener.service.LinkPreviewService;
@@ -94,7 +95,7 @@ class UrlControllerTest {
     void shouldSaveUrl() throws Exception {
         final var url = Url.builder().id(1L).longUrl("https://example.com").shortUrl("ex").build();
         when(clientIpResolver.getClientIp(request)).thenReturn("203.0.113.7");
-        when(urlService.saveUrlRouting(any(CreateUrlDto.class), eq("203.0.113.7"))).thenReturn(UrlResponse.from(url));
+        when(urlService.saveUrlRouting(any(CreateUrlDto.class), eq("203.0.113.7"), any())).thenReturn(UrlResponse.from(url));
 
         mockMvc.perform(post("/api/v1/urls")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -107,7 +108,7 @@ class UrlControllerTest {
     @Test
     void shouldSaveUrlWithApiKey() throws Exception {
         final var url = Url.builder().id(1L).longUrl("https://example.com").shortUrl("ex").build();
-        when(urlService.saveUrlWithApiKey(any(CreateUrlDto.class), eq("apikey"))).thenReturn(UrlResponse.from(url));
+        when(urlService.saveUrlWithApiKey(any(CreateUrlDto.class), eq("apikey"), any())).thenReturn(UrlResponse.from(url));
 
         mockMvc.perform(post("/api/v1/urls")
                         .header("X-Api-Key", "apikey")
@@ -118,9 +119,56 @@ class UrlControllerTest {
     }
 
     @Test
+    void createWithoutAKeyIsWeb() throws Exception {
+        final var link = CreateUrlDto.builder().longUrl("https://example.com").build();
+        when(clientIpResolver.getClientIp(request)).thenReturn("203.0.113.7");
+
+        mockMvc.perform(post("/api/v1/urls")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(link)))
+                .andExpect(status().isOk());
+
+        verify(urlService).saveUrlRouting(link, "203.0.113.7", CreatedVia.WEB);
+        verify(urlService, never()).saveUrlWithApiKey(any(), any(), any());
+    }
+
+    @Test
+    void createWithAKeyIsApiKey() throws Exception {
+        final var link = CreateUrlDto.builder().longUrl("https://example.com").build();
+
+        mockMvc.perform(post("/api/v1/urls")
+                        .header("X-Api-Key", "k")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(link)))
+                .andExpect(status().isOk());
+
+        verify(urlService).saveUrlWithApiKey(link, "k", CreatedVia.API_KEY);
+        verify(urlService, never()).saveUrlRouting(any(), any(), any());
+    }
+
+    @Test
+    void bulkIsBulkWithOrWithoutAKey() throws Exception {
+        final var link = CreateUrlDto.builder().longUrl("https://example.com/1").build();
+        when(clientIpResolver.getClientIp(request)).thenReturn("203.0.113.7");
+
+        mockMvc.perform(post("/api/v1/urls/bulk")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(List.of(link))))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/v1/urls/bulk")
+                        .header("X-Api-Key", "k")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(List.of(link))))
+                .andExpect(status().isOk());
+
+        verify(urlService).saveUrlRouting(link, "203.0.113.7", CreatedVia.BULK);
+        verify(urlService).saveUrlWithApiKey(link, "k", CreatedVia.BULK);
+    }
+
+    @Test
     void aCreateRefusedByTheRateLimitIsA429WithTheReason() throws Exception {
         when(clientIpResolver.getClientIp(request)).thenReturn("203.0.113.7");
-        when(urlService.saveUrlRouting(any(CreateUrlDto.class), eq("203.0.113.7")))
+        when(urlService.saveUrlRouting(any(CreateUrlDto.class), eq("203.0.113.7"), any()))
                 .thenThrow(new RateLimitExceededException("You've created a lot of links in a short time. Try again in an hour."));
 
         mockMvc.perform(post("/api/v1/urls")
@@ -134,7 +182,7 @@ class UrlControllerTest {
     void bulkSendsEveryLinkThroughTheLimitAndStopsWithA429() throws Exception {
         final var created = UrlResponse.from(Url.builder().id(1L).longUrl("https://example.com").shortUrl("ex").build());
         when(clientIpResolver.getClientIp(request)).thenReturn("203.0.113.7");
-        when(urlService.saveUrlRouting(any(CreateUrlDto.class), eq("203.0.113.7")))
+        when(urlService.saveUrlRouting(any(CreateUrlDto.class), eq("203.0.113.7"), any()))
                 .thenReturn(created)
                 .thenReturn(created)
                 .thenThrow(new RateLimitExceededException("You've created a lot of links in a short time. Try again in an hour."));
@@ -149,13 +197,13 @@ class UrlControllerTest {
                 .andExpect(status().isTooManyRequests())
                 .andExpect(jsonPath("$.error").value("You've created a lot of links in a short time. Try again in an hour."));
 
-        verify(urlService, times(3)).saveUrlRouting(any(CreateUrlDto.class), eq("203.0.113.7"));
+        verify(urlService, times(3)).saveUrlRouting(any(CreateUrlDto.class), eq("203.0.113.7"), any());
     }
 
     @Test
     void aDestinationOf2048CharactersIsAccepted() throws Exception {
         final var destination = "https://example.com/" + "a".repeat(2028);
-        when(urlService.saveUrlRouting(any(CreateUrlDto.class), any()))
+        when(urlService.saveUrlRouting(any(CreateUrlDto.class), any(), any()))
                 .thenReturn(UrlResponse.from(Url.builder().id(1L).longUrl(destination).shortUrl("ex").build()));
 
         mockMvc.perform(post("/api/v1/urls")

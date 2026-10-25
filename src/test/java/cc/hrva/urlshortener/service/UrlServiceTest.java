@@ -49,6 +49,7 @@ import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.codebook.Authorities;
 import cc.hrva.urlshortener.model.enums.BlockReason;
+import cc.hrva.urlshortener.model.enums.CreatedVia;
 import cc.hrva.urlshortener.model.enums.ReviewResolution;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.service.impl.DefaultSuspiciousUrlService;
@@ -464,7 +465,7 @@ class UrlServiceTest {
         when(appProperties.getShortUrlLength()).thenReturn(5L);
         when(urlRepository.save(url)).thenReturn(persisted(url));
 
-        urlService.saveUrlRouting(createUrlDto, CLIENT_IP);
+        urlService.saveUrlRouting(createUrlDto, CLIENT_IP, CreatedVia.WEB);
 
         final var order = org.mockito.Mockito.inOrder(urlValidator, urlRepository);
         order.verify(urlValidator).longUrlInUrl(url);
@@ -492,7 +493,7 @@ class UrlServiceTest {
         org.mockito.Mockito.doThrow(new UrlValidationException(UrlValidator.LONG_URL_TOO_LONG))
                 .when(urlValidator).checkIfLongUrlIsValid(any());
 
-        assertThatThrownBy(() -> urlService.saveUrlRouting(createUrlDto, CLIENT_IP))
+        assertThatThrownBy(() -> urlService.saveUrlRouting(createUrlDto, CLIENT_IP, CreatedVia.WEB))
                 .isInstanceOf(UrlValidationException.class)
                 .hasMessage(UrlValidator.LONG_URL_TOO_LONG);
         assertThatThrownBy(() -> urlService.updateUrl(update))
@@ -518,7 +519,7 @@ class UrlServiceTest {
         when(appProperties.getShortUrlLength()).thenReturn(5L);
         when(urlRepository.save(url)).thenReturn(saved);
 
-        urlService.saveUrlRouting(createUrlDto, CLIENT_IP);
+        urlService.saveUrlRouting(createUrlDto, CLIENT_IP, CreatedVia.WEB);
 
         verify(reviewQueueService).flag(saved, YOUNG_DOMAIN);
     }
@@ -532,7 +533,7 @@ class UrlServiceTest {
         when(appProperties.getShortUrlLength()).thenReturn(5L);
         when(urlRepository.save(url)).thenReturn(persisted(url));
 
-        urlService.saveUrlRouting(createUrlDto, CLIENT_IP);
+        urlService.saveUrlRouting(createUrlDto, CLIENT_IP, CreatedVia.WEB);
 
         final var order = org.mockito.Mockito.inOrder(urlRepository, reviewQueueService);
         order.verify(urlRepository).save(url);
@@ -550,7 +551,7 @@ class UrlServiceTest {
         when(appProperties.getShortUrlLength()).thenReturn(5L);
         when(urlRepository.save(url)).thenReturn(persisted(url));
 
-        urlService.saveUrlWithApiKey(createUrlDto, "apikey");
+        urlService.saveUrlWithApiKey(createUrlDto, "apikey", CreatedVia.API_KEY);
 
         final var order = org.mockito.Mockito.inOrder(urlValidator, urlRepository, reviewQueueService);
         order.verify(urlValidator).checkIfLongUrlIsNotAShortener(url);
@@ -571,7 +572,7 @@ class UrlServiceTest {
         when(appProperties.getShortUrlLength()).thenReturn(5L);
         when(urlRepository.save(url)).thenReturn(persisted(url));
 
-        urlService.saveUrlRouting(createUrlDto, CLIENT_IP);
+        urlService.saveUrlRouting(createUrlDto, CLIENT_IP, CreatedVia.WEB);
 
         verify(urlValidator).checkIfUrlSafe(url);
         verify(reviewQueueService, never()).flag(any(), any());
@@ -584,7 +585,7 @@ class UrlServiceTest {
         when(appProperties.isAnonymousUrlCreationEnabled()).thenReturn(true);
         when(linkCheckService.check("https://njuskaio.cam/a/MAUB3")).thenReturn(blocked());
 
-        assertThatThrownBy(() -> service.saveUrlRouting(createUrlDto, CLIENT_IP))
+        assertThatThrownBy(() -> service.saveUrlRouting(createUrlDto, CLIENT_IP, CreatedVia.WEB))
                 .isInstanceOf(UrlValidationException.class)
                 .hasMessage(BLOCKLIST_REFUSAL);
 
@@ -600,7 +601,7 @@ class UrlServiceTest {
         when(linkCheckService.check("https://njuskaio.cam/a/MAUB3")).thenReturn(blocked());
         when(apiKeyService.fetchApiKeyByKey("apikey")).thenReturn(ApiKey.builder().owner(User.builder().id(1L).build()).build());
 
-        assertThatThrownBy(() -> service.saveUrlWithApiKey(createUrlDto, "apikey"))
+        assertThatThrownBy(() -> service.saveUrlWithApiKey(createUrlDto, "apikey", CreatedVia.API_KEY))
                 .isInstanceOf(UrlValidationException.class)
                 .hasMessage(BLOCKLIST_REFUSAL);
 
@@ -619,7 +620,7 @@ class UrlServiceTest {
         recordTransactionDuringCheck("https://example.com/menu", checkedInTransaction);
         recordTransactionDuringSave(savedInTransaction);
 
-        transactionalUrlService().saveUrlRouting(createUrlDto, CLIENT_IP);
+        transactionalUrlService().saveUrlRouting(createUrlDto, CLIENT_IP, CreatedVia.WEB);
 
         assertThat(checkedInTransaction).hasValue(false);
         assertThat(savedInTransaction).hasValue(true);
@@ -635,7 +636,7 @@ class UrlServiceTest {
         recordTransactionDuringCheck("https://example.com/menu", checkedInTransaction);
         recordTransactionDuringSave(savedInTransaction);
 
-        transactionalUrlService().saveUrlRouting(createUrlDto, CLIENT_IP);
+        transactionalUrlService().saveUrlRouting(createUrlDto, CLIENT_IP, CreatedVia.WEB);
 
         assertThat(checkedInTransaction).hasValue(false);
         assertThat(savedInTransaction).hasValue(true);
@@ -656,7 +657,7 @@ class UrlServiceTest {
         recordTransactionDuringCheck("https://example.com/menu", checkedInTransaction);
         recordTransactionDuringSave(savedInTransaction);
 
-        transactionalUrlService().saveUrlWithApiKey(createUrlDto, "apikey");
+        transactionalUrlService().saveUrlWithApiKey(createUrlDto, "apikey", CreatedVia.API_KEY);
 
         assertThat(checkedInTransaction).hasValue(false);
         assertThat(savedInTransaction).hasValue(true);
@@ -676,7 +677,7 @@ class UrlServiceTest {
             return null;
         }).when(reviewQueueService).flag(any(), any());
 
-        transactionalUrlService().saveUrlRouting(createUrlDto, CLIENT_IP);
+        transactionalUrlService().saveUrlRouting(createUrlDto, CLIENT_IP, CreatedVia.WEB);
 
         assertThat(queuedInTransaction).hasValue(true);
     }
@@ -718,7 +719,7 @@ class UrlServiceTest {
         when(linkCheckService.check("https://example.com/menu")).thenReturn(LinkVerdict.clean());
         recordTransactionDuringChainCheck(1L, checkedInTransaction);
 
-        transactionalUrlService().saveUrlRouting(createUrlDto, CLIENT_IP);
+        transactionalUrlService().saveUrlRouting(createUrlDto, CLIENT_IP, CreatedVia.WEB);
 
         assertThat(checkedInTransaction).hasValue(false);
     }
@@ -733,7 +734,7 @@ class UrlServiceTest {
         when(linkCheckService.check("https://example.com/menu")).thenReturn(LinkVerdict.clean());
         recordTransactionDuringChainCheck(1L, checkedInTransaction);
 
-        transactionalUrlService().saveUrlRouting(createUrlDto, CLIENT_IP);
+        transactionalUrlService().saveUrlRouting(createUrlDto, CLIENT_IP, CreatedVia.WEB);
 
         assertThat(checkedInTransaction).hasValue(false);
     }
@@ -748,7 +749,7 @@ class UrlServiceTest {
         when(linkCheckService.check("https://example.com/menu")).thenReturn(LinkVerdict.clean());
         recordTransactionDuringChainCheck(1L, checkedInTransaction);
 
-        transactionalUrlService().saveUrlWithApiKey(createUrlDto, "apikey");
+        transactionalUrlService().saveUrlWithApiKey(createUrlDto, "apikey", CreatedVia.API_KEY);
 
         assertThat(checkedInTransaction).hasValue(false);
     }
@@ -804,7 +805,7 @@ class UrlServiceTest {
         org.mockito.Mockito.doThrow(new org.springframework.core.task.TaskRejectedException("executor is shutting down"))
                 .when(redirectChainService).checkLater(1L);
 
-        final var result = urlService.saveUrlRouting(createUrlDto, CLIENT_IP);
+        final var result = urlService.saveUrlRouting(createUrlDto, CLIENT_IP, CreatedVia.WEB);
 
         assertThat(result.id()).isEqualTo(1L);
     }
@@ -817,7 +818,7 @@ class UrlServiceTest {
         when(userService.getUserFromToken()).thenReturn(User.builder().id(1L).build());
         when(urlValidator.checkIfLongUrlIsNotBlocklisted(url)).thenThrow(new UrlValidationException(BLOCKLIST_REFUSAL));
 
-        assertThatThrownBy(() -> urlService.saveUrlRouting(createUrlDto, CLIENT_IP)).isInstanceOf(UrlValidationException.class);
+        assertThatThrownBy(() -> urlService.saveUrlRouting(createUrlDto, CLIENT_IP, CreatedVia.WEB)).isInstanceOf(UrlValidationException.class);
 
         verify(redirectChainService, never()).checkLater(org.mockito.ArgumentMatchers.anyLong());
     }
@@ -828,7 +829,7 @@ class UrlServiceTest {
         final var createUrlDto = CreateUrlDto.builder().longUrl("https://example.com/menu").build();
         when(apiKeyService.fetchApiKeyByKey("junk")).thenThrow(new ApiKeyNotFoundException("Sent API key doesn't exist"));
 
-        assertThatThrownBy(() -> service.saveUrlWithApiKey(createUrlDto, "junk"))
+        assertThatThrownBy(() -> service.saveUrlWithApiKey(createUrlDto, "junk", CreatedVia.API_KEY))
                 .isInstanceOf(ApiKeyNotFoundException.class);
 
         verify(linkCheckService, never()).check(anyString());
@@ -842,7 +843,7 @@ class UrlServiceTest {
         final var createUrlDto = CreateUrlDto.builder().longUrl("https://example.com/menu").build();
         org.mockito.Mockito.doThrow(new InvalidApiKeyException("API key has expired")).when(apiKeyValidator).apiKeyExistsByKeyAndIsValid("expired");
 
-        assertThatThrownBy(() -> service.saveUrlWithApiKey(createUrlDto, "expired"))
+        assertThatThrownBy(() -> service.saveUrlWithApiKey(createUrlDto, "expired", CreatedVia.API_KEY))
                 .isInstanceOf(InvalidApiKeyException.class)
                 .hasMessage("API key has expired");
 
@@ -857,7 +858,7 @@ class UrlServiceTest {
         final var service = urlServiceWithRealLongUrlHandling();
         final var createUrlDto = CreateUrlDto.builder().longUrl("https://example.com/menu").build();
 
-        assertThatThrownBy(() -> service.saveUrlRouting(createUrlDto, CLIENT_IP))
+        assertThatThrownBy(() -> service.saveUrlRouting(createUrlDto, CLIENT_IP, CreatedVia.WEB))
                 .isInstanceOf(ApiException.class)
                 .hasMessage("Sign in to create short URLs");
 
@@ -873,7 +874,7 @@ class UrlServiceTest {
         when(apiKeyService.fetchApiKeyByKey("apikey")).thenReturn(ApiKey.builder().owner(User.builder().id(1L).build()).build());
         when(rateLimiter.tryAcquire(eq("create:user:1"), anyInt(), any())).thenReturn(false);
 
-        assertThatThrownBy(() -> service.saveUrlWithApiKey(createUrlDto, "apikey"))
+        assertThatThrownBy(() -> service.saveUrlWithApiKey(createUrlDto, "apikey", CreatedVia.API_KEY))
                 .isInstanceOf(RateLimitExceededException.class)
                 .hasMessage(CREATE_LIMIT_REFUSAL);
 
@@ -889,7 +890,7 @@ class UrlServiceTest {
         final var createUrlDto = CreateUrlDto.builder().longUrl("https://example.com/menu").build();
         when(rateLimiter.tryAcquire(startsWith("create:anon"), anyInt(), any())).thenReturn(false);
 
-        assertThatThrownBy(() -> service.saveUrlRouting(createUrlDto, CLIENT_IP))
+        assertThatThrownBy(() -> service.saveUrlRouting(createUrlDto, CLIENT_IP, CreatedVia.WEB))
                 .isInstanceOf(RateLimitExceededException.class)
                 .hasMessage(CREATE_LIMIT_REFUSAL);
 
@@ -908,7 +909,7 @@ class UrlServiceTest {
         when(urlRepository.existsUrlByLongUrlAndActiveTrueAndOwnerIsNull(url.getLongUrl())).thenReturn(true);
         when(urlRepository.findByLongUrlAndActiveTrue(url.getLongUrl())).thenReturn(Optional.of(existing));
 
-        final var result = urlService.saveUrlRouting(createUrlDto, CLIENT_IP);
+        final var result = urlService.saveUrlRouting(createUrlDto, CLIENT_IP, CreatedVia.WEB);
 
         assertThat(result.shortUrl()).isEqualTo("v0DB3");
         verify(reviewQueueService).flag(existing, YOUNG_DOMAIN);
@@ -962,7 +963,7 @@ class UrlServiceTest {
         when(urlRepository.save(url)).thenReturn(persisted(url));
         when(createUrlToUrlConverter.convert(createUrlDto)).thenReturn(url);
 
-        final var result = urlService.saveUrlRouting(createUrlDto, CLIENT_IP);
+        final var result = urlService.saveUrlRouting(createUrlDto, CLIENT_IP, CreatedVia.WEB);
         assertThat(result.longUrl()).isEqualTo("long");
 
         verify(reservedAliasService).isReserved(url.getShortUrl());
@@ -975,7 +976,7 @@ class UrlServiceTest {
         final var url = signedInCreate();
         when(reservedAliasService.isReserved(anyString())).thenReturn(true, false);
 
-        urlService.saveUrlRouting(CreateUrlDto.builder().longUrl("https://example.com/menu").build(), CLIENT_IP);
+        urlService.saveUrlRouting(CreateUrlDto.builder().longUrl("https://example.com/menu").build(), CLIENT_IP, CreatedVia.WEB);
 
         final var candidates = org.mockito.ArgumentCaptor.forClass(String.class);
         verify(reservedAliasService, times(2)).isReserved(candidates.capture());
@@ -989,7 +990,7 @@ class UrlServiceTest {
         final var url = signedInCreate();
         when(urlRepository.existsUrlByShortUrl(anyString())).thenReturn(true, false);
 
-        urlService.saveUrlRouting(CreateUrlDto.builder().longUrl("https://example.com/menu").build(), CLIENT_IP);
+        urlService.saveUrlRouting(CreateUrlDto.builder().longUrl("https://example.com/menu").build(), CLIENT_IP, CreatedVia.WEB);
 
         final var candidates = org.mockito.ArgumentCaptor.forClass(String.class);
         verify(urlRepository, times(2)).existsUrlByShortUrl(candidates.capture());
@@ -1006,7 +1007,7 @@ class UrlServiceTest {
         when(appProperties.getShortUrlLength()).thenReturn(5L);
         when(reservedAliasService.isReserved(anyString())).thenReturn(true);
 
-        assertThatThrownBy(() -> urlService.saveUrlRouting(createUrlDto, CLIENT_IP))
+        assertThatThrownBy(() -> urlService.saveUrlRouting(createUrlDto, CLIENT_IP, CreatedVia.WEB))
                 .isInstanceOf(ShortUrlAlreadyExistsException.class)
                 .hasMessage("Couldn't pick a free short URL. Try again.");
 
@@ -1025,7 +1026,7 @@ class UrlServiceTest {
         when(reservedAliasService.isReserved(anyString())).thenReturn(true, false);
         when(urlRepository.save(url)).thenReturn(persisted(url));
 
-        urlService.saveUrlRouting(createUrlDto, CLIENT_IP);
+        urlService.saveUrlRouting(createUrlDto, CLIENT_IP, CreatedVia.WEB);
 
         final var candidates = org.mockito.ArgumentCaptor.forClass(String.class);
         verify(reservedAliasService, times(2)).isReserved(candidates.capture());
@@ -1042,7 +1043,7 @@ class UrlServiceTest {
         when(userService.getUserFromToken()).thenReturn(User.builder().id(1L).build());
         when(urlRepository.save(url)).thenReturn(persisted(url));
 
-        urlService.saveUrlRouting(createUrlDto, CLIENT_IP);
+        urlService.saveUrlRouting(createUrlDto, CLIENT_IP, CreatedVia.WEB);
 
         final var order = org.mockito.Mockito.inOrder(urlValidator, urlRepository);
         order.verify(urlValidator).checkIfShortUrlIsUnique("promo");
@@ -1061,7 +1062,7 @@ class UrlServiceTest {
         when(urlRepository.save(url)).thenReturn(persisted(url));
         org.mockito.Mockito.doThrow(shortUrlTakenMeanwhile()).when(urlRepository).flush();
 
-        assertThatThrownBy(() -> urlService.saveUrlRouting(createUrlDto, CLIENT_IP))
+        assertThatThrownBy(() -> urlService.saveUrlRouting(createUrlDto, CLIENT_IP, CreatedVia.WEB))
                 .isInstanceOf(ShortUrlAlreadyExistsException.class)
                 .hasMessage("This short URL is already taken. Try another.");
 
@@ -1074,7 +1075,7 @@ class UrlServiceTest {
         final var url = signedInCreate();
         org.mockito.Mockito.doThrow(shortUrlTakenMeanwhile()).when(urlRepository).flush();
 
-        assertThatThrownBy(() -> urlService.saveUrlRouting(CreateUrlDto.builder().longUrl("https://example.com/menu").build(), CLIENT_IP))
+        assertThatThrownBy(() -> urlService.saveUrlRouting(CreateUrlDto.builder().longUrl("https://example.com/menu").build(), CLIENT_IP, CreatedVia.WEB))
                 .isInstanceOf(ShortUrlAlreadyExistsException.class)
                 .hasMessage("Couldn't pick a free short URL. Try again.");
 
@@ -1092,7 +1093,7 @@ class UrlServiceTest {
         when(urlRepository.save(url)).thenReturn(persisted(url));
         org.mockito.Mockito.doThrow(shortUrlTakenMeanwhile()).when(urlRepository).flush();
 
-        assertThatThrownBy(() -> urlService.saveUrlRouting(createUrlDto, CLIENT_IP))
+        assertThatThrownBy(() -> urlService.saveUrlRouting(createUrlDto, CLIENT_IP, CreatedVia.WEB))
                 .isInstanceOf(ShortUrlAlreadyExistsException.class)
                 .hasMessage("Couldn't pick a free short URL. Try again.");
 
@@ -1106,7 +1107,7 @@ class UrlServiceTest {
         signedInCreate();
         org.mockito.Mockito.doThrow(tooLong).when(urlRepository).flush();
 
-        assertThatThrownBy(() -> urlService.saveUrlRouting(CreateUrlDto.builder().longUrl("https://example.com/menu").build(), CLIENT_IP))
+        assertThatThrownBy(() -> urlService.saveUrlRouting(CreateUrlDto.builder().longUrl("https://example.com/menu").build(), CLIENT_IP, CreatedVia.WEB))
                 .isSameAs(tooLong);
     }
 
@@ -1125,6 +1126,21 @@ class UrlServiceTest {
         return url;
     }
 
+    private Url anonymousCreate() {
+        final var url = Url.builder().longUrl("https://example.com/menu").build();
+        when(createUrlToUrlConverter.convert(any(CreateUrlDto.class))).thenReturn(url);
+        when(userService.getUserFromToken()).thenReturn(null);
+        when(appProperties.getShortUrlLength()).thenReturn(5L);
+        when(urlRepository.save(url)).thenReturn(persisted(url));
+        return url;
+    }
+
+    private Url savedLink() {
+        final var saved = org.mockito.ArgumentCaptor.forClass(Url.class);
+        verify(urlRepository).save(saved.capture());
+        return saved.getValue();
+    }
+
     @Test
     void shouldReturnSavedUrlRandomShortUrl() {
         final var createUrlDto = CreateUrlDto.builder().longUrl("long").build();
@@ -1136,7 +1152,7 @@ class UrlServiceTest {
         when(urlRepository.existsUrlByLongUrlAndActiveTrueAndOwnerIsNull(url.getLongUrl())).thenReturn(true);
         when(urlRepository.findByLongUrlAndActiveTrue(url.getLongUrl())).thenReturn(Optional.ofNullable(existingLongUrl));
 
-        final var result = urlService.saveUrlRouting(createUrlDto, CLIENT_IP);
+        final var result = urlService.saveUrlRouting(createUrlDto, CLIENT_IP, CreatedVia.WEB);
         assertThat(result.longUrl()).isEqualTo("long");
         assertThat(result.active()).isTrue();
     }
@@ -1153,7 +1169,7 @@ class UrlServiceTest {
         when(urlRepository.existsUrlByLongUrlAndActiveTrueAndOwnerIsNull(url.getLongUrl())).thenReturn(true);
         when(urlRepository.findByLongUrlAndActiveTrue(url.getLongUrl())).thenReturn(Optional.of(existingLongUrl));
 
-        final var result = urlService.saveUrlRouting(createUrlDto, CLIENT_IP);
+        final var result = urlService.saveUrlRouting(createUrlDto, CLIENT_IP, CreatedVia.WEB);
 
         assertThat(result.shortUrl()).isEqualTo("secret-alias");
         assertThat(output)
@@ -1175,7 +1191,7 @@ class UrlServiceTest {
         when(createUrlToUrlConverter.convert(createUrlDto)).thenReturn(url);
         when(appProperties.getShortUrlLength()).thenReturn(1L);
 
-        final var result = urlService.saveUrlWithApiKey(createUrlDto, api);
+        final var result = urlService.saveUrlWithApiKey(createUrlDto, api, CreatedVia.API_KEY);
         assertThat(result).isInstanceOf(UrlResponse.class);
 
         verify(apiKeyValidator).apiKeyExistsByKeyAndIsValid(api);
@@ -1195,12 +1211,78 @@ class UrlServiceTest {
         when(createUrlToUrlConverter.convert(createUrlDto)).thenReturn(url);
         when(appProperties.getShortUrlLength()).thenReturn(24L);
 
-        final var result = urlService.saveUrlWithApiKey(createUrlDto, api);
+        final var result = urlService.saveUrlWithApiKey(createUrlDto, api, CreatedVia.API_KEY);
 
         assertThat(output)
                 .contains("Saving URL for owner id=1")
                 .doesNotContain("secret-destination.example")
                 .doesNotContain(result.shortUrl());
+    }
+
+    @Test
+    void signedInWebLinkIsStoredAsWeb() {
+        signedInCreate();
+
+        urlService.saveUrlRouting(link(0), CLIENT_IP, CreatedVia.WEB);
+
+        assertThat(savedLink().getCreatedVia()).isEqualTo(CreatedVia.WEB);
+    }
+
+    @Test
+    void anonymousWebLinkIsStoredAsAnonymousWeb() {
+        anonymousCreate();
+
+        urlService.saveUrlRouting(link(0), CLIENT_IP, CreatedVia.WEB);
+
+        assertThat(savedLink().getCreatedVia()).isEqualTo(CreatedVia.ANONYMOUS_WEB);
+    }
+
+    @Test
+    void signedInMcpLinkIsStoredAsMcp() {
+        signedInCreate();
+
+        urlService.saveUrlRouting(link(0), null, CreatedVia.MCP);
+
+        assertThat(savedLink().getCreatedVia()).isEqualTo(CreatedVia.MCP);
+    }
+
+    @Test
+    void anonymousMcpLinkIsStoredAsAnonymousMcp() {
+        anonymousCreate();
+
+        urlService.saveUrlRouting(link(0), null, CreatedVia.MCP);
+
+        assertThat(savedLink().getCreatedVia()).isEqualTo(CreatedVia.ANONYMOUS_MCP);
+    }
+
+    @Test
+    void apiKeyLinkStoresTheGivenChannel() {
+        when(apiKeyService.fetchApiKeyByKey("apikey")).thenReturn(ApiKey.builder().owner(User.builder().id(1L).build()).build());
+        stubLinkCreation();
+
+        urlService.saveUrlWithApiKey(link(0), "apikey", CreatedVia.API_KEY);
+        urlService.saveUrlWithApiKey(link(1), "apikey", CreatedVia.BULK);
+
+        final var saved = org.mockito.ArgumentCaptor.forClass(Url.class);
+        verify(urlRepository, times(2)).save(saved.capture());
+        assertThat(saved.getAllValues())
+                .extracting(Url::getCreatedVia)
+                .containsExactly(CreatedVia.API_KEY, CreatedVia.BULK);
+    }
+
+    @Test
+    void reusedAnonymousLinkKeepsItsChannel() {
+        final var createUrlDto = link(0);
+        final var existing = Url.builder().id(12L).shortUrl("v0DB3").longUrl("https://example.com/0").active(true).build();
+        when(createUrlToUrlConverter.convert(createUrlDto)).thenReturn(Url.builder().longUrl("https://example.com/0").build());
+        when(urlRepository.existsUrlByLongUrlAndActiveTrueAndOwnerIsNull("https://example.com/0")).thenReturn(true);
+        when(urlRepository.findByLongUrlAndActiveTrue("https://example.com/0")).thenReturn(Optional.of(existing));
+
+        final var result = urlService.saveUrlRouting(createUrlDto, CLIENT_IP, CreatedVia.WEB);
+
+        assertThat(result.id()).isEqualTo(12L);
+        assertThat(existing.getCreatedVia()).isNull();
+        verify(urlRepository, never()).save(any(Url.class));
     }
 
     @Test
@@ -1310,7 +1392,7 @@ class UrlServiceTest {
         when(urlRepository.save(url)).thenReturn(persisted(url));
         when(appProperties.getShortUrlLength()).thenReturn(1L);
 
-        final var result = urlService.saveUrlRouting(createUrlDto, CLIENT_IP);
+        final var result = urlService.saveUrlRouting(createUrlDto, CLIENT_IP, CreatedVia.WEB);
         assertThat(result).isInstanceOf(UrlResponse.class);
 
         verify(apiKeyValidator, org.mockito.Mockito.never()).apiKeyExistsByKeyAndIsValid(any());
@@ -1329,7 +1411,7 @@ class UrlServiceTest {
         when(urlRepository.save(url)).thenReturn(persisted(url));
         when(appProperties.getShortUrlLength()).thenReturn(24L);
 
-        final var result = urlService.saveUrlRouting(createUrlDto, CLIENT_IP);
+        final var result = urlService.saveUrlRouting(createUrlDto, CLIENT_IP, CreatedVia.WEB);
 
         assertThat(output)
                 .contains("Saving URL for owner id=1")
@@ -1343,14 +1425,14 @@ class UrlServiceTest {
         final var service = urlServiceLimitedBy(limiter);
         stubLinkCreation();
 
-        IntStream.range(0, 10).forEach(index -> service.saveUrlRouting(link(index), CLIENT_IP));
+        IntStream.range(0, 10).forEach(index -> service.saveUrlRouting(link(index), CLIENT_IP, CreatedVia.WEB));
 
-        assertThatThrownBy(() -> service.saveUrlRouting(link(10), CLIENT_IP))
+        assertThatThrownBy(() -> service.saveUrlRouting(link(10), CLIENT_IP, CreatedVia.WEB))
                 .isInstanceOf(RateLimitExceededException.class)
                 .hasMessage(CREATE_LIMIT_REFUSAL);
         verify(urlRepository, times(10)).save(any(Url.class));
 
-        assertThat(service.saveUrlRouting(link(11), "198.51.100.4").longUrl()).isEqualTo("https://example.com/11");
+        assertThat(service.saveUrlRouting(link(11), "198.51.100.4", CreatedVia.WEB).longUrl()).isEqualTo("https://example.com/11");
         assertThat(limiter.counts).containsOnlyKeys(
                 RateLimiter.clientKey("create:anon", CLIENT_IP),
                 RateLimiter.clientKey("create:anon", "198.51.100.4"));
@@ -1367,13 +1449,13 @@ class UrlServiceTest {
         when(userService.getUserFromToken()).thenReturn(owner);
         when(apiKeyService.fetchApiKeyByKey("apikey")).thenReturn(apiKey);
 
-        IntStream.range(0, 30).forEach(index -> service.saveUrlRouting(link(index), CLIENT_IP));
-        IntStream.range(30, 60).forEach(index -> service.saveUrlWithApiKey(link(index), "apikey"));
+        IntStream.range(0, 30).forEach(index -> service.saveUrlRouting(link(index), CLIENT_IP, CreatedVia.WEB));
+        IntStream.range(30, 60).forEach(index -> service.saveUrlWithApiKey(link(index), "apikey", CreatedVia.API_KEY));
 
-        assertThatThrownBy(() -> service.saveUrlWithApiKey(link(60), "apikey"))
+        assertThatThrownBy(() -> service.saveUrlWithApiKey(link(60), "apikey", CreatedVia.API_KEY))
                 .isInstanceOf(RateLimitExceededException.class)
                 .hasMessage(CREATE_LIMIT_REFUSAL);
-        assertThatThrownBy(() -> service.saveUrlRouting(link(61), CLIENT_IP))
+        assertThatThrownBy(() -> service.saveUrlRouting(link(61), CLIENT_IP, CreatedVia.WEB))
                 .isInstanceOf(RateLimitExceededException.class)
                 .hasMessage(CREATE_LIMIT_REFUSAL);
         verify(urlRepository, times(60)).save(any(Url.class));
@@ -1391,8 +1473,8 @@ class UrlServiceTest {
         when(userService.getUserFromToken()).thenReturn(admin);
         when(apiKeyService.fetchApiKeyByKey("apikey")).thenReturn(ApiKey.builder().owner(admin).build());
 
-        IntStream.range(0, 61).forEach(index -> service.saveUrlRouting(link(index), CLIENT_IP));
-        IntStream.range(61, 122).forEach(index -> service.saveUrlWithApiKey(link(index), "apikey"));
+        IntStream.range(0, 61).forEach(index -> service.saveUrlRouting(link(index), CLIENT_IP, CreatedVia.WEB));
+        IntStream.range(61, 122).forEach(index -> service.saveUrlWithApiKey(link(index), "apikey", CreatedVia.API_KEY));
 
         verify(urlRepository, times(122)).save(any(Url.class));
         assertThat(limiter.counts).isEmpty();
@@ -1406,7 +1488,7 @@ class UrlServiceTest {
         stubLinkCreation();
         when(userService.getUserFromToken()).thenReturn(owner);
 
-        List.of(link(0), link(1), link(2)).forEach(dto -> service.saveUrlRouting(dto, CLIENT_IP));
+        List.of(link(0), link(1), link(2)).forEach(dto -> service.saveUrlRouting(dto, CLIENT_IP, CreatedVia.WEB));
 
         assertThat(limiter.counts).containsExactlyEntriesOf(Map.of("create:user:1", 3));
     }
@@ -1417,9 +1499,9 @@ class UrlServiceTest {
         when(rateLimiter.tryAcquire(startsWith("create:"), anyInt(), any()))
                 .thenThrow(new RateLimiterUnavailableException(new RuntimeException("down")));
 
-        final var anonymous = urlService.saveUrlRouting(link(0), CLIENT_IP);
+        final var anonymous = urlService.saveUrlRouting(link(0), CLIENT_IP, CreatedVia.WEB);
         when(userService.getUserFromToken()).thenReturn(User.builder().id(1L).build());
-        final var signedIn = urlService.saveUrlRouting(link(1), CLIENT_IP);
+        final var signedIn = urlService.saveUrlRouting(link(1), CLIENT_IP, CreatedVia.WEB);
 
         assertThat(anonymous.longUrl()).isEqualTo("https://example.com/0");
         assertThat(signedIn.longUrl()).isEqualTo("https://example.com/1");
@@ -1432,7 +1514,7 @@ class UrlServiceTest {
     void anonymousLinksWithoutAClientIpAreLeftToTheCallersOwnLimit() {
         stubLinkCreation();
 
-        urlService.saveUrlRouting(link(0), null);
+        urlService.saveUrlRouting(link(0), null, CreatedVia.WEB);
 
         verify(rateLimiter, never()).tryAcquire(startsWith("create:"), anyInt(), any());
         verify(urlRepository).save(any(Url.class));
@@ -1581,7 +1663,7 @@ class UrlServiceTest {
         final var createUrlDto = CreateUrlDto.builder().longUrl("https//wedding.hrva.cc").build();
         when(appProperties.isAnonymousUrlCreationEnabled()).thenReturn(true);
 
-        assertThatThrownBy(() -> service.saveUrlRouting(createUrlDto, CLIENT_IP))
+        assertThatThrownBy(() -> service.saveUrlRouting(createUrlDto, CLIENT_IP, CreatedVia.WEB))
                 .isInstanceOf(UrlValidationException.class)
                 .hasMessage("That doesn't look like a valid web address. Check the URL and try again.");
 
@@ -1595,7 +1677,7 @@ class UrlServiceTest {
         final var createUrlDto = CreateUrlDto.builder().longUrl("https//wedding.hrva.cc").build();
         when(apiKeyService.fetchApiKeyByKey("apikey")).thenReturn(ApiKey.builder().owner(User.builder().id(1L).build()).build());
 
-        assertThatThrownBy(() -> service.saveUrlWithApiKey(createUrlDto, "apikey"))
+        assertThatThrownBy(() -> service.saveUrlWithApiKey(createUrlDto, "apikey", CreatedVia.API_KEY))
                 .isInstanceOf(UrlValidationException.class)
                 .hasMessage("That doesn't look like a valid web address. Check the URL and try again.");
 
@@ -1609,7 +1691,7 @@ class UrlServiceTest {
         final var createUrlDto = CreateUrlDto.builder().longUrl("https://bit.ly/3abc").build();
         when(apiKeyService.fetchApiKeyByKey("apikey")).thenReturn(ApiKey.builder().owner(User.builder().id(1L).build()).build());
 
-        assertThatThrownBy(() -> service.saveUrlWithApiKey(createUrlDto, "apikey"))
+        assertThatThrownBy(() -> service.saveUrlWithApiKey(createUrlDto, "apikey", CreatedVia.API_KEY))
                 .isInstanceOf(UrlValidationException.class)
                 .hasMessage("Links to other URL shorteners can't be shortened. Use the final destination instead.");
 
