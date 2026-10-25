@@ -4,6 +4,17 @@ All notable changes to hrva.cc — the URL shortener.
 
 ---
 
+## [v2.8.2] — 2026-10-25
+
+Fixes for long links and for two people picking the same short link name.
+
+### 🐛 Fixes
+- Links whose destination is longer than 255 characters no longer fail. Destinations can be up to 2048 characters, and longer ones get a clear message.
+- If two people pick the same custom short link name at the same moment, the second now gets "This short URL is already taken. Try another." instead of an error.
+- Bulk creation now answers an invalid link with a clear message instead of a server error.
+
+---
+
 ## [v2.8.1] — 2026-10-25
 
 Small fixes: header links when signed in, an accurate AI connector page and an up-to-date changelog.

@@ -1,10 +1,26 @@
 {
   "releases": [
     {
-      "version": "v2.8.1",
+      "version": "v2.8.2",
       "date": "2026-10-25",
       "badge": "Latest",
       "badgeVariant": "default",
+      "summary": "Fixes for long links and for two people picking the same short link name.",
+      "sections": [
+        {
+          "title": "Fixes",
+          "icon": "bug",
+          "items": [
+            "Links whose destination is longer than 255 characters no longer fail. Destinations can be up to 2048 characters, and longer ones get a clear message.",
+            "If two people pick the same custom short link name at the same moment, the second now gets \"This short URL is already taken. Try another.\" instead of an error.",
+            "Bulk creation now answers an invalid link with a clear message instead of a server error."
+          ]
+        }
+      ]
+    },
+    {
+      "version": "v2.8.1",
+      "date": "2026-10-25",
       "summary": "Small fixes: header links when signed in, an accurate AI connector page and an up-to-date changelog.",
       "sections": [
         {
