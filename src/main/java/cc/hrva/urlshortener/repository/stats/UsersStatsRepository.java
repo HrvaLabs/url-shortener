@@ -42,9 +42,9 @@ public class UsersStatsRepository {
     private static final String COUNT_SIGNED_IN_SINCE = "select count(*) from user_account where last_login >= :since";
 
     private static final String COUNT_API_KEYS = """
-            select coalesce(sum(case when active = true and (expiration_date is null or expiration_date >= :today) then 1 else 0 end), 0)
+            select coalesce(sum(case when active = true and (expiration_date is null or expiration_date > :today) then 1 else 0 end), 0)
                        as active_keys,
-                   coalesce(sum(case when expiration_date < :today then 1 else 0 end), 0) as expired_keys,
+                   coalesce(sum(case when expiration_date <= :today then 1 else 0 end), 0) as expired_keys,
                    coalesce(sum(api_calls_used), 0) as calls_used
             from api_key
             """;

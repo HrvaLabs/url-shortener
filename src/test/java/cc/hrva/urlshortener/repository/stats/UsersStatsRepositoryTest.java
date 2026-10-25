@@ -102,13 +102,21 @@ class UsersStatsRepositoryTest {
     @Test
     void apiKeysSplitActiveAndExpiredAndSumCalls() {
         apiKey(9601, true, null, 10L);
-        apiKey(9602, true, TODAY, 5L);
+        apiKey(9602, true, TODAY.plusDays(2), 5L);
         apiKey(9603, true, TODAY.minusDays(1), 7L);
         apiKey(9604, false, null, 3L);
         apiKey(9605, false, TODAY.minusDays(10), null);
         apiKey(9606, true, TODAY.plusDays(30), 0L);
 
         assertThat(usersStatsRepository.countApiKeys(TODAY)).isEqualTo(new ApiKeyCounts(3, 2, 25));
+    }
+
+    @Test
+    void aKeyExpiringTodayCountsAsExpired() {
+        apiKey(9611, true, TODAY, 4L);
+        apiKey(9612, true, TODAY.plusDays(1), 6L);
+
+        assertThat(usersStatsRepository.countApiKeys(TODAY)).isEqualTo(new ApiKeyCounts(1, 1, 10));
     }
 
     @Test
