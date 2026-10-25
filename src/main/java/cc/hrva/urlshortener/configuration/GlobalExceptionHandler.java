@@ -13,6 +13,7 @@ import cc.hrva.urlshortener.exception.EmailLogNotFoundException;
 import cc.hrva.urlshortener.exception.EmailNotVerifiedException;
 import cc.hrva.urlshortener.exception.InvalidApiKeyException;
 import cc.hrva.urlshortener.exception.RateLimitExceededException;
+import cc.hrva.urlshortener.exception.ReservedAliasNotFoundException;
 import cc.hrva.urlshortener.exception.ShortUrlAlreadyExistsException;
 import cc.hrva.urlshortener.exception.NoAuthorizationException;
 import cc.hrva.urlshortener.exception.UrlNotFoundException;
@@ -137,6 +138,11 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(DomainRuleNotFoundException.class)
     public ResponseEntity<Map<String, String>> handleDomainRuleNotFound(final DomainRuleNotFoundException ex) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", safeMessage(ex)));
+    }
+
+    @ExceptionHandler(ReservedAliasNotFoundException.class)
+    public ResponseEntity<Map<String, String>> handleReservedAliasNotFound(final ReservedAliasNotFoundException ex) {
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", safeMessage(ex)));
     }
 

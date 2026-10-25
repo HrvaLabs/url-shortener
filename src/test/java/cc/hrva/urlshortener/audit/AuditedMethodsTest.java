@@ -28,7 +28,9 @@ class AuditedMethodsTest {
             Map.entry("AdminBlocklistController.createSource", AuditAction.CREATE_SOURCE),
             Map.entry("AdminBlocklistController.updateSource", AuditAction.UPDATE_SOURCE),
             Map.entry("AdminBlocklistController.deleteSource", AuditAction.DELETE_SOURCE),
-            Map.entry("AdminBlocklistController.refreshSource", AuditAction.REFRESH_SOURCE));
+            Map.entry("AdminBlocklistController.refreshSource", AuditAction.REFRESH_SOURCE),
+            Map.entry("AdminReservedAliasController.reserveAlias", AuditAction.RESERVE_ALIAS),
+            Map.entry("AdminReservedAliasController.unreserveAlias", AuditAction.UNRESERVE_ALIAS));
 
     @Test
     void exactlyTheseControllerMethodsAreAuditedEachWithItsOwnAction() {

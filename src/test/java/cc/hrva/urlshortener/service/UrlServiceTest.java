@@ -35,6 +35,7 @@ import cc.hrva.urlshortener.exception.ApiKeyNotFoundException;
 import cc.hrva.urlshortener.exception.InvalidApiKeyException;
 import cc.hrva.urlshortener.exception.NoAuthorizationException;
 import cc.hrva.urlshortener.exception.RateLimitExceededException;
+import cc.hrva.urlshortener.exception.ShortUrlAlreadyExistsException;
 import cc.hrva.urlshortener.exception.UrlNotFoundException;
 import cc.hrva.urlshortener.exception.UrlValidationException;
 import cc.hrva.urlshortener.mcp.anon.RateLimiter;
@@ -164,6 +165,9 @@ class UrlServiceTest {
     @Mock
     private EntityManager entityManager;
 
+    @Mock
+    private ReservedAliasService reservedAliasService;
+
     @BeforeEach
     void setUp() {
         org.mockito.Mockito.lenient().when(rateLimiter.tryAcquire(any(), org.mockito.ArgumentMatchers.anyInt(), any())).thenReturn(true);
@@ -191,7 +195,8 @@ class UrlServiceTest {
                 clickCheckService,
                 redirectChainService,
                 TransactionOperations.withoutTransaction(),
-                entityManager
+                entityManager,
+                reservedAliasService
         );
     }
 
@@ -926,8 +931,100 @@ class UrlServiceTest {
         final var result = urlService.saveUrlRouting(createUrlDto, CLIENT_IP);
         assertThat(result.longUrl()).isEqualTo("long");
 
-        verify(urlValidator).checkIfShortUrlIsUnique(url.getShortUrl());
+        verify(reservedAliasService).isReserved(url.getShortUrl());
+        verify(urlRepository).existsUrlByShortUrl(url.getShortUrl());
         verify(urlValidator).longUrlInUrl(url);
+    }
+
+    @Test
+    void generatedAliasSkipsReservedWords() {
+        final var url = signedInCreate();
+        when(reservedAliasService.isReserved(anyString())).thenReturn(true, false);
+
+        urlService.saveUrlRouting(CreateUrlDto.builder().longUrl("https://example.com/menu").build(), CLIENT_IP);
+
+        final var candidates = org.mockito.ArgumentCaptor.forClass(String.class);
+        verify(reservedAliasService, times(2)).isReserved(candidates.capture());
+        assertThat(url.getShortUrl()).hasSize(5).isEqualTo(candidates.getAllValues().getLast());
+        verify(urlRepository).existsUrlByShortUrl(url.getShortUrl());
+        verify(urlRepository).save(url);
+    }
+
+    @Test
+    void generatedAliasSkipsTakenOnes() {
+        final var url = signedInCreate();
+        when(urlRepository.existsUrlByShortUrl(anyString())).thenReturn(true, false);
+
+        urlService.saveUrlRouting(CreateUrlDto.builder().longUrl("https://example.com/menu").build(), CLIENT_IP);
+
+        final var candidates = org.mockito.ArgumentCaptor.forClass(String.class);
+        verify(urlRepository, times(2)).existsUrlByShortUrl(candidates.capture());
+        assertThat(url.getShortUrl()).hasSize(5).isEqualTo(candidates.getAllValues().getLast());
+        verify(reservedAliasService, times(2)).isReserved(anyString());
+        verify(urlRepository).save(url);
+    }
+
+    @Test
+    void givesUpAfterTenUnusableCandidates() {
+        final var createUrlDto = CreateUrlDto.builder().longUrl("https://example.com/menu").build();
+        when(createUrlToUrlConverter.convert(createUrlDto)).thenReturn(Url.builder().longUrl("https://example.com/menu").build());
+        when(userService.getUserFromToken()).thenReturn(User.builder().id(1L).build());
+        when(appProperties.getShortUrlLength()).thenReturn(5L);
+        when(reservedAliasService.isReserved(anyString())).thenReturn(true);
+
+        assertThatThrownBy(() -> urlService.saveUrlRouting(createUrlDto, CLIENT_IP))
+                .isInstanceOf(ShortUrlAlreadyExistsException.class)
+                .hasMessage("Couldn't pick a free short URL. Try again.");
+
+        verify(reservedAliasService, times(10)).isReserved(anyString());
+        verify(urlRepository, never()).existsUrlByShortUrl(anyString());
+        verify(urlRepository, never()).save(any());
+    }
+
+    @Test
+    void anonymousGeneratedAliasSkipsReservedWords() {
+        final var createUrlDto = CreateUrlDto.builder().longUrl("https://example.com/menu").build();
+        final var url = Url.builder().longUrl("https://example.com/menu").build();
+        when(createUrlToUrlConverter.convert(createUrlDto)).thenReturn(url);
+        when(userService.getUserFromToken()).thenReturn(null);
+        when(appProperties.getShortUrlLength()).thenReturn(5L);
+        when(reservedAliasService.isReserved(anyString())).thenReturn(true, false);
+        when(urlRepository.save(url)).thenReturn(persisted(url));
+
+        urlService.saveUrlRouting(createUrlDto, CLIENT_IP);
+
+        final var candidates = org.mockito.ArgumentCaptor.forClass(String.class);
+        verify(reservedAliasService, times(2)).isReserved(candidates.capture());
+        assertThat(url.getShortUrl()).hasSize(5).isEqualTo(candidates.getAllValues().getLast());
+        assertThat(url.getOwner()).isNull();
+        verify(urlRepository).save(url);
+    }
+
+    @Test
+    void customAliasStillGoesThroughTheReservedCheck() {
+        final var createUrlDto = CreateUrlDto.builder().longUrl("https://example.com/menu").shortUrl("promo").build();
+        final var url = Url.builder().longUrl("https://example.com/menu").shortUrl("promo").build();
+        when(createUrlToUrlConverter.convert(createUrlDto)).thenReturn(url);
+        when(userService.getUserFromToken()).thenReturn(User.builder().id(1L).build());
+        when(urlRepository.save(url)).thenReturn(persisted(url));
+
+        urlService.saveUrlRouting(createUrlDto, CLIENT_IP);
+
+        final var order = org.mockito.Mockito.inOrder(urlValidator, urlRepository);
+        order.verify(urlValidator).checkIfShortUrlIsUnique("promo");
+        order.verify(urlValidator).checkIfShortUrlIsReserved("promo");
+        order.verify(urlRepository).save(url);
+        assertThat(url.getShortUrl()).isEqualTo("promo");
+        verifyNoInteractions(reservedAliasService);
+    }
+
+    private Url signedInCreate() {
+        final var url = Url.builder().longUrl("https://example.com/menu").build();
+        when(createUrlToUrlConverter.convert(any(CreateUrlDto.class))).thenReturn(url);
+        when(userService.getUserFromToken()).thenReturn(User.builder().id(1L).build());
+        when(appProperties.getShortUrlLength()).thenReturn(5L);
+        when(urlRepository.save(url)).thenReturn(persisted(url));
+        return url;
     }
 
     @Test
@@ -1910,7 +2007,8 @@ class UrlServiceTest {
                 clickCheckService,
                 redirectChainService,
                 TransactionOperations.withoutTransaction(),
-                entityManager
+                entityManager,
+                reservedAliasService
         );
     }
 
@@ -1954,7 +2052,8 @@ class UrlServiceTest {
         final var transactionManager = new DataSourceTransactionManager(new DriverManagerDataSource("jdbc:h2:mem:"));
         final var service = new DefaultUrlService(
                 userService,
-                new DefaultUrlValidator(userService, urlRepository, appProperties, safeBrowsingService, new DefaultSuspiciousUrlService(appProperties), linkCheckService),
+                new DefaultUrlValidator(userService, urlRepository, appProperties, safeBrowsingService, new DefaultSuspiciousUrlService(appProperties), linkCheckService,
+                        reservedAliasService),
                 apiKeyService,
                 urlRepository,
                 appProperties,
@@ -1974,7 +2073,8 @@ class UrlServiceTest {
                 clickCheckService,
                 redirectChainService,
                 new TransactionTemplate(transactionManager),
-                entityManager
+                entityManager,
+                reservedAliasService
         );
         final var proxyFactory = new ProxyFactory(service);
         proxyFactory.addAdvice(new TransactionInterceptor(transactionManager, new AnnotationTransactionAttributeSource()));
@@ -1984,7 +2084,8 @@ class UrlServiceTest {
     private UrlService urlServiceWithRealLongUrlHandling() {
         return new DefaultUrlService(
                 userService,
-                new DefaultUrlValidator(userService, urlRepository, appProperties, safeBrowsingService, new DefaultSuspiciousUrlService(appProperties), linkCheckService),
+                new DefaultUrlValidator(userService, urlRepository, appProperties, safeBrowsingService, new DefaultSuspiciousUrlService(appProperties), linkCheckService,
+                        reservedAliasService),
                 apiKeyService,
                 urlRepository,
                 appProperties,
@@ -2004,7 +2105,8 @@ class UrlServiceTest {
                 clickCheckService,
                 redirectChainService,
                 TransactionOperations.withoutTransaction(),
-                entityManager
+                entityManager,
+                reservedAliasService
         );
     }
 
@@ -2031,7 +2133,8 @@ class UrlServiceTest {
                 clickCheckService,
                 redirectChainService,
                 TransactionOperations.withoutTransaction(),
-                entityManager
+                entityManager,
+                reservedAliasService
         );
     }
 

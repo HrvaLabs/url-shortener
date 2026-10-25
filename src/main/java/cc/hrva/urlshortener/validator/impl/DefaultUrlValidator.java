@@ -6,13 +6,13 @@ import cc.hrva.urlshortener.exception.*;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.service.LinkCheckService;
+import cc.hrva.urlshortener.service.ReservedAliasService;
 import cc.hrva.urlshortener.service.SafeBrowsingService;
 import cc.hrva.urlshortener.service.SuspiciousUrlService;
 import cc.hrva.urlshortener.service.UserService;
 import cc.hrva.urlshortener.util.DomainNames;
 import cc.hrva.urlshortener.validator.UrlValidator;
 import java.net.URI;
-import java.util.List;
 import java.util.regex.Pattern;
 import lombok.RequiredArgsConstructor;
 import org.apache.commons.lang3.StringUtils;
@@ -31,10 +31,7 @@ public class DefaultUrlValidator implements UrlValidator {
     private final SafeBrowsingService safeBrowsingService;
     private final SuspiciousUrlService suspiciousUrlService;
     private final LinkCheckService linkCheckService;
-
-    private static final List<String> RESERVED_WORDS = List.of(
-            "api", "login", "logout", "oauth2", "actuator", "error",
-            "swagger-ui", "v3", "webjars", "auth", "mcp");
+    private final ReservedAliasService reservedAliasService;
 
     private static final String BLOCKLISTED = "This destination is on a blocklist and can't be shortened. If you think that's a mistake, contact us.";
     private static final String STILL_BLOCKED = "This destination is still blocked: ";
@@ -122,7 +119,7 @@ public class DefaultUrlValidator implements UrlValidator {
 
     @Override
     public void checkIfShortUrlIsReserved(final String shortUrl) {
-        if (shortUrl != null && RESERVED_WORDS.contains(shortUrl.toLowerCase())) {
+        if (reservedAliasService.isReserved(shortUrl)) {
             throw new ShortUrlAlreadyExistsException("This short URL is reserved. Try another.");
         }
     }

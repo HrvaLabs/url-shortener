@@ -14,6 +14,7 @@ import cc.hrva.urlshortener.exception.UrlValidationException;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.service.LinkCheckService;
+import cc.hrva.urlshortener.service.ReservedAliasService;
 import cc.hrva.urlshortener.service.SafeBrowsingService;
 import cc.hrva.urlshortener.service.SuspiciousUrlService;
 import cc.hrva.urlshortener.service.UserService;
@@ -59,9 +60,13 @@ class DefaultUrlValidatorTest {
     @Mock
     private LinkCheckService linkCheckService;
 
+    @Mock
+    private ReservedAliasService reservedAliasService;
+
     @BeforeEach
     void setUp() {
-        this.urlValidator = new DefaultUrlValidator(userService, urlRepository, appProperties, safeBrowsingService, suspiciousUrlService, linkCheckService);
+        this.urlValidator = new DefaultUrlValidator(userService, urlRepository, appProperties, safeBrowsingService, suspiciousUrlService, linkCheckService,
+                reservedAliasService);
     }
 
     @Test
@@ -320,9 +325,28 @@ class DefaultUrlValidatorTest {
 
     @Test
     void shouldRejectMcpAsReservedAlias() {
+        when(reservedAliasService.isReserved("MCP")).thenReturn(true);
+
         assertThatThrownBy(() -> urlValidator.checkIfShortUrlIsReserved("MCP"))
                 .isInstanceOf(ShortUrlAlreadyExistsException.class)
                 .hasMessage("This short URL is reserved. Try another.");
+    }
+
+    @Test
+    void shouldRejectACustomReservedAlias() {
+        when(reservedAliasService.isReserved("Promo")).thenReturn(true);
+
+        assertThatThrownBy(() -> urlValidator.checkIfShortUrlIsReserved("Promo"))
+                .isInstanceOf(ShortUrlAlreadyExistsException.class)
+                .hasMessage("This short URL is reserved. Try another.");
+    }
+
+    @Test
+    void shouldAllowAnAliasThatIsNotReserved() {
+        when(reservedAliasService.isReserved("summer-menu")).thenReturn(false);
+
+        assertThatCode(() -> urlValidator.checkIfShortUrlIsReserved("summer-menu"))
+                .doesNotThrowAnyException();
     }
 
     @Test

@@ -15,6 +15,7 @@ import cc.hrva.urlshortener.dto.UrlSearchDto;
 import cc.hrva.urlshortener.dto.UrlUpdateDto;
 import cc.hrva.urlshortener.dto.UnlockResponse;
 import cc.hrva.urlshortener.exception.NoAuthorizationException;
+import cc.hrva.urlshortener.exception.ShortUrlAlreadyExistsException;
 import cc.hrva.urlshortener.exception.UrlNotFoundException;
 import cc.hrva.urlshortener.exception.UrlValidationException;
 import cc.hrva.urlshortener.model.ApiKey;
@@ -30,6 +31,7 @@ import cc.hrva.urlshortener.service.ApiKeyService;
 import cc.hrva.urlshortener.service.ClickAnalyticsService;
 import cc.hrva.urlshortener.service.ClickCheckService;
 import cc.hrva.urlshortener.service.RedirectChainService;
+import cc.hrva.urlshortener.service.ReservedAliasService;
 import cc.hrva.urlshortener.service.ReviewQueueService;
 import cc.hrva.urlshortener.service.ScammerSignalService;
 import cc.hrva.urlshortener.service.SuspiciousUrlService;
@@ -70,6 +72,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.stream.Stream;
 
 @Service
 @Slf4j
@@ -95,6 +98,8 @@ public class DefaultUrlService implements UrlService {
     private static final String CREATE_LIMIT_REFUSAL = "You've created a lot of links in a short time. Try again in an hour.";
     private static final String ROLE_ADMIN = "ROLE_ADMIN";
     private static final String BLOCKED_WHILE_EDITING = "This link was blocked while you were editing it. Reload and try again.";
+    private static final int MAX_GENERATED_ALIAS_ATTEMPTS = 10;
+    private static final String NO_FREE_ALIAS = "Couldn't pick a free short URL. Try again.";
 
     private static final Set<String> BOT_PROBE_PATHS = Set.of(
             "favicon.ico", "favicon.png", "robots.txt", "sitemap.xml",
@@ -123,6 +128,7 @@ public class DefaultUrlService implements UrlService {
     private final RedirectChainService redirectChainService;
     private final TransactionOperations transactionOperations;
     private final EntityManager entityManager;
+    private final ReservedAliasService reservedAliasService;
 
     @Override
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
@@ -266,11 +272,23 @@ public class DefaultUrlService implements UrlService {
 
     private void assignShortUrl(final Url url) {
         if (StringUtils.isEmpty(url.getShortUrl())) {
-            url.setShortUrl(generateShortUrl(appProperties.getShortUrlLength()));
+            url.setShortUrl(nextFreeShortUrl());
             log.info("URL got a generated short URL");
+        } else {
+            urlValidator.checkIfShortUrlIsUnique(url.getShortUrl());
+            urlValidator.checkIfShortUrlIsReserved(url.getShortUrl());
         }
-        urlValidator.checkIfShortUrlIsUnique(url.getShortUrl());
-        urlValidator.checkIfShortUrlIsReserved(url.getShortUrl());
+    }
+
+    private String nextFreeShortUrl() {
+        return Stream.generate(() -> generateShortUrl(appProperties.getShortUrlLength()))
+                .limit(MAX_GENERATED_ALIAS_ATTEMPTS)
+                .filter(candidate -> !reservedAliasService.isReserved(candidate) && !urlRepository.existsUrlByShortUrl(candidate))
+                .findFirst()
+                .orElseThrow(() -> {
+                    log.warn("No free short URL among {} generated candidates", MAX_GENERATED_ALIAS_ATTEMPTS);
+                    return new ShortUrlAlreadyExistsException(NO_FREE_ALIAS);
+                });
     }
 
     @Override
@@ -772,10 +790,7 @@ public class DefaultUrlService implements UrlService {
             return existingLongUrl;
         }
 
-        url.setShortUrl(generateShortUrl(appProperties.getShortUrlLength()));
-
-        urlValidator.checkIfShortUrlIsUnique(url.getShortUrl());
-        urlValidator.checkIfShortUrlIsReserved(url.getShortUrl());
+        url.setShortUrl(nextFreeShortUrl());
 
         log.info("Saving URL");
         final var saved = urlRepository.save(url);

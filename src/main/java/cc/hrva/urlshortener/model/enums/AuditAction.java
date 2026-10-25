@@ -22,6 +22,8 @@ public enum AuditAction {
     BLOCK_USER,
     REACTIVATE_USER,
     DELETE_LINK,
+    RESERVE_ALIAS,
+    UNRESERVE_ALIAS,
     UNKNOWN
 
 }

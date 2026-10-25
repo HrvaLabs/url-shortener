@@ -1,6 +1,9 @@
 package cc.hrva.urlshortener.repository;
 
+import cc.hrva.urlshortener.model.ReservedAlias;
 import cc.hrva.urlshortener.model.Url;
+import jakarta.persistence.EntityManager;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.SpringBootConfiguration;
@@ -40,6 +43,15 @@ class AdminStatsAndReservedAliasesSchemaTest {
 
     @Autowired
     private ShortUrlUniqueIndex shortUrlUniqueIndex;
+
+    @Autowired
+    private ReservedAliasRepository reservedAliasRepository;
+
+    @Autowired
+    private UrlRepository urlRepository;
+
+    @Autowired
+    private EntityManager entityManager;
 
     @Test
     void everyChangesetOf027Ran() {
@@ -97,6 +109,33 @@ class AdminStatsAndReservedAliasesSchemaTest {
     }
 
     @Test
+    void reservedAliasEntityRoundTrips() {
+        reservedAliasRepository.save(ReservedAlias.builder().alias("summer").reason("Kept for the summer menu").createdBy(ADMIN).build());
+        reservedAliasRepository.save(ReservedAlias.builder().alias("promo").reason("Kept for the spring campaign").createdBy(ADMIN).build());
+        entityManager.flush();
+        entityManager.clear();
+
+        final var entries = reservedAliasRepository.findAllByOrderByAliasAsc();
+
+        assertThat(entries)
+                .extracting(ReservedAlias::getAlias, ReservedAlias::getReason, ReservedAlias::getCreatedBy)
+                .containsExactly(
+                        tuple("promo", "Kept for the spring campaign", ADMIN),
+                        tuple("summer", "Kept for the summer menu", ADMIN));
+        assertThat(entries).allSatisfy(entry -> assertThat(entry.getCreatedAt()).isNotNull());
+    }
+
+    @Test
+    void findsLinksByAliasIgnoringCase() {
+        urlRepository.save(Url.builder().shortUrl("Promo").longUrl("https://example.com/promo").build());
+        urlRepository.save(Url.builder().shortUrl("promotion").longUrl("https://example.com/promotion").build());
+
+        assertThat(urlRepository.findByLowerShortUrlIn(Set.of("promo")))
+                .extracting(Url::getShortUrl)
+                .containsExactly("Promo");
+    }
+
+    @Test
     void uniquenessIsEnforcedOnACleanDatabase() {
         assertThat(shortUrlUniqueIndex.enforced()).isTrue();
     }
@@ -114,7 +153,7 @@ class AdminStatsAndReservedAliasesSchemaTest {
     @EntityScan(basePackageClasses = Url.class)
     @EnableJpaRepositories(
             basePackageClasses = UrlRepository.class,
-            includeFilters = @ComponentScan.Filter(type = FilterType.ASSIGNABLE_TYPE, classes = UrlRepository.class))
+            includeFilters = @ComponentScan.Filter(type = FilterType.ASSIGNABLE_TYPE, classes = {UrlRepository.class, ReservedAliasRepository.class}))
     @Import(ShortUrlUniqueIndex.class)
     static class TestApplication {
     }

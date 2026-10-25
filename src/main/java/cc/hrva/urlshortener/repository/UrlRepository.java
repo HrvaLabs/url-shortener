@@ -51,6 +51,9 @@ public interface UrlRepository extends JpaRepository<Url, Long>, JpaSpecificatio
     @Query("select u.id from Url u where u.active = true order by u.id")
     List<Long> findActiveIds();
 
+    @Query("select u from Url u left join fetch u.owner where lower(u.shortUrl) in :aliases")
+    List<Url> findByLowerShortUrlIn(@Param("aliases") Collection<String> aliases);
+
     @Query("select u.id from Url u where u.expirationDate <= :now and u.active = true order by u.id")
     List<Long> findExpiredActiveIds(@Param("now") LocalDateTime now);
 
