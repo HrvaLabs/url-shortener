@@ -23,6 +23,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.exception.ExceptionUtils;
 import org.slf4j.Logger;
@@ -57,23 +58,20 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<Map<String, String>> handleValidation(final MethodArgumentNotValidException ex) {
-        final var errors = ex.getBindingResult().getFieldErrors().stream()
-                .collect(Collectors.toMap(
-                        FieldError::getField,
-                        e -> e.getDefaultMessage() != null ? e.getDefaultMessage() : "Invalid value",
-                        (a, b) -> b));
-        return ResponseEntity.badRequest().body(errors);
+        return ResponseEntity.badRequest().body(fieldErrors(ex.getBindingResult().getFieldErrors().stream()));
     }
 
     @ExceptionHandler(HandlerMethodValidationException.class)
     public ResponseEntity<Map<String, String>> handleMethodValidation(final HandlerMethodValidationException ex) {
-        final var errors = ex.getBeanResults().stream()
-                .flatMap(result -> result.getFieldErrors().stream())
-                .collect(Collectors.toMap(
-                        FieldError::getField,
-                        e -> e.getDefaultMessage() != null ? e.getDefaultMessage() : "Invalid value",
-                        (a, b) -> b));
-        return ResponseEntity.badRequest().body(errors);
+        return ResponseEntity.badRequest().body(fieldErrors(ex.getBeanResults().stream()
+                .flatMap(result -> result.getFieldErrors().stream())));
+    }
+
+    private static Map<String, String> fieldErrors(final Stream<FieldError> errors) {
+        return errors.collect(Collectors.toMap(
+                FieldError::getField,
+                e -> e.getDefaultMessage() != null ? e.getDefaultMessage() : "Invalid value",
+                (a, b) -> b));
     }
 
     private static String safeMessage(final Exception ex) {

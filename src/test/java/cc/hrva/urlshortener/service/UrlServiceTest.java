@@ -478,6 +478,36 @@ class UrlServiceTest {
     }
 
     @Test
+    void anOverlongDestinationNeverReachesTheLinkChecks() {
+        final var overlong = "https://example.com/" + "a".repeat(UrlValidator.MAX_LONG_URL_LENGTH);
+        final var createUrlDto = CreateUrlDto.builder().longUrl(overlong).build();
+        final var created = Url.builder().longUrl(overlong).build();
+        final var existing = Url.builder().id(7L).shortUrl("abc").longUrl("https://old.example").visits(0L).active(true).build();
+        final var update = UrlUpdateDto.builder().id(7L).longUrl(overlong).build();
+        final var changed = Url.builder().id(7L).shortUrl("abc").longUrl(overlong).visits(0L).active(true).build();
+        when(createUrlToUrlConverter.convert(createUrlDto)).thenReturn(created);
+        when(userService.getUserFromToken()).thenReturn(User.builder().id(1L).build());
+        when(urlRepository.findById(7L)).thenReturn(Optional.of(existing));
+        when(urlUpdateDtoToUrlConverter.convert(update)).thenReturn(changed);
+        org.mockito.Mockito.doThrow(new UrlValidationException(UrlValidator.LONG_URL_TOO_LONG))
+                .when(urlValidator).checkIfLongUrlIsValid(any());
+
+        assertThatThrownBy(() -> urlService.saveUrlRouting(createUrlDto, CLIENT_IP))
+                .isInstanceOf(UrlValidationException.class)
+                .hasMessage(UrlValidator.LONG_URL_TOO_LONG);
+        assertThatThrownBy(() -> urlService.updateUrl(update))
+                .isInstanceOf(UrlValidationException.class)
+                .hasMessage(UrlValidator.LONG_URL_TOO_LONG);
+
+        verify(urlValidator).checkIfLongUrlIsValid(created);
+        verify(urlValidator).checkIfLongUrlIsValid(changed);
+        verify(urlValidator, never()).checkIfLongUrlIsNotAShortener(any());
+        verify(urlValidator, never()).checkIfLongUrlIsNotBlocklisted(any());
+        verify(urlValidator, never()).checkIfUrlSafe(any());
+        verify(urlRepository, never()).save(any());
+    }
+
+    @Test
     void aFlaggedLinkIsSavedAndQueuedForReview() {
         final var createUrlDto = CreateUrlDto.builder().longUrl("https://findfavoritedate.life/?u=f6yp608").build();
         final var url = Url.builder().longUrl("https://findfavoritedate.life/?u=f6yp608").build();
