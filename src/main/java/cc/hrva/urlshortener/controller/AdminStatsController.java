@@ -2,6 +2,7 @@ package cc.hrva.urlshortener.controller;
 
 import cc.hrva.urlshortener.dto.stats.LinksStatsResponse;
 import cc.hrva.urlshortener.dto.stats.TrafficStatsResponse;
+import cc.hrva.urlshortener.dto.stats.UsersStatsResponse;
 import cc.hrva.urlshortener.service.AdminStatsService;
 import io.swagger.v3.oas.annotations.Hidden;
 import lombok.RequiredArgsConstructor;
@@ -29,6 +30,11 @@ public class AdminStatsController {
     @GetMapping("/links")
     public ResponseEntity<LinksStatsResponse> links(@RequestParam(name = "days", required = false) final Integer days) {
         return ResponseEntity.ok(adminStatsService.links(days));
+    }
+
+    @GetMapping("/users")
+    public ResponseEntity<UsersStatsResponse> users(@RequestParam(name = "days", required = false) final Integer days) {
+        return ResponseEntity.ok(adminStatsService.users(days));
     }
 
 }

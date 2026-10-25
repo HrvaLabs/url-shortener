@@ -2,11 +2,13 @@ package cc.hrva.urlshortener.service.impl;
 
 import cc.hrva.urlshortener.dto.stats.LinksStatsResponse;
 import cc.hrva.urlshortener.dto.stats.TrafficStatsResponse;
+import cc.hrva.urlshortener.dto.stats.UsersStatsResponse;
 import cc.hrva.urlshortener.model.enums.AnalyticsRange;
 import cc.hrva.urlshortener.service.AdminStatsService;
 import cc.hrva.urlshortener.service.stats.LinksStats;
 import cc.hrva.urlshortener.service.stats.StatsDays;
 import cc.hrva.urlshortener.service.stats.TrafficStats;
+import cc.hrva.urlshortener.service.stats.UsersStats;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -19,6 +21,7 @@ public class DefaultAdminStatsService implements AdminStatsService {
     private final StatsDays statsDays;
     private final TrafficStats trafficStats;
     private final LinksStats linksStats;
+    private final UsersStats usersStats;
 
     @Override
     public TrafficStatsResponse traffic(final Integer days) {
@@ -30,6 +33,12 @@ public class DefaultAdminStatsService implements AdminStatsService {
     public LinksStatsResponse links(final Integer days) {
         final var range = AnalyticsRange.fromDays(days);
         return linksStats.collect(statsDays.window(range));
+    }
+
+    @Override
+    public UsersStatsResponse users(final Integer days) {
+        final var range = AnalyticsRange.fromDays(days);
+        return usersStats.collect(statsDays.window(range));
     }
 
 }

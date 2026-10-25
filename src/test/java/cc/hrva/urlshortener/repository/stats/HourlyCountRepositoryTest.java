@@ -14,6 +14,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.annotation.Transactional;
 
 import static cc.hrva.urlshortener.repository.stats.HourlySeries.LINKS_BY_CHANNEL;
+import static cc.hrva.urlshortener.repository.stats.HourlySeries.SIGNUPS_BY_PROVIDER;
 import static org.assertj.core.api.Assertions.assertThat;
 
 @Transactional
@@ -66,9 +67,35 @@ class HourlyCountRepositoryTest {
                 .containsExactly(new HourlyCount(DAY, 22, "API_KEY", 1));
     }
 
+    @Test
+    void countsSignUpsPerHourAndProvider() {
+        account(9101, DAY.atTime(8, 10), "local");
+        accountWithoutProvider(9102, DAY.atTime(8, 50));
+        account(9103, DAY.atTime(8, 55), "google");
+        account(9104, DAY.atTime(14, 20), "github");
+        account(9105, DAY.atTime(14, 40), "github");
+        account(9106, DAY.plusDays(1).atTime(0, 5), "google");
+
+        assertThat(hourlyCountRepository.count(SIGNUPS_BY_PROVIDER, DAY.atStartOfDay(), DAY.plusDays(1).atStartOfDay()))
+                .containsExactlyInAnyOrder(
+                        new HourlyCount(DAY, 8, "local", 2),
+                        new HourlyCount(DAY, 8, "google", 1),
+                        new HourlyCount(DAY, 14, "github", 2));
+    }
+
     private void link(final long id, final LocalDateTime createDate, final String createdVia) {
         jdbcTemplate.update("insert into url (id, long_url, short_url, create_date, created_via) values (?, ?, ?, ?, ?)",
                 id, "https://example.org/" + id, "hourly-" + id, createDate, createdVia);
+    }
+
+    private void account(final long id, final LocalDateTime createDate, final String authProvider) {
+        jdbcTemplate.update("insert into user_account (id, email, password, create_date, auth_provider) values (?, ?, ?, ?, ?)",
+                id, "signup-" + id + "@example.com", "correct horse battery", createDate, authProvider);
+    }
+
+    private void accountWithoutProvider(final long id, final LocalDateTime createDate) {
+        jdbcTemplate.update("insert into user_account (id, email, password, create_date) values (?, ?, ?, ?)",
+                id, "signup-" + id + "@example.com", "correct horse battery", createDate);
     }
 
     @SpringBootConfiguration

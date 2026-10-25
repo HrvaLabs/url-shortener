@@ -7,7 +7,8 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public enum HourlySeries {
 
-    LINKS_BY_CHANNEL("url", "create_date", "coalesce(created_via, 'unknown')");
+    LINKS_BY_CHANNEL("url", "create_date", "coalesce(created_via, 'unknown')"),
+    SIGNUPS_BY_PROVIDER("user_account", "create_date", "coalesce(auth_provider, 'local')");
 
     private final String table;
     private final String timestampColumn;
