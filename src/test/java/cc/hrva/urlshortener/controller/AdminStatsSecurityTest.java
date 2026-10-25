@@ -10,6 +10,9 @@ import cc.hrva.urlshortener.dto.UrlAnalyticsDto.Breakdowns;
 import cc.hrva.urlshortener.dto.stats.LinksStatsResponse;
 import cc.hrva.urlshortener.dto.stats.LinksStatsResponse.CreatedInRange;
 import cc.hrva.urlshortener.dto.stats.LinksStatsResponse.LinkInventory;
+import cc.hrva.urlshortener.dto.stats.SafetyStatsResponse;
+import cc.hrva.urlshortener.dto.stats.SafetyStatsResponse.DomainRuleCounts;
+import cc.hrva.urlshortener.dto.stats.SafetyStatsResponse.ResolveTimes;
 import cc.hrva.urlshortener.dto.stats.StackedSeries;
 import cc.hrva.urlshortener.dto.stats.TrafficStatsResponse;
 import cc.hrva.urlshortener.dto.stats.UsersStatsResponse;
@@ -120,7 +123,7 @@ class AdminStatsSecurityTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"traffic", "links", "users"})
+    @ValueSource(strings = {"traffic", "links", "users", "safety"})
     void anAdminGetsTheTab(final String tab) throws Exception {
         respond(tab);
 
@@ -130,7 +133,7 @@ class AdminStatsSecurityTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"traffic", "links", "users"})
+    @ValueSource(strings = {"traffic", "links", "users", "safety"})
     void aSignedInUserWhoIsNotAnAdminIsForbidden(final String tab) throws Exception {
         mockMvc.perform(tabRequest(tab, "user-token").param("days", "7"))
                 .andExpect(status().isForbidden());
@@ -139,7 +142,7 @@ class AdminStatsSecurityTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"traffic", "links", "users"})
+    @ValueSource(strings = {"traffic", "links", "users", "safety"})
     void nobodySignedInIsUnauthorized(final String tab) throws Exception {
         mockMvc.perform(get(STATS + tab).param("days", "7"))
                 .andExpect(status().isUnauthorized());
@@ -148,7 +151,7 @@ class AdminStatsSecurityTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"traffic", "links", "users"})
+    @ValueSource(strings = {"traffic", "links", "users", "safety"})
     void anUnsupportedRangeIsABadRequest(final String tab) throws Exception {
         refuseRange(tab);
 
@@ -158,7 +161,7 @@ class AdminStatsSecurityTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"traffic", "links", "users"})
+    @ValueSource(strings = {"traffic", "links", "users", "safety"})
     void aMistypedRangeIsABadRequest(final String tab) throws Exception {
         mockMvc.perform(tabRequest(tab, "admin-token").param("days", "abc"))
                 .andExpect(status().isBadRequest())
@@ -177,6 +180,9 @@ class AdminStatsSecurityTest {
             case "users" -> when(adminStatsService.users(7)).thenReturn(new UsersStatsResponse(7, LocalDate.of(2026, 10, 20),
                     LocalDate.of(2026, 10, 26), new StackedSeries(List.of(), List.of()), new UserInventory(0, 0, 0, 0, 0, 0, List.of()), 0, 0,
                     new ApiKeyCounts(0, 0, 0), new McpCounts(0, 0)));
+            case "safety" -> when(adminStatsService.safety(7)).thenReturn(new SafetyStatsResponse(7, LocalDate.of(2026, 10, 20),
+                    LocalDate.of(2026, 10, 26), new StackedSeries(List.of(), List.of()), 0, 0, List.of(), new ResolveTimes(0, null, null),
+                    new StackedSeries(List.of(), List.of()), new DomainRuleCounts(0, 0), 0, List.of()));
             default -> throw new IllegalArgumentException("No response for the " + tab + " tab");
         }
     }
@@ -187,6 +193,7 @@ class AdminStatsSecurityTest {
             case "traffic" -> when(adminStatsService.traffic(14)).thenThrow(refusal);
             case "links" -> when(adminStatsService.links(14)).thenThrow(refusal);
             case "users" -> when(adminStatsService.users(14)).thenThrow(refusal);
+            case "safety" -> when(adminStatsService.safety(14)).thenThrow(refusal);
             default -> throw new IllegalArgumentException("No refusal for the " + tab + " tab");
         }
     }

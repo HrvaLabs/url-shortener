@@ -13,7 +13,9 @@ import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.annotation.Transactional;
 
+import static cc.hrva.urlshortener.repository.stats.HourlySeries.BLOCKS_BY_REASON;
 import static cc.hrva.urlshortener.repository.stats.HourlySeries.LINKS_BY_CHANNEL;
+import static cc.hrva.urlshortener.repository.stats.HourlySeries.REVIEWS_BY_SOURCE;
 import static cc.hrva.urlshortener.repository.stats.HourlySeries.SIGNUPS_BY_PROVIDER;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -83,9 +85,53 @@ class HourlyCountRepositoryTest {
                         new HourlyCount(DAY, 14, "github", 2));
     }
 
+    @Test
+    void countsReviewsBySource() {
+        review(9201, DAY.atTime(9, 5), true);
+        review(9202, DAY.atTime(9, 40), true);
+        review(9203, DAY.atTime(9, 50), false);
+        review(9204, DAY.atTime(17, 15), false);
+        review(9205, DAY.minusDays(1).atTime(23, 59), true);
+
+        assertThat(hourlyCountRepository.count(REVIEWS_BY_SOURCE, DAY.atStartOfDay(), DAY.plusDays(1).atStartOfDay()))
+                .containsExactlyInAnyOrder(
+                        new HourlyCount(DAY, 9, "SYSTEM", 2),
+                        new HourlyCount(DAY, 9, "VISITOR", 1),
+                        new HourlyCount(DAY, 17, "VISITOR", 1));
+    }
+
+    @Test
+    void countsBlocksByReasonAndSkipsUnblockedLinks() {
+        blockedLink(9301, DAY.atTime(8, 10), "BLOCKLIST");
+        blockedLink(9302, DAY.atTime(8, 45), "BLOCKLIST");
+        blockedLink(9303, DAY.atTime(8, 50), "SCAM_SIGNALS");
+        blockedLink(9304, DAY.atTime(20, 0), "ADMIN");
+        blockedLink(9305, DAY.atTime(20, 30), null);
+        blockedLink(9306, null, "SAFE_BROWSING");
+        link(9307, DAY.atTime(8, 20), "WEB");
+
+        assertThat(hourlyCountRepository.count(BLOCKS_BY_REASON, DAY.atStartOfDay(), DAY.plusDays(1).atStartOfDay()))
+                .containsExactlyInAnyOrder(
+                        new HourlyCount(DAY, 8, "BLOCKLIST", 2),
+                        new HourlyCount(DAY, 8, "SCAM_SIGNALS", 1),
+                        new HourlyCount(DAY, 20, "ADMIN", 1),
+                        new HourlyCount(DAY, 20, "unknown", 1));
+    }
+
     private void link(final long id, final LocalDateTime createDate, final String createdVia) {
         jdbcTemplate.update("insert into url (id, long_url, short_url, create_date, created_via) values (?, ?, ?, ?, ?)",
                 id, "https://example.org/" + id, "hourly-" + id, createDate, createdVia);
+    }
+
+    private void review(final long id, final LocalDateTime flaggedAt, final boolean systemFlagged) {
+        link(id, flaggedAt, "WEB");
+        jdbcTemplate.update("insert into link_review (id, url_id, reasons, flagged_at, system_flagged) values (?, ?, ?, ?, ?)",
+                id, id, systemFlagged ? "destination host is a raw IP address" : "reported by a visitor: phishing", flaggedAt, systemFlagged);
+    }
+
+    private void blockedLink(final long id, final LocalDateTime blockedAt, final String blockReason) {
+        jdbcTemplate.update("insert into url (id, long_url, short_url, active, block_reason, blocked_at) values (?, ?, ?, false, ?, ?)",
+                id, "https://example.org/" + id, "hourly-" + id, blockReason, blockedAt);
     }
 
     private void account(final long id, final LocalDateTime createDate, final String authProvider) {

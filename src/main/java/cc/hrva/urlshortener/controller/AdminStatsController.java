@@ -1,6 +1,7 @@
 package cc.hrva.urlshortener.controller;
 
 import cc.hrva.urlshortener.dto.stats.LinksStatsResponse;
+import cc.hrva.urlshortener.dto.stats.SafetyStatsResponse;
 import cc.hrva.urlshortener.dto.stats.TrafficStatsResponse;
 import cc.hrva.urlshortener.dto.stats.UsersStatsResponse;
 import cc.hrva.urlshortener.service.AdminStatsService;
@@ -35,6 +36,11 @@ public class AdminStatsController {
     @GetMapping("/users")
     public ResponseEntity<UsersStatsResponse> users(@RequestParam(name = "days", required = false) final Integer days) {
         return ResponseEntity.ok(adminStatsService.users(days));
+    }
+
+    @GetMapping("/safety")
+    public ResponseEntity<SafetyStatsResponse> safety(@RequestParam(name = "days", required = false) final Integer days) {
+        return ResponseEntity.ok(adminStatsService.safety(days));
     }
 
 }

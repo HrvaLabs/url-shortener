@@ -5,6 +5,9 @@ import cc.hrva.urlshortener.dto.UrlAnalyticsDto.Breakdowns;
 import cc.hrva.urlshortener.dto.stats.LinksStatsResponse;
 import cc.hrva.urlshortener.dto.stats.LinksStatsResponse.CreatedInRange;
 import cc.hrva.urlshortener.dto.stats.LinksStatsResponse.LinkInventory;
+import cc.hrva.urlshortener.dto.stats.SafetyStatsResponse;
+import cc.hrva.urlshortener.dto.stats.SafetyStatsResponse.DomainRuleCounts;
+import cc.hrva.urlshortener.dto.stats.SafetyStatsResponse.ResolveTimes;
 import cc.hrva.urlshortener.dto.stats.StackedSeries;
 import cc.hrva.urlshortener.dto.stats.TrafficStatsResponse;
 import cc.hrva.urlshortener.dto.stats.UsersStatsResponse;
@@ -14,6 +17,7 @@ import cc.hrva.urlshortener.dto.stats.UsersStatsResponse.UserInventory;
 import cc.hrva.urlshortener.exception.InvalidAnalyticsRangeException;
 import cc.hrva.urlshortener.service.impl.DefaultAdminStatsService;
 import cc.hrva.urlshortener.service.stats.LinksStats;
+import cc.hrva.urlshortener.service.stats.SafetyStats;
 import cc.hrva.urlshortener.service.stats.StatsDays;
 import cc.hrva.urlshortener.service.stats.StatsWindow;
 import cc.hrva.urlshortener.service.stats.TrafficStats;
@@ -55,11 +59,14 @@ class DefaultAdminStatsServiceTest {
     @Mock
     private UsersStats usersStats;
 
+    @Mock
+    private SafetyStats safetyStats;
+
     private AdminStatsService adminStatsService;
 
     @BeforeEach
     void setUp() {
-        this.adminStatsService = new DefaultAdminStatsService(statsDays, trafficStats, linksStats, usersStats);
+        this.adminStatsService = new DefaultAdminStatsService(statsDays, trafficStats, linksStats, usersStats, safetyStats);
     }
 
     @Test
@@ -73,8 +80,11 @@ class DefaultAdminStatsServiceTest {
         assertThatThrownBy(() -> adminStatsService.users(14))
                 .isInstanceOf(InvalidAnalyticsRangeException.class)
                 .hasMessage(RANGE_ERROR);
+        assertThatThrownBy(() -> adminStatsService.safety(14))
+                .isInstanceOf(InvalidAnalyticsRangeException.class)
+                .hasMessage(RANGE_ERROR);
 
-        verifyNoInteractions(statsDays, trafficStats, linksStats, usersStats);
+        verifyNoInteractions(statsDays, trafficStats, linksStats, usersStats, safetyStats);
     }
 
     @Test
@@ -112,6 +122,15 @@ class DefaultAdminStatsServiceTest {
         assertThat(adminStatsService.users(7)).isSameAs(users);
     }
 
+    @Test
+    void passesTheWindowToTheSafetyTab() {
+        final var safety = emptySafety(LAST_7);
+        when(statsDays.window(LAST_7_DAYS)).thenReturn(LAST_7);
+        when(safetyStats.collect(LAST_7)).thenReturn(safety);
+
+        assertThat(adminStatsService.safety(7)).isSameAs(safety);
+    }
+
     private static TrafficStatsResponse emptyTraffic(final StatsWindow window) {
         return new TrafficStatsResponse(window.days(), window.from(), window.to(), new AnalyticsTotals(0, 0, 0), List.of(), 0, 0,
                 List.of(), new Breakdowns(List.of(), List.of(), List.of(), List.of(), List.of()), 0);
@@ -125,6 +144,11 @@ class DefaultAdminStatsServiceTest {
     private static UsersStatsResponse emptyUsers(final StatsWindow window) {
         return new UsersStatsResponse(window.days(), window.from(), window.to(), new StackedSeries(List.of(), List.of()),
                 new UserInventory(0, 0, 0, 0, 0, 0, List.of()), 0, 0, new ApiKeyCounts(0, 0, 0), new McpCounts(0, 0));
+    }
+
+    private static SafetyStatsResponse emptySafety(final StatsWindow window) {
+        return new SafetyStatsResponse(window.days(), window.from(), window.to(), new StackedSeries(List.of(), List.of()), 0, 0, List.of(),
+                new ResolveTimes(0, null, null), new StackedSeries(List.of(), List.of()), new DomainRuleCounts(0, 0), 0, List.of());
     }
 
 }
