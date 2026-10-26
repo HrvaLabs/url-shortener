@@ -147,7 +147,8 @@ public class DefaultBioPageService implements BioPageService {
 
         final var displayName = cleaned(bioPageUpdateDto.getDisplayName(), BioPageUpdateDto.MAX_DISPLAY_NAME_LENGTH,
                 BioPageUpdateDto.DISPLAY_NAME_TOO_LONG);
-        final var bio = cleaned(bioPageUpdateDto.getBio(), BioPageUpdateDto.MAX_BIO_LENGTH, BioPageUpdateDto.BIO_TOO_LONG);
+        final var bio = limited(BioPageText.cleanBio(bioPageUpdateDto.getBio()), BioPageUpdateDto.MAX_BIO_LENGTH,
+                BioPageUpdateDto.BIO_TOO_LONG);
         final var requestedButtons = bioPageUpdateDto.getButtons();
         final var titles = requestedButtons.stream().map(button -> titleOf(button.getTitle())).toList();
         final var avatarEmoji = avatarEmojiOf(bioPageUpdateDto);
@@ -319,7 +320,10 @@ public class DefaultBioPageService implements BioPageService {
     }
 
     private static String cleaned(final String text, final int maxLength, final String tooLong) {
-        final var cleaned = BioPageText.clean(text);
+        return limited(BioPageText.clean(text), maxLength, tooLong);
+    }
+
+    private static String limited(final String cleaned, final int maxLength, final String tooLong) {
         if (cleaned.length() > maxLength) {
             throw new ApiException(tooLong);
         }

@@ -309,6 +309,103 @@ class BioPageTextTest {
                 codePoints(0x2800, 0x0020, 0xFFFC, 0x200D));
     }
 
+    @Test
+    void aBioKeepsItsLineBreaks() {
+        assertThat(BioPageText.cleanBio(CAMERA + " Photographer\n" + "Zagreb\n" + "DMs open")).isEqualTo(CAMERA + " Photographer\nZagreb\nDMs open");
+    }
+
+    @Test
+    void aBioTurnsWindowsAndOldMacLineEndingsIntoNewlines() {
+        assertThat(BioPageText.cleanBio("Photographer\r\nZagreb")).isEqualTo("Photographer\nZagreb");
+        assertThat(BioPageText.cleanBio("Photographer\rZagreb")).isEqualTo("Photographer\nZagreb");
+        assertThat(BioPageText.cleanBio("Photographer\r\n\r\nZagreb\r\rDMs open")).isEqualTo("Photographer\nZagreb\nDMs open");
+        assertThat(BioPageText.cleanBio("Photographer\n\rZagreb")).isEqualTo("Photographer\nZagreb");
+    }
+
+    @Test
+    void aBioDropsBlankLines() {
+        assertThat(BioPageText.cleanBio("Photographer\n\n\nZagreb")).isEqualTo("Photographer\nZagreb");
+        assertThat(BioPageText.cleanBio("Photographer\n   \n\t\nZagreb")).isEqualTo("Photographer\nZagreb");
+        assertThat(BioPageText.cleanBio("\n\n  Photographer  \n\n")).isEqualTo("Photographer");
+    }
+
+    @Test
+    void aBioKeepsFourLineBreaksAndJoinsTheRestWithSpaces() {
+        assertThat(BioPageText.cleanBio("one\ntwo\nthree\nfour\nfive")).isEqualTo("one\ntwo\nthree\nfour\nfive");
+        assertThat(BioPageText.cleanBio("one\ntwo\nthree\nfour\nfive\nsix")).isEqualTo("one\ntwo\nthree\nfour\nfive six");
+        assertThat(BioPageText.cleanBio("one\ntwo\n\nthree\nfour\n\n\nfive\nsix\nseven")).isEqualTo("one\ntwo\nthree\nfour\nfive six seven");
+    }
+
+    @Test
+    void aBioCollapsesSpacesWithinEachLineAndTrimsEveryLine() {
+        assertThat(BioPageText.cleanBio("Photographer  \n  Zagreb")).isEqualTo("Photographer\nZagreb");
+        assertThat(BioPageText.cleanBio(" Photos \t from   Zagreb \n DMs\t\topen ")).isEqualTo("Photos from Zagreb\nDMs open");
+    }
+
+    @Test
+    void aBioDropsInvisibleCharactersBeforeItLooksForBlankLines() {
+        assertThat(BioPageText.cleanBio("Photographer" + ZERO_WIDTH_SPACE + "\n" + ZERO_WIDTH_SPACE + "Zagreb")).isEqualTo("Photographer\nZagreb");
+        assertThat(BioPageText.cleanBio("Photographer\n" + ZERO_WIDTH_SPACE + "\nZagreb")).isEqualTo("Photographer\nZagreb");
+        assertThat(BioPageText.cleanBio("Photographer\n" + RIGHT_TO_LEFT_OVERRIDE + BELL + "\n" + HANGUL_FILLER + "\nZagreb")).isEqualTo("Photographer\nZagreb");
+        assertThat(BioPageText.cleanBio(ZERO_WIDTH_SPACE + "\n" + SOFT_HYPHEN + "\n" + ZERO_WIDTH_SPACE)).isEmpty();
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {0x000B, 0x000C, 0x00A0, 0x2028, 0x2029, 0x3000})
+    void otherWhitespaceInABioIsASpaceNotALineBreak(final int codePoint) {
+        assertThat(BioPageText.cleanBio("Photographer" + codePoints(codePoint) + "Zagreb")).isEqualTo("Photographer Zagreb");
+    }
+
+    @Test
+    void aNextLineControlInABioIsRemovedLikeOtherControls() {
+        assertThat(BioPageText.cleanBio("Photographer" + codePoints(0x0085) + "Zagreb")).isEqualTo("PhotographerZagreb");
+    }
+
+    @Test
+    void aBioOfOnlyLineBreaksAndSpacesIsEmpty() {
+        assertThat(BioPageText.cleanBio("\n \r\n\t\n")).isEmpty();
+        assertThat(BioPageText.cleanBio(null)).isEmpty();
+    }
+
+    @Test
+    void aBioCapsMarksOnEachLine() {
+        assertThat(BioPageText.cleanBio("x" + ACUTE.repeat(10) + "\nq" + ACUTE.repeat(10))).isEqualTo("x" + ACUTE.repeat(4) + "\nq" + ACUTE.repeat(4));
+    }
+
+    @Test
+    void namesAndTitlesStillCollapseLineBreaks() {
+        assertThat(BioPageText.clean("Ana\nHorvat")).isEqualTo("Ana Horvat");
+        assertThat(BioPageText.clean("Ana\r\n\r\nHorvat")).isEqualTo("Ana Horvat");
+    }
+
+    @Test
+    void aBioDropsLinesWithNothingVisibleOnThem() {
+        assertThat(BioPageText.cleanBio("Photographer\n" + ZERO_WIDTH_JOINER + "\nZagreb")).isEqualTo("Photographer\nZagreb");
+        assertThat(BioPageText.cleanBio("Photographer\n" + ACUTE + "\nZagreb")).isEqualTo("Photographer\nZagreb");
+        assertThat(BioPageText.cleanBio("Photographer\n" + ENCLOSING_CIRCLE + "\nZagreb")).isEqualTo("Photographer\nZagreb");
+        assertThat(BioPageText.cleanBio("Photographer\n" + codePoints(0x2800) + "\nZagreb")).isEqualTo("Photographer\nZagreb");
+        assertThat(BioPageText.cleanBio("Photographer\n " + codePoints(0xFFFC) + " " + ZERO_WIDTH_NON_JOINER + " \nZagreb")).isEqualTo("Photographer\nZagreb");
+    }
+
+    @Test
+    void linesWithNothingVisibleDoNotCountTowardsTheFourLineBreaks() {
+        assertThat(BioPageText.cleanBio("one\n" + ZERO_WIDTH_JOINER + "\ntwo\n" + codePoints(0x2800) + "\nthree\nfour\nfive\nsix"))
+                .isEqualTo("one\ntwo\nthree\nfour\nfive six");
+    }
+
+    @Test
+    void keptInvisibleCharactersBesideVisibleTextOnALineStay() {
+        assertThat(BioPageText.cleanBio("Photographer\nZagreb " + codePoints(0x2800))).isEqualTo("Photographer\nZagreb " + codePoints(0x2800));
+        assertThat(BioPageText.cleanBio("Family\n" + FAMILY_OF_THREE)).isEqualTo("Family\n" + FAMILY_OF_THREE);
+    }
+
+    @ParameterizedTest
+    @MethodSource("keptInvisibleCharactersOnly")
+    void aBioOfOnlyKeptInvisibleCharactersBecomesEmpty(final String text) {
+        assertThat(BioPageText.cleanBio(text)).isEmpty();
+        assertThat(BioPageText.cleanBio(text + "\n" + text)).isEmpty();
+    }
+
     private static boolean isMark(final int codePoint) {
         final var type = Character.getType(codePoint);
         return type == Character.NON_SPACING_MARK || type == Character.ENCLOSING_MARK || type == Character.COMBINING_SPACING_MARK;

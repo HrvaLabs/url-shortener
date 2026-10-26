@@ -13,6 +13,7 @@ import cc.hrva.urlshortener.repository.BioPageRepository;
 import cc.hrva.urlshortener.repository.BioPageReviewRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
+import cc.hrva.urlshortener.service.ReservedAliasService;
 import jakarta.persistence.EntityManager;
 import java.sql.Timestamp;
 import java.time.Clock;
@@ -32,6 +33,7 @@ import org.springframework.context.annotation.FilterType;
 import org.springframework.context.annotation.Import;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.transaction.annotation.Transactional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -80,6 +82,12 @@ class BioAccountDataFlowTest {
     @Autowired
     private EntityManager entityManager;
 
+    @Autowired
+    private BioHandles bioHandles;
+
+    @MockitoBean
+    private ReservedAliasService reservedAliasService;
+
     @Test
     void deletingAnAccountRemovesThePageAndLeavesItsHandlesHeldUnlinked() {
         final var ana = savedUser("ana@example.com");
@@ -112,6 +120,10 @@ class BioAccountDataFlowTest {
                         tuple("ana-old", null, NOW.plusDays(10)));
         assertThat(rows("select count(*) from bio_page where id = ?", bobsPage.getId())).isEqualTo(1L);
         assertThat(rows("select count(*) from bio_page_button where page_id = ?", bobsPage.getId())).isEqualTo(1L);
+        assertThat(bioHandles.unavailableReason("ana", bobsPage))
+                .contains("This handle was recently used and is kept until November 25, 2026. Try another.");
+        assertThat(bioHandles.unavailableReason("ana-old", null))
+                .contains("This handle was recently used and is kept until November 5, 2026. Try another.");
     }
 
     @Test
@@ -127,6 +139,17 @@ class BioAccountDataFlowTest {
         assertThat(export.handle()).isEqualTo("ana");
         assertThat(export.buttons()).extracting(BioButtonExport::title, BioButtonExport::shortUrl)
                 .containsExactly(tuple("Shop", "ana-shop"), tuple("Blog", "ana-blog"));
+    }
+
+    @Test
+    void theExportKeepsTheBiosLineBreaks() {
+        final var ana = savedUser("ana@example.com");
+        bioPageRepository.saveAndFlush(BioPage.builder().owner(ana).handle("ana").bio("Photographer\nZagreb").build());
+        entityManager.clear();
+
+        final var export = bioAccountData.exportFor(userRepository.findById(ana.getId()).orElseThrow()).orElseThrow();
+
+        assertThat(export.bio()).isEqualTo("Photographer\nZagreb");
     }
 
     private long rows(final String sql, final long id) {
@@ -166,7 +189,7 @@ class BioAccountDataFlowTest {
                     UrlRepository.class,
                     UserRepository.class
             }))
-    @Import({BioAccountData.class, BioPageLock.class})
+    @Import({BioAccountData.class, BioPageLock.class, BioHandles.class})
     static class TestApplication {
 
         @Bean

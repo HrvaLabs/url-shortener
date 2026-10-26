@@ -741,13 +741,14 @@ class DefaultBioPageServiceTest {
         savesReturnTheirArgument();
         ownsLinks(link(41L, "ana-ig", ana));
         final var dto = update(buttonDto(41L, " Insta" + RIGHT_TO_LEFT_OVERRIDE + "gram\n"));
-        dto.setDisplayName("  Ana " + RIGHT_TO_LEFT_OVERRIDE + " Horvat  ");
-        dto.setBio("Photos\n\nfrom   Zagreb" + BELL);
+        dto.setDisplayName("  Ana\n" + RIGHT_TO_LEFT_OVERRIDE + " Horvat  ");
+        dto.setBio("Photos\r\n\r\nfrom   Zagreb" + BELL);
 
-        bioPageService.update(dto);
+        final var response = bioPageService.update(dto);
 
         assertThat(page.getDisplayName()).isEqualTo("Ana Horvat");
-        assertThat(page.getBio()).isEqualTo("Photos from Zagreb");
+        assertThat(page.getBio()).isEqualTo("Photos\nfrom Zagreb");
+        assertThat(response.bio()).isEqualTo("Photos\nfrom Zagreb");
         verify(bioPageButtonRepository).saveAll(savedButtons.capture());
         assertThat(savedButtons.getValue()).extracting(BioPageButton::getTitle).containsExactly("Instagram");
     }
@@ -838,6 +839,27 @@ class DefaultBioPageServiceTest {
 
             assertRefusedBeforeWriting(dto, EMOJI_REQUIRED);
         }
+    }
+
+    @Test
+    void aBioCountsEachLineBreakOnceAfterCleaning() {
+        hasPage();
+        savesReturnTheirArgument();
+        final var fits = update();
+        fits.setBio(String.join("\r\n", "a".repeat(31), "b".repeat(31), "c".repeat(31), "d".repeat(31), "e".repeat(32)));
+
+        bioPageService.update(fits);
+
+        assertThat(page.getBio()).hasSize(160).isEqualTo(String.join("\n", "a".repeat(31), "b".repeat(31), "c".repeat(31), "d".repeat(31), "e".repeat(32)));
+    }
+
+    @Test
+    void aBioOneCharacterOverAfterCleaningIsRefused() {
+        hasPage();
+        final var tooLong = update();
+        tooLong.setBio(String.join("\n\n", "a".repeat(31), "b".repeat(31), "c".repeat(31), "d".repeat(31), "e".repeat(33)));
+
+        assertRefusedBeforeWriting(tooLong, "Bio must be 160 characters or fewer");
     }
 
     @Test

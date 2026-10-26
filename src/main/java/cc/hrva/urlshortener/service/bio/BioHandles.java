@@ -10,6 +10,7 @@ import cc.hrva.urlshortener.service.ReservedAliasService;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
@@ -41,6 +42,8 @@ public class BioHandles {
     private static final String NO_LETTER_OR_NUMBER = "A handle needs at least one letter or number.";
     private static final String RESERVED = "This handle is reserved. Try another.";
     private static final String TAKEN = "This handle is taken. Try another.";
+    private static final String RECENTLY_USED = "This handle was recently used and is kept until %s. Try another.";
+    private static final DateTimeFormatter HOLD_END = DateTimeFormatter.ofPattern("MMMM d, yyyy", Locale.ENGLISH);
 
     private final ReservedAliasService reservedAliasService;
     private final BioPageRepository bioPageRepository;
@@ -71,10 +74,10 @@ public class BioHandles {
         if (isReserved(handle)) {
             return Optional.of(RESERVED);
         }
-        if (isTakenByAnotherPage(handle, page) || isHeldForAnotherPage(handle, page)) {
+        if (isTakenByAnotherPage(handle, page)) {
             return Optional.of(TAKEN);
         }
-        return Optional.empty();
+        return liveHoldForAnotherPage(handle, page).map(BioHandles::heldReason);
     }
 
     public void requireAvailable(final String handle, final BioPage page) {
@@ -118,10 +121,13 @@ public class BioHandles {
                 .isPresent();
     }
 
-    private boolean isHeldForAnotherPage(final String handle, final BioPage page) {
+    private Optional<BioHandleHold> liveHoldForAnotherPage(final String handle, final BioPage page) {
         return bioHandleHoldRepository.findByHandleAndHeldUntilAfter(handle, LocalDateTime.now(clock))
-                .filter(hold -> !isSamePage(hold.getPage(), page))
-                .isPresent();
+                .filter(hold -> !isSamePage(hold.getPage(), page));
+    }
+
+    private static String heldReason(final BioHandleHold hold) {
+        return hold.getPage() == null ? RECENTLY_USED.formatted(HOLD_END.format(hold.getHeldUntil())) : TAKEN;
     }
 
     private static boolean isSamePage(final BioPage candidate, final BioPage page) {

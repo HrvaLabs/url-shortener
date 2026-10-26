@@ -11,6 +11,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
+import java.util.Locale;
 import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Stream;
@@ -45,6 +46,7 @@ class BioHandlesTest {
     private static final String NO_LETTER_OR_NUMBER = "A handle needs at least one letter or number.";
     private static final String RESERVED = "This handle is reserved. Try another.";
     private static final String TAKEN = "This handle is taken. Try another.";
+    private static final String RECENTLY_USED_UNTIL_OCTOBER_27 = "This handle was recently used and is kept until October 27, 2026. Try another.";
 
     @Mock
     private ReservedAliasService reservedAliasService;
@@ -134,10 +136,54 @@ class BioHandlesTest {
     }
 
     @Test
-    void anUnlinkedHoldIsTaken() {
+    void anUnlinkedHoldSaysTheHandleWasRecentlyUsedAndWhenItFreesUp() {
         when(bioHandleHoldRepository.findByHandleAndHeldUntilAfter("ana", NOW)).thenReturn(Optional.of(hold("ana", null)));
 
-        assertThat(bioHandles.unavailableReason("ana", page(1L))).contains(TAKEN);
+        assertThat(bioHandles.unavailableReason("ana", page(1L))).contains(RECENTLY_USED_UNTIL_OCTOBER_27);
+        assertThat(bioHandles.unavailableReason("ana", null)).contains(RECENTLY_USED_UNTIL_OCTOBER_27);
+    }
+
+    @ParameterizedTest
+    @MethodSource("holdEnds")
+    void theHoldsEndIsWrittenOutInEnglishWhateverTheServersLanguage(final LocalDateTime heldUntil, final String date) {
+        final var unlinked = BioHandleHold.builder().handle("ana").heldUntil(heldUntil).createdAt(NOW).build();
+        when(bioHandleHoldRepository.findByHandleAndHeldUntilAfter("ana", NOW)).thenReturn(Optional.of(unlinked));
+        final var serverLanguage = Locale.getDefault();
+        Locale.setDefault(Locale.forLanguageTag("hr-HR"));
+        try {
+            assertThat(bioHandles.unavailableReason("ana", null))
+                    .contains("This handle was recently used and is kept until " + date + ". Try another.");
+        } finally {
+            Locale.setDefault(serverLanguage);
+        }
+    }
+
+    static Stream<Arguments> holdEnds() {
+        return Stream.of(
+                Arguments.of(LocalDateTime.of(2026, 11, 25, 9, 0), "November 25, 2026"),
+                Arguments.of(LocalDateTime.of(2026, 12, 5, 23, 59, 59), "December 5, 2026"),
+                Arguments.of(LocalDateTime.of(2027, 1, 1, 0, 0), "January 1, 2027"));
+    }
+
+    @Test
+    void aRecentlyUsedHandleIsRefusedWithItsDate() {
+        when(bioHandleHoldRepository.findByHandleAndHeldUntilAfter("ana", NOW)).thenReturn(Optional.of(hold("ana", null)));
+
+        assertThatThrownBy(() -> bioHandles.requireAvailable("ana", null))
+                .isInstanceOf(BioHandleUnavailableException.class)
+                .hasMessage(RECENTLY_USED_UNTIL_OCTOBER_27);
+        assertThatThrownBy(() -> bioHandles.requireAvailable("ana", page(1L)))
+                .isInstanceOf(BioHandleUnavailableException.class)
+                .hasMessage(RECENTLY_USED_UNTIL_OCTOBER_27);
+    }
+
+    @Test
+    void anotherPagesHandleIsTakenEvenWhenItIsAlsoHeld() {
+        when(bioPageRepository.findByHandle("ana")).thenReturn(Optional.of(page(2L)));
+
+        assertThat(bioHandles.unavailableReason("ana", null)).contains(TAKEN);
+
+        verify(bioHandleHoldRepository, never()).findByHandleAndHeldUntilAfter(anyString(), any());
     }
 
     @Test

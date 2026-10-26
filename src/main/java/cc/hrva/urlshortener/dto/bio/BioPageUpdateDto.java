@@ -29,7 +29,8 @@ public class BioPageUpdateDto {
     @Schema(description = "Display name, at most 50 characters", example = "Ana Horvat")
     private String displayName;
     @Size(max = MAX_BIO_LENGTH, message = BIO_TOO_LONG)
-    @Schema(description = "Short bio, at most 160 characters; shown as plain text", example = "Photos from Zagreb")
+    @Schema(description = "Short bio, at most 160 characters as sent and after cleaning; plain text that keeps up to 4 line breaks",
+            example = "Photos from Zagreb")
     private String bio;
     @NotNull(message = "Choose an avatar")
     @Schema(description = "INITIALS (computed from the name or handle) or EMOJI", example = "EMOJI")

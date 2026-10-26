@@ -1,10 +1,13 @@
 package cc.hrva.urlshortener.service;
 
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
+import cc.hrva.urlshortener.dto.bio.BioHandleAvailabilityResponse;
+import cc.hrva.urlshortener.dto.bio.BioHandleDto;
 import cc.hrva.urlshortener.dto.bio.BioPageCreateDto;
 import cc.hrva.urlshortener.dto.bio.BioPageReasonDto;
 import cc.hrva.urlshortener.dto.bio.BioPageResponse;
 import cc.hrva.urlshortener.dto.bio.BioPageUpdateDto;
+import cc.hrva.urlshortener.exception.BioHandleUnavailableException;
 import cc.hrva.urlshortener.exception.BioPageConflictException;
 import cc.hrva.urlshortener.mcp.anon.RateLimiter;
 import cc.hrva.urlshortener.model.BioPage;
@@ -65,6 +68,8 @@ import static org.mockito.Mockito.when;
 class BioPageOwnerFlowTest {
 
     private static final Instant NOW_INSTANT = Instant.parse("2026-10-26T09:00:00Z");
+    private static final String RECENTLY_USED = "This handle was recently used and is kept until November 25, 2026. Try another.";
+    private static final String TAKEN = "This handle is taken. Try another.";
     private static final String OUTDATED_COPY =
             "Your bio page changed in another tab or window. We loaded the latest version; check your changes and save again.";
 
@@ -167,6 +172,32 @@ class BioPageOwnerFlowTest {
         assertThat(reloaded.hidden()).isTrue();
         bioPageService.update(savingFrom(reloaded, "Saved after a reload"));
         assertThat(storedBio(created.id())).isEqualTo("Saved after a reload");
+    }
+
+    @Test
+    void anOwnerWhoDeletedTheirPageIsToldWhenItsHandleFreesUp() {
+        bioPageService.create(new BioPageCreateDto("ana"));
+        bioPageService.delete();
+
+        assertThat(bioPageService.availability("ana")).isEqualTo(new BioHandleAvailabilityResponse("ana", false, RECENTLY_USED));
+        assertThatThrownBy(() -> bioPageService.create(new BioPageCreateDto("Ana")))
+                .isInstanceOf(BioHandleUnavailableException.class)
+                .hasMessage(RECENTLY_USED);
+
+        when(userService.getUserFromToken()).thenReturn(admin);
+        assertThat(bioPageService.availability("ana")).isEqualTo(new BioHandleAvailabilityResponse("ana", false, RECENTLY_USED));
+    }
+
+    @Test
+    void aRenamedPagesOldHandleIsStillTakenForEveryoneElse() {
+        bioPageService.create(new BioPageCreateDto("ana"));
+        bioPageService.changeHandle(new BioHandleDto("ana-horvat"));
+        when(userService.getUserFromToken()).thenReturn(admin);
+
+        assertThat(bioPageService.availability("ana")).isEqualTo(new BioHandleAvailabilityResponse("ana", false, TAKEN));
+        assertThatThrownBy(() -> bioPageService.create(new BioPageCreateDto("ana")))
+                .isInstanceOf(BioHandleUnavailableException.class)
+                .hasMessage(TAKEN);
     }
 
     private BioPageUpdateDto savingFrom(final BioPageResponse copy, final String bio) {
