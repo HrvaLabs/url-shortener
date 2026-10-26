@@ -63,6 +63,8 @@ public class DefaultBioPageService implements BioPageService {
     private static final String ALREADY_HAS_PAGE = "You already have a bio page.";
     private static final String HANDLE_TAKEN = "This handle is taken. Try another.";
     private static final String PAGE_CHANGED = "This page changed. Reload and try again.";
+    private static final String HIDDEN_PAGE_NOT_DELETABLE =
+            "An admin hid this page, so it can't be deleted here. You can still delete your whole account in Settings.";
     private static final String EMOJI_REQUIRED = "Pick one emoji for the avatar.";
     private static final String DUPLICATE_LINK = "Each link can be on your page only once.";
     private static final String NOT_YOUR_LINK = "You can only add your own short links.";
@@ -199,6 +201,10 @@ public class DefaultBioPageService implements BioPageService {
     @Transactional
     public void delete() {
         final var page = pageOf(currentUser());
+        if (page.getHiddenAt() != null) {
+            log.info("Bio page delete refused because an admin hid the page pageId={}", page.getId());
+            throw new BioPageConflictException(HIDDEN_PAGE_NOT_DELETABLE);
+        }
         if (page.getHandle() != null) {
             bioHandles.hold(page.getHandle(), null);
         }

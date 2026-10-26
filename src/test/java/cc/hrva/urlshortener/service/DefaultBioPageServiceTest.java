@@ -97,6 +97,10 @@ class DefaultBioPageServiceTest {
     private static final String BELL = codePoints(0x0007);
     private static final String CAMERA = codePoints(0x1F4F8);
     private static final String DEVANAGARI_QA = codePoints(0x0958);
+    private static final String ZERO_WIDTH_SPACE = codePoints(0x200B);
+    private static final String ZERO_WIDTH_JOINER = codePoints(0x200D);
+    private static final String HIDDEN_PAGE_NOT_DELETABLE =
+            "An admin hid this page, so it can't be deleted here. You can still delete your whole account in Settings.";
 
     @Mock
     private UserService userService;
@@ -572,6 +576,37 @@ class DefaultBioPageServiceTest {
     }
 
     @Test
+    void aTitleOfOnlyZeroWidthSpacesIsRefused() {
+        hasPage();
+
+        assertRefusedBeforeWriting(update(buttonDto(41L, ZERO_WIDTH_SPACE)), TITLE_REQUIRED);
+        assertRefusedBeforeWriting(update(buttonDto(41L, ZERO_WIDTH_SPACE.repeat(10))), TITLE_REQUIRED);
+    }
+
+    @Test
+    void aDisplayNameOfOnlyZeroWidthSpacesIsStoredEmpty() {
+        hasPage();
+        savesReturnTheirArgument();
+        final var dto = update();
+        dto.setDisplayName(ZERO_WIDTH_SPACE.repeat(3));
+
+        final var response = bioPageService.update(dto);
+
+        assertThat(page.getDisplayName()).isEmpty();
+        assertThat(response.displayName()).isEmpty();
+    }
+
+    @Test
+    void anAvatarEmojiEndingWithAJoinerIsRefused() {
+        hasPage();
+        final var dto = update();
+        dto.setAvatarKind(BioAvatarKind.EMOJI);
+        dto.setAvatarEmoji(CAMERA + ZERO_WIDTH_JOINER);
+
+        assertRefusedBeforeWriting(dto, EMOJI_REQUIRED);
+    }
+
+    @Test
     void textThatGrowsWhenNormalizedIsStillLimited() {
         hasPage();
         final var longName = update();
@@ -734,6 +769,34 @@ class DefaultBioPageServiceTest {
         bioPageService.delete();
 
         verifyNoInteractions(bioHandles);
+        verify(bioPageRepository).delete(page);
+    }
+
+    @Test
+    void aPageAnAdminHidCantBeDeletedByItsOwner() {
+        page.setHiddenAt(NOW);
+        page.setHiddenReason("Spam");
+        page.setHiddenBy("admin@localhost");
+        hasPage();
+
+        assertThatThrownBy(() -> bioPageService.delete())
+                .isInstanceOf(BioPageConflictException.class)
+                .hasMessage(HIDDEN_PAGE_NOT_DELETABLE);
+
+        verifyNoInteractions(bioHandles);
+        verify(bioPageRepository, never()).delete(any(BioPage.class));
+        verify(bioPageRepository, never()).flush();
+    }
+
+    @Test
+    void aPageTheAdminUnhidCanBeDeleted() {
+        page.setHiddenReason("Spam");
+        page.setHiddenBy("admin@localhost");
+        hasPage();
+
+        bioPageService.delete();
+
+        verify(bioHandles).hold("ana", null);
         verify(bioPageRepository).delete(page);
     }
 

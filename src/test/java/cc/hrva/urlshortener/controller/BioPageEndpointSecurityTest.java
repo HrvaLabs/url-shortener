@@ -230,6 +230,17 @@ class BioPageEndpointSecurityTest {
     }
 
     @Test
+    void deletingAHiddenPageIs409WithItsText() throws Exception {
+        doThrow(new BioPageConflictException("An admin hid this page, so it can't be deleted here. You can still delete your whole account in Settings."))
+                .when(bioPageService).delete();
+
+        mockMvc.perform(signedIn(delete(MY_PAGE)))
+                .andExpect(status().isConflict())
+                .andExpect(content().json(
+                        "{\"error\":\"An admin hid this page, so it can't be deleted here. You can still delete your whole account in Settings.\"}", true));
+    }
+
+    @Test
     void theHandleRedirectIsPublic() throws Exception {
         mockMvc.perform(get("/@ana"))
                 .andExpect(status().isFound())

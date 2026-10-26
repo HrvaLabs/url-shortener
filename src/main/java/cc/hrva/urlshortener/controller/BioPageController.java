@@ -73,6 +73,7 @@ public class BioPageController {
     @Operation(summary = "Delete your bio page", description = "Delete the bio page and its buttons. Your links stay. The handle is held for 30 days, so nobody else can take it at once.")
     @ApiResponse(responseCode = "204", description = "Bio page deleted")
     @ApiResponse(responseCode = "404", description = "You don't have a bio page yet")
+    @ApiResponse(responseCode = "409", description = "An admin hid the page, so only deleting the whole account removes it")
     @DeleteMapping("/me")
     @PreAuthorize("hasAnyRole('ROLE_ADMIN', 'ROLE_USER')")
     public ResponseEntity<Void> deleteMyBioPage() {
