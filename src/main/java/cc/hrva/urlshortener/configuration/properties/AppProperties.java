@@ -180,7 +180,7 @@ public class AppProperties {
         private int links = 5;
 
         @NotNull
-        @DurationMin(millis = 1, message = "must be positive (at least 1ms)")
+        @DurationMin(seconds = 1, message = "must be at least 1 second")
         private Duration window = Duration.ofHours(1);
 
     }

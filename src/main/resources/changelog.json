@@ -33,8 +33,8 @@
           "title": "Admin",
           "icon": "wrench",
           "items": [
-            "Weekly summary: every Monday morning, Discord and email get last week's clicks, new links and users, reviews, automatic blocks and the top 5 links, each compared with the week before. Discord and email can be turned off separately.",
-            "Phishing-wave alert: Discord warns when 5 or more new links to the same new or unknown domain appear within an hour from at least 2 creators, with a link to those links. Nothing is blocked automatically.",
+            "Weekly summary: every Monday morning, Discord and email get last week's clicks, visitors, bot share, new links and users, reviews and automatic blocks, the top 5 links, and how many reviews are waiting right now. Clicks, new links and new users are compared with the week before. Discord and email can be turned off separately.",
+            "Phishing-wave alert: Discord warns when 5 or more new links to the same new or unknown domain appear within an hour from at least 2 different accounts or networks, with a link to those links. Nothing is blocked automatically.",
             "All URLs opens with a search from its address, so the alert's link lands on the matching links."
           ]
         },

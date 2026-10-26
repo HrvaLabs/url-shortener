@@ -58,6 +58,7 @@ class WeeklyDigestTextTest {
     @Test
     void aChangeIsAtLeastOnePercentAndUsesThousandsSeparators() {
         assertThat(WeeklyDigestText.change(new Change(999, 1000))).isEqualTo("down 1% on the week before");
+        assertThat(WeeklyDigestText.change(new Change(5, 1000))).isEqualTo("down 99% on the week before");
         assertThat(WeeklyDigestText.change(new Change(0, 70))).isEqualTo("down 100% on the week before");
         assertThat(WeeklyDigestText.change(new Change(25_000, 20))).isEqualTo("up 124,900% on the week before");
     }

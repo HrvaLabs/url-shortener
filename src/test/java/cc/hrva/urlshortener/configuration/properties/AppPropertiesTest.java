@@ -153,20 +153,20 @@ class AppPropertiesTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"PT0S", "PT-1S", "PT-1H", "PT0.0005S"})
-    void aBurstWindowThatIsNotPositiveIsRefused(final String window) {
+    @ValueSource(strings = {"PT0S", "PT-1S", "PT-1H", "PT0.0005S", "PT0.5S", "PT0.999S"})
+    void aBurstWindowUnderOneSecondIsRefused(final String window) {
         final var burst = new AppProperties.Burst();
         burst.setWindow(Duration.parse(window));
 
         assertThat(Validation.buildDefaultValidatorFactory().getValidator().validate(burst))
                 .extracting(violation -> violation.getPropertyPath() + " " + violation.getMessage())
-                .containsExactly("window must be positive (at least 1ms)");
+                .containsExactly("window must be at least 1 second");
     }
 
     @Test
-    void aBurstWindowOfOneMillisecondIsAllowed() {
+    void aBurstWindowOfOneSecondIsAllowed() {
         final var burst = new AppProperties.Burst();
-        burst.setWindow(Duration.ofMillis(1));
+        burst.setWindow(Duration.ofSeconds(1));
 
         assertThat(Validation.buildDefaultValidatorFactory().getValidator().validate(burst)).isEmpty();
     }
@@ -181,7 +181,7 @@ class AppPropertiesTest {
                 .rootCause()
                 .isInstanceOf(BindValidationException.class)
                 .hasMessageContaining("app.burst.window")
-                .hasMessageContaining("must be positive (at least 1ms)");
+                .hasMessageContaining("must be at least 1 second");
     }
 
     @Test

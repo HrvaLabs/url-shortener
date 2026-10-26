@@ -28,6 +28,7 @@ public final class WeeklyDigestText {
     private static final String MONTHS_DASH = " – ";
     private static final double PERCENT = 100.0;
     private static final long SMALLEST_BASE_FOR_A_PERCENTAGE = 20;
+    private static final long LARGEST_PARTIAL_DROP = 99;
     private static final String UNKNOWN = "unknown";
     private static final String IP_DESTINATION = "an IP address";
     private static final String UNREADABLE_DESTINATION = "an unreadable destination";
@@ -80,8 +81,11 @@ public final class WeeklyDigestText {
             return number(change.previous()) + " the week before";
         }
         final var percent = Math.max(1, Math.round(Math.abs(change.current() - change.previous()) * PERCENT / change.previous()));
-        final var direction = change.current() > change.previous() ? "up" : "down";
-        return direction + " " + number(percent) + "% on the week before";
+        if (change.current() > change.previous()) {
+            return "up " + number(percent) + "% on the week before";
+        }
+        final var shown = change.current() > 0 ? Math.min(LARGEST_PARTIAL_DROP, percent) : percent;
+        return "down " + number(shown) + "% on the week before";
     }
 
     public static List<String> lines(final WeeklyDigest digest, final String shortLinkHost, final String reviewPage,
