@@ -80,23 +80,23 @@ class BioPageTextTest {
     }
 
     @Test
-    void marksInterleavedWithJoinersAreCappedAtThree() {
-        assertThat(BioPageText.clean("x" + (ACUTE + ZERO_WIDTH_JOINER).repeat(24))).isEqualTo("x" + (ACUTE + ZERO_WIDTH_JOINER).repeat(3));
+    void marksInterleavedWithJoinersAreCappedAtFour() {
+        assertThat(BioPageText.clean("x" + (ACUTE + ZERO_WIDTH_JOINER).repeat(24))).isEqualTo("x" + (ACUTE + ZERO_WIDTH_JOINER).repeat(4));
         assertThat(BioPageText.clean("x" + (ACUTE + ZERO_WIDTH_NON_JOINER).repeat(24)))
-                .isEqualTo("x" + (ACUTE + ZERO_WIDTH_NON_JOINER).repeat(3));
+                .isEqualTo("x" + (ACUTE + ZERO_WIDTH_NON_JOINER).repeat(4));
         assertThat(BioPageText.clean("x" + (ACUTE + ZERO_WIDTH_JOINER + ZERO_WIDTH_NON_JOINER).repeat(24)))
-                .isEqualTo("x" + (ACUTE + ZERO_WIDTH_JOINER + ZERO_WIDTH_NON_JOINER).repeat(3));
+                .isEqualTo("x" + (ACUTE + ZERO_WIDTH_JOINER + ZERO_WIDTH_NON_JOINER).repeat(4));
         assertThat(BioPageText.clean("a" + (ACUTE + ZERO_WIDTH_JOINER).repeat(24)).codePoints().filter(BioPageTextTest::isNonSpacingMark).count())
-                .isEqualTo(3);
+                .isEqualTo(4);
     }
 
     @Test
     void enclosingMarksCountTowardsTheCap() {
         final var cleaned = BioPageText.clean("a" + (ACUTE + ENCLOSING_CIRCLE).repeat(24));
 
-        assertThat(cleaned).isEqualTo(codePoints(0x00E1) + ENCLOSING_CIRCLE + ACUTE + ENCLOSING_CIRCLE);
-        assertThat(cleaned.codePoints().filter(BioPageTextTest::isMark).count()).isEqualTo(3);
-        assertThat(BioPageText.clean("x" + ENCLOSING_CIRCLE.repeat(40))).isEqualTo("x" + ENCLOSING_CIRCLE.repeat(3));
+        assertThat(cleaned).isEqualTo(codePoints(0x00E1) + ENCLOSING_CIRCLE + ACUTE + ENCLOSING_CIRCLE + ACUTE);
+        assertThat(cleaned.codePoints().filter(BioPageTextTest::isMark).count()).isEqualTo(4);
+        assertThat(BioPageText.clean("x" + ENCLOSING_CIRCLE.repeat(40))).isEqualTo("x" + ENCLOSING_CIRCLE.repeat(4));
     }
 
     @Test
@@ -113,8 +113,8 @@ class BioPageTextTest {
     }
 
     @Test
-    void marksInterleavedWithZeroWidthSpacesAreCappedAtThree() {
-        assertThat(BioPageText.clean("x" + (ACUTE + ZERO_WIDTH_SPACE).repeat(24))).isEqualTo("x" + ACUTE.repeat(3));
+    void marksInterleavedWithZeroWidthSpacesAreCappedAtFour() {
+        assertThat(BioPageText.clean("x" + (ACUTE + ZERO_WIDTH_SPACE).repeat(24))).isEqualTo("x" + ACUTE.repeat(4));
     }
 
     @ParameterizedTest
@@ -146,15 +146,45 @@ class BioPageTextTest {
     }
 
     @Test
-    void combiningMarksAreCappedAtThree() {
-        assertThat(BioPageText.clean("x" + ACUTE.repeat(40))).isEqualTo("x" + ACUTE.repeat(3));
-        assertThat(BioPageText.clean("a" + ACUTE.repeat(40))).isEqualTo(codePoints(0x00E1) + ACUTE.repeat(3));
+    void combiningMarksAreCappedAtFour() {
+        assertThat(BioPageText.clean("x" + ACUTE.repeat(40))).isEqualTo("x" + ACUTE.repeat(4));
+        assertThat(BioPageText.clean("x" + ACUTE.repeat(5))).isEqualTo("x" + ACUTE.repeat(4));
+        assertThat(BioPageText.clean("x" + ACUTE.repeat(4))).isEqualTo("x" + ACUTE.repeat(4));
+        assertThat(BioPageText.clean("a" + ACUTE.repeat(40))).isEqualTo(codePoints(0x00E1) + ACUTE.repeat(4));
+    }
+
+    @Test
+    void hebrewWithCantillationKeepsAllFourMarks() {
+        final var nfc = codePoints(0x05D1, 0x05B0, 0x05BC, 0x05BD, 0x0591, 0x05E8);
+
+        assertThat(BioPageText.clean(nfc)).isEqualTo(nfc);
+        assertThat(BioPageText.clean(codePoints(0x05D1, 0x05BC, 0x05B0, 0x05BD, 0x0591, 0x05E8))).isEqualTo(nfc);
+    }
+
+    @Test
+    void aMyanmarSyllableWithFourMarksIsKept() {
+        final var syllable = codePoints(0x1000, 0x103B, 0x103D, 0x103E, 0x1036, 0x1037);
+
+        assertThat(BioPageText.clean(syllable)).isEqualTo(syllable);
+    }
+
+    @ParameterizedTest
+    @MethodSource("keptInvisibleCharactersOnly")
+    void textOfOnlyKeptInvisibleCharactersBecomesEmpty(final String text) {
+        assertThat(BioPageText.clean(text)).isEmpty();
+        assertThat(BioPageText.clean("  " + text + "  ")).isEmpty();
+    }
+
+    @Test
+    void keptInvisibleCharactersBesideVisibleTextStay() {
+        assertThat(BioPageText.clean("Ana" + ZERO_WIDTH_JOINER)).isEqualTo("Ana" + ZERO_WIDTH_JOINER);
+        assertThat(BioPageText.clean(codePoints(0x2764, 0xFE0F))).isEqualTo(codePoints(0x2764, 0xFE0F));
     }
 
     @Test
     void marksThatNormalizingSplitsAreCappedAfterwards() {
         assertThat(BioPageText.clean("x" + DIALYTIKA_TONOS.repeat(3)))
-                .isEqualTo(codePoints(0x1E8D, 0x0301, 0x0308, 0x0301));
+                .isEqualTo(codePoints(0x1E8D, 0x0301, 0x0308, 0x0301, 0x0308));
     }
 
     @Test
@@ -255,6 +285,22 @@ class BioPageTextTest {
                 codePoints(0x09AC, 0x09BE, 0x0982, 0x09B2, 0x09BE),
                 codePoints(0x1000, 0x103C, 0x103D, 0x103E, 0x1031, 0x1038),
                 "Vi" + codePoints(0x1EC7) + "t Nam");
+    }
+
+    private static Stream<String> keptInvisibleCharactersOnly() {
+        return Stream.of(
+                codePoints(0x200D),
+                codePoints(0x200C),
+                codePoints(0xFE0F),
+                codePoints(0x034F),
+                codePoints(0x0301),
+                codePoints(0x20DD),
+                codePoints(0xE0041, 0xE0042),
+                codePoints(0x17B4),
+                codePoints(0x180B),
+                codePoints(0x0301).repeat(3),
+                codePoints(0x200D, 0x0020, 0x200C, 0x0020, 0xFE0F),
+                codePoints(0x200D, 0x0301, 0x20DD, 0xE007F));
     }
 
     private static boolean isMark(final int codePoint) {

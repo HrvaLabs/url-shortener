@@ -5,6 +5,9 @@ import cc.hrva.urlshortener.model.BioPage;
 import cc.hrva.urlshortener.model.User;
 import jakarta.persistence.EntityManager;
 import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.List;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.SpringBootConfiguration;
@@ -16,12 +19,12 @@ import org.springframework.context.annotation.FilterType;
 import org.springframework.context.annotation.Import;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.tuple;
 
-@Transactional
 @SpringBootTest(
         classes = BioPageViewStatsRepositoryTest.TestApplication.class,
         webEnvironment = SpringBootTest.WebEnvironment.NONE,
@@ -46,6 +49,28 @@ class BioPageViewStatsRepositoryTest {
 
     @Autowired
     private EntityManager entityManager;
+
+    @Autowired
+    private PlatformTransactionManager transactionManager;
+
+    private final List<Long> owners = new ArrayList<>();
+
+    @AfterEach
+    void tearDown() {
+        owners.forEach(owner -> jdbcTemplate.update("delete from user_account where id = ?", owner));
+    }
+
+    @Test
+    void anIncrementInsideATransactionIsCommittedOnItsOwn() {
+        final var page = savedPage("ana@example.com", "ana");
+
+        new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+            bioPageViewStatsRepository.increment(page.getId(), DAY, 1, 0);
+            status.setRollbackOnly();
+        });
+
+        assertThat(bioPageViewStatsRepository.findDaily(page.getId(), DAY, DAY)).containsExactly(new BioViewDay(DAY, 1, 0));
+    }
 
     @Test
     void twoIncrementsOnADayAddUp() {
@@ -106,9 +131,12 @@ class BioPageViewStatsRepositoryTest {
     }
 
     private BioPage savedPage(final String email, final String handle) {
-        final var owner = User.builder().email(email).password("correct horse battery").build();
-        entityManager.persist(owner);
-        return bioPageRepository.saveAndFlush(BioPage.builder().owner(owner).handle(handle).build());
+        return new TransactionTemplate(transactionManager).execute(status -> {
+            final var owner = User.builder().email(email).password("correct horse battery").build();
+            entityManager.persist(owner);
+            owners.add(owner.getId());
+            return bioPageRepository.saveAndFlush(BioPage.builder().owner(owner).handle(handle).build());
+        });
     }
 
     @SpringBootConfiguration

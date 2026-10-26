@@ -3,11 +3,13 @@ package cc.hrva.urlshortener.repository;
 import cc.hrva.urlshortener.dto.bio.BioViewDay;
 import java.time.LocalDate;
 import java.util.List;
-import lombok.RequiredArgsConstructor;
 import java.util.Map;
+import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 
 @Repository
 @RequiredArgsConstructor
@@ -38,6 +40,7 @@ public class BioPageViewStatsRepository {
 
     private final NamedParameterJdbcTemplate jdbcTemplate;
 
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public void increment(final long pageId, final LocalDate day, final long views, final long botViews) {
         final var parameters = Map.of(PAGE_ID, pageId, DAY, day, VIEWS, views, BOT_VIEWS, botViews);
         try {
