@@ -42,8 +42,6 @@ import cc.hrva.urlshortener.exception.RateLimitExceededException;
 import cc.hrva.urlshortener.exception.ShortUrlAlreadyExistsException;
 import cc.hrva.urlshortener.exception.UrlNotFoundException;
 import cc.hrva.urlshortener.exception.UrlValidationException;
-import cc.hrva.urlshortener.mcp.anon.RateLimiter;
-import cc.hrva.urlshortener.mcp.anon.RateLimiterUnavailableException;
 import cc.hrva.urlshortener.model.ApiKey;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.User;
@@ -54,6 +52,8 @@ import cc.hrva.urlshortener.model.enums.ReviewResolution;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.service.impl.DefaultSuspiciousUrlService;
 import cc.hrva.urlshortener.service.impl.DefaultUrlService;
+import cc.hrva.urlshortener.service.ratelimit.RateLimiter;
+import cc.hrva.urlshortener.service.ratelimit.RateLimiterUnavailableException;
 import cc.hrva.urlshortener.validator.ApiKeyValidator;
 import cc.hrva.urlshortener.validator.UrlValidator;
 import cc.hrva.urlshortener.validator.impl.DefaultUrlValidator;
@@ -150,7 +150,7 @@ class UrlServiceTest {
     private SuspiciousUrlService suspiciousUrlService;
 
     @Mock
-    private cc.hrva.urlshortener.mcp.anon.RateLimiter rateLimiter;
+    private RateLimiter rateLimiter;
 
     @Mock
     private ReviewQueueService reviewQueueService;
@@ -1570,7 +1570,7 @@ class UrlServiceTest {
     void unlockStillWorksWhenTheRateLimiterIsDown() {
         final var url = Url.builder().id(1L).shortUrl("a").longUrl("https://a.com").active(true).passwordHash("hash").build();
         when(rateLimiter.tryAcquire(any(), org.mockito.ArgumentMatchers.anyInt(), any()))
-                .thenThrow(new cc.hrva.urlshortener.mcp.anon.RateLimiterUnavailableException(new RuntimeException("down")));
+                .thenThrow(new RateLimiterUnavailableException(new RuntimeException("down")));
         when(urlRepository.findByShortUrlAndActiveTrue("a")).thenReturn(Optional.of(url));
         when(passwordEncoder.matches("secret", "hash")).thenReturn(true);
 

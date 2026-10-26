@@ -1,8 +1,8 @@
 package cc.hrva.urlshortener.mcp.authorization;
 
-import cc.hrva.urlshortener.mcp.anon.RateLimiter;
-import cc.hrva.urlshortener.mcp.anon.RateLimiterUnavailableException;
 import cc.hrva.urlshortener.security.ClientIpResolver;
+import cc.hrva.urlshortener.service.ratelimit.RateLimiter;
+import cc.hrva.urlshortener.service.ratelimit.RateLimiterUnavailableException;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;

@@ -1,4 +1,4 @@
-package cc.hrva.urlshortener.mcp.anon;
+package cc.hrva.urlshortener.service.ratelimit;
 
 import java.time.Duration;
 import java.util.List;

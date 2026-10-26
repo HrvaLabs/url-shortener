@@ -1,4 +1,4 @@
-package cc.hrva.urlshortener.mcp.anon;
+package cc.hrva.urlshortener.service.ratelimit;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -47,7 +47,7 @@ class RateLimiterTest {
 
     @Test
     void keyIsScopedByName() {
-        assertThat(RateLimiter.clientKey("mcp-anon", "203.0.113.7")).isNotEqualTo(RateLimiter.clientKey(NAME, "203.0.113.7"));
+        assertThat(RateLimiter.clientKey("report", "203.0.113.7")).isNotEqualTo(RateLimiter.clientKey(NAME, "203.0.113.7"));
     }
 
     private static String sha256(final String value) {

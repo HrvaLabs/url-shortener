@@ -32,7 +32,7 @@ class McpRequestBodyLimitFilterTest {
 
     @Test
     void oversizedContentLengthIs413BeforeTheBodyIsRead() throws Exception {
-        final var request = new MockHttpServletRequest("POST", "/mcp/anon");
+        final var request = new MockHttpServletRequest("POST", "/mcp");
         request.setContent(new byte[LIMIT + 1]);
         final var response = new MockHttpServletResponse();
         final var chain = new MockFilterChain();
@@ -65,7 +65,7 @@ class McpRequestBodyLimitFilterTest {
             assertThatThrownBy(() -> request.getInputStream().readAllBytes()).isInstanceOf(RequestBodyTooLargeException.class);
             assertThatThrownBy(() -> request.getInputStream().read()).isInstanceOf(RequestBodyTooLargeException.class);
         });
-        filter.doFilter(unknownLength("/mcp/anon", readerBody), new MockHttpServletResponse(), (request, response) ->
+        filter.doFilter(unknownLength("/mcp", readerBody), new MockHttpServletResponse(), (request, response) ->
                 assertThatThrownBy(() -> request.getReader().transferTo(Writer.nullWriter())).isInstanceOf(RequestBodyTooLargeException.class));
 
         assertThat(streamBody.bytesRead()).isLessThanOrEqualTo(LIMIT + 1);
@@ -120,7 +120,8 @@ class McpRequestBodyLimitFilterTest {
         final var bodyLimit = configuration.mcpRequestBodyLimitFilterRegistration();
         final var registration = configuration.dcrEmptyScopeFilterRegistration(JsonMapper.builder().build());
 
-        assertThat(bodyLimit.getUrlPatterns()).containsExactlyInAnyOrder("/oauth2/register", "/mcp", "/mcp/anon", "/api/v1/reports");
+        assertThat(bodyLimit.getUrlPatterns()).containsExactlyInAnyOrder("/oauth2/register", "/mcp", "/api/v1/reports");
+        assertThat(configuration.mcpModernProbeFilterRegistration().getUrlPatterns()).containsExactly("/mcp");
         assertThat(bodyLimit.getOrder()).isLessThan(registration.getOrder());
         assertThat(registration.getOrder()).isLessThan(SecurityFilterProperties.DEFAULT_FILTER_ORDER);
     }

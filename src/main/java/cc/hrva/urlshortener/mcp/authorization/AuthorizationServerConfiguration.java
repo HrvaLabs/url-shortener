@@ -4,14 +4,13 @@ import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.controller.ReportController;
 import cc.hrva.urlshortener.mcp.McpModernProbeFilter;
 import cc.hrva.urlshortener.mcp.McpRequestBodyLimitFilter;
-import cc.hrva.urlshortener.mcp.anon.AnonymousMcpConfiguration;
-import cc.hrva.urlshortener.mcp.anon.RateLimiter;
 import cc.hrva.urlshortener.mcp.bridge.BridgedAuthorizationRequestFilter;
 import cc.hrva.urlshortener.mcp.bridge.ConnectContinueController;
 import cc.hrva.urlshortener.mcp.bridge.ConnectRedirectEntryPoint;
 import cc.hrva.urlshortener.mcp.bridge.ConnectRequestStore;
 import cc.hrva.urlshortener.mcp.bridge.SessionEndingAuthorizationResponseHandler;
 import cc.hrva.urlshortener.security.ClientIpResolver;
+import cc.hrva.urlshortener.service.ratelimit.RateLimiter;
 import com.nimbusds.jose.JOSEException;
 import com.nimbusds.jose.jwk.JWKSet;
 import com.nimbusds.jose.jwk.RSAKey;
@@ -206,8 +205,7 @@ public class AuthorizationServerConfiguration {
     @Bean
     public FilterRegistrationBean<McpRequestBodyLimitFilter> mcpRequestBodyLimitFilterRegistration() {
         final var registration = new FilterRegistrationBean<>(new McpRequestBodyLimitFilter());
-        registration.addUrlPatterns(
-                CLIENT_REGISTRATION_ENDPOINT, MCP_RESOURCE_PATH, AnonymousMcpConfiguration.ANONYMOUS_MCP_ENDPOINT, ReportController.REPORTS_ENDPOINT);
+        registration.addUrlPatterns(CLIENT_REGISTRATION_ENDPOINT, MCP_RESOURCE_PATH, ReportController.REPORTS_ENDPOINT);
         registration.setOrder(REQUEST_BODY_LIMIT_FILTER_ORDER);
 
         return registration;
@@ -216,7 +214,7 @@ public class AuthorizationServerConfiguration {
     @Bean
     public FilterRegistrationBean<McpModernProbeFilter> mcpModernProbeFilterRegistration() {
         final var registration = new FilterRegistrationBean<>(new McpModernProbeFilter());
-        registration.addUrlPatterns(MCP_RESOURCE_PATH, AnonymousMcpConfiguration.ANONYMOUS_MCP_ENDPOINT);
+        registration.addUrlPatterns(MCP_RESOURCE_PATH);
         registration.setOrder(MODERN_PROBE_FILTER_ORDER);
 
         return registration;

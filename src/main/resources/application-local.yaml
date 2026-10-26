@@ -29,7 +29,7 @@ app:
   contact-email: info@localhost
   server-url: localhost
   frontend-url: http://localhost:3000
-  # Local profile only, so /mcp/anon works locally; production keeps application.yaml's value.
+  # Local profile only, so anonymous links work on the website locally; production keeps application.yaml's value.
   anonymous-url-creation-enabled: true
   passkeys:
     rp-id: localhost

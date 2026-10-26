@@ -1,4 +1,4 @@
-package cc.hrva.urlshortener.mcp.anon;
+package cc.hrva.urlshortener.service.ratelimit;
 
 public class RateLimiterUnavailableException extends RuntimeException {
 

@@ -82,6 +82,7 @@ class DefaultReservedAliasServiceTest {
         assertThat(reservedAliasService.isReserved("API")).isTrue();
         assertThat(reservedAliasService.isReserved("mcp")).isTrue();
         assertThat(reservedAliasService.isReserved(" Login ")).isTrue();
+        assertThat(reservedAliasService.isReserved("ANON")).isTrue();
 
         verify(reservedAliasRepository, never()).existsByAlias(anyString());
     }
@@ -117,15 +118,15 @@ class DefaultReservedAliasServiceTest {
         final var entries = reservedAliasService.list();
 
         assertThat(entries).extracting(ReservedAliasResponse::alias).containsExactly(
-                "actuator", "api", "auth", "error", "login", "logout", "mcp", "oauth2", "swagger-ui", "v3", "webjars", "promo");
-        assertThat(entries.subList(0, 11)).allSatisfy(entry -> {
+                "actuator", "anon", "api", "auth", "error", "login", "logout", "mcp", "oauth2", "swagger-ui", "v3", "webjars", "promo");
+        assertThat(entries.subList(0, 12)).allSatisfy(entry -> {
             assertThat(entry.id()).isNull();
             assertThat(entry.builtIn()).isTrue();
             assertThat(entry.reason()).isEqualTo(BUILT_IN_REASON);
             assertThat(entry.createdAt()).isNull();
             assertThat(entry.createdBy()).isNull();
         });
-        assertThat(entries.get(4).inUse()).containsExactly(new InUseLink(52L, "Login", null, false));
+        assertThat(entries.get(5).inUse()).containsExactly(new InUseLink(52L, "Login", null, false));
         assertThat(entries.getLast()).isEqualTo(new ReservedAliasResponse(3L, "promo", "Kept for the spring campaign", false, RESERVED_AT, ADMIN,
                 List.of(new InUseLink(41L, "Promo", "ana@example.com", true))));
         assertThat(entries).filteredOn(entry -> !List.of("login", "promo").contains(entry.alias()))
@@ -133,7 +134,7 @@ class DefaultReservedAliasServiceTest {
 
         verify(urlRepository).findByLowerShortUrlIn(aliases.capture());
         assertThat(aliases.getValue()).containsExactlyInAnyOrder(
-                "actuator", "api", "auth", "error", "login", "logout", "mcp", "oauth2", "swagger-ui", "v3", "webjars", "promo");
+                "actuator", "anon", "api", "auth", "error", "login", "logout", "mcp", "oauth2", "swagger-ui", "v3", "webjars", "promo");
     }
 
     @Test
