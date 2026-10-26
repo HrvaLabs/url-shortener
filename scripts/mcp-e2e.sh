@@ -11,6 +11,8 @@
 # Section 16 checks QR scans, the public numbers (with their 60-per-hour limit) and the burst alert. The
 # alert goes to a local Node stub on a random loopback port: its URL is passed on the command line, which
 # outranks DISCORD_WEBHOOK_URL, so the real webhook is never called.
+# Section 17 checks bio pages on Postgres: racing creates, the page lock's SQL and what waits behind it, the public page,
+# the /@handle redirect, view counting, a click from the page, a report, the admin search, hide and revoke, and the export.
 #
 #   scripts/mcp-e2e.sh                         builds the jar, then runs every step
 #   MCP_E2E_SKIP_BUILD=1 scripts/mcp-e2e.sh    reuses target/url-shortener-*.jar
@@ -42,6 +44,8 @@ STUB_PID=
 DISCORD_SECRET=e2e-$(openssl rand -hex 8)
 DISCORD_POSTS=$WORK/discord-posts.jsonl
 BROWSER_USER_AGENT='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36'
+LOCK_HOLDER_PID=
+BG_PIDS=()
 INITIALIZE='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"curl","version":"0"}}}'
 TOOLS_LIST='{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'
 
@@ -116,6 +120,66 @@ psql_query() {
 
 psql_value() {
     docker exec "$POSTGRES_CONTAINER" psql -U "$DB_USER" -d url_shortener -tAq -c "$1"
+}
+
+psql_has_click() {
+    (( $(psql_value "select coalesce(sum(s.clicks), 0) from link_daily_stats s join url u on u.id = s.url_id where u.short_url = '$1';") >= 1 ))
+}
+
+# http_bg <name> <curl arguments…> sends a request in the background; wait_bg waits for all of them, then bg_status <name>
+# and bg_body <name> read each answer.
+http_bg() {
+    local name=$1
+    shift
+    curl -sS -o "$WORK/$name.body" -w '%{http_code}' "$@" >"$WORK/$name.status" &
+    BG_PIDS+=($!)
+}
+
+wait_bg() {
+    local pid
+    for pid in "${BG_PIDS[@]}"; do
+        wait "$pid" || fail "a background request failed"
+    done
+    BG_PIDS=()
+}
+
+bg_status() {
+    cat "$WORK/$1.status"
+}
+
+bg_body() {
+    cat "$WORK/$1.body"
+}
+
+# hold_page_lock <page id> <lock clause> <seconds> locks a bio_page row from its own psql session, as a save in progress
+# does, and returns once the lock is held; release_page_lock waits for that session to commit.
+hold_page_lock() {
+    local tries
+    docker exec "$POSTGRES_CONTAINER" psql -U "$DB_USER" -d url_shortener -q -v ON_ERROR_STOP=1 \
+        -c 'begin' -c "select id from bio_page where id = $1 $2" -c "select pg_sleep($3)" -c 'commit' >/dev/null &
+    LOCK_HOLDER_PID=$!
+    for (( tries = 0; tries < 50; tries++ )); do
+        [[ $(psql_value "select count(*) from pg_stat_activity where query = 'select pg_sleep($3)' and state = 'active';") == 1 ]] && return 0
+        sleep 0.1
+    done
+    fail "the bio_page row was not locked within 5s"
+}
+
+release_page_lock() {
+    wait "$LOCK_HOLDER_PID" || fail "the psql session holding the bio_page lock failed"
+    LOCK_HOLDER_PID=
+}
+
+# expect_lock_wait <seconds a request took> <what>: an insert that references the page takes FOR KEY SHARE on its row, which
+# waits behind FOR UPDATE and not behind FOR NO KEY UPDATE.
+expect_lock_wait() {
+    if [[ $LOCK_CLAUSE == "for update" ]]; then
+        awk -v seconds="$1" 'BEGIN { exit !(seconds >= 1.5) }' || fail "$2 took ${1}s; behind FOR UPDATE it should have waited"
+        ok "$2 waited ${1}s, until the lock was released"
+    else
+        awk -v seconds="$1" 'BEGIN { exit !(seconds < 1) }' || fail "$2 took ${1}s; FOR NO KEY UPDATE should not block it"
+        ok "$2 did not wait (${1}s)"
+    fi
 }
 
 # mcp_post <path> <access token, or empty for none> <JSON-RPC body>
@@ -678,5 +742,178 @@ expect_eq "$(burst_posts)" 1 "the Discord stub got the burst alert once"
 expect_eq "$(jq -sc --arg line "$BURST_LINE" '[.[] | select(.content | contains($line)) | {allowed_mentions, flags}] | first' "$DISCORD_POSTS")" \
     '{"allowed_mentions":{"parse":[]},"flags":4}' "no mentions, no embeds"
 expect_eq "$(grep -c "$DISCORD_SECRET" "$WORK/app.log" || true)" 0 "the webhook URL never reaches the app log"
+
+section "17. Bio pages"
+CHROME='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36'
+BIO_PAGES=$BASE/api/v1/bio-pages
+expect_eq "$(psql_value "select count(*) from information_schema.tables where table_name in ('bio_page','bio_page_button','bio_handle_hold','bio_page_daily_views','bio_page_review');")" \
+    5 "029 created the five bio tables"
+
+echo "  --- two accounts create a page with the same handle at the same moment"
+http_bg race-user -X POST "$BIO_PAGES/me" -H "Authorization: Bearer $APP_JWT" -H 'Content-Type: application/json' -d '{"handle":"e2e-race"}'
+http_bg race-admin -X POST "$BIO_PAGES/me" -H "Authorization: Bearer $ADMIN_JWT" -H 'Content-Type: application/json' -d '{"handle":"e2e-race"}'
+wait_bg
+show "user -> $(bg_status race-user) $(bg_body race-user | jq -c '{handle, error}'), admin -> $(bg_status race-admin) $(bg_body race-admin | jq -c '{handle, error}')"
+expect_eq "$(printf '%s\n' "$(bg_status race-user)" "$(bg_status race-admin)" | sort | tr '\n' ' ')" "201 409 " "one create wins the handle, the other is a 409"
+if [[ $(bg_status race-user) == 201 ]]; then RACE_WINNER_JWT=$APP_JWT RACE_LOSER=race-admin; else RACE_WINNER_JWT=$ADMIN_JWT RACE_LOSER=race-user; fi
+expect_eq "$(bg_body "$RACE_LOSER" | jq -r .error)" "This handle is taken. Try another." "the losing account is told the handle is taken"
+expect_eq "$(psql_value "select count(*) from bio_page where handle = 'e2e-race';")" 1 "one bio_page row holds e2e-race"
+http -X DELETE "$BIO_PAGES/me" -H "Authorization: Bearer $RACE_WINNER_JWT"
+expect_eq "$HTTP_STATUS" 204 "the winner deletes the page"
+expect_eq "$(psql_value "select (page_id is null) || '|' || (held_until > now() + interval '29 days') from bio_handle_hold where handle = 'e2e-race';")" \
+    "true|true" "the deleted page's handle is held 30 days, linked to no page"
+
+echo "  --- the same account sends its create twice at the same moment"
+http_bg create-1 -X POST "$BIO_PAGES/me" -H "Authorization: Bearer $APP_JWT" -H 'Content-Type: application/json' -d '{"handle":"E2E-Bio"}'
+http_bg create-2 -X POST "$BIO_PAGES/me" -H "Authorization: Bearer $APP_JWT" -H 'Content-Type: application/json' -d '{"handle":"E2E-Bio"}'
+wait_bg
+show "first -> $(bg_status create-1) $(bg_body create-1 | jq -c '{handle, error}'), second -> $(bg_status create-2) $(bg_body create-2 | jq -c '{handle, error}')"
+expect_eq "$(printf '%s\n' "$(bg_status create-1)" "$(bg_status create-2)" | sort | tr '\n' ' ')" "201 409 " "one create makes the page, the other is a 409, never a 500"
+if [[ $(bg_status create-1) == 201 ]]; then CREATED=create-1 REFUSED=create-2; else CREATED=create-2 REFUSED=create-1; fi
+expect_eq "$(bg_body "$CREATED" | jq -r .handle)" e2e-bio "POST /api/v1/bio-pages/me stores the handle E2E-Bio as e2e-bio"
+REFUSAL=$(bg_body "$REFUSED" | jq -r .error)
+[[ $REFUSAL == "You already have a bio page." || $REFUSAL == "This handle is taken. Try another." ]] || fail "the second create: unexpected answer '$REFUSAL'"
+ok "the second create is refused with \"$REFUSAL\""
+echo "  lost the insert race on Postgres (logged by the create): $(grep -q 'Bio page was created by a concurrent request' "$WORK/app.log" && echo yes || echo 'no, refused before the insert')"
+PAGE_ID=$(bg_body "$CREATED" | jq -r .id)
+expect_eq "$(psql_value "select count(*) from bio_page p join user_account u on u.id = p.user_id where u.email = '$USER_EMAIL';")" 1 "$USER_EMAIL has exactly one page"
+http -X POST "$BIO_PAGES/me" -H "Authorization: Bearer $ADMIN_JWT" -H 'Content-Type: application/json' -d '{"handle":"e2e-bio"}'
+expect_eq "$HTTP_STATUS $(jq -r .error <<<"$HTTP_BODY")" "409 This handle is taken. Try another." "another account can't take e2e-bio"
+http -X POST "$BIO_PAGES/me" -H "Authorization: Bearer $ADMIN_JWT" -H 'Content-Type: application/json' -d '{"handle":"e2e_admin"}'
+expect_eq "$HTTP_STATUS" 201 "admin@localhost creates e2e_admin"
+http -X PUT "$BIO_PAGES/me" -H "Authorization: Bearer $ADMIN_JWT" -H 'Content-Type: application/json' \
+    -d '{"displayName":"Lab notes","bio":"","avatarKind":"INITIALS","accent":"SLATE","theme":"AUTO","buttons":[]}'
+expect_eq "$HTTP_STATUS" 200 "admin@localhost names its page Lab notes"
+
+echo "  --- a save, with every statement Postgres runs logged"
+http -X POST "$BASE/api/v1/urls" -H "Authorization: Bearer $APP_JWT" -H 'Content-Type: application/json' \
+    -d '{"longUrl":"https://example.com/hrva-mcp-e2e-bio","shortUrl":"e2e-bio-link"}'
+expect_eq "$HTTP_STATUS" 200 "POST /api/v1/urls e2e-bio-link"
+BIO_LINK_ID=$(jq -r .id <<<"$HTTP_BODY")
+psql_value "alter system set log_statement = 'all';" >/dev/null
+psql_value "select pg_reload_conf();" >/dev/null
+sleep 1
+SAVE=$(jq -nc --argjson urlId "$BIO_LINK_ID" '{displayName: "E2E a\\b 100%", bio: "Photos from Zagreb", avatarKind: "INITIALS", accent: "TEAL",
+    theme: "AUTO", buttons: [{urlId: $urlId, title: "My shop", icon: "WEBSITE"}]}')
+http -X PUT "$BIO_PAGES/me" -H "Authorization: Bearer $APP_JWT" -H 'Content-Type: application/json' -d "$SAVE"
+expect_eq "$HTTP_STATUS" 200 "PUT /api/v1/bio-pages/me with one button"
+expect_eq "$(jq -r '.buttons[0].linkState + " " + (.buttons[0].shownOnPage | tostring)' <<<"$HTTP_BODY")" "LIVE true" "the button's link is LIVE and shows on the page"
+psql_value "alter system reset log_statement;" >/dev/null
+psql_value "select pg_reload_conf();" >/dev/null
+docker logs "$POSTGRES_CONTAINER" >"$WORK/postgres.log" 2>&1
+LOCK_LINE=$(grep -E 'from bio_page [a-z0-9_]+ where [a-z0-9_]+\.id=\$1 for (no key )?update' "$WORK/postgres.log" | tail -n1)
+[[ -n $LOCK_LINE ]] || fail "no locking select on bio_page in the Postgres log"
+LOCK_CLAUSE=$(grep -Eo 'for (no key )?update' <<<"$LOCK_LINE" | tail -n1)
+show "the page lock as Postgres ran it: ${LOCK_LINE#*: }"
+[[ $LOCK_CLAUSE == "for update" || $LOCK_CLAUSE == "for no key update" ]] || fail "unexpected lock clause '$LOCK_CLAUSE'"
+ok "PESSIMISTIC_WRITE on bio_page runs as \"$LOCK_CLAUSE\""
+LOCK_PID=$(awk '{print $4}' <<<"$LOCK_LINE")
+LOCK_HELD_MS=$(awk -v pid="$LOCK_PID" -v lock="$LOCK_LINE" '
+    function ms(date, time) { split(time, t, ":"); return (t[1] * 3600 + t[2] * 60 + t[3]) * 1000 }
+    $0 == lock { start = ms($1, $2); next }
+    start && $4 == pid && /COMMIT/ { printf "%.0f", ms($1, $2) - start; exit }' "$WORK/postgres.log")
+echo "  the save held the page lock for ${LOCK_HELD_MS:-?} ms (its locking select to its COMMIT)"
+
+echo "  --- the public page"
+http "$BASE/api/v1/public/bio-pages/E2E-Bio"
+expect_eq "$HTTP_STATUS" 200 "GET /api/v1/public/bio-pages/E2E-Bio without a token"
+show "$(jq -c . <<<"$HTTP_BODY")"
+expect_eq "$(jq -r '.buttons | length' <<<"$HTTP_BODY")" 1 "one button"
+expect_eq "$(jq -r '.buttons[0].shortUrl' <<<"$HTTP_BODY")" e2e-bio-link "the button is the short link e2e-bio-link"
+expect_eq "$(jq -r '[paths | .[-1] | strings] - ["id", "urlId", "ownerId", "owner", "destinationHost", "longUrl", "linkState", "visible", "hiddenReason"]
+    == [paths | .[-1] | strings]' <<<"$HTTP_BODY")" true "no ids, owner, destination, state or moderation fields"
+expect_contains "$(header_value cache-control)" no-store "Cache-Control: no-store"
+expect_eq "$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' "$BASE/@E2E-Bio?qr")" "302 $FRONTEND_URL/bio/e2e-bio" \
+    "/@E2E-Bio?qr -> 302 to the frontend page, lower-cased, the query dropped"
+
+echo "  --- the first view of the day while the page row is locked \"$LOCK_CLAUSE\""
+hold_page_lock "$PAGE_ID" "$LOCK_CLAUSE" 3
+BEACON=$(curl -s -o /dev/null -w '%{http_code} %{time_total}' -X POST -A "$CHROME" -H 'CF-Connecting-IP: 198.51.100.7' \
+    "$BASE/api/v1/public/bio-pages/e2e-bio/views")
+release_page_lock
+show "first view while locked -> $BEACON (seconds)"
+expect_eq "${BEACON%% *}" 204 "the beacon answers 204"
+expect_lock_wait "${BEACON#* }" "the first view of the day"
+expect_eq "$(curl -s -o /dev/null -w '%{http_code}' -X POST -A "$CHROME" -H 'CF-Connecting-IP: 198.51.100.7' "$BASE/api/v1/public/bio-pages/e2e-bio/views")" \
+    204 "the same visitor again -> 204"
+expect_eq "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/v1/public/bio-pages/e2e-bio/views")" 204 "plain curl, a bot -> 204"
+expect_eq "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/v1/public/bio-pages/nobody-here/views")" 204 "an unknown page -> 204 too"
+expect_eq "$(psql_value "select views || '|' || bot_views from bio_page_daily_views where page_id = $PAGE_ID;")" "1|1" \
+    "bio_page_daily_views: one human view (counted once) and one bot view"
+VISITOR_KEYS=$(docker exec "$REDIS_CONTAINER" redis-cli --scan --pattern "analytics:bio-visitors:$PAGE_ID:*")
+expect_eq "$(grep -cE "^analytics:bio-visitors:$PAGE_ID:[0-9]{4}-[0-9]{2}-[0-9]{2}$" <<<"$VISITOR_KEYS")" 1 "Redis: one analytics:bio-visitors:<pageId>:<day> set"
+VISITOR=$(docker exec "$REDIS_CONTAINER" redis-cli smembers "$VISITOR_KEYS")
+expect_eq "$(docker exec "$REDIS_CONTAINER" redis-cli scard "$VISITOR_KEYS") ${#VISITOR}" "1 22" "it holds one 22-character hash"
+[[ $VISITOR != *198.51.100.7* ]] || fail "the visitor set holds the IP address"
+expect_eq "$(( $(docker exec "$REDIS_CONTAINER" redis-cli ttl "$VISITOR_KEYS") > 0 ))" 1 "the set expires"
+VIEW_LIMIT_KEYS=$(docker exec "$REDIS_CONTAINER" redis-cli --scan --pattern 'rate-limit:bio-view:*')
+expect_eq "$(grep -cE '^rate-limit:bio-view:[0-9a-f]{64}$' <<<"$VIEW_LIMIT_KEYS") $(grep -c . <<<"$VIEW_LIMIT_KEYS")" "2 2" \
+    "Redis: the view limit has one key per network (the visitor's and plain curl's), each a sha256, never an IP"
+
+echo "  --- a click on the button from the bio page"
+expect_eq "$(curl -s -o /dev/null -w '%{http_code}' -A "$CHROME" -H "Referer: $FRONTEND_URL/bio/e2e-bio" "$BASE/e2e-bio-link")" 302 \
+    "a browser follows the button with the bio page as its referrer"
+wait_until 15 "the click on e2e-bio-link" psql_has_click e2e-bio-link
+expect_eq "$(psql_value "select b.dimension_value from link_daily_breakdown b join url u on u.id = b.url_id where u.short_url = 'e2e-bio-link' and b.dimension = 'REFERRER';")" \
+    other "a localhost referrer has no dot, so it is classified other, not as the own host"
+http -H "Authorization: Bearer $APP_JWT" "$BASE/api/v1/analytics/bio-page?days=7"
+expect_eq "$HTTP_STATUS" 200 "GET /api/v1/analytics/bio-page?days=7"
+show "$(jq -c '{handle, views, botViews, days: (.daily | length), buttons}' <<<"$HTTP_BODY")"
+expect_eq "$(jq -r '"\(.views) \(.botViews) \(.daily | length)"' <<<"$HTTP_BODY")" "1 1 7" "views 1, bot views 1, 7 days"
+expect_eq "$(jq -r '.buttons[0] | "\(.shortUrl) \(.allClicks) \(.fromHrvaPages)"' <<<"$HTTP_BODY")" "e2e-bio-link 1 0" \
+    "the button: 1 click in all, 0 from hrva.cc pages on localhost"
+
+echo "  --- a visitor report while the page row is locked \"$LOCK_CLAUSE\""
+hold_page_lock "$PAGE_ID" "$LOCK_CLAUSE" 3
+REPORT=$(curl -s -o /dev/null -w '%{http_code} %{time_total}' -X POST "$BASE/api/v1/reports" -H 'Content-Type: application/json' \
+    -d '{"shortUrl":"@e2e-bio","category":"SPAM"}')
+release_page_lock
+show "POST /api/v1/reports @e2e-bio while locked -> $REPORT (seconds)"
+expect_eq "${REPORT%% *}" 202 "the report answers 202"
+expect_lock_wait "${REPORT#* }" "the report that opens the review"
+expect_eq "$(psql_value "select count(*) || ' ' || bool_or(system_flagged) from bio_page_review where page_id = $PAGE_ID and resolved_at is null;")" "1 false" \
+    "one open review, opened by a visitor"
+
+echo "  --- admin"
+http -H "Authorization: Bearer $ADMIN_JWT" "$BASE/api/v1/admin/bio-page-reviews"
+expect_eq "$HTTP_STATUS $(jq -r .page.totalElements <<<"$HTTP_BODY")" "200 1" "GET /api/v1/admin/bio-page-reviews lists it"
+show "$(jq -c '.content[0] | {pageId, handle, reasons}' <<<"$HTTP_BODY")"
+for search in 'a\b:e2e-bio' '%:e2e-bio' '_:e2e_admin'; do
+    http -H "Authorization: Bearer $ADMIN_JWT" "$BASE/api/v1/admin/bio-pages?search=$(urlencode "${search%%:*}")"
+    expect_eq "$HTTP_STATUS $(jq -r '"\(.page.totalElements) \(.content[0].handle)"' <<<"$HTTP_BODY")" "200 1 ${search#*:}" \
+        "search ${search%%:*} matches it literally: only ${search#*:}"
+done
+http -X POST "$BASE/api/v1/admin/bio-pages/$PAGE_ID/revoke-handle" -H "Authorization: Bearer $ADMIN_JWT" -H 'Content-Type: application/json' \
+    -d '{"reason":"E2E","expectedHandle":"someone-else"}'
+expect_eq "$HTTP_STATUS $(jq -r .error <<<"$HTTP_BODY")" "409 This handle changed. Reload and try again." "a revoke from a stale list is a 409"
+http -X POST "$BASE/api/v1/admin/bio-pages/$PAGE_ID/hide" -H "Authorization: Bearer $ADMIN_JWT" -H 'Content-Type: application/json' -d '{"reason":"E2E"}'
+expect_eq "$HTTP_STATUS $(jq -r '"\(.hidden) \(.hiddenReason)"' <<<"$HTTP_BODY")" "200 true E2E" "POST /api/v1/admin/bio-pages/{id}/hide"
+http "$BASE/api/v1/public/bio-pages/e2e-bio"
+expect_eq "$HTTP_STATUS $HTTP_BODY" "404 {\"error\":\"This page isn't available.\"}" "the hidden page is not available"
+http -H "Authorization: Bearer $ADMIN_JWT" "$BASE/api/v1/admin/bio-page-reviews"
+expect_eq "$(jq -r .page.totalElements <<<"$HTTP_BODY")" 0 "hiding resolved the review"
+expect_eq "$(psql_value "select resolution || ' ' || resolved_by from bio_page_review where page_id = $PAGE_ID;")" "HIDDEN admin@localhost" "as HIDDEN, by the admin"
+http -X DELETE "$BIO_PAGES/me" -H "Authorization: Bearer $APP_JWT"
+expect_eq "$HTTP_STATUS $(jq -r .error <<<"$HTTP_BODY")" \
+    "409 An admin hid this page, so it can't be deleted here. You can still delete your whole account in Settings." "the owner can't delete a hidden page"
+http -X POST "$BASE/api/v1/admin/bio-pages/$PAGE_ID/revoke-handle" -H "Authorization: Bearer $ADMIN_JWT" -H 'Content-Type: application/json' \
+    -d '{"reason":"E2E","expectedHandle":"E2E-Bio"}'
+expect_eq "$HTTP_STATUS $(jq -r '"\(.handle) \(.handleRevokedReason)"' <<<"$HTTP_BODY")" "200 null E2E" "revoking e2e-bio clears the handle and keeps the page"
+expect_eq "$(psql_value "select reason || ' | ' || created_by from reserved_alias where alias = 'e2e-bio';")" "Revoked bio page handle: E2E | admin@localhost" \
+    "the revoked handle is reserved with the reason"
+expect_eq "$(psql_value "select string_agg(action || ' ' || target_identifier || case when failed then ' failed' else '' end, ', ' order by id) from audit_log where action in ('HIDE_BIO_PAGE', 'REVOKE_BIO_HANDLE') or target_identifier = 'e2e-bio';")" \
+    "REVOKE_BIO_HANDLE $PAGE_ID failed, HIDE_BIO_PAGE $PAGE_ID, RESERVE_ALIAS e2e-bio, REVOKE_BIO_HANDLE $PAGE_ID" \
+    "audit: the refused revoke, the hide, then the revoke's two rows"
+http -H "Authorization: Bearer $APP_JWT" "$BASE/api/v1/users/me/export"
+expect_eq "$HTTP_STATUS" 200 "GET /api/v1/users/me/export"
+show "$(jq -c .bioPage <<<"$HTTP_BODY")"
+expect_eq "$(jq -r '.bioPage | "\(.handle) \(.handleRevokedReason) \(.hidden) \(.hiddenReason) \(.buttons[0].shortUrl)"' <<<"$HTTP_BODY")" \
+    "null E2E true E2E e2e-bio-link" "the export has the page, its revoked and hidden reasons and the button"
+expect_eq "$(jq -r '.bioPage | [paths | .[-1] | strings] | map(select(. == "views" or . == "botViews" or . == "hiddenBy" or . == "id")) | length' <<<"$HTTP_BODY")" \
+    0 "no view counts, admin or ids in the export"
+http -H "Authorization: Bearer $ADMIN_JWT" "$BASE/api/v1/admin/stats/users?days=7"
+expect_eq "$(jq -c .bioPages <<<"$HTTP_BODY")" '{"total":2,"hidden":1}' "users stats: 2 bio pages, 1 hidden"
+http -H "Authorization: Bearer $ADMIN_JWT" "$BASE/api/v1/admin/stats/traffic?days=7"
+expect_eq "$(jq -c .bioPageViews <<<"$HTTP_BODY")" '{"views":1,"botViews":1}' "traffic stats: 1 bio page view, 1 bot view"
 
 section "Done: every step passed"

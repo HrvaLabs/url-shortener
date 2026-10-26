@@ -4,6 +4,36 @@ All notable changes to hrva.cc — the URL shortener.
 
 ---
 
+## [v2.12] — 2026-10-26
+
+Bio pages: one page with all your links, for your Instagram, TikTok or any other bio.
+
+### 🔗 Links
+- Bio pages: make a page at hrva.cc/@yourname with your name, a short bio, an emoji or initials avatar and a button for each of your short links. Pick a colour and a light, dark or automatic theme, reorder buttons by dragging or with the keyboard, hide one without deleting it, and see a live preview as you edit.
+- Every button is one of your own short links, so each click gets the same safety checks as any other link. A link that stops working, is blocked or is waiting for review disappears from your page, and the editor shows why.
+- Share your page with a copy-link button or a QR code from the Bio page screen.
+- When you share your page in a chat or on social media, its preview image shows your name, your @handle and your initials in your colour.
+
+### 📊 Analytics
+- A Bio page view on the Analytics page shows views per day and, for each button, clicks that came from hrva.cc pages and all clicks on its link.
+
+### 🔒 Privacy
+- Bio page views are counted once per visitor per day with the same daily-changing one-way hash as link statistics. No IP address or browser details are stored, and the page loads no third-party scripts, fonts or trackers.
+- Search engines are asked not to list your page unless you turn on "Allow search engines to index this page".
+
+### 🛡️ Link Safety
+- Anyone can report a bio page with "Report this page" at the bottom of it, or on the Report a link page with hrva.cc/@name.
+
+### 🔧 Admin
+- Bio pages: search pages by handle, name or owner, hide a page with a reason, and change or revoke a handle. A revoked handle is added to the reserved aliases.
+- Reports, and text that looks like impersonation or phishing, put a bio page in the review queue with Looks fine and Hide page. Discord hears about new bio page reviews and reports, and the daily decisions email counts them.
+- The stats page shows how many bio pages there are and how many views they had.
+
+### 🌐 Site
+- A new help page explains bio pages step by step, linked from the Bio page screen and the Help center.
+
+---
+
 ## [v2.11] — 2026-10-26
 
 QR scans in link analytics, a public page with hrva.cc in numbers, a weekly summary and phishing-wave alerts for the admin, and the AI connector is sign-in only.
