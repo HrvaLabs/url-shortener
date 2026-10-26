@@ -20,6 +20,7 @@ import cc.hrva.urlshortener.mcp.McpResourceServerConfiguration;
 import cc.hrva.urlshortener.mcp.anon.RateLimiter;
 import cc.hrva.urlshortener.mcp.authorization.AuthorizationServerConfiguration;
 import cc.hrva.urlshortener.mcp.bridge.ConnectRequestStore;
+import cc.hrva.urlshortener.repository.PasskeySignInStatsRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.security.ClientIpResolver;
 import cc.hrva.urlshortener.security.JwtFilter;
@@ -29,10 +30,21 @@ import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.enums.PasskeyKind;
 import cc.hrva.urlshortener.model.enums.TwoStepMethod;
 import cc.hrva.urlshortener.service.AuthService;
+import cc.hrva.urlshortener.service.LoginAttemptService;
 import cc.hrva.urlshortener.service.PasskeyService;
 import cc.hrva.urlshortener.service.SecondStepService;
+import cc.hrva.urlshortener.service.SignInService;
 import cc.hrva.urlshortener.service.TwoFactorService;
 import cc.hrva.urlshortener.service.UserService;
+import cc.hrva.urlshortener.service.analytics.AnalyticsDays;
+import cc.hrva.urlshortener.service.impl.DefaultPasskeySignInService;
+import cc.hrva.urlshortener.service.passkey.PasskeyAssertions;
+import cc.hrva.urlshortener.service.passkey.PasskeyCeremony;
+import cc.hrva.urlshortener.service.passkey.PasskeyCeremonyPurpose;
+import cc.hrva.urlshortener.service.passkey.PasskeyCeremonyStore;
+import cc.hrva.urlshortener.service.passkey.PasskeyJson;
+import cc.hrva.urlshortener.service.passkey.PasskeyOptionsFactory;
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
@@ -40,6 +52,7 @@ import com.nimbusds.jose.JOSEException;
 import com.nimbusds.jose.jwk.RSAKey;
 import com.nimbusds.jose.jwk.gen.RSAKeyGenerator;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.SpringBootConfiguration;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
@@ -47,6 +60,8 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
 import org.springframework.dao.QueryTimeoutException;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -59,8 +74,12 @@ import org.springframework.test.json.JsonCompareMode;
 import org.springframework.test.web.servlet.MockMvc;
 import tools.jackson.databind.json.JsonMapper;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -104,6 +123,10 @@ class SignInEndpointSecurityTest {
             .formatted(CEREMONY_ID);
     private static final PasskeyResponse MACBOOK = new PasskeyResponse(7L, "MacBook", PasskeyKind.SYNCED, true, true, true,
             List.of("hybrid", "internal"), LocalDateTime.of(2026, 10, 25, 14, 5), null);
+    private static final String PASSWORDLESS = "/api/v1/auth/passkeys";
+    private static final String PASSWORDLESS_BODY = """
+            {"ceremonyId":"%s","credential":{"id":"a2V5","rawId":"a2V5","type":"public-key","authenticatorAttachment":"platform","clientExtensionResults":{},"response":{"authenticatorData":"e30","clientDataJSON":"e30","signature":"e30","userHandle":"aGFuZGxl"}},"rememberMe":true}"""
+            .formatted(CEREMONY_ID);
     private static final String MACBOOK_JSON = """
             {"id":7,"label":"MacBook","kind":"SYNCED","backupEligible":true,"backedUp":true,"discoverable":true,"transports":["hybrid","internal"],"createdAt":"2026-10-25T14:05:00","lastUsedAt":null}""";
 
@@ -142,6 +165,24 @@ class SignInEndpointSecurityTest {
 
     @MockitoBean
     private OAuth2LoginSuccessHandler oAuth2LoginSuccessHandler;
+
+    @MockitoBean
+    private LoginAttemptService loginAttemptService;
+
+    @MockitoBean
+    private PasskeyCeremonyStore passkeyCeremonyStore;
+
+    @MockitoBean
+    private PasskeyAssertions passkeyAssertions;
+
+    @MockitoBean
+    private PasskeySignInStatsRepository passkeySignInStatsRepository;
+
+    @MockitoBean
+    private AnalyticsDays analyticsDays;
+
+    @MockitoBean
+    private SignInService signInService;
 
     @DynamicPropertySource
     static void signingKey(final DynamicPropertyRegistry registry) {
@@ -210,6 +251,62 @@ class SignInEndpointSecurityTest {
                 .andExpect(jsonPath("$.code").exists());
 
         verifyNoInteractions(secondStepService);
+    }
+
+    @Test
+    void passwordlessOptionsAndVerifyArePublic() throws Exception {
+        when(rateLimiter.tryAcquire(RateLimiter.clientKey("passkey-options", "127.0.0.1"), 30, Duration.ofMinutes(10))).thenReturn(true);
+        when(passkeyCeremonyStore.save(any())).thenReturn(CEREMONY_ID);
+
+        final var options = JsonMapper.builder().build().readTree(mockMvc.perform(post(PASSWORDLESS + "/options"))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString());
+
+        final var ceremony = ArgumentCaptor.forClass(PasskeyCeremony.class);
+        verify(passkeyCeremonyStore).save(ceremony.capture());
+        assertThat(ceremony.getValue()).isEqualTo(new PasskeyCeremony(PasskeyCeremonyPurpose.SIGN_IN, ceremony.getValue().challenge(), null));
+        assertThat(ceremony.getValue().challenge()).hasSize(43);
+        assertThat(options).isEqualTo(JsonMapper.builder().build().readTree("""
+                {"ceremonyId":"%s","options":{"challenge":"%s","timeout":300000,"rpId":"hrva.cc","allowCredentials":[],"userVerification":"required","extensions":{}}}"""
+                .formatted(CEREMONY_ID, ceremony.getValue().challenge())));
+
+        final var user = User.builder().id(7L).email("user@localhost").active(true).emailVerified(true).build();
+        final var headers = new HttpHeaders();
+        headers.add(JwtFilter.AUTHORIZATION_HEADER, "Bearer eyJ.token");
+        when(passkeyCeremonyStore.consume(CEREMONY_ID)).thenReturn(Optional.of(ceremony.getValue()));
+        when(passkeyAssertions.verify(eq(ceremony.getValue()), any(), isNull())).thenReturn(user);
+        when(signInService.signIn(user, true))
+                .thenReturn(new ResponseEntity<>(JWTTokenDto.builder().token("Bearer eyJ.token").build(), headers, HttpStatus.OK));
+
+        mockMvc.perform(post(PASSWORDLESS + "/verify").contentType(MediaType.APPLICATION_JSON).content(PASSWORDLESS_BODY))
+                .andExpect(status().isOk())
+                .andExpect(header().string(JwtFilter.AUTHORIZATION_HEADER, "Bearer eyJ.token"))
+                .andExpect(jsonPath("$.token").value("Bearer eyJ.token"));
+
+        verifyNoInteractions(tokenProvider);
+    }
+
+    @Test
+    void theOptionsRateLimitIsA429() throws Exception {
+        when(rateLimiter.tryAcquire(anyString(), anyInt(), any())).thenReturn(false);
+
+        mockMvc.perform(post(PASSWORDLESS + "/options"))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(content().json(
+                        "{\"error\":\"Too many passkey sign-in attempts from this network. Try again in a few minutes.\"}",
+                        JsonCompareMode.STRICT));
+
+        verifyNoInteractions(passkeyCeremonyStore);
+    }
+
+    @Test
+    void aPasswordlessSignInWithoutACredentialIsRefusedBeforeTheCeremonyIsUsed() throws Exception {
+        mockMvc.perform(post(PASSWORDLESS + "/verify").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"ceremonyId\":\"" + CEREMONY_ID + "\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.credential").exists());
+
+        verifyNoInteractions(passkeyCeremonyStore, passkeyAssertions);
     }
 
     @Test
@@ -334,7 +431,11 @@ class SignInEndpointSecurityTest {
             ClientIpResolver.class,
             AuthController.class,
             TwoStepController.class,
-            PasskeyController.class
+            PasskeyController.class,
+            PasskeySignInController.class,
+            DefaultPasskeySignInService.class,
+            PasskeyOptionsFactory.class,
+            PasskeyJson.class
     })
     static class TestApplication {
     }

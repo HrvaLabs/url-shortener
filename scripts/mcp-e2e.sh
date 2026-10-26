@@ -6,6 +6,7 @@
 #
 # Needs Docker, Java 25, Maven, Node (npx), jq, curl and openssl. The MCP Inspector's own sign-in uses
 # the macOS `open` shim in scripts/mcp-e2e/fake-browser, so that step runs on macOS only.
+# Section 15 asks for the passkey sign-in and registration options with curl and checks 028's columns.
 #
 #   scripts/mcp-e2e.sh                         builds the jar, then runs every step
 #   MCP_E2E_SKIP_BUILD=1 scripts/mcp-e2e.sh    reuses target/url-shortener-*.jar
@@ -498,5 +499,32 @@ http "$BASE/$IDN_ALIAS"
 show "GET $BASE/$IDN_ALIAS -> $HTTP_STATUS Location: $HTTP_LOCATION"
 expect_eq "$HTTP_STATUS" 302 "the accented destination redirects"
 expect_eq "$HTTP_LOCATION" "https://xn--okolada-i6a.hr/torta" "with its host in punycode, so the Location header is ASCII"
+
+section "15. Passkey options (curl)"
+http -X POST "$BASE/api/v1/auth/passkeys/options"
+expect_eq "$HTTP_STATUS" 200 "POST /api/v1/auth/passkeys/options without a token"
+expect_eq "$(jq -r .options.rpId <<<"$HTTP_BODY")" localhost "rpId is app.passkeys.rp-id of the local profile"
+expect_eq "$(jq -r .options.userVerification <<<"$HTTP_BODY")" required "passwordless sign-in requires user verification"
+expect_eq "$(jq -r '.options.allowCredentials | length' <<<"$HTTP_BODY")" 0 "allowCredentials is empty, for discoverable passkeys"
+expect_eq "$(jq -r '.ceremonyId | length' <<<"$HTTP_BODY")" 43 "ceremonyId is 32 random bytes in base64url"
+http -X POST "$BASE/api/v1/users/me/passkeys/registration/options" -H "Authorization: Bearer $APP_JWT" \
+    -H 'Content-Type: application/json' -d "{\"password\":\"$USER_PASSWORD\"}"
+expect_eq "$HTTP_STATUS" 200 "registration options with the current password"
+expect_eq "$(jq -r .options.rp.id <<<"$HTTP_BODY")" localhost "rp.id is app.passkeys.rp-id"
+expect_eq "$(jq -r .options.rp.name <<<"$HTTP_BODY")" hrva.cc "rp.name is hrva.cc"
+expect_eq "$(jq -r .options.user.name <<<"$HTTP_BODY")" "$USER_EMAIL" "user.name is the account email"
+expect_eq "$(jq -r .options.authenticatorSelection.residentKey <<<"$HTTP_BODY")" preferred "residentKey is preferred"
+expect_eq "$(jq -c '[.options.pubKeyCredParams[].alg]' <<<"$HTTP_BODY")" "[-7,-8,-257]" "ES256, EdDSA, RS256 in that order"
+expect_eq "$(jq -r .options.attestation <<<"$HTTP_BODY")" none "attestation is none"
+http -X POST "$BASE/api/v1/users/me/passkeys/registration/options" -H "Authorization: Bearer $APP_JWT" \
+    -H 'Content-Type: application/json' -d '{"password":"wrong"}'
+expect_eq "$HTTP_STATUS" 403 "a wrong password gets no registration options"
+http -X POST "$BASE/api/v1/users/me/passkeys/registration/options" \
+    -H 'Content-Type: application/json' -d "{\"password\":\"$USER_PASSWORD\"}"
+expect_eq "$HTTP_STATUS" 401 "registration options need a signed-in user"
+expect_eq "$(psql_value "select count(*) from information_schema.columns where table_name = 'user_account' and column_name = 'two_step_enabled'")" \
+    1 "028 added user_account.two_step_enabled"
+expect_eq "$(psql_value "select count(*) from information_schema.columns where table_name = 'passkey_credential' and column_name = 'attestation_object'")" \
+    1 "028 added passkey_credential.attestation_object"
 
 section "Done: every step passed"

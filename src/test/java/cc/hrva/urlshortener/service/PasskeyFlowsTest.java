@@ -4,27 +4,37 @@ import cc.hrva.urlshortener.configuration.ClockConfiguration;
 import cc.hrva.urlshortener.configuration.PasskeyConfiguration;
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.converter.UserToUserDtoConverter;
+import cc.hrva.urlshortener.dto.JWTTokenDto;
 import cc.hrva.urlshortener.dto.PasskeyOptionsResponse;
 import cc.hrva.urlshortener.dto.PasskeyRegistrationDto;
 import cc.hrva.urlshortener.dto.PasskeyRegistrationOptionsDto;
 import cc.hrva.urlshortener.dto.PasskeyResponse;
+import cc.hrva.urlshortener.dto.PasskeySignInDto;
 import cc.hrva.urlshortener.exception.ApiException;
+import cc.hrva.urlshortener.exception.EmailNotVerifiedException;
 import cc.hrva.urlshortener.exception.PasskeyVerificationException;
 import cc.hrva.urlshortener.exception.SignInExpiredException;
+import cc.hrva.urlshortener.mcp.anon.RateLimiter;
 import cc.hrva.urlshortener.mcp.bridge.InMemoryRedis;
 import cc.hrva.urlshortener.model.PasskeyCredential;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.enums.PasskeyKind;
 import cc.hrva.urlshortener.repository.PasskeyCredentialRepository;
+import cc.hrva.urlshortener.repository.PasskeySignInStatsRepository;
 import cc.hrva.urlshortener.repository.TwoFactorRecoveryCodeRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
+import cc.hrva.urlshortener.security.ClientIpResolver;
+import cc.hrva.urlshortener.security.JwtFilter;
 import cc.hrva.urlshortener.security.Reauthentication;
 import cc.hrva.urlshortener.security.RecentSignIn;
 import cc.hrva.urlshortener.security.TokenProvider;
+import cc.hrva.urlshortener.service.analytics.AnalyticsDays;
 import cc.hrva.urlshortener.service.impl.DefaultPasskeyService;
+import cc.hrva.urlshortener.service.impl.DefaultPasskeySignInService;
 import cc.hrva.urlshortener.service.impl.DefaultSignInService;
 import cc.hrva.urlshortener.service.passkey.JpaPublicKeyCredentialUserEntityRepository;
 import cc.hrva.urlshortener.service.passkey.JpaUserCredentialRepository;
+import cc.hrva.urlshortener.service.passkey.PasskeyAssertions;
 import cc.hrva.urlshortener.service.passkey.PasskeyJson;
 import cc.hrva.urlshortener.service.passkey.PasskeyOptionsFactory;
 import cc.hrva.urlshortener.service.passkey.RedisPasskeyCeremonyStore;
@@ -36,31 +46,47 @@ import com.nimbusds.jose.JOSEException;
 import com.nimbusds.jose.jwk.RSAKey;
 import com.nimbusds.jose.jwk.gen.RSAKeyGenerator;
 import jakarta.persistence.EntityManager;
+import java.time.LocalDate;
+import java.util.function.Consumer;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.SpringBootConfiguration;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.persistence.autoconfigure.EntityScan;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.FilterType;
 import org.springframework.context.annotation.Import;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.security.authentication.DisabledException;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ObjectNode;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @Transactional
@@ -85,12 +111,24 @@ class PasskeyFlowsTest {
     private static final String PASSWORD = "user123";
     private static final String EXPIRED = "This request expired. Try again.";
     private static final String COULD_NOT_VERIFY = "That passkey or security key couldn't be verified. Try again.";
+    private static final String NOT_REGISTERED =
+            "This passkey isn't registered on hrva.cc. Remove it from your password manager or device, or sign in another way.";
+    private static final String CLIENT_IP = "203.0.113.9";
     private static final RSAKey SIGNING_KEY = generateSigningKey();
 
     private final InMemoryRedis redis = new InMemoryRedis();
 
     @Autowired
     private PasskeyService passkeyService;
+
+    @Autowired
+    private PasskeySignInService passkeySignInService;
+
+    @Autowired
+    private AnalyticsDays analyticsDays;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
 
     @Autowired
     private UserRepository userRepository;
@@ -113,6 +151,12 @@ class PasskeyFlowsTest {
     @MockitoBean
     private UserService userService;
 
+    @MockitoBean
+    private RateLimiter rateLimiter;
+
+    @MockitoBean
+    private LoginAttemptService loginAttemptService;
+
     @DynamicPropertySource
     static void signingKey(final DynamicPropertyRegistry registry) {
         registry.add("app.mcp.signing-key", SIGNING_KEY::toJSONString);
@@ -121,6 +165,7 @@ class PasskeyFlowsTest {
     @BeforeEach
     void setUp() {
         redis.backing(redisTemplate);
+        when(rateLimiter.tryAcquire(anyString(), anyInt(), any())).thenReturn(true);
     }
 
     @Test
@@ -355,6 +400,278 @@ class PasskeyFlowsTest {
         assertThat(userRepository.findById(user.getId()).orElseThrow().getWebauthnUserHandle()).isEqualTo(first);
     }
 
+    @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    void aDiscoverablePasskeySignsInWithoutAPassword() {
+        final var user = signedIn(localUser("passwordless@example.com"));
+        try {
+            final var authenticator = TestAuthenticator.deviceBoundPasskey();
+            addPasskey(authenticator, "Pixel");
+
+            final var response = signInWith(authenticator);
+
+            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+            assertThat(response.getHeaders().getFirst(JwtFilter.AUTHORIZATION_HEADER)).startsWith("Bearer ");
+            assertThat(response.getBody()).satisfies(body -> {
+                assertThat(body.getToken()).isEqualTo(response.getHeaders().getFirst(JwtFilter.AUTHORIZATION_HEADER));
+                assertThat(body.getUser().getId()).isEqualTo(user.getId());
+                assertThat(body.getUser().getEmail()).isEqualTo("passwordless@example.com");
+                assertThat(body.getTwoStepRequired()).isNull();
+                assertThat(body.getPendingToken()).isNull();
+            });
+            assertThat(passkeyCredentialRepository.findByCredentialId(authenticator.credentialId()).orElseThrow())
+                    .satisfies(stored -> {
+                        assertThat(stored.getSignCount()).isEqualTo(2L);
+                        assertThat(stored.getLastUsedAt()).isNotNull();
+                    });
+            verify(loginAttemptService).loginSucceeded(CLIENT_IP);
+        } finally {
+            passkeyCredentialRepository.deleteAll(passkeyCredentialRepository.findByUserOrderByCreatedAtDesc(user));
+            userRepository.deleteById(user.getId());
+        }
+    }
+
+    @Test
+    void aSyncedPasskeyReportingZeroTwiceStillSignsIn() {
+        final var user = signedIn(localUser("zero@example.com"));
+        final var authenticator = TestAuthenticator.syncedPasskey();
+        addPasskey(authenticator, "MacBook");
+
+        assertThat(signInWith(authenticator).getBody().getUser().getId()).isEqualTo(user.getId());
+        assertThat(signInWith(authenticator).getBody().getUser().getId()).isEqualTo(user.getId());
+
+        assertThat(stored(authenticator)).satisfies(stored -> {
+            assertThat(stored.getSignCount()).isZero();
+            assertThat(stored.getLastUsedAt()).isNotNull();
+        });
+    }
+
+    @Test
+    @ExtendWith(OutputCaptureExtension.class)
+    void aCounterThatDidNotIncreaseIsRefusedAndLoggedWithoutTheFullCredentialId(final CapturedOutput output) {
+        final var user = signedIn(localUser("cloned@example.com"));
+        final var authenticator = TestAuthenticator.deviceBoundPasskey();
+        addPasskey(authenticator, "Pixel");
+        final var credentialId = authenticator.credentialId();
+
+        assertThatThrownBy(() -> signInWith(authenticator.withNextCounter(1)))
+                .isInstanceOf(PasskeyVerificationException.class)
+                .hasMessage(COULD_NOT_VERIFY);
+
+        assertThat(output)
+                .contains("Passkey sign count did not increase user id=" + user.getId() + " credential="
+                        + credentialId.substring(0, 8) + "… stored=1 presented=1")
+                .doesNotContain(credentialId);
+        assertThat(stored(authenticator)).satisfies(stored -> {
+            assertThat(stored.getSignCount()).isEqualTo(1L);
+            assertThat(stored.getLastUsedAt()).isNull();
+        });
+        verify(loginAttemptService).loginFailed(CLIENT_IP);
+    }
+
+    @Test
+    void aCounterDroppingToZeroIsAccepted() {
+        signedIn(localUser("reset@example.com"));
+        final var authenticator = TestAuthenticator.deviceBoundPasskey().withNextCounter(5);
+        addPasskey(authenticator, "Pixel");
+
+        assertThat(signInWith(authenticator.withNextCounter(0)).getStatusCode()).isEqualTo(HttpStatus.OK);
+
+        assertThat(stored(authenticator)).satisfies(stored -> {
+            assertThat(stored.getSignCount()).isEqualTo(5L);
+            assertThat(stored.getLastUsedAt()).isNotNull();
+        });
+    }
+
+    @Test
+    void aPasskeyWithoutUserVerificationIsRefusedForPasswordlessSignIn() {
+        signedIn(localUser("no-uv@example.com"));
+        final var authenticator = TestAuthenticator.syncedPasskey();
+        addPasskey(authenticator, "MacBook");
+
+        assertThatThrownBy(() -> signInWith(authenticator.withoutUserVerification()))
+                .isInstanceOf(PasskeyVerificationException.class)
+                .hasMessage(COULD_NOT_VERIFY);
+        assertThat(stored(authenticator).getLastUsedAt()).isNull();
+    }
+
+    @Test
+    void aPasskeyDeletedBetweenOptionsAndVerifyIsA401NotA500() {
+        signedIn(localUser("deleted@example.com"));
+        final var authenticator = TestAuthenticator.syncedPasskey();
+        addPasskey(authenticator, "MacBook");
+        final var options = passkeySignInService.options(request());
+        final var credential = authenticator.authenticate(options.options());
+        passkeyCredentialRepository.delete(stored(authenticator));
+        entityManager.flush();
+
+        assertThatThrownBy(() -> passkeySignInService.verify(signIn(options, credential), request()))
+                .isInstanceOf(PasskeyVerificationException.class)
+                .hasMessage(NOT_REGISTERED);
+    }
+
+    @Test
+    void aReplayedCeremonyIsRefused() {
+        signedIn(localUser("replay@example.com"));
+        final var authenticator = TestAuthenticator.syncedPasskey();
+        addPasskey(authenticator, "MacBook");
+        final var options = passkeySignInService.options(request());
+        passkeySignInService.verify(signIn(options, authenticator.authenticate(options.options())), request());
+
+        assertThatThrownBy(() -> passkeySignInService.verify(signIn(options, authenticator.authenticate(options.options())), request()))
+                .isInstanceOf(SignInExpiredException.class)
+                .hasMessage(EXPIRED);
+    }
+
+    @Test
+    void aRegistrationCeremonyCantBeUsedToSignIn() {
+        signedIn(localUser("wrong-ceremony@example.com"));
+        final var authenticator = TestAuthenticator.syncedPasskey();
+        addPasskey(authenticator, "MacBook");
+        final var registration = registrationOptions();
+        final var requestShaped = JsonMapper.builder().build().createObjectNode()
+                .put("challenge", registration.options().path("challenge").asString())
+                .put("rpId", TestAuthenticator.RP_ID);
+
+        assertThatThrownBy(() -> passkeySignInService.verify(signIn(registration, authenticator.authenticate(requestShaped)), request()))
+                .isInstanceOf(SignInExpiredException.class)
+                .hasMessage(EXPIRED);
+        assertThat(stored(authenticator).getLastUsedAt()).isNull();
+    }
+
+    @Test
+    void aMismatchedUserHandleIsRefused() {
+        signedIn(localUser("alice-handle@example.com"));
+        final var alicesPasskey = TestAuthenticator.syncedPasskey();
+        addPasskey(alicesPasskey, "Alice");
+        final var bob = signedIn(localUser("bob-handle@example.com"));
+        final var bobsHandle = registrationOptions().options().path("user").path("id").asString();
+        assertThat(userRepository.findWebauthnUserHandleById(bob.getId())).contains(bobsHandle);
+        final var options = passkeySignInService.options(request());
+        final var credential = alicesPasskey.authenticate(options.options());
+        ((ObjectNode) credential.get("response")).put("userHandle", bobsHandle);
+
+        assertThatThrownBy(() -> passkeySignInService.verify(signIn(options, credential), request()))
+                .isInstanceOf(PasskeyVerificationException.class)
+                .hasMessage(COULD_NOT_VERIFY);
+    }
+
+    @Test
+    void aMissingUserHandleIsRefusedForPasswordlessSignIn() {
+        signedIn(localUser("no-handle@example.com"));
+        final var authenticator = TestAuthenticator.syncedPasskey();
+        addPasskey(authenticator, "MacBook");
+        final var options = passkeySignInService.options(request());
+        final var credential = authenticator.authenticate(options.options());
+        ((ObjectNode) credential.get("response")).remove("userHandle");
+
+        assertThatThrownBy(() -> passkeySignInService.verify(signIn(options, credential), request()))
+                .isInstanceOf(PasskeyVerificationException.class)
+                .hasMessage(COULD_NOT_VERIFY);
+    }
+
+    @Test
+    void aTruncatedAuthenticatorDataIsA401NotA500() {
+        signedIn(localUser("truncated@example.com"));
+        final var authenticator = TestAuthenticator.syncedPasskey();
+        addPasskey(authenticator, "MacBook");
+        final var options = passkeySignInService.options(request());
+        final var credential = authenticator.authenticate(options.options());
+        ((ObjectNode) credential.get("response")).put("authenticatorData", "AAAA");
+
+        assertThatThrownBy(() -> passkeySignInService.verify(signIn(options, credential), request()))
+                .isInstanceOf(PasskeyVerificationException.class)
+                .hasMessage(COULD_NOT_VERIFY);
+    }
+
+    @Test
+    void aDeactivatedAccountIsRefused() {
+        final var user = signedIn(localUser("inactive@example.com"));
+        final var authenticator = TestAuthenticator.syncedPasskey();
+        addPasskey(authenticator, "MacBook");
+        updated(user, account -> account.setActive(false));
+
+        assertThatThrownBy(() -> signInWith(authenticator))
+                .isInstanceOf(DisabledException.class);
+    }
+
+    @Test
+    void anUnverifiedAccountIsRefused() {
+        final var user = signedIn(localUser("unverified@example.com"));
+        final var authenticator = TestAuthenticator.syncedPasskey();
+        addPasskey(authenticator, "MacBook");
+        updated(user, account -> account.setEmailVerified(false));
+
+        assertThatThrownBy(() -> signInWith(authenticator))
+                .isInstanceOf(EmailNotVerifiedException.class)
+                .hasMessage("Please verify your email before logging in.");
+    }
+
+    @Test
+    void aTwoStepAccountSignsInWithoutASecondStep() {
+        final var user = signedIn(localUser("two-step@example.com"));
+        final var authenticator = TestAuthenticator.syncedPasskey();
+        addPasskey(authenticator, "MacBook");
+        updated(user, account -> account.setTwoStepEnabled(true));
+
+        final var response = signInWith(authenticator);
+
+        assertThat(response.getHeaders().getFirst(JwtFilter.AUTHORIZATION_HEADER)).startsWith("Bearer ");
+        assertThat(response.getBody()).satisfies(body -> {
+            assertThat(body.getToken()).startsWith("Bearer ");
+            assertThat(body.getUser().getTwoStepEnabled()).isTrue();
+            assertThat(body.getTwoStepRequired()).isNull();
+            assertThat(body.getPendingToken()).isNull();
+        });
+    }
+
+    @Test
+    void eachPasskeySignInAddsOneToTheDay() {
+        signedIn(localUser("counted@example.com"));
+        final var authenticator = TestAuthenticator.syncedPasskey();
+        addPasskey(authenticator, "MacBook");
+        final var today = analyticsDays.today();
+        final var before = signInsOn(today);
+
+        signInWith(authenticator);
+        assertThat(signInsOn(today)).isEqualTo(before + 1);
+        signInWith(authenticator);
+        assertThat(signInsOn(today)).isEqualTo(before + 2);
+        assertThatThrownBy(() -> signInWith(authenticator.withoutUserVerification()))
+                .isInstanceOf(PasskeyVerificationException.class);
+        assertThat(signInsOn(today)).isEqualTo(before + 2);
+    }
+
+    @Test
+    void aPasskeyThatStartsSyncingIsStoredAsBackedUp() {
+        signedIn(localUser("starts-syncing@example.com"));
+        final var authenticator = TestAuthenticator.syncedPasskey();
+        addPasskey(authenticator.notBackedUpYet(), "Pixel");
+        assertThat(stored(authenticator)).satisfies(stored -> {
+            assertThat(stored.isBackupEligible()).isTrue();
+            assertThat(stored.isBackupState()).isFalse();
+        });
+
+        signInWith(authenticator);
+
+        assertThat(stored(authenticator).isBackupState()).isTrue();
+    }
+
+    @Test
+    void aDeviceBoundPasskeyCantBecomeBackupEligibleLater() {
+        signedIn(localUser("never-eligible@example.com"));
+        final var authenticator = TestAuthenticator.deviceBoundPasskey();
+        addPasskey(authenticator, "Pixel");
+
+        assertThatThrownBy(() -> signInWith(authenticator.nowBackedUp()))
+                .isInstanceOf(PasskeyVerificationException.class)
+                .hasMessage(COULD_NOT_VERIFY);
+        assertThat(stored(authenticator)).satisfies(stored -> {
+            assertThat(stored.isBackupEligible()).isFalse();
+            assertThat(stored.isBackupState()).isFalse();
+        });
+    }
+
     private PasskeyResponse addPasskey(final TestAuthenticator authenticator, final String label) {
         final var options = registrationOptions();
 
@@ -371,6 +688,40 @@ class PasskeyFlowsTest {
                 .credential(credential)
                 .label(label)
                 .build();
+    }
+
+    private ResponseEntity<JWTTokenDto> signInWith(final TestAuthenticator authenticator) {
+        final var options = passkeySignInService.options(request());
+
+        return passkeySignInService.verify(signIn(options, authenticator.authenticate(options.options())), request());
+    }
+
+    private static PasskeySignInDto signIn(final PasskeyOptionsResponse options, final JsonNode credential) {
+        return PasskeySignInDto.builder()
+                .ceremonyId(options.ceremonyId())
+                .credential(credential)
+                .rememberMe(true)
+                .build();
+    }
+
+    private static MockHttpServletRequest request() {
+        final var request = new MockHttpServletRequest();
+        request.setRemoteAddr(CLIENT_IP);
+
+        return request;
+    }
+
+    private void updated(final User user, final Consumer<User> change) {
+        final var account = userRepository.findById(user.getId()).orElseThrow();
+        change.accept(account);
+        userRepository.saveAndFlush(account);
+    }
+
+    private long signInsOn(final LocalDate day) {
+        return jdbcTemplate.queryForList("select sign_ins from passkey_sign_in_daily where stat_date = ?", Long.class, day)
+                .stream()
+                .findFirst()
+                .orElse(0L);
     }
 
     private PasskeyCredential stored(final TestAuthenticator authenticator) {
@@ -446,7 +797,12 @@ class PasskeyFlowsTest {
             RedisPendingLoginStore.class,
             TwoStepMethods.class,
             UserToUserDtoConverter.class,
-            DefaultSignInService.class
+            DefaultSignInService.class,
+            ClientIpResolver.class,
+            AnalyticsDays.class,
+            PasskeySignInStatsRepository.class,
+            PasskeyAssertions.class,
+            DefaultPasskeySignInService.class
     })
     static class TestApplication {
 

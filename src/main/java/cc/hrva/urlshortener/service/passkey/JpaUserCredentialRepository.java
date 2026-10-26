@@ -73,6 +73,14 @@ public class JpaUserCredentialRepository implements UserCredentialRepository {
                 .ifPresent(passkeyCredentialRepository::delete);
     }
 
+    public void recordBackupState(final Bytes credentialId, final boolean backedUp) {
+        passkeyCredentialRepository.findByCredentialId(credentialId.toBase64UrlString())
+                .ifPresent(passkey -> {
+                    passkey.setBackupState(backedUp);
+                    passkeyCredentialRepository.save(passkey);
+                });
+    }
+
     private void recordUse(final PasskeyCredential passkey, final CredentialRecord credentialRecord) {
         passkey.setSignCount(Math.max(passkey.getSignCount(), credentialRecord.getSignatureCount()));
         passkey.setLastUsedAt(LocalDateTime.now(clock));

@@ -47,6 +47,7 @@ public final class TestAuthenticator {
     private final boolean resident;
     private final boolean userPresent;
     private final boolean userVerified;
+    private final boolean backupEligible;
     private final boolean backedUp;
     private final boolean countsUp;
     private final List<String> transports;
@@ -61,6 +62,7 @@ public final class TestAuthenticator {
             final boolean resident,
             final boolean userPresent,
             final boolean userVerified,
+            final boolean backupEligible,
             final boolean backedUp,
             final boolean countsUp,
             final List<String> transports,
@@ -73,6 +75,7 @@ public final class TestAuthenticator {
         this.resident = resident;
         this.userPresent = userPresent;
         this.userVerified = userVerified;
+        this.backupEligible = backupEligible;
         this.backedUp = backedUp;
         this.countsUp = countsUp;
         this.transports = transports;
@@ -92,19 +95,29 @@ public final class TestAuthenticator {
         return create(1, false, false, false, true, List.of("usb", "nfc"), "cross-platform");
     }
 
+    public TestAuthenticator notBackedUpYet() {
+        return new TestAuthenticator(keyPair, credentialId, nextCounter, userHandle, resident, userPresent, userVerified,
+                backupEligible, false, countsUp, transports, attachment, origin);
+    }
+
+    public TestAuthenticator nowBackedUp() {
+        return new TestAuthenticator(keyPair, credentialId, nextCounter, userHandle, resident, userPresent, userVerified,
+                true, true, countsUp, transports, attachment, origin);
+    }
+
     public TestAuthenticator withoutUserPresence() {
-        return new TestAuthenticator(keyPair, credentialId, nextCounter, userHandle, resident, false, userVerified, backedUp,
-                countsUp, transports, attachment, origin);
+        return new TestAuthenticator(keyPair, credentialId, nextCounter, userHandle, resident, false, userVerified,
+                backupEligible, backedUp, countsUp, transports, attachment, origin);
     }
 
     public TestAuthenticator withoutUserVerification() {
-        return new TestAuthenticator(keyPair, credentialId, nextCounter, userHandle, resident, userPresent, false, backedUp,
-                countsUp, transports, attachment, origin);
+        return new TestAuthenticator(keyPair, credentialId, nextCounter, userHandle, resident, userPresent, false,
+                backupEligible, backedUp, countsUp, transports, attachment, origin);
     }
 
     public TestAuthenticator withOrigin(final String otherOrigin) {
         return new TestAuthenticator(keyPair, credentialId, nextCounter, userHandle, resident, userPresent, userVerified,
-                backedUp, countsUp, transports, attachment, otherOrigin);
+                backupEligible, backedUp, countsUp, transports, attachment, otherOrigin);
     }
 
     public TestAuthenticator withNextCounter(final long counter) {
@@ -115,12 +128,12 @@ public final class TestAuthenticator {
 
     public TestAuthenticator withTransports(final String... values) {
         return new TestAuthenticator(keyPair, credentialId, nextCounter, userHandle, resident, userPresent, userVerified,
-                backedUp, countsUp, List.of(values), attachment, origin);
+                backupEligible, backedUp, countsUp, List.of(values), attachment, origin);
     }
 
     public TestAuthenticator withoutTransports() {
         return new TestAuthenticator(keyPair, credentialId, nextCounter, userHandle, resident, userPresent, userVerified,
-                backedUp, countsUp, null, attachment, origin);
+                backupEligible, backedUp, countsUp, null, attachment, origin);
     }
 
     public String credentialId() {
@@ -201,8 +214,11 @@ public final class TestAuthenticator {
         if (userVerified) {
             flags |= AuthenticatorData.BIT_UV;
         }
+        if (backupEligible) {
+            flags |= AuthenticatorData.BIT_BE;
+        }
         if (backedUp) {
-            flags |= AuthenticatorData.BIT_BE | AuthenticatorData.BIT_BS;
+            flags |= AuthenticatorData.BIT_BS;
         }
 
         return flags;
@@ -244,7 +260,7 @@ public final class TestAuthenticator {
         RANDOM.nextBytes(credentialId);
 
         return new TestAuthenticator(newKeyPair(), credentialId, new AtomicLong(firstCounter), new AtomicReference<>(),
-                resident, true, userVerified, backedUp, countsUp, transports, attachment, ORIGIN);
+                resident, true, userVerified, backedUp, backedUp, countsUp, transports, attachment, ORIGIN);
     }
 
     private static KeyPair newKeyPair() {
