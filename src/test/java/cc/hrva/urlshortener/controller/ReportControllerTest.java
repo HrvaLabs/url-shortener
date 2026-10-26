@@ -3,13 +3,18 @@ package cc.hrva.urlshortener.controller;
 import cc.hrva.urlshortener.configuration.GlobalExceptionHandler;
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.dto.LinkReportDto;
+import cc.hrva.urlshortener.model.BioPage;
 import cc.hrva.urlshortener.model.Url;
+import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.enums.ReportCategory;
+import cc.hrva.urlshortener.repository.BioPageRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.security.ClientIpResolver;
+import cc.hrva.urlshortener.service.BioPageReviewService;
 import cc.hrva.urlshortener.service.ReviewQueueService;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiter;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiterUnavailableException;
+import java.time.LocalDateTime;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletRequest;
 import java.time.Duration;
@@ -58,6 +63,7 @@ class ReportControllerTest {
     private static final String SHORT = "v0DB3";
     private static final String DETAILS = "asks for my bank login";
     private static final String TOO_MANY_REPORTS = "You've sent a lot of reports in a short time. Try again in an hour.";
+    private static final String TARGET_INVALID = "Enter a hrva.cc short link or bio page, like hrva.cc/abc or hrva.cc/@name";
 
     private MockMvc mockMvc;
 
@@ -66,6 +72,12 @@ class ReportControllerTest {
 
     @Mock
     private UrlRepository urlRepository;
+
+    @Mock
+    private BioPageRepository bioPageRepository;
+
+    @Mock
+    private BioPageReviewService bioPageReviewService;
 
     @Mock
     private ClientIpResolver clientIpResolver;
@@ -83,9 +95,12 @@ class ReportControllerTest {
 
     private final Url url = Url.builder().id(287L).shortUrl(SHORT).longUrl("https://findfavoritedate.life/?u=f6yp608").active(true).build();
 
+    private final BioPage page = BioPage.builder().id(12L).handle("ana").owner(User.builder().id(7L).active(true).build()).build();
+
     @BeforeEach
     void setUp() {
         appProperties.setServerUrl("https://hrva.cc");
+        appProperties.setFrontendUrl("http://localhost:3000");
         lenient().when(clientIpResolver.getClientIp(request)).thenReturn(CLIENT_IP);
         mockMvc = mockMvcWith((key, window) -> {
             windows.add(window);
@@ -94,7 +109,8 @@ class ReportControllerTest {
     }
 
     private MockMvc mockMvcWith(final RateLimiter rateLimiter) {
-        return MockMvcBuilders.standaloneSetup(new ReportController(reviewQueueService, urlRepository, rateLimiter, clientIpResolver, request, appProperties))
+        return MockMvcBuilders.standaloneSetup(new ReportController(reviewQueueService, urlRepository, bioPageRepository, bioPageReviewService, rateLimiter,
+                        clientIpResolver, request, appProperties))
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .build();
     }
@@ -136,10 +152,119 @@ class ReportControllerTest {
     void anythingButAShortLinkIsRefused(final String shortUrl) throws Exception {
         report(shortUrl, "PHISHING", DETAILS)
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.error").value("Enter a hrva.cc short link, like hrva.cc/abc"));
+                .andExpect(jsonPath("$.error").value(TARGET_INVALID));
 
-        verifyNoInteractions(urlRepository, reviewQueueService);
+        verifyNoInteractions(urlRepository, reviewQueueService, bioPageRepository, bioPageReviewService);
         assertThat(attempts).isEmpty();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"@Ana", "@ana", " hrva.cc/@ana ", "hrva.cc/@ANA/", "https://www.hrva.cc/@ana?x#y", "HTTPS://HRVA.CC/@ana#top",
+            "http://localhost:3000/bio/ana", "localhost:3000/bio/Ana?utm_source=x", "http://localhost:3000/bio/ana/"})
+    void aBioPageIsReportedByAt(final String target) throws Exception {
+        when(bioPageRepository.findByHandleWithOwner("ana")).thenReturn(Optional.of(page));
+
+        report(target, "SPAM", "fake shop")
+                .andExpect(status().isAccepted())
+                .andExpect(content().string(""));
+
+        verify(bioPageReviewService).report(page, ReportCategory.SPAM, "fake shop");
+        verifyNoInteractions(urlRepository, reviewQueueService);
+    }
+
+    @Test
+    void aHiddenBioPageIsAcceptedButNotQueued() throws Exception {
+        page.setHiddenAt(LocalDateTime.of(2026, 10, 26, 9, 0));
+        when(bioPageRepository.findByHandleWithOwner("ana")).thenReturn(Optional.of(page));
+
+        report("@ana", "SPAM", null).andExpect(status().isAccepted()).andExpect(content().string(""));
+
+        verifyNoInteractions(bioPageReviewService, reviewQueueService);
+    }
+
+    @Test
+    void aBioPageOfADeactivatedOwnerIsAcceptedButNotQueued() throws Exception {
+        page.getOwner().setActive(false);
+        when(bioPageRepository.findByHandleWithOwner("ana")).thenReturn(Optional.of(page));
+
+        report("@ana", "SPAM", null).andExpect(status().isAccepted());
+
+        verifyNoInteractions(bioPageReviewService);
+    }
+
+    @Test
+    void anUnknownHandleIsStill202() throws Exception {
+        when(bioPageRepository.findByHandleWithOwner("nobody")).thenReturn(Optional.empty());
+
+        report("hrva.cc/@nobody", "PHISHING", DETAILS)
+                .andExpect(status().isAccepted())
+                .andExpect(content().string(""));
+
+        verifyNoInteractions(bioPageReviewService, reviewQueueService, urlRepository);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"@", "@a", "@ab", "@@ana", "@ana!", "@---", "@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "hrva.cc/@", "hrva.cc/@ana/blog",
+            "http://localhost:3000/bio/", "http://localhost:3000/bio/a", "http://localhost:3000/bio/ana/extra", "http://localhost:3000/ana",
+            "http://localhost:3000/@ana", "hrva.cc/bio/ana", "https://evil.example/@ana", "https://evil.example/bio/ana"})
+    void aMalformedTargetIs400WithTheNewText(final String target) throws Exception {
+        report(target, "SPAM", DETAILS)
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value(TARGET_INVALID));
+
+        verifyNoInteractions(urlRepository, reviewQueueService, bioPageRepository, bioPageReviewService);
+        assertThat(attempts).isEmpty();
+    }
+
+    @Test
+    void aShortLinkStillReportsTheLink() throws Exception {
+        when(urlRepository.findByShortUrlAndActiveTrue("ana")).thenReturn(Optional.of(url));
+
+        report("hrva.cc/ana", "SPAM", null).andExpect(status().isAccepted());
+
+        verify(reviewQueueService).report(url, ReportCategory.SPAM, null);
+        verifyNoInteractions(bioPageRepository, bioPageReviewService);
+    }
+
+    @Test
+    void bioPageAndLinkReportsShareOneLimit() throws Exception {
+        when(bioPageRepository.findByHandleWithOwner("ana")).thenReturn(Optional.of(page));
+        for (var sent = 0; sent < 5; sent++) {
+            report("@ana", "SPAM", null).andExpect(status().isAccepted());
+        }
+
+        report(SHORT, "PHISHING", DETAILS)
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.error").value(TOO_MANY_REPORTS));
+        report("@ana", "SPAM", null).andExpect(status().isTooManyRequests());
+
+        verify(bioPageReviewService, times(5)).report(page, ReportCategory.SPAM, null);
+        verifyNoInteractions(urlRepository, reviewQueueService);
+        assertThat(attempts).containsOnlyKeys(RateLimiter.clientKey("report", CLIENT_IP));
+    }
+
+    @Test
+    void aBioPageReportIsStillTakenWhenTheRateLimiterIsUnavailable() throws Exception {
+        mockMvc = mockMvcWith((key, window) -> {
+            throw new RateLimiterUnavailableException(new IllegalStateException("redis down"));
+        });
+        when(bioPageRepository.findByHandleWithOwner("ana")).thenReturn(Optional.of(page));
+
+        report("@ana", "OTHER", "pretends to be me").andExpect(status().isAccepted());
+
+        verify(bioPageReviewService).report(page, ReportCategory.OTHER, "pretends to be me");
+    }
+
+    @Test
+    void aBioPageReportNeverChangesThePage() throws Exception {
+        when(bioPageRepository.findByHandleWithOwner("ana")).thenReturn(Optional.of(page));
+
+        report("@ana", "SPAM", null).andExpect(status().isAccepted());
+
+        verify(bioPageRepository).findByHandleWithOwner("ana");
+        verifyNoMoreInteractions(bioPageRepository);
+        assertThat(page.getHiddenAt()).isNull();
+        assertThat(page.getHandle()).isEqualTo("ana");
     }
 
     @Test

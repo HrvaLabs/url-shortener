@@ -23,6 +23,7 @@ import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.service.bio.BioHandles;
 import cc.hrva.urlshortener.service.bio.BioPageLock;
 import cc.hrva.urlshortener.service.bio.BioPageResponses;
+import cc.hrva.urlshortener.service.bio.BioPageTextSignals;
 import cc.hrva.urlshortener.service.impl.DefaultBioPageService;
 import java.time.Duration;
 import java.util.List;
@@ -99,6 +100,12 @@ class BioPageRacesTest {
 
     @MockitoBean
     private ReservedAliasService reservedAliasService;
+
+    @MockitoBean
+    private BioPageTextSignals bioPageTextSignals;
+
+    @MockitoBean
+    private BioPageReviewService bioPageReviewService;
 
     @MockitoSpyBean
     private BioPageResponses bioPageResponses;

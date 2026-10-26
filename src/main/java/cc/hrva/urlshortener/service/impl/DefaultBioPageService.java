@@ -23,12 +23,14 @@ import cc.hrva.urlshortener.model.enums.BioLinkState;
 import cc.hrva.urlshortener.repository.BioPageButtonRepository;
 import cc.hrva.urlshortener.repository.BioPageRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
+import cc.hrva.urlshortener.service.BioPageReviewService;
 import cc.hrva.urlshortener.service.BioPageService;
 import cc.hrva.urlshortener.service.UserService;
 import cc.hrva.urlshortener.service.bio.BioHandles;
 import cc.hrva.urlshortener.service.bio.BioPageLock;
 import cc.hrva.urlshortener.service.bio.BioPageResponses;
 import cc.hrva.urlshortener.service.bio.BioPageText;
+import cc.hrva.urlshortener.service.bio.BioPageTextSignals;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.LocalDateTime;
@@ -94,6 +96,8 @@ public class DefaultBioPageService implements BioPageService {
     private final UrlRepository urlRepository;
     private final BioHandles bioHandles;
     private final BioPageResponses bioPageResponses;
+    private final BioPageTextSignals bioPageTextSignals;
+    private final BioPageReviewService bioPageReviewService;
     private final RateLimiter rateLimiter;
     private final Clock clock;
 
@@ -126,6 +130,7 @@ public class DefaultBioPageService implements BioPageService {
             throw new BioHandleUnavailableException(HANDLE_TAKEN);
         }
         log.info("Bio page created pageId={} userId={}", created.getId(), user.getId());
+        flagSuspiciousText(created, StringUtils.EMPTY, StringUtils.EMPTY, List.of());
         return bioPageResponses.editorView(created, List.of());
     }
 
@@ -170,6 +175,7 @@ public class DefaultBioPageService implements BioPageService {
             throw new BioPageConflictException(PAGE_CHANGED);
         }
         log.info("Bio page saved pageId={} buttons={}", saved.getId(), buttons.size());
+        flagSuspiciousText(saved, displayName, bio, titles);
         return bioPageResponses.editorView(saved, buttons);
     }
 
@@ -200,7 +206,9 @@ public class DefaultBioPageService implements BioPageService {
             throw new BioHandleUnavailableException(HANDLE_TAKEN);
         }
         log.info("Bio page handle changed pageId={}", page.getId());
-        return bioPageResponses.editorView(page);
+        final var buttons = bioPageResponses.buttonsOf(page);
+        flagSuspiciousText(page, page.getDisplayName(), page.getBio(), buttons.stream().map(BioPageButton::getTitle).toList());
+        return bioPageResponses.editorView(page, buttons);
     }
 
     @Override
@@ -236,6 +244,13 @@ public class DefaultBioPageService implements BioPageService {
         final var reason = BioHandles.formatError(normalized)
                 .or(() -> bioHandles.unavailableReason(normalized, bioPageRepository.findByOwner(user).orElse(null)));
         return new BioHandleAvailabilityResponse(normalized, reason.isEmpty(), reason.orElse(null));
+    }
+
+    private void flagSuspiciousText(final BioPage page, final String displayName, final String bio, final List<String> titles) {
+        final var reasons = bioPageTextSignals.reasonsFor(page.getHandle(), displayName, bio, titles);
+        if (!reasons.isEmpty()) {
+            bioPageReviewService.flag(page, reasons);
+        }
     }
 
     private User currentUser() {

@@ -2,15 +2,26 @@ package cc.hrva.urlshortener.service;
 
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.service.impl.DefaultSuspiciousUrlService;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.NullAndEmptySource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 class DefaultSuspiciousUrlServiceTest {
+
+    private static final String CYRILLIC_A = codePoints(0x0430);
+    private static final String CYRILLIC_IE = codePoints(0x0435);
+    private static final String CYRILLIC_CAPITAL_A = codePoints(0x0410);
+    private static final String ZERO_WIDTH_JOINER = codePoints(0x200D);
+    private static final String ZERO_WIDTH_NON_JOINER = codePoints(0x200C);
+    private static final String MIXES_LATIN_AND_CYRILLIC = "mixes Latin and Cyrillic letters";
+    private static final String LURE = "login or verification lure";
 
     private SuspiciousUrlService suspiciousUrlService;
 
@@ -275,6 +286,110 @@ class DefaultSuspiciousUrlServiceTest {
             "https://maps.app.goo.gl/Ux7Qm1aBcD", "https://t.co/AbC123", "https://lnkd.in/dX9yZ"})
     void doesNotRefuseOrdinarySitesOrPlatformShareLinks(final String longUrl) {
         assertThat(suspiciousUrlService.isShortener(longUrl)).isFalse();
+    }
+
+
+    @ParameterizedTest
+    @MethodSource("plainTexts")
+    void plainTextHasNoReasons(final String text) {
+        assertThat(suspiciousUrlService.findTextReasons(text)).isEmpty();
+        assertThat(suspiciousUrlService.findImitatedBrand(text)).isEmpty();
+    }
+
+    @ParameterizedTest
+    @NullAndEmptySource
+    @ValueSource(strings = {"   ", "-- __ !!"})
+    void textWithoutWordsHasNoReasons(final String text) {
+        assertThat(suspiciousUrlService.findTextReasons(text)).isEmpty();
+        assertThat(suspiciousUrlService.findImitatedBrand(text)).isEmpty();
+    }
+
+    @Test
+    void aMixedWordIsFlagged() {
+        assertThat(suspiciousUrlService.findTextReasons("p" + CYRILLIC_A + "ypal support")).containsExactly(MIXES_LATIN_AND_CYRILLIC);
+    }
+
+    @Test
+    void eachMixIsNamedOnce() {
+        final var greekOmicron = codePoints(0x03BF);
+
+        assertThat(suspiciousUrlService.findTextReasons("p" + CYRILLIC_A + "ypal and r" + CYRILLIC_IE + "volut and g" + greekOmicron + "ogle"))
+                .containsExactly(MIXES_LATIN_AND_CYRILLIC, "mixes Latin and Greek letters");
+    }
+
+    @Test
+    void lureWordsAreFlaggedThroughLookalikes() {
+        assertThat(suspiciousUrlService.findTextReasons("Verify your wallet")).containsExactly(LURE);
+        assertThat(suspiciousUrlService.findTextReasons("v" + CYRILLIC_IE + "rify")).containsExactly(MIXES_LATIN_AND_CYRILLIC, LURE);
+        assertThat(suspiciousUrlService.findTextReasons("LOGIN HERE")).containsExactly(LURE);
+        assertThat(suspiciousUrlService.findTextReasons("V" + codePoints(0x00E9) + "rification")).containsExactly(LURE);
+    }
+
+    @Test
+    void wordsThatOnlyContainALureAreNotLures() {
+        assertThat(suspiciousUrlService.findTextReasons("Unverified photos, securely blogged")).isEmpty();
+    }
+
+    @Test
+    void aJoinerInsideAWordDoesNotHideIt() {
+        assertThat(suspiciousUrlService.findTextReasons("Ver" + ZERO_WIDTH_JOINER + "ify now")).containsExactly(LURE);
+        assertThat(suspiciousUrlService.findTextReasons("log" + ZERO_WIDTH_NON_JOINER + "in")).containsExactly(LURE);
+        assertThat(suspiciousUrlService.findImitatedBrand("Pay" + ZERO_WIDTH_JOINER + "Pal")).contains("paypal");
+    }
+
+    @Test
+    void brandsAreFoundThroughLookalikes() {
+        assertThat(suspiciousUrlService.findImitatedBrand("PayPal Help")).contains("paypal");
+        assertThat(suspiciousUrlService.findImitatedBrand("paypa1")).contains("paypal");
+        assertThat(suspiciousUrlService.findImitatedBrand("revoiut")).contains("revolut");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"paypal", "paypa1", "revoiut", "revolutt", "dh1", "dhl", "netflixx", "amazon", "booking", "ana"})
+    void aWordImitatesTheBrandItsHostWouldImitate(final String word) {
+        final var asHost = suspiciousUrlService.findReasons("https://" + word + ".example.org/").stream()
+                .filter(reason -> reason.startsWith(SuspiciousUrlService.IMITATES_PREFIX))
+                .map(reason -> reason.substring(SuspiciousUrlService.IMITATES_PREFIX.length()))
+                .findFirst();
+
+        assertThat(suspiciousUrlService.findImitatedBrand(word)).isEqualTo(asHost);
+    }
+
+    @Test
+    void brandsAreFoundInEveryWordAndHyphenPart() {
+        assertThat(suspiciousUrlService.findImitatedBrand("paypal-help")).contains("paypal");
+        assertThat(suspiciousUrlService.findImitatedBrand("official_netflix_shop")).contains("netflix");
+        assertThat(suspiciousUrlService.findImitatedBrand("Ana from Booking")).contains("booking");
+    }
+
+    @Test
+    void brandsAreFoundThroughOtherAlphabetsAndAccents() {
+        assertThat(suspiciousUrlService.findImitatedBrand(CYRILLIC_CAPITAL_A + "pple Support")).contains("apple");
+        assertThat(suspiciousUrlService.findImitatedBrand("P" + CYRILLIC_A + "yPal")).contains("paypal");
+        assertThat(suspiciousUrlService.findImitatedBrand(codePoints(0x00C1) + "pple")).contains("apple");
+        assertThat(suspiciousUrlService.findImitatedBrand("DH" + codePoints(0x0141))).contains("dhl");
+    }
+
+    @Test
+    void shortBrandsNeedAnExactMatch() {
+        assertThat(suspiciousUrlService.findImitatedBrand("dh1 olxx ebayy")).isEmpty();
+        assertThat(suspiciousUrlService.findImitatedBrand("eBay finds")).contains("ebay");
+    }
+
+    private static Stream<String> plainTexts() {
+        return Stream.of(
+                "Ana Horvat",
+                codePoints(0x0424, 0x043E, 0x0442, 0x043E, 0x20, 0x0438, 0x0437, 0x20, 0x0417, 0x0430, 0x0433, 0x0440, 0x0435, 0x0431, 0x0430),
+                codePoints(0x010D) + "okolada i kava",
+                codePoints(0x65E5, 0x672C, 0x306E, 0x5199, 0x771F),
+                "I " + codePoints(0x2764, 0xFE0F) + " cats",
+                codePoints(0x0391, 0x03B8, 0x03AE, 0x03BD, 0x03B1) + " 2026",
+                codePoints(0x0645, 0x06CC, 0x200C, 0x062E, 0x0648, 0x0627, 0x0647, 0x0645),
+                "Photos from Zagreb, 2026 - say hi!");
+    }
+
+    private static String codePoints(final int... codePoints) {
+        return new String(codePoints, 0, codePoints.length);
     }
 
 }

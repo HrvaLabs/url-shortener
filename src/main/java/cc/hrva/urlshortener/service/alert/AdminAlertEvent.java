@@ -21,4 +21,8 @@ public sealed interface AdminAlertEvent {
 
     record BurstDetected(String domain, int links, int creators, Integer domainAgeDays, Duration window) implements AdminAlertEvent {}
 
+    record BioPageReviewOpened(AlertedBioPage page, List<String> reasons) implements AdminAlertEvent {}
+
+    record BioPageReported(AlertedBioPage page, ReportCategory category, String details, boolean reviewOpened) implements AdminAlertEvent {}
+
 }

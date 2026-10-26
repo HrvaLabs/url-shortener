@@ -8,14 +8,18 @@ import cc.hrva.urlshortener.configuration.WebConfiguration;
 import cc.hrva.urlshortener.mcp.McpResourceServerConfiguration;
 import cc.hrva.urlshortener.mcp.authorization.AuthorizationServerConfiguration;
 import cc.hrva.urlshortener.mcp.bridge.ConnectRequestStore;
+import cc.hrva.urlshortener.model.BioPage;
 import cc.hrva.urlshortener.model.Url;
+import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.enums.ReportCategory;
+import cc.hrva.urlshortener.repository.BioPageRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.security.ClientIpResolver;
 import cc.hrva.urlshortener.security.JwtFilter;
 import cc.hrva.urlshortener.security.OAuth2LoginSuccessHandler;
 import cc.hrva.urlshortener.security.TokenProvider;
+import cc.hrva.urlshortener.service.BioPageReviewService;
 import cc.hrva.urlshortener.service.ReviewQueueService;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiter;
 import com.nimbusds.jose.JOSEException;
@@ -37,6 +41,7 @@ import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.json.JsonCompareMode;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
 
@@ -45,6 +50,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -86,6 +92,12 @@ class ReportEndpointSecurityTest {
     private UrlRepository urlRepository;
 
     @MockitoBean
+    private BioPageRepository bioPageRepository;
+
+    @MockitoBean
+    private BioPageReviewService bioPageReviewService;
+
+    @MockitoBean
     private ConnectRequestStore connectRequestStore;
 
     @MockitoBean
@@ -122,6 +134,31 @@ class ReportEndpointSecurityTest {
                 .andExpect(status().isAccepted());
 
         verify(reviewQueueService).report(url, ReportCategory.PHISHING, "asks for my bank login");
+    }
+
+    @Test
+    void anyoneCanReportABioPageWithoutLoggingIn() throws Exception {
+        final var page = BioPage.builder().id(12L).handle("ana").owner(User.builder().id(7L).active(true).build()).build();
+        when(bioPageRepository.findByHandleWithOwner("ana")).thenReturn(Optional.of(page));
+
+        for (final var target : List.of("@Ana", "http://localhost:3000/bio/ana")) {
+            mockMvc.perform(post(REPORTS).contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"shortUrl\":\"%s\",\"category\":\"SPAM\"}".formatted(target)))
+                    .andExpect(status().isAccepted())
+                    .andExpect(content().string(""));
+        }
+
+        verify(bioPageReviewService, times(2)).report(page, ReportCategory.SPAM, null);
+        verifyNoInteractions(reviewQueueService);
+    }
+
+    @Test
+    void anUnreadableTargetIs400WithTheNewText() throws Exception {
+        mockMvc.perform(post(REPORTS).contentType(MediaType.APPLICATION_JSON).content("{\"shortUrl\":\"@a\",\"category\":\"SPAM\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().json("{\"error\":\"Enter a hrva.cc short link or bio page, like hrva.cc/abc or hrva.cc/@name\"}", JsonCompareMode.STRICT));
+
+        verifyNoInteractions(rateLimiter, bioPageRepository, bioPageReviewService, urlRepository, reviewQueueService);
     }
 
     @Test

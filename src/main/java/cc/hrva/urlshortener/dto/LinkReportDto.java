@@ -12,7 +12,7 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 public class LinkReportDto {
 
-    @Schema(description = "The reported short link, as abc, hrva.cc/abc or https://hrva.cc/abc", example = "hrva.cc/abc")
+    @Schema(description = "The reported short link, as abc, hrva.cc/abc or https://hrva.cc/abc, or bio page, as @name, hrva.cc/@name or app.hrva.cc/bio/name", example = "hrva.cc/abc")
     private String shortUrl;
     @Schema(description = "What is wrong with the link", allowableValues = {"PHISHING", "MALWARE", "SPAM", "OTHER"}, example = "PHISHING")
     private String category;

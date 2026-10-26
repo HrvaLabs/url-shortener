@@ -6,6 +6,7 @@ import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.model.enums.BlockReason;
 import cc.hrva.urlshortener.model.enums.ReportCategory;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent;
+import cc.hrva.urlshortener.service.alert.AlertedBioPage;
 import cc.hrva.urlshortener.service.alert.AlertedLink;
 import cc.hrva.urlshortener.service.alert.DiscordAlertFormatter;
 import cc.hrva.urlshortener.service.impl.DefaultDiscordAlertService;
@@ -212,6 +213,31 @@ class DefaultDiscordAlertServiceTest {
         }
 
         verifyNoInteractions(discordWebhookClient);
+    }
+
+    @Test
+    void bioPageEventsAreBufferedAfterCommit() {
+        final var page = new AlertedBioPage(12L, "ana", 7L);
+        try (final var context = listeningContext()) {
+            new TransactionTemplate(new NoResourceTransactionManager()).executeWithoutResult(status -> {
+                context.publishEvent(new AdminAlertEvent.BioPageReviewOpened(page, List.of("name imitates paypal")));
+                context.publishEvent(new AdminAlertEvent.BioPageReported(page, ReportCategory.SPAM, "fake shop", false));
+                discordAlertService.flush();
+                verifyNoInteractions(discordWebhookClient);
+            });
+            new TransactionTemplate(new NoResourceTransactionManager()).executeWithoutResult(status -> {
+                context.publishEvent(new AdminAlertEvent.BioPageReported(page, ReportCategory.PHISHING, null, true));
+                status.setRollbackOnly();
+            });
+
+            discordAlertService.flush();
+        }
+
+        final var message = ArgumentCaptor.forClass(DiscordMessage.class);
+        verify(discordWebhookClient, times(1)).send(eq(WEBHOOK_URL), message.capture(), eq(Duration.ofSeconds(5)));
+        assertThat(message.getValue().content().lines().toList()).containsExactly(
+                "New bio page review: hrva.cc/@ana (name imitates paypal), account #7, <https://app.hrva.cc/admin/review?bio=12>",
+                "Visitor report on an open bio page review: hrva.cc/@ana (spam: \"fake shop\"), account #7, <https://app.hrva.cc/admin/review?bio=12>");
     }
 
     @Test

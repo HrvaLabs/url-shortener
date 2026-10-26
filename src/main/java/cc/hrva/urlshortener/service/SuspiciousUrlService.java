@@ -1,6 +1,7 @@
 package cc.hrva.urlshortener.service;
 
 import java.util.List;
+import java.util.Optional;
 
 public interface SuspiciousUrlService {
 
@@ -9,5 +10,7 @@ public interface SuspiciousUrlService {
 
     List<String> findReasons(String longUrl);
     boolean isShortener(String longUrl);
+    List<String> findTextReasons(String text);
+    Optional<String> findImitatedBrand(String text);
 
 }

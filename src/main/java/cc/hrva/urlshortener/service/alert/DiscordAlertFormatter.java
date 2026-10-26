@@ -4,6 +4,9 @@ import cc.hrva.urlshortener.client.DiscordMessage;
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.dto.WeeklyDigest;
 import cc.hrva.urlshortener.model.enums.BlockReason;
+import cc.hrva.urlshortener.model.enums.ReportCategory;
+import cc.hrva.urlshortener.service.alert.AdminAlertEvent.BioPageReported;
+import cc.hrva.urlshortener.service.alert.AdminAlertEvent.BioPageReviewOpened;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.BlocklistSourceFailed;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.BlocklistSourceRecovered;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.BurstDetected;
@@ -120,7 +123,7 @@ public class DiscordAlertFormatter {
                     owner(opened.link()), reviewPage(opened.link()));
             case VisitorReported reported -> "%s: %s (%s), %s, <%s>".formatted(
                     reported.reviewOpened() ? "New review from a visitor report" : "Visitor report on an open review",
-                    link(reported.link()), report(reported), owner(reported.link()), reviewPage(reported.link()));
+                    link(reported.link()), report(reported.category(), reported.details()), owner(reported.link()), reviewPage(reported.link()));
             case LinkBlocked blocked -> "Blocked: %s (%s), %s, <%s>".formatted(
                     link(blocked.link()), blockReason(blocked), owner(blocked.link()), frontendPage(LINKS_PAGE));
             case UserSignedUp signedUp -> "New user: %s signed up with %s, <%s>".formatted(
@@ -131,6 +134,13 @@ public class DiscordAlertFormatter {
                     failed.fallbackLoaded() ? " (a fallback loaded)" : "", frontendPage(BLOCKLISTS_PAGE));
             case BlocklistSourceRecovered recovered -> "%s loads again".formatted(plain(recovered.sourceName()));
             case BurstDetected burst -> burstLine(burst);
+            case BioPageReviewOpened opened -> "New bio page review: %s (%s), %s, <%s>".formatted(
+                    bioPage(opened.page()), plain(String.join(", ", opened.reasons())), owner(opened.page().ownerId()),
+                    bioPageReviewPage(opened.page()));
+            case BioPageReported reported -> "%s: %s (%s), %s, <%s>".formatted(
+                    reported.reviewOpened() ? "New bio page review from a visitor report" : "Visitor report on an open bio page review",
+                    bioPage(reported.page()), report(reported.category(), reported.details()), owner(reported.page().ownerId()),
+                    bioPageReviewPage(reported.page()));
         };
     }
 
@@ -158,15 +168,25 @@ public class DiscordAlertFormatter {
         return DomainNames.isIpLiteral(host) ? IP_DESTINATION : plain(host);
     }
 
-    private static String owner(final AlertedLink link) {
-        return link.ownerId() == null ? "anonymous" : "account #" + link.ownerId();
+    private String bioPage(final AlertedBioPage page) {
+        return page.handle() == null
+                ? "a bio page without a handle (#%d)".formatted(page.pageId())
+                : "%s/@%s".formatted(shortLinkHost(), plain(page.handle()));
     }
 
-    private static String report(final VisitorReported reported) {
-        final var category = reported.category() == null ? "other" : reported.category().name().toLowerCase(Locale.ROOT);
-        return StringUtils.isBlank(reported.details())
+    private static String owner(final AlertedLink link) {
+        return owner(link.ownerId());
+    }
+
+    private static String owner(final Long ownerId) {
+        return ownerId == null ? "anonymous" : "account #" + ownerId;
+    }
+
+    private static String report(final ReportCategory reportCategory, final String details) {
+        final var category = reportCategory == null ? "other" : reportCategory.name().toLowerCase(Locale.ROOT);
+        return StringUtils.isBlank(details)
                 ? category
-                : "%s: \"%s\"".formatted(category, plain(reported.details()));
+                : "%s: \"%s\"".formatted(category, plain(details));
     }
 
     private static String blockReason(final LinkBlocked blocked) {
@@ -223,6 +243,10 @@ public class DiscordAlertFormatter {
 
     private String reviewPage(final AlertedLink link) {
         return frontendPage(REVIEW_PAGE) + "?entry=" + link.urlId();
+    }
+
+    private String bioPageReviewPage(final AlertedBioPage page) {
+        return frontendPage(REVIEW_PAGE) + "?bio=" + page.pageId();
     }
 
     private String frontendPage(final String path) {

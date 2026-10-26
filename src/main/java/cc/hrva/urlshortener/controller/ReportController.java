@@ -4,10 +4,14 @@ import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.dto.LinkReportDto;
 import cc.hrva.urlshortener.exception.ApiException;
 import cc.hrva.urlshortener.exception.RateLimitExceededException;
+import cc.hrva.urlshortener.model.BioPage;
 import cc.hrva.urlshortener.model.enums.ReportCategory;
+import cc.hrva.urlshortener.repository.BioPageRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.security.ClientIpResolver;
+import cc.hrva.urlshortener.service.BioPageReviewService;
 import cc.hrva.urlshortener.service.ReviewQueueService;
+import cc.hrva.urlshortener.service.bio.BioHandles;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiter;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiterUnavailableException;
 import io.swagger.v3.oas.annotations.Operation;
@@ -41,25 +45,29 @@ public class ReportController {
     private static final Pattern SCHEME = Pattern.compile("^https?://", Pattern.CASE_INSENSITIVE);
     private static final Pattern SHORT_CODE = Pattern.compile("^[a-zA-Z0-9_-]{1,32}$");
     private static final Pattern CONTROL_CHARACTERS = Pattern.compile("[\\p{Cc}\\p{Cf}&&[^\\s]]");
-    private static final String SHORT_LINK_INVALID = "Enter a hrva.cc short link, like hrva.cc/abc";
+    private static final String HANDLE_PREFIX = "@";
+    private static final String BIO_PAGE_PATH = "bio/";
+    private static final String TARGET_INVALID = "Enter a hrva.cc short link or bio page, like hrva.cc/abc or hrva.cc/@name";
     private static final String CATEGORY_INVALID = "Category must be PHISHING, MALWARE, SPAM or OTHER";
     private static final String DETAILS_TOO_LONG = "Details must be 500 characters or fewer";
     private static final String TOO_MANY_REPORTS = "You've sent a lot of reports in a short time. Try again in an hour.";
 
     private final ReviewQueueService reviewQueueService;
     private final UrlRepository urlRepository;
+    private final BioPageRepository bioPageRepository;
+    private final BioPageReviewService bioPageReviewService;
     private final RateLimiter rateLimiter;
     private final ClientIpResolver clientIpResolver;
     private final HttpServletRequest request;
     private final AppProperties appProperties;
 
-    @Operation(summary = "Report a link", description = "Report an abusive short link for review. Always answers 202 for a well-formed report, whether or not the link exists. 5 reports per hour per client.")
+    @Operation(summary = "Report a link or bio page", description = "Report an abusive short link (abc, hrva.cc/abc) or bio page (@name, hrva.cc/@name, app.hrva.cc/bio/name) for review. Always answers 202 for a well-formed report, whether or not the link or page exists. 5 reports per hour per client, shared by links and bio pages.")
     @ApiResponse(responseCode = "202", description = "Report received")
-    @ApiResponse(responseCode = "400", description = "Invalid short link, category or details")
+    @ApiResponse(responseCode = "400", description = "Invalid short link or bio page, category or details")
     @ApiResponse(responseCode = "429", description = "Too many reports from this client")
     @PostMapping
     public ResponseEntity<Void> reportLink(@RequestBody final LinkReportDto linkReportDto) {
-        final var shortUrl = shortCodeOf(linkReportDto.getShortUrl());
+        final var target = targetOf(linkReportDto.getShortUrl());
         final var category = categoryOf(linkReportDto.getCategory());
         final var details = detailsOf(linkReportDto.getDetails());
 
@@ -67,7 +75,13 @@ public class ReportController {
             throw new RateLimitExceededException(TOO_MANY_REPORTS);
         }
 
-        urlRepository.findByShortUrlAndActiveTrue(shortUrl).ifPresent(url -> reviewQueueService.report(url, category, details));
+        if (target.handle() != null) {
+            bioPageRepository.findByHandleWithOwner(target.handle())
+                    .filter(BioPage::isPublic)
+                    .ifPresent(page -> bioPageReviewService.report(page, category, details));
+        } else {
+            urlRepository.findByShortUrlAndActiveTrue(target.shortCode()).ifPresent(url -> reviewQueueService.report(url, category, details));
+        }
 
         return ResponseEntity.accepted().build();
     }
@@ -81,15 +95,50 @@ public class ReportController {
         }
     }
 
-    private String shortCodeOf(final String shortLink) {
-        final var link = StringUtils.removeStartIgnoreCase(withoutScheme(StringUtils.defaultString(shortLink).strip()), "www.");
-        final var shortHost = StringUtils.removeEnd(withoutScheme(appProperties.getServerUrl()), "/");
-        final var path = StringUtils.startsWithIgnoreCase(link, shortHost + "/") ? link.substring(shortHost.length()) : link;
-        final var shortCode = StringUtils.strip(StringUtils.substringBefore(StringUtils.substringBefore(path, "?"), "#"), "/");
+    private ReportTarget targetOf(final String reported) {
+        final var link = StringUtils.removeStartIgnoreCase(withoutScheme(StringUtils.defaultString(reported).strip()), "www.");
+        final var shortHost = hostOf(appProperties.getServerUrl());
+        final var frontendHost = hostOf(appProperties.getFrontendUrl());
+        if (StringUtils.startsWithIgnoreCase(link, shortHost + "/")) {
+            return shortLinkOrHandle(pathOf(link.substring(shortHost.length())));
+        }
+        if (!frontendHost.isEmpty() && StringUtils.startsWithIgnoreCase(link, frontendHost + "/")) {
+            return bioPagePath(pathOf(link.substring(frontendHost.length())));
+        }
+        return shortLinkOrHandle(pathOf(link));
+    }
 
-        return Optional.of(shortCode)
+    private static ReportTarget shortLinkOrHandle(final String path) {
+        if (path.startsWith(HANDLE_PREFIX)) {
+            return handleOf(path);
+        }
+        return Optional.of(path)
                 .filter(code -> SHORT_CODE.matcher(code).matches())
-                .orElseThrow(() -> new ApiException(SHORT_LINK_INVALID));
+                .map(code -> new ReportTarget(code, null))
+                .orElseThrow(() -> new ApiException(TARGET_INVALID));
+    }
+
+    private static ReportTarget bioPagePath(final String path) {
+        if (!path.startsWith(BIO_PAGE_PATH)) {
+            throw new ApiException(TARGET_INVALID);
+        }
+        return handleOf(path.substring(BIO_PAGE_PATH.length()));
+    }
+
+    private static ReportTarget handleOf(final String raw) {
+        final var handle = BioHandles.normalize(raw);
+        if (BioHandles.formatError(handle).isPresent()) {
+            throw new ApiException(TARGET_INVALID);
+        }
+        return new ReportTarget(null, handle);
+    }
+
+    private static String pathOf(final String link) {
+        return StringUtils.strip(StringUtils.substringBefore(StringUtils.substringBefore(link, "?"), "#"), "/");
+    }
+
+    private static String hostOf(final String url) {
+        return StringUtils.removeEnd(withoutScheme(StringUtils.defaultString(url)), "/");
     }
 
     private static String withoutScheme(final String link) {
@@ -112,6 +161,9 @@ public class ReportController {
         }
 
         return StringUtils.defaultIfEmpty(cleaned, null);
+    }
+
+    private record ReportTarget(String shortCode, String handle) {
     }
 
 }

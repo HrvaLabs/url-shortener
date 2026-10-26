@@ -30,6 +30,7 @@ import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.service.bio.BioHandles;
 import cc.hrva.urlshortener.service.bio.BioPageLock;
 import cc.hrva.urlshortener.service.bio.BioPageResponses;
+import cc.hrva.urlshortener.service.bio.BioPageTextSignals;
 import cc.hrva.urlshortener.service.impl.DefaultBioPageService;
 import java.sql.SQLException;
 import java.time.Clock;
@@ -130,6 +131,12 @@ class DefaultBioPageServiceTest {
     @Mock
     private RateLimiter rateLimiter;
 
+    @Mock
+    private BioPageTextSignals bioPageTextSignals;
+
+    @Mock
+    private BioPageReviewService bioPageReviewService;
+
     @Captor
     private ArgumentCaptor<List<BioPageButton>> savedButtons;
 
@@ -148,7 +155,8 @@ class DefaultBioPageServiceTest {
         lenient().when(bioPageLock.lock(any(BioPage.class))).thenAnswer(invocation -> Optional.of(invocation.getArgument(0)));
         final var clock = Clock.fixed(NOW_INSTANT, ZoneOffset.UTC);
         bioPageService = new DefaultBioPageService(userService, bioPageRepository, bioPageLock, bioPageButtonRepository, urlRepository,
-                bioHandles, new BioPageResponses(bioPageButtonRepository, linkReviewRepository, clock), rateLimiter, clock);
+                bioHandles, new BioPageResponses(bioPageButtonRepository, linkReviewRepository, clock), bioPageTextSignals,
+                bioPageReviewService, rateLimiter, clock);
     }
 
     @Test
@@ -1105,6 +1113,142 @@ class DefaultBioPageServiceTest {
                 .hasMessage(CHECKS_REFUSED);
 
         verifyNoInteractions(bioHandles, bioPageRepository);
+    }
+
+    @Test
+    void aSaveWithSuspiciousTextFlagsThePage() {
+        hasPage();
+        savesReturnTheirArgument();
+        ownsLinks(link(41L, "ana-ig", ana));
+        final var reasons = List.of("name imitates paypal", "a button title has a login or verification lure");
+        when(bioPageTextSignals.reasonsFor("ana", "PayPal Help", "Photos from Zagreb", List.of("Login"))).thenReturn(reasons);
+        final var dto = update(buttonDto(41L, " Log" + RIGHT_TO_LEFT_OVERRIDE + "in "));
+        dto.setDisplayName("  PayPal " + RIGHT_TO_LEFT_OVERRIDE + " Help ");
+
+        bioPageService.update(dto);
+
+        final var inOrder = inOrder(bioPageRepository, bioPageReviewService);
+        inOrder.verify(bioPageRepository).saveAndFlush(page);
+        inOrder.verify(bioPageReviewService).flag(page, reasons);
+    }
+
+    @Test
+    void aCleanSaveFlagsNothing() {
+        hasPage();
+        savesReturnTheirArgument();
+
+        bioPageService.update(update());
+
+        verify(bioPageTextSignals).reasonsFor("ana", "Ana Horvat", "Photos from Zagreb", List.of());
+        verifyNoInteractions(bioPageReviewService);
+    }
+
+    @Test
+    void aSaveThatFailsFlagsNothing() {
+        hasPage();
+        ownsLinks(link(41L, "ana-ig", ana));
+        when(bioPageButtonRepository.saveAll(anyIterable())).thenThrow(violation("uq_bio_page_button_page_url"));
+
+        assertThatThrownBy(() -> bioPageService.update(update(buttonDto(41L, "Instagram")))).isInstanceOf(BioPageConflictException.class);
+
+        verifyNoInteractions(bioPageTextSignals, bioPageReviewService);
+    }
+
+    @Test
+    void aSaveOfAPageWithoutAHandleIsCheckedOnItsText() {
+        page.setHandle(null);
+        hasPage();
+        savesReturnTheirArgument();
+        when(bioPageTextSignals.reasonsFor(null, "Ana Horvat", "Photos from Zagreb", List.of())).thenReturn(List.of("bio mixes Latin and Cyrillic letters"));
+
+        bioPageService.update(update());
+
+        verify(bioPageReviewService).flag(page, List.of("bio mixes Latin and Cyrillic letters"));
+    }
+
+    @Test
+    void aCreateWithASuspiciousHandleFlagsThePage() {
+        when(bioPageRepository.findByOwner(ana)).thenReturn(Optional.empty());
+        savesReturnTheirArgument();
+        when(bioPageTextSignals.reasonsFor("paypal-help", "", "", List.of())).thenReturn(List.of("handle imitates paypal"));
+
+        bioPageService.create(new BioPageCreateDto(" @PayPal-Help "));
+
+        final var flagged = ArgumentCaptor.forClass(BioPage.class);
+        final var inOrder = inOrder(bioPageRepository, bioPageReviewService);
+        inOrder.verify(bioPageRepository).saveAndFlush(any(BioPage.class));
+        inOrder.verify(bioPageReviewService).flag(flagged.capture(), eq(List.of("handle imitates paypal")));
+        assertThat(flagged.getValue().getHandle()).isEqualTo("paypal-help");
+        assertThat(flagged.getValue().getOwner()).isSameAs(ana);
+    }
+
+    @Test
+    void aCleanCreateFlagsNothing() {
+        when(bioPageRepository.findByOwner(ana)).thenReturn(Optional.empty());
+        savesReturnTheirArgument();
+
+        bioPageService.create(new BioPageCreateDto("ana"));
+
+        verify(bioPageTextSignals).reasonsFor("ana", "", "", List.of());
+        verifyNoInteractions(bioPageReviewService);
+    }
+
+    @Test
+    void aLostCreateRaceFlagsNothing() {
+        when(bioPageRepository.findByOwner(ana)).thenReturn(Optional.empty());
+        when(bioPageRepository.saveAndFlush(any(BioPage.class))).thenThrow(new DataIntegrityViolationException("uq_bio_page_handle"));
+
+        assertThatThrownBy(() -> bioPageService.create(new BioPageCreateDto("paypal"))).isInstanceOf(BioHandleUnavailableException.class);
+
+        verifyNoInteractions(bioPageTextSignals, bioPageReviewService);
+    }
+
+    @Test
+    void aHandleChangeFlagsTheNewHandleWithThePageText() {
+        hasPage();
+        savesReturnTheirArgument();
+        final var instagram = button(31L, link(41L, "ana-ig", ana), 0);
+        instagram.setTitle("Instagram");
+        onPage(instagram);
+        when(bioPageTextSignals.reasonsFor("paypal-help", "Ana", "", List.of("Instagram"))).thenReturn(List.of("handle imitates paypal"));
+
+        final var response = bioPageService.changeHandle(new BioHandleDto("paypal-help"));
+
+        final var inOrder = inOrder(bioPageRepository, bioPageReviewService);
+        inOrder.verify(bioPageRepository).saveAndFlush(page);
+        inOrder.verify(bioPageReviewService).flag(page, List.of("handle imitates paypal"));
+        verify(bioPageButtonRepository, times(1)).findByPageWithUrl(page);
+        assertThat(response.buttons()).extracting(BioPageResponse.Button::title).containsExactly("Instagram");
+    }
+
+    @Test
+    void aCleanHandleChangeFlagsNothing() {
+        hasPage();
+        savesReturnTheirArgument();
+
+        bioPageService.changeHandle(new BioHandleDto("bob"));
+
+        verify(bioPageTextSignals).reasonsFor("bob", "Ana", "", List.of());
+        verifyNoInteractions(bioPageReviewService);
+    }
+
+    @Test
+    void theSameHandleFlagsNothing() {
+        hasPage();
+
+        bioPageService.changeHandle(new BioHandleDto("ana"));
+
+        verifyNoInteractions(bioPageTextSignals, bioPageReviewService);
+    }
+
+    @Test
+    void aLostRenameRaceFlagsNothing() {
+        hasPage();
+        when(bioPageRepository.saveAndFlush(page)).thenThrow(new DataIntegrityViolationException("uq_bio_page_handle"));
+
+        assertThatThrownBy(() -> bioPageService.changeHandle(new BioHandleDto("paypal"))).isInstanceOf(BioHandleUnavailableException.class);
+
+        verifyNoInteractions(bioPageTextSignals, bioPageReviewService);
     }
 
     private void assertRefusedBeforeWriting(final BioPageUpdateDto dto, final String message) {

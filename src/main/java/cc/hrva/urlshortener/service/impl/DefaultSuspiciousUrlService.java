@@ -102,6 +102,8 @@ public class DefaultSuspiciousUrlService implements SuspiciousUrlService {
     private static final Pattern MARKS = Pattern.compile("\\p{M}+");
     private static final Pattern MIDDLE_DOT_BETWEEN_LS = Pattern.compile("(?<=l)\u00b7(?=l)");
     private static final Pattern NON_ALPHANUMERIC = Pattern.compile("[^a-z0-9]+");
+    private static final Pattern WORD_SEPARATORS = Pattern.compile("[^\\p{L}\\p{M}\\p{N}\\p{Cf}]+");
+    private static final Pattern FORMAT_CHARACTERS = Pattern.compile("\\p{Cf}+");
 
     private final String ownHost;
 
@@ -150,6 +152,51 @@ public class DefaultSuspiciousUrlService implements SuspiciousUrlService {
     @Override
     public boolean isShortener(final String longUrl) {
         return DomainNames.hostOf(longUrl).map(this::isShortenerHost).orElse(false);
+    }
+
+    @Override
+    public List<String> findTextReasons(final String text) {
+        final var words = wordsOf(text);
+        final var reasons = new LinkedHashSet<String>();
+        words.stream()
+                .map(DefaultSuspiciousUrlService::scriptsOf)
+                .filter(DefaultSuspiciousUrlService::isUnusualMix)
+                .map(DefaultSuspiciousUrlService::mixedAlphabets)
+                .forEach(reasons::add);
+        if (words.stream().map(DefaultSuspiciousUrlService::wordLookalike).anyMatch(PATH_LURE_WORDS::contains)) {
+            reasons.add(LOGIN_LURE);
+        }
+        return List.copyOf(reasons);
+    }
+
+    @Override
+    public Optional<String> findImitatedBrand(final String text) {
+        return wordsOf(text).stream()
+                .map(DefaultSuspiciousUrlService::wordLookalike)
+                .map(DefaultSuspiciousUrlService::brandResembledBy)
+                .flatMap(Optional::stream)
+                .findFirst();
+    }
+
+    private static List<String> wordsOf(final String text) {
+        if (StringUtils.isBlank(text)) {
+            return List.of();
+        }
+        return Arrays.stream(WORD_SEPARATORS.split(text))
+                .map(word -> FORMAT_CHARACTERS.matcher(word).replaceAll(""))
+                .filter(word -> word.codePoints().anyMatch(Character::isLetterOrDigit))
+                .toList();
+    }
+
+    private static String wordLookalike(final String word) {
+        return latinLookalike(word.toLowerCase(Locale.ROOT)).toLowerCase(Locale.ROOT);
+    }
+
+    private static Optional<String> brandResembledBy(final String word) {
+        if (BRAND_DOMAINS.containsKey(word)) {
+            return Optional.of(word);
+        }
+        return BRAND_DOMAINS.keySet().stream().filter(brand -> resembles(word, brand)).sorted().findFirst();
     }
 
     private static Set<String> alphabetReasons(final String[] unicodeLabels) {

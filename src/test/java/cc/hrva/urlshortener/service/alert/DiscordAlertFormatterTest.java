@@ -8,7 +8,10 @@ import cc.hrva.urlshortener.dto.stats.CountEntry;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.enums.BlockReason;
+import cc.hrva.urlshortener.model.BioPage;
 import cc.hrva.urlshortener.model.enums.ReportCategory;
+import cc.hrva.urlshortener.service.alert.AdminAlertEvent.BioPageReported;
+import cc.hrva.urlshortener.service.alert.AdminAlertEvent.BioPageReviewOpened;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.BlocklistSourceFailed;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.BlocklistSourceRecovered;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.BurstDetected;
@@ -31,6 +34,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 class DiscordAlertFormatterTest {
 
     private static final AlertedLink ANONYMOUS_LINK = new AlertedLink(42L, "abc12", "example-login.top", null);
+    private static final AlertedBioPage ANA = new AlertedBioPage(12L, "ana", 7L);
+    private static final String BIO_REVIEW_PAGE = "<https://app.hrva.cc/admin/review?bio=12>";
     private static final String REVIEW_PAGE = "<https://app.hrva.cc/admin/review>";
     private static final LocalDate DIGEST_FROM = LocalDate.of(2026, 10, 19);
     private static final LocalDate DIGEST_TO = LocalDate.of(2026, 10, 25);
@@ -165,6 +170,82 @@ class DiscordAlertFormatterTest {
                 List.of("punycode domain"))), 0).content();
 
         assertThat(content).startsWith("New review: hrva.cc/\\_my\\_link → evil\\_host.example (punycode domain)");
+    }
+
+    @Test
+    void bioPageReviewLine() {
+        final var content = formatter.message(List.of(new BioPageReviewOpened(ANA, List.of("name imitates paypal"))), 0).content();
+
+        assertThat(content).isEqualTo("New bio page review: hrva.cc/@ana (name imitates paypal), account #7, " + BIO_REVIEW_PAGE);
+    }
+
+    @Test
+    void bioPageReportLines() {
+        final var content = formatter.message(List.of(
+                new BioPageReported(ANA, ReportCategory.SPAM, "fake shop", true),
+                new BioPageReported(ANA, ReportCategory.SPAM, "fake shop", false),
+                new BioPageReported(ANA, ReportCategory.PHISHING, null, false),
+                new BioPageReported(ANA, null, " ", true)), 0).content();
+
+        assertThat(content.lines().toList()).containsExactly(
+                "New bio page review from a visitor report: hrva.cc/@ana (spam: \"fake shop\"), account #7, " + BIO_REVIEW_PAGE,
+                "Visitor report on an open bio page review: hrva.cc/@ana (spam: \"fake shop\"), account #7, " + BIO_REVIEW_PAGE,
+                "Visitor report on an open bio page review: hrva.cc/@ana (phishing), account #7, " + BIO_REVIEW_PAGE,
+                "New bio page review from a visitor report: hrva.cc/@ana (other), account #7, " + BIO_REVIEW_PAGE);
+    }
+
+    @Test
+    void aBioPageWithoutAHandleIsNamedById() {
+        final var page = new AlertedBioPage(12L, null, 7L);
+
+        final var content = formatter.message(List.of(
+                new BioPageReviewOpened(page, List.of("name imitates paypal")),
+                new BioPageReported(page, ReportCategory.OTHER, null, false)), 0).content();
+
+        assertThat(content.lines().toList()).containsExactly(
+                "New bio page review: a bio page without a handle (#12) (name imitates paypal), account #7, " + BIO_REVIEW_PAGE,
+                "Visitor report on an open bio page review: a bio page without a handle (#12) (other), account #7, " + BIO_REVIEW_PAGE);
+    }
+
+    @Test
+    void anAlertedBioPageNamesItsOwnerById() {
+        final var owner = User.builder().id(7L).email("ana@example.com").build();
+
+        final var page = AlertedBioPage.of(BioPage.builder().id(12L).handle("ana").displayName("Ana Horvat").owner(owner).build());
+
+        assertThat(page).isEqualTo(ANA);
+    }
+
+    @Test
+    void bioPageTextIsEscaped() {
+        final var message = formatter.message(List.of(
+                new BioPageReviewOpened(new AlertedBioPage(12L, "ana_b", 7L), List.of("name imitates @everyone [x](https://evil) <b>")),
+                new BioPageReported(ANA, ReportCategory.SPAM, "@here `code` [shop](https://evil.example/x)\n**bold** mail ana@example.com", false)), 0);
+        final var json = JsonMapper.builder().build().readTree(JsonMapper.builder().build().writeValueAsString(message));
+
+        assertThat(json.path("allowed_mentions").path("parse").isEmpty()).isTrue();
+        assertThat(message.content().lines().toList()).containsExactly(
+                "New bio page review: hrva.cc/@ana\\_b (name imitates @everyone x <https://evil> b), account #7, " + BIO_REVIEW_PAGE,
+                "Visitor report on an open bio page review: hrva.cc/@ana (spam: \"@here code shop <https://evil.example/x> \\*\\*bold\\*\\* mail "
+                        + "(email removed)\"), account #7, " + BIO_REVIEW_PAGE);
+        assertThat(message.content()).doesNotContain("[x](", "<b>", "`", "ana@example.com");
+    }
+
+    @Test
+    void bioPageLinesShowEveryReasonAndTheDetailsInFull() {
+        final var reasons = List.of("handle imitates paypal", "name imitates paypal", "name mixes Latin and Cyrillic letters",
+                "name has a login or verification lure", "bio mixes Latin and Cyrillic letters", "bio has a login or verification lure",
+                "a button title mixes Latin and Cyrillic letters", "a button title has a login or verification lure");
+        final var details = "word ".repeat(99) + "last";
+
+        final var content = formatter.message(List.of(
+                new BioPageReviewOpened(ANA, reasons),
+                new BioPageReported(ANA, ReportCategory.OTHER, details, false)), 0).content();
+
+        assertThat(content.lines().toList()).containsExactly(
+                "New bio page review: hrva.cc/@ana (" + String.join(", ", reasons) + "), account #7, " + BIO_REVIEW_PAGE,
+                "Visitor report on an open bio page review: hrva.cc/@ana (other: \"" + details + "\"), account #7, " + BIO_REVIEW_PAGE);
+        assertThat(content).doesNotContain("…");
     }
 
     @Test
