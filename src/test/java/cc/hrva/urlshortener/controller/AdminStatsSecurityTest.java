@@ -233,7 +233,7 @@ class AdminStatsSecurityTest {
     }
 
     private static Breakdowns emptyBreakdowns() {
-        return new Breakdowns(List.of(), List.of(), List.of(), List.of(), List.of());
+        return new Breakdowns(List.of(), List.of(), List.of(), List.of(), List.of(), List.of());
     }
 
     private static MockHttpServletRequestBuilder tabRequest(final String tab, final String token) {

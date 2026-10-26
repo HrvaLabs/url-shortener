@@ -353,7 +353,8 @@ echo "  --- link_daily_stats and link_daily_breakdown for $ALIAS"
 psql_query "select s.stat_date, s.clicks, s.unique_visitors, s.bot_clicks from link_daily_stats s join url u on u.id = s.url_id where u.short_url = '$ALIAS';"
 psql_query "select b.stat_date, b.dimension, b.dimension_value, b.clicks from link_daily_breakdown b join url u on u.id = b.url_id where u.short_url = '$ALIAS' order by b.dimension;"
 expect_eq "$(psql_value "select s.clicks || ',' || s.unique_visitors || ',' || s.bot_clicks from link_daily_stats s join url u on u.id = s.url_id where u.short_url = '$ALIAS';")" "1,1,1" "link_daily_stats: clicks 1, unique_visitors 1, bot_clicks 1"
-expect_eq "$(psql_value "select count(*) from link_daily_breakdown b join url u on u.id = b.url_id where u.short_url = '$ALIAS';")" 5 "link_daily_breakdown: 5 rows"
+expect_eq "$(psql_value "select count(*) from link_daily_breakdown b join url u on u.id = b.url_id where u.short_url = '$ALIAS';")" 6 "link_daily_breakdown: 6 rows"
+expect_eq "$(psql_value "select b.dimension_value from link_daily_breakdown b join url u on u.id = b.url_id where u.short_url = '$ALIAS' and b.dimension = 'SOURCE';")" direct "the browser visit counts as direct"
 
 section "10. Refresh (curl): rotation, replay refused"
 http -X POST "$BASE/oauth2/token" \

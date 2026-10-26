@@ -54,7 +54,8 @@ public final class AnalyticsSeries {
                 topValues(breakdowns, StatDimension.COUNTRY),
                 topValues(breakdowns, StatDimension.DEVICE),
                 topValues(breakdowns, StatDimension.BROWSER),
-                topValues(breakdowns, StatDimension.OS));
+                topValues(breakdowns, StatDimension.OS),
+                topValues(breakdowns, StatDimension.SOURCE));
     }
 
 }

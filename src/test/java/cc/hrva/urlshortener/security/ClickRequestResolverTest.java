@@ -1,10 +1,15 @@
 package cc.hrva.urlshortener.security;
 
 import cc.hrva.urlshortener.dto.ClickRequest;
+import org.apache.tomcat.util.http.InvalidParameterException;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.mock.web.MockHttpServletRequest;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.spy;
 
 class ClickRequestResolverTest {
 
@@ -29,6 +34,42 @@ class ClickRequestResolverTest {
     @Test
     void missingRequestIsAnEmptyClick() {
         assertThat(clickRequestResolver.resolve(null)).isEqualTo(ClickRequest.of("", null, null, null));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"qr", "qr=", "qr=1", "fbclid=abc&qr"})
+    void aQrMarkerMakesTheClickAQrScan(final String query) {
+        assertThat(clickRequestResolver.resolve(withQuery(query)))
+                .isEqualTo(ClickRequest.of("203.0.113.7", "UA", "https://t.co/x", "HR").withQrScan());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"", "QR", "qrcode=1", "utm_source=qr"})
+    void otherQueriesAreDirect(final String query) {
+        assertThat(clickRequestResolver.resolve(withQuery(query)))
+                .isEqualTo(ClickRequest.of("203.0.113.7", "UA", "https://t.co/x", "HR"));
+    }
+
+    @Test
+    void aQueryTheServerCannotParseIsADirectClick() {
+        final var request = spy(withQuery("utm_campaign=50%off&qr"));
+        doThrow(new InvalidParameterException("Character decoding failed", 400)).when(request).getParameter("qr");
+
+        assertThat(clickRequestResolver.resolve(request))
+                .isEqualTo(ClickRequest.of("203.0.113.7", "UA", "https://t.co/x", "HR"));
+    }
+
+    private static MockHttpServletRequest withQuery(final String query) {
+        final var request = cloudflareRequest();
+        request.setQueryString(query);
+        for (final var pair : query.split("&")) {
+            if (!pair.isEmpty()) {
+                final var separator = pair.indexOf('=');
+                request.addParameter(separator < 0 ? pair : pair.substring(0, separator), separator < 0 ? "" : pair.substring(separator + 1));
+            }
+        }
+
+        return request;
     }
 
     private static MockHttpServletRequest cloudflareRequest() {

@@ -35,6 +35,7 @@ import static cc.hrva.urlshortener.model.enums.StatDimension.COUNTRY;
 import static cc.hrva.urlshortener.model.enums.StatDimension.DEVICE;
 import static cc.hrva.urlshortener.model.enums.StatDimension.OS;
 import static cc.hrva.urlshortener.model.enums.StatDimension.REFERRER;
+import static cc.hrva.urlshortener.model.enums.StatDimension.SOURCE;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -302,7 +303,8 @@ class DefaultAnalyticsServiceTest {
                 COUNTRY, List.of(new BreakdownEntry("HR", 3), new BreakdownEntry("DE", 2)),
                 DEVICE, List.of(new BreakdownEntry("mobile", 5)),
                 BROWSER, List.of(new BreakdownEntry("safari", 3), new BreakdownEntry("chrome", 2)),
-                OS, List.of(new BreakdownEntry("ios", 3), new BreakdownEntry("android", 2))));
+                OS, List.of(new BreakdownEntry("ios", 3), new BreakdownEntry("android", 2)),
+                SOURCE, List.of(new BreakdownEntry("direct", 4), new BreakdownEntry("qr", 1))));
 
         final var breakdowns = analyticsService.getUrlAnalytics(7L, 30).breakdowns();
 
@@ -311,6 +313,7 @@ class DefaultAnalyticsServiceTest {
         assertThat(breakdowns.devices()).containsExactly(new BreakdownEntry("mobile", 5));
         assertThat(breakdowns.browsers()).containsExactly(new BreakdownEntry("safari", 3), new BreakdownEntry("chrome", 2));
         assertThat(breakdowns.operatingSystems()).containsExactly(new BreakdownEntry("ios", 3), new BreakdownEntry("android", 2));
+        assertThat(breakdowns.sources()).containsExactly(new BreakdownEntry("direct", 4), new BreakdownEntry("qr", 1));
     }
 
     @Test

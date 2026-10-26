@@ -125,7 +125,11 @@ class AnalyticsControllerTest {
                 .andExpect(jsonPath("$.breakdowns.countries[0].value").value("HR"))
                 .andExpect(jsonPath("$.breakdowns.devices").isEmpty())
                 .andExpect(jsonPath("$.breakdowns.browsers").isEmpty())
-                .andExpect(jsonPath("$.breakdowns.operatingSystems").isEmpty());
+                .andExpect(jsonPath("$.breakdowns.operatingSystems").isEmpty())
+                .andExpect(jsonPath("$.breakdowns.sources[0].value").value("direct"))
+                .andExpect(jsonPath("$.breakdowns.sources[0].clicks").value(90))
+                .andExpect(jsonPath("$.breakdowns.sources[1].value").value("qr"))
+                .andExpect(jsonPath("$.breakdowns.sources[1].clicks").value(30));
     }
 
     @Test
@@ -180,7 +184,8 @@ class AnalyticsControllerTest {
                 List.of(new BreakdownEntry("HR", 50)),
                 List.of(),
                 List.of(),
-                List.of());
+                List.of(),
+                List.of(new BreakdownEntry("direct", 90), new BreakdownEntry("qr", 30)));
         return new UrlAnalyticsDto(link, 7, LocalDate.of(2026, 10, 18), LocalDate.of(2026, 10, 24), new AnalyticsTotals(120, 95, 14),
                 List.of(new AnalyticsDay(LocalDate.of(2026, 10, 18), 120, 95, 14)), breakdowns);
     }

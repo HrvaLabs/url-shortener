@@ -49,6 +49,18 @@ class UrlRedirectControllerTest {
     }
 
     @Test
+    void theQrMarkerNeverReachesTheDestination() throws Exception {
+        final var redirectView = new RedirectView();
+        redirectView.setUrl("https://example.com/page?qr=keep&x=1");
+        when(clickRequestResolver.resolve(any())).thenReturn(CLICK.withQrScan());
+        when(urlService.redirectResultUrl("abc", CLICK.withQrScan())).thenReturn(redirectView);
+
+        mockMvc.perform(get("/abc?qr"))
+                .andExpect(status().isFound())
+                .andExpect(redirectedUrl("https://example.com/page?qr=keep&x=1"));
+    }
+
+    @Test
     void shouldRedirectRootToFrontend() throws Exception {
         final var redirectView = new RedirectView("https://frontend.com");
         when(urlService.redirectResultUrl(null, null)).thenReturn(redirectView);

@@ -29,6 +29,7 @@ import static cc.hrva.urlshortener.model.enums.StatDimension.COUNTRY;
 import static cc.hrva.urlshortener.model.enums.StatDimension.DEVICE;
 import static cc.hrva.urlshortener.model.enums.StatDimension.OS;
 import static cc.hrva.urlshortener.model.enums.StatDimension.REFERRER;
+import static cc.hrva.urlshortener.model.enums.StatDimension.SOURCE;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.tuple;
 
@@ -123,6 +124,17 @@ class LinkStatsRepositoryTest {
         linkStatsRepository.incrementBreakdown(url.getId(), DAY, Map.of(REFERRER, host));
 
         assertThat(linkStatsRepository.findBreakdownValues(url.getId(), DAY)).isEqualTo(Map.of(REFERRER, Set.of(host)));
+    }
+
+    @Test
+    void storesTheSourceDimension() {
+        final var url = savedLink("source");
+
+        linkStatsRepository.incrementBreakdown(url.getId(), DAY, Map.of(SOURCE, "qr"));
+        linkStatsRepository.incrementBreakdown(url.getId(), DAY, Map.of(SOURCE, "qr"));
+
+        assertThat(linkStatsRepository.findBreakdownTotals(url.getId(), DAY, DAY))
+                .isEqualTo(Map.of(SOURCE, List.of(new BreakdownEntry("qr", 2))));
     }
 
     @Test

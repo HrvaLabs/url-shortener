@@ -43,6 +43,7 @@ import static cc.hrva.urlshortener.model.enums.StatDimension.COUNTRY;
 import static cc.hrva.urlshortener.model.enums.StatDimension.DEVICE;
 import static cc.hrva.urlshortener.model.enums.StatDimension.OS;
 import static cc.hrva.urlshortener.model.enums.StatDimension.REFERRER;
+import static cc.hrva.urlshortener.model.enums.StatDimension.SOURCE;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.mockito.ArgumentMatchers.any;
@@ -70,7 +71,7 @@ class DefaultClickAnalyticsServiceTest {
             + "(KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1";
     private static final ClickRequest CLICK = ClickRequest.of(CLIENT_IP, SAFARI_IPHONE, "https://t.co/x", "hr");
     private static final Map<StatDimension, String> CLICK_BREAKDOWN = Map.of(
-            REFERRER, "t.co", COUNTRY, "HR", DEVICE, "mobile", BROWSER, "safari", OS, "ios");
+            REFERRER, "t.co", COUNTRY, "HR", DEVICE, "mobile", BROWSER, "safari", OS, "ios", SOURCE, "direct");
     private static final String WRITE_FAILED = "Click analytics write failed urlId=7 step=";
 
     @Mock
@@ -124,7 +125,7 @@ class DefaultClickAnalyticsServiceTest {
     }
 
     @Test
-    void newVisitorCountsAVisitAndAllFiveBreakdowns() {
+    void newVisitorCountsAVisitAndAllSixBreakdowns() {
         when(uniqueVisitorCounter.isNewVisitor(URL_ID, DAY, CLICK)).thenReturn(true);
 
         clickAnalyticsService.recordClick(URL_ID, SHORT_URL, CLICK);
@@ -134,6 +135,15 @@ class DefaultClickAnalyticsServiceTest {
         verify(linkStatsRepository).incrementDailyStats(URL_ID, DAY, 1, 1, 0);
         verify(linkStatsRepository).incrementBreakdown(URL_ID, DAY, CLICK_BREAKDOWN);
         verify(cache, never()).evict(any());
+    }
+
+    @Test
+    void aQrScanIsCountedUnderSourceQr() {
+        clickAnalyticsService.recordClick(URL_ID, SHORT_URL, CLICK.withQrScan());
+
+        verify(linkStatsRepository).incrementDailyStats(URL_ID, DAY, 1, 0, 0);
+        verify(linkStatsRepository).incrementBreakdown(URL_ID, DAY, Map.of(
+                REFERRER, "t.co", COUNTRY, "HR", DEVICE, "mobile", BROWSER, "safari", OS, "ios", SOURCE, "qr"));
     }
 
     @Test

@@ -187,7 +187,7 @@ class DefaultAdminStatsServiceTest {
 
     private static TrafficStatsResponse emptyTraffic(final StatsWindow window) {
         return new TrafficStatsResponse(window.days(), window.from(), window.to(), new AnalyticsTotals(0, 0, 0), List.of(), 0, 0,
-                List.of(), new Breakdowns(List.of(), List.of(), List.of(), List.of(), List.of()), 0);
+                List.of(), new Breakdowns(List.of(), List.of(), List.of(), List.of(), List.of(), List.of()), 0);
     }
 
     private static LinksStatsResponse emptyLinks(final StatsWindow window) {

@@ -12,6 +12,7 @@ import org.springframework.stereotype.Component;
 public class ClickRequestResolver {
 
     private static final String CF_IP_COUNTRY = "CF-IPCountry";
+    private static final String QR_MARKER = "qr";
 
     private final ClientIpResolver clientIpResolver;
 
@@ -20,8 +21,17 @@ public class ClickRequestResolver {
             return ClickRequest.of("", null, null, null);
         }
 
-        return ClickRequest.of(clientIpResolver.getClientIp(request), request.getHeader(HttpHeaders.USER_AGENT),
+        final var click = ClickRequest.of(clientIpResolver.getClientIp(request), request.getHeader(HttpHeaders.USER_AGENT),
                 request.getHeader(HttpHeaders.REFERER), cloudflareCountry(request));
+        return hasQrMarker(request) ? click.withQrScan() : click;
+    }
+
+    private static boolean hasQrMarker(final HttpServletRequest request) {
+        try {
+            return request.getParameter(QR_MARKER) != null;
+        } catch (final IllegalStateException exception) {
+            return false;
+        }
     }
 
     private static String cloudflareCountry(final HttpServletRequest request) {

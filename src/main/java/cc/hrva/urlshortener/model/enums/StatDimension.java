@@ -6,6 +6,7 @@ public enum StatDimension {
     COUNTRY,
     DEVICE,
     BROWSER,
-    OS
+    OS,
+    SOURCE
 
 }

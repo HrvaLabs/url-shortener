@@ -460,7 +460,7 @@ class McpEndpointSecurityTest {
             return new UrlAnalyticsDto(new LinkSummary(1L, "secret-alias", "example.com", "ACTIVE", false, LocalDateTime.now(), null, 3L,
                     "https://example.com/a"),
                     30, LocalDate.of(2026, 9, 25), LocalDate.of(2026, 10, 24), new AnalyticsTotals(2L, 1L, 0L), List.of(),
-                    new Breakdowns(List.of(), List.of(), List.of(), List.of(), List.of()));
+                    new Breakdowns(List.of(), List.of(), List.of(), List.of(), List.of(), List.of()));
         });
 
         final var outputBeforeCall = output.length();

@@ -30,6 +30,8 @@ public class DefaultClickAnalyticsService implements ClickAnalyticsService {
     private static final int MAX_VALUES_PER_DIMENSION = 50;
     private static final int MAX_VALUE_LENGTH = 255;
     private static final String OTHER = "other";
+    private static final String QR_SOURCE = "qr";
+    private static final String DIRECT_SOURCE = "direct";
     private static final String URLS_CACHE = "urls";
     private static final String STEP_CLICK = "click";
     private static final String STEP_BOT = "bot";
@@ -112,6 +114,7 @@ public class DefaultClickAnalyticsService implements ClickAnalyticsService {
         values.put(StatDimension.DEVICE, userAgent.device());
         values.put(StatDimension.BROWSER, userAgent.browser());
         values.put(StatDimension.OS, userAgent.os());
+        values.put(StatDimension.SOURCE, click.qrScan() ? QR_SOURCE : DIRECT_SOURCE);
 
         final var stored = linkStatsRepository.findBreakdownValues(urlId, day);
         values.replaceAll((dimension, value) -> capped(bounded(value), stored.getOrDefault(dimension, Set.of())));

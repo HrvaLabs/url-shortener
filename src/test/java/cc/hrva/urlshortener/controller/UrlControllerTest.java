@@ -277,9 +277,9 @@ class UrlControllerTest {
     }
 
     @Test
-    void qrCodeEncodesTheShortLinkNotTheDestination() throws Exception {
+    void qrCodeEncodesTheShortLinkWithTheQrMarker() throws Exception {
         when(urlService.peekUrlByShortUrl("board")).thenReturn(PeekUrl.builder().shortUrl("board").build());
-        when(qrCodeService.generateQrCode("https://hrva.cc/board", 300, 300)).thenReturn(new byte[]{1});
+        when(qrCodeService.generateQrCode("https://hrva.cc/board?qr", 300, 300)).thenReturn(new byte[]{1});
 
         mockMvc.perform(get("/api/v1/urls/board/qr")).andExpect(status().isOk());
     }
@@ -288,7 +288,7 @@ class UrlControllerTest {
     void qrCodeShortLinkHasNoDoubleSlashWhenTheServerUrlEndsWithOne() throws Exception {
         appProperties.setServerUrl("https://hrva.cc/");
         when(urlService.peekUrlByShortUrl("board")).thenReturn(PeekUrl.builder().shortUrl("board").build());
-        when(qrCodeService.generateQrCode("https://hrva.cc/board", 300, 300)).thenReturn(new byte[]{1});
+        when(qrCodeService.generateQrCode("https://hrva.cc/board?qr", 300, 300)).thenReturn(new byte[]{1});
 
         mockMvc.perform(get("/api/v1/urls/board/qr")).andExpect(status().isOk());
     }
@@ -296,8 +296,8 @@ class UrlControllerTest {
     @Test
     void qrCodeSizeIsKeptWithinLimits() throws Exception {
         when(urlService.peekUrlByShortUrl("board")).thenReturn(PeekUrl.builder().shortUrl("board").build());
-        when(qrCodeService.generateQrCode("https://hrva.cc/board", 1024, 1024)).thenReturn(new byte[]{1});
-        when(qrCodeService.generateQrCode("https://hrva.cc/board", 64, 64)).thenReturn(new byte[]{1});
+        when(qrCodeService.generateQrCode("https://hrva.cc/board?qr", 1024, 1024)).thenReturn(new byte[]{1});
+        when(qrCodeService.generateQrCode("https://hrva.cc/board?qr", 64, 64)).thenReturn(new byte[]{1});
 
         mockMvc.perform(get("/api/v1/urls/board/qr").param("size", "20000")).andExpect(status().isOk());
         mockMvc.perform(get("/api/v1/urls/board/qr").param("size", "-5")).andExpect(status().isOk());

@@ -21,6 +21,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import static cc.hrva.urlshortener.model.enums.StatDimension.REFERRER;
+import static cc.hrva.urlshortener.model.enums.StatDimension.SOURCE;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -105,6 +106,18 @@ class TrafficStatsTest {
         assertThat(breakdowns.devices()).isEmpty();
         assertThat(breakdowns.browsers()).isEmpty();
         assertThat(breakdowns.operatingSystems()).isEmpty();
+        assertThat(breakdowns.sources()).isEmpty();
+    }
+
+    @Test
+    void sourcesComeThroughTheBreakdowns() {
+        when(repository.findBreakdownTotals(FROM, TO)).thenReturn(Map.of(SOURCE, List.of(
+                new BreakdownEntry("direct", 7), new BreakdownEntry("qr", 3))));
+        givenOwnership(0, 0);
+
+        final var breakdowns = trafficStats.collect(WINDOW).breakdowns();
+
+        assertThat(breakdowns.sources()).containsExactly(new BreakdownEntry("direct", 7), new BreakdownEntry("qr", 3));
     }
 
     @Test
@@ -121,7 +134,7 @@ class TrafficStatsTest {
         assertThat(traffic.anonymousClicks()).isZero();
         assertThat(traffic.accountClicks()).isZero();
         assertThat(traffic.topLinks()).isEmpty();
-        assertThat(traffic.breakdowns()).isEqualTo(new Breakdowns(List.of(), List.of(), List.of(), List.of(), List.of()));
+        assertThat(traffic.breakdowns()).isEqualTo(new Breakdowns(List.of(), List.of(), List.of(), List.of(), List.of(), List.of()));
         assertThat(traffic.allTimeVisits()).isZero();
         verify(repository).findDaily(FROM, TO);
         verify(repository).findClicksByOwnership(FROM, TO);

@@ -54,6 +54,7 @@ public class UrlController {
 
     private static final int MIN_QR_SIZE = 64;
     private static final int MAX_QR_SIZE = 1024;
+    private static final String QR_MARKER_QUERY = "?qr";
 
     private final UrlService urlService;
     private final QrCodeService qrCodeService;
@@ -121,7 +122,7 @@ public class UrlController {
             @RequestParam(defaultValue = "300") final int size) {
         final var urlInfo = urlService.peekUrlByShortUrl(shortUrl);
         final var boundedSize = Math.clamp(size, MIN_QR_SIZE, MAX_QR_SIZE);
-        final var shortLink = StringUtils.removeEnd(appProperties.getServerUrl(), "/") + "/" + urlInfo.getShortUrl();
+        final var shortLink = StringUtils.removeEnd(appProperties.getServerUrl(), "/") + "/" + urlInfo.getShortUrl() + QR_MARKER_QUERY;
         final var qrBytes = qrCodeService.generateQrCode(shortLink, boundedSize, boundedSize);
 
         return ResponseEntity.ok().contentType(MediaType.IMAGE_PNG).body(qrBytes);
