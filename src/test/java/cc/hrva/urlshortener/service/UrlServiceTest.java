@@ -366,7 +366,7 @@ class UrlServiceTest {
 
         final var order = org.mockito.Mockito.inOrder(entityManager, urlRepository);
         order.verify(urlRepository).findById(7L);
-        order.verify(entityManager).detach(edited);
+        order.verify(entityManager).detach(loaded);
         order.verify(urlRepository).findById(7L);
         order.verify(urlRepository).save(current);
         assertThat(current)

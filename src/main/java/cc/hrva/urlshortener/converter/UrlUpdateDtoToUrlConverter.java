@@ -22,33 +22,39 @@ public class UrlUpdateDtoToUrlConverter implements Converter<UrlUpdateDto, Url> 
     public Url convert(final UrlUpdateDto urlUpdateDto) {
         final var existingUrl = urlRepository.findById(urlUpdateDto.getId())
                 .orElseThrow(() -> new UrlNotFoundException(String.format("Url with id %d doesn't exist", urlUpdateDto.getId())));
+        final var editedUrl = Url.builder()
+                .id(existingUrl.getId())
+                .longUrl(existingUrl.getLongUrl())
+                .tags(existingUrl.getTags())
+                .passwordHash(existingUrl.getPasswordHash())
+                .build();
 
         if (StringUtils.isNotBlank(urlUpdateDto.getLongUrl())) {
-            existingUrl.setLongUrl(CreateUrlToUrlConverter.normalizeScheme(urlUpdateDto.getLongUrl()));
+            editedUrl.setLongUrl(CreateUrlToUrlConverter.normalizeScheme(urlUpdateDto.getLongUrl()));
         }
 
         if (urlUpdateDto.getVisitLimit() == null || urlUpdateDto.getVisitLimit() <= 0) {
-            existingUrl.setVisitLimit(null);
+            editedUrl.setVisitLimit(null);
         } else {
-            existingUrl.setVisitLimit(urlUpdateDto.getVisitLimit());
+            editedUrl.setVisitLimit(urlUpdateDto.getVisitLimit());
         }
 
         if (urlUpdateDto.getExpirationDate() == null) {
-            existingUrl.setExpirationDate(null);
+            editedUrl.setExpirationDate(null);
         } else {
-            existingUrl.setExpirationDate(urlUpdateDto.getExpirationDate());
+            editedUrl.setExpirationDate(urlUpdateDto.getExpirationDate());
         }
 
         if (urlUpdateDto.getTags() != null) {
-            existingUrl.setTags(TagNormalizer.normalize(urlUpdateDto.getTags()));
+            editedUrl.setTags(TagNormalizer.normalize(urlUpdateDto.getTags()));
         }
 
         if (urlUpdateDto.getPassword() != null) {
-            existingUrl.setPasswordHash(StringUtils.isBlank(urlUpdateDto.getPassword())
+            editedUrl.setPasswordHash(StringUtils.isBlank(urlUpdateDto.getPassword())
                     ? null
                     : passwordEncoder.encode(urlUpdateDto.getPassword()));
         }
-        return existingUrl;
+        return editedUrl;
     }
 
 }

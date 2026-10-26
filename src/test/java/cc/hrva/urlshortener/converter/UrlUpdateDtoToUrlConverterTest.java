@@ -143,6 +143,26 @@ class UrlUpdateDtoToUrlConverterTest {
     }
 
     @Test
+    void shouldLeaveTheLoadedLinkUnchanged() {
+        final var existingUrl = Url.builder().id(1L).longUrl("https://example.com").visitLimit(50L)
+                .tags(new java.util.LinkedHashSet<>(java.util.List.of("keep"))).passwordHash("old").build();
+        final var updateDto = UrlUpdateDto.builder().id(1L).longUrl("https://example.org/new").visitLimit(100L)
+                .expirationDate(java.time.LocalDateTime.now().plusDays(1))
+                .tags(new java.util.LinkedHashSet<>(java.util.List.of("New"))).password("secret").build();
+        when(urlRepository.findById(anyLong())).thenReturn(Optional.of(existingUrl));
+        when(passwordEncoder.encode("secret")).thenReturn("hashed");
+
+        final var result = converter.convert(updateDto);
+
+        assertThat(result).isNotSameAs(existingUrl)
+                .extracting(Url::getId, Url::getLongUrl, Url::getVisitLimit, Url::getTags, Url::getPasswordHash)
+                .containsExactly(1L, "https://example.org/new", 100L, java.util.Set.of("new"), "hashed");
+        assertThat(existingUrl)
+                .extracting(Url::getLongUrl, Url::getVisitLimit, Url::getExpirationDate, Url::getTags, Url::getPasswordHash)
+                .containsExactly("https://example.com", 50L, null, java.util.Set.of("keep"), "old");
+    }
+
+    @Test
     void shouldFailWhenUrlNotFound() {
         final var updateDto = UrlUpdateDto.builder().id(1L).build();
 

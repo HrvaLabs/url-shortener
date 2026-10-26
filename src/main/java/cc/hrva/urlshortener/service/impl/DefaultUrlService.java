@@ -463,7 +463,7 @@ public class DefaultUrlService implements UrlService {
         urlValidator.checkIfUrlExpirationDateIsInThePast(url);
 
         final var updated = transactionOperations.execute(status -> {
-            final var current = reloadUnlessBlockedSince(url, blockAtStart);
+            final var current = reloadUnlessBlockedSince(existing, blockAtStart);
             applyEdit(updateDto, url, current, destinationChanged);
             final var saved = urlRepository.save(current);
             if (destinationChanged) {
