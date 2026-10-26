@@ -133,6 +133,7 @@ class PasskeySchemaTest {
     @ParameterizedTest
     @CsvSource(nullValues = "null", value = {
             "false, true, SECOND_STEP_ONLY",
+            "false, false, SECOND_STEP_ONLY",
             "true, true, SYNCED",
             "null, true, SYNCED",
             "true, false, DEVICE_BOUND",
