@@ -27,6 +27,7 @@ public final class WeeklyDigestText {
     private static final String DAYS_DASH = "–";
     private static final String MONTHS_DASH = " – ";
     private static final double PERCENT = 100.0;
+    private static final long SMALLEST_BASE_FOR_A_PERCENTAGE = 20;
     private static final String UNKNOWN = "unknown";
     private static final String IP_DESTINATION = "an IP address";
     private static final String UNREADABLE_DESTINATION = "an unreadable destination";
@@ -45,6 +46,14 @@ public final class WeeklyDigestText {
             BlockReason.SCAM_SIGNALS.name(), "scam signals");
 
     private WeeklyDigestText() {}
+
+    public record Line(String text, String link) {
+
+        public String withLink(final UnaryOperator<String> linkFormat) {
+            return link == null ? text : text + " " + linkFormat.apply(link);
+        }
+
+    }
 
     public static String title(final WeeklyDigest digest) {
         return TITLE_PREFIX + weekLabel(digest.from(), digest.to());
@@ -67,31 +76,40 @@ public final class WeeklyDigestText {
         if (change.previous() == 0) {
             return "none the week before";
         }
+        if (change.previous() < SMALLEST_BASE_FOR_A_PERCENTAGE) {
+            return number(change.previous()) + " the week before";
+        }
         final var percent = Math.max(1, Math.round(Math.abs(change.current() - change.previous()) * PERCENT / change.previous()));
         final var direction = change.current() > change.previous() ? "up" : "down";
         return direction + " " + number(percent) + "% on the week before";
     }
 
-    public static List<String> lines(final WeeklyDigest digest, final String shortLinkHost, final UnaryOperator<String> value) {
-        final var lines = new ArrayList<>(summaryLines(digest));
+    public static List<String> lines(final WeeklyDigest digest, final String shortLinkHost, final String reviewPage,
+            final UnaryOperator<String> value) {
+        final var lines = new ArrayList<>(summaryLines(digest, reviewPage, UnaryOperator.identity()));
         lines.addAll(topLinkLines(digest, shortLinkHost, value));
         return List.copyOf(lines);
     }
 
-    public static List<String> summaryLines(final WeeklyDigest digest) {
-        final var lines = new ArrayList<String>();
-        lines.add("Clicks: " + withChange(digest.clicks()));
-        lines.add("Daily unique visitors, added up: " + number(digest.uniqueVisitors()));
-        lines.add("Bot share: " + botShare(digest.clicks().current(), digest.botClicks()));
-        lines.add("New links: " + withChange(digest.newLinks()));
+    public static List<String> summaryLines(final WeeklyDigest digest, final String reviewPage, final UnaryOperator<String> linkFormat) {
+        return summary(digest, reviewPage).stream().map(line -> line.withLink(linkFormat)).toList();
+    }
+
+    public static List<Line> summary(final WeeklyDigest digest, final String reviewPage) {
+        final var lines = new ArrayList<Line>();
+        lines.add(textLine("Clicks: " + withChange(digest.clicks())));
+        lines.add(textLine("Visitors: " + number(digest.uniqueVisitors()) + " (each link's daily visitors, added up)"));
+        lines.add(textLine("Bots and link previews: " + botShare(digest.clicks().current(), digest.botClicks())));
+        lines.add(textLine("New links: " + withChange(digest.newLinks())));
         if (!digest.linksByChannel().isEmpty()) {
-            lines.add("How they were made: " + counted(digest.linksByChannel(), CHANNEL_WORDS));
+            lines.add(textLine("How they were made: " + counted(digest.linksByChannel(), CHANNEL_WORDS)));
         }
-        lines.add("New users: " + withChange(digest.newUsers()));
-        lines.add("Active users: " + number(digest.activeUsers()) + " signed in during the last 7 days");
-        lines.add("Reviews: " + number(digest.reviewsOpened()) + " opened, " + number(digest.reviewsResolved()) + " resolved");
-        lines.add("Automatic blocks: " + (digest.automaticBlocks().isEmpty() ? "none" : counted(digest.automaticBlocks(), BLOCK_WORDS)));
-        lines.add(digest.topLinks().isEmpty() ? "Top links by clicks: none this week" : "Top links by clicks:");
+        lines.add(textLine("New users: " + withChange(digest.newUsers())));
+        lines.add(textLine("Active users: " + number(digest.activeUsers()) + " signed in during the last 7 days"));
+        lines.add(textLine("Reviews: " + number(digest.reviewsOpened()) + " opened, " + number(digest.reviewsResolved()) + " resolved"));
+        lines.add(new Line("Review queue: " + number(digest.openReviews()) + " waiting", reviewPage));
+        lines.add(textLine("Automatic blocks: " + (digest.automaticBlocks().isEmpty() ? "none" : counted(digest.automaticBlocks(), BLOCK_WORDS))));
+        lines.add(textLine(digest.topLinks().isEmpty() ? "Top links by clicks: none this week" : "Top links by clicks:"));
         return List.copyOf(lines);
     }
 
@@ -100,6 +118,10 @@ public final class WeeklyDigestText {
         return IntStream.range(0, topLinks.size())
                 .mapToObj(index -> topLink(index + 1, topLinks.get(index), shortLinkHost, value))
                 .toList();
+    }
+
+    private static Line textLine(final String text) {
+        return new Line(text, null);
     }
 
     private static String withChange(final Change change) {
@@ -111,7 +133,7 @@ public final class WeeklyDigestText {
         if (allClicks == 0) {
             return "no clicks";
         }
-        return String.format(Locale.ENGLISH, "%.1f%%", botClicks * PERCENT / allClicks);
+        return String.format(Locale.ENGLISH, "%.1f%% of all clicks", botClicks * PERCENT / allClicks);
     }
 
     private static String counted(final List<CountEntry> entries, final Map<String, String> words) {

@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.repository.specification;
 
+import java.util.Locale;
 import java.util.regex.Pattern;
 
 final class LikePatterns {
@@ -11,7 +12,7 @@ final class LikePatterns {
     private LikePatterns() {}
 
     static String containing(final String keyword) {
-        return "%" + SPECIAL.matcher(keyword.toLowerCase()).replaceAll("\\\\$0") + "%";
+        return "%" + SPECIAL.matcher(keyword.toLowerCase(Locale.ROOT)).replaceAll("\\\\$0") + "%";
     }
 
 }

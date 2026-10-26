@@ -66,9 +66,9 @@ public class DiscordAlertFormatter {
     public DiscordMessage weeklyDigest(final WeeklyDigest digest) {
         final var head = new ArrayList<String>();
         head.add("**" + WeeklyDigestText.title(digest) + "**");
-        head.addAll(WeeklyDigestText.summaryLines(digest));
+        head.addAll(WeeklyDigestText.summaryLines(digest, frontendPage(REVIEW_PAGE), DiscordAlertFormatter::linked));
         final var topLinks = WeeklyDigestText.topLinkLines(digest, shortLinkHost(), DiscordAlertFormatter::plain);
-        final var statsLine = "Stats (last 7 days): <%s>".formatted(frontendPage(STATS_PAGE));
+        final var statsLine = "Stats (last 7 days): " + linked(frontendPage(STATS_PAGE));
         return DiscordMessage.withoutMentionsOrEmbeds(withinLimit(head, topLinks, 0, more -> "and %d more".formatted(more), List.of(statsLine)));
     }
 
@@ -137,9 +137,14 @@ public class DiscordAlertFormatter {
     private String burstLine(final BurstDetected burst) {
         final var readable = DomainNames.toUnicode(burst.domain());
         final var domain = readable.equals(burst.domain()) ? plain(readable) : "%s (%s)".formatted(plain(readable), plain(burst.domain()));
-        return "Possible phishing wave: %d new links to %s from %d creators within %s, %s, <%s>".formatted(
-                burst.links(), domain, burst.creators(), window(burst.window()), domainAge(burst.domainAgeDays()),
-                frontendPage(LINKS_PAGE) + "?search=" + URLEncoder.encode(readable, StandardCharsets.UTF_8));
+        return ("Possible phishing wave: %d new links to %s in the last %s, from %d different accounts or networks. %s Nothing was blocked. "
+                + "Review them: %s").formatted(
+                burst.links(), domain, window(burst.window()), burst.creators(), domainAge(burst.domainAgeDays()),
+                linked(frontendPage(LINKS_PAGE) + "?search=" + URLEncoder.encode(readable, StandardCharsets.UTF_8)));
+    }
+
+    private static String linked(final String url) {
+        return "<" + url + ">";
     }
 
     private String link(final AlertedLink link) {
@@ -183,19 +188,23 @@ public class DiscordAlertFormatter {
 
     private static String window(final Duration window) {
         if (window.toHours() > 0 && window.equals(Duration.ofHours(window.toHours()))) {
-            return count(window.toHours(), "hour");
+            return lastUnits(window.toHours(), "hour");
         }
         if (window.toMinutes() > 0 && window.equals(Duration.ofMinutes(window.toMinutes()))) {
-            return count(window.toMinutes(), "minute");
+            return lastUnits(window.toMinutes(), "minute");
         }
-        return count(window.toSeconds(), "second");
+        return lastUnits(window.toSeconds(), "second");
+    }
+
+    private static String lastUnits(final long amount, final String unit) {
+        return amount == 1 ? unit : count(amount, unit);
     }
 
     private static String domainAge(final Integer ageDays) {
         if (ageDays == null) {
-            return "domain age unknown";
+            return "The domain's age is unknown.";
         }
-        return ageDays == 0 ? "domain registered today" : "domain registered %s ago".formatted(count(ageDays, "day"));
+        return ageDays == 0 ? "The domain was registered today." : "The domain was registered %s ago.".formatted(count(ageDays, "day"));
     }
 
     private static String count(final long amount, final String unit) {

@@ -19,6 +19,7 @@ class WeeklyDigestTextTest {
     private static final LocalDate FROM = LocalDate.of(2026, 10, 19);
     private static final LocalDate TO = LocalDate.of(2026, 10, 25);
     private static final String SHORT_LINK_HOST = "hrva.cc";
+    private static final String REVIEW_PAGE = "https://hrva.cc/admin/review";
 
     @Test
     void weekLabels() {
@@ -42,26 +43,37 @@ class WeeklyDigestTextTest {
         assertThat(WeeklyDigestText.change(new Change(0, 0))).isEqualTo("same as the week before");
         assertThat(WeeklyDigestText.change(new Change(3, 0))).isEqualTo("none the week before");
         assertThat(WeeklyDigestText.change(new Change(1001, 1000))).isEqualTo("up 1% on the week before");
+        assertThat(WeeklyDigestText.change(new Change(3, 1))).isEqualTo("1 the week before");
+    }
+
+    @Test
+    void belowTwentyTheWeekBeforeShowsItsNumberInsteadOfAPercentage() {
+        assertThat(WeeklyDigestText.change(new Change(20, 19))).isEqualTo("19 the week before");
+        assertThat(WeeklyDigestText.change(new Change(0, 7))).isEqualTo("7 the week before");
+        assertThat(WeeklyDigestText.change(new Change(2500, 1))).isEqualTo("1 the week before");
+        assertThat(WeeklyDigestText.change(new Change(21, 20))).isEqualTo("up 5% on the week before");
+        assertThat(WeeklyDigestText.change(new Change(0, 20))).isEqualTo("down 100% on the week before");
     }
 
     @Test
     void aChangeIsAtLeastOnePercentAndUsesThousandsSeparators() {
         assertThat(WeeklyDigestText.change(new Change(999, 1000))).isEqualTo("down 1% on the week before");
-        assertThat(WeeklyDigestText.change(new Change(0, 7))).isEqualTo("down 100% on the week before");
-        assertThat(WeeklyDigestText.change(new Change(2500, 1))).isEqualTo("up 249,900% on the week before");
+        assertThat(WeeklyDigestText.change(new Change(0, 70))).isEqualTo("down 100% on the week before");
+        assertThat(WeeklyDigestText.change(new Change(25_000, 20))).isEqualTo("up 124,900% on the week before");
     }
 
     @Test
     void linesForABusyWeek() {
-        assertThat(WeeklyDigestText.lines(busyWeek(), SHORT_LINK_HOST, UnaryOperator.identity())).containsExactly(
+        assertThat(WeeklyDigestText.lines(busyWeek(), SHORT_LINK_HOST, REVIEW_PAGE, UnaryOperator.identity())).containsExactly(
                 "Clicks: 1,204 (up 12% on the week before)",
-                "Daily unique visitors, added up: 950",
-                "Bot share: 20.0%",
+                "Visitors: 950 (each link's daily visitors, added up)",
+                "Bots and link previews: 20.0% of all clicks",
                 "New links: 40 (down 5% on the week before)",
                 "How they were made: 30 website, 6 API key, 4 AI connector",
                 "New users: 3 (none the week before)",
                 "Active users: 12 signed in during the last 7 days",
                 "Reviews: 5 opened, 4 resolved",
+                "Review queue: 2 waiting https://hrva.cc/admin/review",
                 "Automatic blocks: 2 blocklist, 1 Safe Browsing",
                 "Top links by clicks:",
                 "1. hrva.cc/menu → example.com, 120 clicks");
@@ -69,17 +81,18 @@ class WeeklyDigestTextTest {
 
     @Test
     void linesForAnEmptyWeek() {
-        final var empty = new WeeklyDigest(FROM, TO, new Change(0, 0), 0, 0, new Change(0, 0), List.of(), new Change(0, 0), 0, 0, 0,
+        final var empty = new WeeklyDigest(FROM, TO, new Change(0, 0), 0, 0, new Change(0, 0), List.of(), new Change(0, 0), 0, 0, 0, 0,
                 List.of(), List.of());
 
-        assertThat(WeeklyDigestText.lines(empty, SHORT_LINK_HOST, UnaryOperator.identity())).containsExactly(
+        assertThat(WeeklyDigestText.lines(empty, SHORT_LINK_HOST, REVIEW_PAGE, UnaryOperator.identity())).containsExactly(
                 "Clicks: 0 (same as the week before)",
-                "Daily unique visitors, added up: 0",
-                "Bot share: no clicks",
+                "Visitors: 0 (each link's daily visitors, added up)",
+                "Bots and link previews: no clicks",
                 "New links: 0 (same as the week before)",
                 "New users: 0 (same as the week before)",
                 "Active users: 0 signed in during the last 7 days",
                 "Reviews: 0 opened, 0 resolved",
+                "Review queue: 0 waiting https://hrva.cc/admin/review",
                 "Automatic blocks: none",
                 "Top links by clicks: none this week");
     }
@@ -89,12 +102,12 @@ class WeeklyDigestTextTest {
         final var digest = withTopLinks(List.of(new TopLink("a_b", "x.example", 2), new TopLink("c", "y.example", 1)));
         final UnaryOperator<String> value = text -> "[" + text + "]";
 
-        final var summary = WeeklyDigestText.summaryLines(digest);
+        final var summary = WeeklyDigestText.summaryLines(digest, REVIEW_PAGE, UnaryOperator.identity());
         final var topLinks = WeeklyDigestText.topLinkLines(digest, SHORT_LINK_HOST, value);
 
-        assertThat(summary).hasSize(10).endsWith("Automatic blocks: 2 blocklist, 1 Safe Browsing", "Top links by clicks:");
+        assertThat(summary).hasSize(11).endsWith("Automatic blocks: 2 blocklist, 1 Safe Browsing", "Top links by clicks:");
         assertThat(topLinks).containsExactly("1. [hrva.cc/a_b] → [x.example], 2 clicks", "2. [hrva.cc/c] → [y.example], 1 click");
-        assertThat(WeeklyDigestText.lines(digest, SHORT_LINK_HOST, value))
+        assertThat(WeeklyDigestText.lines(digest, SHORT_LINK_HOST, REVIEW_PAGE, value))
                 .containsExactlyElementsOf(Stream.concat(summary.stream(), topLinks.stream()).toList());
         assertThat(WeeklyDigestText.topLinkLines(withTopLinks(List.of()), SHORT_LINK_HOST, value)).isEmpty();
     }
@@ -103,17 +116,40 @@ class WeeklyDigestTextTest {
     void oneClickIsSingular() {
         final var digest = withTopLinks(List.of(new TopLink("a", "x.example", 2), new TopLink("b", "y.example", 1)));
 
-        assertThat(WeeklyDigestText.lines(digest, SHORT_LINK_HOST, UnaryOperator.identity())).endsWith(
+        assertThat(WeeklyDigestText.lines(digest, SHORT_LINK_HOST, REVIEW_PAGE, UnaryOperator.identity())).endsWith(
                 "Top links by clicks:",
                 "1. hrva.cc/a → x.example, 2 clicks",
                 "2. hrva.cc/b → y.example, 1 click");
     }
 
     @Test
-    void botShareHasOneDecimalOfAllClicks() {
-        assertThat(WeeklyDigestText.lines(withClicks(2, 1), SHORT_LINK_HOST, UnaryOperator.identity())).contains("Bot share: 33.3%");
-        assertThat(WeeklyDigestText.lines(withClicks(0, 5), SHORT_LINK_HOST, UnaryOperator.identity())).contains("Bot share: 100.0%");
-        assertThat(WeeklyDigestText.lines(withClicks(7, 0), SHORT_LINK_HOST, UnaryOperator.identity())).contains("Bot share: 0.0%");
+    void theBotsAndLinkPreviewsShareHasOneDecimalOfAllClicks() {
+        assertThat(WeeklyDigestText.summaryLines(withClicks(2, 1), REVIEW_PAGE, UnaryOperator.identity()))
+                .contains("Bots and link previews: 33.3% of all clicks");
+        assertThat(WeeklyDigestText.summaryLines(withClicks(0, 5), REVIEW_PAGE, UnaryOperator.identity()))
+                .contains("Bots and link previews: 100.0% of all clicks");
+        assertThat(WeeklyDigestText.summaryLines(withClicks(7, 0), REVIEW_PAGE, UnaryOperator.identity()))
+                .contains("Bots and link previews: 0.0% of all clicks");
+    }
+
+    @Test
+    void everyComparedFigureShowsASmallWeekBeforeAsItsNumber() {
+        final var digest = new WeeklyDigest(FROM, TO, new Change(15, 12), 9, 1, new Change(5, 19), List.of(new CountEntry("WEB", 5)),
+                new Change(3, 1), 4, 0, 0, 0, List.of(), List.of());
+
+        assertThat(WeeklyDigestText.summaryLines(digest, REVIEW_PAGE, UnaryOperator.identity())).contains(
+                "Clicks: 15 (12 the week before)",
+                "New links: 5 (19 the week before)",
+                "New users: 3 (1 the week before)");
+    }
+
+    @Test
+    void theReviewQueueLinksTheReviewPageInEachChannelsLinkFormat() {
+        assertThat(WeeklyDigestText.summaryLines(busyWeek(), REVIEW_PAGE, link -> "<" + link + ">"))
+                .containsSubsequence("Reviews: 5 opened, 4 resolved", "Review queue: 2 waiting <https://hrva.cc/admin/review>");
+        assertThat(WeeklyDigestText.summary(busyWeek(), REVIEW_PAGE))
+                .filteredOn(line -> line.link() != null)
+                .containsExactly(new WeeklyDigestText.Line("Review queue: 2 waiting", REVIEW_PAGE));
     }
 
     @Test
@@ -122,8 +158,8 @@ class WeeklyDigestTextTest {
         try {
             Locale.setDefault(Locale.forLanguageTag("hr-HR"));
 
-            assertThat(WeeklyDigestText.lines(busyWeek(), SHORT_LINK_HOST, UnaryOperator.identity()))
-                    .contains("Clicks: 1,204 (up 12% on the week before)", "Bot share: 20.0%");
+            assertThat(WeeklyDigestText.lines(busyWeek(), SHORT_LINK_HOST, REVIEW_PAGE, UnaryOperator.identity()))
+                    .contains("Clicks: 1,204 (up 12% on the week before)", "Bots and link previews: 20.0% of all clicks");
             assertThat(WeeklyDigestText.weekLabel(FROM, TO)).isEqualTo("19–25 October 2026");
         } finally {
             Locale.setDefault(serverLocale);
@@ -141,7 +177,7 @@ class WeeklyDigestTextTest {
                         new CountEntry("ANONYMOUS_WEB", 3),
                         new CountEntry("ANONYMOUS_MCP", 2),
                         new CountEntry("unknown", 1)),
-                new Change(0, 0), 0, 0, 0,
+                new Change(0, 0), 0, 0, 0, 0,
                 List.of(
                         new CountEntry("SAFE_BROWSING", 4),
                         new CountEntry("BLOCKLIST", 3),
@@ -149,7 +185,7 @@ class WeeklyDigestTextTest {
                         new CountEntry("SCAM_SIGNALS", 1)),
                 List.of());
 
-        assertThat(WeeklyDigestText.lines(digest, SHORT_LINK_HOST, UnaryOperator.identity())).contains(
+        assertThat(WeeklyDigestText.lines(digest, SHORT_LINK_HOST, REVIEW_PAGE, UnaryOperator.identity())).contains(
                 "How they were made: 1,500 website, 12 API key, 6 bulk, 4 AI connector, 3 website without an account, "
                         + "2 AI connector without an account, 1 unknown",
                 "Automatic blocks: 4 Safe Browsing, 3 blocklist, 2 domain rule, 1 scam signals");
@@ -158,9 +194,9 @@ class WeeklyDigestTextTest {
     @Test
     void anUnlistedKeyReadsAsLowercaseWordsWithoutUnderscores() {
         final var digest = new WeeklyDigest(FROM, TO, new Change(0, 0), 0, 0, new Change(1, 0), List.of(new CountEntry("NEW_CHANNEL", 1)),
-                new Change(0, 0), 0, 0, 0, List.of(new CountEntry("unknown", 2), new CountEntry("MALWARE_FEED", 1)), List.of());
+                new Change(0, 0), 0, 0, 0, 0, List.of(new CountEntry("unknown", 2), new CountEntry("MALWARE_FEED", 1)), List.of());
 
-        assertThat(WeeklyDigestText.lines(digest, SHORT_LINK_HOST, UnaryOperator.identity())).contains(
+        assertThat(WeeklyDigestText.lines(digest, SHORT_LINK_HOST, REVIEW_PAGE, UnaryOperator.identity())).contains(
                 "How they were made: 1 new channel",
                 "Automatic blocks: 2 unknown, 1 malware feed");
     }
@@ -173,7 +209,7 @@ class WeeklyDigestTextTest {
                 new TopLink("blank", " ", 2),
                 new TopLink("none", null, 1)));
 
-        final var lines = WeeklyDigestText.lines(digest, SHORT_LINK_HOST, UnaryOperator.identity());
+        final var lines = WeeklyDigestText.lines(digest, SHORT_LINK_HOST, REVIEW_PAGE, UnaryOperator.identity());
 
         assertThat(lines).endsWith(
                 "1. hrva.cc/ip → an IP address, 4 clicks",
@@ -187,7 +223,7 @@ class WeeklyDigestTextTest {
     void valuesGoThroughTheEscaper() {
         final var digest = withTopLinks(List.of(new TopLink("a_b", "example.com", 3)));
 
-        assertThat(WeeklyDigestText.lines(digest, SHORT_LINK_HOST, value -> "[" + value + "]"))
+        assertThat(WeeklyDigestText.lines(digest, SHORT_LINK_HOST, REVIEW_PAGE, value -> "[" + value + "]"))
                 .endsWith("1. [hrva.cc/a_b] → [example.com], 3 clicks");
     }
 
@@ -199,18 +235,19 @@ class WeeklyDigestTextTest {
             return "[" + text + "]";
         };
         final var digest = new WeeklyDigest(FROM, TO, new Change(1204, 1075), 950, 301, new Change(40, 42), busyWeek().linksByChannel(),
-                new Change(3, 0), 12, 5, 4, busyWeek().automaticBlocks(),
+                new Change(3, 0), 12, 5, 4, 2, busyWeek().automaticBlocks(),
                 List.of(new TopLink("a_b", "example.com", 3), new TopLink("ip", "203.0.113.7", 2), new TopLink("blank", "", 1)));
 
-        assertThat(WeeklyDigestText.lines(digest, SHORT_LINK_HOST, value)).containsExactly(
+        assertThat(WeeklyDigestText.lines(digest, SHORT_LINK_HOST, REVIEW_PAGE, value)).containsExactly(
                 "Clicks: 1,204 (up 12% on the week before)",
-                "Daily unique visitors, added up: 950",
-                "Bot share: 20.0%",
+                "Visitors: 950 (each link's daily visitors, added up)",
+                "Bots and link previews: 20.0% of all clicks",
                 "New links: 40 (down 5% on the week before)",
                 "How they were made: 30 website, 6 API key, 4 AI connector",
                 "New users: 3 (none the week before)",
                 "Active users: 12 signed in during the last 7 days",
                 "Reviews: 5 opened, 4 resolved",
+                "Review queue: 2 waiting https://hrva.cc/admin/review",
                 "Automatic blocks: 2 blocklist, 1 Safe Browsing",
                 "Top links by clicks:",
                 "1. [hrva.cc/a_b] → [example.com], 3 clicks",
@@ -233,6 +270,7 @@ class WeeklyDigestTextTest {
                 12,
                 5,
                 4,
+                2,
                 List.of(new CountEntry("BLOCKLIST", 2), new CountEntry("SAFE_BROWSING", 1)),
                 List.of(new TopLink("menu", "example.com", 120)));
     }
@@ -241,14 +279,14 @@ class WeeklyDigestTextTest {
         final var busy = busyWeek();
         return new WeeklyDigest(busy.from(), busy.to(), busy.clicks(), busy.uniqueVisitors(), busy.botClicks(), busy.newLinks(),
                 busy.linksByChannel(), busy.newUsers(), busy.activeUsers(), busy.reviewsOpened(), busy.reviewsResolved(),
-                busy.automaticBlocks(), topLinks);
+                busy.openReviews(), busy.automaticBlocks(), topLinks);
     }
 
     private static WeeklyDigest withClicks(final long clicks, final long botClicks) {
         final var busy = busyWeek();
         return new WeeklyDigest(busy.from(), busy.to(), new Change(clicks, clicks), clicks, botClicks, busy.newLinks(),
                 busy.linksByChannel(), busy.newUsers(), busy.activeUsers(), busy.reviewsOpened(), busy.reviewsResolved(),
-                busy.automaticBlocks(), busy.topLinks());
+                busy.openReviews(), busy.automaticBlocks(), busy.topLinks());
     }
 
 }

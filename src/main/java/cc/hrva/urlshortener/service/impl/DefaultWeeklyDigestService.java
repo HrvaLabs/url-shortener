@@ -97,6 +97,7 @@ public class DefaultWeeklyDigestService implements WeeklyDigestService {
                 users.activeLast7Days(),
                 total(safety.reviewsOpened()),
                 safety.resolved().stream().mapToLong(CountEntry::count).sum(),
+                safety.openReviews(),
                 totalsPerKey(safety.blocked(), key -> !MANUAL_BLOCKS.contains(key)),
                 traffic.topLinks().stream()
                         .limit(TOP_LINKS)

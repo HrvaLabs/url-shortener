@@ -16,6 +16,7 @@ public record WeeklyDigest(
         long activeUsers,
         long reviewsOpened,
         long reviewsResolved,
+        long openReviews,
         List<CountEntry> automaticBlocks,
         List<TopLink> topLinks) {
 

@@ -9,7 +9,7 @@ All notable changes to hrva.cc — the URL shortener.
 QR scans in link analytics, a public page with hrva.cc in numbers, a weekly summary and phishing-wave alerts for the admin, and the AI connector is sign-in only.
 
 ### 📊 Analytics
-- QR codes made by hrva.cc now count their scans: link analytics and the admin stats show QR scans apart from direct clicks. Codes made before this release count as direct, so download a new code to count scans from it.
+- QR codes made by hrva.cc now count their scans: link analytics and the admin stats split clicks into QR scans and other clicks. Codes made before this release count as other clicks, so download a new code to count scans from it.
 
 ### 🌐 Site
 - hrva.cc in numbers: a public page with site-wide totals for the last 30 days, such as active links, clicks per day, harmful links blocked and how fast reports are reviewed. It never shows anything about a single link or person.
@@ -32,6 +32,7 @@ QR scans in link analytics, a public page with hrva.cc in numbers, a weekly summ
 - Searching links for a domain finds it in either spelling, such as čokolada.hr and xn--okolada-i6a.hr.
 - A web address whose domain name is longer than 253 characters, the most a domain name can have, is now refused as not a valid web address.
 - Signing in again from an admin page brings you back to the page you opened.
+- The report and unavailable pages no longer show the footer twice.
 
 ---
 

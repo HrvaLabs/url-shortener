@@ -42,13 +42,14 @@
           </tr>
           <tr>
             <td class="content" style="padding: 36px 32px; background-color: #0f0f0f; border-left: 1px solid #1a1a1a; border-right: 1px solid #1a1a1a;">
-              <p th:each="line : ${lines}" th:text="${line}" style="margin: 0 0 8px; font-family: 'Helvetica', 'Arial', sans-serif; font-size: 15px; line-height: 1.6; color: #d4d4d4; overflow-wrap: anywhere;">Line</p>
+              <p th:each="line : ${summary}" style="margin: 0 0 8px; font-family: 'Helvetica', 'Arial', sans-serif; font-size: 15px; line-height: 1.6; color: #d4d4d4; overflow-wrap: anywhere;"><span th:text="${line.text}">Line</span><th:block th:if="${line.link != null}"> <a th:href="${line.link}" th:text="${line.link}" target="_blank" style="color: #a67c00;">Link</a></th:block></p>
+              <p th:each="line : ${top_links}" th:text="${line}" style="margin: 0 0 8px; font-family: 'Helvetica', 'Arial', sans-serif; font-size: 15px; line-height: 1.6; color: #d4d4d4; overflow-wrap: anywhere;">Line</p>
               <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
                 <tr>
                   <td align="center" style="padding: 24px 0 4px;">
                     <a th:href="${stats_page}" target="_blank"
                        style="display: inline-block; padding: 13px 36px; font-family: 'Helvetica', 'Arial', sans-serif; font-size: 14px; font-weight: 600; color: #0a0a0a; text-decoration: none; background-color: #a67c00; border-radius: 8px;">
-                      Open the stats page
+                      Open stats (last 7 days)
                     </a>
                   </td>
                 </tr>

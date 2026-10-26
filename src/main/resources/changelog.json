@@ -11,7 +11,7 @@
           "title": "Analytics",
           "icon": "bar-chart",
           "items": [
-            "QR codes made by hrva.cc now count their scans: link analytics and the admin stats show QR scans apart from direct clicks. Codes made before this release count as direct, so download a new code to count scans from it."
+            "QR codes made by hrva.cc now count their scans: link analytics and the admin stats split clicks into QR scans and other clicks. Codes made before this release count as other clicks, so download a new code to count scans from it."
           ]
         },
         {
@@ -53,7 +53,8 @@
             "Searching links, users or the review queue for % or _ now finds those characters instead of matching everything.",
             "Searching links for a domain finds it in either spelling, such as čokolada.hr and xn--okolada-i6a.hr.",
             "A web address whose domain name is longer than 253 characters, the most a domain name can have, is now refused as not a valid web address.",
-            "Signing in again from an admin page brings you back to the page you opened."
+            "Signing in again from an admin page brings you back to the page you opened.",
+            "The report and unavailable pages no longer show the footer twice."
           ]
         }
       ]

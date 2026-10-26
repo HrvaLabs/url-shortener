@@ -21,6 +21,7 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.IntStream;
+import org.apache.commons.lang3.StringUtils;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.json.JsonMapper;
@@ -282,14 +283,14 @@ class DiscordAlertFormatterTest {
         assertThat(lines).containsExactly(
                 "New user: account #31 signed up with email, <https://app.hrva.cc/admin>",
                 "URLhaus loads again",
-                "Possible phishing wave: 5 new links to evil-login.com from 2 creators within 1 hour, domain registered 4 days ago, "
-                        + "<https://app.hrva.cc/admin/urls?search=evil-login.com>",
+                "Possible phishing wave: 5 new links to evil-login.com in the last hour, from 2 different accounts or networks. "
+                        + "The domain was registered 4 days ago. Nothing was blocked. Review them: <https://app.hrva.cc/admin/urls?search=evil-login.com>",
                 "and 1 more, see " + REVIEW_PAGE);
     }
 
     @Test
     void twoLongAlertsThatFillTheMessageStillLeaveRoomForEveryLaterLineThatFits() {
-        final var details = "d".repeat(750);
+        final var details = "d".repeat(700);
         final var alerts = new ArrayList<AdminAlertEvent>();
         IntStream.rangeClosed(1, 3).forEach(index -> alerts.add(
                 new VisitorReported(new AlertedLink(index, "s" + index, "example.top", null), ReportCategory.PHISHING, details, false)));
@@ -317,16 +318,16 @@ class DiscordAlertFormatterTest {
     void aBurstShowsTheDomainCountsAgeAndTheLinksSearch() {
         final var content = formatter.message(List.of(new BurstDetected("evil-login.com", 6, 3, 4, Duration.ofHours(1))), 0).content();
 
-        assertThat(content).isEqualTo("Possible phishing wave: 6 new links to evil-login.com from 3 creators within 1 hour, domain registered 4 days ago, "
-                + "<https://app.hrva.cc/admin/urls?search=evil-login.com>");
+        assertThat(content).isEqualTo("Possible phishing wave: 6 new links to evil-login.com in the last hour, from 3 different accounts or networks. "
+                + "The domain was registered 4 days ago. Nothing was blocked. Review them: <https://app.hrva.cc/admin/urls?search=evil-login.com>");
     }
 
     @Test
     void aBurstWithAnUnknownAgeSaysSo() {
         final var content = formatter.message(List.of(new BurstDetected("evil-login.com", 5, 2, null, Duration.ofHours(1))), 0).content();
 
-        assertThat(content).isEqualTo("Possible phishing wave: 5 new links to evil-login.com from 2 creators within 1 hour, domain age unknown, "
-                + "<https://app.hrva.cc/admin/urls?search=evil-login.com>");
+        assertThat(content).isEqualTo("Possible phishing wave: 5 new links to evil-login.com in the last hour, from 2 different accounts or networks. "
+                + "The domain's age is unknown. Nothing was blocked. Review them: <https://app.hrva.cc/admin/urls?search=evil-login.com>");
     }
 
     @Test
@@ -336,15 +337,15 @@ class DiscordAlertFormatterTest {
                 new BurstDetected("b.example", 5, 2, 0, Duration.ofHours(1)),
                 new BurstDetected("c.example", 5, 2, 29, Duration.ofHours(1))), 0).content().lines().toList();
 
-        assertThat(lines).extracting(line -> line.split(", ")[1]).containsExactly(
-                "domain registered 1 day ago", "domain registered today", "domain registered 29 days ago");
+        assertThat(lines).extracting(line -> StringUtils.substringBetween(line, "networks. ", " Nothing was blocked.")).containsExactly(
+                "The domain was registered 1 day ago.", "The domain was registered today.", "The domain was registered 29 days ago.");
     }
 
     @Test
     void aBurstWindowInMinutes() {
         final var content = formatter.message(List.of(new BurstDetected("evil-login.com", 5, 2, null, Duration.ofMinutes(30))), 0).content();
 
-        assertThat(content).contains(" from 2 creators within 30 minutes, ");
+        assertThat(content).contains(" in the last 30 minutes, from 2 different accounts or networks. ");
     }
 
     @Test
@@ -353,17 +354,18 @@ class DiscordAlertFormatterTest {
                 new BurstDetected("a.example", 5, 2, null, Duration.ofHours(2)),
                 new BurstDetected("b.example", 5, 2, null, Duration.ofMinutes(1)),
                 new BurstDetected("c.example", 5, 2, null, Duration.ofMinutes(90)),
-                new BurstDetected("d.example", 5, 2, null, Duration.ofSeconds(90))), 0).content().lines().toList();
+                new BurstDetected("d.example", 5, 2, null, Duration.ofSeconds(90)),
+                new BurstDetected("e.example", 5, 2, null, Duration.ofSeconds(1))), 0).content().lines().toList();
 
-        assertThat(lines).extracting(line -> line.split(" within ")[1].split(", ")[0])
-                .containsExactly("2 hours", "1 minute", "90 minutes", "90 seconds");
+        assertThat(lines).extracting(line -> StringUtils.substringBetween(line, " in the last ", ", from "))
+                .containsExactly("2 hours", "minute", "90 minutes", "90 seconds", "second");
     }
 
     @Test
     void aBurstDomainIsEscaped() {
         final var content = formatter.message(List.of(new BurstDetected("evil_login.com", 5, 2, 4, Duration.ofHours(1))), 0).content();
 
-        assertThat(content).startsWith("Possible phishing wave: 5 new links to evil\\_login.com from 2 creators")
+        assertThat(content).startsWith("Possible phishing wave: 5 new links to evil\\_login.com in the last hour, ")
                 .endsWith("<https://app.hrva.cc/admin/urls?search=evil_login.com>");
     }
 
@@ -380,23 +382,24 @@ class DiscordAlertFormatterTest {
 
         final var content = formatter.message(List.of(new BurstDetected(domain, 5, 2, null, Duration.ofHours(1))), 0).content();
 
-        assertThat(content).contains(" new links to " + domain + " from ").endsWith("?search=" + domain + ">").doesNotContain("…");
+        assertThat(content).contains(" new links to " + domain + " in the last ").endsWith("?search=" + domain + ">").doesNotContain("…");
     }
 
     @Test
     void anIdnBurstShowsBothFormsAndSearchesTheReadableOne() {
         final var content = formatter.message(List.of(new BurstDetected("xn--okolada-i6a.hr", 5, 2, null, Duration.ofHours(1))), 0).content();
 
-        assertThat(content).isEqualTo("Possible phishing wave: 5 new links to čokolada.hr (xn--okolada-i6a.hr) from 2 creators within 1 hour, "
-                + "domain age unknown, <https://app.hrva.cc/admin/urls?search=%C4%8Dokolada.hr>");
+        assertThat(content).isEqualTo("Possible phishing wave: 5 new links to čokolada.hr (xn--okolada-i6a.hr) in the last hour, "
+                + "from 2 different accounts or networks. The domain's age is unknown. Nothing was blocked. "
+                + "Review them: <https://app.hrva.cc/admin/urls?search=%C4%8Dokolada.hr>");
     }
 
     @Test
     void anIdnBurstStaysMentionSafe() {
         final var message = formatter.message(List.of(new BurstDetected("xn--evil_login-ljb.com", 5, 2, 4, Duration.ofHours(1))), 0);
 
-        assertThat(message.content()).startsWith("Possible phishing wave: 5 new links to čevil\\_login.com (xn--evil\\_login-ljb.com) from 2 creators")
-                .endsWith(", <https://app.hrva.cc/admin/urls?search=%C4%8Devil_login.com>");
+        assertThat(message.content()).startsWith("Possible phishing wave: 5 new links to čevil\\_login.com (xn--evil\\_login-ljb.com) in the last hour, ")
+                .endsWith(" Review them: <https://app.hrva.cc/admin/urls?search=%C4%8Devil_login.com>");
         assertThat(message.allowedMentions().parse()).isEmpty();
         assertThat(message.flags()).isEqualTo(4);
     }
@@ -407,25 +410,26 @@ class DiscordAlertFormatterTest {
                 new BurstDetected("evil-login.com", 5, 2, null, Duration.ofHours(1)),
                 new BurstDetected("xn--zz.com", 5, 2, null, Duration.ofHours(1))), 0).content().lines().toList();
 
-        assertThat(lines).extracting(line -> line.split(" new links to ")[1].split(" from ")[0]).containsExactly("evil-login.com", "xn--zz.com");
+        assertThat(lines).extracting(line -> StringUtils.substringBetween(line, " new links to ", " in the last ")).containsExactly("evil-login.com", "xn--zz.com");
         assertThat(lines).extracting(line -> line.substring(line.lastIndexOf('<')))
                 .containsExactly("<https://app.hrva.cc/admin/urls?search=evil-login.com>", "<https://app.hrva.cc/admin/urls?search=xn--zz.com>");
     }
 
     @Test
-    void theWeeklyDigestIsTheBoldTitleTheLinesAndTheStatsPage() {
+    void theWeeklyDigestIsTheBoldTitleTheLinesTheReviewQueueAndTheStatsPage() {
         final var content = formatter.weeklyDigest(busyWeek(List.of(new TopLink("menu", "example.com", 120)))).content();
 
         assertThat(content).isEqualTo("""
                 **hrva.cc weekly summary: 19–25 October 2026**
                 Clicks: 1,204 (up 12% on the week before)
-                Daily unique visitors, added up: 950
-                Bot share: 20.0%
+                Visitors: 950 (each link's daily visitors, added up)
+                Bots and link previews: 20.0% of all clicks
                 New links: 40 (down 5% on the week before)
                 How they were made: 30 website, 6 API key, 4 AI connector
                 New users: 3 (none the week before)
                 Active users: 12 signed in during the last 7 days
                 Reviews: 5 opened, 4 resolved
+                Review queue: 2 waiting <https://app.hrva.cc/admin/review>
                 Automatic blocks: 2 blocklist, 1 Safe Browsing
                 Top links by clicks:
                 1. hrva.cc/menu → example.com, 120 clicks
@@ -434,18 +438,19 @@ class DiscordAlertFormatterTest {
 
     @Test
     void anEmptyWeeklyDigestSaysSoAndStillLinksTheStatsPage() {
-        final var empty = new WeeklyDigest(DIGEST_FROM, DIGEST_TO, new Change(0, 0), 0, 0, new Change(0, 0), List.of(), new Change(0, 0), 0, 0, 0,
+        final var empty = new WeeklyDigest(DIGEST_FROM, DIGEST_TO, new Change(0, 0), 0, 0, new Change(0, 0), List.of(), new Change(0, 0), 0, 0, 0, 0,
                 List.of(), List.of());
 
         assertThat(formatter.weeklyDigest(empty).content()).isEqualTo("""
                 **hrva.cc weekly summary: 19–25 October 2026**
                 Clicks: 0 (same as the week before)
-                Daily unique visitors, added up: 0
-                Bot share: no clicks
+                Visitors: 0 (each link's daily visitors, added up)
+                Bots and link previews: no clicks
                 New links: 0 (same as the week before)
                 New users: 0 (same as the week before)
                 Active users: 0 signed in during the last 7 days
                 Reviews: 0 opened, 0 resolved
+                Review queue: 0 waiting <https://app.hrva.cc/admin/review>
                 Automatic blocks: none
                 Top links by clicks: none this week
                 Stats (last 7 days): <https://app.hrva.cc/admin/dashboard?days=7>""");
@@ -459,7 +464,7 @@ class DiscordAlertFormatterTest {
         final var digest = new WeeklyDigest(DIGEST_FROM, DIGEST_TO, new Change(123_456, 120_000), 98_765, 4_321, new Change(1528, 1400),
                 List.of(new CountEntry("WEB", 1500), new CountEntry("API_KEY", 12), new CountEntry("BULK", 6), new CountEntry("MCP", 4),
                         new CountEntry("ANONYMOUS_WEB", 3), new CountEntry("ANONYMOUS_MCP", 2), new CountEntry("unknown", 1)),
-                new Change(30, 25), 1_200, 45, 44,
+                new Change(30, 25), 1_200, 45, 44, 17,
                 List.of(new CountEntry("SAFE_BROWSING", 4), new CountEntry("BLOCKLIST", 3), new CountEntry("DOMAIN_RULE", 2),
                         new CountEntry("SCAM_SIGNALS", 1), new CountEntry("unknown", 1)),
                 topLinks);
@@ -561,6 +566,7 @@ class DiscordAlertFormatterTest {
                 12,
                 5,
                 4,
+                2,
                 List.of(new CountEntry("BLOCKLIST", 2), new CountEntry("SAFE_BROWSING", 1)),
                 topLinks);
     }

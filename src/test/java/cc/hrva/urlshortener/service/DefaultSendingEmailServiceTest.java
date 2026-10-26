@@ -146,6 +146,7 @@ class DefaultSendingEmailServiceTest {
                 12,
                 5,
                 4,
+                2,
                 List.of(new CountEntry("BLOCKLIST", 2), new CountEntry("SAFE_BROWSING", 1)),
                 List.of(new WeeklyDigest.TopLink("my_menu", destinationHost, 120)));
     }
@@ -409,13 +410,14 @@ class DefaultSendingEmailServiceTest {
                 hrva.cc weekly summary: 19–25 October 2026
 
                 Clicks: 1,204 (up 12% on the week before)
-                Daily unique visitors, added up: 950
-                Bot share: 20.0%
+                Visitors: 950 (each link's daily visitors, added up)
+                Bots and link previews: 20.0% of all clicks
                 New links: 40 (down 5% on the week before)
                 How they were made: 30 website, 6 API key, 4 AI connector
                 New users: 3 (none the week before)
                 Active users: 12 signed in during the last 7 days
                 Reviews: 5 opened, 4 resolved
+                Review queue: 2 waiting https://hrva.cc/admin/review
                 Automatic blocks: 2 blocklist, 1 Safe Browsing
                 Top links by clicks:
                 1. hrva.cc/my_menu → example.com, 120 clicks
@@ -423,25 +425,26 @@ class DefaultSendingEmailServiceTest {
                 Stats (last 7 days): https://hrva.cc/admin/dashboard?days=7""");
         assertThat(textOf(email.getText())).startsWith("hrva.cc weekly summary: 19–25 October 2026 "
                 + "Clicks: 1,204 (up 12% on the week before) "
-                + "Daily unique visitors, added up: 950 "
-                + "Bot share: 20.0% "
+                + "Visitors: 950 (each link's daily visitors, added up) "
+                + "Bots and link previews: 20.0% of all clicks "
                 + "New links: 40 (down 5% on the week before) "
                 + "How they were made: 30 website, 6 API key, 4 AI connector "
                 + "New users: 3 (none the week before) "
                 + "Active users: 12 signed in during the last 7 days "
                 + "Reviews: 5 opened, 4 resolved "
+                + "Review queue: 2 waiting https://hrva.cc/admin/review "
                 + "Automatic blocks: 2 blocklist, 1 Safe Browsing "
                 + "Top links by clicks: "
                 + "1. hrva.cc/my_menu → example.com, 120 clicks "
-                + "Open the stats page ");
+                + "Open stats (last 7 days) ");
         assertThat(email.getText()).contains("<title>hrva.cc weekly summary: 19–25 October 2026</title>");
     }
 
     @Test
-    void theWeeklyDigestHasOneLinkToTheStatsPage() throws Exception {
+    void theWeeklyDigestLinksTheReviewQueueAndTheStatsPage() throws Exception {
         final var body = sentWeeklyDigest(weeklyDigest("example.com")).getText();
 
-        assertThat(linksIn(body)).containsExactly("https://hrva.cc/admin/dashboard?days=7");
+        assertThat(linksIn(body)).containsExactly("https://hrva.cc/admin/review", "https://hrva.cc/admin/dashboard?days=7");
     }
 
     @Test

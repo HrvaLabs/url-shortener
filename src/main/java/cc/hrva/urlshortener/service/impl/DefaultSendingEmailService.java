@@ -45,6 +45,7 @@ public class DefaultSendingEmailService implements SendingEmailService {
     private static final Duration CONTENT_RETENTION = Duration.ofDays(7);
     private static final int LISTED_BLOCKED_LINKS = 20;
     private static final String STATS_PAGE = "/admin/dashboard?days=7";
+    private static final String REVIEW_PAGE = "/admin/review";
     private static final DateTimeFormatter PASSKEY_ADDED_AT_FORMAT = DateTimeFormatter.ofPattern("d MMMM yyyy 'at' HH:mm 'UTC'", Locale.ENGLISH);
 
     private final AppProperties appProperties;
@@ -241,7 +242,7 @@ public class DefaultSendingEmailService implements SendingEmailService {
         ctx.setVariable("headline", subject);
         ctx.setVariable("app_name", appProperties.getAppName());
         ctx.setVariable("short_link_host", shortLinkHost());
-        ctx.setVariable("review_page", frontendPage("/admin/review"));
+        ctx.setVariable("review_page", frontendPage(REVIEW_PAGE));
         ctx.setVariable("blocklists_page", frontendPage("/admin/blocklists"));
 
         final var htmlContent = templateEngine.process("decisions", ctx);
@@ -260,11 +261,13 @@ public class DefaultSendingEmailService implements SendingEmailService {
     @Async
     public void sendWeeklyDigestToAdmin(final WeeklyDigest digest) {
         final var title = WeeklyDigestText.title(digest);
-        final var lines = WeeklyDigestText.lines(digest, shortLinkHost(), UnaryOperator.identity());
+        final var reviewPage = frontendPage(REVIEW_PAGE);
+        final var lines = WeeklyDigestText.lines(digest, shortLinkHost(), reviewPage, UnaryOperator.identity());
         final var statsPage = frontendPage(STATS_PAGE);
         final var ctx = new Context();
         ctx.setVariable("headline", title);
-        ctx.setVariable("lines", lines);
+        ctx.setVariable("summary", WeeklyDigestText.summary(digest, reviewPage));
+        ctx.setVariable("top_links", WeeklyDigestText.topLinkLines(digest, shortLinkHost(), UnaryOperator.identity()));
         ctx.setVariable("stats_page", statsPage);
         ctx.setVariable("app_name", appProperties.getAppName());
 

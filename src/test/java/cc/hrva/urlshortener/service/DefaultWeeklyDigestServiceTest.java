@@ -176,6 +176,7 @@ class DefaultWeeklyDigestServiceTest {
                 12,
                 5,
                 4,
+                6,
                 List.of(new CountEntry("BLOCKLIST", 2), new CountEntry("SAFE_BROWSING", 1)),
                 List.of(new WeeklyDigest.TopLink("menu", "example.com", 120))));
     }

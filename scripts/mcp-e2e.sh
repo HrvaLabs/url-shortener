@@ -645,7 +645,7 @@ expect_eq "$(grep -c . <<<"$RATE_KEYS")" 2 "one counter per network"
 expect_eq "$(grep -Ec '203\.0\.113|198\.51\.100' <<<"$RATE_KEYS" || true)" 0 "the counter keys hold no IP address"
 
 BURST_DOMAIN=hrva-burst-e2e.hr
-BURST_LINE="Possible phishing wave: 5 new links to $BURST_DOMAIN from 2 creators within 1 hour, domain age unknown, <$FRONTEND_URL/admin/urls?search=$BURST_DOMAIN>"
+BURST_LINE="Possible phishing wave: 5 new links to $BURST_DOMAIN in the last hour, from 2 different accounts or networks. The domain's age is unknown. Nothing was blocked. Review them: <$FRONTEND_URL/admin/urls?search=$BURST_DOMAIN>"
 burst_logged() {
     grep -q "Burst of new links domain=$BURST_DOMAIN" "$WORK/app.log"
 }

@@ -276,8 +276,8 @@ class DefaultDiscordAlertServiceTest {
         verify(discordWebhookClient).send(eq(WEBHOOK_URL), message.capture(), eq(Duration.ofSeconds(5)));
         assertThat(message.getValue().content().lines().toList()).containsExactly(
                 "New user: account #31 signed up with email, <https://app.hrva.cc/admin>",
-                "Possible phishing wave: 5 new links to evil-login.com from 2 creators within 1 hour, domain age unknown, "
-                        + "<https://app.hrva.cc/admin/urls?search=evil-login.com>");
+                "Possible phishing wave: 5 new links to evil-login.com in the last hour, from 2 different accounts or networks. "
+                        + "The domain's age is unknown. Nothing was blocked. Review them: <https://app.hrva.cc/admin/urls?search=evil-login.com>");
     }
 
     @Test
