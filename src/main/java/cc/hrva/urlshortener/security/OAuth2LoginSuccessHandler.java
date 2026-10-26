@@ -122,10 +122,10 @@ public class OAuth2LoginSuccessHandler implements AuthenticationSuccessHandler {
 
     private void redirectToSecondStep(final HttpServletResponse response, final User user) throws IOException {
         try {
-            final var pendingToken = pendingLoginStore.create(user.getId(), false);
             final var methods = twoStepMethods.of(user).stream()
                     .map(TwoStepMethod::name)
                     .collect(Collectors.joining(","));
+            final var pendingToken = pendingLoginStore.create(user.getId(), false);
             final var redirectUrl = String.format("%s/auth/callback?pendingToken=%s&methods=%s",
                     appProperties.getFrontendUrl(),
                     URLEncoder.encode(pendingToken, StandardCharsets.UTF_8),

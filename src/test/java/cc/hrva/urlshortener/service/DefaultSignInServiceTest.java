@@ -18,12 +18,14 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.GrantedAuthority;
 import tools.jackson.databind.json.JsonMapper;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
@@ -124,6 +126,17 @@ class DefaultSignInServiceTest {
                 {"token":null,"user":null,"twoFactorRequired":true,"twoStepRequired":true,"pendingToken":"%s","methods":["TOTP","RECOVERY_CODE"]}
                 """.formatted(PENDING_TOKEN)));
         verifyNoInteractions(tokenProvider, userService, userToUserDtoConverter);
+    }
+
+    @Test
+    void aFailedMethodLookupLeavesNoPendingToken() {
+        final var user = user();
+        when(twoStepMethods.of(user)).thenThrow(new DataAccessResourceFailureException("database down"));
+
+        assertThatThrownBy(() -> signInService.requireSecondStep(user, true))
+                .isInstanceOf(DataAccessResourceFailureException.class);
+
+        verifyNoInteractions(pendingLoginStore, tokenProvider);
     }
 
     private static User user() {

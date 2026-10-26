@@ -28,15 +28,18 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.oauth2.client.authentication.OAuth2AuthenticationToken;
 import org.springframework.security.oauth2.core.user.OAuth2User;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -268,13 +271,31 @@ class OAuth2LoginSuccessHandlerTest {
         when(appProperties.getFrontendUrl()).thenReturn("http://localhost:3000");
         when(oAuth2User.getAttribute("email")).thenReturn("two@example.com");
         when(userRepository.findByEmail("two@example.com")).thenReturn(Optional.of(user));
+        when(twoStepMethods.of(user)).thenReturn(List.of(TwoStepMethod.TOTP, TwoStepMethod.RECOVERY_CODE));
         when(pendingLoginStore.create(9L, false))
                 .thenThrow(new SignInUnavailableException(PendingLoginStore.UNAVAILABLE, new IllegalStateException()));
 
         handler.onAuthenticationSuccess(request, response, authentication);
 
         assertThat(redirectSent()).isEqualTo("http://localhost:3000/auth/callback?error=two_step_unavailable");
+        final var order = inOrder(twoStepMethods, pendingLoginStore);
+        order.verify(twoStepMethods).of(user);
+        order.verify(pendingLoginStore).create(9L, false);
         verifyNoInteractions(tokenProvider);
+        verify(userRepository, never()).save(any());
+    }
+
+    @Test
+    void aFailedMethodLookupLeavesNoPendingToken() {
+        final var user = twoStepUser(11L, "two@example.com", "google");
+        when(oAuth2User.getAttribute("email")).thenReturn("two@example.com");
+        when(userRepository.findByEmail("two@example.com")).thenReturn(Optional.of(user));
+        when(twoStepMethods.of(user)).thenThrow(new DataAccessResourceFailureException("database down"));
+
+        assertThatThrownBy(() -> handler.onAuthenticationSuccess(request, response, authentication))
+                .isInstanceOf(DataAccessResourceFailureException.class);
+
+        verifyNoInteractions(pendingLoginStore, tokenProvider);
         verify(userRepository, never()).save(any());
     }
 
@@ -289,6 +310,7 @@ class OAuth2LoginSuccessHandlerTest {
 
         verify(response).sendRedirect("http://fe/auth/callback?error=account_inactive");
         verifyNoInteractions(tokenProvider, pendingLoginStore, twoStepMethods);
+        verify(userRepository, never()).save(any());
     }
 
     private String redirectSent() throws Exception {

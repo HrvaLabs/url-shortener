@@ -54,10 +54,11 @@ public class DefaultSignInService implements SignInService {
 
     @Override
     public ResponseEntity<JWTTokenDto> requireSecondStep(final User user, final boolean rememberMe) {
+        final var methods = twoStepMethods.of(user);
         final var pendingToken = pendingLoginStore.create(user.getId(), rememberMe);
         log.info("Second step required user id={}", user.getId());
 
-        return new ResponseEntity<>(JWTTokenDto.twoStepRequired(pendingToken, twoStepMethods.of(user)), HttpStatus.OK);
+        return new ResponseEntity<>(JWTTokenDto.twoStepRequired(pendingToken, methods), HttpStatus.OK);
     }
 
     private long validitySeconds(final boolean rememberMe) {
