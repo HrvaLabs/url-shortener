@@ -13,6 +13,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
+import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
@@ -21,6 +22,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -96,6 +98,7 @@ class DefaultTwoFactorServiceTest {
         final var response = twoFactorService.enable(Totp.currentCode(secret));
 
         assertThat(user.getTwoFactorEnabled()).isTrue();
+        assertThat(user.getTwoStepEnabled()).isTrue();
         assertThat(response.recoveryCodes()).hasSize(10);
         verify(recoveryCodeRepository).deleteByUser(user);
         verify(recoveryCodeRepository).saveAll(org.mockito.ArgumentMatchers.anyList());
@@ -115,13 +118,15 @@ class DefaultTwoFactorServiceTest {
     @Test
     void shouldDisableWithValidTotp() {
         final var secret = Totp.generateSecret();
-        final var user = User.builder().id(1L).authProvider("local").twoFactorEnabled(true).twoFactorSecret(secret).build();
+        final var user = User.builder().id(1L).authProvider("local").twoFactorEnabled(true).twoStepEnabled(true)
+                .twoFactorSecret(secret).build();
         when(userService.getUserFromToken()).thenReturn(user);
         lenient().when(recoveryCodeRepository.findByUserAndUsedFalse(user)).thenReturn(Collections.emptyList());
 
         twoFactorService.disable(Totp.currentCode(secret));
 
         assertThat(user.getTwoFactorEnabled()).isFalse();
+        assertThat(user.getTwoStepEnabled()).isFalse();
         assertThat(user.getTwoFactorSecret()).isNull();
         verify(recoveryCodeRepository).deleteByUser(user);
     }
@@ -143,8 +148,43 @@ class DefaultTwoFactorServiceTest {
     @Test
     void shouldVerifyLoginWithTotp() {
         final var secret = Totp.generateSecret();
-        final var user = User.builder().id(1L).twoFactorSecret(secret).build();
+        final var user = User.builder().id(1L).twoFactorEnabled(true).twoFactorSecret(secret).build();
 
         assertThat(twoFactorService.verifyLoginCode(user, Totp.currentCode(secret))).isTrue();
+    }
+
+    @Test
+    void verifyLoginCodeSkipsTotpWithoutAnAuthenticatorApp() {
+        final var user = User.builder().id(1L).twoFactorEnabled(false).twoFactorSecret(null).twoStepEnabled(true).build();
+        when(recoveryCodeRepository.findByUserAndUsedFalse(user)).thenReturn(Collections.emptyList());
+
+        try (final var totp = mockStatic(Totp.class, Mockito.CALLS_REAL_METHODS)) {
+            assertThat(twoFactorService.verifyLoginCode(user, "123456")).isFalse();
+
+            totp.verify(() -> Totp.verify(any(), any()), never());
+        }
+    }
+
+    @Test
+    void anUnfinishedAuthenticatorAppSetupDoesNotSignIn() {
+        final var secret = Totp.generateSecret();
+        final var user = User.builder().id(1L).twoFactorEnabled(false).twoFactorSecret(secret).twoStepEnabled(true).build();
+        when(recoveryCodeRepository.findByUserAndUsedFalse(user)).thenReturn(Collections.emptyList());
+
+        assertThat(twoFactorService.verifyLoginCode(user, Totp.currentCode(secret))).isFalse();
+    }
+
+    @Test
+    void anAuthenticatorAppWithoutASecretFallsBackToRecoveryCodes() {
+        final var user = User.builder().id(1L).twoFactorEnabled(true).twoFactorSecret(null).build();
+        final var recovery = TwoFactorRecoveryCode.builder().id(1L).user(user).codeHash("hash").used(false).build();
+        when(recoveryCodeRepository.findByUserAndUsedFalse(user)).thenReturn(Collections.singletonList(recovery));
+        when(passwordEncoder.matches("ABCD-EF23", "hash")).thenReturn(true);
+
+        try (final var totp = mockStatic(Totp.class, Mockito.CALLS_REAL_METHODS)) {
+            assertThat(twoFactorService.verifyLoginCode(user, "ABCD-EF23")).isTrue();
+
+            totp.verify(() -> Totp.verify(any(), any()), never());
+        }
     }
 }

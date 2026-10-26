@@ -71,6 +71,7 @@ public class DefaultTwoFactorService implements TwoFactorService {
         }
 
         user.setTwoFactorEnabled(true);
+        user.setTwoStepEnabled(true);
         userRepository.save(user);
 
         recoveryCodeRepository.deleteByUser(user);
@@ -100,6 +101,7 @@ public class DefaultTwoFactorService implements TwoFactorService {
         }
 
         user.setTwoFactorEnabled(false);
+        user.setTwoStepEnabled(false);
         user.setTwoFactorSecret(null);
         userRepository.save(user);
         recoveryCodeRepository.deleteByUser(user);
@@ -113,7 +115,8 @@ public class DefaultTwoFactorService implements TwoFactorService {
         if (code == null) {
             return false;
         }
-        if (Totp.verify(user.getTwoFactorSecret(), code)) {
+        if (Boolean.TRUE.equals(user.getTwoFactorEnabled()) && user.getTwoFactorSecret() != null
+                && Totp.verify(user.getTwoFactorSecret(), code)) {
             return true;
         }
         for (final TwoFactorRecoveryCode recoveryCode : recoveryCodeRepository.findByUserAndUsedFalse(user)) {

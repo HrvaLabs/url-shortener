@@ -25,6 +25,8 @@ class UserToUserDtoConverterTest {
                 .authorities(authorities)
                 .createDate(createDate)
                 .lastLogin(lastLogin)
+                .twoFactorEnabled(false)
+                .twoStepEnabled(true)
                 .build();
 
         final var userDto = converter.convert(user);
@@ -35,6 +37,8 @@ class UserToUserDtoConverterTest {
         assertThat(userDto.getAuthorities()).isEqualTo(authorities);
         assertThat(userDto.getCreateDate()).isEqualTo(createDate);
         assertThat(userDto.getLastLogin()).isEqualTo(lastLogin);
+        assertThat(userDto.getTwoFactorEnabled()).isFalse();
+        assertThat(userDto.getTwoStepEnabled()).isTrue();
     }
 
     @Test

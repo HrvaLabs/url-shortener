@@ -29,5 +29,7 @@ public class UserDto {
     private String authProvider;
     @Schema(description = "Whether two-factor authentication is enabled", example = "false")
     private Boolean twoFactorEnabled;
+    @Schema(description = "Whether two-step verification is on", example = "false")
+    private Boolean twoStepEnabled;
 
 }

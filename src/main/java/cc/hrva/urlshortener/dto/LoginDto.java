@@ -22,7 +22,8 @@ public class LoginDto {
     @Schema(description = "Whether to remember the user across sessions", example = "false")
     private Boolean rememberMe;
 
-    @Schema(description = "TOTP or recovery code, required only when the account has 2FA enabled", example = "123456")
+    @Deprecated(forRemoval = true)
+    @Schema(deprecated = true, description = "Deprecated: finish two-step sign-ins with POST /api/v1/auth/2fa/totp instead. TOTP or recovery code, sent again with the password", example = "123456")
     private String code;
 
 }

@@ -15,6 +15,9 @@ import cc.hrva.urlshortener.exception.InvalidApiKeyException;
 import cc.hrva.urlshortener.exception.RateLimitExceededException;
 import cc.hrva.urlshortener.exception.ReservedAliasNotFoundException;
 import cc.hrva.urlshortener.exception.ShortUrlAlreadyExistsException;
+import cc.hrva.urlshortener.exception.SignInExpiredException;
+import cc.hrva.urlshortener.exception.SignInUnavailableException;
+import cc.hrva.urlshortener.exception.TwoStepFailedException;
 import cc.hrva.urlshortener.exception.NoAuthorizationException;
 import cc.hrva.urlshortener.exception.UrlNotFoundException;
 import cc.hrva.urlshortener.exception.UserNotFoundException;
@@ -185,6 +188,21 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(EmailNotVerifiedException.class)
     public ResponseEntity<Map<String, String>> handleEmailNotVerified(final EmailNotVerifiedException ex) {
         return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", safeMessage(ex)));
+    }
+
+    @ExceptionHandler(SignInExpiredException.class)
+    public ResponseEntity<Map<String, String>> handleSignInExpired(final SignInExpiredException ex) {
+        return ResponseEntity.status(HttpStatus.GONE).body(Map.of("error", safeMessage(ex)));
+    }
+
+    @ExceptionHandler(TwoStepFailedException.class)
+    public ResponseEntity<Map<String, String>> handleTwoStepFailed(final TwoStepFailedException ex) {
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", safeMessage(ex)));
+    }
+
+    @ExceptionHandler(SignInUnavailableException.class)
+    public ResponseEntity<Map<String, String>> handleSignInUnavailable(final SignInUnavailableException ex) {
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(Map.of("error", safeMessage(ex)));
     }
 
     @ExceptionHandler(ConnectRequestExpiredException.class)

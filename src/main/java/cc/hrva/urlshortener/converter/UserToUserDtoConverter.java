@@ -19,6 +19,7 @@ public class UserToUserDtoConverter implements Converter<User, UserDto> {
                 .lastLogin(user.getLastLogin())
                 .authProvider(user.getAuthProvider())
                 .twoFactorEnabled(user.getTwoFactorEnabled())
+                .twoStepEnabled(user.getTwoStepEnabled())
                 .build();
     }
 
