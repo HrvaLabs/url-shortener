@@ -120,6 +120,23 @@ class UrlSpecificationTest {
     }
 
     @Test
+    void ownSearchFindsBothSpellingsOfADomainAmongTheOwnersLinksOnly() {
+        final var owner = persistUser("owner@example.com");
+        persistUrl("unicode", "https://čokolada.hr/torta", owner);
+        persistUrl("punycode", "https://xn--okolada-i6a.hr/kolac", owner);
+        persistUrl("someone", "https://čokolada.hr/x", persistUser("someone@example.com"));
+        entityManager.flush();
+
+        final Function<String, Specification<Url>> ownSearch = search -> UrlSpecification.hasOwner(owner).and(UrlSpecification.search(search));
+        for (final var search : List.of("čokolada.hr", "xn--okolada-i6a.hr", "ČOKOLADA.HR", "XN--OKOLADA-I6A.HR", "https://čokolada.hr/", "xn--okolada-i6a.hr/")) {
+            assertThat(shortUrls(ownSearch.apply(search))).as(search).containsExactly("punycode", "unicode");
+        }
+        assertThat(shortUrls(ownSearch.apply("https://xn--okolada-i6a.hr/torta"))).containsExactly("unicode");
+        assertThat(shortUrls(ownSearch.apply("čokolada"))).containsExactly("unicode");
+        assertThat(shortUrls(ownSearch.apply("xn--okolada"))).containsExactly("punycode");
+    }
+
+    @Test
     void adminSearchForAHostTypedHalfInEachSpellingFindsBothFullSpellings() {
         persistUrl("unicode", "https://čokolada.рф/torta", null);
         persistUrl("punycode", "https://xn--okolada-i6a.xn--p1ai/kolac", null);

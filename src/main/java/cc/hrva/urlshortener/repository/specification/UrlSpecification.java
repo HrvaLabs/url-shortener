@@ -4,6 +4,7 @@ import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.util.DomainNames;
 import cc.hrva.urlshortener.util.HostName;
+import jakarta.persistence.criteria.CriteriaBuilder;
 import jakarta.persistence.criteria.Expression;
 import jakarta.persistence.criteria.JoinType;
 import jakarta.persistence.criteria.Predicate;
@@ -22,22 +23,13 @@ public final class UrlSpecification {
     }
 
     public static Specification<Url> search(final String keyword) {
-        return (root, query, cb) -> {
-            final var pattern = LikePatterns.containing(keyword);
-            return cb.or(
-                    cb.like(cb.lower(root.get("longUrl")), pattern, LikePatterns.ESCAPE),
-                    cb.like(cb.lower(root.get("shortUrl")), pattern, LikePatterns.ESCAPE));
-        };
+        return (root, query, cb) -> anyFieldContainsASpellingOf(keyword, cb, List.of(root.get("longUrl"), root.get("shortUrl")));
     }
 
     public static Specification<Url> searchIncludingOwner(final String keyword) {
         return (root, query, cb) -> {
             final var owner = root.join("owner", JoinType.LEFT);
-            final var fields = List.<Expression<String>>of(root.get("longUrl"), root.get("shortUrl"), owner.get("email"));
-            return cb.or(spellingsOf(keyword).stream()
-                    .map(LikePatterns::containing)
-                    .flatMap(pattern -> fields.stream().map(field -> cb.like(cb.lower(field), pattern, LikePatterns.ESCAPE)))
-                    .toArray(Predicate[]::new));
+            return anyFieldContainsASpellingOf(keyword, cb, List.of(root.get("longUrl"), root.get("shortUrl"), owner.get("email")));
         };
     }
 
@@ -76,6 +68,13 @@ public final class UrlSpecification {
                 cb.or(
                         root.get("expirationDate").isNull(),
                         cb.greaterThanOrEqualTo(root.get("expirationDate"), LocalDateTime.now()));
+    }
+
+    private static Predicate anyFieldContainsASpellingOf(final String keyword, final CriteriaBuilder cb, final List<Expression<String>> fields) {
+        return cb.or(spellingsOf(keyword).stream()
+                .map(LikePatterns::containing)
+                .flatMap(pattern -> fields.stream().map(field -> cb.like(cb.lower(field), pattern, LikePatterns.ESCAPE)))
+                .toArray(Predicate[]::new));
     }
 
     private static List<String> spellingsOf(final String keyword) {
