@@ -2,11 +2,13 @@ package cc.hrva.urlshortener.service;
 
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.dto.JWTTokenDto;
+import cc.hrva.urlshortener.dto.PasskeyDeleteDto;
 import cc.hrva.urlshortener.dto.PasskeyOptionsResponse;
 import cc.hrva.urlshortener.dto.PasskeySecondStepDto;
 import cc.hrva.urlshortener.dto.PendingTokenDto;
 import cc.hrva.urlshortener.dto.TotpSecondStepDto;
 import cc.hrva.urlshortener.dto.TwoStepDisableDto;
+import cc.hrva.urlshortener.exception.ApiException;
 import cc.hrva.urlshortener.exception.PasskeyVerificationException;
 import cc.hrva.urlshortener.exception.SignInExpiredException;
 import cc.hrva.urlshortener.exception.TwoStepFailedException;
@@ -27,6 +29,10 @@ import jakarta.persistence.EntityManager;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.IntStream;
 import org.apache.commons.lang3.StringUtils;
 import org.junit.jupiter.api.BeforeEach;
@@ -44,9 +50,11 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import tools.jackson.databind.JsonNode;
 
 import static cc.hrva.urlshortener.service.PasskeyFlowsSupport.CLIENT_IP;
@@ -86,6 +94,8 @@ class PasskeySecondStepFlowsTest {
     private static final String EXPIRED = "This request expired. Try again.";
     private static final String COULD_NOT_VERIFY = "That passkey or security key couldn't be verified. Try again.";
     private static final String OTHER_ORIGIN = "https://evil.example";
+    private static final String LAST_PASSKEY =
+            "This is your only two-step method. Turn off two-step verification, or add another passkey, security key or authenticator app first.";
     private static final String PENDING_LOGIN_KEY_PREFIX = "auth:pending-login:";
     private static final Duration THIRTY_DAYS = Duration.ofDays(30);
     private static final RSAKey SIGNING_KEY = PasskeyFlowsSupport.generateSigningKey();
@@ -125,6 +135,9 @@ class PasskeySecondStepFlowsTest {
 
     @Autowired
     private EntityManager entityManager;
+
+    @Autowired
+    private PlatformTransactionManager transactionManager;
 
     @MockitoBean
     private StringRedisTemplate redisTemplate;
@@ -360,6 +373,7 @@ class PasskeySecondStepFlowsTest {
             assertThat(twoStepSettingsService.enableWithPasskeys().recoveryCodes()).hasSize(10);
             assertThat(twoStepEnabledOf(user)).isTrue();
             assertThat(recoveryCodesOf(user)).isEqualTo(10L);
+            flows.signedInAgain(user);
 
             final var options = twoStepSettingsService.disableOptions();
 
@@ -400,19 +414,20 @@ class PasskeySecondStepFlowsTest {
         final var alice = flows.signedIn(flows.localUser("alice-turn-off@example.com"));
         flows.addPasskey(TestAuthenticator.securityKey(), "YubiKey");
         twoStepSettingsService.enableWithPasskeys();
-        flows.signedIn(flows.localUser("bob-turn-off@example.com"));
+        final var bob = flows.signedIn(flows.localUser("bob-turn-off@example.com"));
         final var bobsKey = TestAuthenticator.securityKey();
         flows.addPasskey(bobsKey, "YubiKey");
         twoStepSettingsService.enableWithPasskeys();
+        flows.signedInAgain(bob);
         final var bobsOptions = twoStepSettingsService.disableOptions();
         final var bobsCredential = bobsKey.authenticate(bobsOptions.options());
-        flows.signedIn(alice);
+        flows.signedInAgain(alice);
 
         assertThatThrownBy(() -> twoStepSettingsService.disable(turnOff(bobsOptions, bobsCredential)))
                 .isInstanceOf(SignInExpiredException.class)
                 .hasMessage(EXPIRED);
 
-        assertThat(alice.getTwoStepEnabled()).isTrue();
+        assertThat(twoStepEnabledOf(alice)).isTrue();
         assertThat(recoveryCodesOf(alice)).isEqualTo(10L);
         assertThat(flows.stored(bobsKey).getLastUsedAt()).isNull();
         verify(loginAttemptService, never()).loginFailed(anyString());
@@ -427,7 +442,7 @@ class PasskeySecondStepFlowsTest {
         flows.signedIn(flows.localUser("bob-other-key@example.com"));
         final var bobsPasskey = TestAuthenticator.syncedPasskey();
         flows.addPasskey(bobsPasskey, "MacBook");
-        flows.signedIn(alice);
+        flows.signedInAgain(alice);
         final var options = twoStepSettingsService.disableOptions();
         final var bobsCredential = bobsPasskey.authenticate(options.options());
 
@@ -435,11 +450,54 @@ class PasskeySecondStepFlowsTest {
                 .isInstanceOf(PasskeyVerificationException.class)
                 .hasMessage(COULD_NOT_VERIFY);
 
-        assertThat(alice.getTwoStepEnabled()).isTrue();
+        assertThat(twoStepEnabledOf(alice)).isTrue();
         assertThat(recoveryCodesOf(alice)).isEqualTo(10L);
         assertThat(flows.stored(bobsPasskey).getLastUsedAt()).isNull();
         verify(loginAttemptService).loginFailed("2fa:" + alice.getId());
         verify(loginAttemptService, never()).loginSucceeded(anyString());
+    }
+
+    @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    void removingBothPasskeysOfAKeysOnlyAccountAtOnceLeavesOne() throws Exception {
+        final var user = flows.signedIn(flows.localUser("two-keys-at-once@example.com"));
+        try {
+            final var first = flows.addPasskey(TestAuthenticator.securityKey(), "YubiKey");
+            final var second = flows.addPasskey(TestAuthenticator.syncedPasskey(), "MacBook");
+            twoStepSettingsService.enableWithPasskeys();
+            flows.signedInAgain(user);
+            final var firstRemoved = new CountDownLatch(1);
+            final var secondFinished = new CountDownLatch(1);
+            final var executor = Executors.newSingleThreadExecutor();
+            try {
+                final Future<String> secondRemoval = executor.submit(() -> {
+                    try {
+                        firstRemoved.await(10, TimeUnit.SECONDS);
+                        passkeyService.delete(second.id(), new PasskeyDeleteDto(PasskeyFlowsSupport.PASSWORD));
+                        return "removed";
+                    } catch (final ApiException refused) {
+                        return refused.getMessage();
+                    } finally {
+                        secondFinished.countDown();
+                    }
+                });
+                new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+                    passkeyService.delete(first.id(), new PasskeyDeleteDto(PasskeyFlowsSupport.PASSWORD));
+                    firstRemoved.countDown();
+                    waitAtMostASecond(secondFinished);
+                });
+
+                assertThat(secondRemoval.get(10, TimeUnit.SECONDS)).isEqualTo(LAST_PASSKEY);
+            } finally {
+                executor.shutdownNow();
+            }
+
+            assertThat(jdbcTemplate.queryForList("select id from passkey_credential where user_id = ?", Long.class, user.getId()))
+                    .containsExactly(second.id());
+            assertThat(twoStepEnabledOf(user)).isTrue();
+        } finally {
+            flows.remove(user);
+        }
     }
 
     private String pendingTokenOf(final User user, final boolean rememberMe) {
@@ -461,15 +519,29 @@ class PasskeySecondStepFlowsTest {
     }
 
     private boolean twoStepEnabledOf(final User user) {
+        flushed();
+
         return jdbcTemplate.queryForObject("select two_step_enabled from user_account where id = ?", Boolean.class, user.getId());
     }
 
     private long recoveryCodesOf(final User user) {
+        flushed();
+
+        return jdbcTemplate.queryForObject("select count(*) from two_factor_recovery_code where user_id = ?", Long.class, user.getId());
+    }
+
+    private void flushed() {
         if (TransactionSynchronizationManager.isActualTransactionActive()) {
             entityManager.flush();
         }
+    }
 
-        return jdbcTemplate.queryForObject("select count(*) from two_factor_recovery_code where user_id = ?", Long.class, user.getId());
+    private static void waitAtMostASecond(final CountDownLatch latch) {
+        try {
+            latch.await(1, TimeUnit.SECONDS);
+        } catch (final InterruptedException exception) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     private static TwoStepDisableDto turnOff(final PasskeyOptionsResponse options, final JsonNode credential) {

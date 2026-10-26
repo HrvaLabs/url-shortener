@@ -24,6 +24,7 @@ import cc.hrva.urlshortener.service.passkey.PasskeyCeremonyStore;
 import cc.hrva.urlshortener.service.passkey.PasskeyJson;
 import cc.hrva.urlshortener.service.passkey.PasskeyOptionsFactory;
 import cc.hrva.urlshortener.service.passkey.TestAuthenticator;
+import cc.hrva.urlshortener.service.twostep.AccountLock;
 import com.webauthn4j.converter.exception.DataConversionException;
 import com.webauthn4j.verifier.exception.BadOriginException;
 import java.nio.charset.StandardCharsets;
@@ -62,6 +63,8 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -102,6 +105,9 @@ class DefaultPasskeyServiceTest {
     @Mock
     private Reauthentication reauthentication;
 
+    @Mock
+    private AccountLock accountLock;
+
     private final Map<Long, String> storedHandles = new HashMap<>();
 
     private PasskeyService passkeyService;
@@ -115,7 +121,8 @@ class DefaultPasskeyServiceTest {
         final var passkeyOptionsFactory = new PasskeyOptionsFactory(appProperties);
         passkeyService = new DefaultPasskeyService(userService, userRepository, passkeyCredentialRepository,
                 passkeyCeremonyStore, new PasskeyCeremonies(passkeyCeremonyStore, passkeyOptionsFactory, passkeyJson, rateLimiter),
-                passkeyJson, passkeyOptionsFactory, relyingPartyOperations, reauthentication);
+                passkeyJson, passkeyOptionsFactory, relyingPartyOperations, reauthentication, accountLock);
+        lenient().when(accountLock.lock(any())).thenAnswer(invocation -> invocation.getArgument(0));
     }
 
     @Test
@@ -489,6 +496,42 @@ class DefaultPasskeyServiceTest {
                 .hasMessage("Enter your current password.");
 
         verify(passkeyCredentialRepository, never()).countByUser(any());
+        verify(passkeyCredentialRepository, never()).delete(any());
+        verifyNoInteractions(accountLock);
+    }
+
+    @Test
+    void theAccountIsLockedAfterTheReauthenticationAndBeforeTheCount() {
+        final var user = twoStepUser(false);
+        final var passkey = PasskeyCredential.builder().id(5L).user(user).credentialId("a2V5").build();
+        when(userService.getUserFromToken()).thenReturn(user);
+        when(passkeyCredentialRepository.findByIdAndUser(5L, user)).thenReturn(Optional.of(passkey));
+        when(passkeyCredentialRepository.countByUser(user)).thenReturn(2L);
+
+        passkeyService.delete(5L, new PasskeyDeleteDto("user123"));
+
+        final var order = inOrder(reauthentication, accountLock, passkeyCredentialRepository);
+        order.verify(reauthentication).confirm(user, "user123");
+        order.verify(accountLock).lock(user);
+        order.verify(passkeyCredentialRepository).findByIdAndUser(5L, user);
+        order.verify(passkeyCredentialRepository).countByUser(user);
+        order.verify(passkeyCredentialRepository).delete(passkey);
+    }
+
+    @Test
+    void theLastPasskeyGuardReadsTheLockedAccount() {
+        final var fromTheToken = twoStepUser(true);
+        final var locked = twoStepUser(false);
+        final var passkey = PasskeyCredential.builder().id(5L).user(locked).credentialId("a2V5").build();
+        when(userService.getUserFromToken()).thenReturn(fromTheToken);
+        when(accountLock.lock(fromTheToken)).thenReturn(locked);
+        when(passkeyCredentialRepository.findByIdAndUser(5L, locked)).thenReturn(Optional.of(passkey));
+        when(passkeyCredentialRepository.countByUser(locked)).thenReturn(1L);
+
+        assertThatThrownBy(() -> passkeyService.delete(5L, new PasskeyDeleteDto("user123")))
+                .isInstanceOf(ApiException.class)
+                .hasMessage(LAST_PASSKEY);
+
         verify(passkeyCredentialRepository, never()).delete(any());
     }
 

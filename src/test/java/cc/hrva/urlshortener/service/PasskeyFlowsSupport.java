@@ -69,6 +69,10 @@ final class PasskeyFlowsSupport {
         return user;
     }
 
+    User signedInAgain(final User user) {
+        return signedIn(userRepository.findById(user.getId()).orElseThrow());
+    }
+
     PasskeyResponse addPasskey(final TestAuthenticator authenticator, final String label) {
         final var options = registrationOptions();
 

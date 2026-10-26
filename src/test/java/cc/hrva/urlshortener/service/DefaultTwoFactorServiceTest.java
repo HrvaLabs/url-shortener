@@ -10,6 +10,7 @@ import cc.hrva.urlshortener.repository.TwoFactorRecoveryCodeRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.security.Totp;
 import cc.hrva.urlshortener.service.impl.DefaultTwoFactorService;
+import cc.hrva.urlshortener.service.twostep.AccountLock;
 import cc.hrva.urlshortener.service.twostep.RecoveryCodes;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -22,6 +23,8 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -53,10 +56,14 @@ class DefaultTwoFactorServiceTest {
     @Mock
     private RecoveryCodes recoveryCodes;
 
+    @Mock
+    private AccountLock accountLock;
+
     @BeforeEach
     void setUp() {
         this.twoFactorService = new DefaultTwoFactorService(userService, userRepository, appProperties,
-                passwordEncoder, recoveryCodeRepository, recoveryCodes);
+                passwordEncoder, recoveryCodeRepository, recoveryCodes, accountLock);
+        lenient().when(accountLock.lock(any())).thenAnswer(invocation -> invocation.getArgument(0));
     }
 
     @Test
@@ -134,6 +141,56 @@ class DefaultTwoFactorServiceTest {
         assertThat(response.recoveryCodes()).isEmpty();
         verify(recoveryCodeRepository, never()).deleteByUser(any());
         verify(recoveryCodeRepository, never()).saveAll(any());
+    }
+
+    @Test
+    void settingUpLocksTheAccountBeforeCheckingIt() {
+        final var fromTheToken = User.builder().id(1L).email("u@example.com").twoFactorEnabled(false).build();
+        final var locked = User.builder().id(1L).email("u@example.com").twoFactorEnabled(true).twoFactorSecret("EXISTINGSECRET").build();
+        when(userService.getUserFromToken()).thenReturn(fromTheToken);
+        when(accountLock.lock(fromTheToken)).thenReturn(locked);
+
+        assertThatThrownBy(() -> twoFactorService.setup())
+                .isInstanceOf(ApiException.class)
+                .hasMessage("An authenticator app is already set up. Remove it first.");
+
+        assertThat(locked.getTwoFactorSecret()).isEqualTo("EXISTINGSECRET");
+        verify(userRepository, never()).save(any());
+    }
+
+    @Test
+    void enablingLocksTheAccountBeforeCheckingItAndIssuingCodes() {
+        final var secret = Totp.generateSecret();
+        final var fromTheToken = User.builder().id(1L).email("u@example.com").twoFactorSecret(secret).twoFactorEnabled(false).build();
+        final var locked = User.builder().id(1L).email("u@example.com").twoFactorSecret(secret).twoFactorEnabled(false).build();
+        when(userService.getUserFromToken()).thenReturn(fromTheToken);
+        when(accountLock.lock(fromTheToken)).thenReturn(locked);
+        when(recoveryCodes.issueIfNone(locked)).thenReturn(TEN_CODES);
+
+        twoFactorService.enable(Totp.currentCode(secret));
+
+        final var order = inOrder(accountLock, userRepository, recoveryCodes);
+        order.verify(accountLock).lock(fromTheToken);
+        order.verify(userRepository).save(locked);
+        order.verify(recoveryCodes).issueIfNone(locked);
+        assertThat(locked.getTwoFactorEnabled()).isTrue();
+        assertThat(locked.getTwoStepEnabled()).isTrue();
+    }
+
+    @Test
+    void anAppSetUpMeanwhileIsSeenThroughTheLock() {
+        final var secret = Totp.generateSecret();
+        final var fromTheToken = User.builder().id(1L).twoFactorSecret(secret).twoFactorEnabled(false).build();
+        final var locked = User.builder().id(1L).twoFactorSecret(secret).twoFactorEnabled(true).build();
+        when(userService.getUserFromToken()).thenReturn(fromTheToken);
+        when(accountLock.lock(fromTheToken)).thenReturn(locked);
+
+        assertThatThrownBy(() -> twoFactorService.enable(Totp.currentCode(secret)))
+                .isInstanceOf(ApiException.class)
+                .hasMessage("Two-factor authentication is already enabled");
+
+        verify(userRepository, never()).save(any());
+        verify(recoveryCodes, never()).issueIfNone(any());
     }
 
     @Test

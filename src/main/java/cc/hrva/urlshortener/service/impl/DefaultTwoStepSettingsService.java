@@ -21,6 +21,7 @@ import cc.hrva.urlshortener.service.passkey.PasskeyCeremonies;
 import cc.hrva.urlshortener.service.passkey.PasskeyCeremonyPurpose;
 import cc.hrva.urlshortener.service.passkey.PasskeyCeremonyStore;
 import cc.hrva.urlshortener.service.passkey.PasskeyOptionsFactory;
+import cc.hrva.urlshortener.service.twostep.AccountLock;
 import cc.hrva.urlshortener.service.twostep.RecoveryCodes;
 import java.util.Objects;
 import lombok.RequiredArgsConstructor;
@@ -56,6 +57,7 @@ public class DefaultTwoStepSettingsService implements TwoStepSettingsService {
     private final TwoFactorService twoFactorService;
     private final RecoveryCodes recoveryCodes;
     private final LoginAttemptService loginAttemptService;
+    private final AccountLock accountLock;
 
     @Override
     public TwoStepStatusResponse status() {
@@ -68,7 +70,7 @@ public class DefaultTwoStepSettingsService implements TwoStepSettingsService {
     @Override
     @Transactional
     public TwoFactorEnableResponse enableWithPasskeys() {
-        final var user = currentUser();
+        final var user = accountLock.lock(currentUser());
         if (passkeyCredentialRepository.countByUser(user) == 0) {
             throw new ApiException(ADD_A_PASSKEY_FIRST);
         }
@@ -99,7 +101,7 @@ public class DefaultTwoStepSettingsService implements TwoStepSettingsService {
     @Override
     @Transactional
     public void disable(final TwoStepDisableDto dto) {
-        final var user = currentUser();
+        final var user = accountLock.lock(currentUser());
         requireTwoStepOn(user);
         final var withCode = confirmsWithCode(dto);
         requireNotLocked(user);
@@ -122,7 +124,7 @@ public class DefaultTwoStepSettingsService implements TwoStepSettingsService {
     @Override
     @Transactional
     public void removeTotp(final TwoFactorCodeDto dto) {
-        final var user = currentUser();
+        final var user = accountLock.lock(currentUser());
         if (!Boolean.TRUE.equals(user.getTwoFactorEnabled())) {
             throw new ApiException(NO_AUTHENTICATOR_APP);
         }

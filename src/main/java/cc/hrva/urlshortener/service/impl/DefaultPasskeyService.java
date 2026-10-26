@@ -25,6 +25,7 @@ import cc.hrva.urlshortener.service.passkey.PasskeyCeremonyPurpose;
 import cc.hrva.urlshortener.service.passkey.PasskeyCeremonyStore;
 import cc.hrva.urlshortener.service.passkey.PasskeyJson;
 import cc.hrva.urlshortener.service.passkey.PasskeyOptionsFactory;
+import cc.hrva.urlshortener.service.twostep.AccountLock;
 import com.webauthn4j.util.exception.WebAuthnException;
 import java.util.List;
 import java.util.Objects;
@@ -70,6 +71,7 @@ public class DefaultPasskeyService implements PasskeyService {
     private final PasskeyOptionsFactory passkeyOptionsFactory;
     private final WebAuthnRelyingPartyOperations relyingPartyOperations;
     private final Reauthentication reauthentication;
+    private final AccountLock accountLock;
 
     @Override
     @Transactional
@@ -145,8 +147,9 @@ public class DefaultPasskeyService implements PasskeyService {
     @Override
     @Transactional
     public void delete(final Long id, final PasskeyDeleteDto dto) {
-        final var user = currentUser();
-        reauthentication.confirm(user, dto.getPassword());
+        final var current = currentUser();
+        reauthentication.confirm(current, dto.getPassword());
+        final var user = accountLock.lock(current);
         final var passkey = passkeyOf(user, id);
         if (isTheOnlyTwoStepMethod(user)) {
             throw new ApiException(ONLY_TWO_STEP_METHOD);

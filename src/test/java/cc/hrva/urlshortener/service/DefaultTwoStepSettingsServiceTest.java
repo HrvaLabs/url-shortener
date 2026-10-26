@@ -21,6 +21,7 @@ import cc.hrva.urlshortener.service.passkey.PasskeyCeremonyPurpose;
 import cc.hrva.urlshortener.service.passkey.PasskeyCeremonyStore;
 import cc.hrva.urlshortener.service.passkey.PasskeyJson;
 import cc.hrva.urlshortener.service.passkey.PasskeyOptionsFactory;
+import cc.hrva.urlshortener.service.twostep.AccountLock;
 import cc.hrva.urlshortener.service.twostep.RecoveryCodes;
 import java.util.List;
 import java.util.Optional;
@@ -43,6 +44,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -95,6 +98,9 @@ class DefaultTwoStepSettingsServiceTest {
     @Mock
     private RateLimiter rateLimiter;
 
+    @Mock
+    private AccountLock accountLock;
+
     private TwoStepSettingsService twoStepSettingsService;
 
     @BeforeEach
@@ -105,7 +111,8 @@ class DefaultTwoStepSettingsServiceTest {
         final var passkeyCeremonies = new PasskeyCeremonies(passkeyCeremonyStore, passkeyOptionsFactory, new PasskeyJson(), rateLimiter);
         twoStepSettingsService = new DefaultTwoStepSettingsService(userService, userRepository, passkeyCredentialRepository,
                 passkeyCeremonies, passkeyCeremonyStore, passkeyOptionsFactory, passkeyAssertions, twoFactorService,
-                recoveryCodes, loginAttemptService);
+                recoveryCodes, loginAttemptService, accountLock);
+        lenient().when(accountLock.lock(any())).thenAnswer(invocation -> invocation.getArgument(0));
     }
 
     @Test
@@ -432,6 +439,83 @@ class DefaultTwoStepSettingsServiceTest {
     }
 
     @Test
+    void turningOnLocksTheAccountBeforeCountingItsPasskeys() {
+        final var user = signedIn(keysOnly(false));
+        when(passkeyCredentialRepository.countByUser(user)).thenReturn(1L);
+        when(recoveryCodes.issueIfNone(user)).thenReturn(TEN_CODES);
+
+        twoStepSettingsService.enableWithPasskeys();
+
+        final var order = inOrder(accountLock, passkeyCredentialRepository, userRepository, recoveryCodes);
+        order.verify(accountLock).lock(user);
+        order.verify(passkeyCredentialRepository).countByUser(user);
+        order.verify(userRepository).save(user);
+        order.verify(recoveryCodes).issueIfNone(user);
+    }
+
+    @Test
+    void removingTotpLocksTheAccountBeforeCountingItsPasskeys() {
+        final var user = signedIn(withAuthenticatorApp());
+        when(passkeyCredentialRepository.countByUser(user)).thenReturn(1L);
+        when(twoFactorService.verifyLoginCode(user, "123456")).thenReturn(true);
+
+        twoStepSettingsService.removeTotp(new TwoFactorCodeDto("123456"));
+
+        final var order = inOrder(accountLock, passkeyCredentialRepository, twoFactorService, userRepository);
+        order.verify(accountLock).lock(user);
+        order.verify(passkeyCredentialRepository).countByUser(user);
+        order.verify(twoFactorService).verifyLoginCode(user, "123456");
+        order.verify(userRepository).save(user);
+    }
+
+    @Test
+    void turningOffLocksTheAccountBeforeTheFactorIsChecked() {
+        final var user = signedIn(withAuthenticatorApp());
+        when(twoFactorService.verifyLoginCode(user, "123456")).thenReturn(true);
+
+        twoStepSettingsService.disable(TwoStepDisableDto.builder().code("123456").build());
+
+        final var order = inOrder(accountLock, loginAttemptService, twoFactorService, userRepository, recoveryCodes);
+        order.verify(accountLock).lock(user);
+        order.verify(loginAttemptService).isBlocked(TWO_FACTOR_KEY);
+        order.verify(twoFactorService).verifyLoginCode(user, "123456");
+        order.verify(userRepository).save(user);
+        order.verify(recoveryCodes).deleteAll(user);
+    }
+
+    @Test
+    void theLockedAccountDecidesNotTheCopyFromTheToken() {
+        final var fromTheToken = signedIn(keysOnly(false));
+        when(accountLock.lock(fromTheToken)).thenReturn(keysOnly(true));
+        when(passkeyCredentialRepository.countByUser(any())).thenReturn(1L);
+
+        assertThatThrownBy(() -> twoStepSettingsService.enableWithPasskeys())
+                .isInstanceOf(ApiException.class)
+                .hasMessage("Two-step verification is already on.");
+
+        final var appFromTheToken = signedIn(withAuthenticatorApp());
+        when(accountLock.lock(appFromTheToken)).thenReturn(keysOnly(true));
+
+        assertThatThrownBy(() -> twoStepSettingsService.removeTotp(new TwoFactorCodeDto("123456")))
+                .isInstanceOf(ApiException.class)
+                .hasMessage("No authenticator app is set up.");
+        verify(userRepository, never()).save(any());
+        verifyNoInteractions(recoveryCodes, twoFactorService);
+    }
+
+    @Test
+    void readingTheStatusOrTheTurnOffOptionsTakesNoLock() {
+        final var user = signedIn(keysOnly(true));
+        when(passkeyCredentialRepository.findByUserOrderByCreatedAtDesc(user)).thenReturn(List.of(securityKey()));
+        when(passkeyCeremonyStore.save(any())).thenReturn(CEREMONY_ID);
+
+        twoStepSettingsService.status();
+        twoStepSettingsService.disableOptions();
+
+        verifyNoInteractions(accountLock);
+    }
+
+    @Test
     void withoutASignedInUserNothingHappens() {
         when(userService.getUserFromToken()).thenReturn(null);
 
@@ -441,7 +525,7 @@ class DefaultTwoStepSettingsServiceTest {
         assertThatThrownBy(() -> twoStepSettingsService.disable(TwoStepDisableDto.builder().code("123456").build()))
                 .isInstanceOf(NoAuthorizationException.class)
                 .hasMessage("Not authenticated");
-        verifyNoInteractions(twoFactorService, passkeyCredentialRepository, recoveryCodes, loginAttemptService);
+        verifyNoInteractions(twoFactorService, passkeyCredentialRepository, recoveryCodes, loginAttemptService, accountLock);
     }
 
     private User signedIn(final User user) {

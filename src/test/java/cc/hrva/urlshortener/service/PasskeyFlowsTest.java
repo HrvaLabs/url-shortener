@@ -43,6 +43,7 @@ import cc.hrva.urlshortener.service.passkey.PasskeyJson;
 import cc.hrva.urlshortener.service.passkey.PasskeyOptionsFactory;
 import cc.hrva.urlshortener.service.passkey.RedisPasskeyCeremonyStore;
 import cc.hrva.urlshortener.service.passkey.TestAuthenticator;
+import cc.hrva.urlshortener.service.twostep.AccountLock;
 import cc.hrva.urlshortener.service.twostep.RecoveryCodes;
 import cc.hrva.urlshortener.service.twostep.RedisPendingLoginStore;
 import cc.hrva.urlshortener.service.twostep.TwoStepMethods;
@@ -766,7 +767,8 @@ class PasskeyFlowsTest {
             DefaultTwoFactorService.class,
             DefaultSecondStepService.class,
             RecoveryCodes.class,
-            DefaultTwoStepSettingsService.class
+            DefaultTwoStepSettingsService.class,
+            AccountLock.class
     })
     static class TestApplication {
 
