@@ -11,6 +11,7 @@ import cc.hrva.urlshortener.dto.bio.BioPageButtonDto;
 import cc.hrva.urlshortener.dto.bio.BioPageCreateDto;
 import cc.hrva.urlshortener.dto.bio.BioPageResponse;
 import cc.hrva.urlshortener.dto.bio.BioPageUpdateDto;
+import cc.hrva.urlshortener.dto.bio.PublicBioPageResponse;
 import cc.hrva.urlshortener.exception.BioPageConflictException;
 import cc.hrva.urlshortener.exception.BioPageNotFoundException;
 import cc.hrva.urlshortener.mcp.McpResourceServerConfiguration;
@@ -30,6 +31,7 @@ import cc.hrva.urlshortener.security.JwtFilter;
 import cc.hrva.urlshortener.security.OAuth2LoginSuccessHandler;
 import cc.hrva.urlshortener.security.TokenProvider;
 import cc.hrva.urlshortener.service.BioPageService;
+import cc.hrva.urlshortener.service.PublicBioPageService;
 import com.nimbusds.jose.JOSEException;
 import com.nimbusds.jose.jwk.RSAKey;
 import com.nimbusds.jose.jwk.gen.RSAKeyGenerator;
@@ -47,6 +49,7 @@ import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
@@ -71,6 +74,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.redirectedUrl;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -93,6 +97,8 @@ class BioPageEndpointSecurityTest {
     private static final String MY_PAGE = "/api/v1/bio-pages/me";
     private static final String MY_HANDLE = MY_PAGE + "/handle";
     private static final String AVAILABILITY = "/api/v1/bio-pages/handles/ana/availability";
+    private static final String PUBLIC_PAGE = "/api/v1/public/bio-pages/ana";
+    private static final String NOT_AVAILABLE = "This page isn't available.";
     private static final String USER = "ana@example.com";
     private static final String USER_TOKEN = "user-token";
     private static final String NO_PAGE = "You don't have a bio page yet.";
@@ -103,6 +109,9 @@ class BioPageEndpointSecurityTest {
 
     @MockitoBean
     private BioPageService bioPageService;
+
+    @MockitoBean
+    private PublicBioPageService publicBioPageService;
 
     @MockitoBean
     private UrlRepository urlRepository;
@@ -248,6 +257,48 @@ class BioPageEndpointSecurityTest {
     }
 
     @Test
+    void thePublicReadNeedsNoSignIn() throws Exception {
+        when(publicBioPageService.find("ana")).thenReturn(publicAna());
+
+        mockMvc.perform(get(PUBLIC_PAGE))
+                .andExpect(status().isOk())
+                .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "no-store"))
+                .andExpect(content().json("""
+                        {"handle":"ana","displayName":"Ana Horvat","bio":"Photos from Zagreb","avatarKind":"EMOJI","avatarEmoji":"x",
+                        "accent":"TEAL","theme":"AUTO","indexable":false,"buttons":[{"title":"Instagram","icon":"INSTAGRAM","shortUrl":"ana-ig"}]}""",
+                        true));
+    }
+
+    @Test
+    void aSignedInVisitorReadsThePublicPageToo() throws Exception {
+        when(publicBioPageService.find("ana")).thenReturn(publicAna());
+
+        mockMvc.perform(signedIn(get(PUBLIC_PAGE)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.handle").value("ana"));
+    }
+
+    @Test
+    void thePathIsPassedAsTyped() throws Exception {
+        when(publicBioPageService.find("@Ana")).thenReturn(publicAna());
+
+        mockMvc.perform(get("/api/v1/public/bio-pages/@Ana"))
+                .andExpect(status().isOk());
+
+        verify(publicBioPageService).find("@Ana");
+    }
+
+    @Test
+    void anUnavailablePageIs404WithItsText() throws Exception {
+        when(publicBioPageService.find("ana")).thenThrow(new BioPageNotFoundException(NOT_AVAILABLE));
+
+        mockMvc.perform(get(PUBLIC_PAGE))
+                .andExpect(status().isNotFound())
+                .andExpect(header().string(HttpHeaders.CACHE_CONTROL, containsString("no-store")))
+                .andExpect(content().json("{\"error\":\"This page isn't available.\"}", true));
+    }
+
+    @Test
     void theSwitchesMayBeLeftOut() throws Exception {
         when(bioPageService.update(any(BioPageUpdateDto.class))).thenReturn(ana());
 
@@ -355,6 +406,11 @@ class BioPageEndpointSecurityTest {
                 createdAt, createdAt.plusMinutes(5));
     }
 
+    private static PublicBioPageResponse publicAna() {
+        return new PublicBioPageResponse("ana", "Ana Horvat", "Photos from Zagreb", BioAvatarKind.EMOJI, "x", BioAccent.TEAL, BioTheme.AUTO,
+                false, List.of(new PublicBioPageResponse.Button("Instagram", BioIcon.INSTAGRAM, "ana-ig")));
+    }
+
     private static MockHttpServletRequestBuilder signedIn(final MockHttpServletRequestBuilder request) {
         return request.header(JwtFilter.AUTHORIZATION_HEADER, "Bearer " + USER_TOKEN).contentType(MediaType.APPLICATION_JSON);
     }
@@ -380,7 +436,8 @@ class BioPageEndpointSecurityTest {
             JwtFilter.class,
             ClientIpResolver.class,
             BioPageController.class,
-            BioRedirectController.class
+            BioRedirectController.class,
+            PublicBioPageController.class
     })
     static class TestApplication {
     }

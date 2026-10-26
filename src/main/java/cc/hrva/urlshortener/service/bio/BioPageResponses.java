@@ -1,6 +1,7 @@
 package cc.hrva.urlshortener.service.bio;
 
 import cc.hrva.urlshortener.dto.bio.BioPageResponse;
+import cc.hrva.urlshortener.dto.bio.PublicBioPageResponse;
 import cc.hrva.urlshortener.model.BioPage;
 import cc.hrva.urlshortener.model.BioPageButton;
 import cc.hrva.urlshortener.model.Url;
@@ -49,6 +50,15 @@ public class BioPageResponses {
         final var states = statesOf(buttons.stream().map(BioPageButton::getUrl).toList());
         return BioPageResponse.from(page, buttons.stream()
                 .map(button -> BioPageResponse.Button.from(button, states.get(button.getUrl().getId())))
+                .toList());
+    }
+
+    public PublicBioPageResponse publicView(final BioPage page) {
+        final var visibleButtons = buttonsOf(page).stream().filter(BioPageButton::isVisible).toList();
+        final var states = statesOf(visibleButtons.stream().map(BioPageButton::getUrl).toList());
+        return PublicBioPageResponse.from(page, visibleButtons.stream()
+                .filter(button -> states.get(button.getUrl().getId()) == BioLinkState.LIVE)
+                .map(PublicBioPageResponse.Button::from)
                 .toList());
     }
 
