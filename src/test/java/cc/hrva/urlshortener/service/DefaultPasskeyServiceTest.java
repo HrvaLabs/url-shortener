@@ -25,6 +25,8 @@ import cc.hrva.urlshortener.service.passkey.TestAuthenticator;
 import com.webauthn4j.converter.exception.DataConversionException;
 import com.webauthn4j.verifier.exception.BadOriginException;
 import java.nio.charset.StandardCharsets;
+import java.sql.SQLException;
+import java.sql.SQLIntegrityConstraintViolationException;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Base64;
@@ -32,12 +34,18 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Named;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.web.webauthn.api.Bytes;
 import org.springframework.security.web.webauthn.management.RelyingPartyRegistrationRequest;
@@ -67,6 +75,7 @@ class DefaultPasskeyServiceTest {
     private static final String COULD_NOT_VERIFY = "That passkey or security key couldn't be verified. Try again.";
     private static final String ALREADY_ADDED = "This passkey or security key is already added.";
     private static final String EXPIRED = "This request expired. Try again.";
+    private static final String RACED_CREDENTIAL_ID = "c2FtZS1jcmVkZW50aWFs";
 
     @Mock
     private UserService userService;
@@ -308,17 +317,79 @@ class DefaultPasskeyServiceTest {
         verify(relyingPartyOperations, times(4)).registerCredential(any());
     }
 
-    @Test
-    void aConstraintRaceIsTheDuplicateText() {
+    @ParameterizedTest
+    @MethodSource("credentialIdConstraintRaces")
+    @ExtendWith(OutputCaptureExtension.class)
+    void aCredentialIdConstraintRaceIsTheDuplicateTextAndItsDetailIsNeverLogged(
+            final DataIntegrityViolationException race, final CapturedOutput output) {
         final var user = userWithHandle();
         when(userService.getUserFromToken()).thenReturn(user);
         when(passkeyCeremonyStore.consume(CEREMONY_ID)).thenReturn(registrationCeremony(user));
-        when(relyingPartyOperations.registerCredential(any()))
-                .thenThrow(new DataIntegrityViolationException("uq_passkey_credential_credential_id"));
+        when(relyingPartyOperations.registerCredential(any())).thenThrow(race);
 
         assertThatThrownBy(() -> passkeyService.register(registrationDto(registration(user), "MacBook")))
                 .isInstanceOf(ApiException.class)
                 .hasMessage(ALREADY_ADDED);
+        assertThat(output)
+                .contains("Passkey already added user id=7")
+                .doesNotContain(RACED_CREDENTIAL_ID)
+                .doesNotContainIgnoringCase("uq_passkey_credential_credential_id");
+    }
+
+    @Test
+    void anotherConstraintViolationIsRethrown() {
+        final var user = userWithHandle();
+        final var race = new DataIntegrityViolationException("could not execute statement", new SQLException(
+                "ERROR: insert or update on table \"passkey_credential\" violates foreign key constraint \"fk_passkey_credential_user\"\n"
+                        + "  Detail: Key (user_id)=(7) is not present in table \"user_account\".", "23503"));
+        when(userService.getUserFromToken()).thenReturn(user);
+        when(passkeyCeremonyStore.consume(CEREMONY_ID)).thenReturn(registrationCeremony(user));
+        when(relyingPartyOperations.registerCredential(any())).thenThrow(race);
+
+        assertThatThrownBy(() -> passkeyService.register(registrationDto(registration(user), "MacBook")))
+                .isSameAs(race);
+    }
+
+    @Test
+    @ExtendWith(OutputCaptureExtension.class)
+    void anUnexpectedStateIsLoggedAtWarnWithItsStackTrace(final CapturedOutput output) {
+        final var user = userWithHandle();
+        when(userService.getUserFromToken()).thenReturn(user);
+        when(passkeyCeremonyStore.consume(CEREMONY_ID)).thenReturn(registrationCeremony(user));
+        when(relyingPartyOperations.registerCredential(any()))
+                .thenThrow(new IllegalStateException("No account has this passkey user handle"));
+
+        assertThatThrownBy(() -> passkeyService.register(registrationDto(registration(user), "MacBook")))
+                .isInstanceOf(PasskeyVerificationException.class)
+                .hasMessage(COULD_NOT_VERIFY)
+                .hasNoCause();
+        assertThat(output.getOut().lines().filter(line -> line.contains("Passkey refused user id=7")))
+                .singleElement()
+                .satisfies(line -> assertThat(line).contains("WARN").doesNotContain("reason="));
+        assertThat(output).contains("java.lang.IllegalStateException: No account has this passkey user handle")
+                .contains("\tat ");
+    }
+
+    @Test
+    @ExtendWith(OutputCaptureExtension.class)
+    void otherRefusalsAreLoggedByClassNameOnly(final CapturedOutput output) {
+        final var user = userWithHandle();
+        when(userService.getUserFromToken()).thenReturn(user);
+        when(passkeyCeremonyStore.consume(CEREMONY_ID)).thenAnswer(invocation -> registrationCeremony(user));
+        when(relyingPartyOperations.registerCredential(any()))
+                .thenThrow(new BadOriginException("The origin http://evil.example is not allowed"))
+                .thenThrow(new IllegalArgumentException("Credential with id a2V5 already exists"));
+
+        for (var attempt = 0; attempt < 2; attempt++) {
+            assertThatThrownBy(() -> passkeyService.register(registrationDto(registration(user), "MacBook")))
+                    .isInstanceOf(PasskeyVerificationException.class)
+                    .hasMessage(COULD_NOT_VERIFY);
+        }
+        assertThat(output)
+                .contains("reason=BadOriginException")
+                .contains("reason=IllegalArgumentException")
+                .doesNotContain("evil.example")
+                .doesNotContain("already exists");
     }
 
     @Test
@@ -394,6 +465,16 @@ class DefaultPasskeyServiceTest {
                 .hasMessage("Not authenticated");
 
         verifyNoInteractions(reauthentication, passkeyCeremonyStore, passkeyCredentialRepository);
+    }
+
+    private static Stream<Named<DataIntegrityViolationException>> credentialIdConstraintRaces() {
+        return Stream.of(
+                Named.of("H2", new DataIntegrityViolationException("could not execute statement", new SQLIntegrityConstraintViolationException(
+                        "Unique index or primary key violation: \"PUBLIC.UQ_PASSKEY_CREDENTIAL_CREDENTIAL_ID_INDEX_E ON PUBLIC.PASSKEY_CREDENTIAL(CREDENTIAL_ID NULLS FIRST) VALUES ( /* 1 */ '"
+                                + RACED_CREDENTIAL_ID + "' )\"", "23505"))),
+                Named.of("Postgres", new DataIntegrityViolationException("could not execute statement", new SQLException(
+                        "ERROR: duplicate key value violates unique constraint \"uq_passkey_credential_credential_id\"\n"
+                                + "  Detail: Key (credential_id)=(" + RACED_CREDENTIAL_ID + ") already exists.", "23505"))));
     }
 
     private void handlesAreStored() {

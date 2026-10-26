@@ -57,6 +57,7 @@ public class DefaultPasskeyService implements PasskeyService {
     private static final String LABEL_TOO_LONG = "A label can have at most 64 characters.";
     private static final String NOT_FOUND = "Passkey not found";
     private static final String NOT_AUTHENTICATED = "Not authenticated";
+    private static final String CREDENTIAL_ID_CONSTRAINT = "uq_passkey_credential_credential_id";
 
     private final UserService userService;
     private final UserRepository userRepository;
@@ -101,9 +102,15 @@ public class DefaultPasskeyService implements PasskeyService {
             relyingPartyOperations.registerCredential(
                     new ImmutableRelyingPartyRegistrationRequest(options, new RelyingPartyPublicKey(credential, label)));
         } catch (final DataIntegrityViolationException exception) {
+            if (!namesTheCredentialIdConstraint(exception)) {
+                throw exception;
+            }
             log.info("Passkey already added user id={} credential={}…", user.getId(), prefixOf(credentialId));
             throw new ApiException(ALREADY_ADDED);
-        } catch (final WebAuthnException | IllegalArgumentException | IllegalStateException exception) {
+        } catch (final IllegalStateException exception) {
+            log.warn("Passkey refused user id={} credential={}…", user.getId(), prefixOf(credentialId), exception);
+            throw new PasskeyVerificationException(COULD_NOT_VERIFY);
+        } catch (final WebAuthnException | IllegalArgumentException exception) {
             log.info("Passkey refused user id={} credential={}… reason={}", user.getId(), prefixOf(credentialId),
                     exception.getClass().getSimpleName());
             throw new PasskeyVerificationException(COULD_NOT_VERIFY);
@@ -199,6 +206,10 @@ public class DefaultPasskeyService implements PasskeyService {
                 .map(output -> ((CredentialPropertiesOutput) output).getOutput().isRk())
                 .findFirst()
                 .orElse(null);
+    }
+
+    private static boolean namesTheCredentialIdConstraint(final DataIntegrityViolationException exception) {
+        return StringUtils.containsIgnoreCase(exception.getMostSpecificCause().getMessage(), CREDENTIAL_ID_CONSTRAINT);
     }
 
     private static String prefixOf(final String credentialId) {

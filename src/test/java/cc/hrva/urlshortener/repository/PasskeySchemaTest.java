@@ -84,7 +84,9 @@ class PasskeySchemaTest {
         final var sameCredentialForBob = passkey(savedUser("bob@example.com"), "c2FtZS1jcmVkZW50aWFs").build();
 
         assertThatThrownBy(() -> passkeyCredentialRepository.saveAndFlush(sameCredentialForBob))
-                .isInstanceOf(DataIntegrityViolationException.class);
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .satisfies(exception -> assertThat(((DataIntegrityViolationException) exception).getMostSpecificCause().getMessage())
+                        .containsIgnoringCase("uq_passkey_credential_credential_id"));
     }
 
     @Test

@@ -184,6 +184,46 @@ class PasskeyFlowsTest {
     }
 
     @Test
+    void aCredentialWithoutTransportsRegisters() {
+        signedIn(localUser("no-transports@example.com"));
+        final var authenticator = TestAuthenticator.securityKey().withoutTransports();
+
+        final var passkey = addPasskey(authenticator, "Old key");
+
+        assertThat(passkey.transports()).isEmpty();
+        assertThat(stored(authenticator).getTransports()).isNull();
+        assertThat(registrationOptions().options().path("excludeCredentials").values())
+                .singleElement()
+                .satisfies(descriptor -> {
+                    assertThat(descriptor.path("id").asString()).isEqualTo(authenticator.credentialId());
+                    assertThat(descriptor.path("transports").values()).isEmpty();
+                });
+    }
+
+    @Test
+    void anUnknownTransportIsDroppedAndTheKnownOneStored() {
+        signedIn(localUser("cable@example.com"));
+        final var authenticator = TestAuthenticator.securityKey().withTransports("cable", "usb");
+
+        final var passkey = addPasskey(authenticator, "Phone");
+
+        assertThat(passkey.transports()).containsExactly("usb");
+        assertThat(stored(authenticator).getTransports()).isEqualTo("usb");
+    }
+
+    @Test
+    void anAuthenticatorWithoutUserPresenceIsRefused() {
+        signedIn(localUser("presence@example.com"));
+        final var options = registrationOptions();
+        final var credential = TestAuthenticator.syncedPasskey().withoutUserPresence().register(options.options());
+
+        assertThatThrownBy(() -> passkeyService.register(registration(options, credential, "MacBook")))
+                .isInstanceOf(PasskeyVerificationException.class)
+                .hasMessage(COULD_NOT_VERIFY);
+        assertThat(passkeyCredentialRepository.count()).isZero();
+    }
+
+    @Test
     void aCeremonyCanBeUsedOnce() {
         signedIn(localUser("once@example.com"));
         final var authenticator = TestAuthenticator.syncedPasskey();

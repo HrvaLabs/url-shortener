@@ -220,6 +220,8 @@ class SignInEndpointSecurityTest {
                 .andExpect(status().isUnauthorized());
         mockMvc.perform(post(PASSKEYS).contentType(MediaType.APPLICATION_JSON).content(REGISTRATION_BODY))
                 .andExpect(status().isUnauthorized());
+        mockMvc.perform(patch(PASSKEYS + "/7").contentType(MediaType.APPLICATION_JSON).content("{\"label\":\"Work YubiKey\"}"))
+                .andExpect(status().isUnauthorized());
         mockMvc.perform(delete(PASSKEYS + "/7"))
                 .andExpect(status().isUnauthorized());
 
