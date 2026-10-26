@@ -43,6 +43,16 @@ class EmailAddressesTest {
     }
 
     @Test
+    void anAddressInAngleBracketsKeepsItsBrackets() {
+        assertThat(EmailAddresses.maskedIn("Bob <bob@x.com>")).isEqualTo("Bob <b***@x.com>");
+    }
+
+    @Test
+    void punctuationAfterAnAddressIsKept() {
+        assertThat(EmailAddresses.maskedIn("Write to bob@x.com.")).isEqualTo("Write to b***@x.com.");
+    }
+
+    @Test
     void aTextWithoutAddressesIsUnchanged() {
         assertThat(EmailAddresses.maskedIn("A passkey was added to your account")).isEqualTo("A passkey was added to your account");
         assertThat(EmailAddresses.maskedIn(null)).isNull();

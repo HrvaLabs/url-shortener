@@ -93,7 +93,7 @@ public class OAuth2LoginSuccessHandler implements AuthenticationSuccessHandler {
                 .orElseGet(() -> createOAuth2User(email, providerOf(authentication)));
 
         if (Boolean.FALSE.equals(user.getActive())) {
-            log.warn("OAuth2 login blocked: inactive account email={}", EmailAddresses.masked(email));
+            log.warn("OAuth2 login blocked: inactive account email={} user id={}", EmailAddresses.masked(email), user.getId());
             response.sendRedirect(appProperties.getFrontendUrl() + "/auth/callback?error=account_inactive");
             return;
         }
@@ -117,7 +117,7 @@ public class OAuth2LoginSuccessHandler implements AuthenticationSuccessHandler {
                 appProperties.getFrontendUrl(),
                 URLEncoder.encode(jwt, StandardCharsets.UTF_8));
 
-        log.info("OAuth2 login success email={}", EmailAddresses.masked(email));
+        log.info("OAuth2 login success email={} user id={}", EmailAddresses.masked(email), user.getId());
         response.sendRedirect(redirectUrl);
     }
 
@@ -161,7 +161,7 @@ public class OAuth2LoginSuccessHandler implements AuthenticationSuccessHandler {
                 .build();
 
         final var saved = userRepository.save(newUser);
-        log.info("Created OAuth2 user email={}", EmailAddresses.masked(email));
+        log.info("Created OAuth2 user email={} user id={}", EmailAddresses.masked(email), saved.getId());
         eventPublisher.publishEvent(new UserRegisteredEvent(saved, null));
         eventPublisher.publishEvent(new AdminAlertEvent.UserSignedUp(saved.getId(), provider));
         return saved;

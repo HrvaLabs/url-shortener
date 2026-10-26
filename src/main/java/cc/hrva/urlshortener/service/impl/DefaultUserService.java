@@ -228,7 +228,7 @@ public class DefaultUserService implements UserService {
         disconnectConnectedApps(user.getId(), user.getEmail());
         // API keys are removed via CascadeType.ALL on User.apiKeys when the user is deleted.
         userRepository.delete(user);
-        log.info("Deleted user id={} and all owned URLs and API keys", user.getId());
+        log.info("Deleted user id={} and all owned data", user.getId());
     }
 
     private boolean isLocalAccount(final User user) {

@@ -48,6 +48,7 @@ public class DefaultSignInService implements SignInService {
                 .token(token)
                 .user(userToUserDtoConverter.convert(user))
                 .build();
+        log.info("Signed in user id={}", user.getId());
 
         return new ResponseEntity<>(jwtTokenDto, httpHeaders, HttpStatus.OK);
     }

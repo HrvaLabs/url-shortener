@@ -118,7 +118,7 @@ class OAuth2LoginSuccessHandlerTest {
 
         verify(response).sendRedirect("http://fe/auth/callback?error=account_inactive");
         verify(tokenProvider, never()).createToken(any());
-        assertThat(output).contains("OAuth2 login blocked: inactive account email=e***@example.com").doesNotContain("evil@example.com");
+        assertThat(output).contains("OAuth2 login blocked: inactive account email=e***@example.com user id=1").doesNotContain("evil@example.com");
     }
 
     @Test
@@ -137,7 +137,7 @@ class OAuth2LoginSuccessHandlerTest {
         verify(response).sendRedirect(contains("http://fe/auth/callback?token=jwt-token"));
         verify(eventPublisher, never()).publishEvent(any(Object.class));
         verifyNoInteractions(pendingLoginStore, twoStepMethods);
-        assertThat(output).contains("OAuth2 login success email=o***@example.com").doesNotContain("ok@example.com");
+        assertThat(output).contains("OAuth2 login success email=o***@example.com user id=1").doesNotContain("ok@example.com");
     }
 
     @ParameterizedTest
@@ -161,7 +161,11 @@ class OAuth2LoginSuccessHandlerTest {
         when(authoritiesService.getDefaultAuthority())
                 .thenReturn(Authorities.builder().id(1L).name("ROLE_USER").build());
         when(appProperties.getUserApiKeySlots()).thenReturn(2L);
-        when(userRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(userRepository.save(any())).thenAnswer(invocation -> {
+            final User saved = invocation.getArgument(0);
+            saved.setId(31L);
+            return saved;
+        });
         when(tokenProvider.createToken(any())).thenReturn("jwt-token");
 
         handler.onAuthenticationSuccess(request, response, authentication);
@@ -169,7 +173,7 @@ class OAuth2LoginSuccessHandlerTest {
         verify(eventPublisher).publishEvent(argThat((Object event) -> event instanceof UserRegisteredEvent registered
                 && "new@example.com".equals(registered.user().getEmail()) && registered.verificationToken() == null));
         verify(response).sendRedirect(contains("token=jwt-token"));
-        assertThat(output).contains("Created OAuth2 user email=n***@example.com", "OAuth2 login success email=n***@example.com")
+        assertThat(output).contains("Created OAuth2 user email=n***@example.com user id=31", "OAuth2 login success email=n***@example.com user id=31")
                 .doesNotContain("new@example.com");
     }
 

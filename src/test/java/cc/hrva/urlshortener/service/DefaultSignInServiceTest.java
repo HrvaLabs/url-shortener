@@ -18,6 +18,8 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.Authentication;
@@ -89,7 +91,8 @@ class DefaultSignInServiceTest {
     }
 
     @Test
-    void signInSetsTheAuthorizationHeaderAndMarksTheLogin() {
+    @ExtendWith(OutputCaptureExtension.class)
+    void signInSetsTheAuthorizationHeaderAndMarksTheLogin(final CapturedOutput output) {
         final var user = user();
         final var userDto = UserDto.builder().id(7L).email("user@example.com").twoStepEnabled(true).build();
         when(appProperties.getJwtTokenValiditySeconds()).thenReturn(36_000L);
@@ -110,6 +113,7 @@ class DefaultSignInServiceTest {
         verify(tokenProvider).createToken(authentication.capture(), eq(36_000L));
         assertThat(authentication.getValue().getName()).isEqualTo("user@example.com");
         assertThat(authentication.getValue().getAuthorities()).extracting(GrantedAuthority::getAuthority).containsExactly("ROLE_USER");
+        assertThat(output).contains("Signed in user id=7").doesNotContain("user@example.com").doesNotContain("eyJ.token");
     }
 
     @Test

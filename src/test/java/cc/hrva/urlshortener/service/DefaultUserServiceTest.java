@@ -403,7 +403,8 @@ class DefaultUserServiceTest {
     }
 
     @Test
-    void deletingAnAccountDeletesItsPasskeysFirst() {
+    @ExtendWith(OutputCaptureExtension.class)
+    void deletingAnAccountDeletesItsPasskeysBeforeTheAccount(final CapturedOutput output) {
         final var user = User.builder().id(1L).email("test@example.com").build();
         when(userRepository.findById(1L)).thenReturn(Optional.of(user));
 
@@ -412,6 +413,7 @@ class DefaultUserServiceTest {
         final var order = inOrder(passkeyCredentialRepository, userRepository);
         order.verify(passkeyCredentialRepository).deleteByUser(user);
         order.verify(userRepository).delete(user);
+        assertThat(output).contains("Deleted user id=1 and all owned data");
     }
 
     @Test
