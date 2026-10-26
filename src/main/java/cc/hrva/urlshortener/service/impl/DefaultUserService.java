@@ -35,6 +35,7 @@ import cc.hrva.urlshortener.service.ResetTokenService;
 import cc.hrva.urlshortener.service.ScammerSignalService;
 import cc.hrva.urlshortener.service.UserService;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent;
+import cc.hrva.urlshortener.service.bio.BioAccountData;
 import cc.hrva.urlshortener.util.EmailAddresses;
 import java.time.LocalDateTime;
 import java.util.Objects;
@@ -70,6 +71,7 @@ public class DefaultUserService implements UserService {
     private final ResetTokenRepository resetTokenRepository;
     private final TwoFactorRecoveryCodeRepository twoFactorRecoveryCodeRepository;
     private final PasskeyCredentialRepository passkeyCredentialRepository;
+    private final BioAccountData bioAccountData;
     private final UserToUserDtoConverter userToUserDtoConverter;
     private final DefaultSendingEmailService sendingEmailService;
     private final VerificationTokenService verificationTokenService;
@@ -214,7 +216,8 @@ public class DefaultUserService implements UserService {
                 apiKeys,
                 emails,
                 passkeys,
-                twoFactorRecoveryCodeRepository.countByUserAndUsedFalse(user));
+                twoFactorRecoveryCodeRepository.countByUserAndUsedFalse(user),
+                bioAccountData.exportFor(user).orElse(null));
     }
 
     private void deleteUserAndOwnedData(final User user) {
@@ -222,6 +225,7 @@ public class DefaultUserService implements UserService {
         verificationTokenRepository.deleteByUser(user);
         twoFactorRecoveryCodeRepository.deleteByUser(user);
         passkeyCredentialRepository.deleteByUser(user);
+        bioAccountData.deleteFor(user);
         urlRepository.deleteByOwner(user);
         disconnectConnectedApps(user.getId(), user.getEmail());
         // API keys are removed via CascadeType.ALL on User.apiKeys when the user is deleted.

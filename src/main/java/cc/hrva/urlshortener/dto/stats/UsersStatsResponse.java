@@ -12,7 +12,8 @@ public record UsersStatsResponse(
         long activeLast7Days,
         long activeLast30Days,
         ApiKeyCounts apiKeys,
-        McpCounts mcp) {
+        McpCounts mcp,
+        BioPageCounts bioPages) {
 
     public record UserInventory(
             long total,
@@ -26,5 +27,7 @@ public record UsersStatsResponse(
     public record ApiKeyCounts(long active, long expired, long revoked, long callsUsed) {}
 
     public record McpCounts(long connectedUsers, long registeredClients) {}
+
+    public record BioPageCounts(long total, long hidden) {}
 
 }

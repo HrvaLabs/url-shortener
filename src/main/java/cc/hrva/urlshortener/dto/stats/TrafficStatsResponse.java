@@ -16,8 +16,11 @@ public record TrafficStatsResponse(
         long accountClicks,
         List<TopLink> topLinks,
         UrlAnalyticsDto.Breakdowns breakdowns,
-        long allTimeVisits) {
+        long allTimeVisits,
+        BioPageViewTotals bioPageViews) {
 
     public record TopLink(Long id, String shortUrl, String destinationHost, String ownerEmail, long clicks, long uniqueVisitors) {}
+
+    public record BioPageViewTotals(long views, long botViews) {}
 
 }

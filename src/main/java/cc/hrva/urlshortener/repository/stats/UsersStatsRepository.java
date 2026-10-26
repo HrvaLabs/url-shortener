@@ -2,6 +2,7 @@ package cc.hrva.urlshortener.repository.stats;
 
 import cc.hrva.urlshortener.dto.stats.CountEntry;
 import cc.hrva.urlshortener.dto.stats.UsersStatsResponse.ApiKeyCounts;
+import cc.hrva.urlshortener.dto.stats.UsersStatsResponse.BioPageCounts;
 import cc.hrva.urlshortener.dto.stats.UsersStatsResponse.McpCounts;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -58,6 +59,11 @@ public class UsersStatsRepository {
 
     private static final String COUNT_REGISTERED_CLIENTS = "select count(*) from oauth2_registered_client";
 
+    private static final String COUNT_BIO_PAGES = """
+            select count(*) as total_pages, coalesce(sum(case when hidden_at is not null then 1 else 0 end), 0) as hidden_pages
+            from bio_page
+            """;
+
     private final NamedParameterJdbcTemplate jdbcTemplate;
 
     public AccountCounts countAccounts() {
@@ -93,6 +99,12 @@ public class UsersStatsRepository {
         return new McpCounts(
                 jdbcTemplate.queryForObject(COUNT_CONNECTED_USERS, Map.of(NOW, now), Long.class),
                 jdbcTemplate.queryForObject(COUNT_REGISTERED_CLIENTS, Map.of(), Long.class));
+    }
+
+    public BioPageCounts countBioPages() {
+        return jdbcTemplate.queryForObject(COUNT_BIO_PAGES, Map.of(), (row, rowNumber) -> new BioPageCounts(
+                row.getLong("total_pages"),
+                row.getLong("hidden_pages")));
     }
 
     public record AccountCounts(long total, long active, long emailVerified, long twoFactorEnabled) {}

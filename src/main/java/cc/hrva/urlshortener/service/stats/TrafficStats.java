@@ -35,7 +35,8 @@ public class TrafficStats {
                 ownership.account(),
                 topLinks,
                 AnalyticsSeries.breakdownsOf(breakdowns),
-                repository.sumAllTimeVisits());
+                repository.sumAllTimeVisits(),
+                repository.sumBioPageViews(window.from(), window.to()));
     }
 
     private static TopLink topLinkOf(final TopLinkRow row) {

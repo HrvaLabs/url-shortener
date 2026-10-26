@@ -14,5 +14,6 @@ public interface ScheduledService {
     void refreshDueBlocklists();
     void reloadMissingBlocklists();
     void sendWeeklyDigest();
+    void releaseExpiredBioHandles();
 
 }

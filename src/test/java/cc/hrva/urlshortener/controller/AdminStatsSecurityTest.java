@@ -21,8 +21,10 @@ import cc.hrva.urlshortener.dto.stats.SystemStatsResponse.ComponentHealth;
 import cc.hrva.urlshortener.dto.stats.SystemStatsResponse.DatabaseStats;
 import cc.hrva.urlshortener.dto.stats.SystemStatsResponse.RedisStats;
 import cc.hrva.urlshortener.dto.stats.TrafficStatsResponse;
+import cc.hrva.urlshortener.dto.stats.TrafficStatsResponse.BioPageViewTotals;
 import cc.hrva.urlshortener.dto.stats.UsersStatsResponse;
 import cc.hrva.urlshortener.dto.stats.UsersStatsResponse.ApiKeyCounts;
+import cc.hrva.urlshortener.dto.stats.UsersStatsResponse.BioPageCounts;
 import cc.hrva.urlshortener.dto.stats.UsersStatsResponse.McpCounts;
 import cc.hrva.urlshortener.dto.stats.UsersStatsResponse.UserInventory;
 import cc.hrva.urlshortener.exception.InvalidAnalyticsRangeException;
@@ -144,7 +146,7 @@ class AdminStatsSecurityTest {
     void theUsersTabCountsActiveExpiredAndRevokedApiKeys() throws Exception {
         when(adminStatsService.users(30)).thenReturn(new UsersStatsResponse(30, LocalDate.of(2026, 9, 27), LocalDate.of(2026, 10, 26),
                 new StackedSeries(List.of(), List.of()), new UserInventory(0, 0, 0, 0, 0, 0, List.of()), 0, 0,
-                new ApiKeyCounts(1, 1, 1, 42), new McpCounts(0, 0)));
+                new ApiKeyCounts(1, 1, 1, 42), new McpCounts(0, 0), new BioPageCounts(0, 0)));
 
         mockMvc.perform(tabRequest("users", "admin-token").param("days", "30"))
                 .andExpect(status().isOk())
@@ -152,6 +154,29 @@ class AdminStatsSecurityTest {
                 .andExpect(jsonPath("$.apiKeys.expired").value(1))
                 .andExpect(jsonPath("$.apiKeys.revoked").value(1))
                 .andExpect(jsonPath("$.apiKeys.callsUsed").value(42));
+    }
+
+    @Test
+    void theUsersTabCountsBioPagesAndHiddenOnes() throws Exception {
+        when(adminStatsService.users(7)).thenReturn(new UsersStatsResponse(7, LocalDate.of(2026, 10, 20), LocalDate.of(2026, 10, 26),
+                new StackedSeries(List.of(), List.of()), new UserInventory(0, 0, 0, 0, 0, 0, List.of()), 0, 0,
+                new ApiKeyCounts(0, 0, 0, 0), new McpCounts(0, 0), new BioPageCounts(12, 2)));
+
+        mockMvc.perform(tabRequest("users", "admin-token").param("days", "7"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.bioPages.total").value(12))
+                .andExpect(jsonPath("$.bioPages.hidden").value(2));
+    }
+
+    @Test
+    void theTrafficTabSumsBioPageViews() throws Exception {
+        when(adminStatsService.traffic(7)).thenReturn(new TrafficStatsResponse(7, LocalDate.of(2026, 10, 20), LocalDate.of(2026, 10, 26),
+                new AnalyticsTotals(0, 0, 0), List.of(), 0, 0, List.of(), emptyBreakdowns(), 0, new BioPageViewTotals(40, 6)));
+
+        mockMvc.perform(tabRequest("traffic", "admin-token").param("days", "7"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.bioPageViews.views").value(40))
+                .andExpect(jsonPath("$.bioPageViews.botViews").value(6));
     }
 
     @ParameterizedTest
@@ -195,13 +220,14 @@ class AdminStatsSecurityTest {
     private void respond(final String tab) {
         switch (tab) {
             case "traffic" -> when(adminStatsService.traffic(7)).thenReturn(new TrafficStatsResponse(7, LocalDate.of(2026, 10, 20),
-                    LocalDate.of(2026, 10, 26), new AnalyticsTotals(0, 0, 0), List.of(), 0, 0, List.of(), emptyBreakdowns(), 0));
+                    LocalDate.of(2026, 10, 26), new AnalyticsTotals(0, 0, 0), List.of(), 0, 0, List.of(), emptyBreakdowns(), 0,
+                    new BioPageViewTotals(0, 0)));
             case "links" -> when(adminStatsService.links(7)).thenReturn(new LinksStatsResponse(7, LocalDate.of(2026, 10, 20),
                     LocalDate.of(2026, 10, 26), new StackedSeries(List.of(), List.of()), new CreatedInRange(0, 0, 0, 0),
                     new LinkInventory(0, 0, 0, 0, 0, 0, 0, List.of()), List.of(), List.of(), List.of()));
             case "users" -> when(adminStatsService.users(7)).thenReturn(new UsersStatsResponse(7, LocalDate.of(2026, 10, 20),
                     LocalDate.of(2026, 10, 26), new StackedSeries(List.of(), List.of()), new UserInventory(0, 0, 0, 0, 0, 0, List.of()), 0, 0,
-                    new ApiKeyCounts(0, 0, 0, 0), new McpCounts(0, 0)));
+                    new ApiKeyCounts(0, 0, 0, 0), new McpCounts(0, 0), new BioPageCounts(0, 0)));
             case "safety" -> when(adminStatsService.safety(7)).thenReturn(new SafetyStatsResponse(7, LocalDate.of(2026, 10, 20),
                     LocalDate.of(2026, 10, 26), new StackedSeries(List.of(), List.of()), 0, 0, List.of(), new ResolveTimes(0, null, null),
                     new StackedSeries(List.of(), List.of()), new DomainRuleCounts(0, 0), 0, List.of()));

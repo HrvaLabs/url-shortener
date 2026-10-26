@@ -16,8 +16,10 @@ import cc.hrva.urlshortener.dto.stats.SystemStatsResponse.ComponentHealth;
 import cc.hrva.urlshortener.dto.stats.SystemStatsResponse.DatabaseStats;
 import cc.hrva.urlshortener.dto.stats.SystemStatsResponse.RedisStats;
 import cc.hrva.urlshortener.dto.stats.TrafficStatsResponse;
+import cc.hrva.urlshortener.dto.stats.TrafficStatsResponse.BioPageViewTotals;
 import cc.hrva.urlshortener.dto.stats.UsersStatsResponse;
 import cc.hrva.urlshortener.dto.stats.UsersStatsResponse.ApiKeyCounts;
+import cc.hrva.urlshortener.dto.stats.UsersStatsResponse.BioPageCounts;
 import cc.hrva.urlshortener.dto.stats.UsersStatsResponse.McpCounts;
 import cc.hrva.urlshortener.dto.stats.UsersStatsResponse.UserInventory;
 import cc.hrva.urlshortener.exception.InvalidAnalyticsRangeException;
@@ -187,7 +189,7 @@ class DefaultAdminStatsServiceTest {
 
     private static TrafficStatsResponse emptyTraffic(final StatsWindow window) {
         return new TrafficStatsResponse(window.days(), window.from(), window.to(), new AnalyticsTotals(0, 0, 0), List.of(), 0, 0,
-                List.of(), new Breakdowns(List.of(), List.of(), List.of(), List.of(), List.of(), List.of()), 0);
+                List.of(), new Breakdowns(List.of(), List.of(), List.of(), List.of(), List.of(), List.of()), 0, new BioPageViewTotals(0, 0));
     }
 
     private static LinksStatsResponse emptyLinks(final StatsWindow window) {
@@ -197,7 +199,7 @@ class DefaultAdminStatsServiceTest {
 
     private static UsersStatsResponse emptyUsers(final StatsWindow window) {
         return new UsersStatsResponse(window.days(), window.from(), window.to(), new StackedSeries(List.of(), List.of()),
-                new UserInventory(0, 0, 0, 0, 0, 0, List.of()), 0, 0, new ApiKeyCounts(0, 0, 0, 0), new McpCounts(0, 0));
+                new UserInventory(0, 0, 0, 0, 0, 0, List.of()), 0, 0, new ApiKeyCounts(0, 0, 0, 0), new McpCounts(0, 0), new BioPageCounts(0, 0));
     }
 
     private static SafetyStatsResponse emptySafety(final StatsWindow window) {

@@ -4,6 +4,7 @@ import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.dto.stats.CountEntry;
 import cc.hrva.urlshortener.dto.stats.DailyCounts;
 import cc.hrva.urlshortener.dto.stats.UsersStatsResponse.ApiKeyCounts;
+import cc.hrva.urlshortener.dto.stats.UsersStatsResponse.BioPageCounts;
 import cc.hrva.urlshortener.dto.stats.UsersStatsResponse.McpCounts;
 import cc.hrva.urlshortener.dto.stats.UsersStatsResponse.UserInventory;
 import cc.hrva.urlshortener.repository.stats.HourlyCount;
@@ -45,6 +46,7 @@ class UsersStatsTest {
     private static final AccountCounts NO_ACCOUNTS = new AccountCounts(0, 0, 0, 0);
     private static final ApiKeyCounts NO_API_KEYS = new ApiKeyCounts(0, 0, 0, 0);
     private static final McpCounts NO_MCP = new McpCounts(0, 0);
+    private static final BioPageCounts NO_BIO_PAGES = new BioPageCounts(0, 0);
 
     @Mock
     private UsersStatsRepository usersStatsRepository;
@@ -61,7 +63,7 @@ class UsersStatsTest {
 
     @Test
     void deactivatedIsTotalMinusActive() {
-        givenCounts(new AccountCounts(120, 110, 100, 8), STORED_NOW, NO_API_KEYS, NO_MCP);
+        givenCounts(new AccountCounts(120, 110, 100, 8), STORED_NOW, NO_API_KEYS, NO_MCP, NO_BIO_PAGES);
         when(usersStatsRepository.countAdmins()).thenReturn(1L);
         when(usersStatsRepository.countByProvider()).thenReturn(List.of(
                 new CountEntry("local", 90),
@@ -80,7 +82,7 @@ class UsersStatsTest {
                 new HourlyCount(LocalDate.of(2026, 10, 24), 22, "github", 1),
                 new HourlyCount(LocalDate.of(2026, 10, 25), 9, "local", 2),
                 new HourlyCount(LocalDate.of(2026, 10, 25), 10, "gitlab", 1)));
-        givenCounts(NO_ACCOUNTS, STORED_NOW, NO_API_KEYS, NO_MCP);
+        givenCounts(NO_ACCOUNTS, STORED_NOW, NO_API_KEYS, NO_MCP, NO_BIO_PAGES);
 
         final var signups = usersStats.collect(WINDOW).signups();
 
@@ -94,7 +96,7 @@ class UsersStatsTest {
 
     @Test
     void activityWindowsAreSevenAndThirtyDaysBackFromNow() {
-        givenCounts(NO_ACCOUNTS, STORED_NOW, NO_API_KEYS, NO_MCP);
+        givenCounts(NO_ACCOUNTS, STORED_NOW, NO_API_KEYS, NO_MCP, NO_BIO_PAGES);
         when(usersStatsRepository.countSignedInSince(LocalDateTime.of(2026, 10, 19, 10, 0))).thenReturn(30L);
         when(usersStatsRepository.countSignedInSince(LocalDateTime.of(2026, 9, 26, 10, 0))).thenReturn(60L);
 
@@ -111,7 +113,7 @@ class UsersStatsTest {
     void apiKeysAndMcpUseTheStoredDateAndTime() {
         final var storedNow = LocalDateTime.of(2026, 10, 25, 23, 30);
         final var usersStatsJustAfterZagrebMidnight = usersStatsAt(Instant.parse("2026-10-25T23:30:00Z"));
-        givenCounts(NO_ACCOUNTS, storedNow, new ApiKeyCounts(20, 5, 3, 15000), new McpCounts(4, 9));
+        givenCounts(NO_ACCOUNTS, storedNow, new ApiKeyCounts(20, 5, 3, 15000), new McpCounts(4, 9), NO_BIO_PAGES);
 
         final var users = usersStatsJustAfterZagrebMidnight.collect(WINDOW);
 
@@ -122,8 +124,15 @@ class UsersStatsTest {
     }
 
     @Test
+    void bioPagesAreCountedWithTheHiddenOnes() {
+        givenCounts(NO_ACCOUNTS, STORED_NOW, NO_API_KEYS, NO_MCP, new BioPageCounts(12, 2));
+
+        assertThat(usersStats.collect(WINDOW).bioPages()).isEqualTo(new BioPageCounts(12, 2));
+    }
+
+    @Test
     void emptySiteIsAllZeros() {
-        givenCounts(NO_ACCOUNTS, STORED_NOW, NO_API_KEYS, NO_MCP);
+        givenCounts(NO_ACCOUNTS, STORED_NOW, NO_API_KEYS, NO_MCP, NO_BIO_PAGES);
 
         final var users = usersStats.collect(WINDOW);
 
@@ -142,6 +151,7 @@ class UsersStatsTest {
         assertThat(users.activeLast30Days()).isZero();
         assertThat(users.apiKeys()).isEqualTo(new ApiKeyCounts(0, 0, 0, 0));
         assertThat(users.mcp()).isEqualTo(new McpCounts(0, 0));
+        assertThat(users.bioPages()).isEqualTo(new BioPageCounts(0, 0));
         verify(hourlyCountRepository).count(SIGNUPS_BY_PROVIDER, WINDOW.start(), WINDOW.end());
         verify(usersStatsRepository).countAccounts();
         verify(usersStatsRepository).countAdmins();
@@ -150,6 +160,7 @@ class UsersStatsTest {
         verify(usersStatsRepository).countSignedInSince(STORED_NOW.minusDays(30));
         verify(usersStatsRepository).countApiKeys(STORED_NOW.toLocalDate());
         verify(usersStatsRepository).countMcp(STORED_NOW);
+        verify(usersStatsRepository).countBioPages();
     }
 
     private UsersStats usersStatsAt(final Instant now) {
@@ -160,10 +171,12 @@ class UsersStatsTest {
         return new UsersStats(usersStatsRepository, hourlyCountRepository, new DailyBuckets(statsDays), statsDays);
     }
 
-    private void givenCounts(final AccountCounts accounts, final LocalDateTime storedNow, final ApiKeyCounts apiKeys, final McpCounts mcp) {
+    private void givenCounts(final AccountCounts accounts, final LocalDateTime storedNow, final ApiKeyCounts apiKeys, final McpCounts mcp,
+                             final BioPageCounts bioPages) {
         when(usersStatsRepository.countAccounts()).thenReturn(accounts);
         when(usersStatsRepository.countApiKeys(storedNow.toLocalDate())).thenReturn(apiKeys);
         when(usersStatsRepository.countMcp(storedNow)).thenReturn(mcp);
+        when(usersStatsRepository.countBioPages()).thenReturn(bioPages);
     }
 
 }

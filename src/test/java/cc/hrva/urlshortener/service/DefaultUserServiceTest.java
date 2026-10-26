@@ -1,10 +1,12 @@
 package cc.hrva.urlshortener.service;
 
+import java.lang.reflect.RecordComponent;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
@@ -14,6 +16,9 @@ import java.util.stream.IntStream;
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.converter.UserToUserDtoConverter;
 import cc.hrva.urlshortener.converter.UserUpdateDtoToUserConverter;
+import cc.hrva.urlshortener.dto.DataExportDto;
+import cc.hrva.urlshortener.dto.DataExportDto.BioButtonExport;
+import cc.hrva.urlshortener.dto.DataExportDto.BioPageExport;
 import cc.hrva.urlshortener.dto.DeleteAccountDto;
 import cc.hrva.urlshortener.dto.PasswordResetDto;
 import cc.hrva.urlshortener.dto.RequestPasswordResetDto;
@@ -33,6 +38,10 @@ import cc.hrva.urlshortener.model.PasskeyCredential;
 import cc.hrva.urlshortener.model.ResetToken;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.VerificationToken;
+import cc.hrva.urlshortener.model.enums.BioAccent;
+import cc.hrva.urlshortener.model.enums.BioAvatarKind;
+import cc.hrva.urlshortener.model.enums.BioIcon;
+import cc.hrva.urlshortener.model.enums.BioTheme;
 import cc.hrva.urlshortener.repository.ApiKeyRepository;
 import cc.hrva.urlshortener.repository.PasskeyCredentialRepository;
 import cc.hrva.urlshortener.repository.ResetTokenRepository;
@@ -42,6 +51,7 @@ import cc.hrva.urlshortener.security.Reauthentication;
 import cc.hrva.urlshortener.security.RecentSignIn;
 import cc.hrva.urlshortener.security.TokenProvider;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent;
+import cc.hrva.urlshortener.service.bio.BioAccountData;
 import cc.hrva.urlshortener.service.impl.DefaultLoginAttemptService;
 import cc.hrva.urlshortener.service.impl.DefaultSendingEmailService;
 import cc.hrva.urlshortener.service.impl.DefaultUserService;
@@ -135,6 +145,9 @@ class DefaultUserServiceTest {
     private PasskeyCredentialRepository passkeyCredentialRepository;
 
     @Mock
+    private BioAccountData bioAccountData;
+
+    @Mock
     private UserToUserDtoConverter userToUserDtoConverter;
 
     @Mock
@@ -177,7 +190,7 @@ class DefaultUserServiceTest {
                 loginAttemptService);
         return new DefaultUserService(appProperties, reauthentication, urlRepository, userRepository,
                 passwordEncoder, apiKeyRepository, emailLogRepository, resetTokenService,
-                resetTokenRepository, twoFactorRecoveryCodeRepository, passkeyCredentialRepository, userToUserDtoConverter, sendingEmailService,
+                resetTokenRepository, twoFactorRecoveryCodeRepository, passkeyCredentialRepository, bioAccountData, userToUserDtoConverter, sendingEmailService,
                 verificationTokenService, verificationTokenRepository, userUpdateDtoToUserConverter, connectedAppsService, scammerSignalService, publisher);
     }
 
@@ -444,6 +457,19 @@ class DefaultUserServiceTest {
     }
 
     @Test
+    void deletingAnAccountDeletesItsBioPageFirst() {
+        final var user = User.builder().id(1L).email("test@example.com").build();
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+
+        userService.deleteUserById(1L);
+
+        final var order = inOrder(bioAccountData, urlRepository, userRepository);
+        order.verify(bioAccountData).deleteFor(user);
+        order.verify(urlRepository).deleteByOwner(user);
+        order.verify(userRepository).delete(user);
+    }
+
+    @Test
     void shouldFailDeleteUserByIdWhenNotFound() {
         when(userRepository.findById(1L)).thenReturn(Optional.empty());
 
@@ -663,8 +689,42 @@ class DefaultUserServiceTest {
         assertThat(export.emails()).isEmpty();
         assertThat(export.passkeys()).isEmpty();
         assertThat(export.recoveryCodesRemaining()).isZero();
+        assertThat(export.bioPage()).isNull();
         assertThat(export.exportedAt()).isNotNull();
         SecurityContextHolder.clearContext();
+    }
+
+    @Test
+    void exportCarriesTheBioPageButNoViewCounts() {
+        final var user = User.builder().id(1L).email("test@example.com").build();
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken("test@example.com", null));
+        when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
+        when(userToUserDtoConverter.convert(user)).thenReturn(UserDto.builder().id(1L).email("test@example.com").build());
+        when(bioAccountData.exportFor(user)).thenReturn(Optional.of(new BioPageExport("ana", "Ana Horvat", "Photos from Zagreb",
+                BioAvatarKind.INITIALS, null, BioAccent.TEAL, BioTheme.AUTO, false, true, "Impersonation",
+                List.of(new BioButtonExport("Shop", BioIcon.INSTAGRAM, "ana-shop", true), new BioButtonExport("Blog", null, "ana-blog", false)),
+                LocalDateTime.of(2026, 10, 20, 8, 0), LocalDateTime.of(2026, 10, 25, 18, 30))));
+
+        final var mapper = JsonMapper.builder().build();
+        final var json = mapper.writeValueAsString(userService.exportMyData());
+        final var export = mapper.readTree(json);
+
+        assertThat(export.at("/bioPage/handle").asString()).isEqualTo("ana");
+        assertThat(export.get("bioPage").toString()).isEqualTo("""
+                {"handle":"ana","displayName":"Ana Horvat","bio":"Photos from Zagreb","avatarKind":"INITIALS","avatarEmoji":null,\
+                "accent":"TEAL","theme":"AUTO","indexable":false,"hidden":true,"hiddenReason":"Impersonation",\
+                "buttons":[{"title":"Shop","icon":"INSTAGRAM","shortUrl":"ana-shop","visible":true},\
+                {"title":"Blog","icon":null,"shortUrl":"ana-blog","visible":false}],\
+                "createdAt":"2026-10-20T08:00:00","updatedAt":"2026-10-25T18:30:00"}""");
+        assertThat(json).doesNotContain("\"views\"", "\"botViews\"", "\"hiddenBy\"", "\"handleRevokedReason\"", "\"reasons\"", "\"urlId\"");
+        SecurityContextHolder.clearContext();
+    }
+
+    @Test
+    void theBioPageComesLastInTheExport() {
+        assertThat(Arrays.stream(DataExportDto.class.getRecordComponents()).map(RecordComponent::getName))
+                .containsExactly("exportedAt", "profile", "urls", "apiKeys", "emails", "passkeys", "recoveryCodesRemaining", "bioPage");
     }
 
     @Test
@@ -768,6 +828,7 @@ class DefaultUserServiceTest {
         verify(resetTokenRepository).deleteByUser(user);
         verify(urlRepository).deleteByOwner(user);
         verify(passkeyCredentialRepository).deleteByUser(user);
+        verify(bioAccountData).deleteFor(user);
         verify(userRepository).delete(user);
         SecurityContextHolder.clearContext();
     }
@@ -916,7 +977,7 @@ class DefaultUserServiceTest {
         assertThatThrownBy(() -> userService.deleteOwnAccount(DeleteAccountDto.builder().password("wrong").build()))
                 .isInstanceOf(NoAuthorizationException.class);
 
-        verifyNoInteractions(connectedAppsService);
+        verifyNoInteractions(connectedAppsService, bioAccountData);
         SecurityContextHolder.clearContext();
     }
 

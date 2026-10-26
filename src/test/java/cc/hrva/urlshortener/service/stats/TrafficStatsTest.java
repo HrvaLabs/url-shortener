@@ -4,6 +4,7 @@ import cc.hrva.urlshortener.dto.AnalyticsDay;
 import cc.hrva.urlshortener.dto.AnalyticsTotals;
 import cc.hrva.urlshortener.dto.BreakdownEntry;
 import cc.hrva.urlshortener.dto.UrlAnalyticsDto.Breakdowns;
+import cc.hrva.urlshortener.dto.stats.TrafficStatsResponse.BioPageViewTotals;
 import cc.hrva.urlshortener.dto.stats.TrafficStatsResponse.TopLink;
 import cc.hrva.urlshortener.repository.stats.TrafficStatsRepository;
 import cc.hrva.urlshortener.repository.stats.TrafficStatsRepository.OwnershipClicks;
@@ -121,8 +122,17 @@ class TrafficStatsTest {
     }
 
     @Test
+    void bioPageViewsAreSummedOverTheWindow() {
+        givenOwnership(0, 0);
+        when(repository.sumBioPageViews(FROM, TO)).thenReturn(new BioPageViewTotals(40, 6));
+
+        assertThat(trafficStats.collect(WINDOW).bioPageViews()).isEqualTo(new BioPageViewTotals(40, 6));
+    }
+
+    @Test
     void emptySiteIsAllZeros() {
         givenOwnership(0, 0);
+        when(repository.sumBioPageViews(FROM, TO)).thenReturn(new BioPageViewTotals(0, 0));
 
         final var traffic = trafficStats.collect(WINDOW);
 
@@ -136,11 +146,13 @@ class TrafficStatsTest {
         assertThat(traffic.topLinks()).isEmpty();
         assertThat(traffic.breakdowns()).isEqualTo(new Breakdowns(List.of(), List.of(), List.of(), List.of(), List.of(), List.of()));
         assertThat(traffic.allTimeVisits()).isZero();
+        assertThat(traffic.bioPageViews()).isEqualTo(new BioPageViewTotals(0, 0));
         verify(repository).findDaily(FROM, TO);
         verify(repository).findClicksByOwnership(FROM, TO);
         verify(repository).findTopLinks(FROM, TO, 10);
         verify(repository).findBreakdownTotals(FROM, TO);
         verify(repository).sumAllTimeVisits();
+        verify(repository).sumBioPageViews(FROM, TO);
     }
 
     private void givenOwnership(final long anonymous, final long account) {

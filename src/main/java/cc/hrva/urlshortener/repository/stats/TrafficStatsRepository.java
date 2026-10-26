@@ -2,6 +2,7 @@ package cc.hrva.urlshortener.repository.stats;
 
 import cc.hrva.urlshortener.dto.AnalyticsDay;
 import cc.hrva.urlshortener.dto.BreakdownEntry;
+import cc.hrva.urlshortener.dto.stats.TrafficStatsResponse.BioPageViewTotals;
 import cc.hrva.urlshortener.model.enums.StatDimension;
 import java.time.LocalDate;
 import java.util.ArrayList;
@@ -59,6 +60,11 @@ public class TrafficStatsRepository {
 
     private static final String SUM_ALL_TIME_VISITS = "select coalesce(sum(visits), 0) from url";
 
+    private static final String SUM_BIO_PAGE_VIEWS = """
+            select coalesce(sum(views), 0) as total_views, coalesce(sum(bot_views), 0) as total_bot_views from bio_page_daily_views
+            where stat_date between :from and :to
+            """;
+
     private final NamedParameterJdbcTemplate jdbcTemplate;
 
     public List<AnalyticsDay> findDaily(final LocalDate from, final LocalDate to) {
@@ -96,6 +102,12 @@ public class TrafficStatsRepository {
     public long sumAllTimeVisits() {
         final var visits = jdbcTemplate.queryForObject(SUM_ALL_TIME_VISITS, Map.of(), Long.class);
         return visits != null ? visits : 0L;
+    }
+
+    public BioPageViewTotals sumBioPageViews(final LocalDate from, final LocalDate to) {
+        return jdbcTemplate.queryForObject(SUM_BIO_PAGE_VIEWS, Map.of(FROM, from, TO, to), (row, rowNumber) -> new BioPageViewTotals(
+                row.getLong("total_views"),
+                row.getLong("total_bot_views")));
     }
 
     public record OwnershipClicks(long anonymous, long account) {}

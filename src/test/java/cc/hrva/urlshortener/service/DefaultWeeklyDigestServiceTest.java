@@ -17,8 +17,10 @@ import cc.hrva.urlshortener.dto.stats.SafetyStatsResponse.DomainRuleCounts;
 import cc.hrva.urlshortener.dto.stats.SafetyStatsResponse.ResolveTimes;
 import cc.hrva.urlshortener.dto.stats.StackedSeries;
 import cc.hrva.urlshortener.dto.stats.TrafficStatsResponse;
+import cc.hrva.urlshortener.dto.stats.TrafficStatsResponse.BioPageViewTotals;
 import cc.hrva.urlshortener.dto.stats.UsersStatsResponse;
 import cc.hrva.urlshortener.dto.stats.UsersStatsResponse.ApiKeyCounts;
+import cc.hrva.urlshortener.dto.stats.UsersStatsResponse.BioPageCounts;
 import cc.hrva.urlshortener.dto.stats.UsersStatsResponse.McpCounts;
 import cc.hrva.urlshortener.dto.stats.UsersStatsResponse.UserInventory;
 import cc.hrva.urlshortener.mcp.bridge.InMemoryRedis;
@@ -556,7 +558,7 @@ class DefaultWeeklyDigestServiceTest {
     private static TrafficStatsResponse traffic(final LocalDate from, final LocalDate to, final long clicks, final long uniqueVisitors,
                                                 final long botClicks, final List<TrafficStatsResponse.TopLink> topLinks) {
         return new TrafficStatsResponse(7, from, to, new AnalyticsTotals(clicks, uniqueVisitors, botClicks), List.of(), 0, clicks,
-                topLinks, new Breakdowns(List.of(), List.of(), List.of(), List.of(), List.of(), List.of()), 5000);
+                topLinks, new Breakdowns(List.of(), List.of(), List.of(), List.of(), List.of(), List.of()), 5000, new BioPageViewTotals(0, 0));
     }
 
     private static LinksStatsResponse links(final LocalDate from, final LocalDate to, final StackedSeries created, final long createdTotal) {
@@ -566,7 +568,7 @@ class DefaultWeeklyDigestServiceTest {
 
     private static UsersStatsResponse users(final LocalDate from, final LocalDate to, final StackedSeries signups, final long activeLast7Days) {
         return new UsersStatsResponse(7, from, to, signups, new UserInventory(80, 78, 2, 1, 70, 10, List.of()), activeLast7Days, 40,
-                new ApiKeyCounts(0, 0, 0, 0), new McpCounts(0, 0));
+                new ApiKeyCounts(0, 0, 0, 0), new McpCounts(0, 0), new BioPageCounts(0, 0));
     }
 
     private static SafetyStatsResponse safety(final StackedSeries reviewsOpened, final List<CountEntry> resolved,

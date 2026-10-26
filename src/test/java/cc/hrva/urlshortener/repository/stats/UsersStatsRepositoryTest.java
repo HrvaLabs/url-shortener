@@ -2,6 +2,7 @@ package cc.hrva.urlshortener.repository.stats;
 
 import cc.hrva.urlshortener.dto.stats.CountEntry;
 import cc.hrva.urlshortener.dto.stats.UsersStatsResponse.ApiKeyCounts;
+import cc.hrva.urlshortener.dto.stats.UsersStatsResponse.BioPageCounts;
 import cc.hrva.urlshortener.dto.stats.UsersStatsResponse.McpCounts;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.repository.stats.UsersStatsRepository.AccountCounts;
@@ -143,6 +144,21 @@ class UsersStatsRepositoryTest {
     }
 
     @Test
+    void countsBioPagesAndHiddenOnes() {
+        accountWithDefaults(9701);
+        accountWithDefaults(9702);
+        accountWithDefaults(9703);
+        accountWithDefaults(9704);
+        accountWithDefaults(9705);
+        bioPage(9701, "ana", null);
+        bioPage(9702, "ben", NOW.minusDays(3));
+        bioPage(9703, null, null);
+        bioPage(9704, null, NOW);
+
+        assertThat(usersStatsRepository.countBioPages()).isEqualTo(new BioPageCounts(4, 2));
+    }
+
+    @Test
     void anEmptySiteCountsZero() {
         assertThat(usersStatsRepository.countAccounts()).isEqualTo(new AccountCounts(0, 0, 0, 0));
         assertThat(usersStatsRepository.countAdmins()).isZero();
@@ -150,6 +166,7 @@ class UsersStatsRepositoryTest {
         assertThat(usersStatsRepository.countSignedInSince(NOW.minusDays(30))).isZero();
         assertThat(usersStatsRepository.countApiKeys(TODAY)).isEqualTo(new ApiKeyCounts(0, 0, 0, 0));
         assertThat(usersStatsRepository.countMcp(NOW)).isEqualTo(new McpCounts(0, 0));
+        assertThat(usersStatsRepository.countBioPages()).isEqualTo(new BioPageCounts(0, 0));
     }
 
     private void account(final long id, final boolean active, final boolean emailVerified, final boolean twoFactorEnabled) {
@@ -196,6 +213,12 @@ class UsersStatsRepositoryTest {
                             access_token_expires_at, refresh_token_expires_at)
                         values (?, ?, ?, ?, ?, ?)""",
                 id, registeredClientId, principalName, "authorization_code", accessTokenExpiresAt, refreshTokenExpiresAt);
+    }
+
+    private void bioPage(final long userId, final String handle, final LocalDateTime hiddenAt) {
+        jdbcTemplate.update("insert into bio_page (user_id, handle, avatar_kind, accent, theme, hidden_at, created_at, updated_at) "
+                        + "values (?, ?, 'INITIALS', 'BLUE', 'AUTO', ?, ?, ?)",
+                userId, handle, hiddenAt, NOW, NOW);
     }
 
     private static String email(final long id) {

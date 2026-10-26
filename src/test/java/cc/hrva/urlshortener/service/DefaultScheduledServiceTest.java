@@ -1,9 +1,13 @@
 package cc.hrva.urlshortener.service;
 
+import cc.hrva.urlshortener.repository.BioHandleHoldRepository;
 import cc.hrva.urlshortener.service.impl.DefaultScheduledService;
 import java.io.IOException;
+import java.time.Clock;
 import java.time.Instant;
+import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -11,6 +15,8 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.boot.env.YamlPropertySourceLoader;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.core.env.MutablePropertySources;
 import org.springframework.core.env.PropertySourcesPropertyResolver;
 import org.springframework.core.io.ClassPathResource;
@@ -19,9 +25,12 @@ import org.springframework.scheduling.support.CronExpression;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class DefaultScheduledServiceTest {
+
+    private static final Instant NOW = Instant.parse("2026-10-26T01:45:00Z");
 
     private ScheduledService scheduledService;
 
@@ -55,9 +64,31 @@ class DefaultScheduledServiceTest {
     @Mock
     private WeeklyDigestService weeklyDigestService;
 
+    @Mock
+    private BioHandleHoldRepository bioHandleHoldRepository;
+
     @BeforeEach
     void setUp() {
-        this.scheduledService = new DefaultScheduledService(urlService, userService, apiKeyService, resetTokenService, urlNotificationService, safeBrowsingRecheckService, sendingEmailService, linkDigestService, blocklistSourceService, weeklyDigestService);
+        this.scheduledService = new DefaultScheduledService(urlService, userService, apiKeyService, resetTokenService, urlNotificationService, safeBrowsingRecheckService, sendingEmailService, linkDigestService, blocklistSourceService,
+                weeklyDigestService, bioHandleHoldRepository, Clock.fixed(NOW, ZoneOffset.UTC));
+    }
+
+    @Test
+    @ExtendWith(OutputCaptureExtension.class)
+    void releasesExpiredBioHandles(final CapturedOutput output) {
+        when(bioHandleHoldRepository.deleteByHeldUntilBefore(LocalDateTime.of(2026, 10, 26, 1, 45))).thenReturn(3L);
+
+        scheduledService.releaseExpiredBioHandles();
+
+        verify(bioHandleHoldRepository).deleteByHeldUntilBefore(LocalDateTime.of(2026, 10, 26, 1, 45));
+        assertThat(output).contains("Scheduled cleanup: expired bio handles released=3");
+    }
+
+    @Test
+    void expiredBioHandlesAreReleasedDailyAtQuarterToFour() throws NoSuchMethodException {
+        final var scheduled = DefaultScheduledService.class.getMethod("releaseExpiredBioHandles").getAnnotation(Scheduled.class);
+
+        assertThat(scheduled.cron()).isEqualTo("0 45 3 * * *");
     }
 
     @Test

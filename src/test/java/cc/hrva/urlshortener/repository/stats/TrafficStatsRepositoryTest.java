@@ -2,6 +2,7 @@ package cc.hrva.urlshortener.repository.stats;
 
 import cc.hrva.urlshortener.dto.AnalyticsDay;
 import cc.hrva.urlshortener.dto.BreakdownEntry;
+import cc.hrva.urlshortener.dto.stats.TrafficStatsResponse.BioPageViewTotals;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.enums.StatDimension;
@@ -10,6 +11,7 @@ import cc.hrva.urlshortener.repository.stats.TrafficStatsRepository.OwnershipCli
 import cc.hrva.urlshortener.repository.stats.TrafficStatsRepository.TopLinkRow;
 import jakarta.persistence.EntityManager;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -136,6 +138,28 @@ class TrafficStatsRepositoryTest {
         assertThat(trafficStatsRepository.sumAllTimeVisits()).isEqualTo(7);
     }
 
+    @Test
+    void sumsBioPageViewsInTheWindowOnly() {
+        final var anasPage = savedBioPage(savedOwner("bio-ana@example.com"), "ana");
+        final var bensPage = savedBioPage(savedOwner("bio-ben@example.com"), "ben");
+        bioPageViews(anasPage, DAY.minusDays(1), 50, 5);
+        bioPageViews(anasPage, DAY, 7, 2);
+        bioPageViews(bensPage, DAY, 3, 0);
+        bioPageViews(bensPage, DAY.plusDays(1), 4, 1);
+        bioPageViews(anasPage, DAY.plusDays(2), 90, 9);
+
+        assertThat(trafficStatsRepository.sumBioPageViews(DAY, DAY.plusDays(1))).isEqualTo(new BioPageViewTotals(14, 3));
+    }
+
+    @Test
+    void aQuietSiteSumsToZero() {
+        assertThat(trafficStatsRepository.sumBioPageViews(DAY, DAY.plusDays(6))).isEqualTo(new BioPageViewTotals(0, 0));
+
+        bioPageViews(savedBioPage(savedOwner("bio-quiet@example.com"), "quiet"), DAY.minusDays(1), 12, 4);
+
+        assertThat(trafficStatsRepository.sumBioPageViews(DAY, DAY.plusDays(6))).isEqualTo(new BioPageViewTotals(0, 0));
+    }
+
     private void dailyStats(final Url url, final LocalDate day, final long clicks, final long uniqueVisitors, final long botClicks) {
         jdbcTemplate.update("insert into link_daily_stats (url_id, stat_date, clicks, unique_visitors, bot_clicks) values (?, ?, ?, ?, ?)",
                 url.getId(), day, clicks, uniqueVisitors, botClicks);
@@ -156,6 +180,19 @@ class TrafficStatsRepositoryTest {
 
     private Url savedLink(final String shortUrl, final User owner) {
         return urlRepository.saveAndFlush(Url.builder().shortUrl(shortUrl).longUrl("https://example.org/" + shortUrl).owner(owner).build());
+    }
+
+    private long savedBioPage(final User owner, final String handle) {
+        final var now = LocalDateTime.of(2026, 10, 24, 9, 0);
+        entityManager.flush();
+        jdbcTemplate.update("insert into bio_page (user_id, handle, avatar_kind, accent, theme, created_at, updated_at) "
+                + "values (?, ?, 'INITIALS', 'BLUE', 'AUTO', ?, ?)", owner.getId(), handle, now, now);
+        return jdbcTemplate.queryForObject("select id from bio_page where handle = ?", Long.class, handle);
+    }
+
+    private void bioPageViews(final long pageId, final LocalDate day, final long views, final long botViews) {
+        jdbcTemplate.update("insert into bio_page_daily_views (page_id, stat_date, views, bot_views) values (?, ?, ?, ?)",
+                pageId, day, views, botViews);
     }
 
     private User savedOwner(final String email) {

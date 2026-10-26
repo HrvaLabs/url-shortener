@@ -164,14 +164,16 @@ class UserControllerTest {
                 java.util.Collections.emptyList(),
                 java.util.Collections.emptyList(),
                 java.util.Collections.emptyList(),
-                3L);
+                3L,
+                null);
         when(userService.exportMyData()).thenReturn(export);
 
         mockMvc.perform(get("/api/v1/users/me/export"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.profile.email").value("test@example.com"))
                 .andExpect(jsonPath("$.passkeys").isEmpty())
-                .andExpect(jsonPath("$.recoveryCodesRemaining").value(3));
+                .andExpect(jsonPath("$.recoveryCodesRemaining").value(3))
+                .andExpect(jsonPath("$.bioPage").value(org.hamcrest.Matchers.nullValue()));
     }
 
     @Test

@@ -1,6 +1,12 @@
 package cc.hrva.urlshortener.dto;
 
+import cc.hrva.urlshortener.model.BioPage;
+import cc.hrva.urlshortener.model.BioPageButton;
 import cc.hrva.urlshortener.model.PasskeyCredential;
+import cc.hrva.urlshortener.model.enums.BioAccent;
+import cc.hrva.urlshortener.model.enums.BioAvatarKind;
+import cc.hrva.urlshortener.model.enums.BioIcon;
+import cc.hrva.urlshortener.model.enums.BioTheme;
 import cc.hrva.urlshortener.model.enums.PasskeyKind;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -12,7 +18,8 @@ public record DataExportDto(
         List<ApiKeyResponse> apiKeys,
         List<EmailExport> emails,
         List<PasskeyExport> passkeys,
-        long recoveryCodesRemaining) {
+        long recoveryCodesRemaining,
+        BioPageExport bioPage) {
 
     public record EmailExport(String subject, String status, LocalDateTime sentAt, LocalDateTime createdAt) {}
 
@@ -25,6 +32,48 @@ public record DataExportDto(
                     passkey.isBackupState(),
                     passkey.getCreatedAt(),
                     passkey.getLastUsedAt());
+        }
+
+    }
+
+    public record BioPageExport(
+            String handle,
+            String displayName,
+            String bio,
+            BioAvatarKind avatarKind,
+            String avatarEmoji,
+            BioAccent accent,
+            BioTheme theme,
+            boolean indexable,
+            boolean hidden,
+            String hiddenReason,
+            List<BioButtonExport> buttons,
+            LocalDateTime createdAt,
+            LocalDateTime updatedAt) {
+
+        public static BioPageExport from(final BioPage page, final List<BioPageButton> buttons) {
+            return new BioPageExport(
+                    page.getHandle(),
+                    page.getDisplayName(),
+                    page.getBio(),
+                    page.getAvatarKind(),
+                    page.getAvatarEmoji(),
+                    page.getAccent(),
+                    page.getTheme(),
+                    page.isIndexable(),
+                    page.getHiddenAt() != null,
+                    page.getHiddenReason(),
+                    buttons.stream().map(BioButtonExport::from).toList(),
+                    page.getCreatedAt(),
+                    page.getUpdatedAt());
+        }
+
+    }
+
+    public record BioButtonExport(String title, BioIcon icon, String shortUrl, boolean visible) {
+
+        public static BioButtonExport from(final BioPageButton button) {
+            return new BioButtonExport(button.getTitle(), button.getIcon(), button.getUrl().getShortUrl(), button.isVisible());
         }
 
     }

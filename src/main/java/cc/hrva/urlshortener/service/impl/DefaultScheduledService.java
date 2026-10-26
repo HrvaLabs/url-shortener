@@ -2,6 +2,7 @@ package cc.hrva.urlshortener.service.impl;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import cc.hrva.urlshortener.repository.BioHandleHoldRepository;
 import cc.hrva.urlshortener.service.ApiKeyService;
 import cc.hrva.urlshortener.service.BlocklistSourceService;
 import cc.hrva.urlshortener.service.LinkDigestService;
@@ -13,6 +14,8 @@ import cc.hrva.urlshortener.service.UrlNotificationService;
 import cc.hrva.urlshortener.service.UrlService;
 import cc.hrva.urlshortener.service.UserService;
 import cc.hrva.urlshortener.service.WeeklyDigestService;
+import java.time.Clock;
+import java.time.LocalDateTime;
 import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
@@ -33,6 +36,8 @@ public class DefaultScheduledService implements ScheduledService {
     private final LinkDigestService linkDigestService;
     private final BlocklistSourceService blocklistSourceService;
     private final WeeklyDigestService weeklyDigestService;
+    private final BioHandleHoldRepository bioHandleHoldRepository;
+    private final Clock clock;
 
     @Override
     @Scheduled(cron = "0 */1 * * * *")
@@ -117,6 +122,13 @@ public class DefaultScheduledService implements ScheduledService {
     public void sendWeeklyDigest() {
         log.info("Scheduled: weekly digest");
         weeklyDigestService.sendWeeklyDigest();
+    }
+
+    @Override
+    @Scheduled(cron = "0 45 3 * * *")
+    public void releaseExpiredBioHandles() {
+        final var released = bioHandleHoldRepository.deleteByHeldUntilBefore(LocalDateTime.now(clock));
+        log.info("Scheduled cleanup: expired bio handles released={}", released);
     }
 
 }
