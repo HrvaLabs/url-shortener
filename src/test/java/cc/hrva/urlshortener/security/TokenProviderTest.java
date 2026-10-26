@@ -127,4 +127,23 @@ class TokenProviderTest {
     void aMalformedTokenHasNoIssueTime() {
         assertThat(tokenProvider.issuedAt("x.y.z")).isEmpty();
     }
+
+    @Test
+    void anExpiredTokenHasNoIssueTime() {
+        final var key = Keys.hmacShaKeyFor(Decoders.BASE64.decode(SECRET));
+        final var token = Jwts.builder()
+                .subject("test@example.com")
+                .claim("auth", "ROLE_USER")
+                .issuedAt(Date.from(Instant.now().minus(2, ChronoUnit.HOURS)))
+                .expiration(Date.from(Instant.now().minus(1, ChronoUnit.HOURS)))
+                .signWith(key, Jwts.SIG.HS512)
+                .compact();
+
+        assertThat(tokenProvider.issuedAt(token)).isEmpty();
+    }
+
+    @Test
+    void aNullTokenHasNoIssueTime() {
+        assertThat(tokenProvider.issuedAt(null)).isEmpty();
+    }
 }

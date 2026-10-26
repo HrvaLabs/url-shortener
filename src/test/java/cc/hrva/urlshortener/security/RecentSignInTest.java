@@ -50,6 +50,13 @@ class RecentSignInTest {
     }
 
     @Test
+    void aSignInExactlyFifteenMinutesAgoIsRecent() {
+        when(tokenProvider.issuedAt(TOKEN)).thenReturn(Optional.of(NOW.minus(RecentSignIn.WINDOW)));
+
+        assertThat(recentSignIn.isRecent(signedInWith(TOKEN))).isTrue();
+    }
+
+    @Test
     void aTokenWithoutIssueTimeIsNotRecent() {
         when(tokenProvider.issuedAt(TOKEN)).thenReturn(Optional.empty());
 
