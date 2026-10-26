@@ -225,7 +225,7 @@ class DefaultTwoStepSettingsServiceTest {
                 .isInstanceOf(ApiException.class)
                 .hasMessage(ONE_FACTOR);
         assertThat(user.getTwoStepEnabled()).isTrue();
-        verifyNoInteractions(twoFactorService, passkeyCeremonyStore, passkeyAssertions, recoveryCodes, loginAttemptService);
+        verifyNoInteractions(twoFactorService, passkeyCeremonyStore, passkeyAssertions, recoveryCodes, loginAttemptService, accountLock);
         verify(userRepository, never()).save(any());
     }
 
@@ -239,7 +239,17 @@ class DefaultTwoStepSettingsServiceTest {
         assertThatThrownBy(() -> twoStepSettingsService.disableOptions())
                 .isInstanceOf(ApiException.class)
                 .hasMessage(OFF);
-        verifyNoInteractions(twoFactorService, passkeyCeremonyStore, recoveryCodes, loginAttemptService);
+        verifyNoInteractions(twoFactorService, passkeyCeremonyStore, recoveryCodes, loginAttemptService, accountLock);
+    }
+
+    @Test
+    void turningOffWhileOffIsRefusedBeforeTheShapeOfTheRequest() {
+        signedIn(keysOnly(false));
+
+        assertThatThrownBy(() -> twoStepSettingsService.disable(new TwoStepDisableDto()))
+                .isInstanceOf(ApiException.class)
+                .hasMessage(OFF);
+        verifyNoInteractions(accountLock);
     }
 
     @Test
@@ -499,8 +509,16 @@ class DefaultTwoStepSettingsServiceTest {
         assertThatThrownBy(() -> twoStepSettingsService.removeTotp(new TwoFactorCodeDto("123456")))
                 .isInstanceOf(ApiException.class)
                 .hasMessage("No authenticator app is set up.");
+
+        final var onInTheToken = signedIn(withAuthenticatorApp());
+        when(accountLock.lock(onInTheToken)).thenReturn(keysOnly(false));
+
+        assertThatThrownBy(() -> twoStepSettingsService.disable(TwoStepDisableDto.builder().code("123456").build()))
+                .isInstanceOf(ApiException.class)
+                .hasMessage(OFF);
         verify(userRepository, never()).save(any());
         verifyNoInteractions(recoveryCodes, twoFactorService);
+        verify(loginAttemptService, never()).isBlocked(anyString());
     }
 
     @Test

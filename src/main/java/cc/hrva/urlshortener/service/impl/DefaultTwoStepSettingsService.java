@@ -101,9 +101,11 @@ public class DefaultTwoStepSettingsService implements TwoStepSettingsService {
     @Override
     @Transactional
     public void disable(final TwoStepDisableDto dto) {
-        final var user = accountLock.lock(currentUser());
-        requireTwoStepOn(user);
+        final var current = currentUser();
+        requireTwoStepOn(current);
         final var withCode = confirmsWithCode(dto);
+        final var user = accountLock.lock(current);
+        requireTwoStepOn(user);
         requireNotLocked(user);
 
         if (withCode) {

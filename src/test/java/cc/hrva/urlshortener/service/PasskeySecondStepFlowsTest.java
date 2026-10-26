@@ -42,6 +42,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
+import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -370,7 +371,8 @@ class PasskeySecondStepFlowsTest {
         try {
             final var authenticator = TestAuthenticator.securityKey();
             flows.addPasskey(authenticator, "YubiKey");
-            assertThat(twoStepSettingsService.enableWithPasskeys().recoveryCodes()).hasSize(10);
+            final var recoveryCodes = twoStepSettingsService.enableWithPasskeys().recoveryCodes();
+            assertThat(recoveryCodes).hasSize(10);
             assertThat(twoStepEnabledOf(user)).isTrue();
             assertThat(recoveryCodesOf(user)).isEqualTo(10L);
             flows.signedInAgain(user);
@@ -404,6 +406,7 @@ class PasskeySecondStepFlowsTest {
                     .doesNotContain(options.ceremonyId())
                     .doesNotContain(options.options().path("challenge").asString())
                     .doesNotContain(authenticator.credentialId());
+            assertThat(recoveryCodes).allSatisfy(code -> assertThat(output).doesNotContain(code));
         } finally {
             flows.remove(user);
         }
@@ -475,7 +478,7 @@ class PasskeySecondStepFlowsTest {
                         firstRemoved.await(10, TimeUnit.SECONDS);
                         passkeyService.delete(second.id(), new PasskeyDeleteDto(PasskeyFlowsSupport.PASSWORD));
                         return "removed";
-                    } catch (final ApiException refused) {
+                    } catch (final ApiException | PessimisticLockingFailureException refused) {
                         return refused.getMessage();
                     } finally {
                         secondFinished.countDown();
