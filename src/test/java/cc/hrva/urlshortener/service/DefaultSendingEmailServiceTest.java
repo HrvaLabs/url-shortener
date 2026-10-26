@@ -26,6 +26,8 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.web.util.HtmlUtils;
 import org.thymeleaf.TemplateEngine;
 import org.thymeleaf.context.IContext;
@@ -209,7 +211,8 @@ class DefaultSendingEmailServiceTest {
     }
 
     @Test
-    void resendSendsTheStoredEmailAgainAndRetiresTheFailedEntry() throws Exception {
+    @ExtendWith(OutputCaptureExtension.class)
+    void resendSendsTheStoredEmailAgainAndRetiresTheFailedEntry(final CapturedOutput output) throws Exception {
         saveReturnsArgument();
         final var failed = EmailLog.builder()
                 .id(7L)
@@ -234,6 +237,10 @@ class DefaultSendingEmailServiceTest {
         assertThat(result).isNotSameAs(failed);
         assertThat(result.getStatus()).isEqualTo(EmailLog.STATUS_SENT);
         assertThat(result.getRecipient()).isEqualTo("a@example.com, b@example.com");
+        assertThat(output)
+                .contains("Sending Welcome email to 2 recipient(s): [a***@example.com, b***@example.com]")
+                .doesNotContain("a@example.com")
+                .doesNotContain("b@example.com");
         final var order = org.mockito.Mockito.inOrder(emailService, emailLogRepository);
         order.verify(emailService).sendEmail(any(Email.class), eq(null));
         order.verify(emailLogRepository).save(org.mockito.ArgumentMatchers.same(failed));
@@ -486,6 +493,29 @@ class DefaultSendingEmailServiceTest {
         assertThat(context.getValue().getVariable("help_url")).isEqualTo("https://hrva.cc/help/passkeys");
         assertThat(context.getValue().getVariable("contact_email")).isEqualTo("support@hrva.cc");
         verify(emailService).sendEmail(any(Email.class), eq(null));
+    }
+
+    @Test
+    @ExtendWith(OutputCaptureExtension.class)
+    void theSendLogCountsTheRecipientsAndMasksTheirAddresses(final CapturedOutput output) throws Exception {
+        sentPasskeyAddedEmail("Work YubiKey");
+
+        assertThat(output)
+                .contains("Sending A passkey was added to your account email to 1 recipient(s): [a***@example.com]")
+                .doesNotContain("alice@example.com");
+    }
+
+    @Test
+    @ExtendWith(OutputCaptureExtension.class)
+    void theNewAccountNoticeIsLoggedWithTheNewAddressMaskedInItsSubject(final CapturedOutput output) {
+        saveReturnsArgument();
+
+        sendingEmailService.sendNewUserNotificationToAdmin(User.builder().email("new@example.com").build());
+
+        assertThat(output)
+                .contains("Sending New user registered: n***@example.com email to 1 recipient(s): [s***@hrva.cc]")
+                .doesNotContain("new@example.com")
+                .doesNotContain("support@hrva.cc");
     }
 
     @Test

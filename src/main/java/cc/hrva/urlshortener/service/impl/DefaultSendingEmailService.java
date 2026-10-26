@@ -12,10 +12,10 @@ import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
+import java.util.stream.Stream;
 import lombok.RequiredArgsConstructor;
 import org.apache.commons.lang3.StringUtils;
 import lombok.extern.slf4j.Slf4j;
@@ -24,6 +24,7 @@ import cc.hrva.urlshortener.model.ResetToken;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.service.SendingEmailService;
+import cc.hrva.urlshortener.util.EmailAddresses;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.thymeleaf.TemplateEngine;
@@ -311,7 +312,8 @@ public class DefaultSendingEmailService implements SendingEmailService {
                 .status(EmailLog.STATUS_SENDING)
                 .build());
 
-        log.info("Sending {} email to {}", email.getSubject(), Arrays.toString(email.getReceivers()));
+        log.info("Sending {} email to {} recipient(s): {}",
+                EmailAddresses.maskedIn(email.getSubject()), email.getReceivers().length, maskedRecipients(email.getReceivers()));
         sendEmailWithRetries(email, logEntry);
         return logEntry;
     }
@@ -360,6 +362,10 @@ public class DefaultSendingEmailService implements SendingEmailService {
             Thread.currentThread().interrupt();
             return false;
         }
+    }
+
+    private static List<String> maskedRecipients(final String[] receivers) {
+        return Stream.of(receivers).map(EmailAddresses::masked).toList();
     }
 
     private static String decisionsSubject(final long openCount) {

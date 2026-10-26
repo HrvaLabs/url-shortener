@@ -241,13 +241,15 @@ class DefaultUserServiceTest {
     }
 
     @Test
-    void shouldFetchUserFromEmail() {
+    @ExtendWith(OutputCaptureExtension.class)
+    void shouldFetchUserFromEmail(final CapturedOutput output) {
         final var user = User.builder().id(1L).email("test@example.com").active(true).build();
         when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
 
         final var result = userService.fetchUserFromEmail("test@example.com");
 
         assertThat(result).isEqualTo(user);
+        assertThat(output).contains("User login email=t***@example.com").doesNotContain("test@example.com");
     }
 
     @Test

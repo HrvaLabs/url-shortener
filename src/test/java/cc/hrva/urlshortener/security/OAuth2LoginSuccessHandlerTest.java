@@ -27,6 +27,8 @@ import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.security.core.Authentication;
@@ -106,7 +108,8 @@ class OAuth2LoginSuccessHandlerTest {
     }
 
     @Test
-    void shouldBlockInactiveAccount() throws Exception {
+    @ExtendWith(OutputCaptureExtension.class)
+    void shouldBlockInactiveAccount(final CapturedOutput output) throws Exception {
         when(oAuth2User.getAttribute("email")).thenReturn("evil@example.com");
         when(userRepository.findByEmail("evil@example.com"))
                 .thenReturn(Optional.of(User.builder().id(1L).email("evil@example.com").active(false).build()));
@@ -115,10 +118,12 @@ class OAuth2LoginSuccessHandlerTest {
 
         verify(response).sendRedirect("http://fe/auth/callback?error=account_inactive");
         verify(tokenProvider, never()).createToken(any());
+        assertThat(output).contains("OAuth2 login blocked: inactive account email=e***@example.com").doesNotContain("evil@example.com");
     }
 
     @Test
-    void shouldLoginExistingActiveUserAndSetLastLogin() throws Exception {
+    @ExtendWith(OutputCaptureExtension.class)
+    void shouldLoginExistingActiveUserAndSetLastLogin(final CapturedOutput output) throws Exception {
         final var user = User.builder().id(1L).email("ok@example.com").active(true)
                 .authorities(Collections.singletonList(Authorities.builder().id(1L).name("ROLE_USER").build()))
                 .build();
@@ -132,6 +137,7 @@ class OAuth2LoginSuccessHandlerTest {
         verify(response).sendRedirect(contains("http://fe/auth/callback?token=jwt-token"));
         verify(eventPublisher, never()).publishEvent(any(Object.class));
         verifyNoInteractions(pendingLoginStore, twoStepMethods);
+        assertThat(output).contains("OAuth2 login success email=o***@example.com").doesNotContain("ok@example.com");
     }
 
     @ParameterizedTest
@@ -148,7 +154,8 @@ class OAuth2LoginSuccessHandlerTest {
     }
 
     @Test
-    void shouldCreateNewUserAndNotifyAdmin() throws Exception {
+    @ExtendWith(OutputCaptureExtension.class)
+    void shouldCreateNewUserAndNotifyAdmin(final CapturedOutput output) throws Exception {
         when(oAuth2User.getAttribute("email")).thenReturn("new@example.com");
         when(userRepository.findByEmail("new@example.com")).thenReturn(Optional.empty());
         when(authoritiesService.getDefaultAuthority())
@@ -162,6 +169,8 @@ class OAuth2LoginSuccessHandlerTest {
         verify(eventPublisher).publishEvent(argThat((Object event) -> event instanceof UserRegisteredEvent registered
                 && "new@example.com".equals(registered.user().getEmail()) && registered.verificationToken() == null));
         verify(response).sendRedirect(contains("token=jwt-token"));
+        assertThat(output).contains("Created OAuth2 user email=n***@example.com", "OAuth2 login success email=n***@example.com")
+                .doesNotContain("new@example.com");
     }
 
     @Test

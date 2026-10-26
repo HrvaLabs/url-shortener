@@ -107,7 +107,7 @@ class DefaultAuthServiceTest {
     }
 
     @Test
-    void shouldLoginSuccessfully() {
+    void shouldLoginSuccessfully(final CapturedOutput output) {
         final var loginDto = LoginDto.builder().email("test@example.com").password("password123").build();
         final var user = User.builder().id(1L).email("test@example.com").emailVerified(true).build();
         final var signedIn = signedIn();
@@ -122,6 +122,7 @@ class DefaultAuthServiceTest {
         verify(authenticationManager).authenticate(credentials.capture());
         assertThat(credentials.getValue().getName()).isEqualTo("test@example.com");
         assertThat(credentials.getValue().getCredentials()).isEqualTo("password123");
+        assertThat(output).contains("User logged in email=t***@example.com").doesNotContain("test@example.com");
     }
 
     @Test

@@ -6,6 +6,7 @@ import cc.hrva.urlshortener.service.AuthService;
 import cc.hrva.urlshortener.service.TwoFactorService;
 import cc.hrva.urlshortener.service.TwoStepSettingsService;
 import cc.hrva.urlshortener.service.UserService;
+import cc.hrva.urlshortener.util.EmailAddresses;
 import org.springframework.security.access.prepost.PreAuthorize;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
@@ -109,7 +110,7 @@ public class AuthController {
     @ApiResponse(responseCode = "401", description = "Bad credentials")
     @PostMapping("/login")
     public ResponseEntity<JWTTokenDto> login(@Valid @RequestBody final LoginDto login) {
-        log.info("Login controller invoked for user {}", login.getEmail());
+        log.info("Login controller invoked for user {}", EmailAddresses.masked(login.getEmail()));
         return authService.login(login, request);
     }
 }

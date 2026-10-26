@@ -10,6 +10,7 @@ import cc.hrva.urlshortener.service.SendingEmailService;
 import cc.hrva.urlshortener.service.SignInService;
 import cc.hrva.urlshortener.service.TwoFactorService;
 import cc.hrva.urlshortener.service.VerificationTokenService;
+import cc.hrva.urlshortener.util.EmailAddresses;
 import cc.hrva.urlshortener.validator.UserValidator;
 import org.apache.commons.lang3.StringUtils;
 import jakarta.servlet.http.HttpServletRequest;
@@ -61,7 +62,7 @@ public class DefaultAuthService implements AuthService {
     @Transactional
     @SuppressWarnings({"deprecation", "removal"})
     public ResponseEntity<JWTTokenDto> login(final LoginDto loginDto, final HttpServletRequest request) {
-        log.info("User logged in email={}", loginDto.getEmail());
+        log.info("User logged in email={}", EmailAddresses.masked(loginDto.getEmail()));
 
         final var clientIp = clientIpResolver.getClientIp(request);
         if (loginAttemptService.isBlocked(clientIp)) {

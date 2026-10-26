@@ -18,6 +18,7 @@ import cc.hrva.urlshortener.service.ModerationService;
 import cc.hrva.urlshortener.service.ReviewQueueService;
 import cc.hrva.urlshortener.service.ScammerSignalService;
 import cc.hrva.urlshortener.util.DomainNames;
+import cc.hrva.urlshortener.util.EmailAddresses;
 import cc.hrva.urlshortener.util.ReviewReasons;
 import io.modelcontextprotocol.spec.McpSchema.CallToolResult;
 import java.time.Clock;
@@ -497,15 +498,7 @@ public class ModerationTools {
     }
 
     private static String masked(final User user) {
-        return maskedEmail(user.getEmail()) + " #" + user.getId();
-    }
-
-    private static String maskedEmail(final String email) {
-        final var at = StringUtils.lastIndexOf(email, '@');
-        if (at < 1) {
-            return "***";
-        }
-        return email.substring(0, email.offsetByCodePoints(0, 1)) + "***" + email.substring(at);
+        return EmailAddresses.masked(user.getEmail()) + " #" + user.getId();
     }
 
     private static String destination(final String longUrl) {

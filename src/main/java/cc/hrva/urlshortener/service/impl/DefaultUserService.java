@@ -33,6 +33,7 @@ import cc.hrva.urlshortener.service.ResetTokenService;
 import cc.hrva.urlshortener.service.ScammerSignalService;
 import cc.hrva.urlshortener.service.UserService;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent;
+import cc.hrva.urlshortener.util.EmailAddresses;
 import cc.hrva.urlshortener.validator.AuthValidator;
 import java.time.LocalDateTime;
 import java.util.Objects;
@@ -105,7 +106,7 @@ public class DefaultUserService implements UserService {
 
     @Override
     public User fetchUserFromEmail(final String email) {
-        log.info("User login email={}", email);
+        log.info("User login email={}", EmailAddresses.masked(email));
 
         return fetchActiveUserByEmail(email);
     }

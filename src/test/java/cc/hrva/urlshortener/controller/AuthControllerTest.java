@@ -16,12 +16,15 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -186,7 +189,8 @@ class AuthControllerTest {
     }
 
     @Test
-    void shouldLogin() throws Exception {
+    @ExtendWith(OutputCaptureExtension.class)
+    void shouldLogin(final CapturedOutput output) throws Exception {
         final var jwtDto = JWTTokenDto.builder().token("Bearer token").user(UserDto.builder().id(1L).email("test@example.com").build()).build();
         final var headers = new HttpHeaders();
         headers.add("Authorization", "Bearer token");
@@ -197,5 +201,6 @@ class AuthControllerTest {
                         .content(objectMapper.writeValueAsString(LoginDto.builder().email("test@example.com").password("password123").build())))
                 .andExpect(status().isOk())
                 .andExpect(header().string("Authorization", "Bearer token"));
+        assertThat(output).contains("Login controller invoked for user t***@example.com").doesNotContain("test@example.com");
     }
 }
