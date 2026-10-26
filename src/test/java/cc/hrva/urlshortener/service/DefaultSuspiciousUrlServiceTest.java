@@ -18,6 +18,7 @@ class DefaultSuspiciousUrlServiceTest {
     private static final String CYRILLIC_A = codePoints(0x0430);
     private static final String CYRILLIC_IE = codePoints(0x0435);
     private static final String CYRILLIC_CAPITAL_A = codePoints(0x0410);
+    private static final String GREEK_CAPITAL_RHO = codePoints(0x03A1);
     private static final String ZERO_WIDTH_JOINER = codePoints(0x200D);
     private static final String ZERO_WIDTH_NON_JOINER = codePoints(0x200C);
     private static final String MIXES_LATIN_AND_CYRILLIC = "mixes Latin and Cyrillic letters";
@@ -294,6 +295,7 @@ class DefaultSuspiciousUrlServiceTest {
     void plainTextHasNoReasons(final String text) {
         assertThat(suspiciousUrlService.findTextReasons(text)).isEmpty();
         assertThat(suspiciousUrlService.findImitatedBrand(text)).isEmpty();
+        assertThat(suspiciousUrlService.findNamedBrand(text)).isEmpty();
     }
 
     @ParameterizedTest
@@ -302,6 +304,7 @@ class DefaultSuspiciousUrlServiceTest {
     void textWithoutWordsHasNoReasons(final String text) {
         assertThat(suspiciousUrlService.findTextReasons(text)).isEmpty();
         assertThat(suspiciousUrlService.findImitatedBrand(text)).isEmpty();
+        assertThat(suspiciousUrlService.findNamedBrand(text)).isEmpty();
     }
 
     @Test
@@ -335,6 +338,7 @@ class DefaultSuspiciousUrlServiceTest {
         assertThat(suspiciousUrlService.findTextReasons("Ver" + ZERO_WIDTH_JOINER + "ify now")).containsExactly(LURE);
         assertThat(suspiciousUrlService.findTextReasons("log" + ZERO_WIDTH_NON_JOINER + "in")).containsExactly(LURE);
         assertThat(suspiciousUrlService.findImitatedBrand("Pay" + ZERO_WIDTH_JOINER + "Pal")).contains("paypal");
+        assertThat(suspiciousUrlService.findNamedBrand("Pay" + ZERO_WIDTH_JOINER + "Pal")).contains("paypal");
     }
 
     @Test
@@ -374,6 +378,23 @@ class DefaultSuspiciousUrlServiceTest {
     void shortBrandsNeedAnExactMatch() {
         assertThat(suspiciousUrlService.findImitatedBrand("dh1 olxx ebayy")).isEmpty();
         assertThat(suspiciousUrlService.findImitatedBrand("eBay finds")).contains("ebay");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"Cooking with Ana", "Looking good", "Finance tips", "Minted Studio", "Revolution", "paypa1", "revoiut", "netflixx"})
+    void aNamedBrandIsOnlyAnExactName(final String text) {
+        assertThat(suspiciousUrlService.findNamedBrand(text)).isEmpty();
+    }
+
+    @Test
+    void namedBrandsAreFoundThroughOtherAlphabetsAndAccents() {
+        assertThat(suspiciousUrlService.findNamedBrand("PayPal")).contains("paypal");
+        assertThat(suspiciousUrlService.findNamedBrand("p" + CYRILLIC_A + "ypal")).contains("paypal");
+        assertThat(suspiciousUrlService.findNamedBrand(GREEK_CAPITAL_RHO + "ayPal")).contains("paypal");
+        assertThat(suspiciousUrlService.findNamedBrand(CYRILLIC_CAPITAL_A + "pple Support")).contains("apple");
+        assertThat(suspiciousUrlService.findNamedBrand("DH" + codePoints(0x0141))).contains("dhl");
+        assertThat(suspiciousUrlService.findNamedBrand("Ana from Booking")).contains("booking");
+        assertThat(suspiciousUrlService.findNamedBrand("official_netflix_shop")).contains("netflix");
     }
 
     private static Stream<String> plainTexts() {

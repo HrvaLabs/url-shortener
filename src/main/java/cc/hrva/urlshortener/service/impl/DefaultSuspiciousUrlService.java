@@ -178,6 +178,14 @@ public class DefaultSuspiciousUrlService implements SuspiciousUrlService {
                 .findFirst();
     }
 
+    @Override
+    public Optional<String> findNamedBrand(final String text) {
+        return wordsOf(text).stream()
+                .map(DefaultSuspiciousUrlService::wordLookalike)
+                .filter(BRAND_DOMAINS::containsKey)
+                .findFirst();
+    }
+
     private static List<String> wordsOf(final String text) {
         if (StringUtils.isBlank(text)) {
             return List.of();

@@ -5,6 +5,8 @@ import cc.hrva.urlshortener.service.impl.DefaultSuspiciousUrlService;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -12,6 +14,7 @@ class BioPageTextSignalsTest {
 
     private static final String CYRILLIC_A = codePoints(0x0430);
     private static final String CYRILLIC_IE = codePoints(0x0435);
+    private static final String GREEK_CAPITAL_RHO = codePoints(0x03A1);
 
     private BioPageTextSignals bioPageTextSignals;
 
@@ -32,6 +35,38 @@ class BioPageTextSignalsTest {
         assertThat(bioPageTextSignals.reasonsFor("paypal-help", "Ana", "", List.of())).containsExactly("handle imitates paypal");
         assertThat(bioPageTextSignals.reasonsFor("ana", "PayPal Support", "", List.of())).containsExactly("name imitates paypal");
         assertThat(bioPageTextSignals.reasonsFor("ana", "Ana", "Follow me on Instagram", List.of("Instagram", "Netflix picks"))).isEmpty();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"Cooking", "Cooking with Ana", "Finance", "Finance tips", "Minted", "Minted Studio", "Revolution"})
+    void aNameOneLetterFromABrandImitatesNothing(final String displayName) {
+        assertThat(bioPageTextSignals.reasonsFor("ana", displayName, "", List.of())).isEmpty();
+    }
+
+    @Test
+    void aNameThatSpellsABrandImitatesItInAnyAlphabet() {
+        assertThat(bioPageTextSignals.reasonsFor("ana", "PayPal", "", List.of())).containsExactly("name imitates paypal");
+        assertThat(bioPageTextSignals.reasonsFor("ana", "p" + CYRILLIC_A + "ypal", "", List.of()))
+                .containsExactly("name imitates paypal", "name mixes Latin and Cyrillic letters");
+        assertThat(bioPageTextSignals.reasonsFor("ana", GREEK_CAPITAL_RHO + "ayPal", "", List.of()))
+                .containsExactly("name imitates paypal", "name mixes Latin and Greek letters");
+    }
+
+    @Test
+    void aHandleOneLetterFromABrandStillImitatesIt() {
+        assertThat(bioPageTextSignals.reasonsFor("paypa1", "Ana", "", List.of())).containsExactly("handle imitates paypal");
+        assertThat(bioPageTextSignals.reasonsFor("revoiut", "Ana", "", List.of())).containsExactly("handle imitates revolut");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"secure-login", "verify-account", "wallet_unlock", "login"})
+    void aHandleWithALureWordIsFlagged(final String handle) {
+        assertThat(bioPageTextSignals.reasonsFor(handle, "Ana", "", List.of())).containsExactly("handle has a login or verification lure");
+    }
+
+    @Test
+    void aHandleThatOnlyContainsALureIsNotFlagged() {
+        assertThat(bioPageTextSignals.reasonsFor("securely-blogged", "Ana", "", List.of())).isEmpty();
     }
 
     @Test
@@ -55,13 +90,14 @@ class BioPageTextSignalsTest {
     @Test
     void reasonsComeInTheirOrder() {
         final var reasons = bioPageTextSignals.reasonsFor(
-                "revoiut",
+                "revoiut-login",
                 "P" + CYRILLIC_A + "yPal secure",
                 "v" + CYRILLIC_IE + "rify",
                 List.of("Login", "B" + CYRILLIC_A + "nk"));
 
         assertThat(reasons).containsExactly(
                 "handle imitates revolut",
+                "handle has a login or verification lure",
                 "name imitates paypal",
                 "name mixes Latin and Cyrillic letters",
                 "name has a login or verification lure",
