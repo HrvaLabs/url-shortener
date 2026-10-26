@@ -4,6 +4,7 @@ import cc.hrva.urlshortener.configuration.GlobalExceptionHandler;
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.dto.LinkReportDto;
 import cc.hrva.urlshortener.model.BioPage;
+import cc.hrva.urlshortener.model.BioPageReview;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.enums.ReportCategory;
@@ -38,6 +39,7 @@ import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
@@ -291,6 +293,39 @@ class ReportControllerTest {
         doThrow(new DataIntegrityViolationException("fk_bio_page_review_page")).when(bioPageReviewService).report(page, ReportCategory.SPAM, null);
 
         report("@ana", "SPAM", null).andExpect(status().isInternalServerError());
+    }
+
+    @Test
+    @ExtendWith(OutputCaptureExtension.class)
+    void aReportExtendingAReviewDeletedWithItsPageMeanwhileIsStill202(final CapturedOutput output) throws Exception {
+        when(bioPageRepository.findByHandleWithOwner("ana")).thenReturn(Optional.of(page));
+        doThrow(new ObjectOptimisticLockingFailureException(BioPageReview.class, 31L)).when(bioPageReviewService).report(page, ReportCategory.SPAM, null);
+        when(bioPageRepository.existsById(12L)).thenReturn(false);
+
+        report("@ana", "SPAM", null)
+                .andExpect(status().isAccepted())
+                .andExpect(content().string(""));
+
+        assertThat(output).contains("Visitor report dropped because the bio page was deleted meanwhile pageId=12");
+    }
+
+    @Test
+    void anOptimisticLockFailureOnABioPageThatStillExistsIsNotHidden() throws Exception {
+        when(bioPageRepository.findByHandleWithOwner("ana")).thenReturn(Optional.of(page));
+        doThrow(new ObjectOptimisticLockingFailureException(BioPageReview.class, 31L)).when(bioPageReviewService).report(page, ReportCategory.SPAM, null);
+        when(bioPageRepository.existsById(12L)).thenReturn(true);
+
+        report("@ana", "SPAM", null).andExpect(status().isInternalServerError());
+    }
+
+    @Test
+    void anOptimisticLockFailureOnALinkReportIsNotHidden() throws Exception {
+        when(urlRepository.findByShortUrlAndActiveTrue(SHORT)).thenReturn(Optional.of(url));
+        doThrow(new ObjectOptimisticLockingFailureException(Url.class, 287L)).when(reviewQueueService).report(url, ReportCategory.SPAM, null);
+
+        report(SHORT, "SPAM", null).andExpect(status().isInternalServerError());
+
+        verifyNoInteractions(bioPageRepository);
     }
 
     @Test

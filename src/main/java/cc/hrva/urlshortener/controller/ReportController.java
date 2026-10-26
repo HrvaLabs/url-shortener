@@ -27,6 +27,7 @@ import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.exception.ExceptionUtils;
 import org.hibernate.exception.ConstraintViolationException;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -97,8 +98,17 @@ public class ReportController {
             if (!violates(exception, BIO_PAGE_REVIEW_PAGE_CONSTRAINT)) {
                 throw exception;
             }
-            log.info("Visitor report dropped because the bio page was deleted meanwhile pageId={}", page.getId());
+            logDroppedReport(page);
+        } catch (final OptimisticLockingFailureException exception) {
+            if (bioPageRepository.existsById(page.getId())) {
+                throw exception;
+            }
+            logDroppedReport(page);
         }
+    }
+
+    private static void logDroppedReport(final BioPage page) {
+        log.info("Visitor report dropped because the bio page was deleted meanwhile pageId={}", page.getId());
     }
 
     private boolean reportAllowed() {

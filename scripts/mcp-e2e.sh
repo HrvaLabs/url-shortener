@@ -122,8 +122,10 @@ psql_value() {
     docker exec "$POSTGRES_CONTAINER" psql -U "$DB_USER" -d url_shortener -tAq -c "$1"
 }
 
-psql_has_click() {
-    (( $(psql_value "select coalesce(sum(s.clicks), 0) from link_daily_stats s join url u on u.id = s.url_id where u.short_url = '$1';") >= 1 ))
+# psql_has_referrer_row <short link>: the click recorder writes link_daily_stats first and link_daily_breakdown second, each
+# committed on its own, so a click is fully recorded once its REFERRER breakdown row exists.
+psql_has_referrer_row() {
+    (( $(psql_value "select count(*) from link_daily_breakdown b join url u on u.id = b.url_id where u.short_url = '$1' and b.dimension = 'REFERRER';") >= 1 ))
 }
 
 # http_bg <name> <curl arguments…> sends a request in the background; wait_bg waits for all of them, then bg_status <name>
@@ -152,14 +154,22 @@ bg_body() {
 }
 
 # hold_page_lock <page id> <lock clause> <seconds> locks a bio_page row from its own psql session, as a save in progress
-# does, and returns once the lock is held; release_page_lock waits for that session to commit.
+# does, and returns once the lock is held: another session's FOR UPDATE NOWAIT on the row must be refused.
+# release_page_lock waits for that session to commit.
 hold_page_lock() {
-    local tries
+    local tries probe
     docker exec "$POSTGRES_CONTAINER" psql -U "$DB_USER" -d url_shortener -q -v ON_ERROR_STOP=1 \
         -c 'begin' -c "select id from bio_page where id = $1 $2" -c "select pg_sleep($3)" -c 'commit' >/dev/null &
     LOCK_HOLDER_PID=$!
     for (( tries = 0; tries < 50; tries++ )); do
-        [[ $(psql_value "select count(*) from pg_stat_activity where query = 'select pg_sleep($3)' and state = 'active';") == 1 ]] && return 0
+        if [[ $(psql_value "select count(*) from pg_stat_activity where query = 'select pg_sleep($3)' and state = 'active';") == 1 ]]; then
+            if probe=$(psql_value "select id from bio_page where id = $1 for update nowait;" 2>&1); then
+                fail "the psql session does not hold the bio_page row: FOR UPDATE NOWAIT got it ($probe)"
+            fi
+            expect_contains "$probe" "could not obtain lock on row in relation \"bio_page\"" \
+                "the psql session holds bio_page $1 \"$2\": another session's FOR UPDATE NOWAIT is refused"
+            return 0
+        fi
         sleep 0.1
     done
     fail "the bio_page row was not locked within 5s"
@@ -853,7 +863,7 @@ expect_eq "$(grep -cE '^rate-limit:bio-view:[0-9a-f]{64}$' <<<"$VIEW_LIMIT_KEYS"
 echo "  --- a click on the button from the bio page"
 expect_eq "$(curl -s -o /dev/null -w '%{http_code}' -A "$CHROME" -H "Referer: $FRONTEND_URL/bio/e2e-bio" "$BASE/e2e-bio-link")" 302 \
     "a browser follows the button with the bio page as its referrer"
-wait_until 15 "the click on e2e-bio-link" psql_has_click e2e-bio-link
+wait_until 15 "the click's referrer row for e2e-bio-link" psql_has_referrer_row e2e-bio-link
 expect_eq "$(psql_value "select b.dimension_value from link_daily_breakdown b join url u on u.id = b.url_id where u.short_url = 'e2e-bio-link' and b.dimension = 'REFERRER';")" \
     other "a localhost referrer has no dot, so it is classified other, not as the own host"
 http -H "Authorization: Bearer $APP_JWT" "$BASE/api/v1/analytics/bio-page?days=7"

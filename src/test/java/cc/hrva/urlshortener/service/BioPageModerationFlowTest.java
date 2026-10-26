@@ -31,6 +31,8 @@ import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CopyOnWriteArrayList;
+import lombok.RequiredArgsConstructor;
 import org.apache.commons.lang3.exception.ExceptionUtils;
 import org.hibernate.exception.ConstraintViolationException;
 import org.junit.jupiter.api.AfterEach;
@@ -45,12 +47,18 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.FilterType;
 import org.springframework.context.annotation.Import;
+import org.springframework.context.event.EventListener;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.event.ApplicationEvents;
 import org.springframework.test.context.event.RecordApplicationEvents;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.event.TransactionalEventListener;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -90,6 +98,12 @@ class BioPageModerationFlowTest {
     @Autowired
     private ApplicationEvents events;
 
+    @Autowired
+    private PageDeletionBeforeCommit pageDeletionBeforeCommit;
+
+    @Autowired
+    private CommittedAlerts committedAlerts;
+
     @MockitoBean
     private UserService userService;
 
@@ -106,10 +120,12 @@ class BioPageModerationFlowTest {
         ana = userRepository.saveAndFlush(User.builder().email("ana@example.com").password("correct horse battery").apiKeySlots(4L).active(true).build());
         when(userService.getUserFromToken()).thenReturn(ana);
         when(rateLimiter.tryAcquire(anyString(), anyInt(), any(Duration.class))).thenReturn(true);
+        committedAlerts.clear();
     }
 
     @AfterEach
     void tearDown() {
+        pageDeletionBeforeCommit.disarm();
         jdbcTemplate.update("delete from bio_handle_hold");
         jdbcTemplate.update("delete from bio_page where user_id = ?", ana.getId());
         jdbcTemplate.update("delete from user_account where id = ?", ana.getId());
@@ -182,6 +198,22 @@ class BioPageModerationFlowTest {
         assertThat(events.stream(AdminAlertEvent.class)).isEmpty();
     }
 
+    @Test
+    void aReportExtendingAReviewWhosePageIsDeletedBeforeItCommitsFailsAsAnOptimisticLockAndAlertsNothing() {
+        final var created = bioPageService.create(new BioPageCreateDto("ana"));
+        final var page = bioPageRepository.findByHandleWithOwner("ana").orElseThrow();
+        bioPageReviewService.report(page, ReportCategory.SPAM, "fake shop");
+        pageDeletionBeforeCommit.arm(created.id());
+
+        assertThatThrownBy(() -> bioPageReviewService.report(page, ReportCategory.PHISHING, null))
+                .isInstanceOf(OptimisticLockingFailureException.class);
+        assertThat(bioPageRepository.existsById(created.id())).isFalse();
+        assertThat(reviewsOf(created.id())).isEmpty();
+        assertThat(committedAlerts.reported())
+                .extracting(AdminAlertEvent.BioPageReported::category, AdminAlertEvent.BioPageReported::reviewOpened)
+                .containsExactly(tuple(ReportCategory.SPAM, true));
+    }
+
     private List<Map<String, Object>> reviewsOf(final Long pageId) {
         return jdbcTemplate.queryForList("select reasons, system_flagged from bio_page_review where page_id = ? order by id", pageId);
     }
@@ -221,6 +253,67 @@ class BioPageModerationFlowTest {
             final var appProperties = new AppProperties();
             appProperties.setServerUrl("https://hrva.cc");
             return new DefaultSuspiciousUrlService(appProperties);
+        }
+
+        @Bean
+        PageDeletionBeforeCommit pageDeletionBeforeCommit(final JdbcTemplate jdbcTemplate, final PlatformTransactionManager transactionManager) {
+            final var separateTransaction = new TransactionTemplate(transactionManager);
+            separateTransaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+            return new PageDeletionBeforeCommit(jdbcTemplate, separateTransaction);
+        }
+
+        @Bean
+        CommittedAlerts committedAlerts() {
+            return new CommittedAlerts();
+        }
+
+    }
+
+    @RequiredArgsConstructor
+    static class PageDeletionBeforeCommit {
+
+        private final JdbcTemplate jdbcTemplate;
+        private final TransactionTemplate separateTransaction;
+        private volatile Long armedPageId;
+
+        void arm(final Long pageId) {
+            armedPageId = pageId;
+        }
+
+        void disarm() {
+            armedPageId = null;
+        }
+
+        @EventListener
+        void deleteThePageWhileTheReportIsOpen(final AdminAlertEvent.BioPageReported reported) {
+            final var pageId = armedPageId;
+            if (pageId == null || pageId != reported.page().pageId()) {
+                return;
+            }
+            disarm();
+            separateTransaction.executeWithoutResult(status -> jdbcTemplate.update("delete from bio_page where id = ?", pageId));
+        }
+
+    }
+
+    static class CommittedAlerts {
+
+        private final List<AdminAlertEvent> alerts = new CopyOnWriteArrayList<>();
+
+        void clear() {
+            alerts.clear();
+        }
+
+        List<AdminAlertEvent.BioPageReported> reported() {
+            return alerts.stream()
+                    .filter(AdminAlertEvent.BioPageReported.class::isInstance)
+                    .map(AdminAlertEvent.BioPageReported.class::cast)
+                    .toList();
+        }
+
+        @TransactionalEventListener(fallbackExecution = true)
+        void record(final AdminAlertEvent alert) {
+            alerts.add(alert);
         }
 
     }
