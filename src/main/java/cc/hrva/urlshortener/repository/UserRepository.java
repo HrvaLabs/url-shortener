@@ -16,6 +16,7 @@ public interface UserRepository extends JpaRepository<User, Long>, JpaSpecificat
     boolean existsByIdAndAuthoritiesName(Long id, String name);
     @EntityGraph(attributePaths = "authorities", type = EntityGraph.EntityGraphType.LOAD)
     Optional<User> findByEmail(String email);
+    Optional<User> findByWebauthnUserHandle(String handle);
     List<User> findByLastLoginIsLessThanEqualAndActiveTrue(LocalDateTime limitDate);
     long countByCreateDateAfter(LocalDateTime dateTime);
 

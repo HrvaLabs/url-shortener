@@ -10,6 +10,7 @@ import org.springframework.stereotype.Repository;
 public interface TwoFactorRecoveryCodeRepository extends JpaRepository<TwoFactorRecoveryCode, Long> {
 
     List<TwoFactorRecoveryCode> findByUserAndUsedFalse(User user);
+    long countByUserAndUsedFalse(User user);
     void deleteByUser(User user);
 
 }

@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.9.xsd">
+
+    <include file="classpath:/db/changelog/codebook/authorities.xml"/>
+    <include file="classpath:/db/changelog/table/user.xml"/>
+    <include file="classpath:/db/changelog/table/V1.0.0_remove_name_from_user_table.xml"/>
+    <include file="classpath:/db/changelog/table/user_auth_provider.xml"/>
+    <include file="classpath:/db/changelog/013-email-verification.xml"/>
+    <include file="classpath:/db/changelog/015-two-factor.xml"/>
+
+    <changeSet author="test" id="two-step-legacy-accounts">
+        <insert tableName="user_account">
+            <column name="email" value="totp@example.com"/>
+            <column name="password" value="$2a$10$hash"/>
+            <column name="two_factor_enabled" valueBoolean="true"/>
+            <column name="two_factor_secret" value="JBSWY3DPEHPK3PXP"/>
+        </insert>
+        <insert tableName="user_account">
+            <column name="email" value="plain@example.com"/>
+            <column name="password" value="$2a$10$hash"/>
+            <column name="two_factor_enabled" valueBoolean="false"/>
+        </insert>
+    </changeSet>
+
+    <include file="classpath:/db/changelog/028-passkeys-and-two-step.xml"/>
+
+</databaseChangeLog>

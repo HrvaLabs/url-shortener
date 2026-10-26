@@ -68,6 +68,11 @@ public class User {
     @JsonIgnore
     private String twoFactorSecret;
 
+    private Boolean twoStepEnabled;
+
+    @JsonIgnore
+    private String webauthnUserHandle;
+
     private String authProvider;
 
     @Transient
@@ -85,6 +90,9 @@ public class User {
         }
         if (this.twoFactorEnabled == null) {
             this.twoFactorEnabled = false;
+        }
+        if (this.twoStepEnabled == null) {
+            this.twoStepEnabled = false;
         }
         if (this.authProvider == null) {
             this.authProvider = "local";

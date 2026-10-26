@@ -33,5 +33,6 @@
     <include file="classpath:/db/changelog/025-audit-log-typed-action.xml"/>
     <include file="classpath:/db/changelog/026-privacy-first-analytics.xml"/>
     <include file="classpath:/db/changelog/027-admin-stats-and-reserved-aliases.xml"/>
+    <include file="classpath:/db/changelog/028-passkeys-and-two-step.xml"/>
 
 </databaseChangeLog>

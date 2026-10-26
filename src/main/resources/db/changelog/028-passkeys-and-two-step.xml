@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.9.xsd">
+
+    <changeSet author="khrvacic" id="028-user-account-two-step">
+        <addColumn tableName="user_account">
+            <column name="two_step_enabled" type="BOOLEAN" defaultValueBoolean="false">
+                <constraints nullable="false"/>
+            </column>
+            <column name="webauthn_user_handle" type="VARCHAR(64)"/>
+        </addColumn>
+        <addUniqueConstraint tableName="user_account" columnNames="webauthn_user_handle"
+                             constraintName="uq_user_account_webauthn_user_handle"/>
+        <rollback>
+            <dropUniqueConstraint tableName="user_account" constraintName="uq_user_account_webauthn_user_handle"/>
+            <dropColumn tableName="user_account" columnName="webauthn_user_handle"/>
+            <dropColumn tableName="user_account" columnName="two_step_enabled"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet author="khrvacic" id="028-two-step-for-totp-accounts">
+        <update tableName="user_account">
+            <column name="two_step_enabled" valueBoolean="true"/>
+            <where>two_factor_enabled = true</where>
+        </update>
+        <rollback/>
+    </changeSet>
+
+    <changeSet author="khrvacic" id="028-passkey-credential">
+        <createTable tableName="passkey_credential">
+            <column name="id" type="BIGINT" autoIncrement="true">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="user_id" type="BIGINT">
+                <constraints nullable="false"/>
+            </column>
+            <column name="credential_id" type="VARCHAR(1400)">
+                <constraints nullable="false" unique="true" uniqueConstraintName="uq_passkey_credential_credential_id"/>
+            </column>
+            <column name="public_key" type="TEXT">
+                <constraints nullable="false"/>
+            </column>
+            <column name="attestation_object" type="TEXT">
+                <constraints nullable="false"/>
+            </column>
+            <column name="sign_count" type="BIGINT" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+            <column name="uv_initialized" type="BOOLEAN">
+                <constraints nullable="false"/>
+            </column>
+            <column name="backup_eligible" type="BOOLEAN">
+                <constraints nullable="false"/>
+            </column>
+            <column name="backup_state" type="BOOLEAN">
+                <constraints nullable="false"/>
+            </column>
+            <column name="discoverable" type="BOOLEAN"/>
+            <column name="transports" type="VARCHAR(100)"/>
+            <column name="aaguid" type="VARCHAR(36)"/>
+            <column name="label" type="VARCHAR(64)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_at" type="TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="last_used_at" type="TIMESTAMP"/>
+        </createTable>
+        <addForeignKeyConstraint baseTableName="passkey_credential" baseColumnNames="user_id" constraintName="fk_passkey_credential_user"
+                                 referencedTableName="user_account" referencedColumnNames="id" onDelete="CASCADE"/>
+        <createIndex tableName="passkey_credential" indexName="idx_passkey_credential_user_id">
+            <column name="user_id"/>
+        </createIndex>
+        <rollback>
+            <dropTable tableName="passkey_credential"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet author="khrvacic" id="028-passkey-sign-in-daily">
+        <createTable tableName="passkey_sign_in_daily">
+            <column name="stat_date" type="DATE">
+                <constraints primaryKey="true" primaryKeyName="pk_passkey_sign_in_daily" nullable="false"/>
+            </column>
+            <column name="sign_ins" type="BIGINT" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+        <rollback>
+            <dropTable tableName="passkey_sign_in_daily"/>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>
