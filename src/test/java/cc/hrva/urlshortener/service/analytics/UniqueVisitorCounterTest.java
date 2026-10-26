@@ -2,7 +2,11 @@ package cc.hrva.urlshortener.service.analytics;
 
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.dto.ClickRequest;
+import cc.hrva.urlshortener.mcp.bridge.InMemoryRedis;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.security.GeneralSecurityException;
 import java.time.Clock;
 import java.time.Duration;
@@ -21,6 +25,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Captor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.mockito.quality.Strictness;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.data.redis.RedisConnectionFailureException;
@@ -35,10 +40,12 @@ import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.withSettings;
 
 @ExtendWith(MockitoExtension.class)
 class UniqueVisitorCounterTest {
@@ -56,6 +63,18 @@ class UniqueVisitorCounterTest {
     private static final String SALT_BASE64 = Base64.getEncoder().encodeToString(SALT);
     private static final String THEIR_SALT_BASE64 = Base64.getEncoder().encodeToString(THEIR_SALT);
     private static final String WARNING = "Unique visitor check unavailable, counting a new visitor urlId=7 exception=";
+    private static final long PAGE_ID = 5;
+    private static final String BIO_VISITORS_KEY = "analytics:bio-visitors:5:2026-10-24";
+    private static final String LINK_FIVE_VISITORS_KEY = "analytics:visitors:5:2026-10-24";
+    private static final String BIO_WARNING = "Unique visitor check unavailable, counting a new bio page visitor pageId=5 exception=";
+    private static final String COUNTER_SOURCE = "src/main/java/cc/hrva/urlshortener/service/analytics/UniqueVisitorCounter.java";
+    private static final String QUOTED_LINES = """
+                public static String visitorHash(final byte[] salt, final ClickRequest click, final long urlId) {
+                    final var visitor = StringUtils.defaultString(click.clientIp()) + "\\n" + StringUtils.defaultString(click.userAgent()) + "\\n" + urlId;
+                    final var hmac = hmacSha256(salt).doFinal(visitor.getBytes(StandardCharsets.UTF_8));
+                    return Base64.getUrlEncoder().withoutPadding().encodeToString(Arrays.copyOf(hmac, HASH_BYTES));
+                }
+            """;
 
     @Mock
     private StringRedisTemplate redisTemplate;
@@ -69,6 +88,9 @@ class UniqueVisitorCounterTest {
     @Captor
     private ArgumentCaptor<String> createdSalt;
 
+    private final InMemoryRedis inMemoryRedis = new InMemoryRedis();
+
+    private StringRedisTemplate inMemoryRedisTemplate;
     private UniqueVisitorCounter uniqueVisitorCounter;
 
     @BeforeEach
@@ -200,6 +222,92 @@ class UniqueVisitorCounterTest {
         assertThat(UniqueVisitorCounter.visitorHash(SALT, CLICK, URL_ID)).isEqualTo(truncatedHmac(SALT, "203.0.113.7\nUA\n7"));
         assertThat(UniqueVisitorCounter.visitorHash(SALT, ClickRequest.of(null, null, "https://t.co/x", "DE"), URL_ID))
                 .isEqualTo(truncatedHmac(SALT, "\n\n7"));
+    }
+
+    @Test
+    void aBioPageVisitorCountsOncePerDay() {
+        final var counter = counterBackedByInMemoryRedis();
+
+        assertThat(counter.isNewBioPageVisitor(PAGE_ID, DAY, CLICK)).isTrue();
+        assertThat(counter.isNewBioPageVisitor(PAGE_ID, DAY, CLICK)).isFalse();
+        assertThat(counter.isNewBioPageVisitor(PAGE_ID, DAY, ClickRequest.of(CLIENT_IP, "Another UA", null, "HR"))).isTrue();
+        assertThat(counter.isNewBioPageVisitor(PAGE_ID + 1, DAY, CLICK)).isTrue();
+        assertThat(counter.isNewBioPageVisitor(PAGE_ID, DAY.plusDays(1), CLICK)).isTrue();
+        assertThat(counter.isNewBioPageVisitor(PAGE_ID, DAY.plusDays(1), CLICK)).isFalse();
+
+        assertThat(inMemoryRedis.membersOf(BIO_VISITORS_KEY)).hasSize(2);
+    }
+
+    @Test
+    void aBioPageHashNeverEqualsTheLinkHashForTheSameId() throws GeneralSecurityException {
+        final var counter = counterBackedByInMemoryRedis();
+
+        assertThat(counter.isNewVisitor(PAGE_ID, DAY, CLICK)).isTrue();
+        assertThat(counter.isNewBioPageVisitor(PAGE_ID, DAY, CLICK)).isTrue();
+
+        final var salt = Base64.getDecoder().decode(inMemoryRedisTemplate.opsForValue().get(SALT_KEY));
+        final var linkMembers = inMemoryRedis.membersOf(LINK_FIVE_VISITORS_KEY);
+        final var bioMembers = inMemoryRedis.membersOf(BIO_VISITORS_KEY);
+        assertThat(linkMembers).containsExactly(UniqueVisitorCounter.visitorHash(salt, CLICK, PAGE_ID));
+        assertThat(bioMembers)
+                .containsExactly(truncatedHmac(salt, "203.0.113.7\nUA\nbio:5"))
+                .doesNotContainAnyElementsOf(linkMembers);
+        assertThat(bioMembers.iterator().next()).matches("[A-Za-z0-9_-]{22}").doesNotContain(CLIENT_IP);
+    }
+
+    @Test
+    void bioPageSetsExpireWithTheDaysSalt() {
+        final var counter = counterBackedByInMemoryRedis();
+
+        counter.isNewBioPageVisitor(PAGE_ID, DAY, CLICK);
+        counter.isNewVisitor(URL_ID, DAY, CLICK);
+
+        assertThat(inMemoryRedis.expiryOf(BIO_VISITORS_KEY))
+                .isEqualTo(NOW.plus(inMemoryRedis.timeToLiveOfKeyContaining(SALT_KEY)))
+                .isEqualTo(inMemoryRedis.expiryOf(VISITORS_KEY))
+                .isEqualTo(Instant.ofEpochMilli(Long.parseLong(EXPIRY_MILLIS)));
+    }
+
+    @Test
+    @ExtendWith(OutputCaptureExtension.class)
+    void redisDownCountsANewBioPageVisitor(final CapturedOutput output) {
+        when(valueOperations.get(SALT_KEY)).thenThrow(new RedisConnectionFailureException("Unable to connect to Redis"));
+
+        assertThat(uniqueVisitorCounter.isNewBioPageVisitor(PAGE_ID, DAY, CLICK)).isTrue();
+
+        assertThat(output)
+                .contains(BIO_WARNING + RedisConnectionFailureException.class.getName())
+                .doesNotContain(CLIENT_IP);
+        verify(redisTemplate, never()).execute(any(RedisScript.class), anyList(), any(Object[].class));
+    }
+
+    @Test
+    @ExtendWith(OutputCaptureExtension.class)
+    void aFailingBioPageScriptCountsANewVisitor(final CapturedOutput output) {
+        when(valueOperations.get(SALT_KEY)).thenReturn(SALT_BASE64);
+        when(redisTemplate.execute(any(RedisScript.class), anyList(), any(Object[].class)))
+                .thenThrow(new RedisSystemException("OOM command not allowed when used memory > 'maxmemory'", null));
+
+        assertThat(uniqueVisitorCounter.isNewBioPageVisitor(PAGE_ID, DAY, CLICK)).isTrue();
+
+        assertThat(output)
+                .contains(BIO_WARNING + RedisSystemException.class.getName())
+                .doesNotContain(CLIENT_IP)
+                .doesNotContain(SALT_BASE64);
+    }
+
+    @Test
+    void theQuotedLinesAreUntouched() throws IOException {
+        final var lines = Files.readAllLines(Path.of(COUNTER_SOURCE), StandardCharsets.UTF_8);
+
+        assertThat(String.join("\n", lines.subList(57, 62)) + "\n").isEqualTo(QUOTED_LINES);
+    }
+
+    private UniqueVisitorCounter counterBackedByInMemoryRedis() {
+        inMemoryRedisTemplate = mock(StringRedisTemplate.class, withSettings().strictness(Strictness.LENIENT));
+        inMemoryRedis.backing(inMemoryRedisTemplate);
+        final var clock = Clock.fixed(NOW, ZoneOffset.UTC);
+        return new UniqueVisitorCounter(inMemoryRedisTemplate, new AnalyticsDays(clock, new AppProperties()), clock);
     }
 
     private static String truncatedHmac(final byte[] key, final String message) throws GeneralSecurityException {

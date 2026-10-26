@@ -1,8 +1,12 @@
 package cc.hrva.urlshortener.service;
 
 import cc.hrva.urlshortener.configuration.JacksonConfiguration;
+import cc.hrva.urlshortener.configuration.properties.AppProperties;
+import cc.hrva.urlshortener.dto.ClickRequest;
 import cc.hrva.urlshortener.dto.bio.PublicBioPageResponse;
 import cc.hrva.urlshortener.exception.BioPageNotFoundException;
+import cc.hrva.urlshortener.mcp.anon.RateLimiter;
+import cc.hrva.urlshortener.mcp.anon.RateLimiterUnavailableException;
 import cc.hrva.urlshortener.model.BioPage;
 import cc.hrva.urlshortener.model.BioPageButton;
 import cc.hrva.urlshortener.model.Url;
@@ -13,12 +17,17 @@ import cc.hrva.urlshortener.model.enums.BioIcon;
 import cc.hrva.urlshortener.model.enums.BioTheme;
 import cc.hrva.urlshortener.model.enums.BlockReason;
 import cc.hrva.urlshortener.repository.BioPageButtonRepository;
+import cc.hrva.urlshortener.repository.BioPageViewStatsRepository;
 import cc.hrva.urlshortener.repository.BioPageRepository;
 import cc.hrva.urlshortener.repository.LinkReviewRepository;
+import cc.hrva.urlshortener.service.analytics.AnalyticsDays;
+import cc.hrva.urlshortener.service.analytics.UniqueVisitorCounter;
 import cc.hrva.urlshortener.service.bio.BioPageResponses;
 import cc.hrva.urlshortener.service.impl.DefaultPublicBioPageService;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
@@ -31,16 +40,23 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
+import org.springframework.dao.DataAccessResourceFailureException;
+import org.springframework.data.redis.RedisConnectionFailureException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.tuple;
 import static org.mockito.ArgumentMatchers.anyCollection;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -50,6 +66,15 @@ class DefaultPublicBioPageServiceTest {
     private static final LocalDateTime NOW = LocalDateTime.ofInstant(NOW_INSTANT, ZoneOffset.UTC);
     private static final String NOT_AVAILABLE = "This page isn't available.";
     private static final String CAMERA = codePoints(0x1F4F8);
+    private static final LocalDate TODAY = LocalDate.of(2026, 10, 26);
+    private static final String VISITOR_IP = "203.0.113.7";
+    private static final ClickRequest HUMAN = ClickRequest.of(VISITOR_IP,
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36",
+            "https://app.hrva.cc/bio/ana", "HR");
+    private static final ClickRequest BOT = ClickRequest.of(VISITOR_IP, "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
+            null, null);
+    private static final String VIEW_KEY = RateLimiter.clientKey("bio-view", VISITOR_IP);
+    private static final Duration VIEW_WINDOW = Duration.ofMinutes(1);
 
     @Mock
     private BioPageRepository bioPageRepository;
@@ -60,6 +85,15 @@ class DefaultPublicBioPageServiceTest {
     @Mock
     private LinkReviewRepository linkReviewRepository;
 
+    @Mock
+    private BioPageViewStatsRepository bioPageViewStatsRepository;
+
+    @Mock
+    private UniqueVisitorCounter uniqueVisitorCounter;
+
+    @Mock
+    private RateLimiter rateLimiter;
+
     private final User ana = User.builder().id(7L).email("ana@example.com").active(true).build();
     private BioPage page;
     private PublicBioPageService publicBioPageService;
@@ -69,9 +103,7 @@ class DefaultPublicBioPageServiceTest {
         page = BioPage.builder().id(12L).owner(ana).handle("ana").displayName("Ana Horvat").bio("Photos from Zagreb")
                 .avatarKind(BioAvatarKind.EMOJI).avatarEmoji(CAMERA).accent(BioAccent.TEAL).theme(BioTheme.AUTO)
                 .createdAt(NOW).updatedAt(NOW).build();
-        final var clock = Clock.fixed(NOW_INSTANT, ZoneOffset.UTC);
-        publicBioPageService = new DefaultPublicBioPageService(bioPageRepository,
-                new BioPageResponses(bioPageButtonRepository, linkReviewRepository, clock));
+        publicBioPageService = serviceAt(NOW_INSTANT);
     }
 
     @Test
@@ -236,6 +268,151 @@ class DefaultPublicBioPageServiceTest {
                 {"handle":"ana","displayName":"Ana Horvat","bio":"Photos from Zagreb","avatarKind":"EMOJI","avatarEmoji":"%s",\
                 "accent":"TEAL","theme":"AUTO","indexable":false,"buttons":[{"title":"Instagram","icon":"INSTAGRAM","shortUrl":"ana-ig"}]}"""
                 .formatted(CAMERA)));
+    }
+
+    @Test
+    void aHumanViewCountsOnceADay() {
+        isPublished();
+        allowsViews();
+        when(uniqueVisitorCounter.isNewBioPageVisitor(12L, TODAY, HUMAN)).thenReturn(true, false);
+
+        publicBioPageService.recordView("ana", HUMAN);
+        publicBioPageService.recordView("ana", HUMAN);
+
+        verify(bioPageViewStatsRepository).increment(12L, TODAY, 1, 0);
+        verifyNoMoreInteractions(bioPageViewStatsRepository);
+        verify(rateLimiter, times(2)).tryAcquire(VIEW_KEY, 60, VIEW_WINDOW);
+    }
+
+    @Test
+    void aBotViewIsCountedApartEveryTime() {
+        isPublished();
+        allowsViews();
+
+        publicBioPageService.recordView("ana", BOT);
+        publicBioPageService.recordView("ana", BOT);
+        publicBioPageService.recordView("ana", ClickRequest.of(VISITOR_IP, null, null, null));
+
+        verify(bioPageViewStatsRepository, times(3)).increment(12L, TODAY, 0, 1);
+        verifyNoMoreInteractions(bioPageViewStatsRepository);
+        verifyNoInteractions(uniqueVisitorCounter);
+    }
+
+    @Test
+    void aViewOfAHiddenPageCountsNothing() {
+        page.setHiddenAt(NOW);
+        isPublished();
+
+        publicBioPageService.recordView("ana", HUMAN);
+
+        verifyNoInteractions(rateLimiter, uniqueVisitorCounter, bioPageViewStatsRepository);
+    }
+
+    @Test
+    void aViewOfAPageThatIsNotPublicCountsNothing() {
+        ana.setActive(false);
+        isPublished();
+        when(bioPageRepository.findByHandleWithOwner("nobody")).thenReturn(Optional.empty());
+
+        publicBioPageService.recordView("ana", HUMAN);
+        publicBioPageService.recordView("nobody", HUMAN);
+        publicBioPageService.recordView("ana/blog", HUMAN);
+        publicBioPageService.recordView(null, HUMAN);
+
+        verifyNoInteractions(rateLimiter, uniqueVisitorCounter, bioPageViewStatsRepository);
+        verify(bioPageRepository).findByHandleWithOwner("ana");
+        verify(bioPageRepository).findByHandleWithOwner("nobody");
+        verifyNoMoreInteractions(bioPageRepository);
+    }
+
+    @Test
+    void theHandleOfAViewIsMatchedLikeTheRead() {
+        isPublished();
+        allowsViews();
+        when(uniqueVisitorCounter.isNewBioPageVisitor(12L, TODAY, HUMAN)).thenReturn(true);
+
+        publicBioPageService.recordView(" @Ana ", HUMAN);
+
+        verify(bioPageViewStatsRepository).increment(12L, TODAY, 1, 0);
+    }
+
+    @Test
+    void aViewOverTheNetworkLimitCountsNothing() {
+        isPublished();
+        when(rateLimiter.tryAcquire(VIEW_KEY, 60, VIEW_WINDOW)).thenReturn(false);
+
+        publicBioPageService.recordView("ana", HUMAN);
+        publicBioPageService.recordView("ana", BOT);
+
+        verifyNoInteractions(uniqueVisitorCounter, bioPageViewStatsRepository);
+    }
+
+    @Test
+    @ExtendWith(OutputCaptureExtension.class)
+    void redisDownStillCounts(final CapturedOutput output) {
+        isPublished();
+        when(rateLimiter.tryAcquire(VIEW_KEY, 60, VIEW_WINDOW))
+                .thenThrow(new RateLimiterUnavailableException(new RedisConnectionFailureException("Unable to connect to Redis")));
+        when(uniqueVisitorCounter.isNewBioPageVisitor(12L, TODAY, HUMAN)).thenReturn(true);
+
+        publicBioPageService.recordView("ana", HUMAN);
+
+        verify(bioPageViewStatsRepository).increment(12L, TODAY, 1, 0);
+        assertThat(output)
+                .contains("Bio page view rate limit unavailable, counting the view pageId=12")
+                .doesNotContain(VISITOR_IP);
+    }
+
+    @Test
+    @ExtendWith(OutputCaptureExtension.class)
+    void aDatabaseErrorNeverEscapes(final CapturedOutput output) {
+        isPublished();
+        allowsViews();
+        when(uniqueVisitorCounter.isNewBioPageVisitor(12L, TODAY, HUMAN)).thenReturn(true);
+        doThrow(new DataAccessResourceFailureException("Connection refused")).when(bioPageViewStatsRepository).increment(12L, TODAY, 1, 0);
+
+        assertThatCode(() -> publicBioPageService.recordView("ana", HUMAN)).doesNotThrowAnyException();
+
+        assertThat(output)
+                .contains("Bio page view dropped pageId=12 exception=" + DataAccessResourceFailureException.class.getName())
+                .doesNotContain(VISITOR_IP)
+                .doesNotContain("ana@example.com")
+                .doesNotContain("Connection refused");
+    }
+
+    @Test
+    @ExtendWith(OutputCaptureExtension.class)
+    void aFailedLookupNeverEscapes(final CapturedOutput output) {
+        when(bioPageRepository.findByHandleWithOwner("ana")).thenThrow(new DataAccessResourceFailureException("Connection refused"));
+
+        assertThatCode(() -> publicBioPageService.recordView("ana", HUMAN)).doesNotThrowAnyException();
+
+        assertThat(output)
+                .contains("Bio page view dropped pageId=unknown exception=" + DataAccessResourceFailureException.class.getName())
+                .doesNotContain(VISITOR_IP);
+        verifyNoInteractions(rateLimiter, uniqueVisitorCounter, bioPageViewStatsRepository);
+    }
+
+    @Test
+    void aViewIsCountedOnTheAnalyticsDay() {
+        final var lateEvening = serviceAt(Instant.parse("2026-10-26T23:30:00Z"));
+        isPublished();
+        allowsViews();
+        when(uniqueVisitorCounter.isNewBioPageVisitor(12L, TODAY.plusDays(1), HUMAN)).thenReturn(true);
+
+        lateEvening.recordView("ana", HUMAN);
+
+        verify(bioPageViewStatsRepository).increment(12L, TODAY.plusDays(1), 1, 0);
+    }
+
+    private PublicBioPageService serviceAt(final Instant now) {
+        final var clock = Clock.fixed(now, ZoneOffset.UTC);
+        return new DefaultPublicBioPageService(bioPageRepository, new BioPageResponses(bioPageButtonRepository, linkReviewRepository, clock),
+                bioPageViewStatsRepository, uniqueVisitorCounter, rateLimiter, new AnalyticsDays(clock, new AppProperties()));
+    }
+
+    private void allowsViews() {
+        when(rateLimiter.tryAcquire(VIEW_KEY, 60, VIEW_WINDOW)).thenReturn(true);
     }
 
     private void assertNotAvailable(final String handle) {

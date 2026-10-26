@@ -12,9 +12,11 @@ import cc.hrva.urlshortener.dto.BreakdownEntry;
 import cc.hrva.urlshortener.dto.UrlAnalyticsDto;
 import cc.hrva.urlshortener.dto.UrlAnalyticsDto.Breakdowns;
 import cc.hrva.urlshortener.dto.UrlAnalyticsDto.LinkSummary;
+import cc.hrva.urlshortener.dto.bio.BioPageAnalyticsResponse;
 import cc.hrva.urlshortener.exception.InvalidAnalyticsRangeException;
 import cc.hrva.urlshortener.exception.NoAuthorizationException;
 import cc.hrva.urlshortener.service.AnalyticsService;
+import cc.hrva.urlshortener.service.BioPageAnalyticsService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -40,11 +42,42 @@ class AnalyticsControllerTest {
     @Mock
     private AnalyticsService analyticsService;
 
+    @Mock
+    private BioPageAnalyticsService bioPageAnalyticsService;
+
     @BeforeEach
     void setUp() {
-        this.mockMvc = MockMvcBuilders.standaloneSetup(new AnalyticsController(analyticsService))
+        this.mockMvc = MockMvcBuilders.standaloneSetup(new AnalyticsController(analyticsService, bioPageAnalyticsService))
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .build();
+    }
+
+    @Test
+    void shouldReturnBioPageAnalyticsForTheRequestedRange() throws Exception {
+        final var to = LocalDate.of(2026, 10, 24);
+        when(bioPageAnalyticsService.analytics(90)).thenReturn(new BioPageAnalyticsResponse(90, to.minusDays(89), to, "ana", 4, 1, List.of(), List.of()));
+
+        mockMvc.perform(get("/api/v1/analytics/bio-page").param("days", "90"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.days").value(90))
+                .andExpect(jsonPath("$.from").value("2026-07-27"))
+                .andExpect(jsonPath("$.handle").value("ana"))
+                .andExpect(jsonPath("$.views").value(4))
+                .andExpect(jsonPath("$.botViews").value(1));
+
+        verifyNoInteractions(analyticsService);
+    }
+
+    @Test
+    void bioPageAnalyticsWithoutDaysLeavesTheDefaultToTheService() throws Exception {
+        final var to = LocalDate.of(2026, 10, 24);
+        when(bioPageAnalyticsService.analytics(null)).thenReturn(new BioPageAnalyticsResponse(30, to.minusDays(29), to, null, 0, 0, List.of(), List.of()));
+
+        mockMvc.perform(get("/api/v1/analytics/bio-page"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.days").value(30));
+
+        verify(bioPageAnalyticsService).analytics(null);
     }
 
     @Test

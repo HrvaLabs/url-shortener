@@ -98,4 +98,27 @@ public class UniqueVisitorCounter {
         }
     }
 
+    private static final String BIO_VISITORS_KEY_PREFIX = "analytics:bio-visitors:";
+    private static final String BIO_PAGE_PREFIX = "bio:";
+
+    public boolean isNewBioPageVisitor(final long pageId, final LocalDate day, final ClickRequest click) {
+        try {
+            final var expiry = analyticsDays.saltExpiry(day);
+            final var visitorsKey = BIO_VISITORS_KEY_PREFIX + pageId + ":" + day;
+            final var hash = bioPageVisitorHash(saltOf(day, expiry), click, pageId);
+            final var added = redisTemplate.execute(ADD_WITH_EXPIRY, List.of(visitorsKey), hash, Long.toString(expiry.toEpochMilli()));
+            return added == null || added != SEEN;
+        } catch (final RuntimeException exception) {
+            log.warn("Unique visitor check unavailable, counting a new bio page visitor pageId={} exception={}", pageId, exception.getClass().getName());
+            return true;
+        }
+    }
+
+    private static String bioPageVisitorHash(final byte[] salt, final ClickRequest click, final long pageId) {
+        final var visitor = StringUtils.defaultString(click.clientIp()) + "\n" + StringUtils.defaultString(click.userAgent()) + "\n"
+                + BIO_PAGE_PREFIX + pageId;
+        final var hmac = hmacSha256(salt).doFinal(visitor.getBytes(StandardCharsets.UTF_8));
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(Arrays.copyOf(hmac, HASH_BYTES));
+    }
+
 }

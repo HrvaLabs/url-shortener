@@ -25,6 +25,13 @@ class ReferrerClassifierTest {
         referrerClassifier.init();
     }
 
+    @Test
+    void theOwnHostIsTheServerHostTheFrontendHostMapsTo() {
+        assertThat(referrerClassifier.ownHost()).isEqualTo("hrva.cc");
+        assertThat(referrerClassifier.classify(ClickRequest.of("203.0.113.7", "UA", "https://app.hrva.cc/bio/ana", null)))
+                .isEqualTo(referrerClassifier.ownHost());
+    }
+
     @ParameterizedTest
     @MethodSource("referers")
     void refererIsReducedToItsHost(final String referer, final String referrer) {

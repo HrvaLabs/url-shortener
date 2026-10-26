@@ -6,6 +6,7 @@ import cc.hrva.urlshortener.dto.LinkClicks;
 import cc.hrva.urlshortener.model.enums.StatDimension;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -31,6 +32,8 @@ public class LinkStatsRepository {
     private static final String TO = "to";
     private static final String OWNER_ID = "ownerId";
     private static final String LIMIT = "limit";
+    private static final String URL_IDS = "urlIds";
+    private static final String REFERRER = "referrer";
 
     private static final String INCREMENT_DAILY_STATS = """
             MERGE INTO link_daily_stats t
@@ -90,6 +93,18 @@ public class LinkStatsRepository {
             having sum(s.clicks) > 0
             order by sum(s.clicks) desc, s.url_id
             fetch first :limit rows only
+            """;
+
+    private static final String SUM_CLICKS_BY_URL = """
+            select url_id, sum(clicks) as total_clicks from link_daily_stats
+            where url_id in (:urlIds) and stat_date between :from and :to
+            group by url_id
+            """;
+
+    private static final String SUM_REFERRER_CLICKS_BY_URL = """
+            select url_id, sum(clicks) as total_clicks from link_daily_breakdown
+            where url_id in (:urlIds) and dimension = 'REFERRER' and dimension_value = :referrer and stat_date between :from and :to
+            group by url_id
             """;
 
     private final NamedParameterJdbcTemplate jdbcTemplate;
@@ -158,6 +173,26 @@ public class LinkStatsRepository {
                         row.getLong("url_id"),
                         row.getLong("total_clicks"),
                         row.getLong("total_unique_visitors")));
+    }
+
+    public Map<Long, Long> sumClicksByUrl(final Collection<Long> urlIds, final LocalDate from, final LocalDate to) {
+        if (urlIds.isEmpty()) {
+            return Map.of();
+        }
+        return sumsByUrl(SUM_CLICKS_BY_URL, Map.of(URL_IDS, urlIds, FROM, from, TO, to));
+    }
+
+    public Map<Long, Long> sumReferrerClicksByUrl(final Collection<Long> urlIds, final String referrer, final LocalDate from, final LocalDate to) {
+        if (urlIds.isEmpty()) {
+            return Map.of();
+        }
+        return sumsByUrl(SUM_REFERRER_CLICKS_BY_URL, Map.of(URL_IDS, urlIds, REFERRER, referrer, FROM, from, TO, to));
+    }
+
+    private Map<Long, Long> sumsByUrl(final String sql, final Map<String, ?> parameters) {
+        final var sums = new HashMap<Long, Long>();
+        jdbcTemplate.query(sql, parameters, (RowCallbackHandler) row -> sums.put(row.getLong("url_id"), row.getLong("total_clicks")));
+        return Map.copyOf(sums);
     }
 
     private void updateRetryingOnce(final String sql, final Map<String, ?> parameters) {

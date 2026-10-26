@@ -5,15 +5,19 @@ import cc.hrva.urlshortener.configuration.GlobalExceptionHandler;
 import cc.hrva.urlshortener.configuration.JacksonConfiguration;
 import cc.hrva.urlshortener.configuration.SecurityConfiguration;
 import cc.hrva.urlshortener.configuration.WebConfiguration;
+import cc.hrva.urlshortener.dto.ClickRequest;
 import cc.hrva.urlshortener.dto.bio.BioHandleAvailabilityResponse;
 import cc.hrva.urlshortener.dto.bio.BioHandleDto;
+import cc.hrva.urlshortener.dto.bio.BioPageAnalyticsResponse;
 import cc.hrva.urlshortener.dto.bio.BioPageButtonDto;
 import cc.hrva.urlshortener.dto.bio.BioPageCreateDto;
 import cc.hrva.urlshortener.dto.bio.BioPageResponse;
 import cc.hrva.urlshortener.dto.bio.BioPageUpdateDto;
+import cc.hrva.urlshortener.dto.bio.BioViewDay;
 import cc.hrva.urlshortener.dto.bio.PublicBioPageResponse;
 import cc.hrva.urlshortener.exception.BioPageConflictException;
 import cc.hrva.urlshortener.exception.BioPageNotFoundException;
+import cc.hrva.urlshortener.exception.InvalidAnalyticsRangeException;
 import cc.hrva.urlshortener.mcp.McpResourceServerConfiguration;
 import cc.hrva.urlshortener.mcp.anon.RateLimiter;
 import cc.hrva.urlshortener.mcp.authorization.AuthorizationServerConfiguration;
@@ -26,15 +30,19 @@ import cc.hrva.urlshortener.model.enums.BioLinkState;
 import cc.hrva.urlshortener.model.enums.BioTheme;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
+import cc.hrva.urlshortener.security.ClickRequestResolver;
 import cc.hrva.urlshortener.security.ClientIpResolver;
 import cc.hrva.urlshortener.security.JwtFilter;
 import cc.hrva.urlshortener.security.OAuth2LoginSuccessHandler;
 import cc.hrva.urlshortener.security.TokenProvider;
+import cc.hrva.urlshortener.service.AnalyticsService;
+import cc.hrva.urlshortener.service.BioPageAnalyticsService;
 import cc.hrva.urlshortener.service.BioPageService;
 import cc.hrva.urlshortener.service.PublicBioPageService;
 import com.nimbusds.jose.JOSEException;
 import com.nimbusds.jose.jwk.RSAKey;
 import com.nimbusds.jose.jwk.gen.RSAKeyGenerator;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
@@ -64,6 +72,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.allOf;
 import static org.hamcrest.Matchers.containsString;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
@@ -98,6 +108,8 @@ class BioPageEndpointSecurityTest {
     private static final String MY_HANDLE = MY_PAGE + "/handle";
     private static final String AVAILABILITY = "/api/v1/bio-pages/handles/ana/availability";
     private static final String PUBLIC_PAGE = "/api/v1/public/bio-pages/ana";
+    private static final String VIEW_BEACON = PUBLIC_PAGE + "/views";
+    private static final String BIO_ANALYTICS = "/api/v1/analytics/bio-page";
     private static final String NOT_AVAILABLE = "This page isn't available.";
     private static final String USER = "ana@example.com";
     private static final String USER_TOKEN = "user-token";
@@ -112,6 +124,12 @@ class BioPageEndpointSecurityTest {
 
     @MockitoBean
     private PublicBioPageService publicBioPageService;
+
+    @MockitoBean
+    private BioPageAnalyticsService bioPageAnalyticsService;
+
+    @MockitoBean
+    private AnalyticsService analyticsService;
 
     @MockitoBean
     private UrlRepository urlRepository;
@@ -299,6 +317,82 @@ class BioPageEndpointSecurityTest {
     }
 
     @Test
+    void theBeaconIsPublicAndAlways204() throws Exception {
+        doThrow(new IllegalStateException("boom")).when(publicBioPageService).recordView(anyString(), any(ClickRequest.class));
+
+        mockMvc.perform(post(VIEW_BEACON))
+                .andExpect(status().isNoContent())
+                .andExpect(content().string(""));
+        mockMvc.perform(post("/api/v1/public/bio-pages/nobody/views"))
+                .andExpect(status().isNoContent());
+    }
+
+    @Test
+    void theBeaconPassesTheHandleAndTheVisitor() throws Exception {
+        final var click = ArgumentCaptor.forClass(ClickRequest.class);
+
+        mockMvc.perform(post("/api/v1/public/bio-pages/Ana/views")
+                        .header(HttpHeaders.USER_AGENT, "Mozilla/5.0 Test")
+                        .header(HttpHeaders.REFERER, "https://app.hrva.cc/bio/ana"))
+                .andExpect(status().isNoContent());
+
+        verify(publicBioPageService).recordView(eq("Ana"), click.capture());
+        assertThat(click.getValue().userAgent()).isEqualTo("Mozilla/5.0 Test");
+        assertThat(click.getValue().referer()).isEqualTo("https://app.hrva.cc/bio/ana");
+        assertThat(click.getValue().clientIp()).isEqualTo("127.0.0.1");
+    }
+
+    @Test
+    void aSignedInVisitorsViewIsCountedToo() throws Exception {
+        mockMvc.perform(signedIn(post(VIEW_BEACON)))
+                .andExpect(status().isNoContent());
+
+        verify(publicBioPageService).recordView(eq("ana"), any(ClickRequest.class));
+    }
+
+    @Test
+    void bioAnalyticsNeedsSignIn() throws Exception {
+        mockMvc.perform(get(BIO_ANALYTICS + "?days=7"))
+                .andExpect(status().isUnauthorized());
+
+        verifyNoInteractions(bioPageAnalyticsService);
+    }
+
+    @Test
+    void aSignedInUserReadsTheirBioAnalytics() throws Exception {
+        final var day = LocalDate.of(2026, 10, 26);
+        when(bioPageAnalyticsService.analytics(7)).thenReturn(new BioPageAnalyticsResponse(7, day.minusDays(6), day, "ana", 12, 3,
+                List.of(new BioViewDay(day, 12, 3)),
+                List.of(new BioPageAnalyticsResponse.ButtonClicks(31L, 41L, "ana-ig", "Instagram", true, 9, 14))));
+
+        mockMvc.perform(signedIn(get(BIO_ANALYTICS + "?days=7")))
+                .andExpect(status().isOk())
+                .andExpect(content().json("""
+                        {"days":7,"from":"2026-10-20","to":"2026-10-26","handle":"ana","views":12,"botViews":3,
+                        "daily":[{"date":"2026-10-26","views":12,"botViews":3}],
+                        "buttons":[{"buttonId":31,"urlId":41,"shortUrl":"ana-ig","title":"Instagram","shownOnPage":true,"fromHrvaPages":9,"allClicks":14}]}""",
+                        true));
+    }
+
+    @Test
+    void bioAnalyticsRangeIs400() throws Exception {
+        when(bioPageAnalyticsService.analytics(14)).thenThrow(new InvalidAnalyticsRangeException("days must be 7, 30, 90 or 365"));
+
+        mockMvc.perform(signedIn(get(BIO_ANALYTICS + "?days=14")))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().json("{\"error\":\"days must be 7, 30, 90 or 365\"}", true));
+    }
+
+    @Test
+    void bioAnalyticsWithoutAPageIs404WithItsText() throws Exception {
+        when(bioPageAnalyticsService.analytics(null)).thenThrow(new BioPageNotFoundException(NO_PAGE));
+
+        mockMvc.perform(signedIn(get(BIO_ANALYTICS)))
+                .andExpect(status().isNotFound())
+                .andExpect(content().json("{\"error\":\"You don't have a bio page yet.\"}", true));
+    }
+
+    @Test
     void theSwitchesMayBeLeftOut() throws Exception {
         when(bioPageService.update(any(BioPageUpdateDto.class))).thenReturn(ana());
 
@@ -435,6 +529,8 @@ class BioPageEndpointSecurityTest {
             McpResourceServerConfiguration.class,
             JwtFilter.class,
             ClientIpResolver.class,
+            ClickRequestResolver.class,
+            AnalyticsController.class,
             BioPageController.class,
             BioRedirectController.class,
             PublicBioPageController.class

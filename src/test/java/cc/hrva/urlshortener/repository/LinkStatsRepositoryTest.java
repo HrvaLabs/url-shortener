@@ -22,6 +22,7 @@ import org.springframework.context.annotation.FilterType;
 import org.springframework.context.annotation.Import;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.transaction.annotation.Transactional;
 
 import static cc.hrva.urlshortener.model.enums.StatDimension.BROWSER;
@@ -32,6 +33,8 @@ import static cc.hrva.urlshortener.model.enums.StatDimension.REFERRER;
 import static cc.hrva.urlshortener.model.enums.StatDimension.SOURCE;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.tuple;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verifyNoInteractions;
 
 @Transactional
 @SpringBootTest(
@@ -270,6 +273,53 @@ class LinkStatsRepositoryTest {
                 .containsExactly(
                         tuple("026-drop-ip-address", "EXECUTED"),
                         tuple("026-drop-ip-address-seq", "EXECUTED"));
+    }
+
+    @Test
+    void sumsClicksPerLinkInTheRange() {
+        final var first = savedLink("sum-first");
+        final var second = savedLink("sum-second");
+        final var quiet = savedLink("sum-quiet");
+        final var notAsked = savedLink("sum-not-asked");
+        linkStatsRepository.incrementDailyStats(first.getId(), DAY, 3, 1, 5);
+        linkStatsRepository.incrementDailyStats(first.getId(), DAY.plusDays(6), 4, 1, 0);
+        linkStatsRepository.incrementDailyStats(first.getId(), DAY.minusDays(1), 50, 1, 0);
+        linkStatsRepository.incrementDailyStats(first.getId(), DAY.plusDays(7), 60, 1, 0);
+        linkStatsRepository.incrementDailyStats(second.getId(), DAY.plusDays(1), 2, 2, 0);
+        linkStatsRepository.incrementDailyStats(notAsked.getId(), DAY, 9, 9, 0);
+
+        assertThat(linkStatsRepository.sumClicksByUrl(List.of(first.getId(), second.getId(), quiet.getId()), DAY, DAY.plusDays(6)))
+                .isEqualTo(Map.of(first.getId(), 7L, second.getId(), 2L));
+    }
+
+    @Test
+    void sumsOnlyTheGivenReferrer() {
+        final var first = savedLink("referrer-first");
+        final var second = savedLink("referrer-second");
+        final var notAsked = savedLink("referrer-not-asked");
+        linkStatsRepository.incrementBreakdown(first.getId(), DAY, Map.of(REFERRER, "hrva.cc", COUNTRY, "HR"));
+        linkStatsRepository.incrementBreakdown(first.getId(), DAY, Map.of(REFERRER, "hrva.cc", COUNTRY, "HR"));
+        linkStatsRepository.incrementBreakdown(first.getId(), DAY.plusDays(2), Map.of(REFERRER, "hrva.cc"));
+        linkStatsRepository.incrementBreakdown(first.getId(), DAY, Map.of(REFERRER, "t.co", COUNTRY, "hrva.cc"));
+        linkStatsRepository.incrementBreakdown(first.getId(), DAY.plusDays(7), Map.of(REFERRER, "hrva.cc"));
+        linkStatsRepository.incrementBreakdown(second.getId(), DAY.plusDays(1), Map.of(REFERRER, "hrva.cc"));
+        linkStatsRepository.incrementBreakdown(notAsked.getId(), DAY, Map.of(REFERRER, "hrva.cc"));
+
+        assertThat(linkStatsRepository.sumReferrerClicksByUrl(List.of(first.getId(), second.getId()), "hrva.cc", DAY, DAY.plusDays(6)))
+                .isEqualTo(Map.of(first.getId(), 3L, second.getId(), 1L));
+        assertThat(linkStatsRepository.sumReferrerClicksByUrl(List.of(first.getId()), "t.co", DAY, DAY))
+                .isEqualTo(Map.of(first.getId(), 1L));
+    }
+
+    @Test
+    void anEmptyIdListRunsNoQuery() {
+        final var jdbc = mock(NamedParameterJdbcTemplate.class);
+        final var repository = new LinkStatsRepository(jdbc);
+
+        assertThat(repository.sumClicksByUrl(List.of(), DAY, DAY)).isEmpty();
+        assertThat(repository.sumReferrerClicksByUrl(List.of(), "hrva.cc", DAY, DAY)).isEmpty();
+
+        verifyNoInteractions(jdbc);
     }
 
     private void recordBreakdowns(final Url url) {

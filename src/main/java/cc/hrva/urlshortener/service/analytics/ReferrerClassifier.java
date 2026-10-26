@@ -34,6 +34,10 @@ public class ReferrerClassifier {
         frontendHost = hostWithoutWww(appProperties.getFrontendUrl());
     }
 
+    public String ownHost() {
+        return serverHost;
+    }
+
     public String classify(final ClickRequest click) {
         if (!click.referrerKnown()) {
             return UNKNOWN;
