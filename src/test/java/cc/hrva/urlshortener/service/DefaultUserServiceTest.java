@@ -702,7 +702,7 @@ class DefaultUserServiceTest {
         when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
         when(userToUserDtoConverter.convert(user)).thenReturn(UserDto.builder().id(1L).email("test@example.com").build());
         when(bioAccountData.exportFor(user)).thenReturn(Optional.of(new BioPageExport("ana", "Ana Horvat", "Photos from Zagreb",
-                BioAvatarKind.INITIALS, null, BioAccent.TEAL, BioTheme.AUTO, false, true, "Impersonation",
+                BioAvatarKind.INITIALS, null, BioAccent.TEAL, BioTheme.AUTO, false, true, "Impersonation", null,
                 List.of(new BioButtonExport("Shop", BioIcon.INSTAGRAM, "ana-shop", true), new BioButtonExport("Blog", null, "ana-blog", false)),
                 LocalDateTime.of(2026, 10, 20, 8, 0), LocalDateTime.of(2026, 10, 25, 18, 30))));
 
@@ -714,10 +714,10 @@ class DefaultUserServiceTest {
         assertThat(export.get("bioPage").toString()).isEqualTo("""
                 {"handle":"ana","displayName":"Ana Horvat","bio":"Photos from Zagreb","avatarKind":"INITIALS","avatarEmoji":null,\
                 "accent":"TEAL","theme":"AUTO","indexable":false,"hidden":true,"hiddenReason":"Impersonation",\
-                "buttons":[{"title":"Shop","icon":"INSTAGRAM","shortUrl":"ana-shop","visible":true},\
+                "handleRevokedReason":null,"buttons":[{"title":"Shop","icon":"INSTAGRAM","shortUrl":"ana-shop","visible":true},\
                 {"title":"Blog","icon":null,"shortUrl":"ana-blog","visible":false}],\
                 "createdAt":"2026-10-20T08:00:00","updatedAt":"2026-10-25T18:30:00"}""");
-        assertThat(json).doesNotContain("\"views\"", "\"botViews\"", "\"hiddenBy\"", "\"handleRevokedReason\"", "\"reasons\"", "\"urlId\"");
+        assertThat(json).doesNotContain("\"views\"", "\"botViews\"", "\"hiddenBy\"", "\"reasons\"", "\"urlId\"");
         SecurityContextHolder.clearContext();
     }
 

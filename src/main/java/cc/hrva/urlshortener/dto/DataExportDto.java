@@ -47,6 +47,7 @@ public record DataExportDto(
             boolean indexable,
             boolean hidden,
             String hiddenReason,
+            String handleRevokedReason,
             List<BioButtonExport> buttons,
             LocalDateTime createdAt,
             LocalDateTime updatedAt) {
@@ -63,6 +64,7 @@ public record DataExportDto(
                     page.isIndexable(),
                     page.getHiddenAt() != null,
                     page.getHiddenReason(),
+                    page.getHandleRevokedReason(),
                     buttons.stream().map(BioButtonExport::from).toList(),
                     page.getCreatedAt(),
                     page.getUpdatedAt());

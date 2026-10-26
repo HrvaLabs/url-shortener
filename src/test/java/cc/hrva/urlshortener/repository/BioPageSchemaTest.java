@@ -16,6 +16,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 import org.assertj.core.api.ThrowingConsumer;
+import org.hibernate.SessionFactory;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
@@ -43,6 +44,7 @@ import static org.assertj.core.api.Assertions.tuple;
         properties = {
                 "spring.liquibase.enabled=true",
                 "spring.datasource.url=jdbc:h2:mem:bio-schema;DB_CLOSE_DELAY=-1;NON_KEYWORDS=KEY,VALUE",
+                "spring.jpa.properties.hibernate.generate_statistics=true",
                 "spring.security.oauth2.client.registration.google.client-id=test-google-client",
                 "spring.security.oauth2.client.registration.google.client-secret=test-google-secret"
         })
@@ -354,6 +356,22 @@ class BioPageSchemaTest {
         assertThat(bioHandleHoldRepository.deleteByHeldUntilBefore(NOW)).isEqualTo(1L);
 
         assertThat(bioHandleHoldRepository.findAll()).extracting(BioHandleHold::getHandle).containsExactly("live");
+    }
+
+    @Test
+    void expiredHoldsAreDeletedInOneStatementThatLoadsNoHold() {
+        bioHandleHoldRepository.saveAndFlush(hold("ended", null, NOW.minusDays(2)));
+        bioHandleHoldRepository.saveAndFlush(hold("ended-too", null, NOW.minusMinutes(1)));
+        bioHandleHoldRepository.saveAndFlush(hold("live", null, NOW.plusDays(1)));
+        entityManager.clear();
+        final var statistics = entityManager.getEntityManagerFactory().unwrap(SessionFactory.class).getStatistics();
+        statistics.clear();
+
+        assertThat(bioHandleHoldRepository.deleteByHeldUntilBefore(NOW)).isEqualTo(2L);
+
+        assertThat(statistics.getPrepareStatementCount()).isEqualTo(1);
+        assertThat(statistics.getEntityLoadCount()).isZero();
+        assertThat(jdbcTemplate.queryForList("select handle from bio_handle_hold", String.class)).containsExactly("live");
     }
 
     @Test

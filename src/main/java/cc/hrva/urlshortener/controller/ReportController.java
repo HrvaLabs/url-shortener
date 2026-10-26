@@ -24,6 +24,9 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.EnumUtils;
 import org.apache.commons.lang3.StringUtils;
+import org.apache.commons.lang3.exception.ExceptionUtils;
+import org.hibernate.exception.ConstraintViolationException;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -51,6 +54,7 @@ public class ReportController {
     private static final String CATEGORY_INVALID = "Category must be PHISHING, MALWARE, SPAM or OTHER";
     private static final String DETAILS_TOO_LONG = "Details must be 500 characters or fewer";
     private static final String TOO_MANY_REPORTS = "You've sent a lot of reports in a short time. Try again in an hour.";
+    private static final String BIO_PAGE_REVIEW_PAGE_CONSTRAINT = "fk_bio_page_review_page";
 
     private final ReviewQueueService reviewQueueService;
     private final UrlRepository urlRepository;
@@ -78,12 +82,23 @@ public class ReportController {
         if (target.handle() != null) {
             bioPageRepository.findByHandleWithOwner(target.handle())
                     .filter(BioPage::isPublic)
-                    .ifPresent(page -> bioPageReviewService.report(page, category, details));
+                    .ifPresent(page -> reportBioPage(page, category, details));
         } else {
             urlRepository.findByShortUrlAndActiveTrue(target.shortCode()).ifPresent(url -> reviewQueueService.report(url, category, details));
         }
 
         return ResponseEntity.accepted().build();
+    }
+
+    private void reportBioPage(final BioPage page, final ReportCategory category, final String details) {
+        try {
+            bioPageReviewService.report(page, category, details);
+        } catch (final DataIntegrityViolationException exception) {
+            if (!violates(exception, BIO_PAGE_REVIEW_PAGE_CONSTRAINT)) {
+                throw exception;
+            }
+            log.info("Visitor report dropped because the bio page was deleted meanwhile pageId={}", page.getId());
+        }
     }
 
     private boolean reportAllowed() {
@@ -143,6 +158,11 @@ public class ReportController {
 
     private static String withoutScheme(final String link) {
         return SCHEME.matcher(link).replaceFirst("");
+    }
+
+    private static boolean violates(final DataIntegrityViolationException exception, final String constraint) {
+        final var violation = ExceptionUtils.throwableOfType(exception, ConstraintViolationException.class);
+        return violation != null && StringUtils.containsIgnoreCase(violation.getConstraintName(), constraint);
     }
 
     private static ReportCategory categoryOf(final String category) {

@@ -102,6 +102,7 @@ class BioAccountDataTest {
                 true,
                 false,
                 null,
+                null,
                 List.of(
                         new BioButtonExport("Shop", BioIcon.INSTAGRAM, "ana-shop", true),
                         new BioButtonExport("Old blog", null, "ana-blog", false),
@@ -126,10 +127,24 @@ class BioAccountDataTest {
     }
 
     @Test
+    void aRevokedPageExportsTheRevokedReasonTheOwnerSees() {
+        page.setHandle(null);
+        page.setHandleRevokedReason("Impersonation");
+        when(bioPageRepository.findByOwner(owner)).thenReturn(Optional.of(page));
+        when(bioPageButtonRepository.findByPageWithUrl(page)).thenReturn(List.of());
+
+        final var export = bioAccountData.exportFor(owner).orElseThrow();
+
+        assertThat(export.handle()).isNull();
+        assertThat(export.handleRevokedReason()).isEqualTo("Impersonation");
+        assertThat(export.hidden()).isFalse();
+    }
+
+    @Test
     void theExportCarriesNoModerationNotesIdsOrViewCounts() {
         assertThat(componentNames(BioPageExport.class)).containsExactly(
                 "handle", "displayName", "bio", "avatarKind", "avatarEmoji", "accent", "theme", "indexable", "hidden", "hiddenReason",
-                "buttons", "createdAt", "updatedAt");
+                "handleRevokedReason", "buttons", "createdAt", "updatedAt");
         assertThat(componentNames(BioButtonExport.class)).containsExactly("title", "icon", "shortUrl", "visible");
     }
 

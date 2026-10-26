@@ -16,6 +16,7 @@ import cc.hrva.urlshortener.service.ratelimit.RateLimiter;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiterUnavailableException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletRequest;
+import java.sql.SQLException;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -23,6 +24,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import org.hibernate.exception.ConstraintViolationException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -33,6 +35,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
@@ -42,6 +45,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.containsString;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -113,6 +117,11 @@ class ReportControllerTest {
                         clientIpResolver, request, appProperties))
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .build();
+    }
+
+    private static DataIntegrityViolationException integrityViolation(final String constraint) {
+        return new DataIntegrityViolationException("could not execute statement",
+                new ConstraintViolationException("could not execute statement", new SQLException("violates constraint"), constraint));
     }
 
     private ResultActions report(final String shortUrl, final String category, final String details) throws Exception {
@@ -253,6 +262,35 @@ class ReportControllerTest {
         report("@ana", "OTHER", "pretends to be me").andExpect(status().isAccepted());
 
         verify(bioPageReviewService).report(page, ReportCategory.OTHER, "pretends to be me");
+    }
+
+    @Test
+    @ExtendWith(OutputCaptureExtension.class)
+    void aReportOnABioPageDeletedMeanwhileIsStill202(final CapturedOutput output) throws Exception {
+        when(bioPageRepository.findByHandleWithOwner("ana")).thenReturn(Optional.of(page));
+        doThrow(integrityViolation("fk_bio_page_review_page")).when(bioPageReviewService).report(page, ReportCategory.SPAM, null);
+
+        report("@ana", "SPAM", null)
+                .andExpect(status().isAccepted())
+                .andExpect(content().string(""));
+
+        assertThat(output).contains("Visitor report dropped because the bio page was deleted meanwhile pageId=12");
+    }
+
+    @Test
+    void anotherIntegrityErrorOnABioPageReportIsNotHidden() throws Exception {
+        when(bioPageRepository.findByHandleWithOwner("ana")).thenReturn(Optional.of(page));
+        doThrow(integrityViolation("pk_bio_page_review")).when(bioPageReviewService).report(page, ReportCategory.SPAM, null);
+
+        report("@ana", "SPAM", null).andExpect(status().isInternalServerError());
+    }
+
+    @Test
+    void anIntegrityErrorWithoutAConstraintNameOnABioPageReportIsNotHidden() throws Exception {
+        when(bioPageRepository.findByHandleWithOwner("ana")).thenReturn(Optional.of(page));
+        doThrow(new DataIntegrityViolationException("fk_bio_page_review_page")).when(bioPageReviewService).report(page, ReportCategory.SPAM, null);
+
+        report("@ana", "SPAM", null).andExpect(status().isInternalServerError());
     }
 
     @Test

@@ -31,6 +31,8 @@ import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
+import org.apache.commons.lang3.exception.ExceptionUtils;
+import org.hibernate.exception.ConstraintViolationException;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -43,6 +45,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.FilterType;
 import org.springframework.context.annotation.Import;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -50,6 +53,7 @@ import org.springframework.test.context.event.ApplicationEvents;
 import org.springframework.test.context.event.RecordApplicationEvents;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.tuple;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -160,6 +164,20 @@ class BioPageModerationFlowTest {
 
         bioPageService.update(saving("PayPal Support", ""));
 
+        assertThat(reviewsOf(created.id())).isEmpty();
+        assertThat(events.stream(AdminAlertEvent.class)).isEmpty();
+    }
+
+    @Test
+    void aReportOnAPageDeletedMeanwhileFailsOnTheReviewsPageKeyAndAlertsNothing() {
+        final var created = bioPageService.create(new BioPageCreateDto("ana"));
+        final var page = bioPageRepository.findByHandleWithOwner("ana").orElseThrow();
+        jdbcTemplate.update("delete from bio_page where id = ?", created.id());
+
+        assertThatThrownBy(() -> bioPageReviewService.report(page, ReportCategory.SPAM, null))
+                .isInstanceOfSatisfying(DataIntegrityViolationException.class, exception ->
+                        assertThat(ExceptionUtils.throwableOfType(exception, ConstraintViolationException.class).getConstraintName())
+                                .containsIgnoringCase("fk_bio_page_review_page"));
         assertThat(reviewsOf(created.id())).isEmpty();
         assertThat(events.stream(AdminAlertEvent.class)).isEmpty();
     }
