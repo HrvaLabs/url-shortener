@@ -4,6 +4,20 @@ All notable changes to hrva.cc — the URL shortener.
 
 ---
 
+## [v2.8.3] — 2026-10-26
+
+Fixes for reactivating links, addresses with accented letters, admin link edits and blocklist refreshes.
+
+### 🐛 Fixes
+- Reactivating a link works again, including when an admin unblocks a blocked link.
+- Links to addresses with accented letters, such as čokolada.hr, now redirect.
+- Older links whose address contains curly braces now redirect instead of showing an error.
+- When an admin changes a link's destination, the old destination's redirect details no longer come back, and a block made at the same moment is kept.
+- A refused link edit, such as an expiry date in the past, is no longer saved anyway.
+- Refreshing a blocklist source no longer undoes a change another admin made during the download, such as turning it off.
+
+---
+
 ## [v2.8.2] — 2026-10-25
 
 Fixes for long links and for two people picking the same short link name.

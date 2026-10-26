@@ -1,10 +1,29 @@
 {
   "releases": [
     {
-      "version": "v2.8.2",
-      "date": "2026-10-25",
+      "version": "v2.8.3",
+      "date": "2026-10-26",
       "badge": "Latest",
       "badgeVariant": "default",
+      "summary": "Fixes for reactivating links, addresses with accented letters, admin link edits and blocklist refreshes.",
+      "sections": [
+        {
+          "title": "Fixes",
+          "icon": "bug",
+          "items": [
+            "Reactivating a link works again, including when an admin unblocks a blocked link.",
+            "Links to addresses with accented letters, such as čokolada.hr, now redirect.",
+            "Older links whose address contains curly braces now redirect instead of showing an error.",
+            "When an admin changes a link's destination, the old destination's redirect details no longer come back, and a block made at the same moment is kept.",
+            "A refused link edit, such as an expiry date in the past, is no longer saved anyway.",
+            "Refreshing a blocklist source no longer undoes a change another admin made during the download, such as turning it off."
+          ]
+        }
+      ]
+    },
+    {
+      "version": "v2.8.2",
+      "date": "2026-10-25",
       "summary": "Fixes for long links and for two people picking the same short link name.",
       "sections": [
         {
