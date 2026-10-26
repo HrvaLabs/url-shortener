@@ -18,6 +18,7 @@ import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.security.Reauthentication;
 import cc.hrva.urlshortener.service.PasskeyService;
 import cc.hrva.urlshortener.service.UserService;
+import cc.hrva.urlshortener.service.passkey.PasskeyAddedEvent;
 import cc.hrva.urlshortener.service.passkey.PasskeyAssertions;
 import cc.hrva.urlshortener.service.passkey.PasskeyCeremonies;
 import cc.hrva.urlshortener.service.passkey.PasskeyCeremony;
@@ -33,6 +34,7 @@ import java.util.Optional;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.web.webauthn.api.AuthenticationExtensionsClientOutputs;
 import org.springframework.security.web.webauthn.api.AuthenticatorAttestationResponse;
@@ -72,6 +74,7 @@ public class DefaultPasskeyService implements PasskeyService {
     private final WebAuthnRelyingPartyOperations relyingPartyOperations;
     private final Reauthentication reauthentication;
     private final AccountLock accountLock;
+    private final ApplicationEventPublisher eventPublisher;
 
     @Override
     @Transactional
@@ -120,6 +123,7 @@ public class DefaultPasskeyService implements PasskeyService {
         passkey.setDiscoverable(discoverableOf(credential));
         passkeyCredentialRepository.save(passkey);
         log.info("Passkey added user id={} credential={}…", user.getId(), prefixOf(credentialId));
+        eventPublisher.publishEvent(new PasskeyAddedEvent(user, passkey.getLabel(), passkey.getCreatedAt()));
 
         return PasskeyResponse.from(passkey);
     }

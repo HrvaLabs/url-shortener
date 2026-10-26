@@ -14,6 +14,7 @@ import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 import lombok.RequiredArgsConstructor;
 import org.apache.commons.lang3.StringUtils;
@@ -37,6 +38,7 @@ public class DefaultSendingEmailService implements SendingEmailService {
     private static final Duration INTERRUPTED_AFTER = Duration.ofMinutes(10);
     private static final Duration CONTENT_RETENTION = Duration.ofDays(7);
     private static final int LISTED_BLOCKED_LINKS = 20;
+    private static final DateTimeFormatter PASSKEY_ADDED_AT_FORMAT = DateTimeFormatter.ofPattern("d MMMM yyyy 'at' HH:mm 'UTC'", Locale.ENGLISH);
 
     private final AppProperties appProperties;
     private final TemplateEngine templateEngine;
@@ -195,6 +197,27 @@ public class DefaultSendingEmailService implements SendingEmailService {
                 .sender(appProperties.getEmailSenderAddress())
                 .receivers(new String[]{owner.getEmail()})
                 .subject("Your links were blocked as unsafe")
+                .text(htmlContent)
+                .build();
+
+        tryToSendEmail(email);
+    }
+
+    @Override
+    @Async
+    public void sendPasskeyAddedEmail(final User user, final String label, final LocalDateTime addedAt) {
+        final var ctx = getContext(user);
+        ctx.setVariable("label", label);
+        ctx.setVariable("added_at", addedAt.format(PASSKEY_ADDED_AT_FORMAT));
+        ctx.setVariable("settings_url", frontendPage("/dashboard/settings"));
+        ctx.setVariable("help_url", frontendPage("/help/passkeys"));
+
+        final var htmlContent = templateEngine.process("passkey_added", ctx);
+
+        final var email = Email.builder()
+                .sender(appProperties.getEmailSenderAddress())
+                .receivers(new String[]{user.getEmail()})
+                .subject("A passkey was added to your account")
                 .text(htmlContent)
                 .build();
 

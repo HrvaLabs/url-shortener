@@ -5,6 +5,7 @@ import cc.hrva.urlshortener.model.EmailLog;
 import cc.hrva.urlshortener.model.ResetToken;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.User;
+import java.time.LocalDateTime;
 import java.util.List;
 
 public interface SendingEmailService {
@@ -17,6 +18,7 @@ public interface SendingEmailService {
     void sendEmailUrlsBlocked(User owner, List<Url> urls);
     void sendEmailAccountDeactivated(User user);
     void sendEmailForgotPassword(User user, ResetToken resetToken);
+    void sendPasskeyAddedEmail(User user, String label, LocalDateTime addedAt);
     void sendDecisionsEmailToAdmin(DecisionsDigest digest);
     EmailLog resendEmail(Long emailLogId);
     void failInterruptedEmails();

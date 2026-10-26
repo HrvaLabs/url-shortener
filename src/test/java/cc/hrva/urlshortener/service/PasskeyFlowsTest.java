@@ -12,6 +12,7 @@ import cc.hrva.urlshortener.exception.ApiException;
 import cc.hrva.urlshortener.exception.EmailNotVerifiedException;
 import cc.hrva.urlshortener.exception.PasskeyVerificationException;
 import cc.hrva.urlshortener.exception.SignInExpiredException;
+import cc.hrva.urlshortener.listener.PasskeyAddedEmailListener;
 import cc.hrva.urlshortener.mcp.anon.RateLimiter;
 import cc.hrva.urlshortener.mcp.anon.RedisFixedWindowRateLimiter;
 import cc.hrva.urlshortener.mcp.bridge.InMemoryRedis;
@@ -94,6 +95,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -362,6 +364,79 @@ class PasskeyFlowsTest {
                 .isInstanceOf(ApiException.class)
                 .hasMessage("This passkey or security key is already added.");
         assertThat(passkeyCredentialRepository.count()).isEqualTo(1L);
+    }
+
+    @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    void addingAPasskeySendsTheSecurityNotice() {
+        final var user = flows.signedIn(flows.localUser("notice@example.com"));
+        try {
+            final var passkey = flows.addPasskey(TestAuthenticator.syncedPasskey(), "  MacBook  ");
+
+            verify(sendingEmailService).sendPasskeyAddedEmail(user, "MacBook", passkey.createdAt());
+        } finally {
+            flows.remove(user);
+        }
+    }
+
+    @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    void theSecurityNoticeWaitsForTheCommit() {
+        final var user = flows.signedIn(flows.localUser("notice-after-commit@example.com"));
+        try {
+            final var options = flows.registrationOptions();
+            final var credential = TestAuthenticator.securityKey().register(options.options());
+
+            final var passkey = new TransactionTemplate(transactionManager).execute(status -> {
+                final var added = passkeyService.register(registration(options, credential, "YubiKey"));
+                verify(sendingEmailService, never()).sendPasskeyAddedEmail(any(), any(), any());
+
+                return added;
+            });
+
+            verify(sendingEmailService).sendPasskeyAddedEmail(user, "YubiKey", passkey.createdAt());
+        } finally {
+            flows.remove(user);
+        }
+    }
+
+    @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    void aFailedRegistrationSendsNothing() {
+        final var user = flows.signedIn(flows.localUser("refused-notice@example.com"));
+        try {
+            final var options = flows.registrationOptions();
+            final var credential = TestAuthenticator.syncedPasskey().withOrigin("https://evil.example").register(options.options());
+
+            assertThatThrownBy(() -> passkeyService.register(registration(options, credential, "MacBook")))
+                    .isInstanceOf(PasskeyVerificationException.class)
+                    .hasMessage(COULD_NOT_VERIFY);
+
+            verify(sendingEmailService, never()).sendPasskeyAddedEmail(any(), any(), any());
+        } finally {
+            flows.remove(user);
+        }
+    }
+
+    @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    void aRegistrationRolledBackAfterItsSaveSendsNothing() {
+        final var user = flows.signedIn(flows.localUser("rolled-back-notice@example.com"));
+        try {
+            final var authenticator = TestAuthenticator.syncedPasskey();
+            final var options = flows.registrationOptions();
+            final var credential = authenticator.register(options.options());
+
+            new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+                passkeyService.register(registration(options, credential, "MacBook"));
+                status.setRollbackOnly();
+            });
+
+            assertThat(passkeyCredentialRepository.findByCredentialId(authenticator.credentialId())).isEmpty();
+            verify(sendingEmailService, never()).sendPasskeyAddedEmail(any(), any(), any());
+        } finally {
+            flows.remove(user);
+        }
     }
 
     @Test
@@ -754,6 +829,7 @@ class PasskeyFlowsTest {
             DefaultAuthValidator.class,
             Reauthentication.class,
             DefaultPasskeyService.class,
+            PasskeyAddedEmailListener.class,
             RedisPendingLoginStore.class,
             TwoStepMethods.class,
             UserToUserDtoConverter.class,

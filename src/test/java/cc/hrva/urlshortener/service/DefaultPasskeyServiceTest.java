@@ -17,6 +17,7 @@ import cc.hrva.urlshortener.repository.PasskeyCredentialRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.security.Reauthentication;
 import cc.hrva.urlshortener.service.impl.DefaultPasskeyService;
+import cc.hrva.urlshortener.service.passkey.PasskeyAddedEvent;
 import cc.hrva.urlshortener.service.passkey.PasskeyCeremonies;
 import cc.hrva.urlshortener.service.passkey.PasskeyCeremony;
 import cc.hrva.urlshortener.service.passkey.PasskeyCeremonyPurpose;
@@ -49,6 +50,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.web.webauthn.api.Bytes;
 import org.springframework.security.web.webauthn.management.RelyingPartyRegistrationRequest;
@@ -69,6 +71,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -108,6 +111,9 @@ class DefaultPasskeyServiceTest {
     @Mock
     private AccountLock accountLock;
 
+    @Mock
+    private ApplicationEventPublisher eventPublisher;
+
     private final Map<Long, String> storedHandles = new HashMap<>();
 
     private PasskeyService passkeyService;
@@ -121,7 +127,7 @@ class DefaultPasskeyServiceTest {
         final var passkeyOptionsFactory = new PasskeyOptionsFactory(appProperties);
         passkeyService = new DefaultPasskeyService(userService, userRepository, passkeyCredentialRepository,
                 passkeyCeremonyStore, new PasskeyCeremonies(passkeyCeremonyStore, passkeyOptionsFactory, passkeyJson, rateLimiter),
-                passkeyJson, passkeyOptionsFactory, relyingPartyOperations, reauthentication, accountLock);
+                passkeyJson, passkeyOptionsFactory, relyingPartyOperations, reauthentication, accountLock, eventPublisher);
         lenient().when(accountLock.lock(any())).thenAnswer(invocation -> invocation.getArgument(0));
     }
 
@@ -268,6 +274,27 @@ class DefaultPasskeyServiceTest {
     }
 
     @Test
+    void anAddedPasskeyIsAnnouncedAfterItIsSavedWithItsStoredLabelAndTime() {
+        final var user = userWithHandle();
+        final var registration = TestAuthenticator.syncedPasskey().register(creationOptions(user));
+        final var credentialId = registration.path("rawId").asString();
+        final var createdAt = LocalDateTime.of(2026, 10, 25, 14, 5, 33);
+        final var stored = PasskeyCredential.builder().id(3L).user(user).credentialId(credentialId).label("MacBook")
+                .createdAt(createdAt).build();
+        when(userService.getUserFromToken()).thenReturn(user);
+        when(passkeyCeremonyStore.consume(CEREMONY_ID)).thenReturn(registrationCeremony(user));
+        when(passkeyCredentialRepository.findByCredentialId(credentialId)).thenReturn(Optional.empty(), Optional.of(stored));
+
+        passkeyService.register(registrationDto(registration, "  MacBook  "));
+
+        final var order = inOrder(relyingPartyOperations, passkeyCredentialRepository, eventPublisher);
+        order.verify(relyingPartyOperations).registerCredential(any());
+        order.verify(passkeyCredentialRepository).save(stored);
+        order.verify(eventPublisher).publishEvent(new PasskeyAddedEvent(user, "MacBook", createdAt));
+        verifyNoMoreInteractions(eventPublisher);
+    }
+
+    @Test
     void aMissingCeremonyIsExpired() {
         final var user = userWithHandle();
         when(userService.getUserFromToken()).thenReturn(user);
@@ -307,7 +334,7 @@ class DefaultPasskeyServiceTest {
                 .isInstanceOf(ApiException.class)
                 .hasMessage(ALREADY_ADDED);
 
-        verifyNoInteractions(relyingPartyOperations);
+        verifyNoInteractions(relyingPartyOperations, eventPublisher);
     }
 
     @Test
@@ -331,6 +358,7 @@ class DefaultPasskeyServiceTest {
                     .hasNoCause();
         }
         verify(relyingPartyOperations, times(4)).registerCredential(any());
+        verifyNoInteractions(eventPublisher);
     }
 
     @ParameterizedTest
@@ -350,6 +378,7 @@ class DefaultPasskeyServiceTest {
                 .contains("Passkey already added user id=7")
                 .doesNotContain(RACED_CREDENTIAL_ID)
                 .doesNotContainIgnoringCase("uq_passkey_credential_credential_id");
+        verifyNoInteractions(eventPublisher);
     }
 
     @Test

@@ -26,6 +26,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.web.util.HtmlUtils;
 import org.thymeleaf.TemplateEngine;
 import org.thymeleaf.context.IContext;
 import org.thymeleaf.spring6.SpringTemplateEngine;
@@ -50,6 +51,7 @@ class DefaultSendingEmailServiceTest {
     private static final User OWNER = User.builder().email("alice@example.com").apiKeySlots(4L).build();
     private static final Url BLOCKED_LINK = Url.builder().shortUrl("promo").longUrl("https://jofogas.cards/login")
             .blockReason(BlockReason.BLOCKLIST).blockDetail("HaGeZi Fake").active(false).build();
+    private static final LocalDateTime PASSKEY_ADDED_AT = LocalDateTime.of(2026, 10, 25, 14, 5, 33);
 
     @Mock
     private TemplateEngine templateEngine;
@@ -132,6 +134,20 @@ class DefaultSendingEmailServiceTest {
                 List.of(new DecisionsDigest.BlockedLink("promo" + userText, "www.jofogas.cards/login" + userText, "a blocklist (HaGeZi Fake" + userText + ")")),
                 List.of(new DecisionsDigest.FailingSource("HaGeZi Fake" + userText, "HTTP 503 from every mirror" + userText)),
                 List.of(new DecisionsDigest.NewAccountLink("fresh" + userText, "example.com/fresh" + userText, "newcomer@example.com" + userText)));
+    }
+
+    private Email sentPasskeyAddedEmail(final String label) throws Exception {
+        saveReturnsArgument();
+        final var sent = ArgumentCaptor.forClass(Email.class);
+        doAnswer(invocation -> null).when(emailService).sendEmail(sent.capture(), eq(null));
+
+        configuredEmailService(realTemplateEngine()).sendPasskeyAddedEmail(OWNER, label, PASSKEY_ADDED_AT);
+
+        return sent.getValue();
+    }
+
+    private static String textOf(final String html) {
+        return HtmlUtils.htmlUnescape(html.replaceAll("(?s)<head>.*</head>", "").replaceAll("<[^>]+>", "")).replaceAll("\\s+", " ").trim();
     }
 
     private static List<String> linksIn(final String html) {
@@ -423,6 +439,53 @@ class DefaultSendingEmailServiceTest {
         assertThat(context.getValue().getVariable("link_count")).isEqualTo(89);
         assertThat(context.getValue().getVariable("more_links")).isEqualTo(69);
         assertThat((List<?>) context.getValue().getVariable("short_links")).hasSize(20).first().isEqualTo("https://hrva.cc/deal1");
+    }
+
+    @Test
+    void passkeyAddedEmailNamesTheLabelTheTimeAndHowToRemoveIt() throws Exception {
+        final var email = sentPasskeyAddedEmail("Work YubiKey");
+
+        assertThat(email.getReceivers()).containsExactly("alice@example.com");
+        assertThat(email.getSubject()).isEqualTo("A passkey was added to your account");
+        assertThat(email.getText())
+                .contains("Work YubiKey", "25 October 2026 at 14:05 UTC", "/dashboard/settings", "Passkeys and security keys")
+                .containsPattern("<h1[^>]*>A passkey was added</h1>");
+        assertThat(textOf(email.getText()))
+                .contains("Hello alice@example.com,")
+                .contains("A passkey or security key named Work YubiKey was added to your hrva.cc account on 25 October 2026 at 14:05 UTC.")
+                .contains("If this was you, there's nothing else to do.")
+                .contains("If it wasn't you, sign in, open Settings \u2192 Passkeys and security keys (https://hrva.cc/dashboard/settings),"
+                        + " remove it and change your password. If you can't sign in, email support@hrva.cc.")
+                .contains("How passkeys work: https://hrva.cc/help/passkeys");
+        assertThat(linksIn(email.getText()))
+                .containsExactly("https://hrva.cc/dashboard/settings", "mailto:support@hrva.cc", "https://hrva.cc/help/passkeys");
+    }
+
+    @Test
+    void aPasskeyLabelWithMarkupIsEscaped() throws Exception {
+        final var body = sentPasskeyAddedEmail("<b>x</b><script>alert(1)</script>").getText();
+
+        assertThat(body)
+                .doesNotContain("<b>x</b>")
+                .doesNotContain("<script>")
+                .contains("&lt;b&gt;x&lt;/b&gt;&lt;script&gt;alert(1)&lt;/script&gt;");
+    }
+
+    @Test
+    void thePasskeyAddedEmailHandsTheTemplateItsVariables() throws Exception {
+        saveReturnsArgument();
+        final var context = ArgumentCaptor.forClass(IContext.class);
+        when(templateEngine.process(eq("passkey_added"), context.capture())).thenReturn("<p>added</p>");
+
+        configuredEmailService(templateEngine).sendPasskeyAddedEmail(OWNER, "Work YubiKey", PASSKEY_ADDED_AT);
+
+        assertThat(context.getValue().getVariable("name")).isEqualTo("alice@example.com");
+        assertThat(context.getValue().getVariable("label")).isEqualTo("Work YubiKey");
+        assertThat(context.getValue().getVariable("added_at")).isEqualTo("25 October 2026 at 14:05 UTC");
+        assertThat(context.getValue().getVariable("settings_url")).isEqualTo("https://hrva.cc/dashboard/settings");
+        assertThat(context.getValue().getVariable("help_url")).isEqualTo("https://hrva.cc/help/passkeys");
+        assertThat(context.getValue().getVariable("contact_email")).isEqualTo("support@hrva.cc");
+        verify(emailService).sendEmail(any(Email.class), eq(null));
     }
 
     @Test
