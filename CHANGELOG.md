@@ -10,6 +10,8 @@ Bio pages: one page with all your links, for your Instagram, TikTok or any other
 
 ### 🔗 Links
 - Bio pages: make a page at hrva.cc/@yourname with your name, a short bio, an emoji or initials avatar and a button for each of your short links. Pick a colour and a light, dark or automatic theme, reorder buttons by dragging or with the keyboard, hide one without deleting it, and see a live preview as you edit.
+- Your bio keeps its line breaks, up to five lines, so each detail can go on its own line.
+- If your bio page changed in another tab or window, saving an older copy doesn't overwrite it: the editor loads the latest version, keeps your unsaved changes and asks you to check them and save again.
 - Every button is one of your own short links, so each click gets the same safety checks as any other link. A link that stops working, is blocked or is waiting for review disappears from your page, and the editor shows why.
 - Share your page with a copy-link button or a QR code from the Bio page screen.
 - When you share your page in a chat or on social media, its preview image shows your name, your @handle and your initials in your colour.
@@ -23,6 +25,7 @@ Bio pages: one page with all your links, for your Instagram, TikTok or any other
 
 ### 🛡️ Link Safety
 - Anyone can report a bio page with "Report this page" at the bottom of it, or on the Report a link page with hrva.cc/@name.
+- Reports have a new category, "Pretends to be someone", for a link or bio page that impersonates a person or a business.
 
 ### 🔧 Admin
 - Bio pages: search pages by handle, name or owner, hide a page with a reason, and change or revoke a handle. A revoked handle is added to the reserved aliases.
