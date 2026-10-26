@@ -100,7 +100,7 @@ public class AuthController {
         return ResponseEntity.noContent().build();
     }
 
-    @Operation(summary = "Login", description = "Authenticate with email and password and receive a JWT token. If 2FA is enabled, resubmit with a code.")
+    @Operation(summary = "Login", description = "Authenticate with email and password and receive a JWT token. When two-step verification is on, the response has no token but twoStepRequired, a pendingToken valid for 5 minutes and the methods the account can use; finish with POST /api/v1/auth/2fa/totp. Sending code with the password is deprecated.")
     @ApiResponse(responseCode = "401", description = "Bad credentials")
     @PostMapping("/login")
     public ResponseEntity<JWTTokenDto> login(@Valid @RequestBody final LoginDto login) {

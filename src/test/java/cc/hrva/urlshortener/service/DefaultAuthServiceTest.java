@@ -196,6 +196,7 @@ class DefaultAuthServiceTest {
     }
 
     @Test
+    @SuppressWarnings({"deprecation", "removal"})
     void shouldLoginWhenTwoFactorCodeValid() {
         final var loginDto = LoginDto.builder().email("test@example.com").password("password123").code("123456").build();
         final var user = User.builder().id(1L).email("test@example.com").emailVerified(true)
@@ -213,6 +214,7 @@ class DefaultAuthServiceTest {
     }
 
     @Test
+    @SuppressWarnings({"deprecation", "removal"})
     void theLegacyCodeOnLoginStillSignsInForOneRelease(final CapturedOutput output) {
         final var loginDto = LoginDto.builder().email("test@example.com").password("password123").rememberMe(true).code("123456").build();
         final var user = User.builder().id(1L).email("test@example.com").emailVerified(true)
@@ -229,6 +231,7 @@ class DefaultAuthServiceTest {
     }
 
     @Test
+    @SuppressWarnings({"deprecation", "removal"})
     void aKeysOnlyAccountOnTheLegacyPathSignsInWithARecoveryCode() {
         final var loginDto = LoginDto.builder().email("test@example.com").password("password123").code("ABCD-EF23").build();
         final var user = keysOnlyUser();
@@ -243,6 +246,7 @@ class DefaultAuthServiceTest {
     }
 
     @Test
+    @SuppressWarnings({"deprecation", "removal"})
     void aKeysOnlyAccountOnTheLegacyPathIsRefusedASixDigitCode() {
         final var loginDto = LoginDto.builder().email("test@example.com").password("password123").code("123456").build();
         final var user = keysOnlyUser();
@@ -259,6 +263,7 @@ class DefaultAuthServiceTest {
     }
 
     @Test
+    @SuppressWarnings({"deprecation", "removal"})
     void shouldFailLoginWhenTwoFactorCodeInvalid() {
         final var loginDto = LoginDto.builder().email("test@example.com").password("password123").code("000000").build();
         final var user = User.builder().id(1L).email("test@example.com").emailVerified(true)
@@ -276,6 +281,7 @@ class DefaultAuthServiceTest {
     }
 
     @Test
+    @SuppressWarnings({"deprecation", "removal"})
     void stopsCheckingTwoFactorCodesForAnAccountAfterTooManyWrongOnes() {
         final var loginDto = LoginDto.builder().email("test@example.com").password("password123").code("111111").build();
         final var user = User.builder().id(1L).email("test@example.com").emailVerified(true)

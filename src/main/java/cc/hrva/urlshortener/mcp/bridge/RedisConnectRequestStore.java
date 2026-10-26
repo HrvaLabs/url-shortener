@@ -2,8 +2,7 @@ package cc.hrva.urlshortener.mcp.bridge;
 
 import cc.hrva.urlshortener.exception.ConnectRequestAlreadyApprovedException;
 import cc.hrva.urlshortener.exception.ConnectRequestExpiredException;
-import java.security.SecureRandom;
-import java.util.Base64;
+import cc.hrva.urlshortener.security.SecureTokens;
 import java.util.Optional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -19,16 +18,13 @@ public class RedisConnectRequestStore implements ConnectRequestStore {
     private static final String CODE_KEY_PREFIX = "mcp:connect:code:";
     private static final String APPROVED = "approved";
     private static final String DENIED = "denied";
-    private static final int RANDOM_TOKEN_BYTES = 32;
-    private static final SecureRandom SECURE_RANDOM = new SecureRandom();
-    private static final Base64.Encoder RANDOM_TOKEN_ENCODER = Base64.getUrlEncoder().withoutPadding();
 
     private final StringRedisTemplate redisTemplate;
     private final JsonMapper jsonMapper;
 
     @Override
     public String save(final ConnectRequest connectRequest) {
-        final var handle = randomToken();
+        final var handle = SecureTokens.random();
         redisTemplate.opsForValue().set(REQUEST_KEY_PREFIX + handle, jsonMapper.writeValueAsString(connectRequest), REQUEST_TIME_TO_LIVE);
 
         return handle;
@@ -48,7 +44,7 @@ public class RedisConnectRequestStore implements ConnectRequestStore {
         final var connectRequest = find(handle).orElseThrow(ConnectRequestExpiredException::new);
         claimDecision(handle, APPROVED);
 
-        final var code = randomToken();
+        final var code = SecureTokens.random();
         final var approvedConnectRequest = new ApprovedConnectRequest(handle, email, connectRequest.authorizationQuery());
         redisTemplate.opsForValue().set(CODE_KEY_PREFIX + code, jsonMapper.writeValueAsString(approvedConnectRequest), CODE_TIME_TO_LIVE);
 
@@ -93,13 +89,6 @@ public class RedisConnectRequestStore implements ConnectRequestStore {
         }
 
         throw new ConnectRequestExpiredException();
-    }
-
-    private static String randomToken() {
-        final var randomBytes = new byte[RANDOM_TOKEN_BYTES];
-        SECURE_RANDOM.nextBytes(randomBytes);
-
-        return RANDOM_TOKEN_ENCODER.encodeToString(randomBytes);
     }
 
 }

@@ -32,7 +32,6 @@ import org.springframework.transaction.annotation.Transactional;
 @Transactional(readOnly = true)
 public class DefaultSecondStepService implements SecondStepService {
 
-    private static final String TWO_FACTOR_ATTEMPTS_PREFIX = "2fa:";
     private static final String PENDING_LOGIN_ATTEMPTS_PREFIX = "pending-login:";
     private static final String INVALID_CODE = "Invalid two-factor code";
 
@@ -60,21 +59,21 @@ public class DefaultSecondStepService implements SecondStepService {
     private SecondStepAttempt startSecondStep(final String pendingToken, final HttpServletRequest request) {
         final var clientIp = clientIpResolver.getClientIp(request);
         if (loginAttemptService.isBlocked(clientIp)) {
-            throw new NoAuthorizationException("Request has been blocked");
+            throw new NoAuthorizationException(LoginAttemptService.NETWORK_BLOCKED);
         }
 
-        final var pendingLogin = pendingLoginStore.find(pendingToken).orElseThrow(SignInExpiredException::new);
-        countAttempt(pendingToken, pendingLogin);
+        final var pendingLogin = pendingLoginStore.find(pendingToken).orElseThrow(() -> signInExpired(clientIp));
+        countAttempt(pendingToken, pendingLogin, clientIp);
 
-        final var user = userRepository.findById(pendingLogin.userId()).orElseThrow(SignInExpiredException::new);
+        final var user = userRepository.findById(pendingLogin.userId()).orElseThrow(() -> signInExpired(clientIp));
         if (loginAttemptService.isBlocked(twoFactorAttemptsKey(user))) {
-            throw new NoAuthorizationException("Too many invalid two-factor codes. Try again later.");
+            throw new NoAuthorizationException(LoginAttemptService.TWO_FACTOR_BLOCKED);
         }
 
         return new SecondStepAttempt(user, clientIp);
     }
 
-    private void countAttempt(final String pendingToken, final PendingLogin pendingLogin) {
+    private void countAttempt(final String pendingToken, final PendingLogin pendingLogin, final String clientIp) {
         final boolean allowed;
         try {
             allowed = rateLimiter.tryAcquire(PENDING_LOGIN_ATTEMPTS_PREFIX + pendingToken, PendingLoginStore.MAX_ATTEMPTS, PendingLoginStore.TIME_TO_LIVE);
@@ -85,8 +84,14 @@ public class DefaultSecondStepService implements SecondStepService {
         if (!allowed) {
             pendingLoginStore.discard(pendingToken);
             log.info("Second step out of attempts, sign-in discarded user id={}", pendingLogin.userId());
-            throw new SignInExpiredException();
+            throw signInExpired(clientIp);
         }
+    }
+
+    private SignInExpiredException signInExpired(final String clientIp) {
+        loginAttemptService.loginFailed(clientIp);
+
+        return new SignInExpiredException();
     }
 
     private void secondStepFailed(final SecondStepAttempt attempt) {
@@ -112,7 +117,7 @@ public class DefaultSecondStepService implements SecondStepService {
     }
 
     private static String twoFactorAttemptsKey(final User user) {
-        return TWO_FACTOR_ATTEMPTS_PREFIX + user.getId();
+        return LoginAttemptService.TWO_FACTOR_PREFIX + user.getId();
     }
 
     private record SecondStepAttempt(User user, String clientIp) {

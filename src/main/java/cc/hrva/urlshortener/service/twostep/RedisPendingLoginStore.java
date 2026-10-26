@@ -1,8 +1,7 @@
 package cc.hrva.urlshortener.service.twostep;
 
 import cc.hrva.urlshortener.exception.SignInUnavailableException;
-import java.security.SecureRandom;
-import java.util.Base64;
+import cc.hrva.urlshortener.security.SecureTokens;
 import java.util.Optional;
 import java.util.function.Supplier;
 import lombok.RequiredArgsConstructor;
@@ -19,16 +18,13 @@ import tools.jackson.databind.json.JsonMapper;
 public class RedisPendingLoginStore implements PendingLoginStore {
 
     private static final String KEY_PREFIX = "auth:pending-login:";
-    private static final int RANDOM_TOKEN_BYTES = 32;
-    private static final SecureRandom SECURE_RANDOM = new SecureRandom();
-    private static final Base64.Encoder RANDOM_TOKEN_ENCODER = Base64.getUrlEncoder().withoutPadding();
 
     private final StringRedisTemplate redisTemplate;
     private final JsonMapper jsonMapper;
 
     @Override
     public String create(final Long userId, final boolean rememberMe) {
-        final var token = randomToken();
+        final var token = SecureTokens.random();
         final var pendingLogin = jsonMapper.writeValueAsString(new PendingLogin(userId, rememberMe));
         inRedis(() -> {
             redisTemplate.opsForValue().set(KEY_PREFIX + token, pendingLogin, TIME_TO_LIVE);
@@ -77,13 +73,6 @@ public class RedisPendingLoginStore implements PendingLoginStore {
             log.warn("Pending sign-in store unavailable exception={}", exception.getClass().getName());
             throw new SignInUnavailableException(UNAVAILABLE, exception);
         }
-    }
-
-    private static String randomToken() {
-        final var randomBytes = new byte[RANDOM_TOKEN_BYTES];
-        SECURE_RANDOM.nextBytes(randomBytes);
-
-        return RANDOM_TOKEN_ENCODER.encodeToString(randomBytes);
     }
 
 }

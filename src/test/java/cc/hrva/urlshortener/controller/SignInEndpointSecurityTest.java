@@ -42,6 +42,7 @@ import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.json.JsonCompareMode;
 import org.springframework.test.web.servlet.MockMvc;
 
 import static org.mockito.ArgumentMatchers.any;
@@ -148,7 +149,7 @@ class SignInEndpointSecurityTest {
 
         mockMvc.perform(post(TOTP_SECOND_STEP).contentType(MediaType.APPLICATION_JSON).content(TOTP_BODY))
                 .andExpect(status().isGone())
-                .andExpect(content().json("{\"error\":\"Your sign-in expired. Sign in again.\"}", true));
+                .andExpect(content().json("{\"error\":\"Your sign-in expired. Sign in again.\"}", JsonCompareMode.STRICT));
     }
 
     @Test
@@ -157,7 +158,7 @@ class SignInEndpointSecurityTest {
 
         mockMvc.perform(post(TOTP_SECOND_STEP).contentType(MediaType.APPLICATION_JSON).content(TOTP_BODY))
                 .andExpect(status().isUnauthorized())
-                .andExpect(content().json("{\"error\":\"Invalid two-factor code\"}", true));
+                .andExpect(content().json("{\"error\":\"Invalid two-factor code\"}", JsonCompareMode.STRICT));
     }
 
     @Test
@@ -167,7 +168,7 @@ class SignInEndpointSecurityTest {
 
         mockMvc.perform(post(TOTP_SECOND_STEP).contentType(MediaType.APPLICATION_JSON).content(TOTP_BODY))
                 .andExpect(status().isServiceUnavailable())
-                .andExpect(content().json("{\"error\":\"Two-step sign-in isn't available right now. Try again in a minute.\"}", true));
+                .andExpect(content().json("{\"error\":\"Two-step sign-in isn't available right now. Try again in a minute.\"}", JsonCompareMode.STRICT));
     }
 
     @Test

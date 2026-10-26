@@ -33,8 +33,6 @@ import org.springframework.transaction.annotation.Transactional;
 @RequiredArgsConstructor
 public class DefaultAuthService implements AuthService {
 
-    private static final String TWO_FACTOR_ATTEMPTS_PREFIX = "2fa:";
-
     private final UserService userService;
     private final UserValidator userValidator;
     private final SignInService signInService;
@@ -61,13 +59,13 @@ public class DefaultAuthService implements AuthService {
 
     @Override
     @Transactional
-    @SuppressWarnings("removal")
+    @SuppressWarnings({"deprecation", "removal"})
     public ResponseEntity<JWTTokenDto> login(final LoginDto loginDto, final HttpServletRequest request) {
         log.info("User logged in email={}", loginDto.getEmail());
 
         final var clientIp = clientIpResolver.getClientIp(request);
         if (loginAttemptService.isBlocked(clientIp)) {
-            throw new NoAuthorizationException("Request has been blocked");
+            throw new NoAuthorizationException(LoginAttemptService.NETWORK_BLOCKED);
         }
         checkPassword(loginDto);
         final var user = userService.fetchUserFromEmail(loginDto.getEmail());
@@ -124,9 +122,9 @@ public class DefaultAuthService implements AuthService {
     private void verifyLegacyCode(final User user, final String code, final String clientIp) {
         log.info("Legacy two-factor login user id={}", user.getId());
 
-        final var twoFactorAttemptsKey = TWO_FACTOR_ATTEMPTS_PREFIX + user.getId();
+        final var twoFactorAttemptsKey = LoginAttemptService.TWO_FACTOR_PREFIX + user.getId();
         if (loginAttemptService.isBlocked(twoFactorAttemptsKey)) {
-            throw new NoAuthorizationException("Too many invalid two-factor codes. Try again later.");
+            throw new NoAuthorizationException(LoginAttemptService.TWO_FACTOR_BLOCKED);
         }
         if (!twoFactorService.verifyLoginCode(user, code)) {
             loginAttemptService.loginFailed(twoFactorAttemptsKey);

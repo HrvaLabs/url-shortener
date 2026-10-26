@@ -32,6 +32,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.startsWith;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -133,6 +134,7 @@ class DefaultSecondStepServiceTest {
                 .isInstanceOf(SignInExpiredException.class)
                 .hasMessage(SIGN_IN_EXPIRED);
         verify(pendingLoginStore).discard(TOKEN);
+        verify(loginAttemptService).loginFailed(CLIENT_IP);
         verifyNoInteractions(userRepository, twoFactorService, signInService);
     }
 
@@ -147,6 +149,16 @@ class DefaultSecondStepServiceTest {
     }
 
     @Test
+    void anUnknownTokenCountsAgainstTheNetwork() {
+        when(pendingLoginStore.find(TOKEN)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> secondStepService.completeWithCode(totp("123456"), request))
+                .isInstanceOf(SignInExpiredException.class);
+        verify(loginAttemptService).loginFailed(CLIENT_IP);
+        verify(loginAttemptService, never()).loginFailed(startsWith("2fa:"));
+    }
+
+    @Test
     void aConsumedTokenCantBeUsedTwice() {
         final var user = user();
         givenAPendingLogin(new PendingLogin(7L, false), user);
@@ -157,6 +169,7 @@ class DefaultSecondStepServiceTest {
                 .isInstanceOf(SignInExpiredException.class)
                 .hasMessage(SIGN_IN_EXPIRED);
         verify(loginAttemptService, never()).loginSucceeded(anyString());
+        verify(loginAttemptService, never()).loginFailed(anyString());
         verifyNoInteractions(signInService);
     }
 
@@ -220,6 +233,7 @@ class DefaultSecondStepServiceTest {
         assertThatThrownBy(() -> secondStepService.completeWithCode(totp("123456"), request))
                 .isInstanceOf(SignInExpiredException.class)
                 .hasMessage(SIGN_IN_EXPIRED);
+        verify(loginAttemptService).loginFailed(CLIENT_IP);
         verifyNoInteractions(twoFactorService, signInService);
     }
 
@@ -232,6 +246,7 @@ class DefaultSecondStepServiceTest {
         assertThatThrownBy(() -> secondStepService.completeWithCode(totp("123456"), request))
                 .isInstanceOf(SignInUnavailableException.class)
                 .hasMessage("Two-step sign-in isn't available right now. Try again in a minute.");
+        verify(loginAttemptService, never()).loginFailed(anyString());
         verifyNoInteractions(userRepository, twoFactorService, signInService);
     }
 

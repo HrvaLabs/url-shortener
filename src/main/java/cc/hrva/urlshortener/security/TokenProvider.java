@@ -28,7 +28,6 @@ public class TokenProvider {
 
   private static final String AUTHORITIES_KEY = "auth";
   private static final Long SECONDS_TO_MILLISECONDS = 1000L;
-  private static final Long REMEMBER_ME_VALIDITY_SECONDS = 2_592_000L; // 30 days
 
   private final AppProperties appProperties;
 
