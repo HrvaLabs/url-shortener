@@ -901,7 +901,7 @@ expect_eq "$(jq -r '.buttons[0] | "\(.visible) \(.linkState) \(.shownOnPage)"' <
 echo "  --- a visitor report while the page row is locked \"$LOCK_CLAUSE\""
 hold_page_lock "$PAGE_ID" "$LOCK_CLAUSE" 3
 REPORT=$(curl -s -o /dev/null -w '%{http_code} %{time_total}' -X POST "$BASE/api/v1/reports" -H 'Content-Type: application/json' \
-    -d '{"shortUrl":"@e2e-bio","category":"SPAM"}')
+    -d '{"shortUrl":"@e2e-bio","category":"IMPERSONATION"}')
 release_page_lock
 show "POST /api/v1/reports @e2e-bio while locked -> $REPORT (seconds)"
 expect_eq "${REPORT%% *}" 202 "the report answers 202"
@@ -913,6 +913,7 @@ echo "  --- admin"
 http -H "Authorization: Bearer $ADMIN_JWT" "$BASE/api/v1/admin/bio-page-reviews"
 expect_eq "$HTTP_STATUS $(jq -r .page.totalElements <<<"$HTTP_BODY")" "200 1" "GET /api/v1/admin/bio-page-reviews lists it"
 show "$(jq -c '.content[0] | {pageId, handle, reasons}' <<<"$HTTP_BODY")"
+expect_eq "$(jq -r '.content[0].reasons | join("|")' <<<"$HTTP_BODY")" "reported by a visitor: impersonation" "the review names the IMPERSONATION report"
 for search in 'a\b:e2e-bio' '%:e2e-bio' '_:e2e_admin'; do
     http -H "Authorization: Bearer $ADMIN_JWT" "$BASE/api/v1/admin/bio-pages?search=$(urlencode "${search%%:*}")"
     expect_eq "$HTTP_STATUS $(jq -r '"\(.page.totalElements) \(.content[0].handle)"' <<<"$HTTP_BODY")" "200 1 ${search#*:}" \

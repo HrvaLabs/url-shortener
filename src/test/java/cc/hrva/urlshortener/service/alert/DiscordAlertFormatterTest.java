@@ -195,6 +195,18 @@ class DiscordAlertFormatterTest {
     }
 
     @Test
+    void impersonationReportsAreLabelledLikeTheOtherCategories() {
+        final var content = formatter.message(List.of(
+                new VisitorReported(new AlertedLink(42L, "abc12", "example.top", 27L), ReportCategory.IMPERSONATION, null, true),
+                new BioPageReported(ANA, ReportCategory.IMPERSONATION, "uses my photos", false)), 0).content();
+
+        assertThat(content.lines().toList()).containsExactly(
+                "New review from a visitor report: hrva.cc/abc12 → example.top (impersonation), account #27, "
+                        + "<https://app.hrva.cc/admin/review?entry=42>",
+                "Visitor report on an open bio page review: hrva.cc/@ana (impersonation: \"uses my photos\"), account #7, " + BIO_REVIEW_PAGE);
+    }
+
+    @Test
     void aBioPageWithoutAHandleIsNamedById() {
         final var page = new AlertedBioPage(12L, null, 7L);
 

@@ -255,6 +255,18 @@ class ReportControllerTest {
     }
 
     @Test
+    void impersonationCanBeReportedForALinkAndForABioPage() throws Exception {
+        when(urlRepository.findByShortUrlAndActiveTrue(SHORT)).thenReturn(Optional.of(url));
+        when(bioPageRepository.findByHandleWithOwner("ana")).thenReturn(Optional.of(page));
+
+        report(SHORT, "IMPERSONATION", DETAILS).andExpect(status().isAccepted());
+        report("@ana", "IMPERSONATION", "pretends to be me").andExpect(status().isAccepted());
+
+        verify(reviewQueueService).report(url, ReportCategory.IMPERSONATION, DETAILS);
+        verify(bioPageReviewService).report(page, ReportCategory.IMPERSONATION, "pretends to be me");
+    }
+
+    @Test
     void aBioPageReportIsStillTakenWhenTheRateLimiterIsUnavailable() throws Exception {
         mockMvc = mockMvcWith((key, window) -> {
             throw new RateLimiterUnavailableException(new IllegalStateException("redis down"));
@@ -364,10 +376,10 @@ class ReportControllerTest {
     @ParameterizedTest
     @NullAndEmptySource
     @ValueSource(strings = {"SCAM", "phishing"})
-    void theCategoryMustBeOneOfTheFour(final String category) throws Exception {
+    void theCategoryMustBeOneOfTheFive(final String category) throws Exception {
         report(SHORT, category, DETAILS)
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.error").value("Category must be PHISHING, MALWARE, SPAM or OTHER"));
+                .andExpect(jsonPath("$.error").value("Category must be PHISHING, MALWARE, SPAM, IMPERSONATION or OTHER"));
 
         verifyNoInteractions(urlRepository, reviewQueueService);
     }

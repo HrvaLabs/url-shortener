@@ -5,6 +5,7 @@ public enum ReportCategory {
     PHISHING,
     MALWARE,
     SPAM,
+    IMPERSONATION,
     OTHER
 
 }

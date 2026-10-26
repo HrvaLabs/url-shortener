@@ -52,7 +52,7 @@ public class ReportController {
     private static final String HANDLE_PREFIX = "@";
     private static final String BIO_PAGE_PATH = "bio/";
     private static final String TARGET_INVALID = "Enter a hrva.cc short link or bio page, like hrva.cc/abc or hrva.cc/@name";
-    private static final String CATEGORY_INVALID = "Category must be PHISHING, MALWARE, SPAM or OTHER";
+    private static final String CATEGORY_INVALID = "Category must be PHISHING, MALWARE, SPAM, IMPERSONATION or OTHER";
     private static final String DETAILS_TOO_LONG = "Details must be 500 characters or fewer";
     private static final String TOO_MANY_REPORTS = "You've sent a lot of reports in a short time. Try again in an hour.";
     private static final String BIO_PAGE_REVIEW_PAGE_CONSTRAINT = "fk_bio_page_review_page";

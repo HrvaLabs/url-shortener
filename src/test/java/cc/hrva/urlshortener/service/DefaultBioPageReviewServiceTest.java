@@ -195,6 +195,16 @@ class DefaultBioPageReviewServiceTest {
     }
 
     @Test
+    void anImpersonationReportIsNamedInTheReviewQueue() {
+        final var saved = ArgumentCaptor.forClass(BioPageReview.class);
+
+        bioPageReviewService.report(page, ReportCategory.IMPERSONATION, "uses my photos");
+
+        verify(bioPageReviewRepository).save(saved.capture());
+        assertThat(saved.getValue().getReasons()).isEqualTo("reported by a visitor: impersonation: uses my photos");
+    }
+
+    @Test
     void aReportWithoutDetailsNamesOnlyTheCategory() {
         final var saved = ArgumentCaptor.forClass(BioPageReview.class);
 
