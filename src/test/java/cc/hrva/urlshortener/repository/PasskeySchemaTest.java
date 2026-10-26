@@ -110,6 +110,21 @@ class PasskeySchemaTest {
     }
 
     @Test
+    void aHandleIsSetOnlyOnce() {
+        final var user = savedUser("alice@example.com");
+        final var first = "Zmlyc3QtaGFuZGxlZmlyc3QtaGFuZGxlZmlyc3QtaGE";
+        final var second = "c2Vjb25kLWhhbmRsZXNlY29uZC1oYW5kbGVzZWNvbmQ";
+
+        assertThat(userRepository.findWebauthnUserHandleById(user.getId())).isEmpty();
+        assertThat(userRepository.setWebauthnUserHandleIfMissing(user.getId(), first)).isEqualTo(1);
+        assertThat(userRepository.setWebauthnUserHandleIfMissing(user.getId(), second)).isZero();
+
+        assertThat(userRepository.findWebauthnUserHandleById(user.getId())).contains(first);
+        entityManager.clear();
+        assertThat(userRepository.findById(user.getId()).orElseThrow().getWebauthnUserHandle()).isEqualTo(first);
+    }
+
+    @Test
     void newUsersStartWithTwoStepOff() {
         final var user = userRepository.saveAndFlush(user("alice@example.com").build());
         entityManager.clear();

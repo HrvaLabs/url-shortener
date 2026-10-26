@@ -300,6 +300,21 @@ class PasskeyFlowsTest {
         assertThat(userRepository.findById(user.getId()).orElseThrow().getWebauthnUserHandle()).isEqualTo(first);
     }
 
+    @Test
+    void twoFirstRequestsRacingGetTheSameHandle() {
+        final var user = localUser("race@example.com");
+        when(userService.getUserFromToken()).thenReturn(requestsViewOf(user), requestsViewOf(user));
+
+        final var first = registrationOptions().options().path("user").path("id").asString();
+        final var second = registrationOptions().options().path("user").path("id").asString();
+
+        assertThat(first).hasSize(43);
+        assertThat(second).isEqualTo(first);
+        entityManager.flush();
+        entityManager.clear();
+        assertThat(userRepository.findById(user.getId()).orElseThrow().getWebauthnUserHandle()).isEqualTo(first);
+    }
+
     private PasskeyResponse addPasskey(final TestAuthenticator authenticator, final String label) {
         final var options = registrationOptions();
 
@@ -329,6 +344,22 @@ class PasskeyFlowsTest {
         when(userService.getUserFromToken()).thenReturn(user);
 
         return user;
+    }
+
+    private static User requestsViewOf(final User user) {
+        return User.builder()
+                .id(user.getId())
+                .email(user.getEmail())
+                .password(user.getPassword())
+                .apiKeySlots(user.getApiKeySlots())
+                .createDate(user.getCreateDate())
+                .authProvider(user.getAuthProvider())
+                .active(user.getActive())
+                .emailVerified(user.getEmailVerified())
+                .twoFactorEnabled(user.getTwoFactorEnabled())
+                .twoStepEnabled(user.getTwoStepEnabled())
+                .webauthnUserHandle(user.getWebauthnUserHandle())
+                .build();
     }
 
     private User localUser(final String email) {

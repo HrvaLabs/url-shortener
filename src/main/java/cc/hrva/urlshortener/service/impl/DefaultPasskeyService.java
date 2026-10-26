@@ -56,6 +56,7 @@ public class DefaultPasskeyService implements PasskeyService {
     private static final String COULD_NOT_VERIFY = "That passkey or security key couldn't be verified. Try again.";
     private static final String LABEL_TOO_LONG = "A label can have at most 64 characters.";
     private static final String NOT_FOUND = "Passkey not found";
+    private static final String NOT_AUTHENTICATED = "Not authenticated";
 
     private final UserService userService;
     private final UserRepository userRepository;
@@ -151,9 +152,11 @@ public class DefaultPasskeyService implements PasskeyService {
             return;
         }
 
-        user.setWebauthnUserHandle(Bytes.random().toBase64UrlString());
-        userRepository.save(user);
-        log.info("Passkey user handle created user id={}", user.getId());
+        if (userRepository.setWebauthnUserHandleIfMissing(user.getId(), Bytes.random().toBase64UrlString()) > 0) {
+            log.info("Passkey user handle created user id={}", user.getId());
+        }
+        user.setWebauthnUserHandle(userRepository.findWebauthnUserHandleById(user.getId())
+                .orElseThrow(() -> new NoAuthorizationException(NOT_AUTHENTICATED)));
     }
 
     private PasskeyCeremony registrationCeremonyOf(final String ceremonyId, final User user) {
@@ -172,7 +175,7 @@ public class DefaultPasskeyService implements PasskeyService {
     private User currentUser() {
         final var user = userService.getUserFromToken();
         if (user == null) {
-            throw new NoAuthorizationException("Not authenticated");
+            throw new NoAuthorizationException(NOT_AUTHENTICATED);
         }
 
         return user;

@@ -28,7 +28,9 @@ import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -46,6 +48,9 @@ import tools.jackson.databind.json.JsonMapper;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -81,6 +86,8 @@ class DefaultPasskeyServiceTest {
     @Mock
     private Reauthentication reauthentication;
 
+    private final Map<Long, String> storedHandles = new HashMap<>();
+
     private PasskeyService passkeyService;
 
     @BeforeEach
@@ -99,6 +106,7 @@ class DefaultPasskeyServiceTest {
         final var second = user(4_815_162_343L, "second.person@example.com");
         when(userService.getUserFromToken()).thenReturn(first, second);
         when(passkeyCeremonyStore.save(any())).thenReturn(CEREMONY_ID);
+        handlesAreStored();
 
         passkeyService.registrationOptions(new PasskeyRegistrationOptionsDto("user123"));
         passkeyService.registrationOptions(new PasskeyRegistrationOptionsDto("user123"));
@@ -106,15 +114,49 @@ class DefaultPasskeyServiceTest {
         for (final var user : List.of(first, second)) {
             final var id = String.valueOf(user.getId());
             assertThat(user.getWebauthnUserHandle())
+                    .isEqualTo(storedHandles.get(user.getId()))
                     .hasSize(43)
                     .matches("[A-Za-z0-9_-]{43}")
                     .doesNotContain(user.getEmail())
                     .doesNotContain(id)
                     .doesNotContain(base64Url(user.getEmail()))
                     .doesNotContain(base64Url(id));
-            verify(userRepository).save(user);
         }
         assertThat(first.getWebauthnUserHandle()).isNotEqualTo(second.getWebauthnUserHandle());
+        verify(userRepository, never()).save(any());
+    }
+
+    @Test
+    void aHandleSetByARacingRequestIsUsed() {
+        final var user = user(7L, "user@localhost");
+        final var stored = Bytes.random().toBase64UrlString();
+        when(userService.getUserFromToken()).thenReturn(user);
+        when(userRepository.setWebauthnUserHandleIfMissing(eq(7L), anyString())).thenReturn(0);
+        when(userRepository.findWebauthnUserHandleById(7L)).thenReturn(Optional.of(stored));
+        when(passkeyCeremonyStore.save(any())).thenReturn(CEREMONY_ID);
+
+        final var response = passkeyService.registrationOptions(new PasskeyRegistrationOptionsDto("user123"));
+
+        final var generated = ArgumentCaptor.forClass(String.class);
+        verify(userRepository).setWebauthnUserHandleIfMissing(eq(7L), generated.capture());
+        assertThat(generated.getValue()).hasSize(43).isNotEqualTo(stored);
+        assertThat(response.options().path("user").path("id").asString()).isEqualTo(stored);
+        assertThat(user.getWebauthnUserHandle()).isEqualTo(stored);
+        verify(userRepository, never()).save(any());
+    }
+
+    @Test
+    void anAccountDeletedMeanwhileGetsNoOptions() {
+        final var user = user(7L, "user@localhost");
+        when(userService.getUserFromToken()).thenReturn(user);
+        when(userRepository.setWebauthnUserHandleIfMissing(eq(7L), anyString())).thenReturn(0);
+        when(userRepository.findWebauthnUserHandleById(7L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> passkeyService.registrationOptions(new PasskeyRegistrationOptionsDto("user123")))
+                .isInstanceOf(NoAuthorizationException.class)
+                .hasMessage("Not authenticated");
+
+        verifyNoInteractions(passkeyCeremonyStore);
     }
 
     @Test
@@ -129,6 +171,7 @@ class DefaultPasskeyServiceTest {
 
         assertThat(user.getWebauthnUserHandle()).isEqualTo(handle);
         assertThat(response.options().path("user").path("id").asString()).isEqualTo(handle);
+        verify(userRepository, never()).setWebauthnUserHandleIfMissing(any(), any());
         verify(userRepository, never()).save(any());
     }
 
@@ -140,6 +183,7 @@ class DefaultPasskeyServiceTest {
         when(passkeyCredentialRepository.findByUserOrderByCreatedAtDesc(user))
                 .thenReturn(List.of(PasskeyCredential.builder().credentialId(keyId).transports("usb").build()));
         when(passkeyCeremonyStore.save(any())).thenReturn(CEREMONY_ID);
+        handlesAreStored();
 
         final var response = passkeyService.registrationOptions(new PasskeyRegistrationOptionsDto("user123"));
 
@@ -165,6 +209,7 @@ class DefaultPasskeyServiceTest {
                 .hasMessage("Current password is incorrect");
 
         verifyNoInteractions(passkeyCeremonyStore);
+        verify(userRepository, never()).setWebauthnUserHandleIfMissing(any(), any());
         verify(userRepository, never()).save(any());
         assertThat(user.getWebauthnUserHandle()).isNull();
     }
@@ -349,6 +394,13 @@ class DefaultPasskeyServiceTest {
                 .hasMessage("Not authenticated");
 
         verifyNoInteractions(reauthentication, passkeyCeremonyStore, passkeyCredentialRepository);
+    }
+
+    private void handlesAreStored() {
+        when(userRepository.setWebauthnUserHandleIfMissing(anyLong(), anyString())).thenAnswer(invocation ->
+                storedHandles.putIfAbsent(invocation.getArgument(0), invocation.getArgument(1)) == null ? 1 : 0);
+        when(userRepository.findWebauthnUserHandleById(anyLong())).thenAnswer(invocation ->
+                Optional.ofNullable(storedHandles.get(invocation.<Long>getArgument(0))));
     }
 
     private static User user(final Long id, final String email) {
