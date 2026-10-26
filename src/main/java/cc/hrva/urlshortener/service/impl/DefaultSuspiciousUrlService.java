@@ -79,6 +79,7 @@ public class DefaultSuspiciousUrlService implements SuspiciousUrlService {
     private static final String UNUSUAL_CHARACTERS = " with unusual characters";
     private static final String LABEL_SEPARATOR = "\\.";
     private static final int LAST_ASCII = 0x7F;
+    private static final int DISTINCTIVE_BRAND_LENGTH = 6;
 
     private static final Map<Character, Character> LATIN_LOOKALIKES = Map.ofEntries(
             Map.entry('\u0430', 'a'), Map.entry('\u0435', 'e'), Map.entry('\u043e', 'o'), Map.entry('\u0440', 'p'),
@@ -179,6 +180,18 @@ public class DefaultSuspiciousUrlService implements SuspiciousUrlService {
     }
 
     @Override
+    public Optional<String> findBrandInHandle(final String handle) {
+        if (StringUtils.isBlank(handle)) {
+            return Optional.empty();
+        }
+        final var joined = String.join("", wordsOf(handle).stream().map(DefaultSuspiciousUrlService::wordLookalike).toList());
+        return findImitatedBrand(handle).or(() -> BRAND_DOMAINS.keySet().stream()
+                .filter(brand -> brand.length() >= DISTINCTIVE_BRAND_LENGTH && joined.contains(brand))
+                .sorted()
+                .findFirst());
+    }
+
+    @Override
     public Optional<String> findNamedBrand(final String text) {
         return wordsOf(text).stream()
                 .map(DefaultSuspiciousUrlService::wordLookalike)
@@ -273,7 +286,7 @@ public class DefaultSuspiciousUrlService implements SuspiciousUrlService {
     }
 
     private static boolean resembles(final String part, final String brand) {
-        return part.equals(brand) || brand.length() >= 6 && differsByOneLetter(part, brand);
+        return part.equals(brand) || brand.length() >= DISTINCTIVE_BRAND_LENGTH && differsByOneLetter(part, brand);
     }
 
     private static boolean isOfficialBrandDomain(final String domain) {

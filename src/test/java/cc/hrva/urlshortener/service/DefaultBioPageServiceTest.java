@@ -695,7 +695,8 @@ class DefaultBioPageServiceTest {
         hasPage();
 
         for (final var title : List.of(ZERO_WIDTH_JOINER, ZERO_WIDTH_NON_JOINER, codePoints(0xFE0F), codePoints(0x034F), codePoints(0x0301),
-                codePoints(0xE0041, 0xE0042), codePoints(0x17B4), codePoints(0x180B), " " + ZERO_WIDTH_JOINER + " " + codePoints(0xFE0F) + " ")) {
+                codePoints(0xE0041, 0xE0042), codePoints(0x17B4), codePoints(0x180B), " " + ZERO_WIDTH_JOINER + " " + codePoints(0xFE0F) + " ",
+                codePoints(0x2800, 0x2800, 0x2800), codePoints(0xFFFC))) {
             assertRefusedBeforeWriting(update(buttonDto(41L, title)), TITLE_REQUIRED);
         }
     }

@@ -381,6 +381,41 @@ class DefaultSuspiciousUrlServiceTest {
     }
 
     @ParameterizedTest
+    @CsvSource({
+            "paypalhelp, paypal",
+            "paypal2024, paypal",
+            "thepaypal, paypal",
+            "pay-pal, paypal",
+            "my_netflix_shop, netflix",
+            "netflixx, netflix",
+            "revolutt, revolut",
+            "real-instagram4you, instagram",
+            "freeamazongifts, amazon"
+    })
+    void aHandleThatContainsABrandOfSixOrMoreLettersImitatesIt(final String handle, final String brand) {
+        assertThat(suspiciousUrlService.findBrandInHandle(handle)).contains(brand);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"applepie", "gmailer", "ebayfinds", "dhlexpress", "olxshop", "ana-horvat", "paypa"})
+    void aHandleThatOnlyContainsAShorterBrandImitatesNothing(final String handle) {
+        assertThat(suspiciousUrlService.findBrandInHandle(handle)).isEmpty();
+    }
+
+    @ParameterizedTest
+    @CsvSource({"paypal, paypal", "paypa1, paypal", "revoiut, revolut", "apple-pie, apple", "dhl, dhl", "the_ebay_shop, ebay"})
+    void aHandleKeepsTheLinkChecksVerdictOnItsParts(final String handle, final String brand) {
+        assertThat(suspiciousUrlService.findBrandInHandle(handle)).contains(brand);
+        assertThat(suspiciousUrlService.findBrandInHandle(handle)).isEqualTo(suspiciousUrlService.findImitatedBrand(handle));
+    }
+
+    @ParameterizedTest
+    @NullAndEmptySource
+    void aMissingHandleImitatesNothing(final String handle) {
+        assertThat(suspiciousUrlService.findBrandInHandle(handle)).isEmpty();
+    }
+
+    @ParameterizedTest
     @ValueSource(strings = {"Cooking with Ana", "Looking good", "Finance tips", "Minted Studio", "Revolution", "paypa1", "revoiut", "netflixx"})
     void aNamedBrandIsOnlyAnExactName(final String text) {
         assertThat(suspiciousUrlService.findNamedBrand(text)).isEmpty();

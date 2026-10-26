@@ -14,6 +14,8 @@ public final class BioPageText {
     private static final int LAST_ASCII = 0x7F;
     private static final int ZERO_WIDTH_NON_JOINER = 0x200C;
     private static final int ZERO_WIDTH_JOINER = 0x200D;
+    private static final int BRAILLE_PATTERN_BLANK = 0x2800;
+    private static final int OBJECT_REPLACEMENT_CHARACTER = 0xFFFC;
 
     private BioPageText() {}
 
@@ -40,7 +42,8 @@ public final class BioPageText {
     private static boolean isVisible(final int codePoint) {
         final var type = Character.getType(codePoint);
         return type != Character.FORMAT && type != Character.NON_SPACING_MARK && type != Character.ENCLOSING_MARK
-                && type != Character.SPACE_SEPARATOR && !Character.isWhitespace(codePoint);
+                && type != Character.SPACE_SEPARATOR && !Character.isWhitespace(codePoint)
+                && codePoint != BRAILLE_PATTERN_BLANK && codePoint != OBJECT_REPLACEMENT_CHARACTER;
     }
 
     private static boolean isJoiner(final int codePoint) {

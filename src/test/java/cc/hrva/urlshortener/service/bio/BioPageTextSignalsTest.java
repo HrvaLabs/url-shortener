@@ -58,6 +58,14 @@ class BioPageTextSignalsTest {
         assertThat(bioPageTextSignals.reasonsFor("revoiut", "Ana", "", List.of())).containsExactly("handle imitates revolut");
     }
 
+    @Test
+    void aBrandInsideAHandleIsFlaggedButNotInsideAName() {
+        assertThat(bioPageTextSignals.reasonsFor("paypalhelp", "Ana", "", List.of())).containsExactly("handle imitates paypal");
+        assertThat(bioPageTextSignals.reasonsFor("thepaypal", "Ana", "", List.of())).containsExactly("handle imitates paypal");
+        assertThat(bioPageTextSignals.reasonsFor("ana", "Paypalhelp", "", List.of())).isEmpty();
+        assertThat(bioPageTextSignals.reasonsFor("applepie", "Ana", "", List.of())).isEmpty();
+    }
+
     @ParameterizedTest
     @ValueSource(strings = {"secure-login", "verify-account", "wallet_unlock", "login"})
     void aHandleWithALureWordIsFlagged(final String handle) {

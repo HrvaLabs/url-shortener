@@ -179,6 +179,8 @@ class BioPageTextTest {
     void keptInvisibleCharactersBesideVisibleTextStay() {
         assertThat(BioPageText.clean("Ana" + ZERO_WIDTH_JOINER)).isEqualTo("Ana" + ZERO_WIDTH_JOINER);
         assertThat(BioPageText.clean(codePoints(0x2764, 0xFE0F))).isEqualTo(codePoints(0x2764, 0xFE0F));
+        assertThat(BioPageText.clean("Ana" + codePoints(0x2800))).isEqualTo("Ana" + codePoints(0x2800));
+        assertThat(BioPageText.clean(codePoints(0xFFFC) + " Ana")).isEqualTo(codePoints(0xFFFC) + " Ana");
     }
 
     @Test
@@ -300,7 +302,11 @@ class BioPageTextTest {
                 codePoints(0x180B),
                 codePoints(0x0301).repeat(3),
                 codePoints(0x200D, 0x0020, 0x200C, 0x0020, 0xFE0F),
-                codePoints(0x200D, 0x0301, 0x20DD, 0xE007F));
+                codePoints(0x200D, 0x0301, 0x20DD, 0xE007F),
+                codePoints(0x2800),
+                codePoints(0x2800, 0x2800, 0x2800),
+                codePoints(0xFFFC),
+                codePoints(0x2800, 0x0020, 0xFFFC, 0x200D));
     }
 
     private static boolean isMark(final int codePoint) {

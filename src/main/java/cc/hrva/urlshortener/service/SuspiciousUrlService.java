@@ -12,6 +12,7 @@ public interface SuspiciousUrlService {
     boolean isShortener(String longUrl);
     List<String> findTextReasons(String text);
     Optional<String> findImitatedBrand(String text);
+    Optional<String> findBrandInHandle(String handle);
     Optional<String> findNamedBrand(String text);
 
 }

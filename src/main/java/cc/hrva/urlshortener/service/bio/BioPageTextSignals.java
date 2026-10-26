@@ -20,7 +20,7 @@ public class BioPageTextSignals {
 
     public List<String> reasonsFor(final String handle, final String displayName, final String bio, final List<String> buttonTitles) {
         final var reasons = new LinkedHashSet<String>();
-        suspiciousUrlService.findImitatedBrand(handle).map(brand -> imitates(HANDLE, brand)).ifPresent(reasons::add);
+        suspiciousUrlService.findBrandInHandle(handle).map(brand -> imitates(HANDLE, brand)).ifPresent(reasons::add);
         reasons.addAll(textReasons(HANDLE, handle));
         suspiciousUrlService.findNamedBrand(displayName).map(brand -> imitates(NAME, brand)).ifPresent(reasons::add);
         reasons.addAll(textReasons(NAME, displayName));
