@@ -134,7 +134,8 @@ public class DefaultAnalyticsService implements AnalyticsService {
                 url.getPasswordHash() != null,
                 url.getCreateDate(),
                 url.getLastAccessed(),
-                safeLong(url.getVisits()));
+                safeLong(url.getVisits()),
+                url.getLongUrl());
     }
 
     private static TopLink topLinkOf(final Url url, final LinkClicks link) {

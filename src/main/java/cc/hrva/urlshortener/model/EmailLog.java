@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.model;
 
+import cc.hrva.urlshortener.model.enums.EmailStatus;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -24,10 +25,10 @@ import lombok.Setter;
 @Table(name = "email_log")
 public class EmailLog {
 
-    public static final String STATUS_SENDING = "SENDING";
-    public static final String STATUS_SENT = "SENT";
-    public static final String STATUS_FAILED = "FAILED";
-    public static final String STATUS_RESENT = "RESENT";
+    public static final String STATUS_SENDING = EmailStatus.SENDING.name();
+    public static final String STATUS_SENT = EmailStatus.SENT.name();
+    public static final String STATUS_FAILED = EmailStatus.FAILED.name();
+    public static final String STATUS_RESENT = EmailStatus.RESENT.name();
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)

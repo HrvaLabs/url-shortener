@@ -1,13 +1,14 @@
 package cc.hrva.urlshortener.security;
 
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
+import cc.hrva.urlshortener.listener.UserRegisteredEvent;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.service.AuthoritiesService;
-import cc.hrva.urlshortener.service.SendingEmailService;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import jakarta.validation.Validator;
 import java.io.IOException;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
@@ -30,12 +31,13 @@ public class OAuth2LoginSuccessHandler implements AuthenticationSuccessHandler {
 
     private static final Logger log = LoggerFactory.getLogger(OAuth2LoginSuccessHandler.class);
     private static final String DEFAULT_PROVIDER = "google";
+    private static final String EMAIL = "email";
 
     private final UserRepository userRepository;
     private final AuthoritiesService authoritiesService;
     private final TokenProvider tokenProvider;
     private final AppProperties appProperties;
-    private final SendingEmailService sendingEmailService;
+    private final Validator validator;
     private final ApplicationEventPublisher eventPublisher;
 
     public OAuth2LoginSuccessHandler(
@@ -43,13 +45,13 @@ public class OAuth2LoginSuccessHandler implements AuthenticationSuccessHandler {
             final AuthoritiesService authoritiesService,
             final TokenProvider tokenProvider,
             final AppProperties appProperties,
-            final SendingEmailService sendingEmailService,
+            final Validator validator,
             final ApplicationEventPublisher eventPublisher) {
         this.userRepository = userRepository;
         this.authoritiesService = authoritiesService;
         this.tokenProvider = tokenProvider;
         this.appProperties = appProperties;
-        this.sendingEmailService = sendingEmailService;
+        this.validator = validator;
         this.eventPublisher = eventPublisher;
     }
 
@@ -66,6 +68,12 @@ public class OAuth2LoginSuccessHandler implements AuthenticationSuccessHandler {
         if (email == null) {
             log.warn("OAuth2 login failed: no email returned from provider");
             response.sendRedirect(appProperties.getFrontendUrl() + "/auth/callback?error=no_email");
+            return;
+        }
+
+        if (!validator.validateValue(User.class, EMAIL, email).isEmpty()) {
+            log.warn("OAuth2 login failed: the provider's email is not a valid address");
+            response.sendRedirect(appProperties.getFrontendUrl() + "/auth/callback?error=invalid_email");
             return;
         }
 
@@ -101,7 +109,7 @@ public class OAuth2LoginSuccessHandler implements AuthenticationSuccessHandler {
     }
 
     private String extractEmail(final OAuth2User oAuth2User) {
-        final var email = oAuth2User.getAttribute("email");
+        final var email = oAuth2User.getAttribute(EMAIL);
         return email instanceof String s ? s : null;
     }
 
@@ -118,7 +126,7 @@ public class OAuth2LoginSuccessHandler implements AuthenticationSuccessHandler {
 
         final var saved = userRepository.save(newUser);
         log.info("Created OAuth2 user email={}", email);
-        sendingEmailService.sendNewUserNotificationToAdmin(saved);
+        eventPublisher.publishEvent(new UserRegisteredEvent(saved, null));
         eventPublisher.publishEvent(new AdminAlertEvent.UserSignedUp(saved.getId(), provider));
         return saved;
     }

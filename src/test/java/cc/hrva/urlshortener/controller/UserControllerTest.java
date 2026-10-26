@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.controller;
 
+import cc.hrva.urlshortener.configuration.GlobalExceptionHandler;
 import java.util.Collections;
 import java.util.List;
 import cc.hrva.urlshortener.dto.UpdatePasswordDto;
@@ -27,6 +28,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -49,6 +51,7 @@ class UserControllerTest {
     void setUp() {
         this.mockMvc = MockMvcBuilders.standaloneSetup(new UserController(userService))
                 .setCustomArgumentResolvers(new PageableHandlerMethodArgumentResolver())
+                .setControllerAdvice(new GlobalExceptionHandler())
                 .build();
         this.objectMapper = new ObjectMapper();
         this.objectMapper.registerModule(new JavaTimeModule());
@@ -120,6 +123,30 @@ class UserControllerTest {
                         .content(objectMapper.writeValueAsString(UserUpdateDto.builder().id(1L).build())))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(1));
+    }
+
+    @Test
+    void anAdminCannotChangeAnEmailToOneTheAccountCouldNotStore() throws Exception {
+        mockMvc.perform(put("/api/v1/users/1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(UserUpdateDto.builder().id(1L).email("a".repeat(65) + "@example.com").build())))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.email").value("Enter a valid email address (e.g. you@example.com)"));
+
+        verifyNoInteractions(userService);
+    }
+
+    @Test
+    void anAdminCannotChangeAnEmailToAValidOneLongerThanTheAccountCanStore() throws Exception {
+        final var email = "a".repeat(64) + "@" + ("b".repeat(63) + ".").repeat(3) + "example.com";
+
+        mockMvc.perform(put("/api/v1/users/1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(UserUpdateDto.builder().id(1L).email(email).build())))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.email").value("Email must be 255 characters or fewer"));
+
+        verifyNoInteractions(userService);
     }
 
     @Test

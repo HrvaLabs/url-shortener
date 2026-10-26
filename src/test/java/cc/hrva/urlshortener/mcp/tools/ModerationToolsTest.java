@@ -411,6 +411,20 @@ class ModerationToolsTest {
     }
 
     @Test
+    void aPunycodeDomainWithALetterNewerThanUnicode32FindsEvidenceStoredInItsUnicodeForm() {
+        signedInAs(ADMIN, true);
+        final var punycode = "xn--80ak6aa92e.com";
+        final var unicode = "\u0430\u0440\u0440\u04cf\u0435.com";
+        when(urlRepository.findFlaggedOrBlockedDestinationsMentioning(punycode, unicode)).thenReturn(List.of("https://" + unicode + "/id"));
+        when(moderationService.blockDomain(punycode, null, ADMIN_EMAIL, "mcp", 50)).thenReturn(1);
+
+        final var result = moderationTools.blockDomain(punycode, null);
+
+        assertThat(result.isError()).isFalse();
+        assertThat(text(result)).isEqualTo("Blocked %s and its subdomains. Links blocked now: 1.".formatted(punycode));
+    }
+
+    @Test
     void somethingThatIsNotADomainIsRefusedBeforeLookingForEvidence() {
         signedInAs(ADMIN, true);
 

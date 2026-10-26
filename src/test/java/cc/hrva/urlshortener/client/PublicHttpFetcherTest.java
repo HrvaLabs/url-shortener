@@ -25,6 +25,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -417,7 +418,8 @@ class PublicHttpFetcherTest {
 
         final var chain = loopbackOnlyFetcher().followRedirects(baseUrl + "/start", 5, TIMEOUT);
 
-        assertThat(chain).containsExactly(baseUrl + "/start", "https://evil.example/login%20page");
+        assertThat(chain).extracting(RedirectHop::original).containsExactly(baseUrl + "/start", "https://evil.example/login page");
+        assertThat(chain).extracting(RedirectHop::normalized).containsExactly(baseUrl + "/start", "https://evil.example/login%20page");
         assertThat(requestedPaths).containsExactly("/start");
     }
 
@@ -427,7 +429,7 @@ class PublicHttpFetcherTest {
 
         final var chain = loopbackOnlyFetcher().followRedirects(baseUrl + "/start", 5, TIMEOUT);
 
-        assertThat(chain).containsExactly(baseUrl + "/start", "http://evil.example/");
+        assertThat(chain).extracting(RedirectHop::original).containsExactly(baseUrl + "/start", "http://evil.example/");
         assertThat(requestedPaths).containsExactly("/start");
     }
 
@@ -438,7 +440,7 @@ class PublicHttpFetcherTest {
 
         final var chain = loopbackOnlyFetcher().followRedirects(baseUrl + "/start", 5, TIMEOUT);
 
-        assertThat(chain).containsExactly(baseUrl + "/start", baseUrl + "/prijava/%C4%8D%C4%87%C5%BE");
+        assertThat(chain).extracting(RedirectHop::original).containsExactly(baseUrl + "/start", baseUrl + "/prijava/%C4%8D%C4%87%C5%BE");
         assertThat(requestedPaths).containsExactly("/start", "/prijava/čćž");
     }
 
@@ -451,7 +453,72 @@ class PublicHttpFetcherTest {
 
         final var chain = fetcher.followRedirects(baseUrl + "/start", 5, TIMEOUT);
 
-        assertThat(chain).containsExactly(baseUrl + "/start", "http://localhost:" + port + "/admin");
+        assertThat(chain).extracting(RedirectHop::original)
+                .containsExactly(baseUrl + "/start", "http://\uff4c\uff4f\uff43\uff41\uff4c\uff48\uff4f\uff53\uff54:" + port + "/admin");
+        assertThat(chain).extracting(RedirectHop::normalized).containsExactly(baseUrl + "/start", "http://localhost:" + port + "/admin");
+        assertThat(requestedPaths).containsExactly("/start");
+    }
+
+    @Test
+    void aUnicodeHostDestinationIsGuardedAndRequestedInItsAsciiFormAndKeptAsTyped() {
+        respond("/start", exchange -> redirect(exchange, "/landing"));
+        respond("/landing", exchange -> send(exchange, 200, ""));
+        final var asked = new CopyOnWriteArrayList<String>();
+        final var fetcher = new PublicHttpFetcher(url -> asked.add(url) && url.startsWith(baseUrl));
+        final var destination = unicodeLoopbackUrl() + "/start";
+
+        final var chain = fetcher.followRedirects(destination, 5, TIMEOUT);
+
+        assertThat(chain).extracting(RedirectHop::original).containsExactly(destination, baseUrl + "/landing");
+        assertThat(chain).extracting(RedirectHop::normalized).containsExactly(baseUrl + "/start", baseUrl + "/landing");
+        assertThat(asked).containsExactly(baseUrl + "/start", baseUrl + "/landing");
+        assertThat(requestedPaths).containsExactly("/start", "/landing");
+    }
+
+    @Test
+    void aUnicodeHostDestinationThatDoesNotRedirectEndsAtItselfAsTyped() {
+        respond("/plain", exchange -> send(exchange, 200, ""));
+        final var destination = unicodeLoopbackUrl() + "/plain";
+
+        final var chain = loopbackOnlyFetcher().followRedirects(destination, 5, TIMEOUT);
+
+        assertThat(chain).extracting(RedirectHop::original).containsExactly(destination);
+        assertThat(chain).extracting(RedirectHop::normalized).containsExactly(baseUrl + "/plain");
+        assertThat(requestedPaths).containsExactly("/plain");
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            "http://\uff4c\uff4f\uff43\uff41\uff4c\uff48\uff4f\uff53\uff54/admin, http://localhost/admin",
+            "http://\uff11\uff12\uff17\uff0e\uff10\uff0e\uff10\uff0e\uff11/admin, http://127.0.0.1/admin",
+            "http://\uff11\uff10\uff0e\uff10\uff0e\uff10\uff0e\uff11/admin, http://10.0.0.1/admin",
+            "https://\uff11\uff16\uff19\uff0e\uff12\uff15\uff14\uff0e\uff11\uff16\uff19\uff0e\uff12\uff15\uff14/latest/meta-data/, https://169.254.169.254/latest/meta-data/",
+            "http://0x7f.0.0.1/admin, http://127.0.0.1/admin",
+            "http://0x7f000001/admin, http://127.0.0.1/admin",
+            "http://0251.0376.0251.0376/latest/meta-data/, http://169.254.169.254/latest/meta-data/"
+    })
+    void aUnicodeSpellingOfAPrivateDestinationIsRefusedByTheGuardInItsAsciiForm(final String destination, final String ascii) {
+        final var asked = new CopyOnWriteArrayList<String>();
+        final var fetcher = new PublicHttpFetcher(url -> asked.add(url) && PublicHttpFetcher.httpOrHttpsPublicOnly().test(url));
+
+        assertThatThrownBy(() -> fetcher.followRedirects(destination, 5, TIMEOUT))
+                .isInstanceOf(UrlValidationException.class)
+                .hasMessage("not a public address");
+        assertThat(asked).containsExactly(ascii);
+        assertThat(requestedPaths).isEmpty();
+    }
+
+    @Test
+    void anAbsoluteLocationIsKeptAsReceivedAndJudgedInItsAsciiForm() {
+        respond("/start", exchange -> redirect(exchange, inUtf8("https://\u010devapi.example/menu")));
+        final var asked = new CopyOnWriteArrayList<String>();
+        final var fetcher = new PublicHttpFetcher(url -> asked.add(url) && url.startsWith(baseUrl));
+
+        final var chain = fetcher.followRedirects(baseUrl + "/start", 5, TIMEOUT);
+
+        assertThat(chain).extracting(RedirectHop::original).containsExactly(baseUrl + "/start", "https://\u010devapi.example/menu");
+        assertThat(chain).extracting(RedirectHop::normalized).containsExactly(baseUrl + "/start", "https://xn--evapi-gya.example/menu");
+        assertThat(asked).containsExactly(baseUrl + "/start", "https://xn--evapi-gya.example/menu");
         assertThat(requestedPaths).containsExactly("/start");
     }
 
@@ -463,7 +530,7 @@ class PublicHttpFetcherTest {
 
         final var chain = permissiveFetcher.followRedirects(baseUrl + "/go/a", 5, TIMEOUT);
 
-        assertThat(chain).containsExactly(baseUrl + "/go/a", baseUrl + "/go/b", baseUrl + "/landing");
+        assertThat(chain).extracting(RedirectHop::original).containsExactly(baseUrl + "/go/a", baseUrl + "/go/b", baseUrl + "/landing");
         assertThat(requestedPaths).containsExactly("/go/a", "/go/b", "/landing");
     }
 
@@ -476,7 +543,7 @@ class PublicHttpFetcherTest {
 
         final var chain = permissiveFetcher.followRedirects(baseUrl + "/r0", 5, TIMEOUT);
 
-        assertThat(chain).containsExactly(
+        assertThat(chain).extracting(RedirectHop::original).containsExactly(
                 baseUrl + "/r0", baseUrl + "/r1", baseUrl + "/r2", baseUrl + "/r3", baseUrl + "/r4", baseUrl + "/r5");
         assertThat(requestedPaths).containsExactly("/r0", "/r1", "/r2", "/r3", "/r4");
     }
@@ -496,7 +563,7 @@ class PublicHttpFetcherTest {
 
         final var chain = permissiveFetcher.followRedirects(baseUrl + "/h1", 5, Duration.ofSeconds(1));
 
-        assertThat(chain).containsExactly(baseUrl + "/h1", baseUrl + "/h2");
+        assertThat(chain).extracting(RedirectHop::original).containsExactly(baseUrl + "/h1", baseUrl + "/h2");
         assertThat(requestedPaths).containsExactly("/h1", "/h2");
         assertThat(Duration.ofNanos(System.nanoTime() - startedAt)).isLessThan(Duration.ofSeconds(2));
     }
@@ -509,7 +576,7 @@ class PublicHttpFetcherTest {
 
         final var chain = fetcher.followRedirects(baseUrl + "/start", 5, TIMEOUT);
 
-        assertThat(chain).containsExactly(baseUrl + "/start", baseUrl + "/private/admin");
+        assertThat(chain).extracting(RedirectHop::original).containsExactly(baseUrl + "/start", baseUrl + "/private/admin");
         assertThat(requestedPaths).containsExactly("/start");
     }
 
@@ -543,7 +610,7 @@ class PublicHttpFetcherTest {
 
         final var chain = permissiveFetcher.followRedirects(baseUrl + "/start", 5, TIMEOUT);
 
-        assertThat(chain).containsExactly(baseUrl + "/start", baseUrl + "/landing");
+        assertThat(chain).extracting(RedirectHop::original).containsExactly(baseUrl + "/start", baseUrl + "/landing");
         assertThat(Duration.ofNanos(System.nanoTime() - startedAt)).isLessThan(Duration.ofSeconds(2));
     }
 
@@ -554,7 +621,7 @@ class PublicHttpFetcherTest {
 
         final var chain = permissiveFetcher.followRedirects(baseUrl + "/start", 5, TIMEOUT);
 
-        assertThat(chain).containsExactly(baseUrl + "/start", baseUrl + "/gone");
+        assertThat(chain).extracting(RedirectHop::original).containsExactly(baseUrl + "/start", baseUrl + "/gone");
     }
 
     @ParameterizedTest
@@ -569,7 +636,7 @@ class PublicHttpFetcherTest {
 
         final var chain = permissiveFetcher.followRedirects(baseUrl + "/start", 5, TIMEOUT);
 
-        assertThat(chain).containsExactly(baseUrl + "/start");
+        assertThat(chain).extracting(RedirectHop::original).containsExactly(baseUrl + "/start");
     }
 
     @Test
@@ -579,7 +646,7 @@ class PublicHttpFetcherTest {
 
         final var chain = permissiveFetcher.followRedirects(baseUrl + "/start", 5, TIMEOUT);
 
-        assertThat(chain).containsExactly(baseUrl + "/start", unreachable);
+        assertThat(chain).extracting(RedirectHop::original).containsExactly(baseUrl + "/start", unreachable);
     }
 
     @Test
@@ -599,6 +666,10 @@ class PublicHttpFetcherTest {
 
     private PublicHttpFetcher loopbackOnlyFetcher() {
         return new PublicHttpFetcher(url -> url.startsWith(baseUrl));
+    }
+
+    private String unicodeLoopbackUrl() {
+        return "http://\uff11\uff12\uff17\uff0e\uff10\uff0e\uff10\uff0e\uff11:" + server.getAddress().getPort();
     }
 
     private void respond(final String path, final HttpHandler handler) {

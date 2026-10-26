@@ -1,6 +1,7 @@
 package cc.hrva.urlshortener.service.impl;
 
 import cc.hrva.urlshortener.client.RedirectFollower;
+import cc.hrva.urlshortener.client.RedirectHop;
 import cc.hrva.urlshortener.configuration.AsyncExecutorConfiguration;
 import cc.hrva.urlshortener.dto.LinkVerdict;
 import cc.hrva.urlshortener.exception.UrlValidationException;
@@ -69,7 +70,11 @@ public class DefaultRedirectChainService implements RedirectChainService {
             return Result.UNREACHABLE;
         }
 
-        final var hops = chain.get().stream().skip(1).filter(hop -> !hop.equals(longUrl)).distinct().toList();
+        final var destination = chain.get().getFirst().normalized();
+        final var hops = chain.get().stream().skip(1).map(RedirectHop::normalized)
+                .filter(hop -> !hop.equals(destination))
+                .distinct()
+                .toList();
         final var threats = hops.isEmpty() ? Optional.of(List.<String>of()) : threatsOf(urlId, hops);
         final var finding = findingOf(hops, threats.orElse(List.of()));
         if (finding.isPresent() && !stillPointsAt(urlId, longUrl)) {
@@ -81,7 +86,7 @@ public class DefaultRedirectChainService implements RedirectChainService {
             log.info("Safe Browsing was unavailable, the redirects are checked again in the next nightly scan urlId={}", urlId);
             return Result.SAFE_BROWSING_UNAVAILABLE;
         }
-        urlRepository.recordRedirectChain(urlId, longUrl, StringUtils.truncate(chain.get().getLast(), FINAL_URL_LENGTH), now());
+        urlRepository.recordRedirectChain(urlId, longUrl, StringUtils.truncate(chain.get().getLast().original(), FINAL_URL_LENGTH), now());
         return Result.CHECKED;
     }
 
@@ -91,7 +96,7 @@ public class DefaultRedirectChainService implements RedirectChainService {
         check(urlId);
     }
 
-    private Optional<List<String>> chainOf(final Url url) {
+    private Optional<List<RedirectHop>> chainOf(final Url url) {
         try {
             return Optional.of(redirectFollower.followRedirects(url.getLongUrl(), MAX_HOPS, BUDGET));
         } catch (final UrlValidationException exception) {

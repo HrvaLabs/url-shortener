@@ -20,7 +20,6 @@ import cc.hrva.urlshortener.service.ScammerSignalService;
 import cc.hrva.urlshortener.util.DomainNames;
 import cc.hrva.urlshortener.util.ReviewReasons;
 import io.modelcontextprotocol.spec.McpSchema.CallToolResult;
-import java.net.IDN;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.LocalDateTime;
@@ -28,7 +27,6 @@ import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
@@ -410,7 +408,7 @@ public class ModerationTools {
             log.info("MCP block_domain refused for a shared hosting domain adminId={}", admin.getId());
             throw new UrlValidationException(SHARED_HOSTING);
         }
-        final var unicodeDomain = IDN.toUnicode(domain).toLowerCase(Locale.ROOT);
+        final var unicodeDomain = DomainNames.toUnicode(domain);
         if (!hasFlaggedOrBlockedLinksOn(domain, unicodeDomain)) {
             log.info("MCP block_domain refused without flagged or blocked links adminId={}", admin.getId());
             throw new UrlValidationException(NO_EVIDENCE);

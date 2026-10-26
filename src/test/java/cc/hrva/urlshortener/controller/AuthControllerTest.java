@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.controller;
 
+import cc.hrva.urlshortener.configuration.GlobalExceptionHandler;
 import cc.hrva.urlshortener.dto.*;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.service.AuthService;
@@ -10,6 +11,8 @@ import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.HttpHeaders;
@@ -20,6 +23,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
@@ -47,7 +51,9 @@ class AuthControllerTest {
 
     @BeforeEach
     void setUp() {
-        this.mockMvc = MockMvcBuilders.standaloneSetup(new AuthController(authService, userService, twoFactorService, request)).build();
+        this.mockMvc = MockMvcBuilders.standaloneSetup(new AuthController(authService, userService, twoFactorService, request))
+                .setControllerAdvice(new GlobalExceptionHandler())
+                .build();
         this.objectMapper = new ObjectMapper();
         this.objectMapper.registerModule(new JavaTimeModule());
     }
@@ -59,6 +65,46 @@ class AuthControllerTest {
         mockMvc.perform(post("/api/v1/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(UserRegisterDto.builder().email("test@example.com").password("password123").build())))
+                .andExpect(status().isOk());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa@example.com",
+            "not-an-email",
+            "two@@example.com"
+    })
+    void refusesAnEmailAddressTheAccountCouldNotStoreBeforeAnythingIsSavedOrSent(final String email) throws Exception {
+        mockMvc.perform(post("/api/v1/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(UserRegisterDto.builder().email(email).password("password123").build())))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.email").value("Enter a valid email address (e.g. you@example.com)"));
+
+        verifyNoInteractions(authService);
+    }
+
+    @Test
+    void refusesAValidEmailAddressLongerThanTheAccountCanStoreBeforeAnythingIsSavedOrSent() throws Exception {
+        final var email = "a".repeat(64) + "@" + ("b".repeat(63) + ".").repeat(3) + "example.com";
+
+        mockMvc.perform(post("/api/v1/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(UserRegisterDto.builder().email(email).password("password123").build())))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.email").value("Email must be 255 characters or fewer"));
+
+        verifyNoInteractions(authService);
+    }
+
+    @Test
+    void acceptsALocalPartOfExactly64Characters() throws Exception {
+        final var email = "a".repeat(64) + "@example.com";
+        when(authService.register(any(UserRegisterDto.class))).thenReturn(email);
+
+        mockMvc.perform(post("/api/v1/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(UserRegisterDto.builder().email(email).password("password123").build())))
                 .andExpect(status().isOk());
     }
 

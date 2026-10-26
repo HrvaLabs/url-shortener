@@ -13,6 +13,7 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Optional;
 import lombok.RequiredArgsConstructor;
 import org.apache.commons.lang3.StringUtils;
@@ -35,6 +36,7 @@ public class DefaultSendingEmailService implements SendingEmailService {
     private static final String RECIPIENT_SEPARATOR = ", ";
     private static final Duration INTERRUPTED_AFTER = Duration.ofMinutes(10);
     private static final Duration CONTENT_RETENTION = Duration.ofDays(7);
+    private static final int LISTED_BLOCKED_LINKS = 20;
 
     private final AppProperties appProperties;
     private final TemplateEngine templateEngine;
@@ -173,6 +175,26 @@ public class DefaultSendingEmailService implements SendingEmailService {
                 .sender(appProperties.getEmailSenderAddress())
                 .receivers(new String[]{owner.getEmail()})
                 .subject("Your link was blocked as unsafe")
+                .text(htmlContent)
+                .build();
+
+        tryToSendEmail(email);
+    }
+
+    @Override
+    @Async
+    public void sendEmailUrlsBlocked(final User owner, final List<Url> urls) {
+        final var ctx = getContext(owner);
+        ctx.setVariable("link_count", urls.size());
+        ctx.setVariable("short_links", urls.stream().limit(LISTED_BLOCKED_LINKS).map(this::shortLink).toList());
+        ctx.setVariable("more_links", Math.max(0, urls.size() - LISTED_BLOCKED_LINKS));
+
+        final var htmlContent = templateEngine.process("urls_blocked", ctx);
+
+        final var email = Email.builder()
+                .sender(appProperties.getEmailSenderAddress())
+                .receivers(new String[]{owner.getEmail()})
+                .subject("Your links were blocked as unsafe")
                 .text(htmlContent)
                 .build();
 

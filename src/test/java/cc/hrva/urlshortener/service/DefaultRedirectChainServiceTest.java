@@ -1,6 +1,8 @@
 package cc.hrva.urlshortener.service;
 
+import cc.hrva.urlshortener.client.PublicHttpFetcher;
 import cc.hrva.urlshortener.client.RedirectFollower;
+import cc.hrva.urlshortener.client.RedirectHop;
 import cc.hrva.urlshortener.dto.LinkVerdict;
 import cc.hrva.urlshortener.dto.LinkVerdict.Outcome;
 import cc.hrva.urlshortener.exception.UrlValidationException;
@@ -9,12 +11,17 @@ import cc.hrva.urlshortener.model.enums.BlockReason;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.service.RedirectChainService.Result;
 import cc.hrva.urlshortener.service.impl.DefaultRedirectChainService;
+import com.sun.net.httpserver.HttpServer;
+import java.io.IOException;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
@@ -53,6 +60,7 @@ class DefaultRedirectChainServiceTest {
     private static final Instant NOW = Instant.parse("2026-10-21T02:30:00Z");
     private static final LocalDateTime CHECKED_AT = LocalDateTime.ofInstant(NOW, ZoneId.systemDefault());
     private static final List<String> YOUNG_LOOKALIKE = List.of("domain registered in the last 30 days", "imitates njuskalo");
+    private static final String FULL_WIDTH_LOOPBACK = "\uff11\uff12\uff17\uff0e\uff10\uff0e\uff10\uff0e\uff11";
 
     @Mock
     private UrlRepository urlRepository;
@@ -329,6 +337,70 @@ class DefaultRedirectChainServiceTest {
     }
 
     @Test
+    void hopsAreJudgedInTheirAsciiFormAndTheFinalUrlIsTheLastLocationAsReceived() {
+        final var received = "https://\u010devapi.example/menu";
+        final var ascii = "https://xn--evapi-gya.example/menu";
+        when(redirectFollower.followRedirects(DESTINATION, 5, Duration.ofSeconds(5)))
+                .thenReturn(List.of(new RedirectHop(DESTINATION, DESTINATION), new RedirectHop(received, ascii)));
+        when(linkCheckService.check(ascii)).thenReturn(new LinkVerdict(Outcome.FLAG, List.of("on list HaGeZi badware hosters"), null, null));
+
+        redirectChainService.check(LINK_ID);
+
+        verify(safeBrowsingService).checkUrlsForThreats(List.of(ascii));
+        verify(reviewQueueService).flag(link, List.of("redirects to xn--evapi-gya.example: on list HaGeZi badware hosters"));
+        verify(urlRepository).recordRedirectChain(LINK_ID, DESTINATION, received, CHECKED_AT);
+    }
+
+    @Test
+    void aUnicodeHostDestinationThatRedirectsToABlockedHostIsBlocked() throws IOException {
+        final var server = startServer(302, PHISHING);
+        try {
+            final var destination = pointLinkAtUnicodeHostOf(server);
+            when(linkCheckService.check(PHISHING)).thenReturn(blocked(BlockReason.BLOCKLIST, "URLhaus"));
+
+            final var result = serviceFollowingRedirectsOn(server).check(LINK_ID);
+
+            assertThat(result).isEqualTo(Result.CHECKED);
+            verify(moderationService).blockLink(LINK_ID, BlockReason.BLOCKLIST, "URLhaus via redirect to njuskaio.cam", "system", "redirect-check");
+            verify(urlRepository).recordRedirectChain(LINK_ID, destination, PHISHING, CHECKED_AT);
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void aUnicodeHostDestinationThatRedirectsToAFlaggedHostIsQueued() throws IOException {
+        final var server = startServer(302, PHISHING);
+        try {
+            pointLinkAtUnicodeHostOf(server);
+            when(linkCheckService.check(PHISHING)).thenReturn(new LinkVerdict(Outcome.FLAG, List.of("imitates njuskalo"), null, null));
+
+            serviceFollowingRedirectsOn(server).check(LINK_ID);
+
+            verify(reviewQueueService).flag(link, List.of("redirects to njuskaio.cam: imitates njuskalo"));
+            verifyNoInteractions(moderationService);
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void aUnicodeHostDestinationThatDoesNotRedirectKeepsItsOriginalFinalUrl() throws IOException {
+        final var server = startServer(200, null);
+        try {
+            final var destination = pointLinkAtUnicodeHostOf(server);
+
+            final var result = serviceFollowingRedirectsOn(server).check(LINK_ID);
+
+            assertThat(result).isEqualTo(Result.CHECKED);
+            verify(urlRepository).recordRedirectChain(LINK_ID, destination, destination, CHECKED_AT);
+            verifyNoInteractions(linkCheckService, safeBrowsingService, moderationService, reviewQueueService);
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
     void checksRunOutsideAnyTransactionSoEachBlockAndFlagCommitsOnItsOwn() {
         final var transactional = DefaultRedirectChainService.class.getAnnotation(Transactional.class);
 
@@ -337,7 +409,35 @@ class DefaultRedirectChainServiceTest {
     }
 
     private void chain(final String... urls) {
-        when(redirectFollower.followRedirects(DESTINATION, 5, Duration.ofSeconds(5))).thenReturn(List.of(urls));
+        when(redirectFollower.followRedirects(DESTINATION, 5, Duration.ofSeconds(5)))
+                .thenReturn(Arrays.stream(urls).map(url -> new RedirectHop(url, url)).toList());
+    }
+
+    private static HttpServer startServer(final int status, final String location) throws IOException {
+        final var server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
+        server.createContext("/go", exchange -> {
+            if (location != null) {
+                exchange.getResponseHeaders().add("Location", location);
+            }
+            exchange.sendResponseHeaders(status, -1);
+            exchange.close();
+        });
+        server.start();
+        return server;
+    }
+
+    private String pointLinkAtUnicodeHostOf(final HttpServer server) {
+        final var destination = "http://" + FULL_WIDTH_LOOPBACK + ":" + server.getAddress().getPort() + "/go";
+        link.setLongUrl(destination);
+        lenient().when(urlRepository.findLongUrlById(LINK_ID)).thenReturn(Optional.of(destination));
+        return destination;
+    }
+
+    private RedirectChainService serviceFollowingRedirectsOn(final HttpServer server) {
+        final var loopbackOnly = "http://127.0.0.1:" + server.getAddress().getPort() + "/";
+        final RedirectFollower follower = new PublicHttpFetcher(url -> url.startsWith(loopbackOnly))::followRedirects;
+        return new DefaultRedirectChainService(urlRepository, follower, linkCheckService, safeBrowsingService, moderationService,
+                reviewQueueService, Clock.fixed(NOW, ZoneOffset.UTC));
     }
 
     private static LinkVerdict blocked(final BlockReason reason, final String detail) {

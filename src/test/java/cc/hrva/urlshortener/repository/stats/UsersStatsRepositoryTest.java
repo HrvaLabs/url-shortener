@@ -93,7 +93,7 @@ class UsersStatsRepositoryTest {
     }
 
     @Test
-    void apiKeysSplitActiveAndExpiredAndSumCalls() {
+    void apiKeysSplitActiveExpiredAndRevokedAndSumCalls() {
         apiKey(9601, true, null, 10L);
         apiKey(9602, true, TODAY.plusDays(2), 5L);
         apiKey(9603, true, TODAY.minusDays(1), 7L);
@@ -101,7 +101,7 @@ class UsersStatsRepositoryTest {
         apiKey(9605, false, TODAY.minusDays(10), null);
         apiKey(9606, true, TODAY.plusDays(30), 0L);
 
-        assertThat(usersStatsRepository.countApiKeys(TODAY)).isEqualTo(new ApiKeyCounts(3, 2, 25));
+        assertThat(usersStatsRepository.countApiKeys(TODAY)).isEqualTo(new ApiKeyCounts(3, 2, 1, 25));
     }
 
     @Test
@@ -109,7 +109,22 @@ class UsersStatsRepositoryTest {
         apiKey(9611, true, TODAY, 4L);
         apiKey(9612, true, TODAY.plusDays(1), 6L);
 
-        assertThat(usersStatsRepository.countApiKeys(TODAY)).isEqualTo(new ApiKeyCounts(1, 1, 10));
+        assertThat(usersStatsRepository.countApiKeys(TODAY)).isEqualTo(new ApiKeyCounts(1, 1, 0, 10));
+    }
+
+    @Test
+    void aKeySwitchedOffBeforeItExpiresIsRevokedAndTheThreeCountsAddUpToAllKeys() {
+        apiKey(9621, false, null, 2L);
+        apiKey(9622, false, TODAY.plusDays(40), 256L);
+        apiKey(9623, false, TODAY, 1L);
+        apiKey(9624, false, TODAY.minusDays(3), 0L);
+        apiKey(9625, true, TODAY.plusDays(40), 4L);
+        apiKey(9626, true, TODAY.minusDays(1), 0L);
+
+        final var counts = usersStatsRepository.countApiKeys(TODAY);
+
+        assertThat(counts).isEqualTo(new ApiKeyCounts(1, 3, 2, 263));
+        assertThat(counts.active() + counts.expired() + counts.revoked()).isEqualTo(6);
     }
 
     @Test
@@ -133,7 +148,7 @@ class UsersStatsRepositoryTest {
         assertThat(usersStatsRepository.countAdmins()).isZero();
         assertThat(usersStatsRepository.countByProvider()).isEmpty();
         assertThat(usersStatsRepository.countSignedInSince(NOW.minusDays(30))).isZero();
-        assertThat(usersStatsRepository.countApiKeys(TODAY)).isEqualTo(new ApiKeyCounts(0, 0, 0));
+        assertThat(usersStatsRepository.countApiKeys(TODAY)).isEqualTo(new ApiKeyCounts(0, 0, 0, 0));
         assertThat(usersStatsRepository.countMcp(NOW)).isEqualTo(new McpCounts(0, 0));
     }
 

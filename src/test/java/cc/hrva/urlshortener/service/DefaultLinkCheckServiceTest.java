@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.service;
 
+import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.dto.LinkVerdict;
 import cc.hrva.urlshortener.dto.LinkVerdict.Outcome;
 import cc.hrva.urlshortener.dto.ReputationResult;
@@ -15,6 +16,7 @@ import cc.hrva.urlshortener.repository.DomainRuleRepository;
 import cc.hrva.urlshortener.service.blocklist.BlocklistStore;
 import cc.hrva.urlshortener.service.blocklist.LinkListParser;
 import cc.hrva.urlshortener.service.impl.DefaultLinkCheckService;
+import cc.hrva.urlshortener.service.impl.DefaultSuspiciousUrlService;
 import java.io.BufferedReader;
 import java.io.StringReader;
 import java.util.ArrayList;
@@ -127,6 +129,24 @@ class DefaultLinkCheckServiceTest {
                 .isEqualTo(new LinkVerdict(Outcome.BLOCK, List.of("on list HaGeZi Fake"), BlockReason.BLOCKLIST, HAGEZI_FAKE));
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"https://p\u0430ypal.com/login", "https://xn--pypal-4ve.com/login", "https://P\u0410YPAL.com/login"})
+    void aBlockSourceListingTheAsciiFormBlocksEverySpellingOfTheHost(final String longUrl) {
+        source(1, HAGEZI_FAKE, SourceKind.DOMAINS, BlocklistAction.BLOCK, "xn--pypal-4ve.com");
+
+        assertThat(verdictOf(longUrl))
+                .isEqualTo(new LinkVerdict(Outcome.BLOCK, List.of("on list HaGeZi Fake"), BlockReason.BLOCKLIST, HAGEZI_FAKE));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"https://\u0430\u0440\u0440\u04cf\u0435.com/id", "https://xn--80ak6aa92e.com/id", "https://\u0410\u0420\u0420\u04c0\u0415.com/id"})
+    void aBlockRuleOnTheAsciiFormBlocksAUnicodeSpellingWithALetterNewerThanUnicode32(final String longUrl) {
+        rule("xn--80ak6aa92e.com", DomainRuleType.BLOCK);
+
+        assertThat(verdictOf(longUrl))
+                .isEqualTo(new LinkVerdict(Outcome.BLOCK, List.of("blocked domain xn--80ak6aa92e.com"), BlockReason.DOMAIN_RULE, "xn--80ak6aa92e.com"));
+    }
+
     @Test
     void aHostOnlyOnAFlagSourceIsFlagged() {
         source(2, HAGEZI_DYNDNS, SourceKind.DOMAINS, BlocklistAction.FLAG, "dynv6.net");
@@ -169,6 +189,36 @@ class DefaultLinkCheckServiceTest {
                 List.of(YOUNG, imitation, SuspiciousUrlService.LOGIN_LURE),
                 BlockReason.SCAM_SIGNALS,
                 String.join(", ", YOUNG, imitation, SuspiciousUrlService.LOGIN_LURE)));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"https://p\u0430ypal.com/login", "https://xn--pypal-4ve.com/login"})
+    void aYoungCyrillicLookalikeWithALoginLureIsBlockedForScamSignalsByTheRealHeuristics(final String longUrl) {
+        young("xn--pypal-4ve.com");
+
+        assertThat(withRealHeuristics().check(longUrl)).isEqualTo(new LinkVerdict(
+                Outcome.BLOCK,
+                List.of(YOUNG, "mixes Latin and Cyrillic letters", "imitates paypal", LURE),
+                BlockReason.SCAM_SIGNALS,
+                String.join(", ", YOUNG, "imitates paypal", LURE)));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"https://\u00e1pple.com/", "https://xn--pple-4na.com/"})
+    void aYoungLatinLookalikeWithADiacriticIsBlockedForScamSignalsByTheRealHeuristics(final String longUrl) {
+        young("xn--pple-4na.com");
+
+        assertThat(withRealHeuristics().check(longUrl)).isEqualTo(new LinkVerdict(
+                Outcome.BLOCK, List.of(YOUNG, "imitates apple"), BlockReason.SCAM_SIGNALS, YOUNG + ", imitates apple"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"https://\u010dokolada.top/login", "https://xn--okolada-i6a.top/login"})
+    void aYoungCroatianNameWithALoginLureIsBlockedForScamSignalsByTheRealHeuristics(final String longUrl) {
+        young("xn--okolada-i6a.top");
+
+        assertThat(withRealHeuristics().check(longUrl)).isEqualTo(new LinkVerdict(
+                Outcome.BLOCK, List.of(YOUNG, LURE, "high-risk domain ending .top"), BlockReason.SCAM_SIGNALS, YOUNG + ", " + LURE));
     }
 
     @Test
@@ -573,6 +623,11 @@ class DefaultLinkCheckServiceTest {
     private void source(final long id, final String name, final SourceKind kind, final BlocklistAction action, final String... entries) {
         sources.add(BlocklistSource.builder().id(id).name(name).kind(kind).action(action).build());
         listed.put(id, Set.of(entries));
+    }
+
+    private DefaultLinkCheckService withRealHeuristics() {
+        return new DefaultLinkCheckService(domainRuleRepository, blocklistSourceRepository, blocklistStore, domainAgeService,
+                domainReputationService, new DefaultSuspiciousUrlService(new AppProperties()));
     }
 
     private void young(final String host) {

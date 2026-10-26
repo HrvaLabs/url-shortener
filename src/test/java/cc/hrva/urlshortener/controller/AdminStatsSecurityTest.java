@@ -46,6 +46,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -139,6 +140,20 @@ class AdminStatsSecurityTest {
                 .andExpect(jsonPath("$.days").value(7));
     }
 
+    @Test
+    void theUsersTabCountsActiveExpiredAndRevokedApiKeys() throws Exception {
+        when(adminStatsService.users(30)).thenReturn(new UsersStatsResponse(30, LocalDate.of(2026, 9, 27), LocalDate.of(2026, 10, 26),
+                new StackedSeries(List.of(), List.of()), new UserInventory(0, 0, 0, 0, 0, 0, List.of()), 0, 0,
+                new ApiKeyCounts(1, 1, 1, 42), new McpCounts(0, 0)));
+
+        mockMvc.perform(tabRequest("users", "admin-token").param("days", "30"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.apiKeys.active").value(1))
+                .andExpect(jsonPath("$.apiKeys.expired").value(1))
+                .andExpect(jsonPath("$.apiKeys.revoked").value(1))
+                .andExpect(jsonPath("$.apiKeys.callsUsed").value(42));
+    }
+
     @ParameterizedTest
     @ValueSource(strings = {"traffic", "links", "users", "safety", "system"})
     void aSignedInUserWhoIsNotAnAdminIsForbidden(final String tab) throws Exception {
@@ -186,7 +201,7 @@ class AdminStatsSecurityTest {
                     new LinkInventory(0, 0, 0, 0, 0, 0, 0, List.of()), List.of(), List.of(), List.of()));
             case "users" -> when(adminStatsService.users(7)).thenReturn(new UsersStatsResponse(7, LocalDate.of(2026, 10, 20),
                     LocalDate.of(2026, 10, 26), new StackedSeries(List.of(), List.of()), new UserInventory(0, 0, 0, 0, 0, 0, List.of()), 0, 0,
-                    new ApiKeyCounts(0, 0, 0), new McpCounts(0, 0)));
+                    new ApiKeyCounts(0, 0, 0, 0), new McpCounts(0, 0)));
             case "safety" -> when(adminStatsService.safety(7)).thenReturn(new SafetyStatsResponse(7, LocalDate.of(2026, 10, 20),
                     LocalDate.of(2026, 10, 26), new StackedSeries(List.of(), List.of()), 0, 0, List.of(), new ResolveTimes(0, null, null),
                     new StackedSeries(List.of(), List.of()), new DomainRuleCounts(0, 0), 0, List.of()));

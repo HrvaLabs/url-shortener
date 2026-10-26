@@ -43,7 +43,7 @@ class UsersStatsTest {
             new StatsWindow(7, FROM, TO, LocalDateTime.of(2026, 10, 19, 22, 0), LocalDateTime.of(2026, 10, 26, 23, 0));
     private static final List<String> PROVIDERS = List.of("local", "google", "github");
     private static final AccountCounts NO_ACCOUNTS = new AccountCounts(0, 0, 0, 0);
-    private static final ApiKeyCounts NO_API_KEYS = new ApiKeyCounts(0, 0, 0);
+    private static final ApiKeyCounts NO_API_KEYS = new ApiKeyCounts(0, 0, 0, 0);
     private static final McpCounts NO_MCP = new McpCounts(0, 0);
 
     @Mock
@@ -111,11 +111,11 @@ class UsersStatsTest {
     void apiKeysAndMcpUseTheStoredDateAndTime() {
         final var storedNow = LocalDateTime.of(2026, 10, 25, 23, 30);
         final var usersStatsJustAfterZagrebMidnight = usersStatsAt(Instant.parse("2026-10-25T23:30:00Z"));
-        givenCounts(NO_ACCOUNTS, storedNow, new ApiKeyCounts(20, 5, 15000), new McpCounts(4, 9));
+        givenCounts(NO_ACCOUNTS, storedNow, new ApiKeyCounts(20, 5, 3, 15000), new McpCounts(4, 9));
 
         final var users = usersStatsJustAfterZagrebMidnight.collect(WINDOW);
 
-        assertThat(users.apiKeys()).isEqualTo(new ApiKeyCounts(20, 5, 15000));
+        assertThat(users.apiKeys()).isEqualTo(new ApiKeyCounts(20, 5, 3, 15000));
         assertThat(users.mcp()).isEqualTo(new McpCounts(4, 9));
         verify(usersStatsRepository).countApiKeys(LocalDate.of(2026, 10, 25));
         verify(usersStatsRepository).countMcp(storedNow);
@@ -140,7 +140,7 @@ class UsersStatsTest {
         assertThat(users.now()).isEqualTo(new UserInventory(0, 0, 0, 0, 0, 0, List.of()));
         assertThat(users.activeLast7Days()).isZero();
         assertThat(users.activeLast30Days()).isZero();
-        assertThat(users.apiKeys()).isEqualTo(new ApiKeyCounts(0, 0, 0));
+        assertThat(users.apiKeys()).isEqualTo(new ApiKeyCounts(0, 0, 0, 0));
         assertThat(users.mcp()).isEqualTo(new McpCounts(0, 0));
         verify(hourlyCountRepository).count(SIGNUPS_BY_PROVIDER, WINDOW.start(), WINDOW.end());
         verify(usersStatsRepository).countAccounts();

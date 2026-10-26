@@ -338,7 +338,8 @@ class DefaultAnalyticsServiceTest {
         final var analytics = analyticsService.getUrlAnalytics(7L, null);
 
         assertThat(analytics.link()).isEqualTo(
-                new LinkSummary(7L, "menu", "shop.example.com", "ACTIVE", true, created, lastAccessed, 412));
+                new LinkSummary(7L, "menu", "shop.example.com", "ACTIVE", true, created, lastAccessed, 412,
+                        "https://shop.example.com/a?b=c"));
     }
 
     @Test
@@ -350,6 +351,7 @@ class DefaultAnalyticsServiceTest {
         final var link = analyticsService.getUrlAnalytics(7L, null).link();
 
         assertThat(link.destinationHost()).isEmpty();
+        assertThat(link.longUrl()).isEqualTo("not a url");
         assertThat(link.passwordProtected()).isFalse();
         assertThat(link.visits()).isZero();
         assertThat(link.status()).isEqualTo("DEACTIVATED");

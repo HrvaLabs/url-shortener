@@ -21,7 +21,8 @@ public record UrlAnalyticsDto(
             boolean passwordProtected,
             LocalDateTime createDate,
             LocalDateTime lastAccessed,
-            long visits) {}
+            long visits,
+            String longUrl) {}
 
     public record Breakdowns(
             List<BreakdownEntry> referrers,

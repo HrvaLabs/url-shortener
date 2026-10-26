@@ -10,6 +10,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 public interface EmailLogRepository extends JpaRepository<EmailLog, Long> {
 
     Page<EmailLog> findAllByOrderByCreatedAtDesc(Pageable pageable);
+    Page<EmailLog> findAllByStatusOrderByCreatedAtDesc(String status, Pageable pageable);
     List<EmailLog> findByRecipientContainingIgnoreCase(String recipient);
     List<EmailLog> findAllByStatusAndCreatedAtBefore(String status, LocalDateTime createdBefore);
     List<EmailLog> findAllByBodyIsNotNullAndCreatedAtBefore(LocalDateTime createdBefore);

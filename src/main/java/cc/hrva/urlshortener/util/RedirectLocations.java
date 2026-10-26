@@ -1,6 +1,5 @@
 package cc.hrva.urlshortener.util;
 
-import java.net.IDN;
 import java.nio.charset.StandardCharsets;
 import java.util.HexFormat;
 import java.util.regex.Pattern;
@@ -42,7 +41,7 @@ public final class RedirectLocations {
         final var portStart = hostAndPort.indexOf(':');
         final var host = portStart < 0 ? hostAndPort : hostAndPort.substring(0, portStart);
         final var port = portStart < 0 ? "" : hostAndPort.substring(portStart);
-        return userInfo + IDN.toASCII(host) + port;
+        return userInfo + DomainNames.toAscii(host) + port;
     }
 
     public static String percentEncoded(final String part) {

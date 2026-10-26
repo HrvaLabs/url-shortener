@@ -13,6 +13,7 @@ import cc.hrva.urlshortener.dto.UrlAnalyticsDto;
 import cc.hrva.urlshortener.dto.UrlAnalyticsDto.Breakdowns;
 import cc.hrva.urlshortener.dto.UrlAnalyticsDto.LinkSummary;
 import cc.hrva.urlshortener.exception.InvalidAnalyticsRangeException;
+import cc.hrva.urlshortener.exception.NoAuthorizationException;
 import cc.hrva.urlshortener.service.AnalyticsService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -107,6 +108,7 @@ class AnalyticsControllerTest {
                 .andExpect(jsonPath("$.link.createDate").value("2026-10-01T12:00:00"))
                 .andExpect(jsonPath("$.link.lastAccessed").value("2026-10-24T09:15:00"))
                 .andExpect(jsonPath("$.link.visits").value(412))
+                .andExpect(jsonPath("$.link.longUrl").value("https://example.com/menu?utm_source=flyer&utm_medium=print"))
                 .andExpect(jsonPath("$.days").value(7))
                 .andExpect(jsonPath("$.from").value("2026-10-18"))
                 .andExpect(jsonPath("$.to").value("2026-10-24"))
@@ -124,6 +126,15 @@ class AnalyticsControllerTest {
                 .andExpect(jsonPath("$.breakdowns.devices").isEmpty())
                 .andExpect(jsonPath("$.breakdowns.browsers").isEmpty())
                 .andExpect(jsonPath("$.breakdowns.operatingSystems").isEmpty());
+    }
+
+    @Test
+    void anotherUsersLinkIsForbiddenWithoutItsDestination() throws Exception {
+        when(analyticsService.getUrlAnalytics(7L, null)).thenThrow(new NoAuthorizationException("You don't have authorization for this action"));
+
+        mockMvc.perform(get("/api/v1/analytics/urls/7"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.link").doesNotExist());
     }
 
     @Test
@@ -162,7 +173,8 @@ class AnalyticsControllerTest {
 
     private static UrlAnalyticsDto analytics() {
         final var link = new LinkSummary(7L, "menu", "example.com", "ACTIVE", false,
-                LocalDateTime.of(2026, 10, 1, 12, 0), LocalDateTime.of(2026, 10, 24, 9, 15), 412);
+                LocalDateTime.of(2026, 10, 1, 12, 0), LocalDateTime.of(2026, 10, 24, 9, 15), 412,
+                "https://example.com/menu?utm_source=flyer&utm_medium=print");
         final var breakdowns = new Breakdowns(
                 List.of(new BreakdownEntry("direct", 60), new BreakdownEntry("other", 3)),
                 List.of(new BreakdownEntry("HR", 50)),

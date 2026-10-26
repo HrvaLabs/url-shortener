@@ -49,6 +49,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Consumer;
 import java.util.function.LongFunction;
 import java.util.function.Predicate;
 import java.util.function.ToLongFunction;
@@ -121,7 +122,8 @@ public class DefaultModerationService implements ModerationService {
     @Override
     public UrlResponse blockLink(final long urlId, final BlockReason reason, final String detail, final String performedBy, final String via) {
         final var url = findUrl(urlId);
-        final var blocked = blockAndTellOwner(urlId, reason, detail, ReviewResolution.LINK_BLOCKED, performedBy, candidate -> true);
+        final var blocked = blockAndTellOwner(urlId, reason, detail, ReviewResolution.LINK_BLOCKED, performedBy, candidate -> true,
+                this::notifyOwner);
         auditLogService.log(performedBy, AuditAction.BLOCK_LINK, TARGET_URL, String.valueOf(urlId),
                 details(via, blocked.isPresent() ? 1 : 0, field(REASON, reason), field("detail", detail)));
         return UrlResponse.from(blocked.orElse(url));
@@ -211,11 +213,16 @@ public class DefaultModerationService implements ModerationService {
 
     @Override
     public void resolveReview(final long urlId, final ReviewAction action, final String domain, final String performedBy, final String via) {
+        resolveReview(urlId, action, domain, this::notifyOwner, performedBy, via);
+    }
+
+    private void resolveReview(final long urlId, final ReviewAction action, final String domain, final Consumer<Url> tellOwner,
+                               final String performedBy, final String via) {
         final var url = findUrl(urlId);
         final var details = switch (action) {
             case OK -> details(via, 0, field(ACTION, action));
             case TRUST_DOMAIN -> trustFromReview(url, domain, performedBy, via);
-            case BLOCK_LINK -> blockLinkFromReview(url, performedBy, via);
+            case BLOCK_LINK -> blockLinkFromReview(url, tellOwner, performedBy, via);
             case BLOCK_DOMAIN -> blockDomainFromReview(url, domain, performedBy, via);
             case BLOCK_USER -> blockUserFromReview(url, performedBy, via);
         };
@@ -226,6 +233,7 @@ public class DefaultModerationService implements ModerationService {
     public ReviewBulkResolveResponse resolveReviews(final List<Long> urlIds, final ReviewAction action, final String performedBy, final String via) {
         final var open = reviewQueueService.openUrlIds(urlIds);
         final var domainsDone = new ArrayList<String>();
+        final var linksBlocked = new ArrayList<Url>();
         final var resolved = new ArrayList<Long>();
         final var failed = new ArrayList<ReviewBulkResolveResponse.Failure>();
         for (final var urlId : urlIds) {
@@ -234,7 +242,7 @@ public class DefaultModerationService implements ModerationService {
                 continue;
             }
             try {
-                resolveInBulk(urlId, action, domainsDone, performedBy, via);
+                resolveInBulk(urlId, action, domainsDone, linksBlocked::add, performedBy, via);
                 resolved.add(urlId);
             } catch (final CommonException exception) {
                 failed.add(new ReviewBulkResolveResponse.Failure(urlId, exception.getMessage()));
@@ -243,14 +251,15 @@ public class DefaultModerationService implements ModerationService {
                 failed.add(new ReviewBulkResolveResponse.Failure(urlId, RESOLVE_FAILED));
             }
         }
+        notifyOwners(linksBlocked);
         log.info("Reviews resolved in bulk action={} resolved={} failed={}", action, resolved.size(), failed.size());
         return new ReviewBulkResolveResponse(resolved, failed);
     }
 
-    private void resolveInBulk(final long urlId, final ReviewAction action, final List<String> domainsDone, final String performedBy,
-                               final String via) {
+    private void resolveInBulk(final long urlId, final ReviewAction action, final List<String> domainsDone, final Consumer<Url> tellOwner,
+                               final String performedBy, final String via) {
         if (action != ReviewAction.TRUST_DOMAIN && action != ReviewAction.BLOCK_DOMAIN) {
-            resolveReview(urlId, action, null, performedBy, via);
+            resolveReview(urlId, action, null, tellOwner, performedBy, via);
             return;
         }
         final var url = findUrl(urlId);
@@ -285,8 +294,9 @@ public class DefaultModerationService implements ModerationService {
         return details(via, trusted.links(), field(ACTION, ReviewAction.TRUST_DOMAIN), field(DOMAIN, ruleDomain), field("reviews", trusted.reviews()));
     }
 
-    private String blockLinkFromReview(final Url url, final String performedBy, final String via) {
-        final var blocked = blockAndTellOwner(url.getId(), BlockReason.ADMIN, null, ReviewResolution.LINK_BLOCKED, performedBy, candidate -> true);
+    private String blockLinkFromReview(final Url url, final Consumer<Url> tellOwner, final String performedBy, final String via) {
+        final var blocked = blockAndTellOwner(url.getId(), BlockReason.ADMIN, null, ReviewResolution.LINK_BLOCKED, performedBy, candidate -> true,
+                tellOwner);
         return details(via, blocked.isPresent() ? 1 : 0, field(ACTION, ReviewAction.BLOCK_LINK));
     }
 
@@ -332,8 +342,16 @@ public class DefaultModerationService implements ModerationService {
                 .toList();
         refuseOverTheCap(ids.size(), maxLinks);
         saveRule(domain, DomainRuleType.BLOCK, reason, performedBy);
-        return eachLink(ids, Long::longValue, id -> blockAndTellOwner(id, BlockReason.DOMAIN_RULE, domain, ReviewResolution.DOMAIN_BLOCKED,
-                performedBy, url -> url.isActive() && isOn(url.getLongUrl(), domain) && !isAllowedBy(rulesBelow, url.getLongUrl())).isPresent());
+        final var blocked = new ArrayList<Url>();
+        final var count = eachLink(ids, Long::longValue, id -> block(id, BlockReason.DOMAIN_RULE, domain, ReviewResolution.DOMAIN_BLOCKED,
+                performedBy, url -> url.isActive() && isOn(url.getLongUrl(), domain) && !isAllowedBy(rulesBelow, url.getLongUrl()))
+                .map(url -> {
+                    alertWhenAutomatic(url, performedBy);
+                    return blocked.add(url);
+                })
+                .orElse(false));
+        notifyOwners(blocked);
+        return count;
     }
 
     private List<DomainRule> rulesBelow(final String domain) {
@@ -403,15 +421,19 @@ public class DefaultModerationService implements ModerationService {
     }
 
     private Optional<Url> blockAndTellOwner(final long urlId, final BlockReason reason, final String detail, final ReviewResolution resolution,
-                                            final String performedBy, final Predicate<Url> stillApplies) {
+                                            final String performedBy, final Predicate<Url> stillApplies, final Consumer<Url> tellOwner) {
         final var blocked = block(urlId, reason, detail, resolution, performedBy, stillApplies);
         blocked.ifPresent(url -> {
-            notifyOwner(url);
-            if (SYSTEM.equals(performedBy)) {
-                eventPublisher.publishEvent(new AdminAlertEvent.LinkBlocked(AlertedLink.of(url), url.getBlockReason(), url.getBlockDetail()));
-            }
+            tellOwner.accept(url);
+            alertWhenAutomatic(url, performedBy);
         });
         return blocked;
+    }
+
+    private void alertWhenAutomatic(final Url url, final String performedBy) {
+        if (SYSTEM.equals(performedBy)) {
+            eventPublisher.publishEvent(new AdminAlertEvent.LinkBlocked(AlertedLink.of(url), url.getBlockReason(), url.getBlockDetail()));
+        }
     }
 
     private Optional<Url> block(final long urlId, final BlockReason reason, final String detail, final ReviewResolution resolution,
@@ -505,6 +527,27 @@ public class DefaultModerationService implements ModerationService {
         });
         log.info("Domain rule saved domain={} type={}", domain, type);
         eventPublisher.publishEvent(new BlocklistConfigurationChangedEvent());
+    }
+
+    private void notifyOwners(final List<Url> blocked) {
+        blocked.stream()
+                .filter(url -> url.getOwner() != null)
+                .collect(Collectors.groupingBy(url -> url.getOwner().getId(), LinkedHashMap::new, Collectors.toList()))
+                .values()
+                .forEach(this::notifyOwnerOf);
+    }
+
+    private void notifyOwnerOf(final List<Url> links) {
+        if (links.size() == 1) {
+            notifyOwner(links.getFirst());
+            return;
+        }
+        final var owner = links.getFirst().getOwner();
+        try {
+            sendingEmailService.sendEmailUrlsBlocked(owner, List.copyOf(links));
+        } catch (final RuntimeException exception) {
+            log.warn("Telling the owner about blocked links failed ownerId={} links={}", owner.getId(), links.size(), exception);
+        }
     }
 
     private void notifyOwner(final Url url) {

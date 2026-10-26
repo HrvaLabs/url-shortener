@@ -45,6 +45,8 @@ public class UsersStatsRepository {
             select coalesce(sum(case when active = true and (expiration_date is null or expiration_date > :today) then 1 else 0 end), 0)
                        as active_keys,
                    coalesce(sum(case when expiration_date <= :today then 1 else 0 end), 0) as expired_keys,
+                   coalesce(sum(case when active = false and (expiration_date is null or expiration_date > :today) then 1 else 0 end), 0)
+                       as revoked_keys,
                    coalesce(sum(api_calls_used), 0) as calls_used
             from api_key
             """;
@@ -83,6 +85,7 @@ public class UsersStatsRepository {
         return jdbcTemplate.queryForObject(COUNT_API_KEYS, Map.of(TODAY, today), (row, rowNumber) -> new ApiKeyCounts(
                 row.getLong("active_keys"),
                 row.getLong("expired_keys"),
+                row.getLong("revoked_keys"),
                 row.getLong("calls_used")));
     }
 

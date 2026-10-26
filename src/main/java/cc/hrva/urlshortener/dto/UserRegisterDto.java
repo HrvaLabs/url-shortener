@@ -1,6 +1,7 @@
 package cc.hrva.urlshortener.dto;
 
 import io.swagger.v3.oas.annotations.media.Schema;
+import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 import lombok.AllArgsConstructor;
@@ -13,6 +14,8 @@ import lombok.Data;
 public class UserRegisterDto {
 
     @NotBlank(message = "Email is required")
+    @Email(message = "Enter a valid email address (e.g. you@example.com)")
+    @Size(max = 255, message = "Email must be 255 characters or fewer")
     @Schema(description = "User email address", example = "user@example.com")
     private String email;
 

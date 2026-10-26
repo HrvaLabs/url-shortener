@@ -158,7 +158,7 @@ class AdminReservedAliasSecurityTest {
 
     @Test
     void anAdminReservesAnAlias() throws Exception {
-        when(reservedAliasService.reserve(new ReservedAliasDto("Promo", "Spring"))).thenReturn(promo());
+        when(reservedAliasService.reserve(new ReservedAliasDto("Promo", "Spring"), ADMIN)).thenReturn(promo());
 
         mockMvc.perform(asAdmin(post(RESERVED_ALIASES)).content(BODY))
                 .andExpect(status().isOk())
@@ -172,7 +172,7 @@ class AdminReservedAliasSecurityTest {
         mockMvc.perform(asAdmin(delete(RESERVED_ALIAS)))
                 .andExpect(status().isNoContent());
 
-        verify(reservedAliasService).unreserve(3L);
+        verify(reservedAliasService).unreserve(3L, ADMIN);
     }
 
     @Test
@@ -196,7 +196,7 @@ class AdminReservedAliasSecurityTest {
 
     @Test
     void aDuplicateIsAConflict() throws Exception {
-        when(reservedAliasService.reserve(new ReservedAliasDto("Promo", "Spring")))
+        when(reservedAliasService.reserve(new ReservedAliasDto("Promo", "Spring"), ADMIN))
                 .thenThrow(new ShortUrlAlreadyExistsException("This alias is already reserved."));
 
         mockMvc.perform(asAdmin(post(RESERVED_ALIASES)).content(BODY))
@@ -206,7 +206,7 @@ class AdminReservedAliasSecurityTest {
 
     @Test
     void removingAnUnknownEntryIsNotFound() throws Exception {
-        doThrow(new ReservedAliasNotFoundException("Reserved alias not found")).when(reservedAliasService).unreserve(3L);
+        doThrow(new ReservedAliasNotFoundException("Reserved alias not found")).when(reservedAliasService).unreserve(3L, ADMIN);
 
         mockMvc.perform(asAdmin(delete(RESERVED_ALIAS)))
                 .andExpect(status().isNotFound())

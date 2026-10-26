@@ -19,6 +19,10 @@ class RedirectLocationsTest {
             "https://čevapi.example/menu => https://xn--evapi-gya.example/menu",
             "https://user name@čevapi.example:8443/a b#top c => https://user%20name@xn--evapi-gya.example:8443/a%20b#top%20c",
             "http://ｌｏｃａｌｈｏｓｔ/admin => http://localhost/admin",
+            "https://\u0430\u0440\u0440\u04cf\u0435.com/id => https://xn--80ak6aa92e.com/id",
+            "https://\u0410\u0420\u0420\u04c0\u0415.com/id => https://xn--80ak6aa92e.com/id",
+            "http://0x7f.0.0.1/admin => http://127.0.0.1/admin",
+            "http://2130706433:8080/x => http://127.0.0.1:8080/x",
             "https://[2001:db8::1]:8443/a b => https://[2001:db8::1]:8443/a%20b",
             "http://[invalid => http://[invalid",
             "https://shop.example/offer?id=1 => https://shop.example/offer?id=1"

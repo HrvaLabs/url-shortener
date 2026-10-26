@@ -399,6 +399,68 @@ class DefaultModerationServiceTest {
     }
 
     @Test
+    void aDomainBlockSendsEachOwnerOneEmailListingTheirBlockedLinks() {
+        final var alice = user(1L, "alice@example.com");
+        final var bob = user(2L, "bob@example.com");
+        final var aliceLinks = new ArrayList<Url>();
+        final var bobLinks = new ArrayList<Url>();
+        for (long id = 100; id < 189; id++) {
+            final var owner = id % 3 == 0 ? bob : alice;
+            final var url = link(id, "https://shop.example.net/item/" + id, owner);
+            (owner == alice ? aliceLinks : bobLinks).add(url);
+        }
+
+        final var blocked = moderationService.blockDomain("shop.example.net", "fake shop", ADMIN, "admin", null);
+
+        assertThat(blocked).isEqualTo(89);
+        assertThat(aliceLinks).hasSize(60);
+        assertThat(bobLinks).hasSize(29);
+        verify(sendingEmailService).sendEmailUrlsBlocked(alice, aliceLinks);
+        verify(sendingEmailService).sendEmailUrlsBlocked(bob, bobLinks);
+        verifyNoMoreInteractions(sendingEmailService);
+    }
+
+    @Test
+    void anOwnerWithOneLinkInADomainBlockGetsTheSingleLinkEmail() {
+        final var alice = user(1L, "alice@example.com");
+        final var bob = user(2L, "bob@example.com");
+        final var aliceFirst = link(10L, "https://jofogas.cards/a", alice);
+        final var aliceSecond = link(11L, "https://jofogas.cards/b", alice);
+        final var bobOnly = link(12L, "https://jofogas.cards/c", bob);
+
+        moderationService.blockDomain("jofogas.cards", null, ADMIN, "mcp", 50);
+
+        verify(sendingEmailService).sendEmailUrlsBlocked(alice, List.of(aliceFirst, aliceSecond));
+        verify(sendingEmailService).sendEmailUrlBlocked(bob, bobOnly);
+        verifyNoMoreInteractions(sendingEmailService);
+    }
+
+    @Test
+    void aFailedEmailToOneOwnerStillLetsTheOthersBeTold() {
+        final var alice = user(1L, "alice@example.com");
+        final var bob = user(2L, "bob@example.com");
+        final var aliceLinks = List.of(link(10L, "https://jofogas.cards/a", alice), link(11L, "https://jofogas.cards/b", alice));
+        final var bobLinks = List.of(link(12L, "https://jofogas.cards/c", bob), link(13L, "https://jofogas.cards/d", bob));
+        doThrow(new IllegalStateException("template missing")).when(sendingEmailService).sendEmailUrlsBlocked(alice, aliceLinks);
+
+        assertThat(moderationService.blockDomain("jofogas.cards", null, ADMIN, "admin", null)).isEqualTo(4);
+
+        verify(sendingEmailService).sendEmailUrlsBlocked(bob, bobLinks);
+    }
+
+    @Test
+    void blockingASingleLinkKeepsTheSingleLinkEmail() {
+        final var alice = user(1L, "alice@example.com");
+        final var url = link(10L, "https://jofogas.cards/a", alice);
+        link(11L, "https://jofogas.cards/b", alice);
+
+        moderationService.blockLink(10L, BlockReason.ADMIN, "phishing", ADMIN, "admin");
+
+        verify(sendingEmailService).sendEmailUrlBlocked(alice, url);
+        verifyNoMoreInteractions(sendingEmailService);
+    }
+
+    @Test
     void aLinkThatFailsToBlockIsLoggedAndTheRestAreStillBlocked() {
         final var owner = user(1L, "alice@example.com");
         link(10L, "https://jofogas.cards/a", owner);
@@ -412,7 +474,8 @@ class DefaultModerationServiceTest {
         assertThat(blocked).isEqualTo(2);
         assertThat(after.getBlockReason()).isEqualTo(BlockReason.DOMAIN_RULE);
         verify(cache, never()).evict("s11");
-        verify(sendingEmailService, never()).sendEmailUrlBlocked(owner, failing);
+        verify(sendingEmailService).sendEmailUrlsBlocked(owner, List.of(links.get(10L), after));
+        verifyNoMoreInteractions(sendingEmailService);
         verify(auditLogService).log(ADMIN, AuditAction.BLOCK_DOMAIN, "Domain", "jofogas.cards", "links: 2, via: admin");
     }
 
@@ -1311,6 +1374,38 @@ class DefaultModerationServiceTest {
     }
 
     @Test
+    void blockingSeveralSelectedLinksEmailsEachOwnerOnceAfterAllOfThemAreBlocked() {
+        final var alice = user(1L, "alice@example.com");
+        final var bob = user(2L, "bob@example.com");
+        final var aliceFirst = link(70L, "https://example.org/a", alice);
+        final var aliceSecond = link(71L, "https://example.net/b", alice);
+        final var bobOnly = link(72L, "https://example.org/c", bob);
+        final var aliceThird = link(73L, "https://jofogas.cards/d", alice);
+        final var aliceFourth = link(74L, "https://example.com/e", alice);
+        openReviews(70L, 71L, 72L, 73L, 74L);
+
+        final var result = moderationService.resolveReviews(List.of(70L, 71L, 72L, 73L, 74L), ReviewAction.BLOCK_LINK, ADMIN, "admin");
+
+        assertThat(result.resolved()).containsExactly(70L, 71L, 72L, 73L, 74L);
+        assertThat(links.values()).allSatisfy(url -> assertThat(url.getBlockReason()).isEqualTo(BlockReason.ADMIN));
+        verify(sendingEmailService).sendEmailUrlsBlocked(alice, List.of(aliceFirst, aliceSecond, aliceThird, aliceFourth));
+        verify(sendingEmailService).sendEmailUrlBlocked(bob, bobOnly);
+        verifyNoMoreInteractions(sendingEmailService);
+    }
+
+    @Test
+    void blockingTheLinkOfASingleReviewKeepsTheSingleLinkEmail() {
+        final var alice = user(1L, "alice@example.com");
+        final var url = link(30L, "https://example.org/x", alice);
+        link(31L, "https://example.org/y", alice);
+
+        moderationService.resolveReview(30L, ReviewAction.BLOCK_LINK, null, ADMIN, "admin");
+
+        verify(sendingEmailService).sendEmailUrlBlocked(alice, url);
+        verifyNoMoreInteractions(sendingEmailService);
+    }
+
+    @Test
     void aDomainSharedBySeveralSelectedLinksIsBlockedOnceAndTheirReviewsAreResolvedUnderIt() {
         final var alice = user(1L, "alice@example.com");
         final var first = link(62L, "https://www.jofogas.cards/login", alice);
@@ -1330,8 +1425,7 @@ class DefaultModerationServiceTest {
         verify(eventPublisher, times(2)).publishEvent(any(BlocklistConfigurationChangedEvent.class));
         assertThat(List.of(first, second, third)).allSatisfy(url -> assertThat(url.getBlockDetail()).isEqualTo("jofogas.cards"));
         assertThat(other.getBlockDetail()).isEqualTo("example.org");
-        verify(sendingEmailService).sendEmailUrlBlocked(alice, first);
-        verify(sendingEmailService).sendEmailUrlBlocked(alice, second);
+        verify(sendingEmailService).sendEmailUrlsBlocked(alice, List.of(first, second));
         verifyNoMoreInteractions(sendingEmailService);
         verify(reviewQueueService).resolveOpen(inactive, ReviewResolution.DOMAIN_BLOCKED, ADMIN);
         verify(auditLogService).log(ADMIN, AuditAction.RESOLVE_REVIEW, "Url", "62", "action: BLOCK_DOMAIN, domain: jofogas.cards, links: 3, via: admin");

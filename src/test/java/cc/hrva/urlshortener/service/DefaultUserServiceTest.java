@@ -16,10 +16,13 @@ import cc.hrva.urlshortener.dto.UserSearchDto;
 import cc.hrva.urlshortener.dto.UserUpdateDto;
 import cc.hrva.urlshortener.exception.NoAuthorizationException;
 import cc.hrva.urlshortener.exception.UserNotFoundException;
+import cc.hrva.urlshortener.listener.SignUpEmailListener;
+import cc.hrva.urlshortener.listener.UserRegisteredEvent;
 import cc.hrva.urlshortener.mcp.apps.ConnectedAppsService;
 import cc.hrva.urlshortener.model.ApiKey;
 import cc.hrva.urlshortener.model.ResetToken;
 import cc.hrva.urlshortener.model.User;
+import cc.hrva.urlshortener.model.VerificationToken;
 import cc.hrva.urlshortener.repository.ApiKeyRepository;
 import cc.hrva.urlshortener.repository.ResetTokenRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
@@ -36,6 +39,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
@@ -44,6 +48,11 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.event.TransactionalEventListenerFactory;
+import org.springframework.transaction.support.AbstractPlatformTransactionManager;
+import org.springframework.transaction.support.DefaultTransactionStatus;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -116,11 +125,15 @@ class DefaultUserServiceTest {
 
     @BeforeEach
     void setUp() {
-        this.userService = new DefaultUserService(appProperties, authValidator, urlRepository, userRepository,
+        this.userService = userServicePublishingTo(eventPublisher);
+        lenient().when(userRepository.findByEmail(null)).thenReturn(Optional.empty());
+    }
+
+    private DefaultUserService userServicePublishingTo(final ApplicationEventPublisher publisher) {
+        return new DefaultUserService(appProperties, authValidator, urlRepository, userRepository,
                 passwordEncoder, apiKeyRepository, emailLogRepository, resetTokenService,
                 resetTokenRepository, twoFactorRecoveryCodeRepository, userToUserDtoConverter, sendingEmailService,
-                verificationTokenService, verificationTokenRepository, userUpdateDtoToUserConverter, connectedAppsService, scammerSignalService, eventPublisher);
-        lenient().when(userRepository.findByEmail(null)).thenReturn(Optional.empty());
+                verificationTokenService, verificationTokenRepository, userUpdateDtoToUserConverter, connectedAppsService, scammerSignalService, publisher);
     }
 
     @Test
@@ -139,15 +152,52 @@ class DefaultUserServiceTest {
     @Test
     void shouldRegisterUser() {
         final var user = User.builder().email("test@example.com").build();
+        final var token = VerificationToken.builder().token("verify-me").build();
         when(userRepository.save(user)).thenReturn(user);
+        when(verificationTokenService.createTokenForUser(user)).thenReturn(token);
 
         final var result = userService.register(user);
 
         assertThat(result.getEmail()).isEqualTo("test@example.com");
-        verify(verificationTokenService).createTokenForUser(user);
-        verify(sendingEmailService).sendVerificationEmail(eq(user), any());
+        verify(eventPublisher).publishEvent(new UserRegisteredEvent(user, token));
+        verifyNoInteractions(sendingEmailService);
+    }
+
+    @Test
+    void aRegistrationThatRollsBackSendsNoEmail() {
+        final var user = User.builder().id(31L).email("a".repeat(65) + "@example.com").build();
+        when(userRepository.save(user)).thenReturn(user);
+        when(verificationTokenService.createTokenForUser(user)).thenReturn(VerificationToken.builder().token("verify-me").build());
+
+        try (final var context = signUpEmailsContext()) {
+            final var registering = userServicePublishingTo(context);
+            new TransactionTemplate(new NoResourceTransactionManager()).executeWithoutResult(status -> {
+                registering.register(user);
+                status.setRollbackOnly();
+            });
+        }
+
+        verifyNoInteractions(sendingEmailService);
+    }
+
+    @Test
+    void aRegistrationSendsTheVerificationAndAdminEmailsOnlyOnceItCommits() {
+        final var user = User.builder().id(31L).email("ana@example.com").build();
+        final var token = VerificationToken.builder().token("verify-me").build();
+        when(userRepository.save(user)).thenReturn(user);
+        when(verificationTokenService.createTokenForUser(user)).thenReturn(token);
+
+        try (final var context = signUpEmailsContext()) {
+            final var registering = userServicePublishingTo(context);
+            new TransactionTemplate(new NoResourceTransactionManager()).executeWithoutResult(status -> {
+                registering.register(user);
+                verifyNoInteractions(sendingEmailService);
+            });
+        }
+
+        verify(sendingEmailService).sendVerificationEmail(user, token);
         verify(sendingEmailService).sendNewUserNotificationToAdmin(user);
-        verify(sendingEmailService, org.mockito.Mockito.never()).sendWelcomeEmail(any());
+        verify(sendingEmailService, never()).sendWelcomeEmail(any());
     }
 
     @Test
@@ -692,4 +742,33 @@ class DefaultUserServiceTest {
 
         verifyNoInteractions(connectedAppsService);
     }
+    private AnnotationConfigApplicationContext signUpEmailsContext() {
+        final var context = new AnnotationConfigApplicationContext();
+        context.registerBean(TransactionalEventListenerFactory.class);
+        context.registerBean(SignUpEmailListener.class, () -> new SignUpEmailListener(sendingEmailService));
+        context.refresh();
+        return context;
+    }
+
+    private static final class NoResourceTransactionManager extends AbstractPlatformTransactionManager {
+
+        @Override
+        protected Object doGetTransaction() {
+            return new Object();
+        }
+
+        @Override
+        protected void doBegin(final Object transaction, final TransactionDefinition definition) {
+        }
+
+        @Override
+        protected void doCommit(final DefaultTransactionStatus status) {
+        }
+
+        @Override
+        protected void doRollback(final DefaultTransactionStatus status) {
+        }
+
+    }
+
 }

@@ -19,6 +19,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.regex.Pattern;
+import java.util.stream.IntStream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -377,6 +378,54 @@ class DefaultSendingEmailServiceTest {
     }
 
     @Test
+    void aDomainBlockEmailListsTheFirst20ShortLinksAndHowManyMoreWithoutNamingTheRule() throws Exception {
+        saveReturnsArgument();
+        final var sent = ArgumentCaptor.forClass(Email.class);
+        doAnswer(invocation -> null).when(emailService).sendEmail(sent.capture(), eq(null));
+
+        configuredEmailService(realTemplateEngine()).sendEmailUrlsBlocked(OWNER, domainBlockedLinks(25));
+
+        final var email = sent.getValue();
+        assertThat(email.getReceivers()).containsExactly("alice@example.com");
+        assertThat(email.getSubject()).isEqualTo("Your links were blocked as unsafe");
+        assertThat(email.getText())
+                .contains("hrva.cc disabled 25 of your links because their destinations were reported for phishing, malware or scams.")
+                .contains("https://hrva.cc/deal1<", "https://hrva.cc/deal20<")
+                .doesNotContain("https://hrva.cc/deal21")
+                .contains("and 5 more")
+                .contains("alice@example.com", "support@hrva.cc")
+                .doesNotContain("jofogas.cards")
+                .doesNotContain("DOMAIN_RULE");
+    }
+
+    @Test
+    void aDomainBlockEmailWithAtMost20LinksListsThemAllWithoutAMoreLine() throws Exception {
+        saveReturnsArgument();
+        final var sent = ArgumentCaptor.forClass(Email.class);
+        doAnswer(invocation -> null).when(emailService).sendEmail(sent.capture(), eq(null));
+
+        configuredEmailService(realTemplateEngine()).sendEmailUrlsBlocked(OWNER, domainBlockedLinks(20));
+
+        assertThat(sent.getValue().getText())
+                .contains("hrva.cc disabled 20 of your links")
+                .contains("https://hrva.cc/deal1<", "https://hrva.cc/deal20<")
+                .doesNotContain("more");
+    }
+
+    @Test
+    void aDomainBlockEmailGivesTheTemplateTheFirst20ShortLinksAndTheRestAsACount() throws Exception {
+        saveReturnsArgument();
+        final var context = ArgumentCaptor.forClass(IContext.class);
+        when(templateEngine.process(eq("urls_blocked"), context.capture())).thenReturn("<p>blocked</p>");
+
+        configuredEmailService(templateEngine).sendEmailUrlsBlocked(OWNER, domainBlockedLinks(89));
+
+        assertThat(context.getValue().getVariable("link_count")).isEqualTo(89);
+        assertThat(context.getValue().getVariable("more_links")).isEqualTo(69);
+        assertThat((List<?>) context.getValue().getVariable("short_links")).hasSize(20).first().isEqualTo("https://hrva.cc/deal1");
+    }
+
+    @Test
     void marksEmailsStuckInSendingAsFailed() {
         final var stuck = EmailLog.builder().id(11L).status(EmailLog.STATUS_SENDING).body("<p>x</p>").build();
         when(emailLogRepository.findAllByStatusAndCreatedAtBefore(eq(EmailLog.STATUS_SENDING), any(LocalDateTime.class)))
@@ -398,6 +447,13 @@ class DefaultSendingEmailServiceTest {
         sendingEmailService.failInterruptedEmails();
 
         assertThat(cutoff.getValue()).isBetween(LocalDateTime.now().minusMinutes(11), LocalDateTime.now().minusMinutes(9));
+    }
+
+    private static List<Url> domainBlockedLinks(final int count) {
+        return IntStream.rangeClosed(1, count)
+                .mapToObj(number -> Url.builder().id((long) number).shortUrl("deal" + number).longUrl("https://jofogas.cards/deal/" + number)
+                        .blockReason(BlockReason.DOMAIN_RULE).blockDetail("jofogas.cards").active(false).build())
+                .toList();
     }
 
 }

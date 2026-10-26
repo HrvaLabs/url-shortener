@@ -8,10 +8,12 @@ import cc.hrva.urlshortener.exception.ShortUrlAlreadyExistsException;
 import cc.hrva.urlshortener.model.ReservedAlias;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.User;
+import cc.hrva.urlshortener.model.enums.AuditAction;
 import cc.hrva.urlshortener.repository.ReservedAliasRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.service.impl.DefaultReservedAliasService;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
@@ -23,12 +25,17 @@ import org.mockito.Captor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.transaction.support.SimpleTransactionStatus;
+import org.springframework.transaction.support.TransactionCallback;
+import org.springframework.transaction.support.TransactionOperations;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -42,6 +49,7 @@ class DefaultReservedAliasServiceTest {
     private static final String ALREADY_RESERVED = "This alias is already reserved.";
     private static final String BUILT_IN_REASON = "Used by hrva.cc itself";
     private static final LocalDateTime RESERVED_AT = LocalDateTime.of(2026, 10, 25, 10, 0);
+    private static final String TARGET_TYPE = "ReservedAlias";
 
     @Mock
     private ReservedAliasRepository reservedAliasRepository;
@@ -50,16 +58,23 @@ class DefaultReservedAliasServiceTest {
     private UrlRepository urlRepository;
 
     @Mock
-    private UserService userService;
+    private AuditLogService auditLogService;
 
     @Captor
     private ArgumentCaptor<Collection<String>> aliases;
+
+    private final List<String> auditedInsideATransaction = new ArrayList<>();
+    private boolean inTransaction;
 
     private ReservedAliasService reservedAliasService;
 
     @BeforeEach
     void setUp() {
-        reservedAliasService = new DefaultReservedAliasService(reservedAliasRepository, urlRepository, userService);
+        lenient().doAnswer(invocation -> recordIfInsideATransaction(invocation.getArgument(1)))
+                .when(auditLogService).log(anyString(), any(AuditAction.class), anyString(), anyString(), anyString());
+        lenient().doAnswer(invocation -> recordIfInsideATransaction(invocation.getArgument(1)))
+                .when(auditLogService).logFailure(anyString(), any(AuditAction.class), anyString(), anyString(), anyString());
+        reservedAliasService = new DefaultReservedAliasService(reservedAliasRepository, urlRepository, auditLogService, recordingTransactions());
     }
 
     @Test
@@ -123,7 +138,6 @@ class DefaultReservedAliasServiceTest {
 
     @Test
     void reserveStoresTheAliasLowerCasedWithTheAdmin() {
-        when(userService.getUserFromToken()).thenReturn(User.builder().id(1L).email(ADMIN).build());
         when(reservedAliasRepository.save(any(ReservedAlias.class))).thenAnswer(invocation -> {
             final var saved = invocation.<ReservedAlias>getArgument(0);
             saved.setId(3L);
@@ -131,7 +145,7 @@ class DefaultReservedAliasServiceTest {
             return saved;
         });
 
-        final var response = reservedAliasService.reserve(new ReservedAliasDto("Promo", "  Spring campaign "));
+        final var response = reservedAliasService.reserve(new ReservedAliasDto("Promo", "  Spring campaign "), ADMIN);
 
         final var saved = ArgumentCaptor.forClass(ReservedAlias.class);
         verify(reservedAliasRepository).save(saved.capture());
@@ -142,20 +156,31 @@ class DefaultReservedAliasServiceTest {
     }
 
     @Test
+    void aReservationIsAuditedWithTheStoredAliasAsTheTargetAndItsReason() {
+        when(reservedAliasRepository.save(any(ReservedAlias.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        reservedAliasService.reserve(new ReservedAliasDto("LongReason", "  Kept for the autumn campaign "), ADMIN);
+
+        verify(auditLogService).log(ADMIN, AuditAction.RESERVE_ALIAS, TARGET_TYPE, "longreason", "reason: Kept for the autumn campaign");
+        verifyNoMoreInteractions(auditLogService);
+        assertThat(auditedInsideATransaction).isEmpty();
+    }
+
+    @Test
     void reserveRefusesABuiltInWord() {
-        assertThatThrownBy(() -> reservedAliasService.reserve(new ReservedAliasDto("MCP", "Spring campaign")))
+        assertThatThrownBy(() -> reservedAliasService.reserve(new ReservedAliasDto("MCP", "Spring campaign"), ADMIN))
                 .isInstanceOf(ShortUrlAlreadyExistsException.class)
                 .hasMessage(ALREADY_RESERVED);
 
         verify(reservedAliasRepository, never()).save(any());
-        verifyNoInteractions(urlRepository, userService);
+        verifyNoInteractions(urlRepository);
     }
 
     @Test
     void reserveRefusesADuplicate() {
         when(reservedAliasRepository.existsByAlias("promo")).thenReturn(true);
 
-        assertThatThrownBy(() -> reservedAliasService.reserve(new ReservedAliasDto("Promo", "Spring campaign")))
+        assertThatThrownBy(() -> reservedAliasService.reserve(new ReservedAliasDto("Promo", "Spring campaign"), ADMIN))
                 .isInstanceOf(ShortUrlAlreadyExistsException.class)
                 .hasMessage(ALREADY_RESERVED);
 
@@ -163,24 +188,41 @@ class DefaultReservedAliasServiceTest {
     }
 
     @Test
+    void aRefusedReservationIsAuditedAsFailedWithTheAttemptedAliasOutsideTheRolledBackTransaction() {
+        when(reservedAliasRepository.existsByAlias("blog")).thenReturn(true);
+
+        assertThatThrownBy(() -> reservedAliasService.reserve(new ReservedAliasDto("BLOG", "Spring campaign"), ADMIN))
+                .isInstanceOf(ShortUrlAlreadyExistsException.class);
+        assertThatThrownBy(() -> reservedAliasService.reserve(new ReservedAliasDto("Api", "Spring campaign"), ADMIN))
+                .isInstanceOf(ShortUrlAlreadyExistsException.class);
+
+        verify(auditLogService).logFailure(ADMIN, AuditAction.RESERVE_ALIAS, TARGET_TYPE, "blog", ALREADY_RESERVED);
+        verify(auditLogService).logFailure(ADMIN, AuditAction.RESERVE_ALIAS, TARGET_TYPE, "api", ALREADY_RESERVED);
+        verifyNoMoreInteractions(auditLogService);
+        assertThat(auditedInsideATransaction).isEmpty();
+    }
+
+    @Test
     void aLostInsertRaceIsTheSameRefusal() {
-        when(userService.getUserFromToken()).thenReturn(User.builder().id(1L).email(ADMIN).build());
         when(reservedAliasRepository.save(any(ReservedAlias.class)))
                 .thenThrow(new DataIntegrityViolationException("Unique index or primary key violation: UX_RESERVED_ALIAS_ALIAS"));
 
-        assertThatThrownBy(() -> reservedAliasService.reserve(new ReservedAliasDto("promo", "Spring campaign")))
+        assertThatThrownBy(() -> reservedAliasService.reserve(new ReservedAliasDto("Promo", "Spring campaign"), ADMIN))
                 .isInstanceOf(ShortUrlAlreadyExistsException.class)
                 .hasMessage(ALREADY_RESERVED);
+
+        verify(auditLogService).logFailure(ADMIN, AuditAction.RESERVE_ALIAS, TARGET_TYPE, "promo", ALREADY_RESERVED);
+        verifyNoMoreInteractions(auditLogService);
+        assertThat(auditedInsideATransaction).isEmpty();
     }
 
     @Test
     void reservingAnAliasInUseChangesNoLink() {
         final var link = Url.builder().id(41L).shortUrl("Promo").active(true).build();
-        when(userService.getUserFromToken()).thenReturn(User.builder().id(1L).email(ADMIN).build());
         when(reservedAliasRepository.save(any(ReservedAlias.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(urlRepository.findByLowerShortUrlIn(List.of("promo"))).thenReturn(List.of(link));
 
-        final var response = reservedAliasService.reserve(new ReservedAliasDto("promo", "Spring campaign"));
+        final var response = reservedAliasService.reserve(new ReservedAliasDto("promo", "Spring campaign"), ADMIN);
 
         assertThat(response.inUse()).containsExactly(new InUseLink(41L, "Promo", null, true));
         assertThat(link.isActive()).isTrue();
@@ -193,20 +235,55 @@ class DefaultReservedAliasServiceTest {
         final var promo = reservedAlias(3L, "promo", "Spring campaign");
         when(reservedAliasRepository.findById(3L)).thenReturn(Optional.of(promo));
 
-        reservedAliasService.unreserve(3L);
+        reservedAliasService.unreserve(3L, ADMIN);
 
         verify(reservedAliasRepository).delete(promo);
+    }
+
+    @Test
+    void aRemovalIsAuditedWithTheRemovedAliasAsTheTargetAndItsReason() {
+        when(reservedAliasRepository.findById(2L)).thenReturn(Optional.of(reservedAlias(2L, "blog", "Kept for the company blog")));
+
+        reservedAliasService.unreserve(2L, ADMIN);
+
+        verify(auditLogService).log(ADMIN, AuditAction.UNRESERVE_ALIAS, TARGET_TYPE, "blog", "reason: Kept for the company blog");
+        verifyNoMoreInteractions(auditLogService);
+        assertThat(auditedInsideATransaction).isEmpty();
     }
 
     @Test
     void unreservingAnUnknownIdIsNotFound() {
         when(reservedAliasRepository.findById(99L)).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> reservedAliasService.unreserve(99L))
+        assertThatThrownBy(() -> reservedAliasService.unreserve(99L, ADMIN))
                 .isInstanceOf(ReservedAliasNotFoundException.class)
                 .hasMessage("Reserved alias not found");
 
         verify(reservedAliasRepository, never()).delete(any());
+        verify(auditLogService).logFailure(ADMIN, AuditAction.UNRESERVE_ALIAS, TARGET_TYPE, "99", "Reserved alias not found");
+        verifyNoMoreInteractions(auditLogService);
+        assertThat(auditedInsideATransaction).isEmpty();
+    }
+
+    private Object recordIfInsideATransaction(final AuditAction action) {
+        if (inTransaction) {
+            auditedInsideATransaction.add(action.name());
+        }
+        return null;
+    }
+
+    private TransactionOperations recordingTransactions() {
+        return new TransactionOperations() {
+            @Override
+            public <T> T execute(final TransactionCallback<T> action) {
+                inTransaction = true;
+                try {
+                    return action.doInTransaction(new SimpleTransactionStatus());
+                } finally {
+                    inTransaction = false;
+                }
+            }
+        };
     }
 
     private static ReservedAlias reservedAlias(final long id, final String alias, final String reason) {

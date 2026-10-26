@@ -3,6 +3,7 @@ package cc.hrva.urlshortener.controller;
 import cc.hrva.urlshortener.audit.Audited;
 import cc.hrva.urlshortener.model.EmailLog;
 import cc.hrva.urlshortener.model.enums.AuditAction;
+import cc.hrva.urlshortener.model.enums.EmailStatus;
 import cc.hrva.urlshortener.repository.EmailLogRepository;
 import cc.hrva.urlshortener.service.SendingEmailService;
 import lombok.RequiredArgsConstructor;
@@ -16,6 +17,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @Slf4j
@@ -29,8 +31,12 @@ public class AdminEmailLogController {
 
     @GetMapping
     @PreAuthorize("hasRole('ROLE_ADMIN')")
-    public ResponseEntity<Page<EmailLog>> getEmailLogs(@PageableDefault(size = 50) final Pageable pageable) {
-        return ResponseEntity.ok(emailLogRepository.findAllByOrderByCreatedAtDesc(pageable));
+    public ResponseEntity<Page<EmailLog>> getEmailLogs(
+            @PageableDefault(size = 50) final Pageable pageable,
+            @RequestParam(name = "status", required = false) final EmailStatus status) {
+        return ResponseEntity.ok(status == null
+                ? emailLogRepository.findAllByOrderByCreatedAtDesc(pageable)
+                : emailLogRepository.findAllByStatusOrderByCreatedAtDesc(status.name(), pageable));
     }
 
     @PostMapping("/{id}/resend")

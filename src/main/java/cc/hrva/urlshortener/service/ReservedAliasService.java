@@ -8,7 +8,7 @@ public interface ReservedAliasService {
 
     boolean isReserved(String alias);
     List<ReservedAliasResponse> list();
-    ReservedAliasResponse reserve(ReservedAliasDto reservedAliasDto);
-    void unreserve(long id);
+    ReservedAliasResponse reserve(ReservedAliasDto reservedAliasDto, String performedBy);
+    void unreserve(long id, String performedBy);
 
 }

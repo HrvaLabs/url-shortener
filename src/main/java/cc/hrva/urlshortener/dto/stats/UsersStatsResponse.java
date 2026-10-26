@@ -23,7 +23,7 @@ public record UsersStatsResponse(
             long twoFactorEnabled,
             List<CountEntry> byProvider) {}
 
-    public record ApiKeyCounts(long active, long expired, long callsUsed) {}
+    public record ApiKeyCounts(long active, long expired, long revoked, long callsUsed) {}
 
     public record McpCounts(long connectedUsers, long registeredClients) {}
 

@@ -570,6 +570,17 @@ class DefaultUrlValidatorTest {
     }
 
     @Test
+    void refusesAHostWithALabelOver63Characters() {
+        assertLongUrlRejected("https://" + "a".repeat(64) + ".bit.ly/x");
+        assertLongUrlRejected("https://www." + "a".repeat(64) + ".com/");
+    }
+
+    @Test
+    void acceptsAHostWithALabelOfExactly63Characters() {
+        assertLongUrlAccepted("https://" + "a".repeat(63) + ".example.com/");
+    }
+
+    @Test
     void aMissingDestinationIsStillRefusedAsNotAWebAddress() {
         assertLongUrlRejected(null);
     }

@@ -5,6 +5,7 @@ import cc.hrva.urlshortener.model.EmailLog;
 import cc.hrva.urlshortener.model.ResetToken;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.User;
+import java.util.List;
 
 public interface SendingEmailService {
 
@@ -13,6 +14,7 @@ public interface SendingEmailService {
     void sendNewUserNotificationToAdmin(User user);
     void sendEmailUrlMalwareDetected(User user, Url url, String threatType);
     void sendEmailUrlBlocked(User owner, Url url);
+    void sendEmailUrlsBlocked(User owner, List<Url> urls);
     void sendEmailAccountDeactivated(User user);
     void sendEmailForgotPassword(User user, ResetToken resetToken);
     void sendDecisionsEmailToAdmin(DecisionsDigest digest);

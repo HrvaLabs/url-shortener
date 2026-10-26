@@ -16,6 +16,7 @@ import cc.hrva.urlshortener.dto.UserUpdateDto;
 import cc.hrva.urlshortener.exception.ApiException;
 import cc.hrva.urlshortener.exception.NoAuthorizationException;
 import cc.hrva.urlshortener.exception.UserNotFoundException;
+import cc.hrva.urlshortener.listener.UserRegisteredEvent;
 import cc.hrva.urlshortener.mcp.apps.ConnectedAppsService;
 import cc.hrva.urlshortener.model.ApiKey;
 import cc.hrva.urlshortener.model.User;
@@ -82,8 +83,7 @@ public class DefaultUserService implements UserService {
         log.info("User registered email={}", savedUser.getEmail());
 
         final var verificationToken = verificationTokenService.createTokenForUser(savedUser);
-        sendingEmailService.sendVerificationEmail(savedUser, verificationToken);
-        sendingEmailService.sendNewUserNotificationToAdmin(savedUser);
+        eventPublisher.publishEvent(new UserRegisteredEvent(savedUser, verificationToken));
         eventPublisher.publishEvent(new AdminAlertEvent.UserSignedUp(savedUser.getId(), savedUser.getAuthProvider()));
 
         return savedUser;

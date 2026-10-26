@@ -6,7 +6,13 @@ All notable changes to hrva.cc — the URL shortener.
 
 ## [v2.9] — 2026-10-26
 
-A full statistics page and reserved short link names for the admin, and a simpler admin menu.
+Campaign tracking tags for your links, a full statistics page and reserved short link names for the admin, and a simpler admin menu.
+
+### 🔗 Links
+- Campaign tracking (UTM): when you create or edit a link, add Source, Medium and Campaign tags in a few clicks, with a preview of the final link. Your analytics tool reads them; hrva.cc doesn't.
+
+### 📊 Analytics
+- Link analytics shows the full destination's campaign tags (UTM) when the link has them.
 
 ### 🔧 Admin
 - Stats: one page with Traffic, Links, Users, Safety and System tabs for the last 7, 30, 90 or 365 days. It shows clicks and visitors across all links, top links and referrers, links created per day and how they were made, sign-ups, the review queue and blocks, and the server's health.
@@ -18,8 +24,11 @@ A full statistics page and reserved short link names for the admin, and a simple
 - The dashboard's redirect timing, request count, cache hit ratio, app version and database and Redis status now show real values.
 
 ### 🐛 Fixes
-- The audit log shows times in your own time zone.
+- Admin pages show times in your own time zone.
 - Removing a reserved alias or a domain rule keeps keyboard focus on the list.
+- Look-alike links that mix alphabets, such as a Cyrillic letter in a well-known brand, are now caught and sent for review.
+- If an admin blocks a whole domain or several links at once, each owner now gets one email listing their blocked links instead of one email per link.
+- Sign-up refuses an email address that's too long before sending any email.
 
 ---
 

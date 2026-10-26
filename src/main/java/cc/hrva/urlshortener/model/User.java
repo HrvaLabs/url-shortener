@@ -8,6 +8,7 @@ import com.fasterxml.jackson.annotation.ObjectIdGenerators;
 import jakarta.persistence.*;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 import lombok.*;
 import org.hibernate.annotations.BatchSize;
 import org.hibernate.validator.constraints.Length;
@@ -32,6 +33,7 @@ public class User {
 
     @NotBlank(message = "Email is required")
     @Email(message = "Enter a valid email address (e.g. you@example.com)")
+    @Size(max = 255, message = "Email must be 255 characters or fewer")
     private String email;
 
     @JsonIgnore

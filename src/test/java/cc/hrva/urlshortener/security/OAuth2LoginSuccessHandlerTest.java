@@ -3,18 +3,23 @@ package cc.hrva.urlshortener.security;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
+import java.util.stream.Stream;
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
+import cc.hrva.urlshortener.listener.UserRegisteredEvent;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.codebook.Authorities;
 import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.service.AuthoritiesService;
-import cc.hrva.urlshortener.service.SendingEmailService;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import jakarta.validation.Validation;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Named;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationEventPublisher;
@@ -49,9 +54,6 @@ class OAuth2LoginSuccessHandlerTest {
     private AppProperties appProperties;
 
     @Mock
-    private SendingEmailService sendingEmailService;
-
-    @Mock
     private HttpServletRequest request;
 
     @Mock
@@ -69,7 +71,7 @@ class OAuth2LoginSuccessHandlerTest {
     @BeforeEach
     void setUp() {
         this.handler = new OAuth2LoginSuccessHandler(userRepository, authoritiesService, tokenProvider,
-                appProperties, sendingEmailService, eventPublisher);
+                appProperties, Validation.buildDefaultValidatorFactory().getValidator(), eventPublisher);
         lenient().when(authentication.getPrincipal()).thenReturn(oAuth2User);
         lenient().when(appProperties.getFrontendUrl()).thenReturn("http://fe");
     }
@@ -109,8 +111,20 @@ class OAuth2LoginSuccessHandlerTest {
 
         verify(userRepository).save(argThat(saved -> saved.getLastLogin() != null));
         verify(response).sendRedirect(contains("http://fe/auth/callback?token=jwt-token"));
-        verify(sendingEmailService, never()).sendNewUserNotificationToAdmin(any());
-        verify(eventPublisher, never()).publishEvent(any());
+        verify(eventPublisher, never()).publishEvent(any(Object.class));
+    }
+
+    @ParameterizedTest
+    @MethodSource("emailsTheAccountCouldNotStore")
+    void refusesAProviderEmailTheAccountCouldNotStoreBeforeCreatingAnything(final String email) throws Exception {
+        when(oAuth2User.getAttribute("email")).thenReturn(email);
+
+        handler.onAuthenticationSuccess(request, response, authentication);
+
+        verify(response).sendRedirect("http://fe/auth/callback?error=invalid_email");
+        verify(userRepository, never()).save(any());
+        verify(tokenProvider, never()).createToken(any());
+        verify(eventPublisher, never()).publishEvent(any(Object.class));
     }
 
     @Test
@@ -125,7 +139,8 @@ class OAuth2LoginSuccessHandlerTest {
 
         handler.onAuthenticationSuccess(request, response, authentication);
 
-        verify(sendingEmailService).sendNewUserNotificationToAdmin(any());
+        verify(eventPublisher).publishEvent(argThat((Object event) -> event instanceof UserRegisteredEvent registered
+                && "new@example.com".equals(registered.user().getEmail()) && registered.verificationToken() == null));
         verify(response).sendRedirect(contains("token=jwt-token"));
     }
 
@@ -183,5 +198,11 @@ class OAuth2LoginSuccessHandlerTest {
         handler.onAuthenticationSuccess(request, response, google);
 
         verify(userRepository, atLeastOnce()).save(argThat(saved -> "google".equals(saved.getAuthProvider())));
+    }
+
+    private static Stream<Named<String>> emailsTheAccountCouldNotStore() {
+        return Stream.of(
+                Named.of("a 65-character local part", "a".repeat(65) + "@example.com"),
+                Named.of("a valid 268-character address", "a".repeat(64) + "@" + ("b".repeat(63) + ".").repeat(3) + "example.com"));
     }
 }

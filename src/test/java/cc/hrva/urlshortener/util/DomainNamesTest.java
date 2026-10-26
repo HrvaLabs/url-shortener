@@ -20,6 +20,60 @@ class DomainNamesTest {
         assertThat(DomainNames.hostOf("https://bücher.de")).contains("xn--bcher-kva.de");
     }
 
+    @ParameterizedTest
+    @CsvSource({
+            "https://p\u0430ypal.com/login, xn--pypal-4ve.com",
+            "https://xn--pypal-4ve.com/login, xn--pypal-4ve.com",
+            "https://\u0430\u0440\u0440\u04cf\u0435.com/, xn--80ak6aa92e.com",
+            "https://\u0410\u0420\u0420\u04c0\u0415.com/, xn--80ak6aa92e.com",
+            "https://\uff42\uff49\uff54\uff0e\uff4c\uff59/x, bit.ly",
+            "https://my_shop.duckdns.org/, my_shop.duckdns.org"
+    })
+    void internationalHostIsConvertedToTheAsciiFormABrowserVisits(final String url, final String host) {
+        assertThat(DomainNames.hostOf(url)).contains(host);
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            "https://p\u0430ypal.com/login, xn--pypal-4ve.com, p\u0430ypal.com",
+            "https://XN--PYPAL-4VE.COM./login, xn--pypal-4ve.com, p\u0430ypal.com",
+            "https://\u0410\u0420\u0420\u04c0\u0415.com/, xn--80ak6aa92e.com, \u0430\u0440\u0440\u04cf\u0435.com",
+            "https://Čokolada.HR\uff0e/, xn--okolada-i6a.hr, čokolada.hr",
+            "https://xn--zz.com/, xn--zz.com, xn--zz.com",
+            "https://[2001:DB8::1]:8443/, 2001:db8::1, 2001:db8::1"
+    })
+    void hostNameHasTheAsciiFormAndTheLowercaseUnicodeForm(final String url, final String ascii, final String unicode) {
+        assertThat(DomainNames.hostNameOf(url)).contains(new HostName(ascii, unicode));
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            "http://0x7f.0.0.1/, 127.0.0.1",
+            "http://0X7F000001/login, 127.0.0.1",
+            "http://0177.0.0.1/, 127.0.0.1",
+            "http://2130706433/, 127.0.0.1",
+            "http://127.1/, 127.0.0.1",
+            "http://01.2.3.4/, 1.2.3.4",
+            "http://1.2.3.4./, 1.2.3.4",
+            "http://0x.0.0.0x10/, 0.0.0.16"
+    })
+    void hostThatABrowserReadsAsAnIpv4AddressIsThatAddress(final String url, final String address) {
+        assertThat(DomainNames.hostOf(url)).contains(address);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"1.2.3.256", "999.1.1.1", "1.2.3.4.5", "0x7g.0.0.1", "example.123", "4.example"})
+    void hostThatIsNoIpv4AddressStaysAsWritten(final String host) {
+        assertThat(DomainNames.hostOf("http://" + host + "/")).contains(host);
+    }
+
+    @Test
+    void hostNameAllowsLabelsOfUpTo63Characters() {
+        assertThat(DomainNames.HOST_NAME.matcher("a".repeat(63) + ".bit.ly").matches()).isTrue();
+        assertThat(DomainNames.HOST_NAME.matcher("a".repeat(64) + ".bit.ly").matches()).isFalse();
+        assertThat(DomainNames.HOST_NAME.matcher("www." + "b".repeat(64) + ".com").matches()).isFalse();
+    }
+
     @Test
     void ipv6HostLosesItsBrackets() {
         assertThat(DomainNames.hostOf("https://[::1]/")).contains("::1");

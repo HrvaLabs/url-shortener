@@ -61,21 +61,22 @@ public class PublicHttpFetcher {
         return PublicAddresses::isPublicTarget;
     }
 
-    public List<String> followRedirects(final String url, final int maxHops, final Duration budget) {
-        if (!targetPolicy.test(url)) {
+    public List<RedirectHop> followRedirects(final String url, final int maxHops, final Duration budget) {
+        final var destination = new RedirectHop(url, normalizedDestination(url));
+        if (!targetPolicy.test(destination.normalized())) {
             throw new UrlValidationException(NOT_PUBLIC);
         }
 
         final var deadline = System.nanoTime() + budget.toNanos();
-        final var chain = new ArrayList<String>();
-        chain.add(url);
+        final var chain = new ArrayList<RedirectHop>();
+        chain.add(destination);
         while (chain.size() <= maxHops) {
             final var next = nextHop(chain, deadline);
             if (next.isEmpty()) {
                 break;
             }
             chain.add(next.get());
-            if (!targetPolicy.test(next.get())) {
+            if (!targetPolicy.test(next.get().normalized())) {
                 break;
             }
         }
@@ -109,9 +110,9 @@ public class PublicHttpFetcher {
         }
     }
 
-    private Optional<String> nextHop(final List<String> chain, final long deadline) {
+    private Optional<RedirectHop> nextHop(final List<RedirectHop> chain, final long deadline) {
         try {
-            return redirectTarget(chain.getLast(), deadline);
+            return redirectTarget(chain.getLast().normalized(), deadline);
         } catch (final UrlValidationException exception) {
             if (chain.size() == 1) {
                 throw exception;
@@ -121,7 +122,7 @@ public class PublicHttpFetcher {
         }
     }
 
-    private Optional<String> redirectTarget(final String url, final long deadline) {
+    private Optional<RedirectHop> redirectTarget(final String url, final long deadline) {
         final var remaining = deadline - System.nanoTime();
         if (remaining <= 0) {
             throw new UrlValidationException(TIMED_OUT);
@@ -132,10 +133,21 @@ public class PublicHttpFetcher {
         if (!REDIRECT_STATUSES.contains(response.statusCode()) || location.isEmpty()) {
             return Optional.empty();
         }
+        final var received = readAsUtf8(location.get());
         try {
-            return Optional.of(URI.create(url).resolve(RedirectLocations.normalized(readAsUtf8(location.get()))).toString());
+            final var normalizedLocation = URI.create(RedirectLocations.normalized(received));
+            final var next = URI.create(url).resolve(normalizedLocation).toString();
+            return Optional.of(new RedirectHop(normalizedLocation.isAbsolute() ? received : next, next));
         } catch (final IllegalArgumentException exception) {
             return Optional.empty();
+        }
+    }
+
+    private static String normalizedDestination(final String url) {
+        try {
+            return RedirectLocations.normalized(url);
+        } catch (final IllegalArgumentException exception) {
+            throw new UrlValidationException(NOT_PUBLIC, exception);
         }
     }
 
