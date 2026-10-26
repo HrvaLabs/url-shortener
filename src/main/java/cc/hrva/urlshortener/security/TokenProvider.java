@@ -7,8 +7,10 @@ import io.jsonwebtoken.io.Decoders;
 import io.jsonwebtoken.security.Keys;
 import jakarta.annotation.PostConstruct;
 import javax.crypto.SecretKey;
+import java.time.Instant;
 import java.util.Arrays;
 import java.util.Date;
+import java.util.Optional;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -54,6 +56,7 @@ public class TokenProvider {
     return Jwts.builder()
                .subject(authentication.getName())
                .claim(AUTHORITIES_KEY, authorities)
+               .issuedAt(new Date(now))
                .expiration(validity)
                .signWith(key, Jwts.SIG.HS512)
                .compact();
@@ -89,6 +92,20 @@ public class TokenProvider {
     }
 
     return false;
+  }
+
+  public Optional<Instant> issuedAt(final String token) {
+    try {
+      final var claims = Jwts.parser()
+                             .verifyWith(key)
+                             .build()
+                             .parseSignedClaims(token)
+                             .getPayload();
+
+      return Optional.ofNullable(claims.getIssuedAt()).map(Date::toInstant);
+    } catch (final JwtException | IllegalArgumentException e) {
+      return Optional.empty();
+    }
   }
 
 }
