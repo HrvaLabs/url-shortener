@@ -4,6 +4,25 @@ All notable changes to hrva.cc — the URL shortener.
 
 ---
 
+## [v2.9] — 2026-10-26
+
+A full statistics page and reserved short link names for the admin, and a simpler admin menu.
+
+### 🔧 Admin
+- Stats: one page with Traffic, Links, Users, Safety and System tabs for the last 7, 30, 90 or 365 days. It shows clicks and visitors across all links, top links and referrers, links created per day and how they were made, sign-ups, the review queue and blocks, and the server's health.
+- Long values are shown in full and wrap, instead of being cut off with "…".
+- The stats are totals only. Unique visitors are counted per link per day and added up, and nothing identifies a visitor.
+- Reserved aliases: keep short link names back, each with a reason. Nobody can create a link with one, random links never pick one, and links that already use one keep working.
+- New links remember how they were made: on the website, with an API key, in bulk or through the AI connector, with or without an account.
+- The admin pages have their own sidebar, grouped into Overview, Moderation, Content and Logs, in place of one long menu.
+- The dashboard's redirect timing, request count, cache hit ratio, app version and database and Redis status now show real values.
+
+### 🐛 Fixes
+- The audit log shows times in your own time zone.
+- Removing a reserved alias or a domain rule keeps keyboard focus on the list.
+
+---
+
 ## [v2.8.3] — 2026-10-26
 
 Fixes for reactivating links, addresses with accented letters, admin link edits and blocklist refreshes.
