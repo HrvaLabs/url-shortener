@@ -46,6 +46,9 @@ class DefaultLinkDigestServiceTest {
     private ReviewQueueService reviewQueueService;
 
     @Mock
+    private BioPageReviewService bioPageReviewService;
+
+    @Mock
     private ScammerSignalService scammerSignalService;
 
     @Mock
@@ -65,7 +68,8 @@ class DefaultLinkDigestServiceTest {
     @BeforeEach
     void setUp() {
         linkDigestService = new DefaultLinkDigestService(
-                reviewQueueService, scammerSignalService, blocklistSourceService, urlRepository, userRepository, sendingEmailService);
+                reviewQueueService, bioPageReviewService, scammerSignalService, blocklistSourceService, urlRepository, userRepository,
+                sendingEmailService);
     }
 
     private static Url link(final long id, final String shortUrl, final String longUrl, final User owner) {
@@ -165,6 +169,34 @@ class DefaultLinkDigestServiceTest {
                 "x.example/<b>bold</b>",
                 "xn--bcher-kva.example/Kaufen",
                 "not a url");
+    }
+
+    @Test
+    void openBioPageReviewsAloneSendTheEmail() {
+        openEntries(0L);
+        when(bioPageReviewService.openCount()).thenReturn(2L);
+        blockedAutomatically();
+        sources();
+
+        linkDigestService.sendDailyDigest();
+
+        final var digest = sentDigest();
+        assertThat(digest.openCount()).isZero();
+        assertThat(digest.openBioPageReviews()).isEqualTo(2);
+    }
+
+    @Test
+    void theOpenBioPageReviewsRideAlongWithTheLinks() {
+        openEntries(1L, review(link(42L, "v0DB3", "https://findfavoritedate.life/", null), "high-risk domain ending .life"));
+        when(bioPageReviewService.openCount()).thenReturn(1L);
+        blockedAutomatically();
+        sources();
+
+        linkDigestService.sendDailyDigest();
+
+        final var digest = sentDigest();
+        assertThat(digest.openCount()).isEqualTo(1);
+        assertThat(digest.openBioPageReviews()).isEqualTo(1);
     }
 
     @Test

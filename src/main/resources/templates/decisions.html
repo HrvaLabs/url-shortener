@@ -80,7 +80,14 @@
                 </table>
               </th:block>
 
-              <th:block th:unless="${digest.openCount > 0}">
+              <th:block th:if="${digest.openBioPageReviews > 0}">
+                <p style="margin: 0 0 16px; font-family: 'Helvetica', 'Arial', sans-serif; font-size: 15px; line-height: 1.7; color: #d4d4d4;">
+                  <strong style="color: #e8e8e8;" th:text="${digest.openBioPageReviews == 1 ? '1 bio page is' : digest.openBioPageReviews + ' bio pages are'}"/> waiting in the review queue.
+                  <a th:href="${review_page + '#bio-pages'}" target="_blank" style="color: #a67c00;">Review bio pages</a>
+                </p>
+              </th:block>
+
+              <th:block th:unless="${digest.openCount > 0 or digest.openBioPageReviews > 0}">
                 <p style="margin: 0 0 16px; font-family: 'Helvetica', 'Arial', sans-serif; font-size: 15px; line-height: 1.7; color: #d4d4d4;">
                   The review queue is empty, but something happened that you should know about.
                 </p>

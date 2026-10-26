@@ -9,6 +9,7 @@ import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.enums.BioAccent;
 import cc.hrva.urlshortener.model.enums.BioAvatarKind;
+import cc.hrva.urlshortener.model.enums.BioPageReviewResolution;
 import cc.hrva.urlshortener.model.enums.BioTheme;
 import jakarta.persistence.EntityManager;
 import java.time.LocalDate;
@@ -26,6 +27,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.FilterType;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.annotation.Transactional;
@@ -297,6 +299,31 @@ class BioPageSchemaTest {
     }
 
     @Test
+    void openReviewsComeNewestFirstWithTheirOwnersAndCountWithoutResolvedOnes() {
+        final var anasPage = savedPage(savedUser("ana@example.com"), "ana");
+        final var bobsPage = savedPage(savedUser("bob@example.com"), "bob");
+        final var cleosPage = savedPage(savedUser("cleo@example.com"), "cleo");
+        final var oldest = bioPageReviewRepository.saveAndFlush(bioPageReview(anasPage, NOW.minusHours(2), null));
+        final var sameTimeFirst = bioPageReviewRepository.saveAndFlush(bioPageReview(bobsPage, NOW.minusHours(1), null));
+        final var sameTimeSecond = bioPageReviewRepository.saveAndFlush(bioPageReview(cleosPage, NOW.minusHours(1), null));
+        bioPageReviewRepository.saveAndFlush(bioPageReview(anasPage, NOW, NOW));
+        entityManager.clear();
+
+        final var firstPage = bioPageReviewRepository.findOpen(PageRequest.of(0, 2));
+        final var secondPage = bioPageReviewRepository.findOpen(PageRequest.of(1, 2));
+
+        assertThat(firstPage.getTotalElements()).isEqualTo(3);
+        assertThat(firstPage.getTotalPages()).isEqualTo(2);
+        assertThat(firstPage.getContent())
+                .extracting(BioPageReview::getId, review -> review.getPage().getOwner().getEmail())
+                .containsExactly(
+                        tuple(sameTimeSecond.getId(), "cleo@example.com"),
+                        tuple(sameTimeFirst.getId(), "bob@example.com"));
+        assertThat(secondPage.getContent()).extracting(BioPageReview::getId).containsExactly(oldest.getId());
+        assertThat(bioPageReviewRepository.countByResolvedAtIsNull()).isEqualTo(3);
+    }
+
+    @Test
     void expiredHoldsAreDeletedAndLiveOnesKept() {
         bioHandleHoldRepository.saveAndFlush(hold("ended", null, NOW.minusDays(1)));
         bioHandleHoldRepository.saveAndFlush(hold("live", null, NOW.plusDays(1)));
@@ -375,6 +402,11 @@ class BioPageSchemaTest {
 
     private static BioHandleHold hold(final String handle, final BioPage page, final LocalDateTime heldUntil) {
         return BioHandleHold.builder().handle(handle).page(page).heldUntil(heldUntil).createdAt(NOW).build();
+    }
+
+    private static BioPageReview bioPageReview(final BioPage page, final LocalDateTime flaggedAt, final LocalDateTime resolvedAt) {
+        return BioPageReview.builder().page(page).reasons("name imitates paypal").flaggedAt(flaggedAt).resolvedAt(resolvedAt)
+                .resolution(resolvedAt != null ? BioPageReviewResolution.OK : null).systemFlagged(true).build();
     }
 
     private static LinkReview linkReview(final Url url, final boolean systemFlagged, final LocalDateTime resolvedAt) {

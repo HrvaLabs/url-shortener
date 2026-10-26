@@ -236,7 +236,7 @@ public class DefaultSendingEmailService implements SendingEmailService {
     @Override
     @Async
     public void sendDecisionsEmailToAdmin(final DecisionsDigest digest) {
-        final var subject = decisionsSubject(digest.openCount());
+        final var subject = decisionsSubject(digest.openCount() + digest.openBioPageReviews());
         final var ctx = new Context();
         ctx.setVariable("digest", digest);
         ctx.setVariable("headline", subject);

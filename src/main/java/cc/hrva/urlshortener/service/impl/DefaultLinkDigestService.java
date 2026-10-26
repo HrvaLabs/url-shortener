@@ -8,6 +8,7 @@ import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.enums.BlockReason;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
+import cc.hrva.urlshortener.service.BioPageReviewService;
 import cc.hrva.urlshortener.service.BlocklistSourceService;
 import cc.hrva.urlshortener.service.LinkDigestService;
 import cc.hrva.urlshortener.service.ReviewQueueService;
@@ -34,6 +35,7 @@ public class DefaultLinkDigestService implements LinkDigestService {
     private static final int MAX_POSSIBLE_SCAMMERS = 10;
 
     private final ReviewQueueService reviewQueueService;
+    private final BioPageReviewService bioPageReviewService;
     private final ScammerSignalService scammerSignalService;
     private final BlocklistSourceService blocklistSourceService;
     private final UrlRepository urlRepository;
@@ -51,20 +53,21 @@ public class DefaultLinkDigestService implements LinkDigestService {
                 possibleScammers(),
                 autoBlockedSince(now.minusDays(1)),
                 failingSources(),
-                newAccountLinks(now.minusDays(1), now.minusDays(7)));
+                newAccountLinks(now.minusDays(1), now.minusDays(7)),
+                bioPageReviewService.openCount());
 
         if (!needsAttention(digest)) {
             log.info("Decisions email: nothing waiting");
             return;
         }
 
-        log.info("Decisions email: {} open, {} blocked automatically, {} failing sources",
-                digest.openCount(), digest.autoBlocked().size(), digest.failingSources().size());
+        log.info("Decisions email: {} open, {} bio pages open, {} blocked automatically, {} failing sources",
+                digest.openCount(), digest.openBioPageReviews(), digest.autoBlocked().size(), digest.failingSources().size());
         sendingEmailService.sendDecisionsEmailToAdmin(digest);
     }
 
     private static boolean needsAttention(final DecisionsDigest digest) {
-        return digest.openCount() > 0 || !digest.autoBlocked().isEmpty() || !digest.failingSources().isEmpty();
+        return digest.openCount() > 0 || digest.openBioPageReviews() > 0 || !digest.autoBlocked().isEmpty() || !digest.failingSources().isEmpty();
     }
 
     private List<LinkDigestEntry> newestOpen() {

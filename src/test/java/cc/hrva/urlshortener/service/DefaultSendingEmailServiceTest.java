@@ -152,7 +152,7 @@ class DefaultSendingEmailServiceTest {
     }
 
     private static DecisionsDigest decisions(final long openCount) {
-        return new DecisionsDigest(openCount, 0, List.of(), List.of(), List.of(), List.of(), List.of());
+        return new DecisionsDigest(openCount, 0, List.of(), List.of(), List.of(), List.of(), List.of(), 0);
     }
 
     private static DecisionsDigest everything(final String userText) {
@@ -166,7 +166,8 @@ class DefaultSendingEmailServiceTest {
                 List.of(new DecisionsDigest.PossibleScammer("scammer@example.com" + userText, 1, 2)),
                 List.of(new DecisionsDigest.BlockedLink("promo" + userText, "www.jofogas.cards/login" + userText, "a blocklist (HaGeZi Fake" + userText + ")")),
                 List.of(new DecisionsDigest.FailingSource("HaGeZi Fake" + userText, "HTTP 503 from every mirror" + userText)),
-                List.of(new DecisionsDigest.NewAccountLink("fresh" + userText, "example.com/fresh" + userText, "newcomer@example.com" + userText)));
+                List.of(new DecisionsDigest.NewAccountLink("fresh" + userText, "example.com/fresh" + userText, "newcomer@example.com" + userText)),
+                0);
     }
 
     private Email sentPasskeyAddedEmail(final String label) throws Exception {
@@ -384,11 +385,45 @@ class DefaultSendingEmailServiceTest {
     @Test
     void aFailingSourceOnItsOwnShowsItsNameAndErrorAndLinksToTheBlocklists() throws Exception {
         final var email = sentDecisionsEmail(new DecisionsDigest(0, 0, List.of(), List.of(), List.of(),
-                List.of(new DecisionsDigest.FailingSource("HaGeZi Fake", "HTTP 503 from every mirror")), List.of()));
+                List.of(new DecisionsDigest.FailingSource("HaGeZi Fake", "HTTP 503 from every mirror")), List.of(), 0));
 
         assertThat(email.getSubject()).isEqualTo("No decisions waiting on hrva.cc, but there's news");
         assertThat(email.getText()).contains("HaGeZi Fake", "HTTP 503 from every mirror");
         assertThat(linksIn(email.getText())).containsExactly("https://hrva.cc/admin/blocklists");
+    }
+
+    @Test
+    void decisionsEmailCountsBioPageReviews() throws Exception {
+        final var email = sentDecisionsEmail(new DecisionsDigest(1, 0, List.of(), List.of(), List.of(), List.of(), List.of(), 1));
+
+        assertThat(email.getSubject()).isEqualTo("2 decisions waiting on hrva.cc");
+        assertThat(textOf(email.getText())).contains("1 link is waiting in the review queue.", "1 bio page is waiting in the review queue.");
+        assertThat(linksIn(email.getText())).containsExactly("https://hrva.cc/admin/review", "https://hrva.cc/admin/review#bio-pages");
+    }
+
+    @Test
+    void bioPageReviewsAloneAreTheDecisionsAndTheQueueIsNotCalledEmpty() throws Exception {
+        final var email = sentDecisionsEmail(new DecisionsDigest(0, 0, List.of(), List.of(), List.of(), List.of(), List.of(), 3));
+
+        assertThat(email.getSubject()).isEqualTo("3 decisions waiting on hrva.cc");
+        assertThat(textOf(email.getText()))
+                .contains("3 bio pages are waiting in the review queue.")
+                .doesNotContain("The review queue is empty")
+                .doesNotContain("links are waiting")
+                .doesNotContain("link is waiting");
+        assertThat(linksIn(email.getText())).containsExactly("https://hrva.cc/admin/review#bio-pages");
+    }
+
+    @Test
+    void withoutBioPageReviewsTheEmailNamesNoBioPages() throws Exception {
+        final var body = textOf(sentDecisionsEmail(everything("")).getText());
+
+        assertThat(body).doesNotContain("bio page");
+    }
+
+    @Test
+    void withNothingWaitingAnywhereTheQueueIsCalledEmpty() throws Exception {
+        assertThat(textOf(sentDecisionsEmail(decisions(0)).getText())).contains("The review queue is empty");
     }
 
     @Test

@@ -28,7 +28,12 @@ class AuditedMethodsTest {
             Map.entry("AdminBlocklistController.createSource", AuditAction.CREATE_SOURCE),
             Map.entry("AdminBlocklistController.updateSource", AuditAction.UPDATE_SOURCE),
             Map.entry("AdminBlocklistController.deleteSource", AuditAction.DELETE_SOURCE),
-            Map.entry("AdminBlocklistController.refreshSource", AuditAction.REFRESH_SOURCE));
+            Map.entry("AdminBlocklistController.refreshSource", AuditAction.REFRESH_SOURCE),
+            Map.entry("AdminBioPageController.hideBioPage", AuditAction.HIDE_BIO_PAGE),
+            Map.entry("AdminBioPageController.unhideBioPage", AuditAction.UNHIDE_BIO_PAGE),
+            Map.entry("AdminBioPageController.changeBioPageHandle", AuditAction.RENAME_BIO_HANDLE),
+            Map.entry("AdminBioPageController.revokeBioPageHandle", AuditAction.REVOKE_BIO_HANDLE),
+            Map.entry("AdminBioPageReviewController.resolveBioPageReview", AuditAction.RESOLVE_BIO_REVIEW));
 
     @Test
     void exactlyTheseControllerMethodsAreAuditedEachWithItsOwnAction() {

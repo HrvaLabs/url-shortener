@@ -9,7 +9,8 @@ public record DecisionsDigest(
         List<PossibleScammer> possibleScammers,
         List<BlockedLink> autoBlocked,
         List<FailingSource> failingSources,
-        List<NewAccountLink> newAccountLinks) {
+        List<NewAccountLink> newAccountLinks,
+        long openBioPageReviews) {
 
     public record PossibleScammer(String email, long blockedLinks, long flaggedLinks) {}
 
