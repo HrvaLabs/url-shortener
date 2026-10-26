@@ -39,6 +39,7 @@ public class BioPageButton {
     @Enumerated(EnumType.STRING)
     private BioIcon icon;
     private int sortOrder;
-    private boolean visible;
+    @Builder.Default
+    private boolean visible = true;
 
 }

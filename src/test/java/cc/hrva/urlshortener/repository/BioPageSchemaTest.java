@@ -204,11 +204,17 @@ class BioPageSchemaTest {
         final var ana = savedUser("ana@example.com");
         final var page = savedPage(ana, "ana");
         final var link = savedLink("abc", ana);
+        final var otherLink = savedLink("blog", ana);
         jdbcTemplate.update("insert into bio_page_button (page_id, url_id, title, sort_order) values (?, ?, ?, ?)",
                 page.getId(), link.getId(), "Shop", 0);
+        bioPageButtonRepository.saveAndFlush(BioPageButton.builder().page(page).url(otherLink).title("Blog").sortOrder(1).build());
+        entityManager.clear();
 
-        assertThat(jdbcTemplate.queryForObject("select visible from bio_page_button where page_id = ?", Boolean.class, page.getId()))
-                .isTrue();
+        assertThat(jdbcTemplate.queryForList("select visible from bio_page_button where page_id = ? order by sort_order", Boolean.class, page.getId()))
+                .containsExactly(true, true);
+        assertThat(bioPageButtonRepository.findByPageWithUrl(page))
+                .extracting(BioPageButton::getTitle, BioPageButton::isVisible)
+                .containsExactly(tuple("Shop", true), tuple("Blog", true));
     }
 
     @Test
