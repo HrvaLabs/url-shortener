@@ -363,14 +363,18 @@ class BioPageEndpointSecurityTest {
         final var day = LocalDate.of(2026, 10, 26);
         when(bioPageAnalyticsService.analytics(7)).thenReturn(new BioPageAnalyticsResponse(7, day.minusDays(6), day, "ana", 12, 3,
                 List.of(new BioViewDay(day, 12, 3)),
-                List.of(new BioPageAnalyticsResponse.ButtonClicks(31L, 41L, "ana-ig", "Instagram", true, 9, 14))));
+                List.of(new BioPageAnalyticsResponse.ButtonClicks(31L, 41L, "ana-ig", "Instagram", true, BioLinkState.LIVE, true, 9, 14),
+                        new BioPageAnalyticsResponse.ButtonClicks(32L, 42L, "ana-old", "Old", false, BioLinkState.EXPIRED, false, 0, 2))));
 
         mockMvc.perform(signedIn(get(BIO_ANALYTICS + "?days=7")))
                 .andExpect(status().isOk())
                 .andExpect(content().json("""
                         {"days":7,"from":"2026-10-20","to":"2026-10-26","handle":"ana","views":12,"botViews":3,
                         "daily":[{"date":"2026-10-26","views":12,"botViews":3}],
-                        "buttons":[{"buttonId":31,"urlId":41,"shortUrl":"ana-ig","title":"Instagram","shownOnPage":true,"fromHrvaPages":9,"allClicks":14}]}""",
+                        "buttons":[{"buttonId":31,"urlId":41,"shortUrl":"ana-ig","title":"Instagram","visible":true,"linkState":"LIVE",
+                        "shownOnPage":true,"fromHrvaPages":9,"allClicks":14},
+                        {"buttonId":32,"urlId":42,"shortUrl":"ana-old","title":"Old","visible":false,"linkState":"EXPIRED",
+                        "shownOnPage":false,"fromHrvaPages":0,"allClicks":2}]}""",
                         true));
     }
 

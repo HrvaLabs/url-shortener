@@ -9,6 +9,7 @@ import cc.hrva.urlshortener.model.BioPage;
 import cc.hrva.urlshortener.model.BioPageButton;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.User;
+import cc.hrva.urlshortener.model.enums.BioLinkState;
 import cc.hrva.urlshortener.model.enums.BlockReason;
 import cc.hrva.urlshortener.repository.BioPageButtonRepository;
 import cc.hrva.urlshortener.repository.BioPageRepository;
@@ -154,20 +155,29 @@ class DefaultBioPageAnalyticsServiceTest {
     }
 
     @Test
-    void aHiddenButtonIsListedButNotShown() {
+    void eachButtonSaysWhyItIsOrIsNotOnThePage() {
         hasPage();
         final var blocked = link(42L, "ana-promo");
         blocked.setBlockReason(BlockReason.BLOCKLIST);
         final var inReview = link(43L, "ana-shop");
+        final var turnedOff = link(45L, "ana-old");
+        turnedOff.setActive(false);
         onPage(button(31L, link(41L, "ana-drafts"), "Drafts", 0, false), button(32L, blocked, "Promo", 1, true),
-                button(33L, inReview, "Shop", 2, true), button(34L, link(44L, "ana-blog"), "Blog", 3, true));
+                button(33L, inReview, "Shop", 2, true), button(34L, link(44L, "ana-blog"), "Blog", 3, true),
+                button(35L, turnedOff, "Old", 4, false));
         when(linkReviewRepository.findOpenSystemFlaggedUrlIds(anyCollection())).thenReturn(List.of(43L));
 
         final var analytics = bioPageAnalyticsService.analytics(7);
 
         assertThat(analytics.buttons())
-                .extracting(BioPageAnalyticsResponse.ButtonClicks::title, BioPageAnalyticsResponse.ButtonClicks::shownOnPage)
-                .containsExactly(tuple("Drafts", false), tuple("Promo", false), tuple("Shop", false), tuple("Blog", true));
+                .extracting(BioPageAnalyticsResponse.ButtonClicks::title, BioPageAnalyticsResponse.ButtonClicks::visible,
+                        BioPageAnalyticsResponse.ButtonClicks::linkState, BioPageAnalyticsResponse.ButtonClicks::shownOnPage)
+                .containsExactly(
+                        tuple("Drafts", false, BioLinkState.LIVE, false),
+                        tuple("Promo", true, BioLinkState.BLOCKED, false),
+                        tuple("Shop", true, BioLinkState.IN_REVIEW, false),
+                        tuple("Blog", true, BioLinkState.LIVE, true),
+                        tuple("Old", false, BioLinkState.DEACTIVATED, false));
     }
 
     @Test

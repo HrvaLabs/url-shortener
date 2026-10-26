@@ -71,14 +71,19 @@ public class DefaultBioPageAnalyticsService implements BioPageAnalyticsService {
         final var allClicks = linkStatsRepository.sumClicksByUrl(urlIds, from, to);
 
         return buttons.stream()
-                .map(button -> new ButtonClicks(
-                        button.getId(),
-                        button.getUrl().getId(),
-                        button.getUrl().getShortUrl(),
-                        button.getTitle(),
-                        button.isVisible() && states.get(button.getUrl().getId()) == BioLinkState.LIVE,
-                        fromHrvaPages.getOrDefault(button.getUrl().getId(), 0L),
-                        allClicks.getOrDefault(button.getUrl().getId(), 0L)))
+                .map(button -> {
+                    final var linkState = states.get(button.getUrl().getId());
+                    return new ButtonClicks(
+                            button.getId(),
+                            button.getUrl().getId(),
+                            button.getUrl().getShortUrl(),
+                            button.getTitle(),
+                            button.isVisible(),
+                            linkState,
+                            button.isVisible() && linkState == BioLinkState.LIVE,
+                            fromHrvaPages.getOrDefault(button.getUrl().getId(), 0L),
+                            allClicks.getOrDefault(button.getUrl().getId(), 0L));
+                })
                 .toList();
     }
 

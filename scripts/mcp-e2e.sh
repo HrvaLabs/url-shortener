@@ -895,6 +895,8 @@ show "$(jq -c '{handle, views, botViews, days: (.daily | length), buttons}' <<<"
 expect_eq "$(jq -r '"\(.views) \(.botViews) \(.daily | length)"' <<<"$HTTP_BODY")" "1 1 7" "views 1, bot views 1, 7 days"
 expect_eq "$(jq -r '.buttons[0] | "\(.shortUrl) \(.allClicks) \(.fromHrvaPages)"' <<<"$HTTP_BODY")" "e2e-bio-link 1 0" \
     "the button: 1 click in all, 0 from hrva.cc pages on localhost"
+expect_eq "$(jq -r '.buttons[0] | "\(.visible) \(.linkState) \(.shownOnPage)"' <<<"$HTTP_BODY")" "true LIVE true" \
+    "the button says it is visible, its link LIVE, so it is on the page"
 
 echo "  --- a visitor report while the page row is locked \"$LOCK_CLAUSE\""
 hold_page_lock "$PAGE_ID" "$LOCK_CLAUSE" 3
