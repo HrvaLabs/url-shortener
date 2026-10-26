@@ -10,4 +10,8 @@ public class SignInExpiredException extends CommonException {
         super("Your sign-in expired. Sign in again.");
     }
 
+    public SignInExpiredException(final String message) {
+        super(message);
+    }
+
 }

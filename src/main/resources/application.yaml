@@ -91,3 +91,6 @@ app:
     issuer: https://hrva.cc
   analytics:
     zone: ${APP_ANALYTICS_ZONE:Europe/Zagreb}
+  passkeys:
+    rp-id: hrva.cc
+    allowed-origins: https://app.hrva.cc

@@ -12,7 +12,10 @@ import cc.hrva.urlshortener.exception.EmailExistsException;
 import cc.hrva.urlshortener.exception.EmailLogNotFoundException;
 import cc.hrva.urlshortener.exception.EmailNotVerifiedException;
 import cc.hrva.urlshortener.exception.InvalidApiKeyException;
+import cc.hrva.urlshortener.exception.PasskeyNotFoundException;
+import cc.hrva.urlshortener.exception.PasskeyVerificationException;
 import cc.hrva.urlshortener.exception.RateLimitExceededException;
+import cc.hrva.urlshortener.exception.ReauthenticationRequiredException;
 import cc.hrva.urlshortener.exception.ReservedAliasNotFoundException;
 import cc.hrva.urlshortener.exception.ShortUrlAlreadyExistsException;
 import cc.hrva.urlshortener.exception.SignInExpiredException;
@@ -203,6 +206,21 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(SignInUnavailableException.class)
     public ResponseEntity<Map<String, String>> handleSignInUnavailable(final SignInUnavailableException ex) {
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(Map.of("error", safeMessage(ex)));
+    }
+
+    @ExceptionHandler(PasskeyVerificationException.class)
+    public ResponseEntity<Map<String, String>> handlePasskeyVerification(final PasskeyVerificationException ex) {
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", safeMessage(ex)));
+    }
+
+    @ExceptionHandler(ReauthenticationRequiredException.class)
+    public ResponseEntity<Map<String, String>> handleReauthenticationRequired(final ReauthenticationRequiredException ex) {
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", safeMessage(ex)));
+    }
+
+    @ExceptionHandler(PasskeyNotFoundException.class)
+    public ResponseEntity<Map<String, String>> handlePasskeyNotFound(final PasskeyNotFoundException ex) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", safeMessage(ex)));
     }
 
     @ExceptionHandler(ConnectRequestExpiredException.class)

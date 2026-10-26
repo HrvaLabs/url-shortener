@@ -2,9 +2,11 @@ package cc.hrva.urlshortener.configuration.properties;
 
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
 import java.time.ZoneId;
+import java.util.List;
 import lombok.Data;
 import lombok.ToString;
 import org.springframework.boot.context.properties.ConfigurationProperties;
@@ -99,6 +101,10 @@ public class AppProperties {
     @NotNull
     private Analytics analytics = new Analytics();
 
+    @Valid
+    @NotNull
+    private Passkeys passkeys = new Passkeys();
+
     @Data
     public static class Mcp {
 
@@ -125,6 +131,17 @@ public class AppProperties {
 
         @NotNull
         private ZoneId zone = ZoneId.of("Europe/Zagreb");
+
+    }
+
+    @Data
+    public static class Passkeys {
+
+        @NotBlank
+        private String rpId;
+
+        @NotEmpty
+        private List<String> allowedOrigins;
 
     }
 

@@ -11,11 +11,13 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 import java.time.LocalDateTime;
+import java.util.List;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
+import org.apache.commons.lang3.StringUtils;
 
 @Entity
 @Getter
@@ -25,6 +27,8 @@ import lombok.Setter;
 @AllArgsConstructor
 @Table(name = "passkey_credential")
 public class PasskeyCredential {
+
+    public static final String TRANSPORT_SEPARATOR = ",";
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -59,6 +63,10 @@ public class PasskeyCredential {
             return PasskeyKind.DEVICE_BOUND;
         }
         return PasskeyKind.UNKNOWN;
+    }
+
+    public List<String> transportList() {
+        return List.of(StringUtils.split(StringUtils.defaultString(transports), TRANSPORT_SEPARATOR));
     }
 
 }

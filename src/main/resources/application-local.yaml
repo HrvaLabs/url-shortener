@@ -31,6 +31,9 @@ app:
   frontend-url: http://localhost:3000
   # Local profile only, so /mcp/anon works locally; production keeps application.yaml's value.
   anonymous-url-creation-enabled: true
+  passkeys:
+    rp-id: localhost
+    allowed-origins: http://localhost:3000
   mcp:
     issuer: http://localhost:8080
     # NOT A SECRET: a committed dev-only key for the local profile. Never use it anywhere else;

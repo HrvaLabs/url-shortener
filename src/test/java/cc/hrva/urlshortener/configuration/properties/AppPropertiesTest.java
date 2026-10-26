@@ -4,7 +4,9 @@ import java.time.ZoneId;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.context.properties.bind.Binder;
+import org.springframework.boot.context.properties.source.ConfigurationPropertySources;
 import org.springframework.boot.context.properties.source.MapConfigurationPropertySource;
+import org.springframework.core.env.SystemEnvironmentPropertySource;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -43,6 +45,31 @@ class AppPropertiesTest {
     @Test
     void analyticsZoneDefaultsToZagreb() {
         assertThat(new AppProperties().getAnalytics().getZone()).isEqualTo(ZoneId.of("Europe/Zagreb"));
+    }
+
+    @Test
+    void passkeysBindFromCommaSeparatedOrigins() {
+        final var binder = new Binder(new MapConfigurationPropertySource(Map.of(
+                "app.passkeys.rp-id", "hrva.cc",
+                "app.passkeys.allowed-origins", "https://app.hrva.cc,http://localhost:3000")));
+
+        final var passkeys = binder.bind("app.passkeys", AppProperties.Passkeys.class).get();
+
+        assertThat(passkeys.getRpId()).isEqualTo("hrva.cc");
+        assertThat(passkeys.getAllowedOrigins()).containsExactly("https://app.hrva.cc", "http://localhost:3000");
+    }
+
+    @Test
+    void passkeysBindFromTheEnvironment() {
+        final var environment = new SystemEnvironmentPropertySource("environment", Map.<String, Object>of(
+                "APP_PASSKEYS_RP_ID", "hrva.cc",
+                "APP_PASSKEYS_ALLOWED_ORIGINS", "https://app.hrva.cc,https://hrva.cc"));
+        final var binder = new Binder(ConfigurationPropertySources.from(environment));
+
+        final var passkeys = binder.bind("app.passkeys", AppProperties.Passkeys.class).get();
+
+        assertThat(passkeys.getRpId()).isEqualTo("hrva.cc");
+        assertThat(passkeys.getAllowedOrigins()).containsExactly("https://app.hrva.cc", "https://hrva.cc");
     }
 
     @Test
