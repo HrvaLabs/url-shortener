@@ -7,6 +7,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
+import java.time.LocalDateTime;
 import java.util.List;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -48,5 +49,9 @@ public class BioPageUpdateDto {
     @Size(max = 30, message = "A page can have at most 30 buttons")
     @Schema(description = "Every button in page order; the page is replaced as a whole")
     private List<@NotNull(message = BioPageButtonDto.LINK_REQUIRED) BioPageButtonDto> buttons;
+    @Schema(description = "The page's updatedAt as last read, in the format it was sent; when it doesn't match the stored page "
+            + "to the microsecond, the save is refused with 409 and nothing is written. Left out, the save isn't checked",
+            example = "2026-10-26T09:00:00.123456")
+    private LocalDateTime expectedUpdatedAt;
 
 }

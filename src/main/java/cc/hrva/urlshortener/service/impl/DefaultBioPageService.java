@@ -34,6 +34,7 @@ import cc.hrva.urlshortener.service.bio.BioPageTextSignals;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.HashSet;
@@ -66,6 +67,8 @@ public class DefaultBioPageService implements BioPageService {
     private static final String ALREADY_HAS_PAGE = "You already have a bio page.";
     private static final String HANDLE_TAKEN = "This handle is taken. Try another.";
     private static final String PAGE_CHANGED = "This page changed. Reload and try again.";
+    private static final String OUTDATED_COPY =
+            "Your bio page changed in another tab or window. We loaded the latest version; check your changes and save again.";
     private static final String HIDDEN_PAGE_NOT_DELETABLE =
             "An admin hid this page, so it can't be deleted here. You can still delete your whole account in Settings.";
     private static final String EMOJI_REQUIRED = "Pick one emoji for the avatar.";
@@ -140,6 +143,7 @@ public class DefaultBioPageService implements BioPageService {
         final var user = currentUser();
         requireWithinLimit(SAVE_LIMIT, user, SAVES_PER_USER, SAVE_WINDOW, SAVES_REFUSED);
         final var page = lockedPageOf(user);
+        requireCurrentCopy(page, bioPageUpdateDto.getExpectedUpdatedAt());
 
         final var displayName = cleaned(bioPageUpdateDto.getDisplayName(), BioPageUpdateDto.MAX_DISPLAY_NAME_LENGTH,
                 BioPageUpdateDto.DISPLAY_NAME_TOO_LONG);
@@ -158,7 +162,7 @@ public class DefaultBioPageService implements BioPageService {
         page.setAccent(bioPageUpdateDto.getAccent());
         page.setTheme(bioPageUpdateDto.getTheme());
         page.setIndexable(Boolean.TRUE.equals(bioPageUpdateDto.getIndexable()));
-        page.setUpdatedAt(LocalDateTime.now(clock));
+        page.setUpdatedAt(LocalDateTime.now(clock).truncatedTo(ChronoUnit.MICROS));
         final List<BioPageButton> buttons;
         final BioPage saved;
         try {
@@ -273,6 +277,17 @@ public class DefaultBioPageService implements BioPageService {
     private static BioPageNotFoundException deletedByAConcurrentRequest(final BioPage page) {
         log.info("Bio page was deleted by a concurrent request pageId={}", page.getId());
         return new BioPageNotFoundException(NO_PAGE);
+    }
+
+    private static void requireCurrentCopy(final BioPage page, final LocalDateTime expectedUpdatedAt) {
+        if (expectedUpdatedAt == null) {
+            return;
+        }
+        final var stored = page.getUpdatedAt() == null ? null : page.getUpdatedAt().truncatedTo(ChronoUnit.MICROS);
+        if (!expectedUpdatedAt.truncatedTo(ChronoUnit.MICROS).equals(stored)) {
+            log.info("Bio page save refused because it was made from an outdated copy pageId={}", page.getId());
+            throw new BioPageConflictException(OUTDATED_COPY);
+        }
     }
 
     private static boolean violates(final DataIntegrityViolationException exception, final String constraint) {

@@ -11,8 +11,9 @@
 # Section 16 checks QR scans, the public numbers (with their 60-per-hour limit) and the burst alert. The
 # alert goes to a local Node stub on a random loopback port: its URL is passed on the command line, which
 # outranks DISCORD_WEBHOOK_URL, so the real webhook is never called.
-# Section 17 checks bio pages on Postgres: racing creates, the page lock's SQL and what waits behind it, the public page,
-# the /@handle redirect, view counting, a click from the page, a report, the admin search, hide and revoke, and the export.
+# Section 17 checks bio pages on Postgres: racing creates, the page lock's SQL and what waits behind it, saves from an
+# up-to-date and an outdated copy, the public page, the /@handle redirect, view counting, a click from the page, a report,
+# the admin search, hide and revoke, and the export.
 #
 #   scripts/mcp-e2e.sh                         builds the jar, then runs every step
 #   MCP_E2E_SKIP_BUILD=1 scripts/mcp-e2e.sh    reuses target/url-shortener-*.jar
@@ -808,6 +809,7 @@ SAVE=$(jq -nc --argjson urlId "$BIO_LINK_ID" '{displayName: "E2E a\\b 100%", bio
 http -X PUT "$BIO_PAGES/me" -H "Authorization: Bearer $APP_JWT" -H 'Content-Type: application/json' -d "$SAVE"
 expect_eq "$HTTP_STATUS" 200 "PUT /api/v1/bio-pages/me with one button"
 expect_eq "$(jq -r '.buttons[0].linkState + " " + (.buttons[0].shownOnPage | tostring)' <<<"$HTTP_BODY")" "LIVE true" "the button's link is LIVE and shows on the page"
+FIRST_SAVED_AT=$(jq -r .updatedAt <<<"$HTTP_BODY")
 psql_value "alter system reset log_statement;" >/dev/null
 psql_value "select pg_reload_conf();" >/dev/null
 docker logs "$POSTGRES_CONTAINER" >"$WORK/postgres.log" 2>&1
@@ -823,6 +825,27 @@ LOCK_HELD_MS=$(awk -v pid="$LOCK_PID" -v lock="$LOCK_LINE" '
     $0 == lock { start = ms($1, $2); next }
     start && $4 == pid && /COMMIT/ { printf "%.0f", ms($1, $2) - start; exit }' "$WORK/postgres.log")
 echo "  the save held the page lock for ${LOCK_HELD_MS:-?} ms (its locking select to its COMMIT)"
+
+echo "  --- saves from the copy the last save answered with, then one from an outdated copy"
+http -X PUT "$BIO_PAGES/me" -H "Authorization: Bearer $APP_JWT" -H 'Content-Type: application/json' \
+    -d "$(jq -c --arg at "$FIRST_SAVED_AT" '. + {bio: "Photos from Split", expectedUpdatedAt: $at}' <<<"$SAVE")"
+expect_eq "$HTTP_STATUS" 200 "a save sending the first save's updatedAt ($FIRST_SAVED_AT) goes through"
+SECOND_SAVED_AT=$(jq -r .updatedAt <<<"$HTTP_BODY")
+http -X PUT "$BIO_PAGES/me" -H "Authorization: Bearer $APP_JWT" -H 'Content-Type: application/json' \
+    -d "$(jq -c --arg at "$SECOND_SAVED_AT" '. + {expectedUpdatedAt: $at}' <<<"$SAVE")"
+expect_eq "$HTTP_STATUS" 200 "so does the next one, sending the second save's updatedAt ($SECOND_SAVED_AT)"
+THIRD_SAVED_AT=$(jq -r .updatedAt <<<"$HTTP_BODY")
+http -H "Authorization: Bearer $APP_JWT" "$BIO_PAGES/me"
+expect_eq "$(jq -r .updatedAt <<<"$HTTP_BODY")" "$THIRD_SAVED_AT" "GET /api/v1/bio-pages/me reads back the updatedAt the save answered with"
+STORED_BEFORE=$(psql_value "select bio || ' | ' || updated_at from bio_page where id = $PAGE_ID;")
+http -X PUT "$BIO_PAGES/me" -H "Authorization: Bearer $APP_JWT" -H 'Content-Type: application/json' \
+    -d "$(jq -c --arg at "$FIRST_SAVED_AT" '. + {bio: "From an outdated tab", expectedUpdatedAt: $at}' <<<"$SAVE")"
+expect_eq "$HTTP_STATUS $(jq -r .error <<<"$HTTP_BODY")" \
+    "409 Your bio page changed in another tab or window. We loaded the latest version; check your changes and save again." \
+    "a save still sending the first save's updatedAt is a 409"
+[[ $STORED_BEFORE == "Photos from Zagreb | "* ]] || fail "the page before the outdated save: unexpected '$STORED_BEFORE'"
+expect_eq "$(psql_value "select bio || ' | ' || updated_at from bio_page where id = $PAGE_ID;")" "$STORED_BEFORE" \
+    "and writes nothing: bio_page still has the bio and updated_at of the save before it ($STORED_BEFORE)"
 
 echo "  --- the public page"
 http "$BASE/api/v1/public/bio-pages/E2E-Bio"

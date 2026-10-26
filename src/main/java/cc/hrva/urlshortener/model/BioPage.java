@@ -16,6 +16,7 @@ import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
@@ -57,7 +58,7 @@ public class BioPage {
 
     @PrePersist
     public void onCreate() {
-        final var now = LocalDateTime.now();
+        final var now = LocalDateTime.now().truncatedTo(ChronoUnit.MICROS);
         this.createdAt = now;
         this.updatedAt = now;
         if (this.displayName == null) {
@@ -79,7 +80,7 @@ public class BioPage {
 
     @PreUpdate
     public void onUpdate() {
-        this.updatedAt = LocalDateTime.now();
+        this.updatedAt = LocalDateTime.now().truncatedTo(ChronoUnit.MICROS);
     }
 
     public boolean isPublic() {

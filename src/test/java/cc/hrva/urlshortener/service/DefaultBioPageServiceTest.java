@@ -84,6 +84,8 @@ class DefaultBioPageServiceTest {
     private static final Duration CHECK_WINDOW = Duration.ofMinutes(10);
     private static final String NO_PAGE = "You don't have a bio page yet.";
     private static final String PAGE_CHANGED = "This page changed. Reload and try again.";
+    private static final String OUTDATED_COPY =
+            "Your bio page changed in another tab or window. We loaded the latest version; check your changes and save again.";
     private static final String ALREADY_HAS_PAGE = "You already have a bio page.";
     private static final String TAKEN = "This handle is taken. Try another.";
     private static final String RESERVED = "This handle is reserved. Try another.";
@@ -581,6 +583,92 @@ class DefaultBioPageServiceTest {
 
         verifyNoInteractions(urlRepository, bioPageButtonRepository);
         verify(bioPageRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void aSaveFromAnOutdatedCopyIs409AndWritesNothing() {
+        hasPage();
+        final var dto = update(buttonDto(41L, "Instagram"));
+        dto.setExpectedUpdatedAt(CREATED_AT.minusMinutes(5));
+
+        assertThatThrownBy(() -> bioPageService.update(dto))
+                .isInstanceOf(BioPageConflictException.class)
+                .hasMessage(OUTDATED_COPY);
+
+        verifyNoInteractions(urlRepository, bioPageButtonRepository, bioPageTextSignals, bioPageReviewService);
+        verify(bioPageRepository, never()).saveAndFlush(any());
+        assertThat(page.getDisplayName()).isEqualTo("Ana");
+        assertThat(page.getUpdatedAt()).isEqualTo(CREATED_AT);
+    }
+
+    @Test
+    void anOutdatedCopyIsRefusedBeforeItsTextIsChecked() {
+        hasPage();
+        final var dto = update(buttonDto(41L, " "));
+        dto.setExpectedUpdatedAt(CREATED_AT.minusMinutes(5));
+
+        assertThatThrownBy(() -> bioPageService.update(dto))
+                .isInstanceOf(BioPageConflictException.class)
+                .hasMessage(OUTDATED_COPY);
+    }
+
+    @Test
+    void anOutdatedCopyIsJudgedByThePageAsReadUnderTheLock() {
+        hasPage();
+        final var hiddenMeanwhile = BioPage.builder().id(12L).owner(ana).handle("ana").displayName("Ana").bio("")
+                .avatarKind(BioAvatarKind.INITIALS).accent(BioAccent.BLUE).theme(BioTheme.AUTO)
+                .hiddenAt(NOW).hiddenReason("Spam").hiddenBy("admin@localhost")
+                .createdAt(CREATED_AT).updatedAt(NOW).build();
+        when(bioPageLock.lock(page)).thenReturn(Optional.of(hiddenMeanwhile));
+        final var dto = update();
+        dto.setExpectedUpdatedAt(CREATED_AT);
+
+        assertThatThrownBy(() -> bioPageService.update(dto))
+                .isInstanceOf(BioPageConflictException.class)
+                .hasMessage(OUTDATED_COPY);
+
+        verify(bioPageRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void aSaveFromTheCurrentCopyComparesToTheMicrosecond() {
+        page.setUpdatedAt(CREATED_AT.withNano(123_456_000));
+        hasPage();
+        savesReturnTheirArgument();
+        final var dto = update();
+        dto.setExpectedUpdatedAt(CREATED_AT.withNano(123_456_789));
+
+        final var response = bioPageService.update(dto);
+
+        assertThat(response.displayName()).isEqualTo("Ana Horvat");
+        verify(bioPageRepository).saveAndFlush(page);
+    }
+
+    @Test
+    void aCopyOneMicrosecondOlderIsOutdated() {
+        page.setUpdatedAt(CREATED_AT.withNano(123_456_000));
+        hasPage();
+        final var dto = update();
+        dto.setExpectedUpdatedAt(CREATED_AT.withNano(123_455_999));
+
+        assertThatThrownBy(() -> bioPageService.update(dto))
+                .isInstanceOf(BioPageConflictException.class)
+                .hasMessage(OUTDATED_COPY);
+    }
+
+    @Test
+    void aSaveTouchesUpdatedAtToTheMicrosecond() {
+        final var clock = Clock.fixed(Instant.parse("2026-10-26T09:00:00.123456789Z"), ZoneOffset.UTC);
+        final var service = new DefaultBioPageService(userService, bioPageRepository, bioPageLock, bioPageButtonRepository, urlRepository,
+                bioHandles, new BioPageResponses(bioPageButtonRepository, linkReviewRepository, clock), bioPageTextSignals,
+                bioPageReviewService, rateLimiter, clock);
+        hasPage();
+        savesReturnTheirArgument();
+
+        final var response = service.update(update());
+
+        assertThat(page.getUpdatedAt()).isEqualTo(NOW.withNano(123_456_000));
+        assertThat(response.updatedAt()).isEqualTo(NOW.withNano(123_456_000));
     }
 
     @Test

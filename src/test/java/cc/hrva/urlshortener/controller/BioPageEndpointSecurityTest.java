@@ -407,6 +407,30 @@ class BioPageEndpointSecurityTest {
     }
 
     @Test
+    void theCopyTimestampIsReadInTheFormatThePageIsSentIn() throws Exception {
+        when(bioPageService.update(any(BioPageUpdateDto.class))).thenReturn(ana());
+
+        mockMvc.perform(signedIn(put(MY_PAGE)).content("{\"displayName\":\"Ana\",\"avatarKind\":\"INITIALS\",\"accent\":\"TEAL\",\"theme\":\"AUTO\","
+                        + "\"buttons\":[],\"expectedUpdatedAt\":\"2026-10-26T09:05:00.1234\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.updatedAt").value("2026-10-26T09:05:00"));
+
+        final var saved = ArgumentCaptor.forClass(BioPageUpdateDto.class);
+        verify(bioPageService).update(saved.capture());
+        assertThat(saved.getValue().getExpectedUpdatedAt()).isEqualTo(LocalDateTime.of(2026, 10, 26, 9, 5, 0, 123_400_000));
+    }
+
+    @Test
+    void aSaveFromAnOutdatedCopyIs409WithItsText() throws Exception {
+        final var outdated = "Your bio page changed in another tab or window. We loaded the latest version; check your changes and save again.";
+        when(bioPageService.update(any(BioPageUpdateDto.class))).thenThrow(new BioPageConflictException(outdated));
+
+        mockMvc.perform(signedIn(put(MY_PAGE)).content(page("[]")))
+                .andExpect(status().isConflict())
+                .andExpect(content().json("{\"error\":\"" + outdated + "\"}", true));
+    }
+
+    @Test
     void aTooLongNameIsAFieldError() throws Exception {
         mockMvc.perform(signedIn(put(MY_PAGE)).content(page("[]").replace("\"Ana Horvat\"", "\"" + "a".repeat(51) + "\"")))
                 .andExpect(status().isBadRequest())
