@@ -1,5 +1,7 @@
 package cc.hrva.urlshortener.model.enums;
 
+import java.util.Set;
+
 public enum BlockReason {
 
     SAFE_BROWSING,
@@ -7,6 +9,8 @@ public enum BlockReason {
     DOMAIN_RULE,
     ADMIN,
     USER_BLOCKED,
-    SCAM_SIGNALS
+    SCAM_SIGNALS;
+
+    public static final Set<BlockReason> MANUAL = Set.of(ADMIN, USER_BLOCKED);
 
 }

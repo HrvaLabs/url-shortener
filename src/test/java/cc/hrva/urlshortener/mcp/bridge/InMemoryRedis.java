@@ -14,9 +14,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
 
 public final class InMemoryRedis {
 
@@ -27,17 +26,17 @@ public final class InMemoryRedis {
     @SuppressWarnings("unchecked")
     public void backing(final StringRedisTemplate redisTemplate) {
         final ValueOperations<String, String> valueOperations = mock(ValueOperations.class);
-        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
-        doAnswer(invocation -> {
+        lenient().when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+        lenient().doAnswer(invocation -> {
             values.put(invocation.getArgument(0), new StoredValue(invocation.getArgument(1), invocation.getArgument(2)));
             return null;
         }).when(valueOperations).set(anyString(), anyString(), any(Duration.class));
-        when(valueOperations.setIfAbsent(anyString(), anyString(), any(Duration.class))).thenAnswer(invocation ->
+        lenient().when(valueOperations.setIfAbsent(anyString(), anyString(), any(Duration.class))).thenAnswer(invocation ->
                 values.putIfAbsent(invocation.getArgument(0), new StoredValue(invocation.getArgument(1), invocation.getArgument(2))) == null);
-        when(valueOperations.get(anyString())).thenAnswer(invocation -> valueOf(values.get(invocation.<String>getArgument(0))));
-        when(valueOperations.getAndDelete(anyString())).thenAnswer(invocation -> valueOf(values.remove(invocation.<String>getArgument(0))));
-        when(redisTemplate.delete(anyString())).thenAnswer(invocation -> values.remove(invocation.<String>getArgument(0)) != null);
-        when(redisTemplate.execute(any(RedisScript.class), anyList(), any(Object[].class))).thenAnswer(invocation -> {
+        lenient().when(valueOperations.get(anyString())).thenAnswer(invocation -> valueOf(values.get(invocation.<String>getArgument(0))));
+        lenient().when(valueOperations.getAndDelete(anyString())).thenAnswer(invocation -> valueOf(values.remove(invocation.<String>getArgument(0))));
+        lenient().when(redisTemplate.delete(anyString())).thenAnswer(invocation -> values.remove(invocation.<String>getArgument(0)) != null);
+        lenient().when(redisTemplate.execute(any(RedisScript.class), anyList(), any(Object[].class))).thenAnswer(invocation -> {
             final var arguments = invocation.getArguments();
             return fixedWindowIncrement(invocation.getArgument(0), invocation.getArgument(1), Arrays.copyOfRange(arguments, 2, arguments.length));
         });

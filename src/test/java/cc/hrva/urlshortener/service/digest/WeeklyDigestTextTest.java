@@ -9,6 +9,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.function.UnaryOperator;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -81,6 +82,21 @@ class WeeklyDigestTextTest {
                 "Reviews: 0 opened, 0 resolved",
                 "Automatic blocks: none",
                 "Top links by clicks: none this week");
+    }
+
+    @Test
+    void theLinesAreTheSummaryThenTheTopLinks() {
+        final var digest = withTopLinks(List.of(new TopLink("a_b", "x.example", 2), new TopLink("c", "y.example", 1)));
+        final UnaryOperator<String> value = text -> "[" + text + "]";
+
+        final var summary = WeeklyDigestText.summaryLines(digest);
+        final var topLinks = WeeklyDigestText.topLinkLines(digest, SHORT_LINK_HOST, value);
+
+        assertThat(summary).hasSize(10).endsWith("Automatic blocks: 2 blocklist, 1 Safe Browsing", "Top links by clicks:");
+        assertThat(topLinks).containsExactly("1. [hrva.cc/a_b] → [x.example], 2 clicks", "2. [hrva.cc/c] → [y.example], 1 click");
+        assertThat(WeeklyDigestText.lines(digest, SHORT_LINK_HOST, value))
+                .containsExactlyElementsOf(Stream.concat(summary.stream(), topLinks.stream()).toList());
+        assertThat(WeeklyDigestText.topLinkLines(withTopLinks(List.of()), SHORT_LINK_HOST, value)).isEmpty();
     }
 
     @Test

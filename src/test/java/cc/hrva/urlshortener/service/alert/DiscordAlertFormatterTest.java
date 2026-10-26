@@ -1,6 +1,10 @@
 package cc.hrva.urlshortener.service.alert;
 
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
+import cc.hrva.urlshortener.dto.WeeklyDigest;
+import cc.hrva.urlshortener.dto.WeeklyDigest.Change;
+import cc.hrva.urlshortener.dto.WeeklyDigest.TopLink;
+import cc.hrva.urlshortener.dto.stats.CountEntry;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.enums.BlockReason;
@@ -11,6 +15,8 @@ import cc.hrva.urlshortener.service.alert.AdminAlertEvent.LinkBlocked;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.ReviewOpened;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.UserSignedUp;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.VisitorReported;
+import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.IntStream;
 import org.junit.jupiter.api.BeforeEach;
@@ -23,6 +29,8 @@ class DiscordAlertFormatterTest {
 
     private static final AlertedLink ANONYMOUS_LINK = new AlertedLink(42L, "abc12", "example-login.top", null);
     private static final String REVIEW_PAGE = "<https://app.hrva.cc/admin/review>";
+    private static final LocalDate DIGEST_FROM = LocalDate.of(2026, 10, 19);
+    private static final LocalDate DIGEST_TO = LocalDate.of(2026, 10, 25);
 
     private DiscordAlertFormatter formatter;
 
@@ -204,6 +212,151 @@ class DiscordAlertFormatterTest {
         final var content = formatter.message(List.of(new BlocklistSourceRecovered("URLhaus")), 0).content();
 
         assertThat(content).isEqualTo("URLhaus loads again");
+    }
+
+    @Test
+    void theWeeklyDigestIsTheBoldTitleTheLinesAndTheStatsPage() {
+        final var content = formatter.weeklyDigest(busyWeek(List.of(new TopLink("menu", "example.com", 120)))).content();
+
+        assertThat(content).isEqualTo("""
+                **hrva.cc weekly summary: 19–25 October 2026**
+                Clicks: 1,204 (up 12% on the week before)
+                Daily unique visitors, added up: 950
+                Bot share: 20.0%
+                New links: 40 (down 5% on the week before)
+                How they were made: 30 website, 6 API key, 4 AI connector
+                New users: 3 (none the week before)
+                Active users: 12 signed in during the last 7 days
+                Reviews: 5 opened, 4 resolved
+                Automatic blocks: 2 blocklist, 1 Safe Browsing
+                Top links by clicks:
+                1. hrva.cc/menu → example.com, 120 clicks
+                Stats (last 7 days): <https://app.hrva.cc/admin/dashboard?days=7>""");
+    }
+
+    @Test
+    void anEmptyWeeklyDigestSaysSoAndStillLinksTheStatsPage() {
+        final var empty = new WeeklyDigest(DIGEST_FROM, DIGEST_TO, new Change(0, 0), 0, 0, new Change(0, 0), List.of(), new Change(0, 0), 0, 0, 0,
+                List.of(), List.of());
+
+        assertThat(formatter.weeklyDigest(empty).content()).isEqualTo("""
+                **hrva.cc weekly summary: 19–25 October 2026**
+                Clicks: 0 (same as the week before)
+                Daily unique visitors, added up: 0
+                Bot share: no clicks
+                New links: 0 (same as the week before)
+                New users: 0 (same as the week before)
+                Active users: 0 signed in during the last 7 days
+                Reviews: 0 opened, 0 resolved
+                Automatic blocks: none
+                Top links by clicks: none this week
+                Stats (last 7 days): <https://app.hrva.cc/admin/dashboard?days=7>""");
+    }
+
+    @Test
+    void theWeeklyDigestIsOneMessageUnder2000Characters() {
+        final var topLinks = IntStream.rangeClosed(1, 5)
+                .mapToObj(rank -> new TopLink(rank + "a".repeat(39), "h".repeat(91) + rank + ".example", 1000L - rank))
+                .toList();
+        final var digest = new WeeklyDigest(DIGEST_FROM, DIGEST_TO, new Change(123_456, 120_000), 98_765, 4_321, new Change(1528, 1400),
+                List.of(new CountEntry("WEB", 1500), new CountEntry("API_KEY", 12), new CountEntry("BULK", 6), new CountEntry("MCP", 4),
+                        new CountEntry("ANONYMOUS_WEB", 3), new CountEntry("ANONYMOUS_MCP", 2), new CountEntry("unknown", 1)),
+                new Change(30, 25), 1_200, 45, 44,
+                List.of(new CountEntry("SAFE_BROWSING", 4), new CountEntry("BLOCKLIST", 3), new CountEntry("DOMAIN_RULE", 2),
+                        new CountEntry("SCAM_SIGNALS", 1), new CountEntry("unknown", 1)),
+                topLinks);
+
+        final var content = formatter.weeklyDigest(digest).content();
+
+        assertThat(content.length()).isLessThan(2000);
+        assertThat(content).startsWith("**hrva.cc weekly summary: 19–25 October 2026**\n");
+        topLinks.forEach(link -> assertThat(content).contains("hrva.cc/" + link.shortUrl() + " → " + link.destinationHost() + ", "));
+        assertThat(content).doesNotContain("…", " more");
+        assertThat(content.lines().toList().getLast()).isEqualTo("Stats (last 7 days): <https://app.hrva.cc/admin/dashboard?days=7>");
+    }
+
+    @Test
+    void theWeeklyDigestHasNoMentionsOrEmbeds() {
+        final var json = JsonMapper.builder().build().readTree(JsonMapper.builder().build().writeValueAsString(
+                formatter.weeklyDigest(busyWeek(List.of(new TopLink("menu", "example.com", 120))))));
+
+        assertThat(json.path("allowed_mentions").path("parse").isArray()).isTrue();
+        assertThat(json.path("allowed_mentions").path("parse").isEmpty()).isTrue();
+        assertThat(json.path("flags").asInt()).isEqualTo(4);
+        assertThat(json.has("embeds")).isFalse();
+    }
+
+    @Test
+    void theWeeklyDigestEscapesAliasesAndHosts() {
+        final var content = formatter.weeklyDigest(busyWeek(List.of(new TopLink("a_b", "my_shop.example", 3)))).content();
+
+        assertThat(content).contains("\n1. hrva.cc/a\\_b → my\\_shop.example, 3 clicks\n");
+    }
+
+    @Test
+    void theWeeklyDigestShowsNoIp() {
+        final var content = formatter.weeklyDigest(busyWeek(List.of(
+                new TopLink("ip", "203.0.113.7", 4), new TopLink("v6", "2001:db8::1", 3)))).content();
+
+        assertThat(content).contains("1. hrva.cc/ip → an IP address, 4 clicks", "2. hrva.cc/v6 → an IP address, 3 clicks");
+        assertThat(content).doesNotContain("203.0.113.7", "2001:db8");
+    }
+
+    @Test
+    void longHostsAreShownInFullAndTheTopLinksEndWithAndNMoreWhenTheyDoNotFit() {
+        final var host = "a_".repeat(120) + "example";
+        final var topLinks = IntStream.rangeClosed(1, 5).mapToObj(rank -> new TopLink("s" + rank, rank + host, 10L - rank)).toList();
+        final var escapedHost = host.replace("_", "\\_");
+
+        final var content = formatter.weeklyDigest(busyWeek(topLinks)).content();
+        final var lines = content.lines().toList();
+
+        assertThat(content.length()).isLessThanOrEqualTo(2000);
+        assertThat(content).doesNotContain("…");
+        assertThat(lines.subList(lines.indexOf("Top links by clicks:") + 1, lines.size())).containsExactly(
+                "1. hrva.cc/s1 → 1" + escapedHost + ", 9 clicks",
+                "2. hrva.cc/s2 → 2" + escapedHost + ", 8 clicks",
+                "3. hrva.cc/s3 → 3" + escapedHost + ", 7 clicks",
+                "and 2 more",
+                "Stats (last 7 days): <https://app.hrva.cc/admin/dashboard?days=7>");
+    }
+
+    @Test
+    void aWeeklyDigestOfExactly2000CharactersKeepsEveryTopLinkAndOneMoreCharacterMovesTheLastIntoAndOneMore() {
+        final var exactLength = 2000 - formatter.weeklyDigest(withLastHostOfLength(10)).content().length() + 10;
+
+        final var fitting = formatter.weeklyDigest(withLastHostOfLength(exactLength)).content();
+        final var tooLong = formatter.weeklyDigest(withLastHostOfLength(exactLength + 1)).content().lines().toList();
+
+        assertThat(fitting).hasSize(2000).doesNotContain(" more").contains("5. hrva.cc/s5 → " + "x".repeat(exactLength - 8) + ".example, 1 click");
+        assertThat(tooLong.subList(tooLong.size() - 3, tooLong.size())).containsExactly(
+                "4. hrva.cc/s4 → s4.example, 2 clicks",
+                "and 1 more",
+                "Stats (last 7 days): <https://app.hrva.cc/admin/dashboard?days=7>");
+    }
+
+    private static WeeklyDigest withLastHostOfLength(final int length) {
+        final var topLinks = new ArrayList<TopLink>();
+        IntStream.rangeClosed(1, 4).forEach(rank -> topLinks.add(new TopLink("s" + rank, "s" + rank + ".example", 6L - rank)));
+        topLinks.add(new TopLink("s5", "x".repeat(length - 8) + ".example", 1));
+        return busyWeek(topLinks);
+    }
+
+    private static WeeklyDigest busyWeek(final List<TopLink> topLinks) {
+        return new WeeklyDigest(
+                DIGEST_FROM,
+                DIGEST_TO,
+                new Change(1204, 1075),
+                950,
+                301,
+                new Change(40, 42),
+                List.of(new CountEntry("WEB", 30), new CountEntry("API_KEY", 6), new CountEntry("MCP", 4)),
+                new Change(3, 0),
+                12,
+                5,
+                4,
+                List.of(new CountEntry("BLOCKLIST", 2), new CountEntry("SAFE_BROWSING", 1)),
+                topLinks);
     }
 
 }

@@ -2,6 +2,7 @@ package cc.hrva.urlshortener.service.impl;
 
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.dto.DecisionsDigest;
+import cc.hrva.urlshortener.dto.WeeklyDigest;
 import cc.hrva.urlshortener.exception.EmailLogNotFoundException;
 import cc.hrva.urlshortener.exception.EmailNotResendableException;
 import cc.hrva.urlshortener.model.EmailLog;
@@ -16,6 +17,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.UnaryOperator;
 import java.util.stream.Stream;
 import lombok.RequiredArgsConstructor;
 import org.apache.commons.lang3.StringUtils;
@@ -25,6 +27,7 @@ import cc.hrva.urlshortener.model.ResetToken;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.service.SendingEmailService;
+import cc.hrva.urlshortener.service.digest.WeeklyDigestText;
 import cc.hrva.urlshortener.util.EmailAddresses;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
@@ -41,6 +44,7 @@ public class DefaultSendingEmailService implements SendingEmailService {
     private static final Duration INTERRUPTED_AFTER = Duration.ofMinutes(10);
     private static final Duration CONTENT_RETENTION = Duration.ofDays(7);
     private static final int LISTED_BLOCKED_LINKS = 20;
+    private static final String STATS_PAGE = "/admin/dashboard?days=7";
     private static final DateTimeFormatter PASSKEY_ADDED_AT_FORMAT = DateTimeFormatter.ofPattern("d MMMM yyyy 'at' HH:mm 'UTC'", Locale.ENGLISH);
 
     private final AppProperties appProperties;
@@ -246,6 +250,31 @@ public class DefaultSendingEmailService implements SendingEmailService {
                 .sender(appProperties.getEmailSenderAddress())
                 .receivers(new String[]{appProperties.getContactEmail()})
                 .subject(subject)
+                .text(htmlContent)
+                .build();
+
+        tryToSendEmail(email);
+    }
+
+    @Override
+    @Async
+    public void sendWeeklyDigestToAdmin(final WeeklyDigest digest) {
+        final var title = WeeklyDigestText.title(digest);
+        final var lines = WeeklyDigestText.lines(digest, shortLinkHost(), UnaryOperator.identity());
+        final var statsPage = frontendPage(STATS_PAGE);
+        final var ctx = new Context();
+        ctx.setVariable("headline", title);
+        ctx.setVariable("lines", lines);
+        ctx.setVariable("stats_page", statsPage);
+        ctx.setVariable("app_name", appProperties.getAppName());
+
+        final var htmlContent = templateEngine.process("weekly_digest", ctx);
+
+        final var email = Email.builder()
+                .sender(appProperties.getEmailSenderAddress())
+                .receivers(new String[]{appProperties.getContactEmail()})
+                .subject(title)
+                .plainText(title + "\n\n" + String.join("\n", lines) + "\n\nStats (last 7 days): " + statsPage)
                 .text(htmlContent)
                 .build();
 

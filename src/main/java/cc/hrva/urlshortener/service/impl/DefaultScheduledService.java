@@ -12,6 +12,7 @@ import cc.hrva.urlshortener.service.SendingEmailService;
 import cc.hrva.urlshortener.service.UrlNotificationService;
 import cc.hrva.urlshortener.service.UrlService;
 import cc.hrva.urlshortener.service.UserService;
+import cc.hrva.urlshortener.service.WeeklyDigestService;
 import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
@@ -31,6 +32,7 @@ public class DefaultScheduledService implements ScheduledService {
     private final SendingEmailService sendingEmailService;
     private final LinkDigestService linkDigestService;
     private final BlocklistSourceService blocklistSourceService;
+    private final WeeklyDigestService weeklyDigestService;
 
     @Override
     @Scheduled(cron = "0 */1 * * * *")
@@ -108,6 +110,13 @@ public class DefaultScheduledService implements ScheduledService {
     public void reloadMissingBlocklists() {
         log.info("Scheduled: missing blocklists");
         blocklistSourceService.reloadMissing();
+    }
+
+    @Override
+    @Scheduled(cron = "0 0 8 * * MON", zone = "${app.analytics.zone}")
+    public void sendWeeklyDigest() {
+        log.info("Scheduled: weekly digest");
+        weeklyDigestService.sendWeeklyDigest();
     }
 
 }

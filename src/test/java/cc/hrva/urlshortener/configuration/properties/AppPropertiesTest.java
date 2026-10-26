@@ -1,12 +1,16 @@
 package cc.hrva.urlshortener.configuration.properties;
 
+import java.io.IOException;
 import java.time.ZoneId;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.context.properties.bind.Binder;
+import org.springframework.boot.env.YamlPropertySourceLoader;
 import org.springframework.boot.context.properties.source.ConfigurationPropertySources;
 import org.springframework.boot.context.properties.source.MapConfigurationPropertySource;
+import org.springframework.core.env.StandardEnvironment;
 import org.springframework.core.env.SystemEnvironmentPropertySource;
+import org.springframework.core.io.ClassPathResource;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -70,6 +74,48 @@ class AppPropertiesTest {
 
         assertThat(passkeys.getRpId()).isEqualTo("hrva.cc");
         assertThat(passkeys.getAllowedOrigins()).containsExactly("https://app.hrva.cc", "https://hrva.cc");
+    }
+
+    @Test
+    void weeklyDigestIsOnByDefault() {
+        final var weekly = new AppProperties().getDigest().getWeekly();
+
+        assertThat(weekly.isEnabled()).isTrue();
+        assertThat(weekly.isEmail()).isTrue();
+    }
+
+    @Test
+    void weeklyDigestSwitchesBindSeparately() {
+        final var discordOff = new Binder(new MapConfigurationPropertySource(Map.of("app.digest.weekly.enabled", "false")))
+                .bind("app.digest", AppProperties.Digest.class).get().getWeekly();
+        final var emailOff = new Binder(new MapConfigurationPropertySource(Map.of("app.digest.weekly.email", "false")))
+                .bind("app.digest", AppProperties.Digest.class).get().getWeekly();
+
+        assertThat(discordOff.isEnabled()).isFalse();
+        assertThat(discordOff.isEmail()).isTrue();
+        assertThat(emailOff.isEnabled()).isTrue();
+        assertThat(emailOff.isEmail()).isFalse();
+    }
+
+    @Test
+    void weeklyDigestSwitchesBindFromTheEnvironment() {
+        final var environment = new SystemEnvironmentPropertySource(StandardEnvironment.SYSTEM_ENVIRONMENT_PROPERTY_SOURCE_NAME, Map.<String, Object>of(
+                "APP_DIGEST_WEEKLY_ENABLED", "false",
+                "APP_DIGEST_WEEKLY_EMAIL", "true"));
+
+        final var weekly = new Binder(ConfigurationPropertySources.from(environment)).bind("app.digest", AppProperties.Digest.class).get().getWeekly();
+
+        assertThat(weekly.isEnabled()).isFalse();
+        assertThat(weekly.isEmail()).isTrue();
+    }
+
+    @Test
+    void theApplicationYamlTurnsBothDigestSwitchesOn() throws IOException {
+        final var yaml = new YamlPropertySourceLoader().load("application", new ClassPathResource("application.yaml"));
+
+        assertThat(yaml).hasSize(1);
+        assertThat(yaml.getFirst().getProperty("app.digest.weekly.enabled")).isEqualTo(true);
+        assertThat(yaml.getFirst().getProperty("app.digest.weekly.email")).isEqualTo(true);
     }
 
     @Test

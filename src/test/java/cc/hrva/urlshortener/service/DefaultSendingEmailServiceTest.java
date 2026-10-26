@@ -3,6 +3,8 @@ package cc.hrva.urlshortener.service;
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.dto.DecisionsDigest;
 import cc.hrva.urlshortener.dto.LinkDigestEntry;
+import cc.hrva.urlshortener.dto.WeeklyDigest;
+import cc.hrva.urlshortener.dto.stats.CountEntry;
 import cc.hrva.urlshortener.exception.EmailLogNotFoundException;
 import cc.hrva.urlshortener.exception.EmailNotResendableException;
 import cc.hrva.urlshortener.exception.MailingException;
@@ -14,6 +16,7 @@ import cc.hrva.urlshortener.model.enums.BlockReason;
 import cc.hrva.urlshortener.repository.EmailLogRepository;
 import cc.hrva.urlshortener.service.impl.DefaultEmailService;
 import cc.hrva.urlshortener.service.impl.DefaultSendingEmailService;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -118,6 +121,33 @@ class DefaultSendingEmailServiceTest {
         configuredEmailService(realTemplateEngine()).sendDecisionsEmailToAdmin(digest);
 
         return sent.getValue();
+    }
+
+    private Email sentWeeklyDigest(final WeeklyDigest digest) throws Exception {
+        saveReturnsArgument();
+        final var sent = ArgumentCaptor.forClass(Email.class);
+        doAnswer(invocation -> null).when(emailService).sendEmail(sent.capture(), eq(null));
+
+        configuredEmailService(realTemplateEngine()).sendWeeklyDigestToAdmin(digest);
+
+        return sent.getValue();
+    }
+
+    private static WeeklyDigest weeklyDigest(final String destinationHost) {
+        return new WeeklyDigest(
+                LocalDate.of(2026, 10, 19),
+                LocalDate.of(2026, 10, 25),
+                new WeeklyDigest.Change(1204, 1075),
+                950,
+                301,
+                new WeeklyDigest.Change(40, 42),
+                List.of(new CountEntry("WEB", 30), new CountEntry("API_KEY", 6), new CountEntry("MCP", 4)),
+                new WeeklyDigest.Change(3, 0),
+                12,
+                5,
+                4,
+                List.of(new CountEntry("BLOCKLIST", 2), new CountEntry("SAFE_BROWSING", 1)),
+                List.of(new WeeklyDigest.TopLink("my_menu", destinationHost, 120)));
     }
 
     private static DecisionsDigest decisions(final long openCount) {
@@ -365,6 +395,70 @@ class DefaultSendingEmailServiceTest {
         final var body = sentDecisionsEmail(decisions(2)).getText();
 
         assertThat(body).doesNotContain("reported by visitors");
+    }
+
+    @Test
+    void theWeeklyDigestGoesToTheAdminWithPlainTextAndHtml() throws Exception {
+        final var email = sentWeeklyDigest(weeklyDigest("example.com"));
+
+        assertThat(email.getSender()).isEqualTo("noreply@hrva.cc");
+        assertThat(email.getReceivers()).containsExactly("support@hrva.cc");
+        assertThat(email.getBcc()).isNull();
+        assertThat(email.getSubject()).isEqualTo("hrva.cc weekly summary: 19–25 October 2026");
+        assertThat(email.getPlainText()).isEqualTo("""
+                hrva.cc weekly summary: 19–25 October 2026
+
+                Clicks: 1,204 (up 12% on the week before)
+                Daily unique visitors, added up: 950
+                Bot share: 20.0%
+                New links: 40 (down 5% on the week before)
+                How they were made: 30 website, 6 API key, 4 AI connector
+                New users: 3 (none the week before)
+                Active users: 12 signed in during the last 7 days
+                Reviews: 5 opened, 4 resolved
+                Automatic blocks: 2 blocklist, 1 Safe Browsing
+                Top links by clicks:
+                1. hrva.cc/my_menu → example.com, 120 clicks
+
+                Stats (last 7 days): https://hrva.cc/admin/dashboard?days=7""");
+        assertThat(textOf(email.getText())).startsWith("hrva.cc weekly summary: 19–25 October 2026 "
+                + "Clicks: 1,204 (up 12% on the week before) "
+                + "Daily unique visitors, added up: 950 "
+                + "Bot share: 20.0% "
+                + "New links: 40 (down 5% on the week before) "
+                + "How they were made: 30 website, 6 API key, 4 AI connector "
+                + "New users: 3 (none the week before) "
+                + "Active users: 12 signed in during the last 7 days "
+                + "Reviews: 5 opened, 4 resolved "
+                + "Automatic blocks: 2 blocklist, 1 Safe Browsing "
+                + "Top links by clicks: "
+                + "1. hrva.cc/my_menu → example.com, 120 clicks "
+                + "Open the stats page ");
+        assertThat(email.getText()).contains("<title>hrva.cc weekly summary: 19–25 October 2026</title>");
+    }
+
+    @Test
+    void theWeeklyDigestHasOneLinkToTheStatsPage() throws Exception {
+        final var body = sentWeeklyDigest(weeklyDigest("example.com")).getText();
+
+        assertThat(linksIn(body)).containsExactly("https://hrva.cc/admin/dashboard?days=7");
+    }
+
+    @Test
+    void aHostInTheWeeklyDigestIsEscapedInTheHtml() throws Exception {
+        final var email = sentWeeklyDigest(weeklyDigest("<b>x</b>.example"));
+
+        assertThat(email.getText()).doesNotContain("<b>x</b>").contains("hrva.cc/my_menu → &lt;b&gt;x&lt;/b&gt;.example, 120 clicks");
+        assertThat(email.getPlainText()).contains("1. hrva.cc/my_menu → <b>x</b>.example, 120 clicks");
+    }
+
+    @Test
+    void theWeeklyDigestIsLoggedWithItsHtmlSoAResendSendsTheHtml() throws Exception {
+        final var email = sentWeeklyDigest(weeklyDigest("example.com"));
+
+        assertThat(bodiesWhileSending).containsExactly(email.getText());
+        assertThat(lastSavedEntry().getStatus()).isEqualTo(EmailLog.STATUS_SENT);
+        assertThat(lastSavedEntry().getSubject()).isEqualTo("hrva.cc weekly summary: 19–25 October 2026");
     }
 
     @Test

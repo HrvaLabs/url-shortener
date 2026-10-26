@@ -18,7 +18,6 @@ import cc.hrva.urlshortener.util.ReviewReasons;
 import java.time.LocalDateTime;
 import java.util.Comparator;
 import java.util.List;
-import java.util.Set;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
@@ -33,7 +32,6 @@ public class DefaultLinkDigestService implements LinkDigestService {
 
     private static final int NEWEST_OPEN_ENTRIES = 10;
     private static final int MAX_POSSIBLE_SCAMMERS = 10;
-    private static final Set<BlockReason> MANUAL_BLOCKS = Set.of(BlockReason.ADMIN, BlockReason.USER_BLOCKED);
 
     private final ReviewQueueService reviewQueueService;
     private final ScammerSignalService scammerSignalService;
@@ -95,7 +93,7 @@ public class DefaultLinkDigestService implements LinkDigestService {
     }
 
     private List<DecisionsDigest.BlockedLink> autoBlockedSince(final LocalDateTime since) {
-        return urlRepository.findTop20ByBlockedAtAfterAndBlockReasonNotInOrderByBlockedAtDesc(since, MANUAL_BLOCKS).stream()
+        return urlRepository.findTop20ByBlockedAtAfterAndBlockReasonNotInOrderByBlockedAtDesc(since, BlockReason.MANUAL).stream()
                 .map(url -> new DecisionsDigest.BlockedLink(url.getShortUrl(), destinationOf(url), reasonInWords(url)))
                 .toList();
     }

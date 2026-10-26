@@ -1,6 +1,7 @@
 package cc.hrva.urlshortener.service;
 
 import cc.hrva.urlshortener.dto.DecisionsDigest;
+import cc.hrva.urlshortener.dto.WeeklyDigest;
 import cc.hrva.urlshortener.model.EmailLog;
 import cc.hrva.urlshortener.model.ResetToken;
 import cc.hrva.urlshortener.model.Url;
@@ -20,6 +21,7 @@ public interface SendingEmailService {
     void sendEmailForgotPassword(User user, ResetToken resetToken);
     void sendPasskeyAddedEmail(User user, String label, LocalDateTime addedAt);
     void sendDecisionsEmailToAdmin(DecisionsDigest digest);
+    void sendWeeklyDigestToAdmin(WeeklyDigest digest);
     EmailLog resendEmail(Long emailLogId);
     void failInterruptedEmails();
     void forgetOldEmailContent();

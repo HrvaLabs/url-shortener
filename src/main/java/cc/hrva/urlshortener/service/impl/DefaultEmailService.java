@@ -56,7 +56,11 @@ public class DefaultEmailService implements EmailService {
             message.setBcc(email.getBcc());
         }
         message.setSubject(email.getSubject());
-        message.setText(email.getText(), true);
+        if (email.getPlainText() != null) {
+            message.setText(email.getPlainText(), email.getText());
+        } else {
+            message.setText(email.getText(), true);
+        }
     }
 
     public void attachFileToEmail(final File attachment, final MimeMessage mimeMessage) throws IOException, MessagingException {

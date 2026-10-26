@@ -13,5 +13,6 @@ public interface ScheduledService {
     void sendLinkDigest();
     void refreshDueBlocklists();
     void reloadMissingBlocklists();
+    void sendWeeklyDigest();
 
 }

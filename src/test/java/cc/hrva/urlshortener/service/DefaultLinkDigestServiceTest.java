@@ -218,6 +218,7 @@ class DefaultLinkDigestServiceTest {
                 new DecisionsDigest.BlockedLink("promo", "www.jofogas.cards/login", "a blocklist (HaGeZi Fake)"));
         assertThat(since.getValue()).isBetween(LocalDateTime.now().minusHours(25), LocalDateTime.now().minusHours(23));
         assertThat(excluded.getValue()).containsExactlyInAnyOrder(BlockReason.ADMIN, BlockReason.USER_BLOCKED);
+        assertThat(excluded.getValue()).isSameAs(BlockReason.MANUAL);
     }
 
     @Test

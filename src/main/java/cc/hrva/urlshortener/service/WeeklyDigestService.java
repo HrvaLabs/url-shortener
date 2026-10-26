@@ -6,5 +6,6 @@ import java.time.LocalDate;
 public interface WeeklyDigestService {
 
     WeeklyDigest collect(LocalDate today);
+    void sendWeeklyDigest();
 
 }

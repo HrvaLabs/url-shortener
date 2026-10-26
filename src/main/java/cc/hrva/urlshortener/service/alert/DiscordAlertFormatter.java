@@ -2,6 +2,7 @@ package cc.hrva.urlshortener.service.alert;
 
 import cc.hrva.urlshortener.client.DiscordMessage;
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
+import cc.hrva.urlshortener.dto.WeeklyDigest;
 import cc.hrva.urlshortener.model.enums.BlockReason;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.BlocklistSourceFailed;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.BlocklistSourceRecovered;
@@ -9,6 +10,7 @@ import cc.hrva.urlshortener.service.alert.AdminAlertEvent.LinkBlocked;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.ReviewOpened;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.UserSignedUp;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.VisitorReported;
+import cc.hrva.urlshortener.service.digest.WeeklyDigestText;
 import cc.hrva.urlshortener.util.DomainNames;
 import java.util.ArrayList;
 import java.util.List;
@@ -43,6 +45,7 @@ public class DiscordAlertFormatter {
     private static final String LINKS_PAGE = "/admin/urls";
     private static final String USERS_PAGE = "/admin";
     private static final String BLOCKLISTS_PAGE = "/admin/blocklists";
+    private static final String STATS_PAGE = "/admin/dashboard?days=7";
     private static final String EMAIL_REMOVED = "(email removed)";
     private static final String IP_REMOVED = "(IP removed)";
     private static final String IP_DESTINATION = "an IP address";
@@ -76,6 +79,32 @@ public class DiscordAlertFormatter {
             shown.add("%sand %d more, see <%s>".formatted(ELLIPSIS, more, frontendPage(REVIEW_PAGE)));
         }
         return DiscordMessage.withoutMentionsOrEmbeds(String.join(LINE_SEPARATOR, shown));
+    }
+
+    public DiscordMessage weeklyDigest(final WeeklyDigest digest) {
+        final var head = new ArrayList<String>();
+        head.add("**" + WeeklyDigestText.title(digest) + "**");
+        head.addAll(WeeklyDigestText.summaryLines(digest));
+        final var topLinks = WeeklyDigestText.topLinkLines(digest, shortLinkHost(), DiscordAlertFormatter::plainInFull);
+        final var statsLine = "Stats (last 7 days): <%s>".formatted(frontendPage(STATS_PAGE));
+
+        var shown = topLinks.size();
+        var content = weeklyDigestContent(head, topLinks, shown, statsLine);
+        while (content.length() > MAX_CONTENT_LENGTH && shown > 0) {
+            shown--;
+            content = weeklyDigestContent(head, topLinks, shown, statsLine);
+        }
+        return DiscordMessage.withoutMentionsOrEmbeds(content);
+    }
+
+    private static String weeklyDigestContent(final List<String> head, final List<String> topLinks, final int shown, final String statsLine) {
+        final var lines = new ArrayList<>(head);
+        lines.addAll(topLinks.subList(0, shown));
+        if (shown < topLinks.size()) {
+            lines.add("and %d more".formatted(topLinks.size() - shown));
+        }
+        lines.add(statsLine);
+        return String.join(LINE_SEPARATOR, lines);
     }
 
     private String line(final AdminAlertEvent alert) {
@@ -164,14 +193,24 @@ public class DiscordAlertFormatter {
         if (StringUtils.isBlank(text)) {
             return "";
         }
-        var cleaned = INVISIBLE.matcher(StringUtils.left(text, MAX_INPUT_LENGTH)).replaceAll(" ");
+        return escaped(StringUtils.abbreviate(cleaned(StringUtils.left(text, MAX_INPUT_LENGTH)), ELLIPSIS, maxLength));
+    }
+
+    private static String plainInFull(final String text) {
+        if (StringUtils.isBlank(text)) {
+            return "";
+        }
+        return escaped(cleaned(text));
+    }
+
+    private static String cleaned(final String text) {
+        var cleaned = INVISIBLE.matcher(text).replaceAll(" ");
         cleaned = MASKED_LINK.matcher(cleaned).replaceAll("$1 $2");
         cleaned = EMAIL.matcher(cleaned).replaceAll(EMAIL_REMOVED);
         cleaned = IPV6.matcher(cleaned).replaceAll(DiscordAlertFormatter::withoutIpAddress);
         cleaned = IPV4.matcher(cleaned).replaceAll(DiscordAlertFormatter::withoutIpAddress);
         cleaned = FORMATTING.matcher(cleaned).replaceAll("");
-        cleaned = StringUtils.abbreviate(StringUtils.normalizeSpace(cleaned), ELLIPSIS, maxLength);
-        return escaped(cleaned);
+        return StringUtils.normalizeSpace(cleaned);
     }
 
     private static String withoutIpAddress(final MatchResult match) {

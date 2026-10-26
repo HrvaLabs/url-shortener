@@ -73,6 +73,12 @@ public final class WeeklyDigestText {
     }
 
     public static List<String> lines(final WeeklyDigest digest, final String shortLinkHost, final UnaryOperator<String> value) {
+        final var lines = new ArrayList<>(summaryLines(digest));
+        lines.addAll(topLinkLines(digest, shortLinkHost, value));
+        return List.copyOf(lines);
+    }
+
+    public static List<String> summaryLines(final WeeklyDigest digest) {
         final var lines = new ArrayList<String>();
         lines.add("Clicks: " + withChange(digest.clicks()));
         lines.add("Daily unique visitors, added up: " + number(digest.uniqueVisitors()));
@@ -85,16 +91,15 @@ public final class WeeklyDigestText {
         lines.add("Active users: " + number(digest.activeUsers()) + " signed in during the last 7 days");
         lines.add("Reviews: " + number(digest.reviewsOpened()) + " opened, " + number(digest.reviewsResolved()) + " resolved");
         lines.add("Automatic blocks: " + (digest.automaticBlocks().isEmpty() ? "none" : counted(digest.automaticBlocks(), BLOCK_WORDS)));
-        if (digest.topLinks().isEmpty()) {
-            lines.add("Top links by clicks: none this week");
-        } else {
-            lines.add("Top links by clicks:");
-            final var topLinks = digest.topLinks();
-            IntStream.range(0, topLinks.size())
-                    .mapToObj(index -> topLink(index + 1, topLinks.get(index), shortLinkHost, value))
-                    .forEach(lines::add);
-        }
+        lines.add(digest.topLinks().isEmpty() ? "Top links by clicks: none this week" : "Top links by clicks:");
         return List.copyOf(lines);
+    }
+
+    public static List<String> topLinkLines(final WeeklyDigest digest, final String shortLinkHost, final UnaryOperator<String> value) {
+        final var topLinks = digest.topLinks();
+        return IntStream.range(0, topLinks.size())
+                .mapToObj(index -> topLink(index + 1, topLinks.get(index), shortLinkHost, value))
+                .toList();
     }
 
     private static String withChange(final Change change) {

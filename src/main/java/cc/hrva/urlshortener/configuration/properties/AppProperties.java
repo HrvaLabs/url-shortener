@@ -105,6 +105,10 @@ public class AppProperties {
     @NotNull
     private Passkeys passkeys = new Passkeys();
 
+    @Valid
+    @NotNull
+    private Digest digest = new Digest();
+
     @Data
     public static class Mcp {
 
@@ -142,6 +146,23 @@ public class AppProperties {
 
         @NotEmpty
         private List<String> allowedOrigins;
+
+    }
+
+    @Data
+    public static class Digest {
+
+        @Valid
+        @NotNull
+        private Weekly weekly = new Weekly();
+
+    }
+
+    @Data
+    public static class Weekly {
+
+        private boolean enabled = true;
+        private boolean email = true;
 
     }
 
