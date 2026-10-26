@@ -26,6 +26,7 @@ import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.service.BioPageService;
 import cc.hrva.urlshortener.service.UserService;
 import cc.hrva.urlshortener.service.bio.BioHandles;
+import cc.hrva.urlshortener.service.bio.BioPageLock;
 import cc.hrva.urlshortener.service.bio.BioPageResponses;
 import cc.hrva.urlshortener.service.bio.BioPageText;
 import java.time.Clock;
@@ -83,10 +84,12 @@ public class DefaultBioPageService implements BioPageService {
     private static final Duration HANDLE_CHECK_WINDOW = Duration.ofMinutes(10);
     private static final Set<BioLinkState> ADDABLE_STATES = EnumSet.of(BioLinkState.LIVE, BioLinkState.IN_REVIEW);
     private static final String BUTTON_LINK_CONSTRAINT = "uq_bio_page_button_page_url";
+    private static final String BUTTON_URL_CONSTRAINT = "fk_bio_page_button_url";
     private static final String HANDLE_HOLD_CONSTRAINT = "pk_bio_handle_hold";
 
     private final UserService userService;
     private final BioPageRepository bioPageRepository;
+    private final BioPageLock bioPageLock;
     private final BioPageButtonRepository bioPageButtonRepository;
     private final UrlRepository urlRepository;
     private final BioHandles bioHandles;
@@ -131,7 +134,7 @@ public class DefaultBioPageService implements BioPageService {
     public BioPageResponse update(final BioPageUpdateDto bioPageUpdateDto) {
         final var user = currentUser();
         requireWithinLimit(SAVE_LIMIT, user, SAVES_PER_USER, SAVE_WINDOW, SAVES_REFUSED);
-        final var page = pageOf(user);
+        final var page = lockedPageOf(user);
 
         final var displayName = cleaned(bioPageUpdateDto.getDisplayName(), BioPageUpdateDto.MAX_DISPLAY_NAME_LENGTH,
                 BioPageUpdateDto.DISPLAY_NAME_TOO_LONG);
@@ -157,10 +160,13 @@ public class DefaultBioPageService implements BioPageService {
             buttons = reconcile(page, existingButtons, requestedButtons, titles, links);
             saved = bioPageRepository.saveAndFlush(page);
         } catch (final DataIntegrityViolationException exception) {
-            if (!violates(exception, BUTTON_LINK_CONSTRAINT)) {
+            if (!violates(exception, BUTTON_LINK_CONSTRAINT) && !violates(exception, BUTTON_URL_CONSTRAINT)) {
                 throw exception;
             }
-            log.info("Bio page buttons were saved by a concurrent request pageId={}", page.getId());
+            log.info("Bio page buttons were changed by a concurrent request pageId={}", page.getId());
+            throw new BioPageConflictException(PAGE_CHANGED);
+        } catch (final OptimisticLockingFailureException exception) {
+            log.info("Bio page button was removed by a concurrent request pageId={}", page.getId());
             throw new BioPageConflictException(PAGE_CHANGED);
         }
         log.info("Bio page saved pageId={} buttons={}", saved.getId(), buttons.size());
@@ -200,7 +206,7 @@ public class DefaultBioPageService implements BioPageService {
     @Override
     @Transactional
     public void delete() {
-        final var page = pageOf(currentUser());
+        final var page = lockedPageOf(currentUser());
         if (page.getHiddenAt() != null) {
             log.info("Bio page delete refused because an admin hid the page pageId={}", page.getId());
             throw new BioPageConflictException(HIDDEN_PAGE_NOT_DELETABLE);
@@ -242,6 +248,11 @@ public class DefaultBioPageService implements BioPageService {
 
     private BioPage pageOf(final User user) {
         return bioPageRepository.findByOwner(user).orElseThrow(() -> new BioPageNotFoundException(NO_PAGE));
+    }
+
+    private BioPage lockedPageOf(final User user) {
+        final var page = pageOf(user);
+        return bioPageLock.lock(page).orElseThrow(() -> deletedByAConcurrentRequest(page));
     }
 
     private static BioPageNotFoundException deletedByAConcurrentRequest(final BioPage page) {

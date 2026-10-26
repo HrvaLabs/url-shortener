@@ -172,7 +172,7 @@ class DefaultPublicBioPageServiceTest {
     }
 
     @Test
-    void aPageWithoutAHandleIsNotAvailable() {
+    void isPublicRefusesAPageWithoutAHandle() {
         page.setHandle(null);
         page.setHandleRevokedReason("Impersonation");
         isPublished();

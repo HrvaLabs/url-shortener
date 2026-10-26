@@ -6,12 +6,13 @@ import java.util.regex.Pattern;
 public final class BioPageText {
 
     private static final Pattern INVISIBLE = Pattern.compile(
-            "[\\p{Cc}&&[^\\s]]|[\\x{00AD}\\x{061C}\\x{180E}\\x{200B}\\x{200E}\\x{200F}\\x{202A}-\\x{202E}\\x{2060}-\\x{2064}\\x{2066}-\\x{2069}\\x{FEFF}]");
-    private static final Pattern STACKED_MARKS = Pattern.compile("(\\p{Mn}(?:\\p{Cf}*\\p{Mn}){2})(?:\\p{Cf}*\\p{Mn})+");
+            "[\\p{Cc}&&[^\\s]]|[\\p{Cf}&&[^\\x{200C}\\x{200D}\\x{E0020}-\\x{E007F}]]|[\\x{115F}\\x{1160}\\x{3164}\\x{FFA0}\\x{2065}]");
+    private static final Pattern STACKED_MARKS = Pattern.compile("([\\p{Mn}\\p{Me}](?:\\p{Cf}*[\\p{Mn}\\p{Me}]){2})(?:\\p{Cf}*[\\p{Mn}\\p{Me}])+");
     private static final Pattern WHITESPACE = Pattern.compile("[\\s\\p{Z}]+");
     private static final Pattern ONE_GRAPHEME = Pattern.compile("\\X");
     private static final int MAX_EMOJI_LENGTH = 16;
     private static final int LAST_ASCII = 0x7F;
+    private static final int ZERO_WIDTH_NON_JOINER = 0x200C;
     private static final int ZERO_WIDTH_JOINER = 0x200D;
 
     private BioPageText() {}
@@ -32,7 +33,11 @@ public final class BioPageText {
         }
         final var first = value.codePointAt(0);
         final var last = value.codePointBefore(value.length());
-        return first > LAST_ASCII && Character.isEmoji(first) && last != ZERO_WIDTH_JOINER && ONE_GRAPHEME.matcher(value).matches();
+        return first > LAST_ASCII && Character.isEmoji(first) && !isJoiner(first) && !isJoiner(last) && ONE_GRAPHEME.matcher(value).matches();
+    }
+
+    private static boolean isJoiner(final int codePoint) {
+        return codePoint == ZERO_WIDTH_JOINER || codePoint == ZERO_WIDTH_NON_JOINER;
     }
 
 }

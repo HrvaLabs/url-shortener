@@ -28,6 +28,7 @@ import cc.hrva.urlshortener.repository.BioPageRepository;
 import cc.hrva.urlshortener.repository.LinkReviewRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.service.bio.BioHandles;
+import cc.hrva.urlshortener.service.bio.BioPageLock;
 import cc.hrva.urlshortener.service.bio.BioPageResponses;
 import cc.hrva.urlshortener.service.impl.DefaultBioPageService;
 import java.sql.SQLException;
@@ -99,6 +100,9 @@ class DefaultBioPageServiceTest {
     private static final String DEVANAGARI_QA = codePoints(0x0958);
     private static final String ZERO_WIDTH_SPACE = codePoints(0x200B);
     private static final String ZERO_WIDTH_JOINER = codePoints(0x200D);
+    private static final String ZERO_WIDTH_NON_JOINER = codePoints(0x200C);
+    private static final String INHIBIT_SYMMETRIC_SWAPPING = codePoints(0x206A);
+    private static final String HANGUL_FILLER = codePoints(0x3164);
     private static final String HIDDEN_PAGE_NOT_DELETABLE =
             "An admin hid this page, so it can't be deleted here. You can still delete your whole account in Settings.";
 
@@ -121,6 +125,9 @@ class DefaultBioPageServiceTest {
     private BioHandles bioHandles;
 
     @Mock
+    private BioPageLock bioPageLock;
+
+    @Mock
     private RateLimiter rateLimiter;
 
     @Captor
@@ -138,8 +145,9 @@ class DefaultBioPageServiceTest {
                 .createdAt(CREATED_AT).updatedAt(CREATED_AT).build();
         lenient().when(userService.getUserFromToken()).thenReturn(ana);
         lenient().when(rateLimiter.tryAcquire(anyString(), anyInt(), any(Duration.class))).thenReturn(true);
+        lenient().when(bioPageLock.lock(any(BioPage.class))).thenAnswer(invocation -> Optional.of(invocation.getArgument(0)));
         final var clock = Clock.fixed(NOW_INSTANT, ZoneOffset.UTC);
-        bioPageService = new DefaultBioPageService(userService, bioPageRepository, bioPageButtonRepository, urlRepository,
+        bioPageService = new DefaultBioPageService(userService, bioPageRepository, bioPageLock, bioPageButtonRepository, urlRepository,
                 bioHandles, new BioPageResponses(bioPageButtonRepository, linkReviewRepository, clock), rateLimiter, clock);
     }
 
@@ -486,14 +494,95 @@ class DefaultBioPageServiceTest {
     }
 
     @Test
+    void aLinkDeletedWhileTheSaveAddsItIs409() {
+        hasPage();
+        ownsLinks(link(41L, "ana-ig", ana));
+        when(bioPageButtonRepository.saveAll(anyIterable())).thenThrow(violation("fk_bio_page_button_url"));
+
+        assertThatThrownBy(() -> bioPageService.update(update(buttonDto(41L, "Instagram"))))
+                .isInstanceOf(BioPageConflictException.class)
+                .hasMessage(PAGE_CHANGED);
+    }
+
+    @Test
+    void aButtonWhoseLinkWasDeletedWhileSavingIs409() {
+        hasPage();
+        final var instagram = link(41L, "ana-ig", ana);
+        ownsLinks(instagram);
+        onPage(button(31L, instagram, 0));
+        when(bioPageRepository.saveAndFlush(page)).thenThrow(new ObjectOptimisticLockingFailureException(BioPageButton.class, 31L));
+
+        assertThatThrownBy(() -> bioPageService.update(update(buttonDto(41L, "Instagram"))))
+                .isInstanceOf(BioPageConflictException.class)
+                .hasMessage(PAGE_CHANGED);
+    }
+
+    @Test
     void anotherIntegrityErrorWhileSavingIsNotHidden() {
         hasPage();
         ownsLinks(link(41L, "ana-ig", ana));
-        final var linkGone = violation("fk_bio_page_button_url");
-        when(bioPageButtonRepository.saveAll(anyIterable())).thenThrow(linkGone);
+        final var other = violation("fk_bio_page_button_page");
+        when(bioPageButtonRepository.saveAll(anyIterable())).thenThrow(other);
 
         assertThatThrownBy(() -> bioPageService.update(update(buttonDto(41L, "Instagram"))))
-                .isSameAs(linkGone);
+                .isSameAs(other);
+    }
+
+    @Test
+    void aSaveLocksThePageBeforeReadingItsButtons() {
+        hasPage();
+        savesReturnTheirArgument();
+
+        bioPageService.update(update());
+
+        final var inOrder = inOrder(bioPageRepository, bioPageLock, bioPageButtonRepository);
+        inOrder.verify(bioPageRepository).findByOwner(ana);
+        inOrder.verify(bioPageLock).lock(page);
+        inOrder.verify(bioPageButtonRepository).findByPageWithUrl(page);
+        inOrder.verify(bioPageRepository).saveAndFlush(page);
+    }
+
+    @Test
+    void aSaveWritesThePageAsReadUnderTheLock() {
+        hasPage();
+        savesReturnTheirArgument();
+        final var lockedPage = BioPage.builder().id(12L).owner(ana).handle("ana").displayName("Ana").bio("")
+                .avatarKind(BioAvatarKind.INITIALS).accent(BioAccent.BLUE).theme(BioTheme.AUTO)
+                .hiddenAt(NOW).hiddenReason("Spam").hiddenBy("admin@localhost")
+                .createdAt(CREATED_AT).updatedAt(CREATED_AT).build();
+        when(bioPageLock.lock(page)).thenReturn(Optional.of(lockedPage));
+
+        final var response = bioPageService.update(update());
+
+        verify(bioPageRepository).saveAndFlush(lockedPage);
+        verify(bioPageRepository, never()).saveAndFlush(page);
+        verify(bioPageButtonRepository).findByPageWithUrl(lockedPage);
+        assertThat(lockedPage.getDisplayName()).isEqualTo("Ana Horvat");
+        assertThat(lockedPage.getHiddenAt()).isEqualTo(NOW);
+        assertThat(response.hidden()).isTrue();
+    }
+
+    @Test
+    void aSaveOfAPageDeletedBeforeItWasLockedIs404() {
+        hasPage();
+        when(bioPageLock.lock(page)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> bioPageService.update(update(buttonDto(41L, "Instagram"))))
+                .isInstanceOf(BioPageNotFoundException.class)
+                .hasMessage(NO_PAGE);
+
+        verifyNoInteractions(urlRepository, bioPageButtonRepository);
+        verify(bioPageRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void readingThePageTakesNoLock() {
+        hasPage();
+
+        bioPageService.mine();
+        bioPageService.availability("bob");
+
+        verifyNoInteractions(bioPageLock);
     }
 
     @Test
@@ -584,6 +673,16 @@ class DefaultBioPageServiceTest {
     }
 
     @Test
+    void aTitleOfOnlyInvisibleFormatCharactersIsRefused() {
+        hasPage();
+
+        assertRefusedBeforeWriting(update(buttonDto(41L, INHIBIT_SYMMETRIC_SWAPPING)), TITLE_REQUIRED);
+        assertRefusedBeforeWriting(update(buttonDto(41L, INHIBIT_SYMMETRIC_SWAPPING.repeat(10))), TITLE_REQUIRED);
+        assertRefusedBeforeWriting(update(buttonDto(41L, HANGUL_FILLER)), TITLE_REQUIRED);
+        assertRefusedBeforeWriting(update(buttonDto(41L, " " + HANGUL_FILLER.repeat(3) + " ")), TITLE_REQUIRED);
+    }
+
+    @Test
     void aDisplayNameOfOnlyZeroWidthSpacesIsStoredEmpty() {
         hasPage();
         savesReturnTheirArgument();
@@ -604,6 +703,19 @@ class DefaultBioPageServiceTest {
         dto.setAvatarEmoji(CAMERA + ZERO_WIDTH_JOINER);
 
         assertRefusedBeforeWriting(dto, EMOJI_REQUIRED);
+    }
+
+    @Test
+    void anAvatarEmojiStartingOrEndingWithANonJoinerIsRefused() {
+        hasPage();
+
+        for (final var emoji : List.of(CAMERA + ZERO_WIDTH_NON_JOINER, ZERO_WIDTH_NON_JOINER + CAMERA)) {
+            final var dto = update();
+            dto.setAvatarKind(BioAvatarKind.EMOJI);
+            dto.setAvatarEmoji(emoji);
+
+            assertRefusedBeforeWriting(dto, EMOJI_REQUIRED);
+        }
     }
 
     @Test
@@ -759,6 +871,47 @@ class DefaultBioPageServiceTest {
         inOrder.verify(bioHandles).hold("ana", null);
         inOrder.verify(bioPageRepository).delete(page);
         inOrder.verify(bioPageRepository).flush();
+    }
+
+    @Test
+    void aDeleteLocksThePageFirst() {
+        hasPage();
+
+        bioPageService.delete();
+
+        final var inOrder = inOrder(bioPageRepository, bioPageLock, bioHandles);
+        inOrder.verify(bioPageRepository).findByOwner(ana);
+        inOrder.verify(bioPageLock).lock(page);
+        inOrder.verify(bioHandles).hold("ana", null);
+        inOrder.verify(bioPageRepository).delete(page);
+    }
+
+    @Test
+    void aPageAnAdminHidBeforeTheLockCantBeDeletedByItsOwner() {
+        hasPage();
+        final var lockedPage = BioPage.builder().id(12L).owner(ana).handle("ana").hiddenAt(NOW).hiddenReason("Spam").build();
+        when(bioPageLock.lock(page)).thenReturn(Optional.of(lockedPage));
+
+        assertThatThrownBy(() -> bioPageService.delete())
+                .isInstanceOf(BioPageConflictException.class)
+                .hasMessage(HIDDEN_PAGE_NOT_DELETABLE);
+
+        verifyNoInteractions(bioHandles);
+        verify(bioPageRepository, never()).delete(any(BioPage.class));
+    }
+
+    @Test
+    void aDeleteOfAPageDeletedBeforeItWasLockedIs404() {
+        hasPage();
+        when(bioPageLock.lock(page)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> bioPageService.delete())
+                .isInstanceOf(BioPageNotFoundException.class)
+                .hasMessage(NO_PAGE);
+
+        verifyNoInteractions(bioHandles);
+        verify(bioPageRepository, never()).delete(any(BioPage.class));
+        verify(bioPageRepository, never()).flush();
     }
 
     @Test

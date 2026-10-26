@@ -29,6 +29,8 @@ class BioPageTextTest {
     private static final String SOFT_HYPHEN = codePoints(0x00AD);
     private static final String WORD_JOINER = codePoints(0x2060);
     private static final String BYTE_ORDER_MARK = codePoints(0xFEFF);
+    private static final String HANGUL_FILLER = codePoints(0x3164);
+    private static final String ENCLOSING_CIRCLE = codePoints(0x20DD);
 
     @Test
     void controlAndBidiCharactersAreRemoved() {
@@ -42,7 +44,8 @@ class BioPageTextTest {
     }
 
     @ParameterizedTest
-    @ValueSource(ints = {0x00AD, 0x180E, 0x200B, 0x2060, 0x2061, 0x2062, 0x2063, 0x2064, 0xFEFF})
+    @ValueSource(ints = {0x00AD, 0x180E, 0x200B, 0x2060, 0x2061, 0x2062, 0x2063, 0x2064, 0xFEFF, 0x2065, 0x206A, 0x206F, 0x3164, 0x115F,
+            0x1160, 0xFFA0, 0xFFF9, 0xFFFA, 0xFFFB, 0x1D173, 0x1BCA0, 0xE0001, 0x110BD})
     void everyInvisibleCharacterIsRemoved(final int codePoint) {
         assertThat(BioPageText.clean("Ana" + codePoints(codePoint) + "Horvat")).isEqualTo("AnaHorvat");
     }
@@ -59,6 +62,19 @@ class BioPageTextTest {
     }
 
     @Test
+    void anInvisibleFormatCharacterInsideAWordIsRemoved() {
+        assertThat(BioPageText.clean("Insta" + codePoints(0x206A) + "gram")).isEqualTo("Instagram");
+        assertThat(BioPageText.clean("Insta" + HANGUL_FILLER + "gram")).isEqualTo("Instagram");
+    }
+
+    @Test
+    void textOfOnlyFillersAndFormatCharactersBecomesEmpty() {
+        assertThat(BioPageText.clean(codePoints(0x206A).repeat(5))).isEmpty();
+        assertThat(BioPageText.clean(HANGUL_FILLER.repeat(5))).isEmpty();
+        assertThat(BioPageText.clean(codePoints(0x115F, 0x1160, 0xFFA0, 0xFFF9))).isEmpty();
+    }
+
+    @Test
     void softHyphenWordJoinerAndByteOrderMarkAreRemoved() {
         assertThat(BioPageText.clean(BYTE_ORDER_MARK + "In" + SOFT_HYPHEN + "sta" + WORD_JOINER + "gram")).isEqualTo("Instagram");
     }
@@ -72,6 +88,28 @@ class BioPageTextTest {
                 .isEqualTo("x" + (ACUTE + ZERO_WIDTH_JOINER + ZERO_WIDTH_NON_JOINER).repeat(3));
         assertThat(BioPageText.clean("a" + (ACUTE + ZERO_WIDTH_JOINER).repeat(24)).codePoints().filter(BioPageTextTest::isNonSpacingMark).count())
                 .isEqualTo(3);
+    }
+
+    @Test
+    void enclosingMarksCountTowardsTheCap() {
+        final var cleaned = BioPageText.clean("a" + (ACUTE + ENCLOSING_CIRCLE).repeat(24));
+
+        assertThat(cleaned).isEqualTo(codePoints(0x00E1) + ENCLOSING_CIRCLE + ACUTE + ENCLOSING_CIRCLE);
+        assertThat(cleaned.codePoints().filter(BioPageTextTest::isMark).count()).isEqualTo(3);
+        assertThat(BioPageText.clean("x" + ENCLOSING_CIRCLE.repeat(40))).isEqualTo("x" + ENCLOSING_CIRCLE.repeat(3));
+    }
+
+    @Test
+    void aMyanmarSyllableWithSpacingMarksIsKept() {
+        final var syllable = codePoints(0x1000, 0x103C, 0x103D, 0x103E, 0x1031, 0x1038);
+
+        assertThat(BioPageText.clean(syllable)).isEqualTo(syllable);
+    }
+
+    @ParameterizedTest
+    @MethodSource("textThatMustSurvive")
+    void scriptsAndSequencesSurviveUnchanged(final String text) {
+        assertThat(BioPageText.clean(text)).isEqualTo(text);
     }
 
     @Test
@@ -169,6 +207,16 @@ class BioPageTextTest {
         assertThat(BioPageText.isSingleEmoji(FAMILY_OF_THREE + ZERO_WIDTH_JOINER)).isFalse();
     }
 
+    @Test
+    void anEmojiThatStartsOrEndsWithANonJoinerIsNotOne() {
+        assertThat(CAMERA + ZERO_WIDTH_NON_JOINER).matches("\\X");
+        assertThat(BioPageText.clean(CAMERA + ZERO_WIDTH_NON_JOINER)).isEqualTo(CAMERA + ZERO_WIDTH_NON_JOINER);
+
+        assertThat(BioPageText.isSingleEmoji(CAMERA + ZERO_WIDTH_NON_JOINER)).isFalse();
+        assertThat(BioPageText.isSingleEmoji(ZERO_WIDTH_NON_JOINER + CAMERA)).isFalse();
+        assertThat(BioPageText.isSingleEmoji(FAMILY_OF_THREE + ZERO_WIDTH_NON_JOINER)).isFalse();
+    }
+
     @ParameterizedTest
     @MethodSource("emojiSequences")
     void everyJoinedEmojiSequenceIsOneEmoji(final String emoji) {
@@ -193,6 +241,25 @@ class BioPageTextTest {
                 codePoints(0x1F3F4, 0xE0067, 0xE0062, 0xE0065, 0xE006E, 0xE0067, 0xE007F),
                 codePoints(0x1F9D1, 0x1F3FB, 0x200D, 0x1F91D, 0x200D, 0x1F9D1, 0x1F3FF),
                 codePoints(0x1F469, 0x1F3FD, 0x200D, 0x1F4BB));
+    }
+
+    private static Stream<String> textThatMustSurvive() {
+        return Stream.of(
+                codePoints(0x0023, 0xFE0F, 0x20E3),
+                codePoints(0x1F3F4, 0x200D, 0x2620, 0xFE0F),
+                codePoints(0x1F44B, 0x1F3FD),
+                codePoints(0x0F56, 0x0F7C, 0x0F51, 0x0020, 0x0F66, 0x0F92, 0x0FB2),
+                codePoints(0x05E9, 0x05B8, 0x05C1, 0x05DC, 0x05D5, 0x05B9, 0x05DD),
+                codePoints(0x0928, 0x092E, 0x0938, 0x094D, 0x0924, 0x0947),
+                codePoints(0x0E2A, 0x0E27, 0x0E31, 0x0E2A, 0x0E14, 0x0E35, 0x0020, 0x0E19, 0x0E49, 0x0E33),
+                codePoints(0x09AC, 0x09BE, 0x0982, 0x09B2, 0x09BE),
+                codePoints(0x1000, 0x103C, 0x103D, 0x103E, 0x1031, 0x1038),
+                "Vi" + codePoints(0x1EC7) + "t Nam");
+    }
+
+    private static boolean isMark(final int codePoint) {
+        final var type = Character.getType(codePoint);
+        return type == Character.NON_SPACING_MARK || type == Character.ENCLOSING_MARK || type == Character.COMBINING_SPACING_MARK;
     }
 
     private static boolean isNonSpacingMark(final int codePoint) {
