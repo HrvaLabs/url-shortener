@@ -1,10 +1,65 @@
 {
   "releases": [
     {
-      "version": "v2.10",
+      "version": "v2.11",
       "date": "2026-10-26",
       "badge": "Latest",
       "badgeVariant": "default",
+      "summary": "QR scans in link analytics, a public page with hrva.cc in numbers, a weekly summary and phishing-wave alerts for the admin, and the AI connector is sign-in only.",
+      "sections": [
+        {
+          "title": "Analytics",
+          "icon": "bar-chart",
+          "items": [
+            "QR codes made by hrva.cc now count their scans: link analytics and the admin stats show QR scans apart from direct clicks. Codes made before this release count as direct, so download a new code to count scans from it."
+          ]
+        },
+        {
+          "title": "Site",
+          "icon": "globe",
+          "items": [
+            "hrva.cc in numbers: a public page with site-wide totals for the last 30 days, such as active links, clicks per day, harmful links blocked and how fast reports are reviewed. It never shows anything about a single link or person.",
+            "A new help page explains the public numbers and QR scans, linked from both and from the Help page."
+          ]
+        },
+        {
+          "title": "AI Connector",
+          "icon": "sparkles",
+          "items": [
+            "The AI connector without an account (hrva.cc/mcp/anon) is gone. It couldn't create links since anonymous links were turned off. Connect hrva.cc/mcp and sign in instead."
+          ]
+        },
+        {
+          "title": "Admin",
+          "icon": "wrench",
+          "items": [
+            "Weekly summary: every Monday morning, Discord and email get last week's clicks, new links and users, reviews, automatic blocks and the top 5 links, each compared with the week before. Discord and email can be turned off separately.",
+            "Phishing-wave alert: Discord warns when 5 or more new links to the same new or unknown domain appear within an hour from at least 2 creators, with a link to those links. Nothing is blocked automatically.",
+            "All URLs opens with a search from its address, so the alert's link lands on the matching links."
+          ]
+        },
+        {
+          "title": "Privacy",
+          "icon": "lock",
+          "items": [
+            "The public numbers page stores nothing about you beyond a rate-limit counter for your network, which expires after an hour. QR scans are a daily count per link, like the other link statistics."
+          ]
+        },
+        {
+          "title": "Fixes",
+          "icon": "bug",
+          "items": [
+            "Discord alerts for the admin show links, domains, reasons and visitor details in full instead of cutting them off with \"…\". Alerts that don't fit in one message are counted as \"and N more\".",
+            "Searching links, users or the review queue for % or _ now finds those characters instead of matching everything.",
+            "Searching links for a domain finds it in either spelling, such as čokolada.hr and xn--okolada-i6a.hr.",
+            "A web address whose domain name is longer than 253 characters, the most a domain name can have, is now refused as not a valid web address."
+          ]
+        }
+      ]
+    },
+    {
+      "version": "v2.10",
+      "date": "2026-10-26",
       "summary": "Passkeys and security keys, and two-step verification for every sign-in method.",
       "sections": [
         {

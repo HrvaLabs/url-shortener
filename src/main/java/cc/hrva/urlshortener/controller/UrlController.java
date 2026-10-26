@@ -114,7 +114,7 @@ public class UrlController {
         return ResponseEntity.ok(linkPreviewService.fetchPreview(urlInfo.getLongUrl()));
     }
 
-    @Operation(summary = "Generate QR code", description = "Generate a QR code PNG for the short URL. Optional size parameter.")
+    @Operation(summary = "Generate QR code", description = "Generate a QR code PNG for the short URL. It encodes the short link with the ?qr marker, so its scans count as QR scans in the link's analytics. Optional size parameter.")
     @ApiResponse(responseCode = "404", description = "URL not found")
     @GetMapping(value = "/{short}/qr", produces = MediaType.IMAGE_PNG_VALUE)
     public ResponseEntity<byte[]> generateQrCode(
