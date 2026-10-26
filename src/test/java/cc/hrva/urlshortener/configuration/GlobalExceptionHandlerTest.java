@@ -1,6 +1,7 @@
 package cc.hrva.urlshortener.configuration;
 
 import cc.hrva.urlshortener.exception.BioHandleUnavailableException;
+import cc.hrva.urlshortener.exception.BioPageConflictException;
 import cc.hrva.urlshortener.exception.BioPageNotFoundException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -72,12 +73,24 @@ class GlobalExceptionHandlerTest {
                 .andExpect(jsonPath("$.error").value("You don't have a bio page yet."));
     }
 
+    @Test
+    void aBioPageChangedMeanwhileIsAConflictWithItsText() throws Exception {
+        mockMvc.perform(get("/probe/bio-page-changed"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error").value("This page changed. Reload and try again."));
+    }
+
     @RestController
     static class ProbeController {
 
         @GetMapping("/probe/bio-page")
         String probeBioPage() {
             throw new BioPageNotFoundException("You don't have a bio page yet.");
+        }
+
+        @GetMapping("/probe/bio-page-changed")
+        String probeBioPageChanged() {
+            throw new BioPageConflictException("This page changed. Reload and try again.");
         }
 
         @GetMapping("/probe/handle")

@@ -8,6 +8,7 @@ import cc.hrva.urlshortener.dto.bio.BioPageResponse;
 import cc.hrva.urlshortener.dto.bio.BioPageUpdateDto;
 import cc.hrva.urlshortener.exception.ApiException;
 import cc.hrva.urlshortener.exception.BioHandleUnavailableException;
+import cc.hrva.urlshortener.exception.BioPageConflictException;
 import cc.hrva.urlshortener.exception.BioPageNotFoundException;
 import cc.hrva.urlshortener.exception.NoAuthorizationException;
 import cc.hrva.urlshortener.exception.RateLimitExceededException;
@@ -42,7 +43,11 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.lang3.StringUtils;
+import org.apache.commons.lang3.exception.ExceptionUtils;
+import org.hibernate.exception.ConstraintViolationException;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -57,6 +62,7 @@ public class DefaultBioPageService implements BioPageService {
     private static final String NO_PAGE = "You don't have a bio page yet.";
     private static final String ALREADY_HAS_PAGE = "You already have a bio page.";
     private static final String HANDLE_TAKEN = "This handle is taken. Try another.";
+    private static final String PAGE_CHANGED = "This page changed. Reload and try again.";
     private static final String EMOJI_REQUIRED = "Pick one emoji for the avatar.";
     private static final String DUPLICATE_LINK = "Each link can be on your page only once.";
     private static final String NOT_YOUR_LINK = "You can only add your own short links.";
@@ -74,6 +80,8 @@ public class DefaultBioPageService implements BioPageService {
     private static final int HANDLE_CHECKS_PER_USER = 120;
     private static final Duration HANDLE_CHECK_WINDOW = Duration.ofMinutes(10);
     private static final Set<BioLinkState> ADDABLE_STATES = EnumSet.of(BioLinkState.LIVE, BioLinkState.IN_REVIEW);
+    private static final String BUTTON_LINK_CONSTRAINT = "uq_bio_page_button_page_url";
+    private static final String HANDLE_HOLD_CONSTRAINT = "pk_bio_handle_hold";
 
     private final UserService userService;
     private final BioPageRepository bioPageRepository;
@@ -140,9 +148,19 @@ public class DefaultBioPageService implements BioPageService {
         page.setAccent(bioPageUpdateDto.getAccent());
         page.setTheme(bioPageUpdateDto.getTheme());
         page.setIndexable(Boolean.TRUE.equals(bioPageUpdateDto.getIndexable()));
-        final var buttons = reconcile(page, existingButtons, requestedButtons, titles, links);
         page.setUpdatedAt(LocalDateTime.now(clock));
-        final var saved = bioPageRepository.saveAndFlush(page);
+        final List<BioPageButton> buttons;
+        final BioPage saved;
+        try {
+            buttons = reconcile(page, existingButtons, requestedButtons, titles, links);
+            saved = bioPageRepository.saveAndFlush(page);
+        } catch (final DataIntegrityViolationException exception) {
+            if (!violates(exception, BUTTON_LINK_CONSTRAINT)) {
+                throw exception;
+            }
+            log.info("Bio page buttons were saved by a concurrent request pageId={}", page.getId());
+            throw new BioPageConflictException(PAGE_CHANGED);
+        }
         log.info("Bio page saved pageId={} buttons={}", saved.getId(), buttons.size());
         return bioPageResponses.editorView(saved, buttons);
     }
@@ -184,7 +202,17 @@ public class DefaultBioPageService implements BioPageService {
         if (page.getHandle() != null) {
             bioHandles.hold(page.getHandle(), null);
         }
-        bioPageRepository.delete(page);
+        try {
+            bioPageRepository.delete(page);
+            bioPageRepository.flush();
+        } catch (final OptimisticLockingFailureException exception) {
+            throw deletedByAConcurrentRequest(page);
+        } catch (final DataIntegrityViolationException exception) {
+            if (!violates(exception, HANDLE_HOLD_CONSTRAINT)) {
+                throw exception;
+            }
+            throw deletedByAConcurrentRequest(page);
+        }
         log.info("Bio page deleted pageId={}", page.getId());
     }
 
@@ -208,6 +236,16 @@ public class DefaultBioPageService implements BioPageService {
 
     private BioPage pageOf(final User user) {
         return bioPageRepository.findByOwner(user).orElseThrow(() -> new BioPageNotFoundException(NO_PAGE));
+    }
+
+    private static BioPageNotFoundException deletedByAConcurrentRequest(final BioPage page) {
+        log.info("Bio page was deleted by a concurrent request pageId={}", page.getId());
+        return new BioPageNotFoundException(NO_PAGE);
+    }
+
+    private static boolean violates(final DataIntegrityViolationException exception, final String constraint) {
+        final var violation = ExceptionUtils.throwableOfType(exception, ConstraintViolationException.class);
+        return violation != null && StringUtils.containsIgnoreCase(violation.getConstraintName(), constraint);
     }
 
     private static void requireHandleFormat(final String handle) {

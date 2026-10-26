@@ -48,7 +48,7 @@ class BioPageSchemaTest {
 
     private static final LocalDateTime NOW = LocalDateTime.of(2026, 10, 26, 12, 0);
     private static final LocalDate DAY = LocalDate.of(2026, 10, 26);
-    private static final String FAMILY_EMOJI = "👨‍👩‍👧‍👦";
+    private static final String FAMILY_EMOJI = codePoints(0x1F468, 0x200D, 0x1F469, 0x200D, 0x1F467, 0x200D, 0x1F466);
     private static final String INSERT_VIEWS = "insert into bio_page_daily_views (page_id, stat_date) values (?, ?)";
 
     @Autowired
@@ -338,6 +338,10 @@ class BioPageSchemaTest {
                 .build();
 
         assertThat(page.isPublic()).isEqualTo(expected);
+    }
+
+    private static String codePoints(final int... codePoints) {
+        return new String(codePoints, 0, codePoints.length);
     }
 
     private static ThrowingConsumer<Throwable> violates(final String constraint) {

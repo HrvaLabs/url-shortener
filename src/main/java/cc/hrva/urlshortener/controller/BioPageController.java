@@ -51,6 +51,7 @@ public class BioPageController {
     @Operation(summary = "Save your bio page", description = "Replace the profile and the buttons as a whole. Buttons must be your own short links; a newly added link must be working. 60 saves per hour.")
     @ApiResponse(responseCode = "400", description = "Validation error, a link that isn't yours, the same link twice or a newly added link that isn't working")
     @ApiResponse(responseCode = "404", description = "You don't have a bio page yet")
+    @ApiResponse(responseCode = "409", description = "Another save changed the page at the same time; reload and try again")
     @ApiResponse(responseCode = "429", description = "Too many saves in the last hour")
     @PutMapping("/me")
     @PreAuthorize("hasAnyRole('ROLE_ADMIN', 'ROLE_USER')")

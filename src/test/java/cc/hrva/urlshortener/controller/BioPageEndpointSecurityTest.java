@@ -11,6 +11,7 @@ import cc.hrva.urlshortener.dto.bio.BioPageButtonDto;
 import cc.hrva.urlshortener.dto.bio.BioPageCreateDto;
 import cc.hrva.urlshortener.dto.bio.BioPageResponse;
 import cc.hrva.urlshortener.dto.bio.BioPageUpdateDto;
+import cc.hrva.urlshortener.exception.BioPageConflictException;
 import cc.hrva.urlshortener.exception.BioPageNotFoundException;
 import cc.hrva.urlshortener.mcp.McpResourceServerConfiguration;
 import cc.hrva.urlshortener.mcp.anon.RateLimiter;
@@ -60,6 +61,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.allOf;
 import static org.hamcrest.Matchers.containsString;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -207,6 +209,24 @@ class BioPageEndpointSecurityTest {
                 .andExpect(status().isNoContent());
 
         verify(bioPageService).delete();
+    }
+
+    @Test
+    void aSaveThatLostARaceIs409WithItsText() throws Exception {
+        when(bioPageService.update(any(BioPageUpdateDto.class))).thenThrow(new BioPageConflictException("This page changed. Reload and try again."));
+
+        mockMvc.perform(signedIn(put(MY_PAGE)).content(page("[" + button("\"Instagram\"") + "]")))
+                .andExpect(status().isConflict())
+                .andExpect(content().json("{\"error\":\"This page changed. Reload and try again.\"}", true));
+    }
+
+    @Test
+    void aDeleteThatLostARaceIs404WithItsText() throws Exception {
+        doThrow(new BioPageNotFoundException(NO_PAGE)).when(bioPageService).delete();
+
+        mockMvc.perform(signedIn(delete(MY_PAGE)))
+                .andExpect(status().isNotFound())
+                .andExpect(content().json("{\"error\":\"You don't have a bio page yet.\"}", true));
     }
 
     @Test

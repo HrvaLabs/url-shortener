@@ -8,6 +8,7 @@ import cc.hrva.urlshortener.dto.bio.BioPageResponse;
 import cc.hrva.urlshortener.dto.bio.BioPageUpdateDto;
 import cc.hrva.urlshortener.exception.ApiException;
 import cc.hrva.urlshortener.exception.BioHandleUnavailableException;
+import cc.hrva.urlshortener.exception.BioPageConflictException;
 import cc.hrva.urlshortener.exception.BioPageNotFoundException;
 import cc.hrva.urlshortener.exception.RateLimitExceededException;
 import cc.hrva.urlshortener.mcp.anon.RateLimiter;
@@ -29,6 +30,7 @@ import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.service.bio.BioHandles;
 import cc.hrva.urlshortener.service.bio.BioPageResponses;
 import cc.hrva.urlshortener.service.impl.DefaultBioPageService;
+import java.sql.SQLException;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -37,6 +39,7 @@ import java.time.ZoneOffset;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
+import org.hibernate.exception.ConstraintViolationException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -45,6 +48,7 @@ import org.mockito.Captor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -55,6 +59,7 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyIterable;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
@@ -76,6 +81,7 @@ class DefaultBioPageServiceTest {
     private static final Duration HANDLE_WINDOW = Duration.ofHours(24);
     private static final Duration CHECK_WINDOW = Duration.ofMinutes(10);
     private static final String NO_PAGE = "You don't have a bio page yet.";
+    private static final String PAGE_CHANGED = "This page changed. Reload and try again.";
     private static final String ALREADY_HAS_PAGE = "You already have a bio page.";
     private static final String TAKEN = "This handle is taken. Try another.";
     private static final String RESERVED = "This handle is reserved. Try another.";
@@ -454,6 +460,50 @@ class DefaultBioPageServiceTest {
     }
 
     @Test
+    void aSaveThatLostTheRaceForANewLinkIs409() {
+        hasPage();
+        ownsLinks(link(41L, "ana-ig", ana));
+        when(bioPageButtonRepository.saveAll(anyIterable())).thenThrow(violation("uq_bio_page_button_page_url"));
+
+        assertThatThrownBy(() -> bioPageService.update(update(buttonDto(41L, "Instagram"))))
+                .isInstanceOf(BioPageConflictException.class)
+                .hasMessage(PAGE_CHANGED);
+    }
+
+    @Test
+    void aSaveThatLostTheRaceAtTheFlushIs409() {
+        hasPage();
+        ownsLinks(link(41L, "ana-ig", ana));
+        when(bioPageRepository.saveAndFlush(page)).thenThrow(violation("UQ_BIO_PAGE_BUTTON_PAGE_URL_INDEX_C"));
+
+        assertThatThrownBy(() -> bioPageService.update(update(buttonDto(41L, "Instagram"))))
+                .isInstanceOf(BioPageConflictException.class)
+                .hasMessage(PAGE_CHANGED);
+    }
+
+    @Test
+    void anotherIntegrityErrorWhileSavingIsNotHidden() {
+        hasPage();
+        ownsLinks(link(41L, "ana-ig", ana));
+        final var linkGone = violation("fk_bio_page_button_url");
+        when(bioPageButtonRepository.saveAll(anyIterable())).thenThrow(linkGone);
+
+        assertThatThrownBy(() -> bioPageService.update(update(buttonDto(41L, "Instagram"))))
+                .isSameAs(linkGone);
+    }
+
+    @Test
+    void anIntegrityErrorWithoutAConstraintNameIsNotHidden() {
+        hasPage();
+        ownsLinks(link(41L, "ana-ig", ana));
+        final var unnamed = new DataIntegrityViolationException("uq_bio_page_button_page_url");
+        when(bioPageButtonRepository.saveAll(anyIterable())).thenThrow(unnamed);
+
+        assertThatThrownBy(() -> bioPageService.update(update(buttonDto(41L, "Instagram"))))
+                .isSameAs(unnamed);
+    }
+
+    @Test
     void initialsClearTheEmoji() {
         hasPage();
         savesReturnTheirArgument();
@@ -673,6 +723,7 @@ class DefaultBioPageServiceTest {
         final var inOrder = inOrder(bioHandles, bioPageRepository);
         inOrder.verify(bioHandles).hold("ana", null);
         inOrder.verify(bioPageRepository).delete(page);
+        inOrder.verify(bioPageRepository).flush();
     }
 
     @Test
@@ -684,6 +735,36 @@ class DefaultBioPageServiceTest {
 
         verifyNoInteractions(bioHandles);
         verify(bioPageRepository).delete(page);
+    }
+
+    @Test
+    void aDeleteOfAPageAlreadyDeletedMeanwhileIs404() {
+        hasPage();
+        doThrow(new ObjectOptimisticLockingFailureException(BioPage.class, 12L)).when(bioPageRepository).flush();
+
+        assertThatThrownBy(() -> bioPageService.delete())
+                .isInstanceOf(BioPageNotFoundException.class)
+                .hasMessage(NO_PAGE);
+    }
+
+    @Test
+    void aDeleteWhoseHandleTheOtherDeleteHeldIs404() {
+        hasPage();
+        doThrow(violation("pk_bio_handle_hold")).when(bioPageRepository).flush();
+
+        assertThatThrownBy(() -> bioPageService.delete())
+                .isInstanceOf(BioPageNotFoundException.class)
+                .hasMessage(NO_PAGE);
+    }
+
+    @Test
+    void anotherIntegrityErrorWhileDeletingIsNotHidden() {
+        hasPage();
+        final var other = violation("fk_bio_handle_hold_page");
+        doThrow(other).when(bioPageRepository).flush();
+
+        assertThatThrownBy(() -> bioPageService.delete())
+                .isSameAs(other);
     }
 
     @Test
@@ -768,6 +849,12 @@ class DefaultBioPageServiceTest {
                 .theme(BioTheme.DARK)
                 .buttons(List.of(buttons))
                 .build();
+    }
+
+    private static DataIntegrityViolationException violation(final String constraint) {
+        return new DataIntegrityViolationException("could not execute statement", new ConstraintViolationException(
+                "could not execute statement", new SQLException("duplicate key value violates unique constraint \"" + constraint + "\"", "23505"),
+                constraint));
     }
 
     private static String codePoints(final int... codePoints) {
