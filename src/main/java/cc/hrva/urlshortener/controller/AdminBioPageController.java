@@ -3,6 +3,7 @@ package cc.hrva.urlshortener.controller;
 import cc.hrva.urlshortener.audit.Audited;
 import cc.hrva.urlshortener.dto.bio.AdminBioPageResponse;
 import cc.hrva.urlshortener.dto.bio.BioHandleDto;
+import cc.hrva.urlshortener.dto.bio.BioHandleRevokeDto;
 import cc.hrva.urlshortener.dto.bio.BioPageReasonDto;
 import cc.hrva.urlshortener.model.enums.AuditAction;
 import cc.hrva.urlshortener.service.AdminBioPageService;
@@ -68,13 +69,14 @@ public class AdminBioPageController {
         return ResponseEntity.ok(adminBioPageService.changeHandle(id, bioHandleDto));
     }
 
-    @Operation(summary = "Revoke a bio page's handle", description = "Clears the handle, keeps the page and reserves the old handle on the Reserved aliases page.")
+    @Operation(summary = "Revoke a bio page's handle", description = "Clears the handle, keeps the page and reserves the old handle on the Reserved aliases page. "
+            + "With expectedHandle, answers 409 when the handle is no longer that one.")
     @PostMapping("/{id}/revoke-handle")
     @PreAuthorize("hasRole('ROLE_ADMIN')")
     @Audited(AuditAction.REVOKE_BIO_HANDLE)
     public ResponseEntity<AdminBioPageResponse> revokeBioPageHandle(@PathVariable("id") final long id,
-                                                                    @Valid @RequestBody final BioPageReasonDto bioPageReasonDto) {
-        return ResponseEntity.ok(adminBioPageService.revokeHandle(id, bioPageReasonDto));
+                                                                    @Valid @RequestBody final BioHandleRevokeDto bioHandleRevokeDto) {
+        return ResponseEntity.ok(adminBioPageService.revokeHandle(id, bioHandleRevokeDto));
     }
 
 }

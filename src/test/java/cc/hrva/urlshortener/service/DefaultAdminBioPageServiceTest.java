@@ -3,10 +3,12 @@ package cc.hrva.urlshortener.service;
 import cc.hrva.urlshortener.dto.ReservedAliasDto;
 import cc.hrva.urlshortener.dto.bio.AdminBioPageResponse;
 import cc.hrva.urlshortener.dto.bio.BioHandleDto;
+import cc.hrva.urlshortener.dto.bio.BioHandleRevokeDto;
 import cc.hrva.urlshortener.dto.bio.BioPageReasonDto;
 import cc.hrva.urlshortener.dto.bio.BioPageReviewResolveDto;
 import cc.hrva.urlshortener.exception.ApiException;
 import cc.hrva.urlshortener.exception.BioHandleUnavailableException;
+import cc.hrva.urlshortener.exception.BioPageConflictException;
 import cc.hrva.urlshortener.exception.BioPageNotFoundException;
 import cc.hrva.urlshortener.exception.ShortUrlAlreadyExistsException;
 import cc.hrva.urlshortener.model.BioPage;
@@ -36,9 +38,13 @@ import java.util.stream.LongStream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
@@ -78,6 +84,7 @@ class DefaultAdminBioPageServiceTest {
     private static final String RESERVED = "This handle is reserved. Try another.";
     private static final String ALREADY_RESERVED = "This alias is already reserved.";
     private static final int GRINNING_FACE = 0x1F600;
+    private static final String HANDLE_CHANGED = "This handle changed. Reload and try again.";
 
     @Mock
     private BioPageRepository bioPageRepository;
@@ -239,7 +246,7 @@ class DefaultAdminBioPageServiceTest {
 
     @Test
     void revokeClearsTheHandleAndReservesIt() {
-        final var response = adminBioPageService.revokeHandle(12L, new BioPageReasonDto(" Impersonation "));
+        final var response = adminBioPageService.revokeHandle(12L, new BioHandleRevokeDto(" Impersonation ", null));
 
         final var inOrder = inOrder(bioPageLock, bioPageRepository, reservedAliasService);
         inOrder.verify(bioPageLock).lock(page);
@@ -252,11 +259,54 @@ class DefaultAdminBioPageServiceTest {
         verify(bioHandles, never()).hold(anyString(), any());
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"ana", " @Ana "})
+    void aMatchingExpectedHandleRevokes(final String expectedHandle) {
+        final var response = adminBioPageService.revokeHandle(12L, new BioHandleRevokeDto("Impersonation", expectedHandle));
+
+        assertThat(response.handle()).isNull();
+        assertThat(page.getHandleRevokedReason()).isEqualTo("Impersonation");
+        verify(reservedAliasService).reserve(new ReservedAliasDto("ana", "Revoked bio page handle: Impersonation"), ADMIN_EMAIL);
+    }
+
+    @Test
+    void aHandleTheOwnerChangedSinceTheListLoadedIs409AndNothingIsWritten() {
+        assertThatThrownBy(() -> adminBioPageService.revokeHandle(12L, new BioHandleRevokeDto("Impersonation", "ana-old")))
+                .isInstanceOf(BioPageConflictException.class)
+                .hasMessage(HANDLE_CHANGED);
+
+        verify(bioPageLock).lock(page);
+        verify(bioPageRepository, never()).saveAndFlush(any());
+        verifyNoInteractions(reservedAliasService);
+        assertThat(page.getHandle()).isEqualTo("ana");
+        assertThat(page.getHandleRevokedReason()).isNull();
+    }
+
+    @Test
+    void anExpectedHandleOnAPageAlreadyRevokedIs409() {
+        page.setHandle(null);
+
+        assertThatThrownBy(() -> adminBioPageService.revokeHandle(12L, new BioHandleRevokeDto("Impersonation", "ana")))
+                .isInstanceOf(BioPageConflictException.class)
+                .hasMessage(HANDLE_CHANGED);
+
+        verify(bioPageRepository, never()).saveAndFlush(any());
+        verifyNoInteractions(reservedAliasService);
+    }
+
+    @Test
+    @ExtendWith(OutputCaptureExtension.class)
+    void theRevokeLogNamesThePageAndTheHandle(final CapturedOutput output) {
+        adminBioPageService.revokeHandle(12L, new BioHandleRevokeDto("Impersonation", null));
+
+        assertThat(output).contains("Bio page handle revoked by an admin pageId=12 handle=ana").doesNotContain("ana@example.com");
+    }
+
     @Test
     void revokeIgnoresAnAlreadyReservedHandle() {
         when(reservedAliasService.reserve(any(ReservedAliasDto.class), anyString())).thenThrow(new ShortUrlAlreadyExistsException(ALREADY_RESERVED));
 
-        final var response = adminBioPageService.revokeHandle(12L, new BioPageReasonDto("Impersonation"));
+        final var response = adminBioPageService.revokeHandle(12L, new BioHandleRevokeDto("Impersonation", null));
 
         assertThat(response.handle()).isNull();
         assertThat(page.getHandleRevokedReason()).isEqualTo("Impersonation");
@@ -267,7 +317,7 @@ class DefaultAdminBioPageServiceTest {
     void revokeDoesNotTryToReserveAHandleThatIsAlreadyReserved() {
         when(reservedAliasService.isReserved("ana")).thenReturn(true);
 
-        adminBioPageService.revokeHandle(12L, new BioPageReasonDto("Impersonation"));
+        adminBioPageService.revokeHandle(12L, new BioHandleRevokeDto("Impersonation", null));
 
         verify(reservedAliasService, never()).reserve(any(), anyString());
         assertThat(page.getHandle()).isNull();
@@ -278,14 +328,14 @@ class DefaultAdminBioPageServiceTest {
         final var failure = new IllegalStateException("database down");
         when(reservedAliasService.reserve(any(ReservedAliasDto.class), anyString())).thenThrow(failure);
 
-        assertThatThrownBy(() -> adminBioPageService.revokeHandle(12L, new BioPageReasonDto("Impersonation"))).isSameAs(failure);
+        assertThatThrownBy(() -> adminBioPageService.revokeHandle(12L, new BioHandleRevokeDto("Impersonation", null))).isSameAs(failure);
     }
 
     @Test
     void revokeWithoutAHandleIs400() {
         page.setHandle(null);
 
-        assertThatThrownBy(() -> adminBioPageService.revokeHandle(12L, new BioPageReasonDto("Impersonation")))
+        assertThatThrownBy(() -> adminBioPageService.revokeHandle(12L, new BioHandleRevokeDto("Impersonation", null)))
                 .isInstanceOf(ApiException.class)
                 .hasMessage(NO_HANDLE);
 
@@ -297,7 +347,7 @@ class DefaultAdminBioPageServiceTest {
     void aReasonOver200IsCutForTheReservation() {
         final var reason = "r".repeat(200);
 
-        adminBioPageService.revokeHandle(12L, new BioPageReasonDto(reason));
+        adminBioPageService.revokeHandle(12L, new BioHandleRevokeDto(reason, null));
 
         final var reserved = ArgumentCaptor.forClass(ReservedAliasDto.class);
         verify(reservedAliasService).reserve(reserved.capture(), anyString());
@@ -311,7 +361,7 @@ class DefaultAdminBioPageServiceTest {
         final var kept = "r".repeat(174);
         final var reason = kept + Character.toString(GRINNING_FACE) + "r".repeat(24);
 
-        adminBioPageService.revokeHandle(12L, new BioPageReasonDto(reason));
+        adminBioPageService.revokeHandle(12L, new BioHandleRevokeDto(reason, null));
 
         final var reserved = ArgumentCaptor.forClass(ReservedAliasDto.class);
         verify(reservedAliasService).reserve(reserved.capture(), anyString());
@@ -325,7 +375,7 @@ class DefaultAdminBioPageServiceTest {
         final var kept = "r".repeat(173) + Character.toString(GRINNING_FACE);
         final var reason = kept + "r".repeat(25);
 
-        adminBioPageService.revokeHandle(12L, new BioPageReasonDto(reason));
+        adminBioPageService.revokeHandle(12L, new BioHandleRevokeDto(reason, null));
 
         final var reserved = ArgumentCaptor.forClass(ReservedAliasDto.class);
         verify(reservedAliasService).reserve(reserved.capture(), anyString());
@@ -460,7 +510,7 @@ class DefaultAdminBioPageServiceTest {
         expectNotFound(service -> service.hide(99L, new BioPageReasonDto("Spam")));
         expectNotFound(service -> service.unhide(99L));
         expectNotFound(service -> service.changeHandle(99L, new BioHandleDto("bob")));
-        expectNotFound(service -> service.revokeHandle(99L, new BioPageReasonDto("Spam")));
+        expectNotFound(service -> service.revokeHandle(99L, new BioHandleRevokeDto("Spam", null)));
         expectNotFound(service -> service.resolveReview(99L, new BioPageReviewResolveDto(BioPageReviewAction.OK, null)));
         verifyNoInteractions(bioPageLock, bioHandles, reservedAliasService);
     }
@@ -470,7 +520,7 @@ class DefaultAdminBioPageServiceTest {
         when(bioPageLock.lock(page)).thenReturn(Optional.empty());
 
         expectNotFound(service -> service.hide(12L, new BioPageReasonDto("Spam")));
-        expectNotFound(service -> service.revokeHandle(12L, new BioPageReasonDto("Spam")));
+        expectNotFound(service -> service.revokeHandle(12L, new BioHandleRevokeDto("Spam", null)));
         verify(bioPageRepository, never()).saveAndFlush(any());
     }
 
@@ -482,7 +532,7 @@ class DefaultAdminBioPageServiceTest {
                 service.getMethod("hide", long.class, BioPageReasonDto.class),
                 service.getMethod("unhide", long.class),
                 service.getMethod("changeHandle", long.class, BioHandleDto.class),
-                service.getMethod("revokeHandle", long.class, BioPageReasonDto.class),
+                service.getMethod("revokeHandle", long.class, BioHandleRevokeDto.class),
                 service.getMethod("resolveReview", long.class, BioPageReviewResolveDto.class))) {
             assertThat(write.getAnnotation(Transactional.class)).as(write.getName()).isNotNull();
             assertThat(write.getAnnotation(Transactional.class).readOnly()).as(write.getName()).isFalse();

@@ -324,6 +324,27 @@ class BioPageSchemaTest {
     }
 
     @Test
+    void newReasonsSavedAfterAnAdminResolvedTheReviewLeaveItResolved() {
+        final var page = savedPage(savedUser("ana@example.com"), "ana");
+        final var review = bioPageReviewRepository.saveAndFlush(
+                BioPageReview.builder().page(page).reasons("visitor report: spam").flaggedAt(NOW.minusHours(1)).systemFlagged(false).build());
+        jdbcTemplate.update("update bio_page_review set resolved_at = ?, resolved_by = ?, resolution = ? where id = ?",
+                NOW, "admin@hrva.cc", "OK", review.getId());
+
+        review.setReasons(review.getReasons() + "\nname imitates paypal");
+        review.setSystemFlagged(true);
+        bioPageReviewRepository.saveAndFlush(review);
+
+        assertThat(jdbcTemplate.queryForMap("select resolved_at, resolved_by, resolution, system_flagged from bio_page_review where id = ?",
+                review.getId()))
+                .containsEntry("RESOLVED_BY", "admin@hrva.cc")
+                .containsEntry("RESOLUTION", "OK")
+                .containsEntry("SYSTEM_FLAGGED", true)
+                .extractingByKey("RESOLVED_AT").isNotNull();
+        assertThat(bioPageReviewRepository.countByResolvedAtIsNull()).isZero();
+    }
+
+    @Test
     void expiredHoldsAreDeletedAndLiveOnesKept() {
         bioHandleHoldRepository.saveAndFlush(hold("ended", null, NOW.minusDays(1)));
         bioHandleHoldRepository.saveAndFlush(hold("live", null, NOW.plusDays(1)));

@@ -7,11 +7,13 @@ import cc.hrva.urlshortener.configuration.SecurityConfiguration;
 import cc.hrva.urlshortener.configuration.WebConfiguration;
 import cc.hrva.urlshortener.dto.bio.AdminBioPageResponse;
 import cc.hrva.urlshortener.dto.bio.BioHandleDto;
+import cc.hrva.urlshortener.dto.bio.BioHandleRevokeDto;
 import cc.hrva.urlshortener.dto.bio.BioPageReasonDto;
 import cc.hrva.urlshortener.dto.bio.BioPageReviewEntryResponse;
 import cc.hrva.urlshortener.dto.bio.BioPageReviewResolveDto;
 import cc.hrva.urlshortener.exception.ApiException;
 import cc.hrva.urlshortener.exception.BioHandleUnavailableException;
+import cc.hrva.urlshortener.exception.BioPageConflictException;
 import cc.hrva.urlshortener.exception.BioPageNotFoundException;
 import cc.hrva.urlshortener.mcp.McpResourceServerConfiguration;
 import cc.hrva.urlshortener.mcp.anon.RateLimiter;
@@ -218,7 +220,7 @@ class AdminBioPageSecurityTest {
 
     @Test
     void anAdminRevokesAHandle() throws Exception {
-        when(adminBioPageService.revokeHandle(12L, new BioPageReasonDto("Impersonation"))).thenReturn(ana());
+        when(adminBioPageService.revokeHandle(12L, new BioHandleRevokeDto("Impersonation", null))).thenReturn(ana());
 
         mockMvc.perform(asAdmin(post(REVOKE)).content(REASON_BODY))
                 .andExpect(status().isOk())
@@ -226,8 +228,27 @@ class AdminBioPageSecurityTest {
     }
 
     @Test
+    void theRevokeCarriesTheHandleTheAdminSaw() throws Exception {
+        when(adminBioPageService.revokeHandle(12L, new BioHandleRevokeDto("Impersonation", "ana"))).thenReturn(ana());
+
+        mockMvc.perform(asAdmin(post(REVOKE)).content("{\"reason\":\"Impersonation\",\"expectedHandle\":\"ana\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(12));
+    }
+
+    @Test
+    void aHandleThatChangedSinceTheListLoadedIs409() throws Exception {
+        when(adminBioPageService.revokeHandle(12L, new BioHandleRevokeDto("Impersonation", "ana-old")))
+                .thenThrow(new BioPageConflictException("This handle changed. Reload and try again."));
+
+        mockMvc.perform(asAdmin(post(REVOKE)).content("{\"reason\":\"Impersonation\",\"expectedHandle\":\"ana-old\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error").value("This handle changed. Reload and try again."));
+    }
+
+    @Test
     void revokingAPageWithoutAHandleIs400() throws Exception {
-        when(adminBioPageService.revokeHandle(12L, new BioPageReasonDto("Impersonation"))).thenThrow(new ApiException("This page has no handle."));
+        when(adminBioPageService.revokeHandle(12L, new BioHandleRevokeDto("Impersonation", null))).thenThrow(new ApiException("This page has no handle."));
 
         mockMvc.perform(asAdmin(post(REVOKE)).content(REASON_BODY))
                 .andExpect(status().isBadRequest())

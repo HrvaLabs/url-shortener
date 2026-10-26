@@ -95,6 +95,35 @@ class BioPageSpecificationTest {
     }
 
     @Test
+    void anUnderscoreMatchesOnlyAnUnderscore() {
+        persistPage("underscore@escape.test", "a_b", "", false);
+        persistPage("hyphen@escape.test", "a-b", "", false);
+        persistPage("letter@escape.test", "axb", "", false);
+        entityManager.flush();
+
+        assertThat(emails(BioPageSpecification.searchMatches("a_b"))).containsExactly("underscore@escape.test");
+    }
+
+    @Test
+    void aPercentSignIsNotAWildcard() {
+        assertThat(emails(BioPageSpecification.searchMatches("%"))).isEmpty();
+
+        persistPage("percent@escape.test", "vegan", "100% vegan", false);
+        entityManager.flush();
+
+        assertThat(emails(BioPageSpecification.searchMatches("%"))).containsExactly("percent@escape.test");
+    }
+
+    @Test
+    void aBackslashMatchesOnlyABackslash() {
+        persistPage("backslash@escape.test", "slash", "a\\b", false);
+        persistPage("plain@escape.test", "plain", "ab", false);
+        entityManager.flush();
+
+        assertThat(emails(BioPageSpecification.searchMatches("a\\b"))).containsExactly("backslash@escape.test");
+    }
+
+    @Test
     void isHiddenKeepsOnlyHiddenPages() {
         assertThat(emails(BioPageSpecification.isHidden())).containsExactly("Ivana.Kovac@Example.com", "marko@studio.hr");
         assertThat(emails(BioPageSpecification.isHidden().and(BioPageSpecification.searchMatches("studio")))).containsExactly("marko@studio.hr");

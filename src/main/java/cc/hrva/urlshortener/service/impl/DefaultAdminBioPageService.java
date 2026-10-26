@@ -3,10 +3,12 @@ package cc.hrva.urlshortener.service.impl;
 import cc.hrva.urlshortener.dto.ReservedAliasDto;
 import cc.hrva.urlshortener.dto.bio.AdminBioPageResponse;
 import cc.hrva.urlshortener.dto.bio.BioHandleDto;
+import cc.hrva.urlshortener.dto.bio.BioHandleRevokeDto;
 import cc.hrva.urlshortener.dto.bio.BioPageReasonDto;
 import cc.hrva.urlshortener.dto.bio.BioPageReviewResolveDto;
 import cc.hrva.urlshortener.exception.ApiException;
 import cc.hrva.urlshortener.exception.BioHandleUnavailableException;
+import cc.hrva.urlshortener.exception.BioPageConflictException;
 import cc.hrva.urlshortener.exception.BioPageNotFoundException;
 import cc.hrva.urlshortener.exception.NoAuthorizationException;
 import cc.hrva.urlshortener.exception.ShortUrlAlreadyExistsException;
@@ -54,6 +56,7 @@ public class DefaultAdminBioPageService implements AdminBioPageService {
     private static final String NOT_IN_QUEUE = "This bio page is no longer in the review queue.";
     private static final String REASON_REQUIRED = "Reason is required";
     private static final String HANDLE_TAKEN = "This handle is taken. Try another.";
+    private static final String HANDLE_CHANGED = "This handle changed. Reload and try again.";
     private static final String REVOKED_HANDLE_REASON = "Revoked bio page handle: ";
     private static final int MAX_RESERVATION_REASON_LENGTH = 200;
     private static final Sort NEWEST_FIRST = Sort.by(Sort.Order.desc("createdAt"), Sort.Order.desc("id"));
@@ -138,18 +141,23 @@ public class DefaultAdminBioPageService implements AdminBioPageService {
 
     @Override
     @Transactional
-    public AdminBioPageResponse revokeHandle(final long id, final BioPageReasonDto bioPageReasonDto) {
+    public AdminBioPageResponse revokeHandle(final long id, final BioHandleRevokeDto bioHandleRevokeDto) {
         final var page = lockedPage(id);
         final var handle = page.getHandle();
+        final var expectedHandle = bioHandleRevokeDto.expectedHandle();
+        if (expectedHandle != null && !BioHandles.normalize(expectedHandle).equals(handle)) {
+            log.info("Bio page handle revoke refused because the handle changed pageId={} handle={}", page.getId(), handle);
+            throw new BioPageConflictException(HANDLE_CHANGED);
+        }
         if (handle == null) {
             throw new ApiException(NO_HANDLE);
         }
-        final var reason = bioPageReasonDto.reason().strip();
+        final var reason = bioHandleRevokeDto.reason().strip();
         page.setHandle(null);
         page.setHandleRevokedReason(reason);
         bioPageRepository.saveAndFlush(page);
         reserve(page, handle, reason);
-        log.info("Bio page handle revoked by an admin pageId={}", page.getId());
+        log.info("Bio page handle revoked by an admin pageId={} handle={}", page.getId(), handle);
         return responseOf(page);
     }
 
