@@ -1,64 +1,82 @@
 # [URL-Shortener](https://app.hrva.cc)
 
 ## Overview
-Welcome to the URL-Shortener project! This application allows you to shorten URLs efficiently and securely with additional features such as API keys, custom URLs, and comprehensive link management.
+hrva.cc is a privacy-first URL shortener with built-in link safety. This repository is the backend: a Spring Boot API that creates and redirects short links, checks them for phishing and malware, and counts clicks without tracking anyone. The frontend lives in [HrvaLabs/URL-Shortener-FE](https://github.com/HrvaLabs/URL-Shortener-FE).
+
+The changelog is shown at [app.hrva.cc/changelog](https://app.hrva.cc/changelog) and kept in [CHANGELOG.md](CHANGELOG.md). [AGENTS.md](AGENTS.md) documents the architecture, commands, endpoints and configuration.
 
 ## Features
-- **API Keys for External Access**: Generate API keys to access the URL shortening service programmatically.
-- **Automatic Link Deactivation**: Links can automatically deactivate after a certain time or after being accessed by a set number of unique users.+
-- **Custom Expiration Dates**: Allow users to set custom expiration dates for their shortened URLs.
-- **Dashboard**: View all URLs, their access counts, and more in a user-friendly dashboard.
-- **Custom Short URLs**: Logged-in users can create custom short URLs; non-logged-in users receive a randomly generated URL.
-- **Google Safe Browsing Integration**: URLs are scanned using Google Safe Browsing to ensure they are not malicious.
-- **URL Validation**: Regular users can validate URLs through an external site to ensure safety.
-- **Login Security**: Accounts are locked after multiple failed login attempts to prevent unauthorized access.
+
+### Links
+- Random short links, or a custom alias when you're signed in. Links can also be made without an account, with a stricter rate limit.
+- Expiry dates, visit limits, password protection and tags.
+- Bulk creation, and an API with API keys.
+- A campaign tag (UTM) builder.
+- QR codes that count their scans.
+
+### Bio pages
+- One page at `hrva.cc/@yourname`, with a button for each of your short links.
+- Views are counted per day, and changing your handle keeps the old one held for 30 days.
+
+### Safety
+- Every new link, every click and a nightly rescan go through:
+  - Google Safe Browsing
+  - admin-managed blocklists (HaGeZi, OpenPhish, PhishTank, Phishing.Database, URLhaus)
+  - Spamhaus DBL
+  - domain age (RDAP)
+  - redirect-chain and look-alike checks
+- Visitors can report links and bio pages.
+- Suspicious links go to a review queue rather than being blocked blindly.
+- A phishing-wave alert warns when many new links point at the same new domain.
+
+### Privacy-first analytics
+- Clicks are stored only as daily totals per link: visitors, referrers, devices, browsers, countries, and QR scans against other clicks.
+- Unique visitors come from a one-way hash under a key that changes every day, kept only in Redis.
+- Bots are counted apart.
+- The public [hrva.cc in numbers](https://app.hrva.cc/stats) page shows site-wide totals.
+
+### Accounts
+- Sign in with email and password, Google or GitHub, or a passkey or security key.
+- Two-step verification works with every sign-in method, using an authenticator app or a passkey, with recovery codes.
+- You can export your data and delete your account.
+
+### AI connector
+- AI apps such as Claude use hrva.cc over MCP at `https://hrva.cc/mcp`, signing in with OAuth 2.1.
+
+### Admin
+- Pages for stats, the review queue, moderation, blocklists, domain rules, reserved aliases, bio pages and the audit log.
+- Discord alerts, a weekly summary and a daily decisions email.
 
 ## Roadmap
-1. **SSO Logins**: Integrate single sign-on (SSO) options with GitHub, Google, etc.
-2. **Frontend Redesign**: Overhaul the frontend with a new design for improved user experience.
-3. **Backend Refactor**: Refactor the backend to Java 21, adhering to best practices.
-4. **Easy Deploy**: Streamline the deployment process for ease of use.
-5. **Caching Database**: Implement database caching to provide faster responses.
-6. **Improved API Documentation**: Enhance the API documentation for better clarity and usability.
+- **Notifications for link owners:** opt-in alerts by Discord, Slack, Telegram, ntfy, a signed webhook or email. Nothing is sent without consent.
+- **Custom domains:** short links on your own domain.
 
 ## Technologies Used
-- **Backend**: Java, Spring Boot
-- **Frontend**: Next
-- **Database**: Postgres
+- **Backend:** Java 25, Spring Boot 4.1, Spring Security and Spring Authorization Server, Spring AI (MCP)
+- **Database:** PostgreSQL with Liquibase migrations, and Redis
+- **Frontend:** Next.js 16 on Cloudflare Workers (separate repository)
+- **Deploy:** GitHub Actions builds the Docker image and triggers a Portainer stack webhook. The site runs behind Cloudflare.
 
-## Upcoming Features Suggestions in Review
-- **QR Code Generation**: Automatically generate QR codes for each shortened URL for easy sharing.
-- **User Roles and Permissions**: Implement user roles (e.g., admin, editor, viewer) with different levels of access and control.
-- **Two-Factor Authentication (2FA)**: Enhance security by adding two-factor authentication for user logins.
-- **URL Categorization**: Allow users to categorize and tag their URLs for better organization.
-- **Bulk URL Shortening**: Enable users to shorten multiple URLs at once through batch processing.
-- **Link Preview**: Show a preview of the destination website before redirection.
-- **Integration with Other Services**: Integrate with popular services like Slack, Discord, and Microsoft Teams for easier sharing and notifications.
-- **Dark Mode**: Add a dark mode option for the dashboard to reduce eye strain and improve usability in low-light environments.
+## Running it
+Build, test and run commands, local dev users and the end-to-end check (`scripts/mcp-e2e.sh`) are in [AGENTS.md](AGENTS.md). The short version: `docker compose -f docker/docker-compose.yml up -d` for Postgres and Redis, then `mvn spring-boot:run -Dspring-boot.run.profiles=local`. For tests, run `mvn -B test`.
 
-## Production Checklist: MCP Connector
-Before the first deploy of the MCP connector (AI apps such as Claude using hrva.cc at `https://hrva.cc/mcp`). How it works: `AGENTS.md` → MCP connector.
-
-1. **Signing key.** Generate a private RSA JWK and set it as the secret env var `APP_MCP_SIGNING_KEY`; the app doesn't start without it. Keep it out of git and logs, and never reuse the committed `local` profile key.
-   ```bash
-   node -e "const {generateKeyPairSync, randomUUID} = require('node:crypto'); const {privateKey} = generateKeyPairSync('rsa', {modulusLength: 2048}); console.log(JSON.stringify({...privateKey.export({format: 'jwk'}), kid: randomUUID(), use: 'sig', alg: 'RS256'}))"
-   ```
-2. **Cloudflare-only origin.** The per-IP limits (app registrations, logins, reports and anonymous links on the website) trust the `CF-Connecting-IP` header, so the origin must accept traffic from Cloudflare only: a Cloudflare Tunnel, or a firewall that lets only [Cloudflare's IP ranges](https://www.cloudflare.com/ips/) reach the app. Otherwise anyone can forge the header. The country counts in click analytics trust the `CF-IPCountry` header for the same reason.
-3. **Cloudflare rules for the MCP paths.** MCP clients are not browsers: a Cloudflare challenge hands them an HTML page where they expect JSON, and the connection fails.
-   - Exempt `/mcp`, `/oauth2/*` and `/.well-known/*` from WAF managed challenges and from Super Bot Fight Mode (a custom rule with the Skip action), or verify that nothing challenges them. Bot Fight Mode on the Free plan can't be skipped per path; if it challenges these paths, turn it off. The smoke test (step 8) shows it: a challenge returns HTML instead of JSON or a bare 401.
-   - Don't cache `GET /oauth2/authorize` or `/.well-known/*` at the edge (no Cache Everything rule over them). Every `/oauth2/authorize` response sets its own session cookie and connect handle.
-   - Optional: a Cloudflare rate-limiting rule on `GET /oauth2/authorize`. Each unauthenticated hit allocates a 10-minute session and a Redis key, and the app has no per-IP limit there.
-4. **Redis 6.2 or newer.** The login bridge redeems one-time codes with `GETDEL`.
-5. **The `mcp` alias.** `mcp` is now reserved and `/mcp` no longer redirects. Run `select short_url from url where lower(short_url) = 'mcp';` and resolve any row before deploying.
-6. **Merge `fix/long-url-validation` first.** It gives the tools specific errors for malformed URLs instead of a generic one.
-7. **Deploy the backend, then the frontend** `feature/mcp-connector`: the `/connect` page, Settings → Connected apps, and the `/mcp` page.
-8. **Smoke test.** Expect issuer `https://hrva.cc`, resource `https://hrva.cc/mcp`, and 401 from `/mcp` without a token. HTML instead of JSON, or a 403, means a Cloudflare challenge (step 3).
-   ```bash
-   curl -s https://hrva.cc/.well-known/oauth-authorization-server | jq '{issuer, registration_endpoint}'
-   curl -s https://hrva.cc/.well-known/oauth-protected-resource/mcp | jq '{resource, authorization_servers}'
-   curl -s -o /dev/null -w '%{http_code}\n' -X POST https://hrva.cc/mcp
-   ```
-9. **Sign in once from each Claude client.** In Claude Code, `claude mcp add --transport http hrva https://hrva.cc/mcp`, then `/mcp` → authenticate. In the Claude app, Settings → Connectors → Add custom connector with `https://hrva.cc/mcp`.
+## Production requirements
+- **PostgreSQL 15 or newer** (the analytics counters use `MERGE`) and **Redis 6.2 or newer** (`GETDEL`, `SMISMEMBER`).
+- **Environment variables:** the full list is in AGENTS.md (CI / Deploy, and MCP connector → Configuration). `APP_MCP_SIGNING_KEY` is required, and the app won't start without it. Generate a private RSA JWK and keep it out of git and logs:
+  ```bash
+  node -e "const {generateKeyPairSync, randomUUID} = require('node:crypto'); const {privateKey} = generateKeyPairSync('rsa', {modulusLength: 2048}); console.log(JSON.stringify({...privateKey.export({format: 'jwk'}), kid: randomUUID(), use: 'sig', alg: 'RS256'}))"
+  ```
+- **Cloudflare-only origin.** The per-network rate limits trust `CF-Connecting-IP`, and the country counts trust `CF-IPCountry`. The origin must therefore accept traffic only from Cloudflare, through a Cloudflare Tunnel or a firewall limited to [Cloudflare's IP ranges](https://www.cloudflare.com/ips/). Otherwise anyone can forge those headers.
+- **Cloudflare rules for the MCP paths.** MCP clients aren't browsers, and a challenge breaks them:
+  - Exempt `/mcp`, `/oauth2/*` and `/.well-known/*` from WAF managed challenges and Super Bot Fight Mode. If Bot Fight Mode on the Free plan challenges them, turn it off.
+  - Don't cache `GET /oauth2/authorize` or `/.well-known/*` at the edge.
+- **Smoke test after a deploy.** Expect issuer `https://hrva.cc`, resource `https://hrva.cc/mcp`, and 401 from `/mcp` without a token:
+  ```bash
+  curl -s https://hrva.cc/actuator/health
+  curl -s https://hrva.cc/.well-known/oauth-authorization-server | jq '{issuer, registration_endpoint}'
+  curl -s https://hrva.cc/.well-known/oauth-protected-resource/mcp | jq '{resource, authorization_servers}'
+  curl -s -o /dev/null -w '%{http_code}\n' -X POST https://hrva.cc/mcp
+  ```
 
 ## Contribution
 We welcome contributions from the community!
