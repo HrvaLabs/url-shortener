@@ -1,11 +1,15 @@
 package cc.hrva.urlshortener.security;
 
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
+import cc.hrva.urlshortener.exception.SignInUnavailableException;
 import cc.hrva.urlshortener.listener.UserRegisteredEvent;
 import cc.hrva.urlshortener.model.User;
+import cc.hrva.urlshortener.model.enums.TwoStepMethod;
 import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.service.AuthoritiesService;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent;
+import cc.hrva.urlshortener.service.twostep.PendingLoginStore;
+import cc.hrva.urlshortener.service.twostep.TwoStepMethods;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Validator;
@@ -14,6 +18,7 @@ import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.UUID;
+import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
@@ -39,6 +44,8 @@ public class OAuth2LoginSuccessHandler implements AuthenticationSuccessHandler {
     private final AppProperties appProperties;
     private final Validator validator;
     private final ApplicationEventPublisher eventPublisher;
+    private final PendingLoginStore pendingLoginStore;
+    private final TwoStepMethods twoStepMethods;
 
     public OAuth2LoginSuccessHandler(
             final UserRepository userRepository,
@@ -46,13 +53,17 @@ public class OAuth2LoginSuccessHandler implements AuthenticationSuccessHandler {
             final TokenProvider tokenProvider,
             final AppProperties appProperties,
             final Validator validator,
-            final ApplicationEventPublisher eventPublisher) {
+            final ApplicationEventPublisher eventPublisher,
+            final PendingLoginStore pendingLoginStore,
+            final TwoStepMethods twoStepMethods) {
         this.userRepository = userRepository;
         this.authoritiesService = authoritiesService;
         this.tokenProvider = tokenProvider;
         this.appProperties = appProperties;
         this.validator = validator;
         this.eventPublisher = eventPublisher;
+        this.pendingLoginStore = pendingLoginStore;
+        this.twoStepMethods = twoStepMethods;
     }
 
     @Override
@@ -86,6 +97,11 @@ public class OAuth2LoginSuccessHandler implements AuthenticationSuccessHandler {
             return;
         }
 
+        if (Boolean.TRUE.equals(user.getTwoStepEnabled())) {
+            redirectToSecondStep(response, user);
+            return;
+        }
+
         user.userLoggedIn();
         userRepository.save(user);
 
@@ -102,6 +118,25 @@ public class OAuth2LoginSuccessHandler implements AuthenticationSuccessHandler {
 
         log.info("OAuth2 login success email={}", email);
         response.sendRedirect(redirectUrl);
+    }
+
+    private void redirectToSecondStep(final HttpServletResponse response, final User user) throws IOException {
+        try {
+            final var pendingToken = pendingLoginStore.create(user.getId(), false);
+            final var methods = twoStepMethods.of(user).stream()
+                    .map(TwoStepMethod::name)
+                    .collect(Collectors.joining(","));
+            final var redirectUrl = String.format("%s/auth/callback?pendingToken=%s&methods=%s",
+                    appProperties.getFrontendUrl(),
+                    URLEncoder.encode(pendingToken, StandardCharsets.UTF_8),
+                    methods);
+
+            log.info("OAuth2 login needs the second step user id={}", user.getId());
+            response.sendRedirect(redirectUrl);
+        } catch (final SignInUnavailableException exception) {
+            log.warn("OAuth2 login second step unavailable user id={}", user.getId());
+            response.sendRedirect(appProperties.getFrontendUrl() + "/auth/callback?error=two_step_unavailable");
+        }
     }
 
     private static String providerOf(final Authentication authentication) {

@@ -5,12 +5,16 @@ import java.util.List;
 import java.util.Optional;
 import java.util.stream.Stream;
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
+import cc.hrva.urlshortener.exception.SignInUnavailableException;
 import cc.hrva.urlshortener.listener.UserRegisteredEvent;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.codebook.Authorities;
+import cc.hrva.urlshortener.model.enums.TwoStepMethod;
 import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.service.AuthoritiesService;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent;
+import cc.hrva.urlshortener.service.twostep.PendingLoginStore;
+import cc.hrva.urlshortener.service.twostep.TwoStepMethods;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Validation;
@@ -20,6 +24,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationEventPublisher;
@@ -27,6 +32,7 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.oauth2.client.authentication.OAuth2AuthenticationToken;
 import org.springframework.security.oauth2.core.user.OAuth2User;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.contains;
@@ -34,10 +40,13 @@ import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class OAuth2LoginSuccessHandlerTest {
+
+    private static final String PENDING_TOKEN = "Ab-_cD3fGh1jKlMnOpQrStUvWxYz0123456789-_AbC";
 
     private OAuth2LoginSuccessHandler handler;
 
@@ -68,10 +77,17 @@ class OAuth2LoginSuccessHandlerTest {
     @Mock
     private ApplicationEventPublisher eventPublisher;
 
+    @Mock
+    private PendingLoginStore pendingLoginStore;
+
+    @Mock
+    private TwoStepMethods twoStepMethods;
+
     @BeforeEach
     void setUp() {
         this.handler = new OAuth2LoginSuccessHandler(userRepository, authoritiesService, tokenProvider,
-                appProperties, Validation.buildDefaultValidatorFactory().getValidator(), eventPublisher);
+                appProperties, Validation.buildDefaultValidatorFactory().getValidator(), eventPublisher,
+                pendingLoginStore, twoStepMethods);
         lenient().when(authentication.getPrincipal()).thenReturn(oAuth2User);
         lenient().when(appProperties.getFrontendUrl()).thenReturn("http://fe");
     }
@@ -112,6 +128,7 @@ class OAuth2LoginSuccessHandlerTest {
         verify(userRepository).save(argThat(saved -> saved.getLastLogin() != null));
         verify(response).sendRedirect(contains("http://fe/auth/callback?token=jwt-token"));
         verify(eventPublisher, never()).publishEvent(any(Object.class));
+        verifyNoInteractions(pendingLoginStore, twoStepMethods);
     }
 
     @ParameterizedTest
@@ -198,6 +215,94 @@ class OAuth2LoginSuccessHandlerTest {
         handler.onAuthenticationSuccess(request, response, google);
 
         verify(userRepository, atLeastOnce()).save(argThat(saved -> "google".equals(saved.getAuthProvider())));
+    }
+
+    @Test
+    void aTwoStepAccountGetsAPendingTokenInsteadOfAJwt() throws Exception {
+        final var user = twoStepUser(7L, "two@example.com", "google");
+        when(appProperties.getFrontendUrl()).thenReturn("http://localhost:3000");
+        when(oAuth2User.getAttribute("email")).thenReturn("two@example.com");
+        when(userRepository.findByEmail("two@example.com")).thenReturn(Optional.of(user));
+        when(pendingLoginStore.create(7L, false)).thenReturn(PENDING_TOKEN);
+        when(twoStepMethods.of(user)).thenReturn(List.of(TwoStepMethod.TOTP, TwoStepMethod.RECOVERY_CODE));
+
+        handler.onAuthenticationSuccess(request, response, authentication);
+
+        final var redirect = redirectSent();
+        assertThat(redirect)
+                .startsWith("http://localhost:3000/auth/callback?pendingToken=")
+                .contains("&methods=TOTP,RECOVERY_CODE")
+                .doesNotContain("token=")
+                .isEqualTo("http://localhost:3000/auth/callback?pendingToken=" + PENDING_TOKEN
+                        + "&methods=TOTP,RECOVERY_CODE");
+        verify(pendingLoginStore).create(7L, false);
+        verifyNoInteractions(tokenProvider);
+        verify(userRepository, never()).save(any());
+        assertThat(user.getLastLogin()).isNull();
+    }
+
+    @Test
+    void aGoogleSignInToAPasswordAccountWithTwoStepNeedsTheSecondStep() throws Exception {
+        final var google = new OAuth2AuthenticationToken(oAuth2User, List.of(), "google");
+        final var user = twoStepUser(8L, "local@example.com", "local");
+        when(appProperties.getFrontendUrl()).thenReturn("http://localhost:3000");
+        when(oAuth2User.getAttribute("email")).thenReturn("local@example.com");
+        when(userRepository.findByEmail("local@example.com")).thenReturn(Optional.of(user));
+        when(pendingLoginStore.create(8L, false)).thenReturn(PENDING_TOKEN);
+        when(twoStepMethods.of(user))
+                .thenReturn(List.of(TwoStepMethod.TOTP, TwoStepMethod.WEBAUTHN, TwoStepMethod.RECOVERY_CODE));
+
+        handler.onAuthenticationSuccess(request, response, google);
+
+        assertThat(redirectSent()).isEqualTo("http://localhost:3000/auth/callback?pendingToken=" + PENDING_TOKEN
+                + "&methods=TOTP,WEBAUTHN,RECOVERY_CODE");
+        verifyNoInteractions(tokenProvider);
+        verify(userRepository, never()).save(any());
+        assertThat(user.getAuthProvider()).isEqualTo("local");
+        assertThat(user.getLastLogin()).isNull();
+    }
+
+    @Test
+    void redisDownSendsTheCallbackAnError() throws Exception {
+        final var user = twoStepUser(9L, "two@example.com", "github");
+        when(appProperties.getFrontendUrl()).thenReturn("http://localhost:3000");
+        when(oAuth2User.getAttribute("email")).thenReturn("two@example.com");
+        when(userRepository.findByEmail("two@example.com")).thenReturn(Optional.of(user));
+        when(pendingLoginStore.create(9L, false))
+                .thenThrow(new SignInUnavailableException(PendingLoginStore.UNAVAILABLE, new IllegalStateException()));
+
+        handler.onAuthenticationSuccess(request, response, authentication);
+
+        assertThat(redirectSent()).isEqualTo("http://localhost:3000/auth/callback?error=two_step_unavailable");
+        verifyNoInteractions(tokenProvider);
+        verify(userRepository, never()).save(any());
+    }
+
+    @Test
+    void anInactiveTwoStepAccountIsRefusedBeforeTheSecondStep() throws Exception {
+        final var user = twoStepUser(10L, "gone@example.com", "google");
+        user.setActive(false);
+        when(oAuth2User.getAttribute("email")).thenReturn("gone@example.com");
+        when(userRepository.findByEmail("gone@example.com")).thenReturn(Optional.of(user));
+
+        handler.onAuthenticationSuccess(request, response, authentication);
+
+        verify(response).sendRedirect("http://fe/auth/callback?error=account_inactive");
+        verifyNoInteractions(tokenProvider, pendingLoginStore, twoStepMethods);
+    }
+
+    private String redirectSent() throws Exception {
+        final var redirect = ArgumentCaptor.forClass(String.class);
+        verify(response).sendRedirect(redirect.capture());
+
+        return redirect.getValue();
+    }
+
+    private static User twoStepUser(final Long id, final String email, final String authProvider) {
+        return User.builder().id(id).email(email).active(true).authProvider(authProvider)
+                .twoFactorEnabled(true).twoStepEnabled(true)
+                .authorities(Collections.singletonList(Authorities.builder().id(1L).name("ROLE_USER").build()))
+                .build();
     }
 
     private static Stream<Named<String>> emailsTheAccountCouldNotStore() {
