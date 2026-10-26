@@ -2,6 +2,7 @@ package cc.hrva.urlshortener.service.alert;
 
 import cc.hrva.urlshortener.model.enums.BlockReason;
 import cc.hrva.urlshortener.model.enums.ReportCategory;
+import java.time.Duration;
 import java.util.List;
 
 public sealed interface AdminAlertEvent {
@@ -17,5 +18,7 @@ public sealed interface AdminAlertEvent {
     record BlocklistSourceFailed(String sourceName, String error, boolean fallbackLoaded) implements AdminAlertEvent {}
 
     record BlocklistSourceRecovered(String sourceName) implements AdminAlertEvent {}
+
+    record BurstDetected(String domain, int links, int creators, Integer domainAgeDays, Duration window) implements AdminAlertEvent {}
 
 }

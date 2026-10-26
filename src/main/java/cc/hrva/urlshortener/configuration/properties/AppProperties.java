@@ -1,10 +1,12 @@
 package cc.hrva.urlshortener.configuration.properties;
 
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
+import java.time.Duration;
 import java.time.ZoneId;
 import java.util.List;
 import lombok.Data;
@@ -109,6 +111,10 @@ public class AppProperties {
     @NotNull
     private Digest digest = new Digest();
 
+    @Valid
+    @NotNull
+    private Burst burst = new Burst();
+
     @Data
     public static class Mcp {
 
@@ -163,6 +169,17 @@ public class AppProperties {
 
         private boolean enabled = true;
         private boolean email = true;
+
+    }
+
+    @Data
+    public static class Burst {
+
+        @Min(2)
+        private int links = 5;
+
+        @NotNull
+        private Duration window = Duration.ofHours(1);
 
     }
 

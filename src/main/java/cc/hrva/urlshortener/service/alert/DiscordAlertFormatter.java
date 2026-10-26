@@ -6,12 +6,16 @@ import cc.hrva.urlshortener.dto.WeeklyDigest;
 import cc.hrva.urlshortener.model.enums.BlockReason;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.BlocklistSourceFailed;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.BlocklistSourceRecovered;
+import cc.hrva.urlshortener.service.alert.AdminAlertEvent.BurstDetected;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.LinkBlocked;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.ReviewOpened;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.UserSignedUp;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.VisitorReported;
 import cc.hrva.urlshortener.service.digest.WeeklyDigestText;
 import cc.hrva.urlshortener.util.DomainNames;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -108,6 +112,9 @@ public class DiscordAlertFormatter {
                     plain(failed.sourceName()), plain(failed.error()),
                     failed.fallbackLoaded() ? " (a fallback loaded)" : "", frontendPage(BLOCKLISTS_PAGE));
             case BlocklistSourceRecovered recovered -> "%s loads again".formatted(plain(recovered.sourceName()));
+            case BurstDetected burst -> "Possible phishing wave: %d new links to %s from %d creators within %s, %s, <%s>".formatted(
+                    burst.links(), plain(burst.domain()), burst.creators(), window(burst.window()), domainAge(burst.domainAgeDays()),
+                    frontendPage(LINKS_PAGE) + "?search=" + URLEncoder.encode(burst.domain(), StandardCharsets.UTF_8));
         };
     }
 
@@ -148,6 +155,27 @@ public class DiscordAlertFormatter {
             return StringUtils.removeEnd(text, ":");
         }
         return reason == BlockReason.SAFE_BROWSING ? text + ": " + detail : text + " " + detail;
+    }
+
+    private static String window(final Duration window) {
+        if (window.toHours() > 0 && window.equals(Duration.ofHours(window.toHours()))) {
+            return count(window.toHours(), "hour");
+        }
+        if (window.toMinutes() > 0 && window.equals(Duration.ofMinutes(window.toMinutes()))) {
+            return count(window.toMinutes(), "minute");
+        }
+        return count(window.toSeconds(), "second");
+    }
+
+    private static String domainAge(final Integer ageDays) {
+        if (ageDays == null) {
+            return "domain age unknown";
+        }
+        return ageDays == 0 ? "domain registered today" : "domain registered %s ago".formatted(count(ageDays, "day"));
+    }
+
+    private static String count(final long amount, final String unit) {
+        return amount == 1 ? "1 " + unit : amount + " " + unit + "s";
     }
 
     private static String signUpMethod(final String authProvider) {

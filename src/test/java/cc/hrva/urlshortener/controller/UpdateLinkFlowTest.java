@@ -26,6 +26,7 @@ import cc.hrva.urlshortener.security.JwtFilter;
 import cc.hrva.urlshortener.security.OAuth2LoginSuccessHandler;
 import cc.hrva.urlshortener.security.TokenProvider;
 import cc.hrva.urlshortener.service.ApiKeyService;
+import cc.hrva.urlshortener.service.BurstAlertService;
 import cc.hrva.urlshortener.service.ClickAnalyticsService;
 import cc.hrva.urlshortener.service.ClickCheckService;
 import cc.hrva.urlshortener.service.DomainAgeService;
@@ -182,6 +183,9 @@ class UpdateLinkFlowTest {
 
     @MockitoBean
     private RedirectChainService redirectChainService;
+
+    @MockitoBean
+    private BurstAlertService burstAlertService;
 
     @MockitoBean
     private QrCodeService qrCodeService;

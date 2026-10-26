@@ -95,6 +95,9 @@ app:
     weekly:
       enabled: true
       email: true
+  burst:
+    links: 5
+    window: 1h
   passkeys:
     rp-id: hrva.cc
     allowed-origins: https://app.hrva.cc

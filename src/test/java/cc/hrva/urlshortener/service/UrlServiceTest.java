@@ -51,6 +51,7 @@ import cc.hrva.urlshortener.model.enums.BlockReason;
 import cc.hrva.urlshortener.model.enums.CreatedVia;
 import cc.hrva.urlshortener.model.enums.ReviewResolution;
 import cc.hrva.urlshortener.repository.UrlRepository;
+import cc.hrva.urlshortener.service.burst.CreatedLink;
 import cc.hrva.urlshortener.service.impl.DefaultSuspiciousUrlService;
 import cc.hrva.urlshortener.service.impl.DefaultUrlService;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiter;
@@ -175,6 +176,9 @@ class UrlServiceTest {
     @Mock
     private ReservedAliasService reservedAliasService;
 
+    @Mock
+    private BurstAlertService burstAlertService;
+
     @BeforeEach
     void setUp() {
         org.mockito.Mockito.lenient().when(rateLimiter.tryAcquire(any(), org.mockito.ArgumentMatchers.anyInt(), any())).thenReturn(true);
@@ -203,7 +207,8 @@ class UrlServiceTest {
                 redirectChainService,
                 TransactionOperations.withoutTransaction(),
                 entityManager,
-                reservedAliasService
+                reservedAliasService,
+                burstAlertService
         );
     }
 
@@ -823,6 +828,154 @@ class UrlServiceTest {
         assertThatThrownBy(() -> urlService.saveUrlRouting(createUrlDto, CLIENT_IP, CreatedVia.WEB)).isInstanceOf(UrlValidationException.class);
 
         verify(redirectChainService, never()).checkLater(org.mockito.ArgumentMatchers.anyLong());
+    }
+
+    @Test
+    void aSignedInLinkIsReportedToTheBurstCheck() {
+        stubLinkCreation();
+        when(userService.getUserFromToken()).thenReturn(User.builder().id(7L).build());
+
+        urlService.saveUrlRouting(link(0), CLIENT_IP, CreatedVia.WEB);
+
+        verify(burstAlertService).linkCreated(new CreatedLink(1L, "https://example.com/0", "user:7", Outcome.CLEAN));
+    }
+
+    @Test
+    void aSignedInLinkWithoutAClientIpIsReportedAsItsAccount() {
+        stubLinkCreation();
+        when(userService.getUserFromToken()).thenReturn(User.builder().id(7L).build());
+
+        urlService.saveUrlRouting(link(0), null, CreatedVia.MCP);
+
+        verify(burstAlertService).linkCreated(new CreatedLink(1L, "https://example.com/0", "user:7", Outcome.CLEAN));
+    }
+
+    @Test
+    void anAnonymousLinkIsReportedWithItsHashedNetwork() {
+        stubLinkCreation();
+
+        urlService.saveUrlRouting(link(0), CLIENT_IP, CreatedVia.WEB);
+
+        final var reported = org.mockito.ArgumentCaptor.forClass(CreatedLink.class);
+        verify(burstAlertService).linkCreated(reported.capture());
+        assertThat(reported.getValue().creator()).startsWith("anonymous:").doesNotContain(CLIENT_IP)
+                .isEqualTo(RateLimiter.clientKey("anonymous", CLIENT_IP));
+        assertThat(reported.getValue()).isEqualTo(new CreatedLink(1L, "https://example.com/0", RateLimiter.clientKey("anonymous", CLIENT_IP), Outcome.CLEAN));
+    }
+
+    @Test
+    void aReusedAnonymousLinkIsReportedWithItsOwnId() {
+        final var createUrlDto = link(0);
+        final var existing = Url.builder().id(12L).shortUrl("v0DB3").longUrl("https://example.com/0").active(true).build();
+        when(createUrlToUrlConverter.convert(createUrlDto)).thenReturn(Url.builder().longUrl("https://example.com/0").build());
+        when(urlRepository.existsUrlByLongUrlAndActiveTrueAndOwnerIsNull("https://example.com/0")).thenReturn(true);
+        when(urlRepository.findByLongUrlAndActiveTrue("https://example.com/0")).thenReturn(Optional.of(existing));
+
+        urlService.saveUrlRouting(createUrlDto, CLIENT_IP, CreatedVia.WEB);
+
+        verify(burstAlertService).linkCreated(new CreatedLink(12L, "https://example.com/0", RateLimiter.clientKey("anonymous", CLIENT_IP), Outcome.CLEAN));
+    }
+
+    @Test
+    void anApiKeyLinkIsReportedAsItsOwner() {
+        when(apiKeyService.fetchApiKeyByKey("apikey")).thenReturn(ApiKey.builder().owner(User.builder().id(9L).build()).build());
+        stubLinkCreation();
+
+        urlService.saveUrlWithApiKey(link(0), "apikey", CreatedVia.API_KEY);
+
+        verify(burstAlertService).linkCreated(new CreatedLink(1L, "https://example.com/0", "user:9", Outcome.CLEAN));
+    }
+
+    @Test
+    void theVerdictTravelsWithTheLink() {
+        stubLinkCreation();
+        when(userService.getUserFromToken()).thenReturn(User.builder().id(7L).build());
+        when(urlValidator.checkIfLongUrlIsNotBlocklisted(any())).thenReturn(new LinkVerdict(Outcome.FLAG, YOUNG_DOMAIN, null, null));
+
+        urlService.saveUrlRouting(link(0), CLIENT_IP, CreatedVia.WEB);
+
+        verify(burstAlertService).linkCreated(new CreatedLink(1L, "https://example.com/0", "user:7", Outcome.FLAG));
+    }
+
+    @Test
+    void eachLinkOfABulkRequestIsReported() {
+        stubLinkCreation();
+        when(userService.getUserFromToken()).thenReturn(User.builder().id(7L).build());
+
+        List.of(link(0), link(1), link(2)).forEach(dto -> urlService.saveUrlRouting(dto, CLIENT_IP, CreatedVia.BULK));
+
+        final var reported = org.mockito.ArgumentCaptor.forClass(CreatedLink.class);
+        verify(burstAlertService, times(3)).linkCreated(reported.capture());
+        assertThat(reported.getAllValues()).extracting(CreatedLink::longUrl)
+                .containsExactly("https://example.com/0", "https://example.com/1", "https://example.com/2");
+    }
+
+    @Test
+    void aRefusedLinkIsNeverReportedToTheBurstCheck() {
+        final var createUrlDto = CreateUrlDto.builder().longUrl("https://njuskaio.cam/a/MAUB3").build();
+        final var url = Url.builder().longUrl("https://njuskaio.cam/a/MAUB3").build();
+        when(createUrlToUrlConverter.convert(createUrlDto)).thenReturn(url);
+        when(userService.getUserFromToken()).thenReturn(User.builder().id(1L).build());
+        when(urlValidator.checkIfLongUrlIsNotBlocklisted(url)).thenThrow(new UrlValidationException(BLOCKLIST_REFUSAL));
+
+        assertThatThrownBy(() -> urlService.saveUrlRouting(createUrlDto, CLIENT_IP, CreatedVia.WEB)).isInstanceOf(UrlValidationException.class);
+
+        verifyNoInteractions(burstAlertService);
+    }
+
+    @Test
+    @ExtendWith(OutputCaptureExtension.class)
+    void aFailingBurstCheckNeverFailsTheCreate(final CapturedOutput output) {
+        stubLinkCreation();
+        when(userService.getUserFromToken()).thenReturn(User.builder().id(7L).build());
+        org.mockito.Mockito.doThrow(new org.springframework.core.task.TaskRejectedException("executor is shutting down"))
+                .when(burstAlertService).linkCreated(any());
+
+        final var result = urlService.saveUrlRouting(link(0), CLIENT_IP, CreatedVia.WEB);
+
+        assertThat(result.id()).isEqualTo(1L);
+        assertThat(output).containsOnlyOnce("Could not schedule the burst check urlId=1 exception=org.springframework.core.task.TaskRejectedException");
+    }
+
+    @Test
+    void aFailingBurstCheckNeverFailsAnApiKeyCreate() {
+        when(apiKeyService.fetchApiKeyByKey("apikey")).thenReturn(ApiKey.builder().owner(User.builder().id(9L).build()).build());
+        stubLinkCreation();
+        org.mockito.Mockito.doThrow(new IllegalStateException("unexpected")).when(burstAlertService).linkCreated(any());
+
+        final var result = urlService.saveUrlWithApiKey(link(0), "apikey", CreatedVia.API_KEY);
+
+        assertThat(result.id()).isEqualTo(1L);
+    }
+
+    @Test
+    void aSignedInUsersNewLinkIsReportedToTheBurstCheckOnceItIsCommitted() {
+        final var reportedInTransaction = new AtomicReference<Boolean>();
+        final var createUrlDto = CreateUrlDto.builder().longUrl("https://example.com/menu").build();
+        when(userService.getUserFromToken()).thenReturn(User.builder().id(1L).build());
+        when(appProperties.getShortUrlLength()).thenReturn(5L);
+        when(urlRepository.save(any(Url.class))).thenAnswer(invocation -> persisted(invocation.getArgument(0)));
+        when(linkCheckService.check("https://example.com/menu")).thenReturn(LinkVerdict.clean());
+        recordTransactionDuringBurstCheck(reportedInTransaction);
+
+        transactionalUrlService().saveUrlRouting(createUrlDto, CLIENT_IP, CreatedVia.WEB);
+
+        assertThat(reportedInTransaction).hasValue(false);
+    }
+
+    @Test
+    void aLinkMadeWithAnApiKeyIsReportedToTheBurstCheckOnceItIsCommitted() {
+        final var reportedInTransaction = new AtomicReference<Boolean>();
+        final var createUrlDto = CreateUrlDto.builder().longUrl("https://example.com/menu").build();
+        when(apiKeyService.fetchApiKeyByKey("apikey")).thenReturn(ApiKey.builder().owner(User.builder().id(1L).build()).build());
+        when(appProperties.getShortUrlLength()).thenReturn(5L);
+        when(urlRepository.save(any(Url.class))).thenAnswer(invocation -> persisted(invocation.getArgument(0)));
+        when(linkCheckService.check("https://example.com/menu")).thenReturn(LinkVerdict.clean());
+        recordTransactionDuringBurstCheck(reportedInTransaction);
+
+        transactionalUrlService().saveUrlWithApiKey(createUrlDto, "apikey", CreatedVia.API_KEY);
+
+        assertThat(reportedInTransaction).hasValue(false);
     }
 
     @Test
@@ -2302,7 +2455,8 @@ class UrlServiceTest {
                 redirectChainService,
                 TransactionOperations.withoutTransaction(),
                 entityManager,
-                reservedAliasService
+                reservedAliasService,
+                burstAlertService
         );
     }
 
@@ -2311,6 +2465,13 @@ class UrlServiceTest {
             transactionActive.set(TransactionSynchronizationManager.isActualTransactionActive());
             return LinkVerdict.clean();
         });
+    }
+
+    private void recordTransactionDuringBurstCheck(final AtomicReference<Boolean> transactionActive) {
+        org.mockito.Mockito.doAnswer(invocation -> {
+            transactionActive.set(TransactionSynchronizationManager.isActualTransactionActive());
+            return null;
+        }).when(burstAlertService).linkCreated(any());
     }
 
     private void recordTransactionDuringChainCheck(final long urlId, final AtomicReference<Boolean> transactionActive) {
@@ -2368,7 +2529,8 @@ class UrlServiceTest {
                 redirectChainService,
                 new TransactionTemplate(transactionManager),
                 entityManager,
-                reservedAliasService
+                reservedAliasService,
+                burstAlertService
         );
         final var proxyFactory = new ProxyFactory(service);
         proxyFactory.addAdvice(new TransactionInterceptor(transactionManager, new AnnotationTransactionAttributeSource()));
@@ -2400,7 +2562,8 @@ class UrlServiceTest {
                 redirectChainService,
                 TransactionOperations.withoutTransaction(),
                 entityManager,
-                reservedAliasService
+                reservedAliasService,
+                burstAlertService
         );
     }
 
@@ -2428,7 +2591,8 @@ class UrlServiceTest {
                 redirectChainService,
                 TransactionOperations.withoutTransaction(),
                 entityManager,
-                reservedAliasService
+                reservedAliasService,
+                burstAlertService
         );
     }
 

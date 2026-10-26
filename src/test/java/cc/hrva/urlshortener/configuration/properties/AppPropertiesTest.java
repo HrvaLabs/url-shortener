@@ -1,6 +1,9 @@
 package cc.hrva.urlshortener.configuration.properties;
 
+import jakarta.validation.ConstraintViolation;
+import jakarta.validation.Validation;
 import java.io.IOException;
+import java.time.Duration;
 import java.time.ZoneId;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -116,6 +119,58 @@ class AppPropertiesTest {
         assertThat(yaml).hasSize(1);
         assertThat(yaml.getFirst().getProperty("app.digest.weekly.enabled")).isEqualTo(true);
         assertThat(yaml.getFirst().getProperty("app.digest.weekly.email")).isEqualTo(true);
+    }
+
+    @Test
+    void burstDefaultsToFiveLinksInAnHour() {
+        final var burst = new AppProperties().getBurst();
+
+        assertThat(burst.getLinks()).isEqualTo(5);
+        assertThat(burst.getWindow()).isEqualTo(Duration.ofHours(1));
+    }
+
+    @Test
+    void aBurstThresholdBelowTwoIsRefused() {
+        final var validator = Validation.buildDefaultValidatorFactory().getValidator();
+        final var one = new AppProperties.Burst();
+        one.setLinks(1);
+        final var two = new AppProperties.Burst();
+        two.setLinks(2);
+        final var noWindow = new AppProperties.Burst();
+        noWindow.setWindow(null);
+
+        assertThat(validator.validate(one)).extracting(violation -> violation.getPropertyPath().toString()).containsExactly("links");
+        assertThat(validator.validate(two)).isEmpty();
+        assertThat(validator.validate(noWindow)).extracting(violation -> violation.getPropertyPath().toString()).containsExactly("window");
+    }
+
+    @Test
+    void theBurstSettingsAreValidatedWithTheRestOfTheApp() {
+        final var appProperties = new AppProperties();
+        appProperties.getBurst().setLinks(1);
+
+        assertThat(Validation.buildDefaultValidatorFactory().getValidator().validate(appProperties))
+                .extracting(ConstraintViolation::getPropertyPath).map(Object::toString).contains("burst.links");
+    }
+
+    @Test
+    void burstSettingsBindFromTheEnvironment() {
+        final var environment = new SystemEnvironmentPropertySource(StandardEnvironment.SYSTEM_ENVIRONMENT_PROPERTY_SOURCE_NAME, Map.<String, Object>of(
+                "APP_BURST_LINKS", "8",
+                "APP_BURST_WINDOW", "30m"));
+
+        final var burst = new Binder(ConfigurationPropertySources.from(environment)).bind("app.burst", AppProperties.Burst.class).get();
+
+        assertThat(burst.getLinks()).isEqualTo(8);
+        assertThat(burst.getWindow()).isEqualTo(Duration.ofMinutes(30));
+    }
+
+    @Test
+    void theApplicationYamlSetsFiveLinksInAnHour() throws IOException {
+        final var yaml = new YamlPropertySourceLoader().load("application", new ClassPathResource("application.yaml"));
+
+        assertThat(yaml.getFirst().getProperty("app.burst.links")).isEqualTo(5);
+        assertThat(yaml.getFirst().getProperty("app.burst.window")).isEqualTo("1h");
     }
 
     @Test

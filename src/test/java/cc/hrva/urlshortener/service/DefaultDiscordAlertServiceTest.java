@@ -263,6 +263,24 @@ class DefaultDiscordAlertServiceTest {
     }
 
     @Test
+    void aBurstIsBufferedLikeTheOtherAlerts() {
+        try (final var context = listeningContext()) {
+            context.publishEvent(NEW_USER);
+            context.publishEvent(new AdminAlertEvent.BurstDetected("evil-login.com", 5, 2, null, Duration.ofHours(1)));
+            verifyNoInteractions(discordWebhookClient);
+
+            discordAlertService.flush();
+        }
+
+        final var message = ArgumentCaptor.forClass(DiscordMessage.class);
+        verify(discordWebhookClient).send(eq(WEBHOOK_URL), message.capture(), eq(Duration.ofSeconds(5)));
+        assertThat(message.getValue().content().lines().toList()).containsExactly(
+                "New user: account #31 signed up with email, <https://app.hrva.cc/admin>",
+                "Possible phishing wave: 5 new links to evil-login.com from 2 creators within 1 hour, domain age unknown, "
+                        + "<https://app.hrva.cc/admin/urls?search=evil-login.com>");
+    }
+
+    @Test
     void theBufferIsFlushedEveryThirtySeconds() throws NoSuchMethodException {
         final var scheduled = DefaultDiscordAlertService.class.getMethod("flush").getAnnotation(Scheduled.class);
 

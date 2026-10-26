@@ -28,6 +28,7 @@ import cc.hrva.urlshortener.repository.ShortUrlUniqueIndex;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.specification.UrlSpecification;
 import cc.hrva.urlshortener.service.ApiKeyService;
+import cc.hrva.urlshortener.service.BurstAlertService;
 import cc.hrva.urlshortener.service.ClickAnalyticsService;
 import cc.hrva.urlshortener.service.ClickCheckService;
 import cc.hrva.urlshortener.service.RedirectChainService;
@@ -37,6 +38,7 @@ import cc.hrva.urlshortener.service.ScammerSignalService;
 import cc.hrva.urlshortener.service.SuspiciousUrlService;
 import cc.hrva.urlshortener.service.UrlService;
 import cc.hrva.urlshortener.service.UserService;
+import cc.hrva.urlshortener.service.burst.CreatedLink;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiter;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiterUnavailableException;
 import cc.hrva.urlshortener.util.RedirectLocations;
@@ -133,6 +135,7 @@ public class DefaultUrlService implements UrlService {
     private final TransactionOperations transactionOperations;
     private final EntityManager entityManager;
     private final ReservedAliasService reservedAliasService;
+    private final BurstAlertService burstAlertService;
 
     @Override
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
@@ -158,6 +161,7 @@ public class DefaultUrlService implements UrlService {
             return UrlResponse.from(createUrlForAnonymousUser(url, verdict));
         });
         checkRedirectsLater(created.id());
+        reportCreated(created, CreatedLink.creatorOf(currentUser != null ? currentUser.getId() : null, clientIP), verdict);
         return created;
     }
 
@@ -247,6 +251,7 @@ public class DefaultUrlService implements UrlService {
             return saveUrlForUser(url, apiKey.getOwner(), verdict);
         });
         checkRedirectsLater(created.id());
+        reportCreated(created, CreatedLink.creatorOf(apiKey.getOwner().getId(), null), verdict);
         return created;
     }
 
@@ -512,6 +517,14 @@ public class DefaultUrlService implements UrlService {
             redirectChainService.checkLater(urlId);
         } catch (final RuntimeException exception) {
             log.warn("Could not schedule the redirect check, the nightly scan picks it up urlId={}", urlId, exception);
+        }
+    }
+
+    private void reportCreated(final UrlResponse created, final String creator, final LinkVerdict verdict) {
+        try {
+            burstAlertService.linkCreated(new CreatedLink(created.id(), created.longUrl(), creator, verdict.outcome()));
+        } catch (final RuntimeException exception) {
+            log.warn("Could not schedule the burst check urlId={} exception={}", created.id(), exception.getClass().getName());
         }
     }
 

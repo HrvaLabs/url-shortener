@@ -11,10 +11,12 @@ import cc.hrva.urlshortener.model.enums.BlockReason;
 import cc.hrva.urlshortener.model.enums.ReportCategory;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.BlocklistSourceFailed;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.BlocklistSourceRecovered;
+import cc.hrva.urlshortener.service.alert.AdminAlertEvent.BurstDetected;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.LinkBlocked;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.ReviewOpened;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.UserSignedUp;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.VisitorReported;
+import java.time.Duration;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
@@ -271,6 +273,76 @@ class DiscordAlertFormatterTest {
         final var content = formatter.message(List.of(new BlocklistSourceRecovered("URLhaus")), 0).content();
 
         assertThat(content).isEqualTo("URLhaus loads again");
+    }
+
+    @Test
+    void aBurstShowsTheDomainCountsAgeAndTheLinksSearch() {
+        final var content = formatter.message(List.of(new BurstDetected("evil-login.com", 6, 3, 4, Duration.ofHours(1))), 0).content();
+
+        assertThat(content).isEqualTo("Possible phishing wave: 6 new links to evil-login.com from 3 creators within 1 hour, domain registered 4 days ago, "
+                + "<https://app.hrva.cc/admin/urls?search=evil-login.com>");
+    }
+
+    @Test
+    void aBurstWithAnUnknownAgeSaysSo() {
+        final var content = formatter.message(List.of(new BurstDetected("evil-login.com", 5, 2, null, Duration.ofHours(1))), 0).content();
+
+        assertThat(content).isEqualTo("Possible phishing wave: 5 new links to evil-login.com from 2 creators within 1 hour, domain age unknown, "
+                + "<https://app.hrva.cc/admin/urls?search=evil-login.com>");
+    }
+
+    @Test
+    void aBurstSaysHowOldTheDomainIs() {
+        final var lines = formatter.message(List.of(
+                new BurstDetected("a.example", 5, 2, 1, Duration.ofHours(1)),
+                new BurstDetected("b.example", 5, 2, 0, Duration.ofHours(1)),
+                new BurstDetected("c.example", 5, 2, 29, Duration.ofHours(1))), 0).content().lines().toList();
+
+        assertThat(lines).extracting(line -> line.split(", ")[1]).containsExactly(
+                "domain registered 1 day ago", "domain registered today", "domain registered 29 days ago");
+    }
+
+    @Test
+    void aBurstWindowInMinutes() {
+        final var content = formatter.message(List.of(new BurstDetected("evil-login.com", 5, 2, null, Duration.ofMinutes(30))), 0).content();
+
+        assertThat(content).contains(" from 2 creators within 30 minutes, ");
+    }
+
+    @Test
+    void aBurstWindowIsWordedInWholeUnits() {
+        final var lines = formatter.message(List.of(
+                new BurstDetected("a.example", 5, 2, null, Duration.ofHours(2)),
+                new BurstDetected("b.example", 5, 2, null, Duration.ofMinutes(1)),
+                new BurstDetected("c.example", 5, 2, null, Duration.ofMinutes(90)),
+                new BurstDetected("d.example", 5, 2, null, Duration.ofSeconds(90))), 0).content().lines().toList();
+
+        assertThat(lines).extracting(line -> line.split(" within ")[1].split(", ")[0])
+                .containsExactly("2 hours", "1 minute", "90 minutes", "90 seconds");
+    }
+
+    @Test
+    void aBurstDomainIsEscaped() {
+        final var content = formatter.message(List.of(new BurstDetected("evil_login.com", 5, 2, 4, Duration.ofHours(1))), 0).content();
+
+        assertThat(content).startsWith("Possible phishing wave: 5 new links to evil\\_login.com from 2 creators")
+                .endsWith("<https://app.hrva.cc/admin/urls?search=evil_login.com>");
+    }
+
+    @Test
+    void aBurstDomainIsUrlEncodedInTheLinkSoItCannotChangeTheSearch() {
+        final var content = formatter.message(List.of(new BurstDetected("evil.com&anonymous=true>x", 5, 2, 4, Duration.ofHours(1))), 0).content();
+
+        assertThat(content).endsWith("<https://app.hrva.cc/admin/urls?search=evil.com%26anonymous%3Dtrue%3Ex>");
+    }
+
+    @Test
+    void aLongBurstDomainIsShownInFull() {
+        final var domain = "a".repeat(63) + "." + "b".repeat(63) + "." + "c".repeat(63) + ".example";
+
+        final var content = formatter.message(List.of(new BurstDetected(domain, 5, 2, null, Duration.ofHours(1))), 0).content();
+
+        assertThat(content).contains(" new links to " + domain + " from ").endsWith("?search=" + domain + ">").doesNotContain("…");
     }
 
     @Test
