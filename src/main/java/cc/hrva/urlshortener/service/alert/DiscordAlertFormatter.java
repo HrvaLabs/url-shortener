@@ -16,6 +16,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
+import java.util.function.IntFunction;
 import java.util.regex.MatchResult;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -29,18 +30,7 @@ public class DiscordAlertFormatter {
 
     private static final int MAX_LINES = 10;
     private static final int MAX_CONTENT_LENGTH = 2000;
-    private static final int OVERFLOW_ROOM = 120;
-    private static final int MAX_SHORT_URL_LENGTH = 40;
-    private static final int MAX_HOST_LENGTH = 100;
-    private static final int MAX_REASONS_LENGTH = 200;
-    private static final int MAX_DETAILS_LENGTH = 200;
-    private static final int MAX_BLOCK_DETAIL_LENGTH = 120;
-    private static final int MAX_SOURCE_NAME_LENGTH = 80;
-    private static final int MAX_ERROR_LENGTH = 150;
-    private static final int MAX_PROVIDER_LENGTH = 30;
-    private static final int MAX_INPUT_LENGTH = 2000;
     private static final String LINE_SEPARATOR = "\n";
-    private static final String ELLIPSIS = "…";
     private static final String REVIEW_PAGE = "/admin/review";
     private static final String LINKS_PAGE = "/admin/urls";
     private static final String USERS_PAGE = "/admin";
@@ -63,54 +53,48 @@ public class DiscordAlertFormatter {
     private final AppProperties appProperties;
 
     public DiscordMessage message(final List<AdminAlertEvent> alerts, final int dropped) {
-        final var shown = new ArrayList<String>();
-        var length = 0;
-        for (final var alert : alerts) {
-            final var line = line(alert);
-            final var lengthWithLine = length + (shown.isEmpty() ? 0 : LINE_SEPARATOR.length()) + line.length();
-            if (shown.size() == MAX_LINES || lengthWithLine > MAX_CONTENT_LENGTH - OVERFLOW_ROOM) {
-                break;
-            }
-            shown.add(line);
-            length = lengthWithLine;
-        }
-        final var more = alerts.size() - shown.size() + dropped;
-        if (more > 0) {
-            shown.add("%sand %d more, see <%s>".formatted(ELLIPSIS, more, frontendPage(REVIEW_PAGE)));
-        }
-        return DiscordMessage.withoutMentionsOrEmbeds(String.join(LINE_SEPARATOR, shown));
+        final var lines = alerts.stream().limit(MAX_LINES).map(this::line).toList();
+        final var reviewPage = frontendPage(REVIEW_PAGE);
+        return DiscordMessage.withoutMentionsOrEmbeds(withinLimit(List.of(), lines, alerts.size() - lines.size() + dropped,
+                more -> "and %d more, see <%s>".formatted(more, reviewPage), List.of()));
     }
 
     public DiscordMessage weeklyDigest(final WeeklyDigest digest) {
         final var head = new ArrayList<String>();
         head.add("**" + WeeklyDigestText.title(digest) + "**");
         head.addAll(WeeklyDigestText.summaryLines(digest));
-        final var topLinks = WeeklyDigestText.topLinkLines(digest, shortLinkHost(), DiscordAlertFormatter::plainInFull);
+        final var topLinks = WeeklyDigestText.topLinkLines(digest, shortLinkHost(), DiscordAlertFormatter::plain);
         final var statsLine = "Stats (last 7 days): <%s>".formatted(frontendPage(STATS_PAGE));
-
-        var shown = topLinks.size();
-        var content = weeklyDigestContent(head, topLinks, shown, statsLine);
-        while (content.length() > MAX_CONTENT_LENGTH && shown > 0) {
-            shown--;
-            content = weeklyDigestContent(head, topLinks, shown, statsLine);
-        }
-        return DiscordMessage.withoutMentionsOrEmbeds(content);
+        return DiscordMessage.withoutMentionsOrEmbeds(withinLimit(head, topLinks, 0, more -> "and %d more".formatted(more), List.of(statsLine)));
     }
 
-    private static String weeklyDigestContent(final List<String> head, final List<String> topLinks, final int shown, final String statsLine) {
-        final var lines = new ArrayList<>(head);
-        lines.addAll(topLinks.subList(0, shown));
-        if (shown < topLinks.size()) {
-            lines.add("and %d more".formatted(topLinks.size() - shown));
+    private static String withinLimit(final List<String> head, final List<String> items, final int alsoHidden, final IntFunction<String> overflow,
+            final List<String> tail) {
+        var shown = items.size();
+        var content = joined(head, items, shown, alsoHidden, overflow, tail);
+        while (content.length() > MAX_CONTENT_LENGTH && shown > 0) {
+            shown--;
+            content = joined(head, items, shown, alsoHidden, overflow, tail);
         }
-        lines.add(statsLine);
+        return content;
+    }
+
+    private static String joined(final List<String> head, final List<String> items, final int shown, final int alsoHidden,
+            final IntFunction<String> overflow, final List<String> tail) {
+        final var lines = new ArrayList<>(head);
+        lines.addAll(items.subList(0, shown));
+        final var hidden = items.size() - shown + alsoHidden;
+        if (hidden > 0) {
+            lines.add(overflow.apply(hidden));
+        }
+        lines.addAll(tail);
         return String.join(LINE_SEPARATOR, lines);
     }
 
     private String line(final AdminAlertEvent alert) {
         return switch (alert) {
             case ReviewOpened opened -> "New review: %s (%s), %s, <%s>".formatted(
-                    link(opened.link()), plain(String.join(", ", opened.reasons()), MAX_REASONS_LENGTH),
+                    link(opened.link()), plain(String.join(", ", opened.reasons())),
                     owner(opened.link()), reviewPage(opened.link()));
             case VisitorReported reported -> "%s: %s (%s), %s, <%s>".formatted(
                     reported.reviewOpened() ? "New review from a visitor report" : "Visitor report on an open review",
@@ -121,21 +105,21 @@ public class DiscordAlertFormatter {
                     signedUp.userId() == null ? "an account" : "account #" + signedUp.userId(),
                     signUpMethod(signedUp.authProvider()), frontendPage(USERS_PAGE));
             case BlocklistSourceFailed failed -> "%s failed to load: %s%s, <%s>".formatted(
-                    plain(failed.sourceName(), MAX_SOURCE_NAME_LENGTH), plain(failed.error(), MAX_ERROR_LENGTH),
+                    plain(failed.sourceName()), plain(failed.error()),
                     failed.fallbackLoaded() ? " (a fallback loaded)" : "", frontendPage(BLOCKLISTS_PAGE));
-            case BlocklistSourceRecovered recovered -> "%s loads again".formatted(plain(recovered.sourceName(), MAX_SOURCE_NAME_LENGTH));
+            case BlocklistSourceRecovered recovered -> "%s loads again".formatted(plain(recovered.sourceName()));
         };
     }
 
     private String link(final AlertedLink link) {
-        return "%s/%s → %s".formatted(shortLinkHost(), plain(link.shortUrl(), MAX_SHORT_URL_LENGTH), destination(link.destinationHost()));
+        return "%s/%s → %s".formatted(shortLinkHost(), plain(link.shortUrl()), destination(link.destinationHost()));
     }
 
     private static String destination(final String host) {
         if (StringUtils.isBlank(host)) {
             return UNREADABLE_DESTINATION;
         }
-        return DomainNames.isIpLiteral(host) ? IP_DESTINATION : plain(host, MAX_HOST_LENGTH);
+        return DomainNames.isIpLiteral(host) ? IP_DESTINATION : plain(host);
     }
 
     private static String owner(final AlertedLink link) {
@@ -146,11 +130,11 @@ public class DiscordAlertFormatter {
         final var category = reported.category() == null ? "other" : reported.category().name().toLowerCase(Locale.ROOT);
         return StringUtils.isBlank(reported.details())
                 ? category
-                : "%s: \"%s\"".formatted(category, plain(reported.details(), MAX_DETAILS_LENGTH));
+                : "%s: \"%s\"".formatted(category, plain(reported.details()));
     }
 
     private static String blockReason(final LinkBlocked blocked) {
-        final var detail = plain(blocked.detail(), MAX_BLOCK_DETAIL_LENGTH);
+        final var detail = plain(blocked.detail());
         final var reason = Objects.requireNonNullElse(blocked.reason(), BlockReason.ADMIN);
         final var text = switch (reason) {
             case SAFE_BROWSING -> "Safe Browsing";
@@ -172,7 +156,7 @@ public class DiscordAlertFormatter {
             case LOCAL_PROVIDER -> "email";
             case "google" -> "Google";
             case "github" -> "GitHub";
-            default -> plain(provider, MAX_PROVIDER_LENGTH);
+            default -> plain(provider);
         };
     }
 
@@ -189,14 +173,7 @@ public class DiscordAlertFormatter {
         return serverUrl.contains("://") ? StringUtils.substringAfter(serverUrl, "://") : serverUrl;
     }
 
-    private static String plain(final String text, final int maxLength) {
-        if (StringUtils.isBlank(text)) {
-            return "";
-        }
-        return escaped(StringUtils.abbreviate(cleaned(StringUtils.left(text, MAX_INPUT_LENGTH)), ELLIPSIS, maxLength));
-    }
-
-    private static String plainInFull(final String text) {
+    private static String plain(final String text) {
         if (StringUtils.isBlank(text)) {
             return "";
         }

@@ -90,17 +90,38 @@ class DiscordAlertFormatterTest {
     }
 
     @Test
-    void visitorReportDetailsLoseNewlinesCodeAndMaskedLinksAndAreCutToAbout200Characters() {
+    void visitorReportDetailsLoseNewlinesCodeAndMaskedLinksAndAreShownInFull() {
         final var details = "@everyone see `code` [hrva.cc/admin](https://evil.example/phish)\n# fake heading\n> quote **bold** _it_ ||spoiler|| <@123> "
                 + "x".repeat(400);
 
         final var content = formatter.message(List.of(new VisitorReported(ANONYMOUS_LINK, ReportCategory.PHISHING, details, false)), 0).content();
 
-        assertThat(content).startsWith("Visitor report on an open review: hrva.cc/abc12 → example-login.top (phishing: \"@everyone see code hrva.cc/admin "
-                + "<https://evil.example/phish> # fake heading quote \\*\\*bold\\*\\* \\_it\\_ \\|\\|spoiler\\|\\| @123 xxx");
-        assertThat(content).doesNotContain("\n", "`", "[", "](", "<@");
-        assertThat(content).contains("x…\"), anonymous, <https://app.hrva.cc/admin/review?entry=42>");
-        assertThat(content).doesNotContain("x".repeat(200));
+        assertThat(content).isEqualTo("Visitor report on an open review: hrva.cc/abc12 → example-login.top (phishing: \"@everyone see code hrva.cc/admin "
+                + "<https://evil.example/phish> # fake heading quote \\*\\*bold\\*\\* \\_it\\_ \\|\\|spoiler\\|\\| @123 " + "x".repeat(400)
+                + "\"), anonymous, <https://app.hrva.cc/admin/review?entry=42>");
+        assertThat(content).doesNotContain("\n", "`", "[", "](", "<@", "…");
+    }
+
+    @Test
+    void longAliasesHostsReasonsSourceNamesAndErrorsAreShownInFull() {
+        final var alias = "a".repeat(60);
+        final var host = "h".repeat(120) + ".example";
+        final var reasons = List.of("r".repeat(150), "s".repeat(150));
+        final var sourceName = "n".repeat(120);
+        final var error = "e".repeat(300);
+
+        final var lines = formatter.message(List.of(
+                new ReviewOpened(new AlertedLink(1L, alias, host, null), reasons),
+                new LinkBlocked(new AlertedLink(2L, alias, host, 9L), BlockReason.ADMIN, "d".repeat(200)),
+                new BlocklistSourceFailed(sourceName, error, false),
+                new UserSignedUp(3L, "p".repeat(60))), 0).content().lines().toList();
+
+        assertThat(lines).containsExactly(
+                "New review: hrva.cc/" + alias + " → " + host + " (" + "r".repeat(150) + ", " + "s".repeat(150) + "), anonymous, "
+                        + "<https://app.hrva.cc/admin/review?entry=1>",
+                "Blocked: hrva.cc/" + alias + " → " + host + " (by an admin: " + "d".repeat(200) + "), account #9, <https://app.hrva.cc/admin/urls>",
+                sourceName + " failed to load: " + error + ", <https://app.hrva.cc/admin/blocklists>",
+                "New user: account #3 signed up with " + "p".repeat(60) + ", <https://app.hrva.cc/admin>");
     }
 
     @Test
@@ -179,7 +200,7 @@ class DiscordAlertFormatterTest {
         assertThat(lines).hasSize(11);
         assertThat(lines.getFirst()).startsWith("New review: hrva.cc/s0 ");
         assertThat(lines.get(9)).startsWith("New review: hrva.cc/s9 ");
-        assertThat(lines.getLast()).isEqualTo("…and 3 more, see " + REVIEW_PAGE);
+        assertThat(lines.getLast()).isEqualTo("and 3 more, see " + REVIEW_PAGE);
     }
 
     @Test
@@ -188,7 +209,7 @@ class DiscordAlertFormatterTest {
                 .content().lines().toList();
 
         assertThat(lines).hasSize(3);
-        assertThat(lines.getLast()).isEqualTo("…and 5 more, see " + REVIEW_PAGE);
+        assertThat(lines.getLast()).isEqualTo("and 5 more, see " + REVIEW_PAGE);
     }
 
     @Test
@@ -203,8 +224,46 @@ class DiscordAlertFormatterTest {
         final var lines = content.lines().toList();
 
         assertThat(content.length()).isLessThanOrEqualTo(2000);
+        assertThat(content).doesNotContain("…");
         assertThat(lines.size()).isBetween(2, 10);
-        assertThat(lines.getLast()).isEqualTo("…and %d more, see %s".formatted(10 - (lines.size() - 1), REVIEW_PAGE));
+        assertThat(lines.subList(0, lines.size() - 1)).allSatisfy(line -> assertThat(line).contains(details.replace("_", "\\_")));
+        assertThat(lines.getLast()).isEqualTo("and %d more, see %s".formatted(10 - (lines.size() - 1), REVIEW_PAGE));
+    }
+
+    @Test
+    void aBatchOfExactly2000CharactersIsSentWholeAndOneMoreCharacterMovesTheLastAlertIntoAndOneMore() {
+        final var exactLength = 2000 - formatter.message(batchWithLastDetailsOfLength(10), 0).content().length() + 10;
+
+        final var fitting = formatter.message(batchWithLastDetailsOfLength(exactLength), 0).content();
+        final var tooLong = formatter.message(batchWithLastDetailsOfLength(exactLength + 1), 0).content();
+
+        assertThat(fitting).hasSize(2000).doesNotContain(" more", "…").endsWith("x".repeat(exactLength) + "\"), anonymous, <https://app.hrva.cc/admin/review?entry=3>");
+        assertThat(tooLong.length()).isLessThanOrEqualTo(2000);
+        assertThat(tooLong).doesNotContain("x".repeat(10), "…");
+        assertThat(tooLong.lines().toList()).hasSize(4).last().isEqualTo("and 1 more, see " + REVIEW_PAGE);
+    }
+
+    @Test
+    void theOverflowLineCountsTowardThe2000Characters() {
+        final var exactLength = 2000 - formatter.message(batchWithLastDetailsOfLength(10), 1).content().length() + 10;
+
+        final var fitting = formatter.message(batchWithLastDetailsOfLength(exactLength), 1).content();
+        final var tooLong = formatter.message(batchWithLastDetailsOfLength(exactLength + 1), 1).content().lines().toList();
+
+        assertThat(fitting).hasSize(2000).endsWith("x".repeat(exactLength) + "\"), anonymous, <https://app.hrva.cc/admin/review?entry=3>\n"
+                + "and 1 more, see " + REVIEW_PAGE);
+        assertThat(tooLong).hasSize(4).last().isEqualTo("and 2 more, see " + REVIEW_PAGE);
+    }
+
+    @Test
+    void anAlertTooLongForOneMessageIsCountedNeverCut() {
+        final var host = "h".repeat(1990) + ".example";
+
+        final var content = formatter.message(List.of(
+                new ReviewOpened(new AlertedLink(1L, "abc12", host, null), List.of("high-risk domain ending .example")),
+                new UserSignedUp(31L, "local")), 0).content();
+
+        assertThat(content).isEqualTo("and 2 more, see " + REVIEW_PAGE);
     }
 
     @Test
@@ -333,6 +392,14 @@ class DiscordAlertFormatterTest {
                 "4. hrva.cc/s4 → s4.example, 2 clicks",
                 "and 1 more",
                 "Stats (last 7 days): <https://app.hrva.cc/admin/dashboard?days=7>");
+    }
+
+    private static List<AdminAlertEvent> batchWithLastDetailsOfLength(final int length) {
+        final var alerts = new ArrayList<AdminAlertEvent>();
+        IntStream.rangeClosed(0, 2).forEach(index -> alerts.add(
+                new VisitorReported(new AlertedLink(index, "s" + index, "example.top", null), ReportCategory.PHISHING, "y".repeat(450), false)));
+        alerts.add(new VisitorReported(new AlertedLink(3L, "s3", "example.top", null), ReportCategory.PHISHING, "x".repeat(length), false));
+        return alerts;
     }
 
     private static WeeklyDigest withLastHostOfLength(final int length) {

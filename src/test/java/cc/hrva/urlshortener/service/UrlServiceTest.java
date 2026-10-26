@@ -12,6 +12,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.IntStream;
+import java.util.stream.Stream;
 import io.micrometer.core.instrument.MeterRegistry;
 import tools.jackson.databind.ObjectMapper;
 import org.hibernate.exception.ConstraintViolationException;
@@ -73,6 +74,7 @@ import org.springframework.transaction.interceptor.TransactionInterceptor;
 import org.springframework.transaction.support.TransactionOperations;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.web.servlet.view.RedirectView;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -2229,6 +2231,33 @@ class UrlServiceTest {
         when(appProperties.getFrontendUrl()).thenReturn(FRONTEND);
 
         assertThat(urlServiceWithMeters().redirectResultUrl(null, null).getUrl()).isEqualTo(FRONTEND);
+    }
+
+    @Test
+    void noRedirectPassesTheVisitorsQueryOn() {
+        final var cache = org.mockito.Mockito.mock(org.springframework.cache.Cache.class);
+        when(cacheManager.getCache("urls")).thenReturn(cache);
+        final var cached = new UrlResponse(5L, "https://example.com/a", "cached", null, null, 0L, null, true, "ACTIVE", Set.of(), false, null);
+        final var gated = new UrlResponse(6L, "https://example.com/b", "gated", null, null, 0L, null, true, "ACTIVE", Set.of(), true, null);
+        when(cache.get("cached")).thenReturn(() -> cached);
+        when(cache.get("gated")).thenReturn(() -> gated);
+        when(urlRepository.findFirstByShortUrlOrderByActiveDescIdDesc("stored"))
+                .thenReturn(Optional.of(storedLink().shortUrl("stored").longUrl("https://example.com/c").active(true).build()));
+        when(appProperties.getFrontendUrl()).thenReturn(FRONTEND);
+        final var service = urlServiceWithMeters();
+        final var scan = CLICK.withQrScan();
+
+        final var redirects = Stream.of("cached", "gated", "stored", null)
+                .map(shortUrl -> service.redirectResultUrl(shortUrl, scan))
+                .toList();
+
+        assertThat(redirects)
+                .extracting(RedirectView::getUrl, RedirectView::isPropagateQueryProperties)
+                .containsExactly(
+                        tuple("https://example.com/a", false),
+                        tuple(FRONTEND + "/protected/gated", false),
+                        tuple("https://example.com/c", false),
+                        tuple(FRONTEND, false));
     }
 
     @Test

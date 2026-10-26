@@ -148,7 +148,7 @@ class DefaultDiscordAlertServiceTest {
         verify(discordWebhookClient).send(anyString(), message.capture(), any(Duration.class));
         final var lines = message.getValue().content().lines().toList();
         assertThat(lines).hasSize(11);
-        assertThat(lines.getLast()).isEqualTo("…and 195 more, see <https://app.hrva.cc/admin/review>");
+        assertThat(lines.getLast()).isEqualTo("and 195 more, see <https://app.hrva.cc/admin/review>");
     }
 
     @Test
@@ -336,7 +336,7 @@ class DefaultDiscordAlertServiceTest {
 
         final var message = ArgumentCaptor.forClass(DiscordMessage.class);
         verify(discordWebhookClient).sendWithoutWaiting(anyString(), message.capture(), any(Duration.class));
-        assertThat(message.getValue().content().lines().toList().getLast()).isEqualTo("…and 195 more, see <https://app.hrva.cc/admin/review>");
+        assertThat(message.getValue().content().lines().toList().getLast()).isEqualTo("and 195 more, see <https://app.hrva.cc/admin/review>");
     }
 
     @Test
