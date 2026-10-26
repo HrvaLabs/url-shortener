@@ -770,6 +770,18 @@ class DefaultModerationServiceTest {
     }
 
     @Test
+    void blockingAUserDetachesTheAccountItDeactivated() {
+        final var scammer = user(5L, "scammer@example.com");
+        when(userRepository.findById(5L)).thenReturn(Optional.of(scammer));
+
+        moderationService.blockUser(5L, ADMIN, "admin", null);
+
+        final var order = inOrder(userService, entityManager);
+        order.verify(userService).deactivate(scammer);
+        order.verify(entityManager).detach(scammer);
+    }
+
+    @Test
     void blockingAUserWithThreeLinksSendsOnlyTheAccountDeactivatedEmail() {
         final var scammer = user(5L, "scammer@example.com");
         when(userRepository.findById(5L)).thenReturn(Optional.of(scammer));

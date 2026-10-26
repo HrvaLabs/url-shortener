@@ -359,6 +359,7 @@ public class DefaultModerationService implements ModerationService {
         refuseOverTheCap(ids.size(), maxLinks);
         if (!Boolean.FALSE.equals(user.getActive())) {
             userService.deactivate(user);
+            entityManager.detach(user);
         }
         final var blocked = eachLink(ids, Long::longValue, id -> block(id, BlockReason.USER_BLOCKED, null, ReviewResolution.USER_BLOCKED, performedBy,
                 url -> url.isActive() && ownedBy(url, user)).isPresent());
