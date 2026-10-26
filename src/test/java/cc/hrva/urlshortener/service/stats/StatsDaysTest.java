@@ -3,6 +3,7 @@ package cc.hrva.urlshortener.service.stats;
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.model.enums.AnalyticsRange;
 import cc.hrva.urlshortener.service.analytics.AnalyticsDays;
+import cc.hrva.urlshortener.service.digest.DigestWeek;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -55,6 +56,25 @@ class StatsDaysTest {
                 LocalDate.of(2026, 10, 25),
                 LocalDateTime.of(2026, 10, 18, 22, 0),
                 LocalDateTime.of(2026, 10, 25, 23, 0)));
+    }
+
+    @Test
+    void theDigestWeeksOfBothDstChangesAreSevenZagrebDays() {
+        final var autumn = DigestWeek.lastClosedBefore(LocalDate.of(2026, 10, 26));
+        final var spring = DigestWeek.lastClosedBefore(LocalDate.of(2026, 3, 30));
+
+        assertThat(statsDays.window(autumn.from(), autumn.to())).isEqualTo(new StatsWindow(
+                7,
+                LocalDate.of(2026, 10, 19),
+                LocalDate.of(2026, 10, 25),
+                LocalDateTime.of(2026, 10, 18, 22, 0),
+                LocalDateTime.of(2026, 10, 25, 23, 0)));
+        assertThat(statsDays.window(spring.from(), spring.to())).isEqualTo(new StatsWindow(
+                7,
+                LocalDate.of(2026, 3, 23),
+                LocalDate.of(2026, 3, 29),
+                LocalDateTime.of(2026, 3, 22, 23, 0),
+                LocalDateTime.of(2026, 3, 29, 22, 0)));
     }
 
     @Test
