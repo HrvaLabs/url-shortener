@@ -107,7 +107,7 @@ public class DefaultSecondStepService implements SecondStepService {
             throw new DisabledException("Account is deactivated");
         }
         if (!Boolean.TRUE.equals(user.getEmailVerified())) {
-            throw new EmailNotVerifiedException("Please verify your email before logging in.");
+            throw new EmailNotVerifiedException();
         }
 
         loginAttemptService.loginSucceeded(twoFactorAttemptsKey(user));

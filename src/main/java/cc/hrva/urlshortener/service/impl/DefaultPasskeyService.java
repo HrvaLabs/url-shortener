@@ -18,6 +18,7 @@ import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.security.Reauthentication;
 import cc.hrva.urlshortener.service.PasskeyService;
 import cc.hrva.urlshortener.service.UserService;
+import cc.hrva.urlshortener.service.passkey.PasskeyAssertions;
 import cc.hrva.urlshortener.service.passkey.PasskeyCeremony;
 import cc.hrva.urlshortener.service.passkey.PasskeyCeremonyPurpose;
 import cc.hrva.urlshortener.service.passkey.PasskeyCeremonyStore;
@@ -51,9 +52,7 @@ public class DefaultPasskeyService implements PasskeyService {
     private static final String DEFAULT_LABEL = "Passkey";
     private static final int MAX_LABEL_LENGTH = 64;
     private static final int LOGGED_CREDENTIAL_PREFIX = 8;
-    private static final String EXPIRED = "This request expired. Try again.";
     private static final String ALREADY_ADDED = "This passkey or security key is already added.";
-    private static final String COULD_NOT_VERIFY = "That passkey or security key couldn't be verified. Try again.";
     private static final String LABEL_TOO_LONG = "A label can have at most 64 characters.";
     private static final String NOT_FOUND = "Passkey not found";
     private static final String NOT_AUTHENTICATED = "Not authenticated";
@@ -109,11 +108,11 @@ public class DefaultPasskeyService implements PasskeyService {
             throw new ApiException(ALREADY_ADDED);
         } catch (final IllegalStateException exception) {
             log.warn("Passkey refused user id={} credential={}…", user.getId(), prefixOf(credentialId), exception);
-            throw new PasskeyVerificationException(COULD_NOT_VERIFY);
+            throw new PasskeyVerificationException(PasskeyAssertions.COULD_NOT_VERIFY);
         } catch (final WebAuthnException | IllegalArgumentException exception) {
             log.info("Passkey refused user id={} credential={}… reason={}", user.getId(), prefixOf(credentialId),
                     exception.getClass().getSimpleName());
-            throw new PasskeyVerificationException(COULD_NOT_VERIFY);
+            throw new PasskeyVerificationException(PasskeyAssertions.COULD_NOT_VERIFY);
         }
 
         final var passkey = passkeyCredentialRepository.findByCredentialId(credentialId).orElseThrow();
@@ -171,7 +170,7 @@ public class DefaultPasskeyService implements PasskeyService {
                 .filter(ceremony -> ceremony.purpose() == PasskeyCeremonyPurpose.REGISTRATION)
                 .filter(ceremony -> Objects.equals(ceremony.userId(), user.getId()))
                 .filter(ceremony -> user.getWebauthnUserHandle() != null)
-                .orElseThrow(() -> new SignInExpiredException(EXPIRED));
+                .orElseThrow(() -> new SignInExpiredException(PasskeyCeremonyStore.EXPIRED));
     }
 
     private PasskeyCredential passkeyOf(final User user, final Long id) {

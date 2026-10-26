@@ -71,7 +71,7 @@ public class DefaultAuthService implements AuthService {
         final var user = userService.fetchUserFromEmail(loginDto.getEmail());
 
         if (!Boolean.TRUE.equals(user.getEmailVerified())) {
-            throw new EmailNotVerifiedException("Please verify your email before logging in.");
+            throw new EmailNotVerifiedException();
         }
 
         final var rememberMe = Boolean.TRUE.equals(loginDto.getRememberMe());

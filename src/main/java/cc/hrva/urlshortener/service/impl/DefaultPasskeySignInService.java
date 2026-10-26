@@ -48,8 +48,6 @@ public class DefaultPasskeySignInService implements PasskeySignInService {
     private static final int OPTIONS_PER_NETWORK = 30;
     private static final Duration OPTIONS_WINDOW = Duration.ofMinutes(10);
     private static final String TOO_MANY_OPTIONS = "Too many passkey sign-in attempts from this network. Try again in a few minutes.";
-    private static final String EXPIRED = "This request expired. Try again.";
-    private static final String EMAIL_NOT_VERIFIED = "Please verify your email before logging in.";
 
     private final ClientIpResolver clientIpResolver;
     private final LoginAttemptService loginAttemptService;
@@ -95,7 +93,7 @@ public class DefaultPasskeySignInService implements PasskeySignInService {
             throw new DisabledException("Account is deactivated");
         }
         if (!Boolean.TRUE.equals(user.getEmailVerified())) {
-            throw new EmailNotVerifiedException(EMAIL_NOT_VERIFIED);
+            throw new EmailNotVerifiedException();
         }
 
         loginAttemptService.loginSucceeded(clientIp);
@@ -125,7 +123,7 @@ public class DefaultPasskeySignInService implements PasskeySignInService {
     private SignInExpiredException signInExpired(final String clientIp) {
         loginAttemptService.loginFailed(clientIp);
 
-        return new SignInExpiredException(EXPIRED);
+        return new SignInExpiredException(PasskeyCeremonyStore.EXPIRED);
     }
 
 }

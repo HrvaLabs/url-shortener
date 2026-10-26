@@ -160,7 +160,8 @@ class DefaultAuthServiceTest {
         givenTheRightPassword(user);
 
         assertThatThrownBy(() -> authService.login(loginDto, request))
-                .isInstanceOf(cc.hrva.urlshortener.exception.EmailNotVerifiedException.class);
+                .isInstanceOf(cc.hrva.urlshortener.exception.EmailNotVerifiedException.class)
+                .hasMessage("Please verify your email before logging in.");
         verifyNoInteractions(signInService);
     }
 

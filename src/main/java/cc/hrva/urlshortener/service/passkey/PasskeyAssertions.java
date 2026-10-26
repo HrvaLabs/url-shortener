@@ -23,6 +23,8 @@ import org.springframework.security.web.webauthn.api.UserVerificationRequirement
 import org.springframework.security.web.webauthn.management.RelyingPartyAuthenticationRequest;
 import org.springframework.security.web.webauthn.management.WebAuthnRelyingPartyOperations;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.JsonNode;
 
 @Slf4j
@@ -45,6 +47,7 @@ public class PasskeyAssertions {
     private final WebAuthnRelyingPartyOperations relyingPartyOperations;
     private final AuthenticatorDataConverter authenticatorDataConverter = new AuthenticatorDataConverter(new ObjectConverter());
 
+    @Transactional(propagation = Propagation.MANDATORY)
     public User verify(final PasskeyCeremony ceremony, final JsonNode credential, final User expectedUser) {
         final var assertion = passkeyJson.readAssertion(credential);
         final var credentialId = assertion.getRawId().toBase64UrlString();
@@ -52,8 +55,8 @@ public class PasskeyAssertions {
                 .orElseThrow(() -> notRegistered(credentialId));
         final var owner = passkey.getUser();
         if (expectedUser != null && !Objects.equals(owner.getId(), expectedUser.getId())) {
-            log.info("Passkey of another account at the second step user id={} credential={}…", expectedUser.getId(),
-                    prefixOf(credentialId));
+            log.info("Passkey of another account user id={} credential={}… purpose={}", expectedUser.getId(),
+                    prefixOf(credentialId), ceremony.purpose());
             throw couldNotVerify();
         }
 

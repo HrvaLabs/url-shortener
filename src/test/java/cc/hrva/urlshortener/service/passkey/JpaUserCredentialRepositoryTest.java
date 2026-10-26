@@ -205,6 +205,26 @@ class JpaUserCredentialRepositoryTest {
     }
 
     @Test
+    void aBackedUpStateIsStoredOnlyForABackupEligiblePasskey() {
+        final var eligible = Bytes.random();
+        final var eligiblePasskey = existingPasskey(eligible, 0);
+        eligiblePasskey.setBackupEligible(true);
+        passkeyCredentialRepository.saveAndFlush(eligiblePasskey);
+        final var notEligible = Bytes.random();
+        existingPasskey(notEligible, 0);
+
+        credentials.recordBackupState(eligible, true);
+        credentials.recordBackupState(notEligible, true);
+
+        assertThat(stored(eligible).isBackupState()).isTrue();
+        assertThat(stored(notEligible).isBackupState()).isFalse();
+
+        credentials.recordBackupState(eligible, false);
+
+        assertThat(stored(eligible).isBackupState()).isFalse();
+    }
+
+    @Test
     void deleteRemovesTheCredential() {
         final var credentialId = Bytes.random();
         credentials.save(record(credentialId, attestationObject(credentialId, AAGUID.ZERO)).build());

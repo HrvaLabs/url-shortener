@@ -35,6 +35,8 @@ import cc.hrva.urlshortener.service.impl.DefaultSignInService;
 import cc.hrva.urlshortener.service.passkey.JpaPublicKeyCredentialUserEntityRepository;
 import cc.hrva.urlshortener.service.passkey.JpaUserCredentialRepository;
 import cc.hrva.urlshortener.service.passkey.PasskeyAssertions;
+import cc.hrva.urlshortener.service.passkey.PasskeyCeremony;
+import cc.hrva.urlshortener.service.passkey.PasskeyCeremonyPurpose;
 import cc.hrva.urlshortener.service.passkey.PasskeyJson;
 import cc.hrva.urlshortener.service.passkey.PasskeyOptionsFactory;
 import cc.hrva.urlshortener.service.passkey.RedisPasskeyCeremonyStore;
@@ -72,9 +74,11 @@ import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.security.authentication.DisabledException;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.web.webauthn.api.Bytes;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.transaction.IllegalTransactionStateException;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.JsonNode;
@@ -123,6 +127,9 @@ class PasskeyFlowsTest {
 
     @Autowired
     private PasskeySignInService passkeySignInService;
+
+    @Autowired
+    private PasskeyAssertions passkeyAssertions;
 
     @Autowired
     private AnalyticsDays analyticsDays;
@@ -429,6 +436,16 @@ class PasskeyFlowsTest {
             passkeyCredentialRepository.deleteAll(passkeyCredentialRepository.findByUserOrderByCreatedAtDesc(user));
             userRepository.deleteById(user.getId());
         }
+    }
+
+    @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    void anAssertionOutsideATransactionIsRefusedBeforeItIsRead() {
+        final var ceremony = new PasskeyCeremony(PasskeyCeremonyPurpose.SIGN_IN, Bytes.random().toBase64UrlString(), null);
+        final var unreadable = JsonMapper.builder().build().createObjectNode();
+
+        assertThatThrownBy(() -> passkeyAssertions.verify(ceremony, unreadable, null))
+                .isInstanceOf(IllegalTransactionStateException.class);
     }
 
     @Test

@@ -76,7 +76,7 @@ public class JpaUserCredentialRepository implements UserCredentialRepository {
     public void recordBackupState(final Bytes credentialId, final boolean backedUp) {
         passkeyCredentialRepository.findByCredentialId(credentialId.toBase64UrlString())
                 .ifPresent(passkey -> {
-                    passkey.setBackupState(backedUp);
+                    passkey.setBackupState(backedUp && passkey.isBackupEligible());
                     passkeyCredentialRepository.save(passkey);
                 });
     }
