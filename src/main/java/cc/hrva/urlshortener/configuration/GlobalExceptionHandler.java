@@ -2,6 +2,7 @@ package cc.hrva.urlshortener.configuration;
 
 import cc.hrva.urlshortener.exception.ApiException;
 import cc.hrva.urlshortener.exception.ApiKeyNotFoundException;
+import cc.hrva.urlshortener.exception.BioHandleUnavailableException;
 import cc.hrva.urlshortener.exception.BlocklistSourceNotFoundException;
 import cc.hrva.urlshortener.exception.CommonException;
 import cc.hrva.urlshortener.exception.ConnectRequestAlreadyApprovedException;
@@ -169,6 +170,11 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(ShortUrlAlreadyExistsException.class)
     public ResponseEntity<Map<String, String>> handleShortUrlExists(final ShortUrlAlreadyExistsException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("error", safeMessage(ex)));
+    }
+
+    @ExceptionHandler(BioHandleUnavailableException.class)
+    public ResponseEntity<Map<String, String>> handleBioHandleUnavailable(final BioHandleUnavailableException ex) {
         return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("error", safeMessage(ex)));
     }
 

@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.configuration;
 
+import cc.hrva.urlshortener.exception.BioHandleUnavailableException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -56,8 +57,20 @@ class GlobalExceptionHandlerTest {
         assertThat(output).doesNotContain("Unhandled exception").doesNotContain("\tat ");
     }
 
+    @Test
+    void anUnavailableBioHandleIsAConflictWithItsText() throws Exception {
+        mockMvc.perform(get("/probe/handle"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error").value("This handle is taken. Try another."));
+    }
+
     @RestController
     static class ProbeController {
+
+        @GetMapping("/probe/handle")
+        String probeHandle() {
+            throw new BioHandleUnavailableException("This handle is taken. Try another.");
+        }
 
         @GetMapping("/probe")
         String probe(@RequestParam("days") final int days) {
