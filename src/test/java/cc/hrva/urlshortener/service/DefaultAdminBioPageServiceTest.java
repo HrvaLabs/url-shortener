@@ -77,6 +77,7 @@ class DefaultAdminBioPageServiceTest {
     private static final String TAKEN = "This handle is taken. Try another.";
     private static final String RESERVED = "This handle is reserved. Try another.";
     private static final String ALREADY_RESERVED = "This alias is already reserved.";
+    private static final int GRINNING_FACE = 0x1F600;
 
     @Mock
     private BioPageRepository bioPageRepository;
@@ -303,6 +304,33 @@ class DefaultAdminBioPageServiceTest {
         assertThat(reserved.getValue().alias()).isEqualTo("ana");
         assertThat(reserved.getValue().reason()).hasSize(200).isEqualTo(("Revoked bio page handle: " + reason).substring(0, 200));
         assertThat(page.getHandleRevokedReason()).isEqualTo(reason);
+    }
+
+    @Test
+    void theReservationCutNeverSplitsAnEmojiAtTheLimit() {
+        final var kept = "r".repeat(174);
+        final var reason = kept + Character.toString(GRINNING_FACE) + "r".repeat(24);
+
+        adminBioPageService.revokeHandle(12L, new BioPageReasonDto(reason));
+
+        final var reserved = ArgumentCaptor.forClass(ReservedAliasDto.class);
+        verify(reservedAliasService).reserve(reserved.capture(), anyString());
+        assertThat(reserved.getValue().reason()).hasSize(199).isEqualTo("Revoked bio page handle: " + kept);
+        assertThat(reserved.getValue().reason().codePoints()).noneMatch(codePoint -> Character.getType(codePoint) == Character.SURROGATE);
+        assertThat(page.getHandleRevokedReason()).isEqualTo(reason);
+    }
+
+    @Test
+    void anEmojiEndingExactlyAtTheLimitIsKeptWhole() {
+        final var kept = "r".repeat(173) + Character.toString(GRINNING_FACE);
+        final var reason = kept + "r".repeat(25);
+
+        adminBioPageService.revokeHandle(12L, new BioPageReasonDto(reason));
+
+        final var reserved = ArgumentCaptor.forClass(ReservedAliasDto.class);
+        verify(reservedAliasService).reserve(reserved.capture(), anyString());
+        assertThat(reserved.getValue().reason()).hasSize(200).isEqualTo("Revoked bio page handle: " + kept);
+        assertThat(reserved.getValue().reason().codePoints().filter(codePoint -> codePoint == GRINNING_FACE)).hasSize(1);
     }
 
     @Test

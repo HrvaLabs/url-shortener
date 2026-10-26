@@ -49,6 +49,8 @@ public class DefaultSuspiciousUrlService implements SuspiciousUrlService {
             Map.entry("coinbase", Set.of("coinbase.com")),
             Map.entry("binance", Set.of("binance.com")));
 
+    private static final Set<String> COMMON_WORD_BRANDS = Set.of("booking", "outlook");
+
     private static final Set<String> SHORTENER_DOMAINS = Set.of(
             "bit.ly", "bitly.com", "bit.do", "t.ly", "tinyurl.com", "ow.ly", "is.gd", "v.gd",
             "buff.ly", "rebrand.ly", "cutt.ly", "shorturl.at", "rb.gy", "tiny.cc", "s.id", "bl.ink", "short.io",
@@ -186,7 +188,7 @@ public class DefaultSuspiciousUrlService implements SuspiciousUrlService {
         }
         final var joined = String.join("", wordsOf(handle).stream().map(DefaultSuspiciousUrlService::wordLookalike).toList());
         return findImitatedBrand(handle).or(() -> BRAND_DOMAINS.keySet().stream()
-                .filter(brand -> brand.length() >= DISTINCTIVE_BRAND_LENGTH && joined.contains(brand))
+                .filter(brand -> brand.length() >= DISTINCTIVE_BRAND_LENGTH && !COMMON_WORD_BRANDS.contains(brand) && joined.contains(brand))
                 .sorted()
                 .findFirst());
     }

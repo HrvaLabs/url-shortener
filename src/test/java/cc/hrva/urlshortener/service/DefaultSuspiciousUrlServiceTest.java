@@ -403,6 +403,19 @@ class DefaultSuspiciousUrlServiceTest {
     }
 
     @ParameterizedTest
+    @ValueSource(strings = {"bookings", "positiveoutlook", "salonbooking", "my-outlookblog", "rebooking_now"})
+    void aHandleThatOnlyContainsACommonWordBrandImitatesNothing(final String handle) {
+        assertThat(suspiciousUrlService.findBrandInHandle(handle)).isEmpty();
+    }
+
+    @ParameterizedTest
+    @CsvSource({"booking, booking", "outlook, outlook", "bookimg, booking", "0utlook, outlook", "booking-help, booking", "my_outlook, outlook"})
+    void aHandleThatIsACommonWordBrandOrOneLetterFromItStillImitatesIt(final String handle, final String brand) {
+        assertThat(suspiciousUrlService.findBrandInHandle(handle)).contains(brand);
+        assertThat(suspiciousUrlService.findBrandInHandle(handle)).isEqualTo(suspiciousUrlService.findImitatedBrand(handle));
+    }
+
+    @ParameterizedTest
     @CsvSource({"paypal, paypal", "paypa1, paypal", "revoiut, revolut", "apple-pie, apple", "dhl, dhl", "the_ebay_shop, ebay"})
     void aHandleKeepsTheLinkChecksVerdictOnItsParts(final String handle, final String brand) {
         assertThat(suspiciousUrlService.findBrandInHandle(handle)).contains(brand);
