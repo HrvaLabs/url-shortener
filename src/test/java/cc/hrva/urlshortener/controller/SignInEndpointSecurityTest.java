@@ -41,6 +41,7 @@ import cc.hrva.urlshortener.service.UserService;
 import cc.hrva.urlshortener.service.analytics.AnalyticsDays;
 import cc.hrva.urlshortener.service.impl.DefaultPasskeySignInService;
 import cc.hrva.urlshortener.service.passkey.PasskeyAssertions;
+import cc.hrva.urlshortener.service.passkey.PasskeyCeremonies;
 import cc.hrva.urlshortener.service.passkey.PasskeyCeremony;
 import cc.hrva.urlshortener.service.passkey.PasskeyCeremonyPurpose;
 import cc.hrva.urlshortener.service.passkey.PasskeyCeremonyStore;
@@ -482,6 +483,7 @@ class SignInEndpointSecurityTest {
             PasskeyController.class,
             PasskeySignInController.class,
             DefaultPasskeySignInService.class,
+            PasskeyCeremonies.class,
             PasskeyOptionsFactory.class,
             PasskeyJson.class
     })

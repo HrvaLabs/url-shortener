@@ -19,6 +19,7 @@ import cc.hrva.urlshortener.security.Reauthentication;
 import cc.hrva.urlshortener.service.PasskeyService;
 import cc.hrva.urlshortener.service.UserService;
 import cc.hrva.urlshortener.service.passkey.PasskeyAssertions;
+import cc.hrva.urlshortener.service.passkey.PasskeyCeremonies;
 import cc.hrva.urlshortener.service.passkey.PasskeyCeremony;
 import cc.hrva.urlshortener.service.passkey.PasskeyCeremonyPurpose;
 import cc.hrva.urlshortener.service.passkey.PasskeyCeremonyStore;
@@ -62,6 +63,7 @@ public class DefaultPasskeyService implements PasskeyService {
     private final UserRepository userRepository;
     private final PasskeyCredentialRepository passkeyCredentialRepository;
     private final PasskeyCeremonyStore passkeyCeremonyStore;
+    private final PasskeyCeremonies passkeyCeremonies;
     private final PasskeyJson passkeyJson;
     private final PasskeyOptionsFactory passkeyOptionsFactory;
     private final WebAuthnRelyingPartyOperations relyingPartyOperations;
@@ -74,13 +76,8 @@ public class DefaultPasskeyService implements PasskeyService {
         reauthentication.confirm(user, dto.getPassword());
         ensureUserHandle(user);
 
-        final var challenge = Bytes.random();
-        final var options = passkeyOptionsFactory.creationOptions(challenge, passkeyOptionsFactory.userEntity(user),
+        return passkeyCeremonies.startRegistration(user,
                 passkeyOptionsFactory.descriptors(passkeyCredentialRepository.findByUserOrderByCreatedAtDesc(user)));
-        final var ceremonyId = passkeyCeremonyStore.save(
-                new PasskeyCeremony(PasskeyCeremonyPurpose.REGISTRATION, challenge.toBase64UrlString(), user.getId()));
-
-        return new PasskeyOptionsResponse(ceremonyId, passkeyJson.write(options));
     }
 
     @Override

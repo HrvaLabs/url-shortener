@@ -6,8 +6,10 @@ import org.springframework.web.bind.annotation.ResponseStatus;
 @ResponseStatus(HttpStatus.GONE)
 public class SignInExpiredException extends CommonException {
 
+    public static final String SIGN_IN_EXPIRED = "Your sign-in expired. Sign in again.";
+
     public SignInExpiredException() {
-        super("Your sign-in expired. Sign in again.");
+        super(SIGN_IN_EXPIRED);
     }
 
     public SignInExpiredException(final String message) {

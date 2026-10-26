@@ -10,12 +10,14 @@ import cc.hrva.urlshortener.exception.NoAuthorizationException;
 import cc.hrva.urlshortener.exception.PasskeyNotFoundException;
 import cc.hrva.urlshortener.exception.PasskeyVerificationException;
 import cc.hrva.urlshortener.exception.SignInExpiredException;
+import cc.hrva.urlshortener.mcp.anon.RateLimiter;
 import cc.hrva.urlshortener.model.PasskeyCredential;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.repository.PasskeyCredentialRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.security.Reauthentication;
 import cc.hrva.urlshortener.service.impl.DefaultPasskeyService;
+import cc.hrva.urlshortener.service.passkey.PasskeyCeremonies;
 import cc.hrva.urlshortener.service.passkey.PasskeyCeremony;
 import cc.hrva.urlshortener.service.passkey.PasskeyCeremonyPurpose;
 import cc.hrva.urlshortener.service.passkey.PasskeyCeremonyStore;
@@ -93,6 +95,9 @@ class DefaultPasskeyServiceTest {
     private WebAuthnRelyingPartyOperations relyingPartyOperations;
 
     @Mock
+    private RateLimiter rateLimiter;
+
+    @Mock
     private Reauthentication reauthentication;
 
     private final Map<Long, String> storedHandles = new HashMap<>();
@@ -104,9 +109,11 @@ class DefaultPasskeyServiceTest {
         final var appProperties = new AppProperties();
         appProperties.getPasskeys().setRpId("localhost");
         appProperties.getPasskeys().setAllowedOrigins(List.of("http://localhost:3000"));
+        final var passkeyJson = new PasskeyJson();
+        final var passkeyOptionsFactory = new PasskeyOptionsFactory(appProperties);
         passkeyService = new DefaultPasskeyService(userService, userRepository, passkeyCredentialRepository,
-                passkeyCeremonyStore, new PasskeyJson(), new PasskeyOptionsFactory(appProperties), relyingPartyOperations,
-                reauthentication);
+                passkeyCeremonyStore, new PasskeyCeremonies(passkeyCeremonyStore, passkeyOptionsFactory, passkeyJson, rateLimiter),
+                passkeyJson, passkeyOptionsFactory, relyingPartyOperations, reauthentication);
     }
 
     @Test

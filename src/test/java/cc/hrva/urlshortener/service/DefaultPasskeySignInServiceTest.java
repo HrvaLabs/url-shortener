@@ -17,6 +17,7 @@ import cc.hrva.urlshortener.security.ClientIpResolver;
 import cc.hrva.urlshortener.service.analytics.AnalyticsDays;
 import cc.hrva.urlshortener.service.impl.DefaultPasskeySignInService;
 import cc.hrva.urlshortener.service.passkey.PasskeyAssertions;
+import cc.hrva.urlshortener.service.passkey.PasskeyCeremonies;
 import cc.hrva.urlshortener.service.passkey.PasskeyCeremony;
 import cc.hrva.urlshortener.service.passkey.PasskeyCeremonyPurpose;
 import cc.hrva.urlshortener.service.passkey.PasskeyCeremonyStore;
@@ -97,9 +98,10 @@ class DefaultPasskeySignInServiceTest {
     void setUp() {
         final var appProperties = new AppProperties();
         appProperties.getPasskeys().setRpId("hrva.cc");
-        passkeySignInService = new DefaultPasskeySignInService(clientIpResolver, loginAttemptService, rateLimiter,
-                passkeyCeremonyStore, new PasskeyOptionsFactory(appProperties), new PasskeyJson(), passkeyAssertions,
-                passkeySignInStatsRepository, analyticsDays, signInService);
+        final var passkeyCeremonies = new PasskeyCeremonies(passkeyCeremonyStore, new PasskeyOptionsFactory(appProperties),
+                new PasskeyJson(), rateLimiter);
+        passkeySignInService = new DefaultPasskeySignInService(clientIpResolver, loginAttemptService, passkeyCeremonies,
+                passkeyCeremonyStore, passkeyAssertions, passkeySignInStatsRepository, analyticsDays, signInService);
         when(clientIpResolver.getClientIp(request)).thenReturn(CLIENT_IP);
     }
 

@@ -25,10 +25,10 @@ import cc.hrva.urlshortener.service.SignInService;
 import cc.hrva.urlshortener.service.TwoFactorService;
 import cc.hrva.urlshortener.service.analytics.AnalyticsDays;
 import cc.hrva.urlshortener.service.passkey.PasskeyAssertions;
+import cc.hrva.urlshortener.service.passkey.PasskeyCeremonies;
 import cc.hrva.urlshortener.service.passkey.PasskeyCeremony;
 import cc.hrva.urlshortener.service.passkey.PasskeyCeremonyPurpose;
 import cc.hrva.urlshortener.service.passkey.PasskeyCeremonyStore;
-import cc.hrva.urlshortener.service.passkey.PasskeyJson;
 import cc.hrva.urlshortener.service.passkey.PasskeyOptionsFactory;
 import cc.hrva.urlshortener.service.twostep.PendingLogin;
 import cc.hrva.urlshortener.service.twostep.PendingLoginStore;
@@ -38,7 +38,6 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.authentication.DisabledException;
-import org.springframework.security.web.webauthn.api.Bytes;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.JsonNode;
@@ -61,9 +60,9 @@ public class DefaultSecondStepService implements SecondStepService {
     private final TwoFactorService twoFactorService;
     private final SignInService signInService;
     private final PasskeyCredentialRepository passkeyCredentialRepository;
+    private final PasskeyCeremonies passkeyCeremonies;
     private final PasskeyCeremonyStore passkeyCeremonyStore;
     private final PasskeyOptionsFactory passkeyOptionsFactory;
-    private final PasskeyJson passkeyJson;
     private final PasskeyAssertions passkeyAssertions;
     private final PasskeySignInStatsRepository passkeySignInStatsRepository;
     private final AnalyticsDays analyticsDays;
@@ -84,19 +83,15 @@ public class DefaultSecondStepService implements SecondStepService {
     @Override
     public PasskeyOptionsResponse passkeyOptions(final PendingTokenDto dto, final HttpServletRequest request) {
         final var clientIp = allowedClientIp(request);
+        passkeyCeremonies.checkOptionsLimit(clientIp);
         final var user = userOf(pendingLoginOf(dto.getPendingToken(), clientIp), clientIp);
         final var passkeys = passkeyCredentialRepository.findByUserOrderByCreatedAtDesc(user);
         if (passkeys.isEmpty()) {
             throw new ApiException(NO_PASSKEYS);
         }
 
-        final var challenge = Bytes.random();
-        final var options = passkeyOptionsFactory.requestOptions(challenge, passkeyOptionsFactory.descriptors(passkeys),
-                PasskeyCeremonyPurpose.SECOND_STEP.userVerification());
-        final var ceremonyId = passkeyCeremonyStore.save(
-                new PasskeyCeremony(PasskeyCeremonyPurpose.SECOND_STEP, challenge.toBase64UrlString(), user.getId()));
-
-        return new PasskeyOptionsResponse(ceremonyId, passkeyJson.write(options));
+        return passkeyCeremonies.startRequest(PasskeyCeremonyPurpose.SECOND_STEP, passkeyOptionsFactory.descriptors(passkeys),
+                user.getId());
     }
 
     @Override
@@ -106,7 +101,7 @@ public class DefaultSecondStepService implements SecondStepService {
         final var ceremony = passkeyCeremonyStore.consume(dto.getCeremonyId())
                 .filter(stored -> stored.purpose() == PasskeyCeremonyPurpose.SECOND_STEP)
                 .filter(stored -> Objects.equals(stored.userId(), attempt.user().getId()))
-                .orElseThrow(() -> ceremonyExpired(attempt.clientIp()));
+                .orElseThrow(() -> expired(attempt.clientIp(), PasskeyCeremonyStore.EXPIRED));
         verifyPasskey(ceremony, dto.getCredential(), attempt);
 
         final var response = finishSecondStep(dto.getPendingToken(), attempt.user());
@@ -138,11 +133,11 @@ public class DefaultSecondStepService implements SecondStepService {
     }
 
     private PendingLogin pendingLoginOf(final String pendingToken, final String clientIp) {
-        return pendingLoginStore.find(pendingToken).orElseThrow(() -> signInExpired(clientIp));
+        return pendingLoginStore.find(pendingToken).orElseThrow(() -> expired(clientIp, SignInExpiredException.SIGN_IN_EXPIRED));
     }
 
     private User userOf(final PendingLogin pendingLogin, final String clientIp) {
-        return userRepository.findById(pendingLogin.userId()).orElseThrow(() -> signInExpired(clientIp));
+        return userRepository.findById(pendingLogin.userId()).orElseThrow(() -> expired(clientIp, SignInExpiredException.SIGN_IN_EXPIRED));
     }
 
     private void countAttempt(final String pendingToken, final PendingLogin pendingLogin, final String clientIp) {
@@ -156,7 +151,7 @@ public class DefaultSecondStepService implements SecondStepService {
         if (!allowed) {
             pendingLoginStore.discard(pendingToken);
             log.info("Second step out of attempts, sign-in discarded user id={}", pendingLogin.userId());
-            throw signInExpired(clientIp);
+            throw expired(clientIp, SignInExpiredException.SIGN_IN_EXPIRED);
         }
     }
 
@@ -169,16 +164,10 @@ public class DefaultSecondStepService implements SecondStepService {
         }
     }
 
-    private SignInExpiredException signInExpired(final String clientIp) {
+    private SignInExpiredException expired(final String clientIp, final String message) {
         loginAttemptService.loginFailed(clientIp);
 
-        return new SignInExpiredException();
-    }
-
-    private SignInExpiredException ceremonyExpired(final String clientIp) {
-        loginAttemptService.loginFailed(clientIp);
-
-        return new SignInExpiredException(PasskeyCeremonyStore.EXPIRED);
+        return new SignInExpiredException(message);
     }
 
     private void secondStepFailed(final SecondStepAttempt attempt) {

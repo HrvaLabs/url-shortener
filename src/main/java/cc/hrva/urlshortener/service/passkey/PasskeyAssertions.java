@@ -23,8 +23,10 @@ import org.springframework.security.web.webauthn.api.UserVerificationRequirement
 import org.springframework.security.web.webauthn.management.RelyingPartyAuthenticationRequest;
 import org.springframework.security.web.webauthn.management.WebAuthnRelyingPartyOperations;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.IllegalTransactionStateException;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import tools.jackson.databind.JsonNode;
 
 @Slf4j
@@ -36,6 +38,7 @@ public class PasskeyAssertions {
             "This passkey isn't registered on hrva.cc. Remove it from your password manager or device, or sign in another way.";
     public static final String COULD_NOT_VERIFY = "That passkey or security key couldn't be verified. Try again.";
 
+    private static final String READ_ONLY_TRANSACTION = "Passkey assertions need a read-write transaction";
     private static final int LOGGED_CREDENTIAL_PREFIX = 8;
     private static final int SIGN_COUNT_END = 37;
 
@@ -49,6 +52,10 @@ public class PasskeyAssertions {
 
     @Transactional(propagation = Propagation.MANDATORY)
     public User verify(final PasskeyCeremony ceremony, final JsonNode credential, final User expectedUser) {
+        if (TransactionSynchronizationManager.isCurrentTransactionReadOnly()) {
+            throw new IllegalTransactionStateException(READ_ONLY_TRANSACTION);
+        }
+
         final var assertion = passkeyJson.readAssertion(credential);
         final var credentialId = assertion.getRawId().toBase64UrlString();
         final var passkey = passkeyCredentialRepository.findByCredentialId(credentialId)

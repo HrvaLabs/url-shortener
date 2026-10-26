@@ -9,6 +9,7 @@ import cc.hrva.urlshortener.exception.ApiException;
 import cc.hrva.urlshortener.exception.EmailNotVerifiedException;
 import cc.hrva.urlshortener.exception.NoAuthorizationException;
 import cc.hrva.urlshortener.exception.PasskeyVerificationException;
+import cc.hrva.urlshortener.exception.RateLimitExceededException;
 import cc.hrva.urlshortener.exception.SignInExpiredException;
 import cc.hrva.urlshortener.exception.SignInUnavailableException;
 import cc.hrva.urlshortener.exception.TwoStepFailedException;
@@ -23,6 +24,7 @@ import cc.hrva.urlshortener.security.ClientIpResolver;
 import cc.hrva.urlshortener.service.analytics.AnalyticsDays;
 import cc.hrva.urlshortener.service.impl.DefaultSecondStepService;
 import cc.hrva.urlshortener.service.passkey.PasskeyAssertions;
+import cc.hrva.urlshortener.service.passkey.PasskeyCeremonies;
 import cc.hrva.urlshortener.service.passkey.PasskeyCeremony;
 import cc.hrva.urlshortener.service.passkey.PasskeyCeremonyPurpose;
 import cc.hrva.urlshortener.service.passkey.PasskeyCeremonyStore;
@@ -55,7 +57,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.startsWith;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
@@ -73,6 +77,8 @@ class DefaultSecondStepServiceTest {
     private static final String INVALID_CODE = "Invalid two-factor code";
     private static final String SIGN_IN_EXPIRED = "Your sign-in expired. Sign in again.";
     private static final String CEREMONY_EXPIRED = "This request expired. Try again.";
+    private static final String OPTIONS_KEY = RateLimiter.clientKey("passkey-options", CLIENT_IP);
+    private static final Duration TEN_MINUTES = Duration.ofMinutes(10);
     private static final String COULD_NOT_VERIFY = "That passkey or security key couldn't be verified. Try again.";
     private static final String NO_PASSKEYS = "This account has no passkeys or security keys.";
     private static final String CEREMONY_ID = "Cr3m0nY1dCr3m0nY1dCr3m0nY1dCr3m0nY1dCr3m0n";
@@ -128,9 +134,11 @@ class DefaultSecondStepServiceTest {
     void setUp() {
         final var appProperties = new AppProperties();
         appProperties.getPasskeys().setRpId("hrva.cc");
+        final var passkeyOptionsFactory = new PasskeyOptionsFactory(appProperties);
+        final var passkeyCeremonies = new PasskeyCeremonies(passkeyCeremonyStore, passkeyOptionsFactory, new PasskeyJson(), rateLimiter);
         secondStepService = new DefaultSecondStepService(clientIpResolver, loginAttemptService, pendingLoginStore,
                 rateLimiter, userRepository, twoFactorService, signInService, passkeyCredentialRepository,
-                passkeyCeremonyStore, new PasskeyOptionsFactory(appProperties), new PasskeyJson(), passkeyAssertions,
+                passkeyCeremonies, passkeyCeremonyStore, passkeyOptionsFactory, passkeyAssertions,
                 passkeySignInStatsRepository, analyticsDays);
         when(clientIpResolver.getClientIp(request)).thenReturn(CLIENT_IP);
     }
@@ -310,6 +318,7 @@ class DefaultSecondStepServiceTest {
         when(pendingLoginStore.find(TOKEN)).thenReturn(Optional.of(new PendingLogin(7L, false)));
         when(userRepository.findById(7L)).thenReturn(Optional.of(user));
         when(passkeyCredentialRepository.findByUserOrderByCreatedAtDesc(user)).thenReturn(List.of(securityKey()));
+        when(rateLimiter.tryAcquire(OPTIONS_KEY, 30, TEN_MINUTES)).thenReturn(true);
         final var ceremony = ArgumentCaptor.forClass(PasskeyCeremony.class);
         when(passkeyCeremonyStore.save(ceremony.capture())).thenReturn(CEREMONY_ID);
 
@@ -322,7 +331,8 @@ class DefaultSecondStepServiceTest {
         assertThat(JSON.readTree(JSON.writeValueAsString(response.options()))).isEqualTo(JSON.readTree("""
                 {"challenge":"%s","timeout":300000,"rpId":"hrva.cc","allowCredentials":[{"type":"public-key","id":"%s","transports":["usb","nfc"]}],"userVerification":"preferred","extensions":{}}
                 """.formatted(ceremony.getValue().challenge(), CREDENTIAL_ID)));
-        verifyNoInteractions(rateLimiter, passkeyAssertions, signInService);
+        verify(rateLimiter, never()).tryAcquire(eq(ATTEMPTS_KEY), anyInt(), any());
+        verifyNoInteractions(passkeyAssertions, signInService);
         verify(loginAttemptService, never()).loginFailed(anyString());
     }
 
@@ -332,16 +342,19 @@ class DefaultSecondStepServiceTest {
         when(pendingLoginStore.find(TOKEN)).thenReturn(Optional.of(new PendingLogin(7L, false)));
         when(userRepository.findById(7L)).thenReturn(Optional.of(user));
         when(passkeyCredentialRepository.findByUserOrderByCreatedAtDesc(user)).thenReturn(List.of());
+        when(rateLimiter.tryAcquire(OPTIONS_KEY, 30, TEN_MINUTES)).thenReturn(true);
 
         assertThatThrownBy(() -> secondStepService.passkeyOptions(pendingToken(), request))
                 .isInstanceOf(ApiException.class)
                 .hasMessage(NO_PASSKEYS);
-        verifyNoInteractions(rateLimiter, passkeyCeremonyStore);
+        verify(rateLimiter, never()).tryAcquire(eq(ATTEMPTS_KEY), anyInt(), any());
+        verifyNoInteractions(passkeyCeremonyStore);
         verify(loginAttemptService, never()).loginFailed(anyString());
     }
 
     @Test
     void passkeyOptionsAfterThePendingTokenExpiredAre410() {
+        when(rateLimiter.tryAcquire(OPTIONS_KEY, 30, TEN_MINUTES)).thenReturn(true);
         when(pendingLoginStore.find(TOKEN)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> secondStepService.passkeyOptions(pendingToken(), request))
@@ -349,7 +362,8 @@ class DefaultSecondStepServiceTest {
                 .hasMessage(SIGN_IN_EXPIRED);
         verify(loginAttemptService).loginFailed(CLIENT_IP);
         verify(loginAttemptService, never()).loginFailed(startsWith("2fa:"));
-        verifyNoInteractions(rateLimiter, userRepository, passkeyCeremonyStore);
+        verify(rateLimiter, never()).tryAcquire(eq(ATTEMPTS_KEY), anyInt(), any());
+        verifyNoInteractions(userRepository, passkeyCeremonyStore);
     }
 
     @Test
@@ -359,7 +373,30 @@ class DefaultSecondStepServiceTest {
         assertThatThrownBy(() -> secondStepService.passkeyOptions(pendingToken(), request))
                 .isInstanceOf(NoAuthorizationException.class)
                 .hasMessage("Request has been blocked");
+        verifyNoInteractions(rateLimiter, pendingLoginStore, userRepository, passkeyCeremonyStore);
+    }
+
+    @Test
+    void passkeyOptionsShareThePasswordlessLimitOf30Per10MinutesPerNetwork() {
+        when(rateLimiter.tryAcquire(OPTIONS_KEY, 30, TEN_MINUTES)).thenReturn(false);
+
+        assertThatThrownBy(() -> secondStepService.passkeyOptions(pendingToken(), request))
+                .isInstanceOf(RateLimitExceededException.class)
+                .hasMessage("Too many passkey sign-in attempts from this network. Try again in a few minutes.");
         verifyNoInteractions(pendingLoginStore, userRepository, passkeyCeremonyStore);
+        verify(loginAttemptService, never()).loginFailed(anyString());
+    }
+
+    @Test
+    void passkeyOptionsWithTheLimiterDownArePasskeysUnavailable() {
+        when(rateLimiter.tryAcquire(OPTIONS_KEY, 30, TEN_MINUTES))
+                .thenThrow(new RateLimiterUnavailableException(new QueryTimeoutException("down")));
+
+        assertThatThrownBy(() -> secondStepService.passkeyOptions(pendingToken(), request))
+                .isInstanceOf(SignInUnavailableException.class)
+                .hasMessage("Passkeys aren't available right now. Try again in a minute.");
+        verifyNoInteractions(pendingLoginStore, userRepository, passkeyCeremonyStore);
+        verify(loginAttemptService, never()).loginFailed(anyString());
     }
 
     @Test

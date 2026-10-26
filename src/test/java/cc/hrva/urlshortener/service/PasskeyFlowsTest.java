@@ -35,6 +35,7 @@ import cc.hrva.urlshortener.service.impl.DefaultTwoFactorService;
 import cc.hrva.urlshortener.service.passkey.JpaPublicKeyCredentialUserEntityRepository;
 import cc.hrva.urlshortener.service.passkey.JpaUserCredentialRepository;
 import cc.hrva.urlshortener.service.passkey.PasskeyAssertions;
+import cc.hrva.urlshortener.service.passkey.PasskeyCeremonies;
 import cc.hrva.urlshortener.service.passkey.PasskeyCeremony;
 import cc.hrva.urlshortener.service.passkey.PasskeyCeremonyPurpose;
 import cc.hrva.urlshortener.service.passkey.PasskeyJson;
@@ -74,8 +75,10 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.transaction.IllegalTransactionStateException;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ObjectNode;
@@ -145,6 +148,9 @@ class PasskeyFlowsTest {
 
     @Autowired
     private EntityManager entityManager;
+
+    @Autowired
+    private PlatformTransactionManager transactionManager;
 
     @MockitoBean
     private StringRedisTemplate redisTemplate;
@@ -438,12 +444,17 @@ class PasskeyFlowsTest {
 
     @Test
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
-    void anAssertionOutsideATransactionIsRefusedBeforeItIsRead() {
+    void anAssertionWithoutAReadWriteTransactionIsRefusedBeforeItIsRead() {
         final var ceremony = new PasskeyCeremony(PasskeyCeremonyPurpose.SIGN_IN, Bytes.random().toBase64UrlString(), null);
         final var unreadable = JsonMapper.builder().build().createObjectNode();
+        final var readOnly = new TransactionTemplate(transactionManager);
+        readOnly.setReadOnly(true);
 
         assertThatThrownBy(() -> passkeyAssertions.verify(ceremony, unreadable, null))
                 .isInstanceOf(IllegalTransactionStateException.class);
+        assertThatThrownBy(() -> readOnly.executeWithoutResult(status -> passkeyAssertions.verify(ceremony, unreadable, null)))
+                .isInstanceOf(IllegalTransactionStateException.class)
+                .hasMessage("Passkey assertions need a read-write transaction");
     }
 
     @Test
@@ -734,6 +745,7 @@ class PasskeyFlowsTest {
             PasskeyJson.class,
             PasskeyOptionsFactory.class,
             RedisPasskeyCeremonyStore.class,
+            PasskeyCeremonies.class,
             TokenProvider.class,
             RecentSignIn.class,
             DefaultAuthValidator.class,
