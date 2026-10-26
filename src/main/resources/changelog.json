@@ -26,7 +26,7 @@
           "title": "AI Connector",
           "icon": "sparkles",
           "items": [
-            "The AI connector without an account (hrva.cc/mcp/anon) is gone. It couldn't create links since anonymous links were turned off. Connect hrva.cc/mcp and sign in instead."
+            "The AI connector without an account (hrva.cc/mcp/anon) is gone. Connect hrva.cc/mcp and sign in instead."
           ]
         },
         {
@@ -54,7 +54,8 @@
             "Searching links for a domain finds it in either spelling, such as čokolada.hr and xn--okolada-i6a.hr.",
             "A web address whose domain name is longer than 253 characters, the most a domain name can have, is now refused as not a valid web address.",
             "Signing in again from an admin page brings you back to the page you opened.",
-            "The report and unavailable pages no longer show the footer twice."
+            "The report and unavailable pages no longer show the footer twice.",
+            "Password managers no longer offer to fill your username into a passkey's name."
           ]
         }
       ]

@@ -16,7 +16,7 @@ QR scans in link analytics, a public page with hrva.cc in numbers, a weekly summ
 - A new help page explains the public numbers and QR scans, linked from both and from the Help page.
 
 ### ✨ AI Connector
-- The AI connector without an account (hrva.cc/mcp/anon) is gone. It couldn't create links since anonymous links were turned off. Connect hrva.cc/mcp and sign in instead.
+- The AI connector without an account (hrva.cc/mcp/anon) is gone. Connect hrva.cc/mcp and sign in instead.
 
 ### 🔧 Admin
 - Weekly summary: every Monday morning, Discord and email get last week's clicks, visitors, bot share, new links and users, reviews and automatic blocks, the top 5 links, and how many reviews are waiting right now. Clicks, new links and new users are compared with the week before. Discord and email can be turned off separately.
@@ -33,6 +33,7 @@ QR scans in link analytics, a public page with hrva.cc in numbers, a weekly summ
 - A web address whose domain name is longer than 253 characters, the most a domain name can have, is now refused as not a valid web address.
 - Signing in again from an admin page brings you back to the page you opened.
 - The report and unavailable pages no longer show the footer twice.
+- Password managers no longer offer to fill your username into a passkey's name.
 
 ---
 

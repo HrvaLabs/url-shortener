@@ -50,7 +50,7 @@ java -jar "$E2E/app.jar" --spring.profiles.active=local --server.port=18080 \
 - Run the jar from a copy, so `mvn clean` doesn't pull it from under the running app.
 
 ## Testing
-- `mvn test` (or `mvn -B verify`) — 2910 tests, JUnit 5 + Mockito + AssertJ
+- `mvn test` (or `mvn -B verify`) — 2944 tests, JUnit 5 + Mockito + AssertJ
 - Surefire runs them with `-Duser.timezone=UTC` (`pom.xml`), the container's zone, so stored timestamps and day boundaries in the tests match production on any machine.
 - Mostly plain `@ExtendWith(MockitoExtension.class)` unit tests. Each `@SpringBootTest` class boots its own nested `TestApplication` (a trimmed context) on embedded H2 and mocks the rest:
   - MockMvc through the real filter chains, with a subset Liquibase changelog (`db/changelog/017-oauth2-authorization-server.xml` or `db/mcp-connector-test-changelog.xml`): the MCP connector's security tests, `SecurityTxtControllerTest`, `ReportEndpointSecurityTest`, `PublicStatsEndpointSecurityTest` (anyone, even with a stale token, gets 200 with the public cache header; `POST` and `DELETE` get 405 `Allow: GET`; other paths under `/api/v1/public` 404), `AdminReviewQueueSecurityTest`, `AdminStatsSecurityTest` (each tab: admin 200, user 403, nobody signed in 401, `days=14` and `days=abc` 400), `AdminReservedAliasSecurityTest` (list, reserve, remove; invalid 400, duplicate 409, unknown id 404), `SignInEndpointSecurityTest` (which passkey and two-step endpoints are public, which need a JWT, and that refusals carry no library text), `OAuthReauthenticationSecurityTest` (the real `TokenProvider` and `RecentSignIn` with a fixed `Clock`: a Google account's passkey registration options with a fresh token → 200, with an `iat` 16 minutes old → 401)
@@ -228,7 +228,7 @@ MCP, OAuth 2.1, login-bridge and Connected-apps endpoints: see MCP connector.
 - **API docs**: admin endpoints hidden from OpenAPI/Swagger via `@Hidden` (whole `AdminController` + admin methods in shared controllers).
 
 ## MCP connector
-AI apps (Claude, Claude Code, the MCP Inspector) use hrva.cc over MCP. The app is its own OAuth 2.1 authorization server (Spring Authorization Server through `mcp-authorization-server` 0.1.14), protects `/mcp` as a resource server (`mcp-server-security` 0.1.14) and serves the tools from Spring AI 2.0.1's MCP server. Code: `cc.hrva.urlshortener.mcp` (`authorization/`, `bridge/`, `tools/`, `apps/`). MCP is sign-in only: the no-account server at `/mcp/anon` was removed in v2.11 (it had refused every call since anonymous link creation was turned off) and now answers 404.
+AI apps (Claude, Claude Code, the MCP Inspector) use hrva.cc over MCP. The app is its own OAuth 2.1 authorization server (Spring Authorization Server through `mcp-authorization-server` 0.1.14), protects `/mcp` as a resource server (`mcp-server-security` 0.1.14) and serves the tools from Spring AI 2.0.1's MCP server. Code: `cc.hrva.urlshortener.mcp` (`authorization/`, `bridge/`, `tools/`, `apps/`). MCP is sign-in only: the no-account server at `/mcp/anon` was removed in v2.11 and now answers 404.
 
 ### Endpoints
 | Method | Path | Auth | Notes |
