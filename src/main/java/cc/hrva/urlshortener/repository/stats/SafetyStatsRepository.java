@@ -1,6 +1,7 @@
 package cc.hrva.urlshortener.repository.stats;
 
 import cc.hrva.urlshortener.dto.stats.CountEntry;
+import cc.hrva.urlshortener.util.ReviewReasons;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -15,6 +16,7 @@ public class SafetyStatsRepository {
 
     private static final String START = "start";
     private static final String END = "end";
+    private static final String VISITOR_REPORT = "visitorReport";
 
     private static final String COUNT_RESOLVED_BY_RESOLUTION = """
             select coalesce(resolution, 'unknown') as review_resolution, count(*) as total_reviews from link_review
@@ -26,6 +28,11 @@ public class SafetyStatsRepository {
     private static final String FIND_RESOLVED_TIMES = """
             select flagged_at, resolved_at from link_review
             where resolved_at >= :start and resolved_at < :end
+            """;
+
+    private static final String COUNT_RESOLVED_VISITOR_REPORTS = """
+            select count(*) from link_review
+            where resolved_at >= :start and resolved_at < :end and reasons like :visitorReport
             """;
 
     private final NamedParameterJdbcTemplate jdbcTemplate;
@@ -42,6 +49,11 @@ public class SafetyStatsRepository {
                 .stream()
                 .sorted()
                 .toList();
+    }
+
+    public long countResolvedVisitorReports(final LocalDateTime start, final LocalDateTime end) {
+        final var parameters = Map.<String, Object>of(START, start, END, end, VISITOR_REPORT, "%" + ReviewReasons.VISITOR_REPORT + "%");
+        return jdbcTemplate.queryForObject(COUNT_RESOLVED_VISITOR_REPORTS, parameters, Long.class);
     }
 
 }

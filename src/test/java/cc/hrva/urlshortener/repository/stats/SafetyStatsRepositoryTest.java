@@ -90,13 +90,32 @@ class SafetyStatsRepositoryTest {
     void anEmptySiteHasNoResolvedReviews() {
         assertThat(safetyStatsRepository.countResolvedByResolution(START, END)).isEmpty();
         assertThat(safetyStatsRepository.findResolveMinutes(START, END)).isEmpty();
+        assertThat(safetyStatsRepository.countResolvedVisitorReports(START, END)).isZero();
+    }
+
+    @Test
+    void countsResolvedReviewsWithAVisitorReport() {
+        resolved(9501, START.plusDays(1), START.plusDays(2), "OK", "reported by a visitor: phishing");
+        resolved(9502, START.plusDays(1), START.plusDays(3), "LINK_BLOCKED",
+                "login or verification lure\nreported by a visitor: spam: asks for my bank login");
+        resolved(9503, START.minusHours(2), START, "OK", "reported by a visitor: other");
+        resolved(9504, START.plusDays(1), START.plusDays(2), "OK", "destination host is a raw IP address");
+        resolved(9505, START.minusDays(3), START.minusSeconds(1), "OK", "reported by a visitor: phishing");
+        resolved(9506, START.plusDays(5), END, "OK", "reported by a visitor: malware");
+        open(9507, START.plusDays(1));
+
+        assertThat(safetyStatsRepository.countResolvedVisitorReports(START, END)).isEqualTo(3);
     }
 
     private void resolved(final long id, final LocalDateTime flaggedAt, final LocalDateTime resolvedAt, final String resolution) {
+        resolved(id, flaggedAt, resolvedAt, resolution, "destination host is a raw IP address");
+    }
+
+    private void resolved(final long id, final LocalDateTime flaggedAt, final LocalDateTime resolvedAt, final String resolution, final String reasons) {
         link(id);
         jdbcTemplate.update("insert into link_review (id, url_id, reasons, flagged_at, resolved_at, resolved_by, resolution) "
                         + "values (?, ?, ?, ?, ?, ?, ?)",
-                id, id, "destination host is a raw IP address", flaggedAt, resolvedAt, "admin@hrva.cc", resolution);
+                id, id, reasons, flaggedAt, resolvedAt, "admin@hrva.cc", resolution);
     }
 
     private void open(final long id, final LocalDateTime flaggedAt) {
