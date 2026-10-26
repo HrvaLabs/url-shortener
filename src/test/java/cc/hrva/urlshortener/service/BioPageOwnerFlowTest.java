@@ -3,6 +3,7 @@ package cc.hrva.urlshortener.service;
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.dto.bio.BioHandleAvailabilityResponse;
 import cc.hrva.urlshortener.dto.bio.BioHandleDto;
+import cc.hrva.urlshortener.dto.bio.BioPageButtonDto;
 import cc.hrva.urlshortener.dto.bio.BioPageCreateDto;
 import cc.hrva.urlshortener.dto.bio.BioPageReasonDto;
 import cc.hrva.urlshortener.dto.bio.BioPageResponse;
@@ -11,6 +12,7 @@ import cc.hrva.urlshortener.exception.BioHandleUnavailableException;
 import cc.hrva.urlshortener.exception.BioPageConflictException;
 import cc.hrva.urlshortener.mcp.anon.RateLimiter;
 import cc.hrva.urlshortener.model.BioPage;
+import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.repository.BioHandleHoldRepository;
 import cc.hrva.urlshortener.repository.BioPageButtonRepository;
@@ -32,6 +34,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
+import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -83,6 +86,9 @@ class BioPageOwnerFlowTest {
     private UserRepository userRepository;
 
     @Autowired
+    private UrlRepository urlRepository;
+
+    @Autowired
     private JdbcTemplate jdbcTemplate;
 
     @Autowired
@@ -113,6 +119,7 @@ class BioPageOwnerFlowTest {
         jdbcTemplate.update("delete from bio_handle_hold");
         jdbcTemplate.update("delete from bio_page_review");
         jdbcTemplate.update("delete from bio_page");
+        jdbcTemplate.update("delete from url");
         jdbcTemplate.update("delete from user_account");
     }
 
@@ -140,6 +147,21 @@ class BioPageOwnerFlowTest {
                 .hasMessage(OUTDATED_COPY);
 
         assertThat(storedBio(created.id())).isEqualTo("Saved in tab A");
+        assertThat(storedUpdatedAt(created.id())).isEqualTo(fromTabA.updatedAt());
+    }
+
+    @Test
+    void aSaveFromBeforeASaveThatChangedOnlyAButtonIs409() {
+        final var created = bioPageService.create(new BioPageCreateDto("ana"));
+        final var instagram = urlRepository.saveAndFlush(Url.builder().shortUrl("ana-ig").longUrl("https://instagram.com/ana").owner(ana).build());
+        final var inBothTabs = bioPageService.update(savingFrom(created, "Photos from Zagreb", button(instagram, "Instagram")));
+        final var fromTabA = bioPageService.update(savingFrom(inBothTabs, "Photos from Zagreb", button(instagram, "Insta")));
+
+        assertThatThrownBy(() -> bioPageService.update(savingFrom(inBothTabs, "Photos from Zagreb", button(instagram, "Instagram profile"))))
+                .isInstanceOf(BioPageConflictException.class)
+                .hasMessage(OUTDATED_COPY);
+
+        assertThat(storedTitle(created.id())).isEqualTo("Insta");
         assertThat(storedUpdatedAt(created.id())).isEqualTo(fromTabA.updatedAt());
     }
 
@@ -200,15 +222,25 @@ class BioPageOwnerFlowTest {
                 .hasMessage(TAKEN);
     }
 
-    private BioPageUpdateDto savingFrom(final BioPageResponse copy, final String bio) {
+    private BioPageUpdateDto savingFrom(final BioPageResponse copy, final String bio, final BioPageButtonDto... buttons) {
         final var updatedAt = jsonMapper.readTree(jsonMapper.writeValueAsString(copy)).get("updatedAt").asString();
-        return jsonMapper.readValue("""
+        final var saving = jsonMapper.readValue("""
                 {"displayName":"Ana","bio":"%s","avatarKind":"INITIALS","accent":"BLUE","theme":"AUTO","buttons":[],"expectedUpdatedAt":"%s"}"""
                 .formatted(bio, updatedAt), BioPageUpdateDto.class);
+        saving.setButtons(List.of(buttons));
+        return saving;
+    }
+
+    private static BioPageButtonDto button(final Url url, final String title) {
+        return BioPageButtonDto.builder().urlId(url.getId()).title(title).build();
     }
 
     private String storedBio(final Long pageId) {
         return jdbcTemplate.queryForObject("select bio from bio_page where id = ?", String.class, pageId);
+    }
+
+    private String storedTitle(final Long pageId) {
+        return jdbcTemplate.queryForObject("select title from bio_page_button where page_id = ?", String.class, pageId);
     }
 
     private LocalDateTime storedUpdatedAt(final Long pageId) {

@@ -163,7 +163,7 @@ public class DefaultBioPageService implements BioPageService {
         page.setAccent(bioPageUpdateDto.getAccent());
         page.setTheme(bioPageUpdateDto.getTheme());
         page.setIndexable(Boolean.TRUE.equals(bioPageUpdateDto.getIndexable()));
-        page.setUpdatedAt(LocalDateTime.now(clock).truncatedTo(ChronoUnit.MICROS));
+        page.setUpdatedAt(BioPage.micros(LocalDateTime.now(clock)));
         final List<BioPageButton> buttons;
         final BioPage saved;
         try {

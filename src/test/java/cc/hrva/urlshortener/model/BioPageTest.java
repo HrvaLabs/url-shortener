@@ -28,4 +28,11 @@ class BioPageTest {
         assertThat(page.getUpdatedAt()).isEqualTo(page.getUpdatedAt().truncatedTo(ChronoUnit.MICROS));
     }
 
+    @Test
+    void microsDropsEverythingBelowAMicrosecond() {
+        final var time = LocalDateTime.of(2026, 10, 26, 9, 0, 0);
+
+        assertThat(BioPage.micros(time.withNano(123_456_789))).isEqualTo(time.withNano(123_456_000));
+    }
+
 }

@@ -58,7 +58,7 @@ public class BioPage {
 
     @PrePersist
     public void onCreate() {
-        final var now = LocalDateTime.now().truncatedTo(ChronoUnit.MICROS);
+        final var now = micros(LocalDateTime.now());
         this.createdAt = now;
         this.updatedAt = now;
         if (this.displayName == null) {
@@ -80,7 +80,11 @@ public class BioPage {
 
     @PreUpdate
     public void onUpdate() {
-        this.updatedAt = LocalDateTime.now().truncatedTo(ChronoUnit.MICROS);
+        this.updatedAt = micros(LocalDateTime.now());
+    }
+
+    public static LocalDateTime micros(final LocalDateTime time) {
+        return time.truncatedTo(ChronoUnit.MICROS);
     }
 
     public boolean isPublic() {
