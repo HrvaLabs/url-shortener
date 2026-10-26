@@ -2183,6 +2183,22 @@ class UrlServiceTest {
         assertThat(output).contains("urlId=5");
     }
 
+    @Test
+    void aDestinationFromTheDatabaseSentAsStoredNeverHasItsBracesExpanded() throws Exception {
+        final var stored = "https://" + "č".repeat(64) + ".hr/{x}";
+        when(urlRepository.findFirstByShortUrlOrderByActiveDescIdDesc("abc")).thenReturn(Optional.of(storedLink().longUrl(stored).active(true).build()));
+
+        assertThat(locationOf(urlServiceWithMeters().redirectResultUrl("abc", CLICK))).isEqualTo(stored);
+    }
+
+    @Test
+    void aCachedDestinationSentAsStoredNeverHasItsBracesExpanded() throws Exception {
+        final var stored = "https://" + "č".repeat(64) + ".hr/{x}";
+        cached(stored);
+
+        assertThat(locationOf(urlServiceWithMeters().redirectResultUrl("abc", CLICK))).isEqualTo(stored);
+    }
+
     private static java.util.stream.Stream<org.junit.jupiter.params.provider.Arguments> storedDestinations() {
         return java.util.stream.Stream.of(
                 org.junit.jupiter.params.provider.Arguments.of("https://čokolada.hr/torta", "https://xn--okolada-i6a.hr/torta"),

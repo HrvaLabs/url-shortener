@@ -615,6 +615,7 @@ public class DefaultUrlService implements UrlService {
             }
 
             final var redirectView = new RedirectView();
+            redirectView.setExpandUriTemplateVariables(false);
             redirectView.setUrl(fetchAndRedirectFromDb(shortUrl, click));
             sample.stop(Timer.builder("redirect.duration")
                     .tag("source", "db")
@@ -642,6 +643,7 @@ public class DefaultUrlService implements UrlService {
                     return gate;
                 }
                 final var redirectView = new RedirectView();
+                redirectView.setExpandUriTemplateVariables(false);
                 if (refusedAsBot(cachedValue.visitLimit(), click)) {
                     clickAnalyticsService.recordClick(cachedValue.id(), shortUrl, click);
                     redirectView.setUrl(unavailablePageUrl(shortUrl, REASON_MISSING));

@@ -3,6 +3,7 @@ package cc.hrva.urlshortener.converter;
 import cc.hrva.urlshortener.exception.UrlNotFoundException;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.util.TagNormalizer;
+import java.util.LinkedHashSet;
 import lombok.RequiredArgsConstructor;
 import cc.hrva.urlshortener.dto.UrlUpdateDto;
 import cc.hrva.urlshortener.model.Url;
@@ -25,7 +26,7 @@ public class UrlUpdateDtoToUrlConverter implements Converter<UrlUpdateDto, Url> 
         final var editedUrl = Url.builder()
                 .id(existingUrl.getId())
                 .longUrl(existingUrl.getLongUrl())
-                .tags(existingUrl.getTags())
+                .tags(existingUrl.getTags() == null ? null : new LinkedHashSet<>(existingUrl.getTags()))
                 .passwordHash(existingUrl.getPasswordHash())
                 .build();
 

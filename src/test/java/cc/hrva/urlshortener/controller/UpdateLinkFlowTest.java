@@ -289,6 +289,50 @@ class UpdateLinkFlowTest {
     }
 
     @Test
+    void aBlockMadeWhileAnOwnersEditIsCheckedRefusesTheEditAndIsKept() throws Exception {
+        doAnswer(invocation -> signedInAccount())
+                .doAnswer(invocation -> {
+                    blockMeanwhile();
+                    return signedInAccount();
+                })
+                .doAnswer(invocation -> signedInAccount())
+                .when(userService).getUserFromToken();
+
+        mockMvc.perform(edit("owner-token", "{\"id\":" + LINK + ",\"visitLimit\":5}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value(BLOCKED_WHILE_EDITING));
+
+        assertThat(jdbcTemplate.queryForMap("select visit_limit, active, block_reason, block_detail from url where id = ?", LINK))
+                .containsEntry("VISIT_LIMIT", null)
+                .containsEntry("ACTIVE", false)
+                .containsEntry("BLOCK_REASON", "ADMIN")
+                .containsEntry("BLOCK_DETAIL", "blocked meanwhile");
+    }
+
+    @Test
+    void anAdminsDestinationRefusedByTheBlocklistLeavesTheLinkAsItWas() throws Exception {
+        final var before = jdbcTemplate.queryForMap("select * from url where id = ?", LINK);
+
+        mockMvc.perform(edit("admin-token", "{\"id\":" + LINK + ",\"longUrl\":\"https://njuskaio.cam/a/MAUB3\",\"visitLimit\":5}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("This destination is on a blocklist and can't be shortened. If you think that's a mistake, contact us."));
+
+        assertThat(jdbcTemplate.queryForMap("select * from url where id = ?", LINK)).isEqualTo(before);
+    }
+
+    @Test
+    void anAdminsDestinationRefusedAsAShortenerLeavesTheLinkAsItWas() throws Exception {
+        when(suspiciousUrlService.isShortener("https://bit.ly/abc")).thenReturn(true);
+        final var before = jdbcTemplate.queryForMap("select * from url where id = ?", LINK);
+
+        mockMvc.perform(edit("admin-token", "{\"id\":" + LINK + ",\"longUrl\":\"https://bit.ly/abc\",\"visitLimit\":5}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("Links to other URL shorteners can't be shortened. Use the final destination instead."));
+
+        assertThat(jdbcTemplate.queryForMap("select * from url where id = ?", LINK)).isEqualTo(before);
+    }
+
+    @Test
     void anOwnersEditIsSaved() throws Exception {
         mockMvc.perform(edit("owner-token", "{\"id\":" + LINK + ",\"visitLimit\":5,\"tags\":[\"work\"]}"))
                 .andExpect(status().isOk())
