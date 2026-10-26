@@ -39,6 +39,7 @@ import cc.hrva.urlshortener.service.ScammerSignalService;
 import cc.hrva.urlshortener.service.SuspiciousUrlService;
 import cc.hrva.urlshortener.service.UrlService;
 import cc.hrva.urlshortener.service.UserService;
+import cc.hrva.urlshortener.util.RedirectLocations;
 import cc.hrva.urlshortener.validator.ApiKeyValidator;
 import cc.hrva.urlshortener.validator.UrlValidator;
 import jakarta.persistence.EntityManager;
@@ -650,7 +651,7 @@ public class DefaultUrlService implements UrlService {
                     redirectView.setUrl(unavailablePageUrl(shortUrl, REASON_BLOCKED));
                     return redirectView;
                 }
-                redirectView.setUrl(cachedValue.longUrl());
+                redirectView.setUrl(redirectLocation(cachedValue.id(), cachedValue.longUrl()));
                 clickAnalyticsService.recordClick(cachedValue.id(), shortUrl, click);
                 return redirectView;
             }
@@ -683,7 +684,16 @@ public class DefaultUrlService implements UrlService {
         }
         putInCache(shortUrl, response);
         clickAnalyticsService.recordClick(url.getId(), shortUrl, click);
-        return response.longUrl();
+        return redirectLocation(url.getId(), response.longUrl());
+    }
+
+    private static String redirectLocation(final Long urlId, final String longUrl) {
+        try {
+            return RedirectLocations.normalized(longUrl);
+        } catch (final IllegalArgumentException exception) {
+            log.warn("Destination host could not be written in ASCII, redirecting to it as stored urlId={} reason={}", urlId, exception.getMessage());
+            return longUrl;
+        }
     }
 
     private boolean refusedAsBot(final Long visitLimit, final ClickRequest click) {

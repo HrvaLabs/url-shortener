@@ -489,5 +489,14 @@ expect_eq "$HTTP_STATUS" 409 "the user cannot take the reserved alias in another
 expect_eq "$(jq -r .error <<<"$HTTP_BODY")" "This short URL is reserved. Try another." "with the usual refusal"
 http -X DELETE "$BASE/api/v1/admin/reserved-aliases/$RESERVED_ID" -H "Authorization: Bearer $ADMIN_JWT"
 expect_eq "$HTTP_STATUS" 204 "DELETE /api/v1/admin/reserved-aliases/{id}"
+IDN_DESTINATION="https://čokolada.hr/torta"
+http -X POST "$BASE/api/v1/urls" -H "Authorization: Bearer $APP_JWT" -H 'Content-Type: application/json' \
+    -d "{\"longUrl\":\"$IDN_DESTINATION\"}"
+expect_eq "$HTTP_STATUS" 200 "POST /api/v1/urls to $IDN_DESTINATION (after the traffic totals, so its visit doesn't change them)"
+IDN_ALIAS=$(jq -r .shortUrl <<<"$HTTP_BODY")
+http "$BASE/$IDN_ALIAS"
+show "GET $BASE/$IDN_ALIAS -> $HTTP_STATUS Location: $HTTP_LOCATION"
+expect_eq "$HTTP_STATUS" 302 "the accented destination redirects"
+expect_eq "$HTTP_LOCATION" "https://xn--okolada-i6a.hr/torta" "with its host in punycode, so the Location header is ASCII"
 
 section "Done: every step passed"

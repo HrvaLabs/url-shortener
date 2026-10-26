@@ -2139,6 +2139,75 @@ class UrlServiceTest {
         assertThat(redirect.getUrl()).isEqualTo(FRONTEND + "/unavailable?s=a+b%26c%3Dd%2B%C3%A9&reason=missing");
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.MethodSource("storedDestinations")
+    void aDestinationFromTheDatabaseGoesOutAsAnAsciiLocation(final String stored, final String location) throws Exception {
+        when(urlRepository.findFirstByShortUrlOrderByActiveDescIdDesc("abc")).thenReturn(Optional.of(storedLink().longUrl(stored).active(true).build()));
+
+        final var redirect = urlServiceWithMeters().redirectResultUrl("abc", CLICK);
+
+        assertThat(locationOf(redirect)).isEqualTo(location);
+        verify(clickCheckService).mayRedirect(5L, stored);
+        verify(clickAnalyticsService).recordClick(5L, "abc", CLICK);
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.MethodSource("storedDestinations")
+    void aCachedDestinationGoesOutAsAnAsciiLocation(final String stored, final String location) throws Exception {
+        cached(stored);
+
+        final var redirect = urlServiceWithMeters().redirectResultUrl("abc", CLICK);
+
+        assertThat(locationOf(redirect)).isEqualTo(location);
+        verify(clickCheckService).mayRedirect(5L, stored);
+        verifyNoInteractions(urlRepository);
+    }
+
+    @Test
+    @ExtendWith(OutputCaptureExtension.class)
+    void aDestinationFromTheDatabaseWhoseHostCannotBeConvertedIsSentAsStored(final CapturedOutput output) {
+        final var stored = "https://" + "č".repeat(64) + ".hr/torta";
+        when(urlRepository.findFirstByShortUrlOrderByActiveDescIdDesc("abc")).thenReturn(Optional.of(storedLink().longUrl(stored).active(true).build()));
+
+        assertThat(urlServiceWithMeters().redirectResultUrl("abc", CLICK).getUrl()).isEqualTo(stored);
+        assertThat(output).contains("urlId=5");
+    }
+
+    @Test
+    @ExtendWith(OutputCaptureExtension.class)
+    void aCachedDestinationWhoseHostCannotBeConvertedIsSentAsStored(final CapturedOutput output) {
+        final var stored = "https://" + "č".repeat(64) + ".hr/torta";
+        cached(stored);
+
+        assertThat(urlServiceWithMeters().redirectResultUrl("abc", CLICK).getUrl()).isEqualTo(stored);
+        assertThat(output).contains("urlId=5");
+    }
+
+    private static java.util.stream.Stream<org.junit.jupiter.params.provider.Arguments> storedDestinations() {
+        return java.util.stream.Stream.of(
+                org.junit.jupiter.params.provider.Arguments.of("https://čokolada.hr/torta", "https://xn--okolada-i6a.hr/torta"),
+                org.junit.jupiter.params.provider.Arguments.of("https://example.com/čokolada/torta?okus=višnja#recept",
+                        "https://example.com/%C4%8Dokolada/torta?okus=vi%C5%A1nja#recept"),
+                org.junit.jupiter.params.provider.Arguments.of("https://example.com/%C4%8Dokolada?okus=vi%C5%A1nja",
+                        "https://example.com/%C4%8Dokolada?okus=vi%C5%A1nja"),
+                org.junit.jupiter.params.provider.Arguments.of("https://example.com/menu?day=1&meal=lunch#today",
+                        "https://example.com/menu?day=1&meal=lunch#today"),
+                org.junit.jupiter.params.provider.Arguments.of("https://example.com/{x}/menu?day={y}", "https://example.com/%7Bx%7D/menu?day=%7By%7D"));
+    }
+
+    private void cached(final String longUrl) {
+        final var cache = org.mockito.Mockito.mock(org.springframework.cache.Cache.class);
+        when(cacheManager.getCache("urls")).thenReturn(cache);
+        final var cached = new UrlResponse(5L, longUrl, "abc", null, null, 0L, null, true, "ACTIVE", java.util.Set.of(), false, null);
+        when(cache.get("abc")).thenReturn(() -> cached);
+    }
+
+    private static String locationOf(final org.springframework.web.servlet.view.RedirectView redirect) throws Exception {
+        final var response = new org.springframework.mock.web.MockHttpServletResponse();
+        redirect.render(Map.of(), new org.springframework.mock.web.MockHttpServletRequest(), response);
+        return response.getHeader(org.springframework.http.HttpHeaders.LOCATION);
+    }
+
     @Test
     void theRootStillGoesToTheBareFrontend() {
         when(appProperties.getFrontendUrl()).thenReturn(FRONTEND);
