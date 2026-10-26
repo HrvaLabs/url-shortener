@@ -73,7 +73,7 @@ public class PasskeyController {
 
     @Operation(summary = "Remove a passkey or security key", description = "Email and password accounts confirm with their current password; Google and GitHub accounts must have signed in within the last 15 minutes.")
     @ApiResponse(responseCode = "204", description = "Passkey removed")
-    @ApiResponse(responseCode = "400", description = "The current password is missing")
+    @ApiResponse(responseCode = "400", description = "The current password is missing, or it is the account's only two-step method")
     @ApiResponse(responseCode = "401", description = "A Google or GitHub account must sign in again first")
     @ApiResponse(responseCode = "403", description = "The current password is incorrect")
     @ApiResponse(responseCode = "404", description = "Not one of the user's passkeys")

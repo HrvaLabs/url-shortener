@@ -32,6 +32,7 @@ import cc.hrva.urlshortener.service.impl.DefaultPasskeySignInService;
 import cc.hrva.urlshortener.service.impl.DefaultSecondStepService;
 import cc.hrva.urlshortener.service.impl.DefaultSignInService;
 import cc.hrva.urlshortener.service.impl.DefaultTwoFactorService;
+import cc.hrva.urlshortener.service.impl.DefaultTwoStepSettingsService;
 import cc.hrva.urlshortener.service.passkey.JpaPublicKeyCredentialUserEntityRepository;
 import cc.hrva.urlshortener.service.passkey.JpaUserCredentialRepository;
 import cc.hrva.urlshortener.service.passkey.PasskeyAssertions;
@@ -42,6 +43,7 @@ import cc.hrva.urlshortener.service.passkey.PasskeyJson;
 import cc.hrva.urlshortener.service.passkey.PasskeyOptionsFactory;
 import cc.hrva.urlshortener.service.passkey.RedisPasskeyCeremonyStore;
 import cc.hrva.urlshortener.service.passkey.TestAuthenticator;
+import cc.hrva.urlshortener.service.twostep.RecoveryCodes;
 import cc.hrva.urlshortener.service.twostep.RedisPendingLoginStore;
 import cc.hrva.urlshortener.service.twostep.TwoStepMethods;
 import cc.hrva.urlshortener.validator.impl.DefaultAuthValidator;
@@ -762,7 +764,9 @@ class PasskeyFlowsTest {
             DefaultPasskeySignInService.class,
             RedisFixedWindowRateLimiter.class,
             DefaultTwoFactorService.class,
-            DefaultSecondStepService.class
+            DefaultSecondStepService.class,
+            RecoveryCodes.class,
+            DefaultTwoStepSettingsService.class
     })
     static class TestApplication {
 

@@ -78,6 +78,8 @@ class DefaultPasskeyServiceTest {
     private static final String ALREADY_ADDED = "This passkey or security key is already added.";
     private static final String EXPIRED = "This request expired. Try again.";
     private static final String RACED_CREDENTIAL_ID = "c2FtZS1jcmVkZW50aWFs";
+    private static final String LAST_PASSKEY =
+            "This is your only two-step method. Turn off two-step verification, or add another passkey, security key or authenticator app first.";
 
     @Mock
     private UserService userService;
@@ -461,6 +463,75 @@ class DefaultPasskeyServiceTest {
     }
 
     @Test
+    void removingTheLastPasskeyOfAKeysOnlyAccountIsRefused() {
+        final var user = twoStepUser(false);
+        final var passkey = PasskeyCredential.builder().id(5L).user(user).credentialId("a2V5").build();
+        when(userService.getUserFromToken()).thenReturn(user);
+        when(passkeyCredentialRepository.findByIdAndUser(5L, user)).thenReturn(Optional.of(passkey));
+        when(passkeyCredentialRepository.countByUser(user)).thenReturn(1L);
+
+        assertThatThrownBy(() -> passkeyService.delete(5L, new PasskeyDeleteDto("user123")))
+                .isInstanceOf(ApiException.class)
+                .hasMessage(LAST_PASSKEY);
+
+        verify(reauthentication).confirm(user, "user123");
+        verify(passkeyCredentialRepository, never()).delete(any());
+    }
+
+    @Test
+    void theLastPasskeyGuardRunsAfterTheReauthentication() {
+        final var user = twoStepUser(false);
+        when(userService.getUserFromToken()).thenReturn(user);
+        doThrow(new ApiException("Enter your current password.")).when(reauthentication).confirm(user, null);
+
+        assertThatThrownBy(() -> passkeyService.delete(5L, new PasskeyDeleteDto(null)))
+                .isInstanceOf(ApiException.class)
+                .hasMessage("Enter your current password.");
+
+        verify(passkeyCredentialRepository, never()).countByUser(any());
+        verify(passkeyCredentialRepository, never()).delete(any());
+    }
+
+    @Test
+    void removingAPasskeyWhileTotpIsOnIsAllowed() {
+        final var user = twoStepUser(true);
+        final var passkey = PasskeyCredential.builder().id(5L).user(user).credentialId("a2V5").build();
+        when(userService.getUserFromToken()).thenReturn(user);
+        when(passkeyCredentialRepository.findByIdAndUser(5L, user)).thenReturn(Optional.of(passkey));
+
+        passkeyService.delete(5L, new PasskeyDeleteDto("user123"));
+
+        verify(passkeyCredentialRepository).delete(passkey);
+    }
+
+    @Test
+    void removingOneOfTwoPasskeysIsAllowed() {
+        final var user = twoStepUser(false);
+        final var passkey = PasskeyCredential.builder().id(5L).user(user).credentialId("a2V5").build();
+        when(userService.getUserFromToken()).thenReturn(user);
+        when(passkeyCredentialRepository.findByIdAndUser(5L, user)).thenReturn(Optional.of(passkey));
+        when(passkeyCredentialRepository.countByUser(user)).thenReturn(2L);
+
+        passkeyService.delete(5L, new PasskeyDeleteDto("user123"));
+
+        verify(passkeyCredentialRepository).delete(passkey);
+    }
+
+    @Test
+    void removingTheLastPasskeyWhileTwoStepIsOffIsAllowed() {
+        final var user = user(7L, "user@localhost");
+        user.setTwoStepEnabled(false);
+        user.setTwoFactorEnabled(false);
+        final var passkey = PasskeyCredential.builder().id(5L).user(user).credentialId("a2V5").build();
+        when(userService.getUserFromToken()).thenReturn(user);
+        when(passkeyCredentialRepository.findByIdAndUser(5L, user)).thenReturn(Optional.of(passkey));
+
+        passkeyService.delete(5L, new PasskeyDeleteDto("user123"));
+
+        verify(passkeyCredentialRepository).delete(passkey);
+    }
+
+    @Test
     void withoutASignedInUserNothingHappens() {
         when(userService.getUserFromToken()).thenReturn(null);
 
@@ -493,6 +564,14 @@ class DefaultPasskeyServiceTest {
 
     private static User user(final Long id, final String email) {
         return User.builder().id(id).email(email).authProvider("local").build();
+    }
+
+    private static User twoStepUser(final boolean twoFactorEnabled) {
+        final var user = user(7L, "user@localhost");
+        user.setTwoStepEnabled(true);
+        user.setTwoFactorEnabled(twoFactorEnabled);
+
+        return user;
     }
 
     private static User userWithHandle() {

@@ -100,6 +100,7 @@ final class PasskeyFlowsSupport {
     }
 
     void remove(final User user) {
+        jdbcTemplate.update("delete from two_factor_recovery_code where user_id = ?", user.getId());
         passkeyCredentialRepository.deleteAll(passkeyCredentialRepository.findByUserOrderByCreatedAtDesc(user));
         userRepository.deleteById(user.getId());
     }

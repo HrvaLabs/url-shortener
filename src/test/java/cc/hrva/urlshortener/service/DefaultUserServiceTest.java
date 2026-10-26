@@ -472,6 +472,26 @@ class DefaultUserServiceTest {
     }
 
     @Test
+    void aPasswordResetLeavesTwoStepOn() {
+        final var resetDto = PasswordResetDto.builder().email("test@example.com").token("token").password("newPassword").build();
+        final var user = User.builder().id(1L).email("test@example.com").twoStepEnabled(true).twoFactorEnabled(true)
+                .twoFactorSecret("SECRET").build();
+        final var token = ResetToken.builder().id(1L).active(true).build();
+        when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
+        when(resetTokenService.getResetTokenFromUserAndToken(user, "token")).thenReturn(token);
+        when(passwordEncoder.encode("newPassword")).thenReturn("newEncoded");
+        when(userRepository.save(user)).thenReturn(user);
+
+        final var result = userService.resetPassword(resetDto);
+
+        assertThat(result.getPassword()).isEqualTo("newEncoded");
+        assertThat(result.getTwoStepEnabled()).isTrue();
+        assertThat(result.getTwoFactorEnabled()).isTrue();
+        assertThat(result.getTwoFactorSecret()).isEqualTo("SECRET");
+        verifyNoInteractions(twoFactorRecoveryCodeRepository);
+    }
+
+    @Test
     void shouldFailResetPasswordWhenTokenInactive() {
         final var resetDto = PasswordResetDto.builder().email("test@example.com").token("token").password("newPassword").build();
         final var user = User.builder().id(1L).email("test@example.com").build();

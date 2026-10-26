@@ -14,6 +14,11 @@ import cc.hrva.urlshortener.dto.PasskeyResponse;
 import cc.hrva.urlshortener.dto.PasskeySecondStepDto;
 import cc.hrva.urlshortener.dto.PendingTokenDto;
 import cc.hrva.urlshortener.dto.TotpSecondStepDto;
+import cc.hrva.urlshortener.dto.TwoFactorCodeDto;
+import cc.hrva.urlshortener.dto.TwoFactorEnableResponse;
+import cc.hrva.urlshortener.dto.TwoStepDisableDto;
+import cc.hrva.urlshortener.dto.TwoStepStatusResponse;
+import cc.hrva.urlshortener.exception.ApiException;
 import cc.hrva.urlshortener.exception.PasskeyVerificationException;
 import cc.hrva.urlshortener.exception.SignInExpiredException;
 import cc.hrva.urlshortener.exception.SignInUnavailableException;
@@ -37,6 +42,7 @@ import cc.hrva.urlshortener.service.PasskeyService;
 import cc.hrva.urlshortener.service.SecondStepService;
 import cc.hrva.urlshortener.service.SignInService;
 import cc.hrva.urlshortener.service.TwoFactorService;
+import cc.hrva.urlshortener.service.TwoStepSettingsService;
 import cc.hrva.urlshortener.service.UserService;
 import cc.hrva.urlshortener.service.analytics.AnalyticsDays;
 import cc.hrva.urlshortener.service.impl.DefaultPasskeySignInService;
@@ -83,7 +89,10 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.doNothing;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -136,6 +145,11 @@ class SignInEndpointSecurityTest {
             .formatted(PENDING_TOKEN, CEREMONY_ID);
     private static final String SECOND_STEP_OPTIONS_JSON = """
             {"challenge":"Y2hhbGxlbmdl","timeout":300000,"rpId":"hrva.cc","allowCredentials":[{"type":"public-key","id":"a2V5","transports":["usb","nfc"]}],"userVerification":"preferred"}""";
+    private static final String TWO_STEP = "/api/v1/users/me/two-step";
+    private static final String LEGACY_DISABLE = "/api/v1/auth/2fa/disable";
+    private static final String TURN_OFF_WITH_PASSKEY_BODY = """
+            {"ceremonyId":"%s","credential":{"id":"a2V5","rawId":"a2V5","type":"public-key","clientExtensionResults":{},"response":{"authenticatorData":"e30","clientDataJSON":"e30","signature":"e30"}}}"""
+            .formatted(CEREMONY_ID);
     private static final String MACBOOK_JSON = """
             {"id":7,"label":"MacBook","kind":"SYNCED","backupEligible":true,"backedUp":true,"discoverable":true,"transports":["hybrid","internal"],"createdAt":"2026-10-25T14:05:00","lastUsedAt":null}""";
 
@@ -156,6 +170,9 @@ class SignInEndpointSecurityTest {
 
     @MockitoBean
     private PasskeyService passkeyService;
+
+    @MockitoBean
+    private TwoStepSettingsService twoStepSettingsService;
 
     @MockitoBean
     private ConnectRequestStore connectRequestStore;
@@ -449,6 +466,116 @@ class SignInEndpointSecurityTest {
         verify(passkeyService, never()).rename(any(), any());
     }
 
+    @Test
+    void twoStepSettingsNeedSignIn() throws Exception {
+        mockMvc.perform(get(TWO_STEP))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(post(TWO_STEP + "/enable"))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(post(TWO_STEP + "/disable/options"))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(post(TWO_STEP + "/disable").contentType(MediaType.APPLICATION_JSON).content("{\"code\":\"123456\"}"))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(delete(TWO_STEP + "/totp").contentType(MediaType.APPLICATION_JSON).content("{\"code\":\"123456\"}"))
+                .andExpect(status().isUnauthorized());
+
+        verifyNoInteractions(twoStepSettingsService);
+    }
+
+    @Test
+    void aSignedInUserSeesAndTurnsOnTwoStep() throws Exception {
+        signedIn();
+        when(twoStepSettingsService.status()).thenReturn(new TwoStepStatusResponse(true, false, 2L, 10L));
+        when(twoStepSettingsService.enableWithPasskeys()).thenReturn(new TwoFactorEnableResponse(List.of("ABCD-EF23")));
+        when(twoStepSettingsService.disableOptions())
+                .thenReturn(new PasskeyOptionsResponse(CEREMONY_ID, JsonMapper.builder().build().readTree(SECOND_STEP_OPTIONS_JSON)));
+
+        mockMvc.perform(get(TWO_STEP).header(JwtFilter.AUTHORIZATION_HEADER, BEARER))
+                .andExpect(status().isOk())
+                .andExpect(content().json("{\"enabled\":true,\"totp\":false,\"passkeys\":2,\"recoveryCodesRemaining\":10}", JsonCompareMode.STRICT));
+        mockMvc.perform(post(TWO_STEP + "/enable").header(JwtFilter.AUTHORIZATION_HEADER, BEARER))
+                .andExpect(status().isOk())
+                .andExpect(content().json("{\"recoveryCodes\":[\"ABCD-EF23\"]}", JsonCompareMode.STRICT));
+        mockMvc.perform(post(TWO_STEP + "/disable/options").header(JwtFilter.AUTHORIZATION_HEADER, BEARER))
+                .andExpect(status().isOk())
+                .andExpect(content().json("{\"ceremonyId\":\"" + CEREMONY_ID + "\",\"options\":" + SECOND_STEP_OPTIONS_JSON + "}",
+                        JsonCompareMode.STRICT));
+    }
+
+    @Test
+    void turningTwoStepOffAndRemovingTheAppAre204() throws Exception {
+        signedIn();
+
+        mockMvc.perform(post(TWO_STEP + "/disable").header(JwtFilter.AUTHORIZATION_HEADER, BEARER)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"code\":\"123456\"}"))
+                .andExpect(status().isNoContent());
+        mockMvc.perform(post(TWO_STEP + "/disable").header(JwtFilter.AUTHORIZATION_HEADER, BEARER)
+                        .contentType(MediaType.APPLICATION_JSON).content(TURN_OFF_WITH_PASSKEY_BODY))
+                .andExpect(status().isNoContent());
+        mockMvc.perform(delete(TWO_STEP + "/totp").header(JwtFilter.AUTHORIZATION_HEADER, BEARER)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"code\":\"123456\"}"))
+                .andExpect(status().isNoContent());
+
+        final var turnOff = ArgumentCaptor.forClass(TwoStepDisableDto.class);
+        verify(twoStepSettingsService, times(2)).disable(turnOff.capture());
+        assertThat(turnOff.getAllValues().getFirst()).isEqualTo(TwoStepDisableDto.builder().code("123456").build());
+        assertThat(turnOff.getAllValues().getLast().getCode()).isNull();
+        assertThat(turnOff.getAllValues().getLast().getCeremonyId()).isEqualTo(CEREMONY_ID);
+        assertThat(turnOff.getAllValues().getLast().getCredential().path("rawId").asString()).isEqualTo("a2V5");
+        verify(twoStepSettingsService).removeTotp(new TwoFactorCodeDto("123456"));
+    }
+
+    @Test
+    void turningTwoStepOffWithoutABodyReachesTheServiceForItsText() throws Exception {
+        signedIn();
+        doThrow(new ApiException("Confirm with a code, a recovery code or a passkey."))
+                .when(twoStepSettingsService).disable(new TwoStepDisableDto());
+
+        mockMvc.perform(post(TWO_STEP + "/disable").header(JwtFilter.AUTHORIZATION_HEADER, BEARER))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().json("{\"error\":\"Confirm with a code, a recovery code or a passkey.\"}", JsonCompareMode.STRICT));
+    }
+
+    @Test
+    void removingTheAppWithoutACodeIsRefusedBeforeTheServiceRuns() throws Exception {
+        signedIn();
+
+        mockMvc.perform(delete(TWO_STEP + "/totp").header(JwtFilter.AUTHORIZATION_HEADER, BEARER)
+                        .contentType(MediaType.APPLICATION_JSON).content("{}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").exists());
+
+        verifyNoInteractions(twoStepSettingsService);
+    }
+
+    @Test
+    void theOldDisableEndpointKeepsItsStatusCodes() throws Exception {
+        signedIn();
+        doNothing()
+                .doThrow(new ApiException("Invalid verification code"))
+                .doThrow(new ApiException("Two-step verification is off."))
+                .when(twoStepSettingsService).disable(TwoStepDisableDto.builder().code("123456").build());
+
+        mockMvc.perform(post(LEGACY_DISABLE).header(JwtFilter.AUTHORIZATION_HEADER, BEARER)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"code\":\"123456\"}"))
+                .andExpect(status().isNoContent());
+        mockMvc.perform(post(LEGACY_DISABLE).header(JwtFilter.AUTHORIZATION_HEADER, BEARER)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"code\":\"123456\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().json("{\"error\":\"Invalid verification code\"}", JsonCompareMode.STRICT));
+        mockMvc.perform(post(LEGACY_DISABLE).header(JwtFilter.AUTHORIZATION_HEADER, BEARER)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"code\":\"123456\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().json("{\"error\":\"Two-step verification is off.\"}", JsonCompareMode.STRICT));
+        mockMvc.perform(post(LEGACY_DISABLE).header(JwtFilter.AUTHORIZATION_HEADER, BEARER)
+                        .contentType(MediaType.APPLICATION_JSON).content("{}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").exists());
+
+        verify(twoStepSettingsService, times(3)).disable(TwoStepDisableDto.builder().code("123456").build());
+        verifyNoInteractions(twoFactorService);
+    }
+
     private void signedIn() {
         final var authorities = List.of(new SimpleGrantedAuthority("ROLE_USER"));
         when(tokenProvider.validateToken(SIGNED_IN_TOKEN)).thenReturn(true);
@@ -482,6 +609,7 @@ class SignInEndpointSecurityTest {
             TwoStepController.class,
             PasskeyController.class,
             PasskeySignInController.class,
+            TwoStepSettingsController.class,
             DefaultPasskeySignInService.class,
             PasskeyCeremonies.class,
             PasskeyOptionsFactory.class,

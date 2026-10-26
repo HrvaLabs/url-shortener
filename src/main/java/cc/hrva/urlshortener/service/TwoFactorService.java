@@ -8,7 +8,6 @@ public interface TwoFactorService {
 
     TwoFactorSetupResponse setup();
     TwoFactorEnableResponse enable(String code);
-    void disable(String code);
     boolean verifyLoginCode(User user, String code);
 
 }

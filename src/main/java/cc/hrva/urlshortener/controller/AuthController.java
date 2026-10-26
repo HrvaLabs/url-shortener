@@ -4,6 +4,7 @@ import cc.hrva.urlshortener.dto.*;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.service.AuthService;
 import cc.hrva.urlshortener.service.TwoFactorService;
+import cc.hrva.urlshortener.service.TwoStepSettingsService;
 import cc.hrva.urlshortener.service.UserService;
 import org.springframework.security.access.prepost.PreAuthorize;
 import io.swagger.v3.oas.annotations.Operation;
@@ -27,6 +28,7 @@ public class AuthController {
     private final AuthService authService;
     private final UserService userService;
     private final TwoFactorService twoFactorService;
+    private final TwoStepSettingsService twoStepSettingsService;
     private final HttpServletRequest request;
 
     @Operation(summary = "Register a new user", description = "Create a new user account with email and password.")
@@ -76,7 +78,8 @@ public class AuthController {
         return ResponseEntity.accepted().build();
     }
 
-    @Operation(summary = "Start 2FA setup", description = "Generate a TOTP secret and otpauth URI for the authenticated user to scan. Local accounts only.")
+    @Operation(summary = "Start 2FA setup", description = "Generate a TOTP secret and otpauth URI for the authenticated user to scan. Email and password, Google and GitHub accounts can all set up an authenticator app.")
+    @ApiResponse(responseCode = "400", description = "An authenticator app is already set up")
     @PostMapping("/2fa/setup")
     @PreAuthorize("hasAnyRole('ROLE_ADMIN', 'ROLE_USER')")
     public ResponseEntity<TwoFactorSetupResponse> setupTwoFactor() {
@@ -91,12 +94,14 @@ public class AuthController {
         return ResponseEntity.ok(twoFactorService.enable(dto.getCode()));
     }
 
-    @Operation(summary = "Disable 2FA", description = "Disable 2FA using a current TOTP or recovery code.")
-    @ApiResponse(responseCode = "400", description = "Invalid code or 2FA not enabled")
+    @Operation(summary = "Disable 2FA", description = "Turn two-step verification off with a current TOTP or recovery code, the same as POST /api/v1/users/me/two-step/disable with a code. Passkeys and security keys stay.")
+    @ApiResponse(responseCode = "204", description = "Two-step verification turned off")
+    @ApiResponse(responseCode = "400", description = "Invalid code or two-step verification is off")
+    @ApiResponse(responseCode = "403", description = "Account locked after too many invalid codes")
     @PostMapping("/2fa/disable")
     @PreAuthorize("hasAnyRole('ROLE_ADMIN', 'ROLE_USER')")
     public ResponseEntity<Void> disableTwoFactor(@Valid @RequestBody final TwoFactorCodeDto dto) {
-        twoFactorService.disable(dto.getCode());
+        twoStepSettingsService.disable(TwoStepDisableDto.builder().code(dto.getCode()).build());
         return ResponseEntity.noContent().build();
     }
 

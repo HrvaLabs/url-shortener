@@ -58,6 +58,8 @@ public class DefaultPasskeyService implements PasskeyService {
     private static final String NOT_FOUND = "Passkey not found";
     private static final String NOT_AUTHENTICATED = "Not authenticated";
     private static final String CREDENTIAL_ID_CONSTRAINT = "uq_passkey_credential_credential_id";
+    private static final String ONLY_TWO_STEP_METHOD =
+            "This is your only two-step method. Turn off two-step verification, or add another passkey, security key or authenticator app first.";
 
     private final UserService userService;
     private final UserRepository userRepository;
@@ -146,6 +148,9 @@ public class DefaultPasskeyService implements PasskeyService {
         final var user = currentUser();
         reauthentication.confirm(user, dto.getPassword());
         final var passkey = passkeyOf(user, id);
+        if (isTheOnlyTwoStepMethod(user)) {
+            throw new ApiException(ONLY_TWO_STEP_METHOD);
+        }
         passkeyCredentialRepository.delete(passkey);
         log.info("Passkey removed user id={} credential={}…", user.getId(), prefixOf(passkey.getCredentialId()));
     }
@@ -168,6 +173,12 @@ public class DefaultPasskeyService implements PasskeyService {
                 .filter(ceremony -> Objects.equals(ceremony.userId(), user.getId()))
                 .filter(ceremony -> user.getWebauthnUserHandle() != null)
                 .orElseThrow(() -> new SignInExpiredException(PasskeyCeremonyStore.EXPIRED));
+    }
+
+    private boolean isTheOnlyTwoStepMethod(final User user) {
+        return Boolean.TRUE.equals(user.getTwoStepEnabled())
+                && !Boolean.TRUE.equals(user.getTwoFactorEnabled())
+                && passkeyCredentialRepository.countByUser(user) == 1;
     }
 
     private PasskeyCredential passkeyOf(final User user, final Long id) {

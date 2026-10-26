@@ -12,9 +12,7 @@ import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.security.Totp;
 import cc.hrva.urlshortener.service.TwoFactorService;
 import cc.hrva.urlshortener.service.UserService;
-import java.security.SecureRandom;
-import java.util.List;
-import java.util.stream.IntStream;
+import cc.hrva.urlshortener.service.twostep.RecoveryCodes;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -26,23 +24,19 @@ import org.springframework.transaction.annotation.Transactional;
 @RequiredArgsConstructor
 public class DefaultTwoFactorService implements TwoFactorService {
 
-    private static final int RECOVERY_CODE_COUNT = 10;
-    private static final String RECOVERY_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-    private static final SecureRandom RANDOM = new SecureRandom();
-
     private final UserService userService;
     private final UserRepository userRepository;
     private final AppProperties appProperties;
     private final PasswordEncoder passwordEncoder;
     private final TwoFactorRecoveryCodeRepository recoveryCodeRepository;
+    private final RecoveryCodes recoveryCodes;
 
     @Override
     @Transactional
     public TwoFactorSetupResponse setup() {
         final var user = currentUser();
-        requireLocalAccount(user);
         if (Boolean.TRUE.equals(user.getTwoFactorEnabled())) {
-            throw new ApiException("Two-factor authentication is already enabled. Disable it first.");
+            throw new ApiException("An authenticator app is already set up. Remove it first.");
         }
 
         final var secret = Totp.generateSecret();
@@ -58,7 +52,6 @@ public class DefaultTwoFactorService implements TwoFactorService {
     @Transactional
     public TwoFactorEnableResponse enable(final String code) {
         final var user = currentUser();
-        requireLocalAccount(user);
 
         if (Boolean.TRUE.equals(user.getTwoFactorEnabled())) {
             throw new ApiException("Two-factor authentication is already enabled");
@@ -74,39 +67,8 @@ public class DefaultTwoFactorService implements TwoFactorService {
         user.setTwoStepEnabled(true);
         userRepository.save(user);
 
-        recoveryCodeRepository.deleteByUser(user);
-        final var plainCodes = generateRecoveryCodes();
-        recoveryCodeRepository.saveAll(plainCodes.stream()
-                .map(plain -> TwoFactorRecoveryCode.builder()
-                        .user(user)
-                        .codeHash(passwordEncoder.encode(plain))
-                        .used(false)
-                        .build())
-                .toList());
-
         log.info("2FA enabled for user id={}", user.getId());
-        return new TwoFactorEnableResponse(plainCodes);
-    }
-
-    @Override
-    @Transactional
-    public void disable(final String code) {
-        final var user = currentUser();
-
-        if (!Boolean.TRUE.equals(user.getTwoFactorEnabled())) {
-            throw new ApiException("Two-factor authentication is not enabled");
-        }
-        if (!verifyLoginCode(user, code)) {
-            throw new ApiException("Invalid verification code");
-        }
-
-        user.setTwoFactorEnabled(false);
-        user.setTwoStepEnabled(false);
-        user.setTwoFactorSecret(null);
-        userRepository.save(user);
-        recoveryCodeRepository.deleteByUser(user);
-
-        log.info("2FA disabled for user id={}", user.getId());
+        return new TwoFactorEnableResponse(recoveryCodes.issueIfNone(user));
     }
 
     @Override
@@ -128,27 +90,6 @@ public class DefaultTwoFactorService implements TwoFactorService {
             }
         }
         return false;
-    }
-
-    private List<String> generateRecoveryCodes() {
-        return IntStream.range(0, RECOVERY_CODE_COUNT)
-                .mapToObj(i -> randomGroup() + "-" + randomGroup())
-                .toList();
-    }
-
-    private String randomGroup() {
-        final var sb = new StringBuilder(4);
-        for (int i = 0; i < 4; i++) {
-            sb.append(RECOVERY_ALPHABET.charAt(RANDOM.nextInt(RECOVERY_ALPHABET.length())));
-        }
-        return sb.toString();
-    }
-
-    private void requireLocalAccount(final User user) {
-        final var provider = user.getAuthProvider();
-        if (provider != null && !"local".equals(provider)) {
-            throw new ApiException("Two-factor authentication is only available for password accounts");
-        }
     }
 
     private User currentUser() {

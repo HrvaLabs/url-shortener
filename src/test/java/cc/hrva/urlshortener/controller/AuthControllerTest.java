@@ -4,6 +4,7 @@ import cc.hrva.urlshortener.configuration.GlobalExceptionHandler;
 import cc.hrva.urlshortener.dto.*;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.service.AuthService;
+import cc.hrva.urlshortener.service.TwoStepSettingsService;
 import cc.hrva.urlshortener.service.UserService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
@@ -45,13 +46,16 @@ class AuthControllerTest {
     private cc.hrva.urlshortener.service.TwoFactorService twoFactorService;
 
     @Mock
+    private TwoStepSettingsService twoStepSettingsService;
+
+    @Mock
     private HttpServletRequest request;
 
     private ObjectMapper objectMapper;
 
     @BeforeEach
     void setUp() {
-        this.mockMvc = MockMvcBuilders.standaloneSetup(new AuthController(authService, userService, twoFactorService, request))
+        this.mockMvc = MockMvcBuilders.standaloneSetup(new AuthController(authService, userService, twoFactorService, twoStepSettingsService, request))
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .build();
         this.objectMapper = new ObjectMapper();
@@ -177,7 +181,8 @@ class AuthControllerTest {
                         .content(objectMapper.writeValueAsString(TwoFactorCodeDto.builder().code("123456").build())))
                 .andExpect(status().isNoContent());
 
-        verify(twoFactorService).disable("123456");
+        verify(twoStepSettingsService).disable(TwoStepDisableDto.builder().code("123456").build());
+        verifyNoInteractions(twoFactorService);
     }
 
     @Test
