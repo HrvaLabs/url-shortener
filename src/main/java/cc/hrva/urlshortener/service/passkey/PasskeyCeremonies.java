@@ -17,7 +17,6 @@ import org.springframework.stereotype.Component;
 @RequiredArgsConstructor
 public class PasskeyCeremonies {
 
-    private static final String OPTIONS_RATE_LIMIT_NAME = "passkey-options";
     private static final int OPTIONS_PER_NETWORK = 30;
     private static final Duration OPTIONS_WINDOW = Duration.ofMinutes(10);
     private static final String TOO_MANY_OPTIONS = "Too many passkey sign-in attempts from this network. Try again in a few minutes.";
@@ -27,10 +26,10 @@ public class PasskeyCeremonies {
     private final PasskeyJson passkeyJson;
     private final RateLimiter rateLimiter;
 
-    public void checkOptionsLimit(final String clientIp) {
+    public void checkOptionsLimit(final String name, final String clientIp) {
         final boolean allowed;
         try {
-            allowed = rateLimiter.tryAcquire(RateLimiter.clientKey(OPTIONS_RATE_LIMIT_NAME, clientIp), OPTIONS_PER_NETWORK, OPTIONS_WINDOW);
+            allowed = rateLimiter.tryAcquire(RateLimiter.clientKey(name, clientIp), OPTIONS_PER_NETWORK, OPTIONS_WINDOW);
         } catch (final RateLimiterUnavailableException exception) {
             throw new SignInUnavailableException(PasskeyCeremonyStore.UNAVAILABLE, exception);
         }

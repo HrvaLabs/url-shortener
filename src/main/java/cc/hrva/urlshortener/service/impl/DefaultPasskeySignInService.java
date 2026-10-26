@@ -37,6 +37,8 @@ import tools.jackson.databind.JsonNode;
 @Transactional(readOnly = true)
 public class DefaultPasskeySignInService implements PasskeySignInService {
 
+    private static final String OPTIONS_RATE_LIMIT_NAME = "passkey-options";
+
     private final ClientIpResolver clientIpResolver;
     private final LoginAttemptService loginAttemptService;
     private final PasskeyCeremonies passkeyCeremonies;
@@ -49,7 +51,7 @@ public class DefaultPasskeySignInService implements PasskeySignInService {
     @Override
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public PasskeyOptionsResponse options(final HttpServletRequest request) {
-        passkeyCeremonies.checkOptionsLimit(clientIpResolver.getClientIp(request));
+        passkeyCeremonies.checkOptionsLimit(OPTIONS_RATE_LIMIT_NAME, clientIpResolver.getClientIp(request));
 
         return passkeyCeremonies.startRequest(PasskeyCeremonyPurpose.SIGN_IN, List.of(), null);
     }

@@ -77,7 +77,8 @@ class DefaultSecondStepServiceTest {
     private static final String INVALID_CODE = "Invalid two-factor code";
     private static final String SIGN_IN_EXPIRED = "Your sign-in expired. Sign in again.";
     private static final String CEREMONY_EXPIRED = "This request expired. Try again.";
-    private static final String OPTIONS_KEY = RateLimiter.clientKey("passkey-options", CLIENT_IP);
+    private static final String OPTIONS_KEY = RateLimiter.clientKey("passkey-second-step-options", CLIENT_IP);
+    private static final String PASSWORDLESS_OPTIONS_KEY = RateLimiter.clientKey("passkey-options", CLIENT_IP);
     private static final Duration TEN_MINUTES = Duration.ofMinutes(10);
     private static final String COULD_NOT_VERIFY = "That passkey or security key couldn't be verified. Try again.";
     private static final String NO_PASSKEYS = "This account has no passkeys or security keys.";
@@ -331,6 +332,8 @@ class DefaultSecondStepServiceTest {
         assertThat(JSON.readTree(JSON.writeValueAsString(response.options()))).isEqualTo(JSON.readTree("""
                 {"challenge":"%s","timeout":300000,"rpId":"hrva.cc","allowCredentials":[{"type":"public-key","id":"%s","transports":["usb","nfc"]}],"userVerification":"preferred","extensions":{}}
                 """.formatted(ceremony.getValue().challenge(), CREDENTIAL_ID)));
+        verify(rateLimiter).tryAcquire(OPTIONS_KEY, 30, TEN_MINUTES);
+        verify(rateLimiter, never()).tryAcquire(eq(PASSWORDLESS_OPTIONS_KEY), anyInt(), any());
         verify(rateLimiter, never()).tryAcquire(eq(ATTEMPTS_KEY), anyInt(), any());
         verifyNoInteractions(passkeyAssertions, signInService);
         verify(loginAttemptService, never()).loginFailed(anyString());
@@ -377,12 +380,13 @@ class DefaultSecondStepServiceTest {
     }
 
     @Test
-    void passkeyOptionsShareThePasswordlessLimitOf30Per10MinutesPerNetwork() {
+    void passkeyOptionsHaveTheirOwnLimitOf30Per10MinutesPerNetwork() {
         when(rateLimiter.tryAcquire(OPTIONS_KEY, 30, TEN_MINUTES)).thenReturn(false);
 
         assertThatThrownBy(() -> secondStepService.passkeyOptions(pendingToken(), request))
                 .isInstanceOf(RateLimitExceededException.class)
                 .hasMessage("Too many passkey sign-in attempts from this network. Try again in a few minutes.");
+        verify(rateLimiter, never()).tryAcquire(eq(PASSWORDLESS_OPTIONS_KEY), anyInt(), any());
         verifyNoInteractions(pendingLoginStore, userRepository, passkeyCeremonyStore);
         verify(loginAttemptService, never()).loginFailed(anyString());
     }

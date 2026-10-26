@@ -44,7 +44,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
@@ -120,6 +122,8 @@ class DefaultPasskeySignInServiceTest {
         assertThat(JSON.readTree(JSON.writeValueAsString(response.options()))).isEqualTo(JSON.readTree("""
                 {"challenge":"%s","timeout":300000,"rpId":"hrva.cc","allowCredentials":[],"userVerification":"required","extensions":{}}
                 """.formatted(ceremony.getValue().challenge())));
+        verify(rateLimiter).tryAcquire(OPTIONS_KEY, 30, TEN_MINUTES);
+        verify(rateLimiter, never()).tryAcquire(eq(RateLimiter.clientKey("passkey-second-step-options", CLIENT_IP)), anyInt(), any());
     }
 
     @Test

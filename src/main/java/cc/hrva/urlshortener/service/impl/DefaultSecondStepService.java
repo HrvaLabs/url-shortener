@@ -49,6 +49,7 @@ import tools.jackson.databind.JsonNode;
 public class DefaultSecondStepService implements SecondStepService {
 
     private static final String PENDING_LOGIN_ATTEMPTS_PREFIX = "pending-login:";
+    private static final String PASSKEY_OPTIONS_RATE_LIMIT_NAME = "passkey-second-step-options";
     private static final String INVALID_CODE = "Invalid two-factor code";
     private static final String NO_PASSKEYS = "This account has no passkeys or security keys.";
 
@@ -83,7 +84,7 @@ public class DefaultSecondStepService implements SecondStepService {
     @Override
     public PasskeyOptionsResponse passkeyOptions(final PendingTokenDto dto, final HttpServletRequest request) {
         final var clientIp = allowedClientIp(request);
-        passkeyCeremonies.checkOptionsLimit(clientIp);
+        passkeyCeremonies.checkOptionsLimit(PASSKEY_OPTIONS_RATE_LIMIT_NAME, clientIp);
         final var user = userOf(pendingLoginOf(dto.getPendingToken(), clientIp), clientIp);
         final var passkeys = passkeyCredentialRepository.findByUserOrderByCreatedAtDesc(user);
         if (passkeys.isEmpty()) {
