@@ -22,6 +22,7 @@ import cc.hrva.urlshortener.model.ApiKey;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.repository.ApiKeyRepository;
 import cc.hrva.urlshortener.repository.EmailLogRepository;
+import cc.hrva.urlshortener.repository.PasskeyCredentialRepository;
 import cc.hrva.urlshortener.repository.ResetTokenRepository;
 import cc.hrva.urlshortener.repository.TwoFactorRecoveryCodeRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
@@ -68,6 +69,7 @@ public class DefaultUserService implements UserService {
     private final ResetTokenService resetTokenService;
     private final ResetTokenRepository resetTokenRepository;
     private final TwoFactorRecoveryCodeRepository twoFactorRecoveryCodeRepository;
+    private final PasskeyCredentialRepository passkeyCredentialRepository;
     private final UserToUserDtoConverter userToUserDtoConverter;
     private final DefaultSendingEmailService sendingEmailService;
     private final VerificationTokenService verificationTokenService;
@@ -203,19 +205,25 @@ public class DefaultUserService implements UserService {
         final var emails = emailLogRepository.findByRecipientContainingIgnoreCase(user.getEmail()).stream()
                 .map(log -> new DataExportDto.EmailExport(log.getSubject(), log.getStatus(), log.getSentAt(), log.getCreatedAt()))
                 .toList();
+        final var passkeys = passkeyCredentialRepository.findByUserOrderByCreatedAtDesc(user).stream()
+                .map(DataExportDto.PasskeyExport::from)
+                .toList();
 
         return new DataExportDto(
                 LocalDateTime.now(),
                 userToUserDtoConverter.convert(user),
                 urls,
                 apiKeys,
-                emails);
+                emails,
+                passkeys,
+                twoFactorRecoveryCodeRepository.countByUserAndUsedFalse(user));
     }
 
     private void deleteUserAndOwnedData(final User user) {
         resetTokenRepository.deleteByUser(user);
         verificationTokenRepository.deleteByUser(user);
         twoFactorRecoveryCodeRepository.deleteByUser(user);
+        passkeyCredentialRepository.deleteByUser(user);
         urlRepository.deleteByOwner(user);
         disconnectConnectedApps(user.getId(), user.getEmail());
         // API keys are removed via CascadeType.ALL on User.apiKeys when the user is deleted.

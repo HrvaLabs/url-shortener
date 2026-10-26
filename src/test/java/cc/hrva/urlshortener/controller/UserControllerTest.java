@@ -156,12 +156,16 @@ class UserControllerTest {
                 UserDto.builder().id(1L).email("test@example.com").build(),
                 java.util.Collections.emptyList(),
                 java.util.Collections.emptyList(),
-                java.util.Collections.emptyList());
+                java.util.Collections.emptyList(),
+                java.util.Collections.emptyList(),
+                3L);
         when(userService.exportMyData()).thenReturn(export);
 
         mockMvc.perform(get("/api/v1/users/me/export"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.profile.email").value("test@example.com"));
+                .andExpect(jsonPath("$.profile.email").value("test@example.com"))
+                .andExpect(jsonPath("$.passkeys").isEmpty())
+                .andExpect(jsonPath("$.recoveryCodesRemaining").value(3));
     }
 
     @Test

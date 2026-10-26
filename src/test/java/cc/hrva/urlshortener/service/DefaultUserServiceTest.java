@@ -1,9 +1,11 @@
 package cc.hrva.urlshortener.service;
 
+import java.time.LocalDateTime;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.regex.Pattern;
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.converter.UserToUserDtoConverter;
 import cc.hrva.urlshortener.converter.UserUpdateDtoToUserConverter;
@@ -20,10 +22,12 @@ import cc.hrva.urlshortener.listener.SignUpEmailListener;
 import cc.hrva.urlshortener.listener.UserRegisteredEvent;
 import cc.hrva.urlshortener.mcp.apps.ConnectedAppsService;
 import cc.hrva.urlshortener.model.ApiKey;
+import cc.hrva.urlshortener.model.PasskeyCredential;
 import cc.hrva.urlshortener.model.ResetToken;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.VerificationToken;
 import cc.hrva.urlshortener.repository.ApiKeyRepository;
+import cc.hrva.urlshortener.repository.PasskeyCredentialRepository;
 import cc.hrva.urlshortener.repository.ResetTokenRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
@@ -53,11 +57,13 @@ import org.springframework.transaction.event.TransactionalEventListenerFactory;
 import org.springframework.transaction.support.AbstractPlatformTransactionManager;
 import org.springframework.transaction.support.DefaultTransactionStatus;
 import org.springframework.transaction.support.TransactionTemplate;
+import tools.jackson.databind.json.JsonMapper;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -66,6 +72,15 @@ import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class DefaultUserServiceTest {
+
+    private static final String CREDENTIAL_ID = "q1Rz7uCredentialIdOfTheMacBook0aB";
+    private static final String PUBLIC_KEY = "pQECAyYgASFYIPublicKeyOfTheMacBookCose";
+    private static final String ATTESTATION_OBJECT = "o2NmbXRkbm9uZWdhdHRTdG10oGhAttestationObject";
+    private static final String USER_HANDLE = "Xk3vUserHandleOfTheTestAccount43Characters";
+    private static final String AAGUID = "fbfc3007-154e-4ecc-8c0b-6e020557d7bd";
+    private static final String PASSWORD_HASH = "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy";
+    private static final String TOTP_SECRET = "JBSWY3DPEHPK3PXP";
+    private static final Pattern RECOVERY_CODE_SHAPE = Pattern.compile("\\b[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}\\b");
 
     private UserService userService;
 
@@ -100,6 +115,9 @@ class DefaultUserServiceTest {
     private cc.hrva.urlshortener.repository.TwoFactorRecoveryCodeRepository twoFactorRecoveryCodeRepository;
 
     @Mock
+    private PasskeyCredentialRepository passkeyCredentialRepository;
+
+    @Mock
     private UserToUserDtoConverter userToUserDtoConverter;
 
     @Mock
@@ -132,7 +150,7 @@ class DefaultUserServiceTest {
     private DefaultUserService userServicePublishingTo(final ApplicationEventPublisher publisher) {
         return new DefaultUserService(appProperties, authValidator, urlRepository, userRepository,
                 passwordEncoder, apiKeyRepository, emailLogRepository, resetTokenService,
-                resetTokenRepository, twoFactorRecoveryCodeRepository, userToUserDtoConverter, sendingEmailService,
+                resetTokenRepository, twoFactorRecoveryCodeRepository, passkeyCredentialRepository, userToUserDtoConverter, sendingEmailService,
                 verificationTokenService, verificationTokenRepository, userUpdateDtoToUserConverter, connectedAppsService, scammerSignalService, publisher);
     }
 
@@ -385,6 +403,18 @@ class DefaultUserServiceTest {
     }
 
     @Test
+    void deletingAnAccountDeletesItsPasskeysFirst() {
+        final var user = User.builder().id(1L).email("test@example.com").build();
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+
+        userService.deleteUserById(1L);
+
+        final var order = inOrder(passkeyCredentialRepository, userRepository);
+        order.verify(passkeyCredentialRepository).deleteByUser(user);
+        order.verify(userRepository).delete(user);
+    }
+
+    @Test
     void shouldFailDeleteUserByIdWhenNotFound() {
         when(userRepository.findById(1L)).thenReturn(Optional.empty());
 
@@ -571,7 +601,56 @@ class DefaultUserServiceTest {
         assertThat(export.urls()).isEmpty();
         assertThat(export.apiKeys()).isEmpty();
         assertThat(export.emails()).isEmpty();
+        assertThat(export.passkeys()).isEmpty();
+        assertThat(export.recoveryCodesRemaining()).isZero();
         assertThat(export.exportedAt()).isNotNull();
+        SecurityContextHolder.clearContext();
+    }
+
+    @Test
+    void exportListsPasskeyLabelsAndDatesButNoKeyMaterial() {
+        final var user = User.builder().id(1L).email("test@example.com").authProvider("local")
+                .password(PASSWORD_HASH).twoFactorSecret(TOTP_SECRET).webauthnUserHandle(USER_HANDLE)
+                .twoFactorEnabled(true).twoStepEnabled(true).build();
+        final var passkey = PasskeyCredential.builder()
+                .id(5L)
+                .user(user)
+                .credentialId(CREDENTIAL_ID)
+                .publicKey(PUBLIC_KEY)
+                .attestationObject(ATTESTATION_OBJECT)
+                .signCount(12L)
+                .uvInitialized(true)
+                .backupEligible(true)
+                .backupState(true)
+                .discoverable(true)
+                .transports("hybrid,internal")
+                .aaguid(AAGUID)
+                .label("MacBook")
+                .createdAt(LocalDateTime.of(2026, 10, 1, 9, 30))
+                .lastUsedAt(LocalDateTime.of(2026, 10, 24, 18, 5))
+                .build();
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken("test@example.com", null));
+        when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
+        when(userToUserDtoConverter.convert(user)).thenReturn(new UserToUserDtoConverter().convert(user));
+        when(passkeyCredentialRepository.findByUserOrderByCreatedAtDesc(user)).thenReturn(List.of(passkey));
+        when(twoFactorRecoveryCodeRepository.countByUserAndUsedFalse(user)).thenReturn(7L);
+
+        final var mapper = JsonMapper.builder().build();
+        final var json = mapper.writeValueAsString(userService.exportMyData());
+        final var export = mapper.readTree(json);
+
+        assertThat(export.at("/passkeys/0/label").asString()).isEqualTo("MacBook");
+        assertThat(export.at("/passkeys/0/kind").asString()).isEqualTo("SYNCED");
+        assertThat(export.get("passkeys").toString()).isEqualTo("""
+                [{"label":"MacBook","kind":"SYNCED","backedUp":true,"createdAt":"2026-10-01T09:30:00","lastUsedAt":"2026-10-24T18:05:00"}]""");
+        assertThat(export.get("recoveryCodesRemaining").isIntegralNumber()).isTrue();
+        assertThat(export.get("recoveryCodesRemaining").asLong()).isEqualTo(7L);
+        assertThat(json)
+                .doesNotContain(CREDENTIAL_ID, PUBLIC_KEY, ATTESTATION_OBJECT, USER_HANDLE, AAGUID)
+                .doesNotContain("\"credentialId\"", "\"publicKey\"", "\"attestationObject\"")
+                .doesNotContain(PASSWORD_HASH, TOTP_SECRET, "$2a$", "codeHash")
+                .doesNotContainPattern(RECOVERY_CODE_SHAPE);
         SecurityContextHolder.clearContext();
     }
 
@@ -628,6 +707,7 @@ class DefaultUserServiceTest {
         verify(authValidator).passwordMatchesCurrentPassword(user, "myPassword");
         verify(resetTokenRepository).deleteByUser(user);
         verify(urlRepository).deleteByOwner(user);
+        verify(passkeyCredentialRepository).deleteByUser(user);
         verify(userRepository).delete(user);
         SecurityContextHolder.clearContext();
     }
