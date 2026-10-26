@@ -62,8 +62,9 @@ public class DefaultBurstAlertService implements BurstAlertService {
     private void alertIfBurst(final CreatedLink link, final String host, final String domain) {
         final var burst = appProperties.getBurst();
         final var members = redisBurstCounter.record(domain, link.urlId() + MEMBER_SEPARATOR + link.creator(), clock.instant(), burst.getWindow());
+        final var links = linksOf(members);
         final var creators = creatorsOf(members);
-        if (members.size() < burst.getLinks() || creators < MIN_CREATORS) {
+        if (links < burst.getLinks() || creators < MIN_CREATORS) {
             return;
         }
         final var alertedKey = ALERTED_KEY_PREFIX + domain;
@@ -79,8 +80,12 @@ public class DefaultBurstAlertService implements BurstAlertService {
             return;
         }
         final var ageDays = ageInDays(registeredOn, today);
-        eventPublisher.publishEvent(new BurstDetected(domain, members.size(), creators, ageDays, burst.getWindow()));
-        log.info("Burst of new links domain={} links={} creators={} ageDays={}", domain, members.size(), creators, ageDays);
+        eventPublisher.publishEvent(new BurstDetected(domain, links, creators, ageDays, burst.getWindow()));
+        log.info("Burst of new links domain={} links={} creators={} ageDays={}", domain, links, creators, ageDays);
+    }
+
+    private static int linksOf(final List<String> members) {
+        return (int) members.stream().map(member -> StringUtils.substringBefore(member, MEMBER_SEPARATOR)).distinct().count();
     }
 
     private static int creatorsOf(final List<String> members) {

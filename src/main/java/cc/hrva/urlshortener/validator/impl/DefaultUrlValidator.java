@@ -37,6 +37,7 @@ public class DefaultUrlValidator implements UrlValidator {
     private static final String STILL_BLOCKED = "This destination is still blocked: ";
     private static final String REASON_SEPARATOR = ", ";
 
+    private static final int MAX_HOST_LENGTH = 253;
     private static final Pattern WEB_ADDRESS_PREFIX = Pattern.compile("^https?://[^/]", Pattern.CASE_INSENSITIVE);
 
     @Override
@@ -81,10 +82,14 @@ public class DefaultUrlValidator implements UrlValidator {
             final var host = UriComponentsBuilder.fromUriString(longUrl, UriComponentsBuilder.ParserType.WHAT_WG)
                     .build()
                     .getHost();
-            return StringUtils.isNotEmpty(host) && (host.startsWith("[") || DomainNames.HOST_NAME.matcher(host).matches());
+            return StringUtils.isNotEmpty(host) && (host.startsWith("[") || isHostName(host));
         } catch (final IllegalArgumentException exception) {
             return false;
         }
+    }
+
+    private static boolean isHostName(final String host) {
+        return DomainNames.HOST_NAME.matcher(host).matches() && StringUtils.removeEnd(host, ".").length() <= MAX_HOST_LENGTH;
     }
 
     @Override

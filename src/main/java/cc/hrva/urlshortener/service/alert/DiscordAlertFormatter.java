@@ -59,8 +59,8 @@ public class DiscordAlertFormatter {
     public DiscordMessage message(final List<AdminAlertEvent> alerts, final int dropped) {
         final var lines = alerts.stream().limit(MAX_LINES).map(this::line).toList();
         final var reviewPage = frontendPage(REVIEW_PAGE);
-        return DiscordMessage.withoutMentionsOrEmbeds(withinLimit(List.of(), lines, alerts.size() - lines.size() + dropped,
-                more -> "and %d more, see <%s>".formatted(more, reviewPage), List.of()));
+        return DiscordMessage.withoutMentionsOrEmbeds(everyLineThatFits(lines, alerts.size() - lines.size() + dropped,
+                more -> "and %d more, see <%s>".formatted(more, reviewPage)));
     }
 
     public DiscordMessage weeklyDigest(final WeeklyDigest digest) {
@@ -70,6 +70,24 @@ public class DiscordAlertFormatter {
         final var topLinks = WeeklyDigestText.topLinkLines(digest, shortLinkHost(), DiscordAlertFormatter::plain);
         final var statsLine = "Stats (last 7 days): <%s>".formatted(frontendPage(STATS_PAGE));
         return DiscordMessage.withoutMentionsOrEmbeds(withinLimit(head, topLinks, 0, more -> "and %d more".formatted(more), List.of(statsLine)));
+    }
+
+    private static String everyLineThatFits(final List<String> lines, final int alsoHidden, final IntFunction<String> overflow) {
+        final var whole = joined(List.of(), lines, lines.size(), alsoHidden, overflow, List.of());
+        if (whole.length() <= MAX_CONTENT_LENGTH) {
+            return whole;
+        }
+        final var room = MAX_CONTENT_LENGTH - overflow.apply(lines.size() + alsoHidden).length();
+        final var shown = new ArrayList<String>();
+        var used = 0;
+        for (final var line : lines) {
+            if (used + line.length() + LINE_SEPARATOR.length() <= room) {
+                shown.add(line);
+                used += line.length() + LINE_SEPARATOR.length();
+            }
+        }
+        shown.add(overflow.apply(lines.size() - shown.size() + alsoHidden));
+        return String.join(LINE_SEPARATOR, shown);
     }
 
     private static String withinLimit(final List<String> head, final List<String> items, final int alsoHidden, final IntFunction<String> overflow,
@@ -112,10 +130,16 @@ public class DiscordAlertFormatter {
                     plain(failed.sourceName()), plain(failed.error()),
                     failed.fallbackLoaded() ? " (a fallback loaded)" : "", frontendPage(BLOCKLISTS_PAGE));
             case BlocklistSourceRecovered recovered -> "%s loads again".formatted(plain(recovered.sourceName()));
-            case BurstDetected burst -> "Possible phishing wave: %d new links to %s from %d creators within %s, %s, <%s>".formatted(
-                    burst.links(), plain(burst.domain()), burst.creators(), window(burst.window()), domainAge(burst.domainAgeDays()),
-                    frontendPage(LINKS_PAGE) + "?search=" + URLEncoder.encode(burst.domain(), StandardCharsets.UTF_8));
+            case BurstDetected burst -> burstLine(burst);
         };
+    }
+
+    private String burstLine(final BurstDetected burst) {
+        final var readable = DomainNames.toUnicode(burst.domain());
+        final var domain = readable.equals(burst.domain()) ? plain(readable) : "%s (%s)".formatted(plain(readable), plain(burst.domain()));
+        return "Possible phishing wave: %d new links to %s from %d creators within %s, %s, <%s>".formatted(
+                burst.links(), domain, burst.creators(), window(burst.window()), domainAge(burst.domainAgeDays()),
+                frontendPage(LINKS_PAGE) + "?search=" + URLEncoder.encode(readable, StandardCharsets.UTF_8));
     }
 
     private String link(final AlertedLink link) {

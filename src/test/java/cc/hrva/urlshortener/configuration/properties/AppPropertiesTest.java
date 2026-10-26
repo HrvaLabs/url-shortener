@@ -7,15 +7,23 @@ import java.time.Duration;
 import java.time.ZoneId;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+import org.springframework.boot.context.properties.bind.BindException;
+import org.springframework.boot.context.properties.bind.Bindable;
 import org.springframework.boot.context.properties.bind.Binder;
+import org.springframework.boot.context.properties.bind.validation.BindValidationException;
+import org.springframework.boot.context.properties.bind.validation.ValidationBindHandler;
 import org.springframework.boot.env.YamlPropertySourceLoader;
 import org.springframework.boot.context.properties.source.ConfigurationPropertySources;
 import org.springframework.boot.context.properties.source.MapConfigurationPropertySource;
 import org.springframework.core.env.StandardEnvironment;
 import org.springframework.core.env.SystemEnvironmentPropertySource;
 import org.springframework.core.io.ClassPathResource;
+import org.springframework.validation.beanvalidation.SpringValidatorAdapter;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class AppPropertiesTest {
 
@@ -144,13 +152,46 @@ class AppPropertiesTest {
         assertThat(validator.validate(noWindow)).extracting(violation -> violation.getPropertyPath().toString()).containsExactly("window");
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"PT0S", "PT-1S", "PT-1H", "PT0.0005S"})
+    void aBurstWindowThatIsNotPositiveIsRefused(final String window) {
+        final var burst = new AppProperties.Burst();
+        burst.setWindow(Duration.parse(window));
+
+        assertThat(Validation.buildDefaultValidatorFactory().getValidator().validate(burst))
+                .extracting(violation -> violation.getPropertyPath() + " " + violation.getMessage())
+                .containsExactly("window must be positive (at least 1ms)");
+    }
+
+    @Test
+    void aBurstWindowOfOneMillisecondIsAllowed() {
+        final var burst = new AppProperties.Burst();
+        burst.setWindow(Duration.ofMillis(1));
+
+        assertThat(Validation.buildDefaultValidatorFactory().getValidator().validate(burst)).isEmpty();
+    }
+
+    @Test
+    void aZeroBurstWindowStopsTheBindingWithAClearMessage() {
+        final var source = new MapConfigurationPropertySource(Map.of("app.burst.links", "5", "app.burst.window", "0s"));
+        final var validator = new SpringValidatorAdapter(Validation.buildDefaultValidatorFactory().getValidator());
+
+        assertThatThrownBy(() -> new Binder(source).bind("app.burst", Bindable.of(AppProperties.Burst.class), new ValidationBindHandler(validator)))
+                .isInstanceOf(BindException.class)
+                .rootCause()
+                .isInstanceOf(BindValidationException.class)
+                .hasMessageContaining("app.burst.window")
+                .hasMessageContaining("must be positive (at least 1ms)");
+    }
+
     @Test
     void theBurstSettingsAreValidatedWithTheRestOfTheApp() {
         final var appProperties = new AppProperties();
         appProperties.getBurst().setLinks(1);
+        appProperties.getBurst().setWindow(Duration.ZERO);
 
         assertThat(Validation.buildDefaultValidatorFactory().getValidator().validate(appProperties))
-                .extracting(ConstraintViolation::getPropertyPath).map(Object::toString).contains("burst.links");
+                .extracting(ConstraintViolation::getPropertyPath).map(Object::toString).contains("burst.links", "burst.window");
     }
 
     @Test

@@ -11,6 +11,7 @@ import java.time.ZoneId;
 import java.util.List;
 import lombok.Data;
 import lombok.ToString;
+import org.hibernate.validator.constraints.time.DurationMin;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.validation.annotation.Validated;
 
@@ -179,6 +180,7 @@ public class AppProperties {
         private int links = 5;
 
         @NotNull
+        @DurationMin(millis = 1, message = "must be positive (at least 1ms)")
         private Duration window = Duration.ofHours(1);
 
     }

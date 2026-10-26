@@ -265,7 +265,45 @@ class DiscordAlertFormatterTest {
                 new ReviewOpened(new AlertedLink(1L, "abc12", host, null), List.of("high-risk domain ending .example")),
                 new UserSignedUp(31L, "local")), 0).content();
 
-        assertThat(content).isEqualTo("and 2 more, see " + REVIEW_PAGE);
+        assertThat(content).isEqualTo("New user: account #31 signed up with email, <https://app.hrva.cc/admin>\n"
+                + "and 1 more, see " + REVIEW_PAGE);
+    }
+
+    @Test
+    void anOverlongAlertInTheMiddleHidesOnlyItselfSoALaterBurstIsStillShown() {
+        final var host = "h".repeat(1990) + ".example";
+
+        final var lines = formatter.message(List.of(
+                new UserSignedUp(31L, "local"),
+                new ReviewOpened(new AlertedLink(1L, "abc12", host, null), List.of("high-risk domain ending .example")),
+                new BlocklistSourceRecovered("URLhaus"),
+                new BurstDetected("evil-login.com", 5, 2, 4, Duration.ofHours(1))), 0).content().lines().toList();
+
+        assertThat(lines).containsExactly(
+                "New user: account #31 signed up with email, <https://app.hrva.cc/admin>",
+                "URLhaus loads again",
+                "Possible phishing wave: 5 new links to evil-login.com from 2 creators within 1 hour, domain registered 4 days ago, "
+                        + "<https://app.hrva.cc/admin/urls?search=evil-login.com>",
+                "and 1 more, see " + REVIEW_PAGE);
+    }
+
+    @Test
+    void twoLongAlertsThatFillTheMessageStillLeaveRoomForEveryLaterLineThatFits() {
+        final var details = "d".repeat(750);
+        final var alerts = new ArrayList<AdminAlertEvent>();
+        IntStream.rangeClosed(1, 3).forEach(index -> alerts.add(
+                new VisitorReported(new AlertedLink(index, "s" + index, "example.top", null), ReportCategory.PHISHING, details, false)));
+        alerts.add(new BurstDetected("evil-login.com", 5, 2, 4, Duration.ofHours(1)));
+
+        final var content = formatter.message(alerts, 0).content();
+        final var lines = content.lines().toList();
+
+        assertThat(content.length()).isLessThanOrEqualTo(2000);
+        assertThat(lines).hasSize(4);
+        assertThat(lines.get(0)).contains("hrva.cc/s1 ", details);
+        assertThat(lines.get(1)).contains("hrva.cc/s2 ", details);
+        assertThat(lines.get(2)).startsWith("Possible phishing wave: 5 new links to evil-login.com ");
+        assertThat(lines.get(3)).isEqualTo("and 1 more, see " + REVIEW_PAGE);
     }
 
     @Test
@@ -343,6 +381,35 @@ class DiscordAlertFormatterTest {
         final var content = formatter.message(List.of(new BurstDetected(domain, 5, 2, null, Duration.ofHours(1))), 0).content();
 
         assertThat(content).contains(" new links to " + domain + " from ").endsWith("?search=" + domain + ">").doesNotContain("…");
+    }
+
+    @Test
+    void anIdnBurstShowsBothFormsAndSearchesTheReadableOne() {
+        final var content = formatter.message(List.of(new BurstDetected("xn--okolada-i6a.hr", 5, 2, null, Duration.ofHours(1))), 0).content();
+
+        assertThat(content).isEqualTo("Possible phishing wave: 5 new links to čokolada.hr (xn--okolada-i6a.hr) from 2 creators within 1 hour, "
+                + "domain age unknown, <https://app.hrva.cc/admin/urls?search=%C4%8Dokolada.hr>");
+    }
+
+    @Test
+    void anIdnBurstStaysMentionSafe() {
+        final var message = formatter.message(List.of(new BurstDetected("xn--evil_login-ljb.com", 5, 2, 4, Duration.ofHours(1))), 0);
+
+        assertThat(message.content()).startsWith("Possible phishing wave: 5 new links to čevil\\_login.com (xn--evil\\_login-ljb.com) from 2 creators")
+                .endsWith(", <https://app.hrva.cc/admin/urls?search=%C4%8Devil_login.com>");
+        assertThat(message.allowedMentions().parse()).isEmpty();
+        assertThat(message.flags()).isEqualTo(4);
+    }
+
+    @Test
+    void anAsciiOrUndecodableBurstDomainIsShownOnce() {
+        final var lines = formatter.message(List.of(
+                new BurstDetected("evil-login.com", 5, 2, null, Duration.ofHours(1)),
+                new BurstDetected("xn--zz.com", 5, 2, null, Duration.ofHours(1))), 0).content().lines().toList();
+
+        assertThat(lines).extracting(line -> line.split(" new links to ")[1].split(" from ")[0]).containsExactly("evil-login.com", "xn--zz.com");
+        assertThat(lines).extracting(line -> line.substring(line.lastIndexOf('<')))
+                .containsExactly("<https://app.hrva.cc/admin/urls?search=evil-login.com>", "<https://app.hrva.cc/admin/urls?search=xn--zz.com>");
     }
 
     @Test

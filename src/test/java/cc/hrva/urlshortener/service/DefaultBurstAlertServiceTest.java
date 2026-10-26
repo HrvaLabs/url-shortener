@@ -129,6 +129,35 @@ class DefaultBurstAlertServiceTest {
     }
 
     @Test
+    void oneReusedLinkFromFiveNetworksIsNotABurst() {
+        counted(IntStream.rangeClosed(1, 5).mapToObj(network -> "41|anonymous:" + Integer.toString(network).repeat(64)).toList());
+
+        burstAlertService.linkCreated(link(41L, LONG_URL, "anonymous:" + "5".repeat(64), Outcome.CLEAN));
+
+        verifyNoInteractions(domainAgeService, eventPublisher);
+        assertThat(redis.isEmpty()).isTrue();
+    }
+
+    @Test
+    void reusedLinksCountOnceEachAndARealWaveStillAlerts() {
+        counted(List.of("41|" + ANONYMOUS, "41|user:7", "42|user:7", "43|user:8", "44|user:8", "45|user:7", "45|user:8"));
+        when(domainAgeService.registeredOn(DOMAIN)).thenReturn(Optional.empty());
+
+        burstAlertService.linkCreated(link(45L, LONG_URL, "user:8", Outcome.CLEAN));
+
+        verify(eventPublisher).publishEvent(new BurstDetected(DOMAIN, 5, 3, null, HOUR));
+    }
+
+    @Test
+    void fourDistinctLinksAreNotABurstHoweverOftenTheyAreReused() {
+        counted(List.of("41|user:7", "41|user:8", "42|user:7", "42|user:8", "43|user:7", "44|user:8"));
+
+        burstAlertService.linkCreated(link(44L, LONG_URL, "user:8", Outcome.CLEAN));
+
+        verifyNoInteractions(domainAgeService, eventPublisher);
+    }
+
+    @Test
     void fourLinksAreNotABurst() {
         counted(members(4, "user:7", "user:8"));
 

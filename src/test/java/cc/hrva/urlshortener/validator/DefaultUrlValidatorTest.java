@@ -9,6 +9,7 @@ import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.codebook.Authorities;
 import cc.hrva.urlshortener.model.enums.BlockReason;
 import java.util.List;
+import java.util.Locale;
 import cc.hrva.urlshortener.exception.ShortUrlAlreadyExistsException;
 import cc.hrva.urlshortener.exception.UrlValidationException;
 import cc.hrva.urlshortener.model.Url;
@@ -581,6 +582,36 @@ class DefaultUrlValidatorTest {
     }
 
     @Test
+    void acceptsAHostOfExactly253Characters() {
+        final var host = hostOfLength(253);
+
+        assertThat(host).hasSize(253);
+        assertLongUrlAccepted("https://" + host + "/login");
+        assertLongUrlAccepted("https://" + host + "./login");
+    }
+
+    @Test
+    void refusesAHostOver253Characters() {
+        final var host = hostOfLength(254);
+
+        assertThat(host).hasSize(254);
+        assertLongUrlRejected("https://" + host + "/login");
+        assertLongUrlRejected("https://" + host.toUpperCase(Locale.ROOT) + ":8443/login");
+        verifyNoInteractions(linkCheckService, suspiciousUrlService, safeBrowsingService);
+    }
+
+    @Test
+    void anIdnHostCountsInItsAsciiForm() {
+        final var ascii = hostOfLength(235) + ".xn--okolada-i6a.hr";
+        final var unicode = ascii.replace("xn--okolada-i6a", "čokolada");
+
+        assertThat(ascii).hasSize(254);
+        assertThat(unicode).hasSize(247);
+        assertLongUrlAccepted("https://" + unicode.substring(1) + "/");
+        assertLongUrlRejected("https://" + unicode + "/");
+    }
+
+    @Test
     void aMissingDestinationIsStillRefusedAsNotAWebAddress() {
         assertLongUrlRejected(null);
     }
@@ -590,6 +621,14 @@ class DefaultUrlValidatorTest {
         assertThatThrownBy(() -> urlValidator.checkIfLongUrlIsValid(url))
                 .isInstanceOf(UrlValidationException.class)
                 .hasMessage("That doesn't look like a valid web address. Check the URL and try again.");
+    }
+
+    private static String hostOfLength(final int length) {
+        final var host = new StringBuilder();
+        while (length - host.length() > 67) {
+            host.append("a".repeat(62)).append('.');
+        }
+        return host.append("b".repeat(length - host.length() - 4)).append(".com").toString();
     }
 
     private void assertLongUrlAccepted(final String longUrl) {

@@ -4,9 +4,13 @@ import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.User;
 import jakarta.persistence.criteria.JoinType;
 import java.time.LocalDateTime;
+import java.util.regex.Pattern;
 import org.springframework.data.jpa.domain.Specification;
 
 public final class UrlSpecification {
+
+    private static final char LIKE_ESCAPE = '\\';
+    private static final Pattern LIKE_SPECIAL = Pattern.compile("[\\\\%_]");
 
     private UrlSpecification() {}
 
@@ -16,21 +20,21 @@ public final class UrlSpecification {
 
     public static Specification<Url> search(final String keyword) {
         return (root, query, cb) -> {
-            final var pattern = "%" + keyword.toLowerCase() + "%";
+            final var pattern = containing(keyword);
             return cb.or(
-                    cb.like(cb.lower(root.get("longUrl")), pattern),
-                    cb.like(cb.lower(root.get("shortUrl")), pattern));
+                    cb.like(cb.lower(root.get("longUrl")), pattern, LIKE_ESCAPE),
+                    cb.like(cb.lower(root.get("shortUrl")), pattern, LIKE_ESCAPE));
         };
     }
 
     public static Specification<Url> searchIncludingOwner(final String keyword) {
         return (root, query, cb) -> {
-            final var pattern = "%" + keyword.toLowerCase() + "%";
+            final var pattern = containing(keyword);
             final var owner = root.join("owner", JoinType.LEFT);
             return cb.or(
-                    cb.like(cb.lower(root.get("longUrl")), pattern),
-                    cb.like(cb.lower(root.get("shortUrl")), pattern),
-                    cb.like(cb.lower(owner.get("email")), pattern));
+                    cb.like(cb.lower(root.get("longUrl")), pattern, LIKE_ESCAPE),
+                    cb.like(cb.lower(root.get("shortUrl")), pattern, LIKE_ESCAPE),
+                    cb.like(cb.lower(owner.get("email")), pattern, LIKE_ESCAPE));
         };
     }
 
@@ -69,6 +73,10 @@ public final class UrlSpecification {
                 cb.or(
                         root.get("expirationDate").isNull(),
                         cb.greaterThanOrEqualTo(root.get("expirationDate"), LocalDateTime.now()));
+    }
+
+    private static String containing(final String keyword) {
+        return "%" + LIKE_SPECIAL.matcher(keyword.toLowerCase()).replaceAll("\\\\$0") + "%";
     }
 
 }

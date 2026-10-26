@@ -5,6 +5,7 @@ import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import jakarta.persistence.EntityManager;
 import java.util.List;
+import java.util.function.Function;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -74,6 +75,35 @@ class UrlSpecificationTest {
     void adminSearchStillMatchesShortAndLongUrlsIncludingAnonymousLinks() {
         assertThat(shortUrls(UrlSpecification.searchIncludingOwner("gableci"))).containsExactly("gableci");
         assertThat(shortUrls(UrlSpecification.searchIncludingOwner("findfavoritedate"))).containsExactly("v0DB3");
+    }
+
+    @Test
+    void searchTreatsPercentAndUnderscoreAsPlainText() {
+        persistUrl("percent", "https://discount.example/100%25off", null);
+        persistUrl("100%%off", "https://double.example/", null);
+        persistUrl("underscore", "https://evil_login.com/verify", null);
+        persistUrl("lookalike", "https://evilxlogin.com/verify", null);
+        persistUrl("a\\b", "https://odd.example/", null);
+        entityManager.flush();
+
+        for (final var search : List.<Function<String, Specification<Url>>>of(UrlSpecification::searchIncludingOwner, UrlSpecification::search)) {
+            assertThat(shortUrls(search.apply("%%"))).containsExactly("100%%off");
+            assertThat(shortUrls(search.apply("%"))).containsExactly("100%%off", "percent");
+            assertThat(shortUrls(search.apply("evil_login"))).containsExactly("underscore");
+            assertThat(shortUrls(search.apply("_"))).containsExactly("njuskaio_verify", "underscore");
+            assertThat(shortUrls(search.apply("a\\b"))).containsExactly("a\\b");
+            assertThat(shortUrls(search.apply("\\"))).containsExactly("a\\b");
+            assertThat(shortUrls(search.apply("\\%"))).isEmpty();
+        }
+    }
+
+    @Test
+    void adminSearchTreatsWildcardsInTheOwnersEmailAsPlainText() {
+        persistUrl("owned", "https://plain.example/", persistUser("a_b@example.com"));
+        persistUrl("other", "https://other.example/", persistUser("axb@example.com"));
+        entityManager.flush();
+
+        assertThat(shortUrls(UrlSpecification.searchIncludingOwner("a_b@"))).containsExactly("owned");
     }
 
     @Test
