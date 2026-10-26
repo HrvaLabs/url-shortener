@@ -3,6 +3,7 @@ package cc.hrva.urlshortener.configuration;
 import cc.hrva.urlshortener.exception.ApiException;
 import cc.hrva.urlshortener.exception.ApiKeyNotFoundException;
 import cc.hrva.urlshortener.exception.BioHandleUnavailableException;
+import cc.hrva.urlshortener.exception.BioPageNotFoundException;
 import cc.hrva.urlshortener.exception.BlocklistSourceNotFoundException;
 import cc.hrva.urlshortener.exception.CommonException;
 import cc.hrva.urlshortener.exception.ConnectRequestAlreadyApprovedException;
@@ -160,6 +161,11 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(ReservedAliasNotFoundException.class)
     public ResponseEntity<Map<String, String>> handleReservedAliasNotFound(final ReservedAliasNotFoundException ex) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", safeMessage(ex)));
+    }
+
+    @ExceptionHandler(BioPageNotFoundException.class)
+    public ResponseEntity<Map<String, String>> handleBioPageNotFound(final BioPageNotFoundException ex) {
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", safeMessage(ex)));
     }
 

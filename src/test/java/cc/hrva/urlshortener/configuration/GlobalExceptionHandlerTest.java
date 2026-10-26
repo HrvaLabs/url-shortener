@@ -1,6 +1,7 @@
 package cc.hrva.urlshortener.configuration;
 
 import cc.hrva.urlshortener.exception.BioHandleUnavailableException;
+import cc.hrva.urlshortener.exception.BioPageNotFoundException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -64,8 +65,20 @@ class GlobalExceptionHandlerTest {
                 .andExpect(jsonPath("$.error").value("This handle is taken. Try another."));
     }
 
+    @Test
+    void aMissingBioPageIsNotFoundWithItsText() throws Exception {
+        mockMvc.perform(get("/probe/bio-page"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error").value("You don't have a bio page yet."));
+    }
+
     @RestController
     static class ProbeController {
+
+        @GetMapping("/probe/bio-page")
+        String probeBioPage() {
+            throw new BioPageNotFoundException("You don't have a bio page yet.");
+        }
 
         @GetMapping("/probe/handle")
         String probeHandle() {
