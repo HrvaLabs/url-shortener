@@ -1,0 +1,174 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.9.xsd">
+
+    <changeSet author="khrvacic" id="029-bio-page">
+        <createTable tableName="bio_page">
+            <column name="id" type="BIGINT" autoIncrement="true">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="user_id" type="BIGINT">
+                <constraints nullable="false" unique="true" uniqueConstraintName="uq_bio_page_user_id"/>
+            </column>
+            <column name="handle" type="VARCHAR(30)">
+                <constraints unique="true" uniqueConstraintName="uq_bio_page_handle"/>
+            </column>
+            <column name="display_name" type="VARCHAR(50)" defaultValue="">
+                <constraints nullable="false"/>
+            </column>
+            <column name="bio" type="VARCHAR(160)" defaultValue="">
+                <constraints nullable="false"/>
+            </column>
+            <column name="avatar_kind" type="VARCHAR(10)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="avatar_emoji" type="VARCHAR(16)"/>
+            <column name="accent" type="VARCHAR(10)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="theme" type="VARCHAR(10)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="indexable" type="BOOLEAN" defaultValueBoolean="false">
+                <constraints nullable="false"/>
+            </column>
+            <column name="hidden_at" type="TIMESTAMP"/>
+            <column name="hidden_reason" type="VARCHAR(200)"/>
+            <column name="hidden_by" type="VARCHAR(255)"/>
+            <column name="handle_revoked_reason" type="VARCHAR(200)"/>
+            <column name="created_at" type="TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+        <addForeignKeyConstraint baseTableName="bio_page" baseColumnNames="user_id" constraintName="fk_bio_page_user"
+                                 referencedTableName="user_account" referencedColumnNames="id" onDelete="CASCADE"/>
+        <rollback>
+            <dropTable tableName="bio_page"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet author="khrvacic" id="029-bio-page-button">
+        <createTable tableName="bio_page_button">
+            <column name="id" type="BIGINT" autoIncrement="true">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="page_id" type="BIGINT">
+                <constraints nullable="false"/>
+            </column>
+            <column name="url_id" type="BIGINT">
+                <constraints nullable="false"/>
+            </column>
+            <column name="title" type="VARCHAR(60)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="icon" type="VARCHAR(12)"/>
+            <column name="sort_order" type="INT">
+                <constraints nullable="false"/>
+            </column>
+            <column name="visible" type="BOOLEAN" defaultValueBoolean="true">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+        <addUniqueConstraint tableName="bio_page_button" columnNames="page_id, url_id" constraintName="uq_bio_page_button_page_url"/>
+        <addForeignKeyConstraint baseTableName="bio_page_button" baseColumnNames="page_id" constraintName="fk_bio_page_button_page"
+                                 referencedTableName="bio_page" referencedColumnNames="id" onDelete="CASCADE"/>
+        <addForeignKeyConstraint baseTableName="bio_page_button" baseColumnNames="url_id" constraintName="fk_bio_page_button_url"
+                                 referencedTableName="url" referencedColumnNames="id" onDelete="CASCADE"/>
+        <createIndex tableName="bio_page_button" indexName="idx_bio_page_button_url_id">
+            <column name="url_id"/>
+        </createIndex>
+        <rollback>
+            <dropTable tableName="bio_page_button"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet author="khrvacic" id="029-bio-handle-hold">
+        <createTable tableName="bio_handle_hold">
+            <column name="handle" type="VARCHAR(30)">
+                <constraints primaryKey="true" primaryKeyName="pk_bio_handle_hold" nullable="false"/>
+            </column>
+            <column name="page_id" type="BIGINT"/>
+            <column name="held_until" type="TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_at" type="TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+        <addForeignKeyConstraint baseTableName="bio_handle_hold" baseColumnNames="page_id" constraintName="fk_bio_handle_hold_page"
+                                 referencedTableName="bio_page" referencedColumnNames="id" onDelete="SET NULL"/>
+        <createIndex tableName="bio_handle_hold" indexName="idx_bio_handle_hold_held_until">
+            <column name="held_until"/>
+        </createIndex>
+        <rollback>
+            <dropTable tableName="bio_handle_hold"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet author="khrvacic" id="029-bio-page-daily-views">
+        <createTable tableName="bio_page_daily_views">
+            <column name="page_id" type="BIGINT">
+                <constraints nullable="false"/>
+            </column>
+            <column name="stat_date" type="DATE">
+                <constraints nullable="false"/>
+            </column>
+            <column name="views" type="BIGINT" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+            <column name="bot_views" type="BIGINT" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+        <addPrimaryKey tableName="bio_page_daily_views" columnNames="page_id, stat_date" constraintName="pk_bio_page_daily_views"/>
+        <addForeignKeyConstraint baseTableName="bio_page_daily_views" baseColumnNames="page_id" constraintName="fk_bio_page_daily_views_page"
+                                 referencedTableName="bio_page" referencedColumnNames="id" onDelete="CASCADE"/>
+        <createIndex tableName="bio_page_daily_views" indexName="idx_bio_page_daily_views_stat_date">
+            <column name="stat_date"/>
+        </createIndex>
+        <rollback>
+            <dropTable tableName="bio_page_daily_views"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet author="khrvacic" id="029-bio-page-review">
+        <createTable tableName="bio_page_review">
+            <column name="id" type="BIGINT" autoIncrement="true">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="page_id" type="BIGINT">
+                <constraints nullable="false"/>
+            </column>
+            <column name="reasons" type="TEXT">
+                <constraints nullable="false"/>
+            </column>
+            <column name="flagged_at" type="TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="resolved_at" type="TIMESTAMP"/>
+            <column name="resolved_by" type="VARCHAR(255)"/>
+            <column name="resolution" type="VARCHAR(20)"/>
+            <column name="system_flagged" type="BOOLEAN" defaultValueBoolean="false">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+        <addForeignKeyConstraint baseTableName="bio_page_review" baseColumnNames="page_id" constraintName="fk_bio_page_review_page"
+                                 referencedTableName="bio_page" referencedColumnNames="id" onDelete="CASCADE"/>
+        <createIndex tableName="bio_page_review" indexName="idx_bio_page_review_page_id">
+            <column name="page_id"/>
+        </createIndex>
+        <createIndex tableName="bio_page_review" indexName="idx_bio_page_review_resolved_at">
+            <column name="resolved_at"/>
+        </createIndex>
+        <rollback>
+            <dropTable tableName="bio_page_review"/>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>

@@ -33,4 +33,7 @@ public interface LinkReviewRepository extends JpaRepository<LinkReview, Long>, J
     @Query("select distinct r.url.id from LinkReview r where r.resolvedAt is null and r.url.id in :urlIds")
     List<Long> findOpenUrlIds(@Param("urlIds") Collection<Long> urlIds);
 
+    @Query("select distinct r.url.id from LinkReview r where r.resolvedAt is null and r.systemFlagged = true and r.url.id in :urlIds")
+    List<Long> findOpenSystemFlaggedUrlIds(@Param("urlIds") Collection<Long> urlIds);
+
 }
