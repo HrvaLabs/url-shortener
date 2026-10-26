@@ -31,6 +31,7 @@ QR scans in link analytics, a public page with hrva.cc in numbers, a weekly summ
 - Searching links, users or the review queue for % or _ now finds those characters instead of matching everything.
 - Searching links for a domain finds it in either spelling, such as čokolada.hr and xn--okolada-i6a.hr.
 - A web address whose domain name is longer than 253 characters, the most a domain name can have, is now refused as not a valid web address.
+- Signing in again from an admin page brings you back to the page you opened.
 
 ---
 
