@@ -4,9 +4,13 @@
 # http://localhost:8091). The local dev stack (docker/docker-compose.yml, its db volume, ports 5432,
 # 6379 and 8080) is never touched. Everything is removed on exit.
 #
-# Needs Docker, Java 25, Maven, Node (npx), jq, curl and openssl. The MCP Inspector's own sign-in uses
-# the macOS `open` shim in scripts/mcp-e2e/fake-browser, so that step runs on macOS only.
+# Needs Docker, Java 25 (java and jar), Maven, Node (node and npx), jq, curl and openssl. The MCP
+# Inspector's own sign-in uses the macOS `open` shim in scripts/mcp-e2e/fake-browser, so that step runs
+# on macOS only.
 # Section 15 asks for the passkey sign-in and registration options with curl and checks 028's columns.
+# Section 16 checks QR scans, the public numbers (with their 60-per-hour limit) and the burst alert. The
+# alert goes to a local Node stub on a random loopback port: its URL is passed on the command line, which
+# outranks DISCORD_WEBHOOK_URL, so the real webhook is never called.
 #
 #   scripts/mcp-e2e.sh                         builds the jar, then runs every step
 #   MCP_E2E_SKIP_BUILD=1 scripts/mcp-e2e.sh    reuses target/url-shortener-*.jar
@@ -34,6 +38,10 @@ DB_PASSWORD=$(openssl rand -hex 16)
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/hrva-mcp-e2e.XXXXXX")
 APP_PID=
 INSPECTOR_PID=
+STUB_PID=
+DISCORD_SECRET=e2e-$(openssl rand -hex 8)
+DISCORD_POSTS=$WORK/discord-posts.jsonl
+BROWSER_USER_AGENT='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36'
 INITIALIZE='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"curl","version":"0"}}}'
 TOOLS_LIST='{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'
 
@@ -48,6 +56,9 @@ cleanup() {
     if [[ -n $APP_PID ]] && kill -0 "$APP_PID" 2>/dev/null; then
         kill "$APP_PID" 2>/dev/null || true
         wait "$APP_PID" 2>/dev/null || true
+    fi
+    if [[ -n $STUB_PID ]]; then
+        kill "$STUB_PID" 2>/dev/null || true
     fi
     docker rm -f "$POSTGRES_CONTAINER" "$REDIS_CONTAINER" >/dev/null 2>&1 || true
     if (( status != 0 )) && [[ -s $WORK/app.log ]]; then
@@ -154,7 +165,7 @@ tool_text() {
     jq -r '[.content[]? | select(.type == "text") | .text] | join("\n")' <<<"$INSPECTOR_RESULT"
 }
 
-for tool in docker java mvn npx jq curl openssl; do
+for tool in docker java jar mvn node npx jq curl openssl; do
     command -v "$tool" >/dev/null || fail "$tool is required"
 done
 if (exec 3<>"/dev/tcp/127.0.0.1/$PORT") 2>/dev/null; then
@@ -175,6 +186,27 @@ wait_until 60 "Postgres" docker exec "$POSTGRES_CONTAINER" pg_isready -q -h 127.
 wait_until 30 "Redis" docker exec "$REDIS_CONTAINER" redis-cli ping
 echo "  containers $RUN_ID-{postgres,redis}: Postgres 18 on 127.0.0.1:$POSTGRES_PORT, Redis 8 on 127.0.0.1:$REDIS_PORT"
 
+: >"$DISCORD_POSTS"
+node - "$WORK/discord-stub.port" "$DISCORD_POSTS" <<'JS' &
+const fs = require('node:fs');
+const [portFile, postsFile] = process.argv.slice(2);
+const server = require('node:http').createServer((request, response) => {
+    const chunks = [];
+    request.on('data', (chunk) => chunks.push(chunk));
+    request.on('end', () => {
+        if (request.method === 'POST') {
+            fs.appendFileSync(postsFile, Buffer.concat(chunks).toString('utf8').replace(/\n/g, ' ') + '\n');
+        }
+        response.writeHead(204).end();
+    });
+});
+server.listen(0, '127.0.0.1', () => fs.writeFileSync(portFile, String(server.address().port)));
+JS
+STUB_PID=$!
+wait_until 15 "the Discord stub" test -s "$WORK/discord-stub.port"
+DISCORD_WEBHOOK=http://127.0.0.1:$(cat "$WORK/discord-stub.port")/api/webhooks/1/$DISCORD_SECRET
+echo "  Discord stub on ${DISCORD_WEBHOOK%/api/*} (the app's webhook; the real one is never called)"
+
 if [[ ${MCP_E2E_SKIP_BUILD:-0} != 1 ]]; then
     echo "  building the jar (mvn -B -DskipTests package)"
     (cd "$ROOT" && mvn -B -DskipTests package >"$WORK/build.log" 2>&1) || { tail -n 40 "$WORK/build.log"; fail "the build failed"; }
@@ -188,6 +220,7 @@ OAUTH2_GOOGLE_CLIENT_ID=${OAUTH2_GOOGLE_CLIENT_ID:-mcp-e2e-unused} \
     --spring.profiles.active=local \
     --server.port="$PORT" \
     --app.mcp.issuer="$BASE" \
+    --app.discord-webhook-url="$DISCORD_WEBHOOK" \
     --spring.datasource.url="jdbc:postgresql://127.0.0.1:$POSTGRES_PORT/url_shortener" \
     --spring.datasource.username="$DB_USER" \
     --spring.datasource.password="$DB_PASSWORD" \
@@ -334,7 +367,7 @@ expect_eq "$LINK_TAGS" '["ai","docs"]' "stored tags are ai + the requested one"
 
 section "9. link_stats (Inspector CLI) after a browser visit and a bot visit"
 show "visiting $BASE/$ALIAS as Chrome on Windows from t.co in HR -> $(curl -s -o /dev/null -w '%{http_code}' \
-    -A 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36' \
+    -A "$BROWSER_USER_AGENT" \
     -H 'Referer: https://t.co/x' -H 'CF-IPCountry: HR' "$BASE/$ALIAS")"
 show "visiting $BASE/$ALIAS with plain curl, a bot -> $(curl -s -o /dev/null -w '%{http_code}' "$BASE/$ALIAS")"
 sleep 2
@@ -525,5 +558,125 @@ expect_eq "$(psql_value "select count(*) from information_schema.columns where t
     1 "028 added user_account.two_step_enabled"
 expect_eq "$(psql_value "select count(*) from information_schema.columns where table_name = 'passkey_credential' and column_name = 'attestation_object'")" \
     1 "028 added passkey_credential.attestation_object"
+
+section "16. QR scans, public numbers and the burst alert"
+source_clicks() {
+    psql_value "select coalesce(sum(b.clicks), 0) from link_daily_breakdown b join url u on u.id = b.url_id where u.short_url = '$ALIAS' and b.dimension = 'SOURCE' and b.dimension_value = '$1';"
+}
+qr_scan_counted() {
+    [[ $(source_clicks qr) == 1 ]]
+}
+QR_REDIRECT=$(curl -s -o /dev/null -w '%{redirect_url}' -A "$BROWSER_USER_AGENT" "$BASE/$ALIAS?qr")
+show "visiting $BASE/$ALIAS?qr as Chrome -> Location: $QR_REDIRECT"
+expect_eq "$QR_REDIRECT" "$DESTINATION" "the scan lands on the destination exactly, with no qr added"
+wait_until 15 "the QR scan row" qr_scan_counted
+expect_eq "$(source_clicks qr),$(source_clicks direct)" "1,1" "link_daily_breakdown SOURCE: qr 1 (this scan), direct 1 (section 9's plain visit)"
+http -H "Authorization: Bearer $ADMIN_JWT" "$BASE/api/v1/admin/stats/traffic?days=7"
+expect_eq "$HTTP_STATUS" 200 "GET /api/v1/admin/stats/traffic?days=7"
+show "$(jq -c '{clicks: .totals.clicks, sources: .breakdowns.sources}' <<<"$HTTP_BODY")"
+expect_eq "$(jq -r '[.breakdowns.sources[] | select(.value == "qr") | .clicks] | add' <<<"$HTTP_BODY")" 1 "traffic: one QR scan"
+expect_eq "$(jq -r '[.breakdowns.sources[] | select(.value == "direct") | .clicks] | add' <<<"$HTTP_BODY")" 1 "traffic: one direct click"
+expect_eq "$(jq -r .totals.clicks <<<"$HTTP_BODY")" 2 "traffic: QR scans and direct clicks add up to the clicks"
+
+expect_eq "$(curl -s -o "$WORK/qr.png" -w '%{http_code} %{content_type}' "$BASE/api/v1/urls/$ALIAS/qr")" "200 image/png" \
+    "GET /api/v1/urls/$ALIAS/qr is a PNG"
+QR_CLASSPATH=
+while IFS= read -r library; do
+    (cd "$WORK" && jar xf "$JAR" "$library")
+    QR_CLASSPATH+=${QR_CLASSPATH:+:}$WORK/$library
+done < <(jar tf "$JAR" | grep -E '^BOOT-INF/lib/(core|javase)-[0-9.]+\.jar$')
+cat >"$WORK/QrText.java" <<'JAVA'
+import com.google.zxing.BinaryBitmap;
+import com.google.zxing.MultiFormatReader;
+import com.google.zxing.client.j2se.BufferedImageLuminanceSource;
+import com.google.zxing.common.HybridBinarizer;
+import java.io.File;
+import javax.imageio.ImageIO;
+
+public class QrText {
+    public static void main(final String[] arguments) throws Exception {
+        final var image = ImageIO.read(new File(arguments[0]));
+        System.out.print(new MultiFormatReader().decode(new BinaryBitmap(new HybridBinarizer(new BufferedImageLuminanceSource(image)))).getText());
+    }
+}
+JAVA
+QR_TEXT=$(java -Djava.awt.headless=true -cp "$QR_CLASSPATH" "$WORK/QrText.java" "$WORK/qr.png")
+show "the code decodes (ZXing from the app jar) to: $QR_TEXT"
+expect_eq "$QR_TEXT" "localhost/$ALIAS?qr" "the code is the short link (app.server-url of the local profile) with the ?qr marker"
+
+public_stats() {
+    http -H "CF-Connecting-IP: $1" "$BASE/api/v1/public/stats"
+}
+STATS_NETWORK=203.0.113.7
+public_stats "$STATS_NETWORK"
+expect_eq "$HTTP_STATUS" 200 "GET /api/v1/public/stats without a token"
+show "$(jq -c '{from, to, activeLinks, linksCreated, clicks, days: (.daily | length), blocked, visitorReportsHandled, averageReviewMinutes, blocklists}' <<<"$HTTP_BODY")"
+expect_eq "$(jq -r 'keys | join(",")' <<<"$HTTP_BODY")" \
+    "activeLinks,averageReviewMinutes,blocked,blocklists,clicks,daily,from,linksCreated,to,updatedAt,visitorReportsHandled" "only the aggregate fields"
+expect_eq "$(jq -r '.daily | length' <<<"$HTTP_BODY")" 30 "30 days"
+expect_eq "$(jq -r '.daily[0].date == .from and .daily[-1].date == .to' <<<"$HTTP_BODY")" true "the days run from .from to .to"
+expect_eq "$(jq -r '[.daily[] | keys | join(",")] | unique | join(";")' <<<"$HTTP_BODY")" "clicks,date" "each day is a date and a click count"
+expect_eq "$(jq -r '.blocked | keys | join(",")' <<<"$HTTP_BODY")" "allTime,last30Days" "blocked links are two counts"
+expect_eq "$(jq -r '.activeLinks >= 1' <<<"$HTTP_BODY")" true "the active links are counted"
+expect_eq "$(jq -r .clicks <<<"$HTTP_BODY")" 0 "today's clicks wait for the day to close (the window ends yesterday)"
+expect_eq "$(jq -r --arg alias "$ALIAS" '[.. | strings | select(test("@|example\\.com|localhost|" + $alias))] | length' <<<"$HTTP_BODY")" 0 \
+    "no alias, destination host or email in the answer"
+show "Cache-Control: $(header_value cache-control)"
+expect_contains "$(header_value cache-control)" "max-age=600" "browsers may keep it for 10 minutes"
+expect_contains "$(header_value cache-control)" "public" "shared caches may keep it too"
+TTL=$(docker exec "$REDIS_CONTAINER" redis-cli --raw ttl public:stats)
+expect_eq "$(( TTL > 0 && TTL <= 3600 ))" 1 "public:stats is cached in Redis for at most an hour (ttl ${TTL}s)"
+ALLOWED=1
+for (( call = 2; call <= 60; call++ )); do
+    if [[ $(curl -s -o /dev/null -w '%{http_code}' -H "CF-Connecting-IP: $STATS_NETWORK" "$BASE/api/v1/public/stats") == 200 ]]; then
+        ALLOWED=$(( ALLOWED + 1 ))
+    fi
+done
+expect_eq "$ALLOWED" 60 "60 calls in the hour from one network are answered"
+public_stats "$STATS_NETWORK"
+show "call 61 -> $HTTP_STATUS $HTTP_BODY"
+expect_eq "$HTTP_STATUS" 429 "the 61st call in the hour is refused"
+expect_eq "$(jq -r .error <<<"$HTTP_BODY")" "You've opened these numbers a lot in a short time. Try again in an hour." "with the plan's text"
+public_stats 198.51.100.7
+expect_eq "$HTTP_STATUS" 200 "another network still gets the numbers"
+RATE_KEYS=$(docker exec "$REDIS_CONTAINER" redis-cli --raw --scan --pattern 'rate-limit:public-stats:*')
+show "rate limit keys: $(tr '\n' ' ' <<<"$RATE_KEYS")"
+expect_eq "$(grep -c . <<<"$RATE_KEYS")" 2 "one counter per network"
+expect_eq "$(grep -Ec '203\.0\.113|198\.51\.100' <<<"$RATE_KEYS" || true)" 0 "the counter keys hold no IP address"
+
+BURST_DOMAIN=hrva-burst-e2e.hr
+BURST_LINE="Possible phishing wave: 5 new links to $BURST_DOMAIN from 2 creators within 1 hour, domain age unknown, <$FRONTEND_URL/admin/urls?search=$BURST_DOMAIN>"
+burst_logged() {
+    grep -q "Burst of new links domain=$BURST_DOMAIN" "$WORK/app.log"
+}
+burst_posts() {
+    jq -s --arg line "$BURST_LINE" '[.[] | select(.content | contains($line))] | length' "$DISCORD_POSTS"
+}
+burst_posted() {
+    [[ $(burst_posts) -ge 1 ]]
+}
+create_burst_link() {
+    http -X POST "$BASE/api/v1/urls" -H "Authorization: Bearer $1" -H 'Content-Type: application/json' \
+        -d "{\"longUrl\":\"https://$BURST_DOMAIN/$3\"}"
+    expect_eq "$HTTP_STATUS" 200 "$2 creates https://$BURST_DOMAIN/$3"
+}
+for path in a b c; do
+    create_burst_link "$APP_JWT" "$USER_EMAIL" "$path"
+done
+for path in d e; do
+    create_burst_link "$ADMIN_JWT" admin@localhost "$path"
+done
+wait_until 30 "the burst check" burst_logged
+show "$(grep -o "Burst of new links domain=$BURST_DOMAIN.*" "$WORK/app.log")"
+expect_eq "$(docker exec "$REDIS_CONTAINER" redis-cli --raw zcard "burst:links:$BURST_DOMAIN")" 5 "burst:links:$BURST_DOMAIN holds the five links"
+expect_eq "$(docker exec "$REDIS_CONTAINER" redis-cli --raw exists "burst:alerted:$BURST_DOMAIN")" 1 \
+    "burst:alerted:$BURST_DOMAIN is set (.hr RDAP has no dates, so the age is unknown and counts as new)"
+expect_eq "$(grep -c "Burst of new links domain=$BURST_DOMAIN" "$WORK/app.log")" 1 "one burst line in the app log"
+wait_until 45 "the burst alert at the Discord stub (30-second buffer)" burst_posted
+show "$(jq -r --arg line "$BURST_LINE" 'select(.content | contains($line)) | .content' "$DISCORD_POSTS")"
+expect_eq "$(burst_posts)" 1 "the Discord stub got the burst alert once"
+expect_eq "$(jq -sc --arg line "$BURST_LINE" '[.[] | select(.content | contains($line)) | {allowed_mentions, flags}] | first' "$DISCORD_POSTS")" \
+    '{"allowed_mentions":{"parse":[]},"flags":4}' "no mentions, no embeds"
+expect_eq "$(grep -c "$DISCORD_SECRET" "$WORK/app.log" || true)" 0 "the webhook URL never reaches the app log"
 
 section "Done: every step passed"
