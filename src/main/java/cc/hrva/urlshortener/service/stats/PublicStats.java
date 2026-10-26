@@ -1,18 +1,17 @@
 package cc.hrva.urlshortener.service.stats;
 
-import cc.hrva.urlshortener.dto.BlocklistSourceResponse;
 import cc.hrva.urlshortener.dto.stats.CountEntry;
 import cc.hrva.urlshortener.dto.stats.PublicStatsResponse;
 import cc.hrva.urlshortener.dto.stats.PublicStatsResponse.BlockedLinks;
 import cc.hrva.urlshortener.dto.stats.PublicStatsResponse.Blocklist;
 import cc.hrva.urlshortener.dto.stats.PublicStatsResponse.DailyClicks;
+import cc.hrva.urlshortener.repository.BlocklistSourceRepository;
 import cc.hrva.urlshortener.repository.stats.HourlyCount;
 import cc.hrva.urlshortener.repository.stats.HourlyCountRepository;
 import cc.hrva.urlshortener.repository.stats.HourlySeries;
 import cc.hrva.urlshortener.repository.stats.LinksStatsRepository;
 import cc.hrva.urlshortener.repository.stats.SafetyStatsRepository;
 import cc.hrva.urlshortener.repository.stats.TrafficStatsRepository;
-import cc.hrva.urlshortener.service.BlocklistSourceService;
 import cc.hrva.urlshortener.service.analytics.AnalyticsDays;
 import cc.hrva.urlshortener.service.analytics.AnalyticsSeries;
 import java.util.Comparator;
@@ -33,7 +32,7 @@ public class PublicStats {
     private final LinksStatsRepository linksStatsRepository;
     private final HourlyCountRepository hourlyCountRepository;
     private final SafetyStatsRepository safetyStatsRepository;
-    private final BlocklistSourceService blocklistSourceService;
+    private final BlocklistSourceRepository blocklistSourceRepository;
 
     @Transactional(readOnly = true)
     public PublicStatsResponse collect() {
@@ -62,10 +61,9 @@ public class PublicStats {
     }
 
     private List<Blocklist> blocklists() {
-        return blocklistSourceService.list().stream()
-                .filter(BlocklistSourceResponse::enabled)
-                .filter(source -> source.domainCount() != null && source.domainCount() > 0)
-                .map(source -> new Blocklist(source.name(), source.action(), source.domainCount()))
+        return blocklistSourceRepository.findByEnabledTrue().stream()
+                .filter(source -> source.getDomainCount() != null && source.getDomainCount() > 0)
+                .map(source -> new Blocklist(source.getName(), source.getAction(), source.getDomainCount()))
                 .sorted(Comparator.comparingLong(Blocklist::entries).reversed().thenComparing(Blocklist::name))
                 .toList();
     }

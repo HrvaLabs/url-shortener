@@ -13,7 +13,7 @@ public final class LinkReviewSpecification {
     }
 
     public static Specification<LinkReview> reasonContains(final String reason) {
-        return (root, query, cb) -> cb.like(cb.lower(root.get("reasons")), "%" + reason.toLowerCase() + "%");
+        return (root, query, cb) -> cb.like(cb.lower(root.get("reasons")), LikePatterns.containing(reason), LikePatterns.ESCAPE);
     }
 
     public static Specification<LinkReview> linkCreatedBefore(final LocalDateTime cutoff) {

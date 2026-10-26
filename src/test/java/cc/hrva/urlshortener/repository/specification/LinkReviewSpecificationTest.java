@@ -89,6 +89,22 @@ class LinkReviewSpecificationTest {
     }
 
     @Test
+    void theReasonFilterTreatsPercentAndUnderscoreAsPlainText() {
+        persistReview("double", "offers 100%% off", false);
+        persistReview("single", "offers 100% off", false);
+        persistReview("underscore", "imitates a_b", false);
+        persistReview("lookalike", "imitates axb", false);
+        persistReview("backslash", "odd a\\b", false);
+        entityManager.flush();
+
+        assertThat(shortUrls(LinkReviewSpecification.reasonContains("%%"))).containsExactly("double");
+        assertThat(shortUrls(LinkReviewSpecification.reasonContains("%"))).containsExactly("double", "single");
+        assertThat(shortUrls(LinkReviewSpecification.reasonContains("a_b"))).containsExactly("underscore");
+        assertThat(shortUrls(LinkReviewSpecification.reasonContains("a\\b"))).containsExactly("backslash");
+        assertThat(shortUrls(LinkReviewSpecification.reasonContains("\\%"))).isEmpty();
+    }
+
+    @Test
     void theAgeFilterKeepsOnlyEntriesWhoseLinkWasCreatedBeforeTheCutoff() {
         final var cutoff = LocalDateTime.now().minusDays(7);
         links.get("v0DB3").setCreateDate(cutoff.minusDays(1));

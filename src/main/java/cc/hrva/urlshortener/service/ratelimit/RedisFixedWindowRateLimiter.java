@@ -31,7 +31,7 @@ public class RedisFixedWindowRateLimiter implements RateLimiter {
             final var count = redisTemplate.execute(FIXED_WINDOW_INCREMENT, List.of(KEY_PREFIX + key), Long.toString(window.toMillis()));
             return count != null ? count : Long.MAX_VALUE;
         } catch (final DataAccessException exception) {
-            log.warn("Rate limit check failed, refusing the request exception={}", exception.getClass().getName());
+            log.warn("Rate limit check failed exception={}", exception.getClass().getName());
             throw new RateLimiterUnavailableException(exception);
         }
     }

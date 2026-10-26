@@ -49,6 +49,8 @@ import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.dao.QueryTimeoutException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.authentication.DisabledException;
@@ -70,7 +72,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
-@ExtendWith(MockitoExtension.class)
+@ExtendWith({MockitoExtension.class, OutputCaptureExtension.class})
 class DefaultSecondStepServiceTest {
 
     private static final String CLIENT_IP = "203.0.113.9";
@@ -470,7 +472,7 @@ class DefaultSecondStepServiceTest {
     }
 
     @Test
-    void anUnavailableAttemptCounterIsSignInUnavailable() {
+    void anUnavailableAttemptCounterIsSignInUnavailable(final CapturedOutput output) {
         givenAPendingLogin(new PendingLogin(7L, false), user());
         when(rateLimiter.increment(ATTEMPTS_KEY, FIVE_MINUTES))
                 .thenThrow(new RateLimiterUnavailableException(new QueryTimeoutException("down")));
@@ -480,6 +482,7 @@ class DefaultSecondStepServiceTest {
                 .hasMessage("Two-step sign-in isn't available right now. Try again in a minute.");
         verify(loginAttemptService, never()).loginFailed(anyString());
         verifyNoInteractions(twoFactorService, signInService);
+        assertThat(output).containsOnlyOnce("Second step refused, attempt counter unavailable user id=7").doesNotContain(CLIENT_IP, TOKEN);
     }
 
     @Test
@@ -561,7 +564,7 @@ class DefaultSecondStepServiceTest {
     }
 
     @Test
-    void passkeyOptionsWithTheLimiterDownArePasskeysUnavailable() {
+    void passkeyOptionsWithTheLimiterDownArePasskeysUnavailable(final CapturedOutput output) {
         when(rateLimiter.tryAcquire(OPTIONS_KEY, 30, TEN_MINUTES))
                 .thenThrow(new RateLimiterUnavailableException(new QueryTimeoutException("down")));
 
@@ -570,6 +573,8 @@ class DefaultSecondStepServiceTest {
                 .hasMessage("Passkeys aren't available right now. Try again in a minute.");
         verifyNoInteractions(pendingLoginStore, userRepository, passkeyCeremonyStore);
         verify(loginAttemptService, never()).loginFailed(anyString());
+        assertThat(output).containsOnlyOnce("Passkey options refused, rate limiter unavailable name=passkey-second-step-options")
+                .doesNotContain(CLIENT_IP, TOKEN);
     }
 
     @Test

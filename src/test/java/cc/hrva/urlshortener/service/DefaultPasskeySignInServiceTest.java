@@ -34,6 +34,8 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.dao.QueryTimeoutException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.web.webauthn.api.Bytes;
@@ -56,7 +58,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
-@ExtendWith(MockitoExtension.class)
+@ExtendWith({MockitoExtension.class, OutputCaptureExtension.class})
 class DefaultPasskeySignInServiceTest {
 
     private static final JsonMapper JSON = JsonMapper.builder().build();
@@ -139,7 +141,7 @@ class DefaultPasskeySignInServiceTest {
     }
 
     @Test
-    void optionsWithoutRedisAre503() {
+    void optionsWithoutRedisAre503(final CapturedOutput output) {
         when(rateLimiter.tryAcquire(OPTIONS_KEY, 30, TEN_MINUTES))
                 .thenThrow(new RateLimiterUnavailableException(new QueryTimeoutException("down")));
 
@@ -147,6 +149,7 @@ class DefaultPasskeySignInServiceTest {
                 .isInstanceOf(SignInUnavailableException.class)
                 .hasMessage("Passkeys aren't available right now. Try again in a minute.");
         verifyNoInteractions(passkeyCeremonyStore);
+        assertThat(output).containsOnlyOnce("Passkey options refused, rate limiter unavailable name=passkey-options").doesNotContain(CLIENT_IP);
     }
 
     @Test

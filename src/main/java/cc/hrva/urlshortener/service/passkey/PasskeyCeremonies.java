@@ -9,10 +9,12 @@ import cc.hrva.urlshortener.service.ratelimit.RateLimiterUnavailableException;
 import java.time.Duration;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.web.webauthn.api.Bytes;
 import org.springframework.security.web.webauthn.api.PublicKeyCredentialDescriptor;
 import org.springframework.stereotype.Component;
 
+@Slf4j
 @Component
 @RequiredArgsConstructor
 public class PasskeyCeremonies {
@@ -31,6 +33,7 @@ public class PasskeyCeremonies {
         try {
             allowed = rateLimiter.tryAcquire(RateLimiter.clientKey(name, clientIp), OPTIONS_PER_NETWORK, OPTIONS_WINDOW);
         } catch (final RateLimiterUnavailableException exception) {
+            log.warn("Passkey options refused, rate limiter unavailable name={}", name);
             throw new SignInUnavailableException(PasskeyCeremonyStore.UNAVAILABLE, exception);
         }
 

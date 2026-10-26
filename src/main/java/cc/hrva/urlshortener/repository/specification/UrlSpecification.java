@@ -2,15 +2,18 @@ package cc.hrva.urlshortener.repository.specification;
 
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.User;
+import cc.hrva.urlshortener.util.DomainNames;
+import cc.hrva.urlshortener.util.HostName;
+import jakarta.persistence.criteria.Expression;
 import jakarta.persistence.criteria.JoinType;
+import jakarta.persistence.criteria.Predicate;
 import java.time.LocalDateTime;
-import java.util.regex.Pattern;
+import java.util.List;
+import java.util.Locale;
+import java.util.stream.Stream;
 import org.springframework.data.jpa.domain.Specification;
 
 public final class UrlSpecification {
-
-    private static final char LIKE_ESCAPE = '\\';
-    private static final Pattern LIKE_SPECIAL = Pattern.compile("[\\\\%_]");
 
     private UrlSpecification() {}
 
@@ -20,21 +23,21 @@ public final class UrlSpecification {
 
     public static Specification<Url> search(final String keyword) {
         return (root, query, cb) -> {
-            final var pattern = containing(keyword);
+            final var pattern = LikePatterns.containing(keyword);
             return cb.or(
-                    cb.like(cb.lower(root.get("longUrl")), pattern, LIKE_ESCAPE),
-                    cb.like(cb.lower(root.get("shortUrl")), pattern, LIKE_ESCAPE));
+                    cb.like(cb.lower(root.get("longUrl")), pattern, LikePatterns.ESCAPE),
+                    cb.like(cb.lower(root.get("shortUrl")), pattern, LikePatterns.ESCAPE));
         };
     }
 
     public static Specification<Url> searchIncludingOwner(final String keyword) {
         return (root, query, cb) -> {
-            final var pattern = containing(keyword);
             final var owner = root.join("owner", JoinType.LEFT);
-            return cb.or(
-                    cb.like(cb.lower(root.get("longUrl")), pattern, LIKE_ESCAPE),
-                    cb.like(cb.lower(root.get("shortUrl")), pattern, LIKE_ESCAPE),
-                    cb.like(cb.lower(owner.get("email")), pattern, LIKE_ESCAPE));
+            final var fields = List.<Expression<String>>of(root.get("longUrl"), root.get("shortUrl"), owner.get("email"));
+            return cb.or(spellingsOf(keyword).stream()
+                    .map(LikePatterns::containing)
+                    .flatMap(pattern -> fields.stream().map(field -> cb.like(cb.lower(field), pattern, LikePatterns.ESCAPE)))
+                    .toArray(Predicate[]::new));
         };
     }
 
@@ -75,8 +78,22 @@ public final class UrlSpecification {
                         cb.greaterThanOrEqualTo(root.get("expirationDate"), LocalDateTime.now()));
     }
 
-    private static String containing(final String keyword) {
-        return "%" + LIKE_SPECIAL.matcher(keyword.toLowerCase()).replaceAll("\\\\$0") + "%";
+    private static List<String> spellingsOf(final String keyword) {
+        final var term = keyword.toLowerCase(Locale.ROOT);
+        return DomainNames.hostNameOf(term.strip())
+                .filter(host -> !host.ascii().equals(host.unicode()) && DomainNames.HOST_NAME.matcher(host.ascii()).matches())
+                .map(host -> Stream.concat(Stream.of(keyword), otherSpellingsOf(term, host).stream()).toList())
+                .orElseGet(() -> List.of(keyword));
+    }
+
+    private static List<String> otherSpellingsOf(final String term, final HostName host) {
+        if (term.contains(host.unicode())) {
+            return List.of(term.replace(host.unicode(), host.ascii()));
+        }
+        if (term.contains(host.ascii())) {
+            return List.of(term.replace(host.ascii(), host.unicode()));
+        }
+        return List.of(host.ascii(), host.unicode());
     }
 
 }

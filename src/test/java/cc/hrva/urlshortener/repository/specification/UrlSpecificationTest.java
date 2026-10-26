@@ -107,6 +107,60 @@ class UrlSpecificationTest {
     }
 
     @Test
+    void adminSearchFindsBothSpellingsOfADomainFromEitherSpelling() {
+        persistUrl("unicode", "https://čokolada.hr/torta", null);
+        persistUrl("punycode", "https://xn--okolada-i6a.hr/kolac", null);
+        entityManager.flush();
+
+        for (final var search : List.of("čokolada.hr", "xn--okolada-i6a.hr", "ČOKOLADA.HR", "XN--OKOLADA-I6A.HR", "https://čokolada.hr/", "xn--okolada-i6a.hr/")) {
+            assertThat(shortUrls(UrlSpecification.searchIncludingOwner(search))).as(search).containsExactly("punycode", "unicode");
+        }
+        assertThat(shortUrls(UrlSpecification.searchIncludingOwner("https://čokolada.hr/torta"))).containsExactly("unicode");
+        assertThat(shortUrls(UrlSpecification.searchIncludingOwner("https://xn--okolada-i6a.hr/torta"))).containsExactly("unicode");
+    }
+
+    @Test
+    void adminSearchForAHostTypedHalfInEachSpellingFindsBothFullSpellings() {
+        persistUrl("unicode", "https://čokolada.рф/torta", null);
+        persistUrl("punycode", "https://xn--okolada-i6a.xn--p1ai/kolac", null);
+        entityManager.flush();
+
+        assertThat(shortUrls(UrlSpecification.searchIncludingOwner("čokolada.xn--p1ai"))).containsExactly("punycode", "unicode");
+    }
+
+    @Test
+    void adminSearchFindsAnOwnerEmailUnderEitherSpellingOfItsDomain() {
+        persistUrl("owned", "https://plain.example/", persistUser("karlo@xn--okolada-i6a.hr"));
+        entityManager.flush();
+
+        assertThat(shortUrls(UrlSpecification.searchIncludingOwner("karlo@čokolada.hr"))).containsExactly("owned");
+    }
+
+    @Test
+    void adminSearchForAPlainAsciiDomainIsUnchanged() {
+        persistUrl("unicode", "https://čokolada.hr/torta", null);
+        persistUrl("punycode", "https://xn--okolada-i6a.hr/kolac", null);
+        entityManager.flush();
+
+        assertThat(shortUrls(UrlSpecification.searchIncludingOwner("gableci.hrva.cc"))).containsExactly("gableci");
+        assertThat(shortUrls(UrlSpecification.searchIncludingOwner("njuskaio.cam"))).containsExactly("njuskaio_verify");
+        assertThat(shortUrls(UrlSpecification.searchIncludingOwner(".hr/"))).containsExactly("punycode", "unicode");
+    }
+
+    @Test
+    void adminSearchWithoutAHostIsUnchanged() {
+        persistUrl("unicode", "https://čokolada.hr/torta", null);
+        persistUrl("punycode", "https://xn--okolada-i6a.hr/kolac", null);
+        entityManager.flush();
+
+        assertThat(shortUrls(UrlSpecification.searchIncludingOwner("čokolada"))).containsExactly("unicode");
+        assertThat(shortUrls(UrlSpecification.searchIncludingOwner("xn--okolada"))).containsExactly("punycode");
+        assertThat(shortUrls(UrlSpecification.searchIncludingOwner("torta"))).containsExactly("unicode");
+        assertThat(shortUrls(UrlSpecification.searchIncludingOwner("gableci"))).containsExactly("gableci");
+        assertThat(shortUrls(UrlSpecification.searchIncludingOwner("čokolada torta"))).isEmpty();
+    }
+
+    @Test
     void anonymousFilterKeepsOnlyLinksWithoutAnOwner() {
         assertThat(shortUrls(UrlSpecification.hasNoOwner())).containsExactly("v0DB3");
     }

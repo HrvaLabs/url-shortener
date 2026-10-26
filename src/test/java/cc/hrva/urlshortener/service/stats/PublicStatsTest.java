@@ -2,14 +2,15 @@ package cc.hrva.urlshortener.service.stats;
 
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.dto.AnalyticsDay;
-import cc.hrva.urlshortener.dto.BlocklistSourceResponse;
 import cc.hrva.urlshortener.dto.stats.CountEntry;
 import cc.hrva.urlshortener.dto.stats.PublicStatsResponse;
 import cc.hrva.urlshortener.dto.stats.PublicStatsResponse.BlockedLinks;
 import cc.hrva.urlshortener.dto.stats.PublicStatsResponse.Blocklist;
 import cc.hrva.urlshortener.dto.stats.PublicStatsResponse.DailyClicks;
+import cc.hrva.urlshortener.model.BlocklistSource;
 import cc.hrva.urlshortener.model.enums.BlocklistAction;
 import cc.hrva.urlshortener.model.enums.SourceKind;
+import cc.hrva.urlshortener.repository.BlocklistSourceRepository;
 import cc.hrva.urlshortener.repository.stats.HourlyCount;
 import cc.hrva.urlshortener.repository.stats.HourlyCountRepository;
 import cc.hrva.urlshortener.repository.stats.LinksStatsRepository;
@@ -19,6 +20,7 @@ import cc.hrva.urlshortener.repository.stats.SafetyStatsRepository;
 import cc.hrva.urlshortener.repository.stats.TrafficStatsRepository;
 import cc.hrva.urlshortener.service.BlocklistSourceService;
 import cc.hrva.urlshortener.service.analytics.AnalyticsDays;
+import cc.hrva.urlshortener.service.blocklist.BlocklistStore;
 import java.lang.reflect.RecordComponent;
 import java.time.Clock;
 import java.time.Instant;
@@ -37,12 +39,14 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.redis.core.RedisOperations;
 
 import static cc.hrva.urlshortener.repository.stats.HourlySeries.BLOCKS_BY_REASON;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -68,7 +72,7 @@ class PublicStatsTest {
     private SafetyStatsRepository safetyStatsRepository;
 
     @Mock
-    private BlocklistSourceService blocklistSourceService;
+    private BlocklistSourceRepository blocklistSourceRepository;
 
     @BeforeEach
     void setUp() {
@@ -79,7 +83,7 @@ class PublicStatsTest {
         lenient().when(hourlyCountRepository.count(any(), any(), any())).thenReturn(List.of());
         lenient().when(safetyStatsRepository.findResolveMinutes(any(), any())).thenReturn(List.of());
         lenient().when(safetyStatsRepository.countResolvedVisitorReports(any(), any())).thenReturn(0L);
-        lenient().when(blocklistSourceService.list()).thenReturn(List.of());
+        lenient().when(blocklistSourceRepository.findByEnabledTrue()).thenReturn(List.of());
     }
 
     @Test
@@ -173,14 +177,13 @@ class PublicStatsTest {
     }
 
     @Test
-    void blocklistsAreEnabledAndLoadedOnlyWithoutUrls() {
-        when(blocklistSourceService.list()).thenReturn(List.of(
-                source(1L, "URLhaus", BlocklistAction.BLOCK, true, 120_000L),
-                source(2L, "Disabled list", BlocklistAction.BLOCK, false, 500_000L),
-                source(3L, "Never loaded", BlocklistAction.FLAG, true, null),
-                source(4L, "Empty list", BlocklistAction.FLAG, true, 0L),
-                source(5L, "HaGeZi TIF medium", BlocklistAction.BLOCK, true, 400_000L),
-                source(6L, "Abuse feed", BlocklistAction.FLAG, true, 120_000L)));
+    void blocklistsAreTheEnabledLoadedSourcesOnlyWithoutUrls() {
+        when(blocklistSourceRepository.findByEnabledTrue()).thenReturn(List.of(
+                source(1L, "URLhaus", BlocklistAction.BLOCK, 120_000L),
+                source(3L, "Never loaded", BlocklistAction.FLAG, null),
+                source(4L, "Empty list", BlocklistAction.FLAG, 0L),
+                source(5L, "HaGeZi TIF medium", BlocklistAction.BLOCK, 400_000L),
+                source(6L, "Abuse feed", BlocklistAction.FLAG, 120_000L)));
 
         final var stats = publicStatsAt(NOW).collect();
 
@@ -189,6 +192,18 @@ class PublicStatsTest {
                 new Blocklist("Abuse feed", BlocklistAction.FLAG, 120_000),
                 new Blocklist("URLhaus", BlocklistAction.BLOCK, 120_000));
         assertThat(stats.toString()).doesNotContain("https://", "secret-key", "HTTP 403");
+        verify(blocklistSourceRepository).findByEnabledTrue();
+        verifyNoMoreInteractions(blocklistSourceRepository);
+    }
+
+    @Test
+    void blocklistsAreReadFromTheDatabaseWithNoRedisReadPerSource() {
+        assertThat(PublicStats.class.getDeclaredConstructors()).singleElement()
+                .satisfies(constructor -> assertThat(constructor.getParameterTypes())
+                        .contains(BlocklistSourceRepository.class)
+                        .noneMatch(type -> type == BlocklistSourceService.class
+                                || type.getPackageName().equals(BlocklistStore.class.getPackageName())
+                                || RedisOperations.class.isAssignableFrom(type)));
     }
 
     @Test
@@ -229,18 +244,28 @@ class PublicStatsTest {
         appProperties.getAnalytics().setZone(ZoneId.of("Europe/Zagreb"));
         final var analyticsDays = new AnalyticsDays(clock, appProperties);
         return new PublicStats(new StatsDays(analyticsDays, clock, ZoneOffset.UTC), analyticsDays, trafficStatsRepository, linksStatsRepository,
-                hourlyCountRepository, safetyStatsRepository, blocklistSourceService);
+                hourlyCountRepository, safetyStatsRepository, blocklistSourceRepository);
     }
 
     private static List<String> componentNames(final Class<?> recordType) {
         return Arrays.stream(recordType.getRecordComponents()).map(RecordComponent::getName).toList();
     }
 
-    private static BlocklistSourceResponse source(final Long id, final String name, final BlocklistAction action, final boolean enabled,
-            final Long domainCount) {
-        return new BlocklistSourceResponse(id, name, "https://lists.example/" + id + "?key=secret-key", List.of("https://mirror.example/" + id),
-                SourceKind.DOMAINS, action, enabled, 6, LocalDateTime.of(2026, 10, 26, 6, 0), LocalDateTime.of(2026, 10, 26, 6, 0),
-                "https://lists.example/" + id, domainCount, "v1", "HTTP 403 from https://lists.example/" + id, 2_048_000L);
+    private static BlocklistSource source(final Long id, final String name, final BlocklistAction action, final Long domainCount) {
+        return BlocklistSource.builder()
+                .id(id)
+                .name(name)
+                .url("https://lists.example/" + id + "?key=secret-key")
+                .fallbackUrls(List.of("https://mirror.example/" + id))
+                .kind(SourceKind.DOMAINS)
+                .action(action)
+                .lastFetchedAt(LocalDateTime.of(2026, 10, 26, 6, 0))
+                .lastSuccessAt(LocalDateTime.of(2026, 10, 26, 6, 0))
+                .lastSuccessUrl("https://lists.example/" + id)
+                .domainCount(domainCount)
+                .listVersion("v1")
+                .lastError("HTTP 403 from https://lists.example/" + id)
+                .build();
     }
 
 }

@@ -148,6 +148,7 @@ public class DefaultSecondStepService implements SecondStepService {
         try {
             attempts = rateLimiter.increment(PENDING_LOGIN_ATTEMPTS_PREFIX + pendingToken, PendingLoginStore.TIME_TO_LIVE);
         } catch (final RateLimiterUnavailableException exception) {
+            log.warn("Second step refused, attempt counter unavailable user id={}", pendingLogin.userId());
             throw new SignInUnavailableException(PendingLoginStore.UNAVAILABLE, exception);
         }
 
