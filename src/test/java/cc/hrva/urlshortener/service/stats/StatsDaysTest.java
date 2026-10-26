@@ -13,6 +13,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class StatsDaysTest {
 
@@ -44,6 +45,33 @@ class StatsDaysTest {
                 LocalDate.of(2026, 10, 26),
                 LocalDateTime.of(2026, 10, 19, 22, 0),
                 LocalDateTime.of(2026, 10, 26, 23, 0)));
+    }
+
+    @Test
+    void aClosedWeekAcrossTheDstChange() {
+        assertThat(statsDays.window(LocalDate.of(2026, 10, 19), LocalDate.of(2026, 10, 25))).isEqualTo(new StatsWindow(
+                7,
+                LocalDate.of(2026, 10, 19),
+                LocalDate.of(2026, 10, 25),
+                LocalDateTime.of(2026, 10, 18, 22, 0),
+                LocalDateTime.of(2026, 10, 25, 23, 0)));
+    }
+
+    @Test
+    void aSingleDayWindowIsOneDay() {
+        assertThat(statsDays.window(LocalDate.of(2026, 10, 25), LocalDate.of(2026, 10, 25))).isEqualTo(new StatsWindow(
+                1,
+                LocalDate.of(2026, 10, 25),
+                LocalDate.of(2026, 10, 25),
+                LocalDateTime.of(2026, 10, 24, 22, 0),
+                LocalDateTime.of(2026, 10, 25, 23, 0)));
+    }
+
+    @Test
+    void fromAfterToIsRefused() {
+        assertThatThrownBy(() -> statsDays.window(LocalDate.of(2026, 10, 25), LocalDate.of(2026, 10, 24)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("from must not be after to");
     }
 
     @Test

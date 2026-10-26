@@ -13,6 +13,7 @@ import cc.hrva.urlshortener.service.stats.StatsDays;
 import cc.hrva.urlshortener.service.stats.SystemStats;
 import cc.hrva.urlshortener.service.stats.TrafficStats;
 import cc.hrva.urlshortener.service.stats.UsersStats;
+import java.time.LocalDate;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -57,6 +58,26 @@ public class DefaultAdminStatsService implements AdminStatsService {
     public SystemStatsResponse system(final Integer days) {
         final var range = AnalyticsRange.fromDays(days);
         return systemStats.collect(statsDays.window(range));
+    }
+
+    @Override
+    public TrafficStatsResponse traffic(final LocalDate from, final LocalDate to) {
+        return trafficStats.collect(statsDays.window(from, to));
+    }
+
+    @Override
+    public LinksStatsResponse links(final LocalDate from, final LocalDate to) {
+        return linksStats.collect(statsDays.window(from, to));
+    }
+
+    @Override
+    public UsersStatsResponse users(final LocalDate from, final LocalDate to) {
+        return usersStats.collect(statsDays.window(from, to));
+    }
+
+    @Override
+    public SafetyStatsResponse safety(final LocalDate from, final LocalDate to) {
+        return safetyStats.collect(statsDays.window(from, to));
     }
 
 }

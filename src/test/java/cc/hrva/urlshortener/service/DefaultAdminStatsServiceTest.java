@@ -53,6 +53,10 @@ class DefaultAdminStatsServiceTest {
             LocalDateTime.of(2026, 10, 19, 22, 0), LocalDateTime.of(2026, 10, 26, 23, 0));
     private static final StatsWindow LAST_30 = new StatsWindow(30, LocalDate.of(2026, 9, 27), LocalDate.of(2026, 10, 26),
             LocalDateTime.of(2026, 9, 26, 22, 0), LocalDateTime.of(2026, 10, 26, 23, 0));
+    private static final LocalDate WEEK_FROM = LocalDate.of(2026, 10, 19);
+    private static final LocalDate WEEK_TO = LocalDate.of(2026, 10, 25);
+    private static final StatsWindow WEEK = new StatsWindow(7, WEEK_FROM, WEEK_TO,
+            LocalDateTime.of(2026, 10, 18, 22, 0), LocalDateTime.of(2026, 10, 25, 23, 0));
 
     @Mock
     private StatsDays statsDays;
@@ -151,6 +155,25 @@ class DefaultAdminStatsServiceTest {
         when(systemStats.collect(LAST_7)).thenReturn(system);
 
         assertThat(adminStatsService.system(7)).isSameAs(system);
+    }
+
+    @Test
+    void dateVariantsPassTheWindowToEachCollector() {
+        final var traffic = emptyTraffic(WEEK);
+        final var links = emptyLinks(WEEK);
+        final var users = emptyUsers(WEEK);
+        final var safety = emptySafety(WEEK);
+        when(statsDays.window(WEEK_FROM, WEEK_TO)).thenReturn(WEEK);
+        when(trafficStats.collect(WEEK)).thenReturn(traffic);
+        when(linksStats.collect(WEEK)).thenReturn(links);
+        when(usersStats.collect(WEEK)).thenReturn(users);
+        when(safetyStats.collect(WEEK)).thenReturn(safety);
+
+        assertThat(adminStatsService.traffic(WEEK_FROM, WEEK_TO)).isSameAs(traffic);
+        assertThat(adminStatsService.links(WEEK_FROM, WEEK_TO)).isSameAs(links);
+        assertThat(adminStatsService.users(WEEK_FROM, WEEK_TO)).isSameAs(users);
+        assertThat(adminStatsService.safety(WEEK_FROM, WEEK_TO)).isSameAs(safety);
+        verifyNoInteractions(systemStats);
     }
 
     @Test

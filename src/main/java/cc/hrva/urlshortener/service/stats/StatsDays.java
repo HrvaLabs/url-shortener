@@ -6,6 +6,7 @@ import java.time.Clock;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.time.temporal.ChronoUnit;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
@@ -37,8 +38,15 @@ public class StatsDays {
 
     public StatsWindow window(final AnalyticsRange range) {
         final var to = analyticsDays.today();
-        final var from = to.minusDays(range.days() - 1L);
-        return new StatsWindow(range.days(), from, to, storedStartOf(from), storedStartOf(to.plusDays(1)));
+        return window(to.minusDays(range.days() - 1L), to);
+    }
+
+    public StatsWindow window(final LocalDate from, final LocalDate to) {
+        if (from.isAfter(to)) {
+            throw new IllegalArgumentException("from must not be after to");
+        }
+        final var days = Math.toIntExact(ChronoUnit.DAYS.between(from, to) + 1);
+        return new StatsWindow(days, from, to, storedStartOf(from), storedStartOf(to.plusDays(1)));
     }
 
     public LocalDateTime storedNow() {
