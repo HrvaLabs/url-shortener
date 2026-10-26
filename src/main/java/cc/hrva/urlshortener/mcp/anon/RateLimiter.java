@@ -12,7 +12,11 @@ import java.util.HexFormat;
 
 public interface RateLimiter {
 
-    boolean tryAcquire(String key, int limit, Duration window);
+    long increment(String key, Duration window);
+
+    default boolean tryAcquire(final String key, final int limit, final Duration window) {
+        return increment(key, window) <= limit;
+    }
 
     static String clientKey(final String name, final String clientIp) {
         try {

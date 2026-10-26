@@ -79,9 +79,11 @@ public class UserController {
         return ResponseEntity.ok(userService.updateUser(userUpdateDto));
     }
 
-    @Operation(summary = "Delete own account", description = "Permanently delete the authenticated user's account along with all their URLs and API keys. Local accounts must confirm with their current password.")
+    @Operation(summary = "Delete own account", description = "Permanently delete the authenticated user's account along with all their URLs and API keys. Local accounts must confirm with their current password; Google and GitHub accounts need a sign-in within the last 15 minutes.")
     @ApiResponse(responseCode = "204", description = "Account deleted")
-    @ApiResponse(responseCode = "403", description = "Password does not match")
+    @ApiResponse(responseCode = "400", description = "The current password is missing")
+    @ApiResponse(responseCode = "401", description = "A Google or GitHub account must sign in again first")
+    @ApiResponse(responseCode = "403", description = "Password does not match, or too many wrong passwords")
     @DeleteMapping("/me")
     @PreAuthorize("hasAnyRole('ROLE_ADMIN', 'ROLE_USER')")
     public ResponseEntity<Void> deleteOwnAccount(@RequestBody(required = false) final DeleteAccountDto deleteAccountDto) {
@@ -99,6 +101,7 @@ public class UserController {
 
     @Operation(summary = "Update password", description = "Update the password for the authenticated user.")
     @ApiResponse(responseCode = "400", description = "Validation error or bad request")
+    @ApiResponse(responseCode = "403", description = "Password does not match, or too many wrong passwords")
     @PatchMapping("/password")
     @PreAuthorize("hasAnyRole('ROLE_ADMIN', 'ROLE_USER')")
     public ResponseEntity<User> updatePassword(@Valid @RequestBody final UpdatePasswordDto updatePasswordDto) {

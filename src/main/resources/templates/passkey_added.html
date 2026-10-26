@@ -52,7 +52,7 @@
                 If this was you, there's nothing else to do.
               </p>
               <p style="margin: 0 0 16px; font-family: 'Helvetica', 'Arial', sans-serif; font-size: 15px; line-height: 1.7; color: #d4d4d4;">
-                If it wasn't you, sign in, open <strong style="color: #e8e8e8;">Settings &rarr; Passkeys and security keys</strong> (<a th:href="@{${settings_url}}" style="color: #a67c00;" th:text="${settings_url}"/>), remove it and change your password. If you can't sign in, email <a th:href="@{'mailto:' + ${contact_email}}" style="color: #a67c00;" th:text="${contact_email}"/>.
+                If it wasn't you, sign in, open <strong style="color: #e8e8e8;">Settings &rarr; Passkeys and security keys</strong> (<a th:href="@{${settings_url}}" style="color: #a67c00;" th:text="${settings_url}"/>), remove it and <span th:text="${local_account} ? 'change your password' : 'secure your Google or GitHub account'"/>. If you can't sign in, email <a th:href="@{'mailto:' + ${contact_email}}" style="color: #a67c00;" th:text="${contact_email}"/>.
               </p>
               <p style="margin: 0 0 20px; font-family: 'Helvetica', 'Arial', sans-serif; font-size: 15px; line-height: 1.7; color: #d4d4d4;">
                 How passkeys work: <a th:href="@{${help_url}}" style="color: #a67c00;" th:text="${help_url}"/>

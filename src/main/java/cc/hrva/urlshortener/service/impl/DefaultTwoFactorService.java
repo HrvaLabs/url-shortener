@@ -14,6 +14,7 @@ import cc.hrva.urlshortener.service.TwoFactorService;
 import cc.hrva.urlshortener.service.UserService;
 import cc.hrva.urlshortener.service.twostep.AccountLock;
 import cc.hrva.urlshortener.service.twostep.RecoveryCodes;
+import cc.hrva.urlshortener.service.twostep.TwoStepCodes;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -61,7 +62,7 @@ public class DefaultTwoFactorService implements TwoFactorService {
         if (user.getTwoFactorSecret() == null) {
             throw new ApiException("Start two-factor setup first");
         }
-        if (!Totp.verify(user.getTwoFactorSecret(), code)) {
+        if (!Totp.verify(user.getTwoFactorSecret(), TwoStepCodes.normalized(code))) {
             throw new ApiException("Invalid verification code");
         }
 
@@ -75,10 +76,12 @@ public class DefaultTwoFactorService implements TwoFactorService {
 
     @Override
     @Transactional
-    public boolean verifyLoginCode(final User user, final String code) {
-        if (code == null) {
+    public boolean verifyLoginCode(final User user, final String typedCode) {
+        if (typedCode == null) {
             return false;
         }
+
+        final var code = TwoStepCodes.normalized(typedCode);
         if (Boolean.TRUE.equals(user.getTwoFactorEnabled()) && user.getTwoFactorSecret() != null
                 && Totp.verify(user.getTwoFactorSecret(), code)) {
             return true;

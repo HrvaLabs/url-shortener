@@ -10,6 +10,7 @@ import cc.hrva.urlshortener.service.SendingEmailService;
 import cc.hrva.urlshortener.service.SignInService;
 import cc.hrva.urlshortener.service.TwoFactorService;
 import cc.hrva.urlshortener.service.VerificationTokenService;
+import cc.hrva.urlshortener.service.twostep.TwoStepLockMessage;
 import cc.hrva.urlshortener.util.EmailAddresses;
 import cc.hrva.urlshortener.validator.UserValidator;
 import org.apache.commons.lang3.StringUtils;
@@ -45,6 +46,7 @@ public class DefaultAuthService implements AuthService {
     private final VerificationTokenService verificationTokenService;
     private final AuthenticationManagerBuilder authenticationManagerBuilder;
     private final UserRegisterDtoToUserConverter userRegisterDtoToUserConverter;
+    private final TwoStepLockMessage twoStepLockMessage;
 
     @Override
     @Transactional
@@ -125,7 +127,7 @@ public class DefaultAuthService implements AuthService {
 
         final var twoFactorAttemptsKey = LoginAttemptService.TWO_FACTOR_PREFIX + user.getId();
         if (loginAttemptService.isBlocked(twoFactorAttemptsKey)) {
-            throw new NoAuthorizationException(LoginAttemptService.TWO_FACTOR_BLOCKED);
+            throw new NoAuthorizationException(twoStepLockMessage.of(user));
         }
         if (!twoFactorService.verifyLoginCode(user, code)) {
             loginAttemptService.loginFailed(twoFactorAttemptsKey);

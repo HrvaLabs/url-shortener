@@ -7,6 +7,7 @@ import cc.hrva.urlshortener.dto.PasskeyOptionsResponse;
 import cc.hrva.urlshortener.dto.PasskeySecondStepDto;
 import cc.hrva.urlshortener.dto.PendingTokenDto;
 import cc.hrva.urlshortener.dto.TotpSecondStepDto;
+import cc.hrva.urlshortener.dto.TwoFactorCodeDto;
 import cc.hrva.urlshortener.dto.TwoStepDisableDto;
 import cc.hrva.urlshortener.exception.ApiException;
 import cc.hrva.urlshortener.exception.PasskeyVerificationException;
@@ -18,6 +19,7 @@ import cc.hrva.urlshortener.model.enums.TwoStepMethod;
 import cc.hrva.urlshortener.repository.PasskeyCredentialRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.security.JwtFilter;
+import cc.hrva.urlshortener.security.Totp;
 import cc.hrva.urlshortener.service.analytics.AnalyticsDays;
 import cc.hrva.urlshortener.service.passkey.TestAuthenticator;
 import com.nimbusds.jose.jwk.RSAKey;
@@ -29,11 +31,12 @@ import jakarta.persistence.EntityManager;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
-import java.util.stream.IntStream;
 import org.apache.commons.lang3.StringUtils;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -65,6 +68,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.within;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.startsWith;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -92,6 +96,7 @@ class PasskeySecondStepFlowsTest {
             "cGFzc2tleS1zZWNvbmQtc3RlcC1mbG93cy10ZXN0LW9ubHktand0LXNlY3JldC14eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHg=";
 
     private static final String SIGN_IN_EXPIRED = "Your sign-in expired. Sign in again.";
+    private static final String OUT_OF_ATTEMPTS = "Too many wrong codes. Sign in again to get 5 more tries.";
     private static final String EXPIRED = "This request expired. Try again.";
     private static final String COULD_NOT_VERIFY = "That passkey or security key couldn't be verified. Try again.";
     private static final String OTHER_ORIGIN = "https://evil.example";
@@ -115,6 +120,9 @@ class PasskeySecondStepFlowsTest {
 
     @Autowired
     private TwoStepSettingsService twoStepSettingsService;
+
+    @Autowired
+    private TwoFactorService twoFactorService;
 
     @Autowired
     private AnalyticsDays analyticsDays;
@@ -250,7 +258,7 @@ class PasskeySecondStepFlowsTest {
 
         verify(loginAttemptService).loginFailed("2fa:" + alice.getId());
         verify(loginAttemptService).loginFailed(CLIENT_IP);
-        verify(loginAttemptService, never()).loginSucceeded(anyString());
+        verify(loginAttemptService, never()).loginSucceeded(startsWith("2fa:"));
         verify(userService, never()).userHasLoggedIn(any());
         assertThat(flows.stored(bobsPasskey).getLastUsedAt()).isNull();
         assertThat(output)
@@ -281,7 +289,7 @@ class PasskeySecondStepFlowsTest {
         assertThat(flows.stored(alicesKey).getLastUsedAt()).isNull();
         verify(loginAttemptService).loginFailed(CLIENT_IP);
         verify(loginAttemptService, never()).loginFailed("2fa:" + bob.getId());
-        verify(loginAttemptService, never()).loginSucceeded(anyString());
+        verify(loginAttemptService, never()).loginSucceeded(startsWith("2fa:"));
         verify(userService, never()).userHasLoggedIn(any());
     }
 
@@ -300,27 +308,29 @@ class PasskeySecondStepFlowsTest {
     }
 
     @Test
-    void theSixthFailedPasskeyAttemptEndsThePendingLogin() {
-        final var user = flows.signedIn(flows.localUser("six-attempts@example.com"));
+    void theFifthFailedPasskeyAttemptEndsThePendingLogin() {
+        final var user = flows.signedIn(flows.localUser("five-attempts@example.com"));
         final var authenticator = TestAuthenticator.securityKey();
         flows.addPasskey(authenticator, "YubiKey");
         final var pendingToken = pendingTokenOf(user, false);
 
-        IntStream.rangeClosed(1, 5).forEach(attempt ->
-                assertThatThrownBy(() -> completeWith(authenticator.withOrigin(OTHER_ORIGIN), pendingToken))
-                        .isInstanceOf(PasskeyVerificationException.class)
-                        .hasMessage(COULD_NOT_VERIFY));
+        for (final var message : List.of(COULD_NOT_VERIFY, COULD_NOT_VERIFY, COULD_NOT_VERIFY + " 2 tries left.",
+                COULD_NOT_VERIFY + " 1 try left.")) {
+            assertThatThrownBy(() -> completeWith(authenticator.withOrigin(OTHER_ORIGIN), pendingToken))
+                    .isInstanceOf(PasskeyVerificationException.class)
+                    .hasMessage(message);
+        }
         final var options = passkeyOptions(pendingToken);
-        final var credential = authenticator.authenticate(options.options());
+        final var credential = authenticator.withOrigin(OTHER_ORIGIN).authenticate(options.options());
 
         assertThatThrownBy(() -> secondStepService.completeWithPasskey(secondStep(pendingToken, options, credential), request()))
                 .isInstanceOf(SignInExpiredException.class)
-                .hasMessage(SIGN_IN_EXPIRED);
+                .hasMessage(OUT_OF_ATTEMPTS);
 
         assertThat(redis.keys()).doesNotContain(PENDING_LOGIN_KEY_PREFIX + pendingToken);
         assertThat(flows.stored(authenticator).getLastUsedAt()).isNull();
         verify(loginAttemptService, times(5)).loginFailed("2fa:" + user.getId());
-        verify(loginAttemptService, times(6)).loginFailed(CLIENT_IP);
+        verify(loginAttemptService, times(5)).loginFailed(CLIENT_IP);
         assertThatThrownBy(() -> passkeyOptions(pendingToken))
                 .isInstanceOf(SignInExpiredException.class)
                 .hasMessage(SIGN_IN_EXPIRED);
@@ -334,17 +344,64 @@ class PasskeySecondStepFlowsTest {
         final var pendingToken = pendingTokenOf(user, false);
         final var wrongCode = TotpSecondStepDto.builder().pendingToken(pendingToken).code("000000").build();
 
-        IntStream.rangeClosed(1, 3).forEach(attempt ->
-                assertThatThrownBy(() -> secondStepService.completeWithCode(wrongCode, request()))
-                        .isInstanceOf(TwoStepFailedException.class));
-        IntStream.rangeClosed(1, 2).forEach(attempt ->
-                assertThatThrownBy(() -> completeWith(authenticator.withOrigin(OTHER_ORIGIN), pendingToken))
-                        .isInstanceOf(PasskeyVerificationException.class));
+        for (final var message : List.of("Invalid two-factor code", "Invalid two-factor code", "Invalid two-factor code. 2 tries left.")) {
+            assertThatThrownBy(() -> secondStepService.completeWithCode(wrongCode, request()))
+                    .isInstanceOf(TwoStepFailedException.class)
+                    .hasMessage(message);
+        }
+        assertThatThrownBy(() -> completeWith(authenticator.withOrigin(OTHER_ORIGIN), pendingToken))
+                .isInstanceOf(PasskeyVerificationException.class)
+                .hasMessage(COULD_NOT_VERIFY + " 1 try left.");
+        assertThatThrownBy(() -> completeWith(authenticator.withOrigin(OTHER_ORIGIN), pendingToken))
+                .isInstanceOf(SignInExpiredException.class)
+                .hasMessage(OUT_OF_ATTEMPTS);
 
         assertThatThrownBy(() -> completeWith(authenticator, pendingToken))
                 .isInstanceOf(SignInExpiredException.class)
                 .hasMessage(SIGN_IN_EXPIRED);
         verify(loginAttemptService, times(5)).loginFailed("2fa:" + user.getId());
+    }
+
+    @Test
+    void codesTypedTheWayPeopleSeeThemWorkOnEveryCodePath() {
+        final var user = flows.signedIn(flows.localUser("typed-codes@example.com"));
+        flows.addPasskey(TestAuthenticator.securityKey(), "YubiKey");
+        final var secret = twoFactorService.setup().secret();
+        final var recoveryCodes = twoFactorService.enable(" " + spaced(Totp.currentCode(secret)) + " ").recoveryCodes();
+        assertThat(recoveryCodes).hasSize(10);
+        flows.signedInAgain(user);
+
+        for (final var typed : List.of(
+                recoveryCodes.get(0).toLowerCase(Locale.ROOT),
+                " " + recoveryCodes.get(1) + " ",
+                recoveryCodes.get(2) + "\n",
+                recoveryCodes.get(3).replace("-", ""),
+                recoveryCodes.get(4).replace("-", " "),
+                spaced(Totp.currentCode(secret)),
+                Totp.currentCode(secret) + " ")) {
+            final var signedIn = secondStepService.completeWithCode(code(pendingTokenOf(user, false), typed), request());
+
+            assertThat(signedIn.getStatusCode()).as(typed).isEqualTo(HttpStatus.OK);
+            assertThat(signedIn.getBody().getToken()).as(typed).isNotBlank();
+        }
+        assertThat(unusedRecoveryCodesOf(user)).isEqualTo(5L);
+
+        final var usedCode = code(pendingTokenOf(user, false), recoveryCodes.get(0).toLowerCase(Locale.ROOT));
+        assertThatThrownBy(() -> secondStepService.completeWithCode(usedCode, request()))
+                .isInstanceOf(TwoStepFailedException.class)
+                .hasMessage("Invalid two-factor code");
+        verify(loginAttemptService).loginFailed("2fa:" + user.getId());
+
+        twoStepSettingsService.removeTotp(new TwoFactorCodeDto("\t" + spaced(Totp.currentCode(secret)) + "\n"));
+        flushed();
+        assertThat(jdbcTemplate.queryForObject("select two_factor_enabled from user_account where id = ?", Boolean.class, user.getId()))
+                .isFalse();
+
+        twoStepSettingsService.disable(TwoStepDisableDto.builder()
+                .code(recoveryCodes.get(5).toLowerCase(Locale.ROOT).replace("-", ""))
+                .build());
+        assertThat(twoStepEnabledOf(user)).isFalse();
+        verify(loginAttemptService, times(1)).loginFailed("2fa:" + user.getId());
     }
 
     @Test
@@ -434,7 +491,7 @@ class PasskeySecondStepFlowsTest {
         assertThat(recoveryCodesOf(alice)).isEqualTo(10L);
         assertThat(flows.stored(bobsKey).getLastUsedAt()).isNull();
         verify(loginAttemptService, never()).loginFailed(anyString());
-        verify(loginAttemptService, never()).loginSucceeded(anyString());
+        verify(loginAttemptService, never()).loginSucceeded(startsWith("2fa:"));
     }
 
     @Test
@@ -457,7 +514,7 @@ class PasskeySecondStepFlowsTest {
         assertThat(recoveryCodesOf(alice)).isEqualTo(10L);
         assertThat(flows.stored(bobsPasskey).getLastUsedAt()).isNull();
         verify(loginAttemptService).loginFailed("2fa:" + alice.getId());
-        verify(loginAttemptService, never()).loginSucceeded(anyString());
+        verify(loginAttemptService, never()).loginSucceeded(startsWith("2fa:"));
     }
 
     @Test
@@ -519,6 +576,21 @@ class PasskeySecondStepFlowsTest {
 
     private long signCountOf(final TestAuthenticator authenticator) {
         return passkeyCredentialRepository.findByCredentialId(authenticator.credentialId()).orElseThrow().getSignCount();
+    }
+
+    private long unusedRecoveryCodesOf(final User user) {
+        flushed();
+
+        return jdbcTemplate.queryForObject("select count(*) from two_factor_recovery_code where user_id = ? and used = false", Long.class,
+                user.getId());
+    }
+
+    private static TotpSecondStepDto code(final String pendingToken, final String code) {
+        return TotpSecondStepDto.builder().pendingToken(pendingToken).code(code).build();
+    }
+
+    private static String spaced(final String totpCode) {
+        return totpCode.substring(0, 3) + " " + totpCode.substring(3);
     }
 
     private boolean twoStepEnabledOf(final User user) {

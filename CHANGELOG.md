@@ -4,6 +4,27 @@ All notable changes to hrva.cc — the URL shortener.
 
 ---
 
+## [v2.10] — 2026-10-26
+
+Passkeys and security keys, and two-step verification for every sign-in method.
+
+### 🛡️ Security
+- Sign in with a passkey: your fingerprint, face or screen lock, a password manager such as Bitwarden, Proton Pass or 1Password, or a security key such as a YubiKey. No password to type.
+- Add as many passkeys and security keys as you like in Settings, and rename or remove them there. You get an email whenever one is added.
+- Two-step verification can use a passkey or security key instead of a code, and can be turned on with passkeys only.
+- Google and GitHub sign-ins now ask for your second step when two-step verification is on, and accounts that use Google or GitHub can turn it on.
+- Recovery and authenticator codes work however you type them, with or without spaces, dashes or capitals.
+- Sign-in messages now say how many tries are left and when you can try again.
+- Deleting an account that signs in with Google or GitHub needs a sign-in within the last 15 minutes, as adding or removing a passkey does.
+
+### 🔒 Privacy
+- Passkeys store only a public key and a few details, such as the name you give it, when it was added and last used, and whether it's synced. Your fingerprint, face and PIN never leave your device.
+
+### 🌐 Site
+- A new help page explains passkeys and security keys step by step, linked from Settings and the footer.
+
+---
+
 ## [v2.9] — 2026-10-26
 
 Campaign tracking tags for your links, a full statistics page and reserved short link names for the admin, and a simpler admin menu.

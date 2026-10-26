@@ -2,6 +2,8 @@ package cc.hrva.urlshortener.service;
 
 import java.util.Collections;
 import java.util.List;
+import java.util.function.UnaryOperator;
+import java.util.stream.Stream;
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.exception.ApiException;
 import cc.hrva.urlshortener.model.TwoFactorRecoveryCode;
@@ -15,9 +17,14 @@ import cc.hrva.urlshortener.service.twostep.RecoveryCodes;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mock;
 import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -33,6 +40,8 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class DefaultTwoFactorServiceTest {
 
+    private static final BCryptPasswordEncoder BCRYPT = new BCryptPasswordEncoder(4);
+    private static final String RECOVERY_CODE = "E3HJ-HDFU";
     private static final List<String> TEN_CODES = List.of("ABCD-EF23", "GHJK-LM45", "NPQR-ST67", "UVWX-YZ89", "AB23-CD45",
             "EF67-GH89", "JK23-LM45", "NP67-QR89", "ST23-UV45", "WX67-YZ89");
 
@@ -260,4 +269,83 @@ class DefaultTwoFactorServiceTest {
             totp.verify(() -> Totp.verify(any(), any()), never());
         }
     }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"e3hj-hdfu", "E3HJ-HDFU ", " E3HJ-HDFU", "E3HJ-HDFU\n", "E3HJHDFU", "E3HJ HDFU", "e3hjhdfu", "e3hj hdfu",
+            "\tE3HJ-HDFU\r\n", "E3HJ\u00a0HDFU", "E3 HJ-HD FU"})
+    void aRecoveryCodeTypedTheWayPeopleSeeItSignsIn(final String typed) {
+        final var user = User.builder().id(1L).twoStepEnabled(true).build();
+        final var recovery = TwoFactorRecoveryCode.builder().id(1L).user(user).codeHash(BCRYPT.encode(RECOVERY_CODE)).used(false).build();
+        when(recoveryCodeRepository.findByUserAndUsedFalse(user)).thenReturn(List.of(recovery));
+
+        assertThat(withRealBcrypt().verifyLoginCode(user, typed)).isTrue();
+
+        assertThat(recovery.isUsed()).isTrue();
+        verify(recoveryCodeRepository).save(recovery);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"E3HJ-HDFX", "e3hj-hdf", "E3HJ-HDFUU", "E3HJ--HDFU", "E3HJ_HDFU", "   "})
+    void aWrongRecoveryCodeIsStillRefused(final String typed) {
+        final var user = User.builder().id(1L).twoStepEnabled(true).build();
+        final var recovery = TwoFactorRecoveryCode.builder().id(1L).user(user).codeHash(BCRYPT.encode(RECOVERY_CODE)).used(false).build();
+        when(recoveryCodeRepository.findByUserAndUsedFalse(user)).thenReturn(List.of(recovery));
+
+        assertThat(withRealBcrypt().verifyLoginCode(user, typed)).isFalse();
+
+        assertThat(recovery.isUsed()).isFalse();
+        verify(recoveryCodeRepository, never()).save(any());
+    }
+
+    @ParameterizedTest
+    @MethodSource("totpCodesTypedTheWayPeopleSeeThem")
+    void anAuthenticatorCodeTypedTheWayPeopleSeeItSignsIn(final String shape, final UnaryOperator<String> typed) {
+        final var secret = Totp.generateSecret();
+        final var user = User.builder().id(1L).twoFactorEnabled(true).twoFactorSecret(secret).twoStepEnabled(true).build();
+
+        assertThat(twoFactorService.verifyLoginCode(user, typed.apply(Totp.currentCode(secret)))).as(shape).isTrue();
+
+        verify(recoveryCodeRepository, never()).findByUserAndUsedFalse(any());
+    }
+
+    @ParameterizedTest
+    @MethodSource("totpCodesTypedTheWayPeopleSeeThem")
+    void anAuthenticatorCodeTypedTheWayPeopleSeeItConfirmsTheApp(final String shape, final UnaryOperator<String> typed) {
+        final var secret = Totp.generateSecret();
+        final var user = User.builder().id(1L).email("u@example.com").authProvider("local").twoFactorSecret(secret)
+                .twoFactorEnabled(false).twoStepEnabled(false).build();
+        when(userService.getUserFromToken()).thenReturn(user);
+        when(recoveryCodes.issueIfNone(user)).thenReturn(TEN_CODES);
+
+        twoFactorService.enable(typed.apply(Totp.currentCode(secret)));
+
+        assertThat(user.getTwoFactorEnabled()).as(shape).isTrue();
+        assertThat(user.getTwoStepEnabled()).as(shape).isTrue();
+    }
+
+    @Test
+    void aWrongAuthenticatorCodeWithSpacesIsStillRefused() {
+        final var secret = Totp.generateSecret();
+        final var user = User.builder().id(1L).twoFactorEnabled(true).twoFactorSecret(secret).twoStepEnabled(true).build();
+        when(recoveryCodeRepository.findByUserAndUsedFalse(user)).thenReturn(Collections.emptyList());
+        final var wrong = Totp.currentCode(secret).equals("000000") ? "111 111" : "000 000";
+
+        assertThat(twoFactorService.verifyLoginCode(user, wrong)).isFalse();
+    }
+
+    private TwoFactorService withRealBcrypt() {
+        return new DefaultTwoFactorService(userService, userRepository, appProperties, BCRYPT, recoveryCodeRepository, recoveryCodes,
+                accountLock);
+    }
+
+    private static Stream<Arguments> totpCodesTypedTheWayPeopleSeeThem() {
+        return Stream.of(
+                Arguments.of("163 225", (UnaryOperator<String>) code -> code.substring(0, 3) + " " + code.substring(3)),
+                Arguments.of("163225 ", (UnaryOperator<String>) code -> code + " "),
+                Arguments.of(" 163225", (UnaryOperator<String>) code -> " " + code),
+                Arguments.of("163225 newline", (UnaryOperator<String>) code -> code + "\n"),
+                Arguments.of("tab 163 225 crlf", (UnaryOperator<String>) code -> "\t" + code.substring(0, 3) + " " + code.substring(3) + "\r\n"),
+                Arguments.of("163 no-break space 225", (UnaryOperator<String>) code -> code.substring(0, 3) + "\u00a0" + code.substring(3)));
+    }
+
 }

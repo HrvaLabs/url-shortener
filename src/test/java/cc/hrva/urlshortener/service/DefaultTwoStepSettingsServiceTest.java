@@ -67,7 +67,7 @@ class DefaultTwoStepSettingsServiceTest {
     private static final String INVALID_CODE = "Invalid verification code";
     private static final String ONE_FACTOR = "Confirm with a code, a recovery code or a passkey.";
     private static final String OFF = "Two-step verification is off.";
-    private static final String LOCKED = "Too many invalid two-factor codes. Try again later.";
+    private static final String LOCKED = "Too many wrong codes for this account. Try again in 24 hours.";
     private static final String LAST_TOTP =
             "Your authenticator app is your only two-step method. Turn off two-step verification, or add a passkey or security key first.";
 

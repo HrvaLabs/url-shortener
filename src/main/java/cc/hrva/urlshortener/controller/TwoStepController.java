@@ -27,7 +27,7 @@ public class TwoStepController {
 
     @Operation(summary = "Finish a two-step sign-in with a code", description = "Send the pendingToken from the login response with a TOTP code from the authenticator app or a recovery code. Returns the login body and the Authorization header.")
     @ApiResponse(responseCode = "200", description = "Signed in")
-    @ApiResponse(responseCode = "401", description = "Invalid two-factor code")
+    @ApiResponse(responseCode = "401", description = "Invalid two-factor code, with the tries left once 2 or fewer remain")
     @ApiResponse(responseCode = "403", description = "Network or account blocked after too many attempts, account deactivated, or email not verified")
     @ApiResponse(responseCode = "410", description = "The sign-in expired, was used, or ran out of attempts")
     @ApiResponse(responseCode = "503", description = "Two-step sign-in is unavailable")
@@ -50,7 +50,7 @@ public class TwoStepController {
     @Operation(summary = "Finish a two-step sign-in with a passkey or security key", description = "Send the pendingToken, the ceremonyId from the second-step options and the browser's credential (PublicKeyCredential.toJSON()). Returns the login body and the Authorization header. A failed attempt uses one of the sign-in's 5 attempts, shared with codes.")
     @ApiResponse(responseCode = "200", description = "Signed in")
     @ApiResponse(responseCode = "400", description = "The credential is missing or couldn't be read")
-    @ApiResponse(responseCode = "401", description = "The passkey isn't registered, isn't this account's, or couldn't be verified")
+    @ApiResponse(responseCode = "401", description = "The passkey isn't registered, isn't this account's, or couldn't be verified, with the tries left once 2 or fewer remain")
     @ApiResponse(responseCode = "403", description = "Network or account blocked after too many attempts, account deactivated, or email not verified")
     @ApiResponse(responseCode = "410", description = "The sign-in expired, was used, or ran out of attempts, or the ceremony expired or belongs to another request")
     @ApiResponse(responseCode = "503", description = "Two-step sign-in or passkeys are unavailable")

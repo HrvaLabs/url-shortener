@@ -32,6 +32,7 @@ import cc.hrva.urlshortener.service.passkey.PasskeyJson;
 import cc.hrva.urlshortener.service.passkey.PasskeyOptionsFactory;
 import cc.hrva.urlshortener.service.twostep.PendingLogin;
 import cc.hrva.urlshortener.service.twostep.PendingLoginStore;
+import cc.hrva.urlshortener.service.twostep.TwoStepLockMessage;
 import jakarta.servlet.http.HttpServletRequest;
 import java.time.Duration;
 import java.time.LocalDate;
@@ -42,6 +43,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
@@ -76,6 +79,10 @@ class DefaultSecondStepServiceTest {
     private static final Duration FIVE_MINUTES = Duration.ofMinutes(5);
     private static final String INVALID_CODE = "Invalid two-factor code";
     private static final String SIGN_IN_EXPIRED = "Your sign-in expired. Sign in again.";
+    private static final String OUT_OF_ATTEMPTS = "Too many wrong codes. Sign in again to get 5 more tries.";
+    private static final String NETWORK_BLOCKED = "Too many failed sign-ins from this network. Try again tomorrow.";
+    private static final String ACCOUNT_LOCKED = "Too many wrong codes for this account. Try again in 24 hours, or sign in with a passkey.";
+    private static final String ACCOUNT_LOCKED_WITHOUT_A_PASSKEY = "Too many wrong codes for this account. Try again in 24 hours.";
     private static final String CEREMONY_EXPIRED = "This request expired. Try again.";
     private static final String OPTIONS_KEY = RateLimiter.clientKey("passkey-second-step-options", CLIENT_IP);
     private static final String PASSWORDLESS_OPTIONS_KEY = RateLimiter.clientKey("passkey-options", CLIENT_IP);
@@ -140,7 +147,7 @@ class DefaultSecondStepServiceTest {
         secondStepService = new DefaultSecondStepService(clientIpResolver, loginAttemptService, pendingLoginStore,
                 rateLimiter, userRepository, twoFactorService, signInService, passkeyCredentialRepository,
                 passkeyCeremonies, passkeyCeremonyStore, passkeyOptionsFactory, passkeyAssertions,
-                passkeySignInStatsRepository, analyticsDays);
+                passkeySignInStatsRepository, analyticsDays, new TwoStepLockMessage(passkeyCredentialRepository));
         when(clientIpResolver.getClientIp(request)).thenReturn(CLIENT_IP);
     }
 
@@ -190,15 +197,121 @@ class DefaultSecondStepServiceTest {
 
     @Test
     void theSixthAttemptOnOneTokenIsRefusedAndTheTokenIsDiscarded() {
-        when(pendingLoginStore.find(TOKEN)).thenReturn(Optional.of(new PendingLogin(7L, false)));
-        when(rateLimiter.tryAcquire(ATTEMPTS_KEY, 5, FIVE_MINUTES)).thenReturn(false);
+        givenAPendingLoginOnAttempt(new PendingLogin(7L, false), user(), 6L);
 
         assertThatThrownBy(() -> secondStepService.completeWithCode(totp("123456"), request))
                 .isInstanceOf(SignInExpiredException.class)
-                .hasMessage(SIGN_IN_EXPIRED);
+                .hasMessage(OUT_OF_ATTEMPTS);
         verify(pendingLoginStore).discard(TOKEN);
         verify(loginAttemptService).loginFailed(CLIENT_IP);
-        verifyNoInteractions(userRepository, twoFactorService, signInService);
+        verifyNoInteractions(twoFactorService, signInService);
+    }
+
+    @ParameterizedTest
+    @CsvSource(delimiter = '|', value = {
+            "1 | Invalid two-factor code",
+            "2 | Invalid two-factor code",
+            "3 | Invalid two-factor code. 2 tries left.",
+            "4 | Invalid two-factor code. 1 try left."
+    })
+    void aWrongCodeSaysHowManyTriesAreLeftOnceTwoOrFewerRemain(final long attempt, final String message) {
+        final var user = user();
+        givenAPendingLoginOnAttempt(new PendingLogin(7L, false), user, attempt);
+        when(twoFactorService.verifyLoginCode(user, "000000")).thenReturn(false);
+
+        assertThatThrownBy(() -> secondStepService.completeWithCode(totp("000000"), request))
+                .isInstanceOf(TwoStepFailedException.class)
+                .hasMessage(message);
+        verify(loginAttemptService).loginFailed(CLIENT_IP);
+        verify(loginAttemptService).loginFailed("2fa:7");
+        verify(pendingLoginStore, never()).discard(anyString());
+    }
+
+    @Test
+    void theFifthWrongCodeUsesUpTheSignInAndSaysHowToGetMoreTries() {
+        final var user = user();
+        givenAPendingLoginOnAttempt(new PendingLogin(7L, false), user, 5L);
+        when(twoFactorService.verifyLoginCode(user, "000000")).thenReturn(false);
+
+        assertThatThrownBy(() -> secondStepService.completeWithCode(totp("000000"), request))
+                .isInstanceOf(SignInExpiredException.class)
+                .hasMessage(OUT_OF_ATTEMPTS);
+        verify(pendingLoginStore).discard(TOKEN);
+        verify(loginAttemptService).loginFailed(CLIENT_IP);
+        verify(loginAttemptService).loginFailed("2fa:7");
+        verify(pendingLoginStore, never()).consume(anyString());
+        verifyNoInteractions(signInService);
+    }
+
+    @Test
+    void theRightCodeOnTheFifthAttemptStillSignsIn() {
+        final var user = user();
+        final var signedIn = ResponseEntity.ok(JWTTokenDto.builder().token("Bearer eyJ.token").build());
+        givenAPendingLoginOnAttempt(new PendingLogin(7L, false), user, 5L);
+        when(twoFactorService.verifyLoginCode(user, "123456")).thenReturn(true);
+        when(pendingLoginStore.consume(TOKEN)).thenReturn(Optional.of(new PendingLogin(7L, false)));
+        when(signInService.signIn(user, false)).thenReturn(signedIn);
+
+        assertThat(secondStepService.completeWithCode(totp("123456"), request)).isSameAs(signedIn);
+        verify(pendingLoginStore, never()).discard(anyString());
+        verify(loginAttemptService, never()).loginFailed(anyString());
+    }
+
+    @ParameterizedTest
+    @CsvSource(delimiter = '|', value = {
+            "2 | That passkey or security key couldn't be verified. Try again.",
+            "3 | That passkey or security key couldn't be verified. Try again. 2 tries left.",
+            "4 | That passkey or security key couldn't be verified. Try again. 1 try left."
+    })
+    void aRefusedPasskeySaysHowManyTriesAreLeftOnceTwoOrFewerRemain(final long attempt, final String message) {
+        final var user = user();
+        givenAPendingLoginOnAttempt(new PendingLogin(7L, false), user, attempt);
+        when(passkeyCeremonyStore.consume(CEREMONY_ID)).thenReturn(Optional.of(SECOND_STEP_CEREMONY));
+        when(passkeyAssertions.verify(SECOND_STEP_CEREMONY, CREDENTIAL, user)).thenThrow(new PasskeyVerificationException(COULD_NOT_VERIFY));
+
+        assertThatThrownBy(() -> secondStepService.completeWithPasskey(passkey(), request))
+                .isInstanceOf(PasskeyVerificationException.class)
+                .hasMessage(message);
+        verify(pendingLoginStore, never()).discard(anyString());
+    }
+
+    @Test
+    void anUnreadablePasskeyResponseAlsoSaysHowManyTriesAreLeft() {
+        final var user = user();
+        givenAPendingLoginOnAttempt(new PendingLogin(7L, false), user, 4L);
+        when(passkeyCeremonyStore.consume(CEREMONY_ID)).thenReturn(Optional.of(SECOND_STEP_CEREMONY));
+        when(passkeyAssertions.verify(SECOND_STEP_CEREMONY, CREDENTIAL, user)).thenThrow(new ApiException(PasskeyJson.UNREADABLE));
+
+        assertThatThrownBy(() -> secondStepService.completeWithPasskey(passkey(), request))
+                .isInstanceOf(ApiException.class)
+                .hasMessage("That passkey response couldn't be read. Try again. 1 try left.");
+    }
+
+    @Test
+    void theFifthRefusedPasskeyUsesUpTheSignIn() {
+        final var user = user();
+        givenAPendingLoginOnAttempt(new PendingLogin(7L, false), user, 5L);
+        when(passkeyCeremonyStore.consume(CEREMONY_ID)).thenReturn(Optional.of(SECOND_STEP_CEREMONY));
+        when(passkeyAssertions.verify(SECOND_STEP_CEREMONY, CREDENTIAL, user)).thenThrow(new PasskeyVerificationException(COULD_NOT_VERIFY));
+
+        assertThatThrownBy(() -> secondStepService.completeWithPasskey(passkey(), request))
+                .isInstanceOf(SignInExpiredException.class)
+                .hasMessage(OUT_OF_ATTEMPTS);
+        verify(pendingLoginStore).discard(TOKEN);
+        verify(loginAttemptService).loginFailed(CLIENT_IP);
+        verify(loginAttemptService).loginFailed("2fa:7");
+        verifyNoInteractions(signInService, passkeySignInStatsRepository);
+    }
+
+    @Test
+    void anExpiredCeremonyOnTheFifthAttemptKeepsTheSignInForTheNextTry() {
+        givenAPendingLoginOnAttempt(new PendingLogin(7L, false), user(), 5L);
+        when(passkeyCeremonyStore.consume(CEREMONY_ID)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> secondStepService.completeWithPasskey(passkey(), request))
+                .isInstanceOf(SignInExpiredException.class)
+                .hasMessage(CEREMONY_EXPIRED);
+        verify(pendingLoginStore, never()).discard(anyString());
     }
 
     @Test
@@ -269,28 +382,84 @@ class DefaultSecondStepServiceTest {
 
         assertThatThrownBy(() -> secondStepService.completeWithCode(totp("123456"), request))
                 .isInstanceOf(NoAuthorizationException.class)
-                .hasMessage("Request has been blocked");
+                .hasMessage(NETWORK_BLOCKED);
         verifyNoInteractions(pendingLoginStore, rateLimiter, userRepository, twoFactorService, signInService);
     }
 
     @Test
-    void aLockedAccountIsRefusedBeforeTheCodeIsChecked() {
-        when(pendingLoginStore.find(TOKEN)).thenReturn(Optional.of(new PendingLogin(7L, false)));
-        when(rateLimiter.tryAcquire(ATTEMPTS_KEY, 5, FIVE_MINUTES)).thenReturn(true);
-        when(userRepository.findById(7L)).thenReturn(Optional.of(user()));
-        when(loginAttemptService.isBlocked(CLIENT_IP)).thenReturn(false);
-        when(loginAttemptService.isBlocked("2fa:7")).thenReturn(true);
+    void aLockedAccountIsRefusedBeforeTheCodeIsCheckedOrAnAttemptIsUsed() {
+        final var user = user();
+        givenALockedAccount(user);
+        when(passkeyCredentialRepository.findByUserOrderByCreatedAtDesc(user)).thenReturn(List.of(synced()));
 
         assertThatThrownBy(() -> secondStepService.completeWithCode(totp("123456"), request))
                 .isInstanceOf(NoAuthorizationException.class)
-                .hasMessage("Too many invalid two-factor codes. Try again later.");
+                .hasMessage(ACCOUNT_LOCKED);
         verifyNoInteractions(twoFactorService, signInService);
+        verify(rateLimiter, never()).increment(eq(ATTEMPTS_KEY), any());
+    }
+
+    @ParameterizedTest
+    @MethodSource("passkeysAndTheLockText")
+    void theLockTextOffersAPasskeyOnlyWhenTheAccountHasOneThatSignsInAlone(final List<PasskeyCredential> passkeys, final String message) {
+        final var user = user();
+        givenALockedAccount(user);
+        when(passkeyCredentialRepository.findByUserOrderByCreatedAtDesc(user)).thenReturn(passkeys);
+
+        assertThatThrownBy(() -> secondStepService.completeWithCode(totp("123456"), request))
+                .isInstanceOf(NoAuthorizationException.class)
+                .hasMessage(message);
+    }
+
+    @Test
+    void aFifthWrongCodeThatLocksTheAccountSaysTheAccountIsLocked() {
+        final var user = user();
+        givenAPendingLoginOnAttempt(new PendingLogin(7L, false), user, 5L);
+        when(loginAttemptService.isBlocked("2fa:7")).thenReturn(false, true);
+        when(twoFactorService.verifyLoginCode(user, "000000")).thenReturn(false);
+        when(passkeyCredentialRepository.findByUserOrderByCreatedAtDesc(user)).thenReturn(List.of(synced()));
+
+        assertThatThrownBy(() -> secondStepService.completeWithCode(totp("000000"), request))
+                .isInstanceOf(NoAuthorizationException.class)
+                .hasMessage(ACCOUNT_LOCKED);
+        verify(loginAttemptService).loginFailed("2fa:7");
+        verify(loginAttemptService).loginFailed(CLIENT_IP);
+        verify(pendingLoginStore, never()).discard(anyString());
+        verifyNoInteractions(signInService);
+    }
+
+    @Test
+    void aThirdWrongCodeThatLocksTheAccountSaysSoInsteadOfTheTriesLeft() {
+        final var user = user();
+        givenAPendingLoginOnAttempt(new PendingLogin(7L, false), user, 3L);
+        when(loginAttemptService.isBlocked("2fa:7")).thenReturn(false, true);
+        when(twoFactorService.verifyLoginCode(user, "000000")).thenReturn(false);
+
+        assertThatThrownBy(() -> secondStepService.completeWithCode(totp("000000"), request))
+                .isInstanceOf(NoAuthorizationException.class)
+                .hasMessage(ACCOUNT_LOCKED_WITHOUT_A_PASSKEY);
+    }
+
+    @Test
+    void aFifthRefusedPasskeyThatLocksTheAccountSaysTheAccountIsLocked() {
+        final var user = user();
+        givenAPendingLoginOnAttempt(new PendingLogin(7L, false), user, 5L);
+        when(loginAttemptService.isBlocked("2fa:7")).thenReturn(false, true);
+        when(passkeyCeremonyStore.consume(CEREMONY_ID)).thenReturn(Optional.of(SECOND_STEP_CEREMONY));
+        when(passkeyAssertions.verify(SECOND_STEP_CEREMONY, CREDENTIAL, user)).thenThrow(new PasskeyVerificationException(COULD_NOT_VERIFY));
+        when(passkeyCredentialRepository.findByUserOrderByCreatedAtDesc(user))
+                .thenReturn(List.of(PasskeyCredential.builder().credentialId(CREDENTIAL_ID).discoverable(false).build()));
+
+        assertThatThrownBy(() -> secondStepService.completeWithPasskey(passkey(), request))
+                .isInstanceOf(NoAuthorizationException.class)
+                .hasMessage(ACCOUNT_LOCKED_WITHOUT_A_PASSKEY);
+        verify(pendingLoginStore, never()).discard(anyString());
+        verifyNoInteractions(signInService, passkeySignInStatsRepository);
     }
 
     @Test
     void aDeletedAccountIsA410() {
         when(pendingLoginStore.find(TOKEN)).thenReturn(Optional.of(new PendingLogin(7L, false)));
-        when(rateLimiter.tryAcquire(ATTEMPTS_KEY, 5, FIVE_MINUTES)).thenReturn(true);
         when(userRepository.findById(7L)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> secondStepService.completeWithCode(totp("123456"), request))
@@ -302,15 +471,15 @@ class DefaultSecondStepServiceTest {
 
     @Test
     void anUnavailableAttemptCounterIsSignInUnavailable() {
-        when(pendingLoginStore.find(TOKEN)).thenReturn(Optional.of(new PendingLogin(7L, false)));
-        when(rateLimiter.tryAcquire(ATTEMPTS_KEY, 5, FIVE_MINUTES))
+        givenAPendingLogin(new PendingLogin(7L, false), user());
+        when(rateLimiter.increment(ATTEMPTS_KEY, FIVE_MINUTES))
                 .thenThrow(new RateLimiterUnavailableException(new QueryTimeoutException("down")));
 
         assertThatThrownBy(() -> secondStepService.completeWithCode(totp("123456"), request))
                 .isInstanceOf(SignInUnavailableException.class)
                 .hasMessage("Two-step sign-in isn't available right now. Try again in a minute.");
         verify(loginAttemptService, never()).loginFailed(anyString());
-        verifyNoInteractions(userRepository, twoFactorService, signInService);
+        verifyNoInteractions(twoFactorService, signInService);
     }
 
     @Test
@@ -334,7 +503,7 @@ class DefaultSecondStepServiceTest {
                 """.formatted(ceremony.getValue().challenge(), CREDENTIAL_ID)));
         verify(rateLimiter).tryAcquire(OPTIONS_KEY, 30, TEN_MINUTES);
         verify(rateLimiter, never()).tryAcquire(eq(PASSWORDLESS_OPTIONS_KEY), anyInt(), any());
-        verify(rateLimiter, never()).tryAcquire(eq(ATTEMPTS_KEY), anyInt(), any());
+        verify(rateLimiter, never()).increment(eq(ATTEMPTS_KEY), any());
         verifyNoInteractions(passkeyAssertions, signInService);
         verify(loginAttemptService, never()).loginFailed(anyString());
     }
@@ -350,7 +519,7 @@ class DefaultSecondStepServiceTest {
         assertThatThrownBy(() -> secondStepService.passkeyOptions(pendingToken(), request))
                 .isInstanceOf(ApiException.class)
                 .hasMessage(NO_PASSKEYS);
-        verify(rateLimiter, never()).tryAcquire(eq(ATTEMPTS_KEY), anyInt(), any());
+        verify(rateLimiter, never()).increment(eq(ATTEMPTS_KEY), any());
         verifyNoInteractions(passkeyCeremonyStore);
         verify(loginAttemptService, never()).loginFailed(anyString());
     }
@@ -365,7 +534,7 @@ class DefaultSecondStepServiceTest {
                 .hasMessage(SIGN_IN_EXPIRED);
         verify(loginAttemptService).loginFailed(CLIENT_IP);
         verify(loginAttemptService, never()).loginFailed(startsWith("2fa:"));
-        verify(rateLimiter, never()).tryAcquire(eq(ATTEMPTS_KEY), anyInt(), any());
+        verify(rateLimiter, never()).increment(eq(ATTEMPTS_KEY), any());
         verifyNoInteractions(userRepository, passkeyCeremonyStore);
     }
 
@@ -375,7 +544,7 @@ class DefaultSecondStepServiceTest {
 
         assertThatThrownBy(() -> secondStepService.passkeyOptions(pendingToken(), request))
                 .isInstanceOf(NoAuthorizationException.class)
-                .hasMessage("Request has been blocked");
+                .hasMessage(NETWORK_BLOCKED);
         verifyNoInteractions(rateLimiter, pendingLoginStore, userRepository, passkeyCeremonyStore);
     }
 
@@ -419,7 +588,7 @@ class DefaultSecondStepServiceTest {
         assertThat(response).isSameAs(signedIn);
         final var inOrder = inOrder(rateLimiter, passkeyCeremonyStore, passkeyAssertions, pendingLoginStore,
                 loginAttemptService, signInService, passkeySignInStatsRepository);
-        inOrder.verify(rateLimiter).tryAcquire(ATTEMPTS_KEY, 5, FIVE_MINUTES);
+        inOrder.verify(rateLimiter).increment(ATTEMPTS_KEY, FIVE_MINUTES);
         inOrder.verify(passkeyCeremonyStore).consume(CEREMONY_ID);
         inOrder.verify(passkeyAssertions).verify(SECOND_STEP_CEREMONY, CREDENTIAL, user);
         inOrder.verify(pendingLoginStore).consume(TOKEN);
@@ -478,16 +647,15 @@ class DefaultSecondStepServiceTest {
 
     @Test
     void aLockedAccountIsRefusedBeforeTheCeremonyIsUsed() {
-        when(pendingLoginStore.find(TOKEN)).thenReturn(Optional.of(new PendingLogin(7L, false)));
-        when(rateLimiter.tryAcquire(ATTEMPTS_KEY, 5, FIVE_MINUTES)).thenReturn(true);
-        when(userRepository.findById(7L)).thenReturn(Optional.of(user()));
-        when(loginAttemptService.isBlocked(CLIENT_IP)).thenReturn(false);
-        when(loginAttemptService.isBlocked("2fa:7")).thenReturn(true);
+        final var user = user();
+        givenALockedAccount(user);
+        when(passkeyCredentialRepository.findByUserOrderByCreatedAtDesc(user)).thenReturn(List.of(synced()));
 
         assertThatThrownBy(() -> secondStepService.completeWithPasskey(passkey(), request))
                 .isInstanceOf(NoAuthorizationException.class)
-                .hasMessage("Too many invalid two-factor codes. Try again later.");
+                .hasMessage(ACCOUNT_LOCKED);
         verifyNoInteractions(passkeyCeremonyStore, passkeyAssertions, signInService);
+        verify(rateLimiter, never()).increment(eq(ATTEMPTS_KEY), any());
     }
 
     @Test
@@ -504,10 +672,21 @@ class DefaultSecondStepServiceTest {
         verifyNoInteractions(signInService, passkeySignInStatsRepository);
     }
 
+    private void givenALockedAccount(final User user) {
+        when(loginAttemptService.isBlocked(CLIENT_IP)).thenReturn(false);
+        when(pendingLoginStore.find(TOKEN)).thenReturn(Optional.of(new PendingLogin(7L, false)));
+        when(userRepository.findById(7L)).thenReturn(Optional.of(user));
+        when(loginAttemptService.isBlocked("2fa:7")).thenReturn(true);
+    }
+
     private void givenAPendingLogin(final PendingLogin pendingLogin, final User user) {
+        givenAPendingLoginOnAttempt(pendingLogin, user, 1L);
+    }
+
+    private void givenAPendingLoginOnAttempt(final PendingLogin pendingLogin, final User user, final long attempt) {
         when(loginAttemptService.isBlocked(CLIENT_IP)).thenReturn(false);
         when(pendingLoginStore.find(TOKEN)).thenReturn(Optional.of(pendingLogin));
-        when(rateLimiter.tryAcquire(ATTEMPTS_KEY, 5, FIVE_MINUTES)).thenReturn(true);
+        when(rateLimiter.increment(ATTEMPTS_KEY, FIVE_MINUTES)).thenReturn(attempt);
         when(userRepository.findById(pendingLogin.userId())).thenReturn(Optional.of(user));
         when(loginAttemptService.isBlocked("2fa:7")).thenReturn(false);
     }
@@ -533,6 +712,25 @@ class DefaultSecondStepServiceTest {
                 .credentialId(CREDENTIAL_ID)
                 .transports("usb,nfc")
                 .build();
+    }
+
+    private static PasskeyCredential synced() {
+        return PasskeyCredential.builder().credentialId("synced").backupEligible(true).discoverable(true).build();
+    }
+
+    private static Stream<Arguments> passkeysAndTheLockText() {
+        final var secondStepOnly = PasskeyCredential.builder().credentialId("second-step-only").discoverable(false).build();
+        final var deviceBound = PasskeyCredential.builder().credentialId("device-bound").discoverable(true).build();
+        final var unknown = PasskeyCredential.builder().credentialId("unknown").build();
+
+        return Stream.of(
+                Arguments.of(List.of(), ACCOUNT_LOCKED_WITHOUT_A_PASSKEY),
+                Arguments.of(List.of(secondStepOnly), ACCOUNT_LOCKED_WITHOUT_A_PASSKEY),
+                Arguments.of(List.of(synced()), ACCOUNT_LOCKED),
+                Arguments.of(List.of(deviceBound), ACCOUNT_LOCKED),
+                Arguments.of(List.of(unknown), ACCOUNT_LOCKED_WITHOUT_A_PASSKEY),
+                Arguments.of(List.of(unknown, deviceBound), ACCOUNT_LOCKED),
+                Arguments.of(List.of(secondStepOnly, synced()), ACCOUNT_LOCKED));
     }
 
     private static Stream<Optional<PasskeyCeremony>> ceremoniesThatDontFinishThisSignIn() {

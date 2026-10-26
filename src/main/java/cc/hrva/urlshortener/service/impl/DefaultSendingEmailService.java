@@ -14,6 +14,7 @@ import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.stream.Stream;
 import lombok.RequiredArgsConstructor;
@@ -36,6 +37,7 @@ import org.thymeleaf.context.Context;
 public class DefaultSendingEmailService implements SendingEmailService {
 
     private static final String RECIPIENT_SEPARATOR = ", ";
+    private static final String LOCAL_PROVIDER = "local";
     private static final Duration INTERRUPTED_AFTER = Duration.ofMinutes(10);
     private static final Duration CONTENT_RETENTION = Duration.ofDays(7);
     private static final int LISTED_BLOCKED_LINKS = 20;
@@ -212,6 +214,7 @@ public class DefaultSendingEmailService implements SendingEmailService {
         ctx.setVariable("added_at", addedAt.format(PASSKEY_ADDED_AT_FORMAT));
         ctx.setVariable("settings_url", frontendPage("/dashboard/settings"));
         ctx.setVariable("help_url", frontendPage("/help/passkeys"));
+        ctx.setVariable("local_account", isLocalAccount(user));
 
         final var htmlContent = templateEngine.process("passkey_added", ctx);
 
@@ -388,10 +391,14 @@ public class DefaultSendingEmailService implements SendingEmailService {
         return StringUtils.removeEnd(StringUtils.defaultString(appProperties.getServerUrl()), "/") + "/" + url.getShortUrl();
     }
 
+    private static boolean isLocalAccount(final User user) {
+        return user.getAuthProvider() == null || LOCAL_PROVIDER.equals(user.getAuthProvider());
+    }
+
     private Context getContext(final User user) {
         final var ctx = new Context();
         ctx.setVariable("name", user.getEmail());
-        ctx.setVariable("number_of_api_keys", user.getApiKeySlots().toString());
+        ctx.setVariable("number_of_api_keys", Objects.toString(user.getApiKeySlots(), "0"));
         ctx.setVariable("app_name", appProperties.getAppName());
         ctx.setVariable("contact_email", appProperties.getContactEmail());
         ctx.setVariable("login_page", MessageFormat.format("{0}/login/", appProperties.getFrontendUrl()));

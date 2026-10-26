@@ -87,9 +87,9 @@ class ReportControllerTest {
     void setUp() {
         appProperties.setServerUrl("https://hrva.cc");
         lenient().when(clientIpResolver.getClientIp(request)).thenReturn(CLIENT_IP);
-        mockMvc = mockMvcWith((key, limit, window) -> {
+        mockMvc = mockMvcWith((key, window) -> {
             windows.add(window);
-            return attempts.merge(key, 1, Integer::sum) <= limit;
+            return attempts.merge(key, 1, Integer::sum);
         });
     }
 
@@ -289,7 +289,7 @@ class ReportControllerTest {
 
     @Test
     void aReportIsStillTakenWhenTheRateLimiterIsUnavailable() throws Exception {
-        mockMvc = mockMvcWith((key, limit, window) -> {
+        mockMvc = mockMvcWith((key, window) -> {
             throw new RateLimiterUnavailableException(new IllegalStateException("redis down"));
         });
         when(urlRepository.findByShortUrlAndActiveTrue(SHORT)).thenReturn(Optional.of(url));

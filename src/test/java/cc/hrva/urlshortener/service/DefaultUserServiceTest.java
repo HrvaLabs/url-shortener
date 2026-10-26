@@ -1,11 +1,16 @@
 package cc.hrva.urlshortener.service;
 
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Pattern;
+import java.util.stream.IntStream;
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.converter.UserToUserDtoConverter;
 import cc.hrva.urlshortener.converter.UserUpdateDtoToUserConverter;
@@ -16,7 +21,9 @@ import cc.hrva.urlshortener.dto.UpdatePasswordDto;
 import cc.hrva.urlshortener.dto.UserDto;
 import cc.hrva.urlshortener.dto.UserSearchDto;
 import cc.hrva.urlshortener.dto.UserUpdateDto;
+import cc.hrva.urlshortener.exception.ApiException;
 import cc.hrva.urlshortener.exception.NoAuthorizationException;
+import cc.hrva.urlshortener.exception.ReauthenticationRequiredException;
 import cc.hrva.urlshortener.exception.UserNotFoundException;
 import cc.hrva.urlshortener.listener.SignUpEmailListener;
 import cc.hrva.urlshortener.listener.UserRegisteredEvent;
@@ -31,7 +38,11 @@ import cc.hrva.urlshortener.repository.PasskeyCredentialRepository;
 import cc.hrva.urlshortener.repository.ResetTokenRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
+import cc.hrva.urlshortener.security.Reauthentication;
+import cc.hrva.urlshortener.security.RecentSignIn;
+import cc.hrva.urlshortener.security.TokenProvider;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent;
+import cc.hrva.urlshortener.service.impl.DefaultLoginAttemptService;
 import cc.hrva.urlshortener.service.impl.DefaultSendingEmailService;
 import cc.hrva.urlshortener.service.impl.DefaultUserService;
 import cc.hrva.urlshortener.validator.AuthValidator;
@@ -66,6 +77,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -81,6 +93,11 @@ class DefaultUserServiceTest {
     private static final String PASSWORD_HASH = "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy";
     private static final String TOTP_SECRET = "JBSWY3DPEHPK3PXP";
     private static final Pattern RECOVERY_CODE_SHAPE = Pattern.compile("\\b[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}\\b");
+    private static final Instant NOW = Instant.parse("2026-10-25T14:00:00Z");
+    private static final String SIGNED_IN_TOKEN = "header.payload.signature";
+    private static final String SIGN_IN_AGAIN_TO_DELETE = "For your security, sign in again to delete your account.";
+    private static final String WRONG_PASSWORD = "Current password is incorrect";
+    private static final String TOO_MANY_WRONG_PASSWORDS = "Too many wrong passwords. Try again in 24 hours.";
 
     private UserService userService;
 
@@ -141,14 +158,24 @@ class DefaultUserServiceTest {
     @Mock
     private ApplicationEventPublisher eventPublisher;
 
+    @Mock
+    private TokenProvider tokenProvider;
+
+    private DefaultLoginAttemptService loginAttemptService;
+
     @BeforeEach
     void setUp() {
+        final var loginAttemptProperties = new AppProperties();
+        loginAttemptProperties.setMaxLoginAttempts(20L);
+        loginAttemptService = new DefaultLoginAttemptService(loginAttemptProperties);
         this.userService = userServicePublishingTo(eventPublisher);
         lenient().when(userRepository.findByEmail(null)).thenReturn(Optional.empty());
     }
 
     private DefaultUserService userServicePublishingTo(final ApplicationEventPublisher publisher) {
-        return new DefaultUserService(appProperties, authValidator, urlRepository, userRepository,
+        final var reauthentication = new Reauthentication(new RecentSignIn(tokenProvider, Clock.fixed(NOW, ZoneOffset.UTC)), authValidator,
+                loginAttemptService);
+        return new DefaultUserService(appProperties, reauthentication, urlRepository, userRepository,
                 passwordEncoder, apiKeyRepository, emailLogRepository, resetTokenService,
                 resetTokenRepository, twoFactorRecoveryCodeRepository, passkeyCredentialRepository, userToUserDtoConverter, sendingEmailService,
                 verificationTokenService, verificationTokenRepository, userUpdateDtoToUserConverter, connectedAppsService, scammerSignalService, publisher);
@@ -526,6 +553,37 @@ class DefaultUserServiceTest {
     }
 
     @Test
+    void aPasswordResetClearsTheWrongPasswordCounter() {
+        final var resetDto = PasswordResetDto.builder().email("test@example.com").token("token").password("newPassword").build();
+        final var user = User.builder().id(1L).email("test@example.com").authProvider("local").password("enc").build();
+        final var token = ResetToken.builder().id(1L).active(true).build();
+        when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
+        when(resetTokenService.getResetTokenFromUserAndToken(user, "token")).thenReturn(token);
+        when(passwordEncoder.encode("newPassword")).thenReturn("newEncoded");
+        when(userRepository.save(user)).thenReturn(user);
+        IntStream.rangeClosed(1, 20).forEach(attempt -> loginAttemptService.loginFailed("reauth:1"));
+        assertThat(loginAttemptService.isBlocked("reauth:1")).isTrue();
+
+        userService.resetPassword(resetDto);
+
+        assertThat(loginAttemptService.getLoginAttempts()).doesNotContainKey("reauth:1");
+        assertThat(loginAttemptService.isBlocked("reauth:1")).isFalse();
+    }
+
+    @Test
+    void aRefusedPasswordResetKeepsTheWrongPasswordCounter() {
+        final var resetDto = PasswordResetDto.builder().email("test@example.com").token("token").password("newPassword").build();
+        final var user = User.builder().id(1L).email("test@example.com").build();
+        when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
+        when(resetTokenService.getResetTokenFromUserAndToken(user, "token")).thenReturn(ResetToken.builder().id(1L).active(false).build());
+        IntStream.rangeClosed(1, 20).forEach(attempt -> loginAttemptService.loginFailed("reauth:1"));
+
+        assertThatThrownBy(() -> userService.resetPassword(resetDto)).hasMessage("Token expired");
+
+        assertThat(loginAttemptService.isBlocked("reauth:1")).isTrue();
+    }
+
+    @Test
     void shouldFailResetPasswordWhenTokenInactive() {
         final var resetDto = PasswordResetDto.builder().email("test@example.com").token("token").password("newPassword").build();
         final var user = User.builder().id(1L).email("test@example.com").build();
@@ -717,8 +775,7 @@ class DefaultUserServiceTest {
     @Test
     void shouldSelfDeleteOauthAccountWithoutPassword() {
         final var user = User.builder().id(1L).email("g@example.com").authProvider("google").build();
-        SecurityContextHolder.getContext().setAuthentication(
-                new UsernamePasswordAuthenticationToken("g@example.com", null));
+        signedInMinutesAgo("g@example.com", 14);
         when(userRepository.findByEmail("g@example.com")).thenReturn(Optional.of(user));
 
         userService.deleteOwnAccount(new DeleteAccountDto());
@@ -745,6 +802,87 @@ class DefaultUserServiceTest {
     }
 
     @Test
+    void anOAuthAccountCantDeleteItselfWithASignInOlderThan15Minutes() {
+        final var user = User.builder().id(1L).email("g@example.com").authProvider("google").build();
+        signedInMinutesAgo("g@example.com", 16);
+        when(userRepository.findByEmail("g@example.com")).thenReturn(Optional.of(user));
+
+        for (final var dto : List.of(new DeleteAccountDto(), DeleteAccountDto.builder().password("any password").build())) {
+            assertThatThrownBy(() -> userService.deleteOwnAccount(dto))
+                    .isInstanceOf(ReauthenticationRequiredException.class)
+                    .hasMessage(SIGN_IN_AGAIN_TO_DELETE);
+        }
+
+        verify(userRepository, never()).delete(any(User.class));
+        verifyNoInteractions(authValidator, connectedAppsService, urlRepository, passkeyCredentialRepository);
+        SecurityContextHolder.clearContext();
+    }
+
+    @Test
+    void aBlankPasswordCantDeleteALocalAccount() {
+        final var user = User.builder().id(1L).email("test@example.com").authProvider("local").password("enc").build();
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken("test@example.com", null));
+        when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
+
+        assertThatThrownBy(() -> userService.deleteOwnAccount(new DeleteAccountDto()))
+                .isInstanceOf(ApiException.class)
+                .hasMessage("Enter your current password.");
+
+        verify(userRepository, never()).delete(any(User.class));
+        verifyNoInteractions(authValidator);
+        SecurityContextHolder.clearContext();
+    }
+
+    @Test
+    void changingThePasswordAndDeletingTheAccountShareOneWrongPasswordCounter() {
+        final var user = User.builder().id(1L).email("test@example.com").authProvider("local").password("enc").build();
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken("test@example.com", null));
+        when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
+        org.mockito.Mockito.doThrow(new NoAuthorizationException(WRONG_PASSWORD))
+                .when(authValidator).passwordMatchesCurrentPassword(user, "wrong");
+        final var wrongPasswordChange = UpdatePasswordDto.builder().oldPassword("wrong").newPassword("newPassword").build();
+        final var wrongDelete = DeleteAccountDto.builder().password("wrong").build();
+
+        IntStream.rangeClosed(1, 10).forEach(attempt -> {
+            assertThatThrownBy(() -> userService.updatePassword(wrongPasswordChange)).hasMessage(WRONG_PASSWORD);
+            assertThatThrownBy(() -> userService.deleteOwnAccount(wrongDelete)).hasMessage(WRONG_PASSWORD);
+        });
+
+        assertThatThrownBy(() -> userService.updatePassword(wrongPasswordChange))
+                .isInstanceOf(NoAuthorizationException.class)
+                .hasMessage(TOO_MANY_WRONG_PASSWORDS);
+        assertThatThrownBy(() -> userService.deleteOwnAccount(DeleteAccountDto.builder().password("myPassword").build()))
+                .isInstanceOf(NoAuthorizationException.class)
+                .hasMessage(TOO_MANY_WRONG_PASSWORDS);
+        verify(authValidator, times(20)).passwordMatchesCurrentPassword(user, "wrong");
+        verify(authValidator, never()).passwordMatchesCurrentPassword(user, "myPassword");
+        verify(passwordEncoder, never()).encode(any());
+        verify(userRepository, never()).delete(any(User.class));
+        assertThat(loginAttemptService.getLoginAttempts()).containsEntry("reauth:1", 20);
+        SecurityContextHolder.clearContext();
+    }
+
+    @Test
+    void aSuccessfulPasswordChangeResetsTheWrongPasswordCounter() {
+        final var user = User.builder().id(1L).email("test@example.com").authProvider("local").password("enc").build();
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken("test@example.com", null));
+        when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
+        org.mockito.Mockito.doThrow(new NoAuthorizationException(WRONG_PASSWORD))
+                .when(authValidator).passwordMatchesCurrentPassword(user, "wrong");
+        IntStream.rangeClosed(1, 19).forEach(attempt -> assertThatThrownBy(() -> userService.deleteOwnAccount(
+                DeleteAccountDto.builder().password("wrong").build())).hasMessage(WRONG_PASSWORD));
+        assertThat(loginAttemptService.getLoginAttempts()).containsEntry("reauth:1", 19);
+
+        userService.updatePassword(UpdatePasswordDto.builder().oldPassword("oldPassword").newPassword("newPassword").build());
+
+        assertThat(loginAttemptService.getLoginAttempts()).doesNotContainKey("reauth:1");
+        SecurityContextHolder.clearContext();
+    }
+
+    @Test
     void shouldDisconnectConnectedAppsWhenAdminDeletesUser() {
         final var user = User.builder().id(1L).email("test@example.com").build();
         when(userRepository.findById(1L)).thenReturn(Optional.of(user));
@@ -757,8 +895,7 @@ class DefaultUserServiceTest {
     @Test
     void shouldDisconnectConnectedAppsWhenUserDeletesOwnAccount() {
         final var user = User.builder().id(1L).email("g@example.com").authProvider("google").build();
-        SecurityContextHolder.getContext().setAuthentication(
-                new UsernamePasswordAuthenticationToken("g@example.com", null));
+        signedInMinutesAgo("g@example.com", 1);
         when(userRepository.findByEmail("g@example.com")).thenReturn(Optional.of(user));
 
         userService.deleteOwnAccount(new DeleteAccountDto());
@@ -846,6 +983,11 @@ class DefaultUserServiceTest {
 
         verifyNoInteractions(connectedAppsService);
     }
+    private void signedInMinutesAgo(final String email, final long minutes) {
+        SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(email, SIGNED_IN_TOKEN));
+        when(tokenProvider.issuedAt(SIGNED_IN_TOKEN)).thenReturn(Optional.of(NOW.minus(Duration.ofMinutes(minutes))));
+    }
+
     private AnnotationConfigApplicationContext signUpEmailsContext() {
         final var context = new AnnotationConfigApplicationContext();
         context.registerBean(TransactionalEventListenerFactory.class);

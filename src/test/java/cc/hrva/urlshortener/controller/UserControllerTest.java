@@ -3,10 +3,14 @@ package cc.hrva.urlshortener.controller;
 import cc.hrva.urlshortener.configuration.GlobalExceptionHandler;
 import java.util.Collections;
 import java.util.List;
+import cc.hrva.urlshortener.configuration.GlobalExceptionHandler;
+import cc.hrva.urlshortener.dto.DeleteAccountDto;
 import cc.hrva.urlshortener.dto.UpdatePasswordDto;
 import cc.hrva.urlshortener.dto.UserDto;
 import cc.hrva.urlshortener.dto.UserSearchDto;
 import cc.hrva.urlshortener.dto.UserUpdateDto;
+import cc.hrva.urlshortener.exception.NoAuthorizationException;
+import cc.hrva.urlshortener.exception.ReauthenticationRequiredException;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.service.UserService;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -27,6 +31,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -34,6 +39,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -187,6 +193,30 @@ class UserControllerTest {
     }
 
     @Test
+    void aStaleGoogleOrGitHubSignInCantDeleteTheAccount() throws Exception {
+        doThrow(new ReauthenticationRequiredException("For your security, sign in again to delete your account."))
+                .when(userService).deleteOwnAccount(new DeleteAccountDto());
+
+        withErrorHandling().perform(delete("/api/v1/users/me"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(content().json("""
+                        {"error":"For your security, sign in again to delete your account."}"""));
+    }
+
+    @Test
+    void tooManyWrongPasswordsAre403() throws Exception {
+        doThrow(new NoAuthorizationException("Too many wrong passwords. Try again in 24 hours."))
+                .when(userService).deleteOwnAccount(DeleteAccountDto.builder().password("wrong").build());
+
+        withErrorHandling().perform(delete("/api/v1/users/me")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"password\":\"wrong\"}"))
+                .andExpect(status().isForbidden())
+                .andExpect(content().json("""
+                        {"error":"Too many wrong passwords. Try again in 24 hours."}"""));
+    }
+
+    @Test
     void shouldUpdatePassword() throws Exception {
         final var user = User.builder().id(1L).email("test@example.com").build();
         when(userService.updatePassword(any(UpdatePasswordDto.class))).thenReturn(user);
@@ -197,4 +227,11 @@ class UserControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(1));
     }
+
+    private MockMvc withErrorHandling() {
+        return MockMvcBuilders.standaloneSetup(new UserController(userService))
+                .setControllerAdvice(new GlobalExceptionHandler())
+                .build();
+    }
+
 }

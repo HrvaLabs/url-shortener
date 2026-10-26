@@ -47,6 +47,7 @@ import cc.hrva.urlshortener.service.passkey.TestAuthenticator;
 import cc.hrva.urlshortener.service.twostep.AccountLock;
 import cc.hrva.urlshortener.service.twostep.RecoveryCodes;
 import cc.hrva.urlshortener.service.twostep.RedisPendingLoginStore;
+import cc.hrva.urlshortener.service.twostep.TwoStepLockMessage;
 import cc.hrva.urlshortener.service.twostep.TwoStepMethods;
 import cc.hrva.urlshortener.validator.impl.DefaultAuthValidator;
 import com.nimbusds.jose.jwk.RSAKey;
@@ -832,6 +833,7 @@ class PasskeyFlowsTest {
             PasskeyAddedEmailListener.class,
             RedisPendingLoginStore.class,
             TwoStepMethods.class,
+            TwoStepLockMessage.class,
             UserToUserDtoConverter.class,
             DefaultSignInService.class,
             ClientIpResolver.class,

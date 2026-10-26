@@ -30,12 +30,12 @@ import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.repository.VerificationTokenRepository;
 import cc.hrva.urlshortener.service.VerificationTokenService;
 import cc.hrva.urlshortener.repository.specification.UserSpecification;
+import cc.hrva.urlshortener.security.Reauthentication;
 import cc.hrva.urlshortener.service.ResetTokenService;
 import cc.hrva.urlshortener.service.ScammerSignalService;
 import cc.hrva.urlshortener.service.UserService;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent;
 import cc.hrva.urlshortener.util.EmailAddresses;
-import cc.hrva.urlshortener.validator.AuthValidator;
 import java.time.LocalDateTime;
 import java.util.Objects;
 import java.util.Optional;
@@ -60,7 +60,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class DefaultUserService implements UserService {
 
     private final AppProperties appProperties;
-    private final AuthValidator authValidator;
+    private final Reauthentication reauthentication;
     private final UrlRepository urlRepository;
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
@@ -180,9 +180,7 @@ public class DefaultUserService implements UserService {
             throw new NoAuthorizationException("Not authenticated");
         }
 
-        if (isLocalAccount(user)) {
-            authValidator.passwordMatchesCurrentPassword(user, deleteAccountDto.getPassword());
-        }
+        reauthentication.confirmAccountDeletion(user, deleteAccountDto.getPassword());
 
         log.info("Self-delete account id={}", user.getId());
         deleteUserAndOwnedData(user);
@@ -231,10 +229,6 @@ public class DefaultUserService implements UserService {
         log.info("Deleted user id={} and all owned data", user.getId());
     }
 
-    private boolean isLocalAccount(final User user) {
-        return user.getAuthProvider() == null || "local".equals(user.getAuthProvider());
-    }
-
     @Override
     @Transactional
     public User updateUser(final UserUpdateDto userUpdateDto) {
@@ -266,7 +260,7 @@ public class DefaultUserService implements UserService {
     @Transactional
     public User updatePassword(final UpdatePasswordDto updatePasswordDto) {
         final var user = getUserFromToken();
-        authValidator.passwordMatchesCurrentPassword(user, updatePasswordDto.getOldPassword());
+        reauthentication.confirmPassword(user, updatePasswordDto.getOldPassword());
         user.setPassword(passwordEncoder.encode(updatePasswordDto.getNewPassword()));
         log.info("Password changed for user id={}", user.getId());
 
@@ -299,6 +293,7 @@ public class DefaultUserService implements UserService {
         if (token.isActive()) {
             user.setPassword(passwordEncoder.encode(passwordResetDto.getPassword()));
             resetTokenService.deactivateAndSaveToken(token);
+            reauthentication.forgetWrongPasswords(user);
 
             return userRepository.save(user);
         }

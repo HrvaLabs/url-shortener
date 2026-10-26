@@ -8,8 +8,11 @@ import cc.hrva.urlshortener.security.ClientIpResolver;
 import cc.hrva.urlshortener.dto.LoginDto;
 import cc.hrva.urlshortener.dto.UserRegisterDto;
 import cc.hrva.urlshortener.exception.NoAuthorizationException;
+import cc.hrva.urlshortener.model.PasskeyCredential;
 import cc.hrva.urlshortener.model.User;
+import cc.hrva.urlshortener.repository.PasskeyCredentialRepository;
 import cc.hrva.urlshortener.service.impl.DefaultAuthService;
+import cc.hrva.urlshortener.service.twostep.TwoStepLockMessage;
 import cc.hrva.urlshortener.validator.UserValidator;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
@@ -84,11 +87,15 @@ class DefaultAuthServiceTest {
     @Mock
     private Authentication authentication;
 
+    @Mock
+    private PasskeyCredentialRepository passkeyCredentialRepository;
+
     @BeforeEach
     void setUp() {
         this.authService = new DefaultAuthService(userService, userValidator, signInService, userRepository,
                 clientIpResolver, loginAttemptService, sendingEmailService, twoFactorService,
-                verificationTokenService, authenticationManagerBuilder, userRegisterDtoToUserConverter);
+                verificationTokenService, authenticationManagerBuilder, userRegisterDtoToUserConverter,
+                new TwoStepLockMessage(passkeyCredentialRepository));
     }
 
     @Test
@@ -149,7 +156,7 @@ class DefaultAuthServiceTest {
 
         assertThatThrownBy(() -> authService.login(loginDto, request))
                 .isInstanceOf(NoAuthorizationException.class)
-                .hasMessage("Request has been blocked");
+                .hasMessage("Too many failed sign-ins from this network. Try again tomorrow.");
         verifyNoInteractions(authenticationManagerBuilder, signInService);
     }
 
@@ -294,9 +301,24 @@ class DefaultAuthServiceTest {
 
         assertThatThrownBy(() -> authService.login(loginDto, request))
                 .isInstanceOf(NoAuthorizationException.class)
-                .hasMessage("Too many invalid two-factor codes. Try again later.");
+                .hasMessage("Too many wrong codes for this account. Try again in 24 hours.");
         verify(twoFactorService, never()).verifyLoginCode(any(), any());
         verifyNoInteractions(signInService);
+    }
+
+    @Test
+    void aLockedAccountWithAPasskeyThatSignsInAloneIsOfferedAPasskeySignIn() {
+        final var loginDto = LoginDto.builder().email("test@example.com").password("password123").code("111111").build();
+        final var user = User.builder().id(1L).email("test@example.com").emailVerified(true)
+                .twoFactorEnabled(true).twoStepEnabled(true).build();
+        givenTheRightPassword(user);
+        when(loginAttemptService.isBlocked("2fa:1")).thenReturn(true);
+        when(passkeyCredentialRepository.findByUserOrderByCreatedAtDesc(user))
+                .thenReturn(List.of(PasskeyCredential.builder().credentialId("synced").backupEligible(true).discoverable(true).build()));
+
+        assertThatThrownBy(() -> authService.login(loginDto, request))
+                .isInstanceOf(NoAuthorizationException.class)
+                .hasMessage("Too many wrong codes for this account. Try again in 24 hours, or sign in with a passkey.");
     }
 
     @Test

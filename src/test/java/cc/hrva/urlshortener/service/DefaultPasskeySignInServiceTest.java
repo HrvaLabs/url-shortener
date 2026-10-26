@@ -48,6 +48,8 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.ArgumentMatchers.startsWith;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -153,7 +155,7 @@ class DefaultPasskeySignInServiceTest {
 
         assertThatThrownBy(() -> passkeySignInService.verify(signIn(true), request))
                 .isInstanceOf(NoAuthorizationException.class)
-                .hasMessage("Request has been blocked");
+                .hasMessage("Too many failed sign-ins from this network. Try again tomorrow.");
         verifyNoInteractions(passkeyCeremonyStore, passkeyAssertions, passkeySignInStatsRepository, signInService);
         verify(loginAttemptService, never()).loginFailed(anyString());
     }
@@ -238,6 +240,22 @@ class DefaultPasskeySignInServiceTest {
         order.verify(signInService).signIn(user, true);
         verify(signInService, never()).requireSecondStep(any(), anyBoolean());
         verify(loginAttemptService, never()).loginFailed(anyString());
+    }
+
+    @Test
+    void anAccountLockedForWrongCodesCanStillSignInWithAPasskey() {
+        final var user = user();
+        user.setTwoStepEnabled(true);
+        final var signedIn = ResponseEntity.ok(JWTTokenDto.builder().token("Bearer eyJ.token").build());
+        lenient().when(loginAttemptService.isBlocked("2fa:7")).thenReturn(true);
+        when(passkeyCeremonyStore.consume(CEREMONY_ID)).thenReturn(Optional.of(signInCeremony()));
+        when(passkeyAssertions.verify(any(), any(), isNull())).thenReturn(user);
+        when(analyticsDays.today()).thenReturn(TODAY);
+        when(signInService.signIn(user, true)).thenReturn(signedIn);
+
+        assertThat(passkeySignInService.verify(signIn(true), request)).isSameAs(signedIn);
+
+        verify(loginAttemptService, never()).isBlocked(startsWith("2fa:"));
     }
 
     @Test

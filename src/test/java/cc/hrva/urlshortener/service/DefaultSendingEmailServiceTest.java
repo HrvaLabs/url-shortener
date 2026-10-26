@@ -139,11 +139,15 @@ class DefaultSendingEmailServiceTest {
     }
 
     private Email sentPasskeyAddedEmail(final String label) throws Exception {
+        return sentPasskeyAddedEmail(OWNER, label);
+    }
+
+    private Email sentPasskeyAddedEmail(final User user, final String label) throws Exception {
         saveReturnsArgument();
         final var sent = ArgumentCaptor.forClass(Email.class);
         doAnswer(invocation -> null).when(emailService).sendEmail(sent.capture(), eq(null));
 
-        configuredEmailService(realTemplateEngine()).sendPasskeyAddedEmail(OWNER, label, PASSKEY_ADDED_AT);
+        configuredEmailService(realTemplateEngine()).sendPasskeyAddedEmail(user, label, PASSKEY_ADDED_AT);
 
         return sent.getValue();
     }
@@ -469,6 +473,41 @@ class DefaultSendingEmailServiceTest {
     }
 
     @Test
+    void aGoogleOrGitHubAccountIsToldToSecureThatAccountInsteadOfChangingAPassword() throws Exception {
+        for (final var provider : List.of("google", "github")) {
+            final var user = User.builder().email("alice@example.com").apiKeySlots(4L).authProvider(provider).build();
+
+            final var text = textOf(sentPasskeyAddedEmail(user, "Work YubiKey").getText());
+
+            assertThat(text)
+                    .as(provider)
+                    .contains("If it wasn't you, sign in, open Settings \u2192 Passkeys and security keys (https://hrva.cc/dashboard/settings),"
+                            + " remove it and secure your Google or GitHub account. If you can't sign in, email support@hrva.cc.")
+                    .doesNotContain("change your password");
+        }
+    }
+
+    @Test
+    void anEmailAndPasswordAccountIsStillToldToChangeItsPassword() throws Exception {
+        final var user = User.builder().email("alice@example.com").apiKeySlots(4L).authProvider("local").build();
+
+        assertThat(textOf(sentPasskeyAddedEmail(user, "Work YubiKey").getText()))
+                .contains(" remove it and change your password. If you can't sign in, email support@hrva.cc.")
+                .doesNotContain("Google or GitHub");
+    }
+
+    @Test
+    void aUserWithoutApiKeySlotsStillGetsThePasskeyEmail() throws Exception {
+        final var user = User.builder().email("alice@example.com").apiKeySlots(null).authProvider("local").build();
+
+        final var email = sentPasskeyAddedEmail(user, "Work YubiKey");
+
+        assertThat(email.getReceivers()).containsExactly("alice@example.com");
+        assertThat(textOf(email.getText())).contains("A passkey or security key named Work YubiKey was added");
+        verify(emailService).sendEmail(any(Email.class), eq(null));
+    }
+
+    @Test
     void aPasskeyLabelWithMarkupIsEscaped() throws Exception {
         final var body = sentPasskeyAddedEmail("<b>x</b><script>alert(1)</script>").getText();
 
@@ -492,6 +531,7 @@ class DefaultSendingEmailServiceTest {
         assertThat(context.getValue().getVariable("settings_url")).isEqualTo("https://hrva.cc/dashboard/settings");
         assertThat(context.getValue().getVariable("help_url")).isEqualTo("https://hrva.cc/help/passkeys");
         assertThat(context.getValue().getVariable("contact_email")).isEqualTo("support@hrva.cc");
+        assertThat(context.getValue().getVariable("local_account")).isEqualTo(true);
         verify(emailService).sendEmail(any(Email.class), eq(null));
     }
 

@@ -2420,9 +2420,9 @@ class UrlServiceTest {
         private final Set<Duration> windows = new HashSet<>();
 
         @Override
-        public boolean tryAcquire(final String key, final int limit, final Duration window) {
+        public long increment(final String key, final Duration window) {
             windows.add(window);
-            return counts.merge(key, 1, Integer::sum) <= limit;
+            return counts.merge(key, 1, Integer::sum);
         }
 
     }

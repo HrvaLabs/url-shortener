@@ -32,6 +32,7 @@ import cc.hrva.urlshortener.service.passkey.PasskeyCeremonyStore;
 import cc.hrva.urlshortener.service.passkey.PasskeyOptionsFactory;
 import cc.hrva.urlshortener.service.twostep.PendingLogin;
 import cc.hrva.urlshortener.service.twostep.PendingLoginStore;
+import cc.hrva.urlshortener.service.twostep.TwoStepLockMessage;
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.Objects;
 import lombok.RequiredArgsConstructor;
@@ -51,6 +52,8 @@ public class DefaultSecondStepService implements SecondStepService {
     private static final String PENDING_LOGIN_ATTEMPTS_PREFIX = "pending-login:";
     private static final String PASSKEY_OPTIONS_RATE_LIMIT_NAME = "passkey-second-step-options";
     private static final String INVALID_CODE = "Invalid two-factor code";
+    private static final String OUT_OF_ATTEMPTS = "Too many wrong codes. Sign in again to get 5 more tries.";
+    private static final long MOST_ATTEMPTS_LEFT_SHOWN = 2;
     private static final String NO_PASSKEYS = "This account has no passkeys or security keys.";
 
     private final ClientIpResolver clientIpResolver;
@@ -67,6 +70,7 @@ public class DefaultSecondStepService implements SecondStepService {
     private final PasskeyAssertions passkeyAssertions;
     private final PasskeySignInStatsRepository passkeySignInStatsRepository;
     private final AnalyticsDays analyticsDays;
+    private final TwoStepLockMessage twoStepLockMessage;
 
     @Override
     @Transactional
@@ -75,7 +79,7 @@ public class DefaultSecondStepService implements SecondStepService {
 
         if (!twoFactorService.verifyLoginCode(attempt.user(), dto.getCode())) {
             secondStepFailed(attempt);
-            throw new TwoStepFailedException(INVALID_CODE);
+            throw new TwoStepFailedException(withAttemptsLeft(INVALID_CODE, attempt));
         }
 
         return finishSecondStep(dto.getPendingToken(), attempt.user());
@@ -114,14 +118,12 @@ public class DefaultSecondStepService implements SecondStepService {
     private SecondStepAttempt startSecondStep(final String pendingToken, final HttpServletRequest request) {
         final var clientIp = allowedClientIp(request);
         final var pendingLogin = pendingLoginOf(pendingToken, clientIp);
-        countAttempt(pendingToken, pendingLogin, clientIp);
-
         final var user = userOf(pendingLogin, clientIp);
         if (loginAttemptService.isBlocked(twoFactorAttemptsKey(user))) {
-            throw new NoAuthorizationException(LoginAttemptService.TWO_FACTOR_BLOCKED);
+            throw accountLocked(user);
         }
 
-        return new SecondStepAttempt(user, clientIp);
+        return new SecondStepAttempt(pendingToken, user, clientIp, countAttempt(pendingToken, pendingLogin, clientIp));
     }
 
     private String allowedClientIp(final HttpServletRequest request) {
@@ -141,28 +143,45 @@ public class DefaultSecondStepService implements SecondStepService {
         return userRepository.findById(pendingLogin.userId()).orElseThrow(() -> expired(clientIp, SignInExpiredException.SIGN_IN_EXPIRED));
     }
 
-    private void countAttempt(final String pendingToken, final PendingLogin pendingLogin, final String clientIp) {
-        final boolean allowed;
+    private long countAttempt(final String pendingToken, final PendingLogin pendingLogin, final String clientIp) {
+        final long attempts;
         try {
-            allowed = rateLimiter.tryAcquire(PENDING_LOGIN_ATTEMPTS_PREFIX + pendingToken, PendingLoginStore.MAX_ATTEMPTS, PendingLoginStore.TIME_TO_LIVE);
+            attempts = rateLimiter.increment(PENDING_LOGIN_ATTEMPTS_PREFIX + pendingToken, PendingLoginStore.TIME_TO_LIVE);
         } catch (final RateLimiterUnavailableException exception) {
             throw new SignInUnavailableException(PendingLoginStore.UNAVAILABLE, exception);
         }
 
-        if (!allowed) {
-            pendingLoginStore.discard(pendingToken);
-            log.info("Second step out of attempts, sign-in discarded user id={}", pendingLogin.userId());
-            throw expired(clientIp, SignInExpiredException.SIGN_IN_EXPIRED);
+        if (attempts > PendingLoginStore.MAX_ATTEMPTS) {
+            loginAttemptService.loginFailed(clientIp);
+            throw outOfAttempts(pendingToken, pendingLogin.userId());
         }
+
+        return PendingLoginStore.MAX_ATTEMPTS - attempts;
     }
 
     private void verifyPasskey(final PasskeyCeremony ceremony, final JsonNode credential, final SecondStepAttempt attempt) {
         try {
             passkeyAssertions.verify(ceremony, credential, attempt.user());
-        } catch (final PasskeyVerificationException | ApiException exception) {
+        } catch (final PasskeyVerificationException exception) {
             secondStepFailed(attempt);
-            throw exception;
+            throw new PasskeyVerificationException(withAttemptsLeft(exception.getMessage(), attempt));
+        } catch (final ApiException exception) {
+            secondStepFailed(attempt);
+            throw new ApiException(withAttemptsLeft(exception.getMessage(), attempt));
         }
+    }
+
+    private NoAuthorizationException accountLocked(final User user) {
+        log.info("Second step refused, account locked user id={}", user.getId());
+
+        return new NoAuthorizationException(twoStepLockMessage.of(user));
+    }
+
+    private SignInExpiredException outOfAttempts(final String pendingToken, final Long userId) {
+        pendingLoginStore.discard(pendingToken);
+        log.info("Second step out of attempts, sign-in discarded user id={}", userId);
+
+        return new SignInExpiredException(OUT_OF_ATTEMPTS);
     }
 
     private SignInExpiredException expired(final String clientIp, final String message) {
@@ -172,9 +191,27 @@ public class DefaultSecondStepService implements SecondStepService {
     }
 
     private void secondStepFailed(final SecondStepAttempt attempt) {
-        loginAttemptService.loginFailed(twoFactorAttemptsKey(attempt.user()));
+        final var twoFactorAttemptsKey = twoFactorAttemptsKey(attempt.user());
+        loginAttemptService.loginFailed(twoFactorAttemptsKey);
         loginAttemptService.loginFailed(attempt.clientIp());
-        log.info("Second step failed user id={}", attempt.user().getId());
+        log.info("Second step failed user id={} attempts left={}", attempt.user().getId(), attempt.attemptsLeft());
+
+        if (loginAttemptService.isBlocked(twoFactorAttemptsKey)) {
+            throw accountLocked(attempt.user());
+        }
+        if (attempt.attemptsLeft() == 0) {
+            throw outOfAttempts(attempt.pendingToken(), attempt.user().getId());
+        }
+    }
+
+    private static String withAttemptsLeft(final String message, final SecondStepAttempt attempt) {
+        final var attemptsLeft = attempt.attemptsLeft();
+        if (attemptsLeft > MOST_ATTEMPTS_LEFT_SHOWN) {
+            return message;
+        }
+
+        final var sentence = message.endsWith(".") ? message : message + ".";
+        return attemptsLeft == 1 ? sentence + " 1 try left." : "%s %d tries left.".formatted(sentence, attemptsLeft);
     }
 
     private ResponseEntity<JWTTokenDto> finishSecondStep(final String pendingToken, final User user) {
@@ -197,7 +234,7 @@ public class DefaultSecondStepService implements SecondStepService {
         return LoginAttemptService.TWO_FACTOR_PREFIX + user.getId();
     }
 
-    private record SecondStepAttempt(User user, String clientIp) {
+    private record SecondStepAttempt(String pendingToken, User user, String clientIp, long attemptsLeft) {
     }
 
 }
