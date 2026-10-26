@@ -10,6 +10,7 @@ import cc.hrva.urlshortener.dto.bio.BioPageResponse;
 import cc.hrva.urlshortener.dto.bio.BioPageUpdateDto;
 import cc.hrva.urlshortener.exception.BioHandleUnavailableException;
 import cc.hrva.urlshortener.exception.BioPageConflictException;
+import cc.hrva.urlshortener.exception.RateLimitExceededException;
 import cc.hrva.urlshortener.model.BioPage;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.User;
@@ -57,6 +58,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 
 @SpringBootTest(
@@ -75,6 +77,8 @@ class BioPageOwnerFlowTest {
     private static final String TAKEN = "This handle is taken. Try another.";
     private static final String OUTDATED_COPY =
             "Your bio page changed in another tab or window. We loaded the latest version; check your changes and save again.";
+    private static final String PAGE_CHANGED = "This page changed. Reload and try again.";
+    private static final String HANDLE_CHANGES_REFUSED = "You've changed your handle a lot today. Try again tomorrow.";
 
     @Autowired
     private BioPageService bioPageService;
@@ -220,6 +224,45 @@ class BioPageOwnerFlowTest {
         assertThatThrownBy(() -> bioPageService.create(new BioPageCreateDto("ana")))
                 .isInstanceOf(BioHandleUnavailableException.class)
                 .hasMessage(TAKEN);
+    }
+
+    @Test
+    void aSaveWithALinkDeletedSinceItWasReadIs409AndTheButtonIsGone() {
+        final var created = bioPageService.create(new BioPageCreateDto("ana"));
+        final var instagram = urlRepository.saveAndFlush(Url.builder().shortUrl("ana-ig").longUrl("https://instagram.com/ana").owner(ana).build());
+        final var withTheButton = bioPageService.update(savingFrom(created, "Photos from Zagreb", button(instagram, "Instagram")));
+        jdbcTemplate.update("delete from url where id = ?", instagram.getId());
+
+        assertThatThrownBy(() -> bioPageService.update(savingFrom(withTheButton, "Photos from Split", button(instagram, "Instagram"))))
+                .isInstanceOf(BioPageConflictException.class)
+                .hasMessage(PAGE_CHANGED);
+
+        assertThat(storedBio(created.id())).isEqualTo("Photos from Zagreb");
+        assertThat(bioPageService.mine().buttons()).isEmpty();
+    }
+
+    @Test
+    void aCreateOverTheHandleBudgetIs429AndCreatesNothing() {
+        when(rateLimiter.tryAcquire(eq("bio-handle:user:" + ana.getId()), anyInt(), any(Duration.class))).thenReturn(false);
+
+        assertThatThrownBy(() -> bioPageService.create(new BioPageCreateDto("ana")))
+                .isInstanceOf(RateLimitExceededException.class)
+                .hasMessage(HANDLE_CHANGES_REFUSED);
+
+        assertThat(jdbcTemplate.queryForObject("select count(*) from bio_page", Long.class)).isZero();
+    }
+
+    @Test
+    void aHandleChangeOverTheBudgetIs429AndChangesNothing() {
+        final var created = bioPageService.create(new BioPageCreateDto("ana"));
+        when(rateLimiter.tryAcquire(eq("bio-handle:user:" + ana.getId()), anyInt(), any(Duration.class))).thenReturn(false);
+
+        assertThatThrownBy(() -> bioPageService.changeHandle(new BioHandleDto("ana-horvat")))
+                .isInstanceOf(RateLimitExceededException.class)
+                .hasMessage(HANDLE_CHANGES_REFUSED);
+
+        assertThat(jdbcTemplate.queryForObject("select handle from bio_page where id = ?", String.class, created.id())).isEqualTo("ana");
+        assertThat(jdbcTemplate.queryForObject("select count(*) from bio_handle_hold", Long.class)).isZero();
     }
 
     private BioPageUpdateDto savingFrom(final BioPageResponse copy, final String bio, final BioPageButtonDto... buttons) {

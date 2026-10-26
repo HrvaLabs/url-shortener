@@ -39,6 +39,7 @@ import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Optional;
 import org.hibernate.exception.ConstraintViolationException;
@@ -51,9 +52,11 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
+import org.springframework.transaction.support.TransactionOperations;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.entry;
 import static org.assertj.core.api.Assertions.tuple;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyCollection;
@@ -89,6 +92,7 @@ class DefaultBioPageServiceTest {
     private static final String ALREADY_HAS_PAGE = "You already have a bio page.";
     private static final String TAKEN = "This handle is taken. Try another.";
     private static final String RESERVED = "This handle is reserved. Try another.";
+    private static final String RECENTLY_USED = "This handle was recently used and is kept until November 25, 2026. Try another.";
     private static final String LENGTH = "A handle must be 3 to 30 characters.";
     private static final String NOT_YOUR_LINK = "You can only add your own short links.";
     private static final String DUPLICATE_LINK = "Each link can be on your page only once.";
@@ -158,7 +162,7 @@ class DefaultBioPageServiceTest {
         final var clock = Clock.fixed(NOW_INSTANT, ZoneOffset.UTC);
         bioPageService = new DefaultBioPageService(userService, bioPageRepository, bioPageLock, bioPageButtonRepository, urlRepository,
                 bioHandles, new BioPageResponses(bioPageButtonRepository, linkReviewRepository, clock), bioPageTextSignals,
-                bioPageReviewService, rateLimiter, clock);
+                bioPageReviewService, rateLimiter, TransactionOperations.withoutTransaction(), clock);
     }
 
     @Test
@@ -220,9 +224,9 @@ class DefaultBioPageServiceTest {
 
         final var saved = ArgumentCaptor.forClass(BioPage.class);
         final var inOrder = inOrder(rateLimiter, bioHandles, bioPageRepository);
-        inOrder.verify(rateLimiter).tryAcquire(HANDLE_KEY, 5, HANDLE_WINDOW);
         inOrder.verify(bioHandles).requireAvailable("ana", null);
         inOrder.verify(bioPageRepository).saveAndFlush(saved.capture());
+        inOrder.verify(rateLimiter).tryAcquire(HANDLE_KEY, 5, HANDLE_WINDOW);
         assertThat(saved.getValue().getHandle()).isEqualTo("ana");
         assertThat(saved.getValue().getOwner()).isSameAs(ana);
         assertThat(response.handle()).isEqualTo("ana");
@@ -271,19 +275,47 @@ class DefaultBioPageServiceTest {
         assertThatThrownBy(() -> bioPageService.create(new BioPageCreateDto("ana")))
                 .isInstanceOf(BioHandleUnavailableException.class)
                 .hasMessage(TAKEN);
+
+        verify(rateLimiter, never()).tryAcquire(HANDLE_KEY, 5, HANDLE_WINDOW);
     }
 
     @Test
-    void createOverTheLimitIs429() {
+    void refusedCreatesDoNotSpendTheHandleBudget() {
+        final var counts = new HashMap<String, Long>();
+        final var service = serviceWith((key, window) -> counts.merge(key, 1L, Long::sum));
         when(bioPageRepository.findByOwner(ana)).thenReturn(Optional.empty());
+        doThrow(new BioHandleUnavailableException(TAKEN)).when(bioHandles).requireAvailable("bob", null);
+        doThrow(new BioHandleUnavailableException(RESERVED)).when(bioHandles).requireAvailable("admin", null);
+        doThrow(new BioHandleUnavailableException(RECENTLY_USED)).when(bioHandles).requireAvailable("carl", null);
+        doThrow(new BioHandleUnavailableException(TAKEN)).when(bioHandles).requireAvailable("dora", null);
+        when(bioPageRepository.saveAndFlush(any(BioPage.class)))
+                .thenThrow(new DataIntegrityViolationException("uq_bio_page_handle"))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        for (final var refused : List.of("bob", "admin", "carl", "dora", "emma")) {
+            assertThatThrownBy(() -> service.create(new BioPageCreateDto(refused))).isInstanceOf(BioHandleUnavailableException.class);
+        }
+        final var response = service.create(new BioPageCreateDto("ana"));
+
+        assertThat(response.handle()).isEqualTo("ana");
+        assertThat(counts).containsExactly(entry(HANDLE_KEY, 1L));
+    }
+
+    @Test
+    void createOverTheLimitIs429AndSpendsOnlyAfterTheInsert() {
+        when(bioPageRepository.findByOwner(ana)).thenReturn(Optional.empty());
+        savesReturnTheirArgument();
         when(rateLimiter.tryAcquire(HANDLE_KEY, 5, HANDLE_WINDOW)).thenReturn(false);
 
         assertThatThrownBy(() -> bioPageService.create(new BioPageCreateDto("ana")))
                 .isInstanceOf(RateLimitExceededException.class)
                 .hasMessage(HANDLE_CHANGES_REFUSED);
 
-        verifyNoInteractions(bioHandles);
-        verify(bioPageRepository, never()).saveAndFlush(any());
+        final var inOrder = inOrder(bioHandles, bioPageRepository, rateLimiter);
+        inOrder.verify(bioHandles).requireAvailable("ana", null);
+        inOrder.verify(bioPageRepository).saveAndFlush(any(BioPage.class));
+        inOrder.verify(rateLimiter).tryAcquire(HANDLE_KEY, 5, HANDLE_WINDOW);
+        verifyNoInteractions(bioPageTextSignals, bioPageReviewService);
     }
 
     @Test
@@ -341,11 +373,26 @@ class DefaultBioPageServiceTest {
     }
 
     @Test
-    void aMissingLinkIsRefused() {
+    void aDeletedLinkIsAPageChangeAndWritesNothing() {
         hasPage();
         ownsLinks();
 
-        assertRefusedBeforeWriting(update(buttonDto(41L, "Instagram")), NOT_YOUR_LINK);
+        assertThatThrownBy(() -> bioPageService.update(update(buttonDto(41L, "Instagram"))))
+                .isInstanceOf(BioPageConflictException.class)
+                .hasMessage(PAGE_CHANGED);
+
+        verify(bioPageButtonRepository, never()).deleteAllInBatch(anyIterable());
+        verify(bioPageButtonRepository, never()).saveAll(anyIterable());
+        verify(bioPageRepository, never()).saveAndFlush(any());
+        assertThat(page.getDisplayName()).isEqualTo("Ana");
+    }
+
+    @Test
+    void anotherUsersLinkIsRefusedEvenNextToADeletedOne() {
+        hasPage();
+        ownsLinks(link(41L, "bob-ig", bob));
+
+        assertRefusedBeforeWriting(update(buttonDto(41L, "Instagram"), buttonDto(42L, "Blog")), NOT_YOUR_LINK);
     }
 
     @Test
@@ -661,7 +708,7 @@ class DefaultBioPageServiceTest {
         final var clock = Clock.fixed(Instant.parse("2026-10-26T09:00:00.123456789Z"), ZoneOffset.UTC);
         final var service = new DefaultBioPageService(userService, bioPageRepository, bioPageLock, bioPageButtonRepository, urlRepository,
                 bioHandles, new BioPageResponses(bioPageButtonRepository, linkReviewRepository, clock), bioPageTextSignals,
-                bioPageReviewService, rateLimiter, clock);
+                bioPageReviewService, rateLimiter, TransactionOperations.withoutTransaction(), clock);
         hasPage();
         savesReturnTheirArgument();
 
@@ -918,11 +965,11 @@ class DefaultBioPageServiceTest {
         final var response = bioPageService.changeHandle(new BioHandleDto(" @Bob "));
 
         final var inOrder = inOrder(rateLimiter, bioHandles, bioPageRepository);
-        inOrder.verify(rateLimiter).tryAcquire(HANDLE_KEY, 5, HANDLE_WINDOW);
         inOrder.verify(bioHandles).requireAvailable("bob", page);
         inOrder.verify(bioHandles).releaseOwnHold("bob", page);
         inOrder.verify(bioHandles).hold("ana", page);
         inOrder.verify(bioPageRepository).saveAndFlush(page);
+        inOrder.verify(rateLimiter).tryAcquire(HANDLE_KEY, 5, HANDLE_WINDOW);
         assertThat(page.getHandle()).isEqualTo("bob");
         assertThat(response.handle()).isEqualTo("bob");
     }
@@ -979,10 +1026,10 @@ class DefaultBioPageServiceTest {
         final var inOrder = inOrder(bioPageRepository, bioPageLock, rateLimiter, bioHandles);
         inOrder.verify(bioPageRepository).findByOwner(ana);
         inOrder.verify(bioPageLock).lock(page);
-        inOrder.verify(rateLimiter).tryAcquire(HANDLE_KEY, 5, HANDLE_WINDOW);
         inOrder.verify(bioHandles).requireAvailable("bob", page);
         inOrder.verify(bioHandles).hold("ana", page);
         inOrder.verify(bioPageRepository).saveAndFlush(page);
+        inOrder.verify(rateLimiter).tryAcquire(HANDLE_KEY, 5, HANDLE_WINDOW);
     }
 
     @Test
@@ -1055,20 +1102,48 @@ class DefaultBioPageServiceTest {
         assertThatThrownBy(() -> bioPageService.changeHandle(new BioHandleDto("bob")))
                 .isInstanceOf(BioHandleUnavailableException.class)
                 .hasMessage(TAKEN);
+
+        verify(rateLimiter, never()).tryAcquire(HANDLE_KEY, 5, HANDLE_WINDOW);
     }
 
     @Test
-    void handleChangeOverTheLimitIs429() {
+    void refusedHandleChangesDoNotSpendTheHandleBudget() {
+        final var counts = new HashMap<String, Long>();
+        final var service = serviceWith((key, window) -> counts.merge(key, 1L, Long::sum));
         hasPage();
+        doThrow(new BioHandleUnavailableException(TAKEN)).when(bioHandles).requireAvailable("bob", page);
+        doThrow(new BioHandleUnavailableException(RESERVED)).when(bioHandles).requireAvailable("admin", page);
+        doThrow(new BioHandleUnavailableException(RECENTLY_USED)).when(bioHandles).requireAvailable("carl", page);
+        doThrow(new BioHandleUnavailableException(TAKEN)).when(bioHandles).requireAvailable("dora", page);
+        when(bioPageRepository.saveAndFlush(page))
+                .thenThrow(new DataIntegrityViolationException("uq_bio_page_handle"))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        for (final var refused : List.of("bob", "admin", "carl", "dora", "emma")) {
+            assertThatThrownBy(() -> service.changeHandle(new BioHandleDto(refused))).isInstanceOf(BioHandleUnavailableException.class);
+            page.setHandle("ana");
+        }
+        final var response = service.changeHandle(new BioHandleDto("ana-horvat"));
+
+        assertThat(response.handle()).isEqualTo("ana-horvat");
+        assertThat(counts).containsExactly(entry(HANDLE_KEY, 1L));
+    }
+
+    @Test
+    void handleChangeOverTheLimitIs429AndSpendsOnlyAfterTheFlush() {
+        hasPage();
+        savesReturnTheirArgument();
         when(rateLimiter.tryAcquire(HANDLE_KEY, 5, HANDLE_WINDOW)).thenReturn(false);
 
         assertThatThrownBy(() -> bioPageService.changeHandle(new BioHandleDto("bob")))
                 .isInstanceOf(RateLimitExceededException.class)
                 .hasMessage(HANDLE_CHANGES_REFUSED);
 
-        verifyNoInteractions(bioHandles);
-        verify(bioPageRepository, never()).saveAndFlush(any());
-        assertThat(page.getHandle()).isEqualTo("ana");
+        final var inOrder = inOrder(bioHandles, bioPageRepository, rateLimiter);
+        inOrder.verify(bioHandles).requireAvailable("bob", page);
+        inOrder.verify(bioPageRepository).saveAndFlush(page);
+        inOrder.verify(rateLimiter).tryAcquire(HANDLE_KEY, 5, HANDLE_WINDOW);
+        verifyNoInteractions(bioPageTextSignals, bioPageReviewService);
     }
 
     @Test
@@ -1376,6 +1451,13 @@ class DefaultBioPageServiceTest {
 
     private void hasPage() {
         when(bioPageRepository.findByOwner(ana)).thenReturn(Optional.of(page));
+    }
+
+    private BioPageService serviceWith(final RateLimiter limiter) {
+        final var clock = Clock.fixed(NOW_INSTANT, ZoneOffset.UTC);
+        return new DefaultBioPageService(userService, bioPageRepository, bioPageLock, bioPageButtonRepository, urlRepository,
+                bioHandles, new BioPageResponses(bioPageButtonRepository, linkReviewRepository, clock), bioPageTextSignals,
+                bioPageReviewService, limiter, TransactionOperations.withoutTransaction(), clock);
     }
 
     private void onPage(final BioPageButton... buttons) {

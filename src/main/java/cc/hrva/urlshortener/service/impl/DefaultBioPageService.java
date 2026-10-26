@@ -34,7 +34,6 @@ import cc.hrva.urlshortener.service.ratelimit.RateLimiterUnavailableException;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.LocalDateTime;
-import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.HashSet;
@@ -55,6 +54,7 @@ import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionOperations;
 
 @Slf4j
 @Service
@@ -102,6 +102,7 @@ public class DefaultBioPageService implements BioPageService {
     private final BioPageTextSignals bioPageTextSignals;
     private final BioPageReviewService bioPageReviewService;
     private final RateLimiter rateLimiter;
+    private final TransactionOperations transactionOperations;
     private final Clock clock;
 
     @Override
@@ -118,12 +119,15 @@ public class DefaultBioPageService implements BioPageService {
         }
         final var handle = BioHandles.normalize(bioPageCreateDto.getHandle());
         requireHandleFormat(handle);
-        requireWithinLimit(HANDLE_LIMIT, user, HANDLE_CHANGES_PER_USER, HANDLE_CHANGE_WINDOW, HANDLE_CHANGES_REFUSED);
         bioHandles.requireAvailable(handle, null);
 
         final BioPage created;
         try {
-            created = bioPageRepository.saveAndFlush(BioPage.builder().owner(user).handle(handle).build());
+            created = transactionOperations.execute(status -> {
+                final var page = bioPageRepository.saveAndFlush(BioPage.builder().owner(user).handle(handle).build());
+                requireWithinLimit(HANDLE_LIMIT, user, HANDLE_CHANGES_PER_USER, HANDLE_CHANGE_WINDOW, HANDLE_CHANGES_REFUSED);
+                return page;
+            });
         } catch (final DataIntegrityViolationException exception) {
             if (bioPageRepository.findByOwner(user).isPresent()) {
                 log.info("Bio page was created by a concurrent request userId={}", user.getId());
@@ -194,7 +198,6 @@ public class DefaultBioPageService implements BioPageService {
             return bioPageResponses.editorView(page);
         }
         requireHandleFormat(handle);
-        requireWithinLimit(HANDLE_LIMIT, user, HANDLE_CHANGES_PER_USER, HANDLE_CHANGE_WINDOW, HANDLE_CHANGES_REFUSED);
         bioHandles.requireAvailable(handle, page);
 
         bioHandles.releaseOwnHold(handle, page);
@@ -210,6 +213,7 @@ public class DefaultBioPageService implements BioPageService {
             log.info("Bio page handle was taken by a concurrent request pageId={}", page.getId());
             throw new BioHandleUnavailableException(HANDLE_TAKEN);
         }
+        requireWithinLimit(HANDLE_LIMIT, user, HANDLE_CHANGES_PER_USER, HANDLE_CHANGE_WINDOW, HANDLE_CHANGES_REFUSED);
         log.info("Bio page handle changed pageId={}", page.getId());
         final var buttons = bioPageResponses.buttonsOf(page);
         flagSuspiciousText(page, page.getDisplayName(), page.getBio(), buttons.stream().map(BioPageButton::getTitle).toList());
@@ -284,8 +288,8 @@ public class DefaultBioPageService implements BioPageService {
         if (expectedUpdatedAt == null) {
             return;
         }
-        final var stored = page.getUpdatedAt() == null ? null : page.getUpdatedAt().truncatedTo(ChronoUnit.MICROS);
-        if (!expectedUpdatedAt.truncatedTo(ChronoUnit.MICROS).equals(stored)) {
+        final var stored = page.getUpdatedAt() == null ? null : BioPage.micros(page.getUpdatedAt());
+        if (!BioPage.micros(expectedUpdatedAt).equals(stored)) {
             log.info("Bio page save refused because it was made from an outdated copy pageId={}", page.getId());
             throw new BioPageConflictException(OUTDATED_COPY);
         }
@@ -357,13 +361,19 @@ public class DefaultBioPageService implements BioPageService {
         if (urlIds.isEmpty()) {
             return Map.of();
         }
-        final var links = urlRepository.findAllById(urlIds).stream()
-                .filter(url -> url.getOwner() != null && Objects.equals(url.getOwner().getId(), user.getId()))
-                .collect(Collectors.toMap(Url::getId, Function.identity()));
-        if (links.size() != urlIds.size()) {
+        final var found = urlRepository.findAllById(urlIds);
+        if (found.stream().anyMatch(url -> !isOwnedBy(url, user))) {
             throw new ApiException(NOT_YOUR_LINK);
         }
-        return links;
+        if (found.size() != urlIds.size()) {
+            log.info("Bio page save refused because a link on it was deleted userId={}", user.getId());
+            throw new BioPageConflictException(PAGE_CHANGED);
+        }
+        return found.stream().collect(Collectors.toMap(Url::getId, Function.identity()));
+    }
+
+    private static boolean isOwnedBy(final Url url, final User user) {
+        return url.getOwner() != null && Objects.equals(url.getOwner().getId(), user.getId());
     }
 
     private void requireNewLinksWork(final List<BioPageButtonDto> requestedButtons, final Map<Long, Url> links,

@@ -14,6 +14,7 @@ import cc.hrva.urlshortener.model.enums.BioTheme;
 import cc.hrva.urlshortener.repository.BioHandleHoldRepository;
 import cc.hrva.urlshortener.repository.BioPageButtonRepository;
 import cc.hrva.urlshortener.repository.BioPageRepository;
+import cc.hrva.urlshortener.service.ReservedAliasService;
 import java.lang.reflect.RecordComponent;
 import java.time.Clock;
 import java.time.Instant;
@@ -58,14 +59,17 @@ class BioAccountDataTest {
     @Mock
     private BioHandleHoldRepository bioHandleHoldRepository;
 
+    @Mock
+    private ReservedAliasService reservedAliasService;
+
     private BioAccountData bioAccountData;
     private User owner;
     private BioPage page;
 
     @BeforeEach
     void setUp() {
-        bioAccountData = new BioAccountData(bioPageRepository, bioPageLock, bioPageButtonRepository, bioHandleHoldRepository,
-                Clock.fixed(NOW_INSTANT, ZoneOffset.UTC));
+        final var bioHandles = new BioHandles(reservedAliasService, bioPageRepository, bioHandleHoldRepository, Clock.fixed(NOW_INSTANT, ZoneOffset.UTC));
+        bioAccountData = new BioAccountData(bioPageRepository, bioPageLock, bioPageButtonRepository, bioHandles);
         owner = User.builder().id(7L).email("ana@example.com").build();
         page = BioPage.builder()
                 .id(12L)
