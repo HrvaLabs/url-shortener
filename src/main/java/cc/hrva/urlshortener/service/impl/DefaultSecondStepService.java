@@ -1,30 +1,47 @@
 package cc.hrva.urlshortener.service.impl;
 
 import cc.hrva.urlshortener.dto.JWTTokenDto;
+import cc.hrva.urlshortener.dto.PasskeyOptionsResponse;
+import cc.hrva.urlshortener.dto.PasskeySecondStepDto;
+import cc.hrva.urlshortener.dto.PendingTokenDto;
 import cc.hrva.urlshortener.dto.TotpSecondStepDto;
+import cc.hrva.urlshortener.exception.ApiException;
 import cc.hrva.urlshortener.exception.EmailNotVerifiedException;
 import cc.hrva.urlshortener.exception.NoAuthorizationException;
+import cc.hrva.urlshortener.exception.PasskeyVerificationException;
 import cc.hrva.urlshortener.exception.SignInExpiredException;
 import cc.hrva.urlshortener.exception.SignInUnavailableException;
 import cc.hrva.urlshortener.exception.TwoStepFailedException;
 import cc.hrva.urlshortener.mcp.anon.RateLimiter;
 import cc.hrva.urlshortener.mcp.anon.RateLimiterUnavailableException;
 import cc.hrva.urlshortener.model.User;
+import cc.hrva.urlshortener.repository.PasskeyCredentialRepository;
+import cc.hrva.urlshortener.repository.PasskeySignInStatsRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.security.ClientIpResolver;
 import cc.hrva.urlshortener.service.LoginAttemptService;
 import cc.hrva.urlshortener.service.SecondStepService;
 import cc.hrva.urlshortener.service.SignInService;
 import cc.hrva.urlshortener.service.TwoFactorService;
+import cc.hrva.urlshortener.service.analytics.AnalyticsDays;
+import cc.hrva.urlshortener.service.passkey.PasskeyAssertions;
+import cc.hrva.urlshortener.service.passkey.PasskeyCeremony;
+import cc.hrva.urlshortener.service.passkey.PasskeyCeremonyPurpose;
+import cc.hrva.urlshortener.service.passkey.PasskeyCeremonyStore;
+import cc.hrva.urlshortener.service.passkey.PasskeyJson;
+import cc.hrva.urlshortener.service.passkey.PasskeyOptionsFactory;
 import cc.hrva.urlshortener.service.twostep.PendingLogin;
 import cc.hrva.urlshortener.service.twostep.PendingLoginStore;
 import jakarta.servlet.http.HttpServletRequest;
+import java.util.Objects;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.authentication.DisabledException;
+import org.springframework.security.web.webauthn.api.Bytes;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import tools.jackson.databind.JsonNode;
 
 @Slf4j
 @Service
@@ -34,6 +51,7 @@ public class DefaultSecondStepService implements SecondStepService {
 
     private static final String PENDING_LOGIN_ATTEMPTS_PREFIX = "pending-login:";
     private static final String INVALID_CODE = "Invalid two-factor code";
+    private static final String NO_PASSKEYS = "This account has no passkeys or security keys.";
 
     private final ClientIpResolver clientIpResolver;
     private final LoginAttemptService loginAttemptService;
@@ -42,6 +60,13 @@ public class DefaultSecondStepService implements SecondStepService {
     private final UserRepository userRepository;
     private final TwoFactorService twoFactorService;
     private final SignInService signInService;
+    private final PasskeyCredentialRepository passkeyCredentialRepository;
+    private final PasskeyCeremonyStore passkeyCeremonyStore;
+    private final PasskeyOptionsFactory passkeyOptionsFactory;
+    private final PasskeyJson passkeyJson;
+    private final PasskeyAssertions passkeyAssertions;
+    private final PasskeySignInStatsRepository passkeySignInStatsRepository;
+    private final AnalyticsDays analyticsDays;
 
     @Override
     @Transactional
@@ -56,21 +81,68 @@ public class DefaultSecondStepService implements SecondStepService {
         return finishSecondStep(dto.getPendingToken(), attempt.user());
     }
 
-    private SecondStepAttempt startSecondStep(final String pendingToken, final HttpServletRequest request) {
-        final var clientIp = clientIpResolver.getClientIp(request);
-        if (loginAttemptService.isBlocked(clientIp)) {
-            throw new NoAuthorizationException(LoginAttemptService.NETWORK_BLOCKED);
+    @Override
+    public PasskeyOptionsResponse passkeyOptions(final PendingTokenDto dto, final HttpServletRequest request) {
+        final var clientIp = allowedClientIp(request);
+        final var user = userOf(pendingLoginOf(dto.getPendingToken(), clientIp), clientIp);
+        final var passkeys = passkeyCredentialRepository.findByUserOrderByCreatedAtDesc(user);
+        if (passkeys.isEmpty()) {
+            throw new ApiException(NO_PASSKEYS);
         }
 
-        final var pendingLogin = pendingLoginStore.find(pendingToken).orElseThrow(() -> signInExpired(clientIp));
+        final var challenge = Bytes.random();
+        final var options = passkeyOptionsFactory.requestOptions(challenge, passkeyOptionsFactory.descriptors(passkeys),
+                PasskeyCeremonyPurpose.SECOND_STEP.userVerification());
+        final var ceremonyId = passkeyCeremonyStore.save(
+                new PasskeyCeremony(PasskeyCeremonyPurpose.SECOND_STEP, challenge.toBase64UrlString(), user.getId()));
+
+        return new PasskeyOptionsResponse(ceremonyId, passkeyJson.write(options));
+    }
+
+    @Override
+    @Transactional
+    public ResponseEntity<JWTTokenDto> completeWithPasskey(final PasskeySecondStepDto dto, final HttpServletRequest request) {
+        final var attempt = startSecondStep(dto.getPendingToken(), request);
+        final var ceremony = passkeyCeremonyStore.consume(dto.getCeremonyId())
+                .filter(stored -> stored.purpose() == PasskeyCeremonyPurpose.SECOND_STEP)
+                .filter(stored -> Objects.equals(stored.userId(), attempt.user().getId()))
+                .orElseThrow(() -> ceremonyExpired(attempt.clientIp()));
+        verifyPasskey(ceremony, dto.getCredential(), attempt);
+
+        final var response = finishSecondStep(dto.getPendingToken(), attempt.user());
+        passkeySignInStatsRepository.increment(analyticsDays.today());
+
+        return response;
+    }
+
+    private SecondStepAttempt startSecondStep(final String pendingToken, final HttpServletRequest request) {
+        final var clientIp = allowedClientIp(request);
+        final var pendingLogin = pendingLoginOf(pendingToken, clientIp);
         countAttempt(pendingToken, pendingLogin, clientIp);
 
-        final var user = userRepository.findById(pendingLogin.userId()).orElseThrow(() -> signInExpired(clientIp));
+        final var user = userOf(pendingLogin, clientIp);
         if (loginAttemptService.isBlocked(twoFactorAttemptsKey(user))) {
             throw new NoAuthorizationException(LoginAttemptService.TWO_FACTOR_BLOCKED);
         }
 
         return new SecondStepAttempt(user, clientIp);
+    }
+
+    private String allowedClientIp(final HttpServletRequest request) {
+        final var clientIp = clientIpResolver.getClientIp(request);
+        if (loginAttemptService.isBlocked(clientIp)) {
+            throw new NoAuthorizationException(LoginAttemptService.NETWORK_BLOCKED);
+        }
+
+        return clientIp;
+    }
+
+    private PendingLogin pendingLoginOf(final String pendingToken, final String clientIp) {
+        return pendingLoginStore.find(pendingToken).orElseThrow(() -> signInExpired(clientIp));
+    }
+
+    private User userOf(final PendingLogin pendingLogin, final String clientIp) {
+        return userRepository.findById(pendingLogin.userId()).orElseThrow(() -> signInExpired(clientIp));
     }
 
     private void countAttempt(final String pendingToken, final PendingLogin pendingLogin, final String clientIp) {
@@ -88,10 +160,25 @@ public class DefaultSecondStepService implements SecondStepService {
         }
     }
 
+    private void verifyPasskey(final PasskeyCeremony ceremony, final JsonNode credential, final SecondStepAttempt attempt) {
+        try {
+            passkeyAssertions.verify(ceremony, credential, attempt.user());
+        } catch (final PasskeyVerificationException | ApiException exception) {
+            secondStepFailed(attempt);
+            throw exception;
+        }
+    }
+
     private SignInExpiredException signInExpired(final String clientIp) {
         loginAttemptService.loginFailed(clientIp);
 
         return new SignInExpiredException();
+    }
+
+    private SignInExpiredException ceremonyExpired(final String clientIp) {
+        loginAttemptService.loginFailed(clientIp);
+
+        return new SignInExpiredException(PasskeyCeremonyStore.EXPIRED);
     }
 
     private void secondStepFailed(final SecondStepAttempt attempt) {

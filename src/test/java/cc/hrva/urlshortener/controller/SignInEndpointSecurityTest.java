@@ -11,6 +11,8 @@ import cc.hrva.urlshortener.dto.PasskeyOptionsResponse;
 import cc.hrva.urlshortener.dto.PasskeyRegistrationOptionsDto;
 import cc.hrva.urlshortener.dto.PasskeyRenameDto;
 import cc.hrva.urlshortener.dto.PasskeyResponse;
+import cc.hrva.urlshortener.dto.PasskeySecondStepDto;
+import cc.hrva.urlshortener.dto.PendingTokenDto;
 import cc.hrva.urlshortener.dto.TotpSecondStepDto;
 import cc.hrva.urlshortener.exception.PasskeyVerificationException;
 import cc.hrva.urlshortener.exception.SignInExpiredException;
@@ -127,6 +129,12 @@ class SignInEndpointSecurityTest {
     private static final String PASSWORDLESS_BODY = """
             {"ceremonyId":"%s","credential":{"id":"a2V5","rawId":"a2V5","type":"public-key","authenticatorAttachment":"platform","clientExtensionResults":{},"response":{"authenticatorData":"e30","clientDataJSON":"e30","signature":"e30","userHandle":"aGFuZGxl"}},"rememberMe":true}"""
             .formatted(CEREMONY_ID);
+    private static final String WEBAUTHN_SECOND_STEP = "/api/v1/auth/2fa/webauthn";
+    private static final String WEBAUTHN_SECOND_STEP_BODY = """
+            {"pendingToken":"%s","ceremonyId":"%s","credential":{"id":"a2V5","rawId":"a2V5","type":"public-key","authenticatorAttachment":"cross-platform","clientExtensionResults":{},"response":{"authenticatorData":"e30","clientDataJSON":"e30","signature":"e30"}}}"""
+            .formatted(PENDING_TOKEN, CEREMONY_ID);
+    private static final String SECOND_STEP_OPTIONS_JSON = """
+            {"challenge":"Y2hhbGxlbmdl","timeout":300000,"rpId":"hrva.cc","allowCredentials":[{"type":"public-key","id":"a2V5","transports":["usb","nfc"]}],"userVerification":"preferred"}""";
     private static final String MACBOOK_JSON = """
             {"id":7,"label":"MacBook","kind":"SYNCED","backupEligible":true,"backedUp":true,"discoverable":true,"transports":["hybrid","internal"],"createdAt":"2026-10-25T14:05:00","lastUsedAt":null}""";
 
@@ -307,6 +315,46 @@ class SignInEndpointSecurityTest {
                 .andExpect(jsonPath("$.credential").exists());
 
         verifyNoInteractions(passkeyCeremonyStore, passkeyAssertions);
+    }
+
+    @Test
+    void theWebauthnSecondStepIsPublic() throws Exception {
+        when(secondStepService.passkeyOptions(eq(new PendingTokenDto(PENDING_TOKEN)), any()))
+                .thenReturn(new PasskeyOptionsResponse(CEREMONY_ID, JsonMapper.builder().build().readTree(SECOND_STEP_OPTIONS_JSON)));
+        final var headers = new HttpHeaders();
+        headers.add(JwtFilter.AUTHORIZATION_HEADER, "Bearer eyJ.token");
+        when(secondStepService.completeWithPasskey(any(), any()))
+                .thenReturn(new ResponseEntity<>(JWTTokenDto.builder().token("Bearer eyJ.token").build(), headers, HttpStatus.OK));
+
+        mockMvc.perform(post(WEBAUTHN_SECOND_STEP + "/options").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"pendingToken\":\"" + PENDING_TOKEN + "\"}"))
+                .andExpect(status().isOk())
+                .andExpect(content().json("{\"ceremonyId\":\"" + CEREMONY_ID + "\",\"options\":" + SECOND_STEP_OPTIONS_JSON + "}",
+                        JsonCompareMode.STRICT));
+        mockMvc.perform(post(WEBAUTHN_SECOND_STEP + "/verify").contentType(MediaType.APPLICATION_JSON).content(WEBAUTHN_SECOND_STEP_BODY))
+                .andExpect(status().isOk())
+                .andExpect(header().string(JwtFilter.AUTHORIZATION_HEADER, "Bearer eyJ.token"))
+                .andExpect(jsonPath("$.token").value("Bearer eyJ.token"));
+
+        final var secondStep = ArgumentCaptor.forClass(PasskeySecondStepDto.class);
+        verify(secondStepService).completeWithPasskey(secondStep.capture(), any());
+        assertThat(secondStep.getValue().getPendingToken()).isEqualTo(PENDING_TOKEN);
+        assertThat(secondStep.getValue().getCeremonyId()).isEqualTo(CEREMONY_ID);
+        assertThat(secondStep.getValue().getCredential().path("rawId").asString()).isEqualTo("a2V5");
+        verifyNoInteractions(tokenProvider);
+    }
+
+    @Test
+    void aWebauthnSecondStepWithoutATokenOrCredentialIsRefusedBeforeTheServiceRuns() throws Exception {
+        mockMvc.perform(post(WEBAUTHN_SECOND_STEP + "/options").contentType(MediaType.APPLICATION_JSON).content("{}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.pendingToken").exists());
+        mockMvc.perform(post(WEBAUTHN_SECOND_STEP + "/verify").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"pendingToken\":\"" + PENDING_TOKEN + "\",\"ceremonyId\":\"" + CEREMONY_ID + "\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.credential").exists());
+
+        verifyNoInteractions(secondStepService);
     }
 
     @Test
