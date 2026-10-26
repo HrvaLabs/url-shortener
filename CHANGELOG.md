@@ -4,7 +4,7 @@ All notable changes to hrva.cc — the URL shortener.
 
 ---
 
-## [v2.12] — 2026-10-26
+## [v2.12] — 2026-10-27
 
 Bio pages: one page with all your links, for your Instagram, TikTok or any other bio.
 
