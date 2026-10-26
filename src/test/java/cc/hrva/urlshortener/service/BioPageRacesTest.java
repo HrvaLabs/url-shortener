@@ -1,6 +1,7 @@
 package cc.hrva.urlshortener.service;
 
 import cc.hrva.urlshortener.configuration.ClockConfiguration;
+import cc.hrva.urlshortener.dto.bio.BioHandleDto;
 import cc.hrva.urlshortener.dto.bio.BioPageButtonDto;
 import cc.hrva.urlshortener.dto.bio.BioPageResponse;
 import cc.hrva.urlshortener.dto.bio.BioPageUpdateDto;
@@ -239,6 +240,35 @@ class BioPageRacesTest {
         assertThat(buttonsOnThePage()).isZero();
     }
 
+    @Test
+    void aSaveWaitsForAHandleChangeInProgress() {
+        whileTheNewHandleIsChecked(() -> bioPageService.update(savingAs("Ana Horvat")));
+
+        final var renamed = bioPageService.changeHandle(new BioHandleDto("ana-horvat"));
+
+        assertThat(otherRequestRan).isTrue();
+        assertThat(otherRequestFailure.get())
+                .as("the save that ran during the handle change, with the page now stored as %s", storedHandleAndName())
+                .isInstanceOf(PessimisticLockingFailureException.class);
+        assertThat(renamed.handle()).isEqualTo("ana-horvat");
+        final var saved = bioPageService.update(savingAs("Ana Horvat"));
+        assertThat(saved.handle()).isEqualTo("ana-horvat");
+        assertThat(storedHandleAndName()).containsExactly("ana-horvat", "Ana Horvat");
+    }
+
+    @Test
+    void aHandleChangeWaitsForASaveInProgress() {
+        whileTheButtonsAreRead(() -> bioPageService.changeHandle(new BioHandleDto("ana-horvat")));
+
+        final var saved = bioPageService.update(savingAs("Ana Horvat"));
+
+        assertTheOtherRequestWaitedForTheLock();
+        assertThat(saved.handle()).isEqualTo("ana");
+        final var renamed = bioPageService.changeHandle(new BioHandleDto("ana-horvat"));
+        assertThat(renamed.displayName()).isEqualTo("Ana Horvat");
+        assertThat(storedHandleAndName()).containsExactly("ana-horvat", "Ana Horvat");
+    }
+
     private void whileTheButtonsAreRead(final Runnable request) {
         doAnswer(invocation -> {
             runTheOtherRequestOnce(request);
@@ -261,6 +291,13 @@ class BioPageRacesTest {
         }).when(bioHandles).hold(eq("ana"), isNull());
     }
 
+    private void whileTheNewHandleIsChecked(final Runnable request) {
+        doAnswer(invocation -> {
+            runTheOtherRequestOnce(request);
+            return invocation.callRealMethod();
+        }).when(bioHandles).requireAvailable(eq("ana-horvat"), any(BioPage.class));
+    }
+
     private void runTheOtherRequestOnce(final Runnable request) {
         if (otherRequestRan.compareAndSet(false, true)) {
             otherRequestFailure.set(catchThrowable(() -> otherRequest.executeWithoutResult(status -> request.run())));
@@ -278,6 +315,11 @@ class BioPageRacesTest {
                 .containsExactly("ana");
     }
 
+    private List<String> storedHandleAndName() {
+        return jdbcTemplate.queryForObject("select handle, display_name from bio_page where id = ?",
+                (row, rowNumber) -> List.of(row.getString("handle"), row.getString("display_name")), page.getId());
+    }
+
     private Long buttonsOnThePage() {
         return jdbcTemplate.queryForObject("select count(*) from bio_page_button where page_id = ?", Long.class, page.getId());
     }
@@ -287,8 +329,12 @@ class BioPageRacesTest {
     }
 
     private static BioPageUpdateDto saving(final BioPageButtonDto... buttons) {
+        return savingAs("Ana", buttons);
+    }
+
+    private static BioPageUpdateDto savingAs(final String displayName, final BioPageButtonDto... buttons) {
         return BioPageUpdateDto.builder()
-                .displayName("Ana")
+                .displayName(displayName)
                 .bio("")
                 .avatarKind(BioAvatarKind.INITIALS)
                 .accent(BioAccent.BLUE)

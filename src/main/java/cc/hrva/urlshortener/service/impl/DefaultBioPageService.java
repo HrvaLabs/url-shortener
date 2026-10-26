@@ -177,7 +177,7 @@ public class DefaultBioPageService implements BioPageService {
     @Transactional
     public BioPageResponse changeHandle(final BioHandleDto bioHandleDto) {
         final var user = currentUser();
-        final var page = pageOf(user);
+        final var page = lockedPageOf(user);
         final var handle = BioHandles.normalize(bioHandleDto.getHandle());
         if (handle.equals(page.getHandle())) {
             return bioPageResponses.editorView(page);

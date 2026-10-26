@@ -826,6 +826,72 @@ class DefaultBioPageServiceTest {
     }
 
     @Test
+    void aHandleChangeLocksThePageBeforeReadingIt() {
+        hasPage();
+        savesReturnTheirArgument();
+
+        bioPageService.changeHandle(new BioHandleDto("bob"));
+
+        final var inOrder = inOrder(bioPageRepository, bioPageLock, rateLimiter, bioHandles);
+        inOrder.verify(bioPageRepository).findByOwner(ana);
+        inOrder.verify(bioPageLock).lock(page);
+        inOrder.verify(rateLimiter).tryAcquire(HANDLE_KEY, 5, HANDLE_WINDOW);
+        inOrder.verify(bioHandles).requireAvailable("bob", page);
+        inOrder.verify(bioHandles).hold("ana", page);
+        inOrder.verify(bioPageRepository).saveAndFlush(page);
+    }
+
+    @Test
+    void aHandleChangeWritesThePageAsReadUnderTheLock() {
+        hasPage();
+        savesReturnTheirArgument();
+        final var lockedPage = BioPage.builder().id(12L).owner(ana).handle("ana").displayName("Ana Horvat").bio("Photos from Zagreb")
+                .avatarKind(BioAvatarKind.INITIALS).accent(BioAccent.TEAL).theme(BioTheme.DARK)
+                .createdAt(CREATED_AT).updatedAt(CREATED_AT).build();
+        when(bioPageLock.lock(page)).thenReturn(Optional.of(lockedPage));
+
+        final var response = bioPageService.changeHandle(new BioHandleDto("bob"));
+
+        verify(bioPageRepository).saveAndFlush(lockedPage);
+        verify(bioPageRepository, never()).saveAndFlush(page);
+        verify(bioHandles).requireAvailable("bob", lockedPage);
+        verify(bioHandles).hold("ana", lockedPage);
+        assertThat(lockedPage.getHandle()).isEqualTo("bob");
+        assertThat(lockedPage.getDisplayName()).isEqualTo("Ana Horvat");
+        assertThat(page.getHandle()).isEqualTo("ana");
+        assertThat(response.displayName()).isEqualTo("Ana Horvat");
+        assertThat(response.accent()).isEqualTo(BioAccent.TEAL);
+    }
+
+    @Test
+    void aHandleChangeComparesWithTheHandleReadUnderTheLock() {
+        hasPage();
+        final var lockedPage = BioPage.builder().id(12L).owner(ana).handle("bob").displayName("Ana").bio("")
+                .avatarKind(BioAvatarKind.INITIALS).accent(BioAccent.BLUE).theme(BioTheme.AUTO)
+                .createdAt(CREATED_AT).updatedAt(CREATED_AT).build();
+        when(bioPageLock.lock(page)).thenReturn(Optional.of(lockedPage));
+
+        final var response = bioPageService.changeHandle(new BioHandleDto("Bob"));
+
+        assertThat(response.handle()).isEqualTo("bob");
+        verifyNoInteractions(rateLimiter, bioHandles);
+        verify(bioPageRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void aHandleChangeOfAPageDeletedBeforeItWasLockedIs404() {
+        hasPage();
+        when(bioPageLock.lock(page)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> bioPageService.changeHandle(new BioHandleDto("bob")))
+                .isInstanceOf(BioPageNotFoundException.class)
+                .hasMessage(NO_PAGE);
+
+        verifyNoInteractions(rateLimiter, bioHandles);
+        verify(bioPageRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
     void aMalformedNewHandleIsRefusedBeforeTheRateLimit() {
         hasPage();
 
