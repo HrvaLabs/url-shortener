@@ -98,6 +98,9 @@ app:
   burst:
     links: 5
     window: 1h
+  retention:
+    email-log-days: 90
+    audit-log-months: 12
   passkeys:
     rp-id: hrva.cc
     allowed-origins: https://app.hrva.cc

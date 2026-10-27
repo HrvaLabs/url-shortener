@@ -2,7 +2,10 @@ package cc.hrva.urlshortener.service.impl;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import cc.hrva.urlshortener.configuration.properties.AppProperties;
+import cc.hrva.urlshortener.repository.AuditLogRepository;
 import cc.hrva.urlshortener.repository.BioHandleHoldRepository;
+import cc.hrva.urlshortener.repository.EmailLogRepository;
 import cc.hrva.urlshortener.service.ApiKeyService;
 import cc.hrva.urlshortener.service.BlocklistSourceService;
 import cc.hrva.urlshortener.service.LinkDigestService;
@@ -37,6 +40,9 @@ public class DefaultScheduledService implements ScheduledService {
     private final BlocklistSourceService blocklistSourceService;
     private final WeeklyDigestService weeklyDigestService;
     private final BioHandleHoldRepository bioHandleHoldRepository;
+    private final EmailLogRepository emailLogRepository;
+    private final AuditLogRepository auditLogRepository;
+    private final AppProperties appProperties;
     private final Clock clock;
 
     @Override
@@ -129,6 +135,16 @@ public class DefaultScheduledService implements ScheduledService {
     public void releaseExpiredBioHandles() {
         final var released = bioHandleHoldRepository.deleteByHeldUntilBefore(LocalDateTime.now(clock));
         log.info("Scheduled cleanup: expired bio handles released={}", released);
+    }
+
+    @Override
+    @Scheduled(cron = "0 50 3 * * *")
+    public void deleteOldLogs() {
+        final var now = LocalDateTime.now(clock);
+        final var retention = appProperties.getRetention();
+        final var emailLogsDeleted = emailLogRepository.deleteByCreatedAtBefore(now.minusDays(retention.getEmailLogDays()));
+        final var auditLogsDeleted = auditLogRepository.deleteByPerformedAtBefore(now.minusMonths(retention.getAuditLogMonths()));
+        log.info("Scheduled cleanup: old logs emailLogsDeleted={} auditLogsDeleted={}", emailLogsDeleted, auditLogsDeleted);
     }
 
 }

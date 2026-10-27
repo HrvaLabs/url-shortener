@@ -116,6 +116,10 @@ public class AppProperties {
     @NotNull
     private Burst burst = new Burst();
 
+    @Valid
+    @NotNull
+    private Retention retention = new Retention();
+
     @Data
     public static class Mcp {
 
@@ -182,6 +186,17 @@ public class AppProperties {
         @NotNull
         @DurationMin(seconds = 1, message = "must be at least 1 second")
         private Duration window = Duration.ofHours(1);
+
+    }
+
+    @Data
+    public static class Retention {
+
+        @Min(1)
+        private int emailLogDays = 90;
+
+        @Min(1)
+        private int auditLogMonths = 12;
 
     }
 

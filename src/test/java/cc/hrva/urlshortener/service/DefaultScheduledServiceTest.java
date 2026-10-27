@@ -1,6 +1,9 @@
 package cc.hrva.urlshortener.service;
 
+import cc.hrva.urlshortener.configuration.properties.AppProperties;
+import cc.hrva.urlshortener.repository.AuditLogRepository;
 import cc.hrva.urlshortener.repository.BioHandleHoldRepository;
+import cc.hrva.urlshortener.repository.EmailLogRepository;
 import cc.hrva.urlshortener.service.impl.DefaultScheduledService;
 import java.io.IOException;
 import java.time.Clock;
@@ -67,10 +70,49 @@ class DefaultScheduledServiceTest {
     @Mock
     private BioHandleHoldRepository bioHandleHoldRepository;
 
+    @Mock
+    private EmailLogRepository emailLogRepository;
+
+    @Mock
+    private AuditLogRepository auditLogRepository;
+
+    private final AppProperties appProperties = new AppProperties();
+
     @BeforeEach
     void setUp() {
         this.scheduledService = new DefaultScheduledService(urlService, userService, apiKeyService, resetTokenService, urlNotificationService, safeBrowsingRecheckService, sendingEmailService, linkDigestService, blocklistSourceService,
-                weeklyDigestService, bioHandleHoldRepository, Clock.fixed(NOW, ZoneOffset.UTC));
+                weeklyDigestService, bioHandleHoldRepository, emailLogRepository, auditLogRepository, appProperties, Clock.fixed(NOW, ZoneOffset.UTC));
+    }
+
+    @Test
+    @ExtendWith(OutputCaptureExtension.class)
+    void emailLogsOlderThanNinetyDaysAndAuditRowsOlderThanTwelveMonthsAreDeleted(final CapturedOutput output) {
+        when(emailLogRepository.deleteByCreatedAtBefore(LocalDateTime.of(2026, 7, 28, 1, 45))).thenReturn(14);
+        when(auditLogRepository.deleteByPerformedAtBefore(LocalDateTime.of(2025, 10, 26, 1, 45))).thenReturn(3);
+
+        scheduledService.deleteOldLogs();
+
+        verify(emailLogRepository).deleteByCreatedAtBefore(LocalDateTime.of(2026, 7, 28, 1, 45));
+        verify(auditLogRepository).deleteByPerformedAtBefore(LocalDateTime.of(2025, 10, 26, 1, 45));
+        assertThat(output).contains("Scheduled cleanup: old logs emailLogsDeleted=14 auditLogsDeleted=3");
+    }
+
+    @Test
+    void theConfiguredRetentionPeriodsSetTheCutoffs() {
+        appProperties.getRetention().setEmailLogDays(30);
+        appProperties.getRetention().setAuditLogMonths(3);
+
+        scheduledService.deleteOldLogs();
+
+        verify(emailLogRepository).deleteByCreatedAtBefore(LocalDateTime.of(2026, 9, 26, 1, 45));
+        verify(auditLogRepository).deleteByPerformedAtBefore(LocalDateTime.of(2026, 7, 26, 1, 45));
+    }
+
+    @Test
+    void oldLogsAreDeletedDailyAtTenToFour() throws NoSuchMethodException {
+        final var scheduled = DefaultScheduledService.class.getMethod("deleteOldLogs").getAnnotation(Scheduled.class);
+
+        assertThat(scheduled.cron()).isEqualTo("0 50 3 * * *");
     }
 
     @Test

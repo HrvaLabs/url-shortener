@@ -130,6 +130,41 @@ class AppPropertiesTest {
     }
 
     @Test
+    void emailLogsAreKeptNinetyDaysAndTheAuditLogTwelveMonthsByDefault() throws IOException {
+        final var retention = new AppProperties().getRetention();
+        final var yaml = new YamlPropertySourceLoader().load("application", new ClassPathResource("application.yaml"));
+
+        assertThat(retention.getEmailLogDays()).isEqualTo(90);
+        assertThat(retention.getAuditLogMonths()).isEqualTo(12);
+        assertThat(yaml.getFirst().getProperty("app.retention.email-log-days")).isEqualTo(90);
+        assertThat(yaml.getFirst().getProperty("app.retention.audit-log-months")).isEqualTo(12);
+    }
+
+    @Test
+    void theRetentionPeriodsBindFromTheEnvironment() {
+        final var environment = new SystemEnvironmentPropertySource(StandardEnvironment.SYSTEM_ENVIRONMENT_PROPERTY_SOURCE_NAME, Map.<String, Object>of(
+                "APP_RETENTION_EMAIL_LOG_DAYS", "30",
+                "APP_RETENTION_AUDIT_LOG_MONTHS", "24"));
+
+        final var retention = new Binder(ConfigurationPropertySources.from(environment)).bind("app.retention", AppProperties.Retention.class).get();
+
+        assertThat(retention.getEmailLogDays()).isEqualTo(30);
+        assertThat(retention.getAuditLogMonths()).isEqualTo(24);
+    }
+
+    @Test
+    void aRetentionPeriodBelowOneIsRefused() {
+        final var validator = Validation.buildDefaultValidatorFactory().getValidator();
+        final var none = new AppProperties.Retention();
+        none.setEmailLogDays(0);
+        none.setAuditLogMonths(0);
+
+        assertThat(validator.validate(none)).extracting(violation -> violation.getPropertyPath().toString())
+                .containsExactlyInAnyOrder("emailLogDays", "auditLogMonths");
+        assertThat(validator.validate(new AppProperties.Retention())).isEmpty();
+    }
+
+    @Test
     void burstDefaultsToFiveLinksInAnHour() {
         final var burst = new AppProperties().getBurst();
 
