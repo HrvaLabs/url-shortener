@@ -31,8 +31,7 @@
         <jsoupVersion>1.23.2</jsoupVersion>
         <guavaVersion>33.7.2-jre</guavaVersion>
         <springAiVersion>2.0.2</springAiVersion>
-        <!-- Held at 2.0.1: Spring AI 2.0.1 is built against SDK 2.0.0 and breaks on 2.1.0 -->
-        <mcpSdkVersion>2.0.1</mcpSdkVersion>
+        <mcpSdkVersion>2.1.0</mcpSdkVersion>
         <mcpSecurityVersion>0.1.14</mcpSecurityVersion>
 
         <!-- Newer than Spring Boot 4.1.2 manages; drop each once Boot manages the same or newer -->
