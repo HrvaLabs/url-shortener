@@ -40,6 +40,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.contains;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.lenient;
@@ -133,7 +134,8 @@ class OAuth2LoginSuccessHandlerTest {
 
         handler.onAuthenticationSuccess(request, response, authentication);
 
-        verify(userRepository).save(argThat(saved -> saved.getLastLogin() != null));
+        verify(userRepository).recordLastLogin(eq(1L), argThat(signedInAt -> signedInAt != null));
+        verify(userRepository, never()).save(any());
         verify(response).sendRedirect(contains("http://fe/auth/callback?token=jwt-token"));
         verify(eventPublisher, never()).publishEvent(any(Object.class));
         verifyNoInteractions(pendingLoginStore, twoStepMethods);

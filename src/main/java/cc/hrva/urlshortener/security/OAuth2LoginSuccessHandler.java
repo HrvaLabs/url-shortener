@@ -17,6 +17,7 @@ import jakarta.validation.Validator;
 import java.io.IOException;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -103,8 +104,7 @@ public class OAuth2LoginSuccessHandler implements AuthenticationSuccessHandler {
             return;
         }
 
-        user.userLoggedIn();
-        userRepository.save(user);
+        userRepository.recordLastLogin(user.getId(), LocalDateTime.now());
 
         final var springAuth = new UsernamePasswordAuthenticationToken(
                 user.getEmail(), null,
