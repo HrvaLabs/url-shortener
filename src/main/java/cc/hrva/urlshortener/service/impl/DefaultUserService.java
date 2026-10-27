@@ -246,17 +246,22 @@ public class DefaultUserService implements UserService {
         }
 
         final var previousEmail = existingUser.getEmail();
-        final var wasActive = !Boolean.FALSE.equals(existingUser.getActive());
         final var editedUser = Objects.requireNonNull(userUpdateDtoToUserConverter.convert(userUpdateDto));
         existingUser.setEmail(editedUser.getEmail());
         existingUser.setApiKeySlots(editedUser.getApiKeySlots());
-        existingUser.setActive(editedUser.getActive());
-        final var updatedUser = userRepository.save(existingUser);
+        userRepository.save(existingUser);
+        final var deactivated = Boolean.FALSE.equals(editedUser.getActive()) && userRepository.deactivateById(existingUser.getId()) == 1;
+        if (Boolean.TRUE.equals(editedUser.getActive())) {
+            userRepository.reactivateById(existingUser.getId());
+        }
+        final var updatedUser = userRepository.findById(existingUser.getId())
+                .orElseThrow(() -> new UserNotFoundException("User not found"));
 
         if (!Objects.equals(previousEmail, updatedUser.getEmail())) {
             disconnectConnectedApps(updatedUser.getId(), previousEmail);
         }
-        if (wasActive && Boolean.FALSE.equals(updatedUser.getActive())) {
+        if (deactivated) {
+            log.info("Deactivated user with id {}", updatedUser.getId());
             cascadeDeactivation(updatedUser);
         }
 

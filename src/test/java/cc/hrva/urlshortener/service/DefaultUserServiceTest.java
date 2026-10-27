@@ -829,11 +829,27 @@ class DefaultUserServiceTest {
 
         when(userRepository.findById(1L)).thenReturn(Optional.of(existingUser));
         when(userUpdateDtoToUserConverter.convert(updateDto)).thenReturn(deactivated);
-        when(userRepository.save(existingUser)).thenReturn(existingUser);
+        when(userRepository.deactivateById(1L)).thenReturn(1);
 
         userService.updateUser(updateDto);
 
         verify(sendingEmailService).sendEmailAccountDeactivated(existingUser);
+    }
+
+    @Test
+    void anUpdateThatFindsTheUserAlreadyDeactivatedDoesNotCascadeAgain() {
+        final var updateDto = UserUpdateDto.builder().id(1L).active(false).build();
+        final var existingUser = User.builder().id(1L).email("test@example.com").authProvider("local").active(true).build();
+        when(userRepository.findById(1L)).thenReturn(Optional.of(existingUser));
+        when(userUpdateDtoToUserConverter.convert(updateDto))
+                .thenReturn(User.builder().id(1L).email("test@example.com").active(false).build());
+        when(userRepository.deactivateById(1L)).thenReturn(0);
+
+        userService.updateUser(updateDto);
+
+        verify(apiKeyRepository, never()).deactivateActiveByOwnerId(any());
+        verify(connectedAppsService, never()).disconnectAll(any());
+        verify(sendingEmailService, never()).sendEmailAccountDeactivated(any());
     }
 
     @Test
@@ -1037,7 +1053,7 @@ class DefaultUserServiceTest {
         when(userRepository.findById(1L)).thenReturn(Optional.of(existingUser));
         when(userUpdateDtoToUserConverter.convert(updateDto))
                 .thenReturn(User.builder().id(1L).email("test@example.com").active(false).build());
-        when(userRepository.save(existingUser)).thenReturn(existingUser);
+        when(userRepository.deactivateById(1L)).thenReturn(1);
 
         userService.updateUser(updateDto);
 

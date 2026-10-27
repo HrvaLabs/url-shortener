@@ -3,8 +3,10 @@ package cc.hrva.urlshortener.service;
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.converter.UserToUserDtoConverter;
 import cc.hrva.urlshortener.converter.UserUpdateDtoToUserConverter;
+import cc.hrva.urlshortener.dto.UserUpdateDto;
 import cc.hrva.urlshortener.mcp.apps.ConnectedAppsService;
 import cc.hrva.urlshortener.model.Url;
+import cc.hrva.urlshortener.model.codebook.Authorities;
 import cc.hrva.urlshortener.repository.ApiKeyRepository;
 import cc.hrva.urlshortener.repository.DomainRuleRepository;
 import cc.hrva.urlshortener.repository.EmailLogRepository;
@@ -48,6 +50,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mockingDetails;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
 @SpringBootTest(
@@ -69,8 +72,14 @@ class ModerationUserWritesTest {
 
     private final AtomicBoolean concurrentChangeDone = new AtomicBoolean();
 
+    private Runnable meanwhile = () -> this.jdbcTemplate.update(
+            "update user_account set last_login = ?, password = 'changed-hash' where id = ?", CONCURRENT_LOGIN, MEMBER);
+
     @Autowired
     private ModerationService moderationService;
+
+    @Autowired
+    private UserService userService;
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
@@ -143,8 +152,7 @@ class ModerationUserWritesTest {
         doAnswer(invocation -> {
             final var loaded = mockingDetails(userRepository).getMockCreationSettings().getDefaultAnswer().answer(invocation);
             if (concurrentChangeDone.compareAndSet(false, true)) {
-                CompletableFuture.runAsync(() -> jdbcTemplate.update(
-                        "update user_account set last_login = ?, password = 'changed-hash' where id = ?", CONCURRENT_LOGIN, MEMBER)).join();
+                CompletableFuture.runAsync(meanwhile).join();
             }
             return loaded;
         }).when(userRepository).findById(MEMBER);
@@ -181,6 +189,53 @@ class ModerationUserWritesTest {
                 .containsEntry("ACTIVE", false)
                 .containsEntry("LAST_LOGIN", Timestamp.valueOf(CONCURRENT_LOGIN))
                 .containsEntry("PASSWORD", "changed-hash");
+    }
+
+    @Test
+    void anAdminTurningOffAUserThatModerationBlockedMeanwhileDoesNotDeactivateItAgain() {
+        member(true);
+        meanwhile = () -> moderationService.blockUser(MEMBER, ADMIN, "admin", null);
+
+        final var response = userService.updateUser(UserUpdateDto.builder().id(MEMBER).active(false).build());
+
+        assertThat(concurrentChangeDone).isTrue();
+        assertThat(response.active()).isFalse();
+        assertThat(jdbcTemplate.queryForObject("select active from user_account where id = ?", Boolean.class, MEMBER)).isFalse();
+        verify(sendingEmailService, times(1)).sendEmailAccountDeactivated(any());
+        verify(connectedAppsService, times(1)).disconnectAll(MEMBER_EMAIL);
+        verify(apiKeyRepository, times(1)).deactivateActiveByOwnerId(MEMBER);
+    }
+
+    @Test
+    void anAdminTurningOffAUserDeactivatesItOnceAndKeepsASignInAndAPasswordChangeMadeAfterTheAccountWasLoaded() {
+        member(true);
+
+        final var response = userService.updateUser(UserUpdateDto.builder().id(MEMBER).apiKeySlots(7L).active(false).build());
+
+        assertThat(concurrentChangeDone).isTrue();
+        assertThat(response.active()).isFalse();
+        assertThat(response.authorities()).extracting(Authorities::getName).containsExactly("ROLE_USER");
+        assertThat(jdbcTemplate.queryForMap("select active, api_key_slots, last_login, password from user_account where id = ?", MEMBER))
+                .containsEntry("ACTIVE", false)
+                .containsEntry("API_KEY_SLOTS", 7L)
+                .containsEntry("LAST_LOGIN", Timestamp.valueOf(CONCURRENT_LOGIN))
+                .containsEntry("PASSWORD", "changed-hash");
+        verify(userRepository).deactivateById(MEMBER);
+        verify(sendingEmailService, times(1)).sendEmailAccountDeactivated(any());
+    }
+
+    @Test
+    void anAdminTurningOnAUserReactivatesItWithATargetedUpdateAndSendsNoDeactivationEmail() {
+        member(false);
+
+        final var response = userService.updateUser(UserUpdateDto.builder().id(MEMBER).active(true).build());
+
+        assertThat(response.active()).isTrue();
+        assertThat(jdbcTemplate.queryForMap("select active, password from user_account where id = ?", MEMBER))
+                .containsEntry("ACTIVE", true)
+                .containsEntry("PASSWORD", "changed-hash");
+        verify(userRepository).reactivateById(MEMBER);
+        verify(sendingEmailService, never()).sendEmailAccountDeactivated(any());
     }
 
     @Test
