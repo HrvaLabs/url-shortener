@@ -10,6 +10,7 @@ import jakarta.persistence.*;
 import jakarta.validation.constraints.NotBlank;
 import lombok.*;
 import org.hibernate.annotations.BatchSize;
+import org.hibernate.annotations.DynamicUpdate;
 import org.hibernate.validator.constraints.URL;
 import org.springframework.cache.annotation.CacheEvict;
 
@@ -23,6 +24,7 @@ import java.util.Set;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
+@DynamicUpdate
 public class Url {
 
     @Id
