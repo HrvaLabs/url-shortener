@@ -69,10 +69,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @SpringBootTest(
@@ -103,6 +106,8 @@ class RefreshBlocklistSourceFlowTest {
     private Path downloads;
 
     private Runnable meanwhile = () -> {};
+
+    private Runnable duringStore = () -> {};
 
     @Autowired
     private MockMvc mockMvc;
@@ -163,6 +168,10 @@ class RefreshBlocklistSourceFlowTest {
             meanwhile.run();
             return new FetchResult(false, body, null, null);
         });
+        doAnswer(invocation -> {
+            duringStore.run();
+            return null;
+        }).when(blocklistStore).replace(eq(SOURCE), any());
     }
 
     @AfterEach
@@ -221,6 +230,65 @@ class RefreshBlocklistSourceFlowTest {
 
         verify(blocklistStore, never()).replace(eq(SOURCE), any());
         assertThat(jdbcTemplate.queryForObject("select count(*) from blocklist_source where id = ?", Long.class, SOURCE)).isZero();
+    }
+
+    @Test
+    void aSourceRenamedDuringTheRedisWriteKeepsTheNewNameAndRecordsTheDownload() throws Exception {
+        duringStore = () -> jdbcTemplate.update("update blocklist_source set name = 'Renamed meanwhile', refresh_interval_hours = 12 where id = ?", SOURCE);
+
+        mockMvc.perform(refresh())
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.name").value("Renamed meanwhile"))
+                .andExpect(jsonPath("$.domainCount").value(2));
+
+        assertThat(jdbcTemplate.queryForMap("select enabled, name, refresh_interval_hours, domain_count, last_error from blocklist_source where id = ?", SOURCE))
+                .containsEntry("ENABLED", true)
+                .containsEntry("NAME", "Renamed meanwhile")
+                .containsEntry("REFRESH_INTERVAL_HOURS", 12)
+                .containsEntry("DOMAIN_COUNT", 2L)
+                .containsEntry("LAST_ERROR", null);
+        assertThat(jdbcTemplate.queryForObject("select last_fetched_at from blocklist_source where id = ?", Object.class, SOURCE)).isNotNull();
+        verify(blocklistStore, never()).remove(SOURCE);
+    }
+
+    @Test
+    void aSourceTurnedOffDuringTheRedisWriteStaysOffAndTheNewSetIsRemoved() throws Exception {
+        duringStore = () -> jdbcTemplate.update("update blocklist_source set enabled = false, name = 'Renamed meanwhile' where id = ?", SOURCE);
+
+        mockMvc.perform(refresh()).andExpect(status().isOk());
+
+        assertThat(jdbcTemplate.queryForMap("select enabled, name, last_fetched_at, domain_count from blocklist_source where id = ?", SOURCE))
+                .containsEntry("ENABLED", false)
+                .containsEntry("NAME", "Renamed meanwhile")
+                .containsEntry("LAST_FETCHED_AT", null)
+                .containsEntry("DOMAIN_COUNT", null);
+        final var order = inOrder(blocklistStore);
+        order.verify(blocklistStore).replace(eq(SOURCE), any());
+        order.verify(blocklistStore).remove(SOURCE);
+    }
+
+    @Test
+    void aSourceThatChangedKindDuringTheRedisWriteKeepsTheNewKindAndTheNewSetIsRemoved() throws Exception {
+        duringStore = () -> jdbcTemplate.update("update blocklist_source set kind = 'LINKS' where id = ?", SOURCE);
+
+        mockMvc.perform(refresh()).andExpect(status().isOk());
+
+        assertThat(jdbcTemplate.queryForMap("select kind, enabled, last_fetched_at, domain_count from blocklist_source where id = ?", SOURCE))
+                .containsEntry("KIND", "LINKS")
+                .containsEntry("ENABLED", true)
+                .containsEntry("LAST_FETCHED_AT", null)
+                .containsEntry("DOMAIN_COUNT", null);
+        verify(blocklistStore).remove(SOURCE);
+    }
+
+    @Test
+    void aSourceDeletedDuringTheRedisWriteLeavesNoSet() throws Exception {
+        duringStore = () -> jdbcTemplate.update("delete from blocklist_source where id = ?", SOURCE);
+
+        mockMvc.perform(refresh()).andExpect(status().isOk());
+
+        assertThat(jdbcTemplate.queryForObject("select count(*) from blocklist_source where id = ?", Long.class, SOURCE)).isZero();
+        verify(blocklistStore).remove(SOURCE);
     }
 
     private static MockHttpServletRequestBuilder refresh() {

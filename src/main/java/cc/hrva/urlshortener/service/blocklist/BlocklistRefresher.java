@@ -106,24 +106,42 @@ public class BlocklistRefresher {
     private BlocklistSource record(final BlocklistSource source, final Download download) {
         final var errors = new ArrayList<>(download.errors());
         final var previousError = source.getLastError();
-        source.setLastFetchedAt(LocalDateTime.now());
-        var stored = false;
-        if (download.loaded() != null) {
-            final var refusal = store(source, download.loaded());
-            refusal.ifPresent(errors::add);
-            stored = refusal.isEmpty();
+        final var loaded = download.loaded();
+        final var refusal = loaded == null ? Optional.<String>empty() : store(source, loaded);
+        refusal.ifPresent(errors::add);
+        final var stored = loaded != null && refusal.isEmpty();
+        final var lastError = errors.isEmpty() ? null : String.join(ERROR_SEPARATOR, errors);
+        final var fetchedAt = LocalDateTime.now();
+        final var recorded = stored
+                ? blocklistSourceRepository.recordLoadedList(source.getId(), source.getKind(), fetchedAt, lastError,
+                        loaded.attempt().url(), loaded.list().entries().size(), loaded.list().version(),
+                        fitting(loaded.fetched().etag(), MAX_ETAG_LENGTH), fitting(loaded.fetched().lastModified(), MAX_LAST_MODIFIED_LENGTH))
+                : blocklistSourceRepository.recordRefresh(source.getId(), source.getKind(), fetchedAt, lastError);
+        if (recorded == 0) {
+            log.info("Blocklist source {} was disabled, deleted or changed kind while it was stored, discarding the download",
+                    source.getName());
+            if (stored) {
+                removeStoredSet(source);
+            }
+        } else {
+            alertWhenHealthChanged(source.getName(), previousError, lastError, stored);
         }
-        source.setLastError(errors.isEmpty() ? null : String.join(ERROR_SEPARATOR, errors));
-        final var saved = blocklistSourceRepository.save(source);
-        alertWhenHealthChanged(saved, previousError, stored);
-        return saved;
+        return blocklistSourceRepository.findById(source.getId()).orElse(source);
     }
 
-    private void alertWhenHealthChanged(final BlocklistSource source, final String previousError, final boolean stored) {
-        if (previousError == null && source.getLastError() != null) {
-            eventPublisher.publishEvent(new AdminAlertEvent.BlocklistSourceFailed(source.getName(), source.getLastError(), stored));
-        } else if (previousError != null && source.getLastError() == null) {
-            eventPublisher.publishEvent(new AdminAlertEvent.BlocklistSourceRecovered(source.getName()));
+    private void removeStoredSet(final BlocklistSource source) {
+        try {
+            blocklistStore.remove(source.getId());
+        } catch (final RuntimeException exception) {
+            log.warn("Could not remove the Redis set of blocklist source {} exception={}", source.getName(), exception.getClass().getName());
+        }
+    }
+
+    private void alertWhenHealthChanged(final String name, final String previousError, final String lastError, final boolean stored) {
+        if (previousError == null && lastError != null) {
+            eventPublisher.publishEvent(new AdminAlertEvent.BlocklistSourceFailed(name, lastError, stored));
+        } else if (previousError != null && lastError == null) {
+            eventPublisher.publishEvent(new AdminAlertEvent.BlocklistSourceRecovered(name));
         }
     }
 
@@ -140,12 +158,6 @@ public class BlocklistRefresher {
             log.warn("Blocklist source {} could not be stored in Redis", source.getName(), exception);
             return Optional.of("could not store the list in Redis");
         }
-        source.setLastSuccessUrl(loaded.attempt().url());
-        source.setLastSuccessAt(LocalDateTime.now());
-        source.setDomainCount((long) entries.size());
-        source.setListVersion(loaded.list().version());
-        source.setEtag(fitting(loaded.fetched().etag(), MAX_ETAG_LENGTH));
-        source.setLastModified(fitting(loaded.fetched().lastModified(), MAX_LAST_MODIFIED_LENGTH));
         log.info("Blocklist source {} loaded {} entries ({})", source.getName(), entries.size(), loaded.attempt().label());
         return Optional.empty();
     }

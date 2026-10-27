@@ -33,6 +33,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
@@ -59,6 +60,8 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anySet;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
@@ -127,6 +130,7 @@ class DefaultBlocklistSourceServiceTest {
     @Mock
     private EntityManager entityManager;
 
+    private final Map<Long, BlocklistSource> rows = new HashMap<>();
     private FakeFetcher fetcher;
     private BlocklistSourceService blocklistSourceService;
 
@@ -138,6 +142,22 @@ class DefaultBlocklistSourceServiceTest {
                 new BlocklistParser(), new LinkListParser(), alertPublisher, entityManager);
         blocklistSourceService = new DefaultBlocklistSourceService(blocklistSourceRepository, blocklistStore, refresher, eventPublisher);
         lenient().when(blocklistSourceRepository.save(any(BlocklistSource.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        lenient().when(blocklistSourceRepository.recordRefresh(anyLong(), any(), any(), any())).thenAnswer(invocation ->
+                recordedOnTheRow(invocation.getArgument(0), invocation.getArgument(1), row -> {
+                    row.setLastFetchedAt(invocation.getArgument(2));
+                    row.setLastError(invocation.getArgument(3));
+                }));
+        lenient().when(blocklistSourceRepository.recordLoadedList(anyLong(), any(), any(), any(), any(), anyLong(), any(), any(), any()))
+                .thenAnswer(invocation -> recordedOnTheRow(invocation.getArgument(0), invocation.getArgument(1), row -> {
+                    row.setLastFetchedAt(invocation.getArgument(2));
+                    row.setLastError(invocation.getArgument(3));
+                    row.setLastSuccessAt(invocation.getArgument(2));
+                    row.setLastSuccessUrl(invocation.getArgument(4));
+                    row.setDomainCount(invocation.getArgument(5));
+                    row.setListVersion(invocation.getArgument(6));
+                    row.setEtag(invocation.getArgument(7));
+                    row.setLastModified(invocation.getArgument(8));
+                }));
     }
 
     @Test
@@ -174,7 +194,9 @@ class DefaultBlocklistSourceServiceTest {
         assertThat(source.getLastModified()).isEqualTo(LAST_MODIFIED);
         assertThat(source.getLastSuccessUrl()).isEqualTo(MAIN);
         assertThat(source.getLastError()).isNull();
-        verify(blocklistSourceRepository).save(source);
+        verify(blocklistSourceRepository, never()).save(any());
+        verify(blocklistSourceRepository).recordLoadedList(eq(1L), eq(SourceKind.DOMAINS), any(), isNull(), eq(MAIN), eq(3L), eq(VERSION),
+                eq(ETAG), eq(LAST_MODIFIED));
         assertThat(response.listVersion()).isEqualTo(VERSION);
         assertThat(response.domainCount()).isEqualTo(3L);
         assertThat(response.memoryBytes()).isEqualTo(1_234_567L);
@@ -832,7 +854,7 @@ class DefaultBlocklistSourceServiceTest {
         blocklistSourceService.refresh(1);
 
         verify(blocklistStore, never()).replace(anyLong(), anySet());
-        verify(blocklistSourceRepository, never()).save(any());
+        verifyNoRefreshRecorded();
     }
 
     @Test
@@ -843,7 +865,27 @@ class DefaultBlocklistSourceServiceTest {
         blocklistSourceService.refresh(1);
 
         verify(blocklistStore, never()).replace(anyLong(), anySet());
-        verify(blocklistSourceRepository, never()).save(any());
+        verifyNoRefreshRecorded();
+    }
+
+    @Test
+    void aSourceDisabledWhileItsSetIsStoredLosesTheNewSetEvenWhenRedisFailsToRemoveIt() {
+        final var source = stored(source(1).build());
+        fetcher.serves(MAIN, LIST);
+        redisHasRoom();
+        doAnswer(invocation -> {
+            source.setEnabled(false);
+            return null;
+        }).when(blocklistStore).replace(1, LIST_DOMAINS);
+        doThrow(new RedisConnectionFailureException("Connection refused")).when(blocklistStore).remove(1);
+
+        final var response = blocklistSourceService.refresh(1);
+
+        verify(blocklistStore).remove(1);
+        assertThat(response.enabled()).isFalse();
+        assertThat(source.getDomainCount()).isNull();
+        assertThat(source.getLastFetchedAt()).isNull();
+        verifyNoInteractions(alertPublisher);
     }
 
     @Test
@@ -854,7 +896,7 @@ class DefaultBlocklistSourceServiceTest {
         blocklistSourceService.refresh(1);
 
         verify(blocklistStore, never()).replace(anyLong(), anySet());
-        verify(blocklistSourceRepository, never()).save(any());
+        verifyNoRefreshRecorded();
     }
 
     @Test
@@ -1096,7 +1138,23 @@ class DefaultBlocklistSourceServiceTest {
 
     private BlocklistSource stored(final BlocklistSource source) {
         when(blocklistSourceRepository.findById(source.getId())).thenReturn(Optional.of(source));
+        rows.put(source.getId(), source);
         return source;
+    }
+
+    private int recordedOnTheRow(final long id, final SourceKind kind, final Consumer<BlocklistSource> refreshColumns) {
+        final var row = rows.get(id);
+        if (row == null || !row.isEnabled() || row.getKind() != kind) {
+            return 0;
+        }
+        refreshColumns.accept(row);
+        return 1;
+    }
+
+    private void verifyNoRefreshRecorded() {
+        verify(blocklistSourceRepository, never()).save(any());
+        verify(blocklistSourceRepository, never()).recordRefresh(anyLong(), any(), any(), any());
+        verify(blocklistSourceRepository, never()).recordLoadedList(anyLong(), any(), any(), any(), any(), anyLong(), any(), any(), any());
     }
 
     private static BlocklistSource.BlocklistSourceBuilder source(final long id) {
