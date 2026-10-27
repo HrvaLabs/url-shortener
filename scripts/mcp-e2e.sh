@@ -17,6 +17,8 @@
 # Section 18 deletes API keys on Postgres: an active key refused, one revoked key, the bulk delete of inactive keys for
 # the owner and (leaving the owner's keys alone) for an admin, and an admin deleting someone else's key.
 # Section 19 reads the admin user list and edits a user: the JSON fields of a row and its roles, and the edit's answer.
+# Section 20 runs what broke when open-in-view was turned off: a link created with an API key, an owner reactivating and
+# editing their link, and the answers of a password change and a password reset, which carry the roles.
 #
 #   scripts/mcp-e2e.sh                         builds the jar, then runs every step
 #   MCP_E2E_SKIP_BUILD=1 scripts/mcp-e2e.sh    reuses target/url-shortener-*.jar
@@ -313,6 +315,7 @@ for (( second = 0; second < 180; second++ )); do
 done
 (( second < 180 )) || fail "the app did not start within 180s"
 echo "  app $(basename "$JAR") on $BASE (profile local, issuer $BASE)"
+expect_eq "$(grep -c 'spring.jpa.open-in-view is enabled by default' "$WORK/app.log" || true)" 0 "startup does not warn about open-in-view"
 expect_eq "$(psql_value "select string_agg(id || ' ' || exectype, ', ' order by orderexecuted) from databasechangelog where id like '026-drop-ip-address%';")" \
     "026-drop-ip-address EXECUTED, 026-drop-ip-address-seq EXECUTED" "026 ran both ip_address drops"
 expect_eq "$(psql_value "select (select count(*) from information_schema.tables where table_name = 'ip_address') + (select count(*) from information_schema.sequences where sequence_name = 'ip_address_id_seq');")" \
@@ -1006,5 +1009,33 @@ expect_eq "$(psql_value "select api_key_slots from user_account where id = $LIST
 http -X PUT "$BASE/api/v1/users/$LISTED_ID" -H "Authorization: Bearer $ADMIN_JWT" -H 'Content-Type: application/json' \
     -d "{\"id\":$LISTED_ID,\"apiKeySlots\":$LISTED_SLOTS}"
 expect_eq "$HTTP_STATUS" 200 "the slots are put back"
+
+section "20. Without open-in-view: a link created with an API key, an owner's edits, a password change and a reset"
+http -X POST "$BASE/api/v1/api-keys" -H "Authorization: Bearer $KEY_JWT"
+expect_eq "$HTTP_STATUS" 200 "POST /api/v1/api-keys as $USER_EMAIL"
+OWNER_KEY=$(jq -r .key <<<"$HTTP_BODY")
+http -X POST "$BASE/api/v1/urls" -H "X-Api-Key: $OWNER_KEY" -H 'Content-Type: application/json' -d '{"longUrl":"https://example.com/created-with-a-key"}'
+expect_eq "$HTTP_STATUS" 200 "POST /api/v1/urls with X-Api-Key"
+KEY_LINK_ID=$(jq -r .id <<<"$HTTP_BODY")
+expect_eq "$(psql_value "select u.email || ' ' || k.api_calls_used from url l join user_account u on u.id = l.owner_id join api_key k on k.owner_id = u.id where l.id = $KEY_LINK_ID and k.key = '$OWNER_KEY';")" \
+    "$USER_EMAIL 1" "the link belongs to the key's owner and the key counts one call"
+http -X PATCH "$BASE/api/v1/urls/$KEY_LINK_ID/deactivate" -H "Authorization: Bearer $KEY_JWT"
+expect_eq "$HTTP_STATUS" 200 "the owner deactivates the link"
+http -X PATCH "$BASE/api/v1/urls/$KEY_LINK_ID/activate" -H "Authorization: Bearer $KEY_JWT"
+expect_eq "$HTTP_STATUS $(jq -r .active <<<"$HTTP_BODY")" "200 true" "PATCH /api/v1/urls/{id}/activate: the owner reactivates it"
+http -X PUT "$BASE/api/v1/urls/$KEY_LINK_ID" -H "Authorization: Bearer $KEY_JWT" -H 'Content-Type: application/json' \
+    -d "{\"id\":$KEY_LINK_ID,\"longUrl\":\"https://example.com/created-with-a-key\",\"visitLimit\":5}"
+expect_eq "$HTTP_STATUS $(jq -r .visitLimit <<<"$HTTP_BODY")" "200 5" "PUT /api/v1/urls/{id}: the owner edits it"
+http -X PATCH "$BASE/api/v1/users/password" -H "Authorization: Bearer $KEY_JWT" -H 'Content-Type: application/json' \
+    -d "{\"oldPassword\":\"$USER_PASSWORD\",\"newPassword\":\"changed-$USER_PASSWORD\"}"
+expect_eq "$HTTP_STATUS" 200 "PATCH /api/v1/users/password"
+expect_contains "$(jq -c '[.authorities[].name]' <<<"$HTTP_BODY")" '"ROLE_USER"' "the answer carries the roles"
+http -X POST "$BASE/api/v1/auth/password-reset" -H 'Content-Type: application/json' -d "{\"email\":\"$USER_EMAIL\"}"
+expect_eq "$HTTP_STATUS" 202 "POST /api/v1/auth/password-reset"
+RESET_TOKEN=$(psql_value "select r.token from reset_token r join user_account u on u.id = r.user_id where u.email = '$USER_EMAIL' and r.active order by r.id desc limit 1;")
+http -X POST "$BASE/api/v1/auth/password-reset/confirm" -H 'Content-Type: application/json' \
+    -d "{\"token\":\"$RESET_TOKEN\",\"email\":\"$USER_EMAIL\",\"password\":\"reset-$USER_PASSWORD\"}"
+expect_eq "$HTTP_STATUS" 200 "POST /api/v1/auth/password-reset/confirm"
+expect_contains "$(jq -c '[.authorities[].name]' <<<"$HTTP_BODY")" '"ROLE_USER"' "the answer carries the roles"
 
 section "Done: every step passed"
