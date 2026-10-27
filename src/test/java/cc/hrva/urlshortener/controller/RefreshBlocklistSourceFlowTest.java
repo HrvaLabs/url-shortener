@@ -13,6 +13,7 @@ import cc.hrva.urlshortener.mcp.authorization.AuthorizationServerConfiguration;
 import cc.hrva.urlshortener.mcp.bridge.ConnectRequestStore;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.User;
+import cc.hrva.urlshortener.model.enums.SourceKind;
 import cc.hrva.urlshortener.repository.AuditLogRepository;
 import cc.hrva.urlshortener.repository.BlocklistSourceRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
@@ -37,6 +38,8 @@ import com.nimbusds.jose.jwk.gen.RSAKeyGenerator;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.sql.Timestamp;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Set;
 import org.junit.jupiter.api.AfterEach;
@@ -53,6 +56,7 @@ import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.FilterType;
 import org.springframework.context.annotation.Import;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
+import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
@@ -66,6 +70,7 @@ import org.springframework.test.context.event.RecordApplicationEvents;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -78,6 +83,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -127,6 +133,9 @@ class RefreshBlocklistSourceFlowTest {
 
     @Autowired
     private ApplicationEvents events;
+
+    @Autowired
+    private BlocklistSourceRepository blocklistSourceRepository;
 
     @MockitoBean
     private UserService userService;
@@ -307,6 +316,37 @@ class RefreshBlocklistSourceFlowTest {
 
         assertThat(jdbcTemplate.queryForObject("select count(*) from blocklist_source where id = ?", Long.class, SOURCE)).isZero();
         verify(blocklistStore).remove(SOURCE);
+    }
+
+    @Test
+    void anAdminEditSavedAcrossARefreshKeepsWhatTheRefreshRecorded() throws Exception {
+        final var refreshedAt = LocalDateTime.of(2026, 10, 27, 9, 0);
+        final var refreshCommits = new TransactionTemplate(transactionManager);
+        refreshCommits.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        when(blocklistStore.memoryBytes(SOURCE)).thenAnswer(invocation -> {
+            refreshCommits.executeWithoutResult(status -> blocklistSourceRepository.recordLoadedList(
+                    SOURCE, SourceKind.DOMAINS, refreshedAt, null, LIST_URL, 2, "v7", "etag-7", "Tue, 27 Oct 2026 09:00:00 GMT"));
+            return null;
+        });
+
+        mockMvc.perform(put("/api/v1/admin/blocklist-sources/{id}", SOURCE)
+                        .header(JwtFilter.AUTHORIZATION_HEADER, "Bearer admin-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"Renamed by admin\",\"url\":\"" + LIST_URL + "\",\"action\":\"BLOCK\",\"refreshIntervalHours\":12}"))
+                .andExpect(status().isOk());
+
+        assertThat(jdbcTemplate.queryForMap("""
+                select name, refresh_interval_hours, last_fetched_at, last_success_at, last_success_url, domain_count, list_version, etag, last_modified
+                from blocklist_source where id = ?""", SOURCE))
+                .containsEntry("NAME", "Renamed by admin")
+                .containsEntry("REFRESH_INTERVAL_HOURS", 12)
+                .containsEntry("LAST_FETCHED_AT", Timestamp.valueOf(refreshedAt))
+                .containsEntry("LAST_SUCCESS_AT", Timestamp.valueOf(refreshedAt))
+                .containsEntry("LAST_SUCCESS_URL", LIST_URL)
+                .containsEntry("DOMAIN_COUNT", 2L)
+                .containsEntry("LIST_VERSION", "v7")
+                .containsEntry("ETAG", "etag-7")
+                .containsEntry("LAST_MODIFIED", "Tue, 27 Oct 2026 09:00:00 GMT");
     }
 
     private static MockHttpServletRequestBuilder refresh() {
