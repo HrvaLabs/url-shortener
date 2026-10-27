@@ -1,7 +1,7 @@
 # URL-Shortener Agent Guide
 
 ## Build & Run
-- **Java 25**, **Spring Boot 4.1.1**, **Maven**. No Gradle artifacts.
+- **Java 25**, **Spring Boot 4.1.2**, **Maven**. No Gradle artifacts.
 - `.mvn/wrapper/` exists but `mvnw` is missing — use system `mvn`.
 - Entry point: `cc.hrva.urlshortener.UrlShortenerApplication`
 - Local dev:
@@ -249,7 +249,7 @@ MCP, OAuth 2.1, login-bridge and Connected-apps endpoints: see MCP connector.
 - **API docs**: admin endpoints hidden from OpenAPI/Swagger via `@Hidden` (whole `AdminController` + admin methods in shared controllers).
 
 ## MCP connector
-AI apps (Claude, Claude Code, the MCP Inspector) use hrva.cc over MCP. The app is its own OAuth 2.1 authorization server (Spring Authorization Server through `mcp-authorization-server` 0.1.14), protects `/mcp` as a resource server (`mcp-server-security` 0.1.14) and serves the tools from Spring AI 2.0.1's MCP server. Code: `cc.hrva.urlshortener.mcp` (`authorization/`, `bridge/`, `tools/`, `apps/`). MCP is sign-in only: the no-account server at `/mcp/anon` was removed in v2.11 and now answers 404.
+AI apps (Claude, Claude Code, the MCP Inspector) use hrva.cc over MCP. The app is its own OAuth 2.1 authorization server (Spring Authorization Server through `mcp-authorization-server` 0.1.14), protects `/mcp` as a resource server (`mcp-server-security` 0.1.14) and serves the tools from Spring AI 2.0.2's MCP server. Code: `cc.hrva.urlshortener.mcp` (`authorization/`, `bridge/`, `tools/`, `apps/`). MCP is sign-in only: the no-account server at `/mcp/anon` was removed in v2.11 and now answers 404.
 
 ### Endpoints
 | Method | Path | Auth | Notes |

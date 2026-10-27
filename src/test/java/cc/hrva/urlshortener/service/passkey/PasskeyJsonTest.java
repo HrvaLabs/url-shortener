@@ -62,12 +62,12 @@ class PasskeyJsonTest {
     }
 
     @Test
-    void dropsSmartCardBecauseSpringCannotReadIt() {
+    void keepsSmartCardNowThatSpringReadsIt() {
         final var registration = registration();
         response(registration).set("transports", JSON.readTree("[\"smart-card\",\"nfc\"]"));
 
         assertThat(passkeyJson.readRegistration(registration).getResponse().getTransports())
-                .containsExactly(AuthenticatorTransport.NFC);
+                .containsExactly(AuthenticatorTransport.SMART_CARD, AuthenticatorTransport.NFC);
     }
 
     @Test
