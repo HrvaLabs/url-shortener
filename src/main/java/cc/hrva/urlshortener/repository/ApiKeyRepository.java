@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.Optional;
 import cc.hrva.urlshortener.model.ApiKey;
 import cc.hrva.urlshortener.model.User;
+import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
@@ -14,6 +15,7 @@ import org.springframework.stereotype.Repository;
 @Repository
 public interface ApiKeyRepository extends JpaRepository<ApiKey, Long> {
 
+    @EntityGraph(attributePaths = {"owner", "owner.authorities"}, type = EntityGraph.EntityGraphType.LOAD)
     Optional<ApiKey> findApiKeyByKey(String key);
     List<ApiKey> findByOwner(User owner);
     List<ApiKey> findByOwnerAndActiveTrue(User owner);
