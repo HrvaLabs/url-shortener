@@ -68,6 +68,7 @@ import org.springframework.context.annotation.Import;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -230,6 +231,29 @@ class ApiKeyUseOnCreateFlowTest {
     }
 
     @Test
+    void twoCreatesAtTheSameTimeForTheLastCallOfAKeyLetOnlyOneThrough() throws Exception {
+        key(2, 1, LocalDateTime.now().plusMonths(6));
+        final var bothChecking = new CyclicBarrier(2);
+        duringChecks = () -> {
+            try {
+                bothChecking.await(10, TimeUnit.SECONDS);
+            } catch (final Exception exception) {
+                throw new IllegalStateException(exception);
+            }
+        };
+
+        final var first = CompletableFuture.supplyAsync(() -> createdAnswer("https://example.com/last-call-first"));
+        final var second = CompletableFuture.supplyAsync(() -> createdAnswer("https://example.com/last-call-second"));
+
+        final var answers = List.of(first.get(30, TimeUnit.SECONDS), second.get(30, TimeUnit.SECONDS));
+        assertThat(answers).extracting(MockHttpServletResponse::getStatus).containsExactlyInAnyOrder(200, 400);
+        assertThat(answers).filteredOn(answer -> answer.getStatus() == 400).singleElement()
+                .satisfies(refused -> assertThat(refused.getContentAsString()).contains("API key is invalid"));
+        assertThat(keyRow()).containsEntry("API_CALLS_USED", 2L).containsEntry("ACTIVE", false);
+        assertThat(linksOfTheOwner()).isOne();
+    }
+
+    @Test
     void theKeyTurnsOffAtExactlyItsLimit() throws Exception {
         key(3, 1, LocalDateTime.now().plusMonths(6));
 
@@ -286,8 +310,12 @@ class ApiKeyUseOnCreateFlowTest {
     }
 
     private int createdStatus(final String longUrl) {
+        return createdAnswer(longUrl).getStatus();
+    }
+
+    private MockHttpServletResponse createdAnswer(final String longUrl) {
         try {
-            return create(longUrl).andReturn().getResponse().getStatus();
+            return create(longUrl).andReturn().getResponse();
         } catch (final Exception exception) {
             throw new IllegalStateException(exception);
         }
