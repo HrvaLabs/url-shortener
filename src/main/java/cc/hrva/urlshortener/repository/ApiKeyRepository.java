@@ -33,6 +33,10 @@ public interface ApiKeyRepository extends JpaRepository<ApiKey, Long> {
             where k.id = :id and k.active = true""")
     int recordUse(@Param("id") Long id, @Param("now") LocalDateTime now);
 
+    @Modifying(flushAutomatically = true)
+    @Query("update ApiKey k set k.active = false where k.owner.id = :ownerId and k.active = true")
+    int deactivateActiveByOwnerId(@Param("ownerId") Long ownerId);
+
     @Modifying
     @Query("delete from ApiKey k where k.id = :id and k.active = false")
     int deleteInactiveById(@Param("id") Long id);

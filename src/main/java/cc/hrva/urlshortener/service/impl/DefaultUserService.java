@@ -19,7 +19,6 @@ import cc.hrva.urlshortener.exception.NoAuthorizationException;
 import cc.hrva.urlshortener.exception.UserNotFoundException;
 import cc.hrva.urlshortener.listener.UserRegisteredEvent;
 import cc.hrva.urlshortener.mcp.apps.ConnectedAppsService;
-import cc.hrva.urlshortener.model.ApiKey;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.repository.ApiKeyRepository;
 import cc.hrva.urlshortener.repository.EmailLogRepository;
@@ -355,11 +354,9 @@ public class DefaultUserService implements UserService {
     }
 
     private void cascadeDeactivation(final User user) {
-        final var activeKeys = apiKeyRepository.findByOwnerAndActiveTrue(user);
-        activeKeys.forEach(ApiKey::deactivate);
-        apiKeyRepository.saveAll(activeKeys);
-        if (!activeKeys.isEmpty()) {
-            log.info("Revoked {} API keys for deactivated user id={}", activeKeys.size(), user.getId());
+        final var revokedKeys = apiKeyRepository.deactivateActiveByOwnerId(user.getId());
+        if (revokedKeys > 0) {
+            log.info("Revoked {} API keys for deactivated user id={}", revokedKeys, user.getId());
         }
 
         disconnectConnectedApps(user.getId(), user.getEmail());

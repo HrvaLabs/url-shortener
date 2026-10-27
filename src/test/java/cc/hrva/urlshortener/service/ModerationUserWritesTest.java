@@ -21,6 +21,7 @@ import cc.hrva.urlshortener.service.impl.DefaultSendingEmailService;
 import cc.hrva.urlshortener.service.impl.DefaultUserService;
 import java.sql.Timestamp;
 import java.time.LocalDateTime;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.AfterEach;
@@ -43,8 +44,11 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mockingDetails;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 
 @SpringBootTest(
         classes = ModerationUserWritesTest.TestApplication.class,
@@ -73,6 +77,9 @@ class ModerationUserWritesTest {
 
     @MockitoSpyBean
     private UserRepository userRepository;
+
+    @MockitoSpyBean
+    private ApiKeyRepository apiKeyRepository;
 
     @MockitoBean
     private LinkCheckService linkCheckService;
@@ -145,6 +152,7 @@ class ModerationUserWritesTest {
 
     @AfterEach
     void removeTheMember() {
+        jdbcTemplate.update("delete from api_key where owner_id = ?", MEMBER);
         jdbcTemplate.update("delete from user_account_authorities where user_id = ?", MEMBER);
         jdbcTemplate.update("delete from user_account where id = ?", MEMBER);
     }
@@ -173,6 +181,21 @@ class ModerationUserWritesTest {
                 .containsEntry("ACTIVE", false)
                 .containsEntry("LAST_LOGIN", Timestamp.valueOf(CONCURRENT_LOGIN))
                 .containsEntry("PASSWORD", "changed-hash");
+    }
+
+    @Test
+    void blockingAUserTurnsItsActiveKeysOffInOneUpdateAndKeepsTheirCounts() {
+        member(true);
+        jdbcTemplate.update("""
+                insert into api_key (id, "KEY", owner_id, api_calls_limit, api_calls_used, active)
+                values (731, 'members-first-key', ?, 100, 3, true), (732, 'members-second-key', ?, 100, 9, true)""", MEMBER, MEMBER);
+
+        moderationService.blockUser(MEMBER, ADMIN, "admin", null);
+
+        assertThat(jdbcTemplate.queryForList("select active, api_calls_used from api_key where owner_id = ? order by id", MEMBER))
+                .containsExactly(Map.of("ACTIVE", false, "API_CALLS_USED", 3L), Map.of("ACTIVE", false, "API_CALLS_USED", 9L));
+        verify(apiKeyRepository).deactivateActiveByOwnerId(MEMBER);
+        verify(apiKeyRepository, never()).saveAll(any());
     }
 
     private void member(final boolean active) {

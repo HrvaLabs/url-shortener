@@ -34,7 +34,6 @@ import cc.hrva.urlshortener.exception.UserNotFoundException;
 import cc.hrva.urlshortener.listener.SignUpEmailListener;
 import cc.hrva.urlshortener.listener.UserRegisteredEvent;
 import cc.hrva.urlshortener.mcp.apps.ConnectedAppsService;
-import cc.hrva.urlshortener.model.ApiKey;
 import cc.hrva.urlshortener.model.PasskeyCredential;
 import cc.hrva.urlshortener.model.ResetToken;
 import cc.hrva.urlshortener.model.User;
@@ -652,7 +651,6 @@ class DefaultUserServiceTest {
         when(userRepository.findByLastLoginIsLessThanEqualAndActiveTrue(any(java.time.LocalDateTime.class)))
                 .thenReturn(Collections.singletonList(user));
         when(userRepository.saveAll(any())).thenReturn(Collections.singletonList(user));
-        when(apiKeyRepository.findByOwnerAndActiveTrue(user)).thenReturn(Collections.emptyList());
 
         userService.deactivateUnusedUserAccounts();
 
@@ -663,32 +661,28 @@ class DefaultUserServiceTest {
     @Test
     void shouldRevokeApiKeysWhenDeactivatingUnusedAccount() {
         final var user = User.builder().id(1L).active(true).build();
-        final var key = ApiKey.builder().id(5L).active(true).owner(user).build();
         when(appProperties.getDeactivateUserAccountAfterDays()).thenReturn(30L);
         when(userRepository.findByLastLoginIsLessThanEqualAndActiveTrue(any(java.time.LocalDateTime.class)))
                 .thenReturn(Collections.singletonList(user));
         when(userRepository.saveAll(any())).thenReturn(Collections.singletonList(user));
-        when(apiKeyRepository.findByOwnerAndActiveTrue(user)).thenReturn(Collections.singletonList(key));
 
         userService.deactivateUnusedUserAccounts();
 
-        assertThat(key.isActive()).isFalse();
-        verify(apiKeyRepository).saveAll(Collections.singletonList(key));
+        verify(apiKeyRepository).deactivateActiveByOwnerId(1L);
+        verify(apiKeyRepository, never()).saveAll(any());
     }
 
     @Test
     void deactivatingAUserTurnsOnlyItsActiveColumnOffRevokesItsKeysDisconnectsItsAppsAndTellsIt() {
         final var user = User.builder().id(1L).email("scammer@example.com").active(true).build();
-        final var key = ApiKey.builder().id(5L).active(true).owner(user).build();
         when(userRepository.deactivateById(1L)).thenReturn(1);
-        when(apiKeyRepository.findByOwnerAndActiveTrue(user)).thenReturn(Collections.singletonList(key));
 
         userService.deactivate(user);
 
         verify(userRepository).deactivateById(1L);
         verify(userRepository, never()).save(any());
-        assertThat(key.isActive()).isFalse();
-        verify(apiKeyRepository).saveAll(Collections.singletonList(key));
+        verify(apiKeyRepository).deactivateActiveByOwnerId(1L);
+        verify(apiKeyRepository, never()).saveAll(any());
         verify(connectedAppsService).disconnectAll("scammer@example.com");
         verify(sendingEmailService).sendEmailAccountDeactivated(user);
     }
@@ -836,7 +830,6 @@ class DefaultUserServiceTest {
         when(userRepository.findById(1L)).thenReturn(Optional.of(existingUser));
         when(userUpdateDtoToUserConverter.convert(updateDto)).thenReturn(deactivated);
         when(userRepository.save(existingUser)).thenReturn(existingUser);
-        when(apiKeyRepository.findByOwnerAndActiveTrue(existingUser)).thenReturn(Collections.emptyList());
 
         userService.updateUser(updateDto);
 
@@ -1031,7 +1024,6 @@ class DefaultUserServiceTest {
         when(userRepository.findByLastLoginIsLessThanEqualAndActiveTrue(any(java.time.LocalDateTime.class)))
                 .thenReturn(Collections.singletonList(user));
         when(userRepository.saveAll(any())).thenReturn(Collections.singletonList(user));
-        when(apiKeyRepository.findByOwnerAndActiveTrue(user)).thenReturn(Collections.emptyList());
 
         userService.deactivateUnusedUserAccounts();
 
@@ -1046,7 +1038,6 @@ class DefaultUserServiceTest {
         when(userUpdateDtoToUserConverter.convert(updateDto))
                 .thenReturn(User.builder().id(1L).email("test@example.com").active(false).build());
         when(userRepository.save(existingUser)).thenReturn(existingUser);
-        when(apiKeyRepository.findByOwnerAndActiveTrue(existingUser)).thenReturn(Collections.emptyList());
 
         userService.updateUser(updateDto);
 
