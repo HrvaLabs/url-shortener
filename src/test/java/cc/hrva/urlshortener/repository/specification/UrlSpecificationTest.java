@@ -5,6 +5,8 @@ import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import jakarta.persistence.EntityManager;
 import java.util.List;
+import java.util.Locale;
+import java.util.Set;
 import java.util.function.Function;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -64,6 +66,20 @@ class UrlSpecificationTest {
 
     private List<String> shortUrls(final Specification<Url> spec) {
         return urlRepository.findAll(spec, Sort.by("shortUrl")).stream().map(Url::getShortUrl).toList();
+    }
+
+    @Test
+    void aTagFilterInCapitalsMatchesUnderATurkishServerLocale() {
+        entityManager.persist(Url.builder().shortUrl("trip").longUrl("https://example.com/trip").tags(Set.of("istanbul")).build());
+        entityManager.flush();
+        final var serverLocale = Locale.getDefault();
+        try {
+            Locale.setDefault(Locale.forLanguageTag("tr-TR"));
+
+            assertThat(shortUrls(UrlSpecification.hasTag(" ISTANBUL "))).containsExactly("trip");
+        } finally {
+            Locale.setDefault(serverLocale);
+        }
     }
 
     @Test

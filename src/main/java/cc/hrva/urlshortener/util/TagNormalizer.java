@@ -2,6 +2,7 @@ package cc.hrva.urlshortener.util;
 
 import java.util.Collection;
 import java.util.LinkedHashSet;
+import java.util.Locale;
 import java.util.Set;
 import java.util.stream.Collectors;
 import org.apache.commons.lang3.StringUtils;
@@ -19,7 +20,7 @@ public final class TagNormalizer {
         }
         return tags.stream()
                 .filter(StringUtils::isNotBlank)
-                .map(tag -> tag.trim().toLowerCase())
+                .map(tag -> tag.trim().toLowerCase(Locale.ROOT))
                 .map(tag -> tag.length() > MAX_TAG_LENGTH ? tag.substring(0, MAX_TAG_LENGTH) : tag)
                 .distinct()
                 .limit(MAX_TAGS)

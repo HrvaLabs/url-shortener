@@ -2414,6 +2414,21 @@ class UrlServiceTest {
     }
 
     @Test
+    void aBotProbeInCapitalsIsRecognisedUnderATurkishServerLocale() {
+        final var serverLocale = java.util.Locale.getDefault();
+        try {
+            java.util.Locale.setDefault(java.util.Locale.forLanguageTag("tr-TR"));
+
+            assertThatThrownBy(() -> urlServiceWithMeters().redirectResultUrl("FAVICON.ICO", CLICK))
+                    .isInstanceOf(cc.hrva.urlshortener.exception.UrlNotFoundException.class);
+        } finally {
+            java.util.Locale.setDefault(serverLocale);
+        }
+
+        org.mockito.Mockito.verifyNoInteractions(urlRepository);
+    }
+
+    @Test
     void botProbesStillGetANotFound() {
         assertThatThrownBy(() -> urlServiceWithMeters().redirectResultUrl("favicon.ico", CLICK))
                 .isInstanceOf(cc.hrva.urlshortener.exception.UrlNotFoundException.class);

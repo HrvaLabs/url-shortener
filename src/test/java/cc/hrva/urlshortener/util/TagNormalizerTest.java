@@ -1,6 +1,7 @@
 package cc.hrva.urlshortener.util;
 
 import java.util.List;
+import java.util.Locale;
 import java.util.stream.IntStream;
 import org.junit.jupiter.api.Test;
 
@@ -11,6 +12,18 @@ class TagNormalizerTest {
     @Test
     void shouldReturnEmptyForNull() {
         assertThat(TagNormalizer.normalize(null)).isEmpty();
+    }
+
+    @Test
+    void aCapitalIIsLowercasedTheSameWayUnderATurkishServerLocale() {
+        final var serverLocale = Locale.getDefault();
+        try {
+            Locale.setDefault(Locale.forLanguageTag("tr-TR"));
+
+            assertThat(TagNormalizer.normalize(List.of(" ISTANBUL "))).containsExactly("istanbul");
+        } finally {
+            Locale.setDefault(serverLocale);
+        }
     }
 
     @Test

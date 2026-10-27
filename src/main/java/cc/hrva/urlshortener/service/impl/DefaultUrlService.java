@@ -75,6 +75,7 @@ import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
@@ -611,7 +612,7 @@ public class DefaultUrlService implements UrlService {
 
     @Override
     public RedirectView redirectResultUrl(final String shortUrl, final ClickRequest click) {
-        if (shortUrl != null && BOT_PROBE_PATHS.contains(shortUrl.toLowerCase())) {
+        if (shortUrl != null && BOT_PROBE_PATHS.contains(shortUrl.toLowerCase(Locale.ROOT))) {
             throw new UrlNotFoundException("URL doesn't exist");
         }
 

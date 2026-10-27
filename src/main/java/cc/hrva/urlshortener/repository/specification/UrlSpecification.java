@@ -44,7 +44,7 @@ public final class UrlSpecification {
     public static Specification<Url> hasTag(final String tag) {
         return (root, query, cb) -> {
             query.distinct(true);
-            return cb.equal(root.join("tags"), tag.trim().toLowerCase());
+            return cb.equal(root.join("tags"), tag.trim().toLowerCase(Locale.ROOT));
         };
     }
 

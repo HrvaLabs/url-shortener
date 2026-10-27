@@ -3,6 +3,7 @@ package cc.hrva.urlshortener.security;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
+import java.util.Locale;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 
@@ -95,7 +96,7 @@ public final class Totp {
     }
 
     static byte[] base32Decode(final String encoded) {
-        final var clean = encoded.trim().replace("=", "").toUpperCase();
+        final var clean = encoded.trim().replace("=", "").toUpperCase(Locale.ROOT);
         final var output = new java.io.ByteArrayOutputStream();
         int buffer = 0;
         int bitsLeft = 0;

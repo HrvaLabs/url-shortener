@@ -1,6 +1,7 @@
 package cc.hrva.urlshortener.security;
 
 import java.nio.charset.StandardCharsets;
+import java.util.Locale;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -12,6 +13,20 @@ class TotpTest {
         final var original = "Hello, TOTP!".getBytes(StandardCharsets.UTF_8);
         final var encoded = Totp.base32Encode(original);
         assertThat(Totp.base32Decode(encoded)).isEqualTo(original);
+    }
+
+    @Test
+    void aSecretTypedInLowerCaseDecodesTheSameUnderATurkishServerLocale() {
+        final var secret = "JBSWY3DPEHPK3PXPIIZQ";
+        final var expected = Totp.base32Decode(secret);
+        final var serverLocale = Locale.getDefault();
+        try {
+            Locale.setDefault(Locale.forLanguageTag("tr-TR"));
+
+            assertThat(Totp.base32Decode(secret.toLowerCase(Locale.ROOT))).isEqualTo(expected);
+        } finally {
+            Locale.setDefault(serverLocale);
+        }
     }
 
     @Test
