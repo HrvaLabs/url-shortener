@@ -19,7 +19,6 @@ import cc.hrva.urlshortener.service.blocklist.BlocklistRefresher;
 import cc.hrva.urlshortener.service.blocklist.BlocklistStore;
 import cc.hrva.urlshortener.service.blocklist.LinkListParser;
 import cc.hrva.urlshortener.service.impl.DefaultBlocklistSourceService;
-import jakarta.persistence.EntityManager;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
@@ -127,9 +126,6 @@ class DefaultBlocklistSourceServiceTest {
     @Mock
     private ApplicationEventPublisher alertPublisher;
 
-    @Mock
-    private EntityManager entityManager;
-
     private final Map<Long, BlocklistSource> rows = new HashMap<>();
     private FakeFetcher fetcher;
     private BlocklistSourceService blocklistSourceService;
@@ -139,7 +135,7 @@ class DefaultBlocklistSourceServiceTest {
         fetcher = new FakeFetcher(downloads);
         final var memoryGuard = new BlocklistMemoryGuard(blocklistStore, blocklistSourceRepository, new AppProperties());
         final var refresher = new BlocklistRefresher(blocklistSourceRepository, blocklistStore, memoryGuard, fetcher,
-                new BlocklistParser(), new LinkListParser(), alertPublisher, entityManager);
+                new BlocklistParser(), new LinkListParser(), alertPublisher);
         blocklistSourceService = new DefaultBlocklistSourceService(blocklistSourceRepository, blocklistStore, refresher, eventPublisher);
         lenient().when(blocklistSourceRepository.save(any(BlocklistSource.class))).thenAnswer(invocation -> invocation.getArgument(0));
         lenient().when(blocklistSourceRepository.recordRefresh(anyLong(), any(), any(), any())).thenAnswer(invocation ->

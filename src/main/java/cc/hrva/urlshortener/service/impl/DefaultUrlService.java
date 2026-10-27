@@ -44,7 +44,6 @@ import cc.hrva.urlshortener.service.ratelimit.RateLimiterUnavailableException;
 import cc.hrva.urlshortener.util.RedirectLocations;
 import cc.hrva.urlshortener.validator.ApiKeyValidator;
 import cc.hrva.urlshortener.validator.UrlValidator;
-import jakarta.persistence.EntityManager;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -134,7 +133,6 @@ public class DefaultUrlService implements UrlService {
     private final ClickCheckService clickCheckService;
     private final RedirectChainService redirectChainService;
     private final TransactionOperations transactionOperations;
-    private final EntityManager entityManager;
     private final ReservedAliasService reservedAliasService;
     private final BurstAlertService burstAlertService;
 
@@ -486,7 +484,6 @@ public class DefaultUrlService implements UrlService {
     }
 
     private Url reloadUnlessBlockedSince(final Url loaded, final BlockState blockAtStart) {
-        entityManager.detach(loaded);
         final var current = urlRepository.findById(loaded.getId()).orElseThrow(() -> new UrlNotFoundException("Url doesn't exist"));
         final var blockNow = BlockState.of(current);
         if (blockNow.isBlocked() && !blockNow.equals(blockAtStart)) {

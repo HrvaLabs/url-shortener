@@ -59,7 +59,6 @@ import cc.hrva.urlshortener.service.ratelimit.RateLimiterUnavailableException;
 import cc.hrva.urlshortener.validator.ApiKeyValidator;
 import cc.hrva.urlshortener.validator.UrlValidator;
 import cc.hrva.urlshortener.validator.impl.DefaultUrlValidator;
-import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -171,9 +170,6 @@ class UrlServiceTest {
     private RedirectChainService redirectChainService;
 
     @Mock
-    private EntityManager entityManager;
-
-    @Mock
     private ReservedAliasService reservedAliasService;
 
     @Mock
@@ -206,7 +202,6 @@ class UrlServiceTest {
                 clickCheckService,
                 redirectChainService,
                 TransactionOperations.withoutTransaction(),
-                entityManager,
                 reservedAliasService,
                 burstAlertService
         );
@@ -371,10 +366,8 @@ class UrlServiceTest {
 
         urlService.updateUrl(update);
 
-        final var order = org.mockito.Mockito.inOrder(entityManager, urlRepository);
-        order.verify(urlRepository).findById(7L);
-        order.verify(entityManager).detach(loaded);
-        order.verify(urlRepository).findById(7L);
+        final var order = org.mockito.Mockito.inOrder(urlRepository);
+        order.verify(urlRepository, times(2)).findById(7L);
         order.verify(urlRepository).save(current);
         assertThat(current)
                 .extracting(Url::getVisitLimit, Url::getTags, Url::getPasswordHash, Url::isActive, Url::getVisits)
@@ -416,7 +409,6 @@ class UrlServiceTest {
                 .isInstanceOf(UrlValidationException.class)
                 .hasMessage(BLOCKED_WHILE_EDITING);
 
-        verify(entityManager).detach(loaded);
         verify(urlRepository, never()).save(any());
         assertThat(blockedMeanwhile)
                 .extracting(Url::isActive, Url::getBlockReason, Url::getThreatType)
@@ -2471,7 +2463,6 @@ class UrlServiceTest {
                 clickCheckService,
                 redirectChainService,
                 TransactionOperations.withoutTransaction(),
-                entityManager,
                 reservedAliasService,
                 burstAlertService
         );
@@ -2545,7 +2536,6 @@ class UrlServiceTest {
                 clickCheckService,
                 redirectChainService,
                 new TransactionTemplate(transactionManager),
-                entityManager,
                 reservedAliasService,
                 burstAlertService
         );
@@ -2578,7 +2568,6 @@ class UrlServiceTest {
                 clickCheckService,
                 redirectChainService,
                 TransactionOperations.withoutTransaction(),
-                entityManager,
                 reservedAliasService,
                 burstAlertService
         );
@@ -2607,7 +2596,6 @@ class UrlServiceTest {
                 clickCheckService,
                 redirectChainService,
                 TransactionOperations.withoutTransaction(),
-                entityManager,
                 reservedAliasService,
                 burstAlertService
         );

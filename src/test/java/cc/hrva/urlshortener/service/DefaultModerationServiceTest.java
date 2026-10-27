@@ -26,7 +26,6 @@ import cc.hrva.urlshortener.service.alert.AdminAlertEvent;
 import cc.hrva.urlshortener.service.alert.AlertedLink;
 import cc.hrva.urlshortener.service.blocklist.BlocklistConfigurationChangedEvent;
 import cc.hrva.urlshortener.service.impl.DefaultModerationService;
-import jakarta.persistence.EntityManager;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -125,9 +124,6 @@ class DefaultModerationServiceTest {
     private Cache cache;
 
     @Mock
-    private EntityManager entityManager;
-
-    @Mock
     private ApplicationEventPublisher eventPublisher;
 
     @Mock
@@ -194,15 +190,9 @@ class DefaultModerationServiceTest {
             }
             return null;
         }).when(cache).evict(any());
-        lenient().doAnswer(invocation -> {
-            if (inTransaction) {
-                outOfPlace.add("link " + invocation.<Url>getArgument(0).getId() + " detached before its transaction committed");
-            }
-            return null;
-        }).when(entityManager).detach(any());
         moderationService = new DefaultModerationService(urlRepository, userRepository, domainRuleRepository, linkCheckService,
                 reviewQueueService, userService, sendingEmailService, auditLogService, cacheManager, eventPublisher, recordingTransactions(),
-                entityManager, scammerSignalService, taskScheduler);
+                scammerSignalService, taskScheduler);
     }
 
     @Test
@@ -249,27 +239,6 @@ class DefaultModerationServiceTest {
 
         assertThat(savedPerTransaction).filteredOn(saved -> !saved.isEmpty())
                 .containsExactly(List.of(10L), List.of(11L), List.of(12L));
-        assertThat(outOfPlace).isEmpty();
-    }
-
-    @Test
-    void eachChangedLinkLeavesThePersistenceContextOnceItsTransactionCommits() {
-        final var first = link(10L, "https://jofogas.cards/a", null);
-        final var second = link(11L, "https://jofogas.cards/b", null);
-        final var single = link(12L, "https://example.org/", null);
-        final var user = user(5L, "alice@example.com");
-        user.setActive(false);
-        when(userRepository.findById(5L)).thenReturn(Optional.of(user));
-        final var restored = blocked(13L, "https://a.example/", BlockReason.USER_BLOCKED, user);
-
-        moderationService.blockDomain("jofogas.cards", null, ADMIN, "admin", null);
-        moderationService.blockLink(12L, BlockReason.ADMIN, null, ADMIN, "admin");
-        moderationService.reactivateUser(5L, ADMIN, "admin");
-
-        verify(entityManager).detach(first);
-        verify(entityManager).detach(second);
-        verify(entityManager).detach(single);
-        verify(entityManager).detach(restored);
         assertThat(outOfPlace).isEmpty();
     }
 

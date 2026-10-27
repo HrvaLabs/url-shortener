@@ -36,7 +36,6 @@ import cc.hrva.urlshortener.service.alert.AdminAlertEvent;
 import cc.hrva.urlshortener.service.alert.AlertedLink;
 import cc.hrva.urlshortener.service.blocklist.BlocklistConfigurationChangedEvent;
 import cc.hrva.urlshortener.util.DomainNames;
-import jakarta.persistence.EntityManager;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -115,7 +114,6 @@ public class DefaultModerationService implements ModerationService {
     private final CacheManager cacheManager;
     private final ApplicationEventPublisher eventPublisher;
     private final TransactionOperations transactionOperations;
-    private final EntityManager entityManager;
     private final ScammerSignalService scammerSignalService;
     private final TaskScheduler taskScheduler;
 
@@ -452,7 +450,6 @@ public class DefaultModerationService implements ModerationService {
                 .orElse(null)));
         blocked.ifPresent(url -> {
             log.info("Link blocked urlId={} reason={}", url.getId(), reason);
-            entityManager.detach(url);
             evictNowAndAgainLater(url.getShortUrl());
         });
         return blocked;
@@ -472,7 +469,6 @@ public class DefaultModerationService implements ModerationService {
                 .orElse(null)));
         restored.ifPresent(url -> {
             log.info("Link reactivated urlId={}", url.getId());
-            entityManager.detach(url);
             evictNowAndAgainLater(url.getShortUrl());
         });
         return restored.isPresent();

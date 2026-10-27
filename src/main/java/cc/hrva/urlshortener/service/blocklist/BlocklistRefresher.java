@@ -8,7 +8,6 @@ import cc.hrva.urlshortener.model.BlocklistSource;
 import cc.hrva.urlshortener.model.enums.SourceKind;
 import cc.hrva.urlshortener.repository.BlocklistSourceRepository;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent;
-import jakarta.persistence.EntityManager;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -54,7 +53,6 @@ public class BlocklistRefresher {
     private final BlocklistParser blocklistParser;
     private final LinkListParser linkListParser;
     private final ApplicationEventPublisher eventPublisher;
-    private final EntityManager entityManager;
     private final Set<Long> refreshing = ConcurrentHashMap.newKeySet();
 
     public BlocklistSource refresh(final BlocklistSource source, final RefreshTrigger trigger) {
@@ -65,7 +63,6 @@ public class BlocklistRefresher {
         try {
             final var kind = source.getKind();
             final var download = download(source, trigger);
-            entityManager.detach(source);
             final var current = blocklistSourceRepository.findById(source.getId());
             if (current.isEmpty() || !current.get().isEnabled() || current.get().getKind() != kind) {
                 log.info("Blocklist source {} was disabled, deleted or changed kind while it downloaded, discarding the download",
