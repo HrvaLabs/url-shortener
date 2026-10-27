@@ -15,15 +15,14 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
-import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.function.Predicate;
-import java.util.stream.Collectors;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -39,6 +38,9 @@ class PublicHttpFetcherTest {
 
     private final List<String> requestedPaths = new CopyOnWriteArrayList<>();
     private final PublicHttpFetcher permissiveFetcher = new PublicHttpFetcher(url -> true);
+
+    @TempDir
+    private Path downloads;
     private ExecutorService executor;
     private HttpServer server;
     private String baseUrl;
@@ -242,12 +244,12 @@ class PublicHttpFetcherTest {
                 send(exchange, 200, "0123456789A");
             }
         });
-        final var tempFilesBefore = fetchTempFiles();
+        final var fetcher = new PublicHttpFetcher(url -> true, downloads);
 
-        assertThatThrownBy(() -> permissiveFetcher.fetch(baseUrl + "/list", 10, null, null, TIMEOUT))
+        assertThatThrownBy(() -> fetcher.fetch(baseUrl + "/list", 10, null, null, TIMEOUT))
                 .isInstanceOf(UrlValidationException.class)
                 .hasMessage("larger than 10 bytes");
-        assertThat(fetchTempFiles()).isSubsetOf(tempFilesBefore);
+        assertThat(downloads).isEmptyDirectory();
     }
 
     @Test
@@ -348,16 +350,27 @@ class PublicHttpFetcherTest {
             sleep(Duration.ofSeconds(5));
             exchange.close();
         });
-        final var tempFilesBefore = fetchTempFiles();
+        final var fetcher = new PublicHttpFetcher(url -> true, downloads);
         final var startedAt = System.nanoTime();
 
-        assertThatThrownBy(() -> permissiveFetcher.fetch(baseUrl + "/list", 100, null, null, Duration.ofSeconds(1)))
+        assertThatThrownBy(() -> fetcher.fetch(baseUrl + "/list", 100, null, null, Duration.ofSeconds(1)))
                 .isInstanceOf(UrlValidationException.class)
                 .hasMessage("timed out")
                 .cause()
                 .isNotInstanceOf(HttpTimeoutException.class);
         assertThat(Duration.ofNanos(System.nanoTime() - startedAt)).isLessThan(Duration.ofSeconds(3));
-        assertThat(fetchTempFiles()).isSubsetOf(tempFilesBefore);
+        assertThat(downloads).isEmptyDirectory();
+    }
+
+    @Test
+    void aDownloadIsWrittenToTheDirectoryTheFetcherWasGiven() throws IOException {
+        respond("/list", exchange -> send(exchange, 200, "example.com\n"));
+
+        final var fetched = new PublicHttpFetcher(url -> true, downloads).fetch(baseUrl + "/list", 100, null, null, TIMEOUT);
+
+        assertThat(fetched.body().getParent()).isEqualTo(downloads);
+        assertThat(fetched.body().getFileName().toString()).startsWith("hrva-fetch-");
+        assertThat(Files.readString(fetched.body())).isEqualTo("example.com\n");
     }
 
     @Test
@@ -735,13 +748,6 @@ class PublicHttpFetcherTest {
             Thread.sleep(duration);
         } catch (final InterruptedException exception) {
             Thread.currentThread().interrupt();
-        }
-    }
-
-    private static Set<Path> fetchTempFiles() throws IOException {
-        try (final var files = Files.list(Path.of(System.getProperty("java.io.tmpdir")))) {
-            return files.filter(file -> file.getFileName().toString().startsWith("hrva-fetch-"))
-                    .collect(Collectors.toSet());
         }
     }
 

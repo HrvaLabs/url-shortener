@@ -48,9 +48,15 @@ public class PublicHttpFetcher {
             .followRedirects(HttpClient.Redirect.NEVER)
             .build();
     private final Predicate<String> targetPolicy;
+    private final Path downloadDirectory;
 
     public PublicHttpFetcher(final Predicate<String> targetPolicy) {
+        this(targetPolicy, Path.of(System.getProperty("java.io.tmpdir")));
+    }
+
+    public PublicHttpFetcher(final Predicate<String> targetPolicy, final Path downloadDirectory) {
         this.targetPolicy = targetPolicy;
+        this.downloadDirectory = downloadDirectory;
     }
 
     public static Predicate<String> httpsPublicOnly() {
@@ -203,7 +209,7 @@ public class PublicHttpFetcher {
         }
     }
 
-    private static FetchResult result(final HttpResponse<InputStream> response, final long maxBytes, final long deadline) {
+    private FetchResult result(final HttpResponse<InputStream> response, final long maxBytes, final long deadline) {
         final var headers = response.headers();
         final var etag = headers.firstValue(HttpHeaders.ETAG).orElse(null);
         final var lastModified = headers.firstValue(HttpHeaders.LAST_MODIFIED).orElse(null);
@@ -226,7 +232,7 @@ public class PublicHttpFetcher {
         }
     }
 
-    private static Path download(final InputStream body, final long maxBytes, final long deadline) {
+    private Path download(final InputStream body, final long maxBytes, final long deadline) {
         final var file = createTempFile();
         final var timedOut = new AtomicBoolean();
         final var watchdog = CompletableFuture.runAsync(() -> abort(body, timedOut),
@@ -258,9 +264,9 @@ public class PublicHttpFetcher {
         IOUtils.closeQuietly(body);
     }
 
-    private static Path createTempFile() {
+    private Path createTempFile() {
         try {
-            return Files.createTempFile(TEMP_FILE_PREFIX, ".tmp");
+            return Files.createTempFile(downloadDirectory, TEMP_FILE_PREFIX, ".tmp");
         } catch (final IOException exception) {
             throw new UrlValidationException("could not store the download", exception);
         }
