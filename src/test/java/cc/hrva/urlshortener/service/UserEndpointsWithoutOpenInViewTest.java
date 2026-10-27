@@ -3,9 +3,12 @@ package cc.hrva.urlshortener.service;
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.converter.UserToUserDtoConverter;
 import cc.hrva.urlshortener.converter.UserUpdateDtoToUserConverter;
+import cc.hrva.urlshortener.dto.PasswordResetDto;
+import cc.hrva.urlshortener.dto.UpdatePasswordDto;
 import cc.hrva.urlshortener.dto.UserSearchDto;
 import cc.hrva.urlshortener.dto.UserUpdateDto;
 import cc.hrva.urlshortener.mcp.apps.ConnectedAppsService;
+import cc.hrva.urlshortener.model.ResetToken;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.repository.ApiKeyRepository;
 import cc.hrva.urlshortener.repository.EmailLogRepository;
@@ -19,6 +22,7 @@ import cc.hrva.urlshortener.security.Reauthentication;
 import cc.hrva.urlshortener.service.bio.BioAccountData;
 import cc.hrva.urlshortener.service.impl.DefaultSendingEmailService;
 import cc.hrva.urlshortener.service.impl.DefaultUserService;
+import java.util.List;
 import java.util.Set;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -34,24 +38,28 @@ import org.springframework.context.annotation.Import;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import tools.jackson.databind.json.JsonMapper;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
 
 @SpringBootTest(
-        classes = AdminUserEndpointsWithoutOpenInViewTest.TestApplication.class,
+        classes = UserEndpointsWithoutOpenInViewTest.TestApplication.class,
         webEnvironment = SpringBootTest.WebEnvironment.NONE,
         properties = {
                 "spring.liquibase.enabled=true",
                 "spring.jpa.open-in-view=false",
-                "spring.datasource.url=jdbc:h2:mem:admin-users-without-open-in-view;DB_CLOSE_DELAY=-1;NON_KEYWORDS=KEY,VALUE",
+                "spring.datasource.url=jdbc:h2:mem:user-endpoints-without-open-in-view;DB_CLOSE_DELAY=-1;NON_KEYWORDS=KEY,VALUE",
                 "spring.security.oauth2.client.registration.google.client-id=test-google-client",
                 "spring.security.oauth2.client.registration.google.client-secret=test-google-secret"
         })
-class AdminUserEndpointsWithoutOpenInViewTest {
+class UserEndpointsWithoutOpenInViewTest {
 
     private static final long MEMBER = 700L;
     private static final String MEMBER_EMAIL = "member@example.com";
@@ -121,6 +129,7 @@ class AdminUserEndpointsWithoutOpenInViewTest {
 
     @AfterEach
     void removeTheMember() {
+        SecurityContextHolder.clearContext();
         jdbcTemplate.update("delete from user_account_authorities where user_id = ?", MEMBER);
         jdbcTemplate.update("delete from user_account where id = ?", MEMBER);
     }
@@ -149,6 +158,32 @@ class AdminUserEndpointsWithoutOpenInViewTest {
         assertThat(json.get("apiKeySlots").asLong()).isEqualTo(7L);
         assertThat(json.get("authorities").get(0).get("name").asString()).isEqualTo("ROLE_USER");
         assertThat(json.has("possibleScammer")).isFalse();
+    }
+
+    @Test
+    void aChangedPasswordAnswerIsWrittenAfterItsTransactionWithTheRoles() {
+        SecurityContextHolder.getContext().setAuthentication(UsernamePasswordAuthenticationToken.authenticated(MEMBER_EMAIL, null, List.of()));
+        when(passwordEncoder.encode(anyString())).thenReturn("new-hash");
+
+        final var answer = userService.updatePassword(new UpdatePasswordDto("old-password", "new-password"));
+
+        final var json = JSON.readTree(JSON.writeValueAsString(answer));
+        assertThat(json.get("email").asString()).isEqualTo(MEMBER_EMAIL);
+        assertThat(json.get("authorities").get(0).get("name").asString()).isEqualTo("ROLE_USER");
+        assertThat(json.has("password")).isFalse();
+    }
+
+    @Test
+    void aResetPasswordAnswerIsWrittenAfterItsTransactionWithTheRoles() {
+        when(passwordEncoder.encode(anyString())).thenReturn("new-hash");
+        when(resetTokenService.getResetTokenFromUserAndToken(any(), anyString())).thenReturn(ResetToken.builder().token("reset-token").active(true).build());
+
+        final var answer = userService.resetPassword(new PasswordResetDto("reset-token", MEMBER_EMAIL, "new-password"));
+
+        final var json = JSON.readTree(JSON.writeValueAsString(answer));
+        assertThat(json.get("email").asString()).isEqualTo(MEMBER_EMAIL);
+        assertThat(json.get("authorities").get(0).get("name").asString()).isEqualTo("ROLE_USER");
+        assertThat(json.has("password")).isFalse();
     }
 
     @SpringBootConfiguration

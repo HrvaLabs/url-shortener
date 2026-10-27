@@ -405,6 +405,39 @@ class PasskeySecondStepFlowsTest {
     }
 
     @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    void aCodeSecondStepAnswerIsWrittenAfterItsTransactionWithTheRoles() {
+        final var user = flows.signedIn(flows.withTheUserRole(flows.localUser("code-answer@example.com")));
+        try {
+            final var secret = twoFactorService.setup().secret();
+            final var recoveryCodes = twoFactorService.enable(Totp.currentCode(secret)).recoveryCodes();
+            flows.signedInAgain(user);
+
+            final var response = secondStepService.completeWithCode(code(pendingTokenOf(user, false), recoveryCodes.getFirst()), request());
+
+            assertThat(PasskeyFlowsSupport.rolesWrittenIn(response)).containsExactly("ROLE_USER");
+        } finally {
+            flows.remove(user);
+        }
+    }
+
+    @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    void aPasskeySecondStepAnswerIsWrittenAfterItsTransactionWithTheRoles() {
+        final var user = flows.signedIn(flows.withTheUserRole(flows.localUser("passkey-second-step-answer@example.com")));
+        try {
+            final var authenticator = TestAuthenticator.securityKey();
+            flows.addPasskey(authenticator, "YubiKey");
+
+            final var response = completeWith(authenticator, pendingTokenOf(user, false));
+
+            assertThat(PasskeyFlowsSupport.rolesWrittenIn(response)).containsExactly("ROLE_USER");
+        } finally {
+            flows.remove(user);
+        }
+    }
+
+    @Test
     void aPasskeySecondStepCountsAsAPasskeySignIn() {
         final var user = flows.signedIn(flows.localUser("counted-second-step@example.com"));
         final var authenticator = TestAuthenticator.securityKey();

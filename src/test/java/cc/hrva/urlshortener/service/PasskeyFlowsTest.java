@@ -493,6 +493,22 @@ class PasskeyFlowsTest {
 
     @Test
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    void aPasskeySignInAnswerIsWrittenAfterItsTransactionWithTheRoles() {
+        final var user = flows.signedIn(flows.withTheUserRole(flows.localUser("passkey-answer@example.com")));
+        try {
+            final var authenticator = TestAuthenticator.deviceBoundPasskey();
+            flows.addPasskey(authenticator, "Pixel");
+
+            final var response = signInWith(authenticator);
+
+            assertThat(PasskeyFlowsSupport.rolesWrittenIn(response)).containsExactly("ROLE_USER");
+        } finally {
+            flows.remove(user);
+        }
+    }
+
+    @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     void aDiscoverablePasskeySignsInWithoutAPassword() {
         final var user = flows.signedIn(flows.localUser("passwordless@example.com"));
         try {

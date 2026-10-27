@@ -1,7 +1,9 @@
 package cc.hrva.urlshortener.converter;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.List;
 import cc.hrva.urlshortener.dto.UserDto;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.codebook.Authorities;
@@ -42,6 +44,17 @@ class UserToUserDtoConverterTest {
     }
 
     @Test
+    void theRolesAreACopyReadWhileConverting() {
+        final var authorities = new ArrayList<>(List.of(Authorities.builder().id(1L).name("ROLE_USER").build()));
+        final var user = User.builder().authorities(authorities).build();
+
+        final var userDto = converter.convert(user);
+        authorities.clear();
+
+        assertThat(userDto.getAuthorities()).extracting(Authorities::getName).containsExactly("ROLE_USER");
+    }
+
+    @Test
     void shouldConvertWithNullValues() {
         final var user = User.builder().build();
 
@@ -49,5 +62,6 @@ class UserToUserDtoConverterTest {
 
         assertThat(userDto.getId()).isNull();
         assertThat(userDto.getEmail()).isNull();
+        assertThat(userDto.getAuthorities()).isNull();
     }
 }

@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.service;
 
+import cc.hrva.urlshortener.dto.JWTTokenDto;
 import cc.hrva.urlshortener.dto.PasskeyOptionsResponse;
 import cc.hrva.urlshortener.dto.PasskeyRegistrationDto;
 import cc.hrva.urlshortener.dto.PasskeyRegistrationOptionsDto;
@@ -14,11 +15,14 @@ import com.nimbusds.jose.jwk.RSAKey;
 import com.nimbusds.jose.jwk.gen.RSAKeyGenerator;
 import jakarta.persistence.EntityManager;
 import java.time.LocalDate;
+import java.util.List;
 import java.util.function.Consumer;
+import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
 
 import static org.mockito.Mockito.when;
 
@@ -26,6 +30,8 @@ final class PasskeyFlowsSupport {
 
     static final String PASSWORD = "user123";
     static final String CLIENT_IP = "203.0.113.9";
+    private static final long ROLE_USER = 1L;
+    private static final JsonMapper JSON = JsonMapper.builder().build();
 
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
@@ -61,6 +67,12 @@ final class PasskeyFlowsSupport {
                 .active(true)
                 .emailVerified(true)
                 .build());
+    }
+
+    User withTheUserRole(final User user) {
+        jdbcTemplate.update("insert into user_account_authorities (user_id, authorities_id) values (?, ?)", user.getId(), ROLE_USER);
+
+        return user;
     }
 
     User signedIn(final User user) {
@@ -104,6 +116,7 @@ final class PasskeyFlowsSupport {
     }
 
     void remove(final User user) {
+        jdbcTemplate.update("delete from user_account_authorities where user_id = ?", user.getId());
         jdbcTemplate.update("delete from two_factor_recovery_code where user_id = ?", user.getId());
         passkeyCredentialRepository.deleteAll(passkeyCredentialRepository.findByUserOrderByCreatedAtDesc(user));
         userRepository.deleteById(user.getId());
@@ -115,6 +128,12 @@ final class PasskeyFlowsSupport {
                 .credential(credential)
                 .label(label)
                 .build();
+    }
+
+    static List<String> rolesWrittenIn(final ResponseEntity<JWTTokenDto> response) {
+        return JSON.readTree(JSON.writeValueAsString(response.getBody())).path("user").path("authorities").values().stream()
+                .map(role -> role.path("name").asString())
+                .toList();
     }
 
     static MockHttpServletRequest request() {
