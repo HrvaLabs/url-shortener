@@ -16,6 +16,7 @@
 # the admin search, hide and revoke, and the export.
 # Section 18 deletes API keys on Postgres: an active key refused, one revoked key, the bulk delete of inactive keys for
 # the owner and (leaving the owner's keys alone) for an admin, and an admin deleting someone else's key.
+# Section 19 reads the admin user list and edits a user: the JSON fields of a row and its roles, and the edit's answer.
 #
 #   scripts/mcp-e2e.sh                         builds the jar, then runs every step
 #   MCP_E2E_SKIP_BUILD=1 scripts/mcp-e2e.sh    reuses target/url-shortener-*.jar
@@ -986,5 +987,24 @@ http -X DELETE "$BASE/api/v1/api-keys/inactive" -H "Authorization: Bearer $KEY_J
 expect_eq "$HTTP_STATUS $(jq -c . <<<"$HTTP_BODY")" '200 {"deleted":1}' "the owner's bulk delete removes the last inactive key and answers the count"
 expect_eq "$(psql_value "select count(*) from api_key k join user_account u on u.id = k.owner_id where u.email = '$USER_EMAIL' and not k.active;")" 0 \
     "$USER_EMAIL has no inactive key left"
+
+section "19. Admin user list and edit"
+http -G "$BASE/api/v1/users" -H "Authorization: Bearer $ADMIN_JWT" --data-urlencode "search=$USER_EMAIL"
+expect_eq "$HTTP_STATUS" 200 "GET /api/v1/users as admin@localhost"
+expect_eq "$(jq -c '.content[0] | keys' <<<"$HTTP_BODY")" \
+    '["active","apiKeySlots","authProvider","authorities","createDate","email","emailVerified","id","lastLogin","possibleScammer","twoFactorEnabled","twoStepEnabled"]' \
+    "a user row has the fields the User entity had"
+expect_eq "$(jq -c '.content[0].authorities | map(keys) | unique' <<<"$HTTP_BODY")" '[["active","authority","id","name"]]' "each role has id, name, active and authority"
+expect_contains "$(jq -c '[.content[0].authorities[].name]' <<<"$HTTP_BODY")" '"ROLE_USER"' "the roles are read inside the transaction"
+LISTED_ID=$(jq -r .content[0].id <<<"$HTTP_BODY")
+LISTED_SLOTS=$(jq -r .content[0].apiKeySlots <<<"$HTTP_BODY")
+http -X PUT "$BASE/api/v1/users/$LISTED_ID" -H "Authorization: Bearer $ADMIN_JWT" -H 'Content-Type: application/json' \
+    -d "{\"id\":$LISTED_ID,\"apiKeySlots\":$((LISTED_SLOTS + 1))}"
+expect_eq "$HTTP_STATUS $(jq -r '.apiKeySlots, has("possibleScammer"), (.authorities | length > 0)' <<<"$HTTP_BODY" | paste -sd' ' -)" \
+    "200 $((LISTED_SLOTS + 1)) false true" "PUT /api/v1/users/{id} answers the edited user with its roles and no possibleScammer"
+expect_eq "$(psql_value "select api_key_slots from user_account where id = $LISTED_ID;")" "$((LISTED_SLOTS + 1))" "the edit is saved"
+http -X PUT "$BASE/api/v1/users/$LISTED_ID" -H "Authorization: Bearer $ADMIN_JWT" -H 'Content-Type: application/json' \
+    -d "{\"id\":$LISTED_ID,\"apiKeySlots\":$LISTED_SLOTS}"
+expect_eq "$HTTP_STATUS" 200 "the slots are put back"
 
 section "Done: every step passed"
