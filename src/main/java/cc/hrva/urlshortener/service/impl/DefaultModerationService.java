@@ -199,9 +199,7 @@ public class DefaultModerationService implements ModerationService {
     @Override
     public int reactivateUser(final long userId, final String performedBy, final String via) {
         final var user = findUser(userId);
-        if (Boolean.FALSE.equals(user.getActive())) {
-            user.setActive(true);
-            userService.persistUser(user);
+        if (userService.reactivate(userId)) {
             log.info("User reactivated id={}", userId);
         }
         final var restored = eachLink(urlRepository.findIdsByOwnerAndBlockReason(user, BlockReason.USER_BLOCKED), Long::longValue,
@@ -377,7 +375,6 @@ public class DefaultModerationService implements ModerationService {
         refuseOverTheCap(ids.size(), maxLinks);
         if (!Boolean.FALSE.equals(user.getActive())) {
             userService.deactivate(user);
-            entityManager.detach(user);
         }
         final var blocked = eachLink(ids, Long::longValue, id -> block(id, BlockReason.USER_BLOCKED, null, ReviewResolution.USER_BLOCKED, performedBy,
                 url -> url.isActive() && ownedBy(url, user)).isPresent());

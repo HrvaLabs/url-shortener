@@ -677,19 +677,40 @@ class DefaultUserServiceTest {
     }
 
     @Test
-    void deactivatingAUserSavesItInactiveRevokesItsKeysDisconnectsItsAppsAndTellsIt() {
+    void deactivatingAUserTurnsOnlyItsActiveColumnOffRevokesItsKeysDisconnectsItsAppsAndTellsIt() {
         final var user = User.builder().id(1L).email("scammer@example.com").active(true).build();
         final var key = ApiKey.builder().id(5L).active(true).owner(user).build();
+        when(userRepository.deactivateById(1L)).thenReturn(1);
         when(apiKeyRepository.findByOwnerAndActiveTrue(user)).thenReturn(Collections.singletonList(key));
 
         userService.deactivate(user);
 
-        assertThat(user.getActive()).isFalse();
-        verify(userRepository).save(user);
+        verify(userRepository).deactivateById(1L);
+        verify(userRepository, never()).save(any());
         assertThat(key.isActive()).isFalse();
         verify(apiKeyRepository).saveAll(Collections.singletonList(key));
         verify(connectedAppsService).disconnectAll("scammer@example.com");
         verify(sendingEmailService).sendEmailAccountDeactivated(user);
+    }
+
+    @Test
+    void deactivatingAUserThatIsAlreadyInactiveLeavesItsKeysAppsAndInboxAlone() {
+        final var user = User.builder().id(1L).email("scammer@example.com").active(true).build();
+        when(userRepository.deactivateById(1L)).thenReturn(0);
+
+        userService.deactivate(user);
+
+        verifyNoInteractions(apiKeyRepository, connectedAppsService, sendingEmailService);
+    }
+
+    @Test
+    void reactivatingAUserTurnsOnlyItsActiveColumnOnAndSaysWhetherItWasOff() {
+        when(userRepository.reactivateById(1L)).thenReturn(1);
+        when(userRepository.reactivateById(2L)).thenReturn(0);
+
+        assertThat(userService.reactivate(1L)).isTrue();
+        assertThat(userService.reactivate(2L)).isFalse();
+        verify(userRepository, never()).save(any());
     }
 
     @Test

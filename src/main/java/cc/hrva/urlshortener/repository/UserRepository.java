@@ -35,6 +35,15 @@ public interface UserRepository extends JpaRepository<User, Long>, JpaSpecificat
     @Transactional
     @Query("update User u set u.webauthnUserHandle = :handle where u.id = :id and u.webauthnUserHandle is null")
     int setWebauthnUserHandleIfMissing(@Param("id") Long id, @Param("handle") String handle);
+
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query("update User u set u.active = true where u.id = :id and u.active = false")
+    int reactivateById(@Param("id") Long id);
+
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query("update User u set u.active = false where u.id = :id and (u.active is null or u.active = true)")
+    int deactivateById(@Param("id") Long id);
+
     List<User> findByLastLoginIsLessThanEqualAndActiveTrue(LocalDateTime limitDate);
     long countByCreateDateAfter(LocalDateTime dateTime);
 

@@ -326,7 +326,17 @@ public class DefaultUserService implements UserService {
     @Override
     @Transactional
     public void deactivate(final User user) {
-        userRepository.save(deactivateUser(user));
+        if (userRepository.deactivateById(user.getId()) == 0) {
+            return;
+        }
+        log.info("Deactivated user with id {}", user.getId());
+        cascadeDeactivation(user);
+    }
+
+    @Override
+    @Transactional
+    public boolean reactivate(final long userId) {
+        return userRepository.reactivateById(userId) == 1;
     }
 
     @Override

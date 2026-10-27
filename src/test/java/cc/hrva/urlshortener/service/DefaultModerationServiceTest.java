@@ -833,18 +833,6 @@ class DefaultModerationServiceTest {
     }
 
     @Test
-    void blockingAUserDetachesTheAccountItDeactivated() {
-        final var scammer = user(5L, "scammer@example.com");
-        when(userRepository.findById(5L)).thenReturn(Optional.of(scammer));
-
-        moderationService.blockUser(5L, ADMIN, "admin", null);
-
-        final var order = inOrder(userService, entityManager);
-        order.verify(userService).deactivate(scammer);
-        order.verify(entityManager).detach(scammer);
-    }
-
-    @Test
     void blockingAUserWithThreeLinksSendsOnlyTheAccountDeactivatedEmail() {
         final var scammer = user(5L, "scammer@example.com");
         when(userRepository.findById(5L)).thenReturn(Optional.of(scammer));
@@ -927,7 +915,7 @@ class DefaultModerationServiceTest {
         moderationService.reactivateUser(5L, ADMIN, "admin");
 
         final var order = inOrder(userService, urlRepository, scammerSignalService);
-        order.verify(userService).persistUser(user);
+        order.verify(userService).reactivate(5L);
         order.verify(urlRepository).save(argThat(url -> url.getId() == 50L));
         order.verify(scammerSignalService).invalidate();
         assertThat(outOfPlace).isEmpty();
@@ -965,8 +953,7 @@ class DefaultModerationServiceTest {
         final var restored = moderationService.reactivateUser(5L, ADMIN, "admin");
 
         assertThat(restored).isEqualTo(2);
-        assertThat(user.getActive()).isTrue();
-        verify(userService).persistUser(user);
+        verify(userService).reactivate(5L);
         assertThat(List.of(first, second)).allSatisfy(url -> {
             assertThat(url.isActive()).isTrue();
             assertThat(url.getBlockReason()).isNull();
