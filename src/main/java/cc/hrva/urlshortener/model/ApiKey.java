@@ -10,7 +10,6 @@ import jakarta.persistence.ManyToOne;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.SequenceGenerator;
 import java.time.LocalDateTime;
-import java.util.Optional;
 import java.util.UUID;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -59,20 +58,6 @@ public class ApiKey {
         this.createDate = LocalDateTime.now();
         this.apiCallsUsed = 0L;
         this.active = true;
-    }
-
-    public ApiKey apiKeyUsed() {
-        this.apiCallsUsed++;
-        verifyApiKeyValidity();
-
-        return this;
-    }
-
-    private void verifyApiKeyValidity() {
-        if (this.apiCallsUsed >= Optional.ofNullable(this.apiCallsLimit).orElse(this.apiCallsUsed + 1) ||
-                Optional.ofNullable(this.expirationDate).orElse(LocalDateTime.now().plusDays(1)).isBefore(LocalDateTime.now())) {
-            this.active = false;
-        }
     }
 
     public ApiKey deactivate() {

@@ -245,7 +245,7 @@ public class DefaultUrlService implements UrlService {
         final var verdict = validateUrl(url);
 
         final var created = transactionOperations.execute(status -> {
-            apiKeyService.apiKeyUseAction(apiKey);
+            apiKeyService.recordUse(apiKey.getId());
 
             url.setCreatedVia(createdVia);
             applyPassword(url, createUrlDto.getPassword());

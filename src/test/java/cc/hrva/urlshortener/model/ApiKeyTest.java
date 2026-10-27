@@ -31,54 +31,6 @@ class ApiKeyTest {
     }
 
     @Test
-    void shouldIncrementApiCallsUsed() {
-        final var apiKey = ApiKey.builder().apiCallsUsed(5L).apiCallsLimit(10L).active(true).build();
-
-        apiKey.apiKeyUsed();
-
-        assertThat(apiKey.getApiCallsUsed()).isEqualTo(6L);
-    }
-
-    @Test
-    void shouldDeactivateWhenCallLimitReached() {
-        final var apiKey = ApiKey.builder().apiCallsUsed(9L).apiCallsLimit(10L).active(true).build();
-
-        apiKey.apiKeyUsed();
-
-        assertThat(apiKey.getApiCallsUsed()).isEqualTo(10L);
-        assertThat(apiKey.isActive()).isFalse();
-    }
-
-    @Test
-    void shouldDeactivateWhenExpirationDatePassed() {
-        final var apiKey = ApiKey.builder()
-                .apiCallsUsed(0L)
-                .apiCallsLimit(10L)
-                .expirationDate(LocalDateTime.now().minusDays(1))
-                .active(true)
-                .build();
-
-        apiKey.apiKeyUsed();
-
-        assertThat(apiKey.isActive()).isFalse();
-    }
-
-    @Test
-    void shouldRemainActiveWhenWithinLimits() {
-        final var apiKey = ApiKey.builder()
-                .apiCallsUsed(5L)
-                .apiCallsLimit(10L)
-                .expirationDate(LocalDateTime.now().plusDays(1))
-                .active(true)
-                .build();
-
-        apiKey.apiKeyUsed();
-
-        assertThat(apiKey.isActive()).isTrue();
-        assertThat(apiKey.getApiCallsUsed()).isEqualTo(6L);
-    }
-
-    @Test
     void shouldDeactivate() {
         final var apiKey = ApiKey.builder().active(true).build();
 

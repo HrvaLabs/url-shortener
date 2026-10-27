@@ -13,6 +13,7 @@ import cc.hrva.urlshortener.dto.ApiKeyResponse;
 import cc.hrva.urlshortener.dto.ApiKeyUpdateDto;
 import cc.hrva.urlshortener.exception.ApiKeyActiveException;
 import cc.hrva.urlshortener.exception.ApiKeyNotFoundException;
+import cc.hrva.urlshortener.exception.InvalidApiKeyException;
 import cc.hrva.urlshortener.exception.NoAuthorizationException;
 import cc.hrva.urlshortener.model.ApiKey;
 import cc.hrva.urlshortener.model.User;
@@ -26,9 +27,11 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.AssertionsForClassTypes.assertThatCode;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -194,12 +197,22 @@ class ApiKeyServiceTest {
     }
 
     @Test
-    void shouldApiKeyUseAction() {
-        final ApiKey apiKey = ApiKey.builder().apiCallsUsed(1L).build();
-        final ApiKey apiKeyResult = ApiKey.builder().apiCallsUsed(2L).build();
+    void aUseIsRecordedWithOneGuardedUpdateAndNeverASaveOfTheLoadedKey() {
+        when(apiKeyRepository.recordUse(eq(5L), any(LocalDateTime.class))).thenReturn(1);
 
-        when(apiKeyRepository.save(any(ApiKey.class))).thenReturn(apiKey);
-        assertThat(apiKeyService.apiKeyUseAction(apiKey)).usingRecursiveComparison().isEqualTo(apiKeyResult);
+        apiKeyService.recordUse(5L);
+
+        verify(apiKeyRepository).recordUse(eq(5L), any(LocalDateTime.class));
+        verify(apiKeyRepository, never()).save(any());
+    }
+
+    @Test
+    void aUseOfAKeyThatIsNoLongerActiveIsRefusedAsAnInvalidKey() {
+        when(apiKeyRepository.recordUse(eq(5L), any(LocalDateTime.class))).thenReturn(0);
+
+        assertThatThrownBy(() -> apiKeyService.recordUse(5L))
+                .isInstanceOf(InvalidApiKeyException.class)
+                .hasMessage("API key is invalid");
     }
 
     @Test

@@ -612,7 +612,7 @@ class UrlServiceTest {
                 .isInstanceOf(UrlValidationException.class)
                 .hasMessage(BLOCKLIST_REFUSAL);
 
-        verify(apiKeyService, never()).apiKeyUseAction(any());
+        verify(apiKeyService, never()).recordUse(any());
         verify(safeBrowsingService, never()).checkUrlsForThreats(anyString());
         verify(urlRepository, never()).save(any(Url.class));
     }
@@ -656,10 +656,10 @@ class UrlServiceTest {
         final var keyUsedInTransaction = new AtomicReference<Boolean>();
         final var createUrlDto = CreateUrlDto.builder().longUrl("https://example.com/menu").build();
         when(apiKeyService.fetchApiKeyByKey("apikey")).thenReturn(ApiKey.builder().owner(User.builder().id(1L).build()).build());
-        when(apiKeyService.apiKeyUseAction(any())).thenAnswer(invocation -> {
+        org.mockito.Mockito.doAnswer(invocation -> {
             keyUsedInTransaction.set(TransactionSynchronizationManager.isActualTransactionActive());
-            return invocation.getArgument(0);
-        });
+            return null;
+        }).when(apiKeyService).recordUse(any());
         when(appProperties.getShortUrlLength()).thenReturn(5L);
         recordTransactionDuringCheck("https://example.com/menu", checkedInTransaction);
         recordTransactionDuringSave(savedInTransaction);
@@ -1004,7 +1004,7 @@ class UrlServiceTest {
 
         verify(linkCheckService, never()).check(anyString());
         verify(safeBrowsingService, never()).checkUrlsForThreats(anyString());
-        verify(apiKeyService, never()).apiKeyUseAction(any());
+        verify(apiKeyService, never()).recordUse(any());
         verify(urlRepository, never()).save(any(Url.class));
     }
 
@@ -1035,7 +1035,7 @@ class UrlServiceTest {
 
         verify(linkCheckService, never()).check(anyString());
         verify(safeBrowsingService, never()).checkUrlsForThreats(anyString());
-        verify(apiKeyService, never()).apiKeyUseAction(any());
+        verify(apiKeyService, never()).recordUse(any());
         verify(urlRepository, never()).save(any(Url.class));
     }
 
@@ -1339,7 +1339,7 @@ class UrlServiceTest {
         final var url = Url.builder().shortUrl("").build();
         final var api = "apikey";
         final var owner = User.builder().id(1L).build();
-        final var apiKey = ApiKey.builder().owner(owner).build();
+        final var apiKey = ApiKey.builder().id(3L).owner(owner).build();
 
         when(urlRepository.save(url)).thenReturn(persisted(url));
         when(apiKeyService.fetchApiKeyByKey(api)).thenReturn(apiKey);
@@ -1350,7 +1350,9 @@ class UrlServiceTest {
         assertThat(result).isInstanceOf(UrlResponse.class);
 
         verify(apiKeyValidator).apiKeyExistsByKeyAndIsValid(api);
-        verify(apiKeyService).apiKeyUseAction(any(ApiKey.class));
+        final var order = org.mockito.Mockito.inOrder(apiKeyService, urlRepository);
+        order.verify(apiKeyService).recordUse(3L);
+        order.verify(urlRepository).save(url);
     }
 
     @Test
@@ -1551,7 +1553,7 @@ class UrlServiceTest {
         assertThat(result).isInstanceOf(UrlResponse.class);
 
         verify(apiKeyValidator, org.mockito.Mockito.never()).apiKeyExistsByKeyAndIsValid(any());
-        verify(apiKeyService, org.mockito.Mockito.never()).apiKeyUseAction(any(ApiKey.class));
+        verify(apiKeyService, org.mockito.Mockito.never()).recordUse(any());
     }
 
     @Test
@@ -1599,7 +1601,7 @@ class UrlServiceTest {
         final var limiter = new CountingRateLimiter();
         final var service = urlServiceLimitedBy(limiter);
         final var owner = User.builder().id(1L).authorities(List.of(Authorities.builder().name("ROLE_USER").build())).build();
-        final var apiKey = ApiKey.builder().owner(owner).build();
+        final var apiKey = ApiKey.builder().id(3L).owner(owner).build();
         stubLinkCreation();
         when(userService.getUserFromToken()).thenReturn(owner);
         when(apiKeyService.fetchApiKeyByKey("apikey")).thenReturn(apiKey);
@@ -1614,7 +1616,7 @@ class UrlServiceTest {
                 .isInstanceOf(RateLimitExceededException.class)
                 .hasMessage(CREATE_LIMIT_REFUSAL);
         verify(urlRepository, times(60)).save(any(Url.class));
-        verify(apiKeyService, times(30)).apiKeyUseAction(apiKey);
+        verify(apiKeyService, times(30)).recordUse(3L);
         assertThat(limiter.counts).containsOnlyKeys("create:user:1");
         assertThat(limiter.windows).containsOnly(Duration.ofHours(1));
     }

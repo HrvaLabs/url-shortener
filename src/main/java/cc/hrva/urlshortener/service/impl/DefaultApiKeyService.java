@@ -4,6 +4,7 @@ import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.converter.ApiKeyUpdateDtoToApiKeyConverter;
 import cc.hrva.urlshortener.exception.ApiKeyActiveException;
 import cc.hrva.urlshortener.exception.ApiKeyNotFoundException;
+import cc.hrva.urlshortener.exception.InvalidApiKeyException;
 import cc.hrva.urlshortener.repository.ApiKeyRepository;
 import cc.hrva.urlshortener.validator.ApiKeyValidator;
 import java.time.LocalDateTime;
@@ -113,8 +114,10 @@ public class DefaultApiKeyService implements ApiKeyService {
 
     @Override
     @Transactional
-    public ApiKey apiKeyUseAction(final ApiKey apiKey) {
-        return apiKeyRepository.save(apiKey.apiKeyUsed());
+    public void recordUse(final Long apiKeyId) {
+        if (apiKeyRepository.recordUse(apiKeyId, LocalDateTime.now()) == 0) {
+            throw new InvalidApiKeyException("API key is invalid");
+        }
     }
 
     @Override

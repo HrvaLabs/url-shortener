@@ -21,6 +21,18 @@ public interface ApiKeyRepository extends JpaRepository<ApiKey, Long> {
     List<ApiKey> findByOwnerAndActiveTrue(User owner);
     List<ApiKey> findByExpirationDateIsLessThanEqualAndActiveTrue(LocalDateTime createDate);
 
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query("""
+            update ApiKey k
+            set k.active = case
+                    when (k.apiCallsLimit is not null and k.apiCallsUsed + 1 >= k.apiCallsLimit)
+                            or (k.expirationDate is not null and k.expirationDate < :now) then false
+                    else k.active
+                end,
+                k.apiCallsUsed = k.apiCallsUsed + 1
+            where k.id = :id and k.active = true""")
+    int recordUse(@Param("id") Long id, @Param("now") LocalDateTime now);
+
     @Modifying
     @Query("delete from ApiKey k where k.id = :id and k.active = false")
     int deleteInactiveById(@Param("id") Long id);
