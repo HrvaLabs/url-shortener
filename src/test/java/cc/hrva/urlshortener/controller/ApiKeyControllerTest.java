@@ -23,6 +23,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -105,4 +106,22 @@ class ApiKeyControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.active").value(false));
     }
+
+    @Test
+    void deletingAKeyAnswersNoContent() throws Exception {
+        mockMvc.perform(delete("/api/v1/api-keys/1"))
+                .andExpect(status().isNoContent());
+
+        verify(apiKeyService).deleteApiKey(1L);
+    }
+
+    @Test
+    void deletingTheInactiveKeysAnswersHowManyWereDeleted() throws Exception {
+        when(apiKeyService.deleteMyInactiveApiKeys()).thenReturn(3);
+
+        mockMvc.perform(delete("/api/v1/api-keys/inactive"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.deleted").value(3));
+    }
+
 }

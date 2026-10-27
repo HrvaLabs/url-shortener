@@ -2,6 +2,7 @@ package cc.hrva.urlshortener.service.impl;
 
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.converter.ApiKeyUpdateDtoToApiKeyConverter;
+import cc.hrva.urlshortener.exception.ApiKeyActiveException;
 import cc.hrva.urlshortener.exception.ApiKeyNotFoundException;
 import cc.hrva.urlshortener.repository.ApiKeyRepository;
 import cc.hrva.urlshortener.validator.ApiKeyValidator;
@@ -26,6 +27,8 @@ import org.springframework.transaction.annotation.Transactional;
 @Transactional(readOnly = true)
 @RequiredArgsConstructor
 public class DefaultApiKeyService implements ApiKeyService {
+
+    private static final String REVOKE_BEFORE_DELETING = "Revoke this key before deleting it.";
 
     private final UserService userService;
     private final AppProperties appProperties;
@@ -75,6 +78,30 @@ public class DefaultApiKeyService implements ApiKeyService {
         apiKeyValidator.verifyUserAdminOrOwner(apiKey);
         apiKey.setActive(true);
         return ApiKeyResponse.from(apiKeyRepository.save(apiKey));
+    }
+
+    @Override
+    @Transactional
+    public void deleteApiKey(final Long id) {
+        log.info("Delete API key id={}", id);
+
+        final var apiKey = apiKeyRepository.findById(id)
+                .orElseThrow(() -> new ApiKeyNotFoundException("Api key doesn't exist"));
+
+        apiKeyValidator.verifyUserAdminOrOwner(apiKey);
+        if (apiKey.isActive() || apiKeyRepository.deleteInactiveById(id) == 0) {
+            throw new ApiKeyActiveException(REVOKE_BEFORE_DELETING);
+        }
+    }
+
+    @Override
+    @Transactional
+    public int deleteMyInactiveApiKeys() {
+        final var user = userService.getUserFromToken();
+        final var deleted = apiKeyRepository.deleteInactiveByOwnerId(user.getId());
+        log.info("Deleted {} inactive API keys of user id={}", deleted, user.getId());
+
+        return deleted;
     }
 
     @Override

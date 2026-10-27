@@ -50,7 +50,9 @@ public class DefaultApiKeyValidator implements ApiKeyValidator {
         final var currentUser = userService.getUserFromToken();
         final boolean isCurrentUserAdmin = currentUser.getAuthorities().stream()
                 .anyMatch(authorities -> authorities.getName().equals("ROLE_ADMIN"));
-        if (!apiKey.getOwner().equals(currentUser) && !isCurrentUserAdmin) {
+        final var owner = apiKey.getOwner();
+        final var isOwner = owner != null && currentUser.getId() != null && currentUser.getId().equals(owner.getId());
+        if (!isOwner && !isCurrentUserAdmin) {
             throw new NoAuthorizationException("You don't have authorization for this action");
         }
     }

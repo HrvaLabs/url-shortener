@@ -7,12 +7,14 @@ import java.util.List;
 import lombok.RequiredArgsConstructor;
 import cc.hrva.urlshortener.dto.ApiKeyResponse;
 import cc.hrva.urlshortener.dto.ApiKeyUpdateDto;
+import cc.hrva.urlshortener.dto.DeletedApiKeysResponse;
 import cc.hrva.urlshortener.service.ApiKeyService;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.web.PageableDefault;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -75,6 +77,24 @@ public class ApiKeyController {
     @PatchMapping("/{id}/activate")
     public ResponseEntity<ApiKeyResponse> activateApiKey(@PathVariable("id") final Long id) {
         return ResponseEntity.ok(apiKeyService.activateApiKey(id));
+    }
+
+    @Operation(summary = "Delete an inactive API key", description = "Permanently delete an expired or revoked API key by its ID. An active key must be revoked first. The key's owner or an admin.")
+    @ApiResponse(responseCode = "204", description = "API key deleted")
+    @ApiResponse(responseCode = "403", description = "Not the key's owner or an admin")
+    @ApiResponse(responseCode = "404", description = "API key not found")
+    @ApiResponse(responseCode = "409", description = "The key is active: revoke it first")
+    @DeleteMapping("/{id}")
+    public ResponseEntity<Void> deleteApiKey(@PathVariable("id") final Long id) {
+        apiKeyService.deleteApiKey(id);
+
+        return ResponseEntity.noContent().build();
+    }
+
+    @Operation(summary = "Delete my inactive API keys", description = "Permanently delete all of the authenticated user's expired or revoked API keys and return how many were deleted. Never touches other users' keys, even for an admin.")
+    @DeleteMapping("/inactive")
+    public ResponseEntity<DeletedApiKeysResponse> deleteMyInactiveApiKeys() {
+        return ResponseEntity.ok(new DeletedApiKeysResponse(apiKeyService.deleteMyInactiveApiKeys()));
     }
 
 }

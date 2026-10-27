@@ -1,6 +1,7 @@
 package cc.hrva.urlshortener.configuration;
 
 import cc.hrva.urlshortener.exception.ApiException;
+import cc.hrva.urlshortener.exception.ApiKeyActiveException;
 import cc.hrva.urlshortener.exception.ApiKeyNotFoundException;
 import cc.hrva.urlshortener.exception.BioHandleUnavailableException;
 import cc.hrva.urlshortener.exception.BioPageConflictException;
@@ -187,6 +188,11 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(BioPageConflictException.class)
     public ResponseEntity<Map<String, String>> handleBioPageConflict(final BioPageConflictException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("error", safeMessage(ex)));
+    }
+
+    @ExceptionHandler(ApiKeyActiveException.class)
+    public ResponseEntity<Map<String, String>> handleApiKeyActive(final ApiKeyActiveException ex) {
         return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("error", safeMessage(ex)));
     }
 

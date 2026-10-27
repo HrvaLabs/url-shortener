@@ -10,7 +10,9 @@ import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.converter.ApiKeyUpdateDtoToApiKeyConverter;
 import cc.hrva.urlshortener.dto.ApiKeyResponse;
 import cc.hrva.urlshortener.dto.ApiKeyUpdateDto;
+import cc.hrva.urlshortener.exception.ApiKeyActiveException;
 import cc.hrva.urlshortener.exception.ApiKeyNotFoundException;
+import cc.hrva.urlshortener.exception.NoAuthorizationException;
 import cc.hrva.urlshortener.model.ApiKey;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.repository.ApiKeyRepository;
@@ -25,6 +27,10 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.AssertionsForClassTypes.assertThatCode;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -103,6 +109,73 @@ class ApiKeyServiceTest {
 
         final var result = apiKeyService.revokeApiKey(id);
         assertThat(result.active()).isFalse();
+    }
+
+    @Test
+    void anInactiveKeyIsDeleted() {
+        final var apiKey = ApiKey.builder().id(4L).active(false).build();
+
+        when(apiKeyRepository.findById(4L)).thenReturn(Optional.of(apiKey));
+        when(apiKeyRepository.deleteInactiveById(4L)).thenReturn(1);
+
+        apiKeyService.deleteApiKey(4L);
+
+        verify(apiKeyValidator).verifyUserAdminOrOwner(apiKey);
+        verify(apiKeyRepository).deleteInactiveById(4L);
+    }
+
+    @Test
+    void anActiveKeyIsNotDeleted() {
+        final var apiKey = ApiKey.builder().id(4L).active(true).build();
+
+        when(apiKeyRepository.findById(4L)).thenReturn(Optional.of(apiKey));
+
+        assertThatCode(() -> apiKeyService.deleteApiKey(4L))
+                .isInstanceOf(ApiKeyActiveException.class)
+                .hasMessage("Revoke this key before deleting it.");
+        verify(apiKeyRepository, never()).deleteInactiveById(anyLong());
+    }
+
+    @Test
+    void aKeyTurnedOnAgainBeforeTheDeleteIsNotDeleted() {
+        final var apiKey = ApiKey.builder().id(4L).active(false).build();
+
+        when(apiKeyRepository.findById(4L)).thenReturn(Optional.of(apiKey));
+        when(apiKeyRepository.deleteInactiveById(4L)).thenReturn(0);
+
+        assertThatCode(() -> apiKeyService.deleteApiKey(4L))
+                .isInstanceOf(ApiKeyActiveException.class)
+                .hasMessage("Revoke this key before deleting it.");
+    }
+
+    @Test
+    void aMissingKeyIsNotFound() {
+        when(apiKeyRepository.findById(4L)).thenReturn(Optional.empty());
+
+        assertThatCode(() -> apiKeyService.deleteApiKey(4L))
+                .isInstanceOf(ApiKeyNotFoundException.class)
+                .hasMessage("Api key doesn't exist");
+    }
+
+    @Test
+    void someoneElsesKeyIsRefusedBeforeItsStateIsChecked() {
+        final var apiKey = ApiKey.builder().id(4L).active(true).build();
+
+        when(apiKeyRepository.findById(4L)).thenReturn(Optional.of(apiKey));
+        doThrow(new NoAuthorizationException("You don't have authorization for this action"))
+                .when(apiKeyValidator).verifyUserAdminOrOwner(apiKey);
+
+        assertThatCode(() -> apiKeyService.deleteApiKey(4L))
+                .isInstanceOf(NoAuthorizationException.class);
+        verify(apiKeyRepository, never()).deleteInactiveById(anyLong());
+    }
+
+    @Test
+    void theCallersInactiveKeysAreDeletedByTheirOwnerId() {
+        when(userService.getUserFromToken()).thenReturn(User.builder().id(9L).build());
+        when(apiKeyRepository.deleteInactiveByOwnerId(9L)).thenReturn(3);
+
+        assertThat(apiKeyService.deleteMyInactiveApiKeys()).isEqualTo(3);
     }
 
     @Test

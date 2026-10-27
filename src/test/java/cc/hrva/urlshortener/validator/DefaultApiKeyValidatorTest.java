@@ -55,7 +55,7 @@ class DefaultApiKeyValidatorTest {
     @Test
     void shouldVerifyUserAdminOrOwner() {
         final Authorities authorities = Authorities.builder().id(1L).name("ROLE_ADMIN").build();
-        final User user = User.builder().authorities(Collections.singletonList(authorities)).build();
+        final User user = User.builder().id(1L).authorities(Collections.singletonList(authorities)).build();
         apiKey.setOwner(user);
 
         when(userService.getUserFromToken()).thenReturn(user);
@@ -67,8 +67,46 @@ class DefaultApiKeyValidatorTest {
     @Test
     void shouldFailVerifyUserAdminOrOwner() {
         final Authorities authorities = Authorities.builder().id(1L).name("ROLE_USER").build();
+        final User user = User.builder().id(1L).authorities(Collections.singletonList(authorities)).build();
+        apiKey.setOwner(User.builder().id(2L).build());
+
+        when(userService.getUserFromToken()).thenReturn(user);
+
+        assertThatThrownBy(() -> apiKeyValidator.verifyUserAdminOrOwner(apiKey))
+                .isInstanceOf(NoAuthorizationException.class)
+                .hasMessage("You don't have authorization for this action");
+    }
+
+    @Test
+    void theOwnerIsRecognisedByIdEvenAsAnotherInstance() {
+        final Authorities authorities = Authorities.builder().id(1L).name("ROLE_USER").build();
+        final User user = User.builder().id(7L).authorities(Collections.singletonList(authorities)).build();
+        apiKey.setOwner(User.builder().id(7L).build());
+
+        when(userService.getUserFromToken()).thenReturn(user);
+
+        assertThatCode(() -> apiKeyValidator.verifyUserAdminOrOwner(apiKey))
+                .doesNotThrowAnyException();
+    }
+
+    @Test
+    void aUserWithoutAnIdIsNeverTheOwnerOfAKeyWithoutOne() {
+        final Authorities authorities = Authorities.builder().id(1L).name("ROLE_USER").build();
         final User user = User.builder().authorities(Collections.singletonList(authorities)).build();
         apiKey.setOwner(User.builder().build());
+
+        when(userService.getUserFromToken()).thenReturn(user);
+
+        assertThatThrownBy(() -> apiKeyValidator.verifyUserAdminOrOwner(apiKey))
+                .isInstanceOf(NoAuthorizationException.class)
+                .hasMessage("You don't have authorization for this action");
+    }
+
+    @Test
+    void aKeyWithoutAnOwnerIsRefusedToAUser() {
+        final Authorities authorities = Authorities.builder().id(1L).name("ROLE_USER").build();
+        final User user = User.builder().id(7L).authorities(Collections.singletonList(authorities)).build();
+        apiKey.setOwner(null);
 
         when(userService.getUserFromToken()).thenReturn(user);
 
