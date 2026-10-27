@@ -6,7 +6,7 @@ All notable changes to hrva.cc — the URL shortener.
 
 ## [v2.13.1] — 2026-10-27
 
-Admins can delete expired and revoked API keys, logs are no longer kept forever, and two API key fixes.
+Admins can delete expired and revoked API keys, logs are no longer kept forever, and three API key fixes.
 
 ### 🔑 API Keys
 - Admins can delete expired and revoked API keys from All API keys.
@@ -17,6 +17,7 @@ Admins can delete expired and revoked API keys, logs are no longer kept forever,
 ### 🐛 Fixes
 - Deleting an API key that was already removed says so instead of asking you to revoke it.
 - Keyboard focus stays in the API keys table after you revoke a key.
+- Creating a link with an API key no longer undoes a revoke made at the same moment, and links created at once with one key all count.
 
 ---
 

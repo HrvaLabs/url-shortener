@@ -5,7 +5,7 @@
       "date": "2026-10-27",
       "badge": "Latest",
       "badgeVariant": "default",
-      "summary": "Admins can delete expired and revoked API keys, logs are no longer kept forever, and two API key fixes.",
+      "summary": "Admins can delete expired and revoked API keys, logs are no longer kept forever, and three API key fixes.",
       "sections": [
         {
           "title": "API Keys",
@@ -26,7 +26,8 @@
           "icon": "bug",
           "items": [
             "Deleting an API key that was already removed says so instead of asking you to revoke it.",
-            "Keyboard focus stays in the API keys table after you revoke a key."
+            "Keyboard focus stays in the API keys table after you revoke a key.",
+            "Creating a link with an API key no longer undoes a revoke made at the same moment, and links created at once with one key all count."
           ]
         }
       ]
