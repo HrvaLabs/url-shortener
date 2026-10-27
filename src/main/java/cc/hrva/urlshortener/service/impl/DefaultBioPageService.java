@@ -286,6 +286,7 @@ public class DefaultBioPageService implements BioPageService {
 
     private static void requireCurrentCopy(final BioPage page, final LocalDateTime expectedUpdatedAt) {
         if (expectedUpdatedAt == null) {
+            log.info("Bio page save sent without expectedUpdatedAt pageId={}", page.getId());
             return;
         }
         final var stored = page.getUpdatedAt() == null ? null : BioPage.micros(page.getUpdatedAt());

@@ -50,6 +50,8 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Captor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.transaction.support.TransactionOperations;
@@ -689,6 +691,34 @@ class DefaultBioPageServiceTest {
 
         assertThat(response.displayName()).isEqualTo("Ana Horvat");
         verify(bioPageRepository).saveAndFlush(page);
+    }
+
+    @Test
+    @ExtendWith(OutputCaptureExtension.class)
+    void aSaveThatDoesNotSayWhichCopyItWasMadeFromIsSavedAndLoggedOnce(final CapturedOutput output) {
+        hasPage();
+        savesReturnTheirArgument();
+
+        bioPageService.update(update());
+
+        verify(bioPageRepository).saveAndFlush(page);
+        final var lines = output.getAll().lines().filter(line -> line.contains("without expectedUpdatedAt")).toList();
+        assertThat(lines).singleElement().satisfies(line -> assertThat(line)
+                .endsWith("Bio page save sent without expectedUpdatedAt pageId=12")
+                .doesNotContain(ana.getEmail()));
+    }
+
+    @Test
+    @ExtendWith(OutputCaptureExtension.class)
+    void aSaveFromTheCurrentCopyIsNotLoggedAsMissingIt(final CapturedOutput output) {
+        hasPage();
+        savesReturnTheirArgument();
+        final var dto = update();
+        dto.setExpectedUpdatedAt(CREATED_AT);
+
+        bioPageService.update(dto);
+
+        assertThat(output.getAll()).doesNotContain("without expectedUpdatedAt");
     }
 
     @Test
