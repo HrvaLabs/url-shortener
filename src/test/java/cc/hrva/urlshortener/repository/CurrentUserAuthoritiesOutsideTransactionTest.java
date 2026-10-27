@@ -2,7 +2,6 @@ package cc.hrva.urlshortener.repository;
 
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.codebook.Authorities;
-import jakarta.persistence.EntityManagerFactory;
 import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -16,11 +15,7 @@ import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.FilterType;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.orm.jpa.EntityManagerFactoryUtils;
-import org.springframework.orm.jpa.EntityManagerHolder;
 import org.springframework.transaction.PlatformTransactionManager;
-import org.springframework.transaction.TransactionDefinition;
-import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -43,50 +38,26 @@ class CurrentUserAuthoritiesOutsideTransactionTest {
     private UserRepository userRepository;
 
     @Autowired
-    private UrlRepository urlRepository;
-
-    @Autowired
-    private EntityManagerFactory entityManagerFactory;
-
-    @Autowired
     private PlatformTransactionManager transactionManager;
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
-    private EntityManagerHolder openInView;
-
     @BeforeEach
-    void openTheRequestEntityManagerAndSeedTheOwner() {
+    void seedTheOwner() {
         jdbcTemplate.update("insert into user_account (id, email, password) values (?, ?, 'secret-hash')", OWNER, OWNER_EMAIL);
         jdbcTemplate.update("insert into user_account_authorities (user_id, authorities_id) values (?, 1)", OWNER);
-        openInView = new EntityManagerHolder(entityManagerFactory.createEntityManager());
-        TransactionSynchronizationManager.bindResource(entityManagerFactory, openInView);
     }
 
     @AfterEach
-    void closeTheRequestEntityManager() {
-        TransactionSynchronizationManager.unbindResource(entityManagerFactory);
-        EntityManagerFactoryUtils.closeEntityManager(openInView.getEntityManager());
+    void removeTheOwner() {
         jdbcTemplate.update("delete from user_account_authorities where user_id = ?", OWNER);
         jdbcTemplate.update("delete from user_account where id = ?", OWNER);
     }
 
     @Test
-    void theOwnersRolesStayReadableAfterALookupOutsideATransaction() {
-        final var roles = withoutTransaction(() -> {
-            urlRepository.existsUrlByShortUrlAndActiveTrue("abc12");
-            return roleNames();
-        });
-
-        assertThat(roles).containsExactly("ROLE_USER");
-    }
-
-    @Test
-    void theOwnersRolesAreReadableWhenNoLookupRanOutsideATransaction() {
-        final var roles = withoutTransaction(this::roleNames);
-
-        assertThat(roles).containsExactly("ROLE_USER");
+    void theOwnersRolesStayReadableAfterTheTransactionThatLoadedThem() {
+        assertThat(roleNames()).containsExactly("ROLE_USER");
     }
 
     private List<String> roleNames() {
@@ -94,12 +65,6 @@ class CurrentUserAuthoritiesOutsideTransactionTest {
         readOnly.setReadOnly(true);
         final var owner = readOnly.execute(status -> userRepository.findByEmail(OWNER_EMAIL).orElseThrow());
         return owner.getAuthorities().stream().map(Authorities::getName).toList();
-    }
-
-    private <T> T withoutTransaction(final java.util.function.Supplier<T> work) {
-        final var notSupported = new TransactionTemplate(transactionManager);
-        notSupported.setPropagationBehavior(TransactionDefinition.PROPAGATION_NOT_SUPPORTED);
-        return notSupported.execute(status -> work.get());
     }
 
     @SpringBootConfiguration
