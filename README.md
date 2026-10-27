@@ -36,7 +36,7 @@ The changelog is shown at [app.hrva.cc/changelog](https://app.hrva.cc/changelog)
 - The public [hrva.cc in numbers](https://app.hrva.cc/stats) page shows site-wide totals.
 
 ### Accounts
-- Sign in with email and password, Google or GitHub, or a passkey or security key.
+- Sign in with email and password, Google, or a passkey or security key.
 - Two-step verification works with every sign-in method, using an authenticator app or a passkey, with recovery codes.
 - You can export your data and delete your account.
 
