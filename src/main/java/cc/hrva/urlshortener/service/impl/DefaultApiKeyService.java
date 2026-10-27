@@ -89,7 +89,14 @@ public class DefaultApiKeyService implements ApiKeyService {
                 .orElseThrow(() -> new ApiKeyNotFoundException("Api key doesn't exist"));
 
         apiKeyValidator.verifyUserAdminOrOwner(apiKey);
-        if (apiKey.isActive() || apiKeyRepository.deleteInactiveById(id) == 0) {
+        if (apiKey.isActive()) {
+            throw new ApiKeyActiveException(REVOKE_BEFORE_DELETING);
+        }
+        if (apiKeyRepository.deleteInactiveById(id) == 0) {
+            if (!apiKeyRepository.existsById(id)) {
+                log.info("API key was deleted by a concurrent request id={}", id);
+                throw new ApiKeyNotFoundException("Api key doesn't exist");
+            }
             throw new ApiKeyActiveException(REVOKE_BEFORE_DELETING);
         }
     }

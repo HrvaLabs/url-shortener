@@ -142,10 +142,24 @@ class ApiKeyServiceTest {
 
         when(apiKeyRepository.findById(4L)).thenReturn(Optional.of(apiKey));
         when(apiKeyRepository.deleteInactiveById(4L)).thenReturn(0);
+        when(apiKeyRepository.existsById(4L)).thenReturn(true);
 
         assertThatCode(() -> apiKeyService.deleteApiKey(4L))
                 .isInstanceOf(ApiKeyActiveException.class)
                 .hasMessage("Revoke this key before deleting it.");
+    }
+
+    @Test
+    void aKeyDeletedByAnotherRequestBeforeTheDeleteIsNotFound() {
+        final var apiKey = ApiKey.builder().id(4L).active(false).build();
+
+        when(apiKeyRepository.findById(4L)).thenReturn(Optional.of(apiKey));
+        when(apiKeyRepository.deleteInactiveById(4L)).thenReturn(0);
+        when(apiKeyRepository.existsById(4L)).thenReturn(false);
+
+        assertThatCode(() -> apiKeyService.deleteApiKey(4L))
+                .isInstanceOf(ApiKeyNotFoundException.class)
+                .hasMessage("Api key doesn't exist");
     }
 
     @Test
