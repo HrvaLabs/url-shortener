@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.9.xsd">
+
+    <include file="classpath:/db/through-026-test-changelog.xml"/>
+
+    <changeSet author="test" id="short-url-duplicates-left">
+        <insert tableName="URL">
+            <column name="ID" valueNumeric="11"/>
+            <column name="SHORT_URL" value="two-off"/>
+            <column name="LONG_URL" value="https://example.com/11"/>
+            <column name="ACTIVE" valueBoolean="false"/>
+        </insert>
+        <insert tableName="URL">
+            <column name="ID" valueNumeric="12"/>
+            <column name="SHORT_URL" value="two-off"/>
+            <column name="LONG_URL" value="https://example.com/12"/>
+            <column name="ACTIVE" valueBoolean="false"/>
+        </insert>
+        <insert tableName="URL">
+            <column name="ID" valueNumeric="21"/>
+            <column name="SHORT_URL" value="one-on"/>
+            <column name="LONG_URL" value="https://example.com/21"/>
+            <column name="ACTIVE" valueBoolean="true"/>
+        </insert>
+        <insert tableName="URL">
+            <column name="ID" valueNumeric="22"/>
+            <column name="SHORT_URL" value="one-on"/>
+            <column name="LONG_URL" value="https://example.com/22"/>
+            <column name="ACTIVE" valueBoolean="false"/>
+        </insert>
+        <insert tableName="URL">
+            <column name="ID" valueNumeric="31"/>
+            <column name="SHORT_URL" value="two-on"/>
+            <column name="LONG_URL" value="https://example.com/31"/>
+            <column name="ACTIVE" valueBoolean="true"/>
+        </insert>
+        <insert tableName="URL">
+            <column name="ID" valueNumeric="32"/>
+            <column name="SHORT_URL" value="two-on"/>
+            <column name="LONG_URL" value="https://example.com/32"/>
+            <column name="ACTIVE" valueBoolean="true"/>
+        </insert>
+        <insert tableName="URL">
+            <column name="ID" valueNumeric="41"/>
+            <column name="SHORT_URL" value="three"/>
+            <column name="LONG_URL" value="https://example.com/41"/>
+            <column name="ACTIVE" valueBoolean="false"/>
+        </insert>
+        <insert tableName="URL">
+            <column name="ID" valueNumeric="42"/>
+            <column name="SHORT_URL" value="three"/>
+            <column name="LONG_URL" value="https://example.com/42"/>
+            <column name="ACTIVE" valueBoolean="true"/>
+        </insert>
+        <insert tableName="URL">
+            <column name="ID" valueNumeric="43"/>
+            <column name="SHORT_URL" value="three"/>
+            <column name="LONG_URL" value="https://example.com/43"/>
+            <column name="ACTIVE" valueBoolean="false"/>
+        </insert>
+        <insert tableName="URL">
+            <column name="ID" valueNumeric="51"/>
+            <column name="SHORT_URL" value="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"/>
+            <column name="LONG_URL" value="https://example.com/51"/>
+            <column name="ACTIVE" valueBoolean="false"/>
+        </insert>
+        <insert tableName="URL">
+            <column name="ID" valueNumeric="52"/>
+            <column name="SHORT_URL" value="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"/>
+            <column name="LONG_URL" value="https://example.com/52"/>
+            <column name="ACTIVE" valueBoolean="false"/>
+        </insert>
+        <insert tableName="URL">
+            <column name="ID" valueNumeric="61"/>
+            <column name="SHORT_URL" value="solo"/>
+            <column name="LONG_URL" value="https://example.com/61"/>
+            <column name="ACTIVE" valueBoolean="false"/>
+        </insert>
+        <insert tableName="URL">
+            <column name="ID" valueNumeric="71"/>
+            <column name="SHORT_URL" value="Case"/>
+            <column name="LONG_URL" value="https://example.com/71"/>
+            <column name="ACTIVE" valueBoolean="true"/>
+        </insert>
+        <insert tableName="URL">
+            <column name="ID" valueNumeric="72"/>
+            <column name="SHORT_URL" value="case"/>
+            <column name="LONG_URL" value="https://example.com/72"/>
+            <column name="ACTIVE" valueBoolean="true"/>
+        </insert>
+    </changeSet>
+
+    <include file="classpath:/db/changelog/027-admin-stats-and-reserved-aliases.xml"/>
+    <include file="classpath:/db/changelog/028-passkeys-and-two-step.xml"/>
+    <include file="classpath:/db/changelog/029-link-in-bio.xml"/>
+    <include file="classpath:/db/changelog/030-url-short-url-unique-again.xml"/>
+
+</databaseChangeLog>

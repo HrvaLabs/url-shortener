@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.9.xsd">
+
+    <changeSet author="khrvacic" id="030-url-short-url-rename-duplicates">
+        <sql>
+            update url
+            set short_url = concat(left(short_url, 254 - length(cast(id as varchar(20)))), '~', cast(id as varchar(20)))
+            where id in (
+                select id from (
+                    select id, row_number() over (partition by short_url order by active desc, id desc) as served_rank
+                    from url
+                ) ranked
+                where served_rank > 1
+            )
+        </sql>
+        <rollback/>
+    </changeSet>
+
+    <changeSet author="khrvacic" id="030-url-short-url-unique">
+        <preConditions onFail="MARK_RAN">
+            <or>
+                <and>
+                    <dbms type="postgresql"/>
+                    <sqlCheck expectedResult="0">select count(*) from pg_indexes where schemaname = current_schema() and lower(indexname) = 'ux_url_short_url'</sqlCheck>
+                </and>
+                <and>
+                    <not>
+                        <dbms type="postgresql"/>
+                    </not>
+                    <sqlCheck expectedResult="0">select count(*) from information_schema.indexes where lower(index_name) = 'ux_url_short_url'</sqlCheck>
+                </and>
+            </or>
+        </preConditions>
+        <createIndex tableName="URL" indexName="UX_URL_SHORT_URL" unique="true">
+            <column name="SHORT_URL"/>
+        </createIndex>
+        <rollback/>
+    </changeSet>
+
+</databaseChangeLog>

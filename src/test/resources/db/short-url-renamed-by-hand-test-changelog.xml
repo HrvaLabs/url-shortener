@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.9.xsd">
+
+    <include file="classpath:/db/through-026-test-changelog.xml"/>
+
+    <changeSet author="test" id="short-url-duplicates-before-027">
+        <insert tableName="URL">
+            <column name="ID" valueNumeric="1"/>
+            <column name="SHORT_URL" value="dup"/>
+            <column name="LONG_URL" value="https://example.com/1"/>
+            <column name="ACTIVE" valueBoolean="false"/>
+        </insert>
+        <insert tableName="URL">
+            <column name="ID" valueNumeric="2"/>
+            <column name="SHORT_URL" value="dup"/>
+            <column name="LONG_URL" value="https://example.com/2"/>
+            <column name="ACTIVE" valueBoolean="true"/>
+        </insert>
+    </changeSet>
+
+    <include file="classpath:/db/changelog/027-admin-stats-and-reserved-aliases.xml"/>
+
+    <changeSet author="test" id="short-url-renamed-by-hand">
+        <update tableName="URL">
+            <column name="SHORT_URL" value="dup-old"/>
+            <where>ID = 1</where>
+        </update>
+    </changeSet>
+
+    <include file="classpath:/db/changelog/028-passkeys-and-two-step.xml"/>
+    <include file="classpath:/db/changelog/029-link-in-bio.xml"/>
+    <include file="classpath:/db/changelog/030-url-short-url-unique-again.xml"/>
+
+</databaseChangeLog>

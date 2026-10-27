@@ -17,8 +17,10 @@ import org.springframework.stereotype.Component;
 @RequiredArgsConstructor
 public class ShortUrlUniqueIndex {
 
-    private static final String FIND_EXEC_TYPE = "select exectype from databasechangelog where id = '027-url-short-url-unique'";
-    private static final String EXECUTED = "EXECUTED";
+    private static final String COUNT_INDEX_CHANGESETS = """
+            select count(*) from databasechangelog
+            where (id = '027-url-short-url-unique' and exectype = 'EXECUTED')
+               or (id = '030-url-short-url-unique' and exectype in ('EXECUTED', 'MARK_RAN'))""";
     private static final String INDEX_NAME = "UX_URL_SHORT_URL";
 
     private final JdbcTemplate jdbcTemplate;
@@ -30,9 +32,10 @@ public class ShortUrlUniqueIndex {
 
     public boolean enforced() {
         try {
-            return EXECUTED.equals(jdbcTemplate.queryForObject(FIND_EXEC_TYPE, String.class));
+            final var indexChangesets = jdbcTemplate.queryForObject(COUNT_INDEX_CHANGESETS, Integer.class);
+            return indexChangesets != null && indexChangesets > 0;
         } catch (final DataAccessException exception) {
-            log.debug("could not read 027-url-short-url-unique from databasechangelog", exception);
+            log.debug("could not read the short_url index changesets from databasechangelog", exception);
             return false;
         }
     }
