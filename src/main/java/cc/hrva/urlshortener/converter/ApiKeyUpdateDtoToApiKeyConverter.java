@@ -19,20 +19,27 @@ public class ApiKeyUpdateDtoToApiKeyConverter implements Converter<ApiKeyUpdateD
         final var existingApiKey = apiKeyRepository.findById(apiKeyUpdateDto.getId())
                 .orElseThrow(() -> new ApiKeyNotFoundException(String.format("API key with ID %d has not been found",
                         apiKeyUpdateDto.getId())));
+        final var editedApiKey = ApiKey.builder()
+                .id(existingApiKey.getId())
+                .apiCallsLimit(existingApiKey.getApiCallsLimit())
+                .apiCallsUsed(existingApiKey.getApiCallsUsed())
+                .expirationDate(existingApiKey.getExpirationDate())
+                .active(existingApiKey.isActive())
+                .build();
+
         if (apiKeyUpdateDto.getApiCallsLimit() != null) {
-            existingApiKey.setApiCallsLimit(apiKeyUpdateDto.getApiCallsLimit() > 0 ? apiKeyUpdateDto.getApiCallsLimit() : null);
+            editedApiKey.setApiCallsLimit(apiKeyUpdateDto.getApiCallsLimit() > 0 ? apiKeyUpdateDto.getApiCallsLimit() : null);
         }
         if (apiKeyUpdateDto.getApiCallsUsed() != null) {
-            existingApiKey.setApiCallsUsed(apiKeyUpdateDto.getApiCallsUsed());
+            editedApiKey.setApiCallsUsed(apiKeyUpdateDto.getApiCallsUsed());
         }
         if (apiKeyUpdateDto.getExpirationDate() != null) {
-            existingApiKey.setExpirationDate(apiKeyUpdateDto.getExpirationDate());
+            editedApiKey.setExpirationDate(apiKeyUpdateDto.getExpirationDate());
         }
         if (apiKeyUpdateDto.getActive() != null) {
-            existingApiKey.setActive(apiKeyUpdateDto.getActive());
+            editedApiKey.setActive(apiKeyUpdateDto.getActive());
         }
-
-        return existingApiKey;
+        return editedApiKey;
     }
 
 }

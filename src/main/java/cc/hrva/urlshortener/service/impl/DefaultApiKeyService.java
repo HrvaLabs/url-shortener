@@ -132,7 +132,15 @@ public class DefaultApiKeyService implements ApiKeyService {
     @Transactional
     public ApiKeyResponse updateKey(final ApiKeyUpdateDto apiKeyUpdateDto) {
         log.info("Updated API key id={}", apiKeyUpdateDto.getId());
-        return ApiKeyResponse.from(apiKeyRepository.save(Objects.requireNonNull(apiKeyConverter.convert(apiKeyUpdateDto))));
+        final var editedApiKey = Objects.requireNonNull(apiKeyConverter.convert(apiKeyUpdateDto));
+        final var apiKey = apiKeyRepository.findById(editedApiKey.getId())
+                .orElseThrow(() -> new ApiKeyNotFoundException("Api key doesn't exist"));
+
+        apiKey.setApiCallsLimit(editedApiKey.getApiCallsLimit());
+        apiKey.setApiCallsUsed(editedApiKey.getApiCallsUsed());
+        apiKey.setExpirationDate(editedApiKey.getExpirationDate());
+        apiKey.setActive(editedApiKey.isActive());
+        return ApiKeyResponse.from(apiKeyRepository.save(apiKey));
     }
 
     @Override

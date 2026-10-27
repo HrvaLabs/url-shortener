@@ -19,16 +19,23 @@ public class UserUpdateDtoToUserConverter implements Converter<UserUpdateDto, Us
         final var existingUser = userRepository.findById(userUpdateDto.getId())
                 .orElseThrow(() -> new UserNotFoundException(String.format("User with ID %d has not been found",
                         userUpdateDto.getId())));
+        final var editedUser = User.builder()
+                .id(existingUser.getId())
+                .email(existingUser.getEmail())
+                .apiKeySlots(existingUser.getApiKeySlots())
+                .active(existingUser.getActive())
+                .build();
+
         if (userUpdateDto.getEmail() != null) {
-            existingUser.setEmail(userUpdateDto.getEmail());
+            editedUser.setEmail(userUpdateDto.getEmail());
         }
         if (userUpdateDto.getApiKeySlots() != null) {
-            existingUser.setApiKeySlots(userUpdateDto.getApiKeySlots());
+            editedUser.setApiKeySlots(userUpdateDto.getApiKeySlots());
         }
         if (userUpdateDto.getActive() != null) {
-            existingUser.setActive(userUpdateDto.getActive());
+            editedUser.setActive(userUpdateDto.getActive());
         }
-        return existingUser;
+        return editedUser;
     }
 
 }

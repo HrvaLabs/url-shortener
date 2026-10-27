@@ -36,7 +36,24 @@ class UserUpdateDtoToUserConverterTest {
 
         when(userRepository.findById(anyLong())).thenReturn(Optional.ofNullable(user));
 
-        assertThat(converter.convert(userUpdateDto)).isEqualTo(user);
+        assertThat(converter.convert(userUpdateDto).getId()).isEqualTo(1L);
+    }
+
+    @Test
+    void theLoadedUserIsLeftUntouched() {
+        final var userUpdateDto = UserUpdateDto.builder().id(1L).email("new@example.com").apiKeySlots(9L).active(false).build();
+        final var user = User.builder().id(1L).email("old@example.com").password("secret-hash").apiKeySlots(3L).active(true).build();
+
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+
+        final var edited = converter.convert(userUpdateDto);
+
+        assertThat(edited).isNotSameAs(user);
+        assertThat(edited.getId()).isEqualTo(1L);
+        assertThat(edited.getPassword()).isNull();
+        assertThat(user.getEmail()).isEqualTo("old@example.com");
+        assertThat(user.getApiKeySlots()).isEqualTo(3L);
+        assertThat(user.getActive()).isTrue();
     }
 
     @Test

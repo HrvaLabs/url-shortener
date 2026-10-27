@@ -248,7 +248,11 @@ public class DefaultUserService implements UserService {
 
         final var previousEmail = existingUser.getEmail();
         final var wasActive = !Boolean.FALSE.equals(existingUser.getActive());
-        final var updatedUser = userRepository.save(Objects.requireNonNull(userUpdateDtoToUserConverter.convert(userUpdateDto)));
+        final var editedUser = Objects.requireNonNull(userUpdateDtoToUserConverter.convert(userUpdateDto));
+        existingUser.setEmail(editedUser.getEmail());
+        existingUser.setApiKeySlots(editedUser.getApiKeySlots());
+        existingUser.setActive(editedUser.getActive());
+        final var updatedUser = userRepository.save(existingUser);
 
         if (!Objects.equals(previousEmail, updatedUser.getEmail())) {
             disconnectConnectedApps(updatedUser.getId(), previousEmail);

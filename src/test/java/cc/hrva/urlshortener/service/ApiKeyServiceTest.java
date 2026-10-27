@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.service;
 
+import java.time.LocalDateTime;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
@@ -236,14 +237,37 @@ class ApiKeyServiceTest {
 
     @Test
     void shouldUpdateKey() {
-        final ApiKey apiKey = ApiKey.builder().build();
-        final ApiKeyUpdateDto apiKeyUpdateDto = ApiKeyUpdateDto.builder().build();
+        final ApiKey apiKey = ApiKey.builder().id(1L).build();
+        final ApiKeyUpdateDto apiKeyUpdateDto = ApiKeyUpdateDto.builder().id(1L).build();
 
-        when(apiKeyConverter.convert(apiKeyUpdateDto)).thenReturn(apiKey);
+        when(apiKeyConverter.convert(apiKeyUpdateDto)).thenReturn(ApiKey.builder().id(1L).build());
+        when(apiKeyRepository.findById(1L)).thenReturn(Optional.of(apiKey));
         when(apiKeyRepository.save(apiKey)).thenReturn(apiKey);
 
         final var result = apiKeyService.updateKey(apiKeyUpdateDto);
         assertThat(result).isInstanceOf(ApiKeyResponse.class);
+    }
+
+    @Test
+    void anEditIsAppliedToTheKeyLoadedInTheWriteTransactionAndThatKeyIsSaved() {
+        final var expiry = LocalDateTime.of(2027, 6, 1, 0, 0);
+        final var loaded = ApiKey.builder().id(1L).key("secret-key").apiCallsLimit(100L).apiCallsUsed(42L).active(true).build();
+        final var edited = ApiKey.builder().id(1L).apiCallsLimit(500L).apiCallsUsed(0L).expirationDate(expiry).active(false).build();
+        final var apiKeyUpdateDto = ApiKeyUpdateDto.builder().id(1L).build();
+
+        when(apiKeyConverter.convert(apiKeyUpdateDto)).thenReturn(edited);
+        when(apiKeyRepository.findById(1L)).thenReturn(Optional.of(loaded));
+        when(apiKeyRepository.save(loaded)).thenReturn(loaded);
+
+        apiKeyService.updateKey(apiKeyUpdateDto);
+
+        verify(apiKeyRepository).save(loaded);
+        verify(apiKeyRepository, never()).save(edited);
+        assertThat(loaded.getKey()).isEqualTo("secret-key");
+        assertThat(loaded.getApiCallsLimit()).isEqualTo(500L);
+        assertThat(loaded.getApiCallsUsed()).isZero();
+        assertThat(loaded.getExpirationDate()).isEqualTo(expiry);
+        assertThat(loaded.isActive()).isFalse();
     }
 
 }

@@ -486,11 +486,32 @@ class DefaultUserServiceTest {
 
         when(userRepository.findById(1L)).thenReturn(Optional.of(existingUser));
         when(userUpdateDtoToUserConverter.convert(updateDto)).thenReturn(user);
-        when(userRepository.save(user)).thenReturn(user);
+        when(userRepository.save(existingUser)).thenReturn(existingUser);
 
         final var result = userService.updateUser(updateDto);
 
         assertThat(result.id()).isEqualTo(1L);
+    }
+
+    @Test
+    void anEditIsAppliedToTheUserLoadedInTheWriteTransactionAndThatUserIsSaved() {
+        final var updateDto = UserUpdateDto.builder().id(1L).email("new@example.com").apiKeySlots(9L).build();
+        final var existingUser = User.builder().id(1L).email("old@example.com").password("secret-hash").authProvider("local")
+                .apiKeySlots(3L).active(true).build();
+        final var edited = User.builder().id(1L).email("new@example.com").apiKeySlots(9L).active(true).build();
+
+        when(userRepository.findById(1L)).thenReturn(Optional.of(existingUser));
+        when(userUpdateDtoToUserConverter.convert(updateDto)).thenReturn(edited);
+        when(userRepository.save(existingUser)).thenReturn(existingUser);
+
+        final var result = userService.updateUser(updateDto);
+
+        verify(userRepository).save(existingUser);
+        verify(userRepository, never()).save(edited);
+        assertThat(existingUser.getPassword()).isEqualTo("secret-hash");
+        assertThat(existingUser.getEmail()).isEqualTo("new@example.com");
+        assertThat(existingUser.getApiKeySlots()).isEqualTo(9L);
+        assertThat(result.email()).isEqualTo("new@example.com");
     }
 
     @Test
@@ -793,12 +814,12 @@ class DefaultUserServiceTest {
 
         when(userRepository.findById(1L)).thenReturn(Optional.of(existingUser));
         when(userUpdateDtoToUserConverter.convert(updateDto)).thenReturn(deactivated);
-        when(userRepository.save(deactivated)).thenReturn(deactivated);
-        when(apiKeyRepository.findByOwnerAndActiveTrue(deactivated)).thenReturn(Collections.emptyList());
+        when(userRepository.save(existingUser)).thenReturn(existingUser);
+        when(apiKeyRepository.findByOwnerAndActiveTrue(existingUser)).thenReturn(Collections.emptyList());
 
         userService.updateUser(updateDto);
 
-        verify(sendingEmailService).sendEmailAccountDeactivated(deactivated);
+        verify(sendingEmailService).sendEmailAccountDeactivated(existingUser);
     }
 
     @Test
@@ -809,7 +830,7 @@ class DefaultUserServiceTest {
 
         when(userRepository.findById(1L)).thenReturn(Optional.of(existingUser));
         when(userUpdateDtoToUserConverter.convert(updateDto)).thenReturn(stillActive);
-        when(userRepository.save(stillActive)).thenReturn(stillActive);
+        when(userRepository.save(existingUser)).thenReturn(existingUser);
 
         userService.updateUser(updateDto);
 
@@ -1001,10 +1022,8 @@ class DefaultUserServiceTest {
         final var updateDto = UserUpdateDto.builder().id(1L).active(false).build();
         final var existingUser = User.builder().id(1L).email("test@example.com").authProvider("local").active(true).build();
         when(userRepository.findById(1L)).thenReturn(Optional.of(existingUser));
-        when(userUpdateDtoToUserConverter.convert(updateDto)).thenAnswer(invocation -> {
-            existingUser.setActive(false);
-            return existingUser;
-        });
+        when(userUpdateDtoToUserConverter.convert(updateDto))
+                .thenReturn(User.builder().id(1L).email("test@example.com").active(false).build());
         when(userRepository.save(existingUser)).thenReturn(existingUser);
         when(apiKeyRepository.findByOwnerAndActiveTrue(existingUser)).thenReturn(Collections.emptyList());
 
@@ -1018,10 +1037,8 @@ class DefaultUserServiceTest {
         final var updateDto = UserUpdateDto.builder().id(1L).email("new@example.com").build();
         final var existingUser = User.builder().id(1L).email("old@example.com").authProvider("local").active(true).build();
         when(userRepository.findById(1L)).thenReturn(Optional.of(existingUser));
-        when(userUpdateDtoToUserConverter.convert(updateDto)).thenAnswer(invocation -> {
-            existingUser.setEmail("new@example.com");
-            return existingUser;
-        });
+        when(userUpdateDtoToUserConverter.convert(updateDto))
+                .thenReturn(User.builder().id(1L).email("new@example.com").active(true).build());
         when(userRepository.save(existingUser)).thenReturn(existingUser);
 
         userService.updateUser(updateDto);
@@ -1035,10 +1052,8 @@ class DefaultUserServiceTest {
         final var updateDto = UserUpdateDto.builder().id(1L).email("test@example.com").apiKeySlots(6L).active(true).build();
         final var existingUser = User.builder().id(1L).email("test@example.com").authProvider("local").active(true).build();
         when(userRepository.findById(1L)).thenReturn(Optional.of(existingUser));
-        when(userUpdateDtoToUserConverter.convert(updateDto)).thenAnswer(invocation -> {
-            existingUser.setApiKeySlots(6L);
-            return existingUser;
-        });
+        when(userUpdateDtoToUserConverter.convert(updateDto))
+                .thenReturn(User.builder().id(1L).email("test@example.com").apiKeySlots(6L).active(true).build());
         when(userRepository.save(existingUser)).thenReturn(existingUser);
 
         userService.updateUser(updateDto);
