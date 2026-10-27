@@ -325,6 +325,15 @@ class DefaultUrlValidatorTest {
     }
 
     @Test
+    void shouldLetOwnerManageTheirUrlWhenTheyAreLoadedAsAnotherInstance() {
+        final Url url = Url.builder().owner(userWithRole(1L, "ROLE_USER")).build();
+        when(userService.getUserFromToken()).thenReturn(userWithRole(1L, "ROLE_USER"));
+
+        assertThatCode(() -> urlValidator.verifyUserAdminOrOwner(url))
+                .doesNotThrowAnyException();
+    }
+
+    @Test
     void shouldRejectMcpAsReservedAlias() {
         when(reservedAliasService.isReserved("MCP")).thenReturn(true);
 

@@ -47,6 +47,7 @@ import cc.hrva.urlshortener.validator.impl.DefaultUrlValidator;
 import com.nimbusds.jose.JOSEException;
 import com.nimbusds.jose.jwk.RSAKey;
 import com.nimbusds.jose.jwk.gen.RSAKeyGenerator;
+import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -63,6 +64,8 @@ import org.springframework.context.annotation.Import;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -77,7 +80,9 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -99,8 +104,13 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class LinkFlowsWithoutOpenInViewTest {
 
     private static final long OWNER = 500L;
+    private static final long OTHER = 501L;
+    private static final long OWNERS_LINK = 510L;
     private static final long OWNERS_KEY = 520L;
     private static final String OWNER_EMAIL = "owner@hrva.cc";
+    private static final String OTHER_EMAIL = "other@hrva.cc";
+    private static final String OWNER_TOKEN = "Bearer owner-token";
+    private static final String OTHER_TOKEN = "Bearer other-token";
     private static final String OWNERS_KEY_VALUE = "owners-key";
     private static final long ROLE_USER = 1L;
     private static final RSAKey SIGNING_KEY = generateSigningKey();
@@ -182,6 +192,11 @@ class LinkFlowsWithoutOpenInViewTest {
     @BeforeEach
     void setUp() {
         account(OWNER, OWNER_EMAIL, ROLE_USER);
+        account(OTHER, OTHER_EMAIL, ROLE_USER);
+        jdbcTemplate.update("insert into url (id, short_url, long_url, owner_id, active, visits) values (?, 'mine2', 'https://example.com/mine', ?, false, 0)",
+                OWNERS_LINK, OWNER);
+        signedIn("owner-token", OWNER_EMAIL);
+        signedIn("other-token", OTHER_EMAIL);
         jdbcTemplate.update("""
                 insert into api_key (id, "KEY", owner_id, api_calls_limit, api_calls_used, expiration_date, active)
                 values (?, ?, ?, 100, 0, dateadd('MONTH', 6, current_date), true)""", OWNERS_KEY, OWNERS_KEY_VALUE, OWNER);
@@ -195,8 +210,8 @@ class LinkFlowsWithoutOpenInViewTest {
         jdbcTemplate.update("delete from audit_log");
         jdbcTemplate.update("delete from url where owner_id = ?", OWNER);
         jdbcTemplate.update("delete from api_key where owner_id = ?", OWNER);
-        jdbcTemplate.update("delete from user_account_authorities where user_id = ?", OWNER);
-        jdbcTemplate.update("delete from user_account where id = ?", OWNER);
+        jdbcTemplate.update("delete from user_account_authorities where user_id in (?, ?)", OWNER, OTHER);
+        jdbcTemplate.update("delete from user_account where id in (?, ?)", OWNER, OTHER);
     }
 
     @Test
@@ -213,11 +228,53 @@ class LinkFlowsWithoutOpenInViewTest {
         assertThat(jdbcTemplate.queryForObject("select api_calls_used from api_key where id = ?", Long.class, OWNERS_KEY)).isEqualTo(1L);
     }
 
+    @Test
+    void theOwnerReactivatesTheirOwnLink() throws Exception {
+        mockMvc.perform(patch("/api/v1/urls/{id}/activate", OWNERS_LINK).header(JwtFilter.AUTHORIZATION_HEADER, OWNER_TOKEN))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.active").value(true));
+
+        assertThat(jdbcTemplate.queryForObject("select active from url where id = ?", Boolean.class, OWNERS_LINK)).isTrue();
+    }
+
+    @Test
+    void theOwnerEditsTheirOwnLink() throws Exception {
+        mockMvc.perform(put("/api/v1/urls/{id}", OWNERS_LINK)
+                        .header(JwtFilter.AUTHORIZATION_HEADER, OWNER_TOKEN)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"id\":" + OWNERS_LINK + ",\"longUrl\":\"https://example.com/mine\",\"visitLimit\":5}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.visitLimit").value(5));
+
+        assertThat(jdbcTemplate.queryForObject("select visit_limit from url where id = ?", Long.class, OWNERS_LINK)).isEqualTo(5L);
+    }
+
+    @Test
+    void anotherUserCantReactivateOrEditTheLink() throws Exception {
+        mockMvc.perform(patch("/api/v1/urls/{id}/activate", OWNERS_LINK).header(JwtFilter.AUTHORIZATION_HEADER, OTHER_TOKEN))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(put("/api/v1/urls/{id}", OWNERS_LINK)
+                        .header(JwtFilter.AUTHORIZATION_HEADER, OTHER_TOKEN)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"id\":" + OWNERS_LINK + ",\"longUrl\":\"https://example.com/mine\",\"visitLimit\":5}"))
+                .andExpect(status().isForbidden());
+
+        assertThat(jdbcTemplate.queryForMap("select active, visit_limit from url where id = ?", OWNERS_LINK))
+                .containsEntry("ACTIVE", false)
+                .containsEntry("VISIT_LIMIT", null);
+    }
+
     private void account(final long id, final String email, final long... roles) {
         jdbcTemplate.update("insert into user_account (id, email, password, active) values (?, ?, 'secret-hash', true)", id, email);
         for (final var role : roles) {
             jdbcTemplate.update("insert into user_account_authorities (user_id, authorities_id) values (?, ?)", id, role);
         }
+    }
+
+    private void signedIn(final String token, final String email) {
+        when(tokenProvider.validateToken(token)).thenReturn(true);
+        when(tokenProvider.getAuthentication(token))
+                .thenReturn(UsernamePasswordAuthenticationToken.authenticated(email, null, List.of(new SimpleGrantedAuthority("ROLE_USER"))));
     }
 
     private User signedInAccount() {
