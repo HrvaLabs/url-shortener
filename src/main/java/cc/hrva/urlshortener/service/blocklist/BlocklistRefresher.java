@@ -117,16 +117,17 @@ public class BlocklistRefresher {
                         loaded.attempt().url(), loaded.list().entries().size(), loaded.list().version(),
                         fitting(loaded.fetched().etag(), MAX_ETAG_LENGTH), fitting(loaded.fetched().lastModified(), MAX_LAST_MODIFIED_LENGTH))
                 : blocklistSourceRepository.recordRefresh(source.getId(), source.getKind(), fetchedAt, lastError);
+        final var current = blocklistSourceRepository.findById(source.getId()).orElse(source);
         if (recorded == 0) {
             log.info("Blocklist source {} was disabled, deleted or changed kind while it was stored, discarding the download",
-                    source.getName());
+                    current.getName());
             if (stored) {
-                removeStoredSet(source);
+                removeStoredSet(current);
             }
         } else {
-            alertWhenHealthChanged(source.getName(), previousError, lastError, stored);
+            alertWhenHealthChanged(current.getName(), previousError, lastError, stored);
         }
-        return blocklistSourceRepository.findById(source.getId()).orElse(source);
+        return current;
     }
 
     private void removeStoredSet(final BlocklistSource source) {

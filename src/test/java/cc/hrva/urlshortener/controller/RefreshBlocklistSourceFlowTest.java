@@ -22,6 +22,7 @@ import cc.hrva.urlshortener.security.JwtFilter;
 import cc.hrva.urlshortener.security.OAuth2LoginSuccessHandler;
 import cc.hrva.urlshortener.security.TokenProvider;
 import cc.hrva.urlshortener.service.UserService;
+import cc.hrva.urlshortener.service.alert.AdminAlertEvent;
 import cc.hrva.urlshortener.service.blocklist.BlocklistMemoryGuard;
 import cc.hrva.urlshortener.service.blocklist.BlocklistParser;
 import cc.hrva.urlshortener.service.blocklist.BlocklistRefresher;
@@ -60,6 +61,8 @@ import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.context.event.ApplicationEvents;
+import org.springframework.test.context.event.RecordApplicationEvents;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -92,6 +95,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
                 "app.server-url=localhost"
         })
 @AutoConfigureMockMvc
+@RecordApplicationEvents
 class RefreshBlocklistSourceFlowTest {
 
     private static final long ADMIN = 501L;
@@ -120,6 +124,9 @@ class RefreshBlocklistSourceFlowTest {
 
     @Autowired
     private PlatformTransactionManager transactionManager;
+
+    @Autowired
+    private ApplicationEvents events;
 
     @MockitoBean
     private UserService userService;
@@ -249,6 +256,17 @@ class RefreshBlocklistSourceFlowTest {
                 .containsEntry("LAST_ERROR", null);
         assertThat(jdbcTemplate.queryForObject("select last_fetched_at from blocklist_source where id = ?", Object.class, SOURCE)).isNotNull();
         verify(blocklistStore, never()).remove(SOURCE);
+    }
+
+    @Test
+    void aSourceRenamedDuringTheRedisWriteIsReportedRecoveredUnderItsNewName() throws Exception {
+        jdbcTemplate.update("update blocklist_source set last_error = 'timed out' where id = ?", SOURCE);
+        duringStore = () -> jdbcTemplate.update("update blocklist_source set name = 'Renamed meanwhile' where id = ?", SOURCE);
+
+        mockMvc.perform(refresh())
+                .andExpect(status().isOk());
+
+        assertThat(events.stream(AdminAlertEvent.class)).containsExactly(new AdminAlertEvent.BlocklistSourceRecovered("Renamed meanwhile"));
     }
 
     @Test
