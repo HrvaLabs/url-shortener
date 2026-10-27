@@ -4,6 +4,22 @@ All notable changes to hrva.cc — the URL shortener.
 
 ---
 
+## [v2.13] — 2026-10-27
+
+A tidier header and footer, expired and revoked API keys you can delete, and short links guaranteed unique.
+
+### 🌐 Site
+- The header now has Bio pages, Developers, Help and Check a link; Blog and Changelog moved to the footer, and the stats page is listed as Public stats.
+
+### 🔑 API Keys
+- Expired and revoked API keys can be deleted, one at a time or all at once, and they're tucked away below your active keys.
+
+### 🐛 Fixes
+- Short links are now guaranteed unique in the database.
+- On the report page, sending keeps keyboard focus on the Send button even after a double click.
+
+---
+
 ## [v2.12] — 2026-10-27
 
 Bio pages: one page with all your links, for your Instagram, TikTok or any other bio.

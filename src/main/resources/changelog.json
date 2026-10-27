@@ -1,10 +1,39 @@
 {
   "releases": [
     {
-      "version": "v2.12",
+      "version": "v2.13",
       "date": "2026-10-27",
       "badge": "Latest",
       "badgeVariant": "default",
+      "summary": "A tidier header and footer, expired and revoked API keys you can delete, and short links guaranteed unique.",
+      "sections": [
+        {
+          "title": "Site",
+          "icon": "globe",
+          "items": [
+            "The header now has Bio pages, Developers, Help and Check a link; Blog and Changelog moved to the footer, and the stats page is listed as Public stats."
+          ]
+        },
+        {
+          "title": "API Keys",
+          "icon": "key",
+          "items": [
+            "Expired and revoked API keys can be deleted, one at a time or all at once, and they're tucked away below your active keys."
+          ]
+        },
+        {
+          "title": "Fixes",
+          "icon": "bug",
+          "items": [
+            "Short links are now guaranteed unique in the database.",
+            "On the report page, sending keeps keyboard focus on the Send button even after a double click."
+          ]
+        }
+      ]
+    },
+    {
+      "version": "v2.12",
+      "date": "2026-10-27",
       "summary": "Bio pages: one page with all your links, for your Instagram, TikTok or any other bio.",
       "sections": [
         {

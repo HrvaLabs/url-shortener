@@ -14,6 +14,8 @@
 # Section 17 checks bio pages on Postgres: racing creates, the page lock's SQL and what waits behind it, saves from an
 # up-to-date and an outdated copy, the public page, the /@handle redirect, view counting, a click from the page, a report,
 # the admin search, hide and revoke, and the export.
+# Section 18 deletes API keys on Postgres: an active key refused, one revoked key, the bulk delete of inactive keys for
+# the owner and (leaving the owner's keys alone) for an admin, and an admin deleting someone else's key.
 #
 #   scripts/mcp-e2e.sh                         builds the jar, then runs every step
 #   MCP_E2E_SKIP_BUILD=1 scripts/mcp-e2e.sh    reuses target/url-shortener-*.jar
@@ -316,6 +318,8 @@ expect_eq "$(psql_value "select (select count(*) from information_schema.tables 
     0 "no ip_address table or sequence is left"
 expect_eq "$(psql_value "select count(*) from databasechangelog where id like '027-%' and exectype = 'EXECUTED';")" 9 "027 ran all nine changesets"
 expect_eq "$(psql_value "select count(*) from pg_indexes where indexname = 'ux_url_short_url';")" 1 "short_url has its unique index"
+expect_eq "$(psql_value "select string_agg(id || ' ' || exectype, ', ' order by orderexecuted) from databasechangelog where id like '030-%';")" \
+    "030-url-short-url-rename-duplicates EXECUTED, 030-url-short-url-unique MARK_RAN" "030 finds no duplicate to rename and keeps the index 027 made"
 
 section "0. Discovery"
 mcp_post /mcp "" "$INITIALIZE"
@@ -951,5 +955,36 @@ http -H "Authorization: Bearer $ADMIN_JWT" "$BASE/api/v1/admin/stats/users?days=
 expect_eq "$(jq -c .bioPages <<<"$HTTP_BODY")" '{"total":2,"hidden":1}' "users stats: 2 bio pages, 1 hidden"
 http -H "Authorization: Bearer $ADMIN_JWT" "$BASE/api/v1/admin/stats/traffic?days=7"
 expect_eq "$(jq -c .bioPageViews <<<"$HTTP_BODY")" '{"views":1,"botViews":1}' "traffic stats: 1 bio page view, 1 bot view"
+
+section "18. API key cleanup"
+http -X POST "$BASE/api/v1/auth/login" -H 'Content-Type: application/json' \
+    -d "{\"email\":\"$USER_EMAIL\",\"password\":\"$USER_PASSWORD\"}"
+expect_eq "$HTTP_STATUS" 200 "POST /api/v1/auth/login as $USER_EMAIL"
+KEY_JWT=$(jq -r .token <<<"$HTTP_BODY")
+KEY_JWT=${KEY_JWT#Bearer }
+KEY_IDS=()
+for _ in 1 2 3; do
+    http -X POST "$BASE/api/v1/api-keys" -H "Authorization: Bearer $KEY_JWT"
+    expect_eq "$HTTP_STATUS" 200 "POST /api/v1/api-keys"
+    KEY_IDS+=("$(jq -r .id <<<"$HTTP_BODY")")
+done
+http -X DELETE "$BASE/api/v1/api-keys/${KEY_IDS[0]}" -H "Authorization: Bearer $KEY_JWT"
+expect_eq "$HTTP_STATUS $(jq -r .error <<<"$HTTP_BODY")" "409 Revoke this key before deleting it." "an active key can't be deleted"
+for id in "${KEY_IDS[@]}"; do
+    http -X PATCH "$BASE/api/v1/api-keys/$id/revoke" -H "Authorization: Bearer $KEY_JWT"
+    expect_eq "$HTTP_STATUS" 200 "PATCH /api/v1/api-keys/$id/revoke"
+done
+http -X DELETE "$BASE/api/v1/api-keys/${KEY_IDS[0]}" -H "Authorization: Bearer $KEY_JWT"
+expect_eq "$HTTP_STATUS" 204 "the owner deletes a revoked key"
+expect_eq "$(psql_value "select count(*) from api_key where id = ${KEY_IDS[0]};")" 0 "its row is gone"
+http -X DELETE "$BASE/api/v1/api-keys/inactive" -H "Authorization: Bearer $ADMIN_JWT"
+expect_eq "$HTTP_STATUS" 200 "DELETE /api/v1/api-keys/inactive as admin@localhost"
+expect_eq "$(psql_value "select count(*) from api_key where id in (${KEY_IDS[1]}, ${KEY_IDS[2]});")" 2 "the admin's bulk delete leaves $USER_EMAIL's keys alone"
+http -X DELETE "$BASE/api/v1/api-keys/${KEY_IDS[1]}" -H "Authorization: Bearer $ADMIN_JWT"
+expect_eq "$HTTP_STATUS" 204 "an admin deletes someone else's revoked key"
+http -X DELETE "$BASE/api/v1/api-keys/inactive" -H "Authorization: Bearer $KEY_JWT"
+expect_eq "$HTTP_STATUS $(jq -c . <<<"$HTTP_BODY")" '200 {"deleted":1}' "the owner's bulk delete removes the last inactive key and answers the count"
+expect_eq "$(psql_value "select count(*) from api_key k join user_account u on u.id = k.owner_id where u.email = '$USER_EMAIL' and not k.active;")" 0 \
+    "$USER_EMAIL has no inactive key left"
 
 section "Done: every step passed"
