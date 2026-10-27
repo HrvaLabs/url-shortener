@@ -3,6 +3,7 @@ package cc.hrva.urlshortener.service.impl;
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.converter.UserToUserDtoConverter;
 import cc.hrva.urlshortener.converter.UserUpdateDtoToUserConverter;
+import cc.hrva.urlshortener.dto.AdminUserResponse;
 import cc.hrva.urlshortener.dto.ApiKeyResponse;
 import cc.hrva.urlshortener.dto.DataExportDto;
 import cc.hrva.urlshortener.dto.DeleteAccountDto;
@@ -134,7 +135,7 @@ public class DefaultUserService implements UserService {
     }
 
     @Override
-    public Page<User> fetchAllUsers(final Pageable pageable, final UserSearchDto search) {
+    public Page<AdminUserResponse> fetchAllUsers(final Pageable pageable, final UserSearchDto search) {
         final var possibleScammers = scammerSignalService.possibleScammerIds();
         final var onlyPossibleScammers = Boolean.TRUE.equals(search.getPossibleScammer());
         if (onlyPossibleScammers && possibleScammers.isEmpty()) {
@@ -143,8 +144,7 @@ public class DefaultUserService implements UserService {
 
         final var spec = buildSpecification(search, onlyPossibleScammers ? possibleScammers : null);
         final var users = spec == null ? userRepository.findAll(pageable) : userRepository.findAll(spec, pageable);
-        users.forEach(user -> user.setPossibleScammer(possibleScammers.contains(user.getId())));
-        return users;
+        return users.map(user -> AdminUserResponse.from(user, possibleScammers.contains(user.getId())));
     }
 
     private Specification<User> buildSpecification(final UserSearchDto search, final Set<Long> possibleScammers) {
@@ -235,7 +235,7 @@ public class DefaultUserService implements UserService {
 
     @Override
     @Transactional
-    public User updateUser(final UserUpdateDto userUpdateDto) {
+    public AdminUserResponse updateUser(final UserUpdateDto userUpdateDto) {
         log.info("Update user id={}", userUpdateDto.getId());
 
         final var existingUser = userRepository.findById(userUpdateDto.getId())
@@ -257,7 +257,7 @@ public class DefaultUserService implements UserService {
             cascadeDeactivation(updatedUser);
         }
 
-        return updatedUser;
+        return AdminUserResponse.from(updatedUser);
     }
 
     @Override

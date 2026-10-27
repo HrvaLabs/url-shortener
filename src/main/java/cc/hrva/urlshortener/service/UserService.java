@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.service;
 
+import cc.hrva.urlshortener.dto.AdminUserResponse;
 import cc.hrva.urlshortener.dto.DataExportDto;
 import cc.hrva.urlshortener.dto.DeleteAccountDto;
 import cc.hrva.urlshortener.dto.PasswordResetDto;
@@ -17,7 +18,7 @@ public interface UserService {
     User getUserFromToken();
     User register(User user);
     UserDto fetchCurrentUser();
-    Page<User> fetchAllUsers(Pageable pageable, UserSearchDto search);
+    Page<AdminUserResponse> fetchAllUsers(Pageable pageable, UserSearchDto search);
     void persistUser(User user);
     void deleteUserById(Long id);
     void deleteOwnAccount(DeleteAccountDto deleteAccountDto);
@@ -27,7 +28,7 @@ public interface UserService {
     void deactivate(User user);
     User fetchUserFromEmail(String email);
     User fetchActiveUserByEmail(String email);
-    User updateUser(UserUpdateDto userUpdateDto);
+    AdminUserResponse updateUser(UserUpdateDto userUpdateDto);
     User updatePassword(UpdatePasswordDto updatePasswordDto);
     User resetPassword(PasswordResetDto passwordResetDto);
     void sendPasswordResetLinkToUser(RequestPasswordResetDto requestPasswordResetDto);

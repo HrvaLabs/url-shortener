@@ -1,6 +1,7 @@
 package cc.hrva.urlshortener.controller;
 
 import cc.hrva.urlshortener.audit.Audited;
+import cc.hrva.urlshortener.dto.AdminUserResponse;
 import cc.hrva.urlshortener.dto.DataExportDto;
 import cc.hrva.urlshortener.dto.DeleteAccountDto;
 import cc.hrva.urlshortener.dto.UpdatePasswordDto;
@@ -47,7 +48,7 @@ public class UserController {
     @Operation(summary = "Get all users (admin)", description = "Retrieve paginated list of all users. Supports filtering by search and active. Requires ROLE_ADMIN.")
     @GetMapping
     @PreAuthorize("hasRole('ROLE_ADMIN')")
-    public ResponseEntity<Page<User>> fetchAllUsers(
+    public ResponseEntity<Page<AdminUserResponse>> fetchAllUsers(
             @PageableDefault(size = 20) final Pageable pageable,
             @ModelAttribute final UserSearchDto search) {
         return ResponseEntity.ok(userService.fetchAllUsers(pageable, search));
@@ -72,7 +73,7 @@ public class UserController {
     @PutMapping("/{id}")
     @PreAuthorize("hasRole('ROLE_ADMIN')")
     @Audited(AuditAction.UPDATE_USER)
-    public ResponseEntity<User> updateUser(
+    public ResponseEntity<AdminUserResponse> updateUser(
             @PathVariable final Long id,
             @Valid @RequestBody final UserUpdateDto userUpdateDto) {
         userUpdateDto.setId(id);

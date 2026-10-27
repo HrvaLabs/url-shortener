@@ -4,6 +4,7 @@ import cc.hrva.urlshortener.configuration.GlobalExceptionHandler;
 import java.util.Collections;
 import java.util.List;
 import cc.hrva.urlshortener.configuration.GlobalExceptionHandler;
+import cc.hrva.urlshortener.dto.AdminUserResponse;
 import cc.hrva.urlshortener.dto.DeleteAccountDto;
 import cc.hrva.urlshortener.dto.UpdatePasswordDto;
 import cc.hrva.urlshortener.dto.UserDto;
@@ -75,7 +76,7 @@ class UserControllerTest {
 
     @Test
     void shouldGetAllUsers() throws Exception {
-        final var userList = Collections.singletonList(User.builder().id(1L).email("test@example.com").build());
+        final var userList = Collections.singletonList(AdminUserResponse.from(User.builder().id(1L).email("test@example.com").build(), false));
         final var pageable = PageRequest.of(0, 20);
         final var users = new PageImpl<>(userList, pageable, userList.size());
         when(userService.fetchAllUsers(any(Pageable.class), any())).thenReturn(users);
@@ -87,7 +88,7 @@ class UserControllerTest {
 
     @Test
     void theUserListFiltersPossibleScammersServerSideAndMarksEachRow() throws Exception {
-        final var scammer = User.builder().id(27L).email("rhea@gmail.com").possibleScammer(true).build();
+        final var scammer = AdminUserResponse.from(User.builder().id(27L).email("rhea@gmail.com").build(), true);
         final var search = ArgumentCaptor.forClass(UserSearchDto.class);
         when(userService.fetchAllUsers(any(Pageable.class), search.capture())).thenReturn(new PageImpl<>(List.of(scammer), PageRequest.of(0, 20), 1));
 
@@ -102,7 +103,7 @@ class UserControllerTest {
 
     @Test
     void aUserRowOutsideTheAdminListHasNoPossibleScammerField() throws Exception {
-        when(userService.updateUser(any(UserUpdateDto.class))).thenReturn(User.builder().id(1L).email("test@example.com").build());
+        when(userService.updateUser(any(UserUpdateDto.class))).thenReturn(AdminUserResponse.from(User.builder().id(1L).email("test@example.com").build()));
 
         mockMvc.perform(put("/api/v1/users/1")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -121,7 +122,7 @@ class UserControllerTest {
 
     @Test
     void shouldUpdateUser() throws Exception {
-        final var user = User.builder().id(1L).email("test@example.com").build();
+        final var user = AdminUserResponse.from(User.builder().id(1L).email("test@example.com").build());
         when(userService.updateUser(any(UserUpdateDto.class))).thenReturn(user);
 
         mockMvc.perform(put("/api/v1/users/1")

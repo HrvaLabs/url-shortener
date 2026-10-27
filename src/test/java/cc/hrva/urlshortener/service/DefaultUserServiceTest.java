@@ -16,6 +16,7 @@ import java.util.stream.IntStream;
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.converter.UserToUserDtoConverter;
 import cc.hrva.urlshortener.converter.UserUpdateDtoToUserConverter;
+import cc.hrva.urlshortener.dto.AdminUserResponse;
 import cc.hrva.urlshortener.dto.DataExportDto;
 import cc.hrva.urlshortener.dto.DataExportDto.BioButtonExport;
 import cc.hrva.urlshortener.dto.DataExportDto.BioPageExport;
@@ -357,7 +358,7 @@ class DefaultUserServiceTest {
         final var users = new PageImpl<>(Collections.singletonList(User.builder().id(1L).build()));
         when(userRepository.findAll(pageable)).thenReturn(users);
 
-        assertThat(userService.fetchAllUsers(pageable, new UserSearchDto())).isEqualTo(users);
+        assertThat(userService.fetchAllUsers(pageable, new UserSearchDto()).getContent()).extracting(AdminUserResponse::id).containsExactly(1L);
     }
 
     @Test
@@ -370,7 +371,7 @@ class DefaultUserServiceTest {
 
         final var users = userService.fetchAllUsers(pageable, new UserSearchDto());
 
-        assertThat(users.getContent()).extracting(User::getId, User::getPossibleScammer)
+        assertThat(users.getContent()).extracting(AdminUserResponse::id, AdminUserResponse::possibleScammer)
                 .containsExactly(org.assertj.core.groups.Tuple.tuple(27L, true), org.assertj.core.groups.Tuple.tuple(28L, false));
         verify(scammerSignalService).possibleScammerIds();
     }
@@ -387,7 +388,7 @@ class DefaultUserServiceTest {
         final var users = userService.fetchAllUsers(pageable, search);
 
         assertThat(users.getTotalElements()).isEqualTo(1);
-        assertThat(users.getContent()).singleElement().extracting(User::getPossibleScammer).isEqualTo(true);
+        assertThat(users.getContent()).singleElement().extracting(AdminUserResponse::possibleScammer).isEqualTo(true);
         verify(userRepository, never()).findAll(pageable);
     }
 
@@ -414,7 +415,7 @@ class DefaultUserServiceTest {
 
         when(userRepository.findAll(any(Specification.class), eq(pageable))).thenReturn(users);
 
-        assertThat(userService.fetchAllUsers(pageable, search)).isEqualTo(users);
+        assertThat(userService.fetchAllUsers(pageable, search).getContent()).extracting(AdminUserResponse::email).containsExactly("test@example.com");
     }
 
     @Test
@@ -427,7 +428,7 @@ class DefaultUserServiceTest {
 
         when(userRepository.findAll(any(Specification.class), eq(pageable))).thenReturn(users);
 
-        assertThat(userService.fetchAllUsers(pageable, search)).isEqualTo(users);
+        assertThat(userService.fetchAllUsers(pageable, search).getContent()).extracting(AdminUserResponse::active).containsExactly(true);
     }
 
     @Test
@@ -489,7 +490,7 @@ class DefaultUserServiceTest {
 
         final var result = userService.updateUser(updateDto);
 
-        assertThat(result).isEqualTo(user);
+        assertThat(result.id()).isEqualTo(1L);
     }
 
     @Test
