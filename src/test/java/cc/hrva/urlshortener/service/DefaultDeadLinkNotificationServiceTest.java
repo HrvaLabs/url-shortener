@@ -1,5 +1,8 @@
 package cc.hrva.urlshortener.service;
 
+import cc.hrva.urlshortener.client.DestinationProber;
+import cc.hrva.urlshortener.client.ProbeOutcome;
+import cc.hrva.urlshortener.client.ProbeResult;
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.dto.notification.DeadLinksEmail;
 import cc.hrva.urlshortener.model.NotificationChannel;
@@ -9,15 +12,21 @@ import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.enums.ChannelType;
 import cc.hrva.urlshortener.model.enums.ConsentSource;
 import cc.hrva.urlshortener.model.enums.NotificationType;
+import cc.hrva.urlshortener.repository.DestinationCheckRepository;
 import cc.hrva.urlshortener.repository.NotificationChannelRepository;
+import cc.hrva.urlshortener.repository.NotificationClaimRepository;
 import cc.hrva.urlshortener.repository.NotificationConsentRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
+import cc.hrva.urlshortener.service.analytics.AnalyticsDays;
 import cc.hrva.urlshortener.service.impl.DefaultDeadLinkNotificationService;
+import cc.hrva.urlshortener.service.impl.DefaultDestinationCheckService;
 import cc.hrva.urlshortener.service.notification.ChannelContent;
 import cc.hrva.urlshortener.service.notification.DestinationCheckOutcome;
 import cc.hrva.urlshortener.service.notification.DestinationCheckOutcome.DeadLink;
 import cc.hrva.urlshortener.service.notification.EmailConsentReader;
+import cc.hrva.urlshortener.service.notification.HostPacer;
+import cc.hrva.urlshortener.service.notification.NetworkCanary;
 import cc.hrva.urlshortener.service.notification.NotificationMessages;
 import cc.hrva.urlshortener.service.notification.NotificationPayloads;
 import jakarta.persistence.EntityManagerFactory;
@@ -60,6 +69,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 
 @SpringBootTest(
         classes = DefaultDeadLinkNotificationServiceTest.TestApplication.class,
@@ -83,9 +93,16 @@ class DefaultDeadLinkNotificationServiceTest {
     private static final LocalDate NIGHT = LocalDate.of(2026, 10, 27);
     private static final LocalDateTime DIED = LocalDateTime.of(2026, 10, 27, 1, 14);
     private static final LocalDateTime DIED_BEFORE = LocalDateTime.of(2026, 10, 19, 23, 30);
+    private static final LocalDateTime BEFORE_TONIGHT = LocalDateTime.of(2026, 10, 26, 22, 59);
 
     @Autowired
     private DeadLinkNotificationService deadLinkNotificationService;
+
+    @Autowired
+    private DestinationCheckService destinationCheckService;
+
+    @Autowired
+    private DestinationCheckRepository destinationCheckRepository;
 
     @Autowired
     private UrlRepository urlRepository;
@@ -117,6 +134,15 @@ class DefaultDeadLinkNotificationServiceTest {
     @MockitoBean
     private NotificationDeliveryService deliveryService;
 
+    @MockitoBean
+    private DestinationProber destinationProber;
+
+    @MockitoBean
+    private NetworkCanary networkCanary;
+
+    @MockitoBean
+    private HostPacer.Sleeper hostPacerSleeper;
+
     private User ana;
     private User bob;
 
@@ -128,6 +154,7 @@ class DefaultDeadLinkNotificationServiceTest {
 
     @AfterEach
     void tearDown() {
+        jdbcTemplate.update("delete from notification_claim");
         jdbcTemplate.update("delete from notification_consent");
         jdbcTemplate.update("delete from notification_channel");
         jdbcTemplate.update("delete from url");
@@ -345,6 +372,113 @@ class DefaultDeadLinkNotificationServiceTest {
     }
 
     @Test
+    void aSecondNoticeTheSameNightSendsNoSecondEmail() {
+        emailConsent(ana);
+        final var link = dead(link(ana, "anas-menu"));
+
+        deadLinkNotificationService.notify(new DestinationCheckOutcome(List.of(link), List.of(), NIGHT));
+        deadLinkNotificationService.notify(new DestinationCheckOutcome(List.of(link), List.of(), NIGHT));
+
+        verify(sendingEmailService, times(1)).sendDeadLinksEmail(any());
+        assertThat(jdbcTemplate.queryForList("select claim_key from notification_claim where user_id = ?", String.class, ana.getId()))
+                .containsExactly("dead-email:2026-10-27");
+    }
+
+    @Test
+    void theNextNightsNoticeEmailsAgain() {
+        emailConsent(ana);
+        final var link = dead(link(ana, "anas-menu"));
+
+        deadLinkNotificationService.notify(new DestinationCheckOutcome(List.of(link), List.of(), NIGHT));
+        deadLinkNotificationService.notify(new DestinationCheckOutcome(List.of(link), List.of(), NIGHT.plusDays(1)));
+
+        verify(sendingEmailService, times(2)).sendDeadLinksEmail(any());
+    }
+
+    @Test
+    void aLinkThatDiedEarlierTonightIsCaughtUpWhenTheCheckRunsAgain() {
+        emailConsent(ana);
+        channel(ana, NotificationType.LINK_DEAD);
+        final var link = checkedTonight(dead(link(ana, "anas-menu")));
+
+        destinationCheckService.runNightly();
+
+        verifyNoInteractions(destinationProber);
+        final var sent = ArgumentCaptor.forClass(DeadLinksEmail.class);
+        verify(sendingEmailService).sendDeadLinksEmail(sent.capture());
+        assertThat(sent.getValue()).isEqualTo(new DeadLinksEmail(ana.getId(), "ana@example.com", List.of(link), "https://app.hrva.cc/dashboard"));
+        final var content = contentCaptor();
+        verify(deliveryService).enqueue(eq(NotificationType.LINK_DEAD), eq("link.dead:2026-10-27"), any(), content.capture());
+        assertThat(content.getValue()).containsOnlyKeys(ana.getId());
+        assertThat(content.getValue().get(ana.getId())).isEqualTo(new ChannelContent(payloads.linkDead(List.of(link)), messages.linkDead(List.of(link))));
+    }
+
+    @Test
+    void aCaughtUpLinkIsNotEmailedTwiceTheSameNight() {
+        emailConsent(ana);
+        final var link = dead(link(ana, "anas-menu"));
+        deadLinkNotificationService.notify(new DestinationCheckOutcome(List.of(link), List.of(), NIGHT));
+        checkedTonight(link);
+
+        destinationCheckService.runNightly();
+
+        verify(sendingEmailService, times(1)).sendDeadLinksEmail(any());
+    }
+
+    @Test
+    void aLinkThatDiesInThisRunIsListedOnce() {
+        emailConsent(ana);
+        final var url = link(ana, "anas-menu");
+        jdbcTemplate.update("update url set destination_fail_streak = 2 where id = ?", url.getId());
+        when(destinationProber.probe(eq(url.getLongUrl()), any(), any())).thenReturn(new ProbeResult(ProbeOutcome.DEAD, "404", 404));
+
+        destinationCheckService.runNightly();
+
+        final var sent = ArgumentCaptor.forClass(DeadLinksEmail.class);
+        verify(sendingEmailService).sendDeadLinksEmail(sent.capture());
+        assertThat(sent.getValue().links()).singleElement().satisfies(link -> assertThat(link.urlId()).isEqualTo(url.getId()));
+    }
+
+    @Test
+    void aLinkTheOwnerResetSinceItDiedTonightIsNotCaughtUp() {
+        emailConsent(ana);
+        channel(ana, NotificationType.LINK_DEAD);
+        final var link = checkedTonight(dead(link(ana, "anas-menu")));
+        destinationCheckRepository.reset(link.urlId());
+        when(destinationProber.probe(any(), any(), any())).thenReturn(new ProbeResult(ProbeOutcome.UNKNOWN, "timeout", null));
+
+        destinationCheckService.runNightly();
+
+        verify(sendingEmailService, never()).sendDeadLinksEmail(any());
+        verify(deliveryService, never()).enqueue(any(), anyString(), any(), anyMap());
+    }
+
+    @Test
+    void aLinkThatDiedOnAnEarlierNightIsNotCaughtUp() {
+        emailConsent(ana);
+        channel(ana, NotificationType.LINK_DEAD);
+        final var url = link(ana, "anas-menu");
+        jdbcTemplate.update("update url set destination_dead_since = ?, destination_last_status = '404', destination_fail_streak = 3, "
+                + "destination_checked_at = ? where id = ?", BEFORE_TONIGHT, DIED, url.getId());
+
+        destinationCheckService.runNightly();
+
+        verify(sendingEmailService, never()).sendDeadLinksEmail(any());
+        verify(deliveryService, never()).enqueue(any(), anyString(), any(), anyMap());
+    }
+
+    @Test
+    void aDeletedLinkThatDiedTonightIsNotCaughtUp() {
+        emailConsent(ana);
+        final var link = checkedTonight(dead(link(ana, "anas-menu")));
+        jdbcTemplate.update("delete from url where id = ?", link.urlId());
+
+        destinationCheckService.runNightly();
+
+        verify(sendingEmailService, never()).sendDeadLinksEmail(any());
+    }
+
+    @Test
     void oneOwnersFailedEmailDoesNotStopTheOthersOrTheChannels() {
         emailConsent(ana);
         emailConsent(bob);
@@ -384,6 +518,11 @@ class DefaultDeadLinkNotificationServiceTest {
         return new DeadLink(url.getId(), url.getOwner().getId(), url.getShortUrl(), url.getShortUrl() + ".example.org", DIED, "404");
     }
 
+    private DeadLink checkedTonight(final DeadLink link) {
+        jdbcTemplate.update("update url set destination_checked_at = ? where id = ?", DIED, link.urlId());
+        return link;
+    }
+
     private static DeadLink back(final Url url) {
         return new DeadLink(url.getId(), url.getOwner().getId(), url.getShortUrl(), url.getShortUrl() + ".example.org", DIED_BEFORE, null);
     }
@@ -410,6 +549,7 @@ class DefaultDeadLinkNotificationServiceTest {
                     type = FilterType.ASSIGNABLE_TYPE,
                     classes = {UrlRepository.class, UserRepository.class, NotificationConsentRepository.class, NotificationChannelRepository.class}))
     @Import({DefaultDeadLinkNotificationService.class, EmailConsentReader.class, NotificationMessages.class, NotificationPayloads.class,
+            NotificationClaimRepository.class, DefaultDestinationCheckService.class, DestinationCheckRepository.class, AnalyticsDays.class,
             TestApplication.Fixed.class})
     static class TestApplication {
 

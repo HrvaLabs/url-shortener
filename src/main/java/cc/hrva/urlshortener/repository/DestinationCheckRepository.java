@@ -42,6 +42,13 @@ public class DestinationCheckRepository {
             where id = :id
             """;
 
+    private static final String FIND_DIED_SINCE = """
+            select id, owner_id, short_url, long_url, destination_dead_since, destination_last_status
+            from url
+            where owner_id is not null and destination_dead_since >= :since
+            order by id
+            """;
+
     private static final String COUNT_DEAD = "select count(*) from url where active = true and destination_dead_since is not null";
     private static final String ANONYMOUS = " and owner_id is null";
     private static final String OWNED = " and owner_id is not null";
@@ -63,6 +70,16 @@ public class DestinationCheckRepository {
                 row.getObject("destination_dead_since", LocalDateTime.class),
                 row.getObject("owner_id", Long.class),
                 row.getString("short_url")));
+    }
+
+    public List<DiedLink> findDiedSince(final LocalDateTime since) {
+        return jdbcTemplate.query(FIND_DIED_SINCE, Map.of("since", since), (row, rowNumber) -> new DiedLink(
+                row.getLong("id"),
+                row.getLong("owner_id"),
+                row.getString("short_url"),
+                row.getString("long_url"),
+                row.getObject("destination_dead_since", LocalDateTime.class),
+                row.getString("destination_last_status")));
     }
 
     public boolean record(final long id, final String checkedUrl, final LocalDateTime checkedAt, final int failStreak,
@@ -92,6 +109,9 @@ public class DestinationCheckRepository {
     }
 
     public record DueLink(long id, String longUrl, int failStreak, LocalDateTime deadSince, Long ownerId, String shortUrl) {
+    }
+
+    public record DiedLink(long id, long ownerId, String shortUrl, String longUrl, LocalDateTime deadSince, String lastStatus) {
     }
 
 }

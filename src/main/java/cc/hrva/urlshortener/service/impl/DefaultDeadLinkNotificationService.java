@@ -5,6 +5,7 @@ import cc.hrva.urlshortener.model.NotificationChannel;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.enums.NotificationType;
 import cc.hrva.urlshortener.repository.NotificationChannelRepository;
+import cc.hrva.urlshortener.repository.NotificationClaimRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.service.DeadLinkNotificationService;
@@ -17,6 +18,10 @@ import cc.hrva.urlshortener.service.notification.EmailConsentReader;
 import cc.hrva.urlshortener.service.notification.NotificationMessages;
 import cc.hrva.urlshortener.service.notification.NotificationPayloads;
 import com.google.common.collect.Iterables;
+import java.time.Clock;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.List;
@@ -44,6 +49,7 @@ public class DefaultDeadLinkNotificationService implements DeadLinkNotificationS
     private static final String DASHBOARD = "/dashboard";
     private static final String LINK_DEAD_KEY = "link.dead:";
     private static final String LINK_BACK_KEY = "link.back:";
+    private static final String DEAD_EMAIL_CLAIM = "dead-email:";
     private static final int IDS_PER_QUERY = 1000;
 
     private final UrlRepository urlRepository;
@@ -54,7 +60,9 @@ public class DefaultDeadLinkNotificationService implements DeadLinkNotificationS
     private final NotificationDeliveryService notificationDeliveryService;
     private final NotificationMessages notificationMessages;
     private final NotificationPayloads notificationPayloads;
+    private final NotificationClaimRepository notificationClaimRepository;
     private final PlatformTransactionManager transactionManager;
+    private final Clock clock;
 
     @Override
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
@@ -69,8 +77,8 @@ public class DefaultDeadLinkNotificationService implements DeadLinkNotificationS
         final var deadByOwner = byOwner(newlyDead, recipients.stillDeadIds());
         final var backByOwner = byOwner(recovered, recipients.recoveredIds());
 
-        final var emails = sendEmails(deadByOwner, recipients.consentingEmails());
         final var night = outcome.night();
+        final var emails = sendEmails(night, deadByOwner, recipients.consentingEmails());
         final var deadDeliveries = enqueue(NotificationType.LINK_DEAD, LINK_DEAD_KEY + night, recipients.linkDeadChannels(), deadByOwner,
                 links -> new ChannelContent(notificationPayloads.linkDead(links), notificationMessages.linkDead(links)));
         final var backDeliveries = enqueue(NotificationType.LINK_BACK, LINK_BACK_KEY + night, recipients.linkBackChannels(), backByOwner,
@@ -111,8 +119,9 @@ public class DefaultDeadLinkNotificationService implements DeadLinkNotificationS
         return links.stream().map(DeadLink::urlId).collect(Collectors.toUnmodifiableSet());
     }
 
-    private int sendEmails(final Map<Long, List<DeadLink>> deadByOwner, final Map<Long, String> consentingEmails) {
+    private int sendEmails(final LocalDate night, final Map<Long, List<DeadLink>> deadByOwner, final Map<Long, String> consentingEmails) {
         final var dashboard = notificationMessages.frontendPage(DASHBOARD);
+        final var now = LocalDateTime.now(clock).truncatedTo(ChronoUnit.SECONDS);
         var queued = 0;
         for (final var entry : deadByOwner.entrySet()) {
             final var email = consentingEmails.get(entry.getKey());
@@ -120,6 +129,10 @@ public class DefaultDeadLinkNotificationService implements DeadLinkNotificationS
                 continue;
             }
             try {
+                if (!notificationClaimRepository.claim(entry.getKey(), DEAD_EMAIL_CLAIM + night, now)) {
+                    log.info("Dead link email already claimed owner id={} night={}", entry.getKey(), night);
+                    continue;
+                }
                 sendingEmailService.sendDeadLinksEmail(new DeadLinksEmail(entry.getKey(), email, entry.getValue(), dashboard));
                 queued++;
             } catch (final RuntimeException exception) {

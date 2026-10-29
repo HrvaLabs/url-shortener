@@ -5,6 +5,7 @@ import cc.hrva.urlshortener.client.ProbeOutcome;
 import cc.hrva.urlshortener.client.ProbeResult;
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.repository.DestinationCheckRepository;
+import cc.hrva.urlshortener.repository.DestinationCheckRepository.DiedLink;
 import cc.hrva.urlshortener.repository.DestinationCheckRepository.DueLink;
 import cc.hrva.urlshortener.service.analytics.AnalyticsDays;
 import cc.hrva.urlshortener.service.impl.DefaultDestinationCheckService;
@@ -561,6 +562,57 @@ class DefaultDestinationCheckServiceTest {
         service.runNightly();
 
         verify(deadLinkNotificationService).notify(DestinationCheckOutcome.nothing(NIGHT));
+    }
+
+    @Test
+    void runNightlyAddsLinksThatDiedEarlierTonightToTheNotices() {
+        final var dying = due(7L, "https://example.com/menu", 2, null, 40L);
+        answers.put(dying.longUrl(), NOT_FOUND);
+        batches(List.of(dying));
+        final var earlier = LocalDateTime.of(2026, 10, 26, 23, 40);
+        when(repository.findDiedSince(TONIGHT_STARTED)).thenReturn(List.of(
+                new DiedLink(5L, 41L, "shop", "https://Shop.Example.net/cart", earlier, "nxdomain"),
+                new DiedLink(7L, 40L, "menu", "https://example.com/menu", NOW_UTC, "404")));
+
+        service.runNightly();
+
+        verify(deadLinkNotificationService).notify(new DestinationCheckOutcome(
+                List.of(new DeadLink(7L, 40L, "menu", "example.com", NOW_UTC, "404"),
+                        new DeadLink(5L, 41L, "shop", "shop.example.net", earlier, "nxdomain")),
+                List.of(),
+                NIGHT));
+        assertThat(messages()).contains("Destination check caught up links that died earlier tonight night=2026-10-27 links=1");
+    }
+
+    @Test
+    void aFailedCatchUpStillHandsOverTheRunsOutcome() {
+        final var dying = due(7L, "https://example.com/menu", 2, null, 40L);
+        answers.put(dying.longUrl(), NOT_FOUND);
+        batches(List.of(dying));
+        when(repository.findDiedSince(any())).thenThrow(new QueryTimeoutException("slow"));
+
+        service.runNightly();
+
+        verify(deadLinkNotificationService).notify(new DestinationCheckOutcome(
+                List.of(new DeadLink(7L, 40L, "menu", "example.com", NOW_UTC, "404")), List.of(), NIGHT));
+    }
+
+    @Test
+    void aTurnedOffCheckCatchesNothingUp() {
+        appProperties.getDestinationCheck().setEnabled(false);
+
+        service.runNightly();
+
+        verify(repository, never()).findDiedSince(any());
+    }
+
+    @Test
+    void checkAllAloneCatchesNothingUp() {
+        batches(List.of());
+
+        service.checkAll();
+
+        verify(repository, never()).findDiedSince(any());
     }
 
     @Test

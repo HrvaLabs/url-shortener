@@ -4,6 +4,7 @@ import cc.hrva.urlshortener.client.DestinationProber;
 import cc.hrva.urlshortener.client.ProbeResult;
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.repository.DestinationCheckRepository;
+import cc.hrva.urlshortener.repository.DestinationCheckRepository.DiedLink;
 import cc.hrva.urlshortener.repository.DestinationCheckRepository.DueLink;
 import cc.hrva.urlshortener.service.DeadLinkNotificationService;
 import cc.hrva.urlshortener.service.DestinationCheckService;
@@ -22,11 +23,13 @@ import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Async;
@@ -61,26 +64,59 @@ public class DefaultDestinationCheckService implements DestinationCheckService {
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public DestinationCheckOutcome checkAll() {
         final var night = analyticsDays.today();
-        if (!appProperties.getDestinationCheck().isEnabled()) {
-            log.info("Destination check is turned off");
-            return DestinationCheckOutcome.nothing(night);
-        }
-        if (!running.compareAndSet(false, true)) {
-            log.info("Destination check skipped: the previous run is still going");
-            return DestinationCheckOutcome.nothing(night);
-        }
-        try {
-            return new Run(night).check();
-        } finally {
-            running.set(false);
-        }
+        return checked(night).orElseGet(() -> DestinationCheckOutcome.nothing(night));
     }
 
     @Async
     @Override
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public void runNightly() {
-        deadLinkNotificationService.notify(checkAll());
+        final var night = analyticsDays.today();
+        deadLinkNotificationService.notify(checked(night).map(this::withLinksThatDiedEarlierTonight)
+                .orElseGet(() -> DestinationCheckOutcome.nothing(night)));
+    }
+
+    private Optional<DestinationCheckOutcome> checked(final LocalDate night) {
+        if (!appProperties.getDestinationCheck().isEnabled()) {
+            log.info("Destination check is turned off");
+            return Optional.empty();
+        }
+        if (!running.compareAndSet(false, true)) {
+            log.info("Destination check skipped: the previous run is still going");
+            return Optional.empty();
+        }
+        try {
+            return Optional.of(new Run(night).check());
+        } finally {
+            running.set(false);
+        }
+    }
+
+    private DestinationCheckOutcome withLinksThatDiedEarlierTonight(final DestinationCheckOutcome outcome) {
+        final List<DiedLink> died;
+        try {
+            died = destinationCheckRepository.findDiedSince(nightStart(outcome.night()));
+        } catch (final RuntimeException exception) {
+            log.warn("Links that died earlier tonight couldn't be read exception={}", exception.getClass().getName());
+            return outcome;
+        }
+        final var known = outcome.newlyDead().stream().map(DeadLink::urlId).collect(Collectors.toUnmodifiableSet());
+        final var caughtUp = died.stream()
+                .filter(link -> !known.contains(link.id()))
+                .map(link -> new DeadLink(link.id(), link.ownerId(), link.shortUrl(), DomainNames.hostOf(link.longUrl()).orElse(null),
+                        link.deadSince(), link.lastStatus()))
+                .toList();
+        if (caughtUp.isEmpty()) {
+            return outcome;
+        }
+        log.info("Destination check caught up links that died earlier tonight night={} links={}", outcome.night(), caughtUp.size());
+        final var newlyDead = new ArrayList<>(outcome.newlyDead());
+        newlyDead.addAll(caughtUp);
+        return new DestinationCheckOutcome(List.copyOf(newlyDead), outcome.recovered(), outcome.night());
+    }
+
+    private LocalDateTime nightStart(final LocalDate night) {
+        return LocalDateTime.ofInstant(night.atStartOfDay(analyticsDays.zone()).toInstant(), clock.getZone());
     }
 
     private enum Verdict {
@@ -112,7 +148,7 @@ public class DefaultDestinationCheckService implements DestinationCheckService {
 
         private Run(final LocalDate night) {
             this.night = night;
-            this.nightStart = LocalDateTime.ofInstant(night.atStartOfDay(analyticsDays.zone()).toInstant(), clock.getZone());
+            this.nightStart = nightStart(night);
             this.stopAt = clock.instant().plus(appProperties.getDestinationCheck().getBudget());
         }
 
