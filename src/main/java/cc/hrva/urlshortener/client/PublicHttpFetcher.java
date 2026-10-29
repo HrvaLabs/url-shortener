@@ -3,15 +3,20 @@ package cc.hrva.urlshortener.client;
 import cc.hrva.urlshortener.exception.UrlValidationException;
 import cc.hrva.urlshortener.util.PublicAddresses;
 import cc.hrva.urlshortener.util.RedirectLocations;
+import java.io.EOFException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.ConnectException;
+import java.net.InetAddress;
+import java.net.SocketException;
 import java.net.URI;
 import java.net.UnknownHostException;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.net.http.HttpTimeoutException;
+import java.nio.channels.ClosedChannelException;
+import java.nio.channels.UnresolvedAddressException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -22,6 +27,10 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
@@ -56,6 +65,8 @@ public class PublicHttpFetcher {
     private static final Set<Integer> CONFIRMED_WITH_GET = Set.of(404, 405, 410, 501);
     private static final String PROBE_RANGE = "bytes=0-1023";
     private static final String PROBE_ERROR = "error";
+    private static final String PROBE_UNREACHABLE = "unreachable";
+    private static final ExecutorService RESOLVER_THREADS = Executors.newThreadPerTaskExecutor(Thread.ofVirtual().name("probe-dns-", 1).factory());
     private static final String POST_NOT_ALLOWED = "not-allowed";
     private static final String POST_REDIRECTED = "redirected";
     private static final String POST_TIMEOUT = "timeout";
@@ -152,7 +163,7 @@ public class PublicHttpFetcher {
         try {
             return probeHops(url, new ProbeDeadline(System.nanoTime() + budget.toNanos()), beforeEachRequest);
         } catch (final IOException exception) {
-            return transportFailure(exception);
+            return classify(exception);
         } catch (final IllegalArgumentException exception) {
             return new ProbeResult(ProbeOutcome.UNKNOWN, PROBE_ERROR, null);
         } catch (final InterruptedException exception) {
@@ -195,14 +206,12 @@ public class PublicHttpFetcher {
             if (uri.isEmpty()) {
                 return new ProbeResult(ProbeOutcome.UNKNOWN, PROBE_ERROR, null);
             }
-            final var refusal = refusal(uri.get().getHost());
-            if (refusal.isPresent()) {
-                return refusal.get();
-            }
-
             var answer = probeRequest(uri.get(), false, deadline, beforeEachRequest);
-            if (CONFIRMED_WITH_GET.contains(answer.status())) {
+            if (answer.refusal() == null && CONFIRMED_WITH_GET.contains(answer.status())) {
                 answer = probeRequest(uri.get(), true, deadline, beforeEachRequest);
+            }
+            if (answer.refusal() != null) {
+                return answer.refusal();
             }
             if (!REDIRECT_STATUSES.contains(answer.status()) || answer.location() == null) {
                 return judged(answer.status());
@@ -215,15 +224,28 @@ public class PublicHttpFetcher {
         }
     }
 
-    private Optional<ProbeResult> refusal(final String host) {
+    private Optional<ProbeResult> refusal(final String host, final ProbeDeadline deadline) throws IOException, InterruptedException {
         final var bare = host.startsWith("[") ? host.substring(1, host.length() - 1) : host;
+        final var lookup = CompletableFuture.supplyAsync(() -> {
+            try {
+                return resolver.resolve(bare);
+            } catch (final UnknownHostException exception) {
+                return null;
+            }
+        }, RESOLVER_THREADS);
+        final InetAddress[] addresses;
         try {
-            return PublicAddresses.arePublic(resolver.resolve(bare))
-                    ? Optional.empty()
-                    : Optional.of(new ProbeResult(ProbeOutcome.UNKNOWN, "private", null));
-        } catch (final UnknownHostException exception) {
+            addresses = lookup.get(Math.max(0, deadline.remaining()), TimeUnit.NANOSECONDS);
+        } catch (final TimeoutException exception) {
+            lookup.cancel(true);
+            throw new HttpTimeoutException(TIMED_OUT);
+        } catch (final ExecutionException exception) {
+            throw new IOException("lookup failed", exception.getCause());
+        }
+        if (addresses == null) {
             return Optional.of(new ProbeResult(ProbeOutcome.DEAD, "nxdomain", null));
         }
+        return PublicAddresses.arePublic(addresses) ? Optional.empty() : Optional.of(new ProbeResult(ProbeOutcome.UNKNOWN, "private", null));
     }
 
     private ProbeAnswer probeRequest(final URI uri, final boolean get, final ProbeDeadline deadline,
@@ -231,6 +253,10 @@ public class PublicHttpFetcher {
         final var waitStarted = System.nanoTime();
         beforeEachRequest.accept(uri.getHost());
         deadline.extend(System.nanoTime() - waitStarted);
+        final var refusal = refusal(uri.getHost(), deadline);
+        if (refusal.isPresent()) {
+            return new ProbeAnswer(0, null, refusal.get());
+        }
         final var remaining = deadline.remaining();
         if (remaining <= 0) {
             throw new HttpTimeoutException(TIMED_OUT);
@@ -245,7 +271,7 @@ public class PublicHttpFetcher {
         }
         final var response = httpClient.send(builder.build(), HttpResponse.BodyHandlers.ofInputStream());
         IOUtils.closeQuietly(response.body());
-        return new ProbeAnswer(response.statusCode(), response.headers().firstValue(HttpHeaders.LOCATION).orElse(null));
+        return new ProbeAnswer(response.statusCode(), response.headers().firstValue(HttpHeaders.LOCATION).orElse(null), null);
     }
 
     private static Optional<URI> webAddress(final String url) {
@@ -268,17 +294,26 @@ public class PublicHttpFetcher {
         return new ProbeResult(ProbeOutcome.UNKNOWN, "http-" + status, status);
     }
 
-    private static ProbeResult transportFailure(final IOException exception) {
+    static ProbeResult classify(final Throwable exception) {
         if (ExceptionUtils.indexOfType(exception, HttpTimeoutException.class) >= 0) {
             return new ProbeResult(ProbeOutcome.UNKNOWN, "timeout", null);
         }
-        if (ExceptionUtils.indexOfType(exception, ConnectException.class) >= 0) {
+        final var chain = ExceptionUtils.getThrowableList(exception);
+        final var rootCause = chain.getLast();
+        if (rootCause instanceof ConnectException || refusedThenClosed(chain)) {
             return new ProbeResult(ProbeOutcome.DEAD, "refused", null);
+        }
+        if (rootCause instanceof SocketException || rootCause instanceof EOFException || rootCause instanceof UnresolvedAddressException) {
+            return new ProbeResult(ProbeOutcome.UNKNOWN, PROBE_UNREACHABLE, null);
         }
         if (ExceptionUtils.indexOfType(exception, SSLException.class) >= 0) {
             return new ProbeResult(ProbeOutcome.DEAD, "tls", null);
         }
         return new ProbeResult(ProbeOutcome.UNKNOWN, PROBE_ERROR, null);
+    }
+
+    private static boolean refusedThenClosed(final List<Throwable> chain) {
+        return chain.size() > 1 && chain.getLast() instanceof ClosedChannelException && chain.get(chain.size() - 2) instanceof ConnectException;
     }
 
     private Optional<RedirectHop> nextHop(final List<RedirectHop> chain, final long deadline) {
@@ -450,7 +485,7 @@ public class PublicHttpFetcher {
         return new UrlValidationException("larger than " + limit);
     }
 
-    private record ProbeAnswer(int status, String location) {
+    private record ProbeAnswer(int status, String location, ProbeResult refusal) {
     }
 
     private static final class ProbeDeadline {

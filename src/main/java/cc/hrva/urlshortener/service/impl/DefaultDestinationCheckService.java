@@ -120,7 +120,7 @@ public class DefaultDestinationCheckService implements DestinationCheckService {
             final var attempted = new HashSet<Long>();
             try {
                 while (!stopped() && hasTimeLeft()) {
-                    final var due = destinationCheckRepository.findDue(nightStart, BATCH_SIZE).stream()
+                    final var due = destinationCheckRepository.findDue(nightStart, BATCH_SIZE, attempted).stream()
                             .filter(link -> attempted.add(link.id()))
                             .toList();
                     if (due.isEmpty()) {

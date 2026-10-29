@@ -186,7 +186,7 @@ class DefaultDestinationCheckServiceTest {
 
         service.checkAll();
 
-        verify(repository).findDue(TONIGHT_STARTED, 200);
+        verify(repository).findDue(eq(TONIGHT_STARTED), eq(200), any());
     }
 
     @Test
@@ -196,7 +196,7 @@ class DefaultDestinationCheckServiceTest {
 
         final var outcome = service.checkAll();
 
-        verify(repository).findDue(LocalDateTime.of(2026, 6, 30, 22, 0), 200);
+        verify(repository).findDue(eq(LocalDateTime.of(2026, 6, 30, 22, 0)), eq(200), any());
         assertThat(outcome.night()).isEqualTo(LocalDate.of(2026, 7, 1));
     }
 
@@ -210,8 +210,33 @@ class DefaultDestinationCheckServiceTest {
 
         service.checkAll();
 
-        verify(repository, times(3)).findDue(TONIGHT_STARTED, 200);
+        verify(repository, times(3)).findDue(eq(TONIGHT_STARTED), eq(200), any());
         assertThat(probed).containsExactly("https://example.com/a", "https://example.com/b");
+    }
+
+    @Test
+    void linksThatProducedNoWriteAreLeftOutOfTheNextBatch() {
+        final var edited = due(7L, "https://example.com/edited", 0, null, 40L);
+        final var next = due(8L, "https://example.com/next", 0, null, 40L);
+        answers.put(edited.longUrl(), ALIVE);
+        answers.put(next.longUrl(), ALIVE);
+        when(repository.record(eq(7L), anyString(), any(), anyInt(), any(), any())).thenReturn(false);
+        final var exclusions = new java.util.ArrayList<java.util.Set<Long>>();
+        when(repository.findDue(any(), anyInt(), any())).thenAnswer(invocation -> {
+            final java.util.Collection<Long> excluded = invocation.getArgument(2);
+            exclusions.add(java.util.Set.copyOf(excluded));
+            if (!excluded.contains(7L)) {
+                return List.of(edited);
+            }
+            return excluded.contains(8L) ? List.of() : List.of(next);
+        });
+
+        final var outcome = service.checkAll();
+
+        assertThat(probed).containsExactly("https://example.com/edited", "https://example.com/next");
+        assertThat(exclusions).containsExactly(java.util.Set.of(), java.util.Set.of(7L), java.util.Set.of(7L, 8L));
+        assertThat(messages()).anySatisfy(line -> assertThat(line).startsWith("Destination check finished").endsWith("stoppedEarly=false"));
+        assertThat(outcome.recovered()).isEmpty();
     }
 
     @Test
@@ -219,11 +244,11 @@ class DefaultDestinationCheckServiceTest {
         final var link = due(7L, "https://example.com/menu", 0, null, 40L);
         answers.put(link.longUrl(), ALIVE);
         when(repository.record(anyLong(), anyString(), any(), anyInt(), any(), any())).thenReturn(false);
-        when(repository.findDue(any(), anyInt())).thenReturn(List.of(link));
+        when(repository.findDue(any(), anyInt(), any())).thenReturn(List.of(link));
 
         service.checkAll();
 
-        verify(repository, times(2)).findDue(TONIGHT_STARTED, 200);
+        verify(repository, times(2)).findDue(eq(TONIGHT_STARTED), eq(200), any());
         assertThat(probed).containsExactly("https://example.com/menu");
     }
 
@@ -254,7 +279,7 @@ class DefaultDestinationCheckServiceTest {
         final var outcome = service.checkAll();
 
         verify(repository, never()).record(anyLong(), anyString(), any(), anyInt(), any(), any());
-        verify(repository, times(1)).findDue(any(), anyInt());
+        verify(repository, times(1)).findDue(any(), anyInt(), any());
         assertThat(outcome.newlyDead()).isEmpty();
         assertThat(messages()).contains("Destination check stopped: the network looks down")
                 .anyMatch(message -> message.startsWith("Destination check finished") && message.endsWith("stoppedEarly=true"));
@@ -300,7 +325,7 @@ class DefaultDestinationCheckServiceTest {
 
         service.checkAll();
 
-        verify(repository, times(1)).findDue(any(), anyInt());
+        verify(repository, times(1)).findDue(any(), anyInt(), any());
         assertThat(messages()).anyMatch(message -> message.endsWith("stoppedEarly=true"));
     }
 
@@ -329,7 +354,7 @@ class DefaultDestinationCheckServiceTest {
 
         final var outcome = service.checkAll();
 
-        verify(repository, never()).findDue(any(), anyInt());
+        verify(repository, never()).findDue(any(), anyInt(), any());
         assertThat(outcome).isEqualTo(new DestinationCheckOutcome(List.of(), List.of(), NIGHT));
     }
 
@@ -359,7 +384,7 @@ class DefaultDestinationCheckServiceTest {
             first.get(5, TimeUnit.SECONDS);
 
             assertThat(second).isEqualTo(new DestinationCheckOutcome(List.of(), List.of(), NIGHT));
-            verify(repository, times(2)).findDue(any(), anyInt());
+            verify(repository, times(2)).findDue(any(), anyInt(), any());
             assertThat(messages()).containsOnlyOnce("Destination check skipped: the previous run is still going");
         } finally {
             executor.shutdownNow();
@@ -367,7 +392,7 @@ class DefaultDestinationCheckServiceTest {
 
         batches(List.of());
         service.checkAll();
-        verify(repository, times(3)).findDue(any(), anyInt());
+        verify(repository, times(3)).findDue(any(), anyInt(), any());
     }
 
     @Test
@@ -482,7 +507,7 @@ class DefaultDestinationCheckServiceTest {
 
         batches(List.of());
         service.runNightly();
-        verify(repository).findDue(TONIGHT_STARTED, 200);
+        verify(repository).findDue(eq(TONIGHT_STARTED), eq(200), any());
     }
 
     private DestinationCheckService newService() {
@@ -504,7 +529,7 @@ class DefaultDestinationCheckServiceTest {
 
     @SafeVarargs
     private void batches(final List<DueLink>... batches) {
-        var stubbing = when(repository.findDue(any(), anyInt()));
+        var stubbing = when(repository.findDue(any(), anyInt(), any()));
         for (final var batch : batches) {
             stubbing = stubbing.thenReturn(batch);
         }

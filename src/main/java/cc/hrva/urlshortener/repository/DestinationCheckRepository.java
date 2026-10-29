@@ -1,6 +1,9 @@
 package cc.hrva.urlshortener.repository;
 
+import com.google.common.collect.Iterables;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import lombok.RequiredArgsConstructor;
@@ -17,9 +20,11 @@ public class DestinationCheckRepository {
             from url
             where active = true and block_reason is null and threat_type is null
               and (destination_checked_at is null or destination_checked_at < :nightStart)
+            %s
             order by destination_checked_at nulls first, id
             fetch first :limit rows only
             """;
+    private static final int EXCLUDED_PER_LIST = 1000;
 
     private static final String RECORD = """
             update url set destination_checked_at = :checkedAt, destination_fail_streak = :failStreak,
@@ -43,8 +48,15 @@ public class DestinationCheckRepository {
 
     private final NamedParameterJdbcTemplate jdbcTemplate;
 
-    public List<DueLink> findDue(final LocalDateTime nightStart, final int limit) {
-        return jdbcTemplate.query(FIND_DUE, Map.of("nightStart", nightStart, "limit", limit), (row, rowNumber) -> new DueLink(
+    public List<DueLink> findDue(final LocalDateTime nightStart, final int limit, final Collection<Long> excludedIds) {
+        final var parameters = new MapSqlParameterSource().addValue("nightStart", nightStart).addValue("limit", limit);
+        final var exclusions = new ArrayList<String>();
+        for (final var chunk : Iterables.partition(List.copyOf(excludedIds), EXCLUDED_PER_LIST)) {
+            final var name = "excluded" + exclusions.size();
+            parameters.addValue(name, chunk);
+            exclusions.add("and id not in (:" + name + ")");
+        }
+        return jdbcTemplate.query(FIND_DUE.formatted(String.join(" ", exclusions)), parameters, (row, rowNumber) -> new DueLink(
                 row.getLong("id"),
                 row.getString("long_url"),
                 row.getInt("destination_fail_streak"),

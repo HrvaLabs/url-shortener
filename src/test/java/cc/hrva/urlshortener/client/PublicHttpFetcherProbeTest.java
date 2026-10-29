@@ -3,9 +3,18 @@ package cc.hrva.urlshortener.client;
 import cc.hrva.urlshortener.configuration.PublicHttpFetcherConfiguration;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
+import java.io.EOFException;
 import java.io.IOException;
 import java.net.InetAddress;
+import java.net.ConnectException;
 import java.net.InetSocketAddress;
+import java.net.NoRouteToHostException;
+import java.net.SocketException;
+import java.net.http.HttpConnectTimeoutException;
+import java.net.http.HttpTimeoutException;
+import java.nio.channels.ClosedChannelException;
+import java.nio.channels.UnresolvedAddressException;
+import java.security.cert.CertificateException;
 import java.net.ServerSocket;
 import java.net.UnknownHostException;
 import java.nio.file.Path;
@@ -16,7 +25,11 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+import javax.net.ssl.SSLException;
+import javax.net.ssl.SSLHandshakeException;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -327,20 +340,137 @@ class PublicHttpFetcherProbeTest {
     }
 
     @Test
-    void everyRequestWaitsForItsHostsTurnAndTheWaitIsNotCountedAgainstTheBudget() {
+    void everyRequestWaitsForItsHostsTurnAndTheWaitIsNotCountedAgainstTheBudget() throws IOException {
         final Resolver resolver = host -> new InetAddress[] {InetAddress.getByAddress(host, PUBLIC_ADDRESS)};
         final var paced = new PublicHttpFetcher(PublicHttpFetcher.httpOrHttpsPublicOnly(), resolver);
         final var turns = new CopyOnWriteArrayList<String>();
-        redirect("/hop", "http://localhost:" + server.getAddress().getPort() + "/landing");
-        answer("/landing", 404, 200);
+        final var everyAddress = HttpServer.create(new InetSocketAddress(0), 0);
+        everyAddress.createContext("/landing", exchange -> {
+            record(exchange);
+            send(exchange, "HEAD".equals(exchange.getRequestMethod()) ? 404 : 200);
+        });
+        everyAddress.setExecutor(executor);
+        everyAddress.start();
+        try {
+            redirect("/hop", "http://localhost:" + everyAddress.getAddress().getPort() + "/landing");
 
-        final var result = paced.probe(baseUrl + "/hop", Duration.ofSeconds(1), host -> {
-            turns.add(host);
-            sleep(Duration.ofMillis(400));
+            final var result = paced.probe(baseUrl + "/hop", Duration.ofSeconds(1), host -> {
+                turns.add(host);
+                sleep(Duration.ofMillis(400));
+            });
+
+            assertThat(result).isEqualTo(new ProbeResult(ProbeOutcome.ALIVE, "ok", 200));
+            assertThat(turns).containsExactly("127.0.0.1", "localhost", "localhost");
+            assertThat(requests).containsExactly("HEAD /hop", "HEAD /landing", "GET /landing");
+        } finally {
+            everyAddress.stop(0);
+        }
+    }
+
+    @Test
+    void theAddressIsCheckedAgainAfterTheWaitRightBeforeTheRequest() {
+        answer("/ok", 200, 200);
+        final var rebound = new AtomicBoolean();
+        final Resolver resolver = host -> new InetAddress[] {InetAddress.getByAddress(host, rebound.get() ? PRIVATE_ADDRESS : PUBLIC_ADDRESS)};
+        final var guarded = new PublicHttpFetcher(PublicHttpFetcher.httpOrHttpsPublicOnly(), resolver);
+
+        final var result = guarded.probe(baseUrl + "/ok", BUDGET, host -> rebound.set(true));
+
+        assertThat(result).isEqualTo(new ProbeResult(ProbeOutcome.UNKNOWN, "private", null));
+        assertThat(requests).isEmpty();
+    }
+
+    @Test
+    void theGetFallbackChecksTheAddressAgainToo() {
+        answer("/head-only", 404, 200);
+        final var turns = new AtomicInteger();
+        final Resolver resolver = host -> new InetAddress[] {InetAddress.getByAddress(host, turns.get() > 1 ? PRIVATE_ADDRESS : PUBLIC_ADDRESS)};
+        final var guarded = new PublicHttpFetcher(PublicHttpFetcher.httpOrHttpsPublicOnly(), resolver);
+
+        final var result = guarded.probe(baseUrl + "/head-only", BUDGET, host -> turns.incrementAndGet());
+
+        assertThat(result).isEqualTo(new ProbeResult(ProbeOutcome.UNKNOWN, "private", null));
+        assertThat(requests).containsExactly("HEAD /head-only");
+    }
+
+    @Test
+    void aSlowResolverIsBoundByTheProbeBudget() {
+        final var slow = new PublicHttpFetcher(PublicHttpFetcher.httpOrHttpsPublicOnly(), host -> {
+            sleep(Duration.ofSeconds(5));
+            return publicResolver.resolve(host);
         });
 
-        assertThat(result).isEqualTo(new ProbeResult(ProbeOutcome.ALIVE, "ok", 200));
-        assertThat(turns).containsExactly("127.0.0.1", "localhost", "localhost");
+        final var started = System.nanoTime();
+        final var result = slow.probe("https://slow-dns.example/page", Duration.ofMillis(500));
+
+        assertThat(result).isEqualTo(new ProbeResult(ProbeOutcome.UNKNOWN, "timeout", null));
+        assertThat(Duration.ofNanos(System.nanoTime() - started)).isLessThan(Duration.ofSeconds(3));
+    }
+
+    @Test
+    void aRefusedConnectionIsDead() {
+        assertThat(PublicHttpFetcher.classify(connectFailure(new ConnectException("Connection refused"))))
+                .isEqualTo(new ProbeResult(ProbeOutcome.DEAD, "refused", null));
+        assertThat(PublicHttpFetcher.classify(new ConnectException("Connection refused")))
+                .isEqualTo(new ProbeResult(ProbeOutcome.DEAD, "refused", null));
+        assertThat(PublicHttpFetcher.classify(connectFailure(connectFailure(new ClosedChannelException()))))
+                .isEqualTo(new ProbeResult(ProbeOutcome.DEAD, "refused", null));
+    }
+
+    @Test
+    void aClosedChannelOutsideAConnectIsNotARefusal() {
+        assertThat(PublicHttpFetcher.classify(new IOException(new ClosedChannelException())))
+                .isEqualTo(new ProbeResult(ProbeOutcome.UNKNOWN, "error", null));
+    }
+
+    @Test
+    void anUnreachableNetworkIsUnknown() {
+        assertThat(PublicHttpFetcher.classify(connectFailure(new SocketException("Network is unreachable"))))
+                .isEqualTo(new ProbeResult(ProbeOutcome.UNKNOWN, "unreachable", null));
+    }
+
+    @Test
+    void anUnreachableHostIsUnknown() {
+        assertThat(PublicHttpFetcher.classify(connectFailure(new NoRouteToHostException("No route to host"))))
+                .isEqualTo(new ProbeResult(ProbeOutcome.UNKNOWN, "unreachable", null));
+    }
+
+    @Test
+    void anUnresolvedAddressIsUnknown() {
+        assertThat(PublicHttpFetcher.classify(connectFailure(new UnresolvedAddressException())))
+                .isEqualTo(new ProbeResult(ProbeOutcome.UNKNOWN, "unreachable", null));
+    }
+
+    @Test
+    void aHandshakeThePeerAbortedIsUnknown() {
+        assertThat(PublicHttpFetcher.classify(new IOException(new SSLHandshakeException("Remote host terminated the handshake", new EOFException()))))
+                .isEqualTo(new ProbeResult(ProbeOutcome.UNKNOWN, "unreachable", null));
+        assertThat(PublicHttpFetcher.classify(new SSLHandshakeException("handshake failed", new SocketException("Connection reset"))))
+                .isEqualTo(new ProbeResult(ProbeOutcome.UNKNOWN, "unreachable", null));
+        assertThat(PublicHttpFetcher.classify(new EOFException("EOF reached while reading")))
+                .isEqualTo(new ProbeResult(ProbeOutcome.UNKNOWN, "unreachable", null));
+    }
+
+    @Test
+    void aBrokenCertificateOrProtocolIsTls() {
+        assertThat(PublicHttpFetcher.classify(new SSLHandshakeException("PKIX path building failed", new CertificateException("untrusted"))))
+                .isEqualTo(new ProbeResult(ProbeOutcome.DEAD, "tls", null));
+        assertThat(PublicHttpFetcher.classify(new SSLException("Unsupported or unrecognized SSL message")))
+                .isEqualTo(new ProbeResult(ProbeOutcome.DEAD, "tls", null));
+    }
+
+    @Test
+    void aTimeoutAnywhereInTheChainIsUnknown() {
+        assertThat(PublicHttpFetcher.classify(new HttpConnectTimeoutException("connect timed out")))
+                .isEqualTo(new ProbeResult(ProbeOutcome.UNKNOWN, "timeout", null));
+        assertThat(PublicHttpFetcher.classify(new IOException(new HttpTimeoutException("request timed out"))))
+                .isEqualTo(new ProbeResult(ProbeOutcome.UNKNOWN, "timeout", null));
+    }
+
+    @Test
+    void anythingElseIsUnknownError() {
+        assertThat(PublicHttpFetcher.classify(new IOException("something odd")))
+                .isEqualTo(new ProbeResult(ProbeOutcome.UNKNOWN, "error", null));
     }
 
     @Test
@@ -360,6 +490,12 @@ class PublicHttpFetcherProbeTest {
         assertThat(recording.probe("https://\u017euti.example/stranica", BUDGET))
                 .isEqualTo(new ProbeResult(ProbeOutcome.DEAD, "nxdomain", null));
         assertThat(resolved).containsExactly("xn--uti-b3a.example");
+    }
+
+    private static ConnectException connectFailure(final Throwable rootCause) {
+        final var failure = new ConnectException();
+        failure.initCause(rootCause);
+        return failure;
     }
 
     private void answer(final String path, final int headStatus, final int getStatus) {

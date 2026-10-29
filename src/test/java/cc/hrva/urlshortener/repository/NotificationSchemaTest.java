@@ -242,7 +242,7 @@ class NotificationSchemaTest {
         destinationCheckRepository.touch(anonymous.getId(), anonymous.getLongUrl(), TONIGHT.minusDays(2));
         jdbcTemplate.update("update url set active = false where id = ?", inactive.getId());
 
-        final var due = destinationCheckRepository.findDue(TONIGHT, 10);
+        final var due = destinationCheckRepository.findDue(TONIGHT, 10, java.util.List.of());
 
         assertThat(due).extracting(DestinationCheckRepository.DueLink::id)
                 .containsExactly(neverChecked.getId(), anonymous.getId(), checkedYesterday.getId())
@@ -250,8 +250,24 @@ class NotificationSchemaTest {
         assertThat(due.getFirst()).isEqualTo(new DestinationCheckRepository.DueLink(
                 neverChecked.getId(), "https://example.org/never", 0, null, ana.getId(), "never"));
         assertThat(due.get(1).ownerId()).isNull();
-        assertThat(destinationCheckRepository.findDue(TONIGHT, 1)).extracting(DestinationCheckRepository.DueLink::id)
+        assertThat(destinationCheckRepository.findDue(TONIGHT, 1, java.util.List.of())).extracting(DestinationCheckRepository.DueLink::id)
                 .containsExactly(neverChecked.getId());
+    }
+
+    @Test
+    void findDueLeavesOutTheIdsAlreadyTriedThisRun() {
+        final var ana = savedUser("ana@example.com");
+        final var first = savedLink("first", ana);
+        final var second = savedLink("second", ana);
+        final var third = savedLink("third", ana);
+        final var excluded = new java.util.ArrayList<Long>(java.util.stream.LongStream.rangeClosed(1_000_000, 1_002_500).boxed().toList());
+        excluded.add(first.getId());
+        excluded.add(third.getId());
+
+        assertThat(destinationCheckRepository.findDue(TONIGHT, 10, excluded)).extracting(DestinationCheckRepository.DueLink::id)
+                .containsExactly(second.getId());
+        assertThat(destinationCheckRepository.findDue(TONIGHT, 10, java.util.List.of())).extracting(DestinationCheckRepository.DueLink::id)
+                .containsExactly(first.getId(), second.getId(), third.getId());
     }
 
     @Test
