@@ -1,6 +1,10 @@
 package cc.hrva.urlshortener.service;
 
+import cc.hrva.urlshortener.client.ChannelPoster;
+import cc.hrva.urlshortener.client.PostResult;
 import cc.hrva.urlshortener.client.Resolver;
+import cc.hrva.urlshortener.configuration.properties.AppProperties;
+import cc.hrva.urlshortener.dto.notification.ChannelTestResponse;
 import cc.hrva.urlshortener.dto.notification.LastDelivery;
 import cc.hrva.urlshortener.dto.notification.NotificationChannelRequest;
 import cc.hrva.urlshortener.dto.notification.NotificationChannelResponse;
@@ -19,13 +23,26 @@ import cc.hrva.urlshortener.repository.NotificationChannelRepository;
 import cc.hrva.urlshortener.repository.NotificationConsentRepository;
 import cc.hrva.urlshortener.service.impl.DefaultNotificationChannelService;
 import cc.hrva.urlshortener.service.notification.ChannelTargets;
+import cc.hrva.urlshortener.service.notification.NotificationMessages;
+import cc.hrva.urlshortener.service.notification.NotificationPayloads;
+import cc.hrva.urlshortener.service.notification.channel.ChannelSenders;
+import cc.hrva.urlshortener.service.notification.channel.DiscordChannelSender;
+import cc.hrva.urlshortener.service.notification.channel.NtfyChannelSender;
+import cc.hrva.urlshortener.service.notification.channel.SlackChannelSender;
+import cc.hrva.urlshortener.service.notification.channel.TelegramChannelSender;
+import cc.hrva.urlshortener.service.notification.channel.WebhookChannelSender;
 import cc.hrva.urlshortener.service.notification.NotificationTestKeys;
 import cc.hrva.urlshortener.service.notification.SecretBox;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiter;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiterUnavailableException;
 import cc.hrva.urlshortener.service.twostep.AccountLock;
 import java.net.InetAddress;
+import java.nio.charset.StandardCharsets;
+import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneOffset;
+import java.util.ArrayList;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.Base64;
@@ -40,6 +57,9 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.AbstractPlatformTransactionManager;
+import org.springframework.transaction.support.DefaultTransactionStatus;
 import tools.jackson.databind.json.JsonMapper;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -54,6 +74,7 @@ import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -69,6 +90,8 @@ class DefaultNotificationChannelServiceTest {
     private static final String TEST_KEY = "notify-test:user:7";
     private static final String EVENTS_TEXT = "Events must be LINK_DEAD, LINK_BACK, DAILY_SUMMARY or WEEKLY_SUMMARY";
     private static final long ANA = 7L;
+    private static final Instant NOW = Instant.parse("2026-10-27T02:14:09.456Z");
+    private static final LocalDateTime NOW_UTC = LocalDateTime.of(2026, 10, 27, 2, 14, 9);
 
     @Mock
     private NotificationChannelRepository notificationChannelRepository;
@@ -92,13 +115,26 @@ class DefaultNotificationChannelServiceTest {
     private final SecretBox secretBox = new SecretBox(NotificationTestKeys.keys());
     private final Resolver publicDns = host -> new InetAddress[] {InetAddress.ofLiteral("162.159.128.233")};
     private final JsonMapper jsonMapper = JsonMapper.builder().build();
+    private final Clock clock = Clock.fixed(NOW, ZoneOffset.UTC);
+    private final List<String> posted = new ArrayList<>();
+    private PostResult answer = new PostResult(204, null);
 
     private DefaultNotificationChannelService service;
 
     @BeforeEach
     void setUp() {
+        final var appProperties = new AppProperties();
+        appProperties.setServerUrl("https://hrva.cc");
+        appProperties.setFrontendUrl("https://app.hrva.cc");
+        final ChannelPoster poster = (url, contentType, headers, body, timeout) -> {
+            posted.add(url + " " + new String(body, StandardCharsets.UTF_8));
+            return answer;
+        };
+        final var senders = new ChannelSenders(List.of(new DiscordChannelSender(jsonMapper), new SlackChannelSender(jsonMapper),
+                new TelegramChannelSender(jsonMapper), new NtfyChannelSender(), new WebhookChannelSender()), poster);
         service = new DefaultNotificationChannelService(notificationChannelRepository, notificationConsentRepository, notificationConsentService,
-                userService, accountLock, rateLimiter, secretBox, new ChannelTargets(publicDns));
+                userService, accountLock, rateLimiter, secretBox, new ChannelTargets(publicDns), senders, new NotificationMessages(appProperties, clock),
+                new NotificationPayloads(jsonMapper, appProperties, clock), new NoResourceTransactionManager(), clock);
         lenient().when(userService.getUserFromToken()).thenReturn(user);
         lenient().when(accountLock.lock(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
         lenient().when(rateLimiter.tryAcquire(SETTINGS_KEY, 60, Duration.ofHours(1))).thenReturn(true);
@@ -542,6 +578,100 @@ class DefaultNotificationChannelServiceTest {
         assertThat(request.toString()).doesNotContain(NTFY_URL, NTFY_TOKEN, BOT_TOKEN, "-100999").contains("Team alerts");
     }
 
+    @Test
+    void testSendsTheTestMessageAndRecordsTheDelivery() {
+        owned(channel(ChannelType.DISCORD));
+
+        final var response = service.test(4L);
+
+        assertThat(response).isEqualTo(new ChannelTestResponse(true, 204, null));
+        assertThat(posted).singleElement().satisfies(post -> assertThat(post).startsWith(DISCORD_URL + " {")
+                .contains("**hrva.cc test: this channel works**", "This is a test from hrva.cc. Your channel works.", "Channel: Team alerts",
+                        "<https://app.hrva.cc/dashboard/settings#notifications>"));
+        verify(notificationChannelRepository).recordDelivery(4L, NOW_UTC, "SENT", 204, null);
+    }
+
+    @Test
+    void aWebhookTestIsTheSignedTestBody() {
+        owned(channel(ChannelType.WEBHOOK));
+
+        service.test(4L);
+
+        assertThat(posted).singleElement().satisfies(post -> assertThat(post)
+                .startsWith(WEBHOOK_URL + " {\"event\":\"test\",\"deliveryId\":\"test-")
+                .contains("\"createdAt\":\"2026-10-27T02:14:09Z\"", "\"message\":\"This is a test from hrva.cc. Your channel works.\""));
+    }
+
+    @Test
+    void testReportsAFailureInWords() {
+        owned(channel(ChannelType.DISCORD));
+        answer = new PostResult(404, null);
+
+        final var response = service.test(4L);
+
+        assertThat(response).isEqualTo(new ChannelTestResponse(false, 404, "The channel answered with HTTP 404. Check the URL."));
+        verify(notificationChannelRepository).recordDelivery(4L, NOW_UTC, "FAILED", 404, "The channel answered with HTTP 404. Check the URL.");
+    }
+
+    @Test
+    void aTestWithoutAnAnswerHasNoStatus() {
+        owned(channel(ChannelType.NTFY));
+        answer = new PostResult(0, "timeout");
+
+        final var response = service.test(4L);
+
+        assertThat(response).isEqualTo(new ChannelTestResponse(false, null, "Couldn't reach the channel: no answer within 10 seconds."));
+        verify(notificationChannelRepository).recordDelivery(4L, NOW_UTC, "FAILED", null, "Couldn't reach the channel: no answer within 10 seconds.");
+    }
+
+    @Test
+    void testDoesNotCountTowardAutoDisable() {
+        final var channel = owned(channel(ChannelType.DISCORD));
+        channel.setFailedDays(9);
+        channel.setLastFailedDay(LocalDate.of(2026, 10, 26));
+        answer = new PostResult(500, null);
+
+        service.test(4L);
+
+        assertThat(channel.getFailedDays()).isEqualTo(9);
+        assertThat(channel.isEnabled()).isTrue();
+        verify(notificationChannelRepository).findByIdAndOwnerId(4L, ANA);
+        verify(notificationChannelRepository).recordDelivery(4L, NOW_UTC, "FAILED", 500, "The channel answered with HTTP 500. Check the URL.");
+        verifyNoMoreInteractions(notificationChannelRepository);
+    }
+
+    @Test
+    void testLimiterDownIs503() {
+        owned(channel(ChannelType.DISCORD));
+        when(rateLimiter.tryAcquire(TEST_KEY, 10, Duration.ofMinutes(10))).thenThrow(new RateLimiterUnavailableException(new IllegalStateException("redis down")));
+
+        assertThatThrownBy(() -> service.test(4L))
+                .isInstanceOf(NotificationTestUnavailableException.class)
+                .hasMessage("Sending a test isn't available right now. Try again in a minute.");
+        assertThat(posted).isEmpty();
+        verify(notificationChannelRepository, never()).recordDelivery(anyLong(), any(), any(), any(), any());
+    }
+
+    @Test
+    void testsOverTheLimitAre429() {
+        owned(channel(ChannelType.DISCORD));
+        when(rateLimiter.tryAcquire(TEST_KEY, 10, Duration.ofMinutes(10))).thenReturn(false);
+
+        assertThatThrownBy(() -> service.test(4L))
+                .isInstanceOf(RateLimitExceededException.class)
+                .hasMessage("You've sent a lot of tests in a short time. Try again in a few minutes.");
+        assertThat(posted).isEmpty();
+    }
+
+    @Test
+    void aTestOfSomeoneElsesChannelIs404() {
+        when(notificationChannelRepository.findByIdAndOwnerId(4L, ANA)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.test(4L)).isInstanceOf(NotificationChannelNotFoundException.class);
+        assertThat(posted).isEmpty();
+        verify(rateLimiter, never()).tryAcquire(eq(TEST_KEY), anyInt(), any());
+    }
+
     private NotificationChannel owned(final NotificationChannel channel) {
         lenient().when(notificationChannelRepository.findByIdAndOwnerId(channel.getId(), ANA)).thenReturn(Optional.of(channel));
         return channel;
@@ -592,6 +722,27 @@ class DefaultNotificationChannelServiceTest {
 
     private static NotificationChannelRequest.NotificationChannelRequestBuilder request(final ChannelType type) {
         return NotificationChannelRequest.builder().name("Team alerts").type(type).enabled(true).events(Set.of("LINK_DEAD"));
+    }
+
+    private static final class NoResourceTransactionManager extends AbstractPlatformTransactionManager {
+
+        @Override
+        protected Object doGetTransaction() {
+            return new Object();
+        }
+
+        @Override
+        protected void doBegin(final Object transaction, final TransactionDefinition definition) {
+        }
+
+        @Override
+        protected void doCommit(final DefaultTransactionStatus status) {
+        }
+
+        @Override
+        protected void doRollback(final DefaultTransactionStatus status) {
+        }
+
     }
 
 }

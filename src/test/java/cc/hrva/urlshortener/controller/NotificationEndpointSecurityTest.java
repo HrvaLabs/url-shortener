@@ -9,6 +9,8 @@ import cc.hrva.urlshortener.configuration.WebConfiguration;
 import cc.hrva.urlshortener.mcp.McpResourceServerConfiguration;
 import cc.hrva.urlshortener.mcp.authorization.AuthorizationServerConfiguration;
 import cc.hrva.urlshortener.mcp.bridge.ConnectRequestStore;
+import cc.hrva.urlshortener.client.ChannelPoster;
+import cc.hrva.urlshortener.client.PostResult;
 import cc.hrva.urlshortener.client.Resolver;
 import cc.hrva.urlshortener.model.NotificationConsent;
 import cc.hrva.urlshortener.model.User;
@@ -27,7 +29,15 @@ import cc.hrva.urlshortener.service.notification.ChannelTargets;
 import cc.hrva.urlshortener.service.notification.EmailConsentReader;
 import cc.hrva.urlshortener.service.notification.NotificationKeys;
 import cc.hrva.urlshortener.service.notification.NotificationTestKeys;
+import cc.hrva.urlshortener.service.notification.NotificationMessages;
+import cc.hrva.urlshortener.service.notification.NotificationPayloads;
 import cc.hrva.urlshortener.service.notification.SecretBox;
+import cc.hrva.urlshortener.service.notification.channel.ChannelSenders;
+import cc.hrva.urlshortener.service.notification.channel.DiscordChannelSender;
+import cc.hrva.urlshortener.service.notification.channel.NtfyChannelSender;
+import cc.hrva.urlshortener.service.notification.channel.SlackChannelSender;
+import cc.hrva.urlshortener.service.notification.channel.TelegramChannelSender;
+import cc.hrva.urlshortener.service.notification.channel.WebhookChannelSender;
 import cc.hrva.urlshortener.service.notification.UnsubscribeTokens;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiter;
 import cc.hrva.urlshortener.service.twostep.AccountLock;
@@ -393,6 +403,7 @@ class NotificationEndpointSecurityTest {
         mockMvc.perform(put(CHANNELS + "/1").contentType(MediaType.APPLICATION_JSON).content(DISCORD_CHANNEL)).andExpect(status().isUnauthorized());
         mockMvc.perform(delete(CHANNELS + "/1")).andExpect(status().isUnauthorized());
         mockMvc.perform(post(CHANNELS + "/1/signing-secret")).andExpect(status().isUnauthorized());
+        mockMvc.perform(post(CHANNELS + "/1/test")).andExpect(status().isUnauthorized());
 
         assertThat(notificationChannelRepository.count()).isZero();
     }
@@ -516,6 +527,26 @@ class NotificationEndpointSecurityTest {
                 .andExpect(status().isNotFound())
                 .andExpect(content().json(CHANNEL_NOT_FOUND, JsonCompareMode.STRICT));
         assertThat(notificationChannelRepository.count()).isEqualTo(1L);
+    }
+
+    @Test
+    void sendTestAnswersWithTheOutcomeAndRecordsIt() throws Exception {
+        mockMvc.perform(as(ANA_TOKEN, post(CHANNELS)).contentType(MediaType.APPLICATION_JSON).content(DISCORD_CHANNEL)).andExpect(status().isCreated());
+        final var id = notificationChannelRepository.findAll().getFirst().getId();
+
+        mockMvc.perform(as(ANA_TOKEN, post(CHANNELS + "/" + id + "/test")))
+                .andExpect(status().isOk())
+                .andExpect(content().json("""
+                        {"delivered":false,"httpStatus":404,"error":"The channel answered with HTTP 404. Check the URL."}""", JsonCompareMode.STRICT));
+        mockMvc.perform(as(ANA_TOKEN, get(CHANNELS)))
+                .andExpect(jsonPath("$[0].lastDelivery.status").value("FAILED"))
+                .andExpect(jsonPath("$[0].lastDelivery.at").isString())
+                .andExpect(jsonPath("$[0].lastDelivery.httpStatus").value(404))
+                .andExpect(jsonPath("$[0].lastDelivery.error").value("The channel answered with HTTP 404. Check the URL."));
+        assertThat(jdbcTemplate.queryForObject("select failed_days from notification_channel where id = ?", Integer.class, id)).isZero();
+        mockMvc.perform(as(BOB_TOKEN, post(CHANNELS + "/" + id + "/test")))
+                .andExpect(status().isNotFound())
+                .andExpect(content().json(CHANNEL_NOT_FOUND, JsonCompareMode.STRICT));
     }
 
     @Test
@@ -659,6 +690,14 @@ class NotificationEndpointSecurityTest {
             DefaultNotificationChannelService.class,
             ChannelTargets.class,
             SecretBox.class,
+            ChannelSenders.class,
+            DiscordChannelSender.class,
+            SlackChannelSender.class,
+            TelegramChannelSender.class,
+            NtfyChannelSender.class,
+            WebhookChannelSender.class,
+            NotificationMessages.class,
+            NotificationPayloads.class,
             TestApplication.PublicDns.class
     })
     static class TestApplication {
@@ -669,6 +708,11 @@ class NotificationEndpointSecurityTest {
             @Bean
             Resolver resolver() {
                 return host -> new InetAddress[] {InetAddress.ofLiteral("162.159.128.233")};
+            }
+
+            @Bean
+            ChannelPoster channelPoster() {
+                return (url, contentType, headers, body, timeout) -> new PostResult(404, null);
             }
 
         }

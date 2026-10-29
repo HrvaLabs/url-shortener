@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.service.impl;
 
+import cc.hrva.urlshortener.dto.notification.ChannelTestResponse;
 import cc.hrva.urlshortener.dto.notification.LastDelivery;
 import cc.hrva.urlshortener.dto.notification.NotificationChannelRequest;
 import cc.hrva.urlshortener.dto.notification.NotificationChannelResponse;
@@ -23,12 +24,19 @@ import cc.hrva.urlshortener.service.NotificationConsentService;
 import cc.hrva.urlshortener.service.UserService;
 import cc.hrva.urlshortener.service.notification.ChannelTarget;
 import cc.hrva.urlshortener.service.notification.ChannelTargets;
+import cc.hrva.urlshortener.service.notification.NotificationErrors;
+import cc.hrva.urlshortener.service.notification.NotificationMessages;
+import cc.hrva.urlshortener.service.notification.NotificationPayloads;
 import cc.hrva.urlshortener.service.notification.SecretBox;
+import cc.hrva.urlshortener.service.notification.channel.ChannelSenders;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiter;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiterUnavailableException;
 import cc.hrva.urlshortener.service.twostep.AccountLock;
 import java.security.SecureRandom;
+import java.time.Clock;
 import java.time.Duration;
+import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Collection;
@@ -36,13 +44,17 @@ import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.EnumUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 @Slf4j
 @Service
@@ -56,6 +68,8 @@ public class DefaultNotificationChannelService implements NotificationChannelSer
     public static final Duration TEST_WINDOW = Duration.ofMinutes(10);
     public static final String TOO_MANY_TESTS = "You've sent a lot of tests in a short time. Try again in a few minutes.";
     public static final String TESTS_UNAVAILABLE = "Sending a test isn't available right now. Try again in a minute.";
+    public static final String SENT = "SENT";
+    public static final String FAILED = "FAILED";
 
     static final String NOT_FOUND = "Notification channel not found";
     static final String TOO_MANY_CHANNELS = "You can have up to 10 channels. Remove one to add another.";
@@ -75,6 +89,11 @@ public class DefaultNotificationChannelService implements NotificationChannelSer
     private final RateLimiter rateLimiter;
     private final SecretBox secretBox;
     private final ChannelTargets channelTargets;
+    private final ChannelSenders channelSenders;
+    private final NotificationMessages notificationMessages;
+    private final NotificationPayloads notificationPayloads;
+    private final PlatformTransactionManager transactionManager;
+    private final Clock clock;
 
     @Override
     public List<NotificationChannelResponse> mine() {
@@ -187,6 +206,32 @@ public class DefaultNotificationChannelService implements NotificationChannelSer
     }
 
     @Override
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    public ChannelTestResponse test(final long id) {
+        final var user = currentUser();
+        final var readOnly = new TransactionTemplate(transactionManager);
+        readOnly.setReadOnly(true);
+        final var prepared = readOnly.execute(status -> {
+            final var channel = owned(user, id);
+            return new PreparedTest(channel, openTarget(channel));
+        });
+        requireWithinTestLimit(user.getId());
+
+        final var uid = "test-" + UUID.randomUUID();
+        final var json = notificationPayloads.json(NotificationPayloads.TEST_EVENT, uid, clock.instant(), notificationPayloads.test());
+        final var result = channelSenders.send(prepared.channel(), prepared.target(), NotificationPayloads.TEST_EVENT, uid, json,
+                notificationMessages.test(prepared.channel()));
+        final var error = NotificationErrors.describe(result, prepared.channel().getType());
+        final var httpStatus = NotificationErrors.httpStatus(result);
+
+        new TransactionTemplate(transactionManager).executeWithoutResult(status -> notificationChannelRepository.recordDelivery(id,
+                LocalDateTime.now(clock).truncatedTo(ChronoUnit.SECONDS), result.delivered() ? SENT : FAILED, httpStatus, error));
+        log.info("Notification channel test user id={} channel id={} type={} delivered={} status={}", user.getId(), id,
+                prepared.channel().getType(), result.delivered(), httpStatus);
+        return new ChannelTestResponse(result.delivered(), httpStatus, error);
+    }
+
+    @Override
     public NotificationChannel loadOwned(final long id) {
         return owned(currentUser(), id);
     }
@@ -199,6 +244,9 @@ public class DefaultNotificationChannelService implements NotificationChannelSer
                 channel.getAccessTokenSealed() == null ? null : secretBox.open(channel.getAccessTokenSealed(), context),
                 channel.getChatId(),
                 channel.getSigningSecretSealed() == null ? null : secretBox.open(channel.getSigningSecretSealed(), context));
+    }
+
+    private record PreparedTest(NotificationChannel channel, ChannelTarget target) {
     }
 
     private Map<Long, Set<NotificationType>> eventsOf(final Collection<Long> channelIds) {

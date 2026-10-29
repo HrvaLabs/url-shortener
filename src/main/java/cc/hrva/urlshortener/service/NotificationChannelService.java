@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.service;
 
+import cc.hrva.urlshortener.dto.notification.ChannelTestResponse;
 import cc.hrva.urlshortener.dto.notification.NotificationChannelRequest;
 import cc.hrva.urlshortener.dto.notification.NotificationChannelResponse;
 import cc.hrva.urlshortener.dto.notification.SigningSecretResponse;
@@ -18,6 +19,8 @@ public interface NotificationChannelService {
     void delete(long id);
 
     SigningSecretResponse newSigningSecret(long id);
+
+    ChannelTestResponse test(long id);
 
     NotificationChannel loadOwned(long id);
 

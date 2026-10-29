@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.controller;
 
+import cc.hrva.urlshortener.dto.notification.ChannelTestResponse;
 import cc.hrva.urlshortener.dto.notification.NotificationChannelRequest;
 import cc.hrva.urlshortener.dto.notification.NotificationChannelResponse;
 import cc.hrva.urlshortener.dto.notification.SigningSecretResponse;
@@ -78,6 +79,17 @@ public class NotificationChannelController {
     @PreAuthorize("hasAnyRole('ROLE_ADMIN', 'ROLE_USER')")
     public ResponseEntity<SigningSecretResponse> newSigningSecret(@PathVariable final long id) {
         return ResponseEntity.ok(notificationChannelService.newSigningSecret(id));
+    }
+
+    @Operation(summary = "Send a test message to a notification channel", description = "Posts a test message to the channel now, whether it is switched on or not, and answers with how it went. It sets the channel's last delivery but never counts toward turning the channel off. 10 per 10 minutes, shared with New signing secret.")
+    @ApiResponse(responseCode = "200", description = "How the test went; delivered is false when the channel refused it or couldn't be reached")
+    @ApiResponse(responseCode = "404", description = "No such channel of yours")
+    @ApiResponse(responseCode = "429", description = "Too many tests or new secrets")
+    @ApiResponse(responseCode = "503", description = "The limit can't be checked right now")
+    @PostMapping("/{id}/test")
+    @PreAuthorize("hasAnyRole('ROLE_ADMIN', 'ROLE_USER')")
+    public ResponseEntity<ChannelTestResponse> test(@PathVariable final long id) {
+        return ResponseEntity.ok(notificationChannelService.test(id));
     }
 
 }
