@@ -89,6 +89,7 @@ import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
@@ -255,7 +256,7 @@ class DefaultUserServiceTest {
 
         verify(sendingEmailService).sendVerificationEmail(user, token);
         verify(sendingEmailService).sendNewUserNotificationToAdmin(user);
-        verify(sendingEmailService, never()).sendWelcomeEmail(any());
+        verifyNoMoreInteractions(sendingEmailService);
     }
 
     @Test

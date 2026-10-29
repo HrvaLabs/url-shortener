@@ -74,6 +74,17 @@
                 Best regards,<br>
                 <span style="color: #a67c00;" th:text="${app_name}"/> team
               </p>
+
+              <hr style="border: none; border-top: 1px solid #1a1a1a; margin: 24px 0 16px;">
+
+              <p style="margin: 0 0 8px; font-family: 'Helvetica', 'Arial', sans-serif; font-size: 12px; line-height: 1.6; color: #666;">
+                You get this because you turned on expiry reminders.
+              </p>
+              <p style="margin: 0; font-family: 'Helvetica', 'Arial', sans-serif; font-size: 12px; line-height: 1.6; color: #666;">
+                <a th:href="${unsubscribe_page}" target="_blank" style="color: #999; text-decoration: underline;">Turn off expiry reminders</a>
+                &nbsp;&middot;&nbsp;
+                <a th:href="${settings_page}" target="_blank" style="color: #999; text-decoration: underline;">Notification settings</a>
+              </p>
             </td>
           </tr>
           <!-- Footer -->

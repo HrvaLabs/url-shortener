@@ -96,7 +96,6 @@ public class DefaultAuthService implements AuthService {
         user.setEmailVerified(true);
         userService.persistUser(user);
         verificationTokenService.deactivateAndSaveToken(verificationToken);
-        sendingEmailService.sendWelcomeEmail(user);
         log.info("Email verified for user id={}", user.getId());
     }
 

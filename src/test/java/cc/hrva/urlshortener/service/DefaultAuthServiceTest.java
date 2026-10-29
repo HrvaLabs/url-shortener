@@ -322,7 +322,7 @@ class DefaultAuthServiceTest {
     }
 
     @Test
-    void shouldVerifyEmail() {
+    void verifyingSendsNoWelcomeEmail() {
         final var user = User.builder().id(1L).email("test@example.com").emailVerified(false).build();
         final var token = cc.hrva.urlshortener.model.VerificationToken.builder().id(1L).user(user).active(true).build();
 
@@ -333,7 +333,7 @@ class DefaultAuthServiceTest {
         assertThat(user.getEmailVerified()).isTrue();
         verify(userService).persistUser(user);
         verify(verificationTokenService).deactivateAndSaveToken(token);
-        verify(sendingEmailService).sendWelcomeEmail(user);
+        verifyNoInteractions(sendingEmailService);
     }
 
     @Test

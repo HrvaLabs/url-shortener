@@ -101,23 +101,6 @@ public class DefaultSendingEmailService implements SendingEmailService {
 
     @Override
     @Async
-    public void sendWelcomeEmail(final User user) {
-        final var ctx = getContext(user);
-
-        final var htmlContent = templateEngine.process("welcome", ctx);
-
-        final var email = Email.builder()
-                .sender(appProperties.getEmailSenderAddress())
-                .receivers(new String[]{user.getEmail()})
-                .subject("Welcome")
-                .text(htmlContent)
-                .build();
-
-        tryToSendEmail(email);
-    }
-
-    @Override
-    @Async
     public void sendVerificationEmail(final User user, final cc.hrva.urlshortener.model.VerificationToken token) {
         final var ctx = getContext(user);
         ctx.setVariable("token", token.getToken());

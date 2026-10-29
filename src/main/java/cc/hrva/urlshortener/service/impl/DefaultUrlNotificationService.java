@@ -3,87 +3,115 @@ package cc.hrva.urlshortener.service.impl;
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.model.Email;
 import cc.hrva.urlshortener.model.Url;
+import cc.hrva.urlshortener.model.enums.NotificationType;
 import cc.hrva.urlshortener.repository.UrlRepository;
+import cc.hrva.urlshortener.service.NotificationConsentService;
 import cc.hrva.urlshortener.service.UrlNotificationService;
+import cc.hrva.urlshortener.service.notification.ConsentEmails;
 import java.text.MessageFormat;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.thymeleaf.TemplateEngine;
 import org.thymeleaf.context.Context;
 
 @Slf4j
 @Service
+@RequiredArgsConstructor
 public class DefaultUrlNotificationService implements UrlNotificationService {
+
+    private static final String SUBJECT = "Your short link is expiring soon";
+    private static final NotificationType REMINDER = NotificationType.EXPIRY_REMINDER_EMAIL;
 
     private final UrlRepository urlRepository;
     private final DefaultSendingEmailService sendingEmailService;
+    private final NotificationConsentService notificationConsentService;
+    private final ConsentEmails consentEmails;
     private final AppProperties appProperties;
     private final TemplateEngine templateEngine;
-
-    public DefaultUrlNotificationService(
-            final UrlRepository urlRepository,
-            final DefaultSendingEmailService sendingEmailService,
-            final AppProperties appProperties,
-            final TemplateEngine templateEngine) {
-        this.urlRepository = urlRepository;
-        this.sendingEmailService = sendingEmailService;
-        this.appProperties = appProperties;
-        this.templateEngine = templateEngine;
-    }
+    private final PlatformTransactionManager transactionManager;
 
     @Override
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public void notifyExpiringUrls() {
         final var now = LocalDateTime.now();
         final var notificationWindow = appProperties.getUrlExpirationNotificationHours();
-        final var deadline = now.plusHours(notificationWindow);
+        final var due = expiringLinks(now, now.plusHours(notificationWindow));
 
-        final var expiringUrls = urlRepository.findByExpirationDateBetweenAndActiveTrueAndOwnerIsNotNull(now, deadline);
-
-        if (expiringUrls.isEmpty()) {
+        if (due.links().isEmpty()) {
             return;
         }
 
-        log.info("Found {} URLs expiring within {} hours", expiringUrls.size(), notificationWindow);
+        final var reminded = due.links().stream().filter(link -> due.consentingOwnerIds().contains(link.ownerId())).toList();
+        log.info("Found {} URLs expiring within {} hours, {} of them with expiry reminders on", due.links().size(), notificationWindow, reminded.size());
 
-        for (final var url : expiringUrls) {
-            sendExpirationNotification(url);
-        }
+        reminded.forEach(this::sendExpirationNotification);
     }
 
-    private void sendExpirationNotification(final Url url) {
-        final var owner = url.getOwner();
-        if (owner == null || owner.getEmail() == null) {
-            return;
-        }
+    private ExpiringLinks expiringLinks(final LocalDateTime from, final LocalDateTime to) {
+        final var readOnly = new TransactionTemplate(transactionManager);
+        readOnly.setReadOnly(true);
+        return readOnly.execute(status -> {
+            final var links = urlRepository.findByExpirationDateBetweenAndActiveTrueAndOwnerIsNotNull(from, to).stream()
+                    .filter(url -> url.getOwner() != null && url.getOwner().getEmail() != null)
+                    .map(ExpiringLink::of)
+                    .toList();
+            if (links.isEmpty()) {
+                return new ExpiringLinks(List.of(), Set.of());
+            }
 
-        final var expirationDate = url.getExpirationDate() != null
-                ? url.getExpirationDate().format(DateTimeFormatter.ISO_LOCAL_DATE)
+            final var ownerIds = links.stream().map(ExpiringLink::ownerId).collect(Collectors.toSet());
+            return new ExpiringLinks(links, notificationConsentService.emailConsenters(REMINDER, ownerIds));
+        });
+    }
+
+    private void sendExpirationNotification(final ExpiringLink link) {
+        final var expirationDate = link.expirationDate() != null
+                ? link.expirationDate().format(DateTimeFormatter.ISO_LOCAL_DATE)
                 : "unknown";
 
         final var ctx = new Context();
-        ctx.setVariable("name", owner.getEmail());
-        ctx.setVariable("shortUrl", url.getShortUrl());
-        ctx.setVariable("longUrl", url.getLongUrl());
+        ctx.setVariable("name", link.ownerEmail());
+        ctx.setVariable("shortUrl", link.shortUrl());
+        ctx.setVariable("longUrl", link.longUrl());
         ctx.setVariable("expirationDate", expirationDate);
         ctx.setVariable("app_name", appProperties.getAppName());
         ctx.setVariable("login_page", MessageFormat.format("{0}/login/", appProperties.getFrontendUrl()));
+        ctx.setVariable("unsubscribe_page", consentEmails.unsubscribePage(link.ownerId(), REMINDER));
+        ctx.setVariable("settings_page", consentEmails.settingsPage());
 
         final var htmlContent = templateEngine.process("expiry_notification", ctx);
 
         final var email = Email.builder()
                 .sender(appProperties.getEmailSenderAddress())
-                .receivers(new String[]{owner.getEmail()})
-                .subject("Your short link is expiring soon")
+                .receivers(new String[]{link.ownerEmail()})
+                .subject(SUBJECT)
                 .text(htmlContent)
                 .build();
 
-        sendingEmailService.tryToSendEmail(email);
-        log.info("Sent expiration notification for url={} to user={}", url.getShortUrl(), owner.getEmail());
+        sendingEmailService.tryToSendConsentedEmail(email, link.ownerId(), REMINDER)
+                .ifPresent(entry -> log.info("Sent expiry reminder url id={} owner id={}", link.urlId(), link.ownerId()));
+    }
+
+    record ExpiringLink(long urlId, String shortUrl, String longUrl, LocalDateTime expirationDate, long ownerId, String ownerEmail) {
+
+        static ExpiringLink of(final Url url) {
+            return new ExpiringLink(url.getId(), url.getShortUrl(), url.getLongUrl(), url.getExpirationDate(),
+                    url.getOwner().getId(), url.getOwner().getEmail());
+        }
+
+    }
+
+    private record ExpiringLinks(List<ExpiringLink> links, Set<Long> consentingOwnerIds) {
     }
 
 }
