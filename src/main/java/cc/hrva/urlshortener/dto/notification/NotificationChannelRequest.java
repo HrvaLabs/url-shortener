@@ -1,6 +1,7 @@
 package cc.hrva.urlshortener.dto.notification;
 
 import cc.hrva.urlshortener.model.enums.ChannelType;
+import cc.hrva.urlshortener.validator.UrlValidator;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -34,19 +35,23 @@ public class NotificationChannelRequest {
     private Set<String> events;
 
     @ToString.Exclude
+    @Size(max = UrlValidator.MAX_LONG_URL_LENGTH, message = "URL must be 2048 characters or fewer")
     @Schema(description = "The webhook or topic URL (DISCORD, SLACK, NTFY, WEBHOOK); on edit, leave empty to keep the saved one",
             example = "https://discord.com/api/webhooks/123/abc")
     private String target;
 
     @ToString.Exclude
+    @Size(max = 255, message = "Bot token must be 255 characters or fewer")
     @Schema(description = "The bot token from @BotFather (TELEGRAM); on edit, leave empty to keep the saved one")
     private String botToken;
 
     @ToString.Exclude
+    @Size(max = 40, message = "Chat ID must be 40 characters or fewer")
     @Schema(description = "The chat ID or @channel name (TELEGRAM); on edit, leave empty to keep the saved one", example = "-1001234567890")
     private String chatId;
 
     @ToString.Exclude
+    @Size(max = 255, message = "Access token must be 255 characters or fewer")
     @Schema(description = "An optional ntfy access token, sent as a Bearer token (NTFY); on edit, leave empty to keep the saved one")
     private String accessToken;
 

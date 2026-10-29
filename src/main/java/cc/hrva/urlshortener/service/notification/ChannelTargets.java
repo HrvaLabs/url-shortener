@@ -65,9 +65,9 @@ public class ChannelTargets {
             if (creating) {
                 errors.put(TARGET, PASTE_THE_URL);
             }
-            return errors;
+        } else {
+            targetError(type, request.getTarget().strip()).ifPresent(error -> errors.put(TARGET, error));
         }
-        targetError(type, request.getTarget().strip()).ifPresent(error -> errors.put(TARGET, error));
         if (type == ChannelType.NTFY) {
             shapeError(request.getAccessToken(), NTFY_ACCESS_TOKEN, ACCESS_TOKEN_SHAPE, false).ifPresent(error -> errors.put(ACCESS_TOKEN, error));
         }

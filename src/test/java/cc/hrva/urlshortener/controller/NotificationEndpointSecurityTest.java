@@ -539,6 +539,56 @@ class NotificationEndpointSecurityTest {
     }
 
     @Test
+    void anEditWithoutANewTopicStillChecksTheNtfyAccessToken() throws Exception {
+        mockMvc.perform(as(ANA_TOKEN, post(CHANNELS)).contentType(MediaType.APPLICATION_JSON).content("""
+                        {"name":"Phone","type":"NTFY","events":[],"target":"https://ntfy.sh/alerts","accessToken":"tk_first"}"""))
+                .andExpect(status().isCreated());
+        final var channel = notificationChannelRepository.findAll().getFirst();
+
+        mockMvc.perform(as(ANA_TOKEN, put(CHANNELS + "/" + channel.getId())).contentType(MediaType.APPLICATION_JSON).content("""
+                        {"name":"Phone","type":"NTFY","events":[],"target":"","accessToken":"tk abc"}"""))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().json("{\"accessToken\":\"Paste the access token from ntfy. It has no spaces, like tk_AbC123\"}",
+                        JsonCompareMode.STRICT));
+        mockMvc.perform(as(ANA_TOKEN, put(CHANNELS + "/" + channel.getId())).contentType(MediaType.APPLICATION_JSON).content("""
+                        {"name":"Phone","type":"NTFY","events":[],"target":"","accessToken":" "}"""))
+                .andExpect(status().isOk());
+
+        assertThat(notificationChannelRepository.findById(channel.getId()).orElseThrow().getAccessTokenSealed())
+                .isEqualTo(channel.getAccessTokenSealed());
+    }
+
+    @Test
+    void overlongChannelFieldsComeBackByField() throws Exception {
+        mockMvc.perform(as(ANA_TOKEN, post(CHANNELS)).contentType(MediaType.APPLICATION_JSON)
+                        .content(DISCORD_CHANNEL.replace("abc-secret-xyz", "a".repeat(2049 - "https://discord.com/api/webhooks/123/".length()))))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().json("{\"target\":\"URL must be 2048 characters or fewer\"}", JsonCompareMode.STRICT));
+        mockMvc.perform(as(ANA_TOKEN, post(CHANNELS)).contentType(MediaType.APPLICATION_JSON).content("""
+                        {"name":"Phone","type":"TELEGRAM","events":[],"botToken":"%s","chatId":"%s"}""".formatted("1".repeat(256), "1".repeat(41))))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().json("""
+                        {"botToken":"Bot token must be 255 characters or fewer",
+                         "chatId":"Chat ID must be 40 characters or fewer"}""", JsonCompareMode.STRICT));
+        mockMvc.perform(as(ANA_TOKEN, post(CHANNELS)).contentType(MediaType.APPLICATION_JSON).content("""
+                        {"name":"Phone","type":"NTFY","events":[],"target":"https://ntfy.sh/alerts","accessToken":"%s"}""".formatted("t".repeat(256))))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().json("{\"accessToken\":\"Access token must be 255 characters or fewer\"}", JsonCompareMode.STRICT));
+
+        assertThat(notificationChannelRepository.count()).isZero();
+    }
+
+    @Test
+    void channelFieldsAtTheirLimitsAreAccepted() throws Exception {
+        mockMvc.perform(as(ANA_TOKEN, post(CHANNELS)).contentType(MediaType.APPLICATION_JSON)
+                        .content(DISCORD_CHANNEL.replace("abc-secret-xyz", "a".repeat(2048 - "https://discord.com/api/webhooks/123/".length()))))
+                .andExpect(status().isCreated());
+        mockMvc.perform(as(ANA_TOKEN, post(CHANNELS)).contentType(MediaType.APPLICATION_JSON).content("""
+                        {"name":"Phone","type":"NTFY","events":[],"target":"https://ntfy.sh/alerts","accessToken":"%s"}""".formatted("t".repeat(255))))
+                .andExpect(status().isCreated());
+    }
+
+    @Test
     void theEleventhChannelIsRefused() throws Exception {
         for (int existing = 0; existing < 10; existing++) {
             jdbcTemplate.update("""
