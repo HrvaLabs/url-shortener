@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.service;
 
+import cc.hrva.urlshortener.configuration.AsyncExecutorConfiguration;
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.repository.AuditLogRepository;
 import cc.hrva.urlshortener.repository.BioHandleHoldRepository;
@@ -209,19 +210,19 @@ class DefaultScheduledServiceTest {
         final var runNightly = DefaultDestinationCheckService.class.getMethod("runNightly");
 
         assertThat(runNightly.getAnnotation(Async.class)).isNotNull();
-        assertThat(runNightly.getAnnotation(Async.class).value()).isEmpty();
+        assertThat(runNightly.getAnnotation(Async.class).value()).isEqualTo(AsyncExecutorConfiguration.NOTIFICATION_TASK_EXECUTOR);
         assertThat(DefaultScheduledService.class.getMethod("checkDestinations").getAnnotation(Async.class)).isNull();
         final var drainInBackground = DefaultNotificationDeliveryService.class.getMethod("drainInBackground");
         assertThat(drainInBackground.getAnnotation(Async.class)).isNotNull();
-        assertThat(drainInBackground.getAnnotation(Async.class).value()).isEmpty();
+        assertThat(drainInBackground.getAnnotation(Async.class).value()).isEqualTo(AsyncExecutorConfiguration.NOTIFICATION_TASK_EXECUTOR);
         assertThat(DefaultScheduledService.class.getMethod("drainNotificationDeliveries").getAnnotation(Async.class)).isNull();
         final var sendDailyInBackground = DefaultClickSummaryService.class.getMethod("sendDailyInBackground");
         assertThat(sendDailyInBackground.getAnnotation(Async.class)).isNotNull();
-        assertThat(sendDailyInBackground.getAnnotation(Async.class).value()).isEmpty();
+        assertThat(sendDailyInBackground.getAnnotation(Async.class).value()).isEqualTo(AsyncExecutorConfiguration.NOTIFICATION_TASK_EXECUTOR);
         assertThat(DefaultScheduledService.class.getMethod("sendDailyClickSummaries").getAnnotation(Async.class)).isNull();
         final var sendWeeklyInBackground = DefaultClickSummaryService.class.getMethod("sendWeeklyInBackground");
         assertThat(sendWeeklyInBackground.getAnnotation(Async.class)).isNotNull();
-        assertThat(sendWeeklyInBackground.getAnnotation(Async.class).value()).isEmpty();
+        assertThat(sendWeeklyInBackground.getAnnotation(Async.class).value()).isEqualTo(AsyncExecutorConfiguration.NOTIFICATION_TASK_EXECUTOR);
         assertThat(DefaultScheduledService.class.getMethod("sendWeeklyClickSummaries").getAnnotation(Async.class)).isNull();
     }
 

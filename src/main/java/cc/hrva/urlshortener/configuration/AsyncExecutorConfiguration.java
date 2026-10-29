@@ -12,10 +12,14 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 public class AsyncExecutorConfiguration {
 
     public static final String REDIRECT_CHECK_EXECUTOR = "redirectCheckExecutor";
+    public static final String NOTIFICATION_TASK_EXECUTOR = "notificationTaskExecutor";
     private static final int REDIRECT_CHECK_THREADS = 2;
     private static final int REDIRECT_CHECK_QUEUE_CAPACITY = 200;
     private static final String REDIRECT_CHECK_THREAD_PREFIX = "redirect-check-";
     private static final Duration REDIRECT_CHECK_SHUTDOWN_GRACE = Duration.ofSeconds(15);
+    private static final int NOTIFICATION_TASK_THREADS = 4;
+    private static final int NOTIFICATION_TASK_QUEUE_CAPACITY = 16;
+    private static final String NOTIFICATION_TASK_THREAD_PREFIX = "notification-task-";
 
     @Bean(name = {TaskExecutionAutoConfiguration.APPLICATION_TASK_EXECUTOR_BEAN_NAME, AsyncAnnotationBeanPostProcessor.DEFAULT_TASK_EXECUTOR_BEAN_NAME})
     public ThreadPoolTaskExecutor applicationTaskExecutor(final ThreadPoolTaskExecutorBuilder threadPoolTaskExecutorBuilder) {
@@ -31,6 +35,16 @@ public class AsyncExecutorConfiguration {
                 .threadNamePrefix(REDIRECT_CHECK_THREAD_PREFIX)
                 .awaitTermination(true)
                 .awaitTerminationPeriod(REDIRECT_CHECK_SHUTDOWN_GRACE)
+                .build();
+    }
+
+    @Bean(NOTIFICATION_TASK_EXECUTOR)
+    public ThreadPoolTaskExecutor notificationTaskExecutor() {
+        return new ThreadPoolTaskExecutorBuilder()
+                .corePoolSize(NOTIFICATION_TASK_THREADS)
+                .maxPoolSize(NOTIFICATION_TASK_THREADS)
+                .queueCapacity(NOTIFICATION_TASK_QUEUE_CAPACITY)
+                .threadNamePrefix(NOTIFICATION_TASK_THREAD_PREFIX)
                 .build();
     }
 

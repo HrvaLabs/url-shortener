@@ -2,6 +2,7 @@ package cc.hrva.urlshortener.service.impl;
 
 import cc.hrva.urlshortener.client.DestinationProber;
 import cc.hrva.urlshortener.client.ProbeResult;
+import cc.hrva.urlshortener.configuration.AsyncExecutorConfiguration;
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.repository.DestinationCheckRepository;
 import cc.hrva.urlshortener.repository.DestinationCheckRepository.DiedLink;
@@ -67,7 +68,7 @@ public class DefaultDestinationCheckService implements DestinationCheckService {
         return checked(night).orElseGet(() -> DestinationCheckOutcome.nothing(night));
     }
 
-    @Async
+    @Async(AsyncExecutorConfiguration.NOTIFICATION_TASK_EXECUTOR)
     @Override
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public void runNightly() {

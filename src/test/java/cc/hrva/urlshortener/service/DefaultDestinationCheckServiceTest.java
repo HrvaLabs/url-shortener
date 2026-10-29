@@ -3,6 +3,7 @@ package cc.hrva.urlshortener.service;
 import cc.hrva.urlshortener.client.DestinationProber;
 import cc.hrva.urlshortener.client.ProbeOutcome;
 import cc.hrva.urlshortener.client.ProbeResult;
+import cc.hrva.urlshortener.configuration.AsyncExecutorConfiguration;
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.repository.DestinationCheckRepository;
 import cc.hrva.urlshortener.repository.DestinationCheckRepository.DiedLink;
@@ -530,7 +531,7 @@ class DefaultDestinationCheckServiceTest {
         final var runNightly = DefaultDestinationCheckService.class.getMethod("runNightly");
         final var checkAll = DefaultDestinationCheckService.class.getMethod("checkAll");
 
-        assertThat(runNightly.getAnnotation(Async.class)).isNotNull();
+        assertThat(runNightly.getAnnotation(Async.class).value()).isEqualTo(AsyncExecutorConfiguration.NOTIFICATION_TASK_EXECUTOR);
         assertThat(runNightly.getAnnotation(Transactional.class).propagation()).isEqualTo(Propagation.NOT_SUPPORTED);
         assertThat(checkAll.getAnnotation(Transactional.class).propagation()).isEqualTo(Propagation.NOT_SUPPORTED);
 

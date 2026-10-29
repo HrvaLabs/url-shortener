@@ -107,6 +107,42 @@ class AsyncExecutorConfigurationTest {
     }
 
     @Test
+    void notificationJobsRunOnTheirOwnPool() {
+        contextRunner.run(context -> {
+            final var probe = context.getBean(AsyncProbe.class);
+
+            assertThat(probe.notificationTask().get(5, TimeUnit.SECONDS)).startsWith("notification-task-");
+            assertThat(context.getBean("taskExecutor")).isSameAs(context.getBean("applicationTaskExecutor"));
+        });
+    }
+
+    @Test
+    void theNotificationPoolHasFourThreadsAndASmallQueue() {
+        contextRunner.run(context -> {
+            final var executor = context.getBean(AsyncExecutorConfiguration.NOTIFICATION_TASK_EXECUTOR, ThreadPoolTaskExecutor.class);
+
+            assertThat(executor.getCorePoolSize()).isEqualTo(4);
+            assertThat(executor.getMaxPoolSize()).isEqualTo(4);
+            assertThat(executor.getQueueCapacity()).isEqualTo(16);
+        });
+    }
+
+    @Test
+    void aBusyNotificationPoolLeavesTheApplicationExecutorFree() {
+        contextRunner.run(context -> {
+            final var notifications = context.getBean(AsyncExecutorConfiguration.NOTIFICATION_TASK_EXECUTOR, ThreadPoolTaskExecutor.class);
+            final var release = new CountDownLatch(1);
+            try {
+                IntStream.range(0, 4).forEach(task -> notifications.execute(() -> awaitQuietly(release)));
+
+                assertThat(context.getBean(AsyncProbe.class).unqualified().get(5, TimeUnit.SECONDS)).startsWith("task-");
+            } finally {
+                release.countDown();
+            }
+        });
+    }
+
+    @Test
     void aShutdownNeverInterruptsARunningRedirectCheckEvenPastTheLifecycleTimeout() {
         final var finished = new AtomicBoolean();
         final var interrupted = new AtomicBoolean();
@@ -160,6 +196,11 @@ class AsyncExecutorConfigurationTest {
 
         @Async(AsyncExecutorConfiguration.REDIRECT_CHECK_EXECUTOR)
         public CompletableFuture<String> redirectCheck() {
+            return CompletableFuture.completedFuture(Thread.currentThread().getName());
+        }
+
+        @Async(AsyncExecutorConfiguration.NOTIFICATION_TASK_EXECUTOR)
+        public CompletableFuture<String> notificationTask() {
             return CompletableFuture.completedFuture(Thread.currentThread().getName());
         }
 

@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.service.impl;
 
+import cc.hrva.urlshortener.configuration.AsyncExecutorConfiguration;
 import cc.hrva.urlshortener.dto.AnalyticsDay;
 import cc.hrva.urlshortener.dto.LinkClicks;
 import cc.hrva.urlshortener.dto.LinkDayCounts;
@@ -97,7 +98,7 @@ public class DefaultClickSummaryService implements ClickSummaryService {
         log.info("Daily click summaries day={} owners={} withClicks={} deliveries={}", day, ownerIds.size(), contentByOwnerId.size(), queued);
     }
 
-    @Async
+    @Async(AsyncExecutorConfiguration.NOTIFICATION_TASK_EXECUTOR)
     @Override
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public void sendDailyInBackground() {
@@ -138,7 +139,7 @@ public class DefaultClickSummaryService implements ClickSummaryService {
                 contentByOwnerId.size(), queued);
     }
 
-    @Async
+    @Async(AsyncExecutorConfiguration.NOTIFICATION_TASK_EXECUTOR)
     @Override
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public void sendWeeklyInBackground() {

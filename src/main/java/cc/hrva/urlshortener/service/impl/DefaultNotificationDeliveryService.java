@@ -2,6 +2,7 @@ package cc.hrva.urlshortener.service.impl;
 
 import cc.hrva.urlshortener.client.PostResult;
 import cc.hrva.urlshortener.client.PublicHttpFetcher;
+import cc.hrva.urlshortener.configuration.AsyncExecutorConfiguration;
 import cc.hrva.urlshortener.model.NotificationChannel;
 import cc.hrva.urlshortener.model.NotificationConsent;
 import cc.hrva.urlshortener.model.NotificationDelivery;
@@ -141,7 +142,7 @@ public class DefaultNotificationDeliveryService implements NotificationDeliveryS
         }
     }
 
-    @Async
+    @Async(AsyncExecutorConfiguration.NOTIFICATION_TASK_EXECUTOR)
     @Override
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public void drainInBackground() {
