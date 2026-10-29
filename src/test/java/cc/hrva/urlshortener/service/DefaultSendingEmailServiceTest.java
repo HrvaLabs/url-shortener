@@ -877,9 +877,11 @@ class DefaultSendingEmailServiceTest {
         final var token = unsubscribeTokens.issue(7L, NotificationType.DEAD_LINK_EMAIL);
         assertThat(email.getReceivers()).containsExactly("alice@example.com");
         assertThat(email.getSubject()).isEqualTo("2 of your links look broken");
+        assertThat(textOf(email.getText())).doesNotContain("edit the link");
         assertThat(textOf(email.getText())).contains(
                 "hrva.cc/abc → example.com Since 27 October 2026, the page wasn't found (404)",
                 "hrva.cc/menu → example.com Since 27 October 2026, the page wasn't found (404)",
+                "If a page moved, shorten its new address and turn the old link off on your links page.",
                 "Open your links",
                 "You get this because you turned on dead-link emails.",
                 "Turn off dead-link emails",
