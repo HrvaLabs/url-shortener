@@ -100,8 +100,11 @@ public record DataExportDto(
             boolean enabled,
             List<NotificationType> events,
             String maskedTarget,
+            String chatId,
             LocalDateTime createdAt,
             LocalDateTime lastDeliveryAt,
-            String lastDeliveryStatus) {}
+            String lastDeliveryStatus,
+            LocalDateTime autoDisabledAt,
+            int failedDays) {}
 
 }

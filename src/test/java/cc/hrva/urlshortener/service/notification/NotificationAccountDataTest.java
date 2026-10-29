@@ -101,7 +101,8 @@ class NotificationAccountDataTest {
                 new ConsentExport(NotificationType.WEEKLY_SUMMARY, "Discord: Team alerts", REVOKED, ConsentSource.SETTINGS, null, null),
                 new ConsentExport(NotificationType.WEEKLY_SUMMARY_EMAIL, null, REVOKED, ConsentSource.SETTINGS, null, null));
         assertThat(export.channels()).containsExactly(new ChannelExport("Team alerts", ChannelType.DISCORD, true,
-                List.of(NotificationType.LINK_DEAD, NotificationType.WEEKLY_SUMMARY), "https://discord.com/••••abcd", CREATED, null, null));
+                List.of(NotificationType.LINK_DEAD, NotificationType.WEEKLY_SUMMARY), "https://discord.com/••••abcd", null, CREATED, null, null, null,
+                0));
     }
 
     @Test
@@ -112,6 +113,9 @@ class NotificationAccountDataTest {
         earlier.setEnabled(false);
         earlier.setLastDeliveryAt(REVOKED);
         earlier.setLastDeliveryStatus("FAILED");
+        earlier.setChatId("-1001234567890");
+        earlier.setAutoDisabledAt(REVOKED);
+        earlier.setFailedDays(10);
         notificationChannelRepository.saveAndFlush(earlier);
         entityManager.createQuery("update NotificationChannel ch set ch.createdAt = :at where ch.id = :id")
                 .setParameter("at", CREATED.minusDays(1)).setParameter("id", earlier.getId()).executeUpdate();
@@ -121,9 +125,10 @@ class NotificationAccountDataTest {
         final var export = notificationAccountData.exportFor(userRepository.findById(ana.getId()).orElseThrow());
 
         assertThat(export.channels()).containsExactly(
-                new ChannelExport("Earlier", ChannelType.TELEGRAM, false, List.of(), "Bot ••••WxYz", CREATED.minusDays(1), REVOKED, "FAILED"),
-                new ChannelExport("Later", ChannelType.SLACK, true, List.of(), "https://hooks.slack.com/••••wxyz", later.getCreatedAt(), null,
-                        null));
+                new ChannelExport("Earlier", ChannelType.TELEGRAM, false, List.of(), "Bot ••••WxYz", "-1001234567890", CREATED.minusDays(1),
+                        REVOKED, "FAILED", REVOKED, 10),
+                new ChannelExport("Later", ChannelType.SLACK, true, List.of(), "https://hooks.slack.com/••••wxyz", null, later.getCreatedAt(),
+                        null, null, null, 0));
     }
 
     @Test
@@ -162,9 +167,10 @@ class NotificationAccountDataTest {
                 .doesNotContain(TOPIC_URL, "hrva-private-topic")
                 .doesNotContainIgnoringCase("sealed")
                 .doesNotContain("\"deliveries\"", "\"body\"", "\"message\"", "\"uid\"", "link.dead:", "Couldn't reach")
-                .doesNotContain("\"accessToken\"", "\"signingSecret\"", "\"target\"", "\"chatId\"", "\"id\"");
+                .doesNotContain("\"accessToken\"", "\"signingSecret\"", "\"target\"", "\"id\"");
         assertThat(export.get("channels").get(0).propertyNames()).containsExactly(
-                "name", "type", "enabled", "events", "maskedTarget", "createdAt", "lastDeliveryAt", "lastDeliveryStatus");
+                "name", "type", "enabled", "events", "maskedTarget", "chatId", "createdAt", "lastDeliveryAt", "lastDeliveryStatus",
+                "autoDisabledAt", "failedDays");
         assertThat(export.at("/channels/0/maskedTarget").asString()).isEqualTo(MASK);
     }
 

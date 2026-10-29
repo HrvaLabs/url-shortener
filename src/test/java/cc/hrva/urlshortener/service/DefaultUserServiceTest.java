@@ -800,7 +800,7 @@ class DefaultUserServiceTest {
                 List.of(new ConsentExport(NotificationType.LINK_DEAD, "Discord: Team alerts", LocalDateTime.of(2026, 10, 27, 8, 15, 2),
                         ConsentSource.SETTINGS, null, null)),
                 List.of(new ChannelExport("Team alerts", ChannelType.DISCORD, true, List.of(NotificationType.LINK_DEAD),
-                        "https://discord.com/••••abcd", LocalDateTime.of(2026, 10, 27, 8, 15, 2), null, null))));
+                        "https://discord.com/••••abcd", null, LocalDateTime.of(2026, 10, 27, 8, 15, 2), null, null, null, 0))));
 
         final var mapper = JsonMapper.builder().build();
         final var export = mapper.readTree(mapper.writeValueAsString(userService.exportMyData()));
@@ -809,8 +809,8 @@ class DefaultUserServiceTest {
                 {"consentHistory":[{"type":"LINK_DEAD","channelLabel":"Discord: Team alerts","grantedAt":"2026-10-27T08:15:02",\
                 "source":"SETTINGS","revokedAt":null,"revokedSource":null}],\
                 "channels":[{"name":"Team alerts","type":"DISCORD","enabled":true,"events":["LINK_DEAD"],\
-                "maskedTarget":"https://discord.com/••••abcd","createdAt":"2026-10-27T08:15:02","lastDeliveryAt":null,\
-                "lastDeliveryStatus":null}]}""");
+                "maskedTarget":"https://discord.com/••••abcd","chatId":null,"createdAt":"2026-10-27T08:15:02","lastDeliveryAt":null,\
+                "lastDeliveryStatus":null,"autoDisabledAt":null,"failedDays":0}]}""");
         SecurityContextHolder.clearContext();
     }
 

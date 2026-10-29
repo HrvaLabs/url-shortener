@@ -69,9 +69,12 @@ public class NotificationAccountData {
                         .sorted(Comparator.naturalOrder())
                         .toList(),
                 channel.getMaskedTarget(),
+                channel.getChatId(),
                 channel.getCreatedAt(),
                 channel.getLastDeliveryAt(),
-                channel.getLastDeliveryStatus());
+                channel.getLastDeliveryStatus(),
+                channel.getAutoDisabledAt(),
+                channel.getFailedDays());
     }
 
 }
