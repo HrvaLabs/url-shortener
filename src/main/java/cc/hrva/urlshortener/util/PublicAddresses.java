@@ -27,11 +27,14 @@ public final class PublicAddresses {
                 return false;
             }
             final var host = uri.getHost().startsWith("[") ? uri.getHost().substring(1, uri.getHost().length() - 1) : uri.getHost();
-            final var addresses = InetAddress.getAllByName(host);
-            return addresses.length > 0 && Arrays.stream(addresses).allMatch(PublicAddresses::isPublicAddress);
+            return arePublic(InetAddress.getAllByName(host));
         } catch (final IllegalArgumentException | UnknownHostException exception) {
             return false;
         }
+    }
+
+    public static boolean arePublic(final InetAddress[] addresses) {
+        return addresses.length > 0 && Arrays.stream(addresses).allMatch(PublicAddresses::isPublicAddress);
     }
 
     static boolean isPublicAddress(final InetAddress address) {
