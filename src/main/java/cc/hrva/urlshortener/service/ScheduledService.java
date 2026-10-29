@@ -19,5 +19,6 @@ public interface ScheduledService {
     void checkDestinations();
     void drainNotificationDeliveries();
     void deleteOldNotificationRecords();
+    void sendDailyClickSummaries();
 
 }

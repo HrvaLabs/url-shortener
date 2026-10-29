@@ -1,6 +1,7 @@
 package cc.hrva.urlshortener.service.notification;
 
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
+import cc.hrva.urlshortener.dto.notification.DailySummary;
 import cc.hrva.urlshortener.model.enums.NotificationType;
 import cc.hrva.urlshortener.service.notification.DestinationCheckOutcome.DeadLink;
 import java.time.Clock;
@@ -42,6 +43,15 @@ public class NotificationPayloads {
     public record TestData(String message) {
     }
 
+    public record DailyData(String date, DailyTotals totals, List<DailyLinkData> links) {
+    }
+
+    public record DailyTotals(long clicks, long uniqueVisitors, long botClicks) {
+    }
+
+    public record DailyLinkData(String shortUrl, String destinationHost, long clicks, long uniqueVisitors, long botClicks) {
+    }
+
     public String json(final NotificationType event, final String deliveryUid, final Instant createdAt, final Object data) {
         return json(event.wireName(), deliveryUid, createdAt, data);
     }
@@ -65,6 +75,16 @@ public class NotificationPayloads {
         return new Links<>(links.stream()
                 .map(link -> new BackLinkData(shortUrl(link.shortUrl()), link.destinationHost(), day(link.deadSince()).toString(), backOn.toString()))
                 .toList());
+    }
+
+    public DailyData daily(final DailySummary summary) {
+        return new DailyData(summary.date().toString(),
+                new DailyTotals(summary.clicks(), summary.uniqueVisitors(), summary.botClicks()),
+                summary.links().stream()
+                        .limit(NotificationMessages.MOST_LINKS)
+                        .map(link -> new DailyLinkData(shortUrl(link.shortUrl()), link.destinationHost(), link.clicks(), link.uniqueVisitors(),
+                                link.botClicks()))
+                        .toList());
     }
 
     public TestData test() {

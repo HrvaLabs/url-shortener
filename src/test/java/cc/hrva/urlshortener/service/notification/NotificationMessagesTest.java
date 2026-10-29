@@ -1,11 +1,13 @@
 package cc.hrva.urlshortener.service.notification;
 
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
+import cc.hrva.urlshortener.dto.notification.DailySummary;
 import cc.hrva.urlshortener.model.NotificationChannel;
 import cc.hrva.urlshortener.model.enums.ChannelType;
 import cc.hrva.urlshortener.service.notification.DestinationCheckOutcome.DeadLink;
 import java.time.Clock;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
@@ -30,6 +32,33 @@ class NotificationMessagesTest {
         appProperties.setServerUrl("https://hrva.cc");
         appProperties.setFrontendUrl("http://localhost:3000/");
         messages = new NotificationMessages(appProperties, Clock.fixed(Instant.parse("2026-10-27T02:30:00Z"), ZoneOffset.UTC));
+    }
+
+    @Test
+    void dailySummaryListsTheTotalsThenEachLink() {
+        final var message = messages.daily(new DailySummary(LocalDate.of(2026, 10, 26), 1241, 1, 7, List.of(
+                new DailySummary.SummaryLink("abc", "example.com", 1240, 1, 2),
+                new DailySummary.SummaryLink("one", "example.org", 1, 0, 1),
+                new DailySummary.SummaryLink("bots", null, 0, 0, 4))));
+
+        assertThat(message).isEqualTo(new NotificationMessage("hrva.cc: clicks on 26 October 2026", List.of(
+                "1,241 clicks from 1 visitor, and 7 bot clicks",
+                "hrva.cc/abc " + ARROW + " example.com: 1,240 clicks, 1 visitor, 2 bot clicks",
+                "hrva.cc/one " + ARROW + " example.org: 1 click, 0 visitors, 1 bot click",
+                "hrva.cc/bots " + ARROW + " an unreadable destination: 0 clicks, 0 visitors, 4 bot clicks"),
+                "http://localhost:3000/dashboard", 0));
+        assertThat(messages.render(message)).hasSizeLessThanOrEqualTo(NotificationMessages.MOST_CHARACTERS);
+    }
+
+    @Test
+    void aDailySummaryOfTwentyLongAliasesStaysWithinTheLimit() {
+        final var links = java.util.stream.IntStream.range(0, 20)
+                .mapToObj(index -> new DailySummary.SummaryLink("a".repeat(120) + index, "example.com", 20 - index, 1, 0))
+                .toList();
+
+        final var message = messages.daily(new DailySummary(LocalDate.of(2026, 10, 26), 210, 20, 0, links));
+
+        assertThat(messages.render(message)).hasSizeLessThanOrEqualTo(NotificationMessages.MOST_CHARACTERS).endsWith("http://localhost:3000/dashboard");
     }
 
     @Test

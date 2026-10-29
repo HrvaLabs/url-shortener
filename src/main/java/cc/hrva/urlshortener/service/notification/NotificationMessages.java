@@ -1,8 +1,10 @@
 package cc.hrva.urlshortener.service.notification;
 
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
+import cc.hrva.urlshortener.dto.notification.DailySummary;
 import cc.hrva.urlshortener.model.NotificationChannel;
 import cc.hrva.urlshortener.service.notification.DestinationCheckOutcome.DeadLink;
+import java.text.NumberFormat;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -30,6 +32,9 @@ public class NotificationMessages {
     private static final String DASHBOARD = "/dashboard";
     private static final String SETTINGS = "/dashboard/settings#notifications";
     private static final String LINE_SEPARATOR = "\n";
+    private static final String CLICK = "click";
+    private static final String VISITOR = "visitor";
+    private static final String BOT_CLICK = "bot click";
 
     private final AppProperties appProperties;
     private final Clock clock;
@@ -49,6 +54,18 @@ public class NotificationMessages {
     public NotificationMessage linkBack(final List<DeadLink> links) {
         final var title = links.size() == 1 ? "hrva.cc: 1 link works again" : "hrva.cc: %d links work again".formatted(links.size());
         return listed(title, links, link -> target(link) + ", works again after looking broken since " + dayText(link.deadSince()));
+    }
+
+    public NotificationMessage daily(final DailySummary summary) {
+        final var lines = new ArrayList<String>();
+        lines.add(counted(summary.clicks(), CLICK) + " from " + counted(summary.uniqueVisitors(), VISITOR) + ", and "
+                + counted(summary.botClicks(), BOT_CLICK));
+        summary.links().stream()
+                .limit(MOST_LINKS)
+                .map(link -> target(link.shortUrl(), link.destinationHost()) + ": " + counted(link.clicks(), CLICK) + ", "
+                        + counted(link.uniqueVisitors(), VISITOR) + ", " + counted(link.botClicks(), BOT_CLICK))
+                .forEach(lines::add);
+        return new NotificationMessage("hrva.cc: clicks on " + DAY.format(summary.date()), lines, frontendPage(DASHBOARD), 0);
     }
 
     public NotificationMessage test(final NotificationChannel channel) {
@@ -101,6 +118,10 @@ public class NotificationMessages {
         return new NotificationMessage(title, lines, frontendPage(DASHBOARD), links.size() - lines.size());
     }
 
+
+    public static String counted(final long count, final String noun) {
+        return NumberFormat.getIntegerInstance(Locale.ENGLISH).format(count) + " " + noun + (count == 1 ? "" : "s");
+    }
 
     private static String joined(final NotificationMessage message, final Format format, final List<String> lines, final int shown) {
         final var parts = new ArrayList<String>();

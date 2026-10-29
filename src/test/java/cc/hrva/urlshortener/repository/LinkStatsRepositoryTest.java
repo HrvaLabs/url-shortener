@@ -3,6 +3,7 @@ package cc.hrva.urlshortener.repository;
 import cc.hrva.urlshortener.dto.AnalyticsDay;
 import cc.hrva.urlshortener.dto.BreakdownEntry;
 import cc.hrva.urlshortener.dto.LinkClicks;
+import cc.hrva.urlshortener.dto.LinkDayCounts;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.enums.StatDimension;
@@ -234,6 +235,40 @@ class LinkStatsRepositoryTest {
         assertThat(linkStatsRepository.findOwnerTopLinks(owner.getId(), DAY, DAY.plusDays(1), 2)).containsExactly(
                 new LinkClicks(busiest.getId(), 6, 5),
                 new LinkClicks(tiedFirst.getId(), 4, 3));
+    }
+
+    @Test
+    void ownerLinkDayIncludesBotOnlyLinksInOrderUpToTheLimit() {
+        final var owner = savedOwner("day-owner@example.com");
+        final var otherOwner = savedOwner("day-other@example.com");
+        final var busiest = savedLink("day-busiest", owner);
+        final var tiedFirst = savedLink("day-tied-1", owner);
+        final var tiedSecond = savedLink("day-tied-2", owner);
+        final var tiedMoreBots = savedLink("day-tied-bots", owner);
+        final var botOnly = savedLink("day-bots", owner);
+        final var quiet = savedLink("day-quiet", owner);
+        final var otherDay = savedLink("day-other-day", owner);
+        final var foreign = savedLink("day-foreign", otherOwner);
+        linkStatsRepository.incrementDailyStats(busiest.getId(), DAY, 9, 7, 0);
+        linkStatsRepository.incrementDailyStats(tiedSecond.getId(), DAY, 4, 2, 1);
+        linkStatsRepository.incrementDailyStats(tiedFirst.getId(), DAY, 4, 3, 1);
+        linkStatsRepository.incrementDailyStats(tiedMoreBots.getId(), DAY, 4, 4, 5);
+        linkStatsRepository.incrementDailyStats(botOnly.getId(), DAY, 0, 0, 3);
+        linkStatsRepository.incrementDailyStats(quiet.getId(), DAY, 0, 0, 0);
+        linkStatsRepository.incrementDailyStats(otherDay.getId(), DAY.plusDays(1), 50, 50, 0);
+        linkStatsRepository.incrementDailyStats(foreign.getId(), DAY, 20, 20, 0);
+
+        assertThat(tiedFirst.getId()).isLessThan(tiedSecond.getId()).isLessThan(tiedMoreBots.getId());
+        assertThat(linkStatsRepository.findOwnerLinkDay(owner.getId(), DAY, 20)).containsExactly(
+                new LinkDayCounts(busiest.getId(), 9, 7, 0),
+                new LinkDayCounts(tiedMoreBots.getId(), 4, 4, 5),
+                new LinkDayCounts(tiedFirst.getId(), 4, 3, 1),
+                new LinkDayCounts(tiedSecond.getId(), 4, 2, 1),
+                new LinkDayCounts(botOnly.getId(), 0, 0, 3));
+        assertThat(linkStatsRepository.findOwnerLinkDay(owner.getId(), DAY, 2)).containsExactly(
+                new LinkDayCounts(busiest.getId(), 9, 7, 0),
+                new LinkDayCounts(tiedMoreBots.getId(), 4, 4, 5));
+        assertThat(linkStatsRepository.findOwnerLinkDay(owner.getId(), DAY.minusDays(1), 20)).isEmpty();
     }
 
     @Test

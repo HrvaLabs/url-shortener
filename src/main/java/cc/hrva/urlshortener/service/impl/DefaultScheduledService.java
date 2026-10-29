@@ -8,6 +8,7 @@ import cc.hrva.urlshortener.repository.BioHandleHoldRepository;
 import cc.hrva.urlshortener.repository.EmailLogRepository;
 import cc.hrva.urlshortener.service.ApiKeyService;
 import cc.hrva.urlshortener.service.BlocklistSourceService;
+import cc.hrva.urlshortener.service.ClickSummaryService;
 import cc.hrva.urlshortener.service.DestinationCheckService;
 import cc.hrva.urlshortener.service.LinkDigestService;
 import cc.hrva.urlshortener.service.ResetTokenService;
@@ -43,6 +44,7 @@ public class DefaultScheduledService implements ScheduledService {
     private final WeeklyDigestService weeklyDigestService;
     private final DestinationCheckService destinationCheckService;
     private final NotificationDeliveryService notificationDeliveryService;
+    private final ClickSummaryService clickSummaryService;
     private final BioHandleHoldRepository bioHandleHoldRepository;
     private final EmailLogRepository emailLogRepository;
     private final AuditLogRepository auditLogRepository;
@@ -168,6 +170,13 @@ public class DefaultScheduledService implements ScheduledService {
     @Scheduled(cron = "0 55 3 * * *")
     public void deleteOldNotificationRecords() {
         notificationDeliveryService.deleteOld();
+    }
+
+    @Override
+    @Scheduled(cron = "0 15 1 * * *", zone = "${app.analytics.zone}")
+    public void sendDailyClickSummaries() {
+        log.info("Scheduled: daily click summaries");
+        clickSummaryService.sendDailyInBackground();
     }
 
 }

@@ -4,6 +4,7 @@ import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.repository.AuditLogRepository;
 import cc.hrva.urlshortener.repository.BioHandleHoldRepository;
 import cc.hrva.urlshortener.repository.EmailLogRepository;
+import cc.hrva.urlshortener.service.impl.DefaultClickSummaryService;
 import cc.hrva.urlshortener.service.impl.DefaultDestinationCheckService;
 import cc.hrva.urlshortener.service.impl.DefaultNotificationDeliveryService;
 import cc.hrva.urlshortener.service.impl.DefaultScheduledService;
@@ -79,6 +80,9 @@ class DefaultScheduledServiceTest {
     private NotificationDeliveryService notificationDeliveryService;
 
     @Mock
+    private ClickSummaryService clickSummaryService;
+
+    @Mock
     private BioHandleHoldRepository bioHandleHoldRepository;
 
     @Mock
@@ -92,7 +96,7 @@ class DefaultScheduledServiceTest {
     @BeforeEach
     void setUp() {
         this.scheduledService = new DefaultScheduledService(urlService, userService, apiKeyService, resetTokenService, urlNotificationService, safeBrowsingRecheckService, sendingEmailService, linkDigestService, blocklistSourceService,
-                weeklyDigestService, destinationCheckService, notificationDeliveryService, bioHandleHoldRepository, emailLogRepository, auditLogRepository, appProperties, Clock.fixed(NOW, ZoneOffset.UTC));
+                weeklyDigestService, destinationCheckService, notificationDeliveryService, clickSummaryService, bioHandleHoldRepository, emailLogRepository, auditLogRepository, appProperties, Clock.fixed(NOW, ZoneOffset.UTC));
     }
 
     @Test
@@ -211,6 +215,33 @@ class DefaultScheduledServiceTest {
         assertThat(drainInBackground.getAnnotation(Async.class)).isNotNull();
         assertThat(drainInBackground.getAnnotation(Async.class).value()).isEmpty();
         assertThat(DefaultScheduledService.class.getMethod("drainNotificationDeliveries").getAnnotation(Async.class)).isNull();
+        final var sendDailyInBackground = DefaultClickSummaryService.class.getMethod("sendDailyInBackground");
+        assertThat(sendDailyInBackground.getAnnotation(Async.class)).isNotNull();
+        assertThat(sendDailyInBackground.getAnnotation(Async.class).value()).isEmpty();
+        assertThat(DefaultScheduledService.class.getMethod("sendDailyClickSummaries").getAnnotation(Async.class)).isNull();
+    }
+
+    @Test
+    @ExtendWith(OutputCaptureExtension.class)
+    void theDailyClickSummaryHandsOffToTheBackground(final CapturedOutput output) {
+        scheduledService.sendDailyClickSummaries();
+
+        verify(clickSummaryService).sendDailyInBackground();
+        verify(clickSummaryService, never()).sendDaily();
+        assertThat(output).contains("Scheduled: daily click summaries");
+    }
+
+    @Test
+    void theDailyClickSummaryRunsAtQuarterPastOneInTheAnalyticsZone() throws NoSuchMethodException, IOException {
+        final var scheduled = DefaultScheduledService.class.getMethod("sendDailyClickSummaries").getAnnotation(Scheduled.class);
+        final var sources = new MutablePropertySources();
+        new YamlPropertySourceLoader().load("application", new ClassPathResource("application.yaml")).forEach(sources::addLast);
+        final var zone = ZoneId.of(new PropertySourcesPropertyResolver(sources).resolveRequiredPlaceholders(scheduled.zone()));
+
+        assertThat(scheduled.cron()).isEqualTo("0 15 1 * * *");
+        assertThat(scheduled.zone()).isEqualTo("${app.analytics.zone}");
+        assertThat(nextRun(CronExpression.parse(scheduled.cron()), "2026-10-26T12:00:00Z", zone)).isEqualTo("2026-10-27T00:15:00Z");
+        assertThat(nextRun(CronExpression.parse(scheduled.cron()), "2026-07-01T12:00:00Z", zone)).isEqualTo("2026-07-01T23:15:00Z");
     }
 
     @Test

@@ -3,6 +3,7 @@ package cc.hrva.urlshortener.repository;
 import cc.hrva.urlshortener.dto.AnalyticsDay;
 import cc.hrva.urlshortener.dto.BreakdownEntry;
 import cc.hrva.urlshortener.dto.LinkClicks;
+import cc.hrva.urlshortener.dto.LinkDayCounts;
 import cc.hrva.urlshortener.model.enums.StatDimension;
 import java.time.LocalDate;
 import java.util.ArrayList;
@@ -95,6 +96,17 @@ public class LinkStatsRepository {
             fetch first :limit rows only
             """;
 
+    private static final String FIND_OWNER_LINK_DAY = """
+            select s.url_id, sum(s.clicks) as total_clicks, sum(s.unique_visitors) as total_unique_visitors,
+                   sum(s.bot_clicks) as total_bot_clicks
+            from link_daily_stats s join url u on u.id = s.url_id
+            where u.owner_id = :ownerId and s.stat_date = :day
+            group by s.url_id
+            having sum(s.clicks) + sum(s.bot_clicks) > 0
+            order by sum(s.clicks) desc, sum(s.bot_clicks) desc, s.url_id
+            fetch first :limit rows only
+            """;
+
     private static final String SUM_CLICKS_BY_URL = """
             select url_id, sum(clicks) as total_clicks from link_daily_stats
             where url_id in (:urlIds) and stat_date between :from and :to
@@ -173,6 +185,15 @@ public class LinkStatsRepository {
                         row.getLong("url_id"),
                         row.getLong("total_clicks"),
                         row.getLong("total_unique_visitors")));
+    }
+
+    public List<LinkDayCounts> findOwnerLinkDay(final long ownerId, final LocalDate day, final int limit) {
+        return jdbcTemplate.query(FIND_OWNER_LINK_DAY, Map.of(OWNER_ID, ownerId, DAY, day, LIMIT, limit),
+                (row, rowNumber) -> new LinkDayCounts(
+                        row.getLong("url_id"),
+                        row.getLong("total_clicks"),
+                        row.getLong("total_unique_visitors"),
+                        row.getLong("total_bot_clicks")));
     }
 
     public Map<Long, Long> sumClicksByUrl(final Collection<Long> urlIds, final LocalDate from, final LocalDate to) {

@@ -1,6 +1,7 @@
 package cc.hrva.urlshortener.service.notification;
 
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
+import cc.hrva.urlshortener.dto.notification.DailySummary;
 import cc.hrva.urlshortener.model.enums.NotificationType;
 import cc.hrva.urlshortener.service.notification.DestinationCheckOutcome.DeadLink;
 import java.time.Clock;
@@ -48,6 +49,22 @@ class NotificationPayloadsTest {
         assertStrict(json, """
                 {"event":"link.back","deliveryId":"uid-2","createdAt":"2026-10-27T01:14:00Z",
                  "links":[{"shortUrl":"https://hrva.cc/abc","destinationHost":"example.com","deadSince":"2026-10-20","backOn":"2026-10-27"}]}""");
+    }
+
+    @Test
+    void dailySummaryBody() {
+        final var summary = new DailySummary(LocalDate.of(2026, 10, 26), 41, 30, 7, List.of(
+                new DailySummary.SummaryLink("abc", "example.com", 20, 15, 2),
+                new DailySummary.SummaryLink("bots", null, 0, 0, 3)));
+
+        final var json = payloads.json(NotificationType.DAILY_SUMMARY, "uid-3", CREATED_AT, payloads.daily(summary));
+
+        assertStrict(json, """
+                {"event":"summary.daily","deliveryId":"uid-3","createdAt":"2026-10-27T01:14:00Z","date":"2026-10-26",
+                 "totals":{"clicks":41,"uniqueVisitors":30,"botClicks":7},
+                 "links":[{"shortUrl":"https://hrva.cc/abc","destinationHost":"example.com","clicks":20,"uniqueVisitors":15,"botClicks":2},
+                          {"shortUrl":"https://hrva.cc/bots","destinationHost":null,"clicks":0,"uniqueVisitors":0,"botClicks":3}]}""");
+        assertThat(json).startsWith("{\"event\":\"summary.daily\",\"deliveryId\":\"uid-3\",\"createdAt\":\"2026-10-27T01:14:00Z\",\"date\":");
     }
 
     @Test
