@@ -6,7 +6,7 @@ All notable changes to hrva.cc — the URL shortener.
 
 ## [v2.15.3] — 2026-10-29
 
-Sign in with GitHub, and Google and GitHub sign-ins need a verified email address.
+Sign in with GitHub, verified email addresses for Google and GitHub sign-ins, and hrva.cc as an installable app.
 
 ### 🛡️ Security
 - Sign in with GitHub. hrva.cc uses your GitHub account's verified primary email.
@@ -14,6 +14,10 @@ Sign in with GitHub, and Google and GitHub sign-ins need a verified email addres
 - When new sign-ups are paused, Google and GitHub can't create accounts either.
 - Signing in with Google or GitHub to an account whose email address was never confirmed confirms it and turns off the password it was created with.
 - If signing in with Google or GitHub fails, you come back to hrva.cc with a message instead of a bare error page.
+
+### 🌐 Site
+- hrva.cc can be installed as an app. On Android you can share a link to it from any app to shorten it.
+- A Support section on the About page.
 
 ---
 
