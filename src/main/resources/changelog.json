@@ -27,13 +27,20 @@
     {
       "version": "v2.15",
       "date": "2026-10-29",
-      "summary": "Emails have a new look that matches the site.",
+      "summary": "Emails that match the site, and new pages: about, developers, a free QR code generator and UTM builder.",
       "sections": [
         {
           "title": "Site",
           "icon": "globe",
           "items": [
-            "Emails have a new look that matches the site, easier to read on phones and in dark mode."
+            "Emails have a new look that matches the site, easier to read on phones and in dark mode.",
+            "New About page: who runs hrva.cc, how it is paid for and how to reach it.",
+            "New page on how hrva.cc counts visits without tracking, with what it keeps, what it never stores and the source code to check.",
+            "New developers page with an API quickstart in curl, JavaScript and Python, the request fields, errors and limits. The MCP page now has example prompts and says what your assistant can see.",
+            "Free QR code generator at /qr: no account, PNG and SVG download, and an optional short link to count scans.",
+            "Free UTM builder at /utm: tag any link without an account, copy it or shorten it.",
+            "New link in bio page explaining bio pages, linked from the header and from the bottom of every bio page.",
+            "The homepage API example now shows the real response code, 200 OK."
           ]
         }
       ]
