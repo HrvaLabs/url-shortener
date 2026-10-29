@@ -4,6 +4,31 @@ All notable changes to hrva.cc — the URL shortener.
 
 ---
 
+## [v2.14] — 2026-10-29
+
+Notifications you choose: dead-link checks, a weekly summary, and alerts to Discord, Slack, Telegram, ntfy, a webhook or email.
+
+### 🔗 Links
+- hrva.cc now checks every active link's destination each night. If it fails three different nights, with no working answer in between (the page is gone, or the website no longer exists), the link is marked "Destination looks dead" on your dashboard and in its stats.
+
+### 🔔 Notifications
+- New Notifications settings: get an email when a link stops working, a weekly summary every Monday, or a reminder before a link expires. Everything is off until you turn it on.
+- Add channels for Discord, Slack, Telegram, ntfy or your own webhook (signed JSON), and pick which events each gets: a link stopped working, a link works again, a daily click summary or the weekly summary. Each channel has Send test and shows its last delivery.
+- Expiry reminders are now opt-in. If you want them, turn on Expiry reminders in Settings, under Notifications.
+- Every notification email has a one-click unsubscribe link.
+
+### 🔒 Privacy
+- Notifications carry counts, short links and destination hosts only, never visitors' IP addresses, browsers or referrers. Channel URLs and tokens are encrypted and shown masked after you save them.
+- We no longer send a welcome email after you verify your address.
+
+### 🔧 Admin
+- All URLs can show only links whose destination looks dead, and the stats page counts them, plus notification opt-ins and channels per type.
+
+### 🌐 Site
+- A new help page explains notifications, channels and webhook signatures step by step.
+
+---
+
 ## [v2.13.1] — 2026-10-27
 
 Admins can delete expired and revoked API keys, logs are no longer kept forever, pages load faster, and three API key fixes.

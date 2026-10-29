@@ -1,10 +1,56 @@
 {
   "releases": [
     {
-      "version": "v2.13.1",
-      "date": "2026-10-27",
+      "version": "v2.14",
+      "date": "2026-10-29",
       "badge": "Latest",
       "badgeVariant": "default",
+      "summary": "Notifications you choose: dead-link checks, a weekly summary, and alerts to Discord, Slack, Telegram, ntfy, a webhook or email.",
+      "sections": [
+        {
+          "title": "Links",
+          "icon": "link",
+          "items": [
+            "hrva.cc now checks every active link's destination each night. If it fails three different nights, with no working answer in between (the page is gone, or the website no longer exists), the link is marked \"Destination looks dead\" on your dashboard and in its stats."
+          ]
+        },
+        {
+          "title": "Notifications",
+          "icon": "bell",
+          "items": [
+            "New Notifications settings: get an email when a link stops working, a weekly summary every Monday, or a reminder before a link expires. Everything is off until you turn it on.",
+            "Add channels for Discord, Slack, Telegram, ntfy or your own webhook (signed JSON), and pick which events each gets: a link stopped working, a link works again, a daily click summary or the weekly summary. Each channel has Send test and shows its last delivery.",
+            "Expiry reminders are now opt-in. If you want them, turn on Expiry reminders in Settings, under Notifications.",
+            "Every notification email has a one-click unsubscribe link."
+          ]
+        },
+        {
+          "title": "Privacy",
+          "icon": "lock",
+          "items": [
+            "Notifications carry counts, short links and destination hosts only, never visitors' IP addresses, browsers or referrers. Channel URLs and tokens are encrypted and shown masked after you save them.",
+            "We no longer send a welcome email after you verify your address."
+          ]
+        },
+        {
+          "title": "Admin",
+          "icon": "wrench",
+          "items": [
+            "All URLs can show only links whose destination looks dead, and the stats page counts them, plus notification opt-ins and channels per type."
+          ]
+        },
+        {
+          "title": "Site",
+          "icon": "globe",
+          "items": [
+            "A new help page explains notifications, channels and webhook signatures step by step."
+          ]
+        }
+      ]
+    },
+    {
+      "version": "v2.13.1",
+      "date": "2026-10-27",
       "summary": "Admins can delete expired and revoked API keys, logs are no longer kept forever, pages load faster, and three API key fixes.",
       "sections": [
         {

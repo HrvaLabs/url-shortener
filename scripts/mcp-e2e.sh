@@ -19,6 +19,10 @@
 # Section 19 reads the admin user list and edits a user: the JSON fields of a row and its roles, and the edit's answer.
 # Section 20 runs what broke when open-in-view was turned off: a link created with an API key, an owner reactivating and
 # editing their link, and the answers of a password change and a password reset, which carry the roles.
+# Section 21 checks notifications and consent: the email toggles, an unsubscribe token signed in the shell with the local
+# profile's dev key (GET only redirects, the RFC 8058 one-click POST revokes), a channel refused for a non-public address and
+# one saved sealed and masked, a dead destination in the owner's list but not the public answer, deleting the channel (its
+# consent history stays), the export and the admin counts. Channels are only saved; nothing is ever posted to them.
 #
 #   scripts/mcp-e2e.sh                         builds the jar, then runs every step
 #   MCP_E2E_SKIP_BUILD=1 scripts/mcp-e2e.sh    reuses target/url-shortener-*.jar
@@ -1038,5 +1042,112 @@ http -X POST "$BASE/api/v1/auth/password-reset/confirm" -H 'Content-Type: applic
     -d "{\"token\":\"$RESET_TOKEN\",\"email\":\"$USER_EMAIL\",\"password\":\"reset-$USER_PASSWORD\"}"
 expect_eq "$HTTP_STATUS" 200 "POST /api/v1/auth/password-reset/confirm"
 expect_contains "$(jq -c '[.authorities[].name]' <<<"$HTTP_BODY")" '"ROLE_USER"' "the answer carries the roles"
+
+section "21. Notifications and consent"
+NOTIFY_PASSWORD=reset-$USER_PASSWORD
+http -X POST "$BASE/api/v1/auth/login" -H 'Content-Type: application/json' \
+    -d "{\"email\":\"$USER_EMAIL\",\"password\":\"$NOTIFY_PASSWORD\"}"
+expect_eq "$HTTP_STATUS" 200 "POST /api/v1/auth/login as $USER_EMAIL with the password section 20 reset"
+NOTIFY_JWT=$(jq -r .token <<<"$HTTP_BODY")
+NOTIFY_JWT=${NOTIFY_JWT#Bearer }
+NOTIFY_USER_ID=$(psql_value "select id from user_account where email = '$USER_EMAIL';")
+active_consents() {
+    psql_value "select count(*) from notification_consent where user_id = $NOTIFY_USER_ID and revoked_at is null;"
+}
+expect_eq "$(psql_value "select count(*) from databasechangelog where id like '031-%' and exectype = 'EXECUTED';")" 7 "031 ran all seven changesets"
+http -H "Authorization: Bearer $NOTIFY_JWT" "$BASE/api/v1/users/me/notifications"
+expect_eq "$HTTP_STATUS $(jq -c '[.[].type]' <<<"$HTTP_BODY")" '200 ["DEAD_LINK_EMAIL","WEEKLY_SUMMARY_EMAIL","EXPIRY_REMINDER_EMAIL"]' \
+    "GET /api/v1/users/me/notifications lists the three email types"
+expect_eq "$(jq -c '[.[].consented]' <<<"$HTTP_BODY")" '[false,false,false]' "every email is off until the user turns it on"
+http -X PUT "$BASE/api/v1/users/me/notifications/WEEKLY_SUMMARY_EMAIL" -H "Authorization: Bearer $NOTIFY_JWT" -H 'Content-Type: application/json' \
+    -d '{"consented":true}'
+expect_eq "$HTTP_STATUS $(jq -r '"\(.type) \(.consented)"' <<<"$HTTP_BODY")" "200 WEEKLY_SUMMARY_EMAIL true" "PUT .../WEEKLY_SUMMARY_EMAIL turns the weekly summary on"
+expect_eq "$(active_consents)" 1 "one active consent row"
+
+echo "  --- the unsubscribe token, signed in the shell with the local profile's dev key as NotificationKeys derives it"
+NOTIFY_DEV_KEY=$(awk '/^  notifications:/ { inside = 1 } inside && $1 == "key:" { print $2; exit }' "$ROOT/src/main/resources/application-local.yaml")
+[[ -n $NOTIFY_DEV_KEY ]] || fail "no app.notifications.key in application-local.yaml"
+hex_of() {
+    od -An -tx1 | tr -d ' \n'
+}
+NOTIFY_MASTER_HEX=$(printf '%s' "$NOTIFY_DEV_KEY" | openssl base64 -A -d | hex_of)
+NOTIFY_UNSUBSCRIBE_HEX=$(printf '%s' hrva-unsubscribe-v1 | openssl dgst -sha256 -mac HMAC -macopt "hexkey:$NOTIFY_MASTER_HEX" -binary | hex_of)
+UNSUBSCRIBE_PAYLOAD="v1.$NOTIFY_USER_ID.WEEKLY_SUMMARY_EMAIL"
+UNSUBSCRIBE_TOKEN="$(printf '%s' "$UNSUBSCRIBE_PAYLOAD" | b64url).$(printf '%s' "$UNSUBSCRIBE_PAYLOAD" \
+    | openssl dgst -sha256 -mac HMAC -macopt "hexkey:$NOTIFY_UNSUBSCRIBE_HEX" -binary | b64url)"
+UNSUBSCRIBE_URL="$BASE/api/v1/notifications/unsubscribe?token=$UNSUBSCRIBE_TOKEN"
+expect_eq "$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' "$UNSUBSCRIBE_URL")" "302 $FRONTEND_URL/unsubscribe?token=$UNSUBSCRIBE_TOKEN" \
+    "GET .../unsubscribe answers 302 to the frontend page"
+expect_eq "$(active_consents)" 1 "a GET revokes nothing"
+http -X POST "$UNSUBSCRIBE_URL" -d 'List-Unsubscribe=One-Click'
+expect_eq "$HTTP_STATUS $(jq -c . <<<"$HTTP_BODY")" '200 {"type":"WEEKLY_SUMMARY_EMAIL","alreadyOff":false}' \
+    "the RFC 8058 one-click POST turns the weekly summary off"
+expect_eq "$(active_consents)" 0 "no active consent row is left"
+expect_eq "$(psql_value "select revoked_source from notification_consent where user_id = $NOTIFY_USER_ID and type = 'WEEKLY_SUMMARY_EMAIL';")" \
+    UNSUBSCRIBE_LINK "the row is kept, revoked by the unsubscribe link"
+http -X POST "$UNSUBSCRIBE_URL" -d 'List-Unsubscribe=One-Click'
+expect_eq "$HTTP_STATUS $(jq -r .alreadyOff <<<"$HTTP_BODY")" "200 true" "the same POST again says it is already off"
+http -X POST "$BASE/api/v1/notifications/unsubscribe?token=$(printf 'v1.%s.DEAD_LINK_EMAIL' "$NOTIFY_USER_ID" | b64url).${UNSUBSCRIBE_TOKEN#*.}"
+expect_eq "$HTTP_STATUS" 400 "the weekly summary's signature on a dead-link email token is refused"
+
+echo "  --- channels"
+NOTIFY_CHANNELS=$BASE/api/v1/users/me/notification-channels
+http -X POST "$NOTIFY_CHANNELS" -H "Authorization: Bearer $NOTIFY_JWT" -H 'Content-Type: application/json' \
+    -d '{"name":"E2E","type":"WEBHOOK","events":["LINK_DEAD"],"target":"https://127.0.0.1/hook"}'
+expect_eq "$HTTP_STATUS" 400 "a webhook to 127.0.0.1 is refused"
+expect_contains "$(jq -r .target <<<"$HTTP_BODY")" "public" "the target error asks for a public address"
+DISCORD_CHANNEL_SECRET=e2e-secret-abcd
+http -X POST "$NOTIFY_CHANNELS" -H "Authorization: Bearer $NOTIFY_JWT" -H 'Content-Type: application/json' \
+    -d "{\"name\":\"E2E\",\"type\":\"DISCORD\",\"events\":[\"LINK_DEAD\"],\"target\":\"https://discord.com/api/webhooks/1/$DISCORD_CHANNEL_SECRET\"}"
+expect_eq "$HTTP_STATUS" 201 "POST .../notification-channels adds a Discord channel"
+MASK_DOTS=$(jq -rn '[8226, 8226, 8226, 8226] | implode')
+expect_eq "$(jq -r .maskedTarget <<<"$HTTP_BODY")" "https://discord.com/${MASK_DOTS}abcd" "the answer carries the mask"
+expect_eq "$(jq -c .events <<<"$HTTP_BODY")" '["LINK_DEAD"]' "with its event"
+[[ $HTTP_BODY != *e2e-secret* ]] || fail "the channel answer contains the webhook URL's secret"
+ok "the answer does not contain the webhook URL"
+NOTIFY_CHANNEL_ID=$(jq -r .id <<<"$HTTP_BODY")
+expect_eq "$(psql_value "select (target_sealed like 'v1:%') || ' ' || (target_sealed not like '%e2e-secret%') from notification_channel where id = $NOTIFY_CHANNEL_ID;")" \
+    "true true" "the URL is sealed at rest"
+expect_eq "$(active_consents)" 1 "the ticked event is an active consent row"
+grep -q 'e2e-secret' "$WORK/app.log" && fail "the app log contains the webhook URL's secret"
+ok "the app log does not contain the webhook URL"
+
+echo "  --- a dead destination"
+DEAD_ALIAS=$(psql_value "select short_url from url where id = $KEY_LINK_ID;")
+psql_value "update url set destination_dead_since = now(), destination_last_status = '404' where id = $KEY_LINK_ID;" >/dev/null
+http -G "$BASE/api/v1/urls" -H "Authorization: Bearer $NOTIFY_JWT" --data-urlencode "size=100"
+expect_eq "$(jq -r --argjson id "$KEY_LINK_ID" '.content[] | select(.id == $id) | .destinationHealth.lastStatus' <<<"$HTTP_BODY")" 404 \
+    "the owner's list marks $DEAD_ALIAS dead with 404"
+http -A "$BROWSER_USER_AGENT" "$BASE/api/v1/urls/$DEAD_ALIAS"
+expect_eq "$HTTP_STATUS $(jq -r 'has("destinationHealth")' <<<"$HTTP_BODY")" "200 false" \
+    "the public GET /api/v1/urls/$DEAD_ALIAS (a browser; the link has a visit limit, which refuses bots) has no destinationHealth"
+http -G "$BASE/api/v1/urls/all" -H "Authorization: Bearer $ADMIN_JWT" --data-urlencode "deadDestination=true"
+expect_eq "$(jq -r '[.content[].shortUrl] | join(",")' <<<"$HTTP_BODY")" "$DEAD_ALIAS" "the admin's dead-destination filter finds only $DEAD_ALIAS"
+
+echo "  --- deleting the channel keeps its consent history"
+http -X DELETE "$NOTIFY_CHANNELS/$NOTIFY_CHANNEL_ID" -H "Authorization: Bearer $NOTIFY_JWT"
+expect_eq "$HTTP_STATUS" 204 "DELETE .../notification-channels/{id}"
+expect_eq "$(psql_value "select (channel_id is null) || ' ' || channel_label || ' ' || revoked_source from notification_consent where user_id = $NOTIFY_USER_ID and type = 'LINK_DEAD';")" \
+    "true Discord: E2E CHANNEL_REMOVED" "its consent row stays, without the channel, revoked as CHANNEL_REMOVED"
+expect_eq "$(active_consents)" 0 "no active consent row is left"
+
+http -H "Authorization: Bearer $NOTIFY_JWT" "$BASE/api/v1/users/me/export"
+expect_eq "$HTTP_STATUS" 200 "GET /api/v1/users/me/export"
+show "$(jq -c .notifications <<<"$HTTP_BODY")"
+expect_eq "$(jq -r '.notifications.consentHistory | length >= 2' <<<"$HTTP_BODY")" true "the export has the consent history"
+expect_eq "$(jq -r '[.notifications.consentHistory[] | "\(.type) \(.revokedSource)"] | join(", ")' <<<"$HTTP_BODY")" \
+    "WEEKLY_SUMMARY_EMAIL UNSUBSCRIBE_LINK, LINK_DEAD CHANNEL_REMOVED" "in order, with how each was turned off"
+expect_eq "$(jq -c .notifications.channels <<<"$HTTP_BODY")" '[]' "and no channel"
+[[ $(jq -c .notifications <<<"$HTTP_BODY") != *e2e-secret* && $(jq -c .notifications <<<"$HTTP_BODY") != *v1:* ]] || fail "the export holds a secret"
+ok "the export holds no URL or sealed value"
+http -H "Authorization: Bearer $ADMIN_JWT" "$BASE/api/v1/admin/stats/users?days=7"
+expect_eq "$(jq -c '[.notifications.consents[].value]' <<<"$HTTP_BODY")" \
+    '["DEAD_LINK_EMAIL","WEEKLY_SUMMARY_EMAIL","EXPIRY_REMINDER_EMAIL","LINK_DEAD","LINK_BACK","DAILY_SUMMARY","WEEKLY_SUMMARY"]' \
+    "users stats list all seven consent types"
+expect_eq "$(jq -c '[.notifications.channels[].value], .notifications.autoDisabledChannels' <<<"$HTTP_BODY" | paste -sd' ' -)" \
+    '["DISCORD","SLACK","TELEGRAM","NTFY","WEBHOOK"] 0' "and all five channel types"
+expect_eq "$(jq -r '[.notifications.consents[].count, .notifications.channels[].count] | add' <<<"$HTTP_BODY")" 0 "with nothing active left"
+http -H "Authorization: Bearer $ADMIN_JWT" "$BASE/api/v1/admin/stats/links?days=7"
+expect_eq "$(jq -c .deadDestinations <<<"$HTTP_BODY")" '{"total":1,"anonymous":0}' "links stats count the dead destination"
 
 section "Done: every step passed"

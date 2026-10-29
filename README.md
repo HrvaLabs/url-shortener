@@ -66,6 +66,10 @@ Build, test and run commands, local dev users and the end-to-end check (`scripts
   ```bash
   node -e "const {generateKeyPairSync, randomUUID} = require('node:crypto'); const {privateKey} = generateKeyPairSync('rsa', {modulusLength: 2048}); console.log(JSON.stringify({...privateKey.export({format: 'jwk'}), kid: randomUUID(), use: 'sig', alg: 'RS256'}))"
   ```
+- **`APP_NOTIFICATIONS_KEY` is required** too, and the app won't start without it. It encrypts the notification channels' URLs and tokens and signs the unsubscribe links, so keep it next to the MCP signing key: losing it means everyone re-adds their channels. Generate 32 random bytes:
+  ```bash
+  openssl rand -base64 32
+  ```
 - **Cloudflare-only origin.** The per-network rate limits trust `CF-Connecting-IP`, and the country counts trust `CF-IPCountry`. The origin must therefore accept traffic only from Cloudflare, through a Cloudflare Tunnel or a firewall limited to [Cloudflare's IP ranges](https://www.cloudflare.com/ips/). Otherwise anyone can forge those headers.
 - **Cloudflare rules for the MCP paths.** MCP clients aren't browsers, and a challenge breaks them:
   - Exempt `/mcp`, `/oauth2/*` and `/.well-known/*` from WAF managed challenges and Super Bot Fight Mode. If Bot Fight Mode on the Free plan challenges them, turn it off.
