@@ -179,4 +179,11 @@ public class DefaultScheduledService implements ScheduledService {
         clickSummaryService.sendDailyInBackground();
     }
 
+    @Override
+    @Scheduled(cron = "0 0 9 * * MON", zone = "${app.analytics.zone}")
+    public void sendWeeklyClickSummaries() {
+        log.info("Scheduled: weekly click summaries");
+        clickSummaryService.sendWeeklyInBackground();
+    }
+
 }

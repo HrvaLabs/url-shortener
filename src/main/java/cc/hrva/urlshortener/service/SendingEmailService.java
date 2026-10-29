@@ -3,6 +3,7 @@ package cc.hrva.urlshortener.service;
 import cc.hrva.urlshortener.dto.DecisionsDigest;
 import cc.hrva.urlshortener.dto.WeeklyDigest;
 import cc.hrva.urlshortener.dto.notification.DeadLinksEmail;
+import cc.hrva.urlshortener.dto.notification.WeeklySummary;
 import cc.hrva.urlshortener.model.EmailLog;
 import cc.hrva.urlshortener.model.ResetToken;
 import cc.hrva.urlshortener.model.Url;
@@ -23,6 +24,7 @@ public interface SendingEmailService {
     void sendDecisionsEmailToAdmin(DecisionsDigest digest);
     void sendWeeklyDigestToAdmin(WeeklyDigest digest);
     void sendDeadLinksEmail(DeadLinksEmail email);
+    void sendWeeklySummaryEmail(WeeklySummary summary);
     EmailLog resendEmail(Long emailLogId);
     void failInterruptedEmails();
     void forgetOldEmailContent();

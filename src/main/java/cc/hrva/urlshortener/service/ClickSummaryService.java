@@ -6,4 +6,8 @@ public interface ClickSummaryService {
 
     void sendDailyInBackground();
 
+    void sendWeekly();
+
+    void sendWeeklyInBackground();
+
 }

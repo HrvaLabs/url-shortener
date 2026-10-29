@@ -8,6 +8,7 @@ import cc.hrva.urlshortener.dto.LinkDestination;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.enums.BlockReason;
+import org.springframework.data.domain.Limit;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
@@ -57,6 +58,25 @@ public interface UrlRepository extends JpaRepository<Url, Long>, JpaSpecificatio
 
     @Query("select u.id from Url u where u.id in :ids")
     List<Long> findExistingIds(@Param("ids") Collection<Long> ids);
+
+    @Query("""
+            select u from Url u
+            where u.owner.id = :ownerId and u.active = true
+              and u.destinationDeadSince >= :from and u.destinationDeadSince < :to
+            order by u.destinationDeadSince, u.id""")
+    List<Url> findOwnerLinksDeadBetween(@Param("ownerId") long ownerId, @Param("from") LocalDateTime from, @Param("to") LocalDateTime to,
+                                        Limit limit);
+
+    @Query("""
+            select u from Url u
+            where u.owner.id = :ownerId and u.active = true
+              and ((u.expirationDate > :now and u.expirationDate <= :until)
+                or (u.visitLimit is not null
+                    and u.visitLimit - coalesce(u.visits, 0) >= 1
+                    and (u.visitLimit - coalesce(u.visits, 0) - 1) * 10 < u.visitLimit))
+            order by u.expirationDate asc nulls last, u.id""")
+    List<Url> findOwnerLinksEndingSoon(@Param("ownerId") long ownerId, @Param("now") LocalDateTime now, @Param("until") LocalDateTime until,
+                                       Limit limit);
 
     @Query("select u from Url u left join fetch u.owner where lower(u.shortUrl) in :aliases")
     List<Url> findByLowerShortUrlIn(@Param("aliases") Collection<String> aliases);

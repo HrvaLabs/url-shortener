@@ -1,8 +1,11 @@
 package cc.hrva.urlshortener.service;
 
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
+import cc.hrva.urlshortener.dto.WeeklyDigest;
 import cc.hrva.urlshortener.dto.notification.DailySummary;
 import cc.hrva.urlshortener.dto.notification.DailySummary.SummaryLink;
+import cc.hrva.urlshortener.dto.notification.WeeklySummary;
+import cc.hrva.urlshortener.dto.notification.WeeklySummary.EndingSoon;
 import cc.hrva.urlshortener.model.NotificationChannel;
 import cc.hrva.urlshortener.model.NotificationConsent;
 import cc.hrva.urlshortener.model.Url;
@@ -19,6 +22,7 @@ import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.service.analytics.AnalyticsDays;
 import cc.hrva.urlshortener.service.impl.DefaultClickSummaryService;
 import cc.hrva.urlshortener.service.notification.ChannelContent;
+import cc.hrva.urlshortener.service.notification.DestinationCheckOutcome.DeadLink;
 import cc.hrva.urlshortener.service.notification.EmailConsentReader;
 import cc.hrva.urlshortener.service.notification.MutableClock;
 import cc.hrva.urlshortener.service.notification.NotificationMessages;
@@ -54,6 +58,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -80,6 +85,9 @@ class DefaultClickSummaryServiceTest {
     private static final Instant AFTER_MIDNIGHT_IN_ZAGREB = Instant.parse("2026-10-26T23:30:00Z");
     private static final LocalDate YESTERDAY = LocalDate.of(2026, 10, 26);
     private static final LocalDateTime GRANTED = LocalDateTime.of(2026, 10, 1, 9, 0);
+    private static final Instant MONDAY_MORNING = Instant.parse("2026-10-26T08:00:00Z");
+    private static final LocalDateTime MONDAY_MORNING_UTC = LocalDateTime.of(2026, 10, 26, 8, 0);
+    private static final LocalDate LAST_MONDAY = LocalDate.of(2026, 10, 19);
     private static final MutableClock CLOCK = new MutableClock(AFTER_MIDNIGHT_IN_ZAGREB);
 
     @Autowired
@@ -264,6 +272,244 @@ class DefaultClickSummaryServiceTest {
                 .isEqualTo(Propagation.NOT_SUPPORTED);
         assertThat(DefaultClickSummaryService.class.getMethod("sendDailyInBackground").getAnnotation(Transactional.class).propagation())
                 .isEqualTo(Propagation.NOT_SUPPORTED);
+    }
+
+    @Test
+    void weeklyEmailNeedsConsent() {
+        weeklyEmailConsent(ana);
+        final var cid = user("cid@example.com");
+        final var cidsChannel = channel(cid, NotificationType.WEEKLY_SUMMARY);
+        clicks(link(ana, "anas"), LAST_MONDAY, 2, 2, 0);
+        clicks(link(bob, "bobs"), LAST_MONDAY, 3, 3, 0);
+        clicks(link(cid, "cids"), LAST_MONDAY, 4, 4, 0);
+        CLOCK.set(MONDAY_MORNING);
+
+        clickSummaryService.sendWeekly();
+
+        assertThat(sentWeeklySummaries()).extracting(WeeklySummary::userId).containsExactly(ana.getId());
+        assertThat(sentWeeklySummaries().getFirst().email()).isEqualTo("ana@example.com");
+        final var channels = channelsCaptor();
+        final var content = contentCaptor();
+        verify(deliveryService).enqueue(eq(NotificationType.WEEKLY_SUMMARY), eq("summary.weekly:2026-10-19"), channels.capture(), content.capture());
+        assertThat(channels.getValue()).extracting(NotificationChannel::getId).containsExactly(cidsChannel.getId());
+        assertThat(content.getValue()).containsOnlyKeys(cid.getId());
+    }
+
+    @Test
+    void aRevokedWeeklyEmailConsentSendsNothing() {
+        weeklyEmailConsent(ana);
+        jdbcTemplate.update("update notification_consent set revoked_at = ?, revoked_source = 'UNSUBSCRIBE_LINK' where user_id = ?", GRANTED.plusDays(1), ana.getId());
+        clicks(link(ana, "anas"), LAST_MONDAY, 2, 2, 0);
+        CLOCK.set(MONDAY_MORNING);
+
+        clickSummaryService.sendWeekly();
+
+        verify(sendingEmailService, never()).sendWeeklySummaryEmail(any());
+        assertThat(claims()).isZero();
+    }
+
+    @Test
+    void aDeactivatedOwnerGetsNoWeeklySummary() {
+        weeklyEmailConsent(ana);
+        channel(ana, NotificationType.WEEKLY_SUMMARY);
+        clicks(link(ana, "anas"), LAST_MONDAY, 2, 2, 0);
+        jdbcTemplate.update("update user_account set active = false where id = ?", ana.getId());
+        CLOCK.set(MONDAY_MORNING);
+
+        clickSummaryService.sendWeekly();
+
+        verify(sendingEmailService, never()).sendWeeklySummaryEmail(any());
+        verify(deliveryService, never()).enqueue(any(), anyString(), any(), anyMap());
+        assertThat(claims()).isZero();
+    }
+
+    @Test
+    void anEmptyWeekSendsNothing() {
+        weeklyEmailConsent(ana);
+        channel(ana, NotificationType.WEEKLY_SUMMARY);
+        final var link = link(ana, "anas");
+        clicks(link, LAST_MONDAY.minusDays(1), 9, 9, 0);
+        clicks(link, LAST_MONDAY.plusDays(7), 9, 9, 0);
+        clicks(link, LAST_MONDAY, 0, 0, 5);
+        CLOCK.set(MONDAY_MORNING);
+
+        clickSummaryService.sendWeekly();
+
+        verify(sendingEmailService, never()).sendWeeklySummaryEmail(any());
+        verify(deliveryService, never()).enqueue(any(), anyString(), any(), anyMap());
+        assertThat(claims()).isZero();
+    }
+
+    @Test
+    void aDeadOnlyWeekSends() {
+        weeklyEmailConsent(ana);
+        final var firstNight = dead(link(ana, "first"), LocalDateTime.of(2026, 10, 18, 22, 30), "404");
+        final var lastNight = dead(link(ana, "last"), LocalDateTime.of(2026, 10, 25, 22, 30), "410");
+        dead(link(ana, "before"), LocalDateTime.of(2026, 10, 18, 21, 30), "404");
+        dead(link(ana, "after"), LocalDateTime.of(2026, 10, 25, 23, 30), "404");
+        final var inactive = dead(link(ana, "inactive"), LocalDateTime.of(2026, 10, 21, 2, 0), "404");
+        jdbcTemplate.update("update url set active = false where id = ?", inactive.getId());
+        CLOCK.set(MONDAY_MORNING);
+
+        clickSummaryService.sendWeekly();
+
+        assertThat(sentWeeklySummaries()).singleElement().satisfies(summary -> {
+            assertThat(summary.clicks()).isEqualTo(new WeeklyDigest.Change(0, 0));
+            assertThat(summary.deadLinks()).containsExactly(
+                    new DeadLink(firstNight.getId(), ana.getId(), "first", "first.example.org", LocalDateTime.of(2026, 10, 18, 22, 30), "404"),
+                    new DeadLink(lastNight.getId(), ana.getId(), "last", "last.example.org", LocalDateTime.of(2026, 10, 25, 22, 30), "410"));
+        });
+    }
+
+    @Test
+    void endingSoonRules() {
+        weeklyEmailConsent(ana);
+        final var inSixDays = ending(ana, "six-days", MONDAY_MORNING_UTC.plusDays(6), null, 0L);
+        ending(ana, "eight-days", MONDAY_MORNING_UTC.plusDays(8), null, 0L);
+        ending(ana, "expired", MONDAY_MORNING_UTC.minusDays(1), null, 0L);
+        final var nineLeft = ending(ana, "nine-left", null, 100L, 91L);
+        final var tenLeft = ending(ana, "ten-left", null, 100L, 90L);
+        ending(ana, "eleven-left", null, 100L, 89L);
+        final var oneLeft = ending(ana, "one-left", null, 5L, 4L);
+        ending(ana, "none-left", null, 5L, 5L);
+        final var neverVisited = ending(ana, "never-visited", null, 1L, null);
+        final var inactive = ending(ana, "inactive", MONDAY_MORNING_UTC.plusDays(2), null, 0L);
+        jdbcTemplate.update("update url set active = false where id = ?", inactive.getId());
+        CLOCK.set(MONDAY_MORNING);
+
+        clickSummaryService.sendWeekly();
+
+        assertThat(sentWeeklySummaries()).singleElement().satisfies(summary -> assertThat(summary.endingSoon()).containsExactly(
+                new EndingSoon("six-days", "six-days.example.org", "EXPIRES", LocalDate.of(2026, 11, 1), null),
+                new EndingSoon("nine-left", "nine-left.example.org", "VISIT_LIMIT", null, 9L),
+                new EndingSoon("ten-left", "ten-left.example.org", "VISIT_LIMIT", null, 10L),
+                new EndingSoon("one-left", "one-left.example.org", "VISIT_LIMIT", null, 1L),
+                new EndingSoon("never-visited", "never-visited.example.org", "VISIT_LIMIT", null, 1L)));
+        assertThat(List.of(inSixDays, nineLeft, tenLeft, oneLeft, neverVisited)).extracting(Url::getId).isSorted();
+    }
+
+    @Test
+    void theClaimIsOncePerWeek() {
+        weeklyEmailConsent(ana);
+        channel(ana, NotificationType.WEEKLY_SUMMARY);
+        clicks(link(ana, "anas"), LAST_MONDAY, 2, 2, 0);
+        CLOCK.set(MONDAY_MORNING);
+
+        clickSummaryService.sendWeekly();
+        clickSummaryService.sendWeekly();
+
+        verify(sendingEmailService, times(1)).sendWeeklySummaryEmail(any());
+        verify(deliveryService, times(2)).enqueue(eq(NotificationType.WEEKLY_SUMMARY), eq("summary.weekly:2026-10-19"), any(), anyMap());
+        assertThat(jdbcTemplate.queryForList("select claim_key from notification_claim where user_id = ?", String.class, ana.getId()))
+                .containsExactly("weekly-email:2026-10-19");
+    }
+
+    @Test
+    void aLostClaimSendsNoEmailButTheChannelsStillGetTheirs() {
+        weeklyEmailConsent(ana);
+        channel(ana, NotificationType.WEEKLY_SUMMARY);
+        clicks(link(ana, "anas"), LAST_MONDAY, 2, 2, 0);
+        jdbcTemplate.update("insert into notification_claim (user_id, claim_key, created_at) values (?, 'weekly-email:2026-10-19', ?)", ana.getId(), GRANTED);
+        CLOCK.set(MONDAY_MORNING);
+
+        clickSummaryService.sendWeekly();
+
+        verify(sendingEmailService, never()).sendWeeklySummaryEmail(any());
+        verify(deliveryService).enqueue(eq(NotificationType.WEEKLY_SUMMARY), eq("summary.weekly:2026-10-19"), any(), anyMap());
+    }
+
+    @Test
+    void noLinksNoSummary() {
+        weeklyEmailConsent(ana);
+        channel(ana, NotificationType.WEEKLY_SUMMARY);
+        CLOCK.set(MONDAY_MORNING);
+
+        clickSummaryService.sendWeekly();
+
+        verify(sendingEmailService, never()).sendWeeklySummaryEmail(any());
+        verify(deliveryService, never()).enqueue(any(), anyString(), any(), anyMap());
+        assertThat(claims()).isZero();
+    }
+
+    @Test
+    void weekIsTheLastClosedMondayToSunday() {
+        weeklyEmailConsent(ana);
+        final var link = link(ana, "menu");
+        clicks(link, LAST_MONDAY.minusDays(1), 5, 5, 0);
+        clicks(link, LAST_MONDAY, 3, 2, 1);
+        clicks(link, LAST_MONDAY.plusDays(6), 4, 3, 0);
+        clicks(link, LAST_MONDAY.plusDays(7), 50, 50, 0);
+        CLOCK.set(MONDAY_MORNING);
+
+        clickSummaryService.sendWeekly();
+
+        assertThat(sentWeeklySummaries()).containsExactly(new WeeklySummary(ana.getId(), "ana@example.com", LAST_MONDAY, LAST_MONDAY.plusDays(6),
+                new WeeklyDigest.Change(7, 5), 5, List.of(new WeeklyDigest.TopLink("menu", "menu.example.org", 7)), List.of(), List.of()));
+    }
+
+    @Test
+    void topLinksAreTheFiveBusiest() {
+        weeklyEmailConsent(ana);
+        IntStream.rangeClosed(1, 6).forEach(index -> clicks(link(ana, "link" + index), LAST_MONDAY, index, 1, 0));
+        CLOCK.set(MONDAY_MORNING);
+
+        clickSummaryService.sendWeekly();
+
+        assertThat(sentWeeklySummaries().getFirst().topLinks()).extracting(WeeklyDigest.TopLink::shortUrl)
+                .containsExactly("link6", "link5", "link4", "link3", "link2");
+    }
+
+    @Test
+    void theWeeklyChannelContentIsTheSummaryWithoutTheEmailAddress() {
+        final var channel = channel(ana, NotificationType.WEEKLY_SUMMARY);
+        clicks(link(ana, "menu"), LAST_MONDAY, 3, 2, 0);
+        CLOCK.set(MONDAY_MORNING);
+
+        clickSummaryService.sendWeekly();
+
+        final var expected = new WeeklySummary(ana.getId(), "ana@example.com", LAST_MONDAY, LAST_MONDAY.plusDays(6), new WeeklyDigest.Change(3, 0), 2,
+                List.of(new WeeklyDigest.TopLink("menu", "menu.example.org", 3)), List.of(), List.of());
+        final var content = contentCaptor();
+        verify(deliveryService).enqueue(eq(NotificationType.WEEKLY_SUMMARY), eq("summary.weekly:2026-10-19"),
+                argThat(channels -> channels.stream().map(NotificationChannel::getId).toList().equals(List.of(channel.getId()))), content.capture());
+        assertThat(content.getValue()).containsExactly(Map.entry(ana.getId(), new ChannelContent(payloads.weekly(expected), messages.weekly(expected))));
+        verify(sendingEmailService, never()).sendWeeklySummaryEmail(any());
+    }
+
+    @Test
+    void theWeeklySummaryRunsOutsideAnyTransaction() throws NoSuchMethodException {
+        assertThat(DefaultClickSummaryService.class.getMethod("sendWeekly").getAnnotation(Transactional.class).propagation())
+                .isEqualTo(Propagation.NOT_SUPPORTED);
+        assertThat(DefaultClickSummaryService.class.getMethod("sendWeeklyInBackground").getAnnotation(Transactional.class).propagation())
+                .isEqualTo(Propagation.NOT_SUPPORTED);
+    }
+
+    private List<WeeklySummary> sentWeeklySummaries() {
+        final var sent = ArgumentCaptor.forClass(WeeklySummary.class);
+        verify(sendingEmailService, org.mockito.Mockito.atLeast(0)).sendWeeklySummaryEmail(sent.capture());
+        return sent.getAllValues();
+    }
+
+    private long claims() {
+        return jdbcTemplate.queryForObject("select count(*) from notification_claim", Long.class);
+    }
+
+    private void weeklyEmailConsent(final User owner) {
+        consentRepository.saveAndFlush(NotificationConsent.builder().owner(owner).type(NotificationType.WEEKLY_SUMMARY_EMAIL)
+                .grantedAt(GRANTED).source(ConsentSource.SETTINGS).build());
+    }
+
+    private Url dead(final Url link, final LocalDateTime deadSince, final String status) {
+        jdbcTemplate.update("update url set destination_dead_since = ?, destination_last_status = ?, destination_fail_streak = 3 where id = ?",
+                deadSince, status, link.getId());
+        return link;
+    }
+
+    private Url ending(final User owner, final String alias, final LocalDateTime expiresAt, final Long visitLimit, final Long visits) {
+        final var link = urlRepository.saveAndFlush(Url.builder().shortUrl(alias).longUrl("https://" + alias + ".example.org/page").owner(owner)
+                .active(true).expirationDate(expiresAt).visitLimit(visitLimit).build());
+        jdbcTemplate.update("update url set visits = ? where id = ?", visits, link.getId());
+        return link;
     }
 
     @SuppressWarnings("unchecked")

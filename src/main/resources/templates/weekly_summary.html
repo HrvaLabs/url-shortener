@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="https://www.thymeleaf.org">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="x-apple-disable-message-reformatting">
+  <title th:text="${headline}">Your week</title>
+  <style type="text/css">
+    body, table, td, p, a, li, blockquote {
+      -webkit-text-size-adjust: 100%;
+      -ms-text-size-adjust: 100%;
+    }
+    table, td {
+      mso-table-lspace: 0pt;
+      mso-table-rspace: 0pt;
+    }
+    table {
+      border-collapse: collapse !important;
+    }
+    body {
+      margin: 0;
+      padding: 0;
+      width: 100% !important;
+      height: 100% !important;
+    }
+    @media only screen and (max-width: 600px) {
+      .container { width: 100% !important; }
+      .content { padding: 24px !important; }
+    }
+  </style>
+</head>
+<body style="margin: 0; padding: 0; background-color: #0a0a0a; font-family: 'Georgia', 'Times New Roman', serif;">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background-color: #0a0a0a;">
+    <tr>
+      <td align="center" style="padding: 40px 20px;">
+        <table class="container" role="presentation" width="560" cellspacing="0" cellpadding="0" border="0" style="max-width: 560px;">
+          <tr>
+            <td align="center" style="padding: 32px 20px 24px; background-color: #0f0f0f; border-radius: 12px 12px 0 0; border: 1px solid #1a1a1a; border-bottom: none;">
+              <h1 style="margin: 0; font-family: 'Georgia', 'Times New Roman', serif; font-size: 22px; font-weight: 400; color: #a67c00;" th:text="${headline}">Your week</h1>
+            </td>
+          </tr>
+          <tr>
+            <td class="content" style="padding: 36px 32px; background-color: #0f0f0f; border-left: 1px solid #1a1a1a; border-right: 1px solid #1a1a1a;">
+              <th:block th:if="${not #lists.isEmpty(clicks)}">
+                <h2 style="margin: 0 0 8px; font-family: 'Georgia', 'Times New Roman', serif; font-size: 17px; font-weight: 400; color: #a67c00;" th:text="'Clicks'">Section</h2>
+                <p th:each="line : ${clicks}" th:text="${line}" style="margin: 0 0 8px; font-family: 'Helvetica', 'Arial', sans-serif; font-size: 15px; line-height: 1.6; color: #d4d4d4; overflow-wrap: anywhere;">Line</p>
+              </th:block>
+              <th:block th:if="${not #lists.isEmpty(top_links)}">
+                <h2 style="margin: 24px 0 8px; font-family: 'Georgia', 'Times New Roman', serif; font-size: 17px; font-weight: 400; color: #a67c00;" th:text="${top_links_heading}">Section</h2>
+                <p th:each="line : ${top_links}" th:text="${line}" style="margin: 0 0 8px; font-family: 'Helvetica', 'Arial', sans-serif; font-size: 15px; line-height: 1.6; color: #d4d4d4; overflow-wrap: anywhere;">Line</p>
+              </th:block>
+              <th:block th:if="${not #lists.isEmpty(dead_links)}">
+                <h2 style="margin: 24px 0 8px; font-family: 'Georgia', 'Times New Roman', serif; font-size: 17px; font-weight: 400; color: #a67c00;" th:text="${dead_links_heading}">Section</h2>
+                <p th:each="line : ${dead_links}" th:text="${line}" style="margin: 0 0 8px; font-family: 'Helvetica', 'Arial', sans-serif; font-size: 15px; line-height: 1.6; color: #d4d4d4; overflow-wrap: anywhere;">Line</p>
+              </th:block>
+              <th:block th:if="${not #lists.isEmpty(ending_soon)}">
+                <h2 style="margin: 24px 0 8px; font-family: 'Georgia', 'Times New Roman', serif; font-size: 17px; font-weight: 400; color: #a67c00;" th:text="${ending_soon_heading}">Section</h2>
+                <p th:each="line : ${ending_soon}" th:text="${line}" style="margin: 0 0 8px; font-family: 'Helvetica', 'Arial', sans-serif; font-size: 15px; line-height: 1.6; color: #d4d4d4; overflow-wrap: anywhere;">Line</p>
+              </th:block>
+
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                <tr>
+                  <td align="center" style="padding: 24px 0 4px;">
+                    <a th:href="${dashboard_url}" target="_blank"
+                       style="display: inline-block; padding: 13px 36px; font-family: 'Helvetica', 'Arial', sans-serif; font-size: 14px; font-weight: 600; color: #0a0a0a; text-decoration: none; background-color: #a67c00; border-radius: 8px;">
+                      Open your links
+                    </a>
+                  </td>
+                </tr>
+              </table>
+
+              <hr style="border: none; border-top: 1px solid #1a1a1a; margin: 28px 0 16px;">
+
+              <p style="margin: 0 0 8px; font-family: 'Helvetica', 'Arial', sans-serif; font-size: 12px; line-height: 1.6; color: #666;">
+                You get this because you turned on the weekly summary.
+              </p>
+              <p style="margin: 0; font-family: 'Helvetica', 'Arial', sans-serif; font-size: 12px; line-height: 1.6; color: #666;">
+                <a th:href="${unsubscribe_page}" target="_blank" style="color: #999; text-decoration: underline;">Turn off the weekly summary</a>
+                &nbsp;&middot;&nbsp;
+                <a th:href="${settings_page}" target="_blank" style="color: #999; text-decoration: underline;">Notification settings</a>
+              </p>
+            </td>
+          </tr>
+          <tr>
+            <td align="center" style="padding: 20px 32px; background-color: #0a0a0a; border: 1px solid #1a1a1a; border-top: none; border-radius: 0 0 12px 12px;">
+              <p style="margin: 0; font-family: 'Helvetica', 'Arial', sans-serif; font-size: 12px; color: #444;">
+                <span th:text="${app_name}"/> &nbsp;&copy;&nbsp; All Rights Reserved
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

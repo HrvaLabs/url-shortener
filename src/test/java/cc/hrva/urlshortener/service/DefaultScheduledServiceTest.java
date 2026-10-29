@@ -219,6 +219,34 @@ class DefaultScheduledServiceTest {
         assertThat(sendDailyInBackground.getAnnotation(Async.class)).isNotNull();
         assertThat(sendDailyInBackground.getAnnotation(Async.class).value()).isEmpty();
         assertThat(DefaultScheduledService.class.getMethod("sendDailyClickSummaries").getAnnotation(Async.class)).isNull();
+        final var sendWeeklyInBackground = DefaultClickSummaryService.class.getMethod("sendWeeklyInBackground");
+        assertThat(sendWeeklyInBackground.getAnnotation(Async.class)).isNotNull();
+        assertThat(sendWeeklyInBackground.getAnnotation(Async.class).value()).isEmpty();
+        assertThat(DefaultScheduledService.class.getMethod("sendWeeklyClickSummaries").getAnnotation(Async.class)).isNull();
+    }
+
+    @Test
+    @ExtendWith(OutputCaptureExtension.class)
+    void theWeeklyClickSummaryHandsOffToTheBackground(final CapturedOutput output) {
+        scheduledService.sendWeeklyClickSummaries();
+
+        verify(clickSummaryService).sendWeeklyInBackground();
+        verify(clickSummaryService, never()).sendWeekly();
+        assertThat(output).contains("Scheduled: weekly click summaries");
+    }
+
+    @Test
+    void theWeeklyClickSummaryRunsMondaysAtNineInZagrebOnEitherSideOfTheClockChange() throws NoSuchMethodException, IOException {
+        final var scheduled = DefaultScheduledService.class.getMethod("sendWeeklyClickSummaries").getAnnotation(Scheduled.class);
+        final var sources = new MutablePropertySources();
+        new YamlPropertySourceLoader().load("application", new ClassPathResource("application.yaml")).forEach(sources::addLast);
+        final var zone = ZoneId.of(new PropertySourcesPropertyResolver(sources).resolveRequiredPlaceholders(scheduled.zone()));
+        final var cron = CronExpression.parse(scheduled.cron());
+
+        assertThat(scheduled.cron()).isEqualTo("0 0 9 * * MON");
+        assertThat(scheduled.zone()).isEqualTo("${app.analytics.zone}");
+        assertThat(nextRun(cron, "2026-10-25T12:00:00Z", zone)).isEqualTo("2026-10-26T08:00:00Z");
+        assertThat(nextRun(cron, "2026-03-27T12:00:00Z", zone)).isEqualTo("2026-03-30T07:00:00Z");
     }
 
     @Test

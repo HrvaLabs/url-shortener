@@ -5,6 +5,7 @@ import cc.hrva.urlshortener.dto.DecisionsDigest;
 import cc.hrva.urlshortener.dto.LinkDigestEntry;
 import cc.hrva.urlshortener.dto.WeeklyDigest;
 import cc.hrva.urlshortener.dto.notification.DeadLinksEmail;
+import cc.hrva.urlshortener.dto.notification.WeeklySummary;
 import cc.hrva.urlshortener.dto.stats.CountEntry;
 import cc.hrva.urlshortener.exception.EmailLogNotFoundException;
 import cc.hrva.urlshortener.exception.EmailNotResendableException;
@@ -16,6 +17,7 @@ import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.enums.BlockReason;
 import cc.hrva.urlshortener.model.enums.NotificationType;
 import cc.hrva.urlshortener.repository.EmailLogRepository;
+import cc.hrva.urlshortener.service.digest.WeeklyDigestText;
 import cc.hrva.urlshortener.service.impl.DefaultEmailService;
 import cc.hrva.urlshortener.service.impl.DefaultSendingEmailService;
 import cc.hrva.urlshortener.service.notification.ConsentEmails;
@@ -912,6 +914,102 @@ class DefaultSendingEmailServiceTest {
         final var email = sentDeadLinksEmail(deadLinksEmail("<b>x</b>.example", "abc"));
 
         assertThat(email.getText()).doesNotContain("<b>x</b>").contains("hrva.cc/abc → &lt;b&gt;x&lt;/b&gt;.example");
+    }
+
+    @Test
+    void weeklySummaryEmailNeedsConsentRightBeforeItLeaves() throws Exception {
+        when(emailConsentReader.hasActiveEmailConsent(7L, NotificationType.WEEKLY_SUMMARY_EMAIL)).thenReturn(false);
+
+        configuredEmailService(realTemplateEngine()).sendWeeklySummaryEmail(weeklySummary());
+
+        verify(emailService, never()).sendEmail(any(Email.class), any());
+        verify(emailLogRepository, never()).save(any(EmailLog.class));
+    }
+
+    @Test
+    void weeklySummaryHasPlainTextAndHeaders() throws Exception {
+        final var email = sentWeeklySummaryEmail(weeklySummary());
+
+        final var token = unsubscribeTokens.issue(7L, NotificationType.WEEKLY_SUMMARY_EMAIL);
+        final var week = WeeklyDigestText.weekLabel(LocalDate.of(2026, 10, 19), LocalDate.of(2026, 10, 25));
+        assertThat(email.getReceivers()).containsExactly("alice@example.com");
+        assertThat(email.getSubject()).isEqualTo("Your hrva.cc week: " + week);
+        assertThat(email.getPlainText()).isEqualTo("""
+                Your hrva.cc week: %s
+
+                Clicks: 210 (up 17%% on the week before)
+                Visitors: 150 (each link's daily visitors, added up)
+                Top links:
+                1. hrva.cc/abc → example.com, 90 clicks
+                Links that stopped working:
+                hrva.cc/dead → example.net, since 22 October 2026, the page was removed (410)
+                Ending soon:
+                hrva.cc/soon → example.org, expires on 30 October 2026
+                hrva.cc/limited → example.org, 9 visits left
+
+                Open your links: https://hrva.cc/dashboard
+
+                You get this because you turned on the weekly summary.
+                Turn off the weekly summary: https://hrva.cc/unsubscribe?token=%s""".formatted(week, token));
+        assertThat(textOf(email.getText())).contains(
+                "Clicks Clicks: 210 (up 17% on the week before) Visitors: 150 (each link's daily visitors, added up)",
+                "Top links 1. hrva.cc/abc → example.com, 90 clicks",
+                "Links that stopped working hrva.cc/dead → example.net, since 22 October 2026, the page was removed (410)",
+                "Ending soon hrva.cc/soon → example.org, expires on 30 October 2026 hrva.cc/limited → example.org, 9 visits left",
+                "Open your links",
+                "You get this because you turned on the weekly summary.",
+                "Turn off the weekly summary",
+                "Notification settings");
+        assertThat(linksIn(email.getText())).containsExactly(
+                "https://hrva.cc/dashboard",
+                "https://hrva.cc/unsubscribe?token=" + token,
+                "https://hrva.cc/dashboard/settings#notifications");
+        assertThat(email.getHeaders()).containsEntry("List-Unsubscribe", "<https://hrva.cc/api/v1/notifications/unsubscribe?token=" + token + ">")
+                .containsEntry("List-Unsubscribe-Post", "List-Unsubscribe=One-Click");
+        assertThat(lastSavedEntry().getConsentType()).isEqualTo(NotificationType.WEEKLY_SUMMARY_EMAIL);
+        assertThat(lastSavedEntry().getUserId()).isEqualTo(7L);
+        assertThat(bodiesWhileSending).containsExactly(email.getText());
+    }
+
+    @Test
+    void aWeeklySummaryEmailLeavesOutEmptySections() throws Exception {
+        final var summary = new WeeklySummary(7L, "alice@example.com", LocalDate.of(2026, 10, 19), LocalDate.of(2026, 10, 25),
+                new WeeklyDigest.Change(0, 4), 0, List.of(), List.of(), List.of(
+                new WeeklySummary.EndingSoon("soon", "example.org", "EXPIRES", LocalDate.of(2026, 10, 30), null)));
+
+        final var text = textOf(sentWeeklySummaryEmail(summary).getText());
+
+        assertThat(text).contains("Clicks: 0 (4 the week before)", "Ending soon hrva.cc/soon")
+                .doesNotContain("Top links", "Links that stopped working");
+    }
+
+    @Test
+    void aWeeklySummaryEmailEscapesValues() throws Exception {
+        final var summary = new WeeklySummary(7L, "alice@example.com", LocalDate.of(2026, 10, 19), LocalDate.of(2026, 10, 25),
+                new WeeklyDigest.Change(5, 0), 5, List.of(new WeeklyDigest.TopLink("abc", "<b>x</b>.example", 5)), List.of(), List.of());
+
+        final var email = sentWeeklySummaryEmail(summary);
+
+        assertThat(email.getText()).doesNotContain("<b>x</b>").contains("hrva.cc/abc → &lt;b&gt;x&lt;/b&gt;.example, 5 clicks");
+    }
+
+    private Email sentWeeklySummaryEmail(final WeeklySummary summary) throws Exception {
+        saveReturnsArgument();
+        when(emailConsentReader.hasActiveEmailConsent(7L, NotificationType.WEEKLY_SUMMARY_EMAIL)).thenReturn(true);
+        final var sent = ArgumentCaptor.forClass(Email.class);
+        doAnswer(invocation -> null).when(emailService).sendEmail(sent.capture(), eq(null));
+
+        configuredEmailService(realTemplateEngine()).sendWeeklySummaryEmail(summary);
+
+        return sent.getValue();
+    }
+
+    private static WeeklySummary weeklySummary() {
+        return new WeeklySummary(7L, "alice@example.com", LocalDate.of(2026, 10, 19), LocalDate.of(2026, 10, 25), new WeeklyDigest.Change(210, 180), 150,
+                List.of(new WeeklyDigest.TopLink("abc", "example.com", 90)),
+                List.of(new DeadLink(3L, 7L, "dead", "example.net", LocalDateTime.of(2026, 10, 22, 1, 0), "410")),
+                List.of(new WeeklySummary.EndingSoon("soon", "example.org", "EXPIRES", LocalDate.of(2026, 10, 30), null),
+                        new WeeklySummary.EndingSoon("limited", "example.org", "VISIT_LIMIT", null, 9L)));
     }
 
     private Email sentDeadLinksEmail(final DeadLinksEmail deadLinks) throws Exception {

@@ -2,6 +2,7 @@ package cc.hrva.urlshortener.service.notification;
 
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.dto.notification.DailySummary;
+import cc.hrva.urlshortener.dto.notification.WeeklySummary;
 import cc.hrva.urlshortener.model.enums.NotificationType;
 import cc.hrva.urlshortener.service.notification.DestinationCheckOutcome.DeadLink;
 import java.time.Clock;
@@ -75,6 +76,30 @@ public class NotificationPayloads {
         return new Links<>(links.stream()
                 .map(link -> new BackLinkData(shortUrl(link.shortUrl()), link.destinationHost(), day(link.deadSince()).toString(), backOn.toString()))
                 .toList());
+    }
+
+    public record WeeklyData(String from, String to, WeeklyTotals totals, List<TopLinkData> topLinks, List<DeadLinkData> deadLinks,
+                             List<EndingSoonData> endingSoon) {
+    }
+
+    public record WeeklyTotals(long clicks, long clicksWeekBefore, long uniqueVisitors) {
+    }
+
+    public record TopLinkData(String shortUrl, String destinationHost, long clicks) {
+    }
+
+    public record EndingSoonData(String shortUrl, String destinationHost, String reason, String expiresOn, Long visitsLeft) {
+    }
+
+    public WeeklyData weekly(final WeeklySummary summary) {
+        return new WeeklyData(summary.from().toString(), summary.to().toString(),
+                new WeeklyTotals(summary.clicks().current(), summary.clicks().previous(), summary.uniqueVisitors()),
+                summary.topLinks().stream().map(link -> new TopLinkData(shortUrl(link.shortUrl()), link.destinationHost(), link.clicks())).toList(),
+                linkDead(summary.deadLinks()).links(),
+                summary.endingSoon().stream()
+                        .map(link -> new EndingSoonData(shortUrl(link.shortUrl()), link.destinationHost(), link.reason(),
+                                link.expiresOn() == null ? null : link.expiresOn().toString(), link.visitsLeft()))
+                        .toList());
     }
 
     public DailyData daily(final DailySummary summary) {

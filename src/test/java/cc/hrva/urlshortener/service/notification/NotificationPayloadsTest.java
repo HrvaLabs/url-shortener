@@ -68,6 +68,20 @@ class NotificationPayloadsTest {
     }
 
     @Test
+    void weeklySummaryBody() {
+        final var json = payloads.json(NotificationType.WEEKLY_SUMMARY, "uid-4", CREATED_AT, payloads.weekly(NotificationMessagesTest.weeklySummary()));
+
+        assertStrict(json, """
+                {"event":"summary.weekly","deliveryId":"uid-4","createdAt":"2026-10-27T01:14:00Z","from":"2026-10-19","to":"2026-10-25",
+                 "totals":{"clicks":210,"clicksWeekBefore":180,"uniqueVisitors":150},
+                 "topLinks":[{"shortUrl":"https://hrva.cc/abc","destinationHost":"example.com","clicks":90}],
+                 "deadLinks":[{"shortUrl":"https://hrva.cc/dead","destinationHost":"example.net","deadSince":"2026-10-22","lastStatus":"410"}],
+                 "endingSoon":[{"shortUrl":"https://hrva.cc/soon","destinationHost":"example.org","reason":"EXPIRES","expiresOn":"2026-10-30","visitsLeft":null},
+                               {"shortUrl":"https://hrva.cc/limited","destinationHost":"example.org","reason":"VISIT_LIMIT","expiresOn":null,"visitsLeft":1}]}""");
+        assertThat(json).doesNotContain("ana@example.com", "userId", "email");
+    }
+
+    @Test
     void testBody() {
         final var json = payloads.json(NotificationPayloads.TEST_EVENT, "test-0d1c", CREATED_AT, payloads.test());
 

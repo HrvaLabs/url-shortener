@@ -1,8 +1,11 @@
 package cc.hrva.urlshortener.service.notification;
 
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
+import cc.hrva.urlshortener.dto.WeeklyDigest;
 import cc.hrva.urlshortener.dto.notification.DailySummary;
+import cc.hrva.urlshortener.dto.notification.WeeklySummary;
 import cc.hrva.urlshortener.model.NotificationChannel;
+import cc.hrva.urlshortener.service.digest.WeeklyDigestText;
 import cc.hrva.urlshortener.model.enums.ChannelType;
 import cc.hrva.urlshortener.service.notification.DestinationCheckOutcome.DeadLink;
 import java.time.Clock;
@@ -59,6 +62,45 @@ class NotificationMessagesTest {
         final var message = messages.daily(new DailySummary(LocalDate.of(2026, 10, 26), 210, 20, 0, links));
 
         assertThat(messages.render(message)).hasSizeLessThanOrEqualTo(NotificationMessages.MOST_CHARACTERS).endsWith("http://localhost:3000/dashboard");
+    }
+
+    @Test
+    void weeklySummaryHasEachSectionThatHasSomething() {
+        final var message = messages.weekly(weeklySummary());
+
+        assertThat(message).isEqualTo(new NotificationMessage("hrva.cc: your week, " + WeeklyDigestText.weekLabel(LocalDate.of(2026, 10, 19), LocalDate.of(2026, 10, 25)),
+                List.of(
+                        "Clicks: 210 (up 17% on the week before)",
+                        "Visitors: 150 (each link's daily visitors, added up)",
+                        "Top links:",
+                        "1. hrva.cc/abc " + ARROW + " example.com, 90 clicks",
+                        "Links that stopped working:",
+                        "hrva.cc/dead " + ARROW + " example.net, since 22 October 2026, the page was removed (410)",
+                        "Ending soon:",
+                        "hrva.cc/soon " + ARROW + " example.org, expires on 30 October 2026",
+                        "hrva.cc/limited " + ARROW + " example.org, 1 visit left"),
+                "http://localhost:3000/dashboard", 0));
+    }
+
+    @Test
+    void aWeeklySummaryLeavesOutEmptySections() {
+        final var summary = new WeeklySummary(7L, "ana@example.com", LocalDate.of(2026, 10, 19), LocalDate.of(2026, 10, 25),
+                new WeeklyDigest.Change(1, 0), 1, List.of(), List.of(), List.of());
+
+        assertThat(messages.weekly(summary).lines()).containsExactly("Clicks: 1 (none the week before)", "Visitors: 1 (each link's daily visitors, added up)");
+    }
+
+    @Test
+    void aWeeklySummaryNeverNamesTheEmailAddress() {
+        assertThat(messages.render(messages.weekly(weeklySummary()))).doesNotContain("ana@example.com");
+    }
+
+    static WeeklySummary weeklySummary() {
+        return new WeeklySummary(7L, "ana@example.com", LocalDate.of(2026, 10, 19), LocalDate.of(2026, 10, 25), new WeeklyDigest.Change(210, 180), 150,
+                List.of(new WeeklyDigest.TopLink("abc", "example.com", 90)),
+                List.of(new DeadLink(3L, 7L, "dead", "example.net", LocalDateTime.of(2026, 10, 22, 1, 0), "410")),
+                List.of(new WeeklySummary.EndingSoon("soon", "example.org", "EXPIRES", LocalDate.of(2026, 10, 30), null),
+                        new WeeklySummary.EndingSoon("limited", "example.org", "VISIT_LIMIT", null, 1L)));
     }
 
     @Test

@@ -4,6 +4,7 @@ import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.dto.DecisionsDigest;
 import cc.hrva.urlshortener.dto.WeeklyDigest;
 import cc.hrva.urlshortener.dto.notification.DeadLinksEmail;
+import cc.hrva.urlshortener.dto.notification.WeeklySummary;
 import cc.hrva.urlshortener.exception.EmailLogNotFoundException;
 import cc.hrva.urlshortener.exception.EmailNotResendableException;
 import cc.hrva.urlshortener.model.EmailLog;
@@ -57,6 +58,7 @@ public class DefaultSendingEmailService implements SendingEmailService {
     private static final int LISTED_BLOCKED_LINKS = 20;
     private static final String STATS_PAGE = "/admin/dashboard?days=7";
     private static final String REVIEW_PAGE = "/admin/review";
+    private static final String DASHBOARD_PAGE = "/dashboard";
     private static final String CONSENT_WITHDRAWN = "This person has turned this email off since, so it can't be resent.";
     private static final DateTimeFormatter PASSKEY_ADDED_AT_FORMAT = DateTimeFormatter.ofPattern("d MMMM yyyy 'at' HH:mm 'UTC'", Locale.ENGLISH);
 
@@ -318,6 +320,42 @@ public class DefaultSendingEmailService implements SendingEmailService {
     }
 
     public record DeadLinkLine(String target, String detail) {
+    }
+
+    @Override
+    @Async
+    public void sendWeeklySummaryEmail(final WeeklySummary summary) {
+        final var type = NotificationType.WEEKLY_SUMMARY_EMAIL;
+        final var subject = "Your hrva.cc week: " + WeeklyDigestText.weekLabel(summary.from(), summary.to());
+        final var sections = notificationMessages.weeklySections(summary);
+        final var dashboard = notificationMessages.frontendPage(DASHBOARD_PAGE);
+        final var unsubscribePage = consentEmails.unsubscribePage(summary.userId(), type);
+        final var ctx = new Context();
+        ctx.setVariable("headline", subject);
+        ctx.setVariable("clicks", sections.clicks());
+        ctx.setVariable("top_links", sections.topLinks());
+        ctx.setVariable("dead_links", sections.deadLinks());
+        ctx.setVariable("ending_soon", sections.endingSoon());
+        ctx.setVariable("top_links_heading", NotificationMessages.TOP_LINKS);
+        ctx.setVariable("dead_links_heading", NotificationMessages.STOPPED_WORKING);
+        ctx.setVariable("ending_soon_heading", NotificationMessages.ENDING_SOON);
+        ctx.setVariable("dashboard_url", dashboard);
+        ctx.setVariable("unsubscribe_page", unsubscribePage);
+        ctx.setVariable("settings_page", consentEmails.settingsPage());
+        ctx.setVariable("app_name", appProperties.getAppName());
+
+        final var htmlContent = templateEngine.process("weekly_summary", ctx);
+
+        final var email = Email.builder()
+                .sender(appProperties.getEmailSenderAddress())
+                .receivers(new String[]{summary.email()})
+                .subject(subject)
+                .plainText(subject + "\n\n" + String.join("\n", notificationMessages.weekly(summary).lines()) + "\n\nOpen your links: " + dashboard
+                        + "\n\nYou get this because you turned on the weekly summary.\nTurn off the weekly summary: " + unsubscribePage)
+                .text(htmlContent)
+                .build();
+
+        tryToSendConsentedEmail(email, summary.userId(), type);
     }
 
     @Override
