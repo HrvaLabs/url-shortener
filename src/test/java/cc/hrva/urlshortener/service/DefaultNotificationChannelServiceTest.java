@@ -18,6 +18,7 @@ import cc.hrva.urlshortener.model.NotificationConsent;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.enums.ChannelType;
 import cc.hrva.urlshortener.model.enums.ConsentSource;
+import cc.hrva.urlshortener.model.enums.LastDeliveryStatus;
 import cc.hrva.urlshortener.model.enums.NotificationType;
 import cc.hrva.urlshortener.repository.NotificationChannelRepository;
 import cc.hrva.urlshortener.repository.NotificationConsentRepository;
@@ -593,7 +594,7 @@ class DefaultNotificationChannelServiceTest {
         final var webhook = channel(ChannelType.WEBHOOK);
         webhook.setId(5L);
         webhook.setLastDeliveryAt(LocalDateTime.of(2026, 10, 27, 2, 14, 9));
-        webhook.setLastDeliveryStatus("SENT");
+        webhook.setLastDeliveryStatus(LastDeliveryStatus.SENT);
         webhook.setLastDeliveryHttp(204);
         when(notificationChannelRepository.findByOwnerIdOrderByCreatedAtAscIdAsc(ANA)).thenReturn(List.of(discord, webhook));
         when(notificationConsentRepository.findByChannelIdInAndRevokedAtIsNull(List.of(4L, 5L))).thenReturn(List.of(
@@ -605,7 +606,7 @@ class DefaultNotificationChannelServiceTest {
         assertThat(mine.get(0).events()).containsExactly(NotificationType.LINK_BACK);
         assertThat(mine.get(1).events()).containsExactly(NotificationType.LINK_DEAD, NotificationType.WEEKLY_SUMMARY);
         assertThat(mine.get(0).lastDelivery()).isNull();
-        assertThat(mine.get(1).lastDelivery()).isEqualTo(new LastDelivery("SENT", LocalDateTime.of(2026, 10, 27, 2, 14, 9), 204, null));
+        assertThat(mine.get(1).lastDelivery()).isEqualTo(new LastDelivery(LastDeliveryStatus.SENT, LocalDateTime.of(2026, 10, 27, 2, 14, 9), 204, null));
         verify(notificationConsentRepository).findByChannelIdInAndRevokedAtIsNull(anyCollection());
     }
 
@@ -648,7 +649,7 @@ class DefaultNotificationChannelServiceTest {
         assertThat(posted).singleElement().satisfies(post -> assertThat(post).startsWith(DISCORD_URL + " {")
                 .contains("**hrva.cc test: this channel works**", "This is a test from hrva.cc. Your channel works.", "Channel: Team alerts",
                         "<https://app.hrva.cc/dashboard/settings#notifications>"));
-        verify(notificationChannelRepository).recordDelivery(4L, NOW_UTC, "SENT", 204, null);
+        verify(notificationChannelRepository).recordDelivery(4L, NOW_UTC, LastDeliveryStatus.SENT, 204, null);
     }
 
     @Test
@@ -670,7 +671,7 @@ class DefaultNotificationChannelServiceTest {
         final var response = service.test(4L);
 
         assertThat(response).isEqualTo(new ChannelTestResponse(false, 404, "The channel answered with HTTP 404. Check the URL."));
-        verify(notificationChannelRepository).recordDelivery(4L, NOW_UTC, "FAILED", 404, "The channel answered with HTTP 404. Check the URL.");
+        verify(notificationChannelRepository).recordDelivery(4L, NOW_UTC, LastDeliveryStatus.FAILED, 404, "The channel answered with HTTP 404. Check the URL.");
     }
 
     @Test
@@ -681,7 +682,7 @@ class DefaultNotificationChannelServiceTest {
         final var response = service.test(4L);
 
         assertThat(response).isEqualTo(new ChannelTestResponse(false, null, "Couldn't reach the channel: no answer within 10 seconds."));
-        verify(notificationChannelRepository).recordDelivery(4L, NOW_UTC, "FAILED", null, "Couldn't reach the channel: no answer within 10 seconds.");
+        verify(notificationChannelRepository).recordDelivery(4L, NOW_UTC, LastDeliveryStatus.FAILED, null, "Couldn't reach the channel: no answer within 10 seconds.");
     }
 
     @Test
@@ -696,7 +697,7 @@ class DefaultNotificationChannelServiceTest {
         assertThat(channel.getFailedDays()).isEqualTo(9);
         assertThat(channel.isEnabled()).isTrue();
         verify(notificationChannelRepository).findByIdAndOwnerId(4L, ANA);
-        verify(notificationChannelRepository).recordDelivery(4L, NOW_UTC, "FAILED", 500, "The channel answered with HTTP 500. Check the URL.");
+        verify(notificationChannelRepository).recordDelivery(4L, NOW_UTC, LastDeliveryStatus.FAILED, 500, "The channel answered with HTTP 500. Check the URL.");
         verifyNoMoreInteractions(notificationChannelRepository);
     }
 

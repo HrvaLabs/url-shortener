@@ -1,6 +1,7 @@
 package cc.hrva.urlshortener.repository;
 
 import cc.hrva.urlshortener.model.NotificationChannel;
+import cc.hrva.urlshortener.model.enums.LastDeliveryStatus;
 import cc.hrva.urlshortener.model.enums.NotificationType;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -45,7 +46,7 @@ public interface NotificationChannelRepository extends JpaRepository<Notificatio
             set ch.lastDeliveryAt = :at, ch.lastDeliveryStatus = :status, ch.lastDeliveryHttp = :http, ch.lastDeliveryError = :error
             where ch.id = :id
             """)
-    int recordDelivery(@Param("id") long id, @Param("at") LocalDateTime at, @Param("status") String status, @Param("http") Integer http,
+    int recordDelivery(@Param("id") long id, @Param("at") LocalDateTime at, @Param("status") LastDeliveryStatus status, @Param("http") Integer http,
                        @Param("error") String error);
 
     @Modifying(flushAutomatically = true, clearAutomatically = true)

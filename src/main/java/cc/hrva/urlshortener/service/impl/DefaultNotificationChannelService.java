@@ -16,6 +16,7 @@ import cc.hrva.urlshortener.model.NotificationConsent;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.enums.ChannelType;
 import cc.hrva.urlshortener.model.enums.ConsentSource;
+import cc.hrva.urlshortener.model.enums.LastDeliveryStatus;
 import cc.hrva.urlshortener.model.enums.NotificationType;
 import cc.hrva.urlshortener.repository.NotificationChannelRepository;
 import cc.hrva.urlshortener.repository.NotificationConsentRepository;
@@ -68,8 +69,6 @@ public class DefaultNotificationChannelService implements NotificationChannelSer
     public static final Duration TEST_WINDOW = Duration.ofMinutes(10);
     public static final String TOO_MANY_TESTS = "You've sent a lot of tests in a short time. Try again in a few minutes.";
     public static final String TESTS_UNAVAILABLE = "Sending a test isn't available right now. Try again in a minute.";
-    public static final String SENT = "SENT";
-    public static final String FAILED = "FAILED";
 
     static final String NOT_FOUND = "Notification channel not found";
     static final String TOO_MANY_CHANNELS = "You can have up to 10 channels. Remove one to add another.";
@@ -231,7 +230,7 @@ public class DefaultNotificationChannelService implements NotificationChannelSer
         final var httpStatus = NotificationErrors.httpStatus(result);
 
         new TransactionTemplate(transactionManager).executeWithoutResult(status -> notificationChannelRepository.recordDelivery(id,
-                LocalDateTime.now(clock).truncatedTo(ChronoUnit.SECONDS), result.delivered() ? SENT : FAILED, httpStatus, error));
+                LocalDateTime.now(clock).truncatedTo(ChronoUnit.SECONDS), result.delivered() ? LastDeliveryStatus.SENT : LastDeliveryStatus.FAILED, httpStatus, error));
         log.info("Notification channel test user id={} channel id={} type={} delivered={} status={}", user.getId(), id,
                 prepared.channel().getType(), result.delivered(), httpStatus);
         return new ChannelTestResponse(result.delivered(), httpStatus, error);

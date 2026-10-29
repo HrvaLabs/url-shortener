@@ -14,6 +14,7 @@ import cc.hrva.urlshortener.client.PostResult;
 import cc.hrva.urlshortener.client.Resolver;
 import cc.hrva.urlshortener.model.NotificationConsent;
 import cc.hrva.urlshortener.model.User;
+import cc.hrva.urlshortener.model.enums.LastDeliveryStatus;
 import cc.hrva.urlshortener.model.enums.NotificationType;
 import cc.hrva.urlshortener.repository.NotificationChannelRepository;
 import cc.hrva.urlshortener.repository.NotificationConsentRepository;
@@ -586,6 +587,24 @@ class NotificationEndpointSecurityTest {
         mockMvc.perform(as(ANA_TOKEN, post(CHANNELS)).contentType(MediaType.APPLICATION_JSON).content("""
                         {"name":"Phone","type":"NTFY","events":[],"target":"https://ntfy.sh/alerts","accessToken":"%s"}""".formatted("t".repeat(255))))
                 .andExpect(status().isCreated());
+    }
+
+    @Test
+    void theLastDeliveryStatusReadsSentOrFailed() throws Exception {
+        mockMvc.perform(as(ANA_TOKEN, post(CHANNELS)).contentType(MediaType.APPLICATION_JSON).content(DISCORD_CHANNEL))
+                .andExpect(status().isCreated());
+        final var id = notificationChannelRepository.findAll().getFirst().getId();
+
+        for (final var status : List.of("SENT", "FAILED")) {
+            new TransactionTemplate(transactionManager).executeWithoutResult(transaction -> notificationChannelRepository.recordDelivery(id,
+                    LocalDateTime.of(2026, 10, 27, 2, 14, 9), LastDeliveryStatus.valueOf(status), 404, null));
+
+            assertThat(jdbcTemplate.queryForObject("select last_delivery_status from notification_channel where id = ?", String.class, id))
+                    .isEqualTo(status);
+            mockMvc.perform(as(ANA_TOKEN, get(CHANNELS)))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$[0].lastDelivery.status").value(status));
+        }
     }
 
     @Test

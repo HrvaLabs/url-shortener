@@ -1,6 +1,7 @@
 package cc.hrva.urlshortener.model;
 
 import cc.hrva.urlshortener.model.enums.ChannelType;
+import cc.hrva.urlshortener.model.enums.LastDeliveryStatus;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
@@ -55,7 +56,8 @@ public class NotificationChannel {
     private LocalDate lastFailedDay;
     private LocalDateTime autoDisabledAt;
     private LocalDateTime lastDeliveryAt;
-    private String lastDeliveryStatus;
+    @Enumerated(EnumType.STRING)
+    private LastDeliveryStatus lastDeliveryStatus;
     private Integer lastDeliveryHttp;
     private String lastDeliveryError;
     private LocalDateTime createdAt;

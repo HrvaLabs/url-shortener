@@ -9,6 +9,7 @@ import cc.hrva.urlshortener.model.enums.BioIcon;
 import cc.hrva.urlshortener.model.enums.BioTheme;
 import cc.hrva.urlshortener.model.enums.ChannelType;
 import cc.hrva.urlshortener.model.enums.ConsentSource;
+import cc.hrva.urlshortener.model.enums.LastDeliveryStatus;
 import cc.hrva.urlshortener.model.enums.NotificationType;
 import cc.hrva.urlshortener.model.enums.PasskeyKind;
 import java.time.LocalDateTime;
@@ -103,7 +104,7 @@ public record DataExportDto(
             String chatId,
             LocalDateTime createdAt,
             LocalDateTime lastDeliveryAt,
-            String lastDeliveryStatus,
+            LastDeliveryStatus lastDeliveryStatus,
             LocalDateTime autoDisabledAt,
             int failedDays) {}
 

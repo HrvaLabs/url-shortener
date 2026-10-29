@@ -7,6 +7,7 @@ import cc.hrva.urlshortener.model.NotificationChannel;
 import cc.hrva.urlshortener.model.NotificationConsent;
 import cc.hrva.urlshortener.model.NotificationDelivery;
 import cc.hrva.urlshortener.model.enums.DeliveryStatus;
+import cc.hrva.urlshortener.model.enums.LastDeliveryStatus;
 import cc.hrva.urlshortener.model.enums.NotificationType;
 import cc.hrva.urlshortener.repository.NotificationChannelRepository;
 import cc.hrva.urlshortener.repository.NotificationClaimRepository;
@@ -212,11 +213,11 @@ public class DefaultNotificationDeliveryService implements NotificationDeliveryS
         writing().executeWithoutResult(status -> {
             if (result.delivered()) {
                 notificationDeliveryRepository.markSent(due.id(), attempts, at, http, DeliveryStatus.SENT, DeliveryStatus.SENDING);
-                notificationChannelRepository.recordDelivery(channelId, at, DefaultNotificationChannelService.SENT, http, null);
+                notificationChannelRepository.recordDelivery(channelId, at, LastDeliveryStatus.SENT, http, null);
                 notificationChannelRepository.resetFailures(channelId);
                 return;
             }
-            notificationChannelRepository.recordDelivery(channelId, at, DefaultNotificationChannelService.FAILED, http, error);
+            notificationChannelRepository.recordDelivery(channelId, at, LastDeliveryStatus.FAILED, http, error);
             if (retryable(result) && attempts < MOST_ATTEMPTS) {
                 notificationDeliveryRepository.retryLater(due.id(), attempts, at.plus(RETRY_AFTER.get(attempts - 1)), http, error,
                         DeliveryStatus.PENDING, DeliveryStatus.SENDING);

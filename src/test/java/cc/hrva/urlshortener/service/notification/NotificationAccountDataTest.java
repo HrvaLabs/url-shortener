@@ -9,6 +9,7 @@ import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.enums.ChannelType;
 import cc.hrva.urlshortener.model.enums.ConsentSource;
 import cc.hrva.urlshortener.model.enums.DeliveryStatus;
+import cc.hrva.urlshortener.model.enums.LastDeliveryStatus;
 import cc.hrva.urlshortener.model.enums.NotificationType;
 import cc.hrva.urlshortener.repository.NotificationChannelRepository;
 import cc.hrva.urlshortener.repository.NotificationClaimRepository;
@@ -112,7 +113,7 @@ class NotificationAccountDataTest {
         final var earlier = savedChannel(ana, ChannelType.TELEGRAM, "Earlier", "Bot ••••WxYz");
         earlier.setEnabled(false);
         earlier.setLastDeliveryAt(REVOKED);
-        earlier.setLastDeliveryStatus("FAILED");
+        earlier.setLastDeliveryStatus(LastDeliveryStatus.FAILED);
         earlier.setChatId("-1001234567890");
         earlier.setAutoDisabledAt(REVOKED);
         earlier.setFailedDays(10);
@@ -126,7 +127,7 @@ class NotificationAccountDataTest {
 
         assertThat(export.channels()).containsExactly(
                 new ChannelExport("Earlier", ChannelType.TELEGRAM, false, List.of(), "Bot ••••WxYz", "-1001234567890", CREATED.minusDays(1),
-                        REVOKED, "FAILED", REVOKED, 10),
+                        REVOKED, LastDeliveryStatus.FAILED, REVOKED, 10),
                 new ChannelExport("Later", ChannelType.SLACK, true, List.of(), "https://hooks.slack.com/••••wxyz", null, later.getCreatedAt(),
                         null, null, null, 0));
     }
