@@ -8,7 +8,7 @@
   <p class="e-fg" th:style="${s.p}">Your short link <span class="e-lk mono" th:style="${s.short}">/<th:block th:text="${shortUrl}">abc</th:block></span> is expiring on <strong class="e-fg" th:style="${s.strong}" th:text="${expirationDate}">2026-10-28</strong>.</p>
   <table class="e-bd" role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" th:style="${s.panel}">
     <tr>
-      <td class="e-fg" th:style="${s.row}"><span class="e-mu" th:style="${s.label}">Destination</span>
+      <td class="e-fg" th:style="${s.row}"><div class="e-mu" th:style="${s.label}">Destination</div>
           <span th:text="${longUrl}">https://example.com/page</span></td>
     </tr>
   </table>

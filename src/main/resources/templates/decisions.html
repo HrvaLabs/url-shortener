@@ -12,10 +12,10 @@
       <tr th:each="entry, it : ${digest.newestOpen}">
         <td class="e-fg e-bd" th:style="${it.first} ? ${s.row} : ${s.rowNext}">
           <span class="e-lk mono" th:style="${s.short}" th:text="${short_link_host + '/' + entry.shortUrl}">hrva.cc/abc</span>
-          <span class="e-mu" th:style="${s.detail}" th:text="${entry.destination}">example.com/page</span>
-          <span class="e-mu" th:style="${s.detail} + 'margin-top: 8px;'">Owner: <span class="e-fg" th:style="${s.strong} + 'font-weight: 400;'" th:text="${entry.ownerEmail != null ? entry.ownerEmail : 'anonymous'}">anonymous</span></span>
-          <span class="e-mu" th:style="${s.detail}">Why: <span class="e-fg" th:style="${s.strong} + 'font-weight: 400;'" th:text="${#strings.listJoin(entry.reasons, '; ')}">reported by a visitor</span></span>
-          <span th:style="${s.detail} + 'margin-top: 8px;'"><a class="e-lk" th:href="@{${review_page}(entry=${entry.reviewUrlId})}" target="_blank" th:style="${s.link}">Review this link</a></span>
+          <div class="e-mu" th:style="${s.detail}" th:text="${entry.destination}">example.com/page</div>
+          <div class="e-mu" th:style="${s.detail} + 'margin-top: 8px;'">Owner: <span class="e-fg" th:style="${s.strong} + 'font-weight: 400;'" th:text="${entry.ownerEmail != null ? entry.ownerEmail : 'anonymous'}">anonymous</span></div>
+          <div class="e-mu" th:style="${s.detail}">Why: <span class="e-fg" th:style="${s.strong} + 'font-weight: 400;'" th:text="${#strings.listJoin(entry.reasons, '; ')}">reported by a visitor</span></div>
+          <div th:style="${s.detail} + 'margin-top: 8px;'"><a class="e-lk" th:href="@{${review_page}(entry=${entry.reviewUrlId})}" target="_blank" th:style="${s.link}">Review this link</a></div>
         </td>
       </tr>
     </table>
@@ -35,7 +35,7 @@
     <table class="e-bd" role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" th:style="${s.panel}">
       <tr th:each="scammer, it : ${digest.possibleScammers}">
         <td class="e-fg e-bd" th:style="${it.first} ? ${s.row} : ${s.rowNext}"><span th:text="${scammer.email}">scammer@example.com</span>
-          <span class="e-mu" th:style="${s.detail}" th:text="${'Links: ' + scammer.blockedLinks + ' blocked, ' + scammer.flaggedLinks + ' flagged'}">Links: 1 blocked, 2 flagged</span></td>
+          <div class="e-mu" th:style="${s.detail}" th:text="${'Links: ' + scammer.blockedLinks + ' blocked, ' + scammer.flaggedLinks + ' flagged'}">Links: 1 blocked, 2 flagged</div></td>
       </tr>
     </table>
   </th:block>
@@ -46,8 +46,8 @@
       <tr th:each="blocked, it : ${digest.autoBlocked}">
         <td class="e-fg e-bd" th:style="${it.first} ? ${s.row} : ${s.rowNext}">
           <span class="e-lk mono" th:style="${s.short}" th:text="${short_link_host + '/' + blocked.shortUrl}">hrva.cc/promo</span>
-          <span class="e-mu" th:style="${s.detail}" th:text="${blocked.destination}">example.com/login</span>
-          <span class="e-mu" th:style="${s.detail} + 'margin-top: 8px;'">Blocked by <span class="e-fg" th:style="${s.strong} + 'font-weight: 400;'" th:text="${blocked.reason}">a blocklist</span></span>
+          <div class="e-mu" th:style="${s.detail}" th:text="${blocked.destination}">example.com/login</div>
+          <div class="e-mu" th:style="${s.detail} + 'margin-top: 8px;'">Blocked by <span class="e-fg" th:style="${s.strong} + 'font-weight: 400;'" th:text="${blocked.reason}">a blocklist</span></div>
         </td>
       </tr>
     </table>
@@ -58,7 +58,7 @@
     <table class="e-bd" role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" th:style="${s.panel} + 'margin-bottom: 12px;'">
       <tr th:each="source, it : ${digest.failingSources}">
         <td class="e-fg e-bd" th:style="${it.first} ? ${s.row} : ${s.rowNext}"><strong class="e-fg" th:style="${s.strong}" th:text="${source.name}">HaGeZi Fake</strong>
-          <span class="e-mu" th:style="${s.detail}" th:text="${source.lastError}">HTTP 503 from every mirror</span></td>
+          <div class="e-mu" th:style="${s.detail}" th:text="${source.lastError}">HTTP 503 from every mirror</div></td>
       </tr>
     </table>
     <p class="e-fg" th:style="${s.small}"><a class="e-lk" th:href="@{${blocklists_page}}" target="_blank" th:style="${s.link}">Open Blocklists</a></p>
@@ -71,8 +71,8 @@
       <tr th:each="link, it : ${digest.newAccountLinks}">
         <td class="e-fg e-bd" th:style="${it.first} ? ${s.row} : ${s.rowNext}">
           <span class="e-lk mono" th:style="${s.short}" th:text="${short_link_host + '/' + link.shortUrl}">hrva.cc/fresh</span>
-          <span class="e-mu" th:style="${s.detail}" th:text="${link.destination}">example.com/fresh</span>
-          <span class="e-mu" th:style="${s.detail} + 'margin-top: 8px;'">Owner: <span class="e-fg" th:style="${s.strong} + 'font-weight: 400;'" th:text="${link.ownerEmail}">newcomer@example.com</span></span>
+          <div class="e-mu" th:style="${s.detail}" th:text="${link.destination}">example.com/fresh</div>
+          <div class="e-mu" th:style="${s.detail} + 'margin-top: 8px;'">Owner: <span class="e-fg" th:style="${s.strong} + 'font-weight: 400;'" th:text="${link.ownerEmail}">newcomer@example.com</span></div>
         </td>
       </tr>
     </table>

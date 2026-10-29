@@ -8,7 +8,7 @@
   <table class="e-bd" role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" th:style="${s.panel}">
     <tr th:each="link, it : ${links}">
       <td class="e-fg e-bd" th:style="${it.first} ? ${s.row} : ${s.rowNext}"><strong class="e-fg" th:style="${s.strong}" th:text="${link.target}">hrva.cc/abc &rarr; example.com</strong>
-          <span class="e-mu" th:style="${s.detail}" th:text="${link.detail}">Since 27 October 2026, the page wasn't found (404)</span></td>
+          <div class="e-mu" th:style="${s.detail}" th:text="${link.detail}">Since 27 October 2026, the page wasn't found (404)</div></td>
     </tr>
     <tr th:if="${more_links > 0}">
       <td class="e-mu e-bd" th:style="${s.rowNext} + 'color: #67676f;'" th:text="|and ${more_links} more|">and 3 more</td>
