@@ -161,6 +161,12 @@ class PublicHttpFetcherPostTest {
     }
 
     @Test
+    void aHeaderValueThatCannotBeSentIsInvalidNotAnError() {
+        assertThat(permissiveFetcher.post(baseUrl + "/hook", JSON, Map.of("Authorization", "Bearer tk one\ntwo"), BODY, TIMEOUT))
+                .isEqualTo(new PostResult(0, "invalid"));
+    }
+
+    @Test
     void aLargeAnswerIsNotRead() {
         final var written = new AtomicLong();
         final var answer = new byte[64 * 1024 * 1024];
@@ -197,7 +203,8 @@ class PublicHttpFetcherPostTest {
             final var silent = permissiveFetcher.post(baseUrl + "/silent" + path, JSON, Map.of(), BODY, Duration.ofMillis(300));
             final var invalid = permissiveFetcher.post("https://127.0.0.1/bot123456:SECRETTOKEN/send Message", JSON, Map.of(), BODY, TIMEOUT);
 
-            assertThat(List.of(untrusted, plain, refused, invalid)).containsOnly(new PostResult(0, "error"));
+            assertThat(List.of(untrusted, plain, refused)).containsOnly(new PostResult(0, "error"));
+            assertThat(invalid).isEqualTo(new PostResult(0, "invalid"));
             assertThat(silent).isEqualTo(new PostResult(0, "timeout"));
         } finally {
             https.stop();

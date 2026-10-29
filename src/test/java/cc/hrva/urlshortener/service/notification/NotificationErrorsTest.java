@@ -35,6 +35,8 @@ class NotificationErrorsTest {
         assertThat(NotificationErrors.describe(new PostResult(0, "not-allowed"), ChannelType.NTFY))
                 .isEqualTo("Couldn't reach the channel: the address isn't a public https address any more.");
         assertThat(NotificationErrors.describe(new PostResult(0, "error"), ChannelType.DISCORD)).isEqualTo("Couldn't reach the channel.");
+        assertThat(NotificationErrors.describe(new PostResult(0, "invalid"), ChannelType.NTFY))
+                .isEqualTo("Couldn't send to the channel: a saved setting isn't valid. Edit the channel and save it again.");
         assertThat(NotificationErrors.describe(new PostResult(0, null), ChannelType.DISCORD)).isEqualTo("Couldn't reach the channel.");
     }
 

@@ -477,14 +477,39 @@ class DefaultNotificationDeliveryServiceTest {
     }
 
     @Test
-    void aChannelWhoseSecretCannotBeOpenedFailsTheAttempt() {
-        queuedDiscord("key:1");
+    void aChannelWhoseSecretCannotBeOpenedGivesUpAtOnce() {
+        final var channel = queuedDiscord("key:1");
         doThrow(new IllegalStateException("sealed value can't be opened")).when(channelService).openTarget(any());
 
         deliveryService.drain();
 
         assertThat(POSTER.posts).isEmpty();
-        assertThat(row("key:1")).containsEntry("STATUS", "PENDING").containsEntry("ATTEMPTS", 1).containsEntry("LAST_ERROR", "Couldn't reach the channel.");
+        assertThat(row("key:1")).containsEntry("STATUS", "GAVE_UP").containsEntry("ATTEMPTS", 1)
+                .containsEntry("LAST_ERROR", "Couldn't send to the channel: a saved setting isn't valid. Edit the channel and save it again.");
+        assertThat(channelRow(channel)).containsEntry("FAILED_DAYS", 1);
+    }
+
+    @Test
+    void aDeactivatedOwnersDeliveryIsNotSent() {
+        final var channel = queuedDiscord("key:1");
+        jdbcTemplate.update("update user_account set active = false where id = ?", ana.getId());
+
+        deliveryService.drain();
+
+        assertThat(POSTER.posts).isEmpty();
+        assertThat(row("key:1")).containsEntry("STATUS", "GAVE_UP").containsEntry("LAST_ERROR", NOT_SENT).containsEntry("ATTEMPTS", 0);
+        assertThat(channelRow(channel)).containsEntry("FAILED_DAYS", 0).containsEntry("LAST_DELIVERY_AT", null).containsEntry("ENABLED", true);
+    }
+
+    @Test
+    void anInvalidRequestGivesUpAtOnce() {
+        queuedDiscord("key:1");
+        POSTER.always(new PostResult(0, "invalid"));
+
+        deliveryService.drain();
+
+        assertThat(POSTER.posts).hasSize(1);
+        assertThat(row("key:1")).containsEntry("STATUS", "GAVE_UP").containsEntry("ATTEMPTS", 1);
     }
 
     @Test

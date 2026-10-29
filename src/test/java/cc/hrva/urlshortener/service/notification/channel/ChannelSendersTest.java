@@ -135,9 +135,10 @@ class ChannelSendersTest {
         assertThat(request.url()).isEqualTo("https://api.telegram.org/bot" + BOT_TOKEN + "/sendMessage");
         assertThat(request.contentType()).isEqualTo("application/json");
         final var body = json(request);
-        assertThat(body.propertyNames()).containsExactlyInAnyOrder("chat_id", "text", "disable_web_page_preview");
+        assertThat(body.propertyNames()).containsExactlyInAnyOrder("chat_id", "text", "link_preview_options");
         assertThat(body.get("chat_id").asString()).isEqualTo("-1001234567890");
-        assertThat(body.get("disable_web_page_preview").asBoolean()).isTrue();
+        assertThat(body.get("link_preview_options").propertyNames()).containsExactly("is_disabled");
+        assertThat(body.get("link_preview_options").get("is_disabled").asBoolean()).isTrue();
         assertThat(body.has("parse_mode")).isFalse();
         assertThat(body.get("text").asString()).startsWith("hrva.cc: 1 link looks broken\nhrva.cc/my_link " + ARROW + " a_b*c.example")
                 .endsWith("\nhttps://app.hrva.cc/dashboard");

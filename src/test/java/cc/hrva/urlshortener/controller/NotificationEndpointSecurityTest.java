@@ -464,6 +464,38 @@ class NotificationEndpointSecurityTest {
     }
 
     @Test
+    void anEditAnswersWithTheUpdatedAtItStored() throws Exception {
+        mockMvc.perform(as(ANA_TOKEN, post(CHANNELS)).contentType(MediaType.APPLICATION_JSON).content(DISCORD_CHANNEL))
+                .andExpect(status().isCreated());
+        final var id = notificationChannelRepository.findAll().getFirst().getId();
+        final var longAgo = LocalDateTime.of(2026, 1, 2, 3, 4, 5);
+        jdbcTemplate.update("update notification_channel set updated_at = ? where id = ?", longAgo, id);
+
+        final var renamed = updatedAtAfterEdit(id, """
+                {"name":"Renamed","type":"DISCORD","events":["LINK_DEAD","WEEKLY_SUMMARY"]}""");
+        final var storedAfterRename = storedUpdatedAt(id);
+        jdbcTemplate.update("update notification_channel set updated_at = ? where id = ?", longAgo, id);
+        final var eventsOnly = updatedAtAfterEdit(id, """
+                {"name":"Renamed","type":"DISCORD","events":["LINK_BACK"]}""");
+
+        assertThat(storedAfterRename).isAfter(longAgo);
+        assertThat(renamed).isEqualTo(storedAfterRename);
+        assertThat(storedUpdatedAt(id)).isAfter(longAgo);
+        assertThat(eventsOnly).isEqualTo(storedUpdatedAt(id));
+    }
+
+    private LocalDateTime updatedAtAfterEdit(final long id, final String body) throws Exception {
+        final var response = mockMvc.perform(as(ANA_TOKEN, put(CHANNELS + "/" + id)).contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        return LocalDateTime.parse(com.jayway.jsonpath.JsonPath.read(response, "$.updatedAt"));
+    }
+
+    private LocalDateTime storedUpdatedAt(final long id) {
+        return jdbcTemplate.queryForObject("select updated_at from notification_channel where id = ?", LocalDateTime.class, id);
+    }
+
+    @Test
     void channelFieldErrorsComeBackByField() throws Exception {
         mockMvc.perform(as(ANA_TOKEN, post(CHANNELS)).contentType(MediaType.APPLICATION_JSON).content(DISCORD_CHANNEL.replace("\"Team alerts\"", "\" \"")))
                 .andExpect(status().isBadRequest())

@@ -12,6 +12,8 @@ import java.net.NoRouteToHostException;
 import java.net.SocketException;
 import java.net.http.HttpConnectTimeoutException;
 import java.net.http.HttpTimeoutException;
+import java.nio.channels.AsynchronousCloseException;
+import java.nio.channels.ClosedByInterruptException;
 import java.nio.channels.ClosedChannelException;
 import java.nio.channels.UnresolvedAddressException;
 import java.security.cert.CertificateException;
@@ -415,6 +417,14 @@ class PublicHttpFetcherProbeTest {
                 .isEqualTo(new ProbeResult(ProbeOutcome.DEAD, "refused", null));
         assertThat(PublicHttpFetcher.classify(connectFailure(connectFailure(new ClosedChannelException()))))
                 .isEqualTo(new ProbeResult(ProbeOutcome.DEAD, "refused", null));
+    }
+
+    @Test
+    void ourOwnCloseDuringAConnectIsNotARefusal() {
+        assertThat(PublicHttpFetcher.classify(connectFailure(connectFailure(new AsynchronousCloseException()))))
+                .isEqualTo(new ProbeResult(ProbeOutcome.UNKNOWN, "error", null));
+        assertThat(PublicHttpFetcher.classify(connectFailure(connectFailure(new ClosedByInterruptException()))))
+                .isEqualTo(new ProbeResult(ProbeOutcome.UNKNOWN, "error", null));
     }
 
     @Test

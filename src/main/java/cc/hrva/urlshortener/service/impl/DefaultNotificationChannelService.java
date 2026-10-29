@@ -151,13 +151,15 @@ public class DefaultNotificationChannelService implements NotificationChannelSer
             throw new ApiException(TYPE_CHANGED);
         }
         requireValid(channel.getType(), request, false);
+        accountLock.lock(user);
 
         channel.setName(request.getName().strip());
         if (request.getEnabled() != null) {
             switchTo(channel, request.getEnabled());
         }
         replaceGivenSecrets(channel, request);
-        notificationChannelRepository.save(channel);
+        channel.setUpdatedAt(LocalDateTime.now(clock).truncatedTo(ChronoUnit.MICROS));
+        notificationChannelRepository.saveAndFlush(channel);
 
         final var current = notificationConsentService.channelEvents(id);
         final var granted = EnumSet.noneOf(NotificationType.class);

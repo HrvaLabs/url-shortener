@@ -1,6 +1,7 @@
 package cc.hrva.urlshortener.service.impl;
 
 import cc.hrva.urlshortener.client.PostResult;
+import cc.hrva.urlshortener.client.PublicHttpFetcher;
 import cc.hrva.urlshortener.model.NotificationChannel;
 import cc.hrva.urlshortener.model.NotificationConsent;
 import cc.hrva.urlshortener.model.NotificationDelivery;
@@ -58,6 +59,7 @@ public class DefaultNotificationDeliveryService implements NotificationDeliveryS
     private static final int DELIVERIES_KEPT_DAYS = 30;
     private static final int CLAIMS_KEPT_DAYS = 60;
     private static final PostResult NOT_POSTED = new PostResult(0, "error");
+    private static final PostResult SECRETS_UNREADABLE = new PostResult(0, PublicHttpFetcher.POST_INVALID);
 
     private final NotificationDeliveryRepository notificationDeliveryRepository;
     private final NotificationChannelRepository notificationChannelRepository;
@@ -174,6 +176,7 @@ public class DefaultNotificationDeliveryService implements NotificationDeliveryS
     private Prepared prepare(final Due due) {
         final var channel = notificationChannelRepository.findById(due.channelId())
                 .filter(NotificationChannel::isEnabled)
+                .filter(found -> Boolean.TRUE.equals(found.getOwner().getActive()))
                 .filter(found -> notificationConsentRepository.existsByChannelIdAndTypeAndRevokedAtIsNull(found.getId(), due.event()));
         if (channel.isEmpty()) {
             return null;
@@ -188,7 +191,7 @@ public class DefaultNotificationDeliveryService implements NotificationDeliveryS
 
     private PostResult send(final Due due, final Prepared prepared) {
         if (prepared.target() == null) {
-            return NOT_POSTED;
+            return SECRETS_UNREADABLE;
         }
         try {
             final var message = jsonMapper.readValue(due.message(), NotificationMessage.class);

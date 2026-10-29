@@ -90,10 +90,9 @@ public class DefaultDestinationCheckService implements DestinationCheckService {
         NOT_CHECKED
     }
 
-    private record LinkResult(Verdict verdict, DeadLink newlyDead, DeadLink recovered) {
+    private record LinkResult(Verdict verdict, DeadLink newlyDead, DeadLink recovered, boolean written) {
 
-        private static final LinkResult NOT_CHECKED = new LinkResult(Verdict.NOT_CHECKED, null, null);
-        private static final LinkResult UNKNOWN = new LinkResult(Verdict.UNKNOWN, null, null);
+        private static final LinkResult NOT_CHECKED = new LinkResult(Verdict.NOT_CHECKED, null, null, false);
 
     }
 
@@ -120,16 +119,23 @@ public class DefaultDestinationCheckService implements DestinationCheckService {
         private DestinationCheckOutcome check() {
             final var executor = Executors.newFixedThreadPool(PARALLEL_PROBES, Thread.ofPlatform().name("destination-check-", 1).factory());
             final var attempted = new HashSet<Long>();
+            final var unwritten = new HashSet<Long>();
             try {
                 while (!stopped() && hasTimeLeft()) {
-                    final var due = destinationCheckRepository.findDue(nightStart, BATCH_SIZE, attempted).stream()
+                    final var due = destinationCheckRepository.findDue(nightStart, BATCH_SIZE, Set.copyOf(unwritten)).stream()
                             .filter(link -> attempted.add(link.id()))
                             .toList();
                     if (due.isEmpty()) {
                         break;
                     }
                     final var results = due.stream().map(link -> executor.submit(() -> check(link))).toList();
-                    results.forEach(result -> tally(awaited(result)));
+                    for (var index = 0; index < due.size(); index++) {
+                        final var result = awaited(results.get(index));
+                        tally(result);
+                        if (!result.written()) {
+                            unwritten.add(due.get(index).id());
+                        }
+                    }
                 }
             } finally {
                 executor.shutdownNow();
@@ -169,7 +175,7 @@ public class DefaultDestinationCheckService implements DestinationCheckService {
                 case ALIVE -> {
                     final var written = destinationCheckRepository.record(link.id(), link.longUrl(), now, 0, null, null);
                     final var back = written && link.deadSince() != null ? deadLink(link, link.deadSince(), null) : null;
-                    yield new LinkResult(Verdict.ALIVE, null, back);
+                    yield new LinkResult(Verdict.ALIVE, null, back, written);
                 }
                 case DEAD -> {
                     if (OUTAGE_CODES.contains(result.code()) && !networkCanary.healthy()) {
@@ -182,11 +188,11 @@ public class DefaultDestinationCheckService implements DestinationCheckService {
                     final var diesTonight = link.deadSince() == null && streak >= DEAD_AFTER_NIGHTS;
                     final var deadSince = diesTonight ? now : link.deadSince();
                     final var written = destinationCheckRepository.record(link.id(), link.longUrl(), now, streak, deadSince, result.code());
-                    yield new LinkResult(Verdict.DEAD, written && diesTonight ? deadLink(link, now, result.code()) : null, null);
+                    yield new LinkResult(Verdict.DEAD, written && diesTonight ? deadLink(link, now, result.code()) : null, null, written);
                 }
                 case UNKNOWN -> {
-                    destinationCheckRepository.touch(link.id(), link.longUrl(), now);
-                    yield LinkResult.UNKNOWN;
+                    final var written = destinationCheckRepository.touch(link.id(), link.longUrl(), now);
+                    yield new LinkResult(Verdict.UNKNOWN, null, null, written);
                 }
             };
         }

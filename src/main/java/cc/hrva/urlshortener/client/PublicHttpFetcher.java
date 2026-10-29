@@ -49,6 +49,7 @@ import org.springframework.http.HttpStatus;
 public class PublicHttpFetcher {
 
     public static final String LINK_CHECKER_USER_AGENT = "hrva.cc-linkcheck/1.0 (+https://app.hrva.cc/help/notifications#link-checker)";
+    public static final String POST_INVALID = "invalid";
 
     private static final Logger log = LoggerFactory.getLogger(PublicHttpFetcher.class);
     private static final int MAX_REDIRECTS = 3;
@@ -188,7 +189,10 @@ public class PublicHttpFetcher {
             IOUtils.closeQuietly(response.body());
             final var status = response.statusCode();
             return new PostResult(status, status / 100 == 3 ? POST_REDIRECTED : null);
-        } catch (final IOException | IllegalArgumentException exception) {
+        } catch (final IllegalArgumentException exception) {
+            log.debug("Channel post refused before sending exception={}", exception.getClass().getName());
+            return new PostResult(0, POST_INVALID);
+        } catch (final IOException exception) {
             log.debug("Channel post failed exception={}", exception.getClass().getName());
             final var timedOut = ExceptionUtils.indexOfType(exception, HttpTimeoutException.class) >= 0;
             return new PostResult(0, timedOut ? POST_TIMEOUT : POST_ERROR);
@@ -313,7 +317,7 @@ public class PublicHttpFetcher {
     }
 
     private static boolean refusedThenClosed(final List<Throwable> chain) {
-        return chain.size() > 1 && chain.getLast() instanceof ClosedChannelException && chain.get(chain.size() - 2) instanceof ConnectException;
+        return chain.size() > 1 && chain.getLast().getClass() == ClosedChannelException.class && chain.get(chain.size() - 2) instanceof ConnectException;
     }
 
     private Optional<RedirectHop> nextHop(final List<RedirectHop> chain, final long deadline) {

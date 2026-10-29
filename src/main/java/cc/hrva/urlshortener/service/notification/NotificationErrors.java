@@ -9,6 +9,7 @@ public final class NotificationErrors {
     static final String TIMED_OUT = "Couldn't reach the channel: no answer within 10 seconds.";
     static final String NOT_ALLOWED = "Couldn't reach the channel: the address isn't a public https address any more.";
     static final String UNREACHABLE = "Couldn't reach the channel.";
+    static final String INVALID = "Couldn't send to the channel: a saved setting isn't valid. Edit the channel and save it again.";
     static final String TELEGRAM_TOKEN_REFUSED = "Telegram refused the bot token. Check it with @BotFather.";
 
     private NotificationErrors() {
@@ -26,6 +27,9 @@ public final class NotificationErrors {
         }
         if ("not-allowed".equals(result.failure())) {
             return NOT_ALLOWED;
+        }
+        if ("invalid".equals(result.failure())) {
+            return INVALID;
         }
         if (result.httpStatus() == 0) {
             return UNREACHABLE;

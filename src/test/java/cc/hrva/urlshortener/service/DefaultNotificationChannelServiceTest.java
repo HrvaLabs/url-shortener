@@ -326,6 +326,7 @@ class DefaultNotificationChannelServiceTest {
         assertThatThrownBy(() -> service.update(4L, discord().build())).isInstanceOf(RateLimitExceededException.class).hasMessage(message);
         assertThatThrownBy(() -> service.delete(4L)).isInstanceOf(RateLimitExceededException.class).hasMessage(message);
         verify(notificationChannelRepository, never()).save(any());
+        verify(notificationChannelRepository, never()).saveAndFlush(any());
         verify(notificationChannelRepository, never()).delete(any());
     }
 
@@ -345,7 +346,7 @@ class DefaultNotificationChannelServiceTest {
         assertThatThrownBy(() -> service.update(4L, request(ChannelType.SLACK).build()))
                 .isInstanceOf(ApiException.class)
                 .hasMessage("A channel's type can't be changed. Add a new channel instead.");
-        verify(notificationChannelRepository, never()).save(any());
+        verify(notificationChannelRepository, never()).saveAndFlush(any());
     }
 
     @Test
@@ -358,6 +359,27 @@ class DefaultNotificationChannelServiceTest {
         verify(notificationConsentService).grantChannelEvents(channel.getOwner(), channel, EnumSet.of(NotificationType.WEEKLY_SUMMARY));
         verify(notificationConsentService).revokeChannelEvents(4L, EnumSet.of(NotificationType.LINK_DEAD), ConsentSource.SETTINGS);
         assertThat(response.events()).containsExactly(NotificationType.DAILY_SUMMARY, NotificationType.WEEKLY_SUMMARY);
+    }
+
+    @Test
+    void updateTakesTheAccountLockAfterValidationAndBeforeReadingTheEvents() {
+        owned(channel(ChannelType.DISCORD));
+        when(notificationConsentService.channelEvents(4L)).thenReturn(EnumSet.of(NotificationType.LINK_DEAD));
+
+        service.update(4L, discord().target(null).events(Set.of("LINK_BACK")).build());
+
+        final InOrder order = inOrder(accountLock, notificationConsentService);
+        order.verify(accountLock).lock(user);
+        order.verify(notificationConsentService).channelEvents(4L);
+    }
+
+    @Test
+    void anInvalidUpdateTakesNoLock() {
+        owned(channel(ChannelType.DISCORD));
+
+        assertThatThrownBy(() -> service.update(4L, discord().target("https://hooks.slack.com/services/T0/B0/x").build()))
+                .isInstanceOf(ChannelValidationException.class);
+        verify(accountLock, never()).lock(any());
     }
 
     @Test
@@ -405,7 +427,7 @@ class DefaultNotificationChannelServiceTest {
 
         assertThatThrownBy(() -> service.update(4L, discord().target("https://hooks.slack.com/services/T0/B0/x").build()))
                 .isInstanceOf(ChannelValidationException.class);
-        verify(notificationChannelRepository, never()).save(any());
+        verify(notificationChannelRepository, never()).saveAndFlush(any());
     }
 
     @Test

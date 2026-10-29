@@ -29,7 +29,7 @@ public class TelegramChannelSender implements ChannelSender {
         final var body = new LinkedHashMap<String, Object>();
         body.put("chat_id", target.chatId());
         body.put("text", NotificationMessages.fitted(message, NotificationMessages.Format.PLAIN));
-        body.put("disable_web_page_preview", true);
+        body.put("link_preview_options", Map.of("is_disabled", true));
         return new OutgoingRequest(API.formatted(target.target()), OutgoingRequest.JSON, Map.of(), jsonMapper.writeValueAsBytes(body));
     }
 

@@ -238,9 +238,33 @@ class DefaultDestinationCheckServiceTest {
         final var outcome = service.checkAll();
 
         assertThat(probed).containsExactly("https://example.com/edited", "https://example.com/next");
-        assertThat(exclusions).containsExactly(java.util.Set.of(), java.util.Set.of(7L), java.util.Set.of(7L, 8L));
+        assertThat(exclusions).containsExactly(java.util.Set.of(), java.util.Set.of(7L), java.util.Set.of(7L));
         assertThat(messages()).anySatisfy(line -> assertThat(line).startsWith("Destination check finished").endsWith("stoppedEarly=false"));
         assertThat(outcome.recovered()).isEmpty();
+    }
+
+    @Test
+    void onlyLinksThatProducedNoWriteAreSentBackAsExclusions() {
+        final var first = java.util.stream.LongStream.rangeClosed(1, 200)
+                .mapToObj(id -> due(id, "https://host" + id + ".example/page", 0, null, 40L)).toList();
+        final var second = java.util.stream.LongStream.rangeClosed(201, 400)
+                .mapToObj(id -> due(id, "https://host" + id + ".example/page", 0, null, 40L)).toList();
+        first.forEach(link -> answers.put(link.longUrl(), ALIVE));
+        second.forEach(link -> answers.put(link.longUrl(), TIMEOUT));
+        when(repository.record(eq(5L), anyString(), any(), anyInt(), any(), any())).thenReturn(false);
+        when(repository.touch(eq(250L), anyString(), any())).thenReturn(false);
+        final var exclusions = new java.util.ArrayList<java.util.Set<Long>>();
+        final var batches = new java.util.ArrayDeque<>(List.of(first, second));
+        when(repository.findDue(any(), anyInt(), any())).thenAnswer(invocation -> {
+            final java.util.Collection<Long> excluded = invocation.getArgument(2);
+            exclusions.add(java.util.Set.copyOf(excluded));
+            return batches.isEmpty() ? List.of() : batches.poll();
+        });
+
+        service.checkAll();
+
+        assertThat(probed).hasSize(400);
+        assertThat(exclusions).containsExactly(java.util.Set.of(), java.util.Set.of(5L), java.util.Set.of(5L, 250L));
     }
 
     @Test

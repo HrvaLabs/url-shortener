@@ -31,6 +31,7 @@ class ChannelTargetsTest {
     private static final String CHAT_ID_SHAPE = "Enter the chat ID, a number like -1001234567890 or a channel name like @mychannel";
     private static final String BOT_TOKEN = "123456789:AAH4Fq2xYzAbCdEfGhIjKlMnOpQrStUvWxYz";
     private static final String PUBLIC_ADDRESS = "162.159.128.233";
+    private static final String ACCESS_TOKEN_SHAPE = "Paste the access token from ntfy. It has no spaces, like tk_AbC123";
 
     private final List<String> lookedUp = new ArrayList<>();
     private final ChannelTargets channelTargets = new ChannelTargets(fakeDns());
@@ -209,6 +210,42 @@ class ChannelTargetsTest {
     void labelsNameEachType() {
         assertThat(List.of(ChannelType.values())).extracting(ChannelTargets::label)
                 .containsExactly("Discord", "Slack", "Telegram", "ntfy", "Webhook");
+    }
+
+    @Test
+    void aTrailingDotOnTheHostIsTheSameHost() {
+        assertThat(errors(ChannelType.DISCORD, "https://discord.com./api/webhooks/123/abc")).isEmpty();
+        assertThat(errors(ChannelType.SLACK, "https://hooks.slack.com./services/T0/B0/xyz")).isEmpty();
+        assertThat(ChannelTargets.detect("https://discord.com./api/webhooks/1/abc")).contains(ChannelType.DISCORD);
+        assertThat(ChannelTargets.detect("https://NTFY.SH./topic")).contains(ChannelType.NTFY);
+        assertThat(errors(ChannelType.WEBHOOK, "https://hooks.slack.com./services/T0/B0/xyz"))
+                .containsExactly(Map.entry("target", "This is a Slack webhook. Choose Slack as the type so messages arrive formatted."));
+        assertThat(lookedUp).doesNotContain("discord.com.", "hooks.slack.com.");
+    }
+
+    @Test
+    void discordAndSlackRefuseOtherPorts() {
+        assertThat(errors(ChannelType.DISCORD, "https://discord.com:8443/api/webhooks/123/abc")).containsExactly(Map.entry("target", DISCORD_SHAPE));
+        assertThat(errors(ChannelType.SLACK, "https://hooks.slack.com:8443/services/T0/B0/xyz")).containsExactly(Map.entry("target", SLACK_SHAPE));
+        assertThat(errors(ChannelType.DISCORD, "https://discord.com:443/api/webhooks/123/abc")).isEmpty();
+        assertThat(errors(ChannelType.SLACK, "https://hooks.slack.com:443/services/T0/B0/xyz")).isEmpty();
+    }
+
+    @Test
+    void anNtfyAccessTokenMustBePrintableWithoutSpaces() {
+        assertThat(ntfy("tk_AbC123-._~!")).isEmpty();
+        assertThat(ntfy(null)).isEmpty();
+        assertThat(ntfy("  ")).isEmpty();
+        assertThat(ntfy(" tk_trimmed ")).isEmpty();
+        assertThat(ntfy("tk one")).containsExactly(Map.entry("accessToken", ACCESS_TOKEN_SHAPE));
+        assertThat(ntfy("tk\none")).containsExactly(Map.entry("accessToken", ACCESS_TOKEN_SHAPE));
+        assertThat(ntfy("tk" + Character.toString(0x00e9))).containsExactly(Map.entry("accessToken", ACCESS_TOKEN_SHAPE));
+        assertThat(channelTargets.fieldErrors(ChannelType.WEBHOOK,
+                request(ChannelType.WEBHOOK).target("https://hooks.example.org/hrva").accessToken("tk one").build(), true)).isEmpty();
+    }
+
+    private Map<String, String> ntfy(final String accessToken) {
+        return channelTargets.fieldErrors(ChannelType.NTFY, request(ChannelType.NTFY).target("https://ntfy.sh/topic").accessToken(accessToken).build(), true);
     }
 
     private Map<String, String> errors(final ChannelType type, final String target) {

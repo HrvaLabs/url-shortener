@@ -24,6 +24,7 @@ public class ChannelTargets {
     public static final String TARGET = "target";
     public static final String BOT_TOKEN = "botToken";
     public static final String CHAT_ID = "chatId";
+    public static final String ACCESS_TOKEN = "accessToken";
 
     static final String PASTE_THE_URL = "Paste the URL";
     static final String USE_HTTPS = "Use an https URL.";
@@ -34,6 +35,7 @@ public class ChannelTargets {
     static final String NTFY_SHAPE = "Paste your ntfy topic URL, like https://ntfy.sh/your-topic";
     static final String TELEGRAM_ADDRESS = "This is a Telegram address. Choose Telegram as the type and paste the bot token instead.";
     static final String BOT_TOKEN_SHAPE = "Paste the bot token from @BotFather, like 123456789:AAH4Fq2xYzExample";
+    static final String ACCESS_TOKEN_SHAPE = "Paste the access token from ntfy. It has no spaces, like tk_AbC123";
     static final String CHAT_ID_SHAPE = "Enter the chat ID, a number like -1001234567890 or a channel name like @mychannel";
 
     private static final String HTTPS = "https";
@@ -46,6 +48,8 @@ public class ChannelTargets {
     private static final String DISCORD_PATH = "/api/webhooks/";
     private static final String SLACK_PATH = "/services/";
     private static final Pattern TELEGRAM_TOKEN = Pattern.compile("^\\d{5,}:[A-Za-z0-9_-]{30,}$");
+    private static final Pattern NTFY_ACCESS_TOKEN = Pattern.compile("^[\\x21-\\x7E]+$");
+    private static final int DEFAULT_HTTPS_PORT = 443;
     private static final Pattern TELEGRAM_CHAT_ID = Pattern.compile("^-?\\d{1,20}$|^@[A-Za-z][A-Za-z0-9_]{4,31}$");
 
     private final Resolver resolver;
@@ -64,6 +68,9 @@ public class ChannelTargets {
             return errors;
         }
         targetError(type, request.getTarget().strip()).ifPresent(error -> errors.put(TARGET, error));
+        if (type == ChannelType.NTFY) {
+            shapeError(request.getAccessToken(), NTFY_ACCESS_TOKEN, ACCESS_TOKEN_SHAPE, false).ifPresent(error -> errors.put(ACCESS_TOKEN, error));
+        }
         return errors;
     }
 
@@ -89,10 +96,12 @@ public class ChannelTargets {
         if (host.isEmpty()) {
             return Optional.of(USE_HTTPS);
         }
-        final var path = URI.create(target).getRawPath();
+        final var uri = URI.create(target);
+        final var path = uri.getRawPath();
+        final var defaultPort = uri.getPort() == -1 || uri.getPort() == DEFAULT_HTTPS_PORT;
         final var shapeError = switch (type) {
-            case DISCORD -> DISCORD_HOSTS.contains(host.get()) && StringUtils.startsWith(path, DISCORD_PATH) ? null : DISCORD_SHAPE;
-            case SLACK -> SLACK_HOST.equals(host.get()) && StringUtils.startsWith(path, SLACK_PATH) ? null : SLACK_SHAPE;
+            case DISCORD -> defaultPort && DISCORD_HOSTS.contains(host.get()) && StringUtils.startsWith(path, DISCORD_PATH) ? null : DISCORD_SHAPE;
+            case SLACK -> defaultPort && SLACK_HOST.equals(host.get()) && StringUtils.startsWith(path, SLACK_PATH) ? null : SLACK_SHAPE;
             case NTFY -> StringUtils.isEmpty(StringUtils.removeStart(path, "/")) ? NTFY_SHAPE : null;
             case WEBHOOK -> typeOfHost(host.get()).map(ChannelTargets::chatHostRefusal).orElse(null);
             case TELEGRAM -> null;
@@ -139,6 +148,7 @@ public class ChannelTargets {
     private static Optional<String> hostOf(final URI uri) {
         return Optional.ofNullable(uri.getHost())
                 .map(host -> StringUtils.removeEnd(StringUtils.removeStart(host, "["), "]"))
+                .map(host -> StringUtils.removeEnd(host, "."))
                 .filter(StringUtils::isNotEmpty)
                 .map(host -> host.toLowerCase(Locale.ROOT));
     }
