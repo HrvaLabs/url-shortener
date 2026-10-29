@@ -12,6 +12,7 @@ import cc.hrva.urlshortener.service.DestinationCheckService;
 import cc.hrva.urlshortener.service.LinkDigestService;
 import cc.hrva.urlshortener.service.ResetTokenService;
 import cc.hrva.urlshortener.service.SafeBrowsingRecheckService;
+import cc.hrva.urlshortener.service.NotificationDeliveryService;
 import cc.hrva.urlshortener.service.ScheduledService;
 import cc.hrva.urlshortener.service.SendingEmailService;
 import cc.hrva.urlshortener.service.UrlNotificationService;
@@ -41,6 +42,7 @@ public class DefaultScheduledService implements ScheduledService {
     private final BlocklistSourceService blocklistSourceService;
     private final WeeklyDigestService weeklyDigestService;
     private final DestinationCheckService destinationCheckService;
+    private final NotificationDeliveryService notificationDeliveryService;
     private final BioHandleHoldRepository bioHandleHoldRepository;
     private final EmailLogRepository emailLogRepository;
     private final AuditLogRepository auditLogRepository;
@@ -154,6 +156,18 @@ public class DefaultScheduledService implements ScheduledService {
     public void checkDestinations() {
         log.info("Scheduled: destination check");
         destinationCheckService.runNightly();
+    }
+
+    @Override
+    @Scheduled(fixedDelay = 60_000, initialDelay = 60_000)
+    public void drainNotificationDeliveries() {
+        notificationDeliveryService.drainInBackground();
+    }
+
+    @Override
+    @Scheduled(cron = "0 55 3 * * *")
+    public void deleteOldNotificationRecords() {
+        notificationDeliveryService.deleteOld();
     }
 
 }

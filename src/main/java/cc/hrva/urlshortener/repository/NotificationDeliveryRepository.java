@@ -30,6 +30,33 @@ public interface NotificationDeliveryRepository extends JpaRepository<Notificati
                      @Param("pending") DeliveryStatus pending, @Param("sending") DeliveryStatus sending);
 
     @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query("""
+            update NotificationDelivery d
+            set d.status = :sent, d.attempts = :attempts, d.finishedAt = :at, d.lastHttp = :http, d.lastError = null, d.claimedAt = null
+            where d.id = :id and d.status = :sending
+            """)
+    int markSent(@Param("id") Long id, @Param("attempts") int attempts, @Param("at") LocalDateTime at, @Param("http") Integer http,
+                 @Param("sent") DeliveryStatus sent, @Param("sending") DeliveryStatus sending);
+
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query("""
+            update NotificationDelivery d
+            set d.status = :pending, d.attempts = :attempts, d.nextAttemptAt = :next, d.lastHttp = :http, d.lastError = :error, d.claimedAt = null
+            where d.id = :id and d.status = :sending
+            """)
+    int retryLater(@Param("id") Long id, @Param("attempts") int attempts, @Param("next") LocalDateTime next, @Param("http") Integer http,
+                   @Param("error") String error, @Param("pending") DeliveryStatus pending, @Param("sending") DeliveryStatus sending);
+
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query("""
+            update NotificationDelivery d
+            set d.status = :gaveUp, d.attempts = :attempts, d.finishedAt = :at, d.lastHttp = :http, d.lastError = :error, d.claimedAt = null
+            where d.id = :id and d.status = :sending
+            """)
+    int giveUp(@Param("id") Long id, @Param("attempts") int attempts, @Param("at") LocalDateTime at, @Param("http") Integer http,
+               @Param("error") String error, @Param("gaveUp") DeliveryStatus gaveUp, @Param("sending") DeliveryStatus sending);
+
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Query("delete from NotificationDelivery d where d.createdAt < :cutoff")
     int deleteCreatedBefore(@Param("cutoff") LocalDateTime cutoff);
 

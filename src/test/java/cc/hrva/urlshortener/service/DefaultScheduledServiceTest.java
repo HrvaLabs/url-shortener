@@ -5,6 +5,7 @@ import cc.hrva.urlshortener.repository.AuditLogRepository;
 import cc.hrva.urlshortener.repository.BioHandleHoldRepository;
 import cc.hrva.urlshortener.repository.EmailLogRepository;
 import cc.hrva.urlshortener.service.impl.DefaultDestinationCheckService;
+import cc.hrva.urlshortener.service.impl.DefaultNotificationDeliveryService;
 import cc.hrva.urlshortener.service.impl.DefaultScheduledService;
 import java.io.IOException;
 import java.time.Clock;
@@ -29,6 +30,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.scheduling.support.CronExpression;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
@@ -74,6 +76,9 @@ class DefaultScheduledServiceTest {
     private DestinationCheckService destinationCheckService;
 
     @Mock
+    private NotificationDeliveryService notificationDeliveryService;
+
+    @Mock
     private BioHandleHoldRepository bioHandleHoldRepository;
 
     @Mock
@@ -87,7 +92,7 @@ class DefaultScheduledServiceTest {
     @BeforeEach
     void setUp() {
         this.scheduledService = new DefaultScheduledService(urlService, userService, apiKeyService, resetTokenService, urlNotificationService, safeBrowsingRecheckService, sendingEmailService, linkDigestService, blocklistSourceService,
-                weeklyDigestService, destinationCheckService, bioHandleHoldRepository, emailLogRepository, auditLogRepository, appProperties, Clock.fixed(NOW, ZoneOffset.UTC));
+                weeklyDigestService, destinationCheckService, notificationDeliveryService, bioHandleHoldRepository, emailLogRepository, auditLogRepository, appProperties, Clock.fixed(NOW, ZoneOffset.UTC));
     }
 
     @Test
@@ -202,6 +207,36 @@ class DefaultScheduledServiceTest {
         assertThat(runNightly.getAnnotation(Async.class)).isNotNull();
         assertThat(runNightly.getAnnotation(Async.class).value()).isEmpty();
         assertThat(DefaultScheduledService.class.getMethod("checkDestinations").getAnnotation(Async.class)).isNull();
+        final var drainInBackground = DefaultNotificationDeliveryService.class.getMethod("drainInBackground");
+        assertThat(drainInBackground.getAnnotation(Async.class)).isNotNull();
+        assertThat(drainInBackground.getAnnotation(Async.class).value()).isEmpty();
+        assertThat(DefaultScheduledService.class.getMethod("drainNotificationDeliveries").getAnnotation(Async.class)).isNull();
+    }
+
+    @Test
+    void theDeliveryDrainHandsOffToTheBackground() {
+        scheduledService.drainNotificationDeliveries();
+
+        verify(notificationDeliveryService).drainInBackground();
+        verify(notificationDeliveryService, never()).drain();
+    }
+
+    @Test
+    void theDeliveryDrainRunsAMinuteAfterTheLastOne() throws NoSuchMethodException {
+        final var scheduled = DefaultScheduledService.class.getMethod("drainNotificationDeliveries").getAnnotation(Scheduled.class);
+
+        assertThat(scheduled.fixedDelay()).isEqualTo(60_000L);
+        assertThat(scheduled.initialDelay()).isEqualTo(60_000L);
+        assertThat(scheduled.cron()).isEmpty();
+    }
+
+    @Test
+    void oldNotificationRecordsAreDeletedDailyAtFiveToFour() throws NoSuchMethodException {
+        final var scheduled = DefaultScheduledService.class.getMethod("deleteOldNotificationRecords").getAnnotation(Scheduled.class);
+
+        assertThat(scheduled.cron()).isEqualTo("0 55 3 * * *");
+        scheduledService.deleteOldNotificationRecords();
+        verify(notificationDeliveryService).deleteOld();
     }
 
     @Test

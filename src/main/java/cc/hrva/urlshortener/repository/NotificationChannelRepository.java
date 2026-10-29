@@ -2,6 +2,7 @@ package cc.hrva.urlshortener.repository;
 
 import cc.hrva.urlshortener.model.NotificationChannel;
 import cc.hrva.urlshortener.model.enums.NotificationType;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.Collection;
 import java.util.List;
@@ -43,6 +44,24 @@ public interface NotificationChannelRepository extends JpaRepository<Notificatio
             """)
     int recordDelivery(@Param("id") long id, @Param("at") LocalDateTime at, @Param("status") String status, @Param("http") Integer http,
                        @Param("error") String error);
+
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query("update NotificationChannel ch set ch.failedDays = 0, ch.lastFailedDay = null where ch.id = :id")
+    int resetFailures(@Param("id") long id);
+
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query("""
+            update NotificationChannel ch set ch.failedDays = ch.failedDays + 1, ch.lastFailedDay = :today
+            where ch.id = :id and (ch.lastFailedDay is null or ch.lastFailedDay <> :today)
+            """)
+    int countFailedDay(@Param("id") long id, @Param("today") LocalDate today);
+
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query("""
+            update NotificationChannel ch set ch.enabled = false, ch.autoDisabledAt = :at
+            where ch.id = :id and ch.enabled = true and ch.failedDays >= :failedDays
+            """)
+    int turnOffAfterFailedDays(@Param("id") long id, @Param("at") LocalDateTime at, @Param("failedDays") int failedDays);
 
     @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Query("delete from NotificationChannel ch where ch.owner.id = :userId")

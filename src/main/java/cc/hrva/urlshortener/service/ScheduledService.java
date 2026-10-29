@@ -17,5 +17,7 @@ public interface ScheduledService {
     void releaseExpiredBioHandles();
     void deleteOldLogs();
     void checkDestinations();
+    void drainNotificationDeliveries();
+    void deleteOldNotificationRecords();
 
 }
