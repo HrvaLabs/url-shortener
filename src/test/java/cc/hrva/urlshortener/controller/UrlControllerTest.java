@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.controller;
 
+import java.time.LocalDateTime;
 import java.util.Collections;
 import java.util.List;
 import cc.hrva.urlshortener.configuration.GlobalExceptionHandler;
@@ -24,6 +25,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.PageImpl;
@@ -34,6 +36,7 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
@@ -385,6 +388,23 @@ class UrlControllerTest {
         mockMvc.perform(get("/api/v1/urls/all").param("page", "0").param("size", "20"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content.size()").value(1));
+    }
+
+    @Test
+    void theAdminListTakesTheDeadDestinationFilterAndShowsTheHealth() throws Exception {
+        final var dead = Url.builder().id(1L).shortUrl("menu").longUrl("https://gone.example/").active(true)
+                .destinationDeadSince(LocalDateTime.of(2026, 10, 27, 2, 11, 40)).destinationLastStatus("404").build();
+        final var pageable = PageRequest.of(0, 20);
+        final var search = ArgumentCaptor.forClass(UrlSearchDto.class);
+        when(urlService.getAllUrls(any(Pageable.class), search.capture()))
+                .thenReturn(new PageImpl<>(List.of(UrlResponse.from(dead)), pageable, 1));
+
+        mockMvc.perform(get("/api/v1/urls/all").param("deadDestination", "true"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].destinationHealth.deadSince").value("2026-10-27T02:11:40"))
+                .andExpect(jsonPath("$.content[0].destinationHealth.lastStatus").value("404"));
+
+        assertThat(search.getValue().getDeadDestination()).isTrue();
     }
 
     @Test

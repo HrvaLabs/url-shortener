@@ -130,7 +130,7 @@ public class LinkTools {
     private String describeLinks(final String search, final String tag, final Integer page) {
         final var user = mcpUserResolver.currentUser();
         final var pageable = PageRequest.of(Math.max(0, Objects.requireNonNullElse(page, 0)), PAGE_SIZE, NEWEST_FIRST);
-        final var links = urlService.getAllMyUrls(null, pageable, new UrlSearchDto(search, null, null, tag, null, null, null));
+        final var links = urlService.getAllMyUrls(null, pageable, new UrlSearchDto(search, null, null, tag, null, null, null, null));
 
         log.info("MCP list_links userId={} results={}", user.getId(), links.getNumberOfElements());
 
@@ -225,7 +225,7 @@ public class LinkTools {
     }
 
     private Optional<UrlResponse> findOwnLink(final String alias) {
-        final var search = new UrlSearchDto(alias, null, null, null, null, null, null);
+        final var search = new UrlSearchDto(alias, null, null, null, null, null, null, null);
         final var matches = urlService.getAllMyUrls(null, Pageable.unpaged(NEWEST_FIRST), search).stream()
                 .filter(candidate -> alias.equals(candidate.shortUrl()))
                 .toList();

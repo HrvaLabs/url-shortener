@@ -563,7 +563,7 @@ class DefaultWeeklyDigestServiceTest {
 
     private static LinksStatsResponse links(final LocalDate from, final LocalDate to, final StackedSeries created, final long createdTotal) {
         return new LinksStatsResponse(7, from, to, created, new CreatedInRange(createdTotal, createdTotal, 0, 0),
-                new LinkInventory(500, 480, 20, 3, 4, 5, 6, List.of(new CountEntry("ADMIN", 9))), List.of(), List.of(), List.of());
+                new LinkInventory(500, 480, 20, 3, 4, 5, 6, List.of(new CountEntry("ADMIN", 9))), List.of(), List.of(), List.of(), null);
     }
 
     private static UsersStatsResponse users(final LocalDate from, final LocalDate to, final StackedSeries signups, final long activeLast7Days) {

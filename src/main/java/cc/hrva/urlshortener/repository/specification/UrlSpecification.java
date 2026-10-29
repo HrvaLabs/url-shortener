@@ -63,6 +63,10 @@ public final class UrlSpecification {
         return (root, query, cb) -> cb.lessThanOrEqualTo(root.get("createDate"), dateTo);
     }
 
+    public static Specification<Url> hasDeadDestination() {
+        return (root, query, cb) -> cb.and(root.get("destinationDeadSince").isNotNull(), cb.isTrue(root.get("active")));
+    }
+
     public static Specification<Url> notExpired() {
         return (root, query, cb) ->
                 cb.or(

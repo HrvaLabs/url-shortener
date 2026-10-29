@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.dto;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -22,7 +23,9 @@ public record UrlAnalyticsDto(
             LocalDateTime createDate,
             LocalDateTime lastAccessed,
             long visits,
-            String longUrl) {}
+            String longUrl,
+            @JsonInclude(JsonInclude.Include.NON_NULL)
+            DestinationHealth destinationHealth) {}
 
     public record Breakdowns(
             List<BreakdownEntry> referrers,

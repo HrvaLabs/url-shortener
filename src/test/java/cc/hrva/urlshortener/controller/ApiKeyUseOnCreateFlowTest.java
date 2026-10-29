@@ -17,6 +17,7 @@ import cc.hrva.urlshortener.mcp.bridge.ConnectRequestStore;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.repository.ApiKeyRepository;
 import cc.hrva.urlshortener.repository.AuditLogRepository;
+import cc.hrva.urlshortener.repository.DestinationCheckRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.security.ClickRequestResolver;
@@ -358,6 +359,7 @@ class ApiKeyUseOnCreateFlowTest {
             ClickRequestResolver.class,
             UrlController.class,
             DefaultUrlService.class,
+            DestinationCheckRepository.class,
             DefaultUrlValidator.class,
             DefaultApiKeyService.class,
             DefaultApiKeyValidator.class,

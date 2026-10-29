@@ -1,6 +1,7 @@
 package cc.hrva.urlshortener.repository.stats;
 
 import cc.hrva.urlshortener.dto.stats.CountEntry;
+import cc.hrva.urlshortener.dto.stats.LinksStatsResponse.DeadDestinationCounts;
 import cc.hrva.urlshortener.util.DomainNames;
 import java.time.LocalDateTime;
 import java.util.Comparator;
@@ -54,6 +55,13 @@ public class LinksStatsRepository {
             fetch first :limit rows only
             """;
 
+    private static final String COUNT_DEAD_DESTINATIONS = """
+            select count(*) as dead_links,
+                   coalesce(sum(case when owner_id is null then 1 else 0 end), 0) as anonymous_dead_links
+            from url
+            where active = true and destination_dead_since is not null
+            """;
+
     private static final String FIND_ACTIVE_DESTINATIONS = "select long_url from url where active = true";
 
     private final NamedParameterJdbcTemplate jdbcTemplate;
@@ -94,6 +102,12 @@ public class LinksStatsRepository {
                 .sorted(Comparator.comparingLong(CountEntry::count).reversed().thenComparing(CountEntry::value))
                 .limit(limit)
                 .toList();
+    }
+
+    public DeadDestinationCounts countDeadDestinations() {
+        return jdbcTemplate.queryForObject(COUNT_DEAD_DESTINATIONS, Map.of(), (row, rowNumber) -> new DeadDestinationCounts(
+                row.getLong("dead_links"),
+                row.getLong("anonymous_dead_links")));
     }
 
     public record CreatedCounts(long total, long anonymous, long aiTagged) {}

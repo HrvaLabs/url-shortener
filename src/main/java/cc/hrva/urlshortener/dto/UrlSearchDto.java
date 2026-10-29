@@ -24,4 +24,6 @@ public class UrlSearchDto {
 
     private Boolean anonymous;
 
+    private Boolean deadDestination;
+
 }

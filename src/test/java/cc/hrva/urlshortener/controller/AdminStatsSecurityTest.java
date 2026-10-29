@@ -224,7 +224,7 @@ class AdminStatsSecurityTest {
                     new BioPageViewTotals(0, 0)));
             case "links" -> when(adminStatsService.links(7)).thenReturn(new LinksStatsResponse(7, LocalDate.of(2026, 10, 20),
                     LocalDate.of(2026, 10, 26), new StackedSeries(List.of(), List.of()), new CreatedInRange(0, 0, 0, 0),
-                    new LinkInventory(0, 0, 0, 0, 0, 0, 0, List.of()), List.of(), List.of(), List.of()));
+                    new LinkInventory(0, 0, 0, 0, 0, 0, 0, List.of()), List.of(), List.of(), List.of(), null));
             case "users" -> when(adminStatsService.users(7)).thenReturn(new UsersStatsResponse(7, LocalDate.of(2026, 10, 20),
                     LocalDate.of(2026, 10, 26), new StackedSeries(List.of(), List.of()), new UserInventory(0, 0, 0, 0, 0, 0, List.of()), 0, 0,
                     new ApiKeyCounts(0, 0, 0, 0), new McpCounts(0, 0), new BioPageCounts(0, 0)));

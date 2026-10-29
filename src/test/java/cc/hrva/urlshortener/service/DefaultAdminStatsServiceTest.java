@@ -194,7 +194,7 @@ class DefaultAdminStatsServiceTest {
 
     private static LinksStatsResponse emptyLinks(final StatsWindow window) {
         return new LinksStatsResponse(window.days(), window.from(), window.to(), new StackedSeries(List.of(), List.of()),
-                new CreatedInRange(0, 0, 0, 0), new LinkInventory(0, 0, 0, 0, 0, 0, 0, List.of()), List.of(), List.of(), List.of());
+                new CreatedInRange(0, 0, 0, 0), new LinkInventory(0, 0, 0, 0, 0, 0, 0, List.of()), List.of(), List.of(), List.of(), null);
     }
 
     private static UsersStatsResponse emptyUsers(final StatsWindow window) {

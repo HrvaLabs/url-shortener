@@ -33,6 +33,7 @@ import cc.hrva.urlshortener.dto.CreateUrlDto;
 import cc.hrva.urlshortener.dto.LinkVerdict;
 import cc.hrva.urlshortener.dto.LinkVerdict.Outcome;
 import cc.hrva.urlshortener.dto.UrlResponse;
+import cc.hrva.urlshortener.dto.DestinationHealth;
 import cc.hrva.urlshortener.dto.UrlSearchDto;
 import cc.hrva.urlshortener.dto.UrlUpdateDto;
 import cc.hrva.urlshortener.exception.ApiException;
@@ -50,6 +51,7 @@ import cc.hrva.urlshortener.model.codebook.Authorities;
 import cc.hrva.urlshortener.model.enums.BlockReason;
 import cc.hrva.urlshortener.model.enums.CreatedVia;
 import cc.hrva.urlshortener.model.enums.ReviewResolution;
+import cc.hrva.urlshortener.repository.DestinationCheckRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.service.burst.CreatedLink;
 import cc.hrva.urlshortener.service.impl.DefaultSuspiciousUrlService;
@@ -64,6 +66,10 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
+import jakarta.persistence.criteria.CriteriaBuilder;
+import jakarta.persistence.criteria.CriteriaQuery;
+import jakarta.persistence.criteria.Root;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.aop.framework.ProxyFactory;
@@ -81,9 +87,12 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.tuple;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.startsWith;
+import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -175,6 +184,9 @@ class UrlServiceTest {
     @Mock
     private BurstAlertService burstAlertService;
 
+    @Mock
+    private DestinationCheckRepository destinationCheckRepository;
+
     @BeforeEach
     void setUp() {
         org.mockito.Mockito.lenient().when(rateLimiter.tryAcquire(any(), org.mockito.ArgumentMatchers.anyInt(), any())).thenReturn(true);
@@ -203,7 +215,8 @@ class UrlServiceTest {
                 redirectChainService,
                 TransactionOperations.withoutTransaction(),
                 reservedAliasService,
-                burstAlertService
+                burstAlertService,
+                destinationCheckRepository
         );
     }
 
@@ -274,6 +287,65 @@ class UrlServiceTest {
         order.verify(urlRepository).save(url);
         verify(reviewQueueService).resolveOpen(url, ReviewResolution.DESTINATION_CHANGED, "system");
         verify(reviewQueueService, never()).flag(any(), any());
+    }
+
+    @Test
+    void editingTheDestinationClearsDeadState() {
+        final var deadSince = LocalDateTime.of(2026, 10, 20, 2, 11);
+        final var url = Url.builder().id(7L).shortUrl("abc").longUrl("https://old.example").visits(0L).active(true)
+                .destinationDeadSince(deadSince).destinationLastStatus("404").destinationFailStreak(4).build();
+        final var update = UrlUpdateDto.builder().id(7L).longUrl("https://new.example").build();
+        final var changed = Url.builder().id(7L).shortUrl("abc").longUrl("https://new.example").visits(0L).active(true).build();
+        when(urlRepository.findById(7L)).thenReturn(Optional.of(url));
+        when(urlUpdateDtoToUrlConverter.convert(update)).thenReturn(changed);
+        when(urlRepository.save(url)).thenReturn(url);
+
+        final var result = urlService.updateUrl(update);
+
+        final var order = org.mockito.Mockito.inOrder(urlRepository, destinationCheckRepository);
+        order.verify(urlRepository).save(url);
+        order.verify(destinationCheckRepository).reset(7L);
+        assertThat(result.destinationHealth()).isNull();
+    }
+
+    @Test
+    void keepingTheDestinationKeepsItsDeadState() {
+        final var deadSince = LocalDateTime.of(2026, 10, 20, 2, 11);
+        final var url = Url.builder().id(7L).shortUrl("abc").longUrl("https://same.example").visits(0L).active(true)
+                .destinationDeadSince(deadSince).destinationLastStatus("410").build();
+        final var update = UrlUpdateDto.builder().id(7L).longUrl("https://same.example").visitLimit(5L).build();
+        final var edited = Url.builder().id(7L).shortUrl("abc").longUrl("https://same.example").visitLimit(5L).visits(0L).active(true).build();
+        when(urlRepository.findById(7L)).thenReturn(Optional.of(url));
+        when(urlUpdateDtoToUrlConverter.convert(update)).thenReturn(edited);
+        when(urlRepository.save(url)).thenReturn(url);
+
+        final var result = urlService.updateUrl(update);
+
+        verify(destinationCheckRepository, never()).reset(anyLong());
+        assertThat(result.destinationHealth()).isEqualTo(new DestinationHealth(deadSince, "410"));
+    }
+
+    @Test
+    void theAdminListFiltersDeadDestinationsOnlyWhenAsked() {
+        final var pageable = PageRequest.of(0, 20);
+        final var search = new UrlSearchDto();
+        search.setDeadDestination(true);
+        when(urlRepository.findAll(any(Specification.class), eq(pageable))).thenReturn(new PageImpl<>(List.of()));
+
+        urlService.getAllUrls(pageable, search);
+
+        final var captor = ArgumentCaptor.forClass(Specification.class);
+        verify(urlRepository).findAll(captor.capture(), eq(pageable));
+        final var root = mock(Root.class, RETURNS_DEEP_STUBS);
+        final var builder = mock(CriteriaBuilder.class, RETURNS_DEEP_STUBS);
+        captor.getValue().toPredicate(root, mock(CriteriaQuery.class), builder);
+        verify(root).get("destinationDeadSince");
+        verify(root).get("active");
+
+        search.setDeadDestination(false);
+        when(urlRepository.findAll(pageable)).thenReturn(new PageImpl<>(List.of()));
+        urlService.getAllUrls(pageable, search);
+        verify(urlRepository).findAll(pageable);
     }
 
     @Test
@@ -2464,7 +2536,8 @@ class UrlServiceTest {
                 redirectChainService,
                 TransactionOperations.withoutTransaction(),
                 reservedAliasService,
-                burstAlertService
+                burstAlertService,
+                destinationCheckRepository
         );
     }
 
@@ -2537,7 +2610,8 @@ class UrlServiceTest {
                 redirectChainService,
                 new TransactionTemplate(transactionManager),
                 reservedAliasService,
-                burstAlertService
+                burstAlertService,
+                destinationCheckRepository
         );
         final var proxyFactory = new ProxyFactory(service);
         proxyFactory.addAdvice(new TransactionInterceptor(transactionManager, new AnnotationTransactionAttributeSource()));
@@ -2569,7 +2643,8 @@ class UrlServiceTest {
                 redirectChainService,
                 TransactionOperations.withoutTransaction(),
                 reservedAliasService,
-                burstAlertService
+                burstAlertService,
+                destinationCheckRepository
         );
     }
 
@@ -2597,7 +2672,8 @@ class UrlServiceTest {
                 redirectChainService,
                 TransactionOperations.withoutTransaction(),
                 reservedAliasService,
-                burstAlertService
+                burstAlertService,
+                destinationCheckRepository
         );
     }
 

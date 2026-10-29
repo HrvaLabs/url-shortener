@@ -4,6 +4,7 @@ import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import jakarta.persistence.EntityManager;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
@@ -66,6 +67,27 @@ class UrlSpecificationTest {
 
     private List<String> shortUrls(final Specification<Url> spec) {
         return urlRepository.findAll(spec, Sort.by("shortUrl")).stream().map(Url::getShortUrl).toList();
+    }
+
+    @Test
+    void deadDestinationFilter() {
+        persistUrl("dead-active", "https://gone.example/a", null);
+        persistUrl("dead-inactive", "https://gone.example/b", null);
+        persistUrl("failing", "https://flaky.example/c", null);
+        entityManager.flush();
+        markDead("dead-active", LocalDateTime.of(2026, 10, 25, 2, 0), 3);
+        markDead("dead-inactive", LocalDateTime.of(2026, 10, 20, 2, 0), 5);
+        markDead("failing", null, 2);
+        entityManager.createNativeQuery("update url set active = false where short_url = 'dead-inactive'").executeUpdate();
+        entityManager.clear();
+
+        assertThat(shortUrls(UrlSpecification.hasDeadDestination())).containsExactly("dead-active");
+        assertThat(shortUrls(UrlSpecification.hasDeadDestination().and(UrlSpecification.hasNoOwner()))).containsExactly("dead-active");
+    }
+
+    private void markDead(final String shortUrl, final LocalDateTime deadSince, final int failStreak) {
+        entityManager.createNativeQuery("update url set destination_dead_since = ?, destination_fail_streak = ? where short_url = ?")
+                .setParameter(1, deadSince).setParameter(2, failStreak).setParameter(3, shortUrl).executeUpdate();
     }
 
     @Test

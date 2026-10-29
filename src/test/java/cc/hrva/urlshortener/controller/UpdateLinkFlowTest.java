@@ -17,6 +17,7 @@ import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.repository.AuditLogRepository;
 import cc.hrva.urlshortener.repository.BlocklistSourceRepository;
+import cc.hrva.urlshortener.repository.DestinationCheckRepository;
 import cc.hrva.urlshortener.repository.DomainRuleRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
@@ -410,6 +411,7 @@ class UpdateLinkFlowTest {
             ClickRequestResolver.class,
             UrlController.class,
             DefaultUrlService.class,
+            DestinationCheckRepository.class,
             DefaultUrlValidator.class,
             DefaultLinkCheckService.class,
             CreateUrlToUrlConverter.class,

@@ -1,6 +1,7 @@
 package cc.hrva.urlshortener.dto;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.enums.BlockReason;
 import cc.hrva.urlshortener.model.enums.ThreatType;
@@ -162,4 +163,55 @@ class UrlResponseTest {
         assertThat(UrlResponse.from(baseUrl().active(true).passwordHash("hash").build()).passwordProtected()).isTrue();
         assertThat(UrlResponse.from(baseUrl().active(true).build()).passwordProtected()).isFalse();
     }
+
+    @Test
+    void fromCarriesDestinationHealth() {
+        final var deadSince = LocalDateTime.of(2026, 10, 27, 2, 11, 40);
+        final var response = UrlResponse.from(baseUrl().active(true).destinationDeadSince(deadSince).destinationLastStatus("404")
+                .destinationFailStreak(3).build());
+
+        assertThat(response.destinationHealth()).isEqualTo(new DestinationHealth(deadSince, "404"));
+        assertThat(JsonMapper.builder().build().writeValueAsString(response))
+                .contains("\"destinationHealth\":{\"deadSince\":\"2026-10-27T02:11:40\",\"lastStatus\":\"404\"}");
+    }
+
+    @Test
+    void publicViewHasNoDestinationHealth() {
+        final var response = UrlResponse.from(baseUrl().active(true).destinationDeadSince(LocalDateTime.of(2026, 10, 27, 2, 11))
+                .destinationLastStatus("nxdomain").build());
+
+        assertThat(response.publicView().destinationHealth()).isNull();
+        assertThat(JsonMapper.builder().build().writeValueAsString(response.publicView())).doesNotContain("destinationHealth");
+    }
+
+    @Test
+    void liveLinkHasNone() {
+        final var failingButNotDead = UrlResponse.from(baseUrl().active(true).destinationFailStreak(2).destinationLastStatus("404").build());
+
+        assertThat(failingButNotDead.destinationHealth()).isNull();
+        assertThat(JsonMapper.builder().build().writeValueAsString(failingButNotDead)).doesNotContain("destinationHealth");
+        assertThat(DestinationHealth.of(baseUrl().build())).isNull();
+    }
+
+    @Test
+    void theAdminDecorationsKeepTheDestinationHealth() {
+        final var health = new DestinationHealth(LocalDateTime.of(2026, 10, 27, 2, 11), "410");
+        final var response = UrlResponse.from(baseUrl().active(true).destinationDeadSince(health.deadSince())
+                .destinationLastStatus("410").build());
+
+        assertThat(response.withSuspiciousReasons(List.of("x")).destinationHealth()).isEqualTo(health);
+        assertThat(response.withBlockReason(BlockReason.ADMIN).destinationHealth()).isEqualTo(health);
+        assertThat(response.withModeration(true, false, null).destinationHealth()).isEqualTo(health);
+    }
+
+    @Test
+    void destinationHealthSurvivesTheRedisRoundTrip() {
+        final var mapper = JsonMapper.builder().build();
+        final var serializer = new GenericJacksonJsonRedisSerializer(mapper);
+        final var response = UrlResponse.from(baseUrl().active(true).destinationDeadSince(LocalDateTime.of(2026, 10, 27, 2, 11))
+                .destinationLastStatus("tls").build());
+
+        assertThat(mapper.convertValue(serializer.deserialize(serializer.serialize(response)), UrlResponse.class)).isEqualTo(response);
+    }
+
 }

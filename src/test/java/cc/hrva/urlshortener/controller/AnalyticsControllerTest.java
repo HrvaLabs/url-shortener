@@ -211,7 +211,7 @@ class AnalyticsControllerTest {
     private static UrlAnalyticsDto analytics() {
         final var link = new LinkSummary(7L, "menu", "example.com", "ACTIVE", false,
                 LocalDateTime.of(2026, 10, 1, 12, 0), LocalDateTime.of(2026, 10, 24, 9, 15), 412,
-                "https://example.com/menu?utm_source=flyer&utm_medium=print");
+                "https://example.com/menu?utm_source=flyer&utm_medium=print", null);
         final var breakdowns = new Breakdowns(
                 List.of(new BreakdownEntry("direct", 60), new BreakdownEntry("other", 3)),
                 List.of(new BreakdownEntry("HR", 50)),

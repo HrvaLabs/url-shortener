@@ -13,7 +13,8 @@ public record LinksStatsResponse(
         LinkInventory now,
         List<CountEntry> topTags,
         List<CountEntry> topDomains,
-        List<NewestLink> newest) {
+        List<NewestLink> newest,
+        DeadDestinationCounts deadDestinations) {
 
     public record CreatedInRange(long total, long account, long anonymous, long aiTagged) {}
 
@@ -26,6 +27,8 @@ public record LinksStatsResponse(
             long withVisitLimit,
             long withExpiry,
             List<CountEntry> blockedByReason) {}
+
+    public record DeadDestinationCounts(long total, long anonymous) {}
 
     public record NewestLink(
             Long id,

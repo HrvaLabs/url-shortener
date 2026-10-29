@@ -12,6 +12,7 @@ import cc.hrva.urlshortener.dto.AnalyticsDay;
 import cc.hrva.urlshortener.dto.AnalyticsOverviewDto.TopLink;
 import cc.hrva.urlshortener.dto.AnalyticsTotals;
 import cc.hrva.urlshortener.dto.BreakdownEntry;
+import cc.hrva.urlshortener.dto.DestinationHealth;
 import cc.hrva.urlshortener.dto.LinkClicks;
 import cc.hrva.urlshortener.dto.UrlAnalyticsDto.LinkSummary;
 import cc.hrva.urlshortener.exception.InvalidAnalyticsRangeException;
@@ -29,6 +30,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import tools.jackson.databind.json.JsonMapper;
 
 import static cc.hrva.urlshortener.model.enums.StatDimension.BROWSER;
 import static cc.hrva.urlshortener.model.enums.StatDimension.COUNTRY;
@@ -342,7 +344,31 @@ class DefaultAnalyticsServiceTest {
 
         assertThat(analytics.link()).isEqualTo(
                 new LinkSummary(7L, "menu", "shop.example.com", "ACTIVE", true, created, lastAccessed, 412,
-                        "https://shop.example.com/a?b=c"));
+                        "https://shop.example.com/a?b=c", null));
+    }
+
+    @Test
+    void summaryCarriesDestinationHealth() {
+        final var deadSince = LocalDateTime.of(2026, 10, 25, 2, 11, 40);
+        final var url = Url.builder().id(7L).shortUrl("menu").longUrl("https://shop.example.com/a").visits(3L).active(true)
+                .destinationDeadSince(deadSince).destinationLastStatus("410").destinationFailStreak(3).owner(owner).build();
+        givenOwnLink(url);
+        givenNoStoredStats(TODAY);
+
+        assertThat(analyticsService.getUrlAnalytics(7L, null).link().destinationHealth()).isEqualTo(new DestinationHealth(deadSince, "410"));
+    }
+
+    @Test
+    void summaryOfALiveDestinationHasNoHealth() {
+        final var url = Url.builder().id(7L).shortUrl("menu").longUrl("https://shop.example.com/a").visits(3L).active(true)
+                .destinationFailStreak(2).destinationLastStatus("404").owner(owner).build();
+        givenOwnLink(url);
+        givenNoStoredStats(TODAY);
+
+        final var link = analyticsService.getUrlAnalytics(7L, null).link();
+
+        assertThat(link.destinationHealth()).isNull();
+        assertThat(JsonMapper.builder().build().writeValueAsString(link)).doesNotContain("destinationHealth");
     }
 
     @Test

@@ -109,7 +109,7 @@ class LinkToolsTest {
 
         final var search = ArgumentCaptor.forClass(UrlSearchDto.class);
         verify(urlService).getAllMyUrls(isNull(), any(), search.capture());
-        assertThat(search.getValue()).isEqualTo(new UrlSearchDto("example", null, null, "work", null, null, null));
+        assertThat(search.getValue()).isEqualTo(new UrlSearchDto("example", null, null, "work", null, null, null, null));
     }
 
     @Test
@@ -376,7 +376,7 @@ class LinkToolsTest {
         final var search = ArgumentCaptor.forClass(UrlSearchDto.class);
         verify(urlService).getAllMyUrls(isNull(), pageable.capture(), search.capture());
         assertThat(pageable.getValue().isUnpaged()).isTrue();
-        assertThat(search.getValue()).isEqualTo(new UrlSearchDto("menu", null, null, null, null, null, null));
+        assertThat(search.getValue()).isEqualTo(new UrlSearchDto("menu", null, null, null, null, null, null, null));
     }
 
     @Test
@@ -509,7 +509,7 @@ class LinkToolsTest {
         when(mcpUserResolver.currentUser()).thenReturn(CURRENT_USER);
         when(urlService.getAllMyUrls(isNull(), any(), any())).thenReturn(page(link(33L, "menu", true)));
         when(analyticsService.getUrlAnalyticsForOwner(33L, null)).thenReturn(new UrlAnalyticsDto(
-                new LinkSummary(33L, "menu", "example.com", "ACTIVE", false, null, null, 0, "https://example.com/menu"),
+                new LinkSummary(33L, "menu", "example.com", "ACTIVE", false, null, null, 0, "https://example.com/menu", null),
                 30, LocalDate.of(2026, 9, 25), LocalDate.of(2026, 10, 24), new AnalyticsTotals(0, 0, 0), List.of(), NO_BREAKDOWNS));
 
         final var result = linkTools.linkStats("menu", null);
@@ -562,7 +562,7 @@ class LinkToolsTest {
 
     private static UrlAnalyticsDto analytics(final Long id, final String alias, final Breakdowns breakdowns) {
         final var link = new LinkSummary(id, alias, "example.com", "ACTIVE", false,
-                systemTime("2026-10-01T12:00:00Z"), systemTime("2026-10-24T07:15:00Z"), 412, "https://example.com/" + alias);
+                systemTime("2026-10-01T12:00:00Z"), systemTime("2026-10-24T07:15:00Z"), 412, "https://example.com/" + alias, null);
         return new UrlAnalyticsDto(link, 30, LocalDate.of(2026, 9, 25), LocalDate.of(2026, 10, 24), new AnalyticsTotals(120, 95, 14),
                 List.of(), breakdowns);
     }

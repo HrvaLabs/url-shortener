@@ -25,6 +25,7 @@ import cc.hrva.urlshortener.model.enums.CreatedVia;
 import cc.hrva.urlshortener.model.enums.ReviewResolution;
 import cc.hrva.urlshortener.model.enums.ThreatType;
 import cc.hrva.urlshortener.repository.ShortUrlUniqueIndex;
+import cc.hrva.urlshortener.repository.DestinationCheckRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.specification.UrlSpecification;
 import cc.hrva.urlshortener.service.ApiKeyService;
@@ -135,6 +136,7 @@ public class DefaultUrlService implements UrlService {
     private final TransactionOperations transactionOperations;
     private final ReservedAliasService reservedAliasService;
     private final BurstAlertService burstAlertService;
+    private final DestinationCheckRepository destinationCheckRepository;
 
     @Override
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
@@ -365,6 +367,9 @@ public class DefaultUrlService implements UrlService {
         if (Boolean.TRUE.equals(search.getAnonymous())) {
             spec = (spec == null) ? UrlSpecification.hasNoOwner() : spec.and(UrlSpecification.hasNoOwner());
         }
+        if (Boolean.TRUE.equals(search.getDeadDestination())) {
+            spec = (spec == null) ? UrlSpecification.hasDeadDestination() : spec.and(UrlSpecification.hasDeadDestination());
+        }
         if (search.getExpired() != null && search.getExpired()) {
             spec = (spec == null) ? UrlSpecification.isExpired() : spec.and(UrlSpecification.isExpired());
         }
@@ -472,6 +477,7 @@ public class DefaultUrlService implements UrlService {
             applyEdit(updateDto, url, current, destinationChanged);
             final var saved = urlRepository.save(current);
             if (destinationChanged) {
+                destinationCheckRepository.reset(saved.getId());
                 reviewQueueService.resolveOpen(saved, ReviewResolution.DESTINATION_CHANGED, SYSTEM);
             }
             queueIfFlagged(saved, verdict);
@@ -498,6 +504,10 @@ public class DefaultUrlService implements UrlService {
             current.setLongUrl(edited.getLongUrl());
             current.setFinalUrl(null);
             current.setChainCheckedAt(null);
+            current.setDestinationCheckedAt(null);
+            current.setDestinationDeadSince(null);
+            current.setDestinationFailStreak(0);
+            current.setDestinationLastStatus(null);
         }
         current.setVisitLimit(edited.getVisitLimit());
         current.setExpirationDate(edited.getExpirationDate());

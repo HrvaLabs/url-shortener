@@ -4,9 +4,12 @@ import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.converter.CreateUrlToUrlConverter;
 import cc.hrva.urlshortener.converter.UrlToPeekUrlConverter;
 import cc.hrva.urlshortener.converter.UrlUpdateDtoToUrlConverter;
+import cc.hrva.urlshortener.dto.DestinationHealth;
+import cc.hrva.urlshortener.dto.LinkVerdict;
 import cc.hrva.urlshortener.dto.UrlUpdateDto;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.enums.BlockReason;
+import cc.hrva.urlshortener.repository.DestinationCheckRepository;
 import cc.hrva.urlshortener.repository.DomainRuleRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
@@ -41,8 +44,10 @@ import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mockingDetails;
+import static org.mockito.Mockito.when;
 
 @SpringBootTest(
         classes = UrlWritesTest.TestApplication.class,
@@ -60,6 +65,7 @@ class UrlWritesTest {
     private static final LocalDateTime EXPIRES = LocalDateTime.of(2027, 1, 1, 12, 0);
     private static final LocalDateTime NEW_EXPIRY = LocalDateTime.of(2027, 6, 1, 12, 0);
     private static final LocalDateTime VISITED_AT = LocalDateTime.of(2026, 10, 27, 11, 45);
+    private static final LocalDateTime DEAD_SINCE = LocalDateTime.of(2026, 10, 25, 2, 11, 40);
 
     private final AtomicBoolean visitDone = new AtomicBoolean();
 
@@ -206,6 +212,51 @@ class UrlWritesTest {
                 .containsEntry("BLOCK_REASON", "ADMIN");
     }
 
+    @Test
+    void aDestinationEditClearsTheDeadStateTheNightlyCheckWrote() {
+        link(4, null);
+        markDead();
+        visitMeanwhile = () -> {};
+        when(urlValidator.checkIfLongUrlIsNotBlocklisted(any())).thenReturn(LinkVerdict.clean());
+
+        final var response = urlService.updateUrl(UrlUpdateDto.builder().id(LINK).longUrl("https://example.com/moved").build());
+
+        assertThat(response.destinationHealth()).isNull();
+        assertThat(destinationRow())
+                .containsEntry("LONG_URL", "https://example.com/moved")
+                .containsEntry("DESTINATION_CHECKED_AT", null)
+                .containsEntry("DESTINATION_DEAD_SINCE", null)
+                .containsEntry("DESTINATION_FAIL_STREAK", 0)
+                .containsEntry("DESTINATION_LAST_STATUS", null);
+    }
+
+    @Test
+    void anEditThatKeepsTheDestinationKeepsTheDeadState() {
+        link(4, null);
+        markDead();
+        visitMeanwhile = () -> {};
+
+        final var response = urlService.updateUrl(UrlUpdateDto.builder().id(LINK).visitLimit(9L).build());
+
+        assertThat(response.destinationHealth()).isEqualTo(new DestinationHealth(DEAD_SINCE, "404"));
+        assertThat(destinationRow())
+                .containsEntry("DESTINATION_DEAD_SINCE", Timestamp.valueOf(DEAD_SINCE))
+                .containsEntry("DESTINATION_FAIL_STREAK", 3)
+                .containsEntry("DESTINATION_LAST_STATUS", "404");
+    }
+
+    private void markDead() {
+        jdbcTemplate.update("""
+                update url set destination_checked_at = ?, destination_dead_since = ?, destination_fail_streak = 3,
+                               destination_last_status = '404' where id = ?""", DEAD_SINCE, DEAD_SINCE, LINK);
+    }
+
+    private Map<String, Object> destinationRow() {
+        return jdbcTemplate.queryForMap("""
+                select long_url, destination_checked_at, destination_dead_since, destination_fail_streak, destination_last_status
+                from url where id = ?""", LINK);
+    }
+
     private void link(final long visits, final Long visitLimit) {
         jdbcTemplate.update("""
                 insert into url (id, long_url, short_url, visits, visit_limit, expiration_date, create_date, active)
@@ -225,7 +276,7 @@ class UrlWritesTest {
             includeFilters = @ComponentScan.Filter(
                     type = FilterType.ASSIGNABLE_TYPE,
                     classes = {UrlRepository.class, UserRepository.class, DomainRuleRepository.class}))
-    @Import({DefaultUrlService.class, DefaultModerationService.class, UrlUpdateDtoToUrlConverter.class})
+    @Import({DefaultUrlService.class, DefaultModerationService.class, UrlUpdateDtoToUrlConverter.class, DestinationCheckRepository.class})
     static class TestApplication {
     }
 

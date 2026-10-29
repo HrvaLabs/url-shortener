@@ -4,6 +4,7 @@ import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.dto.stats.CountEntry;
 import cc.hrva.urlshortener.dto.stats.DailyCounts;
 import cc.hrva.urlshortener.dto.stats.LinksStatsResponse.CreatedInRange;
+import cc.hrva.urlshortener.dto.stats.LinksStatsResponse.DeadDestinationCounts;
 import cc.hrva.urlshortener.dto.stats.LinksStatsResponse.LinkInventory;
 import cc.hrva.urlshortener.dto.stats.LinksStatsResponse.NewestLink;
 import cc.hrva.urlshortener.model.Url;
@@ -152,6 +153,7 @@ class LinksStatsTest {
     @Test
     void emptySiteIsAllZeros() {
         givenCounts(NO_LINKS_CREATED, NO_LINKS);
+        when(linksStatsRepository.countDeadDestinations()).thenReturn(new DeadDestinationCounts(0, 0));
 
         final var links = linksStats.collect(WINDOW);
 
@@ -170,6 +172,7 @@ class LinksStatsTest {
         assertThat(links.topTags()).isEmpty();
         assertThat(links.topDomains()).isEmpty();
         assertThat(links.newest()).isEmpty();
+        assertThat(links.deadDestinations()).isEqualTo(new DeadDestinationCounts(0, 0));
         verify(hourlyCountRepository).count(LINKS_BY_CHANNEL, WINDOW.start(), WINDOW.end());
         verify(linksStatsRepository).countCreated(WINDOW.start(), WINDOW.end());
         verify(linksStatsRepository).countInventory(STORED_NOW);
@@ -177,6 +180,14 @@ class LinksStatsTest {
         verify(linksStatsRepository).findTopTags(10);
         verify(linksStatsRepository).findTopDomains(10);
         verify(urlRepository).findTop10ByOrderByCreateDateDescIdDesc();
+    }
+
+    @Test
+    void deadDestinationsAreCountedWithTheAnonymousSplit() {
+        givenCounts(NO_LINKS_CREATED, NO_LINKS);
+        when(linksStatsRepository.countDeadDestinations()).thenReturn(new DeadDestinationCounts(12, 3));
+
+        assertThat(linksStats.collect(WINDOW).deadDestinations()).isEqualTo(new DeadDestinationCounts(12, 3));
     }
 
     private void givenCounts(final CreatedCounts created, final InventoryCounts inventory) {

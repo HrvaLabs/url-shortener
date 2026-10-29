@@ -1,6 +1,7 @@
 package cc.hrva.urlshortener.repository.stats;
 
 import cc.hrva.urlshortener.dto.stats.CountEntry;
+import cc.hrva.urlshortener.dto.stats.LinksStatsResponse.DeadDestinationCounts;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.repository.stats.LinksStatsRepository.CreatedCounts;
@@ -146,6 +147,33 @@ class LinksStatsRepositoryTest {
                 new CountEntry("d.example", 3),
                 new CountEntry("b.example", 2),
                 new CountEntry("a.example", 1));
+    }
+
+    @Test
+    void deadDestinationsCountActiveOnly() {
+        final var owner = savedOwner("dead@example.com");
+        dead(9601, true, owner, NOW.minusDays(2));
+        dead(9602, true, null, NOW.minusDays(1));
+        dead(9603, true, owner, NOW.minusDays(5));
+        dead(9604, false, owner, NOW.minusDays(9));
+        dead(9605, false, null, NOW.minusDays(9));
+        dead(9606, true, owner, null);
+        dead(9607, true, null, null);
+
+        assertThat(linksStatsRepository.countDeadDestinations()).isEqualTo(new DeadDestinationCounts(3, 1));
+    }
+
+    @Test
+    void noDeadDestinationsCountZero() {
+        destination(9701, "https://example.org/fine", true);
+
+        assertThat(linksStatsRepository.countDeadDestinations()).isEqualTo(new DeadDestinationCounts(0, 0));
+    }
+
+    private void dead(final long id, final boolean active, final User owner, final LocalDateTime deadSince) {
+        jdbcTemplate.update("insert into url (id, long_url, short_url, active, owner_id, destination_dead_since, destination_fail_streak) "
+                        + "values (?, ?, ?, ?, ?, ?, ?)",
+                id, "https://example.org/" + id, "links-" + id, active, owner != null ? owner.getId() : null, deadSince, deadSince != null ? 3 : 1);
     }
 
     private void created(final long id, final LocalDateTime createDate, final User owner) {

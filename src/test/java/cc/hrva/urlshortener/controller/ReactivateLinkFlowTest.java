@@ -16,6 +16,7 @@ import cc.hrva.urlshortener.mcp.bridge.ConnectRequestStore;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.repository.AuditLogRepository;
+import cc.hrva.urlshortener.repository.DestinationCheckRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.security.ClickRequestResolver;
@@ -279,6 +280,7 @@ class ReactivateLinkFlowTest {
             ClickRequestResolver.class,
             UrlController.class,
             DefaultUrlService.class,
+            DestinationCheckRepository.class,
             DefaultUrlValidator.class,
             CreateUrlToUrlConverter.class,
             UrlToPeekUrlConverter.class,

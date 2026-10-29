@@ -59,7 +59,8 @@ public class LinksStats {
                         linksStatsRepository.countBlockedByReason()),
                 linksStatsRepository.findTopTags(TOP_LIMIT),
                 linksStatsRepository.findTopDomains(TOP_LIMIT),
-                newest);
+                newest,
+                linksStatsRepository.countDeadDestinations());
     }
 
     private static NewestLink newestLinkOf(final Url url) {

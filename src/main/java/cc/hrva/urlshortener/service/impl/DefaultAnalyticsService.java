@@ -5,6 +5,7 @@ import cc.hrva.urlshortener.dto.AnalyticsOverviewDto.TopLink;
 import cc.hrva.urlshortener.dto.LinkClicks;
 import cc.hrva.urlshortener.dto.UrlAnalyticsDto;
 import cc.hrva.urlshortener.dto.UrlAnalyticsDto.LinkSummary;
+import cc.hrva.urlshortener.dto.DestinationHealth;
 import cc.hrva.urlshortener.dto.UrlResponse;
 import cc.hrva.urlshortener.exception.NoAuthorizationException;
 import cc.hrva.urlshortener.exception.UrlNotFoundException;
@@ -135,7 +136,8 @@ public class DefaultAnalyticsService implements AnalyticsService {
                 url.getCreateDate(),
                 url.getLastAccessed(),
                 safeLong(url.getVisits()),
-                url.getLongUrl());
+                url.getLongUrl(),
+                DestinationHealth.of(url));
     }
 
     private static TopLink topLinkOf(final Url url, final LinkClicks link) {
