@@ -116,6 +116,11 @@ public class OAuth2LoginSuccessHandler implements AuthenticationSuccessHandler {
             return;
         }
 
+        if (!Boolean.TRUE.equals(user.getEmailVerified())) {
+            userRepository.confirmEmailAndReplacePassword(user.getId(), SecureTokens.random());
+            log.info("OAuth2 login confirmed the account's email and replaced its unconfirmed password user id={}", user.getId());
+        }
+
         if (Boolean.TRUE.equals(user.getTwoStepEnabled())) {
             redirectToSecondStep(response, user);
             return;

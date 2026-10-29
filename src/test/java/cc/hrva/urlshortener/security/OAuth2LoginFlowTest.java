@@ -26,6 +26,7 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.DependsOn;
 import org.springframework.context.annotation.Import;
+import org.springframework.context.annotation.Primary;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockHttpSession;
@@ -33,8 +34,11 @@ import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.oauth2.client.endpoint.OAuth2AccessTokenResponseClient;
 import org.springframework.security.oauth2.client.endpoint.OAuth2AuthorizationCodeGrantRequest;
 import org.springframework.security.oauth2.client.userinfo.DefaultOAuth2UserService;
+import org.springframework.security.oauth2.client.userinfo.OAuth2UserRequest;
+import org.springframework.security.oauth2.client.userinfo.OAuth2UserService;
 import org.springframework.security.oauth2.core.OAuth2AccessToken;
 import org.springframework.security.oauth2.core.endpoint.OAuth2AccessTokenResponse;
+import org.springframework.security.oauth2.core.user.OAuth2User;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.test.web.servlet.MockMvc;
@@ -54,6 +58,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.header;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
+import static org.springframework.test.web.client.response.MockRestResponseCreators.withServerError;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.redirectedUrl;
@@ -144,6 +149,35 @@ class OAuth2LoginFlowTest {
     }
 
     @Test
+    void aGitHubErrorSendsTheSignInBackToTheSite() throws Exception {
+        providers.expect(requestTo("https://api.github.com/user"))
+                .andRespond(withSuccess(PROFILE, MediaType.APPLICATION_JSON));
+        providers.expect(requestTo("https://api.github.com/user/emails?per_page=100"))
+                .andRespond(withServerError());
+
+        returnFrom("github", authorizeAtGitHub())
+                .andExpect(status().isFound())
+                .andExpect(redirectedUrl("http://localhost:3000/auth/callback?error=provider_error"));
+
+        providers.verify();
+        verifyNoInteractions(tokenProvider);
+    }
+
+    @Test
+    void aCancelledConsentSendsTheSignInBackToTheSite() throws Exception {
+        final var authorization = authorize("github");
+
+        mockMvc.perform(get(CALLBACK + "github")
+                        .param("error", "access_denied")
+                        .param("state", queryParameter(authorization, "state"))
+                        .session((MockHttpSession) authorization.getRequest().getSession(false)))
+                .andExpect(status().isFound())
+                .andExpect(redirectedUrl("http://localhost:3000/auth/callback?error=provider_error"));
+
+        verifyNoInteractions(tokenProvider, userRepository);
+    }
+
+    @Test
     void aGoogleSignInWithAVerifiedEmailStillSignsIn() throws Exception {
         final var member = User.builder().id(8L).email("someone@gmail.com").active(true).authProvider("google")
                 .authorities(List.of(Authorities.builder().id(1L).name("ROLE_USER").build()))
@@ -203,7 +237,7 @@ class OAuth2LoginFlowTest {
         providers.expect(requestTo("https://api.github.com/user"))
                 .andExpect(header(HttpHeaders.AUTHORIZATION, "Bearer " + ACCESS_TOKEN))
                 .andRespond(withSuccess(PROFILE, MediaType.APPLICATION_JSON));
-        providers.expect(requestTo("https://api.github.com/user/emails"))
+        providers.expect(requestTo("https://api.github.com/user/emails?per_page=100"))
                 .andExpect(header(HttpHeaders.AUTHORIZATION, "Bearer " + ACCESS_TOKEN))
                 .andRespond(withSuccess(emails, MediaType.APPLICATION_JSON));
     }
@@ -255,6 +289,14 @@ class OAuth2LoginFlowTest {
             userInfo.setRestOperations(providerApi);
 
             return new OAuth2LoginUserService(userInfo, RestClient.create(providerApi));
+        }
+
+        @Bean
+        @Primary
+        OAuth2UserService<OAuth2UserRequest, OAuth2User> anotherUserService() {
+            return userRequest -> {
+                throw new IllegalStateException("oauth2Login must use OAuth2LoginUserService, not whichever user service bean wins");
+            };
         }
 
         @Bean

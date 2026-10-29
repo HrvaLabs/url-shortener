@@ -405,6 +405,76 @@ class OAuth2LoginSuccessHandlerTest {
         verifyNoInteractions(tokenProvider, eventPublisher, authoritiesService, pendingLoginStore);
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"google", "github"})
+    void anAccountWhoseEmailWasNeverConfirmedLosesItsPasswordBeforeItCountsAsConfirmed(final String provider) throws Exception {
+        final var user = User.builder().id(12L).email("claimed@example.com").password("$2a$10$preRegisteredPasswordHash")
+                .emailVerified(false).active(true).authProvider("local")
+                .authorities(Collections.singletonList(Authorities.builder().id(1L).name("ROLE_USER").build()))
+                .build();
+        when(oAuth2User.getAttribute("email")).thenReturn("claimed@example.com");
+        when(userRepository.findByEmail("claimed@example.com")).thenReturn(Optional.of(user));
+        when(tokenProvider.createToken(any())).thenReturn("jwt-token");
+
+        handler.onAuthenticationSuccess(request, response, signIn(provider));
+
+        final var order = inOrder(userRepository, tokenProvider);
+        order.verify(userRepository).confirmEmailAndReplacePassword(eq(12L), argThat(password -> password != null
+                && password.length() >= 32 && !password.startsWith("$2") && !password.equals(user.getPassword())));
+        order.verify(userRepository).recordLastLogin(eq(12L), any());
+        order.verify(tokenProvider).createToken(any());
+        verify(userRepository, never()).save(any());
+        verify(response).sendRedirect(contains("http://fe/auth/callback?token=jwt-token"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"google", "github"})
+    void aConfirmedAccountKeepsItsPassword(final String provider) throws Exception {
+        final var user = User.builder().id(13L).email("member@example.com").password("$2a$10$memberPasswordHash")
+                .emailVerified(true).active(true).authProvider("local")
+                .authorities(Collections.singletonList(Authorities.builder().id(1L).name("ROLE_USER").build()))
+                .build();
+        when(oAuth2User.getAttribute("email")).thenReturn("member@example.com");
+        when(userRepository.findByEmail("member@example.com")).thenReturn(Optional.of(user));
+        when(tokenProvider.createToken(any())).thenReturn("jwt-token");
+
+        handler.onAuthenticationSuccess(request, response, signIn(provider));
+
+        verify(userRepository, never()).confirmEmailAndReplacePassword(any(), any());
+        verify(response).sendRedirect(contains("http://fe/auth/callback?token=jwt-token"));
+    }
+
+    @Test
+    void anInactiveUnconfirmedAccountIsRefusedWithoutBeingTouched() throws Exception {
+        when(oAuth2User.getAttribute("email")).thenReturn("gone@example.com");
+        when(userRepository.findByEmail("gone@example.com")).thenReturn(Optional.of(
+                User.builder().id(14L).email("gone@example.com").password("$2a$10$hash").emailVerified(false).active(false).build()));
+
+        handler.onAuthenticationSuccess(request, response, signIn("github"));
+
+        verify(response).sendRedirect("http://fe/auth/callback?error=account_inactive");
+        verify(userRepository, never()).confirmEmailAndReplacePassword(any(), any());
+    }
+
+    @Test
+    void aGitHubSignInToATwoStepAccountGetsAPendingTokenInsteadOfAJwt() throws Exception {
+        final var user = twoStepUser(15L, "octo@example.com", "github");
+        user.setEmailVerified(true);
+        when(appProperties.getFrontendUrl()).thenReturn("http://localhost:3000");
+        when(oAuth2User.getAttribute("email")).thenReturn("octo@example.com");
+        when(userRepository.findByEmail("octo@example.com")).thenReturn(Optional.of(user));
+        when(pendingLoginStore.create(15L, false)).thenReturn(PENDING_TOKEN);
+        when(twoStepMethods.of(user)).thenReturn(List.of(TwoStepMethod.WEBAUTHN, TwoStepMethod.RECOVERY_CODE));
+
+        handler.onAuthenticationSuccess(request, response, signIn("github"));
+
+        assertThat(redirectSent()).isEqualTo("http://localhost:3000/auth/callback?pendingToken=" + PENDING_TOKEN
+                + "&methods=WEBAUTHN,RECOVERY_CODE");
+        verifyNoInteractions(tokenProvider);
+        verify(userRepository, never()).save(any());
+        verify(userRepository, never()).recordLastLogin(any(), any());
+    }
+
     private OAuth2AuthenticationToken signIn(final String provider) {
         return new OAuth2AuthenticationToken(oAuth2User, List.of(), provider);
     }

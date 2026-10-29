@@ -3,7 +3,9 @@ package cc.hrva.urlshortener.configuration;
 import cc.hrva.urlshortener.controller.ReportController;
 import cc.hrva.urlshortener.controller.UnsubscribeController;
 import cc.hrva.urlshortener.security.JwtFilter;
+import cc.hrva.urlshortener.security.OAuth2LoginFailureHandler;
 import cc.hrva.urlshortener.security.OAuth2LoginSuccessHandler;
+import cc.hrva.urlshortener.security.OAuth2LoginUserService;
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import jakarta.servlet.http.HttpServletResponse;
 import java.util.Arrays;
@@ -45,6 +47,7 @@ public class SecurityConfiguration {
     private final AppProperties appProperties;
     private final UserDetailsService userDetailsService;
     private final OAuth2LoginSuccessHandler oAuth2LoginSuccessHandler;
+    private final OAuth2LoginUserService oAuth2LoginUserService;
 
     @Bean
     public AuthenticationProvider authenticationProvider(final PasswordEncoder passwordEncoder) {
@@ -108,7 +111,9 @@ public class SecurityConfiguration {
                                 .sessionCreationPolicy(SessionCreationPolicy.STATELESS)
                 ).authenticationProvider(authenticationProvider(passwordEncoder()))
                 .oauth2Login(oauth2 -> oauth2
+                        .userInfoEndpoint(userInfo -> userInfo.userService(oAuth2LoginUserService))
                         .successHandler(oAuth2LoginSuccessHandler)
+                        .failureHandler(new OAuth2LoginFailureHandler(appProperties.getFrontendUrl()))
                 )
                 .headers(headers -> headers.frameOptions(HeadersConfigurer.FrameOptionsConfig::disable))
                 .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class);

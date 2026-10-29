@@ -55,6 +55,8 @@ class OAuth2SignInWritesTest {
     private static final long MEMBER = 790L;
     private static final String MEMBER_EMAIL = "google-member@example.com";
     private static final String NEWCOMER_EMAIL = "google-newcomer@example.com";
+    private static final long PRE_REGISTERED = 791L;
+    private static final String PRE_REGISTERED_EMAIL = "pre-registered@example.com";
     private static final LocalDateTime LOADED_LOGIN = LocalDateTime.of(2026, 10, 1, 9, 0);
 
     private final AtomicBoolean concurrentChangeDone = new AtomicBoolean();
@@ -84,16 +86,16 @@ class OAuth2SignInWritesTest {
 
     @AfterEach
     void removeTheAccounts() {
-        jdbcTemplate.update("delete from user_account_authorities where user_id in (select id from user_account where email in (?, ?))",
-                MEMBER_EMAIL, NEWCOMER_EMAIL);
-        jdbcTemplate.update("delete from user_account where email in (?, ?)", MEMBER_EMAIL, NEWCOMER_EMAIL);
+        jdbcTemplate.update("delete from user_account_authorities where user_id in (select id from user_account where email in (?, ?, ?))",
+                MEMBER_EMAIL, NEWCOMER_EMAIL, PRE_REGISTERED_EMAIL);
+        jdbcTemplate.update("delete from user_account where email in (?, ?, ?)", MEMBER_EMAIL, NEWCOMER_EMAIL, PRE_REGISTERED_EMAIL);
     }
 
     @Test
     void aSignInRecordsOnlyItsLastLoginAndKeepsAPasswordAndTwoStepChangeMadeAfterTheAccountWasLoaded() throws Exception {
         jdbcTemplate.update("""
-                insert into user_account (id, email, password, active, two_step_enabled, auth_provider, last_login)
-                values (?, ?, 'secret-hash', true, false, 'google', ?)""", MEMBER, MEMBER_EMAIL, LOADED_LOGIN);
+                insert into user_account (id, email, password, active, two_step_enabled, auth_provider, last_login, email_verified)
+                values (?, ?, 'secret-hash', true, false, 'google', ?, true)""", MEMBER, MEMBER_EMAIL, LOADED_LOGIN);
         jdbcTemplate.update("insert into user_account_authorities (user_id, authorities_id) values (?, 1)", MEMBER);
         doAnswer(invocation -> {
             final var loaded = mockingDetails(userRepository).getMockCreationSettings().getDefaultAnswer().answer(invocation);
@@ -131,10 +133,29 @@ class OAuth2SignInWritesTest {
                 Long.class, row.get("ID"))).isOne();
     }
 
+    @Test
+    void aGitHubSignInToAnUnconfirmedPasswordAccountReplacesThePasswordAndConfirmsTheEmail() throws Exception {
+        jdbcTemplate.update("""
+                insert into user_account (id, email, password, active, two_step_enabled, auth_provider, email_verified)
+                values (?, ?, 'pre-registered-hash', true, false, 'local', false)""", PRE_REGISTERED, PRE_REGISTERED_EMAIL);
+        jdbcTemplate.update("insert into user_account_authorities (user_id, authorities_id) values (?, 1)", PRE_REGISTERED);
+
+        final var response = signIn(PRE_REGISTERED_EMAIL, "github");
+
+        assertThat(response.getRedirectedUrl()).startsWith("http://fe/auth/callback?token=jwt-token");
+        final var row = jdbcTemplate.queryForMap("select password, email_verified, auth_provider from user_account where id = ?", PRE_REGISTERED);
+        assertThat(row).containsEntry("EMAIL_VERIFIED", true).containsEntry("AUTH_PROVIDER", "local");
+        assertThat((String) row.get("PASSWORD")).isNotEqualTo("pre-registered-hash").isNotBlank();
+    }
+
     private MockHttpServletResponse signIn(final String email) throws Exception {
+        return signIn(email, "google");
+    }
+
+    private MockHttpServletResponse signIn(final String email, final String provider) throws Exception {
         final var principal = new DefaultOAuth2User(List.of(), Map.of("email", email, "email_verified", true, "sub", email), "sub");
         final var response = new MockHttpServletResponse();
-        handler.onAuthenticationSuccess(new MockHttpServletRequest(), response, new OAuth2AuthenticationToken(principal, List.of(), "google"));
+        handler.onAuthenticationSuccess(new MockHttpServletRequest(), response, new OAuth2AuthenticationToken(principal, List.of(), provider));
         return response;
     }
 

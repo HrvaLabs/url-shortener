@@ -13,6 +13,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.ClientHttpRequestFactory;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
+import org.springframework.security.oauth2.client.http.OAuth2ErrorResponseErrorHandler;
 import org.springframework.security.oauth2.client.userinfo.DefaultOAuth2UserService;
 import org.springframework.security.oauth2.client.userinfo.OAuth2UserRequest;
 import org.springframework.security.oauth2.client.userinfo.OAuth2UserService;
@@ -25,6 +26,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
+import org.springframework.web.client.RestTemplate;
 
 @Slf4j
 @Component
@@ -33,7 +35,7 @@ public class OAuth2LoginUserService implements OAuth2UserService<OAuth2UserReque
     public static final String EMAIL_VERIFIED = "email_verified";
 
     private static final String EMAIL = "email";
-    private static final String EMAILS_URI = "https://api.github.com/user/emails";
+    private static final String EMAILS_URI = "https://api.github.com/user/emails?per_page=100";
     private static final MediaType GITHUB_JSON = MediaType.parseMediaType("application/vnd.github+json");
     private static final String API_VERSION_HEADER = "X-GitHub-Api-Version";
     private static final String API_VERSION = "2022-11-28";
@@ -49,7 +51,11 @@ public class OAuth2LoginUserService implements OAuth2UserService<OAuth2UserReque
 
     @Autowired
     public OAuth2LoginUserService() {
-        this(new DefaultOAuth2UserService(), RestClient.builder().requestFactory(requestFactory()).build());
+        this(requestFactory());
+    }
+
+    private OAuth2LoginUserService(final ClientHttpRequestFactory requestFactory) {
+        this(userInfo(requestFactory), RestClient.builder().requestFactory(requestFactory).build());
     }
 
     OAuth2LoginUserService(final OAuth2UserService<OAuth2UserRequest, OAuth2User> userInfo, final RestClient gitHubApi) {
@@ -100,6 +106,15 @@ public class OAuth2LoginUserService implements OAuth2UserService<OAuth2UserReque
             throw new OAuth2AuthenticationException(
                     new OAuth2Error(INVALID_USER_INFO_RESPONSE, "The GitHub account's email addresses could not be read", null), exception);
         }
+    }
+
+    private static DefaultOAuth2UserService userInfo(final ClientHttpRequestFactory requestFactory) {
+        final var userInfoApi = new RestTemplate(requestFactory);
+        userInfoApi.setErrorHandler(new OAuth2ErrorResponseErrorHandler());
+        final var userInfo = new DefaultOAuth2UserService();
+        userInfo.setRestOperations(userInfoApi);
+
+        return userInfo;
     }
 
     private static ClientHttpRequestFactory requestFactory() {

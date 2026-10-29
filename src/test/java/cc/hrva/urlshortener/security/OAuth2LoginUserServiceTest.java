@@ -1,5 +1,7 @@
 package cc.hrva.urlshortener.security;
 
+import java.net.http.HttpClient;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.HashMap;
 import java.util.List;
@@ -9,8 +11,11 @@ import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
+import org.springframework.http.client.ClientHttpRequestFactory;
+import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.security.config.oauth2.client.CommonOAuth2Provider;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.oauth2.client.http.OAuth2ErrorResponseErrorHandler;
 import org.springframework.security.oauth2.client.registration.ClientRegistration;
 import org.springframework.security.oauth2.client.userinfo.OAuth2UserRequest;
 import org.springframework.security.oauth2.client.userinfo.OAuth2UserService;
@@ -18,8 +23,10 @@ import org.springframework.security.oauth2.core.OAuth2AccessToken;
 import org.springframework.security.oauth2.core.OAuth2AuthenticationException;
 import org.springframework.security.oauth2.core.user.DefaultOAuth2User;
 import org.springframework.security.oauth2.core.user.OAuth2User;
+import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
+import org.springframework.web.client.RestTemplate;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -31,7 +38,7 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 
 class OAuth2LoginUserServiceTest {
 
-    private static final String EMAILS = "https://api.github.com/user/emails";
+    private static final String EMAILS = "https://api.github.com/user/emails?per_page=100";
     private static final String ACCESS_TOKEN = "gho_test-access-token";
     private static final ClientRegistration GITHUB = CommonOAuth2Provider.GITHUB.getBuilder("github")
             .clientId("test-github-client").clientSecret("test-github-secret").scope("user:email").build();
@@ -108,6 +115,25 @@ class OAuth2LoginUserServiceTest {
                 Map.of("sub", "1057", "email", "someone@gmail.com", "email_verified", false), "sub");
 
         assertThat(service(google).loadUser(request(GOOGLE))).isSameAs(google);
+    }
+
+    @Test
+    void bothProviderCallsGiveUpAfterFiveSecondsToConnectAndTenToAnswer() {
+        final var service = new OAuth2LoginUserService();
+
+        final var userInfo = ReflectionTestUtils.getField(service, "userInfo");
+        final var userInfoApi = (RestTemplate) ReflectionTestUtils.getField(userInfo, "restOperations");
+        assertThat(userInfoApi).isNotNull();
+        assertThat(userInfoApi.getErrorHandler()).isInstanceOf(OAuth2ErrorResponseErrorHandler.class);
+        assertTimeouts(userInfoApi.getRequestFactory());
+        final var emailsApi = ReflectionTestUtils.getField(service, "gitHubApi");
+        assertTimeouts((ClientHttpRequestFactory) ReflectionTestUtils.getField(emailsApi, "clientRequestFactory"));
+    }
+
+    private static void assertTimeouts(final ClientHttpRequestFactory requestFactory) {
+        assertThat(requestFactory).isInstanceOf(JdkClientHttpRequestFactory.class);
+        assertThat(ReflectionTestUtils.getField(requestFactory, "readTimeout")).isEqualTo(Duration.ofSeconds(10));
+        assertThat(((HttpClient) ReflectionTestUtils.getField(requestFactory, "httpClient")).connectTimeout()).contains(Duration.ofSeconds(5));
     }
 
     private void expectEmails(final String body) {

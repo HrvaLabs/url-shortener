@@ -12,6 +12,8 @@ Sign in with GitHub, and Google and GitHub sign-ins need a verified email addres
 - Sign in with GitHub. hrva.cc uses your GitHub account's verified primary email.
 - Signing in with Google now needs a verified email address.
 - When new sign-ups are paused, Google and GitHub can't create accounts either.
+- Signing in with Google or GitHub to an account whose email address was never confirmed confirms it and turns off the password it was created with.
+- If signing in with Google or GitHub fails, you come back to hrva.cc with a message instead of a bare error page.
 
 ---
 
