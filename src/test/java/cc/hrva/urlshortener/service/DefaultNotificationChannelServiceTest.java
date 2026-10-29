@@ -23,6 +23,7 @@ import cc.hrva.urlshortener.repository.NotificationChannelRepository;
 import cc.hrva.urlshortener.repository.NotificationConsentRepository;
 import cc.hrva.urlshortener.service.impl.DefaultNotificationChannelService;
 import cc.hrva.urlshortener.service.notification.ChannelTargets;
+import cc.hrva.urlshortener.service.notification.MutableClock;
 import cc.hrva.urlshortener.service.notification.NotificationMessages;
 import cc.hrva.urlshortener.service.notification.NotificationPayloads;
 import cc.hrva.urlshortener.service.notification.channel.ChannelSenders;
@@ -38,7 +39,6 @@ import cc.hrva.urlshortener.service.ratelimit.RateLimiterUnavailableException;
 import cc.hrva.urlshortener.service.twostep.AccountLock;
 import java.net.InetAddress;
 import java.nio.charset.StandardCharsets;
-import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -116,7 +116,7 @@ class DefaultNotificationChannelServiceTest {
     private final SecretBox secretBox = new SecretBox(NotificationTestKeys.keys());
     private final Resolver publicDns = host -> new InetAddress[] {InetAddress.ofLiteral("162.159.128.233")};
     private final JsonMapper jsonMapper = JsonMapper.builder().build();
-    private final Clock clock = Clock.fixed(NOW, ZoneOffset.UTC);
+    private final MutableClock clock = new MutableClock(NOW);
     private final List<String> posted = new ArrayList<>();
     private PostResult answer = new PostResult(204, null);
 
@@ -168,6 +168,31 @@ class DefaultNotificationChannelServiceTest {
         assertThat(response.maskedTarget()).isEqualTo("https://discord.com/" + BULLETS + "cret");
         assertThat(response.signingSecret()).isNull();
         assertThat(response.lastDelivery()).isNull();
+    }
+
+    @Test
+    void createStampsBothTimesFromTheClock() {
+        clock.set(Instant.parse("2026-10-27T02:14:09.123456789Z"));
+
+        final var response = service.create(discord().build());
+
+        final var saved = savedChannel();
+        assertThat(saved.getCreatedAt()).isEqualTo(LocalDateTime.of(2026, 10, 27, 2, 14, 9, 123_456_000));
+        assertThat(saved.getUpdatedAt()).isEqualTo(saved.getCreatedAt());
+        assertThat(response.createdAt()).isEqualTo(saved.getCreatedAt());
+        assertThat(response.updatedAt()).isEqualTo(saved.getCreatedAt());
+    }
+
+    @Test
+    void anEditKeepsTheCreatedAtAndMovesTheUpdatedAt() {
+        final var channel = owned(channel(ChannelType.DISCORD));
+        final var createdAt = channel.getCreatedAt();
+        clock.advance(Duration.ofMinutes(5));
+
+        service.update(4L, discord().target(null).build());
+
+        assertThat(channel.getCreatedAt()).isEqualTo(createdAt);
+        assertThat(channel.getUpdatedAt()).isEqualTo(LocalDateTime.ofInstant(NOW.plus(Duration.ofMinutes(5)), ZoneOffset.UTC));
     }
 
     @Test

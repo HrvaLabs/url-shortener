@@ -122,6 +122,7 @@ public class DefaultNotificationChannelService implements NotificationChannelSer
         final var type = request.getType();
         final var target = ChannelTargets.normalized(type, type == ChannelType.TELEGRAM ? request.getBotToken().strip() : request.getTarget().strip());
         final var signingSecret = type == ChannelType.WEBHOOK ? newSecret() : null;
+        final var now = LocalDateTime.now(clock).truncatedTo(ChronoUnit.MICROS);
         final var channel = notificationChannelRepository.save(NotificationChannel.builder()
                 .owner(owner)
                 .name(request.getName().strip())
@@ -134,6 +135,8 @@ public class DefaultNotificationChannelService implements NotificationChannelSer
                 .signingSecretSealed(signingSecret == null ? null : secretBox.seal(signingSecret, context))
                 .chatId(type == ChannelType.TELEGRAM ? request.getChatId().strip() : null)
                 .maskedTarget(ChannelTargets.mask(type, target))
+                .createdAt(now)
+                .updatedAt(now)
                 .build());
         notificationConsentService.grantChannelEvents(owner, channel, events);
         log.info("Notification channel added user id={} channel id={} type={}", owner.getId(), channel.getId(), type);

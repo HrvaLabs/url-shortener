@@ -534,7 +534,8 @@ class DefaultDeadLinkNotificationServiceTest {
 
     private NotificationChannel channel(final User owner, final NotificationType event) {
         final var channel = channelRepository.saveAndFlush(NotificationChannel.builder().owner(owner).name("Team alerts").type(ChannelType.DISCORD)
-                .enabled(true).targetSealed("v1:sealed").maskedTarget("https://discord.com/••••abcd").build());
+                .enabled(true).targetSealed("v1:sealed").maskedTarget("https://discord.com/••••abcd")
+                .createdAt(DIED).updatedAt(DIED).build());
         consentRepository.saveAndFlush(NotificationConsent.builder().owner(owner).channelId(channel.getId()).channelLabel("Discord: Team alerts")
                 .type(event).grantedAt(DIED.minusDays(1)).source(ConsentSource.SETTINGS).build());
         return channel;

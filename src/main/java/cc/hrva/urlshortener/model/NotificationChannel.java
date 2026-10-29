@@ -10,11 +10,9 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
-import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.time.temporal.ChronoUnit;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
@@ -62,12 +60,5 @@ public class NotificationChannel {
     private String lastDeliveryError;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
-
-    @PrePersist
-    public void onCreate() {
-        final var now = LocalDateTime.now().truncatedTo(ChronoUnit.MICROS);
-        this.createdAt = now;
-        this.updatedAt = now;
-    }
 
 }

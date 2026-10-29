@@ -143,6 +143,8 @@ class NotificationAccountDataTest {
                 .accessTokenSealed(SEALED_ACCESS_TOKEN)
                 .signingSecretSealed(SEALED_SIGNING_SECRET)
                 .maskedTarget(MASK)
+                .createdAt(CREATED)
+                .updatedAt(CREATED)
                 .build());
         consent(ana, channel.getId(), "ntfy: Phone", NotificationType.LINK_DEAD, GRANTED, null, null);
         notificationDeliveryRepository.saveAndFlush(NotificationDelivery.builder()
@@ -197,6 +199,8 @@ class NotificationAccountDataTest {
                 .enabled(true)
                 .targetSealed(SEALED_TARGET)
                 .maskedTarget(mask)
+                .createdAt(CREATED)
+                .updatedAt(CREATED)
                 .build());
         entityManager.createQuery("update NotificationChannel ch set ch.createdAt = :at where ch.id = :id")
                 .setParameter("at", CREATED).setParameter("id", channel.getId()).executeUpdate();

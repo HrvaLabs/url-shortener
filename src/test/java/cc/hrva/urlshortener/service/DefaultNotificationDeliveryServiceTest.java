@@ -552,6 +552,8 @@ class DefaultNotificationDeliveryServiceTest {
                 .targetSealed(SECRET_BOX.seal(target, context))
                 .signingSecretSealed(type == ChannelType.WEBHOOK ? SECRET_BOX.seal("signing-secret", context) : null)
                 .maskedTarget("m")
+                .createdAt(START_UTC)
+                .updatedAt(START_UTC)
                 .build());
     }
 

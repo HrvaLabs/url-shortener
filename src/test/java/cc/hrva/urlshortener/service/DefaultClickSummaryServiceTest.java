@@ -625,7 +625,8 @@ class DefaultClickSummaryServiceTest {
 
     private NotificationChannel channel(final User owner, final NotificationType event) {
         final var channel = channelRepository.saveAndFlush(NotificationChannel.builder().owner(owner).name("Team alerts").type(ChannelType.DISCORD)
-                .enabled(true).targetSealed("v1:sealed").maskedTarget("https://discord.com/••••abcd").build());
+                .enabled(true).targetSealed("v1:sealed").maskedTarget("https://discord.com/••••abcd")
+                .createdAt(GRANTED).updatedAt(GRANTED).build());
         consentRepository.saveAndFlush(NotificationConsent.builder().owner(owner).channelId(channel.getId()).channelLabel("Discord: Team alerts")
                 .type(event).grantedAt(GRANTED).source(ConsentSource.SETTINGS).build());
         return channel;

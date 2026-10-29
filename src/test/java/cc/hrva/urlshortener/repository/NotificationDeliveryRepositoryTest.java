@@ -57,7 +57,7 @@ class NotificationDeliveryRepositoryTest {
     void setUp() {
         final var ana = userRepository.saveAndFlush(User.builder().email("ana@example.com").password("correct horse battery").apiKeySlots(4L).build());
         channel = channelRepository.saveAndFlush(NotificationChannel.builder().owner(ana).name("Team alerts").type(ChannelType.DISCORD).enabled(true)
-                .targetSealed("v1:x").maskedTarget("m").build());
+                .targetSealed("v1:x").maskedTarget("m").createdAt(NOW).updatedAt(NOW).build());
     }
 
     @Test

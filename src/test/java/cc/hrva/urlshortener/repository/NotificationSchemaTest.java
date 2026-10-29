@@ -525,7 +525,9 @@ class NotificationSchemaTest {
                 .type(ChannelType.DISCORD)
                 .enabled(true)
                 .targetSealed("v1:sealed")
-                .maskedTarget("https://discord.com/••••/abc");
+                .maskedTarget("https://discord.com/••••/abc")
+                .createdAt(NOW)
+                .updatedAt(NOW);
     }
 
     private static NotificationConsent.NotificationConsentBuilder emailConsent(final User owner, final NotificationType type) {
