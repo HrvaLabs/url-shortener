@@ -68,7 +68,10 @@ class NotificationMessagesTest {
     void weeklySummaryHasEachSectionThatHasSomething() {
         final var message = messages.weekly(weeklySummary());
 
-        assertThat(message).isEqualTo(new NotificationMessage("hrva.cc: your week, " + WeeklyDigestText.weekLabel(LocalDate.of(2026, 10, 19), LocalDate.of(2026, 10, 25)),
+        assertThat(message.title()).isEqualTo("hrva.cc: your week, " + WeeklyDigestText.weekLabel(LocalDate.of(2026, 10, 19), LocalDate.of(2026, 10, 25)));
+        assertThat(message.link()).isEqualTo("http://localhost:3000/dashboard");
+        assertThat(message.moreCount()).isZero();
+        assertThat(message.lines()).isEqualTo(
                 List.of(
                         "Clicks: 210 (up 17% on the week before)",
                         "Visitors: 150 (each link's daily visitors, added up)",
@@ -78,8 +81,56 @@ class NotificationMessagesTest {
                         "hrva.cc/dead " + ARROW + " example.net, since 22 October 2026, the page was removed (410)",
                         "Ending soon:",
                         "hrva.cc/soon " + ARROW + " example.org, expires on 30 October 2026",
-                        "hrva.cc/limited " + ARROW + " example.org, 1 visit left"),
-                "http://localhost:3000/dashboard", 0));
+                        "hrva.cc/limited " + ARROW + " example.org, 1 visit left"));
+    }
+
+    @Test
+    void weeklySectionsSayHowManyMoreThereAre() {
+        final var summary = new WeeklySummary(7L, "ana@example.com", LocalDate.of(2026, 10, 19), LocalDate.of(2026, 10, 25),
+                new WeeklyDigest.Change(0, 0), 0, List.of(),
+                List.of(new DeadLink(3L, 7L, "dead", "example.net", LocalDateTime.of(2026, 10, 22, 1, 0), "410")),
+                List.of(new WeeklySummary.EndingSoon("soon", "example.org", "EXPIRES", LocalDate.of(2026, 10, 30), null)), 4, 1);
+
+        assertThat(messages.weekly(summary).lines()).containsExactly(
+                "Links that stopped working:",
+                "hrva.cc/dead " + ARROW + " example.net, since 22 October 2026, the page was removed (410)",
+                "and 4 more",
+                "Ending soon:",
+                "hrva.cc/soon " + ARROW + " example.org, expires on 30 October 2026",
+                "and 1 more");
+        assertThat(messages.weeklySections(summary).deadLinksMore()).isEqualTo("and 4 more");
+        assertThat(messages.weeklySections(summary).endingSoonMore()).isEqualTo("and 1 more");
+        assertThat(messages.weeklySections(weeklySummary()).deadLinksMore()).isNull();
+        assertThat(messages.render(messages.weekly(summary))).endsWith("and 1 more\nhttp://localhost:3000/dashboard");
+    }
+
+    @Test
+    void aLongWeeklyMessageNeverEndsOnAHeadingAndCountsOnlyLinks() {
+        for (var aliasLength = 1; aliasLength <= 400; aliasLength++) {
+            final var alias = "a".repeat(aliasLength);
+            final var top = IntStream.rangeClosed(1, 5).mapToObj(index -> new WeeklyDigest.TopLink(alias + "t" + index, "example.com", 10L - index)).toList();
+            final var dead = IntStream.rangeClosed(1, 20)
+                    .mapToObj(index -> new DeadLink(index, 7L, alias + "d" + index, "example.net", LocalDateTime.of(2026, 10, 22, 1, 0), "404"))
+                    .toList();
+            final var ending = IntStream.rangeClosed(1, 20)
+                    .mapToObj(index -> new WeeklySummary.EndingSoon(alias + "e" + index, "example.org", "EXPIRES", LocalDate.of(2026, 10, 30), null))
+                    .toList();
+            final var summary = new WeeklySummary(7L, "ana@example.com", LocalDate.of(2026, 10, 19), LocalDate.of(2026, 10, 25),
+                    new WeeklyDigest.Change(50, 40), 30, top, dead, ending, 6, 7);
+
+            final var lines = messages.render(messages.weekly(summary)).lines().toList();
+
+            final var lastContent = lines.get(lines.size() - 2);
+            assertThat(lastContent).as("alias length %d", aliasLength).doesNotEndWith(":");
+            final var shownLinks = lines.stream().filter(line -> line.startsWith("hrva.cc/") || line.matches("^\\d+\\. hrva\\.cc/.*")).count()
+                    + (lines.contains("and 6 more") ? 6 : 0) + (lines.contains("and 7 more") ? 7 : 0);
+            final var hidden = 5 + 20 + 6 + 20 + 7 - shownLinks;
+            if (hidden > 0) {
+                assertThat(lines.getLast()).as("alias length %d", aliasLength).isEqualTo("and " + hidden + " more: http://localhost:3000/dashboard");
+            } else {
+                assertThat(lines.getLast()).isEqualTo("http://localhost:3000/dashboard");
+            }
+        }
     }
 
     @Test

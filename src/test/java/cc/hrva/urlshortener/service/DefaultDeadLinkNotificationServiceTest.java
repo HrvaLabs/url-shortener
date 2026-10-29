@@ -29,6 +29,7 @@ import java.time.ZoneOffset;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.IntStream;
 import org.hibernate.SessionFactory;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -208,6 +209,64 @@ class DefaultDeadLinkNotificationServiceTest {
     }
 
     @Test
+    void aLinkWhoseDestinationWasEditedBeforeTheNoticeIsSkipped() {
+        emailConsent(ana);
+        channel(ana, NotificationType.LINK_DEAD);
+        final var kept = dead(link(ana, "kept"));
+        final var edited = dead(link(ana, "edited"));
+        final var editedAlone = dead(link(bob, "bobs-edited"));
+        emailConsent(bob);
+        channel(bob, NotificationType.LINK_DEAD);
+        jdbcTemplate.update("update url set destination_dead_since = null, destination_last_status = null, destination_fail_streak = 0 "
+                + "where id in (?, ?)", edited.urlId(), editedAlone.urlId());
+
+        deadLinkNotificationService.notify(new DestinationCheckOutcome(List.of(kept, edited, editedAlone), List.of(), NIGHT));
+
+        final var sent = ArgumentCaptor.forClass(DeadLinksEmail.class);
+        verify(sendingEmailService).sendDeadLinksEmail(sent.capture());
+        assertThat(sent.getValue().userId()).isEqualTo(ana.getId());
+        assertThat(sent.getValue().links()).containsExactly(kept);
+        final var content = contentCaptor();
+        verify(deliveryService).enqueue(eq(NotificationType.LINK_DEAD), eq("link.dead:2026-10-27"), any(), content.capture());
+        assertThat(content.getValue()).containsOnlyKeys(ana.getId());
+        assertThat(content.getValue().get(ana.getId())).isEqualTo(new ChannelContent(payloads.linkDead(List.of(kept)), messages.linkDead(List.of(kept))));
+    }
+
+    @Test
+    void aRecoveredLinkNeedsOnlyToStillExist() {
+        channel(ana, NotificationType.LINK_BACK);
+        final var back = back(link(ana, "anas-menu"));
+
+        deadLinkNotificationService.notify(new DestinationCheckOutcome(List.of(), List.of(back), NIGHT));
+
+        verify(deliveryService).enqueue(eq(NotificationType.LINK_BACK), eq("link.back:2026-10-27"), any(), anyMap());
+    }
+
+    @Test
+    void manyLinksAreReadInChunksOfAThousand() {
+        emailConsent(ana);
+        channel(ana, NotificationType.LINK_DEAD);
+        final var links = urlRepository.saveAllAndFlush(IntStream.rangeClosed(1, 1001)
+                .mapToObj(index -> Url.builder().shortUrl("many" + index).longUrl("https://many" + index + ".example.org/page").owner(ana).active(true).build())
+                .toList());
+        jdbcTemplate.update("update url set destination_dead_since = ?, destination_last_status = '404' where owner_id = ?", DIED, ana.getId());
+        final var deadLinks = links.stream()
+                .map(url -> new DeadLink(url.getId(), ana.getId(), url.getShortUrl(), url.getShortUrl() + ".example.org", DIED, "404"))
+                .toList();
+        final var statistics = entityManagerFactory.unwrap(SessionFactory.class).getStatistics();
+        statistics.clear();
+
+        deadLinkNotificationService.notify(new DestinationCheckOutcome(deadLinks, List.of(), NIGHT));
+
+        final var sent = ArgumentCaptor.forClass(DeadLinksEmail.class);
+        verify(sendingEmailService).sendDeadLinksEmail(sent.capture());
+        assertThat(sent.getValue().links()).hasSize(1001);
+        assertThat(java.util.Arrays.stream(statistics.getQueries()).filter(query -> query.contains("destinationDeadSince is not null")))
+                .singleElement()
+                .satisfies(query -> assertThat(statistics.getQueryStatistics(query).getExecutionCount()).isEqualTo(2));
+    }
+
+    @Test
     void linkDeadGoesToChannelsWithTheEvent() {
         final var withEvent = channel(ana, NotificationType.LINK_DEAD);
         channel(ana, NotificationType.LINK_BACK);
@@ -319,7 +378,9 @@ class DefaultDeadLinkNotificationServiceTest {
         return urlRepository.saveAndFlush(Url.builder().shortUrl(alias).longUrl("https://" + alias + ".example.org/page").owner(owner).active(true).build());
     }
 
-    private static DeadLink dead(final Url url) {
+    private DeadLink dead(final Url url) {
+        jdbcTemplate.update("update url set destination_dead_since = ?, destination_last_status = '404', destination_fail_streak = 3 where id = ?",
+                DIED, url.getId());
         return new DeadLink(url.getId(), url.getOwner().getId(), url.getShortUrl(), url.getShortUrl() + ".example.org", DIED, "404");
     }
 

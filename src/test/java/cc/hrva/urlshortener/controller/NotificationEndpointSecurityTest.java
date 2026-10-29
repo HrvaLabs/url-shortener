@@ -156,6 +156,9 @@ class NotificationEndpointSecurityTest {
     @Autowired
     private NotificationChannelRepository notificationChannelRepository;
 
+    @Autowired
+    private SecretBox secretBox;
+
     @MockitoBean
     private UserService userService;
 
@@ -461,6 +464,18 @@ class NotificationEndpointSecurityTest {
         assertThat(jdbcTemplate.queryForList("select revoked_source from notification_consent where user_id = ? and revoked_at is not null and channel_id is null "
                 + "and type = 'LINK_BACK'", String.class, ANA)).containsExactly("CHANNEL_REMOVED");
         assertThat(jdbcTemplate.queryForObject("select count(*) from notification_consent where user_id = ? and revoked_at is null", Long.class, ANA)).isZero();
+    }
+
+    @Test
+    void aTrailingDotOnTheHostIsNotStored() throws Exception {
+        mockMvc.perform(as(ANA_TOKEN, post(CHANNELS)).contentType(MediaType.APPLICATION_JSON).content(
+                        DISCORD_CHANNEL.replace("https://discord.com/", "https://discord.com./")))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.maskedTarget").value("https://discord.com/" + Character.toString(0x2022).repeat(4) + "-xyz"));
+
+        final var stored = notificationChannelRepository.findAll().getFirst();
+        assertThat(secretBox.open(stored.getTargetSealed(), SecretBox.contextFor(stored.getOwner().getId())))
+                .isEqualTo("https://discord.com/api/webhooks/123/abc-secret-xyz");
     }
 
     @Test

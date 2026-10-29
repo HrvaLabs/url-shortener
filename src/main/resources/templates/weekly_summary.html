@@ -53,10 +53,12 @@
               <th:block th:if="${not #lists.isEmpty(dead_links)}">
                 <h2 style="margin: 24px 0 8px; font-family: 'Georgia', 'Times New Roman', serif; font-size: 17px; font-weight: 400; color: #a67c00;" th:text="${dead_links_heading}">Section</h2>
                 <p th:each="line : ${dead_links}" th:text="${line}" style="margin: 0 0 8px; font-family: 'Helvetica', 'Arial', sans-serif; font-size: 15px; line-height: 1.6; color: #d4d4d4; overflow-wrap: anywhere;">Line</p>
+                <p th:if="${dead_links_more != null}" th:text="${dead_links_more}" style="margin: 0 0 8px; font-family: 'Helvetica', 'Arial', sans-serif; font-size: 15px; line-height: 1.6; color: #d4d4d4;">and more</p>
               </th:block>
               <th:block th:if="${not #lists.isEmpty(ending_soon)}">
                 <h2 style="margin: 24px 0 8px; font-family: 'Georgia', 'Times New Roman', serif; font-size: 17px; font-weight: 400; color: #a67c00;" th:text="${ending_soon_heading}">Section</h2>
                 <p th:each="line : ${ending_soon}" th:text="${line}" style="margin: 0 0 8px; font-family: 'Helvetica', 'Arial', sans-serif; font-size: 15px; line-height: 1.6; color: #d4d4d4; overflow-wrap: anywhere;">Line</p>
+                <p th:if="${ending_soon_more != null}" th:text="${ending_soon_more}" style="margin: 0 0 8px; font-family: 'Helvetica', 'Arial', sans-serif; font-size: 15px; line-height: 1.6; color: #d4d4d4;">and more</p>
               </th:block>
 
               <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">

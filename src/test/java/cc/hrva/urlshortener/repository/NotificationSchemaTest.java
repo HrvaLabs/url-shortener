@@ -12,6 +12,7 @@ import cc.hrva.urlshortener.model.enums.DeliveryStatus;
 import cc.hrva.urlshortener.model.enums.NotificationType;
 import cc.hrva.urlshortener.service.notification.ChannelTargets;
 import cc.hrva.urlshortener.service.notification.EmailConsentReader;
+import cc.hrva.urlshortener.service.notification.MutableClock;
 import cc.hrva.urlshortener.service.notification.NotificationAccountData;
 import jakarta.persistence.EntityManager;
 import java.time.LocalDateTime;
@@ -396,6 +397,48 @@ class NotificationSchemaTest {
                 .containsExactly(anasChannel.getId());
         assertThat(notificationChannelRepository.findOwnerIdsWithEnabledEvent(NotificationType.LINK_DEAD)).containsExactly(ana.getId());
         assertThat(notificationChannelRepository.findOwnerIdsWithEnabledEvent(NotificationType.LINK_BACK)).isEmpty();
+    }
+
+    @Test
+    void enabledChannelsWithAnEventAreFoundForEveryActiveOwner() {
+        final var ana = savedUser("ana@example.com");
+        final var bob = savedUser("bob@example.com");
+        final var cid = savedUser("cid@example.com");
+        final var anasChannel = savedChannel(ana, "Ana's");
+        final var bobsChannel = savedChannel(bob, "Bob's");
+        final var anasOffChannel = notificationChannelRepository.saveAndFlush(channel(ana, "Off").enabled(false).build());
+        final var cidsChannel = savedChannel(cid, "Cid's");
+        final var revoked = savedChannel(bob, "Revoked");
+        final var otherEvent = savedChannel(bob, "Other event");
+        notificationConsentRepository.saveAndFlush(channelConsent(ana, anasChannel, NotificationType.WEEKLY_SUMMARY).build());
+        notificationConsentRepository.saveAndFlush(channelConsent(bob, bobsChannel, NotificationType.WEEKLY_SUMMARY).build());
+        notificationConsentRepository.saveAndFlush(channelConsent(ana, anasOffChannel, NotificationType.WEEKLY_SUMMARY).build());
+        notificationConsentRepository.saveAndFlush(channelConsent(cid, cidsChannel, NotificationType.WEEKLY_SUMMARY).build());
+        notificationConsentRepository.saveAndFlush(channelConsent(bob, revoked, NotificationType.WEEKLY_SUMMARY)
+                .revokedAt(NOW).revokedSource(ConsentSource.SETTINGS).build());
+        notificationConsentRepository.saveAndFlush(channelConsent(bob, otherEvent, NotificationType.DAILY_SUMMARY).build());
+        jdbcTemplate.update("update user_account set active = false where id = ?", cid.getId());
+        entityManager.clear();
+
+        final var found = notificationChannelRepository.findEnabledWithEvent(NotificationType.WEEKLY_SUMMARY);
+
+        assertThat(found).extracting(NotificationChannel::getId).containsExactly(anasChannel.getId(), bobsChannel.getId());
+        assertThat(found).allSatisfy(channel -> assertThat(channel.getOwner().getEmail()).isNotBlank());
+    }
+
+    @Test
+    void anUpdatedAtSetBeforeTheFlushIsTheOneStored() {
+        final var clock = new MutableClock(java.time.Instant.parse("2026-01-02T03:04:05.123456Z"));
+        final var channel = savedChannel(savedUser("ana@example.com"), "Team alerts");
+        entityManager.clear();
+        final var loaded = notificationChannelRepository.findById(channel.getId()).orElseThrow();
+
+        loaded.setName("Renamed");
+        loaded.setUpdatedAt(LocalDateTime.now(clock));
+        notificationChannelRepository.saveAndFlush(loaded);
+
+        assertThat(jdbcTemplate.queryForObject("select updated_at from notification_channel where id = ?", LocalDateTime.class, channel.getId()))
+                .isEqualTo(LocalDateTime.of(2026, 1, 2, 3, 4, 5, 123_456_000));
     }
 
     @Test

@@ -78,6 +78,21 @@ public class ChannelTargets {
         return uriOf(url).flatMap(ChannelTargets::hostOf).flatMap(ChannelTargets::typeOfHost);
     }
 
+    public static String normalized(final ChannelType type, final String target) {
+        if (type == ChannelType.TELEGRAM) {
+            return target;
+        }
+        final var uri = uriOf(target);
+        if (uri.isEmpty() || uri.get().getRawAuthority() == null || !StringUtils.endsWith(uri.get().getHost(), ".")) {
+            return target;
+        }
+        final var authority = uri.get().getRawAuthority();
+        final var host = uri.get().getHost();
+        final var hostAt = authority.lastIndexOf(host);
+        final var fixedAuthority = authority.substring(0, hostAt) + StringUtils.removeEnd(host, ".") + authority.substring(hostAt + host.length());
+        return StringUtils.replaceOnce(target, "//" + authority, "//" + fixedAuthority);
+    }
+
     public static String mask(final ChannelType type, final String target) {
         final var lastFour = lastCharacters(target);
         if (type == ChannelType.TELEGRAM) {

@@ -335,7 +335,9 @@ public class DefaultSendingEmailService implements SendingEmailService {
         ctx.setVariable("clicks", sections.clicks());
         ctx.setVariable("top_links", sections.topLinks());
         ctx.setVariable("dead_links", sections.deadLinks());
+        ctx.setVariable("dead_links_more", sections.deadLinksMore());
         ctx.setVariable("ending_soon", sections.endingSoon());
+        ctx.setVariable("ending_soon_more", sections.endingSoonMore());
         ctx.setVariable("top_links_heading", NotificationMessages.TOP_LINKS);
         ctx.setVariable("dead_links_heading", NotificationMessages.STOPPED_WORKING);
         ctx.setVariable("ending_soon_heading", NotificationMessages.ENDING_SOON);

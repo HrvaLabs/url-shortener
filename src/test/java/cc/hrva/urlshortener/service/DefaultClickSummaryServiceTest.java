@@ -51,6 +51,7 @@ import org.springframework.context.annotation.Import;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -60,6 +61,7 @@ import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -111,7 +113,7 @@ class DefaultClickSummaryServiceTest {
     @Autowired
     private NotificationMessages messages;
 
-    @Autowired
+    @MockitoSpyBean
     private NotificationPayloads payloads;
 
     @Autowired
@@ -255,7 +257,7 @@ class DefaultClickSummaryServiceTest {
     }
 
     @Test
-    void rerunIsDeduplicated() {
+    void aRerunEnqueuesUnderTheSameDedupeKey() {
         channel(ana, NotificationType.DAILY_SUMMARY);
         clicks(link(ana, "menu"), YESTERDAY, 5, 4, 1);
 
@@ -264,6 +266,22 @@ class DefaultClickSummaryServiceTest {
         clickSummaryService.sendDaily();
 
         verify(deliveryService, times(2)).enqueue(eq(NotificationType.DAILY_SUMMARY), eq("summary.daily:2026-10-26"), any(), anyMap());
+    }
+
+    @Test
+    void oneOwnersFailedDailySummaryDoesNotStopTheOthers() {
+        channel(ana, NotificationType.DAILY_SUMMARY);
+        channel(bob, NotificationType.DAILY_SUMMARY);
+        clicks(link(ana, "anas"), YESTERDAY, 5, 4, 1);
+        clicks(link(bob, "bobs"), YESTERDAY, 3, 3, 0);
+        doThrow(new IllegalStateException("broken")).when(payloads)
+                .daily(argThat(summary -> summary != null && summary.links().stream().anyMatch(link -> "anas".equals(link.shortUrl()))));
+
+        clickSummaryService.sendDaily();
+
+        final var content = contentCaptor();
+        verify(deliveryService).enqueue(eq(NotificationType.DAILY_SUMMARY), eq("summary.daily:2026-10-26"), any(), content.capture());
+        assertThat(content.getValue()).containsOnlyKeys(bob.getId());
     }
 
     @Test
@@ -416,6 +434,76 @@ class DefaultClickSummaryServiceTest {
 
         verify(sendingEmailService, never()).sendWeeklySummaryEmail(any());
         verify(deliveryService).enqueue(eq(NotificationType.WEEKLY_SUMMARY), eq("summary.weekly:2026-10-19"), any(), anyMap());
+    }
+
+    @Test
+    void aFailedEmailHandOffKeepsTheChannelDeliveryAndTheOthers() {
+        weeklyEmailConsent(ana);
+        channel(ana, NotificationType.WEEKLY_SUMMARY);
+        weeklyEmailConsent(bob);
+        clicks(link(ana, "anas"), LAST_MONDAY, 2, 2, 0);
+        clicks(link(bob, "bobs"), LAST_MONDAY, 3, 3, 0);
+        doThrow(new IllegalStateException("queue full")).when(sendingEmailService)
+                .sendWeeklySummaryEmail(argThat(summary -> summary != null && summary.userId() == ana.getId()));
+        CLOCK.set(MONDAY_MORNING);
+
+        clickSummaryService.sendWeekly();
+
+        verify(sendingEmailService).sendWeeklySummaryEmail(argThat(summary -> summary != null && summary.userId() == bob.getId()));
+        final var content = contentCaptor();
+        verify(deliveryService).enqueue(eq(NotificationType.WEEKLY_SUMMARY), eq("summary.weekly:2026-10-19"), any(), content.capture());
+        assertThat(content.getValue()).containsOnlyKeys(ana.getId());
+    }
+
+    @Test
+    void aFailedChannelContentKeepsTheEmailAndTheOthers() {
+        weeklyEmailConsent(ana);
+        channel(ana, NotificationType.WEEKLY_SUMMARY);
+        channel(bob, NotificationType.WEEKLY_SUMMARY);
+        clicks(link(ana, "anas"), LAST_MONDAY, 2, 2, 0);
+        clicks(link(bob, "bobs"), LAST_MONDAY, 3, 3, 0);
+        doThrow(new IllegalStateException("broken")).when(payloads)
+                .weekly(argThat(summary -> summary != null && summary.userId() == ana.getId()));
+        CLOCK.set(MONDAY_MORNING);
+
+        clickSummaryService.sendWeekly();
+
+        verify(sendingEmailService).sendWeeklySummaryEmail(argThat(summary -> summary != null && summary.userId() == ana.getId()));
+        final var content = contentCaptor();
+        verify(deliveryService).enqueue(eq(NotificationType.WEEKLY_SUMMARY), eq("summary.weekly:2026-10-19"), any(), content.capture());
+        assertThat(content.getValue()).containsOnlyKeys(bob.getId());
+    }
+
+    @Test
+    void moreThanTwentyDeadAndEndingLinksAreCountedNotDropped() {
+        weeklyEmailConsent(ana);
+        IntStream.rangeClosed(1, 23).forEach(index -> dead(link(ana, "dead" + index), LocalDateTime.of(2026, 10, 20, 2, index), "404"));
+        IntStream.rangeClosed(1, 22).forEach(index -> ending(ana, "soon" + index, MONDAY_MORNING_UTC.plusDays(3).plusMinutes(index), null, 0L));
+        CLOCK.set(MONDAY_MORNING);
+
+        clickSummaryService.sendWeekly();
+
+        assertThat(sentWeeklySummaries()).singleElement().satisfies(summary -> {
+            assertThat(summary.deadLinks()).hasSize(20).extracting(DeadLink::shortUrl).startsWith("dead1").endsWith("dead20");
+            assertThat(summary.moreDeadLinks()).isEqualTo(3);
+            assertThat(summary.endingSoon()).hasSize(20).extracting(EndingSoon::shortUrl).startsWith("soon1").endsWith("soon20");
+            assertThat(summary.moreEndingSoon()).isEqualTo(2);
+        });
+    }
+
+    @Test
+    void exactlyTwentyHaveNoMore() {
+        weeklyEmailConsent(ana);
+        IntStream.rangeClosed(1, 20).forEach(index -> dead(link(ana, "dead" + index), LocalDateTime.of(2026, 10, 20, 2, index), "404"));
+        CLOCK.set(MONDAY_MORNING);
+
+        clickSummaryService.sendWeekly();
+
+        assertThat(sentWeeklySummaries()).singleElement().satisfies(summary -> {
+            assertThat(summary.deadLinks()).hasSize(20);
+            assertThat(summary.moreDeadLinks()).isZero();
+            assertThat(summary.moreEndingSoon()).isZero();
+        });
     }
 
     @Test

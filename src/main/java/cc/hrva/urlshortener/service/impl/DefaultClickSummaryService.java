@@ -35,6 +35,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.function.Function;
@@ -121,14 +122,14 @@ public class DefaultClickSummaryService implements ClickSummaryService {
                 if (summary == null || !summary.hasNews()) {
                     continue;
                 }
+                if (channelOwners.contains(userId)) {
+                    channelContent(summary).ifPresent(content -> contentByOwnerId.put(userId, content));
+                }
                 if (recipients.emailConsenters().contains(userId) && emailed(summary, week, now)) {
                     emails++;
                 }
-                if (channelOwners.contains(userId)) {
-                    contentByOwnerId.put(userId, new ChannelContent(notificationPayloads.weekly(summary), notificationMessages.weekly(summary)));
-                }
             } catch (final RuntimeException exception) {
-                log.warn("Weekly summary couldn't be sent user id={} exception={}", userId, exception.getClass().getName());
+                log.warn("Weekly summary couldn't be collected user id={} exception={}", userId, exception.getClass().getName());
             }
         }
         final var queued = contentByOwnerId.isEmpty() ? 0 : enqueue(NotificationType.WEEKLY_SUMMARY, WEEKLY_KEY + week.from(), recipients.channels(),
@@ -145,8 +146,16 @@ public class DefaultClickSummaryService implements ClickSummaryService {
     }
 
     private List<NotificationChannel> channelsWith(final NotificationType event) {
-        final var ownerIds = notificationChannelRepository.findOwnerIdsWithEnabledEvent(event);
-        return ownerIds.isEmpty() ? List.of() : notificationChannelRepository.findEnabledWithEvent(event, ownerIds);
+        return notificationChannelRepository.findEnabledWithEvent(event);
+    }
+
+    private Optional<ChannelContent> channelContent(final WeeklySummary summary) {
+        try {
+            return Optional.of(new ChannelContent(notificationPayloads.weekly(summary), notificationMessages.weekly(summary)));
+        } catch (final RuntimeException exception) {
+            log.warn("Weekly summary channel content couldn't be built user id={} exception={}", summary.userId(), exception.getClass().getName());
+            return Optional.empty();
+        }
     }
 
     private DailySummary daily(final long ownerId, final LocalDate day) {
@@ -183,15 +192,27 @@ public class DefaultClickSummaryService implements ClickSummaryService {
                 .filter(link -> topById.containsKey(link.urlId()))
                 .map(link -> new WeeklyDigest.TopLink(topById.get(link.urlId()).getShortUrl(), hostOf(topById.get(link.urlId())), link.clicks()))
                 .toList();
-        final var deadLinks = urlRepository.findOwnerLinksDeadBetween(userId, startOf(week.from()), startOf(week.to().plusDays(1)),
-                        Limit.of(NotificationMessages.MOST_LINKS)).stream()
+        final var deadFrom = startOf(week.from());
+        final var deadTo = startOf(week.to().plusDays(1));
+        final var dead = urlRepository.findOwnerLinksDeadBetween(userId, deadFrom, deadTo, Limit.of(NotificationMessages.MOST_LINKS + 1));
+        final var moreDead = dead.size() > NotificationMessages.MOST_LINKS
+                ? urlRepository.countOwnerLinksDeadBetween(userId, deadFrom, deadTo) - NotificationMessages.MOST_LINKS
+                : 0;
+        final var deadLinks = dead.stream()
+                .limit(NotificationMessages.MOST_LINKS)
                 .map(url -> new DeadLink(url.getId(), userId, url.getShortUrl(), hostOf(url), url.getDestinationDeadSince(), url.getDestinationLastStatus()))
                 .toList();
-        final var endingSoon = urlRepository.findOwnerLinksEndingSoon(userId, now, now.plusDays(ENDING_SOON_DAYS),
-                        Limit.of(NotificationMessages.MOST_LINKS)).stream()
+        final var until = now.plusDays(ENDING_SOON_DAYS);
+        final var ending = urlRepository.findOwnerLinksEndingSoon(userId, now, until, Limit.of(NotificationMessages.MOST_LINKS + 1));
+        final var moreEnding = ending.size() > NotificationMessages.MOST_LINKS
+                ? urlRepository.countOwnerLinksEndingSoon(userId, now, until) - NotificationMessages.MOST_LINKS
+                : 0;
+        final var endingSoon = ending.stream()
+                .limit(NotificationMessages.MOST_LINKS)
                 .map(url -> endingSoon(url, now))
                 .toList();
-        return new WeeklySummary(userId, user.getEmail(), week.from(), week.to(), clicks, uniqueVisitors, topLinks, deadLinks, endingSoon);
+        return new WeeklySummary(userId, user.getEmail(), week.from(), week.to(), clicks, uniqueVisitors, topLinks, deadLinks, endingSoon,
+                Math.max(0, moreDead), Math.max(0, moreEnding));
     }
 
     private EndingSoon endingSoon(final Url url, final LocalDateTime now) {
@@ -204,12 +225,17 @@ public class DefaultClickSummaryService implements ClickSummaryService {
     }
 
     private boolean emailed(final WeeklySummary summary, final DigestWeek week, final LocalDateTime now) {
-        if (!notificationClaimRepository.claim(summary.userId(), WEEKLY_EMAIL_CLAIM + week.from(), now)) {
-            log.info("Weekly summary email already claimed user id={} week={}", summary.userId(), week.from());
+        try {
+            if (!notificationClaimRepository.claim(summary.userId(), WEEKLY_EMAIL_CLAIM + week.from(), now)) {
+                log.info("Weekly summary email already claimed user id={} week={}", summary.userId(), week.from());
+                return false;
+            }
+            sendingEmailService.sendWeeklySummaryEmail(summary);
+            return true;
+        } catch (final RuntimeException exception) {
+            log.warn("Weekly summary email couldn't be queued user id={} exception={}", summary.userId(), exception.getClass().getName());
             return false;
         }
-        sendingEmailService.sendWeeklySummaryEmail(summary);
-        return true;
     }
 
     private LocalDateTime startOf(final LocalDate day) {

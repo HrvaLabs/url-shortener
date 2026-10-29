@@ -224,6 +224,18 @@ class ChannelTargetsTest {
     }
 
     @Test
+    void theStoredTargetLosesTheHostsTrailingDot() {
+        assertThat(ChannelTargets.normalized(ChannelType.DISCORD, "https://discord.com./api/webhooks/1/abc")).isEqualTo("https://discord.com/api/webhooks/1/abc");
+        assertThat(ChannelTargets.normalized(ChannelType.WEBHOOK, "https://user@Hooks.Example.org.:8443/a.b./c?d=e.#f."))
+                .isEqualTo("https://user@Hooks.Example.org:8443/a.b./c?d=e.#f.");
+        assertThat(ChannelTargets.normalized(ChannelType.NTFY, "https://ntfy.sh/topic")).isEqualTo("https://ntfy.sh/topic");
+        assertThat(ChannelTargets.normalized(ChannelType.TELEGRAM, "123456789:AAH4Fq2xYzAbCdEfGhIjKlMnOpQrStUvWxYz."))
+                .isEqualTo("123456789:AAH4Fq2xYzAbCdEfGhIjKlMnOpQrStUvWxYz.");
+        assertThat(ChannelTargets.mask(ChannelType.DISCORD, ChannelTargets.normalized(ChannelType.DISCORD, "https://discord.com./api/webhooks/1/abcd")))
+                .isEqualTo("https://discord.com/" + BULLETS + "abcd");
+    }
+
+    @Test
     void discordAndSlackRefuseOtherPorts() {
         assertThat(errors(ChannelType.DISCORD, "https://discord.com:8443/api/webhooks/123/abc")).containsExactly(Map.entry("target", DISCORD_SHAPE));
         assertThat(errors(ChannelType.SLACK, "https://hooks.slack.com:8443/services/T0/B0/xyz")).containsExactly(Map.entry("target", SLACK_SHAPE));

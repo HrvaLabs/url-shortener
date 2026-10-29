@@ -78,6 +78,24 @@ public interface UrlRepository extends JpaRepository<Url, Long>, JpaSpecificatio
     List<Url> findOwnerLinksEndingSoon(@Param("ownerId") long ownerId, @Param("now") LocalDateTime now, @Param("until") LocalDateTime until,
                                        Limit limit);
 
+    @Query("""
+            select count(u) from Url u
+            where u.owner.id = :ownerId and u.active = true
+              and u.destinationDeadSince >= :from and u.destinationDeadSince < :to""")
+    long countOwnerLinksDeadBetween(@Param("ownerId") long ownerId, @Param("from") LocalDateTime from, @Param("to") LocalDateTime to);
+
+    @Query("""
+            select count(u) from Url u
+            where u.owner.id = :ownerId and u.active = true
+              and ((u.expirationDate > :now and u.expirationDate <= :until)
+                or (u.visitLimit is not null
+                    and u.visitLimit - coalesce(u.visits, 0) >= 1
+                    and (u.visitLimit - coalesce(u.visits, 0) - 1) * 10 < u.visitLimit))""")
+    long countOwnerLinksEndingSoon(@Param("ownerId") long ownerId, @Param("now") LocalDateTime now, @Param("until") LocalDateTime until);
+
+    @Query("select u.id from Url u where u.id in :ids and u.destinationDeadSince is not null")
+    List<Long> findStillDeadIds(@Param("ids") Collection<Long> ids);
+
     @Query("select u from Url u left join fetch u.owner where lower(u.shortUrl) in :aliases")
     List<Url> findByLowerShortUrlIn(@Param("aliases") Collection<String> aliases);
 

@@ -16,6 +16,7 @@ import cc.hrva.urlshortener.service.notification.DestinationCheckOutcome.DeadLin
 import cc.hrva.urlshortener.service.notification.EmailConsentReader;
 import cc.hrva.urlshortener.service.notification.NotificationMessages;
 import cc.hrva.urlshortener.service.notification.NotificationPayloads;
+import com.google.common.collect.Iterables;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.List;
@@ -25,7 +26,7 @@ import java.util.Set;
 import java.util.TreeMap;
 import java.util.function.Function;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
+import java.util.stream.StreamSupport;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -43,6 +44,7 @@ public class DefaultDeadLinkNotificationService implements DeadLinkNotificationS
     private static final String DASHBOARD = "/dashboard";
     private static final String LINK_DEAD_KEY = "link.dead:";
     private static final String LINK_BACK_KEY = "link.back:";
+    private static final int IDS_PER_QUERY = 1000;
 
     private final UrlRepository urlRepository;
     private final UserRepository userRepository;
@@ -64,8 +66,8 @@ public class DefaultDeadLinkNotificationService implements DeadLinkNotificationS
         }
 
         final var recipients = Objects.requireNonNull(readOnly().execute(status -> recipients(newlyDead, recovered)));
-        final var deadByOwner = byOwner(newlyDead, recipients.existingIds());
-        final var backByOwner = byOwner(recovered, recipients.existingIds());
+        final var deadByOwner = byOwner(newlyDead, recipients.stillDeadIds());
+        final var backByOwner = byOwner(recovered, recipients.recoveredIds());
 
         final var emails = sendEmails(deadByOwner, recipients.consentingEmails());
         final var night = outcome.night();
@@ -78,20 +80,35 @@ public class DefaultDeadLinkNotificationService implements DeadLinkNotificationS
     }
 
     private Recipients recipients(final List<DeadLink> newlyDead, final List<DeadLink> recovered) {
-        final var ids = Stream.concat(newlyDead.stream(), recovered.stream()).map(DeadLink::urlId).collect(Collectors.toSet());
-        final var existingIds = Set.copyOf(urlRepository.findExistingIds(ids));
-        final var deadOwners = owners(newlyDead, existingIds);
-        final var backOwners = owners(recovered, existingIds);
-        final var consenters = emailConsentReader.consenters(NotificationType.DEAD_LINK_EMAIL, deadOwners);
-        final Map<Long, String> consentingEmails = consenters.isEmpty() ? Map.of() : userRepository.findAllById(consenters).stream()
+        final var stillDeadIds = Set.copyOf(inChunks(urlIds(newlyDead), urlRepository::findStillDeadIds));
+        final var recoveredIds = Set.copyOf(inChunks(urlIds(recovered), urlRepository::findExistingIds));
+        final var deadOwners = owners(newlyDead, stillDeadIds);
+        final var backOwners = owners(recovered, recoveredIds);
+        final var consenters = inChunks(deadOwners, chunk -> emailConsentReader.consenters(NotificationType.DEAD_LINK_EMAIL, chunk));
+        final Map<Long, String> consentingEmails = inChunks(consenters, userRepository::findAllById).stream()
                 .filter(user -> user.getEmail() != null)
                 .collect(Collectors.toUnmodifiableMap(User::getId, User::getEmail));
-        return new Recipients(existingIds, consentingEmails, channels(NotificationType.LINK_DEAD, deadOwners),
+        return new Recipients(stillDeadIds, recoveredIds, consentingEmails, channels(NotificationType.LINK_DEAD, deadOwners),
                 channels(NotificationType.LINK_BACK, backOwners));
     }
 
     private List<NotificationChannel> channels(final NotificationType event, final Set<Long> ownerIds) {
-        return ownerIds.isEmpty() ? List.of() : notificationChannelRepository.findEnabledWithEvent(event, ownerIds);
+        return inChunks(ownerIds, chunk -> notificationChannelRepository.findEnabledWithEvent(event, chunk)).stream()
+                .sorted(Comparator.comparingLong(NotificationChannel::getId))
+                .toList();
+    }
+
+    private static <T> List<T> inChunks(final Collection<Long> ids, final Function<List<Long>, ? extends Collection<T>> query) {
+        if (ids.isEmpty()) {
+            return List.of();
+        }
+        return StreamSupport.stream(Iterables.partition(List.copyOf(ids), IDS_PER_QUERY).spliterator(), false)
+                .flatMap(chunk -> query.apply(chunk).stream())
+                .toList();
+    }
+
+    private static Set<Long> urlIds(final List<DeadLink> links) {
+        return links.stream().map(DeadLink::urlId).collect(Collectors.toUnmodifiableSet());
     }
 
     private int sendEmails(final Map<Long, List<DeadLink>> deadByOwner, final Map<Long, String> consentingEmails) {
@@ -154,8 +171,8 @@ public class DefaultDeadLinkNotificationService implements DeadLinkNotificationS
                 .collect(Collectors.groupingBy(DeadLink::ownerId, TreeMap::new, Collectors.toList()));
     }
 
-    private record Recipients(Set<Long> existingIds, Map<Long, String> consentingEmails, List<NotificationChannel> linkDeadChannels,
-                              List<NotificationChannel> linkBackChannels) {
+    private record Recipients(Set<Long> stillDeadIds, Set<Long> recoveredIds, Map<Long, String> consentingEmails,
+                              List<NotificationChannel> linkDeadChannels, List<NotificationChannel> linkBackChannels) {
     }
 
 }

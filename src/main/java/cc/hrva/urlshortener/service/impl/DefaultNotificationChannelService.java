@@ -120,7 +120,7 @@ public class DefaultNotificationChannelService implements NotificationChannelSer
 
         final var context = SecretBox.contextFor(owner.getId());
         final var type = request.getType();
-        final var target = type == ChannelType.TELEGRAM ? request.getBotToken().strip() : request.getTarget().strip();
+        final var target = ChannelTargets.normalized(type, type == ChannelType.TELEGRAM ? request.getBotToken().strip() : request.getTarget().strip());
         final var signingSecret = type == ChannelType.WEBHOOK ? newSecret() : null;
         final var channel = notificationChannelRepository.save(NotificationChannel.builder()
                 .owner(owner)
@@ -202,6 +202,7 @@ public class DefaultNotificationChannelService implements NotificationChannelSer
 
         final var signingSecret = newSecret();
         channel.setSigningSecretSealed(secretBox.seal(signingSecret, SecretBox.contextFor(user.getId())));
+        channel.setUpdatedAt(LocalDateTime.now(clock).truncatedTo(ChronoUnit.MICROS));
         notificationChannelRepository.save(channel);
         log.info("Notification channel signing secret replaced user id={} channel id={}", user.getId(), id);
         return new SigningSecretResponse(signingSecret);
@@ -281,8 +282,9 @@ public class DefaultNotificationChannelService implements NotificationChannelSer
         final var type = channel.getType();
         final var target = type == ChannelType.TELEGRAM ? request.getBotToken() : request.getTarget();
         if (StringUtils.isNotBlank(target)) {
-            channel.setTargetSealed(secretBox.seal(target.strip(), context));
-            channel.setMaskedTarget(ChannelTargets.mask(type, target.strip()));
+            final var normalized = ChannelTargets.normalized(type, target.strip());
+            channel.setTargetSealed(secretBox.seal(normalized, context));
+            channel.setMaskedTarget(ChannelTargets.mask(type, normalized));
         }
         if (type == ChannelType.NTFY && StringUtils.isNotBlank(request.getAccessToken())) {
             channel.setAccessTokenSealed(secretBox.seal(request.getAccessToken().strip(), context));

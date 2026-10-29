@@ -45,6 +45,7 @@ import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.Base64;
 import java.util.EnumSet;
 import java.util.List;
@@ -167,6 +168,25 @@ class DefaultNotificationChannelServiceTest {
         assertThat(response.maskedTarget()).isEqualTo("https://discord.com/" + BULLETS + "cret");
         assertThat(response.signingSecret()).isNull();
         assertThat(response.lastDelivery()).isNull();
+    }
+
+    @Test
+    void aTrailingDotOnTheHostIsDroppedFromWhatIsStored() {
+        service.create(discord().target("https://Discord.com./api/webhooks/123456/abcDEF-secret").build());
+
+        final var saved = savedChannel();
+        assertThat(secretBox.open(saved.getTargetSealed(), SecretBox.contextFor(ANA))).isEqualTo("https://Discord.com/api/webhooks/123456/abcDEF-secret");
+        assertThat(saved.getMaskedTarget()).isEqualTo("https://discord.com/" + BULLETS + "cret");
+    }
+
+    @Test
+    void anEditDropsTheTrailingDotFromANewTarget() {
+        final var channel = owned(channel(ChannelType.DISCORD));
+
+        service.update(4L, discord().target("https://discord.com./api/webhooks/9/new-secret").build());
+
+        assertThat(secretBox.open(channel.getTargetSealed(), SecretBox.contextFor(ANA))).isEqualTo("https://discord.com/api/webhooks/9/new-secret");
+        assertThat(channel.getMaskedTarget()).isEqualTo("https://discord.com/" + BULLETS + "cret");
     }
 
     @Test
@@ -518,6 +538,7 @@ class DefaultNotificationChannelServiceTest {
 
         assertThat(response.signingSecret()).isNotEqualTo(old).matches("^[A-Za-z0-9_-]{43}$");
         assertThat(secretBox.open(channel.getSigningSecretSealed(), SecretBox.contextFor(ANA))).isEqualTo(response.signingSecret());
+        assertThat(channel.getUpdatedAt()).isEqualTo(LocalDateTime.ofInstant(NOW, ZoneOffset.UTC).truncatedTo(ChronoUnit.MICROS));
     }
 
     @Test

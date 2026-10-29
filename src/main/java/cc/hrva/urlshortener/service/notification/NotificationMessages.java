@@ -12,6 +12,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 import java.util.function.Function;
@@ -75,7 +76,8 @@ public class NotificationMessages {
         return new NotificationMessage("hrva.cc: clicks on " + DAY.format(summary.date()), lines, frontendPage(DASHBOARD), 0);
     }
 
-    public record WeeklySections(List<String> clicks, List<String> topLinks, List<String> deadLinks, List<String> endingSoon) {
+    public record WeeklySections(List<String> clicks, List<String> topLinks, List<String> deadLinks, String deadLinksMore, List<String> endingSoon,
+                                 String endingSoonMore) {
     }
 
     public WeeklySections weeklySections(final WeeklySummary summary) {
@@ -90,17 +92,21 @@ public class NotificationMessages {
                                 + counted(topLinks.get(index).clicks(), CLICK))
                         .toList(),
                 summary.deadLinks().stream().map(this::deadLine).toList(),
-                summary.endingSoon().stream().map(this::endingLine).toList());
+                moreText(summary.moreDeadLinks()),
+                summary.endingSoon().stream().map(this::endingLine).toList(),
+                moreText(summary.moreEndingSoon()));
     }
 
     public NotificationMessage weekly(final WeeklySummary summary) {
         final var sections = weeklySections(summary);
         final var lines = new ArrayList<>(sections.clicks());
-        section(lines, TOP_LINKS, sections.topLinks());
-        section(lines, STOPPED_WORKING, sections.deadLinks());
-        section(lines, ENDING_SOON, sections.endingSoon());
+        final var linkCounts = new ArrayList<>(Collections.nCopies(lines.size(), 0));
+        final var headings = new ArrayList<Integer>();
+        section(lines, linkCounts, headings, TOP_LINKS, sections.topLinks(), 0);
+        section(lines, linkCounts, headings, STOPPED_WORKING, sections.deadLinks(), summary.moreDeadLinks());
+        section(lines, linkCounts, headings, ENDING_SOON, sections.endingSoon(), summary.moreEndingSoon());
         return new NotificationMessage("hrva.cc: your week, " + WeeklyDigestText.weekLabel(summary.from(), summary.to()), lines,
-                frontendPage(DASHBOARD), 0);
+                frontendPage(DASHBOARD), 0, linkCounts, headings);
     }
 
     public NotificationMessage test(final NotificationChannel channel) {
@@ -117,6 +123,9 @@ public class NotificationMessages {
         var text = joined(message, format, lines, shown);
         while (text.length() > MOST_CHARACTERS && shown > 0) {
             shown--;
+            while (shown > 0 && message.headings().contains(shown - 1)) {
+                shown--;
+            }
             text = joined(message, format, lines, shown);
         }
         return text;
@@ -165,11 +174,24 @@ public class NotificationMessages {
         return target(link.shortUrl(), link.destinationHost()) + ", " + ending;
     }
 
-    private static void section(final List<String> lines, final String heading, final List<String> section) {
-        if (!section.isEmpty()) {
-            lines.add(heading + ":");
-            lines.addAll(section);
+    private static void section(final List<String> lines, final List<Integer> linkCounts, final List<Integer> headings, final String heading,
+                                final List<String> section, final long more) {
+        if (section.isEmpty()) {
+            return;
         }
+        headings.add(lines.size());
+        lines.add(heading + ":");
+        linkCounts.add(0);
+        lines.addAll(section);
+        linkCounts.addAll(Collections.nCopies(section.size(), 1));
+        if (more > 0) {
+            lines.add(moreText(more));
+            linkCounts.add(Math.toIntExact(more));
+        }
+    }
+
+    private static String moreText(final long more) {
+        return more > 0 ? "and " + number(more) + " more" : null;
     }
 
     private static String number(final long count) {
@@ -184,7 +206,7 @@ public class NotificationMessages {
         final var parts = new ArrayList<String>();
         parts.add(format.title().apply(message.title()));
         parts.addAll(lines.subList(0, shown));
-        final var hidden = lines.size() - shown + message.moreCount();
+        final var hidden = message.linkCounts().subList(shown, lines.size()).stream().mapToInt(Integer::intValue).sum() + message.moreCount();
         final var link = message.link() == null ? null : format.link().apply(message.link());
         if (hidden > 0) {
             parts.add(link == null ? format.more().apply(hidden) : format.more().apply(hidden) + " " + link);

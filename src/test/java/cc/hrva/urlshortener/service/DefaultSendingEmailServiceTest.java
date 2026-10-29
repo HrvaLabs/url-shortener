@@ -917,6 +917,39 @@ class DefaultSendingEmailServiceTest {
     }
 
     @Test
+    void aDeadLinksEmailWithMoreThanTwentyLinksSaysHowManyMore() throws Exception {
+        final var aliases = IntStream.rangeClosed(1, 23).mapToObj(index -> "link" + index).toArray(String[]::new);
+
+        final var email = sentDeadLinksEmail(deadLinksEmail("example.com", aliases));
+
+        assertThat(email.getSubject()).isEqualTo("23 of your links look broken");
+        assertThat(textOf(email.getText())).contains("hrva.cc/link20 → example.com", "and 3 more").doesNotContain("hrva.cc/link21");
+        assertThat(email.getPlainText()).contains("hrva.cc/link20 → example.com, since 27 October 2026, the page wasn't found (404)\nand 3 more\n")
+                .doesNotContain("hrva.cc/link21");
+    }
+
+    @Test
+    void aWeeklySummaryEmailSaysHowManyMoreLinksThereAre() throws Exception {
+        final var deadLinks = IntStream.rangeClosed(1, 20)
+                .mapToObj(index -> new DeadLink(index, 7L, "dead" + index, "example.net", LocalDateTime.of(2026, 10, 22, 1, 0), "410"))
+                .toList();
+        final var endingSoon = IntStream.rangeClosed(1, 20)
+                .mapToObj(index -> new WeeklySummary.EndingSoon("soon" + index, "example.org", "EXPIRES", LocalDate.of(2026, 10, 30), null))
+                .toList();
+        final var summary = new WeeklySummary(7L, "alice@example.com", LocalDate.of(2026, 10, 19), LocalDate.of(2026, 10, 25),
+                new WeeklyDigest.Change(0, 0), 0, List.of(), deadLinks, endingSoon, 4, 1);
+
+        final var email = sentWeeklySummaryEmail(summary);
+
+        assertThat(textOf(email.getText())).contains(
+                "hrva.cc/dead20 → example.net, since 22 October 2026, the page was removed (410) and 4 more Ending soon",
+                "hrva.cc/soon20 → example.org, expires on 30 October 2026 and 1 more Open your links");
+        assertThat(email.getPlainText()).contains(
+                "hrva.cc/dead20 → example.net, since 22 October 2026, the page was removed (410)\nand 4 more\nEnding soon:",
+                "hrva.cc/soon20 → example.org, expires on 30 October 2026\nand 1 more\n\nOpen your links");
+    }
+
+    @Test
     void weeklySummaryEmailNeedsConsentRightBeforeItLeaves() throws Exception {
         when(emailConsentReader.hasActiveEmailConsent(7L, NotificationType.WEEKLY_SUMMARY_EMAIL)).thenReturn(false);
 
