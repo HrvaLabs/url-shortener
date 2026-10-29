@@ -47,5 +47,6 @@
     </changeSet>
 
     <include file="classpath:/db/changelog/027-admin-stats-and-reserved-aliases.xml"/>
+    <include file="classpath:/db/changelog/031-notifications.xml"/>
 
 </databaseChangeLog>

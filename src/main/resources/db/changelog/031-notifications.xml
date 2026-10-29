@@ -1,0 +1,210 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.9.xsd">
+
+    <changeSet author="khrvacic" id="031-notification-channel">
+        <createTable tableName="notification_channel">
+            <column name="id" type="BIGINT" autoIncrement="true">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="user_id" type="BIGINT">
+                <constraints nullable="false"/>
+            </column>
+            <column name="name" type="VARCHAR(60)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="type" type="VARCHAR(20)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="enabled" type="BOOLEAN" defaultValueBoolean="true">
+                <constraints nullable="false"/>
+            </column>
+            <column name="target_sealed" type="TEXT">
+                <constraints nullable="false"/>
+            </column>
+            <column name="access_token_sealed" type="TEXT"/>
+            <column name="signing_secret_sealed" type="TEXT"/>
+            <column name="chat_id" type="VARCHAR(40)"/>
+            <column name="masked_target" type="VARCHAR(160)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="failed_days" type="INT" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+            <column name="last_failed_day" type="DATE"/>
+            <column name="auto_disabled_at" type="TIMESTAMP"/>
+            <column name="last_delivery_at" type="TIMESTAMP"/>
+            <column name="last_delivery_status" type="VARCHAR(10)"/>
+            <column name="last_delivery_http" type="INT"/>
+            <column name="last_delivery_error" type="VARCHAR(300)"/>
+            <column name="created_at" type="TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+        <addForeignKeyConstraint baseTableName="notification_channel" baseColumnNames="user_id" constraintName="fk_notification_channel_user"
+                                 referencedTableName="user_account" referencedColumnNames="id" onDelete="CASCADE"/>
+        <createIndex tableName="notification_channel" indexName="idx_notification_channel_user_id">
+            <column name="user_id"/>
+        </createIndex>
+        <rollback>
+            <dropTable tableName="notification_channel"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet author="khrvacic" id="031-notification-consent">
+        <createTable tableName="notification_consent">
+            <column name="id" type="BIGINT" autoIncrement="true">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="user_id" type="BIGINT">
+                <constraints nullable="false"/>
+            </column>
+            <column name="channel_id" type="BIGINT"/>
+            <column name="channel_label" type="VARCHAR(90)"/>
+            <column name="type" type="VARCHAR(40)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="granted_at" type="TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="source" type="VARCHAR(30)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="revoked_at" type="TIMESTAMP"/>
+            <column name="revoked_source" type="VARCHAR(30)"/>
+        </createTable>
+        <addForeignKeyConstraint baseTableName="notification_consent" baseColumnNames="user_id" constraintName="fk_notification_consent_user"
+                                 referencedTableName="user_account" referencedColumnNames="id" onDelete="CASCADE"/>
+        <addForeignKeyConstraint baseTableName="notification_consent" baseColumnNames="channel_id" constraintName="fk_notification_consent_channel"
+                                 referencedTableName="notification_channel" referencedColumnNames="id" onDelete="SET NULL"/>
+        <createIndex tableName="notification_consent" indexName="idx_notification_consent_user_type">
+            <column name="user_id"/>
+            <column name="type"/>
+        </createIndex>
+        <createIndex tableName="notification_consent" indexName="idx_notification_consent_channel_id">
+            <column name="channel_id"/>
+        </createIndex>
+        <rollback>
+            <dropTable tableName="notification_consent"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet author="khrvacic" id="031-notification-delivery">
+        <createTable tableName="notification_delivery">
+            <column name="id" type="BIGINT" autoIncrement="true">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="uid" type="VARCHAR(36)">
+                <constraints nullable="false" unique="true" uniqueConstraintName="uq_notification_delivery_uid"/>
+            </column>
+            <column name="channel_id" type="BIGINT">
+                <constraints nullable="false"/>
+            </column>
+            <column name="event" type="VARCHAR(40)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="dedupe_key" type="VARCHAR(100)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="body" type="TEXT">
+                <constraints nullable="false"/>
+            </column>
+            <column name="message" type="TEXT">
+                <constraints nullable="false"/>
+            </column>
+            <column name="status" type="VARCHAR(10)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="attempts" type="INT" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+            <column name="next_attempt_at" type="TIMESTAMP"/>
+            <column name="claimed_at" type="TIMESTAMP"/>
+            <column name="last_http" type="INT"/>
+            <column name="last_error" type="VARCHAR(300)"/>
+            <column name="created_at" type="TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="finished_at" type="TIMESTAMP"/>
+        </createTable>
+        <addUniqueConstraint tableName="notification_delivery" columnNames="channel_id, dedupe_key" constraintName="uq_notification_delivery_channel_dedupe"/>
+        <addForeignKeyConstraint baseTableName="notification_delivery" baseColumnNames="channel_id" constraintName="fk_notification_delivery_channel"
+                                 referencedTableName="notification_channel" referencedColumnNames="id" onDelete="CASCADE"/>
+        <createIndex tableName="notification_delivery" indexName="idx_notification_delivery_due">
+            <column name="status"/>
+            <column name="next_attempt_at"/>
+        </createIndex>
+        <createIndex tableName="notification_delivery" indexName="idx_notification_delivery_created_at">
+            <column name="created_at"/>
+        </createIndex>
+        <rollback>
+            <dropTable tableName="notification_delivery"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet author="khrvacic" id="031-notification-claim">
+        <createTable tableName="notification_claim">
+            <column name="user_id" type="BIGINT">
+                <constraints nullable="false"/>
+            </column>
+            <column name="claim_key" type="VARCHAR(60)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_at" type="TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+        <addPrimaryKey tableName="notification_claim" columnNames="user_id, claim_key" constraintName="pk_notification_claim"/>
+        <addForeignKeyConstraint baseTableName="notification_claim" baseColumnNames="user_id" constraintName="fk_notification_claim_user"
+                                 referencedTableName="user_account" referencedColumnNames="id" onDelete="CASCADE"/>
+        <createIndex tableName="notification_claim" indexName="idx_notification_claim_created_at">
+            <column name="created_at"/>
+        </createIndex>
+        <rollback>
+            <dropTable tableName="notification_claim"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet author="khrvacic" id="031-url-destination-check">
+        <addColumn tableName="url">
+            <column name="destination_checked_at" type="TIMESTAMP"/>
+            <column name="destination_dead_since" type="TIMESTAMP"/>
+            <column name="destination_fail_streak" type="INT" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+            <column name="destination_last_status" type="VARCHAR(20)"/>
+        </addColumn>
+        <createIndex tableName="url" indexName="idx_url_destination_checked_at">
+            <column name="destination_checked_at"/>
+        </createIndex>
+        <createIndex tableName="url" indexName="idx_url_destination_dead_since">
+            <column name="destination_dead_since"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="url" indexName="idx_url_destination_dead_since"/>
+            <dropIndex tableName="url" indexName="idx_url_destination_checked_at"/>
+            <dropColumn tableName="url" columnName="destination_last_status"/>
+            <dropColumn tableName="url" columnName="destination_fail_streak"/>
+            <dropColumn tableName="url" columnName="destination_dead_since"/>
+            <dropColumn tableName="url" columnName="destination_checked_at"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet author="khrvacic" id="031-email-log-consent-type">
+        <addColumn tableName="email_log">
+            <column name="consent_type" type="VARCHAR(40)"/>
+            <column name="user_id" type="BIGINT"/>
+        </addColumn>
+        <rollback>
+            <dropColumn tableName="email_log" columnName="user_id"/>
+            <dropColumn tableName="email_log" columnName="consent_type"/>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>

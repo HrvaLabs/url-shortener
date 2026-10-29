@@ -1,9 +1,12 @@
 package cc.hrva.urlshortener.model;
 
 import cc.hrva.urlshortener.model.enums.EmailStatus;
+import cc.hrva.urlshortener.model.enums.NotificationType;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
@@ -44,6 +47,9 @@ public class EmailLog {
     @JsonIgnore
     @Column(columnDefinition = "TEXT")
     private String body;
+    @Enumerated(EnumType.STRING)
+    private NotificationType consentType;
+    private Long userId;
 
     @PrePersist
     public void onCreate() {

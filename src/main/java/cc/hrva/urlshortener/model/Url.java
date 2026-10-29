@@ -70,6 +70,18 @@ public class Url {
     @Enumerated(EnumType.STRING)
     private CreatedVia createdVia;
 
+    @Column(name = "destination_checked_at", insertable = false, updatable = false)
+    private LocalDateTime destinationCheckedAt;
+
+    @Column(name = "destination_dead_since", insertable = false, updatable = false)
+    private LocalDateTime destinationDeadSince;
+
+    @Column(name = "destination_fail_streak", insertable = false, updatable = false)
+    private Integer destinationFailStreak;
+
+    @Column(name = "destination_last_status", insertable = false, updatable = false)
+    private String destinationLastStatus;
+
     @BatchSize(size = 100)
     @ElementCollection(fetch = FetchType.EAGER)
     @CollectionTable(name = "url_tags", joinColumns = @JoinColumn(name = "URL_ID"))

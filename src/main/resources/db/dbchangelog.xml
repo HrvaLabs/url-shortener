@@ -36,5 +36,6 @@
     <include file="classpath:/db/changelog/028-passkeys-and-two-step.xml"/>
     <include file="classpath:/db/changelog/029-link-in-bio.xml"/>
     <include file="classpath:/db/changelog/030-url-short-url-unique-again.xml"/>
+    <include file="classpath:/db/changelog/031-notifications.xml"/>
 
 </databaseChangeLog>
