@@ -4,6 +4,7 @@ import cc.hrva.urlshortener.client.Resolver;
 import cc.hrva.urlshortener.dto.notification.NotificationChannelRequest;
 import cc.hrva.urlshortener.model.enums.ChannelType;
 import cc.hrva.urlshortener.util.PublicAddresses;
+import jakarta.validation.Validator;
 import java.net.URI;
 import java.net.UnknownHostException;
 import java.util.LinkedHashMap;
@@ -53,25 +54,22 @@ public class ChannelTargets {
     private static final Pattern TELEGRAM_CHAT_ID = Pattern.compile("^-?\\d{1,20}$|^@[A-Za-z][A-Za-z0-9_]{4,31}$");
 
     private final Resolver resolver;
+    private final Validator validator;
 
     public Map<String, String> fieldErrors(final ChannelType type, final NotificationChannelRequest request, final boolean creating) {
         final var errors = new LinkedHashMap<String, String>();
-        if (type == ChannelType.TELEGRAM) {
-            shapeError(request.getBotToken(), TELEGRAM_TOKEN, BOT_TOKEN_SHAPE, creating).ifPresent(error -> errors.put(BOT_TOKEN, error));
-            shapeError(request.getChatId(), TELEGRAM_CHAT_ID, CHAT_ID_SHAPE, creating).ifPresent(error -> errors.put(CHAT_ID, error));
-            return errors;
-        }
-        if (StringUtils.isBlank(request.getTarget())) {
-            if (creating) {
-                errors.put(TARGET, PASTE_THE_URL);
-            }
-        } else {
-            targetError(type, request.getTarget().strip()).ifPresent(error -> errors.put(TARGET, error));
-        }
-        if (type == ChannelType.NTFY) {
-            shapeError(request.getAccessToken(), NTFY_ACCESS_TOKEN, ACCESS_TOKEN_SHAPE, false).ifPresent(error -> errors.put(ACCESS_TOKEN, error));
+        validator.validate(request).forEach(violation -> errors.putIfAbsent(violation.getPropertyPath().toString(), violation.getMessage()));
+        if (type != null) {
+            shapeErrors(type, request, creating).forEach(errors::putIfAbsent);
         }
         return errors;
+    }
+
+    public Optional<String> addressError(final ChannelType type, final NotificationChannelRequest request) {
+        if (type == ChannelType.TELEGRAM || StringUtils.isBlank(request.getTarget())) {
+            return Optional.empty();
+        }
+        return httpsHost(request.getTarget().strip()).flatMap(this::hostAddressError);
     }
 
     public static String normalized(final ChannelType type, final String target) {
@@ -102,7 +100,27 @@ public class ChannelTargets {
         return NotificationDescriptions.label(type);
     }
 
-    private Optional<String> targetError(final ChannelType type, final String target) {
+    private static Map<String, String> shapeErrors(final ChannelType type, final NotificationChannelRequest request, final boolean creating) {
+        final var errors = new LinkedHashMap<String, String>();
+        if (type == ChannelType.TELEGRAM) {
+            shapeError(request.getBotToken(), TELEGRAM_TOKEN, BOT_TOKEN_SHAPE, creating).ifPresent(error -> errors.put(BOT_TOKEN, error));
+            shapeError(request.getChatId(), TELEGRAM_CHAT_ID, CHAT_ID_SHAPE, creating).ifPresent(error -> errors.put(CHAT_ID, error));
+            return errors;
+        }
+        if (StringUtils.isBlank(request.getTarget())) {
+            if (creating) {
+                errors.put(TARGET, PASTE_THE_URL);
+            }
+        } else {
+            targetShapeError(type, request.getTarget().strip()).ifPresent(error -> errors.put(TARGET, error));
+        }
+        if (type == ChannelType.NTFY) {
+            shapeError(request.getAccessToken(), NTFY_ACCESS_TOKEN, ACCESS_TOKEN_SHAPE, false).ifPresent(error -> errors.put(ACCESS_TOKEN, error));
+        }
+        return errors;
+    }
+
+    private static Optional<String> targetShapeError(final ChannelType type, final String target) {
         final var host = httpsHost(target);
         if (host.isEmpty()) {
             return Optional.of(USE_HTTPS);
@@ -117,10 +135,10 @@ public class ChannelTargets {
             case WEBHOOK -> typeOfHost(host.get()).map(ChannelTargets::chatHostRefusal).orElse(null);
             case TELEGRAM -> null;
         };
-        return Optional.ofNullable(shapeError).or(() -> addressError(host.get()));
+        return Optional.ofNullable(shapeError);
     }
 
-    private Optional<String> addressError(final String host) {
+    private Optional<String> hostAddressError(final String host) {
         try {
             return PublicAddresses.arePublic(resolver.resolve(host)) ? Optional.empty() : Optional.of(NOT_PUBLIC);
         } catch (final UnknownHostException exception) {

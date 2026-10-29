@@ -540,6 +540,48 @@ class NotificationEndpointSecurityTest {
     }
 
     @Test
+    void everyChannelFieldErrorComesBackInOneAnswer() throws Exception {
+        mockMvc.perform(as(ANA_TOKEN, post(CHANNELS)).contentType(MediaType.APPLICATION_JSON).content("""
+                        {"name":" ","type":"NTFY","events":[],"target":"http://ntfy.sh/alerts","accessToken":"tk abc"}"""))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().json("""
+                        {"name":"Give the channel a name",
+                         "target":"Use an https URL.",
+                         "accessToken":"Paste the access token from ntfy. It has no spaces, like tk_AbC123"}""", JsonCompareMode.STRICT));
+        mockMvc.perform(as(ANA_TOKEN, post(CHANNELS)).contentType(MediaType.APPLICATION_JSON).content("""
+                        {"name":"%s","type":"TELEGRAM","events":[],"botToken":"nope","chatId":"nope"}""".formatted("x".repeat(61))))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().json("""
+                        {"name":"Name must be 60 characters or fewer",
+                         "botToken":"Paste the bot token from @BotFather, like 123456789:AAH4Fq2xYzExample",
+                         "chatId":"Enter the chat ID, a number like -1001234567890 or a channel name like @mychannel"}""", JsonCompareMode.STRICT));
+
+        assertThat(notificationChannelRepository.count()).isZero();
+    }
+
+    @Test
+    void anEditReportsEveryFieldErrorInOneAnswer() throws Exception {
+        mockMvc.perform(as(ANA_TOKEN, post(CHANNELS)).contentType(MediaType.APPLICATION_JSON).content("""
+                        {"name":"Phone","type":"NTFY","events":[],"target":"https://ntfy.sh/alerts"}"""))
+                .andExpect(status().isCreated());
+        final var channel = notificationChannelRepository.findAll().getFirst();
+
+        mockMvc.perform(as(ANA_TOKEN, put(CHANNELS + "/" + channel.getId())).contentType(MediaType.APPLICATION_JSON).content("""
+                        {"name":"","type":"NTFY","events":[],"target":"https://ntfy.sh/","accessToken":"tk abc"}"""))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().json("""
+                        {"name":"Give the channel a name",
+                         "target":"Paste your ntfy topic URL, like https://ntfy.sh/your-topic",
+                         "accessToken":"Paste the access token from ntfy. It has no spaces, like tk_AbC123"}""", JsonCompareMode.STRICT));
+        mockMvc.perform(as(ANA_TOKEN, put(CHANNELS + "/" + channel.getId())).contentType(MediaType.APPLICATION_JSON).content("""
+                        {"name":"","type":null,"events":[]}"""))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().json("{\"name\":\"Give the channel a name\",\"type\":\"Choose a channel type\"}", JsonCompareMode.STRICT));
+
+        assertThat(notificationChannelRepository.findById(channel.getId()).orElseThrow().getName()).isEqualTo("Phone");
+    }
+
+    @Test
     void anEditWithoutANewTopicStillChecksTheNtfyAccessToken() throws Exception {
         mockMvc.perform(as(ANA_TOKEN, post(CHANNELS)).contentType(MediaType.APPLICATION_JSON).content("""
                         {"name":"Phone","type":"NTFY","events":[],"target":"https://ntfy.sh/alerts","accessToken":"tk_first"}"""))

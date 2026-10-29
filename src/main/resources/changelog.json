@@ -1,10 +1,32 @@
 {
   "releases": [
     {
-      "version": "v2.15",
+      "version": "v2.15.1",
       "date": "2026-10-29",
       "badge": "Latest",
       "badgeVariant": "default",
+      "summary": "Notification settings that are easier to find and fix, and faster bio pages.",
+      "sections": [
+        {
+          "title": "Notifications",
+          "icon": "bell",
+          "items": [
+            "Adding or editing a channel shows every problem at once instead of one at a time.",
+            "Notifications now sits right below your profile and password in Settings, and a link marked \"Destination looks dead\" offers \"Get an email when this happens\" while dead-link emails are off."
+          ]
+        },
+        {
+          "title": "Links",
+          "icon": "link",
+          "items": [
+            "Bio pages and their share images load faster: they're kept for up to 5 minutes, so saved changes, a new handle or a deleted page can take up to 5 minutes to show. View page in the editor always shows the saved version."
+          ]
+        }
+      ]
+    },
+    {
+      "version": "v2.15",
+      "date": "2026-10-29",
       "summary": "Emails have a new look that matches the site.",
       "sections": [
         {

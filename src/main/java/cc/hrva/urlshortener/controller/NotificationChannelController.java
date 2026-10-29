@@ -7,7 +7,6 @@ import cc.hrva.urlshortener.dto.notification.SigningSecretResponse;
 import cc.hrva.urlshortener.service.NotificationChannelService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
-import jakarta.validation.Valid;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -43,7 +42,7 @@ public class NotificationChannelController {
     @ApiResponse(responseCode = "429", description = "Too many notification settings changes")
     @PostMapping
     @PreAuthorize("hasAnyRole('ROLE_ADMIN', 'ROLE_USER')")
-    public ResponseEntity<NotificationChannelResponse> create(@Valid @RequestBody final NotificationChannelRequest request) {
+    public ResponseEntity<NotificationChannelResponse> create(@RequestBody final NotificationChannelRequest request) {
         return ResponseEntity.status(HttpStatus.CREATED).body(notificationChannelService.create(request));
     }
 
@@ -54,7 +53,7 @@ public class NotificationChannelController {
     @ApiResponse(responseCode = "429", description = "Too many notification settings changes")
     @PutMapping("/{id}")
     @PreAuthorize("hasAnyRole('ROLE_ADMIN', 'ROLE_USER')")
-    public ResponseEntity<NotificationChannelResponse> update(@PathVariable final long id, @Valid @RequestBody final NotificationChannelRequest request) {
+    public ResponseEntity<NotificationChannelResponse> update(@PathVariable final long id, @RequestBody final NotificationChannelRequest request) {
         return ResponseEntity.ok(notificationChannelService.update(id, request));
     }
 

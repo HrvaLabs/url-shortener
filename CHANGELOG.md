@@ -4,6 +4,19 @@ All notable changes to hrva.cc — the URL shortener.
 
 ---
 
+## [v2.15.1] — 2026-10-29
+
+Notification settings that are easier to find and fix, and faster bio pages.
+
+### 🔔 Notifications
+- Adding or editing a channel shows every problem at once instead of one at a time.
+- Notifications now sits right below your profile and password in Settings, and a link marked "Destination looks dead" offers "Get an email when this happens" while dead-link emails are off.
+
+### 🔗 Links
+- Bio pages and their share images load faster: they're kept for up to 5 minutes, so saved changes, a new handle or a deleted page can take up to 5 minutes to show. View page in the editor always shows the saved version.
+
+---
+
 ## [v2.15] — 2026-10-29
 
 Emails have a new look that matches the site.

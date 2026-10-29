@@ -3,6 +3,7 @@ package cc.hrva.urlshortener.service.notification;
 import cc.hrva.urlshortener.client.Resolver;
 import cc.hrva.urlshortener.dto.notification.NotificationChannelRequest;
 import cc.hrva.urlshortener.model.enums.ChannelType;
+import jakarta.validation.Validation;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.util.ArrayList;
@@ -33,7 +34,7 @@ class ChannelTargetsTest {
     private static final String ACCESS_TOKEN_SHAPE = "Paste the access token from ntfy. It has no spaces, like tk_AbC123";
 
     private final List<String> lookedUp = new ArrayList<>();
-    private final ChannelTargets channelTargets = new ChannelTargets(fakeDns());
+    private final ChannelTargets channelTargets = new ChannelTargets(fakeDns(), Validation.buildDefaultValidatorFactory().getValidator());
 
     @Test
     void aValidTargetOfEachTypeHasNoErrors() {
@@ -135,7 +136,7 @@ class ChannelTargetsTest {
     @Test
     void editWithoutSecretsIsValid() {
         for (final var type : List.of(ChannelType.DISCORD, ChannelType.SLACK, ChannelType.NTFY, ChannelType.WEBHOOK)) {
-            assertThat(channelTargets.fieldErrors(type, request(type).build(), false)).isEmpty();
+            assertThat(allErrors(type, request(type).build(), false)).isEmpty();
         }
         assertThat(telegram(null, null, false)).isEmpty();
         assertThat(telegram("", " ", false)).isEmpty();
@@ -144,7 +145,7 @@ class ChannelTargetsTest {
 
     @Test
     void aNewTargetOnEditIsCheckedLikeOnCreate() {
-        assertThat(channelTargets.fieldErrors(ChannelType.DISCORD, request(ChannelType.DISCORD).target("http://discord.com/api/webhooks/1/a").build(), false))
+        assertThat(allErrors(ChannelType.DISCORD, request(ChannelType.DISCORD).target("http://discord.com/api/webhooks/1/a").build(), false))
                 .containsExactly(Map.entry("target", USE_HTTPS));
         assertThat(telegram("nope", null, false)).containsExactly(Map.entry("botToken", BOT_TOKEN_SHAPE));
     }
@@ -248,20 +249,28 @@ class ChannelTargetsTest {
         assertThat(ntfy("tk one")).containsExactly(Map.entry("accessToken", ACCESS_TOKEN_SHAPE));
         assertThat(ntfy("tk\none")).containsExactly(Map.entry("accessToken", ACCESS_TOKEN_SHAPE));
         assertThat(ntfy("tk" + Character.toString(0x00e9))).containsExactly(Map.entry("accessToken", ACCESS_TOKEN_SHAPE));
-        assertThat(channelTargets.fieldErrors(ChannelType.WEBHOOK,
+        assertThat(allErrors(ChannelType.WEBHOOK,
                 request(ChannelType.WEBHOOK).target("https://hooks.example.org/hrva").accessToken("tk one").build(), true)).isEmpty();
     }
 
     private Map<String, String> ntfy(final String accessToken) {
-        return channelTargets.fieldErrors(ChannelType.NTFY, request(ChannelType.NTFY).target("https://ntfy.sh/topic").accessToken(accessToken).build(), true);
+        return allErrors(ChannelType.NTFY, request(ChannelType.NTFY).target("https://ntfy.sh/topic").accessToken(accessToken).build(), true);
     }
 
     private Map<String, String> errors(final ChannelType type, final String target) {
-        return channelTargets.fieldErrors(type, request(type).target(target).build(), true);
+        return allErrors(type, request(type).target(target).build(), true);
     }
 
     private Map<String, String> telegram(final String botToken, final String chatId, final boolean creating) {
-        return channelTargets.fieldErrors(ChannelType.TELEGRAM, request(ChannelType.TELEGRAM).botToken(botToken).chatId(chatId).build(), creating);
+        return allErrors(ChannelType.TELEGRAM, request(ChannelType.TELEGRAM).botToken(botToken).chatId(chatId).build(), creating);
+    }
+
+    private Map<String, String> allErrors(final ChannelType type, final NotificationChannelRequest request, final boolean creating) {
+        final var errors = channelTargets.fieldErrors(type, request, creating);
+        if (errors.isEmpty()) {
+            channelTargets.addressError(type, request).ifPresent(error -> errors.put("target", error));
+        }
+        return errors;
     }
 
     private static NotificationChannelRequest.NotificationChannelRequestBuilder request(final ChannelType type) {

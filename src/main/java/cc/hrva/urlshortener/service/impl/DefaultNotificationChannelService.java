@@ -109,8 +109,9 @@ public class DefaultNotificationChannelService implements NotificationChannelSer
     public NotificationChannelResponse create(final NotificationChannelRequest request) {
         final var user = currentUser();
         final var events = channelEventsOf(request.getEvents());
+        requireValidFields(request, true);
         requireWithinSettingsLimit(user.getId());
-        requireValid(request.getType(), request, true);
+        requireReachableTarget(request.getType(), request);
 
         final var owner = accountLock.lock(user);
         if (notificationChannelRepository.countByOwnerId(owner.getId()) >= MOST_CHANNELS) {
@@ -147,12 +148,13 @@ public class DefaultNotificationChannelService implements NotificationChannelSer
     public NotificationChannelResponse update(final long id, final NotificationChannelRequest request) {
         final var user = currentUser();
         final var events = channelEventsOf(request.getEvents());
+        requireValidFields(request, false);
         requireWithinSettingsLimit(user.getId());
         final var channel = owned(user, id);
         if (request.getType() != channel.getType()) {
             throw new ApiException(TYPE_CHANGED);
         }
-        requireValid(channel.getType(), request, false);
+        requireReachableTarget(channel.getType(), request);
         accountLock.lock(user);
 
         channel.setName(request.getName().strip());
@@ -258,11 +260,17 @@ public class DefaultNotificationChannelService implements NotificationChannelSer
                         Collectors.mapping(NotificationConsent::getType, Collectors.toCollection(() -> EnumSet.noneOf(NotificationType.class)))));
     }
 
-    private void requireValid(final ChannelType type, final NotificationChannelRequest request, final boolean creating) {
-        final var errors = channelTargets.fieldErrors(type, request, creating);
+    private void requireValidFields(final NotificationChannelRequest request, final boolean creating) {
+        final var errors = channelTargets.fieldErrors(request.getType(), request, creating);
         if (!errors.isEmpty()) {
             throw new ChannelValidationException(errors);
         }
+    }
+
+    private void requireReachableTarget(final ChannelType type, final NotificationChannelRequest request) {
+        channelTargets.addressError(type, request).ifPresent(error -> {
+            throw new ChannelValidationException(Map.of(ChannelTargets.TARGET, error));
+        });
     }
 
     private void switchTo(final NotificationChannel channel, final boolean enabled) {

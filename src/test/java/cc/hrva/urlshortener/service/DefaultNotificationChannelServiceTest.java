@@ -38,6 +38,7 @@ import cc.hrva.urlshortener.service.notification.SecretBox;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiter;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiterUnavailableException;
 import cc.hrva.urlshortener.service.twostep.AccountLock;
+import jakarta.validation.Validation;
 import java.net.InetAddress;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -115,7 +116,11 @@ class DefaultNotificationChannelServiceTest {
 
     private final User user = User.builder().id(ANA).email("ana@example.com").build();
     private final SecretBox secretBox = new SecretBox(NotificationTestKeys.keys());
-    private final Resolver publicDns = host -> new InetAddress[] {InetAddress.ofLiteral("162.159.128.233")};
+    private final List<String> lookedUp = new ArrayList<>();
+    private final Resolver publicDns = host -> {
+        lookedUp.add(host);
+        return new InetAddress[] {InetAddress.ofLiteral("162.159.128.233")};
+    };
     private final JsonMapper jsonMapper = JsonMapper.builder().build();
     private final MutableClock clock = new MutableClock(NOW);
     private final List<String> posted = new ArrayList<>();
@@ -135,7 +140,7 @@ class DefaultNotificationChannelServiceTest {
         final var senders = new ChannelSenders(List.of(new DiscordChannelSender(jsonMapper), new SlackChannelSender(jsonMapper),
                 new TelegramChannelSender(jsonMapper), new NtfyChannelSender(), new WebhookChannelSender()), poster);
         service = new DefaultNotificationChannelService(notificationChannelRepository, notificationConsentRepository, notificationConsentService,
-                userService, accountLock, rateLimiter, secretBox, new ChannelTargets(publicDns), senders, new NotificationMessages(appProperties, clock),
+                userService, accountLock, rateLimiter, secretBox, new ChannelTargets(publicDns, Validation.buildDefaultValidatorFactory().getValidator()), senders, new NotificationMessages(appProperties, clock),
                 new NotificationPayloads(jsonMapper, appProperties, clock), new NoResourceTransactionManager(), clock);
         lenient().when(userService.getUserFromToken()).thenReturn(user);
         lenient().when(accountLock.lock(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
@@ -312,6 +317,32 @@ class DefaultNotificationChannelServiceTest {
 
         verify(notificationChannelRepository, never()).save(any());
         verify(notificationConsentService, never()).grantChannelEvents(any(), any(), any());
+    }
+
+    @Test
+    void aBadNameIsReportedWithoutLookingUpTheAddress() {
+        assertThatThrownBy(() -> service.create(discord().name(" ").build()))
+                .isInstanceOfSatisfying(ChannelValidationException.class,
+                        exception -> assertThat(exception.getFieldErrors()).containsExactly(java.util.Map.entry("name", "Give the channel a name")));
+
+        assertThat(lookedUp).isEmpty();
+        verify(notificationChannelRepository, never()).save(any());
+    }
+
+    @Test
+    void fieldErrorsSpendNoSettingsChange() {
+        assertThatThrownBy(() -> service.create(discord().name(" ").target("http://discord.com/api/webhooks/1/a").build()))
+                .isInstanceOfSatisfying(ChannelValidationException.class,
+                        exception -> assertThat(exception.getFieldErrors()).containsOnlyKeys("name", "target"));
+
+        verify(rateLimiter, never()).tryAcquire(anyString(), anyInt(), any());
+    }
+
+    @Test
+    void aWellShapedAddressIsLookedUpOnceTheOtherFieldsAreValid() {
+        service.create(discord().build());
+
+        assertThat(lookedUp).containsExactly("discord.com");
     }
 
     @Test
