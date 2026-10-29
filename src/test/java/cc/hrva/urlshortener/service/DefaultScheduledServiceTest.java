@@ -4,6 +4,7 @@ import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.repository.AuditLogRepository;
 import cc.hrva.urlshortener.repository.BioHandleHoldRepository;
 import cc.hrva.urlshortener.repository.EmailLogRepository;
+import cc.hrva.urlshortener.service.impl.DefaultDestinationCheckService;
 import cc.hrva.urlshortener.service.impl.DefaultScheduledService;
 import java.io.IOException;
 import java.time.Clock;
@@ -23,11 +24,13 @@ import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.core.env.MutablePropertySources;
 import org.springframework.core.env.PropertySourcesPropertyResolver;
 import org.springframework.core.io.ClassPathResource;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.scheduling.support.CronExpression;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -68,6 +71,9 @@ class DefaultScheduledServiceTest {
     private WeeklyDigestService weeklyDigestService;
 
     @Mock
+    private DestinationCheckService destinationCheckService;
+
+    @Mock
     private BioHandleHoldRepository bioHandleHoldRepository;
 
     @Mock
@@ -81,7 +87,7 @@ class DefaultScheduledServiceTest {
     @BeforeEach
     void setUp() {
         this.scheduledService = new DefaultScheduledService(urlService, userService, apiKeyService, resetTokenService, urlNotificationService, safeBrowsingRecheckService, sendingEmailService, linkDigestService, blocklistSourceService,
-                weeklyDigestService, bioHandleHoldRepository, emailLogRepository, auditLogRepository, appProperties, Clock.fixed(NOW, ZoneOffset.UTC));
+                weeklyDigestService, destinationCheckService, bioHandleHoldRepository, emailLogRepository, auditLogRepository, appProperties, Clock.fixed(NOW, ZoneOffset.UTC));
     }
 
     @Test
@@ -164,6 +170,38 @@ class DefaultScheduledServiceTest {
 
     private static Instant nextRun(final CronExpression cron, final String after, final ZoneId zone) {
         return cron.next(ZonedDateTime.ofInstant(Instant.parse(after), zone)).toInstant();
+    }
+
+    @Test
+    @ExtendWith(OutputCaptureExtension.class)
+    void checkDestinationsHandsTheNightlyCheckOff(final CapturedOutput output) {
+        scheduledService.checkDestinations();
+
+        verify(destinationCheckService).runNightly();
+        verifyNoMoreInteractions(destinationCheckService);
+        assertThat(output).contains("Scheduled: destination check");
+    }
+
+    @Test
+    void theDestinationCheckRunsAtTwoInTheAnalyticsZone() throws NoSuchMethodException, IOException {
+        final var scheduled = DefaultScheduledService.class.getMethod("checkDestinations").getAnnotation(Scheduled.class);
+        final var sources = new MutablePropertySources();
+        new YamlPropertySourceLoader().load("application", new ClassPathResource("application.yaml")).forEach(sources::addLast);
+        final var zone = ZoneId.of(new PropertySourcesPropertyResolver(sources).resolveRequiredPlaceholders(scheduled.zone()));
+
+        assertThat(scheduled.cron()).isEqualTo("0 0 2 * * *");
+        assertThat(scheduled.zone()).isEqualTo("${app.analytics.zone}");
+        assertThat(nextRun(CronExpression.parse(scheduled.cron()), "2026-10-26T12:00:00Z", zone)).isEqualTo("2026-10-27T01:00:00Z");
+        assertThat(nextRun(CronExpression.parse(scheduled.cron()), "2026-07-01T12:00:00Z", zone)).isEqualTo("2026-07-02T00:00:00Z");
+    }
+
+    @Test
+    void longJobsRunAsync() throws NoSuchMethodException {
+        final var runNightly = DefaultDestinationCheckService.class.getMethod("runNightly");
+
+        assertThat(runNightly.getAnnotation(Async.class)).isNotNull();
+        assertThat(runNightly.getAnnotation(Async.class).value()).isEmpty();
+        assertThat(DefaultScheduledService.class.getMethod("checkDestinations").getAnnotation(Async.class)).isNull();
     }
 
     @Test

@@ -16,5 +16,6 @@ public interface ScheduledService {
     void sendWeeklyDigest();
     void releaseExpiredBioHandles();
     void deleteOldLogs();
+    void checkDestinations();
 
 }

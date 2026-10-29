@@ -8,6 +8,7 @@ import cc.hrva.urlshortener.repository.BioHandleHoldRepository;
 import cc.hrva.urlshortener.repository.EmailLogRepository;
 import cc.hrva.urlshortener.service.ApiKeyService;
 import cc.hrva.urlshortener.service.BlocklistSourceService;
+import cc.hrva.urlshortener.service.DestinationCheckService;
 import cc.hrva.urlshortener.service.LinkDigestService;
 import cc.hrva.urlshortener.service.ResetTokenService;
 import cc.hrva.urlshortener.service.SafeBrowsingRecheckService;
@@ -39,6 +40,7 @@ public class DefaultScheduledService implements ScheduledService {
     private final LinkDigestService linkDigestService;
     private final BlocklistSourceService blocklistSourceService;
     private final WeeklyDigestService weeklyDigestService;
+    private final DestinationCheckService destinationCheckService;
     private final BioHandleHoldRepository bioHandleHoldRepository;
     private final EmailLogRepository emailLogRepository;
     private final AuditLogRepository auditLogRepository;
@@ -145,6 +147,13 @@ public class DefaultScheduledService implements ScheduledService {
         final var emailLogsDeleted = emailLogRepository.deleteByCreatedAtBefore(now.minusDays(retention.getEmailLogDays()));
         final var auditLogsDeleted = auditLogRepository.deleteByPerformedAtBefore(now.minusMonths(retention.getAuditLogMonths()));
         log.info("Scheduled cleanup: old logs emailLogsDeleted={} auditLogsDeleted={}", emailLogsDeleted, auditLogsDeleted);
+    }
+
+    @Override
+    @Scheduled(cron = "0 0 2 * * *", zone = "${app.analytics.zone}")
+    public void checkDestinations() {
+        log.info("Scheduled: destination check");
+        destinationCheckService.runNightly();
     }
 
 }
