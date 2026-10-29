@@ -28,7 +28,7 @@
           "title": "Privacy",
           "icon": "lock",
           "items": [
-            "Notifications carry counts, short links and destination hosts only, never visitors' IP addresses, browsers or referrers. Channel URLs and tokens are encrypted. After you save them, URLs are shown masked and tokens are never shown again.",
+            "Notifications carry counts, short links and destination hosts only, never visitors' IP addresses, browsers or referrers. Channel URLs and tokens are encrypted. After you save them, URLs and bot tokens are shown masked, and other tokens are never shown again.",
             "We no longer send a welcome email after you verify your address."
           ]
         },
