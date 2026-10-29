@@ -3,19 +3,24 @@ package cc.hrva.urlshortener.service.impl;
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.dto.DecisionsDigest;
 import cc.hrva.urlshortener.dto.WeeklyDigest;
+import cc.hrva.urlshortener.dto.notification.DeadLinksEmail;
 import cc.hrva.urlshortener.exception.EmailLogNotFoundException;
 import cc.hrva.urlshortener.exception.EmailNotResendableException;
 import cc.hrva.urlshortener.model.EmailLog;
 import cc.hrva.urlshortener.model.enums.NotificationType;
 import cc.hrva.urlshortener.repository.EmailLogRepository;
 import cc.hrva.urlshortener.service.notification.ConsentEmails;
+import cc.hrva.urlshortener.service.notification.DestinationCheckOutcome.DeadLink;
+import cc.hrva.urlshortener.service.notification.DestinationStatusWords;
 import cc.hrva.urlshortener.service.notification.EmailConsentReader;
+import cc.hrva.urlshortener.service.notification.NotificationMessages;
 import jakarta.mail.MessagingException;
 import java.text.MessageFormat;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -61,6 +66,7 @@ public class DefaultSendingEmailService implements SendingEmailService {
     private final EmailLogRepository emailLogRepository;
     private final EmailConsentReader emailConsentReader;
     private final ConsentEmails consentEmails;
+    private final NotificationMessages notificationMessages;
 
     @Override
     @Async
@@ -277,6 +283,44 @@ public class DefaultSendingEmailService implements SendingEmailService {
     }
 
     @Override
+    @Async
+    public void sendDeadLinksEmail(final DeadLinksEmail deadLinks) {
+        final var type = NotificationType.DEAD_LINK_EMAIL;
+        final var count = deadLinks.links().size();
+        final var subject = count == 1 ? "1 of your links looks broken" : "%d of your links look broken".formatted(count);
+        final var message = notificationMessages.linkDead(deadLinks.links());
+        final var unsubscribePage = consentEmails.unsubscribePage(deadLinks.userId(), type);
+        final var ctx = new Context();
+        ctx.setVariable("headline", subject);
+        ctx.setVariable("links", deadLinks.links().stream().limit(NotificationMessages.MOST_LINKS).map(this::deadLinkLine).toList());
+        ctx.setVariable("more_links", message.moreCount());
+        ctx.setVariable("dashboard_url", deadLinks.dashboardUrl());
+        ctx.setVariable("unsubscribe_page", unsubscribePage);
+        ctx.setVariable("settings_page", consentEmails.settingsPage());
+        ctx.setVariable("app_name", appProperties.getAppName());
+
+        final var htmlContent = templateEngine.process("dead_links", ctx);
+        final var plainLines = new ArrayList<>(message.lines());
+        if (message.moreCount() > 0) {
+            plainLines.add("and " + message.moreCount() + " more");
+        }
+
+        final var email = Email.builder()
+                .sender(appProperties.getEmailSenderAddress())
+                .receivers(new String[]{deadLinks.email()})
+                .subject(subject)
+                .plainText(subject + "\n\n" + String.join("\n", plainLines) + "\n\nOpen your links: " + deadLinks.dashboardUrl()
+                        + "\n\nYou get this because you turned on dead-link emails.\nTurn off dead-link emails: " + unsubscribePage)
+                .text(htmlContent)
+                .build();
+
+        tryToSendConsentedEmail(email, deadLinks.userId(), type);
+    }
+
+    public record DeadLinkLine(String target, String detail) {
+    }
+
+    @Override
     public EmailLog resendEmail(final Long emailLogId) {
         final var failed = emailLogRepository.findById(emailLogId)
                 .orElseThrow(() -> new EmailLogNotFoundException("Email log entry doesn't exist"));
@@ -432,6 +476,11 @@ public class DefaultSendingEmailService implements SendingEmailService {
             return "No decisions waiting on hrva.cc, but there's news";
         }
         return openCount == 1 ? "1 decision waiting on hrva.cc" : "%d decisions waiting on hrva.cc".formatted(openCount);
+    }
+
+    private DeadLinkLine deadLinkLine(final DeadLink link) {
+        return new DeadLinkLine(notificationMessages.target(link),
+                "Since " + notificationMessages.dayText(link.deadSince()) + ", " + DestinationStatusWords.of(link.lastStatus()));
     }
 
     private String shortLinkHost() {

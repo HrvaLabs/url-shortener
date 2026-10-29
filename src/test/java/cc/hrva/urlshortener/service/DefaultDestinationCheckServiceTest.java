@@ -54,6 +54,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -71,6 +72,9 @@ class DefaultDestinationCheckServiceTest {
 
     @Mock
     private DestinationCheckRepository repository;
+
+    @Mock
+    private DeadLinkNotificationService deadLinkNotificationService;
 
     private final MutableClock clock = new MutableClock(NOW);
     private final AppProperties appProperties = new AppProperties();
@@ -510,6 +514,41 @@ class DefaultDestinationCheckServiceTest {
         verify(repository).findDue(eq(TONIGHT_STARTED), eq(200), any());
     }
 
+    @Test
+    void runNightlyHandsTheOutcomeToTheDeadLinkNotices() {
+        final var dying = due(7L, "https://example.com/menu", 2, null, 40L);
+        final var recovering = due(8L, "https://example.org/list", 4, DEAD_SINCE, 41L);
+        answers.put(dying.longUrl(), NOT_FOUND);
+        answers.put(recovering.longUrl(), ALIVE);
+        batches(List.of(dying, recovering));
+
+        service.runNightly();
+
+        verify(deadLinkNotificationService).notify(new DestinationCheckOutcome(
+                List.of(new DeadLink(7L, 40L, "menu", "example.com", NOW_UTC, "404")),
+                List.of(new DeadLink(8L, 41L, "list", "example.org", DEAD_SINCE, null)),
+                NIGHT));
+    }
+
+    @Test
+    void aTurnedOffCheckHandsOverAnEmptyOutcome() {
+        appProperties.getDestinationCheck().setEnabled(false);
+
+        service.runNightly();
+
+        verify(deadLinkNotificationService).notify(DestinationCheckOutcome.nothing(NIGHT));
+    }
+
+    @Test
+    void checkAllAloneNotifiesNobody() {
+        batches(List.of(due(7L, "https://example.com/menu", 2, null, 40L)));
+        answers.put("https://example.com/menu", NOT_FOUND);
+
+        service.checkAll();
+
+        verifyNoInteractions(deadLinkNotificationService);
+    }
+
     private DestinationCheckService newService() {
         final var canary = new NetworkCanary(host -> {
             if (!networkUp.get()) {
@@ -518,7 +557,7 @@ class DefaultDestinationCheckServiceTest {
             return new InetAddress[] {InetAddress.getByAddress(host, new byte[] {93, (byte) 184, (byte) 215, 14})};
         }, clock);
         return new DefaultDestinationCheckService(repository, prober, canary, new AnalyticsDays(clock, appProperties), appProperties,
-                sleeps::add, clock);
+                sleeps::add, deadLinkNotificationService, clock);
     }
 
     private ProbeResult answer(final String url, final Consumer<String> beforeEachRequest) {

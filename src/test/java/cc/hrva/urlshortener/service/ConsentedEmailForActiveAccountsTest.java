@@ -14,6 +14,7 @@ import cc.hrva.urlshortener.service.impl.DefaultEmailService;
 import cc.hrva.urlshortener.service.impl.DefaultSendingEmailService;
 import cc.hrva.urlshortener.service.notification.ConsentEmails;
 import cc.hrva.urlshortener.service.notification.EmailConsentReader;
+import cc.hrva.urlshortener.service.notification.NotificationMessages;
 import java.time.LocalDateTime;
 import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
@@ -75,6 +76,9 @@ class ConsentedEmailForActiveAccountsTest {
 
     @MockitoBean
     private TemplateEngine templateEngine;
+
+    @MockitoBean
+    private NotificationMessages notificationMessages;
 
     private User owner;
 

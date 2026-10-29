@@ -23,6 +23,7 @@ public interface NotificationChannelRepository extends JpaRepository<Notificatio
     @Query("""
             select ch from NotificationChannel ch join fetch ch.owner
             where ch.enabled = true
+              and ch.owner.active = true
               and ch.id in (select c.channelId from NotificationConsent c where c.type = :event and c.revokedAt is null)
               and ch.owner.id in :userIds
             order by ch.id
@@ -32,6 +33,7 @@ public interface NotificationChannelRepository extends JpaRepository<Notificatio
     @Query("""
             select distinct ch.owner.id from NotificationChannel ch
             where ch.enabled = true
+              and ch.owner.active = true
               and ch.id in (select c.channelId from NotificationConsent c where c.type = :event and c.revokedAt is null)
             """)
     List<Long> findOwnerIdsWithEnabledEvent(@Param("event") NotificationType event);

@@ -4,6 +4,7 @@ import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.dto.DecisionsDigest;
 import cc.hrva.urlshortener.dto.LinkDigestEntry;
 import cc.hrva.urlshortener.dto.WeeklyDigest;
+import cc.hrva.urlshortener.dto.notification.DeadLinksEmail;
 import cc.hrva.urlshortener.dto.stats.CountEntry;
 import cc.hrva.urlshortener.exception.EmailLogNotFoundException;
 import cc.hrva.urlshortener.exception.EmailNotResendableException;
@@ -18,9 +19,12 @@ import cc.hrva.urlshortener.repository.EmailLogRepository;
 import cc.hrva.urlshortener.service.impl.DefaultEmailService;
 import cc.hrva.urlshortener.service.impl.DefaultSendingEmailService;
 import cc.hrva.urlshortener.service.notification.ConsentEmails;
+import cc.hrva.urlshortener.service.notification.DestinationCheckOutcome.DeadLink;
 import cc.hrva.urlshortener.service.notification.EmailConsentReader;
+import cc.hrva.urlshortener.service.notification.NotificationMessages;
 import cc.hrva.urlshortener.service.notification.NotificationTestKeys;
 import cc.hrva.urlshortener.service.notification.UnsubscribeTokens;
+import java.time.Clock;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -92,7 +96,7 @@ class DefaultSendingEmailServiceTest {
         appProperties.setServerUrl("https://hrva.cc");
         appProperties.setFrontendUrl("https://app.hrva.cc");
         sendingEmailService = new DefaultSendingEmailService(appProperties, templateEngine, emailService, emailLogRepository,
-                emailConsentReader, new ConsentEmails(unsubscribeTokens, appProperties));
+                emailConsentReader, new ConsentEmails(unsubscribeTokens, appProperties), new NotificationMessages(appProperties, Clock.systemUTC()));
     }
 
     private void saveReturnsArgument() {
@@ -115,7 +119,7 @@ class DefaultSendingEmailServiceTest {
         appProperties.setDeactivateUserAccountAfterDays(180L);
         appProperties.setResetTokenExpirationInHours(1L);
         return new DefaultSendingEmailService(appProperties, engine, emailService, emailLogRepository,
-                emailConsentReader, new ConsentEmails(unsubscribeTokens, appProperties));
+                emailConsentReader, new ConsentEmails(unsubscribeTokens, appProperties), new NotificationMessages(appProperties, Clock.systemUTC()));
     }
 
     private static TemplateEngine realTemplateEngine() {
@@ -852,6 +856,80 @@ class DefaultSendingEmailServiceTest {
         assertThat(lastSavedEntry().getConsentType()).isNull();
         assertThat(lastSavedEntry().getUserId()).isNull();
         verifyNoInteractions(emailConsentReader);
+    }
+
+    @Test
+    void deadLinksEmailNeedsConsent() throws Exception {
+        when(emailConsentReader.hasActiveEmailConsent(7L, NotificationType.DEAD_LINK_EMAIL)).thenReturn(false);
+
+        configuredEmailService(realTemplateEngine()).sendDeadLinksEmail(deadLinksEmail("example.com", "abc"));
+
+        verify(emailService, never()).sendEmail(any(Email.class), any());
+        verify(emailLogRepository, never()).save(any(EmailLog.class));
+    }
+
+    @Test
+    void deadLinksEmailListsEachLinkWithItsDayAndWhatWentWrong() throws Exception {
+        final var email = sentDeadLinksEmail(deadLinksEmail("example.com", "abc", "menu"));
+
+        final var token = unsubscribeTokens.issue(7L, NotificationType.DEAD_LINK_EMAIL);
+        assertThat(email.getReceivers()).containsExactly("alice@example.com");
+        assertThat(email.getSubject()).isEqualTo("2 of your links look broken");
+        assertThat(textOf(email.getText())).contains(
+                "hrva.cc/abc → example.com Since 27 October 2026, the page wasn't found (404)",
+                "hrva.cc/menu → example.com Since 27 October 2026, the page wasn't found (404)",
+                "Open your links",
+                "You get this because you turned on dead-link emails.",
+                "Turn off dead-link emails",
+                "Notification settings");
+        assertThat(linksIn(email.getText())).containsExactly(
+                "https://hrva.cc/dashboard",
+                "https://hrva.cc/unsubscribe?token=" + token,
+                "https://hrva.cc/dashboard/settings#notifications");
+        assertThat(email.getPlainText()).isEqualTo("""
+                2 of your links look broken
+
+                hrva.cc/abc → example.com, since 27 October 2026, the page wasn't found (404)
+                hrva.cc/menu → example.com, since 27 October 2026, the page wasn't found (404)
+
+                Open your links: https://hrva.cc/dashboard
+
+                You get this because you turned on dead-link emails.
+                Turn off dead-link emails: https://hrva.cc/unsubscribe?token=%s""".formatted(token));
+        assertThat(email.getHeaders()).containsEntry("List-Unsubscribe", "<https://hrva.cc/api/v1/notifications/unsubscribe?token=" + token + ">")
+                .containsEntry("List-Unsubscribe-Post", "List-Unsubscribe=One-Click");
+        assertThat(lastSavedEntry().getConsentType()).isEqualTo(NotificationType.DEAD_LINK_EMAIL);
+        assertThat(lastSavedEntry().getUserId()).isEqualTo(7L);
+    }
+
+    @Test
+    void oneDeadLinkIsSingularInTheSubject() throws Exception {
+        assertThat(sentDeadLinksEmail(deadLinksEmail("example.com", "abc")).getSubject()).isEqualTo("1 of your links looks broken");
+    }
+
+    @Test
+    void deadLinksTemplateEscapesValues() throws Exception {
+        final var email = sentDeadLinksEmail(deadLinksEmail("<b>x</b>.example", "abc"));
+
+        assertThat(email.getText()).doesNotContain("<b>x</b>").contains("hrva.cc/abc → &lt;b&gt;x&lt;/b&gt;.example");
+    }
+
+    private Email sentDeadLinksEmail(final DeadLinksEmail deadLinks) throws Exception {
+        saveReturnsArgument();
+        when(emailConsentReader.hasActiveEmailConsent(7L, NotificationType.DEAD_LINK_EMAIL)).thenReturn(true);
+        final var sent = ArgumentCaptor.forClass(Email.class);
+        doAnswer(invocation -> null).when(emailService).sendEmail(sent.capture(), eq(null));
+
+        configuredEmailService(realTemplateEngine()).sendDeadLinksEmail(deadLinks);
+
+        return sent.getValue();
+    }
+
+    private static DeadLinksEmail deadLinksEmail(final String host, final String... aliases) {
+        final var links = IntStream.range(0, aliases.length)
+                .mapToObj(index -> new DeadLink(index + 1L, 7L, aliases[index], host, LocalDateTime.of(2026, 10, 26, 23, 30), "404"))
+                .toList();
+        return new DeadLinksEmail(7L, "alice@example.com", links, "https://hrva.cc/dashboard");
     }
 
     private static Email consentedEmail() {

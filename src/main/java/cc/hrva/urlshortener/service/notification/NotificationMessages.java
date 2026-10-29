@@ -43,12 +43,12 @@ public class NotificationMessages {
 
     public NotificationMessage linkDead(final List<DeadLink> links) {
         final var title = links.size() == 1 ? "hrva.cc: 1 link looks broken" : "hrva.cc: %d links look broken".formatted(links.size());
-        return listed(title, links, link -> link(link) + ", since " + DAY.format(day(link.deadSince())) + ", " + DestinationStatusWords.of(link.lastStatus()));
+        return listed(title, links, link -> target(link) + ", since " + dayText(link.deadSince()) + ", " + DestinationStatusWords.of(link.lastStatus()));
     }
 
     public NotificationMessage linkBack(final List<DeadLink> links) {
         final var title = links.size() == 1 ? "hrva.cc: 1 link works again" : "hrva.cc: %d links work again".formatted(links.size());
-        return listed(title, links, link -> link(link) + ", works again after looking broken since " + DAY.format(day(link.deadSince())));
+        return listed(title, links, link -> target(link) + ", works again after looking broken since " + dayText(link.deadSince()));
     }
 
     public NotificationMessage test(final NotificationChannel channel) {
@@ -74,6 +74,19 @@ public class NotificationMessages {
         return stored.atZone(clock.getZone()).withZoneSameInstant(appProperties.getAnalytics().getZone()).toLocalDate();
     }
 
+    public String dayText(final LocalDateTime stored) {
+        return DAY.format(day(stored));
+    }
+
+    public String target(final DeadLink link) {
+        return target(link.shortUrl(), link.destinationHost());
+    }
+
+    public String target(final String alias, final String destinationHost) {
+        final var host = StringUtils.isBlank(destinationHost) ? UNREADABLE_DESTINATION : destinationHost;
+        return shortLinkHost() + "/" + alias + ARROW + host;
+    }
+
     public String shortLinkHost() {
         final var serverUrl = StringUtils.removeEnd(StringUtils.defaultString(appProperties.getServerUrl()), "/");
         return serverUrl.contains("://") ? StringUtils.substringAfter(serverUrl, "://") : serverUrl;
@@ -88,10 +101,6 @@ public class NotificationMessages {
         return new NotificationMessage(title, lines, frontendPage(DASHBOARD), links.size() - lines.size());
     }
 
-    private String link(final DeadLink link) {
-        final var host = StringUtils.isBlank(link.destinationHost()) ? UNREADABLE_DESTINATION : link.destinationHost();
-        return shortLinkHost() + "/" + link.shortUrl() + ARROW + host;
-    }
 
     private static String joined(final NotificationMessage message, final Format format, final List<String> lines, final int shown) {
         final var parts = new ArrayList<String>();

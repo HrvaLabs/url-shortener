@@ -359,6 +359,28 @@ class NotificationSchemaTest {
     }
 
     @Test
+    void aDeactivatedOwnersChannelsAreLeftOut() {
+        final var ana = savedUser("ana@example.com");
+        final var bob = savedUser("bob@example.com");
+        final var anasChannel = savedChannel(ana, "Ana's");
+        final var bobsChannel = savedChannel(bob, "Bob's");
+        notificationConsentRepository.saveAndFlush(channelConsent(ana, anasChannel, NotificationType.DAILY_SUMMARY).build());
+        notificationConsentRepository.saveAndFlush(channelConsent(bob, bobsChannel, NotificationType.DAILY_SUMMARY).build());
+        jdbcTemplate.update("update user_account set active = false where id = ?", bob.getId());
+        entityManager.clear();
+
+        assertThat(notificationChannelRepository.findEnabledWithEvent(NotificationType.DAILY_SUMMARY, List.of(ana.getId(), bob.getId())))
+                .extracting(NotificationChannel::getId)
+                .containsExactly(anasChannel.getId());
+        assertThat(notificationChannelRepository.findOwnerIdsWithEnabledEvent(NotificationType.DAILY_SUMMARY)).containsExactly(ana.getId());
+
+        jdbcTemplate.update("update user_account set active = true where id = ?", bob.getId());
+
+        assertThat(notificationChannelRepository.findOwnerIdsWithEnabledEvent(NotificationType.DAILY_SUMMARY))
+                .containsExactlyInAnyOrder(ana.getId(), bob.getId());
+    }
+
+    @Test
     void sealedValuesAreLeftOutOfToString() {
         final var channel = channel(User.builder().id(1L).build(), "Team alerts")
                 .targetSealed("v1:target").accessTokenSealed("v1:token").signingSecretSealed("v1:secret").build();

@@ -5,6 +5,7 @@ import cc.hrva.urlshortener.client.ProbeResult;
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.repository.DestinationCheckRepository;
 import cc.hrva.urlshortener.repository.DestinationCheckRepository.DueLink;
+import cc.hrva.urlshortener.service.DeadLinkNotificationService;
 import cc.hrva.urlshortener.service.DestinationCheckService;
 import cc.hrva.urlshortener.service.analytics.AnalyticsDays;
 import cc.hrva.urlshortener.service.notification.DestinationCheckOutcome;
@@ -52,6 +53,7 @@ public class DefaultDestinationCheckService implements DestinationCheckService {
     private final AnalyticsDays analyticsDays;
     private final AppProperties appProperties;
     private final HostPacer.Sleeper hostPacerSleeper;
+    private final DeadLinkNotificationService deadLinkNotificationService;
     private final Clock clock;
     private final AtomicBoolean running = new AtomicBoolean();
 
@@ -78,7 +80,7 @@ public class DefaultDestinationCheckService implements DestinationCheckService {
     @Override
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public void runNightly() {
-        checkAll();
+        deadLinkNotificationService.notify(checkAll());
     }
 
     private enum Verdict {
