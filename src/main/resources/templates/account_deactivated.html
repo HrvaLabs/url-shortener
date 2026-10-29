@@ -1,78 +1,13 @@
 <!DOCTYPE html>
-<html lang="en" xmlns:th="https://www.thymeleaf.org">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="X-UA-Compatible" content="IE=edge">
-  <meta name="x-apple-disable-message-reformatting">
-  <title>Account deactivated</title>
-  <style type="text/css">
-    body, table, td, p, a, li, blockquote {
-      -webkit-text-size-adjust: 100%;
-      -ms-text-size-adjust: 100%;
-    }
-    table, td {
-      mso-table-lspace: 0pt;
-      mso-table-rspace: 0pt;
-    }
-    table {
-      border-collapse: collapse !important;
-    }
-    body {
-      margin: 0;
-      padding: 0;
-      width: 100% !important;
-      height: 100% !important;
-    }
-    @media only screen and (max-width: 600px) {
-      .container { width: 100% !important; }
-      .content { padding: 24px !important; }
-    }
-  </style>
-</head>
-<body style="margin: 0; padding: 0; background-color: #0a0a0a; font-family: 'Georgia', 'Times New Roman', serif;">
-  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background-color: #0a0a0a;">
-    <tr>
-      <td align="center" style="padding: 40px 20px;">
-        <table class="container" role="presentation" width="560" cellspacing="0" cellpadding="0" border="0" style="max-width: 560px;">
-          <!-- Header -->
-          <tr>
-            <td align="center" style="padding: 32px 20px 24px; background-color: #0f0f0f; border-radius: 12px 12px 0 0; border: 1px solid #1a1a1a; border-bottom: none;">
-              <h1 style="margin: 0; font-family: 'Georgia', 'Times New Roman', serif; font-size: 22px; font-weight: 400; color: #a67c00;">Account deactivated</h1>
-            </td>
-          </tr>
-          <!-- Body -->
-          <tr>
-            <td class="content" style="padding: 36px 32px; background-color: #0f0f0f; border-left: 1px solid #1a1a1a; border-right: 1px solid #1a1a1a;">
-              <p style="margin: 0 0 16px; font-family: 'Helvetica', 'Arial', sans-serif; font-size: 15px; line-height: 1.7; color: #d4d4d4;">
-                Hello <strong style="color: #e8e8e8;"><span th:text="${name}"/></strong>,
-              </p>
-              <p style="margin: 0 0 16px; font-family: 'Helvetica', 'Arial', sans-serif; font-size: 15px; line-height: 1.7; color: #d4d4d4;">
-                Your account has been deactivated after <strong style="color: #e8e8e8;" th:text="${days_of_inactivity}"/> days of inactivity. We do this to protect your account security.
-              </p>
-              <p style="margin: 0 0 20px; font-family: 'Helvetica', 'Arial', sans-serif; font-size: 15px; line-height: 1.7; color: #d4d4d4;">
-                If you'd like to reinstate your account, please <a th:href="'mailto:' + ${contact_email}" style="color: #a67c00; text-decoration: none;">contact us</a>.
-              </p>
-
-              <hr style="border: none; border-top: 1px solid #1a1a1a; margin: 24px 0;">
-
-              <p style="margin: 0; font-family: 'Helvetica', 'Arial', sans-serif; font-size: 13px; line-height: 1.6; color: #666;">
-                Best regards,<br>
-                <span style="color: #a67c00;" th:text="${app_name}"/> team
-              </p>
-            </td>
-          </tr>
-          <!-- Footer -->
-          <tr>
-            <td align="center" style="padding: 20px 32px; background-color: #0a0a0a; border: 1px solid #1a1a1a; border-top: none; border-radius: 0 0 12px 12px;">
-              <p style="margin: 0; font-family: 'Helvetica', 'Arial', sans-serif; font-size: 12px; color: #444;">
-                <span th:text="${app_name}"/> &nbsp;&copy;&nbsp; All Rights Reserved
-              </p>
-            </td>
-          </tr>
-        </table>
-      </td>
-    </tr>
-  </table>
+<html lang="en" xmlns:th="https://www.thymeleaf.org"
+      th:replace="~{fragments/email :: layout(title='Account deactivated', heading='Account deactivated', preheader=~{::preheader}, content=~{::content}, footer=~{})}">
+<body>
+<th:block th:fragment="preheader">Your account was deactivated after <th:block th:text="${days_of_inactivity}">180</th:block> days of inactivity. Contact us to reinstate it.</th:block>
+<th:block th:fragment="content">
+  <p class="e-fg" th:style="${s.p}">Hello <strong class="e-fg" th:style="${s.strong}" th:text="${name}">alice@example.com</strong>,</p>
+  <p class="e-fg" th:style="${s.p}">Your account has been deactivated after <strong class="e-fg" th:style="${s.strong}" th:text="${days_of_inactivity}">180</strong> days of inactivity. We do this to protect your account security.</p>
+  <p class="e-fg" th:style="${s.p}">If you'd like to reinstate your account, please <a class="e-lk" th:href="'mailto:' + ${contact_email}" th:style="${s.link}">contact us</a>.</p>
+  <th:block th:replace="~{fragments/email :: signoff}"/>
+</th:block>
 </body>
 </html>

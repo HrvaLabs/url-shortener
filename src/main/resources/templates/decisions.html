@@ -1,174 +1,83 @@
 <!DOCTYPE html>
-<html lang="en" xmlns:th="https://www.thymeleaf.org">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="X-UA-Compatible" content="IE=edge">
-  <meta name="x-apple-disable-message-reformatting">
-  <title th:text="${headline}">Decisions waiting</title>
-  <style type="text/css">
-    body, table, td, p, a, li, blockquote {
-      -webkit-text-size-adjust: 100%;
-      -ms-text-size-adjust: 100%;
-    }
-    table, td {
-      mso-table-lspace: 0pt;
-      mso-table-rspace: 0pt;
-    }
-    table {
-      border-collapse: collapse !important;
-    }
-    body {
-      margin: 0;
-      padding: 0;
-      width: 100% !important;
-      height: 100% !important;
-    }
-    @media only screen and (max-width: 600px) {
-      .container { width: 100% !important; }
-      .content { padding: 24px !important; }
-    }
-  </style>
-</head>
-<body style="margin: 0; padding: 0; background-color: #0a0a0a; font-family: 'Georgia', 'Times New Roman', serif;">
-  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background-color: #0a0a0a;">
-    <tr>
-      <td align="center" style="padding: 40px 20px;">
-        <table class="container" role="presentation" width="560" cellspacing="0" cellpadding="0" border="0" style="max-width: 560px;">
-          <tr>
-            <td align="center" style="padding: 32px 20px 24px; background-color: #0f0f0f; border-radius: 12px 12px 0 0; border: 1px solid #1a1a1a; border-bottom: none;">
-              <h1 style="margin: 0; font-family: 'Georgia', 'Times New Roman', serif; font-size: 22px; font-weight: 400; color: #a67c00;" th:text="${headline}">Decisions waiting</h1>
-            </td>
-          </tr>
-          <tr>
-            <td class="content" style="padding: 36px 32px; background-color: #0f0f0f; border-left: 1px solid #1a1a1a; border-right: 1px solid #1a1a1a;">
+<html lang="en" xmlns:th="https://www.thymeleaf.org"
+      th:replace="~{fragments/email :: layout(title=${headline}, heading=${headline}, preheader=~{::preheader}, content=~{::content}, footer=~{})}">
+<body>
+<th:block th:fragment="preheader">The review queue, automatic blocks and anything else from the last 24 hours that needs a look.</th:block>
+<th:block th:fragment="content">
 
-              <th:block th:if="${digest.openCount > 0}">
-                <p style="margin: 0 0 16px; font-family: 'Helvetica', 'Arial', sans-serif; font-size: 15px; line-height: 1.7; color: #d4d4d4;">
-                  <strong style="color: #e8e8e8;" th:text="${digest.openCount == 1 ? '1 link is' : digest.openCount + ' links are'}"/> waiting in the review queue.
-                  <span th:if="${digest.reportedCount > 0}" th:text="${digest.reportedCount + ' reported by visitors.'}"/>
-                </p>
-                <p style="margin: 0 0 8px; font-family: 'Helvetica', 'Arial', sans-serif; font-size: 13px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: #a67c00;">Newest in the queue</p>
-                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
-                  <tr th:each="entry : ${digest.newestOpen}">
-                    <td style="padding: 12px 0; border-top: 1px solid #1a1a1a;">
-                      <p style="margin: 0 0 4px; font-family: 'Helvetica', 'Arial', sans-serif; font-size: 14px; line-height: 1.6; color: #d4d4d4;">
-                        <code style="font-size: 13px; color: #a67c00; background: #1a1a1a; padding: 2px 8px; border-radius: 4px;" th:text="${short_link_host + '/' + entry.shortUrl}"/>
-                        <span style="color: #999;" th:text="${entry.destination}"/>
-                      </p>
-                      <p style="margin: 0 0 4px; font-family: 'Helvetica', 'Arial', sans-serif; font-size: 13px; line-height: 1.6; color: #999;">
-                        Owner: <span style="color: #d4d4d4;" th:text="${entry.ownerEmail != null ? entry.ownerEmail : 'anonymous'}"/>
-                      </p>
-                      <p style="margin: 0 0 4px; font-family: 'Helvetica', 'Arial', sans-serif; font-size: 13px; line-height: 1.6; color: #999;">
-                        Why: <span style="color: #d4d4d4;" th:text="${#strings.listJoin(entry.reasons, '; ')}"/>
-                      </p>
-                      <p style="margin: 0; font-family: 'Helvetica', 'Arial', sans-serif; font-size: 13px; line-height: 1.6;">
-                        <a th:href="@{${review_page}(entry=${entry.reviewUrlId})}" target="_blank" style="color: #a67c00;">Review this link</a>
-                      </p>
-                    </td>
-                  </tr>
-                </table>
-                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
-                  <tr>
-                    <td align="center" style="padding: 20px 0 4px;">
-                      <a th:href="@{${review_page}}" target="_blank"
-                         style="display: inline-block; padding: 13px 36px; font-family: 'Helvetica', 'Arial', sans-serif; font-size: 14px; font-weight: 600; color: #0a0a0a; text-decoration: none; background-color: #a67c00; border-radius: 8px;">
-                        Open the review queue
-                      </a>
-                    </td>
-                  </tr>
-                </table>
-              </th:block>
+  <th:block th:if="${digest.openCount > 0}">
+    <p class="e-fg" th:style="${s.p}"><strong class="e-fg" th:style="${s.strong}" th:text="${digest.openCount == 1 ? '1 link is' : digest.openCount + ' links are'}">2 links are</strong> waiting in the review queue. <span th:if="${digest.reportedCount > 0}" th:text="${digest.reportedCount + ' reported by visitors.'}">2 reported by visitors.</span></p>
+    <h2 class="e-fg" th:style="${s.h2} + 'margin-top: 24px;'">Newest in the queue</h2>
+    <table class="e-bd" role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" th:style="${s.panel}">
+      <tr th:each="entry, it : ${digest.newestOpen}">
+        <td class="e-fg e-bd" th:style="${it.first} ? ${s.row} : ${s.rowNext}">
+          <span class="e-lk mono" th:style="${s.short}" th:text="${short_link_host + '/' + entry.shortUrl}">hrva.cc/abc</span>
+          <span class="e-mu" th:style="${s.detail}" th:text="${entry.destination}">example.com/page</span>
+          <span class="e-mu" th:style="${s.detail} + 'margin-top: 8px;'">Owner: <span class="e-fg" th:style="${s.strong} + 'font-weight: 400;'" th:text="${entry.ownerEmail != null ? entry.ownerEmail : 'anonymous'}">anonymous</span></span>
+          <span class="e-mu" th:style="${s.detail}">Why: <span class="e-fg" th:style="${s.strong} + 'font-weight: 400;'" th:text="${#strings.listJoin(entry.reasons, '; ')}">reported by a visitor</span></span>
+          <span th:style="${s.detail} + 'margin-top: 8px;'"><a class="e-lk" th:href="@{${review_page}(entry=${entry.reviewUrlId})}" target="_blank" th:style="${s.link}">Review this link</a></span>
+        </td>
+      </tr>
+    </table>
+    <th:block th:replace="~{fragments/email :: button(@{${review_page}}, 'Open the review queue')}"/>
+  </th:block>
 
-              <th:block th:if="${digest.openBioPageReviews > 0}">
-                <p style="margin: 0 0 16px; font-family: 'Helvetica', 'Arial', sans-serif; font-size: 15px; line-height: 1.7; color: #d4d4d4;">
-                  <strong style="color: #e8e8e8;" th:text="${digest.openBioPageReviews == 1 ? '1 bio page is' : digest.openBioPageReviews + ' bio pages are'}"/> waiting in the review queue.
-                  <a th:href="${review_page + '#bio-pages'}" target="_blank" style="color: #a67c00;">Review bio pages</a>
-                </p>
-              </th:block>
+  <th:block th:if="${digest.openBioPageReviews > 0}">
+    <p class="e-fg" th:style="${s.p} + (${digest.openCount > 0} ? 'margin-top: 24px;' : '')"><strong class="e-fg" th:style="${s.strong}" th:text="${digest.openBioPageReviews == 1 ? '1 bio page is' : digest.openBioPageReviews + ' bio pages are'}">1 bio page is</strong> waiting in the review queue. <a class="e-lk" th:href="${review_page + '#bio-pages'}" target="_blank" th:style="${s.link}">Review bio pages</a></p>
+  </th:block>
 
-              <th:block th:unless="${digest.openCount > 0 or digest.openBioPageReviews > 0}">
-                <p style="margin: 0 0 16px; font-family: 'Helvetica', 'Arial', sans-serif; font-size: 15px; line-height: 1.7; color: #d4d4d4;">
-                  The review queue is empty, but something happened that you should know about.
-                </p>
-              </th:block>
+  <th:block th:unless="${digest.openCount > 0 or digest.openBioPageReviews > 0}">
+    <p class="e-fg" th:style="${s.p}">The review queue is empty, but something happened that you should know about.</p>
+  </th:block>
 
-              <th:block th:unless="${#lists.isEmpty(digest.possibleScammers)}">
-                <p style="margin: 28px 0 8px; font-family: 'Helvetica', 'Arial', sans-serif; font-size: 13px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: #a67c00;">Possible scammers</p>
-                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
-                  <tr th:each="scammer : ${digest.possibleScammers}">
-                    <td style="padding: 8px 0; border-top: 1px solid #1a1a1a;">
-                      <p style="margin: 0 0 4px; font-family: 'Helvetica', 'Arial', sans-serif; font-size: 14px; line-height: 1.6; color: #d4d4d4;" th:text="${scammer.email}"/>
-                      <p style="margin: 0; font-family: 'Helvetica', 'Arial', sans-serif; font-size: 13px; line-height: 1.6; color: #999;" th:text="${'Links: ' + scammer.blockedLinks + ' blocked, ' + scammer.flaggedLinks + ' flagged'}"/>
-                    </td>
-                  </tr>
-                </table>
-              </th:block>
+  <th:block th:unless="${#lists.isEmpty(digest.possibleScammers)}">
+    <h2 class="e-fg" th:style="${s.h2}">Possible scammers</h2>
+    <table class="e-bd" role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" th:style="${s.panel}">
+      <tr th:each="scammer, it : ${digest.possibleScammers}">
+        <td class="e-fg e-bd" th:style="${it.first} ? ${s.row} : ${s.rowNext}"><span th:text="${scammer.email}">scammer@example.com</span>
+          <span class="e-mu" th:style="${s.detail}" th:text="${'Links: ' + scammer.blockedLinks + ' blocked, ' + scammer.flaggedLinks + ' flagged'}">Links: 1 blocked, 2 flagged</span></td>
+      </tr>
+    </table>
+  </th:block>
 
-              <th:block th:unless="${#lists.isEmpty(digest.autoBlocked)}">
-                <p style="margin: 28px 0 8px; font-family: 'Helvetica', 'Arial', sans-serif; font-size: 13px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: #a67c00;">Blocked automatically in the last 24 hours</p>
-                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
-                  <tr th:each="blocked : ${digest.autoBlocked}">
-                    <td style="padding: 8px 0; border-top: 1px solid #1a1a1a;">
-                      <p style="margin: 0 0 4px; font-family: 'Helvetica', 'Arial', sans-serif; font-size: 14px; line-height: 1.6; color: #d4d4d4;">
-                        <code style="font-size: 13px; color: #a67c00; background: #1a1a1a; padding: 2px 8px; border-radius: 4px;" th:text="${short_link_host + '/' + blocked.shortUrl}"/>
-                        <span style="color: #999;" th:text="${blocked.destination}"/>
-                      </p>
-                      <p style="margin: 0; font-family: 'Helvetica', 'Arial', sans-serif; font-size: 13px; line-height: 1.6; color: #999;">
-                        Blocked by <span style="color: #d4d4d4;" th:text="${blocked.reason}"/>
-                      </p>
-                    </td>
-                  </tr>
-                </table>
-              </th:block>
+  <th:block th:unless="${#lists.isEmpty(digest.autoBlocked)}">
+    <h2 class="e-fg" th:style="${s.h2}">Blocked automatically in the last 24 hours</h2>
+    <table class="e-bd" role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" th:style="${s.panel}">
+      <tr th:each="blocked, it : ${digest.autoBlocked}">
+        <td class="e-fg e-bd" th:style="${it.first} ? ${s.row} : ${s.rowNext}">
+          <span class="e-lk mono" th:style="${s.short}" th:text="${short_link_host + '/' + blocked.shortUrl}">hrva.cc/promo</span>
+          <span class="e-mu" th:style="${s.detail}" th:text="${blocked.destination}">example.com/login</span>
+          <span class="e-mu" th:style="${s.detail} + 'margin-top: 8px;'">Blocked by <span class="e-fg" th:style="${s.strong} + 'font-weight: 400;'" th:text="${blocked.reason}">a blocklist</span></span>
+        </td>
+      </tr>
+    </table>
+  </th:block>
 
-              <th:block th:unless="${#lists.isEmpty(digest.failingSources)}">
-                <p style="margin: 28px 0 8px; font-family: 'Helvetica', 'Arial', sans-serif; font-size: 13px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: #dc2626;">Lists that failed to load</p>
-                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
-                  <tr th:each="source : ${digest.failingSources}">
-                    <td style="padding: 8px 0; border-top: 1px solid #1a1a1a;">
-                      <p style="margin: 0 0 4px; font-family: 'Helvetica', 'Arial', sans-serif; font-size: 14px; line-height: 1.6; color: #e8e8e8;" th:text="${source.name}"/>
-                      <p style="margin: 0; font-family: 'Helvetica', 'Arial', sans-serif; font-size: 13px; line-height: 1.6; color: #999;" th:text="${source.lastError}"/>
-                    </td>
-                  </tr>
-                </table>
-                <p style="margin: 12px 0 0; font-family: 'Helvetica', 'Arial', sans-serif; font-size: 13px; line-height: 1.6;">
-                  <a th:href="@{${blocklists_page}}" target="_blank" style="color: #a67c00;">Open Blocklists</a>
-                </p>
-              </th:block>
+  <th:block th:unless="${#lists.isEmpty(digest.failingSources)}">
+    <h2 class="e-de" th:style="${s.h2} + 'color: #ca2121;'">Lists that failed to load</h2>
+    <table class="e-bd" role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" th:style="${s.panel} + 'margin-bottom: 12px;'">
+      <tr th:each="source, it : ${digest.failingSources}">
+        <td class="e-fg e-bd" th:style="${it.first} ? ${s.row} : ${s.rowNext}"><strong class="e-fg" th:style="${s.strong}" th:text="${source.name}">HaGeZi Fake</strong>
+          <span class="e-mu" th:style="${s.detail}" th:text="${source.lastError}">HTTP 503 from every mirror</span></td>
+      </tr>
+    </table>
+    <p class="e-fg" th:style="${s.small}"><a class="e-lk" th:href="@{${blocklists_page}}" target="_blank" th:style="${s.link}">Open Blocklists</a></p>
+  </th:block>
 
-              <th:block th:unless="${#lists.isEmpty(digest.newAccountLinks)}">
-                <p style="margin: 28px 0 8px; font-family: 'Helvetica', 'Arial', sans-serif; font-size: 13px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: #a67c00;">Links from accounts younger than 7 days</p>
-                <p style="margin: 0 0 8px; font-family: 'Helvetica', 'Arial', sans-serif; font-size: 13px; line-height: 1.6; color: #666;">
-                  For information only. These links were created in the last 24 hours and don't need a decision.
-                </p>
-                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
-                  <tr th:each="link : ${digest.newAccountLinks}">
-                    <td style="padding: 8px 0; border-top: 1px solid #1a1a1a;">
-                      <p style="margin: 0 0 4px; font-family: 'Helvetica', 'Arial', sans-serif; font-size: 14px; line-height: 1.6; color: #d4d4d4;">
-                        <code style="font-size: 13px; color: #a67c00; background: #1a1a1a; padding: 2px 8px; border-radius: 4px;" th:text="${short_link_host + '/' + link.shortUrl}"/>
-                        <span style="color: #999;" th:text="${link.destination}"/>
-                      </p>
-                      <p style="margin: 0; font-family: 'Helvetica', 'Arial', sans-serif; font-size: 13px; line-height: 1.6; color: #999;">
-                        Owner: <span style="color: #d4d4d4;" th:text="${link.ownerEmail}"/>
-                      </p>
-                    </td>
-                  </tr>
-                </table>
-              </th:block>
+  <th:block th:unless="${#lists.isEmpty(digest.newAccountLinks)}">
+    <h2 class="e-fg" th:style="${s.h2}">Links from accounts younger than 7 days</h2>
+    <p class="e-mu" th:style="${s.small} + 'margin-bottom: 12px;'">For information only. These links were created in the last 24 hours and don't need a decision.</p>
+    <table class="e-bd" role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" th:style="${s.panel} + 'margin-bottom: 0;'">
+      <tr th:each="link, it : ${digest.newAccountLinks}">
+        <td class="e-fg e-bd" th:style="${it.first} ? ${s.row} : ${s.rowNext}">
+          <span class="e-lk mono" th:style="${s.short}" th:text="${short_link_host + '/' + link.shortUrl}">hrva.cc/fresh</span>
+          <span class="e-mu" th:style="${s.detail}" th:text="${link.destination}">example.com/fresh</span>
+          <span class="e-mu" th:style="${s.detail} + 'margin-top: 8px;'">Owner: <span class="e-fg" th:style="${s.strong} + 'font-weight: 400;'" th:text="${link.ownerEmail}">newcomer@example.com</span></span>
+        </td>
+      </tr>
+    </table>
+  </th:block>
 
-            </td>
-          </tr>
-          <tr>
-            <td align="center" style="padding: 20px 32px; background-color: #0a0a0a; border: 1px solid #1a1a1a; border-top: none; border-radius: 0 0 12px 12px;">
-              <p style="margin: 0; font-family: 'Helvetica', 'Arial', sans-serif; font-size: 12px; color: #444;">
-                <span th:text="${app_name}"/> &nbsp;&copy;&nbsp; All Rights Reserved
-              </p>
-            </td>
-          </tr>
-        </table>
-      </td>
-    </tr>
-  </table>
+</th:block>
 </body>
 </html>

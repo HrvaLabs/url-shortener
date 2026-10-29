@@ -1,92 +1,21 @@
 <!DOCTYPE html>
-<html lang="en" xmlns:th="https://www.thymeleaf.org">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="X-UA-Compatible" content="IE=edge">
-  <meta name="x-apple-disable-message-reformatting">
-  <title th:text="${headline}">Links that look broken</title>
-  <style type="text/css">
-    body, table, td, p, a, li, blockquote {
-      -webkit-text-size-adjust: 100%;
-      -ms-text-size-adjust: 100%;
-    }
-    table, td {
-      mso-table-lspace: 0pt;
-      mso-table-rspace: 0pt;
-    }
-    table {
-      border-collapse: collapse !important;
-    }
-    body {
-      margin: 0;
-      padding: 0;
-      width: 100% !important;
-      height: 100% !important;
-    }
-    @media only screen and (max-width: 600px) {
-      .container { width: 100% !important; }
-      .content { padding: 24px !important; }
-    }
-  </style>
-</head>
-<body style="margin: 0; padding: 0; background-color: #0a0a0a; font-family: 'Georgia', 'Times New Roman', serif;">
-  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background-color: #0a0a0a;">
-    <tr>
-      <td align="center" style="padding: 40px 20px;">
-        <table class="container" role="presentation" width="560" cellspacing="0" cellpadding="0" border="0" style="max-width: 560px;">
-          <tr>
-            <td align="center" style="padding: 32px 20px 24px; background-color: #0f0f0f; border-radius: 12px 12px 0 0; border: 1px solid #1a1a1a; border-bottom: none;">
-              <h1 style="margin: 0; font-family: 'Georgia', 'Times New Roman', serif; font-size: 22px; font-weight: 400; color: #a67c00;" th:text="${headline}">Links that look broken</h1>
-            </td>
-          </tr>
-          <tr>
-            <td class="content" style="padding: 36px 32px; background-color: #0f0f0f; border-left: 1px solid #1a1a1a; border-right: 1px solid #1a1a1a;">
-              <p style="margin: 0 0 20px; font-family: 'Helvetica', 'Arial', sans-serif; font-size: 15px; line-height: 1.7; color: #d4d4d4;">
-                We check where your links lead every night. These didn't work on three different nights:
-              </p>
-              <p th:each="link : ${links}" style="margin: 0 0 14px; font-family: 'Helvetica', 'Arial', sans-serif; font-size: 15px; line-height: 1.6; color: #d4d4d4; overflow-wrap: anywhere;">
-                <strong style="color: #e8e8e8;" th:text="${link.target}">hrva.cc/abc</strong><br>
-                <span style="font-size: 13px; color: #999;" th:text="${link.detail}">Since</span>
-              </p>
-              <p th:if="${more_links > 0}" th:text="|and ${more_links} more|" style="margin: 0 0 14px; font-family: 'Helvetica', 'Arial', sans-serif; font-size: 15px; line-height: 1.6; color: #d4d4d4;">and more</p>
-              <p style="margin: 8px 0 24px; font-family: 'Helvetica', 'Arial', sans-serif; font-size: 15px; line-height: 1.7; color: #d4d4d4;">
-                If a page moved, shorten its new address and turn the old link off on your links page.
-              </p>
-
-              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
-                <tr>
-                  <td align="center" style="padding: 4px 0;">
-                    <a th:href="${dashboard_url}" target="_blank"
-                       style="display: inline-block; padding: 13px 36px; font-family: 'Helvetica', 'Arial', sans-serif; font-size: 14px; font-weight: 600; color: #0a0a0a; text-decoration: none; background-color: #a67c00; border-radius: 8px;">
-                      Open your links
-                    </a>
-                  </td>
-                </tr>
-              </table>
-
-              <hr style="border: none; border-top: 1px solid #1a1a1a; margin: 28px 0 16px;">
-
-              <p style="margin: 0 0 8px; font-family: 'Helvetica', 'Arial', sans-serif; font-size: 12px; line-height: 1.6; color: #666;">
-                You get this because you turned on dead-link emails.
-              </p>
-              <p style="margin: 0; font-family: 'Helvetica', 'Arial', sans-serif; font-size: 12px; line-height: 1.6; color: #666;">
-                <a th:href="${unsubscribe_page}" target="_blank" style="color: #999; text-decoration: underline;">Turn off dead-link emails</a>
-                &nbsp;&middot;&nbsp;
-                <a th:href="${settings_page}" target="_blank" style="color: #999; text-decoration: underline;">Notification settings</a>
-              </p>
-            </td>
-          </tr>
-          <tr>
-            <td align="center" style="padding: 20px 32px; background-color: #0a0a0a; border: 1px solid #1a1a1a; border-top: none; border-radius: 0 0 12px 12px;">
-              <p style="margin: 0; font-family: 'Helvetica', 'Arial', sans-serif; font-size: 12px; color: #444;">
-                <span th:text="${app_name}"/> &nbsp;&copy;&nbsp; All Rights Reserved
-              </p>
-            </td>
-          </tr>
-        </table>
-      </td>
+<html lang="en" xmlns:th="https://www.thymeleaf.org"
+      th:replace="~{fragments/email :: layout(title=${headline}, heading=${headline}, preheader=~{::preheader}, content=~{::content}, footer=~{fragments/email :: consent('You get this because you turned on dead-link emails.', 'Turn off dead-link emails')})}">
+<body>
+<th:block th:fragment="preheader">We check where your links lead every night, and these didn't work on three different nights.</th:block>
+<th:block th:fragment="content">
+  <p class="e-fg" th:style="${s.p}">We check where your links lead every night. These didn't work on three different nights:</p>
+  <table class="e-bd" role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" th:style="${s.panel}">
+    <tr th:each="link, it : ${links}">
+      <td class="e-fg e-bd" th:style="${it.first} ? ${s.row} : ${s.rowNext}"><strong class="e-fg" th:style="${s.strong}" th:text="${link.target}">hrva.cc/abc &rarr; example.com</strong>
+          <span class="e-mu" th:style="${s.detail}" th:text="${link.detail}">Since 27 October 2026, the page wasn't found (404)</span></td>
+    </tr>
+    <tr th:if="${more_links > 0}">
+      <td class="e-mu e-bd" th:style="${s.rowNext} + 'color: #67676f;'" th:text="|and ${more_links} more|">and 3 more</td>
     </tr>
   </table>
+  <p class="e-fg" th:style="${s.p}">If a page moved, shorten its new address and turn the old link off on your links page.</p>
+  <th:block th:replace="~{fragments/email :: button(${dashboard_url}, 'Open your links')}"/>
+</th:block>
 </body>
 </html>

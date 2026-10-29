@@ -479,7 +479,7 @@ class DefaultSendingEmailServiceTest {
                 1. hrva.cc/my_menu → example.com, 120 clicks
 
                 Stats (last 7 days): https://hrva.cc/admin/dashboard?days=7""");
-        assertThat(textOf(email.getText())).startsWith("hrva.cc weekly summary: 19–25 October 2026 "
+        assertThat(textOf(email.getText())).contains("hrva.cc weekly summary: 19–25 October 2026 "
                 + "Clicks: 1,204 (up 12% on the week before) "
                 + "Visitors: 950 (each link's daily visitors, added up) "
                 + "Bots and link previews: 20.0% of all clicks "

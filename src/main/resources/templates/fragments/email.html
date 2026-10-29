@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="https://www.thymeleaf.org" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office"
+      th:fragment="layout(title, heading, preheader, content, footer)">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="x-apple-disable-message-reformatting">
+  <meta name="format-detection" content="telephone=no, date=no, address=no">
+  <meta name="color-scheme" content="light dark">
+  <meta name="supported-color-schemes" content="light dark">
+  <title th:text="${title}">hrva.cc</title>
+  <!--[if mso]><noscript><xml><o:OfficeDocumentSettings><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml></noscript><![endif]-->
+  <!--[if mso]><style>body,table,td,h1,h2,p,a,span,strong{font-family:'Segoe UI',Arial,sans-serif !important;}.mono{font-family:Consolas,'Courier New',monospace !important;}</style><![endif]-->
+  <style>
+    body { margin: 0; padding: 0; width: 100% !important; -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; }
+    table, td { mso-table-lspace: 0pt; mso-table-rspace: 0pt; }
+    a { text-underline-offset: 3px; }
+  </style>
+  <style>
+    @media only screen and (max-width: 520px) {
+      .e-gutter { padding: 24px 12px !important; }
+      .e-inset { padding-left: 20px !important; padding-right: 20px !important; }
+      .e-card { padding: 28px 20px 24px !important; }
+      .e-h1 { font-size: 22px !important; line-height: 28px !important; }
+      .e-btn-table { width: 100% !important; }
+      .e-btn-a { display: block !important; text-align: center !important; }
+    }
+  </style>
+  <style>
+    :root { color-scheme: light dark; supported-color-schemes: light dark; }
+    @media (prefers-color-scheme: dark) {
+      .e-bg { background-color: #09090b !important; }
+      .e-card { background-color: #161618 !important; border-color: #2a2a2d !important; }
+      .e-fg { color: #f5f5f5 !important; }
+      .e-mu { color: #a1a1aa !important; }
+      .e-lk { color: #708fff !important; }
+      .e-bd { border-color: #2a2a2d !important; }
+      .e-chip { background-color: #202022 !important; border-color: #2a2a2d !important; color: #f5f5f5 !important; }
+      .e-de { color: #e76a6a !important; }
+      .e-pill-de { background-color: #2a1c1e !important; color: #e76a6a !important; }
+      .e-btn { background-color: #f5f5f5 !important; }
+      .e-btn-a { color: #131316 !important; }
+      .e-mark { background-color: #f5f5f5 !important; }
+      .e-mark-bar { background-color: #09090b !important; }
+      .e-mark-dot { background-color: #708fff !important; }
+    }
+  </style>
+  <style>
+    [data-ogsc] .e-fg { color: #f5f5f5 !important; }
+    [data-ogsc] .e-mu { color: #a1a1aa !important; }
+    [data-ogsc] .e-lk { color: #708fff !important; }
+    [data-ogsc] .e-de { color: #e76a6a !important; }
+    [data-ogsc] .e-btn-a { color: #131316 !important; }
+    [data-ogsb] .e-bg { background-color: #09090b !important; }
+    [data-ogsb] .e-card { background-color: #161618 !important; }
+    [data-ogsb] .e-btn { background-color: #f5f5f5 !important; }
+    [data-ogsb] .e-chip { background-color: #202022 !important; }
+    [data-ogsb] .e-pill-de { background-color: #2a1c1e !important; }
+  </style>
+</head>
+<body class="e-bg" style="margin: 0; padding: 0; background-color: #f4f4f5;"
+      th:with="sans='font-family: Host Grotesk, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica Neue, Arial, sans-serif; mso-line-height-rule: exactly;',
+               mono='font-family: JetBrains Mono, ui-monospace, SFMono-Regular, Menlo, Consolas, Liberation Mono, monospace;',
+               wrap='word-break: break-word; overflow-wrap: anywhere;',
+               s=${ {
+                 h1: sans + 'margin: 0 0 20px; font-size: 24px; line-height: 30px; font-weight: 650; letter-spacing: -0.02em; color: #0e0e11;',
+                 h2: sans + 'margin: 32px 0 12px; font-size: 18px; line-height: 24px; font-weight: 600; letter-spacing: -0.015em; color: #0e0e11;',
+                 p: sans + wrap + 'margin: 0 0 16px; font-size: 16px; line-height: 26px; color: #0e0e11;',
+                 small: sans + wrap + 'margin: 0 0 8px; font-size: 14px; line-height: 22px; color: #67676f;',
+                 strong: 'font-weight: 600; color: #0e0e11;',
+                 danger: 'font-weight: 600; color: #ca2121;',
+                 link: wrap + 'color: #2453ff; text-decoration: underline;',
+                 short: mono + 'font-size: 14px; font-weight: 500; color: #2453ff; word-break: break-all;',
+                 chip: mono + 'font-size: 14px; color: #0e0e11; background-color: #f4f4f5; border: 1px solid #e4e4e7; border-radius: 6px; padding: 1px 6px; word-break: break-all;',
+                 panel: 'margin: 0 0 20px; border: 1px solid #e4e4e7; border-radius: 10px; border-collapse: separate;',
+                 row: sans + wrap + 'padding: 12px 16px; font-size: 15px; line-height: 24px; color: #0e0e11;',
+                 rowNext: sans + wrap + 'padding: 12px 16px; font-size: 15px; line-height: 24px; color: #0e0e11; border-top: 1px solid #e4e4e7;',
+                 label: sans + 'display: block; margin: 0 0 2px; font-size: 13px; line-height: 20px; color: #67676f;',
+                 detail: sans + wrap + 'display: block; margin: 2px 0 0; font-size: 14px; line-height: 22px; color: #67676f;',
+                 pill: sans + 'display: inline-block; padding: 2px 8px; border-radius: 6px; background-color: #fae9e9; color: #ca2121; font-size: 12px; line-height: 16px; font-weight: 500; white-space: nowrap;',
+                 foot: sans + wrap + 'margin: 0 0 6px; font-size: 13px; line-height: 20px; color: #67676f;',
+                 footLink: wrap + 'color: #67676f; text-decoration: underline;'
+               } }">
+  <div role="article" aria-roledescription="email" lang="en" th:aria-label="${title}">
+    <div style="display: none; max-height: 0; max-width: 0; overflow: hidden; opacity: 0; font-size: 1px; line-height: 1px; mso-hide: all;"><th:block th:replace="${preheader}"/>&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;</div>
+    <table role="presentation" class="e-bg" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#f4f4f5" style="background-color: #f4f4f5;">
+      <tr>
+        <td class="e-gutter" align="center" style="padding: 40px 16px;">
+          <!--[if mso]><table role="presentation" width="600" align="center" cellpadding="0" cellspacing="0" border="0"><tr><td><![endif]-->
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width: 100%; max-width: 600px; margin: 0 auto;">
+            <tr>
+              <td class="e-inset" align="left" style="padding: 0 33px 20px;">
+                <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                  <tr>
+                    <!--[if !mso]><!-->
+                    <td valign="middle" style="padding: 0 8px 0 0;">
+                      <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="28" style="width: 28px;">
+                        <tr>
+                          <td class="e-mark" width="28" height="28" valign="top" bgcolor="#0e0e11" style="width: 28px; height: 28px; background-color: #0e0e11; border-radius: 8px; font-size: 0; line-height: 0;">
+                            <div style="height: 9px; font-size: 0; line-height: 0;">&nbsp;</div>
+                            <div class="e-mark-bar" style="width: 14px; height: 3px; margin: 0 0 0 7px; background-color: #ffffff; border-radius: 2px; font-size: 0; line-height: 0;">&nbsp;</div>
+                            <div style="height: 3px; font-size: 0; line-height: 0;">&nbsp;</div>
+                            <div style="height: 4px; margin: 0 0 0 7px; font-size: 0; line-height: 0; white-space: nowrap;"><span class="e-mark-bar" style="display: inline-block; vertical-align: top; width: 7px; height: 3px; margin: 1px 0 0; background-color: #ffffff; border-radius: 2px; font-size: 0; line-height: 0;">&nbsp;</span><span class="e-mark-dot" style="display: inline-block; vertical-align: top; width: 4px; height: 4px; margin: 0 0 0 3px; background-color: #2453ff; border-radius: 2px; font-size: 0; line-height: 0;">&nbsp;</span></div>
+                          </td>
+                        </tr>
+                      </table>
+                    </td>
+                    <!--<![endif]-->
+                    <td class="e-fg" valign="middle" th:style="${sans} + 'font-size: 18px; line-height: 28px; font-weight: 600; letter-spacing: -0.02em; color: #0e0e11;'">hrva<span class="e-mu" style="color: #67676f;">.cc</span></td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+            <tr>
+              <td class="e-card" align="left" bgcolor="#ffffff" style="padding: 40px 32px 36px; background-color: #ffffff; border: 1px solid #e4e4e7; border-radius: 12px; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);">
+                <h1 class="e-fg e-h1" th:style="${s.h1}" th:text="${heading}">Heading</h1>
+                <th:block th:replace="${content}"/>
+              </td>
+            </tr>
+            <tr>
+              <td class="e-inset" align="left" style="padding: 24px 33px 0;">
+                <th:block th:replace="${footer}"/>
+                <p class="e-mu" th:style="${s.foot}"><span th:text="${app_name}">hrva.cc</span> &middot; A HrvaLabs project</p>
+              </td>
+            </tr>
+          </table>
+          <!--[if mso]></td></tr></table><![endif]-->
+        </td>
+      </tr>
+    </table>
+  </div>
+</body>
+</html>
+
+<table th:fragment="button(href, label)" role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+  <tr>
+    <td align="left" style="padding: 12px 0 4px;">
+      <table class="e-btn-table" role="presentation" cellpadding="0" cellspacing="0" border="0">
+        <tr>
+          <td class="e-btn" align="center" bgcolor="#0e0e11" style="background-color: #0e0e11; border-radius: 10px; mso-padding-alt: 12px 24px;">
+            <a class="e-btn-a" th:href="${href}" target="_blank" th:style="${sans} + 'display: inline-block; padding: 12px 24px; font-size: 15px; line-height: 20px; font-weight: 600; color: #ffffff; text-decoration: none; border-radius: 10px;'" th:text="${label}">Open</a>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>
+
+<table th:fragment="rule" role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+  <tr>
+    <td class="e-bd" height="1" style="padding: 0; height: 1px; border-top: 1px solid #e4e4e7; font-size: 0; line-height: 0;">&nbsp;</td>
+  </tr>
+</table>
+
+<th:block th:fragment="signoff">
+  <p class="e-mu" th:style="${s.small} + 'margin: 28px 0 0;'">Best regards,<br><span th:text="${app_name}">hrva.cc</span> team</p>
+</th:block>
+
+<th:block th:fragment="consent(reason, turn_off)">
+  <p class="e-mu" th:style="${s.foot}" th:text="${reason}">You get this because you turned it on.</p>
+  <p class="e-mu" th:style="${s.foot} + 'margin: 0 0 16px;'"><a class="e-mu" th:href="${unsubscribe_page}" target="_blank" th:style="${s.footLink}" th:text="${turn_off}">Turn it off</a> &middot; <a class="e-mu" th:href="${settings_page}" target="_blank" th:style="${s.footLink}">Notification settings</a></p>
+</th:block>
