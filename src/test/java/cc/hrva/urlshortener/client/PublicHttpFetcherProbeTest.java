@@ -30,6 +30,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Consumer;
 import javax.net.ssl.SSLException;
 import javax.net.ssl.SSLHandshakeException;
 import org.junit.jupiter.api.AfterEach;
@@ -44,6 +45,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class PublicHttpFetcherProbeTest {
 
     private static final Duration BUDGET = Duration.ofSeconds(5);
+    private static final Consumer<String> NO_HOOK = host -> {};
     private static final byte[] PUBLIC_ADDRESS = {93, (byte) 184, (byte) 215, 14};
     private static final byte[] PRIVATE_ADDRESS = {10, 0, 0, 5};
 
@@ -79,7 +81,7 @@ class PublicHttpFetcherProbeTest {
     void okIsAlive() {
         answer("/ok", 200, 200);
 
-        assertThat(fetcher.probe(baseUrl + "/ok", BUDGET)).isEqualTo(new ProbeResult(ProbeOutcome.ALIVE, "ok", 200));
+        assertThat(fetcher.probe(baseUrl + "/ok", BUDGET, NO_HOOK)).isEqualTo(new ProbeResult(ProbeOutcome.ALIVE, "ok", 200));
         assertThat(requests).containsExactly("HEAD /ok");
     }
 
@@ -87,7 +89,7 @@ class PublicHttpFetcherProbeTest {
     void notModifiedIsAlive() {
         answer("/cached", 304, 304);
 
-        assertThat(fetcher.probe(baseUrl + "/cached", BUDGET)).isEqualTo(new ProbeResult(ProbeOutcome.ALIVE, "ok", 304));
+        assertThat(fetcher.probe(baseUrl + "/cached", BUDGET, NO_HOOK)).isEqualTo(new ProbeResult(ProbeOutcome.ALIVE, "ok", 304));
     }
 
     @Test
@@ -95,8 +97,8 @@ class PublicHttpFetcherProbeTest {
         answer("/head-only", 404, 200);
         answer("/gone-for-real", 404, 404);
 
-        assertThat(fetcher.probe(baseUrl + "/head-only", BUDGET)).isEqualTo(new ProbeResult(ProbeOutcome.ALIVE, "ok", 200));
-        assertThat(fetcher.probe(baseUrl + "/gone-for-real", BUDGET)).isEqualTo(new ProbeResult(ProbeOutcome.DEAD, "404", 404));
+        assertThat(fetcher.probe(baseUrl + "/head-only", BUDGET, NO_HOOK)).isEqualTo(new ProbeResult(ProbeOutcome.ALIVE, "ok", 200));
+        assertThat(fetcher.probe(baseUrl + "/gone-for-real", BUDGET, NO_HOOK)).isEqualTo(new ProbeResult(ProbeOutcome.DEAD, "404", 404));
         assertThat(requests).containsExactly("HEAD /head-only", "GET /head-only", "HEAD /gone-for-real", "GET /gone-for-real");
     }
 
@@ -104,7 +106,7 @@ class PublicHttpFetcherProbeTest {
     void goneIsDead() {
         answer("/gone", 410, 410);
 
-        assertThat(fetcher.probe(baseUrl + "/gone", BUDGET)).isEqualTo(new ProbeResult(ProbeOutcome.DEAD, "410", 410));
+        assertThat(fetcher.probe(baseUrl + "/gone", BUDGET, NO_HOOK)).isEqualTo(new ProbeResult(ProbeOutcome.DEAD, "410", 410));
         assertThat(requests).containsExactly("HEAD /gone", "GET /gone");
     }
 
@@ -112,7 +114,7 @@ class PublicHttpFetcherProbeTest {
     void headGoneThatAGetServesIsAlive() {
         answer("/odd", 410, 206);
 
-        assertThat(fetcher.probe(baseUrl + "/odd", BUDGET)).isEqualTo(new ProbeResult(ProbeOutcome.ALIVE, "ok", 206));
+        assertThat(fetcher.probe(baseUrl + "/odd", BUDGET, NO_HOOK)).isEqualTo(new ProbeResult(ProbeOutcome.ALIVE, "ok", 206));
     }
 
     @ParameterizedTest
@@ -120,7 +122,7 @@ class PublicHttpFetcherProbeTest {
     void methodNotAllowedFallsBackToGet(final int headStatus) {
         answer("/no-head", headStatus, 200);
 
-        assertThat(fetcher.probe(baseUrl + "/no-head", BUDGET)).isEqualTo(new ProbeResult(ProbeOutcome.ALIVE, "ok", 200));
+        assertThat(fetcher.probe(baseUrl + "/no-head", BUDGET, NO_HOOK)).isEqualTo(new ProbeResult(ProbeOutcome.ALIVE, "ok", 200));
         assertThat(requests).containsExactly("HEAD /no-head", "GET /no-head");
         assertThat(rangeHeaders).containsEntry("GET /no-head", "bytes=0-1023").doesNotContainKey("HEAD /no-head");
     }
@@ -130,7 +132,7 @@ class PublicHttpFetcherProbeTest {
     void forbiddenIsUnknown(final int status) {
         answer("/wall", status, status);
 
-        assertThat(fetcher.probe(baseUrl + "/wall", BUDGET))
+        assertThat(fetcher.probe(baseUrl + "/wall", BUDGET, NO_HOOK))
                 .isEqualTo(new ProbeResult(ProbeOutcome.UNKNOWN, "http-" + status, status));
         assertThat(requests).containsExactly("HEAD /wall");
     }
@@ -139,21 +141,21 @@ class PublicHttpFetcherProbeTest {
     void serverErrorIsUnknown() {
         answer("/down", 503, 503);
 
-        assertThat(fetcher.probe(baseUrl + "/down", BUDGET)).isEqualTo(new ProbeResult(ProbeOutcome.UNKNOWN, "http-503", 503));
+        assertThat(fetcher.probe(baseUrl + "/down", BUDGET, NO_HOOK)).isEqualTo(new ProbeResult(ProbeOutcome.UNKNOWN, "http-503", 503));
     }
 
     @Test
     void tooManyIsUnknown() {
         answer("/busy", 429, 429);
 
-        assertThat(fetcher.probe(baseUrl + "/busy", BUDGET)).isEqualTo(new ProbeResult(ProbeOutcome.UNKNOWN, "http-429", 429));
+        assertThat(fetcher.probe(baseUrl + "/busy", BUDGET, NO_HOOK)).isEqualTo(new ProbeResult(ProbeOutcome.UNKNOWN, "http-429", 429));
     }
 
     @Test
     void headThatFailsAndAGetThatAnswersOtherwiseCountsTheGet() {
         answer("/teapot", 405, 503);
 
-        assertThat(fetcher.probe(baseUrl + "/teapot", BUDGET)).isEqualTo(new ProbeResult(ProbeOutcome.UNKNOWN, "http-503", 503));
+        assertThat(fetcher.probe(baseUrl + "/teapot", BUDGET, NO_HOOK)).isEqualTo(new ProbeResult(ProbeOutcome.UNKNOWN, "http-503", 503));
     }
 
     @Test
@@ -161,7 +163,7 @@ class PublicHttpFetcherProbeTest {
         redirect("/old", "/new");
         answer("/new", 200, 200);
 
-        assertThat(fetcher.probe(baseUrl + "/old", BUDGET)).isEqualTo(new ProbeResult(ProbeOutcome.ALIVE, "ok", 200));
+        assertThat(fetcher.probe(baseUrl + "/old", BUDGET, NO_HOOK)).isEqualTo(new ProbeResult(ProbeOutcome.ALIVE, "ok", 200));
         assertThat(requests).containsExactly("HEAD /old", "HEAD /new");
     }
 
@@ -170,7 +172,7 @@ class PublicHttpFetcherProbeTest {
         redirect("/moved", baseUrl + "/nowhere");
         answer("/nowhere", 404, 404);
 
-        assertThat(fetcher.probe(baseUrl + "/moved", BUDGET)).isEqualTo(new ProbeResult(ProbeOutcome.DEAD, "404", 404));
+        assertThat(fetcher.probe(baseUrl + "/moved", BUDGET, NO_HOOK)).isEqualTo(new ProbeResult(ProbeOutcome.DEAD, "404", 404));
     }
 
     @Test
@@ -180,7 +182,7 @@ class PublicHttpFetcherProbeTest {
         }
         answer("/r6", 200, 200);
 
-        assertThat(fetcher.probe(baseUrl + "/r1", BUDGET)).isEqualTo(new ProbeResult(ProbeOutcome.ALIVE, "ok", 200));
+        assertThat(fetcher.probe(baseUrl + "/r1", BUDGET, NO_HOOK)).isEqualTo(new ProbeResult(ProbeOutcome.ALIVE, "ok", 200));
     }
 
     @Test
@@ -190,7 +192,7 @@ class PublicHttpFetcherProbeTest {
         }
         answer("/r7", 200, 200);
 
-        assertThat(fetcher.probe(baseUrl + "/r1", BUDGET)).isEqualTo(new ProbeResult(ProbeOutcome.UNKNOWN, "redirects", 302));
+        assertThat(fetcher.probe(baseUrl + "/r1", BUDGET, NO_HOOK)).isEqualTo(new ProbeResult(ProbeOutcome.UNKNOWN, "redirects", 302));
         assertThat(requests).doesNotContain("HEAD /r7");
     }
 
@@ -202,7 +204,7 @@ class PublicHttpFetcherProbeTest {
         final var guarded = new PublicHttpFetcher(PublicHttpFetcher.httpOrHttpsPublicOnly(), resolver);
         redirect("/out", "http://internal.test:" + server.getAddress().getPort() + "/admin");
 
-        assertThat(guarded.probe(baseUrl + "/out", BUDGET)).isEqualTo(new ProbeResult(ProbeOutcome.UNKNOWN, "private", null));
+        assertThat(guarded.probe(baseUrl + "/out", BUDGET, NO_HOOK)).isEqualTo(new ProbeResult(ProbeOutcome.UNKNOWN, "private", null));
         assertThat(requests).containsExactly("HEAD /out");
     }
 
@@ -212,7 +214,7 @@ class PublicHttpFetcherProbeTest {
         final var guarded = new PublicHttpFetcher(PublicHttpFetcher.httpOrHttpsPublicOnly(),
                 host -> new InetAddress[] {InetAddress.getByAddress(host, PRIVATE_ADDRESS)});
 
-        assertThat(guarded.probe(baseUrl + "/ok", BUDGET)).isEqualTo(new ProbeResult(ProbeOutcome.UNKNOWN, "private", null));
+        assertThat(guarded.probe(baseUrl + "/ok", BUDGET, NO_HOOK)).isEqualTo(new ProbeResult(ProbeOutcome.UNKNOWN, "private", null));
         assertThat(requests).isEmpty();
     }
 
@@ -232,9 +234,9 @@ class PublicHttpFetcherProbeTest {
             throw new UnknownHostException(host);
         });
 
-        assertThat(unresolvable.probe("https://no-such-host.example/page", BUDGET))
+        assertThat(unresolvable.probe("https://no-such-host.example/page", BUDGET, NO_HOOK))
                 .isEqualTo(new ProbeResult(ProbeOutcome.DEAD, "nxdomain", null));
-        assertThat(new PublicHttpFetcher(PublicHttpFetcher.httpOrHttpsPublicOnly()).probe("https://nothing.invalid/", BUDGET))
+        assertThat(new PublicHttpFetcher(PublicHttpFetcher.httpOrHttpsPublicOnly()).probe("https://nothing.invalid/", BUDGET, NO_HOOK))
                 .isEqualTo(new ProbeResult(ProbeOutcome.DEAD, "nxdomain", null));
     }
 
@@ -248,20 +250,20 @@ class PublicHttpFetcherProbeTest {
         };
         redirect("/parked", "https://expired-domain.test/landing");
 
-        assertThat(new PublicHttpFetcher(PublicHttpFetcher.httpOrHttpsPublicOnly(), resolver).probe(baseUrl + "/parked", BUDGET))
+        assertThat(new PublicHttpFetcher(PublicHttpFetcher.httpOrHttpsPublicOnly(), resolver).probe(baseUrl + "/parked", BUDGET, NO_HOOK))
                 .isEqualTo(new ProbeResult(ProbeOutcome.DEAD, "nxdomain", null));
     }
 
     @Test
     void closedPortIsRefused() throws IOException {
-        assertThat(fetcher.probe("http://127.0.0.1:" + closedPort() + "/", BUDGET))
+        assertThat(fetcher.probe("http://127.0.0.1:" + closedPort() + "/", BUDGET, NO_HOOK))
                 .isEqualTo(new ProbeResult(ProbeOutcome.DEAD, "refused", null));
     }
 
     @Test
     void plainHttpBehindHttpsIsTls() throws IOException {
         try (final var plain = PlainHttpSocket.start()) {
-            assertThat(fetcher.probe(plain.httpsUrl() + "/plain", BUDGET)).isEqualTo(new ProbeResult(ProbeOutcome.DEAD, "tls", null));
+            assertThat(fetcher.probe(plain.httpsUrl() + "/plain", BUDGET, NO_HOOK)).isEqualTo(new ProbeResult(ProbeOutcome.DEAD, "tls", null));
         }
     }
 
@@ -269,7 +271,7 @@ class PublicHttpFetcherProbeTest {
     void untrustedCertificateIsTls() throws Exception {
         final var https = SelfSignedHttpsServer.start(keys, exchange -> send(exchange, 200));
         try {
-            assertThat(fetcher.probe(https.url() + "/secure", BUDGET)).isEqualTo(new ProbeResult(ProbeOutcome.DEAD, "tls", null));
+            assertThat(fetcher.probe(https.url() + "/secure", BUDGET, NO_HOOK)).isEqualTo(new ProbeResult(ProbeOutcome.DEAD, "tls", null));
         } finally {
             https.stop();
         }
@@ -280,7 +282,7 @@ class PublicHttpFetcherProbeTest {
         server.createContext("/silent", exchange -> sleep(Duration.ofSeconds(5)));
 
         final var started = System.nanoTime();
-        final var result = fetcher.probe(baseUrl + "/silent", Duration.ofSeconds(1));
+        final var result = fetcher.probe(baseUrl + "/silent", Duration.ofSeconds(1), NO_HOOK);
 
         assertThat(result).isEqualTo(new ProbeResult(ProbeOutcome.UNKNOWN, "timeout", null));
         assertThat(Duration.ofNanos(System.nanoTime() - started)).isLessThan(Duration.ofSeconds(4));
@@ -297,7 +299,7 @@ class PublicHttpFetcherProbeTest {
             send(exchange, 200);
         });
 
-        assertThat(fetcher.probe(baseUrl + "/slow1", Duration.ofSeconds(1)))
+        assertThat(fetcher.probe(baseUrl + "/slow1", Duration.ofSeconds(1), NO_HOOK))
                 .isEqualTo(new ProbeResult(ProbeOutcome.UNKNOWN, "timeout", null));
     }
 
@@ -305,7 +307,7 @@ class PublicHttpFetcherProbeTest {
     void userAgentNamesTheChecker() {
         answer("/ua", 405, 200);
 
-        fetcher.probe(baseUrl + "/ua", BUDGET);
+        fetcher.probe(baseUrl + "/ua", BUDGET, NO_HOOK);
 
         assertThat(PublicHttpFetcher.LINK_CHECKER_USER_AGENT)
                 .isEqualTo("hrva.cc-linkcheck/1.0 (+https://app.hrva.cc/help/notifications#link-checker)");
@@ -335,7 +337,7 @@ class PublicHttpFetcherProbeTest {
         });
 
         final var started = System.nanoTime();
-        assertThat(fetcher.probe(baseUrl + "/big", BUDGET)).isEqualTo(new ProbeResult(ProbeOutcome.ALIVE, "ok", 200));
+        assertThat(fetcher.probe(baseUrl + "/big", BUDGET, NO_HOOK)).isEqualTo(new ProbeResult(ProbeOutcome.ALIVE, "ok", 200));
         assertThat(Duration.ofNanos(System.nanoTime() - started)).isLessThan(Duration.ofSeconds(3));
         sleep(Duration.ofMillis(300));
         assertThat(written.get()).isLessThan(bigBody.length);
@@ -403,7 +405,7 @@ class PublicHttpFetcherProbeTest {
         });
 
         final var started = System.nanoTime();
-        final var result = slow.probe("https://slow-dns.example/page", Duration.ofMillis(500));
+        final var result = slow.probe("https://slow-dns.example/page", Duration.ofMillis(500), NO_HOOK);
 
         assertThat(result).isEqualTo(new ProbeResult(ProbeOutcome.UNKNOWN, "timeout", null));
         assertThat(Duration.ofNanos(System.nanoTime() - started)).isLessThan(Duration.ofSeconds(3));
@@ -485,8 +487,8 @@ class PublicHttpFetcherProbeTest {
 
     @Test
     void anAddressThatIsNotAWebAddressIsUnknown() {
-        assertThat(fetcher.probe("ftp://example.com/file", BUDGET)).isEqualTo(new ProbeResult(ProbeOutcome.UNKNOWN, "error", null));
-        assertThat(fetcher.probe("not a url", BUDGET)).isEqualTo(new ProbeResult(ProbeOutcome.UNKNOWN, "error", null));
+        assertThat(fetcher.probe("ftp://example.com/file", BUDGET, NO_HOOK)).isEqualTo(new ProbeResult(ProbeOutcome.UNKNOWN, "error", null));
+        assertThat(fetcher.probe("not a url", BUDGET, NO_HOOK)).isEqualTo(new ProbeResult(ProbeOutcome.UNKNOWN, "error", null));
     }
 
     @Test
@@ -497,7 +499,7 @@ class PublicHttpFetcherProbeTest {
             throw new UnknownHostException(host);
         });
 
-        assertThat(recording.probe("https://\u017euti.example/stranica", BUDGET))
+        assertThat(recording.probe("https://\u017euti.example/stranica", BUDGET, NO_HOOK))
                 .isEqualTo(new ProbeResult(ProbeOutcome.DEAD, "nxdomain", null));
         assertThat(resolved).containsExactly("xn--uti-b3a.example");
     }

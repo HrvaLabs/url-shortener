@@ -12,7 +12,6 @@ import cc.hrva.urlshortener.model.enums.ConsentSource;
 import cc.hrva.urlshortener.model.enums.NotificationType;
 import cc.hrva.urlshortener.repository.NotificationConsentRepository;
 import cc.hrva.urlshortener.service.impl.DefaultNotificationConsentService;
-import cc.hrva.urlshortener.service.notification.EmailConsentReader;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiter;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiterUnavailableException;
 import cc.hrva.urlshortener.service.twostep.AccountLock;
@@ -37,7 +36,6 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -70,7 +68,7 @@ class DefaultNotificationConsentServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new DefaultNotificationConsentService(notificationConsentRepository, new EmailConsentReader(notificationConsentRepository),
+        service = new DefaultNotificationConsentService(notificationConsentRepository,
                 userService, accountLock, rateLimiter,
                 Clock.fixed(NOW, ZoneOffset.UTC));
         lenient().when(userService.getUserFromToken()).thenReturn(user);
@@ -244,23 +242,6 @@ class DefaultNotificationConsentServiceTest {
 
         assertThat(service.revokeByUnsubscribe(99L, NotificationType.DEAD_LINK_EMAIL)).isFalse();
         verifyNoInteractions(accountLock);
-    }
-
-    @Test
-    void hasEmailConsentAsksForAnActiveRowOfAnActiveOwner() {
-        when(notificationConsentRepository.existsActiveEmailConsent(7L, NotificationType.DEAD_LINK_EMAIL)).thenReturn(true);
-
-        assertThat(service.hasEmailConsent(7L, NotificationType.DEAD_LINK_EMAIL)).isTrue();
-        assertThat(service.hasEmailConsent(7L, NotificationType.WEEKLY_SUMMARY_EMAIL)).isFalse();
-    }
-
-    @Test
-    void emailConsentersOfNobodyRunsNoQuery() {
-        assertThat(service.emailConsenters(NotificationType.EXPIRY_REMINDER_EMAIL, List.of())).isEmpty();
-        verify(notificationConsentRepository, never()).findConsentingUserIds(any(), anyCollection());
-
-        when(notificationConsentRepository.findConsentingUserIds(NotificationType.EXPIRY_REMINDER_EMAIL, List.of(7L, 8L))).thenReturn(List.of(8L));
-        assertThat(service.emailConsenters(NotificationType.EXPIRY_REMINDER_EMAIL, List.of(7L, 8L))).containsExactly(8L);
     }
 
     @Test

@@ -8,7 +8,6 @@ import java.net.UnknownHostException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
@@ -157,26 +156,21 @@ class ChannelTargetsTest {
     }
 
     @Test
-    void detectRecognisesTheFourHosts() {
-        assertThat(ChannelTargets.detect("https://discord.com/api/webhooks/1/abc")).contains(ChannelType.DISCORD);
-        assertThat(ChannelTargets.detect("https://discordapp.com/api/webhooks/1/abc")).contains(ChannelType.DISCORD);
-        assertThat(ChannelTargets.detect("https://ptb.discord.com/api/webhooks/1/abc")).contains(ChannelType.DISCORD);
-        assertThat(ChannelTargets.detect("https://canary.discord.com/api/webhooks/1/abc")).contains(ChannelType.DISCORD);
-        assertThat(ChannelTargets.detect("https://Discord.COM:8443/x")).contains(ChannelType.DISCORD);
-        assertThat(ChannelTargets.detect("https://hooks.slack.com/services/T0/B0/xyz")).contains(ChannelType.SLACK);
-        assertThat(ChannelTargets.detect("https://api.telegram.org/bot1:a/sendMessage")).contains(ChannelType.TELEGRAM);
-        assertThat(ChannelTargets.detect("https://ntfy.sh/alerts")).contains(ChannelType.NTFY);
+    void aWebhookIsRefusedAtEveryChatHost() {
+        final var discord = "This is a Discord webhook. Choose Discord as the type so messages arrive formatted.";
+        assertThat(errors(ChannelType.WEBHOOK, "https://discordapp.com/api/webhooks/1/abc")).containsExactly(Map.entry("target", discord));
+        assertThat(errors(ChannelType.WEBHOOK, "https://ptb.discord.com/api/webhooks/1/abc")).containsExactly(Map.entry("target", discord));
+        assertThat(errors(ChannelType.WEBHOOK, "https://Discord.COM:8443/x")).containsExactly(Map.entry("target", discord));
     }
 
     @Test
-    void detectIgnoresLookAlikes() {
-        assertThat(ChannelTargets.detect("https://discord.com.evil.example/api/webhooks/1/abc")).isEmpty();
-        assertThat(ChannelTargets.detect("https://www.discord.com/api/webhooks/1/abc")).isEmpty();
-        assertThat(ChannelTargets.detect("https://evil.example/discord.com")).isEmpty();
-        assertThat(ChannelTargets.detect("https://slack.com/services/x")).isEmpty();
-        assertThat(ChannelTargets.detect("https://ntfy.example.org/alerts")).isEmpty();
-        assertThat(ChannelTargets.detect("not a url")).isEmpty();
-        assertThat(ChannelTargets.detect(null)).isEqualTo(Optional.empty());
+    void aWebhookAtALookAlikeHostIsNotAChatHost() {
+        assertThat(errors(ChannelType.WEBHOOK, "https://discord.com.evil.example/api/webhooks/1/abc")).isEmpty();
+        assertThat(errors(ChannelType.WEBHOOK, "https://www.discord.com/api/webhooks/1/abc")).isEmpty();
+        assertThat(errors(ChannelType.WEBHOOK, "https://evil.example/discord.com")).isEmpty();
+        assertThat(errors(ChannelType.WEBHOOK, "https://slack.com/services/x")).isEmpty();
+        assertThat(errors(ChannelType.WEBHOOK, "https://ntfy.example.org/alerts")).isEmpty();
+        assertThat(errors(ChannelType.WEBHOOK, "not a url")).containsExactly(Map.entry("target", USE_HTTPS));
     }
 
     @Test
@@ -216,8 +210,10 @@ class ChannelTargetsTest {
     void aTrailingDotOnTheHostIsTheSameHost() {
         assertThat(errors(ChannelType.DISCORD, "https://discord.com./api/webhooks/123/abc")).isEmpty();
         assertThat(errors(ChannelType.SLACK, "https://hooks.slack.com./services/T0/B0/xyz")).isEmpty();
-        assertThat(ChannelTargets.detect("https://discord.com./api/webhooks/1/abc")).contains(ChannelType.DISCORD);
-        assertThat(ChannelTargets.detect("https://NTFY.SH./topic")).contains(ChannelType.NTFY);
+        assertThat(errors(ChannelType.WEBHOOK, "https://discord.com./api/webhooks/1/abc"))
+                .containsExactly(Map.entry("target", "This is a Discord webhook. Choose Discord as the type so messages arrive formatted."));
+        assertThat(errors(ChannelType.WEBHOOK, "https://NTFY.SH./topic"))
+                .containsExactly(Map.entry("target", "This is a ntfy webhook. Choose ntfy as the type so messages arrive formatted."));
         assertThat(errors(ChannelType.WEBHOOK, "https://hooks.slack.com./services/T0/B0/xyz"))
                 .containsExactly(Map.entry("target", "This is a Slack webhook. Choose Slack as the type so messages arrive formatted."));
         assertThat(lookedUp).doesNotContain("discord.com.", "hooks.slack.com.");

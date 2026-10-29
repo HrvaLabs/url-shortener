@@ -50,7 +50,7 @@ class NotificationMessagesTest {
                 "hrva.cc/one " + ARROW + " example.org: 1 click, 0 visitors, 1 bot click",
                 "hrva.cc/bots " + ARROW + " an unreadable destination: 0 clicks, 0 visitors, 4 bot clicks"),
                 "http://localhost:3000/dashboard", 0));
-        assertThat(messages.render(message)).hasSizeLessThanOrEqualTo(NotificationMessages.MOST_CHARACTERS);
+        assertThat(plain(message)).hasSizeLessThanOrEqualTo(NotificationMessages.MOST_CHARACTERS);
     }
 
     @Test
@@ -61,7 +61,7 @@ class NotificationMessagesTest {
 
         final var message = messages.daily(new DailySummary(LocalDate.of(2026, 10, 26), 210, 20, 0, links));
 
-        assertThat(messages.render(message)).hasSizeLessThanOrEqualTo(NotificationMessages.MOST_CHARACTERS).endsWith("http://localhost:3000/dashboard");
+        assertThat(plain(message)).hasSizeLessThanOrEqualTo(NotificationMessages.MOST_CHARACTERS).endsWith("http://localhost:3000/dashboard");
     }
 
     @Test
@@ -101,7 +101,7 @@ class NotificationMessagesTest {
         assertThat(messages.weeklySections(summary).deadLinksMore()).isEqualTo("and 4 more");
         assertThat(messages.weeklySections(summary).endingSoonMore()).isEqualTo("and 1 more");
         assertThat(messages.weeklySections(weeklySummary()).deadLinksMore()).isNull();
-        assertThat(messages.render(messages.weekly(summary))).endsWith("and 1 more\nhttp://localhost:3000/dashboard");
+        assertThat(plain(messages.weekly(summary))).endsWith("and 1 more\nhttp://localhost:3000/dashboard");
     }
 
     @Test
@@ -118,7 +118,7 @@ class NotificationMessagesTest {
             final var summary = new WeeklySummary(7L, "ana@example.com", LocalDate.of(2026, 10, 19), LocalDate.of(2026, 10, 25),
                     new WeeklyDigest.Change(50, 40), 30, top, dead, ending, 6, 7);
 
-            final var lines = messages.render(messages.weekly(summary)).lines().toList();
+            final var lines = plain(messages.weekly(summary)).lines().toList();
 
             final var lastContent = lines.get(lines.size() - 2);
             assertThat(lastContent).as("alias length %d", aliasLength).doesNotEndWith(":");
@@ -143,7 +143,7 @@ class NotificationMessagesTest {
 
     @Test
     void aWeeklySummaryNeverNamesTheEmailAddress() {
-        assertThat(messages.render(messages.weekly(weeklySummary()))).doesNotContain("ana@example.com");
+        assertThat(plain(messages.weekly(weeklySummary()))).doesNotContain("ana@example.com");
     }
 
     static WeeklySummary weeklySummary() {
@@ -219,7 +219,7 @@ class NotificationMessagesTest {
 
     @Test
     void renderIsTheTitleTheLinesAndTheLink() {
-        assertThat(messages.render(messages.linkDead(List.of(dead("abc", "example.com", "404"), dead("xyz", "example.org", "tls")))))
+        assertThat(plain(messages.linkDead(List.of(dead("abc", "example.com", "404"), dead("xyz", "example.org", "tls")))))
                 .isEqualTo("""
                         hrva.cc: 2 links look broken
                         hrva.cc/abc %1$s example.com, since 27 October 2026, the page wasn't found (404)
@@ -230,7 +230,7 @@ class NotificationMessagesTest {
     @Test
     void longListsEndWithMore() {
         final var message = messages.linkDead(links(45));
-        final var text = messages.render(message);
+        final var text = plain(message);
 
         assertThat(message.lines()).hasSize(20);
         assertThat(message.moreCount()).isEqualTo(25);
@@ -244,7 +244,7 @@ class NotificationMessagesTest {
         final var longHost = "h".repeat(60) + "." + "i".repeat(60) + "." + "j".repeat(60) + ".example";
         final var many = IntStream.range(0, 20).mapToObj(index -> dead("alias-" + "x".repeat(40) + index, longHost, "404")).toList();
         final var message = messages.linkDead(many);
-        final var text = messages.render(message);
+        final var text = plain(message);
 
         assertThat(message.lines()).hasSize(20);
         assertThat(text.length()).isLessThanOrEqualTo(1900);
@@ -257,7 +257,7 @@ class NotificationMessagesTest {
     void neverCutsASurrogatePair() {
         final var emoji = Character.toString(0x1F600);
         final var message = new NotificationMessage("hrva.cc: " + emoji, IntStream.range(0, 400).mapToObj(index -> emoji.repeat(5)).toList(), "https://x.example", 0);
-        final var text = messages.render(message);
+        final var text = plain(message);
 
         assertThat(text.length()).isLessThanOrEqualTo(1900);
         assertThat(text.chars().filter(code -> Character.isSurrogate((char) code)).count() % 2).isZero();
@@ -278,6 +278,10 @@ class NotificationMessagesTest {
 
     private static DeadLink dead(final String alias, final String host, final String status) {
         return new DeadLink(1L, 7L, alias, host, DEAD_SINCE, status);
+    }
+
+    private static String plain(final NotificationMessage message) {
+        return NotificationMessages.fitted(message, NotificationMessages.Format.PLAIN);
     }
 
 }

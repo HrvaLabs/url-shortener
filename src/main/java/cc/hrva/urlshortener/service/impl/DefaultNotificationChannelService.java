@@ -235,11 +235,6 @@ public class DefaultNotificationChannelService implements NotificationChannelSer
     }
 
     @Override
-    public NotificationChannel loadOwned(final long id) {
-        return owned(currentUser(), id);
-    }
-
-    @Override
     public ChannelTarget openTarget(final NotificationChannel channel) {
         final var context = SecretBox.contextFor(channel.getOwner().getId());
         return new ChannelTarget(

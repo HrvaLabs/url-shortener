@@ -22,8 +22,6 @@ public interface NotificationChannelService {
 
     ChannelTestResponse test(long id);
 
-    NotificationChannel loadOwned(long id);
-
     ChannelTarget openTarget(NotificationChannel channel);
 
 }

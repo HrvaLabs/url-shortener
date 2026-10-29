@@ -49,9 +49,6 @@ public class DestinationCheckRepository {
             order by id
             """;
 
-    private static final String COUNT_DEAD = "select count(*) from url where active = true and destination_dead_since is not null";
-    private static final String ANONYMOUS = " and owner_id is null";
-    private static final String OWNED = " and owner_id is not null";
 
     private final NamedParameterJdbcTemplate jdbcTemplate;
 
@@ -100,12 +97,6 @@ public class DestinationCheckRepository {
 
     public void reset(final long id) {
         jdbcTemplate.update(RESET, Map.of("id", id));
-    }
-
-    public long countDead(final Boolean anonymous) {
-        final var query = anonymous == null ? COUNT_DEAD : COUNT_DEAD + (anonymous ? ANONYMOUS : OWNED);
-        final var count = jdbcTemplate.queryForObject(query, Map.of(), Long.class);
-        return count != null ? count : 0L;
     }
 
     public record DueLink(long id, String longUrl, int failStreak, LocalDateTime deadSince, Long ownerId, String shortUrl) {

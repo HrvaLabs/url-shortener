@@ -341,22 +341,6 @@ class NotificationSchemaTest {
     }
 
     @Test
-    void countDeadSplitsAnonymous() {
-        final var ana = savedUser("ana@example.com");
-        final var deadOwned = savedLink("owned", ana);
-        final var deadAnonymous = savedLink("anon", null);
-        final var deadInactive = savedLink("inactive", ana);
-        savedLink("alive", ana);
-        List.of(deadOwned, deadAnonymous, deadInactive)
-                .forEach(link -> destinationCheckRepository.record(link.getId(), link.getLongUrl(), NOW, 3, NOW, "404"));
-        jdbcTemplate.update("update url set active = false where id = ?", deadInactive.getId());
-
-        assertThat(destinationCheckRepository.countDead(null)).isEqualTo(2);
-        assertThat(destinationCheckRepository.countDead(true)).isEqualTo(1);
-        assertThat(destinationCheckRepository.countDead(false)).isEqualTo(1);
-    }
-
-    @Test
     void consentingUserIdsSeeOnlyActiveEmailRows() {
         final var active = savedUser("active@example.com");
         final var revoked = savedUser("revoked@example.com");
@@ -395,8 +379,11 @@ class NotificationSchemaTest {
         assertThat(notificationChannelRepository.findEnabledWithEvent(NotificationType.LINK_DEAD, List.of(ana.getId(), bob.getId())))
                 .extracting(NotificationChannel::getId)
                 .containsExactly(anasChannel.getId());
-        assertThat(notificationChannelRepository.findOwnerIdsWithEnabledEvent(NotificationType.LINK_DEAD)).containsExactly(ana.getId());
-        assertThat(notificationChannelRepository.findOwnerIdsWithEnabledEvent(NotificationType.LINK_BACK)).isEmpty();
+        assertThat(notificationChannelRepository.findEnabledWithEvent(NotificationType.LINK_DEAD))
+                .extracting(NotificationChannel::getId)
+                .containsExactly(anasChannel.getId());
+        assertThat(notificationChannelRepository.findEnabledWithEvent(NotificationType.LINK_BACK)).isEmpty();
+        assertThat(notificationChannelRepository.findEnabledWithEvent(NotificationType.LINK_BACK, List.of(ana.getId(), bob.getId()))).isEmpty();
     }
 
     @Test
@@ -455,12 +442,18 @@ class NotificationSchemaTest {
         assertThat(notificationChannelRepository.findEnabledWithEvent(NotificationType.DAILY_SUMMARY, List.of(ana.getId(), bob.getId())))
                 .extracting(NotificationChannel::getId)
                 .containsExactly(anasChannel.getId());
-        assertThat(notificationChannelRepository.findOwnerIdsWithEnabledEvent(NotificationType.DAILY_SUMMARY)).containsExactly(ana.getId());
+        assertThat(notificationChannelRepository.findEnabledWithEvent(NotificationType.DAILY_SUMMARY))
+                .extracting(NotificationChannel::getId)
+                .containsExactly(anasChannel.getId());
 
         jdbcTemplate.update("update user_account set active = true where id = ?", bob.getId());
 
-        assertThat(notificationChannelRepository.findOwnerIdsWithEnabledEvent(NotificationType.DAILY_SUMMARY))
-                .containsExactlyInAnyOrder(ana.getId(), bob.getId());
+        assertThat(notificationChannelRepository.findEnabledWithEvent(NotificationType.DAILY_SUMMARY, List.of(ana.getId(), bob.getId())))
+                .extracting(NotificationChannel::getId)
+                .containsExactly(anasChannel.getId(), bobsChannel.getId());
+        assertThat(notificationChannelRepository.findEnabledWithEvent(NotificationType.DAILY_SUMMARY))
+                .extracting(NotificationChannel::getId)
+                .containsExactly(anasChannel.getId(), bobsChannel.getId());
     }
 
     @Test

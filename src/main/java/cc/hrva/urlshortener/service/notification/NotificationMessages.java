@@ -113,10 +113,6 @@ public class NotificationMessages {
         return new NotificationMessage("hrva.cc test: this channel works", List.of(TEST_TEXT, "Channel: " + channel.getName()), frontendPage(SETTINGS), 0);
     }
 
-    public String render(final NotificationMessage message) {
-        return fitted(message, Format.PLAIN);
-    }
-
     public static String fitted(final NotificationMessage message, final Format format) {
         final var lines = message.lines().stream().map(format.line()).toList();
         var shown = lines.size();

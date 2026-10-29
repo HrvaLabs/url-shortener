@@ -156,10 +156,6 @@ public class PublicHttpFetcher {
         }
     }
 
-    public ProbeResult probe(final String url, final Duration budget) {
-        return probe(url, budget, host -> {});
-    }
-
     public ProbeResult probe(final String url, final Duration budget, final Consumer<String> beforeEachRequest) {
         try {
             return probeHops(url, new ProbeDeadline(System.nanoTime() + budget.toNanos()), beforeEachRequest);

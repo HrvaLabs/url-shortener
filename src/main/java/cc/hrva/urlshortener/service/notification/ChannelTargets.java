@@ -74,10 +74,6 @@ public class ChannelTargets {
         return errors;
     }
 
-    public static Optional<ChannelType> detect(final String url) {
-        return uriOf(url).flatMap(ChannelTargets::hostOf).flatMap(ChannelTargets::typeOfHost);
-    }
-
     public static String normalized(final ChannelType type, final String target) {
         if (type == ChannelType.TELEGRAM) {
             return target;

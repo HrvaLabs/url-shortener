@@ -513,7 +513,6 @@ class DefaultNotificationChannelServiceTest {
                 .isInstanceOf(NotificationChannelNotFoundException.class).hasMessage("Notification channel not found");
         assertThatThrownBy(() -> service.delete(4L)).isInstanceOf(NotificationChannelNotFoundException.class);
         assertThatThrownBy(() -> service.newSigningSecret(4L)).isInstanceOf(NotificationChannelNotFoundException.class);
-        assertThatThrownBy(() -> service.loadOwned(4L)).isInstanceOf(NotificationChannelNotFoundException.class);
         verify(notificationChannelRepository, never()).findById(anyLong());
         verify(notificationChannelRepository, never()).delete(any());
         verify(notificationConsentService, never()).revokeChannelEvents(anyLong(), any(), any());
@@ -605,13 +604,6 @@ class DefaultNotificationChannelServiceTest {
         assertThat(service.openTarget(telegram).target()).isEqualTo(BOT_TOKEN);
         assertThat(service.openTarget(telegram).chatId()).isEqualTo("-1001234567890");
         assertThat(service.openTarget(webhook).toString()).doesNotContain(WEBHOOK_URL, "old-signing-secret");
-    }
-
-    @Test
-    void loadOwnedReturnsTheCallersChannel() {
-        final var channel = owned(channel(ChannelType.DISCORD));
-
-        assertThat(service.loadOwned(4L)).isSameAs(channel);
     }
 
     @Test

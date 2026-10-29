@@ -12,7 +12,6 @@ import cc.hrva.urlshortener.model.enums.NotificationType;
 import cc.hrva.urlshortener.repository.NotificationConsentRepository;
 import cc.hrva.urlshortener.service.NotificationConsentService;
 import cc.hrva.urlshortener.service.UserService;
-import cc.hrva.urlshortener.service.notification.EmailConsentReader;
 import cc.hrva.urlshortener.service.notification.NotificationDescriptions;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiter;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiterUnavailableException;
@@ -21,7 +20,6 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
-import java.util.Collection;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Optional;
@@ -49,7 +47,6 @@ public class DefaultNotificationConsentService implements NotificationConsentSer
     private static final String NOT_AUTHENTICATED = "Not authenticated";
 
     private final NotificationConsentRepository notificationConsentRepository;
-    private final EmailConsentReader emailConsentReader;
     private final UserService userService;
     private final AccountLock accountLock;
     private final RateLimiter rateLimiter;
@@ -90,16 +87,6 @@ public class DefaultNotificationConsentService implements NotificationConsentSer
         }
 
         return response(type, active.map(NotificationConsent::getGrantedAt).orElse(null));
-    }
-
-    @Override
-    public boolean hasEmailConsent(final long userId, final NotificationType type) {
-        return emailConsentReader.hasActiveEmailConsent(userId, type);
-    }
-
-    @Override
-    public Set<Long> emailConsenters(final NotificationType type, final Collection<Long> userIds) {
-        return emailConsentReader.consenters(type, userIds);
     }
 
     @Override
