@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.repository;
 
+import cc.hrva.urlshortener.dto.LinkDestination;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.enums.BlockReason;
@@ -141,6 +142,20 @@ class UrlRepositoryTest {
         assertThat(Hibernate.isInitialized(recent.getFirst().getOwner())).isTrue();
         assertThat(recent.getFirst().getOwner().getEmail()).isEqualTo("recent-owner@example.com");
         assertThat(recent.subList(1, 10)).extracting(Url::getOwner).containsOnlyNulls();
+    }
+
+    @Test
+    void theDestinationsOfTheGivenLinksAreReadWhateverTheirStateAndUnknownIdsAreLeftOut() {
+        final var active = link("active", null);
+        final var blocked = link("blocked", null);
+        blockMeanwhile(blocked);
+        link("other", null);
+
+        final var destinations = urlRepository.findDestinationsByIdIn(List.of(blocked.getId(), active.getId(), Long.MAX_VALUE));
+
+        assertThat(destinations).containsExactlyInAnyOrder(
+                new LinkDestination(active.getId(), "https://active.example/"),
+                new LinkDestination(blocked.getId(), "https://blocked.example/"));
     }
 
     private Url link(final String shortUrl, final LocalDateTime expirationDate) {

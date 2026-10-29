@@ -1,5 +1,7 @@
 package cc.hrva.urlshortener.service;
 
+import cc.hrva.urlshortener.dto.DomainBlockPreviewResponse;
+import cc.hrva.urlshortener.dto.DomainBulkBlockResponse;
 import cc.hrva.urlshortener.dto.DomainRuleCreatedResponse;
 import cc.hrva.urlshortener.dto.DomainRuleDto;
 import cc.hrva.urlshortener.dto.DomainRuleResponse;
@@ -14,6 +16,8 @@ public interface ModerationService {
 
     UrlResponse blockLink(long urlId, BlockReason reason, String detail, String performedBy, String via);
     int blockDomain(String domain, String reason, String performedBy, String via, Integer maxLinks);
+    List<DomainBlockPreviewResponse> previewDomainBlocks(List<Long> urlIds);
+    DomainBulkBlockResponse blockDomains(List<String> domains, String reason, String performedBy, String via);
     int allowDomain(String domain, String reason, String performedBy, String via);
     DomainRuleCreatedResponse createDomainRule(DomainRuleDto domainRuleDto, String performedBy, String via);
     List<DomainRuleResponse> domainRules(DomainRuleType type);

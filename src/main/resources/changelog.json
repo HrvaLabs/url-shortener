@@ -1,10 +1,24 @@
 {
   "releases": [
     {
-      "version": "v2.15.1",
+      "version": "v2.15.2",
       "date": "2026-10-29",
       "badge": "Latest",
       "badgeVariant": "default",
+      "summary": "Admins can block the domains of several links at once.",
+      "sections": [
+        {
+          "title": "Admin",
+          "icon": "wrench",
+          "items": [
+            "Block domains on All URLs blocks the domains of the ticked links at once, after showing how many active links on the site each one turns off."
+          ]
+        }
+      ]
+    },
+    {
+      "version": "v2.15.1",
+      "date": "2026-10-29",
       "summary": "Notification settings that are easier to find and fix, and faster bio pages.",
       "sections": [
         {

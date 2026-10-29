@@ -1,5 +1,7 @@
 package cc.hrva.urlshortener.service.impl;
 
+import cc.hrva.urlshortener.dto.DomainBlockPreviewResponse;
+import cc.hrva.urlshortener.dto.DomainBulkBlockResponse;
 import cc.hrva.urlshortener.dto.DomainRuleCreatedResponse;
 import cc.hrva.urlshortener.dto.DomainRuleDto;
 import cc.hrva.urlshortener.dto.DomainRuleResponse;
@@ -43,12 +45,17 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.EnumSet;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.function.LongFunction;
 import java.util.function.Predicate;
 import java.util.function.ToLongFunction;
@@ -93,6 +100,8 @@ public class DefaultModerationService implements ModerationService {
     private static final String ADMIN_ACCOUNT = "Admin accounts can't be blocked here.";
     private static final String NOT_IN_QUEUE = "This link is no longer in the review queue.";
     private static final String RESOLVE_FAILED = "Resolving this link failed. Try again.";
+    private static final String BLOCK_FAILED = "Blocking this domain failed. Try again.";
+    private static final String ALLOWED_BY_A_RULE = "Allowed by a rule";
     private static final UnaryOperator<String> TRUSTED_BY_DEFAULT = UnaryOperator.identity();
     private static final UnaryOperator<String> BLOCKED_BY_DEFAULT = DomainNames::registrableDomain;
     private static final String ROLE_ADMIN = "ROLE_ADMIN";
@@ -131,8 +140,62 @@ public class DefaultModerationService implements ModerationService {
     public int blockDomain(final String domain, final String reason, final String performedBy, final String via, final Integer maxLinks) {
         final var ruleDomain = ruleDomain(domain);
         final var blocked = blockLinksOn(ruleDomain, reason, performedBy, maxLinks);
-        auditLogService.log(performedBy, AuditAction.BLOCK_DOMAIN, TARGET_DOMAIN, ruleDomain, details(via, blocked, field(REASON, reason)));
+        logDomainBlock(ruleDomain, blocked, reason, performedBy, via);
         return blocked;
+    }
+
+    private void logDomainBlock(final String ruleDomain, final int blocked, final String reason, final String performedBy, final String via) {
+        auditLogService.log(performedBy, AuditAction.BLOCK_DOMAIN, TARGET_DOMAIN, ruleDomain, details(via, blocked, field(REASON, reason)));
+    }
+
+    @Override
+    public List<DomainBlockPreviewResponse> previewDomainBlocks(final List<Long> urlIds) {
+        final var hostsByDomain = new TreeMap<String, List<String>>();
+        for (final var destination : urlRepository.findDestinationsByIdIn(urlIds)) {
+            DomainNames.hostOf(destination.longUrl()).ifPresent(host -> ruleDomainOf(DomainNames.registrableDomain(host))
+                    .ifPresent(domain -> hostsByDomain.computeIfAbsent(domain, key -> new ArrayList<>()).add(host)));
+        }
+        if (hostsByDomain.isEmpty()) {
+            return List.of();
+        }
+        final var rules = domainRuleRepository.findAll();
+        final var activeLinks = activeLinksBlockedBy(hostsByDomain.keySet(), rules);
+        return hostsByDomain.entrySet().stream()
+                .map(entry -> new DomainBlockPreviewResponse(entry.getKey(), entry.getValue().stream().distinct().sorted().toList(),
+                        entry.getValue().size(), activeLinks.getOrDefault(entry.getKey(), 0), ruleTypeOf(entry.getKey(), rules)))
+                .toList();
+    }
+
+    @Override
+    public DomainBulkBlockResponse blockDomains(final List<String> domains, final String reason, final String performedBy, final String via) {
+        final var done = new HashSet<String>();
+        final var linksBlocked = new ArrayList<Url>();
+        final var blocked = new ArrayList<DomainBulkBlockResponse.Blocked>();
+        final var skipped = new ArrayList<DomainBulkBlockResponse.Skipped>();
+        for (final var domain : domains) {
+            try {
+                final var ruleDomain = ruleDomain(domain);
+                if (!done.add(ruleDomain)) {
+                    continue;
+                }
+                if (isAllowedByItsRule(ruleDomain)) {
+                    skipped.add(new DomainBulkBlockResponse.Skipped(StringUtils.strip(domain), ALLOWED_BY_A_RULE));
+                    continue;
+                }
+                final var count = blockLinksOn(ruleDomain, reason, performedBy, null, linksBlocked::add);
+                logDomainBlock(ruleDomain, count, reason, performedBy, via);
+                blocked.add(new DomainBulkBlockResponse.Blocked(ruleDomain, count));
+            } catch (final CommonException exception) {
+                skipped.add(new DomainBulkBlockResponse.Skipped(StringUtils.strip(domain), exception.getMessage()));
+            } catch (final RuntimeException exception) {
+                log.warn("Blocking a domain failed, continuing with the next one domain={}", domain, exception);
+                skipped.add(new DomainBulkBlockResponse.Skipped(StringUtils.strip(domain), BLOCK_FAILED));
+            }
+        }
+        notifyOwners(linksBlocked);
+        final var linksDeactivated = blocked.stream().mapToInt(DomainBulkBlockResponse.Blocked::linksDeactivated).sum();
+        log.info("Domains blocked in bulk blocked={} skipped={} links={}", blocked.size(), skipped.size(), linksDeactivated);
+        return new DomainBulkBlockResponse(blocked, skipped, linksDeactivated);
     }
 
     @Override
@@ -331,38 +394,67 @@ public class DefaultModerationService implements ModerationService {
     }
 
     private int blockLinksOn(final String domain, final String reason, final String performedBy, final Integer maxLinks) {
-        final var rulesBelow = rulesBelow(domain);
-        final var ids = destinationsOn(domain, afterId -> urlRepository.findActiveDestinationsAfter(afterId, FIRST_PAGE)).stream()
-                .filter(destination -> !isAllowedBy(rulesBelow, destination.longUrl()))
-                .map(LinkDestination::id)
-                .toList();
-        refuseOverTheCap(ids.size(), maxLinks);
-        saveRule(domain, DomainRuleType.BLOCK, reason, performedBy);
         final var blocked = new ArrayList<Url>();
-        final var count = eachLink(ids, Long::longValue, id -> block(id, BlockReason.DOMAIN_RULE, domain, ReviewResolution.DOMAIN_BLOCKED,
-                performedBy, url -> url.isActive() && isOn(url.getLongUrl(), domain) && !isAllowedBy(rulesBelow, url.getLongUrl()))
-                .map(url -> {
-                    alertWhenAutomatic(url, performedBy);
-                    return blocked.add(url);
-                })
-                .orElse(false));
+        final var count = blockLinksOn(domain, reason, performedBy, maxLinks, blocked::add);
         notifyOwners(blocked);
         return count;
     }
 
-    private List<DomainRule> rulesBelow(final String domain) {
-        return domainRuleRepository.findAll().stream()
+    private int blockLinksOn(final String domain, final String reason, final String performedBy, final Integer maxLinks,
+                             final Consumer<Url> blockedLinks) {
+        final var rulesBelow = rulesBelow(domain, domainRuleRepository.findAll());
+        final var ids = destinationsOn(domain, afterId -> urlRepository.findActiveDestinationsAfter(afterId, FIRST_PAGE)).stream()
+                .filter(destination -> isBlockedBy(domain, rulesBelow, destination.longUrl()))
+                .map(LinkDestination::id)
+                .toList();
+        refuseOverTheCap(ids.size(), maxLinks);
+        saveRule(domain, DomainRuleType.BLOCK, reason, performedBy);
+        return eachLink(ids, Long::longValue, id -> block(id, BlockReason.DOMAIN_RULE, domain, ReviewResolution.DOMAIN_BLOCKED,
+                performedBy, url -> url.isActive() && isBlockedBy(domain, rulesBelow, url.getLongUrl()))
+                .map(url -> {
+                    alertWhenAutomatic(url, performedBy);
+                    blockedLinks.accept(url);
+                    return true;
+                })
+                .orElse(false));
+    }
+
+    private Map<String, Integer> activeLinksBlockedBy(final Set<String> domains, final List<DomainRule> rules) {
+        final var rulesBelow = domains.stream().collect(Collectors.toMap(Function.identity(), domain -> rulesBelow(domain, rules)));
+        final var counts = new HashMap<String, Integer>();
+        forEachDestination(afterId -> urlRepository.findActiveDestinationsAfter(afterId, FIRST_PAGE), destination ->
+                DomainNames.hostOf(destination.longUrl()).ifPresent(host -> rulesBelow.forEach((domain, below) -> {
+                    if (hostIsBlockedBy(domain, below, host)) {
+                        counts.merge(domain, 1, Integer::sum);
+                    }
+                })));
+        return counts;
+    }
+
+    private boolean isAllowedByItsRule(final String domain) {
+        return domainRuleRepository.findByDomain(domain).filter(rule -> rule.getType() == DomainRuleType.ALLOW).isPresent();
+    }
+
+    private static DomainRuleType ruleTypeOf(final String domain, final List<DomainRule> rules) {
+        return rules.stream().filter(rule -> rule.getDomain().equals(domain)).map(DomainRule::getType).findFirst().orElse(null);
+    }
+
+    private static List<DomainRule> rulesBelow(final String domain, final List<DomainRule> rules) {
+        return rules.stream()
                 .filter(rule -> !rule.getDomain().equals(domain) && covers(rule.getDomain(), domain))
                 .toList();
     }
 
-    private static boolean isAllowedBy(final List<DomainRule> rules, final String longUrl) {
-        return DomainNames.hostOf(longUrl)
-                .flatMap(host -> rules.stream()
-                        .filter(rule -> covers(host, rule.getDomain()))
-                        .max(Comparator.comparingInt(rule -> rule.getDomain().length())))
+    private static boolean isBlockedBy(final String domain, final List<DomainRule> rulesBelow, final String longUrl) {
+        return DomainNames.hostOf(longUrl).filter(host -> hostIsBlockedBy(domain, rulesBelow, host)).isPresent();
+    }
+
+    private static boolean hostIsBlockedBy(final String domain, final List<DomainRule> rulesBelow, final String host) {
+        return covers(host, domain) && rulesBelow.stream()
+                .filter(rule -> covers(host, rule.getDomain()))
+                .max(Comparator.comparingInt(rule -> rule.getDomain().length()))
                 .filter(rule -> rule.getType() == DomainRuleType.ALLOW)
-                .isPresent();
+                .isEmpty();
     }
 
     private int blockLinksOf(final User user, final String performedBy, final Integer maxLinks) {
@@ -498,14 +590,22 @@ public class DefaultModerationService implements ModerationService {
 
     private static List<LinkDestination> destinationsOn(final String domain, final LongFunction<List<LinkDestination>> pageAfter) {
         final var matching = new ArrayList<LinkDestination>();
+        forEachDestination(pageAfter, destination -> {
+            if (isOn(destination.longUrl(), domain)) {
+                matching.add(destination);
+            }
+        });
+        return matching;
+    }
+
+    private static void forEachDestination(final LongFunction<List<LinkDestination>> pageAfter, final Consumer<LinkDestination> action) {
         var afterId = 0L;
         List<LinkDestination> page;
         do {
             page = pageAfter.apply(afterId);
-            page.stream().filter(destination -> isOn(destination.longUrl(), domain)).forEach(matching::add);
+            page.forEach(action);
             afterId = page.isEmpty() ? afterId : page.getLast().id();
         } while (page.size() == PAGE_SIZE);
-        return matching;
     }
 
     private void saveRule(final String domain, final DomainRuleType type, final String reason, final String performedBy) {
@@ -594,10 +694,13 @@ public class DefaultModerationService implements ModerationService {
     }
 
     private static String ruleDomain(final String domain) {
+        return ruleDomainOf(domain).orElseThrow(() -> new UrlValidationException(NOT_A_DOMAIN));
+    }
+
+    private static Optional<String> ruleDomainOf(final String domain) {
         return DomainNames.hostOf(StringUtils.strip(domain))
                 .filter(host -> !DomainNames.isIpLiteral(host))
-                .filter(DomainNames::isUnderRegistrySuffix)
-                .orElseThrow(() -> new UrlValidationException(NOT_A_DOMAIN));
+                .filter(DomainNames::isUnderRegistrySuffix);
     }
 
     private static boolean isOn(final String longUrl, final String domain) {

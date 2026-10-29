@@ -1,5 +1,7 @@
 package cc.hrva.urlshortener.service;
 
+import cc.hrva.urlshortener.dto.DomainBlockPreviewResponse;
+import cc.hrva.urlshortener.dto.DomainBulkBlockResponse;
 import cc.hrva.urlshortener.dto.DomainRuleDto;
 import cc.hrva.urlshortener.dto.DomainRuleResponse;
 import cc.hrva.urlshortener.dto.LinkDestination;
@@ -65,6 +67,7 @@ import org.springframework.transaction.support.TransactionOperations;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.tuple;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.ArgumentMatchers.anyLong;
@@ -152,6 +155,11 @@ class DefaultModerationServiceTest {
             }
             return url;
         });
+        lenient().when(urlRepository.findDestinationsByIdIn(anyCollection())).thenAnswer(invocation -> invocation.<Collection<Long>>getArgument(0).stream()
+                .map(links::get)
+                .filter(Objects::nonNull)
+                .map(url -> new LinkDestination(url.getId(), url.getLongUrl()))
+                .toList());
         lenient().when(urlRepository.existsUrlByShortUrlAndActiveTrue(anyString())).thenAnswer(invocation ->
                 links.values().stream().anyMatch(url -> url.isActive() && url.getShortUrl().equals(invocation.getArgument(0))));
         lenient().when(urlRepository.findActiveDestinationsAfter(anyLong(), any(Pageable.class)))
@@ -1448,6 +1456,208 @@ class DefaultModerationServiceTest {
 
         assertThat(links.values()).allSatisfy(url -> assertThat(url.isActive()).isFalse());
         verify(eventPublisher, never()).publishEvent(any(AdminAlertEvent.class));
+    }
+
+    @Test
+    void aBlockPreviewGroupsTheSelectedLinksByRegistrableDomainAndCountsEveryActiveLinkTheBlockWouldTurnOff() {
+        link(10L, "https://ll.omaehhm.com/a", null);
+        link(11L, "https://qq.omaehhm.com/b?r=zB3vpw", null);
+        link(12L, "https://omaehhm.com/c", null);
+        final var inactive = link(13L, "https://zz.omaehhm.com/d", null);
+        inactive.setActive(false);
+        link(14L, "https://padlet.com/x/scam", null);
+        LongStream.rangeClosed(20, 24).forEach(id -> link(id, "https://padlet.com/board/" + id, null));
+        link(30L, "https://example.org/", null);
+
+        final var preview = moderationService.previewDomainBlocks(List.of(14L, 10L, 11L, 13L));
+
+        assertThat(preview).containsExactly(
+                new DomainBlockPreviewResponse("omaehhm.com", List.of("ll.omaehhm.com", "qq.omaehhm.com", "zz.omaehhm.com"), 3, 3, null),
+                new DomainBlockPreviewResponse("padlet.com", List.of("padlet.com"), 1, 6, null));
+        assertThat(links.values()).filteredOn(url -> url.getId() != 13L).allSatisfy(url -> assertThat(url.isActive()).isTrue());
+        verifyNoInteractions(auditLogService, sendingEmailService, eventPublisher);
+    }
+
+    @Test
+    void aBlockPreviewLeavesOutUnknownLinksAndDestinationsWithoutADomainARuleCouldName() {
+        link(10L, "https://jofogas.cards/login", null);
+        link(11L, "http://203.0.113.7/login", null);
+        link(12L, "http://[2001:db8::1]/login", null);
+        link(13L, "https://localhost/login", null);
+        link(14L, "not a url at all", null);
+
+        final var preview = moderationService.previewDomainBlocks(List.of(10L, 11L, 12L, 13L, 14L, 99L));
+
+        assertThat(preview).containsExactly(new DomainBlockPreviewResponse("jofogas.cards", List.of("jofogas.cards"), 1, 1, null));
+    }
+
+    @Test
+    void aBlockPreviewNamesEachDomainsOwnRuleAndCountsLikeTheBlockAroundMoreSpecificAllows() {
+        rule("jofogas.cards", DomainRuleType.ALLOW);
+        rule("evil.cards", DomainRuleType.BLOCK);
+        rule("docs.padlet.com", DomainRuleType.ALLOW);
+        when(domainRuleRepository.findAll()).thenAnswer(invocation -> List.copyOf(rules.values()));
+        link(10L, "https://jofogas.cards/a", null);
+        link(11L, "https://www.evil.cards/", null);
+        link(12L, "https://padlet.com/scam", null);
+        link(13L, "https://docs.padlet.com/trusted", null);
+        link(14L, "https://padlet.com/other", null);
+
+        final var preview = moderationService.previewDomainBlocks(List.of(10L, 11L, 12L));
+
+        assertThat(preview).containsExactly(
+                new DomainBlockPreviewResponse("evil.cards", List.of("www.evil.cards"), 1, 1, DomainRuleType.BLOCK),
+                new DomainBlockPreviewResponse("jofogas.cards", List.of("jofogas.cards"), 1, 1, DomainRuleType.ALLOW),
+                new DomainBlockPreviewResponse("padlet.com", List.of("padlet.com"), 1, 2, null));
+        assertThat(moderationService.blockDomain("padlet.com", null, ADMIN, "admin", null)).isEqualTo(2);
+    }
+
+    @Test
+    void aBlockPreviewReadsTheActiveLinksOnceForEveryDomain() {
+        LongStream.rangeClosed(1, 40).forEach(id -> link(id, "https://x%d.domain%d.com/".formatted(id, id), null));
+
+        final var preview = moderationService.previewDomainBlocks(LongStream.rangeClosed(1, 40).boxed().toList());
+
+        assertThat(preview).hasSize(40).allSatisfy(row -> assertThat(row.activeLinks()).isEqualTo(1));
+        verify(urlRepository, times(1)).findActiveDestinationsAfter(anyLong(), any(Pageable.class));
+        verify(domainRuleRepository, times(1)).findAll();
+    }
+
+    @Test
+    void blockingSeveralDomainsBlocksEachOneLikeASingleBlockAndAuditsEachOne() {
+        final var first = link(10L, "https://ll.omaehhm.com/a", null);
+        final var second = link(11L, "https://omaehhm.com/b", null);
+        final var third = link(12L, "https://qdbplibnsx.fvvxctw.com/wqamhcsom?r=zB3vpw&t=1793185791", null);
+        final var other = link(13L, "https://example.org/", null);
+
+        final var result = moderationService.blockDomains(List.of("omaehhm.com", " FVVXCTW.com "), "Phishing", ADMIN, "admin-bulk");
+
+        assertThat(result).isEqualTo(new DomainBulkBlockResponse(
+                List.of(new DomainBulkBlockResponse.Blocked("omaehhm.com", 2), new DomainBulkBlockResponse.Blocked("fvvxctw.com", 1)), List.of(), 3));
+        assertThat(List.of(first, second)).allSatisfy(url -> assertThat(url.getBlockDetail()).isEqualTo("omaehhm.com"));
+        assertThat(third.getBlockDetail()).isEqualTo("fvvxctw.com");
+        assertThat(List.of(first, second, third)).allSatisfy(url -> {
+            assertThat(url.isActive()).isFalse();
+            assertThat(url.getBlockReason()).isEqualTo(BlockReason.DOMAIN_RULE);
+            verify(cache).evict(url.getShortUrl());
+            verify(reviewQueueService).resolveOpen(url, ReviewResolution.DOMAIN_BLOCKED, ADMIN);
+        });
+        assertThat(other.isActive()).isTrue();
+        assertThat(rules.values())
+                .extracting(DomainRule::getDomain, DomainRule::getType, DomainRule::getReason, DomainRule::getCreatedBy)
+                .containsExactlyInAnyOrder(
+                        tuple("omaehhm.com", DomainRuleType.BLOCK, "Phishing", ADMIN),
+                        tuple("fvvxctw.com", DomainRuleType.BLOCK, "Phishing", ADMIN));
+        verify(eventPublisher, times(2)).publishEvent(any(BlocklistConfigurationChangedEvent.class));
+        verify(auditLogService).log(ADMIN, AuditAction.BLOCK_DOMAIN, "Domain", "omaehhm.com", "reason: Phishing, links: 2, via: admin-bulk");
+        verify(auditLogService).log(ADMIN, AuditAction.BLOCK_DOMAIN, "Domain", "fvvxctw.com", "reason: Phishing, links: 1, via: admin-bulk");
+        verifyNoMoreInteractions(auditLogService);
+        verify(eventPublisher, never()).publishEvent(any(AdminAlertEvent.class));
+        assertThat(savedPerTransaction).filteredOn(saved -> !saved.isEmpty()).containsExactly(List.of(10L), List.of(11L), List.of(12L));
+        assertThat(outOfPlace).isEmpty();
+    }
+
+    @Test
+    void blockingSeveralDomainsSendsEachOwnerOneEmailAfterEveryDomainIsBlocked() {
+        final var alice = user(1L, "alice@example.com");
+        final var bob = user(2L, "bob@example.com");
+        final var aliceFirst = link(10L, "https://ll.omaehhm.com/a", alice);
+        final var aliceSecond = link(11L, "https://qdbplibnsx.fvvxctw.com/b", alice);
+        final var aliceThird = link(12L, "https://fvvxctw.com/c", alice);
+        final var bobOnly = link(13L, "https://omaehhm.com/d", bob);
+        link(14L, "https://padlet.com/anonymous", null);
+        link(15L, "https://example.org/", alice);
+
+        moderationService.blockDomains(List.of("omaehhm.com", "fvvxctw.com", "padlet.com"), "Phishing", ADMIN, "admin-bulk");
+
+        final var order = inOrder(auditLogService, sendingEmailService);
+        order.verify(auditLogService).log(ADMIN, AuditAction.BLOCK_DOMAIN, "Domain", "padlet.com", "reason: Phishing, links: 1, via: admin-bulk");
+        order.verify(sendingEmailService).sendEmailUrlsBlocked(alice, List.of(aliceFirst, aliceSecond, aliceThird));
+        verify(sendingEmailService).sendEmailUrlBlocked(bob, bobOnly);
+        verifyNoMoreInteractions(sendingEmailService);
+    }
+
+    @Test
+    void blockingDomainsOneAtATimeStillEmailsTheOwnerRightAfterEachBlock() {
+        final var alice = user(1L, "alice@example.com");
+        final var first = link(10L, "https://ll.omaehhm.com/a", alice);
+        final var second = link(11L, "https://fvvxctw.com/b", alice);
+
+        moderationService.createDomainRule(new DomainRuleDto("omaehhm.com", DomainRuleType.BLOCK, "Phishing"), ADMIN, "admin");
+
+        verify(sendingEmailService).sendEmailUrlBlocked(alice, first);
+        verifyNoMoreInteractions(sendingEmailService);
+
+        moderationService.createDomainRule(new DomainRuleDto("fvvxctw.com", DomainRuleType.BLOCK, "Phishing"), ADMIN, "admin");
+
+        verify(sendingEmailService).sendEmailUrlBlocked(alice, second);
+        verifyNoMoreInteractions(sendingEmailService);
+    }
+
+    @Test
+    void blockingSeveralDomainsSkipsADomainAnAllowRuleTrustsAndLeavesTheRuleAlone() {
+        final var trusted = rule("gableci.hrva.cc", DomainRuleType.ALLOW);
+        final var kept = link(10L, "https://gableci.hrva.cc/menu", user(1L, "alice@example.com"));
+        final var blocked = link(11L, "https://omaehhm.com/a", null);
+
+        final var result = moderationService.blockDomains(List.of("gableci.hrva.cc", "omaehhm.com"), "Phishing", ADMIN, "admin-bulk");
+
+        assertThat(result).isEqualTo(new DomainBulkBlockResponse(List.of(new DomainBulkBlockResponse.Blocked("omaehhm.com", 1)),
+                List.of(new DomainBulkBlockResponse.Skipped("gableci.hrva.cc", "Allowed by a rule")), 1));
+        assertThat(trusted.getType()).isEqualTo(DomainRuleType.ALLOW);
+        assertThat(trusted.getReason()).isEqualTo("seeded");
+        assertThat(kept.isActive()).isTrue();
+        assertThat(blocked.isActive()).isFalse();
+        verify(auditLogService, never()).log(anyString(), any(), anyString(), eq("gableci.hrva.cc"), anyString());
+        verifyNoInteractions(sendingEmailService);
+    }
+
+    @Test
+    void blockingSeveralDomainsListsEachFailureWithItsReasonAndBlocksTheRest() {
+        link(10L, "https://omaehhm.com/a", null);
+        final var unsaved = link(11L, "https://fvvxctw.com/b", null);
+        link(12L, "https://padlet.com/c", null);
+        doThrow(new DataAccessResourceFailureException("connection to 10.0.0.5:5432 refused"))
+                .when(domainRuleRepository).save(argThat((DomainRule rule) -> rule != null && "fvvxctw.com".equals(rule.getDomain())));
+
+        final var result = moderationService.blockDomains(List.of("com", "omaehhm.com", "203.0.113.7", "fvvxctw.com", "padlet.com"),
+                "Phishing", ADMIN, "admin-bulk");
+
+        assertThat(result.blocked()).containsExactly(new DomainBulkBlockResponse.Blocked("omaehhm.com", 1),
+                new DomainBulkBlockResponse.Blocked("padlet.com", 1));
+        assertThat(result.skipped()).containsExactly(
+                new DomainBulkBlockResponse.Skipped("com", NOT_A_DOMAIN),
+                new DomainBulkBlockResponse.Skipped("203.0.113.7", NOT_A_DOMAIN),
+                new DomainBulkBlockResponse.Skipped("fvvxctw.com", "Blocking this domain failed. Try again."));
+        assertThat(result.linksDeactivated()).isEqualTo(2);
+        assertThat(unsaved.isActive()).isTrue();
+        assertThat(rules).containsOnlyKeys("omaehhm.com", "padlet.com");
+    }
+
+    @Test
+    void blockingSeveralDomainsReblocksAnAlreadyBlockedDomainLikeASingleBlock() {
+        final var existing = rule("omaehhm.com", DomainRuleType.BLOCK);
+        final var reactivatedByHand = link(10L, "https://ll.omaehhm.com/a", null);
+
+        final var result = moderationService.blockDomains(List.of("omaehhm.com"), "Phishing", ADMIN, "admin-bulk");
+
+        assertThat(result.blocked()).containsExactly(new DomainBulkBlockResponse.Blocked("omaehhm.com", 1));
+        assertThat(reactivatedByHand.getBlockReason()).isEqualTo(BlockReason.DOMAIN_RULE);
+        assertThat(existing)
+                .extracting(DomainRule::getType, DomainRule::getReason, DomainRule::getCreatedBy, DomainRule::getCreatedAt)
+                .containsExactly(DomainRuleType.BLOCK, "Phishing", "system", RULE_CREATED_AT);
+        verify(auditLogService).log(ADMIN, AuditAction.BLOCK_DOMAIN, "Domain", "omaehhm.com", "reason: Phishing, links: 1, via: admin-bulk");
+    }
+
+    @Test
+    void aDomainSentTwiceInOneBulkBlockIsBlockedOnce() {
+        link(10L, "https://omaehhm.com/a", null);
+
+        final var result = moderationService.blockDomains(List.of("omaehhm.com", " OMAEHHM.com "), "Phishing", ADMIN, "admin-bulk");
+
+        assertThat(result).isEqualTo(new DomainBulkBlockResponse(List.of(new DomainBulkBlockResponse.Blocked("omaehhm.com", 1)), List.of(), 1));
+        verify(domainRuleRepository, times(1)).save(any(DomainRule.class));
+        verify(auditLogService, times(1)).log(anyString(), any(), anyString(), anyString(), anyString());
     }
 
     private TransactionOperations recordingTransactions() {

@@ -1,11 +1,16 @@
 package cc.hrva.urlshortener.controller;
 
+import cc.hrva.urlshortener.dto.DomainBlockPreviewDto;
+import cc.hrva.urlshortener.dto.DomainBlockPreviewResponse;
+import cc.hrva.urlshortener.dto.DomainBulkBlockDto;
+import cc.hrva.urlshortener.dto.DomainBulkBlockResponse;
 import cc.hrva.urlshortener.dto.DomainRuleCreatedResponse;
 import cc.hrva.urlshortener.dto.DomainRuleDto;
 import cc.hrva.urlshortener.dto.DomainRuleResponse;
 import cc.hrva.urlshortener.model.enums.DomainRuleType;
 import cc.hrva.urlshortener.service.ModerationService;
 import io.swagger.v3.oas.annotations.Hidden;
+import jakarta.validation.Valid;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -27,6 +32,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class AdminDomainRuleController {
 
     private static final String VIA = "admin";
+    private static final String VIA_BULK = "admin-bulk";
 
     private final ModerationService moderationService;
 
@@ -40,6 +46,20 @@ public class AdminDomainRuleController {
     @PreAuthorize("hasRole('ROLE_ADMIN')")
     public ResponseEntity<DomainRuleCreatedResponse> createRule(@RequestBody final DomainRuleDto domainRuleDto, final Authentication authentication) {
         return ResponseEntity.ok(moderationService.createDomainRule(domainRuleDto, authentication.getName(), VIA));
+    }
+
+    @PostMapping("/bulk-preview")
+    @PreAuthorize("hasRole('ROLE_ADMIN')")
+    public ResponseEntity<List<DomainBlockPreviewResponse>> previewBulkBlock(@Valid @RequestBody final DomainBlockPreviewDto domainBlockPreviewDto) {
+        return ResponseEntity.ok(moderationService.previewDomainBlocks(domainBlockPreviewDto.urlIds()));
+    }
+
+    @PostMapping("/bulk")
+    @PreAuthorize("hasRole('ROLE_ADMIN')")
+    public ResponseEntity<DomainBulkBlockResponse> blockAll(@Valid @RequestBody final DomainBulkBlockDto domainBulkBlockDto,
+                                                            final Authentication authentication) {
+        return ResponseEntity.ok(moderationService.blockDomains(domainBulkBlockDto.domains(), domainBulkBlockDto.reason(), authentication.getName(),
+                VIA_BULK));
     }
 
     @DeleteMapping("/{id}")

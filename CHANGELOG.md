@@ -4,6 +4,15 @@ All notable changes to hrva.cc — the URL shortener.
 
 ---
 
+## [v2.15.2] — 2026-10-29
+
+Admins can block the domains of several links at once.
+
+### 🔧 Admin
+- Block domains on All URLs blocks the domains of the ticked links at once, after showing how many active links on the site each one turns off.
+
+---
+
 ## [v2.15.1] — 2026-10-29
 
 Notification settings that are easier to find and fix, and faster bio pages.
