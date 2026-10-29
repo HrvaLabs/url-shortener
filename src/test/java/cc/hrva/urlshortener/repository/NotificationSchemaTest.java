@@ -10,6 +10,7 @@ import cc.hrva.urlshortener.model.enums.ChannelType;
 import cc.hrva.urlshortener.model.enums.ConsentSource;
 import cc.hrva.urlshortener.model.enums.DeliveryStatus;
 import cc.hrva.urlshortener.model.enums.NotificationType;
+import cc.hrva.urlshortener.service.notification.ChannelTargets;
 import cc.hrva.urlshortener.service.notification.EmailConsentReader;
 import jakarta.persistence.EntityManager;
 import java.time.LocalDateTime;
@@ -88,7 +89,8 @@ class NotificationSchemaTest {
                         tuple("031-notification-delivery", "EXECUTED"),
                         tuple("031-notification-claim", "EXECUTED"),
                         tuple("031-url-destination-check", "EXECUTED"),
-                        tuple("031-email-log-consent-type", "EXECUTED"));
+                        tuple("031-email-log-consent-type", "EXECUTED"),
+                        tuple("031-notification-channel-masked-target", "EXECUTED"));
     }
 
     @Test
@@ -152,6 +154,22 @@ class NotificationSchemaTest {
             assertThat(kept.getType()).isEqualTo(NotificationType.LINK_DEAD);
         });
         assertThat(rows("notification_delivery")).isZero();
+    }
+
+    @Test
+    void aMaskForTheLongestHostFits() {
+        final var label = "a".repeat(63);
+        final var host = String.join(".", label, label, label, "b".repeat(58)) + ".hr";
+        final var mask = ChannelTargets.mask(ChannelType.WEBHOOK, "https://" + host + "/hook/abcd");
+        final var channel = savedChannel(savedUser("ana@example.com"), "Long host");
+        channel.setMaskedTarget(mask);
+        notificationChannelRepository.saveAndFlush(channel);
+        entityManager.clear();
+
+        assertThat(notificationChannelRepository.findById(channel.getId())).hasValueSatisfying(saved -> assertThat(saved.getMaskedTarget()).isEqualTo(mask));
+        assertThat(jdbcTemplate.queryForObject(
+                "select character_maximum_length from information_schema.columns where upper(table_name) = 'NOTIFICATION_CHANNEL' and upper(column_name) = 'MASKED_TARGET'",
+                Integer.class)).isEqualTo(ChannelTargets.MASK_LENGTH);
     }
 
     @Test

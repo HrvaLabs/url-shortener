@@ -7,6 +7,7 @@ import cc.hrva.urlshortener.exception.BioHandleUnavailableException;
 import cc.hrva.urlshortener.exception.BioPageConflictException;
 import cc.hrva.urlshortener.exception.BioPageNotFoundException;
 import cc.hrva.urlshortener.exception.BlocklistSourceNotFoundException;
+import cc.hrva.urlshortener.exception.ChannelValidationException;
 import cc.hrva.urlshortener.exception.CommonException;
 import cc.hrva.urlshortener.exception.ConnectRequestAlreadyApprovedException;
 import cc.hrva.urlshortener.exception.ConnectRequestExpiredException;
@@ -26,6 +27,8 @@ import cc.hrva.urlshortener.exception.SignInExpiredException;
 import cc.hrva.urlshortener.exception.SignInUnavailableException;
 import cc.hrva.urlshortener.exception.TwoStepFailedException;
 import cc.hrva.urlshortener.exception.NoAuthorizationException;
+import cc.hrva.urlshortener.exception.NotificationChannelNotFoundException;
+import cc.hrva.urlshortener.exception.NotificationTestUnavailableException;
 import cc.hrva.urlshortener.exception.UrlNotFoundException;
 import cc.hrva.urlshortener.exception.UserNotFoundException;
 import jakarta.validation.ConstraintViolationException;
@@ -260,6 +263,21 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(ConnectedAppNotFoundException.class)
     public ResponseEntity<Map<String, String>> handleConnectedAppNotFound(final ConnectedAppNotFoundException ex) {
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", safeMessage(ex)));
+    }
+
+    @ExceptionHandler(NotificationChannelNotFoundException.class)
+    public ResponseEntity<Map<String, String>> handleNotificationChannelNotFound(final NotificationChannelNotFoundException ex) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", safeMessage(ex)));
+    }
+
+    @ExceptionHandler(ChannelValidationException.class)
+    public ResponseEntity<Map<String, String>> handleChannelValidation(final ChannelValidationException ex) {
+        return ResponseEntity.badRequest().body(ex.getFieldErrors());
+    }
+
+    @ExceptionHandler(NotificationTestUnavailableException.class)
+    public ResponseEntity<Map<String, String>> handleNotificationTestUnavailable(final NotificationTestUnavailableException ex) {
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(Map.of("error", safeMessage(ex)));
     }
 
     @ExceptionHandler(RateLimitExceededException.class)

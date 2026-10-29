@@ -207,4 +207,13 @@
         </rollback>
     </changeSet>
 
+    <changeSet author="khrvacic" id="031-notification-channel-masked-target">
+        <modifyDataType tableName="notification_channel" columnName="masked_target" newDataType="VARCHAR(300)"/>
+        <addNotNullConstraint tableName="notification_channel" columnName="masked_target" columnDataType="VARCHAR(300)"/>
+        <rollback>
+            <modifyDataType tableName="notification_channel" columnName="masked_target" newDataType="VARCHAR(160)"/>
+            <addNotNullConstraint tableName="notification_channel" columnName="masked_target" columnDataType="VARCHAR(160)"/>
+        </rollback>
+    </changeSet>
+
 </databaseChangeLog>

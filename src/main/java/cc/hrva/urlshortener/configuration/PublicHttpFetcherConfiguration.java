@@ -4,6 +4,7 @@ import cc.hrva.urlshortener.client.ChannelPoster;
 import cc.hrva.urlshortener.client.DestinationProber;
 import cc.hrva.urlshortener.client.PublicHttpFetcher;
 import cc.hrva.urlshortener.client.RedirectFollower;
+import cc.hrva.urlshortener.client.Resolver;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -23,6 +24,11 @@ public class PublicHttpFetcherConfiguration {
     @Bean
     public DestinationProber destinationProber() {
         return new PublicHttpFetcher(PublicHttpFetcher.httpOrHttpsPublicOnly())::probe;
+    }
+
+    @Bean
+    public Resolver resolver() {
+        return Resolver.SYSTEM;
     }
 
     @Bean

@@ -9,9 +9,11 @@ import cc.hrva.urlshortener.configuration.WebConfiguration;
 import cc.hrva.urlshortener.mcp.McpResourceServerConfiguration;
 import cc.hrva.urlshortener.mcp.authorization.AuthorizationServerConfiguration;
 import cc.hrva.urlshortener.mcp.bridge.ConnectRequestStore;
+import cc.hrva.urlshortener.client.Resolver;
 import cc.hrva.urlshortener.model.NotificationConsent;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.enums.NotificationType;
+import cc.hrva.urlshortener.repository.NotificationChannelRepository;
 import cc.hrva.urlshortener.repository.NotificationConsentRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.security.ClientIpResolver;
@@ -19,16 +21,20 @@ import cc.hrva.urlshortener.security.JwtFilter;
 import cc.hrva.urlshortener.security.OAuth2LoginSuccessHandler;
 import cc.hrva.urlshortener.security.TokenProvider;
 import cc.hrva.urlshortener.service.UserService;
+import cc.hrva.urlshortener.service.impl.DefaultNotificationChannelService;
 import cc.hrva.urlshortener.service.impl.DefaultNotificationConsentService;
+import cc.hrva.urlshortener.service.notification.ChannelTargets;
 import cc.hrva.urlshortener.service.notification.EmailConsentReader;
 import cc.hrva.urlshortener.service.notification.NotificationKeys;
 import cc.hrva.urlshortener.service.notification.NotificationTestKeys;
+import cc.hrva.urlshortener.service.notification.SecretBox;
 import cc.hrva.urlshortener.service.notification.UnsubscribeTokens;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiter;
 import cc.hrva.urlshortener.service.twostep.AccountLock;
 import com.nimbusds.jose.JOSEException;
 import com.nimbusds.jose.jwk.RSAKey;
 import com.nimbusds.jose.jwk.gen.RSAKeyGenerator;
+import java.net.InetAddress;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -40,6 +46,8 @@ import org.springframework.boot.SpringBootConfiguration;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.persistence.autoconfigure.EntityScan;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.FilterType;
@@ -68,6 +76,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.startsWith;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -95,6 +104,12 @@ class NotificationEndpointSecurityTest {
 
     private static final String NOTIFICATIONS = "/api/v1/users/me/notifications";
     private static final String UNSUBSCRIBE = "/api/v1/notifications/unsubscribe";
+    private static final String CHANNELS = "/api/v1/users/me/notification-channels";
+    private static final String BULLETS = Character.toString(0x2022).repeat(4);
+    private static final String DISCORD_CHANNEL = """
+            {"name":"Team alerts","type":"DISCORD","enabled":true,"events":["WEEKLY_SUMMARY","LINK_DEAD"],
+             "target":"https://discord.com/api/webhooks/123/abc-secret-xyz","botToken":null,"chatId":null,"accessToken":null}""";
+    private static final String CHANNEL_NOT_FOUND = "{\"error\":\"Notification channel not found\"}";
     private static final String INVALID_LINK = """
             {"error":"This unsubscribe link isn't valid. You can turn emails off in Settings, under Notifications."}""";
     private static final long ANA = 600L;
@@ -127,6 +142,9 @@ class NotificationEndpointSecurityTest {
 
     @Autowired
     private UnsubscribeTokens unsubscribeTokens;
+
+    @Autowired
+    private NotificationChannelRepository notificationChannelRepository;
 
     @MockitoBean
     private UserService userService;
@@ -164,6 +182,7 @@ class NotificationEndpointSecurityTest {
     @AfterEach
     void tearDown() {
         jdbcTemplate.update("delete from notification_consent where user_id in (?, ?)", ANA, BOB);
+        jdbcTemplate.update("delete from notification_channel where user_id in (?, ?)", ANA, BOB);
         jdbcTemplate.update("delete from user_account_authorities where user_id in (?, ?)", ANA, BOB);
         jdbcTemplate.update("delete from user_account where id in (?, ?)", ANA, BOB);
     }
@@ -367,6 +386,204 @@ class NotificationEndpointSecurityTest {
         assertThat(isActive(ANA, NotificationType.WEEKLY_SUMMARY_EMAIL)).isTrue();
     }
 
+    @Test
+    void theChannelEndpointsNeedSignIn() throws Exception {
+        mockMvc.perform(get(CHANNELS)).andExpect(status().isUnauthorized());
+        mockMvc.perform(post(CHANNELS).contentType(MediaType.APPLICATION_JSON).content(DISCORD_CHANNEL)).andExpect(status().isUnauthorized());
+        mockMvc.perform(put(CHANNELS + "/1").contentType(MediaType.APPLICATION_JSON).content(DISCORD_CHANNEL)).andExpect(status().isUnauthorized());
+        mockMvc.perform(delete(CHANNELS + "/1")).andExpect(status().isUnauthorized());
+        mockMvc.perform(post(CHANNELS + "/1/signing-secret")).andExpect(status().isUnauthorized());
+
+        assertThat(notificationChannelRepository.count()).isZero();
+    }
+
+    @Test
+    void aSignedInUserAddsListsEditsAndDeletesAChannel() throws Exception {
+        final var created = mockMvc.perform(as(ANA_TOKEN, post(CHANNELS)).contentType(MediaType.APPLICATION_JSON).content(DISCORD_CHANNEL))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.id").isNumber())
+                .andExpect(jsonPath("$.name").value("Team alerts"))
+                .andExpect(jsonPath("$.type").value("DISCORD"))
+                .andExpect(jsonPath("$.enabled").value(true))
+                .andExpect(jsonPath("$.events[0]").value("LINK_DEAD"))
+                .andExpect(jsonPath("$.events[1]").value("WEEKLY_SUMMARY"))
+                .andExpect(jsonPath("$.maskedTarget").value("https://discord.com/" + BULLETS + "-xyz"))
+                .andExpect(jsonPath("$.chatId").value(nullValue()))
+                .andExpect(jsonPath("$.hasAccessToken").value(false))
+                .andExpect(jsonPath("$.autoDisabledAt").value(nullValue()))
+                .andExpect(jsonPath("$.lastDelivery").value(nullValue()))
+                .andExpect(jsonPath("$.createdAt").isString())
+                .andExpect(jsonPath("$.updatedAt").isString())
+                .andExpect(jsonPath("$.signingSecret").doesNotExist())
+                .andReturn().getResponse().getContentAsString();
+        assertThat(created).doesNotContain("abc-secret-xyz");
+        final var id = notificationChannelRepository.findAll().getFirst().getId();
+        assertThat(jdbcTemplate.queryForList("select type from notification_consent where channel_id = ? and revoked_at is null order by type", String.class, id))
+                .containsExactly("LINK_DEAD", "WEEKLY_SUMMARY");
+        assertThat(jdbcTemplate.queryForObject("select channel_label from notification_consent where channel_id = ? and type = 'LINK_DEAD'", String.class, id))
+                .isEqualTo("Discord: Team alerts");
+
+        mockMvc.perform(as(ANA_TOKEN, get(CHANNELS)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].id").value(id))
+                .andExpect(jsonPath("$[0].events.length()").value(2))
+                .andExpect(jsonPath("$[0].signingSecret").doesNotExist());
+        mockMvc.perform(as(BOB_TOKEN, get(CHANNELS)))
+                .andExpect(status().isOk())
+                .andExpect(content().json("[]", JsonCompareMode.STRICT));
+
+        mockMvc.perform(as(ANA_TOKEN, put(CHANNELS + "/" + id)).contentType(MediaType.APPLICATION_JSON).content("""
+                        {"name":"Renamed","type":"DISCORD","enabled":false,"events":["LINK_BACK"],"chatId":null}"""))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.name").value("Renamed"))
+                .andExpect(jsonPath("$.enabled").value(false))
+                .andExpect(jsonPath("$.events.length()").value(1))
+                .andExpect(jsonPath("$.events[0]").value("LINK_BACK"))
+                .andExpect(jsonPath("$.maskedTarget").value("https://discord.com/" + BULLETS + "-xyz"));
+        assertThat(jdbcTemplate.queryForList("select type from notification_consent where channel_id = ? and revoked_at is null", String.class, id))
+                .containsExactly("LINK_BACK");
+
+        mockMvc.perform(as(ANA_TOKEN, delete(CHANNELS + "/" + id)))
+                .andExpect(status().isNoContent());
+        assertThat(notificationChannelRepository.count()).isZero();
+        assertThat(jdbcTemplate.queryForList("select revoked_source from notification_consent where user_id = ? and revoked_at is not null and channel_id is null "
+                + "and type = 'LINK_BACK'", String.class, ANA)).containsExactly("CHANNEL_REMOVED");
+        assertThat(jdbcTemplate.queryForObject("select count(*) from notification_consent where user_id = ? and revoked_at is null", Long.class, ANA)).isZero();
+    }
+
+    @Test
+    void channelFieldErrorsComeBackByField() throws Exception {
+        mockMvc.perform(as(ANA_TOKEN, post(CHANNELS)).contentType(MediaType.APPLICATION_JSON).content(DISCORD_CHANNEL.replace("\"Team alerts\"", "\" \"")))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().json("{\"name\":\"Give the channel a name\"}", JsonCompareMode.STRICT));
+        mockMvc.perform(as(ANA_TOKEN, post(CHANNELS)).contentType(MediaType.APPLICATION_JSON)
+                        .content(DISCORD_CHANNEL.replace("Team alerts", "x".repeat(61))))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().json("{\"name\":\"Name must be 60 characters or fewer\"}", JsonCompareMode.STRICT));
+        mockMvc.perform(as(ANA_TOKEN, post(CHANNELS)).contentType(MediaType.APPLICATION_JSON).content(DISCORD_CHANNEL.replace("\"DISCORD\"", "null")))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().json("{\"type\":\"Choose a channel type\"}", JsonCompareMode.STRICT));
+        mockMvc.perform(as(ANA_TOKEN, post(CHANNELS)).contentType(MediaType.APPLICATION_JSON).content(DISCORD_CHANNEL.replace("https://", "http://")))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().json("{\"target\":\"Use an https URL.\"}", JsonCompareMode.STRICT));
+        mockMvc.perform(as(ANA_TOKEN, post(CHANNELS)).contentType(MediaType.APPLICATION_JSON).content("""
+                        {"name":"Phone","type":"TELEGRAM","events":[],"botToken":"nope","chatId":"nope"}"""))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().json("""
+                        {"botToken":"Paste the bot token from @BotFather, like 123456789:AAH4Fq2xYzExample",
+                         "chatId":"Enter the chat ID, a number like -1001234567890 or a channel name like @mychannel"}""", JsonCompareMode.STRICT));
+        mockMvc.perform(as(ANA_TOKEN, post(CHANNELS)).contentType(MediaType.APPLICATION_JSON).content(DISCORD_CHANNEL.replace("WEEKLY_SUMMARY", "WEEKLY_SUMMARY_EMAIL")))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().json("{\"error\":\"Events must be LINK_DEAD, LINK_BACK, DAILY_SUMMARY or WEEKLY_SUMMARY\"}", JsonCompareMode.STRICT));
+
+        assertThat(notificationChannelRepository.count()).isZero();
+    }
+
+    @Test
+    void theEleventhChannelIsRefused() throws Exception {
+        for (int existing = 0; existing < 10; existing++) {
+            jdbcTemplate.update("""
+                    insert into notification_channel (user_id, name, type, enabled, target_sealed, masked_target, failed_days, created_at, updated_at)
+                    values (?, ?, 'NTFY', true, 'v1:x', 'https://ntfy.sh/x', 0, ?, ?)""",
+                    ANA, "Channel " + existing, LocalDateTime.of(2026, 10, 20, 9, 0), LocalDateTime.of(2026, 10, 20, 9, 0));
+        }
+
+        mockMvc.perform(as(ANA_TOKEN, post(CHANNELS)).contentType(MediaType.APPLICATION_JSON).content(DISCORD_CHANNEL))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().json("{\"error\":\"You can have up to 10 channels. Remove one to add another.\"}", JsonCompareMode.STRICT));
+        mockMvc.perform(as(BOB_TOKEN, post(CHANNELS)).contentType(MediaType.APPLICATION_JSON).content(DISCORD_CHANNEL))
+                .andExpect(status().isCreated());
+    }
+
+    @Test
+    void someoneElsesChannelIs404() throws Exception {
+        mockMvc.perform(as(ANA_TOKEN, post(CHANNELS)).contentType(MediaType.APPLICATION_JSON).content(DISCORD_CHANNEL.replace("DISCORD", "WEBHOOK")
+                        .replace("discord.com/api/webhooks/123", "hooks.example.org/hrva")))
+                .andExpect(status().isCreated());
+        final var id = notificationChannelRepository.findAll().getFirst().getId();
+
+        mockMvc.perform(as(BOB_TOKEN, put(CHANNELS + "/" + id)).contentType(MediaType.APPLICATION_JSON).content(DISCORD_CHANNEL))
+                .andExpect(status().isNotFound())
+                .andExpect(content().json(CHANNEL_NOT_FOUND, JsonCompareMode.STRICT));
+        mockMvc.perform(as(BOB_TOKEN, delete(CHANNELS + "/" + id)))
+                .andExpect(status().isNotFound())
+                .andExpect(content().json(CHANNEL_NOT_FOUND, JsonCompareMode.STRICT));
+        mockMvc.perform(as(BOB_TOKEN, post(CHANNELS + "/" + id + "/signing-secret")))
+                .andExpect(status().isNotFound())
+                .andExpect(content().json(CHANNEL_NOT_FOUND, JsonCompareMode.STRICT));
+        mockMvc.perform(as(ANA_TOKEN, delete(CHANNELS + "/999999")))
+                .andExpect(status().isNotFound())
+                .andExpect(content().json(CHANNEL_NOT_FOUND, JsonCompareMode.STRICT));
+        assertThat(notificationChannelRepository.count()).isEqualTo(1L);
+    }
+
+    @Test
+    void aWebhookSigningSecretIsShownOnCreateAndRotate() throws Exception {
+        mockMvc.perform(as(ANA_TOKEN, post(CHANNELS)).contentType(MediaType.APPLICATION_JSON).content(DISCORD_CHANNEL.replace("DISCORD", "WEBHOOK")
+                        .replace("discord.com/api/webhooks/123", "hooks.example.org/hrva")))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.signingSecret").isString());
+        final var id = notificationChannelRepository.findAll().getFirst().getId();
+
+        mockMvc.perform(as(ANA_TOKEN, post(CHANNELS + "/" + id + "/signing-secret")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.signingSecret").isString())
+                .andExpect(jsonPath("$.length()").value(1));
+        mockMvc.perform(as(ANA_TOKEN, get(CHANNELS)))
+                .andExpect(jsonPath("$[0].signingSecret").doesNotExist());
+    }
+
+    @Test
+    void aChatChannelHasNoSigningSecret() throws Exception {
+        mockMvc.perform(as(ANA_TOKEN, post(CHANNELS)).contentType(MediaType.APPLICATION_JSON).content(DISCORD_CHANNEL)).andExpect(status().isCreated());
+        final var id = notificationChannelRepository.findAll().getFirst().getId();
+
+        mockMvc.perform(as(ANA_TOKEN, post(CHANNELS + "/" + id + "/signing-secret")))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().json("{\"error\":\"Only webhook channels have a signing secret.\"}", JsonCompareMode.STRICT));
+    }
+
+    @Test
+    void channelChangesOverTheLimitAre429() throws Exception {
+        when(rateLimiter.tryAcquire(eq("notify-settings:user:" + ANA), eq(60), eq(Duration.ofHours(1)))).thenReturn(false);
+
+        mockMvc.perform(as(ANA_TOKEN, post(CHANNELS)).contentType(MediaType.APPLICATION_JSON).content(DISCORD_CHANNEL))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(content().json("""
+                        {"error":"You've changed your notification settings a lot in a short time. Try again in a few minutes."}""", JsonCompareMode.STRICT));
+        assertThat(notificationChannelRepository.count()).isZero();
+    }
+
+    @Test
+    void signingSecretsOverTheTestLimitAre429() throws Exception {
+        mockMvc.perform(as(ANA_TOKEN, post(CHANNELS)).contentType(MediaType.APPLICATION_JSON).content(DISCORD_CHANNEL.replace("DISCORD", "WEBHOOK")
+                        .replace("discord.com/api/webhooks/123", "hooks.example.org/hrva")))
+                .andExpect(status().isCreated());
+        final var id = notificationChannelRepository.findAll().getFirst().getId();
+        when(rateLimiter.tryAcquire(eq("notify-test:user:" + ANA), eq(10), eq(Duration.ofMinutes(10)))).thenReturn(false);
+
+        mockMvc.perform(as(ANA_TOKEN, post(CHANNELS + "/" + id + "/signing-secret")))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(content().json("""
+                        {"error":"You've sent a lot of tests in a short time. Try again in a few minutes."}""", JsonCompareMode.STRICT));
+    }
+
+    @Test
+    void signingSecretsAre503WhenTheTestLimiterIsDown() throws Exception {
+        mockMvc.perform(as(ANA_TOKEN, post(CHANNELS)).contentType(MediaType.APPLICATION_JSON).content(DISCORD_CHANNEL.replace("DISCORD", "WEBHOOK")
+                        .replace("discord.com/api/webhooks/123", "hooks.example.org/hrva")))
+                .andExpect(status().isCreated());
+        final var id = notificationChannelRepository.findAll().getFirst().getId();
+        when(rateLimiter.tryAcquire(eq("notify-test:user:" + ANA), eq(10), eq(Duration.ofMinutes(10))))
+                .thenThrow(new cc.hrva.urlshortener.service.ratelimit.RateLimiterUnavailableException(new IllegalStateException("redis down")));
+
+        mockMvc.perform(as(ANA_TOKEN, post(CHANNELS + "/" + id + "/signing-secret")))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(content().json("""
+                        {"error":"Sending a test isn't available right now. Try again in a minute."}""", JsonCompareMode.STRICT));
+    }
+
     private static MockHttpServletRequestBuilder oneClick(final String token) {
         return post(UNSUBSCRIBE + "?token=" + token)
                 .contentType(MediaType.APPLICATION_FORM_URLENCODED)
@@ -419,7 +636,7 @@ class NotificationEndpointSecurityTest {
             basePackageClasses = UserRepository.class,
             includeFilters = @ComponentScan.Filter(
                     type = FilterType.ASSIGNABLE_TYPE,
-                    classes = {UserRepository.class, NotificationConsentRepository.class}))
+                    classes = {UserRepository.class, NotificationConsentRepository.class, NotificationChannelRepository.class}))
     @Import({
             AppConfiguration.class,
             WebConfiguration.class,
@@ -437,9 +654,25 @@ class NotificationEndpointSecurityTest {
             EmailConsentReader.class,
             UnsubscribeController.class,
             UnsubscribeTokens.class,
-            NotificationKeys.class
+            NotificationKeys.class,
+            NotificationChannelController.class,
+            DefaultNotificationChannelService.class,
+            ChannelTargets.class,
+            SecretBox.class,
+            TestApplication.PublicDns.class
     })
     static class TestApplication {
+
+        @TestConfiguration
+        static class PublicDns {
+
+            @Bean
+            Resolver resolver() {
+                return host -> new InetAddress[] {InetAddress.ofLiteral("162.159.128.233")};
+            }
+
+        }
+
     }
 
 }
