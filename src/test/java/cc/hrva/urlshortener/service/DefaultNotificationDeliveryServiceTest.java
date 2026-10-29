@@ -298,9 +298,9 @@ class DefaultNotificationDeliveryServiceTest {
         deliveryService.drain();
 
         assertThat(row("key:1")).containsEntry("STATUS", "GAVE_UP").containsEntry("ATTEMPTS", 1).containsEntry("LAST_HTTP", 404)
-                .containsEntry("LAST_ERROR", "The channel answered with HTTP 404. Check the URL.");
+                .containsEntry("LAST_ERROR", "Discord doesn't know this webhook. It may have been deleted. Copy the webhook URL again.");
         assertThat(channelRow(channel)).containsEntry("FAILED_DAYS", 1).containsEntry("LAST_DELIVERY_STATUS", "FAILED")
-                .containsEntry("LAST_DELIVERY_ERROR", "The channel answered with HTTP 404. Check the URL.");
+                .containsEntry("LAST_DELIVERY_ERROR", "Discord doesn't know this webhook. It may have been deleted. Copy the webhook URL again.");
     }
 
     @Test

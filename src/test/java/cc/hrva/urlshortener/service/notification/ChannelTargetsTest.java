@@ -106,7 +106,7 @@ class ChannelTargetsTest {
             "https://discord.com/api/webhooks/1/abc|This is a Discord webhook. Choose Discord as the type so messages arrive formatted.",
             "https://canary.discord.com/api/webhooks/1/abc|This is a Discord webhook. Choose Discord as the type so messages arrive formatted.",
             "https://hooks.slack.com/services/T0/B0/xyz|This is a Slack webhook. Choose Slack as the type so messages arrive formatted.",
-            "https://ntfy.sh/alerts|This is a ntfy webhook. Choose ntfy as the type so messages arrive formatted.",
+            "https://ntfy.sh/alerts|This is an ntfy topic URL. Choose ntfy as the type so messages arrive formatted.",
             "https://api.telegram.org/bot123:abc/sendMessage|This is a Telegram address. Choose Telegram as the type and paste the bot token instead."
     })
     void webhookPointedAtAChatHostIsRefused(final String target, final String error) {
@@ -213,7 +213,7 @@ class ChannelTargetsTest {
         assertThat(errors(ChannelType.WEBHOOK, "https://discord.com./api/webhooks/1/abc"))
                 .containsExactly(Map.entry("target", "This is a Discord webhook. Choose Discord as the type so messages arrive formatted."));
         assertThat(errors(ChannelType.WEBHOOK, "https://NTFY.SH./topic"))
-                .containsExactly(Map.entry("target", "This is a ntfy webhook. Choose ntfy as the type so messages arrive formatted."));
+                .containsExactly(Map.entry("target", "This is an ntfy topic URL. Choose ntfy as the type so messages arrive formatted."));
         assertThat(errors(ChannelType.WEBHOOK, "https://hooks.slack.com./services/T0/B0/xyz"))
                 .containsExactly(Map.entry("target", "This is a Slack webhook. Choose Slack as the type so messages arrive formatted."));
         assertThat(lookedUp).doesNotContain("discord.com.", "hooks.slack.com.");

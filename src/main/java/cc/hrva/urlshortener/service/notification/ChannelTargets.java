@@ -129,9 +129,13 @@ public class ChannelTargets {
     }
 
     private static String chatHostRefusal(final ChannelType type) {
-        return type == ChannelType.TELEGRAM
-                ? TELEGRAM_ADDRESS
-                : "This is a %s webhook. Choose %s as the type so messages arrive formatted.".formatted(label(type), label(type));
+        if (type == ChannelType.TELEGRAM) {
+            return TELEGRAM_ADDRESS;
+        }
+        if (type == ChannelType.NTFY) {
+            return "This is an ntfy topic URL. Choose ntfy as the type so messages arrive formatted.";
+        }
+        return "This is a %s webhook. Choose %s as the type so messages arrive formatted.".formatted(label(type), label(type));
     }
 
     private static Optional<String> shapeError(final String value, final Pattern shape, final String error, final boolean creating) {

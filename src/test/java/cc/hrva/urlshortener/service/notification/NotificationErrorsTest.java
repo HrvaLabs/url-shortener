@@ -16,10 +16,20 @@ class NotificationErrorsTest {
 
     @Test
     void anAnswerOutside2xxNamesItsCode() {
-        assertThat(NotificationErrors.describe(new PostResult(404, null), ChannelType.DISCORD)).isEqualTo("The channel answered with HTTP 404. Check the URL.");
+        assertThat(NotificationErrors.describe(new PostResult(404, null), ChannelType.WEBHOOK)).isEqualTo("The channel answered with HTTP 404. Check the URL.");
+        assertThat(NotificationErrors.describe(new PostResult(400, null), ChannelType.DISCORD)).isEqualTo("The channel answered with HTTP 400. Check the URL.");
         assertThat(NotificationErrors.describe(new PostResult(500, null), ChannelType.WEBHOOK)).isEqualTo("The channel answered with HTTP 500. Check the URL.");
         assertThat(NotificationErrors.describe(new PostResult(401, null), ChannelType.NTFY)).isEqualTo("The channel answered with HTTP 401. Check the URL.");
         assertThat(NotificationErrors.describe(new PostResult(400, null), ChannelType.TELEGRAM)).isEqualTo("The channel answered with HTTP 400. Check the URL.");
+    }
+
+    @Test
+    void aDeletedDiscordOrSlackWebhookSaysSo() {
+        assertThat(NotificationErrors.describe(new PostResult(404, null), ChannelType.DISCORD)).isEqualTo("Discord doesn't know this webhook. It may have been deleted. Copy the webhook URL again.");
+        assertThat(NotificationErrors.describe(new PostResult(410, null), ChannelType.DISCORD)).isEqualTo("Discord doesn't know this webhook. It may have been deleted. Copy the webhook URL again.");
+        assertThat(NotificationErrors.describe(new PostResult(404, null), ChannelType.SLACK)).isEqualTo("Slack doesn't know this webhook. It may have been deleted. Copy the webhook URL again.");
+        assertThat(NotificationErrors.describe(new PostResult(410, null), ChannelType.SLACK)).isEqualTo("Slack doesn't know this webhook. It may have been deleted. Copy the webhook URL again.");
+        assertThat(NotificationErrors.describe(new PostResult(404, null), ChannelType.NTFY)).isEqualTo("The channel answered with HTTP 404. Check the URL.");
     }
 
     @Test

@@ -11,6 +11,7 @@ public final class NotificationErrors {
     static final String UNREACHABLE = "Couldn't reach the channel.";
     static final String INVALID = "Couldn't send to the channel: a saved setting isn't valid. Edit the channel and save it again.";
     static final String TELEGRAM_TOKEN_REFUSED = "Telegram refused the bot token. Check it with @BotFather.";
+    static final String WEBHOOK_GONE = "%s doesn't know this webhook. It may have been deleted. Copy the webhook URL again.";
 
     private NotificationErrors() {
     }
@@ -36,6 +37,9 @@ public final class NotificationErrors {
         }
         if (type == ChannelType.TELEGRAM && (result.httpStatus() == 401 || result.httpStatus() == 403)) {
             return TELEGRAM_TOKEN_REFUSED;
+        }
+        if ((type == ChannelType.DISCORD || type == ChannelType.SLACK) && (result.httpStatus() == 404 || result.httpStatus() == 410)) {
+            return WEBHOOK_GONE.formatted(type == ChannelType.DISCORD ? "Discord" : "Slack");
         }
         return "The channel answered with HTTP %d. Check the URL.".formatted(result.httpStatus());
     }

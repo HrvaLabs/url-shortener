@@ -4,6 +4,18 @@ All notable changes to hrva.cc — the URL shortener.
 
 ---
 
+## [v2.14.1] — 2026-10-29
+
+Clearer notification channel messages: a deleted Discord or Slack webhook says so, saved secrets keep a visible note, and a channel with no events ticked says it gets nothing.
+
+### 🔔 Notifications
+- If Discord or Slack no longer knows a channel's webhook, Send test and the channel say it may have been deleted and ask you to copy the webhook URL again.
+- When you edit a channel, the note that a saved address or token is kept if you leave the field empty stays visible while you type.
+- The channel dialog says when no event is ticked, so the channel won't get any messages yet.
+- Pasting an ntfy topic URL into a webhook channel now calls it an ntfy topic URL.
+
+---
+
 ## [v2.14] — 2026-10-29
 
 Notifications you choose: dead-link checks, a weekly summary, and alerts to Discord, Slack, Telegram, ntfy, a webhook or email.

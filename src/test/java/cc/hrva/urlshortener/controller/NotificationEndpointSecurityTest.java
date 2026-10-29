@@ -653,12 +653,12 @@ class NotificationEndpointSecurityTest {
         mockMvc.perform(as(ANA_TOKEN, post(CHANNELS + "/" + id + "/test")))
                 .andExpect(status().isOk())
                 .andExpect(content().json("""
-                        {"delivered":false,"httpStatus":404,"error":"The channel answered with HTTP 404. Check the URL."}""", JsonCompareMode.STRICT));
+                        {"delivered":false,"httpStatus":404,"error":"Discord doesn't know this webhook. It may have been deleted. Copy the webhook URL again."}""", JsonCompareMode.STRICT));
         mockMvc.perform(as(ANA_TOKEN, get(CHANNELS)))
                 .andExpect(jsonPath("$[0].lastDelivery.status").value("FAILED"))
                 .andExpect(jsonPath("$[0].lastDelivery.at").isString())
                 .andExpect(jsonPath("$[0].lastDelivery.httpStatus").value(404))
-                .andExpect(jsonPath("$[0].lastDelivery.error").value("The channel answered with HTTP 404. Check the URL."));
+                .andExpect(jsonPath("$[0].lastDelivery.error").value("Discord doesn't know this webhook. It may have been deleted. Copy the webhook URL again."));
         assertThat(jdbcTemplate.queryForObject("select failed_days from notification_channel where id = ?", Integer.class, id)).isZero();
         mockMvc.perform(as(BOB_TOKEN, post(CHANNELS + "/" + id + "/test")))
                 .andExpect(status().isNotFound())

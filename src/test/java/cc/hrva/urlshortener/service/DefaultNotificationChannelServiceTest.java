@@ -670,8 +670,8 @@ class DefaultNotificationChannelServiceTest {
 
         final var response = service.test(4L);
 
-        assertThat(response).isEqualTo(new ChannelTestResponse(false, 404, "The channel answered with HTTP 404. Check the URL."));
-        verify(notificationChannelRepository).recordDelivery(4L, NOW_UTC, LastDeliveryStatus.FAILED, 404, "The channel answered with HTTP 404. Check the URL.");
+        assertThat(response).isEqualTo(new ChannelTestResponse(false, 404, "Discord doesn't know this webhook. It may have been deleted. Copy the webhook URL again."));
+        verify(notificationChannelRepository).recordDelivery(4L, NOW_UTC, LastDeliveryStatus.FAILED, 404, "Discord doesn't know this webhook. It may have been deleted. Copy the webhook URL again.");
     }
 
     @Test
