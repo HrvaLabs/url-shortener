@@ -4,6 +4,15 @@ All notable changes to hrva.cc — the URL shortener.
 
 ---
 
+## [v2.15] — 2026-10-29
+
+Emails have a new look that matches the site.
+
+### 🌐 Site
+- Emails have a new look that matches the site, easier to read on phones and in dark mode.
+
+---
+
 ## [v2.14.1] — 2026-10-29
 
 Clearer notification channel messages: a deleted Discord or Slack webhook says so, saved secrets keep a visible note, and a channel with no events ticked says it gets nothing.

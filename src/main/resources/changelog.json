@@ -1,10 +1,24 @@
 {
   "releases": [
     {
-      "version": "v2.14.1",
+      "version": "v2.15",
       "date": "2026-10-29",
       "badge": "Latest",
       "badgeVariant": "default",
+      "summary": "Emails have a new look that matches the site.",
+      "sections": [
+        {
+          "title": "Site",
+          "icon": "globe",
+          "items": [
+            "Emails have a new look that matches the site, easier to read on phones and in dark mode."
+          ]
+        }
+      ]
+    },
+    {
+      "version": "v2.14.1",
+      "date": "2026-10-29",
       "summary": "Clearer notification channel messages: a deleted Discord or Slack webhook says so, saved secrets keep a visible note, and a channel with no events ticked says it gets nothing.",
       "sections": [
         {
