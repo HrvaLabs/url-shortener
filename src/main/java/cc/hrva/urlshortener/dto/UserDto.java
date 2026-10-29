@@ -25,7 +25,7 @@ public class UserDto {
     private LocalDateTime createDate;
     @Schema(description = "Last login date and time", example = "2026-05-16T12:00:00")
     private LocalDateTime lastLogin;
-    @Schema(description = "Authentication provider", example = "local", allowableValues = {"local", "google"})
+    @Schema(description = "Authentication provider", example = "local", allowableValues = {"local", "google", "github"})
     private String authProvider;
     @Schema(description = "Whether two-factor authentication is enabled", example = "false")
     private Boolean twoFactorEnabled;

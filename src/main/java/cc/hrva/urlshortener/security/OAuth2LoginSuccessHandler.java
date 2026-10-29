@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.security;
 
+import cc.hrva.urlshortener.configuration.OAuth2ClientConfiguration;
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.exception.SignInUnavailableException;
 import cc.hrva.urlshortener.listener.UserRegisteredEvent;
@@ -39,6 +40,8 @@ public class OAuth2LoginSuccessHandler implements AuthenticationSuccessHandler {
     private static final Logger log = LoggerFactory.getLogger(OAuth2LoginSuccessHandler.class);
     private static final String DEFAULT_PROVIDER = "google";
     private static final String EMAIL = "email";
+    private static final String GITHUB_EMAIL_UNVERIFIED = "github_email_unverified";
+    private static final String GOOGLE_EMAIL_UNVERIFIED = "google_email_unverified";
 
     private final UserRepository userRepository;
     private final AuthoritiesService authoritiesService;
@@ -76,6 +79,14 @@ public class OAuth2LoginSuccessHandler implements AuthenticationSuccessHandler {
             final Authentication authentication) throws IOException {
 
         final var oAuth2User = (OAuth2User) authentication.getPrincipal();
+        final var provider = providerOf(authentication);
+
+        if (!emailVerified(oAuth2User)) {
+            log.warn("OAuth2 login refused: the provider sent no verified email provider={}", provider);
+            response.sendRedirect(appProperties.getFrontendUrl() + "/auth/callback?error=" + unverifiedEmailError(provider));
+            return;
+        }
+
         final var email = extractEmail(oAuth2User);
 
         if (email == null) {
@@ -90,8 +101,14 @@ public class OAuth2LoginSuccessHandler implements AuthenticationSuccessHandler {
             return;
         }
 
-        final var user = userRepository.findByEmail(email)
-                .orElseGet(() -> createOAuth2User(email, providerOf(authentication)));
+        final var existingUser = userRepository.findByEmail(email);
+        if (existingUser.isEmpty() && !appProperties.isRegistrationEnabled()) {
+            log.warn("OAuth2 sign-up refused: registrations are disabled provider={}", provider);
+            response.sendRedirect(appProperties.getFrontendUrl() + "/auth/callback?error=registration_disabled");
+            return;
+        }
+
+        final var user = existingUser.orElseGet(() -> createOAuth2User(email, provider));
 
         if (Boolean.FALSE.equals(user.getActive())) {
             log.warn("OAuth2 login blocked: inactive account email={} user id={}", EmailAddresses.masked(email), user.getId());
@@ -142,6 +159,14 @@ public class OAuth2LoginSuccessHandler implements AuthenticationSuccessHandler {
 
     private static String providerOf(final Authentication authentication) {
         return authentication instanceof OAuth2AuthenticationToken token ? token.getAuthorizedClientRegistrationId() : DEFAULT_PROVIDER;
+    }
+
+    private static boolean emailVerified(final OAuth2User oAuth2User) {
+        return Boolean.parseBoolean(String.valueOf(oAuth2User.<Object>getAttribute(OAuth2LoginUserService.EMAIL_VERIFIED)));
+    }
+
+    private static String unverifiedEmailError(final String provider) {
+        return OAuth2ClientConfiguration.GITHUB.equals(provider) ? GITHUB_EMAIL_UNVERIFIED : GOOGLE_EMAIL_UNVERIFIED;
     }
 
     private String extractEmail(final OAuth2User oAuth2User) {

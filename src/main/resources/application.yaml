@@ -75,6 +75,11 @@ app:
   google-api:
     client-id: hrva.cc
     client-version: 1.0.0
+  github-sign-in:
+    client-id: ${OAUTH2_GITHUB_CLIENT_ID:}
+    client-secret: ${OAUTH2_GITHUB_CLIENT_SECRET:}
+    scope: user:email
+    redirect-uri: https://hrva.cc/login/oauth2/code/github
   short-url-length: 5
   api-key-calls-limit: 256
   jwt-token-validity-seconds: 36000

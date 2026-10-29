@@ -76,6 +76,7 @@ class OAuth2SignInWritesTest {
         when(tokenProvider.createToken(any())).thenReturn("jwt-token");
         when(appProperties.getFrontendUrl()).thenReturn("http://fe");
         when(appProperties.getUserApiKeySlots()).thenReturn(2L);
+        when(appProperties.isRegistrationEnabled()).thenReturn(true);
         handler = new OAuth2LoginSuccessHandler(userRepository, authoritiesService, tokenProvider, appProperties,
                 Validation.buildDefaultValidatorFactory().getValidator(), mock(ApplicationEventPublisher.class),
                 mock(PendingLoginStore.class), mock(TwoStepMethods.class));
@@ -131,7 +132,7 @@ class OAuth2SignInWritesTest {
     }
 
     private MockHttpServletResponse signIn(final String email) throws Exception {
-        final var principal = new DefaultOAuth2User(List.of(), Map.of("email", email, "sub", email), "sub");
+        final var principal = new DefaultOAuth2User(List.of(), Map.of("email", email, "email_verified", true, "sub", email), "sub");
         final var response = new MockHttpServletResponse();
         handler.onAuthenticationSuccess(new MockHttpServletRequest(), response, new OAuth2AuthenticationToken(principal, List.of(), "google"));
         return response;

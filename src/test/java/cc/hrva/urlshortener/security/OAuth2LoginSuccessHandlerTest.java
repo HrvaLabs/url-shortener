@@ -23,7 +23,9 @@ import org.junit.jupiter.api.Named;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -96,6 +98,8 @@ class OAuth2LoginSuccessHandlerTest {
                 pendingLoginStore, twoStepMethods);
         lenient().when(authentication.getPrincipal()).thenReturn(oAuth2User);
         lenient().when(appProperties.getFrontendUrl()).thenReturn("http://fe");
+        lenient().when(appProperties.isRegistrationEnabled()).thenReturn(true);
+        lenient().when(oAuth2User.getAttribute("email_verified")).thenReturn(true);
     }
 
     @Test
@@ -326,6 +330,83 @@ class OAuth2LoginSuccessHandlerTest {
         verify(response).sendRedirect("http://fe/auth/callback?error=account_inactive");
         verifyNoInteractions(tokenProvider, pendingLoginStore, twoStepMethods);
         verify(userRepository, never()).save(any());
+    }
+
+    @ParameterizedTest
+    @CsvSource({"google, google_email_unverified", "github, github_email_unverified"})
+    void anEmailTheProviderHasNotVerifiedNeverReachesAnAccount(final String provider, final String error) throws Exception {
+        when(oAuth2User.getAttribute("email_verified")).thenReturn(false);
+        lenient().when(oAuth2User.getAttribute("email")).thenReturn("taken@example.com");
+
+        handler.onAuthenticationSuccess(request, response, signIn(provider));
+
+        verify(response).sendRedirect("http://fe/auth/callback?error=" + error);
+        verifyNoInteractions(userRepository, tokenProvider, eventPublisher, pendingLoginStore, twoStepMethods);
+    }
+
+    @ParameterizedTest
+    @CsvSource({"google, google_email_unverified", "github, github_email_unverified"})
+    void anAccountWithoutTheVerifiedFlagIsRefused(final String provider, final String error) throws Exception {
+        when(oAuth2User.getAttribute("email_verified")).thenReturn(null);
+        lenient().when(oAuth2User.getAttribute("email")).thenReturn("taken@example.com");
+
+        handler.onAuthenticationSuccess(request, response, signIn(provider));
+
+        verify(response).sendRedirect("http://fe/auth/callback?error=" + error);
+        verifyNoInteractions(userRepository, tokenProvider, eventPublisher);
+    }
+
+    @Test
+    void aVerifiedFlagSentAsTextStillSignsIn() throws Exception {
+        final var user = User.builder().id(1L).email("ok@example.com").active(true)
+                .authorities(Collections.singletonList(Authorities.builder().id(1L).name("ROLE_USER").build()))
+                .build();
+        when(oAuth2User.getAttribute("email_verified")).thenReturn("true");
+        when(oAuth2User.getAttribute("email")).thenReturn("ok@example.com");
+        when(userRepository.findByEmail("ok@example.com")).thenReturn(Optional.of(user));
+        when(tokenProvider.createToken(any())).thenReturn("jwt-token");
+
+        handler.onAuthenticationSuccess(request, response, signIn("google"));
+
+        verify(response).sendRedirect(contains("http://fe/auth/callback?token=jwt-token"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"google", "github"})
+    void pausedSignUpsStillLetAnExistingAccountSignIn(final String provider) throws Exception {
+        final var user = User.builder().id(5L).email("member@example.com").active(true).authProvider("local")
+                .authorities(Collections.singletonList(Authorities.builder().id(1L).name("ROLE_USER").build()))
+                .build();
+        lenient().when(appProperties.isRegistrationEnabled()).thenReturn(false);
+        when(oAuth2User.getAttribute("email")).thenReturn("member@example.com");
+        when(userRepository.findByEmail("member@example.com")).thenReturn(Optional.of(user));
+        when(tokenProvider.createToken(any())).thenReturn("jwt-token");
+
+        handler.onAuthenticationSuccess(request, response, signIn(provider));
+
+        verify(response).sendRedirect(contains("http://fe/auth/callback?token=jwt-token"));
+        verify(userRepository).recordLastLogin(eq(5L), any());
+        verify(userRepository, never()).save(any());
+        verify(eventPublisher, never()).publishEvent(any(Object.class));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"google", "github"})
+    void pausedSignUpsRefuseANewAccount(final String provider) throws Exception {
+        when(appProperties.isRegistrationEnabled()).thenReturn(false);
+        when(oAuth2User.getAttribute("email")).thenReturn("new@example.com");
+        when(userRepository.findByEmail("new@example.com")).thenReturn(Optional.empty());
+
+        handler.onAuthenticationSuccess(request, response, signIn(provider));
+
+        verify(response).sendRedirect("http://fe/auth/callback?error=registration_disabled");
+        verify(userRepository, never()).save(any());
+        verify(userRepository, never()).recordLastLogin(any(), any());
+        verifyNoInteractions(tokenProvider, eventPublisher, authoritiesService, pendingLoginStore);
+    }
+
+    private OAuth2AuthenticationToken signIn(final String provider) {
+        return new OAuth2AuthenticationToken(oAuth2User, List.of(), provider);
     }
 
     private String redirectSent() throws Exception {

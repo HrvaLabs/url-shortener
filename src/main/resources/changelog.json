@@ -1,10 +1,26 @@
 {
   "releases": [
     {
-      "version": "v2.15.2",
+      "version": "v2.15.3",
       "date": "2026-10-29",
       "badge": "Latest",
       "badgeVariant": "default",
+      "summary": "Sign in with GitHub, and Google and GitHub sign-ins need a verified email address.",
+      "sections": [
+        {
+          "title": "Security",
+          "icon": "shield",
+          "items": [
+            "Sign in with GitHub. hrva.cc uses your GitHub account's verified primary email.",
+            "Signing in with Google now needs a verified email address.",
+            "When new sign-ups are paused, Google and GitHub can't create accounts either."
+          ]
+        }
+      ]
+    },
+    {
+      "version": "v2.15.2",
+      "date": "2026-10-29",
       "summary": "Admins can block the domains of several links at once.",
       "sections": [
         {

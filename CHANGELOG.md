@@ -4,6 +4,17 @@ All notable changes to hrva.cc — the URL shortener.
 
 ---
 
+## [v2.15.3] — 2026-10-29
+
+Sign in with GitHub, and Google and GitHub sign-ins need a verified email address.
+
+### 🛡️ Security
+- Sign in with GitHub. hrva.cc uses your GitHub account's verified primary email.
+- Signing in with Google now needs a verified email address.
+- When new sign-ups are paused, Google and GitHub can't create accounts either.
+
+---
+
 ## [v2.15.2] — 2026-10-29
 
 Admins can block the domains of several links at once.
