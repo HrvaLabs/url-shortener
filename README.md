@@ -71,8 +71,8 @@ Build, test and run commands, local dev users and the end-to-end check (`scripts
   openssl rand -base64 32
   ```
 - **Cloudflare-only origin.** The per-network rate limits trust `CF-Connecting-IP`, and the country counts trust `CF-IPCountry`. The origin must therefore accept traffic only from Cloudflare, through a Cloudflare Tunnel or a firewall limited to [Cloudflare's IP ranges](https://www.cloudflare.com/ips/). Otherwise anyone can forge those headers.
-- **Cloudflare rules for the MCP paths.** MCP clients aren't browsers, and a challenge breaks them:
-  - Exempt `/mcp`, `/oauth2/*` and `/.well-known/*` from WAF managed challenges and Super Bot Fight Mode. If Bot Fight Mode on the Free plan challenges them, turn it off.
+- **Cloudflare rules for the MCP paths and one-click unsubscribe.** MCP clients aren't browsers, and neither are the mail providers that POST a one-click unsubscribe (RFC 8058) from the email's `List-Unsubscribe` header. A challenge breaks both:
+  - Exempt `/mcp`, `/oauth2/*`, `/.well-known/*` and `/api/v1/notifications/unsubscribe` from WAF managed challenges and Super Bot Fight Mode. If Bot Fight Mode on the Free plan challenges them, turn it off.
   - Don't cache `GET /oauth2/authorize` or `/.well-known/*` at the edge.
 - **Smoke test after a deploy.** Expect issuer `https://hrva.cc`, resource `https://hrva.cc/mcp`, and 401 from `/mcp` without a token:
   ```bash

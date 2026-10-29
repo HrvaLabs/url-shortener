@@ -18,7 +18,7 @@ Notifications you choose: dead-link checks, a weekly summary, and alerts to Disc
 - Every notification email has a one-click unsubscribe link.
 
 ### 🔒 Privacy
-- Notifications carry counts, short links and destination hosts only, never visitors' IP addresses, browsers or referrers. Channel URLs and tokens are encrypted and shown masked after you save them.
+- Notifications carry counts, short links and destination hosts only, never visitors' IP addresses, browsers or referrers. Channel URLs and tokens are encrypted. After you save them, URLs are shown masked and tokens are never shown again.
 - We no longer send a welcome email after you verify your address.
 
 ### 🔧 Admin
