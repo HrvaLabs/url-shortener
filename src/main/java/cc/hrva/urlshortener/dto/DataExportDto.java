@@ -7,6 +7,9 @@ import cc.hrva.urlshortener.model.enums.BioAccent;
 import cc.hrva.urlshortener.model.enums.BioAvatarKind;
 import cc.hrva.urlshortener.model.enums.BioIcon;
 import cc.hrva.urlshortener.model.enums.BioTheme;
+import cc.hrva.urlshortener.model.enums.ChannelType;
+import cc.hrva.urlshortener.model.enums.ConsentSource;
+import cc.hrva.urlshortener.model.enums.NotificationType;
 import cc.hrva.urlshortener.model.enums.PasskeyKind;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -19,7 +22,8 @@ public record DataExportDto(
         List<EmailExport> emails,
         List<PasskeyExport> passkeys,
         long recoveryCodesRemaining,
-        BioPageExport bioPage) {
+        BioPageExport bioPage,
+        NotificationExport notifications) {
 
     public record EmailExport(String subject, String status, LocalDateTime sentAt, LocalDateTime createdAt) {}
 
@@ -79,5 +83,25 @@ public record DataExportDto(
         }
 
     }
+
+    public record NotificationExport(List<ConsentExport> consentHistory, List<ChannelExport> channels) {}
+
+    public record ConsentExport(
+            NotificationType type,
+            String channelLabel,
+            LocalDateTime grantedAt,
+            ConsentSource source,
+            LocalDateTime revokedAt,
+            ConsentSource revokedSource) {}
+
+    public record ChannelExport(
+            String name,
+            ChannelType type,
+            boolean enabled,
+            List<NotificationType> events,
+            String maskedTarget,
+            LocalDateTime createdAt,
+            LocalDateTime lastDeliveryAt,
+            String lastDeliveryStatus) {}
 
 }

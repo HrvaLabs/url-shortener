@@ -12,6 +12,7 @@ import cc.hrva.urlshortener.model.enums.DeliveryStatus;
 import cc.hrva.urlshortener.model.enums.NotificationType;
 import cc.hrva.urlshortener.service.notification.ChannelTargets;
 import cc.hrva.urlshortener.service.notification.EmailConsentReader;
+import cc.hrva.urlshortener.service.notification.NotificationAccountData;
 import jakarta.persistence.EntityManager;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -79,6 +80,9 @@ class NotificationSchemaTest {
     @Autowired
     private EntityManager entityManager;
 
+    @Autowired
+    private NotificationAccountData notificationAccountData;
+
     @Test
     void everyChangesetOf031Ran() {
         assertThat(jdbcTemplate.queryForList("select id, exectype from databasechangelog where id like '031-%' order by orderexecuted"))
@@ -135,6 +139,42 @@ class NotificationSchemaTest {
         assertThat(rows("notification_channel")).isZero();
         assertThat(rows("notification_consent")).isZero();
         assertThat(rows("notification_delivery")).isZero();
+        assertThat(jdbcTemplate.queryForList("select user_id from notification_claim", Long.class)).containsExactly(bob.getId());
+    }
+
+    @Test
+    void deletionRemovesConsentsChannelsDeliveriesAndClaims() {
+        final var ana = savedUser("ana@example.com");
+        final var bob = savedUser("bob@example.com");
+        savedLink("ana-link", ana);
+        final var anasChannel = savedChannel(ana, "Team alerts");
+        final var bobsChannel = savedChannel(bob, "Bob's alerts");
+        notificationConsentRepository.saveAndFlush(emailConsent(ana, NotificationType.WEEKLY_SUMMARY_EMAIL).build());
+        notificationConsentRepository.saveAndFlush(emailConsent(ana, NotificationType.DEAD_LINK_EMAIL).revokedAt(NOW).build());
+        notificationConsentRepository.saveAndFlush(channelConsent(ana, anasChannel, NotificationType.LINK_DEAD).build());
+        notificationConsentRepository.saveAndFlush(channelConsent(bob, bobsChannel, NotificationType.LINK_DEAD).build());
+        notificationDeliveryRepository.saveAndFlush(delivery(anasChannel, "link.dead:2026-10-27").build());
+        notificationDeliveryRepository.saveAndFlush(delivery(bobsChannel, "link.dead:2026-10-27").build());
+        notificationClaimRepository.claim(ana.getId(), "weekly-email:2026-10-19", NOW);
+        notificationClaimRepository.claim(bob.getId(), "weekly-email:2026-10-19", NOW);
+        entityManager.clear();
+
+        final var loaded = userRepository.findById(ana.getId()).orElseThrow();
+        notificationAccountData.deleteFor(loaded);
+        assertThat(rows("notification_channel")).isEqualTo(1);
+        assertThat(rows("notification_consent")).isEqualTo(1);
+        assertThat(rows("notification_delivery")).isEqualTo(1);
+        assertThat(rows("notification_claim")).isEqualTo(1);
+        assertThat(entityManager.contains(loaded)).isTrue();
+        urlRepository.deleteByOwner(loaded);
+        userRepository.delete(loaded);
+        entityManager.flush();
+
+        assertThat(jdbcTemplate.queryForList("select id from user_account where id in (?, ?)", Long.class, ana.getId(), bob.getId()))
+                .containsExactly(bob.getId());
+        assertThat(jdbcTemplate.queryForList("select user_id from notification_channel", Long.class)).containsExactly(bob.getId());
+        assertThat(jdbcTemplate.queryForList("select user_id from notification_consent", Long.class)).containsExactly(bob.getId());
+        assertThat(jdbcTemplate.queryForList("select channel_id from notification_delivery", Long.class)).containsExactly(bobsChannel.getId());
         assertThat(jdbcTemplate.queryForList("select user_id from notification_claim", Long.class)).containsExactly(bob.getId());
     }
 
@@ -477,7 +517,7 @@ class NotificationSchemaTest {
     @SpringBootConfiguration
     @EnableAutoConfiguration
     @EntityScan(basePackageClasses = NotificationChannel.class)
-    @Import({NotificationClaimRepository.class, DestinationCheckRepository.class, EmailConsentReader.class})
+    @Import({NotificationClaimRepository.class, DestinationCheckRepository.class, EmailConsentReader.class, NotificationAccountData.class})
     @EnableJpaRepositories(
             basePackageClasses = NotificationChannelRepository.class,
             includeFilters = @ComponentScan.Filter(

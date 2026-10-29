@@ -44,7 +44,8 @@ public class UsersStats {
                 usersStatsRepository.countSignedInSince(now.minusDays(LAST_30_DAYS)),
                 usersStatsRepository.countApiKeys(now.toLocalDate()),
                 usersStatsRepository.countMcp(now),
-                usersStatsRepository.countBioPages());
+                usersStatsRepository.countBioPages(),
+                usersStatsRepository.countNotifications());
     }
 
 }

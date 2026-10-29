@@ -37,9 +37,9 @@ public interface NotificationConsentRepository extends JpaRepository<Notificatio
             where c.type = :type and c.channelId is null and c.revokedAt is null and c.owner.active = true""")
     List<Long> findAllConsentingUserIds(@Param("type") NotificationType type);
 
-    List<NotificationConsent> findByOwnerIdOrderByGrantedAtAsc(Long userId);
+    List<NotificationConsent> findByOwnerIdOrderByGrantedAtAscIdAsc(Long userId);
 
-    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Modifying(flushAutomatically = true)
     @Query("delete from NotificationConsent c where c.owner.id = :userId")
     int deleteByOwnerId(@Param("userId") Long userId);
 

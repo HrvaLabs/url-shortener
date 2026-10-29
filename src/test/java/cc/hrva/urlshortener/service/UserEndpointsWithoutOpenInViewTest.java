@@ -20,6 +20,7 @@ import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.repository.VerificationTokenRepository;
 import cc.hrva.urlshortener.security.Reauthentication;
 import cc.hrva.urlshortener.service.bio.BioAccountData;
+import cc.hrva.urlshortener.service.notification.NotificationAccountData;
 import cc.hrva.urlshortener.service.impl.DefaultSendingEmailService;
 import cc.hrva.urlshortener.service.impl.DefaultUserService;
 import java.util.List;
@@ -103,6 +104,9 @@ class UserEndpointsWithoutOpenInViewTest {
 
     @MockitoBean
     private BioAccountData bioAccountData;
+
+    @MockitoBean
+    private NotificationAccountData notificationAccountData;
 
     @MockitoBean
     private DefaultSendingEmailService sendingEmailService;

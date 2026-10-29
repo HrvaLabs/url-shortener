@@ -146,7 +146,7 @@ class AdminStatsSecurityTest {
     void theUsersTabCountsActiveExpiredAndRevokedApiKeys() throws Exception {
         when(adminStatsService.users(30)).thenReturn(new UsersStatsResponse(30, LocalDate.of(2026, 9, 27), LocalDate.of(2026, 10, 26),
                 new StackedSeries(List.of(), List.of()), new UserInventory(0, 0, 0, 0, 0, 0, List.of()), 0, 0,
-                new ApiKeyCounts(1, 1, 1, 42), new McpCounts(0, 0), new BioPageCounts(0, 0)));
+                new ApiKeyCounts(1, 1, 1, 42), new McpCounts(0, 0), new BioPageCounts(0, 0), null));
 
         mockMvc.perform(tabRequest("users", "admin-token").param("days", "30"))
                 .andExpect(status().isOk())
@@ -160,7 +160,7 @@ class AdminStatsSecurityTest {
     void theUsersTabCountsBioPagesAndHiddenOnes() throws Exception {
         when(adminStatsService.users(7)).thenReturn(new UsersStatsResponse(7, LocalDate.of(2026, 10, 20), LocalDate.of(2026, 10, 26),
                 new StackedSeries(List.of(), List.of()), new UserInventory(0, 0, 0, 0, 0, 0, List.of()), 0, 0,
-                new ApiKeyCounts(0, 0, 0, 0), new McpCounts(0, 0), new BioPageCounts(12, 2)));
+                new ApiKeyCounts(0, 0, 0, 0), new McpCounts(0, 0), new BioPageCounts(12, 2), null));
 
         mockMvc.perform(tabRequest("users", "admin-token").param("days", "7"))
                 .andExpect(status().isOk())
@@ -227,7 +227,7 @@ class AdminStatsSecurityTest {
                     new LinkInventory(0, 0, 0, 0, 0, 0, 0, List.of()), List.of(), List.of(), List.of(), null));
             case "users" -> when(adminStatsService.users(7)).thenReturn(new UsersStatsResponse(7, LocalDate.of(2026, 10, 20),
                     LocalDate.of(2026, 10, 26), new StackedSeries(List.of(), List.of()), new UserInventory(0, 0, 0, 0, 0, 0, List.of()), 0, 0,
-                    new ApiKeyCounts(0, 0, 0, 0), new McpCounts(0, 0), new BioPageCounts(0, 0)));
+                    new ApiKeyCounts(0, 0, 0, 0), new McpCounts(0, 0), new BioPageCounts(0, 0), null));
             case "safety" -> when(adminStatsService.safety(7)).thenReturn(new SafetyStatsResponse(7, LocalDate.of(2026, 10, 20),
                     LocalDate.of(2026, 10, 26), new StackedSeries(List.of(), List.of()), 0, 0, List.of(), new ResolveTimes(0, null, null),
                     new StackedSeries(List.of(), List.of()), new DomainRuleCounts(0, 0), 0, List.of()));

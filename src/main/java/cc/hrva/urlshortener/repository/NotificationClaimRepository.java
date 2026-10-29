@@ -15,6 +15,8 @@ public class NotificationClaimRepository {
             insert into notification_claim (user_id, claim_key, created_at) values (:userId, :claimKey, :createdAt)
             """;
 
+    private static final String DELETE_FOR_USER = "delete from notification_claim where user_id = :userId";
+
     private static final String DELETE_OLD = "delete from notification_claim where created_at < :cutoff";
 
     private final NamedParameterJdbcTemplate jdbcTemplate;
@@ -25,6 +27,10 @@ public class NotificationClaimRepository {
         } catch (final DuplicateKeyException exception) {
             return false;
         }
+    }
+
+    public int deleteByUserId(final long userId) {
+        return jdbcTemplate.update(DELETE_FOR_USER, Map.of("userId", userId));
     }
 
     public int deleteCreatedBefore(final LocalDateTime cutoff) {

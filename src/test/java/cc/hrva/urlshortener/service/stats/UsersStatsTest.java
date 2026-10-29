@@ -6,6 +6,7 @@ import cc.hrva.urlshortener.dto.stats.DailyCounts;
 import cc.hrva.urlshortener.dto.stats.UsersStatsResponse.ApiKeyCounts;
 import cc.hrva.urlshortener.dto.stats.UsersStatsResponse.BioPageCounts;
 import cc.hrva.urlshortener.dto.stats.UsersStatsResponse.McpCounts;
+import cc.hrva.urlshortener.dto.stats.UsersStatsResponse.NotificationCounts;
 import cc.hrva.urlshortener.dto.stats.UsersStatsResponse.UserInventory;
 import cc.hrva.urlshortener.repository.stats.HourlyCount;
 import cc.hrva.urlshortener.repository.stats.HourlyCountRepository;
@@ -128,6 +129,15 @@ class UsersStatsTest {
         givenCounts(NO_ACCOUNTS, STORED_NOW, NO_API_KEYS, NO_MCP, new BioPageCounts(12, 2));
 
         assertThat(usersStats.collect(WINDOW).bioPages()).isEqualTo(new BioPageCounts(12, 2));
+    }
+
+    @Test
+    void notificationsAreCountedByTheRepository() {
+        givenCounts(NO_ACCOUNTS, STORED_NOW, NO_API_KEYS, NO_MCP, NO_BIO_PAGES);
+        final var counts = new NotificationCounts(List.of(new CountEntry("DEAD_LINK_EMAIL", 4)), List.of(new CountEntry("DISCORD", 2)), 1);
+        when(usersStatsRepository.countNotifications()).thenReturn(counts);
+
+        assertThat(usersStats.collect(WINDOW).notifications()).isEqualTo(counts);
     }
 
     @Test

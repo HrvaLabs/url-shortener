@@ -4,10 +4,12 @@ import cc.hrva.urlshortener.dto.stats.CountEntry;
 import cc.hrva.urlshortener.dto.stats.UsersStatsResponse.ApiKeyCounts;
 import cc.hrva.urlshortener.dto.stats.UsersStatsResponse.BioPageCounts;
 import cc.hrva.urlshortener.dto.stats.UsersStatsResponse.McpCounts;
+import cc.hrva.urlshortener.dto.stats.UsersStatsResponse.NotificationCounts;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.repository.stats.UsersStatsRepository.AccountCounts;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.SpringBootConfiguration;
@@ -167,6 +169,55 @@ class UsersStatsRepositoryTest {
         assertThat(usersStatsRepository.countApiKeys(TODAY)).isEqualTo(new ApiKeyCounts(0, 0, 0, 0));
         assertThat(usersStatsRepository.countMcp(NOW)).isEqualTo(new McpCounts(0, 0));
         assertThat(usersStatsRepository.countBioPages()).isEqualTo(new BioPageCounts(0, 0));
+        assertThat(usersStatsRepository.countNotifications()).isEqualTo(new NotificationCounts(
+                List.of(
+                        new CountEntry("DEAD_LINK_EMAIL", 0),
+                        new CountEntry("WEEKLY_SUMMARY_EMAIL", 0),
+                        new CountEntry("EXPIRY_REMINDER_EMAIL", 0),
+                        new CountEntry("LINK_DEAD", 0),
+                        new CountEntry("LINK_BACK", 0),
+                        new CountEntry("DAILY_SUMMARY", 0),
+                        new CountEntry("WEEKLY_SUMMARY", 0)),
+                List.of(
+                        new CountEntry("DISCORD", 0),
+                        new CountEntry("SLACK", 0),
+                        new CountEntry("TELEGRAM", 0),
+                        new CountEntry("NTFY", 0),
+                        new CountEntry("WEBHOOK", 0)),
+                0));
+    }
+
+    @Test
+    void notificationCounts() {
+        accountWithDefaults(9801);
+        accountWithDefaults(9802);
+        consent(9801, null, "WEEKLY_SUMMARY_EMAIL", null);
+        consent(9801, null, "DEAD_LINK_EMAIL", NOW.minusDays(1));
+        consent(9802, null, "DEAD_LINK_EMAIL", null);
+        final var discord = channel(9801, "DISCORD", true, null);
+        final var webhook = channel(9802, "WEBHOOK", false, NOW.minusDays(2));
+        channel(9802, "DISCORD", false, null);
+        consent(9801, discord, "LINK_DEAD", null);
+        consent(9801, discord, "LINK_BACK", NOW.minusHours(3));
+        consent(9802, webhook, "LINK_DEAD", null);
+        consent(9802, null, "WEEKLY_SUMMARY_EMAIL", NOW.minusHours(1));
+
+        assertThat(usersStatsRepository.countNotifications()).isEqualTo(new NotificationCounts(
+                List.of(
+                        new CountEntry("DEAD_LINK_EMAIL", 1),
+                        new CountEntry("WEEKLY_SUMMARY_EMAIL", 1),
+                        new CountEntry("EXPIRY_REMINDER_EMAIL", 0),
+                        new CountEntry("LINK_DEAD", 2),
+                        new CountEntry("LINK_BACK", 0),
+                        new CountEntry("DAILY_SUMMARY", 0),
+                        new CountEntry("WEEKLY_SUMMARY", 0)),
+                List.of(
+                        new CountEntry("DISCORD", 2),
+                        new CountEntry("SLACK", 0),
+                        new CountEntry("TELEGRAM", 0),
+                        new CountEntry("NTFY", 0),
+                        new CountEntry("WEBHOOK", 1)),
+                1));
     }
 
     private void account(final long id, final boolean active, final boolean emailVerified, final boolean twoFactorEnabled) {
@@ -219,6 +270,19 @@ class UsersStatsRepositoryTest {
         jdbcTemplate.update("insert into bio_page (user_id, handle, avatar_kind, accent, theme, hidden_at, created_at, updated_at) "
                         + "values (?, ?, 'INITIALS', 'BLUE', 'AUTO', ?, ?, ?)",
                 userId, handle, hiddenAt, NOW, NOW);
+    }
+
+    private long channel(final long userId, final String type, final boolean enabled, final LocalDateTime autoDisabledAt) {
+        jdbcTemplate.update("insert into notification_channel (user_id, name, type, enabled, target_sealed, masked_target, auto_disabled_at, "
+                        + "created_at, updated_at) values (?, ?, ?, ?, 'v1:sealed', 'https://example.com/hook', ?, ?, ?)",
+                userId, type + " " + userId, type, enabled, autoDisabledAt, NOW, NOW);
+        return jdbcTemplate.queryForObject("select max(id) from notification_channel", Long.class);
+    }
+
+    private void consent(final long userId, final Long channelId, final String type, final LocalDateTime revokedAt) {
+        jdbcTemplate.update("insert into notification_consent (user_id, channel_id, type, granted_at, source, revoked_at, revoked_source) "
+                        + "values (?, ?, ?, ?, 'SETTINGS', ?, ?)",
+                userId, channelId, type, NOW.minusDays(5), revokedAt, revokedAt == null ? null : "SETTINGS");
     }
 
     private static String email(final long id) {

@@ -65,7 +65,7 @@ public interface NotificationChannelRepository extends JpaRepository<Notificatio
             """)
     int turnOffAfterFailedDays(@Param("id") long id, @Param("at") LocalDateTime at, @Param("failedDays") int failedDays);
 
-    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Modifying(flushAutomatically = true)
     @Query("delete from NotificationChannel ch where ch.owner.id = :userId")
     int deleteByOwnerId(@Param("userId") Long userId);
 

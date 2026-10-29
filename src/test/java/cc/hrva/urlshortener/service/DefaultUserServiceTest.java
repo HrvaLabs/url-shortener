@@ -20,6 +20,9 @@ import cc.hrva.urlshortener.dto.AdminUserResponse;
 import cc.hrva.urlshortener.dto.DataExportDto;
 import cc.hrva.urlshortener.dto.DataExportDto.BioButtonExport;
 import cc.hrva.urlshortener.dto.DataExportDto.BioPageExport;
+import cc.hrva.urlshortener.dto.DataExportDto.ChannelExport;
+import cc.hrva.urlshortener.dto.DataExportDto.ConsentExport;
+import cc.hrva.urlshortener.dto.DataExportDto.NotificationExport;
 import cc.hrva.urlshortener.dto.DeleteAccountDto;
 import cc.hrva.urlshortener.dto.PasswordResetDto;
 import cc.hrva.urlshortener.dto.RequestPasswordResetDto;
@@ -42,6 +45,9 @@ import cc.hrva.urlshortener.model.enums.BioAccent;
 import cc.hrva.urlshortener.model.enums.BioAvatarKind;
 import cc.hrva.urlshortener.model.enums.BioIcon;
 import cc.hrva.urlshortener.model.enums.BioTheme;
+import cc.hrva.urlshortener.model.enums.ChannelType;
+import cc.hrva.urlshortener.model.enums.ConsentSource;
+import cc.hrva.urlshortener.model.enums.NotificationType;
 import cc.hrva.urlshortener.repository.ApiKeyRepository;
 import cc.hrva.urlshortener.repository.PasskeyCredentialRepository;
 import cc.hrva.urlshortener.repository.ResetTokenRepository;
@@ -53,6 +59,7 @@ import cc.hrva.urlshortener.security.TokenProvider;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent;
 import cc.hrva.urlshortener.service.bio.BioAccountData;
 import cc.hrva.urlshortener.service.impl.DefaultLoginAttemptService;
+import cc.hrva.urlshortener.service.notification.NotificationAccountData;
 import cc.hrva.urlshortener.service.impl.DefaultSendingEmailService;
 import cc.hrva.urlshortener.service.impl.DefaultUserService;
 import cc.hrva.urlshortener.validator.AuthValidator;
@@ -149,6 +156,9 @@ class DefaultUserServiceTest {
     private BioAccountData bioAccountData;
 
     @Mock
+    private NotificationAccountData notificationAccountData;
+
+    @Mock
     private UserToUserDtoConverter userToUserDtoConverter;
 
     @Mock
@@ -191,7 +201,7 @@ class DefaultUserServiceTest {
                 loginAttemptService);
         return new DefaultUserService(appProperties, reauthentication, urlRepository, userRepository,
                 passwordEncoder, apiKeyRepository, emailLogRepository, resetTokenService,
-                resetTokenRepository, twoFactorRecoveryCodeRepository, passkeyCredentialRepository, bioAccountData, userToUserDtoConverter, sendingEmailService,
+                resetTokenRepository, twoFactorRecoveryCodeRepository, passkeyCredentialRepository, bioAccountData, notificationAccountData, userToUserDtoConverter, sendingEmailService,
                 verificationTokenService, verificationTokenRepository, userUpdateDtoToUserConverter, connectedAppsService, scammerSignalService, publisher);
     }
 
@@ -466,6 +476,19 @@ class DefaultUserServiceTest {
 
         final var order = inOrder(bioAccountData, urlRepository, userRepository);
         order.verify(bioAccountData).deleteFor(user);
+        order.verify(urlRepository).deleteByOwner(user);
+        order.verify(userRepository).delete(user);
+    }
+
+    @Test
+    void deletingAnAccountDeletesItsNotificationDataBeforeItsLinksAndTheAccount() {
+        final var user = User.builder().id(1L).email("test@example.com").build();
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+
+        userService.deleteUserById(1L);
+
+        final var order = inOrder(notificationAccountData, urlRepository, userRepository);
+        order.verify(notificationAccountData).deleteFor(user);
         order.verify(urlRepository).deleteByOwner(user);
         order.verify(userRepository).delete(user);
     }
@@ -760,9 +783,35 @@ class DefaultUserServiceTest {
     }
 
     @Test
-    void theBioPageComesLastInTheExport() {
+    void theNotificationsComeLastInTheExport() {
         assertThat(Arrays.stream(DataExportDto.class.getRecordComponents()).map(RecordComponent::getName))
-                .containsExactly("exportedAt", "profile", "urls", "apiKeys", "emails", "passkeys", "recoveryCodesRemaining", "bioPage");
+                .containsExactly("exportedAt", "profile", "urls", "apiKeys", "emails", "passkeys", "recoveryCodesRemaining", "bioPage",
+                        "notifications");
+    }
+
+    @Test
+    void exportCarriesTheNotificationConsentsAndChannels() {
+        final var user = User.builder().id(1L).email("test@example.com").build();
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken("test@example.com", null));
+        when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
+        when(userToUserDtoConverter.convert(user)).thenReturn(UserDto.builder().id(1L).email("test@example.com").build());
+        when(notificationAccountData.exportFor(user)).thenReturn(new NotificationExport(
+                List.of(new ConsentExport(NotificationType.LINK_DEAD, "Discord: Team alerts", LocalDateTime.of(2026, 10, 27, 8, 15, 2),
+                        ConsentSource.SETTINGS, null, null)),
+                List.of(new ChannelExport("Team alerts", ChannelType.DISCORD, true, List.of(NotificationType.LINK_DEAD),
+                        "https://discord.com/••••abcd", LocalDateTime.of(2026, 10, 27, 8, 15, 2), null, null))));
+
+        final var mapper = JsonMapper.builder().build();
+        final var export = mapper.readTree(mapper.writeValueAsString(userService.exportMyData()));
+
+        assertThat(export.get("notifications").toString()).isEqualTo("""
+                {"consentHistory":[{"type":"LINK_DEAD","channelLabel":"Discord: Team alerts","grantedAt":"2026-10-27T08:15:02",\
+                "source":"SETTINGS","revokedAt":null,"revokedSource":null}],\
+                "channels":[{"name":"Team alerts","type":"DISCORD","enabled":true,"events":["LINK_DEAD"],\
+                "maskedTarget":"https://discord.com/••••abcd","createdAt":"2026-10-27T08:15:02","lastDeliveryAt":null,\
+                "lastDeliveryStatus":null}]}""");
+        SecurityContextHolder.clearContext();
     }
 
     @Test
@@ -882,6 +931,7 @@ class DefaultUserServiceTest {
         verify(urlRepository).deleteByOwner(user);
         verify(passkeyCredentialRepository).deleteByUser(user);
         verify(bioAccountData).deleteFor(user);
+        verify(notificationAccountData).deleteFor(user);
         verify(userRepository).delete(user);
         SecurityContextHolder.clearContext();
     }
@@ -1030,7 +1080,7 @@ class DefaultUserServiceTest {
         assertThatThrownBy(() -> userService.deleteOwnAccount(DeleteAccountDto.builder().password("wrong").build()))
                 .isInstanceOf(NoAuthorizationException.class);
 
-        verifyNoInteractions(connectedAppsService, bioAccountData);
+        verifyNoInteractions(connectedAppsService, bioAccountData, notificationAccountData);
         SecurityContextHolder.clearContext();
     }
 

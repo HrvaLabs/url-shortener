@@ -13,7 +13,8 @@ public record UsersStatsResponse(
         long activeLast30Days,
         ApiKeyCounts apiKeys,
         McpCounts mcp,
-        BioPageCounts bioPages) {
+        BioPageCounts bioPages,
+        NotificationCounts notifications) {
 
     public record UserInventory(
             long total,
@@ -29,5 +30,7 @@ public record UsersStatsResponse(
     public record McpCounts(long connectedUsers, long registeredClients) {}
 
     public record BioPageCounts(long total, long hidden) {}
+
+    public record NotificationCounts(List<CountEntry> consents, List<CountEntry> channels, long autoDisabledChannels) {}
 
 }

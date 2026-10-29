@@ -199,7 +199,7 @@ class DefaultAdminStatsServiceTest {
 
     private static UsersStatsResponse emptyUsers(final StatsWindow window) {
         return new UsersStatsResponse(window.days(), window.from(), window.to(), new StackedSeries(List.of(), List.of()),
-                new UserInventory(0, 0, 0, 0, 0, 0, List.of()), 0, 0, new ApiKeyCounts(0, 0, 0, 0), new McpCounts(0, 0), new BioPageCounts(0, 0));
+                new UserInventory(0, 0, 0, 0, 0, 0, List.of()), 0, 0, new ApiKeyCounts(0, 0, 0, 0), new McpCounts(0, 0), new BioPageCounts(0, 0), null);
     }
 
     private static SafetyStatsResponse emptySafety(final StatsWindow window) {

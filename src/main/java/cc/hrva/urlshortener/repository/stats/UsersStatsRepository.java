@@ -4,10 +4,15 @@ import cc.hrva.urlshortener.dto.stats.CountEntry;
 import cc.hrva.urlshortener.dto.stats.UsersStatsResponse.ApiKeyCounts;
 import cc.hrva.urlshortener.dto.stats.UsersStatsResponse.BioPageCounts;
 import cc.hrva.urlshortener.dto.stats.UsersStatsResponse.McpCounts;
+import cc.hrva.urlshortener.dto.stats.UsersStatsResponse.NotificationCounts;
+import cc.hrva.urlshortener.model.enums.ChannelType;
+import cc.hrva.urlshortener.model.enums.NotificationType;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -64,6 +69,14 @@ public class UsersStatsRepository {
             from bio_page
             """;
 
+    private static final String COUNT_ACTIVE_CONSENTS_BY_TYPE =
+            "select type, count(*) as total from notification_consent where revoked_at is null group by type";
+
+    private static final String COUNT_CHANNELS_BY_TYPE = "select type, count(*) as total from notification_channel group by type";
+
+    private static final String COUNT_AUTO_DISABLED_CHANNELS =
+            "select count(*) from notification_channel where enabled = false and auto_disabled_at is not null";
+
     private final NamedParameterJdbcTemplate jdbcTemplate;
 
     public AccountCounts countAccounts() {
@@ -105,6 +118,20 @@ public class UsersStatsRepository {
         return jdbcTemplate.queryForObject(COUNT_BIO_PAGES, Map.of(), (row, rowNumber) -> new BioPageCounts(
                 row.getLong("total_pages"),
                 row.getLong("hidden_pages")));
+    }
+
+    public NotificationCounts countNotifications() {
+        final var consents = countByType(COUNT_ACTIVE_CONSENTS_BY_TYPE);
+        final var channels = countByType(COUNT_CHANNELS_BY_TYPE);
+        return new NotificationCounts(
+                Arrays.stream(NotificationType.values()).map(type -> new CountEntry(type.name(), consents.getOrDefault(type.name(), 0L))).toList(),
+                Arrays.stream(ChannelType.values()).map(type -> new CountEntry(type.name(), channels.getOrDefault(type.name(), 0L))).toList(),
+                jdbcTemplate.queryForObject(COUNT_AUTO_DISABLED_CHANNELS, Map.of(), Long.class));
+    }
+
+    private Map<String, Long> countByType(final String sql) {
+        return jdbcTemplate.query(sql, Map.of(), (row, rowNumber) -> new CountEntry(row.getString("type"), row.getLong("total"))).stream()
+                .collect(Collectors.toMap(CountEntry::value, CountEntry::count));
     }
 
     public record AccountCounts(long total, long active, long emailVerified, long twoFactorEnabled) {}
