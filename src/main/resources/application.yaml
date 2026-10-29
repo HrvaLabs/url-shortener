@@ -106,3 +106,8 @@ app:
   passkeys:
     rp-id: hrva.cc
     allowed-origins: https://app.hrva.cc
+  notifications:
+    key: ${APP_NOTIFICATIONS_KEY:}
+  destination-check:
+    enabled: ${APP_DESTINATION_CHECK_ENABLED:true}
+    budget: ${APP_DESTINATION_CHECK_BUDGET:2h}

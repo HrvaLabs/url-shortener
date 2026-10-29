@@ -120,6 +120,14 @@ public class AppProperties {
     @NotNull
     private Retention retention = new Retention();
 
+    @Valid
+    @NotNull
+    private Notifications notifications = new Notifications();
+
+    @Valid
+    @NotNull
+    private DestinationCheck destinationCheck = new DestinationCheck();
+
     @Data
     public static class Mcp {
 
@@ -197,6 +205,25 @@ public class AppProperties {
 
         @Min(1)
         private int auditLogMonths = 12;
+
+    }
+
+    @Data
+    public static class Notifications {
+
+        @ToString.Exclude
+        private String key;
+
+    }
+
+    @Data
+    public static class DestinationCheck {
+
+        private boolean enabled = true;
+
+        @NotNull
+        @DurationMin(minutes = 1, message = "must be at least 1 minute")
+        private Duration budget = Duration.ofHours(2);
 
     }
 
