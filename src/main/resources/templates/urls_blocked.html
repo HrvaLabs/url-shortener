@@ -11,7 +11,7 @@
       <td class="e-mu" th:style="${s.row} + 'padding-bottom: 10px; font-size: 13px; line-height: 20px; color: #67676f;'">Short links</td>
     </tr>
     <tr th:each="link : ${short_links}">
-      <td class="e-bd" th:style="${s.rowNext} + 'padding-top: 10px; padding-bottom: 10px;'"><span class="e-lk mono" th:style="${s.short}" th:text="${link}">https://hrva.cc/deal1</span></td>
+      <td class="e-bd" th:style="${s.rowNext} + 'padding-top: 10px; padding-bottom: 10px;'"><span class="e-fg mono" th:style="${s.short}" th:text="${link}">https://hrva.cc/deal1</span></td>
     </tr>
     <tr th:if="${more_links > 0}">
       <td class="e-mu e-bd" th:style="${s.rowNext} + 'padding-top: 10px; color: #67676f;'">and <th:block th:text="${more_links}">5</th:block> more</td>

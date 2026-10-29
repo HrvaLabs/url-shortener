@@ -27,7 +27,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.function.UnaryOperator;
 import java.util.stream.Stream;
@@ -74,7 +73,6 @@ public class DefaultSendingEmailService implements SendingEmailService {
     @Async
     public void sendEmailForgotPassword(final User user, final ResetToken resetToken) {
         final var ctx = getContext(user);
-        ctx.setVariable("request_date", resetToken.getCreateDate().truncatedTo(ChronoUnit.SECONDS).format(DateTimeFormatter.ISO_LOCAL_TIME));
         ctx.setVariable("token", resetToken.getToken());
         ctx.setVariable("full_password_reset_link", MessageFormat.format("{0}/reset-password/{1}", appProperties.getFrontendUrl(), resetToken.getToken()));
 
@@ -543,13 +541,10 @@ public class DefaultSendingEmailService implements SendingEmailService {
     private Context getContext(final User user) {
         final var ctx = new Context();
         ctx.setVariable("name", user.getEmail());
-        ctx.setVariable("number_of_api_keys", Objects.toString(user.getApiKeySlots(), "0"));
         ctx.setVariable("app_name", appProperties.getAppName());
         ctx.setVariable("contact_email", appProperties.getContactEmail());
         ctx.setVariable("login_page", MessageFormat.format("{0}/login/", appProperties.getFrontendUrl()));
-        ctx.setVariable("api_documentation", MessageFormat.format("{0}/swagger-ui/index.html", appProperties.getServerUrl()));
         ctx.setVariable("days_of_inactivity", appProperties.getDeactivateUserAccountAfterDays().toString());
-        ctx.setVariable("password_reset_link", MessageFormat.format("{0}/reset-password", appProperties.getFrontendUrl()));
         ctx.setVariable("token_expiration", appProperties.getResetTokenExpirationInHours().toString());
 
         return ctx;

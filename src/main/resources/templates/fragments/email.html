@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" xmlns:th="https://www.thymeleaf.org" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office"
+<html lang="en" dir="ltr" xmlns:th="https://www.thymeleaf.org" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office"
       th:fragment="layout(title, heading, preheader, content, footer)">
 <head>
   <meta charset="UTF-8">
@@ -64,14 +64,14 @@
                mono='font-family: JetBrains Mono, ui-monospace, SFMono-Regular, Menlo, Consolas, Liberation Mono, monospace;',
                wrap='word-break: break-word; overflow-wrap: anywhere;',
                s=${ {
-                 h1: sans + 'margin: 0 0 20px; font-size: 24px; line-height: 30px; font-weight: 650; letter-spacing: -0.02em; color: #0e0e11;',
+                 h1: sans + 'margin: 0 0 20px; font-size: 24px; line-height: 30px; font-weight: 700; letter-spacing: -0.02em; color: #0e0e11;',
                  h2: sans + 'margin: 32px 0 12px; font-size: 18px; line-height: 24px; font-weight: 600; letter-spacing: -0.015em; color: #0e0e11;',
                  p: sans + wrap + 'margin: 0 0 16px; font-size: 16px; line-height: 26px; color: #0e0e11;',
                  small: sans + wrap + 'margin: 0 0 8px; font-size: 14px; line-height: 22px; color: #67676f;',
                  strong: 'font-weight: 600; color: #0e0e11;',
                  danger: 'font-weight: 600; color: #ca2121;',
                  link: wrap + 'color: #2453ff; text-decoration: underline;',
-                 short: mono + 'font-size: 14px; font-weight: 500; color: #2453ff; word-break: break-all;',
+                 short: mono + 'font-size: 14px; font-weight: 500; color: #0e0e11; word-break: break-all;',
                  chip: mono + 'font-size: 14px; color: #0e0e11; background-color: #f4f4f5; border: 1px solid #e4e4e7; border-radius: 6px; padding: 1px 6px; word-break: break-all;',
                  panel: 'margin: 0 0 20px; border: 1px solid #e4e4e7; border-radius: 10px; border-collapse: separate;',
                  row: sans + wrap + 'padding: 12px 16px; font-size: 15px; line-height: 24px; color: #0e0e11;',
@@ -82,7 +82,7 @@
                  foot: sans + wrap + 'margin: 0 0 6px; font-size: 13px; line-height: 20px; color: #67676f;',
                  footLink: wrap + 'color: #67676f; text-decoration: underline;'
                } }">
-  <div role="article" aria-roledescription="email" lang="en" th:aria-label="${title}">
+  <div role="article" aria-roledescription="email" lang="en" dir="ltr" th:aria-label="${title}">
     <div style="display: none; max-height: 0; max-width: 0; overflow: hidden; opacity: 0; font-size: 1px; line-height: 1px; mso-hide: all;"><th:block th:replace="${preheader}"/>&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;</div>
     <table role="presentation" class="e-bg" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#f4f4f5" style="background-color: #f4f4f5;">
       <tr>
@@ -144,12 +144,6 @@
         </tr>
       </table>
     </td>
-  </tr>
-</table>
-
-<table th:fragment="rule" role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
-  <tr>
-    <td class="e-bd" height="1" style="padding: 0; height: 1px; border-top: 1px solid #e4e4e7; font-size: 0; line-height: 0;">&nbsp;</td>
   </tr>
 </table>
 

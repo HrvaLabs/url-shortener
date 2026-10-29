@@ -12,8 +12,10 @@ import cc.hrva.urlshortener.exception.EmailNotResendableException;
 import cc.hrva.urlshortener.exception.MailingException;
 import cc.hrva.urlshortener.model.Email;
 import cc.hrva.urlshortener.model.EmailLog;
+import cc.hrva.urlshortener.model.ResetToken;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.User;
+import cc.hrva.urlshortener.model.VerificationToken;
 import cc.hrva.urlshortener.model.enums.BlockReason;
 import cc.hrva.urlshortener.model.enums.NotificationType;
 import cc.hrva.urlshortener.repository.EmailLogRepository;
@@ -33,11 +35,16 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.function.Consumer;
 import java.util.regex.Pattern;
 import java.util.stream.IntStream;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -658,6 +665,37 @@ class DefaultSendingEmailServiceTest {
         assertThat(email.getReceivers()).containsExactly("alice@example.com");
         assertThat(textOf(email.getText())).contains("A passkey or security key named Work YubiKey was added");
         verify(emailService).sendEmail(any(Email.class), eq(null));
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("accountEmails")
+    void anAccountEmailRendersItsHeadlineAndExactlyItsLinks(final String template, final Consumer<DefaultSendingEmailService> send,
+                                                           final String headline, final List<String> links) throws Exception {
+        saveReturnsArgument();
+        final var sent = ArgumentCaptor.forClass(Email.class);
+        doAnswer(invocation -> null).when(emailService).sendEmail(sent.capture(), eq(null));
+
+        send.accept(configuredEmailService(realTemplateEngine()));
+
+        final var html = sent.getValue().getText();
+        assertThat(textOf(html)).contains(headline);
+        assertThat(html).containsPattern("<h1[^>]*>" + Pattern.quote(headline) + "</h1>");
+        assertThat(linksIn(html)).containsExactlyElementsOf(links);
+    }
+
+    private static Stream<Arguments> accountEmails() {
+        final var resetToken = ResetToken.builder().token("reset-token-41").createDate(LocalDateTime.of(2026, 10, 29, 9, 14, 2)).build();
+        final var verificationToken = VerificationToken.builder().token("verify-token-42").build();
+        final var flaggedLink = Url.builder().shortUrl("menu").longUrl("https://example.com/menu").build();
+        return Stream.of(
+                Arguments.of("reset_password", (Consumer<DefaultSendingEmailService>) service -> service.sendEmailForgotPassword(OWNER, resetToken),
+                        "Reset your password", List.of("https://hrva.cc/reset-password/reset-token-41", "https://hrva.cc/reset-password/reset-token-41")),
+                Arguments.of("verify_email", (Consumer<DefaultSendingEmailService>) service -> service.sendVerificationEmail(OWNER, verificationToken),
+                        "Verify your email", List.of("https://hrva.cc/verify-email/verify-token-42", "https://hrva.cc/verify-email/verify-token-42")),
+                Arguments.of("account_deactivated", (Consumer<DefaultSendingEmailService>) service -> service.sendEmailAccountDeactivated(OWNER),
+                        "Account deactivated", List.of("mailto:support@hrva.cc")),
+                Arguments.of("url_malware_detected", (Consumer<DefaultSendingEmailService>) service -> service.sendEmailUrlMalwareDetected(OWNER, flaggedLink, "MALWARE"),
+                        "Malicious URL detected", List.of("https://hrva.cc/login/")));
     }
 
     @Test
