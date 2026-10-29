@@ -42,6 +42,7 @@ public interface UrlRepository extends JpaRepository<Url, Long>, JpaSpecificatio
     Optional<Url> findByShortUrlAndActiveTrue(String shortUrl);
     Optional<Url> findFirstByShortUrlOrderByActiveDescIdDesc(String shortUrl);
     boolean existsUrlByLongUrlAndActiveTrueAndOwnerIsNull(String longUrl);
+    @EntityGraph(attributePaths = "owner", type = EntityGraph.EntityGraphType.LOAD)
     List<Url> findByExpirationDateBetweenAndActiveTrueAndOwnerIsNotNull(LocalDateTime start, LocalDateTime end);
     long countByActiveTrue();
     List<Url> findTop10ByCreateDateAfterAndOwnerCreateDateAfterOrderByCreateDateDesc(LocalDateTime createdAfter, LocalDateTime ownerCreatedAfter);

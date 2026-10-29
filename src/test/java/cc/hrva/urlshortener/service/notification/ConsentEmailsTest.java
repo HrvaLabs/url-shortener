@@ -2,8 +2,13 @@ package cc.hrva.urlshortener.service.notification;
 
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.model.enums.NotificationType;
+import java.net.URI;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.boot.env.YamlPropertySourceLoader;
+import org.springframework.core.env.MutablePropertySources;
+import org.springframework.core.env.PropertySourcesPropertyResolver;
+import org.springframework.core.io.ClassPathResource;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -30,6 +35,24 @@ class ConsentEmailsTest {
                 .containsExactly(
                         org.assertj.core.api.Assertions.entry("List-Unsubscribe", "<https://hrva.cc/api/v1/notifications/unsubscribe?token=" + token + ">"),
                         org.assertj.core.api.Assertions.entry("List-Unsubscribe-Post", "List-Unsubscribe=One-Click"));
+    }
+
+    @Test
+    void theLocalProfilesUnsubscribeHeaderIsAnAbsoluteUri() throws Exception {
+        final var sources = new MutablePropertySources();
+        new YamlPropertySourceLoader().load("local", new ClassPathResource("application-local.yaml")).forEach(sources::addLast);
+        final var resolver = new PropertySourcesPropertyResolver(sources);
+        final var appProperties = new AppProperties();
+        appProperties.setServerUrl(resolver.getRequiredProperty("app.server-url"));
+        appProperties.setFrontendUrl(resolver.getRequiredProperty("app.frontend-url"));
+
+        final var header = new ConsentEmails(tokens, appProperties).headers(42L, NotificationType.WEEKLY_SUMMARY_EMAIL).get("List-Unsubscribe");
+        final var uri = URI.create(header.substring(1, header.length() - 1));
+
+        assertThat(uri.isAbsolute()).isTrue();
+        assertThat(uri.getScheme()).isEqualTo("http");
+        assertThat(uri.getPort()).isEqualTo(Integer.parseInt(resolver.getRequiredProperty("server.port")));
+        assertThat(uri.getPath()).isEqualTo("/api/v1/notifications/unsubscribe");
     }
 
     @Test

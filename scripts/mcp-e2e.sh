@@ -300,6 +300,7 @@ OAUTH2_GOOGLE_CLIENT_ID=${OAUTH2_GOOGLE_CLIENT_ID:-mcp-e2e-unused} \
     --spring.profiles.active=local \
     --server.port="$PORT" \
     --app.mcp.issuer="$BASE" \
+    --app.server-url="$BASE" \
     --app.discord-webhook-url="$DISCORD_WEBHOOK" \
     --spring.datasource.url="jdbc:postgresql://127.0.0.1:$POSTGRES_PORT/url_shortener" \
     --spring.datasource.username="$DB_USER" \
@@ -685,7 +686,7 @@ public class QrText {
 JAVA
 QR_TEXT=$(java -Djava.awt.headless=true -cp "$QR_CLASSPATH" "$WORK/QrText.java" "$WORK/qr.png")
 show "the code decodes (ZXing from the app jar) to: $QR_TEXT"
-expect_eq "$QR_TEXT" "localhost/$ALIAS?qr" "the code is the short link (app.server-url of the local profile) with the ?qr marker"
+expect_eq "$QR_TEXT" "$BASE/$ALIAS?qr" "the code is the short link (app.server-url, set to the run's base URL) with the ?qr marker"
 
 public_stats() {
     http -H "CF-Connecting-IP: $1" "$BASE/api/v1/public/stats"

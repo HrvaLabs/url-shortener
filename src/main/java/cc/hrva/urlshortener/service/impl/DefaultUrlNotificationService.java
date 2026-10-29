@@ -5,9 +5,9 @@ import cc.hrva.urlshortener.model.Email;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.enums.NotificationType;
 import cc.hrva.urlshortener.repository.UrlRepository;
-import cc.hrva.urlshortener.service.NotificationConsentService;
 import cc.hrva.urlshortener.service.UrlNotificationService;
 import cc.hrva.urlshortener.service.notification.ConsentEmails;
+import cc.hrva.urlshortener.service.notification.EmailConsentReader;
 import java.text.MessageFormat;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
@@ -34,7 +34,7 @@ public class DefaultUrlNotificationService implements UrlNotificationService {
 
     private final UrlRepository urlRepository;
     private final DefaultSendingEmailService sendingEmailService;
-    private final NotificationConsentService notificationConsentService;
+    private final EmailConsentReader emailConsentReader;
     private final ConsentEmails consentEmails;
     private final AppProperties appProperties;
     private final TemplateEngine templateEngine;
@@ -70,7 +70,7 @@ public class DefaultUrlNotificationService implements UrlNotificationService {
             }
 
             final var ownerIds = links.stream().map(ExpiringLink::ownerId).collect(Collectors.toSet());
-            return new ExpiringLinks(links, notificationConsentService.emailConsenters(REMINDER, ownerIds));
+            return new ExpiringLinks(links, emailConsentReader.consenters(REMINDER, ownerIds));
         });
     }
 

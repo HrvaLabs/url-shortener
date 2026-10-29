@@ -10,6 +10,7 @@ import cc.hrva.urlshortener.model.enums.ChannelType;
 import cc.hrva.urlshortener.model.enums.ConsentSource;
 import cc.hrva.urlshortener.model.enums.DeliveryStatus;
 import cc.hrva.urlshortener.model.enums.NotificationType;
+import cc.hrva.urlshortener.service.notification.EmailConsentReader;
 import jakarta.persistence.EntityManager;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -70,6 +71,9 @@ class NotificationSchemaTest {
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
+
+    @Autowired
+    private EmailConsentReader emailConsentReader;
 
     @Autowired
     private EntityManager entityManager;
@@ -332,6 +336,44 @@ class NotificationSchemaTest {
         return jdbcTemplate.queryForObject("select count(*) from " + table, Long.class);
     }
 
+    @Test
+    void aDeactivatedOwnersEmailConsentCountsAgainOnlyOnceTheAccountIsActive() {
+        final var active = savedUser("ana@example.com");
+        final var deactivated = savedUser("bob@example.com");
+        final var type = NotificationType.EXPIRY_REMINDER_EMAIL;
+        notificationConsentRepository.saveAndFlush(emailConsent(active, type).build());
+        notificationConsentRepository.saveAndFlush(emailConsent(deactivated, type).build());
+        jdbcTemplate.update("update user_account set active = false where id = ?", deactivated.getId());
+        entityManager.clear();
+        final var everyone = List.of(active.getId(), deactivated.getId());
+
+        assertThat(emailConsentReader.hasActiveEmailConsent(active.getId(), type)).isTrue();
+        assertThat(emailConsentReader.hasActiveEmailConsent(deactivated.getId(), type)).isFalse();
+        assertThat(emailConsentReader.consenters(type, everyone)).containsExactly(active.getId());
+        assertThat(emailConsentReader.allConsenters(type)).containsExactly(active.getId());
+        assertThat(jdbcTemplate.queryForObject("select count(*) from notification_consent where user_id = ? and revoked_at is null",
+                Long.class, deactivated.getId())).isOne();
+
+        jdbcTemplate.update("update user_account set active = true where id = ?", deactivated.getId());
+
+        assertThat(emailConsentReader.hasActiveEmailConsent(deactivated.getId(), type)).isTrue();
+        assertThat(emailConsentReader.consenters(type, everyone)).containsExactlyInAnyOrder(active.getId(), deactivated.getId());
+        assertThat(emailConsentReader.allConsenters(type)).containsExactlyInAnyOrder(active.getId(), deactivated.getId());
+    }
+
+    @Test
+    void theEmailConsentReaderSeesNeitherRevokedNorChannelRowsAndAsksNothingForNobody() {
+        final var ana = savedUser("ana@example.com");
+        final var type = NotificationType.WEEKLY_SUMMARY_EMAIL;
+        notificationConsentRepository.saveAndFlush(emailConsent(ana, type).revokedAt(NOW).revokedSource(ConsentSource.SETTINGS).build());
+        notificationConsentRepository.saveAndFlush(channelConsent(ana, savedChannel(ana, "Team"), type).build());
+
+        assertThat(emailConsentReader.hasActiveEmailConsent(ana.getId(), type)).isFalse();
+        assertThat(emailConsentReader.consenters(type, List.of(ana.getId()))).isEmpty();
+        assertThat(emailConsentReader.allConsenters(type)).isEmpty();
+        assertThat(emailConsentReader.consenters(type, List.of())).isEmpty();
+    }
+
     private User savedUser(final String email) {
         return userRepository.saveAndFlush(User.builder().email(email).password("correct horse battery").apiKeySlots(4L).build());
     }
@@ -379,7 +421,7 @@ class NotificationSchemaTest {
     @SpringBootConfiguration
     @EnableAutoConfiguration
     @EntityScan(basePackageClasses = NotificationChannel.class)
-    @Import({NotificationClaimRepository.class, DestinationCheckRepository.class})
+    @Import({NotificationClaimRepository.class, DestinationCheckRepository.class, EmailConsentReader.class})
     @EnableJpaRepositories(
             basePackageClasses = NotificationChannelRepository.class,
             includeFilters = @ComponentScan.Filter(

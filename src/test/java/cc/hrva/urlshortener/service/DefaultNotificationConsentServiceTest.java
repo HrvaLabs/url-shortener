@@ -12,6 +12,7 @@ import cc.hrva.urlshortener.model.enums.ConsentSource;
 import cc.hrva.urlshortener.model.enums.NotificationType;
 import cc.hrva.urlshortener.repository.NotificationConsentRepository;
 import cc.hrva.urlshortener.service.impl.DefaultNotificationConsentService;
+import cc.hrva.urlshortener.service.notification.EmailConsentReader;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiter;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiterUnavailableException;
 import cc.hrva.urlshortener.service.twostep.AccountLock;
@@ -69,7 +70,8 @@ class DefaultNotificationConsentServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new DefaultNotificationConsentService(notificationConsentRepository, userService, accountLock, rateLimiter,
+        service = new DefaultNotificationConsentService(notificationConsentRepository, new EmailConsentReader(notificationConsentRepository),
+                userService, accountLock, rateLimiter,
                 Clock.fixed(NOW, ZoneOffset.UTC));
         lenient().when(userService.getUserFromToken()).thenReturn(user);
         lenient().when(accountLock.lock(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
@@ -245,9 +247,8 @@ class DefaultNotificationConsentServiceTest {
     }
 
     @Test
-    void hasEmailConsentReadsTheActiveRow() {
-        when(notificationConsentRepository.findFirstByOwnerIdAndTypeAndChannelIdIsNullAndRevokedAtIsNull(7L, NotificationType.DEAD_LINK_EMAIL))
-                .thenReturn(Optional.of(active(NotificationType.DEAD_LINK_EMAIL)));
+    void hasEmailConsentAsksForAnActiveRowOfAnActiveOwner() {
+        when(notificationConsentRepository.existsActiveEmailConsent(7L, NotificationType.DEAD_LINK_EMAIL)).thenReturn(true);
 
         assertThat(service.hasEmailConsent(7L, NotificationType.DEAD_LINK_EMAIL)).isTrue();
         assertThat(service.hasEmailConsent(7L, NotificationType.WEEKLY_SUMMARY_EMAIL)).isFalse();

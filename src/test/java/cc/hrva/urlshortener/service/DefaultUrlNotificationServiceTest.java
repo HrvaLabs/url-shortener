@@ -10,6 +10,7 @@ import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.service.impl.DefaultSendingEmailService;
 import cc.hrva.urlshortener.service.impl.DefaultUrlNotificationService;
 import cc.hrva.urlshortener.service.notification.ConsentEmails;
+import cc.hrva.urlshortener.service.notification.EmailConsentReader;
 import cc.hrva.urlshortener.service.notification.NotificationTestKeys;
 import cc.hrva.urlshortener.service.notification.UnsubscribeTokens;
 import java.time.LocalDateTime;
@@ -57,7 +58,7 @@ class DefaultUrlNotificationServiceTest {
     private DefaultSendingEmailService sendingEmailService;
 
     @Mock
-    private NotificationConsentService notificationConsentService;
+    private EmailConsentReader emailConsentReader;
 
     @Mock
     private PlatformTransactionManager transactionManager;
@@ -74,7 +75,7 @@ class DefaultUrlNotificationServiceTest {
         appProperties.setServerUrl("https://hrva.cc");
         appProperties.setFrontendUrl("https://app.hrva.cc");
         appProperties.setUrlExpirationNotificationHours(24L);
-        service = new DefaultUrlNotificationService(urlRepository, sendingEmailService, notificationConsentService,
+        service = new DefaultUrlNotificationService(urlRepository, sendingEmailService, emailConsentReader,
                 new ConsentEmails(unsubscribeTokens, appProperties), appProperties, realTemplateEngine(), transactionManager);
         lenient().when(sendingEmailService.tryToSendConsentedEmail(any(Email.class), anyLong(), eq(NotificationType.EXPIRY_REMINDER_EMAIL)))
                 .thenAnswer(invocation -> Optional.of(EmailLog.builder().id(1L).build()));
@@ -92,7 +93,7 @@ class DefaultUrlNotificationServiceTest {
     void expiryReminderNeedsConsent() {
         when(urlRepository.findByExpirationDateBetweenAndActiveTrueAndOwnerIsNotNull(any(), any()))
                 .thenReturn(List.of(link(31L, "anas-menu", ANA), link(32L, "bobs-menu", BOB), link(33L, "anas-shop", ANA)));
-        when(notificationConsentService.emailConsenters(NotificationType.EXPIRY_REMINDER_EMAIL, Set.of(7L, 8L))).thenReturn(Set.of(7L));
+        when(emailConsentReader.consenters(NotificationType.EXPIRY_REMINDER_EMAIL, Set.of(7L, 8L))).thenReturn(Set.of(7L));
 
         service.notifyExpiringUrls();
 
@@ -111,14 +112,14 @@ class DefaultUrlNotificationServiceTest {
     @Test
     void theLinksAndTheConsentsAreReadInOneReadOnlyTransaction() {
         when(urlRepository.findByExpirationDateBetweenAndActiveTrueAndOwnerIsNotNull(any(), any())).thenReturn(List.of(link(31L, "anas-menu", ANA)));
-        when(notificationConsentService.emailConsenters(NotificationType.EXPIRY_REMINDER_EMAIL, Set.of(7L))).thenReturn(Set.of());
+        when(emailConsentReader.consenters(NotificationType.EXPIRY_REMINDER_EMAIL, Set.of(7L))).thenReturn(Set.of());
 
         service.notifyExpiringUrls();
 
         final var definition = ArgumentCaptor.forClass(TransactionDefinition.class);
         verify(transactionManager).getTransaction(definition.capture());
         assertThat(definition.getValue().isReadOnly()).isTrue();
-        verify(notificationConsentService).emailConsenters(any(), any());
+        verify(emailConsentReader).consenters(any(), any());
         verifyNoInteractions(sendingEmailService);
     }
 
@@ -128,7 +129,7 @@ class DefaultUrlNotificationServiceTest {
 
         service.notifyExpiringUrls();
 
-        verifyNoInteractions(notificationConsentService, sendingEmailService);
+        verifyNoInteractions(emailConsentReader, sendingEmailService);
     }
 
     @Test
@@ -146,7 +147,7 @@ class DefaultUrlNotificationServiceTest {
     @Test
     void reminderCarriesTheUnsubscribeLinks() {
         when(urlRepository.findByExpirationDateBetweenAndActiveTrueAndOwnerIsNotNull(any(), any())).thenReturn(List.of(link(31L, "anas-menu", ANA)));
-        when(notificationConsentService.emailConsenters(NotificationType.EXPIRY_REMINDER_EMAIL, Set.of(7L))).thenReturn(Set.of(7L));
+        when(emailConsentReader.consenters(NotificationType.EXPIRY_REMINDER_EMAIL, Set.of(7L))).thenReturn(Set.of(7L));
 
         service.notifyExpiringUrls();
 
@@ -169,7 +170,7 @@ class DefaultUrlNotificationServiceTest {
     @ExtendWith(OutputCaptureExtension.class)
     void theLogNamesIdsNotAddresses(final CapturedOutput output) {
         when(urlRepository.findByExpirationDateBetweenAndActiveTrueAndOwnerIsNotNull(any(), any())).thenReturn(List.of(link(31L, "anas-menu", ANA)));
-        when(notificationConsentService.emailConsenters(NotificationType.EXPIRY_REMINDER_EMAIL, Set.of(7L))).thenReturn(Set.of(7L));
+        when(emailConsentReader.consenters(NotificationType.EXPIRY_REMINDER_EMAIL, Set.of(7L))).thenReturn(Set.of(7L));
 
         service.notifyExpiringUrls();
 

@@ -11,15 +11,14 @@ import cc.hrva.urlshortener.exception.MailingException;
 import cc.hrva.urlshortener.model.Email;
 import cc.hrva.urlshortener.model.EmailLog;
 import cc.hrva.urlshortener.model.Url;
-import cc.hrva.urlshortener.model.NotificationConsent;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.enums.BlockReason;
 import cc.hrva.urlshortener.model.enums.NotificationType;
 import cc.hrva.urlshortener.repository.EmailLogRepository;
-import cc.hrva.urlshortener.repository.NotificationConsentRepository;
 import cc.hrva.urlshortener.service.impl.DefaultEmailService;
 import cc.hrva.urlshortener.service.impl.DefaultSendingEmailService;
 import cc.hrva.urlshortener.service.notification.ConsentEmails;
+import cc.hrva.urlshortener.service.notification.EmailConsentReader;
 import cc.hrva.urlshortener.service.notification.NotificationTestKeys;
 import cc.hrva.urlshortener.service.notification.UnsubscribeTokens;
 import java.time.LocalDate;
@@ -76,7 +75,7 @@ class DefaultSendingEmailServiceTest {
     private EmailLogRepository emailLogRepository;
 
     @Mock
-    private NotificationConsentRepository notificationConsentRepository;
+    private EmailConsentReader emailConsentReader;
 
     private final UnsubscribeTokens unsubscribeTokens = new UnsubscribeTokens(NotificationTestKeys.keys());
 
@@ -93,7 +92,7 @@ class DefaultSendingEmailServiceTest {
         appProperties.setServerUrl("https://hrva.cc");
         appProperties.setFrontendUrl("https://app.hrva.cc");
         sendingEmailService = new DefaultSendingEmailService(appProperties, templateEngine, emailService, emailLogRepository,
-                notificationConsentRepository, new ConsentEmails(unsubscribeTokens, appProperties));
+                emailConsentReader, new ConsentEmails(unsubscribeTokens, appProperties));
     }
 
     private void saveReturnsArgument() {
@@ -116,7 +115,7 @@ class DefaultSendingEmailServiceTest {
         appProperties.setDeactivateUserAccountAfterDays(180L);
         appProperties.setResetTokenExpirationInHours(1L);
         return new DefaultSendingEmailService(appProperties, engine, emailService, emailLogRepository,
-                notificationConsentRepository, new ConsentEmails(unsubscribeTokens, appProperties));
+                emailConsentReader, new ConsentEmails(unsubscribeTokens, appProperties));
     }
 
     private static TemplateEngine realTemplateEngine() {
@@ -733,8 +732,7 @@ class DefaultSendingEmailServiceTest {
     @Test
     @ExtendWith(OutputCaptureExtension.class)
     void consentedEmailIsNotSentAfterRevoke(final CapturedOutput output) throws Exception {
-        when(notificationConsentRepository.findFirstByOwnerIdAndTypeAndChannelIdIsNullAndRevokedAtIsNull(7L, NotificationType.WEEKLY_SUMMARY_EMAIL))
-                .thenReturn(Optional.empty());
+        when(emailConsentReader.hasActiveEmailConsent(7L, NotificationType.WEEKLY_SUMMARY_EMAIL)).thenReturn(false);
 
         final var result = sendingEmailService.tryToSendConsentedEmail(consentedEmail(), 7L, NotificationType.WEEKLY_SUMMARY_EMAIL);
 
@@ -748,8 +746,7 @@ class DefaultSendingEmailServiceTest {
     @Test
     void consentedEmailCarriesHeadersAndIsLogged() throws Exception {
         saveReturnsArgument();
-        when(notificationConsentRepository.findFirstByOwnerIdAndTypeAndChannelIdIsNullAndRevokedAtIsNull(7L, NotificationType.WEEKLY_SUMMARY_EMAIL))
-                .thenReturn(Optional.of(activeConsent(NotificationType.WEEKLY_SUMMARY_EMAIL)));
+        when(emailConsentReader.hasActiveEmailConsent(7L, NotificationType.WEEKLY_SUMMARY_EMAIL)).thenReturn(true);
         final var sent = ArgumentCaptor.forClass(Email.class);
         doAnswer(invocation -> null).when(emailService).sendEmail(sent.capture(), eq(null));
         final var email = consentedEmail();
@@ -781,8 +778,7 @@ class DefaultSendingEmailServiceTest {
     void resendRefusesWithdrawnConsent() throws Exception {
         final var failed = failedConsentedEntry(7L);
         when(emailLogRepository.findById(21L)).thenReturn(Optional.of(failed));
-        when(notificationConsentRepository.findFirstByOwnerIdAndTypeAndChannelIdIsNullAndRevokedAtIsNull(7L, NotificationType.WEEKLY_SUMMARY_EMAIL))
-                .thenReturn(Optional.empty());
+        when(emailConsentReader.hasActiveEmailConsent(7L, NotificationType.WEEKLY_SUMMARY_EMAIL)).thenReturn(false);
 
         assertThatThrownBy(() -> sendingEmailService.resendEmail(21L))
                 .isInstanceOf(EmailNotResendableException.class)
@@ -808,8 +804,7 @@ class DefaultSendingEmailServiceTest {
         saveReturnsArgument();
         final var failed = failedConsentedEntry(7L);
         when(emailLogRepository.findById(21L)).thenReturn(Optional.of(failed));
-        when(notificationConsentRepository.findFirstByOwnerIdAndTypeAndChannelIdIsNullAndRevokedAtIsNull(7L, NotificationType.WEEKLY_SUMMARY_EMAIL))
-                .thenReturn(Optional.of(activeConsent(NotificationType.WEEKLY_SUMMARY_EMAIL)));
+        when(emailConsentReader.hasActiveEmailConsent(7L, NotificationType.WEEKLY_SUMMARY_EMAIL)).thenReturn(true);
         final var sent = ArgumentCaptor.forClass(Email.class);
         doAnswer(invocation -> null).when(emailService).sendEmail(sent.capture(), eq(null));
 
@@ -842,7 +837,7 @@ class DefaultSendingEmailServiceTest {
         assertThat(resent.getConsentType()).isNull();
         assertThat(resent.getUserId()).isNull();
         assertThat(failed.getStatus()).isEqualTo(EmailLog.STATUS_RESENT);
-        verifyNoInteractions(notificationConsentRepository);
+        verifyNoInteractions(emailConsentReader);
     }
 
     @Test
@@ -856,7 +851,7 @@ class DefaultSendingEmailServiceTest {
         assertThat(sent.getValue().getHeaders()).isEmpty();
         assertThat(lastSavedEntry().getConsentType()).isNull();
         assertThat(lastSavedEntry().getUserId()).isNull();
-        verifyNoInteractions(notificationConsentRepository);
+        verifyNoInteractions(emailConsentReader);
     }
 
     private static Email consentedEmail() {
@@ -871,11 +866,6 @@ class DefaultSendingEmailServiceTest {
     private static EmailLog failedConsentedEntry(final Long userId) {
         return EmailLog.builder().id(21L).sender("noreply@hrva.cc").recipient("alice@example.com").subject("Your week on hrva.cc")
                 .body("<p>last week</p>").status(EmailLog.STATUS_FAILED).consentType(NotificationType.WEEKLY_SUMMARY_EMAIL).userId(userId).build();
-    }
-
-    private static NotificationConsent activeConsent(final NotificationType type) {
-        return NotificationConsent.builder().id(3L).owner(User.builder().id(7L).build()).type(type)
-                .grantedAt(LocalDateTime.of(2026, 10, 20, 9, 0)).build();
     }
 
     private static List<Url> domainBlockedLinks(final int count) {

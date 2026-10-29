@@ -20,6 +20,7 @@ import cc.hrva.urlshortener.security.OAuth2LoginSuccessHandler;
 import cc.hrva.urlshortener.security.TokenProvider;
 import cc.hrva.urlshortener.service.UserService;
 import cc.hrva.urlshortener.service.impl.DefaultNotificationConsentService;
+import cc.hrva.urlshortener.service.notification.EmailConsentReader;
 import cc.hrva.urlshortener.service.notification.NotificationKeys;
 import cc.hrva.urlshortener.service.notification.NotificationTestKeys;
 import cc.hrva.urlshortener.service.notification.UnsubscribeTokens;
@@ -282,6 +283,18 @@ class NotificationEndpointSecurityTest {
     }
 
     @Test
+    void aDeactivatedAccountCanStillUnsubscribe() throws Exception {
+        consentOf(ANA, NotificationType.EXPIRY_REMINDER_EMAIL);
+        jdbcTemplate.update("update user_account set active = false where id = ?", ANA);
+
+        mockMvc.perform(oneClick(unsubscribeTokens.issue(ANA, NotificationType.EXPIRY_REMINDER_EMAIL)))
+                .andExpect(status().isOk())
+                .andExpect(content().json("{\"type\":\"EXPIRY_REMINDER_EMAIL\",\"alreadyOff\":false}", JsonCompareMode.STRICT));
+
+        assertThat(isActive(ANA, NotificationType.EXPIRY_REMINDER_EMAIL)).isFalse();
+    }
+
+    @Test
     void unsubscribeTurnsOffOnlyTheNamedEmail() throws Exception {
         consentOf(ANA, NotificationType.WEEKLY_SUMMARY_EMAIL);
         consentOf(ANA, NotificationType.DEAD_LINK_EMAIL);
@@ -421,6 +434,7 @@ class NotificationEndpointSecurityTest {
             AccountLock.class,
             NotificationController.class,
             DefaultNotificationConsentService.class,
+            EmailConsentReader.class,
             UnsubscribeController.class,
             UnsubscribeTokens.class,
             NotificationKeys.class

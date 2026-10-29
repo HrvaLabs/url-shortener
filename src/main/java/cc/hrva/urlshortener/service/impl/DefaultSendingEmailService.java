@@ -8,8 +8,8 @@ import cc.hrva.urlshortener.exception.EmailNotResendableException;
 import cc.hrva.urlshortener.model.EmailLog;
 import cc.hrva.urlshortener.model.enums.NotificationType;
 import cc.hrva.urlshortener.repository.EmailLogRepository;
-import cc.hrva.urlshortener.repository.NotificationConsentRepository;
 import cc.hrva.urlshortener.service.notification.ConsentEmails;
+import cc.hrva.urlshortener.service.notification.EmailConsentReader;
 import jakarta.mail.MessagingException;
 import java.text.MessageFormat;
 import java.time.Duration;
@@ -59,7 +59,7 @@ public class DefaultSendingEmailService implements SendingEmailService {
     private final TemplateEngine templateEngine;
     private final DefaultEmailService emailService;
     private final EmailLogRepository emailLogRepository;
-    private final NotificationConsentRepository notificationConsentRepository;
+    private final EmailConsentReader emailConsentReader;
     private final ConsentEmails consentEmails;
 
     @Override
@@ -374,7 +374,7 @@ public class DefaultSendingEmailService implements SendingEmailService {
     }
 
     private boolean hasConsent(final long userId, final NotificationType type) {
-        return notificationConsentRepository.findFirstByOwnerIdAndTypeAndChannelIdIsNullAndRevokedAtIsNull(userId, type).isPresent();
+        return emailConsentReader.hasActiveEmailConsent(userId, type);
     }
 
     private void sendEmailWithRetries(final Email email, final EmailLog logEntry) {
