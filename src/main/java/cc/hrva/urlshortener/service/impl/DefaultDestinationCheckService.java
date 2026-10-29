@@ -33,6 +33,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
@@ -75,6 +77,26 @@ public class DefaultDestinationCheckService implements DestinationCheckService {
         final var night = analyticsDays.today();
         deadLinkNotificationService.notify(checked(night).map(this::withLinksThatDiedEarlierTonight)
                 .orElseGet(() -> DestinationCheckOutcome.nothing(night)));
+    }
+
+    @Async(AsyncExecutorConfiguration.NOTIFICATION_TASK_EXECUTOR)
+    @Override
+    @EventListener(ApplicationReadyEvent.class)
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    public void catchUpAfterStartup() {
+        final var settings = appProperties.getDestinationCheck();
+        if (!settings.isEnabled() || !settings.isCatchUpOnStartup()) {
+            return;
+        }
+        if (!running.compareAndSet(false, true)) {
+            log.info("Destination check startup catch-up skipped: a run is still going");
+            return;
+        }
+        try {
+            deadLinkNotificationService.notify(withLinksThatDiedEarlierTonight(DestinationCheckOutcome.nothing(analyticsDays.today())));
+        } finally {
+            running.set(false);
+        }
     }
 
     private Optional<DestinationCheckOutcome> checked(final LocalDate night) {

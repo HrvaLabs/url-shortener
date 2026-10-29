@@ -88,7 +88,7 @@ public class DefaultDeadLinkNotificationService implements DeadLinkNotificationS
     }
 
     private Recipients recipients(final List<DeadLink> newlyDead, final List<DeadLink> recovered) {
-        final var stillDeadIds = Set.copyOf(inChunks(urlIds(newlyDead), urlRepository::findStillDeadIds));
+        final var stillDeadIds = Set.copyOf(inChunks(urlIds(newlyDead), urlRepository::findActiveStillDeadIds));
         final var recoveredIds = Set.copyOf(inChunks(urlIds(recovered), urlRepository::findExistingIds));
         final var deadOwners = owners(newlyDead, stillDeadIds);
         final var backOwners = owners(recovered, recoveredIds);

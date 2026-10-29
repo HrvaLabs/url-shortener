@@ -45,7 +45,7 @@ public class DestinationCheckRepository {
     private static final String FIND_DIED_SINCE = """
             select id, owner_id, short_url, long_url, destination_dead_since, destination_last_status
             from url
-            where owner_id is not null and destination_dead_since >= :since
+            where owner_id is not null and active = true and destination_dead_since >= :since
             order by id
             """;
 

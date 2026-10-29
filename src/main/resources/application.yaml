@@ -110,4 +110,5 @@ app:
     key: ${APP_NOTIFICATIONS_KEY:}
   destination-check:
     enabled: ${APP_DESTINATION_CHECK_ENABLED:true}
+    catch-up-on-startup: ${APP_DESTINATION_CHECK_CATCH_UP_ON_STARTUP:true}
     budget: ${APP_DESTINATION_CHECK_BUDGET:2h}

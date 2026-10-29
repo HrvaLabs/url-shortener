@@ -221,6 +221,8 @@ public class AppProperties {
 
         private boolean enabled = true;
 
+        private boolean catchUpOnStartup = true;
+
         @NotNull
         @DurationMin(minutes = 1, message = "must be at least 1 minute")
         private Duration budget = Duration.ofHours(2);

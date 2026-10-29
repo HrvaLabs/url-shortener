@@ -42,6 +42,8 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 import org.slf4j.LoggerFactory;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
 import org.springframework.dao.QueryTimeoutException;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.transaction.annotation.Propagation;
@@ -614,6 +616,92 @@ class DefaultDestinationCheckServiceTest {
         service.checkAll();
 
         verify(repository, never()).findDiedSince(any());
+    }
+
+    @Test
+    void theStartupCatchUpHandsOverTonightsDeadLinksWithoutProbing() {
+        final var earlier = LocalDateTime.of(2026, 10, 26, 23, 40);
+        when(repository.findDiedSince(TONIGHT_STARTED)).thenReturn(List.of(
+                new DiedLink(5L, 41L, "shop", "https://shop.example.net/cart", earlier, "nxdomain")));
+
+        service.catchUpAfterStartup();
+
+        verify(deadLinkNotificationService).notify(new DestinationCheckOutcome(
+                List.of(new DeadLink(5L, 41L, "shop", "shop.example.net", earlier, "nxdomain")), List.of(), NIGHT));
+        verify(repository, never()).findDue(any(), anyInt(), any());
+        assertThat(probed).isEmpty();
+    }
+
+    @Test
+    void theStartupCatchUpUsesTheNightTheNextRunWouldUse() {
+        clock.set(Instant.parse("2026-10-27T10:00:00Z"));
+
+        service.catchUpAfterStartup();
+
+        verify(repository).findDiedSince(TONIGHT_STARTED);
+        verify(deadLinkNotificationService).notify(DestinationCheckOutcome.nothing(NIGHT));
+    }
+
+    @Test
+    void aTurnedOffCheckRunsNoStartupCatchUp() {
+        appProperties.getDestinationCheck().setEnabled(false);
+
+        service.catchUpAfterStartup();
+
+        verifyNoInteractions(repository, deadLinkNotificationService);
+    }
+
+    @Test
+    void theStartupCatchUpCanBeSwitchedOff() {
+        appProperties.getDestinationCheck().setCatchUpOnStartup(false);
+
+        service.catchUpAfterStartup();
+
+        verifyNoInteractions(repository, deadLinkNotificationService);
+    }
+
+    @Test
+    void aStartupCatchUpDuringARunIsSkipped() throws Exception {
+        final var probing = new CountDownLatch(1);
+        final var release = new CountDownLatch(1);
+        prober = (url, budget, beforeEachRequest) -> {
+            probing.countDown();
+            try {
+                release.await(5, TimeUnit.SECONDS);
+            } catch (final InterruptedException exception) {
+                Thread.currentThread().interrupt();
+            }
+            return ALIVE;
+        };
+        service = newService();
+        batches(List.of(due(7L, "https://example.com/menu", 0, null, 40L)));
+        final var executor = Executors.newSingleThreadExecutor();
+        try {
+            final var run = executor.submit(service::checkAll);
+            assertThat(probing.await(5, TimeUnit.SECONDS)).isTrue();
+
+            service.catchUpAfterStartup();
+            release.countDown();
+            run.get(5, TimeUnit.SECONDS);
+
+            verify(repository, never()).findDiedSince(any());
+            verifyNoInteractions(deadLinkNotificationService);
+            assertThat(messages()).containsOnlyOnce("Destination check startup catch-up skipped: a run is still going");
+        } finally {
+            executor.shutdownNow();
+        }
+
+        service.catchUpAfterStartup();
+        verify(repository).findDiedSince(TONIGHT_STARTED);
+    }
+
+    @Test
+    void theStartupCatchUpRunsInTheBackgroundOnceTheAppIsReady() throws NoSuchMethodException {
+        final var catchUp = DefaultDestinationCheckService.class.getMethod("catchUpAfterStartup");
+
+        assertThat(catchUp.getAnnotation(Async.class).value()).isEqualTo(AsyncExecutorConfiguration.NOTIFICATION_TASK_EXECUTOR);
+        assertThat(catchUp.getAnnotation(EventListener.class).value()).containsExactly(ApplicationReadyEvent.class);
+        assertThat(catchUp.getAnnotation(Transactional.class).propagation()).isEqualTo(Propagation.NOT_SUPPORTED);
     }
 
     @Test

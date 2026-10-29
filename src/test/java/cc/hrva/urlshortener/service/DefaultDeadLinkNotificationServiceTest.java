@@ -26,6 +26,7 @@ import cc.hrva.urlshortener.service.notification.DestinationCheckOutcome;
 import cc.hrva.urlshortener.service.notification.DestinationCheckOutcome.DeadLink;
 import cc.hrva.urlshortener.service.notification.EmailConsentReader;
 import cc.hrva.urlshortener.service.notification.HostPacer;
+import cc.hrva.urlshortener.service.notification.MutableClock;
 import cc.hrva.urlshortener.service.notification.NetworkCanary;
 import cc.hrva.urlshortener.service.notification.NotificationMessages;
 import cc.hrva.urlshortener.service.notification.NotificationPayloads;
@@ -102,6 +103,12 @@ class DefaultDeadLinkNotificationServiceTest {
     private DestinationCheckService destinationCheckService;
 
     @Autowired
+    private MutableClock clock;
+
+    @Autowired
+    private AppProperties appProperties;
+
+    @Autowired
     private DestinationCheckRepository destinationCheckRepository;
 
     @Autowired
@@ -154,6 +161,8 @@ class DefaultDeadLinkNotificationServiceTest {
 
     @AfterEach
     void tearDown() {
+        clock.set(NOW);
+        appProperties.getDestinationCheck().setCatchUpOnStartup(false);
         jdbcTemplate.update("delete from notification_claim");
         jdbcTemplate.update("delete from notification_consent");
         jdbcTemplate.update("delete from notification_channel");
@@ -479,6 +488,85 @@ class DefaultDeadLinkNotificationServiceTest {
     }
 
     @Test
+    void aRestartCatchesUpALinkThatDiedEarlierTonight() {
+        appProperties.getDestinationCheck().setCatchUpOnStartup(true);
+        emailConsent(ana);
+        channel(ana, NotificationType.LINK_DEAD);
+        final var link = checkedTonight(dead(link(ana, "anas-menu")));
+
+        destinationCheckService.catchUpAfterStartup();
+
+        verifyNoInteractions(destinationProber);
+        final var sent = ArgumentCaptor.forClass(DeadLinksEmail.class);
+        verify(sendingEmailService).sendDeadLinksEmail(sent.capture());
+        assertThat(sent.getValue()).isEqualTo(new DeadLinksEmail(ana.getId(), "ana@example.com", List.of(link), "https://app.hrva.cc/dashboard"));
+        final var content = contentCaptor();
+        verify(deliveryService).enqueue(eq(NotificationType.LINK_DEAD), eq("link.dead:2026-10-27"), any(), content.capture());
+        assertThat(content.getValue().get(ana.getId())).isEqualTo(new ChannelContent(payloads.linkDead(List.of(link)), messages.linkDead(List.of(link))));
+    }
+
+    @Test
+    void aSecondStartupTheSameNightSendsNoSecondEmail() {
+        appProperties.getDestinationCheck().setCatchUpOnStartup(true);
+        emailConsent(ana);
+        channel(ana, NotificationType.LINK_DEAD);
+        checkedTonight(dead(link(ana, "anas-menu")));
+
+        destinationCheckService.catchUpAfterStartup();
+        clock.advance(java.time.Duration.ofMinutes(20));
+        destinationCheckService.catchUpAfterStartup();
+
+        verify(sendingEmailService, times(1)).sendDeadLinksEmail(any());
+        verify(deliveryService, times(2)).enqueue(eq(NotificationType.LINK_DEAD), eq("link.dead:2026-10-27"), any(), anyMap());
+    }
+
+    @Test
+    void aStartupAtNoonAfterTheNightsRunSendsNothingNew() {
+        appProperties.getDestinationCheck().setCatchUpOnStartup(true);
+        emailConsent(ana);
+        channel(ana, NotificationType.LINK_DEAD);
+        final var url = link(ana, "anas-menu");
+        jdbcTemplate.update("update url set destination_fail_streak = 2 where id = ?", url.getId());
+        when(destinationProber.probe(eq(url.getLongUrl()), any(), any())).thenReturn(new ProbeResult(ProbeOutcome.DEAD, "404", 404));
+        destinationCheckService.runNightly();
+
+        clock.set(Instant.parse("2026-10-27T10:00:00Z"));
+        destinationCheckService.catchUpAfterStartup();
+
+        verify(sendingEmailService, times(1)).sendDeadLinksEmail(any());
+        verify(deliveryService, times(2)).enqueue(eq(NotificationType.LINK_DEAD), eq("link.dead:2026-10-27"), any(), anyMap());
+        verify(deliveryService, never()).enqueue(eq(NotificationType.LINK_DEAD), argThat(key -> !"link.dead:2026-10-27".equals(key)), any(), anyMap());
+    }
+
+    @Test
+    void aLinkDeactivatedAfterItDiedGetsNoNotice() {
+        emailConsent(ana);
+        channel(ana, NotificationType.LINK_DEAD);
+        final var link = dead(link(ana, "anas-menu"));
+        jdbcTemplate.update("update url set active = false where id = ?", link.urlId());
+
+        deadLinkNotificationService.notify(new DestinationCheckOutcome(List.of(link), List.of(), NIGHT));
+
+        verify(sendingEmailService, never()).sendDeadLinksEmail(any());
+        verify(deliveryService, never()).enqueue(any(), anyString(), any(), anyMap());
+    }
+
+    @Test
+    void aLinkDeactivatedAfterItDiedTonightIsNotCaughtUp() {
+        appProperties.getDestinationCheck().setCatchUpOnStartup(true);
+        emailConsent(ana);
+        channel(ana, NotificationType.LINK_DEAD);
+        final var link = checkedTonight(dead(link(ana, "anas-menu")));
+        jdbcTemplate.update("update url set active = false where id = ?", link.urlId());
+
+        destinationCheckService.catchUpAfterStartup();
+
+        assertThat(destinationCheckRepository.findDiedSince(LocalDateTime.of(2026, 10, 26, 23, 0))).isEmpty();
+        verify(sendingEmailService, never()).sendDeadLinksEmail(any());
+        verify(deliveryService, never()).enqueue(any(), anyString(), any(), anyMap());
+    }
+
+    @Test
     void oneOwnersFailedEmailDoesNotStopTheOthersOrTheChannels() {
         emailConsent(ana);
         emailConsent(bob);
@@ -558,13 +646,15 @@ class DefaultDeadLinkNotificationServiceTest {
         static class Fixed {
 
             @Bean
-            Clock clock() {
-                return Clock.fixed(NOW, ZoneOffset.UTC);
+            MutableClock clock() {
+                return new MutableClock(NOW);
             }
 
             @Bean
             AppProperties appProperties() {
-                return new AppProperties();
+                final var appProperties = new AppProperties();
+                appProperties.getDestinationCheck().setCatchUpOnStartup(false);
+                return appProperties;
             }
 
         }

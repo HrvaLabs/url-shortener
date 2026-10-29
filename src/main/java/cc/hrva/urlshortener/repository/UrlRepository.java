@@ -93,8 +93,8 @@ public interface UrlRepository extends JpaRepository<Url, Long>, JpaSpecificatio
                     and (u.visitLimit - coalesce(u.visits, 0) - 1) * 10 < u.visitLimit))""")
     long countOwnerLinksEndingSoon(@Param("ownerId") long ownerId, @Param("now") LocalDateTime now, @Param("until") LocalDateTime until);
 
-    @Query("select u.id from Url u where u.id in :ids and u.destinationDeadSince is not null")
-    List<Long> findStillDeadIds(@Param("ids") Collection<Long> ids);
+    @Query("select u.id from Url u where u.id in :ids and u.active = true and u.destinationDeadSince is not null")
+    List<Long> findActiveStillDeadIds(@Param("ids") Collection<Long> ids);
 
     @Query("select u from Url u left join fetch u.owner where lower(u.shortUrl) in :aliases")
     List<Url> findByLowerShortUrlIn(@Param("aliases") Collection<String> aliases);

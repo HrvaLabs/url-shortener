@@ -8,4 +8,6 @@ public interface DestinationCheckService {
 
     void runNightly();
 
+    void catchUpAfterStartup();
+
 }
