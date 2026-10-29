@@ -5,6 +5,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import cc.hrva.urlshortener.security.ClickRequestResolver;
 import cc.hrva.urlshortener.service.UrlService;
+import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RestController;
@@ -26,6 +27,8 @@ public class UrlRedirectController {
 
     @GetMapping("/")
     public RedirectView rootRedirectToFrontend() {
-        return urlService.redirectResultUrl(null, null);
+        final var redirectView = urlService.redirectResultUrl(null, null);
+        redirectView.setStatusCode(HttpStatus.MOVED_PERMANENTLY);
+        return redirectView;
     }
 }

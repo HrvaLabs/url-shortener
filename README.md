@@ -86,7 +86,7 @@ Build, test and run commands, local dev users and the end-to-end check (`scripts
 We welcome contributions from the community!
 
 ## License
-This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
+This project is licensed under the GNU General Public License v3.0. See the [LICENSE](LICENSE) file for details.
 
 ## Contact
 For questions, issues, or feature requests, please open an issue on GitHub or contact me directly via [email](mailto:url-shortener@hrva.cc).

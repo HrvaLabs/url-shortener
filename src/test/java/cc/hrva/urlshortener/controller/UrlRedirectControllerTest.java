@@ -61,13 +61,13 @@ class UrlRedirectControllerTest {
     }
 
     @Test
-    void shouldRedirectRootToFrontend() throws Exception {
-        final var redirectView = new RedirectView("https://frontend.com");
+    void theRootMovesPermanentlyToTheFrontend() throws Exception {
+        final var redirectView = new RedirectView("https://frontend.com/");
         when(urlService.redirectResultUrl(null, null)).thenReturn(redirectView);
 
         mockMvc.perform(get("/"))
-                .andExpect(status().isFound())
-                .andExpect(redirectedUrl("https://frontend.com"));
+                .andExpect(status().isMovedPermanently())
+                .andExpect(redirectedUrl("https://frontend.com/"));
 
         verifyNoInteractions(clickRequestResolver);
     }

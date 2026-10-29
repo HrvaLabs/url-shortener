@@ -2446,10 +2446,17 @@ class UrlServiceTest {
     }
 
     @Test
-    void theRootStillGoesToTheBareFrontend() {
+    void theRootGoesToTheFrontendHomeWithItsSlash() {
         when(appProperties.getFrontendUrl()).thenReturn(FRONTEND);
 
-        assertThat(urlServiceWithMeters().redirectResultUrl(null, null).getUrl()).isEqualTo(FRONTEND);
+        assertThat(urlServiceWithMeters().redirectResultUrl(null, null).getUrl()).isEqualTo(FRONTEND + "/");
+    }
+
+    @Test
+    void theRootKeepsASingleSlashWhenTheFrontendUrlHasOne() {
+        when(appProperties.getFrontendUrl()).thenReturn(FRONTEND + "/");
+
+        assertThat(urlServiceWithMeters().redirectResultUrl(null, null).getUrl()).isEqualTo(FRONTEND + "/");
     }
 
     @Test
@@ -2476,7 +2483,7 @@ class UrlServiceTest {
                         tuple("https://example.com/a", false),
                         tuple(FRONTEND + "/protected/gated", false),
                         tuple("https://example.com/c", false),
-                        tuple(FRONTEND, false));
+                        tuple(FRONTEND + "/", false));
     }
 
     @Test

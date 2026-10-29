@@ -644,8 +644,9 @@ public class DefaultUrlService implements UrlService {
             return redirectView;
         }
 
+        final var frontendUrl = appProperties.getFrontendUrl();
         final var redirectView = new RedirectView();
-        redirectView.setUrl(appProperties.getFrontendUrl());
+        redirectView.setUrl(frontendUrl.endsWith("/") ? frontendUrl : frontendUrl + "/");
         sample.stop(Timer.builder("redirect.duration")
                 .tag("source", "db")
                 .register(meterRegistry));
