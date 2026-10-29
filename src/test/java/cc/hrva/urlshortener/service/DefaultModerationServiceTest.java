@@ -1660,6 +1660,39 @@ class DefaultModerationServiceTest {
         verify(auditLogService, times(1)).log(anyString(), any(), anyString(), anyString(), anyString());
     }
 
+    @Test
+    void blockingSeveralDomainsReadsTheActiveLinksOnceForAllOfThem() {
+        link(10L, "https://ll.omaehhm.com/a", null);
+        link(11L, "https://fvvxctw.com/b", null);
+        link(12L, "https://www.padlet.com/c", null);
+        link(13L, "https://example.org/", null);
+
+        final var result = moderationService.blockDomains(List.of("omaehhm.com", "fvvxctw.com", "padlet.com"), "Phishing", ADMIN, "admin-bulk");
+
+        assertThat(result.blocked()).containsExactly(new DomainBulkBlockResponse.Blocked("omaehhm.com", 1),
+                new DomainBulkBlockResponse.Blocked("fvvxctw.com", 1), new DomainBulkBlockResponse.Blocked("padlet.com", 1));
+        verify(urlRepository, times(1)).findActiveDestinationsAfter(anyLong(), any(Pageable.class));
+        verify(domainRuleRepository, times(1)).findAll();
+        assertThat(links.get(13L).isActive()).isTrue();
+    }
+
+    @Test
+    void aDomainWhoseAuditEntryFailsIsStillReportedAsBlockedAndTheRestGoOn() {
+        final var alice = user(1L, "alice@example.com");
+        final var first = link(10L, "https://omaehhm.com/a", alice);
+        final var second = link(11L, "https://fvvxctw.com/b", alice);
+        doThrow(new DataAccessResourceFailureException("connection to 10.0.0.5:5432 refused"))
+                .when(auditLogService).log(eq(ADMIN), eq(AuditAction.BLOCK_DOMAIN), eq("Domain"), eq("omaehhm.com"), anyString());
+
+        final var result = moderationService.blockDomains(List.of("omaehhm.com", "fvvxctw.com"), "Phishing", ADMIN, "admin-bulk");
+
+        assertThat(result).isEqualTo(new DomainBulkBlockResponse(
+                List.of(new DomainBulkBlockResponse.Blocked("omaehhm.com", 1), new DomainBulkBlockResponse.Blocked("fvvxctw.com", 1)), List.of(), 2));
+        assertThat(List.of(first, second)).allSatisfy(url -> assertThat(url.getBlockReason()).isEqualTo(BlockReason.DOMAIN_RULE));
+        verify(auditLogService).log(ADMIN, AuditAction.BLOCK_DOMAIN, "Domain", "fvvxctw.com", "reason: Phishing, links: 1, via: admin-bulk");
+        verify(sendingEmailService).sendEmailUrlsBlocked(alice, List.of(first, second));
+    }
+
     private TransactionOperations recordingTransactions() {
         return new TransactionOperations() {
             @Override
