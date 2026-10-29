@@ -86,6 +86,20 @@ class UserRepositoryTest {
         assertThat(stored.get("last_login")).isNotNull();
     }
 
+    @Test
+    void confirmingAnEmailIsVisibleToTheSameTransactionRightAway() {
+        new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+            final var loaded = userRepository.findById(user.getId()).orElseThrow();
+            assertThat(loaded.getEmailVerified()).isFalse();
+
+            assertThat(userRepository.confirmEmailAndReplacePassword(user.getId(), "replaced-random-value")).isOne();
+
+            final var reread = userRepository.findById(user.getId()).orElseThrow();
+            assertThat(reread.getEmailVerified()).isTrue();
+            assertThat(reread.getPassword()).isEqualTo("replaced-random-value");
+        });
+    }
+
     @SpringBootConfiguration
     @EnableAutoConfiguration
     @EntityScan(basePackageClasses = User.class)

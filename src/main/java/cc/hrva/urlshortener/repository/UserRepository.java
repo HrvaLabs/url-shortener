@@ -41,7 +41,7 @@ public interface UserRepository extends JpaRepository<User, Long>, JpaSpecificat
     @Query("update User u set u.lastLogin = :signedInAt where u.id = :id")
     int recordLastLogin(@Param("id") Long id, @Param("signedInAt") LocalDateTime signedInAt);
 
-    @Modifying(flushAutomatically = true)
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Transactional
     @Query("update User u set u.password = :password, u.emailVerified = true where u.id = :id and (u.emailVerified is null or u.emailVerified = false)")
     int confirmEmailAndReplacePassword(@Param("id") Long id, @Param("password") String password);

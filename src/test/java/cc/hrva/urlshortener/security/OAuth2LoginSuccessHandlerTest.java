@@ -427,6 +427,24 @@ class OAuth2LoginSuccessHandlerTest {
         verify(response).sendRedirect(contains("http://fe/auth/callback?token=jwt-token"));
     }
 
+    @Test
+    @ExtendWith(OutputCaptureExtension.class)
+    void theReplacedPasswordIsLoggedOnlyWhenTheRowWasStillUnconfirmed(final CapturedOutput output) throws Exception {
+        final var user = User.builder().id(16L).email("raced@example.com").password("$2a$10$hash").emailVerified(false).active(true)
+                .authorities(Collections.singletonList(Authorities.builder().id(1L).name("ROLE_USER").build()))
+                .build();
+        when(oAuth2User.getAttribute("email")).thenReturn("raced@example.com");
+        when(userRepository.findByEmail("raced@example.com")).thenReturn(Optional.of(user));
+        when(userRepository.confirmEmailAndReplacePassword(eq(16L), any())).thenReturn(0, 1);
+        when(tokenProvider.createToken(any())).thenReturn("jwt-token");
+
+        handler.onAuthenticationSuccess(request, response, signIn("google"));
+        assertThat(output).doesNotContain("replaced its unconfirmed password");
+
+        handler.onAuthenticationSuccess(request, response, signIn("google"));
+        assertThat(output).contains("OAuth2 login confirmed the account's email and replaced its unconfirmed password user id=16");
+    }
+
     @ParameterizedTest
     @ValueSource(strings = {"google", "github"})
     void aConfirmedAccountKeepsItsPassword(final String provider) throws Exception {
