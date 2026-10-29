@@ -38,6 +38,9 @@ public class DefaultEmailService implements EmailService {
         }
 
         setEmailMessageParameters(email, message);
+        for (final var header : email.getHeaders().entrySet()) {
+            mimeMessage.addHeader(header.getKey(), header.getValue());
+        }
 
         try {
             javaMailSender.send(mimeMessage);

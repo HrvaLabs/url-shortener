@@ -6,15 +6,21 @@ import cc.hrva.urlshortener.dto.WeeklyDigest;
 import cc.hrva.urlshortener.exception.EmailLogNotFoundException;
 import cc.hrva.urlshortener.exception.EmailNotResendableException;
 import cc.hrva.urlshortener.model.EmailLog;
+import cc.hrva.urlshortener.model.enums.NotificationType;
 import cc.hrva.urlshortener.repository.EmailLogRepository;
+import cc.hrva.urlshortener.repository.NotificationConsentRepository;
+import cc.hrva.urlshortener.service.notification.ConsentEmails;
 import jakarta.mail.MessagingException;
 import java.text.MessageFormat;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.function.UnaryOperator;
@@ -46,12 +52,15 @@ public class DefaultSendingEmailService implements SendingEmailService {
     private static final int LISTED_BLOCKED_LINKS = 20;
     private static final String STATS_PAGE = "/admin/dashboard?days=7";
     private static final String REVIEW_PAGE = "/admin/review";
+    private static final String CONSENT_WITHDRAWN = "This person has turned this email off since, so it can't be resent.";
     private static final DateTimeFormatter PASSKEY_ADDED_AT_FORMAT = DateTimeFormatter.ofPattern("d MMMM yyyy 'at' HH:mm 'UTC'", Locale.ENGLISH);
 
     private final AppProperties appProperties;
     private final TemplateEngine templateEngine;
     private final DefaultEmailService emailService;
     private final EmailLogRepository emailLogRepository;
+    private final NotificationConsentRepository notificationConsentRepository;
+    private final ConsentEmails consentEmails;
 
     @Override
     @Async
@@ -293,15 +302,22 @@ public class DefaultSendingEmailService implements SendingEmailService {
             throw new EmailNotResendableException("Only failed emails whose content was kept can be resent");
         }
 
+        final var consentType = failed.getConsentType();
+        if (consentType != null && (failed.getUserId() == null || !hasConsent(failed.getUserId(), consentType))) {
+            log.info("Resend refused, consent withdrawn email log id={} type={}", emailLogId, consentType);
+            throw new EmailNotResendableException(CONSENT_WITHDRAWN);
+        }
+
         final var email = Email.builder()
                 .sender(failed.getSender())
                 .receivers(failed.getRecipient().split(RECIPIENT_SEPARATOR))
                 .subject(failed.getSubject())
                 .text(failed.getBody())
+                .headers(consentType != null ? consentEmails.headers(failed.getUserId(), consentType) : Map.of())
                 .build();
 
         log.info("Resending email log id={}", emailLogId);
-        final var resent = tryToSendEmail(email);
+        final var resent = tryToSendEmail(email, consentType, failed.getUserId());
 
         failed.setStatus(EmailLog.STATUS_RESENT);
         failed.setBody(null);
@@ -338,19 +354,44 @@ public class DefaultSendingEmailService implements SendingEmailService {
         log.warn("Marked {} interrupted emails as failed", interrupted.size());
     }
 
+    public Optional<EmailLog> tryToSendConsentedEmail(final Email email, final long userId, final NotificationType type) {
+        if (!type.isEmail()) {
+            throw new IllegalArgumentException("Only email notification types are sent as consented email");
+        }
+        if (!hasConsent(userId, type)) {
+            log.info("Consented email skipped, consent withdrawn user id={} type={}", userId, type);
+            return Optional.empty();
+        }
+
+        final var headers = new LinkedHashMap<>(email.getHeaders());
+        headers.putAll(consentEmails.headers(userId, type));
+        email.setHeaders(Collections.unmodifiableMap(headers));
+        return Optional.of(tryToSendEmail(email, type, userId));
+    }
+
     public EmailLog tryToSendEmail(final Email email) {
+        return tryToSendEmail(email, null, null);
+    }
+
+    private EmailLog tryToSendEmail(final Email email, final NotificationType consentType, final Long userId) {
         final var logEntry = emailLogRepository.save(EmailLog.builder()
                 .sender(email.getSender())
                 .recipient(String.join(RECIPIENT_SEPARATOR, email.getReceivers()))
                 .subject(email.getSubject())
                 .body(email.getText())
                 .status(EmailLog.STATUS_SENDING)
+                .consentType(consentType)
+                .userId(userId)
                 .build());
 
         log.info("Sending {} email to {} recipient(s): {}",
                 EmailAddresses.maskedIn(email.getSubject()), email.getReceivers().length, maskedRecipients(email.getReceivers()));
         sendEmailWithRetries(email, logEntry);
         return logEntry;
+    }
+
+    private boolean hasConsent(final long userId, final NotificationType type) {
+        return notificationConsentRepository.findFirstByOwnerIdAndTypeAndChannelIdIsNullAndRevokedAtIsNull(userId, type).isPresent();
     }
 
     private void sendEmailWithRetries(final Email email, final EmailLog logEntry) {

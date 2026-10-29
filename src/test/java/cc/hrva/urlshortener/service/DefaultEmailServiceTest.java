@@ -9,6 +9,7 @@ import jakarta.mail.internet.MimeMessage;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -65,6 +66,30 @@ class DefaultEmailServiceTest {
         final var html = parts.stream().filter(part -> typeOf(part).startsWith("text/html")).toList();
         assertThat(html).hasSize(1);
         assertThat(html.getFirst().getContent()).isEqualTo(HTML);
+    }
+
+    @Test
+    void customHeadersAreOnTheMessage() throws Exception {
+        final var email = email(PLAIN_TEXT);
+        email.setHeaders(Map.of(
+                "List-Unsubscribe", "<https://hrva.cc/api/v1/notifications/unsubscribe?token=abc.def>",
+                "List-Unsubscribe-Post", "List-Unsubscribe=One-Click"));
+
+        emailService.sendEmail(email, null);
+
+        final var message = sentMessage();
+        assertThat(message.getHeader("List-Unsubscribe-Post")).containsExactly("List-Unsubscribe=One-Click");
+        assertThat(message.getHeader("List-Unsubscribe")).containsExactly("<https://hrva.cc/api/v1/notifications/unsubscribe?token=abc.def>");
+        assertThat(partsOf(message).stream().filter(part -> typeOf(part).startsWith("text/"))).hasSize(2);
+    }
+
+    @Test
+    void anEmailWithoutHeadersHasNeitherUnsubscribeHeader() throws Exception {
+        emailService.sendEmail(email(null), null);
+
+        final var message = sentMessage();
+        assertThat(message.getHeader("List-Unsubscribe")).isNull();
+        assertThat(message.getHeader("List-Unsubscribe-Post")).isNull();
     }
 
     private static Email email(final String plainText) {

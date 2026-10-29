@@ -11,6 +11,7 @@ import cc.hrva.urlshortener.mcp.authorization.AuthorizationServerConfiguration;
 import cc.hrva.urlshortener.mcp.bridge.ConnectRequestStore;
 import cc.hrva.urlshortener.model.NotificationConsent;
 import cc.hrva.urlshortener.model.User;
+import cc.hrva.urlshortener.model.enums.NotificationType;
 import cc.hrva.urlshortener.repository.NotificationConsentRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.security.ClientIpResolver;
@@ -19,11 +20,16 @@ import cc.hrva.urlshortener.security.OAuth2LoginSuccessHandler;
 import cc.hrva.urlshortener.security.TokenProvider;
 import cc.hrva.urlshortener.service.UserService;
 import cc.hrva.urlshortener.service.impl.DefaultNotificationConsentService;
+import cc.hrva.urlshortener.service.notification.NotificationKeys;
+import cc.hrva.urlshortener.service.notification.NotificationTestKeys;
+import cc.hrva.urlshortener.service.notification.UnsubscribeTokens;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiter;
 import cc.hrva.urlshortener.service.twostep.AccountLock;
 import com.nimbusds.jose.JOSEException;
 import com.nimbusds.jose.jwk.RSAKey;
 import com.nimbusds.jose.jwk.gen.RSAKeyGenerator;
+import java.time.Duration;
+import java.time.LocalDateTime;
 import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -58,10 +64,14 @@ import static org.hamcrest.Matchers.nullValue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.startsWith;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -76,12 +86,16 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
                 "app.jwt-base64-secret=dGVzdC1vbmx5LXNlY3JldA==",
                 "app.email-sender-address=no-reply@localhost",
                 "app.contact-email=info@localhost",
-                "app.server-url=localhost"
+                "app.server-url=localhost",
+                NotificationTestKeys.PROPERTY
         })
 @AutoConfigureMockMvc
 class NotificationEndpointSecurityTest {
 
     private static final String NOTIFICATIONS = "/api/v1/users/me/notifications";
+    private static final String UNSUBSCRIBE = "/api/v1/notifications/unsubscribe";
+    private static final String INVALID_LINK = """
+            {"error":"This unsubscribe link isn't valid. You can turn emails off in Settings, under Notifications."}""";
     private static final long ANA = 600L;
     private static final long BOB = 601L;
     private static final String ANA_EMAIL = "ana@hrva.cc";
@@ -109,6 +123,9 @@ class NotificationEndpointSecurityTest {
 
     @Autowired
     private PlatformTransactionManager transactionManager;
+
+    @Autowired
+    private UnsubscribeTokens unsubscribeTokens;
 
     @MockitoBean
     private UserService userService;
@@ -238,6 +255,121 @@ class NotificationEndpointSecurityTest {
         assertThat(notificationConsentRepository.findAll()).extracting(consent -> consent.getOwner().getId()).containsExactly(ANA);
     }
 
+    @Test
+    void getNeverRevokes() throws Exception {
+        consentOf(ANA, NotificationType.WEEKLY_SUMMARY_EMAIL);
+        final var token = unsubscribeTokens.issue(ANA, NotificationType.WEEKLY_SUMMARY_EMAIL);
+
+        mockMvc.perform(get(UNSUBSCRIBE).param("token", token))
+                .andExpect(status().isFound())
+                .andExpect(header().string("Location", "http://localhost:3000/unsubscribe?token=" + token));
+
+        assertThat(isActive(ANA, NotificationType.WEEKLY_SUMMARY_EMAIL)).isTrue();
+    }
+
+    @Test
+    void oneClickPostRevokes() throws Exception {
+        consentOf(ANA, NotificationType.WEEKLY_SUMMARY_EMAIL);
+        final var token = unsubscribeTokens.issue(ANA, NotificationType.WEEKLY_SUMMARY_EMAIL);
+
+        mockMvc.perform(oneClick(token))
+                .andExpect(status().isOk())
+                .andExpect(content().json("{\"type\":\"WEEKLY_SUMMARY_EMAIL\",\"alreadyOff\":false}", JsonCompareMode.STRICT));
+
+        assertThat(isActive(ANA, NotificationType.WEEKLY_SUMMARY_EMAIL)).isFalse();
+        assertThat(jdbcTemplate.queryForObject("select revoked_source from notification_consent where user_id = ?", String.class, ANA))
+                .isEqualTo("UNSUBSCRIBE_LINK");
+    }
+
+    @Test
+    void unsubscribeTurnsOffOnlyTheNamedEmail() throws Exception {
+        consentOf(ANA, NotificationType.WEEKLY_SUMMARY_EMAIL);
+        consentOf(ANA, NotificationType.DEAD_LINK_EMAIL);
+        consentOf(BOB, NotificationType.WEEKLY_SUMMARY_EMAIL);
+
+        mockMvc.perform(post(UNSUBSCRIBE + "?token=" + unsubscribeTokens.issue(ANA, NotificationType.WEEKLY_SUMMARY_EMAIL))
+                        .contentType(MediaType.APPLICATION_JSON).content("{}"))
+                .andExpect(status().isOk());
+
+        assertThat(isActive(ANA, NotificationType.WEEKLY_SUMMARY_EMAIL)).isFalse();
+        assertThat(isActive(ANA, NotificationType.DEAD_LINK_EMAIL)).isTrue();
+        assertThat(isActive(BOB, NotificationType.WEEKLY_SUMMARY_EMAIL)).isTrue();
+    }
+
+    @Test
+    void aSecondPostIsAlreadyOff() throws Exception {
+        consentOf(ANA, NotificationType.DEAD_LINK_EMAIL);
+        final var token = unsubscribeTokens.issue(ANA, NotificationType.DEAD_LINK_EMAIL);
+        mockMvc.perform(oneClick(token)).andExpect(status().isOk());
+
+        mockMvc.perform(oneClick(token))
+                .andExpect(status().isOk())
+                .andExpect(content().json("{\"type\":\"DEAD_LINK_EMAIL\",\"alreadyOff\":true}", JsonCompareMode.STRICT));
+        assertThat(jdbcTemplate.queryForObject("select count(*) from notification_consent where user_id = ?", Long.class, ANA)).isEqualTo(1L);
+    }
+
+    @Test
+    void anUnknownUserIsAlreadyOff() throws Exception {
+        mockMvc.perform(oneClick(unsubscribeTokens.issue(999L, NotificationType.EXPIRY_REMINDER_EMAIL)))
+                .andExpect(status().isOk())
+                .andExpect(content().json("{\"type\":\"EXPIRY_REMINDER_EMAIL\",\"alreadyOff\":true}", JsonCompareMode.STRICT));
+    }
+
+    @Test
+    void aStaleJwtDoesNotBlockIt() throws Exception {
+        consentOf(ANA, NotificationType.WEEKLY_SUMMARY_EMAIL);
+
+        mockMvc.perform(as("stale-token", oneClick(unsubscribeTokens.issue(ANA, NotificationType.WEEKLY_SUMMARY_EMAIL))))
+                .andExpect(status().isOk())
+                .andExpect(content().json("{\"type\":\"WEEKLY_SUMMARY_EMAIL\",\"alreadyOff\":false}", JsonCompareMode.STRICT));
+        mockMvc.perform(as("stale-token", get(UNSUBSCRIBE).param("token", "x")))
+                .andExpect(status().isFound())
+                .andExpect(header().string("Location", "http://localhost:3000/unsubscribe?token=x"));
+    }
+
+    @Test
+    void invalidTokenIs400() throws Exception {
+        consentOf(ANA, NotificationType.WEEKLY_SUMMARY_EMAIL);
+        final var valid = unsubscribeTokens.issue(ANA, NotificationType.WEEKLY_SUMMARY_EMAIL);
+
+        for (final var token : List.of("x", valid + "x", valid.substring(1))) {
+            mockMvc.perform(oneClick(token))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(content().json(INVALID_LINK, JsonCompareMode.STRICT));
+        }
+        mockMvc.perform(post(UNSUBSCRIBE))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().json(INVALID_LINK, JsonCompareMode.STRICT));
+        assertThat(isActive(ANA, NotificationType.WEEKLY_SUMMARY_EMAIL)).isTrue();
+    }
+
+    @Test
+    void overTheLimitIs429() throws Exception {
+        consentOf(ANA, NotificationType.WEEKLY_SUMMARY_EMAIL);
+        when(rateLimiter.tryAcquire(startsWith("unsubscribe:"), eq(30), eq(Duration.ofMinutes(10)))).thenReturn(false);
+
+        mockMvc.perform(oneClick(unsubscribeTokens.issue(ANA, NotificationType.WEEKLY_SUMMARY_EMAIL)))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(content().json("{\"error\":\"Too many tries from your network. Try again in a few minutes.\"}", JsonCompareMode.STRICT));
+        assertThat(isActive(ANA, NotificationType.WEEKLY_SUMMARY_EMAIL)).isTrue();
+    }
+
+    private static MockHttpServletRequestBuilder oneClick(final String token) {
+        return post(UNSUBSCRIBE + "?token=" + token)
+                .contentType(MediaType.APPLICATION_FORM_URLENCODED)
+                .content("List-Unsubscribe=One-Click");
+    }
+
+    private void consentOf(final long userId, final NotificationType type) {
+        jdbcTemplate.update("insert into notification_consent (user_id, type, granted_at, source) values (?, ?, ?, 'SETTINGS')",
+                userId, type.name(), LocalDateTime.of(2026, 10, 20, 9, 0));
+    }
+
+    private boolean isActive(final long userId, final NotificationType type) {
+        return jdbcTemplate.queryForObject("select count(*) from notification_consent where user_id = ? and type = ? and revoked_at is null",
+                Long.class, userId, type.name()) == 1L;
+    }
+
     private static MockHttpServletRequestBuilder as(final String token, final MockHttpServletRequestBuilder request) {
         return request.header(JwtFilter.AUTHORIZATION_HEADER, "Bearer " + token);
     }
@@ -288,7 +420,10 @@ class NotificationEndpointSecurityTest {
             ClientIpResolver.class,
             AccountLock.class,
             NotificationController.class,
-            DefaultNotificationConsentService.class
+            DefaultNotificationConsentService.class,
+            UnsubscribeController.class,
+            UnsubscribeTokens.class,
+            NotificationKeys.class
     })
     static class TestApplication {
     }

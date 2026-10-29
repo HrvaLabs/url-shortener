@@ -11,15 +11,22 @@ import cc.hrva.urlshortener.exception.MailingException;
 import cc.hrva.urlshortener.model.Email;
 import cc.hrva.urlshortener.model.EmailLog;
 import cc.hrva.urlshortener.model.Url;
+import cc.hrva.urlshortener.model.NotificationConsent;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.enums.BlockReason;
+import cc.hrva.urlshortener.model.enums.NotificationType;
 import cc.hrva.urlshortener.repository.EmailLogRepository;
+import cc.hrva.urlshortener.repository.NotificationConsentRepository;
 import cc.hrva.urlshortener.service.impl.DefaultEmailService;
 import cc.hrva.urlshortener.service.impl.DefaultSendingEmailService;
+import cc.hrva.urlshortener.service.notification.ConsentEmails;
+import cc.hrva.urlshortener.service.notification.NotificationTestKeys;
+import cc.hrva.urlshortener.service.notification.UnsubscribeTokens;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.regex.Pattern;
 import java.util.stream.IntStream;
@@ -48,6 +55,7 @@ import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -67,6 +75,11 @@ class DefaultSendingEmailServiceTest {
     @Mock
     private EmailLogRepository emailLogRepository;
 
+    @Mock
+    private NotificationConsentRepository notificationConsentRepository;
+
+    private final UnsubscribeTokens unsubscribeTokens = new UnsubscribeTokens(NotificationTestKeys.keys());
+
     private DefaultSendingEmailService sendingEmailService;
 
     private final List<String> bodiesWhileSending = new ArrayList<>();
@@ -78,7 +91,9 @@ class DefaultSendingEmailServiceTest {
         appProperties.setContactEmail("support@hrva.cc");
         appProperties.setAppName("hrva.cc");
         appProperties.setServerUrl("https://hrva.cc");
-        sendingEmailService = new DefaultSendingEmailService(appProperties, templateEngine, emailService, emailLogRepository);
+        appProperties.setFrontendUrl("https://app.hrva.cc");
+        sendingEmailService = new DefaultSendingEmailService(appProperties, templateEngine, emailService, emailLogRepository,
+                notificationConsentRepository, new ConsentEmails(unsubscribeTokens, appProperties));
     }
 
     private void saveReturnsArgument() {
@@ -100,7 +115,8 @@ class DefaultSendingEmailServiceTest {
         appProperties.setFrontendUrl("https://hrva.cc");
         appProperties.setDeactivateUserAccountAfterDays(180L);
         appProperties.setResetTokenExpirationInHours(1L);
-        return new DefaultSendingEmailService(appProperties, engine, emailService, emailLogRepository);
+        return new DefaultSendingEmailService(appProperties, engine, emailService, emailLogRepository,
+                notificationConsentRepository, new ConsentEmails(unsubscribeTokens, appProperties));
     }
 
     private static TemplateEngine realTemplateEngine() {
@@ -712,6 +728,154 @@ class DefaultSendingEmailServiceTest {
         sendingEmailService.failInterruptedEmails();
 
         assertThat(cutoff.getValue()).isBetween(LocalDateTime.now().minusMinutes(11), LocalDateTime.now().minusMinutes(9));
+    }
+
+    @Test
+    @ExtendWith(OutputCaptureExtension.class)
+    void consentedEmailIsNotSentAfterRevoke(final CapturedOutput output) throws Exception {
+        when(notificationConsentRepository.findFirstByOwnerIdAndTypeAndChannelIdIsNullAndRevokedAtIsNull(7L, NotificationType.WEEKLY_SUMMARY_EMAIL))
+                .thenReturn(Optional.empty());
+
+        final var result = sendingEmailService.tryToSendConsentedEmail(consentedEmail(), 7L, NotificationType.WEEKLY_SUMMARY_EMAIL);
+
+        assertThat(result).isEmpty();
+        verify(emailService, never()).sendEmail(any(Email.class), any());
+        verify(emailLogRepository, never()).save(any(EmailLog.class));
+        assertThat(output).contains("Consented email skipped, consent withdrawn user id=7 type=WEEKLY_SUMMARY_EMAIL")
+                .doesNotContain("alice@example.com");
+    }
+
+    @Test
+    void consentedEmailCarriesHeadersAndIsLogged() throws Exception {
+        saveReturnsArgument();
+        when(notificationConsentRepository.findFirstByOwnerIdAndTypeAndChannelIdIsNullAndRevokedAtIsNull(7L, NotificationType.WEEKLY_SUMMARY_EMAIL))
+                .thenReturn(Optional.of(activeConsent(NotificationType.WEEKLY_SUMMARY_EMAIL)));
+        final var sent = ArgumentCaptor.forClass(Email.class);
+        doAnswer(invocation -> null).when(emailService).sendEmail(sent.capture(), eq(null));
+        final var email = consentedEmail();
+        email.setHeaders(Map.of("X-Entity-Ref-ID", "weekly-2026-10-19"));
+
+        final var result = sendingEmailService.tryToSendConsentedEmail(email, 7L, NotificationType.WEEKLY_SUMMARY_EMAIL);
+
+        final var token = unsubscribeTokens.issue(7L, NotificationType.WEEKLY_SUMMARY_EMAIL);
+        assertThat(sent.getValue().getHeaders())
+                .containsEntry("List-Unsubscribe", "<https://hrva.cc/api/v1/notifications/unsubscribe?token=" + token + ">")
+                .containsEntry("List-Unsubscribe-Post", "List-Unsubscribe=One-Click")
+                .containsEntry("X-Entity-Ref-ID", "weekly-2026-10-19");
+        assertThat(result).hasValueSatisfying(entry -> {
+            assertThat(entry.getConsentType()).isEqualTo(NotificationType.WEEKLY_SUMMARY_EMAIL);
+            assertThat(entry.getUserId()).isEqualTo(7L);
+            assertThat(entry.getStatus()).isEqualTo(EmailLog.STATUS_SENT);
+            assertThat(entry.getRecipient()).isEqualTo("alice@example.com");
+        });
+    }
+
+    @Test
+    void channelEventsCannotBeSentAsConsentedEmail() {
+        assertThatThrownBy(() -> sendingEmailService.tryToSendConsentedEmail(consentedEmail(), 7L, NotificationType.LINK_DEAD))
+                .isInstanceOf(IllegalArgumentException.class);
+        verifyNoInteractions(emailLogRepository, emailService);
+    }
+
+    @Test
+    void resendRefusesWithdrawnConsent() throws Exception {
+        final var failed = failedConsentedEntry(7L);
+        when(emailLogRepository.findById(21L)).thenReturn(Optional.of(failed));
+        when(notificationConsentRepository.findFirstByOwnerIdAndTypeAndChannelIdIsNullAndRevokedAtIsNull(7L, NotificationType.WEEKLY_SUMMARY_EMAIL))
+                .thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> sendingEmailService.resendEmail(21L))
+                .isInstanceOf(EmailNotResendableException.class)
+                .hasMessage("This person has turned this email off since, so it can't be resent.");
+        assertThat(failed.getStatus()).isEqualTo(EmailLog.STATUS_FAILED);
+        assertThat(failed.getBody()).isEqualTo("<p>last week</p>");
+        verify(emailLogRepository, never()).save(any(EmailLog.class));
+        verify(emailService, never()).sendEmail(any(Email.class), any());
+    }
+
+    @Test
+    void resendRefusesAConsentedEmailWithoutItsUser() throws Exception {
+        when(emailLogRepository.findById(21L)).thenReturn(Optional.of(failedConsentedEntry(null)));
+
+        assertThatThrownBy(() -> sendingEmailService.resendEmail(21L))
+                .isInstanceOf(EmailNotResendableException.class)
+                .hasMessage("This person has turned this email off since, so it can't be resent.");
+        verify(emailService, never()).sendEmail(any(Email.class), any());
+    }
+
+    @Test
+    void resendOfAConsentedEmailRebuildsTheHeaders() throws Exception {
+        saveReturnsArgument();
+        final var failed = failedConsentedEntry(7L);
+        when(emailLogRepository.findById(21L)).thenReturn(Optional.of(failed));
+        when(notificationConsentRepository.findFirstByOwnerIdAndTypeAndChannelIdIsNullAndRevokedAtIsNull(7L, NotificationType.WEEKLY_SUMMARY_EMAIL))
+                .thenReturn(Optional.of(activeConsent(NotificationType.WEEKLY_SUMMARY_EMAIL)));
+        final var sent = ArgumentCaptor.forClass(Email.class);
+        doAnswer(invocation -> null).when(emailService).sendEmail(sent.capture(), eq(null));
+
+        final var resent = sendingEmailService.resendEmail(21L);
+
+        final var token = unsubscribeTokens.issue(7L, NotificationType.WEEKLY_SUMMARY_EMAIL);
+        assertThat(sent.getValue().getHeaders()).containsExactlyInAnyOrderEntriesOf(Map.of(
+                "List-Unsubscribe", "<https://hrva.cc/api/v1/notifications/unsubscribe?token=" + token + ">",
+                "List-Unsubscribe-Post", "List-Unsubscribe=One-Click"));
+        assertThat(sent.getValue().getText()).isEqualTo("<p>last week</p>");
+        assertThat(resent.getConsentType()).isEqualTo(NotificationType.WEEKLY_SUMMARY_EMAIL);
+        assertThat(resent.getUserId()).isEqualTo(7L);
+        assertThat(resent.getStatus()).isEqualTo(EmailLog.STATUS_SENT);
+        assertThat(failed.getStatus()).isEqualTo(EmailLog.STATUS_RESENT);
+        assertThat(failed.getBody()).isNull();
+    }
+
+    @Test
+    void resendOfATransactionalEmailIsUnchanged() throws Exception {
+        saveReturnsArgument();
+        final var failed = EmailLog.builder().id(22L).sender("noreply@hrva.cc").recipient("alice@example.com")
+                .subject("Password reset token").body("<p>reset</p>").status(EmailLog.STATUS_FAILED).build();
+        when(emailLogRepository.findById(22L)).thenReturn(Optional.of(failed));
+        final var sent = ArgumentCaptor.forClass(Email.class);
+        doAnswer(invocation -> null).when(emailService).sendEmail(sent.capture(), eq(null));
+
+        final var resent = sendingEmailService.resendEmail(22L);
+
+        assertThat(sent.getValue().getHeaders()).isEmpty();
+        assertThat(resent.getConsentType()).isNull();
+        assertThat(resent.getUserId()).isNull();
+        assertThat(failed.getStatus()).isEqualTo(EmailLog.STATUS_RESENT);
+        verifyNoInteractions(notificationConsentRepository);
+    }
+
+    @Test
+    void aTransactionalEmailHasNoHeadersAndNoConsentType() throws Exception {
+        saveReturnsArgument();
+        final var sent = ArgumentCaptor.forClass(Email.class);
+        doAnswer(invocation -> null).when(emailService).sendEmail(sent.capture(), eq(null));
+
+        sendingEmailService.sendNewUserNotificationToAdmin(User.builder().email("new@example.com").build());
+
+        assertThat(sent.getValue().getHeaders()).isEmpty();
+        assertThat(lastSavedEntry().getConsentType()).isNull();
+        assertThat(lastSavedEntry().getUserId()).isNull();
+        verifyNoInteractions(notificationConsentRepository);
+    }
+
+    private static Email consentedEmail() {
+        return Email.builder()
+                .sender("noreply@hrva.cc")
+                .receivers(new String[]{"alice@example.com"})
+                .subject("Your week on hrva.cc")
+                .text("<p>last week</p>")
+                .build();
+    }
+
+    private static EmailLog failedConsentedEntry(final Long userId) {
+        return EmailLog.builder().id(21L).sender("noreply@hrva.cc").recipient("alice@example.com").subject("Your week on hrva.cc")
+                .body("<p>last week</p>").status(EmailLog.STATUS_FAILED).consentType(NotificationType.WEEKLY_SUMMARY_EMAIL).userId(userId).build();
+    }
+
+    private static NotificationConsent activeConsent(final NotificationType type) {
+        return NotificationConsent.builder().id(3L).owner(User.builder().id(7L).build()).type(type)
+                .grantedAt(LocalDateTime.of(2026, 10, 20, 9, 0)).build();
     }
 
     private static List<Url> domainBlockedLinks(final int count) {
