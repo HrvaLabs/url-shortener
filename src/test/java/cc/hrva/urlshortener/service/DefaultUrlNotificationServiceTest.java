@@ -158,7 +158,8 @@ class DefaultUrlNotificationServiceTest {
         assertThat(html)
                 .contains("/unsubscribe?token=")
                 .contains("href=\"https://app.hrva.cc/unsubscribe?token=" + token + "\"")
-                .contains("href=\"https://app.hrva.cc/dashboard/settings#notifications\"");
+                .contains("href=\"https://app.hrva.cc/dashboard/settings#notifications\"")
+                .contains("href=\"https://app.hrva.cc\"", "href=\"https://hrvalabs.net\"");
         assertThat(textOf(html))
                 .contains("You get this because you turned on expiry reminders.")
                 .contains("Turn off expiry reminders")

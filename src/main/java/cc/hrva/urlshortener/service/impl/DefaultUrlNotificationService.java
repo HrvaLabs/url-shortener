@@ -85,6 +85,7 @@ public class DefaultUrlNotificationService implements UrlNotificationService {
         ctx.setVariable("longUrl", link.longUrl());
         ctx.setVariable("expirationDate", expirationDate);
         ctx.setVariable("app_name", appProperties.getAppName());
+        ctx.setVariable("site_url", appProperties.getFrontendUrl());
         ctx.setVariable("login_page", MessageFormat.format("{0}/login/", appProperties.getFrontendUrl()));
         ctx.setVariable("unsubscribe_page", consentEmails.unsubscribePage(link.ownerId(), REMINDER));
         ctx.setVariable("settings_page", consentEmails.settingsPage());

@@ -80,7 +80,7 @@
                  detail: sans + wrap + 'display: block; margin: 2px 0 0; font-size: 14px; line-height: 22px; color: #67676f;',
                  pill: sans + 'display: inline-block; padding: 2px 8px; border-radius: 6px; background-color: #fae9e9; color: #ca2121; font-size: 12px; line-height: 16px; font-weight: 500; white-space: nowrap;',
                  foot: sans + wrap + 'margin: 0 0 6px; font-size: 13px; line-height: 20px; color: #67676f;',
-                 footLink: wrap + 'color: #67676f; text-decoration: underline;'
+                 footLink: wrap + 'display: inline-block; padding: 12px 0; color: #67676f; text-decoration: underline;'
                } }">
   <div role="article" aria-roledescription="email" lang="en" dir="ltr" th:aria-label="${title}">
     <div style="display: none; max-height: 0; max-width: 0; overflow: hidden; opacity: 0; font-size: 1px; line-height: 1px; mso-hide: all;"><th:block th:replace="${preheader}"/>&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;</div>
@@ -121,7 +121,7 @@
             <tr>
               <td class="e-inset" align="left" style="padding: 24px 33px 0;">
                 <th:block th:replace="${footer}"/>
-                <p class="e-mu" th:style="${s.foot}"><span th:text="${app_name}">hrva.cc</span> &middot; A HrvaLabs project</p>
+                <p class="e-mu" th:style="${s.foot} + 'margin: 0;'"><a class="e-mu" th:href="${site_url}" target="_blank" th:style="${s.footLink}">hrva.cc</a> &middot; A <a class="e-mu" href="https://hrvalabs.net" target="_blank" th:style="${s.footLink}">HrvaLabs</a> project</p>
               </td>
             </tr>
           </table>
@@ -152,6 +152,6 @@
 </th:block>
 
 <th:block th:fragment="consent(reason, turn_off)">
-  <p class="e-mu" th:style="${s.foot}" th:text="${reason}">You get this because you turned it on.</p>
-  <p class="e-mu" th:style="${s.foot} + 'margin: 0 0 16px;'"><a class="e-mu" th:href="${unsubscribe_page}" target="_blank" th:style="${s.footLink}" th:text="${turn_off}">Turn it off</a> &middot; <a class="e-mu" th:href="${settings_page}" target="_blank" th:style="${s.footLink}">Notification settings</a></p>
+  <p class="e-mu" th:style="${s.foot} + 'margin: 0;'" th:text="${reason}">You get this because you turned it on.</p>
+  <p class="e-mu" th:style="${s.foot} + 'margin: 0;'"><a class="e-mu" th:href="${unsubscribe_page}" target="_blank" th:style="${s.footLink}" th:text="${turn_off}">Turn it off</a> &middot; <a class="e-mu" th:href="${settings_page}" target="_blank" th:style="${s.footLink}">Notification settings</a></p>
 </th:block>

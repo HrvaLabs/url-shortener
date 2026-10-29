@@ -239,6 +239,7 @@ public class DefaultSendingEmailService implements SendingEmailService {
         ctx.setVariable("digest", digest);
         ctx.setVariable("headline", subject);
         ctx.setVariable("app_name", appProperties.getAppName());
+        ctx.setVariable("site_url", appProperties.getFrontendUrl());
         ctx.setVariable("short_link_host", shortLinkHost());
         ctx.setVariable("review_page", frontendPage(REVIEW_PAGE));
         ctx.setVariable("blocklists_page", frontendPage("/admin/blocklists"));
@@ -268,6 +269,7 @@ public class DefaultSendingEmailService implements SendingEmailService {
         ctx.setVariable("top_links", WeeklyDigestText.topLinkLines(digest, shortLinkHost(), UnaryOperator.identity()));
         ctx.setVariable("stats_page", statsPage);
         ctx.setVariable("app_name", appProperties.getAppName());
+        ctx.setVariable("site_url", appProperties.getFrontendUrl());
 
         final var htmlContent = templateEngine.process("weekly_digest", ctx);
 
@@ -298,6 +300,7 @@ public class DefaultSendingEmailService implements SendingEmailService {
         ctx.setVariable("unsubscribe_page", unsubscribePage);
         ctx.setVariable("settings_page", consentEmails.settingsPage());
         ctx.setVariable("app_name", appProperties.getAppName());
+        ctx.setVariable("site_url", appProperties.getFrontendUrl());
 
         final var htmlContent = templateEngine.process("dead_links", ctx);
         final var plainLines = new ArrayList<>(message.lines());
@@ -343,6 +346,7 @@ public class DefaultSendingEmailService implements SendingEmailService {
         ctx.setVariable("unsubscribe_page", unsubscribePage);
         ctx.setVariable("settings_page", consentEmails.settingsPage());
         ctx.setVariable("app_name", appProperties.getAppName());
+        ctx.setVariable("site_url", appProperties.getFrontendUrl());
 
         final var htmlContent = templateEngine.process("weekly_summary", ctx);
 
@@ -542,6 +546,7 @@ public class DefaultSendingEmailService implements SendingEmailService {
         final var ctx = new Context();
         ctx.setVariable("name", user.getEmail());
         ctx.setVariable("app_name", appProperties.getAppName());
+        ctx.setVariable("site_url", appProperties.getFrontendUrl());
         ctx.setVariable("contact_email", appProperties.getContactEmail());
         ctx.setVariable("login_page", MessageFormat.format("{0}/login/", appProperties.getFrontendUrl()));
         ctx.setVariable("days_of_inactivity", appProperties.getDeactivateUserAccountAfterDays().toString());

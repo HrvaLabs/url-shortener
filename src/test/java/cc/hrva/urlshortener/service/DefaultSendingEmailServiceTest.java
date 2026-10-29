@@ -77,6 +77,8 @@ class DefaultSendingEmailServiceTest {
     private static final Url BLOCKED_LINK = Url.builder().shortUrl("promo").longUrl("https://jofogas.cards/login")
             .blockReason(BlockReason.BLOCKLIST).blockDetail("HaGeZi Fake").active(false).build();
     private static final LocalDateTime PASSKEY_ADDED_AT = LocalDateTime.of(2026, 10, 25, 14, 5, 33);
+    private static final String SITE_LINK = "https://hrva.cc";
+    private static final String HRVALABS_LINK = "https://hrvalabs.net";
 
     @Mock
     private TemplateEngine templateEngine;
@@ -373,6 +375,8 @@ class DefaultSendingEmailServiceTest {
 
         assertThat(linksIn(body))
                 .contains("https://hrva.cc/admin/review?entry=41", "https://hrva.cc/admin/review?entry=42", "https://hrva.cc/admin/blocklists")
+                .endsWith(SITE_LINK, HRVALABS_LINK)
+                .filteredOn(link -> !link.equals(SITE_LINK) && !link.equals(HRVALABS_LINK))
                 .allMatch(link -> link.matches("https://hrva\\.cc/admin/(review(\\?entry=\\d+)?|blocklists)"));
         assertThat(body.replaceAll("href=\"[^\"]*\"", "")).doesNotContain("://");
     }
@@ -417,7 +421,7 @@ class DefaultSendingEmailServiceTest {
 
         assertThat(email.getSubject()).isEqualTo("No decisions waiting on hrva.cc, but there's news");
         assertThat(email.getText()).contains("HaGeZi Fake", "HTTP 503 from every mirror");
-        assertThat(linksIn(email.getText())).containsExactly("https://hrva.cc/admin/blocklists");
+        assertThat(linksIn(email.getText())).containsExactly("https://hrva.cc/admin/blocklists", SITE_LINK, HRVALABS_LINK);
     }
 
     @Test
@@ -426,7 +430,7 @@ class DefaultSendingEmailServiceTest {
 
         assertThat(email.getSubject()).isEqualTo("2 decisions waiting on hrva.cc");
         assertThat(textOf(email.getText())).contains("1 link is waiting in the review queue.", "1 bio page is waiting in the review queue.");
-        assertThat(linksIn(email.getText())).containsExactly("https://hrva.cc/admin/review", "https://hrva.cc/admin/review#bio-pages");
+        assertThat(linksIn(email.getText())).containsExactly("https://hrva.cc/admin/review", "https://hrva.cc/admin/review#bio-pages", SITE_LINK, HRVALABS_LINK);
     }
 
     @Test
@@ -439,7 +443,7 @@ class DefaultSendingEmailServiceTest {
                 .doesNotContain("The review queue is empty")
                 .doesNotContain("links are waiting")
                 .doesNotContain("link is waiting");
-        assertThat(linksIn(email.getText())).containsExactly("https://hrva.cc/admin/review#bio-pages");
+        assertThat(linksIn(email.getText())).containsExactly("https://hrva.cc/admin/review#bio-pages", SITE_LINK, HRVALABS_LINK);
     }
 
     @Test
@@ -507,7 +511,7 @@ class DefaultSendingEmailServiceTest {
     void theWeeklyDigestLinksTheReviewQueueAndTheStatsPage() throws Exception {
         final var body = sentWeeklyDigest(weeklyDigest("example.com")).getText();
 
-        assertThat(linksIn(body)).containsExactly("https://hrva.cc/admin/review", "https://hrva.cc/admin/dashboard?days=7");
+        assertThat(linksIn(body)).containsExactly("https://hrva.cc/admin/review", "https://hrva.cc/admin/dashboard?days=7", SITE_LINK, HRVALABS_LINK);
     }
 
     @Test
@@ -629,7 +633,7 @@ class DefaultSendingEmailServiceTest {
                         + " remove it and change your password. If you can't sign in, email support@hrva.cc.")
                 .contains("How passkeys work: https://hrva.cc/help/passkeys");
         assertThat(linksIn(email.getText()))
-                .containsExactly("https://hrva.cc/dashboard/settings", "mailto:support@hrva.cc", "https://hrva.cc/help/passkeys");
+                .containsExactly("https://hrva.cc/dashboard/settings", "mailto:support@hrva.cc", "https://hrva.cc/help/passkeys", SITE_LINK, HRVALABS_LINK);
     }
 
     @Test
@@ -680,7 +684,7 @@ class DefaultSendingEmailServiceTest {
         final var html = sent.getValue().getText();
         assertThat(textOf(html)).contains(headline);
         assertThat(html).containsPattern("<h1[^>]*>" + Pattern.quote(headline) + "</h1>");
-        assertThat(linksIn(html)).containsExactlyElementsOf(links);
+        assertThat(linksIn(html)).containsExactlyElementsOf(Stream.concat(links.stream(), Stream.of(SITE_LINK, HRVALABS_LINK)).toList());
     }
 
     private static Stream<Arguments> accountEmails() {
@@ -927,7 +931,9 @@ class DefaultSendingEmailServiceTest {
         assertThat(linksIn(email.getText())).containsExactly(
                 "https://hrva.cc/dashboard",
                 "https://hrva.cc/unsubscribe?token=" + token,
-                "https://hrva.cc/dashboard/settings#notifications");
+                "https://hrva.cc/dashboard/settings#notifications",
+                SITE_LINK,
+                HRVALABS_LINK);
         assertThat(email.getPlainText()).isEqualTo("""
                 2 of your links look broken
 
@@ -1036,7 +1042,9 @@ class DefaultSendingEmailServiceTest {
         assertThat(linksIn(email.getText())).containsExactly(
                 "https://hrva.cc/dashboard",
                 "https://hrva.cc/unsubscribe?token=" + token,
-                "https://hrva.cc/dashboard/settings#notifications");
+                "https://hrva.cc/dashboard/settings#notifications",
+                SITE_LINK,
+                HRVALABS_LINK);
         assertThat(email.getHeaders()).containsEntry("List-Unsubscribe", "<https://hrva.cc/api/v1/notifications/unsubscribe?token=" + token + ">")
                 .containsEntry("List-Unsubscribe-Post", "List-Unsubscribe=One-Click");
         assertThat(lastSavedEntry().getConsentType()).isEqualTo(NotificationType.WEEKLY_SUMMARY_EMAIL);
