@@ -60,7 +60,7 @@ public class ChannelTargets {
         final var errors = new LinkedHashMap<String, String>();
         validator.validate(request).forEach(violation -> errors.putIfAbsent(violation.getPropertyPath().toString(), violation.getMessage()));
         if (type != null) {
-            shapeErrors(type, request, creating).forEach(errors::putIfAbsent);
+            errors.putAll(shapeErrors(type, request, creating, errors.keySet()));
         }
         return errors;
     }
@@ -100,24 +100,32 @@ public class ChannelTargets {
         return NotificationDescriptions.label(type);
     }
 
-    private static Map<String, String> shapeErrors(final ChannelType type, final NotificationChannelRequest request, final boolean creating) {
+    private static Map<String, String> shapeErrors(final ChannelType type, final NotificationChannelRequest request, final boolean creating,
+            final Set<String> alreadyInvalid) {
         final var errors = new LinkedHashMap<String, String>();
         if (type == ChannelType.TELEGRAM) {
-            shapeError(request.getBotToken(), TELEGRAM_TOKEN, BOT_TOKEN_SHAPE, creating).ifPresent(error -> errors.put(BOT_TOKEN, error));
-            shapeError(request.getChatId(), TELEGRAM_CHAT_ID, CHAT_ID_SHAPE, creating).ifPresent(error -> errors.put(CHAT_ID, error));
+            if (!alreadyInvalid.contains(BOT_TOKEN)) {
+                shapeError(request.getBotToken(), TELEGRAM_TOKEN, BOT_TOKEN_SHAPE, creating).ifPresent(error -> errors.put(BOT_TOKEN, error));
+            }
+            if (!alreadyInvalid.contains(CHAT_ID)) {
+                shapeError(request.getChatId(), TELEGRAM_CHAT_ID, CHAT_ID_SHAPE, creating).ifPresent(error -> errors.put(CHAT_ID, error));
+            }
             return errors;
         }
-        if (StringUtils.isBlank(request.getTarget())) {
-            if (creating) {
-                errors.put(TARGET, PASTE_THE_URL);
-            }
-        } else {
-            targetShapeError(type, request.getTarget().strip()).ifPresent(error -> errors.put(TARGET, error));
+        if (!alreadyInvalid.contains(TARGET)) {
+            targetError(type, request.getTarget(), creating).ifPresent(error -> errors.put(TARGET, error));
         }
-        if (type == ChannelType.NTFY) {
+        if (type == ChannelType.NTFY && !alreadyInvalid.contains(ACCESS_TOKEN)) {
             shapeError(request.getAccessToken(), NTFY_ACCESS_TOKEN, ACCESS_TOKEN_SHAPE, false).ifPresent(error -> errors.put(ACCESS_TOKEN, error));
         }
         return errors;
+    }
+
+    private static Optional<String> targetError(final ChannelType type, final String target, final boolean creating) {
+        if (StringUtils.isBlank(target)) {
+            return creating ? Optional.of(PASTE_THE_URL) : Optional.empty();
+        }
+        return targetShapeError(type, target.strip());
     }
 
     private static Optional<String> targetShapeError(final ChannelType type, final String target) {

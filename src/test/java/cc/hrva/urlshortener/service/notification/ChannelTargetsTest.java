@@ -241,6 +241,16 @@ class ChannelTargetsTest {
     }
 
     @Test
+    void aFieldWithALengthErrorGetsOnlyThatError() {
+        final var tooLong = "http://" + "a".repeat(2048);
+        assertThat(channelTargets.fieldErrors(ChannelType.DISCORD, request(ChannelType.DISCORD).name(" ").target(tooLong).build(), true))
+                .containsOnly(Map.entry("name", "Give the channel a name"), Map.entry("target", "URL must be 2048 characters or fewer"));
+        assertThat(channelTargets.fieldErrors(ChannelType.TELEGRAM, request(ChannelType.TELEGRAM).botToken("x".repeat(256)).chatId("nope").build(), true))
+                .containsOnly(Map.entry("botToken", "Bot token must be 255 characters or fewer"), Map.entry("chatId", CHAT_ID_SHAPE));
+        assertThat(lookedUp).isEmpty();
+    }
+
+    @Test
     void anNtfyAccessTokenMustBePrintableWithoutSpaces() {
         assertThat(ntfy("tk_AbC123-._~!")).isEmpty();
         assertThat(ntfy(null)).isEmpty();

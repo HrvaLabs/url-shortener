@@ -339,6 +339,39 @@ class DefaultNotificationChannelServiceTest {
     }
 
     @Test
+    void aBadNameOnEditIsReportedWithoutLookingUpTheAddress() {
+        owned(channel(ChannelType.DISCORD));
+
+        assertThatThrownBy(() -> service.update(4L, discord().name(" ").build()))
+                .isInstanceOfSatisfying(ChannelValidationException.class,
+                        exception -> assertThat(exception.getFieldErrors()).containsExactly(java.util.Map.entry("name", "Give the channel a name")));
+
+        assertThat(lookedUp).isEmpty();
+        verify(notificationChannelRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void fieldErrorsOnEditSpendNoSettingsChange() {
+        assertThatThrownBy(() -> service.update(4L, discord().name(" ").target("http://discord.com/api/webhooks/1/a").build()))
+                .isInstanceOfSatisfying(ChannelValidationException.class,
+                        exception -> assertThat(exception.getFieldErrors()).containsOnlyKeys("name", "target"));
+
+        verify(rateLimiter, never()).tryAcquire(anyString(), anyInt(), any());
+        verify(notificationChannelRepository, never()).findByIdAndOwnerId(anyLong(), anyLong());
+    }
+
+    @Test
+    void aFieldErrorComesBeforeAnUnknownEvent() {
+        assertThatThrownBy(() -> service.create(discord().name(" ").events(Set.of("WEEKLY_SUMMARY_EMAIL")).build()))
+                .isInstanceOfSatisfying(ChannelValidationException.class,
+                        exception -> assertThat(exception.getFieldErrors()).containsExactly(java.util.Map.entry("name", "Give the channel a name")));
+        owned(channel(ChannelType.DISCORD));
+        assertThatThrownBy(() -> service.update(4L, discord().name(" ").events(Set.of("WEEKLY_SUMMARY_EMAIL")).build()))
+                .isInstanceOfSatisfying(ChannelValidationException.class,
+                        exception -> assertThat(exception.getFieldErrors()).containsExactly(java.util.Map.entry("name", "Give the channel a name")));
+    }
+
+    @Test
     void aWellShapedAddressIsLookedUpOnceTheOtherFieldsAreValid() {
         service.create(discord().build());
 

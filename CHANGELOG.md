@@ -13,7 +13,7 @@ Notification settings that are easier to find and fix, and faster bio pages.
 - Notifications now sits right below your profile and password in Settings, and a link marked "Destination looks dead" offers "Get an email when this happens" while dead-link emails are off.
 
 ### 🔗 Links
-- Bio pages and their share images load faster: they're kept for up to 5 minutes, so saved changes, a new handle or a deleted page can take up to 5 minutes to show. View page in the editor always shows the saved version.
+- Bio pages and their share images load faster: they're kept for up to 5 minutes, so saved changes can take up to 5 minutes to show, and your old handle can keep working for up to 5 minutes after you change it or delete your page. View page in the editor always shows the saved version.
 
 ---
 

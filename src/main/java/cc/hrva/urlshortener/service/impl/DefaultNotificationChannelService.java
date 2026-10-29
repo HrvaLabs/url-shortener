@@ -108,8 +108,8 @@ public class DefaultNotificationChannelService implements NotificationChannelSer
     @Transactional
     public NotificationChannelResponse create(final NotificationChannelRequest request) {
         final var user = currentUser();
-        final var events = channelEventsOf(request.getEvents());
         requireValidFields(request, true);
+        final var events = channelEventsOf(request.getEvents());
         requireWithinSettingsLimit(user.getId());
         requireReachableTarget(request.getType(), request);
 
@@ -147,8 +147,8 @@ public class DefaultNotificationChannelService implements NotificationChannelSer
     @Transactional
     public NotificationChannelResponse update(final long id, final NotificationChannelRequest request) {
         final var user = currentUser();
-        final var events = channelEventsOf(request.getEvents());
         requireValidFields(request, false);
+        final var events = channelEventsOf(request.getEvents());
         requireWithinSettingsLimit(user.getId());
         final var channel = owned(user, id);
         if (request.getType() != channel.getType()) {
