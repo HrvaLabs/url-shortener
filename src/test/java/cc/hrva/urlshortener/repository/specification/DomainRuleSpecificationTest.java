@@ -104,6 +104,19 @@ class DomainRuleSpecificationTest {
     }
 
     @Test
+    void aBackslashIsNotAnEscape() {
+        assertThat(domains(DomainRuleSpecification.searchMatches("\\"), NEWEST_FIRST)).isEmpty();
+
+        persistRule("backslash.test", DomainRuleType.BLOCK, "odd a\\b reason", 6);
+        persistRule("ab.test", DomainRuleType.BLOCK, "plain ab reason", 7);
+        entityManager.flush();
+
+        assertThat(domains(DomainRuleSpecification.searchMatches("a\\b"), NEWEST_FIRST)).containsExactly("backslash.test");
+        assertThat(domains(DomainRuleSpecification.searchMatches("\\"), NEWEST_FIRST)).containsExactly("backslash.test");
+        assertThat(domains(DomainRuleSpecification.searchMatches("\\%"), NEWEST_FIRST)).isEmpty();
+    }
+
+    @Test
     void hasTypeKeepsOnlyRulesOfThatType() {
         assertThat(domains(DomainRuleSpecification.hasType(DomainRuleType.ALLOW), NEWEST_FIRST)).containsExactly("padlet.com", "gableci.hrva.cc");
         assertThat(domains(DomainRuleSpecification.hasType(DomainRuleType.BLOCK).and(DomainRuleSpecification.searchMatches("phishing")), NEWEST_FIRST))

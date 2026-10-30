@@ -14,7 +14,7 @@ Admin lists are searched, sorted and paged on the server, and searching your lin
 
 ### 🔧 Admin
 - Every admin list can be searched and sorted, page by page.
-- Domain rules are listed page by page, with a search box.
+- Domain rules are listed page by page, with a search box and a choice of order.
 
 ---
 
