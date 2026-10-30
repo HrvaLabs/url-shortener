@@ -3,6 +3,7 @@ package cc.hrva.urlshortener.controller;
 import cc.hrva.urlshortener.configuration.GlobalExceptionHandler;
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.converter.CreateUrlToUrlConverter;
+import cc.hrva.urlshortener.service.linksignal.AnonymousLinkSignals;
 import cc.hrva.urlshortener.converter.UrlToPeekUrlConverter;
 import cc.hrva.urlshortener.converter.UrlUpdateDtoToUrlConverter;
 import cc.hrva.urlshortener.model.BlocklistSource;
@@ -184,7 +185,7 @@ class UrlControllerBlocklistTest {
                 objectMapper, meterRegistry, passwordEncoder, suspiciousUrlService, rateLimiter, reviewQueueService, scammerSignalService, clickCheckService,
                 redirectChainService, TransactionOperations.withoutTransaction(), reservedAliasService, burstAlertService,
                 destinationCheckRepository, customDomainRegistry, customDomainRepository, campaignService, settingsService,
-                mock(PlatformTransactionManager.class));
+                mock(PlatformTransactionManager.class), mock(AnonymousLinkSignals.class));
         mockMvc = MockMvcBuilders.standaloneSetup(new UrlController(urlService, qrCodeService, linkPreviewService, clientIpResolver,
                         new ClickRequestResolver(clientIpResolver), request, appProperties))
                 .setControllerAdvice(new GlobalExceptionHandler())

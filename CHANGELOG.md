@@ -9,6 +9,7 @@ All notable changes to hrva.cc — the URL shortener.
 A human check and a warning page for links made without an account, limits on those links, and sign-in switches.
 
 ### 🔧 Admin
+- Links made without an account to random-looking new domains go to the review queue.
 - Sign in with Google and Sign in with GitHub can each be turned off in Settings.
 
 ---

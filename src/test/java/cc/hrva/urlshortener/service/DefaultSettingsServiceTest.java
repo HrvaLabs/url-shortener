@@ -478,7 +478,7 @@ class DefaultSettingsServiceTest {
 
         assertThat(settingsService.safetySwitchesOff())
                 .containsExactly(SettingKey.SAFE_BROWSING_CHECK, SettingKey.BLOCKLIST_CHECK, SettingKey.SUSPICIOUS_LINK_CHECK,
-                        SettingKey.NIGHTLY_SAFE_BROWSING, SettingKey.NIGHTLY_DESTINATION_CHECK, SettingKey.SAME_SHAPE_ALERT)
+                        SettingKey.NIGHTLY_SAFE_BROWSING, SettingKey.NIGHTLY_DESTINATION_CHECK, SettingKey.SAME_SHAPE_ALERT, SettingKey.RANDOM_DOMAIN_REVIEW)
                 .allSatisfy(key -> assertThat(key.getParent() == null || settingsService.isOn(key.getParent())).isTrue());
     }
 

@@ -86,7 +86,11 @@ public enum SettingKey {
                     + "need Forgot password meanwhile.", null, false),
     GITHUB_SIGN_IN(SettingGroup.ACCESS, "Sign in with GitHub",
             "The GitHub button on the sign-in and register pages. Off refuses every GitHub sign-in; accounts without a password or passkey "
-                    + "need Forgot password meanwhile.", null, false);
+                    + "need Forgot password meanwhile.", null, false),
+    RANDOM_DOMAIN_REVIEW(SettingGroup.SAFETY, "Review random-looking domains",
+            "Links without an account to machine-made-looking new domains go to the review queue. They stay live.", null, true),
+    RANDOM_DOMAIN_MAX_AGE_DAYS(SettingGroup.SAFETY, "Random-looking domains: maximum age",
+            "Only domains younger than this, or of unknown age, count.", RANDOM_DOMAIN_REVIEW, 30, 3650, "days");
 
     private final SettingGroup group;
     private final SettingType type;

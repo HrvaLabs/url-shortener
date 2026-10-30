@@ -11,6 +11,7 @@
           "title": "Admin",
           "icon": "wrench",
           "items": [
+            "Links made without an account to random-looking new domains go to the review queue.",
             "Sign in with Google and Sign in with GitHub can each be turned off in Settings."
           ]
         }

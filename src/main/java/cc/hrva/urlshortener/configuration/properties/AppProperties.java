@@ -347,10 +347,15 @@ public class AppProperties {
         private boolean campaignHold = true;
         private boolean googleSignIn = true;
         private boolean githubSignIn = true;
+        private boolean randomDomainReview = true;
 
         @Min(1)
         @Max(90)
         private int campaignHoldDays = 7;
+
+        @Min(30)
+        @Max(3650)
+        private int randomDomainMaxAgeDays = 365;
 
         @Valid
         @NotNull

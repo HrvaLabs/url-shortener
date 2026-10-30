@@ -53,6 +53,8 @@ import cc.hrva.urlshortener.service.domain.DomainRoute;
 import cc.hrva.urlshortener.service.domain.ShortLinks;
 import cc.hrva.urlshortener.service.domain.UrlCache;
 import cc.hrva.urlshortener.service.domain.UrlCacheKeys;
+import cc.hrva.urlshortener.service.linksignal.AnonymousLinkSignals;
+import cc.hrva.urlshortener.service.linksignal.AnonymousLinkSignals.Signals;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiter;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiterUnavailableException;
 import cc.hrva.urlshortener.service.settings.SettingKey;
@@ -88,6 +90,7 @@ import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -169,6 +172,7 @@ public class DefaultUrlService implements UrlService {
     private final CampaignService campaignService;
     private final SettingsService settingsService;
     private final PlatformTransactionManager transactionManager;
+    private final AnonymousLinkSignals anonymousLinkSignals;
 
     @Override
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
@@ -188,6 +192,9 @@ public class DefaultUrlService implements UrlService {
         }
         final var verdict = validateUrl(url);
         final var heldShape = currentUser == null ? heldShapeOf(url.getLongUrl(), verdict) : Optional.<HeldShape>empty();
+        final var signals = currentUser == null && heldShape.isEmpty()
+                ? anonymousLinkSignals.signalsFor(url.getLongUrl(), verdict.outcome())
+                : Signals.none();
 
         final var created = transactionOperations.execute(status -> {
             if (currentUser != null) {
@@ -198,7 +205,7 @@ public class DefaultUrlService implements UrlService {
             }
             url.setCreatedVia(createdVia.anonymous());
             return heldShape.map(held -> holdNewAnonymousLink(url, held, verdict))
-                    .orElseGet(() -> UrlResponse.from(createUrlForAnonymousUser(url, verdict)));
+                    .orElseGet(() -> UrlResponse.from(createUrlForAnonymousUser(url, verdict, signals)));
         });
         checkRedirectsLater(created.id());
         reportCreated(created, CreatedLink.creatorOf(currentUser != null ? currentUser.getId() : null, clientIP), verdict);
@@ -1003,7 +1010,7 @@ public class DefaultUrlService implements UrlService {
     private UrlResponse holdNewAnonymousLink(final Url url, final HeldShape held, final LinkVerdict verdict) {
         if (!campaignService.confirmHold(held.campaignId())) {
             log.info("Campaign stopped holding before the link was saved, saving it as usual campaignId={}", held.campaignId());
-            return UrlResponse.from(createUrlForAnonymousUser(url, verdict));
+            return UrlResponse.from(createUrlForAnonymousUser(url, verdict, Signals.none()));
         }
         url.clearForAnonymousUser();
         url.setShortUrl(nextFreeShortUrl(null));
@@ -1017,13 +1024,13 @@ public class DefaultUrlService implements UrlService {
         return UrlResponse.from(saved).asCreated();
     }
 
-    private Url createUrlForAnonymousUser(final Url url, final LinkVerdict verdict) {
+    private Url createUrlForAnonymousUser(final Url url, final LinkVerdict verdict, final Signals signals) {
         url.clearForAnonymousUser();
 
         if (urlRepository.existsUrlByLongUrlAndActiveTrueAndOwnerIsNull(url.getLongUrl())) {
             final var existingLongUrl = getUrlByLongUrl(url.getLongUrl());
             log.warn("Long url already exists in DB, will return the existing anonymous URL");
-            queueIfFlagged(existingLongUrl, verdict);
+            queueIfFlagged(existingLongUrl, verdict, signals);
             cacheUrlResponse(existingLongUrl);
             return existingLongUrl;
         }
@@ -1032,9 +1039,25 @@ public class DefaultUrlService implements UrlService {
 
         log.info("Saving URL");
         final var saved = insertNewLink(url, NO_FREE_ALIAS);
-        queueIfFlagged(saved, verdict);
+        queueIfFlagged(saved, verdict, signals);
         cacheUrlResponse(saved);
         return saved;
+    }
+
+    private void queueIfFlagged(final Url url, final LinkVerdict verdict, final Signals signals) {
+        final var randomLooking = signals.randomLooking() && settingsService.isOn(SettingKey.RANDOM_DOMAIN_REVIEW);
+        if (verdict.outcome() != LinkVerdict.Outcome.FLAG && !randomLooking) {
+            return;
+        }
+        final var reasons = new ArrayList<String>();
+        if (verdict.outcome() == LinkVerdict.Outcome.FLAG) {
+            reasons.addAll(verdict.reasons());
+        }
+        if (randomLooking) {
+            reasons.add(AnonymousLinkSignals.RANDOM_LOOKING_DOMAIN);
+            log.info("Link without an account to a random-looking domain sent to review urlId={}", url.getId());
+        }
+        reviewQueueService.flag(url, reasons);
     }
 
     public Url deactivateUrl(final Url url) {

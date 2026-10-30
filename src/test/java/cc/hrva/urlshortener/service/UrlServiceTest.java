@@ -1,7 +1,9 @@
 package cc.hrva.urlshortener.service;
 
 import java.sql.SQLException;
+import java.time.Clock;
 import java.time.Duration;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.Collections;
 import java.util.HashMap;
@@ -39,6 +41,8 @@ import cc.hrva.urlshortener.dto.LinkVerdict;
 import cc.hrva.urlshortener.dto.LinkVerdict.Outcome;
 import cc.hrva.urlshortener.dto.UrlResponse;
 import cc.hrva.urlshortener.service.campaign.UrlShapes;
+import cc.hrva.urlshortener.service.linksignal.AnonymousLinkSignals;
+import cc.hrva.urlshortener.service.linksignal.RandomLookingLabels;
 import cc.hrva.urlshortener.dto.DestinationHealth;
 import cc.hrva.urlshortener.dto.UrlSearchDto;
 import cc.hrva.urlshortener.dto.UrlUpdateDto;
@@ -137,6 +141,10 @@ class UrlServiceTest {
     private static final String DOMAIN_REFUSAL = "Choose one of your active domains, or leave it empty for hrva.cc.";
     private static final String DOMAIN_OFF = "This link's domain isn't active, so the link can't be turned on.";
     private static final String CUSTOM_ALIASES_OFF = "Custom aliases are turned off right now.";
+    private static final RandomLookingLabels RANDOM_LOOKING_LABELS = new RandomLookingLabels();
+    private static final LocalDate REGISTERED_LONG_AGO = LocalDate.of(2010, 1, 1);
+    private static final String RANDOM_LINK = "https://xdvqnxj.com/login";
+    private static final String RANDOM_LOOKING_DOMAIN = "Random-looking domain";
 
     private UrlService urlService;
 
@@ -228,12 +236,19 @@ class UrlServiceTest {
     @Mock
     private CampaignService campaignService;
 
+    @Mock
+    private DomainAgeService domainAgeService;
+
+    private AnonymousLinkSignals anonymousLinkSignals;
+
     @BeforeEach
     void setUp() {
         org.mockito.Mockito.lenient().when(rateLimiter.tryAcquire(any(), org.mockito.ArgumentMatchers.anyInt(), any())).thenReturn(true);
         org.mockito.Mockito.lenient().when(customDomainRepository.findStatusForUpdate(anyLong())).thenReturn(Optional.of("ACTIVE"));
         org.mockito.Mockito.lenient().when(urlValidator.checkIfLongUrlIsNotBlocklisted(any())).thenReturn(LinkVerdict.clean());
         org.mockito.Mockito.lenient().when(clickCheckService.mayRedirect(org.mockito.ArgumentMatchers.anyLong(), any())).thenReturn(true);
+        org.mockito.Mockito.lenient().when(domainAgeService.registeredOn(any())).thenReturn(Optional.of(REGISTERED_LONG_AGO));
+        anonymousLinkSignals = new AnonymousLinkSignals(RANDOM_LOOKING_LABELS, domainAgeService, settingsService, Clock.systemUTC());
         this.urlService = new DefaultUrlService(
                 userService,
                 urlValidator,
@@ -263,7 +278,8 @@ class UrlServiceTest {
                 customDomainRepository,
                 campaignService,
                 settingsService,
-                withoutTransactions
+                withoutTransactions,
+                anonymousLinkSignals
         );
     }
 
@@ -1306,6 +1322,154 @@ class UrlServiceTest {
         verify(campaignService, never()).addHeldLink(anyLong(), anyLong(), any());
         assertThat(output).containsOnlyOnce("Campaign hold check skipped exception=org.springframework.dao.DataAccessResourceFailureException")
                 .doesNotContain("db.internal", "omaehhm");
+    }
+
+    @Test
+    void aRandomLookingAnonymousLinkGoesToReviewAndStaysLive() {
+        final var url = anonymousCreateOf(RANDOM_LINK, new LinkVerdict(Outcome.FLAG, YOUNG_DOMAIN, null, null));
+        when(domainAgeService.registeredOn("xdvqnxj.com")).thenReturn(Optional.empty());
+
+        final var created = urlService.saveUrlRouting(CreateUrlDto.builder().longUrl(RANDOM_LINK).build(), CLIENT_IP, CreatedVia.WEB);
+
+        verify(reviewQueueService).flag(url, List.of("domain registered in the last 30 days", RANDOM_LOOKING_DOMAIN));
+        org.mockito.Mockito.verifyNoMoreInteractions(reviewQueueService);
+        assertThat(url.getBlockReason()).isNull();
+        assertThat(url.getBlockedAt()).isNull();
+        assertThat(created).isEqualTo(UrlResponse.from(url));
+        verify(campaignService, never()).addHeldLink(anyLong(), anyLong(), any());
+    }
+
+    @Test
+    void aCleanRandomLookingAnonymousLinkGoesToReviewWithThatReasonOnly() {
+        final var url = anonymousCreateOf(RANDOM_LINK, LinkVerdict.clean());
+        when(domainAgeService.registeredOn("xdvqnxj.com")).thenReturn(Optional.of(LocalDate.now(java.time.ZoneOffset.UTC).minusDays(5)));
+
+        urlService.saveUrlRouting(CreateUrlDto.builder().longUrl(RANDOM_LINK).build(), CLIENT_IP, CreatedVia.WEB);
+
+        verify(reviewQueueService).flag(url, List.of(RANDOM_LOOKING_DOMAIN));
+        assertThat(url.getBlockReason()).isNull();
+    }
+
+    @Test
+    void anOldRandomLookingDomainIsNotQueued() {
+        anonymousCreateOf(RANDOM_LINK, LinkVerdict.clean());
+
+        urlService.saveUrlRouting(CreateUrlDto.builder().longUrl(RANDOM_LINK).build(), CLIENT_IP, CreatedVia.WEB);
+
+        verify(domainAgeService).registeredOn("xdvqnxj.com");
+        verifyNoInteractions(reviewQueueService);
+    }
+
+    @Test
+    void reviewOffQueuesNothing() {
+        anonymousCreateOf(RANDOM_LINK, LinkVerdict.clean());
+        when(domainAgeService.registeredOn("xdvqnxj.com")).thenReturn(Optional.empty());
+        SettingsServiceFixtures.turnOff(settingsService, SettingKey.RANDOM_DOMAIN_REVIEW);
+
+        urlService.saveUrlRouting(CreateUrlDto.builder().longUrl(RANDOM_LINK).build(), CLIENT_IP, CreatedVia.WEB);
+
+        verifyNoInteractions(reviewQueueService);
+    }
+
+    @Test
+    void reviewOffStillQueuesTheVerdictsOwnReasons() {
+        final var url = anonymousCreateOf(RANDOM_LINK, new LinkVerdict(Outcome.FLAG, YOUNG_DOMAIN, null, null));
+        when(domainAgeService.registeredOn("xdvqnxj.com")).thenReturn(Optional.empty());
+        SettingsServiceFixtures.turnOff(settingsService, SettingKey.RANDOM_DOMAIN_REVIEW);
+
+        urlService.saveUrlRouting(CreateUrlDto.builder().longUrl(RANDOM_LINK).build(), CLIENT_IP, CreatedVia.WEB);
+
+        verify(reviewQueueService).flag(url, YOUNG_DOMAIN);
+    }
+
+    @Test
+    void anAllowedVerdictIsNeverFlagged() {
+        anonymousCreateOf(RANDOM_LINK, new LinkVerdict(Outcome.ALLOWED, List.of(), null, null));
+
+        urlService.saveUrlRouting(CreateUrlDto.builder().longUrl(RANDOM_LINK).build(), CLIENT_IP, CreatedVia.WEB);
+
+        verifyNoInteractions(reviewQueueService, domainAgeService);
+    }
+
+    @Test
+    void aRandomLookingLinkThatIsDeduplicatedQueuesTheExistingLink() {
+        final var url = Url.builder().longUrl(RANDOM_LINK).build();
+        when(createUrlToUrlConverter.convert(any(CreateUrlDto.class))).thenReturn(url);
+        when(urlValidator.checkIfLongUrlIsNotBlocklisted(url)).thenReturn(LinkVerdict.clean());
+        final var existing = Url.builder().id(12L).shortUrl("v0DB3").longUrl(RANDOM_LINK).active(true).build();
+        when(urlRepository.existsUrlByLongUrlAndActiveTrueAndOwnerIsNull(RANDOM_LINK)).thenReturn(true);
+        when(urlRepository.findByLongUrlAndActiveTrue(RANDOM_LINK)).thenReturn(Optional.of(existing));
+        when(domainAgeService.registeredOn("xdvqnxj.com")).thenReturn(Optional.empty());
+
+        final var created = urlService.saveUrlRouting(CreateUrlDto.builder().longUrl(RANDOM_LINK).build(), CLIENT_IP, CreatedVia.WEB);
+
+        assertThat(created.id()).isEqualTo(12L);
+        verify(reviewQueueService).flag(existing, List.of(RANDOM_LOOKING_DOMAIN));
+    }
+
+    @Test
+    void aHeldLinkIsNeverGivenSignals() {
+        anonymousCreateOf("https://ll.xdvqnxj.com/wqamhcsom/?r=plfN8D&t=1793210826", new LinkVerdict(Outcome.FLAG, YOUNG_DOMAIN, null, null));
+        when(campaignService.holdingCampaignId(any())).thenReturn(Optional.of(4L));
+        when(campaignService.confirmHold(4L)).thenReturn(true);
+
+        urlService.saveUrlRouting(CreateUrlDto.builder().longUrl("https://ll.xdvqnxj.com/wqamhcsom/?r=plfN8D&t=1793210826").build(), CLIENT_IP,
+                CreatedVia.WEB);
+
+        verify(campaignService).addHeldLink(4L, 1L, "xdvqnxj.com");
+        verifyNoInteractions(domainAgeService, reviewQueueService);
+    }
+
+    @Test
+    void aSignedInLinkIsNeverGivenSignals() {
+        stubLinkCreation();
+        when(userService.getUserFromToken()).thenReturn(User.builder().id(7L).build());
+
+        urlService.saveUrlRouting(CreateUrlDto.builder().longUrl(RANDOM_LINK).build(), CLIENT_IP, CreatedVia.WEB);
+
+        verifyNoInteractions(domainAgeService, reviewQueueService);
+    }
+
+    @Test
+    void theSignalsAreComputedOutsideTheTransaction() {
+        final var transactionOperations = mock(TransactionOperations.class);
+        when(transactionOperations.execute(any())).thenAnswer(invocation ->
+                invocation.<org.springframework.transaction.support.TransactionCallback<?>>getArgument(0).doInTransaction(null));
+        final var url = anonymousCreateOf(RANDOM_LINK, LinkVerdict.clean());
+        when(domainAgeService.registeredOn("xdvqnxj.com")).thenReturn(Optional.empty());
+
+        urlServiceIn(transactionOperations).saveUrlRouting(CreateUrlDto.builder().longUrl(RANDOM_LINK).build(), CLIENT_IP, CreatedVia.WEB);
+
+        final var order = org.mockito.Mockito.inOrder(domainAgeService, transactionOperations, urlRepository, reviewQueueService);
+        order.verify(domainAgeService).registeredOn("xdvqnxj.com");
+        order.verify(transactionOperations).execute(any());
+        order.verify(urlRepository).save(url);
+        order.verify(reviewQueueService).flag(url, List.of(RANDOM_LOOKING_DOMAIN));
+    }
+
+    @Test
+    void theSignalsRunWithNoTransactionOpen() {
+        final var inTransaction = new AtomicReference<Boolean>();
+        when(appProperties.getShortUrlLength()).thenReturn(5L);
+        when(urlRepository.save(any(Url.class))).thenAnswer(invocation -> persisted(invocation.getArgument(0)));
+        when(linkCheckService.check(RANDOM_LINK)).thenReturn(LinkVerdict.clean());
+        when(domainAgeService.registeredOn("xdvqnxj.com")).thenAnswer(invocation -> {
+            inTransaction.set(TransactionSynchronizationManager.isActualTransactionActive());
+            return Optional.empty();
+        });
+
+        transactionalUrlService().saveUrlRouting(CreateUrlDto.builder().longUrl(RANDOM_LINK).build(), CLIENT_IP, CreatedVia.WEB);
+
+        assertThat(inTransaction).hasValue(false);
+        verify(reviewQueueService).flag(any(Url.class), org.mockito.ArgumentMatchers.eq(List.of(RANDOM_LOOKING_DOMAIN)));
+    }
+
+    private UrlService urlServiceIn(final TransactionOperations transactionOperations) {
+        return new DefaultUrlService(userService, urlValidator, apiKeyService, urlRepository, appProperties, apiKeyValidator, clickAnalyticsService,
+                urlToPeekUrlConverter, createUrlToUrlConverter, urlUpdateDtoToUrlConverter, new UrlCache(cacheManager), objectMapper, meterRegistry,
+                passwordEncoder, suspiciousUrlService, rateLimiter, reviewQueueService, scammerSignalService, clickCheckService, redirectChainService,
+                transactionOperations, reservedAliasService, burstAlertService, destinationCheckRepository, customDomainRegistry, customDomainRepository,
+                campaignService, settingsService, withoutTransactions, anonymousLinkSignals);
     }
 
     private Url anonymousCreateOf(final String longUrl, final LinkVerdict verdict) {
@@ -3626,7 +3790,7 @@ class UrlServiceTest {
                 new io.micrometer.core.instrument.simple.SimpleMeterRegistry(), passwordEncoder, suspiciousUrlService, rateLimiter,
                 reviewQueueService, scammerSignalService, clickCheckService, redirectChainService, TransactionOperations.withoutTransaction(),
                 reservedAliasService, burstAlertService, destinationCheckRepository, customDomainRegistry, customDomainRepository, campaignService, settingsService,
-                withoutTransactions);
+                withoutTransactions, anonymousLinkSignals);
     }
 
     private static UrlService withTheCacheAnnotations(final UrlService service, final CacheManager urls) {
@@ -3680,7 +3844,8 @@ class UrlServiceTest {
                 customDomainRepository,
                 campaignService,
                 settingsService,
-                withoutTransactions
+                withoutTransactions,
+                anonymousLinkSignals
         );
     }
 
@@ -3759,7 +3924,8 @@ class UrlServiceTest {
                 customDomainRepository,
                 campaignService,
                 settingsService,
-                transactionManager
+                transactionManager,
+                anonymousLinkSignals
         );
         final var proxyFactory = new ProxyFactory(service);
         proxyFactory.addAdvice(new TransactionInterceptor(transactionManager, new AnnotationTransactionAttributeSource()));
@@ -3797,7 +3963,8 @@ class UrlServiceTest {
                 customDomainRepository,
                 campaignService,
                 settingsService,
-                withoutTransactions
+                withoutTransactions,
+                anonymousLinkSignals
         );
     }
 
@@ -3831,7 +3998,8 @@ class UrlServiceTest {
                 customDomainRepository,
                 campaignService,
                 settingsService,
-                withoutTransactions
+                withoutTransactions,
+                anonymousLinkSignals
         );
     }
 
