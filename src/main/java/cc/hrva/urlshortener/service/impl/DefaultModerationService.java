@@ -195,11 +195,12 @@ public class DefaultModerationService implements ModerationService {
                     skipped.add(new DomainBulkBlockResponse.Skipped(entry.getValue(), BLOCK_FAILED));
                     continue;
                 }
+                final var domainsDisabled = disableMatchingDomains(ruleDomain, reason);
                 final var rulesBelow = rulesBelow(ruleDomain, rules);
                 final var count = eachLink(idsByDomain.getOrDefault(ruleDomain, List.of()), Long::longValue,
                         id -> blockOnDomain(id, ruleDomain, rulesBelow, performedBy, linksBlocked::add));
                 blocked.add(new DomainBulkBlockResponse.Blocked(ruleDomain, count));
-                logBulkDomainBlock(ruleDomain, count, reason, performedBy, via);
+                logBulkDomainBlock(ruleDomain, count, domainsDisabled, reason, performedBy, via);
             }
         }
         notifyOwners(linksBlocked);
@@ -233,9 +234,19 @@ public class DefaultModerationService implements ModerationService {
         return toBlock;
     }
 
-    private void logBulkDomainBlock(final String ruleDomain, final int blocked, final String reason, final String performedBy, final String via) {
+    private int disableMatchingDomains(final String ruleDomain, final String reason) {
         try {
-            logDomainBlock(ruleDomain, blocked, 0, reason, performedBy, via);
+            return customDomainModeration.disableMatching(ruleDomain, reason);
+        } catch (final RuntimeException exception) {
+            log.warn("Turning off the custom domains of a blocked domain failed, continuing domain={}", ruleDomain, exception);
+            return 0;
+        }
+    }
+
+    private void logBulkDomainBlock(final String ruleDomain, final int blocked, final int domains, final String reason, final String performedBy,
+                                    final String via) {
+        try {
+            logDomainBlock(ruleDomain, blocked, domains, reason, performedBy, via);
         } catch (final RuntimeException exception) {
             log.warn("Writing the audit entry of a blocked domain failed domain={} links={}", ruleDomain, blocked, exception);
         }

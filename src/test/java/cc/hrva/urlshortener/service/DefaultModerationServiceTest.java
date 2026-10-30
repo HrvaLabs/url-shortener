@@ -1798,6 +1798,24 @@ class DefaultModerationServiceTest {
     }
 
     @Test
+    void blockingSeveralDomainsDisablesTheCustomDomainsOnEachRule() {
+        final var onTheRule = customDomain(70L, "go.omaehhm.com", CustomDomainStatus.ACTIVE, null);
+        final var elsewhere = customDomain(71L, "go.example.org", CustomDomainStatus.ACTIVE, null);
+        when(customDomainRepository.findByStatusIn(anyCollection())).thenReturn(List.of(onTheRule, elsewhere));
+        when(customDomainRepository.findByIdForUpdate(70L)).thenReturn(Optional.of(onTheRule));
+        when(customDomainRepository.markDisabled(eq(70L), eq(CustomDomainStatus.ACTIVE), eq(DomainDisableReason.DOMAIN_RULE),
+                eq("omaehhm.com: Phishing"), any())).thenReturn(1);
+
+        moderationService.blockDomains(List.of("omaehhm.com", "fvvxctw.com"), "Phishing", ADMIN, "admin-bulk");
+
+        verify(customDomainRepository, never()).markDisabled(eq(71L), any(), any(), any(), any());
+        verify(eventPublisher).publishEvent(new DomainDisabled(70L, "go.omaehhm.com", DomainDisableReason.DOMAIN_RULE, "omaehhm.com: Phishing"));
+        verify(auditLogService).log(ADMIN, AuditAction.BLOCK_DOMAIN, "Domain", "omaehhm.com", "reason: Phishing, domains: 1, links: 0, via: admin-bulk");
+        verify(auditLogService).log(ADMIN, AuditAction.BLOCK_DOMAIN, "Domain", "fvvxctw.com", "reason: Phishing, links: 0, via: admin-bulk");
+        assertThat(outOfPlace).isEmpty();
+    }
+
+    @Test
     void blockingSeveralDomainsSendsEachOwnerOneEmailAfterEveryDomainIsBlocked() {
         final var alice = user(1L, "alice@example.com");
         final var bob = user(2L, "bob@example.com");
