@@ -122,6 +122,18 @@ class SettingValuesTest {
     }
 
     @Test
+    void customAliasesSaysCustomDomainsKeepTheirAliases() {
+        assertThat(SettingKey.CUSTOM_ALIASES.getDescription())
+                .isEqualTo("Signed-in users choose their own short link on the web, the API and MCP. Links on a custom domain keep their aliases.");
+    }
+
+    @Test
+    void theNightlySafeBrowsingSwitchSaysTheRedirectHopLookupsStillRun() {
+        assertThat(SettingKey.NIGHTLY_SAFE_BROWSING.getDescription()).isEqualTo("The Safe Browsing part of the 04:30 recheck. The same run's "
+                + "Safe Browsing lookups on redirect hops still happen, and the other rechecks follow their own switches.");
+    }
+
+    @Test
     void failClosedSafeBrowsingIsNotASafetySwitch() {
         assertThat(SettingKey.SAFE_BROWSING_FAIL_CLOSED.isSafety()).isFalse();
         assertThat(SettingKey.SAFE_BROWSING_FAIL_CLOSED.getParent()).isEqualTo(SettingKey.SAFE_BROWSING_CHECK);
