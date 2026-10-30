@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.9.xsd">
+
+    <changeSet author="khrvacic" id="033-app-setting">
+        <createTable tableName="app_setting">
+            <column name="setting_key" type="VARCHAR(60)">
+                <constraints primaryKey="true" primaryKeyName="pk_app_setting" nullable="false"/>
+            </column>
+            <column name="setting_value" type="VARCHAR(2000)"/>
+            <column name="changed_by" type="VARCHAR(255)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="changed_at" type="TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+        <rollback>
+            <dropTable tableName="app_setting"/>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>
