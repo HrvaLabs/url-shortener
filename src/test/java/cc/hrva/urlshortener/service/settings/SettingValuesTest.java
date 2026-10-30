@@ -112,6 +112,22 @@ class SettingValuesTest {
     }
 
     @Test
+    void theLinkCheckSwitchesNameEveryPlaceTheyReach() {
+        assertThat(SettingKey.SAFE_BROWSING_CHECK.getDescription())
+                .isEqualTo("New links, links turned back on and changed destinations are checked with Google Safe Browsing.");
+        assertThat(SettingKey.BLOCKLIST_CHECK.getDescription()).isEqualTo("The enabled blocklists and Spamhaus, on new links, clicks, the nightly "
+                + "recheck, redirect hops, Allow-rule restores, custom-domain applications and the nightly custom-domain check. Domain rules always apply.");
+        assertThat(SettingKey.SUSPICIOUS_LINK_CHECK.getDescription()).isEqualTo("Lookalike brands, risky endings, login lures and young domains, "
+                + "on new links, the nightly recheck, redirect hops, Allow-rule restores, custom-domain applications and the nightly custom-domain check.");
+    }
+
+    @Test
+    void failClosedSafeBrowsingIsNotASafetySwitch() {
+        assertThat(SettingKey.SAFE_BROWSING_FAIL_CLOSED.isSafety()).isFalse();
+        assertThat(SettingKey.SAFE_BROWSING_FAIL_CLOSED.getParent()).isEqualTo(SettingKey.SAFE_BROWSING_CHECK);
+    }
+
+    @Test
     void groupsAreLabelledInOrderAndLabelsAreUnique() {
         final var keys = Arrays.asList(SettingKey.values());
         assertThat(keys).extracting(SettingKey::getLabel).doesNotHaveDuplicates();

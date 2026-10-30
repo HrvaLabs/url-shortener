@@ -13,6 +13,7 @@ import cc.hrva.urlshortener.service.notification.MutableClock;
 import cc.hrva.urlshortener.service.settings.EmailKind;
 import cc.hrva.urlshortener.service.settings.SettingDefaults;
 import cc.hrva.urlshortener.service.settings.SettingKey;
+import cc.hrva.urlshortener.service.settings.SettingType;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -34,6 +35,7 @@ import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.event.EventListener;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.transaction.support.SimpleTransactionStatus;
 import org.springframework.transaction.support.TransactionCallback;
@@ -47,6 +49,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -195,6 +198,25 @@ class DefaultSettingsServiceTest {
     }
 
     @Test
+    void aValueEqualToTheDefaultStillRemovesAnUnreadableRow(final CapturedOutput output) {
+        rows.put("CAMPAIGN_LINKS", row(SettingKey.CAMPAIGN_LINKS, "99"));
+        settingsService.refresh();
+
+        final var changed = settingsService.change(SettingKey.CAMPAIGN_LINKS, NODES.numberNode(3), ADMIN);
+        settingsService.refresh();
+
+        assertThat(rows).doesNotContainKey("CAMPAIGN_LINKS");
+        assertThat(steps).containsExactly("begin", "delete CAMPAIGN_LINKS in a transaction", "commit", "audit", "publish");
+        verify(auditLogService).log(ADMIN, AuditAction.CHANGE_SETTING, "Setting", "CAMPAIGN_LINKS", "from: 3, to: 3");
+        assertThat(changed.value()).isEqualTo(3);
+        assertThat(changed.changed()).isFalse();
+        assertThat(output.getOut().lines().filter(line -> line.contains("key=CAMPAIGN_LINKS"))).hasSizeLessThanOrEqualTo(2);
+        final var warningsSoFar = output.getOut().lines().filter(line -> line.contains("key=CAMPAIGN_LINKS")).count();
+        settingsService.refresh();
+        assertThat(output.getOut().lines().filter(line -> line.contains("key=CAMPAIGN_LINKS"))).hasSize((int) warningsSoFar);
+    }
+
+    @Test
     void anUnchangedValueDoesNothing() {
         settingsService.change(SettingKey.CAMPAIGN_LINKS, NODES.numberNode(3), ADMIN);
         rows.put("TRAFFIC_ALERTS", row(SettingKey.TRAFFIC_ALERTS, "false"));
@@ -288,6 +310,30 @@ class DefaultSettingsServiceTest {
     }
 
     @Test
+    void aRowThatFailsToReadWarnsForItsKeyAndTheOthersStillLoad(final CapturedOutput output) {
+        final var broken = mock(AppSetting.class);
+        when(broken.getSettingKey()).thenReturn("CAMPAIGN_LINKS");
+        when(broken.getSettingValue()).thenThrow(new IllegalStateException("No setting of type TEXT can be changed yet"));
+        rows.put("CAMPAIGN_LINKS", broken);
+        rows.put("TRAFFIC_LINK_CLICKS", row(SettingKey.TRAFFIC_LINK_CLICKS, "30"));
+
+        settingsService.refresh();
+
+        assertThat(settingsService.number(SettingKey.TRAFFIC_LINK_CLICKS)).isEqualTo(30);
+        assertThat(settingsService.number(SettingKey.CAMPAIGN_LINKS)).isEqualTo(3);
+        assertThat(output.getOut().lines().filter(line -> line.contains("WARN"))).hasSize(1)
+                .allSatisfy(line -> assertThat(line).contains("key=CAMPAIGN_LINKS"));
+    }
+
+    @Test
+    void theSettingsAreReloadedEvery30SecondsAfterTheStartupLoad() throws NoSuchMethodException {
+        final var scheduled = DefaultSettingsService.class.getMethod("refresh").getAnnotation(Scheduled.class);
+
+        assertThat(scheduled.fixedDelay()).isEqualTo(30_000);
+        assertThat(scheduled.initialDelay()).isEqualTo(30_000);
+    }
+
+    @Test
     void emailSwitchOffNamesSendEmailsFirst() {
         rows.put("SEND_EMAILS", row(SettingKey.SEND_EMAILS, "false"));
         rows.put("EMAIL_LINK_BLOCKED", row(SettingKey.EMAIL_LINK_BLOCKED, "false"));
@@ -321,13 +367,24 @@ class DefaultSettingsServiceTest {
 
     @Test
     void safetySwitchesOffListsOnlySafetySwitches() {
-        appProperties.setSafeBrowsingFailClosed(true);
         rows.put("ANONYMOUS_LINKS", row(SettingKey.ANONYMOUS_LINKS, "false"));
         rows.put("SEND_EMAILS", row(SettingKey.SEND_EMAILS, "false"));
         rows.put("NIGHTLY_SAFE_BROWSING", row(SettingKey.NIGHTLY_SAFE_BROWSING, "false"));
         rows.put("BLOCKLIST_CHECK", row(SettingKey.BLOCKLIST_CHECK, "false"));
 
+        assertThat(settingsService.isOn(SettingKey.SAFE_BROWSING_FAIL_CLOSED)).isFalse();
         assertThat(settingsService.safetySwitchesOff()).containsExactly(SettingKey.BLOCKLIST_CHECK, SettingKey.NIGHTLY_SAFE_BROWSING);
+    }
+
+    @Test
+    void aSafetySwitchUnderASwitchThatIsOffIsNotListed() {
+        Arrays.stream(SettingKey.values()).filter(key -> key.getType() == SettingType.SWITCH).forEach(key -> rows.put(key.name(), row(key, "false")));
+        settingsService.refresh();
+
+        assertThat(settingsService.safetySwitchesOff())
+                .containsExactly(SettingKey.SAFE_BROWSING_CHECK, SettingKey.BLOCKLIST_CHECK, SettingKey.SUSPICIOUS_LINK_CHECK,
+                        SettingKey.NIGHTLY_SAFE_BROWSING, SettingKey.NIGHTLY_DESTINATION_CHECK)
+                .allSatisfy(key -> assertThat(key.getParent() == null || settingsService.isOn(key.getParent())).isTrue());
     }
 
     @Test

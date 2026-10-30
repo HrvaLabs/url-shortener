@@ -116,6 +116,7 @@ public class DefaultSettingsService implements SettingsService {
     public List<SettingKey> safetySwitchesOff() {
         return Arrays.stream(SettingKey.values())
                 .filter(key -> key.isSafety() && key.getType() == SettingType.SWITCH)
+                .filter(key -> key.getParent() == null || isOn(key.getParent()))
                 .filter(key -> !isOn(key))
                 .toList();
     }
@@ -147,8 +148,10 @@ public class DefaultSettingsService implements SettingsService {
     private Change write(final SettingKey key, final Object value, final String changedBy) {
         final var row = appSettingRepository.findById(key.name());
         final var defaultValue = settingDefaults.defaultOf(key);
-        final var before = valueOf(key, row, defaultValue);
-        if (Objects.equals(before, value)) {
+        final var readable = row.flatMap(existing -> storedValue(key, existing));
+        final var before = readable.isPresent() ? readable.get().value() : defaultValue;
+        final var unreadable = row.isPresent() && readable.isEmpty();
+        if (!unreadable && Objects.equals(before, value)) {
             return null;
         }
         if (Objects.equals(value, defaultValue)) {
@@ -214,7 +217,7 @@ public class DefaultSettingsService implements SettingsService {
     private static Optional<StoredValue> storedValue(final SettingKey key, final AppSetting row) {
         try {
             return Optional.of(new StoredValue(key, SettingValues.fromStored(key, row.getSettingValue()), row.getChangedBy(), row.getChangedAt()));
-        } catch (final IllegalArgumentException exception) {
+        } catch (final IllegalArgumentException | IllegalStateException exception) {
             log.warn("A stored setting no longer fits, using its default key={}", key);
             return Optional.empty();
         }
