@@ -41,6 +41,7 @@ import cc.hrva.urlshortener.service.domain.CustomDomainAccountData;
 import cc.hrva.urlshortener.service.notification.NotificationAccountData;
 import cc.hrva.urlshortener.util.EmailAddresses;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
@@ -262,7 +263,7 @@ public class DefaultUserService implements UserService {
         userRepository.save(existingUser);
         final var deactivated = Boolean.FALSE.equals(editedUser.getActive()) && userRepository.deactivateById(existingUser.getId()) == 1;
         if (Boolean.TRUE.equals(editedUser.getActive()) && userRepository.reactivateById(existingUser.getId()) == 1) {
-            eventPublisher.publishEvent(new AccountActiveChangedEvent(existingUser.getId()));
+            eventPublisher.publishEvent(new AccountActiveChangedEvent(List.of(existingUser.getId())));
         }
         final var updatedUser = userRepository.findById(existingUser.getId())
                 .orElseThrow(() -> new UserNotFoundException("User not found"));
@@ -273,6 +274,7 @@ public class DefaultUserService implements UserService {
         if (deactivated) {
             log.info("Deactivated user with id {}", updatedUser.getId());
             cascadeDeactivation(updatedUser);
+            eventPublisher.publishEvent(new AccountActiveChangedEvent(List.of(updatedUser.getId())));
         }
 
         return AdminUserResponse.from(updatedUser);
@@ -334,6 +336,7 @@ public class DefaultUserService implements UserService {
         userRepository.saveAll(users);
         if (!users.isEmpty()) {
             log.info("Deactivated {} users", users.size());
+            eventPublisher.publishEvent(new AccountActiveChangedEvent(users.stream().map(User::getId).toList()));
         }
     }
 
@@ -345,6 +348,7 @@ public class DefaultUserService implements UserService {
         }
         log.info("Deactivated user with id {}", user.getId());
         cascadeDeactivation(user);
+        eventPublisher.publishEvent(new AccountActiveChangedEvent(List.of(user.getId())));
     }
 
     @Override
@@ -352,7 +356,7 @@ public class DefaultUserService implements UserService {
     public boolean reactivate(final long userId) {
         final var reactivated = userRepository.reactivateById(userId) == 1;
         if (reactivated) {
-            eventPublisher.publishEvent(new AccountActiveChangedEvent(userId));
+            eventPublisher.publishEvent(new AccountActiveChangedEvent(List.of(userId)));
         }
         return reactivated;
     }
@@ -380,7 +384,6 @@ public class DefaultUserService implements UserService {
 
         disconnectConnectedApps(user.getId(), user.getEmail());
         sendingEmailService.sendEmailAccountDeactivated(user);
-        eventPublisher.publishEvent(new AccountActiveChangedEvent(user.getId()));
     }
 
     private void disconnectConnectedApps(final Long userId, final String email) {

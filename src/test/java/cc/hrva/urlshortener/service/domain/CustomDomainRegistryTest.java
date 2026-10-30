@@ -205,13 +205,13 @@ class CustomDomainRegistryTest {
 
         transactionOperations.executeWithoutResult(status -> {
             jdbcTemplate.update("update user_account set active = false where id = ?", ANA);
-            eventPublisher.publishEvent(new AccountActiveChangedEvent(ANA));
+            eventPublisher.publishEvent(new AccountActiveChangedEvent(List.of(ANA)));
         });
         assertThat(registry.active("go.example.com")).isEmpty();
 
         transactionOperations.executeWithoutResult(status -> {
             jdbcTemplate.update("update user_account set active = true where id = ?", ANA);
-            eventPublisher.publishEvent(new AccountActiveChangedEvent(ANA));
+            eventPublisher.publishEvent(new AccountActiveChangedEvent(List.of(ANA)));
         });
         assertThat(registry.active("go.example.com")).isPresent();
     }
@@ -229,6 +229,21 @@ class CustomDomainRegistryTest {
         });
 
         assertThat(registry.route("go.example.com").map(DomainRoute::status)).isEqualTo(Optional.of(CustomDomainStatus.ACTIVE));
+    }
+
+    @Test
+    void aRolledBackAccountChangeReloadsNothing() {
+        domain(ANA, "go.example.com", CustomDomainStatus.ACTIVE);
+        registry.reload();
+
+        jdbcTemplate.update("update user_account set active = false where id = ?", ANA);
+
+        transactionOperations.executeWithoutResult(status -> {
+            eventPublisher.publishEvent(new AccountActiveChangedEvent(List.of(ANA)));
+            status.setRollbackOnly();
+        });
+
+        assertThat(registry.active("go.example.com")).isPresent();
     }
 
     @Test

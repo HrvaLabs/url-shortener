@@ -722,6 +722,31 @@ class DefaultUserServiceTest {
     }
 
     @Test
+    void deactivatingUnusedAccountsReloadsTheDomainRoutesOnceAfterSavingThem() {
+        final var first = User.builder().id(1L).email("idle-one@example.com").active(true).build();
+        final var second = User.builder().id(2L).email("idle-two@example.com").active(true).build();
+        when(appProperties.getDeactivateUserAccountAfterDays()).thenReturn(30L);
+        when(userRepository.findByLastLoginIsLessThanEqualAndActiveTrue(any(java.time.LocalDateTime.class))).thenReturn(List.of(first, second));
+
+        userService.deactivateUnusedUserAccounts();
+
+        final var inOrder = inOrder(userRepository, eventPublisher);
+        inOrder.verify(userRepository).saveAll(List.of(first, second));
+        inOrder.verify(eventPublisher).publishEvent(new AccountActiveChangedEvent(List.of(1L, 2L)));
+        verify(eventPublisher, times(1)).publishEvent(any(AccountActiveChangedEvent.class));
+    }
+
+    @Test
+    void deactivatingNoUnusedAccountsReloadsNothing() {
+        when(appProperties.getDeactivateUserAccountAfterDays()).thenReturn(30L);
+        when(userRepository.findByLastLoginIsLessThanEqualAndActiveTrue(any(java.time.LocalDateTime.class))).thenReturn(List.of());
+
+        userService.deactivateUnusedUserAccounts();
+
+        verify(eventPublisher, never()).publishEvent(any(AccountActiveChangedEvent.class));
+    }
+
+    @Test
     void shouldRevokeApiKeysWhenDeactivatingUnusedAccount() {
         final var user = User.builder().id(1L).active(true).build();
         when(appProperties.getDeactivateUserAccountAfterDays()).thenReturn(30L);
@@ -773,8 +798,8 @@ class DefaultUserServiceTest {
         userService.reactivate(1L);
         userService.reactivate(2L);
 
-        verify(eventPublisher, times(2)).publishEvent(new AccountActiveChangedEvent(1L));
-        verify(eventPublisher, never()).publishEvent(new AccountActiveChangedEvent(2L));
+        verify(eventPublisher, times(2)).publishEvent(new AccountActiveChangedEvent(List.of(1L)));
+        verify(eventPublisher, never()).publishEvent(new AccountActiveChangedEvent(List.of(2L)));
     }
 
     @Test
@@ -792,7 +817,7 @@ class DefaultUserServiceTest {
         userService.updateUser(on);
         userService.updateUser(on);
 
-        verify(eventPublisher, times(2)).publishEvent(new AccountActiveChangedEvent(1L));
+        verify(eventPublisher, times(2)).publishEvent(new AccountActiveChangedEvent(List.of(1L)));
     }
 
     @Test

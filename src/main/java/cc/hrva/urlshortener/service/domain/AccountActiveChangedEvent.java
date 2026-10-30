@@ -1,4 +1,6 @@
 package cc.hrva.urlshortener.service.domain;
 
-public record AccountActiveChangedEvent(long userId) {
+import java.util.List;
+
+public record AccountActiveChangedEvent(List<Long> userIds) {
 }
