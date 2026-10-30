@@ -71,7 +71,9 @@ public class CustomDomainRemoval {
                 .filter(found -> found.getStatus() != CustomDomainStatus.DELETED)
                 .orElseThrow(() -> new CustomDomainNotFoundException(NOT_FOUND));
         final var from = domain.getStatus();
-        final var ownerEmail = actor.admin() && domain.getOwner() != null ? domain.getOwner().getEmail() : null;
+        final var ownerEmail = actor.admin() && from != CustomDomainStatus.REJECTED && domain.getOwner() != null
+                ? domain.getOwner().getEmail()
+                : null;
         if (mode == DomainLinkMode.MOVE && !actor.admin() && from == CustomDomainStatus.DISABLED
                 && TURNED_OFF_BY_HRVA.contains(domain.getDisabledReason())) {
             log.info("Custom domain removal with its links moved refused, hrva.cc turned it off domainId={} reason={}", domainId,

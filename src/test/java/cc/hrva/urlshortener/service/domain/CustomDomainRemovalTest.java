@@ -380,6 +380,21 @@ class CustomDomainRemovalTest {
     }
 
     @Test
+    void anAdminRemovingARejectedApplicationEmailsNobodyButAPendingOneIsTold() {
+        final var rejected = domain("old.example.com", "REJECTED", null);
+        final var pending = domain("new.example.com", "PENDING_REVIEW", null);
+
+        customDomainRemoval.remove(rejected, DomainLinkMode.DEACTIVATE, ADMIN);
+
+        assertThat(statusOf(rejected)).isEqualTo("DELETED");
+        verifyNoInteractions(sendingEmailService);
+
+        customDomainRemoval.remove(pending, DomainLinkMode.DEACTIVATE, ADMIN);
+
+        verify(sendingEmailService).sendDomainRemovedEmail("ana@hrva.cc", "new.example.com", DomainRemovalResponse.nothing(), DomainLinkMode.DEACTIVATE);
+    }
+
+    @Test
     void aFailedEmailKeepsTheDomainRemoved() {
         final var domain = domain("go.example.com", "ACTIVE", "cf-1");
         doThrow(new TaskRejectedException("mail queue full")).when(sendingEmailService).sendDomainRemovedEmail(anyString(), anyString(), any(), any());

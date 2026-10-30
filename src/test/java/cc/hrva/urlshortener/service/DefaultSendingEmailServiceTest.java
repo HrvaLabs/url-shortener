@@ -1372,6 +1372,8 @@ class DefaultSendingEmailServiceTest {
         });
 
         assertThat(emails.getFirst().getText()).doesNotContain("<b>no</b>", "<script>").contains("&lt;b&gt;no&lt;/b&gt;&lt;script&gt;");
+        assertThat(emails.getFirst().getPlainText()).contains("Note from the admin: <b>no</b><script>alert(1)</script>");
+        assertThat(emails.get(1).getPlainText()).contains("Reason: <i>spam</i>");
         assertThat(emails.get(1).getText()).doesNotContain("<i>spam</i>").contains("&lt;i&gt;spam&lt;/i&gt;");
     }
 
