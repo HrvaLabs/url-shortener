@@ -207,7 +207,8 @@ class DefaultSettingsServiceTest {
 
         assertThat(rows).doesNotContainKey("CAMPAIGN_LINKS");
         assertThat(steps).containsExactly("begin", "delete CAMPAIGN_LINKS in a transaction", "commit", "audit", "publish");
-        verify(auditLogService).log(ADMIN, AuditAction.CHANGE_SETTING, "Setting", "CAMPAIGN_LINKS", "from: 3, to: 3");
+        verify(auditLogService).log(ADMIN, AuditAction.RESET_SETTING, "Setting", "CAMPAIGN_LINKS", "from: 3, to: 3");
+        verify(eventPublisher).publishEvent(new SettingChanged("Same-shape alert: links", "reset to its default (3)", ADMIN));
         assertThat(changed.value()).isEqualTo(3);
         assertThat(changed.changed()).isFalse();
         assertThat(output.getOut().lines().filter(line -> line.contains("key=CAMPAIGN_LINKS"))).hasSizeLessThanOrEqualTo(2);

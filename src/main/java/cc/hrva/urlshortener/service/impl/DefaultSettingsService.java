@@ -103,13 +103,13 @@ public class DefaultSettingsService implements SettingsService {
     public SettingResponse change(final SettingKey key, final JsonNode value, final String changedBy) {
         final var parsed = SettingValues.parse(key, value);
         final var change = transactionOperations.execute(status -> write(key, parsed, changedBy));
-        return finish(key, change, AuditAction.CHANGE_SETTING, changedBy);
+        return finish(key, change, changedBy);
     }
 
     @Override
     public SettingResponse reset(final SettingKey key, final String changedBy) {
         final var change = transactionOperations.execute(status -> delete(key));
-        return finish(key, change, AuditAction.RESET_SETTING, changedBy);
+        return finish(key, change, changedBy);
     }
 
     @Override
@@ -156,14 +156,14 @@ public class DefaultSettingsService implements SettingsService {
         }
         if (Objects.equals(value, defaultValue)) {
             appSettingRepository.deleteById(key.name());
-            return new Change(before, value);
+            return new Change(before, value, unreadable ? AuditAction.RESET_SETTING : AuditAction.CHANGE_SETTING);
         }
         final var setting = row.orElseGet(() -> AppSetting.builder().settingKey(key.name()).build());
         setting.setSettingValue(SettingValues.stored(value));
         setting.setChangedBy(changedBy);
         setting.setChangedAt(LocalDateTime.now(clock));
         appSettingRepository.save(setting);
-        return new Change(before, value);
+        return new Change(before, value, AuditAction.CHANGE_SETTING);
     }
 
     private Change delete(final SettingKey key) {
@@ -174,7 +174,7 @@ public class DefaultSettingsService implements SettingsService {
         final var defaultValue = settingDefaults.defaultOf(key);
         final var before = valueOf(key, row, defaultValue);
         appSettingRepository.deleteById(key.name());
-        return new Change(before, defaultValue);
+        return new Change(before, defaultValue, AuditAction.RESET_SETTING);
     }
 
     private static Object valueOf(final SettingKey key, final Optional<AppSetting> row, final Object defaultValue) {
@@ -182,18 +182,18 @@ public class DefaultSettingsService implements SettingsService {
         return value.isPresent() ? value.get().value() : defaultValue;
     }
 
-    private SettingResponse finish(final SettingKey key, final Change change, final AuditAction action, final String changedBy) {
+    private SettingResponse finish(final SettingKey key, final Change change, final String changedBy) {
         if (change != null) {
             refresh();
-            auditLogService.log(changedBy, action, TARGET_SETTING, key.name(),
+            auditLogService.log(changedBy, change.action(), TARGET_SETTING, key.name(),
                     AUDIT_DETAILS.formatted(SettingValues.format(key, change.before()), SettingValues.format(key, change.after())));
-            eventPublisher.publishEvent(new SettingChanged(key.getLabel(), changeText(key, change, action), changedBy));
+            eventPublisher.publishEvent(new SettingChanged(key.getLabel(), changeText(key, change), changedBy));
         }
         return response(key, values().get(key));
     }
 
-    private static String changeText(final SettingKey key, final Change change, final AuditAction action) {
-        if (action == AuditAction.RESET_SETTING) {
+    private static String changeText(final SettingKey key, final Change change) {
+        if (change.action() == AuditAction.RESET_SETTING) {
             return RESET.formatted(SettingValues.format(key, change.after()));
         }
         if (key.getType() == SettingType.SWITCH) {
@@ -255,6 +255,6 @@ public class DefaultSettingsService implements SettingsService {
 
     private record StoredValue(SettingKey key, Object value, String changedBy, LocalDateTime changedAt) {}
 
-    private record Change(Object before, Object after) {}
+    private record Change(Object before, Object after, AuditAction action) {}
 
 }
