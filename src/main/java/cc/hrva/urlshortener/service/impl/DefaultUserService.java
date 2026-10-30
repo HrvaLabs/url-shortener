@@ -36,6 +36,7 @@ import cc.hrva.urlshortener.service.ScammerSignalService;
 import cc.hrva.urlshortener.service.UserService;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent;
 import cc.hrva.urlshortener.service.bio.BioAccountData;
+import cc.hrva.urlshortener.service.domain.AccountActiveChangedEvent;
 import cc.hrva.urlshortener.service.domain.CustomDomainAccountData;
 import cc.hrva.urlshortener.service.notification.NotificationAccountData;
 import cc.hrva.urlshortener.util.EmailAddresses;
@@ -260,8 +261,8 @@ public class DefaultUserService implements UserService {
         existingUser.setApiKeySlots(editedUser.getApiKeySlots());
         userRepository.save(existingUser);
         final var deactivated = Boolean.FALSE.equals(editedUser.getActive()) && userRepository.deactivateById(existingUser.getId()) == 1;
-        if (Boolean.TRUE.equals(editedUser.getActive())) {
-            userRepository.reactivateById(existingUser.getId());
+        if (Boolean.TRUE.equals(editedUser.getActive()) && userRepository.reactivateById(existingUser.getId()) == 1) {
+            eventPublisher.publishEvent(new AccountActiveChangedEvent(existingUser.getId()));
         }
         final var updatedUser = userRepository.findById(existingUser.getId())
                 .orElseThrow(() -> new UserNotFoundException("User not found"));
@@ -349,7 +350,11 @@ public class DefaultUserService implements UserService {
     @Override
     @Transactional
     public boolean reactivate(final long userId) {
-        return userRepository.reactivateById(userId) == 1;
+        final var reactivated = userRepository.reactivateById(userId) == 1;
+        if (reactivated) {
+            eventPublisher.publishEvent(new AccountActiveChangedEvent(userId));
+        }
+        return reactivated;
     }
 
     @Override
@@ -375,6 +380,7 @@ public class DefaultUserService implements UserService {
 
         disconnectConnectedApps(user.getId(), user.getEmail());
         sendingEmailService.sendEmailAccountDeactivated(user);
+        eventPublisher.publishEvent(new AccountActiveChangedEvent(user.getId()));
     }
 
     private void disconnectConnectedApps(final Long userId, final String email) {

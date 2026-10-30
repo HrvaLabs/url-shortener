@@ -56,6 +56,11 @@ public class CustomDomainRegistry implements SmartInitializingSingleton {
         reload();
     }
 
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
+    public void onAccountChange(final AccountActiveChangedEvent event) {
+        reload();
+    }
+
     private TransactionTemplate readTransaction() {
         final var template = new TransactionTemplate(transactionManager);
         template.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);

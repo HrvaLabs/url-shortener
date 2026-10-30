@@ -60,6 +60,7 @@ import cc.hrva.urlshortener.security.RecentSignIn;
 import cc.hrva.urlshortener.security.TokenProvider;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent;
 import cc.hrva.urlshortener.service.bio.BioAccountData;
+import cc.hrva.urlshortener.service.domain.AccountActiveChangedEvent;
 import cc.hrva.urlshortener.service.domain.CustomDomainAccountData;
 import cc.hrva.urlshortener.service.impl.DefaultLoginAttemptService;
 import cc.hrva.urlshortener.service.notification.NotificationAccountData;
@@ -759,6 +760,39 @@ class DefaultUserServiceTest {
         userService.reactivate(1L);
 
         verifyNoInteractions(customDomainAccountData);
+    }
+
+    @Test
+    void deactivatingOrReactivatingAUserReloadsTheDomainRoutes() {
+        final var user = User.builder().id(1L).email("scammer@example.com").active(true).build();
+        when(userRepository.deactivateById(1L)).thenReturn(1);
+        when(userRepository.reactivateById(1L)).thenReturn(1);
+        when(userRepository.reactivateById(2L)).thenReturn(0);
+
+        userService.deactivate(user);
+        userService.reactivate(1L);
+        userService.reactivate(2L);
+
+        verify(eventPublisher, times(2)).publishEvent(new AccountActiveChangedEvent(1L));
+        verify(eventPublisher, never()).publishEvent(new AccountActiveChangedEvent(2L));
+    }
+
+    @Test
+    void anAdminUpdateThatTurnsAnAccountOffOrOnReloadsTheDomainRoutes() {
+        final var existingUser = User.builder().id(1L).email("test@example.com").authProvider("local").active(true).build();
+        when(userRepository.findById(1L)).thenReturn(Optional.of(existingUser));
+        final var off = UserUpdateDto.builder().id(1L).active(false).build();
+        final var on = UserUpdateDto.builder().id(1L).active(true).build();
+        when(userUpdateDtoToUserConverter.convert(off)).thenReturn(User.builder().id(1L).email("test@example.com").active(false).build());
+        when(userUpdateDtoToUserConverter.convert(on)).thenReturn(User.builder().id(1L).email("test@example.com").active(true).build());
+        when(userRepository.deactivateById(1L)).thenReturn(1);
+        when(userRepository.reactivateById(1L)).thenReturn(1, 0);
+
+        userService.updateUser(off);
+        userService.updateUser(on);
+        userService.updateUser(on);
+
+        verify(eventPublisher, times(2)).publishEvent(new AccountActiveChangedEvent(1L));
     }
 
     @Test

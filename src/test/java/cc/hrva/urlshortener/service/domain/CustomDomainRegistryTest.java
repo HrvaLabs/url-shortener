@@ -199,6 +199,24 @@ class CustomDomainRegistryTest {
     }
 
     @Test
+    void anOwnerTurnedOffOrOnIsSeenOnceItsTransactionCommits() {
+        domain(ANA, "go.example.com", CustomDomainStatus.ACTIVE);
+        registry.reload();
+
+        transactionOperations.executeWithoutResult(status -> {
+            jdbcTemplate.update("update user_account set active = false where id = ?", ANA);
+            eventPublisher.publishEvent(new AccountActiveChangedEvent(ANA));
+        });
+        assertThat(registry.active("go.example.com")).isEmpty();
+
+        transactionOperations.executeWithoutResult(status -> {
+            jdbcTemplate.update("update user_account set active = true where id = ?", ANA);
+            eventPublisher.publishEvent(new AccountActiveChangedEvent(ANA));
+        });
+        assertThat(registry.active("go.example.com")).isPresent();
+    }
+
+    @Test
     void aRolledBackChangeReloadsNothing() {
         final var id = domain(ANA, "go.example.com", CustomDomainStatus.ACTIVE);
         registry.reload();
