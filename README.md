@@ -14,6 +14,10 @@ The changelog is shown at [app.hrva.cc/changelog](https://app.hrva.cc/changelog)
 - A campaign tag (UTM) builder.
 - QR codes that count their scans.
 
+### Custom domains
+- Short links on your own subdomain, like `go.example.com/menu`. You apply in Settings; once an admin approves, you add one CNAME record and the certificate is issued through Cloudflare for SaaS.
+- Aliases on your domain are separate from hrva.cc's, and its links get the same stats, limits, passwords and expiry dates.
+
 ### Bio pages
 - One page at `hrva.cc/@yourname`, with a button for each of your short links.
 - Views are counted per day, and changing your handle keeps the old one held for 30 days.
@@ -44,12 +48,11 @@ The changelog is shown at [app.hrva.cc/changelog](https://app.hrva.cc/changelog)
 - AI apps such as Claude use hrva.cc over MCP at `https://hrva.cc/mcp`, signing in with OAuth 2.1.
 
 ### Admin
-- Pages for stats, the review queue, moderation, blocklists, domain rules, reserved aliases, bio pages and the audit log.
+- Pages for stats, the review queue, moderation, blocklists, domain rules, reserved aliases, bio pages, custom domains and the audit log.
 - Discord alerts, a weekly summary and a daily decisions email.
 
 ## Roadmap
 - **Notifications for link owners:** opt-in alerts by Discord, Slack, Telegram, ntfy, a signed webhook or email. Nothing is sent without consent.
-- **Custom domains:** short links on your own domain.
 
 ## Technologies Used
 - **Backend:** Java 25, Spring Boot 4.1, Spring Security and Spring Authorization Server, Spring AI (MCP)
@@ -70,6 +73,13 @@ Build, test and run commands, local dev users and the end-to-end check (`scripts
   ```bash
   openssl rand -base64 32
   ```
+- **Custom domains** need `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ZONE_ID`; without them the app starts and refuses approvals. The other variables (`APP_DOMAINS_ENABLED`, `APP_DOMAINS_MAX_ACTIVE`, `APP_DOMAINS_FREE_ALLOWANCE`, `APP_DOMAINS_PER_USER`, `APP_DOMAINS_RESERVED`, `APP_DOMAINS_PRIMARY_HOSTS`, `APP_DOMAINS_IGNORED_HOSTNAMES`, `APP_DOMAINS_CNAME_TARGET`, `APP_CLOUDFLARE_API_BASE`) have working defaults, listed in AGENTS.md (Config Profiles). Before the first deploy with custom domains:
+  - **O1:** `CLOUDFLARE_ZONE_ID` is the hrva.cc zone's id, and the token has Zone, SSL and Certificates, Edit on the hrva.cc zone only. Use that token nowhere else.
+  - **O2:** the reverse proxy's catch-all `default_server` refuses non-Cloudflare addresses (444), like the proxy hosts. Custom hostnames reach the origin through it.
+  - **O3:** every hostname that must keep reaching the backend is in `APP_DOMAINS_PRIMARY_HOSTS` (default `hrva.cc,domains.hrva.cc`; the host of `app.server-url` always counts). Any other `Host` answers 404 after the deploy, including a request to the container by IP or `localhost`, so health checks go through `https://hrva.cc/actuator/health`.
+  - **O4:** `APP_DOMAINS_IGNORED_HOSTNAMES` lists the Cloudflare hostnames that aren't custom domains (default `test.karlo.cc`), so the nightly reconcile doesn't flag them. They answer 404.
+  - **O5:** the admin System tab shows PostgreSQL 15 or newer; migration 032 stops startup otherwise.
+  - **O6:** custom hostnames run through the hrva.cc zone's Cloudflare rules. Check that no cache, configuration, redirect or WAF skip rule they also need matches only `http.host eq "hrva.cc"`, and that redirects are never cached.
 - **Cloudflare-only origin.** The per-network rate limits trust `CF-Connecting-IP`, and the country counts trust `CF-IPCountry`. The origin must therefore accept traffic only from Cloudflare, through a Cloudflare Tunnel or a firewall limited to [Cloudflare's IP ranges](https://www.cloudflare.com/ips/). Otherwise anyone can forge those headers.
 - **Cloudflare rules for the MCP paths and one-click unsubscribe.** MCP clients aren't browsers, and neither are the mail providers that POST a one-click unsubscribe (RFC 8058) from the email's `List-Unsubscribe` header. A challenge breaks both:
   - Exempt `/mcp`, `/oauth2/*`, `/.well-known/*` and `/api/v1/notifications/unsubscribe` from WAF managed challenges and Super Bot Fight Mode. If Bot Fight Mode on the Free plan challenges them, turn it off.

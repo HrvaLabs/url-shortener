@@ -4,6 +4,28 @@ All notable changes to hrva.cc — the URL shortener.
 
 ---
 
+## [v2.17] — 2026-10-29
+
+Custom domains: apply for your own subdomain, like go.example.com, and make short links on it.
+
+### 🔗 Links
+- Apply for a custom domain in Settings, under Custom domains. Once it's approved, add one CNAME record and hrva.cc sets up the certificate for you.
+- Pick your domain when you shorten a link. Aliases on your domain are your own: go.example.com/menu and hrva.cc/menu can both exist.
+- Short links on your domain work like any other: stats, visit limits, passwords and expiry dates.
+
+### 🔒 Privacy
+- Visitors to your domain get the same privacy as visitors to hrva.cc. Cloudflare receives your domain's name to issue its certificate.
+
+### 🔧 Admin
+- A new Domains page: review applications, see every domain with its owner, links and clicks, turn domains off, retry, or remove them with their links moved or turned off.
+- Cloudflare custom hostnames are created and deleted automatically after approval, never beyond the cap of 90, and checked against Cloudflare every night.
+- Pending applications count in the review badge, and the stats page shows domains against the cap.
+
+### 🌐 Site
+- A new help page explains custom domains, with the exact DNS record for common providers.
+
+---
+
 ## [v2.15.3] — 2026-10-29
 
 Sign in with GitHub, verified email addresses for Google and GitHub sign-ins, and hrva.cc as an installable app.

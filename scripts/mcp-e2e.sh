@@ -23,6 +23,11 @@
 # profile's dev key (GET only redirects, the RFC 8058 one-click POST revokes), a channel refused for a non-public address and
 # one saved sealed and masked, a dead destination in the owner's list but not the public answer, deleting the channel (its
 # consent history stays), the export and the admin counts. Channels are only saved; nothing is ever posted to them.
+# Section 22 checks custom domains against scripts/mcp-e2e/fake-cloudflare.py, started on a random loopback port and passed
+# as --app.cloudflare.api-base, so the real Cloudflare API is never called: an application and the refusals, the token
+# check, approval and the automatic setup, the CNAME seen, links on the domain beside the same alias on the primary host,
+# the Host header routing and its 404s, turning the domain off and on, the removal with its links moved and the queued
+# Cloudflare delete, the two emails (a MailHog container on a random port is the app's SMTP server) and the export.
 #
 #   scripts/mcp-e2e.sh                         builds the jar, then runs every step
 #   MCP_E2E_SKIP_BUILD=1 scripts/mcp-e2e.sh    reuses target/url-shortener-*.jar
@@ -45,12 +50,14 @@ USER_PASSWORD=user123
 RUN_ID=hrva-mcp-e2e-$$
 POSTGRES_CONTAINER=$RUN_ID-postgres
 REDIS_CONTAINER=$RUN_ID-redis
+MAIL_CONTAINER=$RUN_ID-mail
 DB_USER=e2e
 DB_PASSWORD=$(openssl rand -hex 16)
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/hrva-mcp-e2e.XXXXXX")
 APP_PID=
 INSPECTOR_PID=
 STUB_PID=
+CF_PID=
 DISCORD_SECRET=e2e-$(openssl rand -hex 8)
 DISCORD_POSTS=$WORK/discord-posts.jsonl
 BROWSER_USER_AGENT='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36'
@@ -74,7 +81,10 @@ cleanup() {
     if [[ -n $STUB_PID ]]; then
         kill "$STUB_PID" 2>/dev/null || true
     fi
-    docker rm -f "$POSTGRES_CONTAINER" "$REDIS_CONTAINER" >/dev/null 2>&1 || true
+    if [[ -n $CF_PID ]]; then
+        kill "$CF_PID" 2>/dev/null || true
+    fi
+    docker rm -f "$POSTGRES_CONTAINER" "$REDIS_CONTAINER" "$MAIL_CONTAINER" >/dev/null 2>&1 || true
     if (( status != 0 )) && [[ -s $WORK/app.log ]]; then
         echo "--- last 60 lines of the app log"
         tail -n 60 "$WORK/app.log" | redact
@@ -249,7 +259,7 @@ tool_text() {
     jq -r '[.content[]? | select(.type == "text") | .text] | join("\n")' <<<"$INSPECTOR_RESULT"
 }
 
-for tool in docker java jar mvn node npx jq curl openssl; do
+for tool in docker java jar mvn node npx jq curl openssl python3; do
     command -v "$tool" >/dev/null || fail "$tool is required"
 done
 if (exec 3<>"/dev/tcp/127.0.0.1/$PORT") 2>/dev/null; then
@@ -264,11 +274,21 @@ docker run -d --rm --name "$POSTGRES_CONTAINER" --label hrva-mcp-e2e \
     -e POSTGRES_USER="$DB_USER" -e POSTGRES_PASSWORD="$DB_PASSWORD" -e POSTGRES_DB=url_shortener \
     -p 127.0.0.1::5432 postgres:18 >/dev/null
 docker run -d --rm --name "$REDIS_CONTAINER" --label hrva-mcp-e2e -p 127.0.0.1::6379 redis:8 >/dev/null
+docker run -d --rm --name "$MAIL_CONTAINER" --label hrva-mcp-e2e -p 127.0.0.1::1025 mailhog/mailhog >/dev/null
 POSTGRES_PORT=$(host_port "$POSTGRES_CONTAINER" 5432)
 REDIS_PORT=$(host_port "$REDIS_CONTAINER" 6379)
+MAIL_PORT=$(host_port "$MAIL_CONTAINER" 1025)
 wait_until 60 "Postgres" docker exec "$POSTGRES_CONTAINER" pg_isready -q -h 127.0.0.1 -U "$DB_USER" -d url_shortener
 wait_until 30 "Redis" docker exec "$REDIS_CONTAINER" redis-cli ping
-echo "  containers $RUN_ID-{postgres,redis}: Postgres 18 on 127.0.0.1:$POSTGRES_PORT, Redis 8 on 127.0.0.1:$REDIS_PORT"
+wait_until 30 "MailHog" bash -c "exec 3<>/dev/tcp/127.0.0.1/$MAIL_PORT"
+echo "  containers $RUN_ID-{postgres,redis,mail}: Postgres 18 on 127.0.0.1:$POSTGRES_PORT, Redis 8 on 127.0.0.1:$REDIS_PORT, MailHog SMTP on 127.0.0.1:$MAIL_PORT"
+
+CF_PORT=$(python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')
+python3 "$SCRIPT_DIR/mcp-e2e/fake-cloudflare.py" --port "$CF_PORT" 2>"$WORK/fake-cloudflare.log" &
+CF_PID=$!
+CF_BASE=http://127.0.0.1:$CF_PORT
+wait_until 15 "the fake Cloudflare" curl -sf "$CF_BASE/_control/calls"
+echo "  fake Cloudflare on $CF_BASE (the app's Cloudflare API; the real one is never called)"
 
 : >"$DISCORD_POSTS"
 node - "$WORK/discord-stub.port" "$DISCORD_POSTS" <<'JS' &
@@ -311,6 +331,11 @@ OAUTH2_GOOGLE_CLIENT_ID=${OAUTH2_GOOGLE_CLIENT_ID:-mcp-e2e-unused} \
     --spring.datasource.password="$DB_PASSWORD" \
     --spring.data.redis.host=127.0.0.1 \
     --spring.data.redis.port="$REDIS_PORT" \
+    --spring.mail.host=127.0.0.1 \
+    --spring.mail.port="$MAIL_PORT" \
+    --app.cloudflare.api-base="$CF_BASE/client/v4" \
+    --app.cloudflare.api-token=e2e-fake \
+    --app.cloudflare.zone-id=e2e-zone \
     >"$WORK/app.log" 2>&1 &
 APP_PID=$!
 for (( second = 0; second < 180; second++ )); do
@@ -326,9 +351,12 @@ expect_eq "$(psql_value "select string_agg(id || ' ' || exectype, ', ' order by 
 expect_eq "$(psql_value "select (select count(*) from information_schema.tables where table_name = 'ip_address') + (select count(*) from information_schema.sequences where sequence_name = 'ip_address_id_seq');")" \
     0 "no ip_address table or sequence is left"
 expect_eq "$(psql_value "select count(*) from databasechangelog where id like '027-%' and exectype = 'EXECUTED';")" 9 "027 ran all nine changesets"
-expect_eq "$(psql_value "select count(*) from pg_indexes where indexname = 'ux_url_short_url';")" 1 "short_url has its unique index"
 expect_eq "$(psql_value "select string_agg(id || ' ' || exectype, ', ' order by orderexecuted) from databasechangelog where id like '030-%';")" \
     "030-url-short-url-rename-duplicates EXECUTED, 030-url-short-url-unique MARK_RAN" "030 finds no duplicate to rename and keeps the index 027 made"
+expect_eq "$(psql_value "select count(*) from databasechangelog where id like '032-%' and exectype = 'EXECUTED';")" 8 \
+    "032 ran all eight changesets, the Postgres 15 check included"
+expect_eq "$(psql_value "select count(*) from pg_indexes where indexname = 'ux_url_short_url';") $(psql_value "select count(*) from pg_indexes where indexname = 'ux_url_domain_short_url' and indexdef like '%NULLS NOT DISTINCT%';")" \
+    "0 1" "032 replaced ux_url_short_url with ux_url_domain_short_url (domain_id, short_url) NULLS NOT DISTINCT"
 
 section "0. Discovery"
 mcp_post /mcp "" "$INITIALIZE"
@@ -1149,5 +1177,165 @@ expect_eq "$(jq -c '[.notifications.channels[].value], .notifications.autoDisabl
 expect_eq "$(jq -r '[.notifications.consents[].count, .notifications.channels[].count] | add' <<<"$HTTP_BODY")" 0 "with nothing active left"
 http -H "Authorization: Bearer $ADMIN_JWT" "$BASE/api/v1/admin/stats/links?days=7"
 expect_eq "$(jq -c .deadDestinations <<<"$HTTP_BODY")" '{"total":1,"anonymous":0}' "links stats count the dead destination"
+
+section "22. Custom domains"
+DOMAIN_HOST=links.example.com
+MY_DOMAINS=$BASE/api/v1/users/me/domains
+ADMIN_DOMAINS=$BASE/api/v1/admin/domains
+cf_calls() {
+    curl -sS "$CF_BASE/_control/calls"
+}
+cf_control() {
+    curl -sS -o /dev/null -X POST "$CF_BASE/_control/$1"
+}
+# cf_count <method> [query part]: how many API calls the fake got with that method and, when given, that text in the query.
+cf_count() {
+    cf_calls | jq --arg method "$1" --arg query "${2:-}" '[.calls[] | select(.method == $method and (.query | contains($query)))] | length'
+}
+cf_call_lines() {
+    cf_calls | jq -c '[.calls[] | "\(.method) \(.path | sub("^/client/v4/zones/[^/]+"; ""))\(if .query == "" then "" else "?" + .query end) \(.status)"]'
+}
+host_redirect() {
+    curl -s -o /dev/null -w '%{http_code} %{redirect_url}' "$@"
+}
+admin_domain_row() {
+    http -G "$ADMIN_DOMAINS" -H "Authorization: Bearer $ADMIN_JWT" --data-urlencode "search=$DOMAIN_HOST"
+    ADMIN_ROW=$(jq -c --argjson id "$DOMAIN_ID" '.content[] | select(.id == $id)' <<<"$HTTP_BODY")
+}
+email_statuses() {
+    psql_value "select coalesce(string_agg(status, ','), 'none') from email_log where subject = '$1';"
+}
+expect_eq "$(psql_value "select count(*) from information_schema.tables where table_name in ('custom_domain', 'custom_domain_allowance', 'custom_domain_reconcile', 'custom_domain_cap_lock');")" \
+    4 "032 created the four custom domain tables"
+http -X POST "$BASE/api/v1/auth/login" -H 'Content-Type: application/json' \
+    -d "{\"email\":\"$USER_EMAIL\",\"password\":\"reset-$USER_PASSWORD\"}"
+expect_eq "$HTTP_STATUS" 200 "POST /api/v1/auth/login as $USER_EMAIL with the password section 20 reset"
+DOMAIN_JWT=$(jq -r .token <<<"$HTTP_BODY")
+DOMAIN_JWT=${DOMAIN_JWT#Bearer }
+cf_control 'reset?scope=calls'
+show "the fake's call log is cleared (the startup token check and reconcile catch-up called it before this section)"
+
+echo "  --- applying"
+http -X POST "$MY_DOMAINS" -H "Authorization: Bearer $DOMAIN_JWT" -H 'Content-Type: application/json' \
+    -d '{"hostname":"Links.Example.com.","reason":"E2E"}'
+show "POST /api/v1/users/me/domains Links.Example.com. -> $HTTP_STATUS $(jq -c '{id, hostname, status, dnsRecord, steps}' <<<"$HTTP_BODY")"
+expect_eq "$HTTP_STATUS $(jq -r '"\(.hostname) \(.status) \(.dnsRecord)"' <<<"$HTTP_BODY")" "201 $DOMAIN_HOST PENDING_REVIEW null" \
+    "the application is stored lower-cased without the trailing dot, PENDING_REVIEW, with no DNS record yet"
+DOMAIN_ID=$(jq -r .id <<<"$HTTP_BODY")
+http -X POST "$MY_DOMAINS" -H "Authorization: Bearer $DOMAIN_JWT" -H 'Content-Type: application/json' \
+    -d '{"hostname":"second.example.com","reason":"E2E"}'
+expect_eq "$HTTP_STATUS" 400 "a second application is refused"
+expect_contains "$(jq -r .error <<<"$HTTP_BODY")" "You can have 1 custom domain." "with the limit text"
+http -X POST "$MY_DOMAINS" -H "Authorization: Bearer $DOMAIN_JWT" -H 'Content-Type: application/json' \
+    -d '{"hostname":"example.com","reason":"E2E"}'
+expect_eq "$HTTP_STATUS" 400 "an apex is refused"
+expect_contains "$(jq -r .hostname <<<"$HTTP_BODY")" "Use a subdomain" "with the hostname field text"
+expect_eq "$(cf_calls | jq -c .calls)" "[]" "the fake Cloudflare got no call: nothing reaches Cloudflare before approval"
+
+echo "  --- the token check, and approval refused while the token can't manage hostnames"
+http -X POST "$ADMIN_DOMAINS/cloudflare-check" -H "Authorization: Bearer $ADMIN_JWT"
+expect_eq "$HTTP_STATUS $(jq -r .status <<<"$HTTP_BODY")" "200 OK" "POST /api/v1/admin/domains/cloudflare-check: OK"
+cf_control 'token?mode=forbidden'
+http -X POST "$ADMIN_DOMAINS/cloudflare-check" -H "Authorization: Bearer $ADMIN_JWT"
+show "with the fake in mode=forbidden -> $(jq -c '{status, message}' <<<"$HTTP_BODY")"
+expect_eq "$(jq -r .status <<<"$HTTP_BODY")" NO_PERMISSION "an active token refused on the zone is NO_PERMISSION"
+http -X POST "$ADMIN_DOMAINS/$DOMAIN_ID/approve" -H "Authorization: Bearer $ADMIN_JWT"
+show "approve -> $HTTP_STATUS $HTTP_BODY"
+expect_eq "$HTTP_STATUS" 409 "approval is refused"
+expect_contains "$(jq -r .error <<<"$HTTP_BODY")" "Cloudflare isn't set up" "because Cloudflare isn't set up"
+expect_eq "$(cf_count POST)" 0 "and nothing was created"
+cf_control 'token?mode=ok'
+
+echo "  --- approval and the automatic setup"
+cf_control 'reset?scope=calls'
+http -X POST "$ADMIN_DOMAINS/$DOMAIN_ID/approve" -H "Authorization: Bearer $ADMIN_JWT" -H 'Content-Type: application/json' -d '{"note":null}'
+expect_eq "$HTTP_STATUS $(jq -r .status <<<"$HTTP_BODY")" "200 APPROVED_PROVISIONING" "POST /api/v1/admin/domains/{id}/approve: APPROVED_PROVISIONING"
+domain_awaits_dns() {
+    admin_domain_row && [[ $(jq -r '"\(.status) \(.cloudflareId != null)"' <<<"$ADMIN_ROW") == "AWAITING_DNS true" ]]
+}
+wait_until 90 "AWAITING_DNS with a Cloudflare id" domain_awaits_dns
+show "GET /api/v1/admin/domains?search=$DOMAIN_HOST -> $(jq -c '{status, cloudflareId, cloudflareStatus, sslStatus}' <<<"$ADMIN_ROW")"
+ok "within 90 s the setup ran: AWAITING_DNS with cloudflareId set"
+show "Cloudflare calls since the approval: $(cf_call_lines)"
+expect_eq "$(cf_count GET "hostname=$DOMAIN_HOST") $(cf_count POST)" "1 1" "one lookup by hostname, then one create"
+http -H "Authorization: Bearer $DOMAIN_JWT" "$MY_DOMAINS/$DOMAIN_ID"
+show "GET /api/v1/users/me/domains/{id} -> $HTTP_STATUS $(jq -c '{status, dnsRecord, steps, problem}' <<<"$HTTP_BODY")"
+expect_eq "$HTTP_STATUS $(jq -r '"\(.dnsRecord.type) \(.dnsRecord.name) \(.dnsRecord.target) \(.steps.dnsFound)"' <<<"$HTTP_BODY")" \
+    "200 CNAME $DOMAIN_HOST domains.hrva.cc false" "the owner sees the CNAME record to add, not found yet"
+
+echo "  --- the CNAME is seen and the certificate issued"
+cf_control "activate?hostname=$DOMAIN_HOST"
+domain_active_for_owner() {
+    http -H "Authorization: Bearer $DOMAIN_JWT" "$MY_DOMAINS/$DOMAIN_ID" \
+        && [[ $(jq -r '"\(.status) \(.steps.dnsFound) \(.steps.certificateIssued)"' <<<"$HTTP_BODY") == "ACTIVE true true" ]]
+}
+wait_until 60 "ACTIVE for the owner" domain_active_for_owner
+ok "after /_control/activate the owner's GET (one live check per 15 s) says ACTIVE with both steps done"
+
+echo "  --- the same alias on the primary host and on the domain"
+http -X POST "$BASE/api/v1/urls" -H "Authorization: Bearer $DOMAIN_JWT" -H 'Content-Type: application/json' \
+    -d '{"longUrl":"https://example.org/e2e-a","shortUrl":"e2e-menu"}'
+expect_eq "$HTTP_STATUS $(jq -r 'has("domain")' <<<"$HTTP_BODY")" "200 false" "POST /api/v1/urls e2e-menu on the primary host, with no domain"
+http -X POST "$BASE/api/v1/urls" -H "Authorization: Bearer $DOMAIN_JWT" -H 'Content-Type: application/json' \
+    -d "{\"longUrl\":\"https://example.org/e2e-b\",\"shortUrl\":\"e2e-menu\",\"domain\":\"$DOMAIN_HOST\"}"
+expect_eq "$HTTP_STATUS $(jq -r .domain.hostname <<<"$HTTP_BODY")" "200 $DOMAIN_HOST" "POST /api/v1/urls e2e-menu on $DOMAIN_HOST too"
+DOMAIN_LINK_ID=$(jq -r .id <<<"$HTTP_BODY")
+
+echo "  --- Host header routing"
+expect_eq "$(host_redirect -H "Host: $DOMAIN_HOST" "$BASE/e2e-menu")" "302 https://example.org/e2e-b" "Host: $DOMAIN_HOST /e2e-menu -> the domain's link"
+expect_eq "$(host_redirect "$BASE/e2e-menu")" "302 https://example.org/e2e-a" "the primary host's /e2e-menu -> its own link"
+expect_eq "$(host_redirect -H "Host: $DOMAIN_HOST" "$BASE/")" "302 $FRONTEND_URL/" "Host: $DOMAIN_HOST / -> the frontend's home page"
+for path in /login /api/v1/users/me /actuator/health /@x; do
+    expect_eq "$(curl -s -o /dev/null -w '%{http_code}' -H "Host: $DOMAIN_HOST" "$BASE$path")" 404 "Host: $DOMAIN_HOST $path -> 404"
+done
+expect_eq "$(curl -s -o /dev/null -w '%{http_code}' -H 'Host: nobody.example.net' "$BASE/e2e-menu")" 404 "an unknown host -> 404"
+http "$BASE/api/v1/urls/e2e-menu?domain=$DOMAIN_HOST"
+expect_eq "$HTTP_STATUS $(jq -r .longUrl <<<"$HTTP_BODY")" "200 https://example.org/e2e-b" "GET /api/v1/urls/e2e-menu?domain=$DOMAIN_HOST finds the domain's link"
+
+echo "  --- turned off and on"
+http -X POST "$ADMIN_DOMAINS/$DOMAIN_ID/disable" -H "Authorization: Bearer $ADMIN_JWT" -H 'Content-Type: application/json' -d '{"note":"E2E"}'
+expect_eq "$HTTP_STATUS $(jq -r '"\(.status) \(.disabledReason)"' <<<"$HTTP_BODY")" "200 DISABLED ADMIN" "POST /api/v1/admin/domains/{id}/disable"
+expect_eq "$(host_redirect -H "Host: $DOMAIN_HOST" "$BASE/e2e-menu")" "302 $FRONTEND_URL/unavailable?s=e2e-menu&reason=domain&d=$DOMAIN_HOST" \
+    "at once, the domain's link goes to the unavailable page (reason=domain), its cached entry bypassed"
+http -X POST "$ADMIN_DOMAINS/$DOMAIN_ID/enable" -H "Authorization: Bearer $ADMIN_JWT"
+show "POST /api/v1/admin/domains/{id}/enable -> $HTTP_STATUS $(jq -c '{status, disabledReason}' <<<"$HTTP_BODY")"
+expect_eq "$HTTP_STATUS" 200 "turned on again"
+domain_link_redirects() {
+    [[ $(host_redirect -H "Host: $DOMAIN_HOST" "$BASE/e2e-menu") == "302 https://example.org/e2e-b" ]]
+}
+wait_until 90 "the domain's link redirecting again" domain_link_redirects
+ok "the domain's link redirects to its destination again once a check finds it active"
+
+echo "  --- removed with its links moved to the primary host"
+cf_control 'reset?scope=calls'
+http -X DELETE "$ADMIN_DOMAINS/$DOMAIN_ID?links=MOVE" -H "Authorization: Bearer $ADMIN_JWT"
+show "DELETE /api/v1/admin/domains/{id}?links=MOVE -> $HTTP_STATUS $HTTP_BODY"
+expect_eq "$HTTP_STATUS $(jq -r '"\(.moved) \(.renamed | length) \(.renamed[0].from)"' <<<"$HTTP_BODY")" "200 1 1 e2e-menu" \
+    "the link moved, renamed because the primary host already has e2e-menu"
+RENAMED_TO=$(jq -r '.renamed[0].to' <<<"$HTTP_BODY")
+expect_eq "$(psql_value "select (domain_id is null) || ' ' || short_url from url where id = $DOMAIN_LINK_ID;")" "true $RENAMED_TO" \
+    "Postgres: the moved link has domain_id null and the new alias"
+expect_eq "$(curl -s -o /dev/null -w '%{http_code}' -H "Host: $DOMAIN_HOST" "$BASE/e2e-menu")" 404 "Host: $DOMAIN_HOST is no longer served"
+cloudflare_hostname_deleted() {
+    [[ $(cf_count DELETE) == 1 && $(psql_value "select cloudflare_delete_pending from custom_domain where id = $DOMAIN_ID;") == f ]]
+}
+wait_until 90 "the queued Cloudflare delete" cloudflare_hostname_deleted
+show "Cloudflare calls since the removal: $(cf_call_lines)"
+ok "within 90 s the lifecycle job deleted the hostname in Cloudflare and cleared cloudflare_delete_pending"
+expect_eq "$(psql_value "select status || ' ' || (hostname_key is null) from custom_domain where id = $DOMAIN_ID;")" "DELETED true" \
+    "the row stays DELETED for its owner, its hostname free to apply for again"
+
+echo "  --- emails and the export"
+domain_emails_sent() {
+    [[ $(email_statuses "Your domain $DOMAIN_HOST is approved: one step left") == SENT && $(email_statuses "Your domain $DOMAIN_HOST was removed") == SENT ]]
+}
+wait_until 30 "the approved and removed emails" domain_emails_sent
+psql_query "select subject, status from email_log where subject like 'Your domain%' order by id;"
+ok "email_log: the approved and removed emails are SENT (MailHog took them)"
+http -H "Authorization: Bearer $DOMAIN_JWT" "$BASE/api/v1/users/me/export"
+show "GET /api/v1/users/me/export .domains -> $(jq -c .domains <<<"$HTTP_BODY")"
+expect_eq "$HTTP_STATUS $(jq -r '.domains | length' <<<"$HTTP_BODY")" "200 1" "the export lists the domain"
+expect_eq "$(jq -r '.domains[0] | [has("cloudflareId"), has("lastError"), has("applyFlags")] | any' <<<"$HTTP_BODY")" false \
+    "with no Cloudflare id, last error or apply flags"
 
 section "Done: every step passed"
