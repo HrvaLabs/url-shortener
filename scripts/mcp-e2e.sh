@@ -1476,6 +1476,19 @@ http -X POST "$BASE/api/v1/urls" -H "Authorization: Bearer $SETTINGS_JWT" -H 'Co
     -d '{"longUrl":"https://e2e-settings-alias.com/c","shortUrl":"e2e-settings-alias"}'
 expect_eq "$HTTP_STATUS" 200 "the chosen alias works again"
 
+echo "  --- new sign-ups"
+put_setting NEW_SIGNUPS false
+expect_eq "$HTTP_STATUS" 200 "PUT /api/v1/admin/settings/NEW_SIGNUPS false"
+http -X POST "$BASE/api/v1/auth/register" -H 'Content-Type: application/json' -d '{"email":"e2e-settings-signup@example.org","password":"e2e-settings-signup"}'
+show "POST /api/v1/auth/register -> $HTTP_STATUS $HTTP_BODY"
+expect_eq "$HTTP_STATUS" 400 "an email sign-up is refused"
+expect_eq "$(jq -r .error <<<"$HTTP_BODY")" "Creating new accounts is paused." "with the paused text"
+http "$BASE/api/v1/public/settings"
+expect_eq "$(jq -r .newSignups <<<"$HTTP_BODY")" false "GET /api/v1/public/settings: newSignups is false"
+reset_setting NEW_SIGNUPS
+expect_eq "$HTTP_STATUS $(jq -r '[.value, .changed] | map(tostring) | join(",")' <<<"$HTTP_BODY")" "200 true,false" "DELETE NEW_SIGNUPS resets it"
+expect_eq "$(psql_value "select count(*) from user_account where email = 'e2e-settings-signup@example.org';")" 0 "no account was made"
+
 echo "  --- emails"
 EMAIL_BLOCKED_SUBJECT='Your link was blocked as unsafe'
 EMAIL_LOG_BEFORE=$(psql_value "select coalesce(max(id), 0) from email_log;")

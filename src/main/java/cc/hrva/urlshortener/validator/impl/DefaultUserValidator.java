@@ -26,7 +26,7 @@ public class DefaultUserValidator implements UserValidator {
     @Override
     public void checkRegistrationEnabled() {
         if (!settingsService.isOn(SettingKey.NEW_SIGNUPS)) {
-            throw new ApiException("Registrations are currently disabled");
+            throw new ApiException("Creating new accounts is paused.");
         }
     }
 

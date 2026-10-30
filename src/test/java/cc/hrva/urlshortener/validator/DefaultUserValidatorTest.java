@@ -58,6 +58,6 @@ class DefaultUserValidatorTest {
 
         assertThatThrownBy(() -> userValidator.checkRegistrationEnabled())
                 .isInstanceOf(ApiException.class)
-                .hasMessage("Registrations are currently disabled");
+                .hasMessage("Creating new accounts is paused.");
     }
 }
