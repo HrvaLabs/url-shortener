@@ -87,6 +87,49 @@ class CustomDomainHostnamesTest {
     void realPunycodeLabelsPass() {
         assertThat(hostnames.normalize("xn--g-1tb.example.com")).isEqualTo("xn--g-1tb.example.com");
         assertThat(hostnames.normalize("go.xn--hrv-8cd.cc")).isEqualTo("go.xn--hrv-8cd.cc");
+        assertThat(hostnames.normalize("xn--zca.example.com")).isEqualTo("xn--zca.example.com");
+        assertThat(hostnames.normalize("go.xn--strae-oqa.de")).isEqualTo("go.xn--strae-oqa.de");
+        assertThat(hostnames.normalize("xn--pxac2aodamd.example.com")).isEqualTo("xn--pxac2aodamd.example.com");
+        assertThat(hostnames.normalize("xn--mgba3gch5960b.example.com")).isEqualTo("xn--mgba3gch5960b.example.com");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"xn--ls8h.example.com", "xn--a.example.com", "xn--abc.example.com", "xn--zzzzzz.example.com"})
+    void punycodeOfSomethingThatIsNotADomainLabelIsRefused(final String input) {
+        assertRefused(input, BAD_SHAPE);
+    }
+
+    @Test
+    void configurationEntriesInPunycodeThatTheJdkWouldChangeAreAccepted() {
+        appProperties.getDomains().setReserved(List.of("xn--zca.example.com", "*.go.xn--strae-oqa.de"));
+        appProperties.getDomains().setPrimaryHosts(List.of("xn--pxac2aodamd.example.com"));
+        appProperties.getDomains().setIgnoredHostnames(List.of("xn--mgba3gch5960b.example.com"));
+
+        assertThatCode(hostnames::checkSettings).doesNotThrowAnyException();
+        assertRefused("a.go.xn--strae-oqa.de", RESERVED);
+        assertRefused("xn--pxac2aodamd.example.com", RESERVED);
+    }
+
+    @Test
+    void blankListEntriesFromTheEnvironmentAreIgnored() {
+        appProperties.getDomains().setReserved(List.of("hrva.cc", "", " ", "hrvalabs.net"));
+        appProperties.getDomains().setPrimaryHosts(List.of("", "domains.hrva.cc", " "));
+        appProperties.getDomains().setIgnoredHostnames(List.of("test.karlo.cc", ""));
+
+        assertThatCode(hostnames::checkSettings).doesNotThrowAnyException();
+        assertRefused("evil.hrva.cc", RESERVED);
+        assertRefused("go.hrvalabs.net", RESERVED);
+        assertThat(hostnames.isPrimary("domains.hrva.cc")).isTrue();
+        assertThat(hostnames.isPrimary("")).isFalse();
+        assertThat(hostnames.normalize("go.example.com")).isEqualTo("go.example.com");
+    }
+
+    @Test
+    void aBlankCnameTargetStillStopsTheStart() {
+        appProperties.getDomains().setCnameTarget(" ");
+
+        assertThatThrownBy(hostnames::checkSettings).isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("app.domains.cname-target");
     }
 
     @Test
@@ -146,7 +189,7 @@ class CustomDomainHostnamesTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"**.hrva.cc", "hrva..cc", "_hrva.cc", " ", "hrva.cc/", "-hrva.cc", "xn--zzzzzz.cc"})
+    @ValueSource(strings = {"**.hrva.cc", "hrva..cc", "_hrva.cc", "my_host", "https://hrva.cc", "hrva.cc/", "-hrva.cc", "xn--zzzzzz.cc", "xn--a.cc"})
     void anUnreadableReservedEntryStopsTheStart(final String entry) {
         appProperties.getDomains().setReserved(List.of("hrvalabs.net", entry));
 

@@ -4,12 +4,12 @@ import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.util.DomainNames;
 import com.google.common.net.InternetDomainName;
 import jakarta.annotation.PostConstruct;
-import java.net.IDN;
 import java.net.URI;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.Predicate;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
@@ -27,6 +27,8 @@ public class CustomDomainHostnames {
     private static final String ACE_PREFIX = "xn--";
     private static final String LOCALHOST = "localhost";
     private static final List<String> SUFFIX_PREFIXES = List.of("*.", ".");
+    private static final int ASCII_LIMIT = 0x80;
+    private static final Set<Integer> CONTEXTUAL_CODE_POINTS = Set.of((int) '-', 0x200C, 0x200D, 0xB7, 0x375, 0x5F3, 0x5F4, 0x30FB);
 
     private final AppProperties appProperties;
 
@@ -36,7 +38,9 @@ public class CustomDomainHostnames {
         requireEvery("app.domains.reserved", domains.getReserved(), entry -> reservedKey(entry).isPresent());
         requireEvery("app.domains.primary-hosts", domains.getPrimaryHosts(), CustomDomainHostnames::isPrimaryHostEntry);
         requireEvery("app.domains.ignored-hostnames", domains.getIgnoredHostnames(), entry -> wellFormedKey(entry).isPresent());
-        requireEvery("app.domains.cname-target", List.of(StringUtils.defaultString(domains.getCnameTarget())), entry -> wellFormedKey(entry).isPresent());
+        if (wellFormedKey(domains.getCnameTarget()).isEmpty()) {
+            throw unreadable("app.domains.cname-target", domains.getCnameTarget());
+        }
     }
 
     public static Optional<String> hostnameKey(final String host) {
@@ -113,11 +117,16 @@ public class CustomDomainHostnames {
 
     private static void requireEvery(final String property, final List<String> entries, final Predicate<String> readable) {
         entries.stream()
+                .filter(StringUtils::isNotBlank)
                 .filter(readable.negate())
                 .findFirst()
                 .ifPresent(entry -> {
-                    throw new IllegalStateException("%s has an entry that isn't a hostname: '%s'".formatted(property, entry));
+                    throw unreadable(property, entry);
                 });
+    }
+
+    private static IllegalStateException unreadable(final String property, final String entry) {
+        return new IllegalStateException("%s has an entry that isn't a hostname: '%s'".formatted(property, entry));
     }
 
     private static Optional<String> reservedKey(final String entry) {
@@ -147,12 +156,20 @@ public class CustomDomainHostnames {
     }
 
     private static boolean isRealPunycode(final String label) {
-        final var unicode = IDN.toUnicode(label, IDN.ALLOW_UNASSIGNED);
-        try {
-            return !unicode.equals(label) && IDN.toASCII(unicode, IDN.ALLOW_UNASSIGNED).equals(label);
-        } catch (final IllegalArgumentException exception) {
-            return false;
-        }
+        return Punycode.decode(label.substring(ACE_PREFIX.length()))
+                .filter(decoded -> decoded.codePoints().anyMatch(codePoint -> codePoint >= ASCII_LIMIT))
+                .filter(decoded -> decoded.codePoints().allMatch(CustomDomainHostnames::isLabelCodePoint))
+                .flatMap(Punycode::encode)
+                .filter(encoded -> (ACE_PREFIX + encoded).equals(label))
+                .isPresent();
+    }
+
+    private static boolean isLabelCodePoint(final int codePoint) {
+        final var type = Character.getType(codePoint);
+        return Character.isLetter(codePoint) && !Character.isUpperCase(codePoint) && !Character.isTitleCase(codePoint)
+                || Character.isDigit(codePoint)
+                || type == Character.NON_SPACING_MARK || type == Character.COMBINING_SPACING_MARK || type == Character.ENCLOSING_MARK
+                || CONTEXTUAL_CODE_POINTS.contains(codePoint);
     }
 
     private static Optional<String> withoutPort(final String host) {
