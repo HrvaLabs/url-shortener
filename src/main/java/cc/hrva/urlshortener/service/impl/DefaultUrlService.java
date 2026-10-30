@@ -156,6 +156,9 @@ public class DefaultUrlService implements UrlService {
 
         log.info("Creating URL authenticated={}", currentUser != null);
 
+        if (currentUser != null) {
+            precheckDomain(createUrlDto.getDomain(), currentUser);
+        }
         ensureCreateAllowed(currentUser, clientIP);
         if (currentUser == null) {
             requireNoDomain(createUrlDto.getDomain());
@@ -254,6 +257,7 @@ public class DefaultUrlService implements UrlService {
 
         final var apiKey = apiKeyService.fetchApiKeyByKey(key);
         apiKeyValidator.apiKeyExistsByKeyAndIsValid(key);
+        precheckDomain(createUrlDto.getDomain(), apiKey.getOwner());
         ensureCreateAllowed(apiKey.getOwner(), null);
         final var verdict = validateUrl(url);
 
@@ -292,6 +296,12 @@ public class DefaultUrlService implements UrlService {
         final var key = apiKeyService.fetchApiKeyByKey(apiKey);
         apiKeyValidator.apiKeyExistsByKeyAndIsValid(apiKey);
         return key.getOwner();
+    }
+
+    private void precheckDomain(final String hostname, final User caller) {
+        if (StringUtils.isNotBlank(hostname)) {
+            transactionOperations.executeWithoutResult(status -> resolveDomain(hostname, caller));
+        }
     }
 
     private CustomDomain resolveDomain(final String hostname, final User caller) {

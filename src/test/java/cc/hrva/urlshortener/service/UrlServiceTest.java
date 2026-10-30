@@ -1458,6 +1458,53 @@ class UrlServiceTest {
     }
 
     @Test
+    void aDomainTheCallerCantUseCostsNoCreateTokenAndNoLinkCheck() {
+        final var createUrlDto = onTheDomain("go.example.com");
+        when(createUrlToUrlConverter.convert(createUrlDto)).thenReturn(Url.builder().longUrl("https://example.com/menu").build());
+        when(userService.getUserFromToken()).thenReturn(User.builder().id(1L).build());
+        when(customDomainRepository.findUsable("go.example.com", 1L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> urlService.saveUrlRouting(createUrlDto, CLIENT_IP, CreatedVia.WEB))
+                .isInstanceOfSatisfying(FieldValidationException.class,
+                        exception -> assertThat(exception.getFieldErrors()).containsExactly(entry("domain", DOMAIN_REFUSAL)));
+
+        verify(rateLimiter, never()).tryAcquire(startsWith("create:"), anyInt(), any());
+        verifyNoInteractions(urlValidator);
+        verify(urlRepository, never()).save(any());
+    }
+
+    @Test
+    void anApiKeyCreateOnADomainTheOwnerCantUseCostsNoCreateTokenAndNoLinkCheck() {
+        final var createUrlDto = onTheDomain("go.example.com");
+        when(createUrlToUrlConverter.convert(createUrlDto)).thenReturn(Url.builder().longUrl("https://example.com/menu").build());
+        when(apiKeyService.fetchApiKeyByKey("k")).thenReturn(ApiKey.builder().id(3L).owner(User.builder().id(5L).build()).build());
+        when(customDomainRepository.findUsable("go.example.com", 5L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> urlService.saveUrlWithApiKey(createUrlDto, "k", CreatedVia.API_KEY))
+                .isInstanceOf(FieldValidationException.class);
+
+        verify(apiKeyValidator).apiKeyExistsByKeyAndIsValid("k");
+        verify(rateLimiter, never()).tryAcquire(startsWith("create:"), anyInt(), any());
+        verifyNoInteractions(urlValidator);
+    }
+
+    @Test
+    void aDomainTurnedOffDuringTheChecksStopsTheCreate() {
+        final var createUrlDto = onTheDomain("go.example.com");
+        when(createUrlToUrlConverter.convert(createUrlDto)).thenReturn(Url.builder().longUrl("https://example.com/menu").build());
+        when(userService.getUserFromToken()).thenReturn(User.builder().id(1L).build());
+        when(customDomainRepository.findUsable("go.example.com", 1L))
+                .thenReturn(Optional.of(goExampleCom(CustomDomainStatus.ACTIVE)), Optional.empty());
+
+        assertThatThrownBy(() -> urlService.saveUrlRouting(createUrlDto, CLIENT_IP, CreatedVia.WEB))
+                .isInstanceOf(FieldValidationException.class);
+
+        verify(urlValidator).checkIfLongUrlIsNotBlocklisted(any());
+        verify(customDomainRepository, times(2)).findUsable("go.example.com", 1L);
+        verify(urlRepository, never()).save(any());
+    }
+
+    @Test
     void bulkChecksEachItemsDomain() {
         when(userService.getUserFromToken()).thenReturn(User.builder().id(1L).build());
         when(customDomainRepository.findUsable("go.example.com", 1L)).thenReturn(Optional.of(goExampleCom(CustomDomainStatus.ACTIVE)));
