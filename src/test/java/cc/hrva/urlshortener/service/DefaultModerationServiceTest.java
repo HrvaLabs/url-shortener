@@ -160,8 +160,8 @@ class DefaultModerationServiceTest {
                 .filter(Objects::nonNull)
                 .map(url -> new LinkDestination(url.getId(), url.getLongUrl()))
                 .toList());
-        lenient().when(urlRepository.existsUrlByShortUrlAndActiveTrue(anyString())).thenAnswer(invocation ->
-                links.values().stream().anyMatch(url -> url.isActive() && url.getShortUrl().equals(invocation.getArgument(0))));
+        lenient().when(urlRepository.aliasActive(isNull(), anyString())).thenAnswer(invocation ->
+                links.values().stream().anyMatch(url -> url.isActive() && url.getShortUrl().equals(invocation.getArgument(1))));
         lenient().when(urlRepository.findActiveDestinationsAfter(anyLong(), any(Pageable.class)))
                 .thenAnswer(invocation -> page(invocation.getArgument(0), invocation.getArgument(1), Url::isActive));
         lenient().when(urlRepository.findBlockedDestinationsAfter(anyCollection(), anyLong(), any(Pageable.class))).thenAnswer(invocation -> {

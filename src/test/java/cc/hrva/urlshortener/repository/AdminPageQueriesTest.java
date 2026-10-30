@@ -1,10 +1,12 @@
 package cc.hrva.urlshortener.repository;
 
 import cc.hrva.urlshortener.dto.UrlResponse;
+import cc.hrva.urlshortener.model.CustomDomain;
 import cc.hrva.urlshortener.model.LinkReview;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.codebook.Authorities;
+import cc.hrva.urlshortener.model.enums.CustomDomainStatus;
 import cc.hrva.urlshortener.repository.specification.UrlSpecification;
 import cc.hrva.urlshortener.service.ScammerSignalService;
 import cc.hrva.urlshortener.service.impl.DefaultReviewQueueService;
@@ -133,11 +135,40 @@ class AdminPageQueriesTest {
     }
 
     @Test
+    void anAdminUrlPageLoadsTheDomainsOfItsLinksWithoutAQueryPerDomain() {
+        onDomain(domain("go.example.com"), "s0", "s1");
+        onDomain(domain("go.example.org"), "s2", "s3");
+        entityManager.flush();
+        entityManager.clear();
+        statistics.clear();
+
+        final var page = urlRepository.findAll(PageRequest.of(0, 10, Sort.by("shortUrl")));
+
+        assertThat(page.getContent()).extracting(url -> url.getDomain() == null ? null : url.getDomain().getHostname())
+                .contains("go.example.com", "go.example.org");
+        assertThat(statistics.getPrepareStatementCount()).isEqualTo(3);
+    }
+
+    @Test
     void anAdminUserPageLoadsEveryUsersRolesInOneQuery() {
         final var json = JsonMapper.builder().build().writeValueAsString(userRepository.findAll(PageRequest.of(0, 10)).getContent());
 
         assertThat(json).contains("ROLE_USER");
         assertThat(statistics.getPrepareStatementCount()).isEqualTo(2);
+    }
+
+    private CustomDomain domain(final String hostname) {
+        final var domain = CustomDomain.builder().hostname(hostname).hostnameKey(hostname).status(CustomDomainStatus.ACTIVE)
+                .reason("Menu links for my cafe").createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build();
+        entityManager.persist(domain);
+        return domain;
+    }
+
+    private void onDomain(final CustomDomain domain, final String... aliases) {
+        entityManager.createQuery("update Url u set u.domain = :domain where u.shortUrl in :aliases")
+                .setParameter("domain", domain)
+                .setParameter("aliases", List.of(aliases))
+                .executeUpdate();
     }
 
     private User owner(final int index) {

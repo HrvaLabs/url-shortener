@@ -74,18 +74,18 @@ class AdminStatsAndReservedAliasesSchemaTest {
     }
 
     @Test
-    void the030IndexStepIsSkippedWhere027AlreadyMadeTheIndex() {
+    void the030IndexStepIsSkippedWhere027AlreadyMadeTheIndexAnd032ReplacesIt() {
         assertThat(jdbcTemplate.queryForList("select id, exectype from databasechangelog where id like '030-%' order by orderexecuted"))
                 .extracting(row -> row.get("ID"), row -> row.get("EXECTYPE"))
                 .containsExactly(
                         tuple("030-url-short-url-rename-duplicates", "EXECUTED"),
                         tuple("030-url-short-url-unique", "MARK_RAN"));
-        assertThat(jdbcTemplate.queryForObject("""
-                select count(*) from information_schema.indexes i
+        assertThat(jdbcTemplate.queryForList("""
+                select upper(i.index_name) from information_schema.indexes i
                 join information_schema.index_columns c
                   on c.index_schema = i.index_schema and c.index_name = i.index_name and c.table_name = i.table_name
-                where i.table_name = 'URL' and c.column_name = 'SHORT_URL' and i.index_type_name = 'UNIQUE INDEX'""", Integer.class))
-                .isEqualTo(1);
+                where i.table_name = 'URL' and c.column_name = 'SHORT_URL' and i.index_type_name = 'UNIQUE INDEX'""", String.class))
+                .containsExactly("UX_URL_DOMAIN_SHORT_URL");
     }
 
     @Test

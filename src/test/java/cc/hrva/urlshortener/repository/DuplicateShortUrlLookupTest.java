@@ -41,7 +41,7 @@ class DuplicateShortUrlLookupTest {
     void theActiveLinkWinsOverANewerSwitchedOffOne() {
         switchOff(NEWER);
 
-        assertThat(urlRepository.findFirstByShortUrlOrderByActiveDescIdDesc("dup")).map(Url::getId).contains(OLDER);
+        assertThat(urlRepository.findServed(null, "dup")).map(Url::getId).contains(OLDER);
     }
 
     @Test
@@ -49,7 +49,7 @@ class DuplicateShortUrlLookupTest {
         switchOff(OLDER);
         switchOff(NEWER);
 
-        assertThat(urlRepository.findFirstByShortUrlOrderByActiveDescIdDesc("dup")).map(Url::getId).contains(NEWER);
+        assertThat(urlRepository.findServed(null, "dup")).map(Url::getId).contains(NEWER);
     }
 
     private void switchOff(final long id) {

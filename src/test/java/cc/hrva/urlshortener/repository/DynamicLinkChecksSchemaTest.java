@@ -666,9 +666,9 @@ class DynamicLinkChecksSchemaTest {
         entityManager.flush();
         entityManager.clear();
 
-        assertThat(urlRepository.findFirstByShortUrlOrderByActiveDescIdDesc("live")).map(Url::getId).contains(active.getId());
-        assertThat(urlRepository.findFirstByShortUrlOrderByActiveDescIdDesc("gone")).map(Url::getId).contains(switchedOff.getId());
-        assertThat(urlRepository.findFirstByShortUrlOrderByActiveDescIdDesc("unknown")).isEmpty();
+        assertThat(urlRepository.findServed(null, "live")).map(Url::getId).contains(active.getId());
+        assertThat(urlRepository.findServed(null, "gone")).map(Url::getId).contains(switchedOff.getId());
+        assertThat(urlRepository.findServed(null, "unknown")).isEmpty();
     }
 
     @Test

@@ -132,7 +132,7 @@ class ReportEndpointSecurityTest {
     @Test
     void anyoneCanReportALinkWithoutLoggingIn() throws Exception {
         final var url = Url.builder().id(287L).shortUrl("v0DB3").longUrl("https://findfavoritedate.life/?u=f6yp608").active(true).build();
-        when(urlRepository.findByShortUrlAndActiveTrue("v0DB3")).thenReturn(Optional.of(url));
+        when(urlRepository.findActive(null, "v0DB3")).thenReturn(Optional.of(url));
 
         mockMvc.perform(post(REPORTS).contentType(MediaType.APPLICATION_JSON).content(REPORT))
                 .andExpect(status().isAccepted());

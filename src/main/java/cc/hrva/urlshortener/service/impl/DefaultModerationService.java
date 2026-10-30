@@ -600,7 +600,7 @@ public class DefaultModerationService implements ModerationService {
     }
 
     private boolean aliasIsFree(final Url url) {
-        if (urlRepository.existsUrlByShortUrlAndActiveTrue(url.getShortUrl())) {
+        if (urlRepository.aliasActive(null, url.getShortUrl())) {
             log.warn("Link stays inactive because another active link holds its alias urlId={}", url.getId());
             return false;
         }

@@ -94,14 +94,14 @@ public class DefaultUrlValidator implements UrlValidator {
 
     @Override
     public void checkIfShortUrlIsUnique(final String shortUrl) {
-        if (urlRepository.existsUrlByShortUrl(shortUrl)) {
+        if (urlRepository.aliasTaken(null, shortUrl)) {
             throw new ShortUrlAlreadyExistsException(SHORT_URL_TAKEN);
         }
     }
 
     @Override
     public void checkIfShortUrlIsFreeToReactivate(final String shortUrl) {
-        if (urlRepository.existsUrlByShortUrlAndActiveTrue(shortUrl)) {
+        if (urlRepository.aliasActive(null, shortUrl)) {
             throw new ShortUrlAlreadyExistsException("Another active link already uses this short URL.");
         }
     }

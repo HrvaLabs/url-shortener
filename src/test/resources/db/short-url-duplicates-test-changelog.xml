@@ -48,5 +48,6 @@
 
     <include file="classpath:/db/changelog/027-admin-stats-and-reserved-aliases.xml"/>
     <include file="classpath:/db/changelog/031-notifications.xml"/>
+    <include file="classpath:/db/changelog/032-custom-domains.xml"/>
 
 </databaseChangeLog>

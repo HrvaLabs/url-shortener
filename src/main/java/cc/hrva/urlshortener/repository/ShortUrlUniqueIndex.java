@@ -17,11 +17,13 @@ import org.springframework.stereotype.Component;
 @RequiredArgsConstructor
 public class ShortUrlUniqueIndex {
 
+    private static final String COMPOSITE_INDEX_CHANGESET = "select exectype from databasechangelog where id = '032-url-domain-short-url-unique'";
     private static final String COUNT_INDEX_CHANGESETS = """
             select count(*) from databasechangelog
             where (id = '027-url-short-url-unique' and exectype = 'EXECUTED')
                or (id = '030-url-short-url-unique' and exectype in ('EXECUTED', 'MARK_RAN'))""";
-    private static final String INDEX_NAME = "UX_URL_SHORT_URL";
+    private static final String EXECUTED = "EXECUTED";
+    private static final String INDEX_NAME = "UX_URL_DOMAIN_SHORT_URL";
 
     private final JdbcTemplate jdbcTemplate;
 
@@ -32,6 +34,10 @@ public class ShortUrlUniqueIndex {
 
     public boolean enforced() {
         try {
+            final var compositeIndexChangeset = jdbcTemplate.queryForList(COMPOSITE_INDEX_CHANGESET, String.class);
+            if (!compositeIndexChangeset.isEmpty()) {
+                return compositeIndexChangeset.contains(EXECUTED);
+            }
             final var indexChangesets = jdbcTemplate.queryForObject(COUNT_INDEX_CHANGESETS, Integer.class);
             return indexChangesets != null && indexChangesets > 0;
         } catch (final DataAccessException exception) {
@@ -43,7 +49,7 @@ public class ShortUrlUniqueIndex {
     @EventListener(ApplicationReadyEvent.class)
     public void warnIfNotEnforced() {
         if (!enforced()) {
-            log.warn("short_url uniqueness not enforced: duplicate short URLs exist, so 027-url-short-url-unique was skipped");
+            log.warn("short_url uniqueness not enforced: duplicate short URLs exist, so the unique index on domain_id and short_url was skipped");
         }
     }
 

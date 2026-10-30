@@ -170,7 +170,7 @@ class UrlControllerBlocklistTest {
                         new ClickRequestResolver(clientIpResolver), request, appProperties))
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .build();
-        when(urlRepository.findByShortUrlAndActiveTrue("item7")).thenReturn(Optional.of(
+        when(urlRepository.findActive(null, "item7")).thenReturn(Optional.of(
                 Url.builder().id(10L).shortUrl("item7").longUrl(DESTINATION).visits(0L).active(true).build()));
     }
 

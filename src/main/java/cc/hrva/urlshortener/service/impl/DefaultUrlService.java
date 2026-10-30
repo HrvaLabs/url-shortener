@@ -214,7 +214,7 @@ public class DefaultUrlService implements UrlService {
             throw new RateLimitExceededException("Too many password attempts. Try again in a few minutes.");
         }
 
-        final var url = urlRepository.findByShortUrlAndActiveTrue(shortUrl)
+        final var url = urlRepository.findActive(null, shortUrl)
                 .orElseThrow(() -> new UrlNotFoundException("URL doesn't exist"));
 
         if (url.getPasswordHash() != null && !passwordEncoder.matches(password, url.getPasswordHash())) {
@@ -311,7 +311,7 @@ public class DefaultUrlService implements UrlService {
     private String nextFreeShortUrl() {
         return Stream.generate(() -> generateShortUrl(appProperties.getShortUrlLength()))
                 .limit(MAX_GENERATED_ALIAS_ATTEMPTS)
-                .filter(candidate -> !reservedAliasService.isReserved(candidate) && !urlRepository.existsUrlByShortUrl(candidate))
+                .filter(candidate -> !reservedAliasService.isReserved(candidate) && !urlRepository.aliasTaken(null, candidate))
                 .findFirst()
                 .orElseThrow(() -> {
                     log.warn("No free short URL among {} generated candidates", MAX_GENERATED_ALIAS_ATTEMPTS);
@@ -685,7 +685,7 @@ public class DefaultUrlService implements UrlService {
     }
 
     private String fetchAndRedirectFromDb(final String shortUrl, final ClickRequest click) {
-        final var urlOpt = urlRepository.findFirstByShortUrlOrderByActiveDescIdDesc(shortUrl);
+        final var urlOpt = urlRepository.findServed(null, shortUrl);
         if (urlOpt.isEmpty()) {
             return unavailablePageUrl(shortUrl, REASON_MISSING);
         }
@@ -822,7 +822,7 @@ public class DefaultUrlService implements UrlService {
     }
 
     private Url findUrlToReveal(final String shortUrl) {
-        final var url = urlRepository.findByShortUrlAndActiveTrue(shortUrl).orElseThrow(() -> new UrlNotFoundException("URL doesn't exist"));
+        final var url = urlRepository.findActive(null, shortUrl).orElseThrow(() -> new UrlNotFoundException("URL doesn't exist"));
         if (url.getPasswordHash() == null && !clickCheckService.mayRedirect(url.getId(), url.getLongUrl())) {
             throw new UrlNotFoundException("URL doesn't exist");
         }

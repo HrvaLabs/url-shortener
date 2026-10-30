@@ -1,0 +1,192 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.9.xsd">
+
+    <changeSet author="khrvacic" id="032-custom-domain">
+        <createTable tableName="custom_domain">
+            <column name="id" type="BIGINT" autoIncrement="true">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="owner_id" type="BIGINT"/>
+            <column name="hostname" type="VARCHAR(253)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="hostname_key" type="VARCHAR(253)"/>
+            <column name="status" type="VARCHAR(30)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="reason" type="VARCHAR(300)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="apply_flags" type="VARCHAR(1000)"/>
+            <column name="review_note" type="VARCHAR(500)"/>
+            <column name="reviewed_by" type="VARCHAR(255)"/>
+            <column name="reviewed_at" type="TIMESTAMP"/>
+            <column name="cloudflare_id" type="VARCHAR(36)"/>
+            <column name="cloudflare_status" type="VARCHAR(40)"/>
+            <column name="cloudflare_ssl_status" type="VARCHAR(40)"/>
+            <column name="last_error" type="VARCHAR(500)"/>
+            <column name="problem" type="VARCHAR(30)"/>
+            <column name="next_check_at" type="TIMESTAMP"/>
+            <column name="last_checked_at" type="TIMESTAMP"/>
+            <column name="check_count" type="INT" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+            <column name="activated_at" type="TIMESTAMP"/>
+            <column name="disabled_reason" type="VARCHAR(30)"/>
+            <column name="disabled_note" type="VARCHAR(500)"/>
+            <column name="disabled_at" type="TIMESTAMP"/>
+            <column name="deleted_at" type="TIMESTAMP"/>
+            <column name="cloudflare_delete_pending" type="BOOLEAN" defaultValueBoolean="false">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_at" type="TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+        <addForeignKeyConstraint baseTableName="custom_domain" baseColumnNames="owner_id" constraintName="fk_custom_domain_owner"
+                                 referencedTableName="user_account" referencedColumnNames="id" onDelete="SET NULL"/>
+        <createIndex tableName="custom_domain" indexName="ux_custom_domain_hostname_key" unique="true">
+            <column name="hostname_key"/>
+        </createIndex>
+        <createIndex tableName="custom_domain" indexName="idx_custom_domain_owner_id">
+            <column name="owner_id"/>
+        </createIndex>
+        <createIndex tableName="custom_domain" indexName="idx_custom_domain_due">
+            <column name="status"/>
+            <column name="next_check_at"/>
+        </createIndex>
+        <createIndex tableName="custom_domain" indexName="idx_custom_domain_delete_pending">
+            <column name="cloudflare_delete_pending"/>
+        </createIndex>
+        <rollback>
+            <dropTable tableName="custom_domain"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet author="khrvacic" id="032-custom-domain-allowance">
+        <createTable tableName="custom_domain_allowance">
+            <column name="user_id" type="BIGINT">
+                <constraints primaryKey="true" primaryKeyName="pk_custom_domain_allowance" nullable="false"/>
+            </column>
+            <column name="max_domains" type="INT">
+                <constraints nullable="false"/>
+            </column>
+            <column name="reason" type="VARCHAR(300)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="granted_by" type="VARCHAR(255)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="granted_at" type="TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+        <addForeignKeyConstraint baseTableName="custom_domain_allowance" baseColumnNames="user_id" constraintName="fk_custom_domain_allowance_user"
+                                 referencedTableName="user_account" referencedColumnNames="id" onDelete="CASCADE"/>
+        <rollback>
+            <dropTable tableName="custom_domain_allowance"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet author="khrvacic" id="032-custom-domain-reconcile">
+        <createTable tableName="custom_domain_reconcile">
+            <column name="id" type="BIGINT" autoIncrement="true">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="ran_at" type="TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="cloudflare_total" type="INT"/>
+            <column name="ours_in_cloudflare" type="INT"/>
+            <column name="unknown_hostnames" type="TEXT"/>
+            <column name="missing_domain_ids" type="TEXT"/>
+            <column name="error" type="VARCHAR(500)"/>
+        </createTable>
+        <createIndex tableName="custom_domain_reconcile" indexName="idx_custom_domain_reconcile_ran_at">
+            <column name="ran_at"/>
+        </createIndex>
+        <rollback>
+            <dropTable tableName="custom_domain_reconcile"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet author="khrvacic" id="032-custom-domain-cap-lock">
+        <createTable tableName="custom_domain_cap_lock">
+            <column name="id" type="INT">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+        </createTable>
+        <insert tableName="custom_domain_cap_lock">
+            <column name="id" valueNumeric="1"/>
+        </insert>
+        <rollback>
+            <dropTable tableName="custom_domain_cap_lock"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet author="khrvacic" id="032-url-domain-id">
+        <addColumn tableName="url">
+            <column name="domain_id" type="BIGINT"/>
+        </addColumn>
+        <addForeignKeyConstraint baseTableName="url" baseColumnNames="domain_id" constraintName="fk_url_custom_domain"
+                                 referencedTableName="custom_domain" referencedColumnNames="id"/>
+        <createIndex tableName="url" indexName="idx_url_domain_id">
+            <column name="domain_id"/>
+        </createIndex>
+        <rollback>
+            <dropForeignKeyConstraint baseTableName="url" constraintName="fk_url_custom_domain"/>
+            <dropIndex tableName="url" indexName="idx_url_domain_id"/>
+            <dropColumn tableName="url" columnName="domain_id"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet author="khrvacic" id="032-url-postgres-15" dbms="postgresql">
+        <preConditions onFail="HALT">
+            <sqlCheck expectedResult="1">select case when current_setting('server_version_num')::int &gt;= 150000 then 1 else 0 end</sqlCheck>
+        </preConditions>
+        <sql>select 1</sql>
+        <rollback/>
+    </changeSet>
+
+    <changeSet author="khrvacic" id="032-url-domain-short-url-unique">
+        <preConditions onFail="MARK_RAN">
+            <sqlCheck expectedResult="0">select count(*) from (select domain_id, short_url from url group by domain_id, short_url having count(*) &gt; 1) d</sqlCheck>
+        </preConditions>
+        <sql dbms="postgresql">create unique index ux_url_domain_short_url on url (domain_id, short_url) nulls not distinct</sql>
+        <sql dbms="h2">create unique nulls not distinct index ux_url_domain_short_url on url (domain_id, short_url)</sql>
+        <rollback>
+            <sql>drop index if exists ux_url_domain_short_url</sql>
+        </rollback>
+    </changeSet>
+
+    <changeSet author="khrvacic" id="032-url-short-url-unique-dropped">
+        <preConditions onFail="MARK_RAN">
+            <or>
+                <and>
+                    <dbms type="postgresql"/>
+                    <sqlCheck expectedResult="1">select count(*) from pg_indexes where schemaname = current_schema() and lower(indexname) = 'ux_url_short_url'</sqlCheck>
+                </and>
+                <and>
+                    <not>
+                        <dbms type="postgresql"/>
+                    </not>
+                    <sqlCheck expectedResult="1">select count(*) from information_schema.indexes where lower(index_name) = 'ux_url_short_url'</sqlCheck>
+                </and>
+            </or>
+        </preConditions>
+        <dropIndex tableName="url" indexName="ux_url_short_url"/>
+        <rollback>
+            <createIndex tableName="url" indexName="ux_url_short_url" unique="true">
+                <column name="short_url"/>
+            </createIndex>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>

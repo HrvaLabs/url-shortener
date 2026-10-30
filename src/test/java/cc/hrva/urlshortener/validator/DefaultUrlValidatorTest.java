@@ -135,14 +135,14 @@ class DefaultUrlValidatorTest {
     @Test
     void shouldValidateShortUrlIsUnique() {
         final String shortUrl = "test";
-        when(urlRepository.existsUrlByShortUrl(shortUrl)).thenReturn(false);
+        when(urlRepository.aliasTaken(null, shortUrl)).thenReturn(false);
         assertThatCode(() -> urlValidator.checkIfShortUrlIsUnique(shortUrl))
                 .doesNotThrowAnyException();
     }
 
     @Test
     void anAliasStaysTakenAfterItsLinkIsDeactivated() {
-        when(urlRepository.existsUrlByShortUrl("promo")).thenReturn(true);
+        when(urlRepository.aliasTaken(null, "promo")).thenReturn(true);
 
         assertThatThrownBy(() -> urlValidator.checkIfShortUrlIsUnique("promo"))
                 .isInstanceOf(ShortUrlAlreadyExistsException.class)
@@ -151,7 +151,7 @@ class DefaultUrlValidatorTest {
 
     @Test
     void reactivationIsRefusedWhileAnotherActiveLinkUsesTheAlias() {
-        when(urlRepository.existsUrlByShortUrlAndActiveTrue("promo")).thenReturn(true);
+        when(urlRepository.aliasActive(null, "promo")).thenReturn(true);
 
         assertThatThrownBy(() -> urlValidator.checkIfShortUrlIsFreeToReactivate("promo"))
                 .isInstanceOf(ShortUrlAlreadyExistsException.class)
@@ -248,7 +248,7 @@ class DefaultUrlValidatorTest {
     @Test
     void shouldFailValidateShortUrlIsUnique() {
         final String shortUrl = "test";
-        when(urlRepository.existsUrlByShortUrl(shortUrl)).thenReturn(true);
+        when(urlRepository.aliasTaken(null, shortUrl)).thenReturn(true);
         assertThatThrownBy(() -> urlValidator.checkIfShortUrlIsUnique(shortUrl))
                 .isInstanceOf(ShortUrlAlreadyExistsException.class)
                 .hasMessage("This short URL is already taken. Try another.");

@@ -85,7 +85,7 @@ public class ReportController {
                     .filter(BioPage::isPublic)
                     .ifPresent(page -> reportBioPage(page, category, details));
         } else {
-            urlRepository.findByShortUrlAndActiveTrue(target.shortCode()).ifPresent(url -> reviewQueueService.report(url, category, details));
+            urlRepository.findActive(null, target.shortCode()).ifPresent(url -> reviewQueueService.report(url, category, details));
         }
 
         return ResponseEntity.accepted().build();

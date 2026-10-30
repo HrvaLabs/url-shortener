@@ -54,6 +54,19 @@ class ShortUrlUniqueIndexGuardTest {
     }
 
     @Test
+    void theIndexStepIsMarkRanWhereDuplicatesExist() {
+        assertThat(jdbcTemplate.queryForList("select id, exectype from databasechangelog where id like '032-url-%' order by orderexecuted"))
+                .extracting(row -> row.get("ID"), row -> row.get("EXECTYPE"))
+                .containsExactly(
+                        tuple("032-url-domain-id", "EXECUTED"),
+                        tuple("032-url-domain-short-url-unique", "MARK_RAN"),
+                        tuple("032-url-short-url-unique-dropped", "MARK_RAN"));
+        assertThat(jdbcTemplate.queryForObject(
+                "select count(*) from information_schema.indexes where upper(index_name) in ('UX_URL_SHORT_URL', 'UX_URL_DOMAIN_SHORT_URL')", Integer.class))
+                .isZero();
+    }
+
+    @Test
     void bothDuplicatesSurvive() {
         assertThat(jdbcTemplate.queryForObject("select count(*) from url where short_url = 'dup'", Integer.class)).isEqualTo(2);
     }

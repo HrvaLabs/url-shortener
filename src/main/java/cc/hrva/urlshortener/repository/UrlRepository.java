@@ -24,24 +24,46 @@ import org.springframework.transaction.annotation.Transactional;
 @Repository
 public interface UrlRepository extends JpaRepository<Url, Long>, JpaSpecificationExecutor<Url> {
 
+    default Optional<Url> findServed(final Long domainId, final String alias) {
+        return domainId == null
+                ? findFirstByDomainIsNullAndShortUrlOrderByActiveDescIdDesc(alias)
+                : findFirstByDomain_IdAndShortUrlOrderByActiveDescIdDesc(domainId, alias);
+    }
+
+    default Optional<Url> findActive(final Long domainId, final String alias) {
+        return domainId == null ? findByDomainIsNullAndShortUrlAndActiveTrue(alias) : findByDomain_IdAndShortUrlAndActiveTrue(domainId, alias);
+    }
+
+    default boolean aliasTaken(final Long domainId, final String alias) {
+        return domainId == null ? existsByDomainIsNullAndShortUrl(alias) : existsByDomain_IdAndShortUrl(domainId, alias);
+    }
+
+    default boolean aliasActive(final Long domainId, final String alias) {
+        return domainId == null ? existsByDomainIsNullAndShortUrlAndActiveTrue(alias) : existsByDomain_IdAndShortUrlAndActiveTrue(domainId, alias);
+    }
+
     @Override
-    @EntityGraph(attributePaths = "owner", type = EntityGraph.EntityGraphType.LOAD)
+    @EntityGraph(attributePaths = {"owner", "domain"}, type = EntityGraph.EntityGraphType.LOAD)
     Page<Url> findAll(Pageable pageable);
 
     @Override
-    @EntityGraph(attributePaths = "owner", type = EntityGraph.EntityGraphType.LOAD)
+    @EntityGraph(attributePaths = {"owner", "domain"}, type = EntityGraph.EntityGraphType.LOAD)
     Page<Url> findAll(Specification<Url> spec, Pageable pageable);
 
-    @EntityGraph(attributePaths = "owner", type = EntityGraph.EntityGraphType.LOAD)
+    @EntityGraph(attributePaths = {"owner", "domain"}, type = EntityGraph.EntityGraphType.LOAD)
     List<Url> findTop10ByOrderByCreateDateDescIdDesc();
 
     Page<Url> findAllByOwner(User owner, Pageable pageable);
     boolean existsUrlByLongUrlAndActiveTrue(String longUrl);
     Optional<Url> findByLongUrlAndActiveTrue(String longUrl);
-    boolean existsUrlByShortUrl(String shortUrl);
-    boolean existsUrlByShortUrlAndActiveTrue(String shortUrl);
-    Optional<Url> findByShortUrlAndActiveTrue(String shortUrl);
-    Optional<Url> findFirstByShortUrlOrderByActiveDescIdDesc(String shortUrl);
+    Optional<Url> findFirstByDomainIsNullAndShortUrlOrderByActiveDescIdDesc(String alias);
+    Optional<Url> findFirstByDomain_IdAndShortUrlOrderByActiveDescIdDesc(Long domainId, String alias);
+    Optional<Url> findByDomainIsNullAndShortUrlAndActiveTrue(String alias);
+    Optional<Url> findByDomain_IdAndShortUrlAndActiveTrue(Long domainId, String alias);
+    boolean existsByDomainIsNullAndShortUrl(String alias);
+    boolean existsByDomain_IdAndShortUrl(Long domainId, String alias);
+    boolean existsByDomainIsNullAndShortUrlAndActiveTrue(String alias);
+    boolean existsByDomain_IdAndShortUrlAndActiveTrue(Long domainId, String alias);
     boolean existsUrlByLongUrlAndActiveTrueAndOwnerIsNull(String longUrl);
     @EntityGraph(attributePaths = "owner", type = EntityGraph.EntityGraphType.LOAD)
     List<Url> findByExpirationDateBetweenAndActiveTrueAndOwnerIsNotNull(LocalDateTime start, LocalDateTime end);

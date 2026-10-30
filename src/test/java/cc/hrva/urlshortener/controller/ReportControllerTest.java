@@ -138,7 +138,7 @@ class ReportControllerTest {
 
     @Test
     void aReportOnAnActiveLinkGoesToTheReviewQueue() throws Exception {
-        when(urlRepository.findByShortUrlAndActiveTrue(SHORT)).thenReturn(Optional.of(url));
+        when(urlRepository.findActive(null, SHORT)).thenReturn(Optional.of(url));
 
         report(SHORT, "PHISHING", DETAILS)
                 .andExpect(status().isAccepted())
@@ -150,7 +150,7 @@ class ReportControllerTest {
     @ParameterizedTest
     @ValueSource(strings = {"hrva.cc/v0DB3", "https://hrva.cc/v0DB3", "HTTP://www.HRVA.cc/v0DB3/", "hrva.cc/v0DB3?utm_source=mail", " /v0DB3 "})
     void theShortLinkCanBeGivenAsALinkOnTheShortHost(final String shortUrl) throws Exception {
-        when(urlRepository.findByShortUrlAndActiveTrue(SHORT)).thenReturn(Optional.of(url));
+        when(urlRepository.findActive(null, SHORT)).thenReturn(Optional.of(url));
 
         report(shortUrl, "SPAM", null).andExpect(status().isAccepted());
 
@@ -229,7 +229,7 @@ class ReportControllerTest {
 
     @Test
     void aShortLinkStillReportsTheLink() throws Exception {
-        when(urlRepository.findByShortUrlAndActiveTrue("ana")).thenReturn(Optional.of(url));
+        when(urlRepository.findActive(null, "ana")).thenReturn(Optional.of(url));
 
         report("hrva.cc/ana", "SPAM", null).andExpect(status().isAccepted());
 
@@ -256,7 +256,7 @@ class ReportControllerTest {
 
     @Test
     void impersonationCanBeReportedForALinkAndForABioPage() throws Exception {
-        when(urlRepository.findByShortUrlAndActiveTrue(SHORT)).thenReturn(Optional.of(url));
+        when(urlRepository.findActive(null, SHORT)).thenReturn(Optional.of(url));
         when(bioPageRepository.findByHandleWithOwner("ana")).thenReturn(Optional.of(page));
 
         report(SHORT, "IMPERSONATION", DETAILS).andExpect(status().isAccepted());
@@ -332,7 +332,7 @@ class ReportControllerTest {
 
     @Test
     void anOptimisticLockFailureOnALinkReportIsNotHidden() throws Exception {
-        when(urlRepository.findByShortUrlAndActiveTrue(SHORT)).thenReturn(Optional.of(url));
+        when(urlRepository.findActive(null, SHORT)).thenReturn(Optional.of(url));
         doThrow(new ObjectOptimisticLockingFailureException(Url.class, 287L)).when(reviewQueueService).report(url, ReportCategory.SPAM, null);
 
         report(SHORT, "SPAM", null).andExpect(status().isInternalServerError());
@@ -355,16 +355,16 @@ class ReportControllerTest {
     @Test
     void aShortCodeCanBeAsLongAsACustomAlias() throws Exception {
         final var longest = "abcdefghijklmnopqrstuvwxyz012345";
-        when(urlRepository.findByShortUrlAndActiveTrue(longest)).thenReturn(Optional.empty());
+        when(urlRepository.findActive(null, longest)).thenReturn(Optional.empty());
 
         report("hrva.cc/" + longest, "SPAM", null).andExpect(status().isAccepted());
 
-        verify(urlRepository).findByShortUrlAndActiveTrue(longest);
+        verify(urlRepository).findActive(null, longest);
     }
 
     @Test
     void anUnknownOrInactiveLinkIsAcceptedButNothingIsWritten() throws Exception {
-        when(urlRepository.findByShortUrlAndActiveTrue("gone")).thenReturn(Optional.empty());
+        when(urlRepository.findActive(null, "gone")).thenReturn(Optional.empty());
 
         report("gone", "MALWARE", DETAILS)
                 .andExpect(status().isAccepted())
@@ -396,7 +396,7 @@ class ReportControllerTest {
 
     @Test
     void fiveHundredCharactersOfDetailsAreCountedAfterTrimming() throws Exception {
-        when(urlRepository.findByShortUrlAndActiveTrue(SHORT)).thenReturn(Optional.of(url));
+        when(urlRepository.findActive(null, SHORT)).thenReturn(Optional.of(url));
 
         report(SHORT, "OTHER", "  " + "a".repeat(500) + "\u0007\n ").andExpect(status().isAccepted());
 
@@ -405,7 +405,7 @@ class ReportControllerTest {
 
     @Test
     void detailsAreTrimmedAndStrippedOfControlCharacters() throws Exception {
-        when(urlRepository.findByShortUrlAndActiveTrue(SHORT)).thenReturn(Optional.of(url));
+        when(urlRepository.findActive(null, SHORT)).thenReturn(Optional.of(url));
 
         report(SHORT, "PHISHING", "  asks for\u0000 my\u001b bank\r\nlogin\u0085 ").andExpect(status().isAccepted());
 
@@ -414,7 +414,7 @@ class ReportControllerTest {
 
     @Test
     void detailsAreStrippedOfFormatCharactersSoTheyCannotReorderOrHideText() throws Exception {
-        when(urlRepository.findByShortUrlAndActiveTrue(SHORT)).thenReturn(Optional.of(url));
+        when(urlRepository.findActive(null, SHORT)).thenReturn(Optional.of(url));
 
         report(SHORT, "PHISHING", "\u202Easks for\u200B my\u2066 bank\u200D login\uFEFF").andExpect(status().isAccepted());
 
@@ -423,7 +423,7 @@ class ReportControllerTest {
 
     @Test
     void blankDetailsCountAsNoDetails() throws Exception {
-        when(urlRepository.findByShortUrlAndActiveTrue(SHORT)).thenReturn(Optional.of(url));
+        when(urlRepository.findActive(null, SHORT)).thenReturn(Optional.of(url));
 
         report(SHORT, "SPAM", " \t\u0000 ").andExpect(status().isAccepted());
 
@@ -458,7 +458,7 @@ class ReportControllerTest {
 
     @Test
     void theSixthReportFromOneClientWithinAnHourIsRefused() throws Exception {
-        when(urlRepository.findByShortUrlAndActiveTrue(SHORT)).thenReturn(Optional.of(url));
+        when(urlRepository.findActive(null, SHORT)).thenReturn(Optional.of(url));
 
         for (var sent = 0; sent < 5; sent++) {
             report(SHORT, "PHISHING", DETAILS).andExpect(status().isAccepted());
@@ -473,7 +473,7 @@ class ReportControllerTest {
 
     @Test
     void theLimitIsKeptPerHashedClientAddress() throws Exception {
-        when(urlRepository.findByShortUrlAndActiveTrue(SHORT)).thenReturn(Optional.of(url));
+        when(urlRepository.findActive(null, SHORT)).thenReturn(Optional.of(url));
         for (var sent = 0; sent < 5; sent++) {
             report(SHORT, "PHISHING", DETAILS).andExpect(status().isAccepted());
         }
@@ -493,7 +493,7 @@ class ReportControllerTest {
 
         report(SHORT, "PHISHING", DETAILS).andExpect(status().isTooManyRequests());
 
-        verify(urlRepository, never()).findByShortUrlAndActiveTrue(SHORT);
+        verify(urlRepository, never()).findActive(null, SHORT);
         verifyNoInteractions(reviewQueueService);
     }
 
@@ -502,7 +502,7 @@ class ReportControllerTest {
         mockMvc = mockMvcWith((key, window) -> {
             throw new RateLimiterUnavailableException(new IllegalStateException("redis down"));
         });
-        when(urlRepository.findByShortUrlAndActiveTrue(SHORT)).thenReturn(Optional.of(url));
+        when(urlRepository.findActive(null, SHORT)).thenReturn(Optional.of(url));
 
         report(SHORT, "PHISHING", DETAILS).andExpect(status().isAccepted());
 
@@ -511,11 +511,11 @@ class ReportControllerTest {
 
     @Test
     void aReportNeverChangesTheLink() throws Exception {
-        when(urlRepository.findByShortUrlAndActiveTrue(SHORT)).thenReturn(Optional.of(url));
+        when(urlRepository.findActive(null, SHORT)).thenReturn(Optional.of(url));
 
         report(SHORT, "PHISHING", DETAILS).andExpect(status().isAccepted());
 
-        verify(urlRepository).findByShortUrlAndActiveTrue(SHORT);
+        verify(urlRepository).findActive(null, SHORT);
         verifyNoMoreInteractions(urlRepository);
         verify(reviewQueueService).report(any(Url.class), any(ReportCategory.class), any());
         verifyNoMoreInteractions(reviewQueueService);

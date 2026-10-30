@@ -90,6 +90,7 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.ArgumentMatchers.startsWith;
 import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
 import static org.mockito.Mockito.mock;
@@ -1186,7 +1187,7 @@ class UrlServiceTest {
         assertThat(result.longUrl()).isEqualTo("long");
 
         verify(reservedAliasService).isReserved(url.getShortUrl());
-        verify(urlRepository).existsUrlByShortUrl(url.getShortUrl());
+        verify(urlRepository).aliasTaken(null, url.getShortUrl());
         verify(urlValidator).longUrlInUrl(url);
     }
 
@@ -1200,19 +1201,19 @@ class UrlServiceTest {
         final var candidates = org.mockito.ArgumentCaptor.forClass(String.class);
         verify(reservedAliasService, times(2)).isReserved(candidates.capture());
         assertThat(url.getShortUrl()).hasSize(5).isEqualTo(candidates.getAllValues().getLast());
-        verify(urlRepository).existsUrlByShortUrl(url.getShortUrl());
+        verify(urlRepository).aliasTaken(null, url.getShortUrl());
         verify(urlRepository).save(url);
     }
 
     @Test
     void generatedAliasSkipsTakenOnes() {
         final var url = signedInCreate();
-        when(urlRepository.existsUrlByShortUrl(anyString())).thenReturn(true, false);
+        when(urlRepository.aliasTaken(isNull(), anyString())).thenReturn(true, false);
 
         urlService.saveUrlRouting(CreateUrlDto.builder().longUrl("https://example.com/menu").build(), CLIENT_IP, CreatedVia.WEB);
 
         final var candidates = org.mockito.ArgumentCaptor.forClass(String.class);
-        verify(urlRepository, times(2)).existsUrlByShortUrl(candidates.capture());
+        verify(urlRepository, times(2)).aliasTaken(isNull(), candidates.capture());
         assertThat(url.getShortUrl()).hasSize(5).isEqualTo(candidates.getAllValues().getLast());
         verify(reservedAliasService, times(2)).isReserved(anyString());
         verify(urlRepository).save(url);
@@ -1231,7 +1232,7 @@ class UrlServiceTest {
                 .hasMessage("Couldn't pick a free short URL. Try again.");
 
         verify(reservedAliasService, times(10)).isReserved(anyString());
-        verify(urlRepository, never()).existsUrlByShortUrl(anyString());
+        verify(urlRepository, never()).aliasTaken(isNull(), anyString());
         verify(urlRepository, never()).save(any());
     }
 
@@ -1332,8 +1333,8 @@ class UrlServiceTest {
 
     private static DataIntegrityViolationException shortUrlTakenMeanwhile() {
         return new DataIntegrityViolationException("could not execute statement", new ConstraintViolationException(
-                "could not execute statement", new SQLException("duplicate key value violates unique constraint \"ux_url_short_url\"", "23505"),
-                "ux_url_short_url"));
+                "could not execute statement", new SQLException("duplicate key value violates unique constraint \"ux_url_domain_short_url\"", "23505"),
+                "ux_url_domain_short_url"));
     }
 
     private Url signedInCreate() {
@@ -1792,7 +1793,7 @@ class UrlServiceTest {
         final var url = Url.builder().id(1L).shortUrl("a").longUrl("https://a.com").active(true).passwordHash("hash").build();
         when(rateLimiter.tryAcquire(any(), org.mockito.ArgumentMatchers.anyInt(), any()))
                 .thenThrow(new RateLimiterUnavailableException(new RuntimeException("down")));
-        when(urlRepository.findByShortUrlAndActiveTrue("a")).thenReturn(Optional.of(url));
+        when(urlRepository.findActive(null, "a")).thenReturn(Optional.of(url));
         when(passwordEncoder.matches("secret", "hash")).thenReturn(true);
 
         assertThat(urlService.unlockUrl("a", "secret", CLICK).longUrl()).isEqualTo("https://a.com");
@@ -1801,7 +1802,7 @@ class UrlServiceTest {
     @Test
     void shouldUnlockWithCorrectPassword() {
         final var url = Url.builder().id(1L).shortUrl("a").longUrl("https://a.com").active(true).passwordHash("hash").build();
-        when(urlRepository.findByShortUrlAndActiveTrue("a")).thenReturn(Optional.of(url));
+        when(urlRepository.findActive(null, "a")).thenReturn(Optional.of(url));
         when(passwordEncoder.matches("pw", "hash")).thenReturn(true);
 
         final var result = urlService.unlockUrl("a", "pw", CLICK);
@@ -1812,7 +1813,7 @@ class UrlServiceTest {
     @Test
     void shouldRejectUnlockWithWrongPassword() {
         final var url = Url.builder().id(1L).shortUrl("a").longUrl("https://a.com").active(true).passwordHash("hash").build();
-        when(urlRepository.findByShortUrlAndActiveTrue("a")).thenReturn(Optional.of(url));
+        when(urlRepository.findActive(null, "a")).thenReturn(Optional.of(url));
         when(passwordEncoder.matches("nope", "hash")).thenReturn(false);
 
         assertThatThrownBy(() -> urlService.unlockUrl("a", "nope", CLICK))
@@ -1822,7 +1823,7 @@ class UrlServiceTest {
     @Test
     void shouldUnlockNonProtectedUrlWithoutPasswordCheck() {
         final var url = Url.builder().id(1L).shortUrl("a").longUrl("https://a.com").active(true).build();
-        when(urlRepository.findByShortUrlAndActiveTrue("a")).thenReturn(Optional.of(url));
+        when(urlRepository.findActive(null, "a")).thenReturn(Optional.of(url));
 
         final var result = urlService.unlockUrl("a", null, CLICK);
 
@@ -1832,7 +1833,7 @@ class UrlServiceTest {
     @Test
     void unlockRateLimitKeysOnTheClientOfTheClick() {
         final var url = Url.builder().id(7L).shortUrl("a").longUrl("https://a.com").active(true).passwordHash("hash").build();
-        when(urlRepository.findByShortUrlAndActiveTrue("a")).thenReturn(Optional.of(url));
+        when(urlRepository.findActive(null, "a")).thenReturn(Optional.of(url));
         when(passwordEncoder.matches("pw", "hash")).thenReturn(true);
 
         urlService.unlockUrl("a", "pw", CLICK);
@@ -1844,7 +1845,7 @@ class UrlServiceTest {
     @Test
     void unlockRecordsTheClickWithAnUnknownReferrer() {
         final var url = Url.builder().id(7L).shortUrl("a").longUrl("https://a.com").active(true).passwordHash("hash").build();
-        when(urlRepository.findByShortUrlAndActiveTrue("a")).thenReturn(Optional.of(url));
+        when(urlRepository.findActive(null, "a")).thenReturn(Optional.of(url));
         when(passwordEncoder.matches("pw", "hash")).thenReturn(true);
 
         assertThat(urlService.unlockUrl("a", "pw", CLICK).longUrl()).isEqualTo("https://a.com");
@@ -1855,7 +1856,7 @@ class UrlServiceTest {
     @Test
     void unlockAnswersABotOnAVisitLimitedLinkAsMissing() {
         final var url = Url.builder().id(7L).shortUrl("a").longUrl("https://a.com").active(true).passwordHash("hash").visits(0L).visitLimit(1L).build();
-        when(urlRepository.findByShortUrlAndActiveTrue("a")).thenReturn(Optional.of(url));
+        when(urlRepository.findActive(null, "a")).thenReturn(Optional.of(url));
         when(passwordEncoder.matches("pw", "hash")).thenReturn(true);
         when(clickAnalyticsService.isBot(CLICK)).thenReturn(true);
 
@@ -1973,7 +1974,7 @@ class UrlServiceTest {
     void publicLookupHidesTheOwnerAndTags() {
         final var owner = User.builder().email("owner@example.com").build();
         final var url = Url.builder().id(3L).shortUrl("menu").longUrl("https://gableci.hrva.cc").owner(owner).tags(java.util.Set.of("client-x")).active(true).build();
-        when(urlRepository.findByShortUrlAndActiveTrue("menu")).thenReturn(Optional.of(url));
+        when(urlRepository.findActive(null, "menu")).thenReturn(Optional.of(url));
 
         final var result = urlService.revealUrlAndRecordClick("menu", CLICK);
 
@@ -1985,7 +1986,7 @@ class UrlServiceTest {
     @Test
     void revealRecordsTheClickWithTheRequestDetails() {
         final var url = Url.builder().id(3L).shortUrl("menu").longUrl("https://gableci.hrva.cc").active(true).build();
-        when(urlRepository.findByShortUrlAndActiveTrue("menu")).thenReturn(Optional.of(url));
+        when(urlRepository.findActive(null, "menu")).thenReturn(Optional.of(url));
 
         urlService.revealUrlAndRecordClick("menu", CLICK);
 
@@ -1996,7 +1997,7 @@ class UrlServiceTest {
     @Test
     void revealAnswersABotOnAVisitLimitedLinkAsMissing() {
         final var url = Url.builder().id(3L).shortUrl("menu").longUrl("https://gableci.hrva.cc").visits(0L).visitLimit(1L).active(true).build();
-        when(urlRepository.findByShortUrlAndActiveTrue("menu")).thenReturn(Optional.of(url));
+        when(urlRepository.findActive(null, "menu")).thenReturn(Optional.of(url));
         when(clickAnalyticsService.isBot(CLICK)).thenReturn(true);
 
         assertThatThrownBy(() -> urlService.revealUrlAndRecordClick("menu", CLICK))
@@ -2009,7 +2010,7 @@ class UrlServiceTest {
     @Test
     void publicLookupOfALinkFoundOnABlocklistIsNotFoundAndRecordsNoClick() {
         final var url = Url.builder().id(3L).shortUrl("menu").longUrl("https://jofogas.cards/login").active(true).build();
-        when(urlRepository.findByShortUrlAndActiveTrue("menu")).thenReturn(Optional.of(url));
+        when(urlRepository.findActive(null, "menu")).thenReturn(Optional.of(url));
         when(clickCheckService.mayRedirect(3L, "https://jofogas.cards/login")).thenReturn(false);
 
         assertThatThrownBy(() -> urlService.revealUrlAndRecordClick("menu", CLICK))
@@ -2022,7 +2023,7 @@ class UrlServiceTest {
     @Test
     void peekingAtALinkFoundOnABlocklistIsNotFound() {
         final var url = Url.builder().id(3L).shortUrl("menu").longUrl("https://jofogas.cards/login").active(true).build();
-        when(urlRepository.findByShortUrlAndActiveTrue("menu")).thenReturn(Optional.of(url));
+        when(urlRepository.findActive(null, "menu")).thenReturn(Optional.of(url));
         when(clickCheckService.mayRedirect(3L, "https://jofogas.cards/login")).thenReturn(false);
 
         assertThatThrownBy(() -> urlService.peekUrlByShortUrl("menu"))
@@ -2036,7 +2037,7 @@ class UrlServiceTest {
     void peekingAtALinkThatPassesTheClickCheckShowsIt() {
         final var url = Url.builder().id(3L).shortUrl("menu").longUrl("https://gableci.hrva.cc").active(true).build();
         final var peek = cc.hrva.urlshortener.model.PeekUrl.builder().shortUrl("menu").longUrl("https://gableci.hrva.cc").build();
-        when(urlRepository.findByShortUrlAndActiveTrue("menu")).thenReturn(Optional.of(url));
+        when(urlRepository.findActive(null, "menu")).thenReturn(Optional.of(url));
         when(urlToPeekUrlConverter.convert(url)).thenReturn(peek);
 
         assertThat(urlService.peekUrlByShortUrl("menu")).isSameAs(peek);
@@ -2047,7 +2048,7 @@ class UrlServiceTest {
     @Test
     void lookingUpAPasswordProtectedLinkRevealsNothingSoSkipsTheClickCheck() {
         final var url = Url.builder().id(4L).shortUrl("board").longUrl("https://secret.example/board").passwordHash("$2a$10$hash").active(true).build();
-        when(urlRepository.findByShortUrlAndActiveTrue("board")).thenReturn(Optional.of(url));
+        when(urlRepository.findActive(null, "board")).thenReturn(Optional.of(url));
 
         urlService.revealUrlAndRecordClick("board", CLICK);
         urlService.peekUrlByShortUrl("board");
@@ -2058,7 +2059,7 @@ class UrlServiceTest {
     @Test
     void passwordProtectedRevealRecordsNoClick() {
         final var url = Url.builder().id(4L).shortUrl("board").longUrl("https://secret.example/board").passwordHash("$2a$10$hash").visitLimit(1L).active(true).build();
-        when(urlRepository.findByShortUrlAndActiveTrue("board")).thenReturn(Optional.of(url));
+        when(urlRepository.findActive(null, "board")).thenReturn(Optional.of(url));
 
         final var result = urlService.revealUrlAndRecordClick("board", CLICK);
 
@@ -2088,7 +2089,7 @@ class UrlServiceTest {
         when(cache.get("abc")).thenThrow(new IllegalStateException("Redis is down"));
         org.mockito.Mockito.doThrow(new IllegalStateException("Redis is down")).when(cache).put(any(), any());
         final var url = Url.builder().id(5L).shortUrl("abc").longUrl("https://example.com/a").visits(0L).active(true).build();
-        when(urlRepository.findFirstByShortUrlOrderByActiveDescIdDesc("abc")).thenReturn(Optional.of(url));
+        when(urlRepository.findServed(null, "abc")).thenReturn(Optional.of(url));
 
         final var redirect = urlServiceWithMeters().redirectResultUrl("abc", CLICK);
 
@@ -2098,7 +2099,7 @@ class UrlServiceTest {
     @Test
     void redirectRecordsTheClickWithTheRequestDetails() {
         final var url = Url.builder().id(7L).shortUrl("abc").longUrl("https://example.com/a").visits(0L).active(true).build();
-        when(urlRepository.findFirstByShortUrlOrderByActiveDescIdDesc("abc")).thenReturn(Optional.of(url));
+        when(urlRepository.findServed(null, "abc")).thenReturn(Optional.of(url));
 
         assertThat(urlServiceWithMeters().redirectResultUrl("abc", CLICK).getUrl()).isEqualTo("https://example.com/a");
 
@@ -2123,7 +2124,7 @@ class UrlServiceTest {
         final var cache = org.mockito.Mockito.mock(org.springframework.cache.Cache.class);
         when(cacheManager.getCache("urls")).thenReturn(cache);
         final var url = Url.builder().id(7L).shortUrl("abc").longUrl("https://example.com/a").visits(0L).visitLimit(1L).active(true).build();
-        when(urlRepository.findFirstByShortUrlOrderByActiveDescIdDesc("abc")).thenReturn(Optional.of(url));
+        when(urlRepository.findServed(null, "abc")).thenReturn(Optional.of(url));
         when(appProperties.getFrontendUrl()).thenReturn(FRONTEND);
         when(clickAnalyticsService.isBot(CLICK)).thenReturn(true);
 
@@ -2155,7 +2156,7 @@ class UrlServiceTest {
     void redirectSendsABotOnALinkWithoutALimitToTheDestination() {
         final var bot = ClickRequest.of(CLIENT_IP, "Discordbot/2.0", null, "HR");
         final var url = Url.builder().id(7L).shortUrl("abc").longUrl("https://example.com/a").visits(0L).active(true).build();
-        when(urlRepository.findFirstByShortUrlOrderByActiveDescIdDesc("abc")).thenReturn(Optional.of(url));
+        when(urlRepository.findServed(null, "abc")).thenReturn(Optional.of(url));
 
         assertThat(urlServiceWithMeters().redirectResultUrl("abc", bot).getUrl()).isEqualTo("https://example.com/a");
 
@@ -2167,8 +2168,8 @@ class UrlServiceTest {
     @ExtendWith(OutputCaptureExtension.class)
     void clickPathsNeverLogTheClientIp(final CapturedOutput output) {
         final var url = Url.builder().id(7L).shortUrl("abc").longUrl("https://example.com/a").visits(0L).active(true).build();
-        when(urlRepository.findFirstByShortUrlOrderByActiveDescIdDesc("abc")).thenReturn(Optional.of(url));
-        when(urlRepository.findByShortUrlAndActiveTrue("abc")).thenReturn(Optional.of(url));
+        when(urlRepository.findServed(null, "abc")).thenReturn(Optional.of(url));
+        when(urlRepository.findActive(null, "abc")).thenReturn(Optional.of(url));
 
         urlServiceWithMeters().redirectResultUrl("abc", CLICK);
         urlService.revealUrlAndRecordClick("abc", CLICK);
@@ -2200,7 +2201,7 @@ class UrlServiceTest {
         final var cache = org.mockito.Mockito.mock(org.springframework.cache.Cache.class);
         when(cacheManager.getCache("urls")).thenReturn(cache);
         final var url = Url.builder().id(5L).shortUrl("abc").longUrl("https://jofogas.cards/login").visits(0L).active(true).build();
-        when(urlRepository.findFirstByShortUrlOrderByActiveDescIdDesc("abc")).thenReturn(Optional.of(url));
+        when(urlRepository.findServed(null, "abc")).thenReturn(Optional.of(url));
         when(appProperties.getFrontendUrl()).thenReturn(FRONTEND);
         when(clickCheckService.mayRedirect(5L, "https://jofogas.cards/login")).thenReturn(false);
 
@@ -2216,7 +2217,7 @@ class UrlServiceTest {
         final var cache = org.mockito.Mockito.mock(org.springframework.cache.Cache.class);
         when(cacheManager.getCache("urls")).thenReturn(cache);
         final var url = Url.builder().id(5L).shortUrl("abc").longUrl("https://example.com/a").visits(0L).active(true).build();
-        when(urlRepository.findFirstByShortUrlOrderByActiveDescIdDesc("abc")).thenReturn(Optional.of(url));
+        when(urlRepository.findServed(null, "abc")).thenReturn(Optional.of(url));
 
         final var redirect = urlServiceWithMeters().redirectResultUrl("abc", CLICK);
 
@@ -2229,7 +2230,7 @@ class UrlServiceTest {
     @Test
     void aPasswordProtectedLinkGoesToItsGateWithoutTheClickCheck() {
         final var url = Url.builder().id(5L).shortUrl("abc").longUrl("https://example.com/a").visits(0L).active(true).passwordHash("hash").build();
-        when(urlRepository.findFirstByShortUrlOrderByActiveDescIdDesc("abc")).thenReturn(Optional.of(url));
+        when(urlRepository.findServed(null, "abc")).thenReturn(Optional.of(url));
         when(appProperties.getFrontendUrl()).thenReturn(FRONTEND);
 
         final var redirect = urlServiceWithMeters().redirectResultUrl("abc", CLICK);
@@ -2241,7 +2242,7 @@ class UrlServiceTest {
     @Test
     void unlockingALinkFoundOnABlocklistAtClickTimeSendsTheVisitorToTheUnavailablePage() {
         final var url = Url.builder().id(1L).shortUrl("a").longUrl("https://a.com").active(true).passwordHash("hash").build();
-        when(urlRepository.findByShortUrlAndActiveTrue("a")).thenReturn(Optional.of(url));
+        when(urlRepository.findActive(null, "a")).thenReturn(Optional.of(url));
         when(passwordEncoder.matches("pw", "hash")).thenReturn(true);
         when(appProperties.getFrontendUrl()).thenReturn(FRONTEND);
         when(clickCheckService.mayRedirect(1L, "https://a.com")).thenReturn(false);
@@ -2255,7 +2256,7 @@ class UrlServiceTest {
     @Test
     void aWrongPasswordNeverReachesTheClickCheck() {
         final var url = Url.builder().id(1L).shortUrl("a").longUrl("https://a.com").active(true).passwordHash("hash").build();
-        when(urlRepository.findByShortUrlAndActiveTrue("a")).thenReturn(Optional.of(url));
+        when(urlRepository.findActive(null, "a")).thenReturn(Optional.of(url));
         when(passwordEncoder.matches("nope", "hash")).thenReturn(false);
 
         assertThatThrownBy(() -> urlService.unlockUrl("a", "nope", CLICK))
@@ -2325,7 +2326,7 @@ class UrlServiceTest {
 
         urlServiceWithMeters().redirectResultUrl("nope", CLICK);
 
-        verify(urlRepository).findFirstByShortUrlOrderByActiveDescIdDesc("nope");
+        verify(urlRepository).findServed(null, "nope");
         org.mockito.Mockito.verifyNoMoreInteractions(urlRepository);
     }
 
@@ -2334,11 +2335,11 @@ class UrlServiceTest {
         final var cache = org.mockito.Mockito.mock(org.springframework.cache.Cache.class);
         when(cacheManager.getCache("urls")).thenReturn(cache);
         final var url = Url.builder().id(5L).shortUrl("abc").longUrl("https://example.com/a").visits(0L).active(true).build();
-        when(urlRepository.findFirstByShortUrlOrderByActiveDescIdDesc("abc")).thenReturn(Optional.of(url));
+        when(urlRepository.findServed(null, "abc")).thenReturn(Optional.of(url));
 
         assertThat(urlServiceWithMeters().redirectResultUrl("abc", CLICK).getUrl()).isEqualTo("https://example.com/a");
 
-        verify(urlRepository).findFirstByShortUrlOrderByActiveDescIdDesc("abc");
+        verify(urlRepository).findServed(null, "abc");
         org.mockito.Mockito.verifyNoMoreInteractions(urlRepository);
     }
 
@@ -2363,7 +2364,7 @@ class UrlServiceTest {
     @org.junit.jupiter.params.ParameterizedTest
     @org.junit.jupiter.params.provider.MethodSource("storedDestinations")
     void aDestinationFromTheDatabaseGoesOutAsAnAsciiLocation(final String stored, final String location) throws Exception {
-        when(urlRepository.findFirstByShortUrlOrderByActiveDescIdDesc("abc")).thenReturn(Optional.of(storedLink().longUrl(stored).active(true).build()));
+        when(urlRepository.findServed(null, "abc")).thenReturn(Optional.of(storedLink().longUrl(stored).active(true).build()));
 
         final var redirect = urlServiceWithMeters().redirectResultUrl("abc", CLICK);
 
@@ -2388,7 +2389,7 @@ class UrlServiceTest {
     @ExtendWith(OutputCaptureExtension.class)
     void aDestinationFromTheDatabaseWhoseHostCannotBeConvertedIsSentAsStored(final CapturedOutput output) {
         final var stored = "https://" + "č".repeat(64) + ".hr/torta";
-        when(urlRepository.findFirstByShortUrlOrderByActiveDescIdDesc("abc")).thenReturn(Optional.of(storedLink().longUrl(stored).active(true).build()));
+        when(urlRepository.findServed(null, "abc")).thenReturn(Optional.of(storedLink().longUrl(stored).active(true).build()));
 
         assertThat(urlServiceWithMeters().redirectResultUrl("abc", CLICK).getUrl()).isEqualTo(stored);
         assertThat(output).contains("urlId=5");
@@ -2407,7 +2408,7 @@ class UrlServiceTest {
     @Test
     void aDestinationFromTheDatabaseSentAsStoredNeverHasItsBracesExpanded() throws Exception {
         final var stored = "https://" + "č".repeat(64) + ".hr/{x}";
-        when(urlRepository.findFirstByShortUrlOrderByActiveDescIdDesc("abc")).thenReturn(Optional.of(storedLink().longUrl(stored).active(true).build()));
+        when(urlRepository.findServed(null, "abc")).thenReturn(Optional.of(storedLink().longUrl(stored).active(true).build()));
 
         assertThat(locationOf(urlServiceWithMeters().redirectResultUrl("abc", CLICK))).isEqualTo(stored);
     }
@@ -2467,7 +2468,7 @@ class UrlServiceTest {
         final var gated = new UrlResponse(6L, "https://example.com/b", "gated", null, null, 0L, null, true, "ACTIVE", Set.of(), true, null);
         when(cache.get("cached")).thenReturn(() -> cached);
         when(cache.get("gated")).thenReturn(() -> gated);
-        when(urlRepository.findFirstByShortUrlOrderByActiveDescIdDesc("stored"))
+        when(urlRepository.findServed(null, "stored"))
                 .thenReturn(Optional.of(storedLink().shortUrl("stored").longUrl("https://example.com/c").active(true).build()));
         when(appProperties.getFrontendUrl()).thenReturn(FRONTEND);
         final var service = urlServiceWithMeters();
@@ -2515,7 +2516,7 @@ class UrlServiceTest {
 
     private String redirectOf(final Url url) {
         when(appProperties.getFrontendUrl()).thenReturn(FRONTEND);
-        when(urlRepository.findFirstByShortUrlOrderByActiveDescIdDesc(url.getShortUrl())).thenReturn(Optional.of(url));
+        when(urlRepository.findServed(null, url.getShortUrl())).thenReturn(Optional.of(url));
         return urlServiceWithMeters().redirectResultUrl(url.getShortUrl(), CLICK).getUrl();
     }
 

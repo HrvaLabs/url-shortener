@@ -25,6 +25,7 @@ import java.util.Set;
 @NoArgsConstructor
 @AllArgsConstructor
 @DynamicUpdate
+@Table(uniqueConstraints = @UniqueConstraint(name = "ux_url_domain_short_url", columnNames = {"domain_id", "short_url"}))
 public class Url {
 
     @Id
@@ -37,11 +38,14 @@ public class Url {
     @Column(length = 2048)
     private String longUrl;
 
-    @Column(unique = true)
     private String shortUrl;
 
     @ManyToOne
     private User owner;
+
+    @ManyToOne(fetch = FetchType.EAGER)
+    @JoinColumn(name = "domain_id")
+    private CustomDomain domain;
 
     private LocalDateTime createDate;
     private LocalDateTime lastAccessed;
@@ -104,6 +108,11 @@ public class Url {
         if (this.visits >= Optional.ofNullable(visitLimit).orElse(this.visits + 1)) {
             this.active = false;
         }
+    }
+
+    @Transient
+    public Long domainId() {
+        return domain == null ? null : domain.getId();
     }
 
     public void clearForAnonymousUser() {
