@@ -9,7 +9,12 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.data.domain.Limit;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.domain.Specification;
+import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -17,7 +22,11 @@ import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
 @Repository
-public interface CustomDomainRepository extends JpaRepository<CustomDomain, Long> {
+public interface CustomDomainRepository extends JpaRepository<CustomDomain, Long>, JpaSpecificationExecutor<CustomDomain> {
+
+    @Override
+    @EntityGraph(attributePaths = "owner", type = EntityGraph.EntityGraphType.LOAD)
+    Page<CustomDomain> findAll(Specification<CustomDomain> spec, Pageable pageable);
 
     Optional<CustomDomain> findByIdAndOwnerId(Long id, Long ownerId);
 
@@ -28,6 +37,20 @@ public interface CustomDomainRepository extends JpaRepository<CustomDomain, Long
     Optional<CustomDomain> findByHostnameKey(String hostnameKey);
 
     List<CustomDomain> findByStatusIn(Collection<CustomDomainStatus> statuses);
+
+    long countByStatus(CustomDomainStatus status);
+
+    @Query("select new cc.hrva.urlshortener.repository.OwnerLinkCount(u.owner.id, count(u), sum(case when u.blockReason is not null then 1 else 0 end))"
+            + " from Url u where u.owner.id in :ownerIds group by u.owner.id")
+    List<OwnerLinkCount> countLinksOfOwners(@Param("ownerIds") Collection<Long> ownerIds);
+
+    @Query("select new cc.hrva.urlshortener.repository.OwnerReviewCount(r.url.owner.id, count(distinct r.url.id))"
+            + " from LinkReview r where r.resolvedAt is null and r.url.owner.id in :ownerIds group by r.url.owner.id")
+    List<OwnerReviewCount> countOpenReviewsOfOwners(@Param("ownerIds") Collection<Long> ownerIds);
+
+    @Query("select new cc.hrva.urlshortener.repository.DomainLinkCount(u.domain.id, count(u), coalesce(sum(u.visits), 0L))"
+            + " from Url u where u.domain.id in :domainIds group by u.domain.id")
+    List<DomainLinkCount> countLinksOfDomains(@Param("domainIds") Collection<Long> domainIds);
 
     @Query("""
             select count(d) from CustomDomain d

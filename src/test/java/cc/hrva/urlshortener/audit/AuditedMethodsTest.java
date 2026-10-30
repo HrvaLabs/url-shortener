@@ -33,7 +33,11 @@ class AuditedMethodsTest {
             Map.entry("AdminBioPageController.unhideBioPage", AuditAction.UNHIDE_BIO_PAGE),
             Map.entry("AdminBioPageController.changeBioPageHandle", AuditAction.RENAME_BIO_HANDLE),
             Map.entry("AdminBioPageController.revokeBioPageHandle", AuditAction.REVOKE_BIO_HANDLE),
-            Map.entry("AdminBioPageReviewController.resolveBioPageReview", AuditAction.RESOLVE_BIO_REVIEW));
+            Map.entry("AdminBioPageReviewController.resolveBioPageReview", AuditAction.RESOLVE_BIO_REVIEW),
+            Map.entry("AdminCustomDomainController.approveDomain", AuditAction.APPROVE_DOMAIN),
+            Map.entry("AdminCustomDomainController.rejectDomain", AuditAction.REJECT_DOMAIN),
+            Map.entry("AdminCustomDomainController.setAllowance", AuditAction.SET_DOMAIN_ALLOWANCE),
+            Map.entry("AdminCustomDomainController.removeAllowance", AuditAction.REMOVE_DOMAIN_ALLOWANCE));
 
     @Test
     void exactlyTheseControllerMethodsAreAuditedEachWithItsOwnAction() {
