@@ -8,9 +8,15 @@ All notable changes to hrva.cc — the URL shortener.
 
 An admin Settings page: turn features on or off and change their numbers without a redeploy, emails included.
 
+### 🔗 Links
+- When making links without an account is paused, the homepage, /qr and /utm say so before you type. When new sign-ups are paused, the register page says so.
+
 ### 🔧 Admin
 - A new Settings page: turn features on or off and change their numbers without a redeploy. Every change is logged and posted to Discord, and a safety check that is off shows a warning on Settings and Stats.
 - Emails can be turned off all at once or one kind at a time. Account emails always go out, and an email a switch stopped shows as Not sent in the email log.
+
+### 🌐 Site
+- A new help page explains links made without an account and when making them is paused.
 
 ---
 

@@ -31,6 +31,9 @@
 # Section 23 checks the same-shape alert: links without an account (distinct CF-Connecting-IP values, so the 10-per-hour create
 # limit is never reached) to one URL shape on three domains give one Discord line at the stub, a fourth domain adds none, and
 # index.php?id=1 on three domains is a generic path that gives none. Every link stays active; nothing is held.
+# Section 24 checks the admin settings: the Settings list as an admin and a user, ANONYMOUS_LINKS off (the sign-in refusal, the public
+# switches, the Discord lines naming the admin), CUSTOM_ALIASES off, SEND_EMAILS off (an admin domain block of the user's link logs a
+# SKIPPED email_log row), and CAMPAIGN_LINKS=4 (three same-shape links give no line, the fourth gives one). Every setting is reset.
 #
 #   scripts/mcp-e2e.sh                         builds the jar, then runs every step
 #   MCP_E2E_SKIP_BUILD=1 scripts/mcp-e2e.sh    reuses target/url-shortener-*.jar
@@ -1400,5 +1403,136 @@ expect_eq "$(docker exec "$REDIS_CONTAINER" redis-cli --raw --scan --pattern 'ca
 psql_query "select u.id, u.short_url, u.active, u.owner_id is null as anonymous, u.long_url from url u where u.long_url like '%e2e-shape-%' or u.long_url like '%e2e-generic-%' order by u.id;"
 expect_eq "$(psql_value "select count(*) filter (where active and owner_id is null and blocked_at is null) || ' of ' || count(*) from url where long_url like '%e2e-shape-%' or long_url like '%e2e-generic-%';")" \
     "7 of 7" "all seven links are active, without an account and not blocked: the alert holds nothing"
+
+section "24. Moderation: settings"
+SETTINGS_URL=$BASE/api/v1/admin/settings
+put_setting() {
+    http -X PUT "$SETTINGS_URL/$1" -H "Authorization: Bearer $ADMIN_JWT" -H 'Content-Type: application/json' -d "{\"value\":$2}"
+}
+reset_setting() {
+    http -X DELETE "$SETTINGS_URL/$1" -H "Authorization: Bearer $ADMIN_JWT"
+}
+http -X POST "$BASE/api/v1/auth/login" -H 'Content-Type: application/json' \
+    -d "{\"email\":\"$USER_EMAIL\",\"password\":\"reset-$USER_PASSWORD\"}"
+expect_eq "$HTTP_STATUS" 200 "POST /api/v1/auth/login as $USER_EMAIL with the password section 20 reset"
+SETTINGS_JWT=$(jq -r .token <<<"$HTTP_BODY")
+SETTINGS_JWT=${SETTINGS_JWT#Bearer }
+http "$SETTINGS_URL" -H "Authorization: Bearer $SETTINGS_JWT"
+expect_eq "$HTTP_STATUS" 403 "GET /api/v1/admin/settings as $USER_EMAIL"
+http "$SETTINGS_URL" -H "Authorization: Bearer $ADMIN_JWT"
+expect_eq "$HTTP_STATUS" 200 "GET /api/v1/admin/settings as admin@localhost"
+expect_eq "$(jq -r '[.[] | select(.changed)] | length' <<<"$HTTP_BODY")" 0 "no setting starts changed"
+expect_eq "$(jq -r '[.[] | select(.key == "ANONYMOUS_LINKS" or .key == "CUSTOM_ALIASES" or .key == "SEND_EMAILS") | .value] | map(tostring) | join(",")' <<<"$HTTP_BODY")" \
+    "true,true,true" "links without an account, custom aliases and emails start on in the local profile"
+expect_eq "$(jq -r '.[] | select(.key == "CAMPAIGN_LINKS") | .value' <<<"$HTTP_BODY")" 3 "the same-shape alert starts at 3 links"
+http "$BASE/api/v1/public/settings"
+expect_eq "$HTTP_STATUS $(jq -c . <<<"$HTTP_BODY")" '200 {"anonymousLinks":true,"newSignups":true,"customAliases":true}' "GET /api/v1/public/settings without a token"
+
+echo "  --- links without an account"
+put_setting ANONYMOUS_LINKS false
+expect_eq "$HTTP_STATUS" 200 "PUT /api/v1/admin/settings/ANONYMOUS_LINKS false"
+show "$(jq -c '{key, value, defaultValue, changed, changedBy}' <<<"$HTTP_BODY")"
+expect_eq "$(jq -c '[.value, .changed, .changedBy]' <<<"$HTTP_BODY")" '[false,true,"admin@localhost"]' "the answer shows the switch off, changed by the admin"
+http -X POST "$BASE/api/v1/urls" -H 'CF-Connecting-IP: 203.0.113.30' -H 'Content-Type: application/json' -d '{"longUrl":"https://e2e-settings-anon.com/a"}'
+show "POST /api/v1/urls without an account -> $HTTP_STATUS $HTTP_BODY"
+expect_eq "$HTTP_STATUS" 400 "a link without an account is refused"
+expect_eq "$(jq -r .error <<<"$HTTP_BODY")" "Sign in to create short URLs" "with the sign-in text"
+http "$BASE/api/v1/public/settings"
+expect_eq "$(jq -r .anonymousLinks <<<"$HTTP_BODY")" false "GET /api/v1/public/settings: anonymousLinks is false"
+http -X POST "$BASE/api/v1/urls" -H "Authorization: Bearer $SETTINGS_JWT" -H 'Content-Type: application/json' -d '{"longUrl":"https://e2e-settings-anon.com/signed-in"}'
+expect_eq "$HTTP_STATUS" 200 "$USER_EMAIL can still make a link"
+put_setting ANONYMOUS_LINKS true
+expect_eq "$HTTP_STATUS $(jq -r '[.value, .changed] | map(tostring) | join(",")' <<<"$HTTP_BODY")" "200 true,false" "PUT ANONYMOUS_LINKS true is the default again"
+http -X POST "$BASE/api/v1/urls" -H 'CF-Connecting-IP: 203.0.113.30' -H 'Content-Type: application/json' -d '{"longUrl":"https://e2e-settings-anon.com/b"}'
+expect_eq "$HTTP_STATUS" 200 "a link without an account is made again"
+settings_lines() {
+    jq -s --arg line "$1" '[.[].content | scan($line)] | length' "$DISCORD_POSTS"
+}
+settings_line_posted() {
+    [[ $(settings_lines "$1") -ge 1 ]]
+}
+wait_until 45 "the settings line at the Discord stub (30-second buffer)" settings_line_posted "Links without an account turned off by admin@localhost"
+wait_until 45 "the turned-on line at the Discord stub (30-second buffer)" settings_line_posted "Links without an account turned on by admin@localhost"
+expect_eq "$(settings_lines 'Links without an account turned off by admin@localhost')" 1 "the Discord stub got Links without an account turned off by admin@localhost once"
+expect_eq "$(settings_lines 'Links without an account turned on by admin@localhost')" 1 "and turned on by admin@localhost once"
+expect_eq "$(psql_value "select count(*) from audit_log where action = 'CHANGE_SETTING' and target_identifier = 'ANONYMOUS_LINKS' and performed_by = 'admin@localhost';")" 2 \
+    "the audit log has both changes"
+
+echo "  --- custom aliases"
+put_setting CUSTOM_ALIASES false
+expect_eq "$HTTP_STATUS" 200 "PUT /api/v1/admin/settings/CUSTOM_ALIASES false"
+http -X POST "$BASE/api/v1/urls" -H "Authorization: Bearer $SETTINGS_JWT" -H 'Content-Type: application/json' \
+    -d '{"longUrl":"https://e2e-settings-alias.com/a","shortUrl":"e2e-settings-alias"}'
+show "POST /api/v1/urls shortUrl=e2e-settings-alias as $USER_EMAIL -> $HTTP_STATUS $HTTP_BODY"
+expect_eq "$HTTP_STATUS" 400 "a chosen alias is refused"
+expect_eq "$(jq -r .error <<<"$HTTP_BODY")" "Custom aliases are turned off right now." "with the turned-off text"
+http "$BASE/api/v1/public/settings"
+expect_eq "$(jq -r .customAliases <<<"$HTTP_BODY")" false "GET /api/v1/public/settings: customAliases is false"
+http -X POST "$BASE/api/v1/urls" -H "Authorization: Bearer $SETTINGS_JWT" -H 'Content-Type: application/json' -d '{"longUrl":"https://e2e-settings-alias.com/b"}'
+expect_eq "$HTTP_STATUS" 200 "a generated alias still works"
+reset_setting CUSTOM_ALIASES
+expect_eq "$HTTP_STATUS $(jq -r '[.value, .changed] | map(tostring) | join(",")' <<<"$HTTP_BODY")" "200 true,false" "DELETE CUSTOM_ALIASES resets it"
+http -X POST "$BASE/api/v1/urls" -H "Authorization: Bearer $SETTINGS_JWT" -H 'Content-Type: application/json' \
+    -d '{"longUrl":"https://e2e-settings-alias.com/c","shortUrl":"e2e-settings-alias"}'
+expect_eq "$HTTP_STATUS" 200 "the chosen alias works again"
+
+echo "  --- emails"
+EMAIL_BLOCKED_SUBJECT='Your link was blocked as unsafe'
+EMAIL_LOG_BEFORE=$(psql_value "select coalesce(max(id), 0) from email_log;")
+put_setting SEND_EMAILS false
+expect_eq "$HTTP_STATUS" 200 "PUT /api/v1/admin/settings/SEND_EMAILS false"
+http -X POST "$BASE/api/v1/urls" -H "Authorization: Bearer $SETTINGS_JWT" -H 'Content-Type: application/json' -d '{"longUrl":"https://e2e-settings-mail.com/x"}'
+expect_eq "$HTTP_STATUS" 200 "$USER_EMAIL makes a link on e2e-settings-mail.com"
+http -X POST "$BASE/api/v1/admin/domain-rules" -H "Authorization: Bearer $ADMIN_JWT" -H 'Content-Type: application/json' \
+    -d '{"domain":"e2e-settings-mail.com","type":"BLOCK","reason":"E2E settings"}'
+show "POST /api/v1/admin/domain-rules e2e-settings-mail.com BLOCK -> $HTTP_STATUS $(jq -c '{id: .rule.id, linksAffected}' <<<"$HTTP_BODY")"
+expect_eq "$(jq -r '[.linksAffected, .rule.type] | map(tostring) | join(",")' <<<"$HTTP_BODY")" "1,BLOCK" "the admin blocks the link (and its domain)"
+MAIL_RULE_ID=$(jq -r .rule.id <<<"$HTTP_BODY")
+skipped_email_rows() {
+    psql_value "select count(*) from email_log where id > $EMAIL_LOG_BEFORE and recipient = '$USER_EMAIL' and subject = '$EMAIL_BLOCKED_SUBJECT' and status = 'SKIPPED' and error_message = 'Not sent: Send emails is off';"
+}
+email_row_logged() {
+    [[ $(skipped_email_rows) == 1 ]]
+}
+wait_until 30 "the email_log row" email_row_logged
+psql_query "select id, recipient, subject, status, error_message from email_log where id > $EMAIL_LOG_BEFORE order by id;"
+expect_eq "$(skipped_email_rows)" 1 "email_log has one SKIPPED row, Not sent: Send emails is off, for the owner's blocked-link email"
+expect_eq "$(psql_value "select count(*) from email_log where id > $EMAIL_LOG_BEFORE and status <> 'SKIPPED';")" 0 "no email went out while the switch was off"
+reset_setting SEND_EMAILS
+expect_eq "$HTTP_STATUS $(jq -r '[.value, .changed] | map(tostring) | join(",")' <<<"$HTTP_BODY")" "200 true,false" "DELETE SEND_EMAILS resets it"
+http -X DELETE "$BASE/api/v1/admin/domain-rules/$MAIL_RULE_ID" -H "Authorization: Bearer $ADMIN_JWT"
+expect_eq "$HTTP_STATUS" 204 "the domain rule is removed"
+
+echo "  --- the same-shape threshold"
+SETTINGS_SHAPE_PATTERN='Same-shape links: [0-9]+ links without an account on [0-9]+ domains share the URL shape /e2esettings\?r&t'
+settings_shape_lines() {
+    jq -s --arg pattern "$SETTINGS_SHAPE_PATTERN" '[.[].content | scan($pattern)] | length' "$DISCORD_POSTS"
+}
+settings_shape_posted() {
+    [[ $(settings_shape_lines) -ge 1 ]]
+}
+put_setting CAMPAIGN_LINKS 4
+expect_eq "$HTTP_STATUS $(jq -r '[.value, .changed] | map(tostring) | join(",")' <<<"$HTTP_BODY")" "200 4,true" "PUT /api/v1/admin/settings/CAMPAIGN_LINKS 4"
+create_shape_link 203.0.113.31 'https://a1.e2e-set-a.com/e2esettings?r=1&t=1'
+create_shape_link 203.0.113.32 'https://a1.e2e-set-b.com/e2esettings?r=1&t=1'
+create_shape_link 203.0.113.33 'https://a1.e2e-set-c.com/e2esettings?r=1&t=1'
+echo "  waiting 40 s, longer than the Discord buffer's 30-second flush, for a line that must not come"
+sleep 40
+expect_eq "$(settings_shape_lines)" 0 "three same-shape links on three domains give no line while the threshold is 4"
+create_shape_link 203.0.113.31 'https://a1.e2e-set-d.com/e2esettings?r=1&t=1'
+wait_until 45 "the same-shape alert at the Discord stub (30-second buffer)" settings_shape_posted
+show "$(jq -r --arg pattern "$SETTINGS_SHAPE_PATTERN" 'select(.content | test($pattern)) | .content' "$DISCORD_POSTS")"
+expect_eq "$(settings_shape_lines)" 1 "the fourth link on a fourth domain gives exactly one same-shape line"
+expect_eq "$(jq -s '[.[].content | scan("Same-shape links: 4 links without an account on 4 domains share the URL shape /e2esettings\\?r&t")] | length' "$DISCORD_POSTS")" 1 \
+    "and it reads Same-shape links: 4 links"
+reset_setting CAMPAIGN_LINKS
+expect_eq "$HTTP_STATUS $(jq -r '[.value, .changed] | map(tostring) | join(",")' <<<"$HTTP_BODY")" "200 3,false" "DELETE CAMPAIGN_LINKS resets it"
+
+echo "  --- reset"
+http "$SETTINGS_URL" -H "Authorization: Bearer $ADMIN_JWT"
+expect_eq "$(jq -r '[.[] | select(.changed)] | length' <<<"$HTTP_BODY")" 0 "no setting has changed: true"
+expect_eq "$(psql_value "select count(*) from app_setting;")" 0 "app_setting holds no row"
+http "$BASE/api/v1/public/settings"
+expect_eq "$(jq -c . <<<"$HTTP_BODY")" '{"anonymousLinks":true,"newSignups":true,"customAliases":true}' "the public switches are all on again"
 
 section "Done: every step passed"
