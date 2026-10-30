@@ -13,8 +13,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 public interface AuditLogRepository extends JpaRepository<AuditLog, Long> {
 
-    Page<AuditLog> findAllByOrderByPerformedAtDesc(Pageable pageable);
-    Page<AuditLog> findAllByActionOrderByPerformedAtDesc(AuditAction action, Pageable pageable);
+    Page<AuditLog> findAllByAction(AuditAction action, Pageable pageable);
 
     @Modifying
     @Transactional

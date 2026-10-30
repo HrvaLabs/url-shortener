@@ -31,6 +31,7 @@ import cc.hrva.urlshortener.dto.UpdatePasswordDto;
 import cc.hrva.urlshortener.dto.UserDto;
 import cc.hrva.urlshortener.dto.UserSearchDto;
 import cc.hrva.urlshortener.dto.UserUpdateDto;
+import cc.hrva.urlshortener.exception.InvalidSortException;
 import cc.hrva.urlshortener.exception.ApiException;
 import cc.hrva.urlshortener.exception.NoAuthorizationException;
 import cc.hrva.urlshortener.exception.ReauthenticationRequiredException;
@@ -79,6 +80,8 @@ import org.springframework.context.annotation.AnnotationConfigApplicationContext
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -373,9 +376,27 @@ class DefaultUserServiceTest {
     void shouldFetchAllUsers() {
         final var pageable = PageRequest.of(0, 20);
         final var users = new PageImpl<>(Collections.singletonList(User.builder().id(1L).build()));
-        when(userRepository.findAll(pageable)).thenReturn(users);
+        when(userRepository.findAll(newestFirst(pageable))).thenReturn(users);
 
         assertThat(userService.fetchAllUsers(pageable, new UserSearchDto()).getContent()).extracting(AdminUserResponse::id).containsExactly(1L);
+    }
+
+    @Test
+    void theUserListWithoutASortComesNewestFirstWithTheIdBreakingTies() {
+        when(userRepository.findAll(any(Pageable.class))).thenReturn(Page.empty());
+
+        userService.fetchAllUsers(PageRequest.of(2, 20), new UserSearchDto());
+
+        verify(userRepository).findAll(PageRequest.of(2, 20, Sort.by(
+                Sort.Order.desc("createDate"), Sort.Order.desc("id"))));
+    }
+
+    @Test
+    void theUserListRefusesToSortByAFieldOffTheList() {
+        assertThatThrownBy(() -> userService.fetchAllUsers(PageRequest.of(0, 20, Sort.by("password")), new UserSearchDto()))
+                .isInstanceOf(InvalidSortException.class)
+                .hasMessage("Sort must be email, createDate, lastLogin or active");
+        verifyNoInteractions(userRepository);
     }
 
     @Test
@@ -383,7 +404,7 @@ class DefaultUserServiceTest {
         final var pageable = PageRequest.of(0, 20);
         final var scammer = User.builder().id(27L).email("rhea@gmail.com").build();
         final var honest = User.builder().id(28L).email("ana@example.com").build();
-        when(userRepository.findAll(pageable)).thenReturn(new PageImpl<>(List.of(scammer, honest)));
+        when(userRepository.findAll(newestFirst(pageable))).thenReturn(new PageImpl<>(List.of(scammer, honest)));
         when(scammerSignalService.possibleScammerIds()).thenReturn(Set.of(27L, 41L));
 
         final var users = userService.fetchAllUsers(pageable, new UserSearchDto());
@@ -400,13 +421,13 @@ class DefaultUserServiceTest {
         final var search = new UserSearchDto();
         search.setPossibleScammer(true);
         when(scammerSignalService.possibleScammerIds()).thenReturn(Set.of(27L));
-        when(userRepository.findAll(any(Specification.class), eq(pageable))).thenReturn(new PageImpl<>(List.of(scammer), pageable, 1));
+        when(userRepository.findAll(any(Specification.class), eq(newestFirst(pageable)))).thenReturn(new PageImpl<>(List.of(scammer), pageable, 1));
 
         final var users = userService.fetchAllUsers(pageable, search);
 
         assertThat(users.getTotalElements()).isEqualTo(1);
         assertThat(users.getContent()).singleElement().extracting(AdminUserResponse::possibleScammer).isEqualTo(true);
-        verify(userRepository, never()).findAll(pageable);
+        verify(userRepository, never()).findAll(newestFirst(pageable));
     }
 
     @Test
@@ -430,7 +451,7 @@ class DefaultUserServiceTest {
         final var search = new UserSearchDto();
         search.setSearch("example");
 
-        when(userRepository.findAll(any(Specification.class), eq(pageable))).thenReturn(users);
+        when(userRepository.findAll(any(Specification.class), eq(newestFirst(pageable)))).thenReturn(users);
 
         assertThat(userService.fetchAllUsers(pageable, search).getContent()).extracting(AdminUserResponse::email).containsExactly("test@example.com");
     }
@@ -443,7 +464,7 @@ class DefaultUserServiceTest {
         final var search = new UserSearchDto();
         search.setActive(true);
 
-        when(userRepository.findAll(any(Specification.class), eq(pageable))).thenReturn(users);
+        when(userRepository.findAll(any(Specification.class), eq(newestFirst(pageable)))).thenReturn(users);
 
         assertThat(userService.fetchAllUsers(pageable, search).getContent()).extracting(AdminUserResponse::active).containsExactly(true);
     }
@@ -1298,6 +1319,10 @@ class DefaultUserServiceTest {
         protected void doRollback(final DefaultTransactionStatus status) {
         }
 
+    }
+
+    private static Pageable newestFirst(final Pageable pageable) {
+        return PageRequest.of(pageable.getPageNumber(), pageable.getPageSize(), Sort.by(Sort.Order.desc("createDate"), Sort.Order.desc("id")));
     }
 
 }

@@ -6,12 +6,14 @@ import cc.hrva.urlshortener.exception.ApiKeyActiveException;
 import cc.hrva.urlshortener.exception.ApiKeyNotFoundException;
 import cc.hrva.urlshortener.exception.InvalidApiKeyException;
 import cc.hrva.urlshortener.repository.ApiKeyRepository;
+import cc.hrva.urlshortener.util.SortWhitelist;
 import cc.hrva.urlshortener.validator.ApiKeyValidator;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Objects;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import cc.hrva.urlshortener.dto.ApiKeyResponse;
@@ -30,6 +32,10 @@ import org.springframework.transaction.annotation.Transactional;
 public class DefaultApiKeyService implements ApiKeyService {
 
     private static final String REVOKE_BEFORE_DELETING = "Revoke this key before deleting it.";
+    private static final String CREATE_DATE = "createDate";
+    private static final SortWhitelist API_KEY_SORTS = SortWhitelist.of(CREATE_DATE, "apiCallsUsed")
+            .byDefault(Sort.by(Sort.Order.desc(CREATE_DATE)))
+            .thenBy(Sort.Order.desc("id"));
 
     private final UserService userService;
     private final AppProperties appProperties;
@@ -128,7 +134,7 @@ public class DefaultApiKeyService implements ApiKeyService {
 
     @Override
     public Page<ApiKeyResponse> fetchAllApiKeys(final Pageable pageable) {
-        return apiKeyRepository.findAll(pageable).map(ApiKeyResponse::from);
+        return apiKeyRepository.findAll(API_KEY_SORTS.apply(pageable)).map(ApiKeyResponse::from);
     }
 
     @Override

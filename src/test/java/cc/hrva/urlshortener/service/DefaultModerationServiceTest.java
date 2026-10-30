@@ -1496,16 +1496,6 @@ class DefaultModerationServiceTest {
     }
 
     @Test
-    void aPageOfMoreThanAHundredRulesIsCutToAHundred() {
-        when(domainRuleRepository.findAll(anySpecification(), any(Pageable.class))).thenReturn(Page.empty());
-
-        moderationService.domainRules(null, null, PageRequest.of(3, 500));
-
-        verify(domainRuleRepository).findAll(anySpecification(),
-                eq(PageRequest.of(3, 100, Sort.by(Sort.Order.desc("createdAt"), Sort.Order.desc("id")))));
-    }
-
-    @Test
     void sortingByAFieldThatIsNotOnTheListIsRefused() {
         assertThatThrownBy(() -> moderationService.domainRules(null, null, PageRequest.of(0, 20, Sort.by("createdBy"))))
                 .isInstanceOf(InvalidSortException.class)

@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.service;
 
+import cc.hrva.urlshortener.exception.InvalidSortException;
 import cc.hrva.urlshortener.model.AuditLog;
 import cc.hrva.urlshortener.model.enums.AuditAction;
 import cc.hrva.urlshortener.repository.AuditLogRepository;
@@ -12,9 +13,12 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -54,15 +58,33 @@ class DefaultAuditLogServiceTest {
     }
 
     @Test
-    void theLogListsEveryActionWithoutAFilterAndOnlyThatActionWithOne() {
-        final var pageable = PageRequest.of(0, 50);
+    void theLogListsEveryActionWithoutAFilterAndOnlyThatActionWithOneNewestFirst() {
+        final var newestFirst = PageRequest.of(0, 50, Sort.by(Sort.Order.desc("performedAt"), Sort.Order.desc("id")));
         final Page<AuditLog> everything = Page.empty();
         final Page<AuditLog> resolved = Page.empty();
-        when(auditLogRepository.findAllByOrderByPerformedAtDesc(pageable)).thenReturn(everything);
-        when(auditLogRepository.findAllByActionOrderByPerformedAtDesc(AuditAction.RESOLVE_REVIEW, pageable)).thenReturn(resolved);
+        when(auditLogRepository.findAll(newestFirst)).thenReturn(everything);
+        when(auditLogRepository.findAllByAction(AuditAction.RESOLVE_REVIEW, newestFirst)).thenReturn(resolved);
 
-        assertThat(auditLogService.getAuditLogs(pageable, null)).isSameAs(everything);
-        assertThat(auditLogService.getAuditLogs(pageable, AuditAction.RESOLVE_REVIEW)).isSameAs(resolved);
+        assertThat(auditLogService.getAuditLogs(PageRequest.of(0, 50), null)).isSameAs(everything);
+        assertThat(auditLogService.getAuditLogs(PageRequest.of(0, 50), AuditAction.RESOLVE_REVIEW)).isSameAs(resolved);
+    }
+
+    @Test
+    void theLogCanBeReadOldestFirst() {
+        final var oldestFirst = PageRequest.of(1, 50, Sort.by(Sort.Order.asc("performedAt"), Sort.Order.desc("id")));
+        when(auditLogRepository.findAll(oldestFirst)).thenReturn(Page.empty());
+
+        auditLogService.getAuditLogs(PageRequest.of(1, 50, Sort.by(Sort.Order.asc("performedAt"))), null);
+
+        verify(auditLogRepository).findAll(oldestFirst);
+    }
+
+    @Test
+    void theLogRefusesToSortByAFieldOffTheList() {
+        assertThatThrownBy(() -> auditLogService.getAuditLogs(PageRequest.of(0, 50, Sort.by("createDate")), null))
+                .isInstanceOf(InvalidSortException.class)
+                .hasMessage("Sort must be performedAt");
+        verifyNoInteractions(auditLogRepository);
     }
 
 }

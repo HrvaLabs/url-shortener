@@ -76,4 +76,17 @@ class DefaultLoginAttemptServiceTest {
         assertThat(loginAttemptService.isBlocked(ip1)).isTrue();
         assertThat(loginAttemptService.isBlocked(ip2)).isFalse();
     }
+
+    @Test
+    void aFloodOfNewKeysKeepsAtMostTenThousandOfThem() {
+        for (var client = 0; client < 10_500; client++) {
+            loginAttemptService.loginFailed("10.0." + client);
+        }
+        loginAttemptService.loginFailed("10.0.10499");
+        loginAttemptService.loginFailed("10.0.10499");
+
+        assertThat(loginAttemptService.getLoginAttempts()).hasSizeLessThanOrEqualTo(10_000);
+        assertThat(loginAttemptService.isBlocked("10.0.10499")).isTrue();
+    }
+
 }

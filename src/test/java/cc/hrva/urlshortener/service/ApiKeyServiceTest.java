@@ -7,6 +7,7 @@ import java.util.Optional;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.converter.ApiKeyUpdateDtoToApiKeyConverter;
 import cc.hrva.urlshortener.dto.ApiKeyResponse;
@@ -14,6 +15,7 @@ import cc.hrva.urlshortener.dto.ApiKeyUpdateDto;
 import cc.hrva.urlshortener.exception.ApiKeyActiveException;
 import cc.hrva.urlshortener.exception.ApiKeyNotFoundException;
 import cc.hrva.urlshortener.exception.InvalidApiKeyException;
+import cc.hrva.urlshortener.exception.InvalidSortException;
 import cc.hrva.urlshortener.exception.NoAuthorizationException;
 import cc.hrva.urlshortener.model.ApiKey;
 import cc.hrva.urlshortener.model.User;
@@ -236,16 +238,22 @@ class ApiKeyServiceTest {
     }
 
     @Test
-    void shouldFetchAllApiKeys() {
-        final var pageable = PageRequest.of(0, 20);
+    void allKeysWithoutASortComeNewestFirstWithTheIdBreakingTies() {
         final var apiKey = ApiKey.builder().build();
-        final var apiKeyList = new PageImpl<>(Collections.singletonList(apiKey));
+        when(apiKeyRepository.findAll(PageRequest.of(0, 20, Sort.by(Sort.Order.desc("createDate"), Sort.Order.desc("id")))))
+                .thenReturn(new PageImpl<>(Collections.singletonList(apiKey)));
 
-        when(apiKeyRepository.findAll(pageable)).thenReturn(apiKeyList);
+        final var result = apiKeyService.fetchAllApiKeys(PageRequest.of(0, 20));
 
-        final var result = apiKeyService.fetchAllApiKeys(pageable);
-        assertThat(result).isNotNull();
         assertThat(result.getContent()).hasSize(1);
+    }
+
+    @Test
+    void allKeysRefuseToSortByAFieldOffTheList() {
+        assertThatThrownBy(() -> apiKeyService.fetchAllApiKeys(PageRequest.of(0, 20, Sort.by("key"))))
+                .isInstanceOf(InvalidSortException.class)
+                .hasMessage("Sort must be createDate or apiCallsUsed");
+        verify(apiKeyRepository, never()).findAll(any(org.springframework.data.domain.Pageable.class));
     }
 
     @Test

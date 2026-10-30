@@ -4,10 +4,12 @@ import cc.hrva.urlshortener.model.AuditLog;
 import cc.hrva.urlshortener.model.enums.AuditAction;
 import cc.hrva.urlshortener.repository.AuditLogRepository;
 import cc.hrva.urlshortener.service.AuditLogService;
+import cc.hrva.urlshortener.util.SortWhitelist;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -16,6 +18,11 @@ import org.springframework.transaction.annotation.Transactional;
 @Transactional(readOnly = true)
 @RequiredArgsConstructor
 public class DefaultAuditLogService implements AuditLogService {
+
+    private static final String PERFORMED_AT = "performedAt";
+    private static final SortWhitelist AUDIT_SORTS = SortWhitelist.of(PERFORMED_AT)
+            .byDefault(Sort.by(Sort.Order.desc(PERFORMED_AT)))
+            .thenBy(Sort.Order.desc("id"));
 
     private final AuditLogRepository auditLogRepository;
 
@@ -34,9 +41,8 @@ public class DefaultAuditLogService implements AuditLogService {
 
     @Override
     public Page<AuditLog> getAuditLogs(final Pageable pageable, final AuditAction action) {
-        return action == null
-                ? auditLogRepository.findAllByOrderByPerformedAtDesc(pageable)
-                : auditLogRepository.findAllByActionOrderByPerformedAtDesc(action, pageable);
+        final var sorted = AUDIT_SORTS.apply(pageable);
+        return action == null ? auditLogRepository.findAll(sorted) : auditLogRepository.findAllByAction(action, sorted);
     }
 
     private void save(final String performedBy, final AuditAction action, final boolean failed, final String targetType,

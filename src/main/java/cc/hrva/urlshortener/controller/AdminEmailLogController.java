@@ -4,7 +4,7 @@ import cc.hrva.urlshortener.audit.Audited;
 import cc.hrva.urlshortener.model.EmailLog;
 import cc.hrva.urlshortener.model.enums.AuditAction;
 import cc.hrva.urlshortener.model.enums.EmailStatus;
-import cc.hrva.urlshortener.repository.EmailLogRepository;
+import cc.hrva.urlshortener.service.EmailLogService;
 import cc.hrva.urlshortener.service.SendingEmailService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -26,7 +26,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("api/v1/admin/email-log")
 public class AdminEmailLogController {
 
-    private final EmailLogRepository emailLogRepository;
+    private final EmailLogService emailLogService;
     private final SendingEmailService sendingEmailService;
 
     @GetMapping
@@ -34,9 +34,7 @@ public class AdminEmailLogController {
     public ResponseEntity<Page<EmailLog>> getEmailLogs(
             @PageableDefault(size = 50) final Pageable pageable,
             @RequestParam(name = "status", required = false) final EmailStatus status) {
-        return ResponseEntity.ok(status == null
-                ? emailLogRepository.findAllByOrderByCreatedAtDesc(pageable)
-                : emailLogRepository.findAllByStatusOrderByCreatedAtDesc(status.name(), pageable));
+        return ResponseEntity.ok(emailLogService.emails(status, pageable));
     }
 
     @PostMapping("/{id}/resend")

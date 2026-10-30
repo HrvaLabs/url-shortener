@@ -26,6 +26,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.converter.CreateUrlToUrlConverter;
@@ -44,6 +45,7 @@ import cc.hrva.urlshortener.exception.ApiException;
 import cc.hrva.urlshortener.exception.ApiKeyNotFoundException;
 import cc.hrva.urlshortener.exception.FieldValidationException;
 import cc.hrva.urlshortener.exception.InvalidApiKeyException;
+import cc.hrva.urlshortener.exception.InvalidSortException;
 import cc.hrva.urlshortener.exception.NoAuthorizationException;
 import cc.hrva.urlshortener.exception.RateLimitExceededException;
 import cc.hrva.urlshortener.exception.ShortUrlAlreadyExistsException;
@@ -374,12 +376,12 @@ class UrlServiceTest {
         final var pageable = PageRequest.of(0, 20);
         final var search = new UrlSearchDto();
         search.setDeadDestination(true);
-        when(urlRepository.findAll(any(Specification.class), eq(pageable))).thenReturn(new PageImpl<>(List.of()));
+        when(urlRepository.findAll(any(Specification.class), eq(newestFirst(pageable)))).thenReturn(new PageImpl<>(List.of()));
 
         urlService.getAllUrls(pageable, search);
 
         final var captor = ArgumentCaptor.forClass(Specification.class);
-        verify(urlRepository).findAll(captor.capture(), eq(pageable));
+        verify(urlRepository).findAll(captor.capture(), eq(newestFirst(pageable)));
         final var root = mock(Root.class, RETURNS_DEEP_STUBS);
         final var builder = mock(CriteriaBuilder.class, RETURNS_DEEP_STUBS);
         captor.getValue().toPredicate(root, mock(CriteriaQuery.class), builder);
@@ -387,9 +389,9 @@ class UrlServiceTest {
         verify(root).get("active");
 
         search.setDeadDestination(false);
-        when(urlRepository.findAll(pageable)).thenReturn(new PageImpl<>(List.of()));
+        when(urlRepository.findAll(newestFirst(pageable))).thenReturn(new PageImpl<>(List.of()));
         urlService.getAllUrls(pageable, search);
-        verify(urlRepository).findAll(pageable);
+        verify(urlRepository).findAll(newestFirst(pageable));
     }
 
     @Test
@@ -1980,7 +1982,7 @@ class UrlServiceTest {
         final var urls = new PageImpl<>(Collections.singletonList(url));
 
         when(apiKeyService.fetchApiKeyByKey(apiKey)).thenReturn(key);
-        when(urlRepository.findAll(any(Specification.class), eq(pageable))).thenReturn(urls);
+        when(urlRepository.findAll(any(Specification.class), eq(newestFirst(pageable)))).thenReturn(urls);
 
         final var result = urlService.getAllMyUrls(apiKey, pageable, new UrlSearchDto());
         assertThat(result).isNotNull();
@@ -1999,7 +2001,7 @@ class UrlServiceTest {
         search.setSearch("example");
 
         when(apiKeyService.fetchApiKeyByKey(apiKey)).thenReturn(key);
-        when(urlRepository.findAll(any(Specification.class), eq(pageable))).thenReturn(urls);
+        when(urlRepository.findAll(any(Specification.class), eq(newestFirst(pageable)))).thenReturn(urls);
 
         final var result = urlService.getAllMyUrls(apiKey, pageable, search);
         assertThat(result).isNotNull();
@@ -2019,7 +2021,7 @@ class UrlServiceTest {
         search.setActive(true);
 
         when(apiKeyService.fetchApiKeyByKey(apiKey)).thenReturn(key);
-        when(urlRepository.findAll(any(Specification.class), eq(pageable))).thenReturn(urls);
+        when(urlRepository.findAll(any(Specification.class), eq(newestFirst(pageable)))).thenReturn(urls);
 
         final var result = urlService.getAllMyUrls(apiKey, pageable, search);
         assertThat(result).isNotNull();
@@ -2039,7 +2041,7 @@ class UrlServiceTest {
         search.setExpired(true);
 
         when(apiKeyService.fetchApiKeyByKey(apiKey)).thenReturn(key);
-        when(urlRepository.findAll(any(Specification.class), eq(pageable))).thenReturn(urls);
+        when(urlRepository.findAll(any(Specification.class), eq(newestFirst(pageable)))).thenReturn(urls);
 
         final var result = urlService.getAllMyUrls(apiKey, pageable, search);
         assertThat(result).isNotNull();
@@ -2059,7 +2061,7 @@ class UrlServiceTest {
         search.setDateTo(LocalDateTime.now().plusDays(1));
 
         when(apiKeyService.fetchApiKeyByKey(apiKey)).thenReturn(key);
-        when(urlRepository.findAll(any(Specification.class), eq(pageable))).thenReturn(urls);
+        when(urlRepository.findAll(any(Specification.class), eq(newestFirst(pageable)))).thenReturn(urls);
 
         final var result = urlService.getAllMyUrls(apiKey, pageable, search);
         assertThat(result).isNotNull();
@@ -2386,10 +2388,51 @@ class UrlServiceTest {
     }
 
     @Test
+    void theAdminListWithoutASortComesNewestFirstWithTheIdBreakingTies() {
+        when(urlRepository.findAll(any(Pageable.class))).thenReturn(Page.empty());
+
+        urlService.getAllUrls(PageRequest.of(1, 20), new UrlSearchDto());
+
+        verify(urlRepository).findAll(PageRequest.of(1, 20, Sort.by(Sort.Order.desc("createDate"), Sort.Order.desc("id"))));
+    }
+
+    @Test
+    void theAdminListSortsLinksWithoutAnOwnerLastAndBreaksTiesNewestFirst() {
+        when(urlRepository.findAll(any(Pageable.class))).thenReturn(Page.empty());
+
+        urlService.getAllUrls(PageRequest.of(0, 20, Sort.by(Sort.Order.desc("owner.email"))), new UrlSearchDto());
+
+        verify(urlRepository).findAll(PageRequest.of(0, 20,
+                Sort.by(Sort.Order.desc("owner.email").nullsLast(), Sort.Order.desc("createDate"), Sort.Order.desc("id"))));
+    }
+
+    @Test
+    void theAdminListRefusesToSortByAFieldOffTheList() {
+        assertThatThrownBy(() -> urlService.getAllUrls(PageRequest.of(0, 20, Sort.by("owner.password")), new UrlSearchDto()))
+                .isInstanceOf(InvalidSortException.class)
+                .hasMessage("Sort must be shortUrl, longUrl, createDate, expirationDate, visits, active or owner.email");
+        verifyNoInteractions(urlRepository);
+    }
+
+    @Test
+    void myLinksWithoutASortComeNewestFirstAndRefuseAFieldOffTheList() {
+        final var user = User.builder().id(5L).build();
+        when(apiKeyService.fetchApiKeyByKey("apikey")).thenReturn(ApiKey.builder().owner(user).build());
+        when(urlRepository.findAll(any(Specification.class), any(Pageable.class))).thenReturn(Page.empty());
+
+        urlService.getAllMyUrls("apikey", PageRequest.of(0, 20), new UrlSearchDto());
+
+        verify(urlRepository).findAll(any(Specification.class), eq(PageRequest.of(0, 20, Sort.by(Sort.Order.desc("createDate"), Sort.Order.desc("id")))));
+        assertThatThrownBy(() -> urlService.getAllMyUrls("apikey", PageRequest.of(0, 20, Sort.by("passwordHash")), new UrlSearchDto()))
+                .isInstanceOf(InvalidSortException.class)
+                .hasMessage("Sort must be shortUrl, longUrl, createDate, expirationDate, visits or active");
+    }
+
+    @Test
     void adminListFlagsSuspiciousLinks() {
         final var pageable = PageRequest.of(0, 20);
         final var url = Url.builder().id(287L).shortUrl("njuskaio_verify").longUrl("https://njuskaio.cam/a/MAUB3").build();
-        when(urlRepository.findAll(pageable)).thenReturn(new PageImpl<>(List.of(url)));
+        when(urlRepository.findAll(newestFirst(pageable))).thenReturn(new PageImpl<>(List.of(url)));
         when(suspiciousUrlService.findReasons("https://njuskaio.cam/a/MAUB3")).thenReturn(List.of("imitates njuskalo"));
 
         final var result = urlService.getAllUrls(pageable, new UrlSearchDto());
@@ -2406,7 +2449,7 @@ class UrlServiceTest {
                 .blockReason(BlockReason.BLOCKLIST).finalUrl("https://findfavoritedate.life/landing").build();
         final var inReview = Url.builder().id(288L).shortUrl("menu").longUrl("https://gableci.hrva.cc").owner(honest).active(true).build();
         final var anonymous = Url.builder().id(289L).shortUrl("anon").longUrl("https://example.org").active(true).build();
-        when(urlRepository.findAll(pageable)).thenReturn(new PageImpl<>(List.of(blocked, inReview, anonymous)));
+        when(urlRepository.findAll(newestFirst(pageable))).thenReturn(new PageImpl<>(List.of(blocked, inReview, anonymous)));
         when(reviewQueueService.openUrlIds(List.of(287L, 288L, 289L))).thenReturn(Set.of(288L));
         when(scammerSignalService.possibleScammerIds()).thenReturn(Set.of(27L));
 
@@ -2425,7 +2468,7 @@ class UrlServiceTest {
     void adminListOfAnonymousLinksAsksNothingAboutScammers() {
         final var pageable = PageRequest.of(0, 20);
         final var anonymous = Url.builder().id(289L).shortUrl("anon").longUrl("https://example.org").active(true).build();
-        when(urlRepository.findAll(pageable)).thenReturn(new PageImpl<>(List.of(anonymous)));
+        when(urlRepository.findAll(newestFirst(pageable))).thenReturn(new PageImpl<>(List.of(anonymous)));
 
         final var rows = urlService.getAllUrls(pageable, new UrlSearchDto()).getContent();
 
@@ -3452,6 +3495,10 @@ class UrlServiceTest {
             return counts.merge(key, 1, Integer::sum);
         }
 
+    }
+
+    private static Pageable newestFirst(final Pageable pageable) {
+        return PageRequest.of(pageable.getPageNumber(), pageable.getPageSize(), Sort.by(Sort.Order.desc("createDate"), Sort.Order.desc("id")));
     }
 
 }

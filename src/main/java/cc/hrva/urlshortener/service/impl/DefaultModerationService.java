@@ -11,7 +11,6 @@ import cc.hrva.urlshortener.dto.ReviewBulkResolveResponse;
 import cc.hrva.urlshortener.dto.UrlResponse;
 import cc.hrva.urlshortener.exception.CommonException;
 import cc.hrva.urlshortener.exception.DomainRuleNotFoundException;
-import cc.hrva.urlshortener.exception.InvalidSortException;
 import cc.hrva.urlshortener.exception.UrlNotFoundException;
 import cc.hrva.urlshortener.exception.UrlValidationException;
 import cc.hrva.urlshortener.exception.UserNotFoundException;
@@ -44,6 +43,7 @@ import cc.hrva.urlshortener.service.domain.CustomDomainModeration;
 import cc.hrva.urlshortener.service.domain.UrlCache;
 import cc.hrva.urlshortener.service.domain.UrlCacheKeys;
 import cc.hrva.urlshortener.util.DomainNames;
+import cc.hrva.urlshortener.util.SortWhitelist;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -118,10 +118,9 @@ public class DefaultModerationService implements ModerationService {
     private static final String NO_RULE_TYPE = "Choose whether the rule blocks or allows the domain";
     private static final String CREATED_AT = "createdAt";
     private static final String ID = "id";
-    private static final Sort NEWEST_RULES_FIRST = Sort.by(Sort.Order.desc(CREATED_AT), Sort.Order.desc(ID));
-    private static final List<String> RULE_SORT_FIELDS = List.of("domain", "type", CREATED_AT);
-    private static final String RULE_SORT_REFUSED = "Sort must be domain, type or createdAt";
-    private static final int MAX_RULES_PER_PAGE = 100;
+    private static final SortWhitelist RULE_SORTS = SortWhitelist.of("domain", "type", CREATED_AT)
+            .byDefault(Sort.by(Sort.Order.desc(CREATED_AT)))
+            .thenBy(Sort.Order.desc(CREATED_AT), Sort.Order.desc(ID));
     private static final Set<BlockReason> RESTORED_BY_ALLOW = EnumSet.of(BlockReason.BLOCKLIST, BlockReason.SCAM_SIGNALS, BlockReason.DOMAIN_RULE);
     private static final Duration SECOND_EVICTION_DELAY = Duration.ofSeconds(2);
     private static final int MAX_COLUMN_LENGTH = 255;
@@ -293,22 +292,7 @@ public class DefaultModerationService implements ModerationService {
         if (StringUtils.isNotBlank(search)) {
             spec = spec.and(DomainRuleSpecification.searchMatches(search.strip()));
         }
-        final var sort = ruleSortOf(pageable.getSort());
-        final var sortedPageable = pageable.isPaged()
-                ? PageRequest.of(pageable.getPageNumber(), Math.min(pageable.getPageSize(), MAX_RULES_PER_PAGE), sort)
-                : Pageable.unpaged(sort);
-        return domainRuleRepository.findAll(spec, sortedPageable).map(DomainRuleResponse::from);
-    }
-
-    private static Sort ruleSortOf(final Sort requested) {
-        if (requested.isUnsorted()) {
-            return NEWEST_RULES_FIRST;
-        }
-        if (requested.stream().anyMatch(order -> !RULE_SORT_FIELDS.contains(order.getProperty()))) {
-            throw new InvalidSortException(RULE_SORT_REFUSED);
-        }
-        final var withAge = requested.getOrderFor(CREATED_AT) == null ? requested.and(Sort.by(Sort.Order.desc(CREATED_AT))) : requested;
-        return withAge.and(Sort.by(Sort.Order.desc(ID)));
+        return domainRuleRepository.findAll(spec, RULE_SORTS.apply(pageable)).map(DomainRuleResponse::from);
     }
 
     @Override

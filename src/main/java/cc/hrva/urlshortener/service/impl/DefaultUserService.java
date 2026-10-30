@@ -40,6 +40,7 @@ import cc.hrva.urlshortener.service.domain.AccountActiveChangedEvent;
 import cc.hrva.urlshortener.service.domain.CustomDomainAccountData;
 import cc.hrva.urlshortener.service.notification.NotificationAccountData;
 import cc.hrva.urlshortener.util.EmailAddresses;
+import cc.hrva.urlshortener.util.SortWhitelist;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Objects;
@@ -48,6 +49,7 @@ import java.util.Set;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -63,6 +65,11 @@ import org.springframework.transaction.annotation.Transactional;
 @Transactional(readOnly = true)
 @RequiredArgsConstructor
 public class DefaultUserService implements UserService {
+
+    private static final String CREATE_DATE = "createDate";
+    private static final SortWhitelist USER_SORTS = SortWhitelist.of("email", CREATE_DATE, "lastLogin", "active")
+            .byDefault(Sort.by(Sort.Order.desc(CREATE_DATE)))
+            .thenBy(Sort.Order.desc("id"));
 
     private final AppProperties appProperties;
     private final Reauthentication reauthentication;
@@ -141,14 +148,15 @@ public class DefaultUserService implements UserService {
 
     @Override
     public Page<AdminUserResponse> fetchAllUsers(final Pageable pageable, final UserSearchDto search) {
+        final var sorted = USER_SORTS.apply(pageable);
         final var possibleScammers = scammerSignalService.possibleScammerIds();
         final var onlyPossibleScammers = Boolean.TRUE.equals(search.getPossibleScammer());
         if (onlyPossibleScammers && possibleScammers.isEmpty()) {
-            return Page.empty(pageable);
+            return Page.empty(sorted);
         }
 
         final var spec = buildSpecification(search, onlyPossibleScammers ? possibleScammers : null);
-        final var users = spec == null ? userRepository.findAll(pageable) : userRepository.findAll(spec, pageable);
+        final var users = spec == null ? userRepository.findAll(sorted) : userRepository.findAll(spec, sorted);
         return users.map(user -> AdminUserResponse.from(user, possibleScammers.contains(user.getId())));
     }
 

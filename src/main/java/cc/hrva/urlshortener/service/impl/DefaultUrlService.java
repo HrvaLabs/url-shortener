@@ -53,6 +53,7 @@ import cc.hrva.urlshortener.service.domain.UrlCacheKeys;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiter;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiterUnavailableException;
 import cc.hrva.urlshortener.util.RedirectLocations;
+import cc.hrva.urlshortener.util.SortWhitelist;
 import cc.hrva.urlshortener.validator.ApiKeyValidator;
 import cc.hrva.urlshortener.validator.UrlValidator;
 import jakarta.validation.Valid;
@@ -61,12 +62,12 @@ import lombok.extern.slf4j.Slf4j;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import tools.jackson.databind.ObjectMapper;
+import org.apache.commons.lang3.ArrayUtils;
 import org.apache.commons.lang3.RandomStringUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
@@ -95,6 +96,15 @@ import java.util.stream.Stream;
 public class DefaultUrlService implements UrlService {
 
     private static final String OWNER_EMAIL = "owner.email";
+    private static final String CREATE_DATE = "createDate";
+    private static final String[] LINK_SORT_FIELDS = {"shortUrl", "longUrl", CREATE_DATE, "expirationDate", "visits", "active"};
+    private static final SortWhitelist MY_LINK_SORTS = SortWhitelist.of(LINK_SORT_FIELDS)
+            .byDefault(Sort.by(Sort.Order.desc(CREATE_DATE)))
+            .thenBy(Sort.Order.desc(CREATE_DATE), Sort.Order.desc("id"));
+    private static final SortWhitelist ADMIN_LINK_SORTS = SortWhitelist.of(ArrayUtils.add(LINK_SORT_FIELDS, OWNER_EMAIL))
+            .byDefault(Sort.by(Sort.Order.desc(CREATE_DATE)))
+            .thenBy(Sort.Order.desc(CREATE_DATE), Sort.Order.desc("id"))
+            .nullsLast(OWNER_EMAIL);
     private static final String SYSTEM = "system";
     private static final String REASON_BLOCKED = "blocked";
     private static final String REASON_EXPIRED = "expired";
@@ -409,6 +419,7 @@ public class DefaultUrlService implements UrlService {
     @Override
     public Page<UrlResponse> getAllMyUrls(final String apiKey, final Pageable pageable,
             final UrlSearchDto search) {
+        final var sorted = MY_LINK_SORTS.apply(pageable);
         final var user = getUserForExport(apiKey);
 
         var spec = Specification.where(UrlSpecification.hasOwner(user));
@@ -432,7 +443,7 @@ public class DefaultUrlService implements UrlService {
             spec = spec.and(UrlSpecification.hasTag(search.getTag()));
         }
 
-        return urlRepository.findAll(spec, pageable).map(UrlResponse::from);
+        return urlRepository.findAll(spec, sorted).map(UrlResponse::from);
     }
 
     @Override
@@ -443,6 +454,7 @@ public class DefaultUrlService implements UrlService {
 
     @Override
     public Page<UrlResponse> getAllUrls(final Pageable pageable, final UrlSearchDto search) {
+        final var sorted = ADMIN_LINK_SORTS.apply(pageable);
         var spec = (Specification<Url>) null;
 
         if (StringUtils.isNotEmpty(search.getSearch())) {
@@ -467,8 +479,7 @@ public class DefaultUrlService implements UrlService {
             spec = (spec == null) ? UrlSpecification.createdBefore(search.getDateTo()) : spec.and(UrlSpecification.createdBefore(search.getDateTo()));
         }
 
-        final var ownerLastPageable = withAnonymousOwnersLast(pageable);
-        final var urls = spec == null ? urlRepository.findAll(ownerLastPageable) : urlRepository.findAll(spec, ownerLastPageable);
+        final var urls = spec == null ? urlRepository.findAll(sorted) : urlRepository.findAll(spec, sorted);
         final var inReview = reviewQueueService.openUrlIds(urls.map(Url::getId).getContent());
         final var possibleScammers = urls.stream().anyMatch(url -> url.getOwner() != null)
                 ? scammerSignalService.possibleScammerIds()
@@ -479,16 +490,6 @@ public class DefaultUrlService implements UrlService {
                 .withModeration(inReview.contains(url.getId()),
                         url.getOwner() != null && possibleScammers.contains(url.getOwner().getId()),
                         url.getFinalUrl()));
-    }
-
-    private static Pageable withAnonymousOwnersLast(final Pageable pageable) {
-        if (pageable.getSort().getOrderFor(OWNER_EMAIL) == null) {
-            return pageable;
-        }
-        final var sort = Sort.by(pageable.getSort().stream()
-                .map(order -> OWNER_EMAIL.equals(order.getProperty()) ? order.nullsLast() : order)
-                .toList());
-        return PageRequest.of(pageable.getPageNumber(), pageable.getPageSize(), sort);
     }
 
     @Override
