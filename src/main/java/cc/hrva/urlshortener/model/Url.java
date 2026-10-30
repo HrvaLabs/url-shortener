@@ -100,7 +100,7 @@ public class Url {
     public void onCreate() {
         this.visits = 0L;
         this.createDate = LocalDateTime.now();
-        this.active = true;
+        this.active = blockReason == null && threatType == null;
     }
 
     public void verifyUrlValidity(final Url url) {

@@ -10,6 +10,7 @@ import cc.hrva.urlshortener.converter.ApiKeyUpdateDtoToApiKeyConverter;
 import cc.hrva.urlshortener.converter.CreateUrlToUrlConverter;
 import cc.hrva.urlshortener.converter.UrlToPeekUrlConverter;
 import cc.hrva.urlshortener.converter.UrlUpdateDtoToUrlConverter;
+import cc.hrva.urlshortener.dto.ClickRequest;
 import cc.hrva.urlshortener.dto.LinkVerdict;
 import cc.hrva.urlshortener.mcp.McpResourceServerConfiguration;
 import cc.hrva.urlshortener.mcp.authorization.AuthorizationServerConfiguration;
@@ -42,6 +43,7 @@ import cc.hrva.urlshortener.service.ReviewQueueService;
 import cc.hrva.urlshortener.service.SafeBrowsingService;
 import cc.hrva.urlshortener.service.ScammerSignalService;
 import cc.hrva.urlshortener.service.SuspiciousUrlService;
+import cc.hrva.urlshortener.service.UrlService;
 import cc.hrva.urlshortener.service.UserService;
 import cc.hrva.urlshortener.service.domain.CustomDomainRegistry;
 import cc.hrva.urlshortener.service.domain.UrlCache;
@@ -56,6 +58,7 @@ import com.nimbusds.jose.JOSEException;
 import com.nimbusds.jose.jwk.RSAKey;
 import com.nimbusds.jose.jwk.gen.RSAKeyGenerator;
 import java.util.List;
+import java.util.Optional;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -89,7 +92,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
@@ -111,7 +117,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
                 "app.jwt-base64-secret=dGVzdC1vbmx5LXNlY3JldA==",
                 "app.email-sender-address=no-reply@localhost",
                 "app.contact-email=info@localhost",
-                "app.server-url=localhost"
+                "app.server-url=localhost",
+                "app.anonymous-url-creation-enabled=true"
         })
 @AutoConfigureMockMvc
 class LinkFlowsWithoutOpenInViewTest {
@@ -135,6 +142,9 @@ class LinkFlowsWithoutOpenInViewTest {
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
+
+    @Autowired
+    private UrlService urlService;
 
     @Autowired
     private UserRepository userRepository;
@@ -375,6 +385,58 @@ class LinkFlowsWithoutOpenInViewTest {
                 .andExpect(content().json(DOMAIN_REFUSAL, JsonCompareMode.STRICT));
 
         assertThat(jdbcTemplate.queryForObject("select count(*) from url where long_url = 'https://example.com/anonymous'", Long.class)).isZero();
+    }
+
+    @Test
+    void aNewAnonymousLinkWithAHeldShapeIsStoredInactiveAndDoesNotRedirect() throws Exception {
+        final var longUrl = "https://ll.omaehhm.com/wqamhcsom/?r=held1&t=1";
+        doReturn(null).when(userService).getUserFromToken();
+        when(campaignService.holdingCampaignId(any())).thenReturn(Optional.of(77L));
+        when(clickCheckService.mayRedirect(anyLong(), any())).thenReturn(true);
+
+        try {
+            mockMvc.perform(post("/api/v1/urls").contentType(MediaType.APPLICATION_JSON).content("{\"longUrl\":\"" + longUrl + "\"}"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.active").value(true))
+                    .andExpect(jsonPath("$.status").value("ACTIVE"));
+
+            final var stored = jdbcTemplate.queryForMap("select short_url, active, block_reason, block_detail from url where long_url = ?", longUrl);
+            assertThat(stored.get("ACTIVE")).isEqualTo(false);
+            assertThat(stored.get("BLOCK_REASON")).isEqualTo("CAMPAIGN");
+            assertThat(stored.get("BLOCK_DETAIL")).isEqualTo("/wqamhcsom?r&t");
+            final var alias = (String) stored.get("SHORT_URL");
+            verify(campaignService).addHeldLink(eq(77L), anyLong(), eq("omaehhm.com"));
+            assertThat(urlService.redirectResultUrl(alias, ClickRequest.of("203.0.113.7", "UA", null, "HR")).getUrl()).isNotEqualTo(longUrl);
+        } finally {
+            jdbcTemplate.update("delete from url where long_url = ?", longUrl);
+        }
+    }
+
+    @Test
+    void aNewAnonymousLinkWithoutAHeldShapeIsStoredActiveAndRedirects() throws Exception {
+        final var longUrl = "https://example.com/anonymous-active?r=1";
+        doReturn(null).when(userService).getUserFromToken();
+        when(clickCheckService.mayRedirect(anyLong(), any())).thenReturn(true);
+
+        try {
+            mockMvc.perform(post("/api/v1/urls").contentType(MediaType.APPLICATION_JSON).content("{\"longUrl\":\"" + longUrl + "\"}"))
+                    .andExpect(status().isOk());
+
+            final var stored = jdbcTemplate.queryForMap("select short_url, active, block_reason from url where long_url = ?", longUrl);
+            assertThat(stored.get("ACTIVE")).isEqualTo(true);
+            assertThat(stored.get("BLOCK_REASON")).isNull();
+            assertThat(urlService.redirectResultUrl((String) stored.get("SHORT_URL"), ClickRequest.of("203.0.113.7", "UA", null, "HR")).getUrl())
+                    .isEqualTo(longUrl);
+        } finally {
+            jdbcTemplate.update("delete from url where long_url = ?", longUrl);
+        }
+    }
+
+    @Test
+    void aSignedInLinkIsStoredActive() throws Exception {
+        create(OWNER_TOKEN, "{\"longUrl\":\"https://example.com/signed-in-active\"}").andExpect(status().isOk());
+
+        assertThat(jdbcTemplate.queryForObject("select active from url where long_url = 'https://example.com/signed-in-active'", Boolean.class)).isTrue();
     }
 
     @Test
