@@ -12,7 +12,7 @@ Discord alerts when links made without an account share one URL shape or get bus
 - Searching your links waits until you stop typing, and stays in the address.
 - Your API keys are listed newest first, and expired or revoked keys a page at a time.
 
-### 🔒 Security
+### 🛡️ Security
 - Settings lists every way you've signed in, with when you last used it.
 
 ### 🔧 Admin
