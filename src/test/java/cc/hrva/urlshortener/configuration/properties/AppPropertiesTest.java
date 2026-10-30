@@ -165,6 +165,50 @@ class AppPropertiesTest {
     }
 
     @Test
+    void theSameShapeAlertDefaultsToThreeLinksOnThreeDomainsInADay() throws IOException {
+        final var campaign = new AppProperties().getCampaign();
+        final var yaml = new YamlPropertySourceLoader().load("application", new ClassPathResource("application.yaml"));
+
+        assertThat(campaign.isEnabled()).isTrue();
+        assertThat(campaign.getLinks()).isEqualTo(3);
+        assertThat(campaign.getDomains()).isEqualTo(3);
+        assertThat(campaign.getWindow()).isEqualTo(Duration.ofHours(24));
+        assertThat(yaml.getFirst().getProperty("app.campaign.enabled")).isEqualTo("${APP_CAMPAIGN_ENABLED:true}");
+        assertThat(yaml.getFirst().getProperty("app.campaign.links")).isEqualTo("${APP_CAMPAIGN_LINKS:3}");
+        assertThat(yaml.getFirst().getProperty("app.campaign.domains")).isEqualTo("${APP_CAMPAIGN_DOMAINS:3}");
+        assertThat(yaml.getFirst().getProperty("app.campaign.window")).isEqualTo("${APP_CAMPAIGN_WINDOW:24h}");
+    }
+
+    @Test
+    void theSameShapeAlertBindsFromTheEnvironment() {
+        final var environment = new SystemEnvironmentPropertySource(StandardEnvironment.SYSTEM_ENVIRONMENT_PROPERTY_SOURCE_NAME, Map.<String, Object>of(
+                "APP_CAMPAIGN_ENABLED", "false",
+                "APP_CAMPAIGN_LINKS", "4",
+                "APP_CAMPAIGN_DOMAINS", "2",
+                "APP_CAMPAIGN_WINDOW", "6h"));
+
+        final var campaign = new Binder(ConfigurationPropertySources.from(environment)).bind("app.campaign", AppProperties.Campaign.class).get();
+
+        assertThat(campaign.isEnabled()).isFalse();
+        assertThat(campaign.getLinks()).isEqualTo(4);
+        assertThat(campaign.getDomains()).isEqualTo(2);
+        assertThat(campaign.getWindow()).isEqualTo(Duration.ofHours(6));
+    }
+
+    @Test
+    void sameShapeThresholdsBelowTheirMinimumsAreRefused() {
+        final var validator = Validation.buildDefaultValidatorFactory().getValidator();
+        final var tooLow = new AppProperties.Campaign();
+        tooLow.setLinks(1);
+        tooLow.setDomains(1);
+        tooLow.setWindow(Duration.ofMinutes(59));
+
+        assertThat(validator.validate(tooLow)).extracting(violation -> violation.getPropertyPath().toString())
+                .containsExactlyInAnyOrder("links", "domains", "window");
+        assertThat(validator.validate(new AppProperties.Campaign())).isEmpty();
+    }
+
+    @Test
     void burstDefaultsToFiveLinksInAnHour() {
         final var burst = new AppProperties().getBurst();
 

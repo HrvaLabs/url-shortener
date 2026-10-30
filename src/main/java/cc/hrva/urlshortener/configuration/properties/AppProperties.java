@@ -118,6 +118,10 @@ public class AppProperties {
 
     @Valid
     @NotNull
+    private Campaign campaign = new Campaign();
+
+    @Valid
+    @NotNull
     private Retention retention = new Retention();
 
     @Valid
@@ -202,6 +206,23 @@ public class AppProperties {
         @NotNull
         @DurationMin(seconds = 1, message = "must be at least 1 second")
         private Duration window = Duration.ofHours(1);
+
+    }
+
+    @Data
+    public static class Campaign {
+
+        private boolean enabled = true;
+
+        @Min(2)
+        private int links = 3;
+
+        @Min(2)
+        private int domains = 3;
+
+        @NotNull
+        @DurationMin(hours = 1, message = "must be at least 1 hour")
+        private Duration window = Duration.ofHours(24);
 
     }
 

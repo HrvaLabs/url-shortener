@@ -24,6 +24,7 @@ import cc.hrva.urlshortener.service.alert.AdminAlertEvent.DomainDrift;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.DomainNeedsAttention;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.LinkBlocked;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.ReviewOpened;
+import cc.hrva.urlshortener.service.alert.AdminAlertEvent.SameShapeDetected;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.UserSignedUp;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.VisitorReported;
 import cc.hrva.urlshortener.service.domain.ShortLinks;
@@ -481,6 +482,41 @@ class DiscordAlertFormatterTest {
 
         assertThat(lines).extracting(line -> StringUtils.substringBetween(line, "networks. ", " Nothing was blocked.")).containsExactly(
                 "The domain was registered 1 day ago.", "The domain was registered today.", "The domain was registered 29 days ago.");
+    }
+
+    @Test
+    void sameShapeLine() {
+        final var content = formatter.message(List.of(new SameShapeDetected("/wqamhcsom?r&t", "/wqamhcsom", 3, 3, Duration.ofHours(24),
+                List.of("ccc", "bbb", "aaa"))), 0).content();
+
+        assertThat(content).isEqualTo("Same-shape links: 3 links without an account on 3 domains share the URL shape /wqamhcsom?r&t in the last 24 hours. "
+                + "Examples: hrva.cc/ccc, hrva.cc/bbb, hrva.cc/aaa. Nothing was held. Review them: <https://app.hrva.cc/admin/urls?search=%2Fwqamhcsom>");
+    }
+
+    @Test
+    void sameShapeLineShowsAtMostThreeExamples() {
+        final var content = formatter.message(List.of(new SameShapeDetected("/wqamhcsom?r&t", "/wqamhcsom", 5, 4, Duration.ofHours(24),
+                List.of("eee", "ddd", "ccc", "bbb"))), 0).content();
+
+        assertThat(content).contains("Examples: hrva.cc/eee, hrva.cc/ddd, hrva.cc/ccc. Nothing was held.").doesNotContain("bbb");
+    }
+
+    @Test
+    void sameShapeLineWithoutExamplesLeavesThemOut() {
+        final var content = formatter.message(List.of(new SameShapeDetected("/wqamhcsom?r&t", "/wqamhcsom", 3, 3, Duration.ofHours(24), List.of())), 0)
+                .content();
+
+        assertThat(content).isEqualTo("Same-shape links: 3 links without an account on 3 domains share the URL shape /wqamhcsom?r&t in the last 24 hours. "
+                + "Nothing was held. Review them: <https://app.hrva.cc/admin/urls?search=%2Fwqamhcsom>");
+    }
+
+    @Test
+    void sameShapeLineEscapesTheShapeAndEncodesTheSearch() {
+        final var content = formatter.message(List.of(new SameShapeDetected("/log_in/`x`?a&user_id", "/log_in/`x`", 3, 3, Duration.ofHours(1),
+                List.of("a_b"))), 0).content();
+
+        assertThat(content).contains("share the URL shape /log\\_in/x?a&user\\_id in the last hour. ", "Examples: hrva.cc/a\\_b. ",
+                "<https://app.hrva.cc/admin/urls?search=%2Flog_in%2F%60x%60>");
     }
 
     @Test

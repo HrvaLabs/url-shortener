@@ -18,6 +18,7 @@ import cc.hrva.urlshortener.service.alert.AdminAlertEvent.DomainDrift;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.DomainNeedsAttention;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.LinkBlocked;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.ReviewOpened;
+import cc.hrva.urlshortener.service.alert.AdminAlertEvent.SameShapeDetected;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.UserSignedUp;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.VisitorReported;
 import cc.hrva.urlshortener.service.digest.WeeklyDigestText;
@@ -52,6 +53,7 @@ public class DiscordAlertFormatter {
     private static final String UNREADABLE_DESTINATION = "an unreadable destination";
     private static final String LOCAL_PROVIDER = "local";
     private static final String ARROW = " " + Character.toString(0x2192) + " ";
+    private static final int MAX_SAME_SHAPE_EXAMPLES = 3;
 
     private final AppProperties appProperties;
     private final ShortLinks shortLinks;
@@ -131,6 +133,7 @@ public class DiscordAlertFormatter {
                     failed.fallbackLoaded() ? " (a fallback loaded)" : "", frontendPage(BLOCKLISTS_PAGE));
             case BlocklistSourceRecovered recovered -> "%s loads again".formatted(plain(recovered.sourceName()));
             case BurstDetected burst -> burstLine(burst);
+            case SameShapeDetected sameShape -> sameShapeLine(sameShape);
             case BioPageReviewOpened opened -> "New bio page review: %s (%s), %s, <%s>".formatted(
                     bioPage(opened.page()), plain(String.join(", ", opened.reasons())), owner(opened.page().ownerId()),
                     bioPageReviewPage(opened.page()));
@@ -204,6 +207,15 @@ public class DiscordAlertFormatter {
                 + "Review them: %s").formatted(
                 burst.links(), domain, window(burst.window()), burst.creators(), domainAge(burst.domainAgeDays()),
                 linked(frontendPage(LINKS_PAGE) + "?search=" + URLEncoder.encode(readable, StandardCharsets.UTF_8)));
+    }
+
+    private String sameShapeLine(final SameShapeDetected sameShape) {
+        final var examples = sameShape.exampleAliases().stream().limit(MAX_SAME_SHAPE_EXAMPLES)
+                .map(alias -> shortLinks.display(null, plain(alias))).toList();
+        return "Same-shape links: %d links without an account on %d domains share the URL shape %s in the last %s. %sNothing was held. Review them: %s"
+                .formatted(sameShape.links(), sameShape.domains(), plain(sameShape.shape()), window(sameShape.window()),
+                        examples.isEmpty() ? "" : "Examples: " + String.join(", ", examples) + ". ",
+                        linked(frontendPage(LINKS_PAGE) + "?search=" + URLEncoder.encode(sameShape.path(), StandardCharsets.UTF_8)));
     }
 
     private static String linked(final String url) {

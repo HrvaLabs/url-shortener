@@ -214,6 +214,9 @@ class UrlServiceTest {
     @Mock
     private CustomDomainRepository customDomainRepository;
 
+    @Mock
+    private SameShapeAlertService sameShapeAlertService;
+
     @BeforeEach
     void setUp() {
         org.mockito.Mockito.lenient().when(rateLimiter.tryAcquire(any(), org.mockito.ArgumentMatchers.anyInt(), any())).thenReturn(true);
@@ -246,7 +249,8 @@ class UrlServiceTest {
                 burstAlertService,
                 destinationCheckRepository,
                 customDomainRegistry,
-                customDomainRepository
+                customDomainRepository,
+                sameShapeAlertService
         );
     }
 
@@ -1058,6 +1062,94 @@ class UrlServiceTest {
         final var result = urlService.saveUrlWithApiKey(link(0), "apikey", CreatedVia.API_KEY);
 
         assertThat(result.id()).isEqualTo(1L);
+    }
+
+    @Test
+    void anAnonymousCreateReportsTheLinkAfterCommit() {
+        final var reportedInTransaction = new AtomicReference<Boolean>();
+        final var createUrlDto = CreateUrlDto.builder().longUrl("https://example.com/wqamhcsom?r=1&t=2").build();
+        when(appProperties.isAnonymousUrlCreationEnabled()).thenReturn(true);
+        when(appProperties.getShortUrlLength()).thenReturn(5L);
+        when(urlRepository.save(any(Url.class))).thenAnswer(invocation -> persisted(invocation.getArgument(0)));
+        when(linkCheckService.check("https://example.com/wqamhcsom?r=1&t=2")).thenReturn(new LinkVerdict(Outcome.FLAG, YOUNG_DOMAIN, null, null));
+        org.mockito.Mockito.doAnswer(invocation -> {
+            reportedInTransaction.set(TransactionSynchronizationManager.isActualTransactionActive());
+            return null;
+        }).when(sameShapeAlertService).anonymousLinkCreated(org.mockito.ArgumentMatchers.anyLong(), any(), any());
+
+        transactionalUrlService().saveUrlRouting(createUrlDto, CLIENT_IP, CreatedVia.WEB);
+
+        verify(sameShapeAlertService).anonymousLinkCreated(1L, "https://example.com/wqamhcsom?r=1&t=2", Outcome.FLAG);
+        assertThat(reportedInTransaction).hasValue(false);
+    }
+
+    @Test
+    void aReusedAnonymousLinkIsReportedToTheSameShapeCheckWithItsOwnId() {
+        final var createUrlDto = link(0);
+        final var existing = Url.builder().id(12L).shortUrl("v0DB3").longUrl("https://example.com/0").active(true).build();
+        when(createUrlToUrlConverter.convert(createUrlDto)).thenReturn(Url.builder().longUrl("https://example.com/0").build());
+        when(urlRepository.existsUrlByLongUrlAndActiveTrueAndOwnerIsNull("https://example.com/0")).thenReturn(true);
+        when(urlRepository.findByLongUrlAndActiveTrue("https://example.com/0")).thenReturn(Optional.of(existing));
+
+        urlService.saveUrlRouting(createUrlDto, CLIENT_IP, CreatedVia.WEB);
+
+        verify(sameShapeAlertService).anonymousLinkCreated(12L, "https://example.com/0", Outcome.CLEAN);
+    }
+
+    @Test
+    void aSignedInCreateIsNeverReported() {
+        stubLinkCreation();
+        when(userService.getUserFromToken()).thenReturn(User.builder().id(7L).build());
+
+        urlService.saveUrlRouting(link(0), CLIENT_IP, CreatedVia.WEB);
+
+        verifyNoInteractions(sameShapeAlertService);
+    }
+
+    @Test
+    void anApiKeyCreateIsNeverReportedToTheSameShapeCheck() {
+        when(apiKeyService.fetchApiKeyByKey("apikey")).thenReturn(ApiKey.builder().owner(User.builder().id(9L).build()).build());
+        stubLinkCreation();
+
+        urlService.saveUrlWithApiKey(link(0), "apikey", CreatedVia.API_KEY);
+
+        verifyNoInteractions(sameShapeAlertService);
+    }
+
+    @Test
+    void aRefusedAnonymousLinkIsNeverReportedToTheSameShapeCheck() {
+        final var createUrlDto = CreateUrlDto.builder().longUrl("https://njuskaio.cam/a/MAUB3").build();
+        final var url = Url.builder().longUrl("https://njuskaio.cam/a/MAUB3").build();
+        when(createUrlToUrlConverter.convert(createUrlDto)).thenReturn(url);
+        when(urlValidator.checkIfLongUrlIsNotBlocklisted(url)).thenThrow(new UrlValidationException(BLOCKLIST_REFUSAL));
+
+        assertThatThrownBy(() -> urlService.saveUrlRouting(createUrlDto, CLIENT_IP, CreatedVia.WEB)).isInstanceOf(UrlValidationException.class);
+
+        verifyNoInteractions(sameShapeAlertService);
+    }
+
+    @Test
+    @ExtendWith(OutputCaptureExtension.class)
+    void aFailingReportDoesNotFailTheCreate(final CapturedOutput output) {
+        stubLinkCreation();
+        org.mockito.Mockito.doThrow(new org.springframework.core.task.TaskRejectedException("executor is shutting down"))
+                .when(sameShapeAlertService).anonymousLinkCreated(org.mockito.ArgumentMatchers.anyLong(), any(), any());
+
+        final var result = urlService.saveUrlRouting(link(0), CLIENT_IP, CreatedVia.WEB);
+
+        assertThat(result.id()).isEqualTo(1L);
+        assertThat(output).containsOnlyOnce("Could not schedule the same-shape check urlId=1 exception=org.springframework.core.task.TaskRejectedException");
+    }
+
+    @Test
+    void aFailingBurstCheckStillReportsTheSameShape() {
+        stubLinkCreation();
+        org.mockito.Mockito.doThrow(new org.springframework.core.task.TaskRejectedException("executor is shutting down"))
+                .when(burstAlertService).linkCreated(any());
+
+        urlService.saveUrlRouting(link(0), CLIENT_IP, CreatedVia.WEB);
+
+        verify(sameShapeAlertService).anonymousLinkCreated(1L, "https://example.com/0", Outcome.CLEAN);
     }
 
     @Test
@@ -3305,7 +3397,7 @@ class UrlServiceTest {
                 urlToPeekUrlConverter, createUrlToUrlConverter, urlUpdateDtoToUrlConverter, new UrlCache(urls), objectMapper,
                 new io.micrometer.core.instrument.simple.SimpleMeterRegistry(), passwordEncoder, suspiciousUrlService, rateLimiter,
                 reviewQueueService, scammerSignalService, clickCheckService, redirectChainService, TransactionOperations.withoutTransaction(),
-                reservedAliasService, burstAlertService, destinationCheckRepository, customDomainRegistry, customDomainRepository);
+                reservedAliasService, burstAlertService, destinationCheckRepository, customDomainRegistry, customDomainRepository, sameShapeAlertService);
     }
 
     private static UrlService withTheCacheAnnotations(final UrlService service, final CacheManager urls) {
@@ -3356,7 +3448,8 @@ class UrlServiceTest {
                 burstAlertService,
                 destinationCheckRepository,
                 customDomainRegistry,
-                customDomainRepository
+                customDomainRepository,
+                sameShapeAlertService
         );
     }
 
@@ -3432,7 +3525,8 @@ class UrlServiceTest {
                 burstAlertService,
                 destinationCheckRepository,
                 customDomainRegistry,
-                customDomainRepository
+                customDomainRepository,
+                sameShapeAlertService
         );
         final var proxyFactory = new ProxyFactory(service);
         proxyFactory.addAdvice(new TransactionInterceptor(transactionManager, new AnnotationTransactionAttributeSource()));
@@ -3467,7 +3561,8 @@ class UrlServiceTest {
                 burstAlertService,
                 destinationCheckRepository,
                 customDomainRegistry,
-                customDomainRepository
+                customDomainRepository,
+                sameShapeAlertService
         );
     }
 
@@ -3498,7 +3593,8 @@ class UrlServiceTest {
                 burstAlertService,
                 destinationCheckRepository,
                 customDomainRegistry,
-                customDomainRepository
+                customDomainRepository,
+                sameShapeAlertService
         );
     }
 

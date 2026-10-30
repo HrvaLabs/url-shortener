@@ -152,6 +152,9 @@ class UrlWritesTest {
     private BurstAlertService burstAlertService;
 
     @MockitoBean
+    private SameShapeAlertService sameShapeAlertService;
+
+    @MockitoBean
     private LinkCheckService linkCheckService;
 
     @MockitoBean

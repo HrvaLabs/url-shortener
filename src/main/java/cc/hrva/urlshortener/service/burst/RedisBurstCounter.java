@@ -24,7 +24,11 @@ public class RedisBurstCounter {
     private final StringRedisTemplate redisTemplate;
 
     public List<String> record(final String domain, final String member, final Instant now, final Duration window) {
-        final var members = redisTemplate.execute(RECORD_IN_WINDOW, List.of(KEY_PREFIX + domain), Long.toString(now.toEpochMilli()), member,
+        return recordUnderKey(KEY_PREFIX + domain, member, now, window);
+    }
+
+    public List<String> recordUnderKey(final String key, final String member, final Instant now, final Duration window) {
+        final var members = redisTemplate.execute(RECORD_IN_WINDOW, List.of(key), Long.toString(now.toEpochMilli()), member,
                 Long.toString(now.minus(window).toEpochMilli()), Long.toString(window.toMillis()));
         return members == null ? List.of() : members;
     }

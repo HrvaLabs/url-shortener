@@ -38,6 +38,7 @@ import cc.hrva.urlshortener.service.RedirectChainService;
 import cc.hrva.urlshortener.service.ReservedAliasService;
 import cc.hrva.urlshortener.service.ReviewQueueService;
 import cc.hrva.urlshortener.service.SafeBrowsingService;
+import cc.hrva.urlshortener.service.SameShapeAlertService;
 import cc.hrva.urlshortener.service.ScammerSignalService;
 import cc.hrva.urlshortener.service.SuspiciousUrlService;
 import cc.hrva.urlshortener.service.UserService;
@@ -172,6 +173,9 @@ class ApiKeyUseOnCreateFlowTest {
 
     @MockitoBean
     private BurstAlertService burstAlertService;
+
+    @MockitoBean
+    private SameShapeAlertService sameShapeAlertService;
 
     @MockitoBean
     private QrCodeService qrCodeService;

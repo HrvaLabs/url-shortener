@@ -43,6 +43,27 @@ class RedisBurstCounterTest {
     }
 
     @Test
+    void recordUnderKeyUsesTheGivenKey() {
+        final var key = "campaign:shape:" + "a".repeat(64);
+        when(redisTemplate.execute(any(RedisScript.class), eq(List.of(key)), eq(NOW_MILLIS), eq("41|evil-login.com"),
+                eq(Long.toString(NOW.toEpochMilli() - 86_400_000)), eq("86400000")))
+                .thenReturn(List.of("40|other.com", "41|evil-login.com"));
+
+        final var members = new RedisBurstCounter(redisTemplate).recordUnderKey(key, "41|evil-login.com", NOW, Duration.ofHours(24));
+
+        assertThat(members).containsExactly("40|other.com", "41|evil-login.com");
+    }
+
+    @Test
+    void recordStillUsesTheBurstPrefix() {
+        when(redisTemplate.execute(any(RedisScript.class), anyList(), any(Object[].class))).thenReturn(List.of("41|user:7"));
+
+        new RedisBurstCounter(redisTemplate).record("evil-login.com", "41|user:7", NOW, Duration.ofHours(1));
+
+        verify(redisTemplate).execute(any(RedisScript.class), eq(List.of(KEY)), eq(NOW_MILLIS), eq("41|user:7"), eq(CUTOFF_MILLIS), eq("3600000"));
+    }
+
+    @Test
     void theWindowSetsTheCutoffAndTheExpiry() {
         when(redisTemplate.execute(any(RedisScript.class), eq(List.of(KEY)), eq(NOW_MILLIS), eq("41|user:7"),
                 eq(Long.toString(NOW.toEpochMilli() - 1_800_000)), eq("1800000")))

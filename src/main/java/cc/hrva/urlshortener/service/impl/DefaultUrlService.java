@@ -39,6 +39,7 @@ import cc.hrva.urlshortener.service.ClickCheckService;
 import cc.hrva.urlshortener.service.RedirectChainService;
 import cc.hrva.urlshortener.service.ReservedAliasService;
 import cc.hrva.urlshortener.service.ReviewQueueService;
+import cc.hrva.urlshortener.service.SameShapeAlertService;
 import cc.hrva.urlshortener.service.ScammerSignalService;
 import cc.hrva.urlshortener.service.SuspiciousUrlService;
 import cc.hrva.urlshortener.service.UrlService;
@@ -158,6 +159,7 @@ public class DefaultUrlService implements UrlService {
     private final DestinationCheckRepository destinationCheckRepository;
     private final CustomDomainRegistry customDomainRegistry;
     private final CustomDomainRepository customDomainRepository;
+    private final SameShapeAlertService sameShapeAlertService;
 
     @Override
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
@@ -189,6 +191,9 @@ public class DefaultUrlService implements UrlService {
         });
         checkRedirectsLater(created.id());
         reportCreated(created, CreatedLink.creatorOf(currentUser != null ? currentUser.getId() : null, clientIP), verdict);
+        if (currentUser == null) {
+            reportAnonymousShape(created, verdict);
+        }
         return created;
     }
 
@@ -631,6 +636,14 @@ public class DefaultUrlService implements UrlService {
             burstAlertService.linkCreated(new CreatedLink(created.id(), created.longUrl(), creator, verdict.outcome()));
         } catch (final RuntimeException exception) {
             log.warn("Could not schedule the burst check urlId={} exception={}", created.id(), exception.getClass().getName());
+        }
+    }
+
+    private void reportAnonymousShape(final UrlResponse created, final LinkVerdict verdict) {
+        try {
+            sameShapeAlertService.anonymousLinkCreated(created.id(), created.longUrl(), verdict.outcome());
+        } catch (final RuntimeException exception) {
+            log.warn("Could not schedule the same-shape check urlId={} exception={}", created.id(), exception.getClass().getName());
         }
     }
 
