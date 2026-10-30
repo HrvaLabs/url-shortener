@@ -2,6 +2,7 @@ package cc.hrva.urlshortener.service.settings;
 
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.exception.FieldValidationException;
+import cc.hrva.urlshortener.security.OAuthProviders;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -10,6 +11,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.springframework.security.config.oauth2.client.CommonOAuth2Provider;
+import org.springframework.security.oauth2.client.registration.InMemoryClientRegistrationRepository;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.node.JsonNodeFactory;
 import tools.jackson.databind.node.MissingNode;
@@ -120,7 +123,7 @@ class SettingValuesTest {
             assertThat(key.getMaxItems()).isNull();
         }
         assertThat(key.isNullable()).isEqualTo(key.getNoneLabel() != null);
-        final var defaults = new SettingDefaults(new AppProperties());
+        final var defaults = new SettingDefaults(new AppProperties(), SettingsServiceFixtures.bothProviders());
         final var value = defaults.defaultOf(key);
         assertThat(SettingValues.fromStored(key, SettingValues.stored(value))).isEqualTo(value);
         assertThat(defaults.unavailableReason(key)).isEmpty();
@@ -168,9 +171,48 @@ class SettingValuesTest {
         assertThat(Arrays.asList(SettingKey.values()).subList(SettingKey.SAME_SHAPE_ALERT.ordinal(), SettingKey.SAME_SHAPE_ALERT.ordinal() + 6))
                 .containsExactly(SettingKey.SAME_SHAPE_ALERT, SettingKey.CAMPAIGN_LINKS, SettingKey.CAMPAIGN_DOMAINS, SettingKey.CAMPAIGN_WINDOW_HOURS,
                         SettingKey.CAMPAIGN_HOLD, SettingKey.CAMPAIGN_HOLD_DAYS);
-        final var defaults = new SettingDefaults(new AppProperties());
+        final var defaults = new SettingDefaults(new AppProperties(), SettingsServiceFixtures.bothProviders());
         assertThat(defaults.defaultOf(SettingKey.CAMPAIGN_HOLD)).isEqualTo(true);
         assertThat(defaults.defaultOf(SettingKey.CAMPAIGN_HOLD_DAYS)).isEqualTo(7);
+    }
+
+    @Test
+    void theSignInSwitchRows() {
+        assertThat(SettingKey.GOOGLE_SIGN_IN).extracting(SettingKey::getGroup, SettingKey::getType, SettingKey::getLabel, SettingKey::getDescription,
+                        SettingKey::getParent, SettingKey::isSafety)
+                .containsExactly(SettingGroup.ACCESS, SettingType.SWITCH, "Sign in with Google", "The Google button on the sign-in and register pages. "
+                        + "Off refuses every Google sign-in; accounts without a password or passkey need Forgot password meanwhile.", null, false);
+        assertThat(SettingKey.GITHUB_SIGN_IN).extracting(SettingKey::getGroup, SettingKey::getType, SettingKey::getLabel, SettingKey::getDescription,
+                        SettingKey::getParent, SettingKey::isSafety)
+                .containsExactly(SettingGroup.ACCESS, SettingType.SWITCH, "Sign in with GitHub", "The GitHub button on the sign-in and register pages. "
+                        + "Off refuses every GitHub sign-in; accounts without a password or passkey need Forgot password meanwhile.", null, false);
+        final var appProperties = new AppProperties();
+        final var defaults = new SettingDefaults(appProperties, SettingsServiceFixtures.bothProviders());
+        assertThat(defaults.defaultOf(SettingKey.GOOGLE_SIGN_IN)).isEqualTo(true);
+        assertThat(defaults.defaultOf(SettingKey.GITHUB_SIGN_IN)).isEqualTo(true);
+        appProperties.getModeration().setGoogleSignIn(false);
+        appProperties.getModeration().setGithubSignIn(false);
+        assertThat(defaults.defaultOf(SettingKey.GOOGLE_SIGN_IN)).isEqualTo(false);
+        assertThat(defaults.defaultOf(SettingKey.GITHUB_SIGN_IN)).isEqualTo(false);
+    }
+
+    @Test
+    void gitHubIsUnavailableWithoutARegistration() {
+        final var onlyGoogle = new OAuthProviders(new InMemoryClientRegistrationRepository(
+                CommonOAuth2Provider.GOOGLE.getBuilder("google").clientId("test-google-client").clientSecret("test-google-secret").build()));
+        final var defaults = new SettingDefaults(new AppProperties(), onlyGoogle);
+
+        assertThat(defaults.unavailableReason(SettingKey.GITHUB_SIGN_IN)).contains("GitHub sign-in isn't configured.");
+        assertThat(defaults.unavailableReason(SettingKey.GOOGLE_SIGN_IN)).isEmpty();
+    }
+
+    @Test
+    void googleIsUnavailableWithoutARegistration() {
+        final var defaults = new SettingDefaults(new AppProperties(), new OAuthProviders(registrationId -> null));
+
+        assertThat(defaults.unavailableReason(SettingKey.GOOGLE_SIGN_IN)).contains("Google sign-in isn't configured.");
+        assertThat(defaults.unavailableReason(SettingKey.GITHUB_SIGN_IN)).contains("GitHub sign-in isn't configured.");
+        assertThat(defaults.unavailableReason(SettingKey.NEW_SIGNUPS)).isEmpty();
     }
 
     @Test
@@ -202,7 +244,7 @@ class SettingValuesTest {
                         SettingKey::getMin, SettingKey::getMax, SettingKey::getUnit)
                 .containsExactly(SettingGroup.ABUSE_REPORTS, SettingType.NUMBER, "Abuse reports: recheck for",
                         "Reported domains are looked up every day for this many days.", 1, 90, "days");
-        final var defaults = new SettingDefaults(new AppProperties());
+        final var defaults = new SettingDefaults(new AppProperties(), SettingsServiceFixtures.bothProviders());
         assertThat(defaults.defaultOf(SettingKey.ABUSE_REPORTER_NAME)).isEqualTo(new String(new int[] {'K', 'a', 'r', 'l', 'o', ' ', 'H', 'r', 'v', 'a', 0x10D, 'i', 0x107}, 0, 13));
         assertThat(defaults.defaultOf(SettingKey.ABUSE_REPORTER_ADDRESS)).isEqualTo(List.of("abuse@hrva.cc"));
         assertThat(defaults.defaultOf(SettingKey.ABUSE_CC)).isEqualTo(List.of("reportphishing@apwg.org"));

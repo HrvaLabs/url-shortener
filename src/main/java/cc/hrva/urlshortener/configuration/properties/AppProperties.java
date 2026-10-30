@@ -345,6 +345,8 @@ public class AppProperties {
         private boolean nightlySafeBrowsing = true;
         private boolean sendEmails = true;
         private boolean campaignHold = true;
+        private boolean googleSignIn = true;
+        private boolean githubSignIn = true;
 
         @Min(1)
         @Max(90)

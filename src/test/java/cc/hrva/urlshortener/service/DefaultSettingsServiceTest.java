@@ -8,6 +8,7 @@ import cc.hrva.urlshortener.exception.SettingNotFoundException;
 import cc.hrva.urlshortener.model.AppSetting;
 import cc.hrva.urlshortener.model.enums.AuditAction;
 import cc.hrva.urlshortener.repository.AppSettingRepository;
+import cc.hrva.urlshortener.security.OAuthProviders;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.SettingChanged;
 import cc.hrva.urlshortener.service.impl.DefaultSettingsService;
 import cc.hrva.urlshortener.service.notification.MutableClock;
@@ -15,6 +16,7 @@ import cc.hrva.urlshortener.service.settings.EmailKind;
 import cc.hrva.urlshortener.service.settings.SettingDefaults;
 import cc.hrva.urlshortener.service.settings.SettingKey;
 import cc.hrva.urlshortener.service.settings.SettingType;
+import cc.hrva.urlshortener.service.settings.SettingsServiceFixtures;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -37,6 +39,8 @@ import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.security.config.oauth2.client.CommonOAuth2Provider;
+import org.springframework.security.oauth2.client.registration.InMemoryClientRegistrationRepository;
 import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.transaction.support.SimpleTransactionStatus;
 import org.springframework.transaction.support.TransactionCallback;
@@ -47,6 +51,7 @@ import tools.jackson.databind.node.JsonNodeFactory;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.tuple;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.lenient;
@@ -100,7 +105,7 @@ class DefaultSettingsServiceTest {
         lenient().doAnswer(invocation -> steps.add("audit" + (inTransaction ? " in a transaction" : ""))).when(auditLogService)
                 .log(anyString(), any(AuditAction.class), anyString(), anyString(), anyString());
         lenient().doAnswer(invocation -> steps.add("publish" + (inTransaction ? " in a transaction" : ""))).when(eventPublisher).publishEvent(any(Object.class));
-        settingsService = new DefaultSettingsService(appSettingRepository, new SettingDefaults(appProperties), auditLogService, eventPublisher,
+        settingsService = new DefaultSettingsService(appSettingRepository, new SettingDefaults(appProperties, SettingsServiceFixtures.bothProviders()), auditLogService, eventPublisher,
                 recordingTransactions(), clock);
     }
 
@@ -118,14 +123,51 @@ class DefaultSettingsServiceTest {
     }
 
     @Test
-    void thePublicSettingsFollowTheThreeSwitches() {
-        assertThat(settingsService.publicSettings()).isEqualTo(new PublicSettingsResponse(true, true, true));
+    void thePublicSettingsFollowTheirSwitches() {
+        assertThat(settingsService.publicSettings()).isEqualTo(new PublicSettingsResponse(true, true, true, true, true));
 
         rows.put("ANONYMOUS_LINKS", row(SettingKey.ANONYMOUS_LINKS, "false"));
         rows.put("CUSTOM_ALIASES", row(SettingKey.CUSTOM_ALIASES, "false"));
+        rows.put("GITHUB_SIGN_IN", row(SettingKey.GITHUB_SIGN_IN, "false"));
         settingsService.refresh();
 
-        assertThat(settingsService.publicSettings()).isEqualTo(new PublicSettingsResponse(false, true, false));
+        assertThat(settingsService.publicSettings()).isEqualTo(new PublicSettingsResponse(false, true, false, true, false));
+    }
+
+    @Test
+    void aProviderIsOfferedOnlyWhileItsSwitchIsOnAndItIsConfigured() {
+        final var onlyGitHub = new OAuthProviders(new InMemoryClientRegistrationRepository(
+                CommonOAuth2Provider.GITHUB.getBuilder("github").clientId("test-github-client").clientSecret("test-github-secret").build()));
+        final var withoutGoogle = SettingsServiceFixtures.defaults(appProperties, onlyGitHub);
+
+        assertThat(withoutGoogle.publicSettings().googleSignIn()).isFalse();
+        assertThat(withoutGoogle.publicSettings().githubSignIn()).isTrue();
+        assertThat(withoutGoogle.isOn(SettingKey.GOOGLE_SIGN_IN)).isTrue();
+        assertThat(withoutGoogle.isOnAndAvailable(SettingKey.GOOGLE_SIGN_IN)).isFalse();
+        assertThat(withoutGoogle.isOnAndAvailable(SettingKey.GITHUB_SIGN_IN)).isTrue();
+
+        SettingsServiceFixtures.turnOff(withoutGoogle, SettingKey.GITHUB_SIGN_IN);
+
+        assertThat(withoutGoogle.publicSettings().githubSignIn()).isFalse();
+        assertThat(withoutGoogle.isOnAndAvailable(SettingKey.GITHUB_SIGN_IN)).isFalse();
+    }
+
+    @Test
+    void googleSignInIsFalseWhileItsSwitchIsOff() {
+        rows.put("GOOGLE_SIGN_IN", row(SettingKey.GOOGLE_SIGN_IN, "false"));
+        settingsService.refresh();
+
+        assertThat(settingsService.publicSettings().googleSignIn()).isFalse();
+        assertThat(settingsService.publicSettings().githubSignIn()).isTrue();
+    }
+
+    @Test
+    void theSignInSwitchesSayWhenTheProviderIsNotConfigured() {
+        final var unconfigured = SettingsServiceFixtures.defaults(appProperties, new OAuthProviders(registrationId -> null));
+
+        assertThat(unconfigured.list()).filteredOn(setting -> setting.key() == SettingKey.GOOGLE_SIGN_IN || setting.key() == SettingKey.GITHUB_SIGN_IN)
+                .extracting(SettingResponse::available, SettingResponse::unavailableReason)
+                .containsExactly(tuple(false, "Google sign-in isn't configured."), tuple(false, "GitHub sign-in isn't configured."));
     }
 
     @Test

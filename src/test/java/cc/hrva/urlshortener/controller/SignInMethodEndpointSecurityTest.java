@@ -26,12 +26,16 @@ import cc.hrva.urlshortener.security.StoredPasswords;
 import cc.hrva.urlshortener.security.TokenProvider;
 import cc.hrva.urlshortener.service.LoginAttemptService;
 import cc.hrva.urlshortener.service.SendingEmailService;
+import cc.hrva.urlshortener.service.SettingsService;
 import cc.hrva.urlshortener.service.UserService;
 import cc.hrva.urlshortener.service.impl.DefaultAuditLogService;
 import cc.hrva.urlshortener.service.impl.DefaultSignInMethodChangeService;
 import cc.hrva.urlshortener.service.impl.DefaultSignInMethodService;
 import cc.hrva.urlshortener.service.impl.DefaultUserDetailsService;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiter;
+import cc.hrva.urlshortener.service.settings.DefaultSettingsTestConfiguration;
+import cc.hrva.urlshortener.service.settings.SettingKey;
+import cc.hrva.urlshortener.service.settings.SettingsServiceFixtures;
 import cc.hrva.urlshortener.service.signin.SignInMethodGuard;
 import cc.hrva.urlshortener.service.twostep.AccountLock;
 import cc.hrva.urlshortener.validator.impl.DefaultAuthValidator;
@@ -157,6 +161,9 @@ class SignInMethodEndpointSecurityTest {
     @MockitoBean
     private SendingEmailService sendingEmailService;
 
+    @Autowired
+    private SettingsService settingsService;
+
     @DynamicPropertySource
     static void signingKey(final DynamicPropertyRegistry registry) {
         registry.add("app.mcp.signing-key", SIGNING_KEY::toJSONString);
@@ -175,6 +182,8 @@ class SignInMethodEndpointSecurityTest {
 
     @AfterEach
     void tearDown() {
+        settingsService.reset(SettingKey.GOOGLE_SIGN_IN, ANA_EMAIL);
+        settingsService.reset(SettingKey.GITHUB_SIGN_IN, ANA_EMAIL);
         jdbcTemplate.update("delete from audit_log");
         jdbcTemplate.update("delete from passkey_credential where user_id in (?, ?)", ANA, BOB);
         jdbcTemplate.update("delete from user_sign_in_method where user_id in (?, ?)", ANA, BOB);
@@ -450,6 +459,49 @@ class SignInMethodEndpointSecurityTest {
     }
 
     @Test
+    void aProviderSwitchedOffSiteWideIsNotAWayIn() throws Exception {
+        SettingsServiceFixtures.turnOff(settingsService, SettingKey.GOOGLE_SIGN_IN);
+
+        mockMvc.perform(as(ANA_TOKEN, post(REMOVE_PASSWORD)).contentType(MediaType.APPLICATION_JSON).content(passwordBody(PASSWORD)))
+                .andExpect(status().isConflict())
+                .andExpect(content().json(KEEP_ONE, JsonCompareMode.STRICT));
+        assertThat(passwordOf(ANA)).isEqualTo(PASSWORD_HASH);
+        assertThat(turnedOff(ANA)).isEmpty();
+
+        SettingsServiceFixtures.turnOn(settingsService, SettingKey.GOOGLE_SIGN_IN);
+
+        mockMvc.perform(as(ANA_TOKEN, post(REMOVE_PASSWORD)).contentType(MediaType.APPLICATION_JSON).content(passwordBody(PASSWORD)))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void withGitHubOffSiteWideAGoogleAndGitHubAccountKeepsGoogle() throws Exception {
+        method(BOB, "GITHUB");
+        SettingsServiceFixtures.turnOff(settingsService, SettingKey.GITHUB_SIGN_IN);
+
+        mockMvc.perform(as(BOB_TOKEN, post(METHODS + "GOOGLE/turn-off")))
+                .andExpect(status().isConflict())
+                .andExpect(content().json(KEEP_ONE, JsonCompareMode.STRICT));
+        assertThat(turnedOff(BOB)).isEmpty();
+
+        SettingsServiceFixtures.turnOn(settingsService, SettingKey.GITHUB_SIGN_IN);
+
+        mockMvc.perform(as(BOB_TOKEN, post(METHODS + "GOOGLE/turn-off"))).andExpect(status().isOk());
+        assertThat(turnedOff(BOB)).containsExactly("GOOGLE");
+    }
+
+    @Test
+    void aProviderSwitchedOffSiteWideCanStillBeTurnedBackOn() throws Exception {
+        mockMvc.perform(as(ANA_TOKEN, post(METHODS + "GOOGLE/turn-off"))).andExpect(status().isOk());
+        SettingsServiceFixtures.turnOff(settingsService, SettingKey.GOOGLE_SIGN_IN);
+
+        mockMvc.perform(as(ANA_TOKEN, post(METHODS + "GOOGLE/turn-on")).contentType(MediaType.APPLICATION_JSON).content(reauthBody(PASSWORD)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.signInMethods[1].turnedOffAt").value(nullValue()));
+        assertThat(turnedOff(ANA)).isEmpty();
+    }
+
+    @Test
     void aRemovedPasswordIsNotAWayIn() throws Exception {
         mockMvc.perform(as(ANA_TOKEN, post(REMOVE_PASSWORD)).contentType(MediaType.APPLICATION_JSON).content(passwordBody(PASSWORD)))
                 .andExpect(status().isOk());
@@ -610,6 +662,7 @@ class SignInMethodEndpointSecurityTest {
             DefaultUserDetailsService.class,
             DefaultSignInMethodService.class,
             SignInMethodGuard.class,
+            DefaultSettingsTestConfiguration.class,
             DefaultSignInMethodChangeService.class,
             SignInMethodChangedEmailListener.class,
             SignInMethodController.class

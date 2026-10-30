@@ -12,6 +12,7 @@ import tools.jackson.databind.JsonNode;
 public interface SettingsService {
 
     boolean isOn(SettingKey key);
+    boolean isOnAndAvailable(SettingKey key);
     int number(SettingKey key);
     OptionalInt optionalNumber(SettingKey key);
     String text(SettingKey key);

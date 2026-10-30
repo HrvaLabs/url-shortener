@@ -4,6 +4,15 @@ All notable changes to hrva.cc — the URL shortener.
 
 ---
 
+## [v2.20] — 2026-10-30
+
+A human check and a warning page for links made without an account, limits on those links, and sign-in switches.
+
+### 🔧 Admin
+- Sign in with Google and Sign in with GitHub can each be turned off in Settings.
+
+---
+
 ## [v2.19] — 2026-10-30
 
 Campaign holds and abuse reports.

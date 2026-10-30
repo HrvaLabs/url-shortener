@@ -80,7 +80,13 @@ public enum SettingKey {
     ABUSE_CC(SettingGroup.ABUSE_REPORTS, SettingType.ADDRESSES, "Abuse reports: Cc",
             "Copied on every report email.", 0, 5),
     ABUSE_RECHECK_DAYS(SettingGroup.ABUSE_REPORTS, "Abuse reports: recheck for",
-            "Reported domains are looked up every day for this many days.", null, 1, 90, "days");
+            "Reported domains are looked up every day for this many days.", null, 1, 90, "days"),
+    GOOGLE_SIGN_IN(SettingGroup.ACCESS, "Sign in with Google",
+            "The Google button on the sign-in and register pages. Off refuses every Google sign-in; accounts without a password or passkey "
+                    + "need Forgot password meanwhile.", null, false),
+    GITHUB_SIGN_IN(SettingGroup.ACCESS, "Sign in with GitHub",
+            "The GitHub button on the sign-in and register pages. Off refuses every GitHub sign-in; accounts without a password or passkey "
+                    + "need Forgot password meanwhile.", null, false);
 
     private final SettingGroup group;
     private final SettingType type;

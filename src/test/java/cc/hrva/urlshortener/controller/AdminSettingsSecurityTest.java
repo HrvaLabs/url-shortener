@@ -20,6 +20,7 @@ import cc.hrva.urlshortener.security.ClientIpResolver;
 import cc.hrva.urlshortener.security.JwtFilter;
 import cc.hrva.urlshortener.security.OAuth2LoginSuccessHandler;
 import cc.hrva.urlshortener.security.OAuth2LoginUserService;
+import cc.hrva.urlshortener.security.OAuthProviders;
 import cc.hrva.urlshortener.security.TokenProvider;
 import cc.hrva.urlshortener.service.AuditLogService;
 import cc.hrva.urlshortener.service.SettingsService;
@@ -288,6 +289,7 @@ class AdminSettingsSecurityTest {
             JwtFilter.class,
             ClientIpResolver.class,
             ClockConfiguration.class,
+            OAuthProviders.class,
             SettingDefaults.class,
             DefaultSettingsService.class,
             AdminSettingsController.class

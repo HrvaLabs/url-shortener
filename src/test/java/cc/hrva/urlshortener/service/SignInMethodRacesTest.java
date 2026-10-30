@@ -16,6 +16,7 @@ import cc.hrva.urlshortener.security.TokenProvider;
 import cc.hrva.urlshortener.service.impl.DefaultAuditLogService;
 import cc.hrva.urlshortener.service.impl.DefaultSignInMethodChangeService;
 import cc.hrva.urlshortener.service.impl.DefaultSignInMethodService;
+import cc.hrva.urlshortener.service.settings.DefaultSettingsTestConfiguration;
 import cc.hrva.urlshortener.service.signin.SignInMethodGuard;
 import cc.hrva.urlshortener.service.twostep.AccountLock;
 import cc.hrva.urlshortener.validator.impl.DefaultAuthValidator;
@@ -219,6 +220,7 @@ class SignInMethodRacesTest {
             DefaultAuditLogService.class,
             DefaultSignInMethodService.class,
             SignInMethodGuard.class,
+            DefaultSettingsTestConfiguration.class,
             DefaultSignInMethodChangeService.class,
             SignInMethodChangedEmailListener.class
     })

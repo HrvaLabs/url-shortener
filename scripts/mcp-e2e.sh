@@ -1459,7 +1459,7 @@ expect_eq "$(jq -r '.[] | select(.key == "CAMPAIGN_LINKS") | .value' <<<"$HTTP_B
 expect_eq "$(jq -r '[.[] | select(.key == "CAMPAIGN_HOLD" or .key == "CAMPAIGN_HOLD_DAYS") | .value] | map(tostring) | join(",")' <<<"$HTTP_BODY")" "true,7" \
     "campaign holds start on, for 7 days"
 http "$BASE/api/v1/public/settings"
-expect_eq "$HTTP_STATUS $(jq -c . <<<"$HTTP_BODY")" '200 {"anonymousLinks":true,"newSignups":true,"customAliases":true}' "GET /api/v1/public/settings without a token"
+expect_eq "$HTTP_STATUS $(jq -c '{anonymousLinks, newSignups, customAliases}' <<<"$HTTP_BODY")" '200 {"anonymousLinks":true,"newSignups":true,"customAliases":true}' "GET /api/v1/public/settings without a token"
 
 echo "  --- links without an account"
 put_setting ANONYMOUS_LINKS false
@@ -1598,7 +1598,7 @@ http "$SETTINGS_URL" -H "Authorization: Bearer $ADMIN_JWT"
 expect_eq "$(jq -r '[.[] | select(.changed)] | length' <<<"$HTTP_BODY")" 0 "no setting has changed: true"
 expect_eq "$(psql_value "select count(*) from app_setting;")" 0 "app_setting holds no row"
 http "$BASE/api/v1/public/settings"
-expect_eq "$(jq -c . <<<"$HTTP_BODY")" '{"anonymousLinks":true,"newSignups":true,"customAliases":true}' "the public switches are all on again"
+expect_eq "$(jq -c '{anonymousLinks, newSignups, customAliases}' <<<"$HTTP_BODY")" '{"anonymousLinks":true,"newSignups":true,"customAliases":true}' "the public switches are all on again"
 
 section "25. Moderation: the Campaigns API and abuse reports"
 CAMPAIGNS_URL=$BASE/api/v1/admin/campaigns

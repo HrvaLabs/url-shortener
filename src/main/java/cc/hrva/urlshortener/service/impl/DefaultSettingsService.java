@@ -64,6 +64,11 @@ public class DefaultSettingsService implements SettingsService {
     }
 
     @Override
+    public boolean isOnAndAvailable(final SettingKey key) {
+        return isOn(key) && settingDefaults.unavailableReason(key).isEmpty();
+    }
+
+    @Override
     public int number(final SettingKey key) {
         return optionalNumber(key).orElseThrow(() -> new IllegalStateException("Setting " + key + " has no number"));
     }
@@ -102,7 +107,8 @@ public class DefaultSettingsService implements SettingsService {
 
     @Override
     public PublicSettingsResponse publicSettings() {
-        return new PublicSettingsResponse(isOn(SettingKey.ANONYMOUS_LINKS), isOn(SettingKey.NEW_SIGNUPS), isOn(SettingKey.CUSTOM_ALIASES));
+        return new PublicSettingsResponse(isOn(SettingKey.ANONYMOUS_LINKS), isOn(SettingKey.NEW_SIGNUPS), isOn(SettingKey.CUSTOM_ALIASES),
+                isOnAndAvailable(SettingKey.GOOGLE_SIGN_IN), isOnAndAvailable(SettingKey.GITHUB_SIGN_IN));
     }
 
     @Override

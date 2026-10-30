@@ -3,6 +3,7 @@ package cc.hrva.urlshortener.service.settings;
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.model.AppSetting;
 import cc.hrva.urlshortener.repository.AppSettingRepository;
+import cc.hrva.urlshortener.security.OAuthProviders;
 import cc.hrva.urlshortener.service.AuditLogService;
 import cc.hrva.urlshortener.service.SettingsService;
 import cc.hrva.urlshortener.service.impl.DefaultSettingsService;
@@ -12,6 +13,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.security.config.oauth2.client.CommonOAuth2Provider;
+import org.springframework.security.oauth2.client.registration.InMemoryClientRegistrationRepository;
 import org.springframework.transaction.support.TransactionOperations;
 import tools.jackson.databind.node.JsonNodeFactory;
 
@@ -29,13 +32,23 @@ public final class SettingsServiceFixtures {
     }
 
     public static DefaultSettingsService defaults(final AppProperties appProperties) {
+        return defaults(appProperties, bothProviders());
+    }
+
+    public static OAuthProviders bothProviders() {
+        return new OAuthProviders(new InMemoryClientRegistrationRepository(
+                CommonOAuth2Provider.GOOGLE.getBuilder("google").clientId("test-google-client").clientSecret("test-google-secret").build(),
+                CommonOAuth2Provider.GITHUB.getBuilder("github").clientId("test-github-client").clientSecret("test-github-secret").build()));
+    }
+
+    public static DefaultSettingsService defaults(final AppProperties appProperties, final OAuthProviders oAuthProviders) {
         final var rows = new LinkedHashMap<String, AppSetting>();
         final var appSettingRepository = mock(AppSettingRepository.class);
         lenient().when(appSettingRepository.findAll()).thenAnswer(invocation -> List.copyOf(rows.values()));
         lenient().when(appSettingRepository.findById(anyString())).thenAnswer(invocation -> Optional.ofNullable(rows.get(invocation.<String>getArgument(0))));
         lenient().when(appSettingRepository.save(any(AppSetting.class))).thenAnswer(invocation -> store(rows, invocation.getArgument(0)));
         lenient().doAnswer(invocation -> rows.remove(invocation.<String>getArgument(0))).when(appSettingRepository).deleteById(anyString());
-        return new DefaultSettingsService(appSettingRepository, new SettingDefaults(appProperties), mock(AuditLogService.class),
+        return new DefaultSettingsService(appSettingRepository, new SettingDefaults(appProperties, oAuthProviders), mock(AuditLogService.class),
                 mock(ApplicationEventPublisher.class), TransactionOperations.withoutTransaction(), Clock.systemUTC());
     }
 

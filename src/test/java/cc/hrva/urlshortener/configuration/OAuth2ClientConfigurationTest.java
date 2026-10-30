@@ -1,5 +1,9 @@
 package cc.hrva.urlshortener.configuration;
 
+import cc.hrva.urlshortener.configuration.properties.AppProperties;
+import cc.hrva.urlshortener.security.OAuthProviders;
+import cc.hrva.urlshortener.service.settings.SettingDefaults;
+import cc.hrva.urlshortener.service.settings.SettingKey;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
@@ -64,6 +68,24 @@ class OAuth2ClientConfigurationTest {
                     assertThat(gitHub.getProviderDetails().getTokenUri()).isEqualTo("https://github.com/login/oauth/access_token");
                     assertThat(gitHub.getProviderDetails().getUserInfoEndpoint().getUri()).isEqualTo("https://api.github.com/user");
                     assertThat(gitHub.getProviderDetails().getUserInfoEndpoint().getUserNameAttributeName()).isEqualTo("id");
+                });
+    }
+
+    @Test
+    void gitHubIsAvailableOnlyWhenRegistered() {
+        final var withProviders = contextRunner.withUserConfiguration(OAuthProviders.class);
+
+        withProviders.withPropertyValues(GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, "OAUTH2_GITHUB_CLIENT_ID=", "OAUTH2_GITHUB_CLIENT_SECRET=")
+                .run(context -> {
+                    final var defaults = new SettingDefaults(new AppProperties(), context.getBean(OAuthProviders.class));
+                    assertThat(defaults.unavailableReason(SettingKey.GITHUB_SIGN_IN)).contains("GitHub sign-in isn't configured.");
+                    assertThat(defaults.unavailableReason(SettingKey.GOOGLE_SIGN_IN)).isEmpty();
+                });
+        withProviders.withPropertyValues(GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET)
+                .run(context -> {
+                    final var defaults = new SettingDefaults(new AppProperties(), context.getBean(OAuthProviders.class));
+                    assertThat(defaults.unavailableReason(SettingKey.GITHUB_SIGN_IN)).isEmpty();
+                    assertThat(defaults.unavailableReason(SettingKey.GOOGLE_SIGN_IN)).isEmpty();
                 });
     }
 

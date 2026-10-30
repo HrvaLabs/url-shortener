@@ -29,6 +29,7 @@ import cc.hrva.urlshortener.service.impl.DefaultSendingEmailService;
 import cc.hrva.urlshortener.service.impl.DefaultSignInMethodChangeService;
 import cc.hrva.urlshortener.service.impl.DefaultSignInMethodService;
 import cc.hrva.urlshortener.service.impl.DefaultUserService;
+import cc.hrva.urlshortener.service.settings.DefaultSettingsTestConfiguration;
 import cc.hrva.urlshortener.service.signin.SignInMethodGuard;
 import cc.hrva.urlshortener.service.twostep.AccountLock;
 import java.util.List;
@@ -249,7 +250,8 @@ class UserEndpointsWithoutOpenInViewTest {
             includeFilters = @ComponentScan.Filter(type = FilterType.ASSIGNABLE_TYPE,
                     classes = {UserRepository.class, UserSignInMethodRepository.class, AuditLogRepository.class}))
     @Import({DefaultUserService.class, DefaultSignInMethodService.class, UserToUserDtoConverter.class, UserUpdateDtoToUserConverter.class,
-            DefaultSignInMethodChangeService.class, SignInMethodGuard.class, AccountLock.class, DefaultAuditLogService.class})
+            DefaultSignInMethodChangeService.class, SignInMethodGuard.class, DefaultSettingsTestConfiguration.class, AccountLock.class,
+            DefaultAuditLogService.class})
     static class TestApplication {
     }
 

@@ -1,6 +1,7 @@
 package cc.hrva.urlshortener.service.settings;
 
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
+import cc.hrva.urlshortener.security.OAuthProviders;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
@@ -11,10 +12,13 @@ import org.springframework.stereotype.Component;
 @Component
 public class SettingDefaults {
 
+    private static final String GOOGLE_NOT_CONFIGURED = "Google sign-in isn't configured.";
+    private static final String GITHUB_NOT_CONFIGURED = "GitHub sign-in isn't configured.";
+
     private final Map<SettingKey, Supplier<Object>> defaults = new EnumMap<>(SettingKey.class);
     private final Map<SettingKey, Supplier<Optional<String>>> availability = new EnumMap<>(SettingKey.class);
 
-    public SettingDefaults(final AppProperties appProperties) {
+    public SettingDefaults(final AppProperties appProperties, final OAuthProviders oAuthProviders) {
         final var moderation = appProperties.getModeration();
         final var emails = moderation.getEmails();
         final var campaign = appProperties.getCampaign();
@@ -57,6 +61,12 @@ public class SettingDefaults {
         register(SettingKey.ABUSE_REPORTER_ADDRESS, () -> List.of(abuseReports.getReporterAddress()));
         register(SettingKey.ABUSE_CC, () -> List.copyOf(abuseReports.getCc()));
         register(SettingKey.ABUSE_RECHECK_DAYS, abuseReports::getRecheckDays);
+        register(SettingKey.GOOGLE_SIGN_IN, moderation::isGoogleSignIn);
+        register(SettingKey.GITHUB_SIGN_IN, moderation::isGithubSignIn);
+        registerAvailability(SettingKey.GOOGLE_SIGN_IN,
+                () -> unavailableUnless(oAuthProviders.configured(OAuthProviders.GOOGLE), GOOGLE_NOT_CONFIGURED));
+        registerAvailability(SettingKey.GITHUB_SIGN_IN,
+                () -> unavailableUnless(oAuthProviders.configured(OAuthProviders.GITHUB), GITHUB_NOT_CONFIGURED));
     }
 
     public Object defaultOf(final SettingKey key) {
@@ -73,6 +83,14 @@ public class SettingDefaults {
 
     private void register(final SettingKey key, final Supplier<Object> defaultValue) {
         defaults.put(key, defaultValue);
+    }
+
+    private void registerAvailability(final SettingKey key, final Supplier<Optional<String>> unavailableReason) {
+        availability.put(key, unavailableReason);
+    }
+
+    private static Optional<String> unavailableUnless(final boolean available, final String reason) {
+        return available ? Optional.empty() : Optional.of(reason);
     }
 
 }

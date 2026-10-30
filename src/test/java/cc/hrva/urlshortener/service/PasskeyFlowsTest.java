@@ -49,6 +49,7 @@ import cc.hrva.urlshortener.service.passkey.RedisPasskeyCeremonyStore;
 import cc.hrva.urlshortener.service.passkey.TestAuthenticator;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiter;
 import cc.hrva.urlshortener.service.ratelimit.RedisFixedWindowRateLimiter;
+import cc.hrva.urlshortener.service.settings.DefaultSettingsTestConfiguration;
 import cc.hrva.urlshortener.service.signin.SignInMethodGuard;
 import cc.hrva.urlshortener.service.twostep.AccountLock;
 import cc.hrva.urlshortener.service.twostep.RecoveryCodes;
@@ -976,7 +977,8 @@ class PasskeyFlowsTest {
             RecoveryCodes.class,
             DefaultTwoStepSettingsService.class,
             AccountLock.class,
-            SignInMethodGuard.class
+            SignInMethodGuard.class,
+            DefaultSettingsTestConfiguration.class
     })
     static class TestApplication {
 

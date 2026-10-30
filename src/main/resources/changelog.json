@@ -1,10 +1,24 @@
 {
   "releases": [
     {
-      "version": "v2.19",
+      "version": "v2.20",
       "date": "2026-10-30",
       "badge": "Latest",
       "badgeVariant": "default",
+      "summary": "A human check and a warning page for links made without an account, limits on those links, and sign-in switches.",
+      "sections": [
+        {
+          "title": "Admin",
+          "icon": "wrench",
+          "items": [
+            "Sign in with Google and Sign in with GitHub can each be turned off in Settings."
+          ]
+        }
+      ]
+    },
+    {
+      "version": "v2.19",
+      "date": "2026-10-30",
       "summary": "Campaign holds and abuse reports.",
       "sections": [
         {

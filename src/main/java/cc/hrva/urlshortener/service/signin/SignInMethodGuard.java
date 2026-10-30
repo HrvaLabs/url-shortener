@@ -7,7 +7,9 @@ import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.enums.SignInMethod;
 import cc.hrva.urlshortener.repository.PasskeyCredentialRepository;
 import cc.hrva.urlshortener.repository.UserSignInMethodRepository;
+import cc.hrva.urlshortener.security.OAuthProviders;
 import cc.hrva.urlshortener.security.StoredPasswords;
+import cc.hrva.urlshortener.service.SettingsService;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Set;
@@ -25,6 +27,7 @@ public class SignInMethodGuard {
 
     private final UserSignInMethodRepository userSignInMethodRepository;
     private final PasskeyCredentialRepository passkeyCredentialRepository;
+    private final SettingsService settingsService;
 
     public static boolean isProvider(final SignInMethod method) {
         return PROVIDERS.contains(method);
@@ -39,6 +42,7 @@ public class SignInMethodGuard {
         final var providers = states.stream()
                 .filter(state -> isProvider(state.method()) && !state.turnedOff())
                 .map(SignInMethodState::method)
+                .filter(this::onSiteWide)
                 .collect(Collectors.toCollection(() -> EnumSet.noneOf(SignInMethod.class)));
 
         return new WaysToSignIn(hasPassword(lockedUser, states), providers,
@@ -76,6 +80,10 @@ public class SignInMethodGuard {
     public static boolean hasPassword(final User user, final List<SignInMethodState> states) {
         return StoredPasswords.isSet(user.getPassword())
                 && states.stream().noneMatch(state -> state.method() == SignInMethod.PASSWORD && state.turnedOff());
+    }
+
+    private boolean onSiteWide(final SignInMethod provider) {
+        return OAuthProviders.switchOf(provider).map(settingsService::isOnAndAvailable).orElse(true);
     }
 
 }

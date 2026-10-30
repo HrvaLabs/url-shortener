@@ -61,7 +61,7 @@ class PublicSettingsEndpointSecurityTest {
 
     private static final String PUBLIC_SETTINGS = "/api/v1/public/settings";
     private static final RSAKey SIGNING_KEY = generateSigningKey();
-    private static final PublicSettingsResponse SETTINGS = new PublicSettingsResponse(true, false, true);
+    private static final PublicSettingsResponse SETTINGS = new PublicSettingsResponse(true, false, true, true, false);
 
     @Autowired
     private MockMvc mockMvc;
@@ -102,10 +102,12 @@ class PublicSettingsEndpointSecurityTest {
         mockMvc.perform(get(PUBLIC_SETTINGS))
                 .andExpect(status().isOk())
                 .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "max-age=60, public"))
-                .andExpect(jsonPath("$.length()").value(3))
+                .andExpect(jsonPath("$.length()").value(5))
                 .andExpect(jsonPath("$.anonymousLinks").value(true))
                 .andExpect(jsonPath("$.newSignups").value(false))
-                .andExpect(jsonPath("$.customAliases").value(true));
+                .andExpect(jsonPath("$.customAliases").value(true))
+                .andExpect(jsonPath("$.googleSignIn").value(true))
+                .andExpect(jsonPath("$.githubSignIn").value(false));
     }
 
     @Test

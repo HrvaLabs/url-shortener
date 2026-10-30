@@ -608,6 +608,79 @@ class OAuth2LoginSuccessHandlerTest {
         verify(signInMethodService).record(eq(19L), eq(SignInMethod.GOOGLE), any());
     }
 
+    @ParameterizedTest
+    @CsvSource({"google, GOOGLE_SIGN_IN, GOOGLE", "github, GITHUB_SIGN_IN, GITHUB"})
+    @ExtendWith(OutputCaptureExtension.class)
+    void aProviderSwitchedOffIsRefusedBeforeAnything(final String provider, final SettingKey key, final SignInMethod method,
+            final CapturedOutput output) throws Exception {
+        SettingsServiceFixtures.turnOff(settingsService, key);
+        lenient().when(oAuth2User.getAttribute("email_verified")).thenReturn(false);
+        lenient().when(oAuth2User.getAttribute("email")).thenReturn("member@example.com");
+
+        handler.onAuthenticationSuccess(request, response, signIn(provider));
+
+        verify(response).sendRedirect("http://fe/auth/callback?error=provider_disabled&provider=" + method.name());
+        verifyNoInteractions(userRepository, signInMethodService, tokenProvider, eventPublisher, authoritiesService, pendingLoginStore, twoStepMethods);
+        assertThat(output).contains("OAuth2 login refused: this provider is turned off on hrva.cc provider=" + provider)
+                .doesNotContain("member@example.com");
+    }
+
+    @Test
+    void aProviderSwitchedOffIsRefusedBeforeTheAccountsOwnTurnOff() throws Exception {
+        SettingsServiceFixtures.turnOff(settingsService, SettingKey.GITHUB_SIGN_IN);
+        lenient().when(signInMethodService.isTurnedOff(any(), any())).thenReturn(true);
+
+        handler.onAuthenticationSuccess(request, response, signIn("github"));
+
+        verify(response).sendRedirect("http://fe/auth/callback?error=provider_disabled&provider=GITHUB");
+        verifyNoInteractions(userRepository, signInMethodService);
+    }
+
+    @Test
+    void theOtherProviderSwitchedOffDoesNotStopThisOne() throws Exception {
+        final var user = User.builder().id(20L).email("member@example.com").emailVerified(true).active(true).authProvider("local")
+                .authorities(Collections.singletonList(Authorities.builder().id(1L).name("ROLE_USER").build()))
+                .build();
+        SettingsServiceFixtures.turnOff(settingsService, SettingKey.GITHUB_SIGN_IN);
+        when(oAuth2User.getAttribute("email")).thenReturn("member@example.com");
+        when(userRepository.findByEmail("member@example.com")).thenReturn(Optional.of(user));
+        when(tokenProvider.createToken(any())).thenReturn("jwt-token");
+
+        handler.onAuthenticationSuccess(request, response, signIn("google"));
+
+        verify(response).sendRedirect(contains("http://fe/auth/callback?token=jwt-token"));
+        verify(signInMethodService).record(eq(20L), eq(SignInMethod.GOOGLE), any());
+    }
+
+    @Test
+    void anUnrecognisedProviderIsNotGatedByTheProviderSwitches() throws Exception {
+        final var user = User.builder().id(21L).email("member@example.com").emailVerified(true).active(true).authProvider("local")
+                .authorities(Collections.singletonList(Authorities.builder().id(1L).name("ROLE_USER").build()))
+                .build();
+        SettingsServiceFixtures.turnOff(settingsService, SettingKey.GOOGLE_SIGN_IN);
+        SettingsServiceFixtures.turnOff(settingsService, SettingKey.GITHUB_SIGN_IN);
+        when(oAuth2User.getAttribute("email")).thenReturn("member@example.com");
+        when(userRepository.findByEmail("member@example.com")).thenReturn(Optional.of(user));
+        when(tokenProvider.createToken(any())).thenReturn("jwt-token");
+
+        handler.onAuthenticationSuccess(request, response, signIn("gitlab"));
+
+        verify(response).sendRedirect(contains("http://fe/auth/callback?token=jwt-token"));
+    }
+
+    @Test
+    void aSwitchedOnProviderWithSignUpsPausedStillRefusesANewAccountAsRegistrationDisabled() throws Exception {
+        SettingsServiceFixtures.turnOff(settingsService, SettingKey.NEW_SIGNUPS);
+        SettingsServiceFixtures.turnOff(settingsService, SettingKey.GITHUB_SIGN_IN);
+        when(oAuth2User.getAttribute("email")).thenReturn("new@example.com");
+        when(userRepository.findByEmail("new@example.com")).thenReturn(Optional.empty());
+
+        handler.onAuthenticationSuccess(request, response, signIn("google"));
+
+        verify(response).sendRedirect("http://fe/auth/callback?error=registration_disabled");
+        verify(userRepository, never()).save(any());
+    }
+
     private OAuth2AuthenticationToken signIn(final String provider) {
         return new OAuth2AuthenticationToken(oAuth2User, List.of(), provider);
     }

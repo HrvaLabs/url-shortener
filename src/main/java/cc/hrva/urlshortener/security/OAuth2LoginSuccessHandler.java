@@ -47,6 +47,7 @@ public class OAuth2LoginSuccessHandler implements AuthenticationSuccessHandler {
     private static final String GITHUB_EMAIL_UNVERIFIED = "github_email_unverified";
     private static final String GOOGLE_EMAIL_UNVERIFIED = "google_email_unverified";
     private static final String PROVIDER_TURNED_OFF = "provider_turned_off";
+    private static final String PROVIDER_DISABLED = "provider_disabled";
 
     private final UserRepository userRepository;
     private final AuthoritiesService authoritiesService;
@@ -92,6 +93,14 @@ public class OAuth2LoginSuccessHandler implements AuthenticationSuccessHandler {
         final var oAuth2User = (OAuth2User) authentication.getPrincipal();
         final var provider = providerOf(authentication);
 
+        final var method = SignInMethod.ofProvider(provider);
+        final var providerSwitch = method.flatMap(OAuthProviders::switchOf);
+        if (providerSwitch.isPresent() && !settingsService.isOn(providerSwitch.get())) {
+            log.info("OAuth2 login refused: this provider is turned off on hrva.cc provider={}", provider);
+            response.sendRedirect(appProperties.getFrontendUrl() + "/auth/callback?error=" + PROVIDER_DISABLED + "&provider=" + method.get().name());
+            return;
+        }
+
         if (!emailVerified(oAuth2User)) {
             log.warn("OAuth2 login refused: the provider sent no verified email provider={}", provider);
             response.sendRedirect(appProperties.getFrontendUrl() + "/auth/callback?error=" + unverifiedEmailError(provider));
@@ -127,7 +136,6 @@ public class OAuth2LoginSuccessHandler implements AuthenticationSuccessHandler {
             return;
         }
 
-        final var method = SignInMethod.ofProvider(provider);
         if (existingUser.isPresent() && method.isPresent() && signInMethodService.isTurnedOff(user.getId(), method.get())) {
             log.info("OAuth2 login refused: the account turned this provider off provider={} user id={}", provider, user.getId());
             response.sendRedirect(appProperties.getFrontendUrl() + "/auth/callback?error=" + PROVIDER_TURNED_OFF + "&provider=" + method.get().name());
