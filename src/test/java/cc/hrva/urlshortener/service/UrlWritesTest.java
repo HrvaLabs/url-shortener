@@ -17,6 +17,7 @@ import cc.hrva.urlshortener.repository.DomainRuleRepository;
 import cc.hrva.urlshortener.repository.CustomDomainRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
+import cc.hrva.urlshortener.service.domain.CustomDomainModeration;
 import cc.hrva.urlshortener.service.domain.CustomDomainRegistry;
 import cc.hrva.urlshortener.service.domain.DomainRoute;
 import cc.hrva.urlshortener.service.domain.UrlCache;
@@ -164,6 +165,9 @@ class UrlWritesTest {
 
     @MockitoBean
     private CustomDomainRegistry customDomainRegistry;
+
+    @MockitoBean
+    private CustomDomainModeration customDomainModeration;
 
     @BeforeEach
     void visitTheLinkRightAfterTheWriteTransactionReadsIt() {

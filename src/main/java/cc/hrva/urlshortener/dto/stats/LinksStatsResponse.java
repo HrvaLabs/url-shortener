@@ -15,7 +15,8 @@ public record LinksStatsResponse(
         List<CountEntry> topTags,
         List<CountEntry> topDomains,
         List<NewestLink> newest,
-        DeadDestinationCounts deadDestinations) {
+        DeadDestinationCounts deadDestinations,
+        CustomDomainCounts customDomains) {
 
     public record CreatedInRange(long total, long account, long anonymous, long aiTagged) {}
 
@@ -30,6 +31,8 @@ public record LinksStatsResponse(
             List<CountEntry> blockedByReason) {}
 
     public record DeadDestinationCounts(long total, long anonymous) {}
+
+    public record CustomDomainCounts(long active, long pending, long slotsInUse, int maxActive, int freeAllowance, Integer cloudflareTotal) {}
 
     public record NewestLink(
             Long id,

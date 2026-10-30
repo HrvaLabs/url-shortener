@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.dto.stats;
 
+import cc.hrva.urlshortener.dto.domain.CloudflareCheckResponse;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -21,7 +22,8 @@ public record SystemStatsResponse(
         ComponentHealth health,
         RedisStats redis,
         DatabaseStats database,
-        StackedSeries emails) {
+        StackedSeries emails,
+        CloudflareCheckResponse cloudflare) {
 
     public record ComponentHealth(String database, String redis) {}
 

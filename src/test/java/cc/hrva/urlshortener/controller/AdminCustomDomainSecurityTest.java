@@ -18,22 +18,30 @@ import cc.hrva.urlshortener.repository.CustomDomainReconcileRepository;
 import cc.hrva.urlshortener.repository.CustomDomainReconcileRepository.MissingDomain;
 import cc.hrva.urlshortener.repository.CustomDomainReconcileRepository.ReconcileRun;
 import cc.hrva.urlshortener.repository.CustomDomainRepository;
+import cc.hrva.urlshortener.repository.UrlDomainMoves;
+import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.security.AnyHostIsPrimary;
 import cc.hrva.urlshortener.security.ClientIpResolver;
 import cc.hrva.urlshortener.security.JwtFilter;
 import cc.hrva.urlshortener.security.OAuth2LoginSuccessHandler;
 import cc.hrva.urlshortener.security.TokenProvider;
+import cc.hrva.urlshortener.service.ReservedAliasService;
 import cc.hrva.urlshortener.service.ScammerSignalService;
+import cc.hrva.urlshortener.service.UrlService;
 import cc.hrva.urlshortener.service.UserService;
 import cc.hrva.urlshortener.service.domain.AdminDomainResponses;
 import cc.hrva.urlshortener.service.domain.CloudflareTokenCheck;
 import cc.hrva.urlshortener.service.domain.CloudflareTokenCheck.TokenState;
 import cc.hrva.urlshortener.service.domain.CustomDomainLifecycle;
+import cc.hrva.urlshortener.service.domain.CustomDomainModeration;
 import cc.hrva.urlshortener.service.domain.CustomDomainProvisioner;
 import cc.hrva.urlshortener.service.domain.CustomDomainReconciler;
 import cc.hrva.urlshortener.service.domain.CustomDomainReconciler.QuotaReading;
+import cc.hrva.urlshortener.service.domain.CustomDomainRemoval;
 import cc.hrva.urlshortener.service.domain.CustomDomainResponses;
+import cc.hrva.urlshortener.service.domain.CustomDomainSetup;
+import cc.hrva.urlshortener.service.domain.UrlCache;
 import cc.hrva.urlshortener.service.impl.DefaultAuditLogService;
 import cc.hrva.urlshortener.service.impl.DefaultCustomDomainAdminService;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiter;
@@ -63,6 +71,8 @@ import org.springframework.boot.persistence.autoconfigure.EntityScan;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.cache.CacheManager;
+import org.springframework.cache.concurrent.ConcurrentMapCacheManager;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.FilterType;
@@ -81,7 +91,9 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.tuple;
 import static org.hamcrest.Matchers.contains;
+import static org.hamcrest.Matchers.nullValue;
 import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.never;
@@ -173,6 +185,12 @@ class AdminCustomDomainSecurityTest {
     @MockitoBean
     private RateLimiter rateLimiter;
 
+    @MockitoBean
+    private UrlService urlService;
+
+    @MockitoBean
+    private ReservedAliasService reservedAliasService;
+
     @DynamicPropertySource
     static void signingKey(final DynamicPropertyRegistry registry) {
         registry.add("app.mcp.signing-key", SIGNING_KEY::toJSONString);
@@ -212,6 +230,9 @@ class AdminCustomDomainSecurityTest {
                 post(DOMAINS + "/" + id + "/reject").contentType(MediaType.APPLICATION_JSON).content("{\"note\":\"No\"}"),
                 post(DOMAINS + "/cloudflare-check"),
                 post(DOMAINS + "/" + id + "/retry"),
+                post(DOMAINS + "/" + id + "/disable").contentType(MediaType.APPLICATION_JSON).content("{\"note\":\"Phishing\"}"),
+                post(DOMAINS + "/" + id + "/enable"),
+                delete(DOMAINS + "/" + id).param("links", "MOVE"),
                 post(DOMAINS + "/reconcile"),
                 get(ALLOWANCES + ANA),
                 put(ALLOWANCES + ANA).contentType(MediaType.APPLICATION_JSON).content("{\"maxDomains\":3,\"reason\":\"Agency\"}"),
@@ -248,6 +269,103 @@ class AdminCustomDomainSecurityTest {
         mockMvc.perform(as(ADMIN_TOKEN, put(ALLOWANCES + ANA)).contentType(MediaType.APPLICATION_JSON).content("{\"maxDomains\":3,\"reason\":\"Agency\"}"))
                 .andExpect(status().isOk());
         mockMvc.perform(as(ADMIN_TOKEN, delete(ALLOWANCES + ANA))).andExpect(status().isNoContent());
+        final var live = domain(ANA, "live.example.com", "ACTIVE", NOW.minusDays(1));
+        mockMvc.perform(as(ADMIN_TOKEN, post(DOMAINS + "/" + live + "/disable")).contentType(MediaType.APPLICATION_JSON).content("{\"note\":\"Spam\"}"))
+                .andExpect(status().isOk());
+        mockMvc.perform(as(ADMIN_TOKEN, post(DOMAINS + "/" + live + "/enable"))).andExpect(status().isOk());
+        mockMvc.perform(as(ADMIN_TOKEN, delete(DOMAINS + "/" + live))).andExpect(status().isOk());
+    }
+
+    @Test
+    void anAdminTurnsADomainOffAndOnAndTheAuditRowsSaySo() throws Exception {
+        final var id = activeDomainWithLinks();
+
+        mockMvc.perform(as(ADMIN_TOKEN, post(DOMAINS + "/" + id + "/disable")).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"note\":\"  Phishing kit  \"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(id))
+                .andExpect(jsonPath("$.status").value("DISABLED"))
+                .andExpect(jsonPath("$.disabledReason").value("ADMIN"))
+                .andExpect(jsonPath("$.disabledNote").value("Phishing kit"))
+                .andExpect(jsonPath("$.disabledAt").value("2026-10-29T09:00:00"))
+                .andExpect(jsonPath("$.cloudflareId").value("b0361ed9-0000-4000-8000-000000000001"))
+                .andExpect(jsonPath("$.owner.email").value(ANA_EMAIL));
+        assertThat(jdbcTemplate.queryForObject("select next_check_at from custom_domain where id = ?", LocalDateTime.class, id)).isNull();
+
+        mockMvc.perform(as(ADMIN_TOKEN, post(DOMAINS + "/" + id + "/enable")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("AWAITING_DNS"))
+                .andExpect(jsonPath("$.disabledReason").value(nullValue()))
+                .andExpect(jsonPath("$.disabledNote").value(nullValue()));
+
+        verify(customDomainLifecycle).checkNow(id);
+        assertThat(auditRows()).extracting(audit -> audit.get("action"), audit -> audit.get("target_identifier"), audit -> audit.get("failed"))
+                .containsExactly(tuple("DISABLE_DOMAIN", String.valueOf(id), false), tuple("ENABLE_DOMAIN", String.valueOf(id), false));
+    }
+
+    @Test
+    void refusedDisablesAndEnablesAnswerWithTheContractTexts() throws Exception {
+        final var pending = domain(ANA, "go.example.com", "PENDING_REVIEW", NOW.minusDays(1));
+        final var live = domain(BOB, "links.example.org", "ACTIVE", NOW.minusDays(1));
+
+        mockMvc.perform(as(ADMIN_TOKEN, post(DOMAINS + "/" + live + "/disable")).contentType(MediaType.APPLICATION_JSON).content("{\"note\":\"   \"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().json("{\"note\":\"Reason is required\"}", JsonCompareMode.STRICT));
+        mockMvc.perform(as(ADMIN_TOKEN, post(DOMAINS + "/" + live + "/disable")).contentType(MediaType.APPLICATION_JSON).content("{}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().json("{\"note\":\"Reason is required\"}", JsonCompareMode.STRICT));
+        mockMvc.perform(as(ADMIN_TOKEN, post(DOMAINS + "/" + pending + "/disable")).contentType(MediaType.APPLICATION_JSON).content("{\"note\":\"Spam\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(content().json("{\"error\":\"This domain can't be turned off now.\"}", JsonCompareMode.STRICT));
+        mockMvc.perform(as(ADMIN_TOKEN, post(DOMAINS + "/" + live + "/enable")))
+                .andExpect(status().isConflict())
+                .andExpect(content().json("{\"error\":\"This domain isn't turned off.\"}", JsonCompareMode.STRICT));
+        mockMvc.perform(as(ADMIN_TOKEN, post(DOMAINS + "/987654/enable"))).andExpect(status().isNotFound());
+
+        assertThat(statusOf(pending)).isEqualTo("PENDING_REVIEW");
+        assertThat(statusOf(live)).isEqualTo("ACTIVE");
+        verifyNoInteractions(customDomainLifecycle);
+    }
+
+    @Test
+    void anAdminRemovesADomainWithItsLinksMovedAndTheAuditRowSaysSo() throws Exception {
+        final var id = activeDomainWithLinks();
+        link(BOB, null, "hrva-menu", 0, null);
+        jdbcTemplate.update("update url set short_url = 'menu' where short_url = 'hrva-menu'");
+        when(urlService.nextFreeShortUrl(null)).thenReturn("k3J9x");
+
+        mockMvc.perform(as(ADMIN_TOKEN, delete(DOMAINS + "/" + id).param("links", "MOVE")))
+                .andExpect(status().isOk())
+                .andExpect(content().json("{\"moved\":2,\"renamed\":[{\"from\":\"menu\",\"to\":\"k3J9x\"}],\"deactivated\":0}",
+                        JsonCompareMode.STRICT));
+
+        assertThat(jdbcTemplate.queryForMap("select status, cloudflare_delete_pending from custom_domain where id = ?", id))
+                .containsEntry("STATUS", "DELETED").containsEntry("CLOUDFLARE_DELETE_PENDING", true);
+        assertThat(jdbcTemplate.queryForList("select short_url from url where domain_id is null and owner_id = ? and block_reason is null order by short_url",
+                String.class, ANA)).containsExactly("drinks", "k3J9x");
+        assertThat(auditRows()).singleElement().satisfies(audit -> assertThat(audit)
+                .containsEntry("action", "DELETE_DOMAIN")
+                .containsEntry("target_type", "CustomDomain")
+                .containsEntry("target_identifier", String.valueOf(id))
+                .containsEntry("failed", false));
+        verifyNoInteractions(cloudflareTokenCheck, customDomainProvisioner, customDomainLifecycle);
+    }
+
+    @Test
+    void anAdminRemovalTurnsTheLinksOffByDefaultAndARemovedDomainIsNotFound() throws Exception {
+        final var id = activeDomainWithLinks();
+
+        mockMvc.perform(as(ADMIN_TOKEN, delete(DOMAINS + "/" + id)))
+                .andExpect(status().isOk())
+                .andExpect(content().json("{\"moved\":0,\"renamed\":[],\"deactivated\":2}", JsonCompareMode.STRICT));
+        mockMvc.perform(as(ADMIN_TOKEN, delete(DOMAINS + "/" + id)))
+                .andExpect(status().isNotFound())
+                .andExpect(content().json("{\"error\":\"Custom domain not found\"}", JsonCompareMode.STRICT));
+        mockMvc.perform(as(ADMIN_TOKEN, delete(DOMAINS + "/" + id).param("links", "move")))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().json("{\"error\":\"links must be MOVE or DEACTIVATE\"}", JsonCompareMode.STRICT));
+
+        assertThat(jdbcTemplate.queryForList("select active from url where domain_id = ?", Boolean.class, id)).containsOnly(false);
     }
 
     @Test
@@ -681,7 +799,8 @@ class AdminCustomDomainSecurityTest {
             basePackageClasses = UserRepository.class,
             includeFilters = @ComponentScan.Filter(
                     type = FilterType.ASSIGNABLE_TYPE,
-                    classes = {UserRepository.class, CustomDomainRepository.class, CustomDomainAllowanceRepository.class, AuditLogRepository.class}))
+                    classes = {UserRepository.class, CustomDomainRepository.class, CustomDomainAllowanceRepository.class, AuditLogRepository.class,
+                            UrlRepository.class}))
     @Import({
             AppConfiguration.class,
             WebConfiguration.class,
@@ -701,6 +820,11 @@ class AdminCustomDomainSecurityTest {
             CustomDomainResponses.class,
             CustomDomainCapLock.class,
             CustomDomainReconcileRepository.class,
+            CustomDomainSetup.class,
+            CustomDomainModeration.class,
+            CustomDomainRemoval.class,
+            UrlDomainMoves.class,
+            UrlCache.class,
             TestApplication.FixedClock.class
     })
     static class TestApplication {
@@ -711,6 +835,11 @@ class AdminCustomDomainSecurityTest {
             @Bean
             Clock clock() {
                 return Clock.fixed(NOW_INSTANT, ZoneOffset.UTC);
+            }
+
+            @Bean
+            CacheManager cacheManager() {
+                return new ConcurrentMapCacheManager("urls");
             }
 
         }

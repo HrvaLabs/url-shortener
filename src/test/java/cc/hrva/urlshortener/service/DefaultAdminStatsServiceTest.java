@@ -194,7 +194,7 @@ class DefaultAdminStatsServiceTest {
 
     private static LinksStatsResponse emptyLinks(final StatsWindow window) {
         return new LinksStatsResponse(window.days(), window.from(), window.to(), new StackedSeries(List.of(), List.of()),
-                new CreatedInRange(0, 0, 0, 0), new LinkInventory(0, 0, 0, 0, 0, 0, 0, List.of()), List.of(), List.of(), List.of(), null);
+                new CreatedInRange(0, 0, 0, 0), new LinkInventory(0, 0, 0, 0, 0, 0, 0, List.of()), List.of(), List.of(), List.of(), null, null);
     }
 
     private static UsersStatsResponse emptyUsers(final StatsWindow window) {
@@ -210,7 +210,7 @@ class DefaultAdminStatsServiceTest {
     private static SystemStatsResponse emptySystem(final StatsWindow window) {
         return new SystemStatsResponse(window.days(), window.from(), window.to(), "2.9", LocalDateTime.of(2026, 10, 26, 8, 0), "1m",
                 "25", List.of(), 0, 0, List.of(), new RequestCounts(0, 0), CacheStats.of(0, 0), new ComponentHealth("UP", "UP"),
-                new RedisStats(null, null, null), new DatabaseStats("H2", "2.5.252", null, true), new StackedSeries(List.of(), List.of()));
+                new RedisStats(null, null, null), new DatabaseStats("H2", "2.5.252", null, true), new StackedSeries(List.of(), List.of()), null);
     }
 
 }

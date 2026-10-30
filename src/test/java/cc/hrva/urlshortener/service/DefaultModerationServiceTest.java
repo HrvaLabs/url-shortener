@@ -19,19 +19,29 @@ import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.enums.AuditAction;
 import cc.hrva.urlshortener.model.enums.BlockReason;
+import cc.hrva.urlshortener.model.enums.CustomDomainStatus;
+import cc.hrva.urlshortener.model.enums.DomainDisableReason;
 import cc.hrva.urlshortener.model.enums.DomainRuleType;
 import cc.hrva.urlshortener.model.enums.ReviewAction;
 import cc.hrva.urlshortener.model.enums.ReviewResolution;
+import cc.hrva.urlshortener.repository.CustomDomainRepository;
 import cc.hrva.urlshortener.repository.DomainRuleRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent;
+import cc.hrva.urlshortener.service.alert.AdminAlertEvent.DomainDisabled;
 import cc.hrva.urlshortener.service.alert.AlertedLink;
 import cc.hrva.urlshortener.service.blocklist.BlocklistConfigurationChangedEvent;
+import cc.hrva.urlshortener.service.domain.CustomDomainChangedEvent;
+import cc.hrva.urlshortener.service.domain.CustomDomainLifecycle;
+import cc.hrva.urlshortener.service.domain.CustomDomainModeration;
+import cc.hrva.urlshortener.service.domain.LifecycleOutcome;
 import cc.hrva.urlshortener.service.domain.UrlCache;
 import cc.hrva.urlshortener.service.impl.DefaultModerationService;
+import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
@@ -137,6 +147,12 @@ class DefaultModerationServiceTest {
     @Mock
     private TaskScheduler taskScheduler;
 
+    @Mock
+    private CustomDomainRepository customDomainRepository;
+
+    @Mock
+    private CustomDomainLifecycle customDomainLifecycle;
+
     private final Map<Long, Url> links = new TreeMap<>();
     private final Map<String, DomainRule> rules = new HashMap<>();
     private final List<List<Long>> savedPerTransaction = new ArrayList<>();
@@ -200,9 +216,12 @@ class DefaultModerationServiceTest {
             }
             return null;
         }).when(cache).evict(any());
+        final var transactions = recordingTransactions();
+        final var domainModeration = new CustomDomainModeration(customDomainRepository, customDomainLifecycle, eventPublisher, transactions,
+                Clock.fixed(Instant.parse("2026-10-29T09:00:00Z"), ZoneOffset.UTC));
         moderationService = new DefaultModerationService(urlRepository, userRepository, domainRuleRepository, linkCheckService,
-                reviewQueueService, userService, sendingEmailService, auditLogService, new UrlCache(cacheManager), eventPublisher, recordingTransactions(),
-                scammerSignalService, taskScheduler);
+                reviewQueueService, userService, sendingEmailService, auditLogService, new UrlCache(cacheManager), eventPublisher, transactions,
+                scammerSignalService, taskScheduler, domainModeration);
     }
 
     @Test
@@ -1173,6 +1192,172 @@ class DefaultModerationServiceTest {
     }
 
     @Test
+    void aBlockRuleDisablesMatchingDomains() {
+        final var onTheRule = customDomain(70L, "go.example.com", CustomDomainStatus.ACTIVE, null);
+        final var elsewhere = customDomain(71L, "go.example.org", CustomDomainStatus.ACTIVE, null);
+        when(customDomainRepository.findByStatusIn(anyCollection())).thenReturn(List.of(onTheRule, elsewhere));
+        when(customDomainRepository.findByIdForUpdate(70L)).thenReturn(Optional.of(onTheRule));
+        when(customDomainRepository.markDisabled(eq(70L), eq(CustomDomainStatus.ACTIVE), eq(DomainDisableReason.DOMAIN_RULE),
+                eq("example.com: phishing wave"), any())).thenReturn(1);
+
+        final var created = moderationService.createDomainRule(new DomainRuleDto("example.com", DomainRuleType.BLOCK, "phishing wave"), ADMIN, "admin");
+
+        assertThat(created.domainsDisabled()).isEqualTo(1);
+        verify(customDomainRepository, never()).markDisabled(eq(71L), any(), any(), any(), any());
+        verify(eventPublisher).publishEvent(new DomainDisabled(70L, "go.example.com", DomainDisableReason.DOMAIN_RULE, "example.com: phishing wave"));
+        verify(eventPublisher).publishEvent(new CustomDomainChangedEvent(70L));
+        verify(auditLogService).log(ADMIN, AuditAction.BLOCK_DOMAIN, "Domain", "example.com",
+                "reason: phishing wave, domains: 1, links: 0, via: admin");
+        assertThat(outOfPlace).isEmpty();
+    }
+
+    @Test
+    void aDomainThatFailsToTurnOffLeavesTheOthersTurnedOff() {
+        final var failing = customDomain(70L, "go.example.com", CustomDomainStatus.ACTIVE, null);
+        final var next = customDomain(71L, "links.example.com", CustomDomainStatus.ACTIVE, null);
+        when(customDomainRepository.findByStatusIn(anyCollection())).thenReturn(List.of(failing, next));
+        when(customDomainRepository.findByIdForUpdate(70L)).thenThrow(new DataAccessResourceFailureException("lock timeout"));
+        when(customDomainRepository.findByIdForUpdate(71L)).thenReturn(Optional.of(next));
+        when(customDomainRepository.markDisabled(eq(71L), eq(CustomDomainStatus.ACTIVE), eq(DomainDisableReason.DOMAIN_RULE), eq("example.com"), any()))
+                .thenReturn(1);
+
+        final var created = moderationService.createDomainRule(new DomainRuleDto("example.com", DomainRuleType.BLOCK, null), ADMIN, "admin");
+
+        assertThat(created.domainsDisabled()).isEqualTo(1);
+    }
+
+    @Test
+    void anAllowRuleDisablesNoDomains() {
+        final var created = moderationService.createDomainRule(new DomainRuleDto("example.com", DomainRuleType.ALLOW, null), ADMIN, "admin");
+
+        assertThat(created.domainsDisabled()).isZero();
+        verifyNoInteractions(customDomainRepository);
+    }
+
+    @Test
+    void aDomainBlockFromTheReviewQueueAlsoDisablesMatchingDomains() {
+        final var url = link(40L, "https://login.jofogas.cards/", user(1L, "alice@example.com"));
+        final var onTheRule = customDomain(70L, "go.jofogas.cards", CustomDomainStatus.AWAITING_DNS, null);
+        when(customDomainRepository.findByStatusIn(anyCollection())).thenReturn(List.of(onTheRule));
+        when(customDomainRepository.findByIdForUpdate(70L)).thenReturn(Optional.of(onTheRule));
+        when(customDomainRepository.markDisabled(eq(70L), eq(CustomDomainStatus.AWAITING_DNS), eq(DomainDisableReason.DOMAIN_RULE),
+                eq("jofogas.cards"), any())).thenReturn(1);
+
+        moderationService.resolveReview(url.getId(), ReviewAction.BLOCK_DOMAIN, null, ADMIN, "admin");
+
+        verify(customDomainRepository).markDisabled(eq(70L), eq(CustomDomainStatus.AWAITING_DNS), eq(DomainDisableReason.DOMAIN_RULE),
+                eq("jofogas.cards"), any());
+    }
+
+    @Test
+    void blockingAUserDisablesTheirDomainsAndRejectsApplications() {
+        final var scammer = user(5L, "scammer@example.com");
+        when(userRepository.findById(5L)).thenReturn(Optional.of(scammer));
+        link(40L, "https://a.example/", scammer);
+        final var live = customDomain(70L, "go.example.com", CustomDomainStatus.ACTIVE, null);
+        final var pending = customDomain(71L, "new.example.com", CustomDomainStatus.PENDING_REVIEW, null);
+        when(customDomainRepository.findByOwnerIdOrderByCreatedAtDescIdDesc(5L)).thenReturn(List.of(live, pending));
+        when(customDomainRepository.findByIdForUpdate(70L)).thenReturn(Optional.of(live));
+        when(customDomainRepository.markDisabled(eq(70L), eq(CustomDomainStatus.ACTIVE), eq(DomainDisableReason.USER_BLOCKED), isNull(), any()))
+                .thenReturn(1);
+        when(customDomainRepository.markRejected(eq(71L), eq(ADMIN), eq("Account blocked"), any())).thenReturn(1);
+
+        moderationService.blockUser(5L, ADMIN, "admin", null);
+
+        final var order = inOrder(userService, customDomainRepository);
+        order.verify(userService).deactivate(scammer);
+        order.verify(customDomainRepository).markDisabled(eq(70L), eq(CustomDomainStatus.ACTIVE), eq(DomainDisableReason.USER_BLOCKED), isNull(),
+                any());
+        verify(customDomainRepository).markRejected(eq(71L), eq(ADMIN), eq("Account blocked"), any());
+        verify(eventPublisher).publishEvent(new DomainDisabled(70L, "go.example.com", DomainDisableReason.USER_BLOCKED, null));
+        verify(auditLogService).log(ADMIN, AuditAction.BLOCK_USER, "User", "5", "domains: 1, links: 1, via: admin");
+        assertThat(outOfPlace).isEmpty();
+    }
+
+    @Test
+    void unblockingEnablesOnlyWhatTheBlockDisabled() {
+        final var user = user(5L, "alice@example.com");
+        user.setActive(false);
+        when(userRepository.findById(5L)).thenReturn(Optional.of(user));
+        final var byTheBlock = customDomain(70L, "go.example.com", CustomDomainStatus.DISABLED, DomainDisableReason.USER_BLOCKED);
+        final var byAnAdmin = customDomain(71L, "off.example.com", CustomDomainStatus.DISABLED, DomainDisableReason.ADMIN);
+        when(customDomainRepository.findByOwnerIdOrderByCreatedAtDescIdDesc(5L)).thenReturn(List.of(byTheBlock, byAnAdmin));
+        when(customDomainRepository.findByIdForUpdate(70L)).thenReturn(Optional.of(byTheBlock));
+        when(customDomainRepository.markEnabled(eq(70L), any())).thenReturn(1);
+
+        moderationService.reactivateUser(5L, ADMIN, "admin");
+
+        verify(customDomainRepository).markEnabled(eq(70L), any());
+        verify(customDomainRepository, never()).markEnabled(eq(71L), any());
+        verify(customDomainRepository, never()).findByIdForUpdate(71L);
+        verify(customDomainLifecycle).checkNow(70L);
+        verify(customDomainLifecycle, never()).checkNow(71L);
+        verify(auditLogService).log(ADMIN, AuditAction.REACTIVATE_USER, "User", "5", "domains: 1, links: 0, via: admin");
+    }
+
+    @Test
+    void unblockingTurnsTheDomainOnBeforeItsLinksSoTheyComeBackWithIt() {
+        final var user = user(5L, "alice@example.com");
+        when(userRepository.findById(5L)).thenReturn(Optional.of(user));
+        final var domain = customDomain(70L, "go.example.com", CustomDomainStatus.DISABLED, DomainDisableReason.USER_BLOCKED);
+        when(customDomainRepository.findByOwnerIdOrderByCreatedAtDescIdDesc(5L)).thenReturn(List.of(domain));
+        when(customDomainRepository.findByIdForUpdate(70L)).thenReturn(Optional.of(domain));
+        when(customDomainRepository.markEnabled(eq(70L), any())).thenReturn(1);
+        doAnswer(invocation -> {
+            domain.setStatus(CustomDomainStatus.ACTIVE);
+            return LifecycleOutcome.DONE;
+        }).when(customDomainLifecycle).checkNow(70L);
+        final var onTheDomain = blocked(50L, "https://a.example/", BlockReason.USER_BLOCKED, user);
+        onTheDomain.setDomain(domain);
+
+        assertThat(moderationService.reactivateUser(5L, ADMIN, "admin")).isEqualTo(1);
+
+        assertThat(onTheDomain.isActive()).isTrue();
+        assertThat(onTheDomain.getBlockReason()).isNull();
+        verify(cache).evict("70/s50");
+    }
+
+    @Test
+    void aRestoredLinkWhoseDomainIsStillOffLosesItsBlockButStaysOff() {
+        final var user = user(5L, "alice@example.com");
+        when(userRepository.findById(5L)).thenReturn(Optional.of(user));
+        final var stillOff = blocked(50L, "https://a.example/", BlockReason.USER_BLOCKED, user);
+        stillOff.setDomain(customDomain(70L, "go.example.com", CustomDomainStatus.DISABLED, DomainDisableReason.ADMIN));
+        final var removed = blocked(51L, "https://b.example/", BlockReason.USER_BLOCKED, user);
+        removed.setDomain(customDomain(71L, "old.example.com", CustomDomainStatus.DELETED, null));
+        final var onHrva = blocked(52L, "https://c.example/", BlockReason.USER_BLOCKED, user);
+
+        final var restored = moderationService.reactivateUser(5L, ADMIN, "admin");
+
+        assertThat(restored).isEqualTo(1);
+        assertThat(List.of(stillOff, removed)).allSatisfy(url -> {
+            assertThat(url.isActive()).isFalse();
+            assertThat(url.getBlockReason()).isNull();
+            assertThat(url.getBlockDetail()).isNull();
+            assertThat(url.getBlockedAt()).isNull();
+        });
+        assertThat(onHrva.isActive()).isTrue();
+        verify(urlRepository, never()).aliasActive(eq(70L), anyString());
+        assertThat(outOfPlace).isEmpty();
+    }
+
+    @Test
+    void anAllowRuleLiftsTheBlockOfALinkOnADomainThatIsOffButLeavesItOff() {
+        rule("jofogas.cards", DomainRuleType.BLOCK);
+        final var onAnOffDomain = blocked(20L, "https://jofogas.cards/a", BlockReason.BLOCKLIST, null);
+        onAnOffDomain.setDomain(customDomain(70L, "go.example.com", CustomDomainStatus.DISABLED, DomainDisableReason.ADMIN));
+        final var onHrva = blocked(21L, "https://jofogas.cards/b", BlockReason.BLOCKLIST, null);
+        when(linkCheckService.check(anyString())).thenReturn(ALLOWED);
+
+        final var trusted = moderationService.allowDomain("jofogas.cards", null, ADMIN, "admin");
+
+        assertThat(trusted).isEqualTo(1);
+        assertThat(onAnOffDomain.isActive()).isFalse();
+        assertThat(onAnOffDomain.getBlockReason()).isNull();
+        assertThat(onHrva.isActive()).isTrue();
+    }
+
+    @Test
     void addingAnAllowRuleTrustsTheDomainAndReturnsTheRestoredLinks() {
         final var existing = rule("jofogas.cards", DomainRuleType.BLOCK);
         blocked(20L, "https://jofogas.cards/a", BlockReason.BLOCKLIST, null);
@@ -1784,6 +1969,12 @@ class DefaultModerationServiceTest {
 
     private static LinkReview review(final Url url) {
         return LinkReview.builder().id(url.getId()).url(url).reasons("login or verification lure").flaggedAt(LocalDateTime.now()).build();
+    }
+
+    private static CustomDomain customDomain(final long id, final String hostname, final CustomDomainStatus status,
+                                             final DomainDisableReason disabledReason) {
+        return CustomDomain.builder().id(id).hostname(hostname).hostnameKey(hostname).status(status).cloudflareId("cf-" + id)
+                .disabledReason(disabledReason).build();
     }
 
     private static User user(final long id, final String email) {

@@ -4,10 +4,12 @@ import cc.hrva.urlshortener.dto.stats.CountEntry;
 import cc.hrva.urlshortener.dto.stats.LinksStatsResponse.DeadDestinationCounts;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.User;
+import cc.hrva.urlshortener.model.enums.CustomDomainStatus;
 import cc.hrva.urlshortener.repository.stats.LinksStatsRepository.CreatedCounts;
 import cc.hrva.urlshortener.repository.stats.LinksStatsRepository.InventoryCounts;
 import jakarta.persistence.EntityManager;
 import java.time.LocalDateTime;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.SpringBootConfiguration;
@@ -73,6 +75,28 @@ class LinksStatsRepositoryTest {
         inventory(9206, true, NOW, null, null);
 
         assertThat(linksStatsRepository.countInventory(NOW)).isEqualTo(new InventoryCounts(6, 4, 2, 2, 2, 4));
+    }
+
+    @Test
+    void customDomainCounts() {
+        final var owner = savedOwner("domains@example.com");
+        customDomain(owner, "a.example.com", "ACTIVE");
+        customDomain(owner, "b.example.com", "ACTIVE");
+        customDomain(owner, "c.example.com", "PENDING_REVIEW");
+        customDomain(owner, "d.example.com", "DISABLED");
+        customDomain(owner, "e.example.com", "DELETED");
+        customDomain(null, "f.example.com", "DELETED");
+
+        assertThat(linksStatsRepository.countCustomDomainsByStatus()).containsExactlyInAnyOrderEntriesOf(Map.of(
+                CustomDomainStatus.ACTIVE, 2L,
+                CustomDomainStatus.PENDING_REVIEW, 1L,
+                CustomDomainStatus.DISABLED, 1L,
+                CustomDomainStatus.DELETED, 2L));
+    }
+
+    @Test
+    void noCustomDomainsCountsNothing() {
+        assertThat(linksStatsRepository.countCustomDomainsByStatus()).isEmpty();
     }
 
     @Test
@@ -196,6 +220,11 @@ class LinksStatsRepositoryTest {
     private void destination(final long id, final String longUrl, final boolean active) {
         jdbcTemplate.update("insert into url (id, long_url, short_url, active) values (?, ?, ?, ?)",
                 id, longUrl, "links-" + id, active);
+    }
+
+    private void customDomain(final User owner, final String hostname, final String status) {
+        jdbcTemplate.update("insert into custom_domain (owner_id, hostname, status, reason, created_at, updated_at) values (?, ?, ?, 'Menu', ?, ?)",
+                owner != null ? owner.getId() : null, hostname, status, NOW, NOW);
     }
 
     private void tag(final long urlId, final String tag) {

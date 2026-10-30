@@ -9,15 +9,21 @@ import cc.hrva.urlshortener.client.CloudflareResult;
 import cc.hrva.urlshortener.configuration.AppConfiguration;
 import cc.hrva.urlshortener.configuration.AsyncExecutorConfiguration;
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
+import cc.hrva.urlshortener.dto.LinkVerdict;
+import cc.hrva.urlshortener.dto.LinkVerdict.Outcome;
 import cc.hrva.urlshortener.model.User;
+import cc.hrva.urlshortener.model.enums.BlockReason;
 import cc.hrva.urlshortener.model.enums.CloudflareTokenStatus;
 import cc.hrva.urlshortener.model.enums.CustomDomainStatus;
+import cc.hrva.urlshortener.model.enums.DomainDisableReason;
 import cc.hrva.urlshortener.repository.CustomDomainReconcileRepository;
 import cc.hrva.urlshortener.repository.CustomDomainReconcileRepository.MissingDomain;
 import cc.hrva.urlshortener.repository.CustomDomainReconcileRepository.ReconcileRun;
 import cc.hrva.urlshortener.repository.CustomDomainRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent;
+import cc.hrva.urlshortener.service.LinkCheckService;
+import cc.hrva.urlshortener.service.alert.AdminAlertEvent.DomainDisabled;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.DomainDrift;
 import cc.hrva.urlshortener.service.domain.CloudflareTokenCheck.TokenState;
 import cc.hrva.urlshortener.service.domain.CustomDomainReconciler.QuotaReading;
@@ -61,8 +67,11 @@ import org.springframework.transaction.support.TransactionOperations;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @SpringBootTest(
@@ -123,6 +132,7 @@ class CustomDomainReconcilerTest {
     private TestApplication.CommittedEvents committedEvents;
 
     private final CloudflareTokenCheck cloudflareTokenCheck = mock(CloudflareTokenCheck.class);
+    private final LinkCheckService linkCheckService = mock(LinkCheckService.class);
     private final Logger reconcilerLogger = (Logger) LoggerFactory.getLogger(CustomDomainReconciler.class);
     private final ListAppender<ILoggingEvent> logEvents = new ListAppender<>();
     private CustomDomainReconciler reconciler;
@@ -135,8 +145,10 @@ class CustomDomainReconcilerTest {
         when(cloudflareTokenCheck.check()).thenReturn(new TokenState(CloudflareTokenStatus.OK, NOW, null, 7));
         jdbcTemplate.update("insert into user_account (id, email, password, active, create_date) values (?, 'ana@hrva.cc', 'secret-hash', true, ?)",
                 ANA, NOW.minusDays(30));
+        when(linkCheckService.check(anyString())).thenReturn(LinkVerdict.clean());
+        final var moderation = new CustomDomainModeration(customDomainRepository, customDomainLifecycle, eventPublisher, transactionOperations, CLOCK);
         reconciler = new CustomDomainReconciler(CLOUDFLARE, cloudflareTokenCheck, customDomainRepository, customDomainReconcileRepository,
-                customDomainLifecycle, customDomainHostnames, eventPublisher, transactionOperations, appProperties, CLOCK);
+                customDomainLifecycle, customDomainHostnames, linkCheckService, moderation, eventPublisher, transactionOperations, appProperties, CLOCK);
         logEvents.start();
         reconcilerLogger.addAppender(logEvents);
     }
@@ -328,6 +340,79 @@ class CustomDomainReconcilerTest {
         assertThat(run).isEqualTo(new ReconcileRun(NOW, null, null, List.of(), List.of(), "CLOUDFLARE_API_TOKEN or CLOUDFLARE_ZONE_ID isn't set."));
         assertThat(CLOUDFLARE.calls()).isEmpty();
         assertThat(committedEvents.alerts()).isEmpty();
+    }
+
+    @Test
+    void aBlocklistedActiveDomainIsDisabledAtNight() {
+        final var byRule = domain("go.example.com", CustomDomainStatus.ACTIVE, CLOUDFLARE.store("go.example.com", "active", "active"));
+        final var byList = domain("menu.example.org", CustomDomainStatus.ACTIVE, CLOUDFLARE.store("menu.example.org", "active", "active"));
+        final var byScamSignals = domain("pay.example.net", CustomDomainStatus.ACTIVE, CLOUDFLARE.store("pay.example.net", "active", "active"));
+        final var flagged = domain("new.example.net", CustomDomainStatus.ACTIVE, CLOUDFLARE.store("new.example.net", "active", "active"));
+        final var waiting = domain("wait.example.com", CustomDomainStatus.AWAITING_DNS, CLOUDFLARE.store("wait.example.com", "pending", "pending"));
+        when(linkCheckService.check("https://go.example.com/")).thenReturn(
+                new LinkVerdict(Outcome.BLOCK, List.of("blocked domain example.com"), BlockReason.DOMAIN_RULE, "example.com"));
+        when(linkCheckService.check("https://menu.example.org/")).thenReturn(
+                new LinkVerdict(Outcome.BLOCK, List.of("on list HaGeZi TIF medium"), BlockReason.BLOCKLIST, "HaGeZi TIF medium"));
+        when(linkCheckService.check("https://pay.example.net/")).thenReturn(
+                new LinkVerdict(Outcome.BLOCK, List.of("young domain"), BlockReason.SCAM_SIGNALS, "young domain, login lure"));
+        when(linkCheckService.check("https://new.example.net/")).thenReturn(new LinkVerdict(Outcome.FLAG, List.of("young domain"), null, null));
+
+        reconciler.reconcileInBackground();
+
+        assertThat(jdbcTemplate.queryForMap("select status, disabled_reason, disabled_note from custom_domain where id = ?", byRule))
+                .containsEntry("STATUS", "DISABLED").containsEntry("DISABLED_REASON", "DOMAIN_RULE").containsEntry("DISABLED_NOTE", "example.com");
+        assertThat(jdbcTemplate.queryForMap("select status, disabled_reason, disabled_note from custom_domain where id = ?", byList))
+                .containsEntry("STATUS", "DISABLED").containsEntry("DISABLED_REASON", "BLOCKLIST").containsEntry("DISABLED_NOTE", "HaGeZi TIF medium");
+        assertThat(jdbcTemplate.queryForMap("select status, disabled_reason from custom_domain where id = ?", byScamSignals))
+                .containsEntry("STATUS", "DISABLED").containsEntry("DISABLED_REASON", "BLOCKLIST");
+        assertThat(statusOf(flagged)).isEqualTo("ACTIVE");
+        assertThat(statusOf(waiting)).isEqualTo("AWAITING_DNS");
+        verify(linkCheckService, never()).check("https://wait.example.com/");
+        assertThat(committedEvents.alerts()).contains(
+                new DomainDisabled(byRule, "go.example.com", DomainDisableReason.DOMAIN_RULE, "example.com"),
+                new DomainDisabled(byList, "menu.example.org", DomainDisableReason.BLOCKLIST, "HaGeZi TIF medium"));
+        assertThat(committedEvents.changes()).contains(new CustomDomainChangedEvent(byRule), new CustomDomainChangedEvent(byList),
+                new CustomDomainChangedEvent(byScamSignals));
+    }
+
+    @Test
+    void theNightlyHostnameCheckRunsEvenWhenCloudflareCannotBeRead() {
+        when(cloudflareTokenCheck.check()).thenReturn(new TokenState(CloudflareTokenStatus.UNREACHABLE, NOW, "Cloudflare couldn't be reached.", null));
+        final var id = domain("go.example.com", CustomDomainStatus.ACTIVE, "cf-1");
+        when(linkCheckService.check("https://go.example.com/")).thenReturn(
+                new LinkVerdict(Outcome.BLOCK, List.of("blocked domain example.com"), BlockReason.DOMAIN_RULE, "example.com"));
+
+        reconciler.reconcileInBackground();
+
+        assertThat(statusOf(id)).isEqualTo("DISABLED");
+        assertThat(CLOUDFLARE.calls()).isEmpty();
+    }
+
+    @Test
+    void aFailingHostnameCheckLeavesTheOtherDomainsChecked() {
+        final var failing = domain("broken.example.com", CustomDomainStatus.ACTIVE, CLOUDFLARE.store("broken.example.com", "active", "active"));
+        final var blocked = domain("go.example.com", CustomDomainStatus.ACTIVE, CLOUDFLARE.store("go.example.com", "active", "active"));
+        when(linkCheckService.check("https://broken.example.com/")).thenThrow(new IllegalStateException("rdap down"));
+        when(linkCheckService.check("https://go.example.com/")).thenReturn(
+                new LinkVerdict(Outcome.BLOCK, List.of("on list URLhaus"), BlockReason.BLOCKLIST, "URLhaus"));
+
+        reconciler.reconcileInBackground();
+
+        assertThat(statusOf(failing)).isEqualTo("ACTIVE");
+        assertThat(statusOf(blocked)).isEqualTo("DISABLED");
+        assertThat(rowCount()).isOne();
+    }
+
+    @Test
+    void theAdminsReconcileComparesWithCloudflareOnly() {
+        final var id = domain("go.example.com", CustomDomainStatus.ACTIVE, CLOUDFLARE.store("go.example.com", "active", "active"));
+        when(linkCheckService.check("https://go.example.com/")).thenReturn(
+                new LinkVerdict(Outcome.BLOCK, List.of("on list URLhaus"), BlockReason.BLOCKLIST, "URLhaus"));
+
+        reconciler.reconcile();
+
+        assertThat(statusOf(id)).isEqualTo("ACTIVE");
+        verify(linkCheckService, never()).check(anyString());
     }
 
     @Test

@@ -103,7 +103,7 @@ class AdminDomainRuleControllerTest {
     @Test
     void addingABlockRuleDelegatesAsTheSignedInAdminAndReturnsTheRuleAndTheLinksAffected() throws Exception {
         when(moderationService.createDomainRule(new DomainRuleDto("jofogas.cards", DomainRuleType.BLOCK, "phishing wave"), ADMIN, "admin"))
-                .thenReturn(new DomainRuleCreatedResponse(BLOCKED, 12));
+                .thenReturn(new DomainRuleCreatedResponse(BLOCKED, 12, 1));
 
         mockMvc.perform(post("/api/v1/admin/domain-rules").principal(SIGNED_IN_ADMIN)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -112,13 +112,14 @@ class AdminDomainRuleControllerTest {
                 .andExpect(jsonPath("$.rule.id").value(7))
                 .andExpect(jsonPath("$.rule.domain").value("jofogas.cards"))
                 .andExpect(jsonPath("$.rule.type").value("BLOCK"))
-                .andExpect(jsonPath("$.linksAffected").value(12));
+                .andExpect(jsonPath("$.linksAffected").value(12))
+                .andExpect(jsonPath("$.domainsDisabled").value(1));
     }
 
     @Test
     void addingAnAllowRuleWithoutAReasonReturnsTheRestoredLinks() throws Exception {
         when(moderationService.createDomainRule(new DomainRuleDto("gableci.hrva.cc", DomainRuleType.ALLOW, null), ADMIN, "admin"))
-                .thenReturn(new DomainRuleCreatedResponse(TRUSTED, 2));
+                .thenReturn(new DomainRuleCreatedResponse(TRUSTED, 2, 0));
 
         mockMvc.perform(post("/api/v1/admin/domain-rules").principal(SIGNED_IN_ADMIN)
                         .contentType(MediaType.APPLICATION_JSON)

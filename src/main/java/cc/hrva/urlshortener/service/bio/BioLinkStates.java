@@ -2,6 +2,7 @@ package cc.hrva.urlshortener.service.bio;
 
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.enums.BioLinkState;
+import cc.hrva.urlshortener.model.enums.CustomDomainStatus;
 import java.time.LocalDateTime;
 
 public final class BioLinkStates {
@@ -11,6 +12,9 @@ public final class BioLinkStates {
     public static BioLinkState of(final Url url, final boolean inReview, final LocalDateTime now) {
         if (url.getBlockReason() != null || url.getThreatType() != null) {
             return BioLinkState.BLOCKED;
+        }
+        if (domainIsOff(url)) {
+            return BioLinkState.DOMAIN_OFF;
         }
         final var atLimit = hasReachedVisitLimit(url.getVisits(), url.getVisitLimit());
         final var expired = url.getExpirationDate() != null && url.getExpirationDate().isBefore(now);
@@ -27,6 +31,14 @@ public final class BioLinkStates {
             return BioLinkState.LIMIT_REACHED;
         }
         return inReview ? BioLinkState.IN_REVIEW : BioLinkState.LIVE;
+    }
+
+    private static boolean domainIsOff(final Url url) {
+        final var domain = url.getDomain();
+        if (domain == null) {
+            return false;
+        }
+        return domain.getStatus() != CustomDomainStatus.ACTIVE || url.getOwner() == null || Boolean.FALSE.equals(url.getOwner().getActive());
     }
 
     private static boolean hasReachedVisitLimit(final Long visits, final Long visitLimit) {

@@ -5,14 +5,18 @@ import cc.hrva.urlshortener.client.CloudflareHostname;
 import cc.hrva.urlshortener.client.CloudflareResult;
 import cc.hrva.urlshortener.configuration.AsyncExecutorConfiguration;
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
+import cc.hrva.urlshortener.dto.LinkVerdict;
+import cc.hrva.urlshortener.model.enums.BlockReason;
 import cc.hrva.urlshortener.model.enums.CloudflareTokenStatus;
 import cc.hrva.urlshortener.model.enums.CustomDomainStatus;
+import cc.hrva.urlshortener.model.enums.DomainDisableReason;
 import cc.hrva.urlshortener.model.enums.DomainProblem;
 import cc.hrva.urlshortener.repository.CustomDomainReconcileRepository;
 import cc.hrva.urlshortener.repository.CustomDomainReconcileRepository.MissingDomain;
 import cc.hrva.urlshortener.repository.CustomDomainReconcileRepository.ReconcileRun;
 import cc.hrva.urlshortener.repository.CustomDomainRepository;
 import cc.hrva.urlshortener.repository.DomainInCloudflare;
+import cc.hrva.urlshortener.service.LinkCheckService;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.DomainDrift;
 import java.time.Clock;
 import java.time.Duration;
@@ -44,6 +48,7 @@ import org.springframework.transaction.support.TransactionOperations;
 public class CustomDomainReconciler {
 
     private static final int PAGE_SIZE = 50;
+    private static final String HTTPS = "https://";
     private static final int MAX_PAGES = 1000;
     private static final Duration STALE_AFTER = Duration.ofHours(26);
     private static final Duration RUNS_KEPT = Duration.ofDays(30);
@@ -60,6 +65,8 @@ public class CustomDomainReconciler {
     private final CustomDomainReconcileRepository customDomainReconcileRepository;
     private final CustomDomainLifecycle customDomainLifecycle;
     private final CustomDomainHostnames customDomainHostnames;
+    private final LinkCheckService linkCheckService;
+    private final CustomDomainModeration customDomainModeration;
     private final ApplicationEventPublisher eventPublisher;
     private final TransactionOperations transactionOperations;
     private final AppProperties appProperties;
@@ -71,6 +78,7 @@ public class CustomDomainReconciler {
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public void reconcileInBackground() {
         reconcile();
+        checkActiveHostnames();
     }
 
     @Async(AsyncExecutorConfiguration.NOTIFICATION_TASK_EXECUTOR)
@@ -130,6 +138,31 @@ public class CustomDomainReconciler {
                 : new DomainDrift(run.unknownHostnames(), comparison.newlyMissing(), run.cloudflareTotal(),
                         appProperties.getDomains().getFreeAllowance());
         return recorded(run, drift);
+    }
+
+    private void checkActiveHostnames() {
+        final var active = Objects.requireNonNull(transactionOperations.execute(status -> customDomainRepository.findByStatusIn(
+                EnumSet.of(CustomDomainStatus.ACTIVE))));
+        var disabled = 0;
+        for (final var domain : active) {
+            try {
+                if (disableWhenBlocked(domain.getId(), linkCheckService.check(HTTPS + domain.getHostname() + "/"))) {
+                    disabled++;
+                }
+            } catch (final RuntimeException exception) {
+                log.warn("Custom domain hostname check failed domainId={} exception={}", domain.getId(), exception.getClass().getName());
+            }
+        }
+        log.info("Custom domain hostname check active={} disabled={}", active.size(), disabled);
+    }
+
+    private boolean disableWhenBlocked(final long id, final LinkVerdict verdict) {
+        if (verdict.outcome() != LinkVerdict.Outcome.BLOCK) {
+            return false;
+        }
+        final var reason = verdict.blockReason() == BlockReason.DOMAIN_RULE ? DomainDisableReason.DOMAIN_RULE : DomainDisableReason.BLOCKLIST;
+        customDomainModeration.disable(id, reason, verdict.blockDetail());
+        return true;
     }
 
     private Listing listing() {

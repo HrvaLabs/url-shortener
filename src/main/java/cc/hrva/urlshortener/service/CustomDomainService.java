@@ -11,6 +11,7 @@ public interface CustomDomainService {
     MyDomainsResponse mine();
     CustomDomainResponse apply(CustomDomainApplyDto customDomainApplyDto);
     CustomDomainResponse get(long id);
+    CustomDomainResponse retry(long id);
     DomainRemovalResponse remove(long id, DomainLinkMode mode);
 
 }

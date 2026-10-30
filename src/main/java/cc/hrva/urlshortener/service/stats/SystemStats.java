@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.service.stats;
 
+import cc.hrva.urlshortener.dto.domain.CloudflareCheckResponse;
 import cc.hrva.urlshortener.dto.stats.RedisKeyCounts;
 import cc.hrva.urlshortener.dto.stats.SystemStatsResponse;
 import cc.hrva.urlshortener.dto.stats.SystemStatsResponse.ComponentHealth;
@@ -12,6 +13,7 @@ import cc.hrva.urlshortener.repository.stats.HourlySeries;
 import cc.hrva.urlshortener.repository.stats.SystemStatsRepository;
 import cc.hrva.urlshortener.service.blocklist.BlocklistStore;
 import cc.hrva.urlshortener.service.blocklist.BlocklistStore.RedisMemory;
+import cc.hrva.urlshortener.service.domain.CloudflareTokenCheck;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.List;
@@ -44,6 +46,7 @@ public class SystemStats {
     private final HourlyCountRepository hourlyCountRepository;
     private final DailyBuckets dailyBuckets;
     private final Environment environment;
+    private final CloudflareTokenCheck cloudflareTokenCheck;
 
     public SystemStatsResponse collect(final StatsWindow window) {
         final var heap = runtimeMetrics.heap();
@@ -68,7 +71,8 @@ public class SystemStats {
                 health,
                 redisStats(health.redis()),
                 new DatabaseStats(database.product(), database.version(), database.sizeBytes(), shortUrlUniqueIndex.enforced()),
-                dailyBuckets.stack(emails, STATUS_KEYS, window));
+                dailyBuckets.stack(emails, STATUS_KEYS, window),
+                CloudflareCheckResponse.of(cloudflareTokenCheck.current()));
     }
 
     private RedisStats redisStats(final String redisHealth) {

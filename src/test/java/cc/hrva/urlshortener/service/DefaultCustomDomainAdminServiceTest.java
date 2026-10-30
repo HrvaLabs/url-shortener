@@ -5,18 +5,23 @@ import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.dto.domain.CloudflareCheckResponse;
 import cc.hrva.urlshortener.dto.domain.DomainAllowanceDto;
 import cc.hrva.urlshortener.dto.domain.DomainAllowanceResponse;
+import cc.hrva.urlshortener.dto.domain.DomainDisableDto;
+import cc.hrva.urlshortener.dto.domain.DomainRemovalResponse;
 import cc.hrva.urlshortener.dto.domain.DomainOwnerSummary;
 import cc.hrva.urlshortener.dto.domain.DomainReviewDto;
 import cc.hrva.urlshortener.dto.domain.DomainSummaryResponse;
 import cc.hrva.urlshortener.dto.domain.ReconcileResponse;
 import cc.hrva.urlshortener.exception.CustomDomainConflictException;
 import cc.hrva.urlshortener.exception.CustomDomainNotFoundException;
+import cc.hrva.urlshortener.exception.FieldValidationException;
 import cc.hrva.urlshortener.exception.UserNotFoundException;
 import cc.hrva.urlshortener.model.CustomDomain;
 import cc.hrva.urlshortener.model.CustomDomainAllowance;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.enums.CloudflareTokenStatus;
 import cc.hrva.urlshortener.model.enums.CustomDomainStatus;
+import cc.hrva.urlshortener.model.enums.DomainDisableReason;
+import cc.hrva.urlshortener.model.enums.DomainLinkMode;
 import cc.hrva.urlshortener.model.enums.DomainProblem;
 import cc.hrva.urlshortener.repository.CustomDomainAllowanceRepository;
 import cc.hrva.urlshortener.repository.CustomDomainCapLock;
@@ -28,15 +33,20 @@ import cc.hrva.urlshortener.repository.DomainLinkCount;
 import cc.hrva.urlshortener.repository.OwnerLinkCount;
 import cc.hrva.urlshortener.repository.OwnerReviewCount;
 import cc.hrva.urlshortener.repository.UserRepository;
+import cc.hrva.urlshortener.service.alert.AdminAlertEvent.DomainDisabled;
 import cc.hrva.urlshortener.service.domain.AdminDomainResponses;
 import cc.hrva.urlshortener.service.domain.CloudflareTokenCheck;
 import cc.hrva.urlshortener.service.domain.CloudflareTokenCheck.TokenState;
 import cc.hrva.urlshortener.service.domain.CustomDomainChangedEvent;
 import cc.hrva.urlshortener.service.domain.CustomDomainLifecycle;
+import cc.hrva.urlshortener.service.domain.CustomDomainModeration;
 import cc.hrva.urlshortener.service.domain.CustomDomainProvisioner;
 import cc.hrva.urlshortener.service.domain.CustomDomainReconciler;
 import cc.hrva.urlshortener.service.domain.CustomDomainReconciler.QuotaReading;
+import cc.hrva.urlshortener.service.domain.CustomDomainRemoval;
+import cc.hrva.urlshortener.service.domain.CustomDomainRemoval.Actor;
 import cc.hrva.urlshortener.service.domain.CustomDomainResponses;
+import cc.hrva.urlshortener.service.domain.CustomDomainSetup;
 import cc.hrva.urlshortener.service.domain.LifecycleOutcome;
 import cc.hrva.urlshortener.service.impl.DefaultCustomDomainAdminService;
 import jakarta.validation.Validation;
@@ -140,6 +150,9 @@ class DefaultCustomDomainAdminServiceTest {
     @Mock
     private CloudflareClient cloudflareClient;
 
+    @Mock
+    private CustomDomainRemoval customDomainRemoval;
+
     private final User ana = User.builder().id(7L).email("ana@example.com").active(true).createDate(NOW.minusDays(40).plusNanos(5000)).build();
     private final List<String> steps = new ArrayList<>();
     private AppProperties appProperties;
@@ -167,9 +180,13 @@ class DefaultCustomDomainAdminServiceTest {
         lenient().when(customDomainRepository.countSlotsInUse()).thenReturn(3L);
         lenient().doAnswer(invocation -> steps.add("provision")).when(customDomainProvisioner).provisionAsync(anyLong());
         final var responses = new AdminDomainResponses(customDomainRepository, new CustomDomainResponses(appProperties), scammerSignalService, clock);
+        final var transactions = recordingTransactions();
+        final var setup = new CustomDomainSetup(customDomainRepository, customDomainCapLock, cloudflareTokenCheck, customDomainProvisioner,
+                customDomainLifecycle, eventPublisher, transactions, appProperties, clock);
+        final var moderation = new CustomDomainModeration(customDomainRepository, customDomainLifecycle, eventPublisher, transactions, clock);
         customDomainAdminService = new DefaultCustomDomainAdminService(customDomainRepository, customDomainAllowanceRepository,
-                customDomainReconcileRepository, userRepository, customDomainCapLock, cloudflareTokenCheck, customDomainProvisioner, customDomainLifecycle,
-                customDomainReconciler, responses, eventPublisher, recordingTransactions(), appProperties, clock);
+                customDomainReconcileRepository, userRepository, customDomainCapLock, cloudflareTokenCheck, customDomainProvisioner, setup, moderation,
+                customDomainRemoval, customDomainReconciler, responses, eventPublisher, transactions, appProperties, clock);
     }
 
     @Test
@@ -783,6 +800,87 @@ class DefaultCustomDomainAdminServiceTest {
                 .hasMessage("There's nothing to retry for this domain.");
 
         verifyNoInteractions(customDomainProvisioner, eventPublisher);
+    }
+
+    @Test
+    void disableNeedsANote() {
+        assertThat(VALIDATOR.validate(DomainDisableDto.builder().build())).extracting(violation -> violation.getMessage())
+                .containsExactly("Reason is required");
+        assertThat(VALIDATOR.validate(DomainDisableDto.builder().note("   ").build())).extracting(violation -> violation.getMessage())
+                .containsExactly("Reason is required");
+        assertThat(VALIDATOR.validate(DomainDisableDto.builder().note("x".repeat(501)).build())).extracting(violation -> violation.getMessage())
+                .containsExactly("Keep it to 500 characters or fewer");
+        assertThat(VALIDATOR.validate(DomainDisableDto.builder().note("  " + "x".repeat(500) + "  ").build())).isEmpty();
+
+        assertThatThrownBy(() -> customDomainAdminService.disable(ID, "  "))
+                .isInstanceOfSatisfying(FieldValidationException.class,
+                        exception -> assertThat(exception.getFieldErrors()).containsExactly(Map.entry("note", "Reason is required")));
+        verify(customDomainRepository, never()).markDisabled(anyLong(), any(), any(), any(), any());
+    }
+
+    @Test
+    void disableStopsPollingAndKeepsTheSlot() {
+        final var live = domain(CustomDomainStatus.ACTIVE);
+        live.setCloudflareId("cf-1");
+        final var off = domain(CustomDomainStatus.DISABLED);
+        off.setCloudflareId("cf-1");
+        off.setDisabledReason(DomainDisableReason.ADMIN);
+        off.setDisabledNote("Phishing");
+        when(customDomainRepository.findByIdForUpdate(ID)).thenReturn(Optional.of(live));
+        when(customDomainRepository.markDisabled(ID, CustomDomainStatus.ACTIVE, DomainDisableReason.ADMIN, "Phishing", NOW)).thenAnswer(invocation -> {
+            steps.add("markDisabled");
+            return 1;
+        });
+        when(customDomainRepository.findWithOwner(ID)).thenReturn(Optional.of(off));
+
+        final var response = customDomainAdminService.disable(ID, "  Phishing  ");
+
+        assertThat(response.domain().status()).isEqualTo(CustomDomainStatus.DISABLED);
+        assertThat(response.cloudflareId()).isEqualTo("cf-1");
+        assertThat(response.disabledReason()).isEqualTo(DomainDisableReason.ADMIN);
+        assertThat(steps).containsSubsequence("begin", "markDisabled", "commit");
+        verify(eventPublisher).publishEvent(new CustomDomainChangedEvent(ID));
+        verify(eventPublisher).publishEvent(new DomainDisabled(ID, "go.example.com", DomainDisableReason.ADMIN, "Phishing"));
+        verify(customDomainRepository, never()).markDeleted(anyLong(), any(), any());
+        verify(customDomainRepository, never()).clearDeletePending(anyLong(), any());
+        verifyNoInteractions(cloudflareClient, customDomainProvisioner, customDomainLifecycle, customDomainRemoval);
+    }
+
+    @Test
+    void enableChecksAgainAtOnce() {
+        final var off = domain(CustomDomainStatus.DISABLED);
+        off.setCloudflareId("cf-1");
+        off.setDisabledReason(DomainDisableReason.ADMIN);
+        when(customDomainRepository.findByIdForUpdate(ID)).thenReturn(Optional.of(off));
+        when(customDomainRepository.markEnabled(ID, NOW)).thenAnswer(invocation -> {
+            steps.add("markEnabled");
+            return 1;
+        });
+        doAnswer(invocation -> {
+            steps.add("checkNow");
+            return LifecycleOutcome.DONE;
+        }).when(customDomainLifecycle).checkNow(ID);
+        final var waiting = domain(CustomDomainStatus.AWAITING_DNS);
+        waiting.setNextCheckAt(NOW);
+        when(customDomainRepository.findWithOwner(ID)).thenReturn(Optional.of(waiting));
+
+        final var response = customDomainAdminService.enable(ID);
+
+        assertThat(response.domain().status()).isEqualTo(CustomDomainStatus.AWAITING_DNS);
+        assertThat(steps).containsSubsequence("begin", "markEnabled", "commit", "checkNow");
+        verify(eventPublisher).publishEvent(new CustomDomainChangedEvent(ID));
+        verify(customDomainRepository, never()).markEnabledWithoutHostname(anyLong(), any());
+        verifyNoInteractions(customDomainProvisioner, cloudflareTokenCheck);
+    }
+
+    @Test
+    void deleteGoesThroughTheSharedRemovalAsAnAdmin() {
+        final var summary = new DomainRemovalResponse(2, List.of(new DomainRemovalResponse.DomainRename("menu", "k3J9x")), 0);
+        when(customDomainRemoval.remove(ID, DomainLinkMode.MOVE, new Actor(ADMIN, true))).thenReturn(summary);
+
+        assertThat(customDomainAdminService.delete(ID, DomainLinkMode.MOVE, ADMIN)).isEqualTo(summary);
+
+        verifyNoInteractions(cloudflareClient, cloudflareTokenCheck);
     }
 
     @Test

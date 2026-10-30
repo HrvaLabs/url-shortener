@@ -1,6 +1,7 @@
 package cc.hrva.urlshortener.service.stats;
 
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
+import cc.hrva.urlshortener.dto.domain.CloudflareCheckResponse;
 import cc.hrva.urlshortener.dto.stats.CacheStats;
 import cc.hrva.urlshortener.dto.stats.DailyCounts;
 import cc.hrva.urlshortener.dto.stats.RedirectTiming;
@@ -9,6 +10,7 @@ import cc.hrva.urlshortener.dto.stats.RequestCounts;
 import cc.hrva.urlshortener.dto.stats.SystemStatsResponse.ComponentHealth;
 import cc.hrva.urlshortener.dto.stats.SystemStatsResponse.DatabaseStats;
 import cc.hrva.urlshortener.dto.stats.SystemStatsResponse.RedisStats;
+import cc.hrva.urlshortener.model.enums.CloudflareTokenStatus;
 import cc.hrva.urlshortener.repository.ShortUrlUniqueIndex;
 import cc.hrva.urlshortener.repository.stats.HourlyCount;
 import cc.hrva.urlshortener.repository.stats.HourlyCountRepository;
@@ -17,6 +19,8 @@ import cc.hrva.urlshortener.repository.stats.SystemStatsRepository.DatabaseInfo;
 import cc.hrva.urlshortener.service.analytics.AnalyticsDays;
 import cc.hrva.urlshortener.service.blocklist.BlocklistStore;
 import cc.hrva.urlshortener.service.blocklist.BlocklistStore.RedisMemory;
+import cc.hrva.urlshortener.service.domain.CloudflareTokenCheck;
+import cc.hrva.urlshortener.service.domain.CloudflareTokenCheck.TokenState;
 import cc.hrva.urlshortener.service.stats.RuntimeMetrics.JvmHeap;
 import java.time.Clock;
 import java.time.Duration;
@@ -92,6 +96,9 @@ class SystemStatsTest {
     @Mock
     private Environment environment;
 
+    @Mock
+    private CloudflareTokenCheck cloudflareTokenCheck;
+
     private SystemStats systemStats;
 
     @BeforeEach
@@ -101,7 +108,7 @@ class SystemStatsTest {
         appProperties.getAnalytics().setZone(ZoneId.of("Europe/Zagreb"));
         final var statsDays = new StatsDays(new AnalyticsDays(clock, appProperties), clock, ZoneOffset.UTC);
         this.systemStats = new SystemStats(runtimeMetrics, healthStatuses, appVersion, blocklistStore, redisKeyCounter,
-                systemStatsRepository, shortUrlUniqueIndex, hourlyCountRepository, new DailyBuckets(statsDays), environment);
+                systemStatsRepository, shortUrlUniqueIndex, hourlyCountRepository, new DailyBuckets(statsDays), environment, cloudflareTokenCheck);
 
         lenient().when(runtimeMetrics.heap()).thenReturn(new JvmHeap(0, 0));
         lenient().when(runtimeMetrics.startedAt()).thenReturn(STARTED_AT);
@@ -114,6 +121,20 @@ class SystemStatsTest {
         lenient().when(systemStatsRepository.databaseInfo()).thenReturn(POSTGRES);
         lenient().when(blocklistStore.memory()).thenReturn(new RedisMemory(0, 0));
         lenient().when(redisKeyCounter.count()).thenReturn(noKeys());
+        lenient().when(cloudflareTokenCheck.current()).thenReturn(new TokenState(CloudflareTokenStatus.OK, null, null, null));
+    }
+
+    @Test
+    void cloudflareStatusIsShown() {
+        final var checkedAt = LocalDateTime.of(2026, 10, 26, 9, 58, 12);
+        when(cloudflareTokenCheck.current()).thenReturn(new TokenState(CloudflareTokenStatus.NO_PERMISSION, checkedAt,
+                "The token works but can't read custom hostnames on this zone.", 4));
+
+        final var system = systemStats.collect(WINDOW);
+
+        assertThat(system.cloudflare()).isEqualTo(new CloudflareCheckResponse(CloudflareTokenStatus.NO_PERMISSION, checkedAt,
+                "The token works but can't read custom hostnames on this zone."));
+        verify(cloudflareTokenCheck, never()).check();
     }
 
     @Test

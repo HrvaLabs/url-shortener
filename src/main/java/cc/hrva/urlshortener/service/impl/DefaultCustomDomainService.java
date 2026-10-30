@@ -7,6 +7,7 @@ import cc.hrva.urlshortener.dto.domain.CustomDomainResponse;
 import cc.hrva.urlshortener.dto.domain.DomainRemovalResponse;
 import cc.hrva.urlshortener.dto.domain.MyDomainsResponse;
 import cc.hrva.urlshortener.exception.ApiException;
+import cc.hrva.urlshortener.exception.CustomDomainCapacityException;
 import cc.hrva.urlshortener.exception.CustomDomainConflictException;
 import cc.hrva.urlshortener.exception.CustomDomainNotFoundException;
 import cc.hrva.urlshortener.exception.FeatureUnavailableException;
@@ -28,7 +29,10 @@ import cc.hrva.urlshortener.service.domain.CustomDomainHostnames;
 import cc.hrva.urlshortener.service.domain.CustomDomainLifecycle;
 import cc.hrva.urlshortener.service.domain.CustomDomainLimits;
 import cc.hrva.urlshortener.service.domain.CustomDomainProvisioner;
+import cc.hrva.urlshortener.service.domain.CustomDomainRemoval;
+import cc.hrva.urlshortener.service.domain.CustomDomainRemoval.Actor;
 import cc.hrva.urlshortener.service.domain.CustomDomainResponses;
+import cc.hrva.urlshortener.service.domain.CustomDomainSetup;
 import cc.hrva.urlshortener.service.domain.HostnameRefusal;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiter;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiterUnavailableException;
@@ -67,8 +71,8 @@ public class DefaultCustomDomainService implements CustomDomainService {
     private static final String OVER_THE_LIMIT = "You can have %s. Remove one to apply for another.";
     private static final String TAKEN = "This domain has already been applied for.";
     private static final String NOT_FOUND = "Custom domain not found";
-    private static final String CHANGED = "This domain changed. Reload and try again.";
-    private static final String NOT_REMOVABLE_YET = "This domain can't be removed yet.";
+    private static final String NOTHING_TO_RETRY = "There's nothing to retry for this domain.";
+    private static final String CANT_SET_UP_NOW = "We can't set up your domain right now. Try again later.";
     private static final String PUNYCODE_FLAG = "International name (punycode): check it doesn't imitate another domain";
     private static final String PUNYCODE_PREFIX = "xn--";
     private static final String APPLY_LIMIT = "domain-apply:user:";
@@ -89,6 +93,8 @@ public class DefaultCustomDomainService implements CustomDomainService {
     private final CustomDomainResponses customDomainResponses;
     private final CustomDomainLifecycle customDomainLifecycle;
     private final CustomDomainProvisioner customDomainProvisioner;
+    private final CustomDomainSetup customDomainSetup;
+    private final CustomDomainRemoval customDomainRemoval;
     private final LinkCheckService linkCheckService;
     private final AccountLock accountLock;
     private final RateLimiter rateLimiter;
@@ -159,19 +165,30 @@ public class DefaultCustomDomainService implements CustomDomainService {
     }
 
     @Override
-    @Transactional
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    public CustomDomainResponse retry(final long id) {
+        final var domain = Objects.requireNonNull(transactionOperations.execute(status -> ownedDomain(id)));
+        if (!retryable(domain)) {
+            log.info("Custom domain retry refused, there is nothing to retry domainId={} status={}", id, domain.getStatus());
+            throw new CustomDomainConflictException(NOTHING_TO_RETRY);
+        }
+        if (withinCheckLimit(domain.getId())) {
+            try {
+                customDomainSetup.retry(domain);
+            } catch (final CustomDomainCapacityException exception) {
+                log.info("Custom domain retry by its owner refused by the cap or Cloudflare domainId={}", id);
+                throw new CustomDomainConflictException(CANT_SET_UP_NOW);
+            }
+        }
+        return Objects.requireNonNull(transactionOperations.execute(status -> response(ownedDomain(id))));
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public DomainRemovalResponse remove(final long id, final DomainLinkMode mode) {
-        final var domain = ownedDomain(id);
-        if (domain.getStatus() != CustomDomainStatus.PENDING_REVIEW) {
-            throw new CustomDomainConflictException(NOT_REMOVABLE_YET);
-        }
-        if (customDomainRepository.markDeleted(domain.getId(), CustomDomainStatus.PENDING_REVIEW, LocalDateTime.now(clock)) != 1) {
-            log.info("Custom domain application changed before its withdrawal domainId={}", domain.getId());
-            throw new CustomDomainConflictException(CHANGED);
-        }
-        eventPublisher.publishEvent(new CustomDomainChangedEvent(domain.getId()));
-        log.info("Custom domain application withdrawn domainId={}", domain.getId());
-        return DomainRemovalResponse.nothing();
+        final var user = currentUser();
+        Objects.requireNonNull(transactionOperations.execute(status -> ownedDomain(id)));
+        return customDomainRemoval.remove(id, mode, new Actor(user.getEmail(), false));
     }
 
     private CustomDomain insert(final User user, final String hostname, final String reason, final List<String> flags) {
@@ -248,6 +265,11 @@ public class DefaultCustomDomainService implements CustomDomainService {
             log.warn("Custom domain application rate limit unavailable, allowing the request userId={}", user.getId());
             return true;
         }
+    }
+
+    private static boolean retryable(final CustomDomain domain) {
+        return domain.getStatus() == CustomDomainStatus.ERROR
+                || domain.getStatus() == CustomDomainStatus.APPROVED_PROVISIONING && domain.getProblem() == DomainProblem.PROVISIONING_FAILED;
     }
 
     private boolean liveCheckable(final CustomDomain domain) {

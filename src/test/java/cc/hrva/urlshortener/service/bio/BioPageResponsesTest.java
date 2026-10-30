@@ -6,7 +6,9 @@ import cc.hrva.urlshortener.model.BioPage;
 import cc.hrva.urlshortener.model.BioPageButton;
 import cc.hrva.urlshortener.model.CustomDomain;
 import cc.hrva.urlshortener.model.Url;
+import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.enums.BioIcon;
+import cc.hrva.urlshortener.model.enums.BioLinkState;
 import cc.hrva.urlshortener.model.enums.CustomDomainStatus;
 import cc.hrva.urlshortener.repository.BioPageButtonRepository;
 import cc.hrva.urlshortener.repository.LinkReviewRepository;
@@ -29,6 +31,7 @@ import static org.mockito.Mockito.when;
 class BioPageResponsesTest {
 
     private static final Clock CLOCK = Clock.fixed(Instant.parse("2026-10-29T09:00:00Z"), ZoneOffset.UTC);
+    private static final User ANA = User.builder().id(5L).active(true).build();
 
     @Mock
     private BioPageButtonRepository bioPageButtonRepository;
@@ -38,14 +41,15 @@ class BioPageResponsesTest {
 
     private BioPageResponses bioPageResponses;
     private BioPage page;
+    private CustomDomain domain;
 
     @BeforeEach
     void setUp() {
         bioPageResponses = new BioPageResponses(bioPageButtonRepository, linkReviewRepository, CLOCK);
         page = BioPage.builder().id(12L).handle("ana").build();
-        final var domain = CustomDomain.builder().id(7L).hostname("go.example.com").status(CustomDomainStatus.ACTIVE).build();
+        domain = CustomDomain.builder().id(7L).hostname("go.example.com").status(CustomDomainStatus.ACTIVE).build();
         final var onDomain = Url.builder().id(41L).shortUrl("menu").longUrl("https://cafe.example.org/menu").active(true).visits(0L)
-                .domain(domain).build();
+                .owner(ANA).domain(domain).build();
         final var onHrva = Url.builder().id(42L).shortUrl("ana-ig").longUrl("https://instagram.com/ana").active(true).visits(0L).build();
         when(bioPageButtonRepository.findByPageWithUrl(page)).thenReturn(List.of(
                 BioPageButton.builder().id(31L).page(page).url(onDomain).title("Menu").icon(BioIcon.WEBSITE).sortOrder(0).visible(true).build(),
@@ -64,6 +68,17 @@ class BioPageResponsesTest {
         assertThat(json.writeValueAsString(visitor.buttons().get(0))).contains("\"domain\":\"go.example.com\"");
         assertThat(json.writeValueAsString(visitor.buttons().get(1))).doesNotContain("domain");
         assertThat(json.writeValueAsString(editor.buttons().get(1))).doesNotContain("domain");
+    }
+
+    @Test
+    void aButtonToALinkOnATurnedOffDomainIsHiddenFromVisitorsAndMarkedForTheOwner() {
+        domain.setStatus(CustomDomainStatus.DISABLED);
+
+        final var editor = bioPageResponses.editorView(page);
+        final var visitor = bioPageResponses.publicView(page);
+
+        assertThat(editor.buttons()).extracting(BioPageResponse.Button::linkState).containsExactly(BioLinkState.DOMAIN_OFF, BioLinkState.LIVE);
+        assertThat(visitor.buttons()).extracting(PublicBioPageResponse.Button::domain).containsExactly((String) null);
     }
 
 }

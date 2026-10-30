@@ -7,6 +7,7 @@ import cc.hrva.urlshortener.dto.domain.CustomDomainApplyDto;
 import cc.hrva.urlshortener.dto.domain.CustomDomainResponse;
 import cc.hrva.urlshortener.dto.domain.DomainRemovalResponse;
 import cc.hrva.urlshortener.exception.ApiException;
+import cc.hrva.urlshortener.exception.CustomDomainCapacityException;
 import cc.hrva.urlshortener.exception.CustomDomainConflictException;
 import cc.hrva.urlshortener.exception.CustomDomainNotFoundException;
 import cc.hrva.urlshortener.exception.FeatureUnavailableException;
@@ -18,6 +19,7 @@ import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.enums.BlockReason;
 import cc.hrva.urlshortener.model.enums.CustomDomainStatus;
 import cc.hrva.urlshortener.model.enums.DomainLinkMode;
+import cc.hrva.urlshortener.model.enums.DomainProblem;
 import cc.hrva.urlshortener.repository.CustomDomainAllowanceRepository;
 import cc.hrva.urlshortener.repository.CustomDomainRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
@@ -27,7 +29,10 @@ import cc.hrva.urlshortener.service.domain.CustomDomainHostnames;
 import cc.hrva.urlshortener.service.domain.CustomDomainLifecycle;
 import cc.hrva.urlshortener.service.domain.CustomDomainLimits;
 import cc.hrva.urlshortener.service.domain.CustomDomainProvisioner;
+import cc.hrva.urlshortener.service.domain.CustomDomainRemoval;
+import cc.hrva.urlshortener.service.domain.CustomDomainRemoval.Actor;
 import cc.hrva.urlshortener.service.domain.CustomDomainResponses;
+import cc.hrva.urlshortener.service.domain.CustomDomainSetup;
 import cc.hrva.urlshortener.service.impl.DefaultCustomDomainService;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiter;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiterUnavailableException;
@@ -61,6 +66,7 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -117,6 +123,12 @@ class DefaultCustomDomainServiceTest {
     @Mock
     private CustomDomainProvisioner customDomainProvisioner;
 
+    @Mock
+    private CustomDomainSetup customDomainSetup;
+
+    @Mock
+    private CustomDomainRemoval customDomainRemoval;
+
     @Captor
     private ArgumentCaptor<CustomDomain> saved;
 
@@ -146,8 +158,8 @@ class DefaultCustomDomainServiceTest {
         });
         customDomainService = new DefaultCustomDomainService(userService, customDomainRepository, urlRepository,
                 new CustomDomainHostnames(appProperties), new CustomDomainLimits(customDomainRepository, customDomainAllowanceRepository, appProperties),
-                new CustomDomainResponses(appProperties), customDomainLifecycle, customDomainProvisioner, linkCheckService, accountLock, rateLimiter,
-                eventPublisher, TransactionOperations.withoutTransaction(), appProperties, clock);
+                new CustomDomainResponses(appProperties), customDomainLifecycle, customDomainProvisioner, customDomainSetup, customDomainRemoval,
+                linkCheckService, accountLock, rateLimiter, eventPublisher, TransactionOperations.withoutTransaction(), appProperties, clock);
     }
 
     @Test
@@ -393,27 +405,28 @@ class DefaultCustomDomainServiceTest {
     }
 
     @Test
-    void withdrawingAPendingApplicationDeletesNothingInCloudflare() {
+    void withdrawingAPendingApplicationGoesThroughTheRemoval() {
         when(customDomainRepository.findByIdAndOwnerId(12L, 7L)).thenReturn(Optional.of(domain(12L, CustomDomainStatus.PENDING_REVIEW, NOW)));
-        when(customDomainRepository.markDeleted(12L, CustomDomainStatus.PENDING_REVIEW, NOW)).thenReturn(1);
+        when(customDomainRemoval.remove(12L, DomainLinkMode.MOVE, new Actor("ana@example.com", false))).thenReturn(DomainRemovalResponse.nothing());
 
         final var response = customDomainService.remove(12L, DomainLinkMode.MOVE);
 
         assertThat(response).isEqualTo(new DomainRemovalResponse(0, List.of(), 0));
-        verify(customDomainRepository).markDeleted(12L, CustomDomainStatus.PENDING_REVIEW, NOW);
-        verify(eventPublisher).publishEvent(new CustomDomainChangedEvent(12L));
         verifyNoInteractions(cloudflareClient);
     }
 
     @Test
-    void aWithdrawThatLosesARaceIsAConflict() {
-        when(customDomainRepository.findByIdAndOwnerId(12L, 7L)).thenReturn(Optional.of(domain(12L, CustomDomainStatus.PENDING_REVIEW, NOW)));
-        when(customDomainRepository.markDeleted(12L, CustomDomainStatus.PENDING_REVIEW, NOW)).thenReturn(0);
+    void everyStatusOfTheOwnersDomainCanBeRemoved() {
+        final var summary = new DomainRemovalResponse(2, List.of(new DomainRemovalResponse.DomainRename("menu", "k3J9x")), 0);
+        for (final var status : List.of(CustomDomainStatus.APPROVED_PROVISIONING, CustomDomainStatus.AWAITING_DNS, CustomDomainStatus.ACTIVE,
+                CustomDomainStatus.DISABLED, CustomDomainStatus.ERROR, CustomDomainStatus.REJECTED)) {
+            when(customDomainRepository.findByIdAndOwnerId(12L, 7L)).thenReturn(Optional.of(domain(12L, status, NOW)));
+            when(customDomainRemoval.remove(12L, DomainLinkMode.DEACTIVATE, new Actor("ana@example.com", false))).thenReturn(summary);
 
-        assertThatThrownBy(() -> customDomainService.remove(12L, DomainLinkMode.DEACTIVATE))
-                .isInstanceOf(CustomDomainConflictException.class)
-                .hasMessage("This domain changed. Reload and try again.");
-        verifyNoInteractions(eventPublisher);
+            assertThat(customDomainService.remove(12L, DomainLinkMode.DEACTIVATE)).isEqualTo(summary);
+        }
+        verify(customDomainRepository, never()).markDeleted(anyLong(), any(), any());
+        verifyNoInteractions(cloudflareClient);
     }
 
     @Test
@@ -427,18 +440,90 @@ class DefaultCustomDomainServiceTest {
         assertThatThrownBy(() -> customDomainService.remove(13L, DomainLinkMode.DEACTIVATE))
                 .isInstanceOf(CustomDomainNotFoundException.class)
                 .hasMessage(NOT_FOUND);
-        verify(customDomainRepository, never()).markDeleted(anyLong(), any(), any());
+        verifyNoInteractions(customDomainRemoval);
     }
 
     @Test
-    void removingAnApprovedDomainWaitsForItsOwnFlow() {
-        when(customDomainRepository.findByIdAndOwnerId(12L, 7L)).thenReturn(Optional.of(domain(12L, CustomDomainStatus.ACTIVE, NOW)));
+    void theOwnerRetriesAFailedDomain() {
+        final var failed = domain(12L, CustomDomainStatus.ERROR, NOW);
+        failed.setProblem(DomainProblem.PROVISIONING_FAILED);
+        final var retried = domain(12L, CustomDomainStatus.AWAITING_DNS, NOW);
+        when(customDomainRepository.findByIdAndOwnerId(12L, 7L)).thenReturn(Optional.of(failed), Optional.of(retried));
+        when(rateLimiter.tryAcquire("domain-check:domain:12", 1, Duration.ofSeconds(15))).thenReturn(true);
 
-        assertThatThrownBy(() -> customDomainService.remove(12L, DomainLinkMode.DEACTIVATE))
+        final var response = customDomainService.retry(12L);
+
+        assertThat(response.status()).isEqualTo(CustomDomainStatus.AWAITING_DNS);
+        verify(customDomainSetup).retry(failed);
+    }
+
+    @Test
+    void theOwnerCanRetryEveryFailedDomainAndASetupStillBeingRetried() {
+        when(rateLimiter.tryAcquire("domain-check:domain:12", 1, Duration.ofSeconds(15))).thenReturn(true);
+        for (final var problem : List.of(DomainProblem.PROVISIONING_FAILED, DomainProblem.CNAME_REMOVED, DomainProblem.DNS_TIMED_OUT,
+                DomainProblem.CLOUDFLARE_BLOCKED)) {
+            final var failed = domain(12L, CustomDomainStatus.ERROR, NOW);
+            failed.setProblem(problem);
+            when(customDomainRepository.findByIdAndOwnerId(12L, 7L)).thenReturn(Optional.of(failed));
+
+            customDomainService.retry(12L);
+
+            verify(customDomainSetup).retry(failed);
+        }
+        final var retrying = domain(12L, CustomDomainStatus.APPROVED_PROVISIONING, NOW);
+        retrying.setProblem(DomainProblem.PROVISIONING_FAILED);
+        when(customDomainRepository.findByIdAndOwnerId(12L, 7L)).thenReturn(Optional.of(retrying));
+
+        customDomainService.retry(12L);
+
+        verify(customDomainSetup).retry(retrying);
+    }
+
+    @Test
+    void theOwnerHasNothingToRetryOnAnyOtherStatus() {
+        for (final var status : List.of(CustomDomainStatus.PENDING_REVIEW, CustomDomainStatus.APPROVED_PROVISIONING, CustomDomainStatus.AWAITING_DNS,
+                CustomDomainStatus.ACTIVE, CustomDomainStatus.DISABLED, CustomDomainStatus.REJECTED)) {
+            final var row = domain(12L, status, NOW);
+            row.setProblem(status == CustomDomainStatus.AWAITING_DNS ? DomainProblem.DNS_NOT_FOUND : null);
+            when(customDomainRepository.findByIdAndOwnerId(12L, 7L)).thenReturn(Optional.of(row));
+
+            assertThatThrownBy(() -> customDomainService.retry(12L))
+                    .isInstanceOf(CustomDomainConflictException.class)
+                    .hasMessage("There's nothing to retry for this domain.");
+        }
+        when(customDomainRepository.findByIdAndOwnerId(13L, 7L)).thenReturn(Optional.empty());
+        assertThatThrownBy(() -> customDomainService.retry(13L)).isInstanceOf(CustomDomainNotFoundException.class).hasMessage(NOT_FOUND);
+        verifyNoInteractions(customDomainSetup);
+        verify(rateLimiter, never()).tryAcquire(eq("domain-check:domain:12"), eq(1), any(Duration.class));
+    }
+
+    @Test
+    void theOwnerRetryIsRateLimitedLikeCheckNow() {
+        final var failed = domain(12L, CustomDomainStatus.ERROR, NOW);
+        failed.setProblem(DomainProblem.PROVISIONING_FAILED);
+        when(customDomainRepository.findByIdAndOwnerId(12L, 7L)).thenReturn(Optional.of(failed));
+        when(rateLimiter.tryAcquire("domain-check:domain:12", 1, Duration.ofSeconds(15)))
+                .thenReturn(false)
+                .thenThrow(new RateLimiterUnavailableException(new IllegalStateException("redis down")));
+
+        assertThat(customDomainService.retry(12L).status()).isEqualTo(CustomDomainStatus.ERROR);
+        assertThat(customDomainService.retry(12L).status()).isEqualTo(CustomDomainStatus.ERROR);
+
+        verifyNoInteractions(customDomainSetup);
+    }
+
+    @Test
+    void aRetryTheCapOrCloudflareRefusesTellsTheOwnerPlainly() {
+        final var failed = domain(12L, CustomDomainStatus.ERROR, NOW);
+        failed.setProblem(DomainProblem.PROVISIONING_FAILED);
+        when(customDomainRepository.findByIdAndOwnerId(12L, 7L)).thenReturn(Optional.of(failed));
+        when(rateLimiter.tryAcquire("domain-check:domain:12", 1, Duration.ofSeconds(15))).thenReturn(true);
+        doThrow(new CustomDomainCapacityException("Cap reached: 90 of 90 custom domains are in use. Delete one or raise the cap (APP_DOMAINS_MAX_ACTIVE)."))
+                .when(customDomainSetup).retry(failed);
+
+        assertThatThrownBy(() -> customDomainService.retry(12L))
                 .isInstanceOf(CustomDomainConflictException.class)
-                .hasMessage("This domain can't be removed yet.");
-        verify(customDomainRepository, never()).markDeleted(anyLong(), any(), any());
-        verifyNoInteractions(cloudflareClient);
+                .hasMessage("We can't set up your domain right now. Try again later.");
     }
 
     @Test

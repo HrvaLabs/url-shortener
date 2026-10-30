@@ -1,12 +1,18 @@
 package cc.hrva.urlshortener.service.stats;
 
+import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.dto.UrlResponse;
 import cc.hrva.urlshortener.dto.stats.LinksStatsResponse;
 import cc.hrva.urlshortener.dto.stats.LinksStatsResponse.CreatedInRange;
+import cc.hrva.urlshortener.dto.stats.LinksStatsResponse.CustomDomainCounts;
 import cc.hrva.urlshortener.dto.stats.LinksStatsResponse.LinkInventory;
 import cc.hrva.urlshortener.dto.stats.LinksStatsResponse.NewestLink;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.enums.CreatedVia;
+import cc.hrva.urlshortener.model.enums.CustomDomainStatus;
+import cc.hrva.urlshortener.repository.CustomDomainReconcileRepository;
+import cc.hrva.urlshortener.repository.CustomDomainReconcileRepository.ReconcileRun;
+import cc.hrva.urlshortener.repository.CustomDomainRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.stats.HourlyCountRepository;
 import cc.hrva.urlshortener.repository.stats.HourlySeries;
@@ -33,6 +39,9 @@ public class LinksStats {
     private final DailyBuckets dailyBuckets;
     private final UrlRepository urlRepository;
     private final StatsDays statsDays;
+    private final CustomDomainRepository customDomainRepository;
+    private final CustomDomainReconcileRepository customDomainReconcileRepository;
+    private final AppProperties appProperties;
 
     public LinksStatsResponse collect(final StatsWindow window) {
         final var hourly = hourlyCountRepository.count(HourlySeries.LINKS_BY_CHANNEL, window.start(), window.end());
@@ -60,7 +69,20 @@ public class LinksStats {
                 linksStatsRepository.findTopTags(TOP_LIMIT),
                 linksStatsRepository.findTopDomains(TOP_LIMIT),
                 newest,
-                linksStatsRepository.countDeadDestinations());
+                linksStatsRepository.countDeadDestinations(),
+                customDomains());
+    }
+
+    private CustomDomainCounts customDomains() {
+        final var byStatus = linksStatsRepository.countCustomDomainsByStatus();
+        final var settings = appProperties.getDomains();
+        return new CustomDomainCounts(
+                byStatus.getOrDefault(CustomDomainStatus.ACTIVE, 0L),
+                byStatus.getOrDefault(CustomDomainStatus.PENDING_REVIEW, 0L),
+                customDomainRepository.countSlotsInUse(),
+                settings.getMaxActive(),
+                settings.getFreeAllowance(),
+                customDomainReconcileRepository.newest().map(ReconcileRun::cloudflareTotal).orElse(null));
     }
 
     private static NewestLink newestLinkOf(final Url url) {

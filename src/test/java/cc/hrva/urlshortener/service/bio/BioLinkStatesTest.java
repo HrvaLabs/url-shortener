@@ -1,8 +1,11 @@
 package cc.hrva.urlshortener.service.bio;
 
+import cc.hrva.urlshortener.model.CustomDomain;
 import cc.hrva.urlshortener.model.Url;
+import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.enums.BioLinkState;
 import cc.hrva.urlshortener.model.enums.BlockReason;
+import cc.hrva.urlshortener.model.enums.CustomDomainStatus;
 import cc.hrva.urlshortener.model.enums.ThreatType;
 import java.time.LocalDateTime;
 import java.util.function.UnaryOperator;
@@ -18,6 +21,7 @@ import static org.junit.jupiter.params.provider.Arguments.arguments;
 class BioLinkStatesTest {
 
     private static final LocalDateTime NOW = LocalDateTime.of(2026, 10, 26, 9, 0);
+    private static final User ANA = User.builder().id(5L).active(true).build();
 
     @ParameterizedTest(name = "{0}")
     @MethodSource("links")
@@ -53,7 +57,24 @@ class BioLinkStatesTest {
                 arguments(named("noVisitsYetIsBelowTheLimit", (UnaryOperator<Url.UrlBuilder>) link -> link
                         .visits(null).visitLimit(1L)), false, BioLinkState.LIVE),
                 arguments(named("anOpenSystemReviewIsInReview", (UnaryOperator<Url.UrlBuilder>) link -> link
-                        .expirationDate(NOW.plusDays(1)).visitLimit(4L)), true, BioLinkState.IN_REVIEW));
+                        .expirationDate(NOW.plusDays(1)).visitLimit(4L)), true, BioLinkState.IN_REVIEW),
+                arguments(named("aLinkOnAnActiveDomainIsLive", (UnaryOperator<Url.UrlBuilder>) link -> link
+                        .owner(ANA).domain(domain(CustomDomainStatus.ACTIVE))), false, BioLinkState.LIVE),
+                arguments(named("aLinkOnATurnedOffDomainIsHidden", (UnaryOperator<Url.UrlBuilder>) link -> link
+                        .owner(ANA).domain(domain(CustomDomainStatus.DISABLED))), false, BioLinkState.DOMAIN_OFF),
+                arguments(named("aLinkOnARemovedDomainIsHiddenRatherThanTurnedOff", (UnaryOperator<Url.UrlBuilder>) link -> link
+                        .owner(ANA).active(false).domain(domain(CustomDomainStatus.DELETED))), false, BioLinkState.DOMAIN_OFF),
+                arguments(named("aLinkOnADomainThatLostItsRecordIsHidden", (UnaryOperator<Url.UrlBuilder>) link -> link
+                        .owner(ANA).domain(domain(CustomDomainStatus.ERROR))), true, BioLinkState.DOMAIN_OFF),
+                arguments(named("aLinkOnTheDomainOfADeactivatedOwnerIsHidden", (UnaryOperator<Url.UrlBuilder>) link -> link
+                        .owner(User.builder().id(5L).active(false).build()).domain(domain(CustomDomainStatus.ACTIVE))), false, BioLinkState.DOMAIN_OFF),
+                arguments(named("aBlockedLinkOnATurnedOffDomainIsStillBlocked", (UnaryOperator<Url.UrlBuilder>) link -> link
+                        .owner(ANA).blockReason(BlockReason.ADMIN).active(false).domain(domain(CustomDomainStatus.DISABLED))), false,
+                        BioLinkState.BLOCKED));
+    }
+
+    private static CustomDomain domain(final CustomDomainStatus status) {
+        return CustomDomain.builder().id(7L).hostname("go.example.com").status(status).build();
     }
 
 }

@@ -13,6 +13,7 @@ import cc.hrva.urlshortener.mcp.bridge.ConnectRequestStore;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.repository.CustomDomainAllowanceRepository;
 import cc.hrva.urlshortener.repository.CustomDomainRepository;
+import cc.hrva.urlshortener.repository.UrlDomainMoves;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.security.AnyHostIsPrimary;
@@ -21,6 +22,8 @@ import cc.hrva.urlshortener.security.JwtFilter;
 import cc.hrva.urlshortener.security.OAuth2LoginSuccessHandler;
 import cc.hrva.urlshortener.security.TokenProvider;
 import cc.hrva.urlshortener.service.LinkCheckService;
+import cc.hrva.urlshortener.service.ReservedAliasService;
+import cc.hrva.urlshortener.service.UrlService;
 import cc.hrva.urlshortener.service.UserService;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.DomainApplied;
@@ -29,7 +32,10 @@ import cc.hrva.urlshortener.service.domain.CustomDomainHostnames;
 import cc.hrva.urlshortener.service.domain.CustomDomainLifecycle;
 import cc.hrva.urlshortener.service.domain.CustomDomainLimits;
 import cc.hrva.urlshortener.service.domain.CustomDomainProvisioner;
+import cc.hrva.urlshortener.service.domain.CustomDomainRemoval;
 import cc.hrva.urlshortener.service.domain.CustomDomainResponses;
+import cc.hrva.urlshortener.service.domain.CustomDomainSetup;
+import cc.hrva.urlshortener.service.domain.UrlCache;
 import cc.hrva.urlshortener.service.impl.DefaultCustomDomainService;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiter;
 import cc.hrva.urlshortener.service.twostep.AccountLock;
@@ -57,6 +63,8 @@ import org.springframework.boot.persistence.autoconfigure.EntityScan;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.cache.CacheManager;
+import org.springframework.cache.concurrent.ConcurrentMapCacheManager;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.FilterType;
@@ -84,6 +92,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mockingDetails;
@@ -179,6 +188,15 @@ class CustomDomainEndpointSecurityTest {
     @MockitoBean
     private CustomDomainProvisioner customDomainProvisioner;
 
+    @MockitoBean
+    private CustomDomainSetup customDomainSetup;
+
+    @MockitoBean
+    private UrlService urlService;
+
+    @MockitoBean
+    private ReservedAliasService reservedAliasService;
+
     @DynamicPropertySource
     static void signingKey(final DynamicPropertyRegistry registry) {
         registry.add("app.mcp.signing-key", SIGNING_KEY::toJSONString);
@@ -200,6 +218,7 @@ class CustomDomainEndpointSecurityTest {
     void tearDown() {
         appProperties.getDomains().setEnabled(true);
         jdbcTemplate.update("delete from url where domain_id in (select id from custom_domain where owner_id in (?, ?))", ANA, BOB);
+        jdbcTemplate.update("delete from url where owner_id in (?, ?)", ANA, BOB);
         jdbcTemplate.update("delete from custom_domain_allowance where user_id in (?, ?)", ANA, BOB);
         jdbcTemplate.update("delete from custom_domain where owner_id in (?, ?)", ANA, BOB);
         jdbcTemplate.update("delete from user_account_authorities where user_id in (?, ?)", ANA, BOB);
@@ -443,6 +462,87 @@ class CustomDomainEndpointSecurityTest {
     }
 
     @Test
+    void removingAnActiveDomainMovesItsLinksToHrvaAndAnswersTheSummary() throws Exception {
+        final var id = domain(ANA, "go.example.com", "ACTIVE");
+        jdbcTemplate.update("update custom_domain set cloudflare_id = 'cf-1' where id = ?", id);
+        jdbcTemplate.update("insert into url (short_url, long_url, owner_id, domain_id, active) values ('menu', 'https://example.org/menu', ?, ?, true)",
+                ANA, id);
+        jdbcTemplate.update("insert into url (short_url, long_url, owner_id, domain_id, active) values ('cafe', 'https://example.org/cafe', ?, ?, false)",
+                ANA, id);
+        jdbcTemplate.update("insert into url (short_url, long_url, owner_id, active) values ('menu', 'https://example.net/menu', ?, true)", BOB);
+        when(urlService.nextFreeShortUrl(null)).thenReturn("k3J9x");
+
+        mockMvc.perform(as(ANA_TOKEN, delete(DOMAINS + "/" + id).param("links", "MOVE")))
+                .andExpect(status().isOk())
+                .andExpect(content().json("{\"moved\":2,\"renamed\":[{\"from\":\"menu\",\"to\":\"k3J9x\"}],\"deactivated\":0}",
+                        JsonCompareMode.STRICT));
+
+        assertThat(jdbcTemplate.queryForList("select short_url from url where owner_id = ? and domain_id is null order by short_url", String.class, ANA))
+                .containsExactly("cafe", "k3J9x");
+        assertThat(jdbcTemplate.queryForMap("select status, cloudflare_delete_pending from custom_domain where id = ?", id))
+                .containsEntry("STATUS", "DELETED").containsEntry("CLOUDFLARE_DELETE_PENDING", true);
+    }
+
+    @Test
+    void removingAnActiveDomainTurnsItsLinksOffByDefault() throws Exception {
+        final var id = domain(ANA, "go.example.com", "ACTIVE");
+        jdbcTemplate.update("insert into url (short_url, long_url, owner_id, domain_id, active) values ('menu', 'https://example.org/menu', ?, ?, true)",
+                ANA, id);
+
+        mockMvc.perform(as(ANA_TOKEN, delete(DOMAINS + "/" + id)))
+                .andExpect(status().isOk())
+                .andExpect(content().json("{\"moved\":0,\"renamed\":[],\"deactivated\":1}", JsonCompareMode.STRICT));
+        mockMvc.perform(as(ANA_TOKEN, delete(DOMAINS + "/" + id)))
+                .andExpect(status().isNotFound())
+                .andExpect(content().json(NOT_FOUND, JsonCompareMode.STRICT));
+
+        assertThat(jdbcTemplate.queryForList("select active from url where domain_id = ?", Boolean.class, id)).containsExactly(false);
+        assertThat(committedEvents.events()).containsExactly(new CustomDomainChangedEvent(id));
+    }
+
+    @Test
+    void someoneElsesDomainCanNeitherBeRemovedNorRetried() throws Exception {
+        final var id = domain(BOB, "bob.example.org", "ERROR");
+
+        mockMvc.perform(as(ANA_TOKEN, delete(DOMAINS + "/" + id).param("links", "MOVE")))
+                .andExpect(status().isNotFound())
+                .andExpect(content().json(NOT_FOUND, JsonCompareMode.STRICT));
+        mockMvc.perform(as(ANA_TOKEN, post(DOMAINS + "/" + id + "/retry")))
+                .andExpect(status().isNotFound())
+                .andExpect(content().json(NOT_FOUND, JsonCompareMode.STRICT));
+
+        assertThat(statusOf(id)).isEqualTo("ERROR");
+        verifyNoInteractions(customDomainSetup);
+    }
+
+    @Test
+    void theOwnerRetriesAFailedDomain() throws Exception {
+        final var id = domain(ANA, "go.example.com", "ERROR");
+        jdbcTemplate.update("update custom_domain set problem = 'PROVISIONING_FAILED' where id = ?", id);
+
+        mockMvc.perform(post(DOMAINS + "/" + id + "/retry")).andExpect(status().isUnauthorized());
+        mockMvc.perform(as(ANA_TOKEN, post(DOMAINS + "/" + id + "/retry")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(id))
+                .andExpect(jsonPath("$.problem").value("PROVISIONING_FAILED"))
+                .andExpect(jsonPath("$.owner").doesNotExist());
+
+        verify(customDomainSetup).retry(argThat(domain -> domain.getId() == id));
+        verify(rateLimiter).tryAcquire("domain-check:domain:" + id, 1, Duration.ofSeconds(15));
+    }
+
+    @Test
+    void theOwnerHasNothingToRetryOnAWaitingDomain() throws Exception {
+        final var id = domain(ANA, "go.example.com", "AWAITING_DNS");
+
+        mockMvc.perform(as(ANA_TOKEN, post(DOMAINS + "/" + id + "/retry")))
+                .andExpect(status().isConflict())
+                .andExpect(content().json("{\"error\":\"There's nothing to retry for this domain.\"}", JsonCompareMode.STRICT));
+
+        verifyNoInteractions(customDomainSetup);
+    }
+
+    @Test
     void theAlertAndTheChangeGoOutAfterTheApplicationCommits() throws Exception {
         mockMvc.perform(as(ANA_TOKEN, post(DOMAINS)).contentType(MediaType.APPLICATION_JSON).content(APPLICATION))
                 .andExpect(status().isCreated());
@@ -603,6 +703,9 @@ class CustomDomainEndpointSecurityTest {
             CustomDomainHostnames.class,
             CustomDomainLimits.class,
             CustomDomainResponses.class,
+            CustomDomainRemoval.class,
+            UrlDomainMoves.class,
+            UrlCache.class,
             TestApplication.FixedClock.class,
             TestApplication.CommittedEvents.class
     })
@@ -614,6 +717,11 @@ class CustomDomainEndpointSecurityTest {
             @Bean
             Clock clock() {
                 return Clock.fixed(NOW_INSTANT, ZoneOffset.UTC);
+            }
+
+            @Bean
+            CacheManager cacheManager() {
+                return new ConcurrentMapCacheManager("urls");
             }
 
         }

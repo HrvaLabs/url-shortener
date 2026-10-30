@@ -4,6 +4,7 @@ import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.dto.stats.CountEntry;
 import cc.hrva.urlshortener.dto.stats.DailyCounts;
 import cc.hrva.urlshortener.dto.stats.LinksStatsResponse.CreatedInRange;
+import cc.hrva.urlshortener.dto.stats.LinksStatsResponse.CustomDomainCounts;
 import cc.hrva.urlshortener.dto.stats.LinksStatsResponse.DeadDestinationCounts;
 import cc.hrva.urlshortener.dto.stats.LinksStatsResponse.LinkInventory;
 import cc.hrva.urlshortener.dto.stats.LinksStatsResponse.NewestLink;
@@ -12,6 +13,10 @@ import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.enums.BlockReason;
 import cc.hrva.urlshortener.model.enums.CreatedVia;
+import cc.hrva.urlshortener.model.enums.CustomDomainStatus;
+import cc.hrva.urlshortener.repository.CustomDomainReconcileRepository;
+import cc.hrva.urlshortener.repository.CustomDomainReconcileRepository.ReconcileRun;
+import cc.hrva.urlshortener.repository.CustomDomainRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.stats.HourlyCount;
 import cc.hrva.urlshortener.repository.stats.HourlyCountRepository;
@@ -26,6 +31,8 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -60,6 +67,12 @@ class LinksStatsTest {
     @Mock
     private UrlRepository urlRepository;
 
+    @Mock
+    private CustomDomainRepository customDomainRepository;
+
+    @Mock
+    private CustomDomainReconcileRepository customDomainReconcileRepository;
+
     private LinksStats linksStats;
 
     @BeforeEach
@@ -68,7 +81,26 @@ class LinksStatsTest {
         final var appProperties = new AppProperties();
         appProperties.getAnalytics().setZone(ZoneId.of("Europe/Zagreb"));
         final var statsDays = new StatsDays(new AnalyticsDays(clock, appProperties), clock, ZoneOffset.UTC);
-        this.linksStats = new LinksStats(linksStatsRepository, hourlyCountRepository, new DailyBuckets(statsDays), urlRepository, statsDays);
+        this.linksStats = new LinksStats(linksStatsRepository, hourlyCountRepository, new DailyBuckets(statsDays), urlRepository, statsDays,
+                customDomainRepository, customDomainReconcileRepository, appProperties);
+    }
+
+    @Test
+    void customDomainsShowActivePendingSlotsAndTheLastReconcileTotal() {
+        givenCounts(NO_LINKS_CREATED, NO_LINKS);
+        when(linksStatsRepository.countCustomDomainsByStatus()).thenReturn(Map.of(
+                CustomDomainStatus.ACTIVE, 2L, CustomDomainStatus.PENDING_REVIEW, 1L, CustomDomainStatus.DISABLED, 4L));
+        when(customDomainRepository.countSlotsInUse()).thenReturn(3L);
+        when(customDomainReconcileRepository.newest()).thenReturn(Optional.of(new ReconcileRun(STORED_NOW.minusHours(6), 4, 3, List.of(), List.of(), null)));
+
+        assertThat(linksStats.collect(WINDOW).customDomains()).isEqualTo(new CustomDomainCounts(2, 1, 3, 90, 100, 4));
+    }
+
+    @Test
+    void beforeAnyDomainOrReconcileTheCountsAreZeroAndTheTotalUnknown() {
+        givenCounts(NO_LINKS_CREATED, NO_LINKS);
+
+        assertThat(linksStats.collect(WINDOW).customDomains()).isEqualTo(new CustomDomainCounts(0, 0, 0, 90, 100, null));
     }
 
     @Test

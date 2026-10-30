@@ -133,6 +133,12 @@ class CustomDomainLifecycleTest {
     @MockitoBean
     private LinkCheckService linkCheckService;
 
+    @MockitoBean
+    private CustomDomainSetup customDomainSetup;
+
+    @MockitoBean
+    private CustomDomainRemoval customDomainRemoval;
+
     private final Logger lifecycleLogger = (Logger) LoggerFactory.getLogger(CustomDomainLifecycle.class);
     private final ListAppender<ILoggingEvent> logEvents = new ListAppender<>();
 

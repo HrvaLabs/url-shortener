@@ -229,7 +229,7 @@ class AdminStatsSecurityTest {
                     new BioPageViewTotals(0, 0)));
             case "links" -> when(adminStatsService.links(7)).thenReturn(new LinksStatsResponse(7, LocalDate.of(2026, 10, 20),
                     LocalDate.of(2026, 10, 26), new StackedSeries(List.of(), List.of()), new CreatedInRange(0, 0, 0, 0),
-                    new LinkInventory(0, 0, 0, 0, 0, 0, 0, List.of()), List.of(), List.of(), List.of(), null));
+                    new LinkInventory(0, 0, 0, 0, 0, 0, 0, List.of()), List.of(), List.of(), List.of(), null, null));
             case "users" -> when(adminStatsService.users(7)).thenReturn(new UsersStatsResponse(7, LocalDate.of(2026, 10, 20),
                     LocalDate.of(2026, 10, 26), new StackedSeries(List.of(), List.of()), new UserInventory(0, 0, 0, 0, 0, 0, List.of()), 0, 0,
                     new ApiKeyCounts(0, 0, 0, 0), new McpCounts(0, 0), new BioPageCounts(0, 0), null));
@@ -239,7 +239,7 @@ class AdminStatsSecurityTest {
             case "system" -> when(adminStatsService.system(7)).thenReturn(new SystemStatsResponse(7, LocalDate.of(2026, 10, 20),
                     LocalDate.of(2026, 10, 26), "2.9", LocalDateTime.of(2026, 10, 26, 8, 0), "1m", "25", List.of(), 0, 0, List.of(),
                     new RequestCounts(0, 0), CacheStats.of(0, 0), new ComponentHealth("UP", "UP"), new RedisStats(null, null, null),
-                    new DatabaseStats("H2", "2.5.252", null, true), new StackedSeries(List.of(), List.of())));
+                    new DatabaseStats("H2", "2.5.252", null, true), new StackedSeries(List.of(), List.of()), null));
             default -> throw new IllegalArgumentException("No response for the " + tab + " tab");
         }
     }

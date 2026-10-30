@@ -5,11 +5,14 @@ import cc.hrva.urlshortener.dto.domain.AdminDomainResponse;
 import cc.hrva.urlshortener.dto.domain.CloudflareCheckResponse;
 import cc.hrva.urlshortener.dto.domain.DomainAllowanceDto;
 import cc.hrva.urlshortener.dto.domain.DomainAllowanceResponse;
+import cc.hrva.urlshortener.dto.domain.DomainDisableDto;
+import cc.hrva.urlshortener.dto.domain.DomainRemovalResponse;
 import cc.hrva.urlshortener.dto.domain.DomainReviewDto;
 import cc.hrva.urlshortener.dto.domain.DomainSummaryResponse;
 import cc.hrva.urlshortener.dto.domain.ReconcileResponse;
 import cc.hrva.urlshortener.model.enums.AuditAction;
 import cc.hrva.urlshortener.model.enums.CustomDomainStatus;
+import cc.hrva.urlshortener.model.enums.DomainLinkMode;
 import cc.hrva.urlshortener.service.CustomDomainAdminService;
 import io.swagger.v3.oas.annotations.Hidden;
 import io.swagger.v3.oas.annotations.Operation;
@@ -85,6 +88,35 @@ public class AdminCustomDomainController {
     @Audited(AuditAction.RETRY_DOMAIN)
     public ResponseEntity<AdminDomainResponse> retryDomain(@PathVariable("id") final long id) {
         return ResponseEntity.ok(customDomainAdminService.retry(id));
+    }
+
+    @Operation(summary = "Turn a custom domain off", description = "Stops its links redirecting and stops checking it; the domain keeps its "
+            + "links and its Cloudflare hostname. The note is required and the owner sees it.")
+    @PostMapping("/{id}/disable")
+    @PreAuthorize("hasRole('ROLE_ADMIN')")
+    @Audited(AuditAction.DISABLE_DOMAIN)
+    public ResponseEntity<AdminDomainResponse> disableDomain(@PathVariable("id") final long id,
+                                                             @Valid @RequestBody final DomainDisableDto domainDisableDto) {
+        return ResponseEntity.ok(customDomainAdminService.disable(id, domainDisableDto.getNote()));
+    }
+
+    @Operation(summary = "Turn a custom domain on", description = "Checks the domain with Cloudflare again at once; it serves its links as "
+            + "soon as Cloudflare reports it live.")
+    @PostMapping("/{id}/enable")
+    @PreAuthorize("hasRole('ROLE_ADMIN')")
+    @Audited(AuditAction.ENABLE_DOMAIN)
+    public ResponseEntity<AdminDomainResponse> enableDomain(@PathVariable("id") final long id) {
+        return ResponseEntity.ok(customDomainAdminService.enable(id));
+    }
+
+    @Operation(summary = "Remove a custom domain", description = "Removes the domain and queues its Cloudflare hostname for deletion. "
+            + "links=MOVE moves its links to hrva.cc, renaming any alias hrva.cc already has; links=DEACTIVATE (the default) turns them off.")
+    @DeleteMapping("/{id}")
+    @PreAuthorize("hasRole('ROLE_ADMIN')")
+    @Audited(AuditAction.DELETE_DOMAIN)
+    public ResponseEntity<DomainRemovalResponse> deleteDomain(@PathVariable("id") final long id,
+                                                              @RequestParam(name = "links", required = false) final String links) {
+        return ResponseEntity.ok(customDomainAdminService.delete(id, DomainLinkMode.fromParameter(links), signedInAdmin()));
     }
 
     @Operation(summary = "Reconcile with Cloudflare", description = "Compares every Cloudflare custom hostname with ours now and records the run; "

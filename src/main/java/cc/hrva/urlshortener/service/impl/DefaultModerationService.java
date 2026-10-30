@@ -20,6 +20,7 @@ import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.enums.AuditAction;
 import cc.hrva.urlshortener.model.enums.BlockReason;
+import cc.hrva.urlshortener.model.enums.CustomDomainStatus;
 import cc.hrva.urlshortener.model.enums.DomainRuleType;
 import cc.hrva.urlshortener.model.enums.ReviewAction;
 import cc.hrva.urlshortener.model.enums.ReviewResolution;
@@ -37,6 +38,7 @@ import cc.hrva.urlshortener.service.UserService;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent;
 import cc.hrva.urlshortener.service.alert.AlertedLink;
 import cc.hrva.urlshortener.service.blocklist.BlocklistConfigurationChangedEvent;
+import cc.hrva.urlshortener.service.domain.CustomDomainModeration;
 import cc.hrva.urlshortener.service.domain.UrlCache;
 import cc.hrva.urlshortener.service.domain.UrlCacheKeys;
 import cc.hrva.urlshortener.util.DomainNames;
@@ -94,6 +96,7 @@ public class DefaultModerationService implements ModerationService {
     private static final String ACTION = "action";
     private static final String DOMAIN = "domain";
     private static final String REASON = "reason";
+    private static final String DOMAINS = "domains";
     private static final String NOT_A_DOMAIN = "Enter a domain such as example.com, not a top-level domain or an IP address.";
     private static final String OVER_THE_CAP = "This would affect %d links, more than the %d allowed here. Use the dashboard.";
     private static final String NOT_COVERED = "%s doesn't cover this link's destination %s.";
@@ -126,6 +129,7 @@ public class DefaultModerationService implements ModerationService {
     private final TransactionOperations transactionOperations;
     private final ScammerSignalService scammerSignalService;
     private final TaskScheduler taskScheduler;
+    private final CustomDomainModeration customDomainModeration;
 
     @Override
     public UrlResponse blockLink(final long urlId, final BlockReason reason, final String detail, final String performedBy, final String via) {
@@ -139,14 +143,20 @@ public class DefaultModerationService implements ModerationService {
 
     @Override
     public int blockDomain(final String domain, final String reason, final String performedBy, final String via, final Integer maxLinks) {
+        return blockDomainRule(domain, reason, performedBy, via, maxLinks).links();
+    }
+
+    private Affected blockDomainRule(final String domain, final String reason, final String performedBy, final String via, final Integer maxLinks) {
         final var ruleDomain = ruleDomain(domain);
         final var blocked = blockLinksOn(ruleDomain, reason, performedBy, maxLinks);
-        logDomainBlock(ruleDomain, blocked, reason, performedBy, via);
+        logDomainBlock(ruleDomain, blocked.links(), blocked.domains(), reason, performedBy, via);
         return blocked;
     }
 
-    private void logDomainBlock(final String ruleDomain, final int blocked, final String reason, final String performedBy, final String via) {
-        auditLogService.log(performedBy, AuditAction.BLOCK_DOMAIN, TARGET_DOMAIN, ruleDomain, details(via, blocked, field(REASON, reason)));
+    private void logDomainBlock(final String ruleDomain, final int blocked, final int domains, final String reason, final String performedBy,
+                                final String via) {
+        auditLogService.log(performedBy, AuditAction.BLOCK_DOMAIN, TARGET_DOMAIN, ruleDomain,
+                details(via, blocked, field(REASON, reason), domainsField(domains)));
     }
 
     @Override
@@ -225,7 +235,7 @@ public class DefaultModerationService implements ModerationService {
 
     private void logBulkDomainBlock(final String ruleDomain, final int blocked, final String reason, final String performedBy, final String via) {
         try {
-            logDomainBlock(ruleDomain, blocked, reason, performedBy, via);
+            logDomainBlock(ruleDomain, blocked, 0, reason, performedBy, via);
         } catch (final RuntimeException exception) {
             log.warn("Writing the audit entry of a blocked domain failed domain={} links={}", ruleDomain, blocked, exception);
         }
@@ -244,13 +254,13 @@ public class DefaultModerationService implements ModerationService {
     public DomainRuleCreatedResponse createDomainRule(final DomainRuleDto domainRuleDto, final String performedBy, final String via) {
         final var type = Optional.ofNullable(domainRuleDto.type()).orElseThrow(() -> new UrlValidationException(NO_RULE_TYPE));
         final var ruleDomain = ruleDomain(domainRuleDto.domain());
-        final var linksAffected = switch (type) {
-            case BLOCK -> blockDomain(ruleDomain, domainRuleDto.reason(), performedBy, via, null);
-            case ALLOW -> allowDomain(ruleDomain, domainRuleDto.reason(), performedBy, via);
+        final var affected = switch (type) {
+            case BLOCK -> blockDomainRule(ruleDomain, domainRuleDto.reason(), performedBy, via, null);
+            case ALLOW -> new Affected(allowDomain(ruleDomain, domainRuleDto.reason(), performedBy, via), 0);
         };
         final var rule = domainRuleRepository.findByDomain(ruleDomain)
                 .orElseThrow(() -> new DomainRuleNotFoundException("There is no rule for %s.".formatted(ruleDomain)));
-        return new DomainRuleCreatedResponse(DomainRuleResponse.from(rule), linksAffected);
+        return new DomainRuleCreatedResponse(DomainRuleResponse.from(rule), affected.links(), affected.domains());
     }
 
     @Override
@@ -286,8 +296,9 @@ public class DefaultModerationService implements ModerationService {
     public int blockUser(final long userId, final String performedBy, final String via, final Integer maxLinks) {
         final var user = findUser(userId);
         final var blocked = blockLinksOf(user, performedBy, maxLinks);
-        auditLogService.log(performedBy, AuditAction.BLOCK_USER, TARGET_USER, String.valueOf(userId), details(via, blocked));
-        return blocked;
+        auditLogService.log(performedBy, AuditAction.BLOCK_USER, TARGET_USER, String.valueOf(userId),
+                details(via, blocked.links(), domainsField(blocked.domains())));
+        return blocked.links();
     }
 
     @Override
@@ -296,10 +307,12 @@ public class DefaultModerationService implements ModerationService {
         if (userService.reactivate(userId)) {
             log.info("User reactivated id={}", userId);
         }
+        final var domains = customDomainModeration.enableForUser(userId);
         final var restored = eachLink(urlRepository.findIdsByOwnerAndBlockReason(user, BlockReason.USER_BLOCKED), Long::longValue,
                 id -> reactivate(id, url -> url.getBlockReason() == BlockReason.USER_BLOCKED && url.getThreatType() == null));
         scammerSignalService.invalidate();
-        auditLogService.log(performedBy, AuditAction.REACTIVATE_USER, TARGET_USER, String.valueOf(userId), details(via, restored));
+        auditLogService.log(performedBy, AuditAction.REACTIVATE_USER, TARGET_USER, String.valueOf(userId),
+                details(via, restored, domainsField(domains)));
         return restored;
     }
 
@@ -395,7 +408,7 @@ public class DefaultModerationService implements ModerationService {
     private String blockDomainFromReview(final Url url, final String domain, final String performedBy, final String via) {
         final var ruleDomain = domainForReview(url, domain, BLOCKED_BY_DEFAULT);
         final var blocked = blockLinksOn(ruleDomain, null, performedBy, null);
-        return details(via, blocked, field(ACTION, ReviewAction.BLOCK_DOMAIN), field(DOMAIN, ruleDomain));
+        return details(via, blocked.links(), field(ACTION, ReviewAction.BLOCK_DOMAIN), field(DOMAIN, ruleDomain), domainsField(blocked.domains()));
     }
 
     private String blockUserFromReview(final Url url, final String performedBy, final String via) {
@@ -404,7 +417,7 @@ public class DefaultModerationService implements ModerationService {
             throw new UrlValidationException(NO_OWNER);
         }
         final var blocked = blockLinksOf(owner, performedBy, null);
-        return details(via, blocked, field(ACTION, ReviewAction.BLOCK_USER), field("user", owner.getId()));
+        return details(via, blocked.links(), field(ACTION, ReviewAction.BLOCK_USER), field("user", owner.getId()), domainsField(blocked.domains()));
     }
 
     private static String domainForReview(final Url url, final String domain, final UnaryOperator<String> byDefault) {
@@ -426,7 +439,7 @@ public class DefaultModerationService implements ModerationService {
         };
     }
 
-    private int blockLinksOn(final String domain, final String reason, final String performedBy, final Integer maxLinks) {
+    private Affected blockLinksOn(final String domain, final String reason, final String performedBy, final Integer maxLinks) {
         final var rulesBelow = rulesBelow(domain, domainRuleRepository.findAll());
         final var ids = destinationsOn(domain, afterId -> urlRepository.findActiveDestinationsAfter(afterId, FIRST_PAGE)).stream()
                 .filter(destination -> isBlockedBy(domain, rulesBelow, destination.longUrl()))
@@ -434,10 +447,11 @@ public class DefaultModerationService implements ModerationService {
                 .toList();
         refuseOverTheCap(ids.size(), maxLinks);
         saveRule(domain, DomainRuleType.BLOCK, reason, performedBy);
+        final var domains = customDomainModeration.disableMatching(domain, reason);
         final var blocked = new ArrayList<Url>();
         final var count = eachLink(ids, Long::longValue, id -> blockOnDomain(id, domain, rulesBelow, performedBy, blocked::add));
         notifyOwners(blocked);
-        return count;
+        return new Affected(count, domains);
     }
 
     private boolean blockOnDomain(final long urlId, final String domain, final List<DomainRule> rulesBelow, final String performedBy,
@@ -490,7 +504,7 @@ public class DefaultModerationService implements ModerationService {
                 .isEmpty();
     }
 
-    private int blockLinksOf(final User user, final String performedBy, final Integer maxLinks) {
+    private Affected blockLinksOf(final User user, final String performedBy, final Integer maxLinks) {
         if (userRepository.existsByIdAndAuthoritiesName(user.getId(), ROLE_ADMIN)) {
             throw new UrlValidationException(ADMIN_ACCOUNT);
         }
@@ -499,10 +513,11 @@ public class DefaultModerationService implements ModerationService {
         if (!Boolean.FALSE.equals(user.getActive())) {
             userService.deactivate(user);
         }
+        final var domains = customDomainModeration.disableForUser(user.getId(), performedBy);
         final var blocked = eachLink(ids, Long::longValue, id -> block(id, BlockReason.USER_BLOCKED, null, ReviewResolution.USER_BLOCKED, performedBy,
                 url -> url.isActive() && ownedBy(url, user)).isPresent());
         scammerSignalService.invalidate();
-        return blocked;
+        return new Affected(blocked, domains);
     }
 
     private Trusted trust(final String domain, final String reason, final String performedBy) {
@@ -583,20 +598,30 @@ public class DefaultModerationService implements ModerationService {
     private boolean reactivate(final long urlId, final Predicate<Url> stillApplies) {
         final var restored = Optional.ofNullable(transactionOperations.execute(status -> urlRepository.findById(urlId)
                 .filter(url -> !url.isActive() && stillApplies.test(url))
-                .filter(this::aliasIsFree)
+                .filter(url -> domainIsOff(url) || aliasIsFree(url))
                 .map(url -> {
-                    url.setActive(true);
+                    final var turnedOn = !domainIsOff(url);
+                    url.setActive(turnedOn);
                     url.setBlockReason(null);
                     url.setBlockDetail(null);
                     url.setBlockedAt(null);
-                    return urlRepository.save(url);
+                    return new Restored(urlRepository.save(url), turnedOn);
                 })
                 .orElse(null)));
-        restored.ifPresent(url -> {
-            log.info("Link reactivated urlId={}", url.getId());
-            evictNowAndAgainLater(cacheKeyOf(url));
+        restored.ifPresent(link -> {
+            if (link.turnedOn()) {
+                log.info("Link reactivated urlId={}", link.url().getId());
+            } else {
+                log.info("Link block lifted, but the link stays off because its domain isn't active urlId={} domainId={}", link.url().getId(),
+                        link.url().domainId());
+            }
+            evictNowAndAgainLater(cacheKeyOf(link.url()));
         });
-        return restored.isPresent();
+        return restored.map(Restored::turnedOn).orElse(false);
+    }
+
+    private static boolean domainIsOff(final Url url) {
+        return url.getDomain() != null && url.getDomain().getStatus() != CustomDomainStatus.ACTIVE;
     }
 
     private boolean aliasIsFree(final Url url) {
@@ -755,7 +780,17 @@ public class DefaultModerationService implements ModerationService {
         return value == null ? null : name + ": " + value;
     }
 
+    private static String domainsField(final int domains) {
+        return domains > 0 ? field(DOMAINS, domains) : null;
+    }
+
     private record Trusted(int reviews, int links) {
+    }
+
+    private record Affected(int links, int domains) {
+    }
+
+    private record Restored(Url url, boolean turnedOn) {
     }
 
 }

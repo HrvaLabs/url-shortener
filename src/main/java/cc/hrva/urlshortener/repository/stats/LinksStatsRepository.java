@@ -2,9 +2,11 @@ package cc.hrva.urlshortener.repository.stats;
 
 import cc.hrva.urlshortener.dto.stats.CountEntry;
 import cc.hrva.urlshortener.dto.stats.LinksStatsResponse.DeadDestinationCounts;
+import cc.hrva.urlshortener.model.enums.CustomDomainStatus;
 import cc.hrva.urlshortener.util.DomainNames;
 import java.time.LocalDateTime;
 import java.util.Comparator;
+import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -64,6 +66,8 @@ public class LinksStatsRepository {
 
     private static final String FIND_ACTIVE_DESTINATIONS = "select long_url from url where active = true";
 
+    private static final String COUNT_CUSTOM_DOMAINS_BY_STATUS = "select status, count(*) as total_domains from custom_domain group by status";
+
     private final NamedParameterJdbcTemplate jdbcTemplate;
 
     public CreatedCounts countCreated(final LocalDateTime start, final LocalDateTime end) {
@@ -108,6 +112,13 @@ public class LinksStatsRepository {
         return jdbcTemplate.queryForObject(COUNT_DEAD_DESTINATIONS, Map.of(), (row, rowNumber) -> new DeadDestinationCounts(
                 row.getLong("dead_links"),
                 row.getLong("anonymous_dead_links")));
+    }
+
+    public Map<CustomDomainStatus, Long> countCustomDomainsByStatus() {
+        final var counts = new EnumMap<CustomDomainStatus, Long>(CustomDomainStatus.class);
+        jdbcTemplate.query(COUNT_CUSTOM_DOMAINS_BY_STATUS, Map.of(), (RowCallbackHandler) row ->
+                counts.put(CustomDomainStatus.valueOf(row.getString("status")), row.getLong("total_domains")));
+        return counts;
     }
 
     public record CreatedCounts(long total, long anonymous, long aiTagged) {}

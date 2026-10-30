@@ -117,6 +117,12 @@ class CustomDomainApprovalRaceTest {
     @MockitoBean
     private ScammerSignalService scammerSignalService;
 
+    @MockitoBean
+    private CustomDomainModeration customDomainModeration;
+
+    @MockitoBean
+    private CustomDomainRemoval customDomainRemoval;
+
     @BeforeEach
     void setUp() {
         account(ANA, "ana@hrva.cc");
@@ -350,6 +356,7 @@ class CustomDomainApprovalRaceTest {
             CustomDomainResponses.class,
             CustomDomainCapLock.class,
             CustomDomainReconcileRepository.class,
+            CustomDomainSetup.class,
             TestApplication.FixedClock.class,
             TestApplication.CommittedChanges.class
     })

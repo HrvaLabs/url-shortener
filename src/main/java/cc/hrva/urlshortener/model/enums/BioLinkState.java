@@ -7,6 +7,7 @@ public enum BioLinkState {
     DEACTIVATED,
     EXPIRED,
     LIMIT_REACHED,
-    BLOCKED
+    BLOCKED,
+    DOMAIN_OFF
 
 }

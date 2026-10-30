@@ -37,6 +37,9 @@ class AuditedMethodsTest {
             Map.entry("AdminCustomDomainController.approveDomain", AuditAction.APPROVE_DOMAIN),
             Map.entry("AdminCustomDomainController.rejectDomain", AuditAction.REJECT_DOMAIN),
             Map.entry("AdminCustomDomainController.retryDomain", AuditAction.RETRY_DOMAIN),
+            Map.entry("AdminCustomDomainController.disableDomain", AuditAction.DISABLE_DOMAIN),
+            Map.entry("AdminCustomDomainController.enableDomain", AuditAction.ENABLE_DOMAIN),
+            Map.entry("AdminCustomDomainController.deleteDomain", AuditAction.DELETE_DOMAIN),
             Map.entry("AdminCustomDomainController.setAllowance", AuditAction.SET_DOMAIN_ALLOWANCE),
             Map.entry("AdminCustomDomainController.removeAllowance", AuditAction.REMOVE_DOMAIN_ALLOWANCE));
 

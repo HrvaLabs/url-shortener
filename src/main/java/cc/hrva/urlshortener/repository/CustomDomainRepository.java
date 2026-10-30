@@ -4,6 +4,7 @@ import cc.hrva.urlshortener.model.CustomDomain;
 import cc.hrva.urlshortener.model.enums.CustomDomainStatus;
 import cc.hrva.urlshortener.model.enums.DomainDisableReason;
 import cc.hrva.urlshortener.model.enums.DomainProblem;
+import jakarta.persistence.LockModeType;
 import java.time.LocalDateTime;
 import java.util.Collection;
 import java.util.List;
@@ -15,6 +16,7 @@ import org.springframework.data.jpa.domain.Specification;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -67,6 +69,10 @@ public interface CustomDomainRepository extends JpaRepository<CustomDomain, Long
 
     @Query("select d from CustomDomain d left join fetch d.owner where d.id = :id")
     Optional<CustomDomain> findWithOwner(@Param("id") long id);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select d from CustomDomain d where d.id = :id")
+    Optional<CustomDomain> findByIdForUpdate(@Param("id") long id);
 
     @Query("""
             select d from CustomDomain d join d.owner o
@@ -192,6 +198,16 @@ public interface CustomDomainRepository extends JpaRepository<CustomDomain, Long
                 d.disabledAt = null, d.problem = null, d.nextCheckAt = :now, d.updatedAt = :now
             where d.id = :id and d.status = cc.hrva.urlshortener.model.enums.CustomDomainStatus.DISABLED""")
     int markEnabled(@Param("id") long id, @Param("now") LocalDateTime now);
+
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Transactional
+    @Query("""
+            update CustomDomain d
+            set d.status = cc.hrva.urlshortener.model.enums.CustomDomainStatus.ERROR,
+                d.problem = cc.hrva.urlshortener.model.enums.DomainProblem.PROVISIONING_FAILED, d.disabledReason = null, d.disabledNote = null,
+                d.disabledAt = null, d.nextCheckAt = null, d.updatedAt = :now
+            where d.id = :id and d.status = cc.hrva.urlshortener.model.enums.CustomDomainStatus.DISABLED and d.cloudflareId is null""")
+    int markEnabledWithoutHostname(@Param("id") long id, @Param("now") LocalDateTime now);
 
     @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Transactional
