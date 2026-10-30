@@ -838,7 +838,8 @@ class DefaultUserServiceTest {
                 .containsExactly("exportedAt", "profile", "urls", "apiKeys", "emails", "passkeys", "recoveryCodesRemaining", "bioPage",
                         "notifications", "domains");
         assertThat(Arrays.stream(DomainExport.class.getRecordComponents()).map(RecordComponent::getName))
-                .containsExactly("hostname", "status", "reason", "reviewNote", "createdAt", "reviewedAt", "activatedAt", "disabledAt", "deletedAt");
+                .containsExactly("hostname", "status", "reason", "reviewNote", "createdAt", "reviewedAt", "activatedAt", "disabledAt", "deletedAt",
+                        "disabledReason", "disabledNote");
     }
 
     @Test
@@ -849,7 +850,7 @@ class DefaultUserServiceTest {
         when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
         when(userToUserDtoConverter.convert(user)).thenReturn(UserDto.builder().id(1L).email("test@example.com").build());
         final var domain = new DomainExport("go.example.com", CustomDomainStatus.ACTIVE, "Menu links for my cafe", null,
-                LocalDateTime.of(2026, 10, 19, 9, 0), LocalDateTime.of(2026, 10, 20, 9, 0), LocalDateTime.of(2026, 10, 21, 9, 0), null, null);
+                LocalDateTime.of(2026, 10, 19, 9, 0), LocalDateTime.of(2026, 10, 20, 9, 0), LocalDateTime.of(2026, 10, 21, 9, 0), null, null, null, null);
         when(customDomainAccountData.exportFor(user)).thenReturn(List.of(domain));
 
         assertThat(userService.exportMyData().domains()).containsExactly(domain);

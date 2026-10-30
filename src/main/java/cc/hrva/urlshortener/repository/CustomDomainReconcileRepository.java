@@ -3,10 +3,13 @@ package cc.hrva.urlshortener.repository;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.LocalDateTime;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
@@ -36,6 +39,17 @@ public class CustomDomainReconcileRepository {
             fetch first 1 rows only
             """;
 
+    private static final String WITH_LISTS = """
+            select id, unknown_hostnames, missing_domain_ids
+            from custom_domain_reconcile
+            where unknown_hostnames is not null or missing_domain_ids is not null
+            order by id
+            for update
+            """;
+
+    private static final String REWRITE_LISTS =
+            "update custom_domain_reconcile set unknown_hostnames = :unknownHostnames, missing_domain_ids = :missingDomainIds where id = :id";
+
     private static final String DELETE_RAN_BEFORE = "delete from custom_domain_reconcile where ran_at < :cutoff";
 
     private static final String LINE_SEPARATOR = "\n";
@@ -64,6 +78,31 @@ public class CustomDomainReconcileRepository {
 
     public int deleteRanBefore(final LocalDateTime cutoff) {
         return jdbcTemplate.update(DELETE_RAN_BEFORE, Map.of("cutoff", cutoff));
+    }
+
+    public int forgetHostnames(final Collection<String> hostnames) {
+        if (hostnames.isEmpty()) {
+            return 0;
+        }
+        final var forgotten = hostnames.stream().map(hostname -> hostname.toLowerCase(Locale.ROOT)).collect(Collectors.toUnmodifiableSet());
+        var rewritten = 0;
+        for (final var run : jdbcTemplate.queryForList(WITH_LISTS, Map.of())) {
+            final var unknown = lines((String) run.get("unknown_hostnames"));
+            final var missing = lines((String) run.get("missing_domain_ids"));
+            final var keptUnknown = unknown.stream().filter(hostname -> !forgotten.contains(hostname.toLowerCase(Locale.ROOT))).toList();
+            final var keptMissing = missing.stream()
+                    .filter(line -> !forgotten.contains(StringUtils.substringAfter(line, ID_SEPARATOR).toLowerCase(Locale.ROOT)))
+                    .toList();
+            if (keptUnknown.size() == unknown.size() && keptMissing.size() == missing.size()) {
+                continue;
+            }
+            final var parameters = new HashMap<String, Object>();
+            parameters.put("id", run.get("id"));
+            parameters.put("unknownHostnames", joined(keptUnknown));
+            parameters.put("missingDomainIds", joined(keptMissing));
+            rewritten += jdbcTemplate.update(REWRITE_LISTS, parameters);
+        }
+        return rewritten;
     }
 
     private static ReconcileRun run(final ResultSet resultSet, final int row) throws SQLException {

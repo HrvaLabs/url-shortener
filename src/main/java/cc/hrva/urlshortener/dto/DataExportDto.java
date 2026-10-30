@@ -10,6 +10,7 @@ import cc.hrva.urlshortener.model.enums.BioTheme;
 import cc.hrva.urlshortener.model.enums.ChannelType;
 import cc.hrva.urlshortener.model.enums.ConsentSource;
 import cc.hrva.urlshortener.model.enums.CustomDomainStatus;
+import cc.hrva.urlshortener.model.enums.DomainDisableReason;
 import cc.hrva.urlshortener.model.enums.LastDeliveryStatus;
 import cc.hrva.urlshortener.model.enums.NotificationType;
 import cc.hrva.urlshortener.model.enums.PasskeyKind;
@@ -119,6 +120,8 @@ public record DataExportDto(
             LocalDateTime reviewedAt,
             LocalDateTime activatedAt,
             LocalDateTime disabledAt,
-            LocalDateTime deletedAt) {}
+            LocalDateTime deletedAt,
+            DomainDisableReason disabledReason,
+            String disabledNote) {}
 
 }

@@ -527,10 +527,12 @@ class CustomDomainSchemaTest {
         final var bob = savedUser("bob@example.com");
         savedDomain(domain("new.example.com", CustomDomainStatus.PENDING_REVIEW).owner(ana));
         savedDomain(domain("no.example.com", CustomDomainStatus.REJECTED).owner(ana).hostnameKey(null));
-        final var active = savedDomain(domain("go.example.com", CustomDomainStatus.ACTIVE).owner(ana).cloudflareId("cf-1").nextCheckAt(NOW));
+        final var active = savedDomain(domain("go.example.com", CustomDomainStatus.ACTIVE).owner(ana).cloudflareId("cf-1").nextCheckAt(NOW)
+                .reviewNote("Looks fine").reviewedBy("reviewer@hrva.cc").applyFlags(List.of("Registered 3 days ago")));
         final var settingUp = savedDomain(domain("setup.example.com", CustomDomainStatus.APPROVED_PROVISIONING).owner(ana).nextCheckAt(NOW));
         final var queued = savedDomain(domain("queued.example.com", CustomDomainStatus.DELETED).owner(ana).cloudflareId("cf-2")
-                .cloudflareDeletePending(true).deletedAt(NOW.minusDays(1)));
+                .cloudflareDeletePending(true).deletedAt(NOW.minusDays(1)).reviewNote("Fine").reviewedBy("reviewer@hrva.cc")
+                .disabledReason(DomainDisableReason.ADMIN).disabledNote("Phishing"));
         final var finished = savedDomain(domain("finished.example.com", CustomDomainStatus.DELETED).owner(ana).cloudflareId("cf-3").hostnameKey(null)
                 .deletedAt(NOW.minusDays(2)));
         final var bobs = savedDomain(domain("bob.example.com", CustomDomainStatus.PENDING_REVIEW).owner(bob));
@@ -564,6 +566,13 @@ class CustomDomainSchemaTest {
                 .containsEntry("DELETED_AT", timestamp(NOW.minusDays(2)))
                 .containsEntry("CLOUDFLARE_DELETE_PENDING", false)
                 .containsEntry("HOSTNAME_KEY", null);
+
+        assertThat(jdbcTemplate.queryForList("select reason, review_note, reviewed_by, apply_flags, disabled_note from custom_domain where owner_id is null"))
+                .extracting(row -> row.get("REASON"), row -> row.get("REVIEW_NOTE"), row -> row.get("REVIEWED_BY"), row -> row.get("APPLY_FLAGS"),
+                        row -> row.get("DISABLED_NOTE"))
+                .containsOnly(tuple("", null, null, null, null));
+        assertThat(jdbcTemplate.queryForObject("select reason from custom_domain where id = ?", String.class, bobs.getId()))
+                .isEqualTo("Menu links for my cafe");
 
         jdbcTemplate.update("delete from url where domain_id = ?", finished.getId());
         assertThat(customDomainRepository.deleteReleased(released)).isEqualTo(2);
@@ -773,6 +782,25 @@ class CustomDomainSchemaTest {
         assertThat(customDomainReconcileRepository.deleteRanBefore(NOW.minusDays(30))).isOne();
         assertThat(jdbcTemplate.queryForObject("select count(*) from custom_domain_reconcile", Integer.class)).isEqualTo(2);
         assertThat(customDomainReconcileRepository.newest()).contains(three);
+    }
+
+    @Test
+    void forgettingHostnamesRewritesOnlyTheRunsThatNameThem() {
+        customDomainReconcileRepository.insert(new ReconcileRun(NOW.minusDays(2), 5, 3, List.of("GO.example.com", "stray.example.net"),
+                List.of(new MissingDomain(7, "go.example.com"), new MissingDomain(8, "bob.example.com")), null));
+        customDomainReconcileRepository.insert(new ReconcileRun(NOW.minusDays(1), 4, 3, List.of(), List.of(new MissingDomain(9, "old.example.com")),
+                null));
+        customDomainReconcileRepository.insert(new ReconcileRun(NOW, 4, 4, List.of("stray.example.net"), List.of(), null));
+
+        assertThat(customDomainReconcileRepository.forgetHostnames(List.of("go.example.com", "old.example.com"))).isEqualTo(2);
+        assertThat(customDomainReconcileRepository.forgetHostnames(List.of())).isZero();
+
+        assertThat(jdbcTemplate.queryForList("select unknown_hostnames, missing_domain_ids, ours_in_cloudflare from custom_domain_reconcile order by ran_at"))
+                .extracting(row -> row.get("UNKNOWN_HOSTNAMES"), row -> row.get("MISSING_DOMAIN_IDS"), row -> row.get("OURS_IN_CLOUDFLARE"))
+                .containsExactly(
+                        tuple("stray.example.net", "8:bob.example.com", 3),
+                        tuple(null, null, 3),
+                        tuple("stray.example.net", null, 4));
     }
 
     private record CriticalSection(long enteredAt, long leftAt) {

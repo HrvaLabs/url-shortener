@@ -3,6 +3,7 @@ package cc.hrva.urlshortener.service.domain;
 import cc.hrva.urlshortener.dto.DataExportDto.DomainExport;
 import cc.hrva.urlshortener.model.CustomDomain;
 import cc.hrva.urlshortener.model.User;
+import cc.hrva.urlshortener.repository.CustomDomainReconcileRepository;
 import cc.hrva.urlshortener.repository.CustomDomainRepository;
 import cc.hrva.urlshortener.service.twostep.AccountLock;
 import com.google.common.collect.Iterables;
@@ -23,6 +24,7 @@ public class CustomDomainAccountData {
     private static final int IDS_PER_QUERY = 1_000;
 
     private final CustomDomainRepository customDomainRepository;
+    private final CustomDomainReconcileRepository customDomainReconcileRepository;
     private final AccountLock accountLock;
     private final ApplicationEventPublisher eventPublisher;
     private final Clock clock;
@@ -35,6 +37,7 @@ public class CustomDomainAccountData {
 
     public List<Long> releaseFor(final User user) {
         final var owner = accountLock.lock(user);
+        final var hostnames = customDomainRepository.findHostnamesOfOwner(owner.getId());
         final var applications = customDomainRepository.deleteApplicationsOfOwner(owner.getId());
         final var released = customDomainRepository.findIdsOfOwner(owner.getId());
         if (!released.isEmpty()) {
@@ -43,9 +46,10 @@ public class CustomDomainAccountData {
             customDomainRepository.releaseRemovedDomains(owner.getId(), now);
             released.forEach(id -> eventPublisher.publishEvent(new CustomDomainChangedEvent(id)));
         }
+        final var runs = customDomainReconcileRepository.forgetHostnames(hostnames);
         if (applications > 0 || !released.isEmpty()) {
-            log.info("Custom domains released with their account userId={} applicationsDeleted={} domainIds={}", owner.getId(), applications,
-                    released);
+            log.info("Custom domains released with their account userId={} applicationsDeleted={} domainIds={} reconcileRunsRewritten={}",
+                    owner.getId(), applications, released, runs);
         }
         return released;
     }
@@ -71,7 +75,9 @@ public class CustomDomainAccountData {
                 domain.getReviewedAt(),
                 domain.getActivatedAt(),
                 domain.getDisabledAt(),
-                domain.getDeletedAt());
+                domain.getDeletedAt(),
+                domain.getDisabledReason(),
+                CustomDomainResponses.disabledNote(domain.getDisabledReason(), domain.getDisabledNote()));
     }
 
 }

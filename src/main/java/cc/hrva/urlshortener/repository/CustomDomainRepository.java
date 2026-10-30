@@ -250,10 +250,15 @@ public interface CustomDomainRepository extends JpaRepository<CustomDomain, Long
     @Query("select d.id from CustomDomain d where d.owner.id = :ownerId order by d.id")
     List<Long> findIdsOfOwner(@Param("ownerId") long ownerId);
 
+    @Query("select d.hostname from CustomDomain d where d.owner.id = :ownerId order by d.id")
+    List<String> findHostnamesOfOwner(@Param("ownerId") long ownerId);
+
     @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Transactional
     @Query("""
-            update CustomDomain d set d.owner = null, d.updatedAt = :now
+            update CustomDomain d
+            set d.owner = null, d.reason = '', d.reviewNote = null, d.reviewedBy = null, d.applyFlags = null, d.disabledNote = null,
+                d.updatedAt = :now
             where d.owner.id = :ownerId and d.status = cc.hrva.urlshortener.model.enums.CustomDomainStatus.DELETED""")
     int releaseRemovedDomains(@Param("ownerId") long ownerId, @Param("now") LocalDateTime now);
 
@@ -264,7 +269,8 @@ public interface CustomDomainRepository extends JpaRepository<CustomDomain, Long
             set d.status = cc.hrva.urlshortener.model.enums.CustomDomainStatus.DELETED, d.deletedAt = :now, d.nextCheckAt = null,
                 d.cloudflareDeletePending = case when d.cloudflareId is null then false else true end,
                 d.hostnameKey = case when d.cloudflareId is null then null else d.hostnameKey end,
-                d.owner = null, d.updatedAt = :now
+                d.owner = null, d.reason = '', d.reviewNote = null, d.reviewedBy = null, d.applyFlags = null, d.disabledNote = null,
+                d.updatedAt = :now
             where d.owner.id = :ownerId and d.status <> cc.hrva.urlshortener.model.enums.CustomDomainStatus.DELETED""")
     int releaseDomainsAsDeleted(@Param("ownerId") long ownerId, @Param("now") LocalDateTime now);
 

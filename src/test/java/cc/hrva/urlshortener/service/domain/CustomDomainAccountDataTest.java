@@ -5,27 +5,36 @@ import cc.hrva.urlshortener.client.CloudflareResult;
 import cc.hrva.urlshortener.configuration.AppConfiguration;
 import cc.hrva.urlshortener.converter.UserToUserDtoConverter;
 import cc.hrva.urlshortener.converter.UserUpdateDtoToUserConverter;
+import cc.hrva.urlshortener.exception.CustomDomainNotFoundException;
 import cc.hrva.urlshortener.exception.NoAuthorizationException;
 import cc.hrva.urlshortener.mcp.apps.ConnectedAppsService;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.enums.CustomDomainStatus;
+import cc.hrva.urlshortener.model.enums.DomainLinkMode;
 import cc.hrva.urlshortener.repository.ApiKeyRepository;
 import cc.hrva.urlshortener.repository.CustomDomainAllowanceRepository;
+import cc.hrva.urlshortener.repository.CustomDomainReconcileRepository.MissingDomain;
+import cc.hrva.urlshortener.repository.CustomDomainReconcileRepository.ReconcileRun;
+import cc.hrva.urlshortener.repository.CustomDomainReconcileRepository;
 import cc.hrva.urlshortener.repository.CustomDomainRepository;
 import cc.hrva.urlshortener.repository.EmailLogRepository;
 import cc.hrva.urlshortener.repository.PasskeyCredentialRepository;
 import cc.hrva.urlshortener.repository.ResetTokenRepository;
 import cc.hrva.urlshortener.repository.TwoFactorRecoveryCodeRepository;
+import cc.hrva.urlshortener.repository.UrlDomainMoves;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.repository.VerificationTokenRepository;
 import cc.hrva.urlshortener.security.Reauthentication;
+import cc.hrva.urlshortener.service.ReservedAliasService;
 import cc.hrva.urlshortener.service.ResetTokenService;
 import cc.hrva.urlshortener.service.ScammerSignalService;
+import cc.hrva.urlshortener.service.UrlService;
 import cc.hrva.urlshortener.service.UserService;
 import cc.hrva.urlshortener.service.VerificationTokenService;
 import cc.hrva.urlshortener.service.bio.BioAccountData;
 import cc.hrva.urlshortener.service.domain.CustomDomainLifecycle.LifecycleRun;
+import cc.hrva.urlshortener.service.domain.CustomDomainRemoval.Actor;
 import cc.hrva.urlshortener.service.domain.FakeCloudflare.Call;
 import cc.hrva.urlshortener.service.impl.DefaultSendingEmailService;
 import cc.hrva.urlshortener.service.impl.DefaultUserService;
@@ -34,6 +43,7 @@ import cc.hrva.urlshortener.service.notification.NotificationAccountData;
 import cc.hrva.urlshortener.service.twostep.AccountLock;
 import com.zaxxer.hikari.HikariDataSource;
 import java.sql.Timestamp;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
@@ -57,6 +67,8 @@ import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.persistence.autoconfigure.EntityScan;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.cache.CacheManager;
+import org.springframework.cache.concurrent.ConcurrentMapCacheManager;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.FilterType;
@@ -67,6 +79,7 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.event.TransactionalEventListener;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -74,6 +87,8 @@ import tools.jackson.databind.json.JsonMapper;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.tuple;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.when;
 
 @SpringBootTest(
@@ -133,6 +148,21 @@ class CustomDomainAccountDataTest {
 
     @Autowired
     private TestApplication.CommittedChanges committedChanges;
+
+    @Autowired
+    private CustomDomainRemoval customDomainRemoval;
+
+    @Autowired
+    private CustomDomainReconcileRepository customDomainReconcileRepository;
+
+    @MockitoSpyBean
+    private UrlDomainMoves urlDomainMoves;
+
+    @MockitoBean
+    private UrlService urlService;
+
+    @MockitoBean
+    private ReservedAliasService reservedAliasService;
 
     @MockitoBean
     private Reauthentication reauthentication;
@@ -195,6 +225,7 @@ class CustomDomainAccountDataTest {
         jdbcTemplate.update("delete from url");
         jdbcTemplate.update("delete from custom_domain");
         jdbcTemplate.update("delete from custom_domain_allowance");
+        jdbcTemplate.update("delete from custom_domain_reconcile");
         jdbcTemplate.update("delete from api_key where owner_id in (?, ?)", ANA, BOB);
         jdbcTemplate.update("delete from user_account_authorities where user_id in (?, ?)", ANA, BOB);
         jdbcTemplate.update("delete from user_account where id in (?, ?)", ANA, BOB);
@@ -207,9 +238,11 @@ class CustomDomainAccountDataTest {
         set(active, "reviewed_by = 'reviewer@hrva.cc', review_note = 'Looks fine', reviewed_at = ?, activated_at = ?, "
                 + "apply_flags = 'Registered 3 days ago', last_error = 'Cloudflare said no', cloudflare_status = 'active', "
                 + "cloudflare_ssl_status = 'active'", NOW.minusDays(9), NOW.minusDays(8));
+        final var turnedOff = domain(ANA, "off.example.com", CustomDomainStatus.DISABLED, "cf-secret-4", NOW.minusDays(15));
+        set(turnedOff, "disabled_reason = 'ADMIN', disabled_note = 'Phishing reports', disabled_at = ?", NOW.minusDays(14));
         final var removed = domain(ANA, "old.example.com", CustomDomainStatus.DELETED, "cf-secret-2", NOW.minusDays(20));
-        set(removed, "hostname_key = null, reviewed_at = ?, activated_at = ?, disabled_at = ?, deleted_at = ?", NOW.minusDays(19),
-                NOW.minusDays(18), NOW.minusDays(17), NOW.minusDays(16));
+        set(removed, "hostname_key = null, reviewed_at = ?, activated_at = ?, disabled_at = ?, deleted_at = ?, disabled_reason = 'USER_BLOCKED', "
+                + "disabled_note = 'blocked by moderator@hrva.cc'", NOW.minusDays(19), NOW.minusDays(18), NOW.minusDays(17), NOW.minusDays(16));
         final var rejected = domain(ANA, "no.example.com", CustomDomainStatus.REJECTED, null, NOW.minusDays(30));
         set(rejected, "hostname_key = null, review_note = 'Not enough detail', reviewed_at = ?", NOW.minusDays(29));
         domain(BOB, "bob.example.com", CustomDomainStatus.ACTIVE, "cf-secret-3", NOW.minusDays(1));
@@ -220,29 +253,34 @@ class CustomDomainAccountDataTest {
         assertThat(JSON.readTree(json).get("domains").toString()).isEqualTo("""
                 [{"hostname":"go.example.com","status":"ACTIVE","reason":"Menu links for my cafe","reviewNote":"Looks fine",\
                 "createdAt":"2026-10-19T09:00:00","reviewedAt":"2026-10-20T09:00:00","activatedAt":"2026-10-21T09:00:00",\
-                "disabledAt":null,"deletedAt":null},\
+                "disabledAt":null,"deletedAt":null,"disabledReason":null,"disabledNote":null},\
+                {"hostname":"off.example.com","status":"DISABLED","reason":"Menu links for my cafe","reviewNote":null,\
+                "createdAt":"2026-10-14T09:00:00","reviewedAt":null,"activatedAt":null,\
+                "disabledAt":"2026-10-15T09:00:00","deletedAt":null,"disabledReason":"ADMIN","disabledNote":"Phishing reports"},\
                 {"hostname":"old.example.com","status":"DELETED","reason":"Menu links for my cafe","reviewNote":null,\
                 "createdAt":"2026-10-09T09:00:00","reviewedAt":"2026-10-10T09:00:00","activatedAt":"2026-10-11T09:00:00",\
-                "disabledAt":"2026-10-12T09:00:00","deletedAt":"2026-10-13T09:00:00"},\
+                "disabledAt":"2026-10-12T09:00:00","deletedAt":"2026-10-13T09:00:00","disabledReason":"USER_BLOCKED",\
+                "disabledNote":"Turned off because the account was blocked."},\
                 {"hostname":"no.example.com","status":"REJECTED","reason":"Menu links for my cafe","reviewNote":"Not enough detail",\
                 "createdAt":"2026-09-29T09:00:00","reviewedAt":"2026-09-30T09:00:00","activatedAt":null,\
-                "disabledAt":null,"deletedAt":null}]""");
+                "disabledAt":null,"deletedAt":null,"disabledReason":null,"disabledNote":null}]""");
         assertThat(json)
                 .doesNotContain("\"cloudflareId\"", "\"lastError\"", "\"applyFlags\"", "\"reviewedBy\"", "\"cloudflareStatus\"")
                 .doesNotContain("cf-secret-1", "cf-secret-2", "Cloudflare said no", "Registered 3 days ago", "reviewer@hrva.cc")
-                .doesNotContain("bob.example.com");
+                .doesNotContain("bob.example.com", "moderator@hrva.cc");
     }
 
     @Test
     void deletionQueuesTheCloudflareDeleteAndLeavesNoOwner() {
         final var cloudflareId = CLOUDFLARE.store("go.example.com", "active", "active");
         final var active = domain(ANA, "go.example.com", CustomDomainStatus.ACTIVE, cloudflareId, NOW.minusDays(10));
+        set(active, "review_note = 'Looks fine', reviewed_by = 'reviewer@hrva.cc', apply_flags = 'Registered 3 days ago'");
         link(ANA, active, "menu", true);
         link(ANA, active, "drinks", false);
         link(ANA, null, "ana-blog", true);
         jdbcTemplate.update("insert into custom_domain_allowance (user_id, max_domains, reason, granted_by, granted_at) values (?, 3, 'Agency', "
                 + "'admin@localhost', ?)", ANA, NOW.minusDays(5));
-        jdbcTemplate.update("insert into api_key (id, \"KEY\", owner_id, api_calls_used, active) values (9301, 'ana-key', ?, 0, true)", ANA);
+        jdbcTemplate.update("insert into api_key (id, key, owner_id, api_calls_used, active) values (9301, 'ana-key', ?, 0, true)", ANA);
         jdbcTemplate.update("insert into user_account_authorities (user_id, authorities_id) values (?, 1)", ANA);
         registry.reload();
         assertThat(registry.active("go.example.com")).isPresent();
@@ -256,7 +294,11 @@ class CustomDomainAccountDataTest {
                 .containsEntry("CLOUDFLARE_DELETE_PENDING", true)
                 .containsEntry("HOSTNAME_KEY", "go.example.com")
                 .containsEntry("DELETED_AT", Timestamp.valueOf(NOW))
-                .containsEntry("NEXT_CHECK_AT", null);
+                .containsEntry("NEXT_CHECK_AT", null)
+                .containsEntry("REASON", "")
+                .containsEntry("REVIEW_NOTE", null)
+                .containsEntry("REVIEWED_BY", null)
+                .containsEntry("APPLY_FLAGS", null);
         assertThat(CLOUDFLARE.calls()).isEmpty();
         assertThat(count("select count(*) from user_account where id = " + ANA)).isZero();
         assertThat(count("select count(*) from custom_domain_allowance")).isZero();
@@ -304,7 +346,8 @@ class CustomDomainAccountDataTest {
     void anEarlierRemovalKeepsItsQueuedDeleteAndAFinishedOneIsNotQueuedAgain() {
         final var queued = domain(ANA, "queued.example.com", CustomDomainStatus.DELETED, CLOUDFLARE.store("queued.example.com", "active", "active"),
                 NOW.minusDays(10));
-        set(queued, "cloudflare_delete_pending = true, deleted_at = ?", NOW.minusDays(1));
+        set(queued, "cloudflare_delete_pending = true, deleted_at = ?, review_note = 'Fine', disabled_reason = 'ADMIN', disabled_note = 'Phishing'",
+                NOW.minusDays(1));
         final var finished = domain(ANA, "finished.example.com", CustomDomainStatus.DELETED, "cf-gone", NOW.minusDays(20));
         set(finished, "hostname_key = null, deleted_at = ?", NOW.minusDays(2));
         link(ANA, finished, "menu", false);
@@ -316,7 +359,10 @@ class CustomDomainAccountDataTest {
                 .containsEntry("STATUS", "DELETED")
                 .containsEntry("CLOUDFLARE_DELETE_PENDING", true)
                 .containsEntry("HOSTNAME_KEY", "queued.example.com")
-                .containsEntry("DELETED_AT", Timestamp.valueOf(NOW.minusDays(1)));
+                .containsEntry("DELETED_AT", Timestamp.valueOf(NOW.minusDays(1)))
+                .containsEntry("REASON", "")
+                .containsEntry("REVIEW_NOTE", null)
+                .containsEntry("DISABLED_NOTE", null);
         assertThat(count("select count(*) from custom_domain where id = " + finished)).isZero();
 
         assertThat(lifecycle.runOnce()).isEqualTo(new LifecycleRun(0, 0, 1, 0));
@@ -429,6 +475,85 @@ class CustomDomainAccountDataTest {
     }
 
     @Test
+    void deletionForgetsTheAccountsHostnamesInStoredReconcileRuns() {
+        final var active = domain(ANA, "go.example.com", CustomDomainStatus.ACTIVE, "cf-1", NOW.minusDays(10));
+        domain(ANA, "new.example.com", CustomDomainStatus.PENDING_REVIEW, null, NOW.minusDays(1));
+        final var bobs = domain(BOB, "bob.example.com", CustomDomainStatus.ACTIVE, "cf-2", NOW.minusDays(10));
+        customDomainReconcileRepository.insert(new ReconcileRun(NOW.minusDays(2), 3, 1, List.of("new.example.com", "stray.example.net"),
+                List.of(new MissingDomain(active, "go.example.com"), new MissingDomain(bobs, "bob.example.com")), null));
+        customDomainReconcileRepository.insert(new ReconcileRun(NOW.minusDays(1), 2, 2, List.of(), List.of(new MissingDomain(active, "go.example.com")),
+                null));
+
+        userService.deleteUserById(ANA);
+
+        assertThat(jdbcTemplate.queryForList("select unknown_hostnames, missing_domain_ids from custom_domain_reconcile order by ran_at"))
+                .extracting(row -> row.get("UNKNOWN_HOSTNAMES"), row -> row.get("MISSING_DOMAIN_IDS"))
+                .containsExactly(tuple("stray.example.net", bobs + ":bob.example.com"), tuple(null, null));
+    }
+
+    @Test
+    void aRemovalThatHeldTheDomainFirstKeepsItsTimeAndQueuesOneDelete() throws Exception {
+        final var cloudflareId = CLOUDFLARE.store("go.example.com", "active", "active");
+        final var active = domain(ANA, "go.example.com", CustomDomainStatus.ACTIVE, cloudflareId, NOW.minusDays(10));
+        final var removalHoldsTheRow = new CountDownLatch(1);
+        final var finishTheRemoval = new CountDownLatch(1);
+        doAnswer(invocation -> {
+            removalHoldsTheRow.countDown();
+            awaitQuietly(finishTheRemoval);
+            return invocation.callRealMethod();
+        }).when(urlDomainMoves).linksOf(active);
+        final var removal = CompletableFuture.supplyAsync(() -> customDomainRemoval.remove(active, DomainLinkMode.DEACTIVATE,
+                new Actor(ANA_EMAIL, false)));
+        assertThat(removalHoldsTheRow.await(10, TimeUnit.SECONDS)).isTrue();
+        final var deletion = CompletableFuture.runAsync(() -> userService.deleteUserById(ANA));
+
+        assertThatThrownBy(() -> deletion.get(300, TimeUnit.MILLISECONDS)).isInstanceOf(TimeoutException.class);
+        CLOCK.advance(Duration.ofMinutes(1));
+        finishTheRemoval.countDown();
+        removal.get(10, TimeUnit.SECONDS);
+        deletion.get(10, TimeUnit.SECONDS);
+
+        assertThat(row(active))
+                .containsEntry("STATUS", "DELETED")
+                .containsEntry("OWNER_ID", null)
+                .containsEntry("CLOUDFLARE_DELETE_PENDING", true)
+                .containsEntry("DELETED_AT", Timestamp.valueOf(NOW.plusMinutes(1)));
+        assertThat(lifecycle.runOnce()).isEqualTo(new LifecycleRun(0, 0, 1, 0));
+        assertThat(lifecycle.runOnce()).isEqualTo(new LifecycleRun(0, 0, 0, 0));
+        assertThat(CLOUDFLARE.calls()).containsExactly("DELETE " + cloudflareId);
+        assertThat(count("select count(*) from custom_domain")).isZero();
+    }
+
+    @Test
+    void aRemovalThatWaitedForTheDeletionFindsTheDomainGoneAndQueuesNothingMore() throws Exception {
+        final var cloudflareId = CLOUDFLARE.store("go.example.com", "active", "active");
+        final var active = domain(ANA, "go.example.com", CustomDomainStatus.ACTIVE, cloudflareId, NOW.minusDays(10));
+        final var removal = new AtomicReference<CompletableFuture<?>>();
+        when(connectedAppsService.disconnectAll(ANA_EMAIL)).thenAnswer(invocation -> {
+            final var started = new CountDownLatch(1);
+            removal.set(CompletableFuture.runAsync(() -> {
+                started.countDown();
+                customDomainRemoval.remove(active, DomainLinkMode.DEACTIVATE, new Actor(ANA_EMAIL, false));
+            }));
+            assertThat(started.await(10, TimeUnit.SECONDS)).isTrue();
+            assertThatThrownBy(() -> removal.get().get(300, TimeUnit.MILLISECONDS)).isInstanceOf(TimeoutException.class);
+            CLOCK.advance(Duration.ofMinutes(1));
+            return 0;
+        });
+
+        userService.deleteUserById(ANA);
+
+        assertThatThrownBy(() -> removal.get().get(10, TimeUnit.SECONDS)).hasCauseInstanceOf(CustomDomainNotFoundException.class);
+        assertThat(row(active))
+                .containsEntry("STATUS", "DELETED")
+                .containsEntry("OWNER_ID", null)
+                .containsEntry("CLOUDFLARE_DELETE_PENDING", true)
+                .containsEntry("DELETED_AT", Timestamp.valueOf(NOW));
+        assertThat(lifecycle.runOnce()).isEqualTo(new LifecycleRun(0, 0, 1, 0));
+        assertThat(CLOUDFLARE.calls()).containsExactly("DELETE " + cloudflareId);
+    }
+
+    @Test
     void deactivationKeepsEverything() {
         final var cloudflareId = CLOUDFLARE.store("go.example.com", "active", "active");
         final var active = domain(ANA, "go.example.com", CustomDomainStatus.ACTIVE, cloudflareId, NOW.minusDays(10));
@@ -531,6 +656,10 @@ class CustomDomainAccountDataTest {
             CustomDomainLifecycle.class,
             CustomDomainProvisioner.class,
             CustomDomainHostnames.class,
+            CustomDomainRemoval.class,
+            CustomDomainReconcileRepository.class,
+            UrlDomainMoves.class,
+            UrlCache.class,
             TestApplication.Fixed.class,
             TestApplication.CommittedChanges.class
     })
@@ -566,6 +695,11 @@ class CustomDomainAccountDataTest {
             @Bean
             CloudflareClient cloudflareClient() {
                 return CLOUDFLARE;
+            }
+
+            @Bean
+            CacheManager cacheManager() {
+                return new ConcurrentMapCacheManager("urls");
             }
 
         }
