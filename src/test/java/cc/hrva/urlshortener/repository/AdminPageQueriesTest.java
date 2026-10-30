@@ -186,6 +186,26 @@ class AdminPageQueriesTest {
     }
 
     @Test
+    void everyLinkOfAnOwnerLoadsItsDomainWithoutAnotherQuery() {
+        final var owner = userRepository.findAll().stream().filter(user -> user.getEmail().equals("owner0@example.com")).findFirst().orElseThrow();
+        entityManager.clear();
+        statistics.clear();
+        assertThat(urlRepository.findByOwner(owner)).extracting(Url::getDomain).containsOnlyNulls();
+        final var withoutDomains = statistics.getPrepareStatementCount();
+        onDomain(domain("a.example.com"), "s0");
+        onDomain(domain("b.example.com"), "s5");
+        entityManager.flush();
+        entityManager.clear();
+        statistics.clear();
+
+        final var links = urlRepository.findByOwner(owner);
+
+        assertThat(links).extracting(url -> url.getDomain() == null ? null : url.getDomain().getHostname())
+                .containsExactlyInAnyOrder("a.example.com", "b.example.com", null);
+        assertThat(statistics.getPrepareStatementCount()).isEqualTo(withoutDomains).isEqualTo(2);
+    }
+
+    @Test
     void anAdminUserPageLoadsEveryUsersRolesInOneQuery() {
         final var json = JsonMapper.builder().build().writeValueAsString(userRepository.findAll(PageRequest.of(0, 10)).getContent());
 

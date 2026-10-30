@@ -73,6 +73,7 @@ public interface UrlRepository extends JpaRepository<Url, Long>, JpaSpecificatio
     List<Url> findTop20ByBlockedAtAfterAndBlockReasonNotInOrderByBlockedAtDesc(LocalDateTime blockedAfter, Collection<BlockReason> excludedReasons);
     long countByOwnerAndBlockReasonIsNotNull(User owner);
     long countByBlockReasonIsNotNullAndBlockedAtAfter(LocalDateTime blockedAfter);
+    @EntityGraph(attributePaths = {"owner", "domain"}, type = EntityGraph.EntityGraphType.LOAD)
     List<Url> findByOwner(User owner);
     void deleteByOwner(User owner);
 
