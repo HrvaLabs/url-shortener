@@ -51,9 +51,6 @@ The changelog is shown at [app.hrva.cc/changelog](https://app.hrva.cc/changelog)
 - Pages for stats, the review queue, moderation, blocklists, domain rules, reserved aliases, bio pages, custom domains and the audit log.
 - Discord alerts, a weekly summary and a daily decisions email.
 
-## Roadmap
-- **Notifications for link owners:** opt-in alerts by Discord, Slack, Telegram, ntfy, a signed webhook or email. Nothing is sent without consent.
-
 ## Technologies Used
 - **Backend:** Java 25, Spring Boot 4.1, Spring Security and Spring Authorization Server, Spring AI (MCP)
 - **Database:** PostgreSQL with Liquibase migrations, and Redis

@@ -71,11 +71,11 @@ public class CustomDomainAccountData {
                 domain.getStatus(),
                 domain.getReason(),
                 domain.getReviewNote(),
-                domain.getCreatedAt(),
-                domain.getReviewedAt(),
-                domain.getActivatedAt(),
-                domain.getDisabledAt(),
-                domain.getDeletedAt(),
+                CustomDomainResponses.seconds(domain.getCreatedAt()),
+                CustomDomainResponses.seconds(domain.getReviewedAt()),
+                CustomDomainResponses.seconds(domain.getActivatedAt()),
+                CustomDomainResponses.seconds(domain.getDisabledAt()),
+                CustomDomainResponses.seconds(domain.getDeletedAt()),
                 domain.getDisabledReason(),
                 CustomDomainResponses.disabledNote(domain.getDisabledReason(), domain.getDisabledNote()));
     }

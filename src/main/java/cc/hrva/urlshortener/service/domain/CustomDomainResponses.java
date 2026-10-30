@@ -82,7 +82,7 @@ public class CustomDomainResponses {
         return CustomDomainHostnames.hostnameKey(target).orElse(target);
     }
 
-    private static LocalDateTime seconds(final LocalDateTime time) {
+    static LocalDateTime seconds(final LocalDateTime time) {
         return time == null ? null : time.truncatedTo(ChronoUnit.SECONDS);
     }
 

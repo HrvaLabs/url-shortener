@@ -271,6 +271,21 @@ class CustomDomainAccountDataTest {
     }
 
     @Test
+    void exportTimesAreTruncatedToSeconds() {
+        final var removed = domain(ANA, "old.example.com", CustomDomainStatus.DELETED, null, NOW.minusDays(20));
+        set(removed, "hostname_key = null, created_at = ?, reviewed_at = ?, activated_at = ?, disabled_at = ?, deleted_at = ?",
+                NOW.minusDays(20).plusNanos(108_210_000), NOW.minusDays(19).plusNanos(501_909_000), NOW.minusDays(18).plusNanos(974_990_000),
+                NOW.minusDays(17).plusNanos(1_000), NOW.minusDays(16).plusNanos(681_588_000));
+        signedIn();
+
+        final var json = JSON.writeValueAsString(userService.exportMyData());
+
+        assertThat(JSON.readTree(json).get("domains").get(0).toString()).contains(
+                "\"createdAt\":\"2026-10-09T09:00:00\"", "\"reviewedAt\":\"2026-10-10T09:00:00\"", "\"activatedAt\":\"2026-10-11T09:00:00\"",
+                "\"disabledAt\":\"2026-10-12T09:00:00\"", "\"deletedAt\":\"2026-10-13T09:00:00\"");
+    }
+
+    @Test
     void deletionQueuesTheCloudflareDeleteAndLeavesNoOwner() {
         final var cloudflareId = CLOUDFLARE.store("go.example.com", "active", "active");
         final var active = domain(ANA, "go.example.com", CustomDomainStatus.ACTIVE, cloudflareId, NOW.minusDays(10));

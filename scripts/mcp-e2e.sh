@@ -27,7 +27,7 @@
 # as --app.cloudflare.api-base, so the real Cloudflare API is never called: an application and the refusals, the token
 # check, approval and the automatic setup, the CNAME seen, links on the domain beside the same alias on the primary host,
 # the Host header routing and its 404s, turning the domain off and on, the removal with its links moved and the queued
-# Cloudflare delete, the two emails (a MailHog container on a random port is the app's SMTP server) and the export.
+# Cloudflare delete, the three emails (a Mailpit container on a random port is the app's SMTP server) and the export.
 #
 #   scripts/mcp-e2e.sh                         builds the jar, then runs every step
 #   MCP_E2E_SKIP_BUILD=1 scripts/mcp-e2e.sh    reuses target/url-shortener-*.jar
@@ -88,6 +88,10 @@ cleanup() {
     if (( status != 0 )) && [[ -s $WORK/app.log ]]; then
         echo "--- last 60 lines of the app log"
         tail -n 60 "$WORK/app.log" | redact
+    fi
+    if (( status != 0 )) && [[ -s $WORK/fake-cloudflare.log ]]; then
+        echo "--- last 20 lines of the fake Cloudflare log"
+        tail -n 20 "$WORK/fake-cloudflare.log"
     fi
     rm -rf "$WORK"
     exit "$status"
@@ -274,14 +278,14 @@ docker run -d --rm --name "$POSTGRES_CONTAINER" --label hrva-mcp-e2e \
     -e POSTGRES_USER="$DB_USER" -e POSTGRES_PASSWORD="$DB_PASSWORD" -e POSTGRES_DB=url_shortener \
     -p 127.0.0.1::5432 postgres:18 >/dev/null
 docker run -d --rm --name "$REDIS_CONTAINER" --label hrva-mcp-e2e -p 127.0.0.1::6379 redis:8 >/dev/null
-docker run -d --rm --name "$MAIL_CONTAINER" --label hrva-mcp-e2e -p 127.0.0.1::1025 mailhog/mailhog >/dev/null
+docker run -d --rm --name "$MAIL_CONTAINER" --label hrva-mcp-e2e -p 127.0.0.1::1025 axllent/mailpit >/dev/null
 POSTGRES_PORT=$(host_port "$POSTGRES_CONTAINER" 5432)
 REDIS_PORT=$(host_port "$REDIS_CONTAINER" 6379)
 MAIL_PORT=$(host_port "$MAIL_CONTAINER" 1025)
 wait_until 60 "Postgres" docker exec "$POSTGRES_CONTAINER" pg_isready -q -h 127.0.0.1 -U "$DB_USER" -d url_shortener
 wait_until 30 "Redis" docker exec "$REDIS_CONTAINER" redis-cli ping
-wait_until 30 "MailHog" bash -c "exec 3<>/dev/tcp/127.0.0.1/$MAIL_PORT"
-echo "  containers $RUN_ID-{postgres,redis,mail}: Postgres 18 on 127.0.0.1:$POSTGRES_PORT, Redis 8 on 127.0.0.1:$REDIS_PORT, MailHog SMTP on 127.0.0.1:$MAIL_PORT"
+wait_until 30 "Mailpit" bash -c "exec 3<>/dev/tcp/127.0.0.1/$MAIL_PORT"
+echo "  containers $RUN_ID-{postgres,redis,mail}: Postgres 18 on 127.0.0.1:$POSTGRES_PORT, Redis 8 on 127.0.0.1:$REDIS_PORT, Mailpit SMTP on 127.0.0.1:$MAIL_PORT"
 
 CF_PORT=$(python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')
 python3 "$SCRIPT_DIR/mcp-e2e/fake-cloudflare.py" --port "$CF_PORT" 2>"$WORK/fake-cloudflare.log" &
@@ -1327,15 +1331,19 @@ expect_eq "$(psql_value "select status || ' ' || (hostname_key is null) from cus
 
 echo "  --- emails and the export"
 domain_emails_sent() {
-    [[ $(email_statuses "Your domain $DOMAIN_HOST is approved: one step left") == SENT && $(email_statuses "Your domain $DOMAIN_HOST was removed") == SENT ]]
+    [[ $(email_statuses "Your domain $DOMAIN_HOST is approved: one step left") == SENT \
+        && $(email_statuses "Your domain $DOMAIN_HOST was turned off") == SENT \
+        && $(email_statuses "Your domain $DOMAIN_HOST was removed") == SENT ]]
 }
-wait_until 30 "the approved and removed emails" domain_emails_sent
+wait_until 30 "the approved, turned off and removed emails" domain_emails_sent
 psql_query "select subject, status from email_log where subject like 'Your domain%' order by id;"
-ok "email_log: the approved and removed emails are SENT (MailHog took them)"
+ok "email_log: the approved, turned off and removed emails are SENT (Mailpit took them)"
 http -H "Authorization: Bearer $DOMAIN_JWT" "$BASE/api/v1/users/me/export"
 show "GET /api/v1/users/me/export .domains -> $(jq -c .domains <<<"$HTTP_BODY")"
 expect_eq "$HTTP_STATUS $(jq -r '.domains | length' <<<"$HTTP_BODY")" "200 1" "the export lists the domain"
 expect_eq "$(jq -r '.domains[0] | [has("cloudflareId"), has("lastError"), has("applyFlags")] | any' <<<"$HTTP_BODY")" false \
     "with no Cloudflare id, last error or apply flags"
+expect_eq "$(jq -r '.domains[0] | [has("disabledReason"), has("disabledNote")] | all' <<<"$HTTP_BODY")" true \
+    "and with disabledReason and disabledNote (null once turned on again)"
 
 section "Done: every step passed"
