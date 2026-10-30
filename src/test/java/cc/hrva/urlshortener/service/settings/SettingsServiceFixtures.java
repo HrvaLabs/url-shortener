@@ -48,7 +48,7 @@ public final class SettingsServiceFixtures {
         lenient().when(appSettingRepository.findById(anyString())).thenAnswer(invocation -> Optional.ofNullable(rows.get(invocation.<String>getArgument(0))));
         lenient().when(appSettingRepository.save(any(AppSetting.class))).thenAnswer(invocation -> store(rows, invocation.getArgument(0)));
         lenient().doAnswer(invocation -> rows.remove(invocation.<String>getArgument(0))).when(appSettingRepository).deleteById(anyString());
-        return new DefaultSettingsService(appSettingRepository, new SettingDefaults(appProperties, oAuthProviders), mock(AuditLogService.class),
+        return new DefaultSettingsService(appSettingRepository, new SettingDefaults(appProperties, oAuthProviders), appProperties, mock(AuditLogService.class),
                 mock(ApplicationEventPublisher.class), TransactionOperations.withoutTransaction(), Clock.systemUTC());
     }
 

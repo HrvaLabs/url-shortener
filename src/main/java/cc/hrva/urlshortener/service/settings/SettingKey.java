@@ -94,7 +94,9 @@ public enum SettingKey {
     WARNING_PAGE(SettingGroup.SAFETY, "Warning page before risky links without an account",
             "Shows the destination first for young or random-looking domains.", null, true),
     WARNING_PAGE_MAX_AGE_DAYS(SettingGroup.SAFETY, "Warning page: maximum domain age",
-            "Domains known to be younger than this get the page.", WARNING_PAGE, 30, 3650, "days");
+            "Domains known to be younger than this get the page.", WARNING_PAGE, 30, 3650, "days"),
+    HUMAN_CHECK(SettingGroup.SAFETY, "Human check on links without an account",
+            "A Cloudflare Turnstile check on the homepage, /qr, /utm and /share.", null, true);
 
     private final SettingGroup group;
     private final SettingType type;

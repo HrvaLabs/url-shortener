@@ -13,8 +13,10 @@ import cc.hrva.urlshortener.dto.UrlResponse;
 import cc.hrva.urlshortener.dto.UrlSearchDto;
 import cc.hrva.urlshortener.dto.UrlUpdateDto;
 import cc.hrva.urlshortener.exception.FieldValidationException;
+import cc.hrva.urlshortener.exception.HumanCheckUnavailableException;
 import cc.hrva.urlshortener.exception.RateLimitExceededException;
 import cc.hrva.urlshortener.exception.UrlNotFoundException;
+import cc.hrva.urlshortener.exception.UrlValidationException;
 import cc.hrva.urlshortener.model.CustomDomain;
 import cc.hrva.urlshortener.model.PeekUrl;
 import cc.hrva.urlshortener.model.Url;
@@ -105,7 +107,7 @@ class UrlControllerTest {
     void shouldSaveUrl() throws Exception {
         final var url = Url.builder().id(1L).longUrl("https://example.com").shortUrl("ex").build();
         when(clientIpResolver.getClientIp(request)).thenReturn("203.0.113.7");
-        when(urlService.saveUrlRouting(any(CreateUrlDto.class), eq("203.0.113.7"), any())).thenReturn(UrlResponse.from(url));
+        when(urlService.saveUrlRouting(any(CreateUrlDto.class), eq("203.0.113.7"), any(), any())).thenReturn(UrlResponse.from(url));
 
         mockMvc.perform(post("/api/v1/urls")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -138,7 +140,7 @@ class UrlControllerTest {
                         .content(objectMapper.writeValueAsString(link)))
                 .andExpect(status().isOk());
 
-        verify(urlService).saveUrlRouting(link, "203.0.113.7", CreatedVia.WEB);
+        verify(urlService).saveUrlRouting(link, "203.0.113.7", CreatedVia.WEB, null);
         verify(urlService, never()).saveUrlWithApiKey(any(), any(), any());
     }
 
@@ -153,7 +155,61 @@ class UrlControllerTest {
                 .andExpect(status().isOk());
 
         verify(urlService).saveUrlWithApiKey(link, "k", CreatedVia.API_KEY);
-        verify(urlService, never()).saveUrlRouting(any(), any(), any());
+        verify(urlService, never()).saveUrlRouting(any(), any(), any(), any());
+    }
+
+    @Test
+    void theHumanCheckHeaderReachesTheService() throws Exception {
+        final var link = CreateUrlDto.builder().longUrl("https://example.com").build();
+        when(clientIpResolver.getClientIp(request)).thenReturn("203.0.113.7");
+
+        mockMvc.perform(post("/api/v1/urls")
+                        .header("X-Turnstile-Token", "XXXX.DUMMY.TOKEN.XXXX")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(link)))
+                .andExpect(status().isOk());
+
+        verify(urlService).saveUrlRouting(link, "203.0.113.7", CreatedVia.WEB, "XXXX.DUMMY.TOKEN.XXXX");
+    }
+
+    @Test
+    void theHumanCheckHeaderIsIgnoredWithAnApiKey() throws Exception {
+        final var link = CreateUrlDto.builder().longUrl("https://example.com").build();
+
+        mockMvc.perform(post("/api/v1/urls")
+                        .header("X-Api-Key", "k")
+                        .header("X-Turnstile-Token", "XXXX.DUMMY.TOKEN.XXXX")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(link)))
+                .andExpect(status().isOk());
+
+        verify(urlService).saveUrlWithApiKey(link, "k", CreatedVia.API_KEY);
+        verify(urlService, never()).saveUrlRouting(any(), any(), any(), any());
+    }
+
+    @Test
+    void aRefusedHumanCheckIsA400WithTheText() throws Exception {
+        when(urlService.saveUrlRouting(any(CreateUrlDto.class), any(), any(), any()))
+                .thenThrow(new UrlValidationException("Complete the check and try again."));
+
+        mockMvc.perform(post("/api/v1/urls")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(CreateUrlDto.builder().longUrl("https://example.com").build())))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("Complete the check and try again."));
+    }
+
+    @Test
+    void aHumanCheckThatCannotRunIsA503WithTheText() throws Exception {
+        when(urlService.saveUrlRouting(any(CreateUrlDto.class), any(), any(), any()))
+                .thenThrow(new HumanCheckUnavailableException("We couldn't run the check. Try again in a minute."));
+
+        mockMvc.perform(post("/api/v1/urls")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(CreateUrlDto.builder().longUrl("https://example.com").build())))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.error").value("We couldn't run the check. Try again in a minute."))
+                .andExpect(jsonPath("$.length()").value(1));
     }
 
     @Test
@@ -209,7 +265,7 @@ class UrlControllerTest {
     @Test
     void aCreateRefusedByTheRateLimitIsA429WithTheReason() throws Exception {
         when(clientIpResolver.getClientIp(request)).thenReturn("203.0.113.7");
-        when(urlService.saveUrlRouting(any(CreateUrlDto.class), eq("203.0.113.7"), any()))
+        when(urlService.saveUrlRouting(any(CreateUrlDto.class), eq("203.0.113.7"), any(), any()))
                 .thenThrow(new RateLimitExceededException("You've created a lot of links in a short time. Try again in an hour."));
 
         mockMvc.perform(post("/api/v1/urls")
@@ -244,7 +300,7 @@ class UrlControllerTest {
     @Test
     void aDestinationOf2048CharactersIsAccepted() throws Exception {
         final var destination = "https://example.com/" + "a".repeat(2028);
-        when(urlService.saveUrlRouting(any(CreateUrlDto.class), any(), any()))
+        when(urlService.saveUrlRouting(any(CreateUrlDto.class), any(), any(), any()))
                 .thenReturn(UrlResponse.from(Url.builder().id(1L).longUrl(destination).shortUrl("ex").build()));
 
         mockMvc.perform(post("/api/v1/urls")

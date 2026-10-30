@@ -36,6 +36,7 @@ import cc.hrva.urlshortener.repository.specification.UrlSpecification;
 import cc.hrva.urlshortener.service.ApiKeyService;
 import cc.hrva.urlshortener.service.BurstAlertService;
 import cc.hrva.urlshortener.service.CampaignService;
+import cc.hrva.urlshortener.service.HumanCheckService;
 import cc.hrva.urlshortener.service.ClickAnalyticsService;
 import cc.hrva.urlshortener.service.ClickCheckService;
 import cc.hrva.urlshortener.service.RedirectChainService;
@@ -177,10 +178,12 @@ public class DefaultUrlService implements UrlService {
     private final PlatformTransactionManager transactionManager;
     private final AnonymousLinkSignals anonymousLinkSignals;
     private final TemplateEngine templateEngine;
+    private final HumanCheckService humanCheckService;
 
     @Override
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
-    public UrlResponse saveUrlRouting(final @Valid CreateUrlDto createUrlDto, final String clientIP, final CreatedVia createdVia) {
+    public UrlResponse saveUrlRouting(final @Valid CreateUrlDto createUrlDto, final String clientIP, final CreatedVia createdVia,
+            final String humanCheckToken) {
         final var url = createUrlToUrlConverter.convert(createUrlDto);
         final var currentUser = userService.getUserFromToken();
 
@@ -193,6 +196,7 @@ public class DefaultUrlService implements UrlService {
         if (currentUser == null) {
             requireNoDomain(createUrlDto.getDomain());
             urlValidator.checkIfAnonymousUrlCreationEnabled();
+            humanCheckService.verify(humanCheckToken);
         }
         final var verdict = validateUrl(url);
         final var heldShape = currentUser == null ? heldShapeOf(url.getLongUrl(), verdict) : Optional.<HeldShape>empty();

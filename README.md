@@ -71,6 +71,7 @@ Build, test and run commands, local dev users and the end-to-end check (`scripts
   ```bash
   openssl rand -base64 32
   ```
+- **The human check** on links made without an account needs `APP_TURNSTILE_SITE_KEY` and `APP_TURNSTILE_SECRET_KEY` (the Turnstile widget's keys); without them the app starts and no check runs. Keep the secret key out of git and logs.
 - **Custom domains** need `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ZONE_ID`; without them the app starts and refuses approvals. The other variables (`APP_DOMAINS_ENABLED`, `APP_DOMAINS_MAX_ACTIVE`, `APP_DOMAINS_FREE_ALLOWANCE`, `APP_DOMAINS_PER_USER`, `APP_DOMAINS_RESERVED`, `APP_DOMAINS_PRIMARY_HOSTS`, `APP_DOMAINS_IGNORED_HOSTNAMES`, `APP_DOMAINS_CNAME_TARGET`, `APP_CLOUDFLARE_API_BASE`) have working defaults, listed in AGENTS.md (Config Profiles). Before the first deploy with custom domains:
   - **O1:** `CLOUDFLARE_ZONE_ID` is the hrva.cc zone's id, and the token has Zone, SSL and Certificates, Edit on the hrva.cc zone only. Use that token nowhere else.
   - **O2:** the reverse proxy's catch-all `default_server` refuses non-Cloudflare addresses (444), like the proxy hosts. Custom hostnames reach the origin through it.

@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.function.Supplier;
+import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -14,6 +15,7 @@ public class SettingDefaults {
 
     private static final String GOOGLE_NOT_CONFIGURED = "Google sign-in isn't configured.";
     private static final String GITHUB_NOT_CONFIGURED = "GitHub sign-in isn't configured.";
+    private static final String TURNSTILE_NOT_CONFIGURED = "Turnstile keys aren't set, so no check runs.";
 
     private final Map<SettingKey, Supplier<Object>> defaults = new EnumMap<>(SettingKey.class);
     private final Map<SettingKey, Supplier<Optional<String>>> availability = new EnumMap<>(SettingKey.class);
@@ -67,10 +69,13 @@ public class SettingDefaults {
         register(SettingKey.RANDOM_DOMAIN_MAX_AGE_DAYS, moderation::getRandomDomainMaxAgeDays);
         register(SettingKey.WARNING_PAGE, moderation::isWarningPage);
         register(SettingKey.WARNING_PAGE_MAX_AGE_DAYS, moderation::getWarningPageMaxAgeDays);
+        register(SettingKey.HUMAN_CHECK, moderation::isHumanCheck);
         registerAvailability(SettingKey.GOOGLE_SIGN_IN,
                 () -> unavailableUnless(oAuthProviders.configured(OAuthProviders.GOOGLE), GOOGLE_NOT_CONFIGURED));
         registerAvailability(SettingKey.GITHUB_SIGN_IN,
                 () -> unavailableUnless(oAuthProviders.configured(OAuthProviders.GITHUB), GITHUB_NOT_CONFIGURED));
+        registerAvailability(SettingKey.HUMAN_CHECK,
+                () -> unavailableUnless(turnstileConfigured(appProperties.getTurnstile()), TURNSTILE_NOT_CONFIGURED));
     }
 
     public Object defaultOf(final SettingKey key) {
@@ -91,6 +96,10 @@ public class SettingDefaults {
 
     private void registerAvailability(final SettingKey key, final Supplier<Optional<String>> unavailableReason) {
         availability.put(key, unavailableReason);
+    }
+
+    private static boolean turnstileConfigured(final AppProperties.Turnstile turnstile) {
+        return StringUtils.isNotBlank(turnstile.getSiteKey()) && StringUtils.isNotBlank(turnstile.getSecretKey());
     }
 
     private static Optional<String> unavailableUnless(final boolean available, final String reason) {

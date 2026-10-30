@@ -465,5 +465,39 @@ class AppPropertiesTest {
         assertThat(validator.validate(new AppProperties.AbuseReports())).isEmpty();
     }
 
+    @Test
+    void turnstileToStringLacksTheSecretKey() {
+        final var appProperties = new AppProperties();
+        appProperties.getTurnstile().setSiteKey("1x00000000000000000000AA");
+        appProperties.getTurnstile().setSecretKey(KEY_MATERIAL);
+
+        assertThat(appProperties.getTurnstile().toString())
+                .contains("1x00000000000000000000AA")
+                .doesNotContain(KEY_MATERIAL);
+        assertThat(appProperties.toString()).doesNotContain(KEY_MATERIAL);
+    }
+
+    @Test
+    void turnstileKeysAreUnsetByDefaultAndTheHumanCheckSwitchIsOn() throws IOException {
+        final var yaml = new YamlPropertySourceLoader().load("application", new ClassPathResource("application.yaml"));
+
+        assertThat(new AppProperties().getTurnstile().getSiteKey()).isNull();
+        assertThat(new AppProperties().getTurnstile().getSecretKey()).isNull();
+        assertThat(new AppProperties().getModeration().isHumanCheck()).isTrue();
+        assertThat(yaml.getFirst().getProperty("app.turnstile.site-key")).hasToString("${APP_TURNSTILE_SITE_KEY:}");
+        assertThat(yaml.getFirst().getProperty("app.turnstile.secret-key")).hasToString("${APP_TURNSTILE_SECRET_KEY:}");
+    }
+
+    @Test
+    void turnstileKeysBindFromTheEnvironment() {
+        final var environment = new SystemEnvironmentPropertySource(StandardEnvironment.SYSTEM_ENVIRONMENT_PROPERTY_SOURCE_NAME, Map.<String, Object>of(
+                "APP_TURNSTILE_SITE_KEY", "1x00000000000000000000AA",
+                "APP_TURNSTILE_SECRET_KEY", "1x0000000000000000000000000000000AA"));
+
+        final var turnstile = new Binder(ConfigurationPropertySources.from(environment)).bind("app.turnstile", AppProperties.Turnstile.class).get();
+
+        assertThat(turnstile.getSiteKey()).isEqualTo("1x00000000000000000000AA");
+        assertThat(turnstile.getSecretKey()).isEqualTo("1x0000000000000000000000000000000AA");
+    }
 
 }

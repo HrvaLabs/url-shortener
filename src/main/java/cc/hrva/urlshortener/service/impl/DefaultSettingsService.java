@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.service.impl;
 
+import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.dto.settings.PublicSettingsResponse;
 import cc.hrva.urlshortener.dto.settings.SettingResponse;
 import cc.hrva.urlshortener.exception.SettingNotFoundException;
@@ -51,6 +52,7 @@ public class DefaultSettingsService implements SettingsService {
 
     private final AppSettingRepository appSettingRepository;
     private final SettingDefaults settingDefaults;
+    private final AppProperties appProperties;
     private final AuditLogService auditLogService;
     private final ApplicationEventPublisher eventPublisher;
     private final TransactionOperations transactionOperations;
@@ -107,8 +109,10 @@ public class DefaultSettingsService implements SettingsService {
 
     @Override
     public PublicSettingsResponse publicSettings() {
+        final var humanCheck = isOnAndAvailable(SettingKey.HUMAN_CHECK);
         return new PublicSettingsResponse(isOn(SettingKey.ANONYMOUS_LINKS), isOn(SettingKey.NEW_SIGNUPS), isOn(SettingKey.CUSTOM_ALIASES),
-                isOnAndAvailable(SettingKey.GOOGLE_SIGN_IN), isOnAndAvailable(SettingKey.GITHUB_SIGN_IN));
+                isOnAndAvailable(SettingKey.GOOGLE_SIGN_IN), isOnAndAvailable(SettingKey.GITHUB_SIGN_IN), humanCheck,
+                humanCheck ? appProperties.getTurnstile().getSiteKey() : null);
     }
 
     @Override

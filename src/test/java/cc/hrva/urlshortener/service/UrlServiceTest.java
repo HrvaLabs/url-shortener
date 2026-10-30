@@ -5,6 +5,7 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -51,6 +52,7 @@ import cc.hrva.urlshortener.dto.UrlUpdateDto;
 import cc.hrva.urlshortener.exception.ApiException;
 import cc.hrva.urlshortener.exception.ApiKeyNotFoundException;
 import cc.hrva.urlshortener.exception.FieldValidationException;
+import cc.hrva.urlshortener.exception.HumanCheckUnavailableException;
 import cc.hrva.urlshortener.exception.InvalidApiKeyException;
 import cc.hrva.urlshortener.exception.InvalidSortException;
 import cc.hrva.urlshortener.exception.NoAuthorizationException;
@@ -143,6 +145,9 @@ class UrlServiceTest {
     private static final String DOMAIN_REFUSAL = "Choose one of your active domains, or leave it empty for hrva.cc.";
     private static final String DOMAIN_OFF = "This link's domain isn't active, so the link can't be turned on.";
     private static final String CUSTOM_ALIASES_OFF = "Custom aliases are turned off right now.";
+    private static final String HUMAN_CHECK_TOKEN = "XXXX.DUMMY.TOKEN.XXXX";
+    private static final String HUMAN_CHECK_REFUSAL = "Complete the check and try again.";
+    private static final String HUMAN_CHECK_UNAVAILABLE = "We couldn't run the check. Try again in a minute.";
     private static final RandomLookingLabels RANDOM_LOOKING_LABELS = new RandomLookingLabels();
     private static final LocalDate REGISTERED_LONG_AGO = LocalDate.of(2010, 1, 1);
     private static final String RANDOM_LINK = "https://xdvqnxj.com/login";
@@ -242,6 +247,9 @@ class UrlServiceTest {
     @Mock
     private DomainAgeService domainAgeService;
 
+    @Mock
+    private HumanCheckService humanCheckService;
+
     private AnonymousLinkSignals anonymousLinkSignals;
 
     @BeforeEach
@@ -282,7 +290,7 @@ class UrlServiceTest {
                 campaignService,
                 settingsService,
                 withoutTransactions,
-                anonymousLinkSignals, LinkWarningTemplates.engine()
+                anonymousLinkSignals, LinkWarningTemplates.engine(), humanCheckService
         );
     }
 
@@ -1125,6 +1133,112 @@ class UrlServiceTest {
     }
 
     @Test
+    void anonymousCreateChecksBeforeTheUrlChecks() {
+        stubLinkCreation();
+
+        urlService.saveUrlRouting(link(0), CLIENT_IP, CreatedVia.WEB, HUMAN_CHECK_TOKEN);
+
+        final var order = org.mockito.Mockito.inOrder(rateLimiter, urlValidator, humanCheckService, urlRepository);
+        order.verify(rateLimiter).tryAcquire(any(), org.mockito.ArgumentMatchers.anyInt(), any());
+        order.verify(urlValidator).checkIfAnonymousUrlCreationEnabled();
+        order.verify(humanCheckService).verify(HUMAN_CHECK_TOKEN);
+        order.verify(urlValidator).checkIfLongUrlIsNotBlocklisted(any());
+        order.verify(urlRepository).save(any(Url.class));
+    }
+
+    @Test
+    void aRefusedHumanCheckStopsBeforeTheUrlChecksAndStillUsesTheHourlySlot() {
+        when(createUrlToUrlConverter.convert(any(CreateUrlDto.class))).thenReturn(Url.builder().longUrl("https://example.com/0").build());
+        org.mockito.Mockito.doThrow(new UrlValidationException(HUMAN_CHECK_REFUSAL)).when(humanCheckService).verify(null);
+
+        assertThatThrownBy(() -> urlService.saveUrlRouting(link(0), CLIENT_IP, CreatedVia.WEB, null))
+                .isInstanceOf(UrlValidationException.class)
+                .hasMessage(HUMAN_CHECK_REFUSAL);
+
+        verify(rateLimiter).tryAcquire(any(), org.mockito.ArgumentMatchers.anyInt(), any());
+        verify(urlValidator, never()).checkIfLongUrlIsNotBlocklisted(any());
+        verify(urlRepository, never()).save(any(Url.class));
+        verifyNoInteractions(campaignService, domainAgeService, burstAlertService);
+    }
+
+    @Test
+    void aHumanCheckThatCannotRunRefusesTheCreate() {
+        when(createUrlToUrlConverter.convert(any(CreateUrlDto.class))).thenReturn(Url.builder().longUrl("https://example.com/0").build());
+        org.mockito.Mockito.doThrow(new HumanCheckUnavailableException(HUMAN_CHECK_UNAVAILABLE)).when(humanCheckService).verify(HUMAN_CHECK_TOKEN);
+
+        assertThatThrownBy(() -> urlService.saveUrlRouting(link(0), CLIENT_IP, CreatedVia.WEB, HUMAN_CHECK_TOKEN))
+                .isInstanceOf(HumanCheckUnavailableException.class)
+                .hasMessage(HUMAN_CHECK_UNAVAILABLE);
+
+        verify(urlValidator, never()).checkIfLongUrlIsNotBlocklisted(any());
+        verify(urlRepository, never()).save(any(Url.class));
+    }
+
+    @Test
+    void pausedOrRateLimitedCreatesAreRefusedBeforeTheHumanCheck() {
+        when(createUrlToUrlConverter.convert(any(CreateUrlDto.class))).thenReturn(Url.builder().longUrl("https://example.com/0").build());
+        org.mockito.Mockito.doThrow(new UrlValidationException("Making links without an account is paused right now."))
+                .when(urlValidator).checkIfAnonymousUrlCreationEnabled();
+
+        assertThatThrownBy(() -> urlService.saveUrlRouting(link(0), CLIENT_IP, CreatedVia.WEB, HUMAN_CHECK_TOKEN))
+                .isInstanceOf(UrlValidationException.class);
+
+        when(rateLimiter.tryAcquire(any(), org.mockito.ArgumentMatchers.anyInt(), any())).thenReturn(false);
+
+        assertThatThrownBy(() -> urlService.saveUrlRouting(link(0), CLIENT_IP, CreatedVia.WEB, HUMAN_CHECK_TOKEN))
+                .isInstanceOf(RateLimitExceededException.class);
+        verifyNoInteractions(humanCheckService);
+    }
+
+    @Test
+    void aSignedInCreateIsNeverChecked() {
+        stubLinkCreation();
+        when(userService.getUserFromToken()).thenReturn(User.builder().id(7L).build());
+
+        urlService.saveUrlRouting(link(0), CLIENT_IP, CreatedVia.WEB, null);
+        urlService.saveUrlRouting(link(1), CLIENT_IP, CreatedVia.WEB, HUMAN_CHECK_TOKEN);
+        urlService.saveUrlRouting(link(2), null, CreatedVia.MCP);
+
+        verifyNoInteractions(humanCheckService);
+    }
+
+    @Test
+    void anApiKeyCreateIsNeverChecked() {
+        when(apiKeyService.fetchApiKeyByKey("apikey")).thenReturn(ApiKey.builder().owner(User.builder().id(9L).build()).build());
+        stubLinkCreation();
+
+        urlService.saveUrlWithApiKey(link(0), "apikey", CreatedVia.API_KEY);
+        urlService.saveUrlWithApiKey(link(1), "apikey", CreatedVia.BULK);
+
+        verifyNoInteractions(humanCheckService);
+    }
+
+    @Test
+    void theThreeArgumentCreateSendsNoToken() {
+        stubLinkCreation();
+
+        urlService.saveUrlRouting(link(0), CLIENT_IP, CreatedVia.WEB);
+
+        verify(humanCheckService).verify(null);
+    }
+
+    @Test
+    void theHumanCheckRunsOutsideAnyTransactionThroughEitherForm() {
+        final var inTransaction = new ArrayList<Boolean>();
+        when(appProperties.getShortUrlLength()).thenReturn(5L);
+        when(urlRepository.save(any(Url.class))).thenAnswer(invocation -> persisted(invocation.getArgument(0)));
+        when(linkCheckService.check(any())).thenReturn(LinkVerdict.clean());
+        org.mockito.Mockito.doAnswer(invocation -> inTransaction.add(TransactionSynchronizationManager.isActualTransactionActive()))
+                .when(humanCheckService).verify(any());
+        final var service = transactionalUrlService();
+
+        service.saveUrlRouting(link(0), CLIENT_IP, CreatedVia.WEB, HUMAN_CHECK_TOKEN);
+        service.saveUrlRouting(link(1), CLIENT_IP, CreatedVia.WEB);
+
+        assertThat(inTransaction).containsExactly(false, false);
+    }
+
+    @Test
     void aSignedInCreateIsNeverReported() {
         stubLinkCreation();
         when(userService.getUserFromToken()).thenReturn(User.builder().id(7L).build());
@@ -1569,7 +1683,7 @@ class UrlServiceTest {
                 urlToPeekUrlConverter, createUrlToUrlConverter, urlUpdateDtoToUrlConverter, new UrlCache(cacheManager), objectMapper, meterRegistry,
                 passwordEncoder, suspiciousUrlService, rateLimiter, reviewQueueService, scammerSignalService, clickCheckService, redirectChainService,
                 transactionOperations, reservedAliasService, burstAlertService, destinationCheckRepository, customDomainRegistry, customDomainRepository,
-                campaignService, settingsService, withoutTransactions, anonymousLinkSignals, LinkWarningTemplates.engine());
+                campaignService, settingsService, withoutTransactions, anonymousLinkSignals, LinkWarningTemplates.engine(), humanCheckService);
     }
 
     private Url anonymousCreateOf(final String longUrl, final LinkVerdict verdict) {
@@ -4021,7 +4135,7 @@ class UrlServiceTest {
                 new io.micrometer.core.instrument.simple.SimpleMeterRegistry(), passwordEncoder, suspiciousUrlService, rateLimiter,
                 reviewQueueService, scammerSignalService, clickCheckService, redirectChainService, TransactionOperations.withoutTransaction(),
                 reservedAliasService, burstAlertService, destinationCheckRepository, customDomainRegistry, customDomainRepository, campaignService, settingsService,
-                withoutTransactions, anonymousLinkSignals, LinkWarningTemplates.engine());
+                withoutTransactions, anonymousLinkSignals, LinkWarningTemplates.engine(), humanCheckService);
     }
 
     private static UrlService withTheCacheAnnotations(final UrlService service, final CacheManager urls) {
@@ -4076,7 +4190,7 @@ class UrlServiceTest {
                 campaignService,
                 settingsService,
                 withoutTransactions,
-                anonymousLinkSignals, LinkWarningTemplates.engine()
+                anonymousLinkSignals, LinkWarningTemplates.engine(), humanCheckService
         );
     }
 
@@ -4156,7 +4270,7 @@ class UrlServiceTest {
                 campaignService,
                 settingsService,
                 transactionManager,
-                anonymousLinkSignals, LinkWarningTemplates.engine()
+                anonymousLinkSignals, LinkWarningTemplates.engine(), humanCheckService
         );
         final var proxyFactory = new ProxyFactory(service);
         proxyFactory.addAdvice(new TransactionInterceptor(transactionManager, new AnnotationTransactionAttributeSource()));
@@ -4195,7 +4309,7 @@ class UrlServiceTest {
                 campaignService,
                 settingsService,
                 withoutTransactions,
-                anonymousLinkSignals, LinkWarningTemplates.engine()
+                anonymousLinkSignals, LinkWarningTemplates.engine(), humanCheckService
         );
     }
 
@@ -4230,7 +4344,7 @@ class UrlServiceTest {
                 campaignService,
                 settingsService,
                 withoutTransactions,
-                anonymousLinkSignals, LinkWarningTemplates.engine()
+                anonymousLinkSignals, LinkWarningTemplates.engine(), humanCheckService
         );
     }
 

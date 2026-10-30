@@ -22,6 +22,7 @@ import cc.hrva.urlshortener.exception.EmailLogNotFoundException;
 import cc.hrva.urlshortener.exception.EmailNotVerifiedException;
 import cc.hrva.urlshortener.exception.FeatureUnavailableException;
 import cc.hrva.urlshortener.exception.FieldValidationException;
+import cc.hrva.urlshortener.exception.HumanCheckUnavailableException;
 import cc.hrva.urlshortener.exception.InvalidApiKeyException;
 import cc.hrva.urlshortener.exception.LastSignInMethodException;
 import cc.hrva.urlshortener.exception.PasskeyNotFoundException;
@@ -322,6 +323,11 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(CustomDomainConflictException.class)
     public ResponseEntity<Map<String, String>> handleCustomDomainConflict(final CustomDomainConflictException ex) {
         return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("error", safeMessage(ex)));
+    }
+
+    @ExceptionHandler(HumanCheckUnavailableException.class)
+    public ResponseEntity<Map<String, String>> handleHumanCheckUnavailable(final HumanCheckUnavailableException ex) {
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(Map.of("error", safeMessage(ex)));
     }
 
     @ExceptionHandler(FeatureUnavailableException.class)

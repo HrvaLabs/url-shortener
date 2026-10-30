@@ -70,6 +70,8 @@ class DefaultSettingsServiceTest {
     private static final String ADMIN = "karlo@hrva.cc";
     private static final String OTHER_ADMIN = "ana@hrva.cc";
     private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
+    private static final String TURNSTILE_SITE_KEY = "1x00000000000000000000AA";
+    private static final String TURNSTILE_SECRET_KEY = "1x0000000000000000000000000000000AA";
 
     @Mock
     private AppSettingRepository appSettingRepository;
@@ -105,7 +107,8 @@ class DefaultSettingsServiceTest {
         lenient().doAnswer(invocation -> steps.add("audit" + (inTransaction ? " in a transaction" : ""))).when(auditLogService)
                 .log(anyString(), any(AuditAction.class), anyString(), anyString(), anyString());
         lenient().doAnswer(invocation -> steps.add("publish" + (inTransaction ? " in a transaction" : ""))).when(eventPublisher).publishEvent(any(Object.class));
-        settingsService = new DefaultSettingsService(appSettingRepository, new SettingDefaults(appProperties, SettingsServiceFixtures.bothProviders()), auditLogService, eventPublisher,
+        settingsService = new DefaultSettingsService(appSettingRepository, new SettingDefaults(appProperties, SettingsServiceFixtures.bothProviders()), appProperties,
+                auditLogService, eventPublisher,
                 recordingTransactions(), clock);
     }
 
@@ -124,14 +127,43 @@ class DefaultSettingsServiceTest {
 
     @Test
     void thePublicSettingsFollowTheirSwitches() {
-        assertThat(settingsService.publicSettings()).isEqualTo(new PublicSettingsResponse(true, true, true, true, true));
+        assertThat(settingsService.publicSettings()).isEqualTo(new PublicSettingsResponse(true, true, true, true, true, false, null));
 
         rows.put("ANONYMOUS_LINKS", row(SettingKey.ANONYMOUS_LINKS, "false"));
         rows.put("CUSTOM_ALIASES", row(SettingKey.CUSTOM_ALIASES, "false"));
         rows.put("GITHUB_SIGN_IN", row(SettingKey.GITHUB_SIGN_IN, "false"));
         settingsService.refresh();
 
-        assertThat(settingsService.publicSettings()).isEqualTo(new PublicSettingsResponse(false, true, false, true, false));
+        assertThat(settingsService.publicSettings()).isEqualTo(new PublicSettingsResponse(false, true, false, true, false, false, null));
+    }
+
+    @Test
+    void theSiteKeyIsPublicOnlyWithBothKeysAndTheSwitchOn() {
+        appProperties.getTurnstile().setSiteKey(TURNSTILE_SITE_KEY);
+
+        assertThat(settingsService.publicSettings()).extracting(PublicSettingsResponse::humanCheck, PublicSettingsResponse::turnstileSiteKey)
+                .containsExactly(false, null);
+
+        appProperties.getTurnstile().setSecretKey(TURNSTILE_SECRET_KEY);
+
+        assertThat(settingsService.publicSettings()).extracting(PublicSettingsResponse::humanCheck, PublicSettingsResponse::turnstileSiteKey)
+                .containsExactly(true, TURNSTILE_SITE_KEY);
+
+        rows.put("HUMAN_CHECK", row(SettingKey.HUMAN_CHECK, "false"));
+        settingsService.refresh();
+
+        assertThat(settingsService.publicSettings()).extracting(PublicSettingsResponse::humanCheck, PublicSettingsResponse::turnstileSiteKey)
+                .containsExactly(false, null);
+        assertThat(settingsService.publicSettings().toString()).doesNotContain(TURNSTILE_SECRET_KEY);
+    }
+
+    @Test
+    void theHumanCheckSaysWhyItIsUnavailableWithoutTheKeys() {
+        assertThat(settingsService.list()).filteredOn(setting -> setting.key() == SettingKey.HUMAN_CHECK).singleElement()
+                .extracting(SettingResponse::available, SettingResponse::unavailableReason)
+                .containsExactly(false, "Turnstile keys aren't set, so no check runs.");
+        assertThat(settingsService.isOn(SettingKey.HUMAN_CHECK)).isTrue();
+        assertThat(settingsService.isOnAndAvailable(SettingKey.HUMAN_CHECK)).isFalse();
     }
 
     @Test
@@ -479,7 +511,7 @@ class DefaultSettingsServiceTest {
         assertThat(settingsService.safetySwitchesOff())
                 .containsExactly(SettingKey.SAFE_BROWSING_CHECK, SettingKey.BLOCKLIST_CHECK, SettingKey.SUSPICIOUS_LINK_CHECK,
                         SettingKey.NIGHTLY_SAFE_BROWSING, SettingKey.NIGHTLY_DESTINATION_CHECK, SettingKey.SAME_SHAPE_ALERT, SettingKey.RANDOM_DOMAIN_REVIEW,
-                        SettingKey.WARNING_PAGE)
+                        SettingKey.WARNING_PAGE, SettingKey.HUMAN_CHECK)
                 .allSatisfy(key -> assertThat(key.getParent() == null || settingsService.isOn(key.getParent())).isTrue());
     }
 

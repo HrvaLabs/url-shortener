@@ -26,7 +26,12 @@ public interface UrlService {
     UrlResponse updateUrl(UrlUpdateDto url);
     Url getUrlByLongUrl(String longUrl);
     String generateShortUrl(Long length);
-    UrlResponse saveUrlRouting(CreateUrlDto url, String clientIP, CreatedVia createdVia);
+    UrlResponse saveUrlRouting(CreateUrlDto url, String clientIP, CreatedVia createdVia, String humanCheckToken);
+
+    default UrlResponse saveUrlRouting(final CreateUrlDto url, final String clientIP, final CreatedVia createdVia) {
+        return saveUrlRouting(url, clientIP, createdVia, null);
+    }
+
     Page<UrlResponse> getAllMyUrls(String apiKey, Pageable pageable, UrlSearchDto search);
     List<String> getMyTags(String apiKey);
     PeekUrl peekUrlByShortUrl(String domain, String shortUrl);

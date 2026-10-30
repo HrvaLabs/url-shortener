@@ -9,6 +9,7 @@ import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.security.config.oauth2.client.CommonOAuth2Provider;
@@ -123,7 +124,10 @@ class SettingValuesTest {
             assertThat(key.getMaxItems()).isNull();
         }
         assertThat(key.isNullable()).isEqualTo(key.getNoneLabel() != null);
-        final var defaults = new SettingDefaults(new AppProperties(), SettingsServiceFixtures.bothProviders());
+        final var appProperties = new AppProperties();
+        appProperties.getTurnstile().setSiteKey("site");
+        appProperties.getTurnstile().setSecretKey("secret");
+        final var defaults = new SettingDefaults(appProperties, SettingsServiceFixtures.bothProviders());
         final var value = defaults.defaultOf(key);
         assertThat(SettingValues.fromStored(key, SettingValues.stored(value))).isEqualTo(value);
         assertThat(defaults.unavailableReason(key)).isEmpty();
@@ -230,7 +234,7 @@ class SettingValuesTest {
                         SettingKey::isNullable)
                 .containsExactly(SettingGroup.SAFETY, SettingType.NUMBER, "Warning page: maximum domain age",
                         "Domains known to be younger than this get the page.", SettingKey.WARNING_PAGE, false, 30, 3650, "days", false);
-        assertThat(Arrays.asList(SettingKey.values()).subList(SettingKey.RANDOM_DOMAIN_MAX_AGE_DAYS.ordinal() + 1, SettingKey.values().length))
+        assertThat(Arrays.asList(SettingKey.values()).subList(SettingKey.RANDOM_DOMAIN_MAX_AGE_DAYS.ordinal() + 1, SettingKey.HUMAN_CHECK.ordinal()))
                 .containsExactly(SettingKey.WARNING_PAGE, SettingKey.WARNING_PAGE_MAX_AGE_DAYS);
         final var appProperties = new AppProperties();
         final var defaults = new SettingDefaults(appProperties, SettingsServiceFixtures.bothProviders());
@@ -240,6 +244,38 @@ class SettingValuesTest {
         appProperties.getModeration().setWarningPageMaxAgeDays(60);
         assertThat(defaults.defaultOf(SettingKey.WARNING_PAGE)).isEqualTo(false);
         assertThat(defaults.defaultOf(SettingKey.WARNING_PAGE_MAX_AGE_DAYS)).isEqualTo(60);
+    }
+
+    @Test
+    void theHumanCheckRow() {
+        assertThat(SettingKey.HUMAN_CHECK).extracting(SettingKey::getGroup, SettingKey::getType, SettingKey::getLabel, SettingKey::getDescription,
+                        SettingKey::getParent, SettingKey::isSafety)
+                .containsExactly(SettingGroup.SAFETY, SettingType.SWITCH, "Human check on links without an account",
+                        "A Cloudflare Turnstile check on the homepage, /qr, /utm and /share.", null, true);
+        assertThat(Arrays.asList(SettingKey.values()).subList(SettingKey.WARNING_PAGE_MAX_AGE_DAYS.ordinal() + 1, SettingKey.values().length))
+                .containsExactly(SettingKey.HUMAN_CHECK);
+        final var appProperties = new AppProperties();
+        final var defaults = new SettingDefaults(appProperties, SettingsServiceFixtures.bothProviders());
+        assertThat(defaults.defaultOf(SettingKey.HUMAN_CHECK)).isEqualTo(true);
+        appProperties.getModeration().setHumanCheck(false);
+        assertThat(defaults.defaultOf(SettingKey.HUMAN_CHECK)).isEqualTo(false);
+    }
+
+    @ParameterizedTest
+    @CsvSource(value = {"NULL,NULL", "1x00000000000000000000AA,NULL", "NULL,1x0000000000000000000000000000000AA", "'  ',1x0000000000000000000000000000000AA",
+            "1x00000000000000000000AA,''"}, nullValues = "NULL")
+    void humanCheckIsUnavailableWithoutBothKeys(final String siteKey, final String secretKey) {
+        final var appProperties = new AppProperties();
+        appProperties.getTurnstile().setSiteKey(siteKey);
+        appProperties.getTurnstile().setSecretKey(secretKey);
+        final var defaults = new SettingDefaults(appProperties, SettingsServiceFixtures.bothProviders());
+
+        assertThat(defaults.unavailableReason(SettingKey.HUMAN_CHECK)).contains("Turnstile keys aren't set, so no check runs.");
+
+        appProperties.getTurnstile().setSiteKey("1x00000000000000000000AA");
+        appProperties.getTurnstile().setSecretKey("1x0000000000000000000000000000000AA");
+
+        assertThat(defaults.unavailableReason(SettingKey.HUMAN_CHECK)).isEmpty();
     }
 
     @Test

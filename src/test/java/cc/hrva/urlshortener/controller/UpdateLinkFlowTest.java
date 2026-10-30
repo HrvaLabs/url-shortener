@@ -52,6 +52,7 @@ import cc.hrva.urlshortener.service.impl.DefaultAuditLogService;
 import cc.hrva.urlshortener.service.impl.DefaultLinkCheckService;
 import cc.hrva.urlshortener.service.impl.DefaultUrlService;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiter;
+import cc.hrva.urlshortener.service.HumanCheckTestConfiguration;
 import cc.hrva.urlshortener.service.linksignal.AnonymousLinkSignalsTestConfiguration;
 import cc.hrva.urlshortener.service.settings.DefaultSettingsTestConfiguration;
 import cc.hrva.urlshortener.validator.ApiKeyValidator;
@@ -417,7 +418,7 @@ class UpdateLinkFlowTest {
                             BlocklistSourceRepository.class}))
     @Import({
             DefaultSettingsTestConfiguration.class,
-            AnonymousLinkSignalsTestConfiguration.class,
+            AnonymousLinkSignalsTestConfiguration.class, HumanCheckTestConfiguration.class,
             AppConfiguration.class,
             WebConfiguration.class,
             AnyHostIsPrimary.class,

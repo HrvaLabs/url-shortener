@@ -155,6 +155,10 @@ public class AppProperties {
     @NotNull
     private AbuseReports abuseReports = new AbuseReports();
 
+    @Valid
+    @NotNull
+    private Turnstile turnstile = new Turnstile();
+
     @Data
     public static class Mcp {
 
@@ -332,6 +336,16 @@ public class AppProperties {
     }
 
     @Data
+    public static class Turnstile {
+
+        private String siteKey;
+
+        @ToString.Exclude
+        private String secretKey;
+
+    }
+
+    @Data
     public static class Moderation {
 
         @Min(1)
@@ -349,6 +363,7 @@ public class AppProperties {
         private boolean githubSignIn = true;
         private boolean randomDomainReview = true;
         private boolean warningPage = true;
+        private boolean humanCheck = true;
 
         @Min(1)
         @Max(90)

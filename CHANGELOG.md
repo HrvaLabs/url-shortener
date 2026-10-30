@@ -10,6 +10,10 @@ A human check and a warning page for links made without an account, limits on th
 
 ### 🛡️ Link Safety
 - Some links made without an account open a short warning page first. It shows the full destination, with Continue and Report this link.
+- Making a link without an account runs a quick Cloudflare Turnstile check on the homepage, /qr, /utm and /share. Signed-in users, API keys and MCP are never checked.
+
+### 🔒 Privacy
+- The Turnstile check processes browser and network signals for that check only. hrva.cc stores nothing from it.
 
 ### 🔧 Admin
 - Links made without an account to random-looking new domains go to the review queue.

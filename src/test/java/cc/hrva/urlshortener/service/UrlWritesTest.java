@@ -396,7 +396,7 @@ class UrlWritesTest {
                     classes = {UrlRepository.class, CustomDomainRepository.class, UserRepository.class, DomainRuleRepository.class,
                             CampaignRepository.class}))
     @Import({DefaultUrlService.class, DefaultModerationService.class, UrlUpdateDtoToUrlConverter.class, DestinationCheckRepository.class, UrlCache.class,
-            DefaultSettingsTestConfiguration.class, AnonymousLinkSignalsTestConfiguration.class})
+            DefaultSettingsTestConfiguration.class, AnonymousLinkSignalsTestConfiguration.class, HumanCheckTestConfiguration.class})
     static class TestApplication {
     }
 

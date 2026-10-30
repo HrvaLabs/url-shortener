@@ -72,11 +72,12 @@ public class UrlController {
     @PostMapping
     public ResponseEntity<UrlResponse> saveUrl(
             @Valid @RequestBody final CreateUrlDto createUrlDto,
-            @RequestHeader(value = "X-Api-Key", required = false) final String apiKey) {
+            @RequestHeader(value = "X-Api-Key", required = false) final String apiKey,
+            @RequestHeader(value = "X-Turnstile-Token", required = false) final String humanCheckToken) {
         if (apiKey != null) {
             return ResponseEntity.ok(urlService.saveUrlWithApiKey(createUrlDto, apiKey, CreatedVia.API_KEY));
         }
-        return ResponseEntity.ok(urlService.saveUrlRouting(createUrlDto, clientIpResolver.getClientIp(request), CreatedVia.WEB));
+        return ResponseEntity.ok(urlService.saveUrlRouting(createUrlDto, clientIpResolver.getClientIp(request), CreatedVia.WEB, humanCheckToken));
     }
 
     @Operation(summary = "Redirect to short URL", description = "Look up a short URL and return its details. Records a click (bots are counted separately and refused on visit-limited links). Add domain=go.example.com for a link on a custom domain.")

@@ -141,3 +141,6 @@ app:
     api-token: ${CLOUDFLARE_API_TOKEN:}
     zone-id: ${CLOUDFLARE_ZONE_ID:}
     api-base: ${APP_CLOUDFLARE_API_BASE:https://api.cloudflare.com/client/v4}
+  turnstile:
+    site-key: ${APP_TURNSTILE_SITE_KEY:}
+    secret-key: ${APP_TURNSTILE_SECRET_KEY:}
