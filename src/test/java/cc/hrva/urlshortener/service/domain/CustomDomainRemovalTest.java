@@ -4,6 +4,7 @@ import cc.hrva.urlshortener.client.CloudflareClient;
 import cc.hrva.urlshortener.configuration.AppConfiguration;
 import cc.hrva.urlshortener.dto.domain.DomainRemovalResponse;
 import cc.hrva.urlshortener.dto.domain.DomainRemovalResponse.DomainRename;
+import cc.hrva.urlshortener.exception.CustomDomainConflictException;
 import cc.hrva.urlshortener.exception.CustomDomainNotFoundException;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.enums.DomainLinkMode;
@@ -225,6 +226,46 @@ class CustomDomainRemovalTest {
     }
 
     @Test
+    void anOwnerCannotMoveTheLinksOfADomainHrvaTurnedOff() {
+        for (final var reason : List.of("ADMIN", "DOMAIN_RULE", "BLOCKLIST")) {
+            final var id = domain(reason.toLowerCase(Locale.ROOT).replace('_', '-') + ".example.com", "DISABLED", "cf-" + reason);
+            jdbcTemplate.update("update custom_domain set disabled_reason = ? where id = ?", reason, id);
+            final var menu = link(id, "menu", true);
+
+            assertThatThrownBy(() -> customDomainRemoval.remove(id, DomainLinkMode.MOVE, OWNER))
+                    .isInstanceOf(CustomDomainConflictException.class)
+                    .hasMessage("This domain was turned off by hrva.cc, so its links can't move to hrva.cc. "
+                            + "Remove it with its links turned off instead.");
+
+            assertThat(jdbcTemplate.queryForMap("select status, disabled_reason, hostname_key from custom_domain where id = ?", id))
+                    .containsEntry("STATUS", "DISABLED").containsEntry("DISABLED_REASON", reason).containsEntry("HOSTNAME_KEY", hostnameOf(id));
+            assertThat(jdbcTemplate.queryForMap("select domain_id, active from url where id = ?", menu))
+                    .containsEntry("DOMAIN_ID", id).containsEntry("ACTIVE", true);
+        }
+        assertThat(committedChanges.changes()).isEmpty();
+        verifyNoInteractions(urlService, reservedAliasService);
+    }
+
+    @Test
+    void aDomainHrvaTurnedOffCanStillBeRemovedWithItsLinksTurnedOffOrMovedByAnAdmin() {
+        final var byOwner = domain("go.example.com", "DISABLED", "cf-1");
+        final var byAdmin = domain("links.example.org", "DISABLED", "cf-2");
+        final var accountBlocked = domain("blocked.example.net", "DISABLED", "cf-3");
+        jdbcTemplate.update("update custom_domain set disabled_reason = 'ADMIN' where id in (?, ?)", byOwner, byAdmin);
+        jdbcTemplate.update("update custom_domain set disabled_reason = 'USER_BLOCKED' where id = ?", accountBlocked);
+        link(byOwner, "menu", true);
+        final var cafe = link(byAdmin, "cafe", true);
+        final var drinks = link(accountBlocked, "drinks", true);
+
+        assertThat(customDomainRemoval.remove(byOwner, DomainLinkMode.DEACTIVATE, OWNER)).isEqualTo(new DomainRemovalResponse(0, List.of(), 1));
+        assertThat(customDomainRemoval.remove(byAdmin, DomainLinkMode.MOVE, ADMIN)).isEqualTo(new DomainRemovalResponse(1, List.of(), 0));
+        assertThat(customDomainRemoval.remove(accountBlocked, DomainLinkMode.MOVE, OWNER)).isEqualTo(new DomainRemovalResponse(1, List.of(), 0));
+
+        assertThat(jdbcTemplate.queryForObject("select domain_id from url where id = ?", Long.class, cafe)).isNull();
+        assertThat(jdbcTemplate.queryForObject("select domain_id from url where id = ?", Long.class, drinks)).isNull();
+    }
+
+    @Test
     void everyStatusCanBeRemovedAndAPendingApplicationIgnoresItsLinksMode() {
         for (final var status : List.of("PENDING_REVIEW", "APPROVED_PROVISIONING", "AWAITING_DNS", "ACTIVE", "DISABLED", "ERROR", "REJECTED")) {
             final var id = domain(status.toLowerCase(Locale.ROOT).replace('_', '-') + ".example.com", status, null);
@@ -286,6 +327,10 @@ class CustomDomainRemovalTest {
 
     private String aliasOf(final long urlId) {
         return jdbcTemplate.queryForObject("select short_url from url where id = ?", String.class, urlId);
+    }
+
+    private String hostnameOf(final long id) {
+        return jdbcTemplate.queryForObject("select hostname from custom_domain where id = ?", String.class, id);
     }
 
     private String statusOf(final long id) {

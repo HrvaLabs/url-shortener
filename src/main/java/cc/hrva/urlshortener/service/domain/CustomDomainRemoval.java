@@ -2,8 +2,10 @@ package cc.hrva.urlshortener.service.domain;
 
 import cc.hrva.urlshortener.dto.domain.DomainRemovalResponse;
 import cc.hrva.urlshortener.dto.domain.DomainRemovalResponse.DomainRename;
+import cc.hrva.urlshortener.exception.CustomDomainConflictException;
 import cc.hrva.urlshortener.exception.CustomDomainNotFoundException;
 import cc.hrva.urlshortener.model.enums.CustomDomainStatus;
+import cc.hrva.urlshortener.model.enums.DomainDisableReason;
 import cc.hrva.urlshortener.model.enums.DomainLinkMode;
 import cc.hrva.urlshortener.repository.CustomDomainRepository;
 import cc.hrva.urlshortener.repository.UrlDomainMoves;
@@ -14,9 +16,11 @@ import cc.hrva.urlshortener.service.UrlService;
 import java.time.Clock;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.ApplicationEventPublisher;
@@ -32,6 +36,10 @@ import org.springframework.transaction.support.TransactionOperations;
 public class CustomDomainRemoval {
 
     private static final String NOT_FOUND = "Custom domain not found";
+    private static final String NO_MOVE_AFTER_TURN_OFF =
+            "This domain was turned off by hrva.cc, so its links can't move to hrva.cc. Remove it with its links turned off instead.";
+    private static final Set<DomainDisableReason> TURNED_OFF_BY_HRVA = EnumSet.of(DomainDisableReason.ADMIN, DomainDisableReason.DOMAIN_RULE,
+            DomainDisableReason.BLOCKLIST);
 
     private final CustomDomainRepository customDomainRepository;
     private final UrlDomainMoves urlDomainMoves;
@@ -45,7 +53,7 @@ public class CustomDomainRemoval {
 
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public DomainRemovalResponse remove(final long domainId, final DomainLinkMode mode, final Actor actor) {
-        final var marked = Objects.requireNonNull(transactionOperations.execute(status -> mark(domainId, mode)));
+        final var marked = Objects.requireNonNull(transactionOperations.execute(status -> mark(domainId, mode, actor)));
         final var response = mode == DomainLinkMode.MOVE ? moveAll(marked) : new DomainRemovalResponse(0, List.of(), marked.deactivated());
         marked.links().forEach(link -> urlCache.evict(UrlCacheKeys.of(domainId, link.shortUrl())));
         log.info("Custom domain removed domainId={} from={} byAdmin={} mode={} links={} moved={} renamed={} deactivated={}", domainId,
@@ -53,11 +61,17 @@ public class CustomDomainRemoval {
         return response;
     }
 
-    private Marked mark(final long domainId, final DomainLinkMode mode) {
+    private Marked mark(final long domainId, final DomainLinkMode mode, final Actor actor) {
         final var domain = customDomainRepository.findByIdForUpdate(domainId)
                 .filter(found -> found.getStatus() != CustomDomainStatus.DELETED)
                 .orElseThrow(() -> new CustomDomainNotFoundException(NOT_FOUND));
         final var from = domain.getStatus();
+        if (mode == DomainLinkMode.MOVE && !actor.admin() && from == CustomDomainStatus.DISABLED
+                && TURNED_OFF_BY_HRVA.contains(domain.getDisabledReason())) {
+            log.info("Custom domain removal with its links moved refused, hrva.cc turned it off domainId={} reason={}", domainId,
+                    domain.getDisabledReason());
+            throw new CustomDomainConflictException(NO_MOVE_AFTER_TURN_OFF);
+        }
         final var links = from == CustomDomainStatus.PENDING_REVIEW ? List.<DomainLink>of() : urlDomainMoves.linksOf(domainId);
         if (customDomainRepository.markDeleted(domainId, from, LocalDateTime.now(clock)) != 1) {
             log.warn("Custom domain could not be marked removed under its lock domainId={} from={}", domainId, from);

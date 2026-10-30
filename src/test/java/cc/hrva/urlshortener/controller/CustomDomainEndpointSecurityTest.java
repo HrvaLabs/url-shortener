@@ -528,7 +528,45 @@ class CustomDomainEndpointSecurityTest {
                 .andExpect(jsonPath("$.owner").doesNotExist());
 
         verify(customDomainSetup).retry(argThat(domain -> domain.getId() == id));
-        verify(rateLimiter).tryAcquire("domain-check:domain:" + id, 1, Duration.ofSeconds(15));
+        verify(rateLimiter).tryAcquire("domain-retry:domain:" + id, 1, Duration.ofSeconds(15));
+    }
+
+    @Test
+    void pollingNeverHoldsARetryBackButASecondRetryWithinFifteenSecondsIsTooSoon() throws Exception {
+        final var id = domain(ANA, "go.example.com", "ERROR");
+        jdbcTemplate.update("update custom_domain set problem = 'CNAME_REMOVED', cloudflare_id = 'cf-1' where id = ?", id);
+        when(rateLimiter.tryAcquire("domain-check:domain:" + id, 1, Duration.ofSeconds(15))).thenReturn(true, false);
+        when(rateLimiter.tryAcquire("domain-retry:domain:" + id, 1, Duration.ofSeconds(15))).thenReturn(true, false);
+
+        mockMvc.perform(as(ANA_TOKEN, get(DOMAINS + "/" + id))).andExpect(status().isOk());
+        mockMvc.perform(as(ANA_TOKEN, get(DOMAINS + "/" + id))).andExpect(status().isOk());
+        mockMvc.perform(as(ANA_TOKEN, post(DOMAINS + "/" + id + "/retry"))).andExpect(status().isOk());
+        mockMvc.perform(as(ANA_TOKEN, post(DOMAINS + "/" + id + "/retry")))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(content().json("{\"error\":\"Wait a few seconds and try again.\"}", JsonCompareMode.STRICT));
+
+        verify(customDomainLifecycle, times(1)).checkNow(id);
+        verify(customDomainSetup, times(1)).retry(argThat(domain -> domain.getId() == id));
+    }
+
+    @Test
+    void anOwnerCannotMoveTheLinksOfADomainHrvaTurnedOffButCanTurnThemOff() throws Exception {
+        final var id = domain(ANA, "go.example.com", "DISABLED");
+        jdbcTemplate.update("update custom_domain set disabled_reason = 'ADMIN', disabled_note = 'Phishing', cloudflare_id = 'cf-1' where id = ?", id);
+        jdbcTemplate.update("insert into url (short_url, long_url, owner_id, domain_id, active) values ('menu', 'https://example.org/menu', ?, ?, true)",
+                ANA, id);
+
+        mockMvc.perform(as(ANA_TOKEN, delete(DOMAINS + "/" + id).param("links", "MOVE")))
+                .andExpect(status().isConflict())
+                .andExpect(content().json("""
+                        {"error":"This domain was turned off by hrva.cc, so its links can't move to hrva.cc. Remove it with its links turned off instead."}""",
+                        JsonCompareMode.STRICT));
+        assertThat(statusOf(id)).isEqualTo("DISABLED");
+        assertThat(jdbcTemplate.queryForObject("select domain_id from url where short_url = 'menu' and owner_id = ?", Long.class, ANA)).isEqualTo(id);
+
+        mockMvc.perform(as(ANA_TOKEN, delete(DOMAINS + "/" + id).param("links", "DEACTIVATE")))
+                .andExpect(status().isOk())
+                .andExpect(content().json("{\"moved\":0,\"renamed\":[],\"deactivated\":1}", JsonCompareMode.STRICT));
     }
 
     @Test

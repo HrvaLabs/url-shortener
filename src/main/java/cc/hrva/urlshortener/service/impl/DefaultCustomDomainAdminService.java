@@ -25,6 +25,7 @@ import cc.hrva.urlshortener.repository.CustomDomainRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.repository.specification.CustomDomainSpecification;
 import cc.hrva.urlshortener.service.CustomDomainAdminService;
+import cc.hrva.urlshortener.service.LinkCheckService;
 import cc.hrva.urlshortener.service.domain.AdminDomainResponses;
 import cc.hrva.urlshortener.service.domain.CloudflareTokenCheck;
 import cc.hrva.urlshortener.service.domain.CloudflareTokenCheck.TokenState;
@@ -64,7 +65,9 @@ public class DefaultCustomDomainAdminService implements CustomDomainAdminService
     private static final String ALREADY_REVIEWED = "This application was already reviewed.";
     private static final String OWNER_DEACTIVATED = "This account is deactivated, so its domain can't be approved.";
     private static final String RECONCILE_RUNNING = "A reconcile is already running. Try again in a minute.";
+    private static final String BLOCKED_BY_RULE = "This domain matches a block rule.";
     private static final String NOTE = "note";
+    private static final String HTTPS = "https://";
     private static final String NOTE_REQUIRED = "Reason is required";
     private static final Sort NEWEST_FIRST = Sort.by(Sort.Order.desc("createdAt"), Sort.Order.desc("id"));
 
@@ -80,6 +83,7 @@ public class DefaultCustomDomainAdminService implements CustomDomainAdminService
     private final CustomDomainRemoval customDomainRemoval;
     private final CustomDomainReconciler customDomainReconciler;
     private final AdminDomainResponses adminDomainResponses;
+    private final LinkCheckService linkCheckService;
     private final ApplicationEventPublisher eventPublisher;
     private final TransactionOperations transactionOperations;
     private final AppProperties appProperties;
@@ -123,7 +127,9 @@ public class DefaultCustomDomainAdminService implements CustomDomainAdminService
     @Override
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public AdminDomainResponse approve(final long id, final String note, final String performedBy) {
-        requirePending(customDomainRepository.findById(id).orElseThrow(() -> new CustomDomainNotFoundException(NOT_FOUND)));
+        final var application = customDomainRepository.findById(id).orElseThrow(() -> new CustomDomainNotFoundException(NOT_FOUND));
+        requirePending(application);
+        requireNoBlockRule(application);
         final var cloudflareTotal = customDomainSetup.liveTotal(id);
         final var approved = transactionOperations.execute(status -> approveWithinTheCap(id, StringUtils.stripToNull(note), performedBy, cloudflareTotal));
         handOver(id);
@@ -231,6 +237,7 @@ public class DefaultCustomDomainAdminService implements CustomDomainAdminService
         customDomainCapLock.lock();
         final var domain = customDomainRepository.findWithOwner(id).orElseThrow(() -> new CustomDomainNotFoundException(NOT_FOUND));
         requirePending(domain);
+        requireNoBlockRule(domain);
         final var owner = domain.getOwner();
         if (owner == null || Boolean.FALSE.equals(owner.getActive())) {
             log.info("Custom domain approval refused for a deactivated or deleted account domainId={}", id);
@@ -257,6 +264,13 @@ public class DefaultCustomDomainAdminService implements CustomDomainAdminService
         if (domain.getStatus() != CustomDomainStatus.PENDING_REVIEW) {
             log.info("Custom domain review refused, it was already reviewed domainId={} status={}", domain.getId(), domain.getStatus());
             throw new CustomDomainConflictException(ALREADY_REVIEWED);
+        }
+    }
+
+    private void requireNoBlockRule(final CustomDomain domain) {
+        if (linkCheckService.isBlockedByRule(HTTPS + domain.getHostname() + "/")) {
+            log.info("Custom domain approval refused, the domain matches a block rule domainId={}", domain.getId());
+            throw new CustomDomainConflictException(BLOCKED_BY_RULE);
         }
     }
 

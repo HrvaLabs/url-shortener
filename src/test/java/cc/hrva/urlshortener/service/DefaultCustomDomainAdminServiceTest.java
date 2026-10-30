@@ -153,6 +153,9 @@ class DefaultCustomDomainAdminServiceTest {
     @Mock
     private CustomDomainRemoval customDomainRemoval;
 
+    @Mock
+    private LinkCheckService linkCheckService;
+
     private final User ana = User.builder().id(7L).email("ana@example.com").active(true).createDate(NOW.minusDays(40).plusNanos(5000)).build();
     private final List<String> steps = new ArrayList<>();
     private AppProperties appProperties;
@@ -186,7 +189,7 @@ class DefaultCustomDomainAdminServiceTest {
         final var moderation = new CustomDomainModeration(customDomainRepository, customDomainLifecycle, eventPublisher, transactions, clock);
         customDomainAdminService = new DefaultCustomDomainAdminService(customDomainRepository, customDomainAllowanceRepository,
                 customDomainReconcileRepository, userRepository, customDomainCapLock, cloudflareTokenCheck, customDomainProvisioner, setup, moderation,
-                customDomainRemoval, customDomainReconciler, responses, eventPublisher, transactions, appProperties, clock);
+                customDomainRemoval, customDomainReconciler, responses, linkCheckService, eventPublisher, transactions, appProperties, clock);
     }
 
     @Test
@@ -415,6 +418,36 @@ class DefaultCustomDomainAdminServiceTest {
         when(customDomainRepository.findWithOwner(ID)).thenReturn(Optional.of(domain(CustomDomainStatus.PENDING_REVIEW)), Optional.of(approved()));
 
         assertThat(customDomainAdminService.approve(ID, null, ADMIN).domain().status()).isEqualTo(CustomDomainStatus.APPROVED_PROVISIONING);
+    }
+
+    @Test
+    void approvalRefusesADomainOnABlockRuleWithoutAskingCloudflare() {
+        when(linkCheckService.isBlockedByRule("https://go.example.com/")).thenReturn(true);
+
+        assertThatThrownBy(() -> customDomainAdminService.approve(ID, null, ADMIN))
+                .isInstanceOf(CustomDomainConflictException.class)
+                .hasMessage("This domain matches a block rule.");
+
+        verifyNoInteractions(cloudflareTokenCheck, customDomainCapLock, customDomainProvisioner);
+        verify(customDomainRepository, never()).markApproved(anyLong(), any(), any(), any());
+        verify(linkCheckService, never()).check(anyString());
+    }
+
+    @Test
+    void aBlockRuleAddedWhileCloudflareWasAskedStillRefusesTheApproval() {
+        when(linkCheckService.isBlockedByRule("https://go.example.com/")).thenReturn(false, true);
+
+        assertThatThrownBy(() -> customDomainAdminService.approve(ID, null, ADMIN))
+                .isInstanceOf(CustomDomainConflictException.class)
+                .hasMessage("This domain matches a block rule.");
+
+        final var order = inOrder(cloudflareTokenCheck, customDomainCapLock, linkCheckService);
+        order.verify(linkCheckService).isBlockedByRule("https://go.example.com/");
+        order.verify(cloudflareTokenCheck).check();
+        order.verify(customDomainCapLock).lock();
+        order.verify(linkCheckService).isBlockedByRule("https://go.example.com/");
+        verify(customDomainRepository, never()).markApproved(anyLong(), any(), any(), any());
+        verifyNoInteractions(customDomainProvisioner);
     }
 
     @Test

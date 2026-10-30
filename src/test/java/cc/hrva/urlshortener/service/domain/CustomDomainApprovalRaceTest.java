@@ -14,6 +14,7 @@ import cc.hrva.urlshortener.repository.CustomDomainReconcileRepository;
 import cc.hrva.urlshortener.repository.CustomDomainRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.service.CustomDomainAdminService;
+import cc.hrva.urlshortener.service.LinkCheckService;
 import cc.hrva.urlshortener.service.ScammerSignalService;
 import cc.hrva.urlshortener.service.domain.CloudflareTokenCheck.TokenState;
 import cc.hrva.urlshortener.service.impl.DefaultCustomDomainAdminService;
@@ -122,6 +123,9 @@ class CustomDomainApprovalRaceTest {
 
     @MockitoBean
     private CustomDomainRemoval customDomainRemoval;
+
+    @MockitoBean
+    private LinkCheckService linkCheckService;
 
     @BeforeEach
     void setUp() {

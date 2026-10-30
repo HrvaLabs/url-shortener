@@ -26,6 +26,7 @@ import cc.hrva.urlshortener.security.ClientIpResolver;
 import cc.hrva.urlshortener.security.JwtFilter;
 import cc.hrva.urlshortener.security.OAuth2LoginSuccessHandler;
 import cc.hrva.urlshortener.security.TokenProvider;
+import cc.hrva.urlshortener.service.LinkCheckService;
 import cc.hrva.urlshortener.service.ReservedAliasService;
 import cc.hrva.urlshortener.service.ScammerSignalService;
 import cc.hrva.urlshortener.service.UrlService;
@@ -190,6 +191,9 @@ class AdminCustomDomainSecurityTest {
 
     @MockitoBean
     private ReservedAliasService reservedAliasService;
+
+    @MockitoBean
+    private LinkCheckService linkCheckService;
 
     @DynamicPropertySource
     static void signingKey(final DynamicPropertyRegistry registry) {
@@ -505,6 +509,21 @@ class AdminCustomDomainSecurityTest {
                 .andExpect(jsonPath("$.reviewNote").doesNotExist());
 
         assertThat(statusOf(id)).isEqualTo("APPROVED_PROVISIONING");
+    }
+
+    @Test
+    void anApplicationOnABlockRuleCannotBeApproved() throws Exception {
+        final var id = domain(ANA, "go.example.com", "PENDING_REVIEW", NOW.minusDays(1));
+        when(linkCheckService.isBlockedByRule("https://go.example.com/")).thenReturn(true);
+
+        mockMvc.perform(as(ADMIN_TOKEN, post(DOMAINS + "/" + id + "/approve")))
+                .andExpect(status().isConflict())
+                .andExpect(content().json("{\"error\":\"This domain matches a block rule.\"}", JsonCompareMode.STRICT));
+
+        assertThat(statusOf(id)).isEqualTo("PENDING_REVIEW");
+        assertThat(auditRows()).singleElement().satisfies(audit -> assertThat(audit)
+                .containsEntry("action", "APPROVE_DOMAIN").containsEntry("failed", true));
+        verifyNoInteractions(cloudflareTokenCheck, customDomainProvisioner);
     }
 
     @Test

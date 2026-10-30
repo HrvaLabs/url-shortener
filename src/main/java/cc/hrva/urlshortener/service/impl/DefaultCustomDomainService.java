@@ -77,6 +77,8 @@ public class DefaultCustomDomainService implements CustomDomainService {
     private static final String PUNYCODE_PREFIX = "xn--";
     private static final String APPLY_LIMIT = "domain-apply:user:";
     private static final String CHECK_LIMIT = "domain-check:domain:";
+    private static final String RETRY_LIMIT = "domain-retry:domain:";
+    private static final String RETRY_TOO_SOON = "Wait a few seconds and try again.";
     private static final Duration CHECK_WINDOW = Duration.ofSeconds(15);
     private static final int APPLICATIONS_PER_USER = 5;
     private static final Duration APPLY_WINDOW = Duration.ofHours(24);
@@ -172,13 +174,12 @@ public class DefaultCustomDomainService implements CustomDomainService {
             log.info("Custom domain retry refused, there is nothing to retry domainId={} status={}", id, domain.getStatus());
             throw new CustomDomainConflictException(NOTHING_TO_RETRY);
         }
-        if (withinCheckLimit(domain.getId())) {
-            try {
-                customDomainSetup.retry(domain);
-            } catch (final CustomDomainCapacityException exception) {
-                log.info("Custom domain retry by its owner refused by the cap or Cloudflare domainId={}", id);
-                throw new CustomDomainConflictException(CANT_SET_UP_NOW);
-            }
+        requireWithinRetryLimit(domain.getId());
+        try {
+            customDomainSetup.retry(domain);
+        } catch (final CustomDomainCapacityException exception) {
+            log.info("Custom domain retry by its owner refused by the cap or Cloudflare domainId={}", id);
+            throw new CustomDomainConflictException(CANT_SET_UP_NOW);
         }
         return Objects.requireNonNull(transactionOperations.execute(status -> response(ownedDomain(id))));
     }
@@ -279,6 +280,20 @@ public class DefaultCustomDomainService implements CustomDomainService {
             case ERROR -> domain.getProblem() != null && (domain.getProblem().recheckable() || domain.getProblem() == DomainProblem.DNS_TIMED_OUT);
             case PENDING_REVIEW, ACTIVE, REJECTED, DISABLED, DELETED -> false;
         };
+    }
+
+    private void requireWithinRetryLimit(final long id) {
+        final boolean allowed;
+        try {
+            allowed = rateLimiter.tryAcquire(RETRY_LIMIT + id, 1, CHECK_WINDOW);
+        } catch (final RateLimiterUnavailableException exception) {
+            log.warn("Custom domain retry rate limit unavailable, allowing the retry domainId={}", id);
+            return;
+        }
+        if (!allowed) {
+            log.info("Custom domain retry refused, the last one was moments ago domainId={}", id);
+            throw new RateLimitExceededException(RETRY_TOO_SOON);
+        }
     }
 
     private boolean withinCheckLimit(final long id) {

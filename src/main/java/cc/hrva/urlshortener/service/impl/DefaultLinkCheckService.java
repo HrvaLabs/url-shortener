@@ -62,11 +62,12 @@ public class DefaultLinkCheckService implements LinkCheckService {
 
     @Override
     public boolean isAllowListed(final String longUrl) {
-        return DomainNames.hostOf(longUrl)
-                .filter(host -> !DomainNames.isIpLiteral(host))
-                .flatMap(host -> matchingRules(DomainNames.candidates(host)).stream().findFirst())
-                .filter(rule -> rule.getType() == DomainRuleType.ALLOW)
-                .isPresent();
+        return mostSpecificRuleOf(longUrl).filter(rule -> rule.getType() == DomainRuleType.ALLOW).isPresent();
+    }
+
+    @Override
+    public boolean isBlockedByRule(final String longUrl) {
+        return mostSpecificRuleOf(longUrl).filter(rule -> rule.getType() == DomainRuleType.BLOCK).isPresent();
     }
 
     private LinkVerdict evaluate(final String longUrl, final boolean everySignal) {
@@ -93,6 +94,12 @@ public class DefaultLinkCheckService implements LinkCheckService {
 
     private static boolean needsSlowLookup(final Signals signals, final boolean ipLiteral, final boolean everySignal) {
         return !ipLiteral && (everySignal || signals.undecided());
+    }
+
+    private Optional<DomainRule> mostSpecificRuleOf(final String longUrl) {
+        return DomainNames.hostOf(longUrl)
+                .filter(host -> !DomainNames.isIpLiteral(host))
+                .flatMap(host -> matchingRules(DomainNames.candidates(host)).stream().findFirst());
     }
 
     private List<DomainRule> matchingRules(final List<String> domains) {

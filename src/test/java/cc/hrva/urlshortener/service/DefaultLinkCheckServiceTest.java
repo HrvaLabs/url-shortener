@@ -385,6 +385,28 @@ class DefaultLinkCheckServiceTest {
         verifyNoInteractions(blocklistStore, domainAgeService, domainReputationService, suspiciousUrlService);
     }
 
+    @Test
+    void aHostIsBlockedByRuleWhenItsMostSpecificRuleIsABlock() {
+        rule("example.com", DomainRuleType.BLOCK);
+        rule("safe.example.com", DomainRuleType.ALLOW);
+
+        assertThat(linkCheckService.isBlockedByRule("https://go.example.com/")).isTrue();
+        assertThat(linkCheckService.isBlockedByRule("https://example.com/")).isTrue();
+        assertThat(linkCheckService.isBlockedByRule("https://go.safe.example.com/")).isFalse();
+        assertThat(linkCheckService.isBlockedByRule("https://example.com.evil.org/")).isFalse();
+        assertThat(linkCheckService.isBlockedByRule("https://example.org/")).isFalse();
+        verifyNoInteractions(blocklistStore, domainAgeService, domainReputationService, suspiciousUrlService);
+    }
+
+    @ParameterizedTest
+    @NullAndEmptySource
+    @ValueSource(strings = {"https://203.0.113.7/login", "not a url"})
+    void aDestinationWithoutADomainIsNeverBlockedByRule(final String longUrl) {
+        rule("example.com", DomainRuleType.BLOCK);
+
+        assertThat(linkCheckService.isBlockedByRule(longUrl)).isFalse();
+    }
+
     @ParameterizedTest
     @NullAndEmptySource
     @ValueSource(strings = {"https://203.0.113.7/login", "not a url"})

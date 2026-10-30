@@ -7,5 +7,6 @@ public interface LinkCheckService {
     LinkVerdict check(String longUrl);
     LinkVerdict explain(String longUrl);
     boolean isAllowListed(String longUrl);
+    boolean isBlockedByRule(String longUrl);
 
 }

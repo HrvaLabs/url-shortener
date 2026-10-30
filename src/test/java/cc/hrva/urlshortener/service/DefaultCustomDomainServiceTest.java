@@ -65,10 +65,11 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -449,7 +450,7 @@ class DefaultCustomDomainServiceTest {
         failed.setProblem(DomainProblem.PROVISIONING_FAILED);
         final var retried = domain(12L, CustomDomainStatus.AWAITING_DNS, NOW);
         when(customDomainRepository.findByIdAndOwnerId(12L, 7L)).thenReturn(Optional.of(failed), Optional.of(retried));
-        when(rateLimiter.tryAcquire("domain-check:domain:12", 1, Duration.ofSeconds(15))).thenReturn(true);
+        when(rateLimiter.tryAcquire("domain-retry:domain:12", 1, Duration.ofSeconds(15))).thenReturn(true);
 
         final var response = customDomainService.retry(12L);
 
@@ -459,7 +460,7 @@ class DefaultCustomDomainServiceTest {
 
     @Test
     void theOwnerCanRetryEveryFailedDomainAndASetupStillBeingRetried() {
-        when(rateLimiter.tryAcquire("domain-check:domain:12", 1, Duration.ofSeconds(15))).thenReturn(true);
+        when(rateLimiter.tryAcquire("domain-retry:domain:12", 1, Duration.ofSeconds(15))).thenReturn(true);
         for (final var problem : List.of(DomainProblem.PROVISIONING_FAILED, DomainProblem.CNAME_REMOVED, DomainProblem.DNS_TIMED_OUT,
                 DomainProblem.CLOUDFLARE_BLOCKED)) {
             final var failed = domain(12L, CustomDomainStatus.ERROR, NOW);
@@ -494,22 +495,50 @@ class DefaultCustomDomainServiceTest {
         when(customDomainRepository.findByIdAndOwnerId(13L, 7L)).thenReturn(Optional.empty());
         assertThatThrownBy(() -> customDomainService.retry(13L)).isInstanceOf(CustomDomainNotFoundException.class).hasMessage(NOT_FOUND);
         verifyNoInteractions(customDomainSetup);
-        verify(rateLimiter, never()).tryAcquire(eq("domain-check:domain:12"), eq(1), any(Duration.class));
+        verify(rateLimiter, never()).tryAcquire(eq("domain-retry:domain:12"), eq(1), any(Duration.class));
     }
 
     @Test
-    void theOwnerRetryIsRateLimitedLikeCheckNow() {
+    void aSecondRetryWithinFifteenSecondsIsTooSoon() {
         final var failed = domain(12L, CustomDomainStatus.ERROR, NOW);
         failed.setProblem(DomainProblem.PROVISIONING_FAILED);
         when(customDomainRepository.findByIdAndOwnerId(12L, 7L)).thenReturn(Optional.of(failed));
-        when(rateLimiter.tryAcquire("domain-check:domain:12", 1, Duration.ofSeconds(15)))
-                .thenReturn(false)
+        when(rateLimiter.tryAcquire("domain-retry:domain:12", 1, Duration.ofSeconds(15))).thenReturn(true, false);
+
+        customDomainService.retry(12L);
+
+        assertThatThrownBy(() -> customDomainService.retry(12L))
+                .isInstanceOf(RateLimitExceededException.class)
+                .hasMessage("Wait a few seconds and try again.");
+        verify(customDomainSetup, times(1)).retry(failed);
+    }
+
+    @Test
+    void theCheckNowLimitNeverHoldsARetryBack() {
+        final var failed = domain(12L, CustomDomainStatus.ERROR, NOW);
+        failed.setProblem(DomainProblem.CNAME_REMOVED);
+        when(customDomainRepository.findByIdAndOwnerId(12L, 7L)).thenReturn(Optional.of(failed));
+        when(rateLimiter.tryAcquire("domain-check:domain:12", 1, Duration.ofSeconds(15))).thenReturn(false);
+        when(rateLimiter.tryAcquire("domain-retry:domain:12", 1, Duration.ofSeconds(15))).thenReturn(true);
+
+        customDomainService.get(12L);
+        customDomainService.retry(12L);
+
+        verify(customDomainSetup).retry(failed);
+        verify(rateLimiter, times(1)).tryAcquire("domain-check:domain:12", 1, Duration.ofSeconds(15));
+    }
+
+    @Test
+    void aRetryGoesAheadWhenTheLimiterIsDown() {
+        final var failed = domain(12L, CustomDomainStatus.ERROR, NOW);
+        failed.setProblem(DomainProblem.PROVISIONING_FAILED);
+        when(customDomainRepository.findByIdAndOwnerId(12L, 7L)).thenReturn(Optional.of(failed));
+        when(rateLimiter.tryAcquire("domain-retry:domain:12", 1, Duration.ofSeconds(15)))
                 .thenThrow(new RateLimiterUnavailableException(new IllegalStateException("redis down")));
 
-        assertThat(customDomainService.retry(12L).status()).isEqualTo(CustomDomainStatus.ERROR);
-        assertThat(customDomainService.retry(12L).status()).isEqualTo(CustomDomainStatus.ERROR);
+        customDomainService.retry(12L);
 
-        verifyNoInteractions(customDomainSetup);
+        verify(customDomainSetup).retry(failed);
     }
 
     @Test
@@ -517,7 +546,7 @@ class DefaultCustomDomainServiceTest {
         final var failed = domain(12L, CustomDomainStatus.ERROR, NOW);
         failed.setProblem(DomainProblem.PROVISIONING_FAILED);
         when(customDomainRepository.findByIdAndOwnerId(12L, 7L)).thenReturn(Optional.of(failed));
-        when(rateLimiter.tryAcquire("domain-check:domain:12", 1, Duration.ofSeconds(15))).thenReturn(true);
+        when(rateLimiter.tryAcquire("domain-retry:domain:12", 1, Duration.ofSeconds(15))).thenReturn(true);
         doThrow(new CustomDomainCapacityException("Cap reached: 90 of 90 custom domains are in use. Delete one or raise the cap (APP_DOMAINS_MAX_ACTIVE)."))
                 .when(customDomainSetup).retry(failed);
 
