@@ -38,6 +38,10 @@
 # links give no line, the fourth gives the alert-only line and nothing is held). Every setting is reset.
 # Section 25 checks the Campaigns API (list, detail, links, block-preview, allow and a new link that stays active) and abuse reports
 # (prepare with seeded rdap:info: values, so no registry is asked, and the /reported upsert with its audit row).
+# Section 26 checks the warning page (a flagged link without an account answers 200 with no-store, the CSP and no cookie, counts one click and
+# redirects again once the admin clears the flag), the maximums for links without an account (ANONYMOUS_EXPIRY_DAYS and ANONYMOUS_VISIT_LIMIT),
+# the human check without Turnstile keys (HUMAN_CHECK is on but unavailable, no check runs; no key is ever set in this script) and the
+# Google and GitHub sign-in switches. Every setting is reset.
 #
 #   scripts/mcp-e2e.sh                         builds the jar, then runs every step
 #   MCP_E2E_SKIP_BUILD=1 scripts/mcp-e2e.sh    reuses target/url-shortener-*.jar
@@ -1779,5 +1783,149 @@ wait_until 15 "the new link added to the allowed campaign" campaign_link_added
 expect_eq "$(psql_value "select active || ' ' || coalesce(block_reason, 'none') from url where short_url = '$ALLOWED_ALIAS';")" "true none" "Postgres has it active and not blocked"
 admin_get "$CAMPAIGNS_URL/$CAMPAIGN_ID"
 expect_eq "$(jq -c '.campaign | [.status, .holding, .links]' <<<"$HTTP_BODY")" '["ALLOWED",false,{"total":5,"active":5,"held":0,"blocked":0}]' "the campaign counts five active links and holds none"
+
+section "26. Moderation: the warning page, the limits, the human check and the sign-in switches"
+anonymous_create() {
+    local address=$1 url=$2 extra=${3-}
+    http -X POST "$BASE/api/v1/urls" -H "CF-Connecting-IP: $address" -H 'Content-Type: application/json' \
+        -d "{\"longUrl\":\"$url\"$extra}"
+}
+cache_entries() {
+    docker exec "$REDIS_CONTAINER" redis-cli --raw exists "urls::$1"
+}
+link_clicks() {
+    psql_value "select coalesce(sum(s.clicks), 0) from link_daily_stats s join url u on u.id = s.url_id where u.short_url = '$1';"
+}
+link_has_clicks() {
+    [[ $(link_clicks "$1") == "$2" ]]
+}
+
+echo "  --- the warning page"
+anonymous_create 203.0.113.61 'https://e2e-warning-page.com/landing?a=1&b=2'
+expect_eq "$HTTP_STATUS" 200 "a link without an account to https://e2e-warning-page.com/landing"
+WARN_ALIAS=$(jq -r .shortUrl <<<"$HTTP_BODY")
+WARN_ID=$(psql_value "select id from url where short_url = '$WARN_ALIAS';")
+expect_eq "$(psql_value "select active || ' ' || (owner_id is null) from url where id = $WARN_ID;")" "true true" "$WARN_ALIAS is active and has no owner"
+expect_eq "$(cache_entries "$WARN_ALIAS")" 1 "the create cached urls::$WARN_ALIAS for an hour"
+http -A "$BROWSER_USER_AGENT" "$BASE/$WARN_ALIAS"
+expect_eq "$HTTP_STATUS $HTTP_LOCATION" "302 https://e2e-warning-page.com/landing?a=1&b=2" "without the flag GET /$WARN_ALIAS is a plain 302 to the destination"
+psql_query "update url set warning_page = true where id = $WARN_ID;"
+expect_eq "$(psql_value "select warning_page from url where id = $WARN_ID;")" t "Postgres has warning_page = true on it"
+docker exec "$REDIS_CONTAINER" redis-cli --raw del "urls::$WARN_ALIAS" >/dev/null
+expect_eq "$(cache_entries "$WARN_ALIAS")" 0 "the cached entry is gone, so the next click reads the flag from Postgres"
+CLICKS_BEFORE=$(link_clicks "$WARN_ALIAS")
+http -A "$BROWSER_USER_AGENT" "$BASE/$WARN_ALIAS"
+show "$(printf '%s\n' "$HTTP_HEADERS" | grep -iE '^(HTTP|cache-control|content-security-policy|content-type|set-cookie|location)')"
+expect_eq "$HTTP_STATUS" 200 "GET /$WARN_ALIAS answers the warning page, not a redirect"
+expect_eq "$HTTP_LOCATION" "" "with no Location header"
+expect_eq "$(header_value cache-control)" "no-store, no-transform" "Cache-Control: no-store, no-transform"
+expect_eq "$(header_value content-security-policy)" "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'" \
+    "the CSP allows no script, image or frame"
+expect_eq "$(header_value content-type)" "text/html;charset=UTF-8" "Content-Type: text/html;charset=UTF-8"
+expect_eq "$(header_value x-robots-tag)" "noindex, nofollow" "X-Robots-Tag: noindex, nofollow"
+expect_eq "$(header_value referrer-policy)" "no-referrer" "Referrer-Policy: no-referrer"
+expect_eq "$(header_value set-cookie)" "" "no Set-Cookie"
+expect_contains "$HTTP_BODY" "Continue to e2e-warning-page.com" "the button names the destination host"
+expect_contains "$HTTP_BODY" 'href="https://e2e-warning-page.com/landing?a=1&amp;b=2"' "and links to the destination itself"
+expect_contains "$HTTP_BODY" "$FRONTEND_URL/report?s=$WARN_ALIAS" "Report this link points at the frontend's report page"
+[[ $HTTP_BODY != *"<script"* ]] || fail "the warning page has a <script"
+ok "the page has no <script"
+wait_until 30 "the click behind the warning page" link_has_clicks "$WARN_ALIAS" "$(( CLICKS_BEFORE + 1 ))"
+expect_eq "$(link_clicks "$WARN_ALIAS")" "$(( CLICKS_BEFORE + 1 ))" "serving the page counted exactly one click"
+expect_eq "$(cache_entries "$WARN_ALIAS")" 1 "the page cached the link with its flag"
+http -A "$BROWSER_USER_AGENT" "$BASE/$WARN_ALIAS"
+expect_eq "$HTTP_STATUS $(header_value cache-control)" "200 no-store, no-transform" "the cached path answers the same page"
+http -I -A "$BROWSER_USER_AGENT" "$BASE/$WARN_ALIAS"
+expect_eq "$HTTP_STATUS $(header_value cache-control)" "200 no-store, no-transform" "HEAD answers the same headers"
+http -X DELETE "$BASE/api/v1/admin/urls/$WARN_ID/warning-page" -H "Authorization: Bearer $SETTINGS_JWT"
+expect_eq "$HTTP_STATUS" 403 "DELETE /api/v1/admin/urls/$WARN_ID/warning-page as $USER_EMAIL"
+http -X DELETE "$BASE/api/v1/admin/urls/$WARN_ID/warning-page" -H "Authorization: Bearer $ADMIN_JWT"
+expect_eq "$HTTP_STATUS $(jq -r '[.id, .shortUrl, .active] | map(tostring) | join(",")' <<<"$HTTP_BODY")" "200 $WARN_ID,$WARN_ALIAS,true" "DELETE /api/v1/admin/urls/$WARN_ID/warning-page as admin"
+expect_eq "$(psql_value "select warning_page from url where id = $WARN_ID;")" f "Postgres has the flag cleared"
+expect_eq "$(psql_value "select target_type || ' ' || target_identifier || ' ' || details || ' ' || performed_by from audit_log where action = 'CLEAR_WARNING_PAGE';")" \
+    "Url $WARN_ID shortUrl: $WARN_ALIAS, links: 1 admin@localhost" "the audit log has one CLEAR_WARNING_PAGE row"
+http -A "$BROWSER_USER_AGENT" "$BASE/$WARN_ALIAS"
+expect_eq "$HTTP_STATUS $HTTP_LOCATION" "302 https://e2e-warning-page.com/landing?a=1&b=2" "afterwards GET /$WARN_ALIAS is a plain 302 again"
+expect_eq "$(header_value set-cookie)" "" "with no Set-Cookie"
+http -X DELETE "$BASE/api/v1/admin/urls/999999999/warning-page" -H "Authorization: Bearer $ADMIN_JWT"
+expect_eq "$HTTP_STATUS" 404 "clearing the flag of a link that doesn't exist is a 404"
+
+echo "  --- the limits on links without an account"
+http "$BASE/api/v1/public/settings"
+expect_eq "$(jq -c '[.anonymousExpiryDays, .anonymousVisitLimit]' <<<"$HTTP_BODY")" "[null,null]" "no maximum is set to begin with"
+put_setting ANONYMOUS_EXPIRY_DAYS 30
+expect_eq "$HTTP_STATUS $(jq -c '[.value, .changed, .unit]' <<<"$HTTP_BODY")" '200 [30,true,"days"]' "PUT /api/v1/admin/settings/ANONYMOUS_EXPIRY_DAYS 30"
+http "$BASE/api/v1/public/settings"
+expect_eq "$(jq -r .anonymousExpiryDays <<<"$HTTP_BODY")" 30 "GET /api/v1/public/settings: anonymousExpiryDays is 30"
+anonymous_create 203.0.113.62 'https://e2e-limits.com/expiry'
+expect_eq "$HTTP_STATUS" 200 "a link without an account with the end date set"
+LIMIT_EXPIRY=$(jq -r .expirationDate <<<"$HTTP_BODY")
+show "expirationDate $LIMIT_EXPIRY"
+expect_eq "$(python3 -c '
+import sys
+from datetime import datetime, timedelta
+end = datetime.fromisoformat(sys.argv[1])
+print("within" if abs(end - (datetime.now() + timedelta(days=30))) < timedelta(minutes=1) else "off by " + str(end - datetime.now()))
+' "$LIMIT_EXPIRY")" within "the link ends within a minute of now + 30 days"
+anonymous_create 203.0.113.62 'https://e2e-limits.com/expiry-later' ',"expirationDate":"2099-01-01T00:00:00"'
+expect_eq "$HTTP_STATUS" 200 "a link without an account asking to end in 2099"
+expect_eq "$(jq -r '.expirationDate | startswith("2099")' <<<"$HTTP_BODY")" false "its end is cut back to 30 days"
+put_setting ANONYMOUS_VISIT_LIMIT 5
+expect_eq "$HTTP_STATUS $(jq -c '[.value, .changed, .unit]' <<<"$HTTP_BODY")" '200 [5,true,"visits"]' "PUT /api/v1/admin/settings/ANONYMOUS_VISIT_LIMIT 5"
+anonymous_create 203.0.113.62 'https://e2e-limits.com/visits'
+expect_eq "$HTTP_STATUS $(jq -r .visitLimit <<<"$HTTP_BODY")" "200 5" "a link without an account gets visitLimit 5"
+anonymous_create 203.0.113.62 'https://e2e-limits.com/visits-more' ',"visitLimit":500'
+expect_eq "$(jq -r .visitLimit <<<"$HTTP_BODY")" 5 "and asking for 500 is cut back to 5"
+http -X POST "$BASE/api/v1/urls" -H "Authorization: Bearer $SETTINGS_JWT" -H 'Content-Type: application/json' \
+    -d '{"longUrl":"https://e2e-limits.com/signed-in","visitLimit":500}'
+expect_eq "$HTTP_STATUS $(jq -r .visitLimit <<<"$HTTP_BODY")" "200 500" "a signed-in user's link keeps the 500 they asked for"
+reset_setting ANONYMOUS_EXPIRY_DAYS
+expect_eq "$HTTP_STATUS $(jq -c '[.value, .changed]' <<<"$HTTP_BODY")" "200 [null,false]" "DELETE ANONYMOUS_EXPIRY_DAYS resets it"
+reset_setting ANONYMOUS_VISIT_LIMIT
+expect_eq "$HTTP_STATUS $(jq -c '[.value, .changed]' <<<"$HTTP_BODY")" "200 [null,false]" "DELETE ANONYMOUS_VISIT_LIMIT resets it"
+http "$BASE/api/v1/public/settings"
+expect_eq "$(jq -c '[.anonymousExpiryDays, .anonymousVisitLimit]' <<<"$HTTP_BODY")" "[null,null]" "GET /api/v1/public/settings: both maximums are null again"
+anonymous_create 203.0.113.62 'https://e2e-limits.com/free'
+expect_eq "$(jq -c '[.expirationDate, .visitLimit]' <<<"$HTTP_BODY")" "[null,null]" "a link without an account is unlimited again"
+
+echo "  --- the human check without keys"
+http "$BASE/api/v1/admin/settings" -H "Authorization: Bearer $ADMIN_JWT"
+expect_eq "$(jq -c '.[] | select(.key == "HUMAN_CHECK") | [.value, .available, .unavailableReason]' <<<"$HTTP_BODY")" \
+    "[true,false,\"Turnstile keys aren't set, so no check runs.\"]" "HUMAN_CHECK is on by default but unavailable: the app has no Turnstile keys"
+http "$BASE/api/v1/public/settings"
+expect_eq "$(jq -c '[.humanCheck, .turnstileSiteKey]' <<<"$HTTP_BODY")" "[false,null]" "GET /api/v1/public/settings: humanCheck is false, no site key"
+anonymous_create 203.0.113.63 'https://e2e-human-check.com/a'
+expect_eq "$HTTP_STATUS" 200 "a link without an account and without a token is made"
+http -X POST "$BASE/api/v1/urls" -H 'CF-Connecting-IP: 203.0.113.63' -H 'X-Turnstile-Token: not-a-token' -H 'Content-Type: application/json' \
+    -d '{"longUrl":"https://e2e-human-check.com/b"}'
+expect_eq "$HTTP_STATUS" 200 "and one with a made-up token, which nothing looks at"
+expect_eq "$(grep -ci 'turnstile\|siteverify' "$WORK/app.log" || true)" 0 "the app log has no Turnstile or siteverify line: no check ran"
+
+echo "  --- the sign-in switches"
+http "$BASE/api/v1/admin/settings" -H "Authorization: Bearer $ADMIN_JWT"
+expect_eq "$(jq -c '[.[] | select(.key == "GOOGLE_SIGN_IN") | .value, .available]' <<<"$HTTP_BODY")" "[true,true]" "GOOGLE_SIGN_IN is on and available (the e2e app has a Google registration)"
+expect_eq "$(jq -c '.[] | select(.key == "GITHUB_SIGN_IN") | [.value, .available, .unavailableReason]' <<<"$HTTP_BODY")" \
+    "[true,false,\"GitHub sign-in isn't configured.\"]" "GITHUB_SIGN_IN is on but unavailable: the e2e app has no GitHub registration"
+http "$BASE/api/v1/public/settings"
+expect_eq "$(jq -c '[.googleSignIn, .githubSignIn]' <<<"$HTTP_BODY")" "[true,false]" "GET /api/v1/public/settings: Google is offered, GitHub is not"
+put_setting GOOGLE_SIGN_IN false
+expect_eq "$HTTP_STATUS $(jq -c '[.value, .changed, .changedBy]' <<<"$HTTP_BODY")" '200 [false,true,"admin@localhost"]' "PUT /api/v1/admin/settings/GOOGLE_SIGN_IN false"
+http "$BASE/api/v1/public/settings"
+expect_eq "$(jq -c '[.googleSignIn, .githubSignIn]' <<<"$HTTP_BODY")" "[false,false]" "GET /api/v1/public/settings: googleSignIn is false"
+put_setting GITHUB_SIGN_IN false
+expect_eq "$HTTP_STATUS $(jq -c '[.value, .changed]' <<<"$HTTP_BODY")" "200 [false,true]" "PUT /api/v1/admin/settings/GITHUB_SIGN_IN false"
+http "$BASE/api/v1/public/settings"
+expect_eq "$(jq -r .githubSignIn <<<"$HTTP_BODY")" false "GET /api/v1/public/settings: githubSignIn is false (unavailable here either way)"
+reset_setting GOOGLE_SIGN_IN
+expect_eq "$HTTP_STATUS $(jq -c '[.value, .changed]' <<<"$HTTP_BODY")" "200 [true,false]" "DELETE GOOGLE_SIGN_IN resets it"
+reset_setting GITHUB_SIGN_IN
+expect_eq "$HTTP_STATUS $(jq -c '[.value, .changed]' <<<"$HTTP_BODY")" "200 [true,false]" "DELETE GITHUB_SIGN_IN resets it"
+http "$BASE/api/v1/public/settings"
+expect_eq "$(jq -c '[.googleSignIn, .githubSignIn]' <<<"$HTTP_BODY")" "[true,false]" "GET /api/v1/public/settings: back to Google offered, GitHub not"
+
+echo "  --- every setting is back to its default"
+http "$BASE/api/v1/admin/settings" -H "Authorization: Bearer $ADMIN_JWT"
+expect_eq "$(jq -r '[.[] | select(.changed)] | length' <<<"$HTTP_BODY")" 0 "no setting is left changed"
+expect_eq "$(psql_value "select count(*) from app_setting;")" 0 "app_setting holds no row"
 
 section "Done: every step passed"

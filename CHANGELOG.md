@@ -16,6 +16,9 @@ A human check and a warning page for links made without an account, limits on th
 ### 🔒 Privacy
 - The Turnstile check processes browser and network signals for that check only. hrva.cc stores nothing from it.
 
+### 🌐 Site
+- The help page for links made without an account now covers limits, the human check and the warning page.
+
 ### 🔧 Admin
 - Links made without an account to random-looking new domains go to the review queue.
 - The warning page can be cleared on a link in All URLs.

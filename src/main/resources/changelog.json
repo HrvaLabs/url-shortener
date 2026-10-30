@@ -24,6 +24,13 @@
           ]
         },
         {
+          "title": "Site",
+          "icon": "globe",
+          "items": [
+            "The help page for links made without an account now covers limits, the human check and the warning page."
+          ]
+        },
+        {
           "title": "Admin",
           "icon": "wrench",
           "items": [
