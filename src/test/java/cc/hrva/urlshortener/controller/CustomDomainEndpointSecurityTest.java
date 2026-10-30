@@ -451,7 +451,7 @@ class CustomDomainEndpointSecurityTest {
     @Test
     void twoAppliesAtOnceLetOnlyOneThrough() throws Exception {
         bothPassTheLinkCheckTogether();
-        bothReachTheHostnameCheck(Duration.ofSeconds(1));
+        final var arrived = bothReachTheHostnameCheck(Duration.ofSeconds(1));
 
         final var first = CompletableFuture.supplyAsync(() -> appliedAnswer(ANA_TOKEN, "one.example.com"));
         final var second = CompletableFuture.supplyAsync(() -> appliedAnswer(ANA_TOKEN, "two.example.com"));
@@ -462,12 +462,13 @@ class CustomDomainEndpointSecurityTest {
                 .satisfies(refused -> assertThat(refused.getContentAsString()).isEqualTo(OVER_THE_LIMIT));
         assertThat(countOf(ANA)).isOne();
         assertThat(committedEvents.events()).filteredOn(DomainApplied.class::isInstance).hasSize(1);
+        assertThat(arrived.getCount()).isOne();
     }
 
     @Test
     void twoUsersApplyingForOneHostnameAtOnce() throws Exception {
         bothPassTheLinkCheckTogether();
-        bothReachTheHostnameCheck(Duration.ofSeconds(10));
+        final var arrived = bothReachTheHostnameCheck(Duration.ofSeconds(10));
 
         final var first = CompletableFuture.supplyAsync(() -> appliedAnswer(ANA_TOKEN, "go.example.com"));
         final var second = CompletableFuture.supplyAsync(() -> appliedAnswer(BOB_TOKEN, "go.example.com"));
@@ -479,6 +480,7 @@ class CustomDomainEndpointSecurityTest {
         assertThat(jdbcTemplate.queryForObject("select count(*) from custom_domain where hostname = 'go.example.com'", Integer.class)).isOne();
         assertThat(committedEvents.events()).filteredOn(DomainApplied.class::isInstance).hasSize(1);
         verify(customDomainRepository, times(2)).findByHostnameKey("go.example.com");
+        assertThat(arrived.getCount()).isZero();
     }
 
     private void bothPassTheLinkCheckTogether() {
@@ -489,7 +491,7 @@ class CustomDomainEndpointSecurityTest {
         });
     }
 
-    private void bothReachTheHostnameCheck(final Duration longestWait) {
+    private CountDownLatch bothReachTheHostnameCheck(final Duration longestWait) {
         final var arrived = new CountDownLatch(2);
         doAnswer(invocation -> {
             final var found = mockingDetails(customDomainRepository).getMockCreationSettings().getDefaultAnswer().answer(invocation);
@@ -499,6 +501,7 @@ class CustomDomainEndpointSecurityTest {
             }
             return found;
         }).when(customDomainRepository).findByHostnameKey(anyString());
+        return arrived;
     }
 
     private MockHttpServletResponse appliedAnswer(final String token, final String hostname) {
