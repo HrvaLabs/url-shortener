@@ -10,6 +10,7 @@ import cc.hrva.urlshortener.dto.UserDto;
 import cc.hrva.urlshortener.dto.UserSearchDto;
 import cc.hrva.urlshortener.dto.UserUpdateDto;
 import cc.hrva.urlshortener.model.User;
+import java.time.LocalDateTime;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 
@@ -23,7 +24,7 @@ public interface UserService {
     void deleteUserById(Long id);
     void deleteOwnAccount(DeleteAccountDto deleteAccountDto);
     DataExportDto exportMyData();
-    void userHasLoggedIn(User user);
+    void userHasLoggedIn(User user, LocalDateTime signedInAt);
     void deactivateUnusedUserAccounts();
     void deactivate(User user);
     boolean reactivate(long userId);

@@ -260,7 +260,7 @@ class PasskeySecondStepFlowsTest {
         verify(loginAttemptService).loginFailed("2fa:" + alice.getId());
         verify(loginAttemptService).loginFailed(CLIENT_IP);
         verify(loginAttemptService, never()).loginSucceeded(startsWith("2fa:"));
-        verify(userService, never()).userHasLoggedIn(any());
+        verify(userService, never()).userHasLoggedIn(any(), any());
         assertThat(flows.stored(bobsPasskey).getLastUsedAt()).isNull();
         assertThat(output)
                 .contains("Passkey of another account user id=" + alice.getId() + " credential="
@@ -291,7 +291,7 @@ class PasskeySecondStepFlowsTest {
         verify(loginAttemptService).loginFailed(CLIENT_IP);
         verify(loginAttemptService, never()).loginFailed("2fa:" + bob.getId());
         verify(loginAttemptService, never()).loginSucceeded(startsWith("2fa:"));
-        verify(userService, never()).userHasLoggedIn(any());
+        verify(userService, never()).userHasLoggedIn(any(), any());
     }
 
     @Test

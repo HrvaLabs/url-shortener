@@ -34,7 +34,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
-import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
@@ -116,7 +115,7 @@ class DefaultSignInServiceTest {
         assertThat(response.getBody().getUser()).isEqualTo(userDto);
         assertThat(response.getBody().getTwoStepRequired()).isNull();
         assertThat(response.getBody().getPendingToken()).isNull();
-        verify(userService).userHasLoggedIn(user);
+        verify(userService).userHasLoggedIn(eq(user), any(LocalDateTime.class));
 
         final var authentication = ArgumentCaptor.forClass(Authentication.class);
         verify(tokenProvider).createToken(authentication.capture(), eq(36_000L));
@@ -135,10 +134,11 @@ class DefaultSignInServiceTest {
 
         signInService.signIn(user, method, false);
 
+        final var signedInAt = ArgumentCaptor.forClass(LocalDateTime.class);
         final var order = inOrder(userService, signInMethodService);
-        order.verify(userService).userHasLoggedIn(user);
-        order.verify(signInMethodService).record(eq(7L), eq(method),
-                argThat(usedAt -> !usedAt.isBefore(before) && !usedAt.isAfter(LocalDateTime.now())));
+        order.verify(userService).userHasLoggedIn(eq(user), signedInAt.capture());
+        order.verify(signInMethodService).record(7L, method, signedInAt.getValue());
+        assertThat(signedInAt.getValue()).isBetween(before, LocalDateTime.now());
     }
 
     @Test

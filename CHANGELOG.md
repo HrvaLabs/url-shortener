@@ -12,11 +12,11 @@ Discord alerts when links made without an account share one URL shape or get bus
 - Searching your links waits until you stop typing, and stays in the address.
 - Your API keys are listed newest first, and expired or revoked keys a page at a time.
 
-### 🛡️ Security
+### 🔒 Security
 - Settings lists every way you've signed in, with when you last used it.
 
 ### 🔧 Admin
-- Discord alerts when links made without an account share one address shape across several domains.
+- Discord alerts when links made without an account share one URL shape across several domains.
 - Discord alerts when a link made without an account gets many clicks in a day, or when such links take most of the day's clicks. The daily email lists yesterday's busiest links made without an account.
 - Blocking many domains at once saves every block rule first, and asks you to try again if it stops halfway.
 - Every admin list can be searched and sorted, page by page.

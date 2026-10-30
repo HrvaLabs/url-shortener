@@ -384,8 +384,8 @@ public class DefaultUserService implements UserService {
 
     @Override
     @Transactional
-    public void userHasLoggedIn(final User user) {
-        user.userLoggedIn();
+    public void userHasLoggedIn(final User user, final LocalDateTime signedInAt) {
+        user.userLoggedIn(signedInAt);
         persistUser(user);
     }
 

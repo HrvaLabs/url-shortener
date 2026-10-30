@@ -38,10 +38,10 @@ class UserTest {
     @Test
     void shouldSetLastLoginOnUserLoggedIn() {
         final var user = new User();
-        user.userLoggedIn();
+        final var signedInAt = LocalDateTime.of(2026, 10, 30, 7, 15);
+        user.userLoggedIn(signedInAt);
 
-        assertThat(user.getLastLogin()).isNotNull();
-        assertThat(user.getLastLogin()).isBeforeOrEqualTo(LocalDateTime.now());
+        assertThat(user.getLastLogin()).isEqualTo(signedInAt);
     }
 
     @Test

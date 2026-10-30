@@ -1109,9 +1109,11 @@ class DefaultUserServiceTest {
         final var user = User.builder().id(1L).build();
         when(userRepository.save(user)).thenReturn(user);
 
-        userService.userHasLoggedIn(user);
+        final var signedInAt = LocalDateTime.of(2026, 10, 30, 7, 15);
 
-        assertThat(user.getLastLogin()).isNotNull();
+        userService.userHasLoggedIn(user, signedInAt);
+
+        assertThat(user.getLastLogin()).isEqualTo(signedInAt);
     }
 
     @Test

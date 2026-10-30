@@ -95,6 +95,20 @@ class AnonymousTrafficRepositoryTest {
     }
 
     @Test
+    void topCountryLeavesOutUnknownAndTor() {
+        final var link = savedLink("country-hidden");
+        final var hiddenOnly = savedLink("country-hidden-only");
+        breakdown(link, DAY, COUNTRY, "unknown", 60);
+        breakdown(link, DAY, COUNTRY, "tor", 50);
+        breakdown(link, DAY, COUNTRY, "PT", 3);
+        breakdown(hiddenOnly, DAY, COUNTRY, "unknown", 40);
+        breakdown(hiddenOnly, DAY, COUNTRY, "tor", 30);
+
+        assertThat(anonymousTrafficRepository.topCountry(link.getId(), DAY)).contains("PT");
+        assertThat(anonymousTrafficRepository.topCountry(hiddenOnly.getId(), DAY)).isEmpty();
+    }
+
+    @Test
     void busyLinksOrderByClicksAndStopAtTheLimit() {
         final var tiedFirst = savedLink("order-tied-1");
         final var tiedSecond = savedLink("order-tied-2");

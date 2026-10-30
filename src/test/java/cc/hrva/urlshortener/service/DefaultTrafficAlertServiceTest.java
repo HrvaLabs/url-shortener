@@ -27,6 +27,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.data.redis.RedisConnectionFailureException;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.transaction.annotation.Propagation;
@@ -85,6 +86,7 @@ class DefaultTrafficAlertServiceTest {
 
         verify(eventPublisher, times(1)).publishEvent(any(AdminAlertEvent.class));
         verify(eventPublisher).publishEvent(new AnonymousLinkBusy(ALERTED, 25, "PT"));
+        verify(anonymousTrafficRepository, times(1)).topCountry(42L, TODAY);
         assertThat(redis.keys()).containsExactly("traffic:link:2026-10-29:42");
         assertThat(redis.timeToLiveOfKeyContaining("traffic:link:2026-10-29:42")).isEqualTo(TWO_DAYS);
 
@@ -97,6 +99,7 @@ class DefaultTrafficAlertServiceTest {
 
         verify(eventPublisher, times(2)).publishEvent(any(AdminAlertEvent.class));
         verify(eventPublisher).publishEvent(new AnonymousLinkBusy(ALERTED, 26, null));
+        verify(anonymousTrafficRepository, times(1)).topCountry(42L, TOMORROW);
         assertThat(redis.keys()).containsExactlyInAnyOrder("traffic:link:2026-10-29:42", "traffic:link:2026-10-30:42");
     }
 
@@ -171,6 +174,24 @@ class DefaultTrafficAlertServiceTest {
         verify(anonymousTrafficRepository, never()).topCountry(any(Long.class), any());
         assertThat(output).containsOnlyOnce("Traffic check skipped day=2026-10-29 exception=org.springframework.data.redis.RedisConnectionFailureException")
                 .doesNotContain("redis.internal", "abc12", "example-login");
+    }
+
+    @Test
+    void aFailingTopCountryStillAlerts(final CapturedOutput output) {
+        final var other = new BusyLink(43L, "def34", "https://example-pay.top/login", 30);
+        when(anonymousTrafficRepository.busyAnonymousLinks(eq(TODAY), eq(25L), anyInt())).thenReturn(List.of(BUSY, other));
+        when(anonymousTrafficRepository.topCountry(42L, TODAY)).thenThrow(new DataAccessResourceFailureException("connection to db.internal:5432 refused"));
+        when(anonymousTrafficRepository.topCountry(43L, TODAY)).thenReturn(Optional.of("PT"));
+        when(anonymousTrafficRepository.dayClicks(TODAY)).thenReturn(new DayClicks(150, 120));
+
+        trafficAlertService.check();
+
+        verify(eventPublisher).publishEvent(new AnonymousLinkBusy(ALERTED, 25, null));
+        verify(eventPublisher).publishEvent(new AnonymousLinkBusy(new AlertedLink(43L, "def34", "example-pay.top", null, null), 30, "PT"));
+        verify(eventPublisher).publishEvent(new AnonymousTrafficShare(120, 150));
+        assertThat(redis.keys()).contains("traffic:link:2026-10-29:42", "traffic:link:2026-10-29:43");
+        assertThat(output).contains("Top country not read, alerting without it urlId=42 exception=org.springframework.dao.DataAccessResourceFailureException")
+                .doesNotContain("Traffic check skipped", "db.internal");
     }
 
     @Test

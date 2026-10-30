@@ -96,8 +96,8 @@ public class User {
         }
     }
 
-    public void userLoggedIn() {
-        this.lastLogin = LocalDateTime.now();
+    public void userLoggedIn(final LocalDateTime signedInAt) {
+        this.lastLogin = signedInAt;
     }
 
 }

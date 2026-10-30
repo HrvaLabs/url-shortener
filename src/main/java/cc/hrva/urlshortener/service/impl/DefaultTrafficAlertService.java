@@ -55,8 +55,7 @@ public class DefaultTrafficAlertService implements TrafficAlertService {
         final var linkClicks = appProperties.getTrafficAlerts().getLinkClicks();
         for (final var link : anonymousTrafficRepository.busyAnonymousLinks(day, linkClicks, MAX_BUSY_LINKS)) {
             if (firstToday(LINK_KEY_PREFIX + day + ":" + link.urlId())) {
-                final var topCountry = anonymousTrafficRepository.topCountry(link.urlId(), day).orElse(null);
-                eventPublisher.publishEvent(new AnonymousLinkBusy(alerted(link), link.clicks(), topCountry));
+                eventPublisher.publishEvent(new AnonymousLinkBusy(alerted(link), link.clicks(), topCountry(link.urlId(), day)));
                 log.info("Busy link without an account urlId={} clicks={}", link.urlId(), link.clicks());
             }
         }
@@ -71,6 +70,15 @@ public class DefaultTrafficAlertService implements TrafficAlertService {
         if (firstToday(SHARE_KEY_PREFIX + day)) {
             eventPublisher.publishEvent(new AnonymousTrafficShare(clicks.anonymous(), clicks.total()));
             log.info("Traffic share without an account anonymous={} total={}", clicks.anonymous(), clicks.total());
+        }
+    }
+
+    private String topCountry(final long urlId, final LocalDate day) {
+        try {
+            return anonymousTrafficRepository.topCountry(urlId, day).orElse(null);
+        } catch (final RuntimeException exception) {
+            log.warn("Top country not read, alerting without it urlId={} exception={}", urlId, exception.getClass().getName());
+            return null;
         }
     }
 

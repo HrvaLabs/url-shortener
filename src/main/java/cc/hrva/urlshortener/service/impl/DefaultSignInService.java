@@ -43,8 +43,9 @@ public class DefaultSignInService implements SignInService {
     @Override
     @Transactional
     public ResponseEntity<JWTTokenDto> signIn(final User user, final SignInMethod method, final boolean rememberMe) {
-        userService.userHasLoggedIn(user);
-        signInMethodService.record(user.getId(), method, LocalDateTime.now());
+        final var signedInAt = LocalDateTime.now();
+        userService.userHasLoggedIn(user, signedInAt);
+        signInMethodService.record(user.getId(), method, signedInAt);
 
         final var token = BEARER_PREFIX + tokenProvider.createToken(authenticationOf(user), validitySeconds(rememberMe));
         final var httpHeaders = new HttpHeaders();

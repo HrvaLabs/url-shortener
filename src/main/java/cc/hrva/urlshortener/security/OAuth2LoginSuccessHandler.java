@@ -127,14 +127,19 @@ public class OAuth2LoginSuccessHandler implements AuthenticationSuccessHandler {
             }
         }
 
+        final var method = SignInMethod.ofProvider(provider);
+        if (method.isEmpty()) {
+            log.warn("OAuth2 sign-in method not recorded, unrecognised provider={} user id={}", provider, user.getId());
+        }
+
         if (Boolean.TRUE.equals(user.getTwoStepEnabled())) {
-            redirectToSecondStep(response, user, SignInMethod.ofProvider(provider));
+            redirectToSecondStep(response, user, method.orElse(null));
             return;
         }
 
         final var signedInAt = LocalDateTime.now();
         userRepository.recordLastLogin(user.getId(), signedInAt);
-        signInMethodService.record(user.getId(), SignInMethod.ofProvider(provider), signedInAt);
+        method.ifPresent(signInMethod -> signInMethodService.record(user.getId(), signInMethod, signedInAt));
 
         final var springAuth = new UsernamePasswordAuthenticationToken(
                 user.getEmail(), null,

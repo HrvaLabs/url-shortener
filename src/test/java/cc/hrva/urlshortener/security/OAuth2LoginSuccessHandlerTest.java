@@ -171,6 +171,24 @@ class OAuth2LoginSuccessHandlerTest {
     }
 
     @Test
+    @ExtendWith(OutputCaptureExtension.class)
+    void anUnrecognisedProviderSignsInWithoutRecordingAMethod(final CapturedOutput output) throws Exception {
+        final var user = User.builder().id(1L).email("ok@example.com").active(true).emailVerified(true)
+                .authorities(Collections.singletonList(Authorities.builder().id(1L).name("ROLE_USER").build()))
+                .build();
+        when(oAuth2User.getAttribute("email")).thenReturn("ok@example.com");
+        when(userRepository.findByEmail("ok@example.com")).thenReturn(Optional.of(user));
+        when(tokenProvider.createToken(any())).thenReturn("jwt-token");
+
+        handler.onAuthenticationSuccess(request, response, signIn("facebook"));
+
+        verify(userRepository).recordLastLogin(eq(1L), any());
+        verify(response).sendRedirect(contains("http://fe/auth/callback?token=jwt-token"));
+        verifyNoInteractions(signInMethodService);
+        assertThat(output).contains("OAuth2 sign-in method not recorded, unrecognised provider=facebook user id=1").doesNotContain("ok@example.com");
+    }
+
+    @Test
     void aNewAccountIsRecordedWithItsProvider() throws Exception {
         when(oAuth2User.getAttribute("email")).thenReturn("octo@example.com");
         when(userRepository.findByEmail("octo@example.com")).thenReturn(Optional.empty());

@@ -37,6 +37,7 @@ public class AnonymousTrafficRepository {
     private static final String FIND_TOP_COUNTRY = """
             select dimension_value from link_daily_breakdown
             where url_id = :urlId and stat_date = :day and dimension = :dimension
+              and dimension_value not in ('unknown', 'tor')
             order by clicks desc, dimension_value
             fetch first 1 rows only
             """;

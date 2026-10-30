@@ -1,6 +1,7 @@
 package cc.hrva.urlshortener.model.enums;
 
 import java.util.Locale;
+import java.util.Optional;
 
 public enum SignInMethod {
 
@@ -9,15 +10,15 @@ public enum SignInMethod {
     GOOGLE,
     GITHUB;
 
-    public static SignInMethod ofProvider(final String provider) {
+    public static Optional<SignInMethod> ofProvider(final String provider) {
         if (provider == null) {
-            return PASSWORD;
+            return Optional.empty();
         }
 
         return switch (provider.toLowerCase(Locale.ROOT)) {
-            case "google" -> GOOGLE;
-            case "github" -> GITHUB;
-            default -> PASSWORD;
+            case "google" -> Optional.of(GOOGLE);
+            case "github" -> Optional.of(GITHUB);
+            default -> Optional.empty();
         };
     }
 
