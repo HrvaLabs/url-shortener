@@ -22,6 +22,7 @@ import cc.hrva.urlshortener.security.OAuth2LoginSuccessHandler;
 import cc.hrva.urlshortener.security.OAuth2LoginUserService;
 import cc.hrva.urlshortener.security.TokenProvider;
 import cc.hrva.urlshortener.service.AuditLogService;
+import cc.hrva.urlshortener.service.SettingsService;
 import cc.hrva.urlshortener.service.impl.DefaultSettingsService;
 import cc.hrva.urlshortener.service.settings.SettingDefaults;
 import cc.hrva.urlshortener.service.settings.SettingKey;
@@ -30,10 +31,13 @@ import com.nimbusds.jose.JOSEException;
 import com.nimbusds.jose.jwk.RSAKey;
 import com.nimbusds.jose.jwk.gen.RSAKeyGenerator;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.SpringBootConfiguration;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
@@ -48,10 +52,12 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.json.JsonCompareMode;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -60,6 +66,7 @@ import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -88,6 +95,9 @@ class AdminSettingsSecurityTest {
 
     @Autowired
     private MockMvc mockMvc;
+
+    @Autowired
+    private SettingsService settingsService;
 
     @MockitoBean
     private AppSettingRepository appSettingRepository;
@@ -128,6 +138,8 @@ class AdminSettingsSecurityTest {
     void setUp() {
         signedIn("admin-token", ADMIN, "ROLE_ADMIN");
         signedIn("user-token", USER, "ROLE_USER");
+        settingsService.refresh();
+        clearInvocations(appSettingRepository);
     }
 
     @Test
@@ -146,9 +158,19 @@ class AdminSettingsSecurityTest {
 
     @Test
     void anAdminTurnsASwitchOffAndItIsAuditedOnce() throws Exception {
+        final var rows = new ArrayList<AppSetting>();
+        when(appSettingRepository.save(any(AppSetting.class))).thenAnswer(invocation -> {
+            rows.add(invocation.getArgument(0));
+            return invocation.getArgument(0);
+        });
+        when(appSettingRepository.findAll()).thenAnswer(invocation -> List.copyOf(rows));
+
         mockMvc.perform(signedIn(put(ANONYMOUS_LINKS), "admin-token").content(OFF))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.key").value("ANONYMOUS_LINKS"));
+                .andExpect(jsonPath("$.key").value("ANONYMOUS_LINKS"))
+                .andExpect(jsonPath("$.value").value(false))
+                .andExpect(jsonPath("$.changed").value(true))
+                .andExpect(jsonPath("$.changedBy").value(ADMIN));
 
         verify(auditLogService).log(ADMIN, AuditAction.CHANGE_SETTING, "Setting", "ANONYMOUS_LINKS", "from: On, to: Off");
     }
@@ -171,6 +193,27 @@ class AdminSettingsSecurityTest {
         mockMvc.perform(signedIn(put(SETTINGS + "/CAMPAIGN_LINKS"), "admin-token").content("{\"value\":1}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.value").value("Use a number from 2 to 50."));
+
+        verifyNoInteractions(auditLogService);
+        verify(appSettingRepository, never()).save(any());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"{}", "{\"value\":null}"})
+    void aSwitchWithoutAValueIsABadRequestAndChangesNothing(final String body) throws Exception {
+        mockMvc.perform(signedIn(put(ANONYMOUS_LINKS), "admin-token").content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.value").value("Choose on or off."));
+
+        verifyNoInteractions(auditLogService);
+        verify(appSettingRepository, never()).save(any());
+    }
+
+    @Test
+    void aChangeWithoutABodyIsAMalformedRequest() throws Exception {
+        mockMvc.perform(signedIn(put(ANONYMOUS_LINKS), "admin-token"))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().json("{\"error\":\"Malformed request body\"}", JsonCompareMode.STRICT));
 
         verifyNoInteractions(auditLogService);
         verify(appSettingRepository, never()).save(any());
