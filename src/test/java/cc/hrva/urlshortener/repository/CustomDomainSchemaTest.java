@@ -18,6 +18,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -257,6 +258,30 @@ class CustomDomainSchemaTest {
     }
 
     @Test
+    void aStoppedErrorRowIsNeverDue() {
+        savedDomain(domain("stopped.example.com", CustomDomainStatus.ERROR).problem(DomainProblem.DNS_TIMED_OUT));
+        savedDomain(domain("failed.example.com", CustomDomainStatus.ERROR).problem(DomainProblem.PROVISIONING_FAILED));
+        final var rechecked = savedDomain(domain("recheck.example.com", CustomDomainStatus.ERROR).problem(DomainProblem.CNAME_REMOVED)
+                .nextCheckAt(NOW.minusMinutes(5)));
+
+        assertThat(customDomainRepository.findDueIds(CustomDomainStatus.ERROR, NOW, Limit.of(50))).containsExactly(rechecked.getId());
+    }
+
+    @Test
+    void aGuardedUpdateIsSeenByTheNextReadInTheSameTransaction() {
+        final var domain = savedDomain(domain("go.example.com", CustomDomainStatus.PENDING_REVIEW));
+        assertThat(customDomainRepository.findById(domain.getId())).map(CustomDomain::getStatus).contains(CustomDomainStatus.PENDING_REVIEW);
+
+        assertThat(customDomainRepository.markApproved(domain.getId(), "admin@localhost", null, NOW)).isOne();
+
+        assertThat(customDomainRepository.findById(domain.getId())).hasValueSatisfying(reread -> {
+            assertThat(reread.getStatus()).isEqualTo(CustomDomainStatus.APPROVED_PROVISIONING);
+            assertThat(reread.getReviewedBy()).isEqualTo("admin@localhost");
+            assertThat(reread.getNextCheckAt()).isEqualTo(NOW);
+        });
+    }
+
+    @Test
     void findDeletePendingIdsListsOnlyQueuedDeletes() {
         final var second = savedDomain(domain("b.example.com", CustomDomainStatus.DELETED).cloudflareId("cf-2").cloudflareDeletePending(true));
         savedDomain(domain("c.example.com", CustomDomainStatus.DELETED).cloudflareId("cf-3").hostnameKey(null));
@@ -444,13 +469,18 @@ class CustomDomainSchemaTest {
         final var transaction = new TransactionTemplate(transactionManager);
         final var barrier = new CyclicBarrier(2);
 
-        final var first = CompletableFuture.supplyAsync(() -> lockedFor200Milliseconds(transaction, barrier));
-        final var second = CompletableFuture.supplyAsync(() -> lockedFor200Milliseconds(transaction, barrier));
+        final var executor = Executors.newFixedThreadPool(2);
+        try {
+            final var first = CompletableFuture.supplyAsync(() -> lockedFor200Milliseconds(transaction, barrier), executor);
+            final var second = CompletableFuture.supplyAsync(() -> lockedFor200Milliseconds(transaction, barrier), executor);
 
-        final var sections = List.of(first.get(30, TimeUnit.SECONDS), second.get(30, TimeUnit.SECONDS)).stream()
-                .sorted(Comparator.comparingLong(CriticalSection::enteredAt))
-                .toList();
-        assertThat(sections.get(1).enteredAt()).isGreaterThanOrEqualTo(sections.get(0).leftAt());
+            final var sections = List.of(first.get(30, TimeUnit.SECONDS), second.get(30, TimeUnit.SECONDS)).stream()
+                    .sorted(Comparator.comparingLong(CriticalSection::enteredAt))
+                    .toList();
+            assertThat(sections.get(1).enteredAt()).isGreaterThanOrEqualTo(sections.get(0).leftAt());
+        } finally {
+            executor.shutdownNow();
+        }
     }
 
     @Test

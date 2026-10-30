@@ -21,10 +21,12 @@ import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
+import org.hibernate.annotations.BatchSize;
 import org.hibernate.annotations.DynamicUpdate;
 
 @Entity
 @DynamicUpdate
+@BatchSize(size = 50)
 @Getter
 @Setter
 @Builder

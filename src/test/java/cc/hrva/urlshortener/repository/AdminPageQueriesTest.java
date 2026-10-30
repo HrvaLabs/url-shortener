@@ -150,6 +150,23 @@ class AdminPageQueriesTest {
     }
 
     @Test
+    void anOwnersLinksLoadTheirDomainsInOneBatch() {
+        onDomain(domain("a.example.com"), "s0");
+        onDomain(domain("b.example.com"), "s5");
+        onDomain(domain("c.example.com"), "s10");
+        entityManager.flush();
+        entityManager.clear();
+        final var owner = userRepository.findAll().stream().filter(user -> user.getEmail().equals("owner0@example.com")).findFirst().orElseThrow();
+        entityManager.clear();
+        statistics.clear();
+
+        final var links = urlRepository.findAllByOwner(owner, PageRequest.of(0, 10)).getContent();
+
+        assertThat(links).extracting(url -> url.getDomain().getHostname()).containsExactlyInAnyOrder("a.example.com", "b.example.com", "c.example.com");
+        assertThat(statistics.getPrepareStatementCount()).isEqualTo(4);
+    }
+
+    @Test
     void anAdminUserPageLoadsEveryUsersRolesInOneQuery() {
         final var json = JsonMapper.builder().build().writeValueAsString(userRepository.findAll(PageRequest.of(0, 10)).getContent());
 

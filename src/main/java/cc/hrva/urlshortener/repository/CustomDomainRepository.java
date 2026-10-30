@@ -41,14 +41,15 @@ public interface CustomDomainRepository extends JpaRepository<CustomDomain, Long
 
     @Query("""
             select d.id from CustomDomain d
-            where d.status = :status and (d.nextCheckAt is null or d.nextCheckAt <= :now)
+            where d.status = :status
+              and ((d.nextCheckAt is null and d.status <> cc.hrva.urlshortener.model.enums.CustomDomainStatus.ERROR) or d.nextCheckAt <= :now)
             order by d.nextCheckAt asc nulls first, d.id""")
     List<Long> findDueIds(@Param("status") CustomDomainStatus status, @Param("now") LocalDateTime now, Limit limit);
 
     @Query("select d.id from CustomDomain d where d.cloudflareDeletePending = true order by d.id")
     List<Long> findDeletePendingIds(Limit limit);
 
-    @Modifying
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Transactional
     @Query("""
             update CustomDomain d
@@ -57,7 +58,7 @@ public interface CustomDomainRepository extends JpaRepository<CustomDomain, Long
             where d.id = :id and d.status = cc.hrva.urlshortener.model.enums.CustomDomainStatus.PENDING_REVIEW""")
     int markApproved(@Param("id") long id, @Param("reviewedBy") String reviewedBy, @Param("note") String note, @Param("now") LocalDateTime now);
 
-    @Modifying
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Transactional
     @Query("""
             update CustomDomain d
@@ -66,7 +67,7 @@ public interface CustomDomainRepository extends JpaRepository<CustomDomain, Long
             where d.id = :id and d.status = cc.hrva.urlshortener.model.enums.CustomDomainStatus.PENDING_REVIEW""")
     int markRejected(@Param("id") long id, @Param("reviewedBy") String reviewedBy, @Param("note") String note, @Param("now") LocalDateTime now);
 
-    @Modifying
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Transactional
     @Query("""
             update CustomDomain d
@@ -76,7 +77,7 @@ public interface CustomDomainRepository extends JpaRepository<CustomDomain, Long
     int recordCreated(@Param("id") long id, @Param("cloudflareId") String cloudflareId, @Param("now") LocalDateTime now,
                       @Param("nextCheckAt") LocalDateTime nextCheckAt);
 
-    @Modifying
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Transactional
     @Query("""
             update CustomDomain d
@@ -91,7 +92,7 @@ public interface CustomDomainRepository extends JpaRepository<CustomDomain, Long
     int recordProvisioningFailure(@Param("id") long id, @Param("error") String error, @Param("nextCheckAt") LocalDateTime nextCheckAt,
                                   @Param("now") LocalDateTime now);
 
-    @Modifying
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Transactional
     @Query("""
             update CustomDomain d
@@ -104,7 +105,7 @@ public interface CustomDomainRepository extends JpaRepository<CustomDomain, Long
                     @Param("lastError") String lastError, @Param("activatedAt") LocalDateTime activatedAt,
                     @Param("nextCheckAt") LocalDateTime nextCheckAt, @Param("now") LocalDateTime now);
 
-    @Modifying
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Transactional
     @Query("""
             update CustomDomain d
@@ -118,7 +119,7 @@ public interface CustomDomainRepository extends JpaRepository<CustomDomain, Long
     int markDisabled(@Param("id") long id, @Param("expectedStatus") CustomDomainStatus expectedStatus, @Param("reason") DomainDisableReason reason,
                      @Param("note") String note, @Param("now") LocalDateTime now);
 
-    @Modifying
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Transactional
     @Query("""
             update CustomDomain d
@@ -127,7 +128,7 @@ public interface CustomDomainRepository extends JpaRepository<CustomDomain, Long
             where d.id = :id and d.status = cc.hrva.urlshortener.model.enums.CustomDomainStatus.DISABLED""")
     int markEnabled(@Param("id") long id, @Param("now") LocalDateTime now);
 
-    @Modifying
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Transactional
     @Query("""
             update CustomDomain d
@@ -139,7 +140,7 @@ public interface CustomDomainRepository extends JpaRepository<CustomDomain, Long
               and d.status <> cc.hrva.urlshortener.model.enums.CustomDomainStatus.DELETED""")
     int markDeleted(@Param("id") long id, @Param("expectedStatus") CustomDomainStatus expectedStatus, @Param("now") LocalDateTime now);
 
-    @Modifying
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Transactional
     @Query("""
             update CustomDomain d
@@ -147,7 +148,7 @@ public interface CustomDomainRepository extends JpaRepository<CustomDomain, Long
             where d.id = :id and d.status = cc.hrva.urlshortener.model.enums.CustomDomainStatus.DELETED and d.cloudflareDeletePending = true""")
     int clearDeletePending(@Param("id") long id, @Param("now") LocalDateTime now);
 
-    @Modifying
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Transactional
     @Query("delete from CustomDomain d where d.id = :id and d.owner is null and d.cloudflareDeletePending = false")
     int deleteOrphan(@Param("id") long id);
