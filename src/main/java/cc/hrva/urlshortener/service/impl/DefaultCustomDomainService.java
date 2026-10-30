@@ -127,8 +127,10 @@ public class DefaultCustomDomainService implements CustomDomainService {
         }
         final var user = currentUser();
         requireActive(user);
-        requireWithinApplyLimit(user);
         final var hostname = customDomainHostnames.normalize(customDomainApplyDto.getHostname());
+        requireBelowTheLimit(user.getId());
+        requireFree(hostname, user.getId());
+        requireWithinApplyLimit(user);
         final var reason = StringUtils.strip(customDomainApplyDto.getReason());
         final var flags = flagsOf(hostname, linkCheckService.check("https://" + hostname + "/"), user);
 
@@ -195,15 +197,8 @@ public class DefaultCustomDomainService implements CustomDomainService {
     private CustomDomain insert(final User user, final String hostname, final String reason, final List<String> flags) {
         final var owner = accountLock.lock(user);
         requireActive(owner);
-        final var limit = customDomainLimits.limitFor(owner.getId());
-        if (customDomainLimits.usedBy(owner.getId()) >= limit) {
-            log.info("Custom domain application refused at the limit userId={} limit={}", owner.getId(), limit);
-            throw new ApiException(OVER_THE_LIMIT.formatted(limit == 1 ? "1 custom domain" : limit + " custom domains"));
-        }
-        if (customDomainRepository.findByHostnameKey(hostname).isPresent()) {
-            log.info("Custom domain application refused for a taken hostname userId={}", owner.getId());
-            throw new CustomDomainConflictException(TAKEN);
-        }
+        requireBelowTheLimit(owner.getId());
+        requireFree(hostname, owner.getId());
         final var now = LocalDateTime.now(clock);
         final var saved = customDomainRepository.saveAndFlush(CustomDomain.builder()
                 .owner(owner)
@@ -250,6 +245,21 @@ public class DefaultCustomDomainService implements CustomDomainService {
             }
         }
         return List.copyOf(flags);
+    }
+
+    private void requireBelowTheLimit(final long userId) {
+        final var limit = customDomainLimits.limitFor(userId);
+        if (customDomainLimits.usedBy(userId) >= limit) {
+            log.info("Custom domain application refused at the limit userId={} limit={}", userId, limit);
+            throw new ApiException(OVER_THE_LIMIT.formatted(limit == 1 ? "1 custom domain" : limit + " custom domains"));
+        }
+    }
+
+    private void requireFree(final String hostname, final long userId) {
+        if (customDomainRepository.findByHostnameKey(hostname).isPresent()) {
+            log.info("Custom domain application refused for a taken hostname userId={}", userId);
+            throw new CustomDomainConflictException(TAKEN);
+        }
     }
 
     private void requireWithinApplyLimit(final User user) {

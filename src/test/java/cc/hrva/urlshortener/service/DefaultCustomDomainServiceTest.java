@@ -227,7 +227,7 @@ class DefaultCustomDomainServiceTest {
     void anAllowanceRaisesTheLimit() {
         when(customDomainAllowanceRepository.findById(7L))
                 .thenReturn(Optional.of(CustomDomainAllowance.builder().userId(7L).maxDomains(3).reason("Agency").build()));
-        when(customDomainRepository.countByOwnerIdAndStatusIn(7L, CustomDomainStatus.COUNTS_FOR_USER)).thenReturn(2L, 3L);
+        when(customDomainRepository.countByOwnerIdAndStatusIn(7L, CustomDomainStatus.COUNTS_FOR_USER)).thenReturn(2L, 2L, 3L);
 
         customDomainService.apply(apply("one.example.com"));
 
@@ -335,7 +335,7 @@ class DefaultCustomDomainServiceTest {
     void aLostRaceSeenOnlyByTheRereadIsThe409Too() {
         when(customDomainRepository.saveAndFlush(any(CustomDomain.class))).thenThrow(new DataIntegrityViolationException("duplicate key"));
         when(customDomainRepository.findByHostnameKey("go.example.com"))
-                .thenReturn(Optional.empty(), Optional.of(CustomDomain.builder().id(3L).build()));
+                .thenReturn(Optional.empty(), Optional.empty(), Optional.of(CustomDomain.builder().id(3L).build()));
 
         assertThatThrownBy(() -> customDomainService.apply(apply("go.example.com")))
                 .isInstanceOf(CustomDomainConflictException.class)
@@ -348,6 +348,19 @@ class DefaultCustomDomainServiceTest {
         when(customDomainRepository.saveAndFlush(any(CustomDomain.class))).thenThrow(violation);
 
         assertThatThrownBy(() -> customDomainService.apply(apply("go.example.com"))).isSameAs(violation);
+    }
+
+    @Test
+    void aRefusedApplicationCostsNoApplicationFromTheDailyLimit() {
+        assertThatThrownBy(() -> customDomainService.apply(apply("example.com"))).isInstanceOf(FieldValidationException.class);
+        assertThatThrownBy(() -> customDomainService.apply(apply("-go.example.com"))).isInstanceOf(FieldValidationException.class);
+        when(customDomainRepository.findByHostnameKey("taken.example.com"))
+                .thenReturn(Optional.of(CustomDomain.builder().id(3L).hostname("taken.example.com").build()));
+        assertThatThrownBy(() -> customDomainService.apply(apply("taken.example.com"))).isInstanceOf(CustomDomainConflictException.class);
+        when(customDomainRepository.countByOwnerIdAndStatusIn(7L, CustomDomainStatus.COUNTS_FOR_USER)).thenReturn(1L);
+        assertThatThrownBy(() -> customDomainService.apply(apply("go.example.com"))).isInstanceOf(ApiException.class).hasMessage(OVER_ONE);
+
+        verifyNoInteractions(rateLimiter, linkCheckService, accountLock);
     }
 
     @Test

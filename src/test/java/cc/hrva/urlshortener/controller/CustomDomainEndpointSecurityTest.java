@@ -141,6 +141,7 @@ class CustomDomainEndpointSecurityTest {
     private static final String BOB_TOKEN = "bob-token";
     private static final long ROLE_USER = 1L;
     private static final RSAKey SIGNING_KEY = generateSigningKey();
+    private static final ThreadLocal<Boolean> PAST_THE_LINK_CHECK = ThreadLocal.withInitial(() -> false);
 
     @Autowired
     private MockMvc mockMvc;
@@ -638,7 +639,7 @@ class CustomDomainEndpointSecurityTest {
                 .satisfies(refused -> assertThat(refused.getContentAsString()).isEqualTo(TAKEN));
         assertThat(jdbcTemplate.queryForObject("select count(*) from custom_domain where hostname = 'go.example.com'", Integer.class)).isOne();
         assertThat(committedEvents.events()).filteredOn(DomainApplied.class::isInstance).hasSize(1);
-        verify(customDomainRepository, times(2)).findByHostnameKey("go.example.com");
+        verify(customDomainRepository, times(4)).findByHostnameKey("go.example.com");
         assertThat(arrived.getCount()).isZero();
     }
 
@@ -646,6 +647,7 @@ class CustomDomainEndpointSecurityTest {
         final var bothChecking = new CyclicBarrier(2);
         when(linkCheckService.check(anyString())).thenAnswer(invocation -> {
             bothChecking.await(10, TimeUnit.SECONDS);
+            PAST_THE_LINK_CHECK.set(true);
             return LinkVerdict.clean();
         });
     }
@@ -654,7 +656,7 @@ class CustomDomainEndpointSecurityTest {
         final var arrived = new CountDownLatch(2);
         doAnswer(invocation -> {
             final var found = mockingDetails(customDomainRepository).getMockCreationSettings().getDefaultAnswer().answer(invocation);
-            if (arrived.getCount() > 0) {
+            if (PAST_THE_LINK_CHECK.get() && arrived.getCount() > 0) {
                 arrived.countDown();
                 arrived.await(longestWait.toMillis(), TimeUnit.MILLISECONDS);
             }
@@ -664,6 +666,7 @@ class CustomDomainEndpointSecurityTest {
     }
 
     private MockHttpServletResponse appliedAnswer(final String token, final String hostname) {
+        PAST_THE_LINK_CHECK.set(false);
         try {
             return mockMvc.perform(as(token, post(DOMAINS)).contentType(MediaType.APPLICATION_JSON)
                     .content("{\"hostname\":\"" + hostname + "\",\"reason\":\"Menu links for my cafe\"}")).andReturn().getResponse();
