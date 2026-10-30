@@ -39,6 +39,7 @@ import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.service.SendingEmailService;
 import cc.hrva.urlshortener.service.digest.WeeklyDigestText;
+import cc.hrva.urlshortener.service.domain.ShortLinks;
 import cc.hrva.urlshortener.util.EmailAddresses;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
@@ -68,6 +69,7 @@ public class DefaultSendingEmailService implements SendingEmailService {
     private final EmailConsentReader emailConsentReader;
     private final ConsentEmails consentEmails;
     private final NotificationMessages notificationMessages;
+    private final ShortLinks shortLinks;
 
     @Override
     @Async
@@ -240,7 +242,7 @@ public class DefaultSendingEmailService implements SendingEmailService {
         ctx.setVariable("headline", subject);
         ctx.setVariable("app_name", appProperties.getAppName());
         ctx.setVariable("site_url", appProperties.getFrontendUrl());
-        ctx.setVariable("short_link_host", shortLinkHost());
+        ctx.setVariable("short_link_host", shortLinks.host(null));
         ctx.setVariable("review_page", frontendPage(REVIEW_PAGE));
         ctx.setVariable("blocklists_page", frontendPage("/admin/blocklists"));
 
@@ -261,12 +263,12 @@ public class DefaultSendingEmailService implements SendingEmailService {
     public void sendWeeklyDigestToAdmin(final WeeklyDigest digest) {
         final var title = WeeklyDigestText.title(digest);
         final var reviewPage = frontendPage(REVIEW_PAGE);
-        final var lines = WeeklyDigestText.lines(digest, shortLinkHost(), reviewPage, UnaryOperator.identity());
+        final var lines = WeeklyDigestText.lines(digest, shortLinks, reviewPage, UnaryOperator.identity());
         final var statsPage = frontendPage(STATS_PAGE);
         final var ctx = new Context();
         ctx.setVariable("headline", title);
         ctx.setVariable("summary", WeeklyDigestText.summary(digest, reviewPage));
-        ctx.setVariable("top_links", WeeklyDigestText.topLinkLines(digest, shortLinkHost(), UnaryOperator.identity()));
+        ctx.setVariable("top_links", WeeklyDigestText.topLinkLines(digest, shortLinks, UnaryOperator.identity()));
         ctx.setVariable("stats_page", statsPage);
         ctx.setVariable("app_name", appProperties.getAppName());
         ctx.setVariable("site_url", appProperties.getFrontendUrl());
@@ -525,17 +527,12 @@ public class DefaultSendingEmailService implements SendingEmailService {
                 "Since " + notificationMessages.dayText(link.deadSince()) + ", " + DestinationStatusWords.of(link.lastStatus()));
     }
 
-    private String shortLinkHost() {
-        final var serverUrl = StringUtils.removeEnd(StringUtils.defaultString(appProperties.getServerUrl()), "/");
-        return serverUrl.contains("://") ? StringUtils.substringAfter(serverUrl, "://") : serverUrl;
-    }
-
     private String frontendPage(final String path) {
         return StringUtils.removeEnd(StringUtils.defaultString(appProperties.getFrontendUrl()), "/") + path;
     }
 
     private String shortLink(final Url url) {
-        return StringUtils.removeEnd(StringUtils.defaultString(appProperties.getServerUrl()), "/") + "/" + url.getShortUrl();
+        return shortLinks.url(ShortLinks.hostnameOf(url), url.getShortUrl());
     }
 
     private static boolean isLocalAccount(final User user) {

@@ -159,7 +159,7 @@ public class DefaultWeeklyDigestService implements WeeklyDigestService {
     }
 
     private static WeeklyDigest.TopLink topLinkOf(final TrafficStatsResponse.TopLink link) {
-        return new WeeklyDigest.TopLink(link.shortUrl(), link.destinationHost(), link.clicks());
+        return new WeeklyDigest.TopLink(link.shortUrl(), link.destinationHost(), link.clicks(), link.domain());
     }
 
 }

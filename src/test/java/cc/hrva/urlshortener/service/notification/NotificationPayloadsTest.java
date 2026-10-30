@@ -1,8 +1,11 @@
 package cc.hrva.urlshortener.service.notification;
 
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
+import cc.hrva.urlshortener.dto.WeeklyDigest;
 import cc.hrva.urlshortener.dto.notification.DailySummary;
+import cc.hrva.urlshortener.dto.notification.WeeklySummary;
 import cc.hrva.urlshortener.model.enums.NotificationType;
+import cc.hrva.urlshortener.service.domain.ShortLinks;
 import cc.hrva.urlshortener.service.notification.DestinationCheckOutcome.DeadLink;
 import java.time.Clock;
 import java.time.Instant;
@@ -27,13 +30,14 @@ class NotificationPayloadsTest {
     void setUp() {
         final var appProperties = new AppProperties();
         appProperties.setServerUrl("https://hrva.cc/");
-        payloads = new NotificationPayloads(JsonMapper.builder().build(), appProperties, Clock.fixed(Instant.parse("2026-10-27T02:30:00Z"), ZoneOffset.UTC));
+        payloads = new NotificationPayloads(JsonMapper.builder().build(), appProperties, Clock.fixed(Instant.parse("2026-10-27T02:30:00Z"), ZoneOffset.UTC),
+                new ShortLinks(appProperties));
     }
 
     @Test
     void linkDeadBody() {
         final var json = payloads.json(NotificationType.LINK_DEAD, "uid-1", CREATED_AT,
-                payloads.linkDead(List.of(new DeadLink(1L, 7L, "abc", "example.com", LocalDateTime.of(2026, 10, 26, 23, 30), "404"))));
+                payloads.linkDead(List.of(new DeadLink(1L, 7L, "abc", "example.com", LocalDateTime.of(2026, 10, 26, 23, 30), "404", null))));
 
         assertStrict(json, """
                 {"event":"link.dead","deliveryId":"uid-1","createdAt":"2026-10-27T01:14:00Z",
@@ -44,7 +48,7 @@ class NotificationPayloadsTest {
     @Test
     void linkBackBody() {
         final var json = payloads.json(NotificationType.LINK_BACK, "uid-2", CREATED_AT,
-                payloads.linkBack(List.of(new DeadLink(1L, 7L, "abc", "example.com", LocalDateTime.of(2026, 10, 20, 2, 11), null)), LocalDate.of(2026, 10, 27)));
+                payloads.linkBack(List.of(new DeadLink(1L, 7L, "abc", "example.com", LocalDateTime.of(2026, 10, 20, 2, 11), null, null)), LocalDate.of(2026, 10, 27)));
 
         assertStrict(json, """
                 {"event":"link.back","deliveryId":"uid-2","createdAt":"2026-10-27T01:14:00Z",
@@ -54,8 +58,8 @@ class NotificationPayloadsTest {
     @Test
     void dailySummaryBody() {
         final var summary = new DailySummary(LocalDate.of(2026, 10, 26), 41, 30, 7, List.of(
-                new DailySummary.SummaryLink("abc", "example.com", 20, 15, 2),
-                new DailySummary.SummaryLink("bots", null, 0, 0, 3)));
+                new DailySummary.SummaryLink("abc", "example.com", 20, 15, 2, null),
+                new DailySummary.SummaryLink("bots", null, 0, 0, 3, null)));
 
         final var json = payloads.json(NotificationType.DAILY_SUMMARY, "uid-3", CREATED_AT, payloads.daily(summary));
 
@@ -82,6 +86,26 @@ class NotificationPayloadsTest {
     }
 
     @Test
+    void payloadShortUrlsUseTheDomain() {
+        final var onDomain = new DeadLink(1L, 7L, "menu", "example.org", LocalDateTime.of(2026, 10, 26, 23, 30), "404", "go.example.com");
+        final var weekly = new WeeklySummary(7L, "ana@example.com", LocalDate.of(2026, 10, 19), LocalDate.of(2026, 10, 25),
+                new WeeklyDigest.Change(3, 0), 2, List.of(new WeeklyDigest.TopLink("top", "example.org", 3, "go.example.com")), List.of(onDomain),
+                List.of(new WeeklySummary.EndingSoon("soon", "example.org", "EXPIRES", LocalDate.of(2026, 10, 30), null, "go.example.com")));
+
+        final var dead = payloads.json(NotificationType.LINK_DEAD, "u", CREATED_AT, payloads.linkDead(List.of(onDomain)));
+        final var back = payloads.json(NotificationType.LINK_BACK, "u", CREATED_AT, payloads.linkBack(List.of(onDomain), LocalDate.of(2026, 10, 28)));
+        final var daily = payloads.json(NotificationType.DAILY_SUMMARY, "u", CREATED_AT, payloads.daily(new DailySummary(LocalDate.of(2026, 10, 26), 3, 2, 0,
+                List.of(new DailySummary.SummaryLink("day", "example.org", 3, 2, 0, "go.example.com")))));
+        final var week = payloads.json(NotificationType.WEEKLY_SUMMARY, "u", CREATED_AT, payloads.weekly(weekly));
+
+        assertThat(dead).contains("\"shortUrl\":\"https://go.example.com/menu\"").doesNotContain("hrva.cc");
+        assertThat(back).contains("\"shortUrl\":\"https://go.example.com/menu\"").doesNotContain("hrva.cc");
+        assertThat(daily).contains("\"shortUrl\":\"https://go.example.com/day\"").doesNotContain("hrva.cc");
+        assertThat(week).contains("\"shortUrl\":\"https://go.example.com/top\"", "\"shortUrl\":\"https://go.example.com/menu\"",
+                "\"shortUrl\":\"https://go.example.com/soon\"").doesNotContain("hrva.cc", "ana@example.com");
+    }
+
+    @Test
     void testBody() {
         final var json = payloads.json(NotificationPayloads.TEST_EVENT, "test-0d1c", CREATED_AT, payloads.test());
 
@@ -92,7 +116,7 @@ class NotificationPayloadsTest {
     @Test
     void aMissingHostIsNull() {
         final var json = payloads.json(NotificationType.LINK_DEAD, "u", CREATED_AT,
-                payloads.linkDead(List.of(new DeadLink(1L, 7L, "abc", null, LocalDateTime.of(2026, 10, 26, 3, 0), "nxdomain"))));
+                payloads.linkDead(List.of(new DeadLink(1L, 7L, "abc", null, LocalDateTime.of(2026, 10, 26, 3, 0), "nxdomain", null))));
 
         assertThat(json).contains("\"destinationHost\":null", "\"lastStatus\":\"nxdomain\"");
     }

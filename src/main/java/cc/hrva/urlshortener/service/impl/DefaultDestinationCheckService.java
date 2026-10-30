@@ -127,7 +127,7 @@ public class DefaultDestinationCheckService implements DestinationCheckService {
         final var caughtUp = died.stream()
                 .filter(link -> !known.contains(link.id()))
                 .map(link -> new DeadLink(link.id(), link.ownerId(), link.shortUrl(), DomainNames.hostOf(link.longUrl()).orElse(null),
-                        link.deadSince(), link.lastStatus()))
+                        link.deadSince(), link.lastStatus(), link.domain()))
                 .toList();
         if (caughtUp.isEmpty()) {
             return outcome;
@@ -288,7 +288,7 @@ public class DefaultDestinationCheckService implements DestinationCheckService {
 
         private static DeadLink deadLink(final DueLink link, final LocalDateTime deadSince, final String lastStatus) {
             return new DeadLink(link.id(), link.ownerId(), link.shortUrl(), DomainNames.hostOf(link.longUrl()).orElse(null),
-                    deadSince, lastStatus);
+                    deadSince, lastStatus, link.domain());
         }
 
     }

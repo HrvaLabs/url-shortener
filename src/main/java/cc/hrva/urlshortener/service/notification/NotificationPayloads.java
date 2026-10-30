@@ -4,6 +4,7 @@ import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.dto.notification.DailySummary;
 import cc.hrva.urlshortener.dto.notification.WeeklySummary;
 import cc.hrva.urlshortener.model.enums.NotificationType;
+import cc.hrva.urlshortener.service.domain.ShortLinks;
 import cc.hrva.urlshortener.service.notification.DestinationCheckOutcome.DeadLink;
 import java.time.Clock;
 import java.time.Instant;
@@ -14,7 +15,6 @@ import java.time.temporal.ChronoUnit;
 import java.util.LinkedHashMap;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
-import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Component;
 import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.json.JsonMapper;
@@ -31,6 +31,7 @@ public class NotificationPayloads {
     private final JsonMapper jsonMapper;
     private final AppProperties appProperties;
     private final Clock clock;
+    private final ShortLinks shortLinks;
 
     public record Links<T>(List<T> links) {
     }
@@ -68,13 +69,13 @@ public class NotificationPayloads {
 
     public Links<DeadLinkData> linkDead(final List<DeadLink> links) {
         return new Links<>(links.stream()
-                .map(link -> new DeadLinkData(shortUrl(link.shortUrl()), link.destinationHost(), day(link.deadSince()).toString(), link.lastStatus()))
+                .map(link -> new DeadLinkData(shortUrl(link), link.destinationHost(), day(link.deadSince()).toString(), link.lastStatus()))
                 .toList());
     }
 
     public Links<BackLinkData> linkBack(final List<DeadLink> links, final LocalDate backOn) {
         return new Links<>(links.stream()
-                .map(link -> new BackLinkData(shortUrl(link.shortUrl()), link.destinationHost(), day(link.deadSince()).toString(), backOn.toString()))
+                .map(link -> new BackLinkData(shortUrl(link), link.destinationHost(), day(link.deadSince()).toString(), backOn.toString()))
                 .toList());
     }
 
@@ -94,10 +95,12 @@ public class NotificationPayloads {
     public WeeklyData weekly(final WeeklySummary summary) {
         return new WeeklyData(summary.from().toString(), summary.to().toString(),
                 new WeeklyTotals(summary.clicks().current(), summary.clicks().previous(), summary.uniqueVisitors()),
-                summary.topLinks().stream().map(link -> new TopLinkData(shortUrl(link.shortUrl()), link.destinationHost(), link.clicks())).toList(),
+                summary.topLinks().stream()
+                        .map(link -> new TopLinkData(shortLinks.url(link.domain(), link.shortUrl()), link.destinationHost(), link.clicks()))
+                        .toList(),
                 linkDead(summary.deadLinks()).links(),
                 summary.endingSoon().stream()
-                        .map(link -> new EndingSoonData(shortUrl(link.shortUrl()), link.destinationHost(), link.reason(),
+                        .map(link -> new EndingSoonData(shortLinks.url(link.domain(), link.shortUrl()), link.destinationHost(), link.reason(),
                                 link.expiresOn() == null ? null : link.expiresOn().toString(), link.visitsLeft()))
                         .toList());
     }
@@ -107,8 +110,8 @@ public class NotificationPayloads {
                 new DailyTotals(summary.clicks(), summary.uniqueVisitors(), summary.botClicks()),
                 summary.links().stream()
                         .limit(NotificationMessages.MOST_LINKS)
-                        .map(link -> new DailyLinkData(shortUrl(link.shortUrl()), link.destinationHost(), link.clicks(), link.uniqueVisitors(),
-                                link.botClicks()))
+                        .map(link -> new DailyLinkData(shortLinks.url(link.domain(), link.shortUrl()), link.destinationHost(), link.clicks(),
+                                link.uniqueVisitors(), link.botClicks()))
                         .toList());
     }
 
@@ -116,8 +119,8 @@ public class NotificationPayloads {
         return new TestData(NotificationMessages.TEST_TEXT);
     }
 
-    public String shortUrl(final String alias) {
-        return StringUtils.removeEnd(StringUtils.defaultString(appProperties.getServerUrl()), "/") + "/" + alias;
+    private String shortUrl(final DeadLink link) {
+        return shortLinks.url(link.domain(), link.shortUrl());
     }
 
     private LocalDate day(final LocalDateTime stored) {

@@ -4,6 +4,7 @@ import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.dto.AnalyticsTotals;
 import cc.hrva.urlshortener.dto.BreakdownEntry;
 import cc.hrva.urlshortener.dto.CreateUrlDto;
+import cc.hrva.urlshortener.dto.DomainRef;
 import cc.hrva.urlshortener.dto.UrlAnalyticsDto;
 import cc.hrva.urlshortener.dto.UrlAnalyticsDto.Breakdowns;
 import cc.hrva.urlshortener.dto.UrlAnalyticsDto.LinkSummary;
@@ -18,6 +19,7 @@ import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.enums.CreatedVia;
 import cc.hrva.urlshortener.service.AnalyticsService;
 import cc.hrva.urlshortener.service.UrlService;
+import cc.hrva.urlshortener.service.domain.ShortLinks;
 import io.modelcontextprotocol.spec.McpSchema.CallToolResult;
 import io.modelcontextprotocol.spec.McpSchema.TextContent;
 import jakarta.validation.Validation;
@@ -78,7 +80,7 @@ class LinkToolsTest {
         final var appProperties = new AppProperties();
         appProperties.getMcp().setIssuer("https://hrva.cc");
         final var validator = Validation.buildDefaultValidatorFactory().getValidator();
-        linkTools = new LinkTools(urlService, appProperties, mcpUserResolver, analyticsService, validator);
+        linkTools = new LinkTools(urlService, appProperties, mcpUserResolver, analyticsService, validator, new ShortLinks(appProperties));
     }
 
     @Test
@@ -98,6 +100,20 @@ class LinkToolsTest {
         order.verify(mcpUserResolver).currentUser();
         order.verify(urlService).getAllMyUrls(isNull(), any(), any());
         order.verifyNoMoreInteractions();
+    }
+
+    @Test
+    void listLinksPrintsTheDomainLink() {
+        when(mcpUserResolver.currentUser()).thenReturn(CURRENT_USER);
+        when(urlService.getAllMyUrls(isNull(), any(), any())).thenReturn(page(
+                onDomain(44L, "menu", "go.example.com"),
+                link("abc12", "https://example.com/first", 3L, "ACTIVE")));
+
+        final var result = linkTools.listLinks(null, null, null);
+
+        assertThat(text(result).lines()).containsExactly(
+                "https://go.example.com/menu -> https://example.com/menu | 1 visits | ACTIVE",
+                "https://hrva.cc/abc12 -> https://example.com/first | 3 visits | ACTIVE");
     }
 
     @Test
@@ -422,6 +438,40 @@ class LinkToolsTest {
     }
 
     @Test
+    void linkStatsAcceptsTheCallersDomainLink() {
+        when(mcpUserResolver.currentUser()).thenReturn(CURRENT_USER);
+        when(urlService.getAllMyUrls(isNull(), any(), any())).thenReturn(page(onDomain(44L, "menu", "go.example.com"), link(33L, "menu", true)));
+        when(analyticsService.getUrlAnalyticsForOwner(44L, null)).thenReturn(analytics(44L, "menu", new DomainRef(7L, "go.example.com")));
+        when(analyticsService.getUrlAnalyticsForOwner(33L, null)).thenReturn(analytics(33L, "menu"));
+
+        for (final var form : List.of("go.example.com/menu", "https://go.example.com/menu", " HTTPS://Go.Example.com/menu/ ")) {
+            final var result = linkTools.linkStats(form, null);
+            assertThat(result.isError()).as(form).isFalse();
+            assertThat(text(result).lines().findFirst()).as(form).contains("https://go.example.com/menu -> example.com");
+        }
+        for (final var form : List.of("menu", "hrva.cc/menu", "https://hrva.cc/menu")) {
+            assertThat(text(linkTools.linkStats(form, null)).lines().findFirst()).as(form).contains("https://hrva.cc/menu -> example.com");
+        }
+
+        verify(analyticsService, times(3)).getUrlAnalyticsForOwner(44L, null);
+        verify(analyticsService, times(3)).getUrlAnalyticsForOwner(33L, null);
+    }
+
+    @Test
+    void linkStatsRefusesSomeoneElsesDomainLink() {
+        when(mcpUserResolver.currentUser()).thenReturn(CURRENT_USER);
+        when(urlService.getAllMyUrls(isNull(), any(), any())).thenReturn(page(onDomain(44L, "menu", "go.example.com"), link(33L, "menu", true)));
+
+        final var bare = linkTools.linkStats("go.example.org/menu", null);
+        final var withScheme = linkTools.linkStats("https://go.example.org/menu", null);
+
+        assertThat(bare.isError()).isTrue();
+        assertThat(text(bare)).isEqualTo("No link go.example.org/menu in your account.");
+        assertThat(text(withScheme)).isEqualTo("No link go.example.org/menu in your account.");
+        verifyNoInteractions(analyticsService);
+    }
+
+    @Test
     void statsWithoutAnAliasAsksForOne() {
         when(mcpUserResolver.currentUser()).thenReturn(CURRENT_USER);
 
@@ -544,6 +594,11 @@ class LinkToolsTest {
                 active ? "ACTIVE" : "EXPIRED", Set.of(), false, "user@localhost");
     }
 
+    private static UrlResponse onDomain(final Long id, final String alias, final String hostname) {
+        return new UrlResponse(id, "https://example.com/" + alias, alias, LocalDateTime.now(), null, 1L, null, true, "ACTIVE", Set.of(), false,
+                "user@localhost", List.of(), null, null, null, null, null, new DomainRef(7L, hostname));
+    }
+
     private static UrlResponse created(final String alias, final Long visitLimit, final LocalDateTime expirationDate) {
         final var destination = "menu".equals(alias) ? "https://example.com/menu" : "https://example.com/page";
         return new UrlResponse(11L, destination, alias, LocalDateTime.now(), expirationDate, 0L, visitLimit, true, "ACTIVE",
@@ -558,6 +613,13 @@ class LinkToolsTest {
                 List.of(new BreakdownEntry("chrome", 70)),
                 List.of(new BreakdownEntry("android", 60)),
                 List.of(new BreakdownEntry("direct", 90), new BreakdownEntry("qr", 30))));
+    }
+
+    private static UrlAnalyticsDto analytics(final Long id, final String alias, final DomainRef domain) {
+        final var link = new LinkSummary(id, alias, "example.com", "ACTIVE", false,
+                systemTime("2026-10-01T12:00:00Z"), systemTime("2026-10-24T07:15:00Z"), 412, "https://example.com/" + alias, null, domain);
+        return new UrlAnalyticsDto(link, 30, LocalDate.of(2026, 9, 25), LocalDate.of(2026, 10, 24), new AnalyticsTotals(120, 95, 14),
+                List.of(), NO_BREAKDOWNS);
     }
 
     private static UrlAnalyticsDto analytics(final Long id, final String alias, final Breakdowns breakdowns) {

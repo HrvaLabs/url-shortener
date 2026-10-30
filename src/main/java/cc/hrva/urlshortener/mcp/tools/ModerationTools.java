@@ -17,6 +17,7 @@ import cc.hrva.urlshortener.service.LinkCheckService;
 import cc.hrva.urlshortener.service.ModerationService;
 import cc.hrva.urlshortener.service.ReviewQueueService;
 import cc.hrva.urlshortener.service.ScammerSignalService;
+import cc.hrva.urlshortener.service.domain.ShortLinks;
 import cc.hrva.urlshortener.util.DomainNames;
 import cc.hrva.urlshortener.util.EmailAddresses;
 import cc.hrva.urlshortener.util.ReviewReasons;
@@ -83,6 +84,7 @@ public class ModerationTools {
     private final LinkReviewRepository linkReviewRepository;
     private final AppProperties appProperties;
     private final Clock clock;
+    private final ShortLinks shortLinks;
 
     @McpTool(
             name = MODERATION_SUMMARY,
@@ -309,7 +311,7 @@ public class ModerationTools {
         final var url = review.getUrl();
         return "urlId %d | %s -> %s | %s | reasons: %s".formatted(
                 url.getId(),
-                shortLink(url.getShortUrl()),
+                shortLink(ShortLinks.hostnameOf(url), url.getShortUrl()),
                 destination(url.getLongUrl()),
                 describeOwner(url.getOwner(), possibleScammers),
                 String.join("; ", ReviewReasons.withoutVisitorText(review.getReasons())));
@@ -396,7 +398,9 @@ public class ModerationTools {
 
         log.info("MCP block_link adminId={} urlId={}", admin.getId(), id);
 
-        return "urlId %d | %s -> %s | %s".formatted(blocked.id(), shortLink(blocked.shortUrl()), destination(blocked.longUrl()), blocked.status());
+        final var hostname = blocked.domain() == null ? null : blocked.domain().hostname();
+        return "urlId %d | %s -> %s | %s".formatted(blocked.id(), shortLink(hostname, blocked.shortUrl()), destination(blocked.longUrl()),
+                blocked.status());
     }
 
     private String blockLinksOn(final String requested, final String reason) {
@@ -489,8 +493,8 @@ public class ModerationTools {
         });
     }
 
-    private String shortLink(final String alias) {
-        return McpLinks.shortLink(appProperties.getMcp().getIssuer(), alias);
+    private String shortLink(final String hostname, final String alias) {
+        return McpLinks.shortLink(appProperties.getMcp().getIssuer(), shortLinks, hostname, alias);
     }
 
     private LocalDateTime now() {

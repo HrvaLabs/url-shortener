@@ -3,6 +3,7 @@ package cc.hrva.urlshortener.mcp.tools;
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.dto.BreakdownEntry;
 import cc.hrva.urlshortener.dto.CreateUrlDto;
+import cc.hrva.urlshortener.dto.DomainRef;
 import cc.hrva.urlshortener.dto.UrlAnalyticsDto;
 import cc.hrva.urlshortener.dto.UrlResponse;
 import cc.hrva.urlshortener.dto.UrlSearchDto;
@@ -11,6 +12,7 @@ import cc.hrva.urlshortener.exception.UrlValidationException;
 import cc.hrva.urlshortener.model.enums.CreatedVia;
 import cc.hrva.urlshortener.service.AnalyticsService;
 import cc.hrva.urlshortener.service.UrlService;
+import cc.hrva.urlshortener.service.domain.ShortLinks;
 import io.modelcontextprotocol.spec.McpSchema.CallToolResult;
 import jakarta.validation.Validator;
 import java.net.URI;
@@ -22,10 +24,10 @@ import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -48,7 +50,6 @@ public class LinkTools {
     private static final int PAGE_SIZE = 20;
     private static final int TOP_VALUES_SHOWN = 5;
     private static final Sort NEWEST_FIRST = Sort.by(Sort.Direction.DESC, "createDate");
-    private static final Pattern SCHEME = Pattern.compile("^[a-zA-Z][a-zA-Z0-9+.-]*://");
     private static final String EXPIRY_FORMAT_ERROR = "expiresAt must be an ISO-8601 date-time with a time zone, "
             + "for example 2026-12-31T23:59:00Z or 2026-12-31T23:59:00+01:00.";
     private static final String MISSING_LINK_ERROR = "Give the short link, for example menu, hrva.cc/menu or https://hrva.cc/menu.";
@@ -60,6 +61,7 @@ public class LinkTools {
     private final McpUserResolver mcpUserResolver;
     private final AnalyticsService analyticsService;
     private final Validator validator;
+    private final ShortLinks shortLinks;
 
     @McpTool(
             name = LIST_LINKS,
@@ -122,7 +124,8 @@ public class LinkTools {
             )
     )
     public CallToolResult linkStats(
-            @McpToolParam(description = "The short link as menu, hrva.cc/menu or https://hrva.cc/menu") final String link,
+            @McpToolParam(description = "The short link as menu, hrva.cc/menu or https://hrva.cc/menu, "
+                    + "or as go.example.com/menu for a link on one of your own domains") final String link,
             @McpToolParam(required = false, description = "Number of days to cover: 7, 30, 90 or 365 (30 by default)") final Integer days) {
         return McpToolResults.run(LINK_STATS, () -> describeStats(link, days));
     }
@@ -145,7 +148,7 @@ public class LinkTools {
 
     private String describe(final UrlResponse link) {
         return "%s -> %s | %d visits | %s".formatted(
-                shortLink(link.shortUrl()),
+                shortLink(link.domain(), link.shortUrl()),
                 link.longUrl(),
                 Objects.requireNonNullElse(link.visits(), 0L),
                 link.status()
@@ -185,7 +188,7 @@ public class LinkTools {
 
     private String describeCreated(final UrlResponse link) {
         final var lines = new ArrayList<String>();
-        lines.add("Short link: " + shortLink(link.shortUrl()));
+        lines.add("Short link: " + shortLink(link.domain(), link.shortUrl()));
         lines.add("Destination: " + link.longUrl());
         if (link.visitLimit() != null) {
             lines.add("Visit limit: " + link.visitLimit());
@@ -198,13 +201,13 @@ public class LinkTools {
 
     private String describeStats(final String link, final Integer days) {
         final var user = mcpUserResolver.currentUser();
-        final var alias = aliasOf(link);
-        if (alias.isEmpty()) {
+        final var requested = McpLinks.requestedLink(link, host());
+        if (requested.alias().isEmpty()) {
             throw new UrlValidationException(MISSING_LINK_ERROR);
         }
 
-        final var match = findOwnLink(alias)
-                .orElseThrow(() -> new UrlNotFoundException("No link %s/%s in your account.".formatted(host(), alias)));
+        final var match = findOwnLink(requested).orElseThrow(() -> new UrlNotFoundException("No link %s/%s in your account.".formatted(
+                Objects.requireNonNullElseGet(requested.hostname(), this::host), requested.alias())));
         final var analytics = analyticsService.getUrlAnalyticsForOwner(match.id(), days);
 
         log.info("MCP link_stats userId={} urlId={}", user.getId(), match.id());
@@ -212,28 +215,13 @@ public class LinkTools {
         return describeAnalytics(analytics);
     }
 
-    private String aliasOf(final String link) {
-        final var withoutScheme = SCHEME.matcher(StringUtils.trimToEmpty(link)).replaceFirst("");
-        final var host = host();
-        if (StringUtils.equalsIgnoreCase(withoutScheme, host)) {
-            return "";
-        }
-        final var withoutHost = StringUtils.startsWithIgnoreCase(withoutScheme, host + "/")
-                ? withoutScheme.substring(host.length() + 1)
-                : withoutScheme;
-        return StringUtils.strip(withoutHost, "/");
-    }
-
-    private Optional<UrlResponse> findOwnLink(final String alias) {
-        final var search = new UrlSearchDto(alias, null, null, null, null, null, null, null);
-        final var matches = urlService.getAllMyUrls(null, Pageable.unpaged(NEWEST_FIRST), search).stream()
-                .filter(candidate -> alias.equals(candidate.shortUrl()))
-                .toList();
-
-        return matches.stream()
-                .filter(UrlResponse::active)
-                .findFirst()
-                .or(() -> matches.stream().findFirst());
+    private Optional<UrlResponse> findOwnLink(final McpLinks.RequestedLink requested) {
+        final var search = new UrlSearchDto(requested.alias(), null, null, null, null, null, null, null);
+        return urlService.getAllMyUrls(null, Pageable.unpaged(NEWEST_FIRST), search).stream()
+                .filter(candidate -> requested.alias().equals(candidate.shortUrl()))
+                .filter(candidate -> requested.matches(candidate.domain()))
+                .sorted(Comparator.comparing((UrlResponse candidate) -> !candidate.active()).thenComparing(candidate -> candidate.domain() != null))
+                .findFirst();
     }
 
     private String describeAnalytics(final UrlAnalyticsDto analytics) {
@@ -241,7 +229,7 @@ public class LinkTools {
         final var totals = analytics.totals();
         final var breakdowns = analytics.breakdowns();
         return String.join("\n",
-                "%s -> %s".formatted(shortLink(link.shortUrl()), link.destinationHost()),
+                "%s -> %s".formatted(shortLink(link.domain(), link.shortUrl()), link.destinationHost()),
                 "Status: " + link.status(),
                 "Range: last %d days, %s to %s".formatted(analytics.days(), analytics.from(), analytics.to()),
                 "Clicks: " + totals.clicks(),
@@ -266,8 +254,8 @@ public class LinkTools {
                 .collect(Collectors.joining(", "));
     }
 
-    private String shortLink(final String alias) {
-        return McpLinks.shortLink(appProperties.getMcp().getIssuer(), alias);
+    private String shortLink(final DomainRef domain, final String alias) {
+        return McpLinks.shortLink(appProperties.getMcp().getIssuer(), shortLinks, domain == null ? null : domain.hostname(), alias);
     }
 
     private String host() {

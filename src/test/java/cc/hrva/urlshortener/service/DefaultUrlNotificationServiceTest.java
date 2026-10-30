@@ -1,12 +1,14 @@
 package cc.hrva.urlshortener.service;
 
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
+import cc.hrva.urlshortener.model.CustomDomain;
 import cc.hrva.urlshortener.model.Email;
 import cc.hrva.urlshortener.model.EmailLog;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.enums.NotificationType;
 import cc.hrva.urlshortener.repository.UrlRepository;
+import cc.hrva.urlshortener.service.domain.ShortLinks;
 import cc.hrva.urlshortener.service.impl.DefaultSendingEmailService;
 import cc.hrva.urlshortener.service.impl.DefaultUrlNotificationService;
 import cc.hrva.urlshortener.service.notification.ConsentEmails;
@@ -76,7 +78,8 @@ class DefaultUrlNotificationServiceTest {
         appProperties.setFrontendUrl("https://app.hrva.cc");
         appProperties.setUrlExpirationNotificationHours(24L);
         service = new DefaultUrlNotificationService(urlRepository, sendingEmailService, emailConsentReader,
-                new ConsentEmails(unsubscribeTokens, appProperties), appProperties, realTemplateEngine(), transactionManager);
+                new ConsentEmails(unsubscribeTokens, appProperties), appProperties, realTemplateEngine(), transactionManager,
+                new ShortLinks(appProperties));
         lenient().when(sendingEmailService.tryToSendConsentedEmail(any(Email.class), anyLong(), eq(NotificationType.EXPIRY_REMINDER_EMAIL)))
                 .thenAnswer(invocation -> Optional.of(EmailLog.builder().id(1L).build()));
     }
@@ -165,6 +168,22 @@ class DefaultUrlNotificationServiceTest {
                 .contains("Turn off expiry reminders")
                 .contains("Notification settings")
                 .contains("2026-10-28");
+    }
+
+    @Test
+    void expiryEmailShowsTheDomainLink() {
+        final var onDomain = link(31L, "menu", ANA);
+        onDomain.setDomain(CustomDomain.builder().id(9L).hostname("go.example.com").build());
+        when(urlRepository.findByExpirationDateBetweenAndActiveTrueAndOwnerIsNotNull(any(), any())).thenReturn(List.of(onDomain, link(32L, "shop", ANA)));
+        when(emailConsentReader.consenters(NotificationType.EXPIRY_REMINDER_EMAIL, Set.of(7L))).thenReturn(Set.of(7L));
+
+        service.notifyExpiringUrls();
+
+        final var sent = ArgumentCaptor.forClass(Email.class);
+        verify(sendingEmailService, org.mockito.Mockito.times(2)).tryToSendConsentedEmail(sent.capture(), eq(7L), eq(NotificationType.EXPIRY_REMINDER_EMAIL));
+        assertThat(textOf(sent.getAllValues().getFirst().getText())).contains("Your short link go.example.com/menu is expiring on 2026-10-28")
+                .doesNotContain("hrva.cc/menu");
+        assertThat(textOf(sent.getAllValues().get(1).getText())).contains("Your short link hrva.cc/shop is expiring on 2026-10-28");
     }
 
     @Test

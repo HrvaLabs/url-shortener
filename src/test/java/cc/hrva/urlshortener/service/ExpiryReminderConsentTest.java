@@ -10,6 +10,7 @@ import cc.hrva.urlshortener.model.enums.NotificationType;
 import cc.hrva.urlshortener.repository.NotificationConsentRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
+import cc.hrva.urlshortener.service.domain.ShortLinks;
 import cc.hrva.urlshortener.service.impl.DefaultSendingEmailService;
 import cc.hrva.urlshortener.service.impl.DefaultUrlNotificationService;
 import cc.hrva.urlshortener.service.notification.ConsentEmails;
@@ -155,7 +156,7 @@ class ExpiryReminderConsentTest {
             includeFilters = @ComponentScan.Filter(
                     type = FilterType.ASSIGNABLE_TYPE,
                     classes = {UrlRepository.class, UserRepository.class, NotificationConsentRepository.class}))
-    @Import({DefaultUrlNotificationService.class, EmailConsentReader.class})
+    @Import({DefaultUrlNotificationService.class, EmailConsentReader.class, ShortLinks.class})
     static class TestApplication {
     }
 

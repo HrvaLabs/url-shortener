@@ -9,6 +9,7 @@ import cc.hrva.urlshortener.service.alert.AdminAlertEvent;
 import cc.hrva.urlshortener.service.alert.AlertedBioPage;
 import cc.hrva.urlshortener.service.alert.AlertedLink;
 import cc.hrva.urlshortener.service.alert.DiscordAlertFormatter;
+import cc.hrva.urlshortener.service.domain.ShortLinks;
 import cc.hrva.urlshortener.service.impl.DefaultDiscordAlertService;
 import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
@@ -61,9 +62,9 @@ class DefaultDiscordAlertServiceTest {
     private static final String WEBHOOK_URL = "https://discord.com/api/webhooks/1234567890/s3cr3t-w3bh00k-t0k3n";
     private static final AdminAlertEvent NEW_USER = new AdminAlertEvent.UserSignedUp(31L, "local");
     private static final AdminAlertEvent NEW_REVIEW = new AdminAlertEvent.ReviewOpened(
-            new AlertedLink(42L, "abc12", "example-login.top", null), List.of("imitates paypal", "domain registered in the last 30 days"));
+            new AlertedLink(42L, "abc12", "example-login.top", null, null), List.of("imitates paypal", "domain registered in the last 30 days"));
     private static final AdminAlertEvent BLOCKED = new AdminAlertEvent.LinkBlocked(
-            new AlertedLink(43L, "k3Xa1", "paypa1-login.top", 27L), BlockReason.BLOCKLIST, "HaGeZi TIF medium");
+            new AlertedLink(43L, "k3Xa1", "paypa1-login.top", 27L, null), BlockReason.BLOCKLIST, "HaGeZi TIF medium");
 
     @Mock
     private DiscordWebhookClient discordWebhookClient;
@@ -267,7 +268,7 @@ class DefaultDiscordAlertServiceTest {
             appProperties.setDiscordWebhookUrl("http://127.0.0.1:" + server.getAddress().getPort() + "/api/webhooks/1/token");
             discordAlertService = service(new DiscordWebhookClient(JsonMapper.builder().build()));
             try (final var context = listeningContext()) {
-                context.publishEvent(new AdminAlertEvent.VisitorReported(new AlertedLink(42L, "abc12", "example-login.top", null),
+                context.publishEvent(new AdminAlertEvent.VisitorReported(new AlertedLink(42L, "abc12", "example-login.top", null, null),
                         ReportCategory.PHISHING, "@everyone it asks for my card", false));
                 context.publishEvent(new AdminAlertEvent.BlocklistSourceFailed("HaGeZi TIF medium", "HTTP 503", false));
 
@@ -493,7 +494,7 @@ class DefaultDiscordAlertServiceTest {
     }
 
     private DiscordAlertService service(final DiscordWebhookClient client) {
-        return new DefaultDiscordAlertService(appProperties, new DiscordAlertFormatter(appProperties), client);
+        return new DefaultDiscordAlertService(appProperties, new DiscordAlertFormatter(appProperties, new ShortLinks(appProperties)), client);
     }
 
     private AnnotationConfigApplicationContext listeningContext() {

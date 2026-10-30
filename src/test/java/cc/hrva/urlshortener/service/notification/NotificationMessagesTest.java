@@ -7,6 +7,7 @@ import cc.hrva.urlshortener.dto.notification.WeeklySummary;
 import cc.hrva.urlshortener.model.NotificationChannel;
 import cc.hrva.urlshortener.service.digest.WeeklyDigestText;
 import cc.hrva.urlshortener.model.enums.ChannelType;
+import cc.hrva.urlshortener.service.domain.ShortLinks;
 import cc.hrva.urlshortener.service.notification.DestinationCheckOutcome.DeadLink;
 import java.time.Clock;
 import java.time.Instant;
@@ -34,15 +35,16 @@ class NotificationMessagesTest {
         final var appProperties = new AppProperties();
         appProperties.setServerUrl("https://hrva.cc");
         appProperties.setFrontendUrl("http://localhost:3000/");
-        messages = new NotificationMessages(appProperties, Clock.fixed(Instant.parse("2026-10-27T02:30:00Z"), ZoneOffset.UTC));
+        messages = new NotificationMessages(appProperties, Clock.fixed(Instant.parse("2026-10-27T02:30:00Z"), ZoneOffset.UTC),
+                new ShortLinks(appProperties));
     }
 
     @Test
     void dailySummaryListsTheTotalsThenEachLink() {
         final var message = messages.daily(new DailySummary(LocalDate.of(2026, 10, 26), 1241, 1, 7, List.of(
-                new DailySummary.SummaryLink("abc", "example.com", 1240, 1, 2),
-                new DailySummary.SummaryLink("one", "example.org", 1, 0, 1),
-                new DailySummary.SummaryLink("bots", null, 0, 0, 4))));
+                new DailySummary.SummaryLink("abc", "example.com", 1240, 1, 2, null),
+                new DailySummary.SummaryLink("one", "example.org", 1, 0, 1, null),
+                new DailySummary.SummaryLink("bots", null, 0, 0, 4, null))));
 
         assertThat(message).isEqualTo(new NotificationMessage("hrva.cc: clicks on 26 October 2026", List.of(
                 "1,241 clicks from 1 visitor, and 7 bot clicks",
@@ -56,7 +58,7 @@ class NotificationMessagesTest {
     @Test
     void aDailySummaryOfTwentyLongAliasesStaysWithinTheLimit() {
         final var links = java.util.stream.IntStream.range(0, 20)
-                .mapToObj(index -> new DailySummary.SummaryLink("a".repeat(120) + index, "example.com", 20 - index, 1, 0))
+                .mapToObj(index -> new DailySummary.SummaryLink("a".repeat(120) + index, "example.com", 20 - index, 1, 0, null))
                 .toList();
 
         final var message = messages.daily(new DailySummary(LocalDate.of(2026, 10, 26), 210, 20, 0, links));
@@ -88,8 +90,8 @@ class NotificationMessagesTest {
     void weeklySectionsSayHowManyMoreThereAre() {
         final var summary = new WeeklySummary(7L, "ana@example.com", LocalDate.of(2026, 10, 19), LocalDate.of(2026, 10, 25),
                 new WeeklyDigest.Change(0, 0), 0, List.of(),
-                List.of(new DeadLink(3L, 7L, "dead", "example.net", LocalDateTime.of(2026, 10, 22, 1, 0), "410")),
-                List.of(new WeeklySummary.EndingSoon("soon", "example.org", "EXPIRES", LocalDate.of(2026, 10, 30), null)), 4, 1);
+                List.of(new DeadLink(3L, 7L, "dead", "example.net", LocalDateTime.of(2026, 10, 22, 1, 0), "410", null)),
+                List.of(new WeeklySummary.EndingSoon("soon", "example.org", "EXPIRES", LocalDate.of(2026, 10, 30), null, null)), 4, 1);
 
         assertThat(messages.weekly(summary).lines()).containsExactly(
                 "Links that stopped working:",
@@ -108,12 +110,12 @@ class NotificationMessagesTest {
     void aLongWeeklyMessageNeverEndsOnAHeadingAndCountsOnlyLinks() {
         for (var aliasLength = 1; aliasLength <= 400; aliasLength++) {
             final var alias = "a".repeat(aliasLength);
-            final var top = IntStream.rangeClosed(1, 5).mapToObj(index -> new WeeklyDigest.TopLink(alias + "t" + index, "example.com", 10L - index)).toList();
+            final var top = IntStream.rangeClosed(1, 5).mapToObj(index -> new WeeklyDigest.TopLink(alias + "t" + index, "example.com", 10L - index, null)).toList();
             final var dead = IntStream.rangeClosed(1, 20)
-                    .mapToObj(index -> new DeadLink(index, 7L, alias + "d" + index, "example.net", LocalDateTime.of(2026, 10, 22, 1, 0), "404"))
+                    .mapToObj(index -> new DeadLink(index, 7L, alias + "d" + index, "example.net", LocalDateTime.of(2026, 10, 22, 1, 0), "404", null))
                     .toList();
             final var ending = IntStream.rangeClosed(1, 20)
-                    .mapToObj(index -> new WeeklySummary.EndingSoon(alias + "e" + index, "example.org", "EXPIRES", LocalDate.of(2026, 10, 30), null))
+                    .mapToObj(index -> new WeeklySummary.EndingSoon(alias + "e" + index, "example.org", "EXPIRES", LocalDate.of(2026, 10, 30), null, null))
                     .toList();
             final var summary = new WeeklySummary(7L, "ana@example.com", LocalDate.of(2026, 10, 19), LocalDate.of(2026, 10, 25),
                     new WeeklyDigest.Change(50, 40), 30, top, dead, ending, 6, 7);
@@ -148,10 +150,10 @@ class NotificationMessagesTest {
 
     static WeeklySummary weeklySummary() {
         return new WeeklySummary(7L, "ana@example.com", LocalDate.of(2026, 10, 19), LocalDate.of(2026, 10, 25), new WeeklyDigest.Change(210, 180), 150,
-                List.of(new WeeklyDigest.TopLink("abc", "example.com", 90)),
-                List.of(new DeadLink(3L, 7L, "dead", "example.net", LocalDateTime.of(2026, 10, 22, 1, 0), "410")),
-                List.of(new WeeklySummary.EndingSoon("soon", "example.org", "EXPIRES", LocalDate.of(2026, 10, 30), null),
-                        new WeeklySummary.EndingSoon("limited", "example.org", "VISIT_LIMIT", null, 1L)));
+                List.of(new WeeklyDigest.TopLink("abc", "example.com", 90, null)),
+                List.of(new DeadLink(3L, 7L, "dead", "example.net", LocalDateTime.of(2026, 10, 22, 1, 0), "410", null)),
+                List.of(new WeeklySummary.EndingSoon("soon", "example.org", "EXPIRES", LocalDate.of(2026, 10, 30), null, null),
+                        new WeeklySummary.EndingSoon("limited", "example.org", "VISIT_LIMIT", null, 1L, null)));
     }
 
     @Test
@@ -164,8 +166,29 @@ class NotificationMessagesTest {
     }
 
     @Test
+    void deadLinkLinesShowTheDomain() {
+        final var onDomain = new DeadLink(1L, 7L, "menu", "example.org", DEAD_SINCE, "404", "go.example.com");
+
+        assertThat(messages.linkDead(List.of(onDomain, dead("abc", "example.com", "404"))).lines()).containsExactly(
+                "go.example.com/menu " + ARROW + " example.org, since 27 October 2026, the page wasn't found (404)",
+                "hrva.cc/abc " + ARROW + " example.com, since 27 October 2026, the page wasn't found (404)");
+        assertThat(messages.linkBack(List.of(onDomain)).lines())
+                .containsExactly("go.example.com/menu " + ARROW + " example.org, works again after looking broken since 27 October 2026");
+        assertThat(messages.daily(new DailySummary(LocalDate.of(2026, 10, 26), 3, 2, 0,
+                List.of(new DailySummary.SummaryLink("menu", "example.org", 3, 2, 0, "go.example.com")))).lines())
+                .contains("go.example.com/menu " + ARROW + " example.org: 3 clicks, 2 visitors, 0 bot clicks");
+        final var weekly = new WeeklySummary(7L, "ana@example.com", LocalDate.of(2026, 10, 19), LocalDate.of(2026, 10, 25),
+                new WeeklyDigest.Change(3, 0), 2, List.of(new WeeklyDigest.TopLink("menu", "example.org", 3, "go.example.com")), List.of(onDomain),
+                List.of(new WeeklySummary.EndingSoon("soon", "example.org", "EXPIRES", LocalDate.of(2026, 10, 30), null, "go.example.com")));
+        assertThat(messages.weekly(weekly).lines()).contains(
+                "1. go.example.com/menu " + ARROW + " example.org, 3 clicks",
+                "go.example.com/menu " + ARROW + " example.org, since 27 October 2026, the page wasn't found (404)",
+                "go.example.com/soon " + ARROW + " example.org, expires on 30 October 2026");
+    }
+
+    @Test
     void theDeadDateIsTheDayInZagreb() {
-        final var lateEvening = new DeadLink(1L, 7L, "abc", "example.com", LocalDateTime.of(2026, 10, 26, 23, 30), "410");
+        final var lateEvening = new DeadLink(1L, 7L, "abc", "example.com", LocalDateTime.of(2026, 10, 26, 23, 30), "410", null);
 
         assertThat(messages.linkDead(List.of(lateEvening)).lines())
                 .containsExactly("hrva.cc/abc " + ARROW + " example.com, since 27 October 2026, the page was removed (410)");
@@ -193,7 +216,7 @@ class NotificationMessagesTest {
 
     @Test
     void recoveredLinkLine() {
-        final var message = messages.linkBack(List.of(new DeadLink(1L, 7L, "abc", "example.com", LocalDateTime.of(2026, 10, 20, 2, 11), null)));
+        final var message = messages.linkBack(List.of(new DeadLink(1L, 7L, "abc", "example.com", LocalDateTime.of(2026, 10, 20, 2, 11), null, null)));
 
         assertThat(message).isEqualTo(new NotificationMessage("hrva.cc: 1 link works again",
                 List.of("hrva.cc/abc " + ARROW + " example.com, works again after looking broken since 20 October 2026"),
@@ -277,7 +300,7 @@ class NotificationMessagesTest {
     }
 
     private static DeadLink dead(final String alias, final String host, final String status) {
-        return new DeadLink(1L, 7L, alias, host, DEAD_SINCE, status);
+        return new DeadLink(1L, 7L, alias, host, DEAD_SINCE, status, null);
     }
 
     private static String plain(final NotificationMessage message) {

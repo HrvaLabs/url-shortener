@@ -2,10 +2,10 @@
 <html lang="en" xmlns:th="https://www.thymeleaf.org"
       th:replace="~{fragments/email :: layout(title='Short link expiring soon', heading='Link expiring soon', preheader=~{::preheader}, content=~{::content}, footer=~{fragments/email :: consent('You get this because you turned on expiry reminders.', 'Turn off expiry reminders')})}">
 <body>
-<th:block th:fragment="preheader">Your short link /<th:block th:text="${shortUrl}">abc</th:block> expires on <th:block th:text="${expirationDate}">2026-10-28</th:block>. Extend it from your dashboard.</th:block>
+<th:block th:fragment="preheader">Your short link <th:block th:text="${short_link}">hrva.cc/abc</th:block> expires on <th:block th:text="${expirationDate}">2026-10-28</th:block>. Extend it from your dashboard.</th:block>
 <th:block th:fragment="content">
   <p class="e-fg" th:style="${s.p}">Hi <strong class="e-fg" th:style="${s.strong}" th:text="${name}">alice@example.com</strong>,</p>
-  <p class="e-fg" th:style="${s.p}">Your short link <span class="e-fg mono" th:style="${s.short}">/<th:block th:text="${shortUrl}">abc</th:block></span> is expiring on <strong class="e-fg" th:style="${s.strong}" th:text="${expirationDate}">2026-10-28</strong>.</p>
+  <p class="e-fg" th:style="${s.p}">Your short link <span class="e-fg mono" th:style="${s.short}"><th:block th:text="${short_link}">hrva.cc/abc</th:block></span> is expiring on <strong class="e-fg" th:style="${s.strong}" th:text="${expirationDate}">2026-10-28</strong>.</p>
   <table class="e-bd" role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" th:style="${s.panel}">
     <tr>
       <td class="e-fg" th:style="${s.row}"><div class="e-mu" th:style="${s.label}">Destination</div>

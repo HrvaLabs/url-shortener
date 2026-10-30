@@ -2,11 +2,13 @@ package cc.hrva.urlshortener.mcp.tools;
 
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.dto.BlocklistSourceResponse;
+import cc.hrva.urlshortener.dto.DomainRef;
 import cc.hrva.urlshortener.dto.LinkVerdict;
 import cc.hrva.urlshortener.dto.UrlResponse;
 import cc.hrva.urlshortener.exception.UrlNotFoundException;
 import cc.hrva.urlshortener.exception.UrlValidationException;
 import cc.hrva.urlshortener.exception.UserNotFoundException;
+import cc.hrva.urlshortener.model.CustomDomain;
 import cc.hrva.urlshortener.model.LinkReview;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.User;
@@ -21,6 +23,7 @@ import cc.hrva.urlshortener.service.LinkCheckService;
 import cc.hrva.urlshortener.service.ModerationService;
 import cc.hrva.urlshortener.service.ReviewQueueService;
 import cc.hrva.urlshortener.service.ScammerSignalService;
+import cc.hrva.urlshortener.service.domain.ShortLinks;
 import io.modelcontextprotocol.spec.McpSchema.CallToolResult;
 import io.modelcontextprotocol.spec.McpSchema.TextContent;
 import java.net.IDN;
@@ -117,7 +120,7 @@ class ModerationToolsTest {
         appProperties.getMcp().setIssuer("https://hrva.cc");
         moderationTools = new ModerationTools(mcpUserResolver, moderationService, reviewQueueService, scammerSignalService,
                 linkCheckService, blocklistSourceService, userRepository, urlRepository, linkReviewRepository, appProperties,
-                Clock.fixed(NOW, ZoneOffset.UTC));
+                Clock.fixed(NOW, ZoneOffset.UTC), new ShortLinks(appProperties));
     }
 
     @Test
@@ -183,6 +186,26 @@ class ModerationToolsTest {
                 "urlId 42 | https://hrva.cc/abc12 -> <evil.example/login> | owner r***@gmail.com #27, account 3 days old, possible scammer "
                         + "| reasons: domain registered in the last 30 days; imitates njuskalo",
                 "urlId 43 | https://hrva.cc/xyz89 -> <www.fake-bank.example/> | no owner, anonymous link | reasons: punycode domain");
+    }
+
+    @Test
+    void reviewQueuePrintsTheDomainLink() {
+        signedInAs(ADMIN, true);
+        final var onDomain = review(42L, "menu", "https://evil.example/login", null, "punycode domain");
+        onDomain.getUrl().setDomain(CustomDomain.builder().id(7L).hostname("go.example.com").build());
+        when(reviewQueueService.open(any(), isNull())).thenReturn(new PageImpl<>(List.of(onDomain,
+                review(43L, "xyz89", "https://fake-bank.example/", null, "punycode domain")), PageRequest.of(0, 20), 2));
+        when(moderationService.blockLink(42L, BlockReason.ADMIN, null, ADMIN_EMAIL, "mcp"))
+                .thenReturn(new UrlResponse(42L, "https://evil.example/login", "menu", LocalDateTime.now(), null, 3L, null, false, "BLOCKED",
+                        Set.of(), false, "rade.scam@gmail.com", List.of(), null, null, null, null, null, new DomainRef(7L, "go.example.com")));
+
+        final var queue = text(moderationTools.reviewQueue(null, null)).lines().toList();
+        final var blocked = text(moderationTools.blockLink(42L, null));
+
+        assertThat(queue).contains(
+                "urlId 42 | https://go.example.com/menu -> <evil.example/login> | no owner, anonymous link | reasons: punycode domain",
+                "urlId 43 | https://hrva.cc/xyz89 -> <fake-bank.example/> | no owner, anonymous link | reasons: punycode domain");
+        assertThat(blocked).isEqualTo("urlId 42 | https://go.example.com/menu -> <evil.example/login> | BLOCKED");
     }
 
     @Test

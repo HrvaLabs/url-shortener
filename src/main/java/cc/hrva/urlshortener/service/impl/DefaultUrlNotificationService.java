@@ -6,6 +6,7 @@ import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.enums.NotificationType;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.service.UrlNotificationService;
+import cc.hrva.urlshortener.service.domain.ShortLinks;
 import cc.hrva.urlshortener.service.notification.ConsentEmails;
 import cc.hrva.urlshortener.service.notification.EmailConsentReader;
 import java.text.MessageFormat;
@@ -39,6 +40,7 @@ public class DefaultUrlNotificationService implements UrlNotificationService {
     private final AppProperties appProperties;
     private final TemplateEngine templateEngine;
     private final PlatformTransactionManager transactionManager;
+    private final ShortLinks shortLinks;
 
     @Override
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
@@ -82,6 +84,7 @@ public class DefaultUrlNotificationService implements UrlNotificationService {
         final var ctx = new Context();
         ctx.setVariable("name", link.ownerEmail());
         ctx.setVariable("shortUrl", link.shortUrl());
+        ctx.setVariable("short_link", shortLinks.display(link.domain(), link.shortUrl()));
         ctx.setVariable("longUrl", link.longUrl());
         ctx.setVariable("expirationDate", expirationDate);
         ctx.setVariable("app_name", appProperties.getAppName());
@@ -103,11 +106,11 @@ public class DefaultUrlNotificationService implements UrlNotificationService {
                 .ifPresent(entry -> log.info("Sent expiry reminder url id={} owner id={}", link.urlId(), link.ownerId()));
     }
 
-    record ExpiringLink(long urlId, String shortUrl, String longUrl, LocalDateTime expirationDate, long ownerId, String ownerEmail) {
+    record ExpiringLink(long urlId, String shortUrl, String longUrl, LocalDateTime expirationDate, long ownerId, String ownerEmail, String domain) {
 
         static ExpiringLink of(final Url url) {
             return new ExpiringLink(url.getId(), url.getShortUrl(), url.getLongUrl(), url.getExpirationDate(),
-                    url.getOwner().getId(), url.getOwner().getEmail());
+                    url.getOwner().getId(), url.getOwner().getEmail(), ShortLinks.hostnameOf(url));
         }
 
     }

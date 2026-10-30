@@ -19,6 +19,7 @@ import cc.hrva.urlshortener.repository.NotificationConsentRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.service.analytics.AnalyticsDays;
+import cc.hrva.urlshortener.service.domain.ShortLinks;
 import cc.hrva.urlshortener.service.impl.DefaultDeadLinkNotificationService;
 import cc.hrva.urlshortener.service.impl.DefaultDestinationCheckService;
 import cc.hrva.urlshortener.service.notification.ChannelContent;
@@ -220,7 +221,7 @@ class DefaultDeadLinkNotificationServiceTest {
 
     @Test
     void anonymousLinksNotifyNobody() {
-        final var anonymous = new DeadLink(link(null, "anonymous").getId(), null, "anonymous", "example.org", DIED, "404");
+        final var anonymous = new DeadLink(link(null, "anonymous").getId(), null, "anonymous", "example.org", DIED, "404", null);
 
         deadLinkNotificationService.notify(new DestinationCheckOutcome(List.of(anonymous), List.of(anonymous), NIGHT));
 
@@ -287,7 +288,7 @@ class DefaultDeadLinkNotificationServiceTest {
                 .toList());
         jdbcTemplate.update("update url set destination_dead_since = ?, destination_last_status = '404' where owner_id = ?", DIED, ana.getId());
         final var deadLinks = links.stream()
-                .map(url -> new DeadLink(url.getId(), ana.getId(), url.getShortUrl(), url.getShortUrl() + ".example.org", DIED, "404"))
+                .map(url -> new DeadLink(url.getId(), ana.getId(), url.getShortUrl(), url.getShortUrl() + ".example.org", DIED, "404", null))
                 .toList();
         final var statistics = entityManagerFactory.unwrap(SessionFactory.class).getStatistics();
         statistics.clear();
@@ -603,7 +604,7 @@ class DefaultDeadLinkNotificationServiceTest {
     private DeadLink dead(final Url url) {
         jdbcTemplate.update("update url set destination_dead_since = ?, destination_last_status = '404', destination_fail_streak = 3 where id = ?",
                 DIED, url.getId());
-        return new DeadLink(url.getId(), url.getOwner().getId(), url.getShortUrl(), url.getShortUrl() + ".example.org", DIED, "404");
+        return new DeadLink(url.getId(), url.getOwner().getId(), url.getShortUrl(), url.getShortUrl() + ".example.org", DIED, "404", null);
     }
 
     private DeadLink checkedTonight(final DeadLink link) {
@@ -612,7 +613,7 @@ class DefaultDeadLinkNotificationServiceTest {
     }
 
     private static DeadLink back(final Url url) {
-        return new DeadLink(url.getId(), url.getOwner().getId(), url.getShortUrl(), url.getShortUrl() + ".example.org", DIED_BEFORE, null);
+        return new DeadLink(url.getId(), url.getOwner().getId(), url.getShortUrl(), url.getShortUrl() + ".example.org", DIED_BEFORE, null, null);
     }
 
     private void emailConsent(final User owner) {
@@ -639,7 +640,7 @@ class DefaultDeadLinkNotificationServiceTest {
                     classes = {UrlRepository.class, UserRepository.class, NotificationConsentRepository.class, NotificationChannelRepository.class}))
     @Import({DefaultDeadLinkNotificationService.class, EmailConsentReader.class, NotificationMessages.class, NotificationPayloads.class,
             NotificationClaimRepository.class, DefaultDestinationCheckService.class, DestinationCheckRepository.class, AnalyticsDays.class,
-            TestApplication.Fixed.class})
+            ShortLinks.class, TestApplication.Fixed.class})
     static class TestApplication {
 
         @TestConfiguration

@@ -27,6 +27,7 @@ import cc.hrva.urlshortener.mcp.bridge.InMemoryRedis;
 import cc.hrva.urlshortener.model.enums.BlockReason;
 import cc.hrva.urlshortener.service.alert.DiscordAlertFormatter;
 import cc.hrva.urlshortener.service.analytics.AnalyticsDays;
+import cc.hrva.urlshortener.service.domain.ShortLinks;
 import cc.hrva.urlshortener.service.impl.DefaultWeeklyDigestService;
 import java.lang.reflect.RecordComponent;
 import java.time.Clock;
@@ -126,7 +127,7 @@ class DefaultWeeklyDigestServiceTest {
         appProperties.setDiscordWebhookUrl(" " + WEBHOOK + " ");
         redisTemplate = mock(StringRedisTemplate.class);
         redis.backing(redisTemplate);
-        formatter = new DiscordAlertFormatter(appProperties);
+        formatter = new DiscordAlertFormatter(appProperties, new ShortLinks(appProperties));
         this.weeklyDigestService = service();
     }
 
@@ -180,7 +181,7 @@ class DefaultWeeklyDigestServiceTest {
                 4,
                 6,
                 List.of(new CountEntry("BLOCKLIST", 2), new CountEntry("SAFE_BROWSING", 1)),
-                List.of(new WeeklyDigest.TopLink("menu", "example.com", 120))));
+                List.of(new WeeklyDigest.TopLink("menu", "example.com", 120, null))));
     }
 
     @Test
@@ -213,13 +214,24 @@ class DefaultWeeklyDigestServiceTest {
         stubEmptyWeekWith(links(WEEK_FROM, WEEK_TO, NO_SERIES, 0), safety(NO_SERIES, List.of(), NO_SERIES), busiest);
 
         assertThat(weeklyDigestService.collect(TODAY).topLinks()).containsExactly(
-                new WeeklyDigest.TopLink("link1", "site1.example", 99),
-                new WeeklyDigest.TopLink("link2", "site2.example", 98),
-                new WeeklyDigest.TopLink("link3", "site3.example", 97),
-                new WeeklyDigest.TopLink("link4", "site4.example", 96),
-                new WeeklyDigest.TopLink("link5", "site5.example", 95));
+                new WeeklyDigest.TopLink("link1", "site1.example", 99, null),
+                new WeeklyDigest.TopLink("link2", "site2.example", 98, null),
+                new WeeklyDigest.TopLink("link3", "site3.example", 97, null),
+                new WeeklyDigest.TopLink("link4", "site4.example", 96, null),
+                new WeeklyDigest.TopLink("link5", "site5.example", 95, null));
         assertThat(Arrays.stream(WeeklyDigest.TopLink.class.getRecordComponents()).map(RecordComponent::getName))
-                .containsExactly("shortUrl", "destinationHost", "clicks");
+                .containsExactly("shortUrl", "destinationHost", "clicks", "domain");
+    }
+
+    @Test
+    void topLinksCarryTheDomain() {
+        stubEmptyWeekWith(links(WEEK_FROM, WEEK_TO, NO_SERIES, 0), safety(NO_SERIES, List.of(), NO_SERIES), List.of(
+                new TrafficStatsResponse.TopLink(1L, "menu", "example.com", "owner1@example.com", 9, 4, "go.example.com"),
+                topLink(2L, "shop", "example.org", 3)));
+
+        assertThat(weeklyDigestService.collect(TODAY).topLinks()).containsExactly(
+                new WeeklyDigest.TopLink("menu", "example.com", 9, "go.example.com"),
+                new WeeklyDigest.TopLink("shop", "example.org", 3, null));
     }
 
     @Test
@@ -248,7 +260,7 @@ class DefaultWeeklyDigestServiceTest {
         final var digest = emailedDigest();
         assertThat(digest.from()).isEqualTo(WEEK_FROM);
         assertThat(digest.to()).isEqualTo(WEEK_TO);
-        assertThat(digest.topLinks()).containsExactly(new WeeklyDigest.TopLink("menu", "example.com", 120));
+        assertThat(digest.topLinks()).containsExactly(new WeeklyDigest.TopLink("menu", "example.com", 120, null));
         verify(discordWebhookClient).send(WEBHOOK, formatter.weeklyDigest(digest), DISCORD_TIMEOUT);
         verifyNoMoreInteractions(discordWebhookClient, sendingEmailService);
         assertThat(output).contains("Weekly digest sent week=2026-10-19 discord=true email=true").doesNotContain("webhook-secret");

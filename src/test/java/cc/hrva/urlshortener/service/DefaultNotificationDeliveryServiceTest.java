@@ -16,6 +16,7 @@ import cc.hrva.urlshortener.repository.NotificationConsentRepository;
 import cc.hrva.urlshortener.repository.NotificationDeliveryRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.service.analytics.AnalyticsDays;
+import cc.hrva.urlshortener.service.domain.ShortLinks;
 import cc.hrva.urlshortener.service.impl.DefaultNotificationDeliveryService;
 import cc.hrva.urlshortener.service.notification.ChannelContent;
 import cc.hrva.urlshortener.service.notification.ChannelTarget;
@@ -538,7 +539,7 @@ class DefaultNotificationDeliveryServiceTest {
     }
 
     private static DeadLink deadLink() {
-        return new DeadLink(1L, 7L, "abc", "example.com", LocalDateTime.of(2026, 10, 27, 1, 14), "404");
+        return new DeadLink(1L, 7L, "abc", "example.com", LocalDateTime.of(2026, 10, 27, 1, 14), "404", null);
     }
 
     private NotificationChannel channel(final ChannelType type) {
@@ -628,7 +629,7 @@ class DefaultNotificationDeliveryServiceTest {
     @EntityScan(basePackageClasses = NotificationChannel.class)
     @Import({DefaultNotificationDeliveryService.class, NotificationClaimRepository.class, ChannelSenders.class, DiscordChannelSender.class,
             SlackChannelSender.class, TelegramChannelSender.class, NtfyChannelSender.class, WebhookChannelSender.class, NotificationMessages.class,
-            NotificationPayloads.class, AnalyticsDays.class, TestApplication.Fixed.class})
+            NotificationPayloads.class, ShortLinks.class, AnalyticsDays.class, TestApplication.Fixed.class})
     @EnableJpaRepositories(
             basePackageClasses = NotificationChannelRepository.class,
             includeFilters = @ComponentScan.Filter(

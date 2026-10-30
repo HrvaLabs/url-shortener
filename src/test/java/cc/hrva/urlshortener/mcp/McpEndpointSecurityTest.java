@@ -38,6 +38,7 @@ import cc.hrva.urlshortener.service.ReviewQueueService;
 import cc.hrva.urlshortener.service.ScammerSignalService;
 import cc.hrva.urlshortener.service.UrlService;
 import cc.hrva.urlshortener.service.UserService;
+import cc.hrva.urlshortener.service.domain.ShortLinks;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiter;
 import com.jayway.jsonpath.JsonPath;
 import com.nimbusds.jose.JOSEException;
@@ -696,7 +697,8 @@ class McpEndpointSecurityTest {
             ClockConfiguration.class,
             McpUserResolver.class,
             LinkTools.class,
-            ModerationTools.class
+            ModerationTools.class,
+            ShortLinks.class
     })
     static class TestApplication {
     }

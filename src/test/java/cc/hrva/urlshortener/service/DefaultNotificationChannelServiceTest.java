@@ -22,6 +22,7 @@ import cc.hrva.urlshortener.model.enums.LastDeliveryStatus;
 import cc.hrva.urlshortener.model.enums.NotificationType;
 import cc.hrva.urlshortener.repository.NotificationChannelRepository;
 import cc.hrva.urlshortener.repository.NotificationConsentRepository;
+import cc.hrva.urlshortener.service.domain.ShortLinks;
 import cc.hrva.urlshortener.service.impl.DefaultNotificationChannelService;
 import cc.hrva.urlshortener.service.notification.ChannelTargets;
 import cc.hrva.urlshortener.service.notification.MutableClock;
@@ -140,8 +141,9 @@ class DefaultNotificationChannelServiceTest {
         final var senders = new ChannelSenders(List.of(new DiscordChannelSender(jsonMapper), new SlackChannelSender(jsonMapper),
                 new TelegramChannelSender(jsonMapper), new NtfyChannelSender(), new WebhookChannelSender()), poster);
         service = new DefaultNotificationChannelService(notificationChannelRepository, notificationConsentRepository, notificationConsentService,
-                userService, accountLock, rateLimiter, secretBox, new ChannelTargets(publicDns, Validation.buildDefaultValidatorFactory().getValidator()), senders, new NotificationMessages(appProperties, clock),
-                new NotificationPayloads(jsonMapper, appProperties, clock), new NoResourceTransactionManager(), clock);
+                userService, accountLock, rateLimiter, secretBox, new ChannelTargets(publicDns, Validation.buildDefaultValidatorFactory().getValidator()), senders,
+                new NotificationMessages(appProperties, clock, new ShortLinks(appProperties)),
+                new NotificationPayloads(jsonMapper, appProperties, clock, new ShortLinks(appProperties)), new NoResourceTransactionManager(), clock);
         lenient().when(userService.getUserFromToken()).thenReturn(user);
         lenient().when(accountLock.lock(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
         lenient().when(rateLimiter.tryAcquire(SETTINGS_KEY, 60, Duration.ofHours(1))).thenReturn(true);

@@ -1,10 +1,12 @@
 package cc.hrva.urlshortener.service.notification;
 
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
+import cc.hrva.urlshortener.dto.WeeklyDigest;
 import cc.hrva.urlshortener.dto.notification.DailySummary;
 import cc.hrva.urlshortener.dto.notification.WeeklySummary;
 import cc.hrva.urlshortener.model.NotificationChannel;
 import cc.hrva.urlshortener.service.digest.WeeklyDigestText;
+import cc.hrva.urlshortener.service.domain.ShortLinks;
 import cc.hrva.urlshortener.service.notification.DestinationCheckOutcome.DeadLink;
 import java.text.NumberFormat;
 import java.time.Clock;
@@ -46,6 +48,7 @@ public class NotificationMessages {
 
     private final AppProperties appProperties;
     private final Clock clock;
+    private final ShortLinks shortLinks;
 
     public record Format(UnaryOperator<String> title, UnaryOperator<String> line, UnaryOperator<String> link, Function<Integer, String> more) {
 
@@ -70,7 +73,7 @@ public class NotificationMessages {
                 + counted(summary.botClicks(), BOT_CLICK));
         summary.links().stream()
                 .limit(MOST_LINKS)
-                .map(link -> target(link.shortUrl(), link.destinationHost()) + ": " + counted(link.clicks(), CLICK) + ", "
+                .map(link -> target(link.domain(), link.shortUrl(), link.destinationHost()) + ": " + counted(link.clicks(), CLICK) + ", "
                         + counted(link.uniqueVisitors(), VISITOR) + ", " + counted(link.botClicks(), BOT_CLICK))
                 .forEach(lines::add);
         return new NotificationMessage("hrva.cc: clicks on " + DAY.format(summary.date()), lines, frontendPage(DASHBOARD), 0);
@@ -88,7 +91,7 @@ public class NotificationMessages {
         return new WeeklySections(
                 clicks,
                 IntStream.range(0, topLinks.size())
-                        .mapToObj(index -> number(index + 1L) + ". " + target(topLinks.get(index).shortUrl(), topLinks.get(index).destinationHost()) + ", "
+                        .mapToObj(index -> number(index + 1L) + ". " + topLinkTarget(topLinks.get(index)) + ", "
                                 + counted(topLinks.get(index).clicks(), CLICK))
                         .toList(),
                 summary.deadLinks().stream().map(this::deadLine).toList(),
@@ -136,17 +139,12 @@ public class NotificationMessages {
     }
 
     public String target(final DeadLink link) {
-        return target(link.shortUrl(), link.destinationHost());
+        return target(link.domain(), link.shortUrl(), link.destinationHost());
     }
 
-    public String target(final String alias, final String destinationHost) {
+    public String target(final String domain, final String alias, final String destinationHost) {
         final var host = StringUtils.isBlank(destinationHost) ? UNREADABLE_DESTINATION : destinationHost;
-        return shortLinkHost() + "/" + alias + ARROW + host;
-    }
-
-    public String shortLinkHost() {
-        final var serverUrl = StringUtils.removeEnd(StringUtils.defaultString(appProperties.getServerUrl()), "/");
-        return serverUrl.contains("://") ? StringUtils.substringAfter(serverUrl, "://") : serverUrl;
+        return shortLinks.display(domain, alias) + ARROW + host;
     }
 
     public String frontendPage(final String path) {
@@ -167,7 +165,11 @@ public class NotificationMessages {
         final var ending = WeeklySummary.EXPIRES.equals(link.reason())
                 ? "expires on " + DAY.format(link.expiresOn())
                 : counted(link.visitsLeft() == null ? 0 : link.visitsLeft(), VISIT) + " left";
-        return target(link.shortUrl(), link.destinationHost()) + ", " + ending;
+        return target(link.domain(), link.shortUrl(), link.destinationHost()) + ", " + ending;
+    }
+
+    private String topLinkTarget(final WeeklyDigest.TopLink link) {
+        return target(link.domain(), link.shortUrl(), link.destinationHost());
     }
 
     private static void section(final List<String> lines, final List<Integer> linkCounts, final List<Integer> headings, final String heading,

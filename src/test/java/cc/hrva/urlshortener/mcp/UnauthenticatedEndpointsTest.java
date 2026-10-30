@@ -32,6 +32,7 @@ import cc.hrva.urlshortener.service.ReviewQueueService;
 import cc.hrva.urlshortener.service.ScammerSignalService;
 import cc.hrva.urlshortener.service.UrlService;
 import cc.hrva.urlshortener.service.UserService;
+import cc.hrva.urlshortener.service.domain.ShortLinks;
 import cc.hrva.urlshortener.service.ratelimit.RedisFixedWindowRateLimiter;
 import com.nimbusds.jose.JOSEException;
 import com.nimbusds.jose.jwk.RSAKey;
@@ -402,6 +403,7 @@ class UnauthenticatedEndpointsTest {
             McpUserResolver.class,
             LinkTools.class,
             ModerationTools.class,
+            ShortLinks.class,
             RedisFixedWindowRateLimiter.class
     })
     static class TestApplication {

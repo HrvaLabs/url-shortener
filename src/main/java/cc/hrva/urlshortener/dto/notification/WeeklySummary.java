@@ -28,7 +28,7 @@ public record WeeklySummary(long userId, String email, LocalDate from, LocalDate
         return clicks.current() > 0 || !deadLinks.isEmpty() || !endingSoon.isEmpty();
     }
 
-    public record EndingSoon(String shortUrl, String destinationHost, String reason, LocalDate expiresOn, Long visitsLeft) {
+    public record EndingSoon(String shortUrl, String destinationHost, String reason, LocalDate expiresOn, Long visitsLeft, String domain) {
     }
 
 }

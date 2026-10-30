@@ -753,7 +753,7 @@ class DefaultModerationServiceTest {
         moderationService.blockLink(30L, BlockReason.BLOCKLIST, "HaGeZi TIF medium", "system", "click");
 
         verify(eventPublisher).publishEvent(new AdminAlertEvent.LinkBlocked(
-                new AlertedLink(30L, "s30", "login-paypa1.top", null), BlockReason.BLOCKLIST, "HaGeZi TIF medium"));
+                new AlertedLink(30L, "s30", "login-paypa1.top", null, null), BlockReason.BLOCKLIST, "HaGeZi TIF medium"));
     }
 
     @Test
@@ -763,7 +763,7 @@ class DefaultModerationServiceTest {
         moderationService.blockLink(30L, BlockReason.SAFE_BROWSING, "SOCIAL_ENGINEERING", "system", "nightly");
 
         verify(eventPublisher).publishEvent(new AdminAlertEvent.LinkBlocked(
-                new AlertedLink(30L, "s30", "example.org", 7L), BlockReason.SAFE_BROWSING, "SOCIAL_ENGINEERING"));
+                new AlertedLink(30L, "s30", "example.org", 7L, null), BlockReason.SAFE_BROWSING, "SOCIAL_ENGINEERING"));
     }
 
     @Test
@@ -801,7 +801,7 @@ class DefaultModerationServiceTest {
         moderationService.blockLink(31L, BlockReason.ADMIN, null, ADMIN, "admin");
 
         verify(eventPublisher).publishEvent(new AdminAlertEvent.LinkBlocked(
-                new AlertedLink(30L, "s30", "login-paypa1.top", null), BlockReason.SAFE_BROWSING, "SOCIAL_ENGINEERING"));
+                new AlertedLink(30L, "s30", "login-paypa1.top", null, null), BlockReason.SAFE_BROWSING, "SOCIAL_ENGINEERING"));
         verify(eventPublisher, times(1)).publishEvent(any(AdminAlertEvent.class));
     }
 

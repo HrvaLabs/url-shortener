@@ -10,6 +10,7 @@ import cc.hrva.urlshortener.dto.stats.CountEntry;
 import cc.hrva.urlshortener.exception.EmailLogNotFoundException;
 import cc.hrva.urlshortener.exception.EmailNotResendableException;
 import cc.hrva.urlshortener.exception.MailingException;
+import cc.hrva.urlshortener.model.CustomDomain;
 import cc.hrva.urlshortener.model.Email;
 import cc.hrva.urlshortener.model.EmailLog;
 import cc.hrva.urlshortener.model.ResetToken;
@@ -20,6 +21,7 @@ import cc.hrva.urlshortener.model.enums.BlockReason;
 import cc.hrva.urlshortener.model.enums.NotificationType;
 import cc.hrva.urlshortener.repository.EmailLogRepository;
 import cc.hrva.urlshortener.service.digest.WeeklyDigestText;
+import cc.hrva.urlshortener.service.domain.ShortLinks;
 import cc.hrva.urlshortener.service.impl.DefaultEmailService;
 import cc.hrva.urlshortener.service.impl.DefaultSendingEmailService;
 import cc.hrva.urlshortener.service.notification.ConsentEmails;
@@ -79,6 +81,8 @@ class DefaultSendingEmailServiceTest {
     private static final LocalDateTime PASSKEY_ADDED_AT = LocalDateTime.of(2026, 10, 25, 14, 5, 33);
     private static final String SITE_LINK = "https://hrva.cc";
     private static final String HRVALABS_LINK = "https://hrvalabs.net";
+    private static final CustomDomain GO_EXAMPLE = CustomDomain.builder().id(7L).hostname("go.example.com").build();
+    private static final String ARROW = Character.toString(0x2192);
 
     @Mock
     private TemplateEngine templateEngine;
@@ -107,7 +111,8 @@ class DefaultSendingEmailServiceTest {
         appProperties.setServerUrl("https://hrva.cc");
         appProperties.setFrontendUrl("https://app.hrva.cc");
         sendingEmailService = new DefaultSendingEmailService(appProperties, templateEngine, emailService, emailLogRepository,
-                emailConsentReader, new ConsentEmails(unsubscribeTokens, appProperties), new NotificationMessages(appProperties, Clock.systemUTC()));
+                emailConsentReader, new ConsentEmails(unsubscribeTokens, appProperties),
+                new NotificationMessages(appProperties, Clock.systemUTC(), new ShortLinks(appProperties)), new ShortLinks(appProperties));
     }
 
     private void saveReturnsArgument() {
@@ -130,7 +135,8 @@ class DefaultSendingEmailServiceTest {
         appProperties.setDeactivateUserAccountAfterDays(180L);
         appProperties.setResetTokenExpirationInHours(1L);
         return new DefaultSendingEmailService(appProperties, engine, emailService, emailLogRepository,
-                emailConsentReader, new ConsentEmails(unsubscribeTokens, appProperties), new NotificationMessages(appProperties, Clock.systemUTC()));
+                emailConsentReader, new ConsentEmails(unsubscribeTokens, appProperties),
+                new NotificationMessages(appProperties, Clock.systemUTC(), new ShortLinks(appProperties)), new ShortLinks(appProperties));
     }
 
     private static TemplateEngine realTemplateEngine() {
@@ -178,7 +184,7 @@ class DefaultSendingEmailServiceTest {
                 4,
                 2,
                 List.of(new CountEntry("BLOCKLIST", 2), new CountEntry("SAFE_BROWSING", 1)),
-                List.of(new WeeklyDigest.TopLink("my_menu", destinationHost, 120)));
+                List.of(new WeeklyDigest.TopLink("my_menu", destinationHost, 120, null)));
     }
 
     private static DecisionsDigest decisions(final long openCount) {
@@ -548,6 +554,25 @@ class DefaultSendingEmailServiceTest {
         assertThat(context.getValue().getVariableNames()).allSatisfy(name -> assertThat(String.valueOf(context.getValue().getVariable(name)))
                 .doesNotContain("HaGeZi")
                 .doesNotContain("jofogas.cards"));
+    }
+
+    @Test
+    void blockedLinkEmailShowsTheDomainLink() throws Exception {
+        saveReturnsArgument();
+        final var sent = ArgumentCaptor.forClass(Email.class);
+        doAnswer(invocation -> null).when(emailService).sendEmail(sent.capture(), eq(null));
+        final var onDomain = Url.builder().shortUrl("promo").longUrl("https://jofogas.cards/login").domain(GO_EXAMPLE)
+                .blockReason(BlockReason.BLOCKLIST).active(false).build();
+        final var alsoOnDomain = Url.builder().id(2L).shortUrl("deal").longUrl("https://jofogas.cards/deal").domain(GO_EXAMPLE)
+                .blockReason(BlockReason.DOMAIN_RULE).active(false).build();
+        final var service = configuredEmailService(realTemplateEngine());
+
+        service.sendEmailUrlBlocked(OWNER, onDomain);
+        service.sendEmailUrlsBlocked(OWNER, List.of(alsoOnDomain, domainBlockedLinks(1).getFirst()));
+
+        assertThat(sent.getAllValues().getFirst().getText()).contains("https://go.example.com/promo").doesNotContain("hrva.cc/promo");
+        assertThat(sent.getAllValues().get(1).getText()).contains("https://go.example.com/deal<", "https://hrva.cc/deal1<")
+                .doesNotContain("hrva.cc/deal<");
     }
 
     @Test
@@ -977,10 +1002,10 @@ class DefaultSendingEmailServiceTest {
     @Test
     void aWeeklySummaryEmailSaysHowManyMoreLinksThereAre() throws Exception {
         final var deadLinks = IntStream.rangeClosed(1, 20)
-                .mapToObj(index -> new DeadLink(index, 7L, "dead" + index, "example.net", LocalDateTime.of(2026, 10, 22, 1, 0), "410"))
+                .mapToObj(index -> new DeadLink(index, 7L, "dead" + index, "example.net", LocalDateTime.of(2026, 10, 22, 1, 0), "410", null))
                 .toList();
         final var endingSoon = IntStream.rangeClosed(1, 20)
-                .mapToObj(index -> new WeeklySummary.EndingSoon("soon" + index, "example.org", "EXPIRES", LocalDate.of(2026, 10, 30), null))
+                .mapToObj(index -> new WeeklySummary.EndingSoon("soon" + index, "example.org", "EXPIRES", LocalDate.of(2026, 10, 30), null, null))
                 .toList();
         final var summary = new WeeklySummary(7L, "alice@example.com", LocalDate.of(2026, 10, 19), LocalDate.of(2026, 10, 25),
                 new WeeklyDigest.Change(0, 0), 0, List.of(), deadLinks, endingSoon, 4, 1);
@@ -993,6 +1018,47 @@ class DefaultSendingEmailServiceTest {
         assertThat(email.getPlainText()).contains(
                 "hrva.cc/dead20 → example.net, since 22 October 2026, the page was removed (410)\nand 4 more\nEnding soon:",
                 "hrva.cc/soon20 → example.org, expires on 30 October 2026\nand 1 more\n\nOpen your links");
+    }
+
+    @Test
+    void weeklySummaryEmailShowsTheDomainLink() throws Exception {
+        final var summary = new WeeklySummary(7L, "alice@example.com", LocalDate.of(2026, 10, 19), LocalDate.of(2026, 10, 25),
+                new WeeklyDigest.Change(90, 0), 50, List.of(new WeeklyDigest.TopLink("menu", "example.com", 90, "go.example.com")),
+                List.of(new DeadLink(3L, 7L, "dead", "example.net", LocalDateTime.of(2026, 10, 22, 1, 0), "410", "go.example.com")),
+                List.of(new WeeklySummary.EndingSoon("soon", "example.org", "EXPIRES", LocalDate.of(2026, 10, 30), null, "go.example.com")));
+
+        final var email = sentWeeklySummaryEmail(summary);
+
+        assertThat(email.getPlainText()).contains(
+                "1. go.example.com/menu " + ARROW + " example.com, 90 clicks",
+                "go.example.com/dead " + ARROW + " example.net, since 22 October 2026",
+                "go.example.com/soon " + ARROW + " example.org, expires on 30 October 2026").doesNotContain("hrva.cc/menu", "hrva.cc/dead", "hrva.cc/soon");
+        assertThat(textOf(email.getText())).contains("go.example.com/menu " + ARROW + " example.com", "go.example.com/dead " + ARROW + " example.net",
+                "go.example.com/soon " + ARROW + " example.org");
+        assertThat(linksIn(email.getText())).noneMatch(link -> link.contains("go.example.com"));
+    }
+
+    @Test
+    void deadLinksEmailShowsTheDomainLink() throws Exception {
+        final var onDomain = new DeadLink(1L, 7L, "menu", "example.com", LocalDateTime.of(2026, 10, 26, 23, 30), "404", "go.example.com");
+
+        final var email = sentDeadLinksEmail(new DeadLinksEmail(7L, "alice@example.com", List.of(onDomain), "https://hrva.cc/dashboard"));
+
+        assertThat(textOf(email.getText())).contains("go.example.com/menu " + ARROW + " example.com Since 27 October 2026");
+        assertThat(email.getPlainText()).contains("go.example.com/menu " + ARROW + " example.com, since 27 October 2026").doesNotContain("hrva.cc/menu");
+    }
+
+    @Test
+    void theWeeklyDigestShowsTheDomainLink() throws Exception {
+        final var digest = weeklyDigest("example.com");
+        final var onDomain = new WeeklyDigest(digest.from(), digest.to(), digest.clicks(), digest.uniqueVisitors(), digest.botClicks(), digest.newLinks(),
+                digest.linksByChannel(), digest.newUsers(), digest.activeUsers(), digest.reviewsOpened(), digest.reviewsResolved(), digest.openReviews(),
+                digest.automaticBlocks(), List.of(new WeeklyDigest.TopLink("menu", "example.com", 120, "go.example.com")));
+
+        final var email = sentWeeklyDigest(onDomain);
+
+        assertThat(email.getPlainText()).contains("1. go.example.com/menu " + ARROW + " example.com, 120 clicks");
+        assertThat(textOf(email.getText())).contains("1. go.example.com/menu " + ARROW + " example.com, 120 clicks");
     }
 
     @Test
@@ -1056,7 +1122,7 @@ class DefaultSendingEmailServiceTest {
     void aWeeklySummaryEmailLeavesOutEmptySections() throws Exception {
         final var summary = new WeeklySummary(7L, "alice@example.com", LocalDate.of(2026, 10, 19), LocalDate.of(2026, 10, 25),
                 new WeeklyDigest.Change(0, 4), 0, List.of(), List.of(), List.of(
-                new WeeklySummary.EndingSoon("soon", "example.org", "EXPIRES", LocalDate.of(2026, 10, 30), null)));
+                new WeeklySummary.EndingSoon("soon", "example.org", "EXPIRES", LocalDate.of(2026, 10, 30), null, null)));
 
         final var text = textOf(sentWeeklySummaryEmail(summary).getText());
 
@@ -1067,7 +1133,7 @@ class DefaultSendingEmailServiceTest {
     @Test
     void aWeeklySummaryEmailEscapesValues() throws Exception {
         final var summary = new WeeklySummary(7L, "alice@example.com", LocalDate.of(2026, 10, 19), LocalDate.of(2026, 10, 25),
-                new WeeklyDigest.Change(5, 0), 5, List.of(new WeeklyDigest.TopLink("abc", "<b>x</b>.example", 5)), List.of(), List.of());
+                new WeeklyDigest.Change(5, 0), 5, List.of(new WeeklyDigest.TopLink("abc", "<b>x</b>.example", 5, null)), List.of(), List.of());
 
         final var email = sentWeeklySummaryEmail(summary);
 
@@ -1087,10 +1153,10 @@ class DefaultSendingEmailServiceTest {
 
     private static WeeklySummary weeklySummary() {
         return new WeeklySummary(7L, "alice@example.com", LocalDate.of(2026, 10, 19), LocalDate.of(2026, 10, 25), new WeeklyDigest.Change(210, 180), 150,
-                List.of(new WeeklyDigest.TopLink("abc", "example.com", 90)),
-                List.of(new DeadLink(3L, 7L, "dead", "example.net", LocalDateTime.of(2026, 10, 22, 1, 0), "410")),
-                List.of(new WeeklySummary.EndingSoon("soon", "example.org", "EXPIRES", LocalDate.of(2026, 10, 30), null),
-                        new WeeklySummary.EndingSoon("limited", "example.org", "VISIT_LIMIT", null, 9L)));
+                List.of(new WeeklyDigest.TopLink("abc", "example.com", 90, null)),
+                List.of(new DeadLink(3L, 7L, "dead", "example.net", LocalDateTime.of(2026, 10, 22, 1, 0), "410", null)),
+                List.of(new WeeklySummary.EndingSoon("soon", "example.org", "EXPIRES", LocalDate.of(2026, 10, 30), null, null),
+                        new WeeklySummary.EndingSoon("limited", "example.org", "VISIT_LIMIT", null, 9L, null)));
     }
 
     private Email sentDeadLinksEmail(final DeadLinksEmail deadLinks) throws Exception {
@@ -1106,7 +1172,7 @@ class DefaultSendingEmailServiceTest {
 
     private static DeadLinksEmail deadLinksEmail(final String host, final String... aliases) {
         final var links = IntStream.range(0, aliases.length)
-                .mapToObj(index -> new DeadLink(index + 1L, 7L, aliases[index], host, LocalDateTime.of(2026, 10, 26, 23, 30), "404"))
+                .mapToObj(index -> new DeadLink(index + 1L, 7L, aliases[index], host, LocalDateTime.of(2026, 10, 26, 23, 30), "404", null))
                 .toList();
         return new DeadLinksEmail(7L, "alice@example.com", links, "https://hrva.cc/dashboard");
     }

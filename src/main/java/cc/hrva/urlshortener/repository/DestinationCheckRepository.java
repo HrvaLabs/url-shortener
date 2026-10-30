@@ -16,12 +16,13 @@ import org.springframework.stereotype.Repository;
 public class DestinationCheckRepository {
 
     private static final String FIND_DUE = """
-            select id, long_url, destination_fail_streak, destination_dead_since, owner_id, short_url
-            from url
-            where active = true and block_reason is null and threat_type is null
-              and (destination_checked_at is null or destination_checked_at < :nightStart)
+            select u.id, u.long_url, u.destination_fail_streak, u.destination_dead_since, u.owner_id, u.short_url, d.hostname as domain
+            from url u
+            left join custom_domain d on d.id = u.domain_id
+            where u.active = true and u.block_reason is null and u.threat_type is null
+              and (u.destination_checked_at is null or u.destination_checked_at < :nightStart)
             %s
-            order by destination_checked_at nulls first, id
+            order by u.destination_checked_at nulls first, u.id
             fetch first :limit rows only
             """;
     private static final int EXCLUDED_PER_LIST = 1000;
@@ -43,10 +44,11 @@ public class DestinationCheckRepository {
             """;
 
     private static final String FIND_DIED_SINCE = """
-            select id, owner_id, short_url, long_url, destination_dead_since, destination_last_status
-            from url
-            where owner_id is not null and active = true and destination_dead_since >= :since
-            order by id
+            select u.id, u.owner_id, u.short_url, u.long_url, u.destination_dead_since, u.destination_last_status, d.hostname as domain
+            from url u
+            left join custom_domain d on d.id = u.domain_id
+            where u.owner_id is not null and u.active = true and u.destination_dead_since >= :since
+            order by u.id
             """;
 
 
@@ -58,7 +60,7 @@ public class DestinationCheckRepository {
         for (final var chunk : Iterables.partition(List.copyOf(excludedIds), EXCLUDED_PER_LIST)) {
             final var name = "excluded" + exclusions.size();
             parameters.addValue(name, chunk);
-            exclusions.add("and id not in (:" + name + ")");
+            exclusions.add("and u.id not in (:" + name + ")");
         }
         return jdbcTemplate.query(FIND_DUE.formatted(String.join(" ", exclusions)), parameters, (row, rowNumber) -> new DueLink(
                 row.getLong("id"),
@@ -66,7 +68,8 @@ public class DestinationCheckRepository {
                 row.getInt("destination_fail_streak"),
                 row.getObject("destination_dead_since", LocalDateTime.class),
                 row.getObject("owner_id", Long.class),
-                row.getString("short_url")));
+                row.getString("short_url"),
+                row.getString("domain")));
     }
 
     public List<DiedLink> findDiedSince(final LocalDateTime since) {
@@ -76,7 +79,8 @@ public class DestinationCheckRepository {
                 row.getString("short_url"),
                 row.getString("long_url"),
                 row.getObject("destination_dead_since", LocalDateTime.class),
-                row.getString("destination_last_status")));
+                row.getString("destination_last_status"),
+                row.getString("domain")));
     }
 
     public boolean record(final long id, final String checkedUrl, final LocalDateTime checkedAt, final int failStreak,
@@ -99,10 +103,10 @@ public class DestinationCheckRepository {
         jdbcTemplate.update(RESET, Map.of("id", id));
     }
 
-    public record DueLink(long id, String longUrl, int failStreak, LocalDateTime deadSince, Long ownerId, String shortUrl) {
+    public record DueLink(long id, String longUrl, int failStreak, LocalDateTime deadSince, Long ownerId, String shortUrl, String domain) {
     }
 
-    public record DiedLink(long id, long ownerId, String shortUrl, String longUrl, LocalDateTime deadSince, String lastStatus) {
+    public record DiedLink(long id, long ownerId, String shortUrl, String longUrl, LocalDateTime deadSince, String lastStatus, String domain) {
     }
 
 }

@@ -10,6 +10,7 @@ import cc.hrva.urlshortener.model.enums.NotificationType;
 import cc.hrva.urlshortener.repository.EmailLogRepository;
 import cc.hrva.urlshortener.repository.NotificationConsentRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
+import cc.hrva.urlshortener.service.domain.ShortLinks;
 import cc.hrva.urlshortener.service.impl.DefaultEmailService;
 import cc.hrva.urlshortener.service.impl.DefaultSendingEmailService;
 import cc.hrva.urlshortener.service.notification.ConsentEmails;
@@ -127,7 +128,7 @@ class ConsentedEmailForActiveAccountsTest {
             includeFilters = @ComponentScan.Filter(
                     type = FilterType.ASSIGNABLE_TYPE,
                     classes = {UserRepository.class, NotificationConsentRepository.class, EmailLogRepository.class}))
-    @Import({DefaultSendingEmailService.class, EmailConsentReader.class})
+    @Import({DefaultSendingEmailService.class, EmailConsentReader.class, ShortLinks.class})
     static class TestApplication {
     }
 

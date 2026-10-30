@@ -6,6 +6,7 @@ import cc.hrva.urlshortener.dto.WeeklyDigest.Change;
 import cc.hrva.urlshortener.dto.WeeklyDigest.TopLink;
 import cc.hrva.urlshortener.dto.stats.CountEntry;
 import cc.hrva.urlshortener.model.BioPage;
+import cc.hrva.urlshortener.model.CustomDomain;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.enums.BlockReason;
@@ -25,6 +26,7 @@ import cc.hrva.urlshortener.service.alert.AdminAlertEvent.LinkBlocked;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.ReviewOpened;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.UserSignedUp;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.VisitorReported;
+import cc.hrva.urlshortener.service.domain.ShortLinks;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.util.ArrayList;
@@ -39,7 +41,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class DiscordAlertFormatterTest {
 
-    private static final AlertedLink ANONYMOUS_LINK = new AlertedLink(42L, "abc12", "example-login.top", null);
+    private static final String ARROW = Character.toString(0x2192);
+    private static final AlertedLink ANONYMOUS_LINK = new AlertedLink(42L, "abc12", "example-login.top", null, null);
     private static final AlertedBioPage ANA = new AlertedBioPage(12L, "ana", 7L);
     private static final String BIO_REVIEW_PAGE = "<https://app.hrva.cc/admin/review?bio=12>";
     private static final String REVIEW_PAGE = "<https://app.hrva.cc/admin/review>";
@@ -53,7 +56,7 @@ class DiscordAlertFormatterTest {
         final var appProperties = new AppProperties();
         appProperties.setFrontendUrl("https://app.hrva.cc/");
         appProperties.setServerUrl("https://hrva.cc");
-        formatter = new DiscordAlertFormatter(appProperties);
+        formatter = new DiscordAlertFormatter(appProperties, new ShortLinks(appProperties));
     }
 
     @Test
@@ -66,6 +69,24 @@ class DiscordAlertFormatterTest {
         assertThat(json.path("flags").asInt()).isEqualTo(4);
         assertThat(json.has("embeds")).isFalse();
         assertThat(json.path("content").asString()).startsWith("New review: ");
+    }
+
+    @Test
+    void alertsShowTheDomainLink() {
+        final var url = Url.builder().id(42L).shortUrl("menu").longUrl("https://example-login.top/a")
+                .owner(User.builder().id(27L).build()).domain(CustomDomain.builder().id(7L).hostname("go.example.com").build()).build();
+        final var onDomain = AlertedLink.of(url);
+
+        final var content = formatter.message(List.of(
+                new ReviewOpened(onDomain, List.of("imitates paypal")),
+                new VisitorReported(onDomain, ReportCategory.PHISHING, null, false),
+                new LinkBlocked(onDomain, BlockReason.ADMIN, null)), 0).content();
+
+        assertThat(onDomain).isEqualTo(new AlertedLink(42L, "menu", "example-login.top", 27L, "go.example.com"));
+        assertThat(content.lines()).hasSize(3).allSatisfy(line -> assertThat(line).contains("go.example.com/menu " + ARROW + " example-login.top"))
+                .noneSatisfy(line -> assertThat(line).contains("hrva.cc/menu"));
+        assertThat(formatter.weeklyDigest(busyWeek(List.of(new TopLink("menu", "example.com", 120, "go.example.com")))).content())
+                .contains("1. go.example.com/menu " + ARROW + " example.com, 120 clicks");
     }
 
     @Test
@@ -125,8 +146,8 @@ class DiscordAlertFormatterTest {
         final var error = "e".repeat(300);
 
         final var lines = formatter.message(List.of(
-                new ReviewOpened(new AlertedLink(1L, alias, host, null), reasons),
-                new LinkBlocked(new AlertedLink(2L, alias, host, 9L), BlockReason.ADMIN, "d".repeat(200)),
+                new ReviewOpened(new AlertedLink(1L, alias, host, null, null), reasons),
+                new LinkBlocked(new AlertedLink(2L, alias, host, 9L, null), BlockReason.ADMIN, "d".repeat(200)),
                 new BlocklistSourceFailed(sourceName, error, false),
                 new UserSignedUp(3L, "p".repeat(60))), 0).content().lines().toList();
 
@@ -141,7 +162,7 @@ class DiscordAlertFormatterTest {
     @Test
     void aVisitorReportThatOpensAReviewSaysSo() {
         final var content = formatter.message(List.of(new VisitorReported(
-                new AlertedLink(42L, "abc12", "example.top", 27L), ReportCategory.MALWARE, null, true)), 0).content();
+                new AlertedLink(42L, "abc12", "example.top", 27L, null), ReportCategory.MALWARE, null, true)), 0).content();
 
         assertThat(content).isEqualTo("New review from a visitor report: hrva.cc/abc12 → example.top (malware), account #27, "
                 + "<https://app.hrva.cc/admin/review?entry=42>");
@@ -172,7 +193,7 @@ class DiscordAlertFormatterTest {
 
     @Test
     void markdownInAnAliasOrHostIsEscaped() {
-        final var content = formatter.message(List.of(new ReviewOpened(new AlertedLink(7L, "_my_link", "evil_host.example", null),
+        final var content = formatter.message(List.of(new ReviewOpened(new AlertedLink(7L, "_my_link", "evil_host.example", null, null),
                 List.of("punycode domain"))), 0).content();
 
         assertThat(content).startsWith("New review: hrva.cc/\\_my\\_link → evil\\_host.example (punycode domain)");
@@ -203,7 +224,7 @@ class DiscordAlertFormatterTest {
     @Test
     void impersonationReportsAreLabelledLikeTheOtherCategories() {
         final var content = formatter.message(List.of(
-                new VisitorReported(new AlertedLink(42L, "abc12", "example.top", 27L), ReportCategory.IMPERSONATION, null, true),
+                new VisitorReported(new AlertedLink(42L, "abc12", "example.top", 27L, null), ReportCategory.IMPERSONATION, null, true),
                 new BioPageReported(ANA, ReportCategory.IMPERSONATION, "uses my photos", false)), 0).content();
 
         assertThat(content.lines().toList()).containsExactly(
@@ -269,10 +290,10 @@ class DiscordAlertFormatterTest {
     @Test
     void eachKindOfAlertHasItsOwnPlainLine() {
         final var content = formatter.message(List.of(
-                new LinkBlocked(new AlertedLink(30L, "s30", "login-paypa1.top", null), BlockReason.BLOCKLIST, "HaGeZi TIF medium"),
-                new LinkBlocked(new AlertedLink(31L, "s31", "example.org", 7L), BlockReason.SAFE_BROWSING, "SOCIAL_ENGINEERING"),
-                new LinkBlocked(new AlertedLink(32L, "s32", "jofogas.cards", null), BlockReason.DOMAIN_RULE, "jofogas.cards"),
-                new LinkBlocked(new AlertedLink(33L, "s33", "example.net", null), BlockReason.ADMIN, null),
+                new LinkBlocked(new AlertedLink(30L, "s30", "login-paypa1.top", null, null), BlockReason.BLOCKLIST, "HaGeZi TIF medium"),
+                new LinkBlocked(new AlertedLink(31L, "s31", "example.org", 7L, null), BlockReason.SAFE_BROWSING, "SOCIAL_ENGINEERING"),
+                new LinkBlocked(new AlertedLink(32L, "s32", "jofogas.cards", null, null), BlockReason.DOMAIN_RULE, "jofogas.cards"),
+                new LinkBlocked(new AlertedLink(33L, "s33", "example.net", null, null), BlockReason.ADMIN, null),
                 new UserSignedUp(31L, "local"),
                 new UserSignedUp(32L, "github"),
                 new BlocklistSourceFailed("HaGeZi TIF medium", "main: HTTP 503", true),
@@ -294,7 +315,7 @@ class DiscordAlertFormatterTest {
     @Test
     void moreThanTenAlertsShowTheFirstTenAndCountTheRest() {
         final var alerts = IntStream.range(0, 13)
-                .<AdminAlertEvent>mapToObj(index -> new ReviewOpened(new AlertedLink(index, "s" + index, "example.top", null), List.of("high-risk domain ending .top")))
+                .<AdminAlertEvent>mapToObj(index -> new ReviewOpened(new AlertedLink(index, "s" + index, "example.top", null, null), List.of("high-risk domain ending .top")))
                 .toList();
 
         final var lines = formatter.message(alerts, 0).content().lines().toList();
@@ -318,7 +339,7 @@ class DiscordAlertFormatterTest {
     void aBatchOfLongLinesStopsBeforeTwoThousandCharactersAndCountsWhatDidNotFit() {
         final var details = "a_b_".repeat(60);
         final var alerts = IntStream.range(0, 10)
-                .<AdminAlertEvent>mapToObj(index -> new VisitorReported(new AlertedLink(index, "s" + index, "example.top", null),
+                .<AdminAlertEvent>mapToObj(index -> new VisitorReported(new AlertedLink(index, "s" + index, "example.top", null, null),
                         ReportCategory.PHISHING, details, false))
                 .toList();
 
@@ -362,7 +383,7 @@ class DiscordAlertFormatterTest {
         final var host = "h".repeat(1990) + ".example";
 
         final var content = formatter.message(List.of(
-                new ReviewOpened(new AlertedLink(1L, "abc12", host, null), List.of("high-risk domain ending .example")),
+                new ReviewOpened(new AlertedLink(1L, "abc12", host, null, null), List.of("high-risk domain ending .example")),
                 new UserSignedUp(31L, "local")), 0).content();
 
         assertThat(content).isEqualTo("New user: account #31 signed up with email, <https://app.hrva.cc/admin>\n"
@@ -375,7 +396,7 @@ class DiscordAlertFormatterTest {
 
         final var lines = formatter.message(List.of(
                 new UserSignedUp(31L, "local"),
-                new ReviewOpened(new AlertedLink(1L, "abc12", host, null), List.of("high-risk domain ending .example")),
+                new ReviewOpened(new AlertedLink(1L, "abc12", host, null, null), List.of("high-risk domain ending .example")),
                 new BlocklistSourceRecovered("URLhaus"),
                 new BurstDetected("evil-login.com", 5, 2, 4, Duration.ofHours(1))), 0).content().lines().toList();
 
@@ -392,7 +413,7 @@ class DiscordAlertFormatterTest {
         final var details = "d".repeat(700);
         final var alerts = new ArrayList<AdminAlertEvent>();
         IntStream.rangeClosed(1, 3).forEach(index -> alerts.add(
-                new VisitorReported(new AlertedLink(index, "s" + index, "example.top", null), ReportCategory.PHISHING, details, false)));
+                new VisitorReported(new AlertedLink(index, "s" + index, "example.top", null, null), ReportCategory.PHISHING, details, false)));
         alerts.add(new BurstDetected("evil-login.com", 5, 2, 4, Duration.ofHours(1)));
 
         final var content = formatter.message(alerts, 0).content();
@@ -628,7 +649,7 @@ class DiscordAlertFormatterTest {
 
     @Test
     void theWeeklyDigestIsTheBoldTitleTheLinesTheReviewQueueAndTheStatsPage() {
-        final var content = formatter.weeklyDigest(busyWeek(List.of(new TopLink("menu", "example.com", 120)))).content();
+        final var content = formatter.weeklyDigest(busyWeek(List.of(new TopLink("menu", "example.com", 120, null)))).content();
 
         assertThat(content).isEqualTo("""
                 **hrva.cc weekly summary: 19–25 October 2026**
@@ -670,7 +691,7 @@ class DiscordAlertFormatterTest {
     @Test
     void theWeeklyDigestIsOneMessageUnder2000Characters() {
         final var topLinks = IntStream.rangeClosed(1, 5)
-                .mapToObj(rank -> new TopLink(rank + "a".repeat(39), "h".repeat(91) + rank + ".example", 1000L - rank))
+                .mapToObj(rank -> new TopLink(rank + "a".repeat(39), "h".repeat(91) + rank + ".example", 1000L - rank, null))
                 .toList();
         final var digest = new WeeklyDigest(DIGEST_FROM, DIGEST_TO, new Change(123_456, 120_000), 98_765, 4_321, new Change(1528, 1400),
                 List.of(new CountEntry("WEB", 1500), new CountEntry("API_KEY", 12), new CountEntry("BULK", 6), new CountEntry("MCP", 4),
@@ -692,7 +713,7 @@ class DiscordAlertFormatterTest {
     @Test
     void theWeeklyDigestHasNoMentionsOrEmbeds() {
         final var json = JsonMapper.builder().build().readTree(JsonMapper.builder().build().writeValueAsString(
-                formatter.weeklyDigest(busyWeek(List.of(new TopLink("menu", "example.com", 120))))));
+                formatter.weeklyDigest(busyWeek(List.of(new TopLink("menu", "example.com", 120, null))))));
 
         assertThat(json.path("allowed_mentions").path("parse").isArray()).isTrue();
         assertThat(json.path("allowed_mentions").path("parse").isEmpty()).isTrue();
@@ -702,7 +723,7 @@ class DiscordAlertFormatterTest {
 
     @Test
     void theWeeklyDigestEscapesAliasesAndHosts() {
-        final var content = formatter.weeklyDigest(busyWeek(List.of(new TopLink("a_b", "my_shop.example", 3)))).content();
+        final var content = formatter.weeklyDigest(busyWeek(List.of(new TopLink("a_b", "my_shop.example", 3, null)))).content();
 
         assertThat(content).contains("\n1. hrva.cc/a\\_b → my\\_shop.example, 3 clicks\n");
     }
@@ -710,7 +731,7 @@ class DiscordAlertFormatterTest {
     @Test
     void theWeeklyDigestShowsNoIp() {
         final var content = formatter.weeklyDigest(busyWeek(List.of(
-                new TopLink("ip", "203.0.113.7", 4), new TopLink("v6", "2001:db8::1", 3)))).content();
+                new TopLink("ip", "203.0.113.7", 4, null), new TopLink("v6", "2001:db8::1", 3, null)))).content();
 
         assertThat(content).contains("1. hrva.cc/ip → an IP address, 4 clicks", "2. hrva.cc/v6 → an IP address, 3 clicks");
         assertThat(content).doesNotContain("203.0.113.7", "2001:db8");
@@ -719,7 +740,7 @@ class DiscordAlertFormatterTest {
     @Test
     void longHostsAreShownInFullAndTheTopLinksEndWithAndNMoreWhenTheyDoNotFit() {
         final var host = "a_".repeat(120) + "example";
-        final var topLinks = IntStream.rangeClosed(1, 5).mapToObj(rank -> new TopLink("s" + rank, rank + host, 10L - rank)).toList();
+        final var topLinks = IntStream.rangeClosed(1, 5).mapToObj(rank -> new TopLink("s" + rank, rank + host, 10L - rank, null)).toList();
         final var escapedHost = host.replace("_", "\\_");
 
         final var content = formatter.weeklyDigest(busyWeek(topLinks)).content();
@@ -752,15 +773,15 @@ class DiscordAlertFormatterTest {
     private static List<AdminAlertEvent> batchWithLastDetailsOfLength(final int length) {
         final var alerts = new ArrayList<AdminAlertEvent>();
         IntStream.rangeClosed(0, 2).forEach(index -> alerts.add(
-                new VisitorReported(new AlertedLink(index, "s" + index, "example.top", null), ReportCategory.PHISHING, "y".repeat(450), false)));
-        alerts.add(new VisitorReported(new AlertedLink(3L, "s3", "example.top", null), ReportCategory.PHISHING, "x".repeat(length), false));
+                new VisitorReported(new AlertedLink(index, "s" + index, "example.top", null, null), ReportCategory.PHISHING, "y".repeat(450), false)));
+        alerts.add(new VisitorReported(new AlertedLink(3L, "s3", "example.top", null, null), ReportCategory.PHISHING, "x".repeat(length), false));
         return alerts;
     }
 
     private static WeeklyDigest withLastHostOfLength(final int length) {
         final var topLinks = new ArrayList<TopLink>();
-        IntStream.rangeClosed(1, 4).forEach(rank -> topLinks.add(new TopLink("s" + rank, "s" + rank + ".example", 6L - rank)));
-        topLinks.add(new TopLink("s5", "x".repeat(length - 8) + ".example", 1));
+        IntStream.rangeClosed(1, 4).forEach(rank -> topLinks.add(new TopLink("s" + rank, "s" + rank + ".example", 6L - rank, null)));
+        topLinks.add(new TopLink("s5", "x".repeat(length - 8) + ".example", 1, null));
         return busyWeek(topLinks);
     }
 

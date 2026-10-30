@@ -22,6 +22,6 @@ public record WeeklyDigest(
 
     public record Change(long current, long previous) {}
 
-    public record TopLink(String shortUrl, String destinationHost, long clicks) {}
+    public record TopLink(String shortUrl, String destinationHost, long clicks, String domain) {}
 
 }

@@ -47,6 +47,7 @@ import cc.hrva.urlshortener.service.burst.CreatedLink;
 import cc.hrva.urlshortener.service.domain.CustomDomainHostnames;
 import cc.hrva.urlshortener.service.domain.CustomDomainRegistry;
 import cc.hrva.urlshortener.service.domain.DomainRoute;
+import cc.hrva.urlshortener.service.domain.ShortLinks;
 import cc.hrva.urlshortener.service.domain.UrlCache;
 import cc.hrva.urlshortener.service.domain.UrlCacheKeys;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiter;
@@ -667,10 +668,11 @@ public class DefaultUrlService implements UrlService {
                 : List.<Url>of();
 
         final var sb = new StringBuilder();
-        sb.append("Short URL,Long URL,Visits,Visit Limit,Created,Expires,Active\n");
+        sb.append("Short URL,Domain,Long URL,Visits,Visit Limit,Created,Expires,Active\n");
         for (final var url : urls) {
-            sb.append(String.format("%s,%s,%d,%d,%s,%s,%b\n",
+            sb.append(String.format("%s,%s,%s,%d,%d,%s,%s,%b\n",
                     url.getShortUrl(),
+                    StringUtils.defaultString(ShortLinks.hostnameOf(url)),
                     escapeCsv(url.getLongUrl()),
                     url.getVisits(),
                     url.getVisitLimit() != null ? url.getVisitLimit() : 0,

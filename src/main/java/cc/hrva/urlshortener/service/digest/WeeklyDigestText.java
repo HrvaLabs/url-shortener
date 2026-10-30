@@ -6,6 +6,7 @@ import cc.hrva.urlshortener.dto.WeeklyDigest.TopLink;
 import cc.hrva.urlshortener.dto.stats.CountEntry;
 import cc.hrva.urlshortener.model.enums.BlockReason;
 import cc.hrva.urlshortener.model.enums.CreatedVia;
+import cc.hrva.urlshortener.service.domain.ShortLinks;
 import cc.hrva.urlshortener.util.DomainNames;
 import java.text.NumberFormat;
 import java.time.LocalDate;
@@ -88,10 +89,10 @@ public final class WeeklyDigestText {
         return "down " + number(shown) + "% on the week before";
     }
 
-    public static List<String> lines(final WeeklyDigest digest, final String shortLinkHost, final String reviewPage,
+    public static List<String> lines(final WeeklyDigest digest, final ShortLinks shortLinks, final String reviewPage,
             final UnaryOperator<String> value) {
         final var lines = new ArrayList<>(summaryLines(digest, reviewPage, UnaryOperator.identity()));
-        lines.addAll(topLinkLines(digest, shortLinkHost, value));
+        lines.addAll(topLinkLines(digest, shortLinks, value));
         return List.copyOf(lines);
     }
 
@@ -117,10 +118,10 @@ public final class WeeklyDigestText {
         return List.copyOf(lines);
     }
 
-    public static List<String> topLinkLines(final WeeklyDigest digest, final String shortLinkHost, final UnaryOperator<String> value) {
+    public static List<String> topLinkLines(final WeeklyDigest digest, final ShortLinks shortLinks, final UnaryOperator<String> value) {
         final var topLinks = digest.topLinks();
         return IntStream.range(0, topLinks.size())
-                .mapToObj(index -> topLink(index + 1, topLinks.get(index), shortLinkHost, value))
+                .mapToObj(index -> topLink(index + 1, topLinks.get(index), shortLinks, value))
                 .toList();
     }
 
@@ -150,8 +151,8 @@ public final class WeeklyDigestText {
         return words.getOrDefault(key, key.toLowerCase(Locale.ROOT).replace('_', ' '));
     }
 
-    private static String topLink(final int rank, final TopLink link, final String shortLinkHost, final UnaryOperator<String> value) {
-        final var shortLink = value.apply(shortLinkHost + "/" + link.shortUrl());
+    private static String topLink(final int rank, final TopLink link, final ShortLinks shortLinks, final UnaryOperator<String> value) {
+        final var shortLink = value.apply(shortLinks.display(link.domain(), link.shortUrl()));
         final var destination = value.apply(destinationOf(link.destinationHost()));
         return number(rank) + ". " + shortLink + " → " + destination + ", " + clicks(link.clicks());
     }

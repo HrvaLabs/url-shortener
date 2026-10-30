@@ -11,7 +11,7 @@ public record DestinationCheckOutcome(List<DeadLink> newlyDead, List<DeadLink> r
     }
 
     public record DeadLink(long urlId, Long ownerId, String shortUrl, String destinationHost, LocalDateTime deadSince,
-                           String lastStatus) {
+                           String lastStatus, String domain) {
     }
 
 }

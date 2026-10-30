@@ -22,6 +22,7 @@ import cc.hrva.urlshortener.service.NotificationDeliveryService;
 import cc.hrva.urlshortener.service.SendingEmailService;
 import cc.hrva.urlshortener.service.analytics.AnalyticsDays;
 import cc.hrva.urlshortener.service.digest.DigestWeek;
+import cc.hrva.urlshortener.service.domain.ShortLinks;
 import cc.hrva.urlshortener.service.notification.ChannelContent;
 import cc.hrva.urlshortener.service.notification.DestinationCheckOutcome.DeadLink;
 import cc.hrva.urlshortener.service.notification.EmailConsentReader;
@@ -191,7 +192,7 @@ public class DefaultClickSummaryService implements ClickSummaryService {
         final var topById = linksById(top.stream().map(LinkClicks::urlId).toList());
         final var topLinks = top.stream()
                 .filter(link -> topById.containsKey(link.urlId()))
-                .map(link -> new WeeklyDigest.TopLink(topById.get(link.urlId()).getShortUrl(), hostOf(topById.get(link.urlId())), link.clicks()))
+                .map(link -> topLink(topById.get(link.urlId()), link.clicks()))
                 .toList();
         final var deadFrom = startOf(week.from());
         final var deadTo = startOf(week.to().plusDays(1));
@@ -201,7 +202,8 @@ public class DefaultClickSummaryService implements ClickSummaryService {
                 : 0;
         final var deadLinks = dead.stream()
                 .limit(NotificationMessages.MOST_LINKS)
-                .map(url -> new DeadLink(url.getId(), userId, url.getShortUrl(), hostOf(url), url.getDestinationDeadSince(), url.getDestinationLastStatus()))
+                .map(url -> new DeadLink(url.getId(), userId, url.getShortUrl(), hostOf(url), url.getDestinationDeadSince(),
+                        url.getDestinationLastStatus(), ShortLinks.hostnameOf(url)))
                 .toList();
         final var until = now.plusDays(ENDING_SOON_DAYS);
         final var ending = urlRepository.findOwnerLinksEndingSoon(userId, now, until, Limit.of(NotificationMessages.MOST_LINKS + 1));
@@ -219,10 +221,11 @@ public class DefaultClickSummaryService implements ClickSummaryService {
     private EndingSoon endingSoon(final Url url, final LocalDateTime now) {
         final var expiration = url.getExpirationDate();
         if (expiration != null && expiration.isAfter(now) && !expiration.isAfter(now.plusDays(ENDING_SOON_DAYS))) {
-            return new EndingSoon(url.getShortUrl(), hostOf(url), WeeklySummary.EXPIRES, notificationMessages.day(expiration), null);
+            return new EndingSoon(url.getShortUrl(), hostOf(url), WeeklySummary.EXPIRES, notificationMessages.day(expiration), null,
+                    ShortLinks.hostnameOf(url));
         }
         final var visitsLeft = url.getVisitLimit() - Objects.requireNonNullElse(url.getVisits(), 0L);
-        return new EndingSoon(url.getShortUrl(), hostOf(url), WeeklySummary.VISIT_LIMIT, null, visitsLeft);
+        return new EndingSoon(url.getShortUrl(), hostOf(url), WeeklySummary.VISIT_LIMIT, null, visitsLeft, ShortLinks.hostnameOf(url));
     }
 
     private boolean emailed(final WeeklySummary summary, final DigestWeek week, final LocalDateTime now) {
@@ -267,7 +270,11 @@ public class DefaultClickSummaryService implements ClickSummaryService {
     }
 
     private static SummaryLink summaryLink(final Url url, final LinkDayCounts count) {
-        return new SummaryLink(url.getShortUrl(), hostOf(url), count.clicks(), count.uniqueVisitors(), count.botClicks());
+        return new SummaryLink(url.getShortUrl(), hostOf(url), count.clicks(), count.uniqueVisitors(), count.botClicks(), ShortLinks.hostnameOf(url));
+    }
+
+    private static WeeklyDigest.TopLink topLink(final Url url, final long clicks) {
+        return new WeeklyDigest.TopLink(url.getShortUrl(), hostOf(url), clicks, ShortLinks.hostnameOf(url));
     }
 
     private static String hostOf(final Url url) {

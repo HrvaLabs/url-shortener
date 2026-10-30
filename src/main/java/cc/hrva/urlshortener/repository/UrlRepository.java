@@ -66,7 +66,7 @@ public interface UrlRepository extends JpaRepository<Url, Long>, JpaSpecificatio
     boolean existsByDomain_IdAndShortUrlAndActiveTrue(Long domainId, String alias);
     long countByDomain_Id(Long domainId);
     boolean existsUrlByLongUrlAndActiveTrueAndOwnerIsNull(String longUrl);
-    @EntityGraph(attributePaths = "owner", type = EntityGraph.EntityGraphType.LOAD)
+    @EntityGraph(attributePaths = {"owner", "domain"}, type = EntityGraph.EntityGraphType.LOAD)
     List<Url> findByExpirationDateBetweenAndActiveTrueAndOwnerIsNotNull(LocalDateTime start, LocalDateTime end);
     long countByActiveTrue();
     List<Url> findTop10ByCreateDateAfterAndOwnerCreateDateAfterOrderByCreateDateDesc(LocalDateTime createdAfter, LocalDateTime ownerCreatedAfter);
@@ -85,6 +85,7 @@ public interface UrlRepository extends JpaRepository<Url, Long>, JpaSpecificatio
 
     @Query("""
             select u from Url u
+            left join fetch u.domain
             where u.owner.id = :ownerId and u.active = true
               and u.destinationDeadSince >= :from and u.destinationDeadSince < :to
             order by u.destinationDeadSince, u.id""")
@@ -93,6 +94,7 @@ public interface UrlRepository extends JpaRepository<Url, Long>, JpaSpecificatio
 
     @Query("""
             select u from Url u
+            left join fetch u.domain
             where u.owner.id = :ownerId and u.active = true
               and ((u.expirationDate > :now and u.expirationDate <= :until)
                 or (u.visitLimit is not null

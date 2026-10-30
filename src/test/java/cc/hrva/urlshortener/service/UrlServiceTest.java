@@ -247,6 +247,24 @@ class UrlServiceTest {
     }
 
     @Test
+    void csvHasADomainColumn() {
+        final var owner = User.builder().id(1L).email("ana@example.com").build();
+        final var created = LocalDateTime.of(2026, 10, 20, 9, 30);
+        final var domain = CustomDomain.builder().id(7L).hostname("go.example.com").build();
+        when(userService.getUserFromToken()).thenReturn(owner);
+        when(urlRepository.findAllByOwner(owner, org.springframework.data.domain.Pageable.unpaged())).thenReturn(new PageImpl<>(List.of(
+                Url.builder().shortUrl("menu").longUrl("https://example.com/menu,today").visits(3L).createDate(created).active(true).domain(domain).build(),
+                Url.builder().shortUrl("shop").longUrl("https://example.com/shop").visits(0L).visitLimit(5L).createDate(created).active(false).build())));
+
+        final var csv = new String(urlService.exportMyUrlsAsCsv(null), java.nio.charset.StandardCharsets.UTF_8);
+
+        assertThat(csv.lines()).containsExactly(
+                "Short URL,Domain,Long URL,Visits,Visit Limit,Created,Expires,Active",
+                "menu,go.example.com,\"https://example.com/menu,today\",3,0,2026-10-20T09:30,,true",
+                "shop,,https://example.com/shop,0,5,2026-10-20T09:30,,false");
+    }
+
+    @Test
     void updateRefusesCallersWhoAreNeitherOwnerNorAdminBeforeChangingAnything() {
         final var url = Url.builder().id(7L).shortUrl("abc").longUrl("https://example.com").build();
         final var update = UrlUpdateDto.builder().id(7L).password("locked").visitLimit(1L).build();

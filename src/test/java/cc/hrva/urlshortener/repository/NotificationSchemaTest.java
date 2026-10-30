@@ -289,10 +289,34 @@ class NotificationSchemaTest {
                 .containsExactly(neverChecked.getId(), anonymous.getId(), checkedYesterday.getId())
                 .doesNotContain(checkedTonight.getId(), inactive.getId(), blocked.getId());
         assertThat(due.getFirst()).isEqualTo(new DestinationCheckRepository.DueLink(
-                neverChecked.getId(), "https://example.org/never", 0, null, ana.getId(), "never"));
+                neverChecked.getId(), "https://example.org/never", 0, null, ana.getId(), "never", null));
         assertThat(due.get(1).ownerId()).isNull();
         assertThat(destinationCheckRepository.findDue(TONIGHT, 1, java.util.List.of())).extracting(DestinationCheckRepository.DueLink::id)
                 .containsExactly(neverChecked.getId());
+    }
+
+    @Test
+    void findDueCarriesTheHostname() {
+        final var ana = savedUser("ana@example.com");
+        final var onDomain = savedLink("menu", ana);
+        final var onHrva = savedLink("shop", ana);
+        entityManager.flush();
+        jdbcTemplate.update("""
+                insert into custom_domain (owner_id, hostname, hostname_key, status, reason, created_at, updated_at)
+                values (?, 'go.example.com', 'go.example.com', 'ACTIVE', 'Menu links for my cafe', current_timestamp, current_timestamp)""", ana.getId());
+        final var domainId = jdbcTemplate.queryForObject("select id from custom_domain where hostname_key = 'go.example.com'", Long.class);
+        jdbcTemplate.update("update url set domain_id = ? where id = ?", domainId, onDomain.getId());
+        jdbcTemplate.update("update url set destination_dead_since = ?, destination_last_status = '404' where id in (?, ?)", NOW, onDomain.getId(),
+                onHrva.getId());
+
+        assertThat(destinationCheckRepository.findDue(TONIGHT, 10, java.util.List.of(onHrva.getId() + 1_000_000)))
+                .extracting(DestinationCheckRepository.DueLink::shortUrl, DestinationCheckRepository.DueLink::domain)
+                .containsExactly(tuple("menu", "go.example.com"), tuple("shop", null));
+        assertThat(destinationCheckRepository.findDue(TONIGHT, 10, java.util.List.of(onHrva.getId()))).extracting(DestinationCheckRepository.DueLink::id)
+                .containsExactly(onDomain.getId());
+        assertThat(destinationCheckRepository.findDiedSince(NOW.minusHours(1)))
+                .extracting(DestinationCheckRepository.DiedLink::shortUrl, DestinationCheckRepository.DiedLink::domain)
+                .containsExactly(tuple("menu", "go.example.com"), tuple("shop", null));
     }
 
     @Test

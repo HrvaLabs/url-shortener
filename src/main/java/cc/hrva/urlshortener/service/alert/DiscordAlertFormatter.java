@@ -21,6 +21,7 @@ import cc.hrva.urlshortener.service.alert.AdminAlertEvent.ReviewOpened;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.UserSignedUp;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.VisitorReported;
 import cc.hrva.urlshortener.service.digest.WeeklyDigestText;
+import cc.hrva.urlshortener.service.domain.ShortLinks;
 import cc.hrva.urlshortener.util.DomainNames;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
@@ -50,8 +51,10 @@ public class DiscordAlertFormatter {
     private static final String IP_DESTINATION = "an IP address";
     private static final String UNREADABLE_DESTINATION = "an unreadable destination";
     private static final String LOCAL_PROVIDER = "local";
+    private static final String ARROW = " " + Character.toString(0x2192) + " ";
 
     private final AppProperties appProperties;
+    private final ShortLinks shortLinks;
 
     public DiscordMessage message(final List<AdminAlertEvent> alerts, final int dropped) {
         final var lines = alerts.stream().limit(MAX_LINES).map(this::line).toList();
@@ -64,7 +67,7 @@ public class DiscordAlertFormatter {
         final var head = new ArrayList<String>();
         head.add("**" + WeeklyDigestText.title(digest) + "**");
         head.addAll(WeeklyDigestText.summaryLines(digest, frontendPage(REVIEW_PAGE), DiscordAlertFormatter::linked));
-        final var topLinks = WeeklyDigestText.topLinkLines(digest, shortLinkHost(), DiscordAlertFormatter::plain);
+        final var topLinks = WeeklyDigestText.topLinkLines(digest, shortLinks, DiscordAlertFormatter::plain);
         final var statsLine = "Stats (last 7 days): " + linked(frontendPage(STATS_PAGE));
         return DiscordMessage.withoutMentionsOrEmbeds(withinLimit(head, topLinks, 0, more -> "and %d more".formatted(more), List.of(statsLine)));
     }
@@ -208,7 +211,7 @@ public class DiscordAlertFormatter {
     }
 
     private String link(final AlertedLink link) {
-        return "%s/%s → %s".formatted(shortLinkHost(), plain(link.shortUrl()), destination(link.destinationHost()));
+        return shortLinks.display(plain(link.domain()), plain(link.shortUrl())) + ARROW + destination(link.destinationHost());
     }
 
     private static String destination(final String host) {
@@ -221,7 +224,7 @@ public class DiscordAlertFormatter {
     private String bioPage(final AlertedBioPage page) {
         return page.handle() == null
                 ? "a bio page without a handle (#%d)".formatted(page.pageId())
-                : "%s/@%s".formatted(shortLinkHost(), plain(page.handle()));
+                : "%s/@%s".formatted(shortLinks.host(null), plain(page.handle()));
     }
 
     private static String owner(final AlertedLink link) {
@@ -301,11 +304,6 @@ public class DiscordAlertFormatter {
 
     private String frontendPage(final String path) {
         return StringUtils.removeEnd(StringUtils.defaultString(appProperties.getFrontendUrl()), "/") + path;
-    }
-
-    private String shortLinkHost() {
-        final var serverUrl = StringUtils.removeEnd(StringUtils.defaultString(appProperties.getServerUrl()), "/");
-        return serverUrl.contains("://") ? StringUtils.substringAfter(serverUrl, "://") : serverUrl;
     }
 
     private static String plain(final String text) {

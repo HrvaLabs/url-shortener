@@ -20,6 +20,7 @@ import cc.hrva.urlshortener.repository.NotificationConsentRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.service.analytics.AnalyticsDays;
+import cc.hrva.urlshortener.service.domain.ShortLinks;
 import cc.hrva.urlshortener.service.impl.DefaultClickSummaryService;
 import cc.hrva.urlshortener.service.notification.ChannelContent;
 import cc.hrva.urlshortener.service.notification.DestinationCheckOutcome.DeadLink;
@@ -56,6 +57,7 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.tuple;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -142,6 +144,7 @@ class DefaultClickSummaryServiceTest {
         jdbcTemplate.update("delete from notification_channel");
         jdbcTemplate.update("delete from link_daily_stats");
         jdbcTemplate.update("delete from url");
+        jdbcTemplate.update("delete from custom_domain");
         jdbcTemplate.update("delete from user_account");
     }
 
@@ -155,7 +158,7 @@ class DefaultClickSummaryServiceTest {
 
         clickSummaryService.sendDaily();
 
-        final var expected = new DailySummary(YESTERDAY, 5, 4, 1, List.of(new SummaryLink("menu", "menu.example.org", 5, 4, 1)));
+        final var expected = new DailySummary(YESTERDAY, 5, 4, 1, List.of(new SummaryLink("menu", "menu.example.org", 5, 4, 1, null)));
         final var channels = channelsCaptor();
         final var content = contentCaptor();
         verify(deliveryService).enqueue(eq(NotificationType.DAILY_SUMMARY), eq("summary.daily:2026-10-26"), channels.capture(), content.capture());
@@ -374,8 +377,8 @@ class DefaultClickSummaryServiceTest {
         assertThat(sentWeeklySummaries()).singleElement().satisfies(summary -> {
             assertThat(summary.clicks()).isEqualTo(new WeeklyDigest.Change(0, 0));
             assertThat(summary.deadLinks()).containsExactly(
-                    new DeadLink(firstNight.getId(), ana.getId(), "first", "first.example.org", LocalDateTime.of(2026, 10, 18, 22, 30), "404"),
-                    new DeadLink(lastNight.getId(), ana.getId(), "last", "last.example.org", LocalDateTime.of(2026, 10, 25, 22, 30), "410"));
+                    new DeadLink(firstNight.getId(), ana.getId(), "first", "first.example.org", LocalDateTime.of(2026, 10, 18, 22, 30), "404", null),
+                    new DeadLink(lastNight.getId(), ana.getId(), "last", "last.example.org", LocalDateTime.of(2026, 10, 25, 22, 30), "410", null));
         });
     }
 
@@ -398,11 +401,11 @@ class DefaultClickSummaryServiceTest {
         clickSummaryService.sendWeekly();
 
         assertThat(sentWeeklySummaries()).singleElement().satisfies(summary -> assertThat(summary.endingSoon()).containsExactly(
-                new EndingSoon("six-days", "six-days.example.org", "EXPIRES", LocalDate.of(2026, 11, 1), null),
-                new EndingSoon("nine-left", "nine-left.example.org", "VISIT_LIMIT", null, 9L),
-                new EndingSoon("ten-left", "ten-left.example.org", "VISIT_LIMIT", null, 10L),
-                new EndingSoon("one-left", "one-left.example.org", "VISIT_LIMIT", null, 1L),
-                new EndingSoon("never-visited", "never-visited.example.org", "VISIT_LIMIT", null, 1L)));
+                new EndingSoon("six-days", "six-days.example.org", "EXPIRES", LocalDate.of(2026, 11, 1), null, null),
+                new EndingSoon("nine-left", "nine-left.example.org", "VISIT_LIMIT", null, 9L, null),
+                new EndingSoon("ten-left", "ten-left.example.org", "VISIT_LIMIT", null, 10L, null),
+                new EndingSoon("one-left", "one-left.example.org", "VISIT_LIMIT", null, 1L, null),
+                new EndingSoon("never-visited", "never-visited.example.org", "VISIT_LIMIT", null, 1L, null)));
         assertThat(List.of(inSixDays, nineLeft, tenLeft, oneLeft, neverVisited)).extracting(Url::getId).isSorted();
     }
 
@@ -532,7 +535,7 @@ class DefaultClickSummaryServiceTest {
         clickSummaryService.sendWeekly();
 
         assertThat(sentWeeklySummaries()).containsExactly(new WeeklySummary(ana.getId(), "ana@example.com", LAST_MONDAY, LAST_MONDAY.plusDays(6),
-                new WeeklyDigest.Change(7, 5), 5, List.of(new WeeklyDigest.TopLink("menu", "menu.example.org", 7)), List.of(), List.of()));
+                new WeeklyDigest.Change(7, 5), 5, List.of(new WeeklyDigest.TopLink("menu", "menu.example.org", 7, null)), List.of(), List.of()));
     }
 
     @Test
@@ -556,12 +559,43 @@ class DefaultClickSummaryServiceTest {
         clickSummaryService.sendWeekly();
 
         final var expected = new WeeklySummary(ana.getId(), "ana@example.com", LAST_MONDAY, LAST_MONDAY.plusDays(6), new WeeklyDigest.Change(3, 0), 2,
-                List.of(new WeeklyDigest.TopLink("menu", "menu.example.org", 3)), List.of(), List.of());
+                List.of(new WeeklyDigest.TopLink("menu", "menu.example.org", 3, null)), List.of(), List.of());
         final var content = contentCaptor();
         verify(deliveryService).enqueue(eq(NotificationType.WEEKLY_SUMMARY), eq("summary.weekly:2026-10-19"),
                 argThat(channels -> channels.stream().map(NotificationChannel::getId).toList().equals(List.of(channel.getId()))), content.capture());
         assertThat(content.getValue()).containsExactly(Map.entry(ana.getId(), new ChannelContent(payloads.weekly(expected), messages.weekly(expected))));
         verify(sendingEmailService, never()).sendWeeklySummaryEmail(any());
+    }
+
+    @Test
+    void summariesCarryTheHostname() {
+        weeklyEmailConsent(ana);
+        channel(ana, NotificationType.DAILY_SUMMARY);
+        final var domainId = domain(ana, "go.example.com");
+        final var top = onDomain(link(ana, "menu"), domainId);
+        clicks(top, LAST_MONDAY, 5, 4, 0);
+        clicks(link(ana, "shop"), LAST_MONDAY, 3, 3, 0);
+        final var dead = onDomain(dead(link(ana, "dead"), LocalDateTime.of(2026, 10, 22, 1, 0), "404"), domainId);
+        onDomain(ending(ana, "soon", MONDAY_MORNING_UTC.plusDays(3), null, 0L), domainId);
+        CLOCK.set(MONDAY_MORNING);
+
+        clickSummaryService.sendWeekly();
+
+        assertThat(sentWeeklySummaries()).singleElement().satisfies(summary -> {
+            assertThat(summary.topLinks()).containsExactly(new WeeklyDigest.TopLink("menu", "menu.example.org", 5, "go.example.com"),
+                    new WeeklyDigest.TopLink("shop", "shop.example.org", 3, null));
+            assertThat(summary.deadLinks()).containsExactly(
+                    new DeadLink(dead.getId(), ana.getId(), "dead", "dead.example.org", LocalDateTime.of(2026, 10, 22, 1, 0), "404", "go.example.com"));
+            assertThat(summary.endingSoon()).extracting(EndingSoon::shortUrl, EndingSoon::domain).containsExactly(tuple("soon", "go.example.com"));
+        });
+
+        CLOCK.set(Instant.parse("2026-10-19T23:30:00Z"));
+        clickSummaryService.sendDaily();
+
+        final var content = contentCaptor();
+        verify(deliveryService).enqueue(eq(NotificationType.DAILY_SUMMARY), eq("summary.daily:2026-10-19"), any(), content.capture());
+        final var data = (NotificationPayloads.DailyData) content.getValue().get(ana.getId()).data();
+        assertThat(data.links()).extracting(NotificationPayloads.DailyLinkData::shortUrl).containsExactly("https://go.example.com/menu", "https://hrva.cc/shop");
     }
 
     @Test
@@ -619,6 +653,18 @@ class DefaultClickSummaryServiceTest {
                 .active(true).visits(0L).build());
     }
 
+    private long domain(final User owner, final String hostname) {
+        jdbcTemplate.update("""
+                insert into custom_domain (owner_id, hostname, hostname_key, status, reason, created_at, updated_at)
+                values (?, ?, ?, 'ACTIVE', 'Menu links for my cafe', current_timestamp, current_timestamp)""", owner.getId(), hostname, hostname);
+        return jdbcTemplate.queryForObject("select id from custom_domain where hostname_key = ?", Long.class, hostname);
+    }
+
+    private Url onDomain(final Url link, final long domainId) {
+        jdbcTemplate.update("update url set domain_id = ? where id = ?", domainId, link.getId());
+        return link;
+    }
+
     private void clicks(final Url link, final LocalDate day, final long clicks, final long uniqueVisitors, final long botClicks) {
         linkStatsRepository.incrementDailyStats(link.getId(), day, clicks, uniqueVisitors, botClicks);
     }
@@ -641,7 +687,7 @@ class DefaultClickSummaryServiceTest {
                     type = FilterType.ASSIGNABLE_TYPE,
                     classes = {UrlRepository.class, UserRepository.class, NotificationConsentRepository.class, NotificationChannelRepository.class}))
     @Import({DefaultClickSummaryService.class, LinkStatsRepository.class, NotificationClaimRepository.class, EmailConsentReader.class,
-            NotificationMessages.class, NotificationPayloads.class, AnalyticsDays.class, TestApplication.Fixed.class})
+            NotificationMessages.class, NotificationPayloads.class, ShortLinks.class, AnalyticsDays.class, TestApplication.Fixed.class})
     static class TestApplication {
 
         @TestConfiguration

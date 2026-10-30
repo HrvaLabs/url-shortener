@@ -115,7 +115,7 @@ class DefaultDestinationCheckServiceTest {
 
         verify(repository).record(7L, "https://example.com/menu", NOW_UTC, 3, NOW_UTC, "404");
         assertThat(outcome).isEqualTo(new DestinationCheckOutcome(
-                List.of(new DeadLink(7L, 40L, "menu", "example.com", NOW_UTC, "404")), List.of(), NIGHT));
+                List.of(new DeadLink(7L, 40L, "menu", "example.com", NOW_UTC, "404", null)), List.of(), NIGHT));
     }
 
     @Test
@@ -155,7 +155,7 @@ class DefaultDestinationCheckServiceTest {
 
         verify(repository).record(7L, "https://example.com/menu", NOW_UTC, 0, null, null);
         verify(repository).record(8L, "https://example.org/list", NOW_UTC, 0, null, null);
-        assertThat(outcome.recovered()).containsExactly(new DeadLink(7L, 40L, "menu", "example.com", DEAD_SINCE, null));
+        assertThat(outcome.recovered()).containsExactly(new DeadLink(7L, 40L, "menu", "example.com", DEAD_SINCE, null, null));
         assertThat(outcome.newlyDead()).isEmpty();
     }
 
@@ -553,8 +553,8 @@ class DefaultDestinationCheckServiceTest {
         service.runNightly();
 
         verify(deadLinkNotificationService).notify(new DestinationCheckOutcome(
-                List.of(new DeadLink(7L, 40L, "menu", "example.com", NOW_UTC, "404")),
-                List.of(new DeadLink(8L, 41L, "list", "example.org", DEAD_SINCE, null)),
+                List.of(new DeadLink(7L, 40L, "menu", "example.com", NOW_UTC, "404", null)),
+                List.of(new DeadLink(8L, 41L, "list", "example.org", DEAD_SINCE, null, null)),
                 NIGHT));
     }
 
@@ -574,17 +574,36 @@ class DefaultDestinationCheckServiceTest {
         batches(List.of(dying));
         final var earlier = LocalDateTime.of(2026, 10, 26, 23, 40);
         when(repository.findDiedSince(TONIGHT_STARTED)).thenReturn(List.of(
-                new DiedLink(5L, 41L, "shop", "https://Shop.Example.net/cart", earlier, "nxdomain"),
-                new DiedLink(7L, 40L, "menu", "https://example.com/menu", NOW_UTC, "404")));
+                new DiedLink(5L, 41L, "shop", "https://Shop.Example.net/cart", earlier, "nxdomain", null),
+                new DiedLink(7L, 40L, "menu", "https://example.com/menu", NOW_UTC, "404", null)));
 
         service.runNightly();
 
         verify(deadLinkNotificationService).notify(new DestinationCheckOutcome(
-                List.of(new DeadLink(7L, 40L, "menu", "example.com", NOW_UTC, "404"),
-                        new DeadLink(5L, 41L, "shop", "shop.example.net", earlier, "nxdomain")),
+                List.of(new DeadLink(7L, 40L, "menu", "example.com", NOW_UTC, "404", null),
+                        new DeadLink(5L, 41L, "shop", "shop.example.net", earlier, "nxdomain", null)),
                 List.of(),
                 NIGHT));
         assertThat(messages()).contains("Destination check caught up links that died earlier tonight night=2026-10-27 links=1");
+    }
+
+    @Test
+    void deadLinksCarryTheDomain() {
+        final var path = URI.create("https://example.com/menu").getPath();
+        final var dying = new DueLink(7L, "https://example.com/menu", 2, null, 40L, path.substring(1), "go.example.com");
+        answers.put(dying.longUrl(), NOT_FOUND);
+        batches(List.of(dying));
+        final var earlier = LocalDateTime.of(2026, 10, 26, 23, 40);
+        when(repository.findDiedSince(TONIGHT_STARTED)).thenReturn(List.of(
+                new DiedLink(5L, 41L, "shop", "https://shop.example.net/cart", earlier, "nxdomain", "go.example.org")));
+
+        service.runNightly();
+
+        verify(deadLinkNotificationService).notify(new DestinationCheckOutcome(
+                List.of(new DeadLink(7L, 40L, "menu", "example.com", NOW_UTC, "404", "go.example.com"),
+                        new DeadLink(5L, 41L, "shop", "shop.example.net", earlier, "nxdomain", "go.example.org")),
+                List.of(),
+                NIGHT));
     }
 
     @Test
@@ -597,7 +616,7 @@ class DefaultDestinationCheckServiceTest {
         service.runNightly();
 
         verify(deadLinkNotificationService).notify(new DestinationCheckOutcome(
-                List.of(new DeadLink(7L, 40L, "menu", "example.com", NOW_UTC, "404")), List.of(), NIGHT));
+                List.of(new DeadLink(7L, 40L, "menu", "example.com", NOW_UTC, "404", null)), List.of(), NIGHT));
     }
 
     @Test
@@ -622,12 +641,12 @@ class DefaultDestinationCheckServiceTest {
     void theStartupCatchUpHandsOverTonightsDeadLinksWithoutProbing() {
         final var earlier = LocalDateTime.of(2026, 10, 26, 23, 40);
         when(repository.findDiedSince(TONIGHT_STARTED)).thenReturn(List.of(
-                new DiedLink(5L, 41L, "shop", "https://shop.example.net/cart", earlier, "nxdomain")));
+                new DiedLink(5L, 41L, "shop", "https://shop.example.net/cart", earlier, "nxdomain", null)));
 
         service.catchUpAfterStartup();
 
         verify(deadLinkNotificationService).notify(new DestinationCheckOutcome(
-                List.of(new DeadLink(5L, 41L, "shop", "shop.example.net", earlier, "nxdomain")), List.of(), NIGHT));
+                List.of(new DeadLink(5L, 41L, "shop", "shop.example.net", earlier, "nxdomain", null)), List.of(), NIGHT));
         verify(repository, never()).findDue(any(), anyInt(), any());
         assertThat(probed).isEmpty();
     }
@@ -747,7 +766,7 @@ class DefaultDestinationCheckServiceTest {
     private static DueLink due(final long id, final String longUrl, final int failStreak, final LocalDateTime deadSince,
             final Long ownerId) {
         final var path = URI.create(longUrl).getPath();
-        return new DueLink(id, longUrl, failStreak, deadSince, ownerId, path.length() <= 1 ? "link" + id : path.substring(1));
+        return new DueLink(id, longUrl, failStreak, deadSince, ownerId, path.length() <= 1 ? "link" + id : path.substring(1), null);
     }
 
 }

@@ -26,6 +26,7 @@ import cc.hrva.urlshortener.security.OAuth2LoginSuccessHandler;
 import cc.hrva.urlshortener.security.OAuth2LoginUserService;
 import cc.hrva.urlshortener.security.TokenProvider;
 import cc.hrva.urlshortener.service.UserService;
+import cc.hrva.urlshortener.service.domain.ShortLinks;
 import cc.hrva.urlshortener.service.impl.DefaultNotificationChannelService;
 import cc.hrva.urlshortener.service.impl.DefaultNotificationConsentService;
 import cc.hrva.urlshortener.service.notification.ChannelTargets;
@@ -862,6 +863,7 @@ class NotificationEndpointSecurityTest {
             WebhookChannelSender.class,
             NotificationMessages.class,
             NotificationPayloads.class,
+            ShortLinks.class,
             TestApplication.PublicDns.class
     })
     static class TestApplication {

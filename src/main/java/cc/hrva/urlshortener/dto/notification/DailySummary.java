@@ -9,7 +9,7 @@ public record DailySummary(LocalDate date, long clicks, long uniqueVisitors, lon
         links = List.copyOf(links);
     }
 
-    public record SummaryLink(String shortUrl, String destinationHost, long clicks, long uniqueVisitors, long botClicks) {
+    public record SummaryLink(String shortUrl, String destinationHost, long clicks, long uniqueVisitors, long botClicks, String domain) {
     }
 
 }

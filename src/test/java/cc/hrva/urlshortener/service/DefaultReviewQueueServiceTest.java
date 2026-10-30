@@ -560,7 +560,7 @@ class DefaultReviewQueueServiceTest {
         reviewQueueService.flag(url, List.of(YOUNG, LURE));
 
         verify(eventPublisher).publishEvent(new AdminAlertEvent.ReviewOpened(
-                new AlertedLink(287L, "v0DB3", "findfavoritedate.life", null), List.of(YOUNG, LURE)));
+                new AlertedLink(287L, "v0DB3", "findfavoritedate.life", null, null), List.of(YOUNG, LURE)));
     }
 
     @Test
@@ -572,7 +572,7 @@ class DefaultReviewQueueServiceTest {
         reviewQueueService.flag(owned, List.of(LURE));
 
         verify(eventPublisher).publishEvent(new AdminAlertEvent.ReviewOpened(
-                new AlertedLink(288L, "k3Xa1", "paypa1-login.top", 27L), List.of(LURE)));
+                new AlertedLink(288L, "k3Xa1", "paypa1-login.top", 27L, null), List.of(LURE)));
     }
 
     @Test
@@ -600,7 +600,7 @@ class DefaultReviewQueueServiceTest {
         reviewQueueService.report(url, ReportCategory.PHISHING, "asks for my bank login");
 
         verify(eventPublisher).publishEvent(new AdminAlertEvent.VisitorReported(
-                new AlertedLink(287L, "v0DB3", "findfavoritedate.life", null), ReportCategory.PHISHING, "asks for my bank login", true));
+                new AlertedLink(287L, "v0DB3", "findfavoritedate.life", null, null), ReportCategory.PHISHING, "asks for my bank login", true));
     }
 
     @Test
@@ -611,7 +611,7 @@ class DefaultReviewQueueServiceTest {
         reviewQueueService.report(url, ReportCategory.MALWARE, "downloads an exe");
 
         verify(eventPublisher).publishEvent(new AdminAlertEvent.VisitorReported(
-                new AlertedLink(287L, "v0DB3", "findfavoritedate.life", null), ReportCategory.MALWARE, "downloads an exe", false));
+                new AlertedLink(287L, "v0DB3", "findfavoritedate.life", null, null), ReportCategory.MALWARE, "downloads an exe", false));
     }
 
     @Test
