@@ -351,6 +351,19 @@ class DefaultUserServiceTest {
     }
 
     @Test
+    void theCurrentUserSaysWhetherAPasswordIsSet() {
+        final var user = User.builder().id(1L).email("test@example.com").build();
+        SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken("test@example.com", null));
+        when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
+        when(userToUserDtoConverter.convert(user)).thenReturn(UserDto.builder().id(1L).email("test@example.com").build());
+        when(signInMethodService.passwordSet(user)).thenReturn(false, true);
+
+        assertThat(userService.fetchCurrentUser().getPasswordSet()).isFalse();
+        assertThat(userService.fetchCurrentUser().getPasswordSet()).isTrue();
+        SecurityContextHolder.clearContext();
+    }
+
+    @Test
     void shouldFailFetchCurrentUserWhenNotAuthenticated() {
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken(null, null)

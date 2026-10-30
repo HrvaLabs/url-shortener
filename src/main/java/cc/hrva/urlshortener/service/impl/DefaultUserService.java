@@ -126,6 +126,7 @@ public class DefaultUserService implements UserService {
                 .orElseThrow(() -> new NoAuthorizationException("Invalid credentials"));
         final var userDto = userToUserDtoConverter.convert(user);
         userDto.setSignInMethods(signInMethodService.methodsOf(user.getId()));
+        userDto.setPasswordSet(signInMethodService.passwordSet(user));
 
         return userDto;
     }

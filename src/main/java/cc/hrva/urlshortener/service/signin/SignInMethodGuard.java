@@ -73,7 +73,7 @@ public class SignInMethodGuard {
         return true;
     }
 
-    private static boolean hasPassword(final User user, final List<SignInMethodState> states) {
+    public static boolean hasPassword(final User user, final List<SignInMethodState> states) {
         return StoredPasswords.isSet(user.getPassword())
                 && states.stream().noneMatch(state -> state.method() == SignInMethod.PASSWORD && state.turnedOff());
     }

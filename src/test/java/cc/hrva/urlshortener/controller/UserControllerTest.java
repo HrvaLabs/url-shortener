@@ -78,6 +78,25 @@ class UserControllerTest {
     }
 
     @Test
+    void theCurrentUserSaysWhetherAPasswordIsSet() throws Exception {
+        when(userService.fetchCurrentUser()).thenReturn(UserDto.builder().id(1L).email("test@example.com").passwordSet(false)
+                .signInMethods(List.of()).build());
+
+        mockMvc.perform(get("/api/v1/users/me"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.passwordSet").value(false));
+    }
+
+    @Test
+    void aUserWithoutTheFieldLeavesItOut() throws Exception {
+        when(userService.fetchCurrentUser()).thenReturn(UserDto.builder().id(1L).email("test@example.com").build());
+
+        mockMvc.perform(get("/api/v1/users/me"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.passwordSet").doesNotExist());
+    }
+
+    @Test
     void shouldGetAllUsers() throws Exception {
         final var userList = Collections.singletonList(AdminUserResponse.from(User.builder().id(1L).email("test@example.com").build(), List.of(), false));
         final var pageable = PageRequest.of(0, 20);

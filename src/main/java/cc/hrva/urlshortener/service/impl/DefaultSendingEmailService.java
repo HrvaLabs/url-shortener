@@ -43,6 +43,7 @@ import cc.hrva.urlshortener.model.Email;
 import cc.hrva.urlshortener.model.ResetToken;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.User;
+import cc.hrva.urlshortener.security.StoredPasswords;
 import cc.hrva.urlshortener.service.SendingEmailService;
 import cc.hrva.urlshortener.service.SettingsService;
 import cc.hrva.urlshortener.service.digest.WeeklyDigestText;
@@ -235,6 +236,8 @@ public class DefaultSendingEmailService implements SendingEmailService {
         ctx.setVariable("settings_url", frontendPage("/dashboard/settings"));
         ctx.setVariable("help_url", frontendPage("/help/passkeys"));
         ctx.setVariable("local_account", isLocalAccount(user));
+        ctx.setVariable("password_removed", isLocalAccount(user) && !StoredPasswords.isSet(user.getPassword()));
+        ctx.setVariable("reset_url", frontendPage("/reset-password"));
 
         final var htmlContent = templateEngine.process("passkey_added", ctx);
 

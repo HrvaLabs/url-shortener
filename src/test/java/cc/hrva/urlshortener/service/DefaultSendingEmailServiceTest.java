@@ -55,6 +55,8 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
+import org.junit.jupiter.params.provider.NullSource;
 import org.assertj.core.groups.Tuple;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
@@ -85,7 +87,8 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class DefaultSendingEmailServiceTest {
 
-    private static final User OWNER = User.builder().email("alice@example.com").apiKeySlots(4L).build();
+    private static final String PASSWORD_HASH = "$2a$10$" + "p".repeat(53);
+    private static final User OWNER = User.builder().email("alice@example.com").password(PASSWORD_HASH).apiKeySlots(4L).build();
     private static final Url BLOCKED_LINK = Url.builder().shortUrl("promo").longUrl("https://jofogas.cards/login")
             .blockReason(BlockReason.BLOCKLIST).blockDetail("HaGeZi Fake").active(false).build();
     private static final LocalDateTime PASSKEY_ADDED_AT = LocalDateTime.of(2026, 10, 25, 14, 5, 33);
@@ -780,11 +783,28 @@ class DefaultSendingEmailServiceTest {
 
     @Test
     void anEmailAndPasswordAccountIsStillToldToChangeItsPassword() throws Exception {
-        final var user = User.builder().email("alice@example.com").apiKeySlots(4L).authProvider("local").build();
+        final var user = User.builder().email("alice@example.com").password(PASSWORD_HASH).apiKeySlots(4L).authProvider("local").build();
 
         assertThat(textOf(sentPasskeyAddedEmail(user, "Work YubiKey").getText()))
                 .contains(" remove it and change your password. If you can't sign in, email support@hrva.cc.")
                 .doesNotContain("Google or GitHub");
+    }
+
+    @ParameterizedTest
+    @NullSource
+    @ValueSource(strings = "Qm9ndXNSYW5kb21Ub2tlbk5vdEFCY3J5cHRIYXNoMTIzNDU2")
+    void anAccountWhosePasswordWasRemovedIsToldToResetItAndCheckItsSignInMethods(final String password) throws Exception {
+        final var user = User.builder().email("alice@example.com").password(password).apiKeySlots(4L).authProvider("local").build();
+
+        final var email = sentPasskeyAddedEmail(user, "Work YubiKey");
+
+        assertThat(textOf(email.getText()))
+                .contains("If it wasn't you, sign in, open Settings \u2192 Passkeys and security keys (https://hrva.cc/dashboard/settings)"
+                        + " and remove it. If you can't sign in, email support@hrva.cc.")
+                .contains("If this wasn't you, reset your password and check your sign-in methods. Reset it here: https://hrva.cc/reset-password.")
+                .doesNotContain("change your password")
+                .doesNotContain("Google or GitHub");
+        assertThat(linksIn(email.getText())).contains("https://hrva.cc/reset-password");
     }
 
     @Test
@@ -857,6 +877,8 @@ class DefaultSendingEmailServiceTest {
         assertThat(context.getValue().getVariable("help_url")).isEqualTo("https://hrva.cc/help/passkeys");
         assertThat(context.getValue().getVariable("contact_email")).isEqualTo("support@hrva.cc");
         assertThat(context.getValue().getVariable("local_account")).isEqualTo(true);
+        assertThat(context.getValue().getVariable("password_removed")).isEqualTo(false);
+        assertThat(context.getValue().getVariable("reset_url")).isEqualTo("https://hrva.cc/reset-password");
         verify(emailService).sendEmail(any(Email.class), eq(null));
     }
 

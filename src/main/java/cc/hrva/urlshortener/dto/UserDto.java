@@ -35,5 +35,8 @@ public class UserDto {
     @Schema(description = "Every way this account has signed in, email and password first, then in the order first used")
     @JsonInclude(JsonInclude.Include.NON_NULL)
     private List<SignInMethodResponse> signInMethods;
+    @Schema(description = "Whether the account has a password it can sign in with; only on GET /users/me", example = "true")
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private Boolean passwordSet;
 
 }

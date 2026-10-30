@@ -1,11 +1,13 @@
 package cc.hrva.urlshortener.service.impl;
 
 import cc.hrva.urlshortener.dto.SignInMethodResponse;
+import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.UserSignInMethod;
 import cc.hrva.urlshortener.model.enums.SignInMethod;
 import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.repository.UserSignInMethodRepository;
 import cc.hrva.urlshortener.service.SignInMethodService;
+import cc.hrva.urlshortener.service.signin.SignInMethodGuard;
 import java.time.LocalDateTime;
 import java.util.Collection;
 import java.util.Comparator;
@@ -67,6 +69,11 @@ public class DefaultSignInMethodService implements SignInMethodService {
 
         return userSignInMethodRepository.findStatesByUserId(userId).stream()
                 .anyMatch(state -> state.method() == method && state.turnedOff());
+    }
+
+    @Override
+    public boolean passwordSet(final User user) {
+        return SignInMethodGuard.hasPassword(user, userSignInMethodRepository.findStatesByUserId(user.getId()));
     }
 
     @Override

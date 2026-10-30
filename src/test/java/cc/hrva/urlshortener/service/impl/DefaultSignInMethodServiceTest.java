@@ -43,6 +43,7 @@ class DefaultSignInMethodServiceTest {
 
     private static final LocalDateTime FIRST = LocalDateTime.of(2026, 10, 1, 9, 0);
     private static final LocalDateTime LATER = LocalDateTime.of(2026, 10, 20, 18, 30);
+    private static final String BCRYPT_HASH = "$2a$10$" + "h".repeat(53);
 
     @Autowired
     private SignInMethodService signInMethodService;
@@ -238,6 +239,32 @@ class DefaultSignInMethodServiceTest {
                 .containsExactly(new SignInMethodResponse(SignInMethod.PASSWORD, FIRST, LATER, FIRST.plusDays(1)));
     }
 
+    @Test
+    void aBcryptHashIsAPasswordWithOrWithoutItsRow() {
+        final var withHash = userRepository.saveAndFlush(account("hash@example.com", BCRYPT_HASH));
+
+        assertThat(signInMethodService.passwordSet(withHash)).isTrue();
+        signInMethodService.record(withHash.getId(), SignInMethod.PASSWORD, FIRST);
+        assertThat(signInMethodService.passwordSet(withHash)).isTrue();
+    }
+
+    @Test
+    void aTurnedOffPasswordRowMeansNoPassword() {
+        final var withHash = userRepository.saveAndFlush(account("off@example.com", BCRYPT_HASH));
+        signInMethodService.record(withHash.getId(), SignInMethod.PASSWORD, FIRST);
+
+        signInMethodService.turnOff(withHash.getId(), SignInMethod.PASSWORD, LATER);
+
+        assertThat(signInMethodService.passwordSet(withHash)).isFalse();
+    }
+
+    @Test
+    void aRandomValueIsNoPasswordEvenWithAPasswordRowOn() {
+        signInMethodService.record(user.getId(), SignInMethod.PASSWORD, FIRST);
+
+        assertThat(signInMethodService.passwordSet(user)).isFalse();
+    }
+
     private static void awaitQuietly(final CountDownLatch latch) {
         try {
             latch.await(5, TimeUnit.SECONDS);
@@ -255,9 +282,13 @@ class DefaultSignInMethodServiceTest {
     }
 
     private static User account(final String email) {
+        return account(email, "correct horse battery");
+    }
+
+    private static User account(final String email, final String password) {
         return User.builder()
                 .email(email)
-                .password("correct horse battery")
+                .password(password)
                 .apiKeySlots(4L)
                 .build();
     }
