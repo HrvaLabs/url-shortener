@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.audit;
 
+import cc.hrva.urlshortener.controller.AdminCustomDomainController;
 import cc.hrva.urlshortener.controller.AdminEmailLogController;
 import cc.hrva.urlshortener.controller.UrlController;
 import cc.hrva.urlshortener.controller.UserController;
@@ -23,6 +24,7 @@ import tools.jackson.databind.json.JsonMapper;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -51,7 +53,7 @@ class AdminAuditAspectTest {
     }
 
     private Audited invoking(final Class<?> controller, final String method, final Object... args) {
-        doReturn(controller).when(signature).getDeclaringType();
+        lenient().doReturn(controller).when(signature).getDeclaringType();
         when(joinPoint.getArgs()).thenReturn(args);
         return Arrays.stream(controller.getDeclaredMethods())
                 .filter(candidate -> candidate.getName().equals(method))
@@ -132,6 +134,15 @@ class AdminAuditAspectTest {
         aspect.logAdminAction(joinPoint, audited);
 
         verify(auditLogService).log("admin@hrva.cc", AuditAction.RESEND_EMAIL, "EmailLog", "7", "");
+    }
+
+    @Test
+    void aDomainLimitIsRecordedAgainstTheUserItBelongsTo() throws Throwable {
+        final var audited = invoking(AdminCustomDomainController.class, "removeAllowance", 5L);
+
+        aspect.logAdminAction(joinPoint, audited);
+
+        verify(auditLogService).log("admin@hrva.cc", AuditAction.REMOVE_DOMAIN_ALLOWANCE, "User", "5", "");
     }
 
     @Test

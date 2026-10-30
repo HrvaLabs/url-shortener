@@ -144,7 +144,7 @@ public class AdminCustomDomainController {
     @Operation(summary = "Set an account's custom domain limit", description = "1 to 20 custom domains, with a reason.")
     @PutMapping("/allowances/{userId}")
     @PreAuthorize("hasRole('ROLE_ADMIN')")
-    @Audited(AuditAction.SET_DOMAIN_ALLOWANCE)
+    @Audited(value = AuditAction.SET_DOMAIN_ALLOWANCE, targetType = "User")
     public ResponseEntity<DomainAllowanceResponse> setAllowance(@PathVariable("userId") final long userId,
                                                                 @Valid @RequestBody final DomainAllowanceDto domainAllowanceDto) {
         return ResponseEntity.ok(customDomainAdminService.setAllowance(userId, domainAllowanceDto, signedInAdmin()));
@@ -153,7 +153,7 @@ public class AdminCustomDomainController {
     @Operation(summary = "Remove an account's custom domain limit", description = "The account goes back to the default limit.")
     @DeleteMapping("/allowances/{userId}")
     @PreAuthorize("hasRole('ROLE_ADMIN')")
-    @Audited(AuditAction.REMOVE_DOMAIN_ALLOWANCE)
+    @Audited(value = AuditAction.REMOVE_DOMAIN_ALLOWANCE, targetType = "User")
     public ResponseEntity<Void> removeAllowance(@PathVariable("userId") final long userId) {
         customDomainAdminService.removeAllowance(userId);
         return ResponseEntity.noContent().build();

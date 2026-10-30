@@ -37,7 +37,7 @@ public class AdminAuditAspect {
         final var performedBy = user != null ? user.getEmail() : "anonymous";
         final var signature = joinPoint.getSignature();
         final var args = joinPoint.getArgs();
-        final var targetType = targetType(signature.getDeclaringType());
+        final var targetType = audited.targetType().isEmpty() ? targetType(signature.getDeclaringType()) : audited.targetType();
         final var targeted = args.length > 0 && args[0] != null && BeanUtils.isSimpleValueType(args[0].getClass());
         final var targetIdentifier = targeted ? String.valueOf(args[0]) : "";
         final var details = describeChanges(args, targeted ? 1 : 0);

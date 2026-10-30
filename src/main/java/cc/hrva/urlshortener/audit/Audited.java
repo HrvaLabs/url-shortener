@@ -12,4 +12,6 @@ public @interface Audited {
 
     AuditAction value();
 
+    String targetType() default "";
+
 }
