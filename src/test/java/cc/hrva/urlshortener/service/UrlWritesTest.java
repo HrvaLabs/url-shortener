@@ -56,6 +56,8 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.web.servlet.View;
+import org.springframework.web.servlet.view.RedirectView;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -213,7 +215,7 @@ class UrlWritesTest {
         menu(ON_HRVA, "https://example.com/a", null);
         menu(ON_DOMAIN, "https://example.com/b", domainId);
 
-        assertThat(urlService.redirectResultUrl("menu", CLICK).getUrl()).isEqualTo("https://example.com/a");
+        assertThat(locationOf(urlService.redirectResultUrl("menu", CLICK))).isEqualTo("https://example.com/a");
         assertThat(urlService.redirectResultUrl(route, "menu", CLICK).getUrl()).isEqualTo("https://example.com/b");
         assertThat(((UrlResponse) cache.get("menu").get()).id()).isEqualTo(ON_HRVA);
         assertThat(((UrlResponse) cache.get(domainId + "/menu").get()).id()).isEqualTo(ON_DOMAIN);
@@ -224,7 +226,7 @@ class UrlWritesTest {
         assertThat(cache.get("menu")).isNotNull();
         assertThat(urlService.redirectResultUrl(route, "menu", CLICK).getUrl())
                 .isEqualTo("https://app.hrva.cc/unavailable?s=menu&reason=blocked&d=go.example.com");
-        assertThat(urlService.redirectResultUrl("menu", CLICK).getUrl()).isEqualTo("https://example.com/a");
+        assertThat(locationOf(urlService.redirectResultUrl("menu", CLICK))).isEqualTo("https://example.com/a");
     }
 
     @Test
@@ -242,14 +244,14 @@ class UrlWritesTest {
         final var route = new DomainRoute(domainId, "go.example.com", CustomDomainStatus.ACTIVE, true);
         menu(ON_HRVA, "https://example.com/a", null);
         menu(ON_DOMAIN, "https://example.com/b", domainId);
-        assertThat(urlService.redirectResultUrl("menu", CLICK).getUrl()).isEqualTo("https://example.com/a");
+        assertThat(locationOf(urlService.redirectResultUrl("menu", CLICK))).isEqualTo("https://example.com/a");
         assertThat(transactionDuringTheCheck).isTrue();
         assertThat(readOnlyDuringTheCheck).isTrue();
         assertThat(urlService.redirectResultUrl(route, "menu", CLICK).getUrl()).isEqualTo("https://example.com/b");
 
         doThrow(new SQLException("Connection refused")).when(dataSource).getConnection();
         try {
-            assertThat(urlService.redirectResultUrl("menu", CLICK).getUrl()).isEqualTo("https://example.com/a");
+            assertThat(locationOf(urlService.redirectResultUrl("menu", CLICK))).isEqualTo("https://example.com/a");
             assertThat(urlService.redirectResultUrl(route, "menu", CLICK).getUrl()).isEqualTo("https://example.com/b");
         } finally {
             doCallRealMethod().when(dataSource).getConnection();
@@ -377,6 +379,11 @@ class UrlWritesTest {
 
     private Map<String, Object> linkRow() {
         return jdbcTemplate.queryForMap("select visits, last_accessed, active, expiration_date, block_reason from url where id = ?", LINK);
+    }
+
+    private static String locationOf(final View view) {
+        assertThat(view).isInstanceOf(RedirectView.class);
+        return ((RedirectView) view).getUrl();
     }
 
     @SpringBootConfiguration

@@ -13,6 +13,7 @@ import cc.hrva.urlshortener.service.domain.DomainRoute;
 import java.util.List;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.web.servlet.View;
 import org.springframework.web.servlet.view.RedirectView;
 
 public interface UrlService {
@@ -31,7 +32,7 @@ public interface UrlService {
     PeekUrl peekUrlByShortUrl(String domain, String shortUrl);
     UrlResponse saveUrlWithApiKey(CreateUrlDto createUrlDto, String apiKey, CreatedVia createdVia);
     UnlockResponse unlockUrl(String domain, String shortUrl, String password, ClickRequest click);
-    RedirectView redirectResultUrl(String shortUrl, ClickRequest click);
+    View redirectResultUrl(String shortUrl, ClickRequest click);
     RedirectView redirectResultUrl(DomainRoute route, String alias, ClickRequest click);
     UrlResponse revealUrlAndRecordClick(String domain, String shortUrl, ClickRequest click);
     byte[] exportMyUrlsAsCsv(String apiKey);

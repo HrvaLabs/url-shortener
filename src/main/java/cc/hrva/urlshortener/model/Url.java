@@ -96,6 +96,8 @@ public class Url {
 
     private boolean active;
 
+    private boolean warningPage;
+
     @PrePersist
     public void onCreate() {
         this.visits = 0L;

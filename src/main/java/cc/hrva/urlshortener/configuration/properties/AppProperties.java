@@ -348,6 +348,7 @@ public class AppProperties {
         private boolean googleSignIn = true;
         private boolean githubSignIn = true;
         private boolean randomDomainReview = true;
+        private boolean warningPage = true;
 
         @Min(1)
         @Max(90)
@@ -356,6 +357,10 @@ public class AppProperties {
         @Min(30)
         @Max(3650)
         private int randomDomainMaxAgeDays = 365;
+
+        @Min(30)
+        @Max(3650)
+        private int warningPageMaxAgeDays = 365;
 
         @Valid
         @NotNull

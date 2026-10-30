@@ -31,4 +31,18 @@ class RedirectLocationsTest {
         assertThat(RedirectLocations.normalized(location)).isEqualTo(normalised);
     }
 
+    @ParameterizedTest
+    @CsvSource(delimiterString = " => ", value = {
+            "https://xn--evapi-gya.example/menu => xn--evapi-gya.example",
+            "https://user%20name@xn--evapi-gya.example:8443/a%20b#top => xn--evapi-gya.example",
+            "https://shop.example?id=1 => shop.example",
+            "https://shop.example#top => shop.example",
+            "https://shop.example => shop.example",
+            "https://[2001:db8::1]:8443/a => [2001:db8::1]",
+            "https://čokolada.hr/torta => čokolada.hr"
+    })
+    void readsTheHostOfALocationAsWritten(final String location, final String host) {
+        assertThat(RedirectLocations.hostOf(location)).isEqualTo(host);
+    }
+
 }

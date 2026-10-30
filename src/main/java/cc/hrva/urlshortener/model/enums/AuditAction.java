@@ -44,6 +44,7 @@ public enum AuditAction {
     REMOVE_PASSWORD,
     ALLOW_CAMPAIGN_SHAPE,
     REPORT_DOMAINS,
+    CLEAR_WARNING_PAGE,
     UNKNOWN
 
 }

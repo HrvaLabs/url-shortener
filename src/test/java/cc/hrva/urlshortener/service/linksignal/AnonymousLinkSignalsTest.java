@@ -53,21 +53,21 @@ class AnonymousLinkSignalsTest {
     void randomAndYoungIsFlagged() {
         when(domainAgeService.registeredOn(RANDOM_HOST)).thenReturn(Optional.of(TODAY.minusDays(10)));
 
-        assertThat(anonymousLinkSignals.signalsFor(RANDOM_LINK, Outcome.CLEAN)).isEqualTo(new Signals(true, Optional.of(TODAY.minusDays(10))));
+        assertThat(anonymousLinkSignals.signalsFor(RANDOM_LINK, Outcome.CLEAN)).isEqualTo(new Signals(true, Optional.of(TODAY.minusDays(10)), true));
     }
 
     @Test
     void randomAndUnknownAgeIsFlagged() {
         when(domainAgeService.registeredOn(RANDOM_HOST)).thenReturn(Optional.empty());
 
-        assertThat(anonymousLinkSignals.signalsFor(RANDOM_LINK, Outcome.FLAG)).isEqualTo(new Signals(true, Optional.empty()));
+        assertThat(anonymousLinkSignals.signalsFor(RANDOM_LINK, Outcome.FLAG)).isEqualTo(new Signals(true, Optional.empty(), true));
     }
 
     @Test
     void randomButOldIsNot() {
         when(domainAgeService.registeredOn(RANDOM_HOST)).thenReturn(Optional.of(TODAY.minusDays(400)));
 
-        assertThat(anonymousLinkSignals.signalsFor(RANDOM_LINK, Outcome.CLEAN)).isEqualTo(new Signals(false, Optional.of(TODAY.minusDays(400))));
+        assertThat(anonymousLinkSignals.signalsFor(RANDOM_LINK, Outcome.CLEAN)).isEqualTo(new Signals(false, Optional.of(TODAY.minusDays(400)), false));
     }
 
     @Test
@@ -101,7 +101,49 @@ class AnonymousLinkSignalsTest {
         when(domainAgeService.registeredOn("www.jutarnji.hr")).thenReturn(Optional.of(TODAY.minusDays(3)));
 
         assertThat(anonymousLinkSignals.signalsFor("https://www.jutarnji.hr/vijesti", Outcome.CLEAN))
-                .isEqualTo(new Signals(false, Optional.of(TODAY.minusDays(3))));
+                .isEqualTo(new Signals(false, Optional.of(TODAY.minusDays(3)), true));
+    }
+
+    @Test
+    void aKnownYoungDomainGetsTheWarningPage() {
+        when(domainAgeService.registeredOn("www.jutarnji.hr")).thenReturn(Optional.of(TODAY.minusDays(364)), Optional.of(TODAY.minusDays(365)));
+
+        assertThat(anonymousLinkSignals.signalsFor("https://www.jutarnji.hr/vijesti", Outcome.CLEAN).warningPage()).isTrue();
+        assertThat(anonymousLinkSignals.signalsFor("https://www.jutarnji.hr/vijesti", Outcome.CLEAN).warningPage()).isFalse();
+    }
+
+    @Test
+    void anUnknownAgeAloneGivesNoWarningPage() {
+        when(domainAgeService.registeredOn("www.jutarnji.hr")).thenReturn(Optional.empty());
+
+        assertThat(anonymousLinkSignals.signalsFor("https://www.jutarnji.hr/vijesti", Outcome.FLAG))
+                .isEqualTo(new Signals(false, Optional.empty(), false));
+    }
+
+    @Test
+    void aRandomLookingDomainGetsTheWarningPageEvenWithReviewOff() {
+        when(domainAgeService.registeredOn(RANDOM_HOST)).thenReturn(Optional.empty());
+        SettingsServiceFixtures.turnOff(settingsService, SettingKey.RANDOM_DOMAIN_REVIEW);
+
+        assertThat(anonymousLinkSignals.signalsFor(RANDOM_LINK, Outcome.CLEAN).warningPage()).isTrue();
+    }
+
+    @Test
+    void theWarningPageMaximumAgeComesFromSettings() {
+        when(domainAgeService.registeredOn("www.jutarnji.hr")).thenReturn(Optional.of(TODAY.minusDays(40)));
+        assertThat(anonymousLinkSignals.signalsFor("https://www.jutarnji.hr/vijesti", Outcome.CLEAN).warningPage()).isTrue();
+
+        SettingsServiceFixtures.change(settingsService, SettingKey.WARNING_PAGE_MAX_AGE_DAYS, 30);
+
+        assertThat(anonymousLinkSignals.signalsFor("https://www.jutarnji.hr/vijesti", Outcome.CLEAN).warningPage()).isFalse();
+    }
+
+    @Test
+    void theWarningSwitchOffGivesNoWarningPageButKeepsTheOtherSignals() {
+        when(domainAgeService.registeredOn(RANDOM_HOST)).thenReturn(Optional.of(TODAY.minusDays(10)));
+        SettingsServiceFixtures.turnOff(settingsService, SettingKey.WARNING_PAGE);
+
+        assertThat(anonymousLinkSignals.signalsFor(RANDOM_LINK, Outcome.CLEAN)).isEqualTo(new Signals(true, Optional.of(TODAY.minusDays(10)), false));
     }
 
     @Test
@@ -131,14 +173,14 @@ class AnonymousLinkSignalsTest {
     void aFailingAgeLookupCountsAsUnknownAge(final CapturedOutput output) {
         when(domainAgeService.registeredOn(any())).thenThrow(new IllegalStateException("rdap.example down"));
 
-        assertThat(anonymousLinkSignals.signalsFor(RANDOM_LINK, Outcome.CLEAN)).isEqualTo(new Signals(true, Optional.empty()));
+        assertThat(anonymousLinkSignals.signalsFor(RANDOM_LINK, Outcome.CLEAN)).isEqualTo(new Signals(true, Optional.empty(), true));
         assertThat(output).containsOnlyOnce("Domain age lookup for the link signals failed exception=java.lang.IllegalStateException")
                 .doesNotContain("rdap.example", "xdvqnxj");
     }
 
     @Test
     void noSignalsAreNotRandomAndHaveNoAge() {
-        assertThat(Signals.none()).isEqualTo(new Signals(false, Optional.empty()));
+        assertThat(Signals.none()).isEqualTo(new Signals(false, Optional.empty(), false));
         assertThat(AnonymousLinkSignals.RANDOM_LOOKING_DOMAIN).isEqualTo("Random-looking domain");
     }
 

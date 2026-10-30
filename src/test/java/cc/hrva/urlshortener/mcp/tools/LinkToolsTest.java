@@ -596,7 +596,7 @@ class LinkToolsTest {
 
     private static UrlResponse onDomain(final Long id, final String alias, final String hostname) {
         return new UrlResponse(id, "https://example.com/" + alias, alias, LocalDateTime.now(), null, 1L, null, true, "ACTIVE", Set.of(), false,
-                "user@localhost", List.of(), null, null, null, null, null, new DomainRef(7L, hostname));
+                "user@localhost", List.of(), null, null, null, null, null, new DomainRef(7L, hostname), null);
     }
 
     private static UrlResponse created(final String alias, final Long visitLimit, final LocalDateTime expirationDate) {

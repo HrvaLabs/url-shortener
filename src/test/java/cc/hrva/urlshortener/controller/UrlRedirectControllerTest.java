@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.controller;
 
+import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.dto.ClickRequest;
 import cc.hrva.urlshortener.security.ClickRequestResolver;
 import cc.hrva.urlshortener.service.UrlService;
@@ -8,14 +9,18 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.http.HttpHeaders;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.servlet.view.RedirectView;
 
+import static org.hamcrest.Matchers.containsString;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.redirectedUrl;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -32,9 +37,12 @@ class UrlRedirectControllerTest {
     @Mock
     private ClickRequestResolver clickRequestResolver;
 
+    @Mock
+    private AppProperties appProperties;
+
     @BeforeEach
     void setUp() {
-        this.mockMvc = MockMvcBuilders.standaloneSetup(new UrlRedirectController(urlService, clickRequestResolver, null)).build();
+        this.mockMvc = MockMvcBuilders.standaloneSetup(new UrlRedirectController(urlService, clickRequestResolver, null, appProperties)).build();
     }
 
     @Test
@@ -61,14 +69,47 @@ class UrlRedirectControllerTest {
     }
 
     @Test
-    void theRootMovesPermanentlyToTheFrontend() throws Exception {
-        final var redirectView = new RedirectView("https://frontend.com/");
-        when(urlService.redirectResultUrl(null, null)).thenReturn(redirectView);
+    void aFlaggedLinkAnswersWithTheWarningPage() throws Exception {
+        when(clickRequestResolver.resolve(any())).thenReturn(CLICK);
+        when(urlService.redirectResultUrl("abc", CLICK))
+                .thenReturn(new LinkWarningView(LinkWarningTemplates.engine(), "https://hrva.cc", "abc", "https://xdvqnxj.com/login",
+                        "https://xdvqnxj.com/login"));
+
+        mockMvc.perform(get("/abc"))
+                .andExpect(status().isOk())
+                .andExpect(content().contentType("text/html;charset=UTF-8"))
+                .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "no-store, no-transform"))
+                .andExpect(header().doesNotExist(HttpHeaders.LOCATION))
+                .andExpect(content().string(containsString("Continue to xdvqnxj.com")));
+    }
+
+    @Test
+    void aLinkWithoutTheFlagStillRedirects() throws Exception {
+        when(clickRequestResolver.resolve(any())).thenReturn(CLICK);
+        when(urlService.redirectResultUrl("abc", CLICK)).thenReturn(new RedirectView("https://example.com/menu"));
+
+        mockMvc.perform(get("/abc"))
+                .andExpect(status().isFound())
+                .andExpect(redirectedUrl("https://example.com/menu"));
+    }
+
+    @Test
+    void theRootStaysA301() throws Exception {
+        when(appProperties.getFrontendUrl()).thenReturn("https://frontend.com");
 
         mockMvc.perform(get("/"))
                 .andExpect(status().isMovedPermanently())
                 .andExpect(redirectedUrl("https://frontend.com/"));
 
-        verifyNoInteractions(clickRequestResolver);
+        verifyNoInteractions(clickRequestResolver, urlService);
+    }
+
+    @Test
+    void theRootKeepsASingleSlash() throws Exception {
+        when(appProperties.getFrontendUrl()).thenReturn("https://frontend.com/");
+
+        mockMvc.perform(get("/"))
+                .andExpect(status().isMovedPermanently())
+                .andExpect(redirectedUrl("https://frontend.com/"));
     }
 }

@@ -3,6 +3,7 @@ package cc.hrva.urlshortener.controller;
 import cc.hrva.urlshortener.dto.LinksAffectedResponse;
 import cc.hrva.urlshortener.dto.UrlCheckDto;
 import cc.hrva.urlshortener.dto.UrlCheckResponse;
+import cc.hrva.urlshortener.dto.UrlResponse;
 import cc.hrva.urlshortener.exception.ApiException;
 import cc.hrva.urlshortener.service.LinkCheckService;
 import cc.hrva.urlshortener.service.ModerationService;
@@ -15,6 +16,7 @@ import org.apache.commons.lang3.StringUtils;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -45,6 +47,12 @@ public class AdminModerationController {
     @PreAuthorize("hasRole('ROLE_ADMIN')")
     public ResponseEntity<LinksAffectedResponse> unblockUser(@PathVariable("id") final long id, final Authentication authentication) {
         return ResponseEntity.ok(new LinksAffectedResponse(moderationService.reactivateUser(id, authentication.getName(), VIA)));
+    }
+
+    @DeleteMapping("/urls/{id}/warning-page")
+    @PreAuthorize("hasRole('ROLE_ADMIN')")
+    public ResponseEntity<UrlResponse> clearWarningPage(@PathVariable("id") final long id, final Authentication authentication) {
+        return ResponseEntity.ok(moderationService.clearWarningPage(id, authentication.getName()));
     }
 
     @GetMapping("/possible-scammers")

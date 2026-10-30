@@ -207,7 +207,7 @@ class SettingValuesTest {
                         SettingKey::isNullable)
                 .containsExactly(SettingGroup.SAFETY, SettingType.NUMBER, "Random-looking domains: maximum age",
                         "Only domains younger than this, or of unknown age, count.", SettingKey.RANDOM_DOMAIN_REVIEW, false, 30, 3650, "days", false);
-        assertThat(Arrays.asList(SettingKey.values()).subList(SettingKey.GITHUB_SIGN_IN.ordinal() + 1, SettingKey.values().length))
+        assertThat(Arrays.asList(SettingKey.values()).subList(SettingKey.GITHUB_SIGN_IN.ordinal() + 1, SettingKey.WARNING_PAGE.ordinal()))
                 .containsExactly(SettingKey.RANDOM_DOMAIN_REVIEW, SettingKey.RANDOM_DOMAIN_MAX_AGE_DAYS);
         final var appProperties = new AppProperties();
         final var defaults = new SettingDefaults(appProperties, SettingsServiceFixtures.bothProviders());
@@ -217,6 +217,29 @@ class SettingValuesTest {
         appProperties.getModeration().setRandomDomainMaxAgeDays(90);
         assertThat(defaults.defaultOf(SettingKey.RANDOM_DOMAIN_REVIEW)).isEqualTo(false);
         assertThat(defaults.defaultOf(SettingKey.RANDOM_DOMAIN_MAX_AGE_DAYS)).isEqualTo(90);
+    }
+
+    @Test
+    void theWarningPageRows() {
+        assertThat(SettingKey.WARNING_PAGE).extracting(SettingKey::getGroup, SettingKey::getType, SettingKey::getLabel, SettingKey::getDescription,
+                        SettingKey::getParent, SettingKey::isSafety)
+                .containsExactly(SettingGroup.SAFETY, SettingType.SWITCH, "Warning page before risky links without an account",
+                        "Shows the destination first for young or random-looking domains.", null, true);
+        assertThat(SettingKey.WARNING_PAGE_MAX_AGE_DAYS).extracting(SettingKey::getGroup, SettingKey::getType, SettingKey::getLabel,
+                        SettingKey::getDescription, SettingKey::getParent, SettingKey::isSafety, SettingKey::getMin, SettingKey::getMax, SettingKey::getUnit,
+                        SettingKey::isNullable)
+                .containsExactly(SettingGroup.SAFETY, SettingType.NUMBER, "Warning page: maximum domain age",
+                        "Domains known to be younger than this get the page.", SettingKey.WARNING_PAGE, false, 30, 3650, "days", false);
+        assertThat(Arrays.asList(SettingKey.values()).subList(SettingKey.RANDOM_DOMAIN_MAX_AGE_DAYS.ordinal() + 1, SettingKey.values().length))
+                .containsExactly(SettingKey.WARNING_PAGE, SettingKey.WARNING_PAGE_MAX_AGE_DAYS);
+        final var appProperties = new AppProperties();
+        final var defaults = new SettingDefaults(appProperties, SettingsServiceFixtures.bothProviders());
+        assertThat(defaults.defaultOf(SettingKey.WARNING_PAGE)).isEqualTo(true);
+        assertThat(defaults.defaultOf(SettingKey.WARNING_PAGE_MAX_AGE_DAYS)).isEqualTo(365);
+        appProperties.getModeration().setWarningPage(false);
+        appProperties.getModeration().setWarningPageMaxAgeDays(60);
+        assertThat(defaults.defaultOf(SettingKey.WARNING_PAGE)).isEqualTo(false);
+        assertThat(defaults.defaultOf(SettingKey.WARNING_PAGE_MAX_AGE_DAYS)).isEqualTo(60);
     }
 
     @Test

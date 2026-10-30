@@ -2,6 +2,7 @@ package cc.hrva.urlshortener.service.impl;
 
 import cc.hrva.urlshortener.exception.RateLimitExceededException;
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
+import cc.hrva.urlshortener.controller.LinkWarningView;
 import cc.hrva.urlshortener.converter.CreateUrlToUrlConverter;
 import cc.hrva.urlshortener.converter.UrlToPeekUrlConverter;
 import cc.hrva.urlshortener.converter.UrlUpdateDtoToUrlConverter;
@@ -84,7 +85,9 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionOperations;
 import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.web.servlet.View;
 import org.springframework.web.servlet.view.RedirectView;
+import org.thymeleaf.TemplateEngine;
 
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
@@ -173,6 +176,7 @@ public class DefaultUrlService implements UrlService {
     private final SettingsService settingsService;
     private final PlatformTransactionManager transactionManager;
     private final AnonymousLinkSignals anonymousLinkSignals;
+    private final TemplateEngine templateEngine;
 
     @Override
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
@@ -754,7 +758,7 @@ public class DefaultUrlService implements UrlService {
 
     @Override
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
-    public RedirectView redirectResultUrl(final String shortUrl, final ClickRequest click) {
+    public View redirectResultUrl(final String shortUrl, final ClickRequest click) {
         refuseBotProbe(shortUrl);
         return redirect(LinkPlace.primary(shortUrl), click);
     }
@@ -768,7 +772,7 @@ public class DefaultUrlService implements UrlService {
             log.info("Redirect refused, the domain doesn't serve domainId={} status={} ownerActive={}", route.id(), route.status(), route.ownerActive());
             return redirectTo(unavailablePageUrl(place, route.status() == CustomDomainStatus.ACTIVE ? REASON_INACTIVE : REASON_DOMAIN));
         }
-        return redirect(place, click);
+        return (RedirectView) redirect(place, click);
     }
 
     private static void refuseBotProbe(final String shortUrl) {
@@ -777,7 +781,7 @@ public class DefaultUrlService implements UrlService {
         }
     }
 
-    private RedirectView redirect(final LinkPlace place, final ClickRequest click) {
+    private View redirect(final LinkPlace place, final ClickRequest click) {
         final var sample = Timer.start(meterRegistry);
         if (place.domainId() == null) {
             log.info("Redirect shortUrl={}", place.alias());
@@ -794,11 +798,11 @@ public class DefaultUrlService implements UrlService {
                 return cachedRedirect;
             }
 
-            final var redirectView = redirectTo(fetchAndRedirectFromDb(place, click));
+            final var fromDatabase = fetchAndRedirectFromDb(place, click);
             sample.stop(Timer.builder("redirect.duration")
                     .tag("source", "db")
                     .register(meterRegistry));
-            return redirectView;
+            return fromDatabase;
         }
 
         final var frontendUrl = appProperties.getFrontendUrl();
@@ -817,7 +821,7 @@ public class DefaultUrlService implements UrlService {
         return redirectView;
     }
 
-    private RedirectView tryCacheHit(final LinkPlace place, final ClickRequest click) {
+    private View tryCacheHit(final LinkPlace place, final ClickRequest click) {
         final var cachedValue = Optional.ofNullable(urlCache.get(place.cacheKey()))
                 .map(value -> value instanceof UrlResponse ur ? ur : mapToUrlResponse(value))
                 .orElse(null);
@@ -839,16 +843,15 @@ public class DefaultUrlService implements UrlService {
                     redirectView.setUrl(unavailablePageUrl(place, REASON_BLOCKED));
                     return redirectView;
                 }
-                redirectView.setUrl(redirectLocation(cachedValue.id(), cachedValue.longUrl()));
                 clickAnalyticsService.recordClick(cachedValue.id(), place.cacheKey(), click);
-                return redirectView;
+                return destinationView(place, cachedValue);
             }
             urlCache.evict(place.cacheKey());
         }
         return null;
     }
 
-    private String fetchAndRedirectFromDb(final LinkPlace place, final ClickRequest click) {
+    private View fetchAndRedirectFromDb(final LinkPlace place, final ClickRequest click) {
         return readTransaction().execute(status -> redirectFromDb(place, click));
     }
 
@@ -858,31 +861,44 @@ public class DefaultUrlService implements UrlService {
         return template;
     }
 
-    private String redirectFromDb(final LinkPlace place, final ClickRequest click) {
+    private View redirectFromDb(final LinkPlace place, final ClickRequest click) {
         final var urlOpt = urlRepository.findServed(place.domainId(), place.alias());
         if (urlOpt.isEmpty()) {
-            return unavailablePageUrl(place, REASON_MISSING);
+            return redirectTo(unavailablePageUrl(place, REASON_MISSING));
         }
         final var url = urlOpt.get();
         final var unavailable = unavailableReason(url);
         if (unavailable.isPresent()) {
-            return unavailablePageUrl(place, unavailable.get());
+            return redirectTo(unavailablePageUrl(place, unavailable.get()));
         }
         final var response = UrlResponse.from(url);
         if (response.passwordProtected()) {
             urlCache.put(place.cacheKey(), response);
-            return protectedPageUrl(place);
+            return redirectTo(protectedPageUrl(place));
         }
         if (refusedAsBot(url.getVisitLimit(), click)) {
             clickAnalyticsService.recordClick(url.getId(), place.cacheKey(), click);
-            return unavailablePageUrl(place, REASON_MISSING);
+            return redirectTo(unavailablePageUrl(place, REASON_MISSING));
         }
         if (!clickCheckService.mayRedirect(url.getId(), url.getLongUrl())) {
-            return unavailablePageUrl(place, REASON_BLOCKED);
+            return redirectTo(unavailablePageUrl(place, REASON_BLOCKED));
         }
         urlCache.put(place.cacheKey(), response);
         clickAnalyticsService.recordClick(url.getId(), place.cacheKey(), click);
-        return redirectLocation(url.getId(), response.longUrl());
+        return destinationView(place, response);
+    }
+
+    private View destinationView(final LinkPlace place, final UrlResponse link) {
+        final var location = redirectLocation(link.id(), link.longUrl());
+        if (showsWarningPage(place, link)) {
+            log.info("Warning page shown urlId={}", link.id());
+            return new LinkWarningView(templateEngine, appProperties.getFrontendUrl(), place.alias(), link.longUrl(), location);
+        }
+        return redirectTo(location);
+    }
+
+    private boolean showsWarningPage(final LinkPlace place, final UrlResponse link) {
+        return place.domainId() == null && Boolean.TRUE.equals(link.warningPage()) && settingsService.isOn(SettingKey.WARNING_PAGE);
     }
 
     private static String redirectLocation(final Long urlId, final String longUrl) {
@@ -1036,8 +1052,9 @@ public class DefaultUrlService implements UrlService {
         }
 
         url.setShortUrl(nextFreeShortUrl(null));
+        url.setWarningPage(signals.warningPage());
 
-        log.info("Saving URL");
+        log.info("Saving URL warningPage={}", signals.warningPage());
         final var saved = insertNewLink(url, NO_FREE_ALIAS);
         queueIfFlagged(saved, verdict, signals);
         cacheUrlResponse(saved);

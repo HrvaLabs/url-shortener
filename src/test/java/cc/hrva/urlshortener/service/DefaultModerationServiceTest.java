@@ -207,6 +207,8 @@ class DefaultModerationServiceTest {
                     .map(url -> new LinkDestination(url.getId(), url.getLongUrl()))
                     .toList();
         });
+        lenient().when(urlRepository.findWarningPageDestinationsAfter(anyLong(), any(Pageable.class)))
+                .thenAnswer(invocation -> page(invocation.getArgument(0), invocation.getArgument(1), Url::isWarningPage));
         lenient().when(urlRepository.findActiveIdsByOwner(any(User.class)))
                 .thenAnswer(invocation -> ids(url -> url.isActive() && ownedBy(url, invocation.getArgument(0))));
         lenient().when(urlRepository.findIdsByOwnerAndBlockReason(any(User.class), any(BlockReason.class)))
@@ -640,6 +642,93 @@ class DefaultModerationServiceTest {
         order.verify(domainRuleRepository).save(any(DomainRule.class));
         order.verify(linkCheckService).check("https://jofogas.cards/phish");
         verify(auditLogService).log(ADMIN, AuditAction.ALLOW_DOMAIN, "Domain", "jofogas.cards", "reviews: 0, links: 1, via: admin");
+    }
+
+    @Test
+    void clearingTheFlagEvictsTheCacheAndAudits() {
+        final var url = flaggedLink(40L, "https://xdvqnxj.com/login");
+        final var eviction = ArgumentCaptor.forClass(Runnable.class);
+
+        final var response = moderationService.clearWarningPage(40L, ADMIN);
+
+        assertThat(url.isWarningPage()).isFalse();
+        assertThat(response.id()).isEqualTo(40L);
+        assertThat(response.warningPage()).isNull();
+        assertThat(savedPerTransaction).filteredOn(saved -> !saved.isEmpty()).containsExactly(List.of(40L));
+        verify(taskScheduler).schedule(eviction.capture(), any(Instant.class));
+        verify(cache).evict("s40");
+        eviction.getValue().run();
+        verify(cache, times(2)).evict("s40");
+        verify(auditLogService).log(ADMIN, AuditAction.CLEAR_WARNING_PAGE, "Url", "40", "shortUrl: s40, links: 1");
+        verifyNoMoreInteractions(auditLogService);
+        assertThat(outOfPlace).isEmpty();
+    }
+
+    @Test
+    void clearingALinkWithoutTheFlagWritesNothingButStillEvictsAStaleEntry() {
+        link(41L, "https://example.org/", null);
+        final var eviction = ArgumentCaptor.forClass(Runnable.class);
+
+        final var response = moderationService.clearWarningPage(41L, ADMIN);
+
+        assertThat(response.warningPage()).isNull();
+        verify(urlRepository, never()).save(any(Url.class));
+        verify(taskScheduler).schedule(eviction.capture(), any(Instant.class));
+        eviction.getValue().run();
+        verify(cache, times(2)).evict("s41");
+        verify(auditLogService).log(ADMIN, AuditAction.CLEAR_WARNING_PAGE, "Url", "41", "shortUrl: s41, links: 0");
+    }
+
+    @Test
+    void clearingAnUnknownLinkIsNotFound() {
+        assertThatThrownBy(() -> moderationService.clearWarningPage(404L, ADMIN))
+                .isInstanceOf(UrlNotFoundException.class)
+                .hasMessage("Url doesn't exist");
+
+        verifyNoInteractions(auditLogService, cache);
+    }
+
+    @Test
+    void aNewAllowRuleClearsTheWarningPageOnItsDomainsLinks() {
+        final var apex = flaggedLink(50L, "https://xdvqnxj.com/a");
+        final var subdomain = flaggedLink(51L, "https://ll.xdvqnxj.com/b");
+        final var elsewhere = flaggedLink(52L, "https://xdvqnxj.com.example.org/");
+        final var restored = blocked(53L, "https://xdvqnxj.com/c", BlockReason.BLOCKLIST, null);
+        restored.setWarningPage(true);
+        final var unflagged = link(54L, "https://xdvqnxj.com/d", null);
+        when(linkCheckService.check("https://xdvqnxj.com/c")).thenReturn(ALLOWED);
+        final var evictions = ArgumentCaptor.forClass(Runnable.class);
+
+        moderationService.allowDomain("xdvqnxj.com", null, ADMIN, "admin");
+
+        assertThat(List.of(apex, subdomain, restored)).allSatisfy(url -> {
+            assertThat(url.isWarningPage()).isFalse();
+            verify(cache, times(url == restored ? 2 : 1)).evict(url.getShortUrl());
+        });
+        assertThat(restored.isActive()).isTrue();
+        assertThat(elsewhere.isWarningPage()).isTrue();
+        verify(cache, never()).evict("s52");
+        verify(cache, never()).evict(unflagged.getShortUrl());
+        verify(taskScheduler, times(4)).schedule(evictions.capture(), any(Instant.class));
+        evictions.getAllValues().forEach(Runnable::run);
+        verify(cache, times(2)).evict("s50");
+        verify(cache, times(2)).evict("s51");
+        assertThat(savedPerTransaction).filteredOn(saved -> !saved.isEmpty())
+                .containsExactly(List.of(53L), List.of(50L), List.of(51L), List.of(53L));
+        verify(auditLogService).log(ADMIN, AuditAction.ALLOW_DOMAIN, "Domain", "xdvqnxj.com", "reviews: 0, warning pages cleared: 3, links: 1, via: admin");
+        verifyNoMoreInteractions(auditLogService);
+        assertThat(outOfPlace).isEmpty();
+    }
+
+    @Test
+    void trustingADomainFromAReviewClearsItsWarningPagesToo() {
+        final var url = flaggedLink(60L, "https://xdvqnxj.com/a");
+        when(reviewQueueService.open(any(Pageable.class), isNull())).thenReturn(new PageImpl<>(List.of(review(url))));
+
+        moderationService.resolveReview(60L, ReviewAction.TRUST_DOMAIN, null, ADMIN, "admin");
+
+        assertThat(url.isWarningPage()).isFalse();
+        verify(cache).evict("s60");
     }
 
     @Test
@@ -2479,6 +2568,12 @@ class DefaultModerationServiceTest {
     private Url link(final long id, final String longUrl, final User owner) {
         final var url = Url.builder().id(id).shortUrl("s" + id).longUrl(longUrl).owner(owner).active(true).build();
         links.put(id, url);
+        return url;
+    }
+
+    private Url flaggedLink(final long id, final String longUrl) {
+        final var url = link(id, longUrl, null);
+        url.setWarningPage(true);
         return url;
     }
 

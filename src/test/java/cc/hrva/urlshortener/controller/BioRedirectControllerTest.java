@@ -116,7 +116,7 @@ class BioRedirectControllerTest {
         final var appProperties = new AppProperties();
         appProperties.setFrontendUrl(frontendUrl);
         return MockMvcBuilders.standaloneSetup(
-                        new UrlRedirectController(urlService, clickRequestResolver, null),
+                        new UrlRedirectController(urlService, clickRequestResolver, null, appProperties),
                         new BioRedirectController(appProperties))
                 .build();
     }

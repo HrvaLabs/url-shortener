@@ -65,6 +65,8 @@ public class SettingDefaults {
         register(SettingKey.GITHUB_SIGN_IN, moderation::isGithubSignIn);
         register(SettingKey.RANDOM_DOMAIN_REVIEW, moderation::isRandomDomainReview);
         register(SettingKey.RANDOM_DOMAIN_MAX_AGE_DAYS, moderation::getRandomDomainMaxAgeDays);
+        register(SettingKey.WARNING_PAGE, moderation::isWarningPage);
+        register(SettingKey.WARNING_PAGE_MAX_AGE_DAYS, moderation::getWarningPageMaxAgeDays);
         registerAvailability(SettingKey.GOOGLE_SIGN_IN,
                 () -> unavailableUnless(oAuthProviders.configured(OAuthProviders.GOOGLE), GOOGLE_NOT_CONFIGURED));
         registerAvailability(SettingKey.GITHUB_SIGN_IN,

@@ -31,6 +31,21 @@ public final class RedirectLocations {
         return slashed.substring(0, schemeEnd) + AUTHORITY_START + asciiAuthority(authority) + percentEncoded(tail);
     }
 
+    public static String hostOf(final String location) {
+        final var authorityStart = location.indexOf(AUTHORITY_START);
+        if (authorityStart < 0) {
+            return location;
+        }
+        final var afterSlashes = location.substring(authorityStart + AUTHORITY_START.length());
+        final var authorityEnd = StringUtils.indexOfAny(afterSlashes, AUTHORITY_END);
+        final var authority = authorityEnd < 0 ? afterSlashes : afterSlashes.substring(0, authorityEnd);
+        final var hostAndPort = authority.substring(authority.lastIndexOf('@') + 1);
+        if (hostAndPort.startsWith("[")) {
+            return StringUtils.substringBefore(hostAndPort, "]") + "]";
+        }
+        return StringUtils.substringBefore(hostAndPort, ":");
+    }
+
     private static String asciiAuthority(final String authority) {
         final var hostStart = authority.lastIndexOf('@') + 1;
         final var userInfo = percentEncoded(authority.substring(0, hostStart));

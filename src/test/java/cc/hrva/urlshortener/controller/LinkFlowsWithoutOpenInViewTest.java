@@ -88,6 +88,8 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.web.servlet.View;
+import org.springframework.web.servlet.view.RedirectView;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -408,7 +410,7 @@ class LinkFlowsWithoutOpenInViewTest {
             assertThat(stored.get("BLOCK_DETAIL")).isEqualTo("/wqamhcsom?r&t");
             final var alias = (String) stored.get("SHORT_URL");
             verify(campaignService).addHeldLink(eq(77L), anyLong(), eq("omaehhm.com"));
-            assertThat(urlService.redirectResultUrl(alias, ClickRequest.of("203.0.113.7", "UA", null, "HR")).getUrl()).isNotEqualTo(longUrl);
+            assertThat(locationOf(urlService.redirectResultUrl(alias, ClickRequest.of("203.0.113.7", "UA", null, "HR")))).isNotEqualTo(longUrl);
         } finally {
             jdbcTemplate.update("delete from url where long_url = ?", longUrl);
         }
@@ -430,7 +432,7 @@ class LinkFlowsWithoutOpenInViewTest {
             assertThat(stored.get("ACTIVE")).isEqualTo(true);
             assertThat(stored.get("BLOCK_REASON")).isNull();
             verify(campaignService, org.mockito.Mockito.never()).addHeldLink(anyLong(), anyLong(), any());
-            assertThat(urlService.redirectResultUrl((String) stored.get("SHORT_URL"), ClickRequest.of("203.0.113.7", "UA", null, "HR")).getUrl())
+            assertThat(locationOf(urlService.redirectResultUrl((String) stored.get("SHORT_URL"), ClickRequest.of("203.0.113.7", "UA", null, "HR"))))
                     .isEqualTo(longUrl);
         } finally {
             jdbcTemplate.update("delete from url where long_url = ?", longUrl);
@@ -450,7 +452,7 @@ class LinkFlowsWithoutOpenInViewTest {
             final var stored = jdbcTemplate.queryForMap("select short_url, active, block_reason from url where long_url = ?", longUrl);
             assertThat(stored.get("ACTIVE")).isEqualTo(true);
             assertThat(stored.get("BLOCK_REASON")).isNull();
-            assertThat(urlService.redirectResultUrl((String) stored.get("SHORT_URL"), ClickRequest.of("203.0.113.7", "UA", null, "HR")).getUrl())
+            assertThat(locationOf(urlService.redirectResultUrl((String) stored.get("SHORT_URL"), ClickRequest.of("203.0.113.7", "UA", null, "HR"))))
                     .isEqualTo(longUrl);
         } finally {
             jdbcTemplate.update("delete from url where long_url = ?", longUrl);
@@ -572,6 +574,11 @@ class LinkFlowsWithoutOpenInViewTest {
         final var readOnly = new TransactionTemplate(transactionManager);
         readOnly.setReadOnly(true);
         return readOnly.execute(status -> userRepository.findByEmail(SecurityContextHolder.getContext().getAuthentication().getName()).orElse(null));
+    }
+
+    private static String locationOf(final View view) {
+        assertThat(view).isInstanceOf(RedirectView.class);
+        return ((RedirectView) view).getUrl();
     }
 
     private static RSAKey generateSigningKey() {

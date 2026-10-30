@@ -1,0 +1,190 @@
+package cc.hrva.urlshortener.controller;
+
+import cc.hrva.urlshortener.configuration.AppConfiguration;
+import cc.hrva.urlshortener.configuration.GlobalExceptionHandler;
+import cc.hrva.urlshortener.configuration.JacksonConfiguration;
+import cc.hrva.urlshortener.configuration.SecurityConfiguration;
+import cc.hrva.urlshortener.configuration.WebConfiguration;
+import cc.hrva.urlshortener.dto.UrlResponse;
+import cc.hrva.urlshortener.exception.UrlNotFoundException;
+import cc.hrva.urlshortener.mcp.McpResourceServerConfiguration;
+import cc.hrva.urlshortener.mcp.authorization.AuthorizationServerConfiguration;
+import cc.hrva.urlshortener.mcp.bridge.ConnectRequestStore;
+import cc.hrva.urlshortener.model.User;
+import cc.hrva.urlshortener.repository.UrlRepository;
+import cc.hrva.urlshortener.repository.UserRepository;
+import cc.hrva.urlshortener.security.AnyHostIsPrimary;
+import cc.hrva.urlshortener.security.ClientIpResolver;
+import cc.hrva.urlshortener.security.JwtFilter;
+import cc.hrva.urlshortener.security.OAuth2LoginSuccessHandler;
+import cc.hrva.urlshortener.security.OAuth2LoginUserService;
+import cc.hrva.urlshortener.security.TokenProvider;
+import cc.hrva.urlshortener.service.LinkCheckService;
+import cc.hrva.urlshortener.service.ModerationService;
+import cc.hrva.urlshortener.service.ScammerSignalService;
+import cc.hrva.urlshortener.service.ratelimit.RateLimiter;
+import com.nimbusds.jose.JOSEException;
+import com.nimbusds.jose.jwk.RSAKey;
+import com.nimbusds.jose.jwk.gen.RSAKeyGenerator;
+import java.util.List;
+import java.util.Optional;
+import java.util.Set;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.SpringBootConfiguration;
+import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.context.annotation.Import;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.core.userdetails.UserDetailsService;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.web.servlet.MockMvc;
+
+import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+@SpringBootTest(
+        classes = AdminWarningPageSecurityTest.TestApplication.class,
+        properties = {
+                "spring.liquibase.change-log=classpath:db/changelog/017-oauth2-authorization-server.xml",
+                "spring.security.oauth2.client.registration.google.client-id=test-google-client",
+                "spring.security.oauth2.client.registration.google.client-secret=test-google-secret",
+                "app.frontend-url=http://localhost:3000",
+                "app.jwt-base64-secret=dGVzdC1vbmx5LXNlY3JldA==",
+                "app.email-sender-address=no-reply@localhost",
+                "app.contact-email=info@localhost",
+                "app.server-url=localhost"
+        })
+@AutoConfigureMockMvc
+class AdminWarningPageSecurityTest {
+
+    private static final String WARNING_PAGE = "/api/v1/admin/urls/40/warning-page";
+    private static final String ADMIN = "admin@hrva.cc";
+    private static final String USER = "user@hrva.cc";
+    private static final RSAKey SIGNING_KEY = generateSigningKey();
+
+    @Autowired
+    private MockMvc mockMvc;
+
+    @MockitoBean
+    private ModerationService moderationService;
+
+    @MockitoBean
+    private ScammerSignalService scammerSignalService;
+
+    @MockitoBean
+    private LinkCheckService linkCheckService;
+
+    @MockitoBean
+    private UrlRepository urlRepository;
+
+    @MockitoBean
+    private ConnectRequestStore connectRequestStore;
+
+    @MockitoBean
+    private RateLimiter rateLimiter;
+
+    @MockitoBean
+    private TokenProvider tokenProvider;
+
+    @MockitoBean
+    private UserRepository userRepository;
+
+    @MockitoBean
+    private UserDetailsService userDetailsService;
+
+    @MockitoBean
+    private OAuth2LoginSuccessHandler oAuth2LoginSuccessHandler;
+
+    @MockitoBean
+    private OAuth2LoginUserService oAuth2LoginUserService;
+
+    @DynamicPropertySource
+    static void signingKey(final DynamicPropertyRegistry registry) {
+        registry.add("app.mcp.signing-key", SIGNING_KEY::toJSONString);
+    }
+
+    @BeforeEach
+    void setUp() {
+        signedIn("admin-token", ADMIN, "ROLE_ADMIN");
+        signedIn("user-token", USER, "ROLE_USER");
+    }
+
+    @Test
+    void anAdminClearsTheWarningPage() throws Exception {
+        when(moderationService.clearWarningPage(40L, ADMIN))
+                .thenReturn(new UrlResponse(40L, "https://xdvqnxj.com/login", "abc", null, null, 0L, null, true, "ACTIVE", Set.of(), false, null));
+
+        mockMvc.perform(delete(WARNING_PAGE).header(JwtFilter.AUTHORIZATION_HEADER, "Bearer admin-token"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(40))
+                .andExpect(jsonPath("$.warningPage").doesNotExist());
+    }
+
+    @Test
+    void anUnknownLinkIsNotFound() throws Exception {
+        when(moderationService.clearWarningPage(40L, ADMIN)).thenThrow(new UrlNotFoundException("Url doesn't exist"));
+
+        mockMvc.perform(delete(WARNING_PAGE).header(JwtFilter.AUTHORIZATION_HEADER, "Bearer admin-token"))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void aSignedInUserWhoIsNotAnAdminIsForbidden() throws Exception {
+        mockMvc.perform(delete(WARNING_PAGE).header(JwtFilter.AUTHORIZATION_HEADER, "Bearer user-token"))
+                .andExpect(status().isForbidden());
+
+        verifyNoInteractions(moderationService);
+    }
+
+    @Test
+    void nobodySignedInIsUnauthorized() throws Exception {
+        mockMvc.perform(delete(WARNING_PAGE))
+                .andExpect(status().isUnauthorized());
+
+        verifyNoInteractions(moderationService);
+    }
+
+    private void signedIn(final String token, final String email, final String role) {
+        lenient().when(tokenProvider.validateToken(token)).thenReturn(true);
+        lenient().when(tokenProvider.getAuthentication(token))
+                .thenReturn(UsernamePasswordAuthenticationToken.authenticated(email, null, List.of(new SimpleGrantedAuthority(role))));
+        lenient().when(userRepository.findByEmail(email)).thenReturn(Optional.of(User.builder().email(email).active(true).build()));
+    }
+
+    private static RSAKey generateSigningKey() {
+        try {
+            return new RSAKeyGenerator(2048).keyID("test-signing-key").generate();
+        } catch (final JOSEException exception) {
+            throw new IllegalStateException(exception);
+        }
+    }
+
+    @SpringBootConfiguration
+    @EnableAutoConfiguration
+    @Import({
+            AppConfiguration.class,
+            WebConfiguration.class,
+            AnyHostIsPrimary.class,
+            JacksonConfiguration.class,
+            SecurityConfiguration.class,
+            GlobalExceptionHandler.class,
+            AuthorizationServerConfiguration.class,
+            McpResourceServerConfiguration.class,
+            JwtFilter.class,
+            ClientIpResolver.class,
+            AdminModerationController.class
+    })
+    static class TestApplication {
+    }
+
+}

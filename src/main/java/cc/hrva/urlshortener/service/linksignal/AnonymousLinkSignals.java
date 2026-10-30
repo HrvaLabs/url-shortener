@@ -36,7 +36,8 @@ public class AnonymousLinkSignals {
 
     private Signals signalsOfHost(final String host) {
         final var registeredOn = registeredOn(host);
-        return new Signals(randomLookingLabels.looksRandom(host) && youngOrOfUnknownAge(registeredOn), registeredOn);
+        final var randomLooking = randomLookingLabels.looksRandom(host) && youngOrOfUnknownAge(registeredOn);
+        return new Signals(randomLooking, registeredOn, warningPage(randomLooking, registeredOn));
     }
 
     private Optional<LocalDate> registeredOn(final String host) {
@@ -53,10 +54,18 @@ public class AnonymousLinkSignals {
         return registeredOn.map(date -> date.isAfter(oldestCounted)).orElse(true);
     }
 
-    public record Signals(boolean randomLooking, Optional<LocalDate> registeredOn) {
+    private boolean warningPage(final boolean randomLooking, final Optional<LocalDate> registeredOn) {
+        if (!settingsService.isOn(SettingKey.WARNING_PAGE)) {
+            return false;
+        }
+        final var oldestCounted = LocalDate.now(clock).minusDays(settingsService.number(SettingKey.WARNING_PAGE_MAX_AGE_DAYS));
+        return randomLooking || registeredOn.filter(date -> date.isAfter(oldestCounted)).isPresent();
+    }
+
+    public record Signals(boolean randomLooking, Optional<LocalDate> registeredOn, boolean warningPage) {
 
         public static Signals none() {
-            return new Signals(false, Optional.empty());
+            return new Signals(false, Optional.empty(), false);
         }
 
     }

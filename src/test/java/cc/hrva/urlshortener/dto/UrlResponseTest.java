@@ -285,6 +285,64 @@ class UrlResponseTest {
         assertThat(mapper.convertValue(serializer.deserialize(serializer.serialize(response)), UrlResponse.class)).isEqualTo(response);
     }
 
+    @Test
+    void theWarningPageIsTrueWhenSetAndLeftOutOtherwise() {
+        final var flagged = UrlResponse.from(baseUrl().active(true).warningPage(true).build());
+        final var plain = UrlResponse.from(baseUrl().active(true).build());
+
+        assertThat(flagged.warningPage()).isTrue();
+        assertThat(plain.warningPage()).isNull();
+        assertThat(JsonMapper.builder().build().writeValueAsString(flagged)).contains("\"warningPage\":true");
+        assertThat(JsonMapper.builder().build().writeValueAsString(plain)).doesNotContain("warningPage");
+    }
+
+    @Test
+    void publicViewDropsTheFlag() {
+        final var response = UrlResponse.from(baseUrl().active(true).warningPage(true).build());
+
+        assertThat(response.publicView().warningPage()).isNull();
+        assertThat(JsonMapper.builder().build().writeValueAsString(response.publicView())).doesNotContain("warningPage");
+    }
+
+    @Test
+    void theAdminDecorationsKeepTheWarningPage() {
+        final var response = UrlResponse.from(baseUrl().active(true).warningPage(true).build());
+
+        assertThat(response.withSuspiciousReasons(List.of("x")).warningPage()).isTrue();
+        assertThat(response.withBlockReason(BlockReason.ADMIN).warningPage()).isTrue();
+        assertThat(response.withModeration(true, false, null).warningPage()).isTrue();
+    }
+
+    @Test
+    void asCreatedLeavesTheWarningPageOut() {
+        assertThat(UrlResponse.from(baseUrl().active(false).warningPage(true).build()).asCreated().warningPage()).isNull();
+    }
+
+    @Test
+    void theShortConstructorLeavesTheWarningPageOut() {
+        assertThat(new UrlResponse(1L, "https://example.com", "abc", null, null, 0L, null, true, "ACTIVE", Set.of(), false, null).warningPage())
+                .isNull();
+    }
+
+    @Test
+    void theWarningPageSurvivesTheRedisRoundTrip() {
+        final var mapper = JsonMapper.builder().build();
+        final var serializer = new GenericJacksonJsonRedisSerializer(mapper);
+        final var response = UrlResponse.from(baseUrl().active(true).warningPage(true).build());
+
+        assertThat(mapper.convertValue(serializer.deserialize(serializer.serialize(response)), UrlResponse.class)).isEqualTo(response);
+    }
+
+    @Test
+    void aResponseCachedBeforeTheWarningPageExistedReadsAsNoPage() {
+        final var mapper = JsonMapper.builder().build();
+        final var serializer = new GenericJacksonJsonRedisSerializer(mapper);
+        final var legacyJson = "{\"id\":1,\"longUrl\":\"https://example.com\",\"shortUrl\":\"abc\",\"visits\":5,"
+                + "\"active\":true,\"status\":\"ACTIVE\",\"tags\":[],\"passwordProtected\":false,\"ownerEmail\":null}";
+
+        assertThat(mapper.convertValue(serializer.deserialize(legacyJson.getBytes()), UrlResponse.class).warningPage()).isNull();
+    }
+
     private static CustomDomain goExampleCom() {
         return CustomDomain.builder().id(7L).hostname("go.example.com").build();
     }

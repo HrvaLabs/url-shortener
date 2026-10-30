@@ -107,6 +107,7 @@ public class DefaultModerationService implements ModerationService {
     private static final String DOMAINS = "domains";
     private static final String DOMAINS_FAILED = "failed to turn off";
     private static final String HELD_LINKS = "held links";
+    private static final String WARNING_PAGES_CLEARED = "warning pages cleared";
     private static final String NOT_A_DOMAIN = "Enter a domain such as example.com, not a top-level domain or an IP address.";
     private static final String OVER_THE_CAP = "This would affect %d links, more than the %d allowed here. Use the dashboard.";
     private static final String NOT_COVERED = "%s doesn't cover this link's destination %s.";
@@ -313,7 +314,7 @@ public class DefaultModerationService implements ModerationService {
         final var ruleDomain = ruleDomain(domain);
         final var trusted = trust(ruleDomain, reason, performedBy);
         auditLogService.log(performedBy, AuditAction.ALLOW_DOMAIN, TARGET_DOMAIN, ruleDomain,
-                details(via, trusted.links(), field(REASON, reason), field("reviews", trusted.reviews())));
+                details(via, trusted.links(), field(REASON, reason), field("reviews", trusted.reviews()), warningPagesField(trusted.warningPages())));
         return trusted.links();
     }
 
@@ -467,7 +468,8 @@ public class DefaultModerationService implements ModerationService {
     private String trustFromReview(final Url url, final String domain, final String performedBy, final String via) {
         final var ruleDomain = domainForReview(url, domain, TRUSTED_BY_DEFAULT);
         final var trusted = trust(ruleDomain, null, performedBy);
-        return details(via, trusted.links(), field(ACTION, ReviewAction.TRUST_DOMAIN), field(DOMAIN, ruleDomain), field("reviews", trusted.reviews()));
+        return details(via, trusted.links(), field(ACTION, ReviewAction.TRUST_DOMAIN), field(DOMAIN, ruleDomain), field("reviews", trusted.reviews()),
+                warningPagesField(trusted.warningPages()));
     }
 
     private String blockLinkFromReview(final Url url, final Consumer<Url> tellOwner, final String performedBy, final String via) {
@@ -641,7 +643,39 @@ public class DefaultModerationService implements ModerationService {
         final var reviews = resolveOpenReviewsOn(domain, ReviewResolution.DOMAIN_TRUSTED, performedBy);
         final var blocked = destinationsOn(domain, afterId -> urlRepository.findBlockedDestinationsAfter(RESTORED_BY_ALLOW, afterId, FIRST_PAGE));
         final var restored = eachLink(blocked, LinkDestination::id, this::restoreUnlessStillBlocked);
-        return new Trusted(reviews, restored);
+        final var flagged = destinationsOn(domain, afterId -> urlRepository.findWarningPageDestinationsAfter(afterId, FIRST_PAGE));
+        final var warningPages = eachLink(flagged, LinkDestination::id, destination -> clearWarningPageOf(destination.id()));
+        if (warningPages > 0) {
+            log.info("Allow rule cleared the warning page on links domain={} links={}", domain, warningPages);
+        }
+        return new Trusted(reviews, restored, warningPages);
+    }
+
+    @Override
+    public UrlResponse clearWarningPage(final long urlId, final String performedBy) {
+        final var url = findUrl(urlId);
+        final var cleared = clearWarningPageOf(urlId);
+        if (!cleared) {
+            evictNowAndAgainLater(cacheKeyOf(url));
+        }
+        auditLogService.log(performedBy, AuditAction.CLEAR_WARNING_PAGE, TARGET_URL, String.valueOf(urlId),
+                String.join(DETAIL_SEPARATOR, field("shortUrl", url.getShortUrl()), field("links", cleared ? 1 : 0)));
+        return UrlResponse.from(findUrl(urlId));
+    }
+
+    private boolean clearWarningPageOf(final long urlId) {
+        final var cleared = Optional.ofNullable(transactionOperations.execute(status -> urlRepository.findById(urlId)
+                .filter(Url::isWarningPage)
+                .map(url -> {
+                    url.setWarningPage(false);
+                    return urlRepository.save(url);
+                })
+                .orElse(null)));
+        cleared.ifPresent(url -> {
+            log.info("Warning page cleared urlId={}", url.getId());
+            evictNowAndAgainLater(cacheKeyOf(url));
+        });
+        return cleared.isPresent();
     }
 
     private boolean restoreUnlessStillBlocked(final LinkDestination destination) {
@@ -959,7 +993,11 @@ public class DefaultModerationService implements ModerationService {
         return held > 0 ? field(HELD_LINKS, held) : null;
     }
 
-    private record Trusted(int reviews, int links) {
+    private static String warningPagesField(final int warningPages) {
+        return warningPages > 0 ? field(WARNING_PAGES_CLEARED, warningPages) : null;
+    }
+
+    private record Trusted(int reviews, int links, int warningPages) {
     }
 
     private record Affected(int links, int domains, int held) {

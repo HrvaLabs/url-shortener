@@ -31,6 +31,8 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
+import cc.hrva.urlshortener.controller.LinkWarningTemplates;
+import cc.hrva.urlshortener.controller.LinkWarningView;
 import cc.hrva.urlshortener.converter.CreateUrlToUrlConverter;
 import cc.hrva.urlshortener.converter.UrlToPeekUrlConverter;
 import cc.hrva.urlshortener.converter.UrlUpdateDtoToUrlConverter;
@@ -144,6 +146,7 @@ class UrlServiceTest {
     private static final RandomLookingLabels RANDOM_LOOKING_LABELS = new RandomLookingLabels();
     private static final LocalDate REGISTERED_LONG_AGO = LocalDate.of(2010, 1, 1);
     private static final String RANDOM_LINK = "https://xdvqnxj.com/login";
+    private static final String REAL_LINK = "https://www.jutarnji.hr/vijesti";
     private static final String RANDOM_LOOKING_DOMAIN = "Random-looking domain";
 
     private UrlService urlService;
@@ -279,7 +282,7 @@ class UrlServiceTest {
                 campaignService,
                 settingsService,
                 withoutTransactions,
-                anonymousLinkSignals
+                anonymousLinkSignals, LinkWarningTemplates.engine()
         );
     }
 
@@ -1431,6 +1434,103 @@ class UrlServiceTest {
     }
 
     @Test
+    void aKnownYoungDomainGetsTheFlag() {
+        final var url = anonymousCreateOf(REAL_LINK, LinkVerdict.clean());
+        when(domainAgeService.registeredOn("www.jutarnji.hr")).thenReturn(Optional.of(LocalDate.now(java.time.ZoneOffset.UTC).minusDays(10)));
+
+        final var created = urlService.saveUrlRouting(CreateUrlDto.builder().longUrl(REAL_LINK).build(), CLIENT_IP, CreatedVia.WEB);
+
+        assertThat(url.isWarningPage()).isTrue();
+        assertThat(created.warningPage()).isTrue();
+        verifyNoInteractions(reviewQueueService);
+    }
+
+    @Test
+    void anUnknownAgeAloneDoesNot() {
+        final var url = anonymousCreateOf(REAL_LINK, LinkVerdict.clean());
+        when(domainAgeService.registeredOn("www.jutarnji.hr")).thenReturn(Optional.empty());
+
+        final var created = urlService.saveUrlRouting(CreateUrlDto.builder().longUrl(REAL_LINK).build(), CLIENT_IP, CreatedVia.WEB);
+
+        assertThat(url.isWarningPage()).isFalse();
+        assertThat(created.warningPage()).isNull();
+    }
+
+    @Test
+    void aRandomLookingDomainDoes() {
+        final var url = anonymousCreateOf(RANDOM_LINK, LinkVerdict.clean());
+        when(domainAgeService.registeredOn("xdvqnxj.com")).thenReturn(Optional.empty());
+        SettingsServiceFixtures.turnOff(settingsService, SettingKey.RANDOM_DOMAIN_REVIEW);
+
+        final var created = urlService.saveUrlRouting(CreateUrlDto.builder().longUrl(RANDOM_LINK).build(), CLIENT_IP, CreatedVia.WEB);
+
+        assertThat(url.isWarningPage()).isTrue();
+        assertThat(created.warningPage()).isTrue();
+        verifyNoInteractions(reviewQueueService);
+    }
+
+    @Test
+    void anAllowedVerdictNeverDoes() {
+        final var url = anonymousCreateOf(RANDOM_LINK, new LinkVerdict(Outcome.ALLOWED, List.of(), null, null));
+
+        urlService.saveUrlRouting(CreateUrlDto.builder().longUrl(RANDOM_LINK).build(), CLIENT_IP, CreatedVia.WEB);
+
+        assertThat(url.isWarningPage()).isFalse();
+        verifyNoInteractions(domainAgeService);
+    }
+
+    @Test
+    void aSignedInLinkNeverDoes() {
+        stubLinkCreation();
+        when(userService.getUserFromToken()).thenReturn(User.builder().id(7L).build());
+        final var saved = ArgumentCaptor.forClass(Url.class);
+
+        final var created = urlService.saveUrlRouting(CreateUrlDto.builder().longUrl(RANDOM_LINK).build(), CLIENT_IP, CreatedVia.WEB);
+
+        verify(urlRepository).save(saved.capture());
+        assertThat(saved.getValue().isWarningPage()).isFalse();
+        assertThat(created.warningPage()).isNull();
+        verifyNoInteractions(domainAgeService);
+    }
+
+    @Test
+    void theSwitchOffSetsNoFlag() {
+        final var url = anonymousCreateOf(RANDOM_LINK, LinkVerdict.clean());
+        when(domainAgeService.registeredOn("xdvqnxj.com")).thenReturn(Optional.of(LocalDate.now(java.time.ZoneOffset.UTC).minusDays(3)));
+        SettingsServiceFixtures.turnOff(settingsService, SettingKey.WARNING_PAGE);
+
+        final var created = urlService.saveUrlRouting(CreateUrlDto.builder().longUrl(RANDOM_LINK).build(), CLIENT_IP, CreatedVia.WEB);
+
+        assertThat(url.isWarningPage()).isFalse();
+        assertThat(created.warningPage()).isNull();
+    }
+
+    @Test
+    void aHeldLinkNeverGetsTheFlag() {
+        final var url = anonymousCreateOf("https://ll.xdvqnxj.com/wqamhcsom/?r=plfN8D&t=1793210826", LinkVerdict.clean());
+        when(campaignService.holdingCampaignId(any())).thenReturn(Optional.of(4L));
+        when(campaignService.confirmHold(4L)).thenReturn(true);
+
+        final var created = urlService.saveUrlRouting(CreateUrlDto.builder().longUrl("https://ll.xdvqnxj.com/wqamhcsom/?r=plfN8D&t=1793210826").build(),
+                CLIENT_IP, CreatedVia.WEB);
+
+        assertThat(url.isWarningPage()).isFalse();
+        assertThat(created.warningPage()).isNull();
+    }
+
+    @Test
+    void theNewLinkIsCachedWithItsFlag() {
+        final var cache = new org.springframework.cache.concurrent.ConcurrentMapCache("urls");
+        when(cacheManager.getCache("urls")).thenReturn(cache);
+        anonymousCreateOf(RANDOM_LINK, LinkVerdict.clean());
+        when(domainAgeService.registeredOn("xdvqnxj.com")).thenReturn(Optional.empty());
+
+        final var created = urlService.saveUrlRouting(CreateUrlDto.builder().longUrl(RANDOM_LINK).build(), CLIENT_IP, CreatedVia.WEB);
+
+        assertThat(((UrlResponse) cache.get(created.shortUrl()).get()).warningPage()).isTrue();
+    }
+
+    @Test
     void theSignalsAreComputedOutsideTheTransaction() {
         final var transactionOperations = mock(TransactionOperations.class);
         when(transactionOperations.execute(any())).thenAnswer(invocation ->
@@ -1469,7 +1569,7 @@ class UrlServiceTest {
                 urlToPeekUrlConverter, createUrlToUrlConverter, urlUpdateDtoToUrlConverter, new UrlCache(cacheManager), objectMapper, meterRegistry,
                 passwordEncoder, suspiciousUrlService, rateLimiter, reviewQueueService, scammerSignalService, clickCheckService, redirectChainService,
                 transactionOperations, reservedAliasService, burstAlertService, destinationCheckRepository, customDomainRegistry, customDomainRepository,
-                campaignService, settingsService, withoutTransactions, anonymousLinkSignals);
+                campaignService, settingsService, withoutTransactions, anonymousLinkSignals, LinkWarningTemplates.engine());
     }
 
     private Url anonymousCreateOf(final String longUrl, final LinkVerdict verdict) {
@@ -3112,7 +3212,7 @@ class UrlServiceTest {
 
         final var redirect = urlServiceWithMeters().redirectResultUrl("abc", CLICK);
 
-        assertThat(redirect.getUrl()).isEqualTo("https://example.com/a");
+        assertThat(locationOf(redirect)).isEqualTo("https://example.com/a");
     }
 
     @Test
@@ -3120,7 +3220,7 @@ class UrlServiceTest {
         final var url = Url.builder().id(7L).shortUrl("abc").longUrl("https://example.com/a").visits(0L).active(true).build();
         when(urlRepository.findServed(null, "abc")).thenReturn(Optional.of(url));
 
-        assertThat(urlServiceWithMeters().redirectResultUrl("abc", CLICK).getUrl()).isEqualTo("https://example.com/a");
+        assertThat(locationOf(urlServiceWithMeters().redirectResultUrl("abc", CLICK))).isEqualTo("https://example.com/a");
 
         verify(clickAnalyticsService).recordClick(7L, "abc", CLICK);
     }
@@ -3132,7 +3232,7 @@ class UrlServiceTest {
         final var cached = new UrlResponse(5L, "https://example.com/a", "abc", null, null, 0L, 3L, true, "ACTIVE", java.util.Set.of(), false, null);
         when(cache.get("abc")).thenReturn(() -> cached);
 
-        assertThat(urlServiceWithMeters().redirectResultUrl("abc", CLICK).getUrl()).isEqualTo("https://example.com/a");
+        assertThat(locationOf(urlServiceWithMeters().redirectResultUrl("abc", CLICK))).isEqualTo("https://example.com/a");
 
         verify(clickAnalyticsService).recordClick(5L, "abc", CLICK);
         verifyNoInteractions(urlRepository);
@@ -3149,7 +3249,7 @@ class UrlServiceTest {
 
         final var redirect = urlServiceWithMeters().redirectResultUrl("abc", CLICK);
 
-        assertThat(redirect.getUrl()).isEqualTo(FRONTEND + "/unavailable?s=abc&reason=missing");
+        assertThat(locationOf(redirect)).isEqualTo(FRONTEND + "/unavailable?s=abc&reason=missing");
         verify(clickAnalyticsService).recordClick(7L, "abc", CLICK);
         verifyNoInteractions(clickCheckService);
         verify(cache, never()).put(any(), any());
@@ -3166,7 +3266,7 @@ class UrlServiceTest {
 
         final var redirect = urlServiceWithMeters().redirectResultUrl("abc", CLICK);
 
-        assertThat(redirect.getUrl()).isEqualTo(FRONTEND + "/unavailable?s=abc&reason=missing");
+        assertThat(locationOf(redirect)).isEqualTo(FRONTEND + "/unavailable?s=abc&reason=missing");
         verify(clickAnalyticsService).recordClick(5L, "abc", CLICK);
         verifyNoInteractions(clickCheckService, urlRepository);
     }
@@ -3177,7 +3277,7 @@ class UrlServiceTest {
         final var url = Url.builder().id(7L).shortUrl("abc").longUrl("https://example.com/a").visits(0L).active(true).build();
         when(urlRepository.findServed(null, "abc")).thenReturn(Optional.of(url));
 
-        assertThat(urlServiceWithMeters().redirectResultUrl("abc", bot).getUrl()).isEqualTo("https://example.com/a");
+        assertThat(locationOf(urlServiceWithMeters().redirectResultUrl("abc", bot))).isEqualTo("https://example.com/a");
 
         verify(clickAnalyticsService, never()).isBot(any());
         verify(clickAnalyticsService).recordClick(7L, "abc", bot);
@@ -3211,7 +3311,7 @@ class UrlServiceTest {
 
         final var redirect = urlServiceWithMeters().redirectResultUrl("abc", CLICK);
 
-        assertThat(redirect.getUrl()).isEqualTo(FRONTEND + "/unavailable?s=abc&reason=blocked");
+        assertThat(locationOf(redirect)).isEqualTo(FRONTEND + "/unavailable?s=abc&reason=blocked");
         verify(clickAnalyticsService, never()).recordClick(any(), any(), any());
     }
 
@@ -3226,7 +3326,7 @@ class UrlServiceTest {
 
         final var redirect = urlServiceWithMeters().redirectResultUrl("abc", CLICK);
 
-        assertThat(redirect.getUrl()).isEqualTo(FRONTEND + "/unavailable?s=abc&reason=blocked");
+        assertThat(locationOf(redirect)).isEqualTo(FRONTEND + "/unavailable?s=abc&reason=blocked");
         verify(cache, never()).put(any(), any());
         verify(clickAnalyticsService, never()).recordClick(any(), any(), any());
     }
@@ -3240,7 +3340,7 @@ class UrlServiceTest {
 
         final var redirect = urlServiceWithMeters().redirectResultUrl("abc", CLICK);
 
-        assertThat(redirect.getUrl()).isEqualTo("https://example.com/a");
+        assertThat(locationOf(redirect)).isEqualTo("https://example.com/a");
         verify(clickCheckService).mayRedirect(5L, "https://example.com/a");
         verify(cache).put(eq("abc"), any(UrlResponse.class));
         verify(clickAnalyticsService).recordClick(5L, "abc", CLICK);
@@ -3254,7 +3354,7 @@ class UrlServiceTest {
 
         final var redirect = urlServiceWithMeters().redirectResultUrl("abc", CLICK);
 
-        assertThat(redirect.getUrl()).isEqualTo(FRONTEND + "/protected/abc");
+        assertThat(locationOf(redirect)).isEqualTo(FRONTEND + "/protected/abc");
         verify(clickCheckService, never()).mayRedirect(org.mockito.ArgumentMatchers.anyLong(), any());
     }
 
@@ -3336,7 +3436,7 @@ class UrlServiceTest {
 
         final var redirect = urlServiceWithMeters().redirectResultUrl("nope", CLICK);
 
-        assertThat(redirect.getUrl()).isEqualTo(FRONTEND + "/unavailable?s=nope&reason=missing");
+        assertThat(locationOf(redirect)).isEqualTo(FRONTEND + "/unavailable?s=nope&reason=missing");
     }
 
     @Test
@@ -3356,7 +3456,7 @@ class UrlServiceTest {
         final var url = Url.builder().id(5L).shortUrl("abc").longUrl("https://example.com/a").visits(0L).active(true).build();
         when(urlRepository.findServed(null, "abc")).thenReturn(Optional.of(url));
 
-        assertThat(urlServiceWithMeters().redirectResultUrl("abc", CLICK).getUrl()).isEqualTo("https://example.com/a");
+        assertThat(locationOf(urlServiceWithMeters().redirectResultUrl("abc", CLICK))).isEqualTo("https://example.com/a");
 
         verify(urlRepository).findServed(null, "abc");
         org.mockito.Mockito.verifyNoMoreInteractions(urlRepository);
@@ -3368,7 +3468,7 @@ class UrlServiceTest {
 
         final var redirect = urlServiceWithMeters().redirectResultUrl("a".repeat(31) + "é" + "b".repeat(8000), CLICK);
 
-        assertThat(redirect.getUrl()).isEqualTo(FRONTEND + "/unavailable?s=" + "a".repeat(31) + "%C3%A9&reason=missing");
+        assertThat(locationOf(redirect)).isEqualTo(FRONTEND + "/unavailable?s=" + "a".repeat(31) + "%C3%A9&reason=missing");
     }
 
     @Test
@@ -3377,7 +3477,7 @@ class UrlServiceTest {
 
         final var redirect = urlServiceWithMeters().redirectResultUrl("a b&c=d+é", CLICK);
 
-        assertThat(redirect.getUrl()).isEqualTo(FRONTEND + "/unavailable?s=a+b%26c%3Dd%2B%C3%A9&reason=missing");
+        assertThat(locationOf(redirect)).isEqualTo(FRONTEND + "/unavailable?s=a+b%26c%3Dd%2B%C3%A9&reason=missing");
     }
 
     @org.junit.jupiter.params.ParameterizedTest
@@ -3410,7 +3510,7 @@ class UrlServiceTest {
         final var stored = "https://" + "č".repeat(64) + ".hr/torta";
         when(urlRepository.findServed(null, "abc")).thenReturn(Optional.of(storedLink().longUrl(stored).active(true).build()));
 
-        assertThat(urlServiceWithMeters().redirectResultUrl("abc", CLICK).getUrl()).isEqualTo(stored);
+        assertThat(locationOf(urlServiceWithMeters().redirectResultUrl("abc", CLICK))).isEqualTo(stored);
         assertThat(output).contains("urlId=5");
     }
 
@@ -3420,7 +3520,7 @@ class UrlServiceTest {
         final var stored = "https://" + "č".repeat(64) + ".hr/torta";
         cached(stored);
 
-        assertThat(urlServiceWithMeters().redirectResultUrl("abc", CLICK).getUrl()).isEqualTo(stored);
+        assertThat(locationOf(urlServiceWithMeters().redirectResultUrl("abc", CLICK))).isEqualTo(stored);
         assertThat(output).contains("urlId=5");
     }
 
@@ -3459,24 +3559,154 @@ class UrlServiceTest {
         when(cache.get("abc")).thenReturn(() -> cached);
     }
 
-    private static String locationOf(final org.springframework.web.servlet.view.RedirectView redirect) throws Exception {
+    private static String locationOf(final org.springframework.web.servlet.View view) {
+        assertThat(view).isInstanceOf(RedirectView.class);
         final var response = new org.springframework.mock.web.MockHttpServletResponse();
-        redirect.render(Map.of(), new org.springframework.mock.web.MockHttpServletRequest(), response);
+        try {
+            view.render(Map.of(), new org.springframework.mock.web.MockHttpServletRequest(), response);
+        } catch (final Exception exception) {
+            throw new IllegalStateException(exception);
+        }
         return response.getHeader(org.springframework.http.HttpHeaders.LOCATION);
+    }
+
+    @Test
+    void cachedAndUncachedClicksBothShowTheWarningPage() {
+        final var urls = new ConcurrentMapCacheManager("urls");
+        final var service = urlServiceCachingIn(urls);
+        when(appProperties.getFrontendUrl()).thenReturn(FRONTEND);
+        when(urlRepository.findServed(null, "abc")).thenReturn(Optional.of(storedLink().longUrl(RANDOM_LINK).active(true).warningPage(true).build()));
+
+        final var fromTheDatabase = service.redirectResultUrl("abc", CLICK);
+
+        assertThat(fromTheDatabase).isInstanceOfSatisfying(LinkWarningView.class, page -> {
+            assertThat(page.destination()).isEqualTo(RANDOM_LINK);
+            assertThat(page.location()).isEqualTo(RANDOM_LINK);
+            assertThat(page.alias()).isEqualTo("abc");
+            assertThat(page.frontendUrl()).isEqualTo(FRONTEND);
+        });
+        verify(clickAnalyticsService, times(1)).recordClick(5L, "abc", CLICK);
+        assertThat(((UrlResponse) urls.getCache("urls").get("abc").get()).warningPage()).isTrue();
+
+        final var fromTheCache = service.redirectResultUrl("abc", CLICK);
+
+        assertThat(fromTheCache).isEqualTo(fromTheDatabase);
+        verify(urlRepository, times(1)).findServed(null, "abc");
+        verify(clickAnalyticsService, times(2)).recordClick(5L, "abc", CLICK);
+        verify(clickCheckService, times(2)).mayRedirect(5L, RANDOM_LINK);
+    }
+
+    @Test
+    void theWarningPageLinksToTheLocationTheRedirectWouldUse() {
+        final var stored = "https://čokolada.hr/torta?okus=višnja";
+        when(appProperties.getFrontendUrl()).thenReturn(FRONTEND);
+        when(urlRepository.findServed(null, "abc")).thenReturn(Optional.of(storedLink().longUrl(stored).active(true).warningPage(true).build()));
+
+        assertThat(urlServiceWithMeters().redirectResultUrl("abc", CLICK)).isInstanceOfSatisfying(LinkWarningView.class, page -> {
+            assertThat(page.destination()).isEqualTo(stored);
+            assertThat(page.location()).isEqualTo("https://xn--okolada-i6a.hr/torta?okus=vi%C5%A1nja");
+        });
+    }
+
+    @Test
+    void aWarningPageForAHostThatCannotBeWrittenInAsciiLinksToTheStoredDestination() {
+        final var stored = "https://" + "č".repeat(64) + ".hr/torta";
+        cachedWithTheWarningPage(stored);
+        when(appProperties.getFrontendUrl()).thenReturn(FRONTEND);
+
+        assertThat(urlServiceWithMeters().redirectResultUrl("abc", CLICK))
+                .isInstanceOfSatisfying(LinkWarningView.class, page -> assertThat(page.location()).isEqualTo(stored));
+    }
+
+    @Test
+    void theSwitchOffSkipsTheWarningPage() {
+        SettingsServiceFixtures.turnOff(settingsService, SettingKey.WARNING_PAGE);
+        cachedWithTheWarningPage(RANDOM_LINK);
+        when(urlRepository.findServed(null, "stored"))
+                .thenReturn(Optional.of(storedLink().shortUrl("stored").longUrl(RANDOM_LINK).active(true).warningPage(true).build()));
+
+        assertThat(locationOf(urlServiceWithMeters().redirectResultUrl("abc", CLICK))).isEqualTo(RANDOM_LINK);
+        assertThat(locationOf(urlServiceWithMeters().redirectResultUrl("stored", CLICK))).isEqualTo(RANDOM_LINK);
+        verify(clickAnalyticsService).recordClick(5L, "abc", CLICK);
+        verify(clickAnalyticsService).recordClick(5L, "stored", CLICK);
+    }
+
+    @Test
+    void aLinkCachedBeforeTheWarningPageExistedRedirects() {
+        cached(RANDOM_LINK);
+
+        assertThat(locationOf(urlServiceWithMeters().redirectResultUrl("abc", CLICK))).isEqualTo(RANDOM_LINK);
+    }
+
+    @Test
+    void aBotOnAVisitLimitedLinkIsStillRefusedFirst() {
+        final var cache = org.mockito.Mockito.mock(org.springframework.cache.Cache.class);
+        when(cacheManager.getCache("urls")).thenReturn(cache);
+        final var cachedLink = UrlResponse.from(storedLink().longUrl(RANDOM_LINK).visitLimit(1L).active(true).warningPage(true).build());
+        when(cache.get("abc")).thenReturn(() -> cachedLink);
+        when(urlRepository.findServed(null, "stored"))
+                .thenReturn(Optional.of(storedLink().shortUrl("stored").longUrl(RANDOM_LINK).visitLimit(1L).active(true).warningPage(true).build()));
+        when(appProperties.getFrontendUrl()).thenReturn(FRONTEND);
+        when(clickAnalyticsService.isBot(CLICK)).thenReturn(true);
+
+        assertThat(locationOf(urlServiceWithMeters().redirectResultUrl("abc", CLICK))).isEqualTo(FRONTEND + "/unavailable?s=abc&reason=missing");
+        assertThat(locationOf(urlServiceWithMeters().redirectResultUrl("stored", CLICK))).isEqualTo(FRONTEND + "/unavailable?s=stored&reason=missing");
+        verify(clickAnalyticsService).recordClick(5L, "abc", CLICK);
+        verify(clickAnalyticsService).recordClick(5L, "stored", CLICK);
+        verifyNoInteractions(clickCheckService);
+    }
+
+    @Test
+    void aBlocklistedClickIsStillRefusedFirst() {
+        cachedWithTheWarningPage(RANDOM_LINK);
+        when(urlRepository.findServed(null, "stored"))
+                .thenReturn(Optional.of(storedLink().shortUrl("stored").longUrl(RANDOM_LINK).active(true).warningPage(true).build()));
+        when(appProperties.getFrontendUrl()).thenReturn(FRONTEND);
+        when(clickCheckService.mayRedirect(5L, RANDOM_LINK)).thenReturn(false);
+
+        assertThat(locationOf(urlServiceWithMeters().redirectResultUrl("abc", CLICK))).isEqualTo(FRONTEND + "/unavailable?s=abc&reason=blocked");
+        assertThat(locationOf(urlServiceWithMeters().redirectResultUrl("stored", CLICK))).isEqualTo(FRONTEND + "/unavailable?s=stored&reason=blocked");
+        verify(clickAnalyticsService, never()).recordClick(any(), any(), any());
+    }
+
+    @Test
+    void aPasswordGateStillComesFirst() {
+        when(urlRepository.findServed(null, "abc"))
+                .thenReturn(Optional.of(storedLink().longUrl(RANDOM_LINK).active(true).passwordHash("hash").warningPage(true).build()));
+        when(appProperties.getFrontendUrl()).thenReturn(FRONTEND);
+
+        assertThat(locationOf(urlServiceWithMeters().redirectResultUrl("abc", CLICK))).isEqualTo(FRONTEND + "/protected/abc");
+        verify(clickAnalyticsService, never()).recordClick(any(), any(), any());
+    }
+
+    @Test
+    void aLinkOnACustomDomainNeverShowsTheWarningPage() {
+        final var flagged = onGoExampleCom();
+        flagged.setWarningPage(true);
+        when(urlRepository.findServed(7L, "menu")).thenReturn(Optional.of(flagged));
+
+        assertThat(urlServiceWithMeters().redirectResultUrl(GO, "menu", CLICK).getUrl()).isEqualTo("https://b.example/menu");
+    }
+
+    private void cachedWithTheWarningPage(final String longUrl) {
+        final var cache = org.mockito.Mockito.mock(org.springframework.cache.Cache.class);
+        when(cacheManager.getCache("urls")).thenReturn(cache);
+        final var cachedLink = UrlResponse.from(storedLink().longUrl(longUrl).active(true).warningPage(true).build());
+        when(cache.get("abc")).thenReturn(() -> cachedLink);
     }
 
     @Test
     void theRootGoesToTheFrontendHomeWithItsSlash() {
         when(appProperties.getFrontendUrl()).thenReturn(FRONTEND);
 
-        assertThat(urlServiceWithMeters().redirectResultUrl(null, null).getUrl()).isEqualTo(FRONTEND + "/");
+        assertThat(locationOf(urlServiceWithMeters().redirectResultUrl(null, null))).isEqualTo(FRONTEND + "/");
     }
 
     @Test
     void theRootKeepsASingleSlashWhenTheFrontendUrlHasOne() {
         when(appProperties.getFrontendUrl()).thenReturn(FRONTEND + "/");
 
-        assertThat(urlServiceWithMeters().redirectResultUrl(null, null).getUrl()).isEqualTo(FRONTEND + "/");
+        assertThat(locationOf(urlServiceWithMeters().redirectResultUrl(null, null))).isEqualTo(FRONTEND + "/");
     }
 
     @Test
@@ -3495,6 +3725,7 @@ class UrlServiceTest {
 
         final var redirects = Stream.of("cached", "gated", "stored", null)
                 .map(shortUrl -> service.redirectResultUrl(shortUrl, scan))
+                .map(RedirectView.class::cast)
                 .toList();
 
         assertThat(redirects)
@@ -3536,9 +3767,9 @@ class UrlServiceTest {
         when(urlRepository.findServed(null, "menu")).thenReturn(Optional.of(onHrva()));
         when(urlRepository.findServed(7L, "menu")).thenReturn(Optional.of(onGoExampleCom()));
 
-        assertThat(service.redirectResultUrl("menu", CLICK).getUrl()).isEqualTo("https://a.example/menu");
+        assertThat(locationOf(service.redirectResultUrl("menu", CLICK))).isEqualTo("https://a.example/menu");
         assertThat(service.redirectResultUrl(GO, "menu", CLICK).getUrl()).isEqualTo("https://b.example/menu");
-        assertThat(service.redirectResultUrl("menu", CLICK).getUrl()).isEqualTo("https://a.example/menu");
+        assertThat(locationOf(service.redirectResultUrl("menu", CLICK))).isEqualTo("https://a.example/menu");
         assertThat(service.redirectResultUrl(GO, "menu", CLICK).getUrl()).isEqualTo("https://b.example/menu");
 
         verify(urlRepository).findServed(null, "menu");
@@ -3790,7 +4021,7 @@ class UrlServiceTest {
                 new io.micrometer.core.instrument.simple.SimpleMeterRegistry(), passwordEncoder, suspiciousUrlService, rateLimiter,
                 reviewQueueService, scammerSignalService, clickCheckService, redirectChainService, TransactionOperations.withoutTransaction(),
                 reservedAliasService, burstAlertService, destinationCheckRepository, customDomainRegistry, customDomainRepository, campaignService, settingsService,
-                withoutTransactions, anonymousLinkSignals);
+                withoutTransactions, anonymousLinkSignals, LinkWarningTemplates.engine());
     }
 
     private static UrlService withTheCacheAnnotations(final UrlService service, final CacheManager urls) {
@@ -3811,7 +4042,7 @@ class UrlServiceTest {
     private String redirectOf(final Url url) {
         when(appProperties.getFrontendUrl()).thenReturn(FRONTEND);
         when(urlRepository.findServed(null, url.getShortUrl())).thenReturn(Optional.of(url));
-        return urlServiceWithMeters().redirectResultUrl(url.getShortUrl(), CLICK).getUrl();
+        return locationOf(urlServiceWithMeters().redirectResultUrl(url.getShortUrl(), CLICK));
     }
 
     private UrlService urlServiceWithMeters() {
@@ -3845,7 +4076,7 @@ class UrlServiceTest {
                 campaignService,
                 settingsService,
                 withoutTransactions,
-                anonymousLinkSignals
+                anonymousLinkSignals, LinkWarningTemplates.engine()
         );
     }
 
@@ -3925,7 +4156,7 @@ class UrlServiceTest {
                 campaignService,
                 settingsService,
                 transactionManager,
-                anonymousLinkSignals
+                anonymousLinkSignals, LinkWarningTemplates.engine()
         );
         final var proxyFactory = new ProxyFactory(service);
         proxyFactory.addAdvice(new TransactionInterceptor(transactionManager, new AnnotationTransactionAttributeSource()));
@@ -3964,7 +4195,7 @@ class UrlServiceTest {
                 campaignService,
                 settingsService,
                 withoutTransactions,
-                anonymousLinkSignals
+                anonymousLinkSignals, LinkWarningTemplates.engine()
         );
     }
 
@@ -3999,7 +4230,7 @@ class UrlServiceTest {
                 campaignService,
                 settingsService,
                 withoutTransactions,
-                anonymousLinkSignals
+                anonymousLinkSignals, LinkWarningTemplates.engine()
         );
     }
 
