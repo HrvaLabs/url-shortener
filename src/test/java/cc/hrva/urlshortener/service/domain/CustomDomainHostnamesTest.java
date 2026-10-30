@@ -25,6 +25,7 @@ class CustomDomainHostnamesTest {
     private static final String APEX = "Use a subdomain, like go.example.com. Root domains like example.com aren't supported yet.";
     private static final String NOT_OWNABLE = "Enter a domain you own, like go.example.com.";
     private static final String RESERVED = "This domain can't be used on hrva.cc.";
+    private static final String SYMBOLS = "Emoji and symbol domains can't be used. Use a domain made of letters and digits.";
     private static final String MIXED_SCRIPT_HRVA = "go.hrv\u0430.cc";
     private static final String CYRILLIC_LOOK_ALIKE = "g\u043e.example.com";
 
@@ -94,7 +95,34 @@ class CustomDomainHostnamesTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"xn--ls8h.example.com", "xn--a.example.com", "xn--abc.example.com", "xn--zzzzzz.example.com"})
+    @ValueSource(strings = {"xn--w6ja155uba.example.com", "xn--nbd4itbt1dwfyc.example.com", "xn--f9dt7l.example.com"})
+    void idna2008LabelsOutsideTheLetterAndDigitClassesPass(final String input) {
+        assertThat(hostnames.normalize(input)).isEqualTo(input);
+        assertThat(CustomDomainHostnames.hostnameKey(input)).contains(input);
+    }
+
+    @Test
+    void theIdeographicZeroThatTheKeyProducesPasses() {
+        final var key = CustomDomainHostnames.hostnameKey("go\u3007\u3007.example.com").orElseThrow();
+
+        assertThat(key).startsWith("xn--");
+        assertThat(hostnames.normalize(key)).isEqualTo(key);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"xn--wca.example.com", "xn--e-xbb.example.com", "xn--hqd2n7h.example.com", "xn--a-wbb.example.com"})
+    void uppercaseUnnormalizedAndMarkFirstLabelsAreRefused(final String input) {
+        assertRefused(input, BAD_SHAPE);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"xn--ls8h.example.com", "go.xn--qei.example.com"})
+    void emojiAndSymbolLabelsGetTheirOwnText(final String input) {
+        assertRefused(input, SYMBOLS);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"xn--a.example.com", "xn--abc.example.com", "xn--zzzzzz.example.com"})
     void punycodeOfSomethingThatIsNotADomainLabelIsRefused(final String input) {
         assertRefused(input, BAD_SHAPE);
     }

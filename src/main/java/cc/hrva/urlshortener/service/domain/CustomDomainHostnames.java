@@ -5,6 +5,7 @@ import cc.hrva.urlshortener.util.DomainNames;
 import com.google.common.net.InternetDomainName;
 import jakarta.annotation.PostConstruct;
 import java.net.URI;
+import java.text.Normalizer;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
@@ -28,7 +29,10 @@ public class CustomDomainHostnames {
     private static final String LOCALHOST = "localhost";
     private static final List<String> SUFFIX_PREFIXES = List.of("*.", ".");
     private static final int ASCII_LIMIT = 0x80;
-    private static final Set<Integer> CONTEXTUAL_CODE_POINTS = Set.of((int) '-', 0x200C, 0x200D, 0xB7, 0x375, 0x5F3, 0x5F4, 0x30FB);
+    private static final Set<Integer> EXCEPTION_CODE_POINTS = Set.of((int) '-', 0x200C, 0x200D, 0xB7, 0x375, 0x5F3, 0x5F4, 0x30FB,
+            0x6FD, 0x6FE, 0xF0B, 0x3007);
+    private static final int CHEROKEE_FIRST = 0x13A0;
+    private static final int CHEROKEE_LAST = 0x13F5;
 
     private final AppProperties appProperties;
 
@@ -66,9 +70,9 @@ public class CustomDomainHostnames {
         if (hostname.length() > MAX_LENGTH) {
             throw HostnameRefusal.TOO_LONG.toException();
         }
-        if (!hasValidLabels(hostname)) {
-            throw HostnameRefusal.BAD_SHAPE.toException();
-        }
+        labelsRefusal(hostname).ifPresent(refusal -> {
+            throw refusal.toException();
+        });
         if (isLocalhost(hostname) || !isUnderPublicSuffix(hostname)) {
             throw HostnameRefusal.NOT_OWNABLE.toException();
         }
@@ -148,28 +152,62 @@ public class CustomDomainHostnames {
     }
 
     private static boolean hasValidLabels(final String hostname) {
-        return Arrays.stream(hostname.split("\\.", -1)).allMatch(CustomDomainHostnames::isValidLabel);
+        return labelsRefusal(hostname).isEmpty();
     }
 
-    private static boolean isValidLabel(final String label) {
-        return LABEL.matcher(label).matches() && (!label.startsWith(ACE_PREFIX) || isRealPunycode(label));
+    private static Optional<HostnameRefusal> labelsRefusal(final String hostname) {
+        return Arrays.stream(hostname.split("\\.", -1))
+                .map(CustomDomainHostnames::labelRefusal)
+                .flatMap(Optional::stream)
+                .findFirst();
     }
 
-    private static boolean isRealPunycode(final String label) {
-        return Punycode.decode(label.substring(ACE_PREFIX.length()))
-                .filter(decoded -> decoded.codePoints().anyMatch(codePoint -> codePoint >= ASCII_LIMIT))
-                .filter(decoded -> decoded.codePoints().allMatch(CustomDomainHostnames::isLabelCodePoint))
-                .flatMap(Punycode::encode)
-                .filter(encoded -> (ACE_PREFIX + encoded).equals(label))
-                .isPresent();
+    private static Optional<HostnameRefusal> labelRefusal(final String label) {
+        if (!LABEL.matcher(label).matches()) {
+            return Optional.of(HostnameRefusal.BAD_SHAPE);
+        }
+        if (!label.startsWith(ACE_PREFIX)) {
+            return Optional.empty();
+        }
+        final var decoded = Punycode.decode(label.substring(ACE_PREFIX.length()))
+                .filter(text -> text.codePoints().anyMatch(codePoint -> codePoint >= ASCII_LIMIT))
+                .filter(text -> Punycode.encode(text).filter(encoded -> (ACE_PREFIX + encoded).equals(label)).isPresent());
+        if (decoded.isEmpty()) {
+            return Optional.of(HostnameRefusal.BAD_SHAPE);
+        }
+        final var text = decoded.get();
+        if (text.codePoints().anyMatch(CustomDomainHostnames::isSymbol)) {
+            return Optional.of(HostnameRefusal.SYMBOLS);
+        }
+        if (isMark(text.codePointAt(0))
+                || !Normalizer.isNormalized(text, Normalizer.Form.NFC)
+                || !text.codePoints().allMatch(CustomDomainHostnames::isLabelCodePoint)) {
+            return Optional.of(HostnameRefusal.BAD_SHAPE);
+        }
+        return Optional.empty();
+    }
+
+    private static boolean isSymbol(final int codePoint) {
+        final var type = Character.getType(codePoint);
+        return type == Character.OTHER_SYMBOL || type == Character.MATH_SYMBOL || type == Character.CURRENCY_SYMBOL
+                || type == Character.MODIFIER_SYMBOL || codePoint >= ASCII_LIMIT && Character.isEmoji(codePoint);
+    }
+
+    private static boolean isMark(final int codePoint) {
+        final var type = Character.getType(codePoint);
+        return type == Character.NON_SPACING_MARK || type == Character.COMBINING_SPACING_MARK || type == Character.ENCLOSING_MARK;
     }
 
     private static boolean isLabelCodePoint(final int codePoint) {
-        final var type = Character.getType(codePoint);
-        return Character.isLetter(codePoint) && !Character.isUpperCase(codePoint) && !Character.isTitleCase(codePoint)
+        final var cased = Character.isUpperCase(codePoint) || Character.isTitleCase(codePoint);
+        return Character.isLetter(codePoint) && (!cased || isCherokee(codePoint))
                 || Character.isDigit(codePoint)
-                || type == Character.NON_SPACING_MARK || type == Character.COMBINING_SPACING_MARK || type == Character.ENCLOSING_MARK
-                || CONTEXTUAL_CODE_POINTS.contains(codePoint);
+                || isMark(codePoint)
+                || EXCEPTION_CODE_POINTS.contains(codePoint);
+    }
+
+    private static boolean isCherokee(final int codePoint) {
+        return codePoint >= CHEROKEE_FIRST && codePoint <= CHEROKEE_LAST;
     }
 
     private static Optional<String> withoutPort(final String host) {
