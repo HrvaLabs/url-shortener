@@ -28,6 +28,9 @@
 # check, approval and the automatic setup, the CNAME seen, links on the domain beside the same alias on the primary host,
 # the Host header routing and its 404s, turning the domain off and on, the removal with its links moved and the queued
 # Cloudflare delete, the three emails (a Mailpit container on a random port is the app's SMTP server) and the export.
+# Section 23 checks the same-shape alert: links without an account (distinct CF-Connecting-IP values, so the 10-per-hour create
+# limit is never reached) to one URL shape on three domains give one Discord line at the stub, a fourth domain adds none, and
+# index.php?id=1 on three domains is a generic path that gives none. Every link stays active; nothing is held.
 #
 #   scripts/mcp-e2e.sh                         builds the jar, then runs every step
 #   MCP_E2E_SKIP_BUILD=1 scripts/mcp-e2e.sh    reuses target/url-shortener-*.jar
@@ -1347,5 +1350,55 @@ expect_eq "$(jq -r '.domains[0] | [has("cloudflareId"), has("lastError"), has("a
     "with no Cloudflare id, last error or apply flags"
 expect_eq "$(jq -r '.domains[0] | [has("disabledReason"), has("disabledNote")] | all' <<<"$HTTP_BODY")" true \
     "and with disabledReason and disabledNote (null once turned on again)"
+
+section "23. Moderation: the same-shape alert"
+SHAPE_LINE_PREFIX='Same-shape links: 3 links without an account on 3 domains'
+SHAPE_ALIASES=()
+create_shape_link() {
+    http -X POST "$BASE/api/v1/urls" -H "CF-Connecting-IP: $1" -H 'Content-Type: application/json' -d "{\"longUrl\":\"$2\"}"
+    expect_eq "$HTTP_STATUS" 200 "a link without an account from $1 to $2"
+    SHAPE_ALIASES+=("$(jq -r .shortUrl <<<"$HTTP_BODY")")
+}
+shape_lines() {
+    jq -s --arg prefix "$SHAPE_LINE_PREFIX" '[.[] | select(.content | startswith($prefix))] | length' "$DISCORD_POSTS"
+}
+any_shape_lines() {
+    jq -s '[.[] | select(.content | startswith("Same-shape links:"))] | length' "$DISCORD_POSTS"
+}
+shape_posted() {
+    [[ $(shape_lines) -ge 1 ]]
+}
+create_shape_link 203.0.113.21 'https://a1.e2e-shape-a.com/wqamhcsom?r=1&t=1'
+create_shape_link 203.0.113.22 'https://a1.e2e-shape-b.com/wqamhcsom?r=1&t=1'
+create_shape_link 203.0.113.23 'https://a1.e2e-shape-c.com/wqamhcsom?r=1&t=1'
+wait_until 45 "the same-shape alert at the Discord stub (30-second buffer)" shape_posted
+SHAPE_POST=$(jq -r --arg prefix "$SHAPE_LINE_PREFIX" 'select(.content | startswith($prefix)) | .content' "$DISCORD_POSTS")
+show "$SHAPE_POST"
+expect_eq "$(shape_lines)" 1 "the Discord stub got one same-shape line"
+expect_contains "$SHAPE_POST" "share the URL shape /wqamhcsom?r&t in the last 24 hours." "the line names the shape, with the query values left out"
+expect_contains "$SHAPE_POST" "Nothing was held. Review them: <$FRONTEND_URL/admin/urls?search=%2Fwqamhcsom>" "and links to the matching links in All URLs"
+for alias in "${SHAPE_ALIASES[@]}"; do
+    expect_contains "$SHAPE_POST" "$alias" "the line shows the example $alias"
+done
+expect_eq "$(jq -sc --arg prefix "$SHAPE_LINE_PREFIX" '[.[] | select(.content | startswith($prefix)) | {allowed_mentions, flags}] | first' "$DISCORD_POSTS")" \
+    '{"allowed_mentions":{"parse":[]},"flags":4}' "no mentions, no embeds"
+SHAPE_KEY=$(printf '/wqamhcsom\nr,t' | openssl dgst -sha256 | awk '{print $NF}')
+expect_eq "$(docker exec "$REDIS_CONTAINER" redis-cli --raw zcard "campaign:shape:$SHAPE_KEY")" 3 "campaign:shape:<sha256 of the shape> holds the three links"
+expect_eq "$(docker exec "$REDIS_CONTAINER" redis-cli --raw exists "campaign:alerted:$SHAPE_KEY")" 1 "campaign:alerted:<shape> is set for 24 hours"
+
+create_shape_link 203.0.113.21 'https://a1.e2e-shape-d.com/wqamhcsom?r=1&t=1'
+expect_eq "$(docker exec "$REDIS_CONTAINER" redis-cli --raw zcard "campaign:shape:$SHAPE_KEY")" 4 "the fourth link is counted"
+create_shape_link 203.0.113.22 'https://a.e2e-generic-x.com/index.php?id=1'
+create_shape_link 203.0.113.23 'https://a.e2e-generic-y.com/index.php?id=1'
+create_shape_link 203.0.113.21 'https://a.e2e-generic-z.com/index.php?id=1'
+echo "  waiting 40 s, longer than the Discord buffer's 30-second flush, for a second line that must not come"
+sleep 40
+expect_eq "$(any_shape_lines)" 1 "the fourth domain and the three index.php links add no same-shape line"
+expect_eq "$(grep -c 'Same-shape links shape=' "$WORK/app.log" || true)" 1 "the app logged one same-shape alert"
+expect_eq "$(docker exec "$REDIS_CONTAINER" redis-cli --raw --scan --pattern 'campaign:shape:*')" "campaign:shape:$SHAPE_KEY" \
+    "index.php has no shape: only the campaign shape is counted in Redis"
+psql_query "select u.id, u.short_url, u.active, u.owner_id is null as anonymous, u.long_url from url u where u.long_url like '%e2e-shape-%' or u.long_url like '%e2e-generic-%' order by u.id;"
+expect_eq "$(psql_value "select count(*) filter (where active and owner_id is null and blocked_at is null) || ' of ' || count(*) from url where long_url like '%e2e-shape-%' or long_url like '%e2e-generic-%';")" \
+    "7 of 7" "all seven links are active, without an account and not blocked: the alert holds nothing"
 
 section "Done: every step passed"
