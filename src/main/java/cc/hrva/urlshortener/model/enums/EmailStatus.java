@@ -5,6 +5,7 @@ public enum EmailStatus {
     SENDING,
     SENT,
     FAILED,
-    RESENT
+    RESENT,
+    SKIPPED
 
 }

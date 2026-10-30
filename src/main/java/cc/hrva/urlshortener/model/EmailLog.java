@@ -32,6 +32,7 @@ public class EmailLog {
     public static final String STATUS_SENT = EmailStatus.SENT.name();
     public static final String STATUS_FAILED = EmailStatus.FAILED.name();
     public static final String STATUS_RESENT = EmailStatus.RESENT.name();
+    public static final String STATUS_SKIPPED = EmailStatus.SKIPPED.name();
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)

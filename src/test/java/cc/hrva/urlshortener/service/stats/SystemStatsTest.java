@@ -61,7 +61,7 @@ class SystemStatsTest {
     private static final LocalDate TO = LocalDate.of(2026, 10, 26);
     private static final StatsWindow WINDOW =
             new StatsWindow(7, FROM, TO, LocalDateTime.of(2026, 10, 19, 22, 0), LocalDateTime.of(2026, 10, 26, 23, 0));
-    private static final List<String> STATUSES = List.of("SENT", "FAILED", "SENDING", "RESENT");
+    private static final List<String> STATUSES = List.of("SENT", "FAILED", "SENDING", "RESENT", "SKIPPED");
     private static final List<String> PREFIXES =
             List.of("blocklist:", "rate-limit:", "analytics:", "rdap:", "dbl:", "mcp:connect:", "urls::");
     private static final List<RedirectTiming> NO_REDIRECTS =
@@ -247,11 +247,11 @@ class SystemStatsTest {
 
         final var emails = systemStats.collect(WINDOW).emails();
 
-        assertThat(emails.keys()).containsExactly("SENT", "FAILED", "SENDING", "RESENT", "BOUNCED");
+        assertThat(emails.keys()).containsExactly("SENT", "FAILED", "SENDING", "RESENT", "SKIPPED", "BOUNCED");
         assertThat(emails.daily()).filteredOn(day -> day.date().equals(LocalDate.of(2026, 10, 25))).singleElement()
                 .extracting(DailyCounts::counts)
                 .satisfies(counts -> assertThat(counts).containsExactly(
-                        entry("SENT", 2L), entry("FAILED", 1L), entry("SENDING", 0L), entry("RESENT", 0L), entry("BOUNCED", 1L)));
+                        entry("SENT", 2L), entry("FAILED", 1L), entry("SENDING", 0L), entry("RESENT", 0L), entry("SKIPPED", 0L), entry("BOUNCED", 1L)));
     }
 
     @Test

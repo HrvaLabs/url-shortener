@@ -81,6 +81,9 @@ class ConsentedEmailForActiveAccountsTest {
     @MockitoBean
     private NotificationMessages notificationMessages;
 
+    @MockitoBean
+    private SettingsService settingsService;
+
     private User owner;
 
     @BeforeEach

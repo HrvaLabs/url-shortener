@@ -34,6 +34,8 @@ import cc.hrva.urlshortener.service.notification.EmailConsentReader;
 import cc.hrva.urlshortener.service.notification.NotificationMessages;
 import cc.hrva.urlshortener.service.notification.NotificationTestKeys;
 import cc.hrva.urlshortener.service.notification.UnsubscribeTokens;
+import cc.hrva.urlshortener.service.settings.EmailKind;
+import cc.hrva.urlshortener.service.settings.SettingKey;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -51,7 +53,9 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.assertj.core.groups.Tuple;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -71,6 +75,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -102,6 +107,9 @@ class DefaultSendingEmailServiceTest {
     @Mock
     private EmailConsentReader emailConsentReader;
 
+    @Mock
+    private SettingsService settingsService;
+
     private final UnsubscribeTokens unsubscribeTokens = new UnsubscribeTokens(NotificationTestKeys.keys());
 
     private DefaultSendingEmailService sendingEmailService;
@@ -118,7 +126,8 @@ class DefaultSendingEmailServiceTest {
         appProperties.setFrontendUrl("https://app.hrva.cc");
         sendingEmailService = new DefaultSendingEmailService(appProperties, templateEngine, emailService, emailLogRepository,
                 emailConsentReader, new ConsentEmails(unsubscribeTokens, appProperties),
-                new NotificationMessages(appProperties, Clock.systemUTC(), new ShortLinks(appProperties)), new ShortLinks(appProperties));
+                new NotificationMessages(appProperties, Clock.systemUTC(), new ShortLinks(appProperties)), new ShortLinks(appProperties),
+                settingsService);
     }
 
     private void saveReturnsArgument() {
@@ -142,7 +151,8 @@ class DefaultSendingEmailServiceTest {
         appProperties.setResetTokenExpirationInHours(1L);
         return new DefaultSendingEmailService(appProperties, engine, emailService, emailLogRepository,
                 emailConsentReader, new ConsentEmails(unsubscribeTokens, appProperties),
-                new NotificationMessages(appProperties, Clock.systemUTC(), new ShortLinks(appProperties)), new ShortLinks(appProperties));
+                new NotificationMessages(appProperties, Clock.systemUTC(), new ShortLinks(appProperties)), new ShortLinks(appProperties),
+                settingsService);
     }
 
     private static TemplateEngine realTemplateEngine() {
@@ -1461,6 +1471,191 @@ class DefaultSendingEmailServiceTest {
     private static EmailLog failedConsentedEntry(final Long userId) {
         return EmailLog.builder().id(21L).sender("noreply@hrva.cc").recipient("alice@example.com").subject("Your week on hrva.cc")
                 .body("<p>last week</p>").status(EmailLog.STATUS_FAILED).consentType(NotificationType.WEEKLY_SUMMARY_EMAIL).userId(userId).build();
+    }
+
+    private static final String SENDING_IS_OFF = "Not sent: Send emails is off";
+
+    private static Stream<Arguments> nonAccountEmails() {
+        final var domainRemoval = new DomainRemovalResponse(1, List.of(), 0);
+        final var dead = NotificationType.DEAD_LINK_EMAIL;
+        final var weekly = NotificationType.WEEKLY_SUMMARY_EMAIL;
+        final var expiring = NotificationType.EXPIRY_REMINDER_EMAIL;
+        return Stream.of(
+                nonAccountEmail("sendEmailUrlBlocked", EmailKind.LINK_BLOCKED, null, "alice@example.com",
+                        service -> service.sendEmailUrlBlocked(OWNER, BLOCKED_LINK)),
+                nonAccountEmail("sendEmailUrlsBlocked", EmailKind.LINK_BLOCKED, null, "alice@example.com",
+                        service -> service.sendEmailUrlsBlocked(OWNER, domainBlockedLinks(2))),
+                nonAccountEmail("sendEmailUrlMalwareDetected", EmailKind.MALWARE_FOUND, null, "alice@example.com",
+                        service -> service.sendEmailUrlMalwareDetected(OWNER, BLOCKED_LINK, "MALWARE")),
+                nonAccountEmail("sendDecisionsEmailToAdmin", EmailKind.ADMIN_DAILY, null, "support@hrva.cc",
+                        service -> service.sendDecisionsEmailToAdmin(decisions(0))),
+                nonAccountEmail("sendNewUserNotificationToAdmin", EmailKind.NEW_USER_NOTICE, null, "support@hrva.cc",
+                        service -> service.sendNewUserNotificationToAdmin(User.builder().email("new@example.com").build())),
+                nonAccountEmail("sendWeeklyDigestToAdmin", EmailKind.ADMIN_WEEKLY_DIGEST, null, "support@hrva.cc",
+                        service -> service.sendWeeklyDigestToAdmin(weeklyDigest("example.com"))),
+                nonAccountEmail("sendDeadLinksEmail", EmailKind.DEAD_LINKS, dead, "alice@example.com",
+                        service -> service.sendDeadLinksEmail(deadLinksEmail("example.com", "menu"))),
+                nonAccountEmail("sendWeeklySummaryEmail", EmailKind.WEEKLY_SUMMARY, weekly, "alice@example.com",
+                        service -> service.sendWeeklySummaryEmail(weeklySummary())),
+                nonAccountEmail("the expiry reminder", EmailKind.LINK_EXPIRING, expiring, "alice@example.com",
+                        service -> service.tryToSendConsentedEmail(consentedEmail(), 7L, expiring)),
+                nonAccountEmail("sendDomainApprovedEmail", EmailKind.CUSTOM_DOMAIN, null, "alice@example.com",
+                        service -> service.sendDomainApprovedEmail("alice@example.com", "go.example.com", DnsRecord.cname("go.example.com", "domains.hrva.cc"))),
+                nonAccountEmail("sendDomainRejectedEmail", EmailKind.CUSTOM_DOMAIN, null, "alice@example.com",
+                        service -> service.sendDomainRejectedEmail("alice@example.com", "go.example.com", "Use a domain you own")),
+                nonAccountEmail("sendDomainDisabledEmail", EmailKind.CUSTOM_DOMAIN, null, "alice@example.com",
+                        service -> service.sendDomainDisabledEmail("alice@example.com", "go.example.com", "Phishing kit")),
+                nonAccountEmail("sendDomainRemovedEmail", EmailKind.CUSTOM_DOMAIN, null, "alice@example.com",
+                        service -> service.sendDomainRemovedEmail("alice@example.com", "go.example.com", domainRemoval, DomainLinkMode.MOVE)));
+    }
+
+    private static Arguments nonAccountEmail(final String name, final EmailKind kind, final NotificationType consentType, final String recipient,
+                                             final Consumer<DefaultSendingEmailService> send) {
+        return Arguments.of(name, kind, consentType, recipient, send);
+    }
+
+    private static Stream<Arguments> accountEmailSenders() {
+        final var resetToken = ResetToken.builder().token("reset-token-41").createDate(LocalDateTime.of(2026, 10, 29, 9, 14, 2)).build();
+        final var verificationToken = VerificationToken.builder().token("verify-token-42").build();
+        return Stream.of(
+                Arguments.of("reset_password", (Consumer<DefaultSendingEmailService>) service -> service.sendEmailForgotPassword(OWNER, resetToken)),
+                Arguments.of("verify_email", (Consumer<DefaultSendingEmailService>) service -> service.sendVerificationEmail(OWNER, verificationToken)),
+                Arguments.of("passkey_added", (Consumer<DefaultSendingEmailService>) service -> service.sendPasskeyAddedEmail(OWNER, "Laptop", PASSKEY_ADDED_AT)),
+                Arguments.of("account_deactivated", (Consumer<DefaultSendingEmailService>) service -> service.sendEmailAccountDeactivated(OWNER)));
+    }
+
+    private List<EmailLog> savedEntries() {
+        final var saved = ArgumentCaptor.forClass(EmailLog.class);
+        verify(emailLogRepository, atLeastOnce()).save(saved.capture());
+        return saved.getAllValues();
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("nonAccountEmails")
+    void sendEmailsOffLogsEveryNonAccountEmailAsNotSent(final String name, final EmailKind kind, final NotificationType consentType,
+                                                        final String recipient, final Consumer<DefaultSendingEmailService> send) {
+        saveReturnsArgument();
+        when(settingsService.emailSwitchOff(any(EmailKind.class))).thenReturn(Optional.of(SettingKey.SEND_EMAILS));
+        if (consentType != null) {
+            when(emailConsentReader.hasActiveEmailConsent(7L, consentType)).thenReturn(true);
+        }
+
+        send.accept(configuredEmailService(realTemplateEngine()));
+
+        verify(settingsService).emailSwitchOff(kind);
+        verifyNoInteractions(emailService);
+        assertThat(savedEntries()).singleElement().satisfies(entry -> {
+            assertThat(entry.getStatus()).isEqualTo(EmailLog.STATUS_SKIPPED).isEqualTo("SKIPPED");
+            assertThat(entry.getErrorMessage()).isEqualTo(SENDING_IS_OFF);
+            assertThat(entry.getBody()).isNull();
+            assertThat(entry.getSender()).isEqualTo("noreply@hrva.cc");
+            assertThat(entry.getRecipient()).isEqualTo(recipient);
+            assertThat(entry.getSubject()).isNotBlank();
+            assertThat(entry.getSentAt()).isNull();
+            assertThat(entry.isResendable()).isFalse();
+        });
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("accountEmailSenders")
+    void accountEmailsGoOutWithEverySwitchOff(final String template, final Consumer<DefaultSendingEmailService> send) throws Exception {
+        saveReturnsArgument();
+        lenient().when(settingsService.emailSwitchOff(any(EmailKind.class))).thenReturn(Optional.of(SettingKey.SEND_EMAILS));
+
+        send.accept(configuredEmailService(realTemplateEngine()));
+
+        verify(emailService).sendEmail(any(Email.class), eq(null));
+        verifyNoInteractions(settingsService);
+        assertThat(savedEntries()).extracting(EmailLog::getStatus).doesNotContain(EmailLog.STATUS_SKIPPED).contains(EmailLog.STATUS_SENT);
+    }
+
+    @Test
+    void aKindSwitchOffStopsOnlyThatKind() throws Exception {
+        saveReturnsArgument();
+        when(settingsService.emailSwitchOff(EmailKind.LINK_BLOCKED)).thenReturn(Optional.of(SettingKey.EMAIL_LINK_BLOCKED));
+        when(settingsService.emailSwitchOff(EmailKind.MALWARE_FOUND)).thenReturn(Optional.empty());
+        final var service = configuredEmailService(realTemplateEngine());
+
+        service.sendEmailUrlBlocked(OWNER, BLOCKED_LINK);
+        service.sendEmailUrlMalwareDetected(OWNER, BLOCKED_LINK, "MALWARE");
+
+        verify(emailService, times(1)).sendEmail(any(Email.class), eq(null));
+        assertThat(savedEntries()).extracting(EmailLog::getStatus, EmailLog::getErrorMessage)
+                .contains(Tuple.tuple(EmailLog.STATUS_SKIPPED, "Not sent: Link blocked is off"), Tuple.tuple(EmailLog.STATUS_SENT, null));
+    }
+
+    @Test
+    void withoutConsentNothingIsLogged() {
+        when(emailConsentReader.hasActiveEmailConsent(7L, NotificationType.WEEKLY_SUMMARY_EMAIL)).thenReturn(false);
+
+        final var result = sendingEmailService.tryToSendConsentedEmail(consentedEmail(), 7L, NotificationType.WEEKLY_SUMMARY_EMAIL);
+
+        assertThat(result).isEmpty();
+        verifyNoInteractions(settingsService, emailLogRepository, emailService);
+    }
+
+    @Test
+    void withConsentAndTheSwitchOffTheEmailIsLoggedNotSent() {
+        saveReturnsArgument();
+        when(emailConsentReader.hasActiveEmailConsent(7L, NotificationType.WEEKLY_SUMMARY_EMAIL)).thenReturn(true);
+        when(settingsService.emailSwitchOff(EmailKind.WEEKLY_SUMMARY)).thenReturn(Optional.of(SettingKey.EMAIL_WEEKLY_SUMMARY));
+
+        final var result = sendingEmailService.tryToSendConsentedEmail(consentedEmail(), 7L, NotificationType.WEEKLY_SUMMARY_EMAIL);
+
+        assertThat(result).isEmpty();
+        verifyNoInteractions(emailService);
+        assertThat(savedEntries()).singleElement().satisfies(entry -> {
+            assertThat(entry.getStatus()).isEqualTo(EmailLog.STATUS_SKIPPED);
+            assertThat(entry.getErrorMessage()).isEqualTo("Not sent: Weekly link summary is off");
+            assertThat(entry.getBody()).isNull();
+            assertThat(entry.getConsentType()).isEqualTo(NotificationType.WEEKLY_SUMMARY_EMAIL);
+            assertThat(entry.getUserId()).isEqualTo(7L);
+            assertThat(entry.getRecipient()).isEqualTo("alice@example.com");
+            assertThat(entry.getSubject()).isEqualTo("Your week on hrva.cc");
+        });
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            "DEAD_LINK_EMAIL, DEAD_LINKS",
+            "WEEKLY_SUMMARY_EMAIL, WEEKLY_SUMMARY",
+            "EXPIRY_REMINDER_EMAIL, LINK_EXPIRING"})
+    void aConsentedEmailAsksForTheKindOfItsNotificationType(final NotificationType type, final EmailKind kind) {
+        saveReturnsArgument();
+        when(emailConsentReader.hasActiveEmailConsent(7L, type)).thenReturn(true);
+        when(settingsService.emailSwitchOff(kind)).thenReturn(Optional.of(SettingKey.SEND_EMAILS));
+
+        sendingEmailService.tryToSendConsentedEmail(consentedEmail(), 7L, type);
+
+        verify(settingsService).emailSwitchOff(kind);
+        assertThat(savedEntries()).singleElement().extracting(EmailLog::getStatus).isEqualTo(EmailLog.STATUS_SKIPPED);
+    }
+
+    @Test
+    void aSkippedEmailCannotBeResent() {
+        final var skipped = EmailLog.builder().id(31L).sender("noreply@hrva.cc").recipient("alice@example.com").subject("Your link was blocked as unsafe")
+                .status(EmailLog.STATUS_SKIPPED).errorMessage(SENDING_IS_OFF).body("<p>kept by mistake</p>").build();
+        when(emailLogRepository.findById(31L)).thenReturn(Optional.of(skipped));
+
+        assertThat(skipped.isResendable()).isFalse();
+        assertThatThrownBy(() -> sendingEmailService.resendEmail(31L)).isInstanceOf(EmailNotResendableException.class);
+        verifyNoInteractions(emailService, settingsService);
+    }
+
+    @Test
+    void resendIsNotGated() throws Exception {
+        saveReturnsArgument();
+        lenient().when(settingsService.emailSwitchOff(any(EmailKind.class))).thenReturn(Optional.of(SettingKey.SEND_EMAILS));
+        final var failed = EmailLog.builder().id(32L).sender("noreply@hrva.cc").recipient("alice@example.com").subject("Your link was blocked as unsafe")
+                .body("<p>blocked</p>").status(EmailLog.STATUS_FAILED).build();
+        when(emailLogRepository.findById(32L)).thenReturn(Optional.of(failed));
+
+        final var resent = sendingEmailService.resendEmail(32L);
+
+        verify(emailService).sendEmail(any(Email.class), eq(null));
+        verifyNoInteractions(settingsService);
+        assertThat(resent.getStatus()).isEqualTo(EmailLog.STATUS_SENT);
+        assertThat(failed.getStatus()).isEqualTo(EmailLog.STATUS_RESENT);
     }
 
     private static List<Url> domainBlockedLinks(final int count) {

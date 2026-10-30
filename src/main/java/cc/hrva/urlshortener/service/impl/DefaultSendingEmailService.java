@@ -19,6 +19,8 @@ import cc.hrva.urlshortener.service.notification.DestinationCheckOutcome.DeadLin
 import cc.hrva.urlshortener.service.notification.DestinationStatusWords;
 import cc.hrva.urlshortener.service.notification.EmailConsentReader;
 import cc.hrva.urlshortener.service.notification.NotificationMessages;
+import cc.hrva.urlshortener.service.settings.EmailKind;
+import cc.hrva.urlshortener.service.settings.SettingKey;
 import jakarta.mail.MessagingException;
 import java.text.MessageFormat;
 import java.time.Duration;
@@ -42,6 +44,7 @@ import cc.hrva.urlshortener.model.ResetToken;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.service.SendingEmailService;
+import cc.hrva.urlshortener.service.SettingsService;
 import cc.hrva.urlshortener.service.digest.WeeklyDigestText;
 import cc.hrva.urlshortener.service.domain.ShortLinks;
 import cc.hrva.urlshortener.util.EmailAddresses;
@@ -63,6 +66,7 @@ public class DefaultSendingEmailService implements SendingEmailService {
     private static final String STATS_PAGE = "/admin/dashboard?days=7";
     private static final String REVIEW_PAGE = "/admin/review";
     private static final String DASHBOARD_PAGE = "/dashboard";
+    private static final String NOT_SENT = "Not sent: %s is off";
     private static final String CONSENT_WITHDRAWN = "This person has turned this email off since, so it can't be resent.";
     private static final String CUSTOM_DOMAINS_SETTINGS = "/dashboard/settings#custom-domains";
     private static final String ADD_THE_RECORD_HELP = "/help/custom-domains#add-the-record";
@@ -79,6 +83,7 @@ public class DefaultSendingEmailService implements SendingEmailService {
     private final ConsentEmails consentEmails;
     private final NotificationMessages notificationMessages;
     private final ShortLinks shortLinks;
+    private final SettingsService settingsService;
 
     @Override
     @Async
@@ -159,7 +164,7 @@ public class DefaultSendingEmailService implements SendingEmailService {
                 .text(body)
                 .build();
 
-        tryToSendEmail(email);
+        send(email, EmailKind.NEW_USER_NOTICE);
     }
 
     @Override
@@ -180,7 +185,7 @@ public class DefaultSendingEmailService implements SendingEmailService {
                 .text(htmlContent)
                 .build();
 
-        tryToSendEmail(email);
+        send(email, EmailKind.MALWARE_FOUND);
     }
 
     @Override
@@ -198,7 +203,7 @@ public class DefaultSendingEmailService implements SendingEmailService {
                 .text(htmlContent)
                 .build();
 
-        tryToSendEmail(email);
+        send(email, EmailKind.LINK_BLOCKED);
     }
 
     @Override
@@ -218,7 +223,7 @@ public class DefaultSendingEmailService implements SendingEmailService {
                 .text(htmlContent)
                 .build();
 
-        tryToSendEmail(email);
+        send(email, EmailKind.LINK_BLOCKED);
     }
 
     @Override
@@ -265,7 +270,7 @@ public class DefaultSendingEmailService implements SendingEmailService {
                 .text(htmlContent)
                 .build();
 
-        tryToSendEmail(email);
+        send(email, EmailKind.ADMIN_DAILY);
     }
 
     @Override
@@ -293,7 +298,7 @@ public class DefaultSendingEmailService implements SendingEmailService {
                 .text(htmlContent)
                 .build();
 
-        tryToSendEmail(email);
+        send(email, EmailKind.ADMIN_WEEKLY_DIGEST);
     }
 
     @Override
@@ -537,6 +542,12 @@ public class DefaultSendingEmailService implements SendingEmailService {
             return Optional.empty();
         }
 
+        final var switchOff = settingsService.emailSwitchOff(kindOf(type));
+        if (switchOff.isPresent()) {
+            logNotSent(email, switchOff.get(), type, userId);
+            return Optional.empty();
+        }
+
         final var headers = new LinkedHashMap<>(email.getHeaders());
         headers.putAll(consentEmails.headers(userId, type));
         email.setHeaders(Collections.unmodifiableMap(headers));
@@ -545,6 +556,34 @@ public class DefaultSendingEmailService implements SendingEmailService {
 
     public EmailLog tryToSendEmail(final Email email) {
         return tryToSendEmail(email, null, null);
+    }
+
+    private EmailLog send(final Email email, final EmailKind kind) {
+        final var switchOff = settingsService.emailSwitchOff(kind);
+        return switchOff.isPresent() ? logNotSent(email, switchOff.get(), null, null) : tryToSendEmail(email);
+    }
+
+    private EmailLog logNotSent(final Email email, final SettingKey switchOff, final NotificationType consentType, final Long userId) {
+        log.info("Not sent, {} is off: {} email to {} recipient(s): {}",
+                switchOff.getLabel(), EmailAddresses.maskedIn(email.getSubject()), email.getReceivers().length, maskedRecipients(email.getReceivers()));
+        return emailLogRepository.save(EmailLog.builder()
+                .sender(email.getSender())
+                .recipient(String.join(RECIPIENT_SEPARATOR, email.getReceivers()))
+                .subject(email.getSubject())
+                .status(EmailLog.STATUS_SKIPPED)
+                .errorMessage(NOT_SENT.formatted(switchOff.getLabel()))
+                .consentType(consentType)
+                .userId(userId)
+                .build());
+    }
+
+    private static EmailKind kindOf(final NotificationType type) {
+        return switch (type) {
+            case DEAD_LINK_EMAIL -> EmailKind.DEAD_LINKS;
+            case WEEKLY_SUMMARY_EMAIL -> EmailKind.WEEKLY_SUMMARY;
+            case EXPIRY_REMINDER_EMAIL -> EmailKind.LINK_EXPIRING;
+            default -> throw new IllegalArgumentException("Only email notification types are sent as consented email");
+        };
     }
 
     private EmailLog tryToSendEmail(final Email email, final NotificationType consentType, final Long userId) {
@@ -664,7 +703,7 @@ public class DefaultSendingEmailService implements SendingEmailService {
                 .text(templateEngine.process(template, ctx))
                 .build();
 
-        tryToSendEmail(email);
+        send(email, EmailKind.CUSTOM_DOMAIN);
     }
 
     private String frontendPage(final String path) {

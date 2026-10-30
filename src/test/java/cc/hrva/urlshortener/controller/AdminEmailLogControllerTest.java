@@ -94,7 +94,7 @@ class AdminEmailLogControllerTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"SENDING", "SENT", "FAILED", "RESENT"})
+    @ValueSource(strings = {"SENDING", "SENT", "FAILED", "RESENT", "SKIPPED"})
     void everyStatusOfTheLogCanBeKept(final String status) throws Exception {
         when(emailLogService.emails(eq(EmailStatus.valueOf(status)), isNull(), any(Pageable.class))).thenReturn(new PageImpl<>(List.of(), FIRST_PAGE, 0));
 

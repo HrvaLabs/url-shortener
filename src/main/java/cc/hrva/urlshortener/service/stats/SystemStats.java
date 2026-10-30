@@ -29,7 +29,7 @@ import org.springframework.stereotype.Component;
 public class SystemStats {
 
     private static final List<String> STATUS_KEYS =
-            List.of(EmailLog.STATUS_SENT, EmailLog.STATUS_FAILED, EmailLog.STATUS_SENDING, EmailLog.STATUS_RESENT);
+            List.of(EmailLog.STATUS_SENT, EmailLog.STATUS_FAILED, EmailLog.STATUS_SENDING, EmailLog.STATUS_RESENT, EmailLog.STATUS_SKIPPED);
     private static final String DATABASE = "db";
     private static final String REDIS = "redis";
     private static final String DOWN = Status.DOWN.getCode();
