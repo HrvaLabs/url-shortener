@@ -23,6 +23,7 @@ import cc.hrva.urlshortener.security.ClientIpResolver;
 import cc.hrva.urlshortener.security.CustomHostFilter;
 import cc.hrva.urlshortener.security.JwtFilter;
 import cc.hrva.urlshortener.security.OAuth2LoginSuccessHandler;
+import cc.hrva.urlshortener.security.OAuth2LoginUserService;
 import cc.hrva.urlshortener.security.TokenProvider;
 import cc.hrva.urlshortener.service.LinkPreviewService;
 import cc.hrva.urlshortener.service.QrCodeService;
@@ -152,6 +153,9 @@ class CustomHostEndpointSecurityTest {
     @MockitoBean
     private OAuth2LoginSuccessHandler oAuth2LoginSuccessHandler;
 
+    @MockitoBean
+    private OAuth2LoginUserService oAuth2LoginUserService;
+
     private final Logger filterLogger = (Logger) LoggerFactory.getLogger(CustomHostFilter.class);
     private final ListAppender<ILoggingEvent> logEvents = new ListAppender<>();
 
@@ -188,6 +192,8 @@ class CustomHostEndpointSecurityTest {
                 get("/oauth2"),
                 get("/oauth2/authorization/google"),
                 get("/login/oauth2/code/google"),
+                get("/oauth2/authorization/github"),
+                get("/login/oauth2/code/github"),
                 get("/mcp"),
                 head("/mcp"),
                 post("/mcp"),
