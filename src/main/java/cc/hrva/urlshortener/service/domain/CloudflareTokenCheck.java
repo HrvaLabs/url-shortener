@@ -22,6 +22,9 @@ import org.springframework.stereotype.Component;
 @RequiredArgsConstructor
 public class CloudflareTokenCheck {
 
+    static final String REFUSED_MESSAGE =
+            "Cloudflare refused the token. Check that it's valid and has SSL and Certificates edit permission on the hrva.cc zone.";
+
     private final CloudflareClient cloudflareClient;
     private final AppProperties appProperties;
     private final Clock clock;
@@ -67,18 +70,27 @@ public class CloudflareTokenCheck {
         if (!configured()) {
             return state(CloudflareTokenStatus.MISSING, null);
         }
-        final var verifiedActive = cloudflareClient.verifyToken() instanceof CloudflareResult.Ok<Boolean>(final var active, final var ignored)
-                && Boolean.TRUE.equals(active);
+        final var verify = cloudflareClient.verifyToken();
+        final var verifiedActive = verify instanceof CloudflareResult.Ok<Boolean>(final var active, final var ignored) && Boolean.TRUE.equals(active);
+        final var verifyUnreachable = verify instanceof CloudflareResult.Unreachable<Boolean>;
         return switch (cloudflareClient.totalCount()) {
             case CloudflareResult.Ok<Integer>(final var total, final var ignored) -> state(CloudflareTokenStatus.OK, total);
             case CloudflareResult.Refused<Integer>(final var status, final var code, final var message)
                     when status == HttpStatus.UNAUTHORIZED.value() -> state(CloudflareTokenStatus.INVALID, null);
-            case CloudflareResult.Refused<Integer> refused ->
-                    state(verifiedActive ? CloudflareTokenStatus.NO_PERMISSION : CloudflareTokenStatus.INVALID, null);
-            case CloudflareResult.NotFound<Integer> notFound ->
-                    state(verifiedActive ? CloudflareTokenStatus.NO_PERMISSION : CloudflareTokenStatus.INVALID, null);
+            case CloudflareResult.Refused<Integer> refused -> notAccepted(verifiedActive, verifyUnreachable);
+            case CloudflareResult.NotFound<Integer> notFound -> notAccepted(verifiedActive, verifyUnreachable);
             case CloudflareResult.Unreachable<Integer> unreachable -> state(CloudflareTokenStatus.UNREACHABLE, null);
         };
+    }
+
+    private TokenState notAccepted(final boolean verifiedActive, final boolean verifyUnreachable) {
+        if (verifiedActive) {
+            return state(CloudflareTokenStatus.NO_PERMISSION, null);
+        }
+        if (verifyUnreachable) {
+            return state(CloudflareTokenStatus.UNREACHABLE, null);
+        }
+        return new TokenState(CloudflareTokenStatus.INVALID, now(), REFUSED_MESSAGE, null);
     }
 
     private boolean configured() {
@@ -87,7 +99,11 @@ public class CloudflareTokenCheck {
     }
 
     private TokenState state(final CloudflareTokenStatus status, final Integer cloudflareTotal) {
-        return new TokenState(status, LocalDateTime.now(clock).truncatedTo(ChronoUnit.SECONDS), messageFor(status), cloudflareTotal);
+        return new TokenState(status, now(), messageFor(status), cloudflareTotal);
+    }
+
+    private LocalDateTime now() {
+        return LocalDateTime.now(clock).truncatedTo(ChronoUnit.SECONDS);
     }
 
     public record TokenState(CloudflareTokenStatus status, LocalDateTime checkedAt, String message, Integer cloudflareTotal) {

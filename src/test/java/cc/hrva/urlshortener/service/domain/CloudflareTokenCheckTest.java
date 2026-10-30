@@ -102,7 +102,33 @@ class CloudflareTokenCheckTest {
         when(cloudflareClient.totalCount()).thenReturn(new CloudflareResult.Refused<>(403, 10000, "Authentication error"));
 
         assertThat(tokenCheck.check()).isEqualTo(new CloudflareTokenCheck.TokenState(CloudflareTokenStatus.INVALID, CHECKED_AT,
+                "Cloudflare refused the token. Check that it's valid and has SSL and Certificates edit permission on the hrva.cc zone.", null));
+    }
+
+    @Test
+    void verifyUnreachableAndProbeRefusedIsUnreachable() {
+        when(cloudflareClient.verifyToken()).thenReturn(new CloudflareResult.Unreachable<>("timeout"));
+        when(cloudflareClient.totalCount()).thenReturn(new CloudflareResult.Refused<>(403, 10000, "Authentication error"));
+
+        assertThat(tokenCheck.check()).isEqualTo(new CloudflareTokenCheck.TokenState(CloudflareTokenStatus.UNREACHABLE, CHECKED_AT,
+                "Cloudflare couldn't be reached. We'll check again.", null));
+    }
+
+    @Test
+    void verifyUnreachableAndProbeUnauthorizedIsInvalid() {
+        when(cloudflareClient.verifyToken()).thenReturn(new CloudflareResult.Unreachable<>("timeout"));
+        when(cloudflareClient.totalCount()).thenReturn(new CloudflareResult.Refused<>(401, 10000, "Authentication error"));
+
+        assertThat(tokenCheck.check()).isEqualTo(new CloudflareTokenCheck.TokenState(CloudflareTokenStatus.INVALID, CHECKED_AT,
                 "Cloudflare doesn't accept the token.", null));
+    }
+
+    @Test
+    void verifyUnreachableAndProbeOkIsOk() {
+        when(cloudflareClient.verifyToken()).thenReturn(new CloudflareResult.Unreachable<>("timeout"));
+        when(cloudflareClient.totalCount()).thenReturn(new CloudflareResult.Ok<>(3, 3));
+
+        assertThat(tokenCheck.check()).isEqualTo(new CloudflareTokenCheck.TokenState(CloudflareTokenStatus.OK, CHECKED_AT, null, 3));
     }
 
     @Test
@@ -110,7 +136,8 @@ class CloudflareTokenCheckTest {
         when(cloudflareClient.verifyToken()).thenReturn(ACTIVE);
         when(cloudflareClient.totalCount()).thenReturn(new CloudflareResult.Refused<>(401, 10000, "Authentication error"));
 
-        assertThat(tokenCheck.check().status()).isEqualTo(CloudflareTokenStatus.INVALID);
+        assertThat(tokenCheck.check()).isEqualTo(new CloudflareTokenCheck.TokenState(CloudflareTokenStatus.INVALID, CHECKED_AT,
+                "Cloudflare doesn't accept the token.", null));
     }
 
     @Test

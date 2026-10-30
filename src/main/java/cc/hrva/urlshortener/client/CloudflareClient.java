@@ -27,6 +27,7 @@ import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.MissingNode;
 
 @Slf4j
 @Component
@@ -52,6 +53,7 @@ public class CloudflareClient {
     private static final String INTERRUPTED = "interrupted";
     private static final String NOT_CONFIGURED = "not configured";
     private static final String REFUSED = "refused";
+    private static final String VERIFY = "verify";
 
     private final AppProperties appProperties;
     private final JsonMapper jsonMapper;
@@ -73,13 +75,14 @@ public class CloudflareClient {
     }
 
     public CloudflareResult<Boolean> verifyToken() {
-        return call(new Call<>("verify", false, HttpMethod.GET, "/user/tokens/verify", null, null,
+        return call(new Call<>(VERIFY, false, HttpMethod.GET, "/user/tokens/verify", null, null,
                 body -> new CloudflareResult.Ok<>(ACTIVE.equals(text(body.path("result"), "status")), null)));
     }
 
     public CloudflareResult<List<CloudflareHostname>> list(final int page) {
         return call(new Call<>("list", true, HttpMethod.GET, HOSTNAMES + "?per_page=" + PAGE_SIZE + "&page=" + page, null, null,
-                body -> hostnames(body).<CloudflareResult<List<CloudflareHostname>>>map(found -> new CloudflareResult.Ok<>(found, total(body)))
+                body -> hostnames(body).filter(found -> total(body) != null)
+                        .<CloudflareResult<List<CloudflareHostname>>>map(found -> new CloudflareResult.Ok<>(found, total(body)))
                         .orElseGet(() -> new CloudflareResult.Unreachable<>(UNREADABLE))));
     }
 
@@ -90,7 +93,7 @@ public class CloudflareClient {
     }
 
     public CloudflareResult<Optional<CloudflareHostname>> findByHostname(final String hostname) {
-        return call(new Call<>("find", true, HttpMethod.GET, HOSTNAMES + "?hostname=" + encode(hostname), null, null,
+        return call(new Call<>("find", true, HttpMethod.GET, HOSTNAMES + "?hostname=" + encode(hostname) + "&per_page=" + PAGE_SIZE, null, null,
                 body -> hostnames(body).<CloudflareResult<Optional<CloudflareHostname>>>map(found -> new CloudflareResult.Ok<>(found.stream()
                                 .filter(candidate -> Strings.CI.equals(candidate.hostname(), hostname))
                                 .findFirst(), total(body)))
@@ -112,7 +115,7 @@ public class CloudflareClient {
 
     public CloudflareResult<Void> delete(final String id) {
         return call(new Call<>("delete", true, HttpMethod.DELETE, HOSTNAMES + "/" + encode(id), null, new CloudflareResult.Ok<>(null, null),
-                body -> new CloudflareResult.Ok<>(null, null)));
+                body -> new CloudflareResult.Ok<>(null, null), false));
     }
 
     public CloudflareResult<Quota> quota() {
@@ -196,6 +199,9 @@ public class CloudflareClient {
         }
         final var json = parse(body);
         if (status / 100 == 2) {
+            if (json.isEmpty() && !call.readsBody()) {
+                return call.onSuccess().apply(MissingNode.getInstance());
+            }
             if (json.isEmpty()) {
                 return unreachable(call, status, UNREADABLE, null);
             }
@@ -219,7 +225,11 @@ public class CloudflareClient {
         final var error = body == null ? null : body.path("errors").path(0);
         final var code = error != null && error.path("code").isIntegralNumber() ? error.path("code").asInt() : 0;
         final var message = error == null ? null : text(error, "message");
-        log.warn("Cloudflare call failed call={} status={} code={} failure={}", call.name(), status, code, REFUSED);
+        if (VERIFY.equals(call.name())) {
+            log.debug("Cloudflare call failed call={} status={} code={} failure={}", call.name(), status, code, REFUSED);
+        } else {
+            log.warn("Cloudflare call failed call={} status={} code={} failure={}", call.name(), status, code, REFUSED);
+        }
         return new CloudflareResult.Refused<>(status, code, message);
     }
 
@@ -297,7 +307,13 @@ public class CloudflareClient {
     }
 
     private record Call<T>(String name, boolean zoneScoped, HttpMethod method, String path, String body, CloudflareResult<T> onNotFound,
-                           Function<JsonNode, CloudflareResult<T>> onSuccess) {
+                           Function<JsonNode, CloudflareResult<T>> onSuccess, boolean readsBody) {
+
+        Call(final String name, final boolean zoneScoped, final HttpMethod method, final String path, final String body,
+             final CloudflareResult<T> onNotFound, final Function<JsonNode, CloudflareResult<T>> onSuccess) {
+            this(name, zoneScoped, method, path, body, onNotFound, onSuccess, true);
+        }
+
     }
 
 }

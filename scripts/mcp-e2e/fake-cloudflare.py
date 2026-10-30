@@ -150,17 +150,24 @@ class Handler(BaseHTTPRequestHandler):
     def route(self, method):
         parts = urlsplit(self.path)
         query = parse_qs(parts.query, keep_blank_values=True)
-        length = int(self.headers.get("Content-Length") or 0)
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            self.close_connection = True
+            self.reply(400, json.dumps(failure(1000, "Invalid Content-Length")))
+            return
         raw_body = self.rfile.read(length) if length > 0 else b""
         if parts.path.startswith("/_control/"):
             with lock:
                 status, body = self.control(method, parts.path, query)
-            self.reply(status, body)
+                payload = json.dumps(body)
+            self.reply(status, payload)
             return
         with lock:
             status, body = self.api(method, parts.path, query, raw_body)
             state["calls"].append({"method": method, "path": parts.path, "query": parts.query, "status": status})
-        self.reply(status, body)
+            payload = json.dumps(body)
+        self.reply(status, payload)
 
     def control(self, method, path, query):
         if method == "GET" and path == "/_control/calls":
@@ -279,13 +286,18 @@ class Handler(BaseHTTPRequestHandler):
         records[record["id"]] = record
         return 201, envelope(record)
 
-    def reply(self, status, body):
-        payload = json.dumps(body).encode("utf-8")
+    def reply(self, status, text):
+        payload = text.encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(payload)))
         self.end_headers()
         self.wfile.write(payload)
+
+
+class Server(ThreadingHTTPServer):
+    daemon_threads = True
+    request_queue_size = 128
 
 
 def main():
@@ -295,8 +307,7 @@ def main():
     parser.add_argument("--verbose", action="store_true", help="log every request line (never headers)")
     arguments = parser.parse_args()
     Handler.verbose = arguments.verbose
-    server = ThreadingHTTPServer((arguments.host, arguments.port), Handler)
-    server.daemon_threads = True
+    server = Server((arguments.host, arguments.port), Handler)
     sys.stderr.write("fake-cloudflare listening on http://%s:%d%s\n" % (arguments.host, arguments.port, API_PREFIX))
     sys.stderr.flush()
     try:

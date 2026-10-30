@@ -141,7 +141,7 @@ class CloudflareClientTest {
         assertThat(received).singleElement().satisfies(request -> {
             assertThat(request.method()).isEqualTo("GET");
             assertThat(request.path()).isEqualTo(HOSTNAMES);
-            assertThat(request.query()).isEqualTo("hostname=go.example.com");
+            assertThat(request.query()).isEqualTo("hostname=go.example.com&per_page=50");
         });
     }
 
@@ -170,6 +170,42 @@ class CloudflareClientTest {
             assertThat(request.method()).isEqualTo("DELETE");
             assertThat(request.path()).isEqualTo(HOSTNAMES + "/" + HOSTNAME_ID);
         });
+    }
+
+    @Test
+    void anEmptyDeleteAnswerIsOk() {
+        answer(HOSTNAMES + "/" + HOSTNAME_ID, 204, "");
+
+        assertThat(client.delete(HOSTNAME_ID)).isEqualTo(new CloudflareResult.Ok<Void>(null, null));
+    }
+
+    @Test
+    void anEmptyAnswerIsUnreadableWhereTheBodyIsNeeded() {
+        answer(HOSTNAMES + "/" + HOSTNAME_ID, 200, "");
+
+        assertThat(client.get(HOSTNAME_ID)).isEqualTo(new CloudflareResult.Unreachable<>("unreadable"));
+    }
+
+    @Test
+    void aListWithoutATotalIsUnreadable() {
+        answer(HOSTNAMES, 200, "{\"success\":true,\"result\":[" + HOSTNAME_JSON + "]}");
+
+        assertThat(client.list(1)).isEqualTo(new CloudflareResult.Unreachable<>("unreadable"));
+        assertThat(client.findByHostname("go.example.com")).isInstanceOf(CloudflareResult.Ok.class);
+    }
+
+    @Test
+    void verifyRefusalsAreLoggedAtDebugAndOtherRefusalsAtWarn() {
+        answer("/client/v4/user/tokens/verify", 401, error(1000, "Invalid API Token"));
+        answer(HOSTNAMES, 403, error(10000, "Authentication error"));
+
+        client.verifyToken();
+        client.list(1);
+
+        assertThat(logEvents.list).filteredOn(event -> event.getFormattedMessage().contains("call=verify"))
+                .singleElement().satisfies(event -> assertThat(event.getLevel()).isEqualTo(Level.DEBUG));
+        assertThat(logEvents.list).filteredOn(event -> event.getFormattedMessage().contains("call=list"))
+                .singleElement().satisfies(event -> assertThat(event.getLevel()).isEqualTo(Level.WARN));
     }
 
     @Test
@@ -302,7 +338,7 @@ class CloudflareClientTest {
 
         client.findByHostname("go.example.com&per_page=1000");
 
-        assertThat(received).singleElement().satisfies(request -> assertThat(request.rawQuery()).isEqualTo("hostname=go.example.com%26per_page%3D1000"));
+        assertThat(received).singleElement().satisfies(request -> assertThat(request.rawQuery()).isEqualTo("hostname=go.example.com%26per_page%3D1000&per_page=50"));
     }
 
     @Test
