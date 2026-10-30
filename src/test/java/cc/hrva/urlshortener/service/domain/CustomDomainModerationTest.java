@@ -5,10 +5,17 @@ import cc.hrva.urlshortener.exception.CustomDomainConflictException;
 import cc.hrva.urlshortener.exception.CustomDomainNotFoundException;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.enums.DomainDisableReason;
+import cc.hrva.urlshortener.repository.BlocklistSourceRepository;
 import cc.hrva.urlshortener.repository.CustomDomainRepository;
+import cc.hrva.urlshortener.repository.DomainRuleRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
+import cc.hrva.urlshortener.service.DomainAgeService;
+import cc.hrva.urlshortener.service.DomainReputationService;
+import cc.hrva.urlshortener.service.SuspiciousUrlService;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.DomainDisabled;
+import cc.hrva.urlshortener.service.blocklist.BlocklistStore;
+import cc.hrva.urlshortener.service.impl.DefaultLinkCheckService;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -85,6 +92,21 @@ class CustomDomainModerationTest {
     @MockitoBean
     private CustomDomainLifecycle customDomainLifecycle;
 
+    @MockitoBean
+    private BlocklistSourceRepository blocklistSourceRepository;
+
+    @MockitoBean
+    private BlocklistStore blocklistStore;
+
+    @MockitoBean
+    private DomainAgeService domainAgeService;
+
+    @MockitoBean
+    private DomainReputationService domainReputationService;
+
+    @MockitoBean
+    private SuspiciousUrlService suspiciousUrlService;
+
     @BeforeEach
     void setUp() {
         account(ANA, "ana@hrva.cc");
@@ -95,6 +117,7 @@ class CustomDomainModerationTest {
     @AfterEach
     void tearDown() {
         jdbcTemplate.update("delete from custom_domain");
+        jdbcTemplate.update("delete from domain_rule");
         jdbcTemplate.update("delete from user_account where id in (?, ?)", ANA, BOB);
     }
 
@@ -186,6 +209,7 @@ class CustomDomainModerationTest {
         assertThat(row(id))
                 .containsEntry("STATUS", "ERROR")
                 .containsEntry("PROBLEM", "PROVISIONING_FAILED")
+                .containsEntry("LAST_ERROR", "It was turned on again before setup finished.")
                 .containsEntry("NEXT_CHECK_AT", null)
                 .containsEntry("DISABLED_REASON", null);
         assertThat(customDomainRepository.countSlotsInUse()).isZero();
@@ -216,6 +240,8 @@ class CustomDomainModerationTest {
         final var alreadyOff = domain(BOB, "off.example.com", "DISABLED", "cf-6");
         jdbcTemplate.update("update custom_domain set disabled_reason = 'ADMIN', disabled_note = 'Spam' where id = ?", alreadyOff);
 
+        rule("example.com", "BLOCK");
+
         final var disabled = customDomainModeration.disableMatching("example.com", "Scam wave");
 
         assertThat(disabled).isEqualTo(3);
@@ -236,6 +262,8 @@ class CustomDomainModerationTest {
         final var exact = domain(ANA, "go.example.com", "ACTIVE", "cf-1");
         final var sibling = domain(BOB, "links.example.com", "ACTIVE", "cf-2");
 
+        rule("go.example.com", "BLOCK");
+
         assertThat(customDomainModeration.disableMatching("go.example.com", "Phishing")).isOne();
 
         assertThat(statusOf(exact)).isEqualTo("DISABLED");
@@ -243,8 +271,36 @@ class CustomDomainModerationTest {
     }
 
     @Test
+    void aMoreSpecificAllowRuleKeepsItsDomainOn() {
+        final var trusted = domain(ANA, "go.example.com", "ACTIVE", "cf-1");
+        final var underTheAllow = domain(ANA, "deep.go.example.com", "AWAITING_DNS", "cf-2");
+        final var blocked = domain(BOB, "links.example.com", "ACTIVE", "cf-3");
+        rule("example.com", "BLOCK");
+        rule("go.example.com", "ALLOW");
+
+        assertThat(customDomainModeration.disableMatching("example.com", "Scam wave")).isOne();
+
+        assertThat(statusOf(trusted)).isEqualTo("ACTIVE");
+        assertThat(statusOf(underTheAllow)).isEqualTo("AWAITING_DNS");
+        assertThat(statusOf(blocked)).isEqualTo("DISABLED");
+    }
+
+    @Test
+    void aMoreSpecificBlockRuleBelowAnAllowStillTurnsItsDomainOff() {
+        final var blocked = domain(ANA, "bad.go.example.com", "ACTIVE", "cf-1");
+        rule("go.example.com", "ALLOW");
+        rule("bad.go.example.com", "BLOCK");
+
+        assertThat(customDomainModeration.disableMatching("bad.go.example.com", null)).isOne();
+
+        assertThat(statusOf(blocked)).isEqualTo("DISABLED");
+    }
+
+    @Test
     void aBlockRuleWithoutAReasonNamesTheRuleDomain() {
         final var id = domain(ANA, "go.example.com", "ACTIVE", "cf-1");
+
+        rule("example.com", "BLOCK");
 
         customDomainModeration.disableMatching("example.com", "  ");
 
@@ -304,6 +360,10 @@ class CustomDomainModerationTest {
         return jdbcTemplate.queryForObject("select id from custom_domain where hostname = ?", Long.class, hostname);
     }
 
+    private void rule(final String domain, final String type) {
+        jdbcTemplate.update("insert into domain_rule (domain, type, reason, created_by) values (?, ?, 'test', 'system')", domain, type);
+    }
+
     private Map<String, Object> row(final long id) {
         return jdbcTemplate.queryForMap("select * from custom_domain where id = ?", id);
     }
@@ -324,10 +384,11 @@ class CustomDomainModerationTest {
             basePackageClasses = UserRepository.class,
             includeFilters = @ComponentScan.Filter(
                     type = FilterType.ASSIGNABLE_TYPE,
-                    classes = {UserRepository.class, CustomDomainRepository.class}))
+                    classes = {UserRepository.class, CustomDomainRepository.class, DomainRuleRepository.class}))
     @Import({
             AppConfiguration.class,
             CustomDomainModeration.class,
+            DefaultLinkCheckService.class,
             TestApplication.FixedClock.class,
             TestApplication.CommittedEvents.class
     })

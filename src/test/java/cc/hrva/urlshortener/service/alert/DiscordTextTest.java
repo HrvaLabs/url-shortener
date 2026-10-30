@@ -50,4 +50,12 @@ class DiscordTextTest {
         assertThat(DiscordText.plain("see https://example.com/a_b*c now")).isEqualTo("see <https://example.com/a_b*c> now");
     }
 
+    @Test
+    void aHostnameKeepsItsIpLikeLabelsButStillCannotFormat() {
+        assertThat(DiscordText.hostname("1.2.3.4.example.com")).isEqualTo("1.2.3.4.example.com");
+        assertThat(DiscordText.hostname("go_*x.example.com")).isEqualTo("go\\_\\*x.example.com");
+        assertThat(DiscordText.hostname("go.example.com`<@everyone>\n[x]")).isEqualTo("go.example.com@everyone x");
+        assertThat(DiscordText.hostname(null)).isEmpty();
+    }
+
 }

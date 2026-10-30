@@ -74,6 +74,9 @@ public interface CustomDomainRepository extends JpaRepository<CustomDomain, Long
     @Query("select d from CustomDomain d where d.id = :id")
     Optional<CustomDomain> findByIdForUpdate(@Param("id") long id);
 
+    @Query(value = "select status from custom_domain where id = :id for update", nativeQuery = true)
+    Optional<String> findStatusForUpdate(@Param("id") long id);
+
     @Query("""
             select d from CustomDomain d join d.owner o
             where d.hostnameKey = :hostnameKey and o.id = :ownerId and o.active = true
@@ -204,7 +207,8 @@ public interface CustomDomainRepository extends JpaRepository<CustomDomain, Long
     @Query("""
             update CustomDomain d
             set d.status = cc.hrva.urlshortener.model.enums.CustomDomainStatus.ERROR,
-                d.problem = cc.hrva.urlshortener.model.enums.DomainProblem.PROVISIONING_FAILED, d.disabledReason = null, d.disabledNote = null,
+                d.problem = cc.hrva.urlshortener.model.enums.DomainProblem.PROVISIONING_FAILED,
+                d.lastError = 'It was turned on again before setup finished.', d.disabledReason = null, d.disabledNote = null,
                 d.disabledAt = null, d.nextCheckAt = null, d.updatedAt = :now
             where d.id = :id and d.status = cc.hrva.urlshortener.model.enums.CustomDomainStatus.DISABLED and d.cloudflareId is null""")
     int markEnabledWithoutHostname(@Param("id") long id, @Param("now") LocalDateTime now);

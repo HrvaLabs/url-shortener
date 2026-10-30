@@ -161,8 +161,7 @@ public class CustomDomainReconciler {
             return false;
         }
         final var reason = verdict.blockReason() == BlockReason.DOMAIN_RULE ? DomainDisableReason.DOMAIN_RULE : DomainDisableReason.BLOCKLIST;
-        customDomainModeration.disable(id, reason, verdict.blockDetail());
-        return true;
+        return customDomainModeration.disableIfStillOn(id, reason, verdict.blockDetail());
     }
 
     private Listing listing() {

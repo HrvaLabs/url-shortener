@@ -29,6 +29,14 @@ public final class DiscordText {
         return escaped(cleaned(text));
     }
 
+    public static String hostname(final String hostname) {
+        if (StringUtils.isBlank(hostname)) {
+            return "";
+        }
+        final var visible = FORMATTING.matcher(INVISIBLE.matcher(hostname).replaceAll(" ")).replaceAll("");
+        return MARKDOWN.matcher(StringUtils.normalizeSpace(visible)).replaceAll("\\\\$0");
+    }
+
     private static String cleaned(final String text) {
         var cleaned = INVISIBLE.matcher(text).replaceAll(" ");
         cleaned = MASKED_LINK.matcher(cleaned).replaceAll("$1 $2");

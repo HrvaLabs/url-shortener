@@ -586,6 +586,22 @@ class DiscordAlertFormatterTest {
     }
 
     @Test
+    void aDomainHostnameThatStartsLikeAnIpAddressIsShownAsItIsWhileFreeTextIsStillScrubbed() {
+        final var lines = formatter.message(List.of(
+                new DomainApplied(12L, "1.2.3.4.example.com", 7L, List.of("Seen at 10.0.0.1 by ana@example.com")),
+                new DomainDisabled(13L, "10.20.30.40.example.org", DomainDisableReason.ADMIN, "Reported from 192.0.2.7"),
+                new DomainNeedsAttention(14L, "192.168.1.1.example.net", DomainProblem.CNAME_REMOVED)), 0).content().lines().toList();
+
+        assertThat(lines).containsExactly(
+                "New custom domain application: 1.2.3.4.example.com (Seen at (IP removed) by (email removed)), account #7, "
+                        + "<https://app.hrva.cc/admin/domains?search=1.2.3.4.example.com&id=12>",
+                "Custom domain turned off: 10.20.30.40.example.org (by an admin: Reported from (IP removed)), "
+                        + "<https://app.hrva.cc/admin/domains?search=10.20.30.40.example.org&id=13>",
+                "Custom domain needs attention: 192.168.1.1.example.net (its CNAME record is gone), "
+                        + "<https://app.hrva.cc/admin/domains?search=192.168.1.1.example.net&id=14>");
+    }
+
+    @Test
     void domainValuesDoNotFormat() {
         final var content = formatter.message(List.of(
                 new DomainApplied(12L, "go_*x.example.com", 7L, List.of("*bold* _flag_ `code`")),

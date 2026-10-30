@@ -6,6 +6,7 @@ import cc.hrva.urlshortener.model.CustomDomain;
 import cc.hrva.urlshortener.model.enums.CustomDomainStatus;
 import cc.hrva.urlshortener.model.enums.DomainDisableReason;
 import cc.hrva.urlshortener.repository.CustomDomainRepository;
+import cc.hrva.urlshortener.service.LinkCheckService;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.DomainDisabled;
 import java.time.Clock;
 import java.time.LocalDateTime;
@@ -37,9 +38,11 @@ public class CustomDomainModeration {
     private static final String ACCOUNT_BLOCKED = "Account blocked";
     private static final String RULE_NOTE_SEPARATOR = ": ";
     private static final int MAX_NOTE_LENGTH = 500;
+    private static final String HTTPS = "https://";
 
     private final CustomDomainRepository customDomainRepository;
     private final CustomDomainLifecycle customDomainLifecycle;
+    private final LinkCheckService linkCheckService;
     private final ApplicationEventPublisher eventPublisher;
     private final TransactionOperations transactionOperations;
     private final Clock clock;
@@ -50,6 +53,7 @@ public class CustomDomainModeration {
                 MAX_NOTE_LENGTH);
         final var disabled = (int) read(() -> customDomainRepository.findByStatusIn(DISABLEABLE)).stream()
                 .filter(domain -> covers(domain, ruleDomain))
+                .filter(domain -> linkCheckService.isBlockedByRule(HTTPS + hostnameOf(domain) + "/"))
                 .filter(domain -> safely(domain.getId(), () -> disableIfStillOn(domain.getId(), DomainDisableReason.DOMAIN_RULE, ruleNote)))
                 .count();
         if (disabled > 0) {
@@ -113,7 +117,8 @@ public class CustomDomainModeration {
         checkSoon(id, enabledAs);
     }
 
-    private boolean disableIfStillOn(final long id, final DomainDisableReason reason, final String note) {
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    public boolean disableIfStillOn(final long id, final DomainDisableReason reason, final String note) {
         return Boolean.TRUE.equals(transactionOperations.execute(status -> customDomainRepository.findByIdForUpdate(id)
                 .filter(domain -> DISABLEABLE.contains(domain.getStatus()))
                 .map(domain -> turnOff(domain, reason, note))
@@ -198,8 +203,12 @@ public class CustomDomainModeration {
     }
 
     private static boolean covers(final CustomDomain domain, final String ruleDomain) {
-        final var hostname = Objects.requireNonNullElse(domain.getHostnameKey(), domain.getHostname());
+        final var hostname = hostnameOf(domain);
         return hostname.equals(ruleDomain) || hostname.endsWith("." + ruleDomain);
+    }
+
+    private static String hostnameOf(final CustomDomain domain) {
+        return Objects.requireNonNullElse(domain.getHostnameKey(), domain.getHostname());
     }
 
     private LocalDateTime now() {

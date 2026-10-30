@@ -23,7 +23,11 @@ import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -42,13 +46,17 @@ import org.springframework.context.annotation.Import;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.event.TransactionalEventListener;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -88,6 +96,15 @@ class CustomDomainRemovalTest {
 
     @Autowired
     private TestApplication.CommittedChanges committedChanges;
+
+    @Autowired
+    private CustomDomainRepository customDomainRepository;
+
+    @Autowired
+    private PlatformTransactionManager transactionManager;
+
+    @MockitoSpyBean
+    private UrlDomainMoves urlDomainMoves;
 
     @MockitoBean
     private UrlService urlService;
@@ -266,6 +283,57 @@ class CustomDomainRemovalTest {
     }
 
     @Test
+    void aLinkCreatedOnTheDomainWhileItIsRemovedIsTurnedOffWithTheOthers() throws Exception {
+        final var domain = domain("go.example.com", "ACTIVE", "cf-1");
+        link(domain, "menu", true);
+
+        final var response = removeWhileALinkIsBeingCreated(domain, DomainLinkMode.DEACTIVATE);
+
+        assertThat(response).isEqualTo(new DomainRemovalResponse(0, List.of(), 2));
+        assertThat(activeLinksOnRemovedDomains()).isZero();
+    }
+
+    @Test
+    void aLinkCreatedOnTheDomainWhileItIsRemovedIsMovedWithTheOthers() throws Exception {
+        final var domain = domain("go.example.com", "ACTIVE", "cf-1");
+        link(domain, "menu", true);
+
+        final var response = removeWhileALinkIsBeingCreated(domain, DomainLinkMode.MOVE);
+
+        assertThat(response).isEqualTo(new DomainRemovalResponse(2, List.of(), 0));
+        assertThat(jdbcTemplate.queryForObject("select count(*) from url where domain_id = ?", Integer.class, domain)).isZero();
+        assertThat(activeLinksOnRemovedDomains()).isZero();
+    }
+
+    @Test
+    void aCreateThatWaitedForTheRemovalReadsTheDomainAsRemoved() throws Exception {
+        final var domain = domain("go.example.com", "ACTIVE", "cf-1");
+        final var removalHoldsTheRow = new CountDownLatch(1);
+        final var creatorReadTheDomain = new CountDownLatch(1);
+        doAnswer(invocation -> {
+            final var links = invocation.callRealMethod();
+            removalHoldsTheRow.countDown();
+            assertThat(creatorReadTheDomain.await(10, TimeUnit.SECONDS)).isTrue();
+            Thread.sleep(300);
+            return links;
+        }).when(urlDomainMoves).linksOf(domain);
+        final var seenByTheRead = new AtomicReference<String>();
+        final var creator = CompletableFuture.supplyAsync(() -> {
+            awaitQuietly(removalHoldsTheRow);
+            return new TransactionTemplate(transactionManager).execute(status -> {
+                seenByTheRead.set(customDomainRepository.findUsable("go.example.com", ANA).map(found -> found.getStatus().name()).orElse(null));
+                creatorReadTheDomain.countDown();
+                return customDomainRepository.findStatusForUpdate(domain).orElse(null);
+            });
+        });
+
+        customDomainRemoval.remove(domain, DomainLinkMode.DEACTIVATE, OWNER);
+
+        assertThat(seenByTheRead.get()).isEqualTo("ACTIVE");
+        assertThat(creator.get(10, TimeUnit.SECONDS)).isEqualTo("DELETED");
+    }
+
+    @Test
     void everyStatusCanBeRemovedAndAPendingApplicationIgnoresItsLinksMode() {
         for (final var status : List.of("PENDING_REVIEW", "APPROVED_PROVISIONING", "AWAITING_DNS", "ACTIVE", "DISABLED", "ERROR", "REJECTED")) {
             final var id = domain(status.toLowerCase(Locale.ROOT).replace('_', '-') + ".example.com", status, null);
@@ -305,6 +373,39 @@ class CustomDomainRemovalTest {
         assertThat(seenDuringTheMove).containsExactly("DELETED", "1");
         assertThat(committedChanges.changes()).containsExactly(new CustomDomainChangedEvent(domain));
         assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+    }
+
+    private DomainRemovalResponse removeWhileALinkIsBeingCreated(final long domain, final DomainLinkMode mode) throws Exception {
+        final var creatorHoldsTheRow = new CountDownLatch(1);
+        final var commitTheLink = new CountDownLatch(1);
+        final var creator = CompletableFuture.runAsync(() -> new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+            assertThat(customDomainRepository.findStatusForUpdate(domain)).contains("ACTIVE");
+            jdbcTemplate.update("insert into url (short_url, long_url, owner_id, domain_id, active) values ('late', 'https://example.org/late', ?, ?, true)",
+                    ANA, domain);
+            creatorHoldsTheRow.countDown();
+            awaitQuietly(commitTheLink);
+        }));
+        assertThat(creatorHoldsTheRow.await(10, TimeUnit.SECONDS)).isTrue();
+        final var removal = CompletableFuture.supplyAsync(() -> customDomainRemoval.remove(domain, mode, OWNER));
+
+        assertThatThrownBy(() -> removal.get(300, TimeUnit.MILLISECONDS)).isInstanceOf(TimeoutException.class);
+        commitTheLink.countDown();
+        creator.get(10, TimeUnit.SECONDS);
+        return removal.get(10, TimeUnit.SECONDS);
+    }
+
+    private int activeLinksOnRemovedDomains() {
+        return jdbcTemplate.queryForObject(
+                "select count(*) from url u join custom_domain d on d.id = u.domain_id where d.status = 'DELETED' and u.active = true", Integer.class);
+    }
+
+    private static void awaitQuietly(final CountDownLatch latch) {
+        try {
+            assertThat(latch.await(10, TimeUnit.SECONDS)).isTrue();
+        } catch (final InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException(exception);
+        }
     }
 
     private long domain(final String hostname, final String status, final String cloudflareId) {

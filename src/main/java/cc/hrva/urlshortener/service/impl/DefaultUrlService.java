@@ -168,7 +168,7 @@ public class DefaultUrlService implements UrlService {
 
         final var created = transactionOperations.execute(status -> {
             if (currentUser != null) {
-                url.setDomain(resolveDomain(createUrlDto.getDomain(), currentUser));
+                url.setDomain(resolveAndLockDomain(createUrlDto.getDomain(), currentUser));
                 url.setCreatedVia(createdVia);
                 applyPassword(url, createUrlDto.getPassword());
                 return saveUrlForUser(url, currentUser, verdict);
@@ -262,7 +262,7 @@ public class DefaultUrlService implements UrlService {
         final var verdict = validateUrl(url);
 
         final var created = transactionOperations.execute(status -> {
-            url.setDomain(resolveDomain(createUrlDto.getDomain(), apiKey.getOwner()));
+            url.setDomain(resolveAndLockDomain(createUrlDto.getDomain(), apiKey.getOwner()));
             apiKeyService.recordUse(apiKey.getId());
 
             url.setCreatedVia(createdVia);
@@ -302,6 +302,20 @@ public class DefaultUrlService implements UrlService {
         if (StringUtils.isNotBlank(hostname)) {
             transactionOperations.executeWithoutResult(status -> resolveDomain(hostname, caller));
         }
+    }
+
+    private CustomDomain resolveAndLockDomain(final String hostname, final User caller) {
+        final var domain = resolveDomain(hostname, caller);
+        if (domain == null) {
+            return null;
+        }
+        final var lockedStatus = customDomainRepository.findStatusForUpdate(domain.getId());
+        if (!lockedStatus.map(CustomDomainStatus.ACTIVE.name()::equals).orElse(false)) {
+            log.info("Link creation refused, the domain changed while the link was created userId={} domainId={} status={}", caller.getId(),
+                    domain.getId(), lockedStatus.orElse(null));
+            throw new FieldValidationException(DOMAIN_FIELD, UrlValidator.DOMAIN_NOT_USABLE);
+        }
+        return domain;
     }
 
     private CustomDomain resolveDomain(final String hostname, final User caller) {

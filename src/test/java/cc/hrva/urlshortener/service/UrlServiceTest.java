@@ -213,6 +213,7 @@ class UrlServiceTest {
     @BeforeEach
     void setUp() {
         org.mockito.Mockito.lenient().when(rateLimiter.tryAcquire(any(), org.mockito.ArgumentMatchers.anyInt(), any())).thenReturn(true);
+        org.mockito.Mockito.lenient().when(customDomainRepository.findStatusForUpdate(anyLong())).thenReturn(Optional.of("ACTIVE"));
         org.mockito.Mockito.lenient().when(urlValidator.checkIfLongUrlIsNotBlocklisted(any())).thenReturn(LinkVerdict.clean());
         org.mockito.Mockito.lenient().when(clickCheckService.mayRedirect(org.mockito.ArgumentMatchers.anyLong(), any())).thenReturn(true);
         this.urlService = new DefaultUrlService(
@@ -1455,6 +1456,41 @@ class UrlServiceTest {
 
         verify(apiKeyService, never()).recordUse(anyLong());
         verify(urlRepository, never()).save(any());
+    }
+
+    @Test
+    void aDomainRemovedWhileTheLinkIsCreatedStopsTheCreateUnderTheRowLock() {
+        final var createUrlDto = onTheDomain("go.example.com");
+        when(createUrlToUrlConverter.convert(createUrlDto)).thenReturn(Url.builder().longUrl("https://example.com/menu").build());
+        when(userService.getUserFromToken()).thenReturn(User.builder().id(1L).build());
+        when(customDomainRepository.findUsable("go.example.com", 1L)).thenReturn(Optional.of(goExampleCom(CustomDomainStatus.ACTIVE)));
+        when(customDomainRepository.findStatusForUpdate(7L)).thenReturn(Optional.of("DELETED"));
+
+        assertThatThrownBy(() -> urlService.saveUrlRouting(createUrlDto, CLIENT_IP, CreatedVia.WEB))
+                .isInstanceOfSatisfying(FieldValidationException.class,
+                        exception -> assertThat(exception.getFieldErrors()).containsExactly(entry("domain", DOMAIN_REFUSAL)));
+
+        verify(customDomainRepository, times(1)).findStatusForUpdate(7L);
+        verify(urlRepository, never()).save(any());
+    }
+
+    @Test
+    void anApiKeyCreateLocksTheDomainRowOnlyInsideItsWriteTransaction() {
+        final var createUrlDto = onTheDomain("go.example.com");
+        final var url = Url.builder().longUrl("https://example.com/menu").build();
+        when(createUrlToUrlConverter.convert(createUrlDto)).thenReturn(url);
+        when(apiKeyService.fetchApiKeyByKey("k")).thenReturn(ApiKey.builder().id(3L).owner(User.builder().id(5L).build()).build());
+        when(appProperties.getShortUrlLength()).thenReturn(5L);
+        when(customDomainRepository.findUsable("go.example.com", 5L)).thenReturn(Optional.of(goExampleCom(CustomDomainStatus.ACTIVE)));
+        when(urlRepository.save(url)).thenReturn(persisted(url));
+
+        urlService.saveUrlWithApiKey(createUrlDto, "k", CreatedVia.API_KEY);
+
+        final var order = org.mockito.Mockito.inOrder(customDomainRepository, apiKeyService);
+        order.verify(customDomainRepository, times(2)).findUsable("go.example.com", 5L);
+        order.verify(customDomainRepository).findStatusForUpdate(7L);
+        order.verify(apiKeyService).recordUse(3L);
+        verify(customDomainRepository, times(1)).findStatusForUpdate(7L);
     }
 
     @Test

@@ -598,9 +598,9 @@ public class DefaultModerationService implements ModerationService {
     private boolean reactivate(final long urlId, final Predicate<Url> stillApplies) {
         final var restored = Optional.ofNullable(transactionOperations.execute(status -> urlRepository.findById(urlId)
                 .filter(url -> !url.isActive() && stillApplies.test(url))
-                .filter(url -> domainIsOff(url) || aliasIsFree(url))
+                .filter(url -> domainIsRemoved(url) || aliasIsFree(url))
                 .map(url -> {
-                    final var turnedOn = !domainIsOff(url);
+                    final var turnedOn = !domainIsRemoved(url);
                     url.setActive(turnedOn);
                     url.setBlockReason(null);
                     url.setBlockDetail(null);
@@ -612,7 +612,7 @@ public class DefaultModerationService implements ModerationService {
             if (link.turnedOn()) {
                 log.info("Link reactivated urlId={}", link.url().getId());
             } else {
-                log.info("Link block lifted, but the link stays off because its domain isn't active urlId={} domainId={}", link.url().getId(),
+                log.info("Link block lifted, but the link stays off because its domain was removed urlId={} domainId={}", link.url().getId(),
                         link.url().domainId());
             }
             evictNowAndAgainLater(cacheKeyOf(link.url()));
@@ -620,8 +620,8 @@ public class DefaultModerationService implements ModerationService {
         return restored.map(Restored::turnedOn).orElse(false);
     }
 
-    private static boolean domainIsOff(final Url url) {
-        return url.getDomain() != null && url.getDomain().getStatus() != CustomDomainStatus.ACTIVE;
+    private static boolean domainIsRemoved(final Url url) {
+        return url.getDomain() != null && url.getDomain().getStatus() == CustomDomainStatus.DELETED;
     }
 
     private boolean aliasIsFree(final Url url) {

@@ -217,8 +217,9 @@ class DefaultModerationServiceTest {
             return null;
         }).when(cache).evict(any());
         final var transactions = recordingTransactions();
-        final var domainModeration = new CustomDomainModeration(customDomainRepository, customDomainLifecycle, eventPublisher, transactions,
-                Clock.fixed(Instant.parse("2026-10-29T09:00:00Z"), ZoneOffset.UTC));
+        lenient().when(linkCheckService.isBlockedByRule(anyString())).thenReturn(true);
+        final var domainModeration = new CustomDomainModeration(customDomainRepository, customDomainLifecycle, linkCheckService, eventPublisher,
+                transactions, Clock.fixed(Instant.parse("2026-10-29T09:00:00Z"), ZoneOffset.UTC));
         moderationService = new DefaultModerationService(urlRepository, userRepository, domainRuleRepository, linkCheckService,
                 reviewQueueService, userService, sendingEmailService, auditLogService, new UrlCache(cacheManager), eventPublisher, transactions,
                 scammerSignalService, taskScheduler, domainModeration);
@@ -1227,6 +1228,22 @@ class DefaultModerationServiceTest {
     }
 
     @Test
+    void aDomainAMoreSpecificAllowRuleStillTrustsStaysOn() {
+        final var trusted = customDomain(70L, "go.example.com", CustomDomainStatus.ACTIVE, null);
+        final var blocked = customDomain(71L, "links.example.com", CustomDomainStatus.ACTIVE, null);
+        when(customDomainRepository.findByStatusIn(anyCollection())).thenReturn(List.of(trusted, blocked));
+        when(linkCheckService.isBlockedByRule("https://go.example.com/")).thenReturn(false);
+        when(customDomainRepository.findByIdForUpdate(71L)).thenReturn(Optional.of(blocked));
+        when(customDomainRepository.markDisabled(eq(71L), eq(CustomDomainStatus.ACTIVE), eq(DomainDisableReason.DOMAIN_RULE), eq("example.com"), any()))
+                .thenReturn(1);
+
+        final var created = moderationService.createDomainRule(new DomainRuleDto("example.com", DomainRuleType.BLOCK, null), ADMIN, "admin");
+
+        assertThat(created.domainsDisabled()).isEqualTo(1);
+        verify(customDomainRepository, never()).findByIdForUpdate(70L);
+    }
+
+    @Test
     void anAllowRuleDisablesNoDomains() {
         final var created = moderationService.createDomainRule(new DomainRuleDto("example.com", DomainRuleType.ALLOW, null), ADMIN, "admin");
 
@@ -1318,43 +1335,50 @@ class DefaultModerationServiceTest {
     }
 
     @Test
-    void aRestoredLinkWhoseDomainIsStillOffLosesItsBlockButStaysOff() {
+    void aRestoredLinkOnADomainThatIsOffComesBackOnButOneOnARemovedDomainStaysOff() {
         final var user = user(5L, "alice@example.com");
         when(userRepository.findById(5L)).thenReturn(Optional.of(user));
-        final var stillOff = blocked(50L, "https://a.example/", BlockReason.USER_BLOCKED, user);
-        stillOff.setDomain(customDomain(70L, "go.example.com", CustomDomainStatus.DISABLED, DomainDisableReason.ADMIN));
-        final var removed = blocked(51L, "https://b.example/", BlockReason.USER_BLOCKED, user);
+        final var onAnOffDomain = blocked(50L, "https://a.example/", BlockReason.USER_BLOCKED, user);
+        onAnOffDomain.setDomain(customDomain(70L, "go.example.com", CustomDomainStatus.DISABLED, DomainDisableReason.ADMIN));
+        final var onAWaitingDomain = blocked(51L, "https://b.example/", BlockReason.USER_BLOCKED, user);
+        onAWaitingDomain.setDomain(customDomain(72L, "wait.example.com", CustomDomainStatus.AWAITING_DNS, null));
+        final var removed = blocked(53L, "https://d.example/", BlockReason.USER_BLOCKED, user);
         removed.setDomain(customDomain(71L, "old.example.com", CustomDomainStatus.DELETED, null));
         final var onHrva = blocked(52L, "https://c.example/", BlockReason.USER_BLOCKED, user);
 
         final var restored = moderationService.reactivateUser(5L, ADMIN, "admin");
 
-        assertThat(restored).isEqualTo(1);
-        assertThat(List.of(stillOff, removed)).allSatisfy(url -> {
-            assertThat(url.isActive()).isFalse();
+        assertThat(restored).isEqualTo(3);
+        assertThat(List.of(onAnOffDomain, onAWaitingDomain, onHrva)).allSatisfy(url -> {
+            assertThat(url.isActive()).isTrue();
             assertThat(url.getBlockReason()).isNull();
-            assertThat(url.getBlockDetail()).isNull();
-            assertThat(url.getBlockedAt()).isNull();
         });
-        assertThat(onHrva.isActive()).isTrue();
-        verify(urlRepository, never()).aliasActive(eq(70L), anyString());
+        assertThat(removed.isActive()).isFalse();
+        assertThat(removed.getBlockReason()).isNull();
+        assertThat(removed.getBlockDetail()).isNull();
+        assertThat(removed.getBlockedAt()).isNull();
+        verify(urlRepository, never()).aliasActive(eq(71L), anyString());
+        verify(urlRepository).aliasActive(eq(70L), anyString());
         assertThat(outOfPlace).isEmpty();
     }
 
     @Test
-    void anAllowRuleLiftsTheBlockOfALinkOnADomainThatIsOffButLeavesItOff() {
+    void anAllowRuleRestoresALinkOnADomainThatIsOffButLeavesOneOnARemovedDomainOff() {
         rule("jofogas.cards", DomainRuleType.BLOCK);
         final var onAnOffDomain = blocked(20L, "https://jofogas.cards/a", BlockReason.BLOCKLIST, null);
         onAnOffDomain.setDomain(customDomain(70L, "go.example.com", CustomDomainStatus.DISABLED, DomainDisableReason.ADMIN));
+        final var removed = blocked(22L, "https://jofogas.cards/c", BlockReason.BLOCKLIST, null);
+        removed.setDomain(customDomain(71L, "old.example.com", CustomDomainStatus.DELETED, null));
         final var onHrva = blocked(21L, "https://jofogas.cards/b", BlockReason.BLOCKLIST, null);
         when(linkCheckService.check(anyString())).thenReturn(ALLOWED);
 
         final var trusted = moderationService.allowDomain("jofogas.cards", null, ADMIN, "admin");
 
-        assertThat(trusted).isEqualTo(1);
-        assertThat(onAnOffDomain.isActive()).isFalse();
-        assertThat(onAnOffDomain.getBlockReason()).isNull();
+        assertThat(trusted).isEqualTo(2);
+        assertThat(onAnOffDomain.isActive()).isTrue();
         assertThat(onHrva.isActive()).isTrue();
+        assertThat(removed.isActive()).isFalse();
+        assertThat(removed.getBlockReason()).isNull();
     }
 
     @Test

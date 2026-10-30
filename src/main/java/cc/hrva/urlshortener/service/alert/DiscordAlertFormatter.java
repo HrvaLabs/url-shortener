@@ -136,12 +136,12 @@ public class DiscordAlertFormatter {
                     bioPage(reported.page()), report(reported.category(), reported.details()), owner(reported.page().ownerId()),
                     bioPageReviewPage(reported.page()));
             case DomainApplied applied -> "New custom domain application: %s%s, %s, <%s>".formatted(
-                    plain(applied.hostname()), applied.flags().isEmpty() ? "" : " (" + plain(String.join(", ", applied.flags())) + ")",
+                    DiscordText.hostname(applied.hostname()), applied.flags().isEmpty() ? "" : " (" + plain(String.join(", ", applied.flags())) + ")",
                     owner(applied.userId()), domainPage(applied.domainId(), applied.hostname()));
             case DomainDisabled disabled -> "Custom domain turned off: %s (%s), <%s>".formatted(
-                    plain(disabled.hostname()), disableReason(disabled), domainPage(disabled.domainId(), disabled.hostname()));
+                    DiscordText.hostname(disabled.hostname()), disableReason(disabled), domainPage(disabled.domainId(), disabled.hostname()));
             case DomainNeedsAttention attention -> "Custom domain needs attention: %s (%s), <%s>".formatted(
-                    plain(attention.hostname()), problem(attention.problem()), domainPage(attention.domainId(), attention.hostname()));
+                    DiscordText.hostname(attention.hostname()), problem(attention.problem()), domainPage(attention.domainId(), attention.hostname()));
             case DomainDrift drift -> driftLine(drift);
         };
     }

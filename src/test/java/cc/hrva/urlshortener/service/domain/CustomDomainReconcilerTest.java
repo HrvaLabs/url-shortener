@@ -146,7 +146,8 @@ class CustomDomainReconcilerTest {
         jdbcTemplate.update("insert into user_account (id, email, password, active, create_date) values (?, 'ana@hrva.cc', 'secret-hash', true, ?)",
                 ANA, NOW.minusDays(30));
         when(linkCheckService.check(anyString())).thenReturn(LinkVerdict.clean());
-        final var moderation = new CustomDomainModeration(customDomainRepository, customDomainLifecycle, eventPublisher, transactionOperations, CLOCK);
+        final var moderation = new CustomDomainModeration(customDomainRepository, customDomainLifecycle, linkCheckService, eventPublisher,
+                transactionOperations, CLOCK);
         reconciler = new CustomDomainReconciler(CLOUDFLARE, cloudflareTokenCheck, customDomainRepository, customDomainReconcileRepository,
                 customDomainLifecycle, customDomainHostnames, linkCheckService, moderation, eventPublisher, transactionOperations, appProperties, CLOCK);
         logEvents.start();
@@ -401,6 +402,31 @@ class CustomDomainReconcilerTest {
         assertThat(statusOf(failing)).isEqualTo("ACTIVE");
         assertThat(statusOf(blocked)).isEqualTo("DISABLED");
         assertThat(rowCount()).isOne();
+    }
+
+    @Test
+    void aDomainTurnedOffOrRemovedWhileItWasCheckedIsSkippedQuietly() {
+        final var turnedOff = domain("go.example.com", CustomDomainStatus.ACTIVE, CLOUDFLARE.store("go.example.com", "active", "active"));
+        final var removed = domain("menu.example.org", CustomDomainStatus.ACTIVE, CLOUDFLARE.store("menu.example.org", "active", "active"));
+        final var blocked = new LinkVerdict(Outcome.BLOCK, List.of("on list URLhaus"), BlockReason.BLOCKLIST, "URLhaus");
+        when(linkCheckService.check("https://go.example.com/")).thenAnswer(invocation -> {
+            set(turnedOff, "status = 'DISABLED', disabled_reason = 'ADMIN', disabled_note = 'Spam'");
+            return blocked;
+        });
+        when(linkCheckService.check("https://menu.example.org/")).thenAnswer(invocation -> {
+            set(removed, "status = 'DELETED'");
+            return blocked;
+        });
+
+        reconciler.reconcileInBackground();
+
+        assertThat(jdbcTemplate.queryForMap("select status, disabled_reason, disabled_note from custom_domain where id = ?", turnedOff))
+                .containsEntry("STATUS", "DISABLED").containsEntry("DISABLED_REASON", "ADMIN").containsEntry("DISABLED_NOTE", "Spam");
+        assertThat(statusOf(removed)).isEqualTo("DELETED");
+        assertThat(committedEvents.alerts()).noneMatch(DomainDisabled.class::isInstance);
+        assertThat(logEvents.list).extracting(ILoggingEvent::getFormattedMessage)
+                .noneMatch(message -> message.startsWith("Custom domain hostname check failed"))
+                .contains("Custom domain hostname check active=2 disabled=0");
     }
 
     @Test

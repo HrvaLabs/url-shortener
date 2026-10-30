@@ -186,7 +186,8 @@ class DefaultCustomDomainAdminServiceTest {
         final var transactions = recordingTransactions();
         final var setup = new CustomDomainSetup(customDomainRepository, customDomainCapLock, cloudflareTokenCheck, customDomainProvisioner,
                 customDomainLifecycle, eventPublisher, transactions, appProperties, clock);
-        final var moderation = new CustomDomainModeration(customDomainRepository, customDomainLifecycle, eventPublisher, transactions, clock);
+        final var moderation = new CustomDomainModeration(customDomainRepository, customDomainLifecycle, linkCheckService, eventPublisher, transactions,
+                clock);
         customDomainAdminService = new DefaultCustomDomainAdminService(customDomainRepository, customDomainAllowanceRepository,
                 customDomainReconcileRepository, userRepository, customDomainCapLock, cloudflareTokenCheck, customDomainProvisioner, setup, moderation,
                 customDomainRemoval, customDomainReconciler, responses, linkCheckService, eventPublisher, transactions, appProperties, clock);
