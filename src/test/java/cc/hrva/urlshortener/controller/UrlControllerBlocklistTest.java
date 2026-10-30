@@ -53,11 +53,13 @@ import org.springframework.cache.CacheManager;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionOperations;
 import tools.jackson.databind.ObjectMapper;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -181,7 +183,8 @@ class UrlControllerBlocklistTest {
                 clickAnalyticsService, new UrlToPeekUrlConverter(), createUrlToUrlConverter, urlUpdateDtoToUrlConverter, new UrlCache(cacheManager),
                 objectMapper, meterRegistry, passwordEncoder, suspiciousUrlService, rateLimiter, reviewQueueService, scammerSignalService, clickCheckService,
                 redirectChainService, TransactionOperations.withoutTransaction(), reservedAliasService, burstAlertService,
-                destinationCheckRepository, customDomainRegistry, customDomainRepository, sameShapeAlertService, settingsService);
+                destinationCheckRepository, customDomainRegistry, customDomainRepository, sameShapeAlertService, settingsService,
+                mock(PlatformTransactionManager.class));
         mockMvc = MockMvcBuilders.standaloneSetup(new UrlController(urlService, qrCodeService, linkPreviewService, clientIpResolver,
                         new ClickRequestResolver(clientIpResolver), request, appProperties))
                 .setControllerAdvice(new GlobalExceptionHandler())

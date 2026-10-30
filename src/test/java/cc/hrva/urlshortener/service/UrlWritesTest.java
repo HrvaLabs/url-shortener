@@ -27,11 +27,13 @@ import cc.hrva.urlshortener.service.ratelimit.RateLimiter;
 import cc.hrva.urlshortener.service.settings.DefaultSettingsTestConfiguration;
 import cc.hrva.urlshortener.validator.ApiKeyValidator;
 import cc.hrva.urlshortener.validator.UrlValidator;
+import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.LocalDateTime;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
+import javax.sql.DataSource;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -57,7 +59,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doCallRealMethod;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mockingDetails;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @SpringBootTest(
@@ -97,6 +103,9 @@ class UrlWritesTest {
 
     @MockitoSpyBean
     private UrlRepository urlRepository;
+
+    @MockitoSpyBean
+    private DataSource dataSource;
 
     @MockitoBean
     private UserService userService;
@@ -214,6 +223,39 @@ class UrlWritesTest {
         assertThat(urlService.redirectResultUrl(route, "menu", CLICK).getUrl())
                 .isEqualTo("https://app.hrva.cc/unavailable?s=menu&reason=blocked&d=go.example.com");
         assertThat(urlService.redirectResultUrl("menu", CLICK).getUrl()).isEqualTo("https://example.com/a");
+    }
+
+    @Test
+    void aCachedLinkRedirectsWithoutATransactionOrAConnectionWhileTheDatabaseIsDown() throws SQLException {
+        final var cache = new ConcurrentMapCache("urls");
+        when(cacheManager.getCache("urls")).thenReturn(cache);
+        final var transactionDuringTheCheck = new AtomicBoolean();
+        final var readOnlyDuringTheCheck = new AtomicBoolean();
+        when(clickCheckService.mayRedirect(anyLong(), any())).thenAnswer(invocation -> {
+            transactionDuringTheCheck.set(TransactionSynchronizationManager.isActualTransactionActive());
+            readOnlyDuringTheCheck.set(TransactionSynchronizationManager.isCurrentTransactionReadOnly());
+            return true;
+        });
+        final var domainId = goExampleCom();
+        final var route = new DomainRoute(domainId, "go.example.com", CustomDomainStatus.ACTIVE, true);
+        menu(ON_HRVA, "https://example.com/a", null);
+        menu(ON_DOMAIN, "https://example.com/b", domainId);
+        assertThat(urlService.redirectResultUrl("menu", CLICK).getUrl()).isEqualTo("https://example.com/a");
+        assertThat(transactionDuringTheCheck).isTrue();
+        assertThat(readOnlyDuringTheCheck).isTrue();
+        assertThat(urlService.redirectResultUrl(route, "menu", CLICK).getUrl()).isEqualTo("https://example.com/b");
+
+        doThrow(new SQLException("Connection refused")).when(dataSource).getConnection();
+        try {
+            assertThat(urlService.redirectResultUrl("menu", CLICK).getUrl()).isEqualTo("https://example.com/a");
+            assertThat(urlService.redirectResultUrl(route, "menu", CLICK).getUrl()).isEqualTo("https://example.com/b");
+        } finally {
+            doCallRealMethod().when(dataSource).getConnection();
+        }
+
+        assertThat(transactionDuringTheCheck).isFalse();
+        verify(clickAnalyticsService, times(2)).recordClick(ON_HRVA, "menu", CLICK);
+        verify(clickAnalyticsService, times(2)).recordClick(ON_DOMAIN, domainId + "/menu", CLICK);
     }
 
     @Test

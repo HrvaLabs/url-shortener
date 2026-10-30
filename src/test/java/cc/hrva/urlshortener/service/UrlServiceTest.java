@@ -96,6 +96,7 @@ import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.transaction.annotation.AnnotationTransactionAttributeSource;
 import org.springframework.transaction.interceptor.TransactionInterceptor;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionOperations;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -138,6 +139,8 @@ class UrlServiceTest {
     private UrlService urlService;
 
     private final DefaultSettingsService settingsService = SettingsServiceFixtures.defaults(new AppProperties());
+
+    private final PlatformTransactionManager withoutTransactions = org.mockito.Mockito.mock(PlatformTransactionManager.class);
 
     @Mock
     private UrlRepository urlRepository;
@@ -257,7 +260,8 @@ class UrlServiceTest {
                 customDomainRegistry,
                 customDomainRepository,
                 sameShapeAlertService,
-                settingsService
+                settingsService,
+                withoutTransactions
         );
     }
 
@@ -3463,7 +3467,8 @@ class UrlServiceTest {
                 urlToPeekUrlConverter, createUrlToUrlConverter, urlUpdateDtoToUrlConverter, new UrlCache(urls), objectMapper,
                 new io.micrometer.core.instrument.simple.SimpleMeterRegistry(), passwordEncoder, suspiciousUrlService, rateLimiter,
                 reviewQueueService, scammerSignalService, clickCheckService, redirectChainService, TransactionOperations.withoutTransaction(),
-                reservedAliasService, burstAlertService, destinationCheckRepository, customDomainRegistry, customDomainRepository, sameShapeAlertService, settingsService);
+                reservedAliasService, burstAlertService, destinationCheckRepository, customDomainRegistry, customDomainRepository, sameShapeAlertService, settingsService,
+                withoutTransactions);
     }
 
     private static UrlService withTheCacheAnnotations(final UrlService service, final CacheManager urls) {
@@ -3516,7 +3521,8 @@ class UrlServiceTest {
                 customDomainRegistry,
                 customDomainRepository,
                 sameShapeAlertService,
-                settingsService
+                settingsService,
+                withoutTransactions
         );
     }
 
@@ -3594,7 +3600,8 @@ class UrlServiceTest {
                 customDomainRegistry,
                 customDomainRepository,
                 sameShapeAlertService,
-                settingsService
+                settingsService,
+                transactionManager
         );
         final var proxyFactory = new ProxyFactory(service);
         proxyFactory.addAdvice(new TransactionInterceptor(transactionManager, new AnnotationTransactionAttributeSource()));
@@ -3631,7 +3638,8 @@ class UrlServiceTest {
                 customDomainRegistry,
                 customDomainRepository,
                 sameShapeAlertService,
-                settingsService
+                settingsService,
+                withoutTransactions
         );
     }
 
@@ -3664,7 +3672,8 @@ class UrlServiceTest {
                 customDomainRegistry,
                 customDomainRepository,
                 sameShapeAlertService,
-                settingsService
+                settingsService,
+                withoutTransactions
         );
     }
 

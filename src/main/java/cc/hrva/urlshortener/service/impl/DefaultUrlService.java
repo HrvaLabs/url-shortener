@@ -76,8 +76,10 @@ import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionOperations;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.servlet.view.RedirectView;
 
 import java.net.URLEncoder;
@@ -163,6 +165,7 @@ public class DefaultUrlService implements UrlService {
     private final CustomDomainRepository customDomainRepository;
     private final SameShapeAlertService sameShapeAlertService;
     private final SettingsService settingsService;
+    private final PlatformTransactionManager transactionManager;
 
     @Override
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
@@ -738,12 +741,14 @@ public class DefaultUrlService implements UrlService {
     }
 
     @Override
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public RedirectView redirectResultUrl(final String shortUrl, final ClickRequest click) {
         refuseBotProbe(shortUrl);
         return redirect(LinkPlace.primary(shortUrl), click);
     }
 
     @Override
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public RedirectView redirectResultUrl(final DomainRoute route, final String alias, final ClickRequest click) {
         refuseBotProbe(alias);
         final var place = LinkPlace.on(route, alias);
@@ -832,6 +837,16 @@ public class DefaultUrlService implements UrlService {
     }
 
     private String fetchAndRedirectFromDb(final LinkPlace place, final ClickRequest click) {
+        return readTransaction().execute(status -> redirectFromDb(place, click));
+    }
+
+    private TransactionTemplate readTransaction() {
+        final var template = new TransactionTemplate(transactionManager);
+        template.setReadOnly(true);
+        return template;
+    }
+
+    private String redirectFromDb(final LinkPlace place, final ClickRequest click) {
         final var urlOpt = urlRepository.findServed(place.domainId(), place.alias());
         if (urlOpt.isEmpty()) {
             return unavailablePageUrl(place, REASON_MISSING);
