@@ -5,14 +5,19 @@ import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.dto.LinkReportDto;
 import cc.hrva.urlshortener.model.BioPage;
 import cc.hrva.urlshortener.model.BioPageReview;
+import cc.hrva.urlshortener.model.CustomDomain;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.User;
+import cc.hrva.urlshortener.model.enums.CustomDomainStatus;
 import cc.hrva.urlshortener.model.enums.ReportCategory;
 import cc.hrva.urlshortener.repository.BioPageRepository;
+import cc.hrva.urlshortener.repository.CustomDomainRepository;
+import cc.hrva.urlshortener.repository.DomainRouteRow;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.security.ClientIpResolver;
 import cc.hrva.urlshortener.service.BioPageReviewService;
 import cc.hrva.urlshortener.service.ReviewQueueService;
+import cc.hrva.urlshortener.service.domain.CustomDomainRegistry;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiter;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiterUnavailableException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -39,6 +44,8 @@ import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.datasource.DataSourceTransactionManager;
+import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
@@ -89,6 +96,9 @@ class ReportControllerTest {
     private ClientIpResolver clientIpResolver;
 
     @Mock
+    private CustomDomainRepository customDomainRepository;
+
+    @Mock
     private HttpServletRequest request;
 
     private final AppProperties appProperties = new AppProperties();
@@ -103,11 +113,21 @@ class ReportControllerTest {
 
     private final BioPage page = BioPage.builder().id(12L).handle("ana").owner(User.builder().id(7L).active(true).build()).build();
 
+    private CustomDomainRegistry customDomainRegistry;
+
     @BeforeEach
     void setUp() {
         appProperties.setServerUrl("https://hrva.cc");
         appProperties.setFrontendUrl("http://localhost:3000");
         lenient().when(clientIpResolver.getClientIp(request)).thenReturn(CLIENT_IP);
+        lenient().when(customDomainRepository.findRoutes()).thenReturn(List.of(
+                new DomainRouteRow(7L, "go.example.com", "go.example.com", CustomDomainStatus.ACTIVE, 5L, true),
+                new DomainRouteRow(8L, "www.example.com", "www.example.com", CustomDomainStatus.ACTIVE, 5L, true),
+                new DomainRouteRow(9L, "off.example.com", "off.example.com", CustomDomainStatus.DISABLED, 5L, true),
+                new DomainRouteRow(10L, "xn--g-1tb.example.com", "xn--g-1tb.example.com", CustomDomainStatus.ACTIVE, 6L, false)));
+        customDomainRegistry = new CustomDomainRegistry(customDomainRepository,
+                new DataSourceTransactionManager(new DriverManagerDataSource("jdbc:h2:mem:report-controller")));
+        customDomainRegistry.reload();
         mockMvc = mockMvcWith((key, window) -> {
             windows.add(window);
             return attempts.merge(key, 1, Integer::sum);
@@ -116,7 +136,7 @@ class ReportControllerTest {
 
     private MockMvc mockMvcWith(final RateLimiter rateLimiter) {
         return MockMvcBuilders.standaloneSetup(new ReportController(reviewQueueService, urlRepository, bioPageRepository, bioPageReviewService, rateLimiter,
-                        clientIpResolver, request, appProperties))
+                        clientIpResolver, request, appProperties, customDomainRegistry))
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .build();
     }
@@ -225,6 +245,92 @@ class ReportControllerTest {
 
         verifyNoInteractions(urlRepository, reviewQueueService, bioPageRepository, bioPageReviewService);
         assertThat(attempts).isEmpty();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"go.example.com/menu", "https://go.example.com/menu", "HTTPS://GO.Example.COM./menu/", "go.example.com/menu?utm_source=mail#top",
+            " http://go.example.com/menu "})
+    void aLinkOnACustomDomainIsReportedOnThatDomain(final String target) throws Exception {
+        final var onDomain = domainLink(7L, "go.example.com");
+        when(urlRepository.findActive(7L, "menu")).thenReturn(Optional.of(onDomain));
+
+        report(target, "PHISHING", null).andExpect(status().isAccepted());
+
+        verify(reviewQueueService).report(onDomain, ReportCategory.PHISHING, null);
+        verify(urlRepository, never()).findActive(null, "menu");
+    }
+
+    @Test
+    void aLinkOnATurnedOffDomainCanStillBeReported() throws Exception {
+        final var onDomain = domainLink(9L, "off.example.com");
+        when(urlRepository.findActive(9L, "menu")).thenReturn(Optional.of(onDomain));
+
+        report("off.example.com/menu", "SPAM", null).andExpect(status().isAccepted());
+
+        verify(reviewQueueService).report(onDomain, ReportCategory.SPAM, null);
+    }
+
+    @Test
+    void aCustomHostIsLookedUpBeforeWwwIsStripped() throws Exception {
+        final var onDomain = domainLink(8L, "www.example.com");
+        when(urlRepository.findActive(8L, "menu")).thenReturn(Optional.of(onDomain));
+
+        report("https://www.example.com/menu", "SPAM", null).andExpect(status().isAccepted());
+
+        verify(reviewQueueService).report(onDomain, ReportCategory.SPAM, null);
+        verify(urlRepository, never()).findActive(null, "menu");
+    }
+
+    @Test
+    void wwwBeforeACustomHostIsAnotherHost() throws Exception {
+        report("https://www.go.example.com/menu", "SPAM", null)
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value(TARGET_INVALID));
+
+        verifyNoInteractions(urlRepository, reviewQueueService);
+    }
+
+    @Test
+    void wwwIsStillStrippedFromTheShortHost() throws Exception {
+        when(urlRepository.findActive(null, SHORT)).thenReturn(Optional.of(url));
+
+        report("https://www.hrva.cc/" + SHORT, "SPAM", null).andExpect(status().isAccepted());
+
+        verify(reviewQueueService).report(url, ReportCategory.SPAM, null);
+    }
+
+    @Test
+    void aUnicodeCustomHostIsReadAsPunycode() throws Exception {
+        final var onDomain = domainLink(10L, "xn--g-1tb.example.com");
+        when(urlRepository.findActive(10L, "menu")).thenReturn(Optional.of(onDomain));
+
+        report("https://g" + Character.toString(0x43E) + ".example.com/menu", "SPAM", null).andExpect(status().isAccepted());
+
+        verify(reviewQueueService).report(onDomain, ReportCategory.SPAM, null);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"go.example.com", "go.example.com/", "go.example.com/@ana", "go.example.com/menu/stats", "go.example.com/bio/ana",
+            "go.example.com/menu.html", "go.example.com/abcdefghijklmnopqrstuvwxyz0123456"})
+    void onACustomHostOnlyAShortCodeCanBeReported(final String target) throws Exception {
+        report(target, "SPAM", null)
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value(TARGET_INVALID));
+
+        verifyNoInteractions(urlRepository, reviewQueueService, bioPageRepository, bioPageReviewService);
+    }
+
+    @Test
+    void anUnknownLinkOnACustomDomainIsStill202() throws Exception {
+        report("go.example.com/nope", "SPAM", null).andExpect(status().isAccepted());
+
+        verify(urlRepository).findActive(7L, "nope");
+        verifyNoInteractions(reviewQueueService);
+    }
+
+    private static Url domainLink(final long domainId, final String hostname) {
+        return Url.builder().id(500L + domainId).shortUrl("menu").longUrl("https://evil.example/").active(true)
+                .domain(CustomDomain.builder().id(domainId).hostname(hostname).build()).build();
     }
 
     @Test

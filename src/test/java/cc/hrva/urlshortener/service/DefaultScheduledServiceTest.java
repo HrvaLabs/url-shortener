@@ -7,6 +7,7 @@ import cc.hrva.urlshortener.repository.BioHandleHoldRepository;
 import cc.hrva.urlshortener.repository.EmailLogRepository;
 import cc.hrva.urlshortener.service.domain.CustomDomainLifecycle;
 import cc.hrva.urlshortener.service.domain.CustomDomainReconciler;
+import cc.hrva.urlshortener.service.domain.CustomDomainRegistry;
 import cc.hrva.urlshortener.service.impl.DefaultClickSummaryService;
 import cc.hrva.urlshortener.service.impl.DefaultDestinationCheckService;
 import cc.hrva.urlshortener.service.impl.DefaultNotificationDeliveryService;
@@ -92,6 +93,9 @@ class DefaultScheduledServiceTest {
     private CustomDomainReconciler customDomainReconciler;
 
     @Mock
+    private CustomDomainRegistry customDomainRegistry;
+
+    @Mock
     private BioHandleHoldRepository bioHandleHoldRepository;
 
     @Mock
@@ -105,7 +109,7 @@ class DefaultScheduledServiceTest {
     @BeforeEach
     void setUp() {
         this.scheduledService = new DefaultScheduledService(urlService, userService, apiKeyService, resetTokenService, urlNotificationService, safeBrowsingRecheckService, sendingEmailService, linkDigestService, blocklistSourceService,
-                weeklyDigestService, destinationCheckService, notificationDeliveryService, clickSummaryService, customDomainLifecycle, customDomainReconciler, bioHandleHoldRepository, emailLogRepository, auditLogRepository, appProperties, Clock.fixed(NOW, ZoneOffset.UTC));
+                weeklyDigestService, destinationCheckService, notificationDeliveryService, clickSummaryService, customDomainLifecycle, customDomainReconciler, customDomainRegistry, bioHandleHoldRepository, emailLogRepository, auditLogRepository, appProperties, Clock.fixed(NOW, ZoneOffset.UTC));
     }
 
     @Test
@@ -254,6 +258,19 @@ class DefaultScheduledServiceTest {
         assertThat(scheduled.cron()).isEmpty();
         verify(customDomainLifecycle).runInBackground();
         verify(customDomainLifecycle, never()).runOnce();
+        assertThat(output).doesNotContain("Scheduled");
+    }
+
+    @Test
+    @ExtendWith(OutputCaptureExtension.class)
+    void customDomainRoutesReloadEveryMinute(final CapturedOutput output) throws NoSuchMethodException {
+        final var scheduled = DefaultScheduledService.class.getMethod("reloadCustomDomainRoutes").getAnnotation(Scheduled.class);
+
+        scheduledService.reloadCustomDomainRoutes();
+
+        assertThat(scheduled.fixedDelay()).isEqualTo(60_000L);
+        assertThat(scheduled.cron()).isEmpty();
+        verify(customDomainRegistry).reload();
         assertThat(output).doesNotContain("Scheduled");
     }
 

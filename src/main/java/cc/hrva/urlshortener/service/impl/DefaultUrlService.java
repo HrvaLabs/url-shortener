@@ -22,6 +22,7 @@ import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.enums.BlockReason;
 import cc.hrva.urlshortener.model.enums.CreatedVia;
+import cc.hrva.urlshortener.model.enums.CustomDomainStatus;
 import cc.hrva.urlshortener.model.enums.ReviewResolution;
 import cc.hrva.urlshortener.model.enums.ThreatType;
 import cc.hrva.urlshortener.repository.ShortUrlUniqueIndex;
@@ -40,6 +41,10 @@ import cc.hrva.urlshortener.service.SuspiciousUrlService;
 import cc.hrva.urlshortener.service.UrlService;
 import cc.hrva.urlshortener.service.UserService;
 import cc.hrva.urlshortener.service.burst.CreatedLink;
+import cc.hrva.urlshortener.service.domain.CustomDomainRegistry;
+import cc.hrva.urlshortener.service.domain.DomainRoute;
+import cc.hrva.urlshortener.service.domain.UrlCache;
+import cc.hrva.urlshortener.service.domain.UrlCacheKeys;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiter;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiterUnavailableException;
 import cc.hrva.urlshortener.util.RedirectLocations;
@@ -53,10 +58,7 @@ import io.micrometer.core.instrument.Timer;
 import tools.jackson.databind.ObjectMapper;
 import org.apache.commons.lang3.RandomStringUtils;
 import org.apache.commons.lang3.StringUtils;
-import org.springframework.cache.Cache;
-import org.springframework.cache.CacheManager;
 import org.springframework.cache.annotation.CacheEvict;
-import org.springframework.cache.annotation.Cacheable;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -88,13 +90,13 @@ import java.util.stream.Stream;
 public class DefaultUrlService implements UrlService {
 
     private static final String OWNER_EMAIL = "owner.email";
-    private static final String URLS_CACHE = "urls";
     private static final String SYSTEM = "system";
     private static final String REASON_BLOCKED = "blocked";
     private static final String REASON_EXPIRED = "expired";
     private static final String REASON_LIMIT = "limit";
     private static final String REASON_INACTIVE = "inactive";
     private static final String REASON_MISSING = "missing";
+    private static final String REASON_DOMAIN = "domain";
     private static final int MAX_SHORT_URL_LENGTH = 32;
     private static final int UNLOCK_ATTEMPTS_PER_CLIENT = 10;
     private static final int UNLOCK_ATTEMPTS_PER_LINK = 50;
@@ -123,7 +125,7 @@ public class DefaultUrlService implements UrlService {
     private final UrlToPeekUrlConverter urlToPeekUrlConverter;
     private final CreateUrlToUrlConverter createUrlToUrlConverter;
     private final UrlUpdateDtoToUrlConverter urlUpdateDtoToUrlConverter;
-    private final CacheManager cacheManager;
+    private final UrlCache urlCache;
     private final ObjectMapper objectMapper;
     private final MeterRegistry meterRegistry;
     private final org.springframework.security.crypto.password.PasswordEncoder passwordEncoder;
@@ -137,6 +139,7 @@ public class DefaultUrlService implements UrlService {
     private final ReservedAliasService reservedAliasService;
     private final BurstAlertService burstAlertService;
     private final DestinationCheckRepository destinationCheckRepository;
+    private final CustomDomainRegistry customDomainRegistry;
 
     @Override
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
@@ -191,10 +194,10 @@ public class DefaultUrlService implements UrlService {
                 .anyMatch(authority -> ROLE_ADMIN.equals(authority.getName()));
     }
 
-    private boolean unlockAttemptAllowed(final String shortUrl, final String clientIP) {
+    private boolean unlockAttemptAllowed(final String cacheKey, final String clientIP) {
         try {
-            return rateLimiter.tryAcquire(RateLimiter.clientKey("unlock:" + shortUrl, clientIP), UNLOCK_ATTEMPTS_PER_CLIENT, UNLOCK_WINDOW)
-                    && rateLimiter.tryAcquire("unlock:" + shortUrl, UNLOCK_ATTEMPTS_PER_LINK, UNLOCK_WINDOW);
+            return rateLimiter.tryAcquire(RateLimiter.clientKey("unlock:" + cacheKey, clientIP), UNLOCK_ATTEMPTS_PER_CLIENT, UNLOCK_WINDOW)
+                    && rateLimiter.tryAcquire("unlock:" + cacheKey, UNLOCK_ATTEMPTS_PER_LINK, UNLOCK_WINDOW);
         } catch (final RateLimiterUnavailableException exception) {
             log.warn("Unlock rate limit unavailable, allowing the attempt");
             return true;
@@ -209,26 +212,27 @@ public class DefaultUrlService implements UrlService {
 
     @Override
     @Transactional
-    public UnlockResponse unlockUrl(final String shortUrl, final String password, final ClickRequest click) {
-        if (!unlockAttemptAllowed(shortUrl, click.clientIp())) {
+    public UnlockResponse unlockUrl(final String domain, final String shortUrl, final String password, final ClickRequest click) {
+        final var place = placeOf(domain, shortUrl);
+        if (!unlockAttemptAllowed(place.cacheKey(), click.clientIp())) {
             throw new RateLimitExceededException("Too many password attempts. Try again in a few minutes.");
         }
 
-        final var url = urlRepository.findActive(null, shortUrl)
+        final var url = urlRepository.findActive(place.domainId(), shortUrl)
                 .orElseThrow(() -> new UrlNotFoundException("URL doesn't exist"));
 
         if (url.getPasswordHash() != null && !passwordEncoder.matches(password, url.getPasswordHash())) {
             throw new NoAuthorizationException("Incorrect password");
         }
         if (refusedAsBot(url.getVisitLimit(), click)) {
-            clickAnalyticsService.recordClick(url.getId(), shortUrl, click.withUnknownReferrer());
+            clickAnalyticsService.recordClick(url.getId(), place.cacheKey(), click.withUnknownReferrer());
             throw new UrlNotFoundException("URL doesn't exist");
         }
         if (!clickCheckService.mayRedirect(url.getId(), url.getLongUrl())) {
-            return new UnlockResponse(unavailablePageUrl(shortUrl, REASON_BLOCKED));
+            return new UnlockResponse(unavailablePageUrl(place, REASON_BLOCKED));
         }
 
-        clickAnalyticsService.recordClick(url.getId(), shortUrl, click.withUnknownReferrer());
+        clickAnalyticsService.recordClick(url.getId(), place.cacheKey(), click.withUnknownReferrer());
         return new UnlockResponse(url.getLongUrl());
     }
 
@@ -406,7 +410,7 @@ public class DefaultUrlService implements UrlService {
 
     @Override
     @Transactional
-    @CacheEvict(value = "urls", key = "#result.shortUrl")
+    @CacheEvict(value = "urls", key = "#result.cacheKey()")
     public UrlResponse revokeUrl(final Long id) {
         log.info("Revoke URL id={}", id);
 
@@ -419,7 +423,7 @@ public class DefaultUrlService implements UrlService {
 
     @Override
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
-    @CacheEvict(value = "urls", key = "#result.shortUrl")
+    @CacheEvict(value = "urls", key = "#result.cacheKey()")
     public UrlResponse activateUrl(final Long id) {
         log.info("Activate URL id={}", id);
 
@@ -457,7 +461,7 @@ public class DefaultUrlService implements UrlService {
 
     @Override
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
-    @CacheEvict(value = "urls", key = "#result.shortUrl")
+    @CacheEvict(value = "urls", key = "#result.cacheKey()")
     public UrlResponse updateUrl(final UrlUpdateDto updateDto) {
         log.info("Update URL id={}", updateDto.getId());
 
@@ -548,13 +552,14 @@ public class DefaultUrlService implements UrlService {
 
     @Override
     @Transactional
-    public UrlResponse revealUrlAndRecordClick(final String shortUrl, final ClickRequest click) {
-        log.info("URL access shortUrl={}", shortUrl);
+    public UrlResponse revealUrlAndRecordClick(final String domain, final String shortUrl, final ClickRequest click) {
+        final var place = placeOf(domain, shortUrl);
+        log.info("URL access shortUrl={} domainId={}", shortUrl, place.domainId());
 
-        final var url = findUrlToReveal(shortUrl);
+        final var url = findUrlToReveal(place);
 
         if (url.getPasswordHash() == null) {
-            clickAnalyticsService.recordClick(url.getId(), shortUrl, click);
+            clickAnalyticsService.recordClick(url.getId(), place.cacheKey(), click);
             if (refusedAsBot(url.getVisitLimit(), click)) {
                 throw new UrlNotFoundException("URL doesn't exist");
             }
@@ -603,8 +608,8 @@ public class DefaultUrlService implements UrlService {
     }
 
     @Override
-    public PeekUrl peekUrlByShortUrl(final String shortUrl) {
-        return urlToPeekUrlConverter.convert(findUrlToReveal(shortUrl));
+    public PeekUrl peekUrlByShortUrl(final String domain, final String shortUrl) {
+        return urlToPeekUrlConverter.convert(findUrlToReveal(placeOf(domain, shortUrl)));
     }
 
     @Override
@@ -619,15 +624,37 @@ public class DefaultUrlService implements UrlService {
 
     @Override
     public RedirectView redirectResultUrl(final String shortUrl, final ClickRequest click) {
+        refuseBotProbe(shortUrl);
+        return redirect(LinkPlace.primary(shortUrl), click);
+    }
+
+    @Override
+    public RedirectView redirectResultUrl(final DomainRoute route, final String alias, final ClickRequest click) {
+        refuseBotProbe(alias);
+        final var place = LinkPlace.on(route, alias);
+        if (!route.serves()) {
+            log.info("Redirect refused, the domain doesn't serve domainId={} status={} ownerActive={}", route.id(), route.status(), route.ownerActive());
+            return redirectTo(unavailablePageUrl(place, route.status() == CustomDomainStatus.ACTIVE ? REASON_INACTIVE : REASON_DOMAIN));
+        }
+        return redirect(place, click);
+    }
+
+    private static void refuseBotProbe(final String shortUrl) {
         if (shortUrl != null && BOT_PROBE_PATHS.contains(shortUrl.toLowerCase(Locale.ROOT))) {
             throw new UrlNotFoundException("URL doesn't exist");
         }
+    }
 
+    private RedirectView redirect(final LinkPlace place, final ClickRequest click) {
         final var sample = Timer.start(meterRegistry);
-        log.info("Redirect shortUrl={}", shortUrl);
+        if (place.domainId() == null) {
+            log.info("Redirect shortUrl={}", place.alias());
+        } else {
+            log.info("Redirect shortUrl={} domainId={}", place.alias(), place.domainId());
+        }
 
-        if (StringUtils.isNotEmpty(shortUrl)) {
-            final var cachedRedirect = tryCacheHit(shortUrl, click);
+        if (StringUtils.isNotEmpty(place.alias())) {
+            final var cachedRedirect = tryCacheHit(place, click);
             if (cachedRedirect != null) {
                 sample.stop(Timer.builder("redirect.duration")
                         .tag("source", "cache")
@@ -635,9 +662,7 @@ public class DefaultUrlService implements UrlService {
                 return cachedRedirect;
             }
 
-            final var redirectView = new RedirectView();
-            redirectView.setExpandUriTemplateVariables(false);
-            redirectView.setUrl(fetchAndRedirectFromDb(shortUrl, click));
+            final var redirectView = redirectTo(fetchAndRedirectFromDb(place, click));
             sample.stop(Timer.builder("redirect.duration")
                     .tag("source", "db")
                     .register(meterRegistry));
@@ -653,61 +678,68 @@ public class DefaultUrlService implements UrlService {
         return redirectView;
     }
 
-    private RedirectView tryCacheHit(final String shortUrl, final ClickRequest click) {
-        final var cachedValue = Optional.ofNullable(getFromCache(shortUrl))
+    private static RedirectView redirectTo(final String location) {
+        final var redirectView = new RedirectView();
+        redirectView.setExpandUriTemplateVariables(false);
+        redirectView.setUrl(location);
+        return redirectView;
+    }
+
+    private RedirectView tryCacheHit(final LinkPlace place, final ClickRequest click) {
+        final var cachedValue = Optional.ofNullable(urlCache.get(place.cacheKey()))
                 .map(value -> value instanceof UrlResponse ur ? ur : mapToUrlResponse(value))
                 .orElse(null);
         if (cachedValue != null) {
             if (isUrlRedirectValid(cachedValue)) {
                 if (cachedValue.passwordProtected()) {
                     final var gate = new RedirectView();
-                    gate.setUrl(protectedPageUrl(shortUrl));
+                    gate.setUrl(protectedPageUrl(place));
                     return gate;
                 }
                 final var redirectView = new RedirectView();
                 redirectView.setExpandUriTemplateVariables(false);
                 if (refusedAsBot(cachedValue.visitLimit(), click)) {
-                    clickAnalyticsService.recordClick(cachedValue.id(), shortUrl, click);
-                    redirectView.setUrl(unavailablePageUrl(shortUrl, REASON_MISSING));
+                    clickAnalyticsService.recordClick(cachedValue.id(), place.cacheKey(), click);
+                    redirectView.setUrl(unavailablePageUrl(place, REASON_MISSING));
                     return redirectView;
                 }
                 if (!clickCheckService.mayRedirect(cachedValue.id(), cachedValue.longUrl())) {
-                    redirectView.setUrl(unavailablePageUrl(shortUrl, REASON_BLOCKED));
+                    redirectView.setUrl(unavailablePageUrl(place, REASON_BLOCKED));
                     return redirectView;
                 }
                 redirectView.setUrl(redirectLocation(cachedValue.id(), cachedValue.longUrl()));
-                clickAnalyticsService.recordClick(cachedValue.id(), shortUrl, click);
+                clickAnalyticsService.recordClick(cachedValue.id(), place.cacheKey(), click);
                 return redirectView;
             }
-            evictFromCache(shortUrl);
+            urlCache.evict(place.cacheKey());
         }
         return null;
     }
 
-    private String fetchAndRedirectFromDb(final String shortUrl, final ClickRequest click) {
-        final var urlOpt = urlRepository.findServed(null, shortUrl);
+    private String fetchAndRedirectFromDb(final LinkPlace place, final ClickRequest click) {
+        final var urlOpt = urlRepository.findServed(place.domainId(), place.alias());
         if (urlOpt.isEmpty()) {
-            return unavailablePageUrl(shortUrl, REASON_MISSING);
+            return unavailablePageUrl(place, REASON_MISSING);
         }
         final var url = urlOpt.get();
         final var unavailable = unavailableReason(url);
         if (unavailable.isPresent()) {
-            return unavailablePageUrl(shortUrl, unavailable.get());
+            return unavailablePageUrl(place, unavailable.get());
         }
         final var response = UrlResponse.from(url);
         if (response.passwordProtected()) {
-            putInCache(shortUrl, response);
-            return protectedPageUrl(shortUrl);
+            urlCache.put(place.cacheKey(), response);
+            return protectedPageUrl(place);
         }
         if (refusedAsBot(url.getVisitLimit(), click)) {
-            clickAnalyticsService.recordClick(url.getId(), shortUrl, click);
-            return unavailablePageUrl(shortUrl, REASON_MISSING);
+            clickAnalyticsService.recordClick(url.getId(), place.cacheKey(), click);
+            return unavailablePageUrl(place, REASON_MISSING);
         }
         if (!clickCheckService.mayRedirect(url.getId(), url.getLongUrl())) {
-            return unavailablePageUrl(shortUrl, REASON_BLOCKED);
+            return unavailablePageUrl(place, REASON_BLOCKED);
         }
-        putInCache(shortUrl, response);
-        clickAnalyticsService.recordClick(url.getId(), shortUrl, click);
+        urlCache.put(place.cacheKey(), response);
+        clickAnalyticsService.recordClick(url.getId(), place.cacheKey(), click);
         return redirectLocation(url.getId(), response.longUrl());
     }
 
@@ -725,6 +757,9 @@ public class DefaultUrlService implements UrlService {
     }
 
     private static Optional<String> unavailableReason(final Url url) {
+        if (url.getDomain() != null && url.getDomain().getStatus() != CustomDomainStatus.ACTIVE) {
+            return Optional.of(REASON_DOMAIN);
+        }
         if (url.getBlockReason() != null || url.getThreatType() != null) {
             return Optional.of(REASON_BLOCKED);
         }
@@ -737,49 +772,26 @@ public class DefaultUrlService implements UrlService {
         return url.isActive() ? Optional.empty() : Optional.of(REASON_INACTIVE);
     }
 
-    private String protectedPageUrl(final String shortUrl) {
-        return appProperties.getFrontendUrl() + "/protected/" + shortUrl;
+    private String protectedPageUrl(final LinkPlace place) {
+        return appProperties.getFrontendUrl() + "/protected/" + place.alias() + (place.hostname() == null ? "" : "?domain=" + encoded(place.hostname()));
     }
 
-    private String unavailablePageUrl(final String shortUrl, final String reason) {
-        return appProperties.getFrontendUrl() + "/unavailable?s=" + URLEncoder.encode(StringUtils.left(shortUrl, MAX_SHORT_URL_LENGTH), StandardCharsets.UTF_8)
-                + "&reason=" + reason;
+    private String unavailablePageUrl(final LinkPlace place, final String reason) {
+        return appProperties.getFrontendUrl() + "/unavailable?s=" + encoded(StringUtils.left(place.alias(), MAX_SHORT_URL_LENGTH))
+                + "&reason=" + reason + (place.hostname() == null ? "" : "&d=" + encoded(place.hostname()));
     }
 
-    private Object getFromCache(final String shortUrl) {
-        try {
-            final var cache = cacheManager.getCache(URLS_CACHE);
-            if (cache != null) {
-                return Optional.ofNullable(cache.get(shortUrl))
-                        .map(Cache.ValueWrapper::get)
-                        .orElse(null);
-            }
-        } catch (final RuntimeException exception) {
-            log.warn("URL cache read failed, using the database", exception);
+    private static String encoded(final String value) {
+        return URLEncoder.encode(value, StandardCharsets.UTF_8);
+    }
+
+    private LinkPlace placeOf(final String domain, final String alias) {
+        if (StringUtils.isBlank(domain)) {
+            return LinkPlace.primary(alias);
         }
-        return null;
-    }
-
-    private void putInCache(final String shortUrl, final Object value) {
-        try {
-            final var cache = cacheManager.getCache(URLS_CACHE);
-            if (cache != null) {
-                cache.put(shortUrl, value);
-            }
-        } catch (final RuntimeException exception) {
-            log.warn("URL cache write failed", exception);
-        }
-    }
-
-    private void evictFromCache(final String shortUrl) {
-        try {
-            final var cache = cacheManager.getCache(URLS_CACHE);
-            if (cache != null) {
-                cache.evict(shortUrl);
-            }
-        } catch (final RuntimeException exception) {
-            log.warn("URL cache eviction failed", exception);
-        }
+        return customDomainRegistry.active(domain)
+                .map(route -> LinkPlace.on(route, alias))
+                .orElseThrow(() -> new UrlNotFoundException("URL doesn't exist"));
     }
 
     private static boolean isUrlRedirectValid(final UrlResponse response) {
@@ -813,7 +825,8 @@ public class DefaultUrlService implements UrlService {
     }
 
     private void cacheUrlResponse(final Url url) {
-        putInCache(url.getShortUrl(), UrlResponse.from(url));
+        final var response = UrlResponse.from(url);
+        urlCache.put(response.cacheKey(), response);
     }
 
     @Override
@@ -821,8 +834,8 @@ public class DefaultUrlService implements UrlService {
         return RandomStringUtils.secureStrong().nextAlphanumeric(Math.toIntExact(length));
     }
 
-    private Url findUrlToReveal(final String shortUrl) {
-        final var url = urlRepository.findActive(null, shortUrl).orElseThrow(() -> new UrlNotFoundException("URL doesn't exist"));
+    private Url findUrlToReveal(final LinkPlace place) {
+        final var url = urlRepository.findActive(place.domainId(), place.alias()).orElseThrow(() -> new UrlNotFoundException("URL doesn't exist"));
         if (url.getPasswordHash() == null && !clickCheckService.mayRedirect(url.getId(), url.getLongUrl())) {
             throw new UrlNotFoundException("URL doesn't exist");
         }
@@ -862,6 +875,22 @@ public class DefaultUrlService implements UrlService {
     public Url activateUrl(final Url url) {
         url.setActive(true);
         return url;
+    }
+
+    private record LinkPlace(Long domainId, String hostname, String alias) {
+
+        private static LinkPlace primary(final String alias) {
+            return new LinkPlace(null, null, alias);
+        }
+
+        private static LinkPlace on(final DomainRoute route, final String alias) {
+            return new LinkPlace(route.id(), route.hostname(), alias);
+        }
+
+        private String cacheKey() {
+            return UrlCacheKeys.of(domainId, alias);
+        }
+
     }
 
     private record BlockState(BlockReason reason, ThreatType threatType, LocalDateTime blockedAt) {

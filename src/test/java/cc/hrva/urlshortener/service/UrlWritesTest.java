@@ -4,15 +4,21 @@ import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.converter.CreateUrlToUrlConverter;
 import cc.hrva.urlshortener.converter.UrlToPeekUrlConverter;
 import cc.hrva.urlshortener.converter.UrlUpdateDtoToUrlConverter;
+import cc.hrva.urlshortener.dto.ClickRequest;
 import cc.hrva.urlshortener.dto.DestinationHealth;
 import cc.hrva.urlshortener.dto.LinkVerdict;
+import cc.hrva.urlshortener.dto.UrlResponse;
 import cc.hrva.urlshortener.dto.UrlUpdateDto;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.enums.BlockReason;
+import cc.hrva.urlshortener.model.enums.CustomDomainStatus;
 import cc.hrva.urlshortener.repository.DestinationCheckRepository;
 import cc.hrva.urlshortener.repository.DomainRuleRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
+import cc.hrva.urlshortener.service.domain.CustomDomainRegistry;
+import cc.hrva.urlshortener.service.domain.DomainRoute;
+import cc.hrva.urlshortener.service.domain.UrlCache;
 import cc.hrva.urlshortener.service.impl.DefaultModerationService;
 import cc.hrva.urlshortener.service.impl.DefaultUrlService;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiter;
@@ -32,6 +38,7 @@ import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.persistence.autoconfigure.EntityScan;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.cache.CacheManager;
+import org.springframework.cache.concurrent.ConcurrentMapCache;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.FilterType;
 import org.springframework.context.annotation.Import;
@@ -45,6 +52,7 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mockingDetails;
 import static org.mockito.Mockito.when;
@@ -66,6 +74,10 @@ class UrlWritesTest {
     private static final LocalDateTime NEW_EXPIRY = LocalDateTime.of(2027, 6, 1, 12, 0);
     private static final LocalDateTime VISITED_AT = LocalDateTime.of(2026, 10, 27, 11, 45);
     private static final LocalDateTime DEAD_SINCE = LocalDateTime.of(2026, 10, 25, 2, 11, 40);
+    private static final long ON_HRVA = 781L;
+    private static final long ON_DOMAIN = 782L;
+    private static final long DOMAIN_OWNER = 783L;
+    private static final ClickRequest CLICK = ClickRequest.of("203.0.113.7", "Mozilla/5.0", null, "HR");
 
     private final AtomicBoolean visitDone = new AtomicBoolean();
 
@@ -149,6 +161,9 @@ class UrlWritesTest {
     @MockitoBean
     private TaskScheduler taskScheduler;
 
+    @MockitoBean
+    private CustomDomainRegistry customDomainRegistry;
+
     @BeforeEach
     void visitTheLinkRightAfterTheWriteTransactionReadsIt() {
         doAnswer(invocation -> {
@@ -162,7 +177,34 @@ class UrlWritesTest {
 
     @AfterEach
     void removeTheLink() {
-        jdbcTemplate.update("delete from url where id = ?", LINK);
+        jdbcTemplate.update("delete from url where id in (?, ?, ?)", LINK, ON_HRVA, ON_DOMAIN);
+        jdbcTemplate.update("delete from custom_domain where owner_id = ?", DOMAIN_OWNER);
+        jdbcTemplate.update("delete from user_account where id = ?", DOMAIN_OWNER);
+    }
+
+    @Test
+    void eachHostRedirectsToItsOwnLinkFromTheDatabaseAndABlockEvictsOnlyThatLinksKey() {
+        final var cache = new ConcurrentMapCache("urls");
+        when(cacheManager.getCache("urls")).thenReturn(cache);
+        when(appProperties.getFrontendUrl()).thenReturn("https://app.hrva.cc");
+        when(clickCheckService.mayRedirect(anyLong(), any())).thenReturn(true);
+        final var domainId = goExampleCom();
+        final var route = new DomainRoute(domainId, "go.example.com", CustomDomainStatus.ACTIVE, true);
+        menu(ON_HRVA, "https://example.com/a", null);
+        menu(ON_DOMAIN, "https://example.com/b", domainId);
+
+        assertThat(urlService.redirectResultUrl("menu", CLICK).getUrl()).isEqualTo("https://example.com/a");
+        assertThat(urlService.redirectResultUrl(route, "menu", CLICK).getUrl()).isEqualTo("https://example.com/b");
+        assertThat(((UrlResponse) cache.get("menu").get()).id()).isEqualTo(ON_HRVA);
+        assertThat(((UrlResponse) cache.get(domainId + "/menu").get()).id()).isEqualTo(ON_DOMAIN);
+
+        moderationService.blockLink(ON_DOMAIN, BlockReason.ADMIN, "phishing", "admin@hrva.cc", "admin");
+
+        assertThat(cache.get(domainId + "/menu")).isNull();
+        assertThat(cache.get("menu")).isNotNull();
+        assertThat(urlService.redirectResultUrl(route, "menu", CLICK).getUrl())
+                .isEqualTo("https://app.hrva.cc/unavailable?s=menu&reason=blocked&d=go.example.com");
+        assertThat(urlService.redirectResultUrl("menu", CLICK).getUrl()).isEqualTo("https://example.com/a");
     }
 
     @Test
@@ -245,6 +287,22 @@ class UrlWritesTest {
                 .containsEntry("DESTINATION_LAST_STATUS", "404");
     }
 
+    private long goExampleCom() {
+        jdbcTemplate.update("insert into user_account (id, email, password, active, create_date) values (?, 'domain-owner@hrva.cc', 'hash', true, ?)",
+                DOMAIN_OWNER, LocalDateTime.of(2026, 9, 1, 9, 0));
+        jdbcTemplate.update("""
+                insert into custom_domain (owner_id, hostname, hostname_key, status, reason, cloudflare_delete_pending, created_at, updated_at)
+                values (?, 'go.example.com', 'go.example.com', 'ACTIVE', 'Menu links for my cafe', false, ?, ?)""",
+                DOMAIN_OWNER, LocalDateTime.of(2026, 10, 1, 9, 0), LocalDateTime.of(2026, 10, 1, 9, 0));
+        return jdbcTemplate.queryForObject("select id from custom_domain where owner_id = ?", Long.class, DOMAIN_OWNER);
+    }
+
+    private void menu(final long id, final String longUrl, final Long domainId) {
+        jdbcTemplate.update("""
+                insert into url (id, long_url, short_url, visits, create_date, active, domain_id)
+                values (?, ?, 'menu', 0, ?, true, ?)""", id, longUrl, LocalDateTime.of(2026, 10, 1, 9, 0), domainId);
+    }
+
     private void markDead() {
         jdbcTemplate.update("""
                 update url set destination_checked_at = ?, destination_dead_since = ?, destination_fail_streak = 3,
@@ -276,7 +334,7 @@ class UrlWritesTest {
             includeFilters = @ComponentScan.Filter(
                     type = FilterType.ASSIGNABLE_TYPE,
                     classes = {UrlRepository.class, UserRepository.class, DomainRuleRepository.class}))
-    @Import({DefaultUrlService.class, DefaultModerationService.class, UrlUpdateDtoToUrlConverter.class, DestinationCheckRepository.class})
+    @Import({DefaultUrlService.class, DefaultModerationService.class, UrlUpdateDtoToUrlConverter.class, DestinationCheckRepository.class, UrlCache.class})
     static class TestApplication {
     }
 

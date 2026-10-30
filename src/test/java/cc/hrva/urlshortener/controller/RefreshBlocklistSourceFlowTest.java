@@ -18,6 +18,7 @@ import cc.hrva.urlshortener.repository.AuditLogRepository;
 import cc.hrva.urlshortener.repository.BlocklistSourceRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
+import cc.hrva.urlshortener.security.AnyHostIsPrimary;
 import cc.hrva.urlshortener.security.ClientIpResolver;
 import cc.hrva.urlshortener.security.JwtFilter;
 import cc.hrva.urlshortener.security.OAuth2LoginSuccessHandler;
@@ -382,6 +383,7 @@ class RefreshBlocklistSourceFlowTest {
     @Import({
             AppConfiguration.class,
             WebConfiguration.class,
+            AnyHostIsPrimary.class,
             JacksonConfiguration.class,
             SecurityConfiguration.class,
             GlobalExceptionHandler.class,

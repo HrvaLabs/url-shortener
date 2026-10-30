@@ -9,12 +9,17 @@ import cc.hrva.urlshortener.mcp.McpResourceServerConfiguration;
 import cc.hrva.urlshortener.mcp.authorization.AuthorizationServerConfiguration;
 import cc.hrva.urlshortener.mcp.bridge.ConnectRequestStore;
 import cc.hrva.urlshortener.model.BioPage;
+import cc.hrva.urlshortener.model.CustomDomain;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.User;
+import cc.hrva.urlshortener.model.enums.CustomDomainStatus;
 import cc.hrva.urlshortener.model.enums.ReportCategory;
 import cc.hrva.urlshortener.repository.BioPageRepository;
+import cc.hrva.urlshortener.repository.CustomDomainRepository;
+import cc.hrva.urlshortener.repository.DomainRouteRow;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
+import cc.hrva.urlshortener.security.AnyHostIsPrimary;
 import cc.hrva.urlshortener.security.ClientIpResolver;
 import cc.hrva.urlshortener.security.JwtFilter;
 import cc.hrva.urlshortener.security.OAuth2LoginSuccessHandler;
@@ -22,6 +27,7 @@ import cc.hrva.urlshortener.security.OAuth2LoginUserService;
 import cc.hrva.urlshortener.security.TokenProvider;
 import cc.hrva.urlshortener.service.BioPageReviewService;
 import cc.hrva.urlshortener.service.ReviewQueueService;
+import cc.hrva.urlshortener.service.domain.CustomDomainRegistry;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiter;
 import com.nimbusds.jose.JOSEException;
 import com.nimbusds.jose.jwk.RSAKey;
@@ -46,10 +52,12 @@ import org.springframework.test.json.JsonCompareMode;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
 
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -96,6 +104,12 @@ class ReportEndpointSecurityTest {
     private BioPageRepository bioPageRepository;
 
     @MockitoBean
+    private CustomDomainRepository customDomainRepository;
+
+    @Autowired
+    private CustomDomainRegistry customDomainRegistry;
+
+    @MockitoBean
     private BioPageReviewService bioPageReviewService;
 
     @MockitoBean
@@ -138,6 +152,41 @@ class ReportEndpointSecurityTest {
                 .andExpect(status().isAccepted());
 
         verify(reviewQueueService).report(url, ReportCategory.PHISHING, "asks for my bank login");
+    }
+
+    @Test
+    void reportOfACustomLinkFindsIt() throws Exception {
+        final var onHrva = Url.builder().id(287L).shortUrl("menu").longUrl("https://example.com/a").active(true).build();
+        final var onDomain = Url.builder().id(288L).shortUrl("menu").longUrl("https://findfavoritedate.life/?u=f6yp608").active(true)
+                .domain(CustomDomain.builder().id(7L).hostname("go.example.com").build()).build();
+        when(customDomainRepository.findRoutes()).thenReturn(List.of(
+                new DomainRouteRow(7L, "go.example.com", "go.example.com", CustomDomainStatus.ACTIVE, 5L, true)));
+        customDomainRegistry.reload();
+        when(urlRepository.findActive(null, "menu")).thenReturn(Optional.of(onHrva));
+        when(urlRepository.findActive(7L, "menu")).thenReturn(Optional.of(onDomain));
+
+        mockMvc.perform(post(REPORTS).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"shortUrl\":\"https://go.example.com/menu\",\"category\":\"PHISHING\"}"))
+                .andExpect(status().isAccepted())
+                .andExpect(content().string(""));
+
+        verify(reviewQueueService).report(onDomain, ReportCategory.PHISHING, null);
+        verify(reviewQueueService, never()).report(eq(onHrva), any(), any());
+    }
+
+    @Test
+    void anUnregisteredHostStillReadsAsTheAliasAlone() throws Exception {
+        final var url = Url.builder().id(287L).shortUrl("abc").longUrl("https://example.com/a").active(true).build();
+        when(urlRepository.findActive(null, "abc")).thenReturn(Optional.of(url));
+
+        mockMvc.perform(post(REPORTS).contentType(MediaType.APPLICATION_JSON).content("{\"shortUrl\":\"example.org/abc\",\"category\":\"SPAM\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().json("{\"error\":\"Enter a hrva.cc short link or bio page, like hrva.cc/abc or hrva.cc/@name\"}", JsonCompareMode.STRICT));
+        mockMvc.perform(post(REPORTS).contentType(MediaType.APPLICATION_JSON).content("{\"shortUrl\":\"abc\",\"category\":\"SPAM\"}"))
+                .andExpect(status().isAccepted());
+
+        verify(reviewQueueService).report(url, ReportCategory.SPAM, null);
+        verify(urlRepository, never()).findActive(eq(7L), any());
     }
 
     @Test
@@ -229,6 +278,7 @@ class ReportEndpointSecurityTest {
     @Import({
             AppConfiguration.class,
             WebConfiguration.class,
+            AnyHostIsPrimary.class,
             JacksonConfiguration.class,
             SecurityConfiguration.class,
             GlobalExceptionHandler.class,
@@ -236,6 +286,7 @@ class ReportEndpointSecurityTest {
             McpResourceServerConfiguration.class,
             JwtFilter.class,
             ClientIpResolver.class,
+            CustomDomainRegistry.class,
             ReportController.class
     })
     static class TestApplication {

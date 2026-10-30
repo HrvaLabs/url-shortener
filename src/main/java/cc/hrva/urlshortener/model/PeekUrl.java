@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.model;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.LocalDateTime;
 import lombok.AllArgsConstructor;
@@ -26,5 +27,8 @@ public class PeekUrl {
 
   @Schema(description = "Whether the link needs a password; its destination is then left out", example = "false")
   private boolean passwordProtected;
+
+  @JsonIgnore
+  private String domain;
 
 }

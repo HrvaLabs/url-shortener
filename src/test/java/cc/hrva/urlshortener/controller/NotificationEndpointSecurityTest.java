@@ -19,6 +19,7 @@ import cc.hrva.urlshortener.model.enums.NotificationType;
 import cc.hrva.urlshortener.repository.NotificationChannelRepository;
 import cc.hrva.urlshortener.repository.NotificationConsentRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
+import cc.hrva.urlshortener.security.AnyHostIsPrimary;
 import cc.hrva.urlshortener.security.ClientIpResolver;
 import cc.hrva.urlshortener.security.JwtFilter;
 import cc.hrva.urlshortener.security.OAuth2LoginSuccessHandler;
@@ -833,6 +834,7 @@ class NotificationEndpointSecurityTest {
     @Import({
             AppConfiguration.class,
             WebConfiguration.class,
+            AnyHostIsPrimary.class,
             JacksonConfiguration.class,
             SecurityConfiguration.class,
             GlobalExceptionHandler.class,

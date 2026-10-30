@@ -9,6 +9,7 @@ import cc.hrva.urlshortener.mcp.McpResourceServerConfiguration;
 import cc.hrva.urlshortener.mcp.authorization.AuthorizationServerConfiguration;
 import cc.hrva.urlshortener.mcp.bridge.ConnectRequestStore;
 import cc.hrva.urlshortener.repository.UserRepository;
+import cc.hrva.urlshortener.security.AnyHostIsPrimary;
 import cc.hrva.urlshortener.security.ClickRequestResolver;
 import cc.hrva.urlshortener.security.ClientIpResolver;
 import cc.hrva.urlshortener.security.JwtFilter;
@@ -145,6 +146,7 @@ class SecurityTxtControllerTest {
     @Import({
             AppConfiguration.class,
             WebConfiguration.class,
+            AnyHostIsPrimary.class,
             JacksonConfiguration.class,
             SecurityConfiguration.class,
             GlobalExceptionHandler.class,

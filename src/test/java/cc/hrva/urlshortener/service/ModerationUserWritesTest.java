@@ -18,6 +18,7 @@ import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.repository.VerificationTokenRepository;
 import cc.hrva.urlshortener.security.Reauthentication;
 import cc.hrva.urlshortener.service.bio.BioAccountData;
+import cc.hrva.urlshortener.service.domain.UrlCache;
 import cc.hrva.urlshortener.service.notification.NotificationAccountData;
 import cc.hrva.urlshortener.service.impl.DefaultModerationService;
 import cc.hrva.urlshortener.service.impl.DefaultSendingEmailService;
@@ -271,7 +272,7 @@ class ModerationUserWritesTest {
             includeFilters = @ComponentScan.Filter(
                     type = FilterType.ASSIGNABLE_TYPE,
                     classes = {UrlRepository.class, UserRepository.class, ApiKeyRepository.class, DomainRuleRepository.class}))
-    @Import({DefaultModerationService.class, DefaultUserService.class, UserToUserDtoConverter.class, UserUpdateDtoToUserConverter.class})
+    @Import({DefaultModerationService.class, DefaultUserService.class, UserToUserDtoConverter.class, UserUpdateDtoToUserConverter.class, UrlCache.class})
     static class TestApplication {
     }
 

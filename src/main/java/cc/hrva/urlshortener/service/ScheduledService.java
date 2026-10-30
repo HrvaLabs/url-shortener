@@ -23,5 +23,6 @@ public interface ScheduledService {
     void sendWeeklyClickSummaries();
     void runDomainLifecycle();
     void reconcileCustomDomains();
+    void reloadCustomDomainRoutes();
 
 }

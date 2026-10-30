@@ -7,6 +7,7 @@ import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.mcp.McpAccessTokens;
 import cc.hrva.urlshortener.mcp.bridge.ConnectRequestStore;
 import cc.hrva.urlshortener.repository.UserRepository;
+import cc.hrva.urlshortener.security.AnyHostIsPrimary;
 import cc.hrva.urlshortener.security.ClientIpResolver;
 import cc.hrva.urlshortener.security.JwtFilter;
 import cc.hrva.urlshortener.security.OAuth2LoginSuccessHandler;
@@ -710,6 +711,7 @@ class AuthorizationServerConfigurationTest {
     @Import({
             AppConfiguration.class,
             WebConfiguration.class,
+            AnyHostIsPrimary.class,
             SecurityConfiguration.class,
             AuthorizationServerConfiguration.class,
             JwtFilter.class,

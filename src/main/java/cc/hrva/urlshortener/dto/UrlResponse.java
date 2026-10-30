@@ -2,6 +2,8 @@ package cc.hrva.urlshortener.dto;
 
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.enums.BlockReason;
+import cc.hrva.urlshortener.service.domain.UrlCacheKeys;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.LocalDateTime;
@@ -50,7 +52,10 @@ public record UrlResponse(
         String finalUrl,
         @Schema(description = "Set only while the nightly check finds the destination dead; never in the public view")
         @JsonInclude(JsonInclude.Include.NON_NULL)
-        DestinationHealth destinationHealth) {
+        DestinationHealth destinationHealth,
+        @Schema(description = "The custom domain the link lives on; absent for hrva.cc links")
+        @JsonInclude(JsonInclude.Include.NON_NULL)
+        DomainRef domain) {
 
     public UrlResponse {
         suspiciousReasons = suspiciousReasons == null ? List.of() : suspiciousReasons;
@@ -60,27 +65,27 @@ public record UrlResponse(
                        final LocalDateTime expirationDate, final Long visits, final Long visitLimit, final boolean active,
                        final String status, final Set<String> tags, final boolean passwordProtected, final String ownerEmail) {
         this(id, longUrl, shortUrl, createDate, expirationDate, visits, visitLimit, active, status, tags, passwordProtected,
-                ownerEmail, List.of(), null, null, null, null, null);
+                ownerEmail, List.of(), null, null, null, null, null, null);
     }
 
     public UrlResponse publicView() {
         return new UrlResponse(id, passwordProtected ? null : longUrl, shortUrl, createDate, expirationDate, visits, visitLimit,
-                active, status, Set.of(), passwordProtected, null, List.of(), null, null, null, null, null);
+                active, status, Set.of(), passwordProtected, null, List.of(), null, null, null, null, null, domain);
     }
 
     public UrlResponse withSuspiciousReasons(final List<String> reasons) {
         return new UrlResponse(id, longUrl, shortUrl, createDate, expirationDate, visits, visitLimit, active, status, tags,
-                passwordProtected, ownerEmail, reasons, blockReason, reviewOpen, ownerPossibleScammer, finalUrl, destinationHealth);
+                passwordProtected, ownerEmail, reasons, blockReason, reviewOpen, ownerPossibleScammer, finalUrl, destinationHealth, domain);
     }
 
     public UrlResponse withBlockReason(final BlockReason reason) {
         return new UrlResponse(id, longUrl, shortUrl, createDate, expirationDate, visits, visitLimit, active, status, tags,
-                passwordProtected, ownerEmail, suspiciousReasons, reason, reviewOpen, ownerPossibleScammer, finalUrl, destinationHealth);
+                passwordProtected, ownerEmail, suspiciousReasons, reason, reviewOpen, ownerPossibleScammer, finalUrl, destinationHealth, domain);
     }
 
     public UrlResponse withModeration(final boolean inReview, final boolean ownerLooksLikeAScammer, final String chainEnd) {
         return new UrlResponse(id, longUrl, shortUrl, createDate, expirationDate, visits, visitLimit, active, status, tags,
-                passwordProtected, ownerEmail, suspiciousReasons, blockReason, inReview, ownerLooksLikeAScammer, chainEnd, destinationHealth);
+                passwordProtected, ownerEmail, suspiciousReasons, blockReason, inReview, ownerLooksLikeAScammer, chainEnd, destinationHealth, domain);
     }
 
     public static UrlResponse from(final Url url) {
@@ -102,7 +107,13 @@ public record UrlResponse(
                 null,
                 null,
                 null,
-                DestinationHealth.of(url));
+                DestinationHealth.of(url),
+                DomainRef.of(url.getDomain()));
+    }
+
+    @JsonIgnore
+    public String cacheKey() {
+        return UrlCacheKeys.of(domain == null ? null : domain.id(), shortUrl);
     }
 
     private static String resolveStatus(final Url url) {

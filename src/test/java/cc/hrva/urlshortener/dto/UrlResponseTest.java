@@ -2,6 +2,8 @@ package cc.hrva.urlshortener.dto;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Set;
+import cc.hrva.urlshortener.model.CustomDomain;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.enums.BlockReason;
 import cc.hrva.urlshortener.model.enums.ThreatType;
@@ -212,6 +214,65 @@ class UrlResponseTest {
                 .destinationLastStatus("tls").build());
 
         assertThat(mapper.convertValue(serializer.deserialize(serializer.serialize(response)), UrlResponse.class)).isEqualTo(response);
+    }
+
+    @Test
+    void domainIsAbsentForHrvaLinks() {
+        final var response = UrlResponse.from(baseUrl().active(true).build());
+
+        assertThat(response.domain()).isNull();
+        assertThat(JsonMapper.builder().build().writeValueAsString(response)).doesNotContain("\"domain\"").doesNotContain("cacheKey");
+    }
+
+    @Test
+    void aDomainLinkCarriesItsIdAndHostname() {
+        final var response = UrlResponse.from(baseUrl().active(true).domain(goExampleCom()).build());
+
+        assertThat(response.domain()).isEqualTo(new DomainRef(7L, "go.example.com"));
+        assertThat(JsonMapper.builder().build().writeValueAsString(response))
+                .contains("\"domain\":{\"id\":7,\"hostname\":\"go.example.com\"}")
+                .doesNotContain("cacheKey");
+    }
+
+    @Test
+    void publicViewKeepsTheDomain() {
+        final var response = UrlResponse.from(baseUrl().active(true).domain(goExampleCom()).build());
+
+        assertThat(response.publicView().domain()).isEqualTo(new DomainRef(7L, "go.example.com"));
+    }
+
+    @Test
+    void theAdminDecorationsKeepTheDomain() {
+        final var response = UrlResponse.from(baseUrl().active(true).domain(goExampleCom()).build());
+
+        assertThat(response.withSuspiciousReasons(List.of("x")).domain()).isEqualTo(response.domain());
+        assertThat(response.withBlockReason(BlockReason.ADMIN).domain()).isEqualTo(response.domain());
+        assertThat(response.withModeration(true, false, null).domain()).isEqualTo(response.domain());
+    }
+
+    @Test
+    void theShortConstructorLeavesTheDomainOut() {
+        assertThat(new UrlResponse(1L, "https://example.com", "abc", null, null, 0L, null, true, "ACTIVE", Set.of(), false, null).domain())
+                .isNull();
+    }
+
+    @Test
+    void cacheKeyFollowsTheDomain() {
+        assertThat(UrlResponse.from(baseUrl().shortUrl("menu").active(true).build()).cacheKey()).isEqualTo("menu");
+        assertThat(UrlResponse.from(baseUrl().shortUrl("menu").active(true).domain(goExampleCom()).build()).cacheKey()).isEqualTo("7/menu");
+    }
+
+    @Test
+    void theDomainSurvivesTheRedisRoundTrip() {
+        final var mapper = JsonMapper.builder().build();
+        final var serializer = new GenericJacksonJsonRedisSerializer(mapper);
+        final var response = UrlResponse.from(baseUrl().active(true).domain(goExampleCom()).build());
+
+        assertThat(mapper.convertValue(serializer.deserialize(serializer.serialize(response)), UrlResponse.class)).isEqualTo(response);
+    }
+
+    private static CustomDomain goExampleCom() {
+        return CustomDomain.builder().id(7L).hostname("go.example.com").build();
     }
 
 }

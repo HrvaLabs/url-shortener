@@ -229,7 +229,7 @@ public class CustomDomainHostnames {
                 || codePoint >= CHEROKEE_SMALL_SUPPLEMENT_FIRST && codePoint <= CHEROKEE_SMALL_SUPPLEMENT_LAST;
     }
 
-    private static Optional<String> withoutPort(final String host) {
+    public static Optional<String> withoutPort(final String host) {
         if (StringUtils.isBlank(host)) {
             return Optional.empty();
         }

@@ -52,7 +52,7 @@ public class CacheWarmup {
         try {
             final var pageable = PageRequest.of(0, WARMUP_COUNT, sort);
             final var urls = urlRepository.findAll(spec, pageable);
-            urls.forEach(url -> cache.put(url.getShortUrl(), UrlResponse.from(url)));
+            urls.map(UrlResponse::from).forEach(response -> cache.put(response.cacheKey(), response));
             log.info("Cached {} {} URLs", urls.getNumberOfElements(), label);
             return urls.getNumberOfElements();
         } catch (final Exception e) {

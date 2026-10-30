@@ -34,8 +34,6 @@ import org.springframework.transaction.support.TransactionOperations;
 @Transactional(readOnly = true)
 public class DefaultReservedAliasService implements ReservedAliasService {
 
-    private static final List<String> BUILT_IN_ALIASES = List.of(
-            "actuator", "anon", "api", "auth", "error", "login", "logout", "mcp", "oauth2", "swagger-ui", "v3", "webjars");
     private static final String BUILT_IN_REASON = "Used by hrva.cc itself";
     private static final String ALREADY_RESERVED = "This alias is already reserved.";
     private static final String RESERVED_ALIAS_NOT_FOUND = "Reserved alias not found";

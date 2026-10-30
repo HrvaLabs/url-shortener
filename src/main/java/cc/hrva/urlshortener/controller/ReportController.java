@@ -12,6 +12,8 @@ import cc.hrva.urlshortener.security.ClientIpResolver;
 import cc.hrva.urlshortener.service.BioPageReviewService;
 import cc.hrva.urlshortener.service.ReviewQueueService;
 import cc.hrva.urlshortener.service.bio.BioHandles;
+import cc.hrva.urlshortener.service.domain.CustomDomainRegistry;
+import cc.hrva.urlshortener.service.domain.DomainRoute;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiter;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiterUnavailableException;
 import io.swagger.v3.oas.annotations.Operation;
@@ -50,6 +52,8 @@ public class ReportController {
     private static final Pattern SHORT_CODE = Pattern.compile("^[a-zA-Z0-9_-]{1,32}$");
     private static final Pattern CONTROL_CHARACTERS = Pattern.compile("[\\p{Cc}\\p{Cf}&&[^\\s]]");
     private static final String HANDLE_PREFIX = "@";
+    private static final String PATH_START = "/";
+    private static final String WWW = "www.";
     private static final String BIO_PAGE_PATH = "bio/";
     private static final String TARGET_INVALID = "Enter a hrva.cc short link or bio page, like hrva.cc/abc or hrva.cc/@name";
     private static final String CATEGORY_INVALID = "Category must be PHISHING, MALWARE, SPAM, IMPERSONATION or OTHER";
@@ -65,8 +69,9 @@ public class ReportController {
     private final ClientIpResolver clientIpResolver;
     private final HttpServletRequest request;
     private final AppProperties appProperties;
+    private final CustomDomainRegistry customDomainRegistry;
 
-    @Operation(summary = "Report a link or bio page", description = "Report an abusive short link (abc, hrva.cc/abc) or bio page (@name, hrva.cc/@name, app.hrva.cc/bio/name) for review. Always answers 202 for a well-formed report, whether or not the link or page exists. 5 reports per hour per client, shared by links and bio pages.")
+    @Operation(summary = "Report a link or bio page", description = "Report an abusive short link (abc, hrva.cc/abc, go.example.com/abc on a custom domain) or bio page (@name, hrva.cc/@name, app.hrva.cc/bio/name) for review. Always answers 202 for a well-formed report, whether or not the link or page exists. 5 reports per hour per client, shared by links and bio pages.")
     @ApiResponse(responseCode = "202", description = "Report received")
     @ApiResponse(responseCode = "400", description = "Invalid short link or bio page, category or details")
     @ApiResponse(responseCode = "429", description = "Too many reports from this client")
@@ -85,7 +90,7 @@ public class ReportController {
                     .filter(BioPage::isPublic)
                     .ifPresent(page -> reportBioPage(page, category, details));
         } else {
-            urlRepository.findActive(null, target.shortCode()).ifPresent(url -> reviewQueueService.report(url, category, details));
+            urlRepository.findActive(target.domainId(), target.shortCode()).ifPresent(url -> reviewQueueService.report(url, category, details));
         }
 
         return ResponseEntity.accepted().build();
@@ -121,7 +126,12 @@ public class ReportController {
     }
 
     private ReportTarget targetOf(final String reported) {
-        final var link = StringUtils.removeStartIgnoreCase(withoutScheme(StringUtils.defaultString(reported).strip()), "www.");
+        final var typed = withoutScheme(StringUtils.defaultString(reported).strip());
+        final var customDomain = customDomainOf(typed);
+        if (customDomain.isPresent()) {
+            return customLinkOf(customDomain.get(), pathOf(StringUtils.substringAfter(typed, PATH_START)));
+        }
+        final var link = StringUtils.removeStartIgnoreCase(typed, WWW);
         final var shortHost = hostOf(appProperties.getServerUrl());
         final var frontendHost = hostOf(appProperties.getFrontendUrl());
         if (StringUtils.startsWithIgnoreCase(link, shortHost + "/")) {
@@ -133,13 +143,27 @@ public class ReportController {
         return shortLinkOrHandle(pathOf(link));
     }
 
+    private Optional<DomainRoute> customDomainOf(final String typed) {
+        if (!typed.contains(PATH_START)) {
+            return Optional.empty();
+        }
+        return customDomainRegistry.route(StringUtils.substringBefore(typed, PATH_START));
+    }
+
+    private static ReportTarget customLinkOf(final DomainRoute route, final String path) {
+        return new ReportTarget(shortCodeOf(path), null, route.id());
+    }
+
     private static ReportTarget shortLinkOrHandle(final String path) {
         if (path.startsWith(HANDLE_PREFIX)) {
             return handleOf(path);
         }
+        return new ReportTarget(shortCodeOf(path), null, null);
+    }
+
+    private static String shortCodeOf(final String path) {
         return Optional.of(path)
                 .filter(code -> SHORT_CODE.matcher(code).matches())
-                .map(code -> new ReportTarget(code, null))
                 .orElseThrow(() -> new ApiException(TARGET_INVALID));
     }
 
@@ -155,7 +179,7 @@ public class ReportController {
         if (BioHandles.formatError(handle).isPresent()) {
             throw new ApiException(TARGET_INVALID);
         }
-        return new ReportTarget(null, handle);
+        return new ReportTarget(null, handle, null);
     }
 
     private static String pathOf(final String link) {
@@ -193,7 +217,7 @@ public class ReportController {
         return StringUtils.defaultIfEmpty(cleaned, null);
     }
 
-    private record ReportTarget(String shortCode, String handle) {
+    private record ReportTarget(String shortCode, String handle, Long domainId) {
     }
 
 }

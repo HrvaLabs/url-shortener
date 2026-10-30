@@ -7,10 +7,14 @@ import cc.hrva.urlshortener.configuration.GlobalExceptionHandler;
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.dto.ClickRequest;
 import cc.hrva.urlshortener.dto.CreateUrlDto;
+import cc.hrva.urlshortener.dto.LinkPreviewResponse;
+import cc.hrva.urlshortener.dto.UnlockResponse;
 import cc.hrva.urlshortener.dto.UrlResponse;
 import cc.hrva.urlshortener.dto.UrlSearchDto;
 import cc.hrva.urlshortener.dto.UrlUpdateDto;
 import cc.hrva.urlshortener.exception.RateLimitExceededException;
+import cc.hrva.urlshortener.exception.UrlNotFoundException;
+import cc.hrva.urlshortener.model.CustomDomain;
 import cc.hrva.urlshortener.model.PeekUrl;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.enums.CreatedVia;
@@ -39,6 +43,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -49,6 +54,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -272,7 +278,7 @@ class UrlControllerTest {
     void shouldFetchUrlByShort() throws Exception {
         final var url = Url.builder().id(1L).longUrl("https://example.com").build();
         when(clickRequestResolver.resolve(any())).thenReturn(CLICK);
-        when(urlService.revealUrlAndRecordClick("short", CLICK)).thenReturn(UrlResponse.from(url));
+        when(urlService.revealUrlAndRecordClick(null, "short", CLICK)).thenReturn(UrlResponse.from(url));
 
         mockMvc.perform(get("/api/v1/urls/short"))
                 .andExpect(status().isOk())
@@ -281,7 +287,7 @@ class UrlControllerTest {
 
     @Test
     void qrCodeEncodesTheShortLinkWithTheQrMarker() throws Exception {
-        when(urlService.peekUrlByShortUrl("board")).thenReturn(PeekUrl.builder().shortUrl("board").build());
+        when(urlService.peekUrlByShortUrl(null, "board")).thenReturn(PeekUrl.builder().shortUrl("board").build());
         when(qrCodeService.generateQrCode("https://hrva.cc/board?qr", 300, 300)).thenReturn(new byte[]{1});
 
         mockMvc.perform(get("/api/v1/urls/board/qr")).andExpect(status().isOk());
@@ -290,7 +296,7 @@ class UrlControllerTest {
     @Test
     void qrCodeShortLinkHasNoDoubleSlashWhenTheServerUrlEndsWithOne() throws Exception {
         appProperties.setServerUrl("https://hrva.cc/");
-        when(urlService.peekUrlByShortUrl("board")).thenReturn(PeekUrl.builder().shortUrl("board").build());
+        when(urlService.peekUrlByShortUrl(null, "board")).thenReturn(PeekUrl.builder().shortUrl("board").build());
         when(qrCodeService.generateQrCode("https://hrva.cc/board?qr", 300, 300)).thenReturn(new byte[]{1});
 
         mockMvc.perform(get("/api/v1/urls/board/qr")).andExpect(status().isOk());
@@ -298,7 +304,7 @@ class UrlControllerTest {
 
     @Test
     void qrCodeSizeIsKeptWithinLimits() throws Exception {
-        when(urlService.peekUrlByShortUrl("board")).thenReturn(PeekUrl.builder().shortUrl("board").build());
+        when(urlService.peekUrlByShortUrl(null, "board")).thenReturn(PeekUrl.builder().shortUrl("board").build());
         when(qrCodeService.generateQrCode("https://hrva.cc/board?qr", 1024, 1024)).thenReturn(new byte[]{1});
         when(qrCodeService.generateQrCode("https://hrva.cc/board?qr", 64, 64)).thenReturn(new byte[]{1});
 
@@ -308,7 +314,7 @@ class UrlControllerTest {
 
     @Test
     void previewOfAPasswordProtectedLinkFetchesNothing() throws Exception {
-        when(urlService.peekUrlByShortUrl("board")).thenReturn(PeekUrl.builder().shortUrl("board").passwordProtected(true).build());
+        when(urlService.peekUrlByShortUrl(null, "board")).thenReturn(PeekUrl.builder().shortUrl("board").passwordProtected(true).build());
 
         mockMvc.perform(get("/api/v1/urls/board/preview"))
                 .andExpect(status().isOk())
@@ -319,7 +325,7 @@ class UrlControllerTest {
     @Test
     void shouldPeekUrlByShortUrl() throws Exception {
         final var peekUrl = PeekUrl.builder().longUrl("https://example.com").shortUrl("ex").build();
-        when(urlService.peekUrlByShortUrl("short")).thenReturn(peekUrl);
+        when(urlService.peekUrlByShortUrl(null, "short")).thenReturn(peekUrl);
 
         mockMvc.perform(get("/api/v1/urls/short/peek"))
                 .andExpect(status().isOk())
@@ -357,7 +363,7 @@ class UrlControllerTest {
     @Test
     void shouldUnlockUrl() throws Exception {
         when(clickRequestResolver.resolve(any())).thenReturn(CLICK);
-        when(urlService.unlockUrl(eq("abc"), eq("pw"), eq(CLICK)))
+        when(urlService.unlockUrl(isNull(), eq("abc"), eq("pw"), eq(CLICK)))
                 .thenReturn(new cc.hrva.urlshortener.dto.UnlockResponse("https://example.com"));
 
         mockMvc.perform(post("/api/v1/urls/abc/unlock")
@@ -365,6 +371,78 @@ class UrlControllerTest {
                         .content("{\"password\":\"pw\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.longUrl").value("https://example.com"));
+    }
+
+    @Test
+    void theLookupsReadTheLinkOnTheGivenDomain() throws Exception {
+        final var onDomain = Url.builder().id(2L).shortUrl("menu").longUrl("https://b.example/menu").active(true)
+                .domain(CustomDomain.builder().id(7L).hostname("go.example.com").build()).build();
+        when(clickRequestResolver.resolve(any())).thenReturn(CLICK);
+        when(urlService.revealUrlAndRecordClick("go.example.com", "menu", CLICK)).thenReturn(UrlResponse.from(onDomain).publicView());
+        when(urlService.peekUrlByShortUrl("go.example.com", "menu"))
+                .thenReturn(PeekUrl.builder().shortUrl("menu").longUrl("https://b.example/menu").domain("go.example.com").build());
+        when(linkPreviewService.fetchPreview("https://b.example/menu")).thenReturn(new LinkPreviewResponse("https://b.example/menu", "B", null, null));
+
+        mockMvc.perform(get("/api/v1/urls/menu").param("domain", "go.example.com"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(2))
+                .andExpect(jsonPath("$.domain.id").value(7))
+                .andExpect(jsonPath("$.domain.hostname").value("go.example.com"));
+        mockMvc.perform(get("/api/v1/urls/menu/peek").param("domain", "go.example.com"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.longUrl").value("https://b.example/menu"))
+                .andExpect(jsonPath("$.domain").doesNotExist());
+        mockMvc.perform(get("/api/v1/urls/menu/preview").param("domain", "go.example.com"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.title").value("B"));
+    }
+
+    @Test
+    void withoutADomainTheLookupsMeanHrva() throws Exception {
+        final var onHrva = Url.builder().id(1L).shortUrl("menu").longUrl("https://a.example/menu").active(true).build();
+        when(clickRequestResolver.resolve(any())).thenReturn(CLICK);
+        when(urlService.revealUrlAndRecordClick(null, "menu", CLICK)).thenReturn(UrlResponse.from(onHrva).publicView());
+
+        mockMvc.perform(get("/api/v1/urls/menu"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(1))
+                .andExpect(jsonPath("$.domain").doesNotExist());
+    }
+
+    @Test
+    void anUnknownOrTurnedOffDomainIsNotFound() throws Exception {
+        when(clickRequestResolver.resolve(any())).thenReturn(CLICK);
+        when(urlService.revealUrlAndRecordClick("off.example.com", "menu", CLICK)).thenThrow(new UrlNotFoundException("URL doesn't exist"));
+        when(urlService.peekUrlByShortUrl("off.example.com", "menu")).thenThrow(new UrlNotFoundException("URL doesn't exist"));
+
+        for (final var path : List.of("/api/v1/urls/menu", "/api/v1/urls/menu/peek", "/api/v1/urls/menu/preview", "/api/v1/urls/menu/qr")) {
+            mockMvc.perform(get(path).param("domain", "off.example.com"))
+                    .andExpect(status().isNotFound())
+                    .andExpect(content().json("{\"error\":\"URL doesn't exist\"}"));
+        }
+        verifyNoInteractions(qrCodeService, linkPreviewService);
+    }
+
+    @Test
+    void qrCodeOfADomainLinkEncodesTheDomainLink() throws Exception {
+        when(urlService.peekUrlByShortUrl("GO.example.com", "menu")).thenReturn(PeekUrl.builder().shortUrl("menu").domain("go.example.com").build());
+        when(qrCodeService.generateQrCode("https://go.example.com/menu?qr", 300, 300)).thenReturn(new byte[]{1});
+
+        mockMvc.perform(get("/api/v1/urls/menu/qr").param("domain", "GO.example.com")).andExpect(status().isOk());
+
+        verify(qrCodeService).generateQrCode("https://go.example.com/menu?qr", 300, 300);
+    }
+
+    @Test
+    void unlockPassesTheDomainOn() throws Exception {
+        when(clickRequestResolver.resolve(any())).thenReturn(CLICK);
+        when(urlService.unlockUrl("go.example.com", "menu", "pw", CLICK)).thenReturn(new UnlockResponse("https://b.example/menu"));
+
+        mockMvc.perform(post("/api/v1/urls/menu/unlock").param("domain", "go.example.com")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"password\":\"pw\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.longUrl").value("https://b.example/menu"));
     }
 
     @Test

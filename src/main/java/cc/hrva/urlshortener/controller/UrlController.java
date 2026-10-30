@@ -55,6 +55,7 @@ public class UrlController {
     private static final int MIN_QR_SIZE = 64;
     private static final int MAX_QR_SIZE = 1024;
     private static final String QR_MARKER_QUERY = "?qr";
+    private static final String HTTPS = "https://";
 
     private final UrlService urlService;
     private final QrCodeService qrCodeService;
@@ -78,35 +79,42 @@ public class UrlController {
         return ResponseEntity.ok(urlService.saveUrlRouting(createUrlDto, clientIpResolver.getClientIp(request), CreatedVia.WEB));
     }
 
-    @Operation(summary = "Redirect to short URL", description = "Look up a short URL and return its details. Records a click (bots are counted separately and refused on visit-limited links).")
+    @Operation(summary = "Redirect to short URL", description = "Look up a short URL and return its details. Records a click (bots are counted separately and refused on visit-limited links). Add domain=go.example.com for a link on a custom domain.")
     @ApiResponse(responseCode = "404", description = "URL not found")
     @GetMapping("/{short}")
-    public ResponseEntity<UrlResponse> fetchUrlByShort(@PathVariable("short") final String shortUrl) {
-        return ResponseEntity.ok(urlService.revealUrlAndRecordClick(shortUrl, clickRequestResolver.resolve(request)));
+    public ResponseEntity<UrlResponse> fetchUrlByShort(
+            @PathVariable("short") final String shortUrl,
+            @RequestParam(required = false) final String domain) {
+        return ResponseEntity.ok(urlService.revealUrlAndRecordClick(domain, shortUrl, clickRequestResolver.resolve(request)));
     }
 
-    @Operation(summary = "Peek at a short URL", description = "Quickly retrieve longUrl, shortUrl, and createDate without recording a visit.")
+    @Operation(summary = "Peek at a short URL", description = "Quickly retrieve longUrl, shortUrl, and createDate without recording a visit. Add domain=go.example.com for a link on a custom domain.")
     @ApiResponse(responseCode = "404", description = "URL not found")
     @GetMapping("/{short}/peek")
-    public ResponseEntity<PeekUrl> peekUrlByShortUrl(@PathVariable("short") final String shortUrl) {
-        return ResponseEntity.ok(urlService.peekUrlByShortUrl(shortUrl));
+    public ResponseEntity<PeekUrl> peekUrlByShortUrl(
+            @PathVariable("short") final String shortUrl,
+            @RequestParam(required = false) final String domain) {
+        return ResponseEntity.ok(urlService.peekUrlByShortUrl(domain, shortUrl));
     }
 
-    @Operation(summary = "Unlock a password-protected URL", description = "Submit the password for a protected short URL to receive its destination and record the click.")
+    @Operation(summary = "Unlock a password-protected URL", description = "Submit the password for a protected short URL to receive its destination and record the click. Add domain=go.example.com for a link on a custom domain.")
     @ApiResponse(responseCode = "403", description = "Incorrect password")
     @ApiResponse(responseCode = "404", description = "URL not found")
     @PostMapping("/{short}/unlock")
     public ResponseEntity<UnlockResponse> unlockUrl(
             @PathVariable("short") final String shortUrl,
+            @RequestParam(required = false) final String domain,
             @Valid @RequestBody final UnlockUrlDto dto) {
-        return ResponseEntity.ok(urlService.unlockUrl(shortUrl, dto.getPassword(), clickRequestResolver.resolve(request)));
+        return ResponseEntity.ok(urlService.unlockUrl(domain, shortUrl, dto.getPassword(), clickRequestResolver.resolve(request)));
     }
 
-    @Operation(summary = "Get rich link preview", description = "Fetch Open Graph metadata (title, description, image) for a short URL.")
+    @Operation(summary = "Get rich link preview", description = "Fetch Open Graph metadata (title, description, image) for a short URL. Add domain=go.example.com for a link on a custom domain.")
     @ApiResponse(responseCode = "404", description = "URL not found")
     @GetMapping("/{short}/preview")
-    public ResponseEntity<LinkPreviewResponse> previewUrl(@PathVariable("short") final String shortUrl) {
-        final var urlInfo = urlService.peekUrlByShortUrl(shortUrl);
+    public ResponseEntity<LinkPreviewResponse> previewUrl(
+            @PathVariable("short") final String shortUrl,
+            @RequestParam(required = false) final String domain) {
+        final var urlInfo = urlService.peekUrlByShortUrl(domain, shortUrl);
         if (urlInfo.isPasswordProtected()) {
             return ResponseEntity.ok(new LinkPreviewResponse(null, null, null, null));
         }
@@ -114,18 +122,23 @@ public class UrlController {
         return ResponseEntity.ok(linkPreviewService.fetchPreview(urlInfo.getLongUrl()));
     }
 
-    @Operation(summary = "Generate QR code", description = "Generate a QR code PNG for the short URL. It encodes the short link with the ?qr marker, so its scans count as QR scans in the link's analytics. Optional size parameter.")
+    @Operation(summary = "Generate QR code", description = "Generate a QR code PNG for the short URL. It encodes the short link with the ?qr marker, so its scans count as QR scans in the link's analytics. Optional size parameter. Add domain=go.example.com for a link on a custom domain.")
     @ApiResponse(responseCode = "404", description = "URL not found")
     @GetMapping(value = "/{short}/qr", produces = MediaType.IMAGE_PNG_VALUE)
     public ResponseEntity<byte[]> generateQrCode(
             @PathVariable("short") final String shortUrl,
+            @RequestParam(required = false) final String domain,
             @RequestParam(defaultValue = "300") final int size) {
-        final var urlInfo = urlService.peekUrlByShortUrl(shortUrl);
+        final var urlInfo = urlService.peekUrlByShortUrl(domain, shortUrl);
         final var boundedSize = Math.clamp(size, MIN_QR_SIZE, MAX_QR_SIZE);
-        final var shortLink = StringUtils.removeEnd(appProperties.getServerUrl(), "/") + "/" + urlInfo.getShortUrl() + QR_MARKER_QUERY;
-        final var qrBytes = qrCodeService.generateQrCode(shortLink, boundedSize, boundedSize);
+        final var qrBytes = qrCodeService.generateQrCode(shortLinkOf(urlInfo) + QR_MARKER_QUERY, boundedSize, boundedSize);
 
         return ResponseEntity.ok().contentType(MediaType.IMAGE_PNG).body(qrBytes);
+    }
+
+    private String shortLinkOf(final PeekUrl urlInfo) {
+        final var host = urlInfo.getDomain() == null ? StringUtils.removeEnd(appProperties.getServerUrl(), "/") : HTTPS + urlInfo.getDomain();
+        return host + "/" + urlInfo.getShortUrl();
     }
 
     @Operation(summary = "Bulk create short URLs", description = "Create multiple short URLs in a single request. Requires ROLE_USER.")

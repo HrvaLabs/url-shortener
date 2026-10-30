@@ -12,6 +12,7 @@ import cc.hrva.urlshortener.exception.DomainRuleNotFoundException;
 import cc.hrva.urlshortener.exception.UrlNotFoundException;
 import cc.hrva.urlshortener.exception.UrlValidationException;
 import cc.hrva.urlshortener.exception.UserNotFoundException;
+import cc.hrva.urlshortener.model.CustomDomain;
 import cc.hrva.urlshortener.model.DomainRule;
 import cc.hrva.urlshortener.model.LinkReview;
 import cc.hrva.urlshortener.model.Url;
@@ -27,6 +28,7 @@ import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent;
 import cc.hrva.urlshortener.service.alert.AlertedLink;
 import cc.hrva.urlshortener.service.blocklist.BlocklistConfigurationChangedEvent;
+import cc.hrva.urlshortener.service.domain.UrlCache;
 import cc.hrva.urlshortener.service.impl.DefaultModerationService;
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -199,7 +201,7 @@ class DefaultModerationServiceTest {
             return null;
         }).when(cache).evict(any());
         moderationService = new DefaultModerationService(urlRepository, userRepository, domainRuleRepository, linkCheckService,
-                reviewQueueService, userService, sendingEmailService, auditLogService, cacheManager, eventPublisher, recordingTransactions(),
+                reviewQueueService, userService, sendingEmailService, auditLogService, new UrlCache(cacheManager), eventPublisher, recordingTransactions(),
                 scammerSignalService, taskScheduler);
     }
 
@@ -265,6 +267,35 @@ class DefaultModerationServiceTest {
         eviction.getValue().run();
         verify(cache, times(2)).evict("s12");
         assertThat(outOfPlace).isEmpty();
+    }
+
+    @Test
+    void aBlockEvictsTheDomainKeyTwice() {
+        final var url = link(12L, "https://example.org/", null);
+        url.setShortUrl("menu");
+        url.setDomain(CustomDomain.builder().id(7L).hostname("go.example.com").build());
+        final var eviction = ArgumentCaptor.forClass(Runnable.class);
+
+        moderationService.blockLink(12L, BlockReason.ADMIN, null, ADMIN, "admin");
+
+        verify(taskScheduler).schedule(eviction.capture(), any(Instant.class));
+        verify(cache).evict("7/menu");
+        eviction.getValue().run();
+        verify(cache, times(2)).evict("7/menu");
+        verify(cache, never()).evict("menu");
+        assertThat(outOfPlace).isEmpty();
+    }
+
+    @Test
+    void deletingADomainLinkEvictsTheDomainKey() {
+        final var url = link(80L, "https://example.org/x", user(1L, "alice@example.com"));
+        url.setShortUrl("menu");
+        url.setDomain(CustomDomain.builder().id(7L).hostname("go.example.com").build());
+
+        moderationService.deleteLink(80L, ADMIN, "mcp");
+
+        verify(cache).evict("7/menu");
+        verify(cache, never()).evict("menu");
     }
 
     @Test

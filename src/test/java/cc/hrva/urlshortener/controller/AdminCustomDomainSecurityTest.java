@@ -19,6 +19,7 @@ import cc.hrva.urlshortener.repository.CustomDomainReconcileRepository.MissingDo
 import cc.hrva.urlshortener.repository.CustomDomainReconcileRepository.ReconcileRun;
 import cc.hrva.urlshortener.repository.CustomDomainRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
+import cc.hrva.urlshortener.security.AnyHostIsPrimary;
 import cc.hrva.urlshortener.security.ClientIpResolver;
 import cc.hrva.urlshortener.security.JwtFilter;
 import cc.hrva.urlshortener.security.OAuth2LoginSuccessHandler;
@@ -684,6 +685,7 @@ class AdminCustomDomainSecurityTest {
     @Import({
             AppConfiguration.class,
             WebConfiguration.class,
+            AnyHostIsPrimary.class,
             JacksonConfiguration.class,
             SecurityConfiguration.class,
             GlobalExceptionHandler.class,

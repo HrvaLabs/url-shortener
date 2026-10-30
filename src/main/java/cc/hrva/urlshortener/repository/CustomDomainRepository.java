@@ -59,6 +59,12 @@ public interface CustomDomainRepository extends JpaRepository<CustomDomain, Long
                    and (d.status <> cc.hrva.urlshortener.model.enums.CustomDomainStatus.DELETED or d.cloudflareDeletePending = true))""")
     long countSlotsInUse();
 
+    @Query("""
+            select new cc.hrva.urlshortener.repository.DomainRouteRow(d.id, d.hostname, d.hostnameKey, d.status, o.id, o.active)
+            from CustomDomain d left join d.owner o
+            where d.status in (cc.hrva.urlshortener.model.enums.CustomDomainStatus.ACTIVE, cc.hrva.urlshortener.model.enums.CustomDomainStatus.DISABLED)""")
+    List<DomainRouteRow> findRoutes();
+
     @Query("select d from CustomDomain d left join fetch d.owner where d.id = :id")
     Optional<CustomDomain> findWithOwner(@Param("id") long id);
 

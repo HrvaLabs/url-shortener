@@ -21,6 +21,7 @@ import cc.hrva.urlshortener.repository.AuditLogRepository;
 import cc.hrva.urlshortener.repository.DestinationCheckRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
+import cc.hrva.urlshortener.security.AnyHostIsPrimary;
 import cc.hrva.urlshortener.security.ClickRequestResolver;
 import cc.hrva.urlshortener.security.ClientIpResolver;
 import cc.hrva.urlshortener.security.JwtFilter;
@@ -40,6 +41,8 @@ import cc.hrva.urlshortener.service.SafeBrowsingService;
 import cc.hrva.urlshortener.service.ScammerSignalService;
 import cc.hrva.urlshortener.service.SuspiciousUrlService;
 import cc.hrva.urlshortener.service.UserService;
+import cc.hrva.urlshortener.service.domain.CustomDomainRegistry;
+import cc.hrva.urlshortener.service.domain.UrlCache;
 import cc.hrva.urlshortener.service.impl.DefaultApiKeyService;
 import cc.hrva.urlshortener.service.impl.DefaultAuditLogService;
 import cc.hrva.urlshortener.service.impl.DefaultUrlService;
@@ -189,6 +192,9 @@ class LinkFlowsWithoutOpenInViewTest {
     @MockitoBean
     private CacheManager cacheManager;
 
+    @MockitoBean
+    private CustomDomainRegistry customDomainRegistry;
+
     @DynamicPropertySource
     static void signingKey(final DynamicPropertyRegistry registry) {
         registry.add("app.mcp.signing-key", SIGNING_KEY::toJSONString);
@@ -307,6 +313,7 @@ class LinkFlowsWithoutOpenInViewTest {
     @Import({
             AppConfiguration.class,
             WebConfiguration.class,
+            AnyHostIsPrimary.class,
             JacksonConfiguration.class,
             SecurityConfiguration.class,
             GlobalExceptionHandler.class,
@@ -317,6 +324,7 @@ class LinkFlowsWithoutOpenInViewTest {
             ClickRequestResolver.class,
             UrlController.class,
             DefaultUrlService.class,
+            UrlCache.class,
             DestinationCheckRepository.class,
             DefaultUrlValidator.class,
             DefaultApiKeyService.class,

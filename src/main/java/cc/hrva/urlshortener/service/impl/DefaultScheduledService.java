@@ -22,6 +22,7 @@ import cc.hrva.urlshortener.service.UserService;
 import cc.hrva.urlshortener.service.WeeklyDigestService;
 import cc.hrva.urlshortener.service.domain.CustomDomainLifecycle;
 import cc.hrva.urlshortener.service.domain.CustomDomainReconciler;
+import cc.hrva.urlshortener.service.domain.CustomDomainRegistry;
 import java.time.Clock;
 import java.time.LocalDateTime;
 import org.springframework.scheduling.annotation.EnableScheduling;
@@ -49,6 +50,7 @@ public class DefaultScheduledService implements ScheduledService {
     private final ClickSummaryService clickSummaryService;
     private final CustomDomainLifecycle customDomainLifecycle;
     private final CustomDomainReconciler customDomainReconciler;
+    private final CustomDomainRegistry customDomainRegistry;
     private final BioHandleHoldRepository bioHandleHoldRepository;
     private final EmailLogRepository emailLogRepository;
     private final AuditLogRepository auditLogRepository;
@@ -201,6 +203,12 @@ public class DefaultScheduledService implements ScheduledService {
     public void reconcileCustomDomains() {
         log.info("Scheduled: custom domain reconcile");
         customDomainReconciler.reconcileInBackground();
+    }
+
+    @Override
+    @Scheduled(fixedDelay = 60_000)
+    public void reloadCustomDomainRoutes() {
+        customDomainRegistry.reload();
     }
 
 }

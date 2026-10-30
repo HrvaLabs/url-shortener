@@ -8,6 +8,7 @@ import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.service.analytics.AnalyticsDays;
 import cc.hrva.urlshortener.service.analytics.ReferrerClassifier;
 import cc.hrva.urlshortener.service.analytics.UniqueVisitorCounter;
+import cc.hrva.urlshortener.service.domain.UrlCache;
 import cc.hrva.urlshortener.service.impl.DefaultClickAnalyticsService;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -170,6 +171,17 @@ class DefaultClickAnalyticsServiceTest {
     }
 
     @Test
+    void aVisitLimitStopEvictsTheDomainKey() {
+        when(uniqueVisitorCounter.isNewVisitor(URL_ID, DAY, CLICK)).thenReturn(true);
+        when(urlRepository.deactivateAtVisitLimit(URL_ID)).thenReturn(1);
+
+        clickAnalyticsService.recordClick(URL_ID, "7/menu", CLICK);
+
+        verify(cache).evict("7/menu");
+        verify(cache, never()).evict("menu");
+    }
+
+    @Test
     void aFailingCacheEvictionStillCountsTheClick() {
         when(uniqueVisitorCounter.isNewVisitor(URL_ID, DAY, CLICK)).thenReturn(true);
         when(urlRepository.deactivateAtVisitLimit(URL_ID)).thenReturn(1);
@@ -208,7 +220,7 @@ class DefaultClickAnalyticsServiceTest {
     void aValueTooLongForItsColumnIsCountedAsOther() {
         final var classifier = mock(ReferrerClassifier.class);
         final var service = new DefaultClickAnalyticsService(executor, linkStatsRepository, uniqueVisitorCounter, classifier,
-                analyticsDays, urlRepository, TransactionOperations.withoutTransaction(), cacheManager);
+                analyticsDays, urlRepository, TransactionOperations.withoutTransaction(), new UrlCache(cacheManager));
         final var longest = "app:" + "a".repeat(251);
         when(classifier.classify(any(ClickRequest.class))).thenReturn(longest, longest + "b");
 
@@ -223,7 +235,7 @@ class DefaultClickAnalyticsServiceTest {
     void theStatsIncrementsRunWithoutATransactionAndTheVisitInsideOne() {
         final var transactions = new TransactionTemplate(new DataSourceTransactionManager(new DriverManagerDataSource("jdbc:h2:mem:")));
         final var service = new DefaultClickAnalyticsService(executor, linkStatsRepository, uniqueVisitorCounter, referrerClassifier,
-                analyticsDays, urlRepository, transactions, cacheManager);
+                analyticsDays, urlRepository, transactions, new UrlCache(cacheManager));
         final var visitInTransaction = new AtomicReference<Boolean>();
         final var statsInTransaction = new AtomicReference<Boolean>();
         final var breakdownReadInTransaction = new AtomicReference<Boolean>();
@@ -371,7 +383,7 @@ class DefaultClickAnalyticsServiceTest {
 
     private ClickAnalyticsService service(final TaskExecutor taskExecutor) {
         return new DefaultClickAnalyticsService(taskExecutor, linkStatsRepository, uniqueVisitorCounter, referrerClassifier,
-                analyticsDays, urlRepository, TransactionOperations.withoutTransaction(), cacheManager);
+                analyticsDays, urlRepository, TransactionOperations.withoutTransaction(), new UrlCache(cacheManager));
     }
 
     private static Set<String> sites(final int count) {

@@ -29,6 +29,8 @@ import cc.hrva.urlshortener.service.ScammerSignalService;
 import cc.hrva.urlshortener.service.SuspiciousUrlService;
 import cc.hrva.urlshortener.service.UserService;
 import cc.hrva.urlshortener.service.blocklist.BlocklistStore;
+import cc.hrva.urlshortener.service.domain.CustomDomainRegistry;
+import cc.hrva.urlshortener.service.domain.UrlCache;
 import cc.hrva.urlshortener.service.impl.DefaultClickCheckService;
 import cc.hrva.urlshortener.service.impl.DefaultUrlService;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiter;
@@ -116,6 +118,9 @@ class UrlControllerBlocklistTest {
     private CacheManager cacheManager;
 
     @Mock
+    private CustomDomainRegistry customDomainRegistry;
+
+    @Mock
     private ObjectMapper objectMapper;
 
     @Mock
@@ -162,10 +167,10 @@ class UrlControllerBlocklistTest {
         when(blocklistSourceRepository.findByEnabledTrue()).thenReturn(List.of(TIF));
         clickCheckService.reload();
         final var urlService = new DefaultUrlService(userService, urlValidator, apiKeyService, urlRepository, appProperties, apiKeyValidator,
-                clickAnalyticsService, new UrlToPeekUrlConverter(), createUrlToUrlConverter, urlUpdateDtoToUrlConverter, cacheManager,
+                clickAnalyticsService, new UrlToPeekUrlConverter(), createUrlToUrlConverter, urlUpdateDtoToUrlConverter, new UrlCache(cacheManager),
                 objectMapper, meterRegistry, passwordEncoder, suspiciousUrlService, rateLimiter, reviewQueueService, scammerSignalService, clickCheckService,
                 redirectChainService, TransactionOperations.withoutTransaction(), reservedAliasService, burstAlertService,
-                destinationCheckRepository);
+                destinationCheckRepository, customDomainRegistry);
         mockMvc = MockMvcBuilders.standaloneSetup(new UrlController(urlService, qrCodeService, linkPreviewService, clientIpResolver,
                         new ClickRequestResolver(clientIpResolver), request, appProperties))
                 .setControllerAdvice(new GlobalExceptionHandler())

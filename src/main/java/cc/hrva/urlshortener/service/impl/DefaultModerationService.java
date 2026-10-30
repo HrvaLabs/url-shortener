@@ -37,6 +37,8 @@ import cc.hrva.urlshortener.service.UserService;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent;
 import cc.hrva.urlshortener.service.alert.AlertedLink;
 import cc.hrva.urlshortener.service.blocklist.BlocklistConfigurationChangedEvent;
+import cc.hrva.urlshortener.service.domain.UrlCache;
+import cc.hrva.urlshortener.service.domain.UrlCacheKeys;
 import cc.hrva.urlshortener.util.DomainNames;
 import java.time.Duration;
 import java.time.Instant;
@@ -66,7 +68,6 @@ import java.util.stream.Stream;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
-import org.springframework.cache.CacheManager;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -86,7 +87,6 @@ public class DefaultModerationService implements ModerationService {
 
     private static final int PAGE_SIZE = 500;
     private static final Pageable FIRST_PAGE = PageRequest.ofSize(PAGE_SIZE);
-    private static final String URLS_CACHE = "urls";
     private static final String DETAIL_SEPARATOR = ", ";
     private static final String TARGET_URL = "Url";
     private static final String TARGET_DOMAIN = "Domain";
@@ -121,7 +121,7 @@ public class DefaultModerationService implements ModerationService {
     private final UserService userService;
     private final SendingEmailService sendingEmailService;
     private final AuditLogService auditLogService;
-    private final CacheManager cacheManager;
+    private final UrlCache urlCache;
     private final ApplicationEventPublisher eventPublisher;
     private final TransactionOperations transactionOperations;
     private final ScammerSignalService scammerSignalService;
@@ -375,7 +375,7 @@ public class DefaultModerationService implements ModerationService {
     public void deleteLink(final long urlId, final String performedBy, final String via) {
         final var url = findUrl(urlId);
         transactionOperations.executeWithoutResult(status -> urlRepository.delete(url));
-        evictFromCache(url.getShortUrl());
+        urlCache.evict(cacheKeyOf(url));
         log.info("Link deleted urlId={}", urlId);
         auditLogService.log(performedBy, AuditAction.DELETE_LINK, TARGET_URL, String.valueOf(urlId), details(via, 1, field("shortUrl", url.getShortUrl())));
     }
@@ -575,7 +575,7 @@ public class DefaultModerationService implements ModerationService {
                 .orElse(null)));
         blocked.ifPresent(url -> {
             log.info("Link blocked urlId={} reason={}", url.getId(), reason);
-            evictNowAndAgainLater(url.getShortUrl());
+            evictNowAndAgainLater(cacheKeyOf(url));
         });
         return blocked;
     }
@@ -594,13 +594,13 @@ public class DefaultModerationService implements ModerationService {
                 .orElse(null)));
         restored.ifPresent(url -> {
             log.info("Link reactivated urlId={}", url.getId());
-            evictNowAndAgainLater(url.getShortUrl());
+            evictNowAndAgainLater(cacheKeyOf(url));
         });
         return restored.isPresent();
     }
 
     private boolean aliasIsFree(final Url url) {
-        if (urlRepository.aliasActive(null, url.getShortUrl())) {
+        if (urlRepository.aliasActive(url.domainId(), url.getShortUrl())) {
             log.warn("Link stays inactive because another active link holds its alias urlId={}", url.getId());
             return false;
         }
@@ -692,24 +692,17 @@ public class DefaultModerationService implements ModerationService {
         }
     }
 
-    private void evictNowAndAgainLater(final String shortUrl) {
-        evictFromCache(shortUrl);
+    private void evictNowAndAgainLater(final String cacheKey) {
+        urlCache.evict(cacheKey);
         try {
-            taskScheduler.schedule(() -> evictFromCache(shortUrl), Instant.now().plus(SECOND_EVICTION_DELAY));
+            taskScheduler.schedule(() -> urlCache.evict(cacheKey), Instant.now().plus(SECOND_EVICTION_DELAY));
         } catch (final RuntimeException exception) {
             log.warn("Scheduling the second URL cache eviction failed", exception);
         }
     }
 
-    private void evictFromCache(final String shortUrl) {
-        try {
-            final var cache = cacheManager.getCache(URLS_CACHE);
-            if (cache != null) {
-                cache.evict(shortUrl);
-            }
-        } catch (final RuntimeException exception) {
-            log.warn("URL cache eviction failed", exception);
-        }
+    private static String cacheKeyOf(final Url url) {
+        return UrlCacheKeys.of(url.domainId(), url.getShortUrl());
     }
 
     private Url findUrl(final long urlId) {

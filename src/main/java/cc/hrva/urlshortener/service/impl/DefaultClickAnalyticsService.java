@@ -11,13 +11,13 @@ import cc.hrva.urlshortener.service.analytics.ReferrerClassifier;
 import cc.hrva.urlshortener.service.analytics.UniqueVisitorCounter;
 import cc.hrva.urlshortener.service.analytics.UserAgentClassifier;
 import cc.hrva.urlshortener.service.analytics.UserAgentDetails;
+import cc.hrva.urlshortener.service.domain.UrlCache;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.EnumMap;
 import java.util.Set;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.cache.CacheManager;
 import org.springframework.core.task.TaskExecutor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionOperations;
@@ -32,7 +32,6 @@ public class DefaultClickAnalyticsService implements ClickAnalyticsService {
     private static final String OTHER = "other";
     private static final String QR_SOURCE = "qr";
     private static final String DIRECT_SOURCE = "direct";
-    private static final String URLS_CACHE = "urls";
     private static final String STEP_CLICK = "click";
     private static final String STEP_BOT = "bot";
     private static final String STEP_VISIT = "visit";
@@ -46,17 +45,17 @@ public class DefaultClickAnalyticsService implements ClickAnalyticsService {
     private final AnalyticsDays analyticsDays;
     private final UrlRepository urlRepository;
     private final TransactionOperations transactionOperations;
-    private final CacheManager cacheManager;
+    private final UrlCache urlCache;
 
     @Override
-    public void recordClick(final Long urlId, final String shortUrl, final ClickRequest click) {
+    public void recordClick(final Long urlId, final String cacheKey, final ClickRequest click) {
         if (urlId == null) {
             return;
         }
 
         try {
             final var day = analyticsDays.today();
-            applicationTaskExecutor.execute(() -> step(urlId, STEP_CLICK, () -> record(urlId, shortUrl, day, click)));
+            applicationTaskExecutor.execute(() -> step(urlId, STEP_CLICK, () -> record(urlId, cacheKey, day, click)));
         } catch (final RuntimeException exception) {
             log.warn("Click analytics dropped urlId={} exception={}", urlId, exception.getClass().getName());
         }
@@ -71,7 +70,7 @@ public class DefaultClickAnalyticsService implements ClickAnalyticsService {
         }
     }
 
-    private void record(final long urlId, final String shortUrl, final LocalDate day, final ClickRequest click) {
+    private void record(final long urlId, final String cacheKey, final LocalDate day, final ClickRequest click) {
         final var userAgent = UserAgentClassifier.classify(click.userAgent());
         if (userAgent.bot()) {
             step(urlId, STEP_BOT, () -> linkStatsRepository.incrementDailyStats(urlId, day, 0, 0, 1));
@@ -80,30 +79,19 @@ public class DefaultClickAnalyticsService implements ClickAnalyticsService {
 
         final var newVisitor = uniqueVisitorCounter.isNewVisitor(urlId, day, click);
         if (newVisitor) {
-            step(urlId, STEP_VISIT, () -> recordVisit(urlId, shortUrl));
+            step(urlId, STEP_VISIT, () -> recordVisit(urlId, cacheKey));
         }
         step(urlId, STEP_STATS, () -> linkStatsRepository.incrementDailyStats(urlId, day, 1, newVisitor ? 1 : 0, 0));
         step(urlId, STEP_BREAKDOWN, () -> incrementBreakdown(urlId, day, click, userAgent));
     }
 
-    private void recordVisit(final long urlId, final String shortUrl) {
+    private void recordVisit(final long urlId, final String cacheKey) {
         final var switchedOff = transactionOperations.execute(status -> {
             urlRepository.recordVisit(urlId, LocalDateTime.now());
             return urlRepository.deactivateAtVisitLimit(urlId) > 0;
         });
         if (Boolean.TRUE.equals(switchedOff)) {
-            evictFromCache(urlId, shortUrl);
-        }
-    }
-
-    private void evictFromCache(final long urlId, final String shortUrl) {
-        try {
-            final var cache = cacheManager.getCache(URLS_CACHE);
-            if (cache != null) {
-                cache.evict(shortUrl);
-            }
-        } catch (final RuntimeException exception) {
-            log.warn("URL cache eviction failed urlId={} exception={}", urlId, exception.getClass().getName());
+            urlCache.evict(cacheKey);
         }
     }
 

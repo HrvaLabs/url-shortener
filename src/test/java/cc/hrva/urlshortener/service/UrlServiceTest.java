@@ -18,6 +18,9 @@ import tools.jackson.databind.ObjectMapper;
 import org.hibernate.exception.ConstraintViolationException;
 import org.hibernate.exception.DataException;
 import org.springframework.cache.CacheManager;
+import org.springframework.cache.annotation.AnnotationCacheOperationSource;
+import org.springframework.cache.concurrent.ConcurrentMapCacheManager;
+import org.springframework.cache.interceptor.CacheInterceptor;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
@@ -30,6 +33,7 @@ import cc.hrva.urlshortener.converter.UrlToPeekUrlConverter;
 import cc.hrva.urlshortener.converter.UrlUpdateDtoToUrlConverter;
 import cc.hrva.urlshortener.dto.ClickRequest;
 import cc.hrva.urlshortener.dto.CreateUrlDto;
+import cc.hrva.urlshortener.dto.DomainRef;
 import cc.hrva.urlshortener.dto.LinkVerdict;
 import cc.hrva.urlshortener.dto.LinkVerdict.Outcome;
 import cc.hrva.urlshortener.dto.UrlResponse;
@@ -45,15 +49,21 @@ import cc.hrva.urlshortener.exception.ShortUrlAlreadyExistsException;
 import cc.hrva.urlshortener.exception.UrlNotFoundException;
 import cc.hrva.urlshortener.exception.UrlValidationException;
 import cc.hrva.urlshortener.model.ApiKey;
+import cc.hrva.urlshortener.model.CustomDomain;
+import cc.hrva.urlshortener.model.PeekUrl;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.codebook.Authorities;
 import cc.hrva.urlshortener.model.enums.BlockReason;
 import cc.hrva.urlshortener.model.enums.CreatedVia;
+import cc.hrva.urlshortener.model.enums.CustomDomainStatus;
 import cc.hrva.urlshortener.model.enums.ReviewResolution;
 import cc.hrva.urlshortener.repository.DestinationCheckRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.service.burst.CreatedLink;
+import cc.hrva.urlshortener.service.domain.CustomDomainRegistry;
+import cc.hrva.urlshortener.service.domain.DomainRoute;
+import cc.hrva.urlshortener.service.domain.UrlCache;
 import cc.hrva.urlshortener.service.impl.DefaultSuspiciousUrlService;
 import cc.hrva.urlshortener.service.impl.DefaultUrlService;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiter;
@@ -110,6 +120,7 @@ class UrlServiceTest {
     private static final ClickRequest CLICK = ClickRequest.of(CLIENT_IP, "UA", "https://t.co/x", "HR");
     private static final String CREATE_LIMIT_REFUSAL = "You've created a lot of links in a short time. Try again in an hour.";
     private static final String BLOCKED_WHILE_EDITING = "This link was blocked while you were editing it. Reload and try again.";
+    private static final DomainRoute GO = new DomainRoute(7L, "go.example.com", CustomDomainStatus.ACTIVE, true);
 
     private UrlService urlService;
 
@@ -188,6 +199,9 @@ class UrlServiceTest {
     @Mock
     private DestinationCheckRepository destinationCheckRepository;
 
+    @Mock
+    private CustomDomainRegistry customDomainRegistry;
+
     @BeforeEach
     void setUp() {
         org.mockito.Mockito.lenient().when(rateLimiter.tryAcquire(any(), org.mockito.ArgumentMatchers.anyInt(), any())).thenReturn(true);
@@ -204,7 +218,7 @@ class UrlServiceTest {
                 urlToPeekUrlConverter,
                 createUrlToUrlConverter,
                 urlUpdateDtoToUrlConverter,
-                cacheManager,
+                new UrlCache(cacheManager),
                 objectMapper,
                 meterRegistry,
                 passwordEncoder,
@@ -217,7 +231,8 @@ class UrlServiceTest {
                 TransactionOperations.withoutTransaction(),
                 reservedAliasService,
                 burstAlertService,
-                destinationCheckRepository
+                destinationCheckRepository,
+                customDomainRegistry
         );
     }
 
@@ -1782,7 +1797,7 @@ class UrlServiceTest {
     void unlockStopsGuessingAfterTooManyAttempts() {
         when(rateLimiter.tryAcquire(org.mockito.ArgumentMatchers.startsWith("unlock:"), org.mockito.ArgumentMatchers.anyInt(), any())).thenReturn(false);
 
-        assertThatThrownBy(() -> urlService.unlockUrl("board", "guess", CLICK))
+        assertThatThrownBy(() -> urlService.unlockUrl(null, "board", "guess", CLICK))
                 .isInstanceOf(cc.hrva.urlshortener.exception.RateLimitExceededException.class)
                 .hasMessage("Too many password attempts. Try again in a few minutes.");
         verify(passwordEncoder, never()).matches(any(), any());
@@ -1796,7 +1811,7 @@ class UrlServiceTest {
         when(urlRepository.findActive(null, "a")).thenReturn(Optional.of(url));
         when(passwordEncoder.matches("secret", "hash")).thenReturn(true);
 
-        assertThat(urlService.unlockUrl("a", "secret", CLICK).longUrl()).isEqualTo("https://a.com");
+        assertThat(urlService.unlockUrl(null, "a", "secret", CLICK).longUrl()).isEqualTo("https://a.com");
     }
 
     @Test
@@ -1805,7 +1820,7 @@ class UrlServiceTest {
         when(urlRepository.findActive(null, "a")).thenReturn(Optional.of(url));
         when(passwordEncoder.matches("pw", "hash")).thenReturn(true);
 
-        final var result = urlService.unlockUrl("a", "pw", CLICK);
+        final var result = urlService.unlockUrl(null, "a", "pw", CLICK);
 
         assertThat(result.longUrl()).isEqualTo("https://a.com");
     }
@@ -1816,7 +1831,7 @@ class UrlServiceTest {
         when(urlRepository.findActive(null, "a")).thenReturn(Optional.of(url));
         when(passwordEncoder.matches("nope", "hash")).thenReturn(false);
 
-        assertThatThrownBy(() -> urlService.unlockUrl("a", "nope", CLICK))
+        assertThatThrownBy(() -> urlService.unlockUrl(null, "a", "nope", CLICK))
                 .isInstanceOf(cc.hrva.urlshortener.exception.NoAuthorizationException.class);
     }
 
@@ -1825,7 +1840,7 @@ class UrlServiceTest {
         final var url = Url.builder().id(1L).shortUrl("a").longUrl("https://a.com").active(true).build();
         when(urlRepository.findActive(null, "a")).thenReturn(Optional.of(url));
 
-        final var result = urlService.unlockUrl("a", null, CLICK);
+        final var result = urlService.unlockUrl(null, "a", null, CLICK);
 
         assertThat(result.longUrl()).isEqualTo("https://a.com");
     }
@@ -1836,7 +1851,7 @@ class UrlServiceTest {
         when(urlRepository.findActive(null, "a")).thenReturn(Optional.of(url));
         when(passwordEncoder.matches("pw", "hash")).thenReturn(true);
 
-        urlService.unlockUrl("a", "pw", CLICK);
+        urlService.unlockUrl(null, "a", "pw", CLICK);
 
         verify(rateLimiter).tryAcquire(RateLimiter.clientKey("unlock:a", CLIENT_IP), 10, Duration.ofMinutes(15));
         verify(rateLimiter).tryAcquire("unlock:a", 50, Duration.ofMinutes(15));
@@ -1848,7 +1863,7 @@ class UrlServiceTest {
         when(urlRepository.findActive(null, "a")).thenReturn(Optional.of(url));
         when(passwordEncoder.matches("pw", "hash")).thenReturn(true);
 
-        assertThat(urlService.unlockUrl("a", "pw", CLICK).longUrl()).isEqualTo("https://a.com");
+        assertThat(urlService.unlockUrl(null, "a", "pw", CLICK).longUrl()).isEqualTo("https://a.com");
 
         verify(clickAnalyticsService).recordClick(7L, "a", CLICK.withUnknownReferrer());
     }
@@ -1860,7 +1875,7 @@ class UrlServiceTest {
         when(passwordEncoder.matches("pw", "hash")).thenReturn(true);
         when(clickAnalyticsService.isBot(CLICK)).thenReturn(true);
 
-        assertThatThrownBy(() -> urlService.unlockUrl("a", "pw", CLICK))
+        assertThatThrownBy(() -> urlService.unlockUrl(null, "a", "pw", CLICK))
                 .isInstanceOf(UrlNotFoundException.class)
                 .hasMessage("URL doesn't exist");
 
@@ -1976,7 +1991,7 @@ class UrlServiceTest {
         final var url = Url.builder().id(3L).shortUrl("menu").longUrl("https://gableci.hrva.cc").owner(owner).tags(java.util.Set.of("client-x")).active(true).build();
         when(urlRepository.findActive(null, "menu")).thenReturn(Optional.of(url));
 
-        final var result = urlService.revealUrlAndRecordClick("menu", CLICK);
+        final var result = urlService.revealUrlAndRecordClick(null, "menu", CLICK);
 
         assertThat(result.longUrl()).isEqualTo("https://gableci.hrva.cc");
         assertThat(result.ownerEmail()).isNull();
@@ -1988,7 +2003,7 @@ class UrlServiceTest {
         final var url = Url.builder().id(3L).shortUrl("menu").longUrl("https://gableci.hrva.cc").active(true).build();
         when(urlRepository.findActive(null, "menu")).thenReturn(Optional.of(url));
 
-        urlService.revealUrlAndRecordClick("menu", CLICK);
+        urlService.revealUrlAndRecordClick(null, "menu", CLICK);
 
         verify(clickAnalyticsService).recordClick(3L, "menu", CLICK);
         verify(clickAnalyticsService, never()).isBot(any());
@@ -2000,7 +2015,7 @@ class UrlServiceTest {
         when(urlRepository.findActive(null, "menu")).thenReturn(Optional.of(url));
         when(clickAnalyticsService.isBot(CLICK)).thenReturn(true);
 
-        assertThatThrownBy(() -> urlService.revealUrlAndRecordClick("menu", CLICK))
+        assertThatThrownBy(() -> urlService.revealUrlAndRecordClick(null, "menu", CLICK))
                 .isInstanceOf(UrlNotFoundException.class)
                 .hasMessage("URL doesn't exist");
 
@@ -2013,7 +2028,7 @@ class UrlServiceTest {
         when(urlRepository.findActive(null, "menu")).thenReturn(Optional.of(url));
         when(clickCheckService.mayRedirect(3L, "https://jofogas.cards/login")).thenReturn(false);
 
-        assertThatThrownBy(() -> urlService.revealUrlAndRecordClick("menu", CLICK))
+        assertThatThrownBy(() -> urlService.revealUrlAndRecordClick(null, "menu", CLICK))
                 .isInstanceOf(cc.hrva.urlshortener.exception.UrlNotFoundException.class)
                 .hasMessage("URL doesn't exist");
 
@@ -2026,7 +2041,7 @@ class UrlServiceTest {
         when(urlRepository.findActive(null, "menu")).thenReturn(Optional.of(url));
         when(clickCheckService.mayRedirect(3L, "https://jofogas.cards/login")).thenReturn(false);
 
-        assertThatThrownBy(() -> urlService.peekUrlByShortUrl("menu"))
+        assertThatThrownBy(() -> urlService.peekUrlByShortUrl(null, "menu"))
                 .isInstanceOf(cc.hrva.urlshortener.exception.UrlNotFoundException.class)
                 .hasMessage("URL doesn't exist");
 
@@ -2040,7 +2055,7 @@ class UrlServiceTest {
         when(urlRepository.findActive(null, "menu")).thenReturn(Optional.of(url));
         when(urlToPeekUrlConverter.convert(url)).thenReturn(peek);
 
-        assertThat(urlService.peekUrlByShortUrl("menu")).isSameAs(peek);
+        assertThat(urlService.peekUrlByShortUrl(null, "menu")).isSameAs(peek);
 
         verify(clickCheckService).mayRedirect(3L, "https://gableci.hrva.cc");
     }
@@ -2050,8 +2065,8 @@ class UrlServiceTest {
         final var url = Url.builder().id(4L).shortUrl("board").longUrl("https://secret.example/board").passwordHash("$2a$10$hash").active(true).build();
         when(urlRepository.findActive(null, "board")).thenReturn(Optional.of(url));
 
-        urlService.revealUrlAndRecordClick("board", CLICK);
-        urlService.peekUrlByShortUrl("board");
+        urlService.revealUrlAndRecordClick(null, "board", CLICK);
+        urlService.peekUrlByShortUrl(null, "board");
 
         verify(clickCheckService, never()).mayRedirect(org.mockito.ArgumentMatchers.anyLong(), any());
     }
@@ -2061,7 +2076,7 @@ class UrlServiceTest {
         final var url = Url.builder().id(4L).shortUrl("board").longUrl("https://secret.example/board").passwordHash("$2a$10$hash").visitLimit(1L).active(true).build();
         when(urlRepository.findActive(null, "board")).thenReturn(Optional.of(url));
 
-        final var result = urlService.revealUrlAndRecordClick("board", CLICK);
+        final var result = urlService.revealUrlAndRecordClick(null, "board", CLICK);
 
         assertThat(result.longUrl()).isNull();
         assertThat(result.passwordProtected()).isTrue();
@@ -2172,8 +2187,8 @@ class UrlServiceTest {
         when(urlRepository.findActive(null, "abc")).thenReturn(Optional.of(url));
 
         urlServiceWithMeters().redirectResultUrl("abc", CLICK);
-        urlService.revealUrlAndRecordClick("abc", CLICK);
-        urlService.unlockUrl("abc", null, CLICK);
+        urlService.revealUrlAndRecordClick(null, "abc", CLICK);
+        urlService.unlockUrl(null, "abc", null, CLICK);
 
         assertThat(output)
                 .contains("Redirect shortUrl=abc")
@@ -2247,7 +2262,7 @@ class UrlServiceTest {
         when(appProperties.getFrontendUrl()).thenReturn(FRONTEND);
         when(clickCheckService.mayRedirect(1L, "https://a.com")).thenReturn(false);
 
-        final var result = urlService.unlockUrl("a", "pw", CLICK);
+        final var result = urlService.unlockUrl(null, "a", "pw", CLICK);
 
         assertThat(result.longUrl()).isEqualTo(FRONTEND + "/unavailable?s=a&reason=blocked");
         verify(clickAnalyticsService, never()).recordClick(any(), any(), any());
@@ -2259,7 +2274,7 @@ class UrlServiceTest {
         when(urlRepository.findActive(null, "a")).thenReturn(Optional.of(url));
         when(passwordEncoder.matches("nope", "hash")).thenReturn(false);
 
-        assertThatThrownBy(() -> urlService.unlockUrl("a", "nope", CLICK))
+        assertThatThrownBy(() -> urlService.unlockUrl(null, "a", "nope", CLICK))
                 .isInstanceOf(NoAuthorizationException.class);
 
         verify(clickCheckService, never()).mayRedirect(org.mockito.ArgumentMatchers.anyLong(), any());
@@ -2510,6 +2525,278 @@ class UrlServiceTest {
         org.mockito.Mockito.verifyNoInteractions(urlRepository);
     }
 
+    @Test
+    void sameAliasOnTwoHostsRedirectsToEach() {
+        final var urls = new ConcurrentMapCacheManager("urls");
+        final var service = urlServiceCachingIn(urls);
+        when(urlRepository.findServed(null, "menu")).thenReturn(Optional.of(onHrva()));
+        when(urlRepository.findServed(7L, "menu")).thenReturn(Optional.of(onGoExampleCom()));
+
+        assertThat(service.redirectResultUrl("menu", CLICK).getUrl()).isEqualTo("https://a.example/menu");
+        assertThat(service.redirectResultUrl(GO, "menu", CLICK).getUrl()).isEqualTo("https://b.example/menu");
+        assertThat(service.redirectResultUrl("menu", CLICK).getUrl()).isEqualTo("https://a.example/menu");
+        assertThat(service.redirectResultUrl(GO, "menu", CLICK).getUrl()).isEqualTo("https://b.example/menu");
+
+        verify(urlRepository).findServed(null, "menu");
+        verify(urlRepository).findServed(7L, "menu");
+        assertThat(((UrlResponse) urls.getCache("urls").get("menu").get()).id()).isEqualTo(1L);
+        assertThat(((UrlResponse) urls.getCache("urls").get("7/menu").get()).id()).isEqualTo(2L);
+        verify(clickAnalyticsService, times(2)).recordClick(1L, "menu", CLICK);
+        verify(clickAnalyticsService, times(2)).recordClick(2L, "7/menu", CLICK);
+    }
+
+    @Test
+    void evictingOneLeavesTheOther() {
+        final var urls = new ConcurrentMapCacheManager("urls");
+        final var service = withTheCacheAnnotations(urlServiceCachingIn(urls), urls);
+        final var cache = urls.getCache("urls");
+        final var onDomain = onGoExampleCom();
+        cache.put("menu", UrlResponse.from(onHrva()));
+        cache.put("7/menu", UrlResponse.from(onDomain));
+        when(urlRepository.findById(2L)).thenReturn(Optional.of(onDomain));
+        when(urlRepository.save(onDomain)).thenReturn(onDomain);
+
+        service.revokeUrl(2L);
+
+        assertThat(cache.get("7/menu")).isNull();
+        assertThat(cache.get("menu")).isNotNull();
+    }
+
+    @Test
+    void revokingTheHrvaLinkLeavesTheDomainLinkCached() {
+        final var urls = new ConcurrentMapCacheManager("urls");
+        final var service = withTheCacheAnnotations(urlServiceCachingIn(urls), urls);
+        final var cache = urls.getCache("urls");
+        final var onHrva = onHrva();
+        cache.put("menu", UrlResponse.from(onHrva));
+        cache.put("7/menu", UrlResponse.from(onGoExampleCom()));
+        when(urlRepository.findById(1L)).thenReturn(Optional.of(onHrva));
+        when(urlRepository.save(onHrva)).thenReturn(onHrva);
+
+        service.revokeUrl(1L);
+
+        assertThat(cache.get("menu")).isNull();
+        assertThat(cache.get("7/menu")).isNotNull();
+    }
+
+    @Test
+    void aNewDomainLinkIsCachedUnderItsDomainKey() {
+        final var urls = new ConcurrentMapCacheManager("urls");
+        final var link = onGoExampleCom();
+        when(createUrlToUrlConverter.convert(any())).thenReturn(link);
+        when(userService.getUserFromToken()).thenReturn(User.builder().id(5L).email("ana@example.com").build());
+        when(urlRepository.save(link)).thenReturn(link);
+
+        urlServiceCachingIn(urls).saveUrlRouting(CreateUrlDto.builder().longUrl("https://b.example/menu").shortUrl("menu").build(), CLIENT_IP, CreatedVia.WEB);
+
+        assertThat(urls.getCache("urls").get("7/menu")).isNotNull();
+        assertThat(urls.getCache("urls").get("menu")).isNull();
+    }
+
+    @Test
+    void aDisabledDomainBypassesTheCache() {
+        when(appProperties.getFrontendUrl()).thenReturn(FRONTEND);
+        final var off = new DomainRoute(7L, "go.example.com", CustomDomainStatus.DISABLED, true);
+
+        assertThat(urlServiceWithMeters().redirectResultUrl(off, "menu", CLICK).getUrl())
+                .isEqualTo(FRONTEND + "/unavailable?s=menu&reason=domain&d=go.example.com");
+
+        verify(cacheManager, never()).getCache(any());
+        verifyNoInteractions(urlRepository, clickAnalyticsService, clickCheckService);
+    }
+
+    @Test
+    void aDisabledDomainOfAnInactiveOwnerSaysTheDomainIsOff() {
+        when(appProperties.getFrontendUrl()).thenReturn(FRONTEND);
+        final var off = new DomainRoute(7L, "go.example.com", CustomDomainStatus.DISABLED, false);
+
+        assertThat(urlServiceWithMeters().redirectResultUrl(off, "menu", CLICK).getUrl())
+                .isEqualTo(FRONTEND + "/unavailable?s=menu&reason=domain&d=go.example.com");
+    }
+
+    @Test
+    void anInactiveOwnersDomainIsUnavailable() {
+        when(appProperties.getFrontendUrl()).thenReturn(FRONTEND);
+        final var ofAnInactiveOwner = new DomainRoute(7L, "go.example.com", CustomDomainStatus.ACTIVE, false);
+
+        assertThat(urlServiceWithMeters().redirectResultUrl(ofAnInactiveOwner, "menu", CLICK).getUrl())
+                .isEqualTo(FRONTEND + "/unavailable?s=menu&reason=inactive&d=go.example.com");
+
+        verify(cacheManager, never()).getCache(any());
+        verifyNoInteractions(urlRepository, clickAnalyticsService);
+    }
+
+    @Test
+    void aDomainLinkWhoseDomainWasTurnedOffSinceTheLastReloadIsUnavailable() {
+        when(appProperties.getFrontendUrl()).thenReturn(FRONTEND);
+        final var link = onGoExampleCom();
+        link.getDomain().setStatus(CustomDomainStatus.DISABLED);
+        when(urlRepository.findServed(7L, "menu")).thenReturn(Optional.of(link));
+
+        assertThat(urlServiceWithMeters().redirectResultUrl(GO, "menu", CLICK).getUrl())
+                .isEqualTo(FRONTEND + "/unavailable?s=menu&reason=domain&d=go.example.com");
+
+        verifyNoInteractions(clickAnalyticsService);
+    }
+
+    @Test
+    void customUnavailableAndProtectedPagesCarryTheHost() {
+        when(appProperties.getFrontendUrl()).thenReturn(FRONTEND);
+        final var service = urlServiceWithMeters();
+        final var locked = onGoExampleCom();
+        locked.setPasswordHash("hash");
+        final var expired = onGoExampleCom();
+        expired.setShortUrl("old");
+        expired.setActive(false);
+        expired.setExpirationDate(LocalDateTime.now().minusDays(1));
+        when(urlRepository.findServed(7L, "menu")).thenReturn(Optional.of(locked));
+        when(urlRepository.findServed(7L, "old")).thenReturn(Optional.of(expired));
+        when(urlRepository.findServed(7L, "nope")).thenReturn(Optional.empty());
+
+        assertThat(service.redirectResultUrl(GO, "nope", CLICK).getUrl()).isEqualTo(FRONTEND + "/unavailable?s=nope&reason=missing&d=go.example.com");
+        assertThat(service.redirectResultUrl(GO, "old", CLICK).getUrl()).isEqualTo(FRONTEND + "/unavailable?s=old&reason=expired&d=go.example.com");
+        assertThat(service.redirectResultUrl(GO, "menu", CLICK).getUrl()).isEqualTo(FRONTEND + "/protected/menu?domain=go.example.com");
+    }
+
+    @Test
+    void aCachedProtectedDomainLinkGoesToTheProtectedPageWithItsHost() {
+        when(appProperties.getFrontendUrl()).thenReturn(FRONTEND);
+        final var urls = new ConcurrentMapCacheManager("urls");
+        final var locked = onGoExampleCom();
+        locked.setPasswordHash("hash");
+        urls.getCache("urls").put("7/menu", UrlResponse.from(locked));
+
+        assertThat(urlServiceCachingIn(urls).redirectResultUrl(GO, "menu", CLICK).getUrl()).isEqualTo(FRONTEND + "/protected/menu?domain=go.example.com");
+
+        verifyNoInteractions(urlRepository);
+    }
+
+    @Test
+    void aDomainLinkTheClickCheckRefusesSaysBlockedWithItsHost() {
+        when(appProperties.getFrontendUrl()).thenReturn(FRONTEND);
+        when(urlRepository.findServed(7L, "menu")).thenReturn(Optional.of(onGoExampleCom()));
+        when(clickCheckService.mayRedirect(2L, "https://b.example/menu")).thenReturn(false);
+
+        assertThat(urlServiceWithMeters().redirectResultUrl(GO, "menu", CLICK).getUrl())
+                .isEqualTo(FRONTEND + "/unavailable?s=menu&reason=blocked&d=go.example.com");
+    }
+
+    @Test
+    void botProbePathsStillShortCircuitOnACustomHost() {
+        for (final var probe : List.of("favicon.ico", "ROBOTS.TXT", ".env", "wp-login.php")) {
+            assertThatThrownBy(() -> urlServiceWithMeters().redirectResultUrl(GO, probe, CLICK)).as(probe)
+                    .isInstanceOf(UrlNotFoundException.class);
+        }
+
+        verifyNoInteractions(urlRepository, clickAnalyticsService, cacheManager);
+    }
+
+    @Test
+    void theLookupsReadTheDomainsOwnLink() {
+        final var onDomain = onGoExampleCom();
+        final var peek = PeekUrl.builder().shortUrl("menu").domain("go.example.com").build();
+        when(customDomainRegistry.active("go.example.com")).thenReturn(Optional.of(GO));
+        when(urlRepository.findActive(7L, "menu")).thenReturn(Optional.of(onDomain));
+        when(urlRepository.findActive(null, "menu")).thenReturn(Optional.of(onHrva()));
+        when(urlToPeekUrlConverter.convert(onDomain)).thenReturn(peek);
+
+        assertThat(urlService.revealUrlAndRecordClick("go.example.com", "menu", CLICK).longUrl()).isEqualTo("https://b.example/menu");
+        assertThat(urlService.revealUrlAndRecordClick(null, "menu", CLICK).longUrl()).isEqualTo("https://a.example/menu");
+        assertThat(urlService.peekUrlByShortUrl("go.example.com", "menu")).isSameAs(peek);
+
+        verify(clickAnalyticsService).recordClick(2L, "7/menu", CLICK);
+        verify(clickAnalyticsService).recordClick(1L, "menu", CLICK);
+    }
+
+    @Test
+    void theRevealOfADomainLinkKeepsItsDomain() {
+        when(customDomainRegistry.active("go.example.com")).thenReturn(Optional.of(GO));
+        when(urlRepository.findActive(7L, "menu")).thenReturn(Optional.of(onGoExampleCom()));
+
+        assertThat(urlService.revealUrlAndRecordClick("go.example.com", "menu", CLICK).domain())
+                .isEqualTo(new DomainRef(7L, "go.example.com"));
+    }
+
+    @Test
+    void aBlankDomainMeansHrva() {
+        when(urlRepository.findActive(null, "menu")).thenReturn(Optional.of(onHrva()));
+
+        assertThat(urlService.revealUrlAndRecordClick("", "menu", CLICK).id()).isEqualTo(1L);
+        assertThat(urlService.revealUrlAndRecordClick(" ", "menu", CLICK).id()).isEqualTo(1L);
+
+        verifyNoInteractions(customDomainRegistry);
+    }
+
+    @Test
+    void anUnknownOrTurnedOffDomainIsNotFound() {
+        when(customDomainRegistry.active("off.example.com")).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> urlService.revealUrlAndRecordClick("off.example.com", "menu", CLICK))
+                .isInstanceOf(UrlNotFoundException.class).hasMessage("URL doesn't exist");
+        assertThatThrownBy(() -> urlService.peekUrlByShortUrl("off.example.com", "menu"))
+                .isInstanceOf(UrlNotFoundException.class).hasMessage("URL doesn't exist");
+        assertThatThrownBy(() -> urlService.unlockUrl("off.example.com", "menu", "pw", CLICK))
+                .isInstanceOf(UrlNotFoundException.class).hasMessage("URL doesn't exist");
+
+        verifyNoInteractions(urlRepository, clickAnalyticsService, rateLimiter);
+    }
+
+    @Test
+    void unlockOnADomainLinkUsesItsLinkAndItsOwnRateLimitKeys() {
+        final var locked = onGoExampleCom();
+        locked.setPasswordHash("hash");
+        when(customDomainRegistry.active("go.example.com")).thenReturn(Optional.of(GO));
+        when(urlRepository.findActive(7L, "menu")).thenReturn(Optional.of(locked));
+        when(passwordEncoder.matches("pw", "hash")).thenReturn(true);
+
+        assertThat(urlService.unlockUrl("go.example.com", "menu", "pw", CLICK).longUrl()).isEqualTo("https://b.example/menu");
+
+        verify(rateLimiter).tryAcquire(RateLimiter.clientKey("unlock:7/menu", CLIENT_IP), 10, Duration.ofMinutes(15));
+        verify(rateLimiter).tryAcquire("unlock:7/menu", 50, Duration.ofMinutes(15));
+        verify(rateLimiter, never()).tryAcquire(eq("unlock:menu"), anyInt(), any());
+        verify(clickAnalyticsService).recordClick(2L, "7/menu", CLICK.withUnknownReferrer());
+        verify(urlRepository, never()).findActive(isNull(), any());
+    }
+
+    @Test
+    void aDomainLinkTheClickCheckRefusesAtUnlockSaysBlockedWithItsHost() {
+        when(appProperties.getFrontendUrl()).thenReturn(FRONTEND);
+        when(customDomainRegistry.active("go.example.com")).thenReturn(Optional.of(GO));
+        when(urlRepository.findActive(7L, "menu")).thenReturn(Optional.of(onGoExampleCom()));
+        when(clickCheckService.mayRedirect(2L, "https://b.example/menu")).thenReturn(false);
+
+        assertThat(urlService.unlockUrl("go.example.com", "menu", null, CLICK).longUrl())
+                .isEqualTo(FRONTEND + "/unavailable?s=menu&reason=blocked&d=go.example.com");
+    }
+
+    private static Url onHrva() {
+        return Url.builder().id(1L).shortUrl("menu").longUrl("https://a.example/menu").visits(0L).active(true).build();
+    }
+
+    private static Url onGoExampleCom() {
+        final var domain = CustomDomain.builder().id(7L).hostname("go.example.com").status(CustomDomainStatus.ACTIVE).build();
+        return Url.builder().id(2L).shortUrl("menu").longUrl("https://b.example/menu").visits(0L).active(true).domain(domain).build();
+    }
+
+    private UrlService urlServiceCachingIn(final CacheManager urls) {
+        return new DefaultUrlService(userService, urlValidator, apiKeyService, urlRepository, appProperties, apiKeyValidator, clickAnalyticsService,
+                urlToPeekUrlConverter, createUrlToUrlConverter, urlUpdateDtoToUrlConverter, new UrlCache(urls), objectMapper,
+                new io.micrometer.core.instrument.simple.SimpleMeterRegistry(), passwordEncoder, suspiciousUrlService, rateLimiter,
+                reviewQueueService, scammerSignalService, clickCheckService, redirectChainService, TransactionOperations.withoutTransaction(),
+                reservedAliasService, burstAlertService, destinationCheckRepository, customDomainRegistry);
+    }
+
+    private static UrlService withTheCacheAnnotations(final UrlService service, final CacheManager urls) {
+        final var interceptor = new CacheInterceptor();
+        interceptor.setCacheOperationSource(new AnnotationCacheOperationSource());
+        interceptor.setCacheManager(urls);
+        interceptor.afterPropertiesSet();
+        interceptor.afterSingletonsInstantiated();
+        final var proxyFactory = new ProxyFactory(service);
+        proxyFactory.addAdvice(interceptor);
+        return (UrlService) proxyFactory.getProxy();
+    }
+
     private static Url.UrlBuilder storedLink() {
         return Url.builder().id(5L).shortUrl("abc").longUrl("https://example.com/a").visits(0L);
     }
@@ -2532,7 +2819,7 @@ class UrlServiceTest {
                 urlToPeekUrlConverter,
                 createUrlToUrlConverter,
                 urlUpdateDtoToUrlConverter,
-                cacheManager,
+                new UrlCache(cacheManager),
                 objectMapper,
                 new io.micrometer.core.instrument.simple.SimpleMeterRegistry(),
                 passwordEncoder,
@@ -2545,7 +2832,8 @@ class UrlServiceTest {
                 TransactionOperations.withoutTransaction(),
                 reservedAliasService,
                 burstAlertService,
-                destinationCheckRepository
+                destinationCheckRepository,
+                customDomainRegistry
         );
     }
 
@@ -2606,7 +2894,7 @@ class UrlServiceTest {
                 urlToPeekUrlConverter,
                 new CreateUrlToUrlConverter(),
                 urlUpdateDtoToUrlConverter,
-                cacheManager,
+                new UrlCache(cacheManager),
                 objectMapper,
                 meterRegistry,
                 passwordEncoder,
@@ -2619,7 +2907,8 @@ class UrlServiceTest {
                 new TransactionTemplate(transactionManager),
                 reservedAliasService,
                 burstAlertService,
-                destinationCheckRepository
+                destinationCheckRepository,
+                customDomainRegistry
         );
         final var proxyFactory = new ProxyFactory(service);
         proxyFactory.addAdvice(new TransactionInterceptor(transactionManager, new AnnotationTransactionAttributeSource()));
@@ -2639,7 +2928,7 @@ class UrlServiceTest {
                 urlToPeekUrlConverter,
                 new CreateUrlToUrlConverter(),
                 urlUpdateDtoToUrlConverter,
-                cacheManager,
+                new UrlCache(cacheManager),
                 objectMapper,
                 meterRegistry,
                 passwordEncoder,
@@ -2652,7 +2941,8 @@ class UrlServiceTest {
                 TransactionOperations.withoutTransaction(),
                 reservedAliasService,
                 burstAlertService,
-                destinationCheckRepository
+                destinationCheckRepository,
+                customDomainRegistry
         );
     }
 
@@ -2668,7 +2958,7 @@ class UrlServiceTest {
                 urlToPeekUrlConverter,
                 createUrlToUrlConverter,
                 urlUpdateDtoToUrlConverter,
-                cacheManager,
+                new UrlCache(cacheManager),
                 objectMapper,
                 meterRegistry,
                 passwordEncoder,
@@ -2681,7 +2971,8 @@ class UrlServiceTest {
                 TransactionOperations.withoutTransaction(),
                 reservedAliasService,
                 burstAlertService,
-                destinationCheckRepository
+                destinationCheckRepository,
+                customDomainRegistry
         );
     }
 

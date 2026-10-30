@@ -43,6 +43,9 @@ app:
     # NOT A SECRET: a committed dev-only key for the local profile. Never use it anywhere else;
     # every other environment sets its own key in APP_NOTIFICATIONS_KEY (openssl rand -base64 32).
     key: bG9jYWwtZGV2LW5vdGlmaWNhdGlvbnMta2V5LTMyYnl0ZXMhIQ==
+  domains:
+    # Local profile only: these hosts reach the whole app; any other Host header is a custom domain or a 404.
+    primary-hosts: localhost,127.0.0.1,hrva.cc,domains.hrva.cc
 
 server:
   port: 8080

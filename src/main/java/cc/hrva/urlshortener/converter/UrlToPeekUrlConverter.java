@@ -16,6 +16,7 @@ public class UrlToPeekUrlConverter implements Converter<Url, PeekUrl> {
                 .shortUrl(url.getShortUrl())
                 .createDate(url.getCreateDate())
                 .passwordProtected(passwordProtected)
+                .domain(url.getDomain() == null ? null : url.getDomain().getHostname())
                 .build();
     }
 
