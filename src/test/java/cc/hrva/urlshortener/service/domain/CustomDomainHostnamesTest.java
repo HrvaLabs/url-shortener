@@ -95,7 +95,8 @@ class CustomDomainHostnamesTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"xn--w6ja155uba.example.com", "xn--nbd4itbt1dwfyc.example.com", "xn--f9dt7l.example.com"})
+    @ValueSource(strings = {"xn--w6ja155uba.example.com", "xn--nbd4itbt1dwfyc.example.com", "xn--f9dt7l.example.com",
+            "xn--ngb04b.example.com", "xn--ngb24b.example.com", "xn--wva3j.example.com"})
     void idna2008LabelsOutsideTheLetterAndDigitClassesPass(final String input) {
         assertThat(hostnames.normalize(input)).isEqualTo(input);
         assertThat(CustomDomainHostnames.hostnameKey(input)).contains(input);
@@ -113,6 +114,20 @@ class CustomDomainHostnamesTest {
     @ValueSource(strings = {"xn--wca.example.com", "xn--e-xbb.example.com", "xn--hqd2n7h.example.com", "xn--a-wbb.example.com"})
     void uppercaseUnnormalizedAndMarkFirstLabelsAreRefused(final String input) {
         assertRefused(input, BAD_SHAPE);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"xn--kz9a.example.com", "xn--oce.example.com"})
+    void cherokeeSmallLettersAreRefused(final String input) {
+        assertRefused(input, BAD_SHAPE);
+    }
+
+    @Test
+    void typedCherokeeIsRefusedBecauseTheKeyLowercasesItIntoSmallLetters() {
+        final var key = CustomDomainHostnames.hostnameKey("\u13A0\u13A1.example.com").orElseThrow();
+
+        assertThat(key).isEqualTo("xn--kz9ac.example.com");
+        assertRefused(key, BAD_SHAPE);
     }
 
     @ParameterizedTest

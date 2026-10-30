@@ -33,6 +33,10 @@ public class CustomDomainHostnames {
             0x6FD, 0x6FE, 0xF0B, 0x3007);
     private static final int CHEROKEE_FIRST = 0x13A0;
     private static final int CHEROKEE_LAST = 0x13F5;
+    private static final int CHEROKEE_SMALL_FIRST = 0x13F8;
+    private static final int CHEROKEE_SMALL_LAST = 0x13FD;
+    private static final int CHEROKEE_SMALL_SUPPLEMENT_FIRST = 0xAB70;
+    private static final int CHEROKEE_SMALL_SUPPLEMENT_LAST = 0xABBF;
 
     private final AppProperties appProperties;
 
@@ -189,8 +193,9 @@ public class CustomDomainHostnames {
 
     private static boolean isSymbol(final int codePoint) {
         final var type = Character.getType(codePoint);
-        return type == Character.OTHER_SYMBOL || type == Character.MATH_SYMBOL || type == Character.CURRENCY_SYMBOL
-                || type == Character.MODIFIER_SYMBOL || codePoint >= ASCII_LIMIT && Character.isEmoji(codePoint);
+        return !EXCEPTION_CODE_POINTS.contains(codePoint)
+                && (type == Character.OTHER_SYMBOL || type == Character.MATH_SYMBOL || type == Character.CURRENCY_SYMBOL
+                        || type == Character.MODIFIER_SYMBOL || codePoint >= ASCII_LIMIT && Character.isEmoji(codePoint));
     }
 
     private static boolean isMark(final int codePoint) {
@@ -200,14 +205,19 @@ public class CustomDomainHostnames {
 
     private static boolean isLabelCodePoint(final int codePoint) {
         final var cased = Character.isUpperCase(codePoint) || Character.isTitleCase(codePoint);
-        return Character.isLetter(codePoint) && (!cased || isCherokee(codePoint))
+        return !isCherokeeSmall(codePoint) && (Character.isLetter(codePoint) && (!cased || isCherokee(codePoint))
                 || Character.isDigit(codePoint)
                 || isMark(codePoint)
-                || EXCEPTION_CODE_POINTS.contains(codePoint);
+                || EXCEPTION_CODE_POINTS.contains(codePoint));
     }
 
     private static boolean isCherokee(final int codePoint) {
         return codePoint >= CHEROKEE_FIRST && codePoint <= CHEROKEE_LAST;
+    }
+
+    private static boolean isCherokeeSmall(final int codePoint) {
+        return codePoint >= CHEROKEE_SMALL_FIRST && codePoint <= CHEROKEE_SMALL_LAST
+                || codePoint >= CHEROKEE_SMALL_SUPPLEMENT_FIRST && codePoint <= CHEROKEE_SMALL_SUPPLEMENT_LAST;
     }
 
     private static Optional<String> withoutPort(final String host) {
