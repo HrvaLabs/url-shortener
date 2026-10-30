@@ -9,9 +9,11 @@ import java.time.ZoneOffset;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.converter.UserToUserDtoConverter;
@@ -25,6 +27,7 @@ import cc.hrva.urlshortener.dto.DataExportDto.ConsentExport;
 import cc.hrva.urlshortener.dto.DataExportDto.DomainExport;
 import cc.hrva.urlshortener.dto.DataExportDto.NotificationExport;
 import cc.hrva.urlshortener.dto.DeleteAccountDto;
+import cc.hrva.urlshortener.dto.LoginAttemptResponse;
 import cc.hrva.urlshortener.dto.PasswordResetDto;
 import cc.hrva.urlshortener.dto.RequestPasswordResetDto;
 import cc.hrva.urlshortener.dto.UpdatePasswordDto;
@@ -697,7 +700,7 @@ class DefaultUserServiceTest {
 
         userService.resetPassword(resetDto);
 
-        assertThat(loginAttemptService.getLoginAttempts()).doesNotContainKey("reauth:1");
+        assertThat(attemptsByKey()).doesNotContainKey("reauth:1");
         assertThat(loginAttemptService.isBlocked("reauth:1")).isFalse();
     }
 
@@ -1172,7 +1175,7 @@ class DefaultUserServiceTest {
         verify(authValidator, never()).passwordMatchesCurrentPassword(user, "myPassword");
         verify(passwordEncoder, never()).encode(any());
         verify(userRepository, never()).delete(any(User.class));
-        assertThat(loginAttemptService.getLoginAttempts()).containsEntry("reauth:1", 20);
+        assertThat(attemptsByKey()).containsEntry("reauth:1", 20);
         SecurityContextHolder.clearContext();
     }
 
@@ -1186,11 +1189,11 @@ class DefaultUserServiceTest {
                 .when(authValidator).passwordMatchesCurrentPassword(user, "wrong");
         IntStream.rangeClosed(1, 19).forEach(attempt -> assertThatThrownBy(() -> userService.deleteOwnAccount(
                 DeleteAccountDto.builder().password("wrong").build())).hasMessage(WRONG_PASSWORD));
-        assertThat(loginAttemptService.getLoginAttempts()).containsEntry("reauth:1", 19);
+        assertThat(attemptsByKey()).containsEntry("reauth:1", 19);
 
         userService.updatePassword(UpdatePasswordDto.builder().oldPassword("oldPassword").newPassword("newPassword").build());
 
-        assertThat(loginAttemptService.getLoginAttempts()).doesNotContainKey("reauth:1");
+        assertThat(attemptsByKey()).doesNotContainKey("reauth:1");
         SecurityContextHolder.clearContext();
     }
 
@@ -1323,6 +1326,11 @@ class DefaultUserServiceTest {
 
     private static Pageable newestFirst(final Pageable pageable) {
         return PageRequest.of(pageable.getPageNumber(), pageable.getPageSize(), Sort.by(Sort.Order.desc("createDate"), Sort.Order.desc("id")));
+    }
+
+    private Map<String, Integer> attemptsByKey() {
+        return loginAttemptService.attempts(null, Pageable.unpaged()).stream()
+                .collect(Collectors.toMap(LoginAttemptResponse::key, LoginAttemptResponse::attempts));
     }
 
 }

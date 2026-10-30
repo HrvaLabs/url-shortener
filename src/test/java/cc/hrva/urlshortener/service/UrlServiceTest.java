@@ -78,6 +78,8 @@ import cc.hrva.urlshortener.validator.impl.DefaultUrlValidator;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
 import jakarta.persistence.criteria.CriteriaBuilder;
@@ -2410,7 +2412,7 @@ class UrlServiceTest {
     void theAdminListRefusesToSortByAFieldOffTheList() {
         assertThatThrownBy(() -> urlService.getAllUrls(PageRequest.of(0, 20, Sort.by("owner.password")), new UrlSearchDto()))
                 .isInstanceOf(InvalidSortException.class)
-                .hasMessage("Sort must be shortUrl, longUrl, createDate, expirationDate, visits, active or owner.email");
+                .hasMessage("Sort must be id, shortUrl, longUrl, createDate, lastAccessed, expirationDate, visits, visitLimit, active or owner.email");
         verifyNoInteractions(urlRepository);
     }
 
@@ -2425,7 +2427,30 @@ class UrlServiceTest {
         verify(urlRepository).findAll(any(Specification.class), eq(PageRequest.of(0, 20, Sort.by(Sort.Order.desc("createDate"), Sort.Order.desc("id")))));
         assertThatThrownBy(() -> urlService.getAllMyUrls("apikey", PageRequest.of(0, 20, Sort.by("passwordHash")), new UrlSearchDto()))
                 .isInstanceOf(InvalidSortException.class)
-                .hasMessage("Sort must be shortUrl, longUrl, createDate, expirationDate, visits or active");
+                .hasMessage("Sort must be id, shortUrl, longUrl, createDate, lastAccessed, expirationDate, visits, visitLimit or active");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"id", "lastAccessed", "visitLimit"})
+    void myLinksStillSortByTheFieldsTheyTookBeforeTheWhitelist(final String field) {
+        final var user = User.builder().id(5L).build();
+        when(apiKeyService.fetchApiKeyByKey("apikey")).thenReturn(ApiKey.builder().owner(user).build());
+        when(urlRepository.findAll(any(Specification.class), any(Pageable.class))).thenReturn(Page.empty());
+
+        urlService.getAllMyUrls("apikey", PageRequest.of(0, 20, Sort.by(Sort.Order.asc(field))), new UrlSearchDto());
+
+        verify(urlRepository).findAll(any(Specification.class), eq(PageRequest.of(0, 20, Sort.by(Sort.Order.asc(field))
+                .and(field.equals("id") ? Sort.by(Sort.Order.desc("createDate")) : Sort.by(Sort.Order.desc("createDate"), Sort.Order.desc("id"))))));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"id", "lastAccessed", "visitLimit"})
+    void theAdminListStillSortsByTheFieldsItTookBeforeTheWhitelist(final String field) {
+        when(urlRepository.findAll(any(Pageable.class))).thenReturn(Page.empty());
+
+        urlService.getAllUrls(PageRequest.of(0, 20, Sort.by(Sort.Order.desc(field))), new UrlSearchDto());
+
+        verify(urlRepository).findAll(any(Pageable.class));
     }
 
     @Test

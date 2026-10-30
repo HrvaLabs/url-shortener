@@ -68,13 +68,6 @@ public class DefaultLoginAttemptService implements LoginAttemptService {
     }
 
     @Override
-    public java.util.Map<String, Integer> getLoginAttempts() {
-        final var map = new java.util.LinkedHashMap<String, Integer>();
-        map.putAll(attemptsCache.asMap());
-        return map;
-    }
-
-    @Override
     public Page<LoginAttemptResponse> attempts(final String search, final Pageable pageable) {
         final var order = ATTEMPT_SORTS.sortOf(pageable.getSort()).stream()
                 .map(DefaultLoginAttemptService::comparatorOf)

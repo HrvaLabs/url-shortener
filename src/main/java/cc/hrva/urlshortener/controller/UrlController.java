@@ -189,7 +189,9 @@ public class UrlController {
                 .body(csv);
     }
 
-    @Operation(summary = "Get my URLs", description = "Retrieve paginated list of URLs owned by the authenticated user. Supports filtering by search, active, expired, dateFrom, and dateTo. Requires ROLE_USER.")
+    @Operation(summary = "Get my URLs", description = "Retrieve paginated list of URLs owned by the authenticated user. Supports filtering by search, active, expired, dateFrom, and dateTo. "
+            + "sort takes id, shortUrl, longUrl, createDate, lastAccessed, expirationDate, visits, visitLimit or active, with ,asc or ,desc; "
+            + "any other field is a 400. Without a sort, newest first. Requires ROLE_USER.")
     @GetMapping
     @PreAuthorize("hasRole('ROLE_USER')")
     public ResponseEntity<Page<UrlResponse>> getAllMyUrls(

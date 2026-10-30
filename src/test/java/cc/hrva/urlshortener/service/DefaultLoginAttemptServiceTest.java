@@ -10,6 +10,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -90,7 +91,7 @@ class DefaultLoginAttemptServiceTest {
         loginAttemptService.loginFailed("10.0.10499");
         loginAttemptService.loginFailed("10.0.10499");
 
-        assertThat(loginAttemptService.getLoginAttempts()).hasSizeLessThanOrEqualTo(10_000);
+        assertThat(loginAttemptService.attempts(null, Pageable.unpaged()).getTotalElements()).isLessThanOrEqualTo(10_000);
         assertThat(loginAttemptService.isBlocked("10.0.10499")).isTrue();
     }
 

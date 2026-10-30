@@ -15,6 +15,7 @@ import cc.hrva.urlshortener.dto.domain.ReconcileResponse;
 import cc.hrva.urlshortener.exception.CustomDomainConflictException;
 import cc.hrva.urlshortener.exception.CustomDomainNotFoundException;
 import cc.hrva.urlshortener.exception.FieldValidationException;
+import cc.hrva.urlshortener.exception.InvalidSortException;
 import cc.hrva.urlshortener.exception.UserNotFoundException;
 import cc.hrva.urlshortener.model.CustomDomain;
 import cc.hrva.urlshortener.model.CustomDomainAllowance;
@@ -70,6 +71,8 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentMatcher;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -77,6 +80,7 @@ import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.core.task.TaskRejectedException;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.transaction.TransactionStatus;
@@ -669,6 +673,40 @@ class DefaultCustomDomainAdminServiceTest {
         verify(customDomainRepository).countOpenReviewsOfOwners(argThat(ids(7L, 8L)));
         verify(customDomainRepository).countLinksOfDomains(argThat(ids(ID, 13L, 14L)));
         verify(scammerSignalService, times(1)).possibleScammers(anyCollection());
+    }
+
+    @Test
+    void theListWithoutASortComesNewestFirstWithTheIdBreakingTies() {
+        when(customDomainRepository.findAll(any(Specification.class), any(Pageable.class)))
+                .thenAnswer(invocation -> new PageImpl<>(List.of(), invocation.getArgument(1), 0));
+
+        customDomainAdminService.list(null, null, PageRequest.of(2, 20));
+
+        verify(customDomainRepository).findAll(any(Specification.class),
+                eq(PageRequest.of(2, 20, Sort.by(Sort.Order.desc("createdAt"), Sort.Order.desc("id")))));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"hostname", "status", "createdAt"})
+    void theListSortsByAChosenFieldThenNewestFirst(final String field) {
+        when(customDomainRepository.findAll(any(Specification.class), any(Pageable.class)))
+                .thenAnswer(invocation -> new PageImpl<>(List.of(), invocation.getArgument(1), 0));
+
+        customDomainAdminService.list(null, null, PageRequest.of(0, 20, Sort.by(Sort.Order.asc(field))));
+
+        final var expected = field.equals("createdAt")
+                ? Sort.by(Sort.Order.asc("createdAt"), Sort.Order.desc("id"))
+                : Sort.by(Sort.Order.asc(field), Sort.Order.desc("createdAt"), Sort.Order.desc("id"));
+        verify(customDomainRepository).findAll(any(Specification.class), eq(PageRequest.of(0, 20, expected)));
+    }
+
+    @Test
+    void theListRefusesToSortByAFieldOffTheList() {
+        assertThatThrownBy(() -> customDomainAdminService.list(null, null, PageRequest.of(0, 20, Sort.by("owner.password"))))
+                .isInstanceOf(InvalidSortException.class)
+                .hasMessage("Sort must be createdAt, hostname or status");
+
+        verifyNoInteractions(customDomainRepository);
     }
 
     @Test

@@ -37,6 +37,7 @@ import cc.hrva.urlshortener.service.domain.CustomDomainReconciler;
 import cc.hrva.urlshortener.service.domain.CustomDomainRemoval;
 import cc.hrva.urlshortener.service.domain.CustomDomainRemoval.Actor;
 import cc.hrva.urlshortener.service.domain.CustomDomainSetup;
+import cc.hrva.urlshortener.util.SortWhitelist;
 import java.time.Clock;
 import java.time.LocalDateTime;
 import java.util.Objects;
@@ -47,7 +48,6 @@ import org.apache.commons.lang3.StringUtils;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
-import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
@@ -71,7 +71,10 @@ public class DefaultCustomDomainAdminService implements CustomDomainAdminService
     private static final String NOTE = "note";
     private static final String HTTPS = "https://";
     private static final String NOTE_REQUIRED = "Reason is required";
-    private static final Sort NEWEST_FIRST = Sort.by(Sort.Order.desc("createdAt"), Sort.Order.desc("id"));
+    private static final String CREATED_AT = "createdAt";
+    private static final SortWhitelist DOMAIN_SORTS = SortWhitelist.of(CREATED_AT, "hostname", "status")
+            .byDefault(Sort.by(Sort.Order.desc(CREATED_AT)))
+            .thenBy(Sort.Order.desc(CREATED_AT), Sort.Order.desc("id"));
 
     private final CustomDomainRepository customDomainRepository;
     private final CustomDomainAllowanceRepository customDomainAllowanceRepository;
@@ -94,6 +97,7 @@ public class DefaultCustomDomainAdminService implements CustomDomainAdminService
 
     @Override
     public Page<AdminDomainResponse> list(final CustomDomainStatus status, final String search, final Pageable pageable) {
+        final var sorted = DOMAIN_SORTS.apply(pageable);
         var spec = Specification.<CustomDomain>unrestricted();
         if (status != null) {
             spec = spec.and(CustomDomainSpecification.hasStatus(status));
@@ -101,10 +105,7 @@ public class DefaultCustomDomainAdminService implements CustomDomainAdminService
         if (StringUtils.isNotBlank(search)) {
             spec = spec.and(CustomDomainSpecification.searchMatches(search.strip()));
         }
-        final var newestFirst = pageable.isPaged()
-                ? PageRequest.of(pageable.getPageNumber(), pageable.getPageSize(), NEWEST_FIRST)
-                : Pageable.unpaged(NEWEST_FIRST);
-        final var domains = customDomainRepository.findAll(spec, newestFirst);
+        final var domains = customDomainRepository.findAll(spec, sorted);
         return new PageImpl<>(adminDomainResponses.of(domains.getContent()), domains.getPageable(), domains.getTotalElements());
     }
 

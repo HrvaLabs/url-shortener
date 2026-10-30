@@ -97,7 +97,7 @@ public class DefaultUrlService implements UrlService {
 
     private static final String OWNER_EMAIL = "owner.email";
     private static final String CREATE_DATE = "createDate";
-    private static final String[] LINK_SORT_FIELDS = {"shortUrl", "longUrl", CREATE_DATE, "expirationDate", "visits", "active"};
+    private static final String[] LINK_SORT_FIELDS = {"id", "shortUrl", "longUrl", CREATE_DATE, "lastAccessed", "expirationDate", "visits", "visitLimit", "active"};
     private static final SortWhitelist MY_LINK_SORTS = SortWhitelist.of(LINK_SORT_FIELDS)
             .byDefault(Sort.by(Sort.Order.desc(CREATE_DATE)))
             .thenBy(Sort.Order.desc(CREATE_DATE), Sort.Order.desc("id"));

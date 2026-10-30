@@ -1,6 +1,7 @@
 package cc.hrva.urlshortener.security;
 
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
+import cc.hrva.urlshortener.dto.LoginAttemptResponse;
 import cc.hrva.urlshortener.exception.ApiException;
 import cc.hrva.urlshortener.exception.NoAuthorizationException;
 import cc.hrva.urlshortener.exception.ReauthenticationRequiredException;
@@ -12,7 +13,9 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -20,6 +23,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.domain.Pageable;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -110,7 +114,7 @@ class ReauthenticationTest {
         }
         verify(authValidator, times(20)).passwordMatchesCurrentPassword(user, "wrong");
         verify(authValidator, never()).passwordMatchesCurrentPassword(user, "user123");
-        assertThat(loginAttemptService.getLoginAttempts()).containsEntry("reauth:7", 20);
+        assertThat(attemptsByKey()).containsEntry("reauth:7", 20);
     }
 
     @Test
@@ -122,7 +126,7 @@ class ReauthenticationTest {
 
         reauthentication.confirm(user, "user123");
 
-        assertThat(loginAttemptService.getLoginAttempts()).doesNotContainKey("reauth:7");
+        assertThat(attemptsByKey()).doesNotContainKey("reauth:7");
         IntStream.rangeClosed(1, 19).forEach(attempt -> assertThatThrownBy(() -> reauthentication.confirm(user, "wrong"))
                 .hasMessage(WRONG_PASSWORD));
         assertThatCode(() -> reauthentication.confirm(user, "user123")).doesNotThrowAnyException();
@@ -148,7 +152,7 @@ class ReauthenticationTest {
         IntStream.rangeClosed(1, 25).forEach(attempt -> assertThatThrownBy(() -> reauthentication.confirm(user, " "))
                 .hasMessage("Enter your current password."));
 
-        assertThat(loginAttemptService.getLoginAttempts()).doesNotContainKey("reauth:7");
+        assertThat(attemptsByKey()).doesNotContainKey("reauth:7");
     }
 
     @Test
@@ -178,7 +182,7 @@ class ReauthenticationTest {
         assertThatCode(() -> reauthentication.confirm(user("google"), null)).doesNotThrowAnyException();
 
         verifyNoInteractions(authValidator);
-        assertThat(loginAttemptService.getLoginAttempts()).isEmpty();
+        assertThat(attemptsByKey()).isEmpty();
     }
 
     @Test
@@ -259,6 +263,11 @@ class ReauthenticationTest {
 
     private static User user(final String authProvider) {
         return User.builder().id(7L).email("user@example.com").password("$2a$10$hash").authProvider(authProvider).build();
+    }
+
+    private Map<String, Integer> attemptsByKey() {
+        return loginAttemptService.attempts(null, Pageable.unpaged()).stream()
+                .collect(Collectors.toMap(LoginAttemptResponse::key, LoginAttemptResponse::attempts));
     }
 
 }
