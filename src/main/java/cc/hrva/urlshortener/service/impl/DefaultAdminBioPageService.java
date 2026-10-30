@@ -24,6 +24,7 @@ import cc.hrva.urlshortener.service.ReservedAliasService;
 import cc.hrva.urlshortener.service.UserService;
 import cc.hrva.urlshortener.service.bio.BioHandles;
 import cc.hrva.urlshortener.service.bio.BioPageLock;
+import cc.hrva.urlshortener.util.SortWhitelist;
 import java.time.Clock;
 import java.time.LocalDateTime;
 import java.util.Collection;
@@ -37,7 +38,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
@@ -59,7 +59,12 @@ public class DefaultAdminBioPageService implements AdminBioPageService {
     private static final String HANDLE_CHANGED = "This handle changed. Reload and try again.";
     private static final String REVOKED_HANDLE_REASON = "Revoked bio page handle: ";
     private static final int MAX_RESERVATION_REASON_LENGTH = 200;
-    private static final Sort NEWEST_FIRST = Sort.by(Sort.Order.desc("createdAt"), Sort.Order.desc("id"));
+    private static final String CREATED_AT = "createdAt";
+    private static final String HANDLE = "handle";
+    private static final SortWhitelist PAGE_SORTS = SortWhitelist.of(CREATED_AT, HANDLE)
+            .byDefault(Sort.by(Sort.Order.desc(CREATED_AT)))
+            .thenBy(Sort.Order.desc(CREATED_AT), Sort.Order.desc("id"))
+            .nullsLast(HANDLE);
 
     private final BioPageRepository bioPageRepository;
     private final BioPageLock bioPageLock;
@@ -79,10 +84,8 @@ public class DefaultAdminBioPageService implements AdminBioPageService {
         if (hiddenOnly) {
             spec = spec.and(BioPageSpecification.isHidden());
         }
-        final var newestFirst = pageable.isPaged()
-                ? PageRequest.of(pageable.getPageNumber(), pageable.getPageSize(), NEWEST_FIRST)
-                : Pageable.unpaged(NEWEST_FIRST);
-        final var pages = bioPageRepository.findAll(spec, newestFirst);
+        final var sorted = PAGE_SORTS.apply(pageable);
+        final var pages = bioPageRepository.findAll(spec, sorted);
         if (pages.isEmpty()) {
             return pages.map(page -> AdminBioPageResponse.from(page, 0, 0, false));
         }

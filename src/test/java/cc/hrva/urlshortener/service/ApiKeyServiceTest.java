@@ -7,7 +7,9 @@ import java.util.Optional;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
+import org.springframework.data.jpa.domain.Specification;
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.converter.ApiKeyUpdateDtoToApiKeyConverter;
 import cc.hrva.urlshortener.dto.ApiKeyResponse;
@@ -43,6 +45,8 @@ import static org.mockito.Mockito.when;
 class ApiKeyServiceTest {
 
     private ApiKeyService apiKeyService;
+
+    private static final Sort NEWEST_FIRST = Sort.by(Sort.Order.desc("createDate"), Sort.Order.desc("id"));
 
     @Mock
     private ApiKeyRepository apiKeyRepository;
@@ -82,16 +86,46 @@ class ApiKeyServiceTest {
     }
 
     @Test
-    void shouldFetchMyApiKeys() {
-        final ApiKey apiKey = ApiKey.builder().build();
-        final List<ApiKey> apiKeyList = Collections.singletonList(apiKey);
-        final User user = User.builder().apiKeys(apiKeyList).build();
-
+    void myKeysComeNewestFirstWithTheIdBreakingTies() {
+        final var user = User.builder().id(5L).build();
         when(userService.getUserFromToken()).thenReturn(user);
+        when(apiKeyRepository.findByOwner(user, NEWEST_FIRST)).thenReturn(List.of(ApiKey.builder().id(9L).build(), ApiKey.builder().id(4L).build()));
 
-        final var result = apiKeyService.fetchMyApiKeys();
-        assertThat(result).hasSize(1);
-        assertThat(result.get(0)).isInstanceOf(ApiKeyResponse.class);
+        final var result = apiKeyService.fetchMyApiKeys(null);
+
+        assertThat(result).extracting(ApiKeyResponse::id).containsExactly(9L, 4L);
+    }
+
+    @Test
+    void myKeysCanBeOnlyTheActiveOrOnlyTheInactiveOnes() {
+        final var user = User.builder().id(5L).build();
+        when(userService.getUserFromToken()).thenReturn(user);
+        when(apiKeyRepository.findByOwnerAndActive(user, true, NEWEST_FIRST)).thenReturn(List.of(ApiKey.builder().id(9L).active(true).build()));
+
+        assertThat(apiKeyService.fetchMyApiKeys(true)).extracting(ApiKeyResponse::id).containsExactly(9L);
+        verify(apiKeyRepository, never()).findByOwner(any(User.class), any(Sort.class));
+    }
+
+    @Test
+    void myInactiveKeysComeAPageAtATimeNewestFirst() {
+        final var user = User.builder().id(5L).build();
+        final var secondPage = PageRequest.of(1, 10, NEWEST_FIRST);
+        when(userService.getUserFromToken()).thenReturn(user);
+        when(apiKeyRepository.findByOwnerAndActiveFalse(user, secondPage))
+                .thenReturn(new PageImpl<>(List.of(ApiKey.builder().id(3L).build()), secondPage, 11));
+
+        final var result = apiKeyService.fetchMyInactiveApiKeys(PageRequest.of(1, 10));
+
+        assertThat(result.getTotalElements()).isEqualTo(11);
+        assertThat(result.getContent()).extracting(ApiKeyResponse::id).containsExactly(3L);
+    }
+
+    @Test
+    void myInactiveKeysRefuseToSortByAFieldOffTheList() {
+        assertThatThrownBy(() -> apiKeyService.fetchMyInactiveApiKeys(PageRequest.of(0, 10, Sort.by("key"))))
+                .isInstanceOf(InvalidSortException.class)
+                .hasMessage("Sort must be createDate");
+        verify(apiKeyRepository, never()).findByOwnerAndActiveFalse(any(), any());
     }
 
     @Test
@@ -240,20 +274,36 @@ class ApiKeyServiceTest {
     @Test
     void allKeysWithoutASortComeNewestFirstWithTheIdBreakingTies() {
         final var apiKey = ApiKey.builder().build();
-        when(apiKeyRepository.findAll(PageRequest.of(0, 20, Sort.by(Sort.Order.desc("createDate"), Sort.Order.desc("id")))))
+        when(apiKeyRepository.findAll(anySpecification(), eq(PageRequest.of(0, 20, NEWEST_FIRST))))
                 .thenReturn(new PageImpl<>(Collections.singletonList(apiKey)));
 
-        final var result = apiKeyService.fetchAllApiKeys(PageRequest.of(0, 20));
+        final var result = apiKeyService.fetchAllApiKeys(null, null, PageRequest.of(0, 20));
 
         assertThat(result.getContent()).hasSize(1);
     }
 
     @Test
+    void allKeysSortByCallsUsedOrExpiryWithTheIdBreakingTies() {
+        when(apiKeyRepository.findAll(anySpecification(), any(Pageable.class))).thenReturn(Page.empty());
+
+        apiKeyService.fetchAllApiKeys("ana", false, PageRequest.of(0, 20, Sort.by(Sort.Order.desc("apiCallsUsed"))));
+        apiKeyService.fetchAllApiKeys(null, true, PageRequest.of(0, 20, Sort.by(Sort.Order.asc("expirationDate"))));
+
+        verify(apiKeyRepository).findAll(anySpecification(), eq(PageRequest.of(0, 20, Sort.by(Sort.Order.desc("apiCallsUsed"), Sort.Order.desc("id")))));
+        verify(apiKeyRepository).findAll(anySpecification(), eq(PageRequest.of(0, 20, Sort.by(Sort.Order.asc("expirationDate"), Sort.Order.desc("id")))));
+    }
+
+    @Test
     void allKeysRefuseToSortByAFieldOffTheList() {
-        assertThatThrownBy(() -> apiKeyService.fetchAllApiKeys(PageRequest.of(0, 20, Sort.by("key"))))
+        assertThatThrownBy(() -> apiKeyService.fetchAllApiKeys(null, null, PageRequest.of(0, 20, Sort.by("key"))))
                 .isInstanceOf(InvalidSortException.class)
-                .hasMessage("Sort must be createDate or apiCallsUsed");
-        verify(apiKeyRepository, never()).findAll(any(org.springframework.data.domain.Pageable.class));
+                .hasMessage("Sort must be createDate, apiCallsUsed or expirationDate");
+        verify(apiKeyRepository, never()).findAll(anySpecification(), any(Pageable.class));
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Specification<ApiKey> anySpecification() {
+        return any(Specification.class);
     }
 
     @Test

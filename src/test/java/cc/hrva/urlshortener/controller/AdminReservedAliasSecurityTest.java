@@ -7,6 +7,7 @@ import cc.hrva.urlshortener.configuration.SecurityConfiguration;
 import cc.hrva.urlshortener.configuration.WebConfiguration;
 import cc.hrva.urlshortener.dto.ReservedAliasDto;
 import cc.hrva.urlshortener.dto.ReservedAliasResponse;
+import cc.hrva.urlshortener.exception.InvalidSortException;
 import cc.hrva.urlshortener.exception.ReservedAliasNotFoundException;
 import cc.hrva.urlshortener.exception.ShortUrlAlreadyExistsException;
 import cc.hrva.urlshortener.mcp.McpResourceServerConfiguration;
@@ -38,6 +39,10 @@ import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.http.MediaType;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
@@ -48,6 +53,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
@@ -126,15 +132,36 @@ class AdminReservedAliasSecurityTest {
 
     @Test
     void anAdminListsTheReservedAliases() throws Exception {
-        when(reservedAliasService.list()).thenReturn(List.of(
+        when(reservedAliasService.list(null, PageRequest.of(0, 20))).thenReturn(new PageImpl<>(List.of(
                 new ReservedAliasResponse(null, "actuator", "Used by hrva.cc itself", true, null, null, List.of()),
-                promo()));
+                promo()), PageRequest.of(0, 20), 2));
 
         mockMvc.perform(asAdmin(get(RESERVED_ALIASES)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$[0].builtIn").value(true))
-                .andExpect(jsonPath("$[1].alias").value("promo"))
-                .andExpect(jsonPath("$[1].inUse[0].ownerEmail").value("ana@example.com"));
+                .andExpect(jsonPath("$.content[0].builtIn").value(true))
+                .andExpect(jsonPath("$.content[1].alias").value("promo"))
+                .andExpect(jsonPath("$.content[1].inUse[0].ownerEmail").value("ana@example.com"))
+                .andExpect(jsonPath("$.page.totalElements").value(2));
+    }
+
+    @Test
+    void anAdminSearchesSortsAndPagesTheReservedAliases() throws Exception {
+        final var pageable = PageRequest.of(1, 10, Sort.by(Sort.Order.desc("createdAt")));
+        when(reservedAliasService.list("promo", pageable)).thenReturn(new PageImpl<>(List.of(promo()), pageable, 11));
+
+        mockMvc.perform(asAdmin(get(RESERVED_ALIASES)).param("search", "promo").param("page", "1").param("size", "10").param("sort", "createdAt,desc"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].alias").value("promo"))
+                .andExpect(jsonPath("$.page.number").value(1));
+    }
+
+    @Test
+    void anUnknownSortFieldIsABadRequest() throws Exception {
+        when(reservedAliasService.list(any(), any(Pageable.class))).thenThrow(new InvalidSortException("Sort must be alias or createdAt"));
+
+        mockMvc.perform(asAdmin(get(RESERVED_ALIASES)).param("sort", "createdBy"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("Sort must be alias or createdAt"));
     }
 
     @Test

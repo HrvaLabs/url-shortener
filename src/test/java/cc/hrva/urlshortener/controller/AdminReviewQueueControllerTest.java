@@ -21,6 +21,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.web.PageableHandlerMethodArgumentResolver;
 import org.springframework.http.MediaType;
@@ -81,7 +82,7 @@ class AdminReviewQueueControllerTest {
 
     @Test
     void theQueueListsOpenEntriesWithEveryContractField() throws Exception {
-        when(reviewQueueService.openEntries(any(Pageable.class), isNull(), isNull()))
+        when(reviewQueueService.openEntries(any(Pageable.class), isNull(), isNull(), isNull()))
                 .thenReturn(new PageImpl<>(List.of(ENTRY, ANONYMOUS_ENTRY), PageRequest.of(0, 20), 2));
 
         mockMvc.perform(get("/api/v1/admin/review-queue").principal(SIGNED_IN_ADMIN))
@@ -108,7 +109,7 @@ class AdminReviewQueueControllerTest {
     @Test
     void theQueueFiltersByAReasonSubstringAndPassesThePage() throws Exception {
         final var pageable = ArgumentCaptor.forClass(Pageable.class);
-        when(reviewQueueService.openEntries(pageable.capture(), eq("young"), isNull())).thenReturn(new PageImpl<>(List.of(), PageRequest.of(2, 1), 2));
+        when(reviewQueueService.openEntries(pageable.capture(), eq("young"), isNull(), isNull())).thenReturn(new PageImpl<>(List.of(), PageRequest.of(2, 1), 2));
 
         mockMvc.perform(get("/api/v1/admin/review-queue").param("page", "2").param("size", "1").param("reason", "young").principal(SIGNED_IN_ADMIN))
                 .andExpect(status().isOk());
@@ -118,13 +119,23 @@ class AdminReviewQueueControllerTest {
     }
 
     @Test
+    void theQueueSearchesAndSortsAsAsked() throws Exception {
+        final var pageable = PageRequest.of(0, 20, Sort.by(Sort.Order.asc("flaggedAt")));
+        when(reviewQueueService.openEntries(pageable, null, null, "rhea@")).thenReturn(new PageImpl<>(List.of(ENTRY), pageable, 1));
+
+        mockMvc.perform(get("/api/v1/admin/review-queue").param("search", "rhea@").param("sort", "flaggedAt,asc").principal(SIGNED_IN_ADMIN))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].urlId").value(287));
+    }
+
+    @Test
     void theQueueFiltersByLinkAge() throws Exception {
-        when(reviewQueueService.openEntries(any(Pageable.class), isNull(), eq(7))).thenReturn(new PageImpl<>(List.of(), PageRequest.of(0, 20), 0));
+        when(reviewQueueService.openEntries(any(Pageable.class), isNull(), eq(7), isNull())).thenReturn(new PageImpl<>(List.of(), PageRequest.of(0, 20), 0));
 
         mockMvc.perform(get("/api/v1/admin/review-queue").param("olderThanDays", "7").principal(SIGNED_IN_ADMIN))
                 .andExpect(status().isOk());
 
-        verify(reviewQueueService).openEntries(any(Pageable.class), isNull(), eq(7));
+        verify(reviewQueueService).openEntries(any(Pageable.class), isNull(), eq(7), isNull());
     }
 
     @Test

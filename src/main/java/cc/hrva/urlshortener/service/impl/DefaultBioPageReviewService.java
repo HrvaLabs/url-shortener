@@ -6,10 +6,12 @@ import cc.hrva.urlshortener.model.BioPageReview;
 import cc.hrva.urlshortener.model.enums.BioPageReviewResolution;
 import cc.hrva.urlshortener.model.enums.ReportCategory;
 import cc.hrva.urlshortener.repository.BioPageReviewRepository;
+import cc.hrva.urlshortener.repository.specification.BioPageReviewSpecification;
 import cc.hrva.urlshortener.service.BioPageReviewService;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent;
 import cc.hrva.urlshortener.service.alert.AlertedBioPage;
 import cc.hrva.urlshortener.util.ReviewReasons;
+import cc.hrva.urlshortener.util.SortWhitelist;
 import java.time.Clock;
 import java.time.LocalDateTime;
 import java.util.Collection;
@@ -23,8 +25,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -36,6 +38,10 @@ public class DefaultBioPageReviewService implements BioPageReviewService {
 
     private static final String REASON_SEPARATOR = "\n";
     private static final int MAX_VISITOR_REPORTS_PER_REVIEW = 20;
+    private static final String FLAGGED_AT = "flaggedAt";
+    private static final SortWhitelist REVIEW_SORTS = SortWhitelist.of(FLAGGED_AT)
+            .byDefault(Sort.by(Sort.Order.desc(FLAGGED_AT)))
+            .thenBy(Sort.Order.desc("id"));
 
     private final BioPageReviewRepository bioPageReviewRepository;
     private final ApplicationEventPublisher eventPublisher;
@@ -142,9 +148,13 @@ public class DefaultBioPageReviewService implements BioPageReviewService {
     }
 
     @Override
-    public Page<BioPageReviewEntryResponse> openEntries(final Pageable pageable) {
-        final var unsorted = pageable.isPaged() ? PageRequest.of(pageable.getPageNumber(), pageable.getPageSize()) : Pageable.unpaged();
-        return bioPageReviewRepository.findOpen(unsorted).map(DefaultBioPageReviewService::entryOf);
+    public Page<BioPageReviewEntryResponse> openEntries(final String search, final Pageable pageable) {
+        final var sorted = REVIEW_SORTS.apply(pageable);
+        var spec = BioPageReviewSpecification.isOpen();
+        if (StringUtils.isNotBlank(search)) {
+            spec = spec.and(BioPageReviewSpecification.searchMatches(search.strip()));
+        }
+        return bioPageReviewRepository.findAll(spec, sorted).map(DefaultBioPageReviewService::entryOf);
     }
 
     private static BioPageReviewEntryResponse entryOf(final BioPageReview review) {

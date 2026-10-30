@@ -24,6 +24,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -70,7 +71,7 @@ class AdminEmailLogControllerTest {
 
     @Test
     void withoutAStatusTheWholeLogIsListedFiftyAPage() throws Exception {
-        when(emailLogService.emails(null, FIRST_PAGE)).thenReturn(new PageImpl<>(List.of(SENT, FAILED), FIRST_PAGE, 2));
+        when(emailLogService.emails(null, null, FIRST_PAGE)).thenReturn(new PageImpl<>(List.of(SENT, FAILED), FIRST_PAGE, 2));
 
         mockMvc.perform(get(EMAIL_LOG))
                 .andExpect(status().isOk())
@@ -78,12 +79,12 @@ class AdminEmailLogControllerTest {
                 .andExpect(jsonPath("$.content[0].id").value(87))
                 .andExpect(jsonPath("$.content[1].status").value("FAILED"));
 
-        verify(emailLogService).emails(null, FIRST_PAGE);
+        verify(emailLogService).emails(null, null, FIRST_PAGE);
     }
 
     @Test
     void aStatusKeepsOnlyTheEmailsWithIt() throws Exception {
-        when(emailLogService.emails(EmailStatus.FAILED, FIRST_PAGE)).thenReturn(new PageImpl<>(List.of(FAILED), FIRST_PAGE, 1));
+        when(emailLogService.emails(EmailStatus.FAILED, null, FIRST_PAGE)).thenReturn(new PageImpl<>(List.of(FAILED), FIRST_PAGE, 1));
 
         mockMvc.perform(get(EMAIL_LOG).param("status", "FAILED"))
                 .andExpect(status().isOk())
@@ -95,35 +96,36 @@ class AdminEmailLogControllerTest {
     @ParameterizedTest
     @ValueSource(strings = {"SENDING", "SENT", "FAILED", "RESENT"})
     void everyStatusOfTheLogCanBeKept(final String status) throws Exception {
-        when(emailLogService.emails(eq(EmailStatus.valueOf(status)), any(Pageable.class))).thenReturn(new PageImpl<>(List.of(), FIRST_PAGE, 0));
+        when(emailLogService.emails(eq(EmailStatus.valueOf(status)), isNull(), any(Pageable.class))).thenReturn(new PageImpl<>(List.of(), FIRST_PAGE, 0));
 
         mockMvc.perform(get(EMAIL_LOG).param("status", status))
                 .andExpect(status().isOk());
 
-        verify(emailLogService).emails(eq(EmailStatus.valueOf(status)), any(Pageable.class));
+        verify(emailLogService).emails(eq(EmailStatus.valueOf(status)), isNull(), any(Pageable.class));
     }
 
     @Test
     void thePageAndTheSortArePassedOn() throws Exception {
         final var thirdPage = PageRequest.of(2, 10, Sort.by(Sort.Order.asc("createdAt")));
-        when(emailLogService.emails(EmailStatus.FAILED, thirdPage)).thenReturn(new PageImpl<>(List.of(FAILED), thirdPage, 21));
+        when(emailLogService.emails(EmailStatus.FAILED, "ana@", thirdPage)).thenReturn(new PageImpl<>(List.of(FAILED), thirdPage, 21));
 
-        mockMvc.perform(get(EMAIL_LOG).param("status", "FAILED").param("page", "2").param("size", "10").param("sort", "createdAt,asc"))
+        mockMvc.perform(get(EMAIL_LOG).param("status", "FAILED").param("search", "ana@").param("page", "2").param("size", "10")
+                        .param("sort", "createdAt,asc"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.totalElements").value(21));
 
-        verify(emailLogService).emails(EmailStatus.FAILED, thirdPage);
+        verify(emailLogService).emails(EmailStatus.FAILED, "ana@", thirdPage);
     }
 
     @Test
     void anEmptyStatusListsTheWholeLog() throws Exception {
-        when(emailLogService.emails(null, FIRST_PAGE)).thenReturn(new PageImpl<>(List.of(SENT, FAILED), FIRST_PAGE, 2));
+        when(emailLogService.emails(null, null, FIRST_PAGE)).thenReturn(new PageImpl<>(List.of(SENT, FAILED), FIRST_PAGE, 2));
 
         mockMvc.perform(get(EMAIL_LOG).param("status", ""))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.totalElements").value(2));
 
-        verify(emailLogService).emails(null, FIRST_PAGE);
+        verify(emailLogService).emails(null, null, FIRST_PAGE);
     }
 
     @ParameterizedTest

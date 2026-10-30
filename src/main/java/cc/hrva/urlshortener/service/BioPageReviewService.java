@@ -15,7 +15,7 @@ public interface BioPageReviewService {
     void flag(BioPage page, List<String> reasons);
     void report(BioPage page, ReportCategory category, String details);
     void resolveOpen(BioPage page, BioPageReviewResolution resolution, String resolvedBy);
-    Page<BioPageReviewEntryResponse> openEntries(Pageable pageable);
+    Page<BioPageReviewEntryResponse> openEntries(String search, Pageable pageable);
     long openCount();
     Set<Long> openPageIds(Collection<Long> pageIds);
 

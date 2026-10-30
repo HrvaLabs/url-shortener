@@ -5,8 +5,10 @@ import cc.hrva.urlshortener.dto.ReservedAliasResponse;
 import cc.hrva.urlshortener.service.ReservedAliasService;
 import io.swagger.v3.oas.annotations.Hidden;
 import jakarta.validation.Valid;
-import java.util.List;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.web.PageableDefault;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
@@ -16,6 +18,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @Hidden
@@ -28,8 +31,10 @@ public class AdminReservedAliasController {
 
     @GetMapping
     @PreAuthorize("hasRole('ROLE_ADMIN')")
-    public ResponseEntity<List<ReservedAliasResponse>> fetchReservedAliases() {
-        return ResponseEntity.ok(reservedAliasService.list());
+    public ResponseEntity<Page<ReservedAliasResponse>> fetchReservedAliases(
+            @PageableDefault(size = 20) final Pageable pageable,
+            @RequestParam(name = "search", required = false) final String search) {
+        return ResponseEntity.ok(reservedAliasService.list(search, pageable));
     }
 
     @PostMapping

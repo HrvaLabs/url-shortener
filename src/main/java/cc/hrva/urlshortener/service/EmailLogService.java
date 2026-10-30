@@ -7,6 +7,6 @@ import org.springframework.data.domain.Pageable;
 
 public interface EmailLogService {
 
-    Page<EmailLog> emails(EmailStatus status, Pageable pageable);
+    Page<EmailLog> emails(EmailStatus status, String search, Pageable pageable);
 
 }

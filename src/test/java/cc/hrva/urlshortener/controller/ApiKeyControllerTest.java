@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.controller;
 
+import java.util.List;
 import java.util.Collections;
 import cc.hrva.urlshortener.dto.ApiKeyResponse;
 import cc.hrva.urlshortener.dto.ApiKeyUpdateDto;
@@ -14,6 +15,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.web.PageableHandlerMethodArgumentResolver;
 import org.springframework.http.MediaType;
@@ -64,11 +66,31 @@ class ApiKeyControllerTest {
     void shouldFetchMyApiKeys() throws Exception {
         final var apiKey = ApiKey.builder().id(1L).build();
         final var apiKeyResponses = Collections.singletonList(ApiKeyResponse.from(apiKey));
-        when(apiKeyService.fetchMyApiKeys()).thenReturn(apiKeyResponses);
+        when(apiKeyService.fetchMyApiKeys(null)).thenReturn(apiKeyResponses);
 
         mockMvc.perform(get("/api/v1/api-keys"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.size()").value(1));
+    }
+
+    @Test
+    void myActiveKeysCanBeAskedForAlone() throws Exception {
+        when(apiKeyService.fetchMyApiKeys(true)).thenReturn(List.of(ApiKeyResponse.from(ApiKey.builder().id(2L).active(true).build())));
+
+        mockMvc.perform(get("/api/v1/api-keys").param("active", "true"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].id").value(2));
+    }
+
+    @Test
+    void myInactiveKeysComeAPageAtATime() throws Exception {
+        final var secondPage = PageRequest.of(1, 10);
+        when(apiKeyService.fetchMyInactiveApiKeys(secondPage))
+                .thenReturn(new PageImpl<>(List.of(ApiKeyResponse.from(ApiKey.builder().id(3L).build())), secondPage, 11));
+
+        mockMvc.perform(get("/api/v1/api-keys/inactive").param("page", "1").param("size", "10"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].id").value(3));
     }
 
     @Test
@@ -78,11 +100,23 @@ class ApiKeyControllerTest {
         final var apiKeyList = Collections.singletonList(apiKeyResponse);
         final var pageable = PageRequest.of(0, 20);
         final var apiKeys = new PageImpl<>(apiKeyList, pageable, apiKeyList.size());
-        when(apiKeyService.fetchAllApiKeys(any(Pageable.class))).thenReturn(apiKeys);
+        when(apiKeyService.fetchAllApiKeys(null, null, pageable)).thenReturn(apiKeys);
 
         mockMvc.perform(get("/api/v1/api-keys/all").param("page", "0").param("size", "20"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content.size()").value(1));
+    }
+
+    @Test
+    void allKeysPassTheSearchTheActiveFilterAndTheSortOn() throws Exception {
+        final var pageable = PageRequest.of(2, 10, Sort.by(Sort.Order.desc("apiCallsUsed")));
+        when(apiKeyService.fetchAllApiKeys("ana@", false, pageable)).thenReturn(new PageImpl<>(List.of(), pageable, 0));
+
+        mockMvc.perform(get("/api/v1/api-keys/all").param("page", "2").param("size", "10").param("sort", "apiCallsUsed,desc")
+                        .param("search", "ana@").param("active", "false"))
+                .andExpect(status().isOk());
+
+        verify(apiKeyService).fetchAllApiKeys("ana@", false, pageable);
     }
 
     @Test

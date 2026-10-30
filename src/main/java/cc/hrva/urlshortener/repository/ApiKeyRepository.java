@@ -5,19 +5,31 @@ import java.util.List;
 import java.util.Optional;
 import cc.hrva.urlshortener.model.ApiKey;
 import cc.hrva.urlshortener.model.User;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 @Repository
-public interface ApiKeyRepository extends JpaRepository<ApiKey, Long> {
+public interface ApiKeyRepository extends JpaRepository<ApiKey, Long>, JpaSpecificationExecutor<ApiKey> {
+
+    @Override
+    @EntityGraph(attributePaths = "owner", type = EntityGraph.EntityGraphType.LOAD)
+    Page<ApiKey> findAll(Specification<ApiKey> spec, Pageable pageable);
 
     @EntityGraph(attributePaths = {"owner", "owner.authorities"}, type = EntityGraph.EntityGraphType.LOAD)
     Optional<ApiKey> findApiKeyByKey(String key);
     List<ApiKey> findByOwner(User owner);
+    List<ApiKey> findByOwner(User owner, Sort sort);
+    List<ApiKey> findByOwnerAndActive(User owner, boolean active, Sort sort);
+    Page<ApiKey> findByOwnerAndActiveFalse(User owner, Pageable pageable);
     List<ApiKey> findByOwnerAndActiveTrue(User owner);
     List<ApiKey> findByExpirationDateIsLessThanEqualAndActiveTrue(LocalDateTime createDate);
 

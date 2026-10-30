@@ -1,6 +1,7 @@
 package cc.hrva.urlshortener.service;
 
 import cc.hrva.urlshortener.dto.bio.BioPageReviewEntryResponse;
+import cc.hrva.urlshortener.exception.InvalidSortException;
 import cc.hrva.urlshortener.model.BioPage;
 import cc.hrva.urlshortener.model.BioPageReview;
 import cc.hrva.urlshortener.model.User;
@@ -26,15 +27,19 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.transaction.annotation.Transactional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.tuple;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -303,13 +308,11 @@ class DefaultBioPageReviewServiceTest {
         final var newer = review(2L, NAME_IMITATES_PAYPAL + "\n" + REPORTED_SPAM, true);
         final var older = BioPageReview.builder().id(1L).page(hiddenPage).reasons(BIO_LURE).flaggedAt(NOW.minusHours(1)).build();
         final var asked = ArgumentCaptor.forClass(Pageable.class);
-        when(bioPageReviewRepository.findOpen(asked.capture())).thenReturn(new PageImpl<>(List.of(newer, older), PageRequest.of(1, 2), 5));
+        when(bioPageReviewRepository.findAll(anyReviewSpecification(), asked.capture())).thenReturn(new PageImpl<>(List.of(newer, older), PageRequest.of(1, 2), 5));
 
-        final var entries = bioPageReviewService.openEntries(PageRequest.of(1, 2, Sort.by("reasons")));
+        final var entries = bioPageReviewService.openEntries(null, PageRequest.of(1, 2));
 
-        assertThat(asked.getValue().getPageNumber()).isEqualTo(1);
-        assertThat(asked.getValue().getPageSize()).isEqualTo(2);
-        assertThat(asked.getValue().getSort().isUnsorted()).isTrue();
+        assertThat(asked.getValue()).isEqualTo(PageRequest.of(1, 2, Sort.by(Sort.Order.desc("flaggedAt"), Sort.Order.desc("id"))));
         assertThat(entries.getTotalElements()).isEqualTo(5);
         assertThat(entries.getContent())
                 .extracting(BioPageReviewEntryResponse::reviewId, BioPageReviewEntryResponse::pageId, BioPageReviewEntryResponse::handle,
@@ -318,6 +321,28 @@ class DefaultBioPageReviewServiceTest {
                 .containsExactly(
                         tuple(2L, 12L, "ana", "Ana Horvat", 7L, "ana@example.com", false, List.of(NAME_IMITATES_PAYPAL, REPORTED_SPAM), NOW),
                         tuple(1L, 13L, null, "Bob", 8L, "bob@example.com", true, List.of(BIO_LURE), NOW.minusHours(1)));
+    }
+
+    @Test
+    void openEntriesCanComeOldestFirstWithTheIdBreakingTies() {
+        when(bioPageReviewRepository.findAll(anyReviewSpecification(), any(Pageable.class))).thenReturn(Page.empty());
+
+        bioPageReviewService.openEntries("ana", PageRequest.of(0, 20, Sort.by(Sort.Order.asc("flaggedAt"))));
+
+        verify(bioPageReviewRepository).findAll(anyReviewSpecification(), eq(PageRequest.of(0, 20, Sort.by(Sort.Order.asc("flaggedAt"), Sort.Order.desc("id")))));
+    }
+
+    @Test
+    void openEntriesRefuseToSortByAFieldOffTheList() {
+        assertThatThrownBy(() -> bioPageReviewService.openEntries(null, PageRequest.of(0, 20, Sort.by("reasons"))))
+                .isInstanceOf(InvalidSortException.class)
+                .hasMessage("Sort must be flaggedAt");
+        verify(bioPageReviewRepository, never()).findAll(anyReviewSpecification(), any(Pageable.class));
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Specification<BioPageReview> anyReviewSpecification() {
+        return any(Specification.class);
     }
 
     @Test

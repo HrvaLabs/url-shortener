@@ -6,14 +6,17 @@ import cc.hrva.urlshortener.exception.ApiKeyActiveException;
 import cc.hrva.urlshortener.exception.ApiKeyNotFoundException;
 import cc.hrva.urlshortener.exception.InvalidApiKeyException;
 import cc.hrva.urlshortener.repository.ApiKeyRepository;
+import cc.hrva.urlshortener.repository.specification.ApiKeySpecification;
 import cc.hrva.urlshortener.util.SortWhitelist;
 import cc.hrva.urlshortener.validator.ApiKeyValidator;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Objects;
+import org.apache.commons.lang3.StringUtils;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
+import org.springframework.data.jpa.domain.Specification;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import cc.hrva.urlshortener.dto.ApiKeyResponse;
@@ -33,9 +36,14 @@ public class DefaultApiKeyService implements ApiKeyService {
 
     private static final String REVOKE_BEFORE_DELETING = "Revoke this key before deleting it.";
     private static final String CREATE_DATE = "createDate";
-    private static final SortWhitelist API_KEY_SORTS = SortWhitelist.of(CREATE_DATE, "apiCallsUsed")
+    private static final String ID = "id";
+    private static final Sort NEWEST_FIRST = Sort.by(Sort.Order.desc(CREATE_DATE), Sort.Order.desc(ID));
+    private static final SortWhitelist API_KEY_SORTS = SortWhitelist.of(CREATE_DATE, "apiCallsUsed", "expirationDate")
             .byDefault(Sort.by(Sort.Order.desc(CREATE_DATE)))
-            .thenBy(Sort.Order.desc("id"));
+            .thenBy(Sort.Order.desc(ID));
+    private static final SortWhitelist MY_INACTIVE_KEY_SORTS = SortWhitelist.of(CREATE_DATE)
+            .byDefault(Sort.by(Sort.Order.desc(CREATE_DATE)))
+            .thenBy(Sort.Order.desc(ID));
 
     private final UserService userService;
     private final AppProperties appProperties;
@@ -55,10 +63,16 @@ public class DefaultApiKeyService implements ApiKeyService {
     }
 
     @Override
-    public List<ApiKeyResponse> fetchMyApiKeys() {
-        return userService.getUserFromToken().getApiKeys().stream()
-                .map(ApiKeyResponse::from)
-                .toList();
+    public List<ApiKeyResponse> fetchMyApiKeys(final Boolean active) {
+        final var user = userService.getUserFromToken();
+        final var keys = active == null ? apiKeyRepository.findByOwner(user, NEWEST_FIRST) : apiKeyRepository.findByOwnerAndActive(user, active, NEWEST_FIRST);
+        return keys.stream().map(ApiKeyResponse::from).toList();
+    }
+
+    @Override
+    public Page<ApiKeyResponse> fetchMyInactiveApiKeys(final Pageable pageable) {
+        final var sorted = MY_INACTIVE_KEY_SORTS.apply(pageable);
+        return apiKeyRepository.findByOwnerAndActiveFalse(userService.getUserFromToken(), sorted).map(ApiKeyResponse::from);
     }
 
     @Override
@@ -133,8 +147,16 @@ public class DefaultApiKeyService implements ApiKeyService {
     }
 
     @Override
-    public Page<ApiKeyResponse> fetchAllApiKeys(final Pageable pageable) {
-        return apiKeyRepository.findAll(API_KEY_SORTS.apply(pageable)).map(ApiKeyResponse::from);
+    public Page<ApiKeyResponse> fetchAllApiKeys(final String search, final Boolean active, final Pageable pageable) {
+        final var sorted = API_KEY_SORTS.apply(pageable);
+        var spec = Specification.<ApiKey>unrestricted();
+        if (StringUtils.isNotBlank(search)) {
+            spec = spec.and(ApiKeySpecification.searchMatches(search.strip()));
+        }
+        if (active != null) {
+            spec = spec.and(ApiKeySpecification.hasActive(active));
+        }
+        return apiKeyRepository.findAll(spec, sorted).map(ApiKeyResponse::from);
     }
 
     @Override

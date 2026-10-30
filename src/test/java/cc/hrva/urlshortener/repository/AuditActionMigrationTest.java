@@ -15,6 +15,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.FilterType;
 import org.springframework.data.domain.PageRequest;
+import cc.hrva.urlshortener.repository.specification.AuditLogSpecification;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 import org.springframework.transaction.annotation.Transactional;
@@ -107,10 +108,10 @@ class AuditActionMigrationTest {
 
     @Test
     void theLogFiltersByActionNewestFirst() {
-        final var revoked = auditLogRepository.findAllByAction(AuditAction.REVOKE_URL, PageRequest.of(0, 20, Sort.by(Sort.Order.desc("performedAt"))));
+        final var revoked = auditLogRepository.findAll(AuditLogSpecification.hasAction(AuditAction.REVOKE_URL), PageRequest.of(0, 20, Sort.by(Sort.Order.desc("performedAt"))));
 
         assertThat(revoked.getContent()).extracting(AuditLog::getTargetIdentifier).containsExactly("deactivateUrl", "revokeUrl");
-        assertThat(auditLogRepository.findAllByAction(AuditAction.DELETE_LINK, PageRequest.of(0, 20))).isEmpty();
+        assertThat(auditLogRepository.findAll(AuditLogSpecification.hasAction(AuditAction.DELETE_LINK), PageRequest.of(0, 20))).isEmpty();
     }
 
     @Test

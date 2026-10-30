@@ -22,6 +22,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
@@ -38,11 +39,20 @@ public class ApiKeyController {
         return ResponseEntity.ok(apiKeyService.generateNewApiKey());
     }
 
-    @Operation(summary = "Get my API keys", description = "Retrieve all API keys belonging to the authenticated user. Requires ROLE_USER.")
+    @Operation(summary = "Get my API keys", description = "Retrieve the API keys belonging to the authenticated user, newest first. "
+            + "active=true or active=false keeps only those. Requires ROLE_USER.")
     @GetMapping
     @PreAuthorize("hasRole('ROLE_USER')")
-    public ResponseEntity<List<ApiKeyResponse>> fetchMyApiKeys() {
-        return ResponseEntity.ok(apiKeyService.fetchMyApiKeys());
+    public ResponseEntity<List<ApiKeyResponse>> fetchMyApiKeys(@RequestParam(name = "active", required = false) final Boolean active) {
+        return ResponseEntity.ok(apiKeyService.fetchMyApiKeys(active));
+    }
+
+    @Operation(summary = "Get my inactive API keys", description = "A page of the authenticated user's expired, revoked or used-up keys, newest first. "
+            + "Requires ROLE_USER.")
+    @GetMapping("/inactive")
+    @PreAuthorize("hasRole('ROLE_USER')")
+    public ResponseEntity<Page<ApiKeyResponse>> fetchMyInactiveApiKeys(@PageableDefault(size = 20) final Pageable pageable) {
+        return ResponseEntity.ok(apiKeyService.fetchMyInactiveApiKeys(pageable));
     }
 
     @io.swagger.v3.oas.annotations.Hidden
@@ -50,8 +60,10 @@ public class ApiKeyController {
     @GetMapping("/all")
     @PreAuthorize("hasRole('ROLE_ADMIN')")
     public ResponseEntity<Page<ApiKeyResponse>> fetchAllApiKeys(
-            @PageableDefault(size = 20) final Pageable pageable) {
-        return ResponseEntity.ok(apiKeyService.fetchAllApiKeys(pageable));
+            @PageableDefault(size = 20) final Pageable pageable,
+            @RequestParam(name = "search", required = false) final String search,
+            @RequestParam(name = "active", required = false) final Boolean active) {
+        return ResponseEntity.ok(apiKeyService.fetchAllApiKeys(search, active, pageable));
     }
 
     @io.swagger.v3.oas.annotations.Hidden

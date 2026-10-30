@@ -3,12 +3,15 @@ package cc.hrva.urlshortener.service.impl;
 import cc.hrva.urlshortener.model.EmailLog;
 import cc.hrva.urlshortener.model.enums.EmailStatus;
 import cc.hrva.urlshortener.repository.EmailLogRepository;
+import cc.hrva.urlshortener.repository.specification.EmailLogSpecification;
 import cc.hrva.urlshortener.service.EmailLogService;
 import cc.hrva.urlshortener.util.SortWhitelist;
 import lombok.RequiredArgsConstructor;
+import org.apache.commons.lang3.StringUtils;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -25,9 +28,16 @@ public class DefaultEmailLogService implements EmailLogService {
     private final EmailLogRepository emailLogRepository;
 
     @Override
-    public Page<EmailLog> emails(final EmailStatus status, final Pageable pageable) {
+    public Page<EmailLog> emails(final EmailStatus status, final String search, final Pageable pageable) {
         final var sorted = EMAIL_SORTS.apply(pageable);
-        return status == null ? emailLogRepository.findAll(sorted) : emailLogRepository.findAllByStatus(status.name(), sorted);
+        var spec = Specification.<EmailLog>unrestricted();
+        if (status != null) {
+            spec = spec.and(EmailLogSpecification.hasStatus(status.name()));
+        }
+        if (StringUtils.isNotBlank(search)) {
+            spec = spec.and(EmailLogSpecification.searchMatches(search.strip()));
+        }
+        return emailLogRepository.findAll(spec, sorted);
     }
 
 }

@@ -13,6 +13,10 @@ public record ReservedAliasResponse(Long id, String alias, String reason, boolea
                 reservedAlias.getCreatedAt(), reservedAlias.getCreatedBy(), inUse);
     }
 
+    public ReservedAliasResponse withInUse(final List<InUseLink> links) {
+        return new ReservedAliasResponse(id, alias, reason, builtIn, createdAt, createdBy, links);
+    }
+
     public record InUseLink(Long id, String shortUrl, String ownerEmail, boolean active) {
 
         public static InUseLink from(final Url url) {

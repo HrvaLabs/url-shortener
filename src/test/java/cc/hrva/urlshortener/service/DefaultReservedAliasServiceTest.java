@@ -3,6 +3,7 @@ package cc.hrva.urlshortener.service;
 import cc.hrva.urlshortener.dto.ReservedAliasDto;
 import cc.hrva.urlshortener.dto.ReservedAliasResponse;
 import cc.hrva.urlshortener.dto.ReservedAliasResponse.InUseLink;
+import cc.hrva.urlshortener.exception.InvalidSortException;
 import cc.hrva.urlshortener.exception.ReservedAliasNotFoundException;
 import cc.hrva.urlshortener.exception.ShortUrlAlreadyExistsException;
 import cc.hrva.urlshortener.model.ReservedAlias;
@@ -25,6 +26,8 @@ import org.mockito.Captor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.transaction.support.SimpleTransactionStatus;
 import org.springframework.transaction.support.TransactionCallback;
 import org.springframework.transaction.support.TransactionOperations;
@@ -107,7 +110,7 @@ class DefaultReservedAliasServiceTest {
     }
 
     @Test
-    void listsBuiltInsFirstThenCustomWithTheLinksUsingThem() {
+    void listsCustomFirstThenBuiltInsWithTheLinksUsingThem() {
         final var promo = reservedAlias(3L, "promo", "Kept for the spring campaign");
         final var owner = User.builder().id(8L).email("ana@example.com").build();
         when(reservedAliasRepository.findAllByOrderByAliasAsc()).thenReturn(List.of(promo));
@@ -115,19 +118,19 @@ class DefaultReservedAliasServiceTest {
                 Url.builder().id(41L).shortUrl("Promo").owner(owner).active(true).build(),
                 Url.builder().id(52L).shortUrl("Login").active(false).build()));
 
-        final var entries = reservedAliasService.list();
+        final var entries = reservedAliasService.list(null, PageRequest.of(0, 20)).getContent();
 
         assertThat(entries).extracting(ReservedAliasResponse::alias).containsExactly(
-                "actuator", "anon", "api", "auth", "error", "login", "logout", "mcp", "oauth2", "swagger-ui", "v3", "webjars", "promo");
-        assertThat(entries.subList(0, 12)).allSatisfy(entry -> {
+                "promo", "actuator", "anon", "api", "auth", "error", "login", "logout", "mcp", "oauth2", "swagger-ui", "v3", "webjars");
+        assertThat(entries.subList(1, 13)).allSatisfy(entry -> {
             assertThat(entry.id()).isNull();
             assertThat(entry.builtIn()).isTrue();
             assertThat(entry.reason()).isEqualTo(BUILT_IN_REASON);
             assertThat(entry.createdAt()).isNull();
             assertThat(entry.createdBy()).isNull();
         });
-        assertThat(entries.get(5).inUse()).containsExactly(new InUseLink(52L, "Login", null, false));
-        assertThat(entries.getLast()).isEqualTo(new ReservedAliasResponse(3L, "promo", "Kept for the spring campaign", false, RESERVED_AT, ADMIN,
+        assertThat(entries.get(6).inUse()).containsExactly(new InUseLink(52L, "Login", null, false));
+        assertThat(entries.getFirst()).isEqualTo(new ReservedAliasResponse(3L, "promo", "Kept for the spring campaign", false, RESERVED_AT, ADMIN,
                 List.of(new InUseLink(41L, "Promo", "ana@example.com", true))));
         assertThat(entries).filteredOn(entry -> !List.of("login", "promo").contains(entry.alias()))
                 .allSatisfy(entry -> assertThat(entry.inUse()).isEmpty());
@@ -135,6 +138,81 @@ class DefaultReservedAliasServiceTest {
         verify(urlRepository).findByLowerShortUrlIn(aliases.capture());
         assertThat(aliases.getValue()).containsExactlyInAnyOrder(
                 "actuator", "anon", "api", "auth", "error", "login", "logout", "mcp", "oauth2", "swagger-ui", "v3", "webjars", "promo");
+    }
+
+    @Test
+    void aPageHoldsItsShareOfTheAliasesAndOnlyItsAliasesAreCheckedForLinks() {
+        when(reservedAliasRepository.findAllByOrderByAliasAsc()).thenReturn(List.of(reservedAlias(3L, "promo", "Spring")));
+        when(urlRepository.findByLowerShortUrlIn(anyCollection())).thenReturn(List.of());
+
+        final var page = reservedAliasService.list(null, PageRequest.of(2, 5));
+
+        assertThat(page.getTotalElements()).isEqualTo(13);
+        assertThat(page.getTotalPages()).isEqualTo(3);
+        assertThat(page.getContent()).extracting(ReservedAliasResponse::alias).containsExactly("swagger-ui", "v3", "webjars");
+        verify(urlRepository).findByLowerShortUrlIn(aliases.capture());
+        assertThat(aliases.getValue()).containsExactlyInAnyOrder("swagger-ui", "v3", "webjars");
+    }
+
+    @Test
+    void theSearchMatchesTheAliasTheReasonOrWhoAddedItInAnyCase() {
+        when(reservedAliasRepository.findAllByOrderByAliasAsc()).thenReturn(List.of(
+                reservedAlias(3L, "promo", "Kept for the spring campaign"), reservedAlias(4L, "menu", "Gableci SPRING menu")));
+        when(urlRepository.findByLowerShortUrlIn(anyCollection())).thenReturn(List.of());
+
+        assertThat(reservedAliasService.list(" PRO ", PageRequest.of(0, 20)).getContent()).extracting(ReservedAliasResponse::alias)
+                .containsExactly("promo");
+        assertThat(reservedAliasService.list("spring", PageRequest.of(0, 20)).getContent()).extracting(ReservedAliasResponse::alias)
+                .containsExactly("menu", "promo");
+        assertThat(reservedAliasService.list("hrva.cc ITSELF", PageRequest.of(0, 20)).getTotalElements()).isEqualTo(12);
+        assertThat(reservedAliasService.list("ADMIN@hrva", PageRequest.of(0, 20)).getContent()).extracting(ReservedAliasResponse::alias)
+                .containsExactly("menu", "promo");
+        assertThat(reservedAliasService.list("%", PageRequest.of(0, 20)).getContent()).isEmpty();
+    }
+
+    @Test
+    void anEmptySearchFindsNoLinks() {
+        when(reservedAliasRepository.findAllByOrderByAliasAsc()).thenReturn(List.of());
+
+        assertThat(reservedAliasService.list("nothing like this", PageRequest.of(0, 20)).getContent()).isEmpty();
+
+        verifyNoInteractions(urlRepository);
+    }
+
+    @Test
+    void sortingByAliasMixesBuiltInAndCustomWords() {
+        when(reservedAliasRepository.findAllByOrderByAliasAsc()).thenReturn(List.of(reservedAlias(3L, "promo", "Spring"), reservedAlias(4L, "b2b", "Sales")));
+        when(urlRepository.findByLowerShortUrlIn(anyCollection())).thenReturn(List.of());
+
+        assertThat(reservedAliasService.list(null, PageRequest.of(0, 4, Sort.by("alias"))).getContent()).extracting(ReservedAliasResponse::alias)
+                .containsExactly("actuator", "anon", "api", "auth");
+        assertThat(reservedAliasService.list(null, PageRequest.of(0, 4, Sort.by(Sort.Order.desc("alias")))).getContent())
+                .extracting(ReservedAliasResponse::alias)
+                .containsExactly("webjars", "v3", "swagger-ui", "promo");
+        assertThat(reservedAliasService.list(null, PageRequest.of(1, 4, Sort.by("alias"))).getContent()).extracting(ReservedAliasResponse::alias)
+                .containsExactly("b2b", "error", "login", "logout");
+    }
+
+    @Test
+    void sortingByDateKeepsTheBuiltInWordsLastEitherWay() {
+        final var older = ReservedAlias.builder().id(4L).alias("b2b").reason("Sales").createdAt(RESERVED_AT.minusDays(3)).createdBy(ADMIN).build();
+        when(reservedAliasRepository.findAllByOrderByAliasAsc()).thenReturn(List.of(older, reservedAlias(3L, "promo", "Spring")));
+        when(urlRepository.findByLowerShortUrlIn(anyCollection())).thenReturn(List.of());
+
+        assertThat(reservedAliasService.list(null, PageRequest.of(0, 3, Sort.by(Sort.Order.desc("createdAt")))).getContent())
+                .extracting(ReservedAliasResponse::alias)
+                .containsExactly("promo", "b2b", "actuator");
+        assertThat(reservedAliasService.list(null, PageRequest.of(0, 3, Sort.by(Sort.Order.asc("createdAt")))).getContent())
+                .extracting(ReservedAliasResponse::alias)
+                .containsExactly("b2b", "promo", "actuator");
+    }
+
+    @Test
+    void sortingByAFieldOffTheListIsRefused() {
+        assertThatThrownBy(() -> reservedAliasService.list(null, PageRequest.of(0, 20, Sort.by("createdBy"))))
+                .isInstanceOf(InvalidSortException.class)
+                .hasMessage("Sort must be alias or createdAt");
+        verifyNoInteractions(reservedAliasRepository, urlRepository);
     }
 
     @Test

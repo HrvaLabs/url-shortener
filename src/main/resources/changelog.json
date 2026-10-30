@@ -5,12 +5,21 @@
       "date": "2026-10-30",
       "badge": "Latest",
       "badgeVariant": "default",
-      "summary": "A paged domain rules list for admins.",
+      "summary": "Admin lists are searched, sorted and paged on the server, and searching your links waits until you stop typing.",
       "sections": [
+        {
+          "title": "Links",
+          "icon": "link",
+          "items": [
+            "Searching your links waits until you stop typing, and stays in the address.",
+            "Your API keys are listed newest first, and expired or revoked keys a page at a time."
+          ]
+        },
         {
           "title": "Admin",
           "icon": "wrench",
           "items": [
+            "Every admin list can be searched and sorted, page by page.",
             "Domain rules are listed page by page, with a search box."
           ]
         }

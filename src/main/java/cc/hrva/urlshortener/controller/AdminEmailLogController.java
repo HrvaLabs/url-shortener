@@ -33,8 +33,9 @@ public class AdminEmailLogController {
     @PreAuthorize("hasRole('ROLE_ADMIN')")
     public ResponseEntity<Page<EmailLog>> getEmailLogs(
             @PageableDefault(size = 50) final Pageable pageable,
-            @RequestParam(name = "status", required = false) final EmailStatus status) {
-        return ResponseEntity.ok(emailLogService.emails(status, pageable));
+            @RequestParam(name = "status", required = false) final EmailStatus status,
+            @RequestParam(name = "search", required = false) final String search) {
+        return ResponseEntity.ok(emailLogService.emails(status, search, pageable));
     }
 
     @PostMapping("/{id}/resend")

@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.service;
 
+import cc.hrva.urlshortener.dto.AuditLogFilter;
 import cc.hrva.urlshortener.exception.InvalidSortException;
 import cc.hrva.urlshortener.model.AuditLog;
 import cc.hrva.urlshortener.model.enums.AuditAction;
@@ -14,15 +15,21 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
+import org.springframework.data.jpa.domain.Specification;
+import java.time.LocalDate;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class DefaultAuditLogServiceTest {
+
+    private static final Sort NEWEST_FIRST = Sort.by(Sort.Order.desc("performedAt"), Sort.Order.desc("id"));
 
     @Mock
     private AuditLogRepository auditLogRepository;
@@ -58,30 +65,30 @@ class DefaultAuditLogServiceTest {
     }
 
     @Test
-    void theLogListsEveryActionWithoutAFilterAndOnlyThatActionWithOneNewestFirst() {
-        final var newestFirst = PageRequest.of(0, 50, Sort.by(Sort.Order.desc("performedAt"), Sort.Order.desc("id")));
+    @SuppressWarnings("unchecked")
+    void theLogComesNewestFirstWithTheIdBreakingTies() {
         final Page<AuditLog> everything = Page.empty();
-        final Page<AuditLog> resolved = Page.empty();
-        when(auditLogRepository.findAll(newestFirst)).thenReturn(everything);
-        when(auditLogRepository.findAllByAction(AuditAction.RESOLVE_REVIEW, newestFirst)).thenReturn(resolved);
+        when(auditLogRepository.findAll(any(Specification.class), eq(PageRequest.of(0, 50, NEWEST_FIRST)))).thenReturn(everything);
 
-        assertThat(auditLogService.getAuditLogs(PageRequest.of(0, 50), null)).isSameAs(everything);
-        assertThat(auditLogService.getAuditLogs(PageRequest.of(0, 50), AuditAction.RESOLVE_REVIEW)).isSameAs(resolved);
+        assertThat(auditLogService.getAuditLogs(PageRequest.of(0, 50), AuditLogFilter.NONE)).isSameAs(everything);
+        assertThat(auditLogService.getAuditLogs(PageRequest.of(0, 50),
+                new AuditLogFilter(AuditAction.RESOLVE_REVIEW, "rhea", LocalDate.of(2026, 10, 1), LocalDate.of(2026, 10, 29)))).isSameAs(everything);
     }
 
     @Test
+    @SuppressWarnings("unchecked")
     void theLogCanBeReadOldestFirst() {
         final var oldestFirst = PageRequest.of(1, 50, Sort.by(Sort.Order.asc("performedAt"), Sort.Order.desc("id")));
-        when(auditLogRepository.findAll(oldestFirst)).thenReturn(Page.empty());
+        when(auditLogRepository.findAll(any(Specification.class), eq(oldestFirst))).thenReturn(Page.empty());
 
-        auditLogService.getAuditLogs(PageRequest.of(1, 50, Sort.by(Sort.Order.asc("performedAt"))), null);
+        auditLogService.getAuditLogs(PageRequest.of(1, 50, Sort.by(Sort.Order.asc("performedAt"))), AuditLogFilter.NONE);
 
-        verify(auditLogRepository).findAll(oldestFirst);
+        verify(auditLogRepository).findAll(any(Specification.class), eq(oldestFirst));
     }
 
     @Test
     void theLogRefusesToSortByAFieldOffTheList() {
-        assertThatThrownBy(() -> auditLogService.getAuditLogs(PageRequest.of(0, 50, Sort.by("createDate")), null))
+        assertThatThrownBy(() -> auditLogService.getAuditLogs(PageRequest.of(0, 50, Sort.by("createDate")), AuditLogFilter.NONE))
                 .isInstanceOf(InvalidSortException.class)
                 .hasMessage("Sort must be performedAt");
         verifyNoInteractions(auditLogRepository);

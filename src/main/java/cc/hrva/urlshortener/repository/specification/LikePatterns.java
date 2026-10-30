@@ -12,7 +12,15 @@ final class LikePatterns {
     private LikePatterns() {}
 
     static String containing(final String keyword) {
-        return "%" + SPECIAL.matcher(keyword.toLowerCase(Locale.ROOT)).replaceAll("\\\\$0") + "%";
+        return "%" + escaped(keyword) + "%";
+    }
+
+    static String startingWith(final String keyword) {
+        return escaped(keyword) + "%";
+    }
+
+    private static String escaped(final String keyword) {
+        return SPECIAL.matcher(keyword.toLowerCase(Locale.ROOT)).replaceAll("\\\\$0");
     }
 
 }

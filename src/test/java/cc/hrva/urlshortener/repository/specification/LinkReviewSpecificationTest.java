@@ -2,6 +2,7 @@ package cc.hrva.urlshortener.repository.specification;
 
 import cc.hrva.urlshortener.model.LinkReview;
 import cc.hrva.urlshortener.model.Url;
+import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.enums.ReviewResolution;
 import cc.hrva.urlshortener.repository.LinkReviewRepository;
 import jakarta.persistence.EntityManager;
@@ -55,7 +56,7 @@ class LinkReviewSpecificationTest {
     }
 
     private void persistReview(final String shortUrl, final String reasons, final boolean resolved) {
-        final var url = Url.builder().shortUrl(shortUrl).longUrl("https://" + shortUrl + ".example").build();
+        final var url = Url.builder().shortUrl(shortUrl).longUrl("https://" + shortUrl.replace("\\", "-") + ".example").build();
         entityManager.persist(url);
         links.put(shortUrl, url);
         entityManager.persist(LinkReview.builder()
@@ -118,6 +119,34 @@ class LinkReviewSpecificationTest {
                 .and(LinkReviewSpecification.linkCreatedBefore(cutoff))
                 .and(LinkReviewSpecification.reasonContains("login"))))
                 .containsExactly("v0DB3");
+    }
+
+    @Test
+    void theSearchMatchesTheDestinationTheShortLinkOrTheOwnerEmailInAnyCase() {
+        final var owner = User.builder().email("Rhea@Gmail.com").password("password123").apiKeySlots(1L).active(true).build();
+        entityManager.persist(owner);
+        links.get("v0DB3").setOwner(owner);
+        links.get("v0DB3").setLongUrl("https://findfavoritedate.life/?u=f6yp608");
+        entityManager.flush();
+
+        assertThat(shortUrls(LinkReviewSpecification.searchMatches("FINDFAVORITE"))).containsExactly("v0DB3");
+        assertThat(shortUrls(LinkReviewSpecification.searchMatches("rhea@gmail"))).containsExactly("v0DB3");
+        assertThat(shortUrls(LinkReviewSpecification.searchMatches("njuskaio_v"))).containsExactly("njuskaio_verify");
+        assertThat(shortUrls(LinkReviewSpecification.isOpen().and(LinkReviewSpecification.searchMatches(".example"))))
+                .containsExactly("njuskaio_verify");
+        assertThat(shortUrls(LinkReviewSpecification.searchMatches("nobody"))).isEmpty();
+    }
+
+    @Test
+    void theSearchTreatsPercentUnderscoreAndBackslashAsPlainText() {
+        persistReview("a_b", "spam", false);
+        persistReview("axb", "spam", false);
+        persistReview("a\\b", "spam", false);
+        entityManager.flush();
+
+        assertThat(shortUrls(LinkReviewSpecification.searchMatches("a_b"))).containsExactly("a_b");
+        assertThat(shortUrls(LinkReviewSpecification.searchMatches("%"))).isEmpty();
+        assertThat(shortUrls(LinkReviewSpecification.searchMatches("a\\b"))).containsExactly("a\\b");
     }
 
     @SpringBootConfiguration

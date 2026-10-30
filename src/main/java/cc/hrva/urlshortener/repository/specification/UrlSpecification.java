@@ -74,7 +74,7 @@ public final class UrlSpecification {
                         cb.greaterThanOrEqualTo(root.get("expirationDate"), LocalDateTime.now()));
     }
 
-    private static Predicate anyFieldContainsASpellingOf(final String keyword, final CriteriaBuilder cb, final List<Expression<String>> fields) {
+    static Predicate anyFieldContainsASpellingOf(final String keyword, final CriteriaBuilder cb, final List<Expression<String>> fields) {
         return cb.or(spellingsOf(keyword).stream()
                 .map(LikePatterns::containing)
                 .flatMap(pattern -> fields.stream().map(field -> cb.like(cb.lower(field), pattern, LikePatterns.ESCAPE)))

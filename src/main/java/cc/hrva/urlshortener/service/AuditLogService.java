@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.service;
 
+import cc.hrva.urlshortener.dto.AuditLogFilter;
 import cc.hrva.urlshortener.model.AuditLog;
 import cc.hrva.urlshortener.model.enums.AuditAction;
 import org.springframework.data.domain.Page;
@@ -9,6 +10,6 @@ public interface AuditLogService {
 
     void log(String performedBy, AuditAction action, String targetType, String targetIdentifier, String details);
     void logFailure(String performedBy, AuditAction action, String targetType, String targetIdentifier, String details);
-    Page<AuditLog> getAuditLogs(Pageable pageable, AuditAction action);
+    Page<AuditLog> getAuditLogs(Pageable pageable, AuditLogFilter filter);
 
 }

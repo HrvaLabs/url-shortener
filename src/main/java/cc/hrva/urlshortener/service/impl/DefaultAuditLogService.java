@@ -1,8 +1,10 @@
 package cc.hrva.urlshortener.service.impl;
 
+import cc.hrva.urlshortener.dto.AuditLogFilter;
 import cc.hrva.urlshortener.model.AuditLog;
 import cc.hrva.urlshortener.model.enums.AuditAction;
 import cc.hrva.urlshortener.repository.AuditLogRepository;
+import cc.hrva.urlshortener.repository.specification.AuditLogSpecification;
 import cc.hrva.urlshortener.service.AuditLogService;
 import cc.hrva.urlshortener.util.SortWhitelist;
 import lombok.RequiredArgsConstructor;
@@ -10,6 +12,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
+import org.springframework.data.jpa.domain.Specification;
+import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -40,9 +44,22 @@ public class DefaultAuditLogService implements AuditLogService {
     }
 
     @Override
-    public Page<AuditLog> getAuditLogs(final Pageable pageable, final AuditAction action) {
+    public Page<AuditLog> getAuditLogs(final Pageable pageable, final AuditLogFilter filter) {
         final var sorted = AUDIT_SORTS.apply(pageable);
-        return action == null ? auditLogRepository.findAll(sorted) : auditLogRepository.findAllByAction(action, sorted);
+        var spec = Specification.<AuditLog>unrestricted();
+        if (filter.action() != null) {
+            spec = spec.and(AuditLogSpecification.hasAction(filter.action()));
+        }
+        if (StringUtils.isNotBlank(filter.search())) {
+            spec = spec.and(AuditLogSpecification.searchMatches(filter.search().strip()));
+        }
+        if (filter.from() != null) {
+            spec = spec.and(AuditLogSpecification.performedOnOrAfter(filter.from()));
+        }
+        if (filter.to() != null) {
+            spec = spec.and(AuditLogSpecification.performedOnOrBefore(filter.to()));
+        }
+        return auditLogRepository.findAll(spec, sorted);
     }
 
     private void save(final String performedBy, final AuditAction action, final boolean failed, final String targetType,

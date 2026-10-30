@@ -12,6 +12,9 @@ import cc.hrva.urlshortener.repository.ReservedAliasRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.service.AuditLogService;
 import cc.hrva.urlshortener.service.ReservedAliasService;
+import cc.hrva.urlshortener.util.InMemoryPages;
+import cc.hrva.urlshortener.util.SortWhitelist;
+import java.time.LocalDateTime;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.List;
@@ -23,6 +26,9 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -39,6 +45,11 @@ public class DefaultReservedAliasService implements ReservedAliasService {
     private static final String RESERVED_ALIAS_NOT_FOUND = "Reserved alias not found";
     private static final String TARGET_TYPE = "ReservedAlias";
     private static final String REASON_PREFIX = "reason: ";
+    private static final String ALIAS = "alias";
+    private static final String CREATED_AT = "createdAt";
+    private static final SortWhitelist ALIAS_SORTS = SortWhitelist.of(ALIAS, CREATED_AT);
+    private static final Comparator<ReservedAliasResponse> BY_ALIAS = Comparator.comparing(ReservedAliasResponse::alias);
+    private static final Comparator<ReservedAliasResponse> CUSTOM_FIRST = Comparator.comparing(ReservedAliasResponse::builtIn).thenComparing(BY_ALIAS);
 
     private final ReservedAliasRepository reservedAliasRepository;
     private final UrlRepository urlRepository;
@@ -55,15 +66,44 @@ public class DefaultReservedAliasService implements ReservedAliasService {
     }
 
     @Override
-    public List<ReservedAliasResponse> list() {
-        final var customAliases = reservedAliasRepository.findAllByOrderByAliasAsc();
-        final var aliases = Stream.concat(BUILT_IN_ALIASES.stream(), customAliases.stream().map(ReservedAlias::getAlias)).toList();
-        final var linksByAlias = linksUsing(aliases);
-        return Stream.concat(
-                        BUILT_IN_ALIASES.stream().map(alias -> builtInEntry(alias, linksByAlias.getOrDefault(alias, List.of()))),
-                        customAliases.stream()
-                                .map(entry -> ReservedAliasResponse.from(entry, linksByAlias.getOrDefault(entry.getAlias(), List.of()))))
+    public Page<ReservedAliasResponse> list(final String search, final Pageable pageable) {
+        final var order = orderOf(ALIAS_SORTS.sortOf(pageable.getSort()));
+        final var term = StringUtils.isBlank(search) ? null : search.strip().toLowerCase(Locale.ROOT);
+        final var entries = Stream.concat(
+                        BUILT_IN_ALIASES.stream().map(alias -> builtInEntry(alias, List.of())),
+                        reservedAliasRepository.findAllByOrderByAliasAsc().stream().map(entry -> ReservedAliasResponse.from(entry, List.of())))
+                .filter(entry -> term == null || contains(entry.alias(), term) || contains(entry.reason(), term) || contains(entry.createdBy(), term))
+                .sorted(order)
                 .toList();
+        final var page = InMemoryPages.of(entries, pageable);
+        if (page.isEmpty()) {
+            return page;
+        }
+        final var linksByAlias = linksUsing(page.map(ReservedAliasResponse::alias).getContent());
+        return page.map(entry -> entry.withInUse(linksByAlias.getOrDefault(entry.alias(), List.of())));
+    }
+
+    private static Comparator<ReservedAliasResponse> orderOf(final Sort sort) {
+        if (sort.isUnsorted()) {
+            return CUSTOM_FIRST;
+        }
+        return sort.stream()
+                .map(DefaultReservedAliasService::comparatorOf)
+                .reduce(Comparator::thenComparing)
+                .orElseThrow()
+                .thenComparing(BY_ALIAS);
+    }
+
+    private static Comparator<ReservedAliasResponse> comparatorOf(final Sort.Order order) {
+        if (CREATED_AT.equals(order.getProperty())) {
+            final Comparator<LocalDateTime> byDate = order.isAscending() ? Comparator.naturalOrder() : Comparator.reverseOrder();
+            return Comparator.comparing(ReservedAliasResponse::createdAt, Comparator.nullsLast(byDate));
+        }
+        return order.isAscending() ? BY_ALIAS : BY_ALIAS.reversed();
+    }
+
+    private static boolean contains(final String value, final String term) {
+        return value != null && value.toLowerCase(Locale.ROOT).contains(term);
     }
 
     @Override

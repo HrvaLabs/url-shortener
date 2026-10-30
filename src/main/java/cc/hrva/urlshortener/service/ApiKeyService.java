@@ -16,8 +16,9 @@ public interface ApiKeyService {
     ApiKeyResponse activateApiKey(Long id);
     void deleteApiKey(Long id);
     int deleteMyInactiveApiKeys();
-    List<ApiKeyResponse> fetchMyApiKeys();
-    Page<ApiKeyResponse> fetchAllApiKeys(Pageable pageable);
+    List<ApiKeyResponse> fetchMyApiKeys(Boolean active);
+    Page<ApiKeyResponse> fetchMyInactiveApiKeys(Pageable pageable);
+    Page<ApiKeyResponse> fetchAllApiKeys(String search, Boolean active, Pageable pageable);
     ApiKey findApiKeyByKey(String key);
     ApiKey fetchApiKeyByKey(String key);
     void recordUse(Long apiKeyId);

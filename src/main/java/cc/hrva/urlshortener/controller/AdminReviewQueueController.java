@@ -39,8 +39,9 @@ public class AdminReviewQueueController {
     public ResponseEntity<Page<ReviewEntryResponse>> fetchQueue(
             @PageableDefault(size = 20) final Pageable pageable,
             @RequestParam(name = "reason", required = false) final String reason,
-            @RequestParam(name = "olderThanDays", required = false) final Integer olderThanDays) {
-        return ResponseEntity.ok(reviewQueueService.openEntries(pageable, reason, olderThanDays));
+            @RequestParam(name = "olderThanDays", required = false) final Integer olderThanDays,
+            @RequestParam(name = "search", required = false) final String search) {
+        return ResponseEntity.ok(reviewQueueService.openEntries(pageable, reason, olderThanDays, search));
     }
 
     @PostMapping("/{urlId}/resolve")

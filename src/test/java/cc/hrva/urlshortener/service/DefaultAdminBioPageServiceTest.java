@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.service;
 
+import cc.hrva.urlshortener.exception.InvalidSortException;
 import cc.hrva.urlshortener.dto.ReservedAliasDto;
 import cc.hrva.urlshortener.dto.bio.AdminBioPageResponse;
 import cc.hrva.urlshortener.dto.bio.BioHandleDto;
@@ -55,6 +56,7 @@ import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.transaction.annotation.Transactional;
 
+import static org.mockito.ArgumentMatchers.eq;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.tuple;
@@ -464,16 +466,30 @@ class DefaultAdminBioPageServiceTest {
     }
 
     @Test
-    void searchIsNewestFirstWhateverTheCallerAsks() {
+    void searchIsNewestFirstWithoutASort() {
         when(bioPageRepository.findAll(any(Specification.class), any(Pageable.class))).thenReturn(Page.empty());
 
-        adminBioPageService.search(null, true, PageRequest.of(2, 10, Sort.by("handle")));
+        adminBioPageService.search(null, true, PageRequest.of(2, 10));
 
-        final var pageable = ArgumentCaptor.forClass(Pageable.class);
-        verify(bioPageRepository).findAll(any(Specification.class), pageable.capture());
-        assertThat(pageable.getValue().getPageNumber()).isEqualTo(2);
-        assertThat(pageable.getValue().getPageSize()).isEqualTo(10);
-        assertThat(pageable.getValue().getSort()).isEqualTo(Sort.by(Sort.Order.desc("createdAt"), Sort.Order.desc("id")));
+        verify(bioPageRepository).findAll(any(Specification.class), eq(PageRequest.of(2, 10, Sort.by(Sort.Order.desc("createdAt"), Sort.Order.desc("id")))));
+    }
+
+    @Test
+    void searchSortsByHandleWithPagesWithoutOneLastAndTheNewestBreakingTies() {
+        when(bioPageRepository.findAll(any(Specification.class), any(Pageable.class))).thenReturn(Page.empty());
+
+        adminBioPageService.search(null, false, PageRequest.of(0, 20, Sort.by(Sort.Order.desc("handle"))));
+
+        verify(bioPageRepository).findAll(any(Specification.class), eq(PageRequest.of(0, 20,
+                Sort.by(Sort.Order.desc("handle").nullsLast(), Sort.Order.desc("createdAt"), Sort.Order.desc("id")))));
+    }
+
+    @Test
+    void searchRefusesToSortByAFieldOffTheList() {
+        assertThatThrownBy(() -> adminBioPageService.search(null, false, PageRequest.of(0, 20, Sort.by("owner.password"))))
+                .isInstanceOf(InvalidSortException.class)
+                .hasMessage("Sort must be createdAt or handle");
+        verifyNoInteractions(bioPageRepository);
     }
 
     @Test

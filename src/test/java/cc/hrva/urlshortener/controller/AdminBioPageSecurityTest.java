@@ -48,6 +48,7 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.MediaType;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -262,9 +263,9 @@ class AdminBioPageSecurityTest {
 
     @Test
     void anAdminListsTheOpenBioPageReviews() throws Exception {
-        when(bioPageReviewService.openEntries(any(Pageable.class))).thenAnswer(invocation -> new PageImpl<>(List.of(
+        when(bioPageReviewService.openEntries(any(), any(Pageable.class))).thenAnswer(invocation -> new PageImpl<>(List.of(
                 new BioPageReviewEntryResponse(3L, 12L, "ana", "Ana Horvat", 7L, "ana@example.com", false, List.of("name imitates paypal"),
-                        LocalDateTime.of(2026, 10, 26, 9, 0))), invocation.getArgument(0), 1));
+                        LocalDateTime.of(2026, 10, 26, 9, 0))), invocation.getArgument(1), 1));
 
         mockMvc.perform(asAdmin(get(REVIEWS)))
                 .andExpect(status().isOk())
@@ -273,7 +274,17 @@ class AdminBioPageSecurityTest {
                 .andExpect(jsonPath("$.content[0].reasons[0]").value("name imitates paypal"))
                 .andExpect(jsonPath("$.page.totalElements").value(1));
 
-        verify(bioPageReviewService).openEntries(PageRequest.of(0, 20));
+        verify(bioPageReviewService).openEntries(null, PageRequest.of(0, 20));
+    }
+
+    @Test
+    void anAdminSearchesAndSortsTheOpenBioPageReviews() throws Exception {
+        when(bioPageReviewService.openEntries(any(), any(Pageable.class))).thenAnswer(invocation -> new PageImpl<>(List.of(), invocation.getArgument(1), 0));
+
+        mockMvc.perform(asAdmin(get(REVIEWS)).param("search", "ana").param("sort", "flaggedAt,asc"))
+                .andExpect(status().isOk());
+
+        verify(bioPageReviewService).openEntries("ana", PageRequest.of(0, 20, Sort.by(Sort.Order.asc("flaggedAt"))));
     }
 
     @Test

@@ -97,7 +97,7 @@ class AdminPageQueriesTest {
         final var reviewQueueService = new DefaultReviewQueueService(linkReviewRepository, urlRepository, scammerSignalService, Clock.systemUTC(),
                 mock(ApplicationEventPublisher.class));
 
-        final var entries = reviewQueueService.openEntries(PageRequest.of(0, 10), null, null);
+        final var entries = reviewQueueService.openEntries(PageRequest.of(0, 10), null, null, null);
 
         assertThat(entries.getContent()).hasSize(10);
         assertThat(entries.getTotalElements()).isEqualTo(LINKS);
@@ -117,7 +117,7 @@ class AdminPageQueriesTest {
         final var reviewQueueService = new DefaultReviewQueueService(linkReviewRepository, urlRepository, scammerSignalService, Clock.systemUTC(),
                 mock(ApplicationEventPublisher.class));
 
-        final var entries = reviewQueueService.openEntries(PageRequest.of(0, 10), null, null);
+        final var entries = reviewQueueService.openEntries(PageRequest.of(0, 10), null, null, null);
 
         assertThat(entries.getContent()).extracting(ReviewEntryResponse::domain).contains("go.example.com", "go.example.org");
         assertThat(statistics.getPrepareStatementCount()).isEqualTo(3);

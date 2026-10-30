@@ -20,6 +20,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @Hidden
@@ -31,11 +32,14 @@ public class AdminBioPageReviewController {
     private final BioPageReviewService bioPageReviewService;
     private final AdminBioPageService adminBioPageService;
 
-    @Operation(summary = "Open bio page reviews", description = "Newest first, each with the page, its owner and every reason.")
+    @Operation(summary = "Open bio page reviews", description = "Newest first unless sorted by flaggedAt, each with the page, its owner and every reason; "
+            + "search matches the handle, the display name or the owner's email.")
     @GetMapping
     @PreAuthorize("hasRole('ROLE_ADMIN')")
-    public ResponseEntity<Page<BioPageReviewEntryResponse>> fetchBioPageReviews(@PageableDefault(size = 20) final Pageable pageable) {
-        return ResponseEntity.ok(bioPageReviewService.openEntries(pageable));
+    public ResponseEntity<Page<BioPageReviewEntryResponse>> fetchBioPageReviews(
+            @PageableDefault(size = 20) final Pageable pageable,
+            @RequestParam(name = "search", required = false) final String search) {
+        return ResponseEntity.ok(bioPageReviewService.openEntries(search, pageable));
     }
 
     @Operation(summary = "Resolve a bio page review", description = "OK leaves the page up; HIDE hides it with the reason. Closes every open review of the page.")

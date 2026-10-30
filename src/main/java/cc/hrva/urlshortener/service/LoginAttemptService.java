@@ -1,5 +1,9 @@
 package cc.hrva.urlshortener.service;
 
+import cc.hrva.urlshortener.dto.LoginAttemptResponse;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+
 public interface LoginAttemptService {
 
     String TWO_FACTOR_PREFIX = "2fa:";
@@ -11,6 +15,7 @@ public interface LoginAttemptService {
     boolean isBlocked(String key);
     void loginSucceeded(String key);
     java.util.Map<String, Integer> getLoginAttempts();
+    Page<LoginAttemptResponse> attempts(String search, Pageable pageable);
     void clearLoginAttempts();
 
 }

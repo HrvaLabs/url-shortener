@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.service;
 
+import cc.hrva.urlshortener.exception.InvalidSortException;
 import cc.hrva.urlshortener.dto.ReviewEntryResponse;
 import cc.hrva.urlshortener.model.CustomDomain;
 import cc.hrva.urlshortener.model.LinkReview;
@@ -41,6 +42,7 @@ import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.json.JsonMapper;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.tuple;
 import static org.assertj.core.api.Assertions.within;
 import static org.mockito.ArgumentMatchers.any;
@@ -303,7 +305,7 @@ class DefaultReviewQueueServiceTest {
         when(linkReviewRepository.findAll(any(Specification.class), any(Pageable.class))).thenReturn(new PageImpl<>(List.of(review)));
         when(scammerSignalService.possibleScammerIds()).thenReturn(Set.of(27L));
 
-        final var entries = reviewQueueService.openEntries(PageRequest.of(0, 20), null, null);
+        final var entries = reviewQueueService.openEntries(PageRequest.of(0, 20), null, null, null);
 
         assertThat(entries.getContent()).containsExactly(new ReviewEntryResponse(287L, "v0DB3", "https://findfavoritedate.life/?u=f6yp608",
                 "findfavoritedate.life", "findfavoritedate.life", 27L, "rhea@gmail.com", LocalDateTime.of(2026, 10, 19, 12, 0), true, LocalDateTime.of(2026, 10, 20, 7, 15), List.of(YOUNG, LURE),
@@ -318,7 +320,7 @@ class DefaultReviewQueueServiceTest {
         final var review = LinkReview.builder().id(5L).url(link).reasons(YOUNG).flaggedAt(LocalDateTime.of(2026, 10, 20, 7, 16)).build();
         when(linkReviewRepository.findAll(any(Specification.class), any(Pageable.class))).thenReturn(new PageImpl<>(List.of(review)));
 
-        final var entries = reviewQueueService.openEntries(PageRequest.of(0, 20), null, null);
+        final var entries = reviewQueueService.openEntries(PageRequest.of(0, 20), null, null, null);
 
         assertThat(entries.getContent()).extracting(ReviewEntryResponse::domain).containsExactly("go.example.com");
         assertThat(JsonMapper.builder().build().writeValueAsString(entries.getContent().getFirst())).contains("\"domain\":\"go.example.com\"");
@@ -333,7 +335,7 @@ class DefaultReviewQueueServiceTest {
                 LinkReview.builder().id(8L).url(subdomain).reasons(LURE).build(),
                 LinkReview.builder().id(9L).url(unreadable).reasons(LURE).build())));
 
-        final var entries = reviewQueueService.openEntries(PageRequest.of(0, 20), null, null);
+        final var entries = reviewQueueService.openEntries(PageRequest.of(0, 20), null, null, null);
 
         assertThat(entries.getContent())
                 .extracting(ReviewEntryResponse::host, ReviewEntryResponse::registrableDomain)
@@ -349,7 +351,7 @@ class DefaultReviewQueueServiceTest {
         when(linkReviewRepository.findAll(any(Specification.class), any(Pageable.class))).thenReturn(new PageImpl<>(reviews));
         when(scammerSignalService.possibleScammerIds()).thenReturn(Set.of(27L));
 
-        final var entries = reviewQueueService.openEntries(PageRequest.of(0, 20), null, null);
+        final var entries = reviewQueueService.openEntries(PageRequest.of(0, 20), null, null, null);
 
         assertThat(entries.getContent()).extracting(ReviewEntryResponse::possibleScammer).containsExactly(true, false, true, false);
         verify(scammerSignalService, Mockito.times(1)).possibleScammerIds();
@@ -360,7 +362,7 @@ class DefaultReviewQueueServiceTest {
     void anAnonymousEntryHasNoOwnerAndAPageWithoutOwnersAsksNothingAboutScammers() {
         when(linkReviewRepository.findAll(any(Specification.class), any(Pageable.class))).thenReturn(new PageImpl<>(List.of(openReview(4L, null))));
 
-        final var entry = reviewQueueService.openEntries(PageRequest.of(0, 1), null, null).getContent().getFirst();
+        final var entry = reviewQueueService.openEntries(PageRequest.of(0, 1), null, null, null).getContent().getFirst();
 
         assertThat(entry.ownerId()).isNull();
         assertThat(entry.ownerEmail()).isNull();
@@ -371,15 +373,34 @@ class DefaultReviewQueueServiceTest {
 
     @Test
     @SuppressWarnings("unchecked")
-    void queueEntriesComeNewestFirstWhateverSortIsAsked() {
+    void queueEntriesComeNewestFirstWithoutASort() {
         final var sent = ArgumentCaptor.forClass(Pageable.class);
         when(linkReviewRepository.findAll(any(Specification.class), sent.capture())).thenReturn(new PageImpl<>(List.of()));
 
-        reviewQueueService.openEntries(PageRequest.of(1, 5, Sort.by("reasons")), null, null);
+        reviewQueueService.openEntries(PageRequest.of(1, 5), null, null, null);
 
         assertThat(sent.getValue().getPageNumber()).isEqualTo(1);
         assertThat(sent.getValue().getPageSize()).isEqualTo(5);
         assertThat(sent.getValue().getSort()).isEqualTo(Sort.by(Sort.Order.desc("flaggedAt"), Sort.Order.desc("id")));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void queueEntriesCanComeOldestFirstWithTheIdBreakingTies() {
+        final var sent = ArgumentCaptor.forClass(Pageable.class);
+        when(linkReviewRepository.findAll(any(Specification.class), sent.capture())).thenReturn(new PageImpl<>(List.of()));
+
+        reviewQueueService.openEntries(PageRequest.of(0, 20, Sort.by(Sort.Order.asc("flaggedAt"))), null, null, "rhea");
+
+        assertThat(sent.getValue().getSort()).isEqualTo(Sort.by(Sort.Order.asc("flaggedAt"), Sort.Order.desc("id")));
+    }
+
+    @Test
+    void queueEntriesRefuseToSortByAFieldOffTheList() {
+        assertThatThrownBy(() -> reviewQueueService.openEntries(PageRequest.of(0, 20, Sort.by("reasons")), null, null, null))
+                .isInstanceOf(InvalidSortException.class)
+                .hasMessage("Sort must be flaggedAt");
+        verifyNoInteractions(linkReviewRepository);
     }
 
     @Test
@@ -389,7 +410,7 @@ class DefaultReviewQueueServiceTest {
         final var cutoff = LocalDateTime.now(clock.withZone(ZoneId.systemDefault())).minusDays(7);
 
         try (final var specifications = mockStatic(LinkReviewSpecification.class, Mockito.CALLS_REAL_METHODS)) {
-            reviewQueueService.openEntries(PageRequest.of(0, 20), " young ", 7);
+            reviewQueueService.openEntries(PageRequest.of(0, 20), " young ", 7, null);
 
             specifications.verify(LinkReviewSpecification::isOpen);
             specifications.verify(() -> LinkReviewSpecification.reasonContains("young"));
@@ -403,7 +424,7 @@ class DefaultReviewQueueServiceTest {
         when(linkReviewRepository.findAll(any(Specification.class), any(Pageable.class))).thenReturn(new PageImpl<>(List.of()));
 
         try (final var specifications = mockStatic(LinkReviewSpecification.class, Mockito.CALLS_REAL_METHODS)) {
-            reviewQueueService.openEntries(PageRequest.of(0, 20), " ", null);
+            reviewQueueService.openEntries(PageRequest.of(0, 20), " ", null, null);
 
             specifications.verify(LinkReviewSpecification::isOpen);
             specifications.verify(() -> LinkReviewSpecification.reasonContains(anyString()), never());

@@ -6,9 +6,14 @@ All notable changes to hrva.cc — the URL shortener.
 
 ## [v2.17] — 2026-10-30
 
-A paged domain rules list for admins.
+Admin lists are searched, sorted and paged on the server, and searching your links waits until you stop typing.
+
+### 🔗 Links
+- Searching your links waits until you stop typing, and stays in the address.
+- Your API keys are listed newest first, and expired or revoked keys a page at a time.
 
 ### 🔧 Admin
+- Every admin list can be searched and sorted, page by page.
 - Domain rules are listed page by page, with a search box.
 
 ---

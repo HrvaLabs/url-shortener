@@ -29,6 +29,8 @@ import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.FilterType;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
+import cc.hrva.urlshortener.repository.specification.BioPageReviewSpecification;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.annotation.Transactional;
@@ -337,8 +339,9 @@ class BioPageSchemaTest {
         bioPageReviewRepository.saveAndFlush(bioPageReview(anasPage, NOW, NOW));
         entityManager.clear();
 
-        final var firstPage = bioPageReviewRepository.findOpen(PageRequest.of(0, 2));
-        final var secondPage = bioPageReviewRepository.findOpen(PageRequest.of(1, 2));
+        final var newestFirst = Sort.by(Sort.Order.desc("flaggedAt"), Sort.Order.desc("id"));
+        final var firstPage = bioPageReviewRepository.findAll(BioPageReviewSpecification.isOpen(), PageRequest.of(0, 2, newestFirst));
+        final var secondPage = bioPageReviewRepository.findAll(BioPageReviewSpecification.isOpen(), PageRequest.of(1, 2, newestFirst));
 
         assertThat(firstPage.getTotalElements()).isEqualTo(3);
         assertThat(firstPage.getTotalPages()).isEqualTo(2);

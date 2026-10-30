@@ -186,7 +186,10 @@ class PagedEndpointsTest {
                 "/api/v1/admin/bio-pages",
                 "/api/v1/admin/bio-page-reviews",
                 "/api/v1/admin/domain-rules",
-                "/api/v1/admin/domains");
+                "/api/v1/admin/domains",
+                "/api/v1/admin/reserved-aliases",
+                "/api/v1/admin/login-attempts",
+                "/api/v1/api-keys/inactive");
     }
 
     @BeforeEach
@@ -196,14 +199,17 @@ class PagedEndpointsTest {
         lenient().when(urlService.getAllMyUrls(any(), any(Pageable.class), any())).thenAnswer(this::emptyPage);
         lenient().when(urlService.getAllUrls(any(Pageable.class), any())).thenAnswer(this::emptyPage);
         lenient().when(userService.fetchAllUsers(any(Pageable.class), any())).thenAnswer(this::emptyPage);
-        lenient().when(apiKeyService.fetchAllApiKeys(any(Pageable.class))).thenAnswer(this::emptyPage);
+        lenient().when(apiKeyService.fetchAllApiKeys(any(), any(), any(Pageable.class))).thenAnswer(this::emptyPage);
         lenient().when(auditLogService.getAuditLogs(any(Pageable.class), any())).thenAnswer(this::emptyPage);
-        lenient().when(emailLogService.emails(any(), any(Pageable.class))).thenAnswer(this::emptyPage);
-        lenient().when(reviewQueueService.openEntries(any(Pageable.class), any(), any())).thenAnswer(this::emptyPage);
+        lenient().when(emailLogService.emails(any(), any(), any(Pageable.class))).thenAnswer(this::emptyPage);
+        lenient().when(reviewQueueService.openEntries(any(Pageable.class), any(), any(), any())).thenAnswer(this::emptyPage);
         lenient().when(adminBioPageService.search(any(), anyBoolean(), any(Pageable.class))).thenAnswer(this::emptyPage);
-        lenient().when(bioPageReviewService.openEntries(any(Pageable.class))).thenAnswer(this::emptyPage);
+        lenient().when(bioPageReviewService.openEntries(any(), any(Pageable.class))).thenAnswer(this::emptyPage);
         lenient().when(moderationService.domainRules(any(), any(), any(Pageable.class))).thenAnswer(this::emptyPage);
         lenient().when(customDomainAdminService.list(any(), any(), any(Pageable.class))).thenAnswer(this::emptyPage);
+        lenient().when(reservedAliasService.list(any(), any(Pageable.class))).thenAnswer(this::emptyPage);
+        lenient().when(loginAttemptService.attempts(any(), any(Pageable.class))).thenAnswer(this::emptyPage);
+        lenient().when(apiKeyService.fetchMyInactiveApiKeys(any(Pageable.class))).thenAnswer(this::emptyPage);
     }
 
     @ParameterizedTest
@@ -243,7 +249,7 @@ class PagedEndpointsTest {
     }
 
     private static String tokenFor(final String path) {
-        return "/api/v1/urls".equals(path) ? "user-token" : "admin-token";
+        return List.of("/api/v1/urls", "/api/v1/api-keys/inactive").contains(path) ? "user-token" : "admin-token";
     }
 
     private void signedIn(final String token, final String email, final String role) {

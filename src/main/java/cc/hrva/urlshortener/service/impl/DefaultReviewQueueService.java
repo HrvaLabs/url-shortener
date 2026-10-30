@@ -15,6 +15,7 @@ import cc.hrva.urlshortener.service.alert.AdminAlertEvent;
 import cc.hrva.urlshortener.service.alert.AlertedLink;
 import cc.hrva.urlshortener.util.DomainNames;
 import cc.hrva.urlshortener.util.ReviewReasons;
+import cc.hrva.urlshortener.util.SortWhitelist;
 import java.time.Clock;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -46,7 +47,11 @@ public class DefaultReviewQueueService implements ReviewQueueService {
 
     private static final String REASON_SEPARATOR = "\n";
     private static final int MAX_VISITOR_REPORTS_PER_REVIEW = 20;
-    private static final Sort NEWEST_FIRST = Sort.by(Sort.Order.desc("flaggedAt"), Sort.Order.desc("id"));
+    private static final String FLAGGED_AT = "flaggedAt";
+    private static final Sort NEWEST_FIRST = Sort.by(Sort.Order.desc(FLAGGED_AT), Sort.Order.desc("id"));
+    private static final SortWhitelist ENTRY_SORTS = SortWhitelist.of(FLAGGED_AT)
+            .byDefault(Sort.by(Sort.Order.desc(FLAGGED_AT)))
+            .thenBy(Sort.Order.desc("id"));
 
     private final LinkReviewRepository linkReviewRepository;
     private final UrlRepository urlRepository;
@@ -155,12 +160,12 @@ public class DefaultReviewQueueService implements ReviewQueueService {
 
     @Override
     public Page<LinkReview> open(final Pageable pageable, final String reason) {
-        return open(pageable, reason, null);
+        return open(newestFirst(pageable), reason, null, null);
     }
 
     @Override
-    public Page<ReviewEntryResponse> openEntries(final Pageable pageable, final String reason, final Integer olderThanDays) {
-        final var reviews = open(pageable, reason, olderThanDays);
+    public Page<ReviewEntryResponse> openEntries(final Pageable pageable, final String reason, final Integer olderThanDays, final String search) {
+        final var reviews = open(ENTRY_SORTS.apply(pageable), reason, olderThanDays, search);
         final var possibleScammers = reviews.stream().anyMatch(review -> review.getUrl().getOwner() != null)
                 ? scammerSignalService.possibleScammerIds()
                 : Set.<Long>of();
@@ -175,7 +180,7 @@ public class DefaultReviewQueueService implements ReviewQueueService {
         return new HashSet<>(linkReviewRepository.findOpenUrlIds(urlIds));
     }
 
-    private Page<LinkReview> open(final Pageable pageable, final String reason, final Integer olderThanDays) {
+    private Page<LinkReview> open(final Pageable sorted, final String reason, final Integer olderThanDays, final String search) {
         final var filters = new ArrayList<Specification<LinkReview>>();
         filters.add(LinkReviewSpecification.isOpen());
         if (StringUtils.isNotBlank(reason)) {
@@ -184,7 +189,10 @@ public class DefaultReviewQueueService implements ReviewQueueService {
         if (olderThanDays != null) {
             filters.add(LinkReviewSpecification.linkCreatedBefore(LocalDateTime.now(clock.withZone(ZoneId.systemDefault())).minusDays(olderThanDays)));
         }
-        return linkReviewRepository.findAll(Specification.allOf(filters), newestFirst(pageable));
+        if (StringUtils.isNotBlank(search)) {
+            filters.add(LinkReviewSpecification.searchMatches(search.strip()));
+        }
+        return linkReviewRepository.findAll(Specification.allOf(filters), sorted);
     }
 
     private static ReviewEntryResponse entryOf(final LinkReview review, final Set<Long> possibleScammers) {
