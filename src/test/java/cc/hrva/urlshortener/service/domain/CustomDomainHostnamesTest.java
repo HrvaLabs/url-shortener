@@ -335,6 +335,18 @@ class CustomDomainHostnamesTest {
     }
 
     @Test
+    void isIgnoredMatchesOnlyTheConfiguredHostnamesExactly() {
+        appProperties.getDomains().setIgnoredHostnames(List.of("Test.Karlo.CC.", " "));
+
+        assertThat(hostnames.isIgnored("test.karlo.cc")).isTrue();
+        assertThat(hostnames.isIgnored("TEST.KARLO.CC.")).isTrue();
+        assertThat(hostnames.isIgnored("a.test.karlo.cc")).isFalse();
+        assertThat(hostnames.isIgnored("karlo.cc")).isFalse();
+        assertThat(hostnames.isIgnored("")).isFalse();
+        assertThat(hostnames.isIgnored(null)).isFalse();
+    }
+
+    @Test
     void isReservedMatchesTheNameAndItsSubdomainsOnly() {
         assertThat(hostnames.isReserved("hrva.cc")).isTrue();
         assertThat(hostnames.isReserved("a.b.hrva.cc")).isTrue();

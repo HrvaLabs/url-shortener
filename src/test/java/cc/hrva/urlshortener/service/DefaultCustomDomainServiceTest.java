@@ -24,7 +24,9 @@ import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.DomainApplied;
 import cc.hrva.urlshortener.service.domain.CustomDomainChangedEvent;
 import cc.hrva.urlshortener.service.domain.CustomDomainHostnames;
+import cc.hrva.urlshortener.service.domain.CustomDomainLifecycle;
 import cc.hrva.urlshortener.service.domain.CustomDomainLimits;
+import cc.hrva.urlshortener.service.domain.CustomDomainProvisioner;
 import cc.hrva.urlshortener.service.domain.CustomDomainResponses;
 import cc.hrva.urlshortener.service.impl.DefaultCustomDomainService;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiter;
@@ -109,6 +111,12 @@ class DefaultCustomDomainServiceTest {
     @Mock
     private CloudflareClient cloudflareClient;
 
+    @Mock
+    private CustomDomainLifecycle customDomainLifecycle;
+
+    @Mock
+    private CustomDomainProvisioner customDomainProvisioner;
+
     @Captor
     private ArgumentCaptor<CustomDomain> saved;
 
@@ -138,8 +146,8 @@ class DefaultCustomDomainServiceTest {
         });
         customDomainService = new DefaultCustomDomainService(userService, customDomainRepository, urlRepository,
                 new CustomDomainHostnames(appProperties), new CustomDomainLimits(customDomainRepository, customDomainAllowanceRepository, appProperties),
-                new CustomDomainResponses(appProperties), linkCheckService, accountLock, rateLimiter, eventPublisher,
-                TransactionOperations.withoutTransaction(), appProperties, clock);
+                new CustomDomainResponses(appProperties), customDomainLifecycle, customDomainProvisioner, linkCheckService, accountLock, rateLimiter,
+                eventPublisher, TransactionOperations.withoutTransaction(), appProperties, clock);
     }
 
     @Test

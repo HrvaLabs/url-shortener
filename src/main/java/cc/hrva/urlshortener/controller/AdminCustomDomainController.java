@@ -7,6 +7,7 @@ import cc.hrva.urlshortener.dto.domain.DomainAllowanceDto;
 import cc.hrva.urlshortener.dto.domain.DomainAllowanceResponse;
 import cc.hrva.urlshortener.dto.domain.DomainReviewDto;
 import cc.hrva.urlshortener.dto.domain.DomainSummaryResponse;
+import cc.hrva.urlshortener.dto.domain.ReconcileResponse;
 import cc.hrva.urlshortener.model.enums.AuditAction;
 import cc.hrva.urlshortener.model.enums.CustomDomainStatus;
 import cc.hrva.urlshortener.service.CustomDomainAdminService;
@@ -75,6 +76,23 @@ public class AdminCustomDomainController {
     public ResponseEntity<AdminDomainResponse> rejectDomain(@PathVariable("id") final long id,
                                                             @Valid @RequestBody(required = false) final DomainReviewDto domainReviewDto) {
         return ResponseEntity.ok(customDomainAdminService.reject(id, noteOf(domainReviewDto), signedInAdmin()));
+    }
+
+    @Operation(summary = "Retry a custom domain", description = "Sets up again a domain whose Cloudflare setup failed, or asks Cloudflare now "
+            + "about a domain that waits for its CNAME record or has a problem.")
+    @PostMapping("/{id}/retry")
+    @PreAuthorize("hasRole('ROLE_ADMIN')")
+    @Audited(AuditAction.RETRY_DOMAIN)
+    public ResponseEntity<AdminDomainResponse> retryDomain(@PathVariable("id") final long id) {
+        return ResponseEntity.ok(customDomainAdminService.retry(id));
+    }
+
+    @Operation(summary = "Reconcile with Cloudflare", description = "Compares every Cloudflare custom hostname with ours now and records the run; "
+            + "nothing is ever deleted. While a run is going, the last run is answered.")
+    @PostMapping("/reconcile")
+    @PreAuthorize("hasRole('ROLE_ADMIN')")
+    public ResponseEntity<ReconcileResponse> reconcile() {
+        return ResponseEntity.ok(customDomainAdminService.reconcile());
     }
 
     @Operation(summary = "Check the Cloudflare token", description = "Asks Cloudflare now whether the API token can manage custom hostnames.")

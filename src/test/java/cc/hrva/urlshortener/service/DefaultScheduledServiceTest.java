@@ -5,6 +5,8 @@ import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.repository.AuditLogRepository;
 import cc.hrva.urlshortener.repository.BioHandleHoldRepository;
 import cc.hrva.urlshortener.repository.EmailLogRepository;
+import cc.hrva.urlshortener.service.domain.CustomDomainLifecycle;
+import cc.hrva.urlshortener.service.domain.CustomDomainReconciler;
 import cc.hrva.urlshortener.service.impl.DefaultClickSummaryService;
 import cc.hrva.urlshortener.service.impl.DefaultDestinationCheckService;
 import cc.hrva.urlshortener.service.impl.DefaultNotificationDeliveryService;
@@ -84,6 +86,12 @@ class DefaultScheduledServiceTest {
     private ClickSummaryService clickSummaryService;
 
     @Mock
+    private CustomDomainLifecycle customDomainLifecycle;
+
+    @Mock
+    private CustomDomainReconciler customDomainReconciler;
+
+    @Mock
     private BioHandleHoldRepository bioHandleHoldRepository;
 
     @Mock
@@ -97,7 +105,7 @@ class DefaultScheduledServiceTest {
     @BeforeEach
     void setUp() {
         this.scheduledService = new DefaultScheduledService(urlService, userService, apiKeyService, resetTokenService, urlNotificationService, safeBrowsingRecheckService, sendingEmailService, linkDigestService, blocklistSourceService,
-                weeklyDigestService, destinationCheckService, notificationDeliveryService, clickSummaryService, bioHandleHoldRepository, emailLogRepository, auditLogRepository, appProperties, Clock.fixed(NOW, ZoneOffset.UTC));
+                weeklyDigestService, destinationCheckService, notificationDeliveryService, clickSummaryService, customDomainLifecycle, customDomainReconciler, bioHandleHoldRepository, emailLogRepository, auditLogRepository, appProperties, Clock.fixed(NOW, ZoneOffset.UTC));
     }
 
     @Test
@@ -224,6 +232,49 @@ class DefaultScheduledServiceTest {
         assertThat(sendWeeklyInBackground.getAnnotation(Async.class)).isNotNull();
         assertThat(sendWeeklyInBackground.getAnnotation(Async.class).value()).isEqualTo(AsyncExecutorConfiguration.NOTIFICATION_TASK_EXECUTOR);
         assertThat(DefaultScheduledService.class.getMethod("sendWeeklyClickSummaries").getAnnotation(Async.class)).isNull();
+        final var runInBackground = CustomDomainLifecycle.class.getMethod("runInBackground");
+        assertThat(runInBackground.getAnnotation(Async.class)).isNotNull();
+        assertThat(runInBackground.getAnnotation(Async.class).value()).isEqualTo(AsyncExecutorConfiguration.NOTIFICATION_TASK_EXECUTOR);
+        assertThat(DefaultScheduledService.class.getMethod("runDomainLifecycle").getAnnotation(Async.class)).isNull();
+        final var reconcileInBackground = CustomDomainReconciler.class.getMethod("reconcileInBackground");
+        assertThat(reconcileInBackground.getAnnotation(Async.class)).isNotNull();
+        assertThat(reconcileInBackground.getAnnotation(Async.class).value()).isEqualTo(AsyncExecutorConfiguration.NOTIFICATION_TASK_EXECUTOR);
+        assertThat(DefaultScheduledService.class.getMethod("reconcileCustomDomains").getAnnotation(Async.class)).isNull();
+    }
+
+    @Test
+    @ExtendWith(OutputCaptureExtension.class)
+    void domainLifecycleRunsEveryMinuteAsync(final CapturedOutput output) throws NoSuchMethodException {
+        final var scheduled = DefaultScheduledService.class.getMethod("runDomainLifecycle").getAnnotation(Scheduled.class);
+
+        scheduledService.runDomainLifecycle();
+
+        assertThat(scheduled.fixedDelay()).isEqualTo(60_000L);
+        assertThat(scheduled.initialDelay()).isEqualTo(30_000L);
+        assertThat(scheduled.cron()).isEmpty();
+        verify(customDomainLifecycle).runInBackground();
+        verify(customDomainLifecycle, never()).runOnce();
+        assertThat(output).doesNotContain("Scheduled");
+    }
+
+    @Test
+    @ExtendWith(OutputCaptureExtension.class)
+    void reconcileRunsAt0340InTheAnalyticsZone(final CapturedOutput output) throws NoSuchMethodException, IOException {
+        final var scheduled = DefaultScheduledService.class.getMethod("reconcileCustomDomains").getAnnotation(Scheduled.class);
+        final var sources = new MutablePropertySources();
+        new YamlPropertySourceLoader().load("application", new ClassPathResource("application.yaml")).forEach(sources::addLast);
+        final var zone = ZoneId.of(new PropertySourcesPropertyResolver(sources).resolveRequiredPlaceholders(scheduled.zone()));
+        final var cron = CronExpression.parse(scheduled.cron());
+
+        scheduledService.reconcileCustomDomains();
+
+        assertThat(scheduled.cron()).isEqualTo("0 40 3 * * *");
+        assertThat(scheduled.zone()).isEqualTo("${app.analytics.zone}");
+        assertThat(nextRun(cron, "2026-10-26T12:00:00Z", zone)).isEqualTo("2026-10-27T02:40:00Z");
+        assertThat(nextRun(cron, "2026-07-01T12:00:00Z", zone)).isEqualTo("2026-07-02T01:40:00Z");
+        verify(customDomainReconciler).reconcileInBackground();
+        verify(customDomainReconciler, never()).reconcile();
+        assertThat(output).contains("Scheduled: custom domain reconcile");
     }
 
     @Test

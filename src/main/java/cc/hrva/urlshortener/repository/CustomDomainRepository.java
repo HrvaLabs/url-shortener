@@ -72,6 +72,13 @@ public interface CustomDomainRepository extends JpaRepository<CustomDomain, Long
     @Query("select d.id from CustomDomain d where d.cloudflareDeletePending = true order by d.id")
     List<Long> findDeletePendingIds(Limit limit);
 
+    @Query("""
+            select new cc.hrva.urlshortener.repository.DomainInCloudflare(d.id, d.hostname, d.status, d.problem, d.cloudflareId, d.cloudflareDeletePending)
+            from CustomDomain d
+            where d.cloudflareId is not null or d.status in :statuses
+            order by d.id""")
+    List<DomainInCloudflare> findForReconcile(@Param("statuses") Collection<CustomDomainStatus> statuses);
+
     @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Transactional
     @Query("""
@@ -107,13 +114,27 @@ public interface CustomDomainRepository extends JpaRepository<CustomDomain, Long
             set d.status = case when cast(:nextCheckAt as LocalDateTime) is null
                                 then cc.hrva.urlshortener.model.enums.CustomDomainStatus.ERROR
                                 else cc.hrva.urlshortener.model.enums.CustomDomainStatus.APPROVED_PROVISIONING end,
-                d.problem = case when cast(:nextCheckAt as LocalDateTime) is null
-                                 then cc.hrva.urlshortener.model.enums.DomainProblem.PROVISIONING_FAILED
-                                 else d.problem end,
+                d.problem = cc.hrva.urlshortener.model.enums.DomainProblem.PROVISIONING_FAILED,
                 d.lastError = :error, d.nextCheckAt = :nextCheckAt, d.checkCount = d.checkCount + 1, d.lastCheckedAt = :now, d.updatedAt = :now
             where d.id = :id and d.status = cc.hrva.urlshortener.model.enums.CustomDomainStatus.APPROVED_PROVISIONING""")
     int recordProvisioningFailure(@Param("id") long id, @Param("error") String error, @Param("nextCheckAt") LocalDateTime nextCheckAt,
                                   @Param("now") LocalDateTime now);
+
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Transactional
+    @Query("""
+            update CustomDomain d
+            set d.status = cc.hrva.urlshortener.model.enums.CustomDomainStatus.APPROVED_PROVISIONING, d.problem = null, d.checkCount = 0,
+                d.nextCheckAt = :now, d.updatedAt = :now
+            where d.id = :id and d.status = cc.hrva.urlshortener.model.enums.CustomDomainStatus.ERROR
+              and d.problem = cc.hrva.urlshortener.model.enums.DomainProblem.PROVISIONING_FAILED""")
+    int markRetrying(@Param("id") long id, @Param("now") LocalDateTime now);
+
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Transactional
+    @Query("update CustomDomain d set d.nextCheckAt = :nextCheckAt, d.updatedAt = :now where d.id = :id and d.status = :expectedStatus")
+    int postponeCheck(@Param("id") long id, @Param("expectedStatus") CustomDomainStatus expectedStatus, @Param("nextCheckAt") LocalDateTime nextCheckAt,
+                      @Param("now") LocalDateTime now);
 
     @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Transactional

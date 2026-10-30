@@ -98,6 +98,15 @@ public class CustomDomainHostnames {
                 .orElse(false);
     }
 
+    public boolean isIgnored(final String hostname) {
+        return hostnameKey(hostname)
+                .map(key -> appProperties.getDomains().getIgnoredHostnames().stream()
+                        .map(CustomDomainHostnames::hostnameKey)
+                        .flatMap(Optional::stream)
+                        .anyMatch(key::equals))
+                .orElse(false);
+    }
+
     public boolean isPrimary(final String host) {
         return withoutPort(host)
                 .map(key -> Stream.concat(serverUrlHost().stream(), appProperties.getDomains().getPrimaryHosts().stream())

@@ -16,6 +16,7 @@ import cc.hrva.urlshortener.model.CustomDomain;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.enums.CustomDomainStatus;
 import cc.hrva.urlshortener.model.enums.DomainLinkMode;
+import cc.hrva.urlshortener.model.enums.DomainProblem;
 import cc.hrva.urlshortener.repository.CustomDomainRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.service.CustomDomainService;
@@ -24,7 +25,9 @@ import cc.hrva.urlshortener.service.UserService;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.DomainApplied;
 import cc.hrva.urlshortener.service.domain.CustomDomainChangedEvent;
 import cc.hrva.urlshortener.service.domain.CustomDomainHostnames;
+import cc.hrva.urlshortener.service.domain.CustomDomainLifecycle;
 import cc.hrva.urlshortener.service.domain.CustomDomainLimits;
+import cc.hrva.urlshortener.service.domain.CustomDomainProvisioner;
 import cc.hrva.urlshortener.service.domain.CustomDomainResponses;
 import cc.hrva.urlshortener.service.domain.HostnameRefusal;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiter;
@@ -36,6 +39,7 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Objects;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.ObjectUtils;
@@ -68,6 +72,8 @@ public class DefaultCustomDomainService implements CustomDomainService {
     private static final String PUNYCODE_FLAG = "International name (punycode): check it doesn't imitate another domain";
     private static final String PUNYCODE_PREFIX = "xn--";
     private static final String APPLY_LIMIT = "domain-apply:user:";
+    private static final String CHECK_LIMIT = "domain-check:domain:";
+    private static final Duration CHECK_WINDOW = Duration.ofSeconds(15);
     private static final int APPLICATIONS_PER_USER = 5;
     private static final Duration APPLY_WINDOW = Duration.ofHours(24);
     private static final Duration ENDINGS_SHOWN = Duration.ofDays(30);
@@ -81,6 +87,8 @@ public class DefaultCustomDomainService implements CustomDomainService {
     private final CustomDomainHostnames customDomainHostnames;
     private final CustomDomainLimits customDomainLimits;
     private final CustomDomainResponses customDomainResponses;
+    private final CustomDomainLifecycle customDomainLifecycle;
+    private final CustomDomainProvisioner customDomainProvisioner;
     private final LinkCheckService linkCheckService;
     private final AccountLock accountLock;
     private final RateLimiter rateLimiter;
@@ -131,8 +139,23 @@ public class DefaultCustomDomainService implements CustomDomainService {
     }
 
     @Override
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public CustomDomainResponse get(final long id) {
-        return response(ownedDomain(id));
+        final var domain = Objects.requireNonNull(transactionOperations.execute(status -> ownedDomain(id)));
+        if (!liveCheckable(domain) || !withinCheckLimit(domain.getId())) {
+            return Objects.requireNonNull(transactionOperations.execute(status -> response(domain)));
+        }
+        try {
+            if (domain.getStatus() == CustomDomainStatus.APPROVED_PROVISIONING) {
+                customDomainProvisioner.provision(domain.getId());
+            } else {
+                customDomainLifecycle.checkNow(domain.getId());
+            }
+        } catch (final RuntimeException exception) {
+            log.warn("Custom domain live check failed, serving the stored status domainId={} exception={}", domain.getId(),
+                    exception.getClass().getName());
+        }
+        return Objects.requireNonNull(transactionOperations.execute(status -> response(ownedDomain(id))));
     }
 
     @Override
@@ -224,6 +247,24 @@ public class DefaultCustomDomainService implements CustomDomainService {
         } catch (final RateLimiterUnavailableException exception) {
             log.warn("Custom domain application rate limit unavailable, allowing the request userId={}", user.getId());
             return true;
+        }
+    }
+
+    private boolean liveCheckable(final CustomDomain domain) {
+        return switch (domain.getStatus()) {
+            case APPROVED_PROVISIONING -> domain.getNextCheckAt() == null || !domain.getNextCheckAt().isAfter(LocalDateTime.now(clock));
+            case AWAITING_DNS -> true;
+            case ERROR -> domain.getProblem() != null && (domain.getProblem().recheckable() || domain.getProblem() == DomainProblem.DNS_TIMED_OUT);
+            case PENDING_REVIEW, ACTIVE, REJECTED, DISABLED, DELETED -> false;
+        };
+    }
+
+    private boolean withinCheckLimit(final long id) {
+        try {
+            return rateLimiter.tryAcquire(CHECK_LIMIT + id, 1, CHECK_WINDOW);
+        } catch (final RateLimiterUnavailableException exception) {
+            log.warn("Custom domain check rate limit unavailable, serving the stored status domainId={}", id);
+            return false;
         }
     }
 

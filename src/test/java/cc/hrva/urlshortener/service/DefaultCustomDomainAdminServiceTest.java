@@ -17,6 +17,7 @@ import cc.hrva.urlshortener.model.CustomDomainAllowance;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.enums.CloudflareTokenStatus;
 import cc.hrva.urlshortener.model.enums.CustomDomainStatus;
+import cc.hrva.urlshortener.model.enums.DomainProblem;
 import cc.hrva.urlshortener.repository.CustomDomainAllowanceRepository;
 import cc.hrva.urlshortener.repository.CustomDomainCapLock;
 import cc.hrva.urlshortener.repository.CustomDomainReconcileRepository;
@@ -31,8 +32,12 @@ import cc.hrva.urlshortener.service.domain.AdminDomainResponses;
 import cc.hrva.urlshortener.service.domain.CloudflareTokenCheck;
 import cc.hrva.urlshortener.service.domain.CloudflareTokenCheck.TokenState;
 import cc.hrva.urlshortener.service.domain.CustomDomainChangedEvent;
+import cc.hrva.urlshortener.service.domain.CustomDomainLifecycle;
 import cc.hrva.urlshortener.service.domain.CustomDomainProvisioner;
+import cc.hrva.urlshortener.service.domain.CustomDomainReconciler;
+import cc.hrva.urlshortener.service.domain.CustomDomainReconciler.QuotaReading;
 import cc.hrva.urlshortener.service.domain.CustomDomainResponses;
+import cc.hrva.urlshortener.service.domain.LifecycleOutcome;
 import cc.hrva.urlshortener.service.impl.DefaultCustomDomainAdminService;
 import jakarta.validation.Validation;
 import jakarta.validation.Validator;
@@ -121,6 +126,12 @@ class DefaultCustomDomainAdminServiceTest {
     private CustomDomainProvisioner customDomainProvisioner;
 
     @Mock
+    private CustomDomainLifecycle customDomainLifecycle;
+
+    @Mock
+    private CustomDomainReconciler customDomainReconciler;
+
+    @Mock
     private ScammerSignalService scammerSignalService;
 
     @Mock
@@ -157,8 +168,8 @@ class DefaultCustomDomainAdminServiceTest {
         lenient().doAnswer(invocation -> steps.add("provision")).when(customDomainProvisioner).provisionAsync(anyLong());
         final var responses = new AdminDomainResponses(customDomainRepository, new CustomDomainResponses(appProperties), scammerSignalService, clock);
         customDomainAdminService = new DefaultCustomDomainAdminService(customDomainRepository, customDomainAllowanceRepository,
-                customDomainReconcileRepository, userRepository, customDomainCapLock, cloudflareTokenCheck, customDomainProvisioner, responses,
-                eventPublisher, recordingTransactions(), appProperties, clock);
+                customDomainReconcileRepository, userRepository, customDomainCapLock, cloudflareTokenCheck, customDomainProvisioner, customDomainLifecycle,
+                customDomainReconciler, responses, eventPublisher, recordingTransactions(), appProperties, clock);
     }
 
     @Test
@@ -455,7 +466,8 @@ class DefaultCustomDomainAdminServiceTest {
 
     @Test
     void onlyTheProvisionerCreatesHostnames() {
-        final var provisioner = new CustomDomainProvisioner(customDomainRepository, cloudflareClient);
+        final var provisioner = new CustomDomainProvisioner(customDomainRepository, cloudflareClient, eventPublisher, TransactionOperations.withoutTransaction(),
+                Clock.fixed(NOW_INSTANT, ZoneOffset.UTC));
         final var notApproved = Arrays.stream(CustomDomainStatus.values()).filter(status -> status != CustomDomainStatus.APPROVED_PROVISIONING).toList();
         for (final var status : notApproved) {
             final var row = domain(status);
@@ -476,7 +488,8 @@ class DefaultCustomDomainAdminServiceTest {
 
     @Test
     void theAsyncHandOverRunsTheProvisioner() {
-        final var provisioner = new CustomDomainProvisioner(customDomainRepository, cloudflareClient);
+        final var provisioner = new CustomDomainProvisioner(customDomainRepository, cloudflareClient, eventPublisher, TransactionOperations.withoutTransaction(),
+                Clock.fixed(NOW_INSTANT, ZoneOffset.UTC));
         when(customDomainRepository.findById(ID)).thenReturn(Optional.of(domain(CustomDomainStatus.REJECTED)));
 
         provisioner.provisionAsync(ID);
@@ -634,6 +647,140 @@ class DefaultCustomDomainAdminServiceTest {
     }
 
     @Test
+    void theSummaryShowsTheLastQuotaReading() {
+        when(cloudflareTokenCheck.current()).thenReturn(new TokenState(CloudflareTokenStatus.OK, NOW, null, 4));
+        when(customDomainReconciler.lastQuota()).thenReturn(Optional.of(new QuotaReading(4, 50_000, NOW)));
+
+        assertThat(customDomainAdminService.summary().cloudflareQuota()).isEqualTo(new DomainSummaryResponse.CloudflareQuota(4, 50_000));
+    }
+
+    @Test
+    void retryChecksAWaitingOrFailingDomainNow() {
+        for (final var problem : List.of(DomainProblem.CNAME_REMOVED, DomainProblem.DNS_TIMED_OUT, DomainProblem.CERTIFICATE_TIMED_OUT)) {
+            retrying(CustomDomainStatus.ERROR, problem, null);
+
+            assertThat(customDomainAdminService.retry(ID).domain().id()).isEqualTo(ID);
+        }
+        retrying(CustomDomainStatus.AWAITING_DNS, DomainProblem.DNS_NOT_FOUND, "cf-1");
+        customDomainAdminService.retry(ID);
+
+        verify(customDomainLifecycle, times(4)).checkNow(ID);
+        verifyNoInteractions(customDomainProvisioner, customDomainCapLock);
+        verify(customDomainRepository, never()).markRetrying(anyLong(), any());
+    }
+
+    @Test
+    void retrySetsUpADomainStillBeingRetriedAtOnce() {
+        retrying(CustomDomainStatus.APPROVED_PROVISIONING, DomainProblem.PROVISIONING_FAILED, null);
+
+        customDomainAdminService.retry(ID);
+
+        verify(customDomainProvisioner).provision(ID);
+        verify(customDomainRepository, never()).markRetrying(anyLong(), any());
+        verifyNoInteractions(customDomainLifecycle, customDomainCapLock, cloudflareTokenCheck);
+    }
+
+    @Test
+    void retrySetsUpAFailedDomainAgainAfterMovingItBack() {
+        retrying(CustomDomainStatus.ERROR, DomainProblem.PROVISIONING_FAILED, "cf-gone");
+        when(customDomainRepository.markRetrying(ID, NOW)).thenAnswer(invocation -> {
+            steps.add("markRetrying");
+            return 1;
+        });
+        doAnswer(invocation -> {
+            steps.add("provision");
+            return LifecycleOutcome.DONE;
+        }).when(customDomainProvisioner).provision(ID);
+
+        customDomainAdminService.retry(ID);
+
+        assertThat(steps).containsSubsequence("begin", "markRetrying", "commit", "provision");
+        verify(eventPublisher).publishEvent(new CustomDomainChangedEvent(ID));
+        verifyNoInteractions(customDomainCapLock, cloudflareTokenCheck, customDomainLifecycle);
+    }
+
+    @Test
+    void retryOfAFailedDomainWithoutAHostnameNeedsRoomUnderTheCapAndTheFreeAllowance() {
+        retrying(CustomDomainStatus.ERROR, DomainProblem.PROVISIONING_FAILED, null);
+        when(customDomainRepository.markRetrying(ID, NOW)).thenReturn(1);
+
+        customDomainAdminService.retry(ID);
+
+        final var order = inOrder(cloudflareTokenCheck, customDomainCapLock, customDomainRepository, customDomainProvisioner);
+        order.verify(cloudflareTokenCheck).check();
+        order.verify(customDomainCapLock).lock();
+        order.verify(customDomainRepository).countSlotsInUse();
+        order.verify(customDomainRepository).markRetrying(ID, NOW);
+        order.verify(customDomainProvisioner).provision(ID);
+
+        when(customDomainRepository.countSlotsInUse()).thenReturn(90L);
+        assertThatThrownBy(() -> customDomainAdminService.retry(ID)).isInstanceOf(CustomDomainConflictException.class)
+                .hasMessage("Cap reached: 90 of 90 custom domains are in use. Delete one or raise the cap (APP_DOMAINS_MAX_ACTIVE).");
+
+        when(customDomainRepository.countSlotsInUse()).thenReturn(3L);
+        when(cloudflareTokenCheck.check()).thenReturn(token(CloudflareTokenStatus.OK, 100));
+        assertThatThrownBy(() -> customDomainAdminService.retry(ID)).isInstanceOf(CustomDomainConflictException.class)
+                .hasMessage("Cloudflare already has 100 custom hostnames and 100 are free. Delete one here or in Cloudflare first.");
+
+        when(cloudflareTokenCheck.check()).thenReturn(token(CloudflareTokenStatus.UNREACHABLE, null));
+        assertThatThrownBy(() -> customDomainAdminService.retry(ID)).isInstanceOf(CustomDomainConflictException.class)
+                .hasMessage("Cloudflare isn't set up: Cloudflare can't be reached. Check CLOUDFLARE_API_TOKEN and CLOUDFLARE_ZONE_ID.");
+
+        verify(customDomainRepository, times(1)).markRetrying(ID, NOW);
+        verify(customDomainProvisioner, times(1)).provision(ID);
+    }
+
+    @Test
+    void retryOnlyForErrorOrAwaitingDns() {
+        for (final var status : List.of(CustomDomainStatus.PENDING_REVIEW, CustomDomainStatus.APPROVED_PROVISIONING, CustomDomainStatus.ACTIVE,
+                CustomDomainStatus.REJECTED, CustomDomainStatus.DISABLED, CustomDomainStatus.DELETED)) {
+            retrying(status, null, "cf-1");
+
+            assertThatThrownBy(() -> customDomainAdminService.retry(ID)).isInstanceOf(CustomDomainConflictException.class)
+                    .hasMessage("There's nothing to retry for this domain.");
+        }
+        when(customDomainRepository.findById(ID)).thenReturn(Optional.empty());
+        assertThatThrownBy(() -> customDomainAdminService.retry(ID)).isInstanceOf(CustomDomainNotFoundException.class)
+                .hasMessage(NOT_FOUND);
+
+        verifyNoInteractions(customDomainProvisioner, customDomainLifecycle, cloudflareTokenCheck);
+    }
+
+    @Test
+    void aRetryThatLostARaceSetsNothingUp() {
+        retrying(CustomDomainStatus.ERROR, DomainProblem.PROVISIONING_FAILED, "cf-gone");
+        when(customDomainRepository.markRetrying(ID, NOW)).thenReturn(0);
+
+        assertThatThrownBy(() -> customDomainAdminService.retry(ID)).isInstanceOf(CustomDomainConflictException.class)
+                .hasMessage("There's nothing to retry for this domain.");
+
+        verifyNoInteractions(customDomainProvisioner, eventPublisher);
+    }
+
+    @Test
+    void reconcileAnswersTheRunItMade() {
+        appProperties.getDomains().setIgnoredHostnames(List.of("test.karlo.cc"));
+        when(customDomainReconciler.reconcile()).thenReturn(Optional.of(new ReconcileRun(NOW, 4, 3, List.of("stranger.example.net"),
+                List.of(new MissingDomain(9L, "x.example.org")), null)));
+
+        assertThat(customDomainAdminService.reconcile()).isEqualTo(new ReconcileResponse(NOW, 4, 3, List.of("stranger.example.net"),
+                List.of(new ReconcileResponse.MissingDomain(9L, "x.example.org")), List.of("test.karlo.cc"), null));
+        verifyNoInteractions(customDomainReconcileRepository);
+    }
+
+    @Test
+    void aReconcileAlreadyRunningAnswersTheLastRun() {
+        when(customDomainReconciler.reconcile()).thenReturn(Optional.empty());
+        when(customDomainReconcileRepository.newest()).thenReturn(Optional.of(new ReconcileRun(NOW.minusHours(3), 4, 4, List.of(), List.of(), null)));
+
+        assertThat(customDomainAdminService.reconcile().ranAt()).isEqualTo(NOW.minusHours(3));
+
+        when(customDomainReconcileRepository.newest()).thenReturn(Optional.empty());
+        assertThatThrownBy(() -> customDomainAdminService.reconcile()).isInstanceOf(CustomDomainConflictException.class)
+                .hasMessage("A reconcile is already running. Try again in a minute.");
+    }
+
+    @Test
     void checkCloudflareRunsTheTokenCheck() {
         when(cloudflareTokenCheck.check()).thenReturn(new TokenState(CloudflareTokenStatus.NO_PERMISSION, NOW,
                 "The token works but can't read custom hostnames on this zone.", null));
@@ -763,6 +910,15 @@ class DefaultCustomDomainAdminServiceTest {
                 .createdAt(NOW.minusDays(1))
                 .updatedAt(NOW.minusDays(1))
                 .build();
+    }
+
+    private void retrying(final CustomDomainStatus status, final DomainProblem problem, final String cloudflareId) {
+        final var row = domain(status);
+        row.setProblem(problem);
+        row.setCloudflareId(cloudflareId);
+        row.setReviewedAt(NOW.minusDays(2));
+        when(customDomainRepository.findById(ID)).thenReturn(Optional.of(row));
+        lenient().when(customDomainRepository.findWithOwner(ID)).thenReturn(Optional.of(row));
     }
 
     private CustomDomain approved() {

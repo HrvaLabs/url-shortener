@@ -25,7 +25,9 @@ import cc.hrva.urlshortener.service.alert.AdminAlertEvent;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.DomainApplied;
 import cc.hrva.urlshortener.service.domain.CustomDomainChangedEvent;
 import cc.hrva.urlshortener.service.domain.CustomDomainHostnames;
+import cc.hrva.urlshortener.service.domain.CustomDomainLifecycle;
 import cc.hrva.urlshortener.service.domain.CustomDomainLimits;
+import cc.hrva.urlshortener.service.domain.CustomDomainProvisioner;
 import cc.hrva.urlshortener.service.domain.CustomDomainResponses;
 import cc.hrva.urlshortener.service.impl.DefaultCustomDomainService;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiter;
@@ -86,6 +88,7 @@ import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mockingDetails;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -168,6 +171,12 @@ class CustomDomainEndpointSecurityTest {
 
     @MockitoBean
     private LinkCheckService linkCheckService;
+
+    @MockitoBean
+    private CustomDomainLifecycle customDomainLifecycle;
+
+    @MockitoBean
+    private CustomDomainProvisioner customDomainProvisioner;
 
     @DynamicPropertySource
     static void signingKey(final DynamicPropertyRegistry registry) {
@@ -284,6 +293,9 @@ class CustomDomainEndpointSecurityTest {
         mockMvc.perform(as(ANA_TOKEN, get(DOMAINS)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.domains[0].links").value(2));
+        verify(rateLimiter).tryAcquire("domain-check:domain:" + id, 1, Duration.ofSeconds(15));
+        verify(customDomainLifecycle).checkNow(id);
+        verifyNoInteractions(customDomainProvisioner);
     }
 
     @Test

@@ -14,6 +14,7 @@ import jakarta.persistence.EntityManager;
 import java.sql.Timestamp;
 import java.time.LocalDateTime;
 import java.util.Comparator;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -341,7 +342,7 @@ class CustomDomainSchemaTest {
         assertThat(customDomainRepository.recordProvisioningFailure(domain.getId(), "Cloudflare said no", NOW.plusMinutes(1), NOW)).isOne();
         assertThat(domainRow(domain.getId()))
                 .containsEntry("STATUS", "APPROVED_PROVISIONING")
-                .containsEntry("PROBLEM", null)
+                .containsEntry("PROBLEM", "PROVISIONING_FAILED")
                 .containsEntry("LAST_ERROR", "Cloudflare said no")
                 .containsEntry("NEXT_CHECK_AT", timestamp(NOW.plusMinutes(1)))
                 .containsEntry("CHECK_COUNT", 1);
@@ -353,6 +354,64 @@ class CustomDomainSchemaTest {
                 .containsEntry("LAST_ERROR", "Still no")
                 .containsEntry("NEXT_CHECK_AT", null);
         assertThat(customDomainRepository.recordProvisioningFailure(domain.getId(), "Again", NOW, NOW)).isZero();
+    }
+
+    @Test
+    void aRetryMovesAFailedSetupBackToProvisioningOnly() {
+        final var failed = savedDomain(domain("go.example.com", CustomDomainStatus.ERROR).problem(DomainProblem.PROVISIONING_FAILED)
+                .lastError("Cloudflare said no").checkCount(28));
+        final var blocked = savedDomain(domain("blocked.example.com", CustomDomainStatus.ERROR).problem(DomainProblem.CLOUDFLARE_BLOCKED));
+        final var waiting = savedDomain(domain("waiting.example.com", CustomDomainStatus.AWAITING_DNS).problem(DomainProblem.PROVISIONING_FAILED));
+
+        assertThat(customDomainRepository.markRetrying(failed.getId(), NOW)).isOne();
+        assertThat(customDomainRepository.markRetrying(failed.getId(), NOW)).isZero();
+        assertThat(customDomainRepository.markRetrying(blocked.getId(), NOW)).isZero();
+        assertThat(customDomainRepository.markRetrying(waiting.getId(), NOW)).isZero();
+        assertThat(domainRow(failed.getId()))
+                .containsEntry("STATUS", "APPROVED_PROVISIONING")
+                .containsEntry("PROBLEM", null)
+                .containsEntry("LAST_ERROR", "Cloudflare said no")
+                .containsEntry("NEXT_CHECK_AT", timestamp(NOW))
+                .containsEntry("CHECK_COUNT", 0);
+        assertThat(domainRow(blocked.getId())).containsEntry("STATUS", "ERROR").containsEntry("PROBLEM", "CLOUDFLARE_BLOCKED");
+    }
+
+    @Test
+    void aFailedCheckOnlyMovesTheNextCheck() {
+        final var domain = savedDomain(domain("go.example.com", CustomDomainStatus.AWAITING_DNS).problem(DomainProblem.DNS_NOT_FOUND)
+                .lastError("custom hostname does not CNAME to this zone.").nextCheckAt(NOW).checkCount(3));
+
+        assertThat(customDomainRepository.postponeCheck(domain.getId(), CustomDomainStatus.ACTIVE, NOW.plusHours(1), NOW)).isZero();
+        assertThat(customDomainRepository.postponeCheck(domain.getId(), CustomDomainStatus.AWAITING_DNS, NOW.plusMinutes(1), NOW)).isOne();
+        assertThat(domainRow(domain.getId()))
+                .containsEntry("STATUS", "AWAITING_DNS")
+                .containsEntry("PROBLEM", "DNS_NOT_FOUND")
+                .containsEntry("LAST_ERROR", "custom hostname does not CNAME to this zone.")
+                .containsEntry("NEXT_CHECK_AT", timestamp(NOW.plusMinutes(1)))
+                .containsEntry("LAST_CHECKED_AT", null)
+                .containsEntry("CHECK_COUNT", 3);
+    }
+
+    @Test
+    void theReconcileReadsEveryRowThatHasOrIsGettingAHostnameInCloudflare() {
+        final var owner = savedUser("reconcile@example.com");
+        final var active = savedDomain(domain("active.example.com", CustomDomainStatus.ACTIVE).owner(owner).cloudflareId("cf-1"));
+        final var provisioning = savedDomain(domain("new.example.com", CustomDomainStatus.APPROVED_PROVISIONING).owner(owner));
+        final var queued = savedDomain(domain("gone.example.com", CustomDomainStatus.DELETED).cloudflareId("cf-3").cloudflareDeletePending(true));
+        final var deleted = savedDomain(domain("old.example.com", CustomDomainStatus.DELETED).hostnameKey(null).cloudflareId("cf-4"));
+        final var failed = savedDomain(domain("failed.example.com", CustomDomainStatus.ERROR).problem(DomainProblem.PROVISIONING_FAILED));
+        savedDomain(domain("pending.example.com", CustomDomainStatus.PENDING_REVIEW).owner(owner));
+        savedDomain(domain("rejected.example.com", CustomDomainStatus.REJECTED).hostnameKey(null));
+
+        assertThat(customDomainRepository.findForReconcile(EnumSet.of(CustomDomainStatus.APPROVED_PROVISIONING, CustomDomainStatus.AWAITING_DNS,
+                CustomDomainStatus.ACTIVE, CustomDomainStatus.DISABLED, CustomDomainStatus.ERROR)))
+                .containsExactly(
+                        new DomainInCloudflare(active.getId(), "active.example.com", CustomDomainStatus.ACTIVE, null, "cf-1", false),
+                        new DomainInCloudflare(provisioning.getId(), "new.example.com", CustomDomainStatus.APPROVED_PROVISIONING, null, null, false),
+                        new DomainInCloudflare(queued.getId(), "gone.example.com", CustomDomainStatus.DELETED, null, "cf-3", true),
+                        new DomainInCloudflare(deleted.getId(), "old.example.com", CustomDomainStatus.DELETED, null, "cf-4", false),
+                        new DomainInCloudflare(failed.getId(), "failed.example.com", CustomDomainStatus.ERROR, DomainProblem.PROVISIONING_FAILED, null,
+                                false));
     }
 
     @Test

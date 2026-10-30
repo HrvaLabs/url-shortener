@@ -109,6 +109,12 @@ class CustomDomainApprovalRaceTest {
     private CustomDomainProvisioner customDomainProvisioner;
 
     @MockitoBean
+    private CustomDomainLifecycle customDomainLifecycle;
+
+    @MockitoBean
+    private CustomDomainReconciler customDomainReconciler;
+
+    @MockitoBean
     private ScammerSignalService scammerSignalService;
 
     @BeforeEach

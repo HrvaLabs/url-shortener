@@ -20,6 +20,8 @@ import cc.hrva.urlshortener.service.UrlNotificationService;
 import cc.hrva.urlshortener.service.UrlService;
 import cc.hrva.urlshortener.service.UserService;
 import cc.hrva.urlshortener.service.WeeklyDigestService;
+import cc.hrva.urlshortener.service.domain.CustomDomainLifecycle;
+import cc.hrva.urlshortener.service.domain.CustomDomainReconciler;
 import java.time.Clock;
 import java.time.LocalDateTime;
 import org.springframework.scheduling.annotation.EnableScheduling;
@@ -45,6 +47,8 @@ public class DefaultScheduledService implements ScheduledService {
     private final DestinationCheckService destinationCheckService;
     private final NotificationDeliveryService notificationDeliveryService;
     private final ClickSummaryService clickSummaryService;
+    private final CustomDomainLifecycle customDomainLifecycle;
+    private final CustomDomainReconciler customDomainReconciler;
     private final BioHandleHoldRepository bioHandleHoldRepository;
     private final EmailLogRepository emailLogRepository;
     private final AuditLogRepository auditLogRepository;
@@ -184,6 +188,19 @@ public class DefaultScheduledService implements ScheduledService {
     public void sendWeeklyClickSummaries() {
         log.info("Scheduled: weekly click summaries");
         clickSummaryService.sendWeeklyInBackground();
+    }
+
+    @Override
+    @Scheduled(fixedDelay = 60_000, initialDelay = 30_000)
+    public void runDomainLifecycle() {
+        customDomainLifecycle.runInBackground();
+    }
+
+    @Override
+    @Scheduled(cron = "0 40 3 * * *", zone = "${app.analytics.zone}")
+    public void reconcileCustomDomains() {
+        log.info("Scheduled: custom domain reconcile");
+        customDomainReconciler.reconcileInBackground();
     }
 
 }

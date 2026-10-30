@@ -21,5 +21,7 @@ public interface ScheduledService {
     void deleteOldNotificationRecords();
     void sendDailyClickSummaries();
     void sendWeeklyClickSummaries();
+    void runDomainLifecycle();
+    void reconcileCustomDomains();
 
 }

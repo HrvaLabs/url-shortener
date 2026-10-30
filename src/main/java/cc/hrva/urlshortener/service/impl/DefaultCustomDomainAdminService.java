@@ -14,6 +14,7 @@ import cc.hrva.urlshortener.model.CustomDomain;
 import cc.hrva.urlshortener.model.CustomDomainAllowance;
 import cc.hrva.urlshortener.model.enums.CloudflareTokenStatus;
 import cc.hrva.urlshortener.model.enums.CustomDomainStatus;
+import cc.hrva.urlshortener.model.enums.DomainProblem;
 import cc.hrva.urlshortener.repository.CustomDomainAllowanceRepository;
 import cc.hrva.urlshortener.repository.CustomDomainCapLock;
 import cc.hrva.urlshortener.repository.CustomDomainReconcileRepository;
@@ -26,10 +27,13 @@ import cc.hrva.urlshortener.service.domain.AdminDomainResponses;
 import cc.hrva.urlshortener.service.domain.CloudflareTokenCheck;
 import cc.hrva.urlshortener.service.domain.CloudflareTokenCheck.TokenState;
 import cc.hrva.urlshortener.service.domain.CustomDomainChangedEvent;
+import cc.hrva.urlshortener.service.domain.CustomDomainLifecycle;
 import cc.hrva.urlshortener.service.domain.CustomDomainProvisioner;
+import cc.hrva.urlshortener.service.domain.CustomDomainReconciler;
 import java.time.Clock;
 import java.time.LocalDateTime;
 import java.util.Map;
+import java.util.Objects;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
@@ -58,6 +62,8 @@ public class DefaultCustomDomainAdminService implements CustomDomainAdminService
     private static final String CAP_REACHED = "Cap reached: %d of %d custom domains are in use. Delete one or raise the cap (APP_DOMAINS_MAX_ACTIVE).";
     private static final String FREE_ALLOWANCE_USED = "Cloudflare already has %d custom hostnames and %d are free. Delete one here or in Cloudflare first.";
     private static final String NOT_SET_UP = "Cloudflare isn't set up: %s. Check CLOUDFLARE_API_TOKEN and CLOUDFLARE_ZONE_ID.";
+    private static final String NOTHING_TO_RETRY = "There's nothing to retry for this domain.";
+    private static final String RECONCILE_RUNNING = "A reconcile is already running. Try again in a minute.";
     private static final Map<CloudflareTokenStatus, String> TOKEN_PROBLEMS = Map.of(
             CloudflareTokenStatus.MISSING, "the API token is missing",
             CloudflareTokenStatus.INVALID, "the API token is invalid",
@@ -72,6 +78,8 @@ public class DefaultCustomDomainAdminService implements CustomDomainAdminService
     private final CustomDomainCapLock customDomainCapLock;
     private final CloudflareTokenCheck cloudflareTokenCheck;
     private final CustomDomainProvisioner customDomainProvisioner;
+    private final CustomDomainLifecycle customDomainLifecycle;
+    private final CustomDomainReconciler customDomainReconciler;
     private final AdminDomainResponses adminDomainResponses;
     private final ApplicationEventPublisher eventPublisher;
     private final TransactionOperations transactionOperations;
@@ -104,7 +112,9 @@ public class DefaultCustomDomainAdminService implements CustomDomainAdminService
                 settings.getMaxActive(),
                 settings.getFreeAllowance(),
                 newestTotal(token, reconcile),
-                null,
+                customDomainReconciler.lastQuota()
+                        .map(quota -> new DomainSummaryResponse.CloudflareQuota(quota.used(), quota.allocated()))
+                        .orElse(null),
                 customDomainRepository.countByStatus(CustomDomainStatus.PENDING_REVIEW),
                 customDomainRepository.countByStatus(CustomDomainStatus.ACTIVE),
                 CloudflareCheckResponse.of(token),
@@ -133,6 +143,36 @@ public class DefaultCustomDomainAdminService implements CustomDomainAdminService
         eventPublisher.publishEvent(new CustomDomainChangedEvent(id));
         log.info("Custom domain rejected domainId={}", id);
         return reread(id);
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    public AdminDomainResponse retry(final long id) {
+        final var domain = Objects.requireNonNull(transactionOperations.execute(transaction -> customDomainRepository.findById(id)))
+                .orElseThrow(() -> new CustomDomainNotFoundException(NOT_FOUND));
+        final var status = domain.getStatus();
+        final var setupFailed = domain.getProblem() == DomainProblem.PROVISIONING_FAILED;
+        if (status == CustomDomainStatus.APPROVED_PROVISIONING && setupFailed) {
+            customDomainProvisioner.provision(id);
+        } else if (status == CustomDomainStatus.ERROR && setupFailed) {
+            provisionAgain(domain);
+        } else if (status == CustomDomainStatus.ERROR || status == CustomDomainStatus.AWAITING_DNS) {
+            customDomainLifecycle.checkNow(id);
+        } else {
+            log.info("Custom domain retry refused, there is nothing to retry domainId={} status={}", id, status);
+            throw new CustomDomainConflictException(NOTHING_TO_RETRY);
+        }
+        log.info("Custom domain retried domainId={} status={} problem={}", id, status, domain.getProblem());
+        return transactionOperations.execute(transaction -> reread(id));
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    public ReconcileResponse reconcile() {
+        final var run = customDomainReconciler.reconcile()
+                .or(customDomainReconcileRepository::newest)
+                .orElseThrow(() -> new CustomDomainConflictException(RECONCILE_RUNNING));
+        return ReconcileResponse.of(run, appProperties.getDomains().getIgnoredHostnames());
     }
 
     @Override
@@ -178,11 +218,11 @@ public class DefaultCustomDomainAdminService implements CustomDomainAdminService
 
     private Integer liveTotal(final TokenState token, final long id) {
         if (token.status() != CloudflareTokenStatus.OK) {
-            log.info("Custom domain approval refused, the Cloudflare token isn't usable domainId={} status={}", id, token.status());
+            log.info("Custom domain setup refused, the Cloudflare token isn't usable domainId={} status={}", id, token.status());
             throw new CustomDomainConflictException(NOT_SET_UP.formatted(TOKEN_PROBLEMS.get(token.status())));
         }
         if (token.cloudflareTotal() == null) {
-            log.info("Custom domain approval refused, Cloudflare gave no total domainId={}", id);
+            log.info("Custom domain setup refused, Cloudflare gave no total domainId={}", id);
             throw new CustomDomainConflictException(NOT_SET_UP.formatted(TOKEN_PROBLEMS.get(CloudflareTokenStatus.UNREACHABLE)));
         }
         return token.cloudflareTotal();
@@ -197,25 +237,46 @@ public class DefaultCustomDomainAdminService implements CustomDomainAdminService
             log.info("Custom domain approval refused for a deactivated or deleted account domainId={}", id);
             throw new CustomDomainConflictException(OWNER_DEACTIVATED);
         }
-        final var settings = appProperties.getDomains();
-        final var slotsInUse = customDomainRepository.countSlotsInUse();
-        if (slotsInUse >= settings.getMaxActive()) {
-            log.info("Custom domain approval refused at the cap domainId={} slotsInUse={} maxActive={}", id, slotsInUse, settings.getMaxActive());
-            throw new CustomDomainConflictException(CAP_REACHED.formatted(slotsInUse, settings.getMaxActive()));
-        }
-        final var notYetInCloudflare = customDomainRepository.countByStatus(CustomDomainStatus.APPROVED_PROVISIONING);
-        final var hostnames = cloudflareTotal + notYetInCloudflare;
-        if (hostnames >= settings.getFreeAllowance()) {
-            log.info("Custom domain approval refused at the free allowance domainId={} cloudflareTotal={} notYetInCloudflare={} freeAllowance={}", id,
-                    cloudflareTotal, notYetInCloudflare, settings.getFreeAllowance());
-            throw new CustomDomainConflictException(FREE_ALLOWANCE_USED.formatted(hostnames, settings.getFreeAllowance()));
-        }
+        requireRoom(id, cloudflareTotal);
         if (customDomainRepository.markApproved(id, performedBy, note, LocalDateTime.now(clock)) != 1) {
             log.info("Custom domain application was reviewed before its approval domainId={}", id);
             throw new CustomDomainConflictException(ALREADY_REVIEWED);
         }
         eventPublisher.publishEvent(new CustomDomainChangedEvent(id));
         return reread(id);
+    }
+
+    private void requireRoom(final long id, final int cloudflareTotal) {
+        final var settings = appProperties.getDomains();
+        final var slotsInUse = customDomainRepository.countSlotsInUse();
+        if (slotsInUse >= settings.getMaxActive()) {
+            log.info("Custom domain refused at the cap domainId={} slotsInUse={} maxActive={}", id, slotsInUse, settings.getMaxActive());
+            throw new CustomDomainConflictException(CAP_REACHED.formatted(slotsInUse, settings.getMaxActive()));
+        }
+        final var notYetInCloudflare = customDomainRepository.countByStatus(CustomDomainStatus.APPROVED_PROVISIONING);
+        final var hostnames = cloudflareTotal + notYetInCloudflare;
+        if (hostnames >= settings.getFreeAllowance()) {
+            log.info("Custom domain refused at the free allowance domainId={} cloudflareTotal={} notYetInCloudflare={} freeAllowance={}", id,
+                    cloudflareTotal, notYetInCloudflare, settings.getFreeAllowance());
+            throw new CustomDomainConflictException(FREE_ALLOWANCE_USED.formatted(hostnames, settings.getFreeAllowance()));
+        }
+    }
+
+    private void provisionAgain(final CustomDomain domain) {
+        final var id = domain.getId();
+        final var cloudflareTotal = domain.getCloudflareId() == null ? liveTotal(cloudflareTokenCheck.check(), id) : null;
+        transactionOperations.executeWithoutResult(transaction -> {
+            if (cloudflareTotal != null) {
+                customDomainCapLock.lock();
+                requireRoom(id, cloudflareTotal);
+            }
+            if (customDomainRepository.markRetrying(id, LocalDateTime.now(clock)) != 1) {
+                log.info("Custom domain changed before its retry domainId={}", id);
+                throw new CustomDomainConflictException(NOTHING_TO_RETRY);
+            }
+            eventPublisher.publishEvent(new CustomDomainChangedEvent(id));
+        });
+        customDomainProvisioner.provision(id);
     }
 
     private void handOver(final long id) {

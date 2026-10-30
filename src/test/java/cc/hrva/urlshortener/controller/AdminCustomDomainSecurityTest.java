@@ -15,6 +15,8 @@ import cc.hrva.urlshortener.repository.AuditLogRepository;
 import cc.hrva.urlshortener.repository.CustomDomainAllowanceRepository;
 import cc.hrva.urlshortener.repository.CustomDomainCapLock;
 import cc.hrva.urlshortener.repository.CustomDomainReconcileRepository;
+import cc.hrva.urlshortener.repository.CustomDomainReconcileRepository.MissingDomain;
+import cc.hrva.urlshortener.repository.CustomDomainReconcileRepository.ReconcileRun;
 import cc.hrva.urlshortener.repository.CustomDomainRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.security.ClientIpResolver;
@@ -26,7 +28,10 @@ import cc.hrva.urlshortener.service.UserService;
 import cc.hrva.urlshortener.service.domain.AdminDomainResponses;
 import cc.hrva.urlshortener.service.domain.CloudflareTokenCheck;
 import cc.hrva.urlshortener.service.domain.CloudflareTokenCheck.TokenState;
+import cc.hrva.urlshortener.service.domain.CustomDomainLifecycle;
 import cc.hrva.urlshortener.service.domain.CustomDomainProvisioner;
+import cc.hrva.urlshortener.service.domain.CustomDomainReconciler;
+import cc.hrva.urlshortener.service.domain.CustomDomainReconciler.QuotaReading;
 import cc.hrva.urlshortener.service.domain.CustomDomainResponses;
 import cc.hrva.urlshortener.service.impl.DefaultAuditLogService;
 import cc.hrva.urlshortener.service.impl.DefaultCustomDomainAdminService;
@@ -42,6 +47,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.stream.IntStream;
 import org.hibernate.SessionFactory;
@@ -140,6 +146,12 @@ class AdminCustomDomainSecurityTest {
     private CustomDomainProvisioner customDomainProvisioner;
 
     @MockitoBean
+    private CustomDomainLifecycle customDomainLifecycle;
+
+    @MockitoBean
+    private CustomDomainReconciler customDomainReconciler;
+
+    @MockitoBean
     private ScammerSignalService scammerSignalService;
 
     @MockitoBean
@@ -198,6 +210,8 @@ class AdminCustomDomainSecurityTest {
                 post(DOMAINS + "/" + id + "/approve").contentType(MediaType.APPLICATION_JSON).content("{\"note\":null}"),
                 post(DOMAINS + "/" + id + "/reject").contentType(MediaType.APPLICATION_JSON).content("{\"note\":\"No\"}"),
                 post(DOMAINS + "/cloudflare-check"),
+                post(DOMAINS + "/" + id + "/retry"),
+                post(DOMAINS + "/reconcile"),
                 get(ALLOWANCES + ANA),
                 put(ALLOWANCES + ANA).contentType(MediaType.APPLICATION_JSON).content("{\"maxDomains\":3,\"reason\":\"Agency\"}"),
                 delete(ALLOWANCES + ANA));
@@ -210,7 +224,7 @@ class AdminCustomDomainSecurityTest {
         assertThat(statusOf(id)).isEqualTo("PENDING_REVIEW");
         assertThat(count("custom_domain_allowance")).isZero();
         assertThat(count("audit_log")).isZero();
-        verifyNoInteractions(cloudflareTokenCheck, customDomainProvisioner);
+        verifyNoInteractions(cloudflareTokenCheck, customDomainProvisioner, customDomainLifecycle, customDomainReconciler);
     }
 
     @Test
@@ -225,6 +239,10 @@ class AdminCustomDomainSecurityTest {
         mockMvc.perform(as(ADMIN_TOKEN, post(DOMAINS + "/" + rejecting + "/reject")).contentType(MediaType.APPLICATION_JSON).content("{\"note\":\"No\"}"))
                 .andExpect(status().isOk());
         mockMvc.perform(as(ADMIN_TOKEN, post(DOMAINS + "/cloudflare-check"))).andExpect(status().isOk());
+        jdbcTemplate.update("update custom_domain set status = 'AWAITING_DNS' where id = ?", approving);
+        mockMvc.perform(as(ADMIN_TOKEN, post(DOMAINS + "/" + approving + "/retry"))).andExpect(status().isOk());
+        when(customDomainReconciler.reconcile()).thenReturn(Optional.of(new ReconcileRun(NOW, 1, 1, List.of(), List.of(), null)));
+        mockMvc.perform(as(ADMIN_TOKEN, post(DOMAINS + "/reconcile"))).andExpect(status().isOk());
         mockMvc.perform(as(ADMIN_TOKEN, get(ALLOWANCES + ANA))).andExpect(status().isOk());
         mockMvc.perform(as(ADMIN_TOKEN, put(ALLOWANCES + ANA)).contentType(MediaType.APPLICATION_JSON).content("{\"maxDomains\":3,\"reason\":\"Agency\"}"))
                 .andExpect(status().isOk());
@@ -434,6 +452,62 @@ class AdminCustomDomainSecurityTest {
                 .containsEntry("target_identifier", String.valueOf(id))
                 .containsEntry("failed", false));
         verifyNoInteractions(cloudflareTokenCheck, customDomainProvisioner);
+    }
+
+    @Test
+    void anAdminRetriesAWaitingDomainAndTheAuditRowSaysSo() throws Exception {
+        final var id = domain(ANA, "go.example.com", "AWAITING_DNS", NOW.minusDays(1));
+
+        mockMvc.perform(as(ADMIN_TOKEN, post(DOMAINS + "/" + id + "/retry")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(id))
+                .andExpect(jsonPath("$.status").value("AWAITING_DNS"))
+                .andExpect(jsonPath("$.owner.email").value(ANA_EMAIL));
+
+        verify(customDomainLifecycle).checkNow(id);
+        verifyNoInteractions(customDomainProvisioner);
+        assertThat(auditRows()).singleElement().satisfies(audit -> assertThat(audit)
+                .containsEntry("action", "RETRY_DOMAIN")
+                .containsEntry("performed_by", ADMIN_EMAIL)
+                .containsEntry("target_type", "CustomDomain")
+                .containsEntry("target_identifier", String.valueOf(id))
+                .containsEntry("failed", false));
+    }
+
+    @Test
+    void aRetryWithNothingToRetryIsAConflict() throws Exception {
+        final var id = domain(ANA, "go.example.com", "ACTIVE", NOW.minusDays(1));
+
+        mockMvc.perform(as(ADMIN_TOKEN, post(DOMAINS + "/" + id + "/retry")))
+                .andExpect(status().isConflict())
+                .andExpect(content().json("{\"error\":\"There's nothing to retry for this domain.\"}", JsonCompareMode.STRICT));
+        mockMvc.perform(as(ADMIN_TOKEN, post(DOMAINS + "/987654/retry"))).andExpect(status().isNotFound());
+
+        verifyNoInteractions(customDomainLifecycle, customDomainProvisioner);
+        assertThat(auditRows()).extracting(audit -> audit.get("failed")).containsOnly(true);
+    }
+
+    @Test
+    void aReconcileAnswersItsRunWithTheIgnoredHostnames() throws Exception {
+        when(customDomainReconciler.reconcile()).thenReturn(Optional.of(new ReconcileRun(NOW, 4, 3, List.of("stray.example.com"),
+                List.of(new MissingDomain(9L, "x.example.org")), null)));
+
+        mockMvc.perform(as(ADMIN_TOKEN, post(DOMAINS + "/reconcile")))
+                .andExpect(status().isOk())
+                .andExpect(content().json("""
+                        {"ranAt":"2026-10-29T09:00:00","cloudflareTotal":4,"oursInCloudflare":3,"unknownHostnames":["stray.example.com"],
+                        "missing":[{"id":9,"hostname":"x.example.org"}],"ignored":["test.karlo.cc"],"error":null}
+                        """, JsonCompareMode.STRICT));
+    }
+
+    @Test
+    void theSummaryShowsTheLastQuotaReading() throws Exception {
+        when(customDomainReconciler.lastQuota()).thenReturn(Optional.of(new QuotaReading(4, 50_000, NOW)));
+
+        mockMvc.perform(as(ADMIN_TOKEN, get(DOMAINS + "/summary")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.cloudflareQuota.used").value(4))
+                .andExpect(jsonPath("$.cloudflareQuota.allocated").value(50_000));
     }
 
     @Test
