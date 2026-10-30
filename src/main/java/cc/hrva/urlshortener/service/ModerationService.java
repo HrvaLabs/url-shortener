@@ -11,6 +11,8 @@ import cc.hrva.urlshortener.model.enums.BlockReason;
 import cc.hrva.urlshortener.model.enums.DomainRuleType;
 import cc.hrva.urlshortener.model.enums.ReviewAction;
 import java.util.List;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 
 public interface ModerationService {
 
@@ -20,7 +22,7 @@ public interface ModerationService {
     DomainBulkBlockResponse blockDomains(List<String> domains, String reason, String performedBy, String via);
     int allowDomain(String domain, String reason, String performedBy, String via);
     DomainRuleCreatedResponse createDomainRule(DomainRuleDto domainRuleDto, String performedBy, String via);
-    List<DomainRuleResponse> domainRules(DomainRuleType type);
+    Page<DomainRuleResponse> domainRules(DomainRuleType type, String search, Pageable pageable);
     void removeDomainRule(String domain, String performedBy, String via);
     void removeDomainRule(long ruleId, String performedBy, String via);
     int blockUser(long userId, String performedBy, String via, Integer maxLinks);

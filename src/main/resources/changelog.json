@@ -1,10 +1,24 @@
 {
   "releases": [
     {
-      "version": "v2.16",
+      "version": "v2.17",
       "date": "2026-10-30",
       "badge": "Latest",
       "badgeVariant": "default",
+      "summary": "A paged domain rules list for admins.",
+      "sections": [
+        {
+          "title": "Admin",
+          "icon": "wrench",
+          "items": [
+            "Domain rules are listed page by page, with a search box."
+          ]
+        }
+      ]
+    },
+    {
+      "version": "v2.16",
+      "date": "2026-10-30",
       "summary": "Custom domains: apply for your own subdomain, like go.example.com, and make short links on it.",
       "sections": [
         {

@@ -7,10 +7,13 @@ import cc.hrva.urlshortener.configuration.SecurityConfiguration;
 import cc.hrva.urlshortener.configuration.WebConfiguration;
 import cc.hrva.urlshortener.dto.DomainBlockPreviewResponse;
 import cc.hrva.urlshortener.dto.DomainBulkBlockResponse;
+import cc.hrva.urlshortener.dto.DomainRuleResponse;
+import cc.hrva.urlshortener.exception.InvalidSortException;
 import cc.hrva.urlshortener.mcp.McpResourceServerConfiguration;
 import cc.hrva.urlshortener.mcp.authorization.AuthorizationServerConfiguration;
 import cc.hrva.urlshortener.mcp.bridge.ConnectRequestStore;
 import cc.hrva.urlshortener.model.User;
+import cc.hrva.urlshortener.model.enums.DomainRuleType;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.security.AnyHostIsPrimary;
@@ -24,6 +27,7 @@ import cc.hrva.urlshortener.service.ratelimit.RateLimiter;
 import com.nimbusds.jose.JOSEException;
 import com.nimbusds.jose.jwk.RSAKey;
 import com.nimbusds.jose.jwk.gen.RSAKeyGenerator;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 import java.util.stream.IntStream;
@@ -36,6 +40,9 @@ import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.http.MediaType;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
@@ -46,9 +53,11 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -68,6 +77,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @AutoConfigureMockMvc
 class AdminDomainRuleSecurityTest {
 
+    private static final String RULES = "/api/v1/admin/domain-rules";
     private static final String BULK_PREVIEW = "/api/v1/admin/domain-rules/bulk-preview";
     private static final String BULK = "/api/v1/admin/domain-rules/bulk";
     private static final String PREVIEW_BODY = "{\"urlIds\":[287,288]}";
@@ -141,6 +151,41 @@ class AdminDomainRuleSecurityTest {
     }
 
     @Test
+    void anAdminGetsThePagedListOfRules() throws Exception {
+        when(moderationService.domainRules(DomainRuleType.BLOCK, "phish", PageRequest.of(1, 10)))
+                .thenReturn(new PageImpl<>(List.of(new DomainRuleResponse(7L, "jofogas.cards", DomainRuleType.BLOCK, "phishing wave", ADMIN,
+                        LocalDateTime.of(2026, 10, 21, 9, 30))), PageRequest.of(1, 10), 11));
+
+        mockMvc.perform(signedInGet(RULES, "admin-token").param("type", "BLOCK").param("search", "phish").param("page", "1").param("size", "10"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].domain").value("jofogas.cards"))
+                .andExpect(jsonPath("$.page.number").value(1))
+                .andExpect(jsonPath("$.page.size").value(10))
+                .andExpect(jsonPath("$.page.totalElements").value(11))
+                .andExpect(jsonPath("$.page.totalPages").value(2));
+    }
+
+    @Test
+    void anUnknownSortFieldIsABadRequestThroughTheRealStack() throws Exception {
+        when(moderationService.domainRules(any(), any(), any(Pageable.class)))
+                .thenThrow(new InvalidSortException("Sort must be domain, type or createdAt"));
+
+        mockMvc.perform(signedInGet(RULES, "admin-token").param("sort", "createDate,desc"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("Sort must be domain, type or createdAt"));
+    }
+
+    @Test
+    void onlyAnAdminMayListTheRules() throws Exception {
+        mockMvc.perform(signedInGet(RULES, "user-token"))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get(RULES))
+                .andExpect(status().isUnauthorized());
+
+        verifyNoInteractions(moderationService);
+    }
+
+    @Test
     void aSignedInUserWhoIsNotAnAdminIsForbidden() throws Exception {
         mockMvc.perform(signedInPost(BULK_PREVIEW, "user-token").content(PREVIEW_BODY))
                 .andExpect(status().isForbidden());
@@ -189,6 +234,10 @@ class AdminDomainRuleSecurityTest {
         lenient().when(tokenProvider.getAuthentication(token))
                 .thenReturn(UsernamePasswordAuthenticationToken.authenticated(email, null, List.of(new SimpleGrantedAuthority(role))));
         lenient().when(userRepository.findByEmail(email)).thenReturn(Optional.of(User.builder().email(email).active(true).build()));
+    }
+
+    private static MockHttpServletRequestBuilder signedInGet(final String path, final String token) {
+        return get(path).header(JwtFilter.AUTHORIZATION_HEADER, "Bearer " + token);
     }
 
     private static MockHttpServletRequestBuilder signedInPost(final String path, final String token) {

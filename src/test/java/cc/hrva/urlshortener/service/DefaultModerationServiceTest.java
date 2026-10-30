@@ -9,6 +9,7 @@ import cc.hrva.urlshortener.dto.LinkVerdict;
 import cc.hrva.urlshortener.dto.LinkVerdict.Outcome;
 import cc.hrva.urlshortener.dto.ReviewBulkResolveResponse;
 import cc.hrva.urlshortener.exception.DomainRuleNotFoundException;
+import cc.hrva.urlshortener.exception.InvalidSortException;
 import cc.hrva.urlshortener.exception.UrlNotFoundException;
 import cc.hrva.urlshortener.exception.UrlValidationException;
 import cc.hrva.urlshortener.exception.UserNotFoundException;
@@ -70,8 +71,10 @@ import org.springframework.core.task.TaskRejectedException;
 import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.scheduling.TaskScheduler;
 import org.springframework.transaction.support.SimpleTransactionStatus;
 import org.springframework.transaction.support.TransactionCallback;
@@ -1439,28 +1442,77 @@ class DefaultModerationServiceTest {
         assertThatThrownBy(() -> moderationService.removeDomainRule(99L, ADMIN, "admin"))
                 .isInstanceOf(DomainRuleNotFoundException.class)
                 .hasMessage("There is no rule with id 99.");
-        verify(domainRuleRepository, never()).delete(any());
+        verify(domainRuleRepository, never()).delete(any(DomainRule.class));
         verifyNoInteractions(auditLogService, eventPublisher);
     }
 
     @Test
-    void domainRulesOfOneTypeComeNewestFirstWithEveryField() {
-        final var older = rule("jofogas.cards", DomainRuleType.BLOCK);
+    void domainRulesComeAsAPageOfResponsesWithEveryField() {
         final var newer = rule("njuskaio.cam", DomainRuleType.BLOCK);
-        when(domainRuleRepository.findByTypeOrderByCreatedAtDescIdDesc(DomainRuleType.BLOCK)).thenReturn(List.of(newer, older));
+        final var older = rule("jofogas.cards", DomainRuleType.BLOCK);
+        when(domainRuleRepository.findAll(anySpecification(), any(Pageable.class)))
+                .thenAnswer(invocation -> new PageImpl<>(List.of(newer, older), invocation.getArgument(1), 7));
 
-        assertThat(moderationService.domainRules(DomainRuleType.BLOCK)).containsExactly(
+        final var page = moderationService.domainRules(DomainRuleType.BLOCK, "phish", PageRequest.of(1, 2));
+
+        assertThat(page.getContent()).containsExactly(
                 new DomainRuleResponse(newer.getId(), "njuskaio.cam", DomainRuleType.BLOCK, "seeded", "system", RULE_CREATED_AT),
                 new DomainRuleResponse(older.getId(), "jofogas.cards", DomainRuleType.BLOCK, "seeded", "system", RULE_CREATED_AT));
+        assertThat(page.getTotalElements()).isEqualTo(7);
+        assertThat(page.getNumber()).isEqualTo(1);
     }
 
     @Test
-    void domainRulesWithoutATypeListEveryRuleNewestFirst() {
-        final var block = rule("jofogas.cards", DomainRuleType.BLOCK);
-        final var allow = rule("gableci.hrva.cc", DomainRuleType.ALLOW);
-        when(domainRuleRepository.findAll(Sort.by(Sort.Order.desc("createdAt"), Sort.Order.desc("id")))).thenReturn(List.of(allow, block));
+    void domainRulesWithoutASortComeNewestFirst() {
+        when(domainRuleRepository.findAll(anySpecification(), any(Pageable.class))).thenReturn(Page.empty());
 
-        assertThat(moderationService.domainRules(null)).extracting(DomainRuleResponse::domain).containsExactly("gableci.hrva.cc", "jofogas.cards");
+        moderationService.domainRules(null, null, PageRequest.of(2, 50));
+
+        verify(domainRuleRepository).findAll(anySpecification(),
+                eq(PageRequest.of(2, 50, Sort.by(Sort.Order.desc("createdAt"), Sort.Order.desc("id")))));
+    }
+
+    @Test
+    void aChosenSortKeepsItsPageAndBreaksTiesNewestFirst() {
+        when(domainRuleRepository.findAll(anySpecification(), any(Pageable.class))).thenReturn(Page.empty());
+
+        moderationService.domainRules(null, null, PageRequest.of(1, 20, Sort.by(Sort.Order.asc("type"))));
+
+        verify(domainRuleRepository).findAll(anySpecification(),
+                eq(PageRequest.of(1, 20, Sort.by(Sort.Order.asc("type"), Sort.Order.desc("createdAt"), Sort.Order.desc("id")))));
+    }
+
+    @Test
+    void sortingByDomainOrByAgeKeepsTheChosenDirection() {
+        when(domainRuleRepository.findAll(anySpecification(), any(Pageable.class))).thenReturn(Page.empty());
+
+        moderationService.domainRules(DomainRuleType.ALLOW, null, PageRequest.of(0, 20, Sort.by(Sort.Order.desc("domain"))));
+        moderationService.domainRules(DomainRuleType.ALLOW, null, PageRequest.of(0, 20, Sort.by(Sort.Order.asc("createdAt"))));
+
+        verify(domainRuleRepository).findAll(anySpecification(),
+                eq(PageRequest.of(0, 20, Sort.by(Sort.Order.desc("domain"), Sort.Order.desc("createdAt"), Sort.Order.desc("id")))));
+        verify(domainRuleRepository).findAll(anySpecification(),
+                eq(PageRequest.of(0, 20, Sort.by(Sort.Order.asc("createdAt"), Sort.Order.desc("id")))));
+    }
+
+    @Test
+    void aPageOfMoreThanAHundredRulesIsCutToAHundred() {
+        when(domainRuleRepository.findAll(anySpecification(), any(Pageable.class))).thenReturn(Page.empty());
+
+        moderationService.domainRules(null, null, PageRequest.of(3, 500));
+
+        verify(domainRuleRepository).findAll(anySpecification(),
+                eq(PageRequest.of(3, 100, Sort.by(Sort.Order.desc("createdAt"), Sort.Order.desc("id")))));
+    }
+
+    @Test
+    void sortingByAFieldThatIsNotOnTheListIsRefused() {
+        assertThatThrownBy(() -> moderationService.domainRules(null, null, PageRequest.of(0, 20, Sort.by("createdBy"))))
+                .isInstanceOf(InvalidSortException.class)
+                .hasMessage("Sort must be domain, type or createdAt");
+        assertThatThrownBy(() -> moderationService.domainRules(null, null, PageRequest.of(0, 20, Sort.by("domain", "owner.email"))))
+                .isInstanceOf(InvalidSortException.class);
+        verify(domainRuleRepository, never()).findAll(anySpecification(), any(Pageable.class));
     }
 
     @Test
@@ -1484,7 +1536,7 @@ class DefaultModerationServiceTest {
         order.verify(eventPublisher).publishEvent(any(BlocklistConfigurationChangedEvent.class));
         order.verify(domainRuleRepository).save(argThat(rule -> rule.getDomain().equals("njuskaio.cam")));
         order.verify(eventPublisher).publishEvent(any(BlocklistConfigurationChangedEvent.class));
-        order.verify(domainRuleRepository).delete(argThat(rule -> rule.getDomain().equals("jofogas.cards")));
+        order.verify(domainRuleRepository).delete(argThat((DomainRule rule) -> rule.getDomain().equals("jofogas.cards")));
         order.verify(eventPublisher).publishEvent(any(BlocklistConfigurationChangedEvent.class));
     }
 
@@ -1510,7 +1562,7 @@ class DefaultModerationServiceTest {
         assertThatThrownBy(() -> moderationService.removeDomainRule("example.org", ADMIN, "admin"))
                 .isInstanceOf(DomainRuleNotFoundException.class)
                 .hasMessage("There is no rule for example.org.");
-        verify(domainRuleRepository, never()).delete(any());
+        verify(domainRuleRepository, never()).delete(any(DomainRule.class));
         verifyNoInteractions(auditLogService);
     }
 
@@ -2013,6 +2065,11 @@ class DefaultModerationServiceTest {
         url.setBlockDetail(reason == BlockReason.BLOCKLIST ? "URLhaus" : "detail");
         url.setBlockedAt(BLOCKED_AT);
         return url;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Specification<DomainRule> anySpecification() {
+        return any(Specification.class);
     }
 
     private DomainRule rule(final String domain, final DomainRuleType type) {

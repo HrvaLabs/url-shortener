@@ -13,6 +13,9 @@ import io.swagger.v3.oas.annotations.Hidden;
 import jakarta.validation.Valid;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.web.PageableDefault;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
@@ -38,8 +41,11 @@ public class AdminDomainRuleController {
 
     @GetMapping
     @PreAuthorize("hasRole('ROLE_ADMIN')")
-    public ResponseEntity<List<DomainRuleResponse>> fetchRules(@RequestParam(name = "type", required = false) final DomainRuleType type) {
-        return ResponseEntity.ok(moderationService.domainRules(type));
+    public ResponseEntity<Page<DomainRuleResponse>> fetchRules(
+            @PageableDefault(size = 20) final Pageable pageable,
+            @RequestParam(name = "type", required = false) final DomainRuleType type,
+            @RequestParam(name = "search", required = false) final String search) {
+        return ResponseEntity.ok(moderationService.domainRules(type, search, pageable));
     }
 
     @PostMapping

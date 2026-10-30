@@ -7,6 +7,7 @@ import cc.hrva.urlshortener.dto.DomainRuleCreatedResponse;
 import cc.hrva.urlshortener.dto.DomainRuleDto;
 import cc.hrva.urlshortener.dto.DomainRuleResponse;
 import cc.hrva.urlshortener.exception.DomainRuleNotFoundException;
+import cc.hrva.urlshortener.exception.InvalidSortException;
 import cc.hrva.urlshortener.exception.UrlValidationException;
 import cc.hrva.urlshortener.model.enums.DomainRuleType;
 import cc.hrva.urlshortener.service.ModerationService;
@@ -19,6 +20,11 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.web.PageableHandlerMethodArgumentResolver;
 import org.springframework.http.MediaType;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
@@ -30,6 +36,8 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -62,33 +70,69 @@ class AdminDomainRuleControllerTest {
     @BeforeEach
     void setUp() {
         mockMvc = MockMvcBuilders.standaloneSetup(new AdminDomainRuleController(moderationService))
+                .setCustomArgumentResolvers(new PageableHandlerMethodArgumentResolver())
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .build();
     }
 
     @Test
-    void listingRulesOfOneTypeReturnsEveryField() throws Exception {
-        when(moderationService.domainRules(DomainRuleType.BLOCK)).thenReturn(List.of(BLOCKED));
+    void listingRulesOfOneTypeReturnsAPageWithEveryField() throws Exception {
+        when(moderationService.domainRules(eq(DomainRuleType.BLOCK), isNull(), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(BLOCKED), PageRequest.of(0, 20), 1));
 
         mockMvc.perform(get("/api/v1/admin/domain-rules").param("type", "BLOCK").principal(SIGNED_IN_ADMIN))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$[0].id").value(7))
-                .andExpect(jsonPath("$[0].domain").value("jofogas.cards"))
-                .andExpect(jsonPath("$[0].type").value("BLOCK"))
-                .andExpect(jsonPath("$[0].reason").value("phishing wave"))
-                .andExpect(jsonPath("$[0].createdBy").value(ADMIN))
-                .andExpect(jsonPath("$[0].createdAt").exists());
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.content[0].id").value(7))
+                .andExpect(jsonPath("$.content[0].domain").value("jofogas.cards"))
+                .andExpect(jsonPath("$.content[0].type").value("BLOCK"))
+                .andExpect(jsonPath("$.content[0].reason").value("phishing wave"))
+                .andExpect(jsonPath("$.content[0].createdBy").value(ADMIN))
+                .andExpect(jsonPath("$.content[0].createdAt").exists());
     }
 
     @Test
     void listingWithoutATypeReturnsEveryRule() throws Exception {
-        when(moderationService.domainRules(null)).thenReturn(List.of(BLOCKED, TRUSTED));
+        when(moderationService.domainRules(isNull(), isNull(), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(BLOCKED, TRUSTED), PageRequest.of(0, 20), 2));
 
         mockMvc.perform(get("/api/v1/admin/domain-rules").principal(SIGNED_IN_ADMIN))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(2))
-                .andExpect(jsonPath("$[1].reason").value(nullValue()))
-                .andExpect(jsonPath("$[1].createdBy").value(nullValue()));
+                .andExpect(jsonPath("$.content.length()").value(2))
+                .andExpect(jsonPath("$.content[1].reason").value(nullValue()))
+                .andExpect(jsonPath("$.content[1].createdBy").value(nullValue()));
+    }
+
+    @Test
+    void listingPassesThePageTheSortAndTheSearchOn() throws Exception {
+        when(moderationService.domainRules(eq(DomainRuleType.ALLOW), eq("padlet"), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(), PageRequest.of(2, 50), 0));
+
+        mockMvc.perform(get("/api/v1/admin/domain-rules").principal(SIGNED_IN_ADMIN)
+                        .param("type", "ALLOW").param("search", "padlet").param("page", "2").param("size", "50").param("sort", "domain,desc"))
+                .andExpect(status().isOk());
+
+        verify(moderationService).domainRules(DomainRuleType.ALLOW, "padlet", PageRequest.of(2, 50, Sort.by(Sort.Order.desc("domain"))));
+    }
+
+    @Test
+    void listingWithoutAPageAsksForTheFirstTwenty() throws Exception {
+        when(moderationService.domainRules(isNull(), isNull(), any(Pageable.class))).thenReturn(new PageImpl<>(List.of(), PageRequest.of(0, 20), 0));
+
+        mockMvc.perform(get("/api/v1/admin/domain-rules").principal(SIGNED_IN_ADMIN))
+                .andExpect(status().isOk());
+
+        verify(moderationService).domainRules(null, null, PageRequest.of(0, 20));
+    }
+
+    @Test
+    void anUnknownSortFieldIsABadRequestNamingTheFieldsAllowed() throws Exception {
+        when(moderationService.domainRules(isNull(), isNull(), any(Pageable.class)))
+                .thenThrow(new InvalidSortException("Sort must be domain, type or createdAt"));
+
+        mockMvc.perform(get("/api/v1/admin/domain-rules").param("sort", "createDate,desc").principal(SIGNED_IN_ADMIN))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("Sort must be domain, type or createdAt"));
     }
 
     @Test

@@ -11,6 +11,7 @@ import cc.hrva.urlshortener.dto.ReviewBulkResolveResponse;
 import cc.hrva.urlshortener.dto.UrlResponse;
 import cc.hrva.urlshortener.exception.CommonException;
 import cc.hrva.urlshortener.exception.DomainRuleNotFoundException;
+import cc.hrva.urlshortener.exception.InvalidSortException;
 import cc.hrva.urlshortener.exception.UrlNotFoundException;
 import cc.hrva.urlshortener.exception.UrlValidationException;
 import cc.hrva.urlshortener.exception.UserNotFoundException;
@@ -28,6 +29,7 @@ import cc.hrva.urlshortener.model.enums.ThreatType;
 import cc.hrva.urlshortener.repository.DomainRuleRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
+import cc.hrva.urlshortener.repository.specification.DomainRuleSpecification;
 import cc.hrva.urlshortener.service.AuditLogService;
 import cc.hrva.urlshortener.service.LinkCheckService;
 import cc.hrva.urlshortener.service.ModerationService;
@@ -76,6 +78,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.scheduling.TaskScheduler;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
@@ -113,7 +116,12 @@ public class DefaultModerationService implements ModerationService {
     private static final String ROLE_ADMIN = "ROLE_ADMIN";
     private static final String SYSTEM = "system";
     private static final String NO_RULE_TYPE = "Choose whether the rule blocks or allows the domain";
-    private static final Sort NEWEST_RULES_FIRST = Sort.by(Sort.Order.desc("createdAt"), Sort.Order.desc("id"));
+    private static final String CREATED_AT = "createdAt";
+    private static final String ID = "id";
+    private static final Sort NEWEST_RULES_FIRST = Sort.by(Sort.Order.desc(CREATED_AT), Sort.Order.desc(ID));
+    private static final List<String> RULE_SORT_FIELDS = List.of("domain", "type", CREATED_AT);
+    private static final String RULE_SORT_REFUSED = "Sort must be domain, type or createdAt";
+    private static final int MAX_RULES_PER_PAGE = 100;
     private static final Set<BlockReason> RESTORED_BY_ALLOW = EnumSet.of(BlockReason.BLOCKLIST, BlockReason.SCAM_SIGNALS, BlockReason.DOMAIN_RULE);
     private static final Duration SECOND_EVICTION_DELAY = Duration.ofSeconds(2);
     private static final int MAX_COLUMN_LENGTH = 255;
@@ -277,11 +285,30 @@ public class DefaultModerationService implements ModerationService {
     }
 
     @Override
-    public List<DomainRuleResponse> domainRules(final DomainRuleType type) {
-        final var rules = type == null
-                ? domainRuleRepository.findAll(NEWEST_RULES_FIRST)
-                : domainRuleRepository.findByTypeOrderByCreatedAtDescIdDesc(type);
-        return rules.stream().map(DomainRuleResponse::from).toList();
+    public Page<DomainRuleResponse> domainRules(final DomainRuleType type, final String search, final Pageable pageable) {
+        var spec = Specification.<DomainRule>unrestricted();
+        if (type != null) {
+            spec = spec.and(DomainRuleSpecification.hasType(type));
+        }
+        if (StringUtils.isNotBlank(search)) {
+            spec = spec.and(DomainRuleSpecification.searchMatches(search.strip()));
+        }
+        final var sort = ruleSortOf(pageable.getSort());
+        final var sortedPageable = pageable.isPaged()
+                ? PageRequest.of(pageable.getPageNumber(), Math.min(pageable.getPageSize(), MAX_RULES_PER_PAGE), sort)
+                : Pageable.unpaged(sort);
+        return domainRuleRepository.findAll(spec, sortedPageable).map(DomainRuleResponse::from);
+    }
+
+    private static Sort ruleSortOf(final Sort requested) {
+        if (requested.isUnsorted()) {
+            return NEWEST_RULES_FIRST;
+        }
+        if (requested.stream().anyMatch(order -> !RULE_SORT_FIELDS.contains(order.getProperty()))) {
+            throw new InvalidSortException(RULE_SORT_REFUSED);
+        }
+        final var withAge = requested.getOrderFor(CREATED_AT) == null ? requested.and(Sort.by(Sort.Order.desc(CREATED_AT))) : requested;
+        return withAge.and(Sort.by(Sort.Order.desc(ID)));
     }
 
     @Override
