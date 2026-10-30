@@ -139,6 +139,10 @@ public interface UrlRepository extends JpaRepository<Url, Long>, JpaSpecificatio
     List<LinkDestination> findBlockedDestinationsAfter(
             @Param("reasons") Collection<BlockReason> reasons, @Param("afterId") long afterId, Pageable pageable);
 
+    @Query("select new cc.hrva.urlshortener.dto.LinkDestination(u.id, u.longUrl) from Url u "
+            + "where u.active = false and u.blockReason in :reasons and u.id in :ids order by u.id")
+    List<LinkDestination> findBlockedDestinationsByIdIn(@Param("reasons") Collection<BlockReason> reasons, @Param("ids") Collection<Long> ids);
+
     @Query("select u.longUrl from Url u where (lower(u.longUrl) like concat('%', :domain, '%') "
             + "or lower(u.longUrl) like concat('%', :unicodeDomain, '%')) "
             + "and (u.blockReason is not null "

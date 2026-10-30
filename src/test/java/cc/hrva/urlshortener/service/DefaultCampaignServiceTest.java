@@ -1,15 +1,31 @@
 package cc.hrva.urlshortener.service;
 
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
+import cc.hrva.urlshortener.dto.DomainBlockPreviewResponse;
 import cc.hrva.urlshortener.dto.LinkVerdict.Outcome;
+import cc.hrva.urlshortener.dto.campaign.CampaignDomainCount;
+import cc.hrva.urlshortener.dto.campaign.CampaignDomainResponse;
+import cc.hrva.urlshortener.dto.campaign.CampaignLinkCounts;
+import cc.hrva.urlshortener.dto.campaign.CampaignLinkResponse;
+import cc.hrva.urlshortener.dto.campaign.CampaignReportCounts;
+import cc.hrva.urlshortener.dto.campaign.CampaignResponse;
+import cc.hrva.urlshortener.dto.campaign.ReportStatus;
+import cc.hrva.urlshortener.exception.CampaignNotFoundException;
+import cc.hrva.urlshortener.exception.InvalidSortException;
 import cc.hrva.urlshortener.model.Campaign;
 import cc.hrva.urlshortener.model.CampaignLink;
 import cc.hrva.urlshortener.model.CampaignLinkId;
+import cc.hrva.urlshortener.model.ReportedDomain;
 import cc.hrva.urlshortener.model.Url;
+import cc.hrva.urlshortener.model.enums.AuditAction;
+import cc.hrva.urlshortener.model.enums.BlockReason;
 import cc.hrva.urlshortener.model.enums.CampaignStatus;
 import cc.hrva.urlshortener.repository.CampaignLinkRepository;
 import cc.hrva.urlshortener.repository.CampaignRepository;
+import cc.hrva.urlshortener.repository.LinkStatsRepository;
+import cc.hrva.urlshortener.repository.ReportedDomainRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
+import cc.hrva.urlshortener.service.analytics.AnalyticsDays;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.ShapeHeld;
 import cc.hrva.urlshortener.service.burst.RedisBurstCounter;
@@ -22,6 +38,7 @@ import cc.hrva.urlshortener.service.settings.SettingsServiceFixtures;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
@@ -31,6 +48,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.LongStream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -39,6 +57,7 @@ import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.NullAndEmptySource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.boot.test.system.CapturedOutput;
@@ -46,6 +65,11 @@ import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.data.redis.RedisConnectionFailureException;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.transaction.annotation.Propagation;
@@ -54,15 +78,18 @@ import org.springframework.transaction.support.TransactionOperations;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith({MockitoExtension.class, OutputCaptureExtension.class})
@@ -77,6 +104,7 @@ class DefaultCampaignServiceTest {
     private static final UrlShape URL_SHAPE = UrlShapes.of("https://a.com/wqamhcsom?r=1&t=2").orElseThrow();
     private static final String SHAPE_KEY = URL_SHAPE.key();
     private static final String COUNTED_KEY = "campaign:shape:" + SHAPE_KEY;
+    private static final String ADMIN = "karlo@hrva.cc";
 
     @Mock
     private RedisBurstCounter redisBurstCounter;
@@ -96,6 +124,15 @@ class DefaultCampaignServiceTest {
     @Mock
     private ApplicationEventPublisher eventPublisher;
 
+    @Mock
+    private LinkStatsRepository linkStatsRepository;
+
+    @Mock
+    private ReportedDomainRepository reportedDomainRepository;
+
+    @Mock
+    private AuditLogService auditLogService;
+
     private final AppProperties appProperties = new AppProperties();
     private final DefaultSettingsService settingsService = SettingsServiceFixtures.defaults(appProperties);
     private final List<String> window = new ArrayList<>();
@@ -108,7 +145,8 @@ class DefaultCampaignServiceTest {
     @BeforeEach
     void setUp() {
         campaignService = new DefaultCampaignService(redisBurstCounter, urlRepository, campaignRepository, campaignLinkRepository, moderationService,
-                eventPublisher, TransactionOperations.withoutTransaction(), Clock.fixed(NOW, ZoneOffset.UTC), settingsService);
+                eventPublisher, TransactionOperations.withoutTransaction(), Clock.fixed(NOW, ZoneOffset.UTC), settingsService, linkStatsRepository,
+                reportedDomainRepository, auditLogService, new AnalyticsDays(Clock.fixed(NOW, ZoneOffset.UTC), appProperties));
         storing();
     }
 
@@ -688,6 +726,268 @@ class DefaultCampaignServiceTest {
 
         assertThat(async).isNotNull();
         assertThat(async.value()).isEmpty();
+    }
+
+    @Test
+    void recentListsOnlyTheLast90Days() {
+        final var campaign = row(CampaignStatus.HOLDING, HELD_UNTIL);
+        when(campaignRepository.findRecent(any(), anyString(), any(Pageable.class))).thenReturn(new PageImpl<>(List.of(campaign), PageRequest.of(0, 20), 1));
+
+        final var page = campaignService.campaigns(null, PageRequest.of(0, 20));
+
+        verify(campaignRepository).findRecent(NOW_LOCAL.minusDays(90), "%", PageRequest.of(0, 20, Sort.by(Sort.Order.desc("lastSeenAt"), Sort.Order.desc("id"))));
+        assertThat(page.getContent()).extracting(CampaignResponse::id).containsExactly(4L);
+        assertThat(page.getTotalElements()).isEqualTo(1);
+    }
+
+    @Test
+    void theListSearchesWithTheEscapedWordsAndSortsOnlyByTheWhitelist() {
+        when(campaignRepository.findRecent(any(), anyString(), any(Pageable.class))).thenReturn(new PageImpl<>(List.of(), PageRequest.of(1, 50), 0));
+
+        assertThat(campaignService.campaigns("  R_x% ", PageRequest.of(1, 50, Sort.by(Sort.Order.asc("status"))))).isEmpty();
+        campaignService.campaigns(" ", PageRequest.of(0, 20, Sort.by(Sort.Order.desc("firstSeenAt"))));
+
+        verify(campaignRepository).findRecent(NOW_LOCAL.minusDays(90), "%r\\_x\\%%", PageRequest.of(1, 50,
+                Sort.by(Sort.Order.asc("status"), Sort.Order.desc("lastSeenAt"), Sort.Order.desc("id"))));
+        verify(campaignRepository).findRecent(NOW_LOCAL.minusDays(90), "%", PageRequest.of(0, 20,
+                Sort.by(Sort.Order.desc("firstSeenAt"), Sort.Order.desc("lastSeenAt"), Sort.Order.desc("id"))));
+        verifyNoInteractions(campaignLinkRepository, linkStatsRepository);
+        assertThatThrownBy(() -> campaignService.campaigns(null, PageRequest.of(0, 20, Sort.by("shapeKey"))))
+                .isInstanceOf(InvalidSortException.class)
+                .hasMessage("Sort must be lastSeenAt, firstSeenAt or status");
+    }
+
+    @Test
+    void rowCountsActiveHeldAndBlocked() {
+        final var holding = row(CampaignStatus.HOLDING, HELD_UNTIL);
+        final var expired = row(CampaignStatus.HOLDING, NOW_LOCAL);
+        expired.setId(5L);
+        final var allowed = row(CampaignStatus.ALLOWED, NOW_LOCAL.plusDays(3));
+        allowed.setId(6L);
+        allowed.setAllowedBy(ADMIN);
+        allowed.setAllowedAt(NOW_LOCAL.minusHours(2));
+        listed(holding, expired, allowed);
+        when(campaignLinkRepository.countByCampaignIdIn(List.of(4L, 5L, 6L)))
+                .thenReturn(List.of(new CampaignLinkCounts(4L, 62, 0, 58, 3, 39, NOW_LOCAL.minusDays(9))));
+
+        final var rows = campaignService.campaigns(null, PageRequest.of(0, 20)).getContent();
+
+        assertThat(rows).containsExactly(
+                new CampaignResponse(4L, SHAPE, PATH, List.of("r", "t"), CampaignStatus.HOLDING, true, NOW_LOCAL.minusDays(10), NOW_LOCAL.minusDays(1),
+                        HELD_UNTIL, null, null, new CampaignResponse.Links(62, 0, 58, 3), 39, 0, new CampaignResponse.Reports(0, 0)),
+                new CampaignResponse(5L, SHAPE, PATH, List.of("r", "t"), CampaignStatus.HOLDING, false, NOW_LOCAL.minusDays(10), NOW_LOCAL.minusDays(1),
+                        NOW_LOCAL, null, null, new CampaignResponse.Links(0, 0, 0, 0), 0, 0, new CampaignResponse.Reports(0, 0)),
+                new CampaignResponse(6L, SHAPE, PATH, List.of("r", "t"), CampaignStatus.ALLOWED, false, NOW_LOCAL.minusDays(10), NOW_LOCAL.minusDays(1),
+                        NOW_LOCAL.plusDays(3), ADMIN, NOW_LOCAL.minusHours(2), new CampaignResponse.Links(0, 0, 0, 0), 0, 0,
+                        new CampaignResponse.Reports(0, 0)));
+    }
+
+    @Test
+    void clicksSumTheDailyStatsFromTheFirstLink() {
+        final var first = row(CampaignStatus.HOLDING, HELD_UNTIL);
+        final var second = row(CampaignStatus.ALERT_ONLY, HELD_UNTIL);
+        second.setId(5L);
+        listed(first, second);
+        when(campaignLinkRepository.countByCampaignIdIn(List.of(4L, 5L))).thenReturn(List.of(
+                new CampaignLinkCounts(4L, 2, 0, 2, 0, 2, LocalDateTime.of(2026, 10, 20, 23, 30)),
+                new CampaignLinkCounts(5L, 1, 1, 0, 0, 1, LocalDateTime.of(2026, 10, 25, 8, 0))));
+        when(campaignLinkRepository.findByIdCampaignIdIn(List.of(4L, 5L)))
+                .thenReturn(List.of(campaignLink(4L, 41L, "a.com"), campaignLink(4L, 42L, "b.com"), campaignLink(5L, 51L, "c.com")));
+        when(linkStatsRepository.sumClicksByUrl(List.of(41L, 42L, 51L), LocalDate.of(2026, 10, 21), LocalDate.of(2026, 10, 29)))
+                .thenReturn(Map.of(41L, 100L, 42L, 23L, 51L, 7L));
+
+        assertThat(campaignService.campaigns(null, PageRequest.of(0, 20)).getContent())
+                .extracting(CampaignResponse::id, CampaignResponse::clicks)
+                .containsExactly(org.assertj.core.groups.Tuple.tuple(4L, 123L), org.assertj.core.groups.Tuple.tuple(5L, 7L));
+    }
+
+    @Test
+    void clicksAreReadPer1000Links() {
+        listed(row(CampaignStatus.HOLDING, HELD_UNTIL));
+        when(campaignLinkRepository.countByCampaignIdIn(List.of(4L)))
+                .thenReturn(List.of(new CampaignLinkCounts(4L, 1500, 0, 1500, 0, 3, NOW_LOCAL.minusDays(2))));
+        when(campaignLinkRepository.findByIdCampaignIdIn(List.of(4L)))
+                .thenReturn(LongStream.rangeClosed(1, 1500).mapToObj(id -> campaignLink(4L, id, "a.com")).toList());
+        when(linkStatsRepository.sumClicksByUrl(any(), any(), any())).thenAnswer(invocation -> Map.of(invocation.<List<Long>>getArgument(0).getFirst(), 5L));
+
+        assertThat(campaignService.campaigns(null, PageRequest.of(0, 20)).getContent().getFirst().clicks()).isEqualTo(10);
+
+        @SuppressWarnings("unchecked")
+        final ArgumentCaptor<List<Long>> chunks = ArgumentCaptor.forClass(List.class);
+        verify(linkStatsRepository, times(2)).sumClicksByUrl(chunks.capture(), eq(LocalDate.of(2026, 10, 27)), eq(LocalDate.of(2026, 10, 29)));
+        assertThat(chunks.getAllValues()).extracting(List::size).containsExactly(1000, 500);
+    }
+
+    @Test
+    void reportsCountReportedAndSuspendedDomains() {
+        listed(row(CampaignStatus.HOLDING, HELD_UNTIL));
+        when(campaignLinkRepository.countReportsByCampaignIdIn(List.of(4L))).thenReturn(List.of(new CampaignReportCounts(4L, 39, 12)));
+
+        assertThat(campaignService.campaigns(null, PageRequest.of(0, 20)).getContent().getFirst().reports())
+                .isEqualTo(new CampaignResponse.Reports(39, 12));
+    }
+
+    @Test
+    void detailHasTheCampaignAndEachDomainWithItsReport() {
+        when(campaignRepository.findById(4L)).thenReturn(Optional.of(row(CampaignStatus.HOLDING, HELD_UNTIL)));
+        when(campaignLinkRepository.countByCampaignIdIn(List.of(4L)))
+                .thenReturn(List.of(new CampaignLinkCounts(4L, 3, 0, 3, 0, 2, NOW_LOCAL.minusDays(2))));
+        when(campaignLinkRepository.countDomainsByCampaignId(4L))
+                .thenReturn(List.of(new CampaignDomainCount("omaehhm.com", 2), new CampaignDomainCount("c.com", 1)));
+        final var reported = ReportedDomain.builder().domain("omaehhm.com").registrar("NameSilo, LLC").abuseEmail("abuse@namesilo.com")
+                .reportedBy(ADMIN).reportedAt(NOW_LOCAL.minusDays(1)).lastCheckedAt(NOW_LOCAL).suspendedAt(NOW_LOCAL.minusHours(3)).build();
+        when(reportedDomainRepository.findAllById(List.of("omaehhm.com", "c.com"))).thenReturn(List.of(reported));
+
+        final var detail = campaignService.detail(4L);
+
+        assertThat(detail.campaign().id()).isEqualTo(4L);
+        assertThat(detail.campaign().links()).isEqualTo(new CampaignResponse.Links(3, 0, 3, 0));
+        assertThat(detail.domains()).containsExactly(
+                new CampaignDomainResponse("omaehhm.com", 2, new ReportStatus(NOW_LOCAL.minusDays(1), ADMIN, "NameSilo, LLC", NOW_LOCAL.minusHours(3))),
+                new CampaignDomainResponse("c.com", 1, null));
+    }
+
+    @Test
+    void linksArePagedNewestFirstWithTheirDomainAndClicks() {
+        when(campaignRepository.findById(4L)).thenReturn(Optional.of(row(CampaignStatus.HOLDING, HELD_UNTIL)));
+        final var held = Url.builder().id(41L).shortUrl("qf9qb").longUrl("https://ll.omaehhm.com/wqamhcsom/?r=plfN8D&t=1793210826")
+                .createDate(NOW_LOCAL.minusDays(1)).active(false).blockReason(BlockReason.CAMPAIGN).build();
+        final var active = Url.builder().id(42L).shortUrl("abc").longUrl("https://c.com/wqamhcsom?r=1&t=2").createDate(NOW_LOCAL.minusDays(3))
+                .active(true).build();
+        when(urlRepository.findAll(anySpecification(), any(Pageable.class))).thenReturn(new PageImpl<>(List.of(held, active), PageRequest.of(0, 20), 62));
+        when(campaignLinkRepository.findByIdCampaignIdAndIdUrlIdIn(4L, List.of(41L, 42L)))
+                .thenReturn(List.of(campaignLink(4L, 41L, "omaehhm.com"), campaignLink(4L, 42L, "c.com")));
+        when(linkStatsRepository.sumClicksByUrl(List.of(41L, 42L), LocalDate.of(2026, 10, 26), LocalDate.of(2026, 10, 29))).thenReturn(Map.of(41L, 123L));
+
+        final var page = campaignService.links(4L, "  qf9 ", PageRequest.of(0, 20));
+
+        assertThat(page.getContent()).containsExactly(
+                new CampaignLinkResponse(41L, "qf9qb", "https://ll.omaehhm.com/wqamhcsom/?r=plfN8D&t=1793210826", "omaehhm.com", NOW_LOCAL.minusDays(1),
+                        false, BlockReason.CAMPAIGN, 123),
+                new CampaignLinkResponse(42L, "abc", "https://c.com/wqamhcsom?r=1&t=2", "c.com", NOW_LOCAL.minusDays(3), true, null, 0));
+        assertThat(page.getTotalElements()).isEqualTo(62);
+        verify(urlRepository).findAll(anySpecification(), eq(PageRequest.of(0, 20, Sort.by(Sort.Order.desc("createDate"), Sort.Order.desc("id")))));
+    }
+
+    @Test
+    void linksSortOnlyByTheirCreateDateOrId() {
+        when(campaignRepository.findById(4L)).thenReturn(Optional.of(row(CampaignStatus.HOLDING, HELD_UNTIL)));
+
+        assertThatThrownBy(() -> campaignService.links(4L, null, PageRequest.of(0, 20, Sort.by("longUrl"))))
+                .isInstanceOf(InvalidSortException.class)
+                .hasMessage("Sort must be createDate or id");
+    }
+
+    @Test
+    void anUnknownCampaignIsNotFoundAnywhere() {
+        when(campaignRepository.findById(99L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> campaignService.detail(99L)).isInstanceOf(CampaignNotFoundException.class).hasMessage("There is no campaign 99.");
+        assertThatThrownBy(() -> campaignService.links(99L, null, PageRequest.of(0, 20))).isInstanceOf(CampaignNotFoundException.class);
+        assertThatThrownBy(() -> campaignService.allow(99L, ADMIN)).isInstanceOf(CampaignNotFoundException.class);
+        assertThatThrownBy(() -> campaignService.blockPreview(99L)).isInstanceOf(CampaignNotFoundException.class);
+        assertThatThrownBy(() -> campaignService.linkIds(99L)).isInstanceOf(CampaignNotFoundException.class);
+        verifyNoInteractions(moderationService, auditLogService);
+    }
+
+    @Test
+    void allowRestoresHeldLinksAndStopsNewHolds() {
+        final var campaign = row(CampaignStatus.HOLDING, HELD_UNTIL);
+        rows.put(SHAPE_KEY, campaign);
+        when(campaignRepository.findById(4L)).thenAnswer(invocation -> byId(4L));
+        allowing();
+        when(campaignLinkRepository.findByIdCampaignId(4L))
+                .thenReturn(List.of(campaignLink(4L, 43L, "c.com"), campaignLink(4L, 41L, "a.com"), campaignLink(4L, 42L, "b.com")));
+        when(moderationService.restoreCampaignHolds(List.of(41L, 42L, 43L))).thenReturn(2);
+
+        assertThat(campaignService.allow(4L, ADMIN)).isEqualTo(2);
+
+        assertThat(campaign).extracting(Campaign::getStatus, Campaign::getAllowedBy, Campaign::getAllowedAt)
+                .containsExactly(CampaignStatus.ALLOWED, ADMIN, NOW_LOCAL);
+        final InOrder order = inOrder(campaignRepository, moderationService);
+        order.verify(campaignRepository).allow(4L, ADMIN, NOW_LOCAL);
+        order.verify(moderationService).restoreCampaignHolds(List.of(41L, 42L, 43L));
+        verify(auditLogService).log(ADMIN, AuditAction.ALLOW_CAMPAIGN_SHAPE, "Campaign", "4", "shape: /wqamhcsom?r&t, links: 2");
+        verifyNoMoreInteractions(auditLogService);
+        assertThat(campaignService.holdingCampaignId(URL_SHAPE)).isEmpty();
+    }
+
+    @Test
+    void allowAgainRestoresNothing() {
+        final var campaign = row(CampaignStatus.ALLOWED, HELD_UNTIL);
+        campaign.setAllowedBy("first@hrva.cc");
+        campaign.setAllowedAt(NOW_LOCAL.minusDays(1));
+        rows.put(SHAPE_KEY, campaign);
+        when(campaignRepository.findById(4L)).thenAnswer(invocation -> byId(4L));
+        allowing();
+        when(campaignLinkRepository.findByIdCampaignId(4L)).thenReturn(List.of(campaignLink(4L, 41L, "a.com")));
+
+        assertThat(campaignService.allow(4L, ADMIN)).isZero();
+
+        assertThat(campaign).extracting(Campaign::getAllowedBy, Campaign::getAllowedAt).containsExactly("first@hrva.cc", NOW_LOCAL.minusDays(1));
+        verify(auditLogService).log(ADMIN, AuditAction.ALLOW_CAMPAIGN_SHAPE, "Campaign", "4", "shape: /wqamhcsom?r&t, links: 0");
+    }
+
+    @Test
+    void allowRestoresThe1000LinksAtATime() {
+        when(campaignRepository.findById(4L)).thenReturn(Optional.of(row(CampaignStatus.HOLDING, HELD_UNTIL)));
+        when(campaignLinkRepository.findByIdCampaignId(4L))
+                .thenReturn(LongStream.rangeClosed(1, 1500).mapToObj(id -> campaignLink(4L, id, "a.com")).toList());
+        when(moderationService.restoreCampaignHolds(any())).thenAnswer(invocation -> invocation.<List<Long>>getArgument(0).size());
+
+        assertThat(campaignService.allow(4L, ADMIN)).isEqualTo(1500);
+
+        @SuppressWarnings("unchecked")
+        final ArgumentCaptor<List<Long>> chunks = ArgumentCaptor.forClass(List.class);
+        verify(moderationService, times(2)).restoreCampaignHolds(chunks.capture());
+        assertThat(chunks.getAllValues()).extracting(List::size).containsExactly(1000, 500);
+    }
+
+    @Test
+    void blockPreviewCoversEveryLinkPast100() {
+        when(campaignRepository.findById(4L)).thenReturn(Optional.of(row(CampaignStatus.HOLDING, HELD_UNTIL)));
+        when(campaignLinkRepository.findByIdCampaignId(4L))
+                .thenReturn(LongStream.rangeClosed(1, 150).map(id -> 151 - id).mapToObj(id -> campaignLink(4L, id, "a.com")).toList());
+        final var preview = List.of(new DomainBlockPreviewResponse("a.com", List.of("a.com"), 150, 0, 150, null));
+        when(moderationService.previewDomainBlocks(LongStream.rangeClosed(1, 150).boxed().toList())).thenReturn(preview);
+
+        assertThat(campaignService.blockPreview(4L)).isEqualTo(preview);
+
+        verify(moderationService, times(1)).previewDomainBlocks(any());
+    }
+
+    @Test
+    void linkIdsAreEveryLinkOfTheCampaignInIdOrder() {
+        when(campaignRepository.findById(4L)).thenReturn(Optional.of(row(CampaignStatus.HOLDING, HELD_UNTIL)));
+        when(campaignLinkRepository.findByIdCampaignId(4L))
+                .thenReturn(List.of(campaignLink(4L, 43L, "c.com"), campaignLink(4L, 41L, "a.com"), campaignLink(4L, 42L, "b.com")));
+
+        assertThat(campaignService.linkIds(4L)).containsExactly(41L, 42L, 43L);
+    }
+
+    private void listed(final Campaign... campaigns) {
+        when(campaignRepository.findRecent(any(), anyString(), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(campaigns), PageRequest.of(0, 20), campaigns.length));
+    }
+
+    private void allowing() {
+        when(campaignRepository.allow(anyLong(), anyString(), any())).thenAnswer(invocation -> byId(invocation.getArgument(0))
+                .filter(campaign -> campaign.getStatus() != CampaignStatus.ALLOWED)
+                .map(campaign -> {
+                    campaign.setStatus(CampaignStatus.ALLOWED);
+                    campaign.setAllowedBy(invocation.getArgument(1));
+                    campaign.setAllowedAt(invocation.getArgument(2));
+                    return 1;
+                }).orElse(0));
+    }
+
+    private static CampaignLink campaignLink(final long campaignId, final long urlId, final String domain) {
+        return CampaignLink.builder().id(new CampaignLinkId(campaignId, urlId)).domain(domain).createdAt(NOW_LOCAL).build();
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Specification<Url> anySpecification() {
+        return any(Specification.class);
     }
 
     private void crossWithThreeLinks() {

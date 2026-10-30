@@ -130,7 +130,7 @@ class AdminDomainRuleSecurityTest {
     @Test
     void anAdminCanPreviewTheDomainsOfSeveralLinks() throws Exception {
         when(moderationService.previewDomainBlocks(List.of(287L, 288L)))
-                .thenReturn(List.of(new DomainBlockPreviewResponse("omaehhm.com", List.of("ll.omaehhm.com"), 2, 3, null)));
+                .thenReturn(List.of(new DomainBlockPreviewResponse("omaehhm.com", List.of("ll.omaehhm.com"), 2, 3, 0, null)));
 
         mockMvc.perform(signedInPost(BULK_PREVIEW, "admin-token").content(PREVIEW_BODY))
                 .andExpect(status().isOk())
@@ -141,8 +141,8 @@ class AdminDomainRuleSecurityTest {
     @Test
     void anAdminCanBlockSeveralDomainsAtOnce() throws Exception {
         when(moderationService.blockDomains(List.of("omaehhm.com", "fvvxctw.com"), "Phishing", ADMIN, "admin-bulk"))
-                .thenReturn(new DomainBulkBlockResponse(List.of(new DomainBulkBlockResponse.Blocked("omaehhm.com", 2, 0),
-                        new DomainBulkBlockResponse.Blocked("fvvxctw.com", 1, 0)), List.of(), 3));
+                .thenReturn(new DomainBulkBlockResponse(List.of(new DomainBulkBlockResponse.Blocked("omaehhm.com", 2, 0, 0),
+                        new DomainBulkBlockResponse.Blocked("fvvxctw.com", 1, 0, 0)), List.of(), 3, 0));
 
         mockMvc.perform(signedInPost(BULK, "admin-token").content(BULK_BODY))
                 .andExpect(status().isOk())

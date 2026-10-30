@@ -8,6 +8,7 @@ import cc.hrva.urlshortener.exception.BioPageConflictException;
 import cc.hrva.urlshortener.exception.BioPageNotFoundException;
 import cc.hrva.urlshortener.exception.BlocklistSourceNotFoundException;
 import cc.hrva.urlshortener.exception.BulkBlockIncompleteException;
+import cc.hrva.urlshortener.exception.CampaignNotFoundException;
 import cc.hrva.urlshortener.exception.ChannelValidationException;
 import cc.hrva.urlshortener.exception.CommonException;
 import cc.hrva.urlshortener.exception.ConnectRequestAlreadyApprovedException;
@@ -310,6 +311,11 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(SettingNotFoundException.class)
     public ResponseEntity<Map<String, String>> handleSettingNotFound(final SettingNotFoundException ex) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", safeMessage(ex)));
+    }
+
+    @ExceptionHandler(CampaignNotFoundException.class)
+    public ResponseEntity<Map<String, String>> handleCampaignNotFound(final CampaignNotFoundException ex) {
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", safeMessage(ex)));
     }
 

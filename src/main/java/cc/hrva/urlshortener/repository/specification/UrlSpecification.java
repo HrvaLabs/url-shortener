@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.repository.specification;
 
+import cc.hrva.urlshortener.model.CampaignLink;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.util.DomainNames;
@@ -30,6 +31,16 @@ public final class UrlSpecification {
         return (root, query, cb) -> {
             final var owner = root.join("owner", JoinType.LEFT);
             return anyFieldContainsASpellingOf(keyword, cb, List.of(root.get("longUrl"), root.get("shortUrl"), owner.get("email")));
+        };
+    }
+
+    public static Specification<Url> inCampaign(final long campaignId) {
+        return (root, query, cb) -> {
+            final var subquery = query.subquery(Long.class);
+            final var link = subquery.from(CampaignLink.class);
+            subquery.select(link.get("id").get("urlId"))
+                    .where(cb.equal(link.get("id").get("campaignId"), campaignId), cb.equal(link.get("id").get("urlId"), root.get("id")));
+            return cb.exists(subquery);
         };
     }
 

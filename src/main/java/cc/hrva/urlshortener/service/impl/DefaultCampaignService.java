@@ -1,36 +1,66 @@
 package cc.hrva.urlshortener.service.impl;
 
+import cc.hrva.urlshortener.dto.DomainBlockPreviewResponse;
 import cc.hrva.urlshortener.dto.LinkVerdict;
+import cc.hrva.urlshortener.dto.campaign.CampaignDetailResponse;
+import cc.hrva.urlshortener.dto.campaign.CampaignDomainCount;
+import cc.hrva.urlshortener.dto.campaign.CampaignDomainResponse;
+import cc.hrva.urlshortener.dto.campaign.CampaignLinkCounts;
+import cc.hrva.urlshortener.dto.campaign.CampaignLinkResponse;
+import cc.hrva.urlshortener.dto.campaign.CampaignReportCounts;
+import cc.hrva.urlshortener.dto.campaign.CampaignResponse;
+import cc.hrva.urlshortener.dto.campaign.ReportStatus;
+import cc.hrva.urlshortener.exception.CampaignNotFoundException;
 import cc.hrva.urlshortener.model.Campaign;
 import cc.hrva.urlshortener.model.CampaignLink;
 import cc.hrva.urlshortener.model.CampaignLinkId;
+import cc.hrva.urlshortener.model.ReportedDomain;
 import cc.hrva.urlshortener.model.Url;
+import cc.hrva.urlshortener.model.enums.AuditAction;
 import cc.hrva.urlshortener.model.enums.CampaignStatus;
 import cc.hrva.urlshortener.repository.CampaignLinkRepository;
 import cc.hrva.urlshortener.repository.CampaignRepository;
+import cc.hrva.urlshortener.repository.LinkStatsRepository;
+import cc.hrva.urlshortener.repository.ReportedDomainRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
+import cc.hrva.urlshortener.repository.specification.LikePatterns;
+import cc.hrva.urlshortener.repository.specification.UrlSpecification;
+import cc.hrva.urlshortener.service.AuditLogService;
 import cc.hrva.urlshortener.service.CampaignService;
 import cc.hrva.urlshortener.service.ModerationService;
 import cc.hrva.urlshortener.service.SettingsService;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.ShapeHeld;
+import cc.hrva.urlshortener.service.analytics.AnalyticsDays;
 import cc.hrva.urlshortener.service.burst.RedisBurstCounter;
 import cc.hrva.urlshortener.service.campaign.UrlShape;
 import cc.hrva.urlshortener.service.campaign.UrlShapes;
 import cc.hrva.urlshortener.service.settings.SettingKey;
 import cc.hrva.urlshortener.util.DomainNames;
+import cc.hrva.urlshortener.util.SortWhitelist;
+import com.google.common.collect.Lists;
 import java.time.Clock;
 import java.time.Duration;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.Collection;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
@@ -45,6 +75,19 @@ public class DefaultCampaignService implements CampaignService {
     private static final String SHAPE_KEY_PREFIX = "campaign:shape:";
     private static final String MEMBER_SEPARATOR = "|";
     private static final int MAX_EXAMPLES = 3;
+    private static final int IDS_PER_QUERY = 1_000;
+    private static final Duration LISTED_FOR = Duration.ofDays(90);
+    private static final String MATCH_ALL = "%";
+    private static final String ID = "id";
+    private static final String LAST_SEEN_AT = "lastSeenAt";
+    private static final String CREATE_DATE = "createDate";
+    private static final SortWhitelist CAMPAIGN_SORTS = SortWhitelist.of(LAST_SEEN_AT, "firstSeenAt", "status")
+            .byDefault(Sort.by(Sort.Order.desc(LAST_SEEN_AT)))
+            .thenBy(Sort.Order.desc(LAST_SEEN_AT), Sort.Order.desc(ID));
+    private static final SortWhitelist LINK_SORTS = SortWhitelist.of(CREATE_DATE, ID)
+            .byDefault(Sort.by(Sort.Order.desc(CREATE_DATE)))
+            .thenBy(Sort.Order.desc(CREATE_DATE), Sort.Order.desc(ID));
+    private static final String TARGET_CAMPAIGN = "Campaign";
 
     private final RedisBurstCounter redisBurstCounter;
     private final UrlRepository urlRepository;
@@ -55,6 +98,10 @@ public class DefaultCampaignService implements CampaignService {
     private final TransactionOperations transactionOperations;
     private final Clock clock;
     private final SettingsService settingsService;
+    private final LinkStatsRepository linkStatsRepository;
+    private final ReportedDomainRepository reportedDomainRepository;
+    private final AuditLogService auditLogService;
+    private final AnalyticsDays analyticsDays;
 
     @Override
     public Optional<Long> holdingCampaignId(final UrlShape shape) {
@@ -89,6 +136,149 @@ public class DefaultCampaignService implements CampaignService {
         } catch (final RuntimeException exception) {
             log.warn("Campaign check skipped shape={} exception={}", shape.get().key(), exception.getClass().getName());
         }
+    }
+
+    @Override
+    public Page<CampaignResponse> campaigns(final String search, final Pageable pageable) {
+        final var pattern = StringUtils.isBlank(search) ? MATCH_ALL : LikePatterns.containing(search.strip());
+        final var page = campaignRepository.findRecent(now().minus(LISTED_FOR), pattern, CAMPAIGN_SORTS.apply(pageable));
+        final var responses = responsesOf(page.getContent());
+        return page.map(campaign -> responses.get(campaign.getId()));
+    }
+
+    @Override
+    public CampaignDetailResponse detail(final long id) {
+        final var campaign = campaign(id);
+        final var domains = campaignLinkRepository.countDomainsByCampaignId(id);
+        final var reports = reportsOf(domains.stream().map(CampaignDomainCount::domain).toList());
+        return new CampaignDetailResponse(responsesOf(List.of(campaign)).get(id), domains.stream()
+                .map(domain -> new CampaignDomainResponse(domain.domain(), domain.links(),
+                        Optional.ofNullable(reports.get(domain.domain())).map(ReportStatus::from).orElse(null)))
+                .toList());
+    }
+
+    @Override
+    public Page<CampaignLinkResponse> links(final long id, final String search, final Pageable pageable) {
+        campaign(id);
+        var specification = UrlSpecification.inCampaign(id);
+        if (StringUtils.isNotBlank(search)) {
+            specification = specification.and(UrlSpecification.search(search.strip()));
+        }
+        final var page = urlRepository.findAll(specification, LINK_SORTS.apply(pageable));
+        final var urlIds = page.getContent().stream().map(Url::getId).toList();
+        if (urlIds.isEmpty()) {
+            return new PageImpl<>(List.of(), page.getPageable(), page.getTotalElements());
+        }
+        final var domains = campaignLinkRepository.findByIdCampaignIdAndIdUrlIdIn(id, urlIds).stream()
+                .collect(Collectors.toMap(link -> link.getId().urlId(), CampaignLink::getDomain, (first, second) -> first));
+        final var clicks = clicksByUrl(urlIds, earliest(page.getContent().stream().map(Url::getCreateDate).toList()));
+        return page.map(url -> new CampaignLinkResponse(url.getId(), url.getShortUrl(), url.getLongUrl(), domains.get(url.getId()), url.getCreateDate(),
+                url.isActive(), url.getBlockReason(), clicks.getOrDefault(url.getId(), 0L)));
+    }
+
+    @Override
+    public int allow(final long id, final String performedBy) {
+        final var campaign = campaign(id);
+        if (campaignRepository.allow(id, performedBy, now()) == 1) {
+            log.info("Campaign shape allowed campaignId={}", id);
+        }
+        var restored = 0;
+        for (final var chunk : Lists.partition(linkIdsOf(id), IDS_PER_QUERY)) {
+            restored += moderationService.restoreCampaignHolds(chunk);
+        }
+        auditLogService.log(performedBy, AuditAction.ALLOW_CAMPAIGN_SHAPE, TARGET_CAMPAIGN, String.valueOf(id),
+                "shape: " + campaign.shape().display() + ", links: " + restored);
+        return restored;
+    }
+
+    @Override
+    public List<DomainBlockPreviewResponse> blockPreview(final long id) {
+        campaign(id);
+        return moderationService.previewDomainBlocks(linkIdsOf(id));
+    }
+
+    @Override
+    public List<Long> linkIds(final long id) {
+        campaign(id);
+        return linkIdsOf(id);
+    }
+
+    private Campaign campaign(final long id) {
+        return campaignRepository.findById(id).orElseThrow(() -> new CampaignNotFoundException("There is no campaign %d.".formatted(id)));
+    }
+
+    private List<Long> linkIdsOf(final long id) {
+        return campaignLinkRepository.findByIdCampaignId(id).stream().map(link -> link.getId().urlId()).sorted().toList();
+    }
+
+    private Map<Long, CampaignResponse> responsesOf(final List<Campaign> campaigns) {
+        if (campaigns.isEmpty()) {
+            return Map.of();
+        }
+        final var ids = campaigns.stream().map(Campaign::getId).toList();
+        final var counts = campaignLinkRepository.countByCampaignIdIn(ids).stream()
+                .collect(Collectors.toMap(CampaignLinkCounts::campaignId, Function.identity()));
+        final var reports = campaignLinkRepository.countReportsByCampaignIdIn(ids).stream()
+                .collect(Collectors.toMap(CampaignReportCounts::campaignId, Function.identity()));
+        final var clicks = clicksByCampaign(ids, earliest(counts.values().stream().map(CampaignLinkCounts::firstLinkCreated).toList()));
+        final var now = now();
+        return campaigns.stream().collect(Collectors.toMap(Campaign::getId, campaign -> response(campaign, now,
+                Optional.ofNullable(counts.get(campaign.getId())), Optional.ofNullable(reports.get(campaign.getId())),
+                clicks.getOrDefault(campaign.getId(), 0L))));
+    }
+
+    private static CampaignResponse response(final Campaign campaign, final LocalDateTime now, final Optional<CampaignLinkCounts> counts,
+                                             final Optional<CampaignReportCounts> reports, final long clicks) {
+        return new CampaignResponse(campaign.getId(), campaign.shape().display(), campaign.getPath(), campaign.getQueryNames(), campaign.getStatus(),
+                campaign.isHoldingAt(now), campaign.getFirstSeenAt(), campaign.getLastSeenAt(), campaign.getActiveUntil(), campaign.getAllowedBy(),
+                campaign.getAllowedAt(),
+                counts.map(count -> new CampaignResponse.Links(count.total(), count.active(), count.held(), count.blocked()))
+                        .orElseGet(() -> new CampaignResponse.Links(0, 0, 0, 0)),
+                counts.map(CampaignLinkCounts::domains).orElse(0L),
+                clicks,
+                reports.map(report -> new CampaignResponse.Reports(report.reported(), report.suspended()))
+                        .orElseGet(() -> new CampaignResponse.Reports(0, 0)));
+    }
+
+    private Map<Long, Long> clicksByCampaign(final Collection<Long> campaignIds, final Optional<LocalDateTime> firstLinkCreated) {
+        if (firstLinkCreated.isEmpty()) {
+            return Map.of();
+        }
+        final var campaignByUrl = campaignLinkRepository.findByIdCampaignIdIn(campaignIds).stream()
+                .collect(Collectors.toMap(link -> link.getId().urlId(), link -> link.getId().campaignId(), (first, second) -> first, LinkedHashMap::new));
+        final var clicks = new HashMap<Long, Long>();
+        clicksByUrl(List.copyOf(campaignByUrl.keySet()), firstLinkCreated)
+                .forEach((urlId, urlClicks) -> clicks.merge(campaignByUrl.get(urlId), urlClicks, Long::sum));
+        return clicks;
+    }
+
+    private Map<Long, Long> clicksByUrl(final List<Long> urlIds, final Optional<LocalDateTime> firstLinkCreated) {
+        if (urlIds.isEmpty() || firstLinkCreated.isEmpty()) {
+            return Map.of();
+        }
+        final var from = analyticsDate(firstLinkCreated.get());
+        final var to = analyticsDays.today();
+        final var clicks = new HashMap<Long, Long>();
+        for (final var chunk : Lists.partition(urlIds, IDS_PER_QUERY)) {
+            clicks.putAll(linkStatsRepository.sumClicksByUrl(chunk, from, to));
+        }
+        return clicks;
+    }
+
+    private LocalDate analyticsDate(final LocalDateTime stored) {
+        return stored.atZone(clock.getZone()).withZoneSameInstant(analyticsDays.zone()).toLocalDate();
+    }
+
+    private Map<String, ReportedDomain> reportsOf(final List<String> domains) {
+        final var reports = new HashMap<String, ReportedDomain>();
+        for (final var chunk : Lists.partition(domains, IDS_PER_QUERY)) {
+            reportedDomainRepository.findAllById(chunk).forEach(report -> reports.put(report.getDomain(), report));
+        }
+        return reports;
+    }
+
+    private static Optional<LocalDateTime> earliest(final List<LocalDateTime> dates) {
+        return dates.stream().filter(Objects::nonNull).min(Comparator.naturalOrder());
     }
 
     private void record(final long urlId, final UrlShape shape, final String domain) {

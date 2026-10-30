@@ -3,10 +3,19 @@ package cc.hrva.urlshortener.repository;
 import cc.hrva.urlshortener.model.Campaign;
 import cc.hrva.urlshortener.model.CampaignLink;
 import cc.hrva.urlshortener.model.CampaignLinkId;
+import cc.hrva.urlshortener.dto.LinkDestination;
+import cc.hrva.urlshortener.dto.campaign.CampaignDomainCount;
+import cc.hrva.urlshortener.dto.campaign.CampaignLinkCounts;
+import cc.hrva.urlshortener.dto.campaign.CampaignReportCounts;
+import cc.hrva.urlshortener.model.ReportedDomain;
 import cc.hrva.urlshortener.model.Url;
+import cc.hrva.urlshortener.model.enums.BlockReason;
 import cc.hrva.urlshortener.model.enums.CampaignStatus;
+import cc.hrva.urlshortener.model.enums.ThreatType;
+import cc.hrva.urlshortener.repository.specification.UrlSpecification;
 import jakarta.persistence.EntityManager;
 import java.time.LocalDateTime;
+import java.util.EnumSet;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -17,6 +26,8 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.FilterType;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.annotation.Transactional;
@@ -48,6 +59,9 @@ class CampaignSchemaTest {
 
     @Autowired
     private UrlRepository urlRepository;
+
+    @Autowired
+    private ReportedDomainRepository reportedDomainRepository;
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
@@ -235,6 +249,160 @@ class CampaignSchemaTest {
                 .containsExactly(tuple("c.com", null, null), tuple("omaehhm.com", null, null));
     }
 
+    @Test
+    void theCountsSplitEachCampaignsLinksIntoActiveHeldAndBlocked() {
+        final var first = campaignRepository.saveAndFlush(campaign(SHAPE_KEY, "/wqamhcsom", List.of("r", "t"))).getId();
+        final var second = campaignRepository.saveAndFlush(campaign("b".repeat(64), "/login", List.of("u"))).getId();
+        final var other = campaignRepository.saveAndFlush(campaign("c".repeat(64), "/other", List.of("u"))).getId();
+        final var active = link("aaa", NOW.minusDays(2));
+        final var held = held("bbb", NOW.minusDays(4));
+        final var alsoHeld = held("ccc", NOW.minusDays(1));
+        final var blocked = blocked("ddd", BlockReason.DOMAIN_RULE, null);
+        final var malware = blocked("eee", null, ThreatType.MALWARE);
+        final var expired = link("fff", NOW.minusDays(3));
+        jdbcTemplate.update("update url set active = false where id = ?", expired);
+        campaignLinkRepository.saveAllAndFlush(List.of(
+                campaignLink(first, active, "omaehhm.com"), campaignLink(first, held, "omaehhm.com"), campaignLink(first, alsoHeld, "c.com"),
+                campaignLink(first, blocked, "d.com"), campaignLink(first, malware, "e.com"), campaignLink(first, expired, "f.com"),
+                campaignLink(second, link("ggg", NOW.minusDays(9)), "g.com")));
+        entityManager.clear();
+
+        assertThat(campaignLinkRepository.countByCampaignIdIn(List.of(first, second, other)))
+                .containsExactlyInAnyOrder(
+                        new CampaignLinkCounts(first, 6, 1, 2, 2, 5, NOW.minusDays(4)),
+                        new CampaignLinkCounts(second, 1, 1, 0, 0, 1, NOW.minusDays(9)));
+    }
+
+    @Test
+    void theReportCountsTakeEachReportedDomainOnceAndTheSuspendedOnesApart() {
+        final var campaignId = campaignRepository.saveAndFlush(campaign(SHAPE_KEY, "/wqamhcsom", List.of("r", "t"))).getId();
+        final var quiet = campaignRepository.saveAndFlush(campaign("b".repeat(64), "/login", List.of("u"))).getId();
+        campaignLinkRepository.saveAllAndFlush(List.of(
+                campaignLink(campaignId, link("aaa"), "omaehhm.com"), campaignLink(campaignId, link("bbb"), "omaehhm.com"),
+                campaignLink(campaignId, link("ccc"), "c.com"), campaignLink(campaignId, link("ddd"), "d.com"),
+                campaignLink(quiet, link("eee"), "e.com")));
+        reportedDomainRepository.saveAllAndFlush(List.of(reported("omaehhm.com", NOW.minusDays(1)), reported("c.com", null),
+                reported("e-unrelated.com", NOW)));
+
+        assertThat(campaignLinkRepository.countReportsByCampaignIdIn(List.of(campaignId, quiet)))
+                .containsExactly(new CampaignReportCounts(campaignId, 2, 1));
+    }
+
+    @Test
+    void theDomainsAreCountedPerDomainMostLinksFirst() {
+        final var campaignId = campaignRepository.saveAndFlush(campaign(SHAPE_KEY, "/wqamhcsom", List.of("r", "t"))).getId();
+        campaignLinkRepository.saveAllAndFlush(List.of(
+                campaignLink(campaignId, link("aaa"), "c.com"), campaignLink(campaignId, link("bbb"), "omaehhm.com"),
+                campaignLink(campaignId, link("ccc"), "omaehhm.com"), campaignLink(campaignId, link("ddd"), "b.com")));
+
+        assertThat(campaignLinkRepository.countDomainsByCampaignId(campaignId))
+                .containsExactly(new CampaignDomainCount("omaehhm.com", 2), new CampaignDomainCount("b.com", 1), new CampaignDomainCount("c.com", 1));
+    }
+
+    @Test
+    void theListIsRecentSearchableOverThePathAndTheQueryNamesAndSortsStatusByName() {
+        final var holding = campaign("1".repeat(64), "/wqamhcsom", List.of("r", "t"));
+        final var alertOnly = campaign("2".repeat(64), "/login", List.of("token"));
+        alertOnly.setStatus(CampaignStatus.ALERT_ONLY);
+        final var allowed = campaign("3".repeat(64), "/verify", List.of("r_x"));
+        allowed.setStatus(CampaignStatus.ALLOWED);
+        final var old = campaign("4".repeat(64), "/wqamhcsom-old", List.of("r"));
+        old.setLastSeenAt(NOW.minusDays(91));
+        campaignRepository.saveAllAndFlush(List.of(holding, alertOnly, allowed, old));
+        final var since = NOW.minusDays(90);
+        final var byStatus = PageRequest.of(0, 10, Sort.by(Sort.Order.asc("status"), Sort.Order.desc("id")));
+
+        assertThat(campaignRepository.findRecent(since, "%", byStatus).getContent()).extracting(Campaign::getStatus)
+                .containsExactly(CampaignStatus.ALERT_ONLY, CampaignStatus.ALLOWED, CampaignStatus.HOLDING);
+        assertThat(campaignRepository.findRecent(since, "%wqam%", byStatus).getContent())
+                .extracting(Campaign::getPath).containsExactly("/wqamhcsom");
+        assertThat(campaignRepository.findRecent(since, "%toke%", byStatus).getContent())
+                .extracting(Campaign::getPath).containsExactly("/login");
+        assertThat(campaignRepository.findRecent(since, "%r\\_%", byStatus).getContent())
+                .extracting(Campaign::getPath).containsExactly("/verify");
+        assertThat(campaignRepository.findRecent(since, "%nothing%", byStatus)).isEmpty();
+        final var secondPage = campaignRepository.findRecent(since, "%", PageRequest.of(1, 2, Sort.by(Sort.Order.asc("status"))));
+        assertThat(secondPage).extracting(Campaign::getStatus).containsExactly(CampaignStatus.HOLDING);
+        assertThat(secondPage.getTotalElements()).isEqualTo(3);
+    }
+
+    @Test
+    void allowingTakesARowThatIsNotAllowedYet() {
+        final var held = campaignRepository.saveAndFlush(campaign(SHAPE_KEY, "/wqamhcsom", List.of("r", "t")));
+
+        assertThat(campaignRepository.allow(held.getId(), "karlo@hrva.cc", NOW)).isEqualTo(1);
+        assertThat(campaignRepository.allow(held.getId(), "other@hrva.cc", NOW.plusHours(1))).isZero();
+        entityManager.clear();
+
+        assertThat(campaignRepository.findById(held.getId()).orElseThrow())
+                .extracting(Campaign::getStatus, Campaign::getAllowedBy, Campaign::getAllowedAt)
+                .containsExactly(CampaignStatus.ALLOWED, "karlo@hrva.cc", NOW);
+    }
+
+    @Test
+    void aCampaignsLinksArePagedSortedAndSearchedOnTheirOwnFields() {
+        final var campaignId = campaignRepository.saveAndFlush(campaign(SHAPE_KEY, "/wqamhcsom", List.of("r", "t"))).getId();
+        final var otherId = campaignRepository.saveAndFlush(campaign("b".repeat(64), "/login", List.of("u"))).getId();
+        final var oldest = link("qf9qb", NOW.minusDays(3));
+        final var middle = held("zz1", NOW.minusDays(2));
+        final var newest = link("abc", NOW.minusDays(1));
+        final var elsewhere = link("qf9xx", NOW);
+        campaignLinkRepository.saveAllAndFlush(List.of(campaignLink(campaignId, oldest, "example.com"), campaignLink(campaignId, middle, "example.com"),
+                campaignLink(campaignId, newest, "example.com"), campaignLink(otherId, elsewhere, "example.com")));
+        final var inCampaign = UrlSpecification.inCampaign(campaignId);
+
+        assertThat(urlRepository.findAll(inCampaign, PageRequest.of(0, 2, Sort.by(Sort.Order.desc("createDate"), Sort.Order.desc("id")))))
+                .extracting(Url::getId).containsExactly(newest, middle);
+        assertThat(urlRepository.findAll(inCampaign, PageRequest.of(1, 2, Sort.by(Sort.Order.desc("createDate"), Sort.Order.desc("id")))))
+                .extracting(Url::getId).containsExactly(oldest);
+        assertThat(urlRepository.findAll(inCampaign, PageRequest.of(0, 2, Sort.by(Sort.Order.desc("createDate")))).getTotalElements())
+                .isEqualTo(3);
+        assertThat(urlRepository.findAll(inCampaign.and(UrlSpecification.search("QF9")), PageRequest.of(0, 10)))
+                .extracting(Url::getId).containsExactly(oldest);
+        assertThat(urlRepository.findAll(inCampaign.and(UrlSpecification.search("example.com/zz1")), PageRequest.of(0, 10)))
+                .extracting(Url::getId).containsExactly(middle);
+        assertThat(campaignLinkRepository.findByIdCampaignIdAndIdUrlIdIn(campaignId, List.of(oldest, elsewhere)))
+                .extracting(stored -> stored.getId().urlId()).containsExactly(oldest);
+        assertThat(campaignLinkRepository.findByIdCampaignIdIn(List.of(campaignId, otherId)))
+                .extracting(stored -> stored.getId().urlId()).containsExactlyInAnyOrder(oldest, middle, newest, elsewhere);
+    }
+
+    @Test
+    void theHeldDestinationsAmongIdsAreTheLinksStillHeld() {
+        final var heldId = held("aaa", NOW);
+        final var converted = blocked("bbb", BlockReason.DOMAIN_RULE, null);
+        final var active = link("ccc");
+
+        assertThat(urlRepository.findBlockedDestinationsByIdIn(EnumSet.of(BlockReason.CAMPAIGN), List.of(heldId, converted, active)))
+                .containsExactly(new LinkDestination(heldId, "https://example.com/aaa"));
+    }
+
+    private long link(final String alias, final LocalDateTime createDate) {
+        return stored(alias, createDate, true, null, null);
+    }
+
+    private long held(final String alias, final LocalDateTime createDate) {
+        return stored(alias, createDate, false, BlockReason.CAMPAIGN, null);
+    }
+
+    private long blocked(final String alias, final BlockReason reason, final ThreatType threatType) {
+        return stored(alias, NOW, false, reason, threatType);
+    }
+
+    private long stored(final String alias, final LocalDateTime createDate, final boolean active, final BlockReason reason,
+                        final ThreatType threatType) {
+        final var id = urlRepository.saveAndFlush(Url.builder().shortUrl(alias).longUrl("https://example.com/" + alias).blockReason(reason)
+                .threatType(threatType).build()).getId();
+        jdbcTemplate.update("update url set create_date = ?, active = ? where id = ?", createDate, active, id);
+        entityManager.clear();
+        return id;
+    }
+
+    private static ReportedDomain reported(final String domain, final LocalDateTime suspendedAt) {
+        return ReportedDomain.builder().domain(domain).registrar("NameSilo, LLC").abuseEmail("abuse@namesilo.com").reportedBy("karlo@hrva.cc")
+                .reportedAt(NOW.minusDays(2)).suspendedAt(suspendedAt).build();
+    }
+
     private long link(final String alias) {
         return urlRepository.saveAndFlush(Url.builder().shortUrl(alias).longUrl("https://example.com/" + alias).build()).getId();
     }
@@ -263,7 +431,8 @@ class CampaignSchemaTest {
             basePackageClasses = UrlRepository.class,
             includeFilters = @ComponentScan.Filter(
                     type = FilterType.ASSIGNABLE_TYPE,
-                    classes = {CampaignRepository.class, CampaignLinkRepository.class, UrlRepository.class}))
+                    classes = {CampaignRepository.class, CampaignLinkRepository.class, UrlRepository.class,
+                            ReportedDomainRepository.class}))
     static class TestApplication {
     }
 

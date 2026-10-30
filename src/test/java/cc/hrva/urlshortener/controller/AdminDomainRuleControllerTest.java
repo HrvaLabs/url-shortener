@@ -199,8 +199,8 @@ class AdminDomainRuleControllerTest {
     @Test
     void aBulkPreviewListsEachDomainWithItsHostsCountsAndRule() throws Exception {
         when(moderationService.previewDomainBlocks(List.of(287L, 288L, 289L))).thenReturn(List.of(
-                new DomainBlockPreviewResponse("omaehhm.com", List.of("ll.omaehhm.com", "qq.omaehhm.com"), 2, 2, null),
-                new DomainBlockPreviewResponse("padlet.com", List.of("padlet.com"), 1, 412, DomainRuleType.ALLOW)));
+                new DomainBlockPreviewResponse("omaehhm.com", List.of("ll.omaehhm.com", "qq.omaehhm.com"), 2, 2, 5, null),
+                new DomainBlockPreviewResponse("padlet.com", List.of("padlet.com"), 1, 412, 0, DomainRuleType.ALLOW)));
 
         mockMvc.perform(post(BULK_PREVIEW).principal(SIGNED_IN_ADMIN)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -211,6 +211,7 @@ class AdminDomainRuleControllerTest {
                 .andExpect(jsonPath("$[0].hosts[1]").value("qq.omaehhm.com"))
                 .andExpect(jsonPath("$[0].selectedLinks").value(2))
                 .andExpect(jsonPath("$[0].activeLinks").value(2))
+                .andExpect(jsonPath("$[0].heldLinks").value(5))
                 .andExpect(jsonPath("$[0].rule").value(nullValue()))
                 .andExpect(jsonPath("$[1].activeLinks").value(412))
                 .andExpect(jsonPath("$[1].rule").value("ALLOW"));
@@ -254,8 +255,8 @@ class AdminDomainRuleControllerTest {
     void aBulkBlockDelegatesAsTheSignedInAdminViaTheBulkActionAndReturnsWhatWasBlockedAndSkipped() throws Exception {
         when(moderationService.blockDomains(List.of("omaehhm.com", "fvvxctw.com", "gableci.hrva.cc"), "Phishing", ADMIN, "admin-bulk"))
                 .thenReturn(new DomainBulkBlockResponse(
-                        List.of(new DomainBulkBlockResponse.Blocked("omaehhm.com", 2, 1), new DomainBulkBlockResponse.Blocked("fvvxctw.com", 1, 0)),
-                        List.of(new DomainBulkBlockResponse.Skipped("gableci.hrva.cc", "Allowed by a rule")), 3));
+                        List.of(new DomainBulkBlockResponse.Blocked("omaehhm.com", 2, 1, 4), new DomainBulkBlockResponse.Blocked("fvvxctw.com", 1, 0, 0)),
+                        List.of(new DomainBulkBlockResponse.Skipped("gableci.hrva.cc", "Allowed by a rule")), 3, 4));
 
         mockMvc.perform(post(BULK).principal(SIGNED_IN_ADMIN)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -265,9 +266,11 @@ class AdminDomainRuleControllerTest {
                 .andExpect(jsonPath("$.blocked[0].domain").value("omaehhm.com"))
                 .andExpect(jsonPath("$.blocked[0].linksDeactivated").value(2))
                 .andExpect(jsonPath("$.blocked[0].domainsDisabled").value(1))
+                .andExpect(jsonPath("$.blocked[0].heldLinksConverted").value(4))
                 .andExpect(jsonPath("$.skipped[0].domain").value("gableci.hrva.cc"))
                 .andExpect(jsonPath("$.skipped[0].reason").value("Allowed by a rule"))
-                .andExpect(jsonPath("$.linksDeactivated").value(3));
+                .andExpect(jsonPath("$.linksDeactivated").value(3))
+                .andExpect(jsonPath("$.heldLinksConverted").value(4));
     }
 
     @Test

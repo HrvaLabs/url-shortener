@@ -42,6 +42,7 @@ public enum AuditAction {
     TURN_OFF_SIGN_IN_METHOD,
     TURN_ON_SIGN_IN_METHOD,
     REMOVE_PASSWORD,
+    ALLOW_CAMPAIGN_SHAPE,
     UNKNOWN
 
 }
