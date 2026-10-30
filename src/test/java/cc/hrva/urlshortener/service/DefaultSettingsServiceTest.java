@@ -281,14 +281,18 @@ class DefaultSettingsServiceTest {
 
     @ParameterizedTest
     @ValueSource(strings = {"99", "abc", "2.5", "true"})
-    void aStoredValueThatNoLongerFitsReadsAsTheDefault(final String stored, final CapturedOutput output) {
+    void aStoredValueThatNoLongerFitsReadsAsTheDefaultAndShowsAsChangedSoItCanBeReset(final String stored, final CapturedOutput output) {
         rows.put("CAMPAIGN_LINKS", row(SettingKey.CAMPAIGN_LINKS, stored));
 
         settingsService.refresh();
         settingsService.refresh();
 
         assertThat(settingsService.number(SettingKey.CAMPAIGN_LINKS)).isEqualTo(3);
-        assertThat(response(SettingKey.CAMPAIGN_LINKS).changed()).isFalse();
+        final var setting = response(SettingKey.CAMPAIGN_LINKS);
+        assertThat(setting.value()).isEqualTo(3);
+        assertThat(setting.changed()).isTrue();
+        assertThat(setting.changedBy()).isEqualTo(OTHER_ADMIN);
+        assertThat(setting.changedAt()).isEqualTo(EARLIER);
         assertThat(output.getOut().lines().filter(line -> line.contains("WARN") && line.contains("key=CAMPAIGN_LINKS"))).hasSize(2);
         assertThat(output.getOut()).doesNotContain("\tat ");
     }

@@ -214,7 +214,7 @@ public class DefaultSettingsService implements SettingsService {
             Arrays.stream(SettingKey.values())
                     .filter(key -> key.name().equals(row.getSettingKey()))
                     .findFirst()
-                    .flatMap(key -> storedValue(key, row))
+                    .map(key -> storedValue(key, row).orElseGet(() -> unreadable(key, row)))
                     .ifPresent(value -> values.put(value.key(), value));
         }
         return Collections.unmodifiableMap(values);
@@ -222,11 +222,15 @@ public class DefaultSettingsService implements SettingsService {
 
     private static Optional<StoredValue> storedValue(final SettingKey key, final AppSetting row) {
         try {
-            return Optional.of(new StoredValue(key, SettingValues.fromStored(key, row.getSettingValue()), row.getChangedBy(), row.getChangedAt()));
+            return Optional.of(new StoredValue(key, SettingValues.fromStored(key, row.getSettingValue()), row.getChangedBy(), row.getChangedAt(), true));
         } catch (final IllegalArgumentException | IllegalStateException exception) {
             log.warn("A stored setting no longer fits, using its default key={}", key);
             return Optional.empty();
         }
+    }
+
+    private static StoredValue unreadable(final SettingKey key, final AppSetting row) {
+        return new StoredValue(key, null, row.getChangedBy(), row.getChangedAt(), false);
     }
 
     private Map<SettingKey, StoredValue> values() {
@@ -240,14 +244,14 @@ public class DefaultSettingsService implements SettingsService {
 
     private Object current(final SettingKey key) {
         final var value = values().get(key);
-        return value == null ? settingDefaults.defaultOf(key) : value.value();
+        return value == null || !value.readable() ? settingDefaults.defaultOf(key) : value.value();
     }
 
     private SettingResponse response(final SettingKey key, final StoredValue value) {
         final var defaultValue = settingDefaults.defaultOf(key);
         final var unavailableReason = settingDefaults.unavailableReason(key);
         return new SettingResponse(key, key.getGroup(), key.getType(), key.getLabel(), key.getDescription(), key.getParent(), key.isSafety(),
-                value == null ? defaultValue : value.value(), defaultValue, value != null,
+                value == null || !value.readable() ? defaultValue : value.value(), defaultValue, value != null,
                 value == null ? null : value.changedBy(), value == null || value.changedAt() == null ? null : value.changedAt().truncatedTo(ChronoUnit.SECONDS),
                 key.getMin(), key.getMax(), key.isNullable(), key.getNoneLabel(), key.getUnit(), unavailableReason.isEmpty(),
                 unavailableReason.orElse(null));
@@ -259,7 +263,7 @@ public class DefaultSettingsService implements SettingsService {
         }
     }
 
-    private record StoredValue(SettingKey key, Object value, String changedBy, LocalDateTime changedAt) {}
+    private record StoredValue(SettingKey key, Object value, String changedBy, LocalDateTime changedAt, boolean readable) {}
 
     private record Change(Object before, Object after, AuditAction action) {}
 
