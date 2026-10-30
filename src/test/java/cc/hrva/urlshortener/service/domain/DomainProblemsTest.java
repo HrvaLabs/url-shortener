@@ -18,7 +18,7 @@ class DomainProblemsTest {
             DomainProblem.CNAME_REMOVED, "The CNAME record for this domain is gone, so its links stopped working. Add the record again.",
             DomainProblem.CLOUDFLARE_BLOCKED, "This domain can't be set up. We've been told and will look into it.",
             DomainProblem.PROVISIONING_FAILED, "Something went wrong setting up your domain. We've been told and will look into it.",
-            DomainProblem.DNS_TIMED_OUT, "We waited 14 days and never saw the CNAME record, so we stopped checking. Add the record first."));
+            DomainProblem.DNS_TIMED_OUT, "We waited 14 days and never saw the CNAME record, so we stopped checking. Add the record, then select Check now."));
 
     @Test
     void everyProblemHasItsExactText() {
