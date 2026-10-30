@@ -19,7 +19,7 @@ class AdminUserResponseTest {
 
     private static final JsonMapper JSON = JsonMapper.builder().build();
     private static final SignInMethodResponse GITHUB = new SignInMethodResponse(SignInMethod.GITHUB,
-            LocalDateTime.of(2026, 10, 20, 8, 0), LocalDateTime.of(2026, 10, 28, 19, 45));
+            LocalDateTime.of(2026, 10, 20, 8, 0), LocalDateTime.of(2026, 10, 28, 19, 45), null);
 
     @Test
     void anAdminUserRowHasTheJsonShapeOfTheUserEntityPlusItsSignInMethodsAndThePossibleScammerFlag() {
@@ -32,7 +32,17 @@ class AdminUserResponseTest {
         assertThat(responseJson).isEqualTo(entityJson.put("possibleScammer", true));
         assertThat(responseJson.get("authProvider").asString()).isEqualTo("local");
         assertThat(responseJson.get("signInMethods").toString())
-                .isEqualTo("[{\"method\":\"GITHUB\",\"firstUsedAt\":\"2026-10-20T08:00:00\",\"lastUsedAt\":\"2026-10-28T19:45:00\"}]");
+                .isEqualTo("[{\"method\":\"GITHUB\",\"firstUsedAt\":\"2026-10-20T08:00:00\",\"lastUsedAt\":\"2026-10-28T19:45:00\",\"turnedOffAt\":null}]");
+    }
+
+    @Test
+    void aTurnedOffMethodShowsWhenItWasTurnedOff() {
+        final var turnedOff = new SignInMethodResponse(SignInMethod.GOOGLE,
+                LocalDateTime.of(2026, 3, 1, 8, 0), LocalDateTime.of(2026, 10, 2, 8, 0), LocalDateTime.of(2026, 10, 30, 11, 15));
+
+        final JsonNode json = JSON.valueToTree(AdminUserResponse.from(fullUser(), List.of(turnedOff)));
+
+        assertThat(json.get("signInMethods").get(0).get("turnedOffAt").asString()).isEqualTo("2026-10-30T11:15:00");
     }
 
     @Test

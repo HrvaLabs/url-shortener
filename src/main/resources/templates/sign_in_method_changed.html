@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="https://www.thymeleaf.org"
+      th:replace="~{fragments/email :: layout(title='A sign-in method changed', heading='A sign-in method changed', preheader=~{::preheader}, content=~{::content}, footer=~{})}">
+<body>
+<th:block th:fragment="preheader"><th:block th:text="${change}">Google sign-in was turned off.</th:block> If this wasn't you, reset your password and check your sign-in methods.</th:block>
+<th:block th:fragment="content">
+  <p class="e-fg" th:style="${s.p}">Hello <strong class="e-fg" th:style="${s.strong}" th:text="${name}">alice@example.com</strong>,</p>
+  <p class="e-fg" th:style="${s.p}"><strong class="e-fg" th:style="${s.strong}" th:text="${change}">Google sign-in was turned off.</strong></p>
+  <p class="e-fg" th:style="${s.p}">This changed on your hrva.cc account on <span th:text="${changed_at}">30 October 2026 at 14:05 UTC</span>.</p>
+  <p class="e-fg" th:style="${s.p}">If this was you, there's nothing else to do.</p>
+  <p class="e-fg" th:style="${s.p}">If this wasn't you, reset your password and check your sign-in methods. Reset it here: <a class="e-lk" th:href="@{${reset_url}}" th:style="${s.link}" th:text="${reset_url}">https://app.hrva.cc/reset-password</a>. Then sign in and open <strong class="e-fg" th:style="${s.strong}">Settings &rarr; Sign-in methods</strong> (<a class="e-lk" th:href="@{${settings_url}}" th:style="${s.link}" th:text="${settings_url}">https://app.hrva.cc/dashboard/settings</a>). If you can't sign in, email <a class="e-lk" th:href="@{'mailto:' + ${contact_email}}" th:style="${s.link}" th:text="${contact_email}">support@hrva.cc</a>.</p>
+  <th:block th:replace="~{fragments/email :: signoff}"/>
+</th:block>
+</body>
+</html>

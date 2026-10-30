@@ -55,8 +55,27 @@ public class Reauthentication {
         loginAttemptService.loginSucceeded(attemptsKey);
     }
 
+    public boolean currentPasswordMatches(final User user, final String password) {
+        final var attemptsKey = attemptsKeyOf(user);
+        if (loginAttemptService.isBlocked(attemptsKey)) {
+            throw new NoAuthorizationException(TOO_MANY_WRONG_PASSWORDS);
+        }
+        if (StringUtils.isBlank(password)) {
+            return false;
+        }
+        try {
+            authValidator.passwordMatchesCurrentPassword(user, password);
+        } catch (final NoAuthorizationException exception) {
+            loginAttemptService.loginFailed(attemptsKey);
+            return false;
+        }
+        loginAttemptService.loginSucceeded(attemptsKey);
+
+        return true;
+    }
+
     private void confirm(final User user, final String password, final String signInAgain) {
-        if (isLocalAccount(user)) {
+        if (isLocalAccount(user) && StoredPasswords.isSet(user.getPassword())) {
             confirmPassword(user, password);
             return;
         }

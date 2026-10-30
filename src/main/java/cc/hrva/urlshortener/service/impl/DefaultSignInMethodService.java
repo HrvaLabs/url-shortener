@@ -47,6 +47,29 @@ public class DefaultSignInMethodService implements SignInMethodService {
     }
 
     @Override
+    @Transactional
+    public boolean turnOff(final Long userId, final SignInMethod method, final LocalDateTime turnedOffAt) {
+        return userSignInMethodRepository.turnOff(userId, method.name(), turnedOffAt) > 0;
+    }
+
+    @Override
+    @Transactional
+    public boolean turnOn(final Long userId, final SignInMethod method) {
+        return userSignInMethodRepository.turnOn(userId, method.name()) > 0;
+    }
+
+    @Override
+    @Transactional
+    public boolean isTurnedOff(final Long userId, final SignInMethod method) {
+        if (userRepository.findByIdForUpdate(userId).isEmpty()) {
+            return false;
+        }
+
+        return userSignInMethodRepository.findStatesByUserId(userId).stream()
+                .anyMatch(state -> state.method() == method && state.turnedOff());
+    }
+
+    @Override
     public List<SignInMethodResponse> methodsOf(final Long userId) {
         return methodsOf(List.of(userId)).get(userId);
     }

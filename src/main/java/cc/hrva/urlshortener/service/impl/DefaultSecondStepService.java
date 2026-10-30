@@ -30,6 +30,8 @@ import cc.hrva.urlshortener.service.passkey.PasskeyCeremonyStore;
 import cc.hrva.urlshortener.service.passkey.PasskeyOptionsFactory;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiter;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiterUnavailableException;
+import cc.hrva.urlshortener.service.signin.SignInMethodGuard;
+import cc.hrva.urlshortener.service.twostep.AccountLock;
 import cc.hrva.urlshortener.service.twostep.PendingLogin;
 import cc.hrva.urlshortener.service.twostep.PendingLoginStore;
 import cc.hrva.urlshortener.service.twostep.TwoStepLockMessage;
@@ -71,6 +73,8 @@ public class DefaultSecondStepService implements SecondStepService {
     private final PasskeySignInStatsRepository passkeySignInStatsRepository;
     private final AnalyticsDays analyticsDays;
     private final TwoStepLockMessage twoStepLockMessage;
+    private final AccountLock accountLock;
+    private final SignInMethodGuard signInMethodGuard;
 
     @Override
     @Transactional
@@ -215,14 +219,20 @@ public class DefaultSecondStepService implements SecondStepService {
         return attemptsLeft == 1 ? sentence + " 1 try left." : "%s %d tries left.".formatted(sentence, attemptsLeft);
     }
 
-    private ResponseEntity<JWTTokenDto> finishSecondStep(final String pendingToken, final User user) {
+    private ResponseEntity<JWTTokenDto> finishSecondStep(final String pendingToken, final User loaded) {
         final var pendingLogin = pendingLoginStore.consume(pendingToken).orElseThrow(SignInExpiredException::new);
+        final var user = accountLock.lock(loaded);
 
         if (Boolean.FALSE.equals(user.getActive())) {
             throw new DisabledException("Account is deactivated");
         }
         if (!Boolean.TRUE.equals(user.getEmailVerified())) {
             throw new EmailNotVerifiedException();
+        }
+        if (!signInMethodGuard.stillOn(user, pendingLogin.method())) {
+            log.info("Second step refused, the first step's sign-in method was turned off since user id={} method={}",
+                    user.getId(), pendingLogin.method());
+            throw new SignInExpiredException();
         }
 
         loginAttemptService.loginSucceeded(twoFactorAttemptsKey(user));

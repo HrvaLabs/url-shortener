@@ -27,6 +27,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
@@ -48,6 +49,7 @@ class ReauthenticationTest {
     private static final String SIGN_IN_AGAIN_TO_DELETE = "For your security, sign in again to delete your account.";
     private static final String WRONG_PASSWORD = "Current password is incorrect";
     private static final String TOO_MANY_WRONG_PASSWORDS = "Too many wrong passwords. Try again in 24 hours.";
+    private static final String PASSWORD_HASH = new BCryptPasswordEncoder(4).encode("user123");
 
     @Mock
     private TokenProvider tokenProvider;
@@ -136,7 +138,7 @@ class ReauthenticationTest {
     @Test
     void theCounterIsPerAccount() {
         final var user = user("local");
-        final var otherUser = User.builder().id(8L).email("other@example.com").password("$2a$10$hash").authProvider("local").build();
+        final var otherUser = User.builder().id(8L).email("other@example.com").password(PASSWORD_HASH).authProvider("local").build();
         doThrow(new NoAuthorizationException(WRONG_PASSWORD)).when(authValidator).passwordMatchesCurrentPassword(otherUser, "wrong");
         IntStream.rangeClosed(1, 20).forEach(attempt -> assertThatThrownBy(() -> reauthentication.confirm(otherUser, "wrong"))
                 .hasMessage(WRONG_PASSWORD));
@@ -251,6 +253,61 @@ class ReauthenticationTest {
                 .hasMessage(SIGN_IN_AGAIN);
     }
 
+    @Test
+    void aLocalAccountWhosePasswordWasRemovedConfirmsWithARecentSignIn() {
+        final var user = user("local");
+        user.setPassword(StoredPasswords.none());
+        signedInMinutesAgo(14);
+
+        assertThatCode(() -> reauthentication.confirm(user, null)).doesNotThrowAnyException();
+        assertThatCode(() -> reauthentication.confirmAccountDeletion(user, null)).doesNotThrowAnyException();
+        verifyNoInteractions(authValidator);
+    }
+
+    @Test
+    void aLocalAccountWhosePasswordWasRemovedWithAStaleSignInIs401() {
+        final var user = user("local");
+        user.setPassword(StoredPasswords.none());
+        signedInMinutesAgo(16);
+
+        assertThatThrownBy(() -> reauthentication.confirm(user, "any password"))
+                .isInstanceOf(ReauthenticationRequiredException.class)
+                .hasMessage(SIGN_IN_AGAIN);
+        verifyNoInteractions(authValidator);
+    }
+
+    @Test
+    void checkingTheCurrentPasswordAnswersWhetherItMatches() {
+        final var user = user("local");
+        doThrow(new NoAuthorizationException(WRONG_PASSWORD)).when(authValidator).passwordMatchesCurrentPassword(user, "wrong");
+
+        assertThat(reauthentication.currentPasswordMatches(user, "wrong")).isFalse();
+        assertThat(attemptsByKey()).containsEntry("reauth:7", 1);
+        assertThat(reauthentication.currentPasswordMatches(user, "user123")).isTrue();
+        assertThat(attemptsByKey()).doesNotContainKey("reauth:7");
+    }
+
+    @Test
+    void aBlankCurrentPasswordDoesNotMatchAndIsNotCompared() {
+        final var user = user("local");
+
+        for (final var password : new String[] {null, "", "   "}) {
+            assertThat(reauthentication.currentPasswordMatches(user, password)).isFalse();
+        }
+        verifyNoInteractions(authValidator);
+    }
+
+    @Test
+    void checkingTheCurrentPasswordSharesTheBlockWithTheOtherChecks() {
+        final var user = user("local");
+        IntStream.rangeClosed(1, 20).forEach(attempt -> loginAttemptService.loginFailed("reauth:7"));
+
+        assertThatThrownBy(() -> reauthentication.currentPasswordMatches(user, "user123"))
+                .isInstanceOf(NoAuthorizationException.class)
+                .hasMessage(TOO_MANY_WRONG_PASSWORDS);
+        verifyNoInteractions(authValidator);
+    }
+
     private void signedInMinutesAgo(final long minutes) {
         signedIn();
         lenient().when(tokenProvider.issuedAt(TOKEN)).thenReturn(Optional.of(NOW.minus(Duration.ofMinutes(minutes))));
@@ -262,7 +319,7 @@ class ReauthenticationTest {
     }
 
     private static User user(final String authProvider) {
-        return User.builder().id(7L).email("user@example.com").password("$2a$10$hash").authProvider(authProvider).build();
+        return User.builder().id(7L).email("user@example.com").password(PASSWORD_HASH).authProvider(authProvider).build();
     }
 
     private Map<String, Integer> attemptsByKey() {

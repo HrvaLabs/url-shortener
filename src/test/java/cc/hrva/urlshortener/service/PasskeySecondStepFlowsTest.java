@@ -31,6 +31,7 @@ import io.jsonwebtoken.security.Keys;
 import jakarta.persistence.EntityManager;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Locale;
@@ -306,6 +307,51 @@ class PasskeySecondStepFlowsTest {
         assertThat(lifetimeOf(remembered)).isEqualTo(THIRTY_DAYS);
         assertThat(remembered.getExpiration().toInstant()).isCloseTo(Instant.now().plus(THIRTY_DAYS), within(1, ChronoUnit.MINUTES));
         assertThat(lifetimeOf(notRemembered)).isEqualTo(Duration.ofSeconds(appProperties.getJwtTokenValiditySeconds()));
+    }
+
+    @Test
+    void aPasswordRemovedBetweenTheStepsStopsTheSecondStep() {
+        final var user = flows.signedIn(flows.localUser("removed-between-steps@example.com"));
+        final var authenticator = TestAuthenticator.deviceBoundPasskey();
+        flows.addPasskey(authenticator, "Pixel");
+        final var pendingToken = pendingTokenOf(user, false);
+        flushed();
+        jdbcTemplate.update("update user_account set password = 'removed-password' where id = ?", user.getId());
+
+        assertThatThrownBy(() -> completeWith(authenticator, pendingToken))
+                .isInstanceOf(SignInExpiredException.class)
+                .hasMessage("Your sign-in expired. Sign in again.");
+        assertThat(flows.signInMethodsOf(user)).doesNotContain("PASSWORD");
+    }
+
+    @Test
+    void aProviderTurnedOffBetweenTheStepsStopsTheSecondStep() {
+        final var user = flows.signedIn(flows.localUser("turned-off-between-steps@example.com"));
+        final var authenticator = TestAuthenticator.deviceBoundPasskey();
+        flows.addPasskey(authenticator, "Pixel");
+        jdbcTemplate.update("insert into user_sign_in_method (user_id, method, first_used_at, last_used_at) values (?, 'GITHUB', ?, ?)",
+                user.getId(), LocalDateTime.of(2026, 10, 1, 9, 0), LocalDateTime.of(2026, 10, 1, 9, 0));
+        final var pendingToken = signInService.requireSecondStep(user, SignInMethod.GITHUB, false).getBody().getPendingToken();
+        flushed();
+        jdbcTemplate.update("update user_sign_in_method set turned_off_at = ? where user_id = ? and method = 'GITHUB'",
+                LocalDateTime.of(2026, 10, 2, 9, 0), user.getId());
+
+        assertThatThrownBy(() -> completeWith(authenticator, pendingToken))
+                .isInstanceOf(SignInExpiredException.class)
+                .hasMessage("Your sign-in expired. Sign in again.");
+        assertThat(jdbcTemplate.queryForObject("select last_used_at from user_sign_in_method where user_id = ? and method = 'GITHUB'",
+                LocalDateTime.class, user.getId())).isEqualTo(LocalDateTime.of(2026, 10, 1, 9, 0));
+    }
+
+    @Test
+    void aProviderStillOnFinishesTheSecondStepAndRecordsIt() {
+        final var user = flows.signedIn(flows.localUser("still-on-between-steps@example.com"));
+        final var authenticator = TestAuthenticator.deviceBoundPasskey();
+        flows.addPasskey(authenticator, "Pixel");
+        final var pendingToken = signInService.requireSecondStep(user, SignInMethod.GOOGLE, false).getBody().getPendingToken();
+
+        assertThat(completeWith(authenticator, pendingToken).getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(flows.signInMethodsOf(user)).contains("GOOGLE");
     }
 
     @Test

@@ -8,10 +8,12 @@ import java.time.LocalDateTime;
 public record SignInMethodResponse(
         @Schema(description = "How the account signed in", example = "GOOGLE") SignInMethod method,
         @Schema(description = "First sign-in with this method", example = "2026-05-16T10:00:00") LocalDateTime firstUsedAt,
-        @Schema(description = "Latest sign-in with this method", example = "2026-10-29T08:00:00") LocalDateTime lastUsedAt) {
+        @Schema(description = "Latest sign-in with this method", example = "2026-10-29T08:00:00") LocalDateTime lastUsedAt,
+        @Schema(description = "When the account turned this method off; null while it is on", example = "2026-10-30T11:15:00") LocalDateTime turnedOffAt) {
 
     public static SignInMethodResponse from(final UserSignInMethod signInMethod) {
-        return new SignInMethodResponse(signInMethod.getMethod(), signInMethod.getFirstUsedAt(), signInMethod.getLastUsedAt());
+        return new SignInMethodResponse(signInMethod.getMethod(), signInMethod.getFirstUsedAt(), signInMethod.getLastUsedAt(),
+                signInMethod.getTurnedOffAt());
     }
 
 }

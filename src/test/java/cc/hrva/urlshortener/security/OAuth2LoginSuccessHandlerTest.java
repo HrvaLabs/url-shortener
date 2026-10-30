@@ -323,7 +323,7 @@ class OAuth2LoginSuccessHandlerTest {
         verify(pendingLoginStore).create(7L, false, SignInMethod.GOOGLE);
         verifyNoInteractions(tokenProvider);
         verify(userRepository, never()).save(any());
-        verifyNoInteractions(signInMethodService);
+        verify(signInMethodService, never()).record(any(), any(), any());
         assertThat(user.getLastLogin()).isNull();
     }
 
@@ -555,6 +555,57 @@ class OAuth2LoginSuccessHandlerTest {
         verifyNoInteractions(tokenProvider);
         verify(userRepository, never()).save(any());
         verify(userRepository, never()).recordLastLogin(any(), any());
+    }
+
+    @ParameterizedTest
+    @CsvSource({"google, GOOGLE", "github, GITHUB"})
+    void aTurnedOffProviderIsRefusedBeforeAnythingIsWritten(final String provider, final SignInMethod method) throws Exception {
+        final var user = User.builder().id(17L).email("off@example.com").password("$2a$10$preRegisteredPasswordHash")
+                .emailVerified(false).active(true).authProvider("local")
+                .authorities(Collections.singletonList(Authorities.builder().id(1L).name("ROLE_USER").build()))
+                .build();
+        when(oAuth2User.getAttribute("email")).thenReturn("off@example.com");
+        when(userRepository.findByEmail("off@example.com")).thenReturn(Optional.of(user));
+        when(signInMethodService.isTurnedOff(17L, method)).thenReturn(true);
+
+        handler.onAuthenticationSuccess(request, response, signIn(provider));
+
+        verify(response).sendRedirect("http://fe/auth/callback?error=provider_turned_off");
+        verify(userRepository, never()).confirmEmailAndReplacePassword(any(), any());
+        verify(userRepository, never()).recordLastLogin(any(), any());
+        verify(userRepository, never()).save(any());
+        verify(signInMethodService, never()).record(any(), any(), any());
+        verifyNoInteractions(tokenProvider, pendingLoginStore, twoStepMethods, eventPublisher);
+    }
+
+    @Test
+    void aTurnedOffProviderIsRefusedBeforeTheSecondStep() throws Exception {
+        final var user = twoStepUser(18L, "two-off@example.com", "github");
+        when(oAuth2User.getAttribute("email")).thenReturn("two-off@example.com");
+        when(userRepository.findByEmail("two-off@example.com")).thenReturn(Optional.of(user));
+        when(signInMethodService.isTurnedOff(18L, SignInMethod.GITHUB)).thenReturn(true);
+
+        handler.onAuthenticationSuccess(request, response, signIn("github"));
+
+        verify(response).sendRedirect("http://fe/auth/callback?error=provider_turned_off");
+        verifyNoInteractions(tokenProvider, pendingLoginStore, twoStepMethods);
+    }
+
+    @Test
+    void anotherProviderTurnedOffDoesNotStopThisOne() throws Exception {
+        final var user = User.builder().id(19L).email("both@example.com").password("$2a$10$memberPasswordHash")
+                .emailVerified(true).active(true).authProvider("local")
+                .authorities(Collections.singletonList(Authorities.builder().id(1L).name("ROLE_USER").build()))
+                .build();
+        when(oAuth2User.getAttribute("email")).thenReturn("both@example.com");
+        when(userRepository.findByEmail("both@example.com")).thenReturn(Optional.of(user));
+        lenient().when(signInMethodService.isTurnedOff(19L, SignInMethod.GITHUB)).thenReturn(true);
+        when(tokenProvider.createToken(any())).thenReturn("jwt-token");
+
+        handler.onAuthenticationSuccess(request, response, signIn("google"));
+
+        verify(response).sendRedirect(contains("http://fe/auth/callback?token=jwt-token"));
+        verify(signInMethodService).record(eq(19L), eq(SignInMethod.GOOGLE), any());
     }
 
     private OAuth2AuthenticationToken signIn(final String provider) {

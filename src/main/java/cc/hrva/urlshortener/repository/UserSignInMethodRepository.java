@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.repository;
 
+import cc.hrva.urlshortener.model.SignInMethodState;
 import cc.hrva.urlshortener.model.UserSignInMethod;
 import java.time.LocalDateTime;
 import java.util.Collection;
@@ -26,5 +27,24 @@ public interface UserSignInMethodRepository extends JpaRepository<UserSignInMeth
             WHEN NOT MATCHED THEN INSERT (user_id, method, first_used_at, last_used_at) VALUES (s.user_id, s.method, s.used_at, s.used_at)
             """)
     int recordUse(@Param("userId") Long userId, @Param("method") String method, @Param("usedAt") LocalDateTime usedAt);
+
+    @Query("select new cc.hrva.urlshortener.model.SignInMethodState(m.method, m.turnedOffAt) from UserSignInMethod m where m.userId = :userId")
+    List<SignInMethodState> findStatesByUserId(@Param("userId") Long userId);
+
+    @Modifying(flushAutomatically = true)
+    @Transactional
+    @Query(nativeQuery = true, value = """
+            UPDATE user_sign_in_method SET turned_off_at = :turnedOffAt
+            WHERE user_id = :userId AND method = :method AND turned_off_at IS NULL
+            """)
+    int turnOff(@Param("userId") Long userId, @Param("method") String method, @Param("turnedOffAt") LocalDateTime turnedOffAt);
+
+    @Modifying(flushAutomatically = true)
+    @Transactional
+    @Query(nativeQuery = true, value = """
+            UPDATE user_sign_in_method SET turned_off_at = NULL
+            WHERE user_id = :userId AND method = :method AND turned_off_at IS NOT NULL
+            """)
+    int turnOn(@Param("userId") Long userId, @Param("method") String method);
 
 }

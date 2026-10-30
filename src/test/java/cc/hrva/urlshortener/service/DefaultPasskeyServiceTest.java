@@ -6,6 +6,7 @@ import cc.hrva.urlshortener.dto.PasskeyRegistrationDto;
 import cc.hrva.urlshortener.dto.PasskeyRegistrationOptionsDto;
 import cc.hrva.urlshortener.dto.PasskeyRenameDto;
 import cc.hrva.urlshortener.exception.ApiException;
+import cc.hrva.urlshortener.exception.LastSignInMethodException;
 import cc.hrva.urlshortener.exception.NoAuthorizationException;
 import cc.hrva.urlshortener.exception.PasskeyNotFoundException;
 import cc.hrva.urlshortener.exception.PasskeyVerificationException;
@@ -25,6 +26,7 @@ import cc.hrva.urlshortener.service.passkey.PasskeyJson;
 import cc.hrva.urlshortener.service.passkey.PasskeyOptionsFactory;
 import cc.hrva.urlshortener.service.passkey.TestAuthenticator;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiter;
+import cc.hrva.urlshortener.service.signin.SignInMethodGuard;
 import cc.hrva.urlshortener.service.twostep.AccountLock;
 import com.webauthn4j.converter.exception.DataConversionException;
 import com.webauthn4j.verifier.exception.BadOriginException;
@@ -118,6 +120,9 @@ class DefaultPasskeyServiceTest {
 
     private PasskeyService passkeyService;
 
+    @Mock
+    private SignInMethodGuard signInMethodGuard;
+
     @BeforeEach
     void setUp() {
         final var appProperties = new AppProperties();
@@ -127,7 +132,7 @@ class DefaultPasskeyServiceTest {
         final var passkeyOptionsFactory = new PasskeyOptionsFactory(appProperties);
         passkeyService = new DefaultPasskeyService(userService, userRepository, passkeyCredentialRepository,
                 passkeyCeremonyStore, new PasskeyCeremonies(passkeyCeremonyStore, passkeyOptionsFactory, passkeyJson, rateLimiter),
-                passkeyJson, passkeyOptionsFactory, relyingPartyOperations, reauthentication, accountLock, eventPublisher);
+                passkeyJson, passkeyOptionsFactory, relyingPartyOperations, reauthentication, accountLock, signInMethodGuard, eventPublisher);
         lenient().when(accountLock.lock(any())).thenAnswer(invocation -> invocation.getArgument(0));
     }
 
@@ -496,6 +501,25 @@ class DefaultPasskeyServiceTest {
 
         verify(reauthentication).confirm(user, "user123");
         verify(passkeyCredentialRepository).delete(passkey);
+    }
+
+    @Test
+    void removingAPasskeyThatWouldLeaveNoWayInIsRefusedUnderTheLock() {
+        final var user = user(7L, "user@localhost");
+        final var passkey = PasskeyCredential.builder().id(5L).user(user).credentialId("a2V5").discoverable(true).build();
+        when(userService.getUserFromToken()).thenReturn(user);
+        when(passkeyCredentialRepository.findByIdAndUser(5L, user)).thenReturn(Optional.of(passkey));
+        doThrow(new LastSignInMethodException()).when(signInMethodGuard).checkRemoval(user, passkey);
+
+        assertThatThrownBy(() -> passkeyService.delete(5L, new PasskeyDeleteDto("user123")))
+                .isInstanceOf(LastSignInMethodException.class)
+                .hasMessage("Keep at least one way to sign in. Add a passkey or another method first.");
+
+        final var order = inOrder(reauthentication, accountLock, signInMethodGuard);
+        order.verify(reauthentication).confirm(user, "user123");
+        order.verify(accountLock).lock(user);
+        order.verify(signInMethodGuard).checkRemoval(user, passkey);
+        verify(passkeyCredentialRepository, never()).delete(any());
     }
 
     @Test

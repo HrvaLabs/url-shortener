@@ -250,6 +250,27 @@ public class DefaultSendingEmailService implements SendingEmailService {
 
     @Override
     @Async
+    public void sendSignInMethodChangedEmail(final User user, final String change, final LocalDateTime changedAt) {
+        final var ctx = getContext(user);
+        ctx.setVariable("change", change);
+        ctx.setVariable("changed_at", changedAt.format(PASSKEY_ADDED_AT_FORMAT));
+        ctx.setVariable("settings_url", frontendPage("/dashboard/settings"));
+        ctx.setVariable("reset_url", frontendPage("/reset-password"));
+
+        final var htmlContent = templateEngine.process("sign_in_method_changed", ctx);
+
+        final var email = Email.builder()
+                .sender(appProperties.getEmailSenderAddress())
+                .receivers(new String[]{user.getEmail()})
+                .subject("A sign-in method changed on your hrva.cc account")
+                .text(htmlContent)
+                .build();
+
+        tryToSendEmail(email);
+    }
+
+    @Override
+    @Async
     public void sendDecisionsEmailToAdmin(final DecisionsDigest digest) {
         final var subject = decisionsSubject(digest.openCount() + digest.openBioPageReviews());
         final var ctx = new Context();

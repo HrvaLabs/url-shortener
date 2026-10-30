@@ -31,6 +31,8 @@ import cc.hrva.urlshortener.service.passkey.PasskeyJson;
 import cc.hrva.urlshortener.service.passkey.PasskeyOptionsFactory;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiter;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiterUnavailableException;
+import cc.hrva.urlshortener.service.signin.SignInMethodGuard;
+import cc.hrva.urlshortener.service.twostep.AccountLock;
 import cc.hrva.urlshortener.service.twostep.PendingLogin;
 import cc.hrva.urlshortener.service.twostep.PendingLoginStore;
 import cc.hrva.urlshortener.service.twostep.TwoStepLockMessage;
@@ -68,6 +70,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.startsWith;
 import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -139,6 +142,12 @@ class DefaultSecondStepServiceTest {
     @Mock
     private HttpServletRequest request;
 
+    @Mock
+    private AccountLock accountLock;
+
+    @Mock
+    private SignInMethodGuard signInMethodGuard;
+
     private SecondStepService secondStepService;
 
     @BeforeEach
@@ -150,8 +159,11 @@ class DefaultSecondStepServiceTest {
         secondStepService = new DefaultSecondStepService(clientIpResolver, loginAttemptService, pendingLoginStore,
                 rateLimiter, userRepository, twoFactorService, signInService, passkeyCredentialRepository,
                 passkeyCeremonies, passkeyCeremonyStore, passkeyOptionsFactory, passkeyAssertions,
-                passkeySignInStatsRepository, analyticsDays, new TwoStepLockMessage(passkeyCredentialRepository));
+                passkeySignInStatsRepository, analyticsDays, new TwoStepLockMessage(passkeyCredentialRepository), accountLock,
+                signInMethodGuard);
         when(clientIpResolver.getClientIp(request)).thenReturn(CLIENT_IP);
+        lenient().when(accountLock.lock(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        lenient().when(signInMethodGuard.stillOn(any(User.class), any())).thenReturn(true);
     }
 
     @Test
@@ -389,6 +401,42 @@ class DefaultSecondStepServiceTest {
                 .isInstanceOf(EmailNotVerifiedException.class)
                 .hasMessage("Please verify your email before logging in.");
         verifyNoInteractions(signInService);
+    }
+
+    @Test
+    void aPasswordRemovedAfterTheFirstStepStopsTheSecondStep() {
+        final var user = user();
+        givenAPendingLogin(new PendingLogin(7L, false, SignInMethod.PASSWORD), user);
+        when(twoFactorService.verifyLoginCode(user, "123456")).thenReturn(true);
+        when(pendingLoginStore.consume(TOKEN)).thenReturn(Optional.of(new PendingLogin(7L, false, SignInMethod.PASSWORD)));
+        when(signInMethodGuard.stillOn(user, SignInMethod.PASSWORD)).thenReturn(false);
+
+        assertThatThrownBy(() -> secondStepService.completeWithCode(totp("123456"), request))
+                .isInstanceOf(SignInExpiredException.class)
+                .hasMessage(SIGN_IN_EXPIRED);
+
+        final var order = inOrder(pendingLoginStore, accountLock, signInMethodGuard);
+        order.verify(pendingLoginStore).consume(TOKEN);
+        order.verify(accountLock).lock(user);
+        order.verify(signInMethodGuard).stillOn(user, SignInMethod.PASSWORD);
+        verify(loginAttemptService, never()).loginSucceeded(anyString());
+        verifyNoInteractions(signInService);
+    }
+
+    @Test
+    void aProviderTurnedOffAfterTheFirstStepStopsTheSecondStepWithAPasskey() {
+        final var user = user();
+        givenAPendingLogin(new PendingLogin(7L, false, SignInMethod.GITHUB), user);
+        when(passkeyCeremonyStore.consume(CEREMONY_ID)).thenReturn(Optional.of(SECOND_STEP_CEREMONY));
+        when(passkeyAssertions.verify(SECOND_STEP_CEREMONY, CREDENTIAL, user)).thenReturn(user);
+        when(pendingLoginStore.consume(TOKEN)).thenReturn(Optional.of(new PendingLogin(7L, false, SignInMethod.GITHUB)));
+        when(signInMethodGuard.stillOn(user, SignInMethod.GITHUB)).thenReturn(false);
+
+        assertThatThrownBy(() -> secondStepService.completeWithPasskey(passkey(), request))
+                .isInstanceOf(SignInExpiredException.class)
+                .hasMessage(SIGN_IN_EXPIRED);
+
+        verifyNoInteractions(signInService, passkeySignInStatsRepository);
     }
 
     @Test

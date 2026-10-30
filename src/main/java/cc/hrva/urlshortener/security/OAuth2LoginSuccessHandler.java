@@ -46,6 +46,7 @@ public class OAuth2LoginSuccessHandler implements AuthenticationSuccessHandler {
     private static final String EMAIL = "email";
     private static final String GITHUB_EMAIL_UNVERIFIED = "github_email_unverified";
     private static final String GOOGLE_EMAIL_UNVERIFIED = "google_email_unverified";
+    private static final String PROVIDER_TURNED_OFF = "provider_turned_off";
 
     private final UserRepository userRepository;
     private final AuthoritiesService authoritiesService;
@@ -126,13 +127,19 @@ public class OAuth2LoginSuccessHandler implements AuthenticationSuccessHandler {
             return;
         }
 
+        final var method = SignInMethod.ofProvider(provider);
+        if (existingUser.isPresent() && method.isPresent() && signInMethodService.isTurnedOff(user.getId(), method.get())) {
+            log.info("OAuth2 login refused: the account turned this provider off provider={} user id={}", provider, user.getId());
+            response.sendRedirect(appProperties.getFrontendUrl() + "/auth/callback?error=" + PROVIDER_TURNED_OFF);
+            return;
+        }
+
         if (!Boolean.TRUE.equals(user.getEmailVerified())) {
             if (userRepository.confirmEmailAndReplacePassword(user.getId(), SecureTokens.random()) == 1) {
                 log.info("OAuth2 login confirmed the account's email and replaced its unconfirmed password user id={}", user.getId());
             }
         }
 
-        final var method = SignInMethod.ofProvider(provider);
         if (method.isEmpty()) {
             log.warn("OAuth2 sign-in method not recorded, unrecognised provider={} user id={}", provider, user.getId());
         }

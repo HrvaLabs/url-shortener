@@ -15,6 +15,13 @@
           ]
         },
         {
+          "title": "Security",
+          "icon": "shield",
+          "items": [
+            "You can turn off Google or GitHub sign-in, or remove your password, in Settings. The last way you sign in can't be removed."
+          ]
+        },
+        {
           "title": "Admin",
           "icon": "wrench",
           "items": [

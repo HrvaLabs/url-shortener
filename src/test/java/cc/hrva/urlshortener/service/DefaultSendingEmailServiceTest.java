@@ -733,6 +733,37 @@ class DefaultSendingEmailServiceTest {
     }
 
     @Test
+    void theSignInMethodChangedEmailSaysWhatChangedWhenAndWhatToDoIfItWasntYou() throws Exception {
+        saveReturnsArgument();
+        final var sent = ArgumentCaptor.forClass(Email.class);
+        doAnswer(invocation -> null).when(emailService).sendEmail(sent.capture(), eq(null));
+
+        configuredEmailService(realTemplateEngine()).sendSignInMethodChangedEmail(OWNER, "Google sign-in was turned off.", PASSKEY_ADDED_AT);
+
+        final var email = sent.getValue();
+        assertThat(email.getReceivers()).containsExactly("alice@example.com");
+        assertThat(email.getSubject()).isEqualTo("A sign-in method changed on your hrva.cc account");
+        assertThat(email.getText()).containsPattern("<h1[^>]*>A sign-in method changed</h1>");
+        assertThat(textOf(email.getText()))
+                .contains("Hello alice@example.com,")
+                .contains("Google sign-in was turned off.")
+                .contains("This changed on your hrva.cc account on 25 October 2026 at 14:05 UTC.")
+                .contains("If this wasn't you, reset your password and check your sign-in methods.")
+                .contains("Settings \u2192 Sign-in methods (https://hrva.cc/dashboard/settings)");
+    }
+
+    @Test
+    void theSignInMethodChangedEmailEscapesWhatChanged() throws Exception {
+        saveReturnsArgument();
+        final var sent = ArgumentCaptor.forClass(Email.class);
+        doAnswer(invocation -> null).when(emailService).sendEmail(sent.capture(), eq(null));
+
+        configuredEmailService(realTemplateEngine()).sendSignInMethodChangedEmail(OWNER, "<script>alert(1)</script>", PASSKEY_ADDED_AT);
+
+        assertThat(sent.getValue().getText()).doesNotContain("<script>").contains("&lt;script&gt;");
+    }
+
+    @Test
     void aGoogleOrGitHubAccountIsToldToSecureThatAccountInsteadOfChangingAPassword() throws Exception {
         for (final var provider : List.of("google", "github")) {
             final var user = User.builder().email("alice@example.com").apiKeySlots(4L).authProvider(provider).build();
@@ -794,6 +825,9 @@ class DefaultSendingEmailServiceTest {
                         "Verify your email", List.of("https://hrva.cc/verify-email/verify-token-42", "https://hrva.cc/verify-email/verify-token-42")),
                 Arguments.of("account_deactivated", (Consumer<DefaultSendingEmailService>) service -> service.sendEmailAccountDeactivated(OWNER),
                         "Account deactivated", List.of("mailto:support@hrva.cc")),
+                Arguments.of("sign_in_method_changed", (Consumer<DefaultSendingEmailService>) service ->
+                                service.sendSignInMethodChangedEmail(OWNER, "GitHub sign-in was turned off.", PASSKEY_ADDED_AT),
+                        "A sign-in method changed", List.of("https://hrva.cc/reset-password", "https://hrva.cc/dashboard/settings", "mailto:support@hrva.cc")),
                 Arguments.of("url_malware_detected", (Consumer<DefaultSendingEmailService>) service -> service.sendEmailUrlMalwareDetected(OWNER, flaggedLink, "MALWARE"),
                         "Malicious URL detected", List.of("https://hrva.cc/login/")));
     }
@@ -1521,6 +1555,8 @@ class DefaultSendingEmailServiceTest {
                 Arguments.of("reset_password", (Consumer<DefaultSendingEmailService>) service -> service.sendEmailForgotPassword(OWNER, resetToken)),
                 Arguments.of("verify_email", (Consumer<DefaultSendingEmailService>) service -> service.sendVerificationEmail(OWNER, verificationToken)),
                 Arguments.of("passkey_added", (Consumer<DefaultSendingEmailService>) service -> service.sendPasskeyAddedEmail(OWNER, "Laptop", PASSKEY_ADDED_AT)),
+                Arguments.of("sign_in_method_changed", (Consumer<DefaultSendingEmailService>) service ->
+                        service.sendSignInMethodChangedEmail(OWNER, "Your password was removed.", PASSKEY_ADDED_AT)),
                 Arguments.of("account_deactivated", (Consumer<DefaultSendingEmailService>) service -> service.sendEmailAccountDeactivated(OWNER)));
     }
 

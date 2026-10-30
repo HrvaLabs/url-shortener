@@ -10,6 +10,9 @@ import java.util.Map;
 public interface SignInMethodService {
 
     void record(Long userId, SignInMethod method, LocalDateTime usedAt);
+    boolean turnOff(Long userId, SignInMethod method, LocalDateTime turnedOffAt);
+    boolean turnOn(Long userId, SignInMethod method);
+    boolean isTurnedOff(Long userId, SignInMethod method);
     List<SignInMethodResponse> methodsOf(Long userId);
     Map<Long, List<SignInMethodResponse>> methodsOf(Collection<Long> userIds);
 

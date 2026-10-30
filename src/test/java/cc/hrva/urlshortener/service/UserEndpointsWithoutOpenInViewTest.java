@@ -11,6 +11,7 @@ import cc.hrva.urlshortener.mcp.apps.ConnectedAppsService;
 import cc.hrva.urlshortener.model.ResetToken;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.repository.ApiKeyRepository;
+import cc.hrva.urlshortener.repository.AuditLogRepository;
 import cc.hrva.urlshortener.repository.EmailLogRepository;
 import cc.hrva.urlshortener.repository.PasskeyCredentialRepository;
 import cc.hrva.urlshortener.repository.ResetTokenRepository;
@@ -23,9 +24,13 @@ import cc.hrva.urlshortener.security.Reauthentication;
 import cc.hrva.urlshortener.service.bio.BioAccountData;
 import cc.hrva.urlshortener.service.domain.CustomDomainAccountData;
 import cc.hrva.urlshortener.service.notification.NotificationAccountData;
+import cc.hrva.urlshortener.service.impl.DefaultAuditLogService;
 import cc.hrva.urlshortener.service.impl.DefaultSendingEmailService;
+import cc.hrva.urlshortener.service.impl.DefaultSignInMethodChangeService;
 import cc.hrva.urlshortener.service.impl.DefaultSignInMethodService;
 import cc.hrva.urlshortener.service.impl.DefaultUserService;
+import cc.hrva.urlshortener.service.signin.SignInMethodGuard;
+import cc.hrva.urlshortener.service.twostep.AccountLock;
 import java.util.List;
 import java.util.Set;
 import org.junit.jupiter.api.AfterEach;
@@ -143,6 +148,7 @@ class UserEndpointsWithoutOpenInViewTest {
     @AfterEach
     void removeTheMember() {
         SecurityContextHolder.clearContext();
+        jdbcTemplate.update("delete from audit_log");
         jdbcTemplate.update("delete from user_account_authorities where user_id = ?", MEMBER);
         jdbcTemplate.update("delete from user_account where id = ?", MEMBER);
     }
@@ -160,7 +166,7 @@ class UserEndpointsWithoutOpenInViewTest {
         assertThat(json.get(0).get("authorities").get(0).get("name").asString()).isEqualTo("ROLE_USER");
         assertThat(json.get(0).get("possibleScammer").asBoolean()).isTrue();
         assertThat(json.get(0).get("signInMethods").toString())
-                .isEqualTo("[{\"method\":\"GITHUB\",\"firstUsedAt\":\"2026-10-20T08:00:00\",\"lastUsedAt\":\"2026-10-28T19:45:00\"}]");
+                .isEqualTo("[{\"method\":\"GITHUB\",\"firstUsedAt\":\"2026-10-20T08:00:00\",\"lastUsedAt\":\"2026-10-28T19:45:00\",\"turnedOffAt\":null}]");
     }
 
     @Test
@@ -202,13 +208,48 @@ class UserEndpointsWithoutOpenInViewTest {
         assertThat(json.has("password")).isFalse();
     }
 
+    @Test
+    void aResetTurnsAPasswordSignInThatWasRemovedBackOnAndAuditsIt() {
+        jdbcTemplate.update("""
+                insert into user_sign_in_method (user_id, method, first_used_at, last_used_at, turned_off_at)
+                values (?, 'PASSWORD', timestamp '2026-01-02 03:04:05', timestamp '2026-10-28 09:30:00', timestamp '2026-10-29 10:00:00')""", MEMBER);
+        when(passwordEncoder.encode(anyString())).thenReturn("$2a$10$" + "n".repeat(53));
+        when(resetTokenService.getResetTokenFromUserAndToken(any(), anyString())).thenReturn(ResetToken.builder().token("reset-token").active(true).build());
+
+        final var answer = userService.resetPassword(new PasswordResetDto("reset-token", MEMBER_EMAIL, "new-password"));
+
+        assertThat(JSON.readTree(JSON.writeValueAsString(answer)).get("authorities").get(0).get("name").asString()).isEqualTo("ROLE_USER");
+        assertThat(jdbcTemplate.queryForObject("select password from user_account where id = ?", String.class, MEMBER))
+                .isEqualTo("$2a$10$" + "n".repeat(53));
+        assertThat(jdbcTemplate.queryForObject("select count(*) from user_sign_in_method where user_id = ? and method = 'PASSWORD' and turned_off_at is null",
+                Long.class, MEMBER)).isOne();
+        assertThat(jdbcTemplate.queryForMap("select performed_by, action, target_type, target_identifier, details from audit_log"))
+                .containsEntry("PERFORMED_BY", MEMBER_EMAIL)
+                .containsEntry("ACTION", "TURN_ON_SIGN_IN_METHOD")
+                .containsEntry("TARGET_TYPE", "User")
+                .containsEntry("TARGET_IDENTIFIER", String.valueOf(MEMBER))
+                .containsEntry("DETAILS", "method: PASSWORD, via: password reset");
+    }
+
+    @Test
+    void aResetOfAnAccountWhosePasswordSignInIsOnAuditsNothing() {
+        when(passwordEncoder.encode(anyString())).thenReturn("new-hash");
+        when(resetTokenService.getResetTokenFromUserAndToken(any(), anyString())).thenReturn(ResetToken.builder().token("reset-token").active(true).build());
+
+        userService.resetPassword(new PasswordResetDto("reset-token", MEMBER_EMAIL, "new-password"));
+
+        assertThat(jdbcTemplate.queryForObject("select count(*) from audit_log", Long.class)).isZero();
+    }
+
     @SpringBootConfiguration
     @EnableAutoConfiguration
     @EntityScan(basePackageClasses = Url.class)
     @EnableJpaRepositories(
             basePackageClasses = UrlRepository.class,
-            includeFilters = @ComponentScan.Filter(type = FilterType.ASSIGNABLE_TYPE, classes = {UserRepository.class, UserSignInMethodRepository.class}))
-    @Import({DefaultUserService.class, DefaultSignInMethodService.class, UserToUserDtoConverter.class, UserUpdateDtoToUserConverter.class})
+            includeFilters = @ComponentScan.Filter(type = FilterType.ASSIGNABLE_TYPE,
+                    classes = {UserRepository.class, UserSignInMethodRepository.class, AuditLogRepository.class}))
+    @Import({DefaultUserService.class, DefaultSignInMethodService.class, UserToUserDtoConverter.class, UserUpdateDtoToUserConverter.class,
+            DefaultSignInMethodChangeService.class, SignInMethodGuard.class, AccountLock.class, DefaultAuditLogService.class})
     static class TestApplication {
     }
 

@@ -12,6 +12,8 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
@@ -51,6 +53,17 @@ class DefaultAuditLogServiceTest {
                 .extracting(AuditLog::getPerformedBy, AuditLog::getAction, AuditLog::isFailed, AuditLog::getTargetType, AuditLog::getTargetIdentifier,
                         AuditLog::getDetails)
                 .containsExactly("admin@hrva.cc", AuditAction.REVOKE_URL, false, "Url", "12", "");
+    }
+
+    @Test
+    @ExtendWith(OutputCaptureExtension.class)
+    void theLogLineMasksWhoDidItWhileTheRowKeepsTheAddress(final CapturedOutput output) {
+        auditLogService.log("ana@hrva.cc", AuditAction.REMOVE_PASSWORD, "User", "700", "method: PASSWORD");
+
+        assertThat(output).contains("Audit: a***@hrva.cc REMOVE_PASSWORD User 700 - method: PASSWORD").doesNotContain("ana@hrva.cc");
+        final var saved = ArgumentCaptor.forClass(AuditLog.class);
+        verify(auditLogRepository).save(saved.capture());
+        assertThat(saved.getValue().getPerformedBy()).isEqualTo("ana@hrva.cc");
     }
 
     @Test

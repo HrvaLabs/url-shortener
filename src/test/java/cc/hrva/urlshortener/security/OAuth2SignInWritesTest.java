@@ -3,6 +3,7 @@ package cc.hrva.urlshortener.security;
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.codebook.Authorities;
+import cc.hrva.urlshortener.model.enums.SignInMethod;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.repository.UserSignInMethodRepository;
@@ -158,6 +159,63 @@ class OAuth2SignInWritesTest {
         assertThat(row).containsEntry("EMAIL_VERIFIED", true).containsEntry("AUTH_PROVIDER", "local");
         assertThat((String) row.get("PASSWORD")).isNotEqualTo("pre-registered-hash").isNotBlank();
         assertThat(signInMethodsOf(PRE_REGISTERED)).containsOnlyKeys("GITHUB");
+    }
+
+    @Test
+    void aTurnedOffProviderIsRefusedAndNothingIsRecorded() throws Exception {
+        jdbcTemplate.update("""
+                insert into user_account (id, email, password, active, two_step_enabled, auth_provider, last_login, email_verified)
+                values (?, ?, 'secret-hash', true, false, 'google', ?, true)""", MEMBER, MEMBER_EMAIL, LOADED_LOGIN);
+        jdbcTemplate.update("insert into user_account_authorities (user_id, authorities_id) values (?, 1)", MEMBER);
+        jdbcTemplate.update("""
+                insert into user_sign_in_method (user_id, method, first_used_at, last_used_at, turned_off_at)
+                values (?, 'GOOGLE', ?, ?, ?)""", MEMBER, LOADED_LOGIN, LOADED_LOGIN, LOADED_LOGIN.plusDays(1));
+
+        final var response = signIn(MEMBER_EMAIL);
+
+        assertThat(response.getRedirectedUrl()).isEqualTo("http://fe/auth/callback?error=provider_turned_off");
+        assertThat(jdbcTemplate.queryForObject("select last_login from user_account where id = ?", Timestamp.class, MEMBER))
+                .isEqualTo(Timestamp.valueOf(LOADED_LOGIN));
+        assertThat(signInMethodsOf(MEMBER)).containsExactly(Map.entry("GOOGLE", Timestamp.valueOf(LOADED_LOGIN)));
+    }
+
+    @Test
+    void aTurnedOffProviderNeverConfirmsOrChangesAnUnconfirmedAccount() throws Exception {
+        jdbcTemplate.update("""
+                insert into user_account (id, email, password, active, two_step_enabled, auth_provider, email_verified)
+                values (?, ?, 'pre-registered-hash', true, false, 'local', false)""", PRE_REGISTERED, PRE_REGISTERED_EMAIL);
+        jdbcTemplate.update("insert into user_account_authorities (user_id, authorities_id) values (?, 1)", PRE_REGISTERED);
+        jdbcTemplate.update("""
+                insert into user_sign_in_method (user_id, method, first_used_at, last_used_at, turned_off_at)
+                values (?, 'GITHUB', ?, ?, ?)""", PRE_REGISTERED, LOADED_LOGIN, LOADED_LOGIN, LOADED_LOGIN);
+
+        final var response = signIn(PRE_REGISTERED_EMAIL, "github");
+
+        assertThat(response.getRedirectedUrl()).isEqualTo("http://fe/auth/callback?error=provider_turned_off");
+        assertThat(jdbcTemplate.queryForMap("select password, email_verified, last_login from user_account where id = ?", PRE_REGISTERED))
+                .containsEntry("PASSWORD", "pre-registered-hash")
+                .containsEntry("EMAIL_VERIFIED", false)
+                .containsEntry("LAST_LOGIN", null);
+    }
+
+    @Test
+    void afterTurningItBackOnTheNextSignInRecordsAsUsual() throws Exception {
+        jdbcTemplate.update("""
+                insert into user_account (id, email, password, active, two_step_enabled, auth_provider, last_login, email_verified)
+                values (?, ?, 'secret-hash', true, false, 'google', ?, true)""", MEMBER, MEMBER_EMAIL, LOADED_LOGIN);
+        jdbcTemplate.update("insert into user_account_authorities (user_id, authorities_id) values (?, 1)", MEMBER);
+        jdbcTemplate.update("""
+                insert into user_sign_in_method (user_id, method, first_used_at, last_used_at, turned_off_at)
+                values (?, 'GOOGLE', ?, ?, ?)""", MEMBER, LOADED_LOGIN, LOADED_LOGIN, LOADED_LOGIN.plusDays(1));
+        assertThat(signIn(MEMBER_EMAIL).getRedirectedUrl()).isEqualTo("http://fe/auth/callback?error=provider_turned_off");
+
+        signInMethodService.turnOn(MEMBER, SignInMethod.GOOGLE);
+        final var response = signIn(MEMBER_EMAIL);
+
+        assertThat(response.getRedirectedUrl()).startsWith("http://fe/auth/callback?token=jwt-token");
+        final var lastLogin = jdbcTemplate.queryForObject("select last_login from user_account where id = ?", Timestamp.class, MEMBER);
+        assertThat(lastLogin.toLocalDateTime()).isAfter(LOADED_LOGIN);
+        assertThat(signInMethodsOf(MEMBER)).containsExactly(Map.entry("GOOGLE", lastLogin));
     }
 
     private Map<String, Object> signInMethodsOf(final Long userId) {

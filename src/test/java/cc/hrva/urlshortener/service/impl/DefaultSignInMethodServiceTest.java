@@ -73,7 +73,7 @@ class DefaultSignInMethodServiceTest {
         signInMethodService.record(user.getId(), SignInMethod.PASSKEY, FIRST);
 
         assertThat(signInMethodService.methodsOf(user.getId()))
-                .containsExactly(new SignInMethodResponse(SignInMethod.PASSKEY, FIRST, FIRST));
+                .containsExactly(new SignInMethodResponse(SignInMethod.PASSKEY, FIRST, FIRST, null));
     }
 
     @Test
@@ -82,7 +82,7 @@ class DefaultSignInMethodServiceTest {
         signInMethodService.record(user.getId(), SignInMethod.GOOGLE, LATER);
 
         assertThat(signInMethodService.methodsOf(user.getId()))
-                .containsExactly(new SignInMethodResponse(SignInMethod.GOOGLE, FIRST, LATER));
+                .containsExactly(new SignInMethodResponse(SignInMethod.GOOGLE, FIRST, LATER, null));
     }
 
     @Test
@@ -92,7 +92,7 @@ class DefaultSignInMethodServiceTest {
         signInMethodService.record(user.getId(), SignInMethod.GITHUB, FIRST.plusDays(1));
 
         assertThat(signInMethodService.methodsOf(user.getId()))
-                .containsExactly(new SignInMethodResponse(SignInMethod.GITHUB, FIRST, LATER));
+                .containsExactly(new SignInMethodResponse(SignInMethod.GITHUB, FIRST, LATER, null));
     }
 
     @Test
@@ -132,8 +132,8 @@ class DefaultSignInMethodServiceTest {
 
         final var methods = signInMethodService.methodsOf(List.of(user.getId(), other.getId(), withoutRecords.getId()));
 
-        assertThat(methods.get(user.getId())).containsExactly(new SignInMethodResponse(SignInMethod.PASSWORD, FIRST, FIRST));
-        assertThat(methods.get(other.getId())).containsExactly(new SignInMethodResponse(SignInMethod.GOOGLE, LATER, LATER));
+        assertThat(methods.get(user.getId())).containsExactly(new SignInMethodResponse(SignInMethod.PASSWORD, FIRST, FIRST, null));
+        assertThat(methods.get(other.getId())).containsExactly(new SignInMethodResponse(SignInMethod.GOOGLE, LATER, LATER, null));
         assertThat(methods.get(withoutRecords.getId())).isEmpty();
     }
 
@@ -146,7 +146,7 @@ class DefaultSignInMethodServiceTest {
         });
 
         assertThat(signInMethodService.methodsOf(created.getId()))
-                .containsExactly(new SignInMethodResponse(SignInMethod.PASSWORD, FIRST, FIRST));
+                .containsExactly(new SignInMethodResponse(SignInMethod.PASSWORD, FIRST, FIRST, null));
     }
 
     @Test
@@ -169,7 +169,73 @@ class DefaultSignInMethodServiceTest {
         CompletableFuture.allOf(first, second).get(20, TimeUnit.SECONDS);
 
         assertThat(signInMethodService.methodsOf(user.getId()))
-                .containsExactly(new SignInMethodResponse(SignInMethod.PASSKEY, FIRST, LATER));
+                .containsExactly(new SignInMethodResponse(SignInMethod.PASSKEY, FIRST, LATER, null));
+    }
+
+    @Test
+    void aTurnedOffMethodListsWhenItWasTurnedOff() {
+        signInMethodService.record(user.getId(), SignInMethod.GOOGLE, FIRST);
+
+        assertThat(signInMethodService.turnOff(user.getId(), SignInMethod.GOOGLE, LATER)).isTrue();
+
+        assertThat(signInMethodService.methodsOf(user.getId()))
+                .containsExactly(new SignInMethodResponse(SignInMethod.GOOGLE, FIRST, FIRST, LATER));
+        assertThat(signInMethodService.isTurnedOff(user.getId(), SignInMethod.GOOGLE)).isTrue();
+    }
+
+    @Test
+    void turningOffWhatIsAlreadyOffKeepsTheFirstTime() {
+        signInMethodService.record(user.getId(), SignInMethod.GITHUB, FIRST);
+        signInMethodService.turnOff(user.getId(), SignInMethod.GITHUB, FIRST);
+
+        assertThat(signInMethodService.turnOff(user.getId(), SignInMethod.GITHUB, LATER)).isFalse();
+
+        assertThat(signInMethodService.methodsOf(user.getId()))
+                .containsExactly(new SignInMethodResponse(SignInMethod.GITHUB, FIRST, FIRST, FIRST));
+    }
+
+    @Test
+    void turningBackOnClearsOnlyThatMethod() {
+        signInMethodService.record(user.getId(), SignInMethod.GOOGLE, FIRST);
+        signInMethodService.record(user.getId(), SignInMethod.GITHUB, FIRST);
+        signInMethodService.turnOff(user.getId(), SignInMethod.GOOGLE, LATER);
+        signInMethodService.turnOff(user.getId(), SignInMethod.GITHUB, LATER);
+
+        assertThat(signInMethodService.turnOn(user.getId(), SignInMethod.GOOGLE)).isTrue();
+        assertThat(signInMethodService.turnOn(user.getId(), SignInMethod.GOOGLE)).isFalse();
+
+        assertThat(signInMethodService.isTurnedOff(user.getId(), SignInMethod.GOOGLE)).isFalse();
+        assertThat(signInMethodService.isTurnedOff(user.getId(), SignInMethod.GITHUB)).isTrue();
+    }
+
+    @Test
+    void aMethodNeverUsedIsNotTurnedOffAndCantBeTurnedOff() {
+        assertThat(signInMethodService.turnOff(user.getId(), SignInMethod.GOOGLE, LATER)).isFalse();
+
+        assertThat(signInMethodService.isTurnedOff(user.getId(), SignInMethod.GOOGLE)).isFalse();
+        assertThat(signInMethodService.methodsOf(user.getId())).isEmpty();
+    }
+
+    @Test
+    void aTurnOffNeverTouchesAnotherAccount() {
+        final var other = userRepository.saveAndFlush(account("other-off@example.com"));
+        signInMethodService.record(user.getId(), SignInMethod.GOOGLE, FIRST);
+        signInMethodService.record(other.getId(), SignInMethod.GOOGLE, FIRST);
+
+        signInMethodService.turnOff(user.getId(), SignInMethod.GOOGLE, LATER);
+
+        assertThat(signInMethodService.isTurnedOff(other.getId(), SignInMethod.GOOGLE)).isFalse();
+    }
+
+    @Test
+    void recordingAUseLeavesATurnedOffMethodOff() {
+        signInMethodService.record(user.getId(), SignInMethod.PASSWORD, FIRST);
+        signInMethodService.turnOff(user.getId(), SignInMethod.PASSWORD, FIRST.plusDays(1));
+
+        signInMethodService.record(user.getId(), SignInMethod.PASSWORD, LATER);
+
+        assertThat(signInMethodService.methodsOf(user.getId()))
+                .containsExactly(new SignInMethodResponse(SignInMethod.PASSWORD, FIRST, LATER, FIRST.plusDays(1)));
     }
 
     private static void awaitQuietly(final CountDownLatch latch) {

@@ -115,6 +115,8 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class DefaultUserServiceTest {
 
+    private static final String LOCAL_PASSWORD_HASH = "$2a$10$" + "e".repeat(53);
+
     private static final String CREDENTIAL_ID = "q1Rz7uCredentialIdOfTheMacBook0aB";
     private static final String PUBLIC_KEY = "pQECAyYgASFYIPublicKeyOfTheMacBookCose";
     private static final String ATTESTATION_OBJECT = "o2NmbXRkbm9uZWdhdHRTdG10oGhAttestationObject";
@@ -203,6 +205,9 @@ class DefaultUserServiceTest {
     @Mock
     private SignInMethodService signInMethodService;
 
+    @Mock
+    private SignInMethodChangeService signInMethodChangeService;
+
     private DefaultLoginAttemptService loginAttemptService;
 
     @BeforeEach
@@ -220,7 +225,7 @@ class DefaultUserServiceTest {
         return new DefaultUserService(appProperties, reauthentication, urlRepository, userRepository,
                 passwordEncoder, apiKeyRepository, emailLogRepository, resetTokenService,
                 resetTokenRepository, twoFactorRecoveryCodeRepository, passkeyCredentialRepository, bioAccountData, notificationAccountData, customDomainAccountData, userToUserDtoConverter, sendingEmailService,
-                verificationTokenService, verificationTokenRepository, userUpdateDtoToUserConverter, connectedAppsService, scammerSignalService, signInMethodService, publisher);
+                verificationTokenService, verificationTokenRepository, userUpdateDtoToUserConverter, connectedAppsService, scammerSignalService, signInMethodService, signInMethodChangeService, publisher);
     }
 
     @Test
@@ -331,8 +336,8 @@ class DefaultUserServiceTest {
     @Test
     void theCurrentUserComesWithEverySignInMethod() {
         final var user = User.builder().id(1L).email("test@example.com").build();
-        final var methods = List.of(new SignInMethodResponse(SignInMethod.PASSWORD, LocalDateTime.of(2026, 1, 1, 8, 0), LocalDateTime.of(2026, 10, 1, 8, 0)),
-                new SignInMethodResponse(SignInMethod.GITHUB, LocalDateTime.of(2026, 10, 28, 9, 0), LocalDateTime.of(2026, 10, 28, 9, 0)));
+        final var methods = List.of(new SignInMethodResponse(SignInMethod.PASSWORD, LocalDateTime.of(2026, 1, 1, 8, 0), LocalDateTime.of(2026, 10, 1, 8, 0), null),
+                new SignInMethodResponse(SignInMethod.GITHUB, LocalDateTime.of(2026, 10, 28, 9, 0), LocalDateTime.of(2026, 10, 28, 9, 0), null));
         SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken("test@example.com", null));
         when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
         when(userToUserDtoConverter.convert(user)).thenReturn(UserDto.builder().id(1L).email("test@example.com").authProvider("local").build());
@@ -456,7 +461,7 @@ class DefaultUserServiceTest {
     @Test
     void theUserListAttachesEachUsersSignInMethodsFromOneLookupForThePage() {
         final var pageable = PageRequest.of(0, 20);
-        final var google = new SignInMethodResponse(SignInMethod.GOOGLE, LocalDateTime.of(2026, 3, 1, 8, 0), LocalDateTime.of(2026, 10, 2, 8, 0));
+        final var google = new SignInMethodResponse(SignInMethod.GOOGLE, LocalDateTime.of(2026, 3, 1, 8, 0), LocalDateTime.of(2026, 10, 2, 8, 0), null);
         when(userRepository.findAll(newestFirst(pageable))).thenReturn(new PageImpl<>(List.of(User.builder().id(27L).build(), User.builder().id(28L).build())));
         when(signInMethodService.methodsOf(List.of(27L, 28L))).thenReturn(Map.of(27L, List.of(google), 28L, List.of()));
 
@@ -645,7 +650,7 @@ class DefaultUserServiceTest {
     void anEditedUserComesBackWithItsSignInMethods() {
         final var updateDto = UserUpdateDto.builder().id(1L).build();
         final var existingUser = User.builder().id(1L).authProvider("local").build();
-        final var passkey = new SignInMethodResponse(SignInMethod.PASSKEY, LocalDateTime.of(2026, 9, 1, 8, 0), LocalDateTime.of(2026, 10, 1, 8, 0));
+        final var passkey = new SignInMethodResponse(SignInMethod.PASSKEY, LocalDateTime.of(2026, 9, 1, 8, 0), LocalDateTime.of(2026, 10, 1, 8, 0), null);
         when(userRepository.findById(1L)).thenReturn(Optional.of(existingUser));
         when(userUpdateDtoToUserConverter.convert(updateDto)).thenReturn(User.builder().id(1L).build());
         when(signInMethodService.methodsOf(1L)).thenReturn(List.of(passkey));
@@ -741,6 +746,36 @@ class DefaultUserServiceTest {
     }
 
     @Test
+    void aPasswordResetLocksTheAccountAndTurnsPasswordSignInBackOnAfterSaving() {
+        final var resetDto = PasswordResetDto.builder().email("test@example.com").token("token").password("newPassword").build();
+        final var user = User.builder().id(1L).email("test@example.com").build();
+        final var token = ResetToken.builder().id(1L).active(true).build();
+        when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
+        when(resetTokenService.getResetTokenFromUserAndToken(user, "token")).thenReturn(token);
+        when(passwordEncoder.encode("newPassword")).thenReturn("newEncoded");
+        when(userRepository.save(user)).thenReturn(user);
+
+        userService.resetPassword(resetDto);
+
+        final var order = org.mockito.Mockito.inOrder(userRepository, signInMethodChangeService);
+        order.verify(userRepository).findByIdForUpdate(1L);
+        order.verify(userRepository).save(user);
+        order.verify(signInMethodChangeService).passwordWasReset(user);
+    }
+
+    @Test
+    void aRefusedPasswordResetTurnsNothingOn() {
+        final var resetDto = PasswordResetDto.builder().email("test@example.com").token("token").password("newPassword").build();
+        final var user = User.builder().id(1L).email("test@example.com").build();
+        when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
+        when(resetTokenService.getResetTokenFromUserAndToken(user, "token")).thenReturn(ResetToken.builder().id(1L).active(false).build());
+
+        assertThatThrownBy(() -> userService.resetPassword(resetDto)).hasMessage("Token expired");
+
+        verifyNoInteractions(signInMethodChangeService);
+    }
+
+    @Test
     void aPasswordResetLeavesTwoStepOn() {
         final var resetDto = PasswordResetDto.builder().email("test@example.com").token("token").password("newPassword").build();
         final var user = User.builder().id(1L).email("test@example.com").twoStepEnabled(true).twoFactorEnabled(true)
@@ -763,7 +798,7 @@ class DefaultUserServiceTest {
     @Test
     void aPasswordResetClearsTheWrongPasswordCounter() {
         final var resetDto = PasswordResetDto.builder().email("test@example.com").token("token").password("newPassword").build();
-        final var user = User.builder().id(1L).email("test@example.com").authProvider("local").password("enc").build();
+        final var user = User.builder().id(1L).email("test@example.com").authProvider("local").password(LOCAL_PASSWORD_HASH).build();
         final var token = ResetToken.builder().id(1L).active(true).build();
         when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
         when(resetTokenService.getResetTokenFromUserAndToken(user, "token")).thenReturn(token);
@@ -969,14 +1004,30 @@ class DefaultUserServiceTest {
         when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
         when(userToUserDtoConverter.convert(user)).thenReturn(UserDto.builder().id(1L).email("test@example.com").build());
         when(signInMethodService.methodsOf(1L)).thenReturn(List.of(
-                new SignInMethodResponse(SignInMethod.PASSWORD, LocalDateTime.of(2026, 1, 2, 3, 4, 5), LocalDateTime.of(2026, 10, 28, 9, 30))));
+                new SignInMethodResponse(SignInMethod.PASSWORD, LocalDateTime.of(2026, 1, 2, 3, 4, 5), LocalDateTime.of(2026, 10, 28, 9, 30), null)));
 
         final var mapper = JsonMapper.builder().build();
         final var export = mapper.readTree(mapper.writeValueAsString(userService.exportMyData()));
 
         assertThat(export.get("signInMethods").toString())
-                .isEqualTo("[{\"method\":\"PASSWORD\",\"firstUsedAt\":\"2026-01-02T03:04:05\",\"lastUsedAt\":\"2026-10-28T09:30:00\"}]");
+                .isEqualTo("[{\"method\":\"PASSWORD\",\"firstUsedAt\":\"2026-01-02T03:04:05\",\"lastUsedAt\":\"2026-10-28T09:30:00\",\"turnedOffAt\":null}]");
         assertThat(export.get("profile").has("signInMethods")).isFalse();
+        SecurityContextHolder.clearContext();
+    }
+
+    @Test
+    void theExportCarriesWhenASignInMethodWasTurnedOff() {
+        final var user = User.builder().id(1L).email("test@example.com").build();
+        SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken("test@example.com", null));
+        when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
+        when(userToUserDtoConverter.convert(user)).thenReturn(UserDto.builder().id(1L).email("test@example.com").build());
+        when(signInMethodService.methodsOf(1L)).thenReturn(List.of(new SignInMethodResponse(SignInMethod.GOOGLE,
+                LocalDateTime.of(2026, 3, 1, 8, 0), LocalDateTime.of(2026, 10, 2, 8, 0), LocalDateTime.of(2026, 10, 30, 11, 15))));
+
+        final var mapper = JsonMapper.builder().build();
+        final var export = mapper.readTree(mapper.writeValueAsString(userService.exportMyData()));
+
+        assertThat(export.get("signInMethods").get(0).get("turnedOffAt").asString()).isEqualTo("2026-10-30T11:15:00");
         SecurityContextHolder.clearContext();
     }
 
@@ -1164,7 +1215,7 @@ class DefaultUserServiceTest {
 
     @Test
     void shouldSelfDeleteLocalAccountWithCorrectPassword() {
-        final var user = User.builder().id(1L).email("test@example.com").authProvider("local").password("enc").build();
+        final var user = User.builder().id(1L).email("test@example.com").authProvider("local").password(LOCAL_PASSWORD_HASH).build();
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken("test@example.com", null));
         when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
@@ -1196,7 +1247,7 @@ class DefaultUserServiceTest {
 
     @Test
     void shouldFailSelfDeleteWhenPasswordIncorrect() {
-        final var user = User.builder().id(1L).email("test@example.com").authProvider("local").password("enc").build();
+        final var user = User.builder().id(1L).email("test@example.com").authProvider("local").password(LOCAL_PASSWORD_HASH).build();
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken("test@example.com", null));
         when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
@@ -1229,7 +1280,7 @@ class DefaultUserServiceTest {
 
     @Test
     void aBlankPasswordCantDeleteALocalAccount() {
-        final var user = User.builder().id(1L).email("test@example.com").authProvider("local").password("enc").build();
+        final var user = User.builder().id(1L).email("test@example.com").authProvider("local").password(LOCAL_PASSWORD_HASH).build();
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken("test@example.com", null));
         when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
@@ -1245,7 +1296,7 @@ class DefaultUserServiceTest {
 
     @Test
     void changingThePasswordAndDeletingTheAccountShareOneWrongPasswordCounter() {
-        final var user = User.builder().id(1L).email("test@example.com").authProvider("local").password("enc").build();
+        final var user = User.builder().id(1L).email("test@example.com").authProvider("local").password(LOCAL_PASSWORD_HASH).build();
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken("test@example.com", null));
         when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
@@ -1275,7 +1326,7 @@ class DefaultUserServiceTest {
 
     @Test
     void aSuccessfulPasswordChangeResetsTheWrongPasswordCounter() {
-        final var user = User.builder().id(1L).email("test@example.com").authProvider("local").password("enc").build();
+        final var user = User.builder().id(1L).email("test@example.com").authProvider("local").password(LOCAL_PASSWORD_HASH).build();
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken("test@example.com", null));
         when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
@@ -1315,7 +1366,7 @@ class DefaultUserServiceTest {
 
     @Test
     void shouldKeepConnectedAppsWhenSelfDeleteIsRefused() {
-        final var user = User.builder().id(1L).email("test@example.com").authProvider("local").password("enc").build();
+        final var user = User.builder().id(1L).email("test@example.com").authProvider("local").password(LOCAL_PASSWORD_HASH).build();
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken("test@example.com", null));
         when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));

@@ -40,5 +40,6 @@
     <include file="classpath:/db/changelog/032-custom-domains.xml"/>
     <include file="classpath:/db/changelog/033-moderation-settings.xml"/>
     <include file="classpath:/db/changelog/036-sign-in-methods.xml"/>
+    <include file="classpath:/db/changelog/037-sign-in-method-turned-off.xml"/>
 
 </databaseChangeLog>

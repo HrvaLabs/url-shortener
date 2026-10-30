@@ -26,6 +26,7 @@ import cc.hrva.urlshortener.service.passkey.PasskeyCeremonyPurpose;
 import cc.hrva.urlshortener.service.passkey.PasskeyCeremonyStore;
 import cc.hrva.urlshortener.service.passkey.PasskeyJson;
 import cc.hrva.urlshortener.service.passkey.PasskeyOptionsFactory;
+import cc.hrva.urlshortener.service.signin.SignInMethodGuard;
 import cc.hrva.urlshortener.service.twostep.AccountLock;
 import com.webauthn4j.util.exception.WebAuthnException;
 import java.util.List;
@@ -74,6 +75,7 @@ public class DefaultPasskeyService implements PasskeyService {
     private final WebAuthnRelyingPartyOperations relyingPartyOperations;
     private final Reauthentication reauthentication;
     private final AccountLock accountLock;
+    private final SignInMethodGuard signInMethodGuard;
     private final ApplicationEventPublisher eventPublisher;
 
     @Override
@@ -158,6 +160,7 @@ public class DefaultPasskeyService implements PasskeyService {
         if (isTheOnlyTwoStepMethod(user)) {
             throw new ApiException(ONLY_TWO_STEP_METHOD);
         }
+        signInMethodGuard.checkRemoval(user, passkey);
         passkeyCredentialRepository.delete(passkey);
         log.info("Passkey removed user id={} credential={}…", user.getId(), prefixOf(passkey.getCredentialId()));
     }

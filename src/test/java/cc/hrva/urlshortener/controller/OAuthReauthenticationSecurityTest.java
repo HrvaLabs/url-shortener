@@ -29,6 +29,7 @@ import cc.hrva.urlshortener.service.passkey.PasskeyCeremonyStore;
 import cc.hrva.urlshortener.service.passkey.PasskeyJson;
 import cc.hrva.urlshortener.service.passkey.PasskeyOptionsFactory;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiter;
+import cc.hrva.urlshortener.service.signin.SignInMethodGuard;
 import cc.hrva.urlshortener.service.twostep.AccountLock;
 import cc.hrva.urlshortener.validator.impl.DefaultAuthValidator;
 import com.nimbusds.jose.JOSEException;
@@ -115,6 +116,9 @@ class OAuthReauthenticationSecurityTest {
 
     @MockitoBean
     private AccountLock accountLock;
+
+    @MockitoBean
+    private SignInMethodGuard signInMethodGuard;
 
     @MockitoBean
     private LoginAttemptService loginAttemptService;

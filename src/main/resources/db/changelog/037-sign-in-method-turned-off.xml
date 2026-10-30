@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.9.xsd">
+
+    <changeSet author="khrvacic" id="037-user-sign-in-method-turned-off-at">
+        <addColumn tableName="user_sign_in_method">
+            <column name="turned_off_at" type="TIMESTAMP"/>
+        </addColumn>
+        <rollback>
+            <dropColumn tableName="user_sign_in_method" columnName="turned_off_at"/>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>

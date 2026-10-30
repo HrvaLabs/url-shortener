@@ -22,7 +22,9 @@ import cc.hrva.urlshortener.exception.EmailNotVerifiedException;
 import cc.hrva.urlshortener.exception.FeatureUnavailableException;
 import cc.hrva.urlshortener.exception.FieldValidationException;
 import cc.hrva.urlshortener.exception.InvalidApiKeyException;
+import cc.hrva.urlshortener.exception.LastSignInMethodException;
 import cc.hrva.urlshortener.exception.PasskeyNotFoundException;
+import cc.hrva.urlshortener.exception.SignInMethodNotFoundException;
 import cc.hrva.urlshortener.exception.PasskeyVerificationException;
 import cc.hrva.urlshortener.exception.RateLimitExceededException;
 import cc.hrva.urlshortener.exception.ReauthenticationRequiredException;
@@ -249,6 +251,16 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(ReauthenticationRequiredException.class)
     public ResponseEntity<Map<String, String>> handleReauthenticationRequired(final ReauthenticationRequiredException ex) {
         return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", safeMessage(ex)));
+    }
+
+    @ExceptionHandler(SignInMethodNotFoundException.class)
+    public ResponseEntity<Map<String, String>> handleSignInMethodNotFound(final SignInMethodNotFoundException ex) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", safeMessage(ex)));
+    }
+
+    @ExceptionHandler(LastSignInMethodException.class)
+    public ResponseEntity<Map<String, String>> handleLastSignInMethod(final LastSignInMethodException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("error", safeMessage(ex)));
     }
 
     @ExceptionHandler(PasskeyNotFoundException.class)

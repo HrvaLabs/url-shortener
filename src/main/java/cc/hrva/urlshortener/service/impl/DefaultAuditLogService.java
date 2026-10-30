@@ -6,6 +6,7 @@ import cc.hrva.urlshortener.model.enums.AuditAction;
 import cc.hrva.urlshortener.repository.AuditLogRepository;
 import cc.hrva.urlshortener.repository.specification.AuditLogSpecification;
 import cc.hrva.urlshortener.service.AuditLogService;
+import cc.hrva.urlshortener.util.EmailAddresses;
 import cc.hrva.urlshortener.util.SortWhitelist;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -73,7 +74,7 @@ public class DefaultAuditLogService implements AuditLogService {
                 .details(details)
                 .build();
         auditLogRepository.save(entry);
-        log.info("Audit: {} {}{} {} {} - {}", performedBy, action, failed ? " failed" : "", targetType, targetIdentifier, details);
+        log.info("Audit: {} {}{} {} {} - {}", EmailAddresses.maskedIn(performedBy), action, failed ? " failed" : "", targetType, targetIdentifier, details);
     }
 
 }

@@ -40,5 +40,6 @@
     </changeSet>
 
     <include file="classpath:/db/changelog/036-sign-in-methods.xml"/>
+    <include file="classpath:/db/changelog/037-sign-in-method-turned-off.xml"/>
 
 </databaseChangeLog>

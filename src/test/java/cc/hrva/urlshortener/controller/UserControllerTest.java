@@ -106,7 +106,7 @@ class UserControllerTest {
 
     @Test
     void theUserListFiltersBySignInMethodServerSideAndListsEachRowsMethods() throws Exception {
-        final var gitHub = new SignInMethodResponse(SignInMethod.GITHUB, LocalDateTime.of(2026, 10, 20, 8, 0), LocalDateTime.of(2026, 10, 28, 19, 45));
+        final var gitHub = new SignInMethodResponse(SignInMethod.GITHUB, LocalDateTime.of(2026, 10, 20, 8, 0), LocalDateTime.of(2026, 10, 28, 19, 45), null);
         final var row = AdminUserResponse.from(User.builder().id(30L).email("octo@example.com").authProvider("local").build(), List.of(gitHub), false);
         final var search = ArgumentCaptor.forClass(UserSearchDto.class);
         when(userService.fetchAllUsers(any(Pageable.class), search.capture())).thenReturn(new PageImpl<>(List.of(row), PageRequest.of(0, 20), 1));

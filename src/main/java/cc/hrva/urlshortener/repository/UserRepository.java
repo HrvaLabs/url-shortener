@@ -46,6 +46,11 @@ public interface UserRepository extends JpaRepository<User, Long>, JpaSpecificat
     @Query("update User u set u.password = :password, u.emailVerified = true where u.id = :id and (u.emailVerified is null or u.emailVerified = false)")
     int confirmEmailAndReplacePassword(@Param("id") Long id, @Param("password") String password);
 
+    @Modifying(flushAutomatically = true)
+    @Transactional
+    @Query("update User u set u.password = :password where u.id = :id")
+    int replacePassword(@Param("id") Long id, @Param("password") String password);
+
     @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Query("update User u set u.active = true where u.id = :id and u.active = false")
     int reactivateById(@Param("id") Long id);

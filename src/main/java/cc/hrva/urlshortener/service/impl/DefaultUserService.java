@@ -34,6 +34,7 @@ import cc.hrva.urlshortener.repository.specification.UserSpecification;
 import cc.hrva.urlshortener.security.Reauthentication;
 import cc.hrva.urlshortener.service.ResetTokenService;
 import cc.hrva.urlshortener.service.ScammerSignalService;
+import cc.hrva.urlshortener.service.SignInMethodChangeService;
 import cc.hrva.urlshortener.service.SignInMethodService;
 import cc.hrva.urlshortener.service.UserService;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent;
@@ -95,6 +96,7 @@ public class DefaultUserService implements UserService {
     private final ConnectedAppsService connectedAppsService;
     private final ScammerSignalService scammerSignalService;
     private final SignInMethodService signInMethodService;
+    private final SignInMethodChangeService signInMethodChangeService;
     private final ApplicationEventPublisher eventPublisher;
 
     @Override
@@ -336,11 +338,14 @@ public class DefaultUserService implements UserService {
         final var token = resetTokenService.getResetTokenFromUserAndToken(user, passwordResetDto.getToken());
 
         if (token.isActive()) {
+            userRepository.findByIdForUpdate(user.getId());
             user.setPassword(passwordEncoder.encode(passwordResetDto.getPassword()));
             resetTokenService.deactivateAndSaveToken(token);
             reauthentication.forgetWrongPasswords(user);
+            final var saved = userRepository.save(user);
+            signInMethodChangeService.passwordWasReset(saved);
 
-            return userRepository.save(user);
+            return saved;
         }
 
         throw new NoAuthorizationException("Token expired");

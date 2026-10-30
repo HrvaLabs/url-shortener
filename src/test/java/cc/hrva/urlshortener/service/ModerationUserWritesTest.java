@@ -98,6 +98,9 @@ class ModerationUserWritesTest {
     private SignInMethodService signInMethodService;
 
     @MockitoBean
+    private SignInMethodChangeService signInMethodChangeService;
+
+    @MockitoBean
     private LinkCheckService linkCheckService;
 
     @MockitoBean

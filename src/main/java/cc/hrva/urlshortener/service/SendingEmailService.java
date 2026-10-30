@@ -24,6 +24,7 @@ public interface SendingEmailService {
     void sendEmailAccountDeactivated(User user);
     void sendEmailForgotPassword(User user, ResetToken resetToken);
     void sendPasskeyAddedEmail(User user, String label, LocalDateTime addedAt);
+    void sendSignInMethodChangedEmail(User user, String change, LocalDateTime changedAt);
     void sendDecisionsEmailToAdmin(DecisionsDigest digest);
     void sendWeeklyDigestToAdmin(WeeklyDigest digest);
     void sendDeadLinksEmail(DeadLinksEmail email);

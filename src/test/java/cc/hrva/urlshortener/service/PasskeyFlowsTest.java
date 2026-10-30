@@ -6,10 +6,12 @@ import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.converter.UserToUserDtoConverter;
 import cc.hrva.urlshortener.dto.JWTTokenDto;
 import cc.hrva.urlshortener.dto.PasskeyOptionsResponse;
+import cc.hrva.urlshortener.dto.PasskeyDeleteDto;
 import cc.hrva.urlshortener.dto.PasskeyResponse;
 import cc.hrva.urlshortener.dto.PasskeySignInDto;
 import cc.hrva.urlshortener.exception.ApiException;
 import cc.hrva.urlshortener.exception.EmailNotVerifiedException;
+import cc.hrva.urlshortener.exception.LastSignInMethodException;
 import cc.hrva.urlshortener.exception.PasskeyVerificationException;
 import cc.hrva.urlshortener.exception.SignInExpiredException;
 import cc.hrva.urlshortener.listener.PasskeyAddedEmailListener;
@@ -25,6 +27,7 @@ import cc.hrva.urlshortener.security.ClientIpResolver;
 import cc.hrva.urlshortener.security.JwtFilter;
 import cc.hrva.urlshortener.security.Reauthentication;
 import cc.hrva.urlshortener.security.RecentSignIn;
+import cc.hrva.urlshortener.security.StoredPasswords;
 import cc.hrva.urlshortener.security.TokenProvider;
 import cc.hrva.urlshortener.service.analytics.AnalyticsDays;
 import cc.hrva.urlshortener.service.impl.DefaultPasskeyService;
@@ -46,6 +49,7 @@ import cc.hrva.urlshortener.service.passkey.RedisPasskeyCeremonyStore;
 import cc.hrva.urlshortener.service.passkey.TestAuthenticator;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiter;
 import cc.hrva.urlshortener.service.ratelimit.RedisFixedWindowRateLimiter;
+import cc.hrva.urlshortener.service.signin.SignInMethodGuard;
 import cc.hrva.urlshortener.service.twostep.AccountLock;
 import cc.hrva.urlshortener.service.twostep.RecoveryCodes;
 import cc.hrva.urlshortener.service.twostep.RedisPendingLoginStore;
@@ -54,6 +58,11 @@ import cc.hrva.urlshortener.service.twostep.TwoStepMethods;
 import cc.hrva.urlshortener.validator.impl.DefaultAuthValidator;
 import com.nimbusds.jose.jwk.RSAKey;
 import jakarta.persistence.EntityManager;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.core.context.SecurityContextHolder;
+import java.time.LocalDateTime;
+import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -159,6 +168,9 @@ class PasskeyFlowsTest {
 
     @Autowired
     private PlatformTransactionManager transactionManager;
+
+    @Autowired
+    private TokenProvider tokenProvider;
 
     @MockitoBean
     private StringRedisTemplate redisTemplate;
@@ -620,6 +632,95 @@ class PasskeyFlowsTest {
     }
 
     @Test
+    void theLastPasskeyOfAnAccountWithoutAPasswordOrProviderCantBeDeleted() {
+        final var user = flows.signedIn(flows.localUser("last-way-in@example.com"));
+        final var authenticator = TestAuthenticator.deviceBoundPasskey();
+        final var added = flows.addPasskey(authenticator, "Pixel");
+        flows.updated(user, account -> account.setPassword(StoredPasswords.none()));
+        signedInRecently(flows.signedInAgain(user));
+        try {
+            assertThatThrownBy(() -> passkeyService.delete(added.id(), new PasskeyDeleteDto()))
+                    .isInstanceOf(LastSignInMethodException.class)
+                    .hasMessage("Keep at least one way to sign in. Add a passkey or another method first.");
+
+            assertThat(passkeyCredentialRepository.findByCredentialId(authenticator.credentialId())).isPresent();
+        } finally {
+            SecurityContextHolder.clearContext();
+        }
+    }
+
+    @Test
+    void aSecondStepOnlyKeyIsNotAWayInSoTheLastPasskeyBesideItIsKept() {
+        final var user = flows.signedIn(flows.localUser("key-beside-passkey@example.com"));
+        final var passkey = TestAuthenticator.deviceBoundPasskey();
+        final var securityKey = TestAuthenticator.securityKey();
+        final var addedPasskey = flows.addPasskey(passkey, "Pixel");
+        final var addedKey = flows.addPasskey(securityKey, "YubiKey");
+        flows.updated(user, account -> account.setPassword(StoredPasswords.none()));
+        signedInRecently(flows.signedInAgain(user));
+        try {
+            assertThatThrownBy(() -> passkeyService.delete(addedPasskey.id(), new PasskeyDeleteDto()))
+                    .isInstanceOf(LastSignInMethodException.class);
+
+            passkeyService.delete(addedKey.id(), new PasskeyDeleteDto());
+
+            assertThat(passkeyCredentialRepository.findByCredentialId(passkey.credentialId())).isPresent();
+            assertThat(passkeyCredentialRepository.findByCredentialId(securityKey.credentialId())).isEmpty();
+        } finally {
+            SecurityContextHolder.clearContext();
+        }
+    }
+
+    @Test
+    void theLastPasskeyCanGoWhileAProviderIsOn() {
+        final var user = flows.signedIn(flows.localUser("passkey-and-google@example.com"));
+        final var authenticator = TestAuthenticator.deviceBoundPasskey();
+        final var added = flows.addPasskey(authenticator, "Pixel");
+        flows.updated(user, account -> account.setPassword(StoredPasswords.none()));
+        jdbcTemplate.update("insert into user_sign_in_method (user_id, method, first_used_at, last_used_at) values (?, 'GOOGLE', ?, ?)",
+                user.getId(), LocalDateTime.of(2026, 10, 1, 9, 0), LocalDateTime.of(2026, 10, 1, 9, 0));
+        signedInRecently(flows.signedInAgain(user));
+        try {
+            passkeyService.delete(added.id(), new PasskeyDeleteDto());
+
+            assertThat(passkeyCredentialRepository.findByCredentialId(authenticator.credentialId())).isEmpty();
+        } finally {
+            SecurityContextHolder.clearContext();
+        }
+    }
+
+    @Test
+    void theLastPasskeyCantGoWhileTheOnlyProviderIsTurnedOff() {
+        final var user = flows.signedIn(flows.localUser("passkey-and-google-off@example.com"));
+        final var authenticator = TestAuthenticator.deviceBoundPasskey();
+        final var added = flows.addPasskey(authenticator, "Pixel");
+        flows.updated(user, account -> account.setPassword(StoredPasswords.none()));
+        jdbcTemplate.update("""
+                insert into user_sign_in_method (user_id, method, first_used_at, last_used_at, turned_off_at)
+                values (?, 'GOOGLE', ?, ?, ?)""", user.getId(), LocalDateTime.of(2026, 10, 1, 9, 0), LocalDateTime.of(2026, 10, 1, 9, 0),
+                LocalDateTime.of(2026, 10, 2, 9, 0));
+        signedInRecently(flows.signedInAgain(user));
+        try {
+            assertThatThrownBy(() -> passkeyService.delete(added.id(), new PasskeyDeleteDto()))
+                    .isInstanceOf(LastSignInMethodException.class);
+        } finally {
+            SecurityContextHolder.clearContext();
+        }
+    }
+
+    @Test
+    void thePasskeyCanGoWhileThePasswordStays() {
+        final var user = flows.signedIn(flows.localUser("passkey-and-password@example.com"));
+        final var authenticator = TestAuthenticator.deviceBoundPasskey();
+        final var added = flows.addPasskey(authenticator, "Pixel");
+
+        passkeyService.delete(added.id(), new PasskeyDeleteDto(PasskeyFlowsSupport.PASSWORD));
+
+        assertThat(passkeyCredentialRepository.findByCredentialId(authenticator.credentialId())).isEmpty();
+        assertThat(user.getId()).isNotNull();
+    }
+
+    @Test
     void aPasskeyDeletedBetweenOptionsAndVerifyIsA401NotA500() {
         flows.signedIn(flows.localUser("deleted@example.com"));
         final var authenticator = TestAuthenticator.syncedPasskey();
@@ -826,6 +927,13 @@ class PasskeyFlowsTest {
                 .build();
     }
 
+    private void signedInRecently(final User user) {
+        final var authentication = UsernamePasswordAuthenticationToken.authenticated(user.getEmail(), null,
+                List.of(new SimpleGrantedAuthority("ROLE_USER")));
+        SecurityContextHolder.getContext().setAuthentication(UsernamePasswordAuthenticationToken.authenticated(user.getEmail(),
+                tokenProvider.createToken(authentication), authentication.getAuthorities()));
+    }
+
     @SpringBootConfiguration
     @EnableAutoConfiguration
     @EnableConfigurationProperties(AppProperties.class)
@@ -867,7 +975,8 @@ class PasskeyFlowsTest {
             DefaultSecondStepService.class,
             RecoveryCodes.class,
             DefaultTwoStepSettingsService.class,
-            AccountLock.class
+            AccountLock.class,
+            SignInMethodGuard.class
     })
     static class TestApplication {
 

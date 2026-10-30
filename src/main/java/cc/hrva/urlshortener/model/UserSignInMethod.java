@@ -32,5 +32,6 @@ public class UserSignInMethod {
     private SignInMethod method;
     private LocalDateTime firstUsedAt;
     private LocalDateTime lastUsedAt;
+    private LocalDateTime turnedOffAt;
 
 }

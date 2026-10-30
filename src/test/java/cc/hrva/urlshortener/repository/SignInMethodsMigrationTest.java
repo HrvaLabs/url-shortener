@@ -77,6 +77,26 @@ class SignInMethodsMigrationTest {
         assertThat(jdbcTemplate.queryForObject("select count(*) from user_sign_in_method where user_id = ?", Long.class, userId)).isZero();
     }
 
+    @Test
+    void everyBackfilledMethodStartsTurnedOn() {
+        assertThat(jdbcTemplate.queryForObject("select count(*) from user_sign_in_method where turned_off_at is not null", Long.class)).isZero();
+        assertThat(jdbcTemplate.queryForObject("select count(*) from user_sign_in_method", Long.class)).isPositive();
+    }
+
+    @Test
+    void aMethodCanBeTurnedOffAndBackOn() {
+        final var userId = idOf("google@example.com");
+        final var turnedOffAt = LocalDateTime.of(2026, 10, 30, 12, 0);
+
+        jdbcTemplate.update("update user_sign_in_method set turned_off_at = ? where user_id = ?", turnedOffAt, userId);
+        assertThat(jdbcTemplate.queryForObject("select turned_off_at from user_sign_in_method where user_id = ?", LocalDateTime.class, userId))
+                .isEqualTo(turnedOffAt);
+
+        jdbcTemplate.update("update user_sign_in_method set turned_off_at = null where user_id = ?", userId);
+        assertThat(jdbcTemplate.queryForObject("select turned_off_at from user_sign_in_method where user_id = ?", LocalDateTime.class, userId))
+                .isNull();
+    }
+
     private Map<String, Uses> methodsOf(final String email) {
         final var methods = new LinkedHashMap<String, Uses>();
         jdbcTemplate.query("""
