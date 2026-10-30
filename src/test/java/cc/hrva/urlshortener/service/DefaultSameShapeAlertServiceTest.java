@@ -29,6 +29,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.data.redis.RedisConnectionFailureException;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.scheduling.annotation.Async;
@@ -95,8 +96,8 @@ class DefaultSameShapeAlertServiceTest {
         verify(eventPublisher).publishEvent(new SameShapeDetected(SHAPE, PATH, 3, 3, DAY, List.of("ccc", "bbb", "aaa")));
         assertThat(redis.keys()).containsExactly(ALERTED_KEY);
         assertThat(redis.timeToLiveOfKeyContaining(ALERTED_KEY)).isEqualTo(DAY);
-        assertThat(output).containsOnlyOnce("Same-shape links shape=" + SHAPE_KEY + " links=3 domains=3")
-                .doesNotContain("wqamhcsom", "omaehhm", "c.com");
+        assertThat(output).containsOnlyOnce("Same-shape links shape=" + SHAPE_KEY + " display=/wqamhcsom?r&t links=3 domains=3")
+                .doesNotContain("omaehhm", "c.com", "plfN8D");
     }
 
     @Test
@@ -231,6 +232,23 @@ class DefaultSameShapeAlertServiceTest {
         sameShapeAlertService.anonymousLinkCreated(43L, "https://c.com/wqamhcsom?r=1&t=2", Outcome.CLEAN);
 
         verify(eventPublisher).publishEvent(new SameShapeDetected(SHAPE, PATH, 3, 3, DAY, List.of("ccc", "aaa")));
+    }
+
+    @Test
+    void aFailingExampleLookupStillAlertsWithoutExamples(final CapturedOutput output) {
+        window.addAll(List.of("41|a.com", "42|b.com"));
+        counting();
+        when(urlRepository.findAllById(any())).thenThrow(new DataAccessResourceFailureException("Connection refused db.internal"));
+
+        assertThatCode(() -> sameShapeAlertService.anonymousLinkCreated(43L, "https://c.com/wqamhcsom?r=1&t=2", Outcome.CLEAN))
+                .doesNotThrowAnyException();
+
+        verify(eventPublisher).publishEvent(new SameShapeDetected(SHAPE, PATH, 3, 3, DAY, List.of()));
+        assertThat(redis.keys()).containsExactly(ALERTED_KEY);
+        assertThat(output).containsOnlyOnce("Same-shape examples skipped shape=" + SHAPE_KEY
+                        + " exception=org.springframework.dao.DataAccessResourceFailureException")
+                .containsOnlyOnce("Same-shape links shape=" + SHAPE_KEY)
+                .doesNotContain("Same-shape check skipped", "db.internal");
     }
 
     @Test

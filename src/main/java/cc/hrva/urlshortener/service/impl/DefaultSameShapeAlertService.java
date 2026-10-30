@@ -72,8 +72,17 @@ public class DefaultSameShapeAlertService implements SameShapeAlertService {
             return;
         }
         eventPublisher.publishEvent(new SameShapeDetected(shape.display(), shape.path(), urlIds.size(), domains, campaign.getWindow(),
-                newestAliases(urlIds)));
-        log.info("Same-shape links shape={} links={} domains={}", shape.key(), urlIds.size(), domains);
+                examplesOf(shape, urlIds)));
+        log.info("Same-shape links shape={} display={} links={} domains={}", shape.key(), shape.display(), urlIds.size(), domains);
+    }
+
+    private List<String> examplesOf(final UrlShape shape, final List<Long> urlIds) {
+        try {
+            return newestAliases(urlIds);
+        } catch (final RuntimeException exception) {
+            log.warn("Same-shape examples skipped shape={} exception={}", shape.key(), exception.getClass().getName());
+            return List.of();
+        }
     }
 
     private List<String> newestAliases(final List<Long> urlIds) {
