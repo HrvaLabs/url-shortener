@@ -141,12 +141,12 @@ class DefaultSignInMethodServiceTest {
     void aMethodIsRecordedForAnAccountSavedEarlierInTheSameTransaction() {
         final var created = new TransactionTemplate(transactionManager).execute(status -> {
             final var saved = userRepository.save(account("new@example.com"));
-            signInMethodService.record(saved.getId(), SignInMethod.PASSWORD, saved.getCreateDate());
+            signInMethodService.record(saved.getId(), SignInMethod.PASSWORD, FIRST);
             return saved;
         });
 
         assertThat(signInMethodService.methodsOf(created.getId()))
-                .containsExactly(new SignInMethodResponse(SignInMethod.PASSWORD, created.getCreateDate(), created.getCreateDate()));
+                .containsExactly(new SignInMethodResponse(SignInMethod.PASSWORD, FIRST, FIRST));
     }
 
     @Test
