@@ -70,6 +70,31 @@ class UrlShapesTest {
                 .isEqualTo(new UrlShape("/wqamhcsom", List.of("r")));
     }
 
+    @Test
+    void clickIdNamesAreLeftOutLikeUtm() {
+        assertThat(UrlShapes.of("https://a.com/wqamhcsom?r=1&fbclid=x&GCLID=y&msclkid=z&igshid=q&mibextid=w&t=2").orElseThrow())
+                .isEqualTo(new UrlShape("/wqamhcsom", List.of("r", "t")));
+        assertThat(UrlShapes.of("https://a.com/?fbclid=x&gclid=y")).isEmpty();
+        assertThat(UrlShapes.of("https://a.com/promo?fbclid=x").orElseThrow()).isEqualTo(new UrlShape("/promo", List.of()));
+    }
+
+    @Test
+    void theClickIdNamesAreTheFiveOfTheRuling() {
+        assertThat(UrlShapes.CLICK_ID_NAMES).containsExactly("fbclid", "gclid", "msclkid", "igshid", "mibextid");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"https://a.com/wqamhcsom?r=1&t=2", "https://a.com/login?next=1", "https://a.com/a/b?x"})
+    void aPathWithAQueryNameIsHoldable(final String longUrl) {
+        assertThat(UrlShapes.of(longUrl).orElseThrow().holdable()).isTrue();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"https://a.com/login", "https://a.com/about/", "https://a.com/?a=1&b=2", "https://a.com/promo?utm_source=x&fbclid=y"})
+    void aShapeWithoutAQueryOrOnTheRootIsNotHoldable(final String longUrl) {
+        assertThat(UrlShapes.of(longUrl).orElseThrow().holdable()).isFalse();
+    }
+
     @ParameterizedTest
     @MethodSource("genericPathVariants")
     void builtInGenericPathsHaveNoShape(final String longUrl) {

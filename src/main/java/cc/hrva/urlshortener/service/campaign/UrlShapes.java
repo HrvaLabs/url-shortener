@@ -11,6 +11,7 @@ public final class UrlShapes {
 
     public static final List<String> GENERIC_PATHS = List.of("/index.php", "/index.html", "/index.htm", "/search", "/watch", "/article", "/post",
             "/p", "/s", "/share", "/view", "/item", "/product");
+    public static final List<String> CLICK_ID_NAMES = List.of("fbclid", "gclid", "msclkid", "igshid", "mibextid");
 
     private static final String ROOT = "/";
     private static final String UTM_PREFIX = "utm_";
@@ -48,7 +49,7 @@ public final class UrlShapes {
         }
         return Arrays.stream(rawQuery.split("&"))
                 .map(parameter -> StringUtils.substringBefore(parameter, "=").toLowerCase(Locale.ROOT))
-                .filter(name -> !name.isBlank() && !name.startsWith(UTM_PREFIX))
+                .filter(name -> !name.isBlank() && !name.startsWith(UTM_PREFIX) && !CLICK_ID_NAMES.contains(name))
                 .distinct()
                 .sorted()
                 .toList();

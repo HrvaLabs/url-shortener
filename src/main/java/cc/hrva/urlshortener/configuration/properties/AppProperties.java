@@ -338,6 +338,11 @@ public class AppProperties {
         private boolean suspiciousLinkCheck = true;
         private boolean nightlySafeBrowsing = true;
         private boolean sendEmails = true;
+        private boolean campaignHold = true;
+
+        @Min(1)
+        @Max(90)
+        private int campaignHoldDays = 7;
 
         @Valid
         @NotNull

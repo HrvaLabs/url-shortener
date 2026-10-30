@@ -57,7 +57,7 @@ public class DefaultRedirectChainService implements RedirectChainService {
 
     @Override
     public Result check(final long urlId) {
-        final var url = urlRepository.findById(urlId).filter(Url::isActive);
+        final var url = urlRepository.findById(urlId).filter(link -> link.isActive() || isHeldForACampaign(link));
         if (url.isEmpty()) {
             log.info("Link is no longer active, its redirects are not followed urlId={}", urlId);
             return Result.SKIPPED;
@@ -68,6 +68,11 @@ public class DefaultRedirectChainService implements RedirectChainService {
         if (chain.isEmpty()) {
             urlRepository.markRedirectChainChecked(urlId, longUrl, now());
             return Result.UNREACHABLE;
+        }
+        if (!url.get().isActive()) {
+            urlRepository.recordRedirectChain(urlId, longUrl, StringUtils.truncate(chain.get().getLast().original(), FINAL_URL_LENGTH), now());
+            log.info("Recorded where a held link ends without judging its hops urlId={}", urlId);
+            return Result.CHECKED;
         }
 
         final var destination = chain.get().getFirst().normalized();
@@ -88,6 +93,10 @@ public class DefaultRedirectChainService implements RedirectChainService {
         }
         urlRepository.recordRedirectChain(urlId, longUrl, StringUtils.truncate(chain.get().getLast().original(), FINAL_URL_LENGTH), now());
         return Result.CHECKED;
+    }
+
+    private static boolean isHeldForACampaign(final Url url) {
+        return url.getBlockReason() == BlockReason.CAMPAIGN;
     }
 
     @Async(AsyncExecutorConfiguration.REDIRECT_CHECK_EXECUTOR)

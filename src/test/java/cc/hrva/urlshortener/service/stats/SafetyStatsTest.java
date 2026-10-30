@@ -53,7 +53,7 @@ class SafetyStatsTest {
     private static final StatsWindow WINDOW =
             new StatsWindow(7, FROM, TO, LocalDateTime.of(2026, 10, 19, 22, 0), LocalDateTime.of(2026, 10, 26, 23, 0));
     private static final List<String> SOURCES = List.of("SYSTEM", "VISITOR");
-    private static final List<String> REASONS = List.of("SAFE_BROWSING", "BLOCKLIST", "DOMAIN_RULE", "ADMIN", "USER_BLOCKED", "SCAM_SIGNALS");
+    private static final List<String> REASONS = List.of("SAFE_BROWSING", "BLOCKLIST", "DOMAIN_RULE", "ADMIN", "USER_BLOCKED", "SCAM_SIGNALS", "CAMPAIGN");
     private static final LocalDateTime LAST_SUCCESS = LocalDateTime.of(2026, 10, 26, 6, 0);
     private static final String URLHAUS_KEY = "7f3a9c2e5b8d4f1a";
     private static final String URLHAUS_URL = "https://urlhaus-api.abuse.ch/v2/files/exports/" + URLHAUS_KEY + "/text_online";
@@ -126,6 +126,7 @@ class SafetyStatsTest {
                 new HourlyCount(LocalDate.of(2026, 10, 25), 9, "VISITOR", 1)));
         when(hourlyCountRepository.count(BLOCKS_BY_REASON, WINDOW.start(), WINDOW.end())).thenReturn(List.of(
                 new HourlyCount(LocalDate.of(2026, 10, 25), 8, "BLOCKLIST", 3),
+                new HourlyCount(LocalDate.of(2026, 10, 25), 9, "CAMPAIGN", 4),
                 new HourlyCount(LocalDate.of(2026, 10, 25), 20, "unknown", 1)));
 
         final var safety = safetyStats.collect(WINDOW);
@@ -135,12 +136,12 @@ class SafetyStatsTest {
                 .extracting(DailyCounts::counts)
                 .satisfies(counts -> assertThat(counts).containsExactly(entry("SYSTEM", 2L), entry("VISITOR", 1L)));
         assertThat(safety.blocked().keys()).containsExactly(
-                "SAFE_BROWSING", "BLOCKLIST", "DOMAIN_RULE", "ADMIN", "USER_BLOCKED", "SCAM_SIGNALS", "unknown");
+                "SAFE_BROWSING", "BLOCKLIST", "DOMAIN_RULE", "ADMIN", "USER_BLOCKED", "SCAM_SIGNALS", "CAMPAIGN", "unknown");
         assertThat(safety.blocked().daily()).filteredOn(day -> day.date().equals(LocalDate.of(2026, 10, 25))).singleElement()
                 .extracting(DailyCounts::counts)
                 .satisfies(counts -> assertThat(counts).containsExactly(entry("SAFE_BROWSING", 0L), entry("BLOCKLIST", 3L),
                         entry("DOMAIN_RULE", 0L), entry("ADMIN", 0L), entry("USER_BLOCKED", 0L), entry("SCAM_SIGNALS", 0L),
-                        entry("unknown", 1L)));
+                        entry("CAMPAIGN", 4L), entry("unknown", 1L)));
     }
 
     @Test

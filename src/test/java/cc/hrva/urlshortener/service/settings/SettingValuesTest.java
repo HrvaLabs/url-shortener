@@ -134,6 +134,28 @@ class SettingValuesTest {
     }
 
     @Test
+    void theSameShapeAlertIsASafetySwitchThatAlsoStopsHolds() {
+        assertThat(SettingKey.SAME_SHAPE_ALERT.isSafety()).isTrue();
+        assertThat(SettingKey.SAME_SHAPE_ALERT.getDescription()).isEqualTo("A Discord alert and a Campaigns row when links without an account share "
+                + "one URL shape across several domains. Off also stops holds.");
+    }
+
+    @Test
+    void theCampaignHoldRows() {
+        assertThat(SettingKey.CAMPAIGN_HOLD).extracting(SettingKey::getGroup, SettingKey::getType, SettingKey::getLabel, SettingKey::getDescription,
+                        SettingKey::getParent, SettingKey::isSafety)
+                .containsExactly(SettingGroup.SAFETY, SettingType.SWITCH, "Hold links with a campaign URL shape",
+                        "Holds the links of a same-shape alert. Off still sends the alert and lists the campaign.", SettingKey.SAME_SHAPE_ALERT, true);
+        assertThat(SettingKey.CAMPAIGN_HOLD_DAYS).extracting(SettingKey::getGroup, SettingKey::getType, SettingKey::getLabel, SettingKey::getDescription,
+                        SettingKey::getParent, SettingKey::isSafety, SettingKey::getMin, SettingKey::getMax, SettingKey::getUnit)
+                .containsExactly(SettingGroup.SAFETY, SettingType.NUMBER, "Same-shape alert: hold",
+                        "New matching links are held for this many days after the last match.", SettingKey.CAMPAIGN_HOLD, false, 1, 90, "days");
+        final var defaults = new SettingDefaults(new AppProperties());
+        assertThat(defaults.defaultOf(SettingKey.CAMPAIGN_HOLD)).isEqualTo(true);
+        assertThat(defaults.defaultOf(SettingKey.CAMPAIGN_HOLD_DAYS)).isEqualTo(7);
+    }
+
+    @Test
     void failClosedSafeBrowsingIsNotASafetySwitch() {
         assertThat(SettingKey.SAFE_BROWSING_FAIL_CLOSED.isSafety()).isFalse();
         assertThat(SettingKey.SAFE_BROWSING_FAIL_CLOSED.getParent()).isEqualTo(SettingKey.SAFE_BROWSING_CHECK);

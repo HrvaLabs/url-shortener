@@ -13,6 +13,12 @@ class BlockReasonTest {
     }
 
     @Test
+    void aCampaignHoldIsAutomaticAndLast() {
+        assertThat(BlockReason.MANUAL).doesNotContain(BlockReason.CAMPAIGN);
+        assertThat(BlockReason.values()).endsWith(BlockReason.CAMPAIGN);
+    }
+
+    @Test
     void theManualSetCannotBeChanged() {
         assertThatThrownBy(() -> BlockReason.MANUAL.add(BlockReason.BLOCKLIST)).isInstanceOf(UnsupportedOperationException.class);
     }

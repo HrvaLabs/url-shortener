@@ -116,6 +116,20 @@ class UrlResponseTest {
     }
 
     @Test
+    void asCreatedLooksLikeTheSameLinkActive() {
+        final var held = baseUrl().active(false).blockReason(BlockReason.CAMPAIGN).blockDetail("/wqamhcsom?r&t").blockedAt(LocalDateTime.now()).build();
+        final var active = baseUrl().createDate(held.getCreateDate()).expirationDate(held.getExpirationDate()).active(true).build();
+
+        final var created = UrlResponse.from(held).asCreated();
+
+        assertThat(created.active()).isTrue();
+        assertThat(created.status()).isEqualTo("ACTIVE");
+        assertThat(created.blockReason()).isNull();
+        assertThat(created).isEqualTo(UrlResponse.from(active));
+        assertThat(UrlResponse.from(held).withBlockReason(BlockReason.CAMPAIGN).asCreated().blockReason()).isNull();
+    }
+
+    @Test
     void shouldBeActive() {
         assertThat(UrlResponse.from(baseUrl().active(true).build()).status()).isEqualTo("ACTIVE");
     }

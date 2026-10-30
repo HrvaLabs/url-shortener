@@ -195,13 +195,14 @@ class WeeklyDigestTextTest {
                         new CountEntry("SAFE_BROWSING", 4),
                         new CountEntry("BLOCKLIST", 3),
                         new CountEntry("DOMAIN_RULE", 2),
-                        new CountEntry("SCAM_SIGNALS", 1)),
+                        new CountEntry("SCAM_SIGNALS", 1),
+                        new CountEntry("CAMPAIGN", 1)),
                 List.of());
 
         assertThat(WeeklyDigestText.lines(digest, SHORT_LINKS, REVIEW_PAGE, UnaryOperator.identity())).contains(
                 "How they were made: 1,500 website, 12 API key, 6 bulk, 4 AI connector, 3 website without an account, "
                         + "2 AI connector without an account, 1 unknown",
-                "Automatic blocks: 4 Safe Browsing, 3 blocklist, 2 domain rule, 1 scam signals");
+                "Automatic blocks: 4 Safe Browsing, 3 blocklist, 2 domain rule, 1 scam signals, 1 campaign hold");
     }
 
     @Test

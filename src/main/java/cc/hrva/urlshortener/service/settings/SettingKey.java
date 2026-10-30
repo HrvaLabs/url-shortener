@@ -29,7 +29,8 @@ public enum SettingKey {
     NIGHTLY_DESTINATION_CHECK(SettingGroup.SAFETY, "Nightly destination check",
             "The 02:00 check that finds dead destinations.", null, true),
     SAME_SHAPE_ALERT(SettingGroup.ALERTS, "Same-shape alert",
-            "A Discord alert when links without an account share one URL shape across several domains.", null, false),
+            "A Discord alert and a Campaigns row when links without an account share one URL shape across several domains. Off also stops holds.",
+            null, true),
     CAMPAIGN_LINKS(SettingGroup.ALERTS, "Same-shape alert: links",
             "Links without an account that share one URL shape.", SAME_SHAPE_ALERT, 2, 50, "links"),
     CAMPAIGN_DOMAINS(SettingGroup.ALERTS, "Same-shape alert: domains",
@@ -67,7 +68,11 @@ public enum SettingKey {
     EMAIL_NEW_USER_NOTICE(SettingGroup.EMAILS, "New user notice",
             "Emails the admin when someone signs up.", SEND_EMAILS, false),
     EMAIL_CUSTOM_DOMAIN(SettingGroup.EMAILS, "Custom domain updates",
-            "Tells owners when their domain is approved, rejected, turned off or removed.", SEND_EMAILS, false);
+            "Tells owners when their domain is approved, rejected, turned off or removed.", SEND_EMAILS, false),
+    CAMPAIGN_HOLD(SettingGroup.SAFETY, "Hold links with a campaign URL shape",
+            "Holds the links of a same-shape alert. Off still sends the alert and lists the campaign.", SAME_SHAPE_ALERT, true),
+    CAMPAIGN_HOLD_DAYS(SettingGroup.SAFETY, "Same-shape alert: hold",
+            "New matching links are held for this many days after the last match.", CAMPAIGN_HOLD, 1, 90, "days");
 
     private final SettingGroup group;
     private final SettingType type;

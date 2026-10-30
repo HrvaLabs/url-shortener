@@ -57,6 +57,8 @@ public record UrlResponse(
         @JsonInclude(JsonInclude.Include.NON_NULL)
         DomainRef domain) {
 
+    private static final String ACTIVE = "ACTIVE";
+
     public UrlResponse {
         suspiciousReasons = suspiciousReasons == null ? List.of() : suspiciousReasons;
     }
@@ -86,6 +88,11 @@ public record UrlResponse(
     public UrlResponse withModeration(final boolean inReview, final boolean ownerLooksLikeAScammer, final String chainEnd) {
         return new UrlResponse(id, longUrl, shortUrl, createDate, expirationDate, visits, visitLimit, active, status, tags,
                 passwordProtected, ownerEmail, suspiciousReasons, blockReason, inReview, ownerLooksLikeAScammer, chainEnd, destinationHealth, domain);
+    }
+
+    public UrlResponse asCreated() {
+        return new UrlResponse(id, longUrl, shortUrl, createDate, expirationDate, visits, visitLimit, true, ACTIVE, tags, passwordProtected,
+                ownerEmail, suspiciousReasons, null, reviewOpen, ownerPossibleScammer, finalUrl, destinationHealth, domain);
     }
 
     public static UrlResponse from(final Url url) {
@@ -118,7 +125,7 @@ public record UrlResponse(
 
     private static String resolveStatus(final Url url) {
         if (url.isActive()) {
-            return "ACTIVE";
+            return ACTIVE;
         }
         if (url.getBlockReason() != null || url.getThreatType() != null) {
             return "BLOCKED";

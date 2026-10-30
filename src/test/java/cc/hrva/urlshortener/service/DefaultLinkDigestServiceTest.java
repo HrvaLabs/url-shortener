@@ -297,7 +297,8 @@ class DefaultLinkDigestServiceTest {
                 blocked(51L, "sb", "https://malware.example/", BlockReason.SAFE_BROWSING, null),
                 blocked(52L, "dbl", "https://phish.example/", BlockReason.BLOCKLIST, "Spamhaus DBL: phish"),
                 blocked(53L, "rule", "https://jofogas.cards/", BlockReason.DOMAIN_RULE, "jofogas.cards"),
-                blocked(54L, "scam", "https://fresh.example/login", BlockReason.SCAM_SIGNALS, "domain registered in the last 30 days; login lure"));
+                blocked(54L, "scam", "https://fresh.example/login", BlockReason.SCAM_SIGNALS, "domain registered in the last 30 days; login lure"),
+                blocked(55L, "held", "https://ll.omaehhm.com/wqamhcsom/?r=1&t=2", BlockReason.CAMPAIGN, "/wqamhcsom?r&t"));
         sources();
 
         linkDigestService.sendDailyDigest();
@@ -306,7 +307,8 @@ class DefaultLinkDigestServiceTest {
                 "Google Safe Browsing",
                 "a blocklist (Spamhaus DBL: phish)",
                 "a domain rule (jofogas.cards)",
-                "scam signals (domain registered in the last 30 days; login lure)");
+                "scam signals (domain registered in the last 30 days; login lure)",
+                "a campaign hold (/wqamhcsom?r&t)");
     }
 
     @Test

@@ -394,13 +394,26 @@ class DefaultSettingsServiceTest {
     }
 
     @Test
+    void theCampaignHoldIsListedWhileTheSameShapeAlertIsOn() {
+        rows.put("CAMPAIGN_HOLD", row(SettingKey.CAMPAIGN_HOLD, "false"));
+        settingsService.refresh();
+
+        assertThat(settingsService.safetySwitchesOff()).containsExactly(SettingKey.CAMPAIGN_HOLD);
+
+        rows.put("SAME_SHAPE_ALERT", row(SettingKey.SAME_SHAPE_ALERT, "false"));
+        settingsService.refresh();
+
+        assertThat(settingsService.safetySwitchesOff()).containsExactly(SettingKey.SAME_SHAPE_ALERT);
+    }
+
+    @Test
     void aSafetySwitchUnderASwitchThatIsOffIsNotListed() {
         Arrays.stream(SettingKey.values()).filter(key -> key.getType() == SettingType.SWITCH).forEach(key -> rows.put(key.name(), row(key, "false")));
         settingsService.refresh();
 
         assertThat(settingsService.safetySwitchesOff())
                 .containsExactly(SettingKey.SAFE_BROWSING_CHECK, SettingKey.BLOCKLIST_CHECK, SettingKey.SUSPICIOUS_LINK_CHECK,
-                        SettingKey.NIGHTLY_SAFE_BROWSING, SettingKey.NIGHTLY_DESTINATION_CHECK)
+                        SettingKey.NIGHTLY_SAFE_BROWSING, SettingKey.NIGHTLY_DESTINATION_CHECK, SettingKey.SAME_SHAPE_ALERT)
                 .allSatisfy(key -> assertThat(key.getParent() == null || settingsService.isOn(key.getParent())).isTrue());
     }
 

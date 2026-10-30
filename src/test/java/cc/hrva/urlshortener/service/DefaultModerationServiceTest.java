@@ -620,6 +620,51 @@ class DefaultModerationServiceTest {
     }
 
     @Test
+    void holdingSendsNoDiscordLineAndNoEmail() {
+        final var url = link(31L, "https://ll.omaehhm.com/wqamhcsom/?r=1&t=2", null);
+
+        assertThat(moderationService.holdForCampaign(31L, "/wqamhcsom?r&t")).isTrue();
+
+        assertThat(url.isActive()).isFalse();
+        assertThat(url.getBlockReason()).isEqualTo(BlockReason.CAMPAIGN);
+        assertThat(url.getBlockDetail()).isEqualTo("/wqamhcsom?r&t");
+        assertThat(url.getBlockedAt()).isNotNull();
+        verify(cache).evict("s31");
+        verify(taskScheduler).schedule(any(Runnable.class), any(Instant.class));
+        verify(reviewQueueService).resolveOpen(url, ReviewResolution.LINK_BLOCKED, "system");
+        verifyNoInteractions(sendingEmailService, eventPublisher, auditLogService);
+        assertThat(outOfPlace).isEmpty();
+    }
+
+    @Test
+    void holdingSkipsAnAlreadyBlockedLink() {
+        final var url = blocked(32L, "https://ll.omaehhm.com/wqamhcsom/?r=1&t=2", BlockReason.BLOCKLIST, null);
+        url.setBlockDetail("HaGeZi TIF medium");
+
+        assertThat(moderationService.holdForCampaign(32L, "/wqamhcsom?r&t")).isFalse();
+
+        assertThat(url.getBlockReason()).isEqualTo(BlockReason.BLOCKLIST);
+        assertThat(url.getBlockDetail()).isEqualTo("HaGeZi TIF medium");
+        verify(urlRepository, never()).save(any(Url.class));
+        verifyNoInteractions(cache, reviewQueueService, sendingEmailService, eventPublisher);
+    }
+
+    @Test
+    void holdingSkipsALinkWithAnOwnerOrOneThatIsOff() {
+        final var owned = link(33L, "https://ll.omaehhm.com/wqamhcsom/?r=1&t=2", user(1L, "alice@example.com"));
+        final var off = link(34L, "https://ll.omaehhm.com/wqamhcsom/?r=2&t=2", null);
+        off.setActive(false);
+
+        assertThat(moderationService.holdForCampaign(33L, "/wqamhcsom?r&t")).isFalse();
+        assertThat(moderationService.holdForCampaign(34L, "/wqamhcsom?r&t")).isFalse();
+        assertThat(moderationService.holdForCampaign(35L, "/wqamhcsom?r&t")).isFalse();
+
+        assertThat(owned.getBlockReason()).isNull();
+        assertThat(off.getBlockReason()).isNull();
+        verify(urlRepository, never()).save(any(Url.class));
+    }
+
+    @Test
     void blockingALinkDisablesItEvictsItTellsTheOwnerAndClosesItsReview() {
         final var owner = user(1L, "alice@example.com");
         final var url = link(30L, "https://example.org/x", owner);

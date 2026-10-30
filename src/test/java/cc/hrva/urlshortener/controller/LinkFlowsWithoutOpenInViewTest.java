@@ -30,6 +30,7 @@ import cc.hrva.urlshortener.security.OAuth2LoginSuccessHandler;
 import cc.hrva.urlshortener.security.OAuth2LoginUserService;
 import cc.hrva.urlshortener.security.TokenProvider;
 import cc.hrva.urlshortener.service.BurstAlertService;
+import cc.hrva.urlshortener.service.CampaignService;
 import cc.hrva.urlshortener.service.ClickAnalyticsService;
 import cc.hrva.urlshortener.service.ClickCheckService;
 import cc.hrva.urlshortener.service.LinkCheckService;
@@ -39,7 +40,6 @@ import cc.hrva.urlshortener.service.RedirectChainService;
 import cc.hrva.urlshortener.service.ReservedAliasService;
 import cc.hrva.urlshortener.service.ReviewQueueService;
 import cc.hrva.urlshortener.service.SafeBrowsingService;
-import cc.hrva.urlshortener.service.SameShapeAlertService;
 import cc.hrva.urlshortener.service.ScammerSignalService;
 import cc.hrva.urlshortener.service.SuspiciousUrlService;
 import cc.hrva.urlshortener.service.UserService;
@@ -194,7 +194,7 @@ class LinkFlowsWithoutOpenInViewTest {
     private BurstAlertService burstAlertService;
 
     @MockitoBean
-    private SameShapeAlertService sameShapeAlertService;
+    private CampaignService campaignService;
 
     @MockitoBean
     private QrCodeService qrCodeService;

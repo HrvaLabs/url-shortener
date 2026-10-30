@@ -98,7 +98,7 @@ class DefaultWeeklyDigestServiceTest {
     private static final List<String> PROVIDERS = List.of("local", "google", "github");
     private static final List<String> REVIEW_SOURCES = List.of("SYSTEM", "VISITOR");
     private static final List<String> BLOCK_REASONS =
-            List.of("SAFE_BROWSING", "BLOCKLIST", "DOMAIN_RULE", "ADMIN", "USER_BLOCKED", "SCAM_SIGNALS");
+            List.of("SAFE_BROWSING", "BLOCKLIST", "DOMAIN_RULE", "ADMIN", "USER_BLOCKED", "SCAM_SIGNALS", "CAMPAIGN");
     private static final StackedSeries NO_SERIES = new StackedSeries(List.of(), List.of());
     private static final String WEBHOOK = "https://discord.test/api/webhooks/1/webhook-secret";
     private static final Duration DISCORD_TIMEOUT = Duration.ofSeconds(5);
@@ -166,7 +166,7 @@ class DefaultWeeklyDigestServiceTest {
                 safety(
                         series(REVIEW_SOURCES, new long[] {3, 1}, new long[] {0, 1}),
                         List.of(new CountEntry("OK", 3), new CountEntry("BLOCK_LINK", 1)),
-                        series(BLOCK_REASONS, new long[] {0, 2, 0, 0, 0, 0}, new long[] {1, 0, 0, 0, 0, 0})));
+                        series(BLOCK_REASONS, new long[] {0, 2, 0, 0, 0, 0, 0}, new long[] {1, 0, 0, 0, 0, 0, 0})));
         stubWeekBefore(
                 traffic(BEFORE_FROM, BEFORE_TO, 1075, 900, 10, List.of()),
                 links(BEFORE_FROM, BEFORE_TO, series(CHANNELS, new long[] {42, 0, 0, 0, 0, 0, 0}), 42),
@@ -193,11 +193,11 @@ class DefaultWeeklyDigestServiceTest {
     void onlyAutomaticBlocksAreCounted() {
         stubEmptyWeekWith(
                 links(WEEK_FROM, WEEK_TO, NO_SERIES, 0),
-                safety(NO_SERIES, List.of(), series(BLOCK_REASONS, new long[] {0, 1, 0, 3, 2, 0}, new long[] {1, 1, 0, 1, 0, 0})),
+                safety(NO_SERIES, List.of(), series(BLOCK_REASONS, new long[] {0, 1, 0, 3, 2, 0, 1}, new long[] {1, 1, 0, 1, 0, 0, 3})),
                 List.of());
 
         assertThat(weeklyDigestService.collect(TODAY).automaticBlocks())
-                .containsExactly(new CountEntry("BLOCKLIST", 2), new CountEntry("SAFE_BROWSING", 1));
+                .containsExactly(new CountEntry("CAMPAIGN", 4), new CountEntry("BLOCKLIST", 2), new CountEntry("SAFE_BROWSING", 1));
     }
 
     @Test

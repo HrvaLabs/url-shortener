@@ -20,8 +20,8 @@ import cc.hrva.urlshortener.service.alert.AdminAlertEvent.DomainDrift;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.DomainNeedsAttention;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.LinkBlocked;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.ReviewOpened;
-import cc.hrva.urlshortener.service.alert.AdminAlertEvent.SameShapeDetected;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.SettingChanged;
+import cc.hrva.urlshortener.service.alert.AdminAlertEvent.ShapeHeld;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.UserSignedUp;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.VisitorReported;
 import cc.hrva.urlshortener.service.digest.WeeklyDigestText;
@@ -54,6 +54,8 @@ public class DiscordAlertFormatter {
     private static final String BLOCKLISTS_PAGE = "/admin/blocklists";
     private static final String STATS_PAGE = "/admin/dashboard?days=7";
     private static final String DOMAINS_PAGE = "/admin/domains";
+    private static final String CAMPAIGNS_PAGE = "/admin/campaigns";
+    private static final String ROOT_PATH = "/";
     private static final String IP_DESTINATION = "an IP address";
     private static final String UNREADABLE_DESTINATION = "an unreadable destination";
     private static final String LOCAL_PROVIDER = "local";
@@ -139,7 +141,7 @@ public class DiscordAlertFormatter {
                     failed.fallbackLoaded() ? " (a fallback loaded)" : "", frontendPage(BLOCKLISTS_PAGE));
             case BlocklistSourceRecovered recovered -> "%s loads again".formatted(plain(recovered.sourceName()));
             case BurstDetected burst -> burstLine(burst);
-            case SameShapeDetected sameShape -> sameShapeLine(sameShape);
+            case ShapeHeld held -> shapeHeldLine(held);
             case AnonymousLinkBusy busy -> "Busy link without an account: %s, %d clicks today%s. %s".formatted(
                     link(busy.link()), busy.clicks(), countryName(busy.topCountry()).map(name -> ", most from " + name).orElse(""),
                     linked(frontendPage(LINKS_PAGE) + "?search=" + URLEncoder.encode(busy.link().shortUrl(), StandardCharsets.UTF_8)));
@@ -223,13 +225,21 @@ public class DiscordAlertFormatter {
                 linked(frontendPage(LINKS_PAGE) + "?search=" + URLEncoder.encode(readable, StandardCharsets.UTF_8)));
     }
 
-    private String sameShapeLine(final SameShapeDetected sameShape) {
-        final var examples = sameShape.exampleAliases().stream().limit(MAX_SAME_SHAPE_EXAMPLES)
+    private String shapeHeldLine(final ShapeHeld held) {
+        final var examples = held.exampleAliases().stream().limit(MAX_SAME_SHAPE_EXAMPLES)
                 .map(alias -> shortLinks.display(null, plain(alias))).toList();
-        return "Same-shape links: %d links without an account on %d domains share the URL shape %s in the last %s. %sNothing was held. Review them: %s"
-                .formatted(sameShape.links(), sameShape.domains(), plain(sameShape.shape()), window(sameShape.window()),
-                        examples.isEmpty() ? "" : "Examples: " + String.join(", ", examples) + ". ",
-                        linked(frontendPage(LINKS_PAGE) + "?search=" + URLEncoder.encode(sameShape.path(), StandardCharsets.UTF_8)));
+        final var shared = "%d links without an account on %d domains share the URL shape %s in the last %s. %s".formatted(held.links(), held.domains(),
+                plain(held.shape()), window(held.window()), examples.isEmpty() ? "" : "Examples: " + String.join(", ", examples) + ". ");
+        final var campaigns = linked(frontendPage(CAMPAIGNS_PAGE));
+        final var links = ROOT_PATH.equals(held.path())
+                ? Optional.<String>empty()
+                : Optional.of(linked(frontendPage(LINKS_PAGE) + "?search=" + URLEncoder.encode(held.path(), StandardCharsets.UTF_8)));
+        if (held.holding()) {
+            return "Campaign held: %sNew links with this shape are held for %s after the last one. Review: %s%s".formatted(shared,
+                    count(held.holdDays(), "day"), campaigns, links.map(search -> ", links: " + search).orElse(""));
+        }
+        return "Same-shape links: %sNothing was held. %sCampaign: %s".formatted(shared, links.map(search -> "Review them: " + search + " ").orElse(""),
+                campaigns);
     }
 
     private static Optional<String> countryName(final String code) {
@@ -286,6 +296,7 @@ public class DiscordAlertFormatter {
             case SCAM_SIGNALS -> "scam signals:";
             case ADMIN -> "by an admin:";
             case USER_BLOCKED -> "account blocked";
+            case CAMPAIGN -> "campaign hold";
         };
         if (detail.isEmpty()) {
             return StringUtils.removeEnd(text, ":");

@@ -34,18 +34,19 @@ import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.specification.UrlSpecification;
 import cc.hrva.urlshortener.service.ApiKeyService;
 import cc.hrva.urlshortener.service.BurstAlertService;
+import cc.hrva.urlshortener.service.CampaignService;
 import cc.hrva.urlshortener.service.ClickAnalyticsService;
 import cc.hrva.urlshortener.service.ClickCheckService;
 import cc.hrva.urlshortener.service.RedirectChainService;
 import cc.hrva.urlshortener.service.ReservedAliasService;
 import cc.hrva.urlshortener.service.ReviewQueueService;
-import cc.hrva.urlshortener.service.SameShapeAlertService;
 import cc.hrva.urlshortener.service.ScammerSignalService;
 import cc.hrva.urlshortener.service.SettingsService;
 import cc.hrva.urlshortener.service.SuspiciousUrlService;
 import cc.hrva.urlshortener.service.UrlService;
 import cc.hrva.urlshortener.service.UserService;
 import cc.hrva.urlshortener.service.burst.CreatedLink;
+import cc.hrva.urlshortener.service.campaign.UrlShapes;
 import cc.hrva.urlshortener.service.domain.CustomDomainHostnames;
 import cc.hrva.urlshortener.service.domain.CustomDomainRegistry;
 import cc.hrva.urlshortener.service.domain.DomainRoute;
@@ -55,6 +56,7 @@ import cc.hrva.urlshortener.service.domain.UrlCacheKeys;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiter;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiterUnavailableException;
 import cc.hrva.urlshortener.service.settings.SettingKey;
+import cc.hrva.urlshortener.util.DomainNames;
 import cc.hrva.urlshortener.util.RedirectLocations;
 import cc.hrva.urlshortener.util.SortWhitelist;
 import cc.hrva.urlshortener.validator.ApiKeyValidator;
@@ -118,6 +120,7 @@ public class DefaultUrlService implements UrlService {
     private static final String REASON_MISSING = "missing";
     private static final String REASON_DOMAIN = "domain";
     private static final int MAX_SHORT_URL_LENGTH = 32;
+    private static final int MAX_BLOCK_DETAIL_LENGTH = 255;
     private static final int UNLOCK_ATTEMPTS_PER_CLIENT = 10;
     private static final int UNLOCK_ATTEMPTS_PER_LINK = 50;
     private static final Duration UNLOCK_WINDOW = Duration.ofMinutes(15);
@@ -163,7 +166,7 @@ public class DefaultUrlService implements UrlService {
     private final DestinationCheckRepository destinationCheckRepository;
     private final CustomDomainRegistry customDomainRegistry;
     private final CustomDomainRepository customDomainRepository;
-    private final SameShapeAlertService sameShapeAlertService;
+    private final CampaignService campaignService;
     private final SettingsService settingsService;
     private final PlatformTransactionManager transactionManager;
 
@@ -184,6 +187,7 @@ public class DefaultUrlService implements UrlService {
             urlValidator.checkIfAnonymousUrlCreationEnabled();
         }
         final var verdict = validateUrl(url);
+        final var heldShape = currentUser == null ? heldShapeOf(url.getLongUrl(), verdict) : Optional.<HeldShape>empty();
 
         final var created = transactionOperations.execute(status -> {
             if (currentUser != null) {
@@ -193,7 +197,8 @@ public class DefaultUrlService implements UrlService {
                 return saveUrlForUser(url, currentUser, verdict);
             }
             url.setCreatedVia(createdVia.anonymous());
-            return UrlResponse.from(createUrlForAnonymousUser(url, verdict));
+            return heldShape.map(held -> holdNewAnonymousLink(url, held))
+                    .orElseGet(() -> UrlResponse.from(createUrlForAnonymousUser(url, verdict)));
         });
         checkRedirectsLater(created.id());
         reportCreated(created, CreatedLink.creatorOf(currentUser != null ? currentUser.getId() : null, clientIP), verdict);
@@ -651,9 +656,9 @@ public class DefaultUrlService implements UrlService {
 
     private void reportAnonymousShape(final UrlResponse created, final LinkVerdict verdict) {
         try {
-            sameShapeAlertService.anonymousLinkCreated(created.id(), created.longUrl(), verdict.outcome());
+            campaignService.recordAnonymousLink(created.id(), created.longUrl(), verdict.outcome());
         } catch (final RuntimeException exception) {
-            log.warn("Could not schedule the same-shape check urlId={} exception={}", created.id(), exception.getClass().getName());
+            log.warn("Could not schedule the campaign check urlId={} exception={}", created.id(), exception.getClass().getName());
         }
     }
 
@@ -977,6 +982,37 @@ public class DefaultUrlService implements UrlService {
         return urlRepository.findByLongUrlAndActiveTrue(longUrl).orElseThrow(() -> new UrlNotFoundException("URL doesn't exist"));
     }
 
+    private Optional<HeldShape> heldShapeOf(final String longUrl, final LinkVerdict verdict) {
+        if (verdict.outcome() == LinkVerdict.Outcome.ALLOWED) {
+            return Optional.empty();
+        }
+        final var host = DomainNames.hostOf(longUrl).filter(candidate -> !DomainNames.isIpLiteral(candidate));
+        final var shape = UrlShapes.of(longUrl);
+        if (host.isEmpty() || shape.isEmpty()) {
+            return Optional.empty();
+        }
+        try {
+            return campaignService.holdingCampaignId(shape.get())
+                    .map(campaignId -> new HeldShape(campaignId, shape.get().display(), DomainNames.registrableDomain(host.get())));
+        } catch (final RuntimeException exception) {
+            log.warn("Campaign hold check skipped exception={}", exception.getClass().getName());
+            return Optional.empty();
+        }
+    }
+
+    private UrlResponse holdNewAnonymousLink(final Url url, final HeldShape held) {
+        url.clearForAnonymousUser();
+        url.setShortUrl(nextFreeShortUrl(null));
+        url.setActive(false);
+        url.setBlockReason(BlockReason.CAMPAIGN);
+        url.setBlockDetail(StringUtils.abbreviate(held.shape(), MAX_BLOCK_DETAIL_LENGTH));
+        url.setBlockedAt(LocalDateTime.now());
+        final var saved = insertNewLink(url, NO_FREE_ALIAS);
+        campaignService.addHeldLink(held.campaignId(), saved.getId(), held.domain());
+        log.info("New link held for a campaign urlId={} campaignId={}", saved.getId(), held.campaignId());
+        return UrlResponse.from(saved).asCreated();
+    }
+
     private Url createUrlForAnonymousUser(final Url url, final LinkVerdict verdict) {
         url.clearForAnonymousUser();
 
@@ -1022,6 +1058,8 @@ public class DefaultUrlService implements UrlService {
         }
 
     }
+
+    private record HeldShape(long campaignId, String shape, String domain) {}
 
     private record BlockState(BlockReason reason, ThreatType threatType, LocalDateTime blockedAt) {
 

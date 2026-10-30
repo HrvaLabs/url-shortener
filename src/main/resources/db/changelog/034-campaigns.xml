@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.9.xsd">
+
+    <changeSet author="khrvacic" id="034-campaign">
+        <createTable tableName="campaign">
+            <column name="id" type="BIGINT" autoIncrement="true">
+                <constraints primaryKey="true" primaryKeyName="pk_campaign" nullable="false"/>
+            </column>
+            <column name="shape_key" type="VARCHAR(64)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="path" type="VARCHAR(2048)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="query_names" type="VARCHAR(2048)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="status" type="VARCHAR(20)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="first_seen_at" type="TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="last_seen_at" type="TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="active_until" type="TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="alerted_at" type="TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="allowed_by" type="VARCHAR(255)"/>
+            <column name="allowed_at" type="TIMESTAMP"/>
+        </createTable>
+        <createIndex tableName="campaign" indexName="ux_campaign_shape_key" unique="true">
+            <column name="shape_key"/>
+        </createIndex>
+        <createIndex tableName="campaign" indexName="idx_campaign_last_seen_at">
+            <column name="last_seen_at"/>
+        </createIndex>
+        <rollback>
+            <dropTable tableName="campaign"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet author="khrvacic" id="034-campaign-link">
+        <createTable tableName="campaign_link">
+            <column name="campaign_id" type="BIGINT">
+                <constraints nullable="false"/>
+            </column>
+            <column name="url_id" type="BIGINT">
+                <constraints nullable="false"/>
+            </column>
+            <column name="domain" type="VARCHAR(253)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_at" type="TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+        <addPrimaryKey tableName="campaign_link" columnNames="campaign_id, url_id" constraintName="pk_campaign_link"/>
+        <addForeignKeyConstraint baseTableName="campaign_link" baseColumnNames="campaign_id" constraintName="fk_campaign_link_campaign"
+                                 referencedTableName="campaign" referencedColumnNames="id" onDelete="CASCADE"/>
+        <addForeignKeyConstraint baseTableName="campaign_link" baseColumnNames="url_id" constraintName="fk_campaign_link_url"
+                                 referencedTableName="url" referencedColumnNames="id" onDelete="CASCADE"/>
+        <createIndex tableName="campaign_link" indexName="idx_campaign_link_url_id">
+            <column name="url_id"/>
+        </createIndex>
+        <rollback>
+            <dropTable tableName="campaign_link"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet author="khrvacic" id="034-reported-domain">
+        <createTable tableName="reported_domain">
+            <column name="domain" type="VARCHAR(253)">
+                <constraints primaryKey="true" primaryKeyName="pk_reported_domain" nullable="false"/>
+            </column>
+            <column name="registrar" type="VARCHAR(255)"/>
+            <column name="abuse_email" type="VARCHAR(320)"/>
+            <column name="reported_by" type="VARCHAR(255)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="reported_at" type="TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="last_checked_at" type="TIMESTAMP"/>
+            <column name="suspended_at" type="TIMESTAMP"/>
+        </createTable>
+        <createIndex tableName="reported_domain" indexName="idx_reported_domain_reported_at">
+            <column name="reported_at"/>
+        </createIndex>
+        <rollback>
+            <dropTable tableName="reported_domain"/>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>

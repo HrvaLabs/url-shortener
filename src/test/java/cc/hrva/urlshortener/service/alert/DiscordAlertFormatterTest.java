@@ -26,7 +26,7 @@ import cc.hrva.urlshortener.service.alert.AdminAlertEvent.DomainDrift;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.DomainNeedsAttention;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.LinkBlocked;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.ReviewOpened;
-import cc.hrva.urlshortener.service.alert.AdminAlertEvent.SameShapeDetected;
+import cc.hrva.urlshortener.service.alert.AdminAlertEvent.ShapeHeld;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.SettingChanged;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.UserSignedUp;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.VisitorReported;
@@ -512,38 +512,79 @@ class DiscordAlertFormatterTest {
     }
 
     @Test
-    void sameShapeLine() {
-        final var content = formatter.message(List.of(new SameShapeDetected("/wqamhcsom?r&t", "/wqamhcsom", 3, 3, Duration.ofHours(24),
-                List.of("ccc", "bbb", "aaa"))), 0).content();
+    void shapeHeldLine() {
+        final var content = formatter.message(List.of(new ShapeHeld(4L, "/wqamhcsom?r&t", "/wqamhcsom", 3, 3, Duration.ofHours(24),
+                List.of("ccc", "bbb", "aaa"), true, 7)), 0).content();
+
+        assertThat(content).isEqualTo("Campaign held: 3 links without an account on 3 domains share the URL shape /wqamhcsom?r&t in the last 24 hours. "
+                + "Examples: hrva.cc/ccc, hrva.cc/bbb, hrva.cc/aaa. New links with this shape are held for 7 days after the last one. "
+                + "Review: <https://app.hrva.cc/admin/campaigns>, links: <https://app.hrva.cc/admin/urls?search=%2Fwqamhcsom>");
+    }
+
+    @Test
+    void shapeHeldAlertOnlyLine() {
+        final var content = formatter.message(List.of(new ShapeHeld(4L, "/wqamhcsom?r&t", "/wqamhcsom", 3, 3, Duration.ofHours(24),
+                List.of("ccc", "bbb", "aaa"), false, 7)), 0).content();
 
         assertThat(content).isEqualTo("Same-shape links: 3 links without an account on 3 domains share the URL shape /wqamhcsom?r&t in the last 24 hours. "
-                + "Examples: hrva.cc/ccc, hrva.cc/bbb, hrva.cc/aaa. Nothing was held. Review them: <https://app.hrva.cc/admin/urls?search=%2Fwqamhcsom>");
+                + "Examples: hrva.cc/ccc, hrva.cc/bbb, hrva.cc/aaa. Nothing was held. Review them: <https://app.hrva.cc/admin/urls?search=%2Fwqamhcsom> "
+                + "Campaign: <https://app.hrva.cc/admin/campaigns>");
     }
 
     @Test
-    void sameShapeLineShowsAtMostThreeExamples() {
-        final var content = formatter.message(List.of(new SameShapeDetected("/wqamhcsom?r&t", "/wqamhcsom", 5, 4, Duration.ofHours(24),
-                List.of("eee", "ddd", "ccc", "bbb"))), 0).content();
-
-        assertThat(content).contains("Examples: hrva.cc/eee, hrva.cc/ddd, hrva.cc/ccc. Nothing was held.").doesNotContain("bbb");
-    }
-
-    @Test
-    void sameShapeLineWithoutExamplesLeavesThemOut() {
-        final var content = formatter.message(List.of(new SameShapeDetected("/wqamhcsom?r&t", "/wqamhcsom", 3, 3, Duration.ofHours(24), List.of())), 0)
+    void aRootShapeLineLinksOnlyTheCampaigns() {
+        final var content = formatter.message(List.of(new ShapeHeld(5L, "/?a&b", "/", 3, 3, Duration.ofHours(24), List.of("ccc"), false, 7)), 0)
                 .content();
 
-        assertThat(content).isEqualTo("Same-shape links: 3 links without an account on 3 domains share the URL shape /wqamhcsom?r&t in the last 24 hours. "
-                + "Nothing was held. Review them: <https://app.hrva.cc/admin/urls?search=%2Fwqamhcsom>");
+        assertThat(content).isEqualTo("Same-shape links: 3 links without an account on 3 domains share the URL shape /?a&b in the last 24 hours. "
+                + "Examples: hrva.cc/ccc. Nothing was held. Campaign: <https://app.hrva.cc/admin/campaigns>");
     }
 
     @Test
-    void sameShapeLineEscapesTheShapeAndEncodesTheSearch() {
-        final var content = formatter.message(List.of(new SameShapeDetected("/log_in/`x`?a&user_id", "/log_in/`x`", 3, 3, Duration.ofHours(1),
-                List.of("a_b"))), 0).content();
+    void aOneDayHoldIsSingular() {
+        final var content = formatter.message(List.of(new ShapeHeld(4L, "/wqamhcsom?r&t", "/wqamhcsom", 3, 3, Duration.ofHours(1), List.of(), true, 1)),
+                0).content();
+
+        assertThat(content).isEqualTo("Campaign held: 3 links without an account on 3 domains share the URL shape /wqamhcsom?r&t in the last hour. "
+                + "New links with this shape are held for 1 day after the last one. "
+                + "Review: <https://app.hrva.cc/admin/campaigns>, links: <https://app.hrva.cc/admin/urls?search=%2Fwqamhcsom>");
+    }
+
+    @Test
+    void shapeHeldLineShowsAtMostThreeExamples() {
+        final var content = formatter.message(List.of(new ShapeHeld(4L, "/wqamhcsom?r&t", "/wqamhcsom", 5, 4, Duration.ofHours(24),
+                List.of("eee", "ddd", "ccc", "bbb"), true, 7)), 0).content();
+
+        assertThat(content).contains("Examples: hrva.cc/eee, hrva.cc/ddd, hrva.cc/ccc. New links").doesNotContain("bbb");
+    }
+
+    @Test
+    void shapeHeldLineWithoutExamplesLeavesThemOut() {
+        final var content = formatter.message(List.of(new ShapeHeld(4L, "/wqamhcsom?r&t", "/wqamhcsom", 3, 3, Duration.ofHours(24), List.of(), false,
+                7)), 0).content();
+
+        assertThat(content).isEqualTo("Same-shape links: 3 links without an account on 3 domains share the URL shape /wqamhcsom?r&t in the last 24 hours. "
+                + "Nothing was held. Review them: <https://app.hrva.cc/admin/urls?search=%2Fwqamhcsom> Campaign: <https://app.hrva.cc/admin/campaigns>");
+    }
+
+    @Test
+    void shapeHeldLineEscapesTheShapeAndEncodesTheSearch() {
+        final var content = formatter.message(List.of(new ShapeHeld(4L, "/log_in/`x`?a&user_id", "/log_in/`x`", 3, 3, Duration.ofHours(1),
+                List.of("a_b"), true, 7)), 0).content();
 
         assertThat(content).contains("share the URL shape /log\\_in/x?a&user\\_id in the last hour. ", "Examples: hrva.cc/a\\_b. ",
                 "<https://app.hrva.cc/admin/urls?search=%2Flog_in%2F%60x%60>");
+    }
+
+    @Test
+    void aCampaignBlockReadsCampaignHold() {
+        final var content = formatter.message(List.of(
+                new LinkBlocked(ANONYMOUS_LINK, BlockReason.CAMPAIGN, "/wqamhcsom?r&t"),
+                new LinkBlocked(ANONYMOUS_LINK, BlockReason.CAMPAIGN, null)), 0).content();
+
+        assertThat(content.lines()).containsExactly(
+                "Blocked: hrva.cc/abc12 → example-login.top (campaign hold /wqamhcsom?r&t), anonymous, <https://app.hrva.cc/admin/urls>",
+                "Blocked: hrva.cc/abc12 → example-login.top (campaign hold), anonymous, <https://app.hrva.cc/admin/urls>");
     }
 
     @Test

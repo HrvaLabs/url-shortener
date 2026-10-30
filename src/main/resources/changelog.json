@@ -1,10 +1,24 @@
 {
   "releases": [
     {
-      "version": "v2.18",
+      "version": "v2.19",
       "date": "2026-10-30",
       "badge": "Latest",
       "badgeVariant": "default",
+      "summary": "Campaign holds and abuse reports.",
+      "sections": [
+        {
+          "title": "Admin",
+          "icon": "wrench",
+          "items": [
+            "Links made without an account that share one URL shape across several domains are now held, with one Discord alert per campaign."
+          ]
+        }
+      ]
+    },
+    {
+      "version": "v2.18",
+      "date": "2026-10-30",
       "summary": "An admin Settings page: turn features on or off and change their numbers without a redeploy, emails included.",
       "sections": [
         {

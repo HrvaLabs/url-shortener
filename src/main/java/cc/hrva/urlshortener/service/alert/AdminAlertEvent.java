@@ -23,8 +23,14 @@ public sealed interface AdminAlertEvent {
 
     record BurstDetected(String domain, int links, int creators, Integer domainAgeDays, Duration window) implements AdminAlertEvent {}
 
-    record SameShapeDetected(String shape, String path, int links, int domains, Duration window, List<String> exampleAliases)
-            implements AdminAlertEvent {}
+    record ShapeHeld(long campaignId, String shape, String path, int links, int domains, Duration window, List<String> exampleAliases,
+                     boolean holding, int holdDays) implements AdminAlertEvent {
+
+        public ShapeHeld {
+            exampleAliases = List.copyOf(exampleAliases);
+        }
+
+    }
 
     record AnonymousLinkBusy(AlertedLink link, long clicks, String topCountry) implements AdminAlertEvent {}
 

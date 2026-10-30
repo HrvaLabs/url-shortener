@@ -30,5 +30,6 @@ public interface ModerationService {
     void resolveReview(long urlId, ReviewAction action, String domain, String performedBy, String via);
     ReviewBulkResolveResponse resolveReviews(List<Long> urlIds, ReviewAction action, String performedBy, String via);
     void deleteLink(long urlId, String performedBy, String via);
+    boolean holdForCampaign(long urlId, String shape);
 
 }

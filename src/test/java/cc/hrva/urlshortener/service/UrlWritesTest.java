@@ -162,7 +162,7 @@ class UrlWritesTest {
     private BurstAlertService burstAlertService;
 
     @MockitoBean
-    private SameShapeAlertService sameShapeAlertService;
+    private CampaignService campaignService;
 
     @MockitoBean
     private LinkCheckService linkCheckService;

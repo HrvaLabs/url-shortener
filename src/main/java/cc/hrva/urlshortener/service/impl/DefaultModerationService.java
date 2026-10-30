@@ -610,6 +610,12 @@ public class DefaultModerationService implements ModerationService {
         });
     }
 
+    @Override
+    public boolean holdForCampaign(final long urlId, final String shape) {
+        return block(urlId, BlockReason.CAMPAIGN, shape, ReviewResolution.LINK_BLOCKED, SYSTEM, url -> url.isActive() && url.getOwner() == null)
+                .isPresent();
+    }
+
     private Optional<Url> blockAndTellOwner(final long urlId, final BlockReason reason, final String detail, final ReviewResolution resolution,
                                             final String performedBy, final Predicate<Url> stillApplies, final Consumer<Url> tellOwner) {
         final var blocked = block(urlId, reason, detail, resolution, performedBy, stillApplies);

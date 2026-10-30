@@ -9,7 +9,8 @@ public enum BlockReason {
     DOMAIN_RULE,
     ADMIN,
     USER_BLOCKED,
-    SCAM_SIGNALS;
+    SCAM_SIGNALS,
+    CAMPAIGN;
 
     public static final Set<BlockReason> MANUAL = Set.of(ADMIN, USER_BLOCKED);
 

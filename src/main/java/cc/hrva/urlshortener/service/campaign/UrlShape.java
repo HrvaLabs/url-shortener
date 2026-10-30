@@ -9,6 +9,7 @@ import java.util.List;
 public record UrlShape(String path, List<String> queryNames) {
 
     private static final String SHA_256 = "SHA-256";
+    private static final String ROOT = "/";
 
     public UrlShape {
         queryNames = List.copyOf(queryNames);
@@ -21,6 +22,10 @@ public record UrlShape(String path, List<String> queryNames) {
         } catch (final NoSuchAlgorithmException exception) {
             throw new IllegalStateException(SHA_256 + " is not available", exception);
         }
+    }
+
+    public boolean holdable() {
+        return !ROOT.equals(path) && !queryNames.isEmpty();
     }
 
     public String display() {

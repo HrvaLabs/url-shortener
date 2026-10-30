@@ -109,6 +109,7 @@ class HourlyCountRepositoryTest {
         blockedLink(9304, DAY.atTime(20, 0), "ADMIN");
         blockedLink(9305, DAY.atTime(20, 30), null);
         blockedLink(9306, null, "SAFE_BROWSING");
+        blockedLink(9308, DAY.atTime(20, 40), "CAMPAIGN");
         link(9307, DAY.atTime(8, 20), "WEB");
 
         assertThat(hourlyCountRepository.count(BLOCKS_BY_REASON, DAY.atStartOfDay(), DAY.plusDays(1).atStartOfDay()))
@@ -116,6 +117,7 @@ class HourlyCountRepositoryTest {
                         new HourlyCount(DAY, 8, "BLOCKLIST", 2),
                         new HourlyCount(DAY, 8, "SCAM_SIGNALS", 1),
                         new HourlyCount(DAY, 20, "ADMIN", 1),
+                        new HourlyCount(DAY, 20, "CAMPAIGN", 1),
                         new HourlyCount(DAY, 20, "unknown", 1));
     }
 

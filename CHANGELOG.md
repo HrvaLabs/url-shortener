@@ -4,6 +4,15 @@ All notable changes to hrva.cc — the URL shortener.
 
 ---
 
+## [v2.19] — 2026-10-30
+
+Campaign holds and abuse reports.
+
+### 🔧 Admin
+- Links made without an account that share one URL shape across several domains are now held, with one Discord alert per campaign.
+
+---
+
 ## [v2.18] — 2026-10-30
 
 An admin Settings page: turn features on or off and change their numbers without a redeploy, emails included.

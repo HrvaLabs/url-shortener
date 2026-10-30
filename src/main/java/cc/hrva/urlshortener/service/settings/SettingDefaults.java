@@ -49,6 +49,8 @@ public class SettingDefaults {
         register(SettingKey.EMAIL_ADMIN_DAILY, emails::isAdminDaily);
         register(SettingKey.EMAIL_NEW_USER_NOTICE, emails::isNewUserNotice);
         register(SettingKey.EMAIL_CUSTOM_DOMAIN, emails::isCustomDomain);
+        register(SettingKey.CAMPAIGN_HOLD, moderation::isCampaignHold);
+        register(SettingKey.CAMPAIGN_HOLD_DAYS, moderation::getCampaignHoldDays);
     }
 
     public Object defaultOf(final SettingKey key) {

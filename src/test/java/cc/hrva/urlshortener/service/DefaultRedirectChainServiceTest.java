@@ -282,6 +282,40 @@ class DefaultRedirectChainServiceTest {
     }
 
     @Test
+    void aCampaignHeldLinkIsFollowedToRecordWhereItEndsAndNothingElse() {
+        heldForACampaign();
+        chain(DESTINATION, TRACKER, PHISHING);
+        lenient().when(linkCheckService.check(PHISHING)).thenReturn(blocked(BlockReason.BLOCKLIST, "URLhaus"));
+
+        final var result = redirectChainService.check(LINK_ID);
+
+        assertThat(result).isEqualTo(Result.CHECKED);
+        verify(urlRepository).recordRedirectChain(LINK_ID, DESTINATION, PHISHING, CHECKED_AT);
+        verifyNoInteractions(linkCheckService, safeBrowsingService, moderationService, reviewQueueService);
+    }
+
+    @Test
+    void aCampaignHeldLinkThatCannotBeFollowedRecordsOnlyTheCheckTime() {
+        heldForACampaign();
+        when(redirectFollower.followRedirects(DESTINATION, 5, Duration.ofSeconds(5))).thenThrow(new UrlValidationException("HTTP 404"));
+
+        assertThat(redirectChainService.check(LINK_ID)).isEqualTo(Result.UNREACHABLE);
+
+        verify(urlRepository).markRedirectChainChecked(LINK_ID, DESTINATION, CHECKED_AT);
+        verifyNoInteractions(moderationService, reviewQueueService);
+    }
+
+    @Test
+    void aLinkBlockedForAnotherReasonIsStillNotFollowed() {
+        link.setActive(false);
+        link.setBlockReason(BlockReason.BLOCKLIST);
+
+        assertThat(redirectChainService.check(LINK_ID)).isEqualTo(Result.SKIPPED);
+
+        verifyNoInteractions(redirectFollower);
+    }
+
+    @Test
     void checkLaterRunsTheSameCheckInTheBackground() throws NoSuchMethodException {
         chain(DESTINATION, TRACKER);
 
@@ -406,6 +440,12 @@ class DefaultRedirectChainServiceTest {
 
         assertThat(transactional).isNotNull();
         assertThat(transactional.propagation()).isEqualTo(Propagation.NOT_SUPPORTED);
+    }
+
+    private void heldForACampaign() {
+        link.setActive(false);
+        link.setBlockReason(BlockReason.CAMPAIGN);
+        link.setBlockDetail("/wqamhcsom?r&t");
     }
 
     private void chain(final String... urls) {

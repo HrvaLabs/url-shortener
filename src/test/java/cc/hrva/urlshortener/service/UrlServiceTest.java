@@ -38,6 +38,7 @@ import cc.hrva.urlshortener.dto.DomainRef;
 import cc.hrva.urlshortener.dto.LinkVerdict;
 import cc.hrva.urlshortener.dto.LinkVerdict.Outcome;
 import cc.hrva.urlshortener.dto.UrlResponse;
+import cc.hrva.urlshortener.service.campaign.UrlShapes;
 import cc.hrva.urlshortener.dto.DestinationHealth;
 import cc.hrva.urlshortener.dto.UrlSearchDto;
 import cc.hrva.urlshortener.dto.UrlUpdateDto;
@@ -126,6 +127,7 @@ class UrlServiceTest {
 
     private static final String BLOCKLIST_REFUSAL = "This destination is on a blocklist and can't be shortened. If you think that's a mistake, contact us.";
     private static final List<String> YOUNG_DOMAIN = List.of("domain registered in the last 30 days");
+    private static final String CAMPAIGN_LINK = "https://ll.omaehhm.com/wqamhcsom/?r=plfN8D&t=1793210826";
     private static final String FRONTEND = "https://hrva.cc";
     private static final String CLIENT_IP = "203.0.113.7";
     private static final ClickRequest CLICK = ClickRequest.of(CLIENT_IP, "UA", "https://t.co/x", "HR");
@@ -224,7 +226,7 @@ class UrlServiceTest {
     private CustomDomainRepository customDomainRepository;
 
     @Mock
-    private SameShapeAlertService sameShapeAlertService;
+    private CampaignService campaignService;
 
     @BeforeEach
     void setUp() {
@@ -259,7 +261,7 @@ class UrlServiceTest {
                 destinationCheckRepository,
                 customDomainRegistry,
                 customDomainRepository,
-                sameShapeAlertService,
+                campaignService,
                 settingsService,
                 withoutTransactions
         );
@@ -1082,16 +1084,16 @@ class UrlServiceTest {
         org.mockito.Mockito.doAnswer(invocation -> {
             reportedInTransaction.set(TransactionSynchronizationManager.isActualTransactionActive());
             return null;
-        }).when(sameShapeAlertService).anonymousLinkCreated(org.mockito.ArgumentMatchers.anyLong(), any(), any());
+        }).when(campaignService).recordAnonymousLink(org.mockito.ArgumentMatchers.anyLong(), any(), any());
 
         transactionalUrlService().saveUrlRouting(createUrlDto, CLIENT_IP, CreatedVia.WEB);
 
-        verify(sameShapeAlertService).anonymousLinkCreated(1L, "https://example.com/wqamhcsom?r=1&t=2", Outcome.FLAG);
+        verify(campaignService).recordAnonymousLink(1L, "https://example.com/wqamhcsom?r=1&t=2", Outcome.FLAG);
         assertThat(reportedInTransaction).hasValue(false);
     }
 
     @Test
-    void aReusedAnonymousLinkIsReportedToTheSameShapeCheckWithItsOwnId() {
+    void aReusedAnonymousLinkIsReportedToTheCampaignCheckWithItsOwnId() {
         final var createUrlDto = link(0);
         final var existing = Url.builder().id(12L).shortUrl("v0DB3").longUrl("https://example.com/0").active(true).build();
         when(createUrlToUrlConverter.convert(createUrlDto)).thenReturn(Url.builder().longUrl("https://example.com/0").build());
@@ -1100,7 +1102,7 @@ class UrlServiceTest {
 
         urlService.saveUrlRouting(createUrlDto, CLIENT_IP, CreatedVia.WEB);
 
-        verify(sameShapeAlertService).anonymousLinkCreated(12L, "https://example.com/0", Outcome.CLEAN);
+        verify(campaignService).recordAnonymousLink(12L, "https://example.com/0", Outcome.CLEAN);
     }
 
     @Test
@@ -1110,21 +1112,21 @@ class UrlServiceTest {
 
         urlService.saveUrlRouting(link(0), CLIENT_IP, CreatedVia.WEB);
 
-        verifyNoInteractions(sameShapeAlertService);
+        verifyNoInteractions(campaignService);
     }
 
     @Test
-    void anApiKeyCreateIsNeverReportedToTheSameShapeCheck() {
+    void anApiKeyCreateIsNeverReportedToTheCampaignCheck() {
         when(apiKeyService.fetchApiKeyByKey("apikey")).thenReturn(ApiKey.builder().owner(User.builder().id(9L).build()).build());
         stubLinkCreation();
 
         urlService.saveUrlWithApiKey(link(0), "apikey", CreatedVia.API_KEY);
 
-        verifyNoInteractions(sameShapeAlertService);
+        verifyNoInteractions(campaignService);
     }
 
     @Test
-    void aRefusedAnonymousLinkIsNeverReportedToTheSameShapeCheck() {
+    void aRefusedAnonymousLinkIsNeverReportedToTheCampaignCheck() {
         final var createUrlDto = CreateUrlDto.builder().longUrl("https://njuskaio.cam/a/MAUB3").build();
         final var url = Url.builder().longUrl("https://njuskaio.cam/a/MAUB3").build();
         when(createUrlToUrlConverter.convert(createUrlDto)).thenReturn(url);
@@ -1132,7 +1134,7 @@ class UrlServiceTest {
 
         assertThatThrownBy(() -> urlService.saveUrlRouting(createUrlDto, CLIENT_IP, CreatedVia.WEB)).isInstanceOf(UrlValidationException.class);
 
-        verifyNoInteractions(sameShapeAlertService);
+        verifyNoInteractions(campaignService);
     }
 
     @Test
@@ -1140,23 +1142,159 @@ class UrlServiceTest {
     void aFailingReportDoesNotFailTheCreate(final CapturedOutput output) {
         stubLinkCreation();
         org.mockito.Mockito.doThrow(new org.springframework.core.task.TaskRejectedException("executor is shutting down"))
-                .when(sameShapeAlertService).anonymousLinkCreated(org.mockito.ArgumentMatchers.anyLong(), any(), any());
+                .when(campaignService).recordAnonymousLink(org.mockito.ArgumentMatchers.anyLong(), any(), any());
 
         final var result = urlService.saveUrlRouting(link(0), CLIENT_IP, CreatedVia.WEB);
 
         assertThat(result.id()).isEqualTo(1L);
-        assertThat(output).containsOnlyOnce("Could not schedule the same-shape check urlId=1 exception=org.springframework.core.task.TaskRejectedException");
+        assertThat(output).containsOnlyOnce("Could not schedule the campaign check urlId=1 exception=org.springframework.core.task.TaskRejectedException");
     }
 
     @Test
-    void aFailingBurstCheckStillReportsTheSameShape() {
+    void aFailingBurstCheckStillReportsToTheCampaignCheck() {
         stubLinkCreation();
         org.mockito.Mockito.doThrow(new org.springframework.core.task.TaskRejectedException("executor is shutting down"))
                 .when(burstAlertService).linkCreated(any());
 
         urlService.saveUrlRouting(link(0), CLIENT_IP, CreatedVia.WEB);
 
-        verify(sameShapeAlertService).anonymousLinkCreated(1L, "https://example.com/0", Outcome.CLEAN);
+        verify(campaignService).recordAnonymousLink(1L, "https://example.com/0", Outcome.CLEAN);
+    }
+
+    @Test
+    void aNewAnonymousLinkWithAHeldShapeIsSavedHeld() {
+        final var url = anonymousCreateOf(CAMPAIGN_LINK, new LinkVerdict(Outcome.FLAG, YOUNG_DOMAIN, null, null));
+        when(campaignService.holdingCampaignId(UrlShapes.of(CAMPAIGN_LINK).orElseThrow())).thenReturn(Optional.of(4L));
+
+        final var created = urlService.saveUrlRouting(CreateUrlDto.builder().longUrl(CAMPAIGN_LINK).build(), CLIENT_IP, CreatedVia.WEB);
+
+        assertThat(url.isActive()).isFalse();
+        assertThat(url.getOwner()).isNull();
+        assertThat(url.getShortUrl()).hasSize(5);
+        assertThat(url.getBlockReason()).isEqualTo(BlockReason.CAMPAIGN);
+        assertThat(url.getBlockDetail()).isEqualTo("/wqamhcsom?r&t");
+        assertThat(url.getBlockedAt()).isNotNull();
+        final var order = org.mockito.Mockito.inOrder(urlRepository, campaignService);
+        order.verify(urlRepository).save(url);
+        order.verify(campaignService).addHeldLink(4L, 1L, "omaehhm.com");
+        verify(cacheManager, never()).getCache(any());
+        verifyNoInteractions(reviewQueueService);
+        assertThat(created).isEqualTo(UrlResponse.from(url).asCreated());
+        assertThat(created.active()).isTrue();
+        assertThat(created.status()).isEqualTo("ACTIVE");
+        assertThat(created.blockReason()).isNull();
+        url.setActive(true);
+        url.setBlockReason(null);
+        url.setBlockDetail(null);
+        url.setBlockedAt(null);
+        assertThat(created).isEqualTo(UrlResponse.from(url));
+        verify(redirectChainService).checkLater(1L);
+        verify(campaignService).recordAnonymousLink(1L, CAMPAIGN_LINK, Outcome.FLAG);
+    }
+
+    @Test
+    void aHeldShapeIsNeverDeduplicated() {
+        final var url = anonymousCreateOf(CAMPAIGN_LINK, LinkVerdict.clean());
+        org.mockito.Mockito.lenient().when(urlRepository.existsUrlByLongUrlAndActiveTrueAndOwnerIsNull(CAMPAIGN_LINK)).thenReturn(true);
+        org.mockito.Mockito.lenient().when(urlRepository.findByLongUrlAndActiveTrue(CAMPAIGN_LINK))
+                .thenReturn(Optional.of(Url.builder().id(12L).shortUrl("v0DB3").longUrl(CAMPAIGN_LINK).active(true).build()));
+        when(campaignService.holdingCampaignId(any())).thenReturn(Optional.of(4L));
+
+        final var created = urlService.saveUrlRouting(CreateUrlDto.builder().longUrl(CAMPAIGN_LINK).build(), CLIENT_IP, CreatedVia.WEB);
+
+        assertThat(created.id()).isEqualTo(1L);
+        assertThat(url.getBlockReason()).isEqualTo(BlockReason.CAMPAIGN);
+        verify(urlRepository, never()).existsUrlByLongUrlAndActiveTrueAndOwnerIsNull(any());
+        verify(urlRepository, never()).findByLongUrlAndActiveTrue(any());
+        verify(campaignService).addHeldLink(4L, 1L, "omaehhm.com");
+    }
+
+    @Test
+    void anAllowedLinkWithAHeldShapeIsNotHeld() {
+        final var url = anonymousCreateOf(CAMPAIGN_LINK, new LinkVerdict(Outcome.ALLOWED, List.of(), null, null));
+        org.mockito.Mockito.lenient().when(campaignService.holdingCampaignId(any())).thenReturn(Optional.of(4L));
+
+        final var created = urlService.saveUrlRouting(CreateUrlDto.builder().longUrl(CAMPAIGN_LINK).build(), CLIENT_IP, CreatedVia.WEB);
+
+        assertThat(url.getBlockReason()).isNull();
+        assertThat(created.blockReason()).isNull();
+        verify(campaignService, never()).holdingCampaignId(any());
+        verify(campaignService, never()).addHeldLink(anyLong(), anyLong(), any());
+        verify(urlRepository).existsUrlByLongUrlAndActiveTrueAndOwnerIsNull(CAMPAIGN_LINK);
+    }
+
+    @Test
+    void anAnonymousLinkWithoutAHeldShapeIsSavedAsBefore() {
+        final var url = anonymousCreateOf(CAMPAIGN_LINK, LinkVerdict.clean());
+
+        urlService.saveUrlRouting(CreateUrlDto.builder().longUrl(CAMPAIGN_LINK).build(), CLIENT_IP, CreatedVia.WEB);
+
+        verify(campaignService).holdingCampaignId(UrlShapes.of(CAMPAIGN_LINK).orElseThrow());
+        verify(campaignService, never()).addHeldLink(anyLong(), anyLong(), any());
+        assertThat(url.getBlockReason()).isNull();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"http://203.0.113.7/wqamhcsom?r=1&t=2", "https://a.com/index.php?id=1", "https://a.com/"})
+    void anIpHostOrAGenericShapeIsNeverLookedUp(final String longUrl) {
+        anonymousCreateOf(longUrl, LinkVerdict.clean());
+
+        urlService.saveUrlRouting(CreateUrlDto.builder().longUrl(longUrl).build(), CLIENT_IP, CreatedVia.WEB);
+
+        verify(campaignService, never()).holdingCampaignId(any());
+    }
+
+    @Test
+    void aSignedInLinkIsNeverShaped() {
+        stubLinkCreation();
+        when(userService.getUserFromToken()).thenReturn(User.builder().id(7L).build());
+        org.mockito.Mockito.lenient().when(campaignService.holdingCampaignId(any())).thenReturn(Optional.of(4L));
+
+        urlService.saveUrlRouting(CreateUrlDto.builder().longUrl(CAMPAIGN_LINK).build(), CLIENT_IP, CreatedVia.WEB);
+
+        verifyNoInteractions(campaignService);
+    }
+
+    @Test
+    void theHeldCheckRunsBeforeTheCreateTransaction() {
+        final var inTransaction = new AtomicReference<Boolean>();
+        when(appProperties.getShortUrlLength()).thenReturn(5L);
+        when(urlRepository.save(any(Url.class))).thenAnswer(invocation -> persisted(invocation.getArgument(0)));
+        when(linkCheckService.check(CAMPAIGN_LINK)).thenReturn(LinkVerdict.clean());
+        when(campaignService.holdingCampaignId(any())).thenAnswer(invocation -> {
+            inTransaction.set(TransactionSynchronizationManager.isActualTransactionActive());
+            return Optional.of(4L);
+        });
+
+        final var created = transactionalUrlService().saveUrlRouting(CreateUrlDto.builder().longUrl(CAMPAIGN_LINK).build(), CLIENT_IP, CreatedVia.WEB);
+
+        assertThat(inTransaction).hasValue(false);
+        assertThat(created.active()).isTrue();
+        verify(campaignService).addHeldLink(4L, 1L, "omaehhm.com");
+    }
+
+    @Test
+    @ExtendWith(OutputCaptureExtension.class)
+    void aFailingHeldCheckSavesTheLinkAsBefore(final CapturedOutput output) {
+        final var url = anonymousCreateOf(CAMPAIGN_LINK, LinkVerdict.clean());
+        when(campaignService.holdingCampaignId(any())).thenThrow(new org.springframework.dao.DataAccessResourceFailureException("db.internal down"));
+
+        final var created = urlService.saveUrlRouting(CreateUrlDto.builder().longUrl(CAMPAIGN_LINK).build(), CLIENT_IP, CreatedVia.WEB);
+
+        assertThat(created.id()).isEqualTo(1L);
+        assertThat(url.getBlockReason()).isNull();
+        verify(campaignService, never()).addHeldLink(anyLong(), anyLong(), any());
+        assertThat(output).containsOnlyOnce("Campaign hold check skipped exception=org.springframework.dao.DataAccessResourceFailureException")
+                .doesNotContain("db.internal", "omaehhm");
+    }
+
+    private Url anonymousCreateOf(final String longUrl, final LinkVerdict verdict) {
+        final var url = Url.builder().longUrl(longUrl).build();
+        when(createUrlToUrlConverter.convert(any(CreateUrlDto.class))).thenReturn(url);
+        when(urlValidator.checkIfLongUrlIsNotBlocklisted(url)).thenReturn(verdict);
+        when(appProperties.getShortUrlLength()).thenReturn(5L);
+        when(urlRepository.save(url)).thenReturn(persisted(url));
+        return url;
     }
 
     @Test
@@ -3467,7 +3605,7 @@ class UrlServiceTest {
                 urlToPeekUrlConverter, createUrlToUrlConverter, urlUpdateDtoToUrlConverter, new UrlCache(urls), objectMapper,
                 new io.micrometer.core.instrument.simple.SimpleMeterRegistry(), passwordEncoder, suspiciousUrlService, rateLimiter,
                 reviewQueueService, scammerSignalService, clickCheckService, redirectChainService, TransactionOperations.withoutTransaction(),
-                reservedAliasService, burstAlertService, destinationCheckRepository, customDomainRegistry, customDomainRepository, sameShapeAlertService, settingsService,
+                reservedAliasService, burstAlertService, destinationCheckRepository, customDomainRegistry, customDomainRepository, campaignService, settingsService,
                 withoutTransactions);
     }
 
@@ -3520,7 +3658,7 @@ class UrlServiceTest {
                 destinationCheckRepository,
                 customDomainRegistry,
                 customDomainRepository,
-                sameShapeAlertService,
+                campaignService,
                 settingsService,
                 withoutTransactions
         );
@@ -3599,7 +3737,7 @@ class UrlServiceTest {
                 destinationCheckRepository,
                 customDomainRegistry,
                 customDomainRepository,
-                sameShapeAlertService,
+                campaignService,
                 settingsService,
                 transactionManager
         );
@@ -3637,7 +3775,7 @@ class UrlServiceTest {
                 destinationCheckRepository,
                 customDomainRegistry,
                 customDomainRepository,
-                sameShapeAlertService,
+                campaignService,
                 settingsService,
                 withoutTransactions
         );
@@ -3671,7 +3809,7 @@ class UrlServiceTest {
                 destinationCheckRepository,
                 customDomainRegistry,
                 customDomainRepository,
-                sameShapeAlertService,
+                campaignService,
                 settingsService,
                 withoutTransactions
         );
