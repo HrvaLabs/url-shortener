@@ -698,6 +698,30 @@ class DefaultCampaignServiceTest {
     }
 
     @Test
+    void aHoldIsConfirmedUnderTheRowLockOnlyWhileTheRowHolds() {
+        final var campaign = row(CampaignStatus.HOLDING, NOW_LOCAL.plusDays(1));
+        rows.put(SHAPE_KEY, campaign);
+
+        assertThat(campaignService.confirmHold(campaign.getId())).isTrue();
+        campaign.setStatus(CampaignStatus.ALLOWED);
+        assertThat(campaignService.confirmHold(campaign.getId())).isFalse();
+        campaign.setStatus(CampaignStatus.ALERT_ONLY);
+        assertThat(campaignService.confirmHold(campaign.getId())).isFalse();
+        campaign.setStatus(CampaignStatus.HOLDING);
+        campaign.setActiveUntil(NOW_LOCAL);
+        assertThat(campaignService.confirmHold(campaign.getId())).isFalse();
+        assertThat(campaignService.confirmHold(99L)).isFalse();
+        verify(campaignRepository, times(5)).findForCreateHold(anyLong());
+        verify(campaignRepository, never()).findByShapeKey(anyString());
+    }
+
+    @Test
+    void confirmingAHoldRunsInTheCallersTransaction() throws NoSuchMethodException {
+        assertThat(DefaultCampaignService.class.getMethod("confirmHold", long.class).getAnnotation(Transactional.class).propagation())
+                .isEqualTo(Propagation.MANDATORY);
+    }
+
+    @Test
     void addingAHeldLinkStoresItAndExtendsTheHold() {
         final var campaign = row(CampaignStatus.HOLDING, NOW_LOCAL.plusDays(1));
         campaign.setLastSeenAt(NOW_LOCAL.minusDays(1));
@@ -1082,6 +1106,7 @@ class DefaultCampaignServiceTest {
             campaign.setLastSeenAt(invocation.getArgument(1));
             return 1;
         }).orElse(0));
+        lenient().when(campaignRepository.findForCreateHold(anyLong())).thenAnswer(invocation -> byId(invocation.getArgument(0)));
         lenient().when(campaignRepository.startHolding(anyLong())).thenAnswer(invocation -> byId(invocation.getArgument(0))
                 .filter(campaign -> campaign.getStatus() == CampaignStatus.ALERT_ONLY)
                 .map(campaign -> {

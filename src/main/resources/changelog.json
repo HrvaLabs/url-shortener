@@ -13,7 +13,8 @@
           "items": [
             "Links made without an account that share one URL shape across several domains are now held, with one Discord alert per campaign.",
             "A new Campaigns page lists each held URL shape with its links, domains, clicks and report status, with Block all domains, Report all and Allow this shape.",
-            "Report domains prepares one abuse email per registrar for the ticked links' domains, to open in your mail app or copy. Reported domains are checked daily and marked when they are suspended."
+            "Report domains prepares one abuse email per registrar for the ticked links' domains, to open in your mail app or copy. Reported domains are checked daily and marked when they are suspended.",
+            "Settings has new values for campaign holds (on or off, and how many days a hold lasts) and for abuse reports (your name and address, the Cc and how many days reported domains are rechecked)."
           ]
         }
       ]

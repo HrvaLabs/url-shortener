@@ -145,6 +145,17 @@ class CampaignSchemaTest {
     }
 
     @Test
+    void theCreateHoldReadFindsTheRowUnderAWriteLock() {
+        final var campaign = campaignRepository.saveAndFlush(campaign(SHAPE_KEY, "/wqamhcsom", List.of("r", "t")));
+        entityManager.clear();
+
+        final var locked = campaignRepository.findForCreateHold(campaign.getId()).orElseThrow();
+
+        assertThat(entityManager.getLockMode(locked)).isEqualTo(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE);
+        assertThat(campaignRepository.findForCreateHold(campaign.getId() + 1000)).isEmpty();
+    }
+
+    @Test
     void startingToHoldTakesOnlyAnAlertOnlyRow() {
         final var alertOnly = campaign(SHAPE_KEY, "/wqamhcsom", List.of("r", "t"));
         alertOnly.setStatus(CampaignStatus.ALERT_ONLY);

@@ -654,10 +654,22 @@ class DefaultModerationServiceTest {
         assertThat(url.getBlockedAt()).isNotNull();
         verify(cache).evict("s31");
         verify(taskScheduler).schedule(any(Runnable.class), any(Instant.class));
-        verify(reviewQueueService).resolveOpen(url, ReviewResolution.LINK_BLOCKED, "system");
+        verify(reviewQueueService, never()).resolveOpen(any(Url.class), any(ReviewResolution.class), anyString());
         verifyNoInteractions(sendingEmailService, eventPublisher, auditLogService);
         verify(campaignRepository).findForHold(CAMPAIGN_ID);
         assertThat(outOfPlace).isEmpty();
+    }
+
+    @Test
+    void aHeldLinkKeepsItsOpenReviewThroughTheHoldAndTheRestore() {
+        final var url = link(37L, "https://ll.omaehhm.com/wqamhcsom/?r=1&t=2", null);
+        when(linkCheckService.check("https://ll.omaehhm.com/wqamhcsom/?r=1&t=2")).thenReturn(ALLOWED);
+
+        assertThat(moderationService.holdForCampaign(37L, CAMPAIGN_ID, "/wqamhcsom?r&t")).isTrue();
+        assertThat(moderationService.restoreCampaignHolds(List.of(37L))).isEqualTo(1);
+
+        assertThat(url).extracting(Url::isActive, Url::getBlockReason).containsExactly(true, null);
+        verify(reviewQueueService, never()).resolveOpen(any(Url.class), any(ReviewResolution.class), anyString());
     }
 
     @Test
@@ -2077,13 +2089,29 @@ class DefaultModerationServiceTest {
 
         assertThat(restored).extracting(Url::isActive, Url::getBlockReason, Url::getBlockDetail, Url::getBlockedAt)
                 .containsExactly(true, null, null, null);
-        assertThat(stillBlocked).extracting(Url::isActive, Url::getBlockReason).containsExactly(false, BlockReason.CAMPAIGN);
+        assertThat(stillBlocked).extracting(Url::isActive, Url::getBlockReason, Url::getBlockDetail).containsExactly(false, BlockReason.BLOCKLIST, "URLhaus");
+        assertThat(stillBlocked.getBlockedAt()).isNotNull();
+        verify(reviewQueueService).resolveOpen(stillBlocked, ReviewResolution.LINK_BLOCKED, "system");
         assertThat(converted).extracting(Url::isActive, Url::getBlockReason).containsExactly(false, BlockReason.DOMAIN_RULE);
         verify(linkCheckService, never()).check("https://c.com/wqamhcsom?r=1&t=2");
         verify(linkCheckService, never()).check("https://d.com/wqamhcsom?r=1&t=2");
         verify(cache).evict("s30");
         verifyNoInteractions(auditLogService, sendingEmailService);
         assertThat(moderationService.restoreCampaignHolds(List.of())).isZero();
+        assertThat(outOfPlace).isEmpty();
+    }
+
+    @Test
+    void aHeldLinkStillBlockedByARuleIsReblockedByTheRuleWithoutAnEmailOrALine() {
+        final var stillBlocked = held(30L, "https://jofogas.cards/wqamhcsom?r=1&t=2");
+        when(linkCheckService.check("https://jofogas.cards/wqamhcsom?r=1&t=2")).thenReturn(new LinkVerdict(
+                Outcome.BLOCK, List.of("domain rule jofogas.cards"), BlockReason.DOMAIN_RULE, "jofogas.cards"));
+
+        assertThat(moderationService.restoreCampaignHolds(List.of(30L))).isZero();
+
+        assertThat(stillBlocked).extracting(Url::isActive, Url::getBlockReason, Url::getBlockDetail).containsExactly(false, BlockReason.DOMAIN_RULE,
+                "jofogas.cards");
+        verifyNoInteractions(sendingEmailService, eventPublisher, auditLogService);
         assertThat(outOfPlace).isEmpty();
     }
 

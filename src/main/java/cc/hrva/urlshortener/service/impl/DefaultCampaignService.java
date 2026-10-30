@@ -114,6 +114,13 @@ public class DefaultCampaignService implements CampaignService {
 
     @Override
     @Transactional(propagation = Propagation.MANDATORY)
+    public boolean confirmHold(final long campaignId) {
+        final var now = now();
+        return campaignRepository.findForCreateHold(campaignId).filter(campaign -> campaign.isHoldingAt(now)).isPresent();
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
     public void addHeldLink(final long campaignId, final long urlId, final String domain) {
         final var now = now();
         campaignLinkRepository.saveAndFlush(campaignLink(new CampaignLinkId(campaignId, urlId), domain, now));

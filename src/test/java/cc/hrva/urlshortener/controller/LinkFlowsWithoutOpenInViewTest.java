@@ -392,6 +392,7 @@ class LinkFlowsWithoutOpenInViewTest {
         final var longUrl = "https://ll.omaehhm.com/wqamhcsom/?r=held1&t=1";
         doReturn(null).when(userService).getUserFromToken();
         when(campaignService.holdingCampaignId(any())).thenReturn(Optional.of(77L));
+        when(campaignService.confirmHold(77L)).thenReturn(true);
         when(clickCheckService.mayRedirect(anyLong(), any())).thenReturn(true);
 
         try {
@@ -407,6 +408,29 @@ class LinkFlowsWithoutOpenInViewTest {
             final var alias = (String) stored.get("SHORT_URL");
             verify(campaignService).addHeldLink(eq(77L), anyLong(), eq("omaehhm.com"));
             assertThat(urlService.redirectResultUrl(alias, ClickRequest.of("203.0.113.7", "UA", null, "HR")).getUrl()).isNotEqualTo(longUrl);
+        } finally {
+            jdbcTemplate.update("delete from url where long_url = ?", longUrl);
+        }
+    }
+
+    @Test
+    void aHoldAllowedBeforeTheCreateCommitsLeavesTheLinkActiveAndRedirecting() throws Exception {
+        final var longUrl = "https://ll.omaehhm.com/wqamhcsom/?r=allowed1&t=1";
+        doReturn(null).when(userService).getUserFromToken();
+        when(campaignService.holdingCampaignId(any())).thenReturn(Optional.of(78L));
+        when(campaignService.confirmHold(78L)).thenReturn(false);
+        when(clickCheckService.mayRedirect(anyLong(), any())).thenReturn(true);
+
+        try {
+            mockMvc.perform(post("/api/v1/urls").contentType(MediaType.APPLICATION_JSON).content("{\"longUrl\":\"" + longUrl + "\"}"))
+                    .andExpect(status().isOk());
+
+            final var stored = jdbcTemplate.queryForMap("select short_url, active, block_reason from url where long_url = ?", longUrl);
+            assertThat(stored.get("ACTIVE")).isEqualTo(true);
+            assertThat(stored.get("BLOCK_REASON")).isNull();
+            verify(campaignService, org.mockito.Mockito.never()).addHeldLink(anyLong(), anyLong(), any());
+            assertThat(urlService.redirectResultUrl((String) stored.get("SHORT_URL"), ClickRequest.of("203.0.113.7", "UA", null, "HR")).getUrl())
+                    .isEqualTo(longUrl);
         } finally {
             jdbcTemplate.update("delete from url where long_url = ?", longUrl);
         }

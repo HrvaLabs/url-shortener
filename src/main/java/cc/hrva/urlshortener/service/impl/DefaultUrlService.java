@@ -197,7 +197,7 @@ public class DefaultUrlService implements UrlService {
                 return saveUrlForUser(url, currentUser, verdict);
             }
             url.setCreatedVia(createdVia.anonymous());
-            return heldShape.map(held -> holdNewAnonymousLink(url, held))
+            return heldShape.map(held -> holdNewAnonymousLink(url, held, verdict))
                     .orElseGet(() -> UrlResponse.from(createUrlForAnonymousUser(url, verdict)));
         });
         checkRedirectsLater(created.id());
@@ -1000,7 +1000,11 @@ public class DefaultUrlService implements UrlService {
         }
     }
 
-    private UrlResponse holdNewAnonymousLink(final Url url, final HeldShape held) {
+    private UrlResponse holdNewAnonymousLink(final Url url, final HeldShape held, final LinkVerdict verdict) {
+        if (!campaignService.confirmHold(held.campaignId())) {
+            log.info("Campaign stopped holding before the link was saved, saving it as usual campaignId={}", held.campaignId());
+            return UrlResponse.from(createUrlForAnonymousUser(url, verdict));
+        }
         url.clearForAnonymousUser();
         url.setShortUrl(nextFreeShortUrl(null));
         url.setActive(false);

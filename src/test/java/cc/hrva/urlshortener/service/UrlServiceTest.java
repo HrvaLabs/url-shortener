@@ -1165,6 +1165,7 @@ class UrlServiceTest {
     void aNewAnonymousLinkWithAHeldShapeIsSavedHeld() {
         final var url = anonymousCreateOf(CAMPAIGN_LINK, new LinkVerdict(Outcome.FLAG, YOUNG_DOMAIN, null, null));
         when(campaignService.holdingCampaignId(UrlShapes.of(CAMPAIGN_LINK).orElseThrow())).thenReturn(Optional.of(4L));
+        when(campaignService.confirmHold(4L)).thenReturn(true);
 
         final var created = urlService.saveUrlRouting(CreateUrlDto.builder().longUrl(CAMPAIGN_LINK).build(), CLIENT_IP, CreatedVia.WEB);
 
@@ -1175,6 +1176,7 @@ class UrlServiceTest {
         assertThat(url.getBlockDetail()).isEqualTo("/wqamhcsom?r&t");
         assertThat(url.getBlockedAt()).isNotNull();
         final var order = org.mockito.Mockito.inOrder(urlRepository, campaignService);
+        order.verify(campaignService).confirmHold(4L);
         order.verify(urlRepository).save(url);
         order.verify(campaignService).addHeldLink(4L, 1L, "omaehhm.com");
         verify(cacheManager, never()).getCache(any());
@@ -1193,12 +1195,29 @@ class UrlServiceTest {
     }
 
     @Test
+    void aHoldThatEndedOrWasAllowedMeanwhileSavesTheLinkActiveAndUnblocked() {
+        final var url = anonymousCreateOf(CAMPAIGN_LINK, new LinkVerdict(Outcome.FLAG, YOUNG_DOMAIN, null, null));
+        when(campaignService.holdingCampaignId(any())).thenReturn(Optional.of(4L));
+        when(campaignService.confirmHold(4L)).thenReturn(false);
+
+        final var created = urlService.saveUrlRouting(CreateUrlDto.builder().longUrl(CAMPAIGN_LINK).build(), CLIENT_IP, CreatedVia.WEB);
+
+        assertThat(url).extracting(Url::getBlockReason, Url::getBlockDetail, Url::getBlockedAt).containsExactly(null, null, null);
+        assertThat(created.blockReason()).isNull();
+        verify(campaignService, never()).addHeldLink(anyLong(), anyLong(), any());
+        verify(urlRepository).existsUrlByLongUrlAndActiveTrueAndOwnerIsNull(CAMPAIGN_LINK);
+        verify(reviewQueueService).flag(url, YOUNG_DOMAIN);
+        verify(campaignService).recordAnonymousLink(1L, CAMPAIGN_LINK, Outcome.FLAG);
+    }
+
+    @Test
     void aHeldShapeIsNeverDeduplicated() {
         final var url = anonymousCreateOf(CAMPAIGN_LINK, LinkVerdict.clean());
         org.mockito.Mockito.lenient().when(urlRepository.existsUrlByLongUrlAndActiveTrueAndOwnerIsNull(CAMPAIGN_LINK)).thenReturn(true);
         org.mockito.Mockito.lenient().when(urlRepository.findByLongUrlAndActiveTrue(CAMPAIGN_LINK))
                 .thenReturn(Optional.of(Url.builder().id(12L).shortUrl("v0DB3").longUrl(CAMPAIGN_LINK).active(true).build()));
         when(campaignService.holdingCampaignId(any())).thenReturn(Optional.of(4L));
+        when(campaignService.confirmHold(4L)).thenReturn(true);
 
         final var created = urlService.saveUrlRouting(CreateUrlDto.builder().longUrl(CAMPAIGN_LINK).build(), CLIENT_IP, CreatedVia.WEB);
 
@@ -1265,6 +1284,7 @@ class UrlServiceTest {
             inTransaction.set(TransactionSynchronizationManager.isActualTransactionActive());
             return Optional.of(4L);
         });
+        when(campaignService.confirmHold(4L)).thenReturn(true);
 
         final var created = transactionalUrlService().saveUrlRouting(CreateUrlDto.builder().longUrl(CAMPAIGN_LINK).build(), CLIENT_IP, CreatedVia.WEB);
 

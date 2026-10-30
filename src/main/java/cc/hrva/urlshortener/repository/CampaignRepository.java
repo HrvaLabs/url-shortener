@@ -23,6 +23,10 @@ public interface CampaignRepository extends JpaRepository<Campaign, Long> {
     @Query("select c from Campaign c where c.id = :id")
     Optional<Campaign> findForHold(@Param("id") long id);
 
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select c from Campaign c where c.id = :id")
+    Optional<Campaign> findForCreateHold(@Param("id") long id);
+
     List<Campaign> findByLastSeenAtAfterOrderByLastSeenAtDesc(LocalDateTime lastSeenAfter);
 
     @Query("""

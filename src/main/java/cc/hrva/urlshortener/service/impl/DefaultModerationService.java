@@ -695,13 +695,33 @@ public class DefaultModerationService implements ModerationService {
     }
 
     private boolean restoreHoldUnlessStillBlocked(final LinkDestination destination) {
-        if (linkCheckService.check(destination.longUrl()).outcome() == LinkVerdict.Outcome.BLOCK) {
-            log.info("Held link stays blocked under the allowed shape urlId={}", destination.id());
+        final var verdict = linkCheckService.check(destination.longUrl());
+        if (verdict.outcome() == LinkVerdict.Outcome.BLOCK) {
+            reblockHeld(destination, verdict);
             return false;
         }
         return reactivate(destination.id(), url -> url.getBlockReason() == BlockReason.CAMPAIGN
                 && url.getThreatType() == null
                 && destination.longUrl().equals(url.getLongUrl()));
+    }
+
+    private void reblockHeld(final LinkDestination destination, final LinkVerdict verdict) {
+        if (verdict.blockReason() == null || verdict.blockReason() == BlockReason.CAMPAIGN) {
+            log.info("Held link stays blocked under the allowed shape urlId={}", destination.id());
+            return;
+        }
+        transactionOperations.executeWithoutResult(status -> urlRepository.findById(destination.id())
+                .filter(url -> url.getBlockReason() == BlockReason.CAMPAIGN && destination.longUrl().equals(url.getLongUrl()))
+                .ifPresent(url -> {
+                    url.setBlockReason(verdict.blockReason());
+                    url.setBlockDetail(StringUtils.abbreviate(verdict.blockDetail(), MAX_COLUMN_LENGTH));
+                    url.setBlockedAt(LocalDateTime.now());
+                    if (verdict.blockReason() == BlockReason.SAFE_BROWSING) {
+                        url.setThreatType(ThreatType.MALWARE);
+                    }
+                    reviewQueueService.resolveOpen(urlRepository.save(url), ReviewResolution.LINK_BLOCKED, SYSTEM);
+                    log.info("Held link blocked for its own reason under the allowed shape urlId={} reason={}", url.getId(), verdict.blockReason());
+                }));
     }
 
     private Optional<Url> blockAndTellOwner(final long urlId, final BlockReason reason, final String detail, final ReviewResolution resolution,
@@ -733,7 +753,9 @@ public class DefaultModerationService implements ModerationService {
                         url.setThreatType(ThreatType.MALWARE);
                     }
                     final var saved = urlRepository.save(url);
-                    reviewQueueService.resolveOpen(saved, resolution, performedBy);
+                    if (reason != BlockReason.CAMPAIGN) {
+                        reviewQueueService.resolveOpen(saved, resolution, performedBy);
+                    }
                     return saved;
                 })
                 .orElse(null)));

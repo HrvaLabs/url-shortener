@@ -15,6 +15,8 @@ public interface CampaignService {
 
     Optional<Long> holdingCampaignId(UrlShape shape);
 
+    boolean confirmHold(long campaignId);
+
     void addHeldLink(long campaignId, long urlId, String domain);
 
     void recordAnonymousLink(long urlId, String longUrl, LinkVerdict.Outcome outcome);
