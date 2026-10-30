@@ -145,6 +145,10 @@ public class AppProperties {
     @NotNull
     private Cloudflare cloudflare = new Cloudflare();
 
+    @Valid
+    @NotNull
+    private Moderation moderation = new Moderation();
+
     @Data
     public static class Mcp {
 
@@ -318,6 +322,40 @@ public class AppProperties {
 
         @NotBlank
         private String apiBase = "https://api.cloudflare.com/client/v4";
+
+    }
+
+    @Data
+    public static class Moderation {
+
+        @Min(1)
+        @Max(100)
+        private int anonymousLinksPerHour = 10;
+
+        private boolean customAliases = true;
+        private boolean safeBrowsingCheck = true;
+        private boolean blocklistCheck = true;
+        private boolean suspiciousLinkCheck = true;
+        private boolean nightlySafeBrowsing = true;
+        private boolean sendEmails = true;
+
+        @Valid
+        @NotNull
+        private Emails emails = new Emails();
+
+    }
+
+    @Data
+    public static class Emails {
+
+        private boolean linkBlocked = true;
+        private boolean malwareFound = true;
+        private boolean deadLinks = true;
+        private boolean linkExpiring = true;
+        private boolean weeklySummary = true;
+        private boolean adminDaily = true;
+        private boolean newUserNotice = true;
+        private boolean customDomain = true;
 
     }
 

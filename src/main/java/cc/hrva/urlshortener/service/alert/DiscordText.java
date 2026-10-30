@@ -30,10 +30,14 @@ public final class DiscordText {
     }
 
     public static String hostname(final String hostname) {
-        if (StringUtils.isBlank(hostname)) {
+        return literal(hostname);
+    }
+
+    public static String literal(final String text) {
+        if (StringUtils.isBlank(text)) {
             return "";
         }
-        final var visible = FORMATTING.matcher(INVISIBLE.matcher(hostname).replaceAll(" ")).replaceAll("");
+        final var visible = FORMATTING.matcher(INVISIBLE.matcher(text).replaceAll(" ")).replaceAll("");
         return MARKDOWN.matcher(StringUtils.normalizeSpace(visible)).replaceAll("\\\\$0");
     }
 

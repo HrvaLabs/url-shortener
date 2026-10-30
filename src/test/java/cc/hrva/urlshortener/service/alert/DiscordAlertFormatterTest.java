@@ -27,6 +27,7 @@ import cc.hrva.urlshortener.service.alert.AdminAlertEvent.DomainNeedsAttention;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.LinkBlocked;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.ReviewOpened;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.SameShapeDetected;
+import cc.hrva.urlshortener.service.alert.AdminAlertEvent.SettingChanged;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.UserSignedUp;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.VisitorReported;
 import cc.hrva.urlshortener.service.domain.ShortLinks;
@@ -487,6 +488,27 @@ class DiscordAlertFormatterTest {
 
         assertThat(lines).extracting(line -> StringUtils.substringBetween(line, "networks. ", " Nothing was blocked.")).containsExactly(
                 "The domain was registered 1 day ago.", "The domain was registered today.", "The domain was registered 29 days ago.");
+    }
+
+    @Test
+    void settingChangedKeepsTheAdminsAddress() {
+        final var content = formatter.message(List.of(
+                new SettingChanged("Links without an account", "turned off", "karlo@hrva.cc"),
+                new SettingChanged("Same-shape alert: links", "changed from 3 to 5", "karlo@hrva.cc"),
+                new SettingChanged("Weekly digest", "reset to its default (On)", "karlo@hrva.cc")), 0).content();
+
+        assertThat(content.lines()).containsExactly(
+                "Links without an account turned off by karlo@hrva.cc",
+                "Same-shape alert: links changed from 3 to 5 by karlo@hrva.cc",
+                "Weekly digest reset to its default (On) by karlo@hrva.cc");
+    }
+
+    @Test
+    void settingChangedEscapesFormattingInTheLabelTheChangeAndTheAddress() {
+        final var content = formatter.message(List.of(
+                new SettingChanged("Links *without* an account", "turned `off`", "the_admin@hrva.cc <@123>")), 0).content();
+
+        assertThat(content).isEqualTo("Links \\*without\\* an account turned off by the\\_admin@hrva.cc @123");
     }
 
     @Test

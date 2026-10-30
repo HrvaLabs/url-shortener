@@ -1,0 +1,70 @@
+package cc.hrva.urlshortener.service.settings;
+
+import cc.hrva.urlshortener.configuration.properties.AppProperties;
+import java.util.EnumMap;
+import java.util.Map;
+import java.util.Optional;
+import java.util.function.Supplier;
+import org.springframework.stereotype.Component;
+
+@Component
+public class SettingDefaults {
+
+    private final Map<SettingKey, Supplier<Object>> defaults = new EnumMap<>(SettingKey.class);
+    private final Map<SettingKey, Supplier<Optional<String>>> availability = new EnumMap<>(SettingKey.class);
+
+    public SettingDefaults(final AppProperties appProperties) {
+        final var moderation = appProperties.getModeration();
+        final var emails = moderation.getEmails();
+        final var campaign = appProperties.getCampaign();
+        final var trafficAlerts = appProperties.getTrafficAlerts();
+        final var weeklyDigest = appProperties.getDigest().getWeekly();
+        register(SettingKey.ANONYMOUS_LINKS, appProperties::isAnonymousUrlCreationEnabled);
+        register(SettingKey.NEW_SIGNUPS, appProperties::isRegistrationEnabled);
+        register(SettingKey.ANONYMOUS_LINKS_PER_HOUR, moderation::getAnonymousLinksPerHour);
+        register(SettingKey.CUSTOM_ALIASES, moderation::isCustomAliases);
+        register(SettingKey.SAFE_BROWSING_CHECK, moderation::isSafeBrowsingCheck);
+        register(SettingKey.SAFE_BROWSING_FAIL_CLOSED, appProperties::isSafeBrowsingFailClosed);
+        register(SettingKey.BLOCKLIST_CHECK, moderation::isBlocklistCheck);
+        register(SettingKey.SUSPICIOUS_LINK_CHECK, moderation::isSuspiciousLinkCheck);
+        register(SettingKey.NIGHTLY_SAFE_BROWSING, moderation::isNightlySafeBrowsing);
+        register(SettingKey.NIGHTLY_DESTINATION_CHECK, () -> appProperties.getDestinationCheck().isEnabled());
+        register(SettingKey.SAME_SHAPE_ALERT, campaign::isEnabled);
+        register(SettingKey.CAMPAIGN_LINKS, campaign::getLinks);
+        register(SettingKey.CAMPAIGN_DOMAINS, campaign::getDomains);
+        register(SettingKey.CAMPAIGN_WINDOW_HOURS, () -> Math.clamp(campaign.getWindow().toHours(), 1, 168));
+        register(SettingKey.TRAFFIC_ALERTS, trafficAlerts::isEnabled);
+        register(SettingKey.TRAFFIC_LINK_CLICKS, trafficAlerts::getLinkClicks);
+        register(SettingKey.TRAFFIC_SHARE_PERCENT, trafficAlerts::getSharePercent);
+        register(SettingKey.TRAFFIC_MIN_ANONYMOUS_CLICKS, trafficAlerts::getMinAnonymousClicks);
+        register(SettingKey.BURST_LINKS, () -> appProperties.getBurst().getLinks());
+        register(SettingKey.WEEKLY_DIGEST, weeklyDigest::isEnabled);
+        register(SettingKey.WEEKLY_DIGEST_EMAIL, weeklyDigest::isEmail);
+        register(SettingKey.SEND_EMAILS, moderation::isSendEmails);
+        register(SettingKey.EMAIL_LINK_BLOCKED, emails::isLinkBlocked);
+        register(SettingKey.EMAIL_MALWARE_FOUND, emails::isMalwareFound);
+        register(SettingKey.EMAIL_DEAD_LINKS, emails::isDeadLinks);
+        register(SettingKey.EMAIL_LINK_EXPIRING, emails::isLinkExpiring);
+        register(SettingKey.EMAIL_WEEKLY_SUMMARY, emails::isWeeklySummary);
+        register(SettingKey.EMAIL_ADMIN_DAILY, emails::isAdminDaily);
+        register(SettingKey.EMAIL_NEW_USER_NOTICE, emails::isNewUserNotice);
+        register(SettingKey.EMAIL_CUSTOM_DOMAIN, emails::isCustomDomain);
+    }
+
+    public Object defaultOf(final SettingKey key) {
+        final var supplier = defaults.get(key);
+        if (supplier == null) {
+            throw new IllegalStateException("No default for setting " + key);
+        }
+        return supplier.get();
+    }
+
+    public Optional<String> unavailableReason(final SettingKey key) {
+        return availability.getOrDefault(key, Optional::empty).get();
+    }
+
+    private void register(final SettingKey key, final Supplier<Object> defaultValue) {
+        defaults.put(key, defaultValue);
+    }
+
+}

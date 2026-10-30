@@ -56,4 +56,6 @@ public sealed interface AdminAlertEvent {
 
     }
 
+    record SettingChanged(String label, String change, String changedBy) implements AdminAlertEvent {}
+
 }

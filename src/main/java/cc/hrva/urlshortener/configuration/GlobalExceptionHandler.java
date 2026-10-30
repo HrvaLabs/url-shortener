@@ -27,6 +27,7 @@ import cc.hrva.urlshortener.exception.PasskeyVerificationException;
 import cc.hrva.urlshortener.exception.RateLimitExceededException;
 import cc.hrva.urlshortener.exception.ReauthenticationRequiredException;
 import cc.hrva.urlshortener.exception.ReservedAliasNotFoundException;
+import cc.hrva.urlshortener.exception.SettingNotFoundException;
 import cc.hrva.urlshortener.exception.ShortUrlAlreadyExistsException;
 import cc.hrva.urlshortener.exception.SignInExpiredException;
 import cc.hrva.urlshortener.exception.SignInUnavailableException;
@@ -292,6 +293,11 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(CustomDomainNotFoundException.class)
     public ResponseEntity<Map<String, String>> handleCustomDomainNotFound(final CustomDomainNotFoundException ex) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", safeMessage(ex)));
+    }
+
+    @ExceptionHandler(SettingNotFoundException.class)
+    public ResponseEntity<Map<String, String>> handleSettingNotFound(final SettingNotFoundException ex) {
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", safeMessage(ex)));
     }
 

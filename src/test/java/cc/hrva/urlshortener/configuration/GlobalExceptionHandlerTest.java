@@ -5,12 +5,14 @@ import cc.hrva.urlshortener.exception.BioPageConflictException;
 import cc.hrva.urlshortener.exception.BioPageNotFoundException;
 import cc.hrva.urlshortener.exception.BulkBlockIncompleteException;
 import cc.hrva.urlshortener.exception.FieldValidationException;
+import cc.hrva.urlshortener.exception.SettingNotFoundException;
 import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
+import org.springframework.test.json.JsonCompareMode;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -20,6 +22,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -92,6 +95,20 @@ class GlobalExceptionHandlerTest {
     }
 
     @Test
+    void aSettingValueErrorIsABadRequestWithExactlyTheValueMap() throws Exception {
+        mockMvc.perform(get("/probe/setting-value"))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().json("{\"value\": \"Use a number from 2 to 50.\"}", JsonCompareMode.STRICT));
+    }
+
+    @Test
+    void anUnknownSettingIsNotFoundWithItsText() throws Exception {
+        mockMvc.perform(get("/probe/setting"))
+                .andExpect(status().isNotFound())
+                .andExpect(content().json("{\"error\": \"There is no setting NOPE.\"}", JsonCompareMode.STRICT));
+    }
+
+    @Test
     void anUnfinishedBulkBlockIsServiceUnavailableWithItsText() throws Exception {
         mockMvc.perform(get("/probe/bulk-block"))
                 .andExpect(status().isServiceUnavailable())
@@ -104,6 +121,16 @@ class GlobalExceptionHandlerTest {
         @GetMapping("/probe/field")
         String probeField() {
             throw new FieldValidationException(Map.of("hostname", "Enter a domain, like go.example.com"));
+        }
+
+        @GetMapping("/probe/setting-value")
+        String probeSettingValue() {
+            throw new FieldValidationException("value", "Use a number from 2 to 50.");
+        }
+
+        @GetMapping("/probe/setting")
+        String probeSetting() {
+            throw new SettingNotFoundException("There is no setting NOPE.");
         }
 
         @GetMapping("/probe/bio-page")

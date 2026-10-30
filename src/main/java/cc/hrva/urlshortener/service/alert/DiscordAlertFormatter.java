@@ -21,6 +21,7 @@ import cc.hrva.urlshortener.service.alert.AdminAlertEvent.DomainNeedsAttention;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.LinkBlocked;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.ReviewOpened;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.SameShapeDetected;
+import cc.hrva.urlshortener.service.alert.AdminAlertEvent.SettingChanged;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.UserSignedUp;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.VisitorReported;
 import cc.hrva.urlshortener.service.digest.WeeklyDigestText;
@@ -160,6 +161,8 @@ public class DiscordAlertFormatter {
             case DomainNeedsAttention attention -> "Custom domain needs attention: %s (%s), <%s>".formatted(
                     DiscordText.hostname(attention.hostname()), problem(attention.problem()), domainPage(attention.domainId(), attention.hostname()));
             case DomainDrift drift -> driftLine(drift);
+            case SettingChanged changed -> "%s %s by %s".formatted(plain(changed.label()), plain(changed.change()),
+                    DiscordText.literal(changed.changedBy()));
         };
     }
 
