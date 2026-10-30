@@ -28,13 +28,16 @@
 # check, approval and the automatic setup, the CNAME seen, links on the domain beside the same alias on the primary host,
 # the Host header routing and its 404s, turning the domain off and on, the removal with its links moved and the queued
 # Cloudflare delete, the three emails (a Mailpit container on a random port is the app's SMTP server) and the export.
-# Section 23 checks the same-shape alert: links without an account (distinct CF-Connecting-IP values, so the 10-per-hour create
-# limit is never reached) to one URL shape on three domains give one Discord line at the stub, a fourth domain adds none, and
-# index.php?id=1 on three domains is a generic path that gives none. Every link stays active; nothing is held.
+# Section 23 checks campaign holds: links without an account (distinct CF-Connecting-IP values, so the 10-per-hour create limit is
+# never reached) to one URL shape on three domains are held as CAMPAIGN (three url rows, one campaign row, one Campaign held: line at
+# the stub, no campaign:alerted: key), a fourth link is answered active but held, and index.php?id=1 on three domains is a generic
+# path that makes no row and stays active.
 # Section 24 checks the admin settings: the Settings list as an admin and a user, ANONYMOUS_LINKS off (the sign-in refusal, the public
 # switches, the Discord lines naming the admin), CUSTOM_ALIASES off, NEW_SIGNUPS off (the email sign-up refusal), SEND_EMAILS off (an
-# admin domain block of the user's link logs a SKIPPED email_log row), and CAMPAIGN_LINKS=4 (three same-shape links give no line, the
-# fourth gives one). Every setting is reset.
+# admin domain block of the user's link logs a SKIPPED email_log row), and CAMPAIGN_HOLD off with CAMPAIGN_LINKS=4 (three same-shape
+# links give no line, the fourth gives the alert-only line and nothing is held). Every setting is reset.
+# Section 25 checks the Campaigns API (list, detail, links, block-preview, allow and a new link that stays active) and abuse reports
+# (prepare with seeded rdap:info: values, so no registry is asked, and the /reported upsert with its audit row).
 #
 #   scripts/mcp-e2e.sh                         builds the jar, then runs every step
 #   MCP_E2E_SKIP_BUILD=1 scripts/mcp-e2e.sh    reuses target/url-shortener-*.jar
@@ -1355,55 +1358,82 @@ expect_eq "$(jq -r '.domains[0] | [has("cloudflareId"), has("lastError"), has("a
 expect_eq "$(jq -r '.domains[0] | [has("disabledReason"), has("disabledNote")] | all' <<<"$HTTP_BODY")" true \
     "and with disabledReason and disabledNote (null once turned on again)"
 
-section "23. Moderation: the same-shape alert"
-SHAPE_LINE_PREFIX='Same-shape links: 3 links without an account on 3 domains'
+section "23. Moderation: campaign holds"
+CAMPAIGN_LINE_PREFIX='Campaign held: 3 links without an account on 3 domains'
 SHAPE_ALIASES=()
 create_shape_link() {
     http -X POST "$BASE/api/v1/urls" -H "CF-Connecting-IP: $1" -H 'Content-Type: application/json' -d "{\"longUrl\":\"$2\"}"
     expect_eq "$HTTP_STATUS" 200 "a link without an account from $1 to $2"
     SHAPE_ALIASES+=("$(jq -r .shortUrl <<<"$HTTP_BODY")")
 }
-shape_lines() {
-    jq -s --arg prefix "$SHAPE_LINE_PREFIX" '[.[] | select(.content | startswith($prefix))] | length' "$DISCORD_POSTS"
+campaign_lines() {
+    jq -s --arg prefix "$CAMPAIGN_LINE_PREFIX" '[.[] | select(.content | startswith($prefix))] | length' "$DISCORD_POSTS"
 }
-any_shape_lines() {
-    jq -s '[.[] | select(.content | startswith("Same-shape links:"))] | length' "$DISCORD_POSTS"
+any_campaign_lines() {
+    jq -s '[.[] | select(.content | startswith("Campaign held:") or startswith("Same-shape links:"))] | length' "$DISCORD_POSTS"
 }
-shape_posted() {
-    [[ $(shape_lines) -ge 1 ]]
+campaign_posted() {
+    [[ $(campaign_lines) -ge 1 ]]
+}
+held_campaign_links() {
+    psql_value "select count(*) from url where long_url like '%$1%' and not active and block_reason = 'CAMPAIGN' and owner_id is null;"
+}
+campaign_links_held() {
+    [[ $(held_campaign_links "$1") == "$2" ]]
 }
 create_shape_link 203.0.113.21 'https://a1.e2e-shape-a.com/wqamhcsom?r=1&t=1'
 create_shape_link 203.0.113.22 'https://a1.e2e-shape-b.com/wqamhcsom?r=1&t=1'
 create_shape_link 203.0.113.23 'https://a1.e2e-shape-c.com/wqamhcsom?r=1&t=1'
-wait_until 45 "the same-shape alert at the Discord stub (30-second buffer)" shape_posted
-SHAPE_POST=$(jq -r --arg prefix "$SHAPE_LINE_PREFIX" 'select(.content | startswith($prefix)) | .content' "$DISCORD_POSTS")
-show "$SHAPE_POST"
-expect_eq "$(shape_lines)" 1 "the Discord stub got one same-shape line"
-expect_contains "$SHAPE_POST" "share the URL shape /wqamhcsom?r&t in the last 24 hours." "the line names the shape, with the query values left out"
-expect_contains "$SHAPE_POST" "Nothing was held. Review them: <$FRONTEND_URL/admin/urls?search=%2Fwqamhcsom>" "and links to the matching links in All URLs"
+wait_until 15 "the three links held as CAMPAIGN in Postgres" campaign_links_held e2e-shape- 3
+psql_query "select u.id, u.short_url, u.active, u.block_reason, u.owner_id is null as anonymous, u.long_url from url u where u.long_url like '%e2e-shape-%' order by u.id;"
+expect_eq "$(held_campaign_links e2e-shape-)" 3 "Postgres holds the three links as CAMPAIGN: inactive, without an owner"
+expect_eq "$(psql_value "select count(*) from campaign;")" 1 "and has one campaign row"
+expect_eq "$(psql_value "select status || ' ' || path || ' ' || query_names || ' ' || (select count(*) from campaign_link l where l.campaign_id = campaign.id) from campaign;" | tr '\n' ' ')" \
+    "HOLDING /wqamhcsom r t 3 " "it is HOLDING /wqamhcsom with the query names r and t and three campaign_link rows"
+wait_until 45 "the campaign line at the Discord stub (30-second buffer)" campaign_posted
+CAMPAIGN_POST=$(jq -r --arg prefix "$CAMPAIGN_LINE_PREFIX" 'select(.content | startswith($prefix)) | .content' "$DISCORD_POSTS")
+show "$CAMPAIGN_POST"
+expect_eq "$(campaign_lines)" 1 "the Discord stub got one Campaign held: 3 links line"
+expect_contains "$CAMPAIGN_POST" "share the URL shape /wqamhcsom?r&t in the last 24 hours." "the line names the shape, with the query values left out"
+expect_contains "$CAMPAIGN_POST" "New links with this shape are held for 7 days after the last one." "it says how long new links are held"
+expect_contains "$CAMPAIGN_POST" "Review: <$FRONTEND_URL/admin/campaigns>, links: <$FRONTEND_URL/admin/urls?search=%2Fwqamhcsom>" \
+    "and links to the Campaigns page and the matching links in All URLs"
 for alias in "${SHAPE_ALIASES[@]}"; do
-    expect_contains "$SHAPE_POST" "$alias" "the line shows the example $alias"
+    expect_contains "$CAMPAIGN_POST" "$alias" "the line shows the example $alias"
 done
-expect_eq "$(jq -sc --arg prefix "$SHAPE_LINE_PREFIX" '[.[] | select(.content | startswith($prefix)) | {allowed_mentions, flags}] | first' "$DISCORD_POSTS")" \
+expect_eq "$(jq -sc --arg prefix "$CAMPAIGN_LINE_PREFIX" '[.[] | select(.content | startswith($prefix)) | {allowed_mentions, flags}] | first' "$DISCORD_POSTS")" \
     '{"allowed_mentions":{"parse":[]},"flags":4}' "no mentions, no embeds"
 SHAPE_KEY=$(printf '/wqamhcsom\nr,t' | openssl dgst -sha256 | awk '{print $NF}')
+expect_eq "$(psql_value "select shape_key from campaign;")" "$SHAPE_KEY" "campaign.shape_key is the sha256 of the shape"
 expect_eq "$(docker exec "$REDIS_CONTAINER" redis-cli --raw zcard "campaign:shape:$SHAPE_KEY")" 3 "campaign:shape:<sha256 of the shape> holds the three links"
-expect_eq "$(docker exec "$REDIS_CONTAINER" redis-cli --raw exists "campaign:alerted:$SHAPE_KEY")" 1 "campaign:alerted:<shape> is set for 24 hours"
+expect_eq "$(docker exec "$REDIS_CONTAINER" redis-cli --raw exists "campaign:alerted:$SHAPE_KEY")" 0 "there is no campaign:alerted: key any more"
 
 create_shape_link 203.0.113.21 'https://a1.e2e-shape-d.com/wqamhcsom?r=1&t=1'
-expect_eq "$(docker exec "$REDIS_CONTAINER" redis-cli --raw zcard "campaign:shape:$SHAPE_KEY")" 4 "the fourth link is counted"
+expect_eq "$(jq -r '[.active, .status] | map(tostring) | join(",")' <<<"$HTTP_BODY")" "true,ACTIVE" "the fourth link on -d.com is answered active: true"
+FOURTH_ALIAS=${SHAPE_ALIASES[3]}
+expect_eq "$(psql_value "select active || ' ' || coalesce(block_reason, '') || ' ' || (owner_id is null) from url where short_url = '$FOURTH_ALIAS';")" \
+    "false CAMPAIGN true" "while Postgres holds it as CAMPAIGN, inactive and without an owner"
+expect_eq "$(psql_value "select count(*) from campaign_link;")" 4 "the campaign has four campaign_link rows"
+campaign_counted() {
+    [[ $(docker exec "$REDIS_CONTAINER" redis-cli --raw zcard "campaign:shape:$SHAPE_KEY") == 4 ]]
+}
+wait_until 15 "the fourth link counted" campaign_counted
+ok "the fourth link is counted"
 create_shape_link 203.0.113.22 'https://a.e2e-generic-x.com/index.php?id=1'
 create_shape_link 203.0.113.23 'https://a.e2e-generic-y.com/index.php?id=1'
 create_shape_link 203.0.113.21 'https://a.e2e-generic-z.com/index.php?id=1'
 echo "  waiting 40 s, longer than the Discord buffer's 30-second flush, for a second line that must not come"
 sleep 40
-expect_eq "$(any_shape_lines)" 1 "the fourth domain and the three index.php links add no same-shape line"
-expect_eq "$(grep -c 'Same-shape links shape=' "$WORK/app.log" || true)" 1 "the app logged one same-shape alert"
+expect_eq "$(any_campaign_lines)" 1 "the fourth domain and the three index.php links add no line"
+expect_eq "$(grep -c 'Campaign alert shape=' "$WORK/app.log" || true)" 1 "the app logged one campaign alert"
 expect_eq "$(docker exec "$REDIS_CONTAINER" redis-cli --raw --scan --pattern 'campaign:shape:*')" "campaign:shape:$SHAPE_KEY" \
     "index.php has no shape: only the campaign shape is counted in Redis"
-psql_query "select u.id, u.short_url, u.active, u.owner_id is null as anonymous, u.long_url from url u where u.long_url like '%e2e-shape-%' or u.long_url like '%e2e-generic-%' order by u.id;"
-expect_eq "$(psql_value "select count(*) filter (where active and owner_id is null and blocked_at is null) || ' of ' || count(*) from url where long_url like '%e2e-shape-%' or long_url like '%e2e-generic-%';")" \
-    "7 of 7" "all seven links are active, without an account and not blocked: the alert holds nothing"
+psql_query "select u.id, u.short_url, u.active, u.block_reason, u.owner_id is null as anonymous, u.long_url from url u where u.long_url like '%e2e-shape-%' or u.long_url like '%e2e-generic-%' order by u.id;"
+expect_eq "$(held_campaign_links e2e-shape-)" 4 "all four campaign links are held as CAMPAIGN"
+expect_eq "$(psql_value "select count(*) filter (where active and owner_id is null and blocked_at is null) || ' of ' || count(*) from url where long_url like '%e2e-generic-%';")" \
+    "3 of 3" "the three index.php links are active, without an account and not blocked"
+expect_eq "$(psql_value "select count(*) from campaign_link l join url u on u.id = l.url_id where u.long_url like '%e2e-generic-%';") $(psql_value "select count(*) from campaign;")" \
+    "0 1" "index.php made no campaign_link row and no campaign row"
 
 section "24. Moderation: settings"
 SETTINGS_URL=$BASE/api/v1/admin/settings
@@ -1426,6 +1456,8 @@ expect_eq "$(jq -r '[.[] | select(.changed)] | length' <<<"$HTTP_BODY")" 0 "no s
 expect_eq "$(jq -r '[.[] | select(.key == "ANONYMOUS_LINKS" or .key == "CUSTOM_ALIASES" or .key == "SEND_EMAILS") | .value] | map(tostring) | join(",")' <<<"$HTTP_BODY")" \
     "true,true,true" "links without an account, custom aliases and emails start on in the local profile"
 expect_eq "$(jq -r '.[] | select(.key == "CAMPAIGN_LINKS") | .value' <<<"$HTTP_BODY")" 3 "the same-shape alert starts at 3 links"
+expect_eq "$(jq -r '[.[] | select(.key == "CAMPAIGN_HOLD" or .key == "CAMPAIGN_HOLD_DAYS") | .value] | map(tostring) | join(",")' <<<"$HTTP_BODY")" "true,7" \
+    "campaign holds start on, for 7 days"
 http "$BASE/api/v1/public/settings"
 expect_eq "$HTTP_STATUS $(jq -c . <<<"$HTTP_BODY")" '200 {"anonymousLinks":true,"newSignups":true,"customAliases":true}' "GET /api/v1/public/settings without a token"
 
@@ -1517,7 +1549,7 @@ expect_eq "$HTTP_STATUS $(jq -r '[.value, .changed] | map(tostring) | join(",")'
 http -X DELETE "$BASE/api/v1/admin/domain-rules/$MAIL_RULE_ID" -H "Authorization: Bearer $ADMIN_JWT"
 expect_eq "$HTTP_STATUS" 204 "the domain rule is removed"
 
-echo "  --- the same-shape threshold"
+echo "  --- the same-shape alert with CAMPAIGN_HOLD off"
 SETTINGS_SHAPE_PATTERN='Same-shape links: [0-9]+ links without an account on [0-9]+ domains share the URL shape /e2esettings\?r&t'
 settings_shape_lines() {
     jq -s --arg pattern "$SETTINGS_SHAPE_PATTERN" '[.[].content | scan($pattern)] | length' "$DISCORD_POSTS"
@@ -1525,6 +1557,8 @@ settings_shape_lines() {
 settings_shape_posted() {
     [[ $(settings_shape_lines) -ge 1 ]]
 }
+put_setting CAMPAIGN_HOLD false
+expect_eq "$HTTP_STATUS $(jq -r '[.value, .changed] | map(tostring) | join(",")' <<<"$HTTP_BODY")" "200 false,true" "PUT /api/v1/admin/settings/CAMPAIGN_HOLD false"
 put_setting CAMPAIGN_LINKS 4
 expect_eq "$HTTP_STATUS $(jq -r '[.value, .changed] | map(tostring) | join(",")' <<<"$HTTP_BODY")" "200 4,true" "PUT /api/v1/admin/settings/CAMPAIGN_LINKS 4"
 create_shape_link 203.0.113.31 'https://a1.e2e-set-a.com/e2esettings?r=1&t=1'
@@ -1534,11 +1568,22 @@ echo "  waiting 40 s, longer than the Discord buffer's 30-second flush, for a li
 sleep 40
 expect_eq "$(settings_shape_lines)" 0 "three same-shape links on three domains give no line while the threshold is 4"
 create_shape_link 203.0.113.31 'https://a1.e2e-set-d.com/e2esettings?r=1&t=1'
+expect_eq "$(jq -r '[.active, .status] | map(tostring) | join(",")' <<<"$HTTP_BODY")" "true,ACTIVE" "the fourth link is answered active"
 wait_until 45 "the same-shape alert at the Discord stub (30-second buffer)" settings_shape_posted
-show "$(jq -r --arg pattern "$SETTINGS_SHAPE_PATTERN" 'select(.content | test($pattern)) | .content' "$DISCORD_POSTS")"
+SETTINGS_SHAPE_POST=$(jq -r --arg pattern "$SETTINGS_SHAPE_PATTERN" 'select(.content | test($pattern)) | .content' "$DISCORD_POSTS")
+show "$SETTINGS_SHAPE_POST"
 expect_eq "$(settings_shape_lines)" 1 "the fourth link on a fourth domain gives exactly one same-shape line"
-expect_eq "$(jq -s '[.[].content | scan("Same-shape links: 4 links without an account on 4 domains share the URL shape /e2esettings\\?r&t")] | length' "$DISCORD_POSTS")" 1 \
+expect_contains "$SETTINGS_SHAPE_POST" "Same-shape links: 4 links without an account on 4 domains share the URL shape /e2esettings?r&t in the last 24 hours." \
     "and it reads Same-shape links: 4 links"
+expect_contains "$SETTINGS_SHAPE_POST" "Nothing was held. Review them: <$FRONTEND_URL/admin/urls?search=%2Fe2esettings> Campaign: <$FRONTEND_URL/admin/campaigns>" \
+    "it says nothing was held and links to All URLs and the Campaigns page"
+expect_eq "$(jq -s '[.[].content | select(startswith("Campaign held:") and contains("/e2esettings"))] | length' "$DISCORD_POSTS")" 0 "no Campaign held: line for the shape"
+expect_eq "$(psql_value "select count(*) filter (where active and owner_id is null and blocked_at is null and block_reason is null) || ' of ' || count(*) from url where long_url like '%e2e-set-%';")" \
+    "4 of 4" "all four links are active and not blocked: the switch held nothing"
+expect_eq "$(psql_value "select status || ' ' || path || ' ' || (select count(*) from campaign_link l where l.campaign_id = c.id) from campaign c where path = '/e2esettings';")" \
+    "ALERT_ONLY /e2esettings 4" "the campaign row is ALERT_ONLY with four links"
+reset_setting CAMPAIGN_HOLD
+expect_eq "$HTTP_STATUS $(jq -r '[.value, .changed] | map(tostring) | join(",")' <<<"$HTTP_BODY")" "200 true,false" "DELETE CAMPAIGN_HOLD resets it"
 reset_setting CAMPAIGN_LINKS
 expect_eq "$HTTP_STATUS $(jq -r '[.value, .changed] | map(tostring) | join(",")' <<<"$HTTP_BODY")" "200 3,false" "DELETE CAMPAIGN_LINKS resets it"
 
@@ -1548,5 +1593,185 @@ expect_eq "$(jq -r '[.[] | select(.changed)] | length' <<<"$HTTP_BODY")" 0 "no s
 expect_eq "$(psql_value "select count(*) from app_setting;")" 0 "app_setting holds no row"
 http "$BASE/api/v1/public/settings"
 expect_eq "$(jq -c . <<<"$HTTP_BODY")" '{"anonymousLinks":true,"newSignups":true,"customAliases":true}' "the public switches are all on again"
+
+section "25. Moderation: the Campaigns API and abuse reports"
+CAMPAIGNS_URL=$BASE/api/v1/admin/campaigns
+ABUSE_URL=$BASE/api/v1/admin/abuse-reports
+admin_get() {
+    http "$1" -H "Authorization: Bearer $ADMIN_JWT"
+}
+admin_post() {
+    local body=${2-}
+    [[ -n $body ]] || body='{}'
+    http -X POST "$1" -H "Authorization: Bearer $ADMIN_JWT" -H 'Content-Type: application/json' -d "$body"
+}
+echo "  --- a campaign to work on"
+create_shape_link 203.0.113.41 'https://a1.e2e-camp-a.com/e2ecamp?r=1&t=1'
+create_shape_link 203.0.113.42 'https://a1.e2e-camp-b.com/e2ecamp?r=1&t=1'
+create_shape_link 203.0.113.43 'https://a1.e2e-camp-c.com/e2ecamp?r=1&t=1'
+wait_until 15 "the three links held as CAMPAIGN in Postgres" campaign_links_held e2e-camp- 3
+create_shape_link 203.0.113.44 'https://a1.e2e-camp-d.com/e2ecamp?r=1&t=1'
+expect_eq "$(held_campaign_links e2e-camp-)" 4 "four links of /e2ecamp?r&t are held as CAMPAIGN"
+CAMPAIGN_ID=$(psql_value "select id from campaign where path = '/e2ecamp';")
+expect_eq "$(psql_value "select count(*) from campaign where path = '/e2ecamp';")" 1 "and they share one campaign row"
+
+echo "  --- access"
+http "$CAMPAIGNS_URL"
+expect_eq "$HTTP_STATUS" 401 "GET /api/v1/admin/campaigns without a token"
+http "$CAMPAIGNS_URL" -H "Authorization: Bearer $SETTINGS_JWT"
+expect_eq "$HTTP_STATUS" 403 "GET /api/v1/admin/campaigns as $USER_EMAIL"
+http -X POST "$ABUSE_URL" -H "Authorization: Bearer $SETTINGS_JWT" -H 'Content-Type: application/json' -d "{\"campaignId\":$CAMPAIGN_ID}"
+expect_eq "$HTTP_STATUS" 403 "POST /api/v1/admin/abuse-reports as $USER_EMAIL"
+http -X POST "$ABUSE_URL/reported" -H 'Content-Type: application/json' -d '{"domains":["e2e-camp-a.com"]}'
+expect_eq "$HTTP_STATUS" 401 "POST /api/v1/admin/abuse-reports/reported without a token"
+
+echo "  --- the list"
+admin_get "$CAMPAIGNS_URL"
+expect_eq "$HTTP_STATUS" 200 "GET /api/v1/admin/campaigns"
+expect_eq "$(jq -r '.page.totalElements' <<<"$HTTP_BODY")" 3 "it lists the three campaigns of sections 23, 24 and 25"
+expect_eq "$(jq -r '[.content[].path] | join(",")' <<<"$HTTP_BODY")" "/e2ecamp,/e2esettings,/wqamhcsom" "newest first"
+admin_get "$CAMPAIGNS_URL?search=E2ECAMP"
+show "$(jq -c '.content[0]' <<<"$HTTP_BODY")"
+expect_eq "$(jq -r '.page.totalElements' <<<"$HTTP_BODY")" 1 "search finds the campaign by its path, whatever the case"
+expect_eq "$(jq -c '.content[0] | {id, shape, path, queryNames, status, holding}' <<<"$HTTP_BODY")" \
+    "{\"id\":$CAMPAIGN_ID,\"shape\":\"/e2ecamp?r&t\",\"path\":\"/e2ecamp\",\"queryNames\":[\"r\",\"t\"],\"status\":\"HOLDING\",\"holding\":true}" "the row names the shape and says it is holding"
+expect_eq "$(jq -c '.content[0] | [.links, .domains, .clicks, .reports]' <<<"$HTTP_BODY")" \
+    '[{"total":4,"active":0,"held":4,"blocked":0},4,0,{"reported":0,"suspended":0}]' "four links, all held, on four domains, with no clicks and no reports"
+expect_eq "$(jq -r '.content[0] | [.allowedBy, .allowedAt] | map(tostring) | join(",")' <<<"$HTTP_BODY")" "null,null" "and nobody has allowed it"
+admin_get "$CAMPAIGNS_URL?search=wqamhcsom"
+expect_eq "$(jq -r '.content[0] | [.path, (.links.held | tostring)] | join(" ")' <<<"$HTTP_BODY")" "/wqamhcsom 4" "section 23's campaign shows its four held links"
+admin_get "$CAMPAIGNS_URL?search=e2esettings"
+expect_eq "$(jq -r '.content[0] | [.status, .holding, (.links.active | tostring), (.links.held | tostring)] | join(" ")' <<<"$HTTP_BODY")" "ALERT_ONLY false 4 0" \
+    "section 24's campaign is ALERT_ONLY with four active links"
+admin_get "$CAMPAIGNS_URL?sort=status,asc"
+expect_eq "$(jq -r '[.content[].status] | join(",")' <<<"$HTTP_BODY")" "ALERT_ONLY,HOLDING,HOLDING" "sort=status,asc"
+admin_get "$CAMPAIGNS_URL?size=1&page=2&sort=firstSeenAt,asc"
+expect_eq "$(jq -r '[.content[0].path, .page.totalPages, .page.number] | map(tostring) | join(" ")' <<<"$HTTP_BODY")" "/e2ecamp 3 2" "size=1&page=2&sort=firstSeenAt,asc is the newest campaign on the third page"
+admin_get "$CAMPAIGNS_URL?sort=clicks,desc"
+expect_eq "$HTTP_STATUS $(jq -r .error <<<"$HTTP_BODY")" "400 Sort must be lastSeenAt, firstSeenAt or status" "another sort field is a 400"
+
+echo "  --- the detail"
+admin_get "$CAMPAIGNS_URL/$CAMPAIGN_ID"
+expect_eq "$HTTP_STATUS" 200 "GET /api/v1/admin/campaigns/$CAMPAIGN_ID"
+expect_eq "$(jq -c 'keys' <<<"$HTTP_BODY")" '["campaign","domains"]' "the detail has the campaign and its domains, no links"
+expect_eq "$(jq -r '.campaign.id' <<<"$HTTP_BODY")" "$CAMPAIGN_ID" "the campaign is the one asked for"
+expect_eq "$(jq -c '[.domains[] | {domain, links, report}]' <<<"$HTTP_BODY")" \
+    '[{"domain":"e2e-camp-a.com","links":1,"report":null},{"domain":"e2e-camp-b.com","links":1,"report":null},{"domain":"e2e-camp-c.com","links":1,"report":null},{"domain":"e2e-camp-d.com","links":1,"report":null}]' \
+    "it lists the four domains, one link each, none reported"
+admin_get "$CAMPAIGNS_URL/999999"
+expect_eq "$HTTP_STATUS $(jq -r .error <<<"$HTTP_BODY")" "404 There is no campaign 999999." "an unknown campaign is a 404"
+
+echo "  --- the links"
+admin_get "$CAMPAIGNS_URL/$CAMPAIGN_ID/links?sort=createDate,asc"
+expect_eq "$HTTP_STATUS" 200 "GET /api/v1/admin/campaigns/$CAMPAIGN_ID/links"
+expect_eq "$(jq -r '.page.totalElements' <<<"$HTTP_BODY")" 4 "four links"
+expect_eq "$(jq -c '[.content[] | [.domain, .active, .blockReason, .clicks]]' <<<"$HTTP_BODY")" \
+    '[["e2e-camp-a.com",false,"CAMPAIGN",0],["e2e-camp-b.com",false,"CAMPAIGN",0],["e2e-camp-c.com",false,"CAMPAIGN",0],["e2e-camp-d.com",false,"CAMPAIGN",0]]' \
+    "oldest first, each inactive, CAMPAIGN, with its registrable domain and no clicks"
+expect_eq "$(jq -r '.content[0].shortUrl' <<<"$HTTP_BODY")" "${SHAPE_ALIASES[$(( ${#SHAPE_ALIASES[@]} - 4 ))]}" "the first one is the link made first (the alias only)"
+admin_get "$CAMPAIGNS_URL/$CAMPAIGN_ID/links?search=e2e-camp-c"
+expect_eq "$(jq -r '[.page.totalElements, .content[0].domain] | map(tostring) | join(" ")' <<<"$HTTP_BODY")" "1 e2e-camp-c.com" "search finds a link by its destination"
+admin_get "$CAMPAIGNS_URL/$CAMPAIGN_ID/links?sort=domain,asc"
+expect_eq "$HTTP_STATUS $(jq -r .error <<<"$HTTP_BODY")" "400 Sort must be createDate or id" "another sort field is a 400"
+admin_get "$CAMPAIGNS_URL/999999/links"
+expect_eq "$HTTP_STATUS" 404 "the links of an unknown campaign are a 404"
+
+echo "  --- block preview"
+admin_post "$CAMPAIGNS_URL/$CAMPAIGN_ID/block-preview"
+expect_eq "$HTTP_STATUS" 200 "POST /api/v1/admin/campaigns/$CAMPAIGN_ID/block-preview"
+show "$(jq -c . <<<"$HTTP_BODY")"
+expect_eq "$(jq -c '[.[] | [.domain, .hosts, .selectedLinks, .activeLinks, .heldLinks, .rule]]' <<<"$HTTP_BODY")" \
+    '[["e2e-camp-a.com",["a1.e2e-camp-a.com"],1,0,1,null],["e2e-camp-b.com",["a1.e2e-camp-b.com"],1,0,1,null],["e2e-camp-c.com",["a1.e2e-camp-c.com"],1,0,1,null],["e2e-camp-d.com",["a1.e2e-camp-d.com"],1,0,1,null]]' \
+    "the preview lists four domains with one held link each and no rule"
+expect_eq "$(psql_value "select count(*) from domain_rule where domain like 'e2e-camp-%';") $(held_campaign_links e2e-camp-)" "0 4" "the preview changed nothing: no rule, four links still held"
+
+echo "  --- abuse reports"
+RDAP_LOG_LINES=$(grep -c 'RDAP' "$WORK/app.log" || true)
+seed_rdap() {
+    docker exec "$REDIS_CONTAINER" redis-cli set "rdap:info:$1" "$2" EX 3600 >/dev/null
+}
+seed_rdap e2e-camp-a.com '{"domain":"e2e-camp-a.com","status":"FOUND","registeredOn":"2026-08-14","registrar":"E2E Registrar, LLC","abuseEmail":"abuse@e2e-registrar.example","statuses":["active"]}'
+seed_rdap e2e-camp-b.com '{"domain":"e2e-camp-b.com","status":"FOUND","registeredOn":"2026-08-15","registrar":"E2E Registrar, LLC","abuseEmail":"abuse@e2e-registrar.example","statuses":["active"]}'
+seed_rdap e2e-camp-c.com '{"domain":"e2e-camp-c.com","status":"FOUND","registeredOn":null,"registrar":"E2E Other Registrar","abuseEmail":"abuse@e2e-other.example","statuses":["active"]}'
+seed_rdap e2e-camp-d.com '{"domain":"e2e-camp-d.com","status":"NO_RDAP_SERVER","registeredOn":null,"registrar":null,"abuseEmail":null,"statuses":[]}'
+expect_eq "$(docker exec "$REDIS_CONTAINER" redis-cli --raw --scan --pattern 'rdap:info:e2e-camp-*' | wc -l | tr -d ' ')" 4 "rdap:info: holds a seeded record for each of the four domains, so no registry is asked"
+admin_post "$ABUSE_URL" "{\"campaignId\":$CAMPAIGN_ID}"
+expect_eq "$HTTP_STATUS" 200 "POST /api/v1/admin/abuse-reports for the campaign"
+ABUSE_BODY=$HTTP_BODY
+show "$(jq -c '{reports: [.reports[] | del(.body)], noContact}' <<<"$ABUSE_BODY")"
+expect_eq "$(jq -c '[.reports[] | [.registrar, .to, .cc, [.domains[].domain]]]' <<<"$ABUSE_BODY")" \
+    '[["E2E Registrar, LLC","abuse@e2e-registrar.example",["reportphishing@apwg.org"],["e2e-camp-a.com","e2e-camp-b.com"]],["E2E Other Registrar","abuse@e2e-other.example",["reportphishing@apwg.org"],["e2e-camp-c.com"]]]' \
+    "two cards, the larger first, each to its registrar's abuse address with the default Cc"
+expect_eq "$(jq -c '.reports[0].domains | map([.registeredOn, .report])' <<<"$ABUSE_BODY")" '[["2026-08-14",null],["2026-08-15",null]]' "the card has the registration dates and no report yet"
+expect_eq "$(jq -c '.noContact' <<<"$ABUSE_BODY")" '[{"domain":"e2e-camp-d.com","registrar":null,"lookupFailed":false,"report":null}]' \
+    "the domain with no RDAP server is listed as no contact, not as a failed lookup"
+expect_contains "$(jq -r '.reports[0].subject' <<<"$ABUSE_BODY")" "Phishing: 2 domains used in links to " "the subject counts the domains"
+ABUSE_EMAIL_TEXT=$(jq -r '.reports[0].body' <<<"$ABUSE_BODY")
+show "$ABUSE_EMAIL_TEXT"
+expect_contains "$ABUSE_EMAIL_TEXT" "I run hrva.cc, a free URL shortener." "the body introduces hrva.cc"
+expect_contains "$ABUSE_EMAIL_TEXT" ", registered with E2E Registrar, LLC:" "it names the registrar"
+expect_contains "$ABUSE_EMAIL_TEXT" "  e2e-camp-a.com" "it lists the domains"
+expect_contains "$ABUSE_EMAIL_TEXT" "Please suspend these domains under your abuse policy." "and asks for the suspension"
+expect_eq "$(psql_value "select count(*) from reported_domain;")" 0 "preparing reports marks nothing as reported"
+admin_post "$ABUSE_URL" "{\"urlIds\":[$(psql_value "select string_agg(id::text, ',' order by id) from url where long_url like '%e2e-camp-%';")]}"
+expect_eq "$HTTP_STATUS $(jq -c '[.reports[] | [.to, (.domains | length)]]' <<<"$HTTP_BODY")" '200 [["abuse@e2e-registrar.example",2],["abuse@e2e-other.example",1]]' \
+    "the same links given by id give the same cards"
+admin_post "$ABUSE_URL" '{}'
+expect_eq "$HTTP_STATUS $(jq -c . <<<"$HTTP_BODY")" '400 {"urlIds":"Select between 1 and 100 links"}' "neither urlIds nor campaignId is a 400"
+admin_post "$ABUSE_URL" '{"campaignId":999999}'
+expect_eq "$HTTP_STATUS $(jq -r .error <<<"$HTTP_BODY")" "404 There is no campaign 999999." "an unknown campaign is a 404"
+expect_eq "$(grep -c 'RDAP' "$WORK/app.log" || true)" "$RDAP_LOG_LINES" "the app logged no RDAP lookup or failure for the report"
+
+echo "  --- marking domains as reported"
+admin_post "$ABUSE_URL/reported" '{"domains":["e2e-camp-a.com","E2E-Camp-B.com"],"registrar":"E2E Registrar, LLC","abuseEmail":"abuse@e2e-registrar.example"}'
+expect_eq "$HTTP_STATUS" 204 "POST /api/v1/admin/abuse-reports/reported for two domains"
+psql_query "select domain, registrar, abuse_email, reported_by, reported_at, last_checked_at, suspended_at from reported_domain order by domain;"
+expect_eq "$(psql_value "select string_agg(domain || ' ' || registrar || ' ' || abuse_email || ' ' || reported_by, ', ' order by domain) from reported_domain;")" \
+    "e2e-camp-a.com E2E Registrar, LLC abuse@e2e-registrar.example admin@localhost, e2e-camp-b.com E2E Registrar, LLC abuse@e2e-registrar.example admin@localhost" \
+    "two reported_domain rows, lower-cased, by the admin"
+expect_eq "$(psql_value "select action || '|' || target_type || '|' || target_identifier || '|' || details || '|' || performed_by from audit_log where action = 'REPORT_DOMAINS';")" \
+    "REPORT_DOMAINS|Registrar|abuse@e2e-registrar.example|domains: 2, registrar: E2E Registrar, LLC|admin@localhost" "and one REPORT_DOMAINS audit row"
+FIRST_REPORTED_AT=$(psql_value "select reported_at from reported_domain where domain = 'e2e-camp-a.com';")
+sleep 2
+admin_post "$ABUSE_URL/reported" '{"domains":["e2e-camp-a.com","e2e-camp-c.com"]}'
+expect_eq "$HTTP_STATUS" 204 "reporting e2e-camp-a.com again, with e2e-camp-c.com and no registrar"
+expect_eq "$(psql_value "select count(*) from reported_domain;")" 3 "the upsert made one new row"
+expect_eq "$(psql_value "select (reported_at = '$FIRST_REPORTED_AT') || ' ' || registrar || ' ' || abuse_email from reported_domain where domain = 'e2e-camp-a.com';")" \
+    "true E2E Registrar, LLC abuse@e2e-registrar.example" "the first report's time and the known contact stay: a missing registrar wipes nothing"
+expect_eq "$(psql_value "select coalesce(registrar, 'none') || ' ' || coalesce(abuse_email, 'none') from reported_domain where domain = 'e2e-camp-c.com';")" "none none" "the new domain has no contact"
+expect_eq "$(psql_value "select count(*) from audit_log where action = 'REPORT_DOMAINS' and details = 'domains: 2, registrar: unknown';")" 1 "the second call has its own audit row, registrar unknown"
+admin_post "$ABUSE_URL/reported" '{"domains":[]}'
+expect_eq "$HTTP_STATUS $(jq -c . <<<"$HTTP_BODY")" '400 {"domains":"Select between 1 and 100 domains"}' "an empty list is a 400"
+psql_value "update reported_domain set suspended_at = now() where domain = 'e2e-camp-b.com';" >/dev/null
+admin_get "$CAMPAIGNS_URL/$CAMPAIGN_ID"
+expect_eq "$(jq -c '.campaign.reports' <<<"$HTTP_BODY")" '{"reported":3,"suspended":1}' "the campaign counts three reported domains, one of them suspended"
+expect_eq "$(jq -c '[.domains[] | [.domain, (.report.reportedBy // "none"), (.report.registrar // "none"), (.report.suspendedAt != null)]]' <<<"$HTTP_BODY")" \
+    '[["e2e-camp-a.com","admin@localhost","E2E Registrar, LLC",false],["e2e-camp-b.com","admin@localhost","E2E Registrar, LLC",true],["e2e-camp-c.com","admin@localhost","none",false],["e2e-camp-d.com","none","none",false]]' \
+    "and the detail shows each domain's report"
+admin_post "$ABUSE_URL" "{\"campaignId\":$CAMPAIGN_ID}"
+expect_eq "$(jq -c '[.reports[].domains[] | [.domain, .report.reportedBy, (.report.suspendedAt != null)]]' <<<"$HTTP_BODY")" \
+    '[["e2e-camp-a.com","admin@localhost",false],["e2e-camp-b.com","admin@localhost",true],["e2e-camp-c.com","admin@localhost",false]]' \
+    "a new report shows who reported each domain and when it was suspended"
+
+echo "  --- allow this shape"
+admin_post "$CAMPAIGNS_URL/$CAMPAIGN_ID/allow"
+expect_eq "$HTTP_STATUS $(jq -c . <<<"$HTTP_BODY")" '200 {"linksAffected":4}' "POST /api/v1/admin/campaigns/$CAMPAIGN_ID/allow restores the four held links"
+expect_eq "$(psql_value "select count(*) filter (where active and block_reason is null and blocked_at is null) || ' of ' || count(*) from url where long_url like '%e2e-camp-%';")" "4 of 4" "Postgres has the four links active again"
+expect_eq "$(psql_value "select status || ' ' || allowed_by || ' ' || (allowed_at is not null) from campaign where id = $CAMPAIGN_ID;")" "ALLOWED admin@localhost true" \
+    "the campaign is ALLOWED, by the admin"
+expect_eq "$(psql_value "select target_type || ' ' || target_identifier || ' ' || details || ' ' || performed_by from audit_log where action = 'ALLOW_CAMPAIGN_SHAPE';")" \
+    "Campaign $CAMPAIGN_ID shape: /e2ecamp?r&t, links: 4 admin@localhost" "and one ALLOW_CAMPAIGN_SHAPE audit row"
+admin_post "$CAMPAIGNS_URL/$CAMPAIGN_ID/allow"
+expect_eq "$HTTP_STATUS $(jq -c . <<<"$HTTP_BODY")" '200 {"linksAffected":0}' "allowing again restores nothing"
+create_shape_link 203.0.113.41 'https://a1.e2e-camp-e.com/e2ecamp?r=1&t=1'
+expect_eq "$(jq -r '[.active, .status] | map(tostring) | join(",")' <<<"$HTTP_BODY")" "true,ACTIVE" "a new link with the allowed shape is answered active"
+ALLOWED_ALIAS=${SHAPE_ALIASES[$(( ${#SHAPE_ALIASES[@]} - 1 ))]}
+campaign_link_added() {
+    [[ $(psql_value "select count(*) from campaign_link where campaign_id = $CAMPAIGN_ID;") == 5 ]]
+}
+wait_until 15 "the new link added to the allowed campaign" campaign_link_added
+expect_eq "$(psql_value "select active || ' ' || coalesce(block_reason, 'none') from url where short_url = '$ALLOWED_ALIAS';")" "true none" "Postgres has it active and not blocked"
+admin_get "$CAMPAIGNS_URL/$CAMPAIGN_ID"
+expect_eq "$(jq -c '.campaign | [.status, .holding, .links]' <<<"$HTTP_BODY")" '["ALLOWED",false,{"total":5,"active":5,"held":0,"blocked":0}]' "the campaign counts five active links and holds none"
 
 section "Done: every step passed"
