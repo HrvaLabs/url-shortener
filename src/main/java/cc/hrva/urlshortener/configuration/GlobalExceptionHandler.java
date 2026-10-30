@@ -7,6 +7,7 @@ import cc.hrva.urlshortener.exception.BioHandleUnavailableException;
 import cc.hrva.urlshortener.exception.BioPageConflictException;
 import cc.hrva.urlshortener.exception.BioPageNotFoundException;
 import cc.hrva.urlshortener.exception.BlocklistSourceNotFoundException;
+import cc.hrva.urlshortener.exception.BulkBlockIncompleteException;
 import cc.hrva.urlshortener.exception.ChannelValidationException;
 import cc.hrva.urlshortener.exception.CommonException;
 import cc.hrva.urlshortener.exception.ConnectRequestAlreadyApprovedException;
@@ -301,6 +302,11 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(FeatureUnavailableException.class)
     public ResponseEntity<Map<String, String>> handleFeatureUnavailable(final FeatureUnavailableException ex) {
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(Map.of("error", safeMessage(ex)));
+    }
+
+    @ExceptionHandler(BulkBlockIncompleteException.class)
+    public ResponseEntity<Map<String, String>> handleBulkBlockIncomplete(final BulkBlockIncompleteException ex) {
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(Map.of("error", safeMessage(ex)));
     }
 

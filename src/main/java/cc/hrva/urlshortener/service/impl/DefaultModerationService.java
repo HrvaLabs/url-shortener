@@ -9,6 +9,7 @@ import cc.hrva.urlshortener.dto.LinkDestination;
 import cc.hrva.urlshortener.dto.LinkVerdict;
 import cc.hrva.urlshortener.dto.ReviewBulkResolveResponse;
 import cc.hrva.urlshortener.dto.UrlResponse;
+import cc.hrva.urlshortener.exception.BulkBlockIncompleteException;
 import cc.hrva.urlshortener.exception.CommonException;
 import cc.hrva.urlshortener.exception.DomainRuleNotFoundException;
 import cc.hrva.urlshortener.exception.UrlNotFoundException;
@@ -110,6 +111,8 @@ public class DefaultModerationService implements ModerationService {
     private static final String NOT_IN_QUEUE = "This link is no longer in the review queue.";
     private static final String RESOLVE_FAILED = "Resolving this link failed. Try again.";
     private static final String BLOCK_FAILED = "Blocking this domain failed. Try again.";
+    private static final String BULK_BLOCK_INCOMPLETE = "The domains are blocked, but turning off their links failed. Block the same domains again to finish.";
+    private static final String SCAN_FAILED = "scan failed";
     private static final String ALLOWED_BY_A_RULE = "Allowed by a rule";
     private static final UnaryOperator<String> TRUSTED_BY_DEFAULT = UnaryOperator.identity();
     private static final UnaryOperator<String> BLOCKED_BY_DEFAULT = DomainNames::registrableDomain;
@@ -188,24 +191,15 @@ public class DefaultModerationService implements ModerationService {
     @Override
     public DomainBulkBlockResponse blockDomains(final List<String> domains, final String reason, final String performedBy, final String via) {
         final var skipped = new ArrayList<DomainBulkBlockResponse.Skipped>();
-        final var toBlock = domainsToBlock(domains, skipped);
+        final var saved = saveBlockRules(domainsToBlock(domains, skipped), reason, performedBy, skipped);
         final var blocked = new ArrayList<DomainBulkBlockResponse.Blocked>();
         final var linksBlocked = new ArrayList<Url>();
-        if (!toBlock.isEmpty()) {
-            final var rules = domainRuleRepository.findAll();
-            final var idsByDomain = activeLinkIdsBlockedBy(toBlock.keySet(), rules);
-            for (final var entry : toBlock.entrySet()) {
-                final var ruleDomain = entry.getKey();
-                try {
-                    saveRule(ruleDomain, DomainRuleType.BLOCK, reason, performedBy);
-                } catch (final RuntimeException exception) {
-                    log.warn("Blocking a domain failed, continuing with the next one domain={}", ruleDomain, exception);
-                    skipped.add(new DomainBulkBlockResponse.Skipped(entry.getValue(), BLOCK_FAILED));
-                    continue;
-                }
+        if (!saved.isEmpty()) {
+            final var scan = scanAfterSaving(saved, reason, performedBy, via);
+            for (final var ruleDomain : saved) {
                 final var domainsDisabled = disableMatchingDomains(ruleDomain, reason);
-                final var rulesBelow = rulesBelow(ruleDomain, rules);
-                final var count = eachLink(idsByDomain.getOrDefault(ruleDomain, List.of()), Long::longValue,
+                final var rulesBelow = rulesBelow(ruleDomain, scan.rules());
+                final var count = eachLink(scan.idsByDomain().getOrDefault(ruleDomain, List.of()), Long::longValue,
                         id -> blockOnDomain(id, ruleDomain, rulesBelow, performedBy, linksBlocked::add));
                 blocked.add(new DomainBulkBlockResponse.Blocked(ruleDomain, count, domainsDisabled.orElse(0)));
                 logBulkDomainBlock(ruleDomain, count, domainsDisabled, reason, performedBy, via);
@@ -240,6 +234,43 @@ public class DefaultModerationService implements ModerationService {
             }
         }
         return toBlock;
+    }
+
+    private List<String> saveBlockRules(final Map<String, String> toBlock, final String reason, final String performedBy,
+                                        final List<DomainBulkBlockResponse.Skipped> skipped) {
+        final var saved = new ArrayList<String>();
+        toBlock.forEach((ruleDomain, sent) -> {
+            try {
+                saveRule(ruleDomain, DomainRuleType.BLOCK, reason, performedBy);
+                saved.add(ruleDomain);
+            } catch (final RuntimeException exception) {
+                log.warn("Blocking a domain failed, continuing with the next one domain={}", ruleDomain, exception);
+                skipped.add(new DomainBulkBlockResponse.Skipped(sent, BLOCK_FAILED));
+            }
+        });
+        return saved;
+    }
+
+    private Scan scanAfterSaving(final List<String> saved, final String reason, final String performedBy, final String via) {
+        try {
+            final var rules = domainRuleRepository.findAll();
+            return new Scan(rules, activeLinkIdsBlockedBy(saved, rules));
+        } catch (final RuntimeException exception) {
+            log.error("Reading the active links of a bulk domain block failed after its rules were saved domains={}", saved.size(), exception);
+            saved.forEach(ruleDomain -> logScanFailure(ruleDomain, reason, performedBy, via));
+            throw new BulkBlockIncompleteException(BULK_BLOCK_INCOMPLETE, exception);
+        }
+    }
+
+    private void logScanFailure(final String ruleDomain, final String reason, final String performedBy, final String via) {
+        final var details = Stream.of(field(REASON, reason), field("via", via), SCAN_FAILED)
+                .filter(Objects::nonNull)
+                .collect(Collectors.joining(DETAIL_SEPARATOR));
+        try {
+            auditLogService.logFailure(performedBy, AuditAction.BLOCK_DOMAIN, TARGET_DOMAIN, ruleDomain, details);
+        } catch (final RuntimeException exception) {
+            log.warn("Writing the failure entry of a blocked domain failed domain={}", ruleDomain, exception);
+        }
     }
 
     private OptionalInt disableMatchingDomains(final String ruleDomain, final String reason) {
@@ -815,6 +846,9 @@ public class DefaultModerationService implements ModerationService {
     }
 
     private record Restored(Url url, boolean turnedOn) {
+    }
+
+    private record Scan(List<DomainRule> rules, Map<String, List<Long>> idsByDomain) {
     }
 
 }

@@ -8,6 +8,7 @@ import cc.hrva.urlshortener.dto.LinkDestination;
 import cc.hrva.urlshortener.dto.LinkVerdict;
 import cc.hrva.urlshortener.dto.LinkVerdict.Outcome;
 import cc.hrva.urlshortener.dto.ReviewBulkResolveResponse;
+import cc.hrva.urlshortener.exception.BulkBlockIncompleteException;
 import cc.hrva.urlshortener.exception.DomainRuleNotFoundException;
 import cc.hrva.urlshortener.exception.InvalidSortException;
 import cc.hrva.urlshortener.exception.UrlNotFoundException;
@@ -2004,6 +2005,107 @@ class DefaultModerationServiceTest {
         assertThat(List.of(first, second)).allSatisfy(url -> assertThat(url.getBlockReason()).isEqualTo(BlockReason.DOMAIN_RULE));
         verify(auditLogService).log(ADMIN, AuditAction.BLOCK_DOMAIN, "Domain", "fvvxctw.com", "reason: Phishing, links: 1, via: admin-bulk");
         verify(sendingEmailService).sendEmailUrlsBlocked(alice, List.of(first, second));
+    }
+
+    @Test
+    void everyRuleIsSavedBeforeTheScanStarts() {
+        link(10L, "https://ll.omaehhm.com/a", null);
+        link(11L, "https://fvvxctw.com/b", null);
+        link(12L, "https://padlet.com/c", null);
+
+        moderationService.blockDomains(List.of("omaehhm.com", "fvvxctw.com", "padlet.com"), "Phishing", ADMIN, "admin-bulk");
+
+        final var order = inOrder(domainRuleRepository, urlRepository);
+        order.verify(domainRuleRepository, times(3)).save(any(DomainRule.class));
+        order.verify(domainRuleRepository).findAll();
+        order.verify(urlRepository).findActiveDestinationsAfter(anyLong(), any(Pageable.class));
+    }
+
+    @Test
+    void aLinkCreatedWhileTheRulesAreSavedIsBlocked() {
+        final var alice = user(1L, "alice@example.com");
+        link(10L, "https://omaehhm.com/a", null);
+        final var createdMeanwhile = new ArrayList<Url>();
+        doAnswer(invocation -> {
+            final DomainRule rule = invocation.getArgument(0);
+            rules.put(rule.getDomain(), rule);
+            if ("padlet.com".equals(rule.getDomain())) {
+                createdMeanwhile.add(link(20L, "https://new.omaehhm.com/late", alice));
+            }
+            return rule;
+        }).when(domainRuleRepository).save(any(DomainRule.class));
+
+        final var result = moderationService.blockDomains(List.of("omaehhm.com", "fvvxctw.com", "padlet.com"), "Phishing", ADMIN, "admin-bulk");
+
+        assertThat(createdMeanwhile).singleElement().satisfies(url -> {
+            assertThat(url.isActive()).isFalse();
+            assertThat(url.getBlockReason()).isEqualTo(BlockReason.DOMAIN_RULE);
+            assertThat(url.getBlockDetail()).isEqualTo("omaehhm.com");
+        });
+        assertThat(result).isEqualTo(new DomainBulkBlockResponse(List.of(new DomainBulkBlockResponse.Blocked("omaehhm.com", 2, 0),
+                new DomainBulkBlockResponse.Blocked("fvvxctw.com", 0, 0), new DomainBulkBlockResponse.Blocked("padlet.com", 0, 0)), List.of(), 2));
+        verify(sendingEmailService).sendEmailUrlBlocked(alice, createdMeanwhile.getFirst());
+    }
+
+    @Test
+    void aRuleThatFailsToSaveIsSkippedAndNotScanned() {
+        link(10L, "https://omaehhm.com/a", null);
+        final var unsaved = link(11L, "https://fvvxctw.com/b", null);
+        link(12L, "https://padlet.com/c", null);
+        doThrow(new DataAccessResourceFailureException("connection to 10.0.0.5:5432 refused"))
+                .when(domainRuleRepository).save(argThat((DomainRule rule) -> rule != null && "fvvxctw.com".equals(rule.getDomain())));
+
+        final var result = moderationService.blockDomains(List.of("omaehhm.com", "fvvxctw.com", "padlet.com"), "Phishing", ADMIN, "admin-bulk");
+
+        assertThat(result).isEqualTo(new DomainBulkBlockResponse(
+                List.of(new DomainBulkBlockResponse.Blocked("omaehhm.com", 1, 0), new DomainBulkBlockResponse.Blocked("padlet.com", 1, 0)),
+                List.of(new DomainBulkBlockResponse.Skipped("fvvxctw.com", "Blocking this domain failed. Try again.")), 2));
+        assertThat(unsaved.isActive()).isTrue();
+        assertThat(rules).containsOnlyKeys("omaehhm.com", "padlet.com");
+        verify(urlRepository, never()).findById(11L);
+        verify(auditLogService, never()).log(anyString(), any(), anyString(), eq("fvvxctw.com"), anyString());
+        final var order = inOrder(domainRuleRepository, urlRepository);
+        order.verify(domainRuleRepository, times(3)).save(any(DomainRule.class));
+        order.verify(urlRepository).findActiveDestinationsAfter(anyLong(), any(Pageable.class));
+    }
+
+    @Test
+    void aScanFailureAfterTheRulesAreSavedLogsEachDomainAndRefuses() {
+        final var alice = user(1L, "alice@example.com");
+        final var first = link(10L, "https://omaehhm.com/a", alice);
+        when(urlRepository.findActiveDestinationsAfter(anyLong(), any(Pageable.class)))
+                .thenThrow(new DataAccessResourceFailureException("connection to 10.0.0.5:5432 refused"));
+
+        assertThatThrownBy(() -> moderationService.blockDomains(List.of("omaehhm.com", "fvvxctw.com", "padlet.com"), "Phishing", ADMIN,
+                "admin-bulk"))
+                .isInstanceOf(BulkBlockIncompleteException.class)
+                .hasMessage("The domains are blocked, but turning off their links failed. Block the same domains again to finish.");
+
+        assertThat(rules.values())
+                .extracting(DomainRule::getDomain, DomainRule::getType)
+                .containsExactlyInAnyOrder(
+                        tuple("omaehhm.com", DomainRuleType.BLOCK),
+                        tuple("fvvxctw.com", DomainRuleType.BLOCK),
+                        tuple("padlet.com", DomainRuleType.BLOCK));
+        List.of("omaehhm.com", "fvvxctw.com", "padlet.com").forEach(domain -> verify(auditLogService)
+                .logFailure(ADMIN, AuditAction.BLOCK_DOMAIN, "Domain", domain, "reason: Phishing, via: admin-bulk, scan failed"));
+        verify(auditLogService, never()).log(anyString(), any(), anyString(), anyString(), anyString());
+        verifyNoMoreInteractions(auditLogService);
+        verifyNoInteractions(sendingEmailService);
+        assertThat(first.isActive()).isTrue();
+    }
+
+    @Test
+    void aScanFailureStillRefusesWhenItsAuditEntriesFailToWrite() {
+        when(urlRepository.findActiveDestinationsAfter(anyLong(), any(Pageable.class)))
+                .thenThrow(new DataAccessResourceFailureException("connection to 10.0.0.5:5432 refused"));
+        doThrow(new DataAccessResourceFailureException("connection to 10.0.0.5:5432 refused"))
+                .when(auditLogService).logFailure(anyString(), any(), anyString(), anyString(), anyString());
+
+        assertThatThrownBy(() -> moderationService.blockDomains(List.of("omaehhm.com", "fvvxctw.com"), "Phishing", ADMIN, "admin-bulk"))
+                .isInstanceOf(BulkBlockIncompleteException.class);
+
+        verify(auditLogService, times(2)).logFailure(anyString(), any(), anyString(), anyString(), anyString());
     }
 
     private TransactionOperations recordingTransactions() {

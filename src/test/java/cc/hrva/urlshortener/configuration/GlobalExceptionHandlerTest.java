@@ -3,6 +3,7 @@ package cc.hrva.urlshortener.configuration;
 import cc.hrva.urlshortener.exception.BioHandleUnavailableException;
 import cc.hrva.urlshortener.exception.BioPageConflictException;
 import cc.hrva.urlshortener.exception.BioPageNotFoundException;
+import cc.hrva.urlshortener.exception.BulkBlockIncompleteException;
 import cc.hrva.urlshortener.exception.FieldValidationException;
 import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
@@ -90,6 +91,13 @@ class GlobalExceptionHandlerTest {
                 .andExpect(jsonPath("$.error").doesNotExist());
     }
 
+    @Test
+    void anUnfinishedBulkBlockIsServiceUnavailableWithItsText() throws Exception {
+        mockMvc.perform(get("/probe/bulk-block"))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.error").value("The domains are blocked, but turning off their links failed. Block the same domains again to finish."));
+    }
+
     @RestController
     static class ProbeController {
 
@@ -106,6 +114,12 @@ class GlobalExceptionHandlerTest {
         @GetMapping("/probe/bio-page-changed")
         String probeBioPageChanged() {
             throw new BioPageConflictException("This page changed. Reload and try again.");
+        }
+
+        @GetMapping("/probe/bulk-block")
+        String probeBulkBlock() {
+            throw new BulkBlockIncompleteException("The domains are blocked, but turning off their links failed. Block the same domains again to finish.",
+                    new IllegalStateException("scan failed"));
         }
 
         @GetMapping("/probe/handle")
