@@ -75,8 +75,33 @@ class CloudflareStatusMappingTest {
     void aCertificateThatTimedOutIsAnError(final String sslStatus) {
         assertThat(next(CustomDomainStatus.AWAITING_DNS, false, hostname("pending", sslStatus)))
                 .isEqualTo(new Transition(CustomDomainStatus.ERROR, DomainProblem.CERTIFICATE_TIMED_OUT, null));
-        assertThat(next(CustomDomainStatus.ACTIVE, true, hostname("active", sslStatus)))
+        assertThat(next(CustomDomainStatus.AWAITING_DNS, false, hostname("active", sslStatus)))
                 .isEqualTo(new Transition(CustomDomainStatus.ERROR, DomainProblem.CERTIFICATE_TIMED_OUT, null));
+        assertThat(next(CustomDomainStatus.ERROR, true, hostname("active", sslStatus)))
+                .isEqualTo(new Transition(CustomDomainStatus.ERROR, DomainProblem.CERTIFICATE_TIMED_OUT, null));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"pending_validation", "pending_issuance", "pending_deployment", "initializing", "staging_deployment",
+            "validation_timed_out", "issuance_timed_out", "expired", "pending_expiration"})
+    void anActiveDomainKeepsServingWhileOnlyItsCertificateIsNotActive(final String sslStatus) {
+        assertThat(next(CustomDomainStatus.ACTIVE, true, hostname("active", sslStatus)))
+                .isEqualTo(new Transition(CustomDomainStatus.ACTIVE, null, "Certificate status in Cloudflare: " + sslStatus));
+    }
+
+    @Test
+    void anActiveDomainWhoseCertificateIsRenewingKeepsCloudflaresMessageForAdmins() {
+        assertThat(next(CustomDomainStatus.ACTIVE, true, hostname("active", "pending_validation", List.of(), List.of(CAA_ERROR))))
+                .isEqualTo(new Transition(CustomDomainStatus.ACTIVE, null, CAA_ERROR));
+        assertThat(next(CustomDomainStatus.ACTIVE, true, hostname("active", null)))
+                .isEqualTo(new Transition(CustomDomainStatus.ACTIVE, null, "Certificate status in Cloudflare: unknown"));
+    }
+
+    @Test
+    void anActiveDomainStillLeavesActiveForAHostnameProblem() {
+        assertThat(next(CustomDomainStatus.ACTIVE, true, hostname("moved", "pending_validation")).problem()).isEqualTo(DomainProblem.CNAME_REMOVED);
+        assertThat(next(CustomDomainStatus.ACTIVE, true, hostname("blocked", "expired")).problem()).isEqualTo(DomainProblem.CLOUDFLARE_BLOCKED);
+        assertThat(next(CustomDomainStatus.ACTIVE, true, hostname("pending", "expired")).status()).isEqualTo(CustomDomainStatus.ERROR);
     }
 
     @Test

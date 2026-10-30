@@ -344,6 +344,38 @@ class CustomDomainLifecycleTest {
     }
 
     @Test
+    void anActiveDomainWhoseCertificateIsRenewingStaysActive() {
+        final var cloudflareId = CLOUDFLARE.store("go.example.com", "active", "pending_validation");
+        final var id = domain(ANA, "go.example.com", CustomDomainStatus.ACTIVE, cloudflareId);
+        set(id, "activated_at = ?, next_check_at = ?, cloudflare_status = 'active', cloudflare_ssl_status = 'active'", APPROVED_AT.plusMinutes(5),
+                NOW);
+
+        assertThat(lifecycle.runOnce()).isEqualTo(new LifecycleRun(0, 1, 0, 0));
+
+        assertThat(row(id)).containsEntry("STATUS", "ACTIVE").containsEntry("PROBLEM", null)
+                .containsEntry("CLOUDFLARE_SSL_STATUS", "pending_validation")
+                .containsEntry("LAST_ERROR", "Certificate status in Cloudflare: pending_validation");
+        assertThat(nextCheckAt(id)).isEqualTo(NOW.plusDays(1));
+        assertThat(committedEvents.changes()).isEmpty();
+        assertThat(committedEvents.alerts()).isEmpty();
+
+        CLOUDFLARE.state(cloudflareId, "active", "validation_timed_out");
+        CLOCK.advance(Duration.ofDays(1));
+        lifecycle.runOnce();
+
+        assertThat(row(id)).containsEntry("STATUS", "ACTIVE").containsEntry("PROBLEM", null);
+        assertThat(committedEvents.changes()).isEmpty();
+        assertThat(committedEvents.alerts()).isEmpty();
+
+        CLOUDFLARE.state(cloudflareId, "active", "active");
+        CLOCK.advance(Duration.ofDays(1));
+        lifecycle.runOnce();
+
+        assertThat(row(id)).containsEntry("STATUS", "ACTIVE").containsEntry("LAST_ERROR", null).containsEntry("CLOUDFLARE_SSL_STATUS", "active");
+        assertThat(activatedAt(id)).isEqualTo(APPROVED_AT.plusMinutes(5));
+    }
+
+    @Test
     void blockedAlertsOnce() {
         final var cloudflareId = CLOUDFLARE.store("go.example.com", "blocked", "pending_validation");
         final var id = waiting("go.example.com", cloudflareId);
