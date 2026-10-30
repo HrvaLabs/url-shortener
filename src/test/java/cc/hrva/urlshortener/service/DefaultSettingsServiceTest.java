@@ -163,7 +163,7 @@ class DefaultSettingsServiceTest {
         assertThat(cleared.value()).isNull();
         assertThat(cleared.defaultValue()).isEqualTo(100);
         verify(auditLogService).log(ADMIN, AuditAction.CHANGE_SETTING, "Setting", "ANONYMOUS_VISIT_LIMIT", "from: 500 visits, to: Unlimited");
-        verify(eventPublisher).publishEvent(new SettingChanged("Links without an account stop after", "changed from 500 visits to Unlimited", ADMIN));
+        verify(eventPublisher).publishEvent(new SettingChanged("Visit limit for links without an account", "changed from 500 visits to Unlimited", ADMIN));
     }
 
     @Test

@@ -1864,7 +1864,8 @@ show "expirationDate $LIMIT_EXPIRY"
 expect_eq "$(python3 -c '
 import sys
 from datetime import datetime, timedelta
-end = datetime.fromisoformat(sys.argv[1])
+stamp, _, fraction = sys.argv[1].partition(".")
+end = datetime.fromisoformat(stamp + "." + fraction.ljust(6, "0") if fraction else stamp)
 print("within" if abs(end - (datetime.now() + timedelta(days=30))) < timedelta(minutes=1) else "off by " + str(end - datetime.now()))
 ' "$LIMIT_EXPIRY")" within "the link ends within a minute of now + 30 days"
 anonymous_create 203.0.113.62 'https://e2e-limits.com/expiry-later' ',"expirationDate":"2099-01-01T00:00:00"'

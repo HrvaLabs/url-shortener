@@ -276,12 +276,12 @@ class SettingValuesTest {
         assertThat(SettingKey.ANONYMOUS_EXPIRY_DAYS).extracting(SettingKey::getGroup, SettingKey::getType, SettingKey::getLabel,
                         SettingKey::getDescription, SettingKey::getParent, SettingKey::isSafety, SettingKey::getMin, SettingKey::getMax, SettingKey::getUnit,
                         SettingKey::isNullable, SettingKey::getNoneLabel)
-                .containsExactly(SettingGroup.ACCESS, SettingType.NUMBER, "Links without an account expire after",
+                .containsExactly(SettingGroup.ACCESS, SettingType.NUMBER, "Expiry for links without an account",
                         "The latest end a link made without an account can have.", SettingKey.ANONYMOUS_LINKS, false, 1, 3650, "days", true, "Never");
         assertThat(SettingKey.ANONYMOUS_VISIT_LIMIT).extracting(SettingKey::getGroup, SettingKey::getType, SettingKey::getLabel,
                         SettingKey::getDescription, SettingKey::getParent, SettingKey::isSafety, SettingKey::getMin, SettingKey::getMax, SettingKey::getUnit,
                         SettingKey::isNullable, SettingKey::getNoneLabel)
-                .containsExactly(SettingGroup.ACCESS, SettingType.NUMBER, "Links without an account stop after",
+                .containsExactly(SettingGroup.ACCESS, SettingType.NUMBER, "Visit limit for links without an account",
                         "The highest visit limit a link made without an account can have. While it's set, link previews (Slack, WhatsApp, X) and other bots "
                                 + "can't open these links.", SettingKey.ANONYMOUS_LINKS, false, 1, 1_000_000, "visits", true,
                         "Unlimited");

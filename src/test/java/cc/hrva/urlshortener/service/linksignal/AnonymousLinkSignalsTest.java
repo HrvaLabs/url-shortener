@@ -147,6 +147,24 @@ class AnonymousLinkSignalsTest {
     }
 
     @Test
+    void bothSwitchesOffGiveNoSignalsAndNoLookup() {
+        SettingsServiceFixtures.turnOff(settingsService, SettingKey.RANDOM_DOMAIN_REVIEW);
+        SettingsServiceFixtures.turnOff(settingsService, SettingKey.WARNING_PAGE);
+
+        assertThat(anonymousLinkSignals.signalsFor(RANDOM_LINK, Outcome.CLEAN)).isEqualTo(Signals.none());
+        verifyNoInteractions(domainAgeService);
+    }
+
+    @Test
+    void theReviewSwitchAloneKeepsTheLookup() {
+        when(domainAgeService.registeredOn(RANDOM_HOST)).thenReturn(Optional.empty());
+        SettingsServiceFixtures.turnOff(settingsService, SettingKey.WARNING_PAGE);
+
+        assertThat(anonymousLinkSignals.signalsFor(RANDOM_LINK, Outcome.CLEAN)).isEqualTo(new Signals(true, Optional.empty(), false));
+        verify(domainAgeService).registeredOn(RANDOM_HOST);
+    }
+
+    @Test
     void anAllowedVerdictGivesNoSignals() {
         assertThat(anonymousLinkSignals.signalsFor(RANDOM_LINK, Outcome.ALLOWED)).isEqualTo(Signals.none());
         verifyNoInteractions(domainAgeService);

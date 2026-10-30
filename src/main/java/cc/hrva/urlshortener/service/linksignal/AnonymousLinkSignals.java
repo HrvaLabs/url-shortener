@@ -25,13 +25,17 @@ public class AnonymousLinkSignals {
     private final Clock clock;
 
     public Signals signalsFor(final String longUrl, final LinkVerdict.Outcome outcome) {
-        if (outcome == LinkVerdict.Outcome.ALLOWED) {
+        if (outcome == LinkVerdict.Outcome.ALLOWED || noSignalIsWanted()) {
             return Signals.none();
         }
         return DomainNames.hostOf(longUrl)
                 .filter(host -> !DomainNames.isIpLiteral(host))
                 .map(this::signalsOfHost)
                 .orElseGet(Signals::none);
+    }
+
+    private boolean noSignalIsWanted() {
+        return !settingsService.isOn(SettingKey.RANDOM_DOMAIN_REVIEW) && !settingsService.isOn(SettingKey.WARNING_PAGE);
     }
 
     private Signals signalsOfHost(final String host) {

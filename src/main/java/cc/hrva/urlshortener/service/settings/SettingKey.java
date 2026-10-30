@@ -98,9 +98,9 @@ public enum SettingKey {
             WARNING_PAGE, 30, 3650, "days"),
     HUMAN_CHECK(SettingGroup.SAFETY, "Human check on links without an account",
             "A Cloudflare Turnstile check on the homepage, /qr, /utm and /share.", null, true),
-    ANONYMOUS_EXPIRY_DAYS(SettingGroup.ACCESS, "Links without an account expire after",
+    ANONYMOUS_EXPIRY_DAYS(SettingGroup.ACCESS, "Expiry for links without an account",
             "The latest end a link made without an account can have.", ANONYMOUS_LINKS, 1, 3650, "Never", "days"),
-    ANONYMOUS_VISIT_LIMIT(SettingGroup.ACCESS, "Links without an account stop after",
+    ANONYMOUS_VISIT_LIMIT(SettingGroup.ACCESS, "Visit limit for links without an account",
             "The highest visit limit a link made without an account can have. While it's set, link previews (Slack, WhatsApp, X) and other bots "
                     + "can't open these links.", ANONYMOUS_LINKS, 1, 1_000_000, "Unlimited", "visits");
 
