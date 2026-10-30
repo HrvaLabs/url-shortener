@@ -85,7 +85,7 @@ class CustomDomainApprovalRaceTest {
     private static final Instant NOW_INSTANT = Instant.parse("2026-10-29T09:00:00Z");
     private static final LocalDateTime NOW = LocalDateTime.ofInstant(NOW_INSTANT, ZoneOffset.UTC);
     private static final String ADMIN = "admin@hrva.cc";
-    private static final String CAP_REACHED = "Cap reached: 1 of 1 custom domains are in use. Delete one or raise the cap (APP_DOMAINS_MAX_ACTIVE).";
+    private static final String CAP_REACHED = "Cap reached: 1 of 1 custom domains are in use. Remove one or raise the cap (APP_DOMAINS_MAX_ACTIVE).";
     private static final String FREE_ALLOWANCE_USED =
             "Cloudflare already has 100 custom hostnames and 100 are free. Delete one here or in Cloudflare first.";
     private static final long ANA = 800L;
@@ -244,7 +244,7 @@ class CustomDomainApprovalRaceTest {
 
         assertThatThrownBy(() -> customDomainAdminService.approve(pending, null, ADMIN))
                 .isInstanceOf(CustomDomainConflictException.class)
-                .hasMessage("Cap reached: 3 of 3 custom domains are in use. Delete one or raise the cap (APP_DOMAINS_MAX_ACTIVE).");
+                .hasMessage("Cap reached: 3 of 3 custom domains are in use. Remove one or raise the cap (APP_DOMAINS_MAX_ACTIVE).");
         assertThat(statusOf(pending)).isEqualTo("PENDING_REVIEW");
         verify(customDomainProvisioner, never()).provisionAsync(anyLong());
 

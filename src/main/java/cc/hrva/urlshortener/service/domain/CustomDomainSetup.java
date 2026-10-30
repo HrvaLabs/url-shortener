@@ -25,7 +25,7 @@ import org.springframework.transaction.support.TransactionOperations;
 @RequiredArgsConstructor
 public class CustomDomainSetup {
 
-    private static final String CAP_REACHED = "Cap reached: %d of %d custom domains are in use. Delete one or raise the cap (APP_DOMAINS_MAX_ACTIVE).";
+    private static final String CAP_REACHED = "Cap reached: %d of %d custom domains are in use. Remove one or raise the cap (APP_DOMAINS_MAX_ACTIVE).";
     private static final String FREE_ALLOWANCE_USED = "Cloudflare already has %d custom hostnames and %d are free. Delete one here or in Cloudflare first.";
     private static final String NOT_SET_UP = "Cloudflare isn't set up: %s. Check CLOUDFLARE_API_TOKEN and CLOUDFLARE_ZONE_ID.";
     private static final String NOTHING_TO_RETRY = "There's nothing to retry for this domain.";

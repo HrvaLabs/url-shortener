@@ -396,7 +396,7 @@ public class DefaultSendingEmailService implements SendingEmailService {
                 "Name: " + record.name(),
                 "Target: " + record.target(),
                 "",
-                "Some DNS providers want only the first part of the name (%s).".formatted(firstLabel),
+                "Some DNS providers want only the first part of the name (%s). If your DNS is on Cloudflare, set the record to DNS only (grey cloud).".formatted(firstLabel),
                 "",
                 "Open Custom domains: " + settingsUrl,
                 "How to add a CNAME: " + helpUrl));

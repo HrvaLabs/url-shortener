@@ -131,7 +131,7 @@ class CustomDomainEndpointSecurityTest {
     private static final String APPLICATION = """
             {"hostname":"Go.Example.com.","reason":"Menu links for my cafe"}""";
     private static final String NOT_FOUND = "{\"error\":\"Custom domain not found\"}";
-    private static final String OVER_THE_LIMIT = "{\"error\":\"You can have 1 custom domain. Remove one to apply for another.\"}";
+    private static final String OVER_THE_LIMIT = "{\"error\":\"You can have 1 custom domain. Remove or withdraw one to apply for another.\"}";
     private static final String TAKEN = "{\"error\":\"This domain has already been applied for.\"}";
     private static final long ANA = 700L;
     private static final long BOB = 701L;
@@ -408,7 +408,7 @@ class CustomDomainEndpointSecurityTest {
         mockMvc.perform(as(ANA_TOKEN, post(DOMAINS)).contentType(MediaType.APPLICATION_JSON)
                         .content("{\"hostname\":\"old.example.com\",\"reason\":\"Again\"}"))
                 .andExpect(status().isBadRequest())
-                .andExpect(content().json("{\"error\":\"You can have 1 custom domain. Remove one to apply for another.\"}", JsonCompareMode.STRICT));
+                .andExpect(content().json("{\"error\":\"You can have 1 custom domain. Remove or withdraw one to apply for another.\"}", JsonCompareMode.STRICT));
     }
 
     @Test
@@ -424,7 +424,7 @@ class CustomDomainEndpointSecurityTest {
         mockMvc.perform(as(ANA_TOKEN, post(DOMAINS)).contentType(MediaType.APPLICATION_JSON)
                         .content("{\"hostname\":\"three.example.com\",\"reason\":\"Third brand\"}"))
                 .andExpect(status().isBadRequest())
-                .andExpect(content().json("{\"error\":\"You can have 2 custom domains. Remove one to apply for another.\"}", JsonCompareMode.STRICT));
+                .andExpect(content().json("{\"error\":\"You can have 2 custom domains. Remove or withdraw one to apply for another.\"}", JsonCompareMode.STRICT));
         mockMvc.perform(as(ANA_TOKEN, get(DOMAINS)))
                 .andExpect(jsonPath("$.limit").value(2))
                 .andExpect(jsonPath("$.used").value(2))

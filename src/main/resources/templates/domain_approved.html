@@ -20,7 +20,7 @@
       <td class="e-fg e-bd" valign="top" th:style="${s.rowNext} + 'padding-left: 8px;'"><span class="e-fg mono" th:style="${s.short} + ${wrap}" th:text="${record.target}">domains.hrva.cc</span></td>
     </tr>
   </table>
-  <p class="e-mu" th:style="${s.small} + 'margin: 0 0 16px;'">Some DNS providers want only the first part of the name (<span class="e-mu mono" th:style="${s.short} + ${wrap} + 'color: #67676f;'" th:text="${first_label}">go</span>).</p>
+  <p class="e-mu" th:style="${s.small} + 'margin: 0 0 16px;'">Some DNS providers want only the first part of the name (<span class="e-mu mono" th:style="${s.short} + ${wrap} + 'color: #67676f;'" th:text="${first_label}">go</span>). If your DNS is on Cloudflare, set the record to DNS only (grey cloud).</p>
   <th:block th:replace="~{fragments/email :: button(${settings_url}, 'Open Custom domains')}"/>
   <p class="e-fg" th:style="${s.p} + 'margin: 16px 0 0;'"><a class="e-lk" th:href="${help_url}" target="_blank" th:style="${s.link}">How to add a CNAME</a></p>
   <th:block th:replace="~{fragments/email :: signoff}"/>

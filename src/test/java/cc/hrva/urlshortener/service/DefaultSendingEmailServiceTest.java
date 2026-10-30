@@ -1188,7 +1188,7 @@ class DefaultSendingEmailServiceTest {
                 "Hi alice@example.com,",
                 "We approved go.example.com. One step left: add this CNAME record where the domain's DNS is managed.",
                 "Type: CNAME Name: go.example.com Target: domains.hrva.cc",
-                "Some DNS providers want only the first part of the name (go).",
+                "Some DNS providers want only the first part of the name (go). If your DNS is on Cloudflare, set the record to DNS only (grey cloud).",
                 "Open Custom domains",
                 "How to add a CNAME");
         assertThat(linksIn(email.getText())).containsExactly(
@@ -1205,7 +1205,7 @@ class DefaultSendingEmailServiceTest {
                 Name: go.example.com
                 Target: domains.hrva.cc
 
-                Some DNS providers want only the first part of the name (go).
+                Some DNS providers want only the first part of the name (go). If your DNS is on Cloudflare, set the record to DNS only (grey cloud).
 
                 Open Custom domains: https://hrva.cc/dashboard/settings#custom-domains
                 How to add a CNAME: https://hrva.cc/help/custom-domains#add-the-record""");

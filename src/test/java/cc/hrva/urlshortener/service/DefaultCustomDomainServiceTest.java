@@ -84,8 +84,8 @@ class DefaultCustomDomainServiceTest {
     private static final String REASON = "Menu links for my cafe";
     private static final String RESERVED = "This domain can't be used on hrva.cc.";
     private static final String TAKEN = "This domain has already been applied for.";
-    private static final String OVER_ONE = "You can have 1 custom domain. Remove one to apply for another.";
-    private static final String OVER_THREE = "You can have 3 custom domains. Remove one to apply for another.";
+    private static final String OVER_ONE = "You can have 1 custom domain. Remove or withdraw one to apply for another.";
+    private static final String OVER_THREE = "You can have 3 custom domains. Remove or withdraw one to apply for another.";
     private static final String TOO_MANY_APPLICATIONS = "You've applied for a lot of domains today. Try again tomorrow.";
     private static final String TURNED_OFF = "Custom domains aren't available right now.";
     private static final String NOT_FOUND = "Custom domain not found";
@@ -557,7 +557,7 @@ class DefaultCustomDomainServiceTest {
         failed.setProblem(DomainProblem.PROVISIONING_FAILED);
         when(customDomainRepository.findByIdAndOwnerId(12L, 7L)).thenReturn(Optional.of(failed));
         when(rateLimiter.tryAcquire("domain-retry:domain:12", 1, Duration.ofSeconds(15))).thenReturn(true);
-        doThrow(new CustomDomainCapacityException("Cap reached: 90 of 90 custom domains are in use. Delete one or raise the cap (APP_DOMAINS_MAX_ACTIVE)."))
+        doThrow(new CustomDomainCapacityException("Cap reached: 90 of 90 custom domains are in use. Remove one or raise the cap (APP_DOMAINS_MAX_ACTIVE)."))
                 .when(customDomainSetup).retry(failed);
 
         assertThatThrownBy(() -> customDomainService.retry(12L))

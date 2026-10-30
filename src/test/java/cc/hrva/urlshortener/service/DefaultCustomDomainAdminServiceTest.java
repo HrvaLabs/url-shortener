@@ -282,7 +282,7 @@ class DefaultCustomDomainAdminServiceTest {
 
         assertThatThrownBy(() -> customDomainAdminService.approve(ID, null, ADMIN))
                 .isInstanceOf(CustomDomainConflictException.class)
-                .hasMessage("Cap reached: 90 of 90 custom domains are in use. Delete one or raise the cap (APP_DOMAINS_MAX_ACTIVE).");
+                .hasMessage("Cap reached: 90 of 90 custom domains are in use. Remove one or raise the cap (APP_DOMAINS_MAX_ACTIVE).");
         verify(customDomainRepository, never()).markApproved(anyLong(), anyString(), any(), any());
         verifyNoInteractions(customDomainProvisioner);
 
@@ -310,7 +310,7 @@ class DefaultCustomDomainAdminServiceTest {
         appProperties.getDomains().setMaxActive(3);
 
         assertThatThrownBy(() -> customDomainAdminService.approve(ID, null, ADMIN))
-                .hasMessage("Cap reached: 3 of 3 custom domains are in use. Delete one or raise the cap (APP_DOMAINS_MAX_ACTIVE).");
+                .hasMessage("Cap reached: 3 of 3 custom domains are in use. Remove one or raise the cap (APP_DOMAINS_MAX_ACTIVE).");
     }
 
     @Test
@@ -841,7 +841,7 @@ class DefaultCustomDomainAdminServiceTest {
         verify(customDomainProvisioner).provision(ID);
         when(customDomainRepository.countSlotsInUse()).thenReturn(91L);
         assertThatThrownBy(() -> customDomainAdminService.retry(ID)).isInstanceOf(CustomDomainConflictException.class)
-                .hasMessage("Cap reached: 90 of 90 custom domains are in use. Delete one or raise the cap (APP_DOMAINS_MAX_ACTIVE).");
+                .hasMessage("Cap reached: 90 of 90 custom domains are in use. Remove one or raise the cap (APP_DOMAINS_MAX_ACTIVE).");
 
         when(customDomainRepository.countSlotsInUse()).thenReturn(3L);
         when(customDomainRepository.countByStatus(CustomDomainStatus.APPROVED_PROVISIONING)).thenReturn(1L);
@@ -869,7 +869,7 @@ class DefaultCustomDomainAdminServiceTest {
 
         when(customDomainRepository.countSlotsInUse()).thenReturn(90L);
         assertThatThrownBy(() -> customDomainAdminService.retry(ID)).isInstanceOf(CustomDomainConflictException.class)
-                .hasMessage("Cap reached: 90 of 90 custom domains are in use. Delete one or raise the cap (APP_DOMAINS_MAX_ACTIVE).");
+                .hasMessage("Cap reached: 90 of 90 custom domains are in use. Remove one or raise the cap (APP_DOMAINS_MAX_ACTIVE).");
 
         when(customDomainRepository.countSlotsInUse()).thenReturn(3L);
         when(cloudflareTokenCheck.check()).thenReturn(token(CloudflareTokenStatus.OK, 100));

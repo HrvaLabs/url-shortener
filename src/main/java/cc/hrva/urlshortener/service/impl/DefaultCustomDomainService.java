@@ -68,7 +68,7 @@ public class DefaultCustomDomainService implements CustomDomainService {
     private static final String ACCOUNT_DEACTIVATED = "Account is deactivated";
     private static final String TURNED_OFF = "Custom domains aren't available right now.";
     private static final String TOO_MANY_APPLICATIONS = "You've applied for a lot of domains today. Try again tomorrow.";
-    private static final String OVER_THE_LIMIT = "You can have %s. Remove one to apply for another.";
+    private static final String OVER_THE_LIMIT = "You can have %s. Remove or withdraw one to apply for another.";
     private static final String TAKEN = "This domain has already been applied for.";
     private static final String NOT_FOUND = "Custom domain not found";
     private static final String NOTHING_TO_RETRY = "There's nothing to retry for this domain.";
