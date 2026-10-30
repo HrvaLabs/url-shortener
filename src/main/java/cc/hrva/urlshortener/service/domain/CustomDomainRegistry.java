@@ -10,8 +10,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.boot.context.event.ApplicationReadyEvent;
-import org.springframework.context.event.EventListener;
+import org.springframework.beans.factory.SmartInitializingSingleton;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
@@ -22,7 +21,9 @@ import org.springframework.transaction.support.TransactionTemplate;
 @Slf4j
 @Component
 @RequiredArgsConstructor
-public class CustomDomainRegistry {
+public class CustomDomainRegistry implements SmartInitializingSingleton {
+
+    private static final int READ_TIMEOUT_SECONDS = 5;
 
     private final CustomDomainRepository customDomainRepository;
     private final PlatformTransactionManager transactionManager;
@@ -36,7 +37,11 @@ public class CustomDomainRegistry {
         return route(host).filter(DomainRoute::serves);
     }
 
-    @EventListener(ApplicationReadyEvent.class)
+    @Override
+    public void afterSingletonsInstantiated() {
+        reload();
+    }
+
     public synchronized void reload() {
         try {
             final var rows = readTransaction().execute(status -> customDomainRepository.findRoutes());
@@ -55,6 +60,7 @@ public class CustomDomainRegistry {
         final var template = new TransactionTemplate(transactionManager);
         template.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
         template.setReadOnly(true);
+        template.setTimeout(READ_TIMEOUT_SECONDS);
         return template;
     }
 

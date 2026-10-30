@@ -9,6 +9,7 @@ import cc.hrva.urlshortener.service.domain.HostRouting;
 import com.google.common.base.Ticker;
 import com.google.common.cache.Cache;
 import com.google.common.cache.CacheBuilder;
+import jakarta.servlet.DispatcherType;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -37,6 +38,7 @@ public class CustomHostFilter extends OncePerRequestFilter {
     private static final Set<String> SERVED_METHODS = Set.of(HttpMethod.GET.name(), HttpMethod.HEAD.name());
     private static final String ROOT = "/";
     private static final String HANDLE_PREFIX = "@";
+    private static final String PATH_PARAMETER = ";";
     private static final String NOT_FOUND = "Not found";
     private static final String FAILED = "Something went wrong";
     private static final String NO_STORE = "no-cache, no-store, max-age=0, must-revalidate";
@@ -70,13 +72,29 @@ public class CustomHostFilter extends OncePerRequestFilter {
             throws ServletException, IOException {
         switch (hostRouting.classify(request.getServerName())) {
             case HostRouting.Primary _ -> chain.doFilter(request, response);
-            case HostRouting.Custom custom -> serve(custom.route(), request, response);
+            case HostRouting.Custom custom -> serveSafely(custom.route(), request, response);
             case HostRouting.Unknown _ -> refuseUnknownHost(request, response);
         }
     }
 
+    @Override
+    protected boolean shouldNotFilterErrorDispatch() {
+        return false;
+    }
+
+    private void serveSafely(final DomainRoute route, final HttpServletRequest request, final HttpServletResponse response) throws IOException {
+        try {
+            serve(route, request, response);
+        } catch (final UrlNotFoundException exception) {
+            notFound(response);
+        } catch (final RuntimeException exception) {
+            log.warn("Custom host redirect failed domainId={} exception={}", route.id(), exception.getClass().getName());
+            plain(response, HttpServletResponse.SC_INTERNAL_SERVER_ERROR, FAILED);
+        }
+    }
+
     private void serve(final DomainRoute route, final HttpServletRequest request, final HttpServletResponse response) throws IOException {
-        if (!SERVED_METHODS.contains(request.getMethod())) {
+        if (request.getDispatcherType() != DispatcherType.REQUEST || !SERVED_METHODS.contains(request.getMethod())) {
             notFound(response);
             return;
         }
@@ -90,14 +108,7 @@ public class CustomHostFilter extends OncePerRequestFilter {
             notFound(response);
             return;
         }
-        try {
-            redirect(response, urlService.redirectResultUrl(route, alias.get(), clickRequestResolver.resolve(request)).getUrl());
-        } catch (final UrlNotFoundException exception) {
-            notFound(response);
-        } catch (final RuntimeException exception) {
-            log.warn("Custom host redirect failed domainId={} exception={}", route.id(), exception.getClass().getName());
-            plain(response, HttpServletResponse.SC_INTERNAL_SERVER_ERROR, FAILED);
-        }
+        redirect(response, urlService.redirectResultUrl(route, alias.get(), clickRequestResolver.resolve(request)).getUrl());
     }
 
     private static Optional<String> aliasOf(final String path) {
@@ -108,6 +119,7 @@ public class CustomHostFilter extends OncePerRequestFilter {
             return Optional.of(UriUtils.decode(path.substring(1), StandardCharsets.UTF_8))
                     .filter(StringUtils::isNotEmpty)
                     .filter(alias -> !alias.startsWith(HANDLE_PREFIX))
+                    .filter(alias -> !alias.contains(PATH_PARAMETER))
                     .filter(alias -> !ReservedAliasService.BUILT_IN_ALIASES.contains(alias.toLowerCase(Locale.ROOT)));
         } catch (final IllegalArgumentException exception) {
             return Optional.empty();
@@ -133,6 +145,10 @@ public class CustomHostFilter extends OncePerRequestFilter {
     }
 
     private static void plain(final HttpServletResponse response, final int status, final String body) throws IOException {
+        if (response.isCommitted()) {
+            return;
+        }
+        response.reset();
         neverCached(response);
         response.setStatus(status);
         response.setContentType(MediaType.TEXT_PLAIN_VALUE);

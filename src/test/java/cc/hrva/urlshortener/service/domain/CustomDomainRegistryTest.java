@@ -6,6 +6,7 @@ import ch.qos.logback.core.read.ListAppender;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.enums.CustomDomainStatus;
 import cc.hrva.urlshortener.repository.CustomDomainRepository;
+import cc.hrva.urlshortener.repository.DomainRouteRow;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Locale;
@@ -13,6 +14,7 @@ import java.util.Optional;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.SpringBootConfiguration;
@@ -24,10 +26,17 @@ import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.FilterType;
 import org.springframework.context.annotation.Import;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
+import org.springframework.beans.factory.SmartInitializingSingleton;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionOperations;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 @SpringBootTest(
         classes = CustomDomainRegistryTest.TestApplication.class,
@@ -202,6 +211,34 @@ class CustomDomainRegistryTest {
         });
 
         assertThat(registry.route("go.example.com").map(DomainRoute::status)).isEqualTo(Optional.of(CustomDomainStatus.ACTIVE));
+    }
+
+    @Test
+    void theRoutesAreLoadedOnceEveryBeanExistsSoBeforeTheServerTakesRequests() {
+        final var repository = mock(CustomDomainRepository.class);
+        when(repository.findRoutes()).thenReturn(List.of(new DomainRouteRow(7L, "go.example.com", "go.example.com", CustomDomainStatus.ACTIVE, 5L, true)));
+        final var loaded = new CustomDomainRegistry(repository, mock(PlatformTransactionManager.class));
+
+        assertThat(loaded).isInstanceOf(SmartInitializingSingleton.class);
+        ((SmartInitializingSingleton) loaded).afterSingletonsInstantiated();
+
+        assertThat(loaded.route("go.example.com").map(DomainRoute::id)).contains(7L);
+    }
+
+    @Test
+    void theReloadReadsInItsOwnShortReadOnlyTransaction() {
+        final var repository = mock(CustomDomainRepository.class);
+        final var transactionManager = mock(PlatformTransactionManager.class);
+        final var definition = ArgumentCaptor.forClass(TransactionDefinition.class);
+        when(repository.findRoutes()).thenReturn(List.of());
+
+        new CustomDomainRegistry(repository, transactionManager).reload();
+
+        verify(transactionManager).getTransaction(definition.capture());
+        assertThat(definition.getValue().getPropagationBehavior()).isEqualTo(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        assertThat(definition.getValue().isReadOnly()).isTrue();
+        assertThat(definition.getValue().getTimeout()).isEqualTo(5);
+        verify(transactionManager).commit(any());
     }
 
     private void user(final long id, final String email, final boolean active) {

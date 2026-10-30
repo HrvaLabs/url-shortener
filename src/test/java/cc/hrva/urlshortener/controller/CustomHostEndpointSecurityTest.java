@@ -36,6 +36,8 @@ import cc.hrva.urlshortener.service.ratelimit.RateLimiter;
 import com.nimbusds.jose.JOSEException;
 import com.nimbusds.jose.jwk.RSAKey;
 import com.nimbusds.jose.jwk.gen.RSAKeyGenerator;
+import jakarta.servlet.DispatcherType;
+import jakarta.servlet.RequestDispatcher;
 import java.net.URI;
 import java.time.Duration;
 import java.time.Instant;
@@ -203,7 +205,11 @@ class CustomHostEndpointSecurityTest {
                 options("/menu"),
                 post("/"),
                 get("/a/b"),
-                get("/menu/"))) {
+                get("/menu/"),
+                get("/menu;jsessionid=x"),
+                get(URI.create("/menu%3Bjsessionid=x")),
+                rawPath("//menu"),
+                rawPath("/./menu"))) {
             final var result = mockMvc.perform(on(CUSTOM_HOST, request)).andReturn();
             final var description = result.getRequest().getMethod() + " " + result.getRequest().getRequestURI();
             assertThat(result.getResponse().getStatus()).as(description).isEqualTo(404);
@@ -320,6 +326,43 @@ class CustomHostEndpointSecurityTest {
     }
 
     @Test
+    void aForwardedPrimaryHostDoesNotTurnACustomHostIntoHrva() throws Exception {
+        when(urlService.redirectResultUrl(eq(GO), eq("menu"), any())).thenReturn(new RedirectView("https://example.com/b"));
+
+        mockMvc.perform(on(CUSTOM_HOST, get("/menu")).header("X-Forwarded-Host", "hrva.cc").header("Forwarded", "host=hrva.cc"))
+                .andExpect(status().isFound())
+                .andExpect(redirectedUrl("https://example.com/b"))
+                .andExpect(neverCached());
+        mockMvc.perform(on(CUSTOM_HOST, get("/login")).header("X-Forwarded-Host", "hrva.cc"))
+                .andExpect(status().isNotFound())
+                .andExpect(content().string(NOT_FOUND));
+
+        verify(urlService, never()).redirectResultUrl(eq("menu"), any());
+        verify(springSecurityFilterChain, never()).doFilter(any(), any(), any());
+    }
+
+    @Test
+    void anErrorDispatchOnACustomOrUnknownHostIsAPlain404AndNeverTheErrorPage() throws Exception {
+        for (final var host : List.of(CUSTOM_HOST, "stray.example.org")) {
+            mockMvc.perform(on(host, errorDispatchFor("/menu")))
+                    .andExpect(status().isNotFound())
+                    .andExpect(content().string(NOT_FOUND))
+                    .andExpect(content().contentTypeCompatibleWith(MediaType.TEXT_PLAIN))
+                    .andExpect(neverCached());
+        }
+
+        verifyNoInteractions(urlService);
+        verify(springSecurityFilterChain, never()).doFilter(any(), any(), any());
+    }
+
+    @Test
+    void anErrorDispatchOnAPrimaryHostStillReachesTheApp() throws Exception {
+        mockMvc.perform(on("hrva.cc", errorDispatchFor("/menu")));
+
+        verify(springSecurityFilterChain, atLeastOnce()).doFilter(any(), any(), any());
+    }
+
+    @Test
     void primaryHostsWorkAsBefore() throws Exception {
         final var link = UrlResponse.from(Url.builder().id(1L).shortUrl("menu").longUrl("https://example.com/a").active(true).build());
         when(urlService.revealUrlAndRecordClick(isNull(), eq("menu"), any())).thenReturn(link);
@@ -338,6 +381,23 @@ class CustomHostEndpointSecurityTest {
         }
 
         verify(springSecurityFilterChain, atLeastOnce()).doFilter(any(), any(), any());
+    }
+
+    private static MockHttpServletRequestBuilder rawPath(final String path) {
+        return get("/").with(request -> {
+            request.setRequestURI(path);
+            return request;
+        });
+    }
+
+    private static MockHttpServletRequestBuilder errorDispatchFor(final String failedPath) {
+        return get("/error").with(request -> {
+            request.setDispatcherType(DispatcherType.ERROR);
+            request.setAttribute(RequestDispatcher.ERROR_REQUEST_URI, failedPath);
+            request.setAttribute(RequestDispatcher.ERROR_STATUS_CODE, 400);
+            request.setAttribute(RequestDispatcher.ERROR_MESSAGE, "Bad Request");
+            return request;
+        });
     }
 
     private static MockHttpServletRequestBuilder on(final String host, final MockHttpServletRequestBuilder request) {
