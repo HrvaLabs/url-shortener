@@ -10,7 +10,6 @@ import cc.hrva.urlshortener.service.SettingsService;
 import cc.hrva.urlshortener.service.settings.SettingKey;
 import java.net.URI;
 import java.util.Set;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.Strings;
@@ -18,17 +17,24 @@ import org.springframework.stereotype.Service;
 
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class DefaultHumanCheckService implements HumanCheckService {
 
     private static final String REFUSAL = "Complete the check and try again.";
     private static final String UNAVAILABLE = "We couldn't run the check. Try again in a minute.";
     private static final int MAX_TOKEN_LENGTH = 2048;
-    private static final Set<String> FAILURES_NOT_THE_VISITORS = Set.of("missing-input-secret", "invalid-input-secret", "internal-error");
+    private static final Set<String> FAILURES_NOT_THE_VISITORS = Set.of("missing-input-secret", "invalid-input-secret", "invalid-parsed-secret",
+            "bad-request", "internal-error");
+    private static final String NO_FRONTEND_HOST = "app.frontend-url must be an absolute URL with a host for the human check, got: ";
 
     private final SettingsService settingsService;
     private final TurnstileClient turnstileClient;
-    private final AppProperties appProperties;
+    private final String frontendHost;
+
+    public DefaultHumanCheckService(final SettingsService settingsService, final TurnstileClient turnstileClient, final AppProperties appProperties) {
+        this.settingsService = settingsService;
+        this.turnstileClient = turnstileClient;
+        this.frontendHost = hostOf(appProperties.getFrontendUrl());
+    }
 
     @Override
     public void verify(final String token) {
@@ -61,7 +67,19 @@ public class DefaultHumanCheckService implements HumanCheckService {
     }
 
     private boolean isFrontendHost(final String hostname) {
-        return hostname != null && Strings.CI.equals(hostname, URI.create(appProperties.getFrontendUrl()).getHost());
+        return hostname != null && Strings.CI.equals(hostname, frontendHost);
+    }
+
+    private static String hostOf(final String frontendUrl) {
+        try {
+            final var host = URI.create(StringUtils.defaultString(frontendUrl)).getHost();
+            if (StringUtils.isBlank(host)) {
+                throw new IllegalStateException(NO_FRONTEND_HOST + frontendUrl);
+            }
+            return host;
+        } catch (final IllegalArgumentException exception) {
+            throw new IllegalStateException(NO_FRONTEND_HOST + frontendUrl, exception);
+        }
     }
 
 }

@@ -104,9 +104,10 @@ class DefaultHumanCheckServiceTest {
     @Test
     void theHostnameIsComparedWithoutCase() {
         appProperties.setFrontendUrl("https://App.Hrva.cc/");
+        final var service = new DefaultHumanCheckService(settingsService, turnstileClient, appProperties);
         when(turnstileClient.verify(TOKEN)).thenReturn(new SiteverifyResult.Answered(true, "app.hrva.cc", List.of()));
 
-        assertThatCode(() -> humanCheckService.verify(TOKEN)).doesNotThrowAnyException();
+        assertThatCode(() -> service.verify(TOKEN)).doesNotThrowAnyException();
     }
 
     @Test
@@ -154,7 +155,7 @@ class DefaultHumanCheckServiceTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"invalid-input-secret", "missing-input-secret", "internal-error"})
+    @ValueSource(strings = {"invalid-input-secret", "missing-input-secret", "invalid-parsed-secret", "bad-request", "internal-error"})
     void aFailureOnCloudflaresSideOrOursFailsClosed(final String errorCode, final CapturedOutput output) {
         when(turnstileClient.verify(TOKEN)).thenReturn(new SiteverifyResult.Answered(false, null, List.of(errorCode)));
 
@@ -162,6 +163,25 @@ class DefaultHumanCheckServiceTest {
                 .isInstanceOf(HumanCheckUnavailableException.class)
                 .hasMessage(UNAVAILABLE);
         assertThat(output).contains(errorCode).doesNotContain(SECRET_KEY);
+    }
+
+    @Test
+    void theFrontendHostIsReadOnceAtConstruction() {
+        appProperties.setFrontendUrl("https://elsewhere.example");
+        when(turnstileClient.verify(TOKEN)).thenReturn(new SiteverifyResult.Answered(true, "app.hrva.cc", List.of()));
+
+        assertThatCode(() -> humanCheckService.verify(TOKEN)).doesNotThrowAnyException();
+    }
+
+    @ParameterizedTest
+    @NullSource
+    @ValueSource(strings = {"", "   ", "app.hrva.cc", "localhost:3000", "/relative", "https://", "https://app hrva.cc"})
+    void aFrontendUrlWithoutAHostStopsStartup(final String frontendUrl) {
+        appProperties.setFrontendUrl(frontendUrl);
+
+        assertThatThrownBy(() -> new DefaultHumanCheckService(settingsService, turnstileClient, appProperties))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("app.frontend-url must be an absolute URL with a host for the human check, got: " + frontendUrl);
     }
 
 }
