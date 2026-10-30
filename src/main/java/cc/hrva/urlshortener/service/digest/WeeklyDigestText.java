@@ -119,9 +119,14 @@ public final class WeeklyDigestText {
     }
 
     public static List<String> topLinkLines(final WeeklyDigest digest, final ShortLinks shortLinks, final UnaryOperator<String> value) {
+        return topLinkLines(digest, shortLinks, UnaryOperator.identity(), value);
+    }
+
+    public static List<String> topLinkLines(final WeeklyDigest digest, final ShortLinks shortLinks, final UnaryOperator<String> hostname,
+            final UnaryOperator<String> value) {
         final var topLinks = digest.topLinks();
         return IntStream.range(0, topLinks.size())
-                .mapToObj(index -> topLink(index + 1, topLinks.get(index), shortLinks, value))
+                .mapToObj(index -> topLink(index + 1, topLinks.get(index), shortLinks, hostname, value))
                 .toList();
     }
 
@@ -151,8 +156,9 @@ public final class WeeklyDigestText {
         return words.getOrDefault(key, key.toLowerCase(Locale.ROOT).replace('_', ' '));
     }
 
-    private static String topLink(final int rank, final TopLink link, final ShortLinks shortLinks, final UnaryOperator<String> value) {
-        final var shortLink = shortLinks.display(link.domain(), value.apply(link.shortUrl()));
+    private static String topLink(final int rank, final TopLink link, final ShortLinks shortLinks, final UnaryOperator<String> hostname,
+            final UnaryOperator<String> value) {
+        final var shortLink = shortLinks.display(hostname.apply(link.domain()), value.apply(link.shortUrl()));
         final var destination = value.apply(destinationOf(link.destinationHost()));
         return number(rank) + ". " + shortLink + " → " + destination + ", " + clicks(link.clicks());
     }

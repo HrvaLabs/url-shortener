@@ -101,6 +101,17 @@ class DiscordAlertFormatterTest {
     }
 
     @Test
+    void markdownInALinksDomainIsEscapedInAlertsAndTheDigest() {
+        final var onDomain = new AlertedLink(42L, "menu", "example.com", 27L, "go_*x.example.com");
+
+        final var alert = formatter.message(List.of(new LinkBlocked(onDomain, BlockReason.ADMIN, null)), 0).content();
+        final var digest = formatter.weeklyDigest(busyWeek(List.of(new TopLink("menu", "example.com", 3, "go_*x.example.com")))).content();
+
+        assertThat(alert).startsWith("Blocked: go\\_\\*x.example.com/menu " + ARROW + " example.com");
+        assertThat(digest).contains("1. go\\_\\*x.example.com/menu " + ARROW + " example.com, 3 clicks");
+    }
+
+    @Test
     void aNewReviewIsOneLineWithTheShortLinkTheHostTheReasonsAndTheReviewPage() {
         final var message = formatter.message(List.of(new ReviewOpened(ANONYMOUS_LINK,
                 List.of("imitates paypal", "domain registered in the last 30 days"))), 0);

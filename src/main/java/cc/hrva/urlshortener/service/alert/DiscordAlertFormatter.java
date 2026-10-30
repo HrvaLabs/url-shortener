@@ -67,7 +67,7 @@ public class DiscordAlertFormatter {
         final var head = new ArrayList<String>();
         head.add("**" + WeeklyDigestText.title(digest) + "**");
         head.addAll(WeeklyDigestText.summaryLines(digest, frontendPage(REVIEW_PAGE), DiscordAlertFormatter::linked));
-        final var topLinks = WeeklyDigestText.topLinkLines(digest, shortLinks, DiscordAlertFormatter::plain);
+        final var topLinks = WeeklyDigestText.topLinkLines(digest, shortLinks, DiscordText::hostname, DiscordAlertFormatter::plain);
         final var statsLine = "Stats (last 7 days): " + linked(frontendPage(STATS_PAGE));
         return DiscordMessage.withoutMentionsOrEmbeds(withinLimit(head, topLinks, 0, more -> "and %d more".formatted(more), List.of(statsLine)));
     }
@@ -211,7 +211,7 @@ public class DiscordAlertFormatter {
     }
 
     private String link(final AlertedLink link) {
-        return shortLinks.display(link.domain(), plain(link.shortUrl())) + ARROW + destination(link.destinationHost());
+        return shortLinks.display(DiscordText.hostname(link.domain()), plain(link.shortUrl())) + ARROW + destination(link.destinationHost());
     }
 
     private static String destination(final String host) {
