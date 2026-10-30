@@ -26,6 +26,10 @@ public sealed interface AdminAlertEvent {
     record SameShapeDetected(String shape, String path, int links, int domains, Duration window, List<String> exampleAliases)
             implements AdminAlertEvent {}
 
+    record AnonymousLinkBusy(AlertedLink link, long clicks, String topCountry) implements AdminAlertEvent {}
+
+    record AnonymousTrafficShare(long anonymousClicks, long totalClicks) implements AdminAlertEvent {}
+
     record BioPageReviewOpened(AlertedBioPage page, List<String> reasons) implements AdminAlertEvent {}
 
     record BioPageReported(AlertedBioPage page, ReportCategory category, String details, boolean reviewOpened) implements AdminAlertEvent {}

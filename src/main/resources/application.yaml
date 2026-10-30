@@ -111,6 +111,11 @@ app:
     links: ${APP_CAMPAIGN_LINKS:3}
     domains: ${APP_CAMPAIGN_DOMAINS:3}
     window: ${APP_CAMPAIGN_WINDOW:24h}
+  traffic-alerts:
+    enabled: ${APP_TRAFFIC_ALERTS_ENABLED:true}
+    link-clicks: 25
+    share-percent: 50
+    min-anonymous-clicks: 100
   retention:
     email-log-days: 90
     audit-log-months: 12

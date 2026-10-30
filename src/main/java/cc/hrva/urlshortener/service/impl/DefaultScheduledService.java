@@ -16,6 +16,7 @@ import cc.hrva.urlshortener.service.SafeBrowsingRecheckService;
 import cc.hrva.urlshortener.service.NotificationDeliveryService;
 import cc.hrva.urlshortener.service.ScheduledService;
 import cc.hrva.urlshortener.service.SendingEmailService;
+import cc.hrva.urlshortener.service.TrafficAlertService;
 import cc.hrva.urlshortener.service.UrlNotificationService;
 import cc.hrva.urlshortener.service.UrlService;
 import cc.hrva.urlshortener.service.UserService;
@@ -51,6 +52,7 @@ public class DefaultScheduledService implements ScheduledService {
     private final CustomDomainLifecycle customDomainLifecycle;
     private final CustomDomainReconciler customDomainReconciler;
     private final CustomDomainRegistry customDomainRegistry;
+    private final TrafficAlertService trafficAlertService;
     private final BioHandleHoldRepository bioHandleHoldRepository;
     private final EmailLogRepository emailLogRepository;
     private final AuditLogRepository auditLogRepository;
@@ -209,6 +211,13 @@ public class DefaultScheduledService implements ScheduledService {
     @Scheduled(fixedDelay = 60_000)
     public void reloadCustomDomainRoutes() {
         customDomainRegistry.reload();
+    }
+
+    @Override
+    @Scheduled(cron = "15 */5 * * * *")
+    public void checkTraffic() {
+        log.info("Scheduled: traffic check");
+        trafficAlertService.check();
     }
 
 }

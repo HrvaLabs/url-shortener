@@ -78,6 +78,15 @@
     </table>
   </th:block>
 
+  <th:block th:unless="${#lists.isEmpty(digest.busiestAnonymous)}">
+    <h2 class="e-fg" th:style="${s.h2} + 'margin-top: 24px;'">Busiest anonymous links yesterday</h2>
+    <table class="e-bd" role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" th:style="${s.panel} + 'margin-bottom: 0;'">
+      <tr th:each="link, it : ${digest.busiestAnonymous}">
+        <td class="e-fg e-bd" th:style="${it.first} ? ${s.row} : ${s.rowNext}"><span class="e-fg mono" th:style="${s.short}" th:text="${short_links.display(null, link.shortUrl)}">hrva.cc/busy</span> &rarr; <span th:text="${link.destinationHost + ': ' + link.clicks + (link.clicks == 1 ? ' click' : ' clicks')}">example.com: 120 clicks</span></td>
+      </tr>
+    </table>
+  </th:block>
+
 </th:block>
 </body>
 </html>

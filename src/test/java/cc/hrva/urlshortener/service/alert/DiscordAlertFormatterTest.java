@@ -13,6 +13,8 @@ import cc.hrva.urlshortener.model.enums.BlockReason;
 import cc.hrva.urlshortener.model.enums.DomainDisableReason;
 import cc.hrva.urlshortener.model.enums.DomainProblem;
 import cc.hrva.urlshortener.model.enums.ReportCategory;
+import cc.hrva.urlshortener.service.alert.AdminAlertEvent.AnonymousLinkBusy;
+import cc.hrva.urlshortener.service.alert.AdminAlertEvent.AnonymousTrafficShare;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.BioPageReported;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.BioPageReviewOpened;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.BlocklistSourceFailed;
@@ -36,6 +38,9 @@ import java.util.stream.IntStream;
 import org.apache.commons.lang3.StringUtils;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.NullAndEmptySource;
+import org.junit.jupiter.params.provider.ValueSource;
 import tools.jackson.databind.json.JsonMapper;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -517,6 +522,47 @@ class DiscordAlertFormatterTest {
 
         assertThat(content).contains("share the URL shape /log\\_in/x?a&user\\_id in the last hour. ", "Examples: hrva.cc/a\\_b. ",
                 "<https://app.hrva.cc/admin/urls?search=%2Flog_in%2F%60x%60>");
+    }
+
+    @Test
+    void anonymousLinkBusyLine() {
+        final var content = formatter.message(List.of(new AnonymousLinkBusy(ANONYMOUS_LINK, 31, "PT")), 0).content();
+
+        assertThat(content).isEqualTo("Busy link without an account: hrva.cc/abc12 → example-login.top, 31 clicks today, most from Portugal. "
+                + "<https://app.hrva.cc/admin/urls?search=abc12>");
+    }
+
+    @ParameterizedTest
+    @NullAndEmptySource
+    @ValueSource(strings = {"unknown", "tor", "XX"})
+    void anUnknownCountryIsLeftOut(final String topCountry) {
+        final var content = formatter.message(List.of(new AnonymousLinkBusy(ANONYMOUS_LINK, 25, topCountry)), 0).content();
+
+        assertThat(content).isEqualTo("Busy link without an account: hrva.cc/abc12 → example-login.top, 25 clicks today. "
+                + "<https://app.hrva.cc/admin/urls?search=abc12>");
+    }
+
+    @Test
+    void anonymousLinkBusyLineEscapesTheAliasAndEncodesTheSearch() {
+        final var content = formatter.message(List.of(new AnonymousLinkBusy(new AlertedLink(43L, "a_b c", "example.org", null, null), 40, "HR")), 0)
+                .content();
+
+        assertThat(content).contains("hrva.cc/a\\_b c → example.org, 40 clicks today, most from Croatia. ",
+                "<https://app.hrva.cc/admin/urls?search=a_b+c>");
+    }
+
+    @Test
+    void anonymousTrafficShareLine() {
+        final var content = formatter.message(List.of(new AnonymousTrafficShare(100, 199)), 0).content();
+
+        assertThat(content).isEqualTo("Links without an account have 100 of today's 199 clicks (50%). <https://app.hrva.cc/admin/urls>");
+    }
+
+    @Test
+    void theTrafficShareRoundsDown() {
+        final var content = formatter.message(List.of(new AnonymousTrafficShare(299, 300)), 0).content();
+
+        assertThat(content).contains("have 299 of today's 300 clicks (99%).");
     }
 
     @Test

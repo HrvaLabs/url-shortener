@@ -24,5 +24,6 @@ public interface ScheduledService {
     void runDomainLifecycle();
     void reconcileCustomDomains();
     void reloadCustomDomainRoutes();
+    void checkTraffic();
 
 }

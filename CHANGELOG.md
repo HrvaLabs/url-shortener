@@ -6,7 +6,7 @@ All notable changes to hrva.cc — the URL shortener.
 
 ## [v2.17] — 2026-10-30
 
-Admin lists are searched, sorted and paged on the server, and searching your links waits until you stop typing.
+Discord alerts when links made without an account share one URL shape or get busy, every way you've signed in listed in Settings, and admin lists searched, sorted and paged on the server.
 
 ### 🔗 Links
 - Searching your links waits until you stop typing, and stays in the address.
@@ -16,7 +16,9 @@ Admin lists are searched, sorted and paged on the server, and searching your lin
 - Settings lists every way you've signed in, with when you last used it.
 
 ### 🔧 Admin
-- A Discord alert when links made without an account share one URL shape across several domains, a sign of a phishing campaign. Nothing is blocked; the alert links to the matching links in All URLs.
+- Discord alerts when links made without an account share one address shape across several domains.
+- Discord alerts when a link made without an account gets many clicks in a day, or when such links take most of the day's clicks. The daily email lists yesterday's busiest links made without an account.
+- Blocking many domains at once saves every block rule first, and asks you to try again if it stops halfway.
 - Every admin list can be searched and sorted, page by page.
 - Domain rules are listed page by page, with a search box and a choice of order.
 - Custom domains can be sorted by name, status or date added.

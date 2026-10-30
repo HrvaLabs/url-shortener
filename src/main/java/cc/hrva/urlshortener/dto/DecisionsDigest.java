@@ -10,7 +10,8 @@ public record DecisionsDigest(
         List<BlockedLink> autoBlocked,
         List<FailingSource> failingSources,
         List<NewAccountLink> newAccountLinks,
-        long openBioPageReviews) {
+        long openBioPageReviews,
+        List<BusyAnonymousLink> busiestAnonymous) {
 
     public record PossibleScammer(String email, long blockedLinks, long flaggedLinks) {}
 
@@ -19,5 +20,7 @@ public record DecisionsDigest(
     public record FailingSource(String name, String lastError) {}
 
     public record NewAccountLink(String shortUrl, String destination, String ownerEmail, String domain) {}
+
+    public record BusyAnonymousLink(String shortUrl, String destinationHost, long clicks) {}
 
 }

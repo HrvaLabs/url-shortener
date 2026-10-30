@@ -7,6 +7,8 @@ import cc.hrva.urlshortener.model.enums.BlockReason;
 import cc.hrva.urlshortener.model.enums.DomainDisableReason;
 import cc.hrva.urlshortener.model.enums.DomainProblem;
 import cc.hrva.urlshortener.model.enums.ReportCategory;
+import cc.hrva.urlshortener.service.alert.AdminAlertEvent.AnonymousLinkBusy;
+import cc.hrva.urlshortener.service.alert.AdminAlertEvent.AnonymousTrafficShare;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.BioPageReported;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.BioPageReviewOpened;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.BlocklistSourceFailed;
@@ -31,7 +33,9 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.function.IntFunction;
+import java.util.regex.Pattern;
 import lombok.RequiredArgsConstructor;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Component;
@@ -54,6 +58,7 @@ public class DiscordAlertFormatter {
     private static final String LOCAL_PROVIDER = "local";
     private static final String ARROW = " " + Character.toString(0x2192) + " ";
     private static final int MAX_SAME_SHAPE_EXAMPLES = 3;
+    private static final Pattern COUNTRY_CODE = Pattern.compile("[A-Z]{2}");
 
     private final AppProperties appProperties;
     private final ShortLinks shortLinks;
@@ -134,6 +139,12 @@ public class DiscordAlertFormatter {
             case BlocklistSourceRecovered recovered -> "%s loads again".formatted(plain(recovered.sourceName()));
             case BurstDetected burst -> burstLine(burst);
             case SameShapeDetected sameShape -> sameShapeLine(sameShape);
+            case AnonymousLinkBusy busy -> "Busy link without an account: %s, %d clicks today%s. %s".formatted(
+                    link(busy.link()), busy.clicks(), countryName(busy.topCountry()).map(name -> ", most from " + name).orElse(""),
+                    linked(frontendPage(LINKS_PAGE) + "?search=" + URLEncoder.encode(busy.link().shortUrl(), StandardCharsets.UTF_8)));
+            case AnonymousTrafficShare share -> "Links without an account have %d of today's %d clicks (%d%%). %s".formatted(
+                    share.anonymousClicks(), share.totalClicks(), share.anonymousClicks() * 100 / Math.max(1, share.totalClicks()),
+                    linked(frontendPage(LINKS_PAGE)));
             case BioPageReviewOpened opened -> "New bio page review: %s (%s), %s, <%s>".formatted(
                     bioPage(opened.page()), plain(String.join(", ", opened.reasons())), owner(opened.page().ownerId()),
                     bioPageReviewPage(opened.page()));
@@ -216,6 +227,14 @@ public class DiscordAlertFormatter {
                 .formatted(sameShape.links(), sameShape.domains(), plain(sameShape.shape()), window(sameShape.window()),
                         examples.isEmpty() ? "" : "Examples: " + String.join(", ", examples) + ". ",
                         linked(frontendPage(LINKS_PAGE) + "?search=" + URLEncoder.encode(sameShape.path(), StandardCharsets.UTF_8)));
+    }
+
+    private static Optional<String> countryName(final String code) {
+        if (code == null || !COUNTRY_CODE.matcher(code).matches()) {
+            return Optional.empty();
+        }
+        final var name = Locale.of("", code).getDisplayCountry(Locale.ENGLISH);
+        return StringUtils.isBlank(name) || name.equalsIgnoreCase(code) ? Optional.empty() : Optional.of(name);
     }
 
     private static String linked(final String url) {

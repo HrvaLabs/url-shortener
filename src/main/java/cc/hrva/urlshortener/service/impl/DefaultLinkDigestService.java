@@ -8,12 +8,14 @@ import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.enums.BlockReason;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
+import cc.hrva.urlshortener.repository.stats.AnonymousTrafficRepository;
 import cc.hrva.urlshortener.service.BioPageReviewService;
 import cc.hrva.urlshortener.service.BlocklistSourceService;
 import cc.hrva.urlshortener.service.LinkDigestService;
 import cc.hrva.urlshortener.service.ReviewQueueService;
 import cc.hrva.urlshortener.service.ScammerSignalService;
 import cc.hrva.urlshortener.service.SendingEmailService;
+import cc.hrva.urlshortener.service.analytics.AnalyticsDays;
 import cc.hrva.urlshortener.service.domain.ShortLinks;
 import cc.hrva.urlshortener.util.DomainNames;
 import cc.hrva.urlshortener.util.ReviewReasons;
@@ -34,6 +36,8 @@ public class DefaultLinkDigestService implements LinkDigestService {
 
     private static final int NEWEST_OPEN_ENTRIES = 10;
     private static final int MAX_POSSIBLE_SCAMMERS = 10;
+    private static final int BUSIEST_ANONYMOUS_LINKS = 5;
+    private static final String UNREADABLE_DESTINATION = "an unreadable destination";
 
     private final ReviewQueueService reviewQueueService;
     private final BioPageReviewService bioPageReviewService;
@@ -42,6 +46,8 @@ public class DefaultLinkDigestService implements LinkDigestService {
     private final UrlRepository urlRepository;
     private final UserRepository userRepository;
     private final SendingEmailService sendingEmailService;
+    private final AnonymousTrafficRepository anonymousTrafficRepository;
+    private final AnalyticsDays analyticsDays;
 
     @Override
     @Transactional(readOnly = true)
@@ -55,7 +61,8 @@ public class DefaultLinkDigestService implements LinkDigestService {
                 autoBlockedSince(now.minusDays(1)),
                 failingSources(),
                 newAccountLinks(now.minusDays(1), now.minusDays(7)),
-                bioPageReviewService.openCount());
+                bioPageReviewService.openCount(),
+                busiestAnonymousYesterday());
 
         if (!needsAttention(digest)) {
             log.info("Decisions email: nothing waiting");
@@ -112,6 +119,13 @@ public class DefaultLinkDigestService implements LinkDigestService {
     private List<DecisionsDigest.NewAccountLink> newAccountLinks(final LocalDateTime createdAfter, final LocalDateTime ownerCreatedAfter) {
         return urlRepository.findTop10ByCreateDateAfterAndOwnerCreateDateAfterOrderByCreateDateDesc(createdAfter, ownerCreatedAfter).stream()
                 .map(url -> new DecisionsDigest.NewAccountLink(url.getShortUrl(), destinationOf(url), ownerEmailOf(url), ShortLinks.hostnameOf(url)))
+                .toList();
+    }
+
+    private List<DecisionsDigest.BusyAnonymousLink> busiestAnonymousYesterday() {
+        return anonymousTrafficRepository.busyAnonymousLinks(analyticsDays.today().minusDays(1), 1, BUSIEST_ANONYMOUS_LINKS).stream()
+                .map(link -> new DecisionsDigest.BusyAnonymousLink(link.shortUrl(), DomainNames.hostOf(link.longUrl()).orElse(UNREADABLE_DESTINATION),
+                        link.clicks()))
                 .toList();
     }
 

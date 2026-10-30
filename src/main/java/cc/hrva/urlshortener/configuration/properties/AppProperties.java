@@ -1,6 +1,7 @@
 package cc.hrva.urlshortener.configuration.properties;
 
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
@@ -122,6 +123,10 @@ public class AppProperties {
 
     @Valid
     @NotNull
+    private TrafficAlerts trafficAlerts = new TrafficAlerts();
+
+    @Valid
+    @NotNull
     private Retention retention = new Retention();
 
     @Valid
@@ -223,6 +228,23 @@ public class AppProperties {
         @NotNull
         @DurationMin(hours = 1, message = "must be at least 1 hour")
         private Duration window = Duration.ofHours(24);
+
+    }
+
+    @Data
+    public static class TrafficAlerts {
+
+        private boolean enabled = true;
+
+        @Min(5)
+        private int linkClicks = 25;
+
+        @Min(10)
+        @Max(99)
+        private int sharePercent = 50;
+
+        @Min(10)
+        private int minAnonymousClicks = 100;
 
     }
 

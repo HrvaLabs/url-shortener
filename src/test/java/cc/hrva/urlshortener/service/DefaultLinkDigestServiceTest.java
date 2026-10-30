@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.service;
 
+import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.dto.BlocklistSourceResponse;
 import cc.hrva.urlshortener.dto.DecisionsDigest;
 import cc.hrva.urlshortener.dto.LinkDigestEntry;
@@ -12,8 +13,15 @@ import cc.hrva.urlshortener.model.enums.BlocklistAction;
 import cc.hrva.urlshortener.model.enums.SourceKind;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
+import cc.hrva.urlshortener.repository.stats.AnonymousTrafficRepository;
+import cc.hrva.urlshortener.repository.stats.AnonymousTrafficRepository.BusyLink;
+import cc.hrva.urlshortener.service.analytics.AnalyticsDays;
 import cc.hrva.urlshortener.service.impl.DefaultLinkDigestService;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.Collection;
 import java.util.List;
 import java.util.Set;
@@ -65,13 +73,17 @@ class DefaultLinkDigestServiceTest {
     @Mock
     private SendingEmailService sendingEmailService;
 
+    @Mock
+    private AnonymousTrafficRepository anonymousTrafficRepository;
+
     private LinkDigestService linkDigestService;
 
     @BeforeEach
     void setUp() {
         linkDigestService = new DefaultLinkDigestService(
                 reviewQueueService, bioPageReviewService, scammerSignalService, blocklistSourceService, urlRepository, userRepository,
-                sendingEmailService);
+                sendingEmailService, anonymousTrafficRepository,
+                new AnalyticsDays(Clock.fixed(Instant.parse("2026-10-28T23:30:00Z"), ZoneOffset.UTC), new AppProperties()));
     }
 
     private static Url link(final long id, final String shortUrl, final String longUrl, final User owner) {
@@ -348,6 +360,35 @@ class DefaultLinkDigestServiceTest {
                 new DecisionsDigest.NewAccountLink("fresh", "example.com/fresh", "raulsado50w@gmail.com", null));
         assertThat(createdAfter.getValue()).isBetween(LocalDateTime.now().minusHours(25), LocalDateTime.now().minusHours(23));
         assertThat(ownerCreatedAfter.getValue()).isBetween(LocalDateTime.now().minusDays(7).minusHours(1), LocalDateTime.now().minusDays(7).plusHours(1));
+    }
+
+    @Test
+    void theDailyEmailListsYesterdaysFiveBusiestAnonymousLinks() {
+        openEntries(1L, review(link(41L, "njuskaio_verify", "https://njuskaio.cam/a/MAUB3", NEWCOMER), "imitates njuskalo"));
+        blockedAutomatically();
+        sources();
+        when(anonymousTrafficRepository.busyAnonymousLinks(LocalDate.of(2026, 10, 28), 1, 5)).thenReturn(List.of(
+                new BusyLink(80L, "busy", "https://Shop.Example.com/sale?id=1", 120),
+                new BusyLink(81L, "quiet", "https://example.org/", 3)));
+
+        linkDigestService.sendDailyDigest();
+
+        assertThat(sentDigest().busiestAnonymous()).containsExactly(
+                new DecisionsDigest.BusyAnonymousLink("busy", "shop.example.com", 120),
+                new DecisionsDigest.BusyAnonymousLink("quiet", "example.org", 3));
+    }
+
+    @Test
+    void theListAloneDoesNotSendTheEmail() {
+        openEntries(0L);
+        blockedAutomatically();
+        sources();
+        lenient().when(anonymousTrafficRepository.busyAnonymousLinks(any(LocalDate.class), any(Long.class), any(Integer.class)))
+                .thenReturn(List.of(new BusyLink(80L, "busy", "https://shop.example.com/sale", 120)));
+
+        linkDigestService.sendDailyDigest();
+
+        verify(sendingEmailService, never()).sendDecisionsEmailToAdmin(any());
     }
 
 }

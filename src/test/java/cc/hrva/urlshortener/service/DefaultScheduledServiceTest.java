@@ -96,6 +96,9 @@ class DefaultScheduledServiceTest {
     private CustomDomainRegistry customDomainRegistry;
 
     @Mock
+    private TrafficAlertService trafficAlertService;
+
+    @Mock
     private BioHandleHoldRepository bioHandleHoldRepository;
 
     @Mock
@@ -109,7 +112,7 @@ class DefaultScheduledServiceTest {
     @BeforeEach
     void setUp() {
         this.scheduledService = new DefaultScheduledService(urlService, userService, apiKeyService, resetTokenService, urlNotificationService, safeBrowsingRecheckService, sendingEmailService, linkDigestService, blocklistSourceService,
-                weeklyDigestService, destinationCheckService, notificationDeliveryService, clickSummaryService, customDomainLifecycle, customDomainReconciler, customDomainRegistry, bioHandleHoldRepository, emailLogRepository, auditLogRepository, appProperties, Clock.fixed(NOW, ZoneOffset.UTC));
+                weeklyDigestService, destinationCheckService, notificationDeliveryService, clickSummaryService, customDomainLifecycle, customDomainReconciler, customDomainRegistry, trafficAlertService, bioHandleHoldRepository, emailLogRepository, auditLogRepository, appProperties, Clock.fixed(NOW, ZoneOffset.UTC));
     }
 
     @Test
@@ -159,6 +162,23 @@ class DefaultScheduledServiceTest {
         final var scheduled = DefaultScheduledService.class.getMethod("releaseExpiredBioHandles").getAnnotation(Scheduled.class);
 
         assertThat(scheduled.cron()).isEqualTo("0 45 3 * * *");
+    }
+
+    @Test
+    @ExtendWith(OutputCaptureExtension.class)
+    void theTrafficCheckDelegates(final CapturedOutput output) {
+        scheduledService.checkTraffic();
+
+        verify(trafficAlertService).check();
+        assertThat(output).contains("Scheduled: traffic check");
+    }
+
+    @Test
+    void theTrafficCheckRunsEveryFiveMinutesAtFifteenSeconds() throws NoSuchMethodException {
+        final var scheduled = DefaultScheduledService.class.getMethod("checkTraffic").getAnnotation(Scheduled.class);
+
+        assertThat(scheduled.cron()).isEqualTo("15 */5 * * * *");
+        assertThat(DefaultScheduledService.class.getMethod("checkTraffic").getAnnotation(Async.class)).isNull();
     }
 
     @Test

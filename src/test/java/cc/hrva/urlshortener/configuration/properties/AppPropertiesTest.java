@@ -209,6 +209,48 @@ class AppPropertiesTest {
     }
 
     @Test
+    void trafficAlertsDefaultTo25ClicksAndHalfOfTheDayFrom100Clicks() throws IOException {
+        final var trafficAlerts = new AppProperties().getTrafficAlerts();
+        final var yaml = new YamlPropertySourceLoader().load("application", new ClassPathResource("application.yaml"));
+
+        assertThat(trafficAlerts.isEnabled()).isTrue();
+        assertThat(trafficAlerts.getLinkClicks()).isEqualTo(25);
+        assertThat(trafficAlerts.getSharePercent()).isEqualTo(50);
+        assertThat(trafficAlerts.getMinAnonymousClicks()).isEqualTo(100);
+        assertThat(yaml.getFirst().getProperty("app.traffic-alerts.enabled")).isEqualTo("${APP_TRAFFIC_ALERTS_ENABLED:true}");
+        assertThat(yaml.getFirst().getProperty("app.traffic-alerts.link-clicks")).isEqualTo(25);
+        assertThat(yaml.getFirst().getProperty("app.traffic-alerts.share-percent")).isEqualTo(50);
+        assertThat(yaml.getFirst().getProperty("app.traffic-alerts.min-anonymous-clicks")).isEqualTo(100);
+    }
+
+    @Test
+    void trafficAlertsTurnOffFromTheEnvironment() {
+        final var environment = new SystemEnvironmentPropertySource(StandardEnvironment.SYSTEM_ENVIRONMENT_PROPERTY_SOURCE_NAME, Map.<String, Object>of(
+                "APP_TRAFFIC_ALERTS_ENABLED", "false"));
+
+        final var trafficAlerts = new Binder(ConfigurationPropertySources.from(environment))
+                .bind("app.traffic-alerts", AppProperties.TrafficAlerts.class).get();
+
+        assertThat(trafficAlerts.isEnabled()).isFalse();
+    }
+
+    @Test
+    void trafficAlertThresholdsOutsideTheirBoundsAreRefused() {
+        final var validator = Validation.buildDefaultValidatorFactory().getValidator();
+        final var tooLow = new AppProperties.TrafficAlerts();
+        tooLow.setLinkClicks(4);
+        tooLow.setSharePercent(9);
+        tooLow.setMinAnonymousClicks(9);
+        final var tooHigh = new AppProperties.TrafficAlerts();
+        tooHigh.setSharePercent(100);
+
+        assertThat(validator.validate(tooLow)).extracting(violation -> violation.getPropertyPath().toString())
+                .containsExactlyInAnyOrder("linkClicks", "sharePercent", "minAnonymousClicks");
+        assertThat(validator.validate(tooHigh)).extracting(violation -> violation.getPropertyPath().toString()).containsExactly("sharePercent");
+        assertThat(validator.validate(new AppProperties.TrafficAlerts())).isEmpty();
+    }
+
+    @Test
     void burstDefaultsToFiveLinksInAnHour() {
         final var burst = new AppProperties().getBurst();
 
