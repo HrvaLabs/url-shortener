@@ -3,6 +3,7 @@ package cc.hrva.urlshortener.service;
 import cc.hrva.urlshortener.client.CloudflareClient;
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.dto.domain.CloudflareCheckResponse;
+import cc.hrva.urlshortener.dto.domain.DnsRecord;
 import cc.hrva.urlshortener.dto.domain.DomainAllowanceDto;
 import cc.hrva.urlshortener.dto.domain.DomainAllowanceResponse;
 import cc.hrva.urlshortener.dto.domain.DomainDisableDto;
@@ -73,6 +74,7 @@ import org.mockito.ArgumentMatcher;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.core.task.TaskRejectedException;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -156,6 +158,9 @@ class DefaultCustomDomainAdminServiceTest {
     @Mock
     private LinkCheckService linkCheckService;
 
+    @Mock
+    private SendingEmailService sendingEmailService;
+
     private final User ana = User.builder().id(7L).email("ana@example.com").active(true).createDate(NOW.minusDays(40).plusNanos(5000)).build();
     private final List<String> steps = new ArrayList<>();
     private AppProperties appProperties;
@@ -186,11 +191,12 @@ class DefaultCustomDomainAdminServiceTest {
         final var transactions = recordingTransactions();
         final var setup = new CustomDomainSetup(customDomainRepository, customDomainCapLock, cloudflareTokenCheck, customDomainProvisioner,
                 customDomainLifecycle, eventPublisher, transactions, appProperties, clock);
-        final var moderation = new CustomDomainModeration(customDomainRepository, customDomainLifecycle, linkCheckService, eventPublisher, transactions,
-                clock);
+        final var moderation = new CustomDomainModeration(customDomainRepository, customDomainLifecycle, linkCheckService, sendingEmailService,
+                eventPublisher, transactions, clock);
         customDomainAdminService = new DefaultCustomDomainAdminService(customDomainRepository, customDomainAllowanceRepository,
                 customDomainReconcileRepository, userRepository, customDomainCapLock, cloudflareTokenCheck, customDomainProvisioner, setup, moderation,
-                customDomainRemoval, customDomainReconciler, responses, linkCheckService, eventPublisher, transactions, appProperties, clock);
+                customDomainRemoval, customDomainReconciler, responses, linkCheckService, sendingEmailService, eventPublisher, transactions, appProperties,
+                clock);
     }
 
     @Test
@@ -459,6 +465,75 @@ class DefaultCustomDomainAdminServiceTest {
 
         assertThat(response.domain().status()).isEqualTo(CustomDomainStatus.APPROVED_PROVISIONING);
         verify(customDomainRepository).markApproved(ID, ADMIN, null, NOW);
+    }
+
+    @Test
+    void approveEmailsTheOwnerAfterCommit() {
+        doAnswer(invocation -> steps.add("email")).when(sendingEmailService).sendDomainApprovedEmail(anyString(), anyString(), any());
+
+        customDomainAdminService.approve(ID, null, ADMIN);
+
+        verify(sendingEmailService).sendDomainApprovedEmail("ana@example.com", "go.example.com", DnsRecord.cname("go.example.com", "domains.hrva.cc"));
+        assertThat(steps).containsExactly("begin", "markApproved", "commit", "provision", "email");
+    }
+
+    @Test
+    void rejectEmailsTheOwner() {
+        when(customDomainRepository.markRejected(ID, ADMIN, "Not your domain", NOW)).thenAnswer(invocation -> {
+            steps.add("markRejected");
+            return 1;
+        });
+        final var rejected = domain(CustomDomainStatus.REJECTED);
+        rejected.setReviewNote("Not your domain");
+        when(customDomainRepository.findWithOwner(ID)).thenReturn(Optional.of(rejected));
+        doAnswer(invocation -> steps.add("email")).when(sendingEmailService).sendDomainRejectedEmail(anyString(), anyString(), any());
+
+        customDomainAdminService.reject(ID, "  Not your domain  ", ADMIN);
+
+        verify(sendingEmailService).sendDomainRejectedEmail("ana@example.com", "go.example.com", "Not your domain");
+        assertThat(steps).containsExactly("begin", "markRejected", "commit", "email");
+    }
+
+    @Test
+    void aRejectionWithoutANoteEmailsNoNote() {
+        when(customDomainRepository.markRejected(ID, ADMIN, null, NOW)).thenReturn(1);
+        when(customDomainRepository.findWithOwner(ID)).thenReturn(Optional.of(domain(CustomDomainStatus.REJECTED)));
+
+        customDomainAdminService.reject(ID, "   ", ADMIN);
+
+        verify(sendingEmailService).sendDomainRejectedEmail("ana@example.com", "go.example.com", null);
+    }
+
+    @Test
+    void aFailedEmailDoesNotUndoTheReview() {
+        doThrow(new TaskRejectedException("mail queue full")).when(sendingEmailService).sendDomainApprovedEmail(anyString(), anyString(), any());
+        doThrow(new TaskRejectedException("mail queue full")).when(sendingEmailService).sendDomainRejectedEmail(anyString(), anyString(), any());
+
+        final var approved = customDomainAdminService.approve(ID, null, ADMIN);
+
+        assertThat(approved.domain().status()).isEqualTo(CustomDomainStatus.APPROVED_PROVISIONING);
+        verify(customDomainProvisioner).provisionAsync(ID);
+
+        when(customDomainRepository.markRejected(ID, ADMIN, null, NOW)).thenReturn(1);
+        when(customDomainRepository.findWithOwner(ID)).thenReturn(Optional.of(domain(CustomDomainStatus.REJECTED)));
+
+        assertThat(customDomainAdminService.reject(ID, null, ADMIN).domain().status()).isEqualTo(CustomDomainStatus.REJECTED);
+        verify(sendingEmailService).sendDomainApprovedEmail(anyString(), anyString(), any());
+        verify(sendingEmailService).sendDomainRejectedEmail(anyString(), anyString(), any());
+    }
+
+    @Test
+    void aRefusedReviewEmailsNobody() {
+        when(customDomainRepository.findById(ID)).thenReturn(Optional.of(domain(CustomDomainStatus.ACTIVE)));
+
+        assertThatThrownBy(() -> customDomainAdminService.approve(ID, null, ADMIN)).isInstanceOf(CustomDomainConflictException.class);
+        assertThatThrownBy(() -> customDomainAdminService.reject(ID, null, ADMIN)).isInstanceOf(CustomDomainConflictException.class);
+
+        when(customDomainRepository.findById(ID)).thenReturn(Optional.of(domain(CustomDomainStatus.PENDING_REVIEW)));
+        when(customDomainRepository.markRejected(ID, ADMIN, null, NOW)).thenReturn(0);
+
+        assertThatThrownBy(() -> customDomainAdminService.reject(ID, null, ADMIN)).isInstanceOf(CustomDomainConflictException.class);
+        verifyNoInteractions(sendingEmailService);
     }
 
     @Test

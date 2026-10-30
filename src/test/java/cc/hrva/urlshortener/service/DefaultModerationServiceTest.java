@@ -218,7 +218,7 @@ class DefaultModerationServiceTest {
         }).when(cache).evict(any());
         final var transactions = recordingTransactions();
         lenient().when(linkCheckService.isBlockedByRule(anyString())).thenReturn(true);
-        final var domainModeration = new CustomDomainModeration(customDomainRepository, customDomainLifecycle, linkCheckService, eventPublisher,
+        final var domainModeration = new CustomDomainModeration(customDomainRepository, customDomainLifecycle, linkCheckService, sendingEmailService, eventPublisher,
                 transactions, Clock.fixed(Instant.parse("2026-10-29T09:00:00Z"), ZoneOffset.UTC));
         moderationService = new DefaultModerationService(urlRepository, userRepository, domainRuleRepository, linkCheckService,
                 reviewQueueService, userService, sendingEmailService, auditLogService, new UrlCache(cacheManager), eventPublisher, transactions,

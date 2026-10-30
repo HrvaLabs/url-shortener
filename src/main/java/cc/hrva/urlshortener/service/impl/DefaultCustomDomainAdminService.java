@@ -26,6 +26,7 @@ import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.repository.specification.CustomDomainSpecification;
 import cc.hrva.urlshortener.service.CustomDomainAdminService;
 import cc.hrva.urlshortener.service.LinkCheckService;
+import cc.hrva.urlshortener.service.SendingEmailService;
 import cc.hrva.urlshortener.service.domain.AdminDomainResponses;
 import cc.hrva.urlshortener.service.domain.CloudflareTokenCheck;
 import cc.hrva.urlshortener.service.domain.CloudflareTokenCheck.TokenState;
@@ -39,6 +40,7 @@ import cc.hrva.urlshortener.service.domain.CustomDomainSetup;
 import java.time.Clock;
 import java.time.LocalDateTime;
 import java.util.Objects;
+import java.util.function.Consumer;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
@@ -84,6 +86,7 @@ public class DefaultCustomDomainAdminService implements CustomDomainAdminService
     private final CustomDomainReconciler customDomainReconciler;
     private final AdminDomainResponses adminDomainResponses;
     private final LinkCheckService linkCheckService;
+    private final SendingEmailService sendingEmailService;
     private final ApplicationEventPublisher eventPublisher;
     private final TransactionOperations transactionOperations;
     private final AppProperties appProperties;
@@ -131,23 +134,21 @@ public class DefaultCustomDomainAdminService implements CustomDomainAdminService
         requirePending(application);
         requireNoBlockRule(application);
         final var cloudflareTotal = customDomainSetup.liveTotal(id);
-        final var approved = transactionOperations.execute(status -> approveWithinTheCap(id, StringUtils.stripToNull(note), performedBy, cloudflareTotal));
+        final var approved = Objects.requireNonNull(transactionOperations.execute(status ->
+                approveWithinTheCap(id, StringUtils.stripToNull(note), performedBy, cloudflareTotal)));
         handOver(id);
         log.info("Custom domain approved domainId={} cloudflareTotal={}", id, cloudflareTotal);
+        tellOwner(id, approved, owner -> sendingEmailService.sendDomainApprovedEmail(owner, approved.domain().hostname(), approved.domain().dnsRecord()));
         return approved;
     }
 
     @Override
-    @Transactional
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public AdminDomainResponse reject(final long id, final String note, final String performedBy) {
-        requirePending(customDomainRepository.findById(id).orElseThrow(() -> new CustomDomainNotFoundException(NOT_FOUND)));
-        if (customDomainRepository.markRejected(id, performedBy, StringUtils.stripToNull(note), LocalDateTime.now(clock)) != 1) {
-            log.info("Custom domain application was reviewed before its rejection domainId={}", id);
-            throw new CustomDomainConflictException(ALREADY_REVIEWED);
-        }
-        eventPublisher.publishEvent(new CustomDomainChangedEvent(id));
-        log.info("Custom domain rejected domainId={}", id);
-        return reread(id);
+        final var reviewNote = StringUtils.stripToNull(note);
+        final var rejected = Objects.requireNonNull(transactionOperations.execute(status -> rejectPending(id, reviewNote, performedBy)));
+        tellOwner(id, rejected, owner -> sendingEmailService.sendDomainRejectedEmail(owner, rejected.domain().hostname(), reviewNote));
+        return rejected;
     }
 
     @Override
@@ -250,6 +251,28 @@ public class DefaultCustomDomainAdminService implements CustomDomainAdminService
         }
         eventPublisher.publishEvent(new CustomDomainChangedEvent(id));
         return reread(id);
+    }
+
+    private AdminDomainResponse rejectPending(final long id, final String note, final String performedBy) {
+        requirePending(customDomainRepository.findById(id).orElseThrow(() -> new CustomDomainNotFoundException(NOT_FOUND)));
+        if (customDomainRepository.markRejected(id, performedBy, note, LocalDateTime.now(clock)) != 1) {
+            log.info("Custom domain application was reviewed before its rejection domainId={}", id);
+            throw new CustomDomainConflictException(ALREADY_REVIEWED);
+        }
+        eventPublisher.publishEvent(new CustomDomainChangedEvent(id));
+        log.info("Custom domain rejected domainId={}", id);
+        return reread(id);
+    }
+
+    private static void tellOwner(final long id, final AdminDomainResponse reviewed, final Consumer<String> send) {
+        if (reviewed.owner() == null) {
+            return;
+        }
+        try {
+            send.accept(reviewed.owner().email());
+        } catch (final RuntimeException exception) {
+            log.warn("Telling the owner about the review of their custom domain failed domainId={} exception={}", id, exception.getClass().getName());
+        }
     }
 
     private void handOver(final long id) {

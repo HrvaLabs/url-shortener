@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="https://www.thymeleaf.org"
+      th:replace="~{fragments/email :: layout(title=${subject}, heading='Domain removed', preheader=~{::preheader}, content=~{::content}, footer=~{})}">
+<body>
+<th:block th:fragment="preheader">We removed <th:block th:text="${hostname}">go.example.com</th:block>.<th:block th:if="${links_line != null}" th:text="' ' + ${links_line}"> 3 links moved to hrva.cc.</th:block></th:block>
+<th:block th:fragment="content">
+  <p class="e-fg" th:style="${s.p}">Hi <strong class="e-fg" th:style="${s.strong}" th:text="${name}">alice@example.com</strong>,</p>
+  <p class="e-fg" th:style="${s.p}">We removed <span class="e-fg mono" th:style="${s.short} + ${wrap}" th:text="${hostname}">go.example.com</span>.</p>
+  <p class="e-fg" th:if="${links_text != null}" th:style="${s.p}" th:text="${links_text}">3 links moved to hrva.cc. These got a new alias because theirs isn't free on hrva.cc:</p>
+  <table class="e-bd" th:if="${!renames.isEmpty()}" role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" th:style="${s.panel}">
+    <tr th:each="rename, it : ${renames}">
+      <td class="e-fg e-bd" th:style="${it.first} ? ${s.row} : ${s.rowNext}"><span class="e-fg mono" th:style="${s.short} + ${wrap}" th:text="${rename}">go.example.com/menu &rarr; hrva.cc/k3J9x</span></td>
+    </tr>
+    <tr th:if="${more_renames > 0}">
+      <td class="e-mu e-bd" th:style="${s.rowNext} + 'color: #67676f;'" th:text="|and ${more_renames} more|">and 5 more</td>
+    </tr>
+  </table>
+  <p class="e-fg" th:style="${s.p}">If you think that's a mistake, contact <a class="e-lk" th:href="@{'mailto:' + ${contact_email}}" th:style="${s.link}" th:text="${contact_email}">support@hrva.cc</a>.</p>
+  <th:block th:replace="~{fragments/email :: signoff}"/>
+</th:block>
+</body>
+</html>

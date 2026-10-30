@@ -7,6 +7,7 @@ import cc.hrva.urlshortener.model.enums.CustomDomainStatus;
 import cc.hrva.urlshortener.model.enums.DomainDisableReason;
 import cc.hrva.urlshortener.repository.CustomDomainRepository;
 import cc.hrva.urlshortener.service.LinkCheckService;
+import cc.hrva.urlshortener.service.SendingEmailService;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.DomainDisabled;
 import java.time.Clock;
 import java.time.LocalDateTime;
@@ -43,6 +44,7 @@ public class CustomDomainModeration {
     private final CustomDomainRepository customDomainRepository;
     private final CustomDomainLifecycle customDomainLifecycle;
     private final LinkCheckService linkCheckService;
+    private final SendingEmailService sendingEmailService;
     private final ApplicationEventPublisher eventPublisher;
     private final TransactionOperations transactionOperations;
     private final Clock clock;
@@ -94,14 +96,15 @@ public class CustomDomainModeration {
 
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public void disable(final long id, final DomainDisableReason reason, final String note) {
-        transactionOperations.executeWithoutResult(status -> {
+        final var turnedOff = transactionOperations.execute(status -> {
             final var domain = locked(id);
             if (!DISABLEABLE.contains(domain.getStatus())) {
                 log.info("Custom domain not turned off, its status doesn't allow it domainId={} status={}", id, domain.getStatus());
                 throw new CustomDomainConflictException(CANT_TURN_OFF);
             }
-            turnOff(domain, reason, note);
+            return turnOff(domain, reason, note);
         });
+        tellOwner(turnedOff);
     }
 
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
@@ -119,10 +122,12 @@ public class CustomDomainModeration {
 
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public boolean disableIfStillOn(final long id, final DomainDisableReason reason, final String note) {
-        return Boolean.TRUE.equals(transactionOperations.execute(status -> customDomainRepository.findByIdForUpdate(id)
+        final var turnedOff = transactionOperations.execute(status -> customDomainRepository.findByIdForUpdate(id)
                 .filter(domain -> DISABLEABLE.contains(domain.getStatus()))
                 .map(domain -> turnOff(domain, reason, note))
-                .orElse(false)));
+                .orElse(null));
+        tellOwner(turnedOff);
+        return turnedOff != null;
     }
 
     private boolean enableIfStillOffFor(final long id, final DomainDisableReason reason) {
@@ -144,17 +149,30 @@ public class CustomDomainModeration {
         }));
     }
 
-    private boolean turnOff(final CustomDomain domain, final DomainDisableReason reason, final String note) {
+    private TurnedOff turnOff(final CustomDomain domain, final DomainDisableReason reason, final String note) {
         final var id = domain.getId();
         final var hostname = domain.getHostname();
+        final var ownerEmail = domain.getOwner() == null ? null : domain.getOwner().getEmail();
         if (customDomainRepository.markDisabled(id, domain.getStatus(), reason, note, now()) != 1) {
             log.info("Custom domain changed before it could be turned off domainId={}", id);
-            return false;
+            return null;
         }
         eventPublisher.publishEvent(new CustomDomainChangedEvent(id));
         eventPublisher.publishEvent(new DomainDisabled(id, hostname, reason, note));
         log.info("Custom domain turned off domainId={} from={} reason={}", id, domain.getStatus(), reason);
-        return true;
+        return new TurnedOff(id, ownerEmail, hostname, CustomDomainResponses.disabledNote(reason, note));
+    }
+
+    private void tellOwner(final TurnedOff turnedOff) {
+        if (turnedOff == null || turnedOff.ownerEmail() == null) {
+            return;
+        }
+        try {
+            sendingEmailService.sendDomainDisabledEmail(turnedOff.ownerEmail(), turnedOff.hostname(), turnedOff.reasonText());
+        } catch (final RuntimeException exception) {
+            log.warn("Telling the owner their custom domain was turned off failed domainId={} exception={}", turnedOff.domainId(),
+                    exception.getClass().getName());
+        }
     }
 
     private CustomDomainStatus turnOn(final CustomDomain domain) {
@@ -213,6 +231,9 @@ public class CustomDomainModeration {
 
     private LocalDateTime now() {
         return LocalDateTime.now(clock);
+    }
+
+    private record TurnedOff(long domainId, String ownerEmail, String hostname, String reasonText) {
     }
 
 }

@@ -3,11 +3,15 @@ package cc.hrva.urlshortener.service.impl;
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.dto.DecisionsDigest;
 import cc.hrva.urlshortener.dto.WeeklyDigest;
+import cc.hrva.urlshortener.dto.domain.DnsRecord;
+import cc.hrva.urlshortener.dto.domain.DomainRemovalResponse;
+import cc.hrva.urlshortener.dto.domain.DomainRemovalResponse.DomainRename;
 import cc.hrva.urlshortener.dto.notification.DeadLinksEmail;
 import cc.hrva.urlshortener.dto.notification.WeeklySummary;
 import cc.hrva.urlshortener.exception.EmailLogNotFoundException;
 import cc.hrva.urlshortener.exception.EmailNotResendableException;
 import cc.hrva.urlshortener.model.EmailLog;
+import cc.hrva.urlshortener.model.enums.DomainLinkMode;
 import cc.hrva.urlshortener.model.enums.NotificationType;
 import cc.hrva.urlshortener.repository.EmailLogRepository;
 import cc.hrva.urlshortener.service.notification.ConsentEmails;
@@ -60,6 +64,11 @@ public class DefaultSendingEmailService implements SendingEmailService {
     private static final String REVIEW_PAGE = "/admin/review";
     private static final String DASHBOARD_PAGE = "/dashboard";
     private static final String CONSENT_WITHDRAWN = "This person has turned this email off since, so it can't be resent.";
+    private static final String CUSTOM_DOMAINS_SETTINGS = "/dashboard/settings#custom-domains";
+    private static final String ADD_THE_RECORD_HELP = "/help/custom-domains#add-the-record";
+    private static final String CONTACT_LINE = "If you think that's a mistake, contact %s.";
+    private static final String ARROW = " " + Character.toString(0x2192) + " ";
+    private static final int LISTED_RENAMES = 20;
     private static final DateTimeFormatter PASSKEY_ADDED_AT_FORMAT = DateTimeFormatter.ofPattern("d MMMM yyyy 'at' HH:mm 'UTC'", Locale.ENGLISH);
 
     private final AppProperties appProperties;
@@ -366,6 +375,99 @@ public class DefaultSendingEmailService implements SendingEmailService {
     }
 
     @Override
+    @Async
+    public void sendDomainApprovedEmail(final String to, final String hostname, final DnsRecord record) {
+        final var subject = "Your domain %s is approved: one step left".formatted(hostname);
+        final var firstLabel = StringUtils.substringBefore(record.name(), ".");
+        final var settingsUrl = frontendPage(CUSTOM_DOMAINS_SETTINGS);
+        final var helpUrl = frontendPage(ADD_THE_RECORD_HELP);
+        final var ctx = domainContext(to, subject, hostname);
+        ctx.setVariable("record", record);
+        ctx.setVariable("first_label", firstLabel);
+        ctx.setVariable("settings_url", settingsUrl);
+        ctx.setVariable("help_url", helpUrl);
+
+        sendDomainEmail(to, subject, "domain_approved", ctx, List.of(
+                subject,
+                "",
+                "We approved %s. One step left: add this CNAME record where the domain's DNS is managed.".formatted(hostname),
+                "",
+                "Type: " + record.type(),
+                "Name: " + record.name(),
+                "Target: " + record.target(),
+                "",
+                "Some DNS providers want only the first part of the name (%s).".formatted(firstLabel),
+                "",
+                "Open Custom domains: " + settingsUrl,
+                "How to add a CNAME: " + helpUrl));
+    }
+
+    @Override
+    @Async
+    public void sendDomainRejectedEmail(final String to, final String hostname, final String note) {
+        final var subject = "Your domain application for %s".formatted(hostname);
+        final var shownNote = StringUtils.stripToNull(note);
+        final var ctx = domainContext(to, subject, hostname);
+        ctx.setVariable("note", shownNote);
+
+        final var lines = new ArrayList<>(List.of(subject, "", "We didn't approve %s.".formatted(hostname)));
+        if (shownNote != null) {
+            lines.add("Note from the admin: " + shownNote);
+        }
+        lines.addAll(List.of("", contactLine()));
+        sendDomainEmail(to, subject, "domain_rejected", ctx, lines);
+    }
+
+    @Override
+    @Async
+    public void sendDomainDisabledEmail(final String to, final String hostname, final String reasonText) {
+        final var subject = "Your domain %s was turned off".formatted(hostname);
+        final var shownReason = StringUtils.stripToNull(reasonText);
+        final var ctx = domainContext(to, subject, hostname);
+        ctx.setVariable("reason_text", shownReason);
+
+        final var lines = new ArrayList<>(List.of(subject, "", "We turned off %s. Its links stop working until it's turned back on.".formatted(hostname)));
+        if (shownReason != null) {
+            lines.add("Reason: " + shownReason);
+        }
+        lines.addAll(List.of("", contactLine()));
+        sendDomainEmail(to, subject, "domain_disabled", ctx, lines);
+    }
+
+    @Override
+    @Async
+    public void sendDomainRemovedEmail(final String to, final String hostname, final DomainRemovalResponse summary, final DomainLinkMode mode) {
+        final var subject = "Your domain %s was removed".formatted(hostname);
+        final var primaryHost = shortLinks.host(null);
+        final var renamed = mode == DomainLinkMode.MOVE ? summary.renamed() : List.<DomainRename>of();
+        final var renames = renamed.stream()
+                .limit(LISTED_RENAMES)
+                .map(rename -> shortLinks.display(hostname, rename.from()) + ARROW + shortLinks.display(null, rename.to()))
+                .toList();
+        final var moreRenames = Math.max(0, renamed.size() - LISTED_RENAMES);
+        final var linksLine = removedLinksLine(summary, mode, primaryHost);
+        final var linksText = linksLine == null || renamed.isEmpty()
+                ? linksLine
+                : linksLine + " These got a new alias because theirs isn't free on %s:".formatted(primaryHost);
+        final var ctx = domainContext(to, subject, hostname);
+        ctx.setVariable("links_line", linksLine);
+        ctx.setVariable("links_text", linksText);
+        ctx.setVariable("renames", renames);
+        ctx.setVariable("more_renames", moreRenames);
+
+        final var lines = new ArrayList<>(List.of(subject, "", "We removed %s.".formatted(hostname)));
+        if (linksText != null) {
+            lines.add(linksText);
+        }
+        lines.addAll(renames);
+        if (moreRenames > 0) {
+            lines.add("and " + moreRenames + " more");
+        }
+        lines.addAll(List.of("", contactLine()));
+        sendDomainEmail(to, subject, "domain_removed", ctx, lines);
+    }
+
+    @Override
     public EmailLog resendEmail(final Long emailLogId) {
         final var failed = emailLogRepository.findById(emailLogId)
                 .orElseThrow(() -> new EmailLogNotFoundException("Email log entry doesn't exist"));
@@ -526,6 +628,43 @@ public class DefaultSendingEmailService implements SendingEmailService {
     private DeadLinkLine deadLinkLine(final DeadLink link) {
         return new DeadLinkLine(notificationMessages.target(link),
                 "Since " + notificationMessages.dayText(link.deadSince()) + ", " + DestinationStatusWords.of(link.lastStatus()));
+    }
+
+    private static String removedLinksLine(final DomainRemovalResponse summary, final DomainLinkMode mode, final String primaryHost) {
+        if (mode == DomainLinkMode.MOVE && summary.moved() > 0) {
+            return (summary.moved() == 1 ? "1 link" : summary.moved() + " links") + " moved to " + primaryHost + ".";
+        }
+        if (mode == DomainLinkMode.DEACTIVATE && summary.deactivated() > 0) {
+            return summary.deactivated() == 1 ? "1 link was turned off." : summary.deactivated() + " links were turned off.";
+        }
+        return null;
+    }
+
+    private String contactLine() {
+        return CONTACT_LINE.formatted(appProperties.getContactEmail());
+    }
+
+    private Context domainContext(final String to, final String subject, final String hostname) {
+        final var ctx = new Context();
+        ctx.setVariable("name", to);
+        ctx.setVariable("subject", subject);
+        ctx.setVariable("hostname", hostname);
+        ctx.setVariable("app_name", appProperties.getAppName());
+        ctx.setVariable("site_url", appProperties.getFrontendUrl());
+        ctx.setVariable("contact_email", appProperties.getContactEmail());
+        return ctx;
+    }
+
+    private void sendDomainEmail(final String to, final String subject, final String template, final Context ctx, final List<String> plainLines) {
+        final var email = Email.builder()
+                .sender(appProperties.getEmailSenderAddress())
+                .receivers(new String[]{to})
+                .subject(subject)
+                .plainText(String.join("\n", plainLines))
+                .text(templateEngine.process(template, ctx))
+                .build();
+
+        tryToSendEmail(email);
     }
 
     private String frontendPage(final String path) {

@@ -11,6 +11,7 @@ import cc.hrva.urlshortener.repository.DomainRuleRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.service.DomainAgeService;
 import cc.hrva.urlshortener.service.DomainReputationService;
+import cc.hrva.urlshortener.service.SendingEmailService;
 import cc.hrva.urlshortener.service.SuspiciousUrlService;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.DomainDisabled;
@@ -38,6 +39,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.FilterType;
 import org.springframework.context.annotation.Import;
+import org.springframework.core.task.TaskRejectedException;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -47,10 +49,13 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 
 @SpringBootTest(
         classes = CustomDomainModerationTest.TestApplication.class,
@@ -107,6 +112,9 @@ class CustomDomainModerationTest {
     @MockitoBean
     private SuspiciousUrlService suspiciousUrlService;
 
+    @MockitoBean
+    private SendingEmailService sendingEmailService;
+
     @BeforeEach
     void setUp() {
         account(ANA, "ana@hrva.cc");
@@ -161,6 +169,64 @@ class CustomDomainModerationTest {
         assertThatThrownBy(() -> customDomainModeration.disable(999_999L, DomainDisableReason.ADMIN, "Spam"))
                 .isInstanceOf(CustomDomainNotFoundException.class)
                 .hasMessage("Custom domain not found");
+    }
+
+    @Test
+    void disablingEmailsTheOwnerWithTheReason() {
+        final var byAdmin = domain(ANA, "go.example.com", "ACTIVE", "cf-1");
+        final var byBlock = domain(BOB, "bob.example.org", "AWAITING_DNS", "cf-2");
+        final var byRule = domain(ANA, "shop.scam-wave.com", "ACTIVE", "cf-3");
+        final var byList = domain(ANA, "links.example.net", "ERROR", "cf-4");
+        rule("scam-wave.com", "BLOCK");
+        final var seenWhenSent = new CopyOnWriteArrayList<String>();
+        doAnswer(invocation -> {
+            final String hostname = invocation.getArgument(1);
+            seenWhenSent.add(hostname + " " + TransactionSynchronizationManager.isActualTransactionActive() + " "
+                    + CompletableFuture.supplyAsync(() -> jdbcTemplate.queryForObject("select status from custom_domain where hostname = ?", String.class,
+                    hostname)).join());
+            return null;
+        }).when(sendingEmailService).sendDomainDisabledEmail(anyString(), anyString(), anyString());
+
+        customDomainModeration.disable(byAdmin, DomainDisableReason.ADMIN, "Phishing kit");
+        customDomainModeration.disableForUser(BOB, ADMIN);
+        customDomainModeration.disableMatching("scam-wave.com", "Fake shops");
+        customDomainModeration.disableIfStillOn(byList, DomainDisableReason.BLOCKLIST, null);
+
+        verify(sendingEmailService).sendDomainDisabledEmail("ana@hrva.cc", "go.example.com", "Phishing kit");
+        verify(sendingEmailService).sendDomainDisabledEmail("bob@hrva.cc", "bob.example.org", "Turned off because the account was blocked.");
+        verify(sendingEmailService).sendDomainDisabledEmail("ana@hrva.cc", "shop.scam-wave.com", "Turned off because the domain is on a blocklist.");
+        verify(sendingEmailService).sendDomainDisabledEmail("ana@hrva.cc", "links.example.net", "Turned off because the domain is on a blocklist.");
+        verifyNoMoreInteractions(sendingEmailService);
+        assertThat(seenWhenSent).containsExactly("go.example.com false DISABLED", "bob.example.org false DISABLED",
+                "shop.scam-wave.com false DISABLED", "links.example.net false DISABLED");
+        assertThat(List.of(byAdmin, byBlock, byRule, byList)).allSatisfy(id -> assertThat(statusOf(id)).isEqualTo("DISABLED"));
+        assertThat(DomainDisableReason.values()).containsExactlyInAnyOrder(DomainDisableReason.ADMIN, DomainDisableReason.USER_BLOCKED,
+                DomainDisableReason.DOMAIN_RULE, DomainDisableReason.BLOCKLIST);
+    }
+
+    @Test
+    void aDomainThatWasNotTurnedOffEmailsNobody() {
+        final var alreadyOff = domain(ANA, "off.example.com", "DISABLED", "cf-1");
+        final var pending = domain(ANA, "new.example.com", "PENDING_REVIEW", null);
+
+        assertThat(customDomainModeration.disableIfStillOn(alreadyOff, DomainDisableReason.BLOCKLIST, null)).isFalse();
+        assertThatThrownBy(() -> customDomainModeration.disable(pending, DomainDisableReason.ADMIN, "Spam"))
+                .isInstanceOf(CustomDomainConflictException.class);
+        customDomainModeration.disableForUser(ANA, ADMIN);
+
+        verifyNoInteractions(sendingEmailService);
+    }
+
+    @Test
+    void aFailedEmailKeepsTheDomainOff() {
+        final var id = domain(ANA, "go.example.com", "ACTIVE", "cf-1");
+        doThrow(new TaskRejectedException("mail queue full")).when(sendingEmailService).sendDomainDisabledEmail(anyString(), anyString(), anyString());
+
+        customDomainModeration.disable(id, DomainDisableReason.ADMIN, "Phishing kit");
+
+        assertThat(statusOf(id)).isEqualTo("DISABLED");
+        assertThat(customDomainModeration.disableIfStillOn(domain(ANA, "links.example.com", "ACTIVE", "cf-2"), DomainDisableReason.BLOCKLIST, null))
+                .isTrue();
     }
 
     @Test

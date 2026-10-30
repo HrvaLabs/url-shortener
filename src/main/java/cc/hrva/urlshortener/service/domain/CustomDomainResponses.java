@@ -63,15 +63,18 @@ public class CustomDomainResponses {
         return new DomainSteps(CLOUDFLARE_ACTIVE.equals(domain.getCloudflareStatus()), CLOUDFLARE_ACTIVE.equals(domain.getCloudflareSslStatus()));
     }
 
+    public static String disabledNote(final DomainDisableReason reason, final String note) {
+        if (reason == null || reason == DomainDisableReason.ADMIN) {
+            return note;
+        }
+        return reason == DomainDisableReason.USER_BLOCKED ? ACCOUNT_BLOCKED : ON_A_BLOCKLIST;
+    }
+
     private static String disabledNote(final CustomDomain domain) {
         if (domain.getStatus() != CustomDomainStatus.DISABLED) {
             return null;
         }
-        final var reason = domain.getDisabledReason();
-        if (reason == null || reason == DomainDisableReason.ADMIN) {
-            return domain.getDisabledNote();
-        }
-        return reason == DomainDisableReason.USER_BLOCKED ? ACCOUNT_BLOCKED : ON_A_BLOCKLIST;
+        return disabledNote(domain.getDisabledReason(), domain.getDisabledNote());
     }
 
     private String cnameTarget() {

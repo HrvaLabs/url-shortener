@@ -3,6 +3,7 @@ package cc.hrva.urlshortener.service.domain;
 import cc.hrva.urlshortener.configuration.AppConfiguration;
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.dto.domain.AdminDomainResponse;
+import cc.hrva.urlshortener.dto.domain.DnsRecord;
 import cc.hrva.urlshortener.exception.CustomDomainConflictException;
 import cc.hrva.urlshortener.exception.CustomDomainNotFoundException;
 import cc.hrva.urlshortener.model.User;
@@ -16,6 +17,7 @@ import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.service.CustomDomainAdminService;
 import cc.hrva.urlshortener.service.LinkCheckService;
 import cc.hrva.urlshortener.service.ScammerSignalService;
+import cc.hrva.urlshortener.service.SendingEmailService;
 import cc.hrva.urlshortener.service.domain.CloudflareTokenCheck.TokenState;
 import cc.hrva.urlshortener.service.impl.DefaultCustomDomainAdminService;
 import java.time.Clock;
@@ -59,6 +61,7 @@ import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mockingDetails;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @SpringBootTest(
@@ -126,6 +129,9 @@ class CustomDomainApprovalRaceTest {
 
     @MockitoBean
     private LinkCheckService linkCheckService;
+
+    @MockitoBean
+    private SendingEmailService sendingEmailService;
 
     @BeforeEach
     void setUp() {
@@ -294,6 +300,8 @@ class CustomDomainApprovalRaceTest {
         assertThat(committedChanges.changes()).containsExactly(new CustomDomainChangedEvent(approving), new CustomDomainChangedEvent(rejecting));
         assertThat(jdbcTemplate.queryForMap("select status, hostname_key, review_note from custom_domain where id = ?", rejecting))
                 .containsEntry("status", "REJECTED").containsEntry("hostname_key", null).containsEntry("review_note", "Not yours");
+        verify(sendingEmailService).sendDomainApprovedEmail("ana@hrva.cc", "go.example.com", DnsRecord.cname("go.example.com", "domains.hrva.cc"));
+        verify(sendingEmailService).sendDomainRejectedEmail("bob@hrva.cc", "links.example.org", "Not yours");
     }
 
     @Test
@@ -304,6 +312,7 @@ class CustomDomainApprovalRaceTest {
         assertThatThrownBy(() -> customDomainAdminService.reject(reviewed, null, ADMIN)).isInstanceOf(CustomDomainConflictException.class);
 
         assertThat(committedChanges.changes()).isEmpty();
+        verifyNoInteractions(sendingEmailService);
     }
 
     private AtomicReference<Boolean> bothCountTheSlots() {

@@ -4,6 +4,9 @@ import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.dto.DecisionsDigest;
 import cc.hrva.urlshortener.dto.LinkDigestEntry;
 import cc.hrva.urlshortener.dto.WeeklyDigest;
+import cc.hrva.urlshortener.dto.domain.DnsRecord;
+import cc.hrva.urlshortener.dto.domain.DomainRemovalResponse;
+import cc.hrva.urlshortener.dto.domain.DomainRemovalResponse.DomainRename;
 import cc.hrva.urlshortener.dto.notification.DeadLinksEmail;
 import cc.hrva.urlshortener.dto.notification.WeeklySummary;
 import cc.hrva.urlshortener.dto.stats.CountEntry;
@@ -18,6 +21,7 @@ import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.VerificationToken;
 import cc.hrva.urlshortener.model.enums.BlockReason;
+import cc.hrva.urlshortener.model.enums.DomainLinkMode;
 import cc.hrva.urlshortener.model.enums.NotificationType;
 import cc.hrva.urlshortener.repository.EmailLogRepository;
 import cc.hrva.urlshortener.service.digest.WeeklyDigestText;
@@ -39,6 +43,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.function.Consumer;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.BeforeEach;
@@ -83,6 +88,7 @@ class DefaultSendingEmailServiceTest {
     private static final String HRVALABS_LINK = "https://hrvalabs.net";
     private static final CustomDomain GO_EXAMPLE = CustomDomain.builder().id(7L).hostname("go.example.com").build();
     private static final String ARROW = Character.toString(0x2192);
+    private static final String ARROW_LINE = " " + ARROW + " ";
 
     @Mock
     private TemplateEngine templateEngine;
@@ -1168,6 +1174,215 @@ class DefaultSendingEmailServiceTest {
         final var email = sentWeeklySummaryEmail(summary);
 
         assertThat(email.getText()).doesNotContain("<b>x</b>").contains("hrva.cc/abc → &lt;b&gt;x&lt;/b&gt;.example, 5 clicks");
+    }
+
+    @Test
+    void domainApprovedCarriesTheRecord() throws Exception {
+        final var email = sentDomainEmails(service -> service.sendDomainApprovedEmail("alice@example.com", "go.example.com",
+                DnsRecord.cname("go.example.com", "domains.hrva.cc"))).getFirst();
+
+        assertThat(email.getReceivers()).containsExactly("alice@example.com");
+        assertThat(email.getSubject()).isEqualTo("Your domain go.example.com is approved: one step left");
+        assertThat(email.getText()).containsPattern("<h1[^>]*>Domain approved: one step left</h1>");
+        assertThat(textOf(email.getText())).contains(
+                "Hi alice@example.com,",
+                "We approved go.example.com. One step left: add this CNAME record where the domain's DNS is managed.",
+                "Type: CNAME Name: go.example.com Target: domains.hrva.cc",
+                "Some DNS providers want only the first part of the name (go).",
+                "Open Custom domains",
+                "How to add a CNAME");
+        assertThat(linksIn(email.getText())).containsExactly(
+                "https://hrva.cc/dashboard/settings#custom-domains",
+                "https://hrva.cc/help/custom-domains#add-the-record",
+                SITE_LINK,
+                HRVALABS_LINK);
+        assertThat(email.getPlainText()).isEqualTo("""
+                Your domain go.example.com is approved: one step left
+
+                We approved go.example.com. One step left: add this CNAME record where the domain's DNS is managed.
+
+                Type: CNAME
+                Name: go.example.com
+                Target: domains.hrva.cc
+
+                Some DNS providers want only the first part of the name (go).
+
+                Open Custom domains: https://hrva.cc/dashboard/settings#custom-domains
+                How to add a CNAME: https://hrva.cc/help/custom-domains#add-the-record""");
+    }
+
+    @Test
+    void domainApprovedNamesTheFirstPartOfADeeperName() throws Exception {
+        final var email = sentDomainEmails(service -> service.sendDomainApprovedEmail("alice@example.com", "links.shop.example.co.uk",
+                DnsRecord.cname("links.shop.example.co.uk", "domains.hrva.cc"))).getFirst();
+
+        assertThat(textOf(email.getText())).contains("Name: links.shop.example.co.uk", "Some DNS providers want only the first part of the name (links).");
+        assertThat(email.getPlainText()).contains("Name: links.shop.example.co.uk\n", "the first part of the name (links).");
+    }
+
+    @Test
+    void domainRejectedShowsTheNoteOnlyWhenGiven() throws Exception {
+        final var emails = sentDomainEmails(service -> {
+            service.sendDomainRejectedEmail("alice@example.com", "go.example.com", "Use a domain you own");
+            service.sendDomainRejectedEmail("alice@example.com", "go.example.com", null);
+        });
+
+        final var withNote = emails.getFirst();
+        assertThat(withNote.getReceivers()).containsExactly("alice@example.com");
+        assertThat(withNote.getSubject()).isEqualTo("Your domain application for go.example.com");
+        assertThat(withNote.getText()).containsPattern("<h1[^>]*>Domain not approved</h1>");
+        assertThat(textOf(withNote.getText())).contains(
+                "Hi alice@example.com,",
+                "We didn't approve go.example.com.",
+                "Note from the admin: Use a domain you own",
+                "If you think that's a mistake, contact support@hrva.cc.");
+        assertThat(linksIn(withNote.getText())).containsExactly("mailto:support@hrva.cc", SITE_LINK, HRVALABS_LINK);
+        assertThat(withNote.getPlainText()).isEqualTo("""
+                Your domain application for go.example.com
+
+                We didn't approve go.example.com.
+                Note from the admin: Use a domain you own
+
+                If you think that's a mistake, contact support@hrva.cc.""");
+        final var withoutNote = emails.get(1);
+        assertThat(textOf(withoutNote.getText())).contains("We didn't approve go.example.com.").doesNotContain("Note from the admin");
+        assertThat(withoutNote.getPlainText()).isEqualTo("""
+                Your domain application for go.example.com
+
+                We didn't approve go.example.com.
+
+                If you think that's a mistake, contact support@hrva.cc.""");
+    }
+
+    @Test
+    void domainDisabledSaysWhy() throws Exception {
+        final var emails = sentDomainEmails(service -> {
+            service.sendDomainDisabledEmail("alice@example.com", "go.example.com", "Phishing kit");
+            service.sendDomainDisabledEmail("alice@example.com", "go.example.com", "Turned off because the domain is on a blocklist.");
+        });
+
+        final var byAnAdmin = emails.getFirst();
+        assertThat(byAnAdmin.getReceivers()).containsExactly("alice@example.com");
+        assertThat(byAnAdmin.getSubject()).isEqualTo("Your domain go.example.com was turned off");
+        assertThat(byAnAdmin.getText()).containsPattern("<h1[^>]*>Domain turned off</h1>");
+        assertThat(textOf(byAnAdmin.getText())).contains(
+                "Hi alice@example.com,",
+                "We turned off go.example.com. Its links stop working until it's turned back on.",
+                "Reason Phishing kit",
+                "If you think that's a mistake, contact support@hrva.cc.");
+        assertThat(linksIn(byAnAdmin.getText())).containsExactly("mailto:support@hrva.cc", SITE_LINK, HRVALABS_LINK);
+        assertThat(byAnAdmin.getPlainText()).isEqualTo("""
+                Your domain go.example.com was turned off
+
+                We turned off go.example.com. Its links stop working until it's turned back on.
+                Reason: Phishing kit
+
+                If you think that's a mistake, contact support@hrva.cc.""");
+        assertThat(textOf(emails.get(1).getText())).contains("Reason Turned off because the domain is on a blocklist.");
+        assertThat(emails.get(1).getPlainText()).contains("\nReason: Turned off because the domain is on a blocklist.\n");
+    }
+
+    @Test
+    void domainRemovedSummarizesTheLinks() throws Exception {
+        final var renames = IntStream.rangeClosed(1, 25).mapToObj(number -> new DomainRename("menu" + number, "new" + number)).toList();
+        final var email = sentDomainEmails(service -> service.sendDomainRemovedEmail("alice@example.com", "go.example.com",
+                new DomainRemovalResponse(30, renames, 0), DomainLinkMode.MOVE)).getFirst();
+
+        assertThat(email.getReceivers()).containsExactly("alice@example.com");
+        assertThat(email.getSubject()).isEqualTo("Your domain go.example.com was removed");
+        assertThat(email.getText()).containsPattern("<h1[^>]*>Domain removed</h1>")
+                .contains(">go.example.com/menu1" + ARROW_LINE + "hrva.cc/new1<", ">go.example.com/menu20" + ARROW_LINE + "hrva.cc/new20<")
+                .doesNotContain("menu21");
+        assertThat(textOf(email.getText())).contains(
+                "Hi alice@example.com,",
+                "We removed go.example.com.",
+                "30 links moved to hrva.cc. These got a new alias because theirs isn't free on hrva.cc:",
+                "and 5 more",
+                "If you think that's a mistake, contact support@hrva.cc.");
+        assertThat(linksIn(email.getText())).containsExactly("mailto:support@hrva.cc", SITE_LINK, HRVALABS_LINK);
+        final var renameLines = IntStream.rangeClosed(1, 20).mapToObj(number -> "go.example.com/menu" + number + ARROW_LINE + "hrva.cc/new" + number)
+                .collect(Collectors.joining("\n"));
+        assertThat(email.getPlainText()).isEqualTo("""
+                Your domain go.example.com was removed
+
+                We removed go.example.com.
+                30 links moved to hrva.cc. These got a new alias because theirs isn't free on hrva.cc:
+                %s
+                and 5 more
+
+                If you think that's a mistake, contact support@hrva.cc.""".formatted(renameLines));
+    }
+
+    @Test
+    void domainRemovedSaysHowManyLinksWereTurnedOffOrMoved() throws Exception {
+        final var emails = sentDomainEmails(service -> {
+            service.sendDomainRemovedEmail("alice@example.com", "go.example.com", new DomainRemovalResponse(0, List.of(), 2), DomainLinkMode.DEACTIVATE);
+            service.sendDomainRemovedEmail("alice@example.com", "go.example.com", new DomainRemovalResponse(0, List.of(), 1), DomainLinkMode.DEACTIVATE);
+            service.sendDomainRemovedEmail("alice@example.com", "go.example.com", new DomainRemovalResponse(1, List.of(), 0), DomainLinkMode.MOVE);
+            service.sendDomainRemovedEmail("alice@example.com", "go.example.com", DomainRemovalResponse.nothing(), DomainLinkMode.DEACTIVATE);
+        });
+
+        assertThat(textOf(emails.getFirst().getText())).contains("We removed go.example.com. 2 links were turned off.").doesNotContain("moved to", "alias");
+        assertThat(emails.getFirst().getPlainText()).contains("\nWe removed go.example.com.\n2 links were turned off.\n");
+        assertThat(textOf(emails.get(1).getText())).contains("1 link was turned off.");
+        assertThat(textOf(emails.get(2).getText())).contains("We removed go.example.com. 1 link moved to hrva.cc. If you think")
+                .doesNotContain("alias", "and 0 more");
+        assertThat(textOf(emails.get(3).getText())).contains("We removed go.example.com. If you think").doesNotContain("links", "link was");
+        assertThat(emails.get(3).getPlainText()).isEqualTo("""
+                Your domain go.example.com was removed
+
+                We removed go.example.com.
+
+                If you think that's a mistake, contact support@hrva.cc.""");
+    }
+
+    @Test
+    void domainEmailsAreTransactional() throws Exception {
+        final var emails = sentDomainEmails(service -> {
+            service.sendDomainApprovedEmail("alice@example.com", "go.example.com", DnsRecord.cname("go.example.com", "domains.hrva.cc"));
+            service.sendDomainRejectedEmail("alice@example.com", "go.example.com", "Use a domain you own");
+            service.sendDomainDisabledEmail("alice@example.com", "go.example.com", "Phishing kit");
+            service.sendDomainRemovedEmail("alice@example.com", "go.example.com", new DomainRemovalResponse(0, List.of(), 2), DomainLinkMode.DEACTIVATE);
+        });
+
+        assertThat(emails).hasSize(4).allSatisfy(email -> {
+            assertThat(email.getHeaders()).isEmpty();
+            assertThat(email.getText()).doesNotContain("unsubscribe", "Notification settings", "You get this because");
+            assertThat(email.getPlainText()).doesNotContain("unsubscribe", "You get this because");
+        });
+        final var logged = ArgumentCaptor.forClass(EmailLog.class);
+        verify(emailLogRepository, atLeastOnce()).save(logged.capture());
+        assertThat(logged.getAllValues()).extracting(EmailLog::getSubject).containsSubsequence(
+                "Your domain go.example.com is approved: one step left",
+                "Your domain application for go.example.com",
+                "Your domain go.example.com was turned off",
+                "Your domain go.example.com was removed");
+        assertThat(logged.getAllValues()).allSatisfy(entry -> {
+            assertThat(entry.getConsentType()).isNull();
+            assertThat(entry.getUserId()).isNull();
+        });
+        verifyNoInteractions(emailConsentReader);
+    }
+
+    @Test
+    void domainEmailsEscapeWhatAdminsWrite() throws Exception {
+        final var emails = sentDomainEmails(service -> {
+            service.sendDomainRejectedEmail("alice@example.com", "go.example.com", "<b>no</b><script>alert(1)</script>");
+            service.sendDomainDisabledEmail("alice@example.com", "go.example.com", "<i>spam</i>");
+        });
+
+        assertThat(emails.getFirst().getText()).doesNotContain("<b>no</b>", "<script>").contains("&lt;b&gt;no&lt;/b&gt;&lt;script&gt;");
+        assertThat(emails.get(1).getText()).doesNotContain("<i>spam</i>").contains("&lt;i&gt;spam&lt;/i&gt;");
+    }
+
+    private List<Email> sentDomainEmails(final Consumer<DefaultSendingEmailService> send) throws Exception {
+        saveReturnsArgument();
+        final var sent = ArgumentCaptor.forClass(Email.class);
+        doAnswer(invocation -> null).when(emailService).sendEmail(sent.capture(), eq(null));
+
+        send.accept(configuredEmailService(realTemplateEngine()));
+
+        return sent.getAllValues();
     }
 
     private Email sentWeeklySummaryEmail(final WeeklySummary summary) throws Exception {

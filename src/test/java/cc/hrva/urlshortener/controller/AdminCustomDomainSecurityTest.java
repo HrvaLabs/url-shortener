@@ -6,6 +6,7 @@ import cc.hrva.urlshortener.configuration.GlobalExceptionHandler;
 import cc.hrva.urlshortener.configuration.JacksonConfiguration;
 import cc.hrva.urlshortener.configuration.SecurityConfiguration;
 import cc.hrva.urlshortener.configuration.WebConfiguration;
+import cc.hrva.urlshortener.dto.domain.DnsRecord;
 import cc.hrva.urlshortener.mcp.McpResourceServerConfiguration;
 import cc.hrva.urlshortener.mcp.authorization.AuthorizationServerConfiguration;
 import cc.hrva.urlshortener.mcp.bridge.ConnectRequestStore;
@@ -29,6 +30,7 @@ import cc.hrva.urlshortener.security.TokenProvider;
 import cc.hrva.urlshortener.service.LinkCheckService;
 import cc.hrva.urlshortener.service.ReservedAliasService;
 import cc.hrva.urlshortener.service.ScammerSignalService;
+import cc.hrva.urlshortener.service.SendingEmailService;
 import cc.hrva.urlshortener.service.UrlService;
 import cc.hrva.urlshortener.service.UserService;
 import cc.hrva.urlshortener.service.domain.AdminDomainResponses;
@@ -59,12 +61,15 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.stream.IntStream;
 import org.hibernate.SessionFactory;
 import org.hibernate.stat.Statistics;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.stubbing.Answer;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.SpringBootConfiguration;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
@@ -90,13 +95,17 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.json.JsonCompareMode;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.tuple;
 import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.nullValue;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -194,6 +203,9 @@ class AdminCustomDomainSecurityTest {
 
     @MockitoBean
     private LinkCheckService linkCheckService;
+
+    @MockitoBean
+    private SendingEmailService sendingEmailService;
 
     @DynamicPropertySource
     static void signingKey(final DynamicPropertyRegistry registry) {
@@ -590,6 +602,31 @@ class AdminCustomDomainSecurityTest {
                 .containsEntry("target_identifier", String.valueOf(id))
                 .containsEntry("failed", false));
         verifyNoInteractions(cloudflareTokenCheck, customDomainProvisioner);
+    }
+
+    @Test
+    void reviewEmailsGoToTheOwnerOnceTheReviewHasCommitted() throws Exception {
+        final var approving = domain(ANA, "go.example.com", "PENDING_REVIEW", NOW.minusDays(1));
+        final var rejecting = domain(ANA, "links.example.org", "PENDING_REVIEW", NOW.minusDays(1));
+        final var seenWhenSent = new CopyOnWriteArrayList<String>();
+        final Answer<Void> recordWhatOthersSee = invocation -> {
+            final String hostname = invocation.getArgument(1);
+            seenWhenSent.add(hostname + " " + TransactionSynchronizationManager.isActualTransactionActive() + " "
+                    + CompletableFuture.supplyAsync(() -> jdbcTemplate.queryForObject("select status from custom_domain where hostname = ?", String.class,
+                    hostname)).join());
+            return null;
+        };
+        doAnswer(recordWhatOthersSee).when(sendingEmailService).sendDomainApprovedEmail(anyString(), anyString(), any());
+        doAnswer(recordWhatOthersSee).when(sendingEmailService).sendDomainRejectedEmail(anyString(), anyString(), any());
+
+        mockMvc.perform(as(ADMIN_TOKEN, post(DOMAINS + "/" + approving + "/approve"))).andExpect(status().isOk());
+        mockMvc.perform(as(ADMIN_TOKEN, post(DOMAINS + "/" + rejecting + "/reject")).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"note\":\"  We can't verify this domain is yours  \"}"))
+                .andExpect(status().isOk());
+
+        verify(sendingEmailService).sendDomainApprovedEmail(ANA_EMAIL, "go.example.com", DnsRecord.cname("go.example.com", "domains.hrva.cc"));
+        verify(sendingEmailService).sendDomainRejectedEmail(ANA_EMAIL, "links.example.org", "We can't verify this domain is yours");
+        assertThat(seenWhenSent).containsExactly("go.example.com false APPROVED_PROVISIONING", "links.example.org false REJECTED");
     }
 
     @Test

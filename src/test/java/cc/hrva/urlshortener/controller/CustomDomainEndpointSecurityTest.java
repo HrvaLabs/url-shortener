@@ -23,6 +23,7 @@ import cc.hrva.urlshortener.security.OAuth2LoginSuccessHandler;
 import cc.hrva.urlshortener.security.TokenProvider;
 import cc.hrva.urlshortener.service.LinkCheckService;
 import cc.hrva.urlshortener.service.ReservedAliasService;
+import cc.hrva.urlshortener.service.SendingEmailService;
 import cc.hrva.urlshortener.service.UrlService;
 import cc.hrva.urlshortener.service.UserService;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent;
@@ -196,6 +197,9 @@ class CustomDomainEndpointSecurityTest {
 
     @MockitoBean
     private ReservedAliasService reservedAliasService;
+
+    @MockitoBean
+    private SendingEmailService sendingEmailService;
 
     @DynamicPropertySource
     static void signingKey(final DynamicPropertyRegistry registry) {

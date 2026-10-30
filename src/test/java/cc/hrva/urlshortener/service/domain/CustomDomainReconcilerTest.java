@@ -23,6 +23,7 @@ import cc.hrva.urlshortener.repository.CustomDomainRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent;
 import cc.hrva.urlshortener.service.LinkCheckService;
+import cc.hrva.urlshortener.service.SendingEmailService;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.DomainDisabled;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.DomainDrift;
 import cc.hrva.urlshortener.service.domain.CloudflareTokenCheck.TokenState;
@@ -133,6 +134,7 @@ class CustomDomainReconcilerTest {
 
     private final CloudflareTokenCheck cloudflareTokenCheck = mock(CloudflareTokenCheck.class);
     private final LinkCheckService linkCheckService = mock(LinkCheckService.class);
+    private final SendingEmailService sendingEmailService = mock(SendingEmailService.class);
     private final Logger reconcilerLogger = (Logger) LoggerFactory.getLogger(CustomDomainReconciler.class);
     private final ListAppender<ILoggingEvent> logEvents = new ListAppender<>();
     private CustomDomainReconciler reconciler;
@@ -146,7 +148,7 @@ class CustomDomainReconcilerTest {
         jdbcTemplate.update("insert into user_account (id, email, password, active, create_date) values (?, 'ana@hrva.cc', 'secret-hash', true, ?)",
                 ANA, NOW.minusDays(30));
         when(linkCheckService.check(anyString())).thenReturn(LinkVerdict.clean());
-        final var moderation = new CustomDomainModeration(customDomainRepository, customDomainLifecycle, linkCheckService, eventPublisher,
+        final var moderation = new CustomDomainModeration(customDomainRepository, customDomainLifecycle, linkCheckService, sendingEmailService, eventPublisher,
                 transactionOperations, CLOCK);
         reconciler = new CustomDomainReconciler(CLOUDFLARE, cloudflareTokenCheck, customDomainRepository, customDomainReconcileRepository,
                 customDomainLifecycle, customDomainHostnames, linkCheckService, moderation, eventPublisher, transactionOperations, appProperties, CLOCK);

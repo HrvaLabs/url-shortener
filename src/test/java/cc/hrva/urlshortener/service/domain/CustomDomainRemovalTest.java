@@ -13,6 +13,7 @@ import cc.hrva.urlshortener.repository.UrlDomainMoves;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.service.ReservedAliasService;
+import cc.hrva.urlshortener.service.SendingEmailService;
 import cc.hrva.urlshortener.service.UrlService;
 import cc.hrva.urlshortener.service.domain.CustomDomainRemoval.Actor;
 import java.time.Clock;
@@ -43,6 +44,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.FilterType;
 import org.springframework.context.annotation.Import;
+import org.springframework.core.task.TaskRejectedException;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -54,9 +56,11 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -114,6 +118,9 @@ class CustomDomainRemovalTest {
 
     @MockitoBean
     private CloudflareClient cloudflareClient;
+
+    @MockitoBean
+    private SendingEmailService sendingEmailService;
 
     @BeforeEach
     void setUp() {
@@ -331,6 +338,65 @@ class CustomDomainRemovalTest {
 
         assertThat(seenByTheRead.get()).isEqualTo("ACTIVE");
         assertThat(creator.get(10, TimeUnit.SECONDS)).isEqualTo("DELETED");
+    }
+
+    @Test
+    void onlyAnAdminRemovalEmails() {
+        final var removedByItsOwner = domain("mine.example.com", "ACTIVE", "cf-1");
+        link(removedByItsOwner, "cafe", true);
+
+        customDomainRemoval.remove(removedByItsOwner, DomainLinkMode.DEACTIVATE, OWNER);
+
+        verifyNoInteractions(sendingEmailService);
+
+        final var removedByAnAdmin = domain("go.example.com", "ACTIVE", "cf-2");
+        final var menu = link(removedByAnAdmin, "menu", true);
+        hrvaLink("menu", true);
+        final var seenWhenSent = new CopyOnWriteArrayList<String>();
+        doAnswer(invocation -> {
+            seenWhenSent.add(String.valueOf(TransactionSynchronizationManager.isActualTransactionActive()));
+            seenWhenSent.add(CompletableFuture.supplyAsync(() -> statusOf(removedByAnAdmin) + " " + aliasOf(menu)).join());
+            return null;
+        }).when(sendingEmailService).sendDomainRemovedEmail(anyString(), anyString(), any(), any());
+
+        final var response = customDomainRemoval.remove(removedByAnAdmin, DomainLinkMode.MOVE, ADMIN);
+
+        assertThat(response).isEqualTo(new DomainRemovalResponse(1, List.of(new DomainRename("menu", "k3J9x")), 0));
+        verify(sendingEmailService).sendDomainRemovedEmail("ana@hrva.cc", "go.example.com", response, DomainLinkMode.MOVE);
+        assertThat(seenWhenSent).containsExactly("false", "DELETED k3J9x");
+    }
+
+    @Test
+    void anAdminRemovalThatTurnsLinksOffSaysHowMany() {
+        final var domain = domain("go.example.com", "ACTIVE", "cf-1");
+        link(domain, "menu", true);
+        link(domain, "cafe", true);
+
+        final var response = customDomainRemoval.remove(domain, DomainLinkMode.DEACTIVATE, ADMIN);
+
+        verify(sendingEmailService).sendDomainRemovedEmail("ana@hrva.cc", "go.example.com", new DomainRemovalResponse(0, List.of(), 2),
+                DomainLinkMode.DEACTIVATE);
+        assertThat(response.deactivated()).isEqualTo(2);
+    }
+
+    @Test
+    void aFailedEmailKeepsTheDomainRemoved() {
+        final var domain = domain("go.example.com", "ACTIVE", "cf-1");
+        doThrow(new TaskRejectedException("mail queue full")).when(sendingEmailService).sendDomainRemovedEmail(anyString(), anyString(), any(), any());
+
+        assertThat(customDomainRemoval.remove(domain, DomainLinkMode.DEACTIVATE, ADMIN)).isEqualTo(DomainRemovalResponse.nothing());
+
+        assertThat(statusOf(domain)).isEqualTo("DELETED");
+    }
+
+    @Test
+    void aRefusedRemovalEmailsNobody() {
+        final var id = domain("go.example.com", "ACTIVE", null);
+        customDomainRemoval.remove(id, DomainLinkMode.DEACTIVATE, OWNER);
+
+        assertThatThrownBy(() -> customDomainRemoval.remove(id, DomainLinkMode.DEACTIVATE, ADMIN)).isInstanceOf(CustomDomainNotFoundException.class);
+
+        verifyNoInteractions(sendingEmailService);
     }
 
     @Test

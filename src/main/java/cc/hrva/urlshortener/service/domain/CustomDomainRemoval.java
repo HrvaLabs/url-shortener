@@ -12,6 +12,7 @@ import cc.hrva.urlshortener.repository.UrlDomainMoves;
 import cc.hrva.urlshortener.repository.UrlDomainMoves.DomainLink;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.service.ReservedAliasService;
+import cc.hrva.urlshortener.service.SendingEmailService;
 import cc.hrva.urlshortener.service.UrlService;
 import java.time.Clock;
 import java.time.LocalDateTime;
@@ -47,6 +48,7 @@ public class CustomDomainRemoval {
     private final UrlService urlService;
     private final ReservedAliasService reservedAliasService;
     private final UrlCache urlCache;
+    private final SendingEmailService sendingEmailService;
     private final ApplicationEventPublisher eventPublisher;
     private final TransactionOperations transactionOperations;
     private final Clock clock;
@@ -58,6 +60,9 @@ public class CustomDomainRemoval {
         marked.links().forEach(link -> urlCache.evict(UrlCacheKeys.of(domainId, link.shortUrl())));
         log.info("Custom domain removed domainId={} from={} byAdmin={} mode={} links={} moved={} renamed={} deactivated={}", domainId,
                 marked.from(), actor.admin(), mode, marked.links().size(), response.moved(), response.renamed().size(), response.deactivated());
+        if (actor.admin()) {
+            tellOwner(marked, response, mode);
+        }
         return response;
     }
 
@@ -66,6 +71,7 @@ public class CustomDomainRemoval {
                 .filter(found -> found.getStatus() != CustomDomainStatus.DELETED)
                 .orElseThrow(() -> new CustomDomainNotFoundException(NOT_FOUND));
         final var from = domain.getStatus();
+        final var ownerEmail = actor.admin() && domain.getOwner() != null ? domain.getOwner().getEmail() : null;
         if (mode == DomainLinkMode.MOVE && !actor.admin() && from == CustomDomainStatus.DISABLED
                 && TURNED_OFF_BY_HRVA.contains(domain.getDisabledReason())) {
             log.info("Custom domain removal with its links moved refused, hrva.cc turned it off domainId={} reason={}", domainId,
@@ -79,7 +85,19 @@ public class CustomDomainRemoval {
         }
         final var deactivated = mode == DomainLinkMode.DEACTIVATE && !links.isEmpty() ? urlDomainMoves.deactivateAll(domainId) : 0;
         eventPublisher.publishEvent(new CustomDomainChangedEvent(domainId));
-        return new Marked(domainId, from, links, deactivated);
+        return new Marked(domainId, from, domain.getHostname(), ownerEmail, links, deactivated);
+    }
+
+    private void tellOwner(final Marked marked, final DomainRemovalResponse response, final DomainLinkMode mode) {
+        if (marked.ownerEmail() == null) {
+            return;
+        }
+        try {
+            sendingEmailService.sendDomainRemovedEmail(marked.ownerEmail(), marked.hostname(), response, mode);
+        } catch (final RuntimeException exception) {
+            log.warn("Telling the owner their custom domain was removed failed domainId={} exception={}", marked.domainId(),
+                    exception.getClass().getName());
+        }
     }
 
     private DomainRemovalResponse moveAll(final Marked marked) {
@@ -136,7 +154,7 @@ public class CustomDomainRemoval {
     public record Actor(String performedBy, boolean admin) {
     }
 
-    private record Marked(long domainId, CustomDomainStatus from, List<DomainLink> links, int deactivated) {
+    private record Marked(long domainId, CustomDomainStatus from, String hostname, String ownerEmail, List<DomainLink> links, int deactivated) {
     }
 
 }

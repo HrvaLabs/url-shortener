@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="https://www.thymeleaf.org"
+      th:replace="~{fragments/email :: layout(title=${subject}, heading='Domain approved: one step left', preheader=~{::preheader}, content=~{::content}, footer=~{})}">
+<body>
+<th:block th:fragment="preheader">Add one CNAME record to finish setting up <th:block th:text="${hostname}">go.example.com</th:block>.</th:block>
+<th:block th:fragment="content">
+  <p class="e-fg" th:style="${s.p}">Hi <strong class="e-fg" th:style="${s.strong}" th:text="${name}">alice@example.com</strong>,</p>
+  <p class="e-fg" th:style="${s.p}">We approved <span class="e-fg mono" th:style="${s.short} + ${wrap}" th:text="${hostname}">go.example.com</span>. One step left: add this CNAME record where the domain's DNS is managed.</p>
+  <table class="e-bd" role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" th:style="${s.panel}">
+    <tr>
+      <td class="e-mu" valign="top" width="64" th:style="${s.row} + 'width: 64px; padding-right: 0; font-size: 13px; color: #67676f; white-space: nowrap;'">Type:</td>
+      <td class="e-fg" valign="top" th:style="${s.row} + 'padding-left: 8px;'"><span class="e-fg mono" th:style="${s.short} + ${wrap}" th:text="${record.type}">CNAME</span></td>
+    </tr>
+    <tr>
+      <td class="e-mu e-bd" valign="top" width="64" th:style="${s.rowNext} + 'width: 64px; padding-right: 0; font-size: 13px; color: #67676f; white-space: nowrap;'">Name:</td>
+      <td class="e-fg e-bd" valign="top" th:style="${s.rowNext} + 'padding-left: 8px;'"><span class="e-fg mono" th:style="${s.short} + ${wrap}" th:text="${record.name}">go.example.com</span></td>
+    </tr>
+    <tr>
+      <td class="e-mu e-bd" valign="top" width="64" th:style="${s.rowNext} + 'width: 64px; padding-right: 0; font-size: 13px; color: #67676f; white-space: nowrap;'">Target:</td>
+      <td class="e-fg e-bd" valign="top" th:style="${s.rowNext} + 'padding-left: 8px;'"><span class="e-fg mono" th:style="${s.short} + ${wrap}" th:text="${record.target}">domains.hrva.cc</span></td>
+    </tr>
+  </table>
+  <p class="e-mu" th:style="${s.small} + 'margin: 0 0 16px;'">Some DNS providers want only the first part of the name (<span class="e-mu mono" th:style="${s.short} + ${wrap} + 'color: #67676f;'" th:text="${first_label}">go</span>).</p>
+  <th:block th:replace="~{fragments/email :: button(${settings_url}, 'Open Custom domains')}"/>
+  <p class="e-fg" th:style="${s.p} + 'margin: 16px 0 0;'"><a class="e-lk" th:href="${help_url}" target="_blank" th:style="${s.link}">How to add a CNAME</a></p>
+  <th:block th:replace="~{fragments/email :: signoff}"/>
+</th:block>
+</body>
+</html>
