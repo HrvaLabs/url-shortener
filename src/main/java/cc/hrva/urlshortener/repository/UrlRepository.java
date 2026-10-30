@@ -55,8 +55,6 @@ public interface UrlRepository extends JpaRepository<Url, Long>, JpaSpecificatio
     List<Url> findTop10ByOrderByCreateDateDescIdDesc();
 
     Page<Url> findAllByOwner(User owner, Pageable pageable);
-    boolean existsUrlByLongUrlAndActiveTrue(String longUrl);
-    Optional<Url> findByLongUrlAndActiveTrue(String longUrl);
     Optional<Url> findFirstByDomainIsNullAndShortUrlOrderByActiveDescIdDesc(String alias);
     Optional<Url> findFirstByDomain_IdAndShortUrlOrderByActiveDescIdDesc(Long domainId, String alias);
     Optional<Url> findByDomainIsNullAndShortUrlAndActiveTrue(String alias);

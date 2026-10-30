@@ -1728,9 +1728,6 @@ class UrlServiceTest {
 
     @Test
     void aSignedInUsersLinkIsNeverHandedToAnAnonymousCreator() {
-        final var owned = Url.builder().id(12L).shortUrl("mine1").longUrl(LIMITED_LINK).active(true).visits(0L)
-                .owner(User.builder().id(7L).email("ana@example.com").build()).build();
-        org.mockito.Mockito.lenient().when(urlRepository.findByLongUrlAndActiveTrue(LIMITED_LINK)).thenReturn(Optional.of(owned));
         final var url = anonymousCreateOf(LIMITED_LINK, LinkVerdict.clean());
 
         final var created = createAnonymously(LIMITED_LINK);
@@ -1738,7 +1735,6 @@ class UrlServiceTest {
         assertThat(created.id()).isEqualTo(1L);
         assertThat(created.ownerEmail()).isNull();
         verify(urlRepository).findByLongUrlAndActiveTrueAndOwnerIsNull(LIMITED_LINK);
-        verify(urlRepository, never()).findByLongUrlAndActiveTrue(any());
         verify(urlRepository).save(url);
     }
 

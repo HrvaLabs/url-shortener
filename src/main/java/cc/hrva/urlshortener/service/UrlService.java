@@ -7,7 +7,6 @@ import cc.hrva.urlshortener.dto.UrlResponse;
 import cc.hrva.urlshortener.dto.UrlSearchDto;
 import cc.hrva.urlshortener.dto.UrlUpdateDto;
 import cc.hrva.urlshortener.model.PeekUrl;
-import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.enums.CreatedVia;
 import cc.hrva.urlshortener.service.domain.DomainRoute;
 import java.util.List;
@@ -24,7 +23,6 @@ public interface UrlService {
     void deleteUrl(Long id);
     void deactivateExpiredUrls();
     UrlResponse updateUrl(UrlUpdateDto url);
-    Url getUrlByLongUrl(String longUrl);
     String generateShortUrl(Long length);
     UrlResponse saveUrlRouting(CreateUrlDto url, String clientIP, CreatedVia createdVia, String humanCheckToken);
 

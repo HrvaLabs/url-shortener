@@ -1005,11 +1005,6 @@ public class DefaultUrlService implements UrlService {
         return url;
     }
 
-    @Override
-    public Url getUrlByLongUrl(final String longUrl) {
-        return urlRepository.findByLongUrlAndActiveTrue(longUrl).orElseThrow(() -> new UrlNotFoundException("URL doesn't exist"));
-    }
-
     private Optional<HeldShape> heldShapeOf(final String longUrl, final LinkVerdict verdict) {
         if (verdict.outcome() == LinkVerdict.Outcome.ALLOWED) {
             return Optional.empty();
