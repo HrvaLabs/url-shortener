@@ -100,7 +100,7 @@ public class CustomHostFilter extends OncePerRequestFilter {
         }
         final var path = StringUtils.removeStart(request.getRequestURI(), request.getContextPath());
         if (ROOT.equals(path)) {
-            redirect(response, appProperties.getFrontendUrl());
+            redirect(response, homePageOf(appProperties.getFrontendUrl()));
             return;
         }
         final var alias = aliasOf(path);
@@ -109,6 +109,10 @@ public class CustomHostFilter extends OncePerRequestFilter {
             return;
         }
         redirect(response, urlService.redirectResultUrl(route, alias.get(), clickRequestResolver.resolve(request)).getUrl());
+    }
+
+    private static String homePageOf(final String frontendUrl) {
+        return frontendUrl.endsWith(ROOT) ? frontendUrl : frontendUrl + ROOT;
     }
 
     private static Optional<String> aliasOf(final String path) {

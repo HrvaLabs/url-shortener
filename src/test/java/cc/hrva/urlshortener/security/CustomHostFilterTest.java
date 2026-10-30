@@ -130,6 +130,30 @@ class CustomHostFilterTest {
         assertThat(response.getHeader(HttpHeaders.CACHE_CONTROL)).isEqualTo("no-cache, no-store, max-age=0, must-revalidate");
     }
 
+    @Test
+    void theRootGoesToTheFrontendHomePageAndIsNeverCached() throws Exception {
+        when(hostRouting.classify("go.example.com")).thenReturn(new HostRouting.Custom(GO));
+        when(appProperties.getFrontendUrl()).thenReturn("https://app.hrva.cc");
+
+        filter.doFilter(request("/"), response, chain);
+
+        assertThat(response.getStatus()).isEqualTo(302);
+        assertThat(response.getHeader(HttpHeaders.LOCATION)).isEqualTo("https://app.hrva.cc/");
+        assertThat(response.getHeader(HttpHeaders.CACHE_CONTROL)).isEqualTo("no-cache, no-store, max-age=0, must-revalidate");
+        verifyNoInteractions(urlService);
+    }
+
+    @Test
+    void theRootKeepsASingleSlashWhenTheFrontendUrlEndsWithOne() throws Exception {
+        when(hostRouting.classify("go.example.com")).thenReturn(new HostRouting.Custom(GO));
+        when(appProperties.getFrontendUrl()).thenReturn("https://app.hrva.cc/");
+
+        filter.doFilter(request("/"), response, chain);
+
+        assertThat(response.getStatus()).isEqualTo(302);
+        assertThat(response.getHeader(HttpHeaders.LOCATION)).isEqualTo("https://app.hrva.cc/");
+    }
+
     private void assertPlain(final int status, final String body) throws Exception {
         assertThat(response.getStatus()).isEqualTo(status);
         assertThat(response.getContentAsString()).isEqualTo(body);

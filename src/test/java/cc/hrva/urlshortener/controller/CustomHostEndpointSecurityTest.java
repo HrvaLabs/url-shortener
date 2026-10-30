@@ -273,7 +273,7 @@ class CustomHostEndpointSecurityTest {
         for (final var request : List.of(get("/"), head("/"))) {
             mockMvc.perform(on(CUSTOM_HOST, request))
                     .andExpect(status().isFound())
-                    .andExpect(redirectedUrl("https://app.hrva.cc"))
+                    .andExpect(redirectedUrl("https://app.hrva.cc/"))
                     .andExpect(neverCached());
         }
 
