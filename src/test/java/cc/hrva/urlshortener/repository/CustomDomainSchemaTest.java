@@ -522,6 +522,57 @@ class CustomDomainSchemaTest {
     }
 
     @Test
+    void anAccountsDomainsAreReleasedAndOnlyThoseWithNothingQueuedArePurgedAfterTheirLinks() {
+        final var ana = savedUser("ana@example.com");
+        final var bob = savedUser("bob@example.com");
+        savedDomain(domain("new.example.com", CustomDomainStatus.PENDING_REVIEW).owner(ana));
+        savedDomain(domain("no.example.com", CustomDomainStatus.REJECTED).owner(ana).hostnameKey(null));
+        final var active = savedDomain(domain("go.example.com", CustomDomainStatus.ACTIVE).owner(ana).cloudflareId("cf-1").nextCheckAt(NOW));
+        final var settingUp = savedDomain(domain("setup.example.com", CustomDomainStatus.APPROVED_PROVISIONING).owner(ana).nextCheckAt(NOW));
+        final var queued = savedDomain(domain("queued.example.com", CustomDomainStatus.DELETED).owner(ana).cloudflareId("cf-2")
+                .cloudflareDeletePending(true).deletedAt(NOW.minusDays(1)));
+        final var finished = savedDomain(domain("finished.example.com", CustomDomainStatus.DELETED).owner(ana).cloudflareId("cf-3").hostnameKey(null)
+                .deletedAt(NOW.minusDays(2)));
+        final var bobs = savedDomain(domain("bob.example.com", CustomDomainStatus.PENDING_REVIEW).owner(bob));
+        insertLink("menu", finished.getId());
+
+        assertThat(customDomainRepository.deleteApplicationsOfOwner(ana.getId())).isEqualTo(2);
+        final var released = customDomainRepository.findIdsOfOwner(ana.getId());
+        assertThat(released).containsExactly(active.getId(), settingUp.getId(), queued.getId(), finished.getId());
+        assertThat(customDomainRepository.releaseDomainsAsDeleted(ana.getId(), NOW)).isEqualTo(2);
+        assertThat(jdbcTemplate.queryForList("select id from custom_domain where owner_id is not null order by id", Long.class))
+                .containsExactly(queued.getId(), finished.getId(), bobs.getId());
+        assertThat(customDomainRepository.releaseRemovedDomains(ana.getId(), NOW)).isEqualTo(2);
+
+        assertThat(jdbcTemplate.queryForList("select id from custom_domain where owner_id is not null", Long.class)).containsExactly(bobs.getId());
+        assertThat(domainRow(active.getId()))
+                .containsEntry("STATUS", "DELETED")
+                .containsEntry("DELETED_AT", timestamp(NOW))
+                .containsEntry("NEXT_CHECK_AT", null)
+                .containsEntry("CLOUDFLARE_DELETE_PENDING", true)
+                .containsEntry("HOSTNAME_KEY", "go.example.com");
+        assertThat(domainRow(settingUp.getId()))
+                .containsEntry("STATUS", "DELETED")
+                .containsEntry("NEXT_CHECK_AT", null)
+                .containsEntry("CLOUDFLARE_DELETE_PENDING", false)
+                .containsEntry("HOSTNAME_KEY", null);
+        assertThat(domainRow(queued.getId()))
+                .containsEntry("DELETED_AT", timestamp(NOW.minusDays(1)))
+                .containsEntry("CLOUDFLARE_DELETE_PENDING", true)
+                .containsEntry("HOSTNAME_KEY", "queued.example.com");
+        assertThat(domainRow(finished.getId()))
+                .containsEntry("DELETED_AT", timestamp(NOW.minusDays(2)))
+                .containsEntry("CLOUDFLARE_DELETE_PENDING", false)
+                .containsEntry("HOSTNAME_KEY", null);
+
+        jdbcTemplate.update("delete from url where domain_id = ?", finished.getId());
+        assertThat(customDomainRepository.deleteReleased(released)).isEqualTo(2);
+
+        assertThat(jdbcTemplate.queryForList("select id from custom_domain order by id", Long.class))
+                .containsExactly(active.getId(), queued.getId(), bobs.getId());
+    }
+
+    @Test
     void ownedRowsAreFoundByTheirOwner() {
         final var ana = savedUser("ana@example.com");
         final var bob = savedUser("bob@example.com");

@@ -238,4 +238,39 @@ public interface CustomDomainRepository extends JpaRepository<CustomDomain, Long
     @Query("delete from CustomDomain d where d.id = :id and d.owner is null and d.cloudflareDeletePending = false")
     int deleteOrphan(@Param("id") long id);
 
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Transactional
+    @Query("""
+            delete from CustomDomain d
+            where d.owner.id = :ownerId and d.cloudflareId is null
+              and d.status in (cc.hrva.urlshortener.model.enums.CustomDomainStatus.PENDING_REVIEW,
+                               cc.hrva.urlshortener.model.enums.CustomDomainStatus.REJECTED)""")
+    int deleteApplicationsOfOwner(@Param("ownerId") long ownerId);
+
+    @Query("select d.id from CustomDomain d where d.owner.id = :ownerId order by d.id")
+    List<Long> findIdsOfOwner(@Param("ownerId") long ownerId);
+
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Transactional
+    @Query("""
+            update CustomDomain d set d.owner = null, d.updatedAt = :now
+            where d.owner.id = :ownerId and d.status = cc.hrva.urlshortener.model.enums.CustomDomainStatus.DELETED""")
+    int releaseRemovedDomains(@Param("ownerId") long ownerId, @Param("now") LocalDateTime now);
+
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Transactional
+    @Query("""
+            update CustomDomain d
+            set d.status = cc.hrva.urlshortener.model.enums.CustomDomainStatus.DELETED, d.deletedAt = :now, d.nextCheckAt = null,
+                d.cloudflareDeletePending = case when d.cloudflareId is null then false else true end,
+                d.hostnameKey = case when d.cloudflareId is null then null else d.hostnameKey end,
+                d.owner = null, d.updatedAt = :now
+            where d.owner.id = :ownerId and d.status <> cc.hrva.urlshortener.model.enums.CustomDomainStatus.DELETED""")
+    int releaseDomainsAsDeleted(@Param("ownerId") long ownerId, @Param("now") LocalDateTime now);
+
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Transactional
+    @Query("delete from CustomDomain d where d.id in :ids and d.owner is null and d.cloudflareDeletePending = false")
+    int deleteReleased(@Param("ids") Collection<Long> ids);
+
 }

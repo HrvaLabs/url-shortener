@@ -36,6 +36,7 @@ import cc.hrva.urlshortener.service.ScammerSignalService;
 import cc.hrva.urlshortener.service.UserService;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent;
 import cc.hrva.urlshortener.service.bio.BioAccountData;
+import cc.hrva.urlshortener.service.domain.CustomDomainAccountData;
 import cc.hrva.urlshortener.service.notification.NotificationAccountData;
 import cc.hrva.urlshortener.util.EmailAddresses;
 import java.time.LocalDateTime;
@@ -74,6 +75,7 @@ public class DefaultUserService implements UserService {
     private final PasskeyCredentialRepository passkeyCredentialRepository;
     private final BioAccountData bioAccountData;
     private final NotificationAccountData notificationAccountData;
+    private final CustomDomainAccountData customDomainAccountData;
     private final UserToUserDtoConverter userToUserDtoConverter;
     private final DefaultSendingEmailService sendingEmailService;
     private final VerificationTokenService verificationTokenService;
@@ -219,7 +221,8 @@ public class DefaultUserService implements UserService {
                 passkeys,
                 twoFactorRecoveryCodeRepository.countByUserAndUsedFalse(user),
                 bioAccountData.exportFor(user).orElse(null),
-                notificationAccountData.exportFor(user));
+                notificationAccountData.exportFor(user),
+                customDomainAccountData.exportFor(user));
     }
 
     private void deleteUserAndOwnedData(final User user) {
@@ -229,7 +232,9 @@ public class DefaultUserService implements UserService {
         passkeyCredentialRepository.deleteByUser(user);
         bioAccountData.deleteFor(user);
         notificationAccountData.deleteFor(user);
+        final var releasedDomains = customDomainAccountData.releaseFor(user);
         urlRepository.deleteByOwner(user);
+        customDomainAccountData.purgeFor(releasedDomains);
         disconnectConnectedApps(user.getId(), user.getEmail());
         // API keys are removed via CascadeType.ALL on User.apiKeys when the user is deleted.
         userRepository.delete(user);

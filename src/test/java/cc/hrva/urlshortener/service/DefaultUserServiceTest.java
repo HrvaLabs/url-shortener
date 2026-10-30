@@ -22,6 +22,7 @@ import cc.hrva.urlshortener.dto.DataExportDto.BioButtonExport;
 import cc.hrva.urlshortener.dto.DataExportDto.BioPageExport;
 import cc.hrva.urlshortener.dto.DataExportDto.ChannelExport;
 import cc.hrva.urlshortener.dto.DataExportDto.ConsentExport;
+import cc.hrva.urlshortener.dto.DataExportDto.DomainExport;
 import cc.hrva.urlshortener.dto.DataExportDto.NotificationExport;
 import cc.hrva.urlshortener.dto.DeleteAccountDto;
 import cc.hrva.urlshortener.dto.PasswordResetDto;
@@ -47,6 +48,7 @@ import cc.hrva.urlshortener.model.enums.BioIcon;
 import cc.hrva.urlshortener.model.enums.BioTheme;
 import cc.hrva.urlshortener.model.enums.ChannelType;
 import cc.hrva.urlshortener.model.enums.ConsentSource;
+import cc.hrva.urlshortener.model.enums.CustomDomainStatus;
 import cc.hrva.urlshortener.model.enums.NotificationType;
 import cc.hrva.urlshortener.repository.ApiKeyRepository;
 import cc.hrva.urlshortener.repository.PasskeyCredentialRepository;
@@ -58,6 +60,7 @@ import cc.hrva.urlshortener.security.RecentSignIn;
 import cc.hrva.urlshortener.security.TokenProvider;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent;
 import cc.hrva.urlshortener.service.bio.BioAccountData;
+import cc.hrva.urlshortener.service.domain.CustomDomainAccountData;
 import cc.hrva.urlshortener.service.impl.DefaultLoginAttemptService;
 import cc.hrva.urlshortener.service.notification.NotificationAccountData;
 import cc.hrva.urlshortener.service.impl.DefaultSendingEmailService;
@@ -159,6 +162,9 @@ class DefaultUserServiceTest {
     private NotificationAccountData notificationAccountData;
 
     @Mock
+    private CustomDomainAccountData customDomainAccountData;
+
+    @Mock
     private UserToUserDtoConverter userToUserDtoConverter;
 
     @Mock
@@ -201,7 +207,7 @@ class DefaultUserServiceTest {
                 loginAttemptService);
         return new DefaultUserService(appProperties, reauthentication, urlRepository, userRepository,
                 passwordEncoder, apiKeyRepository, emailLogRepository, resetTokenService,
-                resetTokenRepository, twoFactorRecoveryCodeRepository, passkeyCredentialRepository, bioAccountData, notificationAccountData, userToUserDtoConverter, sendingEmailService,
+                resetTokenRepository, twoFactorRecoveryCodeRepository, passkeyCredentialRepository, bioAccountData, notificationAccountData, customDomainAccountData, userToUserDtoConverter, sendingEmailService,
                 verificationTokenService, verificationTokenRepository, userUpdateDtoToUserConverter, connectedAppsService, scammerSignalService, publisher);
     }
 
@@ -494,6 +500,38 @@ class DefaultUserServiceTest {
     }
 
     @Test
+    void domainsAreReleasedBeforeLinksAndPurgedAfter() {
+        final var user = User.builder().id(1L).email("test@example.com").build();
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(customDomainAccountData.releaseFor(user)).thenReturn(List.of(7L, 9L));
+
+        userService.deleteUserById(1L);
+
+        final var order = inOrder(customDomainAccountData, urlRepository, userRepository);
+        order.verify(customDomainAccountData).releaseFor(user);
+        order.verify(urlRepository).deleteByOwner(user);
+        order.verify(customDomainAccountData).purgeFor(List.of(7L, 9L));
+        order.verify(userRepository).delete(user);
+    }
+
+    @Test
+    void deletingTheOwnAccountReleasesItsDomainsTheSameWay() {
+        final var user = User.builder().id(1L).email("test@example.com").authProvider("google").build();
+        signedInMinutesAgo("test@example.com", 5);
+        when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
+        when(customDomainAccountData.releaseFor(user)).thenReturn(List.of(7L));
+
+        userService.deleteOwnAccount(new DeleteAccountDto());
+
+        final var order = inOrder(customDomainAccountData, urlRepository, userRepository);
+        order.verify(customDomainAccountData).releaseFor(user);
+        order.verify(urlRepository).deleteByOwner(user);
+        order.verify(customDomainAccountData).purgeFor(List.of(7L));
+        order.verify(userRepository).delete(user);
+        SecurityContextHolder.clearContext();
+    }
+
+    @Test
     void shouldFailDeleteUserByIdWhenNotFound() {
         when(userRepository.findById(1L)).thenReturn(Optional.empty());
 
@@ -712,6 +750,18 @@ class DefaultUserServiceTest {
     }
 
     @Test
+    void deactivatingOrReactivatingAUserLeavesItsDomainsAlone() {
+        final var user = User.builder().id(1L).email("scammer@example.com").active(true).build();
+        when(userRepository.deactivateById(1L)).thenReturn(1);
+        when(userRepository.reactivateById(1L)).thenReturn(1);
+
+        userService.deactivate(user);
+        userService.reactivate(1L);
+
+        verifyNoInteractions(customDomainAccountData);
+    }
+
+    @Test
     void deactivatingAUserThatIsAlreadyInactiveLeavesItsKeysAppsAndInboxAlone() {
         final var user = User.builder().id(1L).email("scammer@example.com").active(true).build();
         when(userRepository.deactivateById(1L)).thenReturn(0);
@@ -783,10 +833,27 @@ class DefaultUserServiceTest {
     }
 
     @Test
-    void theNotificationsComeLastInTheExport() {
+    void theDomainsComeLastInTheExport() {
         assertThat(Arrays.stream(DataExportDto.class.getRecordComponents()).map(RecordComponent::getName))
                 .containsExactly("exportedAt", "profile", "urls", "apiKeys", "emails", "passkeys", "recoveryCodesRemaining", "bioPage",
-                        "notifications");
+                        "notifications", "domains");
+        assertThat(Arrays.stream(DomainExport.class.getRecordComponents()).map(RecordComponent::getName))
+                .containsExactly("hostname", "status", "reason", "reviewNote", "createdAt", "reviewedAt", "activatedAt", "disabledAt", "deletedAt");
+    }
+
+    @Test
+    void exportCarriesTheDomains() {
+        final var user = User.builder().id(1L).email("test@example.com").build();
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken("test@example.com", null));
+        when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
+        when(userToUserDtoConverter.convert(user)).thenReturn(UserDto.builder().id(1L).email("test@example.com").build());
+        final var domain = new DomainExport("go.example.com", CustomDomainStatus.ACTIVE, "Menu links for my cafe", null,
+                LocalDateTime.of(2026, 10, 19, 9, 0), LocalDateTime.of(2026, 10, 20, 9, 0), LocalDateTime.of(2026, 10, 21, 9, 0), null, null);
+        when(customDomainAccountData.exportFor(user)).thenReturn(List.of(domain));
+
+        assertThat(userService.exportMyData().domains()).containsExactly(domain);
+        SecurityContextHolder.clearContext();
     }
 
     @Test

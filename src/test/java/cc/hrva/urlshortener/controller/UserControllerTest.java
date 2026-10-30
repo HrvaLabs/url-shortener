@@ -167,7 +167,8 @@ class UserControllerTest {
                 java.util.Collections.emptyList(),
                 3L,
                 null,
-                new cc.hrva.urlshortener.dto.DataExportDto.NotificationExport(java.util.List.of(), java.util.List.of()));
+                new cc.hrva.urlshortener.dto.DataExportDto.NotificationExport(java.util.List.of(), java.util.List.of()),
+                java.util.List.of());
         when(userService.exportMyData()).thenReturn(export);
 
         mockMvc.perform(get("/api/v1/users/me/export"))
@@ -177,7 +178,8 @@ class UserControllerTest {
                 .andExpect(jsonPath("$.recoveryCodesRemaining").value(3))
                 .andExpect(jsonPath("$.bioPage").value(org.hamcrest.Matchers.nullValue()))
                 .andExpect(jsonPath("$.notifications.consentHistory").isEmpty())
-                .andExpect(jsonPath("$.notifications.channels").isEmpty());
+                .andExpect(jsonPath("$.notifications.channels").isEmpty())
+                .andExpect(jsonPath("$.domains").isEmpty());
     }
 
     @Test

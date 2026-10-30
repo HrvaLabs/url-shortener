@@ -9,6 +9,7 @@ import cc.hrva.urlshortener.model.enums.BioIcon;
 import cc.hrva.urlshortener.model.enums.BioTheme;
 import cc.hrva.urlshortener.model.enums.ChannelType;
 import cc.hrva.urlshortener.model.enums.ConsentSource;
+import cc.hrva.urlshortener.model.enums.CustomDomainStatus;
 import cc.hrva.urlshortener.model.enums.LastDeliveryStatus;
 import cc.hrva.urlshortener.model.enums.NotificationType;
 import cc.hrva.urlshortener.model.enums.PasskeyKind;
@@ -24,7 +25,8 @@ public record DataExportDto(
         List<PasskeyExport> passkeys,
         long recoveryCodesRemaining,
         BioPageExport bioPage,
-        NotificationExport notifications) {
+        NotificationExport notifications,
+        List<DomainExport> domains) {
 
     public record EmailExport(String subject, String status, LocalDateTime sentAt, LocalDateTime createdAt) {}
 
@@ -107,5 +109,16 @@ public record DataExportDto(
             LastDeliveryStatus lastDeliveryStatus,
             LocalDateTime autoDisabledAt,
             int failedDays) {}
+
+    public record DomainExport(
+            String hostname,
+            CustomDomainStatus status,
+            String reason,
+            String reviewNote,
+            LocalDateTime createdAt,
+            LocalDateTime reviewedAt,
+            LocalDateTime activatedAt,
+            LocalDateTime disabledAt,
+            LocalDateTime deletedAt) {}
 
 }
