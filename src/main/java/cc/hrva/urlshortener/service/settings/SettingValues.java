@@ -5,6 +5,7 @@ import cc.hrva.urlshortener.util.EmailAddresses;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import org.apache.commons.lang3.StringUtils;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
@@ -24,6 +25,7 @@ public final class SettingValues {
     private static final String ON = "On";
     private static final String OFF = "Off";
     private static final String LIST_SEPARATOR = ", ";
+    private static final String PERCENT = "%";
     private static final JsonMapper JSON = JsonMapper.shared();
 
     private SettingValues() {
@@ -63,10 +65,22 @@ public final class SettingValues {
     public static String format(final SettingKey key, final Object value) {
         return switch (key.getType()) {
             case SWITCH -> Boolean.TRUE.equals(value) ? ON : OFF;
-            case NUMBER -> value == null ? key.getNoneLabel() : String.format(Locale.ENGLISH, "%,d", (Integer) value);
+            case NUMBER -> value == null ? key.getNoneLabel() : numberWithUnit(key, (Integer) value);
             case TEXT -> String.valueOf(value);
             case ADDRESSES -> value instanceof List<?> addresses ? String.join(LIST_SEPARATOR, addresses.stream().map(String::valueOf).toList()) : "";
         };
+    }
+
+    private static String numberWithUnit(final SettingKey key, final int number) {
+        final var digits = String.format(Locale.ENGLISH, "%,d", number);
+        final var unit = key.getUnit();
+        if (unit == null) {
+            return digits;
+        }
+        if (PERCENT.equals(unit)) {
+            return digits + unit;
+        }
+        return digits + " " + (number == 1 ? StringUtils.removeEnd(unit, "s") : unit);
     }
 
     private static boolean switchOf(final JsonNode value) {

@@ -7,6 +7,7 @@ import java.io.IOException;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
+import org.apache.commons.lang3.StringUtils;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.web.servlet.View;
@@ -47,6 +48,12 @@ public record LinkWarningView(TemplateEngine templateEngine, String frontendUrl,
         return RedirectLocations.hostOf(location);
     }
 
+    public String plainSpelling() {
+        final var storedHost = RedirectLocations.hostOf(destination);
+        final var shownHost = host();
+        return StringUtils.isAsciiPrintable(storedHost) || !StringUtils.isAsciiPrintable(shownHost) ? null : shownHost;
+    }
+
     public String reportUrl() {
         return frontendUrl + "/report?s=" + URLEncoder.encode(alias, StandardCharsets.UTF_8);
     }
@@ -56,6 +63,7 @@ public record LinkWarningView(TemplateEngine templateEngine, String frontendUrl,
         context.setVariable("destination", destination);
         context.setVariable("location", location);
         context.setVariable("host", host());
+        context.setVariable("plainSpelling", plainSpelling());
         context.setVariable("reportUrl", reportUrl());
         context.setVariable("homeUrl", frontendUrl);
         return context;

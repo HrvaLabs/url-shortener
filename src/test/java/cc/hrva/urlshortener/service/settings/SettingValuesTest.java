@@ -67,7 +67,17 @@ class SettingValuesTest {
     void valuesPrintAsOnOffAndGroupedNumbers() {
         assertThat(SettingValues.format(SettingKey.ANONYMOUS_LINKS, true)).isEqualTo("On");
         assertThat(SettingValues.format(SettingKey.ANONYMOUS_LINKS, false)).isEqualTo("Off");
-        assertThat(SettingValues.format(SettingKey.TRAFFIC_LINK_CLICKS, 25_000)).isEqualTo("25,000");
+        assertThat(SettingValues.format(SettingKey.TRAFFIC_LINK_CLICKS, 25_000)).isEqualTo("25,000 clicks");
+    }
+
+    @Test
+    void aNumberPrintsItsUnitInTheSingularForOne() {
+        assertThat(SettingValues.format(SettingKey.CAMPAIGN_HOLD_DAYS, 1)).isEqualTo("1 day");
+        assertThat(SettingValues.format(SettingKey.CAMPAIGN_WINDOW_HOURS, 1)).isEqualTo("1 hour");
+        assertThat(SettingValues.format(SettingKey.ANONYMOUS_VISIT_LIMIT, 1)).isEqualTo("1 visit");
+        assertThat(SettingValues.format(SettingKey.CAMPAIGN_DOMAINS, 2)).isEqualTo("2 domains");
+        assertThat(SettingValues.format(SettingKey.TRAFFIC_SHARE_PERCENT, 30)).isEqualTo("30%");
+        assertThat(SettingValues.format(SettingKey.TRAFFIC_SHARE_PERCENT, 1)).isEqualTo("1%");
     }
 
     @Test
@@ -210,7 +220,7 @@ class SettingValuesTest {
                         SettingKey::getDescription, SettingKey::getParent, SettingKey::isSafety, SettingKey::getMin, SettingKey::getMax, SettingKey::getUnit,
                         SettingKey::isNullable)
                 .containsExactly(SettingGroup.SAFETY, SettingType.NUMBER, "Random-looking domains: maximum age",
-                        "Only domains younger than this, or of unknown age, count.", SettingKey.RANDOM_DOMAIN_REVIEW, false, 30, 3650, "days", false);
+                        "Only domains younger than this, or of unknown age, count. Also used for the warning page.", SettingKey.RANDOM_DOMAIN_REVIEW, false, 30, 3650, "days", false);
         assertThat(Arrays.asList(SettingKey.values()).subList(SettingKey.GITHUB_SIGN_IN.ordinal() + 1, SettingKey.WARNING_PAGE.ordinal()))
                 .containsExactly(SettingKey.RANDOM_DOMAIN_REVIEW, SettingKey.RANDOM_DOMAIN_MAX_AGE_DAYS);
         final var appProperties = new AppProperties();
@@ -233,7 +243,7 @@ class SettingValuesTest {
                         SettingKey::getDescription, SettingKey::getParent, SettingKey::isSafety, SettingKey::getMin, SettingKey::getMax, SettingKey::getUnit,
                         SettingKey::isNullable)
                 .containsExactly(SettingGroup.SAFETY, SettingType.NUMBER, "Warning page: maximum domain age",
-                        "Domains known to be younger than this get the page.", SettingKey.WARNING_PAGE, false, 30, 3650, "days", false);
+                        "Domains with a known registration date younger than this get the page. Random-looking domains use the random-looking age.", SettingKey.WARNING_PAGE, false, 30, 3650, "days", false);
         assertThat(Arrays.asList(SettingKey.values()).subList(SettingKey.RANDOM_DOMAIN_MAX_AGE_DAYS.ordinal() + 1, SettingKey.HUMAN_CHECK.ordinal()))
                 .containsExactly(SettingKey.WARNING_PAGE, SettingKey.WARNING_PAGE_MAX_AGE_DAYS);
         final var appProperties = new AppProperties();
@@ -272,7 +282,8 @@ class SettingValuesTest {
                         SettingKey::getDescription, SettingKey::getParent, SettingKey::isSafety, SettingKey::getMin, SettingKey::getMax, SettingKey::getUnit,
                         SettingKey::isNullable, SettingKey::getNoneLabel)
                 .containsExactly(SettingGroup.ACCESS, SettingType.NUMBER, "Links without an account stop after",
-                        "The highest visit limit a link made without an account can have.", SettingKey.ANONYMOUS_LINKS, false, 1, 1_000_000, "visits", true,
+                        "The highest visit limit a link made without an account can have. While it's set, link previews (Slack, WhatsApp, X) and other bots "
+                                + "can't open these links.", SettingKey.ANONYMOUS_LINKS, false, 1, 1_000_000, "visits", true,
                         "Unlimited");
         assertThat(Arrays.asList(SettingKey.values()).subList(SettingKey.HUMAN_CHECK.ordinal() + 1, SettingKey.values().length))
                 .containsExactly(SettingKey.ANONYMOUS_EXPIRY_DAYS, SettingKey.ANONYMOUS_VISIT_LIMIT);
@@ -309,8 +320,8 @@ class SettingValuesTest {
     void noMaximumPrintsItsNoneLabel() {
         assertThat(SettingValues.format(SettingKey.ANONYMOUS_EXPIRY_DAYS, null)).isEqualTo("Never");
         assertThat(SettingValues.format(SettingKey.ANONYMOUS_VISIT_LIMIT, null)).isEqualTo("Unlimited");
-        assertThat(SettingValues.format(SettingKey.ANONYMOUS_EXPIRY_DAYS, 30)).isEqualTo("30");
-        assertThat(SettingValues.format(SettingKey.ANONYMOUS_VISIT_LIMIT, 25_000)).isEqualTo("25,000");
+        assertThat(SettingValues.format(SettingKey.ANONYMOUS_EXPIRY_DAYS, 30)).isEqualTo("30 days");
+        assertThat(SettingValues.format(SettingKey.ANONYMOUS_VISIT_LIMIT, 25_000)).isEqualTo("25,000 visits");
     }
 
     @ParameterizedTest
@@ -322,7 +333,7 @@ class SettingValuesTest {
         appProperties.getTurnstile().setSecretKey(secretKey);
         final var defaults = new SettingDefaults(appProperties, SettingsServiceFixtures.bothProviders());
 
-        assertThat(defaults.unavailableReason(SettingKey.HUMAN_CHECK)).contains("Turnstile keys aren't set, so no check runs.");
+        assertThat(defaults.unavailableReason(SettingKey.HUMAN_CHECK)).contains("Turnstile keys aren't set, so no check runs. Set APP_TURNSTILE_SITE_KEY and APP_TURNSTILE_SECRET_KEY.");
 
         appProperties.getTurnstile().setSiteKey("1x00000000000000000000AA");
         appProperties.getTurnstile().setSecretKey("1x0000000000000000000000000000000AA");

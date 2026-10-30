@@ -90,17 +90,19 @@ public enum SettingKey {
     RANDOM_DOMAIN_REVIEW(SettingGroup.SAFETY, "Review random-looking domains",
             "Links without an account to machine-made-looking new domains go to the review queue. They stay live.", null, true),
     RANDOM_DOMAIN_MAX_AGE_DAYS(SettingGroup.SAFETY, "Random-looking domains: maximum age",
-            "Only domains younger than this, or of unknown age, count.", RANDOM_DOMAIN_REVIEW, 30, 3650, "days"),
+            "Only domains younger than this, or of unknown age, count. Also used for the warning page.", RANDOM_DOMAIN_REVIEW, 30, 3650, "days"),
     WARNING_PAGE(SettingGroup.SAFETY, "Warning page before risky links without an account",
             "Shows the destination first for young or random-looking domains.", null, true),
     WARNING_PAGE_MAX_AGE_DAYS(SettingGroup.SAFETY, "Warning page: maximum domain age",
-            "Domains known to be younger than this get the page.", WARNING_PAGE, 30, 3650, "days"),
+            "Domains with a known registration date younger than this get the page. Random-looking domains use the random-looking age.",
+            WARNING_PAGE, 30, 3650, "days"),
     HUMAN_CHECK(SettingGroup.SAFETY, "Human check on links without an account",
             "A Cloudflare Turnstile check on the homepage, /qr, /utm and /share.", null, true),
     ANONYMOUS_EXPIRY_DAYS(SettingGroup.ACCESS, "Links without an account expire after",
             "The latest end a link made without an account can have.", ANONYMOUS_LINKS, 1, 3650, "Never", "days"),
     ANONYMOUS_VISIT_LIMIT(SettingGroup.ACCESS, "Links without an account stop after",
-            "The highest visit limit a link made without an account can have.", ANONYMOUS_LINKS, 1, 1_000_000, "Unlimited", "visits");
+            "The highest visit limit a link made without an account can have. While it's set, link previews (Slack, WhatsApp, X) and other bots "
+                    + "can't open these links.", ANONYMOUS_LINKS, 1, 1_000_000, "Unlimited", "visits");
 
     private final SettingGroup group;
     private final SettingType type;

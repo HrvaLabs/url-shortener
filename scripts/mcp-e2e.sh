@@ -1891,7 +1891,7 @@ expect_eq "$(jq -c '[.expirationDate, .visitLimit]' <<<"$HTTP_BODY")" "[null,nul
 echo "  --- the human check without keys"
 http "$BASE/api/v1/admin/settings" -H "Authorization: Bearer $ADMIN_JWT"
 expect_eq "$(jq -c '.[] | select(.key == "HUMAN_CHECK") | [.value, .available, .unavailableReason]' <<<"$HTTP_BODY")" \
-    "[true,false,\"Turnstile keys aren't set, so no check runs.\"]" "HUMAN_CHECK is on by default but unavailable: the app has no Turnstile keys"
+    "[true,false,\"Turnstile keys aren't set, so no check runs. Set APP_TURNSTILE_SITE_KEY and APP_TURNSTILE_SECRET_KEY.\"]" "HUMAN_CHECK is on by default but unavailable: the app has no Turnstile keys"
 http "$BASE/api/v1/public/settings"
 expect_eq "$(jq -c '[.humanCheck, .turnstileSiteKey]' <<<"$HTTP_BODY")" "[false,null]" "GET /api/v1/public/settings: humanCheck is false, no site key"
 anonymous_create 203.0.113.63 'https://e2e-human-check.com/a'

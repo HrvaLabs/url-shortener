@@ -15,7 +15,8 @@ public class SettingDefaults {
 
     private static final String GOOGLE_NOT_CONFIGURED = "Google sign-in isn't configured.";
     private static final String GITHUB_NOT_CONFIGURED = "GitHub sign-in isn't configured.";
-    private static final String TURNSTILE_NOT_CONFIGURED = "Turnstile keys aren't set, so no check runs.";
+    private static final String TURNSTILE_NOT_CONFIGURED =
+            "Turnstile keys aren't set, so no check runs. Set APP_TURNSTILE_SITE_KEY and APP_TURNSTILE_SECRET_KEY.";
 
     private final Map<SettingKey, Supplier<Object>> defaults = new EnumMap<>(SettingKey.class);
     private final Map<SettingKey, Supplier<Optional<String>>> availability = new EnumMap<>(SettingKey.class);

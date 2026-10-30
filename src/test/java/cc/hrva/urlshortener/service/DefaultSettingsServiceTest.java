@@ -162,8 +162,8 @@ class DefaultSettingsServiceTest {
         assertThat(settingsService.optionalNumber(SettingKey.ANONYMOUS_VISIT_LIMIT)).isEmpty();
         assertThat(cleared.value()).isNull();
         assertThat(cleared.defaultValue()).isEqualTo(100);
-        verify(auditLogService).log(ADMIN, AuditAction.CHANGE_SETTING, "Setting", "ANONYMOUS_VISIT_LIMIT", "from: 500, to: Unlimited");
-        verify(eventPublisher).publishEvent(new SettingChanged("Links without an account stop after", "changed from 500 to Unlimited", ADMIN));
+        verify(auditLogService).log(ADMIN, AuditAction.CHANGE_SETTING, "Setting", "ANONYMOUS_VISIT_LIMIT", "from: 500 visits, to: Unlimited");
+        verify(eventPublisher).publishEvent(new SettingChanged("Links without an account stop after", "changed from 500 visits to Unlimited", ADMIN));
     }
 
     @Test
@@ -190,7 +190,7 @@ class DefaultSettingsServiceTest {
     void theHumanCheckSaysWhyItIsUnavailableWithoutTheKeys() {
         assertThat(settingsService.list()).filteredOn(setting -> setting.key() == SettingKey.HUMAN_CHECK).singleElement()
                 .extracting(SettingResponse::available, SettingResponse::unavailableReason)
-                .containsExactly(false, "Turnstile keys aren't set, so no check runs.");
+                .containsExactly(false, "Turnstile keys aren't set, so no check runs. Set APP_TURNSTILE_SITE_KEY and APP_TURNSTILE_SECRET_KEY.");
         assertThat(settingsService.isOn(SettingKey.HUMAN_CHECK)).isTrue();
         assertThat(settingsService.isOnAndAvailable(SettingKey.HUMAN_CHECK)).isFalse();
     }
@@ -290,8 +290,8 @@ class DefaultSettingsServiceTest {
         settingsService.change(SettingKey.TRAFFIC_LINK_CLICKS, NODES.numberNode(1500), ADMIN);
 
         assertThat(rows.get("TRAFFIC_LINK_CLICKS").getSettingValue()).isEqualTo("1500");
-        verify(auditLogService).log(ADMIN, AuditAction.CHANGE_SETTING, "Setting", "TRAFFIC_LINK_CLICKS", "from: 25, to: 1,500");
-        verify(eventPublisher).publishEvent(new SettingChanged("Traffic alerts: clicks per link per day", "changed from 25 to 1,500", ADMIN));
+        verify(auditLogService).log(ADMIN, AuditAction.CHANGE_SETTING, "Setting", "TRAFFIC_LINK_CLICKS", "from: 25 clicks, to: 1,500 clicks");
+        verify(eventPublisher).publishEvent(new SettingChanged("Traffic alerts: clicks per link per day", "changed from 25 clicks to 1,500 clicks", ADMIN));
         assertThat(settingsService.number(SettingKey.TRAFFIC_LINK_CLICKS)).isEqualTo(1500);
     }
 
@@ -327,8 +327,8 @@ class DefaultSettingsServiceTest {
         assertThat(rows).doesNotContainKey("CAMPAIGN_LINKS");
         assertThat(steps).containsExactly("begin", "delete CAMPAIGN_LINKS in a transaction", "commit", "audit", "publish");
         verify(appSettingRepository, never()).save(any());
-        verify(auditLogService).log(ADMIN, AuditAction.CHANGE_SETTING, "Setting", "CAMPAIGN_LINKS", "from: 5, to: 3");
-        verify(eventPublisher).publishEvent(new SettingChanged("Same-shape alert: links", "changed from 5 to 3", ADMIN));
+        verify(auditLogService).log(ADMIN, AuditAction.CHANGE_SETTING, "Setting", "CAMPAIGN_LINKS", "from: 5 links, to: 3 links");
+        verify(eventPublisher).publishEvent(new SettingChanged("Same-shape alert: links", "changed from 5 links to 3 links", ADMIN));
         assertThat(changed.value()).isEqualTo(3);
         assertThat(changed.changed()).isFalse();
         assertThat(changed.changedBy()).isNull();
@@ -345,8 +345,8 @@ class DefaultSettingsServiceTest {
 
         assertThat(rows).doesNotContainKey("CAMPAIGN_LINKS");
         assertThat(steps).containsExactly("begin", "delete CAMPAIGN_LINKS in a transaction", "commit", "audit", "publish");
-        verify(auditLogService).log(ADMIN, AuditAction.RESET_SETTING, "Setting", "CAMPAIGN_LINKS", "from: 3, to: 3");
-        verify(eventPublisher).publishEvent(new SettingChanged("Same-shape alert: links", "reset to its default (3)", ADMIN));
+        verify(auditLogService).log(ADMIN, AuditAction.RESET_SETTING, "Setting", "CAMPAIGN_LINKS", "from: 3 links, to: 3 links");
+        verify(eventPublisher).publishEvent(new SettingChanged("Same-shape alert: links", "reset to its default (3 links)", ADMIN));
         assertThat(changed.value()).isEqualTo(3);
         assertThat(changed.changed()).isFalse();
         assertThat(output.getOut().lines().filter(line -> line.contains("key=CAMPAIGN_LINKS"))).hasSizeLessThanOrEqualTo(2);

@@ -67,6 +67,9 @@ class LinkWarningViewTest {
                 .contains("<title>This link was made without an account &middot; hrva.cc</title>")
                 .contains("<h1>This link was made without an account. It goes to:</h1>")
                 .contains("<p class=\"destination\" style=\"overflow-wrap:anywhere\">https://xdvqnxj.com/login</p>")
+                .contains("<p class=\"note\">The site is new or its name looks machine-made. Continue only if this is the address you expected.</p>")
+                .contains("word-break: break-all;")
+                .doesNotContain("letters outside A to Z")
                 .contains("<a href=\"https://xdvqnxj.com/login\" rel=\"nofollow\" class=\"continue\">Continue to xdvqnxj.com</a>")
                 .contains("<a href=\"https://hrva.cc/report?s=abc\" class=\"report\">Report this link</a>")
                 .contains("<a href=\"https://hrva.cc\" class=\"home\">hrva.cc</a>")
@@ -91,12 +94,30 @@ class LinkWarningViewTest {
     }
 
     @Test
+    void aUnicodeHostNamesItsPlainSpelling() throws Exception {
+        final var stored = "https://čokolada.hr/menu2";
+
+        final var body = render(page(stored, RedirectLocations.normalized(stored)), "GET").getContentAsString();
+
+        assertThat(body).contains("<p class=\"note\">This address uses letters outside A to Z. Its plain spelling is xn--okolada-i6a.hr.</p>");
+    }
+
+    @Test
+    void aPunycodeHostAsTypedNeedsNoPlainSpelling() throws Exception {
+        final var stored = "https://xn--okolada-i6a.hr/menu2";
+
+        final var body = render(page(stored, stored), "GET").getContentAsString();
+
+        assertThat(body).doesNotContain("letters outside A to Z");
+    }
+
+    @Test
     void aHostThatCannotBeWrittenInAsciiIsNamedAsStored() throws Exception {
         final var stored = "https://" + "č".repeat(64) + ".hr/torta";
 
         final var body = render(page(stored, stored), "GET").getContentAsString();
 
-        assertThat(body).contains(">Continue to " + "č".repeat(64) + ".hr</a>");
+        assertThat(body).contains(">Continue to " + "č".repeat(64) + ".hr</a>").doesNotContain("letters outside A to Z");
     }
 
     @Test
