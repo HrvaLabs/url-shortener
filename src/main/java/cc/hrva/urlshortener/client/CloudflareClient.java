@@ -199,7 +199,7 @@ public class CloudflareClient {
         }
         final var json = parse(body);
         if (status / 100 == 2) {
-            if (json.isEmpty() && !call.readsBody()) {
+            if (json.isEmpty() && !call.readsBody() && StringUtils.isBlank(body)) {
                 return call.onSuccess().apply(MissingNode.getInstance());
             }
             if (json.isEmpty()) {

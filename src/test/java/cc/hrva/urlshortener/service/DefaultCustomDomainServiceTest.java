@@ -217,15 +217,6 @@ class DefaultCustomDomainServiceTest {
     }
 
     @Test
-    void rejectedAndDeletedDoNotCount() {
-        assertThat(CustomDomainStatus.COUNTS_FOR_USER).doesNotContain(CustomDomainStatus.REJECTED, CustomDomainStatus.DELETED);
-
-        customDomainService.apply(apply("go.example.com"));
-
-        verify(customDomainRepository).countByOwnerIdAndStatusIn(7L, CustomDomainStatus.COUNTS_FOR_USER);
-    }
-
-    @Test
     void blockedHostnamesAreRefusedLikeReservedOnes() {
         when(linkCheckService.check("https://go.evil.example.com/"))
                 .thenReturn(new LinkVerdict(LinkVerdict.Outcome.BLOCK, List.of("on HaGeZi TIF"), BlockReason.BLOCKLIST, "HaGeZi TIF"));

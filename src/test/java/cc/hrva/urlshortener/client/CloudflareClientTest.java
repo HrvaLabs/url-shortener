@@ -180,6 +180,27 @@ class CloudflareClientTest {
     }
 
     @Test
+    void aDeleteAnsweredWithSomethingThatIsNotJsonIsUnreadable() {
+        answer(HOSTNAMES + "/" + HOSTNAME_ID, 200, "<html><body>Proxy says hello</body></html>");
+
+        assertThat(client.delete(HOSTNAME_ID)).isEqualTo(new CloudflareResult.Unreachable<>("unreadable"));
+    }
+
+    @Test
+    void aDeleteAnsweredWithAJsonArrayIsUnreadable() {
+        answer(HOSTNAMES + "/" + HOSTNAME_ID, 200, "[]");
+
+        assertThat(client.delete(HOSTNAME_ID)).isEqualTo(new CloudflareResult.Unreachable<>("unreadable"));
+    }
+
+    @Test
+    void aDeleteAnsweredWithBlankSpaceIsOk() {
+        answer(HOSTNAMES + "/" + HOSTNAME_ID, 200, "  \n");
+
+        assertThat(client.delete(HOSTNAME_ID)).isEqualTo(new CloudflareResult.Ok<Void>(null, null));
+    }
+
+    @Test
     void anEmptyAnswerIsUnreadableWhereTheBodyIsNeeded() {
         answer(HOSTNAMES + "/" + HOSTNAME_ID, 200, "");
 

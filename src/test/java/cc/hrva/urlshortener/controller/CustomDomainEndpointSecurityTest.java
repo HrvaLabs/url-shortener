@@ -39,7 +39,11 @@ import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -64,6 +68,8 @@ import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
+import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.test.json.JsonCompareMode;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
@@ -76,6 +82,10 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.mockingDetails;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -88,7 +98,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         classes = CustomDomainEndpointSecurityTest.TestApplication.class,
         properties = {
                 "spring.liquibase.enabled=true",
-                "spring.datasource.url=jdbc:h2:mem:custom-domain-endpoints;DB_CLOSE_DELAY=-1;NON_KEYWORDS=KEY,VALUE",
+                "spring.datasource.url=jdbc:h2:mem:custom-domain-endpoints;DB_CLOSE_DELAY=-1;NON_KEYWORDS=KEY,VALUE;LOCK_TIMEOUT=10000",
                 "spring.security.oauth2.client.registration.google.client-id=test-google-client",
                 "spring.security.oauth2.client.registration.google.client-secret=test-google-secret",
                 "app.frontend-url=http://localhost:3000",
@@ -106,6 +116,8 @@ class CustomDomainEndpointSecurityTest {
     private static final String APPLICATION = """
             {"hostname":"Go.Example.com.","reason":"Menu links for my cafe"}""";
     private static final String NOT_FOUND = "{\"error\":\"Custom domain not found\"}";
+    private static final String OVER_THE_LIMIT = "{\"error\":\"You can have 1 custom domain. Remove one to apply for another.\"}";
+    private static final String TAKEN = "{\"error\":\"This domain has already been applied for.\"}";
     private static final long ANA = 700L;
     private static final long BOB = 701L;
     private static final String ANA_EMAIL = "ana@hrva.cc";
@@ -132,6 +144,9 @@ class CustomDomainEndpointSecurityTest {
 
     @Autowired
     private TestApplication.CommittedEvents committedEvents;
+
+    @MockitoSpyBean
+    private CustomDomainRepository customDomainRepository;
 
     @MockitoBean
     private UserService userService;
@@ -431,6 +446,68 @@ class CustomDomainEndpointSecurityTest {
                 .andExpect(status().isConflict());
 
         assertThat(committedEvents.events()).isEmpty();
+    }
+
+    @Test
+    void twoAppliesAtOnceLetOnlyOneThrough() throws Exception {
+        bothPassTheLinkCheckTogether();
+        bothReachTheHostnameCheck(Duration.ofSeconds(1));
+
+        final var first = CompletableFuture.supplyAsync(() -> appliedAnswer(ANA_TOKEN, "one.example.com"));
+        final var second = CompletableFuture.supplyAsync(() -> appliedAnswer(ANA_TOKEN, "two.example.com"));
+
+        final var answers = List.of(first.get(30, TimeUnit.SECONDS), second.get(30, TimeUnit.SECONDS));
+        assertThat(answers).extracting(MockHttpServletResponse::getStatus).containsExactlyInAnyOrder(201, 400);
+        assertThat(answers).filteredOn(answer -> answer.getStatus() == 400).singleElement()
+                .satisfies(refused -> assertThat(refused.getContentAsString()).isEqualTo(OVER_THE_LIMIT));
+        assertThat(countOf(ANA)).isOne();
+        assertThat(committedEvents.events()).filteredOn(DomainApplied.class::isInstance).hasSize(1);
+    }
+
+    @Test
+    void twoUsersApplyingForOneHostnameAtOnce() throws Exception {
+        bothPassTheLinkCheckTogether();
+        bothReachTheHostnameCheck(Duration.ofSeconds(10));
+
+        final var first = CompletableFuture.supplyAsync(() -> appliedAnswer(ANA_TOKEN, "go.example.com"));
+        final var second = CompletableFuture.supplyAsync(() -> appliedAnswer(BOB_TOKEN, "go.example.com"));
+
+        final var answers = List.of(first.get(30, TimeUnit.SECONDS), second.get(30, TimeUnit.SECONDS));
+        assertThat(answers).extracting(MockHttpServletResponse::getStatus).containsExactlyInAnyOrder(201, 409);
+        assertThat(answers).filteredOn(answer -> answer.getStatus() == 409).singleElement()
+                .satisfies(refused -> assertThat(refused.getContentAsString()).isEqualTo(TAKEN));
+        assertThat(jdbcTemplate.queryForObject("select count(*) from custom_domain where hostname = 'go.example.com'", Integer.class)).isOne();
+        assertThat(committedEvents.events()).filteredOn(DomainApplied.class::isInstance).hasSize(1);
+        verify(customDomainRepository, times(2)).findByHostnameKey("go.example.com");
+    }
+
+    private void bothPassTheLinkCheckTogether() {
+        final var bothChecking = new CyclicBarrier(2);
+        when(linkCheckService.check(anyString())).thenAnswer(invocation -> {
+            bothChecking.await(10, TimeUnit.SECONDS);
+            return LinkVerdict.clean();
+        });
+    }
+
+    private void bothReachTheHostnameCheck(final Duration longestWait) {
+        final var arrived = new CountDownLatch(2);
+        doAnswer(invocation -> {
+            final var found = mockingDetails(customDomainRepository).getMockCreationSettings().getDefaultAnswer().answer(invocation);
+            if (arrived.getCount() > 0) {
+                arrived.countDown();
+                arrived.await(longestWait.toMillis(), TimeUnit.MILLISECONDS);
+            }
+            return found;
+        }).when(customDomainRepository).findByHostnameKey(anyString());
+    }
+
+    private MockHttpServletResponse appliedAnswer(final String token, final String hostname) {
+        try {
+            return mockMvc.perform(as(token, post(DOMAINS)).contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"hostname\":\"" + hostname + "\",\"reason\":\"Menu links for my cafe\"}")).andReturn().getResponse();
+        } catch (final Exception exception) {
+            throw new IllegalStateException(exception);
+        }
     }
 
     private long domain(final long ownerId, final String hostname, final String status) {
