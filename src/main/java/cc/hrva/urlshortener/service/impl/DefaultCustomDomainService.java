@@ -129,7 +129,6 @@ public class DefaultCustomDomainService implements CustomDomainService {
         requireActive(user);
         final var hostname = customDomainHostnames.normalize(customDomainApplyDto.getHostname());
         requireBelowTheLimit(user.getId());
-        requireFree(hostname, user.getId());
         requireWithinApplyLimit(user);
         final var reason = StringUtils.strip(customDomainApplyDto.getReason());
         final var flags = flagsOf(hostname, linkCheckService.check("https://" + hostname + "/"), user);

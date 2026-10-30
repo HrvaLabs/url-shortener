@@ -639,7 +639,7 @@ class CustomDomainEndpointSecurityTest {
                 .satisfies(refused -> assertThat(refused.getContentAsString()).isEqualTo(TAKEN));
         assertThat(jdbcTemplate.queryForObject("select count(*) from custom_domain where hostname = 'go.example.com'", Integer.class)).isOne();
         assertThat(committedEvents.events()).filteredOn(DomainApplied.class::isInstance).hasSize(1);
-        verify(customDomainRepository, times(4)).findByHostnameKey("go.example.com");
+        verify(customDomainRepository, times(2)).findByHostnameKey("go.example.com");
         assertThat(arrived.getCount()).isZero();
     }
 
