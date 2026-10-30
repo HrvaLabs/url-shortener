@@ -1,9 +1,10 @@
 package cc.hrva.urlshortener.service.impl;
 
 import cc.hrva.urlshortener.client.GoogleSafeBrowsingApi;
-import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.exception.UrlValidationException;
 import cc.hrva.urlshortener.service.SafeBrowsingService;
+import cc.hrva.urlshortener.service.SettingsService;
+import cc.hrva.urlshortener.service.settings.SettingKey;
 import com.google.api.services.safebrowsing.v5.Safebrowsing;
 import java.io.IOException;
 import java.util.List;
@@ -18,7 +19,7 @@ public class DefaultSafeBrowsingService implements SafeBrowsingService {
 
     private final Safebrowsing safebrowsing;
     private final GoogleSafeBrowsingApi googleSafeBrowsingApi;
-    private final AppProperties appProperties;
+    private final SettingsService settingsService;
 
     @Override
     public List<String> checkUrlsForThreats(final List<String> urls) {
@@ -28,9 +29,9 @@ public class DefaultSafeBrowsingService implements SafeBrowsingService {
             final var response = googleSafeBrowsingApi.executeSearch(searchRequest);
             return googleSafeBrowsingApi.extractThreatUrls(response);
         } catch (final IOException exception) {
-            log.error("ALERT Safe Browsing API unreachable failClosed={} count={}",
-                    appProperties.isSafeBrowsingFailClosed(), urls.size(), exception);
-            if (appProperties.isSafeBrowsingFailClosed()) {
+            final var failClosed = settingsService.isOn(SettingKey.SAFE_BROWSING_CHECK) && settingsService.isOn(SettingKey.SAFE_BROWSING_FAIL_CLOSED);
+            log.error("ALERT Safe Browsing API unreachable failClosed={} count={}", failClosed, urls.size(), exception);
+            if (failClosed) {
                 throw new UrlValidationException("URL safety check is temporarily unavailable. Please try again later.");
             }
             return List.of();

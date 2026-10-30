@@ -41,6 +41,7 @@ import cc.hrva.urlshortener.service.ReservedAliasService;
 import cc.hrva.urlshortener.service.ReviewQueueService;
 import cc.hrva.urlshortener.service.SameShapeAlertService;
 import cc.hrva.urlshortener.service.ScammerSignalService;
+import cc.hrva.urlshortener.service.SettingsService;
 import cc.hrva.urlshortener.service.SuspiciousUrlService;
 import cc.hrva.urlshortener.service.UrlService;
 import cc.hrva.urlshortener.service.UserService;
@@ -53,6 +54,7 @@ import cc.hrva.urlshortener.service.domain.UrlCache;
 import cc.hrva.urlshortener.service.domain.UrlCacheKeys;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiter;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiterUnavailableException;
+import cc.hrva.urlshortener.service.settings.SettingKey;
 import cc.hrva.urlshortener.util.RedirectLocations;
 import cc.hrva.urlshortener.util.SortWhitelist;
 import cc.hrva.urlshortener.validator.ApiKeyValidator;
@@ -117,7 +119,6 @@ public class DefaultUrlService implements UrlService {
     private static final int UNLOCK_ATTEMPTS_PER_CLIENT = 10;
     private static final int UNLOCK_ATTEMPTS_PER_LINK = 50;
     private static final Duration UNLOCK_WINDOW = Duration.ofMinutes(15);
-    private static final int CREATES_PER_ANONYMOUS_CLIENT = 10;
     private static final int CREATES_PER_USER = 60;
     private static final Duration CREATE_WINDOW = Duration.ofHours(1);
     private static final String CREATE_LIMIT_REFUSAL = "You've created a lot of links in a short time. Try again in an hour.";
@@ -125,6 +126,7 @@ public class DefaultUrlService implements UrlService {
     private static final String BLOCKED_WHILE_EDITING = "This link was blocked while you were editing it. Reload and try again.";
     private static final int MAX_GENERATED_ALIAS_ATTEMPTS = 10;
     private static final String NO_FREE_ALIAS = "Couldn't pick a free short URL. Try again.";
+    private static final String CUSTOM_ALIASES_OFF = "Custom aliases are turned off right now.";
     private static final String DOMAIN_FIELD = "domain";
     private static final String DOMAIN_NOT_ACTIVE = "This link's domain isn't active, so the link can't be turned on.";
 
@@ -160,6 +162,7 @@ public class DefaultUrlService implements UrlService {
     private final CustomDomainRegistry customDomainRegistry;
     private final CustomDomainRepository customDomainRepository;
     private final SameShapeAlertService sameShapeAlertService;
+    private final SettingsService settingsService;
 
     @Override
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
@@ -210,7 +213,8 @@ public class DefaultUrlService implements UrlService {
                 return isAdmin(creator) || rateLimiter.tryAcquire("create:user:" + creator.getId(), CREATES_PER_USER, CREATE_WINDOW);
             }
             return clientIP == null
-                    || rateLimiter.tryAcquire(RateLimiter.clientKey("create:anon", clientIP), CREATES_PER_ANONYMOUS_CLIENT, CREATE_WINDOW);
+                    || rateLimiter.tryAcquire(RateLimiter.clientKey("create:anon", clientIP), settingsService.number(SettingKey.ANONYMOUS_LINKS_PER_HOUR),
+                    CREATE_WINDOW);
         } catch (final RateLimiterUnavailableException exception) {
             log.warn("Create rate limit unavailable, allowing the link");
             return true;
@@ -390,6 +394,9 @@ public class DefaultUrlService implements UrlService {
             url.setShortUrl(nextFreeShortUrl(url.domainId()));
             log.info("URL got a generated short URL");
         } else {
+            if (url.domainId() == null && !settingsService.isOn(SettingKey.CUSTOM_ALIASES)) {
+                throw new UrlValidationException(CUSTOM_ALIASES_OFF);
+            }
             urlValidator.checkIfShortUrlIsUnique(url.domainId(), url.getShortUrl());
             urlValidator.checkIfShortUrlIsReserved(url.getShortUrl());
         }

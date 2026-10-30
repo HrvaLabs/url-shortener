@@ -9,8 +9,10 @@ import cc.hrva.urlshortener.model.enums.SignInMethod;
 import cc.hrva.urlshortener.model.enums.TwoStepMethod;
 import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.service.AuthoritiesService;
+import cc.hrva.urlshortener.service.SettingsService;
 import cc.hrva.urlshortener.service.SignInMethodService;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent;
+import cc.hrva.urlshortener.service.settings.SettingKey;
 import cc.hrva.urlshortener.service.twostep.PendingLoginStore;
 import cc.hrva.urlshortener.service.twostep.TwoStepMethods;
 import cc.hrva.urlshortener.util.EmailAddresses;
@@ -54,6 +56,7 @@ public class OAuth2LoginSuccessHandler implements AuthenticationSuccessHandler {
     private final PendingLoginStore pendingLoginStore;
     private final TwoStepMethods twoStepMethods;
     private final SignInMethodService signInMethodService;
+    private final SettingsService settingsService;
 
     public OAuth2LoginSuccessHandler(
             final UserRepository userRepository,
@@ -64,7 +67,8 @@ public class OAuth2LoginSuccessHandler implements AuthenticationSuccessHandler {
             final ApplicationEventPublisher eventPublisher,
             final PendingLoginStore pendingLoginStore,
             final TwoStepMethods twoStepMethods,
-            final SignInMethodService signInMethodService) {
+            final SignInMethodService signInMethodService,
+            final SettingsService settingsService) {
         this.userRepository = userRepository;
         this.authoritiesService = authoritiesService;
         this.tokenProvider = tokenProvider;
@@ -74,6 +78,7 @@ public class OAuth2LoginSuccessHandler implements AuthenticationSuccessHandler {
         this.pendingLoginStore = pendingLoginStore;
         this.twoStepMethods = twoStepMethods;
         this.signInMethodService = signInMethodService;
+        this.settingsService = settingsService;
     }
 
     @Override
@@ -107,7 +112,7 @@ public class OAuth2LoginSuccessHandler implements AuthenticationSuccessHandler {
         }
 
         final var existingUser = userRepository.findByEmail(email);
-        if (existingUser.isEmpty() && !appProperties.isRegistrationEnabled()) {
+        if (existingUser.isEmpty() && !settingsService.isOn(SettingKey.NEW_SIGNUPS)) {
             log.warn("OAuth2 sign-up refused: registrations are disabled provider={}", provider);
             response.sendRedirect(appProperties.getFrontendUrl() + "/auth/callback?error=registration_disabled");
             return;

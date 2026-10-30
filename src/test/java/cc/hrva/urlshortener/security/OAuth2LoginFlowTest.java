@@ -10,6 +10,7 @@ import cc.hrva.urlshortener.model.codebook.Authorities;
 import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.service.AuthoritiesService;
 import cc.hrva.urlshortener.service.SignInMethodService;
+import cc.hrva.urlshortener.service.settings.DefaultSettingsTestConfiguration;
 import cc.hrva.urlshortener.service.twostep.PendingLoginStore;
 import cc.hrva.urlshortener.service.twostep.TwoStepMethods;
 import java.net.URLDecoder;
@@ -265,6 +266,7 @@ class OAuth2LoginFlowTest {
     @SpringBootConfiguration
     @EnableAutoConfiguration
     @Import({
+            DefaultSettingsTestConfiguration.class,
             AppConfiguration.class,
             JacksonConfiguration.class,
             SecurityConfiguration.class,

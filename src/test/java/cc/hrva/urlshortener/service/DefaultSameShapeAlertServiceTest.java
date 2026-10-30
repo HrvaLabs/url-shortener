@@ -10,6 +10,9 @@ import cc.hrva.urlshortener.service.alert.AdminAlertEvent.SameShapeDetected;
 import cc.hrva.urlshortener.service.burst.RedisBurstCounter;
 import cc.hrva.urlshortener.service.campaign.UrlShapes;
 import cc.hrva.urlshortener.service.impl.DefaultSameShapeAlertService;
+import cc.hrva.urlshortener.service.impl.DefaultSettingsService;
+import cc.hrva.urlshortener.service.settings.SettingKey;
+import cc.hrva.urlshortener.service.settings.SettingsServiceFixtures;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -67,6 +70,7 @@ class DefaultSameShapeAlertServiceTest {
 
     private final InMemoryRedis redis = new InMemoryRedis();
     private final AppProperties appProperties = new AppProperties();
+    private final DefaultSettingsService settingsService = SettingsServiceFixtures.defaults(appProperties);
     private final List<String> window = new ArrayList<>();
     private SameShapeAlertService sameShapeAlertService;
 
@@ -74,8 +78,8 @@ class DefaultSameShapeAlertServiceTest {
     void setUp() {
         final var redisTemplate = mock(StringRedisTemplate.class);
         redis.backing(redisTemplate);
-        sameShapeAlertService = new DefaultSameShapeAlertService(redisBurstCounter, urlRepository, eventPublisher, redisTemplate, appProperties,
-                Clock.fixed(NOW, ZoneOffset.UTC));
+        sameShapeAlertService = new DefaultSameShapeAlertService(redisBurstCounter, urlRepository, eventPublisher, redisTemplate,
+                Clock.fixed(NOW, ZoneOffset.UTC), settingsService);
     }
 
     @Test
@@ -224,6 +228,31 @@ class DefaultSameShapeAlertServiceTest {
     }
 
     @Test
+    void theThresholdsAndSwitchComeFromSettings() {
+        SettingsServiceFixtures.change(settingsService, SettingKey.CAMPAIGN_LINKS, 4);
+        SettingsServiceFixtures.change(settingsService, SettingKey.CAMPAIGN_DOMAINS, 2);
+        SettingsServiceFixtures.change(settingsService, SettingKey.CAMPAIGN_WINDOW_HOURS, 6);
+        when(redisBurstCounter.recordUnderKey(eq(COUNTED_KEY), anyString(), eq(NOW), eq(Duration.ofHours(6)))).thenAnswer(invocation -> {
+            window.add(invocation.getArgument(1));
+            return List.copyOf(window);
+        });
+        when(urlRepository.findAllById(any())).thenReturn(List.of(link(41L, "aaa"), link(42L, "bbb"), link(43L, "ccc"), link(44L, "ddd")));
+
+        sameShapeAlertService.anonymousLinkCreated(41L, "https://a.com/wqamhcsom?r=1&t=2", Outcome.CLEAN);
+        sameShapeAlertService.anonymousLinkCreated(42L, "https://b.com/wqamhcsom?r=1&t=2", Outcome.CLEAN);
+        sameShapeAlertService.anonymousLinkCreated(43L, "https://a.com/wqamhcsom?r=3&t=2", Outcome.CLEAN);
+        verifyNoInteractions(eventPublisher);
+        sameShapeAlertService.anonymousLinkCreated(44L, "https://b.com/wqamhcsom?r=4&t=2", Outcome.CLEAN);
+
+        verify(eventPublisher).publishEvent(new SameShapeDetected(SHAPE, PATH, 4, 2, Duration.ofHours(6), List.of("ddd", "ccc", "bbb")));
+
+        SettingsServiceFixtures.turnOff(settingsService, SettingKey.SAME_SHAPE_ALERT);
+        sameShapeAlertService.anonymousLinkCreated(45L, "https://c.com/wqamhcsom?r=5&t=2", Outcome.CLEAN);
+
+        verify(redisBurstCounter, times(4)).recordUnderKey(anyString(), anyString(), any(), any());
+    }
+
+    @Test
     void anExampleLinkDeletedMeanwhileIsLeftOut() {
         window.addAll(List.of("41|a.com", "42|b.com"));
         counting();
@@ -271,8 +300,8 @@ class DefaultSameShapeAlertServiceTest {
         when(template.opsForValue()).thenThrow(new RedisConnectionFailureException("Unable to connect"));
         window.addAll(List.of("41|a.com", "42|b.com"));
         counting();
-        final var service = new DefaultSameShapeAlertService(redisBurstCounter, urlRepository, eventPublisher, template, appProperties,
-                Clock.fixed(NOW, ZoneOffset.UTC));
+        final var service = new DefaultSameShapeAlertService(redisBurstCounter, urlRepository, eventPublisher, template,
+                Clock.fixed(NOW, ZoneOffset.UTC), settingsService);
 
         assertThatCode(() -> service.anonymousLinkCreated(43L, "https://c.com/wqamhcsom?r=1&t=2", Outcome.CLEAN)).doesNotThrowAnyException();
 

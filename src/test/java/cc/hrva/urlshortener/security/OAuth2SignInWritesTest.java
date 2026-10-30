@@ -9,6 +9,7 @@ import cc.hrva.urlshortener.repository.UserSignInMethodRepository;
 import cc.hrva.urlshortener.service.AuthoritiesService;
 import cc.hrva.urlshortener.service.SignInMethodService;
 import cc.hrva.urlshortener.service.impl.DefaultSignInMethodService;
+import cc.hrva.urlshortener.service.settings.SettingsServiceFixtures;
 import cc.hrva.urlshortener.service.twostep.PendingLoginStore;
 import cc.hrva.urlshortener.service.twostep.TwoStepMethods;
 import jakarta.validation.Validation;
@@ -86,10 +87,10 @@ class OAuth2SignInWritesTest {
         when(tokenProvider.createToken(any())).thenReturn("jwt-token");
         when(appProperties.getFrontendUrl()).thenReturn("http://fe");
         when(appProperties.getUserApiKeySlots()).thenReturn(2L);
-        when(appProperties.isRegistrationEnabled()).thenReturn(true);
         handler = new OAuth2LoginSuccessHandler(userRepository, authoritiesService, tokenProvider, appProperties,
                 Validation.buildDefaultValidatorFactory().getValidator(), mock(ApplicationEventPublisher.class),
-                mock(PendingLoginStore.class), mock(TwoStepMethods.class), signInMethodService);
+                mock(PendingLoginStore.class), mock(TwoStepMethods.class), signInMethodService,
+                SettingsServiceFixtures.defaults(new AppProperties()));
     }
 
     @AfterEach

@@ -47,6 +47,7 @@ import cc.hrva.urlshortener.service.domain.UrlCache;
 import cc.hrva.urlshortener.service.impl.DefaultAuditLogService;
 import cc.hrva.urlshortener.service.impl.DefaultUrlService;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiter;
+import cc.hrva.urlshortener.service.settings.DefaultSettingsTestConfiguration;
 import cc.hrva.urlshortener.validator.ApiKeyValidator;
 import cc.hrva.urlshortener.validator.impl.DefaultUrlValidator;
 import com.nimbusds.jose.JOSEException;
@@ -283,6 +284,7 @@ class ReactivateLinkFlowTest {
                     type = FilterType.ASSIGNABLE_TYPE,
                     classes = {UrlRepository.class, CustomDomainRepository.class, UserRepository.class, AuditLogRepository.class}))
     @Import({
+            DefaultSettingsTestConfiguration.class,
             AppConfiguration.class,
             WebConfiguration.class,
             AnyHostIsPrimary.class,

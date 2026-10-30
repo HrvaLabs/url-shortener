@@ -16,7 +16,10 @@ import cc.hrva.urlshortener.repository.DomainRuleRepository;
 import cc.hrva.urlshortener.service.blocklist.BlocklistStore;
 import cc.hrva.urlshortener.service.blocklist.LinkListParser;
 import cc.hrva.urlshortener.service.impl.DefaultLinkCheckService;
+import cc.hrva.urlshortener.service.impl.DefaultSettingsService;
 import cc.hrva.urlshortener.service.impl.DefaultSuspiciousUrlService;
+import cc.hrva.urlshortener.service.settings.SettingKey;
+import cc.hrva.urlshortener.service.settings.SettingsServiceFixtures;
 import java.io.BufferedReader;
 import java.io.StringReader;
 import java.util.ArrayList;
@@ -90,6 +93,7 @@ class DefaultLinkCheckServiceTest {
     private ArgumentCaptor<Map<Long, List<String>>> keysBySource;
 
     private DefaultLinkCheckService linkCheckService;
+    private final DefaultSettingsService settingsService = SettingsServiceFixtures.defaults(new AppProperties());
 
     @BeforeEach
     void setUp() {
@@ -101,7 +105,8 @@ class DefaultLinkCheckServiceTest {
         lenient().when(blocklistStore.matchingSources(anyMap())).thenAnswer(invocation -> matchingSources(invocation.getArgument(0)));
         lenient().when(domainReputationService.lookup(anyString())).thenReturn(ReputationResult.none());
         linkCheckService = new DefaultLinkCheckService(
-                domainRuleRepository, blocklistSourceRepository, blocklistStore, domainAgeService, domainReputationService, suspiciousUrlService);
+                domainRuleRepository, blocklistSourceRepository, blocklistStore, domainAgeService, domainReputationService, suspiciousUrlService,
+                settingsService);
     }
 
     @Test
@@ -512,6 +517,34 @@ class DefaultLinkCheckServiceTest {
     }
 
     @Test
+    void blocklistCheckOffSkipsListsAndSpamhausButNotRules() {
+        SettingsServiceFixtures.turnOff(settingsService, SettingKey.BLOCKLIST_CHECK);
+        source(1, HAGEZI_FAKE, SourceKind.DOMAINS, BlocklistAction.BLOCK, "fake-shop.com");
+        rule("jofogas.cards", DomainRuleType.BLOCK);
+
+        assertThat(linkCheckService.check("https://fake-shop.com/sale")).isEqualTo(CLEAN);
+        assertThat(linkCheckService.check("https://jofogas.cards/item"))
+                .isEqualTo(new LinkVerdict(Outcome.BLOCK, List.of("blocked domain jofogas.cards"), BlockReason.DOMAIN_RULE, "jofogas.cards"));
+        verifyNoInteractions(blocklistSourceRepository, blocklistStore, domainReputationService);
+
+        assertThat(linkCheckService.explain("https://fake-shop.com/sale"))
+                .isEqualTo(new LinkVerdict(Outcome.BLOCK, List.of("on list HaGeZi Fake"), BlockReason.BLOCKLIST, HAGEZI_FAKE));
+    }
+
+    @Test
+    void suspiciousCheckOffSkipsHeuristicsAndAge() {
+        SettingsServiceFixtures.turnOff(settingsService, SettingKey.SUSPICIOUS_LINK_CHECK);
+        young(SCAM_HOST);
+        heuristics(SCAM_URL, "imitates njuskalo");
+
+        assertThat(linkCheckService.check(SCAM_URL)).isEqualTo(CLEAN);
+        verifyNoInteractions(suspiciousUrlService, domainAgeService);
+
+        assertThat(linkCheckService.explain(SCAM_URL)).isEqualTo(new LinkVerdict(
+                Outcome.BLOCK, List.of(YOUNG, "imitates njuskalo"), BlockReason.SCAM_SIGNALS, YOUNG + ", imitates njuskalo"));
+    }
+
+    @Test
     void aDomainRuleTakesPrecedenceOverTheListsSpamhausAndScamSignals() {
         rule(SCAM_HOST, DomainRuleType.BLOCK);
         source(1, HAGEZI_FAKE, SourceKind.DOMAINS, BlocklistAction.BLOCK, SCAM_HOST);
@@ -649,7 +682,7 @@ class DefaultLinkCheckServiceTest {
 
     private DefaultLinkCheckService withRealHeuristics() {
         return new DefaultLinkCheckService(domainRuleRepository, blocklistSourceRepository, blocklistStore, domainAgeService,
-                domainReputationService, new DefaultSuspiciousUrlService(new AppProperties()));
+                domainReputationService, new DefaultSuspiciousUrlService(new AppProperties()), settingsService);
     }
 
     private void young(final String host) {

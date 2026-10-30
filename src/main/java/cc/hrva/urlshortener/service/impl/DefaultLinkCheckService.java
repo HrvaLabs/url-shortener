@@ -15,8 +15,10 @@ import cc.hrva.urlshortener.repository.DomainRuleRepository;
 import cc.hrva.urlshortener.service.DomainAgeService;
 import cc.hrva.urlshortener.service.DomainReputationService;
 import cc.hrva.urlshortener.service.LinkCheckService;
+import cc.hrva.urlshortener.service.SettingsService;
 import cc.hrva.urlshortener.service.SuspiciousUrlService;
 import cc.hrva.urlshortener.service.blocklist.BlocklistStore;
+import cc.hrva.urlshortener.service.settings.SettingKey;
 import cc.hrva.urlshortener.util.DomainNames;
 import cc.hrva.urlshortener.util.LinkKeys;
 import java.util.ArrayList;
@@ -49,15 +51,16 @@ public class DefaultLinkCheckService implements LinkCheckService {
     private final DomainAgeService domainAgeService;
     private final DomainReputationService domainReputationService;
     private final SuspiciousUrlService suspiciousUrlService;
+    private final SettingsService settingsService;
 
     @Override
     public LinkVerdict check(final String longUrl) {
-        return evaluate(longUrl, false);
+        return evaluate(longUrl, new Checks(false, settingsService.isOn(SettingKey.BLOCKLIST_CHECK), settingsService.isOn(SettingKey.SUSPICIOUS_LINK_CHECK)));
     }
 
     @Override
     public LinkVerdict explain(final String longUrl) {
-        return evaluate(longUrl, true);
+        return evaluate(longUrl, Checks.EVERY_SIGNAL);
     }
 
     @Override
@@ -70,7 +73,7 @@ public class DefaultLinkCheckService implements LinkCheckService {
         return mostSpecificRuleOf(longUrl).filter(rule -> rule.getType() == DomainRuleType.BLOCK).isPresent();
     }
 
-    private LinkVerdict evaluate(final String longUrl, final boolean everySignal) {
+    private LinkVerdict evaluate(final String longUrl, final Checks checks) {
         if (StringUtils.isBlank(longUrl)) {
             return LinkVerdict.clean();
         }
@@ -82,18 +85,22 @@ public class DefaultLinkCheckService implements LinkCheckService {
         final var ipLiteral = DomainNames.isIpLiteral(host);
         final var domains = ipLiteral ? List.<String>of() : DomainNames.candidates(host);
         final var cheapSignals = new Signals(
-                matchingRules(domains), matchingSources(domains, longUrl), heuristicReasons(longUrl), ReputationResult.none(), false);
-        final var withReputation = needsSlowLookup(cheapSignals, ipLiteral, everySignal)
+                matchingRules(domains),
+                checks.blocklists() ? matchingSources(domains, longUrl) : List.of(),
+                checks.suspicious() ? heuristicReasons(longUrl) : List.of(),
+                ReputationResult.none(),
+                false);
+        final var withReputation = checks.blocklists() && needsSlowLookup(cheapSignals, ipLiteral, checks)
                 ? cheapSignals.withReputation(reputationOf(host))
                 : cheapSignals;
-        final var signals = needsSlowLookup(withReputation, ipLiteral, everySignal)
+        final var signals = checks.suspicious() && needsSlowLookup(withReputation, ipLiteral, checks)
                 ? withReputation.withYoung(isYoung(host))
                 : withReputation;
         return signals.verdict();
     }
 
-    private static boolean needsSlowLookup(final Signals signals, final boolean ipLiteral, final boolean everySignal) {
-        return !ipLiteral && (everySignal || signals.undecided());
+    private static boolean needsSlowLookup(final Signals signals, final boolean ipLiteral, final Checks checks) {
+        return !ipLiteral && (checks.everySignal() || signals.undecided());
     }
 
     private Optional<DomainRule> mostSpecificRuleOf(final String longUrl) {
@@ -155,6 +162,12 @@ public class DefaultLinkCheckService implements LinkCheckService {
             log.warn("Domain age lookup failed, checking without it exception={}", exception.getClass().getName());
             return false;
         }
+    }
+
+    private record Checks(boolean everySignal, boolean blocklists, boolean suspicious) {
+
+        private static final Checks EVERY_SIGNAL = new Checks(true, true, true);
+
     }
 
     @With

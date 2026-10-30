@@ -48,6 +48,7 @@ import cc.hrva.urlshortener.service.impl.DefaultApiKeyService;
 import cc.hrva.urlshortener.service.impl.DefaultAuditLogService;
 import cc.hrva.urlshortener.service.impl.DefaultUrlService;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiter;
+import cc.hrva.urlshortener.service.settings.DefaultSettingsTestConfiguration;
 import cc.hrva.urlshortener.validator.impl.DefaultApiKeyValidator;
 import cc.hrva.urlshortener.validator.impl.DefaultUrlValidator;
 import com.nimbusds.jose.JOSEException;
@@ -362,6 +363,7 @@ class ApiKeyUseOnCreateFlowTest {
                     type = FilterType.ASSIGNABLE_TYPE,
                     classes = {UrlRepository.class, CustomDomainRepository.class, UserRepository.class, ApiKeyRepository.class, AuditLogRepository.class}))
     @Import({
+            DefaultSettingsTestConfiguration.class,
             AppConfiguration.class,
             WebConfiguration.class,
             AnyHostIsPrimary.class,

@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.service;
 
+import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.model.BlocklistSource;
 import cc.hrva.urlshortener.model.DomainRule;
 import cc.hrva.urlshortener.model.enums.BlockReason;
@@ -11,6 +12,9 @@ import cc.hrva.urlshortener.repository.DomainRuleRepository;
 import cc.hrva.urlshortener.service.blocklist.BlocklistConfigurationChangedEvent;
 import cc.hrva.urlshortener.service.blocklist.BlocklistStore;
 import cc.hrva.urlshortener.service.impl.DefaultClickCheckService;
+import cc.hrva.urlshortener.service.impl.DefaultSettingsService;
+import cc.hrva.urlshortener.service.settings.SettingKey;
+import cc.hrva.urlshortener.service.settings.SettingsServiceFixtures;
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
@@ -37,6 +41,7 @@ import static org.assertj.core.api.Assertions.entry;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -70,10 +75,12 @@ class DefaultClickCheckServiceTest {
     private ArgumentCaptor<Map<Long, List<String>>> lookups;
 
     private ClickCheckService clickCheckService;
+    private final DefaultSettingsService settingsService = SettingsServiceFixtures.defaults(new AppProperties());
 
     @BeforeEach
     void setUp() {
-        clickCheckService = new DefaultClickCheckService(blocklistSourceRepository, domainRuleRepository, blocklistStore, moderationService);
+        clickCheckService = new DefaultClickCheckService(blocklistSourceRepository, domainRuleRepository, blocklistStore, moderationService,
+                settingsService);
     }
 
     @Test
@@ -87,6 +94,18 @@ class DefaultClickCheckServiceTest {
         verify(moderationService, times(1)).blockLink(URL_ID, BlockReason.BLOCKLIST, "HaGeZi TIF medium", "system", "click");
         verify(blocklistStore).matchingSources(lookups.capture());
         assertThat(lookups.getValue()).containsOnly(entry(1L, PHISHING_DOMAINS));
+    }
+
+    @Test
+    void blocklistCheckOffLetsClicksThrough() {
+        lists(TIF);
+        lenient().when(blocklistStore.matchingSources(any())).thenReturn(Set.of(1L));
+        clickCheckService.reload();
+        SettingsServiceFixtures.turnOff(settingsService, SettingKey.BLOCKLIST_CHECK);
+
+        assertThat(clickCheckService.mayRedirect(URL_ID, PHISHING_LINK)).isTrue();
+
+        verifyNoInteractions(blocklistStore, moderationService);
     }
 
     @Test

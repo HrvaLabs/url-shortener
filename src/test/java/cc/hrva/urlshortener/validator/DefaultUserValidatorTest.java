@@ -4,6 +4,9 @@ import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.exception.ApiException;
 import cc.hrva.urlshortener.exception.EmailExistsException;
 import cc.hrva.urlshortener.repository.UserRepository;
+import cc.hrva.urlshortener.service.impl.DefaultSettingsService;
+import cc.hrva.urlshortener.service.settings.SettingKey;
+import cc.hrva.urlshortener.service.settings.SettingsServiceFixtures;
 import cc.hrva.urlshortener.validator.impl.DefaultUserValidator;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -20,15 +23,14 @@ class DefaultUserValidatorTest {
 
     private UserValidator userValidator;
 
-    @Mock
-    private AppProperties appProperties;
+    private final DefaultSettingsService settingsService = SettingsServiceFixtures.defaults(new AppProperties());
 
     @Mock
     private UserRepository userRepository;
 
     @BeforeEach
     void setUp() {
-        this.userValidator = new DefaultUserValidator(appProperties, userRepository);
+        this.userValidator = new DefaultUserValidator(userRepository, settingsService);
     }
 
     @Test
@@ -49,18 +51,13 @@ class DefaultUserValidatorTest {
     }
 
     @Test
-    void shouldValidateRegistrationEnabled() {
-        when(appProperties.isRegistrationEnabled()).thenReturn(true);
+    void newSignupsFollowTheSetting() {
+        assertThatCode(() -> userValidator.checkRegistrationEnabled()).doesNotThrowAnyException();
 
-        assertThatCode(() -> userValidator.checkRegistrationEnabled())
-                .doesNotThrowAnyException();
-    }
-
-    @Test
-    void shouldFailWhenRegistrationDisabled() {
-        when(appProperties.isRegistrationEnabled()).thenReturn(false);
+        SettingsServiceFixtures.turnOff(settingsService, SettingKey.NEW_SIGNUPS);
 
         assertThatThrownBy(() -> userValidator.checkRegistrationEnabled())
-                .isInstanceOf(ApiException.class);
+                .isInstanceOf(ApiException.class)
+                .hasMessage("Registrations are currently disabled");
     }
 }

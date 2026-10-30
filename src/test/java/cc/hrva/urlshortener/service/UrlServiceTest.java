@@ -68,10 +68,13 @@ import cc.hrva.urlshortener.service.burst.CreatedLink;
 import cc.hrva.urlshortener.service.domain.CustomDomainRegistry;
 import cc.hrva.urlshortener.service.domain.DomainRoute;
 import cc.hrva.urlshortener.service.domain.UrlCache;
+import cc.hrva.urlshortener.service.impl.DefaultSettingsService;
 import cc.hrva.urlshortener.service.impl.DefaultSuspiciousUrlService;
 import cc.hrva.urlshortener.service.impl.DefaultUrlService;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiter;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiterUnavailableException;
+import cc.hrva.urlshortener.service.settings.SettingKey;
+import cc.hrva.urlshortener.service.settings.SettingsServiceFixtures;
 import cc.hrva.urlshortener.validator.ApiKeyValidator;
 import cc.hrva.urlshortener.validator.UrlValidator;
 import cc.hrva.urlshortener.validator.impl.DefaultUrlValidator;
@@ -130,8 +133,11 @@ class UrlServiceTest {
     private static final DomainRoute GO = new DomainRoute(7L, "go.example.com", CustomDomainStatus.ACTIVE, true);
     private static final String DOMAIN_REFUSAL = "Choose one of your active domains, or leave it empty for hrva.cc.";
     private static final String DOMAIN_OFF = "This link's domain isn't active, so the link can't be turned on.";
+    private static final String CUSTOM_ALIASES_OFF = "Custom aliases are turned off right now.";
 
     private UrlService urlService;
+
+    private final DefaultSettingsService settingsService = SettingsServiceFixtures.defaults(new AppProperties());
 
     @Mock
     private UrlRepository urlRepository;
@@ -250,7 +256,8 @@ class UrlServiceTest {
                 destinationCheckRepository,
                 customDomainRegistry,
                 customDomainRepository,
-                sameShapeAlertService
+                sameShapeAlertService,
+                settingsService
         );
     }
 
@@ -705,7 +712,6 @@ class UrlServiceTest {
     void aBlocklistedDestinationIsRefusedBeforeSafeBrowsingAndNeverSaved() {
         final var service = urlServiceWithRealLongUrlHandling();
         final var createUrlDto = CreateUrlDto.builder().longUrl("https://njuskaio.cam/a/MAUB3").build();
-        when(appProperties.isAnonymousUrlCreationEnabled()).thenReturn(true);
         when(linkCheckService.check("https://njuskaio.cam/a/MAUB3")).thenReturn(blocked());
 
         assertThatThrownBy(() -> service.saveUrlRouting(createUrlDto, CLIENT_IP, CreatedVia.WEB))
@@ -754,7 +760,6 @@ class UrlServiceTest {
         final var checkedInTransaction = new AtomicReference<Boolean>();
         final var savedInTransaction = new AtomicReference<Boolean>();
         final var createUrlDto = CreateUrlDto.builder().longUrl("https://example.com/menu").build();
-        when(appProperties.isAnonymousUrlCreationEnabled()).thenReturn(true);
         when(appProperties.getShortUrlLength()).thenReturn(5L);
         recordTransactionDuringCheck("https://example.com/menu", checkedInTransaction);
         recordTransactionDuringSave(savedInTransaction);
@@ -851,7 +856,6 @@ class UrlServiceTest {
     void anAnonymousLinkHasItsRedirectsCheckedInTheBackgroundOnceItIsCommitted() {
         final var checkedInTransaction = new AtomicReference<Boolean>();
         final var createUrlDto = CreateUrlDto.builder().longUrl("https://example.com/menu").build();
-        when(appProperties.isAnonymousUrlCreationEnabled()).thenReturn(true);
         when(appProperties.getShortUrlLength()).thenReturn(5L);
         when(urlRepository.save(any(Url.class))).thenAnswer(invocation -> persisted(invocation.getArgument(0)));
         when(linkCheckService.check("https://example.com/menu")).thenReturn(LinkVerdict.clean());
@@ -1068,7 +1072,6 @@ class UrlServiceTest {
     void anAnonymousCreateReportsTheLinkAfterCommit() {
         final var reportedInTransaction = new AtomicReference<Boolean>();
         final var createUrlDto = CreateUrlDto.builder().longUrl("https://example.com/wqamhcsom?r=1&t=2").build();
-        when(appProperties.isAnonymousUrlCreationEnabled()).thenReturn(true);
         when(appProperties.getShortUrlLength()).thenReturn(5L);
         when(urlRepository.save(any(Url.class))).thenAnswer(invocation -> persisted(invocation.getArgument(0)));
         when(linkCheckService.check("https://example.com/wqamhcsom?r=1&t=2")).thenReturn(new LinkVerdict(Outcome.FLAG, YOUNG_DOMAIN, null, null));
@@ -1214,6 +1217,7 @@ class UrlServiceTest {
 
     @Test
     void anonymousCreationWhileItIsSwitchedOffIsRefusedBeforeTheSlowLinkCheck() {
+        SettingsServiceFixtures.turnOff(settingsService, SettingKey.ANONYMOUS_LINKS);
         final var service = urlServiceWithRealLongUrlHandling();
         final var createUrlDto = CreateUrlDto.builder().longUrl("https://example.com/menu").build();
 
@@ -1328,6 +1332,69 @@ class UrlServiceTest {
         verify(reservedAliasService).isReserved(url.getShortUrl());
         verify(urlRepository).aliasTaken(null, url.getShortUrl());
         verify(urlValidator).longUrlInUrl(url);
+    }
+
+    @Test
+    void customAliasesOffRefusesAnAlias() {
+        SettingsServiceFixtures.turnOff(settingsService, SettingKey.CUSTOM_ALIASES);
+        final var createUrlDto = CreateUrlDto.builder().longUrl("https://example.com/menu").shortUrl("promo").build();
+        when(createUrlToUrlConverter.convert(createUrlDto))
+                .thenAnswer(invocation -> Url.builder().longUrl("https://example.com/menu").shortUrl("promo").build());
+        when(userService.getUserFromToken()).thenReturn(User.builder().id(1L).build());
+        when(apiKeyService.fetchApiKeyByKey("apikey")).thenReturn(ApiKey.builder().id(4L).owner(User.builder().id(1L).build()).build());
+
+        assertThatThrownBy(() -> urlService.saveUrlWithApiKey(createUrlDto, "apikey", CreatedVia.API_KEY))
+                .isInstanceOf(UrlValidationException.class)
+                .hasMessage(CUSTOM_ALIASES_OFF);
+        assertThatThrownBy(() -> urlService.saveUrlRouting(createUrlDto, null, CreatedVia.MCP))
+                .isInstanceOf(UrlValidationException.class)
+                .hasMessage(CUSTOM_ALIASES_OFF);
+        assertThatThrownBy(() -> urlService.saveUrlRouting(createUrlDto, CLIENT_IP, CreatedVia.BULK))
+                .isInstanceOf(UrlValidationException.class)
+                .hasMessage(CUSTOM_ALIASES_OFF);
+        assertThatThrownBy(() -> urlService.saveUrlRouting(createUrlDto, CLIENT_IP, CreatedVia.WEB))
+                .isInstanceOf(UrlValidationException.class)
+                .hasMessage(CUSTOM_ALIASES_OFF);
+
+        verify(urlValidator, never()).checkIfShortUrlIsUnique(any(), anyString());
+        verify(urlRepository, never()).save(any());
+    }
+
+    @Test
+    void customAliasesOffStillGivesARandomAlias() {
+        SettingsServiceFixtures.turnOff(settingsService, SettingKey.CUSTOM_ALIASES);
+        final var url = signedInCreate();
+
+        urlService.saveUrlRouting(CreateUrlDto.builder().longUrl("https://example.com/menu").build(), CLIENT_IP, CreatedVia.WEB);
+
+        assertThat(url.getShortUrl()).hasSize(5);
+        verify(urlRepository).save(url);
+    }
+
+    @Test
+    void customAliasesOffKeepsTheAliasOfALinkOnACustomDomain() {
+        SettingsServiceFixtures.turnOff(settingsService, SettingKey.CUSTOM_ALIASES);
+        final var createUrlDto = CreateUrlDto.builder().longUrl("https://example.com/menu").shortUrl("menu").domain("go.example.com").build();
+        final var url = Url.builder().longUrl("https://example.com/menu").shortUrl("menu").build();
+        when(createUrlToUrlConverter.convert(createUrlDto)).thenReturn(url);
+        when(userService.getUserFromToken()).thenReturn(User.builder().id(1L).build());
+        when(customDomainRepository.findUsable("go.example.com", 1L)).thenReturn(Optional.of(goExampleCom(CustomDomainStatus.ACTIVE)));
+        when(urlRepository.save(url)).thenReturn(persisted(url));
+
+        final var created = urlService.saveUrlRouting(createUrlDto, CLIENT_IP, CreatedVia.WEB);
+
+        assertThat(created.shortUrl()).isEqualTo("menu");
+        verify(urlValidator).checkIfShortUrlIsUnique(7L, "menu");
+    }
+
+    @Test
+    void anonymousLinksPerHourFollowTheSetting() {
+        SettingsServiceFixtures.change(settingsService, SettingKey.ANONYMOUS_LINKS_PER_HOUR, 3);
+        anonymousCreate();
+
+        urlService.saveUrlRouting(CreateUrlDto.builder().longUrl("https://example.com/menu").build(), CLIENT_IP, CreatedVia.WEB);
+
+        verify(rateLimiter).tryAcquire(RateLimiter.clientKey("create:anon", CLIENT_IP), 3, Duration.ofHours(1));
     }
 
     @Test
@@ -2442,7 +2509,6 @@ class UrlServiceTest {
     void shouldRejectMalformedLongUrlWhenSavingUrl() {
         final var service = urlServiceWithRealLongUrlHandling();
         final var createUrlDto = CreateUrlDto.builder().longUrl("https//wedding.hrva.cc").build();
-        when(appProperties.isAnonymousUrlCreationEnabled()).thenReturn(true);
 
         assertThatThrownBy(() -> service.saveUrlRouting(createUrlDto, CLIENT_IP, CreatedVia.WEB))
                 .isInstanceOf(UrlValidationException.class)
@@ -3397,7 +3463,7 @@ class UrlServiceTest {
                 urlToPeekUrlConverter, createUrlToUrlConverter, urlUpdateDtoToUrlConverter, new UrlCache(urls), objectMapper,
                 new io.micrometer.core.instrument.simple.SimpleMeterRegistry(), passwordEncoder, suspiciousUrlService, rateLimiter,
                 reviewQueueService, scammerSignalService, clickCheckService, redirectChainService, TransactionOperations.withoutTransaction(),
-                reservedAliasService, burstAlertService, destinationCheckRepository, customDomainRegistry, customDomainRepository, sameShapeAlertService);
+                reservedAliasService, burstAlertService, destinationCheckRepository, customDomainRegistry, customDomainRepository, sameShapeAlertService, settingsService);
     }
 
     private static UrlService withTheCacheAnnotations(final UrlService service, final CacheManager urls) {
@@ -3449,7 +3515,8 @@ class UrlServiceTest {
                 destinationCheckRepository,
                 customDomainRegistry,
                 customDomainRepository,
-                sameShapeAlertService
+                sameShapeAlertService,
+                settingsService
         );
     }
 
@@ -3500,8 +3567,8 @@ class UrlServiceTest {
         final var transactionManager = new DataSourceTransactionManager(new DriverManagerDataSource("jdbc:h2:mem:"));
         final var service = new DefaultUrlService(
                 userService,
-                new DefaultUrlValidator(userService, urlRepository, appProperties, safeBrowsingService, new DefaultSuspiciousUrlService(appProperties), linkCheckService,
-                        reservedAliasService),
+                new DefaultUrlValidator(userService, urlRepository, safeBrowsingService, new DefaultSuspiciousUrlService(appProperties), linkCheckService,
+                        reservedAliasService, settingsService),
                 apiKeyService,
                 urlRepository,
                 appProperties,
@@ -3526,7 +3593,8 @@ class UrlServiceTest {
                 destinationCheckRepository,
                 customDomainRegistry,
                 customDomainRepository,
-                sameShapeAlertService
+                sameShapeAlertService,
+                settingsService
         );
         final var proxyFactory = new ProxyFactory(service);
         proxyFactory.addAdvice(new TransactionInterceptor(transactionManager, new AnnotationTransactionAttributeSource()));
@@ -3536,8 +3604,8 @@ class UrlServiceTest {
     private UrlService urlServiceWithRealLongUrlHandling() {
         return new DefaultUrlService(
                 userService,
-                new DefaultUrlValidator(userService, urlRepository, appProperties, safeBrowsingService, new DefaultSuspiciousUrlService(appProperties), linkCheckService,
-                        reservedAliasService),
+                new DefaultUrlValidator(userService, urlRepository, safeBrowsingService, new DefaultSuspiciousUrlService(appProperties), linkCheckService,
+                        reservedAliasService, settingsService),
                 apiKeyService,
                 urlRepository,
                 appProperties,
@@ -3562,7 +3630,8 @@ class UrlServiceTest {
                 destinationCheckRepository,
                 customDomainRegistry,
                 customDomainRepository,
-                sameShapeAlertService
+                sameShapeAlertService,
+                settingsService
         );
     }
 
@@ -3594,7 +3663,8 @@ class UrlServiceTest {
                 destinationCheckRepository,
                 customDomainRegistry,
                 customDomainRepository,
-                sameShapeAlertService
+                sameShapeAlertService,
+                settingsService
         );
     }
 

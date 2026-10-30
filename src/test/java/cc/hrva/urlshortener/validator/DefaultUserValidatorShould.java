@@ -3,6 +3,8 @@ package cc.hrva.urlshortener.validator;
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.exception.EmailExistsException;
 import cc.hrva.urlshortener.repository.UserRepository;
+import cc.hrva.urlshortener.service.impl.DefaultSettingsService;
+import cc.hrva.urlshortener.service.settings.SettingsServiceFixtures;
 import cc.hrva.urlshortener.validator.impl.DefaultUserValidator;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -22,15 +24,14 @@ class DefaultUserValidatorShould {
     @Mock
     private UserRepository userRepository;
 
-    @Mock
-    private AppProperties appProperties;
+    private final DefaultSettingsService settingsService = SettingsServiceFixtures.defaults(new AppProperties());
 
 
     private String email;
 
     @BeforeEach
     void setUp() {
-        this.userValidator = new DefaultUserValidator(appProperties, userRepository);
+        this.userValidator = new DefaultUserValidator(userRepository, settingsService);
 
         this.email = "email";
     }

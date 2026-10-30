@@ -4,9 +4,11 @@ import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.dto.LinkVerdict;
 import cc.hrva.urlshortener.service.BurstAlertService;
 import cc.hrva.urlshortener.service.DomainAgeService;
+import cc.hrva.urlshortener.service.SettingsService;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.BurstDetected;
 import cc.hrva.urlshortener.service.burst.CreatedLink;
 import cc.hrva.urlshortener.service.burst.RedisBurstCounter;
+import cc.hrva.urlshortener.service.settings.SettingKey;
 import cc.hrva.urlshortener.util.DomainNames;
 import java.time.Clock;
 import java.time.Duration;
@@ -40,6 +42,7 @@ public class DefaultBurstAlertService implements BurstAlertService {
     private final StringRedisTemplate redisTemplate;
     private final AppProperties appProperties;
     private final Clock clock;
+    private final SettingsService settingsService;
 
     @Async
     @Override
@@ -60,11 +63,11 @@ public class DefaultBurstAlertService implements BurstAlertService {
     }
 
     private void alertIfBurst(final CreatedLink link, final String host, final String domain) {
-        final var burst = appProperties.getBurst();
-        final var members = redisBurstCounter.record(domain, link.urlId() + MEMBER_SEPARATOR + link.creator(), clock.instant(), burst.getWindow());
+        final var window = appProperties.getBurst().getWindow();
+        final var members = redisBurstCounter.record(domain, link.urlId() + MEMBER_SEPARATOR + link.creator(), clock.instant(), window);
         final var links = linksOf(members);
         final var creators = creatorsOf(members);
-        if (links < burst.getLinks() || creators < MIN_CREATORS) {
+        if (links < settingsService.number(SettingKey.BURST_LINKS) || creators < MIN_CREATORS) {
             return;
         }
         final var alertedKey = ALERTED_KEY_PREFIX + domain;
@@ -80,7 +83,7 @@ public class DefaultBurstAlertService implements BurstAlertService {
             return;
         }
         final var ageDays = ageInDays(registeredOn, today);
-        eventPublisher.publishEvent(new BurstDetected(domain, links, creators, ageDays, burst.getWindow()));
+        eventPublisher.publishEvent(new BurstDetected(domain, links, creators, ageDays, window));
         log.info("Burst of new links domain={} links={} creators={} ageDays={}", domain, links, creators, ageDays);
     }
 

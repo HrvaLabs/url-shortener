@@ -1,13 +1,14 @@
 package cc.hrva.urlshortener.service.impl;
 
-import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.repository.stats.AnonymousTrafficRepository;
 import cc.hrva.urlshortener.repository.stats.AnonymousTrafficRepository.BusyLink;
+import cc.hrva.urlshortener.service.SettingsService;
 import cc.hrva.urlshortener.service.TrafficAlertService;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.AnonymousLinkBusy;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.AnonymousTrafficShare;
 import cc.hrva.urlshortener.service.alert.AlertedLink;
 import cc.hrva.urlshortener.service.analytics.AnalyticsDays;
+import cc.hrva.urlshortener.service.settings.SettingKey;
 import cc.hrva.urlshortener.util.DomainNames;
 import java.time.Duration;
 import java.time.LocalDate;
@@ -34,12 +35,12 @@ public class DefaultTrafficAlertService implements TrafficAlertService {
     private final AnalyticsDays analyticsDays;
     private final ApplicationEventPublisher eventPublisher;
     private final StringRedisTemplate redisTemplate;
-    private final AppProperties appProperties;
+    private final SettingsService settingsService;
 
     @Override
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public void check() {
-        if (!appProperties.getTrafficAlerts().isEnabled()) {
+        if (!settingsService.isOn(SettingKey.TRAFFIC_ALERTS)) {
             return;
         }
         final var day = analyticsDays.today();
@@ -52,7 +53,7 @@ public class DefaultTrafficAlertService implements TrafficAlertService {
     }
 
     private void alertBusyLinks(final LocalDate day) {
-        final var linkClicks = appProperties.getTrafficAlerts().getLinkClicks();
+        final var linkClicks = settingsService.number(SettingKey.TRAFFIC_LINK_CLICKS);
         for (final var link : anonymousTrafficRepository.busyAnonymousLinks(day, linkClicks, MAX_BUSY_LINKS)) {
             if (firstToday(LINK_KEY_PREFIX + day + ":" + link.urlId())) {
                 eventPublisher.publishEvent(new AnonymousLinkBusy(alerted(link), link.clicks(), topCountry(link.urlId(), day)));
@@ -62,9 +63,9 @@ public class DefaultTrafficAlertService implements TrafficAlertService {
     }
 
     private void alertTrafficShare(final LocalDate day) {
-        final var trafficAlerts = appProperties.getTrafficAlerts();
         final var clicks = anonymousTrafficRepository.dayClicks(day);
-        if (clicks.anonymous() < trafficAlerts.getMinAnonymousClicks() || clicks.anonymous() * 100 <= clicks.total() * trafficAlerts.getSharePercent()) {
+        if (clicks.anonymous() < settingsService.number(SettingKey.TRAFFIC_MIN_ANONYMOUS_CLICKS)
+                || clicks.anonymous() * 100 <= clicks.total() * settingsService.number(SettingKey.TRAFFIC_SHARE_PERCENT)) {
             return;
         }
         if (firstToday(SHARE_KEY_PREFIX + day)) {

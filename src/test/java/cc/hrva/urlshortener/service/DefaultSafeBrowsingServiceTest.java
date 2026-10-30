@@ -6,6 +6,9 @@ import cc.hrva.urlshortener.client.GoogleSafeBrowsingApi;
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.exception.UrlValidationException;
 import cc.hrva.urlshortener.service.impl.DefaultSafeBrowsingService;
+import cc.hrva.urlshortener.service.impl.DefaultSettingsService;
+import cc.hrva.urlshortener.service.settings.SettingKey;
+import cc.hrva.urlshortener.service.settings.SettingsServiceFixtures;
 import com.google.api.services.safebrowsing.v5.Safebrowsing;
 import java.io.IOException;
 import java.util.List;
@@ -39,6 +42,8 @@ class DefaultSafeBrowsingServiceTest {
 
     private AppProperties appProperties;
 
+    private DefaultSettingsService settingsService;
+
     private Level previousLevel;
 
     private SafeBrowsingService safeBrowsingService;
@@ -46,7 +51,8 @@ class DefaultSafeBrowsingServiceTest {
     @BeforeEach
     void setUp() {
         appProperties = new AppProperties();
-        safeBrowsingService = new DefaultSafeBrowsingService(safebrowsing, googleSafeBrowsingApi, appProperties);
+        settingsService = SettingsServiceFixtures.defaults(appProperties);
+        safeBrowsingService = new DefaultSafeBrowsingService(safebrowsing, googleSafeBrowsingApi, settingsService);
         previousLevel = serviceLogger.getLevel();
         serviceLogger.setLevel(Level.DEBUG);
     }
@@ -83,6 +89,29 @@ class DefaultSafeBrowsingServiceTest {
                 .contains("ALERT Safe Browsing API unreachable failClosed=true count=1")
                 .contains("java.io.IOException: Connection refused")
                 .doesNotContain("secret-destination.example");
+    }
+
+    @Test
+    void failClosedFollowsTheSetting() throws IOException {
+        when(googleSafeBrowsingApi.executeSearch(any())).thenThrow(new IOException("Connection refused"));
+
+        assertThat(safeBrowsingService.checkUrlsForThreats(DESTINATION)).isEmpty();
+
+        SettingsServiceFixtures.turnOn(settingsService, SettingKey.SAFE_BROWSING_FAIL_CLOSED);
+
+        assertThatThrownBy(() -> safeBrowsingService.checkUrlsForThreats(DESTINATION))
+                .isInstanceOf(UrlValidationException.class)
+                .hasMessage("URL safety check is temporarily unavailable. Please try again later.");
+    }
+
+    @Test
+    void failClosedNeedsTheSafeBrowsingCheck(final CapturedOutput output) throws IOException {
+        appProperties.setSafeBrowsingFailClosed(true);
+        SettingsServiceFixtures.turnOff(settingsService, SettingKey.SAFE_BROWSING_CHECK);
+        when(googleSafeBrowsingApi.executeSearch(any())).thenThrow(new IOException("Connection refused"));
+
+        assertThat(safeBrowsingService.checkUrlsForThreats(DESTINATION)).isEmpty();
+        assertThat(output).contains("ALERT Safe Browsing API unreachable failClosed=false count=1");
     }
 
 }

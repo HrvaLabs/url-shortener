@@ -3,6 +3,7 @@ package cc.hrva.urlshortener.validator;
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.dto.LinkVerdict;
 import cc.hrva.urlshortener.dto.LinkVerdict.Outcome;
+import cc.hrva.urlshortener.exception.ApiException;
 import cc.hrva.urlshortener.exception.LongUrlNotSpecifiedException;
 import cc.hrva.urlshortener.exception.NoAuthorizationException;
 import cc.hrva.urlshortener.model.User;
@@ -19,6 +20,9 @@ import cc.hrva.urlshortener.service.ReservedAliasService;
 import cc.hrva.urlshortener.service.SafeBrowsingService;
 import cc.hrva.urlshortener.service.SuspiciousUrlService;
 import cc.hrva.urlshortener.service.UserService;
+import cc.hrva.urlshortener.service.impl.DefaultSettingsService;
+import cc.hrva.urlshortener.service.settings.SettingKey;
+import cc.hrva.urlshortener.service.settings.SettingsServiceFixtures;
 import cc.hrva.urlshortener.util.DomainNames;
 import cc.hrva.urlshortener.validator.impl.DefaultUrlValidator;
 import org.junit.jupiter.api.BeforeEach;
@@ -50,8 +54,7 @@ class DefaultUrlValidatorTest {
     @Mock
     private UserService userService;
 
-    @Mock
-    private AppProperties appProperties;
+    private final DefaultSettingsService settingsService = SettingsServiceFixtures.defaults(new AppProperties());
 
     @Mock
     private SafeBrowsingService safeBrowsingService;
@@ -67,8 +70,8 @@ class DefaultUrlValidatorTest {
 
     @BeforeEach
     void setUp() {
-        this.urlValidator = new DefaultUrlValidator(userService, urlRepository, appProperties, safeBrowsingService, suspiciousUrlService, linkCheckService,
-                reservedAliasService);
+        this.urlValidator = new DefaultUrlValidator(userService, urlRepository, safeBrowsingService, suspiciousUrlService, linkCheckService,
+                reservedAliasService, settingsService);
     }
 
     @Test
@@ -654,6 +657,37 @@ class DefaultUrlValidatorTest {
     @Test
     void aMissingDestinationIsStillRefusedAsNotAWebAddress() {
         assertLongUrlRejected(null);
+    }
+
+    @Test
+    void anonymousLinksFollowTheSetting() {
+        assertThatCode(() -> urlValidator.checkIfAnonymousUrlCreationEnabled()).doesNotThrowAnyException();
+
+        SettingsServiceFixtures.turnOff(settingsService, SettingKey.ANONYMOUS_LINKS);
+
+        assertThatThrownBy(() -> urlValidator.checkIfAnonymousUrlCreationEnabled())
+                .isInstanceOf(ApiException.class)
+                .hasMessage("Sign in to create short URLs");
+    }
+
+    @Test
+    void safeBrowsingCheckOffSkipsTheLookup() {
+        final var url = Url.builder().longUrl("https://malware.example/download").build();
+        SettingsServiceFixtures.turnOff(settingsService, SettingKey.SAFE_BROWSING_CHECK);
+
+        assertThatCode(() -> urlValidator.checkIfUrlSafe(url)).doesNotThrowAnyException();
+
+        verifyNoInteractions(safeBrowsingService);
+    }
+
+    @Test
+    void safeBrowsingCheckOnRefusesAFlaggedDestination() {
+        final var url = Url.builder().longUrl("https://malware.example/download").build();
+        when(safeBrowsingService.checkUrlsForThreats("https://malware.example/download")).thenReturn(List.of("MALWARE"));
+
+        assertThatThrownBy(() -> urlValidator.checkIfUrlSafe(url))
+                .isInstanceOf(UrlValidationException.class)
+                .hasMessage("This URL was flagged as unsafe and cannot be shortened");
     }
 
     private void assertLongUrlRejected(final String longUrl) {

@@ -1,8 +1,9 @@
 package cc.hrva.urlshortener.validator.impl;
 
-import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.exception.ApiException;
 import cc.hrva.urlshortener.repository.UserRepository;
+import cc.hrva.urlshortener.service.SettingsService;
+import cc.hrva.urlshortener.service.settings.SettingKey;
 import lombok.RequiredArgsConstructor;
 import cc.hrva.urlshortener.exception.EmailExistsException;
 import cc.hrva.urlshortener.validator.UserValidator;
@@ -12,8 +13,8 @@ import org.springframework.stereotype.Component;
 @RequiredArgsConstructor
 public class DefaultUserValidator implements UserValidator {
 
-    private final AppProperties appProperties;
     private final UserRepository userRepository;
+    private final SettingsService settingsService;
 
     @Override
     public void checkEmailUniqueness(final String email) {
@@ -24,7 +25,7 @@ public class DefaultUserValidator implements UserValidator {
 
     @Override
     public void checkRegistrationEnabled() {
-        if (!appProperties.isRegistrationEnabled()) {
+        if (!settingsService.isOn(SettingKey.NEW_SIGNUPS)) {
             throw new ApiException("Registrations are currently disabled");
         }
     }

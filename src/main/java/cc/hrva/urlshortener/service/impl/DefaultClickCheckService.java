@@ -10,8 +10,10 @@ import cc.hrva.urlshortener.repository.BlocklistSourceRepository;
 import cc.hrva.urlshortener.repository.DomainRuleRepository;
 import cc.hrva.urlshortener.service.ClickCheckService;
 import cc.hrva.urlshortener.service.ModerationService;
+import cc.hrva.urlshortener.service.SettingsService;
 import cc.hrva.urlshortener.service.blocklist.BlocklistConfigurationChangedEvent;
 import cc.hrva.urlshortener.service.blocklist.BlocklistStore;
+import cc.hrva.urlshortener.service.settings.SettingKey;
 import cc.hrva.urlshortener.util.DomainNames;
 import cc.hrva.urlshortener.util.LinkKeys;
 import java.util.Comparator;
@@ -42,10 +44,14 @@ public class DefaultClickCheckService implements ClickCheckService {
     private final DomainRuleRepository domainRuleRepository;
     private final BlocklistStore blocklistStore;
     private final ModerationService moderationService;
+    private final SettingsService settingsService;
     private final AtomicReference<Snapshot> snapshot = new AtomicReference<>(Snapshot.EMPTY);
 
     @Override
     public boolean mayRedirect(final long urlId, final String longUrl) {
+        if (!settingsService.isOn(SettingKey.BLOCKLIST_CHECK)) {
+            return true;
+        }
         final var lists = snapshot.get();
         final var lookups = lookupsFor(lists, longUrl);
         if (lookups.isEmpty()) {

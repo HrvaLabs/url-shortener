@@ -16,6 +16,9 @@ import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.service.AuthoritiesService;
 import cc.hrva.urlshortener.service.SignInMethodService;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent;
+import cc.hrva.urlshortener.service.impl.DefaultSettingsService;
+import cc.hrva.urlshortener.service.settings.SettingKey;
+import cc.hrva.urlshortener.service.settings.SettingsServiceFixtures;
 import cc.hrva.urlshortener.service.twostep.PendingLoginStore;
 import cc.hrva.urlshortener.service.twostep.TwoStepMethods;
 import jakarta.servlet.http.HttpServletRequest;
@@ -73,6 +76,8 @@ class OAuth2LoginSuccessHandlerTest {
     @Mock
     private AppProperties appProperties;
 
+    private final DefaultSettingsService settingsService = SettingsServiceFixtures.defaults(new AppProperties());
+
     @Mock
     private HttpServletRequest request;
 
@@ -101,10 +106,9 @@ class OAuth2LoginSuccessHandlerTest {
     void setUp() {
         this.handler = new OAuth2LoginSuccessHandler(userRepository, authoritiesService, tokenProvider,
                 appProperties, Validation.buildDefaultValidatorFactory().getValidator(), eventPublisher,
-                pendingLoginStore, twoStepMethods, signInMethodService);
+                pendingLoginStore, twoStepMethods, signInMethodService, settingsService);
         lenient().when(authentication.getPrincipal()).thenReturn(oAuth2User);
         lenient().when(appProperties.getFrontendUrl()).thenReturn("http://fe");
-        lenient().when(appProperties.isRegistrationEnabled()).thenReturn(true);
         lenient().when(oAuth2User.getAttribute("email_verified")).thenReturn(true);
     }
 
@@ -433,11 +437,26 @@ class OAuth2LoginSuccessHandlerTest {
 
     @ParameterizedTest
     @ValueSource(strings = {"google", "github"})
+    void anOAuthSignUpFollowsNewSignups(final String provider) throws Exception {
+        SettingsServiceFixtures.turnOff(settingsService, SettingKey.NEW_SIGNUPS);
+        when(oAuth2User.getAttribute("email")).thenReturn("new@example.com");
+        when(userRepository.findByEmail("new@example.com")).thenReturn(Optional.empty());
+
+        handler.onAuthenticationSuccess(request, response, signIn(provider));
+
+        verify(response).sendRedirect("http://fe/auth/callback?error=registration_disabled");
+        verify(userRepository, never()).save(any());
+        verify(userRepository, never()).recordLastLogin(any(), any());
+        verifyNoInteractions(tokenProvider, eventPublisher, authoritiesService, pendingLoginStore, signInMethodService);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"google", "github"})
     void pausedSignUpsStillLetAnExistingAccountSignIn(final String provider) throws Exception {
         final var user = User.builder().id(5L).email("member@example.com").active(true).authProvider("local")
                 .authorities(Collections.singletonList(Authorities.builder().id(1L).name("ROLE_USER").build()))
                 .build();
-        lenient().when(appProperties.isRegistrationEnabled()).thenReturn(false);
+        SettingsServiceFixtures.turnOff(settingsService, SettingKey.NEW_SIGNUPS);
         when(oAuth2User.getAttribute("email")).thenReturn("member@example.com");
         when(userRepository.findByEmail("member@example.com")).thenReturn(Optional.of(user));
         when(tokenProvider.createToken(any())).thenReturn("jwt-token");
@@ -448,21 +467,6 @@ class OAuth2LoginSuccessHandlerTest {
         verify(userRepository).recordLastLogin(eq(5L), any());
         verify(userRepository, never()).save(any());
         verify(eventPublisher, never()).publishEvent(any(Object.class));
-    }
-
-    @ParameterizedTest
-    @ValueSource(strings = {"google", "github"})
-    void pausedSignUpsRefuseANewAccount(final String provider) throws Exception {
-        when(appProperties.isRegistrationEnabled()).thenReturn(false);
-        when(oAuth2User.getAttribute("email")).thenReturn("new@example.com");
-        when(userRepository.findByEmail("new@example.com")).thenReturn(Optional.empty());
-
-        handler.onAuthenticationSuccess(request, response, signIn(provider));
-
-        verify(response).sendRedirect("http://fe/auth/callback?error=registration_disabled");
-        verify(userRepository, never()).save(any());
-        verify(userRepository, never()).recordLastLogin(any(), any());
-        verifyNoInteractions(tokenProvider, eventPublisher, authoritiesService, pendingLoginStore, signInMethodService);
     }
 
     @ParameterizedTest

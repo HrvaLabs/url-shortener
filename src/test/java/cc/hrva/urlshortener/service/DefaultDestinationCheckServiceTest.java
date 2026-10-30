@@ -10,10 +10,13 @@ import cc.hrva.urlshortener.repository.DestinationCheckRepository.DiedLink;
 import cc.hrva.urlshortener.repository.DestinationCheckRepository.DueLink;
 import cc.hrva.urlshortener.service.analytics.AnalyticsDays;
 import cc.hrva.urlshortener.service.impl.DefaultDestinationCheckService;
+import cc.hrva.urlshortener.service.impl.DefaultSettingsService;
 import cc.hrva.urlshortener.service.notification.DestinationCheckOutcome;
 import cc.hrva.urlshortener.service.notification.DestinationCheckOutcome.DeadLink;
 import cc.hrva.urlshortener.service.notification.MutableClock;
 import cc.hrva.urlshortener.service.notification.NetworkCanary;
+import cc.hrva.urlshortener.service.settings.SettingKey;
+import cc.hrva.urlshortener.service.settings.SettingsServiceFixtures;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
@@ -82,6 +85,7 @@ class DefaultDestinationCheckServiceTest {
 
     private final MutableClock clock = new MutableClock(NOW);
     private final AppProperties appProperties = new AppProperties();
+    private final DefaultSettingsService settingsService = SettingsServiceFixtures.defaults(appProperties);
     private final Map<String, ProbeResult> answers = new ConcurrentHashMap<>();
     private final List<String> probed = new CopyOnWriteArrayList<>();
     private final List<Duration> sleeps = new CopyOnWriteArrayList<>();
@@ -388,6 +392,25 @@ class DefaultDestinationCheckServiceTest {
 
         verify(repository, never()).findDue(any(), anyInt(), any());
         assertThat(outcome).isEqualTo(new DestinationCheckOutcome(List.of(), List.of(), NIGHT));
+    }
+
+    @Test
+    void theSettingTurnsTheCheckOff() {
+        SettingsServiceFixtures.turnOff(settingsService, SettingKey.NIGHTLY_DESTINATION_CHECK);
+
+        final var outcome = service.checkAll();
+
+        verify(repository, never()).findDue(any(), anyInt(), any());
+        assertThat(outcome).isEqualTo(new DestinationCheckOutcome(List.of(), List.of(), NIGHT));
+    }
+
+    @Test
+    void theSettingAlsoSkipsTheStartupCatchUp() {
+        SettingsServiceFixtures.turnOff(settingsService, SettingKey.NIGHTLY_DESTINATION_CHECK);
+
+        service.catchUpAfterStartup();
+
+        verifyNoInteractions(repository, deadLinkNotificationService);
     }
 
     @Test
@@ -741,7 +764,7 @@ class DefaultDestinationCheckServiceTest {
             return new InetAddress[] {InetAddress.getByAddress(host, new byte[] {93, (byte) 184, (byte) 215, 14})};
         }, clock);
         return new DefaultDestinationCheckService(repository, prober, canary, new AnalyticsDays(clock, appProperties), appProperties,
-                sleeps::add, deadLinkNotificationService, clock);
+                sleeps::add, deadLinkNotificationService, clock, settingsService);
     }
 
     private ProbeResult answer(final String url, final Consumer<String> beforeEachRequest) {

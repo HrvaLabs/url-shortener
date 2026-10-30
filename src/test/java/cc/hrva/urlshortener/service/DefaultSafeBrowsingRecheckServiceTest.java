@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.service;
 
+import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.dto.LinkVerdict;
 import cc.hrva.urlshortener.dto.LinkVerdict.Outcome;
 import cc.hrva.urlshortener.exception.UrlNotFoundException;
@@ -9,6 +10,9 @@ import cc.hrva.urlshortener.model.enums.BlockReason;
 import cc.hrva.urlshortener.model.enums.ThreatType;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.service.impl.DefaultSafeBrowsingRecheckService;
+import cc.hrva.urlshortener.service.impl.DefaultSettingsService;
+import cc.hrva.urlshortener.service.settings.SettingKey;
+import cc.hrva.urlshortener.service.settings.SettingsServiceFixtures;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -73,11 +77,12 @@ class DefaultSafeBrowsingRecheckServiceTest {
 
     private final Map<Long, Url> database = new TreeMap<>();
     private final List<Long> stamped = new ArrayList<>();
+    private final DefaultSettingsService settingsService = SettingsServiceFixtures.defaults(new AppProperties());
 
     @BeforeEach
     void setUp() {
         recheckService = new DefaultSafeBrowsingRecheckService(urlRepository, safeBrowsingService, linkCheckService, moderationService,
-                reviewQueueService, redirectChainService);
+                reviewQueueService, redirectChainService, settingsService);
         LongStream.rangeClosed(1, 45).forEach(id -> database.put(id,
                 Url.builder().id(id).shortUrl("s" + id).longUrl("https://site" + id + ".example").active(true).build()));
         lenient().when(urlRepository.findActiveIds()).thenAnswer(invocation -> new ArrayList<>(database.keySet()));
@@ -350,6 +355,22 @@ class DefaultSafeBrowsingRecheckServiceTest {
 
         verify(urlRepository, never()).findIdsDueForRedirectCheck(any(LocalDateTime.class), any(Pageable.class));
         verifyNoInteractions(redirectChainService);
+    }
+
+    @Test
+    void nightlySafeBrowsingOffStillRunsTheLinkChecksAndRedirectChains() {
+        SettingsServiceFixtures.turnOff(settingsService, SettingKey.NIGHTLY_SAFE_BROWSING);
+        verdict(3L, blocked(BlockReason.BLOCKLIST, "URLhaus"));
+        when(urlRepository.findIdsDueForRedirectCheck(any(LocalDateTime.class), any(Pageable.class))).thenReturn(List.of(12L, 40L));
+
+        recheckService.recheckActiveUrls();
+
+        verifyNoInteractions(safeBrowsingService);
+        verify(linkCheckService, times(45)).check(anyString());
+        verify(moderationService).blockLink(3L, BlockReason.BLOCKLIST, "URLhaus", "system", "nightly");
+        verify(redirectChainService).check(12L);
+        verify(redirectChainService).check(40L);
+        verify(urlRepository, never()).markSafeBrowsingChecked(anyCollection(), any(LocalDateTime.class));
     }
 
     @Test

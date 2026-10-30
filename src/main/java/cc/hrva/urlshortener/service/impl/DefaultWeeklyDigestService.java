@@ -10,10 +10,12 @@ import cc.hrva.urlshortener.dto.stats.TrafficStatsResponse;
 import cc.hrva.urlshortener.model.enums.BlockReason;
 import cc.hrva.urlshortener.service.AdminStatsService;
 import cc.hrva.urlshortener.service.SendingEmailService;
+import cc.hrva.urlshortener.service.SettingsService;
 import cc.hrva.urlshortener.service.WeeklyDigestService;
 import cc.hrva.urlshortener.service.alert.DiscordAlertFormatter;
 import cc.hrva.urlshortener.service.analytics.AnalyticsDays;
 import cc.hrva.urlshortener.service.digest.DigestWeek;
+import cc.hrva.urlshortener.service.settings.SettingKey;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -51,13 +53,14 @@ public class DefaultWeeklyDigestService implements WeeklyDigestService {
     private final SendingEmailService sendingEmailService;
     private final StringRedisTemplate redisTemplate;
     private final Clock clock;
+    private final SettingsService settingsService;
 
     @Override
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public void sendWeeklyDigest() {
         final var webhookUrl = StringUtils.trimToEmpty(appProperties.getDiscordWebhookUrl());
-        final var toDiscord = appProperties.getDigest().getWeekly().isEnabled() && !webhookUrl.isEmpty();
-        final var byEmail = appProperties.getDigest().getWeekly().isEmail();
+        final var toDiscord = settingsService.isOn(SettingKey.WEEKLY_DIGEST) && !webhookUrl.isEmpty();
+        final var byEmail = settingsService.isOn(SettingKey.WEEKLY_DIGEST_EMAIL);
         if (!toDiscord && !byEmail) {
             log.info("Weekly digest is off");
             return;

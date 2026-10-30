@@ -17,6 +17,7 @@ import cc.hrva.urlshortener.service.alert.AdminAlertEvent;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.DomainDisabled;
 import cc.hrva.urlshortener.service.blocklist.BlocklistStore;
 import cc.hrva.urlshortener.service.impl.DefaultLinkCheckService;
+import cc.hrva.urlshortener.service.settings.DefaultSettingsTestConfiguration;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -452,6 +453,7 @@ class CustomDomainModerationTest {
                     type = FilterType.ASSIGNABLE_TYPE,
                     classes = {UserRepository.class, CustomDomainRepository.class, DomainRuleRepository.class}))
     @Import({
+            DefaultSettingsTestConfiguration.class,
             AppConfiguration.class,
             CustomDomainModeration.class,
             DefaultLinkCheckService.class,

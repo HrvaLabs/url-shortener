@@ -9,11 +9,13 @@ import cc.hrva.urlshortener.repository.DestinationCheckRepository.DiedLink;
 import cc.hrva.urlshortener.repository.DestinationCheckRepository.DueLink;
 import cc.hrva.urlshortener.service.DeadLinkNotificationService;
 import cc.hrva.urlshortener.service.DestinationCheckService;
+import cc.hrva.urlshortener.service.SettingsService;
 import cc.hrva.urlshortener.service.analytics.AnalyticsDays;
 import cc.hrva.urlshortener.service.notification.DestinationCheckOutcome;
 import cc.hrva.urlshortener.service.notification.DestinationCheckOutcome.DeadLink;
 import cc.hrva.urlshortener.service.notification.HostPacer;
 import cc.hrva.urlshortener.service.notification.NetworkCanary;
+import cc.hrva.urlshortener.service.settings.SettingKey;
 import cc.hrva.urlshortener.util.DomainNames;
 import java.time.Clock;
 import java.time.Duration;
@@ -61,6 +63,7 @@ public class DefaultDestinationCheckService implements DestinationCheckService {
     private final HostPacer.Sleeper hostPacerSleeper;
     private final DeadLinkNotificationService deadLinkNotificationService;
     private final Clock clock;
+    private final SettingsService settingsService;
     private final AtomicBoolean running = new AtomicBoolean();
 
     @Override
@@ -84,8 +87,7 @@ public class DefaultDestinationCheckService implements DestinationCheckService {
     @EventListener(ApplicationReadyEvent.class)
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public void catchUpAfterStartup() {
-        final var settings = appProperties.getDestinationCheck();
-        if (!settings.isEnabled() || !settings.isCatchUpOnStartup()) {
+        if (!settingsService.isOn(SettingKey.NIGHTLY_DESTINATION_CHECK) || !appProperties.getDestinationCheck().isCatchUpOnStartup()) {
             return;
         }
         if (!running.compareAndSet(false, true)) {
@@ -100,7 +102,7 @@ public class DefaultDestinationCheckService implements DestinationCheckService {
     }
 
     private Optional<DestinationCheckOutcome> checked(final LocalDate night) {
-        if (!appProperties.getDestinationCheck().isEnabled()) {
+        if (!settingsService.isOn(SettingKey.NIGHTLY_DESTINATION_CHECK)) {
             log.info("Destination check is turned off");
             return Optional.empty();
         }

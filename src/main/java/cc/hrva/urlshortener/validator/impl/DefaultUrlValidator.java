@@ -1,6 +1,5 @@
 package cc.hrva.urlshortener.validator.impl;
 
-import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.dto.LinkVerdict;
 import cc.hrva.urlshortener.exception.*;
 import cc.hrva.urlshortener.model.Url;
@@ -8,8 +7,10 @@ import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.service.LinkCheckService;
 import cc.hrva.urlshortener.service.ReservedAliasService;
 import cc.hrva.urlshortener.service.SafeBrowsingService;
+import cc.hrva.urlshortener.service.SettingsService;
 import cc.hrva.urlshortener.service.SuspiciousUrlService;
 import cc.hrva.urlshortener.service.UserService;
+import cc.hrva.urlshortener.service.settings.SettingKey;
 import cc.hrva.urlshortener.util.DomainNames;
 import cc.hrva.urlshortener.validator.UrlValidator;
 import java.net.URI;
@@ -27,11 +28,11 @@ public class DefaultUrlValidator implements UrlValidator {
 
     private final UserService userService;
     private final UrlRepository urlRepository;
-    private final AppProperties appProperties;
     private final SafeBrowsingService safeBrowsingService;
     private final SuspiciousUrlService suspiciousUrlService;
     private final LinkCheckService linkCheckService;
     private final ReservedAliasService reservedAliasService;
+    private final SettingsService settingsService;
 
     private static final String BLOCKLISTED = "This destination is on a blocklist and can't be shortened. If you think that's a mistake, contact us.";
     private static final String STILL_BLOCKED = "This destination is still blocked: ";
@@ -171,6 +172,9 @@ public class DefaultUrlValidator implements UrlValidator {
 
     @Override
     public void checkIfUrlSafe(final Url url) {
+        if (!settingsService.isOn(SettingKey.SAFE_BROWSING_CHECK)) {
+            return;
+        }
         if (!safeBrowsingService.checkUrlsForThreats(url.getLongUrl()).isEmpty()) {
             throw new UrlValidationException("This URL was flagged as unsafe and cannot be shortened");
         }
@@ -178,7 +182,7 @@ public class DefaultUrlValidator implements UrlValidator {
 
     @Override
     public void checkIfAnonymousUrlCreationEnabled() {
-        if (!appProperties.isAnonymousUrlCreationEnabled()) {
+        if (!settingsService.isOn(SettingKey.ANONYMOUS_LINKS)) {
             throw new ApiException("Sign in to create short URLs");
         }
     }

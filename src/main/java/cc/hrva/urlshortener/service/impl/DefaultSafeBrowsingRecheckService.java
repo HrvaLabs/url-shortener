@@ -10,6 +10,8 @@ import cc.hrva.urlshortener.service.RedirectChainService;
 import cc.hrva.urlshortener.service.ReviewQueueService;
 import cc.hrva.urlshortener.service.SafeBrowsingRecheckService;
 import cc.hrva.urlshortener.service.SafeBrowsingService;
+import cc.hrva.urlshortener.service.SettingsService;
+import cc.hrva.urlshortener.service.settings.SettingKey;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.EnumMap;
@@ -44,6 +46,7 @@ public class DefaultSafeBrowsingRecheckService implements SafeBrowsingRecheckSer
     private final ModerationService moderationService;
     private final ReviewQueueService reviewQueueService;
     private final RedirectChainService redirectChainService;
+    private final SettingsService settingsService;
 
     @Override
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
@@ -111,7 +114,7 @@ public class DefaultSafeBrowsingRecheckService implements SafeBrowsingRecheckSer
     }
 
     private Optional<List<String>> threatsOf(final Url url, final AtomicBoolean safeBrowsingAvailable) {
-        if (!safeBrowsingAvailable.get()) {
+        if (!settingsService.isOn(SettingKey.NIGHTLY_SAFE_BROWSING) || !safeBrowsingAvailable.get()) {
             return Optional.empty();
         }
         try {

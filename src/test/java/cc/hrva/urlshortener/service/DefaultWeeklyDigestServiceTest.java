@@ -28,7 +28,10 @@ import cc.hrva.urlshortener.model.enums.BlockReason;
 import cc.hrva.urlshortener.service.alert.DiscordAlertFormatter;
 import cc.hrva.urlshortener.service.analytics.AnalyticsDays;
 import cc.hrva.urlshortener.service.domain.ShortLinks;
+import cc.hrva.urlshortener.service.impl.DefaultSettingsService;
 import cc.hrva.urlshortener.service.impl.DefaultWeeklyDigestService;
+import cc.hrva.urlshortener.service.settings.SettingKey;
+import cc.hrva.urlshortener.service.settings.SettingsServiceFixtures;
 import java.lang.reflect.RecordComponent;
 import java.time.Clock;
 import java.time.Duration;
@@ -116,6 +119,8 @@ class DefaultWeeklyDigestServiceTest {
 
     private final InMemoryRedis redis = new InMemoryRedis();
     private final AppProperties appProperties = new AppProperties();
+    private final DefaultSettingsService settingsService = SettingsServiceFixtures.defaults(appProperties);
+
     private StringRedisTemplate redisTemplate;
     private DiscordAlertFormatter formatter;
     private WeeklyDigestService weeklyDigestService;
@@ -387,6 +392,24 @@ class DefaultWeeklyDigestServiceTest {
         assertThat(output).contains("Weekly digest sent week=2026-10-19 discord=true email=false");
     }
 
+    @Test
+    void bothDigestSwitchesComeFromSettings(final CapturedOutput output) {
+        SettingsServiceFixtures.turnOff(settingsService, SettingKey.WEEKLY_DIGEST);
+        readyToSend();
+
+        weeklyDigestService.sendWeeklyDigest();
+
+        verify(sendingEmailService).sendWeeklyDigestToAdmin(any(WeeklyDigest.class));
+        verifyNoInteractions(discordWebhookClient);
+        assertThat(output).contains("Weekly digest sent week=2026-10-19 discord=false email=true");
+
+        SettingsServiceFixtures.turnOff(settingsService, SettingKey.WEEKLY_DIGEST_EMAIL);
+        weeklyDigestService.sendWeeklyDigest();
+
+        assertThat(output).contains("Weekly digest is off");
+        verify(sendingEmailService, times(1)).sendWeeklyDigestToAdmin(any(WeeklyDigest.class));
+    }
+
     @ParameterizedTest
     @NullSource
     @ValueSource(strings = {"", "   "})
@@ -506,7 +529,7 @@ class DefaultWeeklyDigestServiceTest {
 
     private DefaultWeeklyDigestService service() {
         return new DefaultWeeklyDigestService(adminStatsService, analyticsDays, appProperties, formatter, discordWebhookClient,
-                sendingEmailService, redisTemplate, Clock.fixed(NOW, ZoneOffset.UTC));
+                sendingEmailService, redisTemplate, Clock.fixed(NOW, ZoneOffset.UTC), settingsService);
     }
 
     private static WeeklyDigestService transactional(final WeeklyDigestService target) {

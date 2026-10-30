@@ -31,6 +31,7 @@ import cc.hrva.urlshortener.service.notification.MutableClock;
 import cc.hrva.urlshortener.service.notification.NetworkCanary;
 import cc.hrva.urlshortener.service.notification.NotificationMessages;
 import cc.hrva.urlshortener.service.notification.NotificationPayloads;
+import cc.hrva.urlshortener.service.settings.DefaultSettingsTestConfiguration;
 import jakarta.persistence.EntityManagerFactory;
 import java.time.Clock;
 import java.time.Instant;
@@ -640,7 +641,7 @@ class DefaultDeadLinkNotificationServiceTest {
                     classes = {UrlRepository.class, UserRepository.class, NotificationConsentRepository.class, NotificationChannelRepository.class}))
     @Import({DefaultDeadLinkNotificationService.class, EmailConsentReader.class, NotificationMessages.class, NotificationPayloads.class,
             NotificationClaimRepository.class, DefaultDestinationCheckService.class, DestinationCheckRepository.class, AnalyticsDays.class,
-            ShortLinks.class, TestApplication.Fixed.class})
+            ShortLinks.class, DefaultSettingsTestConfiguration.class, TestApplication.Fixed.class})
     static class TestApplication {
 
         @TestConfiguration

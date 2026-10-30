@@ -8,6 +8,9 @@ import cc.hrva.urlshortener.service.alert.AdminAlertEvent.BurstDetected;
 import cc.hrva.urlshortener.service.burst.CreatedLink;
 import cc.hrva.urlshortener.service.burst.RedisBurstCounter;
 import cc.hrva.urlshortener.service.impl.DefaultBurstAlertService;
+import cc.hrva.urlshortener.service.impl.DefaultSettingsService;
+import cc.hrva.urlshortener.service.settings.SettingKey;
+import cc.hrva.urlshortener.service.settings.SettingsServiceFixtures;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -74,6 +77,7 @@ class DefaultBurstAlertServiceTest {
 
     private final InMemoryRedis redis = new InMemoryRedis();
     private final AppProperties appProperties = new AppProperties();
+    private final DefaultSettingsService settingsService = SettingsServiceFixtures.defaults(appProperties);
     private StringRedisTemplate redisTemplate;
     private BurstAlertService burstAlertService;
 
@@ -369,6 +373,21 @@ class DefaultBurstAlertServiceTest {
     }
 
     @Test
+    void theLinkCountComesFromSettings() {
+        SettingsServiceFixtures.change(settingsService, SettingKey.BURST_LINKS, 3);
+        appProperties.getBurst().setWindow(Duration.ofMinutes(30));
+        when(redisBurstCounter.record(DOMAIN, "41|user:7", NOW, Duration.ofMinutes(30))).thenReturn(members(3, "user:7", "user:8"));
+        when(redisBurstCounter.record(DOMAIN, "42|user:7", NOW, Duration.ofMinutes(30))).thenReturn(members(2, "user:7", "user:8"));
+        when(domainAgeService.registeredOn(DOMAIN)).thenReturn(Optional.empty());
+
+        burstAlertService.linkCreated(link(42L, LONG_URL, "user:7", Outcome.CLEAN));
+        verifyNoInteractions(eventPublisher);
+        burstAlertService.linkCreated(link(41L, LONG_URL, "user:7", Outcome.CLEAN));
+
+        verify(eventPublisher).publishEvent(new BurstDetected(DOMAIN, 3, 2, null, Duration.ofMinutes(30)));
+    }
+
+    @Test
     void theCheckRunsOnTheDefaultTaskExecutor() throws NoSuchMethodException {
         final var async = DefaultBurstAlertService.class.getMethod("linkCreated", CreatedLink.class).getAnnotation(Async.class);
 
@@ -412,7 +431,8 @@ class DefaultBurstAlertServiceTest {
     }
 
     private BurstAlertService service(final StringRedisTemplate template) {
-        return new DefaultBurstAlertService(redisBurstCounter, domainAgeService, eventPublisher, template, appProperties, Clock.fixed(NOW, ZoneOffset.UTC));
+        return new DefaultBurstAlertService(redisBurstCounter, domainAgeService, eventPublisher, template, appProperties, Clock.fixed(NOW, ZoneOffset.UTC),
+                settingsService);
     }
 
 }

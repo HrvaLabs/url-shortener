@@ -36,6 +36,7 @@ import cc.hrva.urlshortener.service.domain.UrlCache;
 import cc.hrva.urlshortener.service.impl.DefaultClickCheckService;
 import cc.hrva.urlshortener.service.impl.DefaultUrlService;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiter;
+import cc.hrva.urlshortener.service.settings.SettingsServiceFixtures;
 import cc.hrva.urlshortener.validator.ApiKeyValidator;
 import cc.hrva.urlshortener.validator.UrlValidator;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -171,14 +172,16 @@ class UrlControllerBlocklistTest {
     void setUp() {
         final var appProperties = new AppProperties();
         appProperties.setServerUrl("https://hrva.cc");
-        final var clickCheckService = new DefaultClickCheckService(blocklistSourceRepository, domainRuleRepository, blocklistStore, moderationService);
+        final var settingsService = SettingsServiceFixtures.defaults(appProperties);
+        final var clickCheckService = new DefaultClickCheckService(blocklistSourceRepository, domainRuleRepository, blocklistStore, moderationService,
+                settingsService);
         when(blocklistSourceRepository.findByEnabledTrue()).thenReturn(List.of(TIF));
         clickCheckService.reload();
         final var urlService = new DefaultUrlService(userService, urlValidator, apiKeyService, urlRepository, appProperties, apiKeyValidator,
                 clickAnalyticsService, new UrlToPeekUrlConverter(), createUrlToUrlConverter, urlUpdateDtoToUrlConverter, new UrlCache(cacheManager),
                 objectMapper, meterRegistry, passwordEncoder, suspiciousUrlService, rateLimiter, reviewQueueService, scammerSignalService, clickCheckService,
                 redirectChainService, TransactionOperations.withoutTransaction(), reservedAliasService, burstAlertService,
-                destinationCheckRepository, customDomainRegistry, customDomainRepository, sameShapeAlertService);
+                destinationCheckRepository, customDomainRegistry, customDomainRepository, sameShapeAlertService, settingsService);
         mockMvc = MockMvcBuilders.standaloneSetup(new UrlController(urlService, qrCodeService, linkPreviewService, clientIpResolver,
                         new ClickRequestResolver(clientIpResolver), request, appProperties))
                 .setControllerAdvice(new GlobalExceptionHandler())

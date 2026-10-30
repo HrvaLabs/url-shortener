@@ -10,8 +10,11 @@ import cc.hrva.urlshortener.service.alert.AdminAlertEvent.AnonymousLinkBusy;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.AnonymousTrafficShare;
 import cc.hrva.urlshortener.service.alert.AlertedLink;
 import cc.hrva.urlshortener.service.analytics.AnalyticsDays;
+import cc.hrva.urlshortener.service.impl.DefaultSettingsService;
 import cc.hrva.urlshortener.service.impl.DefaultTrafficAlertService;
 import cc.hrva.urlshortener.service.notification.MutableClock;
+import cc.hrva.urlshortener.service.settings.SettingKey;
+import cc.hrva.urlshortener.service.settings.SettingsServiceFixtures;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -64,6 +67,7 @@ class DefaultTrafficAlertServiceTest {
 
     private final InMemoryRedis redis = new InMemoryRedis();
     private final AppProperties appProperties = new AppProperties();
+    private final DefaultSettingsService settingsService = SettingsServiceFixtures.defaults(appProperties);
     private final MutableClock clock = new MutableClock(LATE_EVENING);
     private StringRedisTemplate redisTemplate;
     private TrafficAlertService trafficAlertService;
@@ -210,6 +214,26 @@ class DefaultTrafficAlertServiceTest {
     }
 
     @Test
+    void theThresholdsAndSwitchComeFromSettings() {
+        SettingsServiceFixtures.change(settingsService, SettingKey.TRAFFIC_LINK_CLICKS, 40);
+        SettingsServiceFixtures.change(settingsService, SettingKey.TRAFFIC_SHARE_PERCENT, 70);
+        SettingsServiceFixtures.change(settingsService, SettingKey.TRAFFIC_MIN_ANONYMOUS_CLICKS, 10);
+        when(anonymousTrafficRepository.busyAnonymousLinks(eq(TODAY), eq(40L), anyInt())).thenReturn(List.of(withClicks(BUSY, 40)));
+        when(anonymousTrafficRepository.topCountry(42L, TODAY)).thenReturn(Optional.of("HR"));
+        when(anonymousTrafficRepository.dayClicks(TODAY)).thenReturn(new DayClicks(20, 15));
+
+        trafficAlertService.check();
+
+        verify(eventPublisher).publishEvent(new AnonymousLinkBusy(ALERTED, 40, "HR"));
+        verify(eventPublisher).publishEvent(new AnonymousTrafficShare(15, 20));
+
+        SettingsServiceFixtures.turnOff(settingsService, SettingKey.TRAFFIC_ALERTS);
+        trafficAlertService.check();
+
+        verify(anonymousTrafficRepository, times(1)).dayClicks(TODAY);
+    }
+
+    @Test
     void theCheckRunsOutsideATransaction() throws NoSuchMethodException {
         final var transactional = DefaultTrafficAlertService.class.getMethod("check").getAnnotation(Transactional.class);
 
@@ -219,7 +243,7 @@ class DefaultTrafficAlertServiceTest {
 
     private TrafficAlertService service(final StringRedisTemplate template) {
         return new DefaultTrafficAlertService(anonymousTrafficRepository, new AnalyticsDays(clock, appProperties), eventPublisher, template,
-                appProperties);
+                settingsService);
     }
 
     private void quietDay(final LocalDate day) {
