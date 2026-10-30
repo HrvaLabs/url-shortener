@@ -4,6 +4,7 @@ import cc.hrva.urlshortener.configuration.AppConfiguration;
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.dto.domain.AdminDomainResponse;
 import cc.hrva.urlshortener.exception.CustomDomainConflictException;
+import cc.hrva.urlshortener.exception.CustomDomainNotFoundException;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.enums.CloudflareTokenStatus;
 import cc.hrva.urlshortener.model.enums.CustomDomainStatus;
@@ -81,6 +82,8 @@ class CustomDomainApprovalRaceTest {
     private static final LocalDateTime NOW = LocalDateTime.ofInstant(NOW_INSTANT, ZoneOffset.UTC);
     private static final String ADMIN = "admin@hrva.cc";
     private static final String CAP_REACHED = "Cap reached: 1 of 1 custom domains are in use. Delete one or raise the cap (APP_DOMAINS_MAX_ACTIVE).";
+    private static final String FREE_ALLOWANCE_USED =
+            "Cloudflare already has 100 custom hostnames and 100 are free. Delete one here or in Cloudflare first.";
     private static final long ANA = 800L;
     private static final long BOB = 801L;
 
@@ -149,6 +152,62 @@ class CustomDomainApprovalRaceTest {
         }
         assertThat(List.of(statusOf(first), statusOf(second))).containsExactlyInAnyOrder("APPROVED_PROVISIONING", "PENDING_REVIEW");
         assertThat(secondArrivedWhileTheFirstHeldTheLock.get()).isFalse();
+    }
+
+    @Test
+    void twoApprovalsThatBothProbed99LetAtMostOneThrough() {
+        appProperties.getDomains().setMaxActive(10);
+        final var first = domain(ANA, "one.example.com", "PENDING_REVIEW", null, false);
+        final var second = domain(BOB, "two.example.com", "PENDING_REVIEW", null, false);
+        final var bothChecked = new CyclicBarrier(2);
+        when(cloudflareTokenCheck.check()).thenAnswer(invocation -> {
+            bothChecked.await(10, TimeUnit.SECONDS);
+            return new TokenState(CloudflareTokenStatus.OK, NOW, null, 99);
+        });
+
+        final var executor = Executors.newFixedThreadPool(2);
+        try {
+            final var approvals = List.of(
+                    CompletableFuture.supplyAsync(() -> approved(first), executor),
+                    CompletableFuture.supplyAsync(() -> approved(second), executor));
+            final var outcomes = approvals.stream().map(approval -> approval.handle((response, failure) -> failure).join()).toList();
+
+            assertThat(outcomes).filteredOn(failure -> failure == null).hasSize(1);
+            assertThat(outcomes).filteredOn(failure -> failure != null).singleElement()
+                    .satisfies(failure -> assertThat(rootOf(failure)).isInstanceOf(CustomDomainConflictException.class).hasMessage(FREE_ALLOWANCE_USED));
+        } finally {
+            executor.shutdownNow();
+        }
+        assertThat(List.of(statusOf(first), statusOf(second))).containsExactlyInAnyOrder("APPROVED_PROVISIONING", "PENDING_REVIEW");
+    }
+
+    @Test
+    void anApprovalNotYetInCloudflareCountsTowardTheFreeAllowance() {
+        appProperties.getDomains().setMaxActive(10);
+        domain(ANA, "waiting.example.com", "APPROVED_PROVISIONING", null, false);
+        final var pending = domain(BOB, "go.example.com", "PENDING_REVIEW", null, false);
+        when(cloudflareTokenCheck.check()).thenReturn(new TokenState(CloudflareTokenStatus.OK, NOW, null, 99));
+
+        assertThatThrownBy(() -> customDomainAdminService.approve(pending, null, ADMIN))
+                .isInstanceOf(CustomDomainConflictException.class)
+                .hasMessage(FREE_ALLOWANCE_USED);
+        assertThat(statusOf(pending)).isEqualTo("PENDING_REVIEW");
+        verify(customDomainProvisioner, never()).provisionAsync(anyLong());
+    }
+
+    @Test
+    void aReviewedApplicationIsRefusedEvenWhileCloudflareIsDown() {
+        final var reviewed = domain(ANA, "go.example.com", "REJECTED", null, false);
+        when(cloudflareTokenCheck.check()).thenReturn(new TokenState(CloudflareTokenStatus.UNREACHABLE, NOW,
+                "Cloudflare couldn't be reached. We'll check again.", null));
+
+        assertThatThrownBy(() -> customDomainAdminService.approve(reviewed, null, ADMIN))
+                .isInstanceOf(CustomDomainConflictException.class)
+                .hasMessage("This application was already reviewed.");
+        assertThatThrownBy(() -> customDomainAdminService.approve(987_654L, null, ADMIN))
+                .isInstanceOf(CustomDomainNotFoundException.class)
+                .hasMessage("Custom domain not found");
+        verify(cloudflareTokenCheck, never()).check();
     }
 
     @Test

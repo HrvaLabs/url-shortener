@@ -76,7 +76,9 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -144,6 +146,7 @@ class DefaultCustomDomainAdminServiceTest {
         appProperties.setFrontendUrl("https://app.hrva.cc");
         final var clock = Clock.fixed(NOW_INSTANT, ZoneOffset.UTC);
         lenient().when(cloudflareTokenCheck.check()).thenReturn(token(CloudflareTokenStatus.OK, 4));
+        lenient().when(customDomainRepository.findById(ID)).thenReturn(Optional.of(domain(CustomDomainStatus.PENDING_REVIEW)));
         lenient().when(customDomainRepository.findWithOwner(ID))
                 .thenReturn(Optional.of(domain(CustomDomainStatus.PENDING_REVIEW)), Optional.of(approved()));
         lenient().when(customDomainRepository.markApproved(eq(ID), eq(ADMIN), any(), eq(NOW))).thenAnswer(invocation -> {
@@ -324,6 +327,66 @@ class DefaultCustomDomainAdminServiceTest {
                 .isInstanceOf(CustomDomainNotFoundException.class)
                 .hasMessage(NOT_FOUND);
         verifyNoInteractions(customDomainProvisioner);
+    }
+
+    @Test
+    void aMissingApplicationIsNotFoundWithoutAskingCloudflare() {
+        when(customDomainRepository.findById(ID)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> customDomainAdminService.approve(ID, null, ADMIN))
+                .isInstanceOf(CustomDomainNotFoundException.class)
+                .hasMessage(NOT_FOUND);
+        verifyNoInteractions(cloudflareTokenCheck, customDomainCapLock, customDomainProvisioner);
+        assertThat(steps).isEmpty();
+    }
+
+    @Test
+    void anAlreadyReviewedApplicationIsRefusedWithoutAskingCloudflare() {
+        lenient().when(cloudflareTokenCheck.check()).thenReturn(token(CloudflareTokenStatus.UNREACHABLE, null));
+        for (final var status : List.of(CustomDomainStatus.ACTIVE, CustomDomainStatus.REJECTED, CustomDomainStatus.APPROVED_PROVISIONING)) {
+            when(customDomainRepository.findById(ID)).thenReturn(Optional.of(domain(status)));
+
+            assertThatThrownBy(() -> customDomainAdminService.approve(ID, null, ADMIN))
+                    .isInstanceOf(CustomDomainConflictException.class)
+                    .hasMessage(ALREADY_REVIEWED);
+        }
+
+        verify(cloudflareTokenCheck, never()).check();
+        verifyNoInteractions(customDomainCapLock, customDomainProvisioner, eventPublisher);
+        assertThat(steps).isEmpty();
+    }
+
+    @Test
+    void thePendingCheckComesBeforeTheTokenCheck() {
+        customDomainAdminService.approve(ID, null, ADMIN);
+
+        final var order = inOrder(customDomainRepository, cloudflareTokenCheck, customDomainCapLock);
+        order.verify(customDomainRepository).findById(ID);
+        order.verify(cloudflareTokenCheck).check();
+        order.verify(customDomainCapLock).lock();
+        order.verify(customDomainRepository).findWithOwner(ID);
+    }
+
+    @Test
+    void applicationsApprovedButNotYetInCloudflareCountTowardTheFreeAllowance() {
+        when(cloudflareTokenCheck.check()).thenReturn(token(CloudflareTokenStatus.OK, 99));
+        doAnswer(invocation -> steps.add("lock")).when(customDomainCapLock).lock();
+        when(customDomainRepository.countByStatus(CustomDomainStatus.APPROVED_PROVISIONING)).thenAnswer(invocation -> {
+            steps.add("notYetInCloudflare");
+            return 1L;
+        });
+
+        assertThatThrownBy(() -> customDomainAdminService.approve(ID, null, ADMIN))
+                .isInstanceOf(CustomDomainConflictException.class)
+                .hasMessage("Cloudflare already has 100 custom hostnames and 100 are free. Delete one here or in Cloudflare first.");
+        assertThat(steps).containsExactly("begin", "lock", "notYetInCloudflare");
+        verify(customDomainRepository, never()).markApproved(anyLong(), anyString(), any(), any());
+        verifyNoInteractions(customDomainProvisioner);
+
+        when(cloudflareTokenCheck.check()).thenReturn(token(CloudflareTokenStatus.OK, 98));
+        when(customDomainRepository.findWithOwner(ID)).thenReturn(Optional.of(domain(CustomDomainStatus.PENDING_REVIEW)), Optional.of(approved()));
+
+        assertThat(customDomainAdminService.approve(ID, null, ADMIN).domain().status()).isEqualTo(CustomDomainStatus.APPROVED_PROVISIONING);
     }
 
     @Test

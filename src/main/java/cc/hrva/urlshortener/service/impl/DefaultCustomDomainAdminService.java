@@ -114,6 +114,7 @@ public class DefaultCustomDomainAdminService implements CustomDomainAdminService
     @Override
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public AdminDomainResponse approve(final long id, final String note, final String performedBy) {
+        requirePending(customDomainRepository.findById(id).orElseThrow(() -> new CustomDomainNotFoundException(NOT_FOUND)));
         final var cloudflareTotal = liveTotal(cloudflareTokenCheck.check(), id);
         final var approved = transactionOperations.execute(status -> approveWithinTheCap(id, StringUtils.stripToNull(note), performedBy, cloudflareTotal));
         handOver(id);
@@ -202,10 +203,12 @@ public class DefaultCustomDomainAdminService implements CustomDomainAdminService
             log.info("Custom domain approval refused at the cap domainId={} slotsInUse={} maxActive={}", id, slotsInUse, settings.getMaxActive());
             throw new CustomDomainConflictException(CAP_REACHED.formatted(slotsInUse, settings.getMaxActive()));
         }
-        if (cloudflareTotal >= settings.getFreeAllowance()) {
-            log.info("Custom domain approval refused at the free allowance domainId={} cloudflareTotal={} freeAllowance={}", id, cloudflareTotal,
-                    settings.getFreeAllowance());
-            throw new CustomDomainConflictException(FREE_ALLOWANCE_USED.formatted(cloudflareTotal, settings.getFreeAllowance()));
+        final var notYetInCloudflare = customDomainRepository.countByStatus(CustomDomainStatus.APPROVED_PROVISIONING);
+        final var hostnames = cloudflareTotal + notYetInCloudflare;
+        if (hostnames >= settings.getFreeAllowance()) {
+            log.info("Custom domain approval refused at the free allowance domainId={} cloudflareTotal={} notYetInCloudflare={} freeAllowance={}", id,
+                    cloudflareTotal, notYetInCloudflare, settings.getFreeAllowance());
+            throw new CustomDomainConflictException(FREE_ALLOWANCE_USED.formatted(hostnames, settings.getFreeAllowance()));
         }
         if (customDomainRepository.markApproved(id, performedBy, note, LocalDateTime.now(clock)) != 1) {
             log.info("Custom domain application was reviewed before its approval domainId={}", id);
