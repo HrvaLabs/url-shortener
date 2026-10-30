@@ -37,6 +37,10 @@ public enum SettingKey {
             "How many different domains those links must use.", SAME_SHAPE_ALERT, 2, 50, "domains"),
     CAMPAIGN_WINDOW_HOURS(SettingGroup.ALERTS, "Same-shape alert: window",
             "Links are counted over this many hours.", SAME_SHAPE_ALERT, 1, 168, "hours"),
+    CAMPAIGN_HOLD(SettingGroup.ALERTS, "Hold links with a campaign URL shape",
+            "Holds the links of a same-shape alert. Off still sends the alert and lists the campaign.", SAME_SHAPE_ALERT, true),
+    CAMPAIGN_HOLD_DAYS(SettingGroup.ALERTS, "Same-shape alert: hold",
+            "New matching links are held for this many days after the last match.", CAMPAIGN_HOLD, 1, 90, "days"),
     TRAFFIC_ALERTS(SettingGroup.ALERTS, "Traffic alerts",
             "Discord alerts about busy links without an account.", null, false),
     TRAFFIC_LINK_CLICKS(SettingGroup.ALERTS, "Traffic alerts: clicks per link per day",
@@ -68,11 +72,7 @@ public enum SettingKey {
     EMAIL_NEW_USER_NOTICE(SettingGroup.EMAILS, "New user notice",
             "Emails the admin when someone signs up.", SEND_EMAILS, false),
     EMAIL_CUSTOM_DOMAIN(SettingGroup.EMAILS, "Custom domain updates",
-            "Tells owners when their domain is approved, rejected, turned off or removed.", SEND_EMAILS, false),
-    CAMPAIGN_HOLD(SettingGroup.SAFETY, "Hold links with a campaign URL shape",
-            "Holds the links of a same-shape alert. Off still sends the alert and lists the campaign.", SAME_SHAPE_ALERT, true),
-    CAMPAIGN_HOLD_DAYS(SettingGroup.SAFETY, "Same-shape alert: hold",
-            "New matching links are held for this many days after the last match.", CAMPAIGN_HOLD, 1, 90, "days");
+            "Tells owners when their domain is approved, rejected, turned off or removed.", SEND_EMAILS, false);
 
     private final SettingGroup group;
     private final SettingType type;

@@ -294,9 +294,10 @@ class DefaultCampaignServiceTest {
     }
 
     @Test
-    void aMatchOnAnAlertOnlyRowIsAddedAndExtendsWithoutAHold() {
+    void aMatchOnAnAlertOnlyRowWhileTheHoldIsOffIsAddedAndExtendsWithoutAHold() {
         final var campaign = row(CampaignStatus.ALERT_ONLY, NOW_LOCAL.plusDays(2));
         rows.put(SHAPE_KEY, campaign);
+        SettingsServiceFixtures.turnOff(settingsService, SettingKey.CAMPAIGN_HOLD);
         counting();
 
         campaignService.recordAnonymousLink(44L, "https://d.com/wqamhcsom?r=3&t=4", Outcome.CLEAN);
@@ -406,6 +407,83 @@ class DefaultCampaignServiceTest {
         assertThat(holds).containsExactly(42L, 43L);
         verify(eventPublisher, times(1)).publishEvent(any(ShapeHeld.class));
         assertThat(output).containsOnlyOnce("Campaign link skipped campaignId=" + onlyRow().getId() + " urlId=41");
+    }
+
+    @Test
+    void aWindowLinkThatFailsToBeAddedStillLeavesTheAlert(final CapturedOutput output) {
+        window.addAll(List.of("41|a.com", "42|b.com"));
+        counting();
+        aliases(link(43L, "ccc"));
+        when(campaignLinkRepository.saveAndFlush(org.mockito.ArgumentMatchers.argThat(link -> link != null && link.getId().urlId() == 42L)))
+                .thenThrow(new DataAccessResourceFailureException("Connection reset db.internal"));
+
+        campaignService.recordAnonymousLink(43L, "https://c.com/wqamhcsom?r=1&t=2", Outcome.CLEAN);
+
+        assertThat(campaignLinks.keySet()).extracting(CampaignLinkId::urlId).containsExactly(41L, 43L);
+        assertThat(holds).containsExactly(41L, 43L);
+        verify(eventPublisher).publishEvent(new ShapeHeld(onlyRow().getId(), SHAPE, PATH, 3, 3, DAY, List.of("ccc"), true, 7));
+        assertThat(output).containsOnlyOnce("Campaign link failed campaignId=" + onlyRow().getId()
+                        + " urlId=42 exception=org.springframework.dao.DataAccessResourceFailureException")
+                .doesNotContain("Campaign check skipped", "db.internal");
+    }
+
+    @Test
+    void turningTheHoldOnMidCampaignStartsHoldingAtTheNextMatch(final CapturedOutput output) {
+        final var campaign = row(CampaignStatus.ALERT_ONLY, NOW_LOCAL.plusDays(2));
+        rows.put(SHAPE_KEY, campaign);
+        campaignLinks.put(new CampaignLinkId(campaign.getId(), 41L), CampaignLink.builder().id(new CampaignLinkId(campaign.getId(), 41L)).build());
+        counting();
+
+        campaignService.recordAnonymousLink(44L, "https://d.com/wqamhcsom?r=3&t=4", Outcome.CLEAN);
+
+        assertThat(campaign.getStatus()).isEqualTo(CampaignStatus.HOLDING);
+        assertThat(holds).containsExactly(44L);
+        assertThat(campaign.getActiveUntil()).isEqualTo(HELD_UNTIL);
+        verifyNoInteractions(eventPublisher);
+        assertThat(campaignService.holdingCampaignId(URL_SHAPE)).contains(campaign.getId());
+        assertThat(output).containsOnlyOnce("Campaign started holding campaignId=" + campaign.getId());
+    }
+
+    @Test
+    void anAlertOnlyRowStaysAlertOnlyWhileTheHoldIsOff() {
+        final var campaign = row(CampaignStatus.ALERT_ONLY, NOW_LOCAL.plusDays(2));
+        rows.put(SHAPE_KEY, campaign);
+        SettingsServiceFixtures.turnOff(settingsService, SettingKey.CAMPAIGN_HOLD);
+        counting();
+
+        campaignService.recordAnonymousLink(44L, "https://d.com/wqamhcsom?r=3&t=4", Outcome.CLEAN);
+
+        assertThat(campaign.getStatus()).isEqualTo(CampaignStatus.ALERT_ONLY);
+        verify(campaignRepository, never()).startHolding(anyLong());
+        verifyNoInteractions(moderationService);
+    }
+
+    @Test
+    void aThinShapesAlertOnlyRowNeverStartsHolding() {
+        final var bare = UrlShapes.of("https://a.com/login").orElseThrow();
+        final var campaign = row(CampaignStatus.ALERT_ONLY, NOW_LOCAL.plusDays(2));
+        campaign.setShapeKey(bare.key());
+        rows.put(bare.key(), campaign);
+        when(redisBurstCounter.recordUnderKey(eq("campaign:shape:" + bare.key()), anyString(), eq(NOW), eq(DAY))).thenReturn(List.of("44|d.com"));
+
+        campaignService.recordAnonymousLink(44L, "https://d.com/login", Outcome.CLEAN);
+
+        assertThat(campaign.getStatus()).isEqualTo(CampaignStatus.ALERT_ONLY);
+        verify(campaignRepository, never()).startHolding(anyLong());
+        verifyNoInteractions(moderationService);
+    }
+
+    @Test
+    void aRowAnotherRunStartedHoldingIsHeldToo() {
+        final var campaign = row(CampaignStatus.ALERT_ONLY, NOW_LOCAL.plusDays(2));
+        rows.put(SHAPE_KEY, campaign);
+        counting();
+        org.mockito.Mockito.doReturn(0).when(campaignRepository).startHolding(campaign.getId());
+        when(campaignRepository.findById(campaign.getId())).thenReturn(Optional.of(row(CampaignStatus.HOLDING, NOW_LOCAL.plusDays(2))));
+
+        campaignService.recordAnonymousLink(44L, "https://d.com/wqamhcsom?r=3&t=4", Outcome.CLEAN);
+
+        assertThat(holds).containsExactly(44L);
     }
 
     @Test
@@ -661,6 +739,12 @@ class DefaultCampaignServiceTest {
             campaign.setLastSeenAt(invocation.getArgument(1));
             return 1;
         }).orElse(0));
+        lenient().when(campaignRepository.startHolding(anyLong())).thenAnswer(invocation -> byId(invocation.getArgument(0))
+                .filter(campaign -> campaign.getStatus() == CampaignStatus.ALERT_ONLY)
+                .map(campaign -> {
+                    campaign.setStatus(CampaignStatus.HOLDING);
+                    return 1;
+                }).orElse(0));
         lenient().when(campaignLinkRepository.existsById(any())).thenAnswer(invocation -> campaignLinks.containsKey(invocation.<CampaignLinkId>getArgument(0)));
         lenient().when(campaignLinkRepository.saveAndFlush(any(CampaignLink.class))).thenAnswer(invocation -> {
             final CampaignLink link = invocation.getArgument(0);

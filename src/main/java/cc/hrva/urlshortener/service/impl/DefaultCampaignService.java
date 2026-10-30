@@ -124,9 +124,20 @@ public class DefaultCampaignService implements CampaignService {
             return;
         }
         campaignRepository.extendHold(campaign.getId(), now, holdEnd(now));
-        if (campaign.getStatus() == CampaignStatus.HOLDING && shape.holdable() && holdsNewLinks()) {
+        if (shape.holdable() && holdsNewLinks() && isHolding(campaign)) {
             hold(campaign.getId(), urlId, shape);
         }
+    }
+
+    private boolean isHolding(final Campaign campaign) {
+        if (campaign.getStatus() != CampaignStatus.ALERT_ONLY) {
+            return campaign.getStatus() == CampaignStatus.HOLDING;
+        }
+        if (campaignRepository.startHolding(campaign.getId()) == 1) {
+            log.info("Campaign started holding campaignId={}", campaign.getId());
+            return true;
+        }
+        return campaignRepository.findById(campaign.getId()).map(Campaign::getStatus).filter(CampaignStatus.HOLDING::equals).isPresent();
     }
 
     private Optional<Campaign> open(final Crossing crossing) {
@@ -182,12 +193,23 @@ public class DefaultCampaignService implements CampaignService {
             });
             return true;
         } catch (final DataIntegrityViolationException exception) {
+            return addedMeanwhile(id);
+        } catch (final RuntimeException exception) {
+            log.warn("Campaign link failed campaignId={} urlId={} exception={}", campaignId, urlId, exception.getClass().getName());
+            return false;
+        }
+    }
+
+    private boolean addedMeanwhile(final CampaignLinkId id) {
+        try {
             if (campaignLinkRepository.existsById(id)) {
                 return true;
             }
-            log.info("Campaign link skipped campaignId={} urlId={}", campaignId, urlId);
-            return false;
+            log.info("Campaign link skipped campaignId={} urlId={}", id.campaignId(), id.urlId());
+        } catch (final RuntimeException exception) {
+            log.warn("Campaign link failed campaignId={} urlId={} exception={}", id.campaignId(), id.urlId(), exception.getClass().getName());
         }
+        return false;
     }
 
     private void hold(final long campaignId, final long urlId, final UrlShape shape) {

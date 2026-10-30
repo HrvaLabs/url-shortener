@@ -31,6 +31,12 @@ public interface CampaignRepository extends JpaRepository<Campaign, Long> {
 
     @Modifying(flushAutomatically = true)
     @Transactional
+    @Query("update Campaign c set c.status = cc.hrva.urlshortener.model.enums.CampaignStatus.HOLDING "
+            + "where c.id = :id and c.status = cc.hrva.urlshortener.model.enums.CampaignStatus.ALERT_ONLY")
+    int startHolding(@Param("id") long id);
+
+    @Modifying(flushAutomatically = true)
+    @Transactional
     @Query("update Campaign c set c.lastSeenAt = :now where c.id = :id")
     int markSeen(@Param("id") long id, @Param("now") LocalDateTime now);
 

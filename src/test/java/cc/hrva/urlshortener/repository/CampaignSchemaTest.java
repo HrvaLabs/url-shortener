@@ -131,6 +131,23 @@ class CampaignSchemaTest {
     }
 
     @Test
+    void startingToHoldTakesOnlyAnAlertOnlyRow() {
+        final var alertOnly = campaign(SHAPE_KEY, "/wqamhcsom", List.of("r", "t"));
+        alertOnly.setStatus(CampaignStatus.ALERT_ONLY);
+        final var allowed = campaign("b".repeat(64), "/allowed", List.of("a"));
+        allowed.setStatus(CampaignStatus.ALLOWED);
+        campaignRepository.saveAllAndFlush(List.of(alertOnly, allowed));
+
+        assertThat(campaignRepository.startHolding(alertOnly.getId())).isEqualTo(1);
+        assertThat(campaignRepository.startHolding(alertOnly.getId())).isZero();
+        assertThat(campaignRepository.startHolding(allowed.getId())).isZero();
+        entityManager.clear();
+
+        assertThat(campaignRepository.findById(alertOnly.getId()).orElseThrow().getStatus()).isEqualTo(CampaignStatus.HOLDING);
+        assertThat(campaignRepository.findById(allowed.getId()).orElseThrow().getStatus()).isEqualTo(CampaignStatus.ALLOWED);
+    }
+
+    @Test
     void extendingMovesTheEndAndTheLastSeenAndSeeingMovesOnlyTheLastSeen() {
         final var held = campaignRepository.saveAndFlush(campaign(SHAPE_KEY, "/wqamhcsom", List.of("r", "t")));
         final var allowed = campaign("b".repeat(64), "/allowed", List.of("a"));
