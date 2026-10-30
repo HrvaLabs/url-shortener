@@ -8,6 +8,7 @@ import cc.hrva.urlshortener.mcp.apps.ConnectedAppsService;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.codebook.Authorities;
 import cc.hrva.urlshortener.repository.ApiKeyRepository;
+import cc.hrva.urlshortener.repository.CampaignRepository;
 import cc.hrva.urlshortener.repository.DomainRuleRepository;
 import cc.hrva.urlshortener.repository.EmailLogRepository;
 import cc.hrva.urlshortener.repository.PasskeyCredentialRepository;
@@ -286,7 +287,8 @@ class ModerationUserWritesTest {
             basePackageClasses = UrlRepository.class,
             includeFilters = @ComponentScan.Filter(
                     type = FilterType.ASSIGNABLE_TYPE,
-                    classes = {UrlRepository.class, UserRepository.class, ApiKeyRepository.class, DomainRuleRepository.class}))
+                    classes = {UrlRepository.class, UserRepository.class, ApiKeyRepository.class, DomainRuleRepository.class,
+                            CampaignRepository.class}))
     @Import({DefaultModerationService.class, DefaultUserService.class, UserToUserDtoConverter.class, UserUpdateDtoToUserConverter.class, UrlCache.class,
             AccountLock.class})
     static class TestApplication {

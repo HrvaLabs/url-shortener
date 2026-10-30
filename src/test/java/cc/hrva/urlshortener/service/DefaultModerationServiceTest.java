@@ -14,6 +14,7 @@ import cc.hrva.urlshortener.exception.InvalidSortException;
 import cc.hrva.urlshortener.exception.UrlNotFoundException;
 import cc.hrva.urlshortener.exception.UrlValidationException;
 import cc.hrva.urlshortener.exception.UserNotFoundException;
+import cc.hrva.urlshortener.model.Campaign;
 import cc.hrva.urlshortener.model.CustomDomain;
 import cc.hrva.urlshortener.model.DomainRule;
 import cc.hrva.urlshortener.model.LinkReview;
@@ -21,11 +22,13 @@ import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.enums.AuditAction;
 import cc.hrva.urlshortener.model.enums.BlockReason;
+import cc.hrva.urlshortener.model.enums.CampaignStatus;
 import cc.hrva.urlshortener.model.enums.CustomDomainStatus;
 import cc.hrva.urlshortener.model.enums.DomainDisableReason;
 import cc.hrva.urlshortener.model.enums.DomainRuleType;
 import cc.hrva.urlshortener.model.enums.ReviewAction;
 import cc.hrva.urlshortener.model.enums.ReviewResolution;
+import cc.hrva.urlshortener.repository.CampaignRepository;
 import cc.hrva.urlshortener.repository.CustomDomainRepository;
 import cc.hrva.urlshortener.repository.DomainRuleRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
@@ -110,6 +113,7 @@ class DefaultModerationServiceTest {
     private static final String ADMIN = "admin@hrva.cc";
     private static final String NOT_A_DOMAIN = "Enter a domain such as example.com, not a top-level domain or an IP address.";
     private static final LocalDateTime BLOCKED_AT = LocalDateTime.of(2026, 10, 20, 2, 0);
+    private static final long CAMPAIGN_ID = 7L;
     private static final LocalDateTime RULE_CREATED_AT = LocalDateTime.of(2026, 10, 1, 9, 0);
     private static final LinkVerdict ALLOWED = new LinkVerdict(Outcome.ALLOWED, List.of("allowed domain jofogas.cards"), null, null);
 
@@ -157,6 +161,9 @@ class DefaultModerationServiceTest {
 
     @Mock
     private CustomDomainLifecycle customDomainLifecycle;
+
+    @Mock
+    private CampaignRepository campaignRepository;
 
     private final Map<Long, Url> links = new TreeMap<>();
     private final Map<String, DomainRule> rules = new HashMap<>();
@@ -231,12 +238,18 @@ class DefaultModerationServiceTest {
             return null;
         }).when(cache).evict(any());
         final var transactions = recordingTransactions();
+        lenient().when(campaignRepository.findForHold(CAMPAIGN_ID)).thenAnswer(invocation -> {
+            if (!inTransaction) {
+                outOfPlace.add("campaign read for a hold outside the hold's transaction");
+            }
+            return Optional.of(Campaign.builder().id(CAMPAIGN_ID).status(CampaignStatus.HOLDING).build());
+        });
         lenient().when(linkCheckService.isBlockedByRule(anyString())).thenReturn(true);
         final var domainModeration = new CustomDomainModeration(customDomainRepository, customDomainLifecycle, linkCheckService, sendingEmailService, eventPublisher,
                 transactions, Clock.fixed(Instant.parse("2026-10-29T09:00:00Z"), ZoneOffset.UTC));
         moderationService = new DefaultModerationService(urlRepository, userRepository, domainRuleRepository, linkCheckService,
                 reviewQueueService, userService, sendingEmailService, auditLogService, new UrlCache(cacheManager), eventPublisher, transactions,
-                scammerSignalService, taskScheduler, domainModeration);
+                scammerSignalService, taskScheduler, domainModeration, campaignRepository);
     }
 
     @Test
@@ -633,7 +646,7 @@ class DefaultModerationServiceTest {
     void holdingSendsNoDiscordLineAndNoEmail() {
         final var url = link(31L, "https://ll.omaehhm.com/wqamhcsom/?r=1&t=2", null);
 
-        assertThat(moderationService.holdForCampaign(31L, "/wqamhcsom?r&t")).isTrue();
+        assertThat(moderationService.holdForCampaign(31L, CAMPAIGN_ID, "/wqamhcsom?r&t")).isTrue();
 
         assertThat(url.isActive()).isFalse();
         assertThat(url.getBlockReason()).isEqualTo(BlockReason.CAMPAIGN);
@@ -643,6 +656,27 @@ class DefaultModerationServiceTest {
         verify(taskScheduler).schedule(any(Runnable.class), any(Instant.class));
         verify(reviewQueueService).resolveOpen(url, ReviewResolution.LINK_BLOCKED, "system");
         verifyNoInteractions(sendingEmailService, eventPublisher, auditLogService);
+        verify(campaignRepository).findForHold(CAMPAIGN_ID);
+        assertThat(outOfPlace).isEmpty();
+    }
+
+    @Test
+    void aHoldForAShapeThatWasJustAllowedHoldsNothing() {
+        final var url = link(36L, "https://ll.omaehhm.com/wqamhcsom/?r=1&t=2", null);
+        doAnswer(invocation -> {
+            if (!inTransaction) {
+                outOfPlace.add("campaign read for a hold outside the hold's transaction");
+            }
+            return Optional.of(Campaign.builder().id(CAMPAIGN_ID).status(CampaignStatus.ALLOWED).build());
+        }).when(campaignRepository).findForHold(CAMPAIGN_ID);
+
+        assertThat(moderationService.holdForCampaign(36L, CAMPAIGN_ID, "/wqamhcsom?r&t")).isFalse();
+        assertThat(moderationService.holdForCampaign(36L, 99L, "/wqamhcsom?r&t")).isFalse();
+
+        assertThat(url.isActive()).isTrue();
+        assertThat(url.getBlockReason()).isNull();
+        verify(urlRepository, never()).save(any(Url.class));
+        verifyNoInteractions(cache, reviewQueueService);
         assertThat(outOfPlace).isEmpty();
     }
 
@@ -651,7 +685,7 @@ class DefaultModerationServiceTest {
         final var url = blocked(32L, "https://ll.omaehhm.com/wqamhcsom/?r=1&t=2", BlockReason.BLOCKLIST, null);
         url.setBlockDetail("HaGeZi TIF medium");
 
-        assertThat(moderationService.holdForCampaign(32L, "/wqamhcsom?r&t")).isFalse();
+        assertThat(moderationService.holdForCampaign(32L, CAMPAIGN_ID, "/wqamhcsom?r&t")).isFalse();
 
         assertThat(url.getBlockReason()).isEqualTo(BlockReason.BLOCKLIST);
         assertThat(url.getBlockDetail()).isEqualTo("HaGeZi TIF medium");
@@ -665,9 +699,9 @@ class DefaultModerationServiceTest {
         final var off = link(34L, "https://ll.omaehhm.com/wqamhcsom/?r=2&t=2", null);
         off.setActive(false);
 
-        assertThat(moderationService.holdForCampaign(33L, "/wqamhcsom?r&t")).isFalse();
-        assertThat(moderationService.holdForCampaign(34L, "/wqamhcsom?r&t")).isFalse();
-        assertThat(moderationService.holdForCampaign(35L, "/wqamhcsom?r&t")).isFalse();
+        assertThat(moderationService.holdForCampaign(33L, CAMPAIGN_ID, "/wqamhcsom?r&t")).isFalse();
+        assertThat(moderationService.holdForCampaign(34L, CAMPAIGN_ID, "/wqamhcsom?r&t")).isFalse();
+        assertThat(moderationService.holdForCampaign(35L, CAMPAIGN_ID, "/wqamhcsom?r&t")).isFalse();
 
         assertThat(owned.getBlockReason()).isNull();
         assertThat(off.getBlockReason()).isNull();

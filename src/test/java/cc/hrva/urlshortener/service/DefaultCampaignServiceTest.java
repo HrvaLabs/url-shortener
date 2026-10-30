@@ -174,7 +174,7 @@ class DefaultCampaignServiceTest {
                 .containsExactly(org.assertj.core.groups.Tuple.tuple(41L, "omaehhm.com"), org.assertj.core.groups.Tuple.tuple(42L, "fvvxctw.com"),
                         org.assertj.core.groups.Tuple.tuple(43L, "c.com"));
         assertThat(holds).containsExactly(41L, 42L, 43L);
-        verify(moderationService, times(3)).holdForCampaign(anyLong(), eq(SHAPE));
+        verify(moderationService, times(3)).holdForCampaign(anyLong(), eq((long) campaign.getId()), eq(SHAPE));
         verify(eventPublisher, times(1)).publishEvent(any(AdminAlertEvent.class));
         verify(eventPublisher).publishEvent(new ShapeHeld(campaign.getId(), SHAPE, PATH, 3, 3, DAY, List.of("ccc", "bbb", "aaa"), true, 7));
         assertThat(output).containsOnlyOnce("Campaign alert shape=" + SHAPE_KEY + " display=/wqamhcsom?r&t campaignId=" + campaign.getId()
@@ -791,10 +791,8 @@ class DefaultCampaignServiceTest {
         when(campaignLinkRepository.countByCampaignIdIn(List.of(4L, 5L))).thenReturn(List.of(
                 new CampaignLinkCounts(4L, 2, 0, 2, 0, 2, LocalDateTime.of(2026, 10, 20, 23, 30)),
                 new CampaignLinkCounts(5L, 1, 1, 0, 0, 1, LocalDateTime.of(2026, 10, 25, 8, 0))));
-        when(campaignLinkRepository.findByIdCampaignIdIn(List.of(4L, 5L)))
-                .thenReturn(List.of(campaignLink(4L, 41L, "a.com"), campaignLink(4L, 42L, "b.com"), campaignLink(5L, 51L, "c.com")));
-        when(linkStatsRepository.sumClicksByUrl(List.of(41L, 42L, 51L), LocalDate.of(2026, 10, 21), LocalDate.of(2026, 10, 29)))
-                .thenReturn(Map.of(41L, 100L, 42L, 23L, 51L, 7L));
+        when(linkStatsRepository.sumClicksByCampaign(List.of(4L, 5L), LocalDate.of(2026, 10, 21), LocalDate.of(2026, 10, 29)))
+                .thenReturn(Map.of(4L, 123L, 5L, 7L));
 
         assertThat(campaignService.campaigns(null, PageRequest.of(0, 20)).getContent())
                 .extracting(CampaignResponse::id, CampaignResponse::clicks)
@@ -802,20 +800,26 @@ class DefaultCampaignServiceTest {
     }
 
     @Test
-    void clicksAreReadPer1000Links() {
+    void clicksAreOneQueryForThePageWhateverItsLinks() {
         listed(row(CampaignStatus.HOLDING, HELD_UNTIL));
         when(campaignLinkRepository.countByCampaignIdIn(List.of(4L)))
                 .thenReturn(List.of(new CampaignLinkCounts(4L, 1500, 0, 1500, 0, 3, NOW_LOCAL.minusDays(2))));
-        when(campaignLinkRepository.findByIdCampaignIdIn(List.of(4L)))
-                .thenReturn(LongStream.rangeClosed(1, 1500).mapToObj(id -> campaignLink(4L, id, "a.com")).toList());
-        when(linkStatsRepository.sumClicksByUrl(any(), any(), any())).thenAnswer(invocation -> Map.of(invocation.<List<Long>>getArgument(0).getFirst(), 5L));
+        when(linkStatsRepository.sumClicksByCampaign(List.of(4L), LocalDate.of(2026, 10, 27), LocalDate.of(2026, 10, 29))).thenReturn(Map.of(4L, 10L));
 
         assertThat(campaignService.campaigns(null, PageRequest.of(0, 20)).getContent().getFirst().clicks()).isEqualTo(10);
 
-        @SuppressWarnings("unchecked")
-        final ArgumentCaptor<List<Long>> chunks = ArgumentCaptor.forClass(List.class);
-        verify(linkStatsRepository, times(2)).sumClicksByUrl(chunks.capture(), eq(LocalDate.of(2026, 10, 27)), eq(LocalDate.of(2026, 10, 29)));
-        assertThat(chunks.getAllValues()).extracting(List::size).containsExactly(1000, 500);
+        verify(linkStatsRepository, times(1)).sumClicksByCampaign(any(), any(), any());
+        verifyNoMoreInteractions(linkStatsRepository);
+        verify(campaignLinkRepository, never()).findByIdCampaignId(anyLong());
+    }
+
+    @Test
+    void aPageWithoutLinksReadsNoClicks() {
+        listed(row(CampaignStatus.HOLDING, HELD_UNTIL));
+
+        assertThat(campaignService.campaigns(null, PageRequest.of(0, 20)).getContent().getFirst().clicks()).isZero();
+
+        verifyNoInteractions(linkStatsRepository);
     }
 
     @Test
@@ -1053,7 +1057,7 @@ class DefaultCampaignServiceTest {
             }
             return link;
         });
-        lenient().when(moderationService.holdForCampaign(anyLong(), anyString())).thenAnswer(invocation -> {
+        lenient().when(moderationService.holdForCampaign(anyLong(), anyLong(), anyString())).thenAnswer(invocation -> {
             holds.add(invocation.getArgument(0));
             return true;
         });

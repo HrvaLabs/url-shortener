@@ -360,6 +360,37 @@ class LinkStatsRepositoryTest {
     }
 
     @Test
+    void sumsClicksPerCampaignInTheRangeInOneQuery() {
+        final var first = savedLink("campaign-first");
+        final var second = savedLink("campaign-second");
+        final var third = savedLink("campaign-third");
+        final var quiet = savedLink("campaign-quiet");
+        final var notAsked = savedLink("campaign-not-asked");
+        final var held = campaign("1");
+        final var other = campaign("2");
+        final var silent = campaign("3");
+        final var elsewhere = campaign("4");
+        campaignLink(held, first);
+        campaignLink(held, second);
+        campaignLink(other, third);
+        campaignLink(silent, quiet);
+        campaignLink(elsewhere, notAsked);
+        linkStatsRepository.incrementDailyStats(first.getId(), DAY, 3, 1, 5);
+        linkStatsRepository.incrementDailyStats(first.getId(), DAY.plusDays(6), 4, 1, 0);
+        linkStatsRepository.incrementDailyStats(first.getId(), DAY.minusDays(1), 50, 1, 0);
+        linkStatsRepository.incrementDailyStats(first.getId(), DAY.plusDays(7), 60, 1, 0);
+        linkStatsRepository.incrementDailyStats(second.getId(), DAY.plusDays(1), 2, 2, 0);
+        linkStatsRepository.incrementDailyStats(third.getId(), DAY.plusDays(2), 7, 2, 0);
+        linkStatsRepository.incrementDailyStats(notAsked.getId(), DAY, 9, 9, 0);
+        final var ids = List.of(first.getId(), second.getId(), third.getId(), quiet.getId());
+
+        assertThat(linkStatsRepository.sumClicksByCampaign(List.of(held, other, silent), DAY, DAY.plusDays(6)))
+                .isEqualTo(Map.of(held, 9L, other, 7L));
+        assertThat(linkStatsRepository.sumClicksByUrl(ids, DAY, DAY.plusDays(6)))
+                .isEqualTo(Map.of(first.getId(), 7L, second.getId(), 2L, third.getId(), 7L));
+    }
+
+    @Test
     void sumsOnlyTheGivenReferrer() {
         final var first = savedLink("referrer-first");
         final var second = savedLink("referrer-second");
@@ -385,6 +416,7 @@ class LinkStatsRepositoryTest {
 
         assertThat(repository.sumClicksByUrl(List.of(), DAY, DAY)).isEmpty();
         assertThat(repository.sumReferrerClicksByUrl(List.of(), "hrva.cc", DAY, DAY)).isEmpty();
+        assertThat(repository.sumClicksByCampaign(List.of(), DAY, DAY)).isEmpty();
 
         verifyNoInteractions(jdbc);
     }
@@ -397,6 +429,18 @@ class LinkStatsRepositoryTest {
 
     private Integer countRows(final String table, final long urlId) {
         return jdbcTemplate.queryForObject("select count(*) from " + table + " where url_id = ?", Integer.class, urlId);
+    }
+
+    private long campaign(final String key) {
+        jdbcTemplate.update("insert into campaign (shape_key, path, query_names, status, first_seen_at, last_seen_at, active_until, alerted_at) "
+                + "values (?, '/p', 'r', 'HOLDING', ?, ?, ?, ?)", key.repeat(64), DAY.atStartOfDay(), DAY.atStartOfDay(), DAY.plusDays(7).atStartOfDay(),
+                DAY.atStartOfDay());
+        return jdbcTemplate.queryForObject("select id from campaign where shape_key = ?", Long.class, key.repeat(64));
+    }
+
+    private void campaignLink(final long campaignId, final Url url) {
+        jdbcTemplate.update("insert into campaign_link (campaign_id, url_id, domain, created_at) values (?, ?, 'example.org', ?)", campaignId, url.getId(),
+                DAY.atStartOfDay());
     }
 
     private Url savedLink(final String shortUrl) {

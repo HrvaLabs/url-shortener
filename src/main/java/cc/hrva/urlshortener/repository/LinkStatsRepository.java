@@ -35,6 +35,7 @@ public class LinkStatsRepository {
     private static final String OWNER_ID = "ownerId";
     private static final String LIMIT = "limit";
     private static final String URL_IDS = "urlIds";
+    private static final String CAMPAIGN_IDS = "campaignIds";
     private static final String REFERRER = "referrer";
     private static final int IDS_PER_QUERY = 1_000;
 
@@ -119,6 +120,13 @@ public class LinkStatsRepository {
             select dimension_value, sum(clicks) as total_clicks from link_daily_breakdown
             where url_id in (:urlIds) and dimension = :dimension and dimension_value not in ('unknown', 'tor')
             group by dimension_value
+            """;
+
+    private static final String SUM_CLICKS_BY_CAMPAIGN = """
+            select cl.campaign_id, sum(s.clicks) as total_clicks from campaign_link cl
+            join link_daily_stats s on s.url_id = cl.url_id
+            where cl.campaign_id in (:campaignIds) and s.stat_date between :from and :to
+            group by cl.campaign_id
             """;
 
     private static final String SUM_REFERRER_CLICKS_BY_URL = """
@@ -209,6 +217,16 @@ public class LinkStatsRepository {
             return Map.of();
         }
         return sumsByUrl(SUM_CLICKS_BY_URL, Map.of(URL_IDS, urlIds, FROM, from, TO, to));
+    }
+
+    public Map<Long, Long> sumClicksByCampaign(final Collection<Long> campaignIds, final LocalDate from, final LocalDate to) {
+        if (campaignIds.isEmpty()) {
+            return Map.of();
+        }
+        final var sums = new HashMap<Long, Long>();
+        jdbcTemplate.query(SUM_CLICKS_BY_CAMPAIGN, Map.of(CAMPAIGN_IDS, campaignIds, FROM, from, TO, to),
+                (RowCallbackHandler) row -> sums.put(row.getLong("campaign_id"), row.getLong("total_clicks")));
+        return Map.copyOf(sums);
     }
 
     public Map<Long, Long> sumReferrerClicksByUrl(final Collection<Long> urlIds, final String referrer, final LocalDate from, final LocalDate to) {

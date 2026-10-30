@@ -21,11 +21,13 @@ import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.enums.AuditAction;
 import cc.hrva.urlshortener.model.enums.BlockReason;
+import cc.hrva.urlshortener.model.enums.CampaignStatus;
 import cc.hrva.urlshortener.model.enums.CustomDomainStatus;
 import cc.hrva.urlshortener.model.enums.DomainRuleType;
 import cc.hrva.urlshortener.model.enums.ReviewAction;
 import cc.hrva.urlshortener.model.enums.ReviewResolution;
 import cc.hrva.urlshortener.model.enums.ThreatType;
+import cc.hrva.urlshortener.repository.CampaignRepository;
 import cc.hrva.urlshortener.repository.DomainRuleRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
@@ -147,6 +149,7 @@ public class DefaultModerationService implements ModerationService {
     private final ScammerSignalService scammerSignalService;
     private final TaskScheduler taskScheduler;
     private final CustomDomainModeration customDomainModeration;
+    private final CampaignRepository campaignRepository;
 
     @Override
     public UrlResponse blockLink(final long urlId, final BlockReason reason, final String detail, final String performedBy, final String via) {
@@ -669,9 +672,18 @@ public class DefaultModerationService implements ModerationService {
     }
 
     @Override
-    public boolean holdForCampaign(final long urlId, final String shape) {
-        return block(urlId, BlockReason.CAMPAIGN, shape, ReviewResolution.LINK_BLOCKED, SYSTEM, url -> url.isActive() && url.getOwner() == null)
+    public boolean holdForCampaign(final long urlId, final long campaignId, final String shape) {
+        return block(urlId, BlockReason.CAMPAIGN, shape, ReviewResolution.LINK_BLOCKED, SYSTEM,
+                url -> url.isActive() && url.getOwner() == null && stillHolds(campaignId, urlId))
                 .isPresent();
+    }
+
+    private boolean stillHolds(final long campaignId, final long urlId) {
+        if (campaignRepository.findForHold(campaignId).filter(campaign -> campaign.getStatus() != CampaignStatus.ALLOWED).isPresent()) {
+            return true;
+        }
+        log.info("Hold skipped because the shape is allowed campaignId={} urlId={}", campaignId, urlId);
+        return false;
     }
 
     @Override

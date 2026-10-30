@@ -15,8 +15,6 @@ public interface CampaignLinkRepository extends JpaRepository<CampaignLink, Camp
 
     List<CampaignLink> findByIdCampaignId(long campaignId);
 
-    List<CampaignLink> findByIdCampaignIdIn(Collection<Long> campaignIds);
-
     List<CampaignLink> findByIdCampaignIdAndIdUrlIdIn(long campaignId, Collection<Long> urlIds);
 
     @Query("""

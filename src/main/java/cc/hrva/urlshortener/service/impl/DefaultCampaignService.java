@@ -241,15 +241,9 @@ public class DefaultCampaignService implements CampaignService {
     }
 
     private Map<Long, Long> clicksByCampaign(final Collection<Long> campaignIds, final Optional<LocalDateTime> firstLinkCreated) {
-        if (firstLinkCreated.isEmpty()) {
-            return Map.of();
-        }
-        final var campaignByUrl = campaignLinkRepository.findByIdCampaignIdIn(campaignIds).stream()
-                .collect(Collectors.toMap(link -> link.getId().urlId(), link -> link.getId().campaignId(), (first, second) -> first, LinkedHashMap::new));
-        final var clicks = new HashMap<Long, Long>();
-        clicksByUrl(List.copyOf(campaignByUrl.keySet()), firstLinkCreated)
-                .forEach((urlId, urlClicks) -> clicks.merge(campaignByUrl.get(urlId), urlClicks, Long::sum));
-        return clicks;
+        return firstLinkCreated
+                .map(first -> linkStatsRepository.sumClicksByCampaign(campaignIds, analyticsDate(first), analyticsDays.today()))
+                .orElseGet(Map::of);
     }
 
     private Map<Long, Long> clicksByUrl(final List<Long> urlIds, final Optional<LocalDateTime> firstLinkCreated) {
@@ -404,7 +398,7 @@ public class DefaultCampaignService implements CampaignService {
 
     private void hold(final long campaignId, final long urlId, final UrlShape shape) {
         try {
-            moderationService.holdForCampaign(urlId, shape.display());
+            moderationService.holdForCampaign(urlId, campaignId, shape.display());
         } catch (final RuntimeException exception) {
             log.warn("Campaign hold failed campaignId={} urlId={} exception={}", campaignId, urlId, exception.getClass().getName());
         }

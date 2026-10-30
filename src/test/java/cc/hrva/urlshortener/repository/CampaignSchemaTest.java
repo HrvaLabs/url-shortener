@@ -327,6 +327,16 @@ class CampaignSchemaTest {
     }
 
     @Test
+    void aHoldReadsTheCampaignsStatus() {
+        final var held = campaignRepository.saveAndFlush(campaign(SHAPE_KEY, "/wqamhcsom", List.of("r", "t")));
+        campaignRepository.allow(held.getId(), "karlo@hrva.cc", NOW);
+        entityManager.clear();
+
+        assertThat(campaignRepository.findForHold(held.getId())).map(Campaign::getStatus).contains(CampaignStatus.ALLOWED);
+        assertThat(campaignRepository.findForHold(held.getId() + 1000)).isEmpty();
+    }
+
+    @Test
     void allowingTakesARowThatIsNotAllowedYet() {
         final var held = campaignRepository.saveAndFlush(campaign(SHAPE_KEY, "/wqamhcsom", List.of("r", "t")));
 
@@ -363,8 +373,6 @@ class CampaignSchemaTest {
                 .extracting(Url::getId).containsExactly(middle);
         assertThat(campaignLinkRepository.findByIdCampaignIdAndIdUrlIdIn(campaignId, List.of(oldest, elsewhere)))
                 .extracting(stored -> stored.getId().urlId()).containsExactly(oldest);
-        assertThat(campaignLinkRepository.findByIdCampaignIdIn(List.of(campaignId, otherId)))
-                .extracting(stored -> stored.getId().urlId()).containsExactlyInAnyOrder(oldest, middle, newest, elsewhere);
     }
 
     @Test
