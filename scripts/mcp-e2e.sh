@@ -625,10 +625,11 @@ expect_eq "$(jq -r .cacheActive <<<"$HTTP_BODY")" true "legacy: cacheActive"
 expect_eq "$(jq -r .appVersion <<<"$HTTP_BODY")" "$(jq -r '.releases[0].version | ltrimstr("v")' "$ROOT/src/main/resources/changelog.json")" \
     "legacy: appVersion is the newest changelog release"
 
-http -H "Authorization: Bearer $ADMIN_JWT" "$BASE/api/v1/admin/reserved-aliases"
-expect_eq "$HTTP_STATUS" 200 "GET /api/v1/admin/reserved-aliases"
-expect_eq "$(jq -r 'any(.[]; .alias == "mcp" and .builtIn == true)' <<<"$HTTP_BODY")" true "mcp is a built-in reserved alias"
-expect_eq "$(jq -r 'any(.[]; .alias == "anon" and .builtIn == true)' <<<"$HTTP_BODY")" true "anon is a built-in reserved alias"
+http -H "Authorization: Bearer $ADMIN_JWT" "$BASE/api/v1/admin/reserved-aliases?search=mcp"
+expect_eq "$HTTP_STATUS" 200 "GET /api/v1/admin/reserved-aliases?search=mcp"
+expect_eq "$(jq -r 'any(.content[]; .alias == "mcp" and .builtIn == true)' <<<"$HTTP_BODY")" true "mcp is a built-in reserved alias"
+http -H "Authorization: Bearer $ADMIN_JWT" "$BASE/api/v1/admin/reserved-aliases?search=anon"
+expect_eq "$(jq -r 'any(.content[]; .alias == "anon" and .builtIn == true)' <<<"$HTTP_BODY")" true "anon is a built-in reserved alias"
 http -X POST "$BASE/api/v1/admin/reserved-aliases" -H "Authorization: Bearer $ADMIN_JWT" -H 'Content-Type: application/json' \
     -d '{"alias":"E2E-Reserved","reason":"e2e check"}'
 show "POST /api/v1/admin/reserved-aliases -> $HTTP_STATUS $(jq -c '{id, alias, reason, builtIn}' <<<"$HTTP_BODY")"
@@ -1032,8 +1033,9 @@ section "19. Admin user list and edit"
 http -G "$BASE/api/v1/users" -H "Authorization: Bearer $ADMIN_JWT" --data-urlencode "search=$USER_EMAIL"
 expect_eq "$HTTP_STATUS" 200 "GET /api/v1/users as admin@localhost"
 expect_eq "$(jq -c '.content[0] | keys' <<<"$HTTP_BODY")" \
-    '["active","apiKeySlots","authProvider","authorities","createDate","email","emailVerified","id","lastLogin","possibleScammer","twoFactorEnabled","twoStepEnabled"]' \
-    "a user row has the fields the User entity had"
+    '["active","apiKeySlots","authProvider","authorities","createDate","email","emailVerified","id","lastLogin","possibleScammer","signInMethods","twoFactorEnabled","twoStepEnabled"]' \
+    "a user row has the fields the User entity had, plus signInMethods"
+expect_contains "$(jq -c '[.content[0].signInMethods[].method]' <<<"$HTTP_BODY")" '"PASSWORD"' "the password sign-ins are recorded as a sign-in method"
 expect_eq "$(jq -c '.content[0].authorities | map(keys) | unique' <<<"$HTTP_BODY")" '[["active","authority","id","name"]]' "each role has id, name, active and authority"
 expect_contains "$(jq -c '[.content[0].authorities[].name]' <<<"$HTTP_BODY")" '"ROLE_USER"' "the roles are read inside the transaction"
 LISTED_ID=$(jq -r .content[0].id <<<"$HTTP_BODY")
