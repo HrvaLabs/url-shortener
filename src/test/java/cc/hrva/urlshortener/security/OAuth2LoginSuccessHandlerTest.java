@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.security;
 
+import java.time.LocalDateTime;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
@@ -9,9 +10,11 @@ import cc.hrva.urlshortener.exception.SignInUnavailableException;
 import cc.hrva.urlshortener.listener.UserRegisteredEvent;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.codebook.Authorities;
+import cc.hrva.urlshortener.model.enums.SignInMethod;
 import cc.hrva.urlshortener.model.enums.TwoStepMethod;
 import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.service.AuthoritiesService;
+import cc.hrva.urlshortener.service.SignInMethodService;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent;
 import cc.hrva.urlshortener.service.twostep.PendingLoginStore;
 import cc.hrva.urlshortener.service.twostep.TwoStepMethods;
@@ -91,11 +94,14 @@ class OAuth2LoginSuccessHandlerTest {
     @Mock
     private TwoStepMethods twoStepMethods;
 
+    @Mock
+    private SignInMethodService signInMethodService;
+
     @BeforeEach
     void setUp() {
         this.handler = new OAuth2LoginSuccessHandler(userRepository, authoritiesService, tokenProvider,
                 appProperties, Validation.buildDefaultValidatorFactory().getValidator(), eventPublisher,
-                pendingLoginStore, twoStepMethods);
+                pendingLoginStore, twoStepMethods, signInMethodService);
         lenient().when(authentication.getPrincipal()).thenReturn(oAuth2User);
         lenient().when(appProperties.getFrontendUrl()).thenReturn("http://fe");
         lenient().when(appProperties.isRegistrationEnabled()).thenReturn(true);
@@ -123,6 +129,7 @@ class OAuth2LoginSuccessHandlerTest {
 
         verify(response).sendRedirect("http://fe/auth/callback?error=account_inactive");
         verify(tokenProvider, never()).createToken(any());
+        verifyNoInteractions(signInMethodService);
         assertThat(output).contains("OAuth2 login blocked: inactive account email=e***@example.com user id=1").doesNotContain("evil@example.com");
     }
 
@@ -144,6 +151,40 @@ class OAuth2LoginSuccessHandlerTest {
         verify(eventPublisher, never()).publishEvent(any(Object.class));
         verifyNoInteractions(pendingLoginStore, twoStepMethods);
         assertThat(output).contains("OAuth2 login success email=o***@example.com user id=1").doesNotContain("ok@example.com");
+    }
+
+    @ParameterizedTest
+    @CsvSource({"google, GOOGLE", "github, GITHUB"})
+    void aSignInRecordsItsProviderAtTheTimeOfTheLastLogin(final String provider, final SignInMethod method) throws Exception {
+        final var user = User.builder().id(1L).email("ok@example.com").active(true).emailVerified(true)
+                .authorities(Collections.singletonList(Authorities.builder().id(1L).name("ROLE_USER").build()))
+                .build();
+        when(oAuth2User.getAttribute("email")).thenReturn("ok@example.com");
+        when(userRepository.findByEmail("ok@example.com")).thenReturn(Optional.of(user));
+        when(tokenProvider.createToken(any())).thenReturn("jwt-token");
+
+        handler.onAuthenticationSuccess(request, response, signIn(provider));
+
+        final var lastLogin = ArgumentCaptor.forClass(LocalDateTime.class);
+        verify(userRepository).recordLastLogin(eq(1L), lastLogin.capture());
+        verify(signInMethodService).record(1L, method, lastLogin.getValue());
+    }
+
+    @Test
+    void aNewAccountIsRecordedWithItsProvider() throws Exception {
+        when(oAuth2User.getAttribute("email")).thenReturn("octo@example.com");
+        when(userRepository.findByEmail("octo@example.com")).thenReturn(Optional.empty());
+        when(authoritiesService.getDefaultAuthority()).thenReturn(Authorities.builder().id(1L).name("ROLE_USER").build());
+        when(userRepository.save(any())).thenAnswer(invocation -> {
+            final User saved = invocation.getArgument(0);
+            saved.setId(33L);
+            return saved;
+        });
+        when(tokenProvider.createToken(any())).thenReturn("jwt-token");
+
+        handler.onAuthenticationSuccess(request, response, signIn("github"));
+
+        verify(signInMethodService).record(eq(33L), eq(SignInMethod.GITHUB), any());
     }
 
     @ParameterizedTest
@@ -245,7 +286,7 @@ class OAuth2LoginSuccessHandlerTest {
         when(appProperties.getFrontendUrl()).thenReturn("http://localhost:3000");
         when(oAuth2User.getAttribute("email")).thenReturn("two@example.com");
         when(userRepository.findByEmail("two@example.com")).thenReturn(Optional.of(user));
-        when(pendingLoginStore.create(7L, false)).thenReturn(PENDING_TOKEN);
+        when(pendingLoginStore.create(7L, false, SignInMethod.GOOGLE)).thenReturn(PENDING_TOKEN);
         when(twoStepMethods.of(user)).thenReturn(List.of(TwoStepMethod.TOTP, TwoStepMethod.RECOVERY_CODE));
 
         handler.onAuthenticationSuccess(request, response, authentication);
@@ -257,9 +298,10 @@ class OAuth2LoginSuccessHandlerTest {
                 .doesNotContain("token=")
                 .isEqualTo("http://localhost:3000/auth/callback?pendingToken=" + PENDING_TOKEN
                         + "&methods=TOTP,RECOVERY_CODE");
-        verify(pendingLoginStore).create(7L, false);
+        verify(pendingLoginStore).create(7L, false, SignInMethod.GOOGLE);
         verifyNoInteractions(tokenProvider);
         verify(userRepository, never()).save(any());
+        verifyNoInteractions(signInMethodService);
         assertThat(user.getLastLogin()).isNull();
     }
 
@@ -270,7 +312,7 @@ class OAuth2LoginSuccessHandlerTest {
         when(appProperties.getFrontendUrl()).thenReturn("http://localhost:3000");
         when(oAuth2User.getAttribute("email")).thenReturn("local@example.com");
         when(userRepository.findByEmail("local@example.com")).thenReturn(Optional.of(user));
-        when(pendingLoginStore.create(8L, false)).thenReturn(PENDING_TOKEN);
+        when(pendingLoginStore.create(8L, false, SignInMethod.GOOGLE)).thenReturn(PENDING_TOKEN);
         when(twoStepMethods.of(user))
                 .thenReturn(List.of(TwoStepMethod.TOTP, TwoStepMethod.WEBAUTHN, TwoStepMethod.RECOVERY_CODE));
 
@@ -291,7 +333,7 @@ class OAuth2LoginSuccessHandlerTest {
         when(oAuth2User.getAttribute("email")).thenReturn("two@example.com");
         when(userRepository.findByEmail("two@example.com")).thenReturn(Optional.of(user));
         when(twoStepMethods.of(user)).thenReturn(List.of(TwoStepMethod.TOTP, TwoStepMethod.RECOVERY_CODE));
-        when(pendingLoginStore.create(9L, false))
+        when(pendingLoginStore.create(9L, false, SignInMethod.GOOGLE))
                 .thenThrow(new SignInUnavailableException(PendingLoginStore.UNAVAILABLE, new IllegalStateException()));
 
         handler.onAuthenticationSuccess(request, response, authentication);
@@ -299,7 +341,7 @@ class OAuth2LoginSuccessHandlerTest {
         assertThat(redirectSent()).isEqualTo("http://localhost:3000/auth/callback?error=two_step_unavailable");
         final var order = inOrder(twoStepMethods, pendingLoginStore);
         order.verify(twoStepMethods).of(user);
-        order.verify(pendingLoginStore).create(9L, false);
+        order.verify(pendingLoginStore).create(9L, false, SignInMethod.GOOGLE);
         verifyNoInteractions(tokenProvider);
         verify(userRepository, never()).save(any());
     }
@@ -402,7 +444,7 @@ class OAuth2LoginSuccessHandlerTest {
         verify(response).sendRedirect("http://fe/auth/callback?error=registration_disabled");
         verify(userRepository, never()).save(any());
         verify(userRepository, never()).recordLastLogin(any(), any());
-        verifyNoInteractions(tokenProvider, eventPublisher, authoritiesService, pendingLoginStore);
+        verifyNoInteractions(tokenProvider, eventPublisher, authoritiesService, pendingLoginStore, signInMethodService);
     }
 
     @ParameterizedTest
@@ -481,7 +523,7 @@ class OAuth2LoginSuccessHandlerTest {
         when(appProperties.getFrontendUrl()).thenReturn("http://localhost:3000");
         when(oAuth2User.getAttribute("email")).thenReturn("octo@example.com");
         when(userRepository.findByEmail("octo@example.com")).thenReturn(Optional.of(user));
-        when(pendingLoginStore.create(15L, false)).thenReturn(PENDING_TOKEN);
+        when(pendingLoginStore.create(15L, false, SignInMethod.GITHUB)).thenReturn(PENDING_TOKEN);
         when(twoStepMethods.of(user)).thenReturn(List.of(TwoStepMethod.WEBAUTHN, TwoStepMethod.RECOVERY_CODE));
 
         handler.onAuthenticationSuccess(request, response, signIn("github"));

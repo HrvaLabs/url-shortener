@@ -4,12 +4,15 @@ import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.converter.UserToUserDtoConverter;
 import cc.hrva.urlshortener.dto.JWTTokenDto;
 import cc.hrva.urlshortener.model.User;
+import cc.hrva.urlshortener.model.enums.SignInMethod;
 import cc.hrva.urlshortener.security.JwtFilter;
 import cc.hrva.urlshortener.security.TokenProvider;
+import cc.hrva.urlshortener.service.SignInMethodService;
 import cc.hrva.urlshortener.service.SignInService;
 import cc.hrva.urlshortener.service.UserService;
 import cc.hrva.urlshortener.service.twostep.PendingLoginStore;
 import cc.hrva.urlshortener.service.twostep.TwoStepMethods;
+import java.time.LocalDateTime;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpHeaders;
@@ -35,11 +38,13 @@ public class DefaultSignInService implements SignInService {
     private final PendingLoginStore pendingLoginStore;
     private final TwoStepMethods twoStepMethods;
     private final UserToUserDtoConverter userToUserDtoConverter;
+    private final SignInMethodService signInMethodService;
 
     @Override
     @Transactional
-    public ResponseEntity<JWTTokenDto> signIn(final User user, final boolean rememberMe) {
+    public ResponseEntity<JWTTokenDto> signIn(final User user, final SignInMethod method, final boolean rememberMe) {
         userService.userHasLoggedIn(user);
+        signInMethodService.record(user.getId(), method, LocalDateTime.now());
 
         final var token = BEARER_PREFIX + tokenProvider.createToken(authenticationOf(user), validitySeconds(rememberMe));
         final var httpHeaders = new HttpHeaders();
@@ -54,9 +59,9 @@ public class DefaultSignInService implements SignInService {
     }
 
     @Override
-    public ResponseEntity<JWTTokenDto> requireSecondStep(final User user, final boolean rememberMe) {
+    public ResponseEntity<JWTTokenDto> requireSecondStep(final User user, final SignInMethod method, final boolean rememberMe) {
         final var methods = twoStepMethods.of(user);
-        final var pendingToken = pendingLoginStore.create(user.getId(), rememberMe);
+        final var pendingToken = pendingLoginStore.create(user.getId(), rememberMe, method);
         log.info("Second step required user id={}", user.getId());
 
         return new ResponseEntity<>(JWTTokenDto.twoStepRequired(pendingToken, methods), HttpStatus.OK);

@@ -5,12 +5,16 @@ import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.codebook.Authorities;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
+import cc.hrva.urlshortener.repository.UserSignInMethodRepository;
 import cc.hrva.urlshortener.service.AuthoritiesService;
+import cc.hrva.urlshortener.service.SignInMethodService;
+import cc.hrva.urlshortener.service.impl.DefaultSignInMethodService;
 import cc.hrva.urlshortener.service.twostep.PendingLoginStore;
 import cc.hrva.urlshortener.service.twostep.TwoStepMethods;
 import jakarta.validation.Validation;
 import java.sql.Timestamp;
 import java.time.LocalDateTime;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -26,6 +30,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.FilterType;
+import org.springframework.context.annotation.Import;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.web.MockHttpServletRequest;
@@ -69,6 +74,9 @@ class OAuth2SignInWritesTest {
     @MockitoSpyBean
     private UserRepository userRepository;
 
+    @Autowired
+    private SignInMethodService signInMethodService;
+
     @BeforeEach
     void handlerOutsideAnyTransaction() {
         final var authoritiesService = mock(AuthoritiesService.class);
@@ -81,7 +89,7 @@ class OAuth2SignInWritesTest {
         when(appProperties.isRegistrationEnabled()).thenReturn(true);
         handler = new OAuth2LoginSuccessHandler(userRepository, authoritiesService, tokenProvider, appProperties,
                 Validation.buildDefaultValidatorFactory().getValidator(), mock(ApplicationEventPublisher.class),
-                mock(PendingLoginStore.class), mock(TwoStepMethods.class));
+                mock(PendingLoginStore.class), mock(TwoStepMethods.class), signInMethodService);
     }
 
     @AfterEach
@@ -117,6 +125,7 @@ class OAuth2SignInWritesTest {
                 .containsEntry("TWO_STEP_ENABLED", true)
                 .containsEntry("ACTIVE", true);
         assertThat(((Timestamp) row.get("LAST_LOGIN")).toLocalDateTime()).isAfter(startedAt);
+        assertThat(signInMethodsOf(MEMBER)).containsExactly(Map.entry("GOOGLE", row.get("LAST_LOGIN")));
     }
 
     @Test
@@ -131,6 +140,7 @@ class OAuth2SignInWritesTest {
         assertThat(((Timestamp) row.get("LAST_LOGIN")).toLocalDateTime()).isAfter(startedAt);
         assertThat(jdbcTemplate.queryForObject("select count(*) from user_account_authorities where user_id = ? and authorities_id = 1",
                 Long.class, row.get("ID"))).isOne();
+        assertThat(signInMethodsOf((Long) row.get("ID"))).containsExactly(Map.entry("GOOGLE", row.get("LAST_LOGIN")));
     }
 
     @Test
@@ -146,6 +156,14 @@ class OAuth2SignInWritesTest {
         final var row = jdbcTemplate.queryForMap("select password, email_verified, auth_provider from user_account where id = ?", PRE_REGISTERED);
         assertThat(row).containsEntry("EMAIL_VERIFIED", true).containsEntry("AUTH_PROVIDER", "local");
         assertThat((String) row.get("PASSWORD")).isNotEqualTo("pre-registered-hash").isNotBlank();
+        assertThat(signInMethodsOf(PRE_REGISTERED)).containsOnlyKeys("GITHUB");
+    }
+
+    private Map<String, Object> signInMethodsOf(final Long userId) {
+        final var methods = new LinkedHashMap<String, Object>();
+        jdbcTemplate.query("select method, last_used_at from user_sign_in_method where user_id = ? order by method",
+                (rs, rowNum) -> methods.put(rs.getString(1), rs.getTimestamp(2)), userId);
+        return methods;
     }
 
     private MockHttpServletResponse signIn(final String email) throws Exception {
@@ -164,7 +182,8 @@ class OAuth2SignInWritesTest {
     @EntityScan(basePackageClasses = Url.class)
     @EnableJpaRepositories(
             basePackageClasses = UrlRepository.class,
-            includeFilters = @ComponentScan.Filter(type = FilterType.ASSIGNABLE_TYPE, classes = {UrlRepository.class, UserRepository.class}))
+            includeFilters = @ComponentScan.Filter(type = FilterType.ASSIGNABLE_TYPE, classes = {UrlRepository.class, UserRepository.class, UserSignInMethodRepository.class}))
+    @Import(DefaultSignInMethodService.class)
     static class TestApplication {
     }
 

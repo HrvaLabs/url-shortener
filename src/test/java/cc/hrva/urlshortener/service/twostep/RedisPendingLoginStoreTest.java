@@ -2,6 +2,7 @@ package cc.hrva.urlshortener.service.twostep;
 
 import cc.hrva.urlshortener.exception.SignInUnavailableException;
 import cc.hrva.urlshortener.mcp.bridge.InMemoryRedis;
+import cc.hrva.urlshortener.model.enums.SignInMethod;
 import java.time.Duration;
 import java.util.List;
 import org.assertj.core.api.ThrowableAssert.ThrowingCallable;
@@ -40,35 +41,49 @@ class RedisPendingLoginStoreTest {
 
     @Test
     void createsA43CharacterTokenThatExpiresInFiveMinutes() {
-        final var token = pendingLoginStore.create(42L, true);
+        final var token = pendingLoginStore.create(42L, true, SignInMethod.PASSWORD);
 
         assertThat(token).hasSize(43).matches("[A-Za-z0-9_-]{43}");
         assertThat(redis.keys()).containsExactly(KEY_PREFIX + token);
         assertThat(redis.timeToLiveOfKeyContaining(KEY_PREFIX)).isEqualTo(Duration.ofMinutes(5));
         assertThat(JSON.readTree(redisTemplate.opsForValue().get(KEY_PREFIX + token)))
-                .isEqualTo(JSON.readTree("{\"userId\":42,\"rememberMe\":true}"));
+                .isEqualTo(JSON.readTree("{\"userId\":42,\"rememberMe\":true,\"method\":\"PASSWORD\"}"));
     }
 
     @Test
     void findReturnsTheUserAndRememberMe() {
-        final var token = pendingLoginStore.create(42L, true);
+        final var token = pendingLoginStore.create(42L, true, SignInMethod.PASSWORD);
 
-        assertThat(pendingLoginStore.find(token)).contains(new PendingLogin(42L, true));
-        assertThat(pendingLoginStore.find(token)).contains(new PendingLogin(42L, true));
+        assertThat(pendingLoginStore.find(token)).contains(new PendingLogin(42L, true, SignInMethod.PASSWORD));
+        assertThat(pendingLoginStore.find(token)).contains(new PendingLogin(42L, true, SignInMethod.PASSWORD));
+    }
+
+    @Test
+    void theFirstStepMethodComesBackWithThePendingSignIn() {
+        final var token = pendingLoginStore.create(42L, false, SignInMethod.GITHUB);
+
+        assertThat(pendingLoginStore.consume(token)).contains(new PendingLogin(42L, false, SignInMethod.GITHUB));
+    }
+
+    @Test
+    void aPendingSignInStoredBeforeMethodsWereKeptComesBackWithoutOne() {
+        redisTemplate.opsForValue().set(KEY_PREFIX + "legacy", "{\"userId\":42,\"rememberMe\":true}", Duration.ofMinutes(5));
+
+        assertThat(pendingLoginStore.consume("legacy")).contains(new PendingLogin(42L, true, null));
     }
 
     @Test
     void consumeIsSingleUse() {
-        final var token = pendingLoginStore.create(7L, false);
+        final var token = pendingLoginStore.create(7L, false, SignInMethod.PASSWORD);
 
-        assertThat(pendingLoginStore.consume(token)).contains(new PendingLogin(7L, false));
+        assertThat(pendingLoginStore.consume(token)).contains(new PendingLogin(7L, false, SignInMethod.PASSWORD));
         assertThat(pendingLoginStore.consume(token)).isEmpty();
         assertThat(pendingLoginStore.find(token)).isEmpty();
     }
 
     @Test
     void discardRemovesTheToken() {
-        final var token = pendingLoginStore.create(7L, false);
+        final var token = pendingLoginStore.create(7L, false, SignInMethod.PASSWORD);
 
         pendingLoginStore.discard(token);
 
@@ -78,7 +93,7 @@ class RedisPendingLoginStoreTest {
 
     @Test
     void anExpiredTokenIsGone() {
-        final var token = pendingLoginStore.create(7L, false);
+        final var token = pendingLoginStore.create(7L, false, SignInMethod.PASSWORD);
 
         redis.expireKeysContaining(KEY_PREFIX);
 
@@ -88,7 +103,7 @@ class RedisPendingLoginStoreTest {
 
     @Test
     void eachTokenIsNew() {
-        assertThat(pendingLoginStore.create(7L, false)).isNotEqualTo(pendingLoginStore.create(7L, false));
+        assertThat(pendingLoginStore.create(7L, false, SignInMethod.PASSWORD)).isNotEqualTo(pendingLoginStore.create(7L, false, SignInMethod.PASSWORD));
     }
 
     @Test
@@ -104,7 +119,7 @@ class RedisPendingLoginStoreTest {
         final var token = "a".repeat(43);
 
         for (final ThrowingCallable call : List.<ThrowingCallable>of(
-                () -> pendingLoginStore.create(7L, false),
+                () -> pendingLoginStore.create(7L, false, SignInMethod.PASSWORD),
                 () -> pendingLoginStore.find(token),
                 () -> pendingLoginStore.consume(token),
                 () -> pendingLoginStore.discard(token))) {

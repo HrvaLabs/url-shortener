@@ -9,6 +9,7 @@ import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.codebook.Authorities;
 import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.service.AuthoritiesService;
+import cc.hrva.urlshortener.service.SignInMethodService;
 import cc.hrva.urlshortener.service.twostep.PendingLoginStore;
 import cc.hrva.urlshortener.service.twostep.TwoStepMethods;
 import java.net.URLDecoder;
@@ -107,6 +108,9 @@ class OAuth2LoginFlowTest {
 
     @MockitoBean
     private TwoStepMethods twoStepMethods;
+
+    @MockitoBean
+    private SignInMethodService signInMethodService;
 
     @MockitoBean
     private UserDetailsService userDetailsService;

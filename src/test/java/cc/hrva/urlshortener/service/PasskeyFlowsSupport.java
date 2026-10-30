@@ -115,6 +115,10 @@ final class PasskeyFlowsSupport {
                 .orElse(0L);
     }
 
+    List<String> signInMethodsOf(final User user) {
+        return jdbcTemplate.queryForList("select method from user_sign_in_method where user_id = ? order by method", String.class, user.getId());
+    }
+
     void remove(final User user) {
         jdbcTemplate.update("delete from user_account_authorities where user_id = ?", user.getId());
         jdbcTemplate.update("delete from two_factor_recovery_code where user_id = ?", user.getId());

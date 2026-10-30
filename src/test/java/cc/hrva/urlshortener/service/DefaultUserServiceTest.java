@@ -28,6 +28,7 @@ import cc.hrva.urlshortener.dto.DataExportDto.DomainExport;
 import cc.hrva.urlshortener.dto.DataExportDto.NotificationExport;
 import cc.hrva.urlshortener.dto.DeleteAccountDto;
 import cc.hrva.urlshortener.dto.LoginAttemptResponse;
+import cc.hrva.urlshortener.dto.SignInMethodResponse;
 import cc.hrva.urlshortener.dto.PasswordResetDto;
 import cc.hrva.urlshortener.dto.RequestPasswordResetDto;
 import cc.hrva.urlshortener.dto.UpdatePasswordDto;
@@ -54,6 +55,7 @@ import cc.hrva.urlshortener.model.enums.ChannelType;
 import cc.hrva.urlshortener.model.enums.ConsentSource;
 import cc.hrva.urlshortener.model.enums.CustomDomainStatus;
 import cc.hrva.urlshortener.model.enums.NotificationType;
+import cc.hrva.urlshortener.model.enums.SignInMethod;
 import cc.hrva.urlshortener.repository.ApiKeyRepository;
 import cc.hrva.urlshortener.repository.PasskeyCredentialRepository;
 import cc.hrva.urlshortener.repository.ResetTokenRepository;
@@ -198,6 +200,9 @@ class DefaultUserServiceTest {
     @Mock
     private TokenProvider tokenProvider;
 
+    @Mock
+    private SignInMethodService signInMethodService;
+
     private DefaultLoginAttemptService loginAttemptService;
 
     @BeforeEach
@@ -215,7 +220,7 @@ class DefaultUserServiceTest {
         return new DefaultUserService(appProperties, reauthentication, urlRepository, userRepository,
                 passwordEncoder, apiKeyRepository, emailLogRepository, resetTokenService,
                 resetTokenRepository, twoFactorRecoveryCodeRepository, passkeyCredentialRepository, bioAccountData, notificationAccountData, customDomainAccountData, userToUserDtoConverter, sendingEmailService,
-                verificationTokenService, verificationTokenRepository, userUpdateDtoToUserConverter, connectedAppsService, scammerSignalService, publisher);
+                verificationTokenService, verificationTokenRepository, userUpdateDtoToUserConverter, connectedAppsService, scammerSignalService, signInMethodService, publisher);
     }
 
     @Test
@@ -243,6 +248,20 @@ class DefaultUserServiceTest {
         assertThat(result.getEmail()).isEqualTo("test@example.com");
         verify(eventPublisher).publishEvent(new UserRegisteredEvent(user, token));
         verifyNoInteractions(sendingEmailService);
+    }
+
+    @Test
+    void aNewAccountRecordsPasswordAtItsCreateDate() {
+        final var createdAt = LocalDateTime.of(2026, 10, 29, 10, 0);
+        final var user = User.builder().id(40L).email("new@example.com").build();
+        when(userRepository.save(user)).thenAnswer(invocation -> {
+            user.setCreateDate(createdAt);
+            return user;
+        });
+
+        userService.register(user);
+
+        verify(signInMethodService).record(40L, SignInMethod.PASSWORD, createdAt);
     }
 
     @Test
@@ -306,6 +325,23 @@ class DefaultUserServiceTest {
         final var result = userService.fetchCurrentUser();
 
         assertThat(result.getEmail()).isEqualTo("test@example.com");
+        SecurityContextHolder.clearContext();
+    }
+
+    @Test
+    void theCurrentUserComesWithEverySignInMethod() {
+        final var user = User.builder().id(1L).email("test@example.com").build();
+        final var methods = List.of(new SignInMethodResponse(SignInMethod.PASSWORD, LocalDateTime.of(2026, 1, 1, 8, 0), LocalDateTime.of(2026, 10, 1, 8, 0)),
+                new SignInMethodResponse(SignInMethod.GITHUB, LocalDateTime.of(2026, 10, 28, 9, 0), LocalDateTime.of(2026, 10, 28, 9, 0)));
+        SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken("test@example.com", null));
+        when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
+        when(userToUserDtoConverter.convert(user)).thenReturn(UserDto.builder().id(1L).email("test@example.com").authProvider("local").build());
+        when(signInMethodService.methodsOf(1L)).thenReturn(methods);
+
+        final var result = userService.fetchCurrentUser();
+
+        assertThat(result.getSignInMethods()).isEqualTo(methods);
+        assertThat(result.getAuthProvider()).isEqualTo("local");
         SecurityContextHolder.clearContext();
     }
 
@@ -418,6 +454,20 @@ class DefaultUserServiceTest {
     }
 
     @Test
+    void theUserListAttachesEachUsersSignInMethodsFromOneLookupForThePage() {
+        final var pageable = PageRequest.of(0, 20);
+        final var google = new SignInMethodResponse(SignInMethod.GOOGLE, LocalDateTime.of(2026, 3, 1, 8, 0), LocalDateTime.of(2026, 10, 2, 8, 0));
+        when(userRepository.findAll(newestFirst(pageable))).thenReturn(new PageImpl<>(List.of(User.builder().id(27L).build(), User.builder().id(28L).build())));
+        when(signInMethodService.methodsOf(List.of(27L, 28L))).thenReturn(Map.of(27L, List.of(google), 28L, List.of()));
+
+        final var users = userService.fetchAllUsers(pageable, new UserSearchDto());
+
+        assertThat(users.getContent()).extracting(AdminUserResponse::signInMethods).containsExactly(List.of(google), List.of());
+        verify(signInMethodService).methodsOf(List.of(27L, 28L));
+        verifyNoMoreInteractions(signInMethodService);
+    }
+
+    @Test
     void thePossibleScammerFilterIsAppliedInTheQuerySoTheTotalsStayRight() {
         final var pageable = PageRequest.of(0, 20);
         final var scammer = User.builder().id(27L).email("rhea@gmail.com").build();
@@ -430,6 +480,18 @@ class DefaultUserServiceTest {
 
         assertThat(users.getTotalElements()).isEqualTo(1);
         assertThat(users.getContent()).singleElement().extracting(AdminUserResponse::possibleScammer).isEqualTo(true);
+        verify(userRepository, never()).findAll(newestFirst(pageable));
+    }
+
+    @Test
+    void theSignInMethodFilterIsAppliedInTheQuery() {
+        final var pageable = PageRequest.of(0, 20);
+        final var search = new UserSearchDto();
+        search.setSignInMethod(SignInMethod.GITHUB);
+        when(userRepository.findAll(any(Specification.class), eq(newestFirst(pageable))))
+                .thenReturn(new PageImpl<>(List.of(User.builder().id(30L).build()), pageable, 1));
+
+        assertThat(userService.fetchAllUsers(pageable, search).getContent()).extracting(AdminUserResponse::id).containsExactly(30L);
         verify(userRepository, never()).findAll(newestFirst(pageable));
     }
 
@@ -577,6 +639,18 @@ class DefaultUserServiceTest {
         final var result = userService.updateUser(updateDto);
 
         assertThat(result.id()).isEqualTo(1L);
+    }
+
+    @Test
+    void anEditedUserComesBackWithItsSignInMethods() {
+        final var updateDto = UserUpdateDto.builder().id(1L).build();
+        final var existingUser = User.builder().id(1L).authProvider("local").build();
+        final var passkey = new SignInMethodResponse(SignInMethod.PASSKEY, LocalDateTime.of(2026, 9, 1, 8, 0), LocalDateTime.of(2026, 10, 1, 8, 0));
+        when(userRepository.findById(1L)).thenReturn(Optional.of(existingUser));
+        when(userUpdateDtoToUserConverter.convert(updateDto)).thenReturn(User.builder().id(1L).build());
+        when(signInMethodService.methodsOf(1L)).thenReturn(List.of(passkey));
+
+        assertThat(userService.updateUser(updateDto).signInMethods()).containsExactly(passkey);
     }
 
     @Test
@@ -889,6 +963,24 @@ class DefaultUserServiceTest {
     }
 
     @Test
+    void theExportListsEverySignInMethodWithItsFirstAndLastUse() {
+        final var user = User.builder().id(1L).email("test@example.com").build();
+        SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken("test@example.com", null));
+        when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
+        when(userToUserDtoConverter.convert(user)).thenReturn(UserDto.builder().id(1L).email("test@example.com").build());
+        when(signInMethodService.methodsOf(1L)).thenReturn(List.of(
+                new SignInMethodResponse(SignInMethod.PASSWORD, LocalDateTime.of(2026, 1, 2, 3, 4, 5), LocalDateTime.of(2026, 10, 28, 9, 30))));
+
+        final var mapper = JsonMapper.builder().build();
+        final var export = mapper.readTree(mapper.writeValueAsString(userService.exportMyData()));
+
+        assertThat(export.get("signInMethods").toString())
+                .isEqualTo("[{\"method\":\"PASSWORD\",\"firstUsedAt\":\"2026-01-02T03:04:05\",\"lastUsedAt\":\"2026-10-28T09:30:00\"}]");
+        assertThat(export.get("profile").has("signInMethods")).isFalse();
+        SecurityContextHolder.clearContext();
+    }
+
+    @Test
     void exportCarriesTheBioPageButNoViewCounts() {
         final var user = User.builder().id(1L).email("test@example.com").build();
         SecurityContextHolder.getContext().setAuthentication(
@@ -918,8 +1010,8 @@ class DefaultUserServiceTest {
     @Test
     void theDomainsComeLastInTheExport() {
         assertThat(Arrays.stream(DataExportDto.class.getRecordComponents()).map(RecordComponent::getName))
-                .containsExactly("exportedAt", "profile", "urls", "apiKeys", "emails", "passkeys", "recoveryCodesRemaining", "bioPage",
-                        "notifications", "domains");
+                .containsExactly("exportedAt", "profile", "urls", "apiKeys", "emails", "passkeys", "signInMethods", "recoveryCodesRemaining",
+                        "bioPage", "notifications", "domains");
         assertThat(Arrays.stream(DomainExport.class.getRecordComponents()).map(RecordComponent::getName))
                 .containsExactly("hostname", "status", "reason", "reviewNote", "createdAt", "reviewedAt", "activatedAt", "disabledAt", "deletedAt",
                         "disabledReason", "disabledNote");

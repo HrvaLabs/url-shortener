@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.9.xsd">
+
+    <include file="classpath:/db/changelog/codebook/authorities.xml"/>
+    <include file="classpath:/db/changelog/table/user.xml"/>
+    <include file="classpath:/db/changelog/table/V1.0.0_remove_name_from_user_table.xml"/>
+    <include file="classpath:/db/changelog/table/user_auth_provider.xml"/>
+
+    <changeSet author="test" id="sign-in-methods-existing-accounts">
+        <insert tableName="user_account">
+            <column name="email" value="local@example.com"/>
+            <column name="password" value="$2a$10$hash"/>
+            <column name="auth_provider" value="local"/>
+            <column name="create_date" valueDate="2025-01-02T03:04:05"/>
+            <column name="last_login" valueDate="2026-06-07T08:09:10"/>
+        </insert>
+        <insert tableName="user_account">
+            <column name="email" value="never-signed-in@example.com"/>
+            <column name="password" value="$2a$10$hash"/>
+            <column name="auth_provider" value="local"/>
+            <column name="create_date" valueDate="2025-02-03T04:05:06"/>
+        </insert>
+        <insert tableName="user_account">
+            <column name="email" value="google@example.com"/>
+            <column name="password" value="random"/>
+            <column name="auth_provider" value="google"/>
+            <column name="create_date" valueDate="2025-03-04T05:06:07"/>
+            <column name="last_login" valueDate="2026-07-08T09:10:11"/>
+        </insert>
+        <insert tableName="user_account">
+            <column name="email" value="github@example.com"/>
+            <column name="password" value="random"/>
+            <column name="auth_provider" value="github"/>
+            <column name="create_date" valueDate="2025-04-05T06:07:08"/>
+        </insert>
+    </changeSet>
+
+    <include file="classpath:/db/changelog/036-sign-in-methods.xml"/>
+
+</databaseChangeLog>

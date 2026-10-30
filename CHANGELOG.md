@@ -12,10 +12,14 @@ Admin lists are searched, sorted and paged on the server, and searching your lin
 - Searching your links waits until you stop typing, and stays in the address.
 - Your API keys are listed newest first, and expired or revoked keys a page at a time.
 
+### 🛡️ Security
+- Settings lists every way you've signed in, with when you last used it.
+
 ### 🔧 Admin
 - Every admin list can be searched and sorted, page by page.
 - Domain rules are listed page by page, with a search box and a choice of order.
 - Custom domains can be sorted by name, status or date added.
+- Users shows every sign-in method an account has used.
 
 ---
 

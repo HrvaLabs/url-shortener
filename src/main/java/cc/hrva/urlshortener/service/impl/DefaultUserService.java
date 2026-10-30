@@ -20,6 +20,7 @@ import cc.hrva.urlshortener.exception.UserNotFoundException;
 import cc.hrva.urlshortener.listener.UserRegisteredEvent;
 import cc.hrva.urlshortener.mcp.apps.ConnectedAppsService;
 import cc.hrva.urlshortener.model.User;
+import cc.hrva.urlshortener.model.enums.SignInMethod;
 import cc.hrva.urlshortener.repository.ApiKeyRepository;
 import cc.hrva.urlshortener.repository.EmailLogRepository;
 import cc.hrva.urlshortener.repository.PasskeyCredentialRepository;
@@ -33,6 +34,7 @@ import cc.hrva.urlshortener.repository.specification.UserSpecification;
 import cc.hrva.urlshortener.security.Reauthentication;
 import cc.hrva.urlshortener.service.ResetTokenService;
 import cc.hrva.urlshortener.service.ScammerSignalService;
+import cc.hrva.urlshortener.service.SignInMethodService;
 import cc.hrva.urlshortener.service.UserService;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent;
 import cc.hrva.urlshortener.service.bio.BioAccountData;
@@ -92,6 +94,7 @@ public class DefaultUserService implements UserService {
     private final UserUpdateDtoToUserConverter userUpdateDtoToUserConverter;
     private final ConnectedAppsService connectedAppsService;
     private final ScammerSignalService scammerSignalService;
+    private final SignInMethodService signInMethodService;
     private final ApplicationEventPublisher eventPublisher;
 
     @Override
@@ -99,6 +102,7 @@ public class DefaultUserService implements UserService {
     public User register(final User user) {
         final var savedUser = userRepository.save(user);
         log.info("User registered email={}", savedUser.getEmail());
+        signInMethodService.record(savedUser.getId(), SignInMethod.PASSWORD, savedUser.getCreateDate());
 
         final var verificationToken = verificationTokenService.createTokenForUser(savedUser);
         eventPublisher.publishEvent(new UserRegisteredEvent(savedUser, verificationToken));
@@ -116,9 +120,12 @@ public class DefaultUserService implements UserService {
 
     @Override
     public UserDto fetchCurrentUser() {
-        return Optional.ofNullable(getUserFromToken())
-                .map(userToUserDtoConverter::convert)
+        final var user = Optional.ofNullable(getUserFromToken())
                 .orElseThrow(() -> new NoAuthorizationException("Invalid credentials"));
+        final var userDto = userToUserDtoConverter.convert(user);
+        userDto.setSignInMethods(signInMethodService.methodsOf(user.getId()));
+
+        return userDto;
     }
 
     @Override
@@ -157,7 +164,8 @@ public class DefaultUserService implements UserService {
 
         final var spec = buildSpecification(search, onlyPossibleScammers ? possibleScammers : null);
         final var users = spec == null ? userRepository.findAll(sorted) : userRepository.findAll(spec, sorted);
-        return users.map(user -> AdminUserResponse.from(user, possibleScammers.contains(user.getId())));
+        final var signInMethods = signInMethodService.methodsOf(users.map(User::getId).getContent());
+        return users.map(user -> AdminUserResponse.from(user, signInMethods, possibleScammers.contains(user.getId())));
     }
 
     private Specification<User> buildSpecification(final UserSearchDto search, final Set<Long> possibleScammers) {
@@ -168,6 +176,10 @@ public class DefaultUserService implements UserService {
         }
         if (search.getActive() != null) {
             spec = (spec == null) ? UserSpecification.hasActive(search.getActive()) : spec.and(UserSpecification.hasActive(search.getActive()));
+        }
+        if (search.getSignInMethod() != null) {
+            final var usedTheMethod = UserSpecification.hasSignInMethod(search.getSignInMethod());
+            spec = (spec == null) ? usedTheMethod : spec.and(usedTheMethod);
         }
         if (possibleScammers != null) {
             spec = (spec == null) ? UserSpecification.idIn(possibleScammers) : spec.and(UserSpecification.idIn(possibleScammers));
@@ -229,6 +241,7 @@ public class DefaultUserService implements UserService {
                 apiKeys,
                 emails,
                 passkeys,
+                signInMethodService.methodsOf(user.getId()),
                 twoFactorRecoveryCodeRepository.countByUserAndUsedFalse(user),
                 bioAccountData.exportFor(user).orElse(null),
                 notificationAccountData.exportFor(user),
@@ -285,7 +298,7 @@ public class DefaultUserService implements UserService {
             eventPublisher.publishEvent(new AccountActiveChangedEvent(List.of(updatedUser.getId())));
         }
 
-        return AdminUserResponse.from(updatedUser);
+        return AdminUserResponse.from(updatedUser, signInMethodService.methodsOf(updatedUser.getId()));
     }
 
     @Override

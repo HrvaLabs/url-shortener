@@ -24,6 +24,7 @@ public record DataExportDto(
         List<ApiKeyResponse> apiKeys,
         List<EmailExport> emails,
         List<PasskeyExport> passkeys,
+        List<SignInMethodResponse> signInMethods,
         long recoveryCodesRemaining,
         BioPageExport bioPage,
         NotificationExport notifications,

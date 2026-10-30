@@ -20,6 +20,7 @@ import cc.hrva.urlshortener.repository.PasskeyCredentialRepository;
 import cc.hrva.urlshortener.repository.PasskeySignInStatsRepository;
 import cc.hrva.urlshortener.repository.TwoFactorRecoveryCodeRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
+import cc.hrva.urlshortener.repository.UserSignInMethodRepository;
 import cc.hrva.urlshortener.security.ClientIpResolver;
 import cc.hrva.urlshortener.security.JwtFilter;
 import cc.hrva.urlshortener.security.Reauthentication;
@@ -29,6 +30,7 @@ import cc.hrva.urlshortener.service.analytics.AnalyticsDays;
 import cc.hrva.urlshortener.service.impl.DefaultPasskeyService;
 import cc.hrva.urlshortener.service.impl.DefaultPasskeySignInService;
 import cc.hrva.urlshortener.service.impl.DefaultSecondStepService;
+import cc.hrva.urlshortener.service.impl.DefaultSignInMethodService;
 import cc.hrva.urlshortener.service.impl.DefaultSignInService;
 import cc.hrva.urlshortener.service.impl.DefaultTwoFactorService;
 import cc.hrva.urlshortener.service.impl.DefaultTwoStepSettingsService;
@@ -532,6 +534,7 @@ class PasskeyFlowsTest {
                         assertThat(stored.getLastUsedAt()).isNotNull();
                     });
             verify(loginAttemptService).loginSucceeded(CLIENT_IP);
+            assertThat(flows.signInMethodsOf(user)).containsExactly("PASSKEY");
         } finally {
             flows.remove(user);
         }
@@ -831,7 +834,8 @@ class PasskeyFlowsTest {
             basePackageClasses = UserRepository.class,
             includeFilters = @ComponentScan.Filter(
                     type = FilterType.ASSIGNABLE_TYPE,
-                    classes = {UserRepository.class, PasskeyCredentialRepository.class, TwoFactorRecoveryCodeRepository.class}))
+                    classes = {UserRepository.class, PasskeyCredentialRepository.class, TwoFactorRecoveryCodeRepository.class,
+                            UserSignInMethodRepository.class}))
     @Import({
             ClockConfiguration.class,
             PasskeyConfiguration.class,
@@ -852,6 +856,7 @@ class PasskeyFlowsTest {
             TwoStepLockMessage.class,
             UserToUserDtoConverter.class,
             DefaultSignInService.class,
+            DefaultSignInMethodService.class,
             ClientIpResolver.class,
             AnalyticsDays.class,
             PasskeySignInStatsRepository.class,

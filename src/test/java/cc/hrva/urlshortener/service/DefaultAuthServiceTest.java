@@ -3,6 +3,7 @@ package cc.hrva.urlshortener.service;
 import jakarta.servlet.http.HttpServletRequest;
 import cc.hrva.urlshortener.converter.UserRegisterDtoToUserConverter;
 import cc.hrva.urlshortener.dto.JWTTokenDto;
+import cc.hrva.urlshortener.model.enums.SignInMethod;
 import cc.hrva.urlshortener.model.enums.TwoStepMethod;
 import cc.hrva.urlshortener.security.ClientIpResolver;
 import cc.hrva.urlshortener.dto.LoginDto;
@@ -120,7 +121,7 @@ class DefaultAuthServiceTest {
         final var signedIn = signedIn();
 
         givenTheRightPassword(user);
-        when(signInService.signIn(user, false)).thenReturn(signedIn);
+        when(signInService.signIn(user, SignInMethod.PASSWORD, false)).thenReturn(signedIn);
 
         final var response = authService.login(loginDto, request);
 
@@ -140,10 +141,10 @@ class DefaultAuthServiceTest {
         final var signedIn = signedIn();
 
         givenTheRightPassword(user);
-        when(signInService.signIn(user, true)).thenReturn(signedIn);
+        when(signInService.signIn(user, SignInMethod.PASSWORD, true)).thenReturn(signedIn);
 
         assertThat(authService.login(loginDto, request)).isSameAs(signedIn);
-        verify(signInService, never()).requireSecondStep(any(), anyBoolean());
+        verify(signInService, never()).requireSecondStep(any(), any(), anyBoolean());
         verifyNoInteractions(twoFactorService);
     }
 
@@ -181,7 +182,7 @@ class DefaultAuthServiceTest {
         final var pending = ResponseEntity.ok(JWTTokenDto.twoStepRequired(PENDING_TOKEN, List.of(TwoStepMethod.TOTP, TwoStepMethod.RECOVERY_CODE)));
 
         givenTheRightPassword(user);
-        when(signInService.requireSecondStep(user, true)).thenReturn(pending);
+        when(signInService.requireSecondStep(user, SignInMethod.PASSWORD, true)).thenReturn(pending);
 
         final var response = authService.login(loginDto, request);
 
@@ -189,7 +190,7 @@ class DefaultAuthServiceTest {
         assertThat(response.getBody().getTwoFactorRequired()).isTrue();
         assertThat(response.getBody().getTwoStepRequired()).isTrue();
         assertThat(response.getBody().getToken()).isNull();
-        verify(signInService, never()).signIn(any(), anyBoolean());
+        verify(signInService, never()).signIn(any(), any(), anyBoolean());
         verifyNoInteractions(twoFactorService);
         verify(loginAttemptService, never()).isBlocked("2fa:1");
     }
@@ -214,7 +215,7 @@ class DefaultAuthServiceTest {
 
         givenTheRightPassword(user);
         when(twoFactorService.verifyLoginCode(user, "123456")).thenReturn(true);
-        when(signInService.signIn(user, false)).thenReturn(signedIn);
+        when(signInService.signIn(user, SignInMethod.PASSWORD, false)).thenReturn(signedIn);
 
         final var response = authService.login(loginDto, request);
 
@@ -232,10 +233,10 @@ class DefaultAuthServiceTest {
 
         givenTheRightPassword(user);
         when(twoFactorService.verifyLoginCode(user, "123456")).thenReturn(true);
-        when(signInService.signIn(user, true)).thenReturn(signedIn);
+        when(signInService.signIn(user, SignInMethod.PASSWORD, true)).thenReturn(signedIn);
 
         assertThat(authService.login(loginDto, request)).isSameAs(signedIn);
-        verify(signInService, never()).requireSecondStep(any(), anyBoolean());
+        verify(signInService, never()).requireSecondStep(any(), any(), anyBoolean());
         assertThat(output).contains("Legacy two-factor login user id=1").doesNotContain("123456");
     }
 
@@ -248,7 +249,7 @@ class DefaultAuthServiceTest {
 
         givenTheRightPassword(user);
         when(twoFactorService.verifyLoginCode(user, "ABCD-EF23")).thenReturn(true);
-        when(signInService.signIn(user, false)).thenReturn(signedIn);
+        when(signInService.signIn(user, SignInMethod.PASSWORD, false)).thenReturn(signedIn);
 
         assertThat(authService.login(loginDto, request)).isSameAs(signedIn);
         verify(loginAttemptService).loginSucceeded("2fa:1");

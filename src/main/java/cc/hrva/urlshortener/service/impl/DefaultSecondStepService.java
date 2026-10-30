@@ -228,7 +228,7 @@ public class DefaultSecondStepService implements SecondStepService {
         loginAttemptService.loginSucceeded(twoFactorAttemptsKey(user));
         log.info("Second step completed user id={}", user.getId());
 
-        return signInService.signIn(user, pendingLogin.rememberMe());
+        return signInService.signIn(user, pendingLogin.method(), pendingLogin.rememberMe());
     }
 
     private static String twoFactorAttemptsKey(final User user) {

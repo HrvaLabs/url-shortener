@@ -26,6 +26,7 @@ import cc.hrva.urlshortener.exception.TwoStepFailedException;
 import cc.hrva.urlshortener.mcp.McpResourceServerConfiguration;
 import cc.hrva.urlshortener.mcp.authorization.AuthorizationServerConfiguration;
 import cc.hrva.urlshortener.mcp.bridge.ConnectRequestStore;
+import cc.hrva.urlshortener.model.enums.SignInMethod;
 import cc.hrva.urlshortener.repository.PasskeySignInStatsRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.security.AnyHostIsPrimary;
@@ -306,7 +307,7 @@ class SignInEndpointSecurityTest {
         headers.add(JwtFilter.AUTHORIZATION_HEADER, "Bearer eyJ.token");
         when(passkeyCeremonyStore.consume(CEREMONY_ID)).thenReturn(Optional.of(ceremony.getValue()));
         when(passkeyAssertions.verify(eq(ceremony.getValue()), any(), isNull())).thenReturn(user);
-        when(signInService.signIn(user, true))
+        when(signInService.signIn(user, SignInMethod.PASSKEY, true))
                 .thenReturn(new ResponseEntity<>(JWTTokenDto.builder().token("Bearer eyJ.token").build(), headers, HttpStatus.OK));
 
         mockMvc.perform(post(PASSWORDLESS + "/verify").contentType(MediaType.APPLICATION_JSON).content(PASSWORDLESS_BODY))

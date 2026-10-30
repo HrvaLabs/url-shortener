@@ -1,8 +1,11 @@
 package cc.hrva.urlshortener.repository.specification;
 
 import cc.hrva.urlshortener.model.User;
+import cc.hrva.urlshortener.model.UserSignInMethod;
+import cc.hrva.urlshortener.model.enums.SignInMethod;
 import cc.hrva.urlshortener.repository.UserRepository;
 import jakarta.persistence.EntityManager;
+import java.time.LocalDateTime;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -70,6 +73,27 @@ class UserSpecificationTest {
         assertThat(emails(UserSpecification.search("a_b"))).containsExactly("a_b@example.com");
         assertThat(emails(UserSpecification.search("_"))).containsExactly("a_b@example.com");
         assertThat(emails(UserSpecification.search("\\%"))).isEmpty();
+    }
+
+    @Test
+    void theSignInMethodFilterKeepsAccountsThatUsedTheMethodAtLeastOnce() {
+        final var karlo = userRepository.findAll(UserSpecification.search("karlo@hrva.cc")).getFirst();
+        final var percent = userRepository.findAll(UserSpecification.search("a%b@")).getFirst();
+        recordUse(karlo, SignInMethod.PASSWORD);
+        recordUse(karlo, SignInMethod.GITHUB);
+        recordUse(percent, SignInMethod.GITHUB);
+        entityManager.flush();
+
+        assertThat(emails(UserSpecification.hasSignInMethod(SignInMethod.GITHUB))).containsExactly("a%b@example.com", "karlo@hrva.cc");
+        assertThat(emails(UserSpecification.hasSignInMethod(SignInMethod.PASSWORD))).containsExactly("karlo@hrva.cc");
+        assertThat(emails(UserSpecification.hasSignInMethod(SignInMethod.PASSKEY))).isEmpty();
+        assertThat(emails(UserSpecification.search("karlo").and(UserSpecification.hasSignInMethod(SignInMethod.GITHUB))))
+                .containsExactly("karlo@hrva.cc");
+    }
+
+    private void recordUse(final User user, final SignInMethod method) {
+        final var now = LocalDateTime.of(2026, 10, 29, 9, 0);
+        entityManager.persist(UserSignInMethod.builder().userId(user.getId()).method(method).firstUsedAt(now).lastUsedAt(now).build());
     }
 
     @SpringBootConfiguration

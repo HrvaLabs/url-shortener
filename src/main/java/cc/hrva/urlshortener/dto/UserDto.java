@@ -1,6 +1,7 @@
 package cc.hrva.urlshortener.dto;
 
 import cc.hrva.urlshortener.model.codebook.Authorities;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -31,5 +32,8 @@ public class UserDto {
     private Boolean twoFactorEnabled;
     @Schema(description = "Whether two-step verification is on", example = "false")
     private Boolean twoStepEnabled;
+    @Schema(description = "Every way this account has signed in, email and password first, then in the order first used")
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private List<SignInMethodResponse> signInMethods;
 
 }

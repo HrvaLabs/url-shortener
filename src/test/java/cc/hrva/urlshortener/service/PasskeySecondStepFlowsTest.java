@@ -15,6 +15,7 @@ import cc.hrva.urlshortener.exception.SignInExpiredException;
 import cc.hrva.urlshortener.exception.TwoStepFailedException;
 import cc.hrva.urlshortener.mcp.bridge.InMemoryRedis;
 import cc.hrva.urlshortener.model.User;
+import cc.hrva.urlshortener.model.enums.SignInMethod;
 import cc.hrva.urlshortener.model.enums.TwoStepMethod;
 import cc.hrva.urlshortener.repository.PasskeyCredentialRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
@@ -182,7 +183,7 @@ class PasskeySecondStepFlowsTest {
             flows.addPasskey(authenticator, "YubiKey");
             flows.updated(user, account -> account.setTwoStepEnabled(true));
             assertThat(signCountOf(authenticator)).isEqualTo(1L);
-            final var login = signInService.requireSecondStep(user, false).getBody();
+            final var login = signInService.requireSecondStep(user, SignInMethod.PASSWORD, false).getBody();
             assertThat(login.getMethods()).containsExactly(TwoStepMethod.WEBAUTHN);
 
             final var options = passkeyOptions(login.getPendingToken());
@@ -416,6 +417,7 @@ class PasskeySecondStepFlowsTest {
             final var response = secondStepService.completeWithCode(code(pendingTokenOf(user, false), recoveryCodes.getFirst()), request());
 
             assertThat(PasskeyFlowsSupport.rolesWrittenIn(response)).containsExactly("ROLE_USER");
+            assertThat(flows.signInMethodsOf(user)).containsExactly("PASSWORD");
         } finally {
             flows.remove(user);
         }
@@ -594,7 +596,7 @@ class PasskeySecondStepFlowsTest {
     }
 
     private String pendingTokenOf(final User user, final boolean rememberMe) {
-        return signInService.requireSecondStep(user, rememberMe).getBody().getPendingToken();
+        return signInService.requireSecondStep(user, SignInMethod.PASSWORD, rememberMe).getBody().getPendingToken();
     }
 
     private PasskeyOptionsResponse passkeyOptions(final String pendingToken) {

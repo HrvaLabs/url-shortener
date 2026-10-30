@@ -29,6 +29,7 @@ import cc.hrva.urlshortener.security.Reauthentication;
 import cc.hrva.urlshortener.service.ReservedAliasService;
 import cc.hrva.urlshortener.service.ResetTokenService;
 import cc.hrva.urlshortener.service.ScammerSignalService;
+import cc.hrva.urlshortener.service.SignInMethodService;
 import cc.hrva.urlshortener.service.UrlService;
 import cc.hrva.urlshortener.service.UserService;
 import cc.hrva.urlshortener.service.VerificationTokenService;
@@ -157,6 +158,9 @@ class CustomDomainAccountDataTest {
 
     @MockitoSpyBean
     private UrlDomainMoves urlDomainMoves;
+
+    @MockitoBean
+    private SignInMethodService signInMethodService;
 
     @MockitoBean
     private UrlService urlService;

@@ -10,6 +10,7 @@ import cc.hrva.urlshortener.exception.RateLimitExceededException;
 import cc.hrva.urlshortener.exception.SignInExpiredException;
 import cc.hrva.urlshortener.exception.SignInUnavailableException;
 import cc.hrva.urlshortener.model.User;
+import cc.hrva.urlshortener.model.enums.SignInMethod;
 import cc.hrva.urlshortener.repository.PasskeySignInStatsRepository;
 import cc.hrva.urlshortener.security.ClientIpResolver;
 import cc.hrva.urlshortener.service.analytics.AnalyticsDays;
@@ -232,7 +233,7 @@ class DefaultPasskeySignInServiceTest {
         when(passkeyCeremonyStore.consume(CEREMONY_ID)).thenReturn(Optional.of(ceremony));
         when(passkeyAssertions.verify(any(), any(), isNull())).thenReturn(user);
         when(analyticsDays.today()).thenReturn(TODAY);
-        when(signInService.signIn(user, true)).thenReturn(signedIn);
+        when(signInService.signIn(user, SignInMethod.PASSKEY, true)).thenReturn(signedIn);
 
         assertThat(passkeySignInService.verify(signIn(true), request)).isSameAs(signedIn);
 
@@ -240,8 +241,8 @@ class DefaultPasskeySignInServiceTest {
         order.verify(passkeyAssertions).verify(ceremony, credential(), null);
         order.verify(loginAttemptService).loginSucceeded(CLIENT_IP);
         order.verify(passkeySignInStatsRepository).increment(TODAY);
-        order.verify(signInService).signIn(user, true);
-        verify(signInService, never()).requireSecondStep(any(), anyBoolean());
+        order.verify(signInService).signIn(user, SignInMethod.PASSKEY, true);
+        verify(signInService, never()).requireSecondStep(any(), any(), anyBoolean());
         verify(loginAttemptService, never()).loginFailed(anyString());
     }
 
@@ -254,7 +255,7 @@ class DefaultPasskeySignInServiceTest {
         when(passkeyCeremonyStore.consume(CEREMONY_ID)).thenReturn(Optional.of(signInCeremony()));
         when(passkeyAssertions.verify(any(), any(), isNull())).thenReturn(user);
         when(analyticsDays.today()).thenReturn(TODAY);
-        when(signInService.signIn(user, true)).thenReturn(signedIn);
+        when(signInService.signIn(user, SignInMethod.PASSKEY, true)).thenReturn(signedIn);
 
         assertThat(passkeySignInService.verify(signIn(true), request)).isSameAs(signedIn);
 
@@ -270,7 +271,7 @@ class DefaultPasskeySignInServiceTest {
 
         passkeySignInService.verify(signIn(null), request);
 
-        verify(signInService).signIn(user, false);
+        verify(signInService).signIn(user, SignInMethod.PASSKEY, false);
     }
 
     private static PasskeyCeremony signInCeremony() {

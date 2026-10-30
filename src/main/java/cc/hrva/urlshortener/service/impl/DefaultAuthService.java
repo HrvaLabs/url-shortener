@@ -4,6 +4,7 @@ import cc.hrva.urlshortener.converter.UserRegisterDtoToUserConverter;
 import cc.hrva.urlshortener.exception.EmailNotVerifiedException;
 import cc.hrva.urlshortener.exception.NoAuthorizationException;
 import cc.hrva.urlshortener.model.User;
+import cc.hrva.urlshortener.model.enums.SignInMethod;
 import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.security.ClientIpResolver;
 import cc.hrva.urlshortener.service.SendingEmailService;
@@ -80,12 +81,12 @@ public class DefaultAuthService implements AuthService {
         final var rememberMe = Boolean.TRUE.equals(loginDto.getRememberMe());
         if (Boolean.TRUE.equals(user.getTwoStepEnabled())) {
             if (StringUtils.isBlank(loginDto.getCode())) {
-                return signInService.requireSecondStep(user, rememberMe);
+                return signInService.requireSecondStep(user, SignInMethod.PASSWORD, rememberMe);
             }
             verifyLegacyCode(user, loginDto.getCode(), clientIp);
         }
 
-        return signInService.signIn(user, rememberMe);
+        return signInService.signIn(user, SignInMethod.PASSWORD, rememberMe);
     }
 
     @Override

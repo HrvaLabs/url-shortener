@@ -5,16 +5,20 @@ import cc.hrva.urlshortener.converter.UserToUserDtoConverter;
 import cc.hrva.urlshortener.dto.UserDto;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.codebook.Authorities;
+import cc.hrva.urlshortener.model.enums.SignInMethod;
 import cc.hrva.urlshortener.model.enums.TwoStepMethod;
 import cc.hrva.urlshortener.security.JwtFilter;
 import cc.hrva.urlshortener.security.TokenProvider;
 import cc.hrva.urlshortener.service.impl.DefaultSignInService;
 import cc.hrva.urlshortener.service.twostep.PendingLoginStore;
 import cc.hrva.urlshortener.service.twostep.TwoStepMethods;
+import java.time.LocalDateTime;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -30,7 +34,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -60,12 +66,15 @@ class DefaultSignInServiceTest {
     @Mock
     private UserToUserDtoConverter userToUserDtoConverter;
 
+    @Mock
+    private SignInMethodService signInMethodService;
+
     private SignInService signInService;
 
     @BeforeEach
     void setUp() {
         signInService = new DefaultSignInService(userService, tokenProvider, appProperties, pendingLoginStore,
-                twoStepMethods, userToUserDtoConverter);
+                twoStepMethods, userToUserDtoConverter, signInMethodService);
     }
 
     @Test
@@ -73,7 +82,7 @@ class DefaultSignInServiceTest {
         final var user = user();
         when(tokenProvider.createToken(any(), eq(2_592_000L))).thenReturn("eyJ.thirty.days");
 
-        final var response = signInService.signIn(user, true);
+        final var response = signInService.signIn(user, SignInMethod.PASSWORD, true);
 
         assertThat(response.getBody().getToken()).isEqualTo("Bearer eyJ.thirty.days");
         verify(appProperties, never()).getJwtTokenValiditySeconds();
@@ -85,7 +94,7 @@ class DefaultSignInServiceTest {
         when(appProperties.getJwtTokenValiditySeconds()).thenReturn(36_000L);
         when(tokenProvider.createToken(any(), eq(36_000L))).thenReturn("eyJ.ten.hours");
 
-        final var response = signInService.signIn(user, false);
+        final var response = signInService.signIn(user, SignInMethod.PASSWORD, false);
 
         assertThat(response.getBody().getToken()).isEqualTo("Bearer eyJ.ten.hours");
     }
@@ -99,7 +108,7 @@ class DefaultSignInServiceTest {
         when(tokenProvider.createToken(any(), anyLong())).thenReturn("eyJ.token");
         when(userToUserDtoConverter.convert(user)).thenReturn(userDto);
 
-        final var response = signInService.signIn(user, false);
+        final var response = signInService.signIn(user, SignInMethod.PASSWORD, false);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(response.getHeaders().getFirst(JwtFilter.AUTHORIZATION_HEADER)).isEqualTo("Bearer eyJ.token");
@@ -116,13 +125,41 @@ class DefaultSignInServiceTest {
         assertThat(output).contains("Signed in user id=7").doesNotContain("user@example.com").doesNotContain("eyJ.token");
     }
 
+    @ParameterizedTest
+    @EnumSource(SignInMethod.class)
+    void signInRecordsItsMethodAtTheTimeOfTheSignIn(final SignInMethod method) {
+        final var user = user();
+        when(appProperties.getJwtTokenValiditySeconds()).thenReturn(36_000L);
+        when(tokenProvider.createToken(any(), anyLong())).thenReturn("eyJ.token");
+        final var before = LocalDateTime.now();
+
+        signInService.signIn(user, method, false);
+
+        final var order = inOrder(userService, signInMethodService);
+        order.verify(userService).userHasLoggedIn(user);
+        order.verify(signInMethodService).record(eq(7L), eq(method),
+                argThat(usedAt -> !usedAt.isBefore(before) && !usedAt.isAfter(LocalDateTime.now())));
+    }
+
+    @Test
+    void requireSecondStepCarriesTheFirstStepMethodAndRecordsNothing() {
+        final var user = user();
+        when(pendingLoginStore.create(7L, false, SignInMethod.GITHUB)).thenReturn(PENDING_TOKEN);
+        when(twoStepMethods.of(user)).thenReturn(List.of(TwoStepMethod.TOTP));
+
+        final var response = signInService.requireSecondStep(user, SignInMethod.GITHUB, false);
+
+        assertThat(response.getBody().getPendingToken()).isEqualTo(PENDING_TOKEN);
+        verifyNoInteractions(signInMethodService);
+    }
+
     @Test
     void requireSecondStepIssuesNoJwt() {
         final var user = user();
-        when(pendingLoginStore.create(7L, true)).thenReturn(PENDING_TOKEN);
+        when(pendingLoginStore.create(7L, true, SignInMethod.PASSWORD)).thenReturn(PENDING_TOKEN);
         when(twoStepMethods.of(user)).thenReturn(List.of(TwoStepMethod.TOTP, TwoStepMethod.RECOVERY_CODE));
 
-        final var response = signInService.requireSecondStep(user, true);
+        final var response = signInService.requireSecondStep(user, SignInMethod.PASSWORD, true);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(response.getHeaders().containsHeader(JwtFilter.AUTHORIZATION_HEADER)).isFalse();
@@ -137,7 +174,7 @@ class DefaultSignInServiceTest {
         final var user = user();
         when(twoStepMethods.of(user)).thenThrow(new DataAccessResourceFailureException("database down"));
 
-        assertThatThrownBy(() -> signInService.requireSecondStep(user, true))
+        assertThatThrownBy(() -> signInService.requireSecondStep(user, SignInMethod.PASSWORD, true))
                 .isInstanceOf(DataAccessResourceFailureException.class);
 
         verifyNoInteractions(pendingLoginStore, tokenProvider);

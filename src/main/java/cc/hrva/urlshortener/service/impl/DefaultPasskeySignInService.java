@@ -9,6 +9,7 @@ import cc.hrva.urlshortener.exception.NoAuthorizationException;
 import cc.hrva.urlshortener.exception.PasskeyVerificationException;
 import cc.hrva.urlshortener.exception.SignInExpiredException;
 import cc.hrva.urlshortener.model.User;
+import cc.hrva.urlshortener.model.enums.SignInMethod;
 import cc.hrva.urlshortener.repository.PasskeySignInStatsRepository;
 import cc.hrva.urlshortener.security.ClientIpResolver;
 import cc.hrva.urlshortener.service.LoginAttemptService;
@@ -80,7 +81,7 @@ public class DefaultPasskeySignInService implements PasskeySignInService {
         passkeySignInStatsRepository.increment(analyticsDays.today());
         log.info("Passkey sign-in user id={}", user.getId());
 
-        return signInService.signIn(user, Boolean.TRUE.equals(dto.getRememberMe()));
+        return signInService.signIn(user, SignInMethod.PASSKEY, Boolean.TRUE.equals(dto.getRememberMe()));
     }
 
     private User verifiedUser(final PasskeyCeremony ceremony, final JsonNode credential, final String clientIp) {

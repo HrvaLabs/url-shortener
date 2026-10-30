@@ -1,9 +1,11 @@
 package cc.hrva.urlshortener.controller;
 
 import cc.hrva.urlshortener.configuration.GlobalExceptionHandler;
+import java.time.LocalDateTime;
 import java.util.Collections;
 import java.util.List;
 import cc.hrva.urlshortener.configuration.GlobalExceptionHandler;
+import cc.hrva.urlshortener.dto.SignInMethodResponse;
 import cc.hrva.urlshortener.dto.AdminUserResponse;
 import cc.hrva.urlshortener.dto.DeleteAccountDto;
 import cc.hrva.urlshortener.dto.UpdatePasswordDto;
@@ -13,6 +15,7 @@ import cc.hrva.urlshortener.dto.UserUpdateDto;
 import cc.hrva.urlshortener.exception.NoAuthorizationException;
 import cc.hrva.urlshortener.exception.ReauthenticationRequiredException;
 import cc.hrva.urlshortener.model.User;
+import cc.hrva.urlshortener.model.enums.SignInMethod;
 import cc.hrva.urlshortener.service.UserService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
@@ -76,7 +79,7 @@ class UserControllerTest {
 
     @Test
     void shouldGetAllUsers() throws Exception {
-        final var userList = Collections.singletonList(AdminUserResponse.from(User.builder().id(1L).email("test@example.com").build(), false));
+        final var userList = Collections.singletonList(AdminUserResponse.from(User.builder().id(1L).email("test@example.com").build(), List.of(), false));
         final var pageable = PageRequest.of(0, 20);
         final var users = new PageImpl<>(userList, pageable, userList.size());
         when(userService.fetchAllUsers(any(Pageable.class), any())).thenReturn(users);
@@ -88,7 +91,7 @@ class UserControllerTest {
 
     @Test
     void theUserListFiltersPossibleScammersServerSideAndMarksEachRow() throws Exception {
-        final var scammer = AdminUserResponse.from(User.builder().id(27L).email("rhea@gmail.com").build(), true);
+        final var scammer = AdminUserResponse.from(User.builder().id(27L).email("rhea@gmail.com").build(), List.of(), true);
         final var search = ArgumentCaptor.forClass(UserSearchDto.class);
         when(userService.fetchAllUsers(any(Pageable.class), search.capture())).thenReturn(new PageImpl<>(List.of(scammer), PageRequest.of(0, 20), 1));
 
@@ -102,8 +105,24 @@ class UserControllerTest {
     }
 
     @Test
+    void theUserListFiltersBySignInMethodServerSideAndListsEachRowsMethods() throws Exception {
+        final var gitHub = new SignInMethodResponse(SignInMethod.GITHUB, LocalDateTime.of(2026, 10, 20, 8, 0), LocalDateTime.of(2026, 10, 28, 19, 45));
+        final var row = AdminUserResponse.from(User.builder().id(30L).email("octo@example.com").authProvider("local").build(), List.of(gitHub), false);
+        final var search = ArgumentCaptor.forClass(UserSearchDto.class);
+        when(userService.fetchAllUsers(any(Pageable.class), search.capture())).thenReturn(new PageImpl<>(List.of(row), PageRequest.of(0, 20), 1));
+
+        mockMvc.perform(get("/api/v1/users").param("signInMethod", "GITHUB"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].authProvider").value("local"))
+                .andExpect(jsonPath("$.content[0].signInMethods[0].method").value("GITHUB"))
+                .andExpect(jsonPath("$.content[0].signInMethods[0].lastUsedAt").value("2026-10-28T19:45:00"));
+
+        assertThat(search.getValue().getSignInMethod()).isEqualTo(SignInMethod.GITHUB);
+    }
+
+    @Test
     void aUserRowOutsideTheAdminListHasNoPossibleScammerField() throws Exception {
-        when(userService.updateUser(any(UserUpdateDto.class))).thenReturn(AdminUserResponse.from(User.builder().id(1L).email("test@example.com").build()));
+        when(userService.updateUser(any(UserUpdateDto.class))).thenReturn(AdminUserResponse.from(User.builder().id(1L).email("test@example.com").build(), List.of()));
 
         mockMvc.perform(put("/api/v1/users/1")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -122,7 +141,7 @@ class UserControllerTest {
 
     @Test
     void shouldUpdateUser() throws Exception {
-        final var user = AdminUserResponse.from(User.builder().id(1L).email("test@example.com").build());
+        final var user = AdminUserResponse.from(User.builder().id(1L).email("test@example.com").build(), List.of());
         when(userService.updateUser(any(UserUpdateDto.class))).thenReturn(user);
 
         mockMvc.perform(put("/api/v1/users/1")
@@ -161,6 +180,7 @@ class UserControllerTest {
         final var export = new cc.hrva.urlshortener.dto.DataExportDto(
                 java.time.LocalDateTime.now(),
                 UserDto.builder().id(1L).email("test@example.com").build(),
+                java.util.Collections.emptyList(),
                 java.util.Collections.emptyList(),
                 java.util.Collections.emptyList(),
                 java.util.Collections.emptyList(),

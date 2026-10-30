@@ -1,6 +1,7 @@
 package cc.hrva.urlshortener.service.twostep;
 
 import cc.hrva.urlshortener.exception.SignInUnavailableException;
+import cc.hrva.urlshortener.model.enums.SignInMethod;
 import cc.hrva.urlshortener.security.SecureTokens;
 import java.util.Optional;
 import java.util.function.Supplier;
@@ -23,9 +24,9 @@ public class RedisPendingLoginStore implements PendingLoginStore {
     private final JsonMapper jsonMapper;
 
     @Override
-    public String create(final Long userId, final boolean rememberMe) {
+    public String create(final Long userId, final boolean rememberMe, final SignInMethod method) {
         final var token = SecureTokens.random();
-        final var pendingLogin = jsonMapper.writeValueAsString(new PendingLogin(userId, rememberMe));
+        final var pendingLogin = jsonMapper.writeValueAsString(new PendingLogin(userId, rememberMe, method));
         inRedis(() -> {
             redisTemplate.opsForValue().set(KEY_PREFIX + token, pendingLogin, TIME_TO_LIVE);
             return null;

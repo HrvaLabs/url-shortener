@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.9.xsd">
+
+    <changeSet author="khrvacic" id="036-user-sign-in-method">
+        <createTable tableName="user_sign_in_method">
+            <column name="id" type="BIGINT" autoIncrement="true">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="user_id" type="BIGINT">
+                <constraints nullable="false"/>
+            </column>
+            <column name="method" type="VARCHAR(20)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="first_used_at" type="TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="last_used_at" type="TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+        <addUniqueConstraint tableName="user_sign_in_method" columnNames="user_id, method" constraintName="uq_user_sign_in_method_user_method"/>
+        <addForeignKeyConstraint baseTableName="user_sign_in_method" baseColumnNames="user_id" constraintName="fk_user_sign_in_method_user"
+                                 referencedTableName="user_account" referencedColumnNames="id" onDelete="CASCADE"/>
+        <rollback>
+            <dropTable tableName="user_sign_in_method"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet author="khrvacic" id="036-user-sign-in-method-backfill">
+        <sql>
+            INSERT INTO user_sign_in_method (user_id, method, first_used_at, last_used_at)
+            SELECT id,
+                   CASE LOWER(auth_provider) WHEN 'google' THEN 'GOOGLE' WHEN 'github' THEN 'GITHUB' ELSE 'PASSWORD' END,
+                   create_date,
+                   COALESCE(last_login, create_date)
+            FROM user_account
+        </sql>
+        <rollback>
+            <delete tableName="user_sign_in_method"/>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>

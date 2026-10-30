@@ -17,12 +17,14 @@ import cc.hrva.urlshortener.repository.ResetTokenRepository;
 import cc.hrva.urlshortener.repository.TwoFactorRecoveryCodeRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
+import cc.hrva.urlshortener.repository.UserSignInMethodRepository;
 import cc.hrva.urlshortener.repository.VerificationTokenRepository;
 import cc.hrva.urlshortener.security.Reauthentication;
 import cc.hrva.urlshortener.service.bio.BioAccountData;
 import cc.hrva.urlshortener.service.domain.CustomDomainAccountData;
 import cc.hrva.urlshortener.service.notification.NotificationAccountData;
 import cc.hrva.urlshortener.service.impl.DefaultSendingEmailService;
+import cc.hrva.urlshortener.service.impl.DefaultSignInMethodService;
 import cc.hrva.urlshortener.service.impl.DefaultUserService;
 import java.util.List;
 import java.util.Set;
@@ -132,6 +134,9 @@ class UserEndpointsWithoutOpenInViewTest {
         jdbcTemplate.update("insert into user_account (id, email, password, api_key_slots, active) values (?, ?, 'secret-hash', 4, true)",
                 MEMBER, MEMBER_EMAIL);
         jdbcTemplate.update("insert into user_account_authorities (user_id, authorities_id) values (?, 1)", MEMBER);
+        jdbcTemplate.update("""
+                insert into user_sign_in_method (user_id, method, first_used_at, last_used_at)
+                values (?, 'GITHUB', timestamp '2026-10-20 08:00:00', timestamp '2026-10-28 19:45:00')""", MEMBER);
         when(scammerSignalService.possibleScammerIds()).thenReturn(Set.of(MEMBER));
     }
 
@@ -154,6 +159,8 @@ class UserEndpointsWithoutOpenInViewTest {
         assertThat(json.get(0).get("email").asString()).isEqualTo(MEMBER_EMAIL);
         assertThat(json.get(0).get("authorities").get(0).get("name").asString()).isEqualTo("ROLE_USER");
         assertThat(json.get(0).get("possibleScammer").asBoolean()).isTrue();
+        assertThat(json.get(0).get("signInMethods").toString())
+                .isEqualTo("[{\"method\":\"GITHUB\",\"firstUsedAt\":\"2026-10-20T08:00:00\",\"lastUsedAt\":\"2026-10-28T19:45:00\"}]");
     }
 
     @Test
@@ -166,6 +173,7 @@ class UserEndpointsWithoutOpenInViewTest {
         assertThat(json.get("apiKeySlots").asLong()).isEqualTo(7L);
         assertThat(json.get("authorities").get(0).get("name").asString()).isEqualTo("ROLE_USER");
         assertThat(json.has("possibleScammer")).isFalse();
+        assertThat(json.get("signInMethods").get(0).get("method").asString()).isEqualTo("GITHUB");
     }
 
     @Test
@@ -199,8 +207,8 @@ class UserEndpointsWithoutOpenInViewTest {
     @EntityScan(basePackageClasses = Url.class)
     @EnableJpaRepositories(
             basePackageClasses = UrlRepository.class,
-            includeFilters = @ComponentScan.Filter(type = FilterType.ASSIGNABLE_TYPE, classes = UserRepository.class))
-    @Import({DefaultUserService.class, UserToUserDtoConverter.class, UserUpdateDtoToUserConverter.class})
+            includeFilters = @ComponentScan.Filter(type = FilterType.ASSIGNABLE_TYPE, classes = {UserRepository.class, UserSignInMethodRepository.class}))
+    @Import({DefaultUserService.class, DefaultSignInMethodService.class, UserToUserDtoConverter.class, UserUpdateDtoToUserConverter.class})
     static class TestApplication {
     }
 

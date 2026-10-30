@@ -38,5 +38,6 @@
     <include file="classpath:/db/changelog/030-url-short-url-unique-again.xml"/>
     <include file="classpath:/db/changelog/031-notifications.xml"/>
     <include file="classpath:/db/changelog/032-custom-domains.xml"/>
+    <include file="classpath:/db/changelog/036-sign-in-methods.xml"/>
 
 </databaseChangeLog>

@@ -1,16 +1,21 @@
 package cc.hrva.urlshortener.repository;
 
 import cc.hrva.urlshortener.dto.ReviewEntryResponse;
+import cc.hrva.urlshortener.dto.AdminUserResponse;
 import cc.hrva.urlshortener.dto.UrlResponse;
 import cc.hrva.urlshortener.model.CustomDomain;
 import cc.hrva.urlshortener.model.LinkReview;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.User;
+import cc.hrva.urlshortener.model.UserSignInMethod;
 import cc.hrva.urlshortener.model.codebook.Authorities;
 import cc.hrva.urlshortener.model.enums.CustomDomainStatus;
+import cc.hrva.urlshortener.model.enums.SignInMethod;
 import cc.hrva.urlshortener.repository.specification.UrlSpecification;
+import cc.hrva.urlshortener.repository.specification.UserSpecification;
 import cc.hrva.urlshortener.service.ScammerSignalService;
 import cc.hrva.urlshortener.service.impl.DefaultReviewQueueService;
+import cc.hrva.urlshortener.service.impl.DefaultSignInMethodService;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.EntityManagerFactory;
 import java.time.Clock;
@@ -57,6 +62,7 @@ class AdminPageQueriesTest {
 
     private static final int OWNERS = 5;
     private static final int LINKS = 12;
+    private static final Sort NEWEST_USERS_FIRST = Sort.by(Sort.Order.desc("createDate"), Sort.Order.desc("id"));
 
     @Autowired
     private UrlRepository urlRepository;
@@ -66,6 +72,9 @@ class AdminPageQueriesTest {
 
     @Autowired
     private UserRepository userRepository;
+
+    @Autowired
+    private UserSignInMethodRepository userSignInMethodRepository;
 
     @Autowired
     private EntityManager entityManager;
@@ -227,6 +236,46 @@ class AdminPageQueriesTest {
                 .executeUpdate();
     }
 
+    @Test
+    void anAdminUserPageLoadsEveryUsersSignInMethodsInOneQuery() {
+        withPasswordAndGoogleForEveryUser();
+        final var signInMethodService = new DefaultSignInMethodService(userRepository, userSignInMethodRepository);
+
+        final var users = userRepository.findAll(PageRequest.of(0, 10, NEWEST_USERS_FIRST));
+        final var signInMethods = signInMethodService.methodsOf(users.map(User::getId).getContent());
+        final var json = JsonMapper.builder().build().writeValueAsString(users.map(user -> AdminUserResponse.from(user, signInMethods, false)).getContent());
+
+        assertThat(json).contains("ROLE_USER", "\"method\":\"PASSWORD\"", "\"method\":\"GOOGLE\"");
+        assertThat(signInMethods).hasSize(OWNERS).allSatisfy((userId, methods) -> assertThat(methods).hasSize(2));
+        assertThat(statistics.getPrepareStatementCount()).isEqualTo(3);
+    }
+
+    @Test
+    void anAdminUserPageFilteredBySignInMethodLoadsEveryUsersSignInMethodsInOneQuery() {
+        withPasswordAndGoogleForEveryUser();
+        final var signInMethodService = new DefaultSignInMethodService(userRepository, userSignInMethodRepository);
+
+        final var users = userRepository.findAll(UserSpecification.hasSignInMethod(SignInMethod.GOOGLE), PageRequest.of(0, 10, NEWEST_USERS_FIRST));
+        final var signInMethods = signInMethodService.methodsOf(users.map(User::getId).getContent());
+        final var json = JsonMapper.builder().build().writeValueAsString(users.map(user -> AdminUserResponse.from(user, signInMethods, false)).getContent());
+
+        assertThat(users.getContent()).hasSize(OWNERS);
+        assertThat(json).contains("ROLE_USER", "\"method\":\"PASSWORD\"", "\"method\":\"GOOGLE\"");
+        assertThat(statistics.getPrepareStatementCount()).isEqualTo(3);
+    }
+
+    private void withPasswordAndGoogleForEveryUser() {
+        userRepository.findAll().forEach(user -> {
+            entityManager.persist(UserSignInMethod.builder().userId(user.getId()).method(SignInMethod.PASSWORD)
+                    .firstUsedAt(LocalDateTime.of(2026, 1, 1, 8, 0)).lastUsedAt(LocalDateTime.of(2026, 10, 1, 8, 0)).build());
+            entityManager.persist(UserSignInMethod.builder().userId(user.getId()).method(SignInMethod.GOOGLE)
+                    .firstUsedAt(LocalDateTime.of(2026, 2, 1, 8, 0)).lastUsedAt(LocalDateTime.of(2026, 10, 2, 8, 0)).build());
+        });
+        entityManager.flush();
+        entityManager.clear();
+        statistics.clear();
+    }
+
     private User owner(final int index) {
         final var role = Authorities.builder().id(index + 1L).name("ROLE_USER").active(true).build();
         entityManager.persist(role);
@@ -241,7 +290,8 @@ class AdminPageQueriesTest {
     @EntityScan(basePackageClasses = Url.class)
     @EnableJpaRepositories(
             basePackageClasses = UrlRepository.class,
-            includeFilters = @ComponentScan.Filter(type = FilterType.ASSIGNABLE_TYPE, classes = {UrlRepository.class, LinkReviewRepository.class, UserRepository.class}))
+            includeFilters = @ComponentScan.Filter(type = FilterType.ASSIGNABLE_TYPE, classes = {UrlRepository.class, LinkReviewRepository.class, UserRepository.class,
+                    UserSignInMethodRepository.class}))
     static class TestApplication {
     }
 

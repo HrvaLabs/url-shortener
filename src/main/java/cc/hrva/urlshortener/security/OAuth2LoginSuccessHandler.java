@@ -5,9 +5,11 @@ import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.exception.SignInUnavailableException;
 import cc.hrva.urlshortener.listener.UserRegisteredEvent;
 import cc.hrva.urlshortener.model.User;
+import cc.hrva.urlshortener.model.enums.SignInMethod;
 import cc.hrva.urlshortener.model.enums.TwoStepMethod;
 import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.service.AuthoritiesService;
+import cc.hrva.urlshortener.service.SignInMethodService;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent;
 import cc.hrva.urlshortener.service.twostep.PendingLoginStore;
 import cc.hrva.urlshortener.service.twostep.TwoStepMethods;
@@ -51,6 +53,7 @@ public class OAuth2LoginSuccessHandler implements AuthenticationSuccessHandler {
     private final ApplicationEventPublisher eventPublisher;
     private final PendingLoginStore pendingLoginStore;
     private final TwoStepMethods twoStepMethods;
+    private final SignInMethodService signInMethodService;
 
     public OAuth2LoginSuccessHandler(
             final UserRepository userRepository,
@@ -60,7 +63,8 @@ public class OAuth2LoginSuccessHandler implements AuthenticationSuccessHandler {
             final Validator validator,
             final ApplicationEventPublisher eventPublisher,
             final PendingLoginStore pendingLoginStore,
-            final TwoStepMethods twoStepMethods) {
+            final TwoStepMethods twoStepMethods,
+            final SignInMethodService signInMethodService) {
         this.userRepository = userRepository;
         this.authoritiesService = authoritiesService;
         this.tokenProvider = tokenProvider;
@@ -69,6 +73,7 @@ public class OAuth2LoginSuccessHandler implements AuthenticationSuccessHandler {
         this.eventPublisher = eventPublisher;
         this.pendingLoginStore = pendingLoginStore;
         this.twoStepMethods = twoStepMethods;
+        this.signInMethodService = signInMethodService;
     }
 
     @Override
@@ -123,11 +128,13 @@ public class OAuth2LoginSuccessHandler implements AuthenticationSuccessHandler {
         }
 
         if (Boolean.TRUE.equals(user.getTwoStepEnabled())) {
-            redirectToSecondStep(response, user);
+            redirectToSecondStep(response, user, SignInMethod.ofProvider(provider));
             return;
         }
 
-        userRepository.recordLastLogin(user.getId(), LocalDateTime.now());
+        final var signedInAt = LocalDateTime.now();
+        userRepository.recordLastLogin(user.getId(), signedInAt);
+        signInMethodService.record(user.getId(), SignInMethod.ofProvider(provider), signedInAt);
 
         final var springAuth = new UsernamePasswordAuthenticationToken(
                 user.getEmail(), null,
@@ -144,12 +151,12 @@ public class OAuth2LoginSuccessHandler implements AuthenticationSuccessHandler {
         response.sendRedirect(redirectUrl);
     }
 
-    private void redirectToSecondStep(final HttpServletResponse response, final User user) throws IOException {
+    private void redirectToSecondStep(final HttpServletResponse response, final User user, final SignInMethod method) throws IOException {
         try {
             final var methods = twoStepMethods.of(user).stream()
                     .map(TwoStepMethod::name)
                     .collect(Collectors.joining(","));
-            final var pendingToken = pendingLoginStore.create(user.getId(), false);
+            final var pendingToken = pendingLoginStore.create(user.getId(), false, method);
             final var redirectUrl = String.format("%s/auth/callback?pendingToken=%s&methods=%s",
                     appProperties.getFrontendUrl(),
                     URLEncoder.encode(pendingToken, StandardCharsets.UTF_8),
