@@ -5,6 +5,7 @@ import jakarta.validation.Validation;
 import java.io.IOException;
 import java.time.Duration;
 import java.time.ZoneId;
+import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -439,5 +440,30 @@ class AppPropertiesTest {
         assertThat(validator.validate(cloudflare)).extracting(violation -> violation.getPropertyPath().toString()).containsExactly("apiBase");
         assertThat(validator.validate(new AppProperties.Cloudflare())).isEmpty();
     }
+
+    @Test
+    void abuseReportsDefaultToTheOwnerApwgAndThirtyDays() {
+        final var abuseReports = new AppProperties().getAbuseReports();
+
+        assertThat(abuseReports.getReporterName()).isEqualTo(new String(new int[] {'K', 'a', 'r', 'l', 'o', ' ', 'H', 'r', 'v', 'a', 0x10D, 'i', 0x107}, 0, 13));
+        assertThat(abuseReports.getReporterAddress()).isEqualTo("abuse@hrva.cc");
+        assertThat(abuseReports.getCc()).containsExactly("reportphishing@apwg.org");
+        assertThat(abuseReports.getRecheckDays()).isEqualTo(30);
+    }
+
+    @Test
+    void abuseReportDefaultsOutsideTheirSettingLimitsAreRefused() {
+        final var validator = Validation.buildDefaultValidatorFactory().getValidator();
+        final var abuseReports = new AppProperties.AbuseReports();
+        abuseReports.setReporterName(" ");
+        abuseReports.setReporterAddress("");
+        abuseReports.setCc(List.of("a@x.hr", "b@x.hr", "c@x.hr", "d@x.hr", "e@x.hr", "f@x.hr"));
+        abuseReports.setRecheckDays(91);
+
+        assertThat(validator.validate(abuseReports)).extracting(violation -> violation.getPropertyPath().toString())
+                .containsExactlyInAnyOrder("reporterName", "reporterAddress", "cc", "recheckDays");
+        assertThat(validator.validate(new AppProperties.AbuseReports())).isEmpty();
+    }
+
 
 }

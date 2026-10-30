@@ -1,0 +1,21 @@
+{
+  "objectClassName": "domain",
+  "ldhName": "BUOKPKY.COM",
+  "status": ["client hold", "client transfer prohibited", "server hold"],
+  "entities": [
+    {
+      "objectClassName": "entity",
+      "handle": "1479",
+      "roles": ["registrar"],
+      "vcardArray": ["vcard", [["version", {}, "text", "4.0"], ["fn", {}, "text", "NameSilo, LLC"]]]
+    },
+    {
+      "objectClassName": "entity",
+      "roles": ["abuse"],
+      "vcardArray": ["vcard", [["version", {}, "text", "4.0"], ["email", {}, "text", "Abuse@NameSilo.com"]]]
+    }
+  ],
+  "events": [
+    {"eventAction": "registration", "eventDate": "2026-08-14T17:40:58Z"}
+  ]
+}

@@ -8,8 +8,10 @@ import cc.hrva.urlshortener.client.FetchResult;
 import cc.hrva.urlshortener.client.PublicHttpFetcher;
 import cc.hrva.urlshortener.exception.UrlValidationException;
 import cc.hrva.urlshortener.service.impl.DefaultDomainAgeService;
+import cc.hrva.urlshortener.service.rdap.DomainRecord;
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Clock;
@@ -75,6 +77,10 @@ class DefaultDomainAgeServiceTest {
               [["com", "net"], ["https://rdap.verisign.com/com/v1/"]]
             ]}
             """;
+    private static final String OMAEHHM_URL = "https://rdap.verisign.com/com/v1/domain/omaehhm.com";
+    private static final String OMAEHHM_INFO_KEY = "rdap:info:omaehhm.com";
+    private static final String CACHED_RECORD = "{\"domain\":\"omaehhm.com\",\"status\":\"FOUND\",\"registeredOn\":\"2026-08-14\","
+            + "\"registrar\":\"Cached Registrar\",\"abuseEmail\":\"abuse@cached.example\",\"statuses\":[]}";
     private static final String REGISTERED = """
             {"objectClassName": "domain", "ldhName": "njuskaio.cam", "events": [
               {"eventAction": "last changed", "eventDate": "2026-10-01T12:00:00Z"},
@@ -418,6 +424,161 @@ class DefaultDomainAgeServiceTest {
         assertThat(domainAgeService.isYoung(HOST)).isEqualTo(young);
     }
 
+    @Test
+    void recordsAreCachedADayUnderTheirOwnKey() {
+        fetcher.answer(BOOTSTRAP_URL, BOOTSTRAP);
+        fetcher.answer(OMAEHHM_URL, fixture("omaehhm.com.json"));
+
+        final var records = domainAgeService.records(List.of("ll.omaehhm.com", "omaehhm.com"), false);
+
+        final var expected = new DomainRecord("omaehhm.com", DomainRecord.Status.FOUND, LocalDate.of(2026, 8, 14), "NameSilo, LLC", "abuse@namesilo.com",
+                List.of("client transfer prohibited"));
+        assertThat(records).containsOnly(Map.entry("ll.omaehhm.com", expected), Map.entry("omaehhm.com", expected));
+        assertThat(fetcher.requestedUrls()).containsExactly(BOOTSTRAP_URL, OMAEHHM_URL);
+        verify(valueOperations).set(OMAEHHM_INFO_KEY, "{\"domain\":\"omaehhm.com\",\"status\":\"FOUND\",\"registeredOn\":\"2026-08-14\","
+                + "\"registrar\":\"NameSilo, LLC\",\"abuseEmail\":\"abuse@namesilo.com\",\"statuses\":[\"client transfer prohibited\"]}", Duration.ofDays(1));
+        verify(valueOperations).set("rdap:omaehhm.com", "2026-08-14", Duration.ofDays(30));
+        assertThat(fetcher.bodies).hasSize(2).allMatch(Files::notExists);
+    }
+
+    @Test
+    void aCachedRecordIsReturnedWithoutFetching() {
+        when(valueOperations.get(OMAEHHM_INFO_KEY)).thenReturn(CACHED_RECORD);
+
+        final var records = domainAgeService.records(List.of("omaehhm.com"), false);
+
+        assertThat(records.get("omaehhm.com").registrar()).isEqualTo("Cached Registrar");
+        assertThat(fetcher.requests).isEmpty();
+        verify(valueOperations, never()).set(anyString(), anyString(), any(Duration.class));
+    }
+
+    @Test
+    void freshSkipsTheCache() {
+        lenient().when(valueOperations.get(OMAEHHM_INFO_KEY)).thenReturn(CACHED_RECORD);
+        fetcher.answer(BOOTSTRAP_URL, BOOTSTRAP);
+        fetcher.answer(OMAEHHM_URL, fixture("omaehhm.com.json"));
+
+        final var records = domainAgeService.records(List.of("omaehhm.com"), true);
+
+        assertThat(records.get("omaehhm.com").registrar()).isEqualTo("NameSilo, LLC");
+        assertThat(fetcher.requestedUrls()).containsExactly(BOOTSTRAP_URL, OMAEHHM_URL);
+        verify(valueOperations, never()).get(OMAEHHM_INFO_KEY);
+        verify(valueOperations).set(eq(OMAEHHM_INFO_KEY), anyString(), eq(Duration.ofDays(1)));
+    }
+
+    @Test
+    void anUnreadableCachedRecordIsLookedUpAgain() {
+        when(valueOperations.get(OMAEHHM_INFO_KEY)).thenReturn("garbage");
+        fetcher.answer(BOOTSTRAP_URL, BOOTSTRAP);
+        fetcher.answer(OMAEHHM_URL, fixture("omaehhm.com.json"));
+
+        assertThat(domainAgeService.records(List.of("omaehhm.com"), false).get("omaehhm.com").status()).isEqualTo(DomainRecord.Status.FOUND);
+    }
+
+    @Test
+    void a404IsNotFound() {
+        fetcher.answer(BOOTSTRAP_URL, BOOTSTRAP);
+
+        final var record = domainAgeService.records(List.of("omaehhm.com"), true).get("omaehhm.com");
+
+        assertThat(record).isEqualTo(DomainRecord.notFound("omaehhm.com"));
+        assertThat(record.suspended()).isTrue();
+        verify(valueOperations).set(OMAEHHM_INFO_KEY, "{\"domain\":\"omaehhm.com\",\"status\":\"NOT_FOUND\",\"registeredOn\":null,\"registrar\":null,"
+                + "\"abuseEmail\":null,\"statuses\":[]}", Duration.ofDays(1));
+    }
+
+    @Test
+    void aTldWithoutRdapIsNoRdapServer() {
+        fetcher.answer(BOOTSTRAP_URL, BOOTSTRAP);
+
+        final var records = domainAgeService.records(List.of("www.njuskalo.hr", "203.0.113.7"), false);
+
+        assertThat(records).containsOnly(Map.entry("www.njuskalo.hr", DomainRecord.noRdapServer("njuskalo.hr")),
+                Map.entry("203.0.113.7", DomainRecord.noRdapServer("203.0.113.7")));
+        assertThat(fetcher.requestedUrls()).containsExactly(BOOTSTRAP_URL);
+        verify(valueOperations).set(eq("rdap:info:njuskalo.hr"), anyString(), eq(Duration.ofDays(1)));
+        verify(valueOperations, never()).set(eq("rdap:info:203.0.113.7"), anyString(), any(Duration.class));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"HTTP 429", "HTTP 503", "HTTP 403", "timed out"})
+    void failuresAreNotCached(final String failure) {
+        fetcher.answer(BOOTSTRAP_URL, BOOTSTRAP);
+        fetcher.fail(OMAEHHM_URL, failure);
+
+        final var record = domainAgeService.records(List.of("omaehhm.com"), false).get("omaehhm.com");
+
+        assertThat(record).isEqualTo(DomainRecord.failed("omaehhm.com"));
+        assertThat(record.suspended()).isFalse();
+        verify(valueOperations, never()).set(eq(OMAEHHM_INFO_KEY), anyString(), any(Duration.class));
+        verify(valueOperations, never()).set(eq("rdap:omaehhm.com"), anyString(), any(Duration.class));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"<html>Service unavailable</html>", "", "[]"})
+    void anUnreadableAnswerIsAFailureAndNotCached(final String answer) {
+        fetcher.answer(BOOTSTRAP_URL, BOOTSTRAP);
+        fetcher.answer(OMAEHHM_URL, answer);
+
+        assertThat(domainAgeService.records(List.of("omaehhm.com"), false).get("omaehhm.com").status()).isEqualTo(DomainRecord.Status.FAILED);
+        verify(valueOperations, never()).set(eq(OMAEHHM_INFO_KEY), anyString(), any(Duration.class));
+    }
+
+    @Test
+    void aFailedBootstrapFailsEveryLookupWithoutCaching() {
+        final var records = domainAgeService.records(List.of("omaehhm.com", "buokpky.com"), false);
+
+        assertThat(records.values()).extracting(DomainRecord::status).containsOnly(DomainRecord.Status.FAILED);
+        assertThat(fetcher.requestedUrls()).containsExactly(BOOTSTRAP_URL);
+        verify(valueOperations, never()).set(anyString(), anyString(), any(Duration.class));
+    }
+
+    @Test
+    void atMostFourLookupsRunAtOnce() throws Exception {
+        fetcher.answer(BOOTSTRAP_URL, BOOTSTRAP);
+        final var domains = IntStream.range(0, 6).mapToObj(index -> "busy" + index + ".com").toList();
+        domains.forEach(domain -> fetcher.stick("https://rdap.verisign.com/com/v1/domain/" + domain));
+
+        final var lookup = CompletableFuture.supplyAsync(() -> domainAgeService.records(domains, false), callers);
+
+        assertThat(fetcher.awaitHung(4)).isTrue();
+        assertThat(fetcher.awaitHung(1, 300)).isFalse();
+        fetcher.release();
+        assertThat(lookup.get(10, TimeUnit.SECONDS)).hasSize(6);
+        assertThat(fetcher.requestedUrls()).hasSize(7);
+    }
+
+    @Test
+    void theAgePoolIsNotUsed() {
+        fetcher.answer(BOOTSTRAP_URL, BOOTSTRAP);
+        fetcher.answer(OMAEHHM_URL, fixture("omaehhm.com.json"));
+        fetcher.answer(DOMAIN_URL, REGISTERED);
+
+        domainAgeService.records(List.of("omaehhm.com", "buokpky.com"), false);
+        domainAgeService.registeredOn(HOST);
+
+        assertThat(fetcher.requestedUrls().subList(1, 3)).containsExactlyInAnyOrder(OMAEHHM_URL, "https://rdap.verisign.com/com/v1/domain/buokpky.com");
+        assertThat(fetcher.requestedUrls().subList(3, 5)).containsExactly(BOOTSTRAP_URL, DOMAIN_URL);
+        assertThat(fetcher.threads.subList(1, 3)).allMatch(name -> name.startsWith("rdap-record-"));
+        assertThat(fetcher.threads.subList(3, 5)).allMatch(name -> name.startsWith("rdap-lookup-"));
+    }
+
+    @Test
+    void lookupsStillRunningAtTheDeadlineFail() {
+        fetcher.answer(BOOTSTRAP_URL, BOOTSTRAP);
+        fetcher.answer(OMAEHHM_URL, fixture("omaehhm.com.json"));
+        fetcher.hang("https://rdap.verisign.com/com/v1/domain/slow.com");
+
+        final var startedAt = System.nanoTime();
+        final var records = domainAgeService.records(List.of("omaehhm.com", "slow.com"), false, Duration.ofSeconds(1));
+        final var elapsed = Duration.ofNanos(System.nanoTime() - startedAt);
+
+        assertThat(elapsed).isGreaterThanOrEqualTo(Duration.ofSeconds(1)).isLessThan(Duration.ofSeconds(3));
+        assertThat(records.get("omaehhm.com").status()).isEqualTo(DomainRecord.Status.FOUND);
+        assertThat(records.get("slow.com")).isEqualTo(DomainRecord.failed("slow.com"));
+        verify(valueOperations, never()).set(eq("rdap:info:slow.com"), anyString(), any(Duration.class));
+    }
+
     private CompletableFuture<?>[] occupyBothWorkers() throws InterruptedException {
         fetcher.stick("https://rdap.example/domain/busy0.cam");
         fetcher.stick("https://rdap.example/domain/busy1.cam");
@@ -427,6 +588,14 @@ class DefaultDomainAgeServiceTest {
         };
         assertThat(fetcher.awaitHung(2)).isTrue();
         return busy;
+    }
+
+    private static String fixture(final String name) {
+        try (var input = DefaultDomainAgeServiceTest.class.getResourceAsStream("/rdap/" + name)) {
+            return new String(input.readAllBytes(), StandardCharsets.UTF_8);
+        } catch (final IOException exception) {
+            throw new UncheckedIOException(exception);
+        }
     }
 
     private Outcome timed(final String host) {
@@ -442,6 +611,8 @@ class DefaultDomainAgeServiceTest {
     private static final class FakeFetcher extends PublicHttpFetcher {
 
         private final Map<String, String> answers = new ConcurrentHashMap<>();
+        private final Map<String, String> failures = new ConcurrentHashMap<>();
+        private final List<String> threads = new CopyOnWriteArrayList<>();
         private final Set<String> hangingUrls = ConcurrentHashMap.newKeySet();
         private final Set<String> stuckUrls = ConcurrentHashMap.newKeySet();
         private final List<Request> requests = new CopyOnWriteArrayList<>();
@@ -458,11 +629,15 @@ class DefaultDomainAgeServiceTest {
         public FetchResult fetch(final String url, final long maxBytes, final String etag, final String lastModified,
                 final Duration requestTimeout) {
             requests.add(new Request(url, maxBytes, requestTimeout));
+            threads.add(Thread.currentThread().getName());
             if (hangingUrls.contains(url)) {
                 awaitRelease();
             }
             if (stuckUrls.contains(url)) {
                 awaitReleaseIgnoringInterrupts();
+            }
+            if (failures.containsKey(url)) {
+                throw new UrlValidationException(failures.get(url));
             }
             return Optional.ofNullable(answers.get(url))
                     .map(answer -> new FetchResult(false, bodyOf(answer), null, null))
@@ -471,6 +646,10 @@ class DefaultDomainAgeServiceTest {
 
         private void answer(final String url, final String body) {
             answers.put(url, body);
+        }
+
+        private void fail(final String url, final String message) {
+            failures.put(url, message);
         }
 
         private void hang(final String url) {
@@ -483,6 +662,10 @@ class DefaultDomainAgeServiceTest {
 
         private boolean awaitHung(final int lookups) throws InterruptedException {
             return hung.tryAcquire(lookups, 2, TimeUnit.SECONDS);
+        }
+
+        private boolean awaitHung(final int lookups, final long milliseconds) throws InterruptedException {
+            return hung.tryAcquire(lookups, milliseconds, TimeUnit.MILLISECONDS);
         }
 
         private void release() {

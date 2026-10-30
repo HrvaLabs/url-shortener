@@ -9,8 +9,10 @@ import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.enums.StatDimension;
 import jakarta.persistence.EntityManager;
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.LongStream;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -185,6 +187,36 @@ class LinkStatsRepositoryTest {
                 REFERRER, List.of(new BreakdownEntry("direct", 3), new BreakdownEntry("t.co", 1)),
                 COUNTRY, List.of(new BreakdownEntry("HR", 2), new BreakdownEntry("AT", 1), new BreakdownEntry("DE", 1))));
         assertThat(linkStatsRepository.findBreakdownTotals(url.getId(), DAY.plusDays(3), DAY.plusDays(9))).isEmpty();
+    }
+
+    @Test
+    void topCountriesSumEveryDayOfTheLinksAcrossChunksWithoutUnknownOrTor() {
+        final var first = savedLink("countries-a");
+        final var second = savedLink("countries-b");
+        final var outside = savedLink("countries-out");
+        for (int click = 0; click < 3; click++) {
+            linkStatsRepository.incrementBreakdown(first.getId(), DAY, Map.of(COUNTRY, "PT"));
+        }
+        linkStatsRepository.incrementBreakdown(second.getId(), DAY.minusDays(40), Map.of(COUNTRY, "PT"));
+        linkStatsRepository.incrementBreakdown(second.getId(), DAY.plusDays(1), Map.of(COUNTRY, "ES"));
+        linkStatsRepository.incrementBreakdown(first.getId(), DAY, Map.of(COUNTRY, "ES"));
+        linkStatsRepository.incrementBreakdown(second.getId(), DAY, Map.of(COUNTRY, "BR"));
+        linkStatsRepository.incrementBreakdown(second.getId(), DAY, Map.of(COUNTRY, "AO"));
+        for (int click = 0; click < 9; click++) {
+            linkStatsRepository.incrementBreakdown(first.getId(), DAY, Map.of(COUNTRY, "unknown"));
+            linkStatsRepository.incrementBreakdown(second.getId(), DAY, Map.of(COUNTRY, "tor"));
+            linkStatsRepository.incrementBreakdown(outside.getId(), DAY, Map.of(COUNTRY, "DE"));
+        }
+        linkStatsRepository.incrementBreakdown(first.getId(), DAY, Map.of(REFERRER, "direct"));
+        final var ids = new ArrayList<Long>();
+        ids.add(first.getId());
+        LongStream.range(1, 1_500).map(index -> -index).forEach(ids::add);
+        ids.add(second.getId());
+
+        assertThat(linkStatsRepository.topCountries(ids, 3)).containsExactly(
+                new BreakdownEntry("PT", 4), new BreakdownEntry("ES", 2), new BreakdownEntry("AO", 1));
+        assertThat(linkStatsRepository.topCountries(List.of(first.getId()), 1)).containsExactly(new BreakdownEntry("PT", 3));
+        assertThat(linkStatsRepository.topCountries(List.of(), 3)).isEmpty();
     }
 
     @Test

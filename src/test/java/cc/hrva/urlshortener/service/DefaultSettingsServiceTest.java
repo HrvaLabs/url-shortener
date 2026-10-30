@@ -193,6 +193,29 @@ class DefaultSettingsServiceTest {
     }
 
     @Test
+    void aChangedCcIsPostedWithItsAddressesAndReadBack() {
+        settingsService.change(SettingKey.ABUSE_CC, NODES.arrayNode().add("cert@cert.pt").add("reportphishing@apwg.org"), ADMIN);
+
+        assertThat(rows.get("ABUSE_CC").getSettingValue()).isEqualTo("[\"cert@cert.pt\",\"reportphishing@apwg.org\"]");
+        verify(auditLogService).log(ADMIN, AuditAction.CHANGE_SETTING, "Setting", "ABUSE_CC",
+                "from: reportphishing@apwg.org, to: cert@cert.pt, reportphishing@apwg.org");
+        verify(eventPublisher).publishEvent(new SettingChanged("Abuse reports: Cc",
+                "changed from reportphishing@apwg.org to cert@cert.pt, reportphishing@apwg.org", ADMIN, true));
+        assertThat(settingsService.addresses(SettingKey.ABUSE_CC)).containsExactly("cert@cert.pt", "reportphishing@apwg.org");
+    }
+
+    @Test
+    void aChangedReporterNameIsReadBackAndPostedAsPlainText() {
+        settingsService.change(SettingKey.ABUSE_REPORTER_NAME, NODES.stringNode(" Karlo "), ADMIN);
+
+        assertThat(rows.get("ABUSE_REPORTER_NAME").getSettingValue()).isEqualTo("\"Karlo\"");
+        verify(eventPublisher).publishEvent(new SettingChanged("Abuse reports: your name",
+                "changed from " + appProperties.getAbuseReports().getReporterName() + " to Karlo", ADMIN, false));
+        assertThat(settingsService.text(SettingKey.ABUSE_REPORTER_NAME)).isEqualTo("Karlo");
+        assertThat(settingsService.addresses(SettingKey.ABUSE_REPORTER_ADDRESS)).containsExactly("abuse@hrva.cc");
+    }
+
+    @Test
     void aValueEqualToTheDefaultRemovesTheRow() {
         rows.put("CAMPAIGN_LINKS", row(SettingKey.CAMPAIGN_LINKS, "5"));
 

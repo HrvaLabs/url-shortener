@@ -18,6 +18,7 @@ import cc.hrva.urlshortener.service.alert.AdminAlertEvent.DomainApplied;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.DomainDisabled;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.DomainDrift;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.DomainNeedsAttention;
+import cc.hrva.urlshortener.service.alert.AdminAlertEvent.DomainsSuspended;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.LinkBlocked;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.ReviewOpened;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.SettingChanged;
@@ -61,6 +62,7 @@ public class DiscordAlertFormatter {
     private static final String LOCAL_PROVIDER = "local";
     private static final String ARROW = " " + Character.toString(0x2192) + " ";
     private static final int MAX_SAME_SHAPE_EXAMPLES = 3;
+    private static final int MAX_SUSPENDED_DOMAINS = 20;
     private static final Pattern COUNTRY_CODE = Pattern.compile("[A-Z]{2}");
 
     private final AppProperties appProperties;
@@ -163,9 +165,17 @@ public class DiscordAlertFormatter {
             case DomainNeedsAttention attention -> "Custom domain needs attention: %s (%s), <%s>".formatted(
                     DiscordText.hostname(attention.hostname()), problem(attention.problem()), domainPage(attention.domainId(), attention.hostname()));
             case DomainDrift drift -> driftLine(drift);
-            case SettingChanged changed -> "%s %s by %s".formatted(plain(changed.label()), plain(changed.change()),
-                    DiscordText.literal(changed.changedBy()));
+            case SettingChanged changed -> "%s %s by %s".formatted(plain(changed.label()),
+                    changed.addresses() ? DiscordText.literal(changed.change()) : plain(changed.change()), DiscordText.literal(changed.changedBy()));
+            case DomainsSuspended suspended -> suspendedLine(suspended);
         };
+    }
+
+    private String suspendedLine(final DomainsSuspended suspended) {
+        final var shown = suspended.domains().stream().limit(MAX_SUSPENDED_DOMAINS).map(DiscordText::hostname).toList();
+        final var more = suspended.domains().size() - shown.size();
+        return "Suspended since reported: %s%s %s".formatted(String.join(", ", shown), more > 0 ? " and " + more + " more" : "",
+                linked(frontendPage(CAMPAIGNS_PAGE)));
     }
 
     private String driftLine(final DomainDrift drift) {

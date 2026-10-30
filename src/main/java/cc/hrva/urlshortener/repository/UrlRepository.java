@@ -5,6 +5,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import cc.hrva.urlshortener.dto.LinkDestination;
+import cc.hrva.urlshortener.dto.abuse.AbuseReportLink;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.enums.BlockReason;
@@ -133,6 +134,9 @@ public interface UrlRepository extends JpaRepository<Url, Long>, JpaSpecificatio
 
     @Query("select new cc.hrva.urlshortener.dto.LinkDestination(u.id, u.longUrl) from Url u where u.id in :ids")
     List<LinkDestination> findDestinationsByIdIn(@Param("ids") Collection<Long> ids);
+
+    @Query("select new cc.hrva.urlshortener.dto.abuse.AbuseReportLink(u.id, u.longUrl, u.finalUrl, u.createDate, u.active) from Url u where u.id in :ids")
+    List<AbuseReportLink> findAbuseReportLinksByIdIn(@Param("ids") Collection<Long> ids);
 
     @Query("select new cc.hrva.urlshortener.dto.LinkDestination(u.id, u.longUrl) from Url u "
             + "where u.active = false and u.blockReason in :reasons and u.id > :afterId order by u.id")

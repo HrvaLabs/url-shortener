@@ -2,6 +2,7 @@ package cc.hrva.urlshortener.service.settings;
 
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import java.util.EnumMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.function.Supplier;
@@ -19,6 +20,7 @@ public class SettingDefaults {
         final var campaign = appProperties.getCampaign();
         final var trafficAlerts = appProperties.getTrafficAlerts();
         final var weeklyDigest = appProperties.getDigest().getWeekly();
+        final var abuseReports = appProperties.getAbuseReports();
         register(SettingKey.ANONYMOUS_LINKS, appProperties::isAnonymousUrlCreationEnabled);
         register(SettingKey.NEW_SIGNUPS, appProperties::isRegistrationEnabled);
         register(SettingKey.ANONYMOUS_LINKS_PER_HOUR, moderation::getAnonymousLinksPerHour);
@@ -51,6 +53,10 @@ public class SettingDefaults {
         register(SettingKey.EMAIL_CUSTOM_DOMAIN, emails::isCustomDomain);
         register(SettingKey.CAMPAIGN_HOLD, moderation::isCampaignHold);
         register(SettingKey.CAMPAIGN_HOLD_DAYS, moderation::getCampaignHoldDays);
+        register(SettingKey.ABUSE_REPORTER_NAME, abuseReports::getReporterName);
+        register(SettingKey.ABUSE_REPORTER_ADDRESS, () -> List.of(abuseReports.getReporterAddress()));
+        register(SettingKey.ABUSE_CC, () -> List.copyOf(abuseReports.getCc()));
+        register(SettingKey.ABUSE_RECHECK_DAYS, abuseReports::getRecheckDays);
     }
 
     public Object defaultOf(final SettingKey key) {

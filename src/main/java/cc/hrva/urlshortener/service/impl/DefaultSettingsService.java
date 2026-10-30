@@ -193,7 +193,7 @@ public class DefaultSettingsService implements SettingsService {
             refresh();
             auditLogService.log(changedBy, change.action(), TARGET_SETTING, key.name(),
                     AUDIT_DETAILS.formatted(SettingValues.format(key, change.before()), SettingValues.format(key, change.after())));
-            eventPublisher.publishEvent(new SettingChanged(key.getLabel(), changeText(key, change), changedBy));
+            eventPublisher.publishEvent(new SettingChanged(key.getLabel(), changeText(key, change), changedBy, key.getType() == SettingType.ADDRESSES));
         }
         return response(key, values().get(key));
     }

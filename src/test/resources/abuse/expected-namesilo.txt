@@ -1,0 +1,56 @@
+Phishing: 39 domains used in links to wwkn0gb.bgp37.sbs
+
+Hello,
+
+I run hrva.cc, a free URL shortener. Between 28 October 2026 and 29 October 2026, short links were made on hrva.cc without an account that lead to wwkn0gb.bgp37.sbs. They used these domains, registered with NameSilo, LLC:
+  buokpky.com (registered 14 August 2026)
+  dgjetnv.com (registered 14 August 2026)
+  dlsetyk.com (registered 14 August 2026)
+  dsdckkf.com (registered 14 August 2026)
+  ebnccxh.com (registered 14 August 2026)
+  eikvptb.com (registered 14 August 2026)
+  ezvlwdm.com (registered 14 August 2026)
+  fnjphdp.com (registered 14 August 2026)
+  frywxfu.com (registered 14 August 2026)
+  fvvxctw.com (registered 14 August 2026)
+  gofhwjf.com (registered 14 August 2026)
+  hsbpqwj.com (registered 14 August 2026)
+  ivwanbx.com (registered 14 August 2026)
+  jehenmy.com (registered 14 August 2026)
+  jvbvmdl.com (registered 14 August 2026)
+  klveggf.com (registered 14 August 2026)
+  lsppreo.com (registered 14 August 2026)
+  mitrpmd.com (registered 14 August 2026)
+  nbmgpmx.com (registered 14 August 2026)
+  nbycfou.com (registered 14 August 2026)
+  npqymns.com (registered 14 August 2026)
+  nubksat.com (registered 14 August 2026)
+  omaehhm.com (registered 14 August 2026)
+  onmtonj.com (registered 14 August 2026)
+  pqqolce.com (registered 14 August 2026)
+  qctwqfc.com (registered 14 August 2026)
+  rnrlfac.com (registered 14 August 2026)
+  sccjlej.com (registered 14 August 2026)
+  sjcsvbl.com (registered 14 August 2026)
+  sssplgd.com (registered 14 August 2026)
+  tklmiyc.com (registered 14 August 2026)
+  upofrnh.com (registered 14 August 2026)
+  vxokzce.com (registered 14 August 2026)
+  wlkybdd.com (registered 14 August 2026)
+  wvttzqr.com (registered 14 August 2026)
+  xdvqnxj.com (registered 14 August 2026)
+  xiwqhzv.com (registered 14 August 2026)
+  xlsntlg.com (registered 14 August 2026)
+  yhnivjb.com (registered 14 August 2026)
+
+Example destinations:
+  https://ll.omaehhm.com/wqamhcsom/?r=plfN8D&t=1793210826
+  https://qe.buokpky.com/wqamhcsom/?r=Xk2pQa&t=1793210911
+  https://mz.dgjetnv.com/wqamhcsom/?r=Tn8wLc&t=1793211002
+
+These links had 970 clicks on hrva.cc, mostly from Portugal (558) and Spain (330). The links are turned off on hrva.cc.
+
+Please suspend these domains under your abuse policy.
+
+Karlo Hrvacic Test
+hrva.cc, abuse@hrva.cc

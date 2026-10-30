@@ -3,6 +3,7 @@ package cc.hrva.urlshortener.service.settings;
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.exception.FieldValidationException;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
@@ -104,6 +105,20 @@ class SettingValuesTest {
             assertThat(key.getMin()).isNull();
             assertThat(key.getMax()).isNull();
         }
+        if (key.getType() == SettingType.TEXT) {
+            assertThat(key.getMinLength()).isPositive();
+            assertThat(key.getMaxLength()).isGreaterThanOrEqualTo(key.getMinLength());
+        } else {
+            assertThat(key.getMinLength()).isNull();
+            assertThat(key.getMaxLength()).isNull();
+        }
+        if (key.getType() == SettingType.ADDRESSES) {
+            assertThat(key.getMinItems()).isNotNegative();
+            assertThat(key.getMaxItems()).isGreaterThanOrEqualTo(key.getMinItems()).isPositive();
+        } else {
+            assertThat(key.getMinItems()).isNull();
+            assertThat(key.getMaxItems()).isNull();
+        }
         assertThat(key.isNullable()).isEqualTo(key.getNoneLabel() != null);
         final var defaults = new SettingDefaults(new AppProperties());
         final var value = defaults.defaultOf(key);
@@ -170,6 +185,82 @@ class SettingValuesTest {
         assertThat(keys).extracting(SettingKey::getLabel).doesNotHaveDuplicates();
         assertThat(Arrays.stream(SettingGroup.values()).map(SettingGroup::getLabel))
                 .containsExactly("Access", "Links", "Safety", "Alerts", "Digest", "Emails", "Abuse reports");
+    }
+
+    @Test
+    void theAbuseReportRows() {
+        assertThat(SettingKey.ABUSE_REPORTER_NAME).extracting(SettingKey::getGroup, SettingKey::getType, SettingKey::getLabel, SettingKey::getDescription,
+                        SettingKey::getParent, SettingKey::getMinLength, SettingKey::getMaxLength)
+                .containsExactly(SettingGroup.ABUSE_REPORTS, SettingType.TEXT, "Abuse reports: your name", "Signs the report emails.", null, 1, 100);
+        assertThat(SettingKey.ABUSE_REPORTER_ADDRESS).extracting(SettingKey::getGroup, SettingKey::getType, SettingKey::getLabel, SettingKey::getDescription,
+                        SettingKey::getMinItems, SettingKey::getMaxItems)
+                .containsExactly(SettingGroup.ABUSE_REPORTS, SettingType.ADDRESSES, "Abuse reports: your address", "Under your name in the report emails.", 1, 1);
+        assertThat(SettingKey.ABUSE_CC).extracting(SettingKey::getGroup, SettingKey::getType, SettingKey::getLabel, SettingKey::getDescription,
+                        SettingKey::getMinItems, SettingKey::getMaxItems)
+                .containsExactly(SettingGroup.ABUSE_REPORTS, SettingType.ADDRESSES, "Abuse reports: Cc", "Copied on every report email.", 0, 5);
+        assertThat(SettingKey.ABUSE_RECHECK_DAYS).extracting(SettingKey::getGroup, SettingKey::getType, SettingKey::getLabel, SettingKey::getDescription,
+                        SettingKey::getMin, SettingKey::getMax, SettingKey::getUnit)
+                .containsExactly(SettingGroup.ABUSE_REPORTS, SettingType.NUMBER, "Abuse reports: recheck for",
+                        "Reported domains are looked up every day for this many days.", 1, 90, "days");
+        final var defaults = new SettingDefaults(new AppProperties());
+        assertThat(defaults.defaultOf(SettingKey.ABUSE_REPORTER_NAME)).isEqualTo(new String(new int[] {'K', 'a', 'r', 'l', 'o', ' ', 'H', 'r', 'v', 'a', 0x10D, 'i', 0x107}, 0, 13));
+        assertThat(defaults.defaultOf(SettingKey.ABUSE_REPORTER_ADDRESS)).isEqualTo(List.of("abuse@hrva.cc"));
+        assertThat(defaults.defaultOf(SettingKey.ABUSE_CC)).isEqualTo(List.of("reportphishing@apwg.org"));
+        assertThat(defaults.defaultOf(SettingKey.ABUSE_RECHECK_DAYS)).isEqualTo(30);
+    }
+
+    @Test
+    void aTextIsStrippedAndHoldsOneTo100Characters() {
+        assertThat(SettingValues.parse(SettingKey.ABUSE_REPORTER_NAME, NODES.stringNode("  Karlo  "))).isEqualTo("Karlo");
+        assertThat(SettingValues.parse(SettingKey.ABUSE_REPORTER_NAME, NODES.stringNode("x".repeat(100)))).isEqualTo("x".repeat(100));
+        assertThat(SettingValues.parse(SettingKey.ABUSE_REPORTER_NAME, NODES.stringNode(Character.toString(0x1F600).repeat(100))))
+                .isEqualTo(Character.toString(0x1F600).repeat(100));
+        for (final var refused : List.<JsonNode>of(NODES.stringNode(""), NODES.stringNode("   "), NODES.stringNode("x".repeat(101)), NODES.numberNode(5),
+                NODES.nullNode(), MissingNode.getInstance(), NODES.arrayNode().add("Karlo"))) {
+            assertRefused(SettingKey.ABUSE_REPORTER_NAME, refused, "Use 1 to 100 characters.");
+        }
+    }
+
+    @Test
+    void theReporterAddressIsExactlyOneEmailAddress() {
+        assertThat(SettingValues.parse(SettingKey.ABUSE_REPORTER_ADDRESS, addresses(" abuse@hrva.cc "))).isEqualTo(List.of("abuse@hrva.cc"));
+        for (final var refused : List.<JsonNode>of(addresses(), addresses("a@hrva.cc", "b@hrva.cc"), addresses("not-an-address"), NODES.stringNode("abuse@hrva.cc"),
+                NODES.nullNode(), MissingNode.getInstance(), NODES.arrayNode().add(5))) {
+            assertRefused(SettingKey.ABUSE_REPORTER_ADDRESS, refused, "Enter one email address.");
+        }
+    }
+
+    @Test
+    void theCcTakesUpToFiveEmailAddressesAndNamesTheFirstBadOne() {
+        assertThat(SettingValues.parse(SettingKey.ABUSE_CC, addresses())).isEqualTo(List.of());
+        assertThat(SettingValues.parse(SettingKey.ABUSE_CC, addresses("a@apwg.org", "b@cert.pt", "c@incibe-cert.es", "d@x.hr", "e@y.hr")))
+                .isEqualTo(List.of("a@apwg.org", "b@cert.pt", "c@incibe-cert.es", "d@x.hr", "e@y.hr"));
+        assertRefused(SettingKey.ABUSE_CC, addresses("a@x.hr", "b@x.hr", "c@x.hr", "d@x.hr", "e@x.hr", "f@x.hr"), "Enter up to 5 email addresses.");
+        assertRefused(SettingKey.ABUSE_CC, NODES.stringNode("a@x.hr"), "Enter up to 5 email addresses.");
+        assertRefused(SettingKey.ABUSE_CC, NODES.nullNode(), "Enter up to 5 email addresses.");
+        assertRefused(SettingKey.ABUSE_CC, addresses("a@x.hr", "abuse at x.hr", "nope"), "abuse at x.hr isn't an email address.");
+        for (final var bad : List.of("a@x", "@x.hr", "a@", "a b@x.hr", "a@x..hr", "a,b@x.hr", "<a@x.hr>", "a@-x.hr")) {
+            assertRefused(SettingKey.ABUSE_CC, addresses(bad), bad + " isn't an email address.");
+        }
+        assertRefused(SettingKey.ABUSE_CC, addresses(""), " isn't an email address.");
+    }
+
+    @Test
+    void addressesRoundTripAndPrintJoined() {
+        assertThat(SettingValues.stored(List.of("a@x.hr", "b@x.hr"))).isEqualTo("[\"a@x.hr\",\"b@x.hr\"]");
+        assertThat(SettingValues.fromStored(SettingKey.ABUSE_CC, "[\"a@x.hr\",\"b@x.hr\"]")).isEqualTo(List.of("a@x.hr", "b@x.hr"));
+        assertThat(SettingValues.fromStored(SettingKey.ABUSE_REPORTER_NAME, "\"Karlo\"")).isEqualTo("Karlo");
+        assertThat(SettingValues.format(SettingKey.ABUSE_CC, List.of("a@x.hr", "b@x.hr"))).isEqualTo("a@x.hr, b@x.hr");
+        assertThat(SettingValues.format(SettingKey.ABUSE_CC, List.of())).isEqualTo("");
+        assertThatThrownBy(() -> SettingValues.fromStored(SettingKey.ABUSE_REPORTER_ADDRESS, "[]")).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    private static JsonNode addresses(final String... values) {
+        final var array = NODES.arrayNode();
+        for (final var value : values) {
+            array.add(value);
+        }
+        return array;
     }
 
     private static void assertRefused(final SettingKey key, final JsonNode value, final String text) {

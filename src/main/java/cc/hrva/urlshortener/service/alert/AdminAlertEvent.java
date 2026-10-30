@@ -62,6 +62,20 @@ public sealed interface AdminAlertEvent {
 
     }
 
-    record SettingChanged(String label, String change, String changedBy) implements AdminAlertEvent {}
+    record SettingChanged(String label, String change, String changedBy, boolean addresses) implements AdminAlertEvent {
+
+        public SettingChanged(final String label, final String change, final String changedBy) {
+            this(label, change, changedBy, false);
+        }
+
+    }
+
+    record DomainsSuspended(List<String> domains) implements AdminAlertEvent {
+
+        public DomainsSuspended {
+            domains = List.copyOf(domains);
+        }
+
+    }
 
 }

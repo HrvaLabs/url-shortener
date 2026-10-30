@@ -26,6 +26,7 @@ import cc.hrva.urlshortener.service.alert.AdminAlertEvent.DomainDrift;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.DomainNeedsAttention;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.LinkBlocked;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.ReviewOpened;
+import cc.hrva.urlshortener.service.alert.AdminAlertEvent.DomainsSuspended;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.ShapeHeld;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.SettingChanged;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.UserSignedUp;
@@ -509,6 +510,34 @@ class DiscordAlertFormatterTest {
                 new SettingChanged("Links *without* an account", "turned `off`", "the_admin@hrva.cc <@123>")), 0).content();
 
         assertThat(content).isEqualTo("Links \\*without\\* an account turned off by the\\_admin@hrva.cc @123");
+    }
+
+    @Test
+    void anAddressSettingShowsTheAddressesItWasChangedTo() {
+        final var content = formatter.message(List.of(
+                new SettingChanged("Abuse reports: Cc", "changed from reportphishing@apwg.org to cert@cert.pt, abuse_desk@x.hr", "karlo@hrva.cc", true),
+                new SettingChanged("Abuse reports: your name", "changed from karlo@hrva.cc to Karlo", "karlo@hrva.cc", false)), 0).content();
+
+        assertThat(content.lines()).containsExactly(
+                "Abuse reports: Cc changed from reportphishing@apwg.org to cert@cert.pt, abuse\\_desk@x.hr by karlo@hrva.cc",
+                "Abuse reports: your name changed from (email removed) to Karlo by karlo@hrva.cc");
+    }
+
+    @Test
+    void domainsSuspendedLine() {
+        final var content = formatter.message(List.of(new DomainsSuspended(List.of("omaehhm.com", "buokpky.com"))), 0).content();
+
+        assertThat(content).isEqualTo("Suspended since reported: omaehhm.com, buokpky.com <https://app.hrva.cc/admin/campaigns>");
+    }
+
+    @Test
+    void domainsSuspendedListsTwentyAndCountsTheRest() {
+        final var domains = IntStream.rangeClosed(1, 21).mapToObj(index -> "d" + index + ".com").toList();
+
+        final var content = formatter.message(List.of(new DomainsSuspended(domains)), 0).content();
+
+        assertThat(content).isEqualTo("Suspended since reported: " + String.join(", ", domains.subList(0, 20))
+                + " and 1 more <https://app.hrva.cc/admin/campaigns>");
     }
 
     @Test

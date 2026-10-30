@@ -1,12 +1,14 @@
 package cc.hrva.urlshortener.configuration.properties;
 
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
+import jakarta.validation.constraints.Size;
 import java.time.Duration;
 import java.time.ZoneId;
 import java.util.List;
@@ -148,6 +150,10 @@ public class AppProperties {
     @Valid
     @NotNull
     private Moderation moderation = new Moderation();
+
+    @Valid
+    @NotNull
+    private AbuseReports abuseReports = new AbuseReports();
 
     @Data
     public static class Mcp {
@@ -347,6 +353,27 @@ public class AppProperties {
         @Valid
         @NotNull
         private Emails emails = new Emails();
+
+    }
+
+    @Data
+    public static class AbuseReports {
+
+        @NotBlank
+        @Size(max = 100)
+        private String reporterName = "Karlo Hrva\u010di\u0107";
+
+        @NotBlank
+        @Email
+        private String reporterAddress = "abuse@hrva.cc";
+
+        @NotNull
+        @Size(max = 5)
+        private List<String> cc = List.of("reportphishing@apwg.org");
+
+        @Min(1)
+        @Max(90)
+        private int recheckDays = 30;
 
     }
 

@@ -25,7 +25,8 @@ class SettingsSourceTest {
             "\\bgetCampaign\\b",
             "\\bgetTrafficAlerts\\b",
             "\\bgetModeration\\b",
-            "\\bgetBurst\\b(?!\\s*\\(\\s*\\)\\s*\\.\\s*getWindow\\s*\\()"
+            "\\bgetBurst\\b(?!\\s*\\(\\s*\\)\\s*\\.\\s*getWindow\\s*\\()",
+            "\\bgetAbuseReports\\b"
     ).map(Pattern::compile).toList();
 
     @Test
@@ -59,7 +60,9 @@ class SettingsSourceTest {
                 "final var burst = appProperties.getBurst();",
                 "appProperties.getBurst().getLinks()",
                 "appProperties.getModeration().isCustomAliases()",
-                "final var moderation = appProperties.getModeration();"))
+                "final var moderation = appProperties.getModeration();",
+                "final var abuseReports = appProperties.getAbuseReports();",
+                "appProperties.getAbuseReports().getCc()"))
                 .allMatch(SettingsSourceTest::readsAMigratedFlag);
         assertThat(List.of(
                 "appProperties.getDestinationCheck().getBudget()",

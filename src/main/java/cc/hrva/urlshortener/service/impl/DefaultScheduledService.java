@@ -6,6 +6,7 @@ import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.repository.AuditLogRepository;
 import cc.hrva.urlshortener.repository.BioHandleHoldRepository;
 import cc.hrva.urlshortener.repository.EmailLogRepository;
+import cc.hrva.urlshortener.service.AbuseReportService;
 import cc.hrva.urlshortener.service.ApiKeyService;
 import cc.hrva.urlshortener.service.BlocklistSourceService;
 import cc.hrva.urlshortener.service.ClickSummaryService;
@@ -53,6 +54,7 @@ public class DefaultScheduledService implements ScheduledService {
     private final CustomDomainReconciler customDomainReconciler;
     private final CustomDomainRegistry customDomainRegistry;
     private final TrafficAlertService trafficAlertService;
+    private final AbuseReportService abuseReportService;
     private final BioHandleHoldRepository bioHandleHoldRepository;
     private final EmailLogRepository emailLogRepository;
     private final AuditLogRepository auditLogRepository;
@@ -218,6 +220,13 @@ public class DefaultScheduledService implements ScheduledService {
     public void checkTraffic() {
         log.info("Scheduled: traffic check");
         trafficAlertService.check();
+    }
+
+    @Override
+    @Scheduled(cron = "0 20 6 * * *", zone = "${app.analytics.zone}")
+    public void recheckReportedDomains() {
+        log.info("Scheduled: reported domains recheck");
+        abuseReportService.recheck();
     }
 
 }

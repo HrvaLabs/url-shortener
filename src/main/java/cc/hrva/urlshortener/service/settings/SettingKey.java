@@ -72,7 +72,15 @@ public enum SettingKey {
     EMAIL_NEW_USER_NOTICE(SettingGroup.EMAILS, "New user notice",
             "Emails the admin when someone signs up.", SEND_EMAILS, false),
     EMAIL_CUSTOM_DOMAIN(SettingGroup.EMAILS, "Custom domain updates",
-            "Tells owners when their domain is approved, rejected, turned off or removed.", SEND_EMAILS, false);
+            "Tells owners when their domain is approved, rejected, turned off or removed.", SEND_EMAILS, false),
+    ABUSE_REPORTER_NAME(SettingGroup.ABUSE_REPORTS, SettingType.TEXT, "Abuse reports: your name",
+            "Signs the report emails.", 1, 100),
+    ABUSE_REPORTER_ADDRESS(SettingGroup.ABUSE_REPORTS, SettingType.ADDRESSES, "Abuse reports: your address",
+            "Under your name in the report emails.", 1, 1),
+    ABUSE_CC(SettingGroup.ABUSE_REPORTS, SettingType.ADDRESSES, "Abuse reports: Cc",
+            "Copied on every report email.", 0, 5),
+    ABUSE_RECHECK_DAYS(SettingGroup.ABUSE_REPORTS, "Abuse reports: recheck for",
+            "Reported domains are looked up every day for this many days.", null, 1, 90, "days");
 
     private final SettingGroup group;
     private final SettingType type;
@@ -87,19 +95,27 @@ public enum SettingKey {
     private final String unit;
     private final Integer minItems;
     private final Integer maxItems;
+    private final Integer minLength;
+    private final Integer maxLength;
 
     SettingKey(final SettingGroup group, final String label, final String description, final SettingKey parent, final boolean safety) {
-        this(group, SettingType.SWITCH, label, description, parent, safety, null, null, false, null, null, null, null);
+        this(group, SettingType.SWITCH, label, description, parent, safety, null, null, false, null, null, null, null, null, null);
     }
 
     SettingKey(final SettingGroup group, final String label, final String description, final SettingKey parent, final int min, final int max,
             final String unit) {
-        this(group, SettingType.NUMBER, label, description, parent, false, min, max, false, null, unit, null, null);
+        this(group, SettingType.NUMBER, label, description, parent, false, min, max, false, null, unit, null, null, null, null);
+    }
+
+    SettingKey(final SettingGroup group, final SettingType type, final String label, final String description, final int minimum, final int maximum) {
+        this(group, type, label, description, null, false, null, null, false, null, null,
+                type == SettingType.ADDRESSES ? minimum : null, type == SettingType.ADDRESSES ? maximum : null,
+                type == SettingType.TEXT ? minimum : null, type == SettingType.TEXT ? maximum : null);
     }
 
     SettingKey(final SettingGroup group, final SettingType type, final String label, final String description, final SettingKey parent,
             final boolean safety, final Integer min, final Integer max, final boolean nullable, final String noneLabel, final String unit,
-            final Integer minItems, final Integer maxItems) {
+            final Integer minItems, final Integer maxItems, final Integer minLength, final Integer maxLength) {
         this.group = group;
         this.type = type;
         this.label = label;
@@ -113,6 +129,8 @@ public enum SettingKey {
         this.unit = unit;
         this.minItems = minItems;
         this.maxItems = maxItems;
+        this.minLength = minLength;
+        this.maxLength = maxLength;
     }
 
 }

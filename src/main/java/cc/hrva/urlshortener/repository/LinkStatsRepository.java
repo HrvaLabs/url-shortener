@@ -5,6 +5,7 @@ import cc.hrva.urlshortener.dto.BreakdownEntry;
 import cc.hrva.urlshortener.dto.LinkClicks;
 import cc.hrva.urlshortener.dto.LinkDayCounts;
 import cc.hrva.urlshortener.model.enums.StatDimension;
+import com.google.common.collect.Lists;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -35,6 +36,7 @@ public class LinkStatsRepository {
     private static final String LIMIT = "limit";
     private static final String URL_IDS = "urlIds";
     private static final String REFERRER = "referrer";
+    private static final int IDS_PER_QUERY = 1_000;
 
     private static final String INCREMENT_DAILY_STATS = """
             MERGE INTO link_daily_stats t
@@ -111,6 +113,12 @@ public class LinkStatsRepository {
             select url_id, sum(clicks) as total_clicks from link_daily_stats
             where url_id in (:urlIds) and stat_date between :from and :to
             group by url_id
+            """;
+
+    private static final String SUM_COUNTRY_CLICKS = """
+            select dimension_value, sum(clicks) as total_clicks from link_daily_breakdown
+            where url_id in (:urlIds) and dimension = :dimension and dimension_value not in ('unknown', 'tor')
+            group by dimension_value
             """;
 
     private static final String SUM_REFERRER_CLICKS_BY_URL = """
@@ -208,6 +216,19 @@ public class LinkStatsRepository {
             return Map.of();
         }
         return sumsByUrl(SUM_REFERRER_CLICKS_BY_URL, Map.of(URL_IDS, urlIds, REFERRER, referrer, FROM, from, TO, to));
+    }
+
+    public List<BreakdownEntry> topCountries(final Collection<Long> urlIds, final int limit) {
+        final var clicks = new HashMap<String, Long>();
+        for (final var chunk : Lists.partition(List.copyOf(urlIds), IDS_PER_QUERY)) {
+            jdbcTemplate.query(SUM_COUNTRY_CLICKS, Map.of(URL_IDS, chunk, DIMENSION, StatDimension.COUNTRY.name()), (RowCallbackHandler) row ->
+                    clicks.merge(row.getString("dimension_value"), row.getLong("total_clicks"), Long::sum));
+        }
+        return clicks.entrySet().stream()
+                .sorted(Map.Entry.<String, Long>comparingByValue().reversed().thenComparing(Map.Entry.comparingByKey()))
+                .limit(limit)
+                .map(entry -> new BreakdownEntry(entry.getKey(), entry.getValue()))
+                .toList();
     }
 
     private Map<Long, Long> sumsByUrl(final String sql, final Map<String, ?> parameters) {

@@ -43,6 +43,7 @@ public enum AuditAction {
     TURN_ON_SIGN_IN_METHOD,
     REMOVE_PASSWORD,
     ALLOW_CAMPAIGN_SHAPE,
+    REPORT_DOMAINS,
     UNKNOWN
 
 }

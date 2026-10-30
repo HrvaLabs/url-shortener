@@ -107,12 +107,15 @@ class DefaultScheduledServiceTest {
     @Mock
     private AuditLogRepository auditLogRepository;
 
+    @Mock
+    private AbuseReportService abuseReportService;
+
     private final AppProperties appProperties = new AppProperties();
 
     @BeforeEach
     void setUp() {
         this.scheduledService = new DefaultScheduledService(urlService, userService, apiKeyService, resetTokenService, urlNotificationService, safeBrowsingRecheckService, sendingEmailService, linkDigestService, blocklistSourceService,
-                weeklyDigestService, destinationCheckService, notificationDeliveryService, clickSummaryService, customDomainLifecycle, customDomainReconciler, customDomainRegistry, trafficAlertService, bioHandleHoldRepository, emailLogRepository, auditLogRepository, appProperties, Clock.fixed(NOW, ZoneOffset.UTC));
+                weeklyDigestService, destinationCheckService, notificationDeliveryService, clickSummaryService, customDomainLifecycle, customDomainReconciler, customDomainRegistry, trafficAlertService, abuseReportService, bioHandleHoldRepository, emailLogRepository, auditLogRepository, appProperties, Clock.fixed(NOW, ZoneOffset.UTC));
     }
 
     @Test
@@ -208,6 +211,27 @@ class DefaultScheduledServiceTest {
         assertThat(nextRun(cron, "2026-10-26T07:00:00Z", zone)).isEqualTo("2026-11-02T07:00:00Z");
         assertThat(nextRun(cron, "2026-03-29T12:00:00Z", zone)).isEqualTo("2026-03-30T06:00:00Z");
         assertThat(nextRun(cron, "2026-03-27T12:00:00Z", zone)).isEqualTo("2026-03-30T06:00:00Z");
+    }
+
+    @Test
+    @ExtendWith(OutputCaptureExtension.class)
+    void theReportedDomainsRecheckDelegates(final CapturedOutput output) {
+        scheduledService.recheckReportedDomains();
+
+        verify(abuseReportService).recheck();
+        assertThat(output).contains("Scheduled: reported domains recheck");
+    }
+
+    @Test
+    void reportedDomainsAreRecheckedAtTwentyPastSixInZagreb() throws NoSuchMethodException, IOException {
+        final var scheduled = DefaultScheduledService.class.getMethod("recheckReportedDomains").getAnnotation(Scheduled.class);
+        final var sources = new MutablePropertySources();
+        new YamlPropertySourceLoader().load("application", new ClassPathResource("application.yaml")).forEach(sources::addLast);
+        final var zone = ZoneId.of(new PropertySourcesPropertyResolver(sources).resolveRequiredPlaceholders(scheduled.zone()));
+
+        assertThat(scheduled.cron()).isEqualTo("0 20 6 * * *");
+        assertThat(scheduled.zone()).isEqualTo("${app.analytics.zone}");
+        assertThat(nextRun(CronExpression.parse(scheduled.cron()), "2026-10-30T06:00:00Z", zone)).isEqualTo("2026-10-31T05:20:00Z");
     }
 
     private static Instant nextRun(final CronExpression cron, final String after, final ZoneId zone) {

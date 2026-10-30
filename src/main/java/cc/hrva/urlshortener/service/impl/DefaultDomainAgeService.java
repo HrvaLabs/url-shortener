@@ -3,6 +3,8 @@ package cc.hrva.urlshortener.service.impl;
 import cc.hrva.urlshortener.client.PublicHttpFetcher;
 import cc.hrva.urlshortener.exception.UrlValidationException;
 import cc.hrva.urlshortener.service.DomainAgeService;
+import cc.hrva.urlshortener.service.rdap.DomainRecord;
+import cc.hrva.urlshortener.service.rdap.RdapAnswers;
 import cc.hrva.urlshortener.util.DomainNames;
 import jakarta.annotation.PreDestroy;
 import java.io.IOException;
@@ -12,11 +14,15 @@ import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.LocalDate;
-import java.time.OffsetDateTime;
-import java.time.ZoneOffset;
 import java.time.format.DateTimeParseException;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ExecutionException;
@@ -36,6 +42,7 @@ import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.Strings;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
+import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -46,21 +53,25 @@ public class DefaultDomainAgeService implements DomainAgeService {
 
     private static final String KEY_PREFIX = "rdap:";
     private static final String BOOTSTRAP_KEY = KEY_PREFIX + "bootstrap";
+    private static final String RECORD_KEY_PREFIX = KEY_PREFIX + "info:";
+    private static final String NOT_FOUND = "HTTP 404";
     private static final String BOOTSTRAP_URL = "https://data.iana.org/rdap/dns.json";
     private static final String UNKNOWN = "unknown";
-    private static final String REGISTRATION = "registration";
     private static final String HTTPS = "https://";
     private static final Pattern CLIENT_ERROR = Pattern.compile("HTTP 4\\d\\d");
-    private static final int ISO_DATE_LENGTH = 10;
     private static final long MAX_BYTES = 1024L * 1024L;
     private static final Duration TIMEOUT = Duration.ofSeconds(3);
     private static final Duration REGISTERED_TIME_TO_LIVE = Duration.ofDays(30);
     private static final Duration UNKNOWN_TIME_TO_LIVE = Duration.ofDays(1);
     private static final Duration FAILED_TIME_TO_LIVE = Duration.ofHours(1);
     private static final Duration BOOTSTRAP_TIME_TO_LIVE = Duration.ofDays(1);
+    private static final Duration RECORD_TIME_TO_LIVE = Duration.ofDays(1);
+    private static final Duration RECORDS_DEADLINE = Duration.ofSeconds(20);
     private static final int YOUNG_DAYS = 30;
     private static final int LOOKUP_THREADS = 2;
     private static final int LOOKUP_QUEUE_CAPACITY = 16;
+    private static final int RECORD_THREADS = 4;
+    private static final int RECORD_QUEUE_CAPACITY = 1000;
 
     private final PublicHttpFetcher publicHttpFetcher;
     private final StringRedisTemplate redisTemplate;
@@ -68,6 +79,8 @@ public class DefaultDomainAgeService implements DomainAgeService {
     private final Clock clock;
     private final ExecutorService lookupExecutor = new ThreadPoolExecutor(LOOKUP_THREADS, LOOKUP_THREADS, 0L, TimeUnit.MILLISECONDS,
             new ArrayBlockingQueue<>(LOOKUP_QUEUE_CAPACITY), Thread.ofPlatform().name("rdap-lookup-", 0).daemon().factory());
+    private final ExecutorService recordExecutor = new ThreadPoolExecutor(RECORD_THREADS, RECORD_THREADS, 0L, TimeUnit.MILLISECONDS,
+            new ArrayBlockingQueue<>(RECORD_QUEUE_CAPACITY), Thread.ofPlatform().name("rdap-record-", 0).daemon().factory());
 
     @Override
     public Optional<LocalDate> registeredOn(final String host) {
@@ -80,9 +93,124 @@ public class DefaultDomainAgeService implements DomainAgeService {
         return registeredOn(host).filter(registeredOn -> registeredOn.isAfter(youngAfter)).isPresent();
     }
 
+    @Override
+    public Map<String, DomainRecord> records(final Collection<String> domains, final boolean fresh) {
+        return records(domains, fresh, RECORDS_DEADLINE);
+    }
+
+    public Map<String, DomainRecord> records(final Collection<String> domains, final boolean fresh, final Duration deadline) {
+        final var endsAt = System.nanoTime() + deadline.toNanos();
+        final var registryDomains = new LinkedHashMap<String, Optional<String>>();
+        domains.stream().filter(Objects::nonNull).forEach(domain -> registryDomains.computeIfAbsent(domain, DefaultDomainAgeService::registryDomainOf));
+        final var found = new HashMap<String, DomainRecord>();
+        final var pending = new ArrayList<String>();
+        registryDomains.values().stream().flatMap(Optional::stream).distinct().forEach(domain -> {
+            final var cached = fresh ? Optional.<DomainRecord>empty() : cachedRecord(domain);
+            cached.ifPresentOrElse(record -> found.put(domain, record), () -> pending.add(domain));
+        });
+        if (!pending.isEmpty()) {
+            found.putAll(lookUpRecords(pending, endsAt));
+        }
+        final var records = new LinkedHashMap<String, DomainRecord>();
+        registryDomains.forEach((domain, registryDomain) -> records.put(domain, registryDomain
+                .map(name -> found.getOrDefault(name, DomainRecord.failed(name)))
+                .orElseGet(() -> DomainRecord.noRdapServer(domain))));
+        return records;
+    }
+
     @PreDestroy
     public void shutDown() {
         lookupExecutor.shutdownNow();
+        recordExecutor.shutdownNow();
+    }
+
+    private Optional<DomainRecord> cachedRecord(final String domain) {
+        final var cached = read(RECORD_KEY_PREFIX + domain).value();
+        if (cached == null) {
+            return Optional.empty();
+        }
+        try {
+            return Optional.of(jsonMapper.readValue(cached, DomainRecord.class)).filter(record -> record.status() != DomainRecord.Status.FAILED);
+        } catch (final JacksonException exception) {
+            return Optional.empty();
+        }
+    }
+
+    private Map<String, DomainRecord> lookUpRecords(final List<String> domains, final long endsAt) {
+        final Map<String, String> baseUrls;
+        try {
+            baseUrls = rdapBaseUrls(true);
+        } catch (final RuntimeException exception) {
+            log.warn("RDAP bootstrap failed, no registry lookups reason={}: {}", exception.getClass().getSimpleName(), exception.getMessage());
+            return Map.of();
+        }
+
+        final var lookups = new LinkedHashMap<String, FutureTask<DomainRecord>>();
+        for (final var domain : domains) {
+            final var lookup = new FutureTask<>(() -> recordOf(domain, baseUrls, endsAt));
+            try {
+                recordExecutor.execute(lookup);
+                lookups.put(domain, lookup);
+            } catch (final RejectedExecutionException exception) {
+                log.warn("RDAP record lookups are all busy, lookup failed domain={}", domain);
+            }
+        }
+
+        final var records = new HashMap<String, DomainRecord>();
+        lookups.forEach((domain, lookup) -> {
+            try {
+                records.put(domain, lookup.get(Math.max(0L, endsAt - System.nanoTime()), TimeUnit.NANOSECONDS));
+            } catch (final TimeoutException exception) {
+                lookup.cancel(false);
+                log.warn("RDAP record lookup missed the deadline domain={}", domain);
+            } catch (final ExecutionException exception) {
+                logRecordFailure(domain, exception.getCause());
+            } catch (final InterruptedException exception) {
+                lookup.cancel(false);
+                Thread.currentThread().interrupt();
+            }
+        });
+        return records;
+    }
+
+    private DomainRecord recordOf(final String domain, final Map<String, String> baseUrls, final long endsAt) {
+        if (System.nanoTime() >= endsAt) {
+            return DomainRecord.failed(domain);
+        }
+        final var baseUrl = baseUrls.get(StringUtils.substringAfterLast(domain, "."));
+        if (baseUrl == null) {
+            return cachedAs(DomainRecord.noRdapServer(domain));
+        }
+
+        try {
+            final var answer = jsonMapper.readTree(fetch(baseUrl + "domain/" + domain));
+            if (!answer.isObject()) {
+                throw new IllegalStateException("not an RDAP domain answer");
+            }
+            final var record = cachedAs(RdapAnswers.found(domain, answer));
+            if (record.registeredOn() != null) {
+                write(KEY_PREFIX + domain, record.registeredOn().toString(), REGISTERED_TIME_TO_LIVE);
+            }
+            return record;
+        } catch (final UrlValidationException exception) {
+            if (NOT_FOUND.equals(exception.getMessage())) {
+                return cachedAs(DomainRecord.notFound(domain));
+            }
+            logRecordFailure(domain, exception);
+            return DomainRecord.failed(domain);
+        } catch (final RuntimeException exception) {
+            logRecordFailure(domain, exception);
+            return DomainRecord.failed(domain);
+        }
+    }
+
+    private static void logRecordFailure(final String domain, final Throwable failure) {
+        log.warn("RDAP record lookup failed, not cached domain={} reason={}: {}", domain, failure.getClass().getSimpleName(), failure.getMessage());
+    }
+
+    private DomainRecord cachedAs(final DomainRecord record) {
+        write(RECORD_KEY_PREFIX + record.domain(), jsonMapper.writeValueAsString(record), RECORD_TIME_TO_LIVE);
+        return record;
     }
 
     private static Optional<String> registryDomainOf(final String host) {
@@ -168,11 +296,7 @@ public class DefaultDomainAgeService implements DomainAgeService {
             throw new IllegalStateException("not an RDAP domain answer");
         }
 
-        return answer.path("events").valueStream()
-                .filter(event -> event.path("eventAction").stringValueOpt().filter(REGISTRATION::equals).isPresent())
-                .findFirst()
-                .flatMap(event -> event.path("eventDate").stringValueOpt())
-                .flatMap(DefaultDomainAgeService::utcDateOf);
+        return RdapAnswers.registeredOn(answer);
     }
 
     private Map<String, String> rdapBaseUrls(final boolean caching) {
@@ -263,14 +387,6 @@ public class DefaultDomainAgeService implements DomainAgeService {
             return Optional.of(LocalDate.parse(value));
         } catch (final DateTimeParseException exception) {
             return Optional.empty();
-        }
-    }
-
-    private static Optional<LocalDate> utcDateOf(final String timestamp) {
-        try {
-            return Optional.of(OffsetDateTime.parse(timestamp).withOffsetSameInstant(ZoneOffset.UTC).toLocalDate());
-        } catch (final DateTimeParseException exception) {
-            return timestamp.length() >= ISO_DATE_LENGTH ? isoDateOf(timestamp.substring(0, ISO_DATE_LENGTH)) : Optional.empty();
         }
     }
 
