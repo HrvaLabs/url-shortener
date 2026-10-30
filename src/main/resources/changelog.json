@@ -1,8 +1,8 @@
 {
   "releases": [
     {
-      "version": "v2.17",
-      "date": "2026-10-29",
+      "version": "v2.16",
+      "date": "2026-10-30",
       "badge": "Latest",
       "badgeVariant": "default",
       "summary": "Custom domains: apply for your own subdomain, like go.example.com, and make short links on it.",

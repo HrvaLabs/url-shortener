@@ -4,7 +4,7 @@ All notable changes to hrva.cc — the URL shortener.
 
 ---
 
-## [v2.17] — 2026-10-29
+## [v2.16] — 2026-10-30
 
 Custom domains: apply for your own subdomain, like go.example.com, and make short links on it.
 
