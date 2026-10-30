@@ -72,6 +72,7 @@ import cc.hrva.urlshortener.service.impl.DefaultLoginAttemptService;
 import cc.hrva.urlshortener.service.notification.NotificationAccountData;
 import cc.hrva.urlshortener.service.impl.DefaultSendingEmailService;
 import cc.hrva.urlshortener.service.impl.DefaultUserService;
+import cc.hrva.urlshortener.service.twostep.AccountLock;
 import cc.hrva.urlshortener.validator.AuthValidator;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -208,6 +209,9 @@ class DefaultUserServiceTest {
     @Mock
     private SignInMethodChangeService signInMethodChangeService;
 
+    @Mock
+    private AccountLock accountLock;
+
     private DefaultLoginAttemptService loginAttemptService;
 
     @BeforeEach
@@ -217,6 +221,7 @@ class DefaultUserServiceTest {
         loginAttemptService = new DefaultLoginAttemptService(loginAttemptProperties);
         this.userService = userServicePublishingTo(eventPublisher);
         lenient().when(userRepository.findByEmail(null)).thenReturn(Optional.empty());
+        lenient().when(accountLock.lock(any())).thenAnswer(invocation -> invocation.getArgument(0));
     }
 
     private DefaultUserService userServicePublishingTo(final ApplicationEventPublisher publisher) {
@@ -225,7 +230,7 @@ class DefaultUserServiceTest {
         return new DefaultUserService(appProperties, reauthentication, urlRepository, userRepository,
                 passwordEncoder, apiKeyRepository, emailLogRepository, resetTokenService,
                 resetTokenRepository, twoFactorRecoveryCodeRepository, passkeyCredentialRepository, bioAccountData, notificationAccountData, customDomainAccountData, userToUserDtoConverter, sendingEmailService,
-                verificationTokenService, verificationTokenRepository, userUpdateDtoToUserConverter, connectedAppsService, scammerSignalService, signInMethodService, signInMethodChangeService, publisher);
+                verificationTokenService, verificationTokenRepository, userUpdateDtoToUserConverter, connectedAppsService, scammerSignalService, signInMethodService, signInMethodChangeService, accountLock, publisher);
     }
 
     @Test
@@ -770,8 +775,8 @@ class DefaultUserServiceTest {
 
         userService.resetPassword(resetDto);
 
-        final var order = org.mockito.Mockito.inOrder(userRepository, signInMethodChangeService);
-        order.verify(userRepository).findByIdForUpdate(1L);
+        final var order = org.mockito.Mockito.inOrder(accountLock, userRepository, signInMethodChangeService);
+        order.verify(accountLock).lock(user);
         order.verify(userRepository).save(user);
         order.verify(signInMethodChangeService).passwordWasReset(user);
     }

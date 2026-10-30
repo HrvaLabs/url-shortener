@@ -1,6 +1,7 @@
 package cc.hrva.urlshortener.service.impl;
 
 import cc.hrva.urlshortener.dto.RemovePasswordDto;
+import cc.hrva.urlshortener.dto.SignInMethodTurnOnDto;
 import cc.hrva.urlshortener.dto.SignInMethodsResponse;
 import cc.hrva.urlshortener.exception.ApiException;
 import cc.hrva.urlshortener.exception.FieldValidationException;
@@ -73,9 +74,11 @@ public class DefaultSignInMethodChangeService implements SignInMethodChangeServi
 
     @Override
     @Transactional
-    public SignInMethodsResponse turnOn(final SignInMethod method) {
+    public SignInMethodsResponse turnOn(final SignInMethod method, final SignInMethodTurnOnDto dto) {
         requireProvider(method);
-        final var user = accountLock.lock(currentUser());
+        final var current = currentUser();
+        reauthentication.confirmSignInMethodChange(current, dto.getPassword());
+        final var user = accountLock.lock(current);
         if (!stateOf(user, method).turnedOff()) {
             return methodsOf(user);
         }

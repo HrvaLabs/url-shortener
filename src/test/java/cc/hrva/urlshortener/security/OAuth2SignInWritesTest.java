@@ -173,7 +173,7 @@ class OAuth2SignInWritesTest {
 
         final var response = signIn(MEMBER_EMAIL);
 
-        assertThat(response.getRedirectedUrl()).isEqualTo("http://fe/auth/callback?error=provider_turned_off");
+        assertThat(response.getRedirectedUrl()).isEqualTo("http://fe/auth/callback?error=provider_turned_off&provider=GOOGLE");
         assertThat(jdbcTemplate.queryForObject("select last_login from user_account where id = ?", Timestamp.class, MEMBER))
                 .isEqualTo(Timestamp.valueOf(LOADED_LOGIN));
         assertThat(signInMethodsOf(MEMBER)).containsExactly(Map.entry("GOOGLE", Timestamp.valueOf(LOADED_LOGIN)));
@@ -191,7 +191,7 @@ class OAuth2SignInWritesTest {
 
         final var response = signIn(PRE_REGISTERED_EMAIL, "github");
 
-        assertThat(response.getRedirectedUrl()).isEqualTo("http://fe/auth/callback?error=provider_turned_off");
+        assertThat(response.getRedirectedUrl()).isEqualTo("http://fe/auth/callback?error=provider_turned_off&provider=GITHUB");
         assertThat(jdbcTemplate.queryForMap("select password, email_verified, last_login from user_account where id = ?", PRE_REGISTERED))
                 .containsEntry("PASSWORD", "pre-registered-hash")
                 .containsEntry("EMAIL_VERIFIED", false)
@@ -207,7 +207,7 @@ class OAuth2SignInWritesTest {
         jdbcTemplate.update("""
                 insert into user_sign_in_method (user_id, method, first_used_at, last_used_at, turned_off_at)
                 values (?, 'GOOGLE', ?, ?, ?)""", MEMBER, LOADED_LOGIN, LOADED_LOGIN, LOADED_LOGIN.plusDays(1));
-        assertThat(signIn(MEMBER_EMAIL).getRedirectedUrl()).isEqualTo("http://fe/auth/callback?error=provider_turned_off");
+        assertThat(signIn(MEMBER_EMAIL).getRedirectedUrl()).isEqualTo("http://fe/auth/callback?error=provider_turned_off&provider=GOOGLE");
 
         signInMethodService.turnOn(MEMBER, SignInMethod.GOOGLE);
         final var response = signIn(MEMBER_EMAIL);

@@ -570,7 +570,7 @@ class OAuth2LoginSuccessHandlerTest {
 
         handler.onAuthenticationSuccess(request, response, signIn(provider));
 
-        verify(response).sendRedirect("http://fe/auth/callback?error=provider_turned_off");
+        verify(response).sendRedirect("http://fe/auth/callback?error=provider_turned_off&provider=" + method.name());
         verify(userRepository, never()).confirmEmailAndReplacePassword(any(), any());
         verify(userRepository, never()).recordLastLogin(any(), any());
         verify(userRepository, never()).save(any());
@@ -587,7 +587,7 @@ class OAuth2LoginSuccessHandlerTest {
 
         handler.onAuthenticationSuccess(request, response, signIn("github"));
 
-        verify(response).sendRedirect("http://fe/auth/callback?error=provider_turned_off");
+        verify(response).sendRedirect("http://fe/auth/callback?error=provider_turned_off&provider=GITHUB");
         verifyNoInteractions(tokenProvider, pendingLoginStore, twoStepMethods);
     }
 

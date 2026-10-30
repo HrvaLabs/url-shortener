@@ -30,6 +30,7 @@ import cc.hrva.urlshortener.service.UserService;
 import cc.hrva.urlshortener.service.impl.DefaultAuditLogService;
 import cc.hrva.urlshortener.service.impl.DefaultSignInMethodChangeService;
 import cc.hrva.urlshortener.service.impl.DefaultSignInMethodService;
+import cc.hrva.urlshortener.service.impl.DefaultUserDetailsService;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiter;
 import cc.hrva.urlshortener.service.signin.SignInMethodGuard;
 import cc.hrva.urlshortener.service.twostep.AccountLock;
@@ -37,9 +38,11 @@ import cc.hrva.urlshortener.validator.impl.DefaultAuthValidator;
 import com.nimbusds.jose.JOSEException;
 import com.nimbusds.jose.jwk.RSAKey;
 import com.nimbusds.jose.jwk.gen.RSAKeyGenerator;
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -60,6 +63,7 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -105,6 +109,7 @@ class SignInMethodEndpointSecurityTest {
     private static final String BOB_EMAIL = "bob@hrva.cc";
     private static final String ANA_TOKEN = "ana-token";
     private static final String BOB_TOKEN = "bob-token";
+    private static final String BOB_FRESH_TOKEN = "bob-fresh-token";
     private static final String PASSWORD = "correct horse battery";
     private static final String PASSWORD_HASH = new BCryptPasswordEncoder(4).encode(PASSWORD);
     private static final LocalDateTime FIRST = LocalDateTime.of(2026, 5, 16, 10, 0);
@@ -128,8 +133,11 @@ class SignInMethodEndpointSecurityTest {
     @MockitoBean
     private TokenProvider tokenProvider;
 
-    @MockitoBean
+    @Autowired
     private UserDetailsService userDetailsService;
+
+    @Autowired
+    private PasswordEncoder passwordEncoder;
 
     @MockitoBean
     private OAuth2LoginSuccessHandler oAuth2LoginSuccessHandler;
@@ -229,11 +237,12 @@ class SignInMethodEndpointSecurityTest {
     void turningGoogleBackOnClearsTheTimeAndIsAuditedAndEmailed() throws Exception {
         mockMvc.perform(as(ANA_TOKEN, post(METHODS + "GOOGLE/turn-off"))).andExpect(status().isOk());
 
-        mockMvc.perform(as(ANA_TOKEN, post(METHODS + "GOOGLE/turn-on")))
+        mockMvc.perform(as(ANA_TOKEN, post(METHODS + "GOOGLE/turn-on")).contentType(MediaType.APPLICATION_JSON).content(reauthBody(PASSWORD)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.signInMethods[1].method").value("GOOGLE"))
                 .andExpect(jsonPath("$.signInMethods[1].turnedOffAt").value(nullValue()));
-        mockMvc.perform(as(ANA_TOKEN, post(METHODS + "GOOGLE/turn-on"))).andExpect(status().isOk());
+        mockMvc.perform(as(ANA_TOKEN, post(METHODS + "GOOGLE/turn-on")).contentType(MediaType.APPLICATION_JSON).content(reauthBody(PASSWORD)))
+                .andExpect(status().isOk());
 
         assertThat(turnedOff(ANA)).isEmpty();
         assertThat(auditActions()).containsExactly("TURN_OFF_SIGN_IN_METHOD", "TURN_ON_SIGN_IN_METHOD");
@@ -241,9 +250,50 @@ class SignInMethodEndpointSecurityTest {
     }
 
     @Test
+    void turningBackOnNeedsTheCurrentPasswordOfAnAccountThatHasOne() throws Exception {
+        mockMvc.perform(as(ANA_TOKEN, post(METHODS + "GOOGLE/turn-off"))).andExpect(status().isOk());
+
+        mockMvc.perform(as(ANA_TOKEN, post(METHODS + "GOOGLE/turn-on")))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().json("{\"error\":\"Enter your current password.\"}", JsonCompareMode.STRICT));
+        mockMvc.perform(as(ANA_TOKEN, post(METHODS + "GOOGLE/turn-on")).contentType(MediaType.APPLICATION_JSON).content(reauthBody("not it")))
+                .andExpect(status().isForbidden())
+                .andExpect(content().json("{\"error\":\"Current password is incorrect\"}", JsonCompareMode.STRICT));
+
+        assertThat(turnedOff(ANA)).containsExactly("GOOGLE");
+        assertThat(auditActions()).containsExactly("TURN_OFF_SIGN_IN_METHOD");
+        verify(loginAttemptService).loginFailed("reauth:" + ANA);
+    }
+
+    @Test
+    void anAccountWithoutAPasswordTurnsBackOnOnlyAfterARecentSignIn() throws Exception {
+        passkey(BOB, "bob-synced", true);
+        mockMvc.perform(as(BOB_TOKEN, post(METHODS + "GOOGLE/turn-off"))).andExpect(status().isOk());
+
+        mockMvc.perform(as(BOB_TOKEN, post(METHODS + "GOOGLE/turn-on")).contentType(MediaType.APPLICATION_JSON).content(reauthBody(PASSWORD)))
+                .andExpect(status().isUnauthorized())
+                .andExpect(content().json("{\"error\":\"For your security, sign in again to change your sign-in methods.\"}",
+                        JsonCompareMode.STRICT));
+        assertThat(turnedOff(BOB)).containsExactly("GOOGLE");
+
+        signedInJustNow(BOB_FRESH_TOKEN, BOB_EMAIL);
+        mockMvc.perform(as(BOB_FRESH_TOKEN, post(METHODS + "GOOGLE/turn-on")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.signInMethods[0].turnedOffAt").value(nullValue()));
+        assertThat(turnedOff(BOB)).isEmpty();
+    }
+
+    @Test
+    void turningOffNeedsNoReauthentication() throws Exception {
+        mockMvc.perform(as(ANA_TOKEN, post(METHODS + "GOOGLE/turn-off"))).andExpect(status().isOk());
+
+        verify(loginAttemptService, never()).isBlocked("reauth:" + ANA);
+    }
+
+    @Test
     void aProviderTheAccountNeverUsedIs404() throws Exception {
         for (final var action : List.of("turn-off", "turn-on")) {
-            mockMvc.perform(as(ANA_TOKEN, post(METHODS + "GITHUB/" + action)))
+            mockMvc.perform(as(ANA_TOKEN, post(METHODS + "GITHUB/" + action)).contentType(MediaType.APPLICATION_JSON).content(reauthBody(PASSWORD)))
                     .andExpect(status().isNotFound())
                     .andExpect(content().json("{\"error\":\"This account has never signed in with GitHub.\"}", JsonCompareMode.STRICT));
         }
@@ -291,10 +341,12 @@ class SignInMethodEndpointSecurityTest {
     }
 
     @Test
-    void aPasskeyWhoseKindIsUnknownIsAWayIn() throws Exception {
+    void aPasskeyWhoseKindIsUnknownIsNotAWayIn() throws Exception {
         passkey(BOB, "bob-unknown", null);
 
-        mockMvc.perform(as(BOB_TOKEN, post(METHODS + "GOOGLE/turn-off"))).andExpect(status().isOk());
+        mockMvc.perform(as(BOB_TOKEN, post(METHODS + "GOOGLE/turn-off")))
+                .andExpect(status().isConflict())
+                .andExpect(content().json(KEEP_ONE, JsonCompareMode.STRICT));
     }
 
     @Test
@@ -446,6 +498,15 @@ class SignInMethodEndpointSecurityTest {
                 .containsEntry("TARGET_IDENTIFIER", String.valueOf(BOB)));
     }
 
+    @Test
+    void anAccountWithoutAPasswordIsComparedAgainstAHashMadeByTheAppsOwnEncoder() {
+        final var stored = userDetailsService.loadUserByUsername(BOB_EMAIL).getPassword();
+
+        assertThat(StoredPasswords.isSet(stored)).isTrue();
+        assertThat(stored.substring(0, 7)).isEqualTo(passwordEncoder.encode("any").substring(0, 7));
+        assertThat(userDetailsService.loadUserByUsername(ANA_EMAIL).getPassword()).isEqualTo(PASSWORD_HASH);
+    }
+
     private void account(final long id, final String email, final String password, final String authProvider) {
         jdbcTemplate.update("""
                 insert into user_account (id, email, password, active, email_verified, auth_provider, two_step_enabled)
@@ -493,6 +554,17 @@ class SignInMethodEndpointSecurityTest {
                 .thenReturn(UsernamePasswordAuthenticationToken.authenticated(email, null, List.of(new SimpleGrantedAuthority("ROLE_USER"))));
     }
 
+    private void signedInJustNow(final String token, final String email) {
+        when(tokenProvider.validateToken(token)).thenReturn(true);
+        when(tokenProvider.getAuthentication(token))
+                .thenReturn(UsernamePasswordAuthenticationToken.authenticated(email, token, List.of(new SimpleGrantedAuthority("ROLE_USER"))));
+        when(tokenProvider.issuedAt(token)).thenReturn(Optional.of(Instant.now()));
+    }
+
+    private static String reauthBody(final String password) {
+        return "{\"password\":\"" + password + "\"}";
+    }
+
     private static String passwordBody(final String password) {
         return "{\"currentPassword\":\"" + password + "\"}";
     }
@@ -535,6 +607,7 @@ class SignInMethodEndpointSecurityTest {
             DefaultAuthValidator.class,
             Reauthentication.class,
             DefaultAuditLogService.class,
+            DefaultUserDetailsService.class,
             DefaultSignInMethodService.class,
             SignInMethodGuard.class,
             DefaultSignInMethodChangeService.class,

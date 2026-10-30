@@ -20,6 +20,7 @@ public class Reauthentication {
     private static final String TOO_MANY_WRONG_PASSWORDS = "Too many wrong passwords. Try again in 24 hours.";
     private static final String SIGN_IN_AGAIN_FOR_PASSKEYS = "For your security, sign in again to change your passkeys and security keys.";
     private static final String SIGN_IN_AGAIN_TO_DELETE = "For your security, sign in again to delete your account.";
+    private static final String SIGN_IN_AGAIN_FOR_SIGN_IN_METHODS = "For your security, sign in again to change your sign-in methods.";
 
     private final RecentSignIn recentSignIn;
     private final AuthValidator authValidator;
@@ -31,6 +32,10 @@ public class Reauthentication {
 
     public void confirmAccountDeletion(final User user, final String password) {
         confirm(user, password, SIGN_IN_AGAIN_TO_DELETE);
+    }
+
+    public void confirmSignInMethodChange(final User user, final String password) {
+        confirm(user, password, SIGN_IN_AGAIN_FOR_SIGN_IN_METHODS);
     }
 
     public void forgetWrongPasswords(final User user) {

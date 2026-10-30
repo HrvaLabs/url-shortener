@@ -42,6 +42,7 @@ import cc.hrva.urlshortener.service.bio.BioAccountData;
 import cc.hrva.urlshortener.service.domain.AccountActiveChangedEvent;
 import cc.hrva.urlshortener.service.domain.CustomDomainAccountData;
 import cc.hrva.urlshortener.service.notification.NotificationAccountData;
+import cc.hrva.urlshortener.service.twostep.AccountLock;
 import cc.hrva.urlshortener.util.EmailAddresses;
 import cc.hrva.urlshortener.util.SortWhitelist;
 import java.time.LocalDateTime;
@@ -50,6 +51,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import org.apache.commons.lang3.StringUtils;
+import org.hibernate.Hibernate;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
@@ -97,6 +99,7 @@ public class DefaultUserService implements UserService {
     private final ScammerSignalService scammerSignalService;
     private final SignInMethodService signInMethodService;
     private final SignInMethodChangeService signInMethodChangeService;
+    private final AccountLock accountLock;
     private final ApplicationEventPublisher eventPublisher;
 
     @Override
@@ -339,11 +342,12 @@ public class DefaultUserService implements UserService {
         final var token = resetTokenService.getResetTokenFromUserAndToken(user, passwordResetDto.getToken());
 
         if (token.isActive()) {
-            userRepository.findByIdForUpdate(user.getId());
-            user.setPassword(passwordEncoder.encode(passwordResetDto.getPassword()));
+            final var locked = accountLock.lock(user);
+            Hibernate.initialize(locked.getAuthorities());
+            locked.setPassword(passwordEncoder.encode(passwordResetDto.getPassword()));
             resetTokenService.deactivateAndSaveToken(token);
-            reauthentication.forgetWrongPasswords(user);
-            final var saved = userRepository.save(user);
+            reauthentication.forgetWrongPasswords(locked);
+            final var saved = userRepository.save(locked);
             signInMethodChangeService.passwordWasReset(saved);
 
             return saved;

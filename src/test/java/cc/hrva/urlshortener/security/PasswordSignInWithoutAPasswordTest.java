@@ -47,7 +47,7 @@ class PasswordSignInWithoutAPasswordTest {
         when(userRepository.findByEmail(WITH_PASSWORD)).thenReturn(Optional.of(account(WITH_PASSWORD, new BCryptPasswordEncoder().encode(PASSWORD))));
         when(userRepository.findByEmail(WITHOUT_PASSWORD)).thenReturn(Optional.of(account(WITHOUT_PASSWORD, StoredPasswords.none())));
         when(userRepository.findByEmail(GOOGLE_ONLY)).thenReturn(Optional.of(account(GOOGLE_ONLY, "6c1b2a3e-0b8e-4c1e-9d0e-1f2a3b4c5d6e")));
-        final var provider = new DaoAuthenticationProvider(new DefaultUserDetailsService(userRepository));
+        final var provider = new DaoAuthenticationProvider(new DefaultUserDetailsService(userRepository, passwordEncoder));
         provider.setPasswordEncoder(passwordEncoder);
         final var providerManager = new ProviderManager(provider);
         providerManager.setAuthenticationEventPublisher(new DefaultAuthenticationEventPublisher(event -> {
@@ -76,6 +76,7 @@ class PasswordSignInWithoutAPasswordTest {
     void anAccountWithoutAPasswordStillRunsAFullPasswordCheck() {
         refusal(WITHOUT_PASSWORD, PASSWORD);
 
+        verify(passwordEncoder).encode(argThat(raw -> !"userNotFoundPassword".equals(raw)));
         verify(passwordEncoder).matches(anyString(), argThat(StoredPasswords::isSet));
     }
 

@@ -130,7 +130,7 @@ public class OAuth2LoginSuccessHandler implements AuthenticationSuccessHandler {
         final var method = SignInMethod.ofProvider(provider);
         if (existingUser.isPresent() && method.isPresent() && signInMethodService.isTurnedOff(user.getId(), method.get())) {
             log.info("OAuth2 login refused: the account turned this provider off provider={} user id={}", provider, user.getId());
-            response.sendRedirect(appProperties.getFrontendUrl() + "/auth/callback?error=" + PROVIDER_TURNED_OFF);
+            response.sendRedirect(appProperties.getFrontendUrl() + "/auth/callback?error=" + PROVIDER_TURNED_OFF + "&provider=" + method.get().name());
             return;
         }
 

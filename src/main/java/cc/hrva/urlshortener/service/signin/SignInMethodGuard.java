@@ -31,7 +31,7 @@ public class SignInMethodGuard {
     }
 
     public static boolean signsInAlone(final PasskeyCredential passkey) {
-        return !Boolean.FALSE.equals(passkey.getDiscoverable());
+        return Boolean.TRUE.equals(passkey.getDiscoverable());
     }
 
     public WaysToSignIn waysOf(final User lockedUser) {

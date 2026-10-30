@@ -25,6 +25,7 @@ import cc.hrva.urlshortener.service.notification.NotificationAccountData;
 import cc.hrva.urlshortener.service.impl.DefaultModerationService;
 import cc.hrva.urlshortener.service.impl.DefaultSendingEmailService;
 import cc.hrva.urlshortener.service.impl.DefaultUserService;
+import cc.hrva.urlshortener.service.twostep.AccountLock;
 import java.sql.Timestamp;
 import java.time.LocalDateTime;
 import java.util.Map;
@@ -286,7 +287,8 @@ class ModerationUserWritesTest {
             includeFilters = @ComponentScan.Filter(
                     type = FilterType.ASSIGNABLE_TYPE,
                     classes = {UrlRepository.class, UserRepository.class, ApiKeyRepository.class, DomainRuleRepository.class}))
-    @Import({DefaultModerationService.class, DefaultUserService.class, UserToUserDtoConverter.class, UserUpdateDtoToUserConverter.class, UrlCache.class})
+    @Import({DefaultModerationService.class, DefaultUserService.class, UserToUserDtoConverter.class, UserUpdateDtoToUserConverter.class, UrlCache.class,
+            AccountLock.class})
     static class TestApplication {
     }
 

@@ -277,6 +277,26 @@ class ReauthenticationTest {
     }
 
     @Test
+    void changingSignInMethodsWithAStaleSignInAsksToSignInAgainForThem() {
+        final var user = user("google");
+        signedInMinutesAgo(16);
+
+        assertThatThrownBy(() -> reauthentication.confirmSignInMethodChange(user, null))
+                .isInstanceOf(ReauthenticationRequiredException.class)
+                .hasMessage("For your security, sign in again to change your sign-in methods.");
+    }
+
+    @Test
+    void changingSignInMethodsChecksThePasswordOfALocalAccountOnTheSameCounter() {
+        final var user = user("local");
+        doThrow(new NoAuthorizationException(WRONG_PASSWORD)).when(authValidator).passwordMatchesCurrentPassword(user, "wrong");
+
+        assertThatThrownBy(() -> reauthentication.confirmSignInMethodChange(user, "wrong")).hasMessage(WRONG_PASSWORD);
+        assertThat(attemptsByKey()).containsEntry("reauth:7", 1);
+        assertThatCode(() -> reauthentication.confirmSignInMethodChange(user, "user123")).doesNotThrowAnyException();
+    }
+
+    @Test
     void checkingTheCurrentPasswordAnswersWhetherItMatches() {
         final var user = user("local");
         doThrow(new NoAuthorizationException(WRONG_PASSWORD)).when(authValidator).passwordMatchesCurrentPassword(user, "wrong");

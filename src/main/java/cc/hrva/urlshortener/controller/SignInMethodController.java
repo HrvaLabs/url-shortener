@@ -1,6 +1,7 @@
 package cc.hrva.urlshortener.controller;
 
 import cc.hrva.urlshortener.dto.RemovePasswordDto;
+import cc.hrva.urlshortener.dto.SignInMethodTurnOnDto;
 import cc.hrva.urlshortener.dto.SignInMethodsResponse;
 import cc.hrva.urlshortener.model.enums.SignInMethod;
 import cc.hrva.urlshortener.service.SignInMethodChangeService;
@@ -35,14 +36,18 @@ public class SignInMethodController {
         return ResponseEntity.ok(signInMethodChangeService.turnOff(method));
     }
 
-    @Operation(summary = "Turn Google or GitHub sign-in back on")
+    @Operation(summary = "Turn Google or GitHub sign-in back on",
+            description = "Needs the current password while the account has one, otherwise a sign-in within the last 15 minutes.")
     @ApiResponse(responseCode = "200", description = "The account's sign-in methods after the change")
-    @ApiResponse(responseCode = "400", description = "PASSWORD or PASSKEY, or an unknown method")
+    @ApiResponse(responseCode = "400", description = "PASSWORD or PASSKEY, an unknown method, or the current password is missing")
+    @ApiResponse(responseCode = "401", description = "An account without a password must sign in again first")
+    @ApiResponse(responseCode = "403", description = "The current password doesn't match, or too many wrong passwords")
     @ApiResponse(responseCode = "404", description = "The account has never signed in with this method")
     @PostMapping("/sign-in-methods/{method}/turn-on")
     @PreAuthorize("hasAnyRole('ROLE_ADMIN', 'ROLE_USER')")
-    public ResponseEntity<SignInMethodsResponse> turnOn(@PathVariable("method") final SignInMethod method) {
-        return ResponseEntity.ok(signInMethodChangeService.turnOn(method));
+    public ResponseEntity<SignInMethodsResponse> turnOn(@PathVariable("method") final SignInMethod method,
+                                                        @RequestBody(required = false) final SignInMethodTurnOnDto dto) {
+        return ResponseEntity.ok(signInMethodChangeService.turnOn(method, dto != null ? dto : new SignInMethodTurnOnDto()));
     }
 
     @Operation(summary = "Remove the account's password",

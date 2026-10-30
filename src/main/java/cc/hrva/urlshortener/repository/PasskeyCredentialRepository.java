@@ -17,7 +17,7 @@ public interface PasskeyCredentialRepository extends JpaRepository<PasskeyCreden
     Optional<PasskeyCredential> findByIdAndUser(Long id, User user);
     long countByUser(User user);
 
-    @Query("select count(p) from PasskeyCredential p where p.user.id = :userId and (p.discoverable is null or p.discoverable = true)")
+    @Query("select count(p) from PasskeyCredential p where p.user.id = :userId and p.discoverable = true")
     long countSignInPasskeysByUserId(@Param("userId") Long userId);
 
     void deleteByUser(User user);
