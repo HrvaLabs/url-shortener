@@ -13,6 +13,8 @@ import org.junit.jupiter.params.provider.NullAndEmptySource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.catchThrowableOfType;
 
 class CustomDomainHostnamesTest {
@@ -23,6 +25,7 @@ class CustomDomainHostnamesTest {
     private static final String APEX = "Use a subdomain, like go.example.com. Root domains like example.com aren't supported yet.";
     private static final String NOT_OWNABLE = "Enter a domain you own, like go.example.com.";
     private static final String RESERVED = "This domain can't be used on hrva.cc.";
+    private static final String MIXED_SCRIPT_HRVA = "go.hrv\u0430.cc";
     private static final String CYRILLIC_LOOK_ALIKE = "g\u043e.example.com";
 
     private AppProperties appProperties;
@@ -65,6 +68,115 @@ class CustomDomainHostnamesTest {
     @ValueSource(strings = {"go.example.co.uk", "a.b.example.com", "go.foo.github.io"})
     void subdomainsPass(final String input) {
         assertThat(hostnames.normalize(input)).isEqualTo(input);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"2130706433", "0177.0.0.1", "0x7f000001", "0x7f.0.0.1", "2001:0db8:0000:0000:0000:0000:0000:0001",
+            "[2001:0db8:0000:0000:0000:0000:0000:0001]", "[2001:db8::1]"})
+    void everyWayOfWritingAnAddressIsNotOwnable(final String input) {
+        assertRefused(input, NOT_OWNABLE);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"xn--zzzzzz.example.com", "go.xn--.com", "xn--a.example.com", "go.xn--abc-.example.com"})
+    void bogusPunycodeIsRefused(final String input) {
+        assertRefused(input, BAD_SHAPE);
+    }
+
+    @Test
+    void realPunycodeLabelsPass() {
+        assertThat(hostnames.normalize("xn--g-1tb.example.com")).isEqualTo("xn--g-1tb.example.com");
+        assertThat(hostnames.normalize("go.xn--hrv-8cd.cc")).isEqualTo("go.xn--hrv-8cd.cc");
+    }
+
+    @Test
+    void aMixedScriptLookAlikeOfAReservedNamePassesAsTheDifferentDomainItIs() {
+        final var normalized = hostnames.normalize(MIXED_SCRIPT_HRVA);
+
+        assertThat(normalized).isEqualTo("go.xn--hrv-8cd.cc").isEqualTo(DomainNames.toAscii(MIXED_SCRIPT_HRVA));
+        assertThat(hostnames.isReserved(MIXED_SCRIPT_HRVA)).isFalse();
+    }
+
+    @Test
+    void aPrimaryHostIsRefusedAsReserved() {
+        appProperties.getDomains().setPrimaryHosts(List.of("short.karlo.cc"));
+
+        assertRefused("short.karlo.cc", RESERVED);
+        assertRefused("SHORT.karlo.cc.", RESERVED);
+        assertThat(hostnames.normalize("go.karlo.cc")).isEqualTo("go.karlo.cc");
+    }
+
+    @Test
+    void theCnameTargetIsRefusedAsReserved() {
+        appProperties.getDomains().setCnameTarget("cname.karlo.cc");
+        appProperties.getDomains().setPrimaryHosts(List.of());
+
+        assertRefused("cname.karlo.cc", RESERVED);
+        assertThat(hostnames.normalize("go.karlo.cc")).isEqualTo("go.karlo.cc");
+    }
+
+    @Test
+    void anIgnoredHostnameCanStillBeAppliedFor() {
+        appProperties.getDomains().setIgnoredHostnames(List.of("test.karlo.cc"));
+
+        assertThat(hostnames.normalize("test.karlo.cc")).isEqualTo("test.karlo.cc");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {".hrva.cc", "*.hrva.cc", "*.HRVA.cc.", "hrva.cc"})
+    void suffixConventionsInTheReservedListStillReserve(final String entry) {
+        appProperties.getDomains().setReserved(List.of(entry));
+
+        assertThatCode(hostnames::checkSettings).doesNotThrowAnyException();
+        assertRefused("evil.hrva.cc", RESERVED);
+        assertRefused("hrva.cc", RESERVED);
+        assertThat(hostnames.normalize("go.hrvalabs.net")).isEqualTo("go.hrvalabs.net");
+    }
+
+    @Test
+    void theDefaultSettingsPassTheCheck() {
+        assertThatCode(hostnames::checkSettings).doesNotThrowAnyException();
+    }
+
+    @Test
+    void primaryHostsMayBeAddressesOrCarryAPort() {
+        appProperties.getDomains().setPrimaryHosts(List.of("localhost:18087", "127.0.0.1", "[::1]"));
+
+        assertThatCode(hostnames::checkSettings).doesNotThrowAnyException();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"**.hrva.cc", "hrva..cc", "_hrva.cc", " ", "hrva.cc/", "-hrva.cc", "xn--zzzzzz.cc"})
+    void anUnreadableReservedEntryStopsTheStart(final String entry) {
+        appProperties.getDomains().setReserved(List.of("hrvalabs.net", entry));
+
+        assertThatThrownBy(hostnames::checkSettings)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("app.domains.reserved");
+    }
+
+    @Test
+    void anUnreadablePrimaryHostStopsTheStart() {
+        appProperties.getDomains().setPrimaryHosts(List.of("hrva.cc", "*.hrva.cc"));
+
+        assertThatThrownBy(hostnames::checkSettings).isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("app.domains.primary-hosts").hasMessageContaining("*.hrva.cc");
+    }
+
+    @Test
+    void anUnreadableIgnoredHostnameStopsTheStart() {
+        appProperties.getDomains().setIgnoredHostnames(List.of("test..karlo.cc"));
+
+        assertThatThrownBy(hostnames::checkSettings).isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("app.domains.ignored-hostnames");
+    }
+
+    @Test
+    void anUnreadableCnameTargetStopsTheStart() {
+        appProperties.getDomains().setCnameTarget("domains_hrva.cc");
+
+        assertThatThrownBy(hostnames::checkSettings).isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("app.domains.cname-target");
     }
 
     @ParameterizedTest
@@ -198,12 +310,13 @@ class CustomDomainHostnamesTest {
     void hostnameKeyLowercasesStripsOneTrailingDotAndConvertsToPunycode() {
         assertThat(CustomDomainHostnames.hostnameKey(" Go.Example.COM. ")).contains("go.example.com");
         assertThat(CustomDomainHostnames.hostnameKey(CYRILLIC_LOOK_ALIKE.toUpperCase(Locale.ROOT))).contains("xn--g-1tb.example.com");
-        assertThat(CustomDomainHostnames.hostnameKey("go.example.com..")).contains("go.example.com.");
+        assertThat(CustomDomainHostnames.hostnameKey("go.example.com\u3002")).contains("go.example.com");
+        assertThat(CustomDomainHostnames.hostnameKey("127.0.0.1.")).contains("127.0.0.1");
     }
 
     @ParameterizedTest
     @NullAndEmptySource
-    @ValueSource(strings = {" ", "go..example.com"})
+    @ValueSource(strings = {" ", "go..example.com", "go.example.com..", "."})
     void hostnameKeyIsEmptyForWhatCannotBeRead(final String host) {
         assertThat(CustomDomainHostnames.hostnameKey(host)).isEmpty();
     }

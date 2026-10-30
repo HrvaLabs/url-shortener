@@ -340,4 +340,18 @@ class AppPropertiesTest {
                 .noneMatch(path -> path.startsWith("domains") || path.startsWith("cloudflare"));
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"", " "})
+    void aBlankCnameTargetOrCloudflareApiBaseIsRefused(final String blank) {
+        final var validator = Validation.buildDefaultValidatorFactory().getValidator();
+        final var domains = new AppProperties.Domains();
+        domains.setCnameTarget(blank);
+        final var cloudflare = new AppProperties.Cloudflare();
+        cloudflare.setApiBase(blank);
+
+        assertThat(validator.validate(domains)).extracting(violation -> violation.getPropertyPath().toString()).containsExactly("cnameTarget");
+        assertThat(validator.validate(cloudflare)).extracting(violation -> violation.getPropertyPath().toString()).containsExactly("apiBase");
+        assertThat(validator.validate(new AppProperties.Cloudflare())).isEmpty();
+    }
+
 }
