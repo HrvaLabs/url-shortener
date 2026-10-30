@@ -12,10 +12,13 @@ import cc.hrva.urlshortener.exception.CommonException;
 import cc.hrva.urlshortener.exception.ConnectRequestAlreadyApprovedException;
 import cc.hrva.urlshortener.exception.ConnectRequestExpiredException;
 import cc.hrva.urlshortener.exception.ConnectedAppNotFoundException;
+import cc.hrva.urlshortener.exception.CustomDomainConflictException;
+import cc.hrva.urlshortener.exception.CustomDomainNotFoundException;
 import cc.hrva.urlshortener.exception.DomainRuleNotFoundException;
 import cc.hrva.urlshortener.exception.EmailExistsException;
 import cc.hrva.urlshortener.exception.EmailLogNotFoundException;
 import cc.hrva.urlshortener.exception.EmailNotVerifiedException;
+import cc.hrva.urlshortener.exception.FeatureUnavailableException;
 import cc.hrva.urlshortener.exception.FieldValidationException;
 import cc.hrva.urlshortener.exception.InvalidApiKeyException;
 import cc.hrva.urlshortener.exception.PasskeyNotFoundException;
@@ -283,6 +286,21 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(NotificationTestUnavailableException.class)
     public ResponseEntity<Map<String, String>> handleNotificationTestUnavailable(final NotificationTestUnavailableException ex) {
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(Map.of("error", safeMessage(ex)));
+    }
+
+    @ExceptionHandler(CustomDomainNotFoundException.class)
+    public ResponseEntity<Map<String, String>> handleCustomDomainNotFound(final CustomDomainNotFoundException ex) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", safeMessage(ex)));
+    }
+
+    @ExceptionHandler(CustomDomainConflictException.class)
+    public ResponseEntity<Map<String, String>> handleCustomDomainConflict(final CustomDomainConflictException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("error", safeMessage(ex)));
+    }
+
+    @ExceptionHandler(FeatureUnavailableException.class)
+    public ResponseEntity<Map<String, String>> handleFeatureUnavailable(final FeatureUnavailableException ex) {
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(Map.of("error", safeMessage(ex)));
     }
 

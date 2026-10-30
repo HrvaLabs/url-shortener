@@ -9,12 +9,18 @@ import cc.hrva.urlshortener.model.BioPage;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.enums.BlockReason;
+import cc.hrva.urlshortener.model.enums.DomainDisableReason;
+import cc.hrva.urlshortener.model.enums.DomainProblem;
 import cc.hrva.urlshortener.model.enums.ReportCategory;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.BioPageReported;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.BioPageReviewOpened;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.BlocklistSourceFailed;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.BlocklistSourceRecovered;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.BurstDetected;
+import cc.hrva.urlshortener.service.alert.AdminAlertEvent.DomainApplied;
+import cc.hrva.urlshortener.service.alert.AdminAlertEvent.DomainDisabled;
+import cc.hrva.urlshortener.service.alert.AdminAlertEvent.DomainDrift;
+import cc.hrva.urlshortener.service.alert.AdminAlertEvent.DomainNeedsAttention;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.LinkBlocked;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.ReviewOpened;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.UserSignedUp;
@@ -506,6 +512,102 @@ class DiscordAlertFormatterTest {
         assertThat(lines).extracting(line -> StringUtils.substringBetween(line, " new links to ", " in the last ")).containsExactly("evil-login.com", "xn--zz.com");
         assertThat(lines).extracting(line -> line.substring(line.lastIndexOf('<')))
                 .containsExactly("<https://app.hrva.cc/admin/urls?search=evil-login.com>", "<https://app.hrva.cc/admin/urls?search=xn--zz.com>");
+    }
+
+    @Test
+    void aDomainApplicationNamesTheHostnameTheAccountAndItsRow() {
+        final var lines = formatter.message(List.of(
+                new DomainApplied(12L, "go.example.com", 7L, List.of()),
+                new DomainApplied(13L, "xn--g-1tb.example.com", 8L, List.of("International name (punycode): check it doesn't imitate another domain",
+                        "Registered 3 days ago"))), 0).content().lines().toList();
+
+        assertThat(lines).containsExactly(
+                "New custom domain application: go.example.com, account #7, <https://app.hrva.cc/admin/domains?search=go.example.com&id=12>",
+                "New custom domain application: xn--g-1tb.example.com (International name (punycode): check it doesn't imitate another domain, "
+                        + "Registered 3 days ago), account #8, <https://app.hrva.cc/admin/domains?search=xn--g-1tb.example.com&id=13>");
+    }
+
+    @Test
+    void aTurnedOffDomainSaysWhy() {
+        final var lines = formatter.message(List.of(
+                new DomainDisabled(12L, "go.example.com", DomainDisableReason.ADMIN, "Phishing kit"),
+                new DomainDisabled(13L, "menu.example.org", DomainDisableReason.ADMIN, null),
+                new DomainDisabled(14L, "a.example.net", DomainDisableReason.USER_BLOCKED, "Account blocked"),
+                new DomainDisabled(15L, "b.example.net", DomainDisableReason.DOMAIN_RULE, "example.net"),
+                new DomainDisabled(16L, "c.example.net", DomainDisableReason.BLOCKLIST, "HaGeZi TIF medium")), 0).content().lines().toList();
+
+        assertThat(lines).containsExactly(
+                "Custom domain turned off: go.example.com (by an admin: Phishing kit), <https://app.hrva.cc/admin/domains?search=go.example.com&id=12>",
+                "Custom domain turned off: menu.example.org (by an admin), <https://app.hrva.cc/admin/domains?search=menu.example.org&id=13>",
+                "Custom domain turned off: a.example.net (account blocked), <https://app.hrva.cc/admin/domains?search=a.example.net&id=14>",
+                "Custom domain turned off: b.example.net (domain rule example.net), <https://app.hrva.cc/admin/domains?search=b.example.net&id=15>",
+                "Custom domain turned off: c.example.net (on HaGeZi TIF medium), <https://app.hrva.cc/admin/domains?search=c.example.net&id=16>");
+    }
+
+    @Test
+    void aDomainThatNeedsAttentionSaysWhatHappened() {
+        final var lines = formatter.message(List.of(
+                new DomainNeedsAttention(12L, "go.example.com", DomainProblem.PROVISIONING_FAILED),
+                new DomainNeedsAttention(13L, "menu.example.org", DomainProblem.CLOUDFLARE_BLOCKED),
+                new DomainNeedsAttention(14L, "a.example.net", DomainProblem.CNAME_REMOVED),
+                new DomainNeedsAttention(15L, "b.example.net", DomainProblem.CERTIFICATE_TIMED_OUT)), 0).content().lines().toList();
+
+        assertThat(lines).containsExactly(
+                "Custom domain needs attention: go.example.com (setting it up in Cloudflare failed), "
+                        + "<https://app.hrva.cc/admin/domains?search=go.example.com&id=12>",
+                "Custom domain needs attention: menu.example.org (Cloudflare blocked it), <https://app.hrva.cc/admin/domains?search=menu.example.org&id=13>",
+                "Custom domain needs attention: a.example.net (its CNAME record is gone), <https://app.hrva.cc/admin/domains?search=a.example.net&id=14>",
+                "Custom domain needs attention: b.example.net (the certificate timed out), <https://app.hrva.cc/admin/domains?search=b.example.net&id=15>");
+    }
+
+    @Test
+    void everyDomainProblemHasWords() {
+        final var lines = formatter.message(java.util.Arrays.stream(DomainProblem.values())
+                .<AdminAlertEvent>map(problem -> new DomainNeedsAttention(1L, "go.example.com", problem)).toList(), 0).content().lines().toList();
+
+        assertThat(lines).hasSize(DomainProblem.values().length).allSatisfy(line ->
+                assertThat(StringUtils.substringBetween(line, "go.example.com (", "), <")).isNotBlank().doesNotContain("_"));
+    }
+
+    @Test
+    void driftNamesTheUnknownAndTheMissingHostnames() {
+        final var lines = formatter.message(List.of(
+                new DomainDrift(List.of("a.example.com", "b.example.com"), List.of("x.example.org"), 5, 100),
+                new DomainDrift(List.of("a.example.com"), List.of(), null, 100),
+                new DomainDrift(List.of(), List.of("x.example.org", "y.example.org"), 1, 100)), 0).content().lines().toList();
+
+        assertThat(lines).containsExactly(
+                "Custom domain drift: Cloudflare has 2 hostnames we don't know (a.example.com, b.example.com); 1 of ours is missing in Cloudflare "
+                        + "(x.example.org). Cloudflare has 5 custom hostnames and 100 are free, <https://app.hrva.cc/admin/domains>",
+                "Custom domain drift: Cloudflare has 1 hostname we don't know (a.example.com). Cloudflare's total is unknown, "
+                        + "<https://app.hrva.cc/admin/domains>",
+                "Custom domain drift: 2 of ours are missing in Cloudflare (x.example.org, y.example.org). "
+                        + "Cloudflare has 1 custom hostname and 100 are free, <https://app.hrva.cc/admin/domains>");
+    }
+
+    @Test
+    void domainValuesDoNotFormat() {
+        final var content = formatter.message(List.of(
+                new DomainApplied(12L, "go_*x.example.com", 7L, List.of("*bold* _flag_ `code`")),
+                new DomainDisabled(13L, "a_b.example.com", DomainDisableReason.ADMIN, "**phish** <@everyone>"),
+                new DomainNeedsAttention(14L, "c*d.example.com", DomainProblem.CNAME_REMOVED),
+                new DomainDrift(List.of("e_f.example.com"), List.of("g*h.example.com"), 2, 100)), 0).content();
+
+        assertThat(content.lines().toList()).containsExactly(
+                "New custom domain application: go\\_\\*x.example.com (\\*bold\\* \\_flag\\_ code), account #7, "
+                        + "<https://app.hrva.cc/admin/domains?search=go_*x.example.com&id=12>",
+                "Custom domain turned off: a\\_b.example.com (by an admin: \\*\\*phish\\*\\* @everyone), "
+                        + "<https://app.hrva.cc/admin/domains?search=a_b.example.com&id=13>",
+                "Custom domain needs attention: c\\*d.example.com (its CNAME record is gone), <https://app.hrva.cc/admin/domains?search=c*d.example.com&id=14>",
+                "Custom domain drift: Cloudflare has 1 hostname we don't know (e\\_f.example.com); 1 of ours is missing in Cloudflare (g\\*h.example.com). "
+                        + "Cloudflare has 2 custom hostnames and 100 are free, <https://app.hrva.cc/admin/domains>");
+    }
+
+    @Test
+    void aDomainHostnameCannotChangeTheAdminSearch() {
+        final var content = formatter.message(List.of(new DomainApplied(12L, "go.example.com&status=ACTIVE>x", 7L, List.of())), 0).content();
+
+        assertThat(content).endsWith("<https://app.hrva.cc/admin/domains?search=go.example.com%26status%3DACTIVE%3Ex&id=12>");
     }
 
     @Test

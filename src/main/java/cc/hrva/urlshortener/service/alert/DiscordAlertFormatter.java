@@ -4,12 +4,18 @@ import cc.hrva.urlshortener.client.DiscordMessage;
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.dto.WeeklyDigest;
 import cc.hrva.urlshortener.model.enums.BlockReason;
+import cc.hrva.urlshortener.model.enums.DomainDisableReason;
+import cc.hrva.urlshortener.model.enums.DomainProblem;
 import cc.hrva.urlshortener.model.enums.ReportCategory;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.BioPageReported;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.BioPageReviewOpened;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.BlocklistSourceFailed;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.BlocklistSourceRecovered;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.BurstDetected;
+import cc.hrva.urlshortener.service.alert.AdminAlertEvent.DomainApplied;
+import cc.hrva.urlshortener.service.alert.AdminAlertEvent.DomainDisabled;
+import cc.hrva.urlshortener.service.alert.AdminAlertEvent.DomainDrift;
+import cc.hrva.urlshortener.service.alert.AdminAlertEvent.DomainNeedsAttention;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.LinkBlocked;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.ReviewOpened;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.UserSignedUp;
@@ -40,6 +46,7 @@ public class DiscordAlertFormatter {
     private static final String USERS_PAGE = "/admin";
     private static final String BLOCKLISTS_PAGE = "/admin/blocklists";
     private static final String STATS_PAGE = "/admin/dashboard?days=7";
+    private static final String DOMAINS_PAGE = "/admin/domains";
     private static final String IP_DESTINATION = "an IP address";
     private static final String UNREADABLE_DESTINATION = "an unreadable destination";
     private static final String LOCAL_PROVIDER = "local";
@@ -128,7 +135,63 @@ public class DiscordAlertFormatter {
                     reported.reviewOpened() ? "New bio page review from a visitor report" : "Visitor report on an open bio page review",
                     bioPage(reported.page()), report(reported.category(), reported.details()), owner(reported.page().ownerId()),
                     bioPageReviewPage(reported.page()));
+            case DomainApplied applied -> "New custom domain application: %s%s, %s, <%s>".formatted(
+                    plain(applied.hostname()), applied.flags().isEmpty() ? "" : " (" + plain(String.join(", ", applied.flags())) + ")",
+                    owner(applied.userId()), domainPage(applied.domainId(), applied.hostname()));
+            case DomainDisabled disabled -> "Custom domain turned off: %s (%s), <%s>".formatted(
+                    plain(disabled.hostname()), disableReason(disabled), domainPage(disabled.domainId(), disabled.hostname()));
+            case DomainNeedsAttention attention -> "Custom domain needs attention: %s (%s), <%s>".formatted(
+                    plain(attention.hostname()), problem(attention.problem()), domainPage(attention.domainId(), attention.hostname()));
+            case DomainDrift drift -> driftLine(drift);
         };
+    }
+
+    private String driftLine(final DomainDrift drift) {
+        final var parts = new ArrayList<String>();
+        if (!drift.unknownHostnames().isEmpty()) {
+            parts.add("Cloudflare has %s we don't know (%s)".formatted(count(drift.unknownHostnames().size(), "hostname"),
+                    plain(String.join(", ", drift.unknownHostnames()))));
+        }
+        if (!drift.missingHostnames().isEmpty()) {
+            final var missing = drift.missingHostnames().size();
+            parts.add("%d of ours %s missing in Cloudflare (%s)".formatted(missing, missing == 1 ? "is" : "are",
+                    plain(String.join(", ", drift.missingHostnames()))));
+        }
+        final var total = drift.cloudflareTotal() == null
+                ? "Cloudflare's total is unknown"
+                : "Cloudflare has %s and %d are free".formatted(count(drift.cloudflareTotal(), "custom hostname"), drift.freeAllowance());
+        return "Custom domain drift: %s. %s, <%s>".formatted(String.join("; ", parts), total, frontendPage(DOMAINS_PAGE));
+    }
+
+    private static String disableReason(final DomainDisabled disabled) {
+        final var note = plain(disabled.note());
+        final var reason = Objects.requireNonNullElse(disabled.reason(), DomainDisableReason.ADMIN);
+        return switch (reason) {
+            case ADMIN -> note.isEmpty() ? "by an admin" : "by an admin: " + note;
+            case USER_BLOCKED -> "account blocked";
+            case DOMAIN_RULE -> note.isEmpty() ? "domain rule" : "domain rule " + note;
+            case BLOCKLIST -> note.isEmpty() ? "on a blocklist" : "on " + note;
+        };
+    }
+
+    private static String problem(final DomainProblem problem) {
+        if (problem == null) {
+            return "unknown problem";
+        }
+        return switch (problem) {
+            case DNS_NOT_FOUND -> "no CNAME record yet";
+            case CAA_BLOCKED -> "CAA records block the certificate";
+            case CERTIFICATE_TIMED_OUT -> "the certificate timed out";
+            case CNAME_REMOVED -> "its CNAME record is gone";
+            case CLOUDFLARE_BLOCKED -> "Cloudflare blocked it";
+            case PROVISIONING_FAILED -> "setting it up in Cloudflare failed";
+            case DNS_TIMED_OUT -> "no CNAME record after 14 days";
+        };
+    }
+
+    private String domainPage(final long domainId, final String hostname) {
+        return frontendPage(DOMAINS_PAGE) + "?search=" + URLEncoder.encode(StringUtils.defaultString(hostname), StandardCharsets.UTF_8)
+                + "&id=" + domainId;
     }
 
     private String burstLine(final BurstDetected burst) {
