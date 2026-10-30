@@ -163,7 +163,7 @@ class SettingValuesTest {
                         "Holds the links of a same-shape alert. Off still sends the alert and lists the campaign.", SettingKey.SAME_SHAPE_ALERT, true);
         assertThat(SettingKey.CAMPAIGN_HOLD_DAYS).extracting(SettingKey::getGroup, SettingKey::getType, SettingKey::getLabel, SettingKey::getDescription,
                         SettingKey::getParent, SettingKey::isSafety, SettingKey::getMin, SettingKey::getMax, SettingKey::getUnit)
-                .containsExactly(SettingGroup.ALERTS, SettingType.NUMBER, "Same-shape alert: hold",
+                .containsExactly(SettingGroup.ALERTS, SettingType.NUMBER, "Campaign hold: days",
                         "New matching links are held for this many days after the last match.", SettingKey.CAMPAIGN_HOLD, false, 1, 90, "days");
         assertThat(Arrays.asList(SettingKey.values()).subList(SettingKey.SAME_SHAPE_ALERT.ordinal(), SettingKey.SAME_SHAPE_ALERT.ordinal() + 6))
                 .containsExactly(SettingKey.SAME_SHAPE_ALERT, SettingKey.CAMPAIGN_LINKS, SettingKey.CAMPAIGN_DOMAINS, SettingKey.CAMPAIGN_WINDOW_HOURS,

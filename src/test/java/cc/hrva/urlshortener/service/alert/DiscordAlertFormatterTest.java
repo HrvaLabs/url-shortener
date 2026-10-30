@@ -384,6 +384,46 @@ class DiscordAlertFormatterTest {
     }
 
     @Test
+    void aBatchOfCampaignLinesPointsTheOverflowAtTheCampaigns() {
+        final var alerts = IntStream.range(0, 8).<AdminAlertEvent>mapToObj(ignored -> longShapeHeld()).toList();
+
+        final var content = formatter.message(alerts, 0).content();
+        final var lines = content.lines().toList();
+
+        assertThat(content.length()).isLessThanOrEqualTo(2000);
+        assertThat(lines.size()).isBetween(2, 8);
+        assertThat(lines.getLast()).isEqualTo("and %d more, see <https://app.hrva.cc/admin/campaigns>".formatted(8 - (lines.size() - 1)));
+    }
+
+    @Test
+    void moreThanTenCampaignLinesPointTheOverflowAtTheCampaigns() {
+        final var alerts = IntStream.range(0, 12).<AdminAlertEvent>mapToObj(index -> new ShapeHeld(index, "/p" + index + "?k", "/p" + index, 3, 3,
+                Duration.ofHours(24), List.of(), true, 7)).toList();
+
+        final var lines = formatter.message(alerts, 0).content().lines().toList();
+
+        assertThat(lines.size()).isBetween(2, 11);
+        assertThat(lines.getLast()).isEqualTo("and %d more, see <https://app.hrva.cc/admin/campaigns>".formatted(12 - (lines.size() - 1)));
+    }
+
+    @Test
+    void aMixedBatchOrDroppedAlertsKeepTheReviewPageInTheOverflow() {
+        final var mixed = new ArrayList<AdminAlertEvent>(IntStream.range(0, 7).mapToObj(ignored -> longShapeHeld()).toList());
+        mixed.add(new UserSignedUp(31L, "local"));
+
+        final var mixedLines = formatter.message(mixed, 0).content().lines().toList();
+        final var droppedLines = formatter.message(List.of(longShapeHeld()), 2).content().lines().toList();
+
+        assertThat(mixedLines.getLast()).startsWith("and ").endsWith(" more, see " + REVIEW_PAGE);
+        assertThat(droppedLines.getLast()).isEqualTo("and 2 more, see " + REVIEW_PAGE);
+    }
+
+    private static ShapeHeld longShapeHeld() {
+        return new ShapeHeld(4L, "/secure-update-account-verification?id&token", "/secure-update-account-verification", 106, 105,
+                Duration.ofHours(24), List.of("aaaaaaa", "bbbbbbb", "ccccccc"), true, 7);
+    }
+
+    @Test
     void aBatchOfExactly2000CharactersIsSentWholeAndOneMoreCharacterMovesTheLastAlertIntoAndOneMore() {
         final var exactLength = 2000 - formatter.message(batchWithLastDetailsOfLength(10), 0).content().length() + 10;
 
@@ -547,7 +587,7 @@ class DiscordAlertFormatterTest {
 
         assertThat(content).isEqualTo("Campaign held: 3 links without an account on 3 domains share the URL shape /wqamhcsom?r&t in the last 24 hours. "
                 + "Examples: hrva.cc/ccc, hrva.cc/bbb, hrva.cc/aaa. New links with this shape are held for 7 days after the last one. "
-                + "Review: <https://app.hrva.cc/admin/campaigns>, links: <https://app.hrva.cc/admin/urls?search=%2Fwqamhcsom>");
+                + "Review: <https://app.hrva.cc/admin/campaigns?search=%2Fwqamhcsom>, links: <https://app.hrva.cc/admin/urls?search=%2Fwqamhcsom>");
     }
 
     @Test
@@ -557,7 +597,7 @@ class DiscordAlertFormatterTest {
 
         assertThat(content).isEqualTo("Same-shape links: 3 links without an account on 3 domains share the URL shape /wqamhcsom?r&t in the last 24 hours. "
                 + "Examples: hrva.cc/ccc, hrva.cc/bbb, hrva.cc/aaa. Nothing was held. Review them: <https://app.hrva.cc/admin/urls?search=%2Fwqamhcsom> "
-                + "Campaign: <https://app.hrva.cc/admin/campaigns>");
+                + "Campaign: <https://app.hrva.cc/admin/campaigns?search=%2Fwqamhcsom>");
     }
 
     @Test
@@ -576,7 +616,7 @@ class DiscordAlertFormatterTest {
 
         assertThat(content).isEqualTo("Campaign held: 3 links without an account on 3 domains share the URL shape /wqamhcsom?r&t in the last hour. "
                 + "New links with this shape are held for 1 day after the last one. "
-                + "Review: <https://app.hrva.cc/admin/campaigns>, links: <https://app.hrva.cc/admin/urls?search=%2Fwqamhcsom>");
+                + "Review: <https://app.hrva.cc/admin/campaigns?search=%2Fwqamhcsom>, links: <https://app.hrva.cc/admin/urls?search=%2Fwqamhcsom>");
     }
 
     @Test
@@ -593,7 +633,7 @@ class DiscordAlertFormatterTest {
                 7)), 0).content();
 
         assertThat(content).isEqualTo("Same-shape links: 3 links without an account on 3 domains share the URL shape /wqamhcsom?r&t in the last 24 hours. "
-                + "Nothing was held. Review them: <https://app.hrva.cc/admin/urls?search=%2Fwqamhcsom> Campaign: <https://app.hrva.cc/admin/campaigns>");
+                + "Nothing was held. Review them: <https://app.hrva.cc/admin/urls?search=%2Fwqamhcsom> Campaign: <https://app.hrva.cc/admin/campaigns?search=%2Fwqamhcsom>");
     }
 
     @Test
@@ -602,7 +642,7 @@ class DiscordAlertFormatterTest {
                 List.of("a_b"), true, 7)), 0).content();
 
         assertThat(content).contains("share the URL shape /log\\_in/x?a&user\\_id in the last hour. ", "Examples: hrva.cc/a\\_b. ",
-                "<https://app.hrva.cc/admin/urls?search=%2Flog_in%2F%60x%60>");
+                "<https://app.hrva.cc/admin/urls?search=%2Flog_in%2F%60x%60>", "Review: <https://app.hrva.cc/admin/campaigns?search=%2Flog_in%2F%60x%60>");
     }
 
     @Test

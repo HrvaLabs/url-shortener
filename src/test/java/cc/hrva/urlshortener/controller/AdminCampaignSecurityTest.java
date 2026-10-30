@@ -96,10 +96,10 @@ class AdminCampaignSecurityTest {
     private static final LocalDateTime LAST_SEEN = LocalDateTime.of(2026, 10, 29, 9, 30);
     private static final LocalDateTime HELD_UNTIL = LocalDateTime.of(2026, 11, 5, 9, 30);
     private static final CampaignResponse CAMPAIGN = new CampaignResponse(4L, "/wqamhcsom?r&t", "/wqamhcsom", List.of("r", "t"),
-            CampaignStatus.HOLDING, true, FIRST_SEEN, LAST_SEEN, HELD_UNTIL, null, null, new CampaignResponse.Links(62, 0, 58, 4), 39, 970,
+            CampaignStatus.HOLDING, true, null, FIRST_SEEN, LAST_SEEN, HELD_UNTIL, null, null, new CampaignResponse.Links(62, 0, 58, 4), 39, 970,
             new CampaignResponse.Reports(39, 12));
     private static final String CAMPAIGN_JSON = """
-            {"id":4,"shape":"/wqamhcsom?r&t","path":"/wqamhcsom","queryNames":["r","t"],"status":"HOLDING","holding":true,
+            {"id":4,"shape":"/wqamhcsom?r&t","path":"/wqamhcsom","queryNames":["r","t"],"status":"HOLDING","holding":true,"holdingOff":null,
              "firstSeenAt":"2026-10-20T08:15:00","lastSeenAt":"2026-10-29T09:30:00","activeUntil":"2026-11-05T09:30:00",
              "allowedBy":null,"allowedAt":null,"links":{"total":62,"active":0,"held":58,"blocked":4},"domains":39,"clicks":970,
              "reports":{"reported":39,"suspended":12}}""";

@@ -39,7 +39,7 @@ public enum SettingKey {
             "Links are counted over this many hours.", SAME_SHAPE_ALERT, 1, 168, "hours"),
     CAMPAIGN_HOLD(SettingGroup.ALERTS, "Hold links with a campaign URL shape",
             "Holds the links of a same-shape alert. Off still sends the alert and lists the campaign.", SAME_SHAPE_ALERT, true),
-    CAMPAIGN_HOLD_DAYS(SettingGroup.ALERTS, "Same-shape alert: hold",
+    CAMPAIGN_HOLD_DAYS(SettingGroup.ALERTS, "Campaign hold: days",
             "New matching links are held for this many days after the last match.", CAMPAIGN_HOLD, 1, 90, "days"),
     TRAFFIC_ALERTS(SettingGroup.ALERTS, "Traffic alerts",
             "Discord alerts about busy links without an account.", null, false),

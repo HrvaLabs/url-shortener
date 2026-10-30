@@ -99,15 +99,14 @@ public class DefaultAbuseReportService implements AbuseReportService {
         final var noContact = new ArrayList<AbuseReportResponse.NoContact>();
         for (final var domain : domains) {
             if (!isRegistryDomain(domain)) {
-                noContact.add(new AbuseReportResponse.NoContact(domain, null, false, statusOf(reports, domain)));
+                noContact.add(AbuseReportResponse.NoContact.of(domain, null, AbuseReportResponse.Reason.SHARED_SUFFIX, statusOf(reports, domain)));
                 continue;
             }
             final var record = Optional.ofNullable(records.get(domain)).orElseGet(() -> DomainRecord.failed(domain));
             if (record.status() == DomainRecord.Status.FOUND && EmailAddresses.isValid(record.abuseEmail())) {
                 groups.computeIfAbsent(record.abuseEmail().toLowerCase(Locale.ROOT), key -> new ArrayList<>()).add(withDomain(record, domain));
             } else {
-                noContact.add(new AbuseReportResponse.NoContact(domain, record.registrar(), record.status() == DomainRecord.Status.FAILED,
-                        statusOf(reports, domain)));
+                noContact.add(AbuseReportResponse.NoContact.of(domain, record.registrar(), noContactReason(record), statusOf(reports, domain)));
             }
         }
 
@@ -201,6 +200,15 @@ public class DefaultAbuseReportService implements AbuseReportService {
         } catch (final RuntimeException exception) {
             log.warn("Pending suspension delete failed domain={} exception={}", domain, exception.getClass().getName());
         }
+    }
+
+    private static AbuseReportResponse.Reason noContactReason(final DomainRecord record) {
+        return switch (record.status()) {
+            case NO_RDAP_SERVER -> AbuseReportResponse.Reason.NO_REGISTRY;
+            case FAILED -> AbuseReportResponse.Reason.LOOKUP_FAILED;
+            case NOT_FOUND -> AbuseReportResponse.Reason.NOT_REGISTERED;
+            case FOUND -> AbuseReportResponse.Reason.NO_ABUSE_EMAIL;
+        };
     }
 
     private static boolean isRegistryDomain(final String domain) {

@@ -133,8 +133,11 @@ class AdminAbuseReportSecurityTest {
                         "Phishing: 2 domains used in links to wwkn0gb.bgp37.sbs", "Hello,\n\nI run hrva.cc",
                         List.of(new AbuseReportResponse.Domain("omaehhm.com", LocalDate.of(2026, 8, 14), report),
                                 new AbuseReportResponse.Domain("buokpky.com", null, null)))),
-                List.of(new AbuseReportResponse.NoContact("example.hr", null, false, null),
-                        new AbuseReportResponse.NoContact("slow.com", "Some Registrar", true, null))));
+                List.of(new AbuseReportResponse.NoContact("example.hr", null, false, AbuseReportResponse.Reason.NO_REGISTRY, null),
+                        new AbuseReportResponse.NoContact("slow.com", "Some Registrar", true, AbuseReportResponse.Reason.LOOKUP_FAILED, null),
+                        new AbuseReportResponse.NoContact("quiet.com", "Quiet Registrar", false, AbuseReportResponse.Reason.NO_ABUSE_EMAIL, null),
+                        new AbuseReportResponse.NoContact("gone.com", null, false, AbuseReportResponse.Reason.NOT_REGISTERED, null),
+                        new AbuseReportResponse.NoContact("evil.pages.dev", null, false, AbuseReportResponse.Reason.SHARED_SUFFIX, null))));
 
         mockMvc.perform(signedIn(post(PREPARE), "admin-token").content("{\"urlIds\":[41,42]}"))
                 .andExpect(status().isOk())
@@ -144,8 +147,12 @@ class AdminAbuseReportSecurityTest {
                           "domains":[{"domain":"omaehhm.com","registeredOn":"2026-08-14",
                                       "report":{"reportedAt":"2026-10-28T07:00:00","reportedBy":"karlo@hrva.cc","registrar":"NameSilo, LLC","suspendedAt":null}},
                                      {"domain":"buokpky.com","registeredOn":null,"report":null}]}],
-                         "noContact":[{"domain":"example.hr","registrar":null,"lookupFailed":false,"report":null},
-                                      {"domain":"slow.com","registrar":"Some Registrar","lookupFailed":true,"report":null}]}""", JsonCompareMode.STRICT));
+                         "noContact":[{"domain":"example.hr","registrar":null,"lookupFailed":false,"reason":"noRegistry","report":null},
+                                      {"domain":"slow.com","registrar":"Some Registrar","lookupFailed":true,"reason":"lookupFailed","report":null},
+                                      {"domain":"quiet.com","registrar":"Quiet Registrar","lookupFailed":false,"reason":"noAbuseEmail","report":null},
+                                      {"domain":"gone.com","registrar":null,"lookupFailed":false,"reason":"notRegistered","report":null},
+                                      {"domain":"evil.pages.dev","registrar":null,"lookupFailed":false,"reason":"sharedSuffix","report":null}]}""",
+                        JsonCompareMode.STRICT));
     }
 
     @Test

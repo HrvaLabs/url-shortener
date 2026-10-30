@@ -773,13 +773,52 @@ class DefaultCampaignServiceTest {
         final var rows = campaignService.campaigns(null, PageRequest.of(0, 20)).getContent();
 
         assertThat(rows).containsExactly(
-                new CampaignResponse(4L, SHAPE, PATH, List.of("r", "t"), CampaignStatus.HOLDING, true, NOW_LOCAL.minusDays(10), NOW_LOCAL.minusDays(1),
+                new CampaignResponse(4L, SHAPE, PATH, List.of("r", "t"), CampaignStatus.HOLDING, true, null, NOW_LOCAL.minusDays(10), NOW_LOCAL.minusDays(1),
                         HELD_UNTIL, null, null, new CampaignResponse.Links(62, 0, 58, 3), 39, 0, new CampaignResponse.Reports(0, 0)),
-                new CampaignResponse(5L, SHAPE, PATH, List.of("r", "t"), CampaignStatus.HOLDING, false, NOW_LOCAL.minusDays(10), NOW_LOCAL.minusDays(1),
+                new CampaignResponse(5L, SHAPE, PATH, List.of("r", "t"), CampaignStatus.HOLDING, false, null, NOW_LOCAL.minusDays(10), NOW_LOCAL.minusDays(1),
                         NOW_LOCAL, null, null, new CampaignResponse.Links(0, 0, 0, 0), 0, 0, new CampaignResponse.Reports(0, 0)),
-                new CampaignResponse(6L, SHAPE, PATH, List.of("r", "t"), CampaignStatus.ALLOWED, false, NOW_LOCAL.minusDays(10), NOW_LOCAL.minusDays(1),
+                new CampaignResponse(6L, SHAPE, PATH, List.of("r", "t"), CampaignStatus.ALLOWED, false, null, NOW_LOCAL.minusDays(10), NOW_LOCAL.minusDays(1),
                         NOW_LOCAL.plusDays(3), ADMIN, NOW_LOCAL.minusHours(2), new CampaignResponse.Links(0, 0, 0, 0), 0, 0,
                         new CampaignResponse.Reports(0, 0)));
+    }
+
+    @Test
+    void aHoldingRowIsNotHoldingWhileEitherSwitchIsOffAndSaysWhy() {
+        final var holding = row(CampaignStatus.HOLDING, HELD_UNTIL);
+        final var expired = row(CampaignStatus.HOLDING, NOW_LOCAL);
+        expired.setId(5L);
+        final var alertOnly = row(CampaignStatus.ALERT_ONLY, HELD_UNTIL);
+        alertOnly.setId(6L);
+        when(campaignRepository.findRecent(any(), anyString(), any(Pageable.class)))
+                .thenAnswer(invocation -> new PageImpl<>(List.of(holding, expired, alertOnly), PageRequest.of(0, 20), 3));
+
+        SettingsServiceFixtures.turnOff(settingsService, SettingKey.CAMPAIGN_HOLD);
+        final var holdOff = campaignService.campaigns(null, PageRequest.of(0, 20)).getContent();
+        SettingsServiceFixtures.turnOn(settingsService, SettingKey.CAMPAIGN_HOLD);
+        SettingsServiceFixtures.turnOff(settingsService, SettingKey.SAME_SHAPE_ALERT);
+        final var alertOff = campaignService.campaigns(null, PageRequest.of(0, 20)).getContent();
+
+        for (final var rows : List.of(holdOff, alertOff)) {
+            assertThat(rows).extracting(CampaignResponse::id, CampaignResponse::status, CampaignResponse::holding, CampaignResponse::holdingOff)
+                    .containsExactly(
+                            org.assertj.core.groups.Tuple.tuple(4L, CampaignStatus.HOLDING, false, "switch"),
+                            org.assertj.core.groups.Tuple.tuple(5L, CampaignStatus.HOLDING, false, null),
+                            org.assertj.core.groups.Tuple.tuple(6L, CampaignStatus.ALERT_ONLY, false, null));
+        }
+        assertThat(holding.getStatus()).isEqualTo(CampaignStatus.HOLDING);
+        verify(campaignRepository, never()).save(any());
+    }
+
+    @Test
+    void detailSaysTheHoldIsOffToo() {
+        final var holding = row(CampaignStatus.HOLDING, HELD_UNTIL);
+        when(campaignRepository.findById(4L)).thenReturn(Optional.of(holding));
+        SettingsServiceFixtures.turnOff(settingsService, SettingKey.CAMPAIGN_HOLD);
+
+        final var campaign = campaignService.detail(4L).campaign();
+
+        assertThat(campaign.holding()).isFalse();
+        assertThat(campaign.holdingOff()).isEqualTo("switch");
     }
 
     @Test

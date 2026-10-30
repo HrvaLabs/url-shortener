@@ -202,10 +202,10 @@ class DefaultAbuseReportServiceTest {
         final var response = abuseReportService.prepare(new AbuseReportRequest(List.of(1L, 2L, 3L, 4L, 5L), null));
 
         assertThat(response.noContact()).containsExactly(
-                new AbuseReportResponse.NoContact("failed.com", null, true, null),
-                new AbuseReportResponse.NoContact("gone.com", null, false, null),
-                new AbuseReportResponse.NoContact("njuskalo.hr", null, false, null),
-                new AbuseReportResponse.NoContact("no-email.com", "Quiet Registrar", false, null));
+                new AbuseReportResponse.NoContact("failed.com", null, true, AbuseReportResponse.Reason.LOOKUP_FAILED, null),
+                new AbuseReportResponse.NoContact("gone.com", null, false, AbuseReportResponse.Reason.NOT_REGISTERED, null),
+                new AbuseReportResponse.NoContact("njuskalo.hr", null, false, AbuseReportResponse.Reason.NO_REGISTRY, null),
+                new AbuseReportResponse.NoContact("no-email.com", "Quiet Registrar", false, AbuseReportResponse.Reason.NO_ABUSE_EMAIL, null));
         assertThat(response.reports()).singleElement().satisfies(report -> {
             assertThat(report.registrar()).isEqualTo("registry.example");
             assertThat(report.to()).isEqualTo("abuse@registry.example");
@@ -222,8 +222,10 @@ class DefaultAbuseReportServiceTest {
         final var response = abuseReportService.prepare(new AbuseReportRequest(List.of(1L, 2L), null));
 
         assertThat(response.reports()).isEmpty();
-        assertThat(response.noContact()).extracting(AbuseReportResponse.NoContact::domain, AbuseReportResponse.NoContact::lookupFailed)
-                .containsExactly(tuple("hostile.com", false), tuple("listed.com", false));
+        assertThat(response.noContact())
+                .extracting(AbuseReportResponse.NoContact::domain, AbuseReportResponse.NoContact::lookupFailed, AbuseReportResponse.NoContact::reason)
+                .containsExactly(tuple("hostile.com", false, AbuseReportResponse.Reason.NO_ABUSE_EMAIL),
+                        tuple("listed.com", false, AbuseReportResponse.Reason.NO_ABUSE_EMAIL));
         assertThat(response.noContact().getFirst().registrar()).startsWith("Evil Registrar XXX").hasSize(255);
         assertThat(response.noContact().get(1).registrar()).isEqualTo("Listed Registrar");
     }
@@ -250,7 +252,8 @@ class DefaultAbuseReportServiceTest {
         final var response = abuseReportService.prepare(new AbuseReportRequest(List.of(1L, 2L), null));
 
         verify(domainAgeService).records(List.of("omaehhm.com"), false);
-        assertThat(response.noContact()).containsExactly(new AbuseReportResponse.NoContact("evil.pages.dev", null, false, ReportStatus.from(reported)));
+        assertThat(response.noContact()).containsExactly(new AbuseReportResponse.NoContact("evil.pages.dev", null, false,
+                AbuseReportResponse.Reason.SHARED_SUFFIX, ReportStatus.from(reported)));
         assertThat(response.reports()).extracting(AbuseReportResponse.Report::registrar).containsExactly(NAMESILO);
     }
 

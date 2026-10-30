@@ -70,9 +70,10 @@ public class DiscordAlertFormatter {
 
     public DiscordMessage message(final List<AdminAlertEvent> alerts, final int dropped) {
         final var lines = alerts.stream().limit(MAX_LINES).map(this::line).toList();
-        final var reviewPage = frontendPage(REVIEW_PAGE);
+        final var onlyCampaigns = dropped == 0 && alerts.stream().allMatch(ShapeHeld.class::isInstance);
+        final var overflowPage = frontendPage(onlyCampaigns ? CAMPAIGNS_PAGE : REVIEW_PAGE);
         return DiscordMessage.withoutMentionsOrEmbeds(everyLineThatFits(lines, alerts.size() - lines.size() + dropped,
-                more -> "and %d more, see <%s>".formatted(more, reviewPage)));
+                more -> "and %d more, see <%s>".formatted(more, overflowPage)));
     }
 
     public DiscordMessage weeklyDigest(final WeeklyDigest digest) {
@@ -240,10 +241,10 @@ public class DiscordAlertFormatter {
                 .map(alias -> shortLinks.display(null, plain(alias))).toList();
         final var shared = "%d links without an account on %d domains share the URL shape %s in the last %s. %s".formatted(held.links(), held.domains(),
                 plain(held.shape()), window(held.window()), examples.isEmpty() ? "" : "Examples: " + String.join(", ", examples) + ". ");
-        final var campaigns = linked(frontendPage(CAMPAIGNS_PAGE));
-        final var links = ROOT_PATH.equals(held.path())
-                ? Optional.<String>empty()
-                : Optional.of(linked(frontendPage(LINKS_PAGE) + "?search=" + URLEncoder.encode(held.path(), StandardCharsets.UTF_8)));
+        final var rootPath = ROOT_PATH.equals(held.path());
+        final var pathSearch = "?search=" + URLEncoder.encode(held.path(), StandardCharsets.UTF_8);
+        final var campaigns = linked(frontendPage(CAMPAIGNS_PAGE) + (rootPath ? "" : pathSearch));
+        final var links = rootPath ? Optional.<String>empty() : Optional.of(linked(frontendPage(LINKS_PAGE) + pathSearch));
         if (held.holding()) {
             return "Campaign held: %sNew links with this shape are held for %s after the last one. Review: %s%s".formatted(shared,
                     count(held.holdDays(), "day"), campaigns, links.map(search -> ", links: " + search).orElse(""));

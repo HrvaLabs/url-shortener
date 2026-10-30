@@ -222,16 +222,18 @@ public class DefaultCampaignService implements CampaignService {
                 .collect(Collectors.toMap(CampaignReportCounts::campaignId, Function.identity()));
         final var clicks = clicksByCampaign(ids, earliest(counts.values().stream().map(CampaignLinkCounts::firstLinkCreated).toList()));
         final var now = now();
-        return campaigns.stream().collect(Collectors.toMap(Campaign::getId, campaign -> response(campaign, now,
+        final var holdsNewLinks = holdsNewLinks();
+        return campaigns.stream().collect(Collectors.toMap(Campaign::getId, campaign -> response(campaign, now, holdsNewLinks,
                 Optional.ofNullable(counts.get(campaign.getId())), Optional.ofNullable(reports.get(campaign.getId())),
                 clicks.getOrDefault(campaign.getId(), 0L))));
     }
 
-    private static CampaignResponse response(final Campaign campaign, final LocalDateTime now, final Optional<CampaignLinkCounts> counts,
-                                             final Optional<CampaignReportCounts> reports, final long clicks) {
+    private static CampaignResponse response(final Campaign campaign, final LocalDateTime now, final boolean holdsNewLinks,
+                                             final Optional<CampaignLinkCounts> counts, final Optional<CampaignReportCounts> reports, final long clicks) {
+        final var holdingRow = campaign.isHoldingAt(now);
         return new CampaignResponse(campaign.getId(), campaign.shape().display(), campaign.getPath(), campaign.getQueryNames(), campaign.getStatus(),
-                campaign.isHoldingAt(now), campaign.getFirstSeenAt(), campaign.getLastSeenAt(), campaign.getActiveUntil(), campaign.getAllowedBy(),
-                campaign.getAllowedAt(),
+                holdingRow && holdsNewLinks, holdingRow && !holdsNewLinks ? CampaignResponse.HOLDS_TURNED_OFF : null, campaign.getFirstSeenAt(),
+                campaign.getLastSeenAt(), campaign.getActiveUntil(), campaign.getAllowedBy(), campaign.getAllowedAt(),
                 counts.map(count -> new CampaignResponse.Links(count.total(), count.active(), count.held(), count.blocked()))
                         .orElseGet(() -> new CampaignResponse.Links(0, 0, 0, 0)),
                 counts.map(CampaignLinkCounts::domains).orElse(0L),

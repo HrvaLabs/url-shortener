@@ -1396,8 +1396,8 @@ show "$CAMPAIGN_POST"
 expect_eq "$(campaign_lines)" 1 "the Discord stub got one Campaign held: 3 links line"
 expect_contains "$CAMPAIGN_POST" "share the URL shape /wqamhcsom?r&t in the last 24 hours." "the line names the shape, with the query values left out"
 expect_contains "$CAMPAIGN_POST" "New links with this shape are held for 7 days after the last one." "it says how long new links are held"
-expect_contains "$CAMPAIGN_POST" "Review: <$FRONTEND_URL/admin/campaigns>, links: <$FRONTEND_URL/admin/urls?search=%2Fwqamhcsom>" \
-    "and links to the Campaigns page and the matching links in All URLs"
+expect_contains "$CAMPAIGN_POST" "Review: <$FRONTEND_URL/admin/campaigns?search=%2Fwqamhcsom>, links: <$FRONTEND_URL/admin/urls?search=%2Fwqamhcsom>" \
+    "and links to the campaign on the Campaigns page and the matching links in All URLs"
 for alias in "${SHAPE_ALIASES[@]}"; do
     expect_contains "$CAMPAIGN_POST" "$alias" "the line shows the example $alias"
 done
@@ -1575,15 +1575,21 @@ show "$SETTINGS_SHAPE_POST"
 expect_eq "$(settings_shape_lines)" 1 "the fourth link on a fourth domain gives exactly one same-shape line"
 expect_contains "$SETTINGS_SHAPE_POST" "Same-shape links: 4 links without an account on 4 domains share the URL shape /e2esettings?r&t in the last 24 hours." \
     "and it reads Same-shape links: 4 links"
-expect_contains "$SETTINGS_SHAPE_POST" "Nothing was held. Review them: <$FRONTEND_URL/admin/urls?search=%2Fe2esettings> Campaign: <$FRONTEND_URL/admin/campaigns>" \
-    "it says nothing was held and links to All URLs and the Campaigns page"
+expect_contains "$SETTINGS_SHAPE_POST" "Nothing was held. Review them: <$FRONTEND_URL/admin/urls?search=%2Fe2esettings> Campaign: <$FRONTEND_URL/admin/campaigns?search=%2Fe2esettings>" \
+    "it says nothing was held and links to All URLs and the campaign on the Campaigns page"
 expect_eq "$(jq -s '[.[].content | select(startswith("Campaign held:") and contains("/e2esettings"))] | length' "$DISCORD_POSTS")" 0 "no Campaign held: line for the shape"
 expect_eq "$(psql_value "select count(*) filter (where active and owner_id is null and blocked_at is null and block_reason is null) || ' of ' || count(*) from url where long_url like '%e2e-set-%';")" \
     "4 of 4" "all four links are active and not blocked: the switch held nothing"
 expect_eq "$(psql_value "select status || ' ' || path || ' ' || (select count(*) from campaign_link l where l.campaign_id = c.id) from campaign c where path = '/e2esettings';")" \
     "ALERT_ONLY /e2esettings 4" "the campaign row is ALERT_ONLY with four links"
+http "$BASE/api/v1/admin/campaigns?search=wqamhcsom" -H "Authorization: Bearer $ADMIN_JWT"
+expect_eq "$HTTP_STATUS $(jq -c '.content[0] | [.status, .holding, .holdingOff]' <<<"$HTTP_BODY")" '200 ["HOLDING",false,"switch"]' \
+    "with CAMPAIGN_HOLD off, section 23's campaign stays HOLDING but answers holding false and holdingOff switch"
 reset_setting CAMPAIGN_HOLD
 expect_eq "$HTTP_STATUS $(jq -r '[.value, .changed] | map(tostring) | join(",")' <<<"$HTTP_BODY")" "200 true,false" "DELETE CAMPAIGN_HOLD resets it"
+http "$BASE/api/v1/admin/campaigns?search=wqamhcsom" -H "Authorization: Bearer $ADMIN_JWT"
+expect_eq "$HTTP_STATUS $(jq -c '.content[0] | [.status, .holding, .holdingOff]' <<<"$HTTP_BODY")" '200 ["HOLDING",true,null]' \
+    "with CAMPAIGN_HOLD on again, it holds again"
 reset_setting CAMPAIGN_LINKS
 expect_eq "$HTTP_STATUS $(jq -r '[.value, .changed] | map(tostring) | join(",")' <<<"$HTTP_BODY")" "200 3,false" "DELETE CAMPAIGN_LINKS resets it"
 
@@ -1703,8 +1709,8 @@ expect_eq "$(jq -c '[.reports[] | [.registrar, .to, .cc, [.domains[].domain]]]' 
     '[["E2E Registrar, LLC","abuse@e2e-registrar.example",["reportphishing@apwg.org"],["e2e-camp-a.com","e2e-camp-b.com"]],["E2E Other Registrar","abuse@e2e-other.example",["reportphishing@apwg.org"],["e2e-camp-c.com"]]]' \
     "two cards, the larger first, each to its registrar's abuse address with the default Cc"
 expect_eq "$(jq -c '.reports[0].domains | map([.registeredOn, .report])' <<<"$ABUSE_BODY")" '[["2026-08-14",null],["2026-08-15",null]]' "the card has the registration dates and no report yet"
-expect_eq "$(jq -c '.noContact' <<<"$ABUSE_BODY")" '[{"domain":"e2e-camp-d.com","registrar":null,"lookupFailed":false,"report":null}]' \
-    "the domain with no RDAP server is listed as no contact, not as a failed lookup"
+expect_eq "$(jq -c '.noContact' <<<"$ABUSE_BODY")" '[{"domain":"e2e-camp-d.com","registrar":null,"lookupFailed":false,"reason":"noRegistry","report":null}]' \
+    "the domain with no RDAP server is listed as no contact with the reason noRegistry, not as a failed lookup"
 expect_contains "$(jq -r '.reports[0].subject' <<<"$ABUSE_BODY")" "Phishing: 2 domains used in links to " "the subject counts the domains"
 ABUSE_EMAIL_TEXT=$(jq -r '.reports[0].body' <<<"$ABUSE_BODY")
 show "$ABUSE_EMAIL_TEXT"
