@@ -399,19 +399,35 @@ class CustomDomainSchemaTest {
         final var provisioning = savedDomain(domain("new.example.com", CustomDomainStatus.APPROVED_PROVISIONING).owner(owner));
         final var queued = savedDomain(domain("gone.example.com", CustomDomainStatus.DELETED).cloudflareId("cf-3").cloudflareDeletePending(true));
         final var deleted = savedDomain(domain("old.example.com", CustomDomainStatus.DELETED).hostnameKey(null).cloudflareId("cf-4"));
-        final var failed = savedDomain(domain("failed.example.com", CustomDomainStatus.ERROR).problem(DomainProblem.PROVISIONING_FAILED));
+        final var failed = savedDomain(domain("failed.example.com", CustomDomainStatus.ERROR).problem(DomainProblem.PROVISIONING_FAILED)
+                .lastError("Cloudflare no longer has this hostname"));
         savedDomain(domain("pending.example.com", CustomDomainStatus.PENDING_REVIEW).owner(owner));
         savedDomain(domain("rejected.example.com", CustomDomainStatus.REJECTED).hostnameKey(null));
 
         assertThat(customDomainRepository.findForReconcile(EnumSet.of(CustomDomainStatus.APPROVED_PROVISIONING, CustomDomainStatus.AWAITING_DNS,
                 CustomDomainStatus.ACTIVE, CustomDomainStatus.DISABLED, CustomDomainStatus.ERROR)))
                 .containsExactly(
-                        new DomainInCloudflare(active.getId(), "active.example.com", CustomDomainStatus.ACTIVE, null, "cf-1", false),
-                        new DomainInCloudflare(provisioning.getId(), "new.example.com", CustomDomainStatus.APPROVED_PROVISIONING, null, null, false),
-                        new DomainInCloudflare(queued.getId(), "gone.example.com", CustomDomainStatus.DELETED, null, "cf-3", true),
-                        new DomainInCloudflare(deleted.getId(), "old.example.com", CustomDomainStatus.DELETED, null, "cf-4", false),
-                        new DomainInCloudflare(failed.getId(), "failed.example.com", CustomDomainStatus.ERROR, DomainProblem.PROVISIONING_FAILED, null,
-                                false));
+                        new DomainInCloudflare(active.getId(), "active.example.com", CustomDomainStatus.ACTIVE, null, null, "cf-1", false),
+                        new DomainInCloudflare(provisioning.getId(), "new.example.com", CustomDomainStatus.APPROVED_PROVISIONING, null, null, null,
+                                false),
+                        new DomainInCloudflare(queued.getId(), "gone.example.com", CustomDomainStatus.DELETED, null, null, "cf-3", true),
+                        new DomainInCloudflare(deleted.getId(), "old.example.com", CustomDomainStatus.DELETED, null, null, "cf-4", false),
+                        new DomainInCloudflare(failed.getId(), "failed.example.com", CustomDomainStatus.ERROR, DomainProblem.PROVISIONING_FAILED,
+                                "Cloudflare no longer has this hostname", null, false));
+    }
+
+    @Test
+    void aHostnameCreatedWhileTheDomainWasTurnedOffIsKeptOnlyByThatDomain() {
+        final var disabled = savedDomain(domain("go.example.com", CustomDomainStatus.DISABLED));
+        final var deleted = savedDomain(domain("old.example.com", CustomDomainStatus.DELETED).hostnameKey(null));
+        final var recorded = savedDomain(domain("links.example.org", CustomDomainStatus.DISABLED).cloudflareId("cf-9"));
+
+        assertThat(customDomainRepository.keepCreatedWhileDisabled(disabled.getId(), "cf-1", NOW)).isOne();
+        assertThat(customDomainRepository.keepCreatedWhileDisabled(disabled.getId(), "cf-2", NOW)).isZero();
+        assertThat(customDomainRepository.keepCreatedWhileDisabled(deleted.getId(), "cf-3", NOW)).isZero();
+        assertThat(customDomainRepository.keepCreatedWhileDisabled(recorded.getId(), "cf-4", NOW)).isZero();
+        assertThat(jdbcTemplate.queryForList("select cloudflare_id from custom_domain where id in (?, ?, ?) order by id", String.class,
+                disabled.getId(), deleted.getId(), recorded.getId())).containsExactly("cf-1", null, "cf-9");
     }
 
     @Test

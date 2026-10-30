@@ -237,7 +237,7 @@ public class DefaultCustomDomainAdminService implements CustomDomainAdminService
             log.info("Custom domain approval refused for a deactivated or deleted account domainId={}", id);
             throw new CustomDomainConflictException(OWNER_DEACTIVATED);
         }
-        requireRoom(id, cloudflareTotal);
+        requireRoom(id, cloudflareTotal, false);
         if (customDomainRepository.markApproved(id, performedBy, note, LocalDateTime.now(clock)) != 1) {
             log.info("Custom domain application was reviewed before its approval domainId={}", id);
             throw new CustomDomainConflictException(ALREADY_REVIEWED);
@@ -246,9 +246,9 @@ public class DefaultCustomDomainAdminService implements CustomDomainAdminService
         return reread(id);
     }
 
-    private void requireRoom(final long id, final int cloudflareTotal) {
+    private void requireRoom(final long id, final int cloudflareTotal, final boolean holdsASlot) {
         final var settings = appProperties.getDomains();
-        final var slotsInUse = customDomainRepository.countSlotsInUse();
+        final var slotsInUse = customDomainRepository.countSlotsInUse() - (holdsASlot ? 1 : 0);
         if (slotsInUse >= settings.getMaxActive()) {
             log.info("Custom domain refused at the cap domainId={} slotsInUse={} maxActive={}", id, slotsInUse, settings.getMaxActive());
             throw new CustomDomainConflictException(CAP_REACHED.formatted(slotsInUse, settings.getMaxActive()));
@@ -264,12 +264,10 @@ public class DefaultCustomDomainAdminService implements CustomDomainAdminService
 
     private void provisionAgain(final CustomDomain domain) {
         final var id = domain.getId();
-        final var cloudflareTotal = domain.getCloudflareId() == null ? liveTotal(cloudflareTokenCheck.check(), id) : null;
+        final int cloudflareTotal = liveTotal(cloudflareTokenCheck.check(), id);
         transactionOperations.executeWithoutResult(transaction -> {
-            if (cloudflareTotal != null) {
-                customDomainCapLock.lock();
-                requireRoom(id, cloudflareTotal);
-            }
+            customDomainCapLock.lock();
+            requireRoom(id, cloudflareTotal, domain.getCloudflareId() != null);
             if (customDomainRepository.markRetrying(id, LocalDateTime.now(clock)) != 1) {
                 log.info("Custom domain changed before its retry domainId={}", id);
                 throw new CustomDomainConflictException(NOTHING_TO_RETRY);

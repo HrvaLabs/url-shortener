@@ -467,7 +467,7 @@ class DefaultCustomDomainAdminServiceTest {
     @Test
     void onlyTheProvisionerCreatesHostnames() {
         final var provisioner = new CustomDomainProvisioner(customDomainRepository, cloudflareClient, eventPublisher, TransactionOperations.withoutTransaction(),
-                Clock.fixed(NOW_INSTANT, ZoneOffset.UTC));
+                appProperties, Clock.fixed(NOW_INSTANT, ZoneOffset.UTC));
         final var notApproved = Arrays.stream(CustomDomainStatus.values()).filter(status -> status != CustomDomainStatus.APPROVED_PROVISIONING).toList();
         for (final var status : notApproved) {
             final var row = domain(status);
@@ -489,7 +489,7 @@ class DefaultCustomDomainAdminServiceTest {
     @Test
     void theAsyncHandOverRunsTheProvisioner() {
         final var provisioner = new CustomDomainProvisioner(customDomainRepository, cloudflareClient, eventPublisher, TransactionOperations.withoutTransaction(),
-                Clock.fixed(NOW_INSTANT, ZoneOffset.UTC));
+                appProperties, Clock.fixed(NOW_INSTANT, ZoneOffset.UTC));
         when(customDomainRepository.findById(ID)).thenReturn(Optional.of(domain(CustomDomainStatus.REJECTED)));
 
         provisioner.provisionAsync(ID);
@@ -696,7 +696,35 @@ class DefaultCustomDomainAdminServiceTest {
 
         assertThat(steps).containsSubsequence("begin", "markRetrying", "commit", "provision");
         verify(eventPublisher).publishEvent(new CustomDomainChangedEvent(ID));
-        verifyNoInteractions(customDomainCapLock, cloudflareTokenCheck, customDomainLifecycle);
+        final var order = inOrder(cloudflareTokenCheck, customDomainCapLock, customDomainRepository);
+        order.verify(cloudflareTokenCheck).check();
+        order.verify(customDomainCapLock).lock();
+        order.verify(customDomainRepository).countByStatus(CustomDomainStatus.APPROVED_PROVISIONING);
+        order.verify(customDomainRepository).markRetrying(ID, NOW);
+        verifyNoInteractions(customDomainLifecycle);
+    }
+
+    @Test
+    void retryOfAFailedDomainStillHoldingAHostnameNeedsTheFreeAllowanceButIsNotCountedTwiceAgainstTheCap() {
+        retrying(CustomDomainStatus.ERROR, DomainProblem.PROVISIONING_FAILED, "cf-gone");
+        when(customDomainRepository.markRetrying(ID, NOW)).thenReturn(1);
+        when(customDomainRepository.countSlotsInUse()).thenReturn(90L);
+
+        customDomainAdminService.retry(ID);
+
+        verify(customDomainProvisioner).provision(ID);
+        when(customDomainRepository.countSlotsInUse()).thenReturn(91L);
+        assertThatThrownBy(() -> customDomainAdminService.retry(ID)).isInstanceOf(CustomDomainConflictException.class)
+                .hasMessage("Cap reached: 90 of 90 custom domains are in use. Delete one or raise the cap (APP_DOMAINS_MAX_ACTIVE).");
+
+        when(customDomainRepository.countSlotsInUse()).thenReturn(3L);
+        when(customDomainRepository.countByStatus(CustomDomainStatus.APPROVED_PROVISIONING)).thenReturn(1L);
+        when(cloudflareTokenCheck.check()).thenReturn(token(CloudflareTokenStatus.OK, 99));
+        assertThatThrownBy(() -> customDomainAdminService.retry(ID)).isInstanceOf(CustomDomainConflictException.class)
+                .hasMessage("Cloudflare already has 100 custom hostnames and 100 are free. Delete one here or in Cloudflare first.");
+
+        verify(customDomainRepository, times(1)).markRetrying(ID, NOW);
+        verify(customDomainProvisioner, times(1)).provision(ID);
     }
 
     @Test

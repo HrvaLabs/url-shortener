@@ -20,21 +20,21 @@ public final class DomainCheckSchedule {
     private DomainCheckSchedule() {
     }
 
-    public static LocalDateTime nextCheck(final CustomDomainStatus status, final DomainProblem problem, final LocalDateTime approvedAt,
-                                          final int checkCount, final LocalDateTime now) {
+    public static LocalDateTime nextCheck(final CustomDomainStatus status, final DomainProblem problem, final boolean wasActive,
+                                          final LocalDateTime approvedAt, final int checkCount, final LocalDateTime now) {
         final var since = Duration.between(Objects.requireNonNullElse(approvedAt, now), now);
         return switch (status) {
             case APPROVED_PROVISIONING -> since.compareTo(RETRY_WINDOW) >= 0 ? null : now.plus(retryWait(checkCount));
-            case AWAITING_DNS -> awaitingDns(problem, since, now);
+            case AWAITING_DNS -> awaitingDns(problem, wasActive, since, now);
             case ACTIVE -> now.plus(DAY);
             case ERROR -> problem != null && problem.recheckable() ? now.plus(HOUR) : null;
             case PENDING_REVIEW, REJECTED, DISABLED, DELETED -> null;
         };
     }
 
-    private static LocalDateTime awaitingDns(final DomainProblem problem, final Duration since, final LocalDateTime now) {
+    private static LocalDateTime awaitingDns(final DomainProblem problem, final boolean wasActive, final Duration since, final LocalDateTime now) {
         if (since.compareTo(DNS_DEADLINE) >= 0) {
-            return problem == DomainProblem.DNS_NOT_FOUND ? null : now.plus(HOUR);
+            return problem == DomainProblem.DNS_NOT_FOUND && !wasActive ? null : now.plus(HOUR);
         }
         if (since.compareTo(HOUR) < 0) {
             return now.plus(MINUTE);

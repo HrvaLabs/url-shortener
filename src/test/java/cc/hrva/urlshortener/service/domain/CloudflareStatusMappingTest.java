@@ -9,6 +9,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
@@ -82,10 +83,11 @@ class CloudflareStatusMappingTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"pending_validation", "pending_issuance", "pending_deployment", "initializing", "staging_deployment",
-            "validation_timed_out", "issuance_timed_out", "expired", "pending_expiration"})
-    void anActiveDomainKeepsServingWhileOnlyItsCertificateIsNotActive(final String sslStatus) {
-        assertThat(next(CustomDomainStatus.ACTIVE, true, hostname("active", sslStatus)))
+    @CsvSource({"active,pending_validation", "active,pending_issuance", "active,pending_deployment", "active,initializing",
+            "active,staging_deployment", "active,validation_timed_out", "active,issuance_timed_out", "active,expired", "active,pending_expiration",
+            "active_redeploying,expired", "something_new,validation_timed_out"})
+    void anActiveDomainKeepsServingWhileOnlyItsCertificateIsNotActive(final String status, final String sslStatus) {
+        assertThat(next(CustomDomainStatus.ACTIVE, true, hostname(status, sslStatus)))
                 .isEqualTo(new Transition(CustomDomainStatus.ACTIVE, null, "Certificate status in Cloudflare: " + sslStatus));
     }
 

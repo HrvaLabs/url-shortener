@@ -28,6 +28,7 @@ final class FakeCloudflare extends CloudflareClient {
     enum Call {
         FIND,
         CREATE,
+        TOTAL,
         GET,
         DELETE,
         LIST,
@@ -167,6 +168,16 @@ final class FakeCloudflare extends CloudflareClient {
             afterLostCreate = null;
             return lost != null ? lost : new CloudflareResult.Ok<>(created, null);
         }
+    }
+
+    @Override
+    public CloudflareResult<Integer> totalCount() {
+        record(Call.TOTAL, "");
+        return this.<Integer>scripted(Call.TOTAL).orElseGet(() -> {
+            synchronized (this) {
+                return new CloudflareResult.Ok<>(hostnames.size(), hostnames.size());
+            }
+        });
     }
 
     @Override

@@ -4,6 +4,7 @@ import cc.hrva.urlshortener.client.CloudflareClient;
 import cc.hrva.urlshortener.client.CloudflareHostname;
 import cc.hrva.urlshortener.client.CloudflareResult;
 import cc.hrva.urlshortener.configuration.AsyncExecutorConfiguration;
+import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.model.CustomDomain;
 import cc.hrva.urlshortener.model.enums.CustomDomainStatus;
 import cc.hrva.urlshortener.model.enums.DomainProblem;
@@ -33,11 +34,13 @@ public class CustomDomainProvisioner {
 
     private static final Duration FIRST_CHECK = Duration.ofMinutes(1);
     private static final int DUPLICATE_CODE = 1406;
+    private static final String FREE_ALLOWANCE_FULL = "Cloudflare's free allowance is full: %d of %d custom hostnames are taken or being set up.";
 
     private final CustomDomainRepository customDomainRepository;
     private final CloudflareClient cloudflareClient;
     private final ApplicationEventPublisher eventPublisher;
     private final TransactionOperations transactionOperations;
+    private final AppProperties appProperties;
     private final Clock clock;
     private final Set<Long> inFlight = ConcurrentHashMap.newKeySet();
 
@@ -78,6 +81,10 @@ public class CustomDomainProvisioner {
     }
 
     private Attempt create(final String hostname) {
+        final var full = freeAllowanceFull();
+        if (full != null) {
+            return Attempt.failed(full);
+        }
         final var created = cloudflareClient.create(hostname);
         if (created instanceof CloudflareResult.Ok<CloudflareHostname>(final var hostnameCreated, final var ignored)) {
             return Attempt.created(hostnameCreated.id());
@@ -87,6 +94,23 @@ public class CustomDomainProvisioner {
             return lookUpOnceMore(hostname, refused);
         }
         return Attempt.failed(CloudflareStatusMapping.failureText(created));
+    }
+
+    private String freeAllowanceFull() {
+        final var probe = cloudflareClient.totalCount();
+        if (!(probe instanceof CloudflareResult.Ok<Integer>(final var total, final var ignored))) {
+            return CloudflareStatusMapping.failureText(probe);
+        }
+        final var inFlight = Objects.requireNonNull(transactionOperations.execute(status ->
+                customDomainRepository.countByStatus(CustomDomainStatus.APPROVED_PROVISIONING)));
+        final var taken = total + Math.max(inFlight - 1, 0);
+        final var freeAllowance = appProperties.getDomains().getFreeAllowance();
+        if (taken < freeAllowance) {
+            return null;
+        }
+        log.info("Custom domain create held back, Cloudflare's free allowance is full cloudflareTotal={} inFlight={} freeAllowance={}", total,
+                inFlight, freeAllowance);
+        return FREE_ALLOWANCE_FULL.formatted(taken, freeAllowance);
     }
 
     private Attempt lookUpOnceMore(final String hostname, final CloudflareResult.Refused<CloudflareHostname> refused) {
@@ -121,20 +145,26 @@ public class CustomDomainProvisioner {
             log.info("Custom domain was already recorded with its Cloudflare hostname domainId={}", id);
             return LifecycleOutcome.SKIPPED;
         }
+        if (current != null && current.getStatus() == CustomDomainStatus.DISABLED
+                && customDomainRepository.keepCreatedWhileDisabled(id, attempt.cloudflareId(), LocalDateTime.now(clock)) == 1) {
+            log.info("Custom domain was turned off while it was set up in Cloudflare, the hostname stays recorded with it domainId={} "
+                    + "cloudflareId={}", id, attempt.cloudflareId());
+            return LifecycleOutcome.SKIPPED;
+        }
         if (attempt.created() && (current == null || current.getStatus() == CustomDomainStatus.DELETED)) {
             final var deleted = cloudflareClient.delete(attempt.cloudflareId());
             log.info("Custom domain was removed while its hostname was created, so the hostname was deleted again domainId={} cloudflareId={} "
                     + "deleted={}", id, attempt.cloudflareId(), deleted instanceof CloudflareResult.Ok<Void>);
             return LifecycleOutcome.SKIPPED;
         }
-        log.warn("Custom domain changed while it was set up in Cloudflare, the reconcile will list the hostname domainId={} cloudflareId={} "
-                + "status={}", id, attempt.cloudflareId(), current == null ? null : current.getStatus());
+        log.warn("Custom domain changed while it was set up in Cloudflare and its hostname isn't recorded on it domainId={} cloudflareId={} "
+                + "status={} created={}", id, attempt.cloudflareId(), current == null ? null : current.getStatus(), attempt.created());
         return LifecycleOutcome.SKIPPED;
     }
 
     private LifecycleOutcome recordFailure(final CustomDomain domain, final String error) {
         final var now = LocalDateTime.now(clock);
-        final var nextTry = DomainCheckSchedule.nextCheck(CustomDomainStatus.APPROVED_PROVISIONING, DomainProblem.PROVISIONING_FAILED,
+        final var nextTry = DomainCheckSchedule.nextCheck(CustomDomainStatus.APPROVED_PROVISIONING, DomainProblem.PROVISIONING_FAILED, false,
                 domain.getReviewedAt(), domain.getCheckCount() + 1, now);
         transactionOperations.executeWithoutResult(status -> {
             if (customDomainRepository.recordProvisioningFailure(domain.getId(), error, nextTry, now) == 1 && nextTry == null) {

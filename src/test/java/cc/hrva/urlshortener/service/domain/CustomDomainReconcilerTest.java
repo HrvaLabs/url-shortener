@@ -192,6 +192,24 @@ class CustomDomainReconcilerTest {
     }
 
     @Test
+    void aMissingDomainIsAlertedOnTheFirstNightOnly() {
+        final var missing = domain("go.example.com", CustomDomainStatus.ACTIVE, "cf-404");
+
+        reconciler.reconcile();
+        CLOCK.advance(Duration.ofDays(1));
+        final var secondNight = reconciler.reconcile().orElseThrow();
+
+        assertThat(secondNight.missingDomains()).containsExactly(new MissingDomain(missing, "go.example.com"));
+        assertThat(committedEvents.alerts()).containsExactly(new DomainDrift(List.of(), List.of("go.example.com"), 0, 100));
+
+        CLOUDFLARE.store("stranger.example.net", "active", "active");
+        CLOCK.advance(Duration.ofDays(1));
+        reconciler.reconcile();
+
+        assertThat(committedEvents.alerts()).last().isEqualTo(new DomainDrift(List.of("stranger.example.net"), List.of(), 1, 100));
+    }
+
+    @Test
     void aHostnameTheListingSkippedIsAskedForBeforeItIsMarked() {
         final var skipped = CLOUDFLARE.store("go.example.com", "active", "active");
         final var id = domain("go.example.com", CustomDomainStatus.ACTIVE, skipped);

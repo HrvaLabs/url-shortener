@@ -7,6 +7,7 @@ import ch.qos.logback.core.read.ListAppender;
 import cc.hrva.urlshortener.client.CloudflareClient;
 import cc.hrva.urlshortener.client.CloudflareResult;
 import cc.hrva.urlshortener.configuration.AppConfiguration;
+import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.enums.CustomDomainStatus;
 import cc.hrva.urlshortener.model.enums.DomainProblem;
@@ -121,6 +122,9 @@ class CustomDomainLifecycleTest {
     private DataSource dataSource;
 
     @Autowired
+    private AppProperties appProperties;
+
+    @Autowired
     private TestApplication.CommittedEvents committedEvents;
 
     @MockitoBean
@@ -146,6 +150,7 @@ class CustomDomainLifecycleTest {
 
     @AfterEach
     void tearDown() {
+        appProperties.getDomains().setFreeAllowance(100);
         lifecycleLogger.detachAppender(logEvents);
         assertThat(CLOUDFLARE.callsInsideATransaction()).isEmpty();
         jdbcTemplate.update("delete from custom_domain");
@@ -159,7 +164,7 @@ class CustomDomainLifecycleTest {
 
         assertThat(lifecycle.runOnce()).isEqualTo(new LifecycleRun(1, 0, 0, 0));
 
-        assertThat(CLOUDFLARE.calls()).containsExactly("FIND go.example.com", "CREATE go.example.com");
+        assertThat(CLOUDFLARE.calls()).containsExactly("FIND go.example.com", "TOTAL ", "CREATE go.example.com");
         assertThat(row(id))
                 .containsEntry("STATUS", "AWAITING_DNS")
                 .containsEntry("CLOUDFLARE_ID", "cf-1")
@@ -214,7 +219,7 @@ class CustomDomainLifecycleTest {
 
         assertThat(lifecycle.runOnce()).isEqualTo(new LifecycleRun(1, 0, 0, 0));
 
-        assertThat(CLOUDFLARE.calls()).containsExactly("FIND go.example.com", "CREATE go.example.com", "FIND go.example.com");
+        assertThat(CLOUDFLARE.calls()).containsExactly("FIND go.example.com", "TOTAL ", "CREATE go.example.com", "FIND go.example.com");
         assertThat(row(id)).containsEntry("STATUS", "AWAITING_DNS").containsEntry("CLOUDFLARE_ID", existing);
     }
 
@@ -227,7 +232,7 @@ class CustomDomainLifecycleTest {
 
         assertThat(lifecycle.runOnce()).isEqualTo(new LifecycleRun(0, 0, 0, 1));
 
-        assertThat(CLOUDFLARE.calls()).containsExactly("FIND go.example.com", "CREATE go.example.com", "FIND go.example.com");
+        assertThat(CLOUDFLARE.calls()).containsExactly("FIND go.example.com", "TOTAL ", "CREATE go.example.com", "FIND go.example.com");
         assertThat(row(id)).containsEntry("STATUS", "APPROVED_PROVISIONING").containsEntry("PROBLEM", "PROVISIONING_FAILED")
                 .containsEntry("LAST_ERROR", "Duplicate custom hostname found.");
     }
@@ -329,7 +334,7 @@ class CustomDomainLifecycleTest {
     void activeThenMovedIsCnameRemoved() {
         final var cloudflareId = CLOUDFLARE.store("go.example.com", "moved", "active");
         final var id = domain(ANA, "go.example.com", CustomDomainStatus.ACTIVE, cloudflareId);
-        set(id, "activated_at = ?, next_check_at = ?", APPROVED_AT.plusMinutes(5), NOW);
+        set(id, "reviewed_at = ?, activated_at = ?, next_check_at = ?", NOW.minusDays(20), NOW.minusDays(20).plusMinutes(5), NOW);
 
         assertThat(lifecycle.runOnce()).isEqualTo(new LifecycleRun(0, 1, 0, 0));
         assertThat(row(id)).containsEntry("STATUS", "ERROR").containsEntry("PROBLEM", "CNAME_REMOVED");
@@ -341,6 +346,18 @@ class CustomDomainLifecycleTest {
 
         assertThat(committedEvents.alerts()).containsExactly(new DomainNeedsAttention(id, "go.example.com", DomainProblem.CNAME_REMOVED));
         assertThat(committedEvents.changes()).containsExactly(new CustomDomainChangedEvent(id));
+
+        CLOUDFLARE.state(cloudflareId, "pending", "pending_validation");
+        CLOCK.advance(Duration.ofHours(1));
+        assertThat(lifecycle.runOnce()).isEqualTo(new LifecycleRun(0, 1, 0, 0));
+        assertThat(row(id)).containsEntry("STATUS", "AWAITING_DNS").containsEntry("PROBLEM", "DNS_NOT_FOUND");
+        assertThat(nextCheckAt(id)).isEqualTo(NOW.plusHours(3));
+
+        CLOUDFLARE.state(cloudflareId, "active", "active");
+        CLOCK.advance(Duration.ofHours(1));
+        assertThat(lifecycle.runOnce()).isEqualTo(new LifecycleRun(0, 1, 0, 0));
+        assertThat(row(id)).containsEntry("STATUS", "ACTIVE").containsEntry("PROBLEM", null);
+        assertThat(committedEvents.alerts()).hasSize(1);
     }
 
     @Test
@@ -493,9 +510,54 @@ class CustomDomainLifecycleTest {
 
         assertThat(lifecycle.runOnce().provisioned()).isZero();
 
-        assertThat(CLOUDFLARE.calls()).containsExactly("FIND go.example.com", "CREATE go.example.com", "DELETE cf-1");
+        assertThat(CLOUDFLARE.calls()).containsExactly("FIND go.example.com", "TOTAL ", "CREATE go.example.com", "DELETE cf-1");
         assertThat(CLOUDFLARE.has("cf-1")).isFalse();
         assertThat(row(id)).containsEntry("STATUS", "DELETED").containsEntry("CLOUDFLARE_ID", null);
+    }
+
+    @Test
+    void aHostnameCreatedForADomainTurnedOffMeanwhileIsKeptWithIt() {
+        final var id = approved("go.example.com");
+        CLOUDFLARE.duringTheNextCreate(() -> set(id, "status = 'DISABLED', disabled_reason = 'ADMIN', disabled_at = ?", NOW));
+
+        assertThat(lifecycle.runOnce().provisioned()).isZero();
+
+        assertThat(CLOUDFLARE.calls()).containsExactly("FIND go.example.com", "TOTAL ", "CREATE go.example.com");
+        assertThat(CLOUDFLARE.has("cf-1")).isTrue();
+        assertThat(row(id)).containsEntry("STATUS", "DISABLED").containsEntry("CLOUDFLARE_ID", "cf-1");
+        assertThat(customDomainRepository.countSlotsInUse()).isOne();
+    }
+
+    @Test
+    void aCreateWaitsWhileCloudflaresFreeAllowanceIsFull() {
+        appProperties.getDomains().setFreeAllowance(2);
+        CLOUDFLARE.store("one.example.net", "active", "active");
+        final var id = approved("go.example.com");
+        final var inFlight = approved("other.example.org");
+        set(inFlight, "next_check_at = ?", NOW.plusHours(1));
+
+        assertThat(lifecycle.runOnce()).isEqualTo(new LifecycleRun(0, 0, 0, 1));
+
+        assertThat(CLOUDFLARE.calls()).containsExactly("FIND go.example.com", "TOTAL ");
+        assertThat(row(id)).containsEntry("STATUS", "APPROVED_PROVISIONING").containsEntry("PROBLEM", "PROVISIONING_FAILED")
+                .containsEntry("LAST_ERROR", "Cloudflare's free allowance is full: 2 of 2 custom hostnames are taken or being set up.");
+        assertThat(nextCheckAt(id)).isEqualTo(NOW.plusMinutes(1));
+
+        set(inFlight, "status = 'REJECTED', hostname_key = null");
+        CLOCK.advance(Duration.ofMinutes(1));
+        assertThat(lifecycle.runOnce()).isEqualTo(new LifecycleRun(1, 0, 0, 0));
+        assertThat(row(id)).containsEntry("STATUS", "AWAITING_DNS");
+    }
+
+    @Test
+    void aFailedFreeAllowanceProbeCreatesNothing() {
+        CLOUDFLARE.script(Call.TOTAL, new CloudflareResult.Unreachable<>("timeout"));
+        final var id = approved("go.example.com");
+
+        assertThat(lifecycle.runOnce()).isEqualTo(new LifecycleRun(0, 0, 0, 1));
+
+        assertThat(CLOUDFLARE.calls()).containsExactly("FIND go.example.com", "TOTAL ");
+        assertThat(row(id)).containsEntry("LAST_ERROR", "Cloudflare couldn't be reached (timeout)");
     }
 
     @Test
@@ -506,7 +568,7 @@ class CustomDomainLifecycleTest {
         final var deletedId = CLOUDFLARE.store("old.example.com", "active", "active");
         final var deleted = queuedDelete(ANA, "old.example.com", deletedId);
         final var afterRestart = new CustomDomainLifecycle(customDomainRepository, CLOUDFLARE,
-                new CustomDomainProvisioner(customDomainRepository, CLOUDFLARE, eventPublisher, transactionOperations, CLOCK),
+                new CustomDomainProvisioner(customDomainRepository, CLOUDFLARE, eventPublisher, transactionOperations, appProperties, CLOCK),
                 customDomainHostnames, eventPublisher, transactionOperations, CLOCK);
 
         assertThat(afterRestart.runOnce()).isEqualTo(new LifecycleRun(1, 1, 1, 0));
@@ -589,7 +651,7 @@ class CustomDomainLifecycleTest {
         lifecycle.runOnce();
         customDomainService.get(viewed);
 
-        assertThat(CLOUDFLARE.calls()).contains("FIND new.example.com", "CREATE new.example.com", "GET cf-1", "DELETE cf-2", "GET cf-3");
+        assertThat(CLOUDFLARE.calls()).contains("FIND new.example.com", "TOTAL ", "CREATE new.example.com", "GET cf-1", "DELETE cf-2", "GET cf-3");
         assertThat(CLOUDFLARE.callsHoldingAConnection()).isEmpty();
     }
 
@@ -630,7 +692,7 @@ class CustomDomainLifecycleTest {
 
         CLOCK.advance(Duration.ofMinutes(5));
         assertThat(customDomainService.get(id).status()).isEqualTo(CustomDomainStatus.AWAITING_DNS);
-        assertThat(CLOUDFLARE.calls()).containsExactly("FIND go.example.com", "CREATE go.example.com");
+        assertThat(CLOUDFLARE.calls()).containsExactly("FIND go.example.com", "TOTAL ", "CREATE go.example.com");
     }
 
     @Test

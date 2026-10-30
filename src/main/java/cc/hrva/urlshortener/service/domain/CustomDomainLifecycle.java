@@ -147,8 +147,8 @@ public class CustomDomainLifecycle {
 
     private LifecycleOutcome record(final CustomDomain domain, final Transition transition, final CloudflareHostname hostname,
                                     final LocalDateTime now) {
-        final var next = DomainCheckSchedule.nextCheck(transition.status(), transition.problem(), approvedAt(domain), domain.getCheckCount() + 1,
-                now);
+        final var next = DomainCheckSchedule.nextCheck(transition.status(), transition.problem(), domain.getActivatedAt() != null, approvedAt(domain),
+                domain.getCheckCount() + 1, now);
         final var settled = transition.status() == CustomDomainStatus.AWAITING_DNS && next == null
                 ? new Transition(CustomDomainStatus.ERROR, DomainProblem.DNS_TIMED_OUT, transition.lastError())
                 : transition;
@@ -182,7 +182,8 @@ public class CustomDomainLifecycle {
     }
 
     private LifecycleOutcome postpone(final CustomDomain domain, final LocalDateTime now) {
-        final var scheduled = DomainCheckSchedule.nextCheck(domain.getStatus(), domain.getProblem(), approvedAt(domain), domain.getCheckCount(), now);
+        final var scheduled = DomainCheckSchedule.nextCheck(domain.getStatus(), domain.getProblem(), domain.getActivatedAt() != null,
+                approvedAt(domain), domain.getCheckCount(), now);
         final var latest = now.plus(FAILED_CHECK_WAIT);
         final LocalDateTime next;
         if (scheduled == null) {

@@ -122,9 +122,9 @@ public class CustomDomainReconciler {
         final var ours = transactionOperations.execute(status -> customDomainRepository.findForReconcile(HOLDING_A_HOSTNAME));
         final var comparison = compare(listing.hostnames(), Objects.requireNonNull(ours));
         final var run = new ReconcileRun(now(), listing.total(), comparison.oursInCloudflare(), comparison.unknown(), comparison.missing(), null);
-        final var drift = run.unknownHostnames().isEmpty() && run.missingDomains().isEmpty()
+        final var drift = run.unknownHostnames().isEmpty() && comparison.newlyMissing().isEmpty()
                 ? null
-                : new DomainDrift(run.unknownHostnames(), run.missingDomains().stream().map(MissingDomain::hostname).toList(), run.cloudflareTotal(),
+                : new DomainDrift(run.unknownHostnames(), comparison.newlyMissing(), run.cloudflareTotal(),
                         appProperties.getDomains().getFreeAllowance());
         return recorded(run, drift);
     }
@@ -174,6 +174,7 @@ public class CustomDomainReconciler {
         }
         final var listedIds = hostnames.stream().map(CloudflareHostname::id).collect(Collectors.toSet());
         final var missing = new ArrayList<MissingDomain>();
+        final var newlyMissing = new ArrayList<String>();
         var oursInCloudflare = 0;
         for (final var domain : ours) {
             if (domain.cloudflareId() == null || NOT_EXPECTED_IN_CLOUDFLARE.contains(domain.status())) {
@@ -183,10 +184,18 @@ public class CustomDomainReconciler {
                 oursInCloudflare++;
             } else {
                 missing.add(new MissingDomain(domain.id(), domain.hostname()));
+                if (!knownToBeGone(domain)) {
+                    newlyMissing.add(domain.hostname());
+                }
             }
         }
         log.debug("Custom domain reconcile compared hostnames={} ours={} ignored={}", hostnames.size(), ours.size(), ignored);
-        return new Comparison(oursInCloudflare, List.copyOf(unknown), List.copyOf(missing));
+        return new Comparison(oursInCloudflare, List.copyOf(unknown), List.copyOf(missing), List.copyOf(newlyMissing));
+    }
+
+    private static boolean knownToBeGone(final DomainInCloudflare domain) {
+        final var gone = CloudflareStatusMapping.gone();
+        return domain.status() == gone.status() && domain.problem() == gone.problem() && gone.lastError().equals(domain.lastError());
     }
 
     private boolean confirmedMissing(final DomainInCloudflare domain) {
@@ -239,7 +248,7 @@ public class CustomDomainReconciler {
 
     }
 
-    private record Comparison(int oursInCloudflare, List<String> unknown, List<MissingDomain> missing) {
+    private record Comparison(int oursInCloudflare, List<String> unknown, List<MissingDomain> missing, List<String> newlyMissing) {
     }
 
 }

@@ -73,7 +73,8 @@ public interface CustomDomainRepository extends JpaRepository<CustomDomain, Long
     List<Long> findDeletePendingIds(Limit limit);
 
     @Query("""
-            select new cc.hrva.urlshortener.repository.DomainInCloudflare(d.id, d.hostname, d.status, d.problem, d.cloudflareId, d.cloudflareDeletePending)
+            select new cc.hrva.urlshortener.repository.DomainInCloudflare(d.id, d.hostname, d.status, d.problem, d.lastError, d.cloudflareId,
+                d.cloudflareDeletePending)
             from CustomDomain d
             where d.cloudflareId is not null or d.status in :statuses
             order by d.id""")
@@ -129,6 +130,13 @@ public interface CustomDomainRepository extends JpaRepository<CustomDomain, Long
             where d.id = :id and d.status = cc.hrva.urlshortener.model.enums.CustomDomainStatus.ERROR
               and d.problem = cc.hrva.urlshortener.model.enums.DomainProblem.PROVISIONING_FAILED""")
     int markRetrying(@Param("id") long id, @Param("now") LocalDateTime now);
+
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Transactional
+    @Query("""
+            update CustomDomain d set d.cloudflareId = :cloudflareId, d.updatedAt = :now
+            where d.id = :id and d.cloudflareId is null and d.status = cc.hrva.urlshortener.model.enums.CustomDomainStatus.DISABLED""")
+    int keepCreatedWhileDisabled(@Param("id") long id, @Param("cloudflareId") String cloudflareId, @Param("now") LocalDateTime now);
 
     @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Transactional

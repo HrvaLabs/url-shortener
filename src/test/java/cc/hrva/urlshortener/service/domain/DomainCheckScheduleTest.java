@@ -48,6 +48,16 @@ class DomainCheckScheduleTest {
     }
 
     @Test
+    void aDomainThatWasActiveOnceNeverStopsBeingCheckedWhileItWaits() {
+        final var now = APPROVED_AT.plusDays(20);
+
+        assertThat(DomainCheckSchedule.nextCheck(CustomDomainStatus.AWAITING_DNS, DomainProblem.DNS_NOT_FOUND, true, APPROVED_AT, 7, now))
+                .isEqualTo(now.plusHours(1));
+        assertThat(DomainCheckSchedule.nextCheck(CustomDomainStatus.AWAITING_DNS, DomainProblem.DNS_NOT_FOUND, true, APPROVED_AT, 7,
+                APPROVED_AT.plusMinutes(30))).isEqualTo(APPROVED_AT.plusMinutes(31));
+    }
+
+    @Test
     void aFailedCreateIsRetriedAfterOneFiveAndThirtyMinutesThenHourly() {
         assertThat(provisioning(1, Duration.ZERO)).isEqualTo(after(Duration.ZERO, Duration.ofMinutes(1)));
         assertThat(provisioning(2, Duration.ofMinutes(1))).isEqualTo(after(Duration.ofMinutes(1), Duration.ofMinutes(5)));
@@ -69,45 +79,46 @@ class DomainCheckScheduleTest {
     void anErrorThatCanClearByItselfIsCheckedHourly(final DomainProblem problem) {
         final var now = APPROVED_AT.plusDays(30);
 
-        assertThat(DomainCheckSchedule.nextCheck(CustomDomainStatus.ERROR, problem, APPROVED_AT, 500, now)).isEqualTo(now.plusHours(1));
+        assertThat(DomainCheckSchedule.nextCheck(CustomDomainStatus.ERROR, problem, false, APPROVED_AT, 500, now)).isEqualTo(now.plusHours(1));
     }
 
     @ParameterizedTest
     @EnumSource(value = DomainProblem.class, names = {"PROVISIONING_FAILED", "DNS_TIMED_OUT", "DNS_NOT_FOUND"})
     void anErrorThatWaitsForCheckNowOrRetryIsNotChecked(final DomainProblem problem) {
-        assertThat(DomainCheckSchedule.nextCheck(CustomDomainStatus.ERROR, problem, APPROVED_AT, 3, APPROVED_AT.plusDays(15))).isNull();
-        assertThat(DomainCheckSchedule.nextCheck(CustomDomainStatus.ERROR, null, APPROVED_AT, 3, APPROVED_AT.plusDays(15))).isNull();
+        assertThat(DomainCheckSchedule.nextCheck(CustomDomainStatus.ERROR, problem, false, APPROVED_AT, 3, APPROVED_AT.plusDays(15))).isNull();
+        assertThat(DomainCheckSchedule.nextCheck(CustomDomainStatus.ERROR, null, false, APPROVED_AT, 3, APPROVED_AT.plusDays(15))).isNull();
     }
 
     @Test
     void anActiveDomainIsCheckedDaily() {
         final var now = APPROVED_AT.plusDays(3);
 
-        assertThat(DomainCheckSchedule.nextCheck(CustomDomainStatus.ACTIVE, null, APPROVED_AT, 40, now)).isEqualTo(now.plusDays(1));
-        assertThat(DomainCheckSchedule.nextCheck(CustomDomainStatus.ACTIVE, null, APPROVED_AT, 40, APPROVED_AT.plusDays(400)))
+        assertThat(DomainCheckSchedule.nextCheck(CustomDomainStatus.ACTIVE, null, true, APPROVED_AT, 40, now)).isEqualTo(now.plusDays(1));
+        assertThat(DomainCheckSchedule.nextCheck(CustomDomainStatus.ACTIVE, null, true, APPROVED_AT, 40, APPROVED_AT.plusDays(400)))
                 .isEqualTo(APPROVED_AT.plusDays(401));
     }
 
     @ParameterizedTest
     @EnumSource(value = CustomDomainStatus.class, names = {"PENDING_REVIEW", "REJECTED", "DISABLED", "DELETED"})
     void aDomainNobodyWaitsOnIsNotChecked(final CustomDomainStatus status) {
-        assertThat(DomainCheckSchedule.nextCheck(status, null, APPROVED_AT, 0, APPROVED_AT.plusMinutes(5))).isNull();
+        assertThat(DomainCheckSchedule.nextCheck(status, null, false, APPROVED_AT, 0, APPROVED_AT.plusMinutes(5))).isNull();
     }
 
     @Test
     void aDomainWithoutAnApprovalTimeCountsFromNow() {
         final var now = APPROVED_AT.plusDays(20);
 
-        assertThat(DomainCheckSchedule.nextCheck(CustomDomainStatus.AWAITING_DNS, DomainProblem.DNS_NOT_FOUND, null, 0, now)).isEqualTo(now.plusMinutes(1));
+        assertThat(DomainCheckSchedule.nextCheck(CustomDomainStatus.AWAITING_DNS, DomainProblem.DNS_NOT_FOUND, false, null, 0, now))
+                .isEqualTo(now.plusMinutes(1));
     }
 
     private static LocalDateTime waiting(final DomainProblem problem, final Duration sinceApproval) {
-        return DomainCheckSchedule.nextCheck(CustomDomainStatus.AWAITING_DNS, problem, APPROVED_AT, 7, APPROVED_AT.plus(sinceApproval));
+        return DomainCheckSchedule.nextCheck(CustomDomainStatus.AWAITING_DNS, problem, false, APPROVED_AT, 7, APPROVED_AT.plus(sinceApproval));
     }
 
     private static LocalDateTime provisioning(final int attempts, final Duration sinceApproval) {
-        return DomainCheckSchedule.nextCheck(CustomDomainStatus.APPROVED_PROVISIONING, DomainProblem.PROVISIONING_FAILED, APPROVED_AT, attempts,
-                APPROVED_AT.plus(sinceApproval));
+        return DomainCheckSchedule.nextCheck(CustomDomainStatus.APPROVED_PROVISIONING, DomainProblem.PROVISIONING_FAILED, false, APPROVED_AT,
+                attempts, APPROVED_AT.plus(sinceApproval));
     }
 
     private static LocalDateTime after(final Duration sinceApproval, final Duration wait) {

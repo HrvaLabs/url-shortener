@@ -44,9 +44,11 @@ public final class CloudflareStatusMapping {
                     ? new Transition(CustomDomainStatus.ERROR, DomainProblem.CNAME_REMOVED, lastError)
                     : new Transition(CustomDomainStatus.AWAITING_DNS, DomainProblem.DNS_NOT_FOUND, lastError);
         }
-        if (current == CustomDomainStatus.ACTIVE && ACTIVE.equals(status) && !ACTIVE.equals(sslStatus)) {
-            return new Transition(CustomDomainStatus.ACTIVE, null,
-                    ObjectUtils.firstNonNull(lastError, CERTIFICATE_STATUS + StringUtils.defaultString(sslStatus, UNKNOWN)));
+        if (current == CustomDomainStatus.ACTIVE && serving(status)) {
+            return ACTIVE.equals(sslStatus)
+                    ? new Transition(CustomDomainStatus.ACTIVE, null, lastError)
+                    : new Transition(CustomDomainStatus.ACTIVE, null,
+                            ObjectUtils.firstNonNull(lastError, CERTIFICATE_STATUS + StringUtils.defaultString(sslStatus, UNKNOWN)));
         }
         if (timedOut(sslStatus)) {
             return new Transition(CustomDomainStatus.ERROR, caa ? DomainProblem.CAA_BLOCKED : DomainProblem.CERTIFICATE_TIMED_OUT, lastError);
@@ -55,9 +57,6 @@ public final class CloudflareStatusMapping {
             return ACTIVE.equals(sslStatus)
                     ? new Transition(CustomDomainStatus.ACTIVE, null, lastError)
                     : new Transition(CustomDomainStatus.AWAITING_DNS, caa ? DomainProblem.CAA_BLOCKED : null, lastError);
-        }
-        if (current == CustomDomainStatus.ACTIVE && (ACTIVE_REDEPLOYING.equals(status) || !known(status))) {
-            return new Transition(CustomDomainStatus.ACTIVE, null, lastError);
         }
         return new Transition(CustomDomainStatus.AWAITING_DNS, pendingProblem(caa, approvedAt, now), lastError);
     }
@@ -86,6 +85,10 @@ public final class CloudflareStatusMapping {
             return DomainProblem.CAA_BLOCKED;
         }
         return approvedAt == null || !now.isBefore(approvedAt.plus(DNS_GRACE)) ? DomainProblem.DNS_NOT_FOUND : null;
+    }
+
+    private static boolean serving(final String status) {
+        return ACTIVE.equals(status) || ACTIVE_REDEPLOYING.equals(status) || !known(status);
     }
 
     private static boolean timedOut(final String sslStatus) {
