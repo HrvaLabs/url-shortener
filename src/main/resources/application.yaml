@@ -117,3 +117,16 @@ app:
     enabled: ${APP_DESTINATION_CHECK_ENABLED:true}
     catch-up-on-startup: ${APP_DESTINATION_CHECK_CATCH_UP_ON_STARTUP:true}
     budget: ${APP_DESTINATION_CHECK_BUDGET:2h}
+  domains:
+    enabled: ${APP_DOMAINS_ENABLED:true}
+    max-active: ${APP_DOMAINS_MAX_ACTIVE:90}
+    free-allowance: ${APP_DOMAINS_FREE_ALLOWANCE:100}
+    per-user: ${APP_DOMAINS_PER_USER:1}
+    reserved: ${APP_DOMAINS_RESERVED:hrva.cc,hrvalabs.net}
+    primary-hosts: ${APP_DOMAINS_PRIMARY_HOSTS:hrva.cc,domains.hrva.cc}
+    ignored-hostnames: ${APP_DOMAINS_IGNORED_HOSTNAMES:test.karlo.cc}
+    cname-target: ${APP_DOMAINS_CNAME_TARGET:domains.hrva.cc}
+  cloudflare:
+    api-token: ${CLOUDFLARE_API_TOKEN:}
+    zone-id: ${CLOUDFLARE_ZONE_ID:}
+    api-base: ${APP_CLOUDFLARE_API_BASE:https://api.cloudflare.com/client/v4}

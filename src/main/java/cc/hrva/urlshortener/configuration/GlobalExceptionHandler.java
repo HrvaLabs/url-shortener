@@ -16,6 +16,7 @@ import cc.hrva.urlshortener.exception.DomainRuleNotFoundException;
 import cc.hrva.urlshortener.exception.EmailExistsException;
 import cc.hrva.urlshortener.exception.EmailLogNotFoundException;
 import cc.hrva.urlshortener.exception.EmailNotVerifiedException;
+import cc.hrva.urlshortener.exception.FieldValidationException;
 import cc.hrva.urlshortener.exception.InvalidApiKeyException;
 import cc.hrva.urlshortener.exception.PasskeyNotFoundException;
 import cc.hrva.urlshortener.exception.PasskeyVerificationException;
@@ -272,6 +273,11 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(ChannelValidationException.class)
     public ResponseEntity<Map<String, String>> handleChannelValidation(final ChannelValidationException ex) {
+        return ResponseEntity.badRequest().body(ex.getFieldErrors());
+    }
+
+    @ExceptionHandler(FieldValidationException.class)
+    public ResponseEntity<Map<String, String>> handleFieldValidation(final FieldValidationException ex) {
         return ResponseEntity.badRequest().body(ex.getFieldErrors());
     }
 

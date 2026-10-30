@@ -3,6 +3,8 @@ package cc.hrva.urlshortener.configuration;
 import cc.hrva.urlshortener.exception.BioHandleUnavailableException;
 import cc.hrva.urlshortener.exception.BioPageConflictException;
 import cc.hrva.urlshortener.exception.BioPageNotFoundException;
+import cc.hrva.urlshortener.exception.FieldValidationException;
+import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -80,8 +82,21 @@ class GlobalExceptionHandlerTest {
                 .andExpect(jsonPath("$.error").value("This page changed. Reload and try again."));
     }
 
+    @Test
+    void aFieldValidationErrorIsABadRequestWithTheFieldMapAsTheBody() throws Exception {
+        mockMvc.perform(get("/probe/field"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.hostname").value("Enter a domain, like go.example.com"))
+                .andExpect(jsonPath("$.error").doesNotExist());
+    }
+
     @RestController
     static class ProbeController {
+
+        @GetMapping("/probe/field")
+        String probeField() {
+            throw new FieldValidationException(Map.of("hostname", "Enter a domain, like go.example.com"));
+        }
 
         @GetMapping("/probe/bio-page")
         String probeBioPage() {

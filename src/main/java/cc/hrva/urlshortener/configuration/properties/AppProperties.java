@@ -128,6 +128,14 @@ public class AppProperties {
     @NotNull
     private DestinationCheck destinationCheck = new DestinationCheck();
 
+    @Valid
+    @NotNull
+    private Domains domains = new Domains();
+
+    @Valid
+    @NotNull
+    private Cloudflare cloudflare = new Cloudflare();
+
     @Data
     public static class Mcp {
 
@@ -226,6 +234,47 @@ public class AppProperties {
         @NotNull
         @DurationMin(minutes = 1, message = "must be at least 1 minute")
         private Duration budget = Duration.ofHours(2);
+
+    }
+
+    @Data
+    public static class Domains {
+
+        private boolean enabled = true;
+
+        @Min(1)
+        private int maxActive = 90;
+
+        @Min(1)
+        private int freeAllowance = 100;
+
+        @Min(1)
+        private int perUser = 1;
+
+        @NotNull
+        private List<String> reserved = List.of("hrva.cc", "hrvalabs.net");
+
+        @NotNull
+        private List<String> primaryHosts = List.of("hrva.cc", "domains.hrva.cc");
+
+        @NotNull
+        private List<String> ignoredHostnames = List.of("test.karlo.cc");
+
+        @NotBlank
+        private String cnameTarget = "domains.hrva.cc";
+
+    }
+
+    @Data
+    public static class Cloudflare {
+
+        @ToString.Exclude
+        private String apiToken;
+
+        private String zoneId;
+
+        @NotBlank
+        private String apiBase = "https://api.cloudflare.com/client/v4";
 
     }
 

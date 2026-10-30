@@ -256,4 +256,88 @@ class AppPropertiesTest {
         assertThat(binder.bind("app.analytics", AppProperties.Analytics.class).get().getZone()).isEqualTo(ZoneId.of("UTC"));
     }
 
+    @Test
+    void cloudflareTokenIsNotInToString() {
+        final var appProperties = new AppProperties();
+        appProperties.getCloudflare().setApiToken(KEY_MATERIAL);
+        appProperties.getCloudflare().setZoneId("zone-for-the-test");
+
+        assertThat(appProperties.getCloudflare().toString()).contains("zone-for-the-test").doesNotContain(KEY_MATERIAL);
+        assertThat(appProperties.toString()).doesNotContain(KEY_MATERIAL);
+    }
+
+    @Test
+    void customDomainSettingsHaveTheirDefaults() {
+        final var domains = new AppProperties().getDomains();
+        final var cloudflare = new AppProperties().getCloudflare();
+
+        assertThat(domains.isEnabled()).isTrue();
+        assertThat(domains.getMaxActive()).isEqualTo(90);
+        assertThat(domains.getFreeAllowance()).isEqualTo(100);
+        assertThat(domains.getPerUser()).isEqualTo(1);
+        assertThat(domains.getReserved()).containsExactly("hrva.cc", "hrvalabs.net");
+        assertThat(domains.getPrimaryHosts()).containsExactly("hrva.cc", "domains.hrva.cc");
+        assertThat(domains.getIgnoredHostnames()).containsExactly("test.karlo.cc");
+        assertThat(domains.getCnameTarget()).isEqualTo("domains.hrva.cc");
+        assertThat(cloudflare.getApiToken()).isNull();
+        assertThat(cloudflare.getZoneId()).isNull();
+        assertThat(cloudflare.getApiBase()).isEqualTo("https://api.cloudflare.com/client/v4");
+    }
+
+    @Test
+    void theApplicationYamlReadsTheCustomDomainSettingsFromTheEnvironment() throws IOException {
+        final var yaml = new YamlPropertySourceLoader().load("application", new ClassPathResource("application.yaml")).getFirst();
+
+        assertThat(yaml.getProperty("app.domains.enabled")).isEqualTo("${APP_DOMAINS_ENABLED:true}");
+        assertThat(yaml.getProperty("app.domains.max-active")).isEqualTo("${APP_DOMAINS_MAX_ACTIVE:90}");
+        assertThat(yaml.getProperty("app.domains.free-allowance")).isEqualTo("${APP_DOMAINS_FREE_ALLOWANCE:100}");
+        assertThat(yaml.getProperty("app.domains.per-user")).isEqualTo("${APP_DOMAINS_PER_USER:1}");
+        assertThat(yaml.getProperty("app.domains.reserved")).isEqualTo("${APP_DOMAINS_RESERVED:hrva.cc,hrvalabs.net}");
+        assertThat(yaml.getProperty("app.domains.primary-hosts")).isEqualTo("${APP_DOMAINS_PRIMARY_HOSTS:hrva.cc,domains.hrva.cc}");
+        assertThat(yaml.getProperty("app.domains.ignored-hostnames")).isEqualTo("${APP_DOMAINS_IGNORED_HOSTNAMES:test.karlo.cc}");
+        assertThat(yaml.getProperty("app.domains.cname-target")).isEqualTo("${APP_DOMAINS_CNAME_TARGET:domains.hrva.cc}");
+        assertThat(yaml.getProperty("app.cloudflare.api-token")).isEqualTo("${CLOUDFLARE_API_TOKEN:}");
+        assertThat(yaml.getProperty("app.cloudflare.zone-id")).isEqualTo("${CLOUDFLARE_ZONE_ID:}");
+        assertThat(yaml.getProperty("app.cloudflare.api-base")).isEqualTo("${APP_CLOUDFLARE_API_BASE:https://api.cloudflare.com/client/v4}");
+    }
+
+    @Test
+    void customDomainListsBindFromTheEnvironment() {
+        final var environment = new SystemEnvironmentPropertySource(StandardEnvironment.SYSTEM_ENVIRONMENT_PROPERTY_SOURCE_NAME, Map.<String, Object>of(
+                "APP_DOMAINS_PRIMARY_HOSTS", "hrva.cc,domains.hrva.cc,www.hrva.cc",
+                "APP_DOMAINS_IGNORED_HOSTNAMES", "test.karlo.cc,old.karlo.cc",
+                "APP_DOMAINS_RESERVED", "hrva.cc,hrvalabs.net,karlo.cc",
+                "APP_DOMAINS_MAX_ACTIVE", "40"));
+
+        final var domains = new Binder(ConfigurationPropertySources.from(environment)).bind("app.domains", AppProperties.Domains.class).get();
+
+        assertThat(domains.getPrimaryHosts()).containsExactly("hrva.cc", "domains.hrva.cc", "www.hrva.cc");
+        assertThat(domains.getIgnoredHostnames()).containsExactly("test.karlo.cc", "old.karlo.cc");
+        assertThat(domains.getReserved()).containsExactly("hrva.cc", "hrvalabs.net", "karlo.cc");
+        assertThat(domains.getMaxActive()).isEqualTo(40);
+    }
+
+    @Test
+    void anEmptyIgnoredListBindsAsEmpty() {
+        final var domains = new Binder(new MapConfigurationPropertySource(Map.of("app.domains.ignored-hostnames", "")))
+                .bind("app.domains", AppProperties.Domains.class).get();
+
+        assertThat(domains.getIgnoredHostnames()).isEmpty();
+    }
+
+    @Test
+    void aCustomDomainNumberBelowOneIsRefused() {
+        final var validator = Validation.buildDefaultValidatorFactory().getValidator();
+        final var none = new AppProperties.Domains();
+        none.setMaxActive(0);
+        none.setFreeAllowance(0);
+        none.setPerUser(0);
+
+        assertThat(validator.validate(none)).extracting(violation -> violation.getPropertyPath().toString())
+                .containsExactlyInAnyOrder("maxActive", "freeAllowance", "perUser");
+        assertThat(validator.validate(new AppProperties.Domains())).isEmpty();
+        assertThat(validator.validate(new AppProperties())).extracting(violation -> violation.getPropertyPath().toString())
+                .noneMatch(path -> path.startsWith("domains") || path.startsWith("cloudflare"));
+    }
+
 }
