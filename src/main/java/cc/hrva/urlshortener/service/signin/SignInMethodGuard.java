@@ -70,7 +70,7 @@ public class SignInMethodGuard {
             return hasPassword(lockedUser, userSignInMethodRepository.findStatesByUserId(lockedUser.getId()));
         }
         if (isProvider(method)) {
-            return userSignInMethodRepository.findStatesByUserId(lockedUser.getId()).stream()
+            return onSiteWide(method) && userSignInMethodRepository.findStatesByUserId(lockedUser.getId()).stream()
                     .noneMatch(state -> state.method() == method && state.turnedOff());
         }
 

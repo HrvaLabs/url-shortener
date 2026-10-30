@@ -23,6 +23,8 @@ import cc.hrva.urlshortener.security.JwtFilter;
 import cc.hrva.urlshortener.security.Totp;
 import cc.hrva.urlshortener.service.analytics.AnalyticsDays;
 import cc.hrva.urlshortener.service.passkey.TestAuthenticator;
+import cc.hrva.urlshortener.service.settings.SettingKey;
+import cc.hrva.urlshortener.service.settings.SettingsServiceFixtures;
 import com.nimbusds.jose.jwk.RSAKey;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
@@ -116,6 +118,9 @@ class PasskeySecondStepFlowsTest {
 
     @Autowired
     private SignInService signInService;
+
+    @Autowired
+    private SettingsService settingsService;
 
     @Autowired
     private PasskeyService passkeyService;
@@ -352,6 +357,29 @@ class PasskeySecondStepFlowsTest {
 
         assertThat(completeWith(authenticator, pendingToken).getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(flows.signInMethodsOf(user)).contains("GOOGLE");
+    }
+
+    @Test
+    void aProviderSwitchedOffSiteWideBetweenTheStepsStopsTheSecondStep() {
+        final var user = flows.signedIn(flows.localUser("switched-off-between-steps@example.com"));
+        final var authenticator = TestAuthenticator.deviceBoundPasskey();
+        flows.addPasskey(authenticator, "Pixel");
+        jdbcTemplate.update("insert into user_sign_in_method (user_id, method, first_used_at, last_used_at) values (?, 'GITHUB', ?, ?)",
+                user.getId(), LocalDateTime.of(2026, 10, 1, 9, 0), LocalDateTime.of(2026, 10, 1, 9, 0));
+        final var gitHubToken = signInService.requireSecondStep(user, SignInMethod.GITHUB, false).getBody().getPendingToken();
+        final var googleToken = signInService.requireSecondStep(user, SignInMethod.GOOGLE, false).getBody().getPendingToken();
+        flushed();
+        SettingsServiceFixtures.turnOff(settingsService, SettingKey.GITHUB_SIGN_IN);
+        try {
+            assertThatThrownBy(() -> completeWith(authenticator, gitHubToken))
+                    .isInstanceOf(SignInExpiredException.class)
+                    .hasMessage(SIGN_IN_EXPIRED);
+            assertThat(jdbcTemplate.queryForObject("select last_used_at from user_sign_in_method where user_id = ? and method = 'GITHUB'",
+                    LocalDateTime.class, user.getId())).isEqualTo(LocalDateTime.of(2026, 10, 1, 9, 0));
+            assertThat(completeWith(authenticator, googleToken).getStatusCode()).isEqualTo(HttpStatus.OK);
+        } finally {
+            settingsService.reset(SettingKey.GITHUB_SIGN_IN, "admin@hrva.cc");
+        }
     }
 
     @Test
