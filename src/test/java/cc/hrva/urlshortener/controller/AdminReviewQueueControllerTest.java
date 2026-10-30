@@ -56,9 +56,9 @@ class AdminReviewQueueControllerTest {
     private static final ReviewEntryResponse ENTRY = new ReviewEntryResponse(287L, "v0DB3", "https://findfavoritedate.life/?u=f6yp608",
             "findfavoritedate.life", "findfavoritedate.life", 27L,
             "rhea@gmail.com", LocalDateTime.of(2026, 10, 19, 12, 0), true, LocalDateTime.of(2026, 10, 20, 7, 15),
-            List.of("domain registered in the last 30 days", "high-risk domain ending .life"), LocalDateTime.of(2026, 10, 20, 7, 16));
+            List.of("domain registered in the last 30 days", "high-risk domain ending .life"), LocalDateTime.of(2026, 10, 20, 7, 16), null);
     private static final ReviewEntryResponse ANONYMOUS_ENTRY = new ReviewEntryResponse(288L, "njuskaio_verify", "https://njuskaio.cam/a/MAUB3",
-            "njuskaio.cam", "njuskaio.cam", null, null, null, false, LocalDateTime.of(2026, 10, 20, 6, 0), List.of("imitates njuskalo"), LocalDateTime.of(2026, 10, 20, 6, 1));
+            "njuskaio.cam", "njuskaio.cam", null, null, null, false, LocalDateTime.of(2026, 10, 20, 6, 0), List.of("imitates njuskalo"), LocalDateTime.of(2026, 10, 20, 6, 1), null);
 
     private MockMvc mockMvc;
 

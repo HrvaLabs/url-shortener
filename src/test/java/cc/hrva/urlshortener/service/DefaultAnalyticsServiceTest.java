@@ -13,14 +13,17 @@ import cc.hrva.urlshortener.dto.AnalyticsOverviewDto.TopLink;
 import cc.hrva.urlshortener.dto.AnalyticsTotals;
 import cc.hrva.urlshortener.dto.BreakdownEntry;
 import cc.hrva.urlshortener.dto.DestinationHealth;
+import cc.hrva.urlshortener.dto.DomainRef;
 import cc.hrva.urlshortener.dto.LinkClicks;
 import cc.hrva.urlshortener.dto.UrlAnalyticsDto.LinkSummary;
 import cc.hrva.urlshortener.exception.InvalidAnalyticsRangeException;
 import cc.hrva.urlshortener.exception.NoAuthorizationException;
 import cc.hrva.urlshortener.exception.UrlNotFoundException;
+import cc.hrva.urlshortener.model.CustomDomain;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.codebook.Authorities;
+import cc.hrva.urlshortener.model.enums.CustomDomainStatus;
 import cc.hrva.urlshortener.repository.LinkStatsRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.service.analytics.AnalyticsDays;
@@ -132,8 +135,36 @@ class DefaultAnalyticsServiceTest {
         final var overview = analyticsService.getOverview(30);
 
         assertThat(overview.topLinks()).containsExactly(
-                new TopLink(8L, "menu", "shop.example.com", 120, 95),
-                new TopLink(7L, "a", "a.com", 4, 3));
+                new TopLink(8L, "menu", "shop.example.com", 120, 95, null),
+                new TopLink(7L, "a", "a.com", 4, 3, null));
+    }
+
+    @Test
+    void linkSummaryAndTopLinksCarryTheDomain() {
+        final var domain = CustomDomain.builder().id(9L).hostname("go.example.com").status(CustomDomainStatus.ACTIVE).build();
+        final var menu = Url.builder().id(7L).shortUrl("menu").longUrl("https://shop.example.com/a").visits(4L).active(true)
+                .owner(owner).domain(domain).build();
+        final var plain = Url.builder().id(8L).shortUrl("plain").longUrl("https://shop.example.com/b").visits(1L).active(true)
+                .owner(owner).build();
+        givenOwnLinks(List.of(menu, plain));
+        when(analyticsDays.today()).thenReturn(TODAY);
+        when(linkStatsRepository.findOwnerDaily(eq(1L), any(), any())).thenReturn(List.of());
+        when(linkStatsRepository.findOwnerTopLinks(eq(1L), any(), any(), eq(10))).thenReturn(List.of(
+                new LinkClicks(7L, 4, 3),
+                new LinkClicks(8L, 1, 1)));
+        when(urlRepository.findById(7L)).thenReturn(Optional.of(menu));
+        when(linkStatsRepository.findDaily(eq(7L), any(), any())).thenReturn(List.of());
+        when(linkStatsRepository.findBreakdownTotals(eq(7L), any(), any())).thenReturn(Map.of());
+
+        final var overview = analyticsService.getOverview(30);
+        final var analytics = analyticsService.getUrlAnalytics(7L, null);
+
+        assertThat(overview.topLinks()).extracting(TopLink::domain).containsExactly(new DomainRef(9L, "go.example.com"), null);
+        assertThat(analytics.link().domain()).isEqualTo(new DomainRef(9L, "go.example.com"));
+        final var json = JsonMapper.builder().build();
+        assertThat(json.writeValueAsString(overview.topLinks().get(0))).contains("\"domain\":{\"id\":9,\"hostname\":\"go.example.com\"}");
+        assertThat(json.writeValueAsString(overview.topLinks().get(1))).doesNotContain("domain");
+        assertThat(json.writeValueAsString(analytics.link())).contains("\"domain\":{\"id\":9,\"hostname\":\"go.example.com\"}");
     }
 
     @Test
@@ -147,7 +178,7 @@ class DefaultAnalyticsServiceTest {
 
         final var overview = analyticsService.getOverview(30);
 
-        assertThat(overview.topLinks()).containsExactly(new TopLink(7L, "a", "a.com", 4, 3));
+        assertThat(overview.topLinks()).containsExactly(new TopLink(7L, "a", "a.com", 4, 3, null));
     }
 
     @Test
@@ -344,7 +375,7 @@ class DefaultAnalyticsServiceTest {
 
         assertThat(analytics.link()).isEqualTo(
                 new LinkSummary(7L, "menu", "shop.example.com", "ACTIVE", true, created, lastAccessed, 412,
-                        "https://shop.example.com/a?b=c", null));
+                        "https://shop.example.com/a?b=c", null, null));
     }
 
     @Test

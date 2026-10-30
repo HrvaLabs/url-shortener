@@ -35,5 +35,7 @@ public interface UrlService {
     RedirectView redirectResultUrl(DomainRoute route, String alias, ClickRequest click);
     UrlResponse revealUrlAndRecordClick(String domain, String shortUrl, ClickRequest click);
     byte[] exportMyUrlsAsCsv(String apiKey);
+    void requireUsableDomains(List<CreateUrlDto> createUrlDtos, String apiKey);
+    String nextFreeShortUrl(Long domainId);
 
 }

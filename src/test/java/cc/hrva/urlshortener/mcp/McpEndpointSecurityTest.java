@@ -463,7 +463,7 @@ class McpEndpointSecurityTest {
         when(analyticsService.getUrlAnalyticsForOwner(1L, null)).thenAnswer(invocation -> {
             callerDuringStats.set(SecurityContextHolder.getContext().getAuthentication().getName());
             return new UrlAnalyticsDto(new LinkSummary(1L, "secret-alias", "example.com", "ACTIVE", false, LocalDateTime.now(), null, 3L,
-                    "https://example.com/a", null),
+                    "https://example.com/a", null, null),
                     30, LocalDate.of(2026, 9, 25), LocalDate.of(2026, 10, 24), new AnalyticsTotals(2L, 1L, 0L), List.of(),
                     new Breakdowns(List.of(), List.of(), List.of(), List.of(), List.of(), List.of()));
         });

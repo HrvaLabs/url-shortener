@@ -116,6 +116,7 @@ public class Url {
 
     public void clearForAnonymousUser() {
         this.owner = null;
+        this.domain = null;
     }
 
 }

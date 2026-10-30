@@ -17,6 +17,7 @@ import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.repository.AuditLogRepository;
 import cc.hrva.urlshortener.repository.DestinationCheckRepository;
+import cc.hrva.urlshortener.repository.CustomDomainRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.security.AnyHostIsPrimary;
@@ -276,7 +277,7 @@ class ReactivateLinkFlowTest {
             basePackageClasses = UrlRepository.class,
             includeFilters = @ComponentScan.Filter(
                     type = FilterType.ASSIGNABLE_TYPE,
-                    classes = {UrlRepository.class, UserRepository.class, AuditLogRepository.class}))
+                    classes = {UrlRepository.class, CustomDomainRepository.class, UserRepository.class, AuditLogRepository.class}))
     @Import({
             AppConfiguration.class,
             WebConfiguration.class,

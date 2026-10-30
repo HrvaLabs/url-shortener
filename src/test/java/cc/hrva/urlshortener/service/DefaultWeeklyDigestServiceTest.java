@@ -552,7 +552,7 @@ class DefaultWeeklyDigestServiceTest {
     }
 
     private static TrafficStatsResponse.TopLink topLink(final long id, final String shortUrl, final String host, final long clicks) {
-        return new TrafficStatsResponse.TopLink(id, shortUrl, host, "owner" + id + "@example.com", clicks, clicks / 2);
+        return new TrafficStatsResponse.TopLink(id, shortUrl, host, "owner" + id + "@example.com", clicks, clicks / 2, null);
     }
 
     private static TrafficStatsResponse traffic(final LocalDate from, final LocalDate to, final long clicks, final long uniqueVisitors,

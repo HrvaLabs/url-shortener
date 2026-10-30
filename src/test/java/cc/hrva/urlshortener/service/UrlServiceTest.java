@@ -42,6 +42,7 @@ import cc.hrva.urlshortener.dto.UrlSearchDto;
 import cc.hrva.urlshortener.dto.UrlUpdateDto;
 import cc.hrva.urlshortener.exception.ApiException;
 import cc.hrva.urlshortener.exception.ApiKeyNotFoundException;
+import cc.hrva.urlshortener.exception.FieldValidationException;
 import cc.hrva.urlshortener.exception.InvalidApiKeyException;
 import cc.hrva.urlshortener.exception.NoAuthorizationException;
 import cc.hrva.urlshortener.exception.RateLimitExceededException;
@@ -58,6 +59,7 @@ import cc.hrva.urlshortener.model.enums.BlockReason;
 import cc.hrva.urlshortener.model.enums.CreatedVia;
 import cc.hrva.urlshortener.model.enums.CustomDomainStatus;
 import cc.hrva.urlshortener.model.enums.ReviewResolution;
+import cc.hrva.urlshortener.repository.CustomDomainRepository;
 import cc.hrva.urlshortener.repository.DestinationCheckRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.service.burst.CreatedLink;
@@ -94,6 +96,7 @@ import org.springframework.web.servlet.view.RedirectView;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.entry;
 import static org.assertj.core.api.Assertions.tuple;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -121,6 +124,8 @@ class UrlServiceTest {
     private static final String CREATE_LIMIT_REFUSAL = "You've created a lot of links in a short time. Try again in an hour.";
     private static final String BLOCKED_WHILE_EDITING = "This link was blocked while you were editing it. Reload and try again.";
     private static final DomainRoute GO = new DomainRoute(7L, "go.example.com", CustomDomainStatus.ACTIVE, true);
+    private static final String DOMAIN_REFUSAL = "Choose one of your active domains, or leave it empty for hrva.cc.";
+    private static final String DOMAIN_OFF = "This link's domain isn't active, so the link can't be turned on.";
 
     private UrlService urlService;
 
@@ -202,6 +207,9 @@ class UrlServiceTest {
     @Mock
     private CustomDomainRegistry customDomainRegistry;
 
+    @Mock
+    private CustomDomainRepository customDomainRepository;
+
     @BeforeEach
     void setUp() {
         org.mockito.Mockito.lenient().when(rateLimiter.tryAcquire(any(), org.mockito.ArgumentMatchers.anyInt(), any())).thenReturn(true);
@@ -232,7 +240,8 @@ class UrlServiceTest {
                 reservedAliasService,
                 burstAlertService,
                 destinationCheckRepository,
-                customDomainRegistry
+                customDomainRegistry,
+                customDomainRepository
         );
     }
 
@@ -1281,7 +1290,7 @@ class UrlServiceTest {
         urlService.saveUrlRouting(createUrlDto, CLIENT_IP, CreatedVia.WEB);
 
         final var order = org.mockito.Mockito.inOrder(urlValidator, urlRepository);
-        order.verify(urlValidator).checkIfShortUrlIsUnique("promo");
+        order.verify(urlValidator).checkIfShortUrlIsUnique(null, "promo");
         order.verify(urlValidator).checkIfShortUrlIsReserved("promo");
         order.verify(urlRepository).save(url);
         assertThat(url.getShortUrl()).isEqualTo("promo");
@@ -1344,6 +1353,344 @@ class UrlServiceTest {
 
         assertThatThrownBy(() -> urlService.saveUrlRouting(CreateUrlDto.builder().longUrl("https://example.com/menu").build(), CLIENT_IP, CreatedVia.WEB))
                 .isSameAs(tooLong);
+    }
+
+    @Test
+    void aLinkIsCreatedOnTheCallersDomain() {
+        final var url = signedInCreate();
+        final var domain = goExampleCom(CustomDomainStatus.ACTIVE);
+        final var cache = new org.springframework.cache.concurrent.ConcurrentMapCache("urls");
+        when(cacheManager.getCache("urls")).thenReturn(cache);
+        when(customDomainRepository.findUsable("go.example.com", 1L)).thenReturn(Optional.of(domain));
+
+        final var created = urlService.saveUrlRouting(onTheDomain(" Go.Example.com. "), CLIENT_IP, CreatedVia.WEB);
+
+        assertThat(created.domain()).isEqualTo(new DomainRef(7L, "go.example.com"));
+        assertThat(url.getDomain()).isSameAs(domain);
+        assertThat(cache.get("7/" + url.getShortUrl())).isNotNull();
+        assertThat(cache.get(url.getShortUrl())).isNull();
+    }
+
+    @Test
+    void aBlankDomainMeansHrvaAndLooksNothingUp() {
+        final var url = signedInCreate();
+
+        final var created = urlService.saveUrlRouting(onTheDomain("  "), CLIENT_IP, CreatedVia.WEB);
+
+        assertThat(created.domain()).isNull();
+        assertThat(url.getDomain()).isNull();
+        verifyNoInteractions(customDomainRepository);
+    }
+
+    @Test
+    void someoneElsesOrAPendingDomainIsRefused() {
+        final var createUrlDto = onTheDomain("go.example.com");
+        when(createUrlToUrlConverter.convert(createUrlDto)).thenReturn(Url.builder().longUrl("https://example.com/menu").build());
+        when(userService.getUserFromToken()).thenReturn(User.builder().id(1L).build());
+        when(customDomainRepository.findUsable("go.example.com", 1L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> urlService.saveUrlRouting(createUrlDto, CLIENT_IP, CreatedVia.WEB))
+                .isInstanceOfSatisfying(FieldValidationException.class,
+                        exception -> assertThat(exception.getFieldErrors()).containsExactly(entry("domain", DOMAIN_REFUSAL)));
+
+        verify(urlRepository, never()).save(any());
+        verifyNoInteractions(reservedAliasService);
+    }
+
+    @Test
+    void anonymousCannotPickADomain() {
+        final var createUrlDto = onTheDomain("go.example.com");
+        when(createUrlToUrlConverter.convert(createUrlDto)).thenReturn(Url.builder().longUrl("https://example.com/menu").build());
+        when(userService.getUserFromToken()).thenReturn(null);
+
+        assertThatThrownBy(() -> urlService.saveUrlRouting(createUrlDto, CLIENT_IP, CreatedVia.WEB))
+                .isInstanceOfSatisfying(FieldValidationException.class,
+                        exception -> assertThat(exception.getFieldErrors()).containsExactly(entry("domain", DOMAIN_REFUSAL)));
+
+        verifyNoInteractions(customDomainRepository);
+        verify(urlValidator, never()).checkIfAnonymousUrlCreationEnabled();
+        verify(urlValidator, never()).checkIfLongUrlIsNotBlocklisted(any());
+        verify(urlRepository, never()).save(any());
+    }
+
+    @Test
+    void theDomainIsLookedUpForTheSignedInAccountSoTheQueryDecidesWhetherItIsUsable() {
+        final var createUrlDto = onTheDomain("go.example.com");
+        when(createUrlToUrlConverter.convert(createUrlDto)).thenReturn(Url.builder().longUrl("https://example.com/menu").build());
+        when(userService.getUserFromToken()).thenReturn(User.builder().id(42L).active(false).build());
+
+        assertThatThrownBy(() -> urlService.saveUrlRouting(createUrlDto, CLIENT_IP, CreatedVia.WEB))
+                .isInstanceOf(FieldValidationException.class);
+
+        verify(customDomainRepository).findUsable("go.example.com", 42L);
+    }
+
+    @Test
+    void apiKeyCreatesUseTheKeyOwnersDomains() {
+        final var createUrlDto = onTheDomain("go.example.com");
+        final var url = Url.builder().longUrl("https://example.com/menu").build();
+        when(createUrlToUrlConverter.convert(createUrlDto)).thenReturn(url);
+        when(apiKeyService.fetchApiKeyByKey("k")).thenReturn(ApiKey.builder().id(3L).owner(User.builder().id(5L).build()).build());
+        when(appProperties.getShortUrlLength()).thenReturn(5L);
+        when(customDomainRepository.findUsable("go.example.com", 5L)).thenReturn(Optional.of(goExampleCom(CustomDomainStatus.ACTIVE)));
+        when(urlRepository.save(url)).thenReturn(persisted(url));
+
+        final var created = urlService.saveUrlWithApiKey(createUrlDto, "k", CreatedVia.API_KEY);
+
+        assertThat(created.domain()).isEqualTo(new DomainRef(7L, "go.example.com"));
+        verify(userService, never()).getUserFromToken();
+        verify(apiKeyService).recordUse(3L);
+    }
+
+    @Test
+    void anApiKeyCreateOnADomainTheOwnerCantUseNeitherSavesNorCountsTheCall() {
+        final var createUrlDto = onTheDomain("go.example.com");
+        when(createUrlToUrlConverter.convert(createUrlDto)).thenReturn(Url.builder().longUrl("https://example.com/menu").build());
+        when(apiKeyService.fetchApiKeyByKey("k")).thenReturn(ApiKey.builder().id(3L).owner(User.builder().id(5L).build()).build());
+        when(customDomainRepository.findUsable("go.example.com", 5L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> urlService.saveUrlWithApiKey(createUrlDto, "k", CreatedVia.API_KEY))
+                .isInstanceOfSatisfying(FieldValidationException.class,
+                        exception -> assertThat(exception.getFieldErrors()).containsExactly(entry("domain", DOMAIN_REFUSAL)));
+
+        verify(apiKeyService, never()).recordUse(anyLong());
+        verify(urlRepository, never()).save(any());
+    }
+
+    @Test
+    void bulkChecksEachItemsDomain() {
+        when(userService.getUserFromToken()).thenReturn(User.builder().id(1L).build());
+        when(customDomainRepository.findUsable("go.example.com", 1L)).thenReturn(Optional.of(goExampleCom(CustomDomainStatus.ACTIVE)));
+        when(customDomainRepository.findUsable("other.example.com", 1L)).thenReturn(Optional.empty());
+        final var links = List.of(
+                CreateUrlDto.builder().longUrl("https://example.com/1").build(),
+                CreateUrlDto.builder().longUrl("https://example.com/2").domain("go.example.com").build(),
+                CreateUrlDto.builder().longUrl("https://example.com/3").domain("Other.Example.com").build());
+
+        assertThatThrownBy(() -> urlService.requireUsableDomains(links, null))
+                .isInstanceOfSatisfying(FieldValidationException.class,
+                        exception -> assertThat(exception.getFieldErrors()).containsExactly(entry("domain", DOMAIN_REFUSAL)));
+
+        verify(urlRepository, never()).save(any());
+    }
+
+    @Test
+    void bulkWithAKeyChecksTheKeyOwnersDomains() {
+        when(apiKeyService.fetchApiKeyByKey("k")).thenReturn(ApiKey.builder().id(3L).owner(User.builder().id(5L).build()).build());
+        when(customDomainRepository.findUsable("go.example.com", 5L)).thenReturn(Optional.of(goExampleCom(CustomDomainStatus.ACTIVE)));
+
+        urlService.requireUsableDomains(List.of(onTheDomain("go.example.com"), onTheDomain("GO.example.com")), "k");
+
+        verify(apiKeyValidator).apiKeyExistsByKeyAndIsValid("k");
+        verify(customDomainRepository).findUsable("go.example.com", 5L);
+        verify(userService, never()).getUserFromToken();
+    }
+
+    @Test
+    void bulkWithoutDomainsLooksNothingUp() {
+        urlService.requireUsableDomains(List.of(CreateUrlDto.builder().longUrl("https://example.com/1").build(), onTheDomain(" ")), "k");
+
+        verifyNoInteractions(customDomainRepository, userService, apiKeyService, apiKeyValidator);
+    }
+
+    @Test
+    void anonymousBulkWithADomainIsRefused() {
+        when(userService.getUserFromToken()).thenReturn(null);
+
+        assertThatThrownBy(() -> urlService.requireUsableDomains(List.of(onTheDomain("go.example.com")), null))
+                .isInstanceOf(FieldValidationException.class);
+
+        verifyNoInteractions(customDomainRepository);
+    }
+
+    @Test
+    void theSameCustomAliasOnTwoDomainsIsFine() {
+        final var createUrlDto = CreateUrlDto.builder().longUrl("https://example.com/menu").shortUrl("menu").domain("go.example.com").build();
+        final var url = Url.builder().longUrl("https://example.com/menu").shortUrl("menu").build();
+        when(createUrlToUrlConverter.convert(createUrlDto)).thenReturn(url);
+        when(userService.getUserFromToken()).thenReturn(User.builder().id(1L).build());
+        when(customDomainRepository.findUsable("go.example.com", 1L)).thenReturn(Optional.of(goExampleCom(CustomDomainStatus.ACTIVE)));
+        when(urlRepository.save(url)).thenReturn(persisted(url));
+
+        final var created = urlService.saveUrlRouting(createUrlDto, CLIENT_IP, CreatedVia.WEB);
+
+        assertThat(created.shortUrl()).isEqualTo("menu");
+        assertThat(created.domain()).isEqualTo(new DomainRef(7L, "go.example.com"));
+        verify(urlValidator).checkIfShortUrlIsUnique(7L, "menu");
+        verify(urlValidator, never()).checkIfShortUrlIsUnique(isNull(), anyString());
+    }
+
+    @Test
+    void aTakenAliasOnTheSameDomainIs409() {
+        final var createUrlDto = CreateUrlDto.builder().longUrl("https://example.com/menu").shortUrl("menu").domain("go.example.com").build();
+        when(createUrlToUrlConverter.convert(createUrlDto)).thenReturn(Url.builder().longUrl("https://example.com/menu").shortUrl("menu").build());
+        when(userService.getUserFromToken()).thenReturn(User.builder().id(1L).build());
+        when(customDomainRepository.findUsable("go.example.com", 1L)).thenReturn(Optional.of(goExampleCom(CustomDomainStatus.ACTIVE)));
+        org.mockito.Mockito.doThrow(new ShortUrlAlreadyExistsException(UrlValidator.SHORT_URL_TAKEN))
+                .when(urlValidator).checkIfShortUrlIsUnique(7L, "menu");
+
+        assertThatThrownBy(() -> urlService.saveUrlRouting(createUrlDto, CLIENT_IP, CreatedVia.WEB))
+                .isInstanceOf(ShortUrlAlreadyExistsException.class)
+                .hasMessage(UrlValidator.SHORT_URL_TAKEN);
+
+        verify(urlRepository, never()).save(any());
+    }
+
+    @Test
+    void aCustomAliasLostToAConcurrentCreateOnTheSameDomainIsTaken() {
+        final var createUrlDto = CreateUrlDto.builder().longUrl("https://example.com/menu").shortUrl("menu").domain("go.example.com").build();
+        final var url = Url.builder().longUrl("https://example.com/menu").shortUrl("menu").build();
+        when(createUrlToUrlConverter.convert(createUrlDto)).thenReturn(url);
+        when(userService.getUserFromToken()).thenReturn(User.builder().id(1L).build());
+        when(customDomainRepository.findUsable("go.example.com", 1L)).thenReturn(Optional.of(goExampleCom(CustomDomainStatus.ACTIVE)));
+        when(urlRepository.save(url)).thenReturn(persisted(url));
+        org.mockito.Mockito.doThrow(shortUrlTakenMeanwhile()).when(urlRepository).flush();
+
+        assertThatThrownBy(() -> urlService.saveUrlRouting(createUrlDto, CLIENT_IP, CreatedVia.WEB))
+                .isInstanceOf(ShortUrlAlreadyExistsException.class)
+                .hasMessage(UrlValidator.SHORT_URL_TAKEN);
+    }
+
+    @Test
+    void randomAliasesArePerDomain() {
+        final var url = signedInCreate();
+        when(customDomainRepository.findUsable("go.example.com", 1L)).thenReturn(Optional.of(goExampleCom(CustomDomainStatus.ACTIVE)));
+        org.mockito.Mockito.lenient().when(urlRepository.aliasTaken(isNull(), anyString())).thenReturn(true);
+
+        urlService.saveUrlRouting(onTheDomain("go.example.com"), CLIENT_IP, CreatedVia.WEB);
+
+        verify(urlRepository).aliasTaken(7L, url.getShortUrl());
+        verify(urlRepository, never()).aliasTaken(isNull(), anyString());
+        verify(urlRepository).save(url);
+    }
+
+    @Test
+    void aRandomAliasTakenOnTheDomainIsSkipped() {
+        final var url = signedInCreate();
+        when(customDomainRepository.findUsable("go.example.com", 1L)).thenReturn(Optional.of(goExampleCom(CustomDomainStatus.ACTIVE)));
+        when(urlRepository.aliasTaken(eq(7L), anyString())).thenReturn(true, false);
+
+        urlService.saveUrlRouting(onTheDomain("go.example.com"), CLIENT_IP, CreatedVia.WEB);
+
+        final var candidates = ArgumentCaptor.forClass(String.class);
+        verify(urlRepository, times(2)).aliasTaken(eq(7L), candidates.capture());
+        assertThat(url.getShortUrl()).isEqualTo(candidates.getAllValues().getLast());
+    }
+
+    @Test
+    void reservedAliasesApplyOnEveryDomain() {
+        final var createUrlDto = CreateUrlDto.builder().longUrl("https://example.com/menu").shortUrl("login").domain("go.example.com").build();
+        when(createUrlToUrlConverter.convert(createUrlDto)).thenReturn(Url.builder().longUrl("https://example.com/menu").shortUrl("login").build());
+        when(userService.getUserFromToken()).thenReturn(User.builder().id(1L).build());
+        when(customDomainRepository.findUsable("go.example.com", 1L)).thenReturn(Optional.of(goExampleCom(CustomDomainStatus.ACTIVE)));
+        org.mockito.Mockito.doThrow(new ShortUrlAlreadyExistsException("This short URL is reserved. Try another."))
+                .when(urlValidator).checkIfShortUrlIsReserved("login");
+
+        assertThatThrownBy(() -> urlService.saveUrlRouting(createUrlDto, CLIENT_IP, CreatedVia.WEB))
+                .isInstanceOf(ShortUrlAlreadyExistsException.class)
+                .hasMessage("This short URL is reserved. Try another.");
+
+        verify(urlValidator).checkIfShortUrlIsUnique(7L, "login");
+        verify(urlRepository, never()).save(any());
+    }
+
+    @Test
+    void randomAliasesOnADomainSkipReservedWords() {
+        final var url = signedInCreate();
+        when(customDomainRepository.findUsable("go.example.com", 1L)).thenReturn(Optional.of(goExampleCom(CustomDomainStatus.ACTIVE)));
+        when(reservedAliasService.isReserved(anyString())).thenReturn(true, false);
+
+        urlService.saveUrlRouting(onTheDomain("go.example.com"), CLIENT_IP, CreatedVia.WEB);
+
+        final var candidates = ArgumentCaptor.forClass(String.class);
+        verify(reservedAliasService, times(2)).isReserved(candidates.capture());
+        assertThat(url.getShortUrl()).isEqualTo(candidates.getAllValues().getLast());
+        verify(urlRepository).aliasTaken(7L, url.getShortUrl());
+    }
+
+    @Test
+    void aFreeAliasIsDrawnForTheGivenDomain() {
+        when(appProperties.getShortUrlLength()).thenReturn(5L);
+        when(urlRepository.aliasTaken(isNull(), anyString())).thenReturn(true, false);
+
+        final var alias = urlService.nextFreeShortUrl(null);
+
+        final var candidates = ArgumentCaptor.forClass(String.class);
+        verify(urlRepository, times(2)).aliasTaken(isNull(), candidates.capture());
+        assertThat(alias).hasSize(5).isEqualTo(candidates.getAllValues().getLast());
+        verify(reservedAliasService, times(2)).isReserved(anyString());
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.EnumSource(value = CustomDomainStatus.class, names = "ACTIVE", mode = org.junit.jupiter.params.provider.EnumSource.Mode.EXCLUDE)
+    void aLinkOnARemovedDomainCannotBeReactivated(final CustomDomainStatus status) {
+        final var url = Url.builder().id(1L).shortUrl("menu").longUrl("https://example.com").visits(0L).active(false)
+                .domain(goExampleCom(status)).build();
+        when(urlRepository.findById(1L)).thenReturn(Optional.of(url));
+
+        assertThatThrownBy(() -> urlService.activateUrl(1L))
+                .isInstanceOf(UrlValidationException.class)
+                .hasMessage(DOMAIN_OFF);
+
+        verify(urlValidator).verifyUserAdminOrOwner(url);
+        verify(urlValidator, never()).checkIfShortUrlIsFreeToReactivate(any(), any());
+        verify(urlValidator, never()).checkIfUrlSafe(any());
+        verify(urlRepository, never()).save(any());
+        assertThat(url.isActive()).isFalse();
+    }
+
+    @Test
+    void aDomainTurnedOffWhileTheLinkIsReactivatedStopsIt() {
+        final var loaded = Url.builder().id(1L).shortUrl("menu").longUrl("https://example.com").visits(0L).active(false)
+                .domain(goExampleCom(CustomDomainStatus.ACTIVE)).build();
+        final var current = Url.builder().id(1L).shortUrl("menu").longUrl("https://example.com").visits(0L).active(false)
+                .domain(goExampleCom(CustomDomainStatus.DISABLED)).build();
+        when(urlRepository.findById(1L)).thenReturn(Optional.of(loaded), Optional.of(current));
+
+        assertThatThrownBy(() -> urlService.activateUrl(1L))
+                .isInstanceOf(UrlValidationException.class)
+                .hasMessage(DOMAIN_OFF);
+
+        verify(urlRepository, never()).save(any());
+        assertThat(current.isActive()).isFalse();
+    }
+
+    @Test
+    void aLinkOnAnActiveDomainIsReactivatedWithItsAliasCheckedOnThatDomain() {
+        final var url = Url.builder().id(1L).shortUrl("menu").longUrl("https://example.com").visits(0L).active(false)
+                .domain(goExampleCom(CustomDomainStatus.ACTIVE)).build();
+        when(urlRepository.findById(1L)).thenReturn(Optional.of(url));
+        when(urlRepository.save(url)).thenReturn(url);
+
+        final var result = urlService.activateUrl(1L);
+
+        verify(urlValidator).checkIfShortUrlIsFreeToReactivate(7L, "menu");
+        assertThat(result.active()).isTrue();
+        assertThat(result.domain()).isEqualTo(new DomainRef(7L, "go.example.com"));
+    }
+
+    @Test
+    void editingNeverChangesTheDomain() {
+        final var domain = goExampleCom(CustomDomainStatus.ACTIVE);
+        final var url = Url.builder().id(7L).shortUrl("menu").longUrl("https://example.com").visits(0L).active(true).domain(domain).build();
+        final var update = UrlUpdateDto.builder().id(7L).longUrl("https://example.com").visitLimit(10L).build();
+        when(urlRepository.findById(7L)).thenReturn(Optional.of(url));
+        when(urlUpdateDtoToUrlConverter.convert(update)).thenReturn(Url.builder().id(7L).longUrl("https://example.com").visitLimit(10L).build());
+        when(urlRepository.save(url)).thenReturn(url);
+
+        final var result = urlService.updateUrl(update);
+
+        assertThat(url.getDomain()).isSameAs(domain);
+        assertThat(url.getVisitLimit()).isEqualTo(10L);
+        assertThat(result.domain()).isEqualTo(new DomainRef(7L, "go.example.com"));
+    }
+
+    private static CreateUrlDto onTheDomain(final String domain) {
+        return CreateUrlDto.builder().longUrl("https://example.com/menu").domain(domain).build();
+    }
+
+    private static CustomDomain goExampleCom(final CustomDomainStatus status) {
+        return CustomDomain.builder().id(7L).hostname("go.example.com").hostnameKey("go.example.com").status(status).build();
     }
 
     private static DataIntegrityViolationException shortUrlTakenMeanwhile() {
@@ -1771,7 +2118,7 @@ class UrlServiceTest {
         final var order = org.mockito.Mockito.inOrder(urlValidator, urlRepository);
         order.verify(urlValidator).verifyUserAdminOrOwner(url);
         order.verify(urlValidator).checkIfUrlNotBlocked(url);
-        order.verify(urlValidator).checkIfShortUrlIsFreeToReactivate("promo");
+        order.verify(urlValidator).checkIfShortUrlIsFreeToReactivate(null, "promo");
         order.verify(urlValidator).checkIfDestinationNotBlocked(url);
         order.verify(urlValidator).checkIfUrlSafe(url);
         order.verify(urlRepository).save(url);
@@ -2585,9 +2932,11 @@ class UrlServiceTest {
         final var link = onGoExampleCom();
         when(createUrlToUrlConverter.convert(any())).thenReturn(link);
         when(userService.getUserFromToken()).thenReturn(User.builder().id(5L).email("ana@example.com").build());
+        when(customDomainRepository.findUsable("go.example.com", 5L)).thenReturn(Optional.of(link.getDomain()));
         when(urlRepository.save(link)).thenReturn(link);
 
-        urlServiceCachingIn(urls).saveUrlRouting(CreateUrlDto.builder().longUrl("https://b.example/menu").shortUrl("menu").build(), CLIENT_IP, CreatedVia.WEB);
+        urlServiceCachingIn(urls).saveUrlRouting(CreateUrlDto.builder().longUrl("https://b.example/menu").shortUrl("menu").domain("go.example.com").build(),
+                CLIENT_IP, CreatedVia.WEB);
 
         assertThat(urls.getCache("urls").get("7/menu")).isNotNull();
         assertThat(urls.getCache("urls").get("menu")).isNull();
@@ -2783,7 +3132,7 @@ class UrlServiceTest {
                 urlToPeekUrlConverter, createUrlToUrlConverter, urlUpdateDtoToUrlConverter, new UrlCache(urls), objectMapper,
                 new io.micrometer.core.instrument.simple.SimpleMeterRegistry(), passwordEncoder, suspiciousUrlService, rateLimiter,
                 reviewQueueService, scammerSignalService, clickCheckService, redirectChainService, TransactionOperations.withoutTransaction(),
-                reservedAliasService, burstAlertService, destinationCheckRepository, customDomainRegistry);
+                reservedAliasService, burstAlertService, destinationCheckRepository, customDomainRegistry, customDomainRepository);
     }
 
     private static UrlService withTheCacheAnnotations(final UrlService service, final CacheManager urls) {
@@ -2833,7 +3182,8 @@ class UrlServiceTest {
                 reservedAliasService,
                 burstAlertService,
                 destinationCheckRepository,
-                customDomainRegistry
+                customDomainRegistry,
+                customDomainRepository
         );
     }
 
@@ -2908,7 +3258,8 @@ class UrlServiceTest {
                 reservedAliasService,
                 burstAlertService,
                 destinationCheckRepository,
-                customDomainRegistry
+                customDomainRegistry,
+                customDomainRepository
         );
         final var proxyFactory = new ProxyFactory(service);
         proxyFactory.addAdvice(new TransactionInterceptor(transactionManager, new AnnotationTransactionAttributeSource()));
@@ -2942,7 +3293,8 @@ class UrlServiceTest {
                 reservedAliasService,
                 burstAlertService,
                 destinationCheckRepository,
-                customDomainRegistry
+                customDomainRegistry,
+                customDomainRepository
         );
     }
 
@@ -2972,7 +3324,8 @@ class UrlServiceTest {
                 reservedAliasService,
                 burstAlertService,
                 destinationCheckRepository,
-                customDomainRegistry
+                customDomainRegistry,
+                customDomainRepository
         );
     }
 

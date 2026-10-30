@@ -204,14 +204,14 @@ class AnalyticsControllerTest {
     private static AnalyticsOverviewDto overview() {
         return new AnalyticsOverviewDto(90, LocalDate.of(2026, 7, 27), LocalDate.of(2026, 10, 24), new AnalyticsTotals(300, 250, 40),
                 List.of(new AnalyticsDay(LocalDate.of(2026, 7, 27), 4, 3, 1)),
-                List.of(new TopLink(7L, "menu", "example.com", 120, 95)),
+                List.of(new TopLink(7L, "menu", "example.com", 120, 95, null)),
                 12, 9, 2, 4120);
     }
 
     private static UrlAnalyticsDto analytics() {
         final var link = new LinkSummary(7L, "menu", "example.com", "ACTIVE", false,
                 LocalDateTime.of(2026, 10, 1, 12, 0), LocalDateTime.of(2026, 10, 24, 9, 15), 412,
-                "https://example.com/menu?utm_source=flyer&utm_medium=print", null);
+                "https://example.com/menu?utm_source=flyer&utm_medium=print", null, null);
         final var breakdowns = new Breakdowns(
                 List.of(new BreakdownEntry("direct", 60), new BreakdownEntry("other", 3)),
                 List.of(new BreakdownEntry("HR", 50)),

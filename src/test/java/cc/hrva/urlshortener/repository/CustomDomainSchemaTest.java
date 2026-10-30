@@ -13,9 +13,11 @@ import cc.hrva.urlshortener.repository.UrlDomainMoves.DomainLink;
 import jakarta.persistence.EntityManager;
 import java.sql.Timestamp;
 import java.time.LocalDateTime;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.EnumSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CyclicBarrier;
@@ -538,6 +540,29 @@ class CustomDomainSchemaTest {
                 .extracting(CustomDomain::getId).containsExactlyInAnyOrder(newer.getId(), bobs.getId());
         assertThat(customDomainRepository.findWithOwner(newer.getId())).hasValueSatisfying(found ->
                 assertThat(found.getOwner().getEmail()).isEqualTo("ana@example.com"));
+    }
+
+    @Test
+    void onlyTheOwnersActiveDomainOfAnActiveAccountTakesNewLinks() {
+        final var ana = savedUser("ana@example.com");
+        final var bob = savedUser("bob@example.com");
+        final var gone = savedUser("gone@example.com");
+        final var anas = savedDomain(domain("go.example.com", CustomDomainStatus.ACTIVE).owner(ana));
+        final var bobs = savedDomain(domain("bob.example.com", CustomDomainStatus.ACTIVE).owner(bob));
+        savedDomain(domain("gone.example.com", CustomDomainStatus.ACTIVE).owner(gone));
+        Arrays.stream(CustomDomainStatus.values()).filter(status -> status != CustomDomainStatus.ACTIVE).forEach(status ->
+                savedDomain(domain(status.name().toLowerCase(Locale.ROOT).replace('_', '-') + ".example.com", status).owner(ana)));
+        jdbcTemplate.update("update user_account set active = false where id = ?", gone.getId());
+        entityManager.clear();
+
+        assertThat(customDomainRepository.findUsable("go.example.com", ana.getId())).map(CustomDomain::getId).contains(anas.getId());
+        assertThat(customDomainRepository.findUsable("bob.example.com", ana.getId())).isEmpty();
+        assertThat(customDomainRepository.findUsable("bob.example.com", bob.getId())).map(CustomDomain::getId).contains(bobs.getId());
+        assertThat(customDomainRepository.findUsable("gone.example.com", gone.getId())).isEmpty();
+        Arrays.stream(CustomDomainStatus.values()).filter(status -> status != CustomDomainStatus.ACTIVE).forEach(status ->
+                assertThat(customDomainRepository.findUsable(status.name().toLowerCase(Locale.ROOT).replace('_', '-') + ".example.com", ana.getId()))
+                        .as(status.name()).isEmpty());
+        assertThat(customDomainRepository.findUsable("unknown.example.com", ana.getId())).isEmpty();
     }
 
     @Test

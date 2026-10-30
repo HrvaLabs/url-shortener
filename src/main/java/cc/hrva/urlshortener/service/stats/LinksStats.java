@@ -72,7 +72,8 @@ public class LinksStats {
                 link.ownerEmail(),
                 Optional.ofNullable(url.getCreatedVia()).map(CreatedVia::name).orElse(UNKNOWN_CHANNEL),
                 link.createDate(),
-                link.status());
+                link.status(),
+                link.domain() == null ? null : link.domain().hostname());
     }
 
 }

@@ -39,13 +39,14 @@ public class TrafficStatsRepository {
             """;
 
     private static final String FIND_TOP_LINKS = """
-            select s.url_id, u.short_url, u.long_url, a.email as owner_email,
+            select s.url_id, u.short_url, u.long_url, a.email as owner_email, d.hostname as domain,
                    coalesce(sum(s.clicks), 0) as total_clicks, coalesce(sum(s.unique_visitors), 0) as total_unique_visitors
             from link_daily_stats s
             join url u on u.id = s.url_id
             left join user_account a on a.id = u.owner_id
+            left join custom_domain d on d.id = u.domain_id
             where s.stat_date between :from and :to
-            group by s.url_id, u.short_url, u.long_url, a.email
+            group by s.url_id, u.short_url, u.long_url, a.email, d.hostname
             having sum(s.clicks) > 0
             order by sum(s.clicks) desc, s.url_id
             fetch first :limit rows only
@@ -88,7 +89,8 @@ public class TrafficStatsRepository {
                 row.getString("long_url"),
                 row.getString("owner_email"),
                 row.getLong("total_clicks"),
-                row.getLong("total_unique_visitors")));
+                row.getLong("total_unique_visitors"),
+                row.getString("domain")));
     }
 
     public Map<StatDimension, List<BreakdownEntry>> findBreakdownTotals(final LocalDate from, final LocalDate to) {
@@ -112,6 +114,6 @@ public class TrafficStatsRepository {
 
     public record OwnershipClicks(long anonymous, long account) {}
 
-    public record TopLinkRow(long urlId, String shortUrl, String longUrl, String ownerEmail, long clicks, long uniqueVisitors) {}
+    public record TopLinkRow(long urlId, String shortUrl, String longUrl, String ownerEmail, long clicks, long uniqueVisitors, String domain) {}
 
 }

@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.dto.stats;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -37,6 +38,8 @@ public record LinksStatsResponse(
             String ownerEmail,
             String createdVia,
             LocalDateTime createDate,
-            String status) {}
+            String status,
+            @JsonInclude(JsonInclude.Include.NON_NULL)
+            String domain) {}
 
 }

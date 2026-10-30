@@ -529,13 +529,13 @@ class BioPageEndpointSecurityTest {
         final var createdAt = LocalDateTime.of(2026, 10, 26, 9, 0);
         return new BioPageResponse(12L, "ana", "Ana Horvat", "Photos from Zagreb", BioAvatarKind.EMOJI, "x", BioAccent.TEAL, BioTheme.AUTO,
                 false, false, null, null,
-                List.of(new BioPageResponse.Button(31L, 41L, "ana-ig", "instagram.com", "Instagram", BioIcon.INSTAGRAM, true, BioLinkState.LIVE, true)),
+                List.of(new BioPageResponse.Button(31L, 41L, "ana-ig", "instagram.com", "Instagram", BioIcon.INSTAGRAM, true, BioLinkState.LIVE, true, null)),
                 createdAt, createdAt.plusMinutes(5));
     }
 
     private static PublicBioPageResponse publicAna() {
         return new PublicBioPageResponse("ana", "Ana Horvat", "Photos from Zagreb", BioAvatarKind.EMOJI, "x", BioAccent.TEAL, BioTheme.AUTO,
-                false, List.of(new PublicBioPageResponse.Button("Instagram", BioIcon.INSTAGRAM, "ana-ig")));
+                false, List.of(new PublicBioPageResponse.Button("Instagram", BioIcon.INSTAGRAM, "ana-ig", null)));
     }
 
     private static MockHttpServletRequestBuilder signedIn(final MockHttpServletRequestBuilder request) {

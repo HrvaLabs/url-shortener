@@ -25,7 +25,9 @@ public record UrlAnalyticsDto(
             long visits,
             String longUrl,
             @JsonInclude(JsonInclude.Include.NON_NULL)
-            DestinationHealth destinationHealth) {}
+            DestinationHealth destinationHealth,
+            @JsonInclude(JsonInclude.Include.NON_NULL)
+            DomainRef domain) {}
 
     public record Breakdowns(
             List<BreakdownEntry> referrers,

@@ -11,6 +11,7 @@ import cc.hrva.urlshortener.model.enums.BlockReason;
 import cc.hrva.urlshortener.model.enums.BlocklistAction;
 import cc.hrva.urlshortener.model.enums.SourceKind;
 import cc.hrva.urlshortener.repository.BlocklistSourceRepository;
+import cc.hrva.urlshortener.repository.CustomDomainRepository;
 import cc.hrva.urlshortener.repository.DomainRuleRepository;
 import cc.hrva.urlshortener.repository.DestinationCheckRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
@@ -121,6 +122,9 @@ class UrlControllerBlocklistTest {
     private CustomDomainRegistry customDomainRegistry;
 
     @Mock
+    private CustomDomainRepository customDomainRepository;
+
+    @Mock
     private ObjectMapper objectMapper;
 
     @Mock
@@ -170,7 +174,7 @@ class UrlControllerBlocklistTest {
                 clickAnalyticsService, new UrlToPeekUrlConverter(), createUrlToUrlConverter, urlUpdateDtoToUrlConverter, new UrlCache(cacheManager),
                 objectMapper, meterRegistry, passwordEncoder, suspiciousUrlService, rateLimiter, reviewQueueService, scammerSignalService, clickCheckService,
                 redirectChainService, TransactionOperations.withoutTransaction(), reservedAliasService, burstAlertService,
-                destinationCheckRepository, customDomainRegistry);
+                destinationCheckRepository, customDomainRegistry, customDomainRepository);
         mockMvc = MockMvcBuilders.standaloneSetup(new UrlController(urlService, qrCodeService, linkPreviewService, clientIpResolver,
                         new ClickRequestResolver(clientIpResolver), request, appProperties))
                 .setControllerAdvice(new GlobalExceptionHandler())

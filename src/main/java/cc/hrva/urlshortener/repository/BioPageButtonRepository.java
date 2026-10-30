@@ -12,7 +12,7 @@ import org.springframework.stereotype.Repository;
 @Repository
 public interface BioPageButtonRepository extends JpaRepository<BioPageButton, Long> {
 
-    @Query("select b from BioPageButton b join fetch b.url where b.page = :page order by b.sortOrder")
+    @Query("select b from BioPageButton b join fetch b.url u left join fetch u.domain where b.page = :page order by b.sortOrder")
     List<BioPageButton> findByPageWithUrl(@Param("page") BioPage page);
 
     @Query("select new cc.hrva.urlshortener.repository.BioButtonCount(b.page.id, count(b), sum(case when b.visible = true then 1 else 0 end))"

@@ -14,6 +14,7 @@ import cc.hrva.urlshortener.model.enums.BlockReason;
 import cc.hrva.urlshortener.model.enums.CustomDomainStatus;
 import cc.hrva.urlshortener.repository.DestinationCheckRepository;
 import cc.hrva.urlshortener.repository.DomainRuleRepository;
+import cc.hrva.urlshortener.repository.CustomDomainRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.service.domain.CustomDomainRegistry;
@@ -333,7 +334,7 @@ class UrlWritesTest {
             basePackageClasses = UrlRepository.class,
             includeFilters = @ComponentScan.Filter(
                     type = FilterType.ASSIGNABLE_TYPE,
-                    classes = {UrlRepository.class, UserRepository.class, DomainRuleRepository.class}))
+                    classes = {UrlRepository.class, CustomDomainRepository.class, UserRepository.class, DomainRuleRepository.class}))
     @Import({DefaultUrlService.class, DefaultModerationService.class, UrlUpdateDtoToUrlConverter.class, DestinationCheckRepository.class, UrlCache.class})
     static class TestApplication {
     }

@@ -32,5 +32,8 @@ public class CreateUrlDto {
   private Set<String> tags;
   @Schema(description = "Optional password to protect the link (registered users only; ignored for anonymous)", example = "s3cret")
   private String password;
+  @Size(max = 253, message = UrlValidator.DOMAIN_NOT_USABLE)
+  @Schema(description = "One of your active custom domains to put the link on (optional, signed-in only); empty means hrva.cc", example = "go.example.com")
+  private String domain;
 
 }

@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.dto;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import java.time.LocalDate;
 import java.util.List;
 
@@ -15,6 +16,7 @@ public record AnalyticsOverviewDto(
         long expiredUrls,
         long totalVisits) {
 
-    public record TopLink(Long id, String shortUrl, String destinationHost, long clicks, long uniqueVisitors) {}
+    public record TopLink(Long id, String shortUrl, String destinationHost, long clicks, long uniqueVisitors,
+                          @JsonInclude(JsonInclude.Include.NON_NULL) DomainRef domain) {}
 
 }

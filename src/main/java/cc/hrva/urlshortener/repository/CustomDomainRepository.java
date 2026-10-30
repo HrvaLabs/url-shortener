@@ -69,6 +69,12 @@ public interface CustomDomainRepository extends JpaRepository<CustomDomain, Long
     Optional<CustomDomain> findWithOwner(@Param("id") long id);
 
     @Query("""
+            select d from CustomDomain d join d.owner o
+            where d.hostnameKey = :hostnameKey and o.id = :ownerId and o.active = true
+              and d.status = cc.hrva.urlshortener.model.enums.CustomDomainStatus.ACTIVE""")
+    Optional<CustomDomain> findUsable(@Param("hostnameKey") String hostnameKey, @Param("ownerId") long ownerId);
+
+    @Query("""
             select d.id from CustomDomain d
             where d.status = :status
               and ((d.nextCheckAt is null and d.status <> cc.hrva.urlshortener.model.enums.CustomDomainStatus.ERROR) or d.nextCheckAt <= :now)

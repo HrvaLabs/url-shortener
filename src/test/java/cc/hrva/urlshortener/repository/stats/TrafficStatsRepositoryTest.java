@@ -30,6 +30,7 @@ import org.springframework.transaction.annotation.Transactional;
 import static cc.hrva.urlshortener.model.enums.StatDimension.COUNTRY;
 import static cc.hrva.urlshortener.model.enums.StatDimension.REFERRER;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.tuple;
 
 @Transactional
 @SpringBootTest(
@@ -102,12 +103,32 @@ class TrafficStatsRepositoryTest {
 
         assertThat(tiedFirst.getId()).isLessThan(tiedSecond.getId());
         assertThat(trafficStatsRepository.findTopLinks(DAY, DAY.plusDays(1), 10)).containsExactly(
-                new TopLinkRow(busiest.getId(), "top-busiest", "https://example.org/top-busiest", "ana@example.com", 6, 5),
-                new TopLinkRow(tiedFirst.getId(), "top-tied-1", "https://example.org/top-tied-1", "ana@example.com", 4, 3),
-                new TopLinkRow(tiedSecond.getId(), "top-tied-2", "https://example.org/top-tied-2", null, 4, 2));
+                new TopLinkRow(busiest.getId(), "top-busiest", "https://example.org/top-busiest", "ana@example.com", 6, 5, null),
+                new TopLinkRow(tiedFirst.getId(), "top-tied-1", "https://example.org/top-tied-1", "ana@example.com", 4, 3, null),
+                new TopLinkRow(tiedSecond.getId(), "top-tied-2", "https://example.org/top-tied-2", null, 4, 2, null));
         assertThat(trafficStatsRepository.findTopLinks(DAY, DAY.plusDays(1), 1)).containsExactly(
-                new TopLinkRow(busiest.getId(), "top-busiest", "https://example.org/top-busiest", "ana@example.com", 6, 5));
+                new TopLinkRow(busiest.getId(), "top-busiest", "https://example.org/top-busiest", "ana@example.com", 6, 5, null));
         assertThat(trafficStatsRepository.findTopLinks(DAY.plusDays(3), DAY.plusDays(9), 10)).isEmpty();
+    }
+
+    @Test
+    void newestAndTopLinksCarryTheHostname() {
+        final var owner = savedOwner("domain-links@example.com");
+        final var domainId = savedDomain(owner, "go.example.com");
+        final var onDomain = savedLink("on-domain", owner);
+        final var onHrva = savedLink("on-hrva", owner);
+        jdbcTemplate.update("update url set domain_id = ? where id = ?", domainId, onDomain.getId());
+        dailyStats(onDomain, DAY, 9, 7, 0);
+        dailyStats(onHrva, DAY, 3, 3, 0);
+        entityManager.clear();
+
+        assertThat(trafficStatsRepository.findTopLinks(DAY, DAY, 10)).containsExactly(
+                new TopLinkRow(onDomain.getId(), "on-domain", "https://example.org/on-domain", "domain-links@example.com", 9, 7, "go.example.com"),
+                new TopLinkRow(onHrva.getId(), "on-hrva", "https://example.org/on-hrva", "domain-links@example.com", 3, 3, null));
+        assertThat(urlRepository.findTop10ByOrderByCreateDateDescIdDesc())
+                .filteredOn(url -> url.getOwner() != null && url.getOwner().getId().equals(owner.getId()))
+                .extracting(Url::getShortUrl, url -> url.getDomain() == null ? null : url.getDomain().getHostname())
+                .containsExactlyInAnyOrder(tuple("on-domain", "go.example.com"), tuple("on-hrva", null));
     }
 
     @Test
@@ -180,6 +201,14 @@ class TrafficStatsRepositoryTest {
 
     private Url savedLink(final String shortUrl, final User owner) {
         return urlRepository.saveAndFlush(Url.builder().shortUrl(shortUrl).longUrl("https://example.org/" + shortUrl).owner(owner).build());
+    }
+
+    private long savedDomain(final User owner, final String hostname) {
+        entityManager.flush();
+        jdbcTemplate.update("""
+                insert into custom_domain (owner_id, hostname, hostname_key, status, reason, created_at, updated_at)
+                values (?, ?, ?, 'ACTIVE', 'Menu links for my cafe', current_timestamp, current_timestamp)""", owner.getId(), hostname, hostname);
+        return jdbcTemplate.queryForObject("select id from custom_domain where hostname_key = ?", Long.class, hostname);
     }
 
     private long savedBioPage(final User owner, final String handle) {

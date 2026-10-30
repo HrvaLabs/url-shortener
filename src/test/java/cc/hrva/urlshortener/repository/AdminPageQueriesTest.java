@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.repository;
 
+import cc.hrva.urlshortener.dto.ReviewEntryResponse;
 import cc.hrva.urlshortener.dto.UrlResponse;
 import cc.hrva.urlshortener.model.CustomDomain;
 import cc.hrva.urlshortener.model.LinkReview;
@@ -101,6 +102,24 @@ class AdminPageQueriesTest {
         assertThat(entries.getContent()).hasSize(10);
         assertThat(entries.getTotalElements()).isEqualTo(LINKS);
         assertThat(entries.getContent()).filteredOn(entry -> entry.ownerEmail() != null).isNotEmpty();
+        assertThat(statistics.getPrepareStatementCount()).isEqualTo(3);
+    }
+
+    @Test
+    void aReviewQueuePageLoadsTheDomainsOfItsLinksWithoutAnotherQuery() {
+        onDomain(domain("go.example.com"), "s11", "s10");
+        onDomain(domain("go.example.org"), "s9");
+        entityManager.flush();
+        entityManager.clear();
+        statistics.clear();
+        final var scammerSignalService = mock(ScammerSignalService.class);
+        when(scammerSignalService.possibleScammerIds()).thenReturn(Set.of());
+        final var reviewQueueService = new DefaultReviewQueueService(linkReviewRepository, urlRepository, scammerSignalService, Clock.systemUTC(),
+                mock(ApplicationEventPublisher.class));
+
+        final var entries = reviewQueueService.openEntries(PageRequest.of(0, 10), null, null);
+
+        assertThat(entries.getContent()).extracting(ReviewEntryResponse::domain).contains("go.example.com", "go.example.org");
         assertThat(statistics.getPrepareStatementCount()).isEqualTo(3);
     }
 

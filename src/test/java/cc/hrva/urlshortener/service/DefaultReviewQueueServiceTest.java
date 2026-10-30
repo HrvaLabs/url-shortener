@@ -1,6 +1,7 @@
 package cc.hrva.urlshortener.service;
 
 import cc.hrva.urlshortener.dto.ReviewEntryResponse;
+import cc.hrva.urlshortener.model.CustomDomain;
 import cc.hrva.urlshortener.model.LinkReview;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.User;
@@ -37,6 +38,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.transaction.annotation.Transactional;
+import tools.jackson.databind.json.JsonMapper;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.tuple;
@@ -305,7 +307,21 @@ class DefaultReviewQueueServiceTest {
 
         assertThat(entries.getContent()).containsExactly(new ReviewEntryResponse(287L, "v0DB3", "https://findfavoritedate.life/?u=f6yp608",
                 "findfavoritedate.life", "findfavoritedate.life", 27L, "rhea@gmail.com", LocalDateTime.of(2026, 10, 19, 12, 0), true, LocalDateTime.of(2026, 10, 20, 7, 15), List.of(YOUNG, LURE),
-                LocalDateTime.of(2026, 10, 20, 7, 16)));
+                LocalDateTime.of(2026, 10, 20, 7, 16), null));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void aQueueEntryOnADomainCarriesTheHostname() {
+        final var link = Url.builder().id(287L).shortUrl("menu").longUrl("https://findfavoritedate.life/?u=f6yp608")
+                .domain(CustomDomain.builder().id(7L).hostname("go.example.com").build()).build();
+        final var review = LinkReview.builder().id(5L).url(link).reasons(YOUNG).flaggedAt(LocalDateTime.of(2026, 10, 20, 7, 16)).build();
+        when(linkReviewRepository.findAll(any(Specification.class), any(Pageable.class))).thenReturn(new PageImpl<>(List.of(review)));
+
+        final var entries = reviewQueueService.openEntries(PageRequest.of(0, 20), null, null);
+
+        assertThat(entries.getContent()).extracting(ReviewEntryResponse::domain).containsExactly("go.example.com");
+        assertThat(JsonMapper.builder().build().writeValueAsString(entries.getContent().getFirst())).contains("\"domain\":\"go.example.com\"");
     }
 
     @Test

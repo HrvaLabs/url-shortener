@@ -19,6 +19,7 @@ import cc.hrva.urlshortener.repository.AuditLogRepository;
 import cc.hrva.urlshortener.repository.BlocklistSourceRepository;
 import cc.hrva.urlshortener.repository.DestinationCheckRepository;
 import cc.hrva.urlshortener.repository.DomainRuleRepository;
+import cc.hrva.urlshortener.repository.CustomDomainRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.security.AnyHostIsPrimary;
@@ -406,7 +407,7 @@ class UpdateLinkFlowTest {
             basePackageClasses = UrlRepository.class,
             includeFilters = @ComponentScan.Filter(
                     type = FilterType.ASSIGNABLE_TYPE,
-                    classes = {UrlRepository.class, UserRepository.class, AuditLogRepository.class, DomainRuleRepository.class,
+                    classes = {UrlRepository.class, CustomDomainRepository.class, UserRepository.class, AuditLogRepository.class, DomainRuleRepository.class,
                             BlocklistSourceRepository.class}))
     @Import({
             AppConfiguration.class,

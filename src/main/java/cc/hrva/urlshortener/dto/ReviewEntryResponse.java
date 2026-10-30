@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.dto;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -15,5 +16,7 @@ public record ReviewEntryResponse(
         boolean possibleScammer,
         LocalDateTime createDate,
         List<String> reasons,
-        LocalDateTime flaggedAt) {
+        LocalDateTime flaggedAt,
+        @JsonInclude(JsonInclude.Include.NON_NULL)
+        String domain) {
 }

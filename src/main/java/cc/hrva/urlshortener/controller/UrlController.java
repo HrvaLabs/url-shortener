@@ -65,7 +65,7 @@ public class UrlController {
     private final HttpServletRequest request;
     private final AppProperties appProperties;
 
-    @Operation(summary = "Create a short URL", description = "Create a short URL. Requires X-Api-Key header for programmatic access, otherwise optional for authenticated users.")
+    @Operation(summary = "Create a short URL", description = "Create a short URL. Requires X-Api-Key header for programmatic access, otherwise optional for authenticated users. Set domain to one of your active custom domains to put the link on it; leave it out for hrva.cc.")
     @ApiResponse(responseCode = "400", description = "Validation error or bad request")
     @ApiResponse(responseCode = "409", description = "Short URL already exists")
     @ApiResponse(responseCode = "429", description = "Too many links created in the last hour")
@@ -141,7 +141,7 @@ public class UrlController {
         return host + "/" + urlInfo.getShortUrl();
     }
 
-    @Operation(summary = "Bulk create short URLs", description = "Create multiple short URLs in a single request. Requires ROLE_USER.")
+    @Operation(summary = "Bulk create short URLs", description = "Create multiple short URLs in a single request. Requires ROLE_USER. Every item's domain is checked before any link is created.")
     @ApiResponse(responseCode = "400", description = "Validation error or bad request")
     @ApiResponse(responseCode = "409", description = "Short URL already exists")
     @ApiResponse(responseCode = "429", description = "Too many links created in the last hour")
@@ -153,6 +153,7 @@ public class UrlController {
         if (createUrlDtos == null || createUrlDtos.isEmpty()) {
             throw new ApiException("Request must contain at least one URL");
         }
+        urlService.requireUsableDomains(createUrlDtos, apiKey);
         final var clientIp = clientIpResolver.getClientIp(request);
         final var urls = createUrlDtos.stream()
                 .map(dto -> apiKey != null

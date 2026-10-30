@@ -12,11 +12,13 @@ import cc.hrva.urlshortener.dto.UrlResponse;
 import cc.hrva.urlshortener.dto.UrlSearchDto;
 import cc.hrva.urlshortener.dto.UrlUpdateDto;
 import cc.hrva.urlshortener.dto.UnlockResponse;
+import cc.hrva.urlshortener.exception.FieldValidationException;
 import cc.hrva.urlshortener.exception.NoAuthorizationException;
 import cc.hrva.urlshortener.exception.ShortUrlAlreadyExistsException;
 import cc.hrva.urlshortener.exception.UrlNotFoundException;
 import cc.hrva.urlshortener.exception.UrlValidationException;
 import cc.hrva.urlshortener.model.ApiKey;
+import cc.hrva.urlshortener.model.CustomDomain;
 import cc.hrva.urlshortener.model.PeekUrl;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.User;
@@ -25,6 +27,7 @@ import cc.hrva.urlshortener.model.enums.CreatedVia;
 import cc.hrva.urlshortener.model.enums.CustomDomainStatus;
 import cc.hrva.urlshortener.model.enums.ReviewResolution;
 import cc.hrva.urlshortener.model.enums.ThreatType;
+import cc.hrva.urlshortener.repository.CustomDomainRepository;
 import cc.hrva.urlshortener.repository.ShortUrlUniqueIndex;
 import cc.hrva.urlshortener.repository.DestinationCheckRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
@@ -41,6 +44,7 @@ import cc.hrva.urlshortener.service.SuspiciousUrlService;
 import cc.hrva.urlshortener.service.UrlService;
 import cc.hrva.urlshortener.service.UserService;
 import cc.hrva.urlshortener.service.burst.CreatedLink;
+import cc.hrva.urlshortener.service.domain.CustomDomainHostnames;
 import cc.hrva.urlshortener.service.domain.CustomDomainRegistry;
 import cc.hrva.urlshortener.service.domain.DomainRoute;
 import cc.hrva.urlshortener.service.domain.UrlCache;
@@ -109,6 +113,8 @@ public class DefaultUrlService implements UrlService {
     private static final String BLOCKED_WHILE_EDITING = "This link was blocked while you were editing it. Reload and try again.";
     private static final int MAX_GENERATED_ALIAS_ATTEMPTS = 10;
     private static final String NO_FREE_ALIAS = "Couldn't pick a free short URL. Try again.";
+    private static final String DOMAIN_FIELD = "domain";
+    private static final String DOMAIN_NOT_ACTIVE = "This link's domain isn't active, so the link can't be turned on.";
 
     private static final Set<String> BOT_PROBE_PATHS = Set.of(
             "favicon.ico", "favicon.png", "robots.txt", "sitemap.xml",
@@ -140,6 +146,7 @@ public class DefaultUrlService implements UrlService {
     private final BurstAlertService burstAlertService;
     private final DestinationCheckRepository destinationCheckRepository;
     private final CustomDomainRegistry customDomainRegistry;
+    private final CustomDomainRepository customDomainRepository;
 
     @Override
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
@@ -151,12 +158,14 @@ public class DefaultUrlService implements UrlService {
 
         ensureCreateAllowed(currentUser, clientIP);
         if (currentUser == null) {
+            requireNoDomain(createUrlDto.getDomain());
             urlValidator.checkIfAnonymousUrlCreationEnabled();
         }
         final var verdict = validateUrl(url);
 
         final var created = transactionOperations.execute(status -> {
             if (currentUser != null) {
+                url.setDomain(resolveDomain(createUrlDto.getDomain(), currentUser));
                 url.setCreatedVia(createdVia);
                 applyPassword(url, createUrlDto.getPassword());
                 return saveUrlForUser(url, currentUser, verdict);
@@ -249,6 +258,7 @@ public class DefaultUrlService implements UrlService {
         final var verdict = validateUrl(url);
 
         final var created = transactionOperations.execute(status -> {
+            url.setDomain(resolveDomain(createUrlDto.getDomain(), apiKey.getOwner()));
             apiKeyService.recordUse(apiKey.getId());
 
             url.setCreatedVia(createdVia);
@@ -260,12 +270,59 @@ public class DefaultUrlService implements UrlService {
         return created;
     }
 
+    @Override
+    public void requireUsableDomains(final List<CreateUrlDto> createUrlDtos, final String apiKey) {
+        final var hostnames = createUrlDtos.stream()
+                .map(CreateUrlDto::getDomain)
+                .filter(StringUtils::isNotBlank)
+                .map(hostname -> CustomDomainHostnames.hostnameKey(hostname).orElse(hostname))
+                .distinct()
+                .toList();
+        if (hostnames.isEmpty()) {
+            return;
+        }
+        final var caller = callerOf(apiKey);
+        hostnames.forEach(hostname -> resolveDomain(hostname, caller));
+    }
+
+    private User callerOf(final String apiKey) {
+        if (apiKey == null) {
+            return userService.getUserFromToken();
+        }
+        final var key = apiKeyService.fetchApiKeyByKey(apiKey);
+        apiKeyValidator.apiKeyExistsByKeyAndIsValid(apiKey);
+        return key.getOwner();
+    }
+
+    private CustomDomain resolveDomain(final String hostname, final User caller) {
+        if (caller == null) {
+            requireNoDomain(hostname);
+            return null;
+        }
+        if (StringUtils.isBlank(hostname)) {
+            return null;
+        }
+        return CustomDomainHostnames.hostnameKey(hostname)
+                .flatMap(key -> customDomainRepository.findUsable(key, caller.getId()))
+                .orElseThrow(() -> {
+                    log.info("Link creation refused, the domain isn't one of the caller's active domains userId={}", caller.getId());
+                    return new FieldValidationException(DOMAIN_FIELD, UrlValidator.DOMAIN_NOT_USABLE);
+                });
+    }
+
+    private static void requireNoDomain(final String hostname) {
+        if (StringUtils.isNotBlank(hostname)) {
+            log.info("Link creation on a custom domain refused for an anonymous caller");
+            throw new FieldValidationException(DOMAIN_FIELD, UrlValidator.DOMAIN_NOT_USABLE);
+        }
+    }
+
     private UrlResponse saveUrlForUser(final Url url, final User owner, final LinkVerdict verdict) {
         final var customAlias = StringUtils.isNotEmpty(url.getShortUrl());
         assignShortUrl(url);
         url.setOwner(owner);
 
-        log.info("Saving URL for owner id={}", owner.getId());
+        log.info("Saving URL for owner id={} domainId={}", owner.getId(), url.domainId());
         final var saved = insertNewLink(url, customAlias ? UrlValidator.SHORT_URL_TAKEN : NO_FREE_ALIAS);
         queueIfFlagged(saved, verdict);
         cacheUrlResponse(saved);
@@ -290,10 +347,10 @@ public class DefaultUrlService implements UrlService {
 
     private void assignShortUrl(final Url url) {
         if (StringUtils.isEmpty(url.getShortUrl())) {
-            url.setShortUrl(nextFreeShortUrl());
+            url.setShortUrl(nextFreeShortUrl(url.domainId()));
             log.info("URL got a generated short URL");
         } else {
-            urlValidator.checkIfShortUrlIsUnique(url.getShortUrl());
+            urlValidator.checkIfShortUrlIsUnique(url.domainId(), url.getShortUrl());
             urlValidator.checkIfShortUrlIsReserved(url.getShortUrl());
         }
     }
@@ -312,10 +369,11 @@ public class DefaultUrlService implements UrlService {
         }
     }
 
-    private String nextFreeShortUrl() {
+    @Override
+    public String nextFreeShortUrl(final Long domainId) {
         return Stream.generate(() -> generateShortUrl(appProperties.getShortUrlLength()))
                 .limit(MAX_GENERATED_ALIAS_ATTEMPTS)
-                .filter(candidate -> !reservedAliasService.isReserved(candidate) && !urlRepository.aliasTaken(null, candidate))
+                .filter(candidate -> !reservedAliasService.isReserved(candidate) && !urlRepository.aliasTaken(domainId, candidate))
                 .findFirst()
                 .orElseThrow(() -> {
                     log.warn("No free short URL among {} generated candidates", MAX_GENERATED_ALIAS_ATTEMPTS);
@@ -432,12 +490,14 @@ public class DefaultUrlService implements UrlService {
 
         urlValidator.verifyUserAdminOrOwner(url);
         urlValidator.checkIfUrlNotBlocked(url);
-        urlValidator.checkIfShortUrlIsFreeToReactivate(url.getShortUrl());
+        requireActiveDomain(url);
+        urlValidator.checkIfShortUrlIsFreeToReactivate(url.domainId(), url.getShortUrl());
         urlValidator.checkIfDestinationNotBlocked(url);
         urlValidator.checkIfUrlSafe(url);
 
         return transactionOperations.execute(status -> {
             final var current = reloadUnlessBlockedSince(url, blockAtStart);
+            requireActiveDomain(current);
             current.setThreatType(null);
             current.setBlockReason(null);
             current.setBlockDetail(null);
@@ -491,6 +551,14 @@ public class DefaultUrlService implements UrlService {
             checkRedirectsLater(updated.id());
         }
         return updated;
+    }
+
+    private static void requireActiveDomain(final Url url) {
+        if (url.getDomain() != null && url.getDomain().getStatus() != CustomDomainStatus.ACTIVE) {
+            log.info("Reactivation refused, the link's domain isn't active urlId={} domainId={} status={}",
+                    url.getId(), url.domainId(), url.getDomain().getStatus());
+            throw new UrlValidationException(DOMAIN_NOT_ACTIVE);
+        }
     }
 
     private Url reloadUnlessBlockedSince(final Url loaded, final BlockState blockAtStart) {
@@ -858,7 +926,7 @@ public class DefaultUrlService implements UrlService {
             return existingLongUrl;
         }
 
-        url.setShortUrl(nextFreeShortUrl());
+        url.setShortUrl(nextFreeShortUrl(null));
 
         log.info("Saving URL");
         final var saved = insertNewLink(url, NO_FREE_ALIAS);

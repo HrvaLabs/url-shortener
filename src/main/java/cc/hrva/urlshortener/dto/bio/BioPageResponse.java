@@ -8,6 +8,7 @@ import cc.hrva.urlshortener.model.enums.BioIcon;
 import cc.hrva.urlshortener.model.enums.BioLinkState;
 import cc.hrva.urlshortener.model.enums.BioTheme;
 import cc.hrva.urlshortener.util.DomainNames;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -22,13 +23,13 @@ public record BioPageResponse(Long id, String handle, String displayName, String
     }
 
     public record Button(Long id, Long urlId, String shortUrl, String destinationHost, String title, BioIcon icon, boolean visible,
-                         BioLinkState linkState, boolean shownOnPage) {
+                         BioLinkState linkState, boolean shownOnPage, @JsonInclude(JsonInclude.Include.NON_NULL) String domain) {
 
         public static Button from(final BioPageButton button, final BioLinkState linkState) {
             final var url = button.getUrl();
             return new Button(button.getId(), url.getId(), url.getShortUrl(), DomainNames.hostOf(url.getLongUrl()).orElse(""),
                     button.getTitle(), button.getIcon(), button.isVisible(), linkState,
-                    button.isVisible() && linkState == BioLinkState.LIVE);
+                    button.isVisible() && linkState == BioLinkState.LIVE, url.getDomain() == null ? null : url.getDomain().getHostname());
         }
 
     }

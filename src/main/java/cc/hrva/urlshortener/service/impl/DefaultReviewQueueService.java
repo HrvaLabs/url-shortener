@@ -203,7 +203,8 @@ public class DefaultReviewQueueService implements ReviewQueueService {
                 owner.map(User::getId).filter(possibleScammers::contains).isPresent(),
                 url.getCreateDate(),
                 reasonsOf(review),
-                review.getFlaggedAt());
+                review.getFlaggedAt(),
+                url.getDomain() == null ? null : url.getDomain().getHostname());
     }
 
     @Override

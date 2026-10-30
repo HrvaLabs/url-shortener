@@ -7,6 +7,7 @@ import cc.hrva.urlshortener.dto.stats.LinksStatsResponse.CreatedInRange;
 import cc.hrva.urlshortener.dto.stats.LinksStatsResponse.DeadDestinationCounts;
 import cc.hrva.urlshortener.dto.stats.LinksStatsResponse.LinkInventory;
 import cc.hrva.urlshortener.dto.stats.LinksStatsResponse.NewestLink;
+import cc.hrva.urlshortener.model.CustomDomain;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.enums.BlockReason;
@@ -145,9 +146,27 @@ class LinksStatsTest {
         when(urlRepository.findTop10ByOrderByCreateDateDescIdDesc()).thenReturn(List.of(anonymous, blocked));
 
         assertThat(linksStats.collect(WINDOW).newest()).containsExactly(
-                new NewestLink(905L, "abc12", "example.com", null, "ANONYMOUS_WEB", LocalDateTime.of(2026, 10, 25, 9, 0), "ACTIVE"),
+                new NewestLink(905L, "abc12", "example.com", null, "ANONYMOUS_WEB", LocalDateTime.of(2026, 10, 25, 9, 0), "ACTIVE", null),
                 new NewestLink(904L, "flyer", "shop.example.org", "ana@example.com", "unknown", LocalDateTime.of(2026, 10, 25, 8, 30),
-                        "BLOCKED"));
+                        "BLOCKED", null));
+    }
+
+    @Test
+    void aNewestLinkOnADomainCarriesTheHostname() {
+        final var onDomain = Url.builder()
+                .id(906L)
+                .shortUrl("menu")
+                .longUrl("https://example.com/menu")
+                .domain(CustomDomain.builder().id(7L).hostname("go.example.com").build())
+                .createdVia(CreatedVia.WEB)
+                .createDate(LocalDateTime.of(2026, 10, 25, 10, 0))
+                .visits(0L)
+                .active(true)
+                .build();
+        givenCounts(NO_LINKS_CREATED, NO_LINKS);
+        when(urlRepository.findTop10ByOrderByCreateDateDescIdDesc()).thenReturn(List.of(onDomain));
+
+        assertThat(linksStats.collect(WINDOW).newest()).extracting(NewestLink::domain).containsExactly("go.example.com");
     }
 
     @Test

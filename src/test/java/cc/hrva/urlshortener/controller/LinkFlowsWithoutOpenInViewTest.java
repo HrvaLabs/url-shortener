@@ -19,6 +19,7 @@ import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.repository.ApiKeyRepository;
 import cc.hrva.urlshortener.repository.AuditLogRepository;
 import cc.hrva.urlshortener.repository.DestinationCheckRepository;
+import cc.hrva.urlshortener.repository.CustomDomainRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.security.AnyHostIsPrimary;
@@ -76,7 +77,9 @@ import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.json.JsonCompareMode;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -84,10 +87,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -112,6 +118,8 @@ class LinkFlowsWithoutOpenInViewTest {
     private static final long OTHER = 501L;
     private static final long OWNERS_LINK = 510L;
     private static final long OWNERS_KEY = 520L;
+    private static final long OWNERS_DOMAIN = 530L;
+    private static final String DOMAIN_REFUSAL = "{\"domain\":\"Choose one of your active domains, or leave it empty for hrva.cc.\"}";
     private static final String OWNER_EMAIL = "owner@hrva.cc";
     private static final String OTHER_EMAIL = "other@hrva.cc";
     private static final String OWNER_TOKEN = "Bearer owner-token";
@@ -219,7 +227,8 @@ class LinkFlowsWithoutOpenInViewTest {
     @AfterEach
     void tearDown() {
         jdbcTemplate.update("delete from audit_log");
-        jdbcTemplate.update("delete from url where owner_id = ?", OWNER);
+        jdbcTemplate.update("delete from url where owner_id in (?, ?)", OWNER, OTHER);
+        jdbcTemplate.update("delete from custom_domain where owner_id in (?, ?)", OWNER, OTHER);
         jdbcTemplate.update("delete from api_key where owner_id = ?", OWNER);
         jdbcTemplate.update("delete from user_account_authorities where user_id in (?, ?)", OWNER, OTHER);
         jdbcTemplate.update("delete from user_account where id in (?, ?)", OWNER, OTHER);
@@ -275,6 +284,185 @@ class LinkFlowsWithoutOpenInViewTest {
                 .containsEntry("VISIT_LIMIT", null);
     }
 
+    @Test
+    void aDomainLinkSerialisesAfterItsTransaction() throws Exception {
+        domain(OWNERS_DOMAIN, OWNER, "go.example.com", "ACTIVE");
+
+        mockMvc.perform(post("/api/v1/urls")
+                        .header(JwtFilter.AUTHORIZATION_HEADER, OWNER_TOKEN)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"longUrl\":\"https://example.com/menu\",\"shortUrl\":\"menu\",\"domain\":\"Go.Example.com\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.shortUrl").value("menu"))
+                .andExpect(jsonPath("$.domain.id").value(OWNERS_DOMAIN))
+                .andExpect(jsonPath("$.domain.hostname").value("go.example.com"));
+        final var id = linkOn(OWNERS_DOMAIN, "menu");
+
+        mockMvc.perform(put("/api/v1/urls/{id}", id)
+                        .header(JwtFilter.AUTHORIZATION_HEADER, OWNER_TOKEN)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"id\":" + id + ",\"longUrl\":\"https://example.com/menu\",\"visitLimit\":5}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.domain.hostname").value("go.example.com"));
+        mockMvc.perform(patch("/api/v1/urls/{id}/deactivate", id).header(JwtFilter.AUTHORIZATION_HEADER, OWNER_TOKEN))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.domain.hostname").value("go.example.com"));
+        mockMvc.perform(patch("/api/v1/urls/{id}/activate", id).header(JwtFilter.AUTHORIZATION_HEADER, OWNER_TOKEN))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.active").value(true))
+                .andExpect(jsonPath("$.domain.hostname").value("go.example.com"));
+        mockMvc.perform(get("/api/v1/urls").header(JwtFilter.AUTHORIZATION_HEADER, OWNER_TOKEN))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[?(@.shortUrl == 'menu')].domain.hostname").value("go.example.com"))
+                .andExpect(jsonPath("$.content[?(@.shortUrl == 'mine2')].domain").doesNotExist());
+
+        assertThat(jdbcTemplate.queryForMap("select domain_id, visit_limit, active from url where id = ?", id))
+                .containsEntry("DOMAIN_ID", OWNERS_DOMAIN)
+                .containsEntry("VISIT_LIMIT", 5L)
+                .containsEntry("ACTIVE", true);
+    }
+
+    @Test
+    void theSameCustomAliasOnHrvaAndOnTheDomainIsFineButNotTwiceOnTheDomain() throws Exception {
+        domain(OWNERS_DOMAIN, OWNER, "go.example.com", "ACTIVE");
+
+        create(OWNER_TOKEN, "{\"longUrl\":\"https://example.com/a\",\"shortUrl\":\"menu\"}")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.domain").doesNotExist());
+        create(OWNER_TOKEN, "{\"longUrl\":\"https://example.com/b\",\"shortUrl\":\"menu\",\"domain\":\"go.example.com\"}")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.domain.hostname").value("go.example.com"));
+        create(OWNER_TOKEN, "{\"longUrl\":\"https://example.com/c\",\"shortUrl\":\"menu\",\"domain\":\"go.example.com\"}")
+                .andExpect(status().isConflict())
+                .andExpect(content().json("{\"error\":\"This short URL is already taken. Try another.\"}", JsonCompareMode.STRICT));
+
+        assertThat(jdbcTemplate.queryForList("select long_url from url where short_url = 'menu' order by id", String.class))
+                .containsExactly("https://example.com/a", "https://example.com/b");
+    }
+
+    @Test
+    void someoneElsesOrAPendingDomainIsRefused() throws Exception {
+        domain(OWNERS_DOMAIN, OWNER, "go.example.com", "ACTIVE");
+        domain(OWNERS_DOMAIN + 1, OWNER, "pending.example.com", "PENDING_REVIEW");
+
+        create(OTHER_TOKEN, "{\"longUrl\":\"https://example.com/a\",\"domain\":\"go.example.com\"}")
+                .andExpect(status().isBadRequest())
+                .andExpect(content().json(DOMAIN_REFUSAL, JsonCompareMode.STRICT));
+        create(OWNER_TOKEN, "{\"longUrl\":\"https://example.com/a\",\"domain\":\"pending.example.com\"}")
+                .andExpect(status().isBadRequest())
+                .andExpect(content().json(DOMAIN_REFUSAL, JsonCompareMode.STRICT));
+        create(OWNER_TOKEN, "{\"longUrl\":\"https://example.com/a\",\"domain\":\"" + "a".repeat(250) + ".com\"}")
+                .andExpect(status().isBadRequest())
+                .andExpect(content().json(DOMAIN_REFUSAL, JsonCompareMode.STRICT));
+
+        assertThat(linkCount()).isEqualTo(1L);
+    }
+
+    @Test
+    void anonymousCannotPickADomain() throws Exception {
+        domain(OWNERS_DOMAIN, OWNER, "go.example.com", "ACTIVE");
+        doReturn(null).when(userService).getUserFromToken();
+
+        mockMvc.perform(post("/api/v1/urls")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"longUrl\":\"https://example.com/anonymous\",\"domain\":\"go.example.com\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().json(DOMAIN_REFUSAL, JsonCompareMode.STRICT));
+
+        assertThat(jdbcTemplate.queryForObject("select count(*) from url where long_url = 'https://example.com/anonymous'", Long.class)).isZero();
+    }
+
+    @Test
+    void aDeactivatedOwnerCannotUseTheirDomain() throws Exception {
+        domain(OWNERS_DOMAIN, OWNER, "go.example.com", "ACTIVE");
+        jdbcTemplate.update("update user_account set active = false where id = ?", OWNER);
+
+        create(OWNER_TOKEN, "{\"longUrl\":\"https://example.com/a\",\"domain\":\"go.example.com\"}")
+                .andExpect(status().isBadRequest())
+                .andExpect(content().json(DOMAIN_REFUSAL, JsonCompareMode.STRICT));
+
+        assertThat(linkCount()).isEqualTo(1L);
+    }
+
+    @Test
+    void apiKeyCreatesUseTheKeyOwnersDomains() throws Exception {
+        domain(OWNERS_DOMAIN, OWNER, "go.example.com", "ACTIVE");
+        domain(OWNERS_DOMAIN + 1, OTHER, "other.example.com", "ACTIVE");
+
+        mockMvc.perform(post("/api/v1/urls")
+                        .header("X-Api-Key", OWNERS_KEY_VALUE)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"longUrl\":\"https://example.com/by-key\",\"domain\":\"go.example.com\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.domain.hostname").value("go.example.com"));
+        mockMvc.perform(post("/api/v1/urls")
+                        .header("X-Api-Key", OWNERS_KEY_VALUE)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"longUrl\":\"https://example.com/by-key-2\",\"domain\":\"other.example.com\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().json(DOMAIN_REFUSAL, JsonCompareMode.STRICT));
+
+        assertThat(jdbcTemplate.queryForObject("select count(*) from url where owner_id = ? and domain_id = ?", Long.class, OWNER, OWNERS_DOMAIN))
+                .isEqualTo(1L);
+        assertThat(jdbcTemplate.queryForObject("select api_calls_used from api_key where id = ?", Long.class, OWNERS_KEY)).isEqualTo(1L);
+    }
+
+    @Test
+    void bulkChecksEachItemsDomain() throws Exception {
+        domain(OWNERS_DOMAIN, OWNER, "go.example.com", "ACTIVE");
+
+        mockMvc.perform(post("/api/v1/urls/bulk")
+                        .header(JwtFilter.AUTHORIZATION_HEADER, OWNER_TOKEN)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("[{\"longUrl\":\"https://example.com/1\"},{\"longUrl\":\"https://example.com/2\",\"domain\":\"go.example.com\"},"
+                                + "{\"longUrl\":\"https://example.com/3\",\"domain\":\"elsewhere.example.com\"}]"))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().json(DOMAIN_REFUSAL, JsonCompareMode.STRICT));
+
+        assertThat(linkCount()).isEqualTo(1L);
+
+        mockMvc.perform(post("/api/v1/urls/bulk")
+                        .header(JwtFilter.AUTHORIZATION_HEADER, OWNER_TOKEN)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("[{\"longUrl\":\"https://example.com/1\"},{\"longUrl\":\"https://example.com/2\",\"domain\":\"go.example.com\"}]"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].domain").doesNotExist())
+                .andExpect(jsonPath("$[1].domain.hostname").value("go.example.com"));
+    }
+
+    @Test
+    void aLinkOnARemovedDomainCannotBeReactivated() throws Exception {
+        domain(OWNERS_DOMAIN, OWNER, "go.example.com", "DISABLED");
+        jdbcTemplate.update("update url set domain_id = ? where id = ?", OWNERS_DOMAIN, OWNERS_LINK);
+
+        mockMvc.perform(patch("/api/v1/urls/{id}/activate", OWNERS_LINK).header(JwtFilter.AUTHORIZATION_HEADER, OWNER_TOKEN))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().json("{\"error\":\"This link's domain isn't active, so the link can't be turned on.\"}", JsonCompareMode.STRICT));
+
+        assertThat(jdbcTemplate.queryForObject("select active from url where id = ?", Boolean.class, OWNERS_LINK)).isFalse();
+    }
+
+    private ResultActions create(final String token, final String body) throws Exception {
+        return mockMvc.perform(post("/api/v1/urls")
+                .header(JwtFilter.AUTHORIZATION_HEADER, token)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body));
+    }
+
+    private void domain(final long id, final long owner, final String hostname, final String status) {
+        jdbcTemplate.update("""
+                insert into custom_domain (id, owner_id, hostname, hostname_key, status, reason, created_at, updated_at)
+                values (?, ?, ?, ?, ?, 'Menu links for my cafe', current_timestamp, current_timestamp)""", id, owner, hostname, hostname, status);
+    }
+
+    private long linkOn(final long domainId, final String alias) {
+        return jdbcTemplate.queryForObject("select id from url where domain_id = ? and short_url = ?", Long.class, domainId, alias);
+    }
+
+    private long linkCount() {
+        return jdbcTemplate.queryForObject("select count(*) from url where owner_id in (?, ?)", Long.class, OWNER, OTHER);
+    }
+
     private void account(final long id, final String email, final long... roles) {
         jdbcTemplate.update("insert into user_account (id, email, password, active) values (?, ?, 'secret-hash', true)", id, email);
         for (final var role : roles) {
@@ -309,7 +497,7 @@ class LinkFlowsWithoutOpenInViewTest {
             basePackageClasses = UrlRepository.class,
             includeFilters = @ComponentScan.Filter(
                     type = FilterType.ASSIGNABLE_TYPE,
-                    classes = {UrlRepository.class, UserRepository.class, ApiKeyRepository.class, AuditLogRepository.class}))
+                    classes = {UrlRepository.class, CustomDomainRepository.class, UserRepository.class, ApiKeyRepository.class, AuditLogRepository.class}))
     @Import({
             AppConfiguration.class,
             WebConfiguration.class,

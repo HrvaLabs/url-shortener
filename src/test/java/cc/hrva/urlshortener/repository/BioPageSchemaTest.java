@@ -222,6 +222,32 @@ class BioPageSchemaTest {
     }
 
     @Test
+    void theDomainsOfAPagesButtonsCostNoExtraStatement() {
+        final var ana = savedUser("ana@example.com");
+        final var page = savedPage(ana, "ana");
+        final var onDomain = savedLink("menu", ana);
+        final var onOtherDomain = savedLink("shop", ana);
+        final var onHrva = savedLink("blog", ana);
+        bioPageButtonRepository.saveAndFlush(button(page, onDomain, 0, true));
+        bioPageButtonRepository.saveAndFlush(button(page, onOtherDomain, 1, true));
+        bioPageButtonRepository.saveAndFlush(button(page, onHrva, 2, true));
+        final var withoutDomains = statementsToLoadTheButtonsOf(page);
+        jdbcTemplate.update("""
+                insert into custom_domain (owner_id, hostname, hostname_key, status, reason, created_at, updated_at)
+                values (?, 'go.example.com', 'go.example.com', 'ACTIVE', 'Menu links for my cafe', ?, ?),
+                       (?, 'shop.example.com', 'shop.example.com', 'ACTIVE', 'Menu links for my cafe', ?, ?)""",
+                ana.getId(), NOW, NOW, ana.getId(), NOW, NOW);
+        jdbcTemplate.update("update url set domain_id = (select id from custom_domain where hostname_key = 'go.example.com') where id = ?", onDomain.getId());
+        jdbcTemplate.update("update url set domain_id = (select id from custom_domain where hostname_key = 'shop.example.com') where id = ?",
+                onOtherDomain.getId());
+
+        assertThat(statementsToLoadTheButtonsOf(page)).isEqualTo(withoutDomains);
+        assertThat(bioPageButtonRepository.findByPageWithUrl(page))
+                .extracting(button -> button.getUrl().getDomain() == null ? null : button.getUrl().getDomain().getHostname())
+                .containsExactly("go.example.com", "shop.example.com", null);
+    }
+
+    @Test
     void deletingALinkRemovesItsButton() {
         final var ana = savedUser("ana@example.com");
         final var page = savedPage(ana, "ana");
@@ -413,6 +439,17 @@ class BioPageSchemaTest {
     private static ThrowingConsumer<Throwable> violates(final String constraint) {
         return exception -> assertThat(exception).isInstanceOfSatisfying(DataIntegrityViolationException.class,
                 violation -> assertThat(violation.getMostSpecificCause().getMessage()).containsIgnoringCase(constraint));
+    }
+
+    private long statementsToLoadTheButtonsOf(final BioPage page) {
+        entityManager.flush();
+        entityManager.clear();
+        final var statistics = entityManager.getEntityManagerFactory().unwrap(SessionFactory.class).getStatistics();
+        statistics.clear();
+        bioPageButtonRepository.findByPageWithUrl(page).forEach(button -> button.getUrl().getDomain());
+        final var statements = statistics.getPrepareStatementCount();
+        entityManager.clear();
+        return statements;
     }
 
     private long rowsOfPage(final String table, final BioPage page) {

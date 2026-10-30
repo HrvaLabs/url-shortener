@@ -46,7 +46,8 @@ public class TrafficStats {
                 DomainNames.hostOf(row.longUrl()).orElse(""),
                 row.ownerEmail(),
                 row.clicks(),
-                row.uniqueVisitors());
+                row.uniqueVisitors(),
+                row.domain());
     }
 
 }

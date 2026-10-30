@@ -6,6 +6,7 @@ import cc.hrva.urlshortener.model.enums.BioAccent;
 import cc.hrva.urlshortener.model.enums.BioAvatarKind;
 import cc.hrva.urlshortener.model.enums.BioIcon;
 import cc.hrva.urlshortener.model.enums.BioTheme;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import java.util.List;
 
 public record PublicBioPageResponse(String handle, String displayName, String bio, BioAvatarKind avatarKind, String avatarEmoji,
@@ -16,10 +17,11 @@ public record PublicBioPageResponse(String handle, String displayName, String bi
                 page.getAvatarEmoji(), page.getAccent(), page.getTheme(), page.isIndexable(), buttons);
     }
 
-    public record Button(String title, BioIcon icon, String shortUrl) {
+    public record Button(String title, BioIcon icon, String shortUrl, @JsonInclude(JsonInclude.Include.NON_NULL) String domain) {
 
         public static Button from(final BioPageButton button) {
-            return new Button(button.getTitle(), button.getIcon(), button.getUrl().getShortUrl());
+            final var url = button.getUrl();
+            return new Button(button.getTitle(), button.getIcon(), url.getShortUrl(), url.getDomain() == null ? null : url.getDomain().getHostname());
         }
 
     }

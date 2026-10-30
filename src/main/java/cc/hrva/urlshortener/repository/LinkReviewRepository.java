@@ -18,7 +18,7 @@ import org.springframework.data.repository.query.Param;
 public interface LinkReviewRepository extends JpaRepository<LinkReview, Long>, JpaSpecificationExecutor<LinkReview> {
 
     @Override
-    @EntityGraph(attributePaths = {"url", "url.owner"}, type = EntityGraph.EntityGraphType.LOAD)
+    @EntityGraph(attributePaths = {"url", "url.owner", "url.domain"}, type = EntityGraph.EntityGraphType.LOAD)
     Page<LinkReview> findAll(Specification<LinkReview> spec, Pageable pageable);
 
     Optional<LinkReview> findFirstByUrlAndResolvedAtIsNullOrderByFlaggedAtDesc(Url url);

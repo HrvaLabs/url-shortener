@@ -75,17 +75,17 @@ class TrafficStatsTest {
     @Test
     void topLinksCarryTheHostAndOwner() {
         when(repository.findTopLinks(FROM, TO, 10)).thenReturn(List.of(
-                new TopLinkRow(7L, "menu", "https://shop.example.com/a?b=c", "ana@example.com", 120, 95),
-                new TopLinkRow(9L, "flyer", "https://example.org/x", null, 30, 20),
-                new TopLinkRow(11L, "odd", "", null, 5, 5)));
+                new TopLinkRow(7L, "menu", "https://shop.example.com/a?b=c", "ana@example.com", 120, 95, "go.example.com"),
+                new TopLinkRow(9L, "flyer", "https://example.org/x", null, 30, 20, null),
+                new TopLinkRow(11L, "odd", "", null, 5, 5, null)));
         givenOwnership(35, 120);
 
         final var traffic = trafficStats.collect(WINDOW);
 
         assertThat(traffic.topLinks()).containsExactly(
-                new TopLink(7L, "menu", "shop.example.com", "ana@example.com", 120, 95),
-                new TopLink(9L, "flyer", "example.org", null, 30, 20),
-                new TopLink(11L, "odd", "", null, 5, 5));
+                new TopLink(7L, "menu", "shop.example.com", "ana@example.com", 120, 95, "go.example.com"),
+                new TopLink(9L, "flyer", "example.org", null, 30, 20, null),
+                new TopLink(11L, "odd", "", null, 5, 5, null));
     }
 
     @Test

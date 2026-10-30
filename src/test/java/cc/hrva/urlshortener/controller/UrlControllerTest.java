@@ -12,6 +12,7 @@ import cc.hrva.urlshortener.dto.UnlockResponse;
 import cc.hrva.urlshortener.dto.UrlResponse;
 import cc.hrva.urlshortener.dto.UrlSearchDto;
 import cc.hrva.urlshortener.dto.UrlUpdateDto;
+import cc.hrva.urlshortener.exception.FieldValidationException;
 import cc.hrva.urlshortener.exception.RateLimitExceededException;
 import cc.hrva.urlshortener.exception.UrlNotFoundException;
 import cc.hrva.urlshortener.model.CustomDomain;
@@ -172,6 +173,37 @@ class UrlControllerTest {
 
         verify(urlService).saveUrlRouting(link, "203.0.113.7", CreatedVia.BULK);
         verify(urlService).saveUrlWithApiKey(link, "k", CreatedVia.BULK);
+    }
+
+    @Test
+    void bulkChecksEveryDomainBeforeCreatingAny() throws Exception {
+        final var links = List.of(
+                CreateUrlDto.builder().longUrl("https://example.com/1").build(),
+                CreateUrlDto.builder().longUrl("https://example.com/2").domain("elsewhere.example.com").build());
+        org.mockito.Mockito.doThrow(new FieldValidationException("domain", "Choose one of your active domains, or leave it empty for hrva.cc."))
+                .when(urlService).requireUsableDomains(links, "k");
+
+        mockMvc.perform(post("/api/v1/urls/bulk")
+                        .header("X-Api-Key", "k")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(links)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.domain").value("Choose one of your active domains, or leave it empty for hrva.cc."));
+
+        verify(urlService, never()).saveUrlWithApiKey(any(), any(), any());
+        verify(urlService, never()).saveUrlRouting(any(), any(), any());
+    }
+
+    @Test
+    void aDomainOver253CharactersIsRefusedAsADomainError() throws Exception {
+        mockMvc.perform(post("/api/v1/urls")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(CreateUrlDto.builder().longUrl("https://example.com")
+                                .domain("a".repeat(250) + ".com").build())))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.domain").value("Choose one of your active domains, or leave it empty for hrva.cc."));
+
+        verifyNoInteractions(urlService);
     }
 
     @Test
