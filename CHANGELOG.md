@@ -4,6 +4,15 @@ All notable changes to hrva.cc — the URL shortener.
 
 ---
 
+## [v2.18] — 2026-10-30
+
+An admin Settings page: turn features on or off and change their numbers without a redeploy, emails included.
+
+### 🔧 Admin
+- A new Settings page: turn features on or off and change their numbers without a redeploy. Every change is logged and posted to Discord, and a safety check that is off shows a warning on Settings and Stats.
+
+---
+
 ## [v2.17] — 2026-10-30
 
 Discord alerts when links made without an account share one URL shape or get busy, every way you've signed in listed in Settings, and admin lists searched, sorted and paged on the server.

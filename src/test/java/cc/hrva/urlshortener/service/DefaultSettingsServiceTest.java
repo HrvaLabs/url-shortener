@@ -1,6 +1,7 @@
 package cc.hrva.urlshortener.service;
 
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
+import cc.hrva.urlshortener.dto.settings.PublicSettingsResponse;
 import cc.hrva.urlshortener.dto.settings.SettingResponse;
 import cc.hrva.urlshortener.exception.FieldValidationException;
 import cc.hrva.urlshortener.exception.SettingNotFoundException;
@@ -114,6 +115,17 @@ class DefaultSettingsServiceTest {
         assertThat(settingsService.number(SettingKey.ANONYMOUS_LINKS_PER_HOUR)).isEqualTo(10);
         assertThat(settingsService.isOn(SettingKey.SEND_EMAILS)).isTrue();
         assertThat(settingsService.isOn(SettingKey.EMAIL_CUSTOM_DOMAIN)).isTrue();
+    }
+
+    @Test
+    void thePublicSettingsFollowTheThreeSwitches() {
+        assertThat(settingsService.publicSettings()).isEqualTo(new PublicSettingsResponse(true, true, true));
+
+        rows.put("ANONYMOUS_LINKS", row(SettingKey.ANONYMOUS_LINKS, "false"));
+        rows.put("CUSTOM_ALIASES", row(SettingKey.CUSTOM_ALIASES, "false"));
+        settingsService.refresh();
+
+        assertThat(settingsService.publicSettings()).isEqualTo(new PublicSettingsResponse(false, true, false));
     }
 
     @Test

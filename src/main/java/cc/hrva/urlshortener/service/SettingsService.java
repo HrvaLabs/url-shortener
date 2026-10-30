@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.service;
 
+import cc.hrva.urlshortener.dto.settings.PublicSettingsResponse;
 import cc.hrva.urlshortener.dto.settings.SettingResponse;
 import cc.hrva.urlshortener.service.settings.EmailKind;
 import cc.hrva.urlshortener.service.settings.SettingKey;
@@ -17,6 +18,7 @@ public interface SettingsService {
     List<String> addresses(SettingKey key);
     SettingKey settingKey(String name);
     List<SettingResponse> list();
+    PublicSettingsResponse publicSettings();
     SettingResponse change(SettingKey key, JsonNode value, String changedBy);
     SettingResponse reset(SettingKey key, String changedBy);
     List<SettingKey> safetySwitchesOff();

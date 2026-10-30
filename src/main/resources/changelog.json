@@ -1,10 +1,24 @@
 {
   "releases": [
     {
-      "version": "v2.17",
+      "version": "v2.18",
       "date": "2026-10-30",
       "badge": "Latest",
       "badgeVariant": "default",
+      "summary": "An admin Settings page: turn features on or off and change their numbers without a redeploy, emails included.",
+      "sections": [
+        {
+          "title": "Admin",
+          "icon": "wrench",
+          "items": [
+            "A new Settings page: turn features on or off and change their numbers without a redeploy. Every change is logged and posted to Discord, and a safety check that is off shows a warning on Settings and Stats."
+          ]
+        }
+      ]
+    },
+    {
+      "version": "v2.17",
+      "date": "2026-10-30",
       "summary": "Discord alerts when links made without an account share one URL shape or get busy, every way you've signed in listed in Settings, and admin lists searched, sorted and paged on the server.",
       "sections": [
         {

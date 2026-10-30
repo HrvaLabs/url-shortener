@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.service.impl;
 
+import cc.hrva.urlshortener.dto.settings.PublicSettingsResponse;
 import cc.hrva.urlshortener.dto.settings.SettingResponse;
 import cc.hrva.urlshortener.exception.SettingNotFoundException;
 import cc.hrva.urlshortener.model.AppSetting;
@@ -97,6 +98,11 @@ public class DefaultSettingsService implements SettingsService {
     public List<SettingResponse> list() {
         final var values = values();
         return Arrays.stream(SettingKey.values()).map(key -> response(key, values.get(key))).toList();
+    }
+
+    @Override
+    public PublicSettingsResponse publicSettings() {
+        return new PublicSettingsResponse(isOn(SettingKey.ANONYMOUS_LINKS), isOn(SettingKey.NEW_SIGNUPS), isOn(SettingKey.CUSTOM_ALIASES));
     }
 
     @Override
