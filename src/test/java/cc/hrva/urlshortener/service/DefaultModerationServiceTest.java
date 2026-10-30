@@ -1773,7 +1773,7 @@ class DefaultModerationServiceTest {
         final var result = moderationService.blockDomains(List.of("omaehhm.com", " FVVXCTW.com "), "Phishing", ADMIN, "admin-bulk");
 
         assertThat(result).isEqualTo(new DomainBulkBlockResponse(
-                List.of(new DomainBulkBlockResponse.Blocked("omaehhm.com", 2), new DomainBulkBlockResponse.Blocked("fvvxctw.com", 1)), List.of(), 3));
+                List.of(new DomainBulkBlockResponse.Blocked("omaehhm.com", 2, 0), new DomainBulkBlockResponse.Blocked("fvvxctw.com", 1, 0)), List.of(), 3));
         assertThat(List.of(first, second)).allSatisfy(url -> assertThat(url.getBlockDetail()).isEqualTo("omaehhm.com"));
         assertThat(third.getBlockDetail()).isEqualTo("fvvxctw.com");
         assertThat(List.of(first, second, third)).allSatisfy(url -> {
@@ -1806,13 +1806,26 @@ class DefaultModerationServiceTest {
         when(customDomainRepository.markDisabled(eq(70L), eq(CustomDomainStatus.ACTIVE), eq(DomainDisableReason.DOMAIN_RULE),
                 eq("omaehhm.com: Phishing"), any())).thenReturn(1);
 
-        moderationService.blockDomains(List.of("omaehhm.com", "fvvxctw.com"), "Phishing", ADMIN, "admin-bulk");
+        final var result = moderationService.blockDomains(List.of("omaehhm.com", "fvvxctw.com"), "Phishing", ADMIN, "admin-bulk");
 
+        assertThat(result.blocked()).containsExactly(new DomainBulkBlockResponse.Blocked("omaehhm.com", 0, 1),
+                new DomainBulkBlockResponse.Blocked("fvvxctw.com", 0, 0));
         verify(customDomainRepository, never()).markDisabled(eq(71L), any(), any(), any(), any());
         verify(eventPublisher).publishEvent(new DomainDisabled(70L, "go.omaehhm.com", DomainDisableReason.DOMAIN_RULE, "omaehhm.com: Phishing"));
         verify(auditLogService).log(ADMIN, AuditAction.BLOCK_DOMAIN, "Domain", "omaehhm.com", "reason: Phishing, domains: 1, links: 0, via: admin-bulk");
         verify(auditLogService).log(ADMIN, AuditAction.BLOCK_DOMAIN, "Domain", "fvvxctw.com", "reason: Phishing, links: 0, via: admin-bulk");
         assertThat(outOfPlace).isEmpty();
+    }
+
+    @Test
+    void aBulkBlockWhoseCustomDomainsCannotBeReadSaysSoInItsAuditEntry() {
+        when(customDomainRepository.findByStatusIn(anyCollection())).thenThrow(new IllegalStateException("database down"));
+
+        final var result = moderationService.blockDomains(List.of("omaehhm.com"), "Phishing", ADMIN, "admin-bulk");
+
+        assertThat(result.blocked()).containsExactly(new DomainBulkBlockResponse.Blocked("omaehhm.com", 0, 0));
+        verify(auditLogService).log(ADMIN, AuditAction.BLOCK_DOMAIN, "Domain", "omaehhm.com",
+                "reason: Phishing, domains: failed to turn off, links: 0, via: admin-bulk");
     }
 
     @Test
@@ -1860,7 +1873,7 @@ class DefaultModerationServiceTest {
 
         final var result = moderationService.blockDomains(List.of("gableci.hrva.cc", "omaehhm.com"), "Phishing", ADMIN, "admin-bulk");
 
-        assertThat(result).isEqualTo(new DomainBulkBlockResponse(List.of(new DomainBulkBlockResponse.Blocked("omaehhm.com", 1)),
+        assertThat(result).isEqualTo(new DomainBulkBlockResponse(List.of(new DomainBulkBlockResponse.Blocked("omaehhm.com", 1, 0)),
                 List.of(new DomainBulkBlockResponse.Skipped("gableci.hrva.cc", "Allowed by a rule")), 1));
         assertThat(trusted.getType()).isEqualTo(DomainRuleType.ALLOW);
         assertThat(trusted.getReason()).isEqualTo("seeded");
@@ -1881,8 +1894,8 @@ class DefaultModerationServiceTest {
         final var result = moderationService.blockDomains(List.of("com", "omaehhm.com", "203.0.113.7", "fvvxctw.com", "padlet.com"),
                 "Phishing", ADMIN, "admin-bulk");
 
-        assertThat(result.blocked()).containsExactly(new DomainBulkBlockResponse.Blocked("omaehhm.com", 1),
-                new DomainBulkBlockResponse.Blocked("padlet.com", 1));
+        assertThat(result.blocked()).containsExactly(new DomainBulkBlockResponse.Blocked("omaehhm.com", 1, 0),
+                new DomainBulkBlockResponse.Blocked("padlet.com", 1, 0));
         assertThat(result.skipped()).containsExactly(
                 new DomainBulkBlockResponse.Skipped("com", NOT_A_DOMAIN),
                 new DomainBulkBlockResponse.Skipped("203.0.113.7", NOT_A_DOMAIN),
@@ -1899,7 +1912,7 @@ class DefaultModerationServiceTest {
 
         final var result = moderationService.blockDomains(List.of("omaehhm.com"), "Phishing", ADMIN, "admin-bulk");
 
-        assertThat(result.blocked()).containsExactly(new DomainBulkBlockResponse.Blocked("omaehhm.com", 1));
+        assertThat(result.blocked()).containsExactly(new DomainBulkBlockResponse.Blocked("omaehhm.com", 1, 0));
         assertThat(reactivatedByHand.getBlockReason()).isEqualTo(BlockReason.DOMAIN_RULE);
         assertThat(existing)
                 .extracting(DomainRule::getType, DomainRule::getReason, DomainRule::getCreatedBy, DomainRule::getCreatedAt)
@@ -1913,7 +1926,7 @@ class DefaultModerationServiceTest {
 
         final var result = moderationService.blockDomains(List.of("omaehhm.com", " OMAEHHM.com "), "Phishing", ADMIN, "admin-bulk");
 
-        assertThat(result).isEqualTo(new DomainBulkBlockResponse(List.of(new DomainBulkBlockResponse.Blocked("omaehhm.com", 1)), List.of(), 1));
+        assertThat(result).isEqualTo(new DomainBulkBlockResponse(List.of(new DomainBulkBlockResponse.Blocked("omaehhm.com", 1, 0)), List.of(), 1));
         verify(domainRuleRepository, times(1)).save(any(DomainRule.class));
         verify(auditLogService, times(1)).log(anyString(), any(), anyString(), anyString(), anyString());
     }
@@ -1927,8 +1940,8 @@ class DefaultModerationServiceTest {
 
         final var result = moderationService.blockDomains(List.of("omaehhm.com", "fvvxctw.com", "padlet.com"), "Phishing", ADMIN, "admin-bulk");
 
-        assertThat(result.blocked()).containsExactly(new DomainBulkBlockResponse.Blocked("omaehhm.com", 1),
-                new DomainBulkBlockResponse.Blocked("fvvxctw.com", 1), new DomainBulkBlockResponse.Blocked("padlet.com", 1));
+        assertThat(result.blocked()).containsExactly(new DomainBulkBlockResponse.Blocked("omaehhm.com", 1, 0),
+                new DomainBulkBlockResponse.Blocked("fvvxctw.com", 1, 0), new DomainBulkBlockResponse.Blocked("padlet.com", 1, 0));
         verify(urlRepository, times(1)).findActiveDestinationsAfter(anyLong(), any(Pageable.class));
         verify(domainRuleRepository, times(1)).findAll();
         assertThat(links.get(13L).isActive()).isTrue();
@@ -1945,7 +1958,7 @@ class DefaultModerationServiceTest {
         final var result = moderationService.blockDomains(List.of("omaehhm.com", "fvvxctw.com"), "Phishing", ADMIN, "admin-bulk");
 
         assertThat(result).isEqualTo(new DomainBulkBlockResponse(
-                List.of(new DomainBulkBlockResponse.Blocked("omaehhm.com", 1), new DomainBulkBlockResponse.Blocked("fvvxctw.com", 1)), List.of(), 2));
+                List.of(new DomainBulkBlockResponse.Blocked("omaehhm.com", 1, 0), new DomainBulkBlockResponse.Blocked("fvvxctw.com", 1, 0)), List.of(), 2));
         assertThat(List.of(first, second)).allSatisfy(url -> assertThat(url.getBlockReason()).isEqualTo(BlockReason.DOMAIN_RULE));
         verify(auditLogService).log(ADMIN, AuditAction.BLOCK_DOMAIN, "Domain", "fvvxctw.com", "reason: Phishing, links: 1, via: admin-bulk");
         verify(sendingEmailService).sendEmailUrlsBlocked(alice, List.of(first, second));

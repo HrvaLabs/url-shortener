@@ -131,8 +131,8 @@ class AdminDomainRuleSecurityTest {
     @Test
     void anAdminCanBlockSeveralDomainsAtOnce() throws Exception {
         when(moderationService.blockDomains(List.of("omaehhm.com", "fvvxctw.com"), "Phishing", ADMIN, "admin-bulk"))
-                .thenReturn(new DomainBulkBlockResponse(List.of(new DomainBulkBlockResponse.Blocked("omaehhm.com", 2),
-                        new DomainBulkBlockResponse.Blocked("fvvxctw.com", 1)), List.of(), 3));
+                .thenReturn(new DomainBulkBlockResponse(List.of(new DomainBulkBlockResponse.Blocked("omaehhm.com", 2, 0),
+                        new DomainBulkBlockResponse.Blocked("fvvxctw.com", 1, 0)), List.of(), 3));
 
         mockMvc.perform(signedInPost(BULK, "admin-token").content(BULK_BODY))
                 .andExpect(status().isOk())

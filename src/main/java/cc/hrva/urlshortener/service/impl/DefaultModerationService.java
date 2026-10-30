@@ -57,6 +57,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.OptionalInt;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.function.Consumer;
@@ -97,6 +98,7 @@ public class DefaultModerationService implements ModerationService {
     private static final String DOMAIN = "domain";
     private static final String REASON = "reason";
     private static final String DOMAINS = "domains";
+    private static final String DOMAINS_FAILED = "failed to turn off";
     private static final String NOT_A_DOMAIN = "Enter a domain such as example.com, not a top-level domain or an IP address.";
     private static final String OVER_THE_CAP = "This would affect %d links, more than the %d allowed here. Use the dashboard.";
     private static final String NOT_COVERED = "%s doesn't cover this link's destination %s.";
@@ -149,14 +151,13 @@ public class DefaultModerationService implements ModerationService {
     private Affected blockDomainRule(final String domain, final String reason, final String performedBy, final String via, final Integer maxLinks) {
         final var ruleDomain = ruleDomain(domain);
         final var blocked = blockLinksOn(ruleDomain, reason, performedBy, maxLinks);
-        logDomainBlock(ruleDomain, blocked.links(), blocked.domains(), reason, performedBy, via);
+        logDomainBlock(ruleDomain, blocked.links(), domainsField(blocked.domains()), reason, performedBy, via);
         return blocked;
     }
 
-    private void logDomainBlock(final String ruleDomain, final int blocked, final int domains, final String reason, final String performedBy,
+    private void logDomainBlock(final String ruleDomain, final int blocked, final String domains, final String reason, final String performedBy,
                                 final String via) {
-        auditLogService.log(performedBy, AuditAction.BLOCK_DOMAIN, TARGET_DOMAIN, ruleDomain,
-                details(via, blocked, field(REASON, reason), domainsField(domains)));
+        auditLogService.log(performedBy, AuditAction.BLOCK_DOMAIN, TARGET_DOMAIN, ruleDomain, details(via, blocked, field(REASON, reason), domains));
     }
 
     @Override
@@ -199,7 +200,7 @@ public class DefaultModerationService implements ModerationService {
                 final var rulesBelow = rulesBelow(ruleDomain, rules);
                 final var count = eachLink(idsByDomain.getOrDefault(ruleDomain, List.of()), Long::longValue,
                         id -> blockOnDomain(id, ruleDomain, rulesBelow, performedBy, linksBlocked::add));
-                blocked.add(new DomainBulkBlockResponse.Blocked(ruleDomain, count));
+                blocked.add(new DomainBulkBlockResponse.Blocked(ruleDomain, count, domainsDisabled.orElse(0)));
                 logBulkDomainBlock(ruleDomain, count, domainsDisabled, reason, performedBy, via);
             }
         }
@@ -234,19 +235,20 @@ public class DefaultModerationService implements ModerationService {
         return toBlock;
     }
 
-    private int disableMatchingDomains(final String ruleDomain, final String reason) {
+    private OptionalInt disableMatchingDomains(final String ruleDomain, final String reason) {
         try {
-            return customDomainModeration.disableMatching(ruleDomain, reason);
+            return OptionalInt.of(customDomainModeration.disableMatching(ruleDomain, reason));
         } catch (final RuntimeException exception) {
             log.warn("Turning off the custom domains of a blocked domain failed, continuing domain={}", ruleDomain, exception);
-            return 0;
+            return OptionalInt.empty();
         }
     }
 
-    private void logBulkDomainBlock(final String ruleDomain, final int blocked, final int domains, final String reason, final String performedBy,
-                                    final String via) {
+    private void logBulkDomainBlock(final String ruleDomain, final int blocked, final OptionalInt domains, final String reason,
+                                    final String performedBy, final String via) {
         try {
-            logDomainBlock(ruleDomain, blocked, domains, reason, performedBy, via);
+            logDomainBlock(ruleDomain, blocked, domains.isPresent() ? domainsField(domains.getAsInt()) : field(DOMAINS, DOMAINS_FAILED), reason,
+                    performedBy, via);
         } catch (final RuntimeException exception) {
             log.warn("Writing the audit entry of a blocked domain failed domain={} links={}", ruleDomain, blocked, exception);
         }

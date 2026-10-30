@@ -210,7 +210,7 @@ class AdminDomainRuleControllerTest {
     void aBulkBlockDelegatesAsTheSignedInAdminViaTheBulkActionAndReturnsWhatWasBlockedAndSkipped() throws Exception {
         when(moderationService.blockDomains(List.of("omaehhm.com", "fvvxctw.com", "gableci.hrva.cc"), "Phishing", ADMIN, "admin-bulk"))
                 .thenReturn(new DomainBulkBlockResponse(
-                        List.of(new DomainBulkBlockResponse.Blocked("omaehhm.com", 2), new DomainBulkBlockResponse.Blocked("fvvxctw.com", 1)),
+                        List.of(new DomainBulkBlockResponse.Blocked("omaehhm.com", 2, 1), new DomainBulkBlockResponse.Blocked("fvvxctw.com", 1, 0)),
                         List.of(new DomainBulkBlockResponse.Skipped("gableci.hrva.cc", "Allowed by a rule")), 3));
 
         mockMvc.perform(post(BULK).principal(SIGNED_IN_ADMIN)
@@ -220,6 +220,7 @@ class AdminDomainRuleControllerTest {
                 .andExpect(jsonPath("$.blocked.length()").value(2))
                 .andExpect(jsonPath("$.blocked[0].domain").value("omaehhm.com"))
                 .andExpect(jsonPath("$.blocked[0].linksDeactivated").value(2))
+                .andExpect(jsonPath("$.blocked[0].domainsDisabled").value(1))
                 .andExpect(jsonPath("$.skipped[0].domain").value("gableci.hrva.cc"))
                 .andExpect(jsonPath("$.skipped[0].reason").value("Allowed by a rule"))
                 .andExpect(jsonPath("$.linksDeactivated").value(3));
