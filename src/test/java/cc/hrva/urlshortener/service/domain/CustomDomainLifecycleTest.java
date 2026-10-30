@@ -529,6 +529,21 @@ class CustomDomainLifecycleTest {
     }
 
     @Test
+    void aRetriedDomainTurnedOffDuringItsCreateKeepsTheNewHostnameInsteadOfTheStaleOne() {
+        final var id = domain(ANA, "go.example.com", CustomDomainStatus.ERROR, "cf-stale");
+        set(id, "problem = 'PROVISIONING_FAILED', last_error = 'Cloudflare no longer has this hostname', next_check_at = null");
+        assertThat(customDomainRepository.markRetrying(id, NOW)).isOne();
+        CLOUDFLARE.duringTheNextCreate(() -> set(id, "status = 'DISABLED', disabled_reason = 'ADMIN', disabled_at = ?", NOW));
+
+        assertThat(lifecycle.runOnce().provisioned()).isZero();
+
+        assertThat(CLOUDFLARE.calls()).containsExactly("FIND go.example.com", "TOTAL ", "CREATE go.example.com");
+        assertThat(CLOUDFLARE.has("cf-1")).isTrue();
+        assertThat(row(id)).containsEntry("STATUS", "DISABLED").containsEntry("CLOUDFLARE_ID", "cf-1");
+        assertThat(customDomainRepository.countSlotsInUse()).isOne();
+    }
+
+    @Test
     void aCreateWaitsWhileCloudflaresFreeAllowanceIsFull() {
         appProperties.getDomains().setFreeAllowance(2);
         CLOUDFLARE.store("one.example.net", "active", "active");

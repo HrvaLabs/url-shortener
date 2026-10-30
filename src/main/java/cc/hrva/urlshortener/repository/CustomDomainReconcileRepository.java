@@ -28,6 +28,14 @@ public class CustomDomainReconcileRepository {
             fetch first 1 rows only
             """;
 
+    private static final String NEWEST_COMPLETED = """
+            select ran_at, cloudflare_total, ours_in_cloudflare, unknown_hostnames, missing_domain_ids, error
+            from custom_domain_reconcile
+            where error is null
+            order by ran_at desc, id desc
+            fetch first 1 rows only
+            """;
+
     private static final String DELETE_RAN_BEFORE = "delete from custom_domain_reconcile where ran_at < :cutoff";
 
     private static final String LINE_SEPARATOR = "\n";
@@ -48,6 +56,10 @@ public class CustomDomainReconcileRepository {
 
     public Optional<ReconcileRun> newest() {
         return jdbcTemplate.query(NEWEST, Map.of(), CustomDomainReconcileRepository::run).stream().findFirst();
+    }
+
+    public Optional<ReconcileRun> newestCompleted() {
+        return jdbcTemplate.query(NEWEST_COMPLETED, Map.of(), CustomDomainReconcileRepository::run).stream().findFirst();
     }
 
     public int deleteRanBefore(final LocalDateTime cutoff) {

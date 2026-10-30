@@ -210,6 +210,49 @@ class CustomDomainReconcilerTest {
     }
 
     @Test
+    void aHostnameStillMissingTheNextNightIsNotAlertedAgainWhateverItsState() {
+        final var disabled = domain("off.example.com", CustomDomainStatus.DISABLED, "cf-404");
+        final var stale = domain("go.example.com", CustomDomainStatus.ERROR, "cf-405");
+        set(stale, "problem = 'PROVISIONING_FAILED', last_error = 'Hostname is not allowed.', next_check_at = null");
+
+        reconciler.reconcile();
+        CLOCK.advance(Duration.ofDays(1));
+        final var secondNight = reconciler.reconcile().orElseThrow();
+
+        assertThat(secondNight.missingDomains())
+                .containsExactly(new MissingDomain(disabled, "off.example.com"), new MissingDomain(stale, "go.example.com"));
+        assertThat(committedEvents.alerts()).containsExactly(new DomainDrift(List.of(), List.of("off.example.com", "go.example.com"), 0, 100));
+        assertThat(statusOf(disabled)).isEqualTo("DISABLED");
+    }
+
+    @Test
+    void aHostnameAlertsAgainOnlyAfterANightItWasNotMissing() {
+        final var disabled = domain("off.example.com", CustomDomainStatus.DISABLED, "cf-404");
+
+        reconciler.reconcile();
+        when(cloudflareTokenCheck.check())
+                .thenReturn(new TokenState(CloudflareTokenStatus.UNREACHABLE, NOW, "Cloudflare couldn't be reached. We'll check again.", null));
+        CLOCK.advance(Duration.ofDays(1));
+        reconciler.reconcile();
+        when(cloudflareTokenCheck.check()).thenReturn(new TokenState(CloudflareTokenStatus.OK, NOW, null, 7));
+        CLOCK.advance(Duration.ofDays(1));
+        reconciler.reconcile();
+
+        assertThat(committedEvents.alerts()).hasSize(1);
+
+        final var found = CLOUDFLARE.store("off.example.com", "active", "active");
+        jdbcTemplate.update("update custom_domain set cloudflare_id = ? where id = ?", found, disabled);
+        CLOCK.advance(Duration.ofDays(1));
+        assertThat(reconciler.reconcile().orElseThrow().missingDomains()).isEmpty();
+        jdbcTemplate.update("update custom_domain set cloudflare_id = 'cf-404' where id = ?", disabled);
+        CLOCK.advance(Duration.ofDays(1));
+        reconciler.reconcile();
+
+        assertThat(committedEvents.alerts()).hasSize(2);
+        assertThat(committedEvents.alerts()).last().isEqualTo(new DomainDrift(List.of(), List.of("off.example.com"), 1, 100));
+    }
+
+    @Test
     void aHostnameTheListingSkippedIsAskedForBeforeItIsMarked() {
         final var skipped = CLOUDFLARE.store("go.example.com", "active", "active");
         final var id = domain("go.example.com", CustomDomainStatus.ACTIVE, skipped);

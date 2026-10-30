@@ -407,27 +407,41 @@ class CustomDomainSchemaTest {
         assertThat(customDomainRepository.findForReconcile(EnumSet.of(CustomDomainStatus.APPROVED_PROVISIONING, CustomDomainStatus.AWAITING_DNS,
                 CustomDomainStatus.ACTIVE, CustomDomainStatus.DISABLED, CustomDomainStatus.ERROR)))
                 .containsExactly(
-                        new DomainInCloudflare(active.getId(), "active.example.com", CustomDomainStatus.ACTIVE, null, null, "cf-1", false),
-                        new DomainInCloudflare(provisioning.getId(), "new.example.com", CustomDomainStatus.APPROVED_PROVISIONING, null, null, null,
-                                false),
-                        new DomainInCloudflare(queued.getId(), "gone.example.com", CustomDomainStatus.DELETED, null, null, "cf-3", true),
-                        new DomainInCloudflare(deleted.getId(), "old.example.com", CustomDomainStatus.DELETED, null, null, "cf-4", false),
+                        new DomainInCloudflare(active.getId(), "active.example.com", CustomDomainStatus.ACTIVE, null, "cf-1", false),
+                        new DomainInCloudflare(provisioning.getId(), "new.example.com", CustomDomainStatus.APPROVED_PROVISIONING, null, null, false),
+                        new DomainInCloudflare(queued.getId(), "gone.example.com", CustomDomainStatus.DELETED, null, "cf-3", true),
+                        new DomainInCloudflare(deleted.getId(), "old.example.com", CustomDomainStatus.DELETED, null, "cf-4", false),
                         new DomainInCloudflare(failed.getId(), "failed.example.com", CustomDomainStatus.ERROR, DomainProblem.PROVISIONING_FAILED,
-                                "Cloudflare no longer has this hostname", null, false));
+                                null, false));
     }
 
     @Test
     void aHostnameCreatedWhileTheDomainWasTurnedOffIsKeptOnlyByThatDomain() {
         final var disabled = savedDomain(domain("go.example.com", CustomDomainStatus.DISABLED));
         final var deleted = savedDomain(domain("old.example.com", CustomDomainStatus.DELETED).hostnameKey(null));
-        final var recorded = savedDomain(domain("links.example.org", CustomDomainStatus.DISABLED).cloudflareId("cf-9"));
+        final var stale = savedDomain(domain("links.example.org", CustomDomainStatus.DISABLED).cloudflareId("cf-stale"));
+        final var active = savedDomain(domain("menu.example.net", CustomDomainStatus.ACTIVE).cloudflareId("cf-old"));
 
         assertThat(customDomainRepository.keepCreatedWhileDisabled(disabled.getId(), "cf-1", NOW)).isOne();
-        assertThat(customDomainRepository.keepCreatedWhileDisabled(disabled.getId(), "cf-2", NOW)).isZero();
+        assertThat(customDomainRepository.keepCreatedWhileDisabled(disabled.getId(), "cf-1", NOW)).isZero();
+        assertThat(customDomainRepository.keepCreatedWhileDisabled(stale.getId(), "cf-4", NOW)).isOne();
         assertThat(customDomainRepository.keepCreatedWhileDisabled(deleted.getId(), "cf-3", NOW)).isZero();
-        assertThat(customDomainRepository.keepCreatedWhileDisabled(recorded.getId(), "cf-4", NOW)).isZero();
-        assertThat(jdbcTemplate.queryForList("select cloudflare_id from custom_domain where id in (?, ?, ?) order by id", String.class,
-                disabled.getId(), deleted.getId(), recorded.getId())).containsExactly("cf-1", null, "cf-9");
+        assertThat(customDomainRepository.keepCreatedWhileDisabled(active.getId(), "cf-5", NOW)).isZero();
+        assertThat(jdbcTemplate.queryForList("select cloudflare_id from custom_domain where id in (?, ?, ?, ?) order by id", String.class,
+                disabled.getId(), deleted.getId(), stale.getId(), active.getId())).containsExactly("cf-1", null, "cf-4", "cf-old");
+    }
+
+    @Test
+    void theLastCompletedReconcileSkipsRunsThatFailed() {
+        final var completed = new ReconcileRun(NOW.minusDays(1), 3, 2, List.of(), List.of(new MissingDomain(9L, "x.example.org")), null);
+        final var failed = new ReconcileRun(NOW, null, null, List.of(), List.of(), "Cloudflare couldn't be reached (timeout)");
+
+        assertThat(customDomainReconcileRepository.newestCompleted()).isEmpty();
+        customDomainReconcileRepository.insert(completed);
+        customDomainReconcileRepository.insert(failed);
+
+        assertThat(customDomainReconcileRepository.newest()).contains(failed);
+        assertThat(customDomainReconcileRepository.newestCompleted()).contains(completed);
     }
 
     @Test

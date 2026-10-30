@@ -119,8 +119,11 @@ public class CustomDomainReconciler {
             return recorded(failed(token.cloudflareTotal(), listing.error()), null);
         }
         readQuota();
+        final var alreadyMissing = Objects.requireNonNull(transactionOperations.execute(status -> customDomainReconcileRepository.newestCompleted()
+                .map(previous -> previous.missingDomains().stream().map(MissingDomain::id).collect(Collectors.toUnmodifiableSet()))
+                .orElse(Set.of())));
         final var ours = transactionOperations.execute(status -> customDomainRepository.findForReconcile(HOLDING_A_HOSTNAME));
-        final var comparison = compare(listing.hostnames(), Objects.requireNonNull(ours));
+        final var comparison = compare(listing.hostnames(), Objects.requireNonNull(ours), alreadyMissing);
         final var run = new ReconcileRun(now(), listing.total(), comparison.oursInCloudflare(), comparison.unknown(), comparison.missing(), null);
         final var drift = run.unknownHostnames().isEmpty() && comparison.newlyMissing().isEmpty()
                 ? null
@@ -154,7 +157,7 @@ public class CustomDomainReconciler {
         }
     }
 
-    private Comparison compare(final List<CloudflareHostname> hostnames, final List<DomainInCloudflare> ours) {
+    private Comparison compare(final List<CloudflareHostname> hostnames, final List<DomainInCloudflare> ours, final Set<Long> alreadyMissing) {
         final var ourIds = ours.stream().map(DomainInCloudflare::cloudflareId).filter(Objects::nonNull).collect(Collectors.toSet());
         final var ourHostnames = ours.stream()
                 .filter(domain -> domain.status() != CustomDomainStatus.DELETED || domain.deletePending())
@@ -184,18 +187,13 @@ public class CustomDomainReconciler {
                 oursInCloudflare++;
             } else {
                 missing.add(new MissingDomain(domain.id(), domain.hostname()));
-                if (!knownToBeGone(domain)) {
+                if (!alreadyMissing.contains(domain.id())) {
                     newlyMissing.add(domain.hostname());
                 }
             }
         }
         log.debug("Custom domain reconcile compared hostnames={} ours={} ignored={}", hostnames.size(), ours.size(), ignored);
         return new Comparison(oursInCloudflare, List.copyOf(unknown), List.copyOf(missing), List.copyOf(newlyMissing));
-    }
-
-    private static boolean knownToBeGone(final DomainInCloudflare domain) {
-        final var gone = CloudflareStatusMapping.gone();
-        return domain.status() == gone.status() && domain.problem() == gone.problem() && gone.lastError().equals(domain.lastError());
     }
 
     private boolean confirmedMissing(final DomainInCloudflare domain) {
