@@ -13,6 +13,7 @@ The changelog is shown at [app.hrva.cc/changelog](https://app.hrva.cc/changelog)
 - Bulk creation, and an API with API keys.
 - A campaign tag (UTM) builder.
 - QR codes that count their scans.
+- Opt-in notifications by email or to Discord, Slack, Telegram, ntfy or a webhook: dead destinations, expiry reminders, and daily or weekly summaries.
 
 ### Custom domains
 - Short links on your own subdomain, like `go.example.com/menu`. You apply in Settings; once an admin approves, you add one CNAME record and the certificate is issued through Cloudflare for SaaS.
