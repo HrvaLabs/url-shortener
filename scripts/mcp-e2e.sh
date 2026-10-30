@@ -32,8 +32,9 @@
 # limit is never reached) to one URL shape on three domains give one Discord line at the stub, a fourth domain adds none, and
 # index.php?id=1 on three domains is a generic path that gives none. Every link stays active; nothing is held.
 # Section 24 checks the admin settings: the Settings list as an admin and a user, ANONYMOUS_LINKS off (the sign-in refusal, the public
-# switches, the Discord lines naming the admin), CUSTOM_ALIASES off, SEND_EMAILS off (an admin domain block of the user's link logs a
-# SKIPPED email_log row), and CAMPAIGN_LINKS=4 (three same-shape links give no line, the fourth gives one). Every setting is reset.
+# switches, the Discord lines naming the admin), CUSTOM_ALIASES off, NEW_SIGNUPS off (the email sign-up refusal), SEND_EMAILS off (an
+# admin domain block of the user's link logs a SKIPPED email_log row), and CAMPAIGN_LINKS=4 (three same-shape links give no line, the
+# fourth gives one). Every setting is reset.
 #
 #   scripts/mcp-e2e.sh                         builds the jar, then runs every step
 #   MCP_E2E_SKIP_BUILD=1 scripts/mcp-e2e.sh    reuses target/url-shortener-*.jar
