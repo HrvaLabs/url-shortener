@@ -2450,7 +2450,11 @@ class UrlServiceTest {
 
         urlService.getAllUrls(PageRequest.of(0, 20, Sort.by(Sort.Order.desc(field))), new UrlSearchDto());
 
-        verify(urlRepository).findAll(any(Pageable.class));
+        final var captor = ArgumentCaptor.forClass(Pageable.class);
+        verify(urlRepository).findAll(captor.capture());
+        final var first = captor.getValue().getSort().iterator().next();
+        assertThat(first.getProperty()).isEqualTo(field);
+        assertThat(first.getDirection()).isEqualTo(Sort.Direction.DESC);
     }
 
     @Test
