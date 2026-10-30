@@ -70,6 +70,8 @@ public class SettingDefaults {
         register(SettingKey.WARNING_PAGE, moderation::isWarningPage);
         register(SettingKey.WARNING_PAGE_MAX_AGE_DAYS, moderation::getWarningPageMaxAgeDays);
         register(SettingKey.HUMAN_CHECK, moderation::isHumanCheck);
+        register(SettingKey.ANONYMOUS_EXPIRY_DAYS, moderation::getAnonymousExpiryDays);
+        register(SettingKey.ANONYMOUS_VISIT_LIMIT, moderation::getAnonymousVisitLimit);
         registerAvailability(SettingKey.GOOGLE_SIGN_IN,
                 () -> unavailableUnless(oAuthProviders.configured(OAuthProviders.GOOGLE), GOOGLE_NOT_CONFIGURED));
         registerAvailability(SettingKey.GITHUB_SIGN_IN,

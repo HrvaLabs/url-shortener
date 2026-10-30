@@ -252,13 +252,65 @@ class SettingValuesTest {
                         SettingKey::getParent, SettingKey::isSafety)
                 .containsExactly(SettingGroup.SAFETY, SettingType.SWITCH, "Human check on links without an account",
                         "A Cloudflare Turnstile check on the homepage, /qr, /utm and /share.", null, true);
-        assertThat(Arrays.asList(SettingKey.values()).subList(SettingKey.WARNING_PAGE_MAX_AGE_DAYS.ordinal() + 1, SettingKey.values().length))
+        assertThat(Arrays.asList(SettingKey.values()).subList(SettingKey.WARNING_PAGE_MAX_AGE_DAYS.ordinal() + 1, SettingKey.ANONYMOUS_EXPIRY_DAYS.ordinal()))
                 .containsExactly(SettingKey.HUMAN_CHECK);
         final var appProperties = new AppProperties();
         final var defaults = new SettingDefaults(appProperties, SettingsServiceFixtures.bothProviders());
         assertThat(defaults.defaultOf(SettingKey.HUMAN_CHECK)).isEqualTo(true);
         appProperties.getModeration().setHumanCheck(false);
         assertThat(defaults.defaultOf(SettingKey.HUMAN_CHECK)).isEqualTo(false);
+    }
+
+    @Test
+    void theAnonymousLimitRows() {
+        assertThat(SettingKey.ANONYMOUS_EXPIRY_DAYS).extracting(SettingKey::getGroup, SettingKey::getType, SettingKey::getLabel,
+                        SettingKey::getDescription, SettingKey::getParent, SettingKey::isSafety, SettingKey::getMin, SettingKey::getMax, SettingKey::getUnit,
+                        SettingKey::isNullable, SettingKey::getNoneLabel)
+                .containsExactly(SettingGroup.ACCESS, SettingType.NUMBER, "Links without an account expire after",
+                        "The latest end a link made without an account can have.", SettingKey.ANONYMOUS_LINKS, false, 1, 3650, "days", true, "Never");
+        assertThat(SettingKey.ANONYMOUS_VISIT_LIMIT).extracting(SettingKey::getGroup, SettingKey::getType, SettingKey::getLabel,
+                        SettingKey::getDescription, SettingKey::getParent, SettingKey::isSafety, SettingKey::getMin, SettingKey::getMax, SettingKey::getUnit,
+                        SettingKey::isNullable, SettingKey::getNoneLabel)
+                .containsExactly(SettingGroup.ACCESS, SettingType.NUMBER, "Links without an account stop after",
+                        "The highest visit limit a link made without an account can have.", SettingKey.ANONYMOUS_LINKS, false, 1, 1_000_000, "visits", true,
+                        "Unlimited");
+        assertThat(Arrays.asList(SettingKey.values()).subList(SettingKey.HUMAN_CHECK.ordinal() + 1, SettingKey.values().length))
+                .containsExactly(SettingKey.ANONYMOUS_EXPIRY_DAYS, SettingKey.ANONYMOUS_VISIT_LIMIT);
+        final var appProperties = new AppProperties();
+        final var defaults = new SettingDefaults(appProperties, SettingsServiceFixtures.bothProviders());
+        assertThat(defaults.defaultOf(SettingKey.ANONYMOUS_EXPIRY_DAYS)).isNull();
+        assertThat(defaults.defaultOf(SettingKey.ANONYMOUS_VISIT_LIMIT)).isNull();
+        appProperties.getModeration().setAnonymousExpiryDays(30);
+        appProperties.getModeration().setAnonymousVisitLimit(500);
+        assertThat(defaults.defaultOf(SettingKey.ANONYMOUS_EXPIRY_DAYS)).isEqualTo(30);
+        assertThat(defaults.defaultOf(SettingKey.ANONYMOUS_VISIT_LIMIT)).isEqualTo(500);
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {0, -1, 1_000_001})
+    void theVisitLimitMaximumNamesItsRange(final int visits) {
+        assertRefused(SettingKey.ANONYMOUS_VISIT_LIMIT, NODES.numberNode(visits), "Use a number from 1 to 1,000,000.");
+    }
+
+    @Test
+    void theExpiryMaximumAcceptsNoneAndItsRange() {
+        assertThat(SettingValues.parse(SettingKey.ANONYMOUS_EXPIRY_DAYS, NODES.nullNode())).isNull();
+        assertThat(SettingValues.parse(SettingKey.ANONYMOUS_EXPIRY_DAYS, MissingNode.getInstance())).isNull();
+        assertThat(SettingValues.parse(SettingKey.ANONYMOUS_EXPIRY_DAYS, null)).isNull();
+        assertThat(SettingValues.parse(SettingKey.ANONYMOUS_EXPIRY_DAYS, NODES.numberNode(1))).isEqualTo(1);
+        assertThat(SettingValues.parse(SettingKey.ANONYMOUS_EXPIRY_DAYS, NODES.numberNode(3650))).isEqualTo(3650);
+        assertRefused(SettingKey.ANONYMOUS_EXPIRY_DAYS, NODES.numberNode(3651), "Use a number from 1 to 3,650.");
+        assertThat(SettingValues.parse(SettingKey.ANONYMOUS_VISIT_LIMIT, NODES.nullNode())).isNull();
+        assertThat(SettingValues.parse(SettingKey.ANONYMOUS_VISIT_LIMIT, NODES.numberNode(1_000_000))).isEqualTo(1_000_000);
+        assertThat(SettingValues.fromStored(SettingKey.ANONYMOUS_EXPIRY_DAYS, null)).isNull();
+    }
+
+    @Test
+    void noMaximumPrintsItsNoneLabel() {
+        assertThat(SettingValues.format(SettingKey.ANONYMOUS_EXPIRY_DAYS, null)).isEqualTo("Never");
+        assertThat(SettingValues.format(SettingKey.ANONYMOUS_VISIT_LIMIT, null)).isEqualTo("Unlimited");
+        assertThat(SettingValues.format(SettingKey.ANONYMOUS_EXPIRY_DAYS, 30)).isEqualTo("30");
+        assertThat(SettingValues.format(SettingKey.ANONYMOUS_VISIT_LIMIT, 25_000)).isEqualTo("25,000");
     }
 
     @ParameterizedTest

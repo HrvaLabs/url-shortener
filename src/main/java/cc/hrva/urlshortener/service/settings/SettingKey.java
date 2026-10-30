@@ -96,7 +96,11 @@ public enum SettingKey {
     WARNING_PAGE_MAX_AGE_DAYS(SettingGroup.SAFETY, "Warning page: maximum domain age",
             "Domains known to be younger than this get the page.", WARNING_PAGE, 30, 3650, "days"),
     HUMAN_CHECK(SettingGroup.SAFETY, "Human check on links without an account",
-            "A Cloudflare Turnstile check on the homepage, /qr, /utm and /share.", null, true);
+            "A Cloudflare Turnstile check on the homepage, /qr, /utm and /share.", null, true),
+    ANONYMOUS_EXPIRY_DAYS(SettingGroup.ACCESS, "Links without an account expire after",
+            "The latest end a link made without an account can have.", ANONYMOUS_LINKS, 1, 3650, "Never", "days"),
+    ANONYMOUS_VISIT_LIMIT(SettingGroup.ACCESS, "Links without an account stop after",
+            "The highest visit limit a link made without an account can have.", ANONYMOUS_LINKS, 1, 1_000_000, "Unlimited", "visits");
 
     private final SettingGroup group;
     private final SettingType type;
@@ -127,6 +131,11 @@ public enum SettingKey {
         this(group, type, label, description, null, false, null, null, false, null, null,
                 type == SettingType.ADDRESSES ? minimum : null, type == SettingType.ADDRESSES ? maximum : null,
                 type == SettingType.TEXT ? minimum : null, type == SettingType.TEXT ? maximum : null);
+    }
+
+    SettingKey(final SettingGroup group, final String label, final String description, final SettingKey parent, final int min, final int max,
+            final String noneLabel, final String unit) {
+        this(group, SettingType.NUMBER, label, description, parent, false, min, max, true, noneLabel, unit, null, null, null, null);
     }
 
     SettingKey(final SettingGroup group, final SettingType type, final String label, final String description, final SettingKey parent,

@@ -127,14 +127,43 @@ class DefaultSettingsServiceTest {
 
     @Test
     void thePublicSettingsFollowTheirSwitches() {
-        assertThat(settingsService.publicSettings()).isEqualTo(new PublicSettingsResponse(true, true, true, true, true, false, null));
+        assertThat(settingsService.publicSettings()).isEqualTo(new PublicSettingsResponse(true, true, true, true, true, false, null, null, null));
 
         rows.put("ANONYMOUS_LINKS", row(SettingKey.ANONYMOUS_LINKS, "false"));
         rows.put("CUSTOM_ALIASES", row(SettingKey.CUSTOM_ALIASES, "false"));
         rows.put("GITHUB_SIGN_IN", row(SettingKey.GITHUB_SIGN_IN, "false"));
         settingsService.refresh();
 
-        assertThat(settingsService.publicSettings()).isEqualTo(new PublicSettingsResponse(false, true, false, true, false, false, null));
+        assertThat(settingsService.publicSettings()).isEqualTo(new PublicSettingsResponse(false, true, false, true, false, false, null, null, null));
+    }
+
+    @Test
+    void thePublicSettingsCarryTheAnonymousMaximums() {
+        assertThat(settingsService.publicSettings()).extracting(PublicSettingsResponse::anonymousExpiryDays, PublicSettingsResponse::anonymousVisitLimit)
+                .containsExactly(null, null);
+
+        rows.put("ANONYMOUS_EXPIRY_DAYS", row(SettingKey.ANONYMOUS_EXPIRY_DAYS, "30"));
+        rows.put("ANONYMOUS_VISIT_LIMIT", row(SettingKey.ANONYMOUS_VISIT_LIMIT, "1000"));
+        settingsService.refresh();
+
+        assertThat(settingsService.publicSettings()).extracting(PublicSettingsResponse::anonymousExpiryDays, PublicSettingsResponse::anonymousVisitLimit)
+                .containsExactly(30, 1000);
+    }
+
+    @Test
+    void aMaximumCanBeClearedBackToNone() {
+        appProperties.getModeration().setAnonymousVisitLimit(100);
+        settingsService.change(SettingKey.ANONYMOUS_VISIT_LIMIT, NODES.numberNode(500), ADMIN);
+        assertThat(settingsService.optionalNumber(SettingKey.ANONYMOUS_VISIT_LIMIT)).hasValue(500);
+
+        final var cleared = settingsService.change(SettingKey.ANONYMOUS_VISIT_LIMIT, NODES.nullNode(), ADMIN);
+
+        assertThat(rows.get("ANONYMOUS_VISIT_LIMIT").getSettingValue()).isNull();
+        assertThat(settingsService.optionalNumber(SettingKey.ANONYMOUS_VISIT_LIMIT)).isEmpty();
+        assertThat(cleared.value()).isNull();
+        assertThat(cleared.defaultValue()).isEqualTo(100);
+        verify(auditLogService).log(ADMIN, AuditAction.CHANGE_SETTING, "Setting", "ANONYMOUS_VISIT_LIMIT", "from: 500, to: Unlimited");
+        verify(eventPublisher).publishEvent(new SettingChanged("Links without an account stop after", "changed from 500 to Unlimited", ADMIN));
     }
 
     @Test

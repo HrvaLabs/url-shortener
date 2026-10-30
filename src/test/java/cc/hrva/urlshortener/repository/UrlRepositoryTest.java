@@ -158,6 +158,32 @@ class UrlRepositoryTest {
                 new LinkDestination(blocked.getId(), "https://blocked.example/"));
     }
 
+    @Test
+    void deduplicationCandidatesAreTheActiveLinksWithoutAnOwnerForThatDestination() {
+        final var owner = savedOwner("dedup-owner@example.com");
+        final var first = linkTo("dedup-a", "https://shared.example/page");
+        final var second = linkTo("dedup-b", "https://shared.example/page");
+        final var owned = linkTo("dedup-owned", "https://shared.example/page");
+        owned.setOwner(owner);
+        final var blocked = linkTo("dedup-blocked", "https://shared.example/page");
+        blockMeanwhile(blocked);
+        linkTo("dedup-other", "https://shared.example/other");
+        entityManager.flush();
+        entityManager.clear();
+
+        final var candidates = urlRepository.findByLongUrlAndActiveTrueAndOwnerIsNull("https://shared.example/page");
+
+        assertThat(candidates).extracting(Url::getId).containsExactlyInAnyOrder(first.getId(), second.getId());
+        assertThat(urlRepository.findByLongUrlAndActiveTrueAndOwnerIsNull("https://nobody.example/")).isEmpty();
+    }
+
+    private Url linkTo(final String shortUrl, final String longUrl) {
+        final var url = Url.builder().shortUrl(shortUrl).longUrl(longUrl).build();
+        entityManager.persist(url);
+        entityManager.flush();
+        return url;
+    }
+
     private Url link(final String shortUrl, final LocalDateTime expirationDate) {
         final var url = Url.builder().shortUrl(shortUrl).longUrl("https://" + shortUrl + ".example/").expirationDate(expirationDate).build();
         entityManager.persist(url);

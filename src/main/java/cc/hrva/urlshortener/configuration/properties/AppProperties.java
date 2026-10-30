@@ -377,6 +377,14 @@ public class AppProperties {
         @Max(3650)
         private int warningPageMaxAgeDays = 365;
 
+        @Min(1)
+        @Max(3650)
+        private Integer anonymousExpiryDays;
+
+        @Min(1)
+        @Max(1_000_000)
+        private Integer anonymousVisitLimit;
+
         @Valid
         @NotNull
         private Emails emails = new Emails();

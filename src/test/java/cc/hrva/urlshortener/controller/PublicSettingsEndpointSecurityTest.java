@@ -62,7 +62,8 @@ class PublicSettingsEndpointSecurityTest {
 
     private static final String PUBLIC_SETTINGS = "/api/v1/public/settings";
     private static final RSAKey SIGNING_KEY = generateSigningKey();
-    private static final PublicSettingsResponse SETTINGS = new PublicSettingsResponse(true, false, true, true, false, true, "1x00000000000000000000AA");
+    private static final PublicSettingsResponse SETTINGS = new PublicSettingsResponse(true, false, true, true, false, true, "1x00000000000000000000AA", 30,
+            1000);
 
     @Autowired
     private MockMvc mockMvc;
@@ -103,25 +104,29 @@ class PublicSettingsEndpointSecurityTest {
         mockMvc.perform(get(PUBLIC_SETTINGS))
                 .andExpect(status().isOk())
                 .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "max-age=60, public"))
-                .andExpect(jsonPath("$.length()").value(7))
+                .andExpect(jsonPath("$.length()").value(9))
                 .andExpect(jsonPath("$.anonymousLinks").value(true))
                 .andExpect(jsonPath("$.newSignups").value(false))
                 .andExpect(jsonPath("$.customAliases").value(true))
                 .andExpect(jsonPath("$.googleSignIn").value(true))
                 .andExpect(jsonPath("$.githubSignIn").value(false))
                 .andExpect(jsonPath("$.humanCheck").value(true))
-                .andExpect(jsonPath("$.turnstileSiteKey").value("1x00000000000000000000AA"));
+                .andExpect(jsonPath("$.turnstileSiteKey").value("1x00000000000000000000AA"))
+                .andExpect(jsonPath("$.anonymousExpiryDays").value(30))
+                .andExpect(jsonPath("$.anonymousVisitLimit").value(1000));
     }
 
     @Test
     void theSiteKeyIsNullWhileTheHumanCheckIsOff() throws Exception {
-        when(settingsService.publicSettings()).thenReturn(new PublicSettingsResponse(true, true, true, true, true, false, null));
+        when(settingsService.publicSettings()).thenReturn(new PublicSettingsResponse(true, true, true, true, true, false, null, null, null));
 
         mockMvc.perform(get(PUBLIC_SETTINGS))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(7))
+                .andExpect(jsonPath("$.length()").value(9))
                 .andExpect(jsonPath("$.humanCheck").value(false))
-                .andExpect(jsonPath("$.turnstileSiteKey").value(nullValue()));
+                .andExpect(jsonPath("$.turnstileSiteKey").value(nullValue()))
+                .andExpect(jsonPath("$.anonymousExpiryDays").value(nullValue()))
+                .andExpect(jsonPath("$.anonymousVisitLimit").value(nullValue()));
     }
 
     @Test

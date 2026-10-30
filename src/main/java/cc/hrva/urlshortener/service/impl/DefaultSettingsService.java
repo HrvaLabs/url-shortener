@@ -112,7 +112,8 @@ public class DefaultSettingsService implements SettingsService {
         final var humanCheck = isOnAndAvailable(SettingKey.HUMAN_CHECK);
         return new PublicSettingsResponse(isOn(SettingKey.ANONYMOUS_LINKS), isOn(SettingKey.NEW_SIGNUPS), isOn(SettingKey.CUSTOM_ALIASES),
                 isOnAndAvailable(SettingKey.GOOGLE_SIGN_IN), isOnAndAvailable(SettingKey.GITHUB_SIGN_IN), humanCheck,
-                humanCheck ? appProperties.getTurnstile().getSiteKey() : null);
+                humanCheck ? appProperties.getTurnstile().getSiteKey() : null, nullableNumber(SettingKey.ANONYMOUS_EXPIRY_DAYS),
+                nullableNumber(SettingKey.ANONYMOUS_VISIT_LIMIT));
     }
 
     @Override
@@ -265,6 +266,11 @@ public class DefaultSettingsService implements SettingsService {
                 value == null ? null : value.changedBy(), value == null || value.changedAt() == null ? null : value.changedAt().truncatedTo(ChronoUnit.SECONDS),
                 key.getMin(), key.getMax(), key.isNullable(), key.getNoneLabel(), key.getUnit(), unavailableReason.isEmpty(),
                 unavailableReason.orElse(null));
+    }
+
+    private Integer nullableNumber(final SettingKey key) {
+        final var number = optionalNumber(key);
+        return number.isPresent() ? number.getAsInt() : null;
     }
 
     private static void requireType(final SettingKey key, final SettingType type) {

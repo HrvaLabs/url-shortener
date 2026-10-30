@@ -12,7 +12,8 @@
           "icon": "shield",
           "items": [
             "Some links made without an account open a short warning page first. It shows the full destination, with Continue and Report this link.",
-            "Making a link without an account runs a quick Cloudflare Turnstile check on the homepage, /qr, /utm and /share. Signed-in users, API keys and MCP are never checked."
+            "Making a link without an account runs a quick Cloudflare Turnstile check on the homepage, /qr, /utm and /share. Signed-in users, API keys and MCP are never checked.",
+            "Links made without an account can have an end date or a visit limit set by hrva.cc. The form says so when they do."
           ]
         },
         {

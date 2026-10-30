@@ -212,6 +212,7 @@ public class DefaultUrlService implements UrlService {
                 return saveUrlForUser(url, currentUser, verdict);
             }
             url.setCreatedVia(createdVia.anonymous());
+            applyAnonymousMaximums(url);
             return heldShape.map(held -> holdNewAnonymousLink(url, held, verdict))
                     .orElseGet(() -> UrlResponse.from(createUrlForAnonymousUser(url, verdict, signals)));
         });
@@ -1047,8 +1048,9 @@ public class DefaultUrlService implements UrlService {
     private Url createUrlForAnonymousUser(final Url url, final LinkVerdict verdict, final Signals signals) {
         url.clearForAnonymousUser();
 
-        if (urlRepository.existsUrlByLongUrlAndActiveTrueAndOwnerIsNull(url.getLongUrl())) {
-            final var existingLongUrl = getUrlByLongUrl(url.getLongUrl());
+        final var equivalent = equivalentAnonymousLink(url, signals.warningPage());
+        if (equivalent.isPresent()) {
+            final var existingLongUrl = equivalent.get();
             log.warn("Long url already exists in DB, will return the existing anonymous URL");
             queueIfFlagged(existingLongUrl, verdict, signals);
             cacheUrlResponse(existingLongUrl);
@@ -1063,6 +1065,30 @@ public class DefaultUrlService implements UrlService {
         queueIfFlagged(saved, verdict, signals);
         cacheUrlResponse(saved);
         return saved;
+    }
+
+    private void applyAnonymousMaximums(final Url url) {
+        final var expiryDays = settingsService.optionalNumber(SettingKey.ANONYMOUS_EXPIRY_DAYS);
+        if (expiryDays.isPresent()) {
+            final var latest = LocalDateTime.now().plusDays(expiryDays.getAsInt());
+            final var requested = url.getExpirationDate();
+            url.setExpirationDate(requested == null || requested.isAfter(latest) ? latest : requested);
+        }
+        final var visitLimit = settingsService.optionalNumber(SettingKey.ANONYMOUS_VISIT_LIMIT);
+        if (visitLimit.isPresent()) {
+            final long highest = visitLimit.getAsInt();
+            final var requested = url.getVisitLimit();
+            url.setVisitLimit(requested == null || requested <= 0 ? highest : Math.min(requested, highest));
+        }
+    }
+
+    private Optional<Url> equivalentAnonymousLink(final Url url, final boolean warningPage) {
+        return urlRepository.findByLongUrlAndActiveTrueAndOwnerIsNull(url.getLongUrl()).stream()
+                .filter(candidate -> candidate.isWarningPage() == warningPage)
+                .filter(candidate -> Objects.equals(candidate.getExpirationDate(), url.getExpirationDate()))
+                .filter(candidate -> Objects.equals(candidate.getVisitLimit(), url.getVisitLimit()))
+                .filter(candidate -> !isExpired(candidate.getExpirationDate()) && !hasReachedVisitLimit(candidate.getVisits(), candidate.getVisitLimit()))
+                .findFirst();
     }
 
     private void queueIfFlagged(final Url url, final LinkVerdict verdict, final Signals signals) {

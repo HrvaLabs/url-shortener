@@ -91,6 +91,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.NullSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
@@ -151,6 +153,7 @@ class UrlServiceTest {
     private static final RandomLookingLabels RANDOM_LOOKING_LABELS = new RandomLookingLabels();
     private static final LocalDate REGISTERED_LONG_AGO = LocalDate.of(2010, 1, 1);
     private static final String RANDOM_LINK = "https://xdvqnxj.com/login";
+    private static final String LIMITED_LINK = "https://example.com/limits";
     private static final String REAL_LINK = "https://www.jutarnji.hr/vijesti";
     private static final String RANDOM_LOOKING_DOMAIN = "Random-looking domain";
 
@@ -1021,8 +1024,7 @@ class UrlServiceTest {
         final var createUrlDto = link(0);
         final var existing = Url.builder().id(12L).shortUrl("v0DB3").longUrl("https://example.com/0").active(true).build();
         when(createUrlToUrlConverter.convert(createUrlDto)).thenReturn(Url.builder().longUrl("https://example.com/0").build());
-        when(urlRepository.existsUrlByLongUrlAndActiveTrueAndOwnerIsNull("https://example.com/0")).thenReturn(true);
-        when(urlRepository.findByLongUrlAndActiveTrue("https://example.com/0")).thenReturn(Optional.of(existing));
+        when(urlRepository.findByLongUrlAndActiveTrueAndOwnerIsNull("https://example.com/0")).thenReturn(List.of(existing));
 
         urlService.saveUrlRouting(createUrlDto, CLIENT_IP, CreatedVia.WEB);
 
@@ -1124,8 +1126,7 @@ class UrlServiceTest {
         final var createUrlDto = link(0);
         final var existing = Url.builder().id(12L).shortUrl("v0DB3").longUrl("https://example.com/0").active(true).build();
         when(createUrlToUrlConverter.convert(createUrlDto)).thenReturn(Url.builder().longUrl("https://example.com/0").build());
-        when(urlRepository.existsUrlByLongUrlAndActiveTrueAndOwnerIsNull("https://example.com/0")).thenReturn(true);
-        when(urlRepository.findByLongUrlAndActiveTrue("https://example.com/0")).thenReturn(Optional.of(existing));
+        when(urlRepository.findByLongUrlAndActiveTrueAndOwnerIsNull("https://example.com/0")).thenReturn(List.of(existing));
 
         urlService.saveUrlRouting(createUrlDto, CLIENT_IP, CreatedVia.WEB);
 
@@ -1338,7 +1339,7 @@ class UrlServiceTest {
         assertThat(url).extracting(Url::getBlockReason, Url::getBlockDetail, Url::getBlockedAt).containsExactly(null, null, null);
         assertThat(created.blockReason()).isNull();
         verify(campaignService, never()).addHeldLink(anyLong(), anyLong(), any());
-        verify(urlRepository).existsUrlByLongUrlAndActiveTrueAndOwnerIsNull(CAMPAIGN_LINK);
+        verify(urlRepository).findByLongUrlAndActiveTrueAndOwnerIsNull(CAMPAIGN_LINK);
         verify(reviewQueueService).flag(url, YOUNG_DOMAIN);
         verify(campaignService).recordAnonymousLink(1L, CAMPAIGN_LINK, Outcome.FLAG);
     }
@@ -1346,9 +1347,8 @@ class UrlServiceTest {
     @Test
     void aHeldShapeIsNeverDeduplicated() {
         final var url = anonymousCreateOf(CAMPAIGN_LINK, LinkVerdict.clean());
-        org.mockito.Mockito.lenient().when(urlRepository.existsUrlByLongUrlAndActiveTrueAndOwnerIsNull(CAMPAIGN_LINK)).thenReturn(true);
-        org.mockito.Mockito.lenient().when(urlRepository.findByLongUrlAndActiveTrue(CAMPAIGN_LINK))
-                .thenReturn(Optional.of(Url.builder().id(12L).shortUrl("v0DB3").longUrl(CAMPAIGN_LINK).active(true).build()));
+        org.mockito.Mockito.lenient().when(urlRepository.findByLongUrlAndActiveTrueAndOwnerIsNull(CAMPAIGN_LINK))
+                .thenReturn(List.of(Url.builder().id(12L).shortUrl("v0DB3").longUrl(CAMPAIGN_LINK).active(true).build()));
         when(campaignService.holdingCampaignId(any())).thenReturn(Optional.of(4L));
         when(campaignService.confirmHold(4L)).thenReturn(true);
 
@@ -1356,8 +1356,7 @@ class UrlServiceTest {
 
         assertThat(created.id()).isEqualTo(1L);
         assertThat(url.getBlockReason()).isEqualTo(BlockReason.CAMPAIGN);
-        verify(urlRepository, never()).existsUrlByLongUrlAndActiveTrueAndOwnerIsNull(any());
-        verify(urlRepository, never()).findByLongUrlAndActiveTrue(any());
+        verify(urlRepository, never()).findByLongUrlAndActiveTrueAndOwnerIsNull(any());
         verify(campaignService).addHeldLink(4L, 1L, "omaehhm.com");
     }
 
@@ -1372,7 +1371,7 @@ class UrlServiceTest {
         assertThat(created.blockReason()).isNull();
         verify(campaignService, never()).holdingCampaignId(any());
         verify(campaignService, never()).addHeldLink(anyLong(), anyLong(), any());
-        verify(urlRepository).existsUrlByLongUrlAndActiveTrueAndOwnerIsNull(CAMPAIGN_LINK);
+        verify(urlRepository).findByLongUrlAndActiveTrueAndOwnerIsNull(CAMPAIGN_LINK);
     }
 
     @Test
@@ -1508,14 +1507,276 @@ class UrlServiceTest {
         verifyNoInteractions(reviewQueueService, domainAgeService);
     }
 
+    @ParameterizedTest
+    @CsvSource(value = {"NULL,NULL", "1825,0", "1825,7"}, nullValues = "NULL")
+    void withNothingSetLinksKeepWhatTheyAsked(final Integer daysAhead, final Long visitLimit) {
+        final var requested = daysAhead == null ? null : LocalDateTime.now().plusDays(daysAhead);
+        final var url = anonymousCreateOf(LIMITED_LINK, LinkVerdict.clean());
+        url.setExpirationDate(requested);
+        url.setVisitLimit(visitLimit);
+
+        final var created = createAnonymously(LIMITED_LINK);
+
+        assertThat(url.getExpirationDate()).isEqualTo(requested);
+        assertThat(url.getVisitLimit()).isEqualTo(visitLimit);
+        assertThat(created.expirationDate()).isEqualTo(requested);
+        assertThat(created.visitLimit()).isEqualTo(visitLimit);
+    }
+
+    @Test
+    void expiryDaysGiveANewLinkThatEnd() {
+        SettingsServiceFixtures.change(settingsService, SettingKey.ANONYMOUS_EXPIRY_DAYS, 30);
+        final var url = anonymousCreateOf(LIMITED_LINK, LinkVerdict.clean());
+        final var before = LocalDateTime.now();
+
+        final var created = createAnonymously(LIMITED_LINK);
+
+        assertThat(url.getExpirationDate()).isBetween(before.plusDays(30), LocalDateTime.now().plusDays(30));
+        assertThat(created.expirationDate()).isEqualTo(url.getExpirationDate());
+        assertThat(url.getVisitLimit()).isNull();
+    }
+
+    @Test
+    void anEarlierRequestedExpiryIsKept() {
+        SettingsServiceFixtures.change(settingsService, SettingKey.ANONYMOUS_EXPIRY_DAYS, 30);
+        final var requested = LocalDateTime.now().plusDays(3);
+        final var url = anonymousCreateOf(LIMITED_LINK, LinkVerdict.clean());
+        url.setExpirationDate(requested);
+
+        final var created = createAnonymously(LIMITED_LINK);
+
+        assertThat(url.getExpirationDate()).isEqualTo(requested);
+        assertThat(created.expirationDate()).isEqualTo(requested);
+    }
+
+    @Test
+    void aLaterRequestedExpiryIsCut() {
+        SettingsServiceFixtures.change(settingsService, SettingKey.ANONYMOUS_EXPIRY_DAYS, 30);
+        final var url = anonymousCreateOf(LIMITED_LINK, LinkVerdict.clean());
+        url.setExpirationDate(LocalDateTime.now().plusDays(90));
+        final var before = LocalDateTime.now();
+
+        final var created = createAnonymously(LIMITED_LINK);
+
+        assertThat(url.getExpirationDate()).isBetween(before.plusDays(30), LocalDateTime.now().plusDays(30));
+        assertThat(created.expirationDate()).isEqualTo(url.getExpirationDate());
+    }
+
+    @ParameterizedTest
+    @CsvSource({"500,100", "100,100", "40,40", "1,1"})
+    void aVisitLimitIsAppliedAndALowerOneKept(final long requested, final long expected) {
+        SettingsServiceFixtures.change(settingsService, SettingKey.ANONYMOUS_VISIT_LIMIT, 100);
+        final var url = anonymousCreateOf(LIMITED_LINK, LinkVerdict.clean());
+        url.setVisitLimit(requested);
+
+        final var created = createAnonymously(LIMITED_LINK);
+
+        assertThat(url.getVisitLimit()).isEqualTo(expected);
+        assertThat(created.visitLimit()).isEqualTo(expected);
+        assertThat(url.getExpirationDate()).isNull();
+    }
+
+    @ParameterizedTest
+    @NullSource
+    @ValueSource(longs = {0, -5})
+    void zeroOrNoVisitLimitBecomesTheMaximum(final Long requested) {
+        SettingsServiceFixtures.change(settingsService, SettingKey.ANONYMOUS_VISIT_LIMIT, 100);
+        final var url = anonymousCreateOf(LIMITED_LINK, LinkVerdict.clean());
+        url.setVisitLimit(requested);
+
+        final var created = createAnonymously(LIMITED_LINK);
+
+        assertThat(url.getVisitLimit()).isEqualTo(100L);
+        assertThat(created.visitLimit()).isEqualTo(100L);
+    }
+
+    @Test
+    void theMaximumsNeverReachASignedInUsersLink() {
+        SettingsServiceFixtures.change(settingsService, SettingKey.ANONYMOUS_EXPIRY_DAYS, 30);
+        SettingsServiceFixtures.change(settingsService, SettingKey.ANONYMOUS_VISIT_LIMIT, 100);
+        final var requested = LocalDateTime.now().plusDays(400);
+        when(userService.getUserFromToken()).thenReturn(User.builder().id(7L).build());
+        final var url = anonymousCreateOf(LIMITED_LINK, LinkVerdict.clean());
+        url.setExpirationDate(requested);
+        url.setVisitLimit(5_000L);
+
+        createAnonymously(LIMITED_LINK);
+
+        assertThat(url.getExpirationDate()).isEqualTo(requested);
+        assertThat(url.getVisitLimit()).isEqualTo(5_000L);
+    }
+
+    @Test
+    void existingLinksAreUntouched() {
+        final var existing = Url.builder().id(12L).shortUrl("v0DB3").longUrl(LIMITED_LINK).active(true).visits(3L).build();
+        when(urlRepository.findByLongUrlAndActiveTrueAndOwnerIsNull(LIMITED_LINK)).thenReturn(List.of(existing));
+        SettingsServiceFixtures.change(settingsService, SettingKey.ANONYMOUS_EXPIRY_DAYS, 30);
+        SettingsServiceFixtures.change(settingsService, SettingKey.ANONYMOUS_VISIT_LIMIT, 100);
+        final var url = anonymousCreateOf(LIMITED_LINK, LinkVerdict.clean());
+
+        final var created = createAnonymously(LIMITED_LINK);
+
+        assertThat(created.id()).isEqualTo(1L);
+        assertThat(url.getVisitLimit()).isEqualTo(100L);
+        assertThat(existing.getExpirationDate()).isNull();
+        assertThat(existing.getVisitLimit()).isNull();
+        verify(urlRepository).save(url);
+        verify(urlRepository, never()).save(existing);
+    }
+
+    @Test
+    void deduplicationNeedsTheSameExpiryLimitAndWarningFlag() {
+        final var requested = LocalDateTime.of(2027, 3, 1, 12, 0);
+        final var url = anonymousCreateOf(LIMITED_LINK, LinkVerdict.clean());
+        url.setExpirationDate(requested);
+        url.setVisitLimit(50L);
+        when(urlRepository.findByLongUrlAndActiveTrueAndOwnerIsNull(LIMITED_LINK)).thenReturn(List.of(
+                candidate(12L, requested.plusSeconds(1), 50L, false),
+                candidate(13L, null, 50L, false),
+                candidate(14L, requested, 51L, false),
+                candidate(15L, requested, null, false),
+                candidate(16L, requested, 50L, true)));
+
+        final var created = createAnonymously(LIMITED_LINK);
+
+        assertThat(created.id()).isEqualTo(1L);
+        verify(urlRepository).save(url);
+    }
+
+    @Test
+    void anEquivalentLinkIsReused() {
+        final var requested = LocalDateTime.of(2027, 3, 1, 12, 0);
+        final var url = Url.builder().longUrl(LIMITED_LINK).build();
+        when(createUrlToUrlConverter.convert(any(CreateUrlDto.class))).thenReturn(url);
+        url.setExpirationDate(requested);
+        url.setVisitLimit(50L);
+        final var equivalent = candidate(17L, requested, 50L, false);
+        when(urlRepository.findByLongUrlAndActiveTrueAndOwnerIsNull(LIMITED_LINK)).thenReturn(List.of(
+                candidate(16L, requested, 50L, true), equivalent));
+
+        final var created = createAnonymously(LIMITED_LINK);
+
+        assertThat(created.id()).isEqualTo(17L);
+        assertThat(created).isEqualTo(UrlResponse.from(equivalent));
+        verify(urlRepository, never()).save(any(Url.class));
+    }
+
+    @Test
+    void aFlaggedCreateNeverReusesALinkWithoutTheWarningPage() {
+        final var url = anonymousCreateOf(RANDOM_LINK, LinkVerdict.clean());
+        when(domainAgeService.registeredOn("xdvqnxj.com")).thenReturn(Optional.empty());
+        when(urlRepository.findByLongUrlAndActiveTrueAndOwnerIsNull(RANDOM_LINK))
+                .thenReturn(List.of(Url.builder().id(12L).shortUrl("v0DB3").longUrl(RANDOM_LINK).active(true).visits(0L).build()));
+
+        final var created = createAnonymously(RANDOM_LINK);
+
+        assertThat(created.id()).isEqualTo(1L);
+        assertThat(created.warningPage()).isTrue();
+        assertThat(url.isWarningPage()).isTrue();
+    }
+
+    @Test
+    void anUnflaggedCreateNeverReusesALinkWithTheWarningPage() {
+        anonymousCreateOf(LIMITED_LINK, LinkVerdict.clean());
+        when(urlRepository.findByLongUrlAndActiveTrueAndOwnerIsNull(LIMITED_LINK)).thenReturn(List.of(candidate(12L, null, null, true)));
+
+        final var created = createAnonymously(LIMITED_LINK);
+
+        assertThat(created.id()).isEqualTo(1L);
+        assertThat(created.warningPage()).isNull();
+    }
+
+    @Test
+    void aLinkAtItsVisitLimitIsNeverReused() {
+        SettingsServiceFixtures.change(settingsService, SettingKey.ANONYMOUS_VISIT_LIMIT, 5);
+        final var used = candidate(12L, null, 5L, false);
+        used.setVisits(5L);
+        anonymousCreateOf(LIMITED_LINK, LinkVerdict.clean());
+        when(urlRepository.findByLongUrlAndActiveTrueAndOwnerIsNull(LIMITED_LINK)).thenReturn(List.of(used));
+
+        final var created = createAnonymously(LIMITED_LINK);
+
+        assertThat(created.id()).isEqualTo(1L);
+        assertThat(created.visitLimit()).isEqualTo(5L);
+    }
+
+    @Test
+    void aLinkUnderItsVisitLimitIsReused() {
+        SettingsServiceFixtures.change(settingsService, SettingKey.ANONYMOUS_VISIT_LIMIT, 5);
+        final var existing = candidate(12L, null, 5L, false);
+        existing.setVisits(4L);
+        when(createUrlToUrlConverter.convert(any(CreateUrlDto.class))).thenReturn(Url.builder().longUrl(LIMITED_LINK).build());
+        when(urlRepository.findByLongUrlAndActiveTrueAndOwnerIsNull(LIMITED_LINK)).thenReturn(List.of(existing));
+
+        final var created = createAnonymously(LIMITED_LINK);
+
+        assertThat(created.id()).isEqualTo(12L);
+        verify(urlRepository, never()).save(any(Url.class));
+    }
+
+    @Test
+    void anExpiredLinkThatIsStillActiveIsNeverReused() {
+        final var ended = LocalDateTime.now().minusMinutes(1);
+        final var url = anonymousCreateOf(LIMITED_LINK, LinkVerdict.clean());
+        url.setExpirationDate(ended);
+        when(urlRepository.findByLongUrlAndActiveTrueAndOwnerIsNull(LIMITED_LINK)).thenReturn(List.of(candidate(12L, ended, null, false)));
+
+        final var created = createAnonymously(LIMITED_LINK);
+
+        assertThat(created.id()).isEqualTo(1L);
+    }
+
+    @Test
+    void aSignedInUsersLinkIsNeverHandedToAnAnonymousCreator() {
+        final var owned = Url.builder().id(12L).shortUrl("mine1").longUrl(LIMITED_LINK).active(true).visits(0L)
+                .owner(User.builder().id(7L).email("ana@example.com").build()).build();
+        org.mockito.Mockito.lenient().when(urlRepository.findByLongUrlAndActiveTrue(LIMITED_LINK)).thenReturn(Optional.of(owned));
+        final var url = anonymousCreateOf(LIMITED_LINK, LinkVerdict.clean());
+
+        final var created = createAnonymously(LIMITED_LINK);
+
+        assertThat(created.id()).isEqualTo(1L);
+        assertThat(created.ownerEmail()).isNull();
+        verify(urlRepository).findByLongUrlAndActiveTrueAndOwnerIsNull(LIMITED_LINK);
+        verify(urlRepository, never()).findByLongUrlAndActiveTrue(any());
+        verify(urlRepository).save(url);
+    }
+
+    @Test
+    void aHeldLinkGetsTheSameLimitsAsAnyOther() {
+        SettingsServiceFixtures.change(settingsService, SettingKey.ANONYMOUS_EXPIRY_DAYS, 30);
+        SettingsServiceFixtures.change(settingsService, SettingKey.ANONYMOUS_VISIT_LIMIT, 100);
+        final var url = anonymousCreateOf(CAMPAIGN_LINK, LinkVerdict.clean());
+        url.setVisitLimit(1_000L);
+        when(campaignService.holdingCampaignId(any())).thenReturn(Optional.of(4L));
+        when(campaignService.confirmHold(4L)).thenReturn(true);
+        final var before = LocalDateTime.now();
+
+        final var created = createAnonymously(CAMPAIGN_LINK);
+
+        assertThat(url.getBlockReason()).isEqualTo(BlockReason.CAMPAIGN);
+        assertThat(url.getExpirationDate()).isBetween(before.plusDays(30), LocalDateTime.now().plusDays(30));
+        assertThat(url.getVisitLimit()).isEqualTo(100L);
+        assertThat(created.expirationDate()).isEqualTo(url.getExpirationDate());
+        assertThat(created.visitLimit()).isEqualTo(100L);
+    }
+
+    private UrlResponse createAnonymously(final String longUrl) {
+        return urlService.saveUrlRouting(CreateUrlDto.builder().longUrl(longUrl).build(), CLIENT_IP, CreatedVia.WEB);
+    }
+
+    private static Url candidate(final long id, final LocalDateTime expirationDate, final Long visitLimit, final boolean warningPage) {
+        return Url.builder().id(id).shortUrl("c" + id).longUrl(LIMITED_LINK).active(true).visits(0L).expirationDate(expirationDate)
+                .visitLimit(visitLimit).warningPage(warningPage).build();
+    }
+
     @Test
     void aRandomLookingLinkThatIsDeduplicatedQueuesTheExistingLink() {
         final var url = Url.builder().longUrl(RANDOM_LINK).build();
         when(createUrlToUrlConverter.convert(any(CreateUrlDto.class))).thenReturn(url);
         when(urlValidator.checkIfLongUrlIsNotBlocklisted(url)).thenReturn(LinkVerdict.clean());
-        final var existing = Url.builder().id(12L).shortUrl("v0DB3").longUrl(RANDOM_LINK).active(true).build();
-        when(urlRepository.existsUrlByLongUrlAndActiveTrueAndOwnerIsNull(RANDOM_LINK)).thenReturn(true);
-        when(urlRepository.findByLongUrlAndActiveTrue(RANDOM_LINK)).thenReturn(Optional.of(existing));
+        final var existing = Url.builder().id(12L).shortUrl("v0DB3").longUrl(RANDOM_LINK).active(true).warningPage(true).build();
+        when(urlRepository.findByLongUrlAndActiveTrueAndOwnerIsNull(RANDOM_LINK)).thenReturn(List.of(existing));
         when(domainAgeService.registeredOn("xdvqnxj.com")).thenReturn(Optional.empty());
 
         final var created = urlService.saveUrlRouting(CreateUrlDto.builder().longUrl(RANDOM_LINK).build(), CLIENT_IP, CreatedVia.WEB);
@@ -1809,8 +2070,7 @@ class UrlServiceTest {
         final var existing = Url.builder().id(12L).shortUrl("v0DB3").longUrl("https://findfavoritedate.life/?u=f6yp608").active(true).build();
         when(createUrlToUrlConverter.convert(createUrlDto)).thenReturn(url);
         when(urlValidator.checkIfLongUrlIsNotBlocklisted(url)).thenReturn(new LinkVerdict(Outcome.FLAG, YOUNG_DOMAIN, null, null));
-        when(urlRepository.existsUrlByLongUrlAndActiveTrueAndOwnerIsNull(url.getLongUrl())).thenReturn(true);
-        when(urlRepository.findByLongUrlAndActiveTrue(url.getLongUrl())).thenReturn(Optional.of(existing));
+        when(urlRepository.findByLongUrlAndActiveTrueAndOwnerIsNull(url.getLongUrl())).thenReturn(List.of(existing));
 
         final var result = urlService.saveUrlRouting(createUrlDto, CLIENT_IP, CreatedVia.WEB);
 
@@ -2535,8 +2795,7 @@ class UrlServiceTest {
 
         when(createUrlToUrlConverter.convert(createUrlDto)).thenReturn(url);
         when(userService.getUserFromToken()).thenReturn(null);
-        when(urlRepository.existsUrlByLongUrlAndActiveTrueAndOwnerIsNull(url.getLongUrl())).thenReturn(true);
-        when(urlRepository.findByLongUrlAndActiveTrue(url.getLongUrl())).thenReturn(Optional.ofNullable(existingLongUrl));
+        when(urlRepository.findByLongUrlAndActiveTrueAndOwnerIsNull(url.getLongUrl())).thenReturn(List.of(existingLongUrl));
 
         final var result = urlService.saveUrlRouting(createUrlDto, CLIENT_IP, CreatedVia.WEB);
         assertThat(result.longUrl()).isEqualTo("long");
@@ -2552,8 +2811,7 @@ class UrlServiceTest {
 
         when(createUrlToUrlConverter.convert(createUrlDto)).thenReturn(url);
         when(userService.getUserFromToken()).thenReturn(null);
-        when(urlRepository.existsUrlByLongUrlAndActiveTrueAndOwnerIsNull(url.getLongUrl())).thenReturn(true);
-        when(urlRepository.findByLongUrlAndActiveTrue(url.getLongUrl())).thenReturn(Optional.of(existingLongUrl));
+        when(urlRepository.findByLongUrlAndActiveTrueAndOwnerIsNull(url.getLongUrl())).thenReturn(List.of(existingLongUrl));
 
         final var result = urlService.saveUrlRouting(createUrlDto, CLIENT_IP, CreatedVia.WEB);
 
@@ -2663,8 +2921,7 @@ class UrlServiceTest {
         final var createUrlDto = link(0);
         final var existing = Url.builder().id(12L).shortUrl("v0DB3").longUrl("https://example.com/0").active(true).build();
         when(createUrlToUrlConverter.convert(createUrlDto)).thenReturn(Url.builder().longUrl("https://example.com/0").build());
-        when(urlRepository.existsUrlByLongUrlAndActiveTrueAndOwnerIsNull("https://example.com/0")).thenReturn(true);
-        when(urlRepository.findByLongUrlAndActiveTrue("https://example.com/0")).thenReturn(Optional.of(existing));
+        when(urlRepository.findByLongUrlAndActiveTrueAndOwnerIsNull("https://example.com/0")).thenReturn(List.of(existing));
 
         final var result = urlService.saveUrlRouting(createUrlDto, CLIENT_IP, CreatedVia.WEB);
 

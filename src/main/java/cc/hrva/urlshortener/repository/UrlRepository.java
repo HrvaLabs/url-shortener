@@ -66,7 +66,7 @@ public interface UrlRepository extends JpaRepository<Url, Long>, JpaSpecificatio
     boolean existsByDomainIsNullAndShortUrlAndActiveTrue(String alias);
     boolean existsByDomain_IdAndShortUrlAndActiveTrue(Long domainId, String alias);
     long countByDomain_Id(Long domainId);
-    boolean existsUrlByLongUrlAndActiveTrueAndOwnerIsNull(String longUrl);
+    List<Url> findByLongUrlAndActiveTrueAndOwnerIsNull(String longUrl);
     @EntityGraph(attributePaths = {"owner", "domain"}, type = EntityGraph.EntityGraphType.LOAD)
     List<Url> findByExpirationDateBetweenAndActiveTrueAndOwnerIsNotNull(LocalDateTime start, LocalDateTime end);
     long countByActiveTrue();
