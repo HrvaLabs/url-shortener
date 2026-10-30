@@ -1,11 +1,13 @@
 package cc.hrva.urlshortener.service.rdap;
 
+import cc.hrva.urlshortener.util.EmailAddresses;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeParseException;
 import java.util.Locale;
 import java.util.Optional;
+import java.util.regex.Pattern;
 import java.util.stream.Stream;
 import org.apache.commons.lang3.StringUtils;
 import tools.jackson.databind.JsonNode;
@@ -19,6 +21,8 @@ public final class RdapAnswers {
     private static final String FULL_NAME = "fn";
     private static final String EMAIL = "email";
     private static final int ISO_DATE_LENGTH = 10;
+    private static final int MAX_NAME_LENGTH = 255;
+    private static final Pattern INVISIBLE = Pattern.compile("[\\p{Cc}\\p{Cf}\\p{Zl}\\p{Zp}]");
 
     private RdapAnswers() {
     }
@@ -26,14 +30,15 @@ public final class RdapAnswers {
     public static DomainRecord found(final String domain, final JsonNode answer) {
         final var registrar = entitiesWithRole(answer, REGISTRAR).findFirst();
         final var abuseEmail = registrar.flatMap(entity -> entitiesWithRole(entity, ABUSE).flatMap(abuse -> vcardText(abuse, EMAIL).stream()).findFirst())
-                .or(() -> entitiesWithRole(answer, ABUSE).flatMap(abuse -> vcardText(abuse, EMAIL).stream()).findFirst());
+                .or(() -> entitiesWithRole(answer, ABUSE).flatMap(abuse -> vcardText(abuse, EMAIL).stream()).findFirst())
+                .filter(EmailAddresses::isValid);
         final var statuses = answer.path("status").valueStream()
                 .flatMap(status -> status.stringValueOpt().stream())
                 .map(status -> status.strip().toLowerCase(Locale.ROOT))
                 .filter(StringUtils::isNotEmpty)
                 .toList();
         return new DomainRecord(domain, DomainRecord.Status.FOUND, registeredOn(answer).orElse(null),
-                registrar.flatMap(entity -> vcardText(entity, FULL_NAME)).orElse(null), abuseEmail.orElse(null), statuses);
+                registrar.flatMap(entity -> vcardText(entity, FULL_NAME)).flatMap(RdapAnswers::cleanName).orElse(null), abuseEmail.orElse(null), statuses);
     }
 
     public static Optional<LocalDate> registeredOn(final JsonNode answer) {
@@ -57,6 +62,18 @@ public final class RdapAnswers {
                 .map(String::strip)
                 .filter(StringUtils::isNotEmpty)
                 .findFirst();
+    }
+
+    private static Optional<String> cleanName(final String name) {
+        final var visible = StringUtils.normalizeSpace(INVISIBLE.matcher(name).replaceAll(" "));
+        if (visible.isEmpty()) {
+            return Optional.empty();
+        }
+        if (visible.length() <= MAX_NAME_LENGTH) {
+            return Optional.of(visible);
+        }
+        final var end = Character.isHighSurrogate(visible.charAt(MAX_NAME_LENGTH - 1)) ? MAX_NAME_LENGTH - 1 : MAX_NAME_LENGTH;
+        return Optional.of(visible.substring(0, end).strip());
     }
 
     private static Optional<LocalDate> utcDateOf(final String timestamp) {

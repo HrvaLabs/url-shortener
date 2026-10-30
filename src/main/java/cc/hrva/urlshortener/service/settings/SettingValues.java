@@ -1,12 +1,10 @@
 package cc.hrva.urlshortener.service.settings;
 
 import cc.hrva.urlshortener.exception.FieldValidationException;
-import cc.hrva.urlshortener.util.DomainNames;
+import cc.hrva.urlshortener.util.EmailAddresses;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
-import java.util.regex.Pattern;
-import org.apache.commons.lang3.StringUtils;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
@@ -20,8 +18,9 @@ public final class SettingValues {
     private static final String ONE_ADDRESS_TEXT = "Enter one email address.";
     private static final String ADDRESSES_TEXT = "Enter up to %d email addresses.";
     private static final String BAD_ADDRESS_TEXT = "%s isn't an email address.";
-    private static final int MAX_ADDRESS_LENGTH = 254;
-    private static final Pattern LOCAL_PART = Pattern.compile("^[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\\.[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+)*$");
+    private static final String REPEATED_ADDRESS_TEXT = "Enter each email address only once.";
+    private static final String ELLIPSIS = Character.toString(0x2026);
+    private static final int MAX_ECHOED_LENGTH = 64;
     private static final String ON = "On";
     private static final String OFF = "Off";
     private static final String LIST_SEPARATOR = ", ";
@@ -100,30 +99,34 @@ public final class SettingValues {
     private static List<String> addressesOf(final SettingKey key, final JsonNode value) {
         final var single = key.getMaxItems() == 1;
         final var countText = single ? ONE_ADDRESS_TEXT : String.format(Locale.ENGLISH, ADDRESSES_TEXT, key.getMaxItems());
-        if (value == null || !value.isArray() || value.size() < key.getMinItems() || value.size() > key.getMaxItems()) {
+        if (value == null || !value.isArray()) {
+            throw new FieldValidationException(FIELD, countText);
+        }
+        final var entries = value.valueStream()
+                .filter(entry -> !entry.isString() || !entry.stringValue().isBlank())
+                .toList();
+        if (entries.size() < key.getMinItems() || entries.size() > key.getMaxItems()) {
             throw new FieldValidationException(FIELD, countText);
         }
         final var addresses = new ArrayList<String>();
-        for (final var entry : value) {
+        for (final var entry : entries) {
             final var address = entry.isString() ? entry.stringValue().strip() : entry.toString();
-            if (!entry.isString() || !isEmailAddress(address)) {
-                throw new FieldValidationException(FIELD, single ? countText : String.format(Locale.ENGLISH, BAD_ADDRESS_TEXT, address));
+            if (!entry.isString() || !EmailAddresses.isValid(address)) {
+                throw new FieldValidationException(FIELD, single ? countText : String.format(Locale.ENGLISH, BAD_ADDRESS_TEXT, shortened(address)));
             }
             addresses.add(address);
+        }
+        if (addresses.stream().map(address -> address.toLowerCase(Locale.ROOT)).distinct().count() < addresses.size()) {
+            throw new FieldValidationException(FIELD, REPEATED_ADDRESS_TEXT);
         }
         return List.copyOf(addresses);
     }
 
-    private static boolean isEmailAddress(final String address) {
-        final var at = address.lastIndexOf('@');
-        if (at <= 0 || address.length() > MAX_ADDRESS_LENGTH) {
-            return false;
+    private static String shortened(final String entry) {
+        if (entry.codePointCount(0, entry.length()) <= MAX_ECHOED_LENGTH) {
+            return entry;
         }
-        final var domain = address.substring(at + 1);
-        return LOCAL_PART.matcher(address.substring(0, at)).matches()
-                && !domain.endsWith(".")
-                && DomainNames.HOST_NAME.matcher(domain).matches()
-                && !StringUtils.isNumeric(StringUtils.substringAfterLast(domain, "."));
+        return entry.substring(0, entry.offsetByCodePoints(0, MAX_ECHOED_LENGTH - 1)) + ELLIPSIS;
     }
 
     private static FieldValidationException outOfRange(final SettingKey key) {

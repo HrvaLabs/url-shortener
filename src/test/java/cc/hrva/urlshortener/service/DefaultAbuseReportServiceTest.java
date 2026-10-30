@@ -25,6 +25,7 @@ import cc.hrva.urlshortener.service.domain.ShortLinks;
 import cc.hrva.urlshortener.service.impl.DefaultAbuseReportService;
 import cc.hrva.urlshortener.service.impl.DefaultDomainAgeService;
 import cc.hrva.urlshortener.service.rdap.DomainRecord;
+import cc.hrva.urlshortener.service.rdap.RdapAnswers;
 import cc.hrva.urlshortener.service.settings.SettingKey;
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -36,6 +37,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -53,8 +55,10 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.redis.RedisConnectionFailureException;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -65,6 +69,7 @@ import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -81,6 +86,7 @@ class DefaultAbuseReportServiceTest {
     private static final String ADMIN = "karlo@hrva.cc";
     private static final LocalDate REGISTERED = LocalDate.of(2026, 8, 14);
     private static final String NAMESILO = "NameSilo, LLC";
+    private static final String PENDING = "abuse:pending-suspension:";
     private static final String PHISHING_PAGE = "https://wwkn0gb.bgp37.sbs/?r=plfN8D&t=1793210826";
 
     @Mock
@@ -107,6 +113,13 @@ class DefaultAbuseReportServiceTest {
     @Mock
     private ApplicationEventPublisher eventPublisher;
 
+    @Mock
+    private StringRedisTemplate redisTemplate;
+
+    @Mock
+    private ValueOperations<String, String> pendingMarks;
+
+    private final Map<String, Duration> pending = new HashMap<>();
     private final AppProperties appProperties = new AppProperties();
     private final Clock clock = Clock.fixed(NOW, ZoneOffset.UTC);
     private final Map<Long, AbuseReportLink> links = new LinkedHashMap<>();
@@ -123,6 +136,11 @@ class DefaultAbuseReportServiceTest {
         lenient().when(linkStatsRepository.sumClicksByUrl(anyCollection(), any(), any())).thenReturn(Map.of());
         lenient().when(reportedDomainRepository.findAllById(any())).thenReturn(List.of());
         lenient().when(reportedDomainRepository.markSuspended(anyString(), any())).thenReturn(1);
+        lenient().when(redisTemplate.opsForValue()).thenReturn(pendingMarks);
+        lenient().when(pendingMarks.get(anyString())).thenAnswer(invocation -> pending.containsKey(invocation.<String>getArgument(0)) ? "1" : null);
+        lenient().doAnswer(invocation -> pending.put(invocation.getArgument(0), invocation.getArgument(2))).when(pendingMarks)
+                .set(anyString(), anyString(), any(Duration.class));
+        lenient().when(redisTemplate.delete(anyString())).thenAnswer(invocation -> pending.remove(invocation.<String>getArgument(0)) != null);
         abuseReportService = service(domainAgeService);
     }
 
@@ -195,6 +213,48 @@ class DefaultAbuseReportServiceTest {
     }
 
     @Test
+    void aHostileRegistryRecordLeavesTheDomainWithoutAContact() {
+        link(1, "https://a.hostile.com/", null, NOW_UTC);
+        link(2, "https://b.listed.com/", null, NOW_UTC);
+        records(RdapAnswers.found("hostile.com", fixture("hostile.json")),
+                new DomainRecord("listed.com", DomainRecord.Status.FOUND, REGISTERED, "Listed Registrar", "abuse@a.example, abuse@b.example", List.of()));
+
+        final var response = abuseReportService.prepare(new AbuseReportRequest(List.of(1L, 2L), null));
+
+        assertThat(response.reports()).isEmpty();
+        assertThat(response.noContact()).extracting(AbuseReportResponse.NoContact::domain, AbuseReportResponse.NoContact::lookupFailed)
+                .containsExactly(tuple("hostile.com", false), tuple("listed.com", false));
+        assertThat(response.noContact().getFirst().registrar()).startsWith("Evil Registrar XXX").hasSize(255);
+        assertThat(response.noContact().get(1).registrar()).isEqualTo("Listed Registrar");
+    }
+
+    @Test
+    void aCardsRegistrarIsNeverBlank() {
+        link(1, "https://a.blank.com/", null, NOW_UTC);
+        records(new DomainRecord("blank.com", DomainRecord.Status.FOUND, REGISTERED, "  ", "abuse@registry.example", List.of()));
+
+        final var report = abuseReportService.prepare(new AbuseReportRequest(List.of(1L), null)).reports().getFirst();
+
+        assertThat(report.registrar()).isEqualTo("registry.example");
+        assertThat(report.body()).contains("registered with registry.example:\n");
+    }
+
+    @Test
+    void aSharedSuffixHostHasNoContactAndIsNotLookedUp() {
+        link(1, "https://evil.pages.dev/login", null, NOW_UTC);
+        link(2, "https://ll.omaehhm.com/a", null, NOW_UTC);
+        records(found("omaehhm.com", NAMESILO, "abuse@namesilo.com"));
+        final var reported = new ReportedDomain("evil.pages.dev", null, null, ADMIN, NOW_UTC.minusDays(1), null, null);
+        when(reportedDomainRepository.findAllById(any())).thenReturn(List.of(reported));
+
+        final var response = abuseReportService.prepare(new AbuseReportRequest(List.of(1L, 2L), null));
+
+        verify(domainAgeService).records(List.of("omaehhm.com"), false);
+        assertThat(response.noContact()).containsExactly(new AbuseReportResponse.NoContact("evil.pages.dev", null, false, ReportStatus.from(reported)));
+        assertThat(response.reports()).extracting(AbuseReportResponse.Report::registrar).containsExactly(NAMESILO);
+    }
+
+    @Test
     void noLinksWithADomainAnswerAnEmptyReport() {
         link(1, "https://203.0.113.5/", null, NOW_UTC);
 
@@ -262,6 +322,7 @@ class DefaultAbuseReportServiceTest {
 
     @Test
     void recheckSuspendsOnHoldOr404Only() {
+        pendingSince("a.com", "b.com", "c.com", "d.hr", "e.com");
         when(reportedDomainRepository.findToRecheck(NOW_UTC.minusDays(30))).thenReturn(List.of("a.com", "b.com", "c.com", "d.hr", "e.com"));
         records(new DomainRecord("a.com", DomainRecord.Status.FOUND, REGISTERED, NAMESILO, null, List.of("client hold")),
                 DomainRecord.notFound("b.com"),
@@ -276,6 +337,65 @@ class DefaultAbuseReportServiceTest {
         verify(reportedDomainRepository, times(2)).markSuspended(anyString(), any());
         verify(reportedDomainRepository).markChecked(List.of("c.com", "d.hr"), NOW_UTC);
         verify(eventPublisher).publishEvent(new DomainsSuspended(List.of("a.com", "b.com")));
+        assertThat(pending).containsOnlyKeys(PENDING + "e.com");
+    }
+
+    @Test
+    void aFirstSuspendedAnswerOnlyMarksTheDomainPendingForADayAndAHalf() {
+        when(reportedDomainRepository.findToRecheck(any())).thenReturn(List.of("a.com", "b.com"));
+        records(new DomainRecord("a.com", DomainRecord.Status.FOUND, REGISTERED, NAMESILO, null, List.of("serverHold")), DomainRecord.notFound("b.com"));
+
+        abuseReportService.recheck();
+
+        verify(reportedDomainRepository, never()).markSuspended(anyString(), any());
+        verify(reportedDomainRepository).markChecked(List.of("a.com", "b.com"), NOW_UTC);
+        verifyNoInteractions(eventPublisher);
+        assertThat(pending).containsOnly(Map.entry(PENDING + "a.com", Duration.ofHours(36)), Map.entry(PENDING + "b.com", Duration.ofHours(36)));
+
+        abuseReportService.recheck();
+
+        verify(reportedDomainRepository).markSuspended("a.com", NOW_UTC);
+        verify(reportedDomainRepository).markSuspended("b.com", NOW_UTC);
+        verify(eventPublisher).publishEvent(new DomainsSuspended(List.of("a.com", "b.com")));
+        assertThat(pending).isEmpty();
+    }
+
+    @Test
+    void aHealthyAnswerClearsThePendingMark() {
+        pendingSince("a.com");
+        when(reportedDomainRepository.findToRecheck(any())).thenReturn(List.of("a.com"));
+        records(found("a.com", NAMESILO, "abuse@namesilo.com"));
+
+        abuseReportService.recheck();
+
+        assertThat(pending).isEmpty();
+        verify(reportedDomainRepository).markChecked(List.of("a.com"), NOW_UTC);
+        verify(reportedDomainRepository, never()).markSuspended(anyString(), any());
+    }
+
+    @Test
+    void withRedisDownNothingIsMarkedSuspended() {
+        when(reportedDomainRepository.findToRecheck(any())).thenReturn(List.of("a.com"));
+        records(DomainRecord.notFound("a.com"));
+        when(pendingMarks.get(anyString())).thenThrow(new RedisConnectionFailureException("Redis is down"));
+        doThrow(new RedisConnectionFailureException("Redis is down")).when(pendingMarks).set(anyString(), anyString(), any(Duration.class));
+
+        abuseReportService.recheck();
+
+        verify(reportedDomainRepository, never()).markSuspended(anyString(), any());
+        verify(reportedDomainRepository).markChecked(List.of("a.com"), NOW_UTC);
+        verifyNoInteractions(eventPublisher);
+    }
+
+    @Test
+    void aSharedSuffixHostIsNeverRechecked() {
+        when(reportedDomainRepository.findToRecheck(any())).thenReturn(List.of("evil.pages.dev", "a.com"));
+        records(found("a.com", NAMESILO, "abuse@namesilo.com"));
+
+        abuseReportService.recheck();
+
+        verify(domainAgeService).records(List.of("a.com"), true);
+        verify(reportedDomainRepository).markChecked(List.of("a.com"), NOW_UTC);
     }
 
     @ParameterizedTest
@@ -293,6 +413,7 @@ class DefaultAbuseReportServiceTest {
 
     @Test
     void aRecheck404FromTheRegistryMarksTheDomainSuspended() {
+        pendingSince("omaehhm.com");
         when(reportedDomainRepository.findToRecheck(any())).thenReturn(List.of("omaehhm.com"));
         abuseReportService = service(realDomainAgeService("HTTP 404"));
 
@@ -331,6 +452,7 @@ class DefaultAbuseReportServiceTest {
     @Test
     void newlySuspendedDomainsPostOneLine() {
         final var domains = IntStream.rangeClosed(1, 22).mapToObj(index -> "d" + index + ".com").toList();
+        pendingSince(domains.toArray(String[]::new));
         when(reportedDomainRepository.findToRecheck(any())).thenReturn(domains);
         when(domainAgeService.records(anyCollection(), anyBoolean())).thenAnswer(invocation -> invocation.<Collection<String>>getArgument(0).stream()
                 .collect(Collectors.toMap(Function.identity(), DomainRecord::notFound)));
@@ -349,6 +471,7 @@ class DefaultAbuseReportServiceTest {
 
     @Test
     void nothingNewPostsNothing() {
+        pendingSince("a.com");
         when(reportedDomainRepository.findToRecheck(any())).thenReturn(List.of("a.com"));
         records(DomainRecord.notFound("a.com"));
         when(reportedDomainRepository.markSuspended("a.com", NOW_UTC)).thenReturn(0);
@@ -359,9 +482,23 @@ class DefaultAbuseReportServiceTest {
         verify(reportedDomainRepository, never()).markChecked(anyCollection(), any());
     }
 
+    private void pendingSince(final String... domains) {
+        for (final var domain : domains) {
+            pending.put(PENDING + domain, Duration.ofHours(36));
+        }
+    }
+
+    private static JsonNode fixture(final String name) {
+        try (var input = DefaultAbuseReportServiceTest.class.getResourceAsStream("/rdap/" + name)) {
+            return JsonMapper.builder().build().readTree(input);
+        } catch (final IOException exception) {
+            throw new UncheckedIOException(exception);
+        }
+    }
+
     private DefaultAbuseReportService service(final DomainAgeService ageService) {
         return new DefaultAbuseReportService(campaignService, urlRepository, linkStatsRepository, reportedDomainRepository, ageService,
-                new AbuseReportComposer(settingsService), settingsService, auditLogService, eventPublisher, new AnalyticsDays(clock, appProperties), clock);
+                new AbuseReportComposer(settingsService), settingsService, auditLogService, eventPublisher, redisTemplate, new AnalyticsDays(clock, appProperties), clock);
     }
 
     private DomainAgeService realDomainAgeService(final String failure) {

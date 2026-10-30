@@ -42,7 +42,8 @@ public class AbuseReportComposer {
                 .append("Hello,").append(NEW_LINE).append(NEW_LINE)
                 .append("I run hrva.cc, a free URL shortener. ").append(when(links))
                 .append(", short links were made on hrva.cc without an account that lead to ").append(target)
-                .append(". They used these domains, registered with ").append(registrar).append(':').append(NEW_LINE);
+                .append(". They used these domains").append(StringUtils.isBlank(registrar) ? "" : ", registered with " + registrar.strip())
+                .append(':').append(NEW_LINE);
         sortedDomains.forEach(domain -> body.append(INDENT).append(domain.domain()).append(registration(domain.registeredOn())).append(NEW_LINE));
         body.append(NEW_LINE).append("Example destinations:").append(NEW_LINE);
         examples(links).forEach(example -> body.append(INDENT).append(example).append(NEW_LINE));
@@ -59,6 +60,7 @@ public class AbuseReportComposer {
         return links.stream()
                 .map(Link::finalUrl)
                 .flatMap(finalUrl -> DomainNames.hostOf(finalUrl).stream())
+                .filter(host -> !DomainNames.isIpLiteral(host))
                 .filter(host -> !domains.contains(DomainNames.registrableDomain(host)))
                 .collect(Collectors.groupingBy(Function.identity(), Collectors.counting()))
                 .entrySet().stream()

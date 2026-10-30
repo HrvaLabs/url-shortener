@@ -1,0 +1,74 @@
+{
+  "objectClassName": "domain",
+  "ldhName": "HOSTILE.COM",
+  "status": [
+    "client transfer prohibited"
+  ],
+  "entities": [
+    {
+      "objectClassName": "entity",
+      "roles": [
+        "registrar"
+      ],
+      "vcardArray": [
+        "vcard",
+        [
+          [
+            "version",
+            {},
+            "text",
+            "4.0"
+          ],
+          [
+            "fn",
+            {},
+            "text",
+            "Evil\r\nRegistrar\u200b\u0000 XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+          ]
+        ]
+      ],
+      "entities": [
+        {
+          "objectClassName": "entity",
+          "roles": [
+            "abuse"
+          ],
+          "vcardArray": [
+            "vcard",
+            [
+              [
+                "email",
+                {},
+                "text",
+                "abuse@evil.example\r\nBcc: victim@target.example"
+              ]
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "objectClassName": "entity",
+      "roles": [
+        "abuse"
+      ],
+      "vcardArray": [
+        "vcard",
+        [
+          [
+            "email",
+            {},
+            "text",
+            "abuse@top.example"
+          ]
+        ]
+      ]
+    }
+  ],
+  "events": [
+    {
+      "eventAction": "registration",
+      "eventDate": "2026-08-14T17:41:03Z"
+    }
+  ]
+}

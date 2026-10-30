@@ -104,6 +104,34 @@ class AbuseReportComposerTest {
     }
 
     @Test
+    void anIpAddressIsNeverTheTarget() {
+        final var email = composer.compose("NameSilo, LLC", List.of(new Domain("omaehhm.com", REGISTERED)),
+                List.of(new Link(1, "https://a.omaehhm.com/", "http://203.0.113.9/login", FIRST_DAY, false, 0),
+                        new Link(2, "https://b.omaehhm.com/", "http://203.0.113.9/login", FIRST_DAY, false, 0),
+                        new Link(3, "https://c.omaehhm.com/", "https://[2001:db8::1]/login", FIRST_DAY, false, 0),
+                        new Link(4, "https://d.omaehhm.com/", PHISHING_PAGE, FIRST_DAY, false, 0)), List.of());
+
+        assertThat(email.subject()).isEqualTo("Phishing: 1 domain used in links to wwkn0gb.bgp37.sbs");
+    }
+
+    @Test
+    void onlyIpTargetsSayAPhishingPage() {
+        final var email = composer.compose("NameSilo, LLC", List.of(new Domain("omaehhm.com", REGISTERED)),
+                List.of(new Link(1, "https://a.omaehhm.com/", "http://203.0.113.9/login", FIRST_DAY, false, 0)), List.of());
+
+        assertThat(email.subject()).endsWith(" links to a phishing page");
+    }
+
+    @Test
+    void aBlankRegistrarIsLeftOutOfTheBody() {
+        final var email = composer.compose("  ", List.of(new Domain("omaehhm.com", REGISTERED)),
+                List.of(new Link(1, "https://a.omaehhm.com/", null, FIRST_DAY, false, 0)), List.of());
+
+        assertThat(email.body()).contains("that lead to a phishing page. They used these domains:\n  omaehhm.com (registered 14 August 2026)\n")
+                .doesNotContain("registered with");
+    }
+
+    @Test
     void someLinksStillOnSaysSo() {
         final var email = composer.compose("NameSilo, LLC", List.of(new Domain("omaehhm.com", REGISTERED)),
                 List.of(new Link(1, "https://a.omaehhm.com/", null, FIRST_DAY, true, 2_000),

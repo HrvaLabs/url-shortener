@@ -23,8 +23,10 @@ import cc.hrva.urlshortener.service.analytics.AnalyticsDays;
 import cc.hrva.urlshortener.service.rdap.DomainRecord;
 import cc.hrva.urlshortener.service.settings.SettingKey;
 import cc.hrva.urlshortener.util.DomainNames;
+import cc.hrva.urlshortener.util.EmailAddresses;
 import com.google.common.collect.Lists;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -45,6 +47,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
 @Slf4j
@@ -58,6 +61,9 @@ public class DefaultAbuseReportService implements AbuseReportService {
     private static final int IDS_PER_QUERY = 1_000;
     private static final int RECHECK_BATCH = 20;
     private static final int TOP_COUNTRIES = 3;
+    private static final String PENDING_PREFIX = "abuse:pending-suspension:";
+    private static final String PENDING = "1";
+    private static final Duration PENDING_TIME_TO_LIVE = Duration.ofHours(36);
 
     private final CampaignService campaignService;
     private final UrlRepository urlRepository;
@@ -68,6 +74,7 @@ public class DefaultAbuseReportService implements AbuseReportService {
     private final SettingsService settingsService;
     private final AuditLogService auditLogService;
     private final ApplicationEventPublisher eventPublisher;
+    private final StringRedisTemplate redisTemplate;
     private final AnalyticsDays analyticsDays;
     private final Clock clock;
 
@@ -84,15 +91,19 @@ public class DefaultAbuseReportService implements AbuseReportService {
         }
 
         final var domains = List.copyOf(linksByDomain.keySet());
-        final var records = domainAgeService.records(domains, false);
+        final var records = domainAgeService.records(domains.stream().filter(DefaultAbuseReportService::isRegistryDomain).toList(), false);
         final var reports = reportsOf(domains);
         final var allLinks = linksByDomain.values().stream().flatMap(List::stream).toList();
         final var clicks = clicksOf(allLinks);
         final var groups = new LinkedHashMap<String, List<DomainRecord>>();
         final var noContact = new ArrayList<AbuseReportResponse.NoContact>();
         for (final var domain : domains) {
+            if (!isRegistryDomain(domain)) {
+                noContact.add(new AbuseReportResponse.NoContact(domain, null, false, statusOf(reports, domain)));
+                continue;
+            }
             final var record = Optional.ofNullable(records.get(domain)).orElseGet(() -> DomainRecord.failed(domain));
-            if (record.status() == DomainRecord.Status.FOUND && record.abuseEmail() != null) {
+            if (record.status() == DomainRecord.Status.FOUND && EmailAddresses.isValid(record.abuseEmail())) {
                 groups.computeIfAbsent(record.abuseEmail().toLowerCase(Locale.ROOT), key -> new ArrayList<>()).add(withDomain(record, domain));
             } else {
                 noContact.add(new AbuseReportResponse.NoContact(domain, record.registrar(), record.status() == DomainRecord.Status.FAILED,
@@ -130,9 +141,12 @@ public class DefaultAbuseReportService implements AbuseReportService {
     @Override
     public void recheck() {
         final var now = LocalDateTime.now(clock);
-        final var domains = reportedDomainRepository.findToRecheck(now.minusDays(settingsService.number(SettingKey.ABUSE_RECHECK_DAYS)));
+        final var domains = reportedDomainRepository.findToRecheck(now.minusDays(settingsService.number(SettingKey.ABUSE_RECHECK_DAYS))).stream()
+                .filter(DefaultAbuseReportService::isRegistryDomain)
+                .toList();
         final var suspended = new ArrayList<String>();
         var failed = 0;
+        var pending = 0;
         for (final var batch : Lists.partition(domains, RECHECK_BATCH)) {
             final var records = domainAgeService.records(batch, true);
             final var checked = new ArrayList<String>();
@@ -141,19 +155,56 @@ public class DefaultAbuseReportService implements AbuseReportService {
                 if (record == null || record.status() == DomainRecord.Status.FAILED) {
                     failed++;
                 } else if (!record.suspended()) {
+                    forgetPending(domain);
                     checked.add(domain);
-                } else if (reportedDomainRepository.markSuspended(domain, now) == 1) {
-                    suspended.add(domain);
+                } else if (!wasPending(domain)) {
+                    markPending(domain);
+                    checked.add(domain);
+                    pending++;
+                } else {
+                    if (reportedDomainRepository.markSuspended(domain, now) == 1) {
+                        suspended.add(domain);
+                    }
+                    forgetPending(domain);
                 }
             }
             if (!checked.isEmpty()) {
                 reportedDomainRepository.markChecked(checked, now);
             }
         }
-        log.info("Reported domains rechecked domains={} suspended={} failed={}", domains.size(), suspended.size(), failed);
+        log.info("Reported domains rechecked domains={} suspended={} pending={} failed={}", domains.size(), suspended.size(), pending, failed);
         if (!suspended.isEmpty()) {
             eventPublisher.publishEvent(new DomainsSuspended(suspended));
         }
+    }
+
+    private boolean wasPending(final String domain) {
+        try {
+            return redisTemplate.opsForValue().get(PENDING_PREFIX + domain) != null;
+        } catch (final RuntimeException exception) {
+            log.warn("Pending suspension read failed, not confirming domain={} exception={}", domain, exception.getClass().getName());
+            return false;
+        }
+    }
+
+    private void markPending(final String domain) {
+        try {
+            redisTemplate.opsForValue().set(PENDING_PREFIX + domain, PENDING, PENDING_TIME_TO_LIVE);
+        } catch (final RuntimeException exception) {
+            log.warn("Pending suspension write failed domain={} exception={}", domain, exception.getClass().getName());
+        }
+    }
+
+    private void forgetPending(final String domain) {
+        try {
+            redisTemplate.delete(PENDING_PREFIX + domain);
+        } catch (final RuntimeException exception) {
+            log.warn("Pending suspension delete failed domain={} exception={}", domain, exception.getClass().getName());
+        }
+    }
+
+    private static boolean isRegistryDomain(final String domain) {
+        return DomainNames.registryDomain(domain).equals(domain);
     }
 
     private List<Long> linkIdsOf(final AbuseReportRequest request) {
@@ -193,7 +244,8 @@ public class DefaultAbuseReportService implements AbuseReportService {
     private static Optional<String> registrarOf(final List<DomainRecord> group) {
         return group.stream()
                 .map(DomainRecord::registrar)
-                .filter(Objects::nonNull)
+                .filter(StringUtils::isNotBlank)
+                .map(String::strip)
                 .collect(Collectors.groupingBy(Function.identity(), Collectors.counting()))
                 .entrySet().stream()
                 .min(Map.Entry.<String, Long>comparingByValue().reversed().thenComparing(Map.Entry.comparingByKey()))

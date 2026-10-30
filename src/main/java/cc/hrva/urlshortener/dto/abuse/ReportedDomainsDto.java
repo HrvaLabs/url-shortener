@@ -13,5 +13,5 @@ public record ReportedDomainsDto(
         @UniqueElements(message = DomainBulkBlockDto.DOMAINS_REPEATED)
         List<@NotBlank(message = DomainBulkBlockDto.DOMAIN_REQUIRED) @Size(max = 253, message = DomainBulkBlockDto.DOMAIN_REQUIRED) String> domains,
         @Size(max = 255, message = "Use at most 255 characters for the registrar") String registrar,
-        @Size(max = 320, message = "Use at most 320 characters for the abuse address") String abuseEmail) {
+        @Size(max = 254, message = "Use at most 254 characters for the abuse address") String abuseEmail) {
 }

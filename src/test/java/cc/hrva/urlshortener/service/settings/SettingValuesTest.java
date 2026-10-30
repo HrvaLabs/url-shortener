@@ -242,7 +242,28 @@ class SettingValuesTest {
         for (final var bad : List.of("a@x", "@x.hr", "a@", "a b@x.hr", "a@x..hr", "a,b@x.hr", "<a@x.hr>", "a@-x.hr")) {
             assertRefused(SettingKey.ABUSE_CC, addresses(bad), bad + " isn't an email address.");
         }
-        assertRefused(SettingKey.ABUSE_CC, addresses(""), " isn't an email address.");
+    }
+
+    @Test
+    void blankAddressEntriesAreLeftOut() {
+        assertThat(SettingValues.parse(SettingKey.ABUSE_CC, addresses("", "  "))).isEqualTo(List.of());
+        assertThat(SettingValues.parse(SettingKey.ABUSE_CC, addresses("a@x.hr", " ", "b@x.hr"))).isEqualTo(List.of("a@x.hr", "b@x.hr"));
+        assertThat(SettingValues.parse(SettingKey.ABUSE_REPORTER_ADDRESS, addresses(" ", "abuse@hrva.cc"))).isEqualTo(List.of("abuse@hrva.cc"));
+        assertRefused(SettingKey.ABUSE_REPORTER_ADDRESS, addresses(""), "Enter one email address.");
+        assertRefused(SettingKey.ABUSE_CC, addresses("a@x.hr", "", "b@x.hr", "c@x.hr", "d@x.hr", "e@x.hr", "f@x.hr"), "Enter up to 5 email addresses.");
+    }
+
+    @Test
+    void aLongBadEntryIsShortenedInTheText() {
+        final var bad = "x".repeat(100);
+
+        assertRefused(SettingKey.ABUSE_CC, addresses(bad), "x".repeat(63) + Character.toString(0x2026) + " isn't an email address.");
+        assertRefused(SettingKey.ABUSE_CC, addresses("y".repeat(64)), "y".repeat(64) + " isn't an email address.");
+    }
+
+    @Test
+    void anAddressGivenTwiceIsRefused() {
+        assertRefused(SettingKey.ABUSE_CC, addresses("cert@cert.pt", "a@x.hr", "CERT@cert.pt"), "Enter each email address only once.");
     }
 
     @Test

@@ -213,6 +213,17 @@ class AdminAbuseReportSecurityTest {
     }
 
     @Test
+    void anAbuseAddressLongerThanAnEmailAddressCanBeIsRefused() throws Exception {
+        final var body = "{\"domains\":[\"omaehhm.com\"],\"registrar\":\"" + "R".repeat(256) + "\",\"abuseEmail\":\"" + "a".repeat(250) + "@x.hr\"}";
+
+        mockMvc.perform(signedIn(post(REPORTED), "admin-token").content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().json("{\"registrar\":\"Use at most 255 characters for the registrar\","
+                        + "\"abuseEmail\":\"Use at most 254 characters for the abuse address\"}", JsonCompareMode.STRICT));
+        verifyNoInteractions(abuseReportService);
+    }
+
+    @Test
     void aSignedInUserWhoIsNotAnAdminIsForbidden() throws Exception {
         mockMvc.perform(signedIn(post(PREPARE), "user-token").content("{\"urlIds\":[1]}")).andExpect(status().isForbidden());
         mockMvc.perform(signedIn(post(REPORTED), "user-token").content(MARK_BODY)).andExpect(status().isForbidden());

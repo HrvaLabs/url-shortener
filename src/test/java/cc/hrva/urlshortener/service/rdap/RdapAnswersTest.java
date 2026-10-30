@@ -73,6 +73,42 @@ class RdapAnswersTest {
     }
 
     @Test
+    void aHostileRecordGetsACleanCappedRegistrarAndNoAbuseAddress() {
+        final var record = RdapAnswers.found("hostile.com", fixture("hostile.json"));
+
+        assertThat(record.registrar()).startsWith("Evil Registrar XXX").hasSize(255).doesNotContain("\r", "\n", "\u0000", Character.toString(0x200B));
+        assertThat(record.abuseEmail()).isNull();
+        assertThat(record.status()).isEqualTo(DomainRecord.Status.FOUND);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"abuse@a.example, abuse@b.example", "abuse@a.example;abuse@b.example", "no-at-sign.example", "abuse@localhost",
+            "<abuse@a.example>", "abuse @a.example", "abuse@a.example\r\nBcc: x@y.example", "mailto:abuse@a.example"})
+    void anAbuseAddressThatIsNotOneEmailAddressIsDropped(final String address) {
+        final var record = RdapAnswers.found("x.com", JSON.readTree(registrarWithAbuse(address)));
+
+        assertThat(record.registrar()).isEqualTo("Registrar One");
+        assertThat(record.abuseEmail()).isNull();
+    }
+
+    @Test
+    void aRegistrarNameOfOnlyInvisibleCharactersIsNull() {
+        final var record = RdapAnswers.found("x.com", JSON.readTree("{\"entities\": [{\"roles\": [\"registrar\"], \"vcardArray\": [\"vcard\", "
+                + "[[\"fn\", {}, \"text\", \"\\u200b\\r\\n\\t\"]]]}]}"));
+
+        assertThat(record.registrar()).isNull();
+    }
+
+    @Test
+    void aCappedRegistrarNeverEndsInHalfACharacter() {
+        final var name = "R".repeat(254) + Character.toString(0x1F600);
+        final var record = RdapAnswers.found("x.com", JSON.readTree("{\"entities\": [{\"roles\": [\"registrar\"], \"vcardArray\": [\"vcard\", "
+                + "[[\"fn\", {}, \"text\", \"" + name + "\"]]]}]}"));
+
+        assertThat(record.registrar()).isEqualTo("R".repeat(254));
+    }
+
+    @Test
     void holdStatusesInEitherSpellingSuspend() {
         assertThat(RdapAnswers.found("buokpky.com", fixture("held.json")).suspended()).isTrue();
         for (final var status : List.of("clientHold", "serverHold", "client hold", "Server Hold")) {
@@ -113,6 +149,13 @@ class RdapAnswersTest {
         assertThat(RdapAnswers.registeredOn(JSON.readTree("{\"events\": [{\"eventAction\": \"registration\", \"eventDate\": \"2026-09-15\"}]}")))
                 .contains(LocalDate.of(2026, 9, 15));
         assertThat(RdapAnswers.registeredOn(JSON.readTree("{\"events\": [{\"eventAction\": \"registration\", \"eventDate\": \"15.09.2026.\"}]}"))).isEmpty();
+    }
+
+    private static String registrarWithAbuse(final String address) {
+        return JSON.writeValueAsString(JSON.readTree("""
+                {"entities": [{"roles": ["registrar"], "vcardArray": ["vcard", [["fn", {}, "text", "Registrar One"]]],
+                  "entities": [{"roles": ["abuse"], "vcardArray": ["vcard", [["email", {}, "text", "PLACEHOLDER"]]]}]}]}
+                """)).replace("PLACEHOLDER", JSON.writeValueAsString(address).replaceAll("^\"|\"$", ""));
     }
 
     private static JsonNode fixture(final String name) {
