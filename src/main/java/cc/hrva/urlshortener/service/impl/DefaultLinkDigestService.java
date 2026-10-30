@@ -14,6 +14,7 @@ import cc.hrva.urlshortener.service.LinkDigestService;
 import cc.hrva.urlshortener.service.ReviewQueueService;
 import cc.hrva.urlshortener.service.ScammerSignalService;
 import cc.hrva.urlshortener.service.SendingEmailService;
+import cc.hrva.urlshortener.service.domain.ShortLinks;
 import cc.hrva.urlshortener.util.DomainNames;
 import cc.hrva.urlshortener.util.ReviewReasons;
 import java.time.LocalDateTime;
@@ -79,7 +80,7 @@ public class DefaultLinkDigestService implements LinkDigestService {
     private static LinkDigestEntry toEntry(final LinkReview review) {
         final var url = review.getUrl();
         return new LinkDigestEntry(url.getId(), url.getShortUrl(), destinationOf(url), ownerEmailOf(url),
-                ReviewReasons.withoutVisitorText(review.getReasons()));
+                ReviewReasons.withoutVisitorText(review.getReasons()), ShortLinks.hostnameOf(url));
     }
 
     private List<DecisionsDigest.PossibleScammer> possibleScammers() {
@@ -97,7 +98,7 @@ public class DefaultLinkDigestService implements LinkDigestService {
 
     private List<DecisionsDigest.BlockedLink> autoBlockedSince(final LocalDateTime since) {
         return urlRepository.findTop20ByBlockedAtAfterAndBlockReasonNotInOrderByBlockedAtDesc(since, BlockReason.MANUAL).stream()
-                .map(url -> new DecisionsDigest.BlockedLink(url.getShortUrl(), destinationOf(url), reasonInWords(url)))
+                .map(url -> new DecisionsDigest.BlockedLink(url.getShortUrl(), destinationOf(url), reasonInWords(url), ShortLinks.hostnameOf(url)))
                 .toList();
     }
 
@@ -110,7 +111,7 @@ public class DefaultLinkDigestService implements LinkDigestService {
 
     private List<DecisionsDigest.NewAccountLink> newAccountLinks(final LocalDateTime createdAfter, final LocalDateTime ownerCreatedAfter) {
         return urlRepository.findTop10ByCreateDateAfterAndOwnerCreateDateAfterOrderByCreateDateDesc(createdAfter, ownerCreatedAfter).stream()
-                .map(url -> new DecisionsDigest.NewAccountLink(url.getShortUrl(), destinationOf(url), ownerEmailOf(url)))
+                .map(url -> new DecisionsDigest.NewAccountLink(url.getShortUrl(), destinationOf(url), ownerEmailOf(url), ShortLinks.hostnameOf(url)))
                 .toList();
     }
 

@@ -14,10 +14,10 @@ public record DecisionsDigest(
 
     public record PossibleScammer(String email, long blockedLinks, long flaggedLinks) {}
 
-    public record BlockedLink(String shortUrl, String destination, String reason) {}
+    public record BlockedLink(String shortUrl, String destination, String reason, String domain) {}
 
     public record FailingSource(String name, String lastError) {}
 
-    public record NewAccountLink(String shortUrl, String destination, String ownerEmail) {}
+    public record NewAccountLink(String shortUrl, String destination, String ownerEmail, String domain) {}
 
 }

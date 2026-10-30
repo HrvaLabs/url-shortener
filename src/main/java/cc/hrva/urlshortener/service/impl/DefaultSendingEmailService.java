@@ -158,6 +158,7 @@ public class DefaultSendingEmailService implements SendingEmailService {
     public void sendEmailUrlMalwareDetected(final User user, final Url url, final String threatType) {
         final var ctx = getContext(user);
         ctx.setVariable("shortUrl", url.getShortUrl());
+        ctx.setVariable("short_link", shortLinks.display(ShortLinks.hostnameOf(url), url.getShortUrl()));
         ctx.setVariable("longUrl", url.getLongUrl());
         ctx.setVariable("threatType", threatType);
 
@@ -242,7 +243,7 @@ public class DefaultSendingEmailService implements SendingEmailService {
         ctx.setVariable("headline", subject);
         ctx.setVariable("app_name", appProperties.getAppName());
         ctx.setVariable("site_url", appProperties.getFrontendUrl());
-        ctx.setVariable("short_link_host", shortLinks.host(null));
+        ctx.setVariable("short_links", shortLinks);
         ctx.setVariable("review_page", frontendPage(REVIEW_PAGE));
         ctx.setVariable("blocklists_page", frontendPage("/admin/blocklists"));
 

@@ -152,7 +152,7 @@ public final class WeeklyDigestText {
     }
 
     private static String topLink(final int rank, final TopLink link, final ShortLinks shortLinks, final UnaryOperator<String> value) {
-        final var shortLink = value.apply(shortLinks.display(link.domain(), link.shortUrl()));
+        final var shortLink = shortLinks.display(link.domain(), value.apply(link.shortUrl()));
         final var destination = value.apply(destinationOf(link.destinationHost()));
         return number(rank) + ". " + shortLink + " → " + destination + ", " + clicks(link.clicks());
     }

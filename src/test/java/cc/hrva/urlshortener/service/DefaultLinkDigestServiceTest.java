@@ -3,6 +3,7 @@ package cc.hrva.urlshortener.service;
 import cc.hrva.urlshortener.dto.BlocklistSourceResponse;
 import cc.hrva.urlshortener.dto.DecisionsDigest;
 import cc.hrva.urlshortener.dto.LinkDigestEntry;
+import cc.hrva.urlshortener.model.CustomDomain;
 import cc.hrva.urlshortener.model.LinkReview;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.User;
@@ -29,6 +30,7 @@ import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.tuple;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.Mockito.lenient;
@@ -148,8 +150,31 @@ class DefaultLinkDigestServiceTest {
         assertThat(digest.reportedCount()).isEqualTo(1);
         assertThat(digest.newestOpen()).containsExactly(
                 new LinkDigestEntry(41L, "njuskaio_verify", "njuskaio.cam/a/MAUB3", "raulsado50w@gmail.com",
-                        List.of("imitates njuskalo", "reported by a visitor: phishing (2 times)")),
-                new LinkDigestEntry(42L, "v0DB3", "findfavoritedate.life", null, List.of("high-risk domain ending .life")));
+                        List.of("imitates njuskalo", "reported by a visitor: phishing (2 times)"), null),
+                new LinkDigestEntry(42L, "v0DB3", "findfavoritedate.life", null, List.of("high-risk domain ending .life"), null));
+    }
+
+    @Test
+    void decisionsDigestCarriesTheDomain() {
+        final var domain = CustomDomain.builder().id(7L).hostname("go.example.com").build();
+        final var openOnDomain = link(41L, "menu", "https://njuskaio.cam/a", NEWCOMER);
+        openOnDomain.setDomain(domain);
+        final var blockedOnDomain = blocked(50L, "menu", "https://www.jofogas.cards/login", BlockReason.BLOCKLIST, "HaGeZi Fake");
+        blockedOnDomain.setDomain(domain);
+        final var newOnDomain = link(70L, "menu", "https://example.com/fresh", NEWCOMER);
+        newOnDomain.setDomain(domain);
+        openEntries(2L, review(openOnDomain, "imitates njuskalo"), review(link(42L, "v0DB3", "https://findfavoritedate.life/", null), "high-risk"));
+        blockedAutomatically(blockedOnDomain);
+        sources();
+        when(urlRepository.findTop10ByCreateDateAfterAndOwnerCreateDateAfterOrderByCreateDateDesc(any(), any())).thenReturn(List.of(newOnDomain));
+
+        linkDigestService.sendDailyDigest();
+
+        final var digest = sentDigest();
+        assertThat(digest.newestOpen()).extracting(LinkDigestEntry::shortUrl, LinkDigestEntry::domain)
+                .containsExactly(tuple("menu", "go.example.com"), tuple("v0DB3", null));
+        assertThat(digest.autoBlocked()).extracting(DecisionsDigest.BlockedLink::domain).containsExactly("go.example.com");
+        assertThat(digest.newAccountLinks()).extracting(DecisionsDigest.NewAccountLink::domain).containsExactly("go.example.com");
     }
 
     @Test
@@ -247,7 +272,7 @@ class DefaultLinkDigestServiceTest {
         linkDigestService.sendDailyDigest();
 
         assertThat(sentDigest().autoBlocked()).containsExactly(
-                new DecisionsDigest.BlockedLink("promo", "www.jofogas.cards/login", "a blocklist (HaGeZi Fake)"));
+                new DecisionsDigest.BlockedLink("promo", "www.jofogas.cards/login", "a blocklist (HaGeZi Fake)", null));
         assertThat(since.getValue()).isBetween(LocalDateTime.now().minusHours(25), LocalDateTime.now().minusHours(23));
         assertThat(excluded.getValue()).containsExactlyInAnyOrder(BlockReason.ADMIN, BlockReason.USER_BLOCKED);
         assertThat(excluded.getValue()).isSameAs(BlockReason.MANUAL);
@@ -320,7 +345,7 @@ class DefaultLinkDigestServiceTest {
         linkDigestService.sendDailyDigest();
 
         assertThat(sentDigest().newAccountLinks()).containsExactly(
-                new DecisionsDigest.NewAccountLink("fresh", "example.com/fresh", "raulsado50w@gmail.com"));
+                new DecisionsDigest.NewAccountLink("fresh", "example.com/fresh", "raulsado50w@gmail.com", null));
         assertThat(createdAfter.getValue()).isBetween(LocalDateTime.now().minusHours(25), LocalDateTime.now().minusHours(23));
         assertThat(ownerCreatedAfter.getValue()).isBetween(LocalDateTime.now().minusDays(7).minusHours(1), LocalDateTime.now().minusDays(7).plusHours(1));
     }

@@ -211,7 +211,7 @@ public class DiscordAlertFormatter {
     }
 
     private String link(final AlertedLink link) {
-        return shortLinks.display(plain(link.domain()), plain(link.shortUrl())) + ARROW + destination(link.destinationHost());
+        return shortLinks.display(link.domain(), plain(link.shortUrl())) + ARROW + destination(link.destinationHost());
     }
 
     private static String destination(final String host) {

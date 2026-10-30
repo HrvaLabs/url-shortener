@@ -110,7 +110,7 @@ class WeeklyDigestTextTest {
         final var topLinks = WeeklyDigestText.topLinkLines(digest, SHORT_LINKS, value);
 
         assertThat(summary).hasSize(11).endsWith("Automatic blocks: 2 blocklist, 1 Safe Browsing", "Top links by clicks:");
-        assertThat(topLinks).containsExactly("1. [hrva.cc/a_b] → [x.example], 2 clicks", "2. [hrva.cc/c] → [y.example], 1 click");
+        assertThat(topLinks).containsExactly("1. hrva.cc/[a_b] " + ARROW + " [x.example], 2 clicks", "2. hrva.cc/[c] " + ARROW + " [y.example], 1 click");
         assertThat(WeeklyDigestText.lines(digest, SHORT_LINKS, REVIEW_PAGE, value))
                 .containsExactlyElementsOf(Stream.concat(summary.stream(), topLinks.stream()).toList());
         assertThat(WeeklyDigestText.topLinkLines(withTopLinks(List.of()), SHORT_LINKS, value)).isEmpty();
@@ -121,8 +121,8 @@ class WeeklyDigestTextTest {
         final var digest = withTopLinks(List.of(new TopLink("menu", "x.example", 2, "go.example.com"), new TopLink("c", "y.example", 1, null)));
 
         assertThat(WeeklyDigestText.topLinkLines(digest, SHORT_LINKS, text -> "[" + text + "]")).containsExactly(
-                "1. [go.example.com/menu] " + ARROW + " [x.example], 2 clicks",
-                "2. [hrva.cc/c] " + ARROW + " [y.example], 1 click");
+                "1. go.example.com/[menu] " + ARROW + " [x.example], 2 clicks",
+                "2. hrva.cc/[c] " + ARROW + " [y.example], 1 click");
     }
 
     @Test
@@ -237,11 +237,11 @@ class WeeklyDigestTextTest {
         final var digest = withTopLinks(List.of(new TopLink("a_b", "example.com", 3, null)));
 
         assertThat(WeeklyDigestText.lines(digest, SHORT_LINKS, REVIEW_PAGE, value -> "[" + value + "]"))
-                .endsWith("1. [hrva.cc/a_b] → [example.com], 3 clicks");
+                .endsWith("1. hrva.cc/[a_b] " + ARROW + " [example.com], 3 clicks");
     }
 
     @Test
-    void onlyShortLinksAndDestinationsGoThroughTheEscaperAndNeverARawIp() {
+    void onlyAliasesAndDestinationsGoThroughTheEscaperAndNeverARawIp() {
         final var seen = new ArrayList<String>();
         final UnaryOperator<String> value = text -> {
             seen.add(text);
@@ -263,11 +263,11 @@ class WeeklyDigestTextTest {
                 "Review queue: 2 waiting https://hrva.cc/admin/review",
                 "Automatic blocks: 2 blocklist, 1 Safe Browsing",
                 "Top links by clicks:",
-                "1. [hrva.cc/a_b] → [example.com], 3 clicks",
-                "2. [hrva.cc/ip] → [an IP address], 2 clicks",
-                "3. [hrva.cc/blank] → [an unreadable destination], 1 click");
+                "1. hrva.cc/[a_b] " + ARROW + " [example.com], 3 clicks",
+                "2. hrva.cc/[ip] " + ARROW + " [an IP address], 2 clicks",
+                "3. hrva.cc/[blank] " + ARROW + " [an unreadable destination], 1 click");
         assertThat(seen).containsExactly(
-                "hrva.cc/a_b", "example.com", "hrva.cc/ip", "an IP address", "hrva.cc/blank", "an unreadable destination");
+                "a_b", "example.com", "ip", "an IP address", "blank", "an unreadable destination");
     }
 
     private static WeeklyDigest busyWeek() {

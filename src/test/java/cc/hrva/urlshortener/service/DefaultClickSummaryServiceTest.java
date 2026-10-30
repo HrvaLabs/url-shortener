@@ -28,6 +28,7 @@ import cc.hrva.urlshortener.service.notification.EmailConsentReader;
 import cc.hrva.urlshortener.service.notification.MutableClock;
 import cc.hrva.urlshortener.service.notification.NotificationMessages;
 import cc.hrva.urlshortener.service.notification.NotificationPayloads;
+import jakarta.persistence.EntityManagerFactory;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -35,6 +36,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.IntStream;
+import org.hibernate.SessionFactory;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -74,6 +76,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
         webEnvironment = SpringBootTest.WebEnvironment.NONE,
         properties = {
                 "spring.liquibase.enabled=true",
+                "spring.jpa.properties.hibernate.generate_statistics=true",
                 "spring.datasource.url=jdbc:h2:mem:click-summaries;DB_CLOSE_DELAY=-1;NON_KEYWORDS=KEY,VALUE",
                 "spring.security.oauth2.client.registration.google.client-id=test-google-client",
                 "spring.security.oauth2.client.registration.google.client-secret=test-google-secret",
@@ -93,6 +96,8 @@ class DefaultClickSummaryServiceTest {
     private static final LocalDateTime MONDAY_MORNING_UTC = LocalDateTime.of(2026, 10, 26, 8, 0);
     private static final LocalDate LAST_MONDAY = LocalDate.of(2026, 10, 19);
     private static final MutableClock CLOCK = new MutableClock(AFTER_MIDNIGHT_IN_ZAGREB);
+    private static final long WEEKLY_STATEMENTS = 10;
+    private static final long DAILY_STATEMENTS = 5;
 
     @Autowired
     private ClickSummaryService clickSummaryService;
@@ -120,6 +125,9 @@ class DefaultClickSummaryServiceTest {
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
+
+    @Autowired
+    private EntityManagerFactory entityManagerFactory;
 
     @MockitoBean
     private NotificationDeliveryService deliveryService;
@@ -571,31 +579,41 @@ class DefaultClickSummaryServiceTest {
     void summariesCarryTheHostname() {
         weeklyEmailConsent(ana);
         channel(ana, NotificationType.DAILY_SUMMARY);
-        final var domainId = domain(ana, "go.example.com");
-        final var top = onDomain(link(ana, "menu"), domainId);
-        clicks(top, LAST_MONDAY, 5, 4, 0);
+        final var dotCom = domain(ana, "go.example.com");
+        final var dotOrg = domain(ana, "go.example.org");
+        final var dotNet = domain(ana, "go.example.net");
+        clicks(onDomain(link(ana, "menu"), dotCom), LAST_MONDAY, 5, 4, 0);
+        clicks(onDomain(link(ana, "cafe"), dotOrg), LAST_MONDAY, 4, 4, 0);
         clicks(link(ana, "shop"), LAST_MONDAY, 3, 3, 0);
-        final var dead = onDomain(dead(link(ana, "dead"), LocalDateTime.of(2026, 10, 22, 1, 0), "404"), domainId);
-        onDomain(ending(ana, "soon", MONDAY_MORNING_UTC.plusDays(3), null, 0L), domainId);
+        clicks(onDomain(link(ana, "bar"), dotNet), LAST_MONDAY, 2, 2, 0);
+        final var dead = onDomain(dead(link(ana, "dead"), LocalDateTime.of(2026, 10, 22, 1, 0), "404"), dotNet);
+        onDomain(ending(ana, "soon", MONDAY_MORNING_UTC.plusDays(3), null, 0L), dotOrg);
         CLOCK.set(MONDAY_MORNING);
+        final var statistics = entityManagerFactory.unwrap(SessionFactory.class).getStatistics();
+        statistics.clear();
 
         clickSummaryService.sendWeekly();
 
+        assertThat(statistics.getPrepareStatementCount()).isLessThanOrEqualTo(WEEKLY_STATEMENTS);
         assertThat(sentWeeklySummaries()).singleElement().satisfies(summary -> {
             assertThat(summary.topLinks()).containsExactly(new WeeklyDigest.TopLink("menu", "menu.example.org", 5, "go.example.com"),
-                    new WeeklyDigest.TopLink("shop", "shop.example.org", 3, null));
+                    new WeeklyDigest.TopLink("cafe", "cafe.example.org", 4, "go.example.org"), new WeeklyDigest.TopLink("shop", "shop.example.org", 3, null),
+                    new WeeklyDigest.TopLink("bar", "bar.example.org", 2, "go.example.net"));
             assertThat(summary.deadLinks()).containsExactly(
-                    new DeadLink(dead.getId(), ana.getId(), "dead", "dead.example.org", LocalDateTime.of(2026, 10, 22, 1, 0), "404", "go.example.com"));
-            assertThat(summary.endingSoon()).extracting(EndingSoon::shortUrl, EndingSoon::domain).containsExactly(tuple("soon", "go.example.com"));
+                    new DeadLink(dead.getId(), ana.getId(), "dead", "dead.example.org", LocalDateTime.of(2026, 10, 22, 1, 0), "404", "go.example.net"));
+            assertThat(summary.endingSoon()).extracting(EndingSoon::shortUrl, EndingSoon::domain).containsExactly(tuple("soon", "go.example.org"));
         });
 
         CLOCK.set(Instant.parse("2026-10-19T23:30:00Z"));
+        statistics.clear();
         clickSummaryService.sendDaily();
 
+        assertThat(statistics.getPrepareStatementCount()).isLessThanOrEqualTo(DAILY_STATEMENTS);
         final var content = contentCaptor();
         verify(deliveryService).enqueue(eq(NotificationType.DAILY_SUMMARY), eq("summary.daily:2026-10-19"), any(), content.capture());
         final var data = (NotificationPayloads.DailyData) content.getValue().get(ana.getId()).data();
-        assertThat(data.links()).extracting(NotificationPayloads.DailyLinkData::shortUrl).containsExactly("https://go.example.com/menu", "https://hrva.cc/shop");
+        assertThat(data.links()).extracting(NotificationPayloads.DailyLinkData::shortUrl)
+                .containsExactly("https://go.example.com/menu", "https://go.example.org/cafe", "https://hrva.cc/shop", "https://go.example.net/bar");
     }
 
     @Test

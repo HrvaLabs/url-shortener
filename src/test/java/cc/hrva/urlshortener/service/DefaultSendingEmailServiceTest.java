@@ -197,12 +197,12 @@ class DefaultSendingEmailServiceTest {
                 2,
                 List.of(
                         new LinkDigestEntry(41L, "njuskaio_verify" + userText, "njuskaio.cam/a/MAUB3" + userText, "raulsado50w@gmail.com" + userText,
-                                List.of("imitates njuskalo" + userText, "reported by a visitor: phishing")),
-                        new LinkDigestEntry(42L, "v0DB3", "findfavoritedate.life", null, List.of("high-risk domain ending .life"))),
+                                List.of("imitates njuskalo" + userText, "reported by a visitor: phishing"), null),
+                        new LinkDigestEntry(42L, "v0DB3", "findfavoritedate.life", null, List.of("high-risk domain ending .life"), null)),
                 List.of(new DecisionsDigest.PossibleScammer("scammer@example.com" + userText, 1, 2)),
-                List.of(new DecisionsDigest.BlockedLink("promo" + userText, "www.jofogas.cards/login" + userText, "a blocklist (HaGeZi Fake" + userText + ")")),
+                List.of(new DecisionsDigest.BlockedLink("promo" + userText, "www.jofogas.cards/login" + userText, "a blocklist (HaGeZi Fake" + userText + ")", null)),
                 List.of(new DecisionsDigest.FailingSource("HaGeZi Fake" + userText, "HTTP 503 from every mirror" + userText)),
-                List.of(new DecisionsDigest.NewAccountLink("fresh" + userText, "example.com/fresh" + userText, "newcomer@example.com" + userText)),
+                List.of(new DecisionsDigest.NewAccountLink("fresh" + userText, "example.com/fresh" + userText, "newcomer@example.com" + userText, null)),
                 0);
     }
 
@@ -399,6 +399,36 @@ class DefaultSendingEmailServiceTest {
                 .contains("hrva.cc/promo", "www.jofogas.cards/login", "a blocklist (HaGeZi Fake)")
                 .contains("HaGeZi Fake", "HTTP 503 from every mirror")
                 .contains("Links from accounts younger than 7 days", "hrva.cc/fresh", "example.com/fresh", "newcomer@example.com");
+    }
+
+    @Test
+    void decisionsEmailShowsTheDomainLink() throws Exception {
+        final var digest = new DecisionsDigest(2, 0,
+                List.of(new LinkDigestEntry(41L, "menu", "njuskaio.cam/a", "raulsado50w@gmail.com", List.of("imitates njuskalo"), "go.example.com"),
+                        new LinkDigestEntry(42L, "v0DB3", "findfavoritedate.life", null, List.of("high-risk domain ending .life"), null)),
+                List.of(), List.of(new DecisionsDigest.BlockedLink("deal", "www.jofogas.cards/login", "a blocklist", "go.example.com")), List.of(),
+                List.of(new DecisionsDigest.NewAccountLink("fresh", "example.com/fresh", "newcomer@example.com", "go.example.com")), 0);
+
+        final var text = textOf(sentDecisionsEmail(digest).getText());
+
+        assertThat(text).contains("go.example.com/menu", "hrva.cc/v0DB3", "go.example.com/deal", "go.example.com/fresh")
+                .doesNotContain("hrva.cc/menu", "hrva.cc/deal", "hrva.cc/fresh");
+    }
+
+    @Test
+    void malwareEmailShowsTheDomainLink() throws Exception {
+        saveReturnsArgument();
+        final var sent = ArgumentCaptor.forClass(Email.class);
+        doAnswer(invocation -> null).when(emailService).sendEmail(sent.capture(), eq(null));
+        final var onDomain = Url.builder().shortUrl("menu").longUrl("https://evil.example/login").domain(GO_EXAMPLE).active(false).build();
+        final var service = configuredEmailService(realTemplateEngine());
+
+        service.sendEmailUrlMalwareDetected(OWNER, onDomain, "SOCIAL_ENGINEERING");
+        service.sendEmailUrlMalwareDetected(OWNER, BLOCKED_LINK, "MALWARE");
+
+        assertThat(textOf(sent.getAllValues().getFirst().getText())).contains("Your short link go.example.com/menu has been automatically deactivated")
+                .doesNotContain("hrva.cc/menu");
+        assertThat(textOf(sent.getAllValues().get(1).getText())).contains("Your short link hrva.cc/promo has been automatically deactivated");
     }
 
     @Test

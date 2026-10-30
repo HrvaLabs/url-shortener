@@ -23,6 +23,7 @@ import org.hibernate.SessionFactory;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.SpringBootConfiguration;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
@@ -35,6 +36,7 @@ import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.thymeleaf.TemplateEngine;
+import org.thymeleaf.context.IContext;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -99,6 +101,7 @@ class ExpiryReminderConsentTest {
     void cleanUp() {
         jdbcTemplate.update("delete from notification_consent");
         jdbcTemplate.update("delete from url");
+        jdbcTemplate.update("delete from custom_domain");
         jdbcTemplate.update("delete from user_account");
     }
 
@@ -130,6 +133,11 @@ class ExpiryReminderConsentTest {
     @Test
     void expiringLinksArriveWithTheirOwnersWithoutAQueryPerOwner() {
         List.of("ana", "bob", "cid", "dora", "ema").forEach(name -> consentingOwnerWithAnExpiringLink(name + "@example.com", name + "-menu"));
+        final var ana = userRepository.findAll().stream().filter(user -> user.getEmail().equals("ana@example.com")).findFirst().orElseThrow();
+        jdbcTemplate.update("""
+                insert into custom_domain (owner_id, hostname, hostname_key, status, reason, created_at, updated_at)
+                values (?, 'go.example.com', 'go.example.com', 'ACTIVE', 'Menu links for my cafe', current_timestamp, current_timestamp)""", ana.getId());
+        jdbcTemplate.update("update url set domain_id = (select id from custom_domain where hostname_key = 'go.example.com') where short_url = 'ana-menu'");
         final var statistics = entityManagerFactory.unwrap(SessionFactory.class).getStatistics();
         statistics.clear();
 
@@ -137,6 +145,9 @@ class ExpiryReminderConsentTest {
 
         verify(sendingEmailService, times(5)).tryToSendConsentedEmail(any(Email.class), anyLong(), eq(REMINDER));
         assertThat(statistics.getPrepareStatementCount()).isLessThanOrEqualTo(3);
+        final var contexts = ArgumentCaptor.forClass(IContext.class);
+        verify(templateEngine, times(5)).process(eq("expiry_notification"), contexts.capture());
+        assertThat(contexts.getAllValues()).extracting(context -> context.getVariable("short_link")).contains("go.example.com/ana-menu");
     }
 
     private User consentingOwnerWithAnExpiringLink(final String email, final String alias) {

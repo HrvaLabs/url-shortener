@@ -90,6 +90,17 @@ class DiscordAlertFormatterTest {
     }
 
     @Test
+    void aDomainThatStartsWithAnIpAddressIsNotScrubbed() {
+        final var onDomain = new AlertedLink(42L, "my_menu", "203.0.113.7", 27L, "1.2.3.4.example.com");
+
+        final var alert = formatter.message(List.of(new LinkBlocked(onDomain, BlockReason.ADMIN, null)), 0).content();
+        final var digest = formatter.weeklyDigest(busyWeek(List.of(new TopLink("my_menu", "203.0.113.7", 3, "1.2.3.4.example.com")))).content();
+
+        assertThat(alert).startsWith("Blocked: 1.2.3.4.example.com/my\\_menu " + ARROW + " an IP address").doesNotContain("IP removed");
+        assertThat(digest).contains("1. 1.2.3.4.example.com/my\\_menu " + ARROW + " an IP address, 3 clicks").doesNotContain("IP removed");
+    }
+
+    @Test
     void aNewReviewIsOneLineWithTheShortLinkTheHostTheReasonsAndTheReviewPage() {
         final var message = formatter.message(List.of(new ReviewOpened(ANONYMOUS_LINK,
                 List.of("imitates paypal", "domain registered in the last 30 days"))), 0);
