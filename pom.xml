@@ -21,7 +21,7 @@
     <properties>
         <java.version>25</java.version>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <springdocVersion>3.1.1</springdocVersion>
+        <springdocVersion>3.2.0</springdocVersion>
         <jsonwebtokenVersion>0.13.0</jsonwebtokenVersion>
         <apacheCommonsVersion>3.21.0</apacheCommonsVersion>
         <commonsIoVersion>2.22.0</commonsIoVersion>
