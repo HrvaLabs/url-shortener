@@ -94,7 +94,7 @@ public class SecurityConfiguration {
                                 .permitAll()
                                 .requestMatchers(UnsubscribeController.UNSUBSCRIBE_ENDPOINT)
                                 .permitAll()
-                                .requestMatchers("/actuator/health")
+                                .requestMatchers("/actuator/health", "/actuator/health/liveness", "/actuator/health/readiness")
                                 .permitAll()
                                 .requestMatchers("/actuator/**", "/api/v1/admin/**")
                                 .hasRole("ADMIN")

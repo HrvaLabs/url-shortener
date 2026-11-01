@@ -60,6 +60,7 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.web.FilterChainProxy;
@@ -404,6 +405,17 @@ class CustomHostEndpointSecurityTest {
         }
 
         verify(springSecurityFilterChain, atLeastOnce()).doFilter(any(), any(), any());
+    }
+
+    @Test
+    void theHealthProbesArePublicAndTheRestOfActuatorStaysForAdmins() throws Exception {
+        for (final var path : List.of("/actuator/health", "/actuator/health/liveness", "/actuator/health/readiness")) {
+            mockMvc.perform(on("hrva.cc", get(path)))
+                    .andExpect(result -> assertThat(result.getResponse().getStatus()).isNotIn(HttpStatus.UNAUTHORIZED.value(), HttpStatus.FORBIDDEN.value()));
+        }
+        for (final var path : List.of("/actuator/env", "/actuator/beans", "/actuator/metrics", "/actuator/health/db")) {
+            mockMvc.perform(on("hrva.cc", get(path))).andExpect(status().isUnauthorized());
+        }
     }
 
     private static MockHttpServletRequestBuilder rawPath(final String path) {

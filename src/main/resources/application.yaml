@@ -59,6 +59,8 @@ management:
         include: health
   endpoint:
     health:
+      probes:
+        enabled: true
       show-details: when-authorized
       show-components: when-authorized
 

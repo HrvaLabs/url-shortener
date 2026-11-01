@@ -17,4 +17,12 @@ class ActuatorExposureTest {
                 assertThat(source.getProperty("management.endpoints.web.exposure.include")).isEqualTo("health"));
     }
 
+    @Test
+    void theHealthProbesAreOnSoTheContainerCheckDoesNotDependOnMailRedisOrTheDatabase() throws IOException {
+        final var sources = new YamlPropertySourceLoader().load("application", new ClassPathResource("application.yaml"));
+
+        assertThat(sources).anySatisfy(source ->
+                assertThat(source.getProperty("management.endpoint.health.probes.enabled")).isEqualTo(true));
+    }
+
 }
