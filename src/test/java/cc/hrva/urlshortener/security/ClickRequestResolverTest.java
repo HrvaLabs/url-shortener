@@ -53,18 +53,24 @@ class ClickRequestResolverTest {
         assertThat(clickRequestResolver.resolve(null)).isEqualTo(ClickRequest.of("", null, null, null));
     }
 
+    @Test
+    void theRawQueryIsKeptForTheRedirect() {
+        assertThat(clickRequestResolver.resolve(withQuery("q=hello%20world&qr&a=1&a=2")).query()).isEqualTo("q=hello%20world&qr&a=1&a=2");
+        assertThat(clickRequestResolver.resolve(cloudflareRequest()).query()).isNull();
+    }
+
     @ParameterizedTest
     @ValueSource(strings = {"qr", "qr=", "qr=1", "fbclid=abc&qr"})
     void aQrMarkerMakesTheClickAQrScan(final String query) {
         assertThat(clickRequestResolver.resolve(withQuery(query)))
-                .isEqualTo(ClickRequest.of("203.0.113.7", "UA", "https://t.co/x", "HR").withQrScan());
+                .isEqualTo(ClickRequest.of("203.0.113.7", "UA", "https://t.co/x", "HR").withQrScan().withQuery(query));
     }
 
     @ParameterizedTest
     @ValueSource(strings = {"", "QR", "qrcode=1", "utm_source=qr"})
     void otherQueriesAreDirect(final String query) {
         assertThat(clickRequestResolver.resolve(withQuery(query)))
-                .isEqualTo(ClickRequest.of("203.0.113.7", "UA", "https://t.co/x", "HR"));
+                .isEqualTo(ClickRequest.of("203.0.113.7", "UA", "https://t.co/x", "HR").withQuery(query.isEmpty() ? null : query));
     }
 
     @Test
@@ -73,7 +79,7 @@ class ClickRequestResolverTest {
         doThrow(new InvalidParameterException("Character decoding failed", 400)).when(request).getParameter("qr");
 
         assertThat(clickRequestResolver.resolve(request))
-                .isEqualTo(ClickRequest.of("203.0.113.7", "UA", "https://t.co/x", "HR"));
+                .isEqualTo(ClickRequest.of("203.0.113.7", "UA", "https://t.co/x", "HR").withQuery("utm_campaign=50%off&qr"));
     }
 
     private static MockHttpServletRequest withQuery(final String query) {

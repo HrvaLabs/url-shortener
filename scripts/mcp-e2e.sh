@@ -65,7 +65,8 @@
 # Section 30 checks the v2.23 links work as the admin (section 29 ended the user's sessions): a create answers 201 with Location and
 # shortLink (signed in, without an account and with an API key; bulk stays 200); a revoked API key can't be turned on again (no
 # PATCH /activate, PUT active:true or a new expiry is 409) and can be deleted; a visit limit counts every click but not bots or HEAD, and
-# 20 opens at once of a link limited to 5 give exactly 5 redirects and 15 answers of 410.
+# 20 opens at once of a link limited to 5 give exactly 5 redirects and 15 answers of 410; a short link's query is forwarded to the
+# destination (its own parameters win, qr dropped, the fragment kept, the host never changes).
 #
 #   scripts/mcp-e2e.sh                         builds the jar, then runs every step
 #   MCP_E2E_SKIP_BUILD=1 scripts/mcp-e2e.sh    reuses target/url-shortener-*.jar
@@ -2539,5 +2540,23 @@ show "20 opens at once: $(sort "$WORK/twenty-opens.txt" | uniq -c | awk '{print 
 expect_eq "$(grep -c '^302$' "$WORK/twenty-opens.txt") $(grep -c '^410$' "$WORK/twenty-opens.txt")" "5 15" \
     "20 opens at once of a link limited to 5: exactly 5 redirects and 15 answers of 410"
 expect_eq "$(psql_value "select opens || ',' || active from url where short_url = 'e2e-limit-5';")" "5,false" "opens stopped at 5 and the link is off"
+
+section "30d. Query strings: forwarded to the destination"
+http -X POST "$BASE/api/v1/urls" -H "Authorization: Bearer $ADMIN_JWT" -H 'Content-Type: application/json' \
+    -d '{"longUrl":"https://e2e-links.com/q?id=7#top","shortUrl":"e2e-query"}'
+expect_eq "$HTTP_STATUS" 201 "a link to a destination with its own query and a fragment"
+http -A "$BROWSER_USER_AGENT" "$BASE/e2e-query?utm_source=news&id=9&qr"
+expect_eq "$HTTP_STATUS $HTTP_LOCATION" "302 https://e2e-links.com/q?id=7&utm_source=news#top" \
+    "the query is appended, the destination's id wins, qr is dropped and the fragment stays"
+http -A "$BROWSER_USER_AGENT" "$BASE/e2e-query?city=%C4%90akovo&q=a%20b&a=1&a=2"
+expect_eq "$HTTP_LOCATION" "https://e2e-links.com/q?id=7&city=%C4%90akovo&q=a%20b&a=1&a=2#top" "encoded values and repeated keys stay as sent"
+http -A "$BROWSER_USER_AGENT" "$BASE/e2e-query/?x=1"
+expect_eq "$HTTP_LOCATION" "https://e2e-links.com/q?id=7&x=1#top" "with a slash at the end too"
+for query in '@evil.example' 'x=//evil.example' 'next=https://evil.example/'; do
+    http -A "$BROWSER_USER_AGENT" "$BASE/e2e-query?$query"
+    expect_contains "$HTTP_LOCATION" "https://e2e-links.com/q?id=7&" "?$query keeps the destination host"
+done
+http -A "$BROWSER_USER_AGENT" "$BASE/e2e-query?qr"
+expect_eq "$HTTP_LOCATION" "https://e2e-links.com/q?id=7#top" "a QR scan alone forwards nothing"
 
 section "Done: every step passed"

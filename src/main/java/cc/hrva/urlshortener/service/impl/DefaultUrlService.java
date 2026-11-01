@@ -64,6 +64,7 @@ import cc.hrva.urlshortener.service.ratelimit.RateLimiter;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiterUnavailableException;
 import cc.hrva.urlshortener.service.settings.SettingKey;
 import cc.hrva.urlshortener.util.DomainNames;
+import cc.hrva.urlshortener.util.ForwardedQueries;
 import cc.hrva.urlshortener.util.RedirectLocations;
 import cc.hrva.urlshortener.util.SortWhitelist;
 import cc.hrva.urlshortener.validator.ApiKeyValidator;
@@ -924,7 +925,7 @@ public class DefaultUrlService implements UrlService {
             return unavailable(place, REASON_LIMIT);
         }
         clickAnalyticsService.recordClick(link.id(), place.cacheKey(), click);
-        return destinationView(place, link);
+        return destinationView(place, link, click);
     }
 
     private boolean openRefused(final LinkPlace place, final long urlId, final Long visitLimit, final ClickRequest click) {
@@ -948,8 +949,8 @@ public class DefaultUrlService implements UrlService {
         return urlRepository.existsByIdAndActiveTrue(urlId) ? Open.ALLOWED : Open.LAST;
     }
 
-    private View destinationView(final LinkPlace place, final UrlResponse link) {
-        final var location = redirectLocation(link.id(), link.longUrl());
+    private View destinationView(final LinkPlace place, final UrlResponse link, final ClickRequest click) {
+        final var location = redirectLocation(link.id(), ForwardedQueries.appendTo(link.longUrl(), click.query()));
         if (showsWarningPage(place, link)) {
             log.info("Warning page shown urlId={}", link.id());
             return new LinkWarningView(templateEngine, appProperties.getFrontendUrl(), place.alias(), link.longUrl(), location);

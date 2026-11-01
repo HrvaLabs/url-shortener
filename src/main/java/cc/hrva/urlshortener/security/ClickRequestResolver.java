@@ -4,6 +4,7 @@ import cc.hrva.urlshortener.dto.ClickRequest;
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.Collections;
 import lombok.RequiredArgsConstructor;
+import org.apache.commons.lang3.StringUtils;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.stereotype.Component;
@@ -24,7 +25,7 @@ public class ClickRequestResolver {
 
         final var click = ClickRequest.of(clientIpResolver.getClientIp(request), request.getHeader(HttpHeaders.USER_AGENT),
                 request.getHeader(HttpHeaders.REFERER), cloudflareCountry(request));
-        final var marked = hasQrMarker(request) ? click.withQrScan() : click;
+        final var marked = (hasQrMarker(request) ? click.withQrScan() : click).withQuery(StringUtils.defaultIfEmpty(request.getQueryString(), null));
         return HttpMethod.HEAD.matches(request.getMethod()) ? marked.asHead() : marked;
     }
 

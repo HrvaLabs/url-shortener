@@ -4198,6 +4198,46 @@ class UrlServiceTest {
     }
 
     @Test
+    void theWarningPageContinuesWithTheForwardedQuery() {
+        when(appProperties.getFrontendUrl()).thenReturn(FRONTEND);
+        when(urlRepository.findServed(null, "abc")).thenReturn(Optional.of(storedLink().longUrl(RANDOM_LINK).active(true).warningPage(true).build()));
+
+        assertThat(urlServiceWithMeters().redirectResultUrl("abc", CLICK.withQuery("ref=mail&qr"))).isInstanceOfSatisfying(LinkWarningView.class, page -> {
+            assertThat(page.destination()).isEqualTo(RANDOM_LINK);
+            assertThat(page.location()).isEqualTo(RANDOM_LINK + "?ref=mail");
+        });
+    }
+
+    @Test
+    void aRedirectForwardsTheQueryAndTheDestinationKeepsItsOwnParametersAndFragment() {
+        final var url = Url.builder().id(7L).shortUrl("abc").longUrl("https://example.com/a?id=7#top").visits(0L).active(true).build();
+        when(urlRepository.findServed(null, "abc")).thenReturn(Optional.of(url));
+
+        assertThat(locationOf(urlServiceWithMeters().redirectResultUrl("abc", CLICK.withQuery("utm_source=news&id=9&qr"))))
+                .isEqualTo("https://example.com/a?id=7&utm_source=news#top");
+    }
+
+    @Test
+    void aCachedRedirectForwardsTheQueryToo() {
+        final var cache = org.mockito.Mockito.mock(org.springframework.cache.Cache.class);
+        when(cacheManager.getCache("urls")).thenReturn(cache);
+        final var cached = new UrlResponse(5L, "https://example.com/a", "abc", null, null, 0L, null, true, "ACTIVE", java.util.Set.of(), false, null);
+        when(cache.get("abc")).thenReturn(() -> cached);
+
+        assertThat(locationOf(urlServiceWithMeters().redirectResultUrl("abc", CLICK.withQuery("x=1&city=%C4%90akovo"))))
+                .isEqualTo("https://example.com/a?x=1&city=%C4%90akovo");
+    }
+
+    @Test
+    void aRedirectOnACustomDomainForwardsTheQuery() {
+        final var url = Url.builder().id(7L).shortUrl("menu").longUrl("https://cafe.example/menu").visits(0L).active(true).build();
+        when(urlRepository.findServed(7L, "menu")).thenReturn(Optional.of(url));
+
+        assertThat(locationOf(urlServiceWithMeters().redirectResultUrl(GO, "menu", CLICK.withQuery("table=4"))))
+                .isEqualTo("https://cafe.example/menu?table=4");
+    }
+
+    @Test
     void aWarningPageForAHostThatCannotBeWrittenInAsciiLinksToTheStoredDestination() {
         final var stored = "https://" + "č".repeat(64) + ".hr/torta";
         cachedWithTheWarningPage(stored);

@@ -21,7 +21,15 @@ class ClickRequestTest {
     @Test
     void unknownReferrerKeepsEverythingButTheReferer() {
         assertThat(click.withUnknownReferrer())
-                .isEqualTo(new ClickRequest("203.0.113.7", "Mozilla/5.0 secret-ua", null, "HR", false, false, false));
+                .isEqualTo(new ClickRequest("203.0.113.7", "Mozilla/5.0 secret-ua", null, "HR", false, false, false, null));
+    }
+
+    @Test
+    void theQueryIsKeptThroughEveryChangeAndNeverPrinted() {
+        final var forwarded = click.withQuery("utm_source=private-campaign").withQrScan().withUnknownReferrer().asHead();
+
+        assertThat(forwarded.query()).isEqualTo("utm_source=private-campaign");
+        assertThat(forwarded.toString()).doesNotContain("private-campaign");
     }
 
     @Test
