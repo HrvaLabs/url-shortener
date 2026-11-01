@@ -4,6 +4,7 @@ import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.codebook.Authorities;
 import cc.hrva.urlshortener.repository.AuthoritiesRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
+import cc.hrva.urlshortener.util.EmailAddresses;
 import java.time.LocalDateTime;
 import java.util.List;
 import org.slf4j.Logger;
@@ -49,7 +50,7 @@ public class LocalDataInitializer implements CommandLineRunner {
             final List<Long> authorityIds,
             final Long apiKeySlots) {
         if (userRepository.findByEmail(email).isPresent()) {
-            log.info("Local dev user already exists email={}", email);
+            log.info("Local dev user already exists email={}", EmailAddresses.masked(email));
             return;
         }
 
@@ -77,7 +78,7 @@ public class LocalDataInitializer implements CommandLineRunner {
                 .build();
 
         userRepository.save(user);
-        log.info("Created local dev user email={} authorities={}", email, authorities.stream().map(Authorities::getName).toList());
+        log.info("Created local dev user email={} authorities={}", EmailAddresses.masked(email), authorities.stream().map(Authorities::getName).toList());
     }
 
 }

@@ -52,7 +52,7 @@ public class DefaultAuthService implements AuthService {
     @Override
     @Transactional
     public String register(final UserRegisterDto userRegisterDto) {
-        log.info("Registration requested email={}", userRegisterDto.getEmail());
+        log.info("Registration requested email={}", EmailAddresses.masked(userRegisterDto.getEmail()));
 
         userValidator.checkRegistrationEnabled();
         userValidator.checkEmailUniqueness(userRegisterDto.getEmail());
@@ -101,7 +101,7 @@ public class DefaultAuthService implements AuthService {
     @Override
     @Transactional
     public void resendVerificationEmail(final String email) {
-        log.info("Verification resend requested email={}", email);
+        log.info("Verification resend requested email={}", EmailAddresses.masked(email));
         userRepository.findByEmail(email).ifPresent(user -> {
             if (!Boolean.TRUE.equals(user.getEmailVerified())) {
                 verificationTokenService.deactivateActiveTokensForUser(user);

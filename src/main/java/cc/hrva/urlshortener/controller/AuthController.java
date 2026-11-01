@@ -37,7 +37,7 @@ public class AuthController {
     @ApiResponse(responseCode = "409", description = "Email already exists")
     @PostMapping("/register")
     public ResponseEntity<String> register(@Valid @RequestBody final UserRegisterDto user) {
-        log.info("Register controller invoked for user {}", user.getEmail());
+        log.info("Register controller invoked for user {}", EmailAddresses.masked(user.getEmail()));
         return ResponseEntity.ok(authService.register(user));
     }
 
@@ -45,7 +45,7 @@ public class AuthController {
     @ApiResponse(responseCode = "404", description = "User not found")
     @PostMapping("/password-reset")
     public ResponseEntity<Void> requestPasswordReset(@Valid @RequestBody final RequestPasswordResetDto dto) {
-        log.info("Forgot password controller invoked for {}", dto.getEmail());
+        log.info("Forgot password controller invoked for {}", EmailAddresses.masked(dto.getEmail()));
         userService.sendPasswordResetLinkToUser(dto);
 
         return ResponseEntity.accepted().build();
@@ -56,7 +56,7 @@ public class AuthController {
     @ApiResponse(responseCode = "404", description = "User or token not found")
     @PostMapping("/password-reset/confirm")
     public ResponseEntity<User> resetPassword(@Valid @RequestBody final PasswordResetDto passwordResetDto) {
-        log.info("Forgot password controller invoked for {}", passwordResetDto.getEmail());
+        log.info("Forgot password controller invoked for {}", EmailAddresses.masked(passwordResetDto.getEmail()));
         return ResponseEntity.ok(userService.resetPassword(passwordResetDto));
     }
 
@@ -73,7 +73,7 @@ public class AuthController {
     @Operation(summary = "Resend verification email", description = "Resend the email verification link to the given address.")
     @PostMapping("/verify-email/resend")
     public ResponseEntity<Void> resendVerificationEmail(@Valid @RequestBody final ResendVerificationDto dto) {
-        log.info("Resend verification email controller invoked for {}", dto.getEmail());
+        log.info("Resend verification email controller invoked for {}", EmailAddresses.masked(dto.getEmail()));
         authService.resendVerificationEmail(dto.getEmail());
 
         return ResponseEntity.accepted().build();

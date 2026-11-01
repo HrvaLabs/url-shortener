@@ -108,7 +108,7 @@ public class DefaultUserService implements UserService {
     @Transactional
     public User register(final User user) {
         final var savedUser = userRepository.save(user);
-        log.info("User registered email={}", savedUser.getEmail());
+        log.info("User registered email={}", EmailAddresses.masked(savedUser.getEmail()));
         signInMethodService.record(savedUser.getId(), SignInMethod.PASSWORD, savedUser.getCreateDate());
 
         final var verificationToken = verificationTokenService.createTokenForUser(savedUser);
@@ -324,7 +324,7 @@ public class DefaultUserService implements UserService {
     @Override
     @Transactional
     public void sendPasswordResetLinkToUser(final RequestPasswordResetDto requestPasswordResetDto) {
-        log.info("Password reset requested email={}", requestPasswordResetDto.getEmail());
+        log.info("Password reset requested email={}", EmailAddresses.masked(requestPasswordResetDto.getEmail()));
 
         final var user = userRepository.findByEmail(requestPasswordResetDto.getEmail());
 
@@ -337,7 +337,7 @@ public class DefaultUserService implements UserService {
     @Override
     @Transactional
     public User resetPassword(final PasswordResetDto passwordResetDto) {
-        log.info("Password reset for user email={}", passwordResetDto.getEmail());
+        log.info("Password reset for user email={}", EmailAddresses.masked(passwordResetDto.getEmail()));
 
         final var user = userRepository.findByEmail(passwordResetDto.getEmail())
                 .orElseThrow(() -> new NoAuthorizationException("Invalid credentials"));

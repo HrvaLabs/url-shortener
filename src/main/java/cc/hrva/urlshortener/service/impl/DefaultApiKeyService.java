@@ -7,6 +7,7 @@ import cc.hrva.urlshortener.exception.ApiKeyNotFoundException;
 import cc.hrva.urlshortener.exception.InvalidApiKeyException;
 import cc.hrva.urlshortener.repository.ApiKeyRepository;
 import cc.hrva.urlshortener.repository.specification.ApiKeySpecification;
+import cc.hrva.urlshortener.util.EmailAddresses;
 import cc.hrva.urlshortener.util.SortWhitelist;
 import cc.hrva.urlshortener.validator.ApiKeyValidator;
 import java.time.Clock;
@@ -73,7 +74,7 @@ public class DefaultApiKeyService implements ApiKeyService {
 
         final var token = ApiKeyTokens.generate();
         final var apiKey = apiKeyRepository.save(new ApiKey(user, expirationOf(expiresInDays, neverExpires), token));
-        log.info("Generated new API key for user email={} keyPrefix={} neverExpires={}", user.getEmail(), apiKey.getKeyPrefix(),
+        log.info("Generated new API key for user email={} keyPrefix={} neverExpires={}", EmailAddresses.masked(user.getEmail()), apiKey.getKeyPrefix(),
                 apiKey.getExpirationDate() == null);
         return CreatedApiKeyResponse.from(apiKey, token.key());
     }
