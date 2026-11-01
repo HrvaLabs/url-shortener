@@ -17,6 +17,7 @@ import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.repository.UserSignInMethodRepository;
 import cc.hrva.urlshortener.security.AnyHostIsPrimary;
 import cc.hrva.urlshortener.security.ClientIpResolver;
+import cc.hrva.urlshortener.security.CurrentSession;
 import cc.hrva.urlshortener.security.JwtFilter;
 import cc.hrva.urlshortener.security.OAuth2LoginSuccessHandler;
 import cc.hrva.urlshortener.security.OAuth2LoginUserService;
@@ -80,6 +81,7 @@ import static org.hamcrest.Matchers.nullValue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -218,6 +220,7 @@ class SignInMethodEndpointSecurityTest {
                 .andExpect(jsonPath("$.signInMethods[1].turnedOffAt").isString());
 
         assertThat(turnedOff(ANA)).containsExactly("GOOGLE");
+        assertThat(tokensValidAfter(ANA)).as("every other device is signed out").isNotNull();
         assertThat(auditRows()).singleElement().satisfies(row -> assertThat(row)
                 .containsEntry("PERFORMED_BY", ANA_EMAIL)
                 .containsEntry("ACTION", "TURN_OFF_SIGN_IN_METHOD")
@@ -415,6 +418,7 @@ class SignInMethodEndpointSecurityTest {
 
         assertThat(passwordOf(ANA)).isNotEqualTo(PASSWORD_HASH).satisfies(stored -> assertThat(StoredPasswords.isSet(stored)).isFalse());
         assertThat(turnedOff(ANA)).containsExactly("PASSWORD");
+        assertThat(tokensValidAfter(ANA)).as("every other device is signed out").isNotNull();
         assertThat(auditRows()).singleElement().satisfies(row -> assertThat(row)
                 .containsEntry("PERFORMED_BY", ANA_EMAIL)
                 .containsEntry("ACTION", "REMOVE_PASSWORD")
@@ -590,6 +594,10 @@ class SignInMethodEndpointSecurityTest {
                 LocalDateTime.class, userId, method);
     }
 
+    private Object tokensValidAfter(final long userId) {
+        return jdbcTemplate.queryForObject("select tokens_valid_after from user_account where id = ?", Object.class, userId);
+    }
+
     private String passwordOf(final long userId) {
         return jdbcTemplate.queryForObject("select password from user_account where id = ?", String.class, userId);
     }
@@ -603,16 +611,18 @@ class SignInMethodEndpointSecurityTest {
     }
 
     private void signedIn(final String token, final String email) {
+        lenient().when(tokenProvider.issuedAt(token)).thenReturn(Optional.of(Instant.now().plusSeconds(60)));
         when(tokenProvider.validateToken(token)).thenReturn(true);
         when(tokenProvider.getAuthentication(token))
                 .thenReturn(UsernamePasswordAuthenticationToken.authenticated(email, null, List.of(new SimpleGrantedAuthority("ROLE_USER"))));
     }
 
     private void signedInJustNow(final String token, final String email) {
+        lenient().when(tokenProvider.issuedAt(token)).thenReturn(Optional.of(Instant.now().plusSeconds(60)));
         when(tokenProvider.validateToken(token)).thenReturn(true);
         when(tokenProvider.getAuthentication(token))
                 .thenReturn(UsernamePasswordAuthenticationToken.authenticated(email, token, List.of(new SimpleGrantedAuthority("ROLE_USER"))));
-        when(tokenProvider.issuedAt(token)).thenReturn(Optional.of(Instant.now()));
+        when(tokenProvider.signedInAt(token)).thenReturn(Optional.of(Instant.now()));
     }
 
     private static String reauthBody(final String password) {
@@ -667,7 +677,8 @@ class SignInMethodEndpointSecurityTest {
             DefaultSettingsTestConfiguration.class,
             DefaultSignInMethodChangeService.class,
             SignInMethodChangedEmailListener.class,
-            SignInMethodController.class
+            SignInMethodController.class,
+            CurrentSession.class
     })
     static class TestApplication {
     }

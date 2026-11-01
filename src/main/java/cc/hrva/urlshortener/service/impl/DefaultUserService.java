@@ -46,6 +46,7 @@ import cc.hrva.urlshortener.service.notification.NotificationAccountData;
 import cc.hrva.urlshortener.service.twostep.AccountLock;
 import cc.hrva.urlshortener.util.EmailAddresses;
 import cc.hrva.urlshortener.util.SortWhitelist;
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Objects;
@@ -314,7 +315,8 @@ public class DefaultUserService implements UserService {
         final var user = getUserFromToken();
         reauthentication.confirmPassword(user, updatePasswordDto.getOldPassword());
         user.setPassword(passwordEncoder.encode(updatePasswordDto.getNewPassword()));
-        log.info("Password changed for user id={}", user.getId());
+        user.endSessions(Instant.now());
+        log.info("Password changed, other sessions ended user id={}", user.getId());
 
         return userRepository.save(user);
     }
@@ -346,6 +348,7 @@ public class DefaultUserService implements UserService {
             final var locked = accountLock.lock(user);
             Hibernate.initialize(locked.getAuthorities());
             locked.setPassword(passwordEncoder.encode(passwordResetDto.getPassword()));
+            locked.endSessions(Instant.now());
             resetTokenService.deactivateAndSaveToken(token);
             reauthentication.forgetWrongPasswords(locked);
             final var saved = userRepository.save(locked);
@@ -402,6 +405,7 @@ public class DefaultUserService implements UserService {
 
     private User deactivateUser(final User user) {
         user.setActive(false);
+        user.endSessions(Instant.now());
         log.info("Deactivated user with id {}", user.getId());
         cascadeDeactivation(user);
 

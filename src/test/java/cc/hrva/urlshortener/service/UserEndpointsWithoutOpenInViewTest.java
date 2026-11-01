@@ -194,6 +194,8 @@ class UserEndpointsWithoutOpenInViewTest {
         assertThat(json.get("email").asString()).isEqualTo(MEMBER_EMAIL);
         assertThat(json.get("authorities").get(0).get("name").asString()).isEqualTo("ROLE_USER");
         assertThat(json.has("password")).isFalse();
+        assertThat(json.has("tokensValidAfter")).isFalse();
+        assertThat(tokensValidAfter()).as("the change ends the other sessions").isNotNull();
     }
 
     @Test
@@ -207,6 +209,23 @@ class UserEndpointsWithoutOpenInViewTest {
         assertThat(json.get("email").asString()).isEqualTo(MEMBER_EMAIL);
         assertThat(json.get("authorities").get(0).get("name").asString()).isEqualTo("ROLE_USER");
         assertThat(json.has("password")).isFalse();
+        assertThat(tokensValidAfter()).as("the reset ends every session").isNotNull();
+    }
+
+    @Test
+    void deactivatingAnAccountEndsItsSessionsAndReactivatingItDoesNotBringThemBack() {
+        userService.updateUser(UserUpdateDto.builder().id(MEMBER).active(false).build());
+        final var endedAt = tokensValidAfter();
+
+        userService.updateUser(UserUpdateDto.builder().id(MEMBER).active(true).build());
+
+        assertThat(endedAt).isNotNull();
+        assertThat(tokensValidAfter()).isEqualTo(endedAt);
+        assertThat(jdbcTemplate.queryForObject("select active from user_account where id = ?", Boolean.class, MEMBER)).isTrue();
+    }
+
+    private java.time.LocalDateTime tokensValidAfter() {
+        return jdbcTemplate.queryForObject("select tokens_valid_after from user_account where id = ?", java.time.LocalDateTime.class, MEMBER);
     }
 
     @Test

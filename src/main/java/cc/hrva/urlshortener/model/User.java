@@ -13,7 +13,10 @@ import org.hibernate.annotations.BatchSize;
 import org.hibernate.annotations.DynamicUpdate;
 import org.hibernate.validator.constraints.Length;
 
+import java.time.Instant;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 
 @Entity
@@ -76,6 +79,9 @@ public class User {
 
     private String authProvider;
 
+    @JsonIgnore
+    private LocalDateTime tokensValidAfter;
+
     @PrePersist
     public void onCreate() {
         this.createDate = LocalDateTime.now();
@@ -98,6 +104,18 @@ public class User {
 
     public void userLoggedIn(final LocalDateTime signedInAt) {
         this.lastLogin = signedInAt;
+    }
+
+    public void endSessions(final Instant endedAt) {
+        this.tokensValidAfter = sessionCutOffOf(endedAt);
+    }
+
+    public boolean sessionEndedFor(final Instant tokenIssuedAt) {
+        return tokensValidAfter != null && (tokenIssuedAt == null || tokenIssuedAt.isBefore(tokensValidAfter.toInstant(ZoneOffset.UTC)));
+    }
+
+    public static LocalDateTime sessionCutOffOf(final Instant endedAt) {
+        return LocalDateTime.ofInstant(endedAt.truncatedTo(ChronoUnit.SECONDS), ZoneOffset.UTC);
     }
 
 }

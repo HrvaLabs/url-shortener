@@ -21,6 +21,7 @@ import cc.hrva.urlshortener.service.SignInMethodService;
 import cc.hrva.urlshortener.service.signin.SignInMethodChangedEvent;
 import cc.hrva.urlshortener.service.signin.SignInMethodGuard;
 import cc.hrva.urlshortener.service.twostep.AccountLock;
+import java.time.Instant;
 import java.time.LocalDateTime;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -65,6 +66,7 @@ public class DefaultSignInMethodChangeService implements SignInMethodChangeServi
         signInMethodGuard.check(user, before, before.withoutProvider(method));
         final var turnedOffAt = LocalDateTime.now();
         signInMethodService.turnOff(user.getId(), method, turnedOffAt);
+        user.endSessions(Instant.now());
         auditLogService.log(user.getEmail(), AuditAction.TURN_OFF_SIGN_IN_METHOD, TARGET_USER, String.valueOf(user.getId()), detailsOf(method));
         eventPublisher.publishEvent(SignInMethodChangedEvent.turnedOff(user, method, turnedOffAt));
         log.info("Sign-in method turned off user id={} method={}", user.getId(), method);
@@ -108,6 +110,7 @@ public class DefaultSignInMethodChangeService implements SignInMethodChangeServi
         final var removedAt = LocalDateTime.now();
         userRepository.replacePassword(user.getId(), StoredPasswords.none());
         signInMethodService.turnOff(user.getId(), SignInMethod.PASSWORD, removedAt);
+        user.endSessions(Instant.now());
         auditLogService.log(user.getEmail(), AuditAction.REMOVE_PASSWORD, TARGET_USER, String.valueOf(user.getId()),
                 detailsOf(SignInMethod.PASSWORD));
         eventPublisher.publishEvent(SignInMethodChangedEvent.passwordRemoved(user, removedAt));

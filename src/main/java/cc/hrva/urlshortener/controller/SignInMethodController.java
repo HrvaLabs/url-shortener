@@ -4,6 +4,7 @@ import cc.hrva.urlshortener.dto.RemovePasswordDto;
 import cc.hrva.urlshortener.dto.SignInMethodTurnOnDto;
 import cc.hrva.urlshortener.dto.SignInMethodsResponse;
 import cc.hrva.urlshortener.model.enums.SignInMethod;
+import cc.hrva.urlshortener.security.CurrentSession;
 import cc.hrva.urlshortener.service.SignInMethodChangeService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
@@ -23,9 +24,11 @@ import org.springframework.web.bind.annotation.RestController;
 public class SignInMethodController {
 
     private final SignInMethodChangeService signInMethodChangeService;
+    private final CurrentSession currentSession;
 
     @Operation(summary = "Turn off Google or GitHub sign-in",
-            description = "Keeps the method's row and refuses later sign-ins with it. The last way to sign in can't be turned off.")
+            description = "Keeps the method's row and refuses later sign-ins with it, and signs out every other device: the answer's "
+                    + "Authorization header carries a new token for this one. The last way to sign in can't be turned off.")
     @ApiResponse(responseCode = "200", description = "The account's sign-in methods after the change")
     @ApiResponse(responseCode = "400", description = "PASSWORD or PASSKEY, or an unknown method")
     @ApiResponse(responseCode = "404", description = "The account has never signed in with this method")
@@ -33,7 +36,9 @@ public class SignInMethodController {
     @PostMapping("/sign-in-methods/{method}/turn-off")
     @PreAuthorize("hasAnyRole('ROLE_ADMIN', 'ROLE_USER')")
     public ResponseEntity<SignInMethodsResponse> turnOff(@PathVariable("method") final SignInMethod method) {
-        return ResponseEntity.ok(signInMethodChangeService.turnOff(method));
+        final var methods = signInMethodChangeService.turnOff(method);
+
+        return ResponseEntity.ok().headers(currentSession.keepThisDeviceSignedIn()).body(methods);
     }
 
     @Operation(summary = "Turn Google or GitHub sign-in back on",
@@ -51,7 +56,8 @@ public class SignInMethodController {
     }
 
     @Operation(summary = "Remove the account's password",
-            description = "Needs the current password. Forgot password sets a new one. The last way to sign in can't be removed.")
+            description = "Needs the current password. Forgot password sets a new one. Signs out every other device: the answer's "
+                    + "Authorization header carries a new token for this one. The last way to sign in can't be removed.")
     @ApiResponse(responseCode = "200", description = "The account's sign-in methods after the change")
     @ApiResponse(responseCode = "400", description = "The current password is missing or wrong")
     @ApiResponse(responseCode = "403", description = "Too many wrong passwords")
@@ -60,7 +66,9 @@ public class SignInMethodController {
     @PostMapping("/password/remove")
     @PreAuthorize("hasAnyRole('ROLE_ADMIN', 'ROLE_USER')")
     public ResponseEntity<SignInMethodsResponse> removePassword(@Valid @RequestBody final RemovePasswordDto dto) {
-        return ResponseEntity.ok(signInMethodChangeService.removePassword(dto));
+        final var methods = signInMethodChangeService.removePassword(dto);
+
+        return ResponseEntity.ok().headers(currentSession.keepThisDeviceSignedIn()).body(methods);
     }
 
 }

@@ -1,5 +1,7 @@
 package cc.hrva.urlshortener.security;
 
+import cc.hrva.urlshortener.model.User;
+import cc.hrva.urlshortener.repository.UserRepository;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.ServletRequest;
@@ -7,22 +9,29 @@ import jakarta.servlet.ServletResponse;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
-import cc.hrva.urlshortener.repository.UserRepository;
+import java.nio.charset.StandardCharsets;
+import java.util.Map;
+import java.util.Optional;
 import lombok.RequiredArgsConstructor;
-import org.springframework.security.core.Authentication;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.MediaType;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 import org.springframework.web.filter.GenericFilterBean;
+import tools.jackson.databind.json.JsonMapper;
 
+@Slf4j
 @Component
 @RequiredArgsConstructor
 public class JwtFilter extends GenericFilterBean {
 
   public static final String AUTHORIZATION_HEADER = "Authorization";
+  public static final String SESSION_ENDED = "Your session ended. Sign in again.";
 
   private final TokenProvider tokenProvider;
   private final UserRepository userRepository;
+  private final JsonMapper jsonMapper;
 
   @Override
   public void doFilter(final ServletRequest servletRequest, final ServletResponse servletResponse, final FilterChain filterChain)
@@ -33,18 +42,34 @@ public class JwtFilter extends GenericFilterBean {
 
     final var jwt = getToken(httpServletRequest);
     if (StringUtils.hasText(jwt) && this.tokenProvider.validateToken(jwt)) {
-      final Authentication authentication = this.tokenProvider.getAuthentication(jwt);
-      if (isActiveUser(authentication.getName())) {
+      final var authentication = this.tokenProvider.getAuthentication(jwt);
+      final var user = activeUser(authentication.getName());
+      if (user.isPresent() && sessionEnded(user.get(), jwt)) {
+        log.info("Refused a token issued before the account's sessions ended user id={}", user.get().getId());
+        writeSessionEnded(httpServletResponse);
+        return;
+      }
+      if (user.isPresent()) {
         SecurityContextHolder.getContext().setAuthentication(authentication);
       }
     }
     filterChain.doFilter(servletRequest, servletResponse);
   }
 
-  private boolean isActiveUser(final String email) {
+  private boolean sessionEnded(final User user, final String jwt) {
+    return user.getTokensValidAfter() != null && user.sessionEndedFor(tokenProvider.issuedAt(jwt).orElse(null));
+  }
+
+  private Optional<User> activeUser(final String email) {
     return userRepository.findByEmail(email)
-        .map(user -> !Boolean.FALSE.equals(user.getActive()))
-        .orElse(false);
+        .filter(user -> !Boolean.FALSE.equals(user.getActive()));
+  }
+
+  private void writeSessionEnded(final HttpServletResponse response) throws IOException {
+    response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+    response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+    response.setCharacterEncoding(StandardCharsets.UTF_8.name());
+    response.getWriter().write(jsonMapper.writeValueAsString(Map.of("error", SESSION_ENDED)));
   }
 
   private String getToken(final HttpServletRequest request) {

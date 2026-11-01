@@ -16,6 +16,7 @@ import cc.hrva.urlshortener.exception.NoAuthorizationException;
 import cc.hrva.urlshortener.exception.ReauthenticationRequiredException;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.enums.SignInMethod;
+import cc.hrva.urlshortener.security.CurrentSession;
 import cc.hrva.urlshortener.service.UserService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
@@ -56,11 +57,14 @@ class UserControllerTest {
     @Mock
     private UserService userService;
 
+    @Mock
+    private CurrentSession currentSession;
+
     private ObjectMapper objectMapper;
 
     @BeforeEach
     void setUp() {
-        this.mockMvc = MockMvcBuilders.standaloneSetup(new UserController(userService))
+        this.mockMvc = MockMvcBuilders.standaloneSetup(new UserController(userService, currentSession))
                 .setCustomArgumentResolvers(new PageableHandlerMethodArgumentResolver())
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .build();
@@ -270,16 +274,20 @@ class UserControllerTest {
     void shouldUpdatePassword() throws Exception {
         final var user = User.builder().id(1L).email("test@example.com").build();
         when(userService.updatePassword(any(UpdatePasswordDto.class))).thenReturn(user);
+        final var renewed = new org.springframework.http.HttpHeaders();
+        renewed.add("Authorization", "Bearer renewed");
+        when(currentSession.keepThisDeviceSignedIn()).thenReturn(renewed);
 
         mockMvc.perform(patch("/api/v1/users/password")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(UpdatePasswordDto.builder().oldPassword("old").newPassword("newPassword1").build())))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.id").value(1));
+                .andExpect(jsonPath("$.id").value(1))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.header().string("Authorization", "Bearer renewed"));
     }
 
     private MockMvc withErrorHandling() {
-        return MockMvcBuilders.standaloneSetup(new UserController(userService))
+        return MockMvcBuilders.standaloneSetup(new UserController(userService, currentSession))
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .build();
     }

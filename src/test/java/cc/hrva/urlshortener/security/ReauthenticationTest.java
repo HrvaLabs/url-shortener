@@ -239,7 +239,7 @@ class ReauthenticationTest {
     @Test
     void aTokenFromBeforeIatIsStale() {
         signedIn();
-        when(tokenProvider.issuedAt(TOKEN)).thenReturn(Optional.empty());
+        when(tokenProvider.signedInAt(TOKEN)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> reauthentication.confirm(user("google"), null))
                 .isInstanceOf(ReauthenticationRequiredException.class)
@@ -330,7 +330,7 @@ class ReauthenticationTest {
 
     private void signedInMinutesAgo(final long minutes) {
         signedIn();
-        lenient().when(tokenProvider.issuedAt(TOKEN)).thenReturn(Optional.of(NOW.minus(Duration.ofMinutes(minutes))));
+        lenient().when(tokenProvider.signedInAt(TOKEN)).thenReturn(Optional.of(NOW.minus(Duration.ofMinutes(minutes))));
     }
 
     private static void signedIn() {

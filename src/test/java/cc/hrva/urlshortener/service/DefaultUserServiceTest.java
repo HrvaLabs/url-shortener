@@ -709,9 +709,13 @@ class DefaultUserServiceTest {
         when(passwordEncoder.encode("newPassword")).thenReturn("newEncoded");
         when(userRepository.save(user)).thenReturn(user);
 
+        final var before = Instant.now().truncatedTo(java.time.temporal.ChronoUnit.SECONDS);
+
         final var result = userService.updatePassword(updateDto);
 
         assertThat(result.getPassword()).isEqualTo("newEncoded");
+        assertThat(result.sessionEndedFor(before.minusSeconds(1))).as("tokens from before the change end").isTrue();
+        assertThat(result.sessionEndedFor(Instant.now())).as("a token issued now stays valid").isFalse();
         SecurityContextHolder.clearContext();
     }
 
@@ -757,10 +761,13 @@ class DefaultUserServiceTest {
             return null;
         }).when(resetTokenService).deactivateAndSaveToken(token);
 
+        final var before = Instant.now().truncatedTo(java.time.temporal.ChronoUnit.SECONDS);
+
         final var result = userService.resetPassword(resetDto);
 
         assertThat(result.getPassword()).isEqualTo("newEncoded");
         assertThat(token.isActive()).isFalse();
+        assertThat(result.sessionEndedFor(before.minusSeconds(1))).as("every session from before the reset ends").isTrue();
     }
 
     @Test
@@ -869,6 +876,7 @@ class DefaultUserServiceTest {
         userService.deactivateUnusedUserAccounts();
 
         assertThat(user.getActive()).isFalse();
+        assertThat(user.getTokensValidAfter()).as("a reactivation doesn't bring old tokens back").isNotNull();
         verify(sendingEmailService).sendEmailAccountDeactivated(user);
     }
 
@@ -1455,7 +1463,7 @@ class DefaultUserServiceTest {
     }
     private void signedInMinutesAgo(final String email, final long minutes) {
         SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(email, SIGNED_IN_TOKEN));
-        when(tokenProvider.issuedAt(SIGNED_IN_TOKEN)).thenReturn(Optional.of(NOW.minus(Duration.ofMinutes(minutes))));
+        when(tokenProvider.signedInAt(SIGNED_IN_TOKEN)).thenReturn(Optional.of(NOW.minus(Duration.ofMinutes(minutes))));
     }
 
     private AnnotationConfigApplicationContext signUpEmailsContext() {

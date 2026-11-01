@@ -10,6 +10,7 @@ import cc.hrva.urlshortener.dto.UserSearchDto;
 import cc.hrva.urlshortener.dto.UserUpdateDto;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.enums.AuditAction;
+import cc.hrva.urlshortener.security.CurrentSession;
 import cc.hrva.urlshortener.service.UserService;
 import io.swagger.v3.oas.annotations.Hidden;
 import io.swagger.v3.oas.annotations.Operation;
@@ -37,6 +38,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class UserController {
 
     private final UserService userService;
+    private final CurrentSession currentSession;
 
     @Operation(summary = "Get current user", description = "Retrieve details of the currently authenticated user.")
     @GetMapping("/me")
@@ -100,13 +102,16 @@ public class UserController {
         return ResponseEntity.ok(userService.exportMyData());
     }
 
-    @Operation(summary = "Update password", description = "Update the password for the authenticated user.")
+    @Operation(summary = "Update password", description = "Update the password for the authenticated user. Signs out every other device: "
+            + "the answer's Authorization header carries a new token for this one.")
     @ApiResponse(responseCode = "400", description = "Validation error or bad request")
     @ApiResponse(responseCode = "403", description = "Password does not match, or too many wrong passwords")
     @PatchMapping("/password")
     @PreAuthorize("hasAnyRole('ROLE_ADMIN', 'ROLE_USER')")
     public ResponseEntity<User> updatePassword(@Valid @RequestBody final UpdatePasswordDto updatePasswordDto) {
-        return ResponseEntity.ok(userService.updatePassword(updatePasswordDto));
+        final var user = userService.updatePassword(updatePasswordDto);
+
+        return ResponseEntity.ok().headers(currentSession.keepThisDeviceSignedIn()).body(user);
     }
 
 }

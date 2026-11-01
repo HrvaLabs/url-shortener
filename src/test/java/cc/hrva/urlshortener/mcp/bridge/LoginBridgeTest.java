@@ -16,6 +16,7 @@ import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.security.AnyHostIsPrimary;
 import cc.hrva.urlshortener.security.ClientIpResolver;
+import cc.hrva.urlshortener.security.CurrentSession;
 import cc.hrva.urlshortener.security.JwtFilter;
 import cc.hrva.urlshortener.security.OAuth2LoginSuccessHandler;
 import cc.hrva.urlshortener.security.OAuth2LoginUserService;
@@ -696,6 +697,7 @@ class LoginBridgeTest {
             RedisConnectRequestStore.class,
             ConnectController.class,
             ConnectContinueController.class,
+            CurrentSession.class,
             UserController.class
     })
     static class TestApplication {

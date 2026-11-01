@@ -37,28 +37,28 @@ class RecentSignInTest {
 
     @Test
     void aSignInFourteenMinutesAgoIsRecent() {
-        when(tokenProvider.issuedAt(TOKEN)).thenReturn(Optional.of(NOW.minus(Duration.ofMinutes(14))));
+        when(tokenProvider.signedInAt(TOKEN)).thenReturn(Optional.of(NOW.minus(Duration.ofMinutes(14))));
 
         assertThat(recentSignIn.isRecent(signedInWith(TOKEN))).isTrue();
     }
 
     @Test
     void aSignInSixteenMinutesAgoIsNotRecent() {
-        when(tokenProvider.issuedAt(TOKEN)).thenReturn(Optional.of(NOW.minus(Duration.ofMinutes(16))));
+        when(tokenProvider.signedInAt(TOKEN)).thenReturn(Optional.of(NOW.minus(Duration.ofMinutes(16))));
 
         assertThat(recentSignIn.isRecent(signedInWith(TOKEN))).isFalse();
     }
 
     @Test
     void aSignInExactlyFifteenMinutesAgoIsRecent() {
-        when(tokenProvider.issuedAt(TOKEN)).thenReturn(Optional.of(NOW.minus(RecentSignIn.WINDOW)));
+        when(tokenProvider.signedInAt(TOKEN)).thenReturn(Optional.of(NOW.minus(RecentSignIn.WINDOW)));
 
         assertThat(recentSignIn.isRecent(signedInWith(TOKEN))).isTrue();
     }
 
     @Test
     void aTokenWithoutIssueTimeIsNotRecent() {
-        when(tokenProvider.issuedAt(TOKEN)).thenReturn(Optional.empty());
+        when(tokenProvider.signedInAt(TOKEN)).thenReturn(Optional.empty());
 
         assertThat(recentSignIn.isRecent(signedInWith(TOKEN))).isFalse();
     }

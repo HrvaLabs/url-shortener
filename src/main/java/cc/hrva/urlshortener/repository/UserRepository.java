@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.repository;
 
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
@@ -55,9 +56,13 @@ public interface UserRepository extends JpaRepository<User, Long>, JpaSpecificat
     @Query("update User u set u.active = true where u.id = :id and u.active = false")
     int reactivateById(@Param("id") Long id);
 
+    default int deactivateById(final Long id) {
+        return deactivateAndEndSessionsById(id, User.sessionCutOffOf(Instant.now()));
+    }
+
     @Modifying(flushAutomatically = true, clearAutomatically = true)
-    @Query("update User u set u.active = false where u.id = :id and (u.active is null or u.active = true)")
-    int deactivateById(@Param("id") Long id);
+    @Query("update User u set u.active = false, u.tokensValidAfter = :endedAt where u.id = :id and (u.active is null or u.active = true)")
+    int deactivateAndEndSessionsById(@Param("id") Long id, @Param("endedAt") LocalDateTime endedAt);
 
     List<User> findByLastLoginIsLessThanEqualAndActiveTrue(LocalDateTime limitDate);
     long countByCreateDateAfter(LocalDateTime dateTime);

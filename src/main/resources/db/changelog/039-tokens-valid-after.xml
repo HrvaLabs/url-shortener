@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.9.xsd">
+
+    <changeSet author="khrvacic" id="039-user-account-tokens-valid-after">
+        <addColumn tableName="user_account">
+            <column name="tokens_valid_after" type="TIMESTAMP"/>
+        </addColumn>
+        <rollback>
+            <dropColumn tableName="user_account" columnName="tokens_valid_after"/>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>

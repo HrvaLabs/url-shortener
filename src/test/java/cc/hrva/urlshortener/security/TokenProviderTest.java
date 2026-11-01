@@ -91,7 +91,7 @@ class TokenProviderTest {
 
         final var token = tokenProvider.createToken(authentication, 60);
 
-        assertThat(tokenProvider.issuedAt(token))
+        assertThat(tokenProvider.read(token).map(SessionToken::issuedAt))
                 .hasValueSatisfying(issuedAt -> assertThat(issuedAt).isCloseTo(now, within(2, ChronoUnit.SECONDS)));
     }
 
@@ -105,7 +105,7 @@ class TokenProviderTest {
                 .signWith(key, Jwts.SIG.HS512)
                 .compact();
 
-        assertThat(tokenProvider.issuedAt(token)).isEmpty();
+        assertThat(tokenProvider.read(token).map(SessionToken::issuedAt)).isEmpty();
         assertThat(tokenProvider.validateToken(token)).isTrue();
     }
 
@@ -120,12 +120,12 @@ class TokenProviderTest {
                 .signWith(otherKey, Jwts.SIG.HS512)
                 .compact();
 
-        assertThat(tokenProvider.issuedAt(token)).isEmpty();
+        assertThat(tokenProvider.read(token).map(SessionToken::issuedAt)).isEmpty();
     }
 
     @Test
     void aMalformedTokenHasNoIssueTime() {
-        assertThat(tokenProvider.issuedAt("x.y.z")).isEmpty();
+        assertThat(tokenProvider.read("x.y.z").map(SessionToken::issuedAt)).isEmpty();
     }
 
     @Test
@@ -139,11 +139,84 @@ class TokenProviderTest {
                 .signWith(key, Jwts.SIG.HS512)
                 .compact();
 
-        assertThat(tokenProvider.issuedAt(token)).isEmpty();
+        assertThat(tokenProvider.read(token).map(SessionToken::issuedAt)).isEmpty();
     }
 
     @Test
     void aNullTokenHasNoIssueTime() {
-        assertThat(tokenProvider.issuedAt(null)).isEmpty();
+        assertThat(tokenProvider.read(null).map(SessionToken::issuedAt)).isEmpty();
+    }
+
+    @Test
+    void readingATokenParsesItOnceIntoItsUserTimesAndExpiry() {
+        final var authentication = userAuthentication();
+        final var before = Instant.now().truncatedTo(ChronoUnit.SECONDS);
+
+        final var read = tokenProvider.read(tokenProvider.createToken(authentication, 60)).orElseThrow();
+
+        assertThat(read.authentication().getName()).isEqualTo("test@example.com");
+        assertThat(read.authentication().getAuthorities()).extracting(Object::toString).containsExactly("ROLE_USER");
+        assertThat(read.issuedAt()).isBetween(before, Instant.now());
+        assertThat(read.signedInAt()).isEqualTo(read.issuedAt());
+        assertThat(read.expiresAt()).isEqualTo(read.issuedAt().plusSeconds(60));
+    }
+
+    @Test
+    void aTokenSignedWithAnotherKeyCantBeRead() {
+        final var token = Jwts.builder()
+                .subject("test@example.com")
+                .claim("auth", "ROLE_USER")
+                .issuedAt(new Date())
+                .expiration(Date.from(Instant.now().plus(1, ChronoUnit.HOURS)))
+                .signWith(Jwts.SIG.HS512.key().build(), Jwts.SIG.HS512)
+                .compact();
+
+        assertThat(tokenProvider.read(token)).isEmpty();
+        assertThat(tokenProvider.read("x.y.z")).isEmpty();
+        assertThat(tokenProvider.read(null)).isEmpty();
+    }
+
+    @Test
+    void aRenewedTokenIsIssuedNowButKeepsTheSignInTimeAndTheExpiry() {
+        final var key = Keys.hmacShaKeyFor(Decoders.BASE64.decode(SECRET));
+        final var signedIn = Instant.now().minus(3, ChronoUnit.HOURS).truncatedTo(ChronoUnit.SECONDS);
+        final var expires = Instant.now().plus(5, ChronoUnit.HOURS).truncatedTo(ChronoUnit.SECONDS);
+        final var old = Jwts.builder()
+                .subject("test@example.com")
+                .claim("auth", "ROLE_USER,ROLE_ADMIN")
+                .issuedAt(Date.from(signedIn))
+                .expiration(Date.from(expires))
+                .signWith(key, Jwts.SIG.HS512)
+                .compact();
+        final var oldToken = tokenProvider.read(old).orElseThrow();
+
+        final var renewed = tokenProvider.read(tokenProvider.renewToken(userAuthentication(), oldToken)).orElseThrow();
+
+        assertThat(renewed.issuedAt()).isCloseTo(Instant.now(), within(2, ChronoUnit.SECONDS));
+        assertThat(renewed.signedInAt()).isEqualTo(signedIn);
+        assertThat(renewed.expiresAt()).isEqualTo(expires);
+        assertThat(renewed.authentication().getAuthorities()).extracting(Object::toString).containsExactly("ROLE_USER");
+        assertThat(tokenProvider.signedInAt(tokenProvider.renewToken(userAuthentication(), oldToken))).contains(signedIn);
+    }
+
+    @Test
+    void theSignInTimeOfATokenWithoutOneIsWhenItWasIssued() {
+        final var key = Keys.hmacShaKeyFor(Decoders.BASE64.decode(SECRET));
+        final var issued = Instant.now().minus(1, ChronoUnit.HOURS).truncatedTo(ChronoUnit.SECONDS);
+        final var token = Jwts.builder()
+                .subject("test@example.com")
+                .claim("auth", "ROLE_USER")
+                .issuedAt(Date.from(issued))
+                .expiration(Date.from(Instant.now().plus(1, ChronoUnit.HOURS)))
+                .signWith(key, Jwts.SIG.HS512)
+                .compact();
+
+        assertThat(tokenProvider.signedInAt(token)).contains(issued);
+        assertThat(tokenProvider.signedInAt("x.y.z")).isEmpty();
+    }
+
+    private static Authentication userAuthentication() {
+        return new UsernamePasswordAuthenticationToken("test@example.com", null,
+                Collections.singletonList(new SimpleGrantedAuthority("ROLE_USER")));
     }
 }

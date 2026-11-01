@@ -11,6 +11,7 @@ import cc.hrva.urlshortener.security.OAuth2LoginUserService;
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import java.util.Arrays;
 import java.util.List;
+import java.util.stream.Stream;
 import lombok.RequiredArgsConstructor;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
@@ -136,7 +137,7 @@ public class SecurityConfiguration {
         configuration.setAllowedOrigins(List.of(appProperties.getFrontendUrl()));
         configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         configuration.setAllowedHeaders(List.of("*"));
-        configuration.setExposedHeaders(ApiKeyRateLimitFilter.EXPOSED_HEADERS);
+        configuration.setExposedHeaders(Stream.concat(Stream.of(JwtFilter.AUTHORIZATION_HEADER), ApiKeyRateLimitFilter.EXPOSED_HEADERS.stream()).toList());
         configuration.setAllowCredentials(true);
         source.registerCorsConfiguration("/**", configuration);
 

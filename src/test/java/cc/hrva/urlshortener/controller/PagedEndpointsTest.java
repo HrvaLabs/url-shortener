@@ -14,6 +14,7 @@ import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.security.AnyHostIsPrimary;
 import cc.hrva.urlshortener.security.ClickRequestResolver;
 import cc.hrva.urlshortener.security.ClientIpResolver;
+import cc.hrva.urlshortener.security.CurrentSession;
 import cc.hrva.urlshortener.security.JwtFilter;
 import cc.hrva.urlshortener.security.OAuth2LoginSuccessHandler;
 import cc.hrva.urlshortener.security.OAuth2LoginUserService;
@@ -281,6 +282,7 @@ class PagedEndpointsTest {
             JwtFilter.class,
             ClientIpResolver.class,
             UrlController.class,
+            CurrentSession.class,
             UserController.class,
             ApiKeyController.class,
             AdminAuditLogController.class,

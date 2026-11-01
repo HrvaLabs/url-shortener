@@ -1,6 +1,7 @@
 package cc.hrva.urlshortener.security;
 
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
+import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.JwtException;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.io.Decoders;
@@ -10,6 +11,7 @@ import javax.crypto.SecretKey;
 import java.time.Instant;
 import java.util.Arrays;
 import java.util.Date;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
@@ -27,6 +29,7 @@ import org.springframework.stereotype.Component;
 public class TokenProvider {
 
   private static final String AUTHORITIES_KEY = "auth";
+  private static final String SIGNED_IN_AT_KEY = "auth_time";
   private static final Long SECONDS_TO_MILLISECONDS = 1000L;
 
   private final AppProperties appProperties;
@@ -46,35 +49,53 @@ public class TokenProvider {
   }
 
   public String createToken(final Authentication authentication, final long ttlSeconds) {
-    final var now = (new Date()).getTime();
-    final var validity = new Date(now + SECONDS_TO_MILLISECONDS * ttlSeconds);
-    final var authorities = authentication.getAuthorities().stream()
-                                          .map(GrantedAuthority::getAuthority)
-                                          .collect(Collectors.joining(","));
+    final var now = Instant.ofEpochMilli(new Date().getTime());
 
-    return Jwts.builder()
-               .subject(authentication.getName())
-               .claim(AUTHORITIES_KEY, authorities)
-               .issuedAt(new Date(now))
-               .expiration(validity)
-               .signWith(key, Jwts.SIG.HS512)
-               .compact();
+    return signedToken(authentication, now, now, now.plusMillis(SECONDS_TO_MILLISECONDS * ttlSeconds));
+  }
+
+  public String renewToken(final Authentication authentication, final SessionToken current) {
+    return signedToken(authentication, Instant.now(), current.signedInAt(), current.expiresAt());
+  }
+
+  public static Authentication authenticationOf(final cc.hrva.urlshortener.model.User user) {
+    final var authorities = user.getAuthorities().stream()
+                                .map(authority -> new SimpleGrantedAuthority(authority.getName()))
+                                .toList();
+
+    return new UsernamePasswordAuthenticationToken(user.getEmail(), null, authorities);
   }
 
   public Authentication getAuthentication(final String token) {
-    final var claims = Jwts.parser()
-                           .verifyWith(key)
-                           .build()
-                           .parseSignedClaims(token)
-                           .getPayload();
+    return authenticationOf(claimsOf(token), token);
+  }
 
-    final var authorities = Arrays.stream(claims.get(AUTHORITIES_KEY).toString().split(","))
-                                  .map(SimpleGrantedAuthority::new)
-                                  .toList();
+  public Optional<SessionToken> read(final String token) {
+    try {
+      final var claims = claimsOf(token);
+      final var issuedAt = Optional.ofNullable(claims.getIssuedAt()).map(Date::toInstant).orElse(null);
 
-    final var principal = new User(claims.getSubject(), "", authorities);
+      return Optional.of(new SessionToken(authenticationOf(claims, token), issuedAt, signedInAtOf(claims, issuedAt),
+              Optional.ofNullable(claims.getExpiration()).map(Date::toInstant).orElse(null)));
+    } catch (final JwtException | IllegalArgumentException e) {
+      log.info("Invalid JWT token.");
+      log.trace("Invalid JWT token trace.", e);
+      return Optional.empty();
+    }
+  }
 
-    return new UsernamePasswordAuthenticationToken(principal, token, authorities);
+  public Optional<Instant> issuedAt(final String token) {
+    return read(token).map(SessionToken::issuedAt);
+  }
+
+  public Optional<Instant> signedInAt(final String token) {
+    try {
+      final var claims = claimsOf(token);
+
+      return Optional.ofNullable(signedInAtOf(claims, Optional.ofNullable(claims.getIssuedAt()).map(Date::toInstant).orElse(null)));
+    } catch (final JwtException | IllegalArgumentException e) {
+      return Optional.empty();
+    }
   }
 
   public boolean validateToken(final String authToken) {
@@ -93,18 +114,44 @@ public class TokenProvider {
     return false;
   }
 
-  public Optional<Instant> issuedAt(final String token) {
-    try {
-      final var claims = Jwts.parser()
-                             .verifyWith(key)
-                             .build()
-                             .parseSignedClaims(token)
-                             .getPayload();
+  private String signedToken(final Authentication authentication, final Instant issuedAt, final Instant signedInAt, final Instant expiresAt) {
+    final var authorities = authentication.getAuthorities().stream()
+                                          .map(GrantedAuthority::getAuthority)
+                                          .collect(Collectors.joining(","));
 
-      return Optional.ofNullable(claims.getIssuedAt()).map(Date::toInstant);
-    } catch (final JwtException | IllegalArgumentException e) {
-      return Optional.empty();
-    }
+    return Jwts.builder()
+               .subject(authentication.getName())
+               .claim(AUTHORITIES_KEY, authorities)
+               .claim(SIGNED_IN_AT_KEY, signedInAt.getEpochSecond())
+               .issuedAt(Date.from(issuedAt))
+               .expiration(Date.from(expiresAt))
+               .signWith(key, Jwts.SIG.HS512)
+               .compact();
+  }
+
+  private Claims claimsOf(final String token) {
+    return Jwts.parser()
+               .verifyWith(key)
+               .build()
+               .parseSignedClaims(token)
+               .getPayload();
+  }
+
+  private static Authentication authenticationOf(final Claims claims, final String token) {
+    final var authorities = Arrays.stream(Objects.toString(claims.get(AUTHORITIES_KEY), "").split(","))
+                                  .filter(authority -> !authority.isBlank())
+                                  .map(SimpleGrantedAuthority::new)
+                                  .toList();
+
+    final var principal = new User(claims.getSubject(), "", authorities);
+
+    return new UsernamePasswordAuthenticationToken(principal, token, authorities);
+  }
+
+  private static Instant signedInAtOf(final Claims claims, final Instant issuedAt) {
+    final var signedInAt = claims.get(SIGNED_IN_AT_KEY);
+
+    return signedInAt instanceof Number seconds ? Instant.ofEpochSecond(seconds.longValue()) : issuedAt;
   }
 
 }

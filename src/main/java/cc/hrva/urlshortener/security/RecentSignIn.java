@@ -22,7 +22,7 @@ public class RecentSignIn {
 
         final var oldestRecent = clock.instant().minus(WINDOW);
 
-        return tokenProvider.issuedAt(token)
+        return tokenProvider.signedInAt(token)
                 .map(issuedAt -> !issuedAt.isBefore(oldestRecent))
                 .orElse(false);
     }
