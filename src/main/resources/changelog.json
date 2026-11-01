@@ -5,7 +5,7 @@
       "date": "2026-11-01",
       "badge": "Latest",
       "badgeVariant": "default",
-      "summary": "Admin pages need two-step sign-in, password reset links that work once for an hour, sign-up that never shows whether an email is taken, API keys as Bearer tokens, limits on account emails and link previews, a warning before an inactive account is deactivated, stricter checks of the pages hrva.cc fetches, and blocklist status for the admin.",
+      "summary": "Visit limits that count every click and can't be passed at once, query strings passed on to the destination, 201 Created with the full short link, an API closed unless a route is public, final API key revokes, admin pages that need two-step sign-in, password reset links that work once for an hour, sign-up that never shows whether an email is taken, API keys as Bearer tokens, stricter checks of the pages hrva.cc fetches, and quick 503 answers when Redis or the database can't answer.",
       "sections": [
         {
           "title": "Accounts & Security",
@@ -16,7 +16,8 @@
             "A password reset link works once and for 1 hour, and only a hash of it is stored. Links sent before this release no longer work; ask for a new one.",
             "Setting a new password from a reset link no longer asks for your email. The link already names the account.",
             "Asking for a password reset or a new verification email is limited per network and per email address, so nobody can flood an inbox. The answer never says whether an account uses the address.",
-            "Signing up with an email that already has an account answers the same as a new sign-up. The account gets an email saying someone tried, with links to sign in and reset the password."
+            "Signing up with an email that already has an account answers the same as a new sign-up. The account gets an email saying someone tried, with links to sign in and reset the password.",
+            "Revoking an API key is final. A revoked or expired key can't be turned back on, only deleted; make a new key instead. The Activate buttons are gone."
           ]
         },
         {
@@ -32,14 +33,20 @@
           "title": "Links",
           "icon": "link",
           "items": [
-            "If the rate limiter is unavailable, password tries on a protected link are paused for a minute instead of left unlimited.",
-            "Link previews are kept for 10 minutes. A network can ask for 30 previews a minute, and a link's page is fetched at most 10 times in 10 minutes. Over the limit, or while 8 previews are already being fetched, the answer says when to try again."
+            "A visit limit now counts every click, not counting bots, so a link limited to 5 opens 5 times, even for the same visitor. The count is checked before the redirect, so clicks at the same moment can't go past the limit. Links with a limit keep the visits they had used. Unique visitors in your stats count as before.",
+            "A short link passes its query string on: hrva.cc/abc?ref=mail opens the destination with ref=mail added. The destination's own parameters win when both have the same name, hrva.cc's qr marker isn't passed on, and the destination's #fragment stays.",
+            "New random aliases leave out 0, O, 1, l and I, so they're easier to read out and type. Aliases stay case-sensitive, and existing ones don't change.",
+            "Link previews are kept for 10 minutes. A network can ask for 30 previews a minute, and a link's page is fetched at most 10 times in 10 minutes. Over the limit, or while 8 previews are already being fetched, the answer says when to try again.",
+            "While the rate limiter is down, links without an account aren't made and the link-password check waits: both answer 503 with Retry-After instead of letting requests through. Signed-in, API-key and AI connector links are made as usual.",
+            "When the database doesn't answer, a short link that isn't cached answers 503 within a few seconds instead of waiting, and cached links keep working."
           ]
         },
         {
           "title": "API",
           "icon": "key",
           "items": [
+            "Creating a link answers 201 Created with a Location header and the full short link in shortLink, with or without an API key or an account. Bulk creates answer 200 as before, each link with its shortLink.",
+            "The API answers without a sign-in only on a listed set of public routes, such as short links, link lookups, creating a link and signing in. Anything else, including a wrong method or an unknown path, is a 401 until you sign in.",
             "POST /api/v1/auth/register answers 202 with a JSON body, the same for a new and a taken address. POST /api/v1/auth/password-reset/confirm answers 204 with no body.",
             "An API key also works as Authorization: Bearer <key>, besides X-Api-Key. A Bearer value that starts with hrva_ is read as a key, anything else as a sign-in."
           ]
@@ -57,7 +64,9 @@
           "icon": "wrench",
           "items": [
             "Admin pages and the MCP moderation tools need two-step sign-in on the admin's account. Until it's on, they answer \"Turn on two-step sign-in to use admin pages.\" and the dashboard opens the two-step settings. Your own account pages keep working.",
-            "The Health page lists each blocklist with its last refresh, its errors in a row and whether it is stale. A list that misses two refreshes sends the owner one email."
+            "The Health page lists each blocklist with its last refresh, its errors in a row and whether it is stale. A list that misses two refreshes sends the owner one email.",
+            "A held link that gets its final block closes its review with the reason of that block, the same as any other block: a domain block as \"domain blocked\", its own blocklist hit as \"link blocked\".",
+            "A link without an account whose same-shape hold was lifted while it was being made still gets the warning page and the random-domain review when its domain calls for them."
           ]
         }
       ]
