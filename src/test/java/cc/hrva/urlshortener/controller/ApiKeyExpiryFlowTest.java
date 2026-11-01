@@ -296,6 +296,26 @@ class ApiKeyExpiryFlowTest {
     }
 
     @Test
+    void anExpirationDateWithZOrAnOffsetIsStoredAsTheSameUtcTime() throws Exception {
+        update(OWNERS_KEY, ADMIN_TOKEN, "{\"expirationDate\":\"2028-10-30T01:00:00+01:00\"}")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.expirationDate").value("2028-10-30T00:00:00Z"));
+        assertThat(expiryOf(OWNERS_KEY)).isEqualTo(LocalDateTime.of(2028, 10, 30, 0, 0));
+
+        update(OWNERS_KEY, ADMIN_TOKEN, "{\"expirationDate\":\"2028-10-30T00:00:00Z\"}").andExpect(status().isOk());
+        assertThat(expiryOf(OWNERS_KEY)).isEqualTo(LocalDateTime.of(2028, 10, 30, 0, 0));
+    }
+
+    @Test
+    void anOffsetThatPutsTheExpiryEarlierTodayIsRefused() throws Exception {
+        update(OWNERS_KEY, OWNER_TOKEN, "{\"expirationDate\":\"2026-10-31T00:30:00+01:00\"}")
+                .andExpect(status().isBadRequest())
+                .andExpect(fieldProblem("expirationDate", "Choose a date in the future."));
+        update(OWNERS_KEY, OWNER_TOKEN, "{\"expirationDate\":\"2026-10-31T01:30:00+01:00\"}").andExpect(status().isOk());
+        assertThat(expiryOf(OWNERS_KEY)).isEqualTo(LocalDateTime.of(2026, 10, 31, 0, 30));
+    }
+
+    @Test
     void theCreateAnswerAndALaterListAgreeOnTheExpiryToTheSecond() throws Exception {
         CLOCK.set(Instant.parse("2026-10-30T23:50:07.123456789Z"));
         final var answer = create("{\"expiresInDays\":1}").andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
