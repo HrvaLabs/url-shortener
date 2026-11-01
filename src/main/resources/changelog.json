@@ -1,10 +1,47 @@
 {
   "releases": [
     {
-      "version": "v2.23",
+      "version": "v2.24",
       "date": "2026-11-01",
       "badge": "Latest",
       "badgeVariant": "default",
+      "summary": "Retry-After that gives the seconds left, the hrva.cc icon and a small not-found page for addresses on hrva.cc that aren't short links, an error status on the unavailable page, links to Revolut's and PayPal's privacy terms, and dependency and security updates.",
+      "sections": [
+        {
+          "title": "Links",
+          "icon": "link",
+          "items": [
+            "An address on hrva.cc that isn't a short link, such as hrva.cc/robots.txt or hrva.cc/a/b, answers 404 with the small not-found page instead of an error in JSON. Short links and the API answer as before.",
+            "hrva.cc/favicon.ico is the hrva.cc icon, so the not-found and unavailable pages on hrva.cc show it in the browser tab.",
+            "The unavailable page a password-protected link can lead to answers with an error status, 404 or 410 like the short link itself, instead of 200. Its text stays the same."
+          ]
+        },
+        {
+          "title": "API",
+          "icon": "key",
+          "items": [
+            "Retry-After on a 429 is the number of seconds until that limit resets, not the length of its whole window. This applies to every limit, from creating links to reports, sign-in and connected app registration."
+          ]
+        },
+        {
+          "title": "Privacy",
+          "icon": "lock",
+          "items": [
+            "The privacy page says what happens when you follow a donation link: you leave hrva.cc for Revolut or PayPal, and hrva.cc sends them nothing beyond that click. It links to each company's own privacy terms."
+          ]
+        },
+        {
+          "title": "Fixes",
+          "icon": "bug",
+          "items": [
+            "Updated dependencies, and fixed a pattern that a very long link could make slow."
+          ]
+        }
+      ]
+    },
+    {
+      "version": "v2.23",
+      "date": "2026-11-01",
       "summary": "Visit limits that count every click and can't be passed at once, query strings passed on to the destination, 201 Created with the full short link, an API closed unless a route is public, final API key revokes, admin pages that need two-step sign-in, password reset links that work once for an hour, sign-up that never shows whether an email is taken, API keys as Bearer tokens, stricter checks of the pages hrva.cc fetches, and quick 503 answers when Redis or the database can't answer.",
       "sections": [
         {
