@@ -856,7 +856,9 @@ expect_eq "$ALLOWED" 60 "60 calls in the hour from one network are answered"
 public_stats "$STATS_NETWORK"
 show "call 61 -> $HTTP_STATUS $HTTP_BODY"
 expect_eq "$HTTP_STATUS" 429 "the 61st call in the hour is refused"
-expect_eq "$(header_value retry-after) $(header_value content-type)" "3600 application/problem+json" "with Retry-After: 3600 and a problem"
+RETRY_AFTER=$(header_value retry-after)
+(( RETRY_AFTER > 3500 && RETRY_AFTER <= 3600 )) || fail "Retry-After for the public numbers: expected the seconds left in the hour, 3501 to 3600, got '$RETRY_AFTER'"
+expect_eq "$(header_value content-type)" "application/problem+json" "with Retry-After: $RETRY_AFTER and a problem"
 expect_eq "$(jq -r .detail <<<"$HTTP_BODY")" "You've opened these numbers a lot in a short time. Try again in an hour." "with the plan's text"
 public_stats 198.51.100.7
 expect_eq "$HTTP_STATUS" 200 "another network still gets the numbers"
@@ -2607,7 +2609,10 @@ ok "9 more wrong link passwords from one network are each 403"
 unlock_e2e_locked 203.0.113.82 wrong-pw
 expect_eq "$HTTP_STATUS" 403 "the 10th wrong one is still 403"
 unlock_e2e_locked 203.0.113.82 secret-pw
-expect_eq "$HTTP_STATUS $(header_value retry-after)" "429 900" "a real limit stays 429 with Retry-After 900"
+RETRY_AFTER=$(header_value retry-after)
+expect_eq "$HTTP_STATUS" 429 "a real limit stays 429"
+(( RETRY_AFTER > 840 && RETRY_AFTER <= 900 )) || fail "Retry-After for the unlock limit: expected the seconds left in the 15 minutes, 841 to 900, got '$RETRY_AFTER'"
+ok "Retry-After: $RETRY_AFTER"
 
 section "31f. Deny by default: only the listed public routes answer without a sign-in"
 for endpoint in "GET /api/v1/urls/export" "GET /api/v1/urls/tags" "GET /api/v1/urls/all" "POST /api/v1/auth/2fa/setup" "GET /actuator" \
