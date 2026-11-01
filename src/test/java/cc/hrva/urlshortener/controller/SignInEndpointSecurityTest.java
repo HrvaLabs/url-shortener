@@ -245,8 +245,10 @@ class SignInEndpointSecurityTest {
                         {"email":"user@example.com","password":"password123"}"""))
                 .andExpect(status().isTooManyRequests())
                 .andExpect(header().string("Retry-After", "2520"))
+                .andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON))
                 .andExpect(content().json("""
-                        {"error":"Too many sign-in attempts. Try again in 42 minutes."}""", JsonCompareMode.STRICT));
+                        {"type":"about:blank","title":"Too Many Requests","status":429,
+                         "detail":"Too many sign-in attempts. Try again in 42 minutes.","instance":"/api/v1/auth/login"}""", JsonCompareMode.STRICT));
     }
 
     @Test

@@ -292,8 +292,10 @@ class UserControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(UpdatePasswordDto.builder().oldPassword("old").newPassword("p".repeat(73)).build())))
                 .andExpect(status().isBadRequest())
-                .andExpect(content().json("""
-                        {"newPassword":"This password is too long. Use at most 72 bytes; accented letters count as two."}""", JsonCompareMode.STRICT));
+                .andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON))
+                .andExpect(jsonPath("$.detail").value("This password is too long. Use at most 72 bytes; accented letters count as two."))
+                .andExpect(jsonPath("$.errors.length()").value(1))
+                .andExpect(jsonPath("$.errors.newPassword").value("This password is too long. Use at most 72 bytes; accented letters count as two."));
 
         verifyNoInteractions(userService);
     }

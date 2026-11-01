@@ -57,9 +57,9 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.http.MediaType;
-import org.springframework.test.json.JsonCompareMode;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
+import org.springframework.test.web.servlet.ResultMatcher;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -239,7 +239,7 @@ class ApiKeyExpiryFlowTest {
         for (final var days : List.of("0", "3651", "-5")) {
             create("{\"expiresInDays\":" + days + "}")
                     .andExpect(status().isBadRequest())
-                    .andExpect(content().json("{\"expiresInDays\":\"" + DAYS_RANGE + "\"}", JsonCompareMode.STRICT));
+                    .andExpect(fieldProblem("expiresInDays", DAYS_RANGE));
         }
         create("{\"expiresInDays\":3650}").andExpect(status().isOk());
         create("{\"expiresInDays\":1}").andExpect(status().isOk());
@@ -249,7 +249,7 @@ class ApiKeyExpiryFlowTest {
     void daysAndNoExpiryTogetherAreRefused() throws Exception {
         create("{\"expiresInDays\":30,\"neverExpires\":true}")
                 .andExpect(status().isBadRequest())
-                .andExpect(content().json("{\"error\":\"" + CHOOSE_ONE + "\"}", JsonCompareMode.STRICT));
+                .andExpect(problem(CHOOSE_ONE));
 
         assertThat(keysOf(OWNER)).isOne();
     }
@@ -275,10 +275,10 @@ class ApiKeyExpiryFlowTest {
     void anUpdateRefusesTheSameWayACreateDoes() throws Exception {
         update(OWNERS_KEY, OWNER_TOKEN, "{\"expiresInDays\":30,\"neverExpires\":true}")
                 .andExpect(status().isBadRequest())
-                .andExpect(content().json("{\"error\":\"" + CHOOSE_ONE + "\"}", JsonCompareMode.STRICT));
+                .andExpect(problem(CHOOSE_ONE));
         update(OWNERS_KEY, OWNER_TOKEN, "{\"expiresInDays\":4000}")
                 .andExpect(status().isBadRequest())
-                .andExpect(content().json("{\"expiresInDays\":\"" + DAYS_RANGE + "\"}", JsonCompareMode.STRICT));
+                .andExpect(fieldProblem("expiresInDays", DAYS_RANGE));
 
         assertThat(expiryOf(OWNERS_KEY)).isEqualTo(LocalDateTime.of(2027, 1, 1, 0, 0));
     }
@@ -291,7 +291,7 @@ class ApiKeyExpiryFlowTest {
 
         update(OWNERS_KEY, ADMIN_TOKEN, "{\"expirationDate\":\"2020-01-01T00:00:00\"}")
                 .andExpect(status().isBadRequest())
-                .andExpect(content().json("{\"expirationDate\":\"Choose a date in the future.\"}", JsonCompareMode.STRICT));
+                .andExpect(fieldProblem("expirationDate", "Choose a date in the future."));
         assertThat(expiryOf(OWNERS_KEY)).isEqualTo(future);
     }
 
@@ -301,10 +301,10 @@ class ApiKeyExpiryFlowTest {
         final var answer = create("{\"expiresInDays\":1}").andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         final long id = ((Number) com.jayway.jsonpath.JsonPath.read(answer, "$.id")).longValue();
 
-        assertThat(com.jayway.jsonpath.JsonPath.<String>read(answer, "$.expirationDate")).isEqualTo("2026-10-31T23:50:07");
+        assertThat(com.jayway.jsonpath.JsonPath.<String>read(answer, "$.expirationDate")).isEqualTo("2026-10-31T23:50:07Z");
         mockMvc.perform(get("/api/v1/api-keys").header(JwtFilter.AUTHORIZATION_HEADER, OWNER_TOKEN))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$[?(@.id == " + id + ")].expirationDate").value("2026-10-31T23:50:07"));
+                .andExpect(jsonPath("$[?(@.id == " + id + ")].expirationDate").value("2026-10-31T23:50:07Z"));
         assertThat(expiryOf(id)).isEqualTo(LocalDateTime.of(2026, 10, 31, 23, 50, 7));
     }
 
@@ -343,7 +343,7 @@ class ApiKeyExpiryFlowTest {
     void anExpirationDateEarlierTodayIsRefused() throws Exception {
         update(OWNERS_KEY, OWNER_TOKEN, "{\"expirationDate\":\"2026-10-30T23:00:00\"}")
                 .andExpect(status().isBadRequest())
-                .andExpect(content().json("{\"expirationDate\":\"Choose a date in the future.\"}", JsonCompareMode.STRICT));
+                .andExpect(fieldProblem("expirationDate", "Choose a date in the future."));
     }
 
     @Test
@@ -421,6 +421,23 @@ class ApiKeyExpiryFlowTest {
 
     private long idOf(final ResultActions created) throws Exception {
         return ((Number) com.jayway.jsonpath.JsonPath.read(created.andReturn().getResponse().getContentAsString(), "$.id")).longValue();
+    }
+
+    private static ResultMatcher problem(final String detail) {
+        return allOf(content().contentType(MediaType.APPLICATION_PROBLEM_JSON), jsonPath("$.detail").value(detail), jsonPath("$.errors").doesNotExist());
+    }
+
+    private static ResultMatcher fieldProblem(final String field, final String message) {
+        return allOf(content().contentType(MediaType.APPLICATION_PROBLEM_JSON), jsonPath("$.detail").value(message),
+                jsonPath("$.errors.length()").value(1), jsonPath("$.errors." + field).value(message));
+    }
+
+    private static ResultMatcher allOf(final ResultMatcher... matchers) {
+        return result -> {
+            for (final var matcher : matchers) {
+                matcher.match(result);
+            }
+        };
     }
 
     private LocalDateTime expiryOf(final long id) {
