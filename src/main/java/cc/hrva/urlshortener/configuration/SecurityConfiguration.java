@@ -77,7 +77,7 @@ public class SecurityConfiguration {
                     authorizeRequests
                             .dispatcherTypeMatchers(DispatcherType.ERROR)
                             .permitAll()
-                            .requestMatchers(HttpMethod.GET, "/actuator/health")
+                            .requestMatchers(HttpMethod.GET, PublicRoutes.HEALTH_PROBES.toArray(String[]::new))
                             .permitAll()
                             .requestMatchers("/actuator", "/actuator/**", "/api/v1/admin/**")
                             .hasRole("ADMIN")

@@ -9,6 +9,7 @@ import org.springframework.security.config.annotation.web.configurers.AuthorizeH
 
 final class PublicRoutes {
 
+    static final List<String> HEALTH_PROBES = List.of("/actuator/health", "/actuator/health/liveness", "/actuator/health/readiness");
     static final List<String> SIGNED_IN_UNDER_A_PUBLIC_PATTERN = List.of("/api/v1/urls/export", "/api/v1/urls/tags", "/api/v1/urls/all");
 
     private static final List<PublicRoute> ROUTES = List.of(
@@ -44,7 +45,6 @@ final class PublicRoutes {
             post("/api/v1/auth/2fa/webauthn/verify"),
             get("/oauth2/authorization/*"),
             get("/login/oauth2/code/*"),
-            get("/actuator/health"),
             get("/swagger-ui.html"),
             get("/swagger-ui/**"),
             get("/v3/api-docs"),

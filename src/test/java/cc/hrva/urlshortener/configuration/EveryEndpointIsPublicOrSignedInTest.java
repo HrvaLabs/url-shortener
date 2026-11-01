@@ -170,6 +170,9 @@ class EveryEndpointIsPublicOrSignedInTest {
         assertThat(anonymousAllowed("GET /oauth2/authorization/google")).isTrue();
         assertThat(anonymousAllowed("GET /login/oauth2/code/github")).isTrue();
         assertThat(anonymousAllowed("GET /actuator/health")).isTrue();
+        assertThat(anonymousAllowed("GET /actuator/health/liveness")).isTrue();
+        assertThat(anonymousAllowed("GET /actuator/health/readiness")).isTrue();
+        assertThat(anonymousAllowed("GET /actuator/health/db")).isFalse();
         assertThat(anonymousAllowed("GET /actuator")).isFalse();
         assertThat(anonymousAllowed("GET /actuator/env")).isFalse();
     }
