@@ -275,6 +275,21 @@ class ApiKeyExpiryFlowTest {
     }
 
     @Test
+    void aKeyPastItsExpiryIsRefusedAnEditBeforeTheHourlyJobSwitchesItOffAndStaysRefused() throws Exception {
+        jdbcTemplate.update("update api_key set expiration_date = ? where id = ?", NOW.minusMinutes(1), OWNERS_KEY);
+
+        update(OWNERS_KEY, OWNER_TOKEN, "{\"neverExpires\":true}")
+                .andExpect(status().isConflict())
+                .andExpect(problem("A revoked or expired key can't be turned back on or changed. Delete it and make a new key."));
+        update(OWNERS_KEY, ADMIN_TOKEN, "{\"expiresInDays\":30}").andExpect(status().isConflict());
+
+        assertThat(expiryOf(OWNERS_KEY)).isEqualTo(NOW.minusMinutes(1));
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> apiKeyValidator.apiKeyExistsByKeyAndIsValid("owners-expiry-key"))
+                .isInstanceOf(cc.hrva.urlshortener.exception.InvalidApiKeyException.class)
+                .hasMessage("API key has expired");
+    }
+
+    @Test
     void anUpdateRefusesTheSameWayACreateDoes() throws Exception {
         update(OWNERS_KEY, OWNER_TOKEN, "{\"expiresInDays\":30,\"neverExpires\":true}")
                 .andExpect(status().isBadRequest())

@@ -460,6 +460,23 @@ class ApiKeyServiceTest {
     }
 
     @Test
+    void aKeyPastItsExpiryThatTheHourlyJobHasNotSwitchedOffYetCantBeRevivedEither() {
+        final var expiredAt = LocalDateTime.of(2026, 10, 30, 23, 50, 7);
+        final var expired = ApiKey.builder().id(1L).keyHash("stored-hash").expirationDate(expiredAt).active(true).build();
+        when(apiKeyRepository.findForUpdateById(1L)).thenReturn(Optional.of(expired));
+
+        assertThatThrownBy(() -> apiKeyService.updateKey(ApiKeyUpdateDto.builder().id(1L).expiresInDays(30).build()))
+                .isInstanceOf(ApiKeyInactiveException.class)
+                .hasMessage("A revoked or expired key can't be turned back on or changed. Delete it and make a new key.");
+        assertThatThrownBy(() -> apiKeyService.updateKey(ApiKeyUpdateDto.builder().id(1L).neverExpires(true).build()))
+                .isInstanceOf(ApiKeyInactiveException.class);
+
+        verify(apiKeyRepository, never()).save(any());
+        verify(apiKeyConverter, never()).convert(any());
+        assertThat(expired.getExpirationDate()).isEqualTo(expiredAt);
+    }
+
+    @Test
     void someoneElsesRevokedKeyIsRefusedForTheOwnerFirst() {
         final var revoked = ApiKey.builder().id(1L).active(false).build();
         when(apiKeyRepository.findForUpdateById(1L)).thenReturn(Optional.of(revoked));

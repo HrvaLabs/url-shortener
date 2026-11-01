@@ -185,8 +185,8 @@ public class DefaultApiKeyService implements ApiKeyService {
         final var apiKey = apiKeyRepository.findForUpdateById(apiKeyUpdateDto.getId())
                 .orElseThrow(() -> new ApiKeyNotFoundException("Api key doesn't exist"));
         apiKeyValidator.verifyUserAdminOrOwner(apiKey);
-        if (!apiKey.isActive()) {
-            log.info("Edit of an inactive API key refused id={}", apiKey.getId());
+        if (!apiKey.isActive() || hasExpired(apiKey)) {
+            log.info("Edit of an inactive or expired API key refused id={}", apiKey.getId());
             throw new ApiKeyInactiveException(INACTIVE_KEY_IS_FINAL);
         }
         apiKeyValidator.validateExpiry(apiKeyUpdateDto.getExpiresInDays(), apiKeyUpdateDto.getNeverExpires(), apiKeyUpdateDto.getExpirationDate());
@@ -195,6 +195,10 @@ public class DefaultApiKeyService implements ApiKeyService {
         apiKey.setExpirationDate(editedApiKey.getExpirationDate());
         apiKey.setActive(editedApiKey.isActive());
         return ApiKeyResponse.from(apiKeyRepository.save(apiKey));
+    }
+
+    private boolean hasExpired(final ApiKey apiKey) {
+        return apiKey.getExpirationDate() != null && LocalDateTime.now(clock.withZone(ZoneId.systemDefault())).isAfter(apiKey.getExpirationDate());
     }
 
     @Override
