@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.controller;
 
+import cc.hrva.urlshortener.service.domain.ShortLinks;
 import cc.hrva.urlshortener.controller.LinkPageHeaders;
 import cc.hrva.urlshortener.controller.LinkUnavailableView;
 import cc.hrva.urlshortener.controller.LinkWarningTemplates;
@@ -474,6 +475,7 @@ class CustomHostEndpointSecurityTest {
             HostRouting.class,
             CustomHostFilter.class,
             UrlController.class,
+            ShortLinks.class,
             UrlRedirectController.class,
             TestApplication.FixedClock.class
     })

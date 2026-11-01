@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.controller;
 
+import cc.hrva.urlshortener.service.domain.ShortLinks;
 import cc.hrva.urlshortener.configuration.AppConfiguration;
 import cc.hrva.urlshortener.configuration.GlobalExceptionHandler;
 import cc.hrva.urlshortener.configuration.JacksonConfiguration;
@@ -283,6 +284,7 @@ class PagedEndpointsTest {
             JwtFilter.class,
             ClientIpResolver.class,
             UrlController.class,
+            ShortLinks.class,
             CurrentSession.class,
             UserController.class,
             ApiKeyController.class,

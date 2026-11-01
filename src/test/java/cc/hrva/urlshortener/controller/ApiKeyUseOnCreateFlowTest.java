@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.controller;
 
+import cc.hrva.urlshortener.service.domain.ShortLinks;
 import cc.hrva.urlshortener.audit.AdminAuditAspect;
 import cc.hrva.urlshortener.configuration.AppConfiguration;
 import cc.hrva.urlshortener.configuration.ClockConfiguration;
@@ -263,7 +264,7 @@ class ApiKeyUseOnCreateFlowTest {
         final var first = CompletableFuture.supplyAsync(() -> createdStatus("https://example.com/first"));
         final var second = CompletableFuture.supplyAsync(() -> createdStatus("https://example.com/second"));
 
-        assertThat(List.of(first.get(30, TimeUnit.SECONDS), second.get(30, TimeUnit.SECONDS))).containsExactly(200, 200);
+        assertThat(List.of(first.get(30, TimeUnit.SECONDS), second.get(30, TimeUnit.SECONDS))).containsExactly(201, 201);
         assertThat(keyRow()).containsEntry("API_CALLS_USED", 2L).containsEntry("ACTIVE", true);
         assertThat(linksOfTheOwner()).isEqualTo(2L);
     }
@@ -273,7 +274,7 @@ class ApiKeyUseOnCreateFlowTest {
         key(0, LocalDateTime.now().plusMonths(6));
         duringChecks = () -> meanwhile("update api_key set expiration_date = ? where id = ?", LocalDateTime.now().minusMinutes(1), OWNERS_KEY);
 
-        create("https://example.com/expired-meanwhile").andExpect(status().isOk());
+        create("https://example.com/expired-meanwhile").andExpect(status().isCreated());
 
         assertThat(keyRow()).containsEntry("ACTIVE", true).containsEntry("API_CALLS_USED", 1L);
         assertThat(linksOfTheOwner()).isEqualTo(1L);
@@ -283,8 +284,8 @@ class ApiKeyUseOnCreateFlowTest {
     void aKeyKeepsWorkingWhateverItsTotalAndEachCreateCountsOnce() throws Exception {
         key(256, LocalDateTime.now().plusMonths(6));
 
-        create("https://example.com/past-the-old-cap").andExpect(status().isOk());
-        create("https://example.com/and-again").andExpect(status().isOk());
+        create("https://example.com/past-the-old-cap").andExpect(status().isCreated());
+        create("https://example.com/and-again").andExpect(status().isCreated());
 
         assertThat(keyRow()).containsEntry("API_CALLS_USED", 258L).containsEntry("ACTIVE", true);
         assertThat(jdbcTemplate.queryForObject("select last_used_at from api_key where id = ?", LocalDateTime.class, OWNERS_KEY))
@@ -295,7 +296,7 @@ class ApiKeyUseOnCreateFlowTest {
     void aKeyThatNeverExpiresWorks() throws Exception {
         key(7, null);
 
-        create("https://example.com/never-expires").andExpect(status().isOk());
+        create("https://example.com/never-expires").andExpect(status().isCreated());
 
         assertThat(keyRow()).containsEntry("API_CALLS_USED", 8L).containsEntry("ACTIVE", true);
     }
@@ -310,7 +311,7 @@ class ApiKeyUseOnCreateFlowTest {
                         .header("Origin", "http://localhost:3000")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"longUrl\":\"https://example.com/with-headers\"}"))
-                .andExpect(status().isOk())
+                .andExpect(status().isCreated())
                 .andExpect(header().string("RateLimit-Limit", "600"))
                 .andExpect(header().string("RateLimit-Remaining", "597"))
                 .andExpect(header().string("RateLimit-Reset", "1200"))
@@ -318,7 +319,7 @@ class ApiKeyUseOnCreateFlowTest {
                 .andExpect(header().string("Access-Control-Expose-Headers",
                         org.hamcrest.Matchers.allOf(org.hamcrest.Matchers.containsString("RateLimit-Limit"),
                                 org.hamcrest.Matchers.containsString("RateLimit-Remaining"), org.hamcrest.Matchers.containsString("RateLimit-Reset"),
-                                org.hamcrest.Matchers.containsString("Retry-After"))));
+                                org.hamcrest.Matchers.containsString("Retry-After"), org.hamcrest.Matchers.containsString("Location"))));
     }
 
     @Test
@@ -478,6 +479,7 @@ class ApiKeyUseOnCreateFlowTest {
             ClientIpResolver.class,
             ClickRequestResolver.class,
             UrlController.class,
+            ShortLinks.class,
             DefaultUrlService.class,
             UrlCache.class,
             DestinationCheckRepository.class,

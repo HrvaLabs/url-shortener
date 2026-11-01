@@ -178,7 +178,7 @@ class SessionEndpointSecurityTest {
                         .header("Origin", "http://localhost:3000")
                         .header(JwtFilter.AUTHORIZATION_HEADER, "Bearer " + tokenIssued(Duration.ofMinutes(1))))
                 .andExpect(status().isOk())
-                .andExpect(header().string("Access-Control-Expose-Headers", "Authorization, RateLimit-Limit, RateLimit-Remaining, RateLimit-Reset, Retry-After"));
+                .andExpect(header().string("Access-Control-Expose-Headers", "Authorization, Location, RateLimit-Limit, RateLimit-Remaining, RateLimit-Reset, Retry-After"));
     }
 
     @Test

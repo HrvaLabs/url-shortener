@@ -62,6 +62,8 @@
 # address and per network (the same 202, then a 429), sign-up answering a taken address like a new one (the note email, nothing created, a new
 # verification link for an unverified one), and an API key as Authorization: Bearer (counted once, two different keys a 400, a JWT still a
 # sign-in).
+# Section 30 checks the v2.23 links work as the admin (section 29 ended the user's sessions): a create answers 201 with Location and
+# shortLink (signed in, without an account and with an API key; bulk stays 200).
 #
 #   scripts/mcp-e2e.sh                         builds the jar, then runs every step
 #   MCP_E2E_SKIP_BUILD=1 scripts/mcp-e2e.sh    reuses target/url-shortener-*.jar
@@ -735,7 +737,7 @@ expect_eq "$HTTP_STATUS" 204 "DELETE /api/v1/admin/reserved-aliases/{id}"
 IDN_DESTINATION="https://čokolada.hr/torta"
 http -X POST "$BASE/api/v1/urls" -H "Authorization: Bearer $APP_JWT" -H 'Content-Type: application/json' \
     -d "{\"longUrl\":\"$IDN_DESTINATION\"}"
-expect_eq "$HTTP_STATUS" 200 "POST /api/v1/urls to $IDN_DESTINATION (after the traffic totals, so its visit doesn't change them)"
+expect_eq "$HTTP_STATUS" 201 "POST /api/v1/urls to $IDN_DESTINATION (after the traffic totals, so its visit doesn't change them)"
 IDN_ALIAS=$(jq -r .shortUrl <<<"$HTTP_BODY")
 http "$BASE/$IDN_ALIAS"
 show "GET $BASE/$IDN_ALIAS -> $HTTP_STATUS Location: $HTTP_LOCATION"
@@ -869,7 +871,7 @@ burst_posted() {
 create_burst_link() {
     http -X POST "$BASE/api/v1/urls" -H "Authorization: Bearer $1" -H 'Content-Type: application/json' \
         -d "{\"longUrl\":\"https://$BURST_DOMAIN/$3\"}"
-    expect_eq "$HTTP_STATUS" 200 "$2 creates https://$BURST_DOMAIN/$3"
+    expect_eq "$HTTP_STATUS" 201 "$2 creates https://$BURST_DOMAIN/$3"
 }
 for path in a b c; do
     create_burst_link "$APP_JWT" "$USER_EMAIL" "$path"
@@ -935,7 +937,7 @@ expect_eq "$HTTP_STATUS" 200 "admin@localhost names its page Lab notes"
 echo "  --- a save, with every statement Postgres runs logged"
 http -X POST "$BASE/api/v1/urls" -H "Authorization: Bearer $APP_JWT" -H 'Content-Type: application/json' \
     -d '{"longUrl":"https://example.com/hrva-mcp-e2e-bio","shortUrl":"e2e-bio-link"}'
-expect_eq "$HTTP_STATUS" 200 "POST /api/v1/urls e2e-bio-link"
+expect_eq "$HTTP_STATUS" 201 "POST /api/v1/urls e2e-bio-link"
 BIO_LINK_ID=$(jq -r .id <<<"$HTTP_BODY")
 psql_value "alter system set log_statement = 'all';" >/dev/null
 psql_value "select pg_reload_conf();" >/dev/null
@@ -1145,7 +1147,7 @@ http -X POST "$BASE/api/v1/api-keys" -H "Authorization: Bearer $KEY_JWT"
 expect_eq "$HTTP_STATUS" 200 "POST /api/v1/api-keys as $USER_EMAIL"
 OWNER_KEY=$(jq -r .key <<<"$HTTP_BODY")
 http -X POST "$BASE/api/v1/urls" -H "X-Api-Key: $OWNER_KEY" -H 'Content-Type: application/json' -d '{"longUrl":"https://example.com/created-with-a-key"}'
-expect_eq "$HTTP_STATUS" 200 "POST /api/v1/urls with X-Api-Key"
+expect_eq "$HTTP_STATUS" 201 "POST /api/v1/urls with X-Api-Key"
 KEY_LINK_ID=$(jq -r .id <<<"$HTTP_BODY")
 expect_eq "$(psql_value "select u.email || ' ' || k.api_calls_used from url l join user_account u on u.id = l.owner_id join api_key k on k.owner_id = u.id where l.id = $KEY_LINK_ID and k.key_hash = encode(sha256(convert_to('$OWNER_KEY', 'UTF8')), 'hex');")" \
     "$USER_EMAIL 1" "the link belongs to the key's owner and the key counts one call"
@@ -1377,10 +1379,10 @@ ok "after /_control/activate the owner's GET (one live check per 15 s) says ACTI
 echo "  --- the same alias on the primary host and on the domain"
 http -X POST "$BASE/api/v1/urls" -H "Authorization: Bearer $DOMAIN_JWT" -H 'Content-Type: application/json' \
     -d '{"longUrl":"https://example.org/e2e-a","shortUrl":"e2e-menu"}'
-expect_eq "$HTTP_STATUS $(jq -r 'has("domain")' <<<"$HTTP_BODY")" "200 false" "POST /api/v1/urls e2e-menu on the primary host, with no domain"
+expect_eq "$HTTP_STATUS $(jq -r 'has("domain")' <<<"$HTTP_BODY")" "201 false" "POST /api/v1/urls e2e-menu on the primary host, with no domain"
 http -X POST "$BASE/api/v1/urls" -H "Authorization: Bearer $DOMAIN_JWT" -H 'Content-Type: application/json' \
     -d "{\"longUrl\":\"https://example.org/e2e-b\",\"shortUrl\":\"e2e-menu\",\"domain\":\"$DOMAIN_HOST\"}"
-expect_eq "$HTTP_STATUS $(jq -r .domain.hostname <<<"$HTTP_BODY")" "200 $DOMAIN_HOST" "POST /api/v1/urls e2e-menu on $DOMAIN_HOST too"
+expect_eq "$HTTP_STATUS $(jq -r .domain.hostname <<<"$HTTP_BODY")" "201 $DOMAIN_HOST" "POST /api/v1/urls e2e-menu on $DOMAIN_HOST too"
 DOMAIN_LINK_ID=$(jq -r .id <<<"$HTTP_BODY")
 
 echo "  --- Host header routing"
@@ -1457,7 +1459,7 @@ CAMPAIGN_LINE_PREFIX='Campaign held: 3 links without an account on 3 domains'
 SHAPE_ALIASES=()
 create_shape_link() {
     http -X POST "$BASE/api/v1/urls" -H "CF-Connecting-IP: $1" -H 'Content-Type: application/json' -d "{\"longUrl\":\"$2\"}"
-    expect_eq "$HTTP_STATUS" 200 "a link without an account from $1 to $2"
+    expect_eq "$HTTP_STATUS" 201 "a link without an account from $1 to $2"
     SHAPE_ALIASES+=("$(jq -r .shortUrl <<<"$HTTP_BODY")")
 }
 campaign_lines() {
@@ -1567,11 +1569,11 @@ expect_eq "$(jq -r .detail <<<"$HTTP_BODY")" "Sign in to create short URLs" "wit
 http "$BASE/api/v1/public/settings"
 expect_eq "$(jq -r .anonymousLinks <<<"$HTTP_BODY")" false "GET /api/v1/public/settings: anonymousLinks is false"
 http -X POST "$BASE/api/v1/urls" -H "Authorization: Bearer $SETTINGS_JWT" -H 'Content-Type: application/json' -d '{"longUrl":"https://e2e-settings-anon.com/signed-in"}'
-expect_eq "$HTTP_STATUS" 200 "$USER_EMAIL can still make a link"
+expect_eq "$HTTP_STATUS" 201 "$USER_EMAIL can still make a link"
 put_setting ANONYMOUS_LINKS true
 expect_eq "$HTTP_STATUS $(jq -r '[.value, .changed] | map(tostring) | join(",")' <<<"$HTTP_BODY")" "200 true,false" "PUT ANONYMOUS_LINKS true is the default again"
 http -X POST "$BASE/api/v1/urls" -H 'CF-Connecting-IP: 203.0.113.30' -H 'Content-Type: application/json' -d '{"longUrl":"https://e2e-settings-anon.com/b"}'
-expect_eq "$HTTP_STATUS" 200 "a link without an account is made again"
+expect_eq "$HTTP_STATUS" 201 "a link without an account is made again"
 settings_lines() {
     jq -s --arg line "$1" '[.[].content | scan($line)] | length' "$DISCORD_POSTS"
 }
@@ -1596,12 +1598,12 @@ expect_eq "$(jq -r .detail <<<"$HTTP_BODY")" "Custom aliases are turned off righ
 http "$BASE/api/v1/public/settings"
 expect_eq "$(jq -r .customAliases <<<"$HTTP_BODY")" false "GET /api/v1/public/settings: customAliases is false"
 http -X POST "$BASE/api/v1/urls" -H "Authorization: Bearer $SETTINGS_JWT" -H 'Content-Type: application/json' -d '{"longUrl":"https://e2e-settings-alias.com/b"}'
-expect_eq "$HTTP_STATUS" 200 "a generated alias still works"
+expect_eq "$HTTP_STATUS" 201 "a generated alias still works"
 reset_setting CUSTOM_ALIASES
 expect_eq "$HTTP_STATUS $(jq -r '[.value, .changed] | map(tostring) | join(",")' <<<"$HTTP_BODY")" "200 true,false" "DELETE CUSTOM_ALIASES resets it"
 http -X POST "$BASE/api/v1/urls" -H "Authorization: Bearer $SETTINGS_JWT" -H 'Content-Type: application/json' \
     -d '{"longUrl":"https://e2e-settings-alias.com/c","shortUrl":"e2e-settings-alias"}'
-expect_eq "$HTTP_STATUS" 200 "the chosen alias works again"
+expect_eq "$HTTP_STATUS" 201 "the chosen alias works again"
 
 echo "  --- new sign-ups"
 put_setting NEW_SIGNUPS false
@@ -1622,7 +1624,7 @@ EMAIL_LOG_BEFORE=$(psql_value "select coalesce(max(id), 0) from email_log;")
 put_setting SEND_EMAILS false
 expect_eq "$HTTP_STATUS" 200 "PUT /api/v1/admin/settings/SEND_EMAILS false"
 http -X POST "$BASE/api/v1/urls" -H "Authorization: Bearer $SETTINGS_JWT" -H 'Content-Type: application/json' -d '{"longUrl":"https://e2e-settings-mail.com/x"}'
-expect_eq "$HTTP_STATUS" 200 "$USER_EMAIL makes a link on e2e-settings-mail.com"
+expect_eq "$HTTP_STATUS" 201 "$USER_EMAIL makes a link on e2e-settings-mail.com"
 http -X POST "$BASE/api/v1/admin/domain-rules" -H "Authorization: Bearer $ADMIN_JWT" -H 'Content-Type: application/json' \
     -d '{"domain":"e2e-settings-mail.com","type":"BLOCK","reason":"E2E settings"}'
 show "POST /api/v1/admin/domain-rules e2e-settings-mail.com BLOCK -> $HTTP_STATUS $(jq -c '{id: .rule.id, linksAffected}' <<<"$HTTP_BODY")"
@@ -1892,7 +1894,7 @@ link_has_clicks() {
 
 echo "  --- the warning page"
 anonymous_create 203.0.113.61 'https://e2e-warning-page.com/landing?a=1&b=2'
-expect_eq "$HTTP_STATUS" 200 "a link without an account to https://e2e-warning-page.com/landing"
+expect_eq "$HTTP_STATUS" 201 "a link without an account to https://e2e-warning-page.com/landing"
 WARN_ALIAS=$(jq -r .shortUrl <<<"$HTTP_BODY")
 WARN_ID=$(psql_value "select id from url where short_url = '$WARN_ALIAS';")
 expect_eq "$(psql_value "select active || ' ' || (owner_id is null) from url where id = $WARN_ID;")" "true true" "$WARN_ALIAS is active and has no owner"
@@ -1948,7 +1950,7 @@ expect_eq "$HTTP_STATUS $(jq -c '[.value, .changed, .unit]' <<<"$HTTP_BODY")" '2
 http "$BASE/api/v1/public/settings"
 expect_eq "$(jq -r .anonymousExpiryDays <<<"$HTTP_BODY")" 30 "GET /api/v1/public/settings: anonymousExpiryDays is 30"
 anonymous_create 203.0.113.62 'https://e2e-limits.com/expiry'
-expect_eq "$HTTP_STATUS" 200 "a link without an account with the end date set"
+expect_eq "$HTTP_STATUS" 201 "a link without an account with the end date set"
 LIMIT_EXPIRY=$(jq -r .expirationDate <<<"$HTTP_BODY")
 show "expirationDate $LIMIT_EXPIRY"
 expect_eq "$(python3 -c '
@@ -1962,17 +1964,17 @@ now = datetime.now(timezone.utc)
 print("within" if abs(end - (now + timedelta(days=30))) < timedelta(minutes=1) else "off by " + str(end - now))
 ' "$LIMIT_EXPIRY")" within "the link ends within a minute of now + 30 days"
 anonymous_create 203.0.113.62 'https://e2e-limits.com/expiry-later' ',"expirationDate":"2099-01-01T00:00:00"'
-expect_eq "$HTTP_STATUS" 200 "a link without an account asking to end in 2099"
+expect_eq "$HTTP_STATUS" 201 "a link without an account asking to end in 2099"
 expect_eq "$(jq -r '.expirationDate | startswith("2099")' <<<"$HTTP_BODY")" false "its end is cut back to 30 days"
 put_setting ANONYMOUS_VISIT_LIMIT 5
 expect_eq "$HTTP_STATUS $(jq -c '[.value, .changed, .unit]' <<<"$HTTP_BODY")" '200 [5,true,"visits"]' "PUT /api/v1/admin/settings/ANONYMOUS_VISIT_LIMIT 5"
 anonymous_create 203.0.113.62 'https://e2e-limits.com/visits'
-expect_eq "$HTTP_STATUS $(jq -r .visitLimit <<<"$HTTP_BODY")" "200 5" "a link without an account gets visitLimit 5"
+expect_eq "$HTTP_STATUS $(jq -r .visitLimit <<<"$HTTP_BODY")" "201 5" "a link without an account gets visitLimit 5"
 anonymous_create 203.0.113.62 'https://e2e-limits.com/visits-more' ',"visitLimit":500'
 expect_eq "$(jq -r .visitLimit <<<"$HTTP_BODY")" 5 "and asking for 500 is cut back to 5"
 http -X POST "$BASE/api/v1/urls" -H "Authorization: Bearer $SETTINGS_JWT" -H 'Content-Type: application/json' \
     -d '{"longUrl":"https://e2e-limits.com/signed-in","visitLimit":500}'
-expect_eq "$HTTP_STATUS $(jq -r .visitLimit <<<"$HTTP_BODY")" "200 500" "a signed-in user's link keeps the 500 they asked for"
+expect_eq "$HTTP_STATUS $(jq -r .visitLimit <<<"$HTTP_BODY")" "201 500" "a signed-in user's link keeps the 500 they asked for"
 reset_setting ANONYMOUS_EXPIRY_DAYS
 expect_eq "$HTTP_STATUS $(jq -c '[.value, .changed]' <<<"$HTTP_BODY")" "200 [null,false]" "DELETE ANONYMOUS_EXPIRY_DAYS resets it"
 reset_setting ANONYMOUS_VISIT_LIMIT
@@ -1989,10 +1991,10 @@ expect_eq "$(jq -c '.[] | select(.key == "HUMAN_CHECK") | [.value, .available, .
 http "$BASE/api/v1/public/settings"
 expect_eq "$(jq -c '[.humanCheck, .turnstileSiteKey]' <<<"$HTTP_BODY")" "[false,null]" "GET /api/v1/public/settings: humanCheck is false, no site key"
 anonymous_create 203.0.113.63 'https://e2e-human-check.com/a'
-expect_eq "$HTTP_STATUS" 200 "a link without an account and without a token is made"
+expect_eq "$HTTP_STATUS" 201 "a link without an account and without a token is made"
 http -X POST "$BASE/api/v1/urls" -H 'CF-Connecting-IP: 203.0.113.63' -H 'X-Turnstile-Token: not-a-token' -H 'Content-Type: application/json' \
     -d '{"longUrl":"https://e2e-human-check.com/b"}'
-expect_eq "$HTTP_STATUS" 200 "and one with a made-up token, which nothing looks at"
+expect_eq "$HTTP_STATUS" 201 "and one with a made-up token, which nothing looks at"
 expect_eq "$(grep -ci 'turnstile\|siteverify' "$WORK/app.log" || true)" 0 "the app log has no Turnstile or siteverify line: no check ran"
 
 echo "  --- the sign-in switches"
@@ -2071,7 +2073,7 @@ expect_eq "$(jq -r ".[] | select(.id == $DAYS_KEY_ID) | .expirationDate[0:16]" <
 echo "  --- the RateLimit-* headers"
 http -X POST "$BASE/api/v1/urls" -H "X-Api-Key: $LIMITED_KEY" -H "Origin: $FRONTEND_URL" -H 'Content-Type: application/json' \
     -d '{"longUrl":"https://example.com/rate-limited-key"}'
-expect_eq "$HTTP_STATUS $(header_value RateLimit-Limit) $(header_value RateLimit-Remaining)" "200 600 599" "POST /api/v1/urls with the key: RateLimit-Limit 600, RateLimit-Remaining 599"
+expect_eq "$HTTP_STATUS $(header_value RateLimit-Limit) $(header_value RateLimit-Remaining)" "201 600 599" "POST /api/v1/urls with the key: RateLimit-Limit 600, RateLimit-Remaining 599"
 RESET=$(header_value RateLimit-Reset)
 expect_eq "$(( RESET >= 3590 && RESET <= 3600 ))" 1 "RateLimit-Reset is the seconds left in the hour ($RESET)"
 expect_contains "$(header_value Access-Control-Expose-Headers)" "RateLimit-Remaining" "CORS exposes the headers to the frontend"
@@ -2156,7 +2158,7 @@ expect_eq "$(jq -r .detail <<<"$HTTP_BODY")" "Custom short URL can only contain 
 echo "  --- dates in UTC"
 http -X POST "$BASE/api/v1/urls" -H "Authorization: Bearer $SETTINGS_JWT" -H 'Content-Type: application/json' \
     -d '{"longUrl":"https://e2e-api.com/dated","shortUrl":"e2e-dated","expirationDate":"2099-01-01T00:00:00"}'
-expect_eq "$HTTP_STATUS $(jq -r .expirationDate <<<"$HTTP_BODY")" "200 2099-01-01T00:00:00Z" "an expirationDate without an offset is read as UTC and written back with Z"
+expect_eq "$HTTP_STATUS $(jq -r .expirationDate <<<"$HTTP_BODY")" "201 2099-01-01T00:00:00Z" "an expirationDate without an offset is read as UTC and written back with Z"
 expect_contains "$(jq -r .createDate <<<"$HTTP_BODY")" "Z" "createDate ends with Z"
 [[ $(jq -r .createDate <<<"$HTTP_BODY") =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z$ ]] || fail "createDate is not ISO 8601 with Z"
 ok "createDate is ISO 8601 UTC: $(jq -r .createDate <<<"$HTTP_BODY")"
@@ -2170,7 +2172,7 @@ expect_eq "$(psql_value "select expiration_date from url where id = $DATED_ID;")
 echo "  --- HEAD isn't a click, on a cache miss and a cache hit"
 http -X POST "$BASE/api/v1/urls" -H "Authorization: Bearer $SETTINGS_JWT" -H 'Content-Type: application/json' \
     -d '{"longUrl":"https://e2e-api.com/head","shortUrl":"e2e-head","visitLimit":1}'
-expect_eq "$HTTP_STATUS" 200 "a link with visitLimit 1"
+expect_eq "$HTTP_STATUS" 201 "a link with visitLimit 1"
 docker exec "$REDIS_CONTAINER" redis-cli --raw del "urls::e2e-head" >/dev/null
 expect_eq "$(cache_entries e2e-head)" 0 "not cached"
 http -I -A "$BROWSER_USER_AGENT" "$BASE/e2e-head"
@@ -2214,7 +2216,7 @@ expect_eq "$HTTP_STATUS" 410 "a turned-off link answers 410"
 expect_contains "$HTTP_BODY" "Its owner has turned this link off." "saying its owner turned it off"
 http -X POST "$BASE/api/v1/urls" -H "Authorization: Bearer $SETTINGS_JWT" -H 'Content-Type: application/json' \
     -d '{"longUrl":"https://e2e-api.com/blocked","shortUrl":"e2e-blocked"}'
-expect_eq "$HTTP_STATUS" 200 "a link to block"
+expect_eq "$HTTP_STATUS" 201 "a link to block"
 http -A "$BROWSER_USER_AGENT" "$BASE/e2e-blocked/"
 expect_eq "$HTTP_STATUS $HTTP_LOCATION" "302 https://e2e-api.com/blocked" "GET /e2e-blocked/ redirects like /e2e-blocked"
 psql_query "update url set block_reason = 'ADMIN', active = false where short_url = 'e2e-blocked';"
@@ -2255,7 +2257,7 @@ expect_eq "$HTTP_STATUS $(jq -r .email <<<"$HTTP_BODY")" "200 $USER_EMAIL" "the 
 expect_eq "$(psql_value "select tokens_valid_after is not null and tokens_valid_after <= (now() at time zone 'utc') from user_account where id = $SESSION_USER_ID;")" t \
     "tokens_valid_after is set, in UTC"
 http -X POST "$BASE/api/v1/urls" -H "X-Api-Key: $OWNER_KEY" -H 'Content-Type: application/json' -d '{"longUrl":"https://example.com/after-sign-out-everywhere"}'
-expect_eq "$HTTP_STATUS" 200 "the API key keeps working after signing out everywhere"
+expect_eq "$HTTP_STATUS" 201 "the API key keeps working after signing out everywhere"
 
 echo "  --- the one-time OAuth code"
 OAUTH_CODE=$(openssl rand -hex 24)
@@ -2451,7 +2453,7 @@ echo "  --- an API key as Authorization: Bearer"
 OWNER_KEY_ID=$(psql_value "select id from api_key where key_hash = '$(printf '%s' "$OWNER_KEY" | shasum -a 256 | cut -d' ' -f1)';")
 CALLS_BEFORE=$(psql_value "select api_calls_used from api_key where id = $OWNER_KEY_ID;")
 http -X POST "$BASE/api/v1/urls" -H "Authorization: Bearer $OWNER_KEY" -H 'Content-Type: application/json' -d '{"longUrl":"https://example.com/bearer-key"}'
-expect_eq "$HTTP_STATUS $(header_value ratelimit-limit)" "200 600" "POST /api/v1/urls with Authorization: Bearer <key> creates the link, with the key's RateLimit headers"
+expect_eq "$HTTP_STATUS $(header_value ratelimit-limit)" "201 600" "POST /api/v1/urls with Authorization: Bearer <key> creates the link, with the key's RateLimit headers"
 expect_eq "$(psql_value "select u.email from url l join user_account u on u.id = l.owner_id where l.long_url = 'https://example.com/bearer-key';") $(psql_value "select created_via from url where long_url = 'https://example.com/bearer-key';")" \
     "$USER_EMAIL API_KEY" "the link belongs to the key's owner and is created via API_KEY"
 expect_eq "$(psql_value "select api_calls_used from api_key where id = $OWNER_KEY_ID;")" "$((CALLS_BEFORE + 1))" "and the request counts once on the key"
@@ -2463,6 +2465,27 @@ session_login 203.0.113.254 "$USER_EMAIL" "$SESSION_PASSWORD"
 BEARER_JWT=$(jq -r .token <<<"$HTTP_BODY")
 http -X POST "$BASE/api/v1/urls" -H "Authorization: $BEARER_JWT" -H 'Content-Type: application/json' -d '{"longUrl":"https://example.com/bearer-jwt"}'
 expect_eq "$HTTP_STATUS $(header_value ratelimit-limit) $(psql_value "select created_via from url where long_url = 'https://example.com/bearer-jwt';")" \
-    "200  WEB" "a JWT as Bearer still signs the request in: a web create, no API key headers"
+    "201  WEB" "a JWT as Bearer still signs the request in: a web create, no API key headers"
+
+section "30. Links: 201 with Location"
+http -X POST "$BASE/api/v1/urls" -H "Authorization: Bearer $ADMIN_JWT" -H 'Content-Type: application/json' -d '{"longUrl":"https://e2e-links.com/created"}'
+CREATED_ALIAS=$(jq -r .shortUrl <<<"$HTTP_BODY")
+show "POST /api/v1/urls -> $HTTP_STATUS Location: $HTTP_LOCATION shortLink: $(jq -r .shortLink <<<"$HTTP_BODY")"
+expect_eq "$HTTP_STATUS $HTTP_LOCATION $(jq -r .shortLink <<<"$HTTP_BODY")" "201 $BASE/api/v1/urls/$CREATED_ALIAS/peek $BASE/$CREATED_ALIAS" \
+    "a signed-in create is 201 with Location (the peek URL) and the full short link"
+http "$HTTP_LOCATION"
+expect_eq "$HTTP_STATUS $(jq -r '[.shortUrl, .longUrl] | join(" ")' <<<"$HTTP_BODY")" "200 $CREATED_ALIAS https://e2e-links.com/created" "the Location answers the link"
+http -X POST "$BASE/api/v1/urls" -H 'CF-Connecting-IP: 203.0.113.70' -H 'Content-Type: application/json' -d '{"longUrl":"https://e2e-links.com/anonymous"}'
+CREATED_ALIAS=$(jq -r .shortUrl <<<"$HTTP_BODY")
+expect_eq "$HTTP_STATUS $HTTP_LOCATION $(jq -r .shortLink <<<"$HTTP_BODY")" "201 $BASE/api/v1/urls/$CREATED_ALIAS/peek $BASE/$CREATED_ALIAS" \
+    "a create without an account is 201 with Location and the short link"
+http -X POST "$BASE/api/v1/urls" -H "X-Api-Key: $OWNER_KEY" -H 'Content-Type: application/json' -d '{"longUrl":"https://e2e-links.com/with-a-key"}'
+CREATED_ALIAS=$(jq -r .shortUrl <<<"$HTTP_BODY")
+expect_eq "$HTTP_STATUS $HTTP_LOCATION $(jq -r .shortLink <<<"$HTTP_BODY")" "201 $BASE/api/v1/urls/$CREATED_ALIAS/peek $BASE/$CREATED_ALIAS" \
+    "a create with an API key is 201 with Location and the short link"
+http -X POST "$BASE/api/v1/urls" -H "Authorization: Bearer $ADMIN_JWT" -H "Origin: $FRONTEND_URL" -H 'Content-Type: application/json' -d '{"longUrl":"https://e2e-links.com/cors"}'
+expect_contains "$(header_value access-control-expose-headers)" "Location" "the frontend may read Location"
+http -X POST "$BASE/api/v1/urls/bulk" -H "Authorization: Bearer $ADMIN_JWT" -H 'Content-Type: application/json' -d '[{"longUrl":"https://e2e-links.com/bulk"}]'
+expect_eq "$HTTP_STATUS $(jq -r '.[0].shortLink == ("'"$BASE"'/" + .[0].shortUrl)' <<<"$HTTP_BODY")" "200 true" "a bulk create stays 200, each link with its shortLink"
 
 section "Done: every step passed"

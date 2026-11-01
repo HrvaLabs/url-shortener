@@ -30,6 +30,7 @@ import cc.hrva.urlshortener.service.LinkPreviewOutcome.Ready;
 import cc.hrva.urlshortener.service.LinkPreviewService;
 import cc.hrva.urlshortener.service.QrCodeService;
 import cc.hrva.urlshortener.service.UrlService;
+import cc.hrva.urlshortener.service.domain.ShortLinks;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import jakarta.servlet.http.HttpServletRequest;
@@ -43,6 +44,7 @@ import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.web.PageableHandlerMethodArgumentResolver;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
@@ -52,6 +54,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -101,12 +104,16 @@ class UrlControllerTest {
     @BeforeEach
     void setUp() {
         appProperties.setServerUrl("https://hrva.cc");
-        this.mockMvc = MockMvcBuilders.standaloneSetup(new UrlController(urlService, qrCodeService, linkPreviewService, clientIpResolver, clickRequestResolver, request, appProperties))
+        this.mockMvc = MockMvcBuilders.standaloneSetup(new UrlController(urlService, qrCodeService, linkPreviewService, clientIpResolver, clickRequestResolver, request, new ShortLinks(appProperties)))
                 .setCustomArgumentResolvers(new PageableHandlerMethodArgumentResolver())
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .build();
         this.objectMapper = new ObjectMapper();
         this.objectMapper.registerModule(new JavaTimeModule());
+        final var created = UrlResponse.from(Url.builder().id(1L).longUrl("https://example.com").shortUrl("ex").build());
+        lenient().when(urlService.saveUrlRouting(any(), any(), any(), any())).thenReturn(created);
+        lenient().when(urlService.saveUrlRouting(any(), any(), any())).thenReturn(created);
+        lenient().when(urlService.saveUrlWithApiKey(any(), any(), any())).thenReturn(created);
     }
 
     @Test
@@ -118,9 +125,25 @@ class UrlControllerTest {
         mockMvc.perform(post("/api/v1/urls")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(CreateUrlDto.builder().longUrl("https://example.com").build())))
-                .andExpect(status().isOk())
+                .andExpect(status().isCreated())
+                .andExpect(header().string(HttpHeaders.LOCATION, "https://hrva.cc/api/v1/urls/ex/peek"))
                 .andExpect(jsonPath("$.id").value(1))
-                .andExpect(jsonPath("$.longUrl").value("https://example.com"));
+                .andExpect(jsonPath("$.longUrl").value("https://example.com"))
+                .andExpect(jsonPath("$.shortLink").value("https://hrva.cc/ex"));
+    }
+
+    @Test
+    void aLinkOnACustomDomainAnswersItsOwnShortLinkAndTheDomainInTheLocation() throws Exception {
+        final var domain = CustomDomain.builder().id(7L).hostname("go.example.com").build();
+        final var url = Url.builder().id(1L).longUrl("https://example.com").shortUrl("menu").domain(domain).build();
+        when(urlService.saveUrlRouting(any(CreateUrlDto.class), any(), any(), any())).thenReturn(UrlResponse.from(url));
+
+        mockMvc.perform(post("/api/v1/urls")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(CreateUrlDto.builder().longUrl("https://example.com").domain("go.example.com").build())))
+                .andExpect(status().isCreated())
+                .andExpect(header().string(HttpHeaders.LOCATION, "https://hrva.cc/api/v1/urls/menu/peek?domain=go.example.com"))
+                .andExpect(jsonPath("$.shortLink").value("https://go.example.com/menu"));
     }
 
     @Test
@@ -132,8 +155,10 @@ class UrlControllerTest {
                         .header("X-Api-Key", "apikey")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(CreateUrlDto.builder().longUrl("https://example.com").build())))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.shortUrl").value("ex"));
+                .andExpect(status().isCreated())
+                .andExpect(header().string(HttpHeaders.LOCATION, "https://hrva.cc/api/v1/urls/ex/peek"))
+                .andExpect(jsonPath("$.shortUrl").value("ex"))
+                .andExpect(jsonPath("$.shortLink").value("https://hrva.cc/ex"));
     }
 
     @Test
@@ -144,7 +169,7 @@ class UrlControllerTest {
         mockMvc.perform(post("/api/v1/urls")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(link)))
-                .andExpect(status().isOk());
+                .andExpect(status().isCreated());
 
         verify(urlService).saveUrlRouting(link, "203.0.113.7", CreatedVia.WEB, null);
         verify(urlService, never()).saveUrlWithApiKey(any(), any(), any());
@@ -158,7 +183,7 @@ class UrlControllerTest {
                         .header("X-Api-Key", "k")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(link)))
-                .andExpect(status().isOk());
+                .andExpect(status().isCreated());
 
         verify(urlService).saveUrlWithApiKey(link, "k", CreatedVia.API_KEY);
         verify(urlService, never()).saveUrlRouting(any(), any(), any(), any());
@@ -173,7 +198,7 @@ class UrlControllerTest {
                         .header("X-Turnstile-Token", "XXXX.DUMMY.TOKEN.XXXX")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(link)))
-                .andExpect(status().isOk());
+                .andExpect(status().isCreated());
 
         verify(urlService).saveUrlRouting(link, "203.0.113.7", CreatedVia.WEB, "XXXX.DUMMY.TOKEN.XXXX");
     }
@@ -187,7 +212,7 @@ class UrlControllerTest {
                         .header("X-Turnstile-Token", "XXXX.DUMMY.TOKEN.XXXX")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(link)))
-                .andExpect(status().isOk());
+                .andExpect(status().isCreated());
 
         verify(urlService).saveUrlWithApiKey(link, "k", CreatedVia.API_KEY);
         verify(urlService, never()).saveUrlRouting(any(), any(), any(), any());
@@ -223,10 +248,15 @@ class UrlControllerTest {
         final var link = CreateUrlDto.builder().longUrl("https://example.com/1").build();
         when(clientIpResolver.getClientIp(request)).thenReturn("203.0.113.7");
 
+        when(urlService.saveUrlRouting(link, "203.0.113.7", CreatedVia.BULK))
+                .thenReturn(UrlResponse.from(Url.builder().id(1L).longUrl("https://example.com/1").shortUrl("one").build()));
+
         mockMvc.perform(post("/api/v1/urls/bulk")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(List.of(link))))
-                .andExpect(status().isOk());
+                .andExpect(status().isOk())
+                .andExpect(header().doesNotExist(HttpHeaders.LOCATION))
+                .andExpect(jsonPath("$[0].shortLink").value("https://hrva.cc/one"));
         mockMvc.perform(post("/api/v1/urls/bulk")
                         .header("X-Api-Key", "k")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -312,7 +342,7 @@ class UrlControllerTest {
         mockMvc.perform(post("/api/v1/urls")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(CreateUrlDto.builder().longUrl(destination).build())))
-                .andExpect(status().isOk())
+                .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.longUrl").value(destination));
     }
 

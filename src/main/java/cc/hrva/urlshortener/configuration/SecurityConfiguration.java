@@ -19,6 +19,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.AuthenticationProvider;
@@ -138,7 +139,7 @@ public class SecurityConfiguration {
         configuration.setAllowedOrigins(List.of(appProperties.getFrontendUrl()));
         configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         configuration.setAllowedHeaders(List.of("*"));
-        configuration.setExposedHeaders(Stream.concat(Stream.of(JwtFilter.AUTHORIZATION_HEADER), ApiKeyRateLimitFilter.EXPOSED_HEADERS.stream()).toList());
+        configuration.setExposedHeaders(Stream.concat(Stream.of(JwtFilter.AUTHORIZATION_HEADER, HttpHeaders.LOCATION), ApiKeyRateLimitFilter.EXPOSED_HEADERS.stream()).toList());
         configuration.setAllowCredentials(true);
         source.registerCorsConfiguration("/**", configuration);
 

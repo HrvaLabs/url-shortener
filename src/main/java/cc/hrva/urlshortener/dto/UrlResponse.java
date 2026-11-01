@@ -58,7 +58,10 @@ public record UrlResponse(
         DomainRef domain,
         @Schema(description = "Whether a click opens the warning page first (links made without an account to young or random-looking domains)")
         @JsonInclude(JsonInclude.Include.NON_NULL)
-        Boolean warningPage) {
+        Boolean warningPage,
+        @Schema(description = "The full short link; set in the answer to a create", example = "https://hrva.cc/abc123")
+        @JsonInclude(JsonInclude.Include.NON_NULL)
+        String shortLink) {
 
     private static final String ACTIVE = "ACTIVE";
 
@@ -70,33 +73,46 @@ public record UrlResponse(
                        final LocalDateTime expirationDate, final Long visits, final Long visitLimit, final boolean active,
                        final String status, final Set<String> tags, final boolean passwordProtected, final String ownerEmail) {
         this(id, longUrl, shortUrl, createDate, expirationDate, visits, visitLimit, active, status, tags, passwordProtected,
-                ownerEmail, List.of(), null, null, null, null, null, null, null);
+                ownerEmail, List.of(), null, null, null, null, null, null, null, null);
     }
 
     public UrlResponse publicView() {
         return new UrlResponse(id, passwordProtected ? null : longUrl, shortUrl, createDate, expirationDate, visits, visitLimit,
-                active, status, Set.of(), passwordProtected, null, List.of(), null, null, null, null, null, domain, null);
+                active, status, Set.of(), passwordProtected, null, List.of(), null, null, null, null, null, domain, null, null);
     }
 
     public UrlResponse withSuspiciousReasons(final List<String> reasons) {
         return new UrlResponse(id, longUrl, shortUrl, createDate, expirationDate, visits, visitLimit, active, status, tags,
-                passwordProtected, ownerEmail, reasons, blockReason, reviewOpen, ownerPossibleScammer, finalUrl, destinationHealth, domain, warningPage);
+                passwordProtected, ownerEmail, reasons, blockReason, reviewOpen, ownerPossibleScammer, finalUrl, destinationHealth, domain, warningPage,
+                shortLink);
     }
 
     public UrlResponse withBlockReason(final BlockReason reason) {
         return new UrlResponse(id, longUrl, shortUrl, createDate, expirationDate, visits, visitLimit, active, status, tags,
-                passwordProtected, ownerEmail, suspiciousReasons, reason, reviewOpen, ownerPossibleScammer, finalUrl, destinationHealth, domain, warningPage);
+                passwordProtected, ownerEmail, suspiciousReasons, reason, reviewOpen, ownerPossibleScammer, finalUrl, destinationHealth, domain, warningPage,
+                shortLink);
     }
 
     public UrlResponse withModeration(final boolean inReview, final boolean ownerLooksLikeAScammer, final String chainEnd) {
         return new UrlResponse(id, longUrl, shortUrl, createDate, expirationDate, visits, visitLimit, active, status, tags,
                 passwordProtected, ownerEmail, suspiciousReasons, blockReason, inReview, ownerLooksLikeAScammer, chainEnd, destinationHealth, domain,
-                warningPage);
+                warningPage, shortLink);
     }
 
     public UrlResponse asCreated() {
         return new UrlResponse(id, longUrl, shortUrl, createDate, expirationDate, visits, visitLimit, true, ACTIVE, tags, passwordProtected,
-                ownerEmail, suspiciousReasons, null, reviewOpen, ownerPossibleScammer, finalUrl, destinationHealth, domain, null);
+                ownerEmail, suspiciousReasons, null, reviewOpen, ownerPossibleScammer, finalUrl, destinationHealth, domain, null, shortLink);
+    }
+
+    public UrlResponse withShortLink(final String link) {
+        return new UrlResponse(id, longUrl, shortUrl, createDate, expirationDate, visits, visitLimit, active, status, tags,
+                passwordProtected, ownerEmail, suspiciousReasons, blockReason, reviewOpen, ownerPossibleScammer, finalUrl, destinationHealth, domain,
+                warningPage, link);
+    }
+
+    @JsonIgnore
+    public String hostname() {
+        return domain == null ? null : domain.hostname();
     }
 
     public static UrlResponse from(final Url url) {
@@ -120,7 +136,8 @@ public record UrlResponse(
                 null,
                 DestinationHealth.of(url),
                 DomainRef.of(url.getDomain()),
-                url.isWarningPage() ? Boolean.TRUE : null);
+                url.isWarningPage() ? Boolean.TRUE : null,
+                null);
     }
 
     @JsonIgnore

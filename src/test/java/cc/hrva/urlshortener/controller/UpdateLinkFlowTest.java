@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.controller;
 
+import cc.hrva.urlshortener.service.domain.ShortLinks;
 import cc.hrva.urlshortener.audit.AdminAuditAspect;
 import cc.hrva.urlshortener.configuration.AppConfiguration;
 import cc.hrva.urlshortener.configuration.GlobalExceptionHandler;
@@ -434,6 +435,7 @@ class UpdateLinkFlowTest {
             ClientIpResolver.class,
             ClickRequestResolver.class,
             UrlController.class,
+            ShortLinks.class,
             DefaultUrlService.class,
             UrlCache.class,
             DestinationCheckRepository.class,

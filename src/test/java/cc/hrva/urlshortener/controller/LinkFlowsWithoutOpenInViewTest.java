@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.controller;
 
+import cc.hrva.urlshortener.service.domain.ShortLinks;
 import org.springframework.http.HttpStatus;
 import cc.hrva.urlshortener.audit.AdminAuditAspect;
 import cc.hrva.urlshortener.configuration.AppConfiguration;
@@ -268,7 +269,7 @@ class LinkFlowsWithoutOpenInViewTest {
                         .header("X-Api-Key", OWNERS_KEY_VALUE)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"longUrl\":\"https://example.com/by-key\"}"))
-                .andExpect(status().isOk())
+                .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.longUrl").value("https://example.com/by-key"));
 
         assertThat(jdbcTemplate.queryForObject("select count(*) from url where owner_id = ? and long_url = 'https://example.com/by-key'",
@@ -320,7 +321,7 @@ class LinkFlowsWithoutOpenInViewTest {
                         .header(JwtFilter.AUTHORIZATION_HEADER, OWNER_TOKEN)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"longUrl\":\"https://example.com/menu\",\"shortUrl\":\"menu\",\"domain\":\"Go.Example.com\"}"))
-                .andExpect(status().isOk())
+                .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.shortUrl").value("menu"))
                 .andExpect(jsonPath("$.domain.id").value(OWNERS_DOMAIN))
                 .andExpect(jsonPath("$.domain.hostname").value("go.example.com"));
@@ -355,10 +356,10 @@ class LinkFlowsWithoutOpenInViewTest {
         domain(OWNERS_DOMAIN, OWNER, "go.example.com", "ACTIVE");
 
         create(OWNER_TOKEN, "{\"longUrl\":\"https://example.com/a\",\"shortUrl\":\"menu\"}")
-                .andExpect(status().isOk())
+                .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.domain").doesNotExist());
         create(OWNER_TOKEN, "{\"longUrl\":\"https://example.com/b\",\"shortUrl\":\"menu\",\"domain\":\"go.example.com\"}")
-                .andExpect(status().isOk())
+                .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.domain.hostname").value("go.example.com"));
         create(OWNER_TOKEN, "{\"longUrl\":\"https://example.com/c\",\"shortUrl\":\"menu\",\"domain\":\"go.example.com\"}")
                 .andExpect(status().isConflict())
@@ -410,7 +411,7 @@ class LinkFlowsWithoutOpenInViewTest {
 
         try {
             mockMvc.perform(post("/api/v1/urls").contentType(MediaType.APPLICATION_JSON).content("{\"longUrl\":\"" + longUrl + "\"}"))
-                    .andExpect(status().isOk())
+                    .andExpect(status().isCreated())
                     .andExpect(jsonPath("$.active").value(true))
                     .andExpect(jsonPath("$.status").value("ACTIVE"));
 
@@ -437,7 +438,7 @@ class LinkFlowsWithoutOpenInViewTest {
 
         try {
             mockMvc.perform(post("/api/v1/urls").contentType(MediaType.APPLICATION_JSON).content("{\"longUrl\":\"" + longUrl + "\"}"))
-                    .andExpect(status().isOk());
+                    .andExpect(status().isCreated());
 
             final var stored = jdbcTemplate.queryForMap("select short_url, active, block_reason from url where long_url = ?", longUrl);
             assertThat(stored.get("ACTIVE")).isEqualTo(true);
@@ -458,7 +459,7 @@ class LinkFlowsWithoutOpenInViewTest {
 
         try {
             mockMvc.perform(post("/api/v1/urls").contentType(MediaType.APPLICATION_JSON).content("{\"longUrl\":\"" + longUrl + "\"}"))
-                    .andExpect(status().isOk());
+                    .andExpect(status().isCreated());
 
             final var stored = jdbcTemplate.queryForMap("select short_url, active, block_reason from url where long_url = ?", longUrl);
             assertThat(stored.get("ACTIVE")).isEqualTo(true);
@@ -472,7 +473,7 @@ class LinkFlowsWithoutOpenInViewTest {
 
     @Test
     void aSignedInLinkIsStoredActive() throws Exception {
-        create(OWNER_TOKEN, "{\"longUrl\":\"https://example.com/signed-in-active\"}").andExpect(status().isOk());
+        create(OWNER_TOKEN, "{\"longUrl\":\"https://example.com/signed-in-active\"}").andExpect(status().isCreated());
 
         assertThat(jdbcTemplate.queryForObject("select active from url where long_url = 'https://example.com/signed-in-active'", Boolean.class)).isTrue();
     }
@@ -498,7 +499,7 @@ class LinkFlowsWithoutOpenInViewTest {
                         .header("X-Api-Key", OWNERS_KEY_VALUE)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"longUrl\":\"https://example.com/by-key\",\"domain\":\"go.example.com\"}"))
-                .andExpect(status().isOk())
+                .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.domain.hostname").value("go.example.com"));
         mockMvc.perform(post("/api/v1/urls")
                         .header("X-Api-Key", OWNERS_KEY_VALUE)
@@ -625,6 +626,7 @@ class LinkFlowsWithoutOpenInViewTest {
             ClientIpResolver.class,
             ClickRequestResolver.class,
             UrlController.class,
+            ShortLinks.class,
             DefaultUrlService.class,
             UrlCache.class,
             DestinationCheckRepository.class,

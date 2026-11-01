@@ -12,7 +12,6 @@ import java.util.List;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import cc.hrva.urlshortener.audit.Audited;
-import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.dto.CreateUrlDto;
 import cc.hrva.urlshortener.dto.LinkPreviewResponse;
 import cc.hrva.urlshortener.dto.UnlockResponse;
@@ -34,10 +33,10 @@ import cc.hrva.urlshortener.service.LinkPreviewOutcome.Ready;
 import cc.hrva.urlshortener.service.LinkPreviewService;
 import cc.hrva.urlshortener.service.QrCodeService;
 import cc.hrva.urlshortener.service.UrlService;
+import cc.hrva.urlshortener.service.domain.ShortLinks;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.web.PageableDefault;
-import org.apache.commons.lang3.StringUtils;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -63,7 +62,6 @@ public class UrlController {
     private static final int MIN_QR_SIZE = 64;
     private static final int MAX_QR_SIZE = 1024;
     private static final String QR_MARKER_QUERY = "?qr";
-    private static final String HTTPS = "https://";
     private static final String PREVIEWS_LIMITED = "Too many link previews. Try again later.";
     private static final String PREVIEWS_BUSY = "Link previews are busy. Try again in a few seconds.";
     private static final Duration PREVIEWS_BUSY_RETRY_AFTER = Duration.ofSeconds(5);
@@ -74,11 +72,13 @@ public class UrlController {
     private final ClientIpResolver clientIpResolver;
     private final ClickRequestResolver clickRequestResolver;
     private final HttpServletRequest request;
-    private final AppProperties appProperties;
+    private final ShortLinks shortLinks;
 
     @Operation(summary = "Create a short URL", description = "Create a short URL. For programmatic access send an API key, as X-Api-Key: <key> or as Authorization: Bearer <key> "
             + "(a Bearer value starting with hrva_ is read as an API key, anything else as a sign-in token; two different keys are a 400); "
-            + "signed-in users need neither. Set domain to one of your active custom domains to put the link on it; leave it out for hrva.cc.")
+            + "signed-in users need neither. Set domain to one of your active custom domains to put the link on it; leave it out for hrva.cc. "
+            + "Answers 201 with the full short link in shortLink and a Location header that points to the link's peek URL.")
+    @ApiResponse(responseCode = "201", description = "The link: shortLink is the full short link; Location is /api/v1/urls/{short}/peek, with ?domain= for a custom domain")
     @ApiResponse(responseCode = "400", description = "Validation error or bad request")
     @ApiResponse(responseCode = "409", description = "Short URL already exists")
     @ApiResponse(responseCode = "429", description = "Too many links created in the last hour, or the API key's requests this hour are over its limit (Retry-After)")
@@ -87,10 +87,14 @@ public class UrlController {
             @Valid @RequestBody final CreateUrlDto createUrlDto,
             @RequestHeader(value = "X-Api-Key", required = false) final String apiKey,
             @RequestHeader(value = "X-Turnstile-Token", required = false) final String humanCheckToken) {
-        if (apiKey != null) {
-            return ResponseEntity.ok(urlService.saveUrlWithApiKey(createUrlDto, apiKey, CreatedVia.API_KEY));
-        }
-        return ResponseEntity.ok(urlService.saveUrlRouting(createUrlDto, clientIpResolver.getClientIp(request), CreatedVia.WEB, humanCheckToken));
+        final var created = apiKey != null
+                ? urlService.saveUrlWithApiKey(createUrlDto, apiKey, CreatedVia.API_KEY)
+                : urlService.saveUrlRouting(createUrlDto, clientIpResolver.getClientIp(request), CreatedVia.WEB, humanCheckToken);
+        return ResponseEntity.created(shortLinks.peekLocation(created.hostname(), created.shortUrl())).body(withShortLink(created));
+    }
+
+    private UrlResponse withShortLink(final UrlResponse link) {
+        return link.withShortLink(shortLinks.url(link.hostname(), link.shortUrl()));
     }
 
     @Operation(summary = "Redirect to short URL", description = "Look up a short URL and return its details. Records a click (bots are counted separately and refused on visit-limited links). Add domain=go.example.com for a link on a custom domain.")
@@ -152,17 +156,13 @@ public class UrlController {
             @RequestParam(defaultValue = "300") final int size) {
         final var urlInfo = urlService.peekUrlByShortUrl(domain, shortUrl);
         final var boundedSize = Math.clamp(size, MIN_QR_SIZE, MAX_QR_SIZE);
-        final var qrBytes = qrCodeService.generateQrCode(shortLinkOf(urlInfo) + QR_MARKER_QUERY, boundedSize, boundedSize);
+        final var qrBytes = qrCodeService.generateQrCode(shortLinks.url(urlInfo.getDomain(), urlInfo.getShortUrl()) + QR_MARKER_QUERY, boundedSize, boundedSize);
 
         return ResponseEntity.ok().contentType(MediaType.IMAGE_PNG).body(qrBytes);
     }
 
-    private String shortLinkOf(final PeekUrl urlInfo) {
-        final var host = urlInfo.getDomain() == null ? StringUtils.removeEnd(appProperties.getServerUrl(), "/") : HTTPS + urlInfo.getDomain();
-        return host + "/" + urlInfo.getShortUrl();
-    }
-
-    @Operation(summary = "Bulk create short URLs", description = "Create multiple short URLs in a single request. Requires ROLE_USER. Every item's domain is checked before any link is created.")
+    @Operation(summary = "Bulk create short URLs", description = "Create multiple short URLs in a single request. Requires ROLE_USER. Every item's domain is checked before any link is created. "
+            + "Answers 200 with the links in order, each with its full short link in shortLink.")
     @ApiResponse(responseCode = "400", description = "Validation error or bad request")
     @ApiResponse(responseCode = "409", description = "Short URL already exists")
     @ApiResponse(responseCode = "429", description = "Too many links created in the last hour, or the API key's requests this hour are over its limit (Retry-After)")
@@ -180,6 +180,7 @@ public class UrlController {
                 .map(dto -> apiKey != null
                         ? urlService.saveUrlWithApiKey(dto, apiKey, CreatedVia.BULK)
                         : urlService.saveUrlRouting(dto, clientIp, CreatedVia.BULK))
+                .map(this::withShortLink)
                 .toList();
 
         return ResponseEntity.ok(urls);
