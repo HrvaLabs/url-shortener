@@ -6,7 +6,7 @@ All notable changes to hrva.cc — the URL shortener.
 
 ## [v2.23] — 2026-11-01
 
-Admin pages need two-step sign-in, password reset links that work once for an hour, sign-up that never shows whether an email is taken, API keys as Bearer tokens, limits on account emails, and a warning before an inactive account is deactivated.
+Admin pages need two-step sign-in, password reset links that work once for an hour, sign-up that never shows whether an email is taken, API keys as Bearer tokens, limits on account emails and link previews, a warning before an inactive account is deactivated, stricter checks of the pages hrva.cc fetches, and blocklist status for the admin.
 
 ### 🛡️ Accounts & Security
 - You get an email 30 days before an account is deactivated for 5 years without use. Signing in, using an API key or using a connected MCP app keeps it active.
@@ -16,8 +16,12 @@ Admin pages need two-step sign-in, password reset links that work once for an ho
 - Asking for a password reset or a new verification email is limited per network and per email address, so nobody can flood an inbox. The answer never says whether an account uses the address.
 - Signing up with an email that already has an account answers the same as a new sign-up. The account gets an email saying someone tried, with links to sign in and reset the password.
 
+### 🛡️ Link Safety
+- When hrva.cc fetches a destination to follow its redirects, see whether it still works or read its preview, it connects only to the address it checked, and checks again on every redirect.
+
 ### 🔗 Links
 - If the rate limiter is unavailable, password tries on a protected link are paused for a minute instead of left unlimited.
+- Link previews are kept for 10 minutes. A network can ask for 30 previews a minute, and a link's page is fetched at most 10 times in 10 minutes. Over the limit, or while 8 previews are already being fetched, the answer says when to try again.
 
 ### 🔑 API
 - POST /api/v1/auth/register answers 202 with a JSON body, the same for a new and a taken address. POST /api/v1/auth/password-reset/confirm answers 204 with no body.
@@ -29,6 +33,7 @@ Admin pages need two-step sign-in, password reset links that work once for an ho
 
 ### 🔧 Admin
 - Admin pages and the MCP moderation tools need two-step sign-in on the admin's account. Until it's on, they answer "Turn on two-step sign-in to use admin pages." and the dashboard opens the two-step settings. Your own account pages keep working.
+- The Health page lists each blocklist with its last refresh, its errors in a row and whether it is stale. A list that misses two refreshes sends the owner one email.
 
 ---
 

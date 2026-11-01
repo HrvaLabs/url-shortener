@@ -5,7 +5,7 @@
       "date": "2026-11-01",
       "badge": "Latest",
       "badgeVariant": "default",
-      "summary": "Admin pages need two-step sign-in, password reset links that work once for an hour, sign-up that never shows whether an email is taken, API keys as Bearer tokens, limits on account emails, and a warning before an inactive account is deactivated.",
+      "summary": "Admin pages need two-step sign-in, password reset links that work once for an hour, sign-up that never shows whether an email is taken, API keys as Bearer tokens, limits on account emails and link previews, a warning before an inactive account is deactivated, stricter checks of the pages hrva.cc fetches, and blocklist status for the admin.",
       "sections": [
         {
           "title": "Accounts & Security",
@@ -20,10 +20,18 @@
           ]
         },
         {
+          "title": "Link Safety",
+          "icon": "shield",
+          "items": [
+            "When hrva.cc fetches a destination to follow its redirects, see whether it still works or read its preview, it connects only to the address it checked, and checks again on every redirect."
+          ]
+        },
+        {
           "title": "Links",
           "icon": "link",
           "items": [
-            "If the rate limiter is unavailable, password tries on a protected link are paused for a minute instead of left unlimited."
+            "If the rate limiter is unavailable, password tries on a protected link are paused for a minute instead of left unlimited.",
+            "Link previews are kept for 10 minutes. A network can ask for 30 previews a minute, and a link's page is fetched at most 10 times in 10 minutes. Over the limit, or while 8 previews are already being fetched, the answer says when to try again."
           ]
         },
         {
@@ -46,7 +54,8 @@
           "title": "Admin",
           "icon": "wrench",
           "items": [
-            "Admin pages and the MCP moderation tools need two-step sign-in on the admin's account. Until it's on, they answer \"Turn on two-step sign-in to use admin pages.\" and the dashboard opens the two-step settings. Your own account pages keep working."
+            "Admin pages and the MCP moderation tools need two-step sign-in on the admin's account. Until it's on, they answer \"Turn on two-step sign-in to use admin pages.\" and the dashboard opens the two-step settings. Your own account pages keep working.",
+            "The Health page lists each blocklist with its last refresh, its errors in a row and whether it is stale. A list that misses two refreshes sends the owner one email."
           ]
         }
       ]
