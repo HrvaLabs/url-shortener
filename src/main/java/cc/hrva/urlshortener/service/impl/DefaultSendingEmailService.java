@@ -107,7 +107,7 @@ public class DefaultSendingEmailService implements SendingEmailService {
                 .text(htmlContent)
                 .build();
 
-        tryToSendEmail(email);
+        tryToSendEmailWithoutKeepingIt(email);
     }
 
     @Override
@@ -181,7 +181,7 @@ public class DefaultSendingEmailService implements SendingEmailService {
                 .text(htmlContent)
                 .build();
 
-        tryToSendEmail(email);
+        tryToSendEmailWithoutKeepingIt(email);
     }
 
     @Override
@@ -678,12 +678,20 @@ public class DefaultSendingEmailService implements SendingEmailService {
         };
     }
 
+    private EmailLog tryToSendEmailWithoutKeepingIt(final Email email) {
+        return tryToSendEmail(email, null, null, false);
+    }
+
     private EmailLog tryToSendEmail(final Email email, final NotificationType consentType, final Long userId) {
+        return tryToSendEmail(email, consentType, userId, true);
+    }
+
+    private EmailLog tryToSendEmail(final Email email, final NotificationType consentType, final Long userId, final boolean keepContent) {
         final var logEntry = emailLogRepository.save(EmailLog.builder()
                 .sender(email.getSender())
                 .recipient(String.join(RECIPIENT_SEPARATOR, email.getReceivers()))
                 .subject(email.getSubject())
-                .body(email.getText())
+                .body(keepContent ? email.getText() : null)
                 .status(EmailLog.STATUS_SENDING)
                 .consentType(consentType)
                 .userId(userId)

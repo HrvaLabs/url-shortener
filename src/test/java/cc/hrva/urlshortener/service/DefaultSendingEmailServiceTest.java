@@ -374,6 +374,42 @@ class DefaultSendingEmailServiceTest {
         verify(emailService, never()).sendEmail(any(Email.class), any());
     }
 
+    @ParameterizedTest
+    @MethodSource("tokenEmails")
+    void anEmailWithASignInTokenThatFailsKeepsNoContentInTheLogSoTheTokenIsNeverStoredOrResent(final String token,
+                                                                                                final Consumer<DefaultSendingEmailService> send)
+            throws Exception {
+        saveReturnsArgument();
+        final var sent = ArgumentCaptor.forClass(Email.class);
+        doThrow(new MailingException("Email couldn't be sent")).when(emailService).sendEmail(sent.capture(), eq(null));
+
+        send.accept(configuredEmailService(realTemplateEngine()));
+
+        assertThat(sent.getValue().getText()).contains(token);
+        assertThat(savedEntries()).allSatisfy(entry -> assertThat(entry.getBody()).isNull());
+        final var entry = lastSavedEntry();
+        assertThat(entry.getStatus()).isEqualTo(EmailLog.STATUS_FAILED);
+        assertThat(entry.isResendable()).isFalse();
+    }
+
+    @ParameterizedTest
+    @MethodSource("tokenEmails")
+    void anEmailWithASignInTokenThatIsSentKeepsNoContentWhileSendingEither(final String token, final Consumer<DefaultSendingEmailService> send) {
+        saveReturnsArgument();
+
+        send.accept(configuredEmailService(realTemplateEngine()));
+
+        assertThat(bodiesWhileSending).isNotEmpty().allSatisfy(body -> assertThat(body).isNull());
+        assertThat(lastSavedEntry().getStatus()).isEqualTo(EmailLog.STATUS_SENT);
+    }
+
+    private static Stream<Arguments> tokenEmails() {
+        return Stream.of(
+                Arguments.of("reset-token-41", (Consumer<DefaultSendingEmailService>) service -> service.sendEmailForgotPassword(OWNER, "reset-token-41")),
+                Arguments.of("verify-token-42", (Consumer<DefaultSendingEmailService>) service ->
+                        service.sendVerificationEmail(OWNER, VerificationToken.builder().token("verify-token-42").build())));
+    }
+
     @Test
     void resendOfAnUnknownEntryIsNotFound() {
         when(emailLogRepository.findById(10L)).thenReturn(Optional.empty());
