@@ -21,12 +21,12 @@
     <properties>
         <java.version>25</java.version>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <springdocVersion>3.1.1</springdocVersion>
+        <springdocVersion>3.2.0</springdocVersion>
         <jsonwebtokenVersion>0.13.0</jsonwebtokenVersion>
         <apacheCommonsVersion>3.21.0</apacheCommonsVersion>
         <commonsIoVersion>2.22.0</commonsIoVersion>
         <googleApiClientVersion>2.9.2</googleApiClientVersion>
-        <googleApiServicesSafebrowsingVersion>v5-rev20251214-2.0.0</googleApiServicesSafebrowsingVersion>
+        <googleApiServicesSafebrowsingVersion>v5-rev20251214-2.9.2</googleApiServicesSafebrowsingVersion>
         <zxingVersion>3.5.4</zxingVersion>
         <jsoupVersion>1.23.2</jsoupVersion>
         <guavaVersion>33.7.2-jre</guavaVersion>
