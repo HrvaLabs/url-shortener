@@ -1,10 +1,38 @@
 {
   "releases": [
     {
-      "version": "v2.22",
+      "version": "v2.23",
       "date": "2026-11-01",
       "badge": "Latest",
       "badgeVariant": "default",
+      "summary": "A warning before an inactive account is deactivated, and tighter handling of email addresses and password tries.",
+      "sections": [
+        {
+          "title": "Accounts & Security",
+          "icon": "shield",
+          "items": [
+            "You get an email 30 days before an account is deactivated for 5 years without use. Signing in, using an API key or using a connected MCP app keeps it active."
+          ]
+        },
+        {
+          "title": "Links",
+          "icon": "link",
+          "items": [
+            "If the rate limiter is unavailable, password tries on a protected link are paused for a minute instead of left unlimited."
+          ]
+        },
+        {
+          "title": "Privacy",
+          "icon": "lock",
+          "items": [
+            "Email addresses are masked in every server log line."
+          ]
+        }
+      ]
+    },
+    {
+      "version": "v2.22",
+      "date": "2026-11-01",
       "summary": "Sign out everywhere, a one-time code instead of any token in the address bar, sign-in limits per account and per network, standard API errors and UTC dates, real statuses for dead links, and a content security policy for the dashboard.",
       "sections": [
         {
@@ -1153,8 +1181,6 @@
     {
       "version": "v2.0",
       "date": "2026-05-13",
-      "badge": "Major Release",
-      "badgeVariant": "secondary",
       "summary": "Complete frontend rewrite from Angular to React (Next.js). OAuth2 login, URL expiry notifications, performance overhaul.",
       "sections": [
         {
@@ -1289,8 +1315,6 @@
     {
       "version": "v1.0",
       "date": "2022-05",
-      "badge": "Initial Release",
-      "badgeVariant": "outline",
       "summary": "First public release with Angular frontend and Spring Boot backend.",
       "sections": [
         {
@@ -1326,8 +1350,6 @@
     {
       "version": "Pre-release",
       "date": "2022-02 — 2022-05",
-      "badge": "Development",
-      "badgeVariant": "outline",
       "summary": "Early development phase. Core backend built out, frontend prototyped.",
       "sections": [
         {

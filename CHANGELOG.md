@@ -4,6 +4,21 @@ All notable changes to hrva.cc — the URL shortener.
 
 ---
 
+## [v2.23] — 2026-11-01
+
+A warning before an inactive account is deactivated, and tighter handling of email addresses and password tries.
+
+### 🛡️ Accounts & Security
+- You get an email 30 days before an account is deactivated for 5 years without use. Signing in, using an API key or using a connected MCP app keeps it active.
+
+### 🔗 Links
+- If the rate limiter is unavailable, password tries on a protected link are paused for a minute instead of left unlimited.
+
+### 🔒 Privacy
+- Email addresses are masked in every server log line.
+
+---
+
 ## [v2.22] — 2026-11-01
 
 Sign out everywhere, a one-time code instead of any token in the address bar, sign-in limits per account and per network, standard API errors and UTC dates, real statuses for dead links, and a content security policy for the dashboard.

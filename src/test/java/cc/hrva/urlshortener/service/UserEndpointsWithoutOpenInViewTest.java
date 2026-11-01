@@ -32,6 +32,7 @@ import cc.hrva.urlshortener.service.impl.DefaultUserService;
 import cc.hrva.urlshortener.service.settings.DefaultSettingsTestConfiguration;
 import cc.hrva.urlshortener.service.signin.SignInMethodGuard;
 import cc.hrva.urlshortener.service.twostep.AccountLock;
+import cc.hrva.urlshortener.service.inactivity.InactiveAccounts;
 import java.util.List;
 import java.util.Set;
 import org.junit.jupiter.api.AfterEach;
@@ -131,6 +132,9 @@ class UserEndpointsWithoutOpenInViewTest {
 
     @MockitoBean
     private ConnectedAppsService connectedAppsService;
+
+    @MockitoBean
+    private InactiveAccounts inactiveAccounts;
 
     @MockitoBean
     private ScammerSignalService scammerSignalService;
