@@ -45,5 +45,6 @@
     <include file="classpath:/db/changelog/037-sign-in-method-turned-off.xml"/>
     <include file="classpath:/db/changelog/038-api-key-rate-limit.xml"/>
     <include file="classpath:/db/changelog/039-tokens-valid-after.xml"/>
+    <include file="classpath:/db/changelog/040-inactivity-warning.xml"/>
 
 </databaseChangeLog>

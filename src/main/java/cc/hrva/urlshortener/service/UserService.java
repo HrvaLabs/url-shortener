@@ -25,6 +25,7 @@ public interface UserService {
     void deleteOwnAccount(DeleteAccountDto deleteAccountDto);
     DataExportDto exportMyData();
     void userHasLoggedIn(User user, LocalDateTime signedInAt);
+    void recordActivity(Long userId);
     void deactivateUnusedUserAccounts();
     void deactivate(User user);
     boolean reactivate(long userId);

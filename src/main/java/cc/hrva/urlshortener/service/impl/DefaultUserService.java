@@ -37,6 +37,7 @@ import cc.hrva.urlshortener.service.ResetTokenService;
 import cc.hrva.urlshortener.service.ScammerSignalService;
 import cc.hrva.urlshortener.service.SignInMethodChangeService;
 import cc.hrva.urlshortener.service.SignInMethodService;
+import cc.hrva.urlshortener.service.inactivity.InactiveAccounts;
 import cc.hrva.urlshortener.service.UserService;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent;
 import cc.hrva.urlshortener.service.bio.BioAccountData;
@@ -103,6 +104,7 @@ public class DefaultUserService implements UserService {
     private final SignInMethodChangeService signInMethodChangeService;
     private final AccountLock accountLock;
     private final ApplicationEventPublisher eventPublisher;
+    private final InactiveAccounts inactiveAccounts;
 
     @Override
     @Transactional
@@ -362,9 +364,15 @@ public class DefaultUserService implements UserService {
 
     @Override
     @Transactional
+    public void recordActivity(final Long userId) {
+        final var now = LocalDateTime.now();
+        userRepository.recordActivity(userId, now, now.minusDays(1));
+    }
+
+    @Override
+    @Transactional
     public void deactivateUnusedUserAccounts() {
-        final var users = userRepository.findByLastLoginIsLessThanEqualAndActiveTrue(LocalDateTime.now()
-                .minusDays(appProperties.getDeactivateUserAccountAfterDays())).stream()
+        final var users = inactiveAccounts.warnAndSelectForDeactivation().stream()
                 .map(this::deactivateUser)
                 .toList();
 

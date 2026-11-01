@@ -708,6 +708,22 @@ class UrlServiceTest {
     }
 
     @Test
+    void aLinkMadeWithAnApiKeyCountsAsActivityOfItsOwner() {
+        final var createUrlDto = CreateUrlDto.builder().longUrl("https://example.com/api").build();
+        final var url = Url.builder().longUrl("https://example.com/api").build();
+        final var apiKey = ApiKey.builder().id(5L).owner(User.builder().id(7L).build()).build();
+        when(createUrlToUrlConverter.convert(createUrlDto)).thenReturn(url);
+        when(apiKeyService.fetchApiKeyByKey("apikey")).thenReturn(apiKey);
+        when(appProperties.getShortUrlLength()).thenReturn(5L);
+        when(urlRepository.save(url)).thenReturn(persisted(url));
+
+        urlService.saveUrlWithApiKey(createUrlDto, "apikey", CreatedVia.API_KEY);
+
+        verify(apiKeyService).requireActive(5L);
+        verify(userService).recordActivity(7L);
+    }
+
+    @Test
     void aFlaggedLinkMadeWithAnApiKeyIsSavedAndQueuedForReview() {
         final var createUrlDto = CreateUrlDto.builder().longUrl("https://findfavoritedate.life/?u=f6yp608").build();
         final var url = Url.builder().longUrl("https://findfavoritedate.life/?u=f6yp608").build();

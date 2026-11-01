@@ -102,6 +102,8 @@ import tools.jackson.databind.json.JsonMapper;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import cc.hrva.urlshortener.service.inactivity.InactiveAccounts;
+import org.mockito.ArgumentCaptor;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.inOrder;
@@ -212,6 +214,9 @@ class DefaultUserServiceTest {
     @Mock
     private AccountLock accountLock;
 
+    @Mock
+    private InactiveAccounts inactiveAccounts;
+
     private DefaultLoginAttemptService loginAttemptService;
 
     @BeforeEach
@@ -228,7 +233,7 @@ class DefaultUserServiceTest {
         return new DefaultUserService(appProperties, reauthentication, urlRepository, userRepository,
                 passwordEncoder, apiKeyRepository, emailLogRepository, resetTokenService,
                 resetTokenRepository, twoFactorRecoveryCodeRepository, passkeyCredentialRepository, bioAccountData, notificationAccountData, customDomainAccountData, userToUserDtoConverter, sendingEmailService,
-                verificationTokenService, verificationTokenRepository, userUpdateDtoToUserConverter, connectedAppsService, scammerSignalService, signInMethodService, signInMethodChangeService, accountLock, publisher);
+                verificationTokenService, verificationTokenRepository, userUpdateDtoToUserConverter, connectedAppsService, scammerSignalService, signInMethodService, signInMethodChangeService, accountLock, publisher, inactiveAccounts);
     }
 
     @Test
@@ -864,11 +869,19 @@ class DefaultUserServiceTest {
     }
 
     @Test
+    void recordingActivityWritesOncePerDayAtMost() {
+        userService.recordActivity(7L);
+
+        final var now = ArgumentCaptor.forClass(java.time.LocalDateTime.class);
+        final var staleBefore = ArgumentCaptor.forClass(java.time.LocalDateTime.class);
+        verify(userRepository).recordActivity(eq(7L), now.capture(), staleBefore.capture());
+        assertThat(java.time.Duration.between(staleBefore.getValue(), now.getValue())).isEqualTo(java.time.Duration.ofDays(1));
+    }
+
+    @Test
     void shouldDeactivateUnusedUserAccounts() {
         final var user = User.builder().id(1L).active(true).build();
-        when(appProperties.getDeactivateUserAccountAfterDays()).thenReturn(30L);
-        when(userRepository.findByLastLoginIsLessThanEqualAndActiveTrue(any(java.time.LocalDateTime.class)))
-                .thenReturn(Collections.singletonList(user));
+        when(inactiveAccounts.warnAndSelectForDeactivation()).thenReturn(Collections.singletonList(user));
         when(userRepository.saveAll(any())).thenReturn(Collections.singletonList(user));
 
         userService.deactivateUnusedUserAccounts();
@@ -882,8 +895,7 @@ class DefaultUserServiceTest {
     void deactivatingUnusedAccountsReloadsTheDomainRoutesOnceAfterSavingThem() {
         final var first = User.builder().id(1L).email("idle-one@example.com").active(true).build();
         final var second = User.builder().id(2L).email("idle-two@example.com").active(true).build();
-        when(appProperties.getDeactivateUserAccountAfterDays()).thenReturn(30L);
-        when(userRepository.findByLastLoginIsLessThanEqualAndActiveTrue(any(java.time.LocalDateTime.class))).thenReturn(List.of(first, second));
+        when(inactiveAccounts.warnAndSelectForDeactivation()).thenReturn(List.of(first, second));
 
         userService.deactivateUnusedUserAccounts();
 
@@ -895,8 +907,7 @@ class DefaultUserServiceTest {
 
     @Test
     void deactivatingNoUnusedAccountsReloadsNothing() {
-        when(appProperties.getDeactivateUserAccountAfterDays()).thenReturn(30L);
-        when(userRepository.findByLastLoginIsLessThanEqualAndActiveTrue(any(java.time.LocalDateTime.class))).thenReturn(List.of());
+        when(inactiveAccounts.warnAndSelectForDeactivation()).thenReturn(List.of());
 
         userService.deactivateUnusedUserAccounts();
 
@@ -906,9 +917,7 @@ class DefaultUserServiceTest {
     @Test
     void shouldRevokeApiKeysWhenDeactivatingUnusedAccount() {
         final var user = User.builder().id(1L).active(true).build();
-        when(appProperties.getDeactivateUserAccountAfterDays()).thenReturn(30L);
-        when(userRepository.findByLastLoginIsLessThanEqualAndActiveTrue(any(java.time.LocalDateTime.class)))
-                .thenReturn(Collections.singletonList(user));
+        when(inactiveAccounts.warnAndSelectForDeactivation()).thenReturn(Collections.singletonList(user));
         when(userRepository.saveAll(any())).thenReturn(Collections.singletonList(user));
 
         userService.deactivateUnusedUserAccounts();
@@ -1407,9 +1416,7 @@ class DefaultUserServiceTest {
     @Test
     void shouldDisconnectConnectedAppsWhenDeactivatingUnusedAccount() {
         final var user = User.builder().id(1L).email("idle@example.com").active(true).build();
-        when(appProperties.getDeactivateUserAccountAfterDays()).thenReturn(30L);
-        when(userRepository.findByLastLoginIsLessThanEqualAndActiveTrue(any(java.time.LocalDateTime.class)))
-                .thenReturn(Collections.singletonList(user));
+        when(inactiveAccounts.warnAndSelectForDeactivation()).thenReturn(Collections.singletonList(user));
         when(userRepository.saveAll(any())).thenReturn(Collections.singletonList(user));
 
         userService.deactivateUnusedUserAccounts();
