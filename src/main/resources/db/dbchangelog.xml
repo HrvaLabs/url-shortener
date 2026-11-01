@@ -47,5 +47,6 @@
     <include file="classpath:/db/changelog/039-tokens-valid-after.xml"/>
     <include file="classpath:/db/changelog/040-inactivity-warning.xml"/>
     <include file="classpath:/db/changelog/041-reset-token-hash.xml"/>
+    <include file="classpath:/db/changelog/042-long-url-index.xml"/>
 
 </databaseChangeLog>

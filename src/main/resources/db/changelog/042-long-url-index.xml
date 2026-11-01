@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.9.xsd">
+
+    <changeSet author="khrvacic" id="042-url-anonymous-long-url-index" dbms="postgresql">
+        <comment>The reuse lookup for links made without an account: long_url = ? and active and owner_id is null. A hash index, because a long_url of up to 2048 characters can pass the btree row limit.</comment>
+        <sql>create index if not exists ix_url_anonymous_long_url on url using hash (long_url) where owner_id is null and active = true</sql>
+        <rollback>
+            <sql>drop index if exists ix_url_anonymous_long_url</sql>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>
