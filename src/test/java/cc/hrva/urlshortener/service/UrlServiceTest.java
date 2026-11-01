@@ -82,6 +82,7 @@ import cc.hrva.urlshortener.service.impl.DefaultSuspiciousUrlService;
 import cc.hrva.urlshortener.service.impl.DefaultUrlService;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiter;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiterUnavailableException;
+import cc.hrva.urlshortener.exception.ServiceBusyException;
 import cc.hrva.urlshortener.service.settings.SettingKey;
 import cc.hrva.urlshortener.service.settings.SettingsServiceFixtures;
 import cc.hrva.urlshortener.validator.ApiKeyValidator;
@@ -3206,20 +3207,34 @@ class UrlServiceTest {
     }
 
     @Test
-    void linksAreStillCreatedWhenTheRateLimiterIsDown() {
+    void signedInLinksAreStillCreatedWhenTheRateLimiterIsDown() {
         stubLinkCreation();
         when(rateLimiter.tryAcquire(startsWith("create:"), anyInt(), any()))
                 .thenThrow(new RateLimiterUnavailableException(new RuntimeException("down")));
-
-        final var anonymous = urlService.saveUrlRouting(link(0), CLIENT_IP, CreatedVia.WEB);
         when(userService.getUserFromToken()).thenReturn(User.builder().id(1L).build());
+
         final var signedIn = urlService.saveUrlRouting(link(1), CLIENT_IP, CreatedVia.WEB);
 
-        assertThat(anonymous.longUrl()).isEqualTo("https://example.com/0");
         assertThat(signedIn.longUrl()).isEqualTo("https://example.com/1");
-        verify(rateLimiter).tryAcquire(RateLimiter.clientKey("create:anon", CLIENT_IP), 10, Duration.ofHours(1));
         verify(rateLimiter).tryAcquire("create:user:1", 60, Duration.ofHours(1));
-        verify(urlRepository, times(2)).save(any(Url.class));
+        verify(urlRepository).save(any(Url.class));
+    }
+
+    @Test
+    void anAnonymousCreateIsRefusedWithA503WhileTheRateLimiterIsDown() {
+        when(createUrlToUrlConverter.convert(any())).thenReturn(Url.builder().longUrl("https://example.com/0").build());
+        when(rateLimiter.tryAcquire(startsWith("create:"), anyInt(), any()))
+                .thenThrow(new RateLimiterUnavailableException(new RuntimeException("down")));
+
+        assertThatThrownBy(() -> urlService.saveUrlRouting(link(0), CLIENT_IP, CreatedVia.WEB, HUMAN_CHECK_TOKEN))
+                .isInstanceOfSatisfying(ServiceBusyException.class, refusal -> {
+                    assertThat(refusal).hasMessage("Links without an account can't be made right now. Try again in a minute, or sign in.");
+                    assertThat(refusal.getRetryAfter()).isEqualTo(Duration.ofMinutes(1));
+                });
+
+        verify(rateLimiter).tryAcquire(RateLimiter.clientKey("create:anon", CLIENT_IP), 10, Duration.ofHours(1));
+        verifyNoInteractions(humanCheckService);
+        verify(urlRepository, never()).save(any(Url.class));
     }
 
     @Test
@@ -3279,17 +3294,17 @@ class UrlServiceTest {
     }
 
     @Test
-    void unlockFailsClosedWithAWaitTimeWhenTheRateLimiterIsDown() {
+    void unlockIsRefusedWithA503WhileTheRateLimiterIsDown() {
         when(rateLimiter.tryAcquire(any(), org.mockito.ArgumentMatchers.anyInt(), any()))
                 .thenThrow(new RateLimiterUnavailableException(new RuntimeException("down")));
 
         assertThatThrownBy(() -> urlService.unlockUrl(null, "a", "secret", CLICK))
-                .isInstanceOfSatisfying(cc.hrva.urlshortener.exception.RateLimitExceededException.class, exception -> {
-                    assertThat(exception).hasMessage("Password checks are paused for a moment. Try again in a minute.");
-                    assertThat(exception.getRetryAfter()).isEqualTo(Duration.ofSeconds(60));
+                .isInstanceOfSatisfying(ServiceBusyException.class, refusal -> {
+                    assertThat(refusal).hasMessage("Password checks are paused for a moment. Try again in a minute.");
+                    assertThat(refusal.getRetryAfter()).isEqualTo(Duration.ofMinutes(1));
                 });
-        verify(urlRepository, never()).findActive(any(), any());
-        verify(passwordEncoder, never()).matches(any(), any());
+
+        verifyNoInteractions(urlRepository, passwordEncoder, clickAnalyticsService);
     }
 
     @Test

@@ -20,6 +20,7 @@ import cc.hrva.urlshortener.exception.UrlNotFoundException;
 import cc.hrva.urlshortener.exception.UrlValidationException;
 import cc.hrva.urlshortener.model.CustomDomain;
 import cc.hrva.urlshortener.model.PeekUrl;
+import cc.hrva.urlshortener.exception.ServiceBusyException;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.enums.CreatedVia;
 import cc.hrva.urlshortener.security.ClickRequestResolver;
@@ -228,6 +229,37 @@ class UrlControllerTest {
                         .content(objectMapper.writeValueAsString(CreateUrlDto.builder().longUrl("https://example.com").build())))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.detail").value("Complete the check and try again."));
+    }
+
+    @Test
+    void anAnonymousCreateWhileTheLimiterIsDownIsA503WithRetryAfter() throws Exception {
+        when(urlService.saveUrlRouting(any(CreateUrlDto.class), any(), any(), any()))
+                .thenThrow(new ServiceBusyException("Links without an account can't be made right now. Try again in a minute, or sign in.",
+                        java.time.Duration.ofMinutes(1)));
+
+        mockMvc.perform(post("/api/v1/urls")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(CreateUrlDto.builder().longUrl("https://example.com").build())))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(header().string(HttpHeaders.RETRY_AFTER, "60"))
+                .andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON))
+                .andExpect(jsonPath("$.detail").value("Links without an account can't be made right now. Try again in a minute, or sign in."));
+    }
+
+    @Test
+    void anUnlockWhileTheLimiterIsDownIsA503AndARealLimitStaysA429() throws Exception {
+        when(clickRequestResolver.resolve(request)).thenReturn(CLICK);
+        when(urlService.unlockUrl(any(), eq("down"), any(), any()))
+                .thenThrow(new ServiceBusyException("Password checks are paused for a moment. Try again in a minute.", java.time.Duration.ofMinutes(1)));
+        when(urlService.unlockUrl(any(), eq("limited"), any(), any()))
+                .thenThrow(new RateLimitExceededException("Too many password attempts. Try again in a few minutes.", java.time.Duration.ofMinutes(15)));
+
+        mockMvc.perform(post("/api/v1/urls/down/unlock").contentType(MediaType.APPLICATION_JSON).content("{\"password\":\"x\"}"))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(header().string(HttpHeaders.RETRY_AFTER, "60"));
+        mockMvc.perform(post("/api/v1/urls/limited/unlock").contentType(MediaType.APPLICATION_JSON).content("{\"password\":\"x\"}"))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(header().string(HttpHeaders.RETRY_AFTER, "900"));
     }
 
     @Test

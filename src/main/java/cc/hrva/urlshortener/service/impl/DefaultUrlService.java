@@ -17,6 +17,7 @@ import cc.hrva.urlshortener.dto.UrlUpdateDto;
 import cc.hrva.urlshortener.dto.UnlockResponse;
 import cc.hrva.urlshortener.exception.FieldValidationException;
 import cc.hrva.urlshortener.exception.NoAuthorizationException;
+import cc.hrva.urlshortener.exception.ServiceBusyException;
 import cc.hrva.urlshortener.exception.ShortUrlAlreadyExistsException;
 import cc.hrva.urlshortener.exception.UrlNotFoundException;
 import cc.hrva.urlshortener.exception.UrlValidationException;
@@ -137,11 +138,12 @@ public class DefaultUrlService implements UrlService {
     private static final int UNLOCK_ATTEMPTS_PER_CLIENT = 10;
     private static final int UNLOCK_ATTEMPTS_PER_LINK = 50;
     private static final Duration UNLOCK_WINDOW = Duration.ofMinutes(15);
-    private static final Duration UNLOCK_UNAVAILABLE_RETRY = Duration.ofMinutes(1);
-    private static final String UNLOCK_PAUSED = "Password checks are paused for a moment. Try again in a minute.";
     private static final int CREATES_PER_USER = 60;
     private static final Duration CREATE_WINDOW = Duration.ofHours(1);
     private static final String CREATE_LIMIT_REFUSAL = "You've created a lot of links in a short time. Try again in an hour.";
+    private static final String ANONYMOUS_CREATE_UNAVAILABLE = "Links without an account can't be made right now. Try again in a minute, or sign in.";
+    private static final String UNLOCK_UNAVAILABLE = "Password checks are paused for a moment. Try again in a minute.";
+    private static final Duration LIMITER_RETRY = Duration.ofMinutes(1);
     private static final String ROLE_ADMIN = "ROLE_ADMIN";
     private static final String BLOCKED_WHILE_EDITING = "This link was blocked while you were editing it. Reload and try again.";
     private static final int MAX_GENERATED_ALIAS_ATTEMPTS = 10;
@@ -257,7 +259,11 @@ public class DefaultUrlService implements UrlService {
                     || rateLimiter.tryAcquire(RateLimiter.clientKey("create:anon", clientIP), settingsService.number(SettingKey.ANONYMOUS_LINKS_PER_HOUR),
                     CREATE_WINDOW);
         } catch (final RateLimiterUnavailableException exception) {
-            log.warn("Create rate limit unavailable, allowing the link");
+            if (creator == null) {
+                log.warn("Create rate limit unavailable, refusing the link without an account");
+                throw new ServiceBusyException(ANONYMOUS_CREATE_UNAVAILABLE, LIMITER_RETRY);
+            }
+            log.warn("Create rate limit unavailable, allowing the link userId={}", creator.getId());
             return true;
         }
     }
@@ -273,7 +279,7 @@ public class DefaultUrlService implements UrlService {
                     && rateLimiter.tryAcquire("unlock:" + cacheKey, UNLOCK_ATTEMPTS_PER_LINK, UNLOCK_WINDOW);
         } catch (final RateLimiterUnavailableException exception) {
             log.warn("Unlock rate limit unavailable, refusing the attempt");
-            throw new RateLimitExceededException(UNLOCK_PAUSED, UNLOCK_UNAVAILABLE_RETRY);
+            throw new ServiceBusyException(UNLOCK_UNAVAILABLE, LIMITER_RETRY);
         }
     }
 

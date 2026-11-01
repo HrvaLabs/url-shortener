@@ -66,7 +66,8 @@
 # shortLink (signed in, without an account and with an API key; bulk stays 200); a revoked API key can't be turned on again (no
 # PATCH /activate, PUT active:true or a new expiry is 409) and can be deleted; a visit limit counts every click but not bots or HEAD, and
 # 20 opens at once of a link limited to 5 give exactly 5 redirects and 15 answers of 410; a short link's query is forwarded to the
-# destination (its own parameters win, qr dropped, the fragment kept, the host never changes).
+# destination (its own parameters win, qr dropped, the fragment kept, the host never changes); with Redis paused a create without an
+# account and a link-password unlock are 503 with Retry-After while signed-in and API-key creates go on, and a real unlock limit stays 429.
 #
 #   scripts/mcp-e2e.sh                         builds the jar, then runs every step
 #   MCP_E2E_SKIP_BUILD=1 scripts/mcp-e2e.sh    reuses target/url-shortener-*.jar
@@ -123,6 +124,7 @@ cleanup() {
     if [[ -n $CF_PID ]]; then
         kill "$CF_PID" 2>/dev/null || true
     fi
+    docker unpause "$POSTGRES_CONTAINER" "$REDIS_CONTAINER" >/dev/null 2>&1 || true
     docker rm -f "$POSTGRES_CONTAINER" "$REDIS_CONTAINER" "$MAIL_CONTAINER" >/dev/null 2>&1 || true
     if (( status != 0 )) && [[ -s $WORK/app.log ]]; then
         echo "--- last 60 lines of the app log"
@@ -2558,5 +2560,44 @@ for query in '@evil.example' 'x=//evil.example' 'next=https://evil.example/'; do
 done
 http -A "$BROWSER_USER_AGENT" "$BASE/e2e-query?qr"
 expect_eq "$HTTP_LOCATION" "https://e2e-links.com/q?id=7#top" "a QR scan alone forwards nothing"
+
+section "30e. Redis down: links without an account and password checks wait, the rest goes on"
+session_login 192.0.2.30 "$USER_EMAIL" "$SESSION_PASSWORD"
+expect_eq "$HTTP_STATUS" 200 "the user signs in while Redis is up"
+DOWN_JWT=$(jq -r .token <<<"$HTTP_BODY")
+http -X POST "$BASE/api/v1/urls" -H "Authorization: $DOWN_JWT" -H 'Content-Type: application/json' \
+    -d '{"longUrl":"https://e2e-links.com/locked","shortUrl":"e2e-locked","password":"secret-pw"}'
+expect_eq "$HTTP_STATUS" 201 "a link with a password"
+unlock_e2e_locked() {
+    http -X POST "$BASE/api/v1/urls/e2e-locked/unlock" -H "CF-Connecting-IP: $1" -H 'Content-Type: application/json' -d "{\"password\":\"$2\"}"
+}
+docker pause "$REDIS_CONTAINER" >/dev/null
+http -X POST "$BASE/api/v1/urls" -H 'CF-Connecting-IP: 203.0.113.80' -H 'Content-Type: application/json' -d '{"longUrl":"https://e2e-links.com/anonymous-while-down"}'
+expect_eq "$HTTP_STATUS $(header_value retry-after) $(header_value content-type)" "503 60 application/problem+json" "a link without an account is 503 with Retry-After 60"
+expect_eq "$(jq -r .detail <<<"$HTTP_BODY")" "Links without an account can't be made right now. Try again in a minute, or sign in." "and says why"
+expect_eq "$(psql_value "select count(*) from url where long_url = 'https://e2e-links.com/anonymous-while-down';")" 0 "nothing is saved"
+http -X POST "$BASE/api/v1/urls" -H "Authorization: $DOWN_JWT" -H 'Content-Type: application/json' -d '{"longUrl":"https://e2e-links.com/signed-in-while-down"}'
+expect_eq "$HTTP_STATUS" 201 "a signed-in create goes on"
+http -X POST "$BASE/api/v1/urls" -H "X-Api-Key: $OWNER_KEY" -H 'Content-Type: application/json' -d '{"longUrl":"https://e2e-links.com/key-while-down"}'
+expect_eq "$HTTP_STATUS" 201 "an API-key create goes on"
+unlock_e2e_locked 203.0.113.81 secret-pw
+expect_eq "$HTTP_STATUS $(header_value retry-after) $(jq -r .detail <<<"$HTTP_BODY")" "503 60 Password checks are paused for a moment. Try again in a minute." \
+    "the link-password unlock is 503 while the limiter is down"
+docker unpause "$REDIS_CONTAINER" >/dev/null
+unlocks_again() {
+    unlock_e2e_locked 203.0.113.81 secret-pw
+    [[ $HTTP_STATUS == 200 ]]
+}
+wait_until 30 "the unlock after Redis came back" unlocks_again
+expect_eq "$(jq -r .longUrl <<<"$HTTP_BODY")" "https://e2e-links.com/locked" "with Redis back the right password unlocks"
+for attempt in $(seq 1 9); do
+    unlock_e2e_locked 203.0.113.82 wrong-pw
+    [[ $HTTP_STATUS == 403 ]] || fail "wrong link password $attempt: expected 403, got $HTTP_STATUS"
+done
+ok "9 more wrong link passwords from one network are each 403"
+unlock_e2e_locked 203.0.113.82 wrong-pw
+expect_eq "$HTTP_STATUS" 403 "the 10th wrong one is still 403"
+unlock_e2e_locked 203.0.113.82 secret-pw
+expect_eq "$HTTP_STATUS $(header_value retry-after)" "429 900" "a real limit stays 429 with Retry-After 900"
 
 section "Done: every step passed"
