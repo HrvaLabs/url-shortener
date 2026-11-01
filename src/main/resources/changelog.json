@@ -1,10 +1,40 @@
 {
   "releases": [
     {
-      "version": "v2.24",
+      "version": "v2.25",
       "date": "2026-11-01",
       "badge": "Latest",
       "badgeVariant": "default",
+      "summary": "A security page that lists what hrva.cc checks and protects and how to report a vulnerability, security blog posts rewritten for today, and emails signed off with hrva.cc.",
+      "sections": [
+        {
+          "title": "Security",
+          "icon": "shield",
+          "items": [
+            "A new Security page at app.hrva.cc/security lists what hrva.cc checks before a short link sends someone on, how accounts, API keys and connected apps are protected, how the site itself is protected, and how to report a vulnerability. It is linked from the footer, the homepage and the help.",
+            "security.txt now points to the Security page."
+          ]
+        },
+        {
+          "title": "Site",
+          "icon": "globe",
+          "items": [
+            "\"Why Safe Browsing Matters for Link Sharing\" and \"How hrva.cc Handles Security, Speed, Reliability, and Migration\" are rewritten to match what hrva.cc does today, and \"How hrva.cc stops phishing links\" now covers the warning page and links held for a sign-in form. A rewritten post shows the date it was updated.",
+            "Emails end with \"Best regards, hrva.cc\"."
+          ]
+        },
+        {
+          "title": "Privacy",
+          "icon": "lock",
+          "items": [
+            "The privacy page says exactly what is kept about signing in: the audit log records admin actions and changes to sign-in methods, not sign-ins. An account keeps only when it last signed in, and failed attempts are short-lived counters."
+          ]
+        }
+      ]
+    },
+    {
+      "version": "v2.24",
+      "date": "2026-11-01",
       "summary": "Retry-After that gives the seconds left, the hrva.cc icon and a small not-found page for addresses on hrva.cc that aren't short links, an error status on the unavailable page, links to Revolut's and PayPal's privacy terms, and dependency and security updates.",
       "sections": [
         {
