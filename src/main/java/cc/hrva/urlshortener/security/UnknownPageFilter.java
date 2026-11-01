@@ -47,7 +47,7 @@ public class UnknownPageFilter extends OncePerRequestFilter {
 
     @Override
     protected void doFilterInternal(final HttpServletRequest request, final HttpServletResponse response, final FilterChain chain) throws IOException {
-        log.info("Unknown page answered with the not-found page method={}", request.getMethod());
+        log.debug("Unknown page answered with the not-found page method={}", request.getMethod());
         LinkUnavailableView.of(templateEngine, appProperties.getFrontendUrl(), appProperties.getServerUrl(), pathOf(request).substring(SLASH.length()), null,
                         LinkUnavailableView.MISSING)
                 .asPageOnly()
