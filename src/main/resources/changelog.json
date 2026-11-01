@@ -5,8 +5,20 @@
       "date": "2026-11-01",
       "badge": "Latest",
       "badgeVariant": "default",
-      "summary": "Clearer API answers, real statuses for dead links, and a content security policy for the dashboard.",
+      "summary": "Sign out everywhere, a one-time code instead of the sign-in token in the address bar, sign-in limits per account and per network, standard API errors and UTC dates, real statuses for dead links, and a content security policy for the dashboard.",
       "sections": [
+        {
+          "title": "Accounts & Security",
+          "icon": "shield",
+          "items": [
+            "Sign out everywhere in Settings signs out every other browser and device. The one you use stays signed in. API keys and connected apps keep working.",
+            "Changing your password, removing it, or turning off Google or GitHub sign-in signs out your other devices. Resetting a forgotten password signs out every device.",
+            "Signing in with Google or GitHub no longer puts your sign-in token in the address bar. The sign-in page swaps a one-time code for it.",
+            "Passwords can be up to 72 bytes; accented letters count as two. A longer one shows a message under the field instead of an error.",
+            "After too many wrong passwords for one account, or from one network, sign-in pauses for up to 15 minutes or an hour. The message says how long to wait.",
+            "The dashboard sends a content security policy, so pages load scripts only from hrva.cc and Cloudflare Turnstile and can't be framed by other sites."
+          ]
+        },
         {
           "title": "Links",
           "icon": "link",
@@ -26,10 +38,17 @@
           ]
         },
         {
-          "title": "Security",
-          "icon": "shield",
+          "title": "Privacy",
+          "icon": "lock",
           "items": [
-            "The dashboard sends a content security policy, so pages load scripts only from hrva.cc and Cloudflare Turnstile and can't be framed by other sites."
+            "Sign-in attempt counters keep a hash of the network or email address, never the address itself."
+          ]
+        },
+        {
+          "title": "Admin",
+          "icon": "wrench",
+          "items": [
+            "Login rate limits in Stats › System show counters per network and per account. They survive restarts, and you can search them by IP address or email."
           ]
         },
         {

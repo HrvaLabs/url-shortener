@@ -6,7 +6,15 @@ All notable changes to hrva.cc — the URL shortener.
 
 ## [v2.22] — 2026-11-01
 
-Clearer API answers, real statuses for dead links, and a content security policy for the dashboard.
+Sign out everywhere, a one-time code instead of the sign-in token in the address bar, sign-in limits per account and per network, standard API errors and UTC dates, real statuses for dead links, and a content security policy for the dashboard.
+
+### 🛡️ Accounts & Security
+- Sign out everywhere in Settings signs out every other browser and device. The one you use stays signed in. API keys and connected apps keep working.
+- Changing your password, removing it, or turning off Google or GitHub sign-in signs out your other devices. Resetting a forgotten password signs out every device.
+- Signing in with Google or GitHub no longer puts your sign-in token in the address bar. The sign-in page swaps a one-time code for it.
+- Passwords can be up to 72 bytes; accented letters count as two. A longer one shows a message under the field instead of an error.
+- After too many wrong passwords for one account, or from one network, sign-in pauses for up to 15 minutes or an hour. The message says how long to wait.
+- The dashboard sends a content security policy, so pages load scripts only from hrva.cc and Cloudflare Turnstile and can't be framed by other sites.
 
 ### 🔗 Links
 - A link that doesn't exist answers 404, and one that is blocked, expired, used up or turned off answers 410, with a short page that says why. Before, they redirected to a page that answered 200.
@@ -18,8 +26,11 @@ Clearer API answers, real statuses for dead links, and a content security policy
 - Every date and time in the API is in UTC with a Z, like 2026-10-30T19:02:13Z. Dates you send without an offset are still read as UTC.
 - A request that needs a signed-in account answers 401 when nobody is signed in, and 403 only when the account isn't allowed. Every 429 says how long to wait in a Retry-After header.
 
-### 🛡️ Security
-- The dashboard sends a content security policy, so pages load scripts only from hrva.cc and Cloudflare Turnstile and can't be framed by other sites.
+### 🔒 Privacy
+- Sign-in attempt counters keep a hash of the network or email address, never the address itself.
+
+### 🔧 Admin
+- Login rate limits in Stats › System show counters per network and per account. They survive restarts, and you can search them by IP address or email.
 
 ### 🌐 Site
 - The developers page covers dates, error answers, status codes and what a short link answers.

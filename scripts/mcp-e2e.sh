@@ -49,6 +49,11 @@
 # error under errors, dates written in UTC with Z and read with or without an offset, HEAD counting no click and using no visit on a
 # cache miss and hit, the 404 and 410 pages with the warning page's headers (and a problem for Accept: application/json), and a
 # trailing slash opening the same link.
+# Section 20 also checks that the password change ends the older token (401, "Your session ended. Sign in again.") and renews this
+# device's. Section 29 checks sessions and sign-in: 039's column, sign out everywhere (the new token, the old ones refused, the API key
+# untouched), the one-time OAuth code put straight into Redis (exchanged once, then 410), passwords over 72 bytes (field errors, and a
+# sign-in answered like a wrong password) and the Redis login limit per account and per network (429 with Retry-After, a success that
+# doesn't clear the network, hashed keys, the admin list and clearing it).
 #
 #   scripts/mcp-e2e.sh                         builds the jar, then runs every step
 #   MCP_E2E_SKIP_BUILD=1 scripts/mcp-e2e.sh    reuses target/url-shortener-*.jar
@@ -1095,6 +1100,12 @@ http -X PATCH "$BASE/api/v1/users/password" -H "Authorization: Bearer $KEY_JWT" 
     -d "{\"oldPassword\":\"$USER_PASSWORD\",\"newPassword\":\"changed-$USER_PASSWORD\"}"
 expect_eq "$HTTP_STATUS" 200 "PATCH /api/v1/users/password"
 expect_contains "$(jq -c '[.authorities[].name]' <<<"$HTTP_BODY")" '"ROLE_USER"' "the answer carries the roles"
+RENEWED_JWT=$(header_value authorization)
+expect_contains "$RENEWED_JWT" "Bearer eyJ" "the answer's Authorization header carries a new token for this device"
+http "$BASE/api/v1/users/me" -H "Authorization: Bearer $KEY_JWT"
+expect_eq "$HTTP_STATUS $(jq -c . <<<"$HTTP_BODY")" '401 {"error":"Your session ended. Sign in again."}' "the token from before the change is refused: 401, session ended"
+http "$BASE/api/v1/users/me" -H "Authorization: $RENEWED_JWT"
+expect_eq "$HTTP_STATUS $(jq -r .email <<<"$HTTP_BODY")" "200 $USER_EMAIL" "the new token keeps this device signed in"
 http -X POST "$BASE/api/v1/auth/password-reset" -H 'Content-Type: application/json' -d "{\"email\":\"$USER_EMAIL\"}"
 expect_eq "$HTTP_STATUS" 202 "POST /api/v1/auth/password-reset"
 RESET_TOKEN=$(psql_value "select r.token from reset_token r join user_account u on u.id = r.user_id where u.email = '$USER_EMAIL' and r.active order by r.id desc limit 1;")
@@ -2154,5 +2165,106 @@ expect_eq "$HTTP_STATUS $HTTP_LOCATION" "410 " "a blocked link answers 410, not 
 expect_contains "$HTTP_BODY" "hrva.cc disabled this link because it led to a site reported for phishing, malware or scams." "saying hrva.cc disabled it"
 http -H 'Accept: application/json' "$BASE/e2e-blocked"
 expect_eq "$HTTP_STATUS $(jq -r '"\(.title) \(.reason)"' <<<"$HTTP_BODY")" "410 Gone blocked" "Accept: application/json: Gone, reason blocked"
+
+section "29. Sessions and sign-in: sign out everywhere, the one-time OAuth code, 72-byte passwords and the login limit"
+SESSION_PASSWORD=reset-$USER_PASSWORD
+SESSION_USER_ID=$(psql_value "select id from user_account where email = '$USER_EMAIL';")
+expect_eq "$(psql_value "select exectype from databasechangelog where id = '039-user-account-tokens-valid-after';")" EXECUTED "039 ran"
+expect_eq "$(psql_value "select data_type || ' ' || is_nullable from information_schema.columns where table_name = 'user_account' and column_name = 'tokens_valid_after';")" \
+    "timestamp without time zone YES" "user_account.tokens_valid_after is a nullable TIMESTAMP"
+session_login() {
+    http -X POST "$BASE/api/v1/auth/login" -H "CF-Connecting-IP: $1" -H 'Content-Type: application/json' -d "{\"email\":\"$2\",\"password\":\"$3\"}"
+}
+session_login 192.0.2.10 "$USER_EMAIL" "$SESSION_PASSWORD"
+expect_eq "$HTTP_STATUS" 200 "the phone signs in"
+PHONE_JWT=$(jq -r .token <<<"$HTTP_BODY")
+session_login 192.0.2.10 "$USER_EMAIL" "$SESSION_PASSWORD"
+expect_eq "$HTTP_STATUS" 200 "the laptop signs in"
+LAPTOP_JWT=$(jq -r .token <<<"$HTTP_BODY")
+sleep 1
+http -X POST "$BASE/api/v1/users/me/sessions/end" -H "Authorization: $LAPTOP_JWT" -H "Origin: $FRONTEND_URL"
+FRESH_JWT=$(jq -r .token <<<"$HTTP_BODY")
+expect_eq "$HTTP_STATUS $(header_value authorization)" "200 $FRESH_JWT" "POST /api/v1/users/me/sessions/end answers a new token in the body and the Authorization header"
+expect_contains "$(header_value access-control-expose-headers)" "Authorization" "the frontend may read it (Access-Control-Expose-Headers)"
+expect_contains "$(header_value access-control-expose-headers)" "Retry-After" "and Retry-After"
+http "$BASE/api/v1/users/me" -H "Authorization: $PHONE_JWT"
+expect_eq "$HTTP_STATUS $(jq -c . <<<"$HTTP_BODY")" '401 {"error":"Your session ended. Sign in again."}' "the phone's token is refused: 401, session ended"
+http "$BASE/api/v1/users/me" -H "Authorization: $LAPTOP_JWT"
+expect_eq "$HTTP_STATUS $(jq -c . <<<"$HTTP_BODY")" '401 {"error":"Your session ended. Sign in again."}' "so is the laptop's, which asked"
+http "$BASE/api/v1/users/me" -H "Authorization: $FRESH_JWT"
+expect_eq "$HTTP_STATUS $(jq -r .email <<<"$HTTP_BODY")" "200 $USER_EMAIL" "the new token keeps this device signed in"
+expect_eq "$(psql_value "select tokens_valid_after is not null and tokens_valid_after <= (now() at time zone 'utc') from user_account where id = $SESSION_USER_ID;")" t \
+    "tokens_valid_after is set, in UTC"
+http -X POST "$BASE/api/v1/urls" -H "X-Api-Key: $OWNER_KEY" -H 'Content-Type: application/json' -d '{"longUrl":"https://example.com/after-sign-out-everywhere"}'
+expect_eq "$HTTP_STATUS" 200 "the API key keeps working after signing out everywhere"
+
+echo "  --- the one-time OAuth code"
+OAUTH_CODE=$(openssl rand -hex 24)
+docker exec "$REDIS_CONTAINER" redis-cli SET "auth:oauth-code:$OAUTH_CODE" "{\"userId\":$SESSION_USER_ID,\"method\":\"GOOGLE\"}" EX 60 >/dev/null
+http -X POST "$BASE/api/v1/auth/oauth/exchange" -H 'Content-Type: application/json' -d "{\"code\":\"$OAUTH_CODE\"}"
+expect_eq "$HTTP_STATUS $(jq -r '.user.email' <<<"$HTTP_BODY") $(jq -r '.token | startswith("Bearer eyJ")' <<<"$HTTP_BODY")" "200 $USER_EMAIL true" \
+    "POST /api/v1/auth/oauth/exchange answers like a sign-in"
+expect_eq "$(docker exec "$REDIS_CONTAINER" redis-cli EXISTS "auth:oauth-code:$OAUTH_CODE")" 0 "the code is gone from Redis"
+http -X POST "$BASE/api/v1/auth/oauth/exchange" -H 'Content-Type: application/json' -d "{\"code\":\"$OAUTH_CODE\"}"
+expect_eq "$HTTP_STATUS $(jq -c . <<<"$HTTP_BODY")" '410 {"error":"Your sign-in expired. Sign in again."}' "a used code is 410"
+http -X POST "$BASE/api/v1/auth/oauth/exchange" -H 'Content-Type: application/json' -d '{}'
+expect_eq "$HTTP_STATUS $(jq -c . <<<"$HTTP_BODY")" '400 {"code":"Code is required"}' "no code is 400"
+
+echo "  --- passwords over 72 bytes"
+TOO_LONG_TEXT="This password is too long. Use at most 72 bytes; accented letters count as two."
+http -X POST "$BASE/api/v1/auth/register" -H 'Content-Type: application/json' \
+    -d "{\"email\":\"long-password@example.com\",\"password\":\"$(printf 'x%.0s' {1..73})\"}"
+expect_eq "$HTTP_STATUS $(jq -c . <<<"$HTTP_BODY")" "400 {\"password\":\"$TOO_LONG_TEXT\"}" "sign-up with 73 bytes is a 400 field error"
+http -X POST "$BASE/api/v1/auth/register" -H 'Content-Type: application/json' \
+    -d "{\"email\":\"long-password@example.com\",\"password\":\"$(printf '\\u010d%.0s' {1..37})\"}"
+expect_eq "$HTTP_STATUS $(jq -r .password <<<"$HTTP_BODY")" "400 $TOO_LONG_TEXT" "37 accented letters are 74 bytes: refused"
+http -X PATCH "$BASE/api/v1/users/password" -H "Authorization: $FRESH_JWT" -H 'Content-Type: application/json' \
+    -d "{\"oldPassword\":\"$SESSION_PASSWORD\",\"newPassword\":\"$(printf 'x%.0s' {1..73})\"}"
+expect_eq "$HTTP_STATUS $(jq -c . <<<"$HTTP_BODY")" "400 {\"newPassword\":\"$TOO_LONG_TEXT\"}" "a password change to 73 bytes is a 400 field error"
+http -X POST "$BASE/api/v1/urls" -H "Authorization: $FRESH_JWT" -H 'Content-Type: application/json' \
+    -d "{\"longUrl\":\"https://example.com/long-link-password\",\"password\":\"$(printf 'x%.0s' {1..73})\"}"
+expect_eq "$HTTP_STATUS $(jq -c . <<<"$HTTP_BODY")" "400 {\"password\":\"$TOO_LONG_TEXT\"}" "a link password of 73 bytes is a 400 field error"
+session_login 192.0.2.11 "$USER_EMAIL" "$SESSION_PASSWORD$(printf 'x%.0s' {1..80})"
+expect_eq "$HTTP_STATUS $(jq -c . <<<"$HTTP_BODY")" '401 {"error":"Invalid email or password"}' "signing in with a password over 72 bytes answers like a wrong one"
+
+echo "  --- the login limit (Redis, per network and per account)"
+for network in $(seq 1 10); do
+    session_login "198.51.100.$network" limited-account@example.com wrong-password
+    [[ $HTTP_STATUS == 401 ]] || fail "wrong password $network for one account: expected 401, got $HTTP_STATUS"
+done
+ok "10 wrong passwords for one account from 10 networks are each 401"
+session_login 198.51.100.99 Limited-Account@Example.com wrong-password
+RETRY_AFTER=$(header_value retry-after)
+expect_eq "$HTTP_STATUS $(jq -c . <<<"$HTTP_BODY")" '429 {"error":"Too many sign-in attempts. Try again in 15 minutes."}' "the 11th, from a new network and in other case, is 429"
+(( RETRY_AFTER > 840 && RETRY_AFTER <= 900 )) || fail "Retry-After for the account limit: expected 841 to 900 seconds, got '$RETRY_AFTER'"
+ok "Retry-After: $RETRY_AFTER"
+for attempt in $(seq 1 19); do
+    session_login 203.0.113.250 "nobody-$attempt@example.com" wrong-password
+    [[ $HTTP_STATUS == 401 ]] || fail "wrong password $attempt from one network: expected 401, got $HTTP_STATUS"
+done
+ok "19 wrong passwords from one network are each 401"
+session_login 203.0.113.250 "$USER_EMAIL" "$SESSION_PASSWORD"
+expect_eq "$HTTP_STATUS" 200 "a right password from that network still signs in"
+session_login 203.0.113.250 nobody-20@example.com wrong-password
+expect_eq "$HTTP_STATUS" 401 "the 20th wrong password is 401: the success didn't clear the network's count"
+session_login 203.0.113.250 "$USER_EMAIL" "$SESSION_PASSWORD"
+RETRY_AFTER=$(header_value retry-after)
+expect_eq "$HTTP_STATUS $(jq -c . <<<"$HTTP_BODY")" '429 {"error":"Too many sign-in attempts. Try again in 60 minutes."}' "then even the right password is 429"
+(( RETRY_AFTER > 3500 && RETRY_AFTER <= 3600 )) || fail "Retry-After for the network limit: expected 3501 to 3600 seconds, got '$RETRY_AFTER'"
+ok "Retry-After: $RETRY_AFTER"
+http -X POST "$BASE/api/v1/auth/oauth/exchange" -H 'CF-Connecting-IP: 203.0.113.250' -H 'Content-Type: application/json' -d '{"code":"any"}'
+expect_eq "$HTTP_STATUS" 429 "the code exchange is limited per network too"
+expect_eq "$(docker exec "$REDIS_CONTAINER" redis-cli --scan --pattern 'rate-limit:login:*' | grep -c -e '@' -e '203\.0\.113' -e '198\.51\.100' || true)" 0 \
+    "no counter key holds a plain address or email"
+http "$BASE/api/v1/admin/login-attempts?search=203.0.113.250" -H "Authorization: Bearer $ADMIN_JWT"
+expect_eq "$HTTP_STATUS $(jq -c '[.content[] | [(.key | startswith("network:")), .attempts]]' <<<"$HTTP_BODY")" '200 [[true,20]]' \
+    "the admin list finds the network by its address"
+http "$BASE/api/v1/admin/login-attempts?search=limited-account@example.com" -H "Authorization: Bearer $ADMIN_JWT"
+expect_eq "$(jq -c '[.content[] | [(.key | startswith("account:")), .attempts]]' <<<"$HTTP_BODY")" '[[true,10]]' "and the account by its email"
+http -X DELETE "$BASE/api/v1/admin/login-attempts" -H "Authorization: Bearer $ADMIN_JWT"
+expect_eq "$HTTP_STATUS" 204 "DELETE /api/v1/admin/login-attempts"
+expect_eq "$(docker exec "$REDIS_CONTAINER" redis-cli --scan --pattern 'rate-limit:login:*' | wc -l | tr -d ' ')" 0 "every login counter is gone"
+session_login 203.0.113.250 "$USER_EMAIL" "$SESSION_PASSWORD"
+expect_eq "$HTTP_STATUS" 200 "the network signs in again"
 
 section "Done: every step passed"
