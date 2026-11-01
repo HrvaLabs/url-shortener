@@ -23,6 +23,13 @@ public interface BlocklistSourceRepository extends JpaRepository<BlocklistSource
 
     @Modifying
     @Transactional
+    @Query("update BlocklistSource s set s.lastFetchedAt = :fetchedAt, s.lastError = :lastError, s.lastSuccessAt = :fetchedAt "
+            + "where s.id = :id and s.enabled = true and s.kind = :kind")
+    int recordUnchangedList(@Param("id") long id, @Param("kind") SourceKind kind, @Param("fetchedAt") LocalDateTime fetchedAt,
+            @Param("lastError") String lastError);
+
+    @Modifying
+    @Transactional
     @Query("update BlocklistSource s set s.lastFetchedAt = :fetchedAt, s.lastError = :lastError, s.lastSuccessAt = :fetchedAt, "
             + "s.lastSuccessUrl = :successUrl, s.domainCount = :domainCount, s.listVersion = :listVersion, s.etag = :etag, "
             + "s.lastModified = :lastModified "

@@ -225,6 +225,22 @@ class RefreshBlocklistSourceFlowTest {
     }
 
     @Test
+    void anUnchangedListIsRecordedAsASuccessfulRefresh() throws Exception {
+        final var loadedBefore = LocalDateTime.of(2026, 10, 1, 8, 0);
+        jdbcTemplate.update("update blocklist_source set last_success_url = ?, etag = 'e1', last_success_at = ?, last_error = 'HTTP 503' where id = ?",
+                LIST_URL, loadedBefore, SOURCE);
+        when(blocklistStore.exists(SOURCE)).thenReturn(true);
+        when(publicHttpFetcher.fetch(eq(LIST_URL), anyLong(), eq("e1"), any(), any())).thenReturn(new FetchResult(true, null, "e1", null));
+
+        mockMvc.perform(refresh()).andExpect(status().isOk());
+
+        final var row = jdbcTemplate.queryForMap("select last_fetched_at, last_success_at, last_error from blocklist_source where id = ?", SOURCE);
+        assertThat(row).containsEntry("LAST_ERROR", null);
+        assertThat(row.get("LAST_SUCCESS_AT")).isEqualTo(row.get("LAST_FETCHED_AT")).isNotEqualTo(Timestamp.valueOf(loadedBefore));
+        verify(blocklistStore, never()).replace(eq(SOURCE), any());
+    }
+
+    @Test
     void aSourceTurnedOffDuringTheDownloadStaysOffAndKeepsItsSet() throws Exception {
         meanwhile = () -> jdbcTemplate.update("update blocklist_source set enabled = false, name = 'Renamed meanwhile' where id = ?", SOURCE);
 

@@ -154,6 +154,12 @@ class DefaultBlocklistSourceServiceTest {
                     row.setLastFetchedAt(invocation.getArgument(2));
                     row.setLastError(invocation.getArgument(3));
                 }));
+        lenient().when(blocklistSourceRepository.recordUnchangedList(anyLong(), any(), any(), any())).thenAnswer(invocation ->
+                recordedOnTheRow(invocation.getArgument(0), invocation.getArgument(1), row -> {
+                    row.setLastFetchedAt(invocation.getArgument(2));
+                    row.setLastError(invocation.getArgument(3));
+                    row.setLastSuccessAt(invocation.getArgument(2));
+                }));
         lenient().when(blocklistSourceRepository.recordLoadedList(anyLong(), any(), any(), any(), any(), anyLong(), any(), any(), any()))
                 .thenAnswer(invocation -> recordedOnTheRow(invocation.getArgument(0), invocation.getArgument(1), row -> {
                     row.setLastFetchedAt(invocation.getArgument(2));
@@ -226,7 +232,7 @@ class DefaultBlocklistSourceServiceTest {
     }
 
     @Test
-    void aNotModifiedAnswerOnlyUpdatesLastFetchedAt() {
+    void aNotModifiedAnswerIsASuccessfulRefreshThatKeepsTheList() {
         final var lastFetchedAt = LocalDateTime.now().minusHours(6);
         final var lastSuccessAt = LocalDateTime.now().minusHours(12);
         final var source = stored(source(1)
@@ -239,11 +245,13 @@ class DefaultBlocklistSourceServiceTest {
         blocklistSourceService.refresh(1);
 
         assertThat(source.getLastFetchedAt()).isCloseTo(LocalDateTime.now(), within(5, SECONDS));
+        assertThat(source.getLastSuccessAt()).isEqualTo(source.getLastFetchedAt()).isAfter(lastSuccessAt);
         assertThat(source)
-                .extracting(BlocklistSource::getLastSuccessAt, BlocklistSource::getDomainCount, BlocklistSource::getListVersion,
+                .extracting(BlocklistSource::getDomainCount, BlocklistSource::getListVersion,
                         BlocklistSource::getEtag, BlocklistSource::getLastModified, BlocklistSource::getLastSuccessUrl,
                         BlocklistSource::getLastError)
-                .containsExactly(lastSuccessAt, 3L, VERSION, ETAG, LAST_MODIFIED, MAIN, null);
+                .containsExactly(3L, VERSION, ETAG, LAST_MODIFIED, MAIN, null);
+        verify(blocklistHealth).refreshed(1);
         assertThat(fetcher.requests).extracting(Request::etag, Request::lastModified).containsExactly(tuple(ETAG, LAST_MODIFIED));
         verify(blocklistStore, never()).replace(anyLong(), anySet());
     }
@@ -1243,6 +1251,7 @@ class DefaultBlocklistSourceServiceTest {
     private void verifyNoRefreshRecorded() {
         verify(blocklistSourceRepository, never()).save(any());
         verify(blocklistSourceRepository, never()).recordRefresh(anyLong(), any(), any(), any());
+        verify(blocklistSourceRepository, never()).recordUnchangedList(anyLong(), any(), any(), any());
         verify(blocklistSourceRepository, never()).recordLoadedList(anyLong(), any(), any(), any(), any(), anyLong(), any(), any(), any());
     }
 
