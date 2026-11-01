@@ -8,7 +8,7 @@ All notable changes to hrva.cc — the URL shortener.
 
 A security page that lists what hrva.cc checks and protects and how to report a vulnerability, security blog posts rewritten for today, and emails signed off with hrva.cc.
 
-### 🛡️ Security
+### 🔒 Security
 - A new Security page at app.hrva.cc/security lists what hrva.cc checks before a short link sends someone on, how accounts, API keys and connected apps are protected, how the site itself is protected, and how to report a vulnerability. It is linked from the footer, the homepage and the help.
 - security.txt now points to the Security page.
 
@@ -17,7 +17,7 @@ A security page that lists what hrva.cc checks and protects and how to report a 
 - Emails end with "Best regards, hrva.cc".
 
 ### 🔒 Privacy
-- The privacy page says exactly what is kept about signing in: the audit log records admin actions and changes to sign-in methods, not sign-ins. An account keeps only when it last signed in, and failed attempts are short-lived counters.
+- The privacy page says exactly what is kept about signing in: the audit log records admin actions and changes to sign-in methods, not sign-ins. An account keeps when it last signed in and when each passkey or sign-in method was last used, and failed attempts are short-lived counters.
 
 ### 🐛 Fixes
 - A tab left open across an update reloads itself once when it can't load part of the site, instead of showing an error such as "Couldn't load these stats".

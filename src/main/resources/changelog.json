@@ -27,7 +27,7 @@
           "title": "Privacy",
           "icon": "lock",
           "items": [
-            "The privacy page says exactly what is kept about signing in: the audit log records admin actions and changes to sign-in methods, not sign-ins. An account keeps only when it last signed in, and failed attempts are short-lived counters."
+            "The privacy page says exactly what is kept about signing in: the audit log records admin actions and changes to sign-in methods, not sign-ins. An account keeps when it last signed in and when each passkey or sign-in method was last used, and failed attempts are short-lived counters."
           ]
         },
         {
