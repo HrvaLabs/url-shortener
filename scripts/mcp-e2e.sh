@@ -63,7 +63,8 @@
 # verification link for an unverified one), and an API key as Authorization: Bearer (counted once, two different keys a 400, a JWT still a
 # sign-in).
 # Section 30 checks the v2.23 links work as the admin (section 29 ended the user's sessions): a create answers 201 with Location and
-# shortLink (signed in, without an account and with an API key; bulk stays 200).
+# shortLink (signed in, without an account and with an API key; bulk stays 200); a revoked API key can't be turned on again (no
+# PATCH /activate, PUT active:true or a new expiry is 409) and can be deleted.
 #
 #   scripts/mcp-e2e.sh                         builds the jar, then runs every step
 #   MCP_E2E_SKIP_BUILD=1 scripts/mcp-e2e.sh    reuses target/url-shortener-*.jar
@@ -2487,5 +2488,25 @@ http -X POST "$BASE/api/v1/urls" -H "Authorization: Bearer $ADMIN_JWT" -H "Origi
 expect_contains "$(header_value access-control-expose-headers)" "Location" "the frontend may read Location"
 http -X POST "$BASE/api/v1/urls/bulk" -H "Authorization: Bearer $ADMIN_JWT" -H 'Content-Type: application/json' -d '[{"longUrl":"https://e2e-links.com/bulk"}]'
 expect_eq "$HTTP_STATUS $(jq -r '.[0].shortLink == ("'"$BASE"'/" + .[0].shortUrl)' <<<"$HTTP_BODY")" "200 true" "a bulk create stays 200, each link with its shortLink"
+
+section "30b. API keys: revoking is final"
+http -X POST "$BASE/api/v1/api-keys" -H "Authorization: Bearer $ADMIN_JWT" -H 'Content-Type: application/json' -d '{"expiresInDays":30}'
+FINAL_KEY_ID=$(jq -r .id <<<"$HTTP_BODY")
+FINAL_KEY=$(jq -r .key <<<"$HTTP_BODY")
+expect_eq "$HTTP_STATUS" 200 "the admin makes a key"
+http -X PATCH "$BASE/api/v1/api-keys/$FINAL_KEY_ID/revoke" -H "Authorization: Bearer $ADMIN_JWT"
+expect_eq "$HTTP_STATUS $(jq -r .status <<<"$HTTP_BODY")" "200 REVOKED" "PATCH /api-keys/{id}/revoke"
+http -X PATCH "$BASE/api/v1/api-keys/$FINAL_KEY_ID/activate" -H "Authorization: Bearer $ADMIN_JWT"
+expect_eq "$HTTP_STATUS" 404 "there is no PATCH /api-keys/{id}/activate any more"
+http -X PUT "$BASE/api/v1/api-keys/$FINAL_KEY_ID" -H "Authorization: Bearer $ADMIN_JWT" -H 'Content-Type: application/json' -d "{\"id\":$FINAL_KEY_ID,\"active\":true}"
+expect_eq "$HTTP_STATUS $(header_value content-type) $(jq -r .detail <<<"$HTTP_BODY")" \
+    "409 application/problem+json A revoked or expired key can't be turned back on or changed. Delete it and make a new key." "PUT active:true on a revoked key is 409"
+http -X PUT "$BASE/api/v1/api-keys/$FINAL_KEY_ID" -H "Authorization: Bearer $ADMIN_JWT" -H 'Content-Type: application/json' -d "{\"id\":$FINAL_KEY_ID,\"expiresInDays\":90}"
+expect_eq "$HTTP_STATUS" 409 "a new expiry for a revoked key is 409 too"
+expect_eq "$(psql_value "select active from api_key where id = $FINAL_KEY_ID;")" f "the key is still revoked"
+http -X POST "$BASE/api/v1/urls" -H "X-Api-Key: $FINAL_KEY" -H 'Content-Type: application/json' -d '{"longUrl":"https://e2e-links.com/revoked-key"}'
+expect_eq "$HTTP_STATUS" 400 "the revoked key creates nothing"
+http -X DELETE "$BASE/api/v1/api-keys/$FINAL_KEY_ID" -H "Authorization: Bearer $ADMIN_JWT"
+expect_eq "$HTTP_STATUS" 204 "the revoked key can be deleted"
 
 section "Done: every step passed"

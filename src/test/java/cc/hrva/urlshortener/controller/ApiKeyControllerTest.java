@@ -1,5 +1,8 @@
 package cc.hrva.urlshortener.controller;
 
+import org.springframework.web.servlet.NoHandlerFoundException;
+import cc.hrva.urlshortener.configuration.GlobalExceptionHandler;
+import cc.hrva.urlshortener.exception.ApiKeyInactiveException;
 import java.util.List;
 import java.util.Collections;
 import cc.hrva.urlshortener.dto.ApiKeyCreateDto;
@@ -24,8 +27,10 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -49,6 +54,7 @@ class ApiKeyControllerTest {
     void setUp() {
         this.mockMvc = MockMvcBuilders.standaloneSetup(new ApiKeyController(apiKeyService))
                 .setCustomArgumentResolvers(new PageableHandlerMethodArgumentResolver())
+                .setControllerAdvice(new GlobalExceptionHandler())
                 .build();
         this.objectMapper = new ObjectMapper();
         this.objectMapper.registerModule(new JavaTimeModule());
@@ -141,6 +147,26 @@ class ApiKeyControllerTest {
                         .content(objectMapper.writeValueAsString(ApiKeyUpdateDto.builder().id(1L).build())))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(1));
+    }
+
+    @Test
+    void turningARevokedKeyBackOnIsAConflict() throws Exception {
+        when(apiKeyService.updateKey(any(ApiKeyUpdateDto.class)))
+                .thenThrow(new ApiKeyInactiveException("A revoked or expired key can't be turned back on or changed. Delete it and make a new key."));
+
+        mockMvc.perform(put("/api/v1/api-keys/1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"id\":1,\"active\":true}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.detail").value("A revoked or expired key can't be turned back on or changed. Delete it and make a new key."));
+    }
+
+    @Test
+    void thereIsNoWayToActivateAKey() throws Exception {
+        mockMvc.perform(patch("/api/v1/api-keys/1/activate"))
+                .andExpect(result -> assertThat(result.getResolvedException()).isInstanceOf(NoHandlerFoundException.class));
+
+        verifyNoInteractions(apiKeyService);
     }
 
     @Test

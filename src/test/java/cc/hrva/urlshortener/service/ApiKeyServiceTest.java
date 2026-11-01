@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.service;
 
+import cc.hrva.urlshortener.exception.ApiKeyInactiveException;
 import java.time.LocalDateTime;
 import java.util.Collections;
 import java.util.List;
@@ -386,11 +387,11 @@ class ApiKeyServiceTest {
 
     @Test
     void shouldUpdateKey() {
-        final ApiKey apiKey = ApiKey.builder().id(1L).build();
+        final ApiKey apiKey = ApiKey.builder().id(1L).active(true).build();
         final ApiKeyUpdateDto apiKeyUpdateDto = ApiKeyUpdateDto.builder().id(1L).build();
 
-        when(apiKeyConverter.convert(apiKeyUpdateDto)).thenReturn(ApiKey.builder().id(1L).build());
-        when(apiKeyRepository.findById(1L)).thenReturn(Optional.of(apiKey));
+        when(apiKeyConverter.convert(apiKeyUpdateDto)).thenReturn(ApiKey.builder().id(1L).active(true).build());
+        when(apiKeyRepository.findForUpdateById(1L)).thenReturn(Optional.of(apiKey));
         when(apiKeyRepository.save(apiKey)).thenReturn(apiKey);
 
         final var result = apiKeyService.updateKey(apiKeyUpdateDto);
@@ -405,7 +406,7 @@ class ApiKeyServiceTest {
         final var apiKeyUpdateDto = ApiKeyUpdateDto.builder().id(1L).build();
 
         when(apiKeyConverter.convert(apiKeyUpdateDto)).thenReturn(edited);
-        when(apiKeyRepository.findById(1L)).thenReturn(Optional.of(loaded));
+        when(apiKeyRepository.findForUpdateById(1L)).thenReturn(Optional.of(loaded));
         when(apiKeyRepository.save(loaded)).thenReturn(loaded);
 
         apiKeyService.updateKey(apiKeyUpdateDto);
@@ -423,7 +424,7 @@ class ApiKeyServiceTest {
         final var loaded = ApiKey.builder().id(1L).keyHash("stored-hash").apiCallsUsed(42L).active(true).build();
         final var later = LocalDateTime.of(2027, 6, 1, 0, 0);
         final var apiKeyUpdateDto = ApiKeyUpdateDto.builder().id(1L).expiresInDays(30).neverExpires(true).expirationDate(later).build();
-        when(apiKeyRepository.findById(1L)).thenReturn(Optional.of(loaded));
+        when(apiKeyRepository.findForUpdateById(1L)).thenReturn(Optional.of(loaded));
         doThrow(new NoAuthorizationException("You don't have authorization for this action")).when(apiKeyValidator).verifyUserAdminOrOwner(loaded);
 
         assertThatThrownBy(() -> apiKeyService.updateKey(apiKeyUpdateDto)).isInstanceOf(NoAuthorizationException.class);
@@ -433,10 +434,46 @@ class ApiKeyServiceTest {
     }
 
     @Test
+    void aRevokedKeyCantBeTurnedBackOn() {
+        final var revoked = ApiKey.builder().id(1L).keyHash("stored-hash").active(false).build();
+        final var apiKeyUpdateDto = ApiKeyUpdateDto.builder().id(1L).active(true).build();
+        when(apiKeyRepository.findForUpdateById(1L)).thenReturn(Optional.of(revoked));
+
+        assertThatThrownBy(() -> apiKeyService.updateKey(apiKeyUpdateDto))
+                .isInstanceOf(ApiKeyInactiveException.class)
+                .hasMessage("A revoked or expired key can't be turned back on or changed. Delete it and make a new key.");
+
+        verify(apiKeyRepository, never()).save(any());
+        verify(apiKeyConverter, never()).convert(any());
+        assertThat(revoked.isActive()).isFalse();
+    }
+
+    @Test
+    void anExpiredKeyCantBeGivenANewExpiryEither() {
+        final var expired = ApiKey.builder().id(1L).keyHash("stored-hash").expirationDate(LocalDateTime.of(2026, 1, 1, 0, 0)).active(false).build();
+        final var apiKeyUpdateDto = ApiKeyUpdateDto.builder().id(1L).expiresInDays(30).build();
+        when(apiKeyRepository.findForUpdateById(1L)).thenReturn(Optional.of(expired));
+
+        assertThatThrownBy(() -> apiKeyService.updateKey(apiKeyUpdateDto)).isInstanceOf(ApiKeyInactiveException.class);
+
+        verify(apiKeyRepository, never()).save(any());
+    }
+
+    @Test
+    void someoneElsesRevokedKeyIsRefusedForTheOwnerFirst() {
+        final var revoked = ApiKey.builder().id(1L).active(false).build();
+        when(apiKeyRepository.findForUpdateById(1L)).thenReturn(Optional.of(revoked));
+        doThrow(new NoAuthorizationException("You don't have authorization for this action")).when(apiKeyValidator).verifyUserAdminOrOwner(revoked);
+
+        assertThatThrownBy(() -> apiKeyService.updateKey(ApiKeyUpdateDto.builder().id(1L).active(true).build()))
+                .isInstanceOf(NoAuthorizationException.class);
+    }
+
+    @Test
     void anEditChecksTheExpiryChoice() {
         final var loaded = ApiKey.builder().id(1L).keyHash("stored-hash").apiCallsUsed(42L).active(true).build();
         final var apiKeyUpdateDto = ApiKeyUpdateDto.builder().id(1L).expiresInDays(30).neverExpires(true).build();
-        when(apiKeyRepository.findById(1L)).thenReturn(Optional.of(loaded));
+        when(apiKeyRepository.findForUpdateById(1L)).thenReturn(Optional.of(loaded));
         doThrow(new ApiException("Choose either an expiry in days or no expiry.")).when(apiKeyValidator).validateExpiry(30, true, null);
 
         assertThatThrownBy(() -> apiKeyService.updateKey(apiKeyUpdateDto)).isInstanceOf(ApiException.class);

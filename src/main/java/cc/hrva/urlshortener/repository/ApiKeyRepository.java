@@ -12,6 +12,8 @@ import org.springframework.data.jpa.domain.Specification;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
+import jakarta.persistence.LockModeType;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -27,6 +29,10 @@ public interface ApiKeyRepository extends JpaRepository<ApiKey, Long>, JpaSpecif
 
     @EntityGraph(attributePaths = {"owner", "owner.authorities"}, type = EntityGraph.EntityGraphType.LOAD)
     Optional<ApiKey> findApiKeyByKeyHash(String keyHash);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select k from ApiKey k where k.id = :id")
+    Optional<ApiKey> findForUpdateById(@Param("id") Long id);
     @Query("select k.id from ApiKey k where k.keyHash = :keyHash")
     Optional<Long> findIdByKeyHash(@Param("keyHash") String keyHash);
     List<ApiKey> findByOwner(User owner);

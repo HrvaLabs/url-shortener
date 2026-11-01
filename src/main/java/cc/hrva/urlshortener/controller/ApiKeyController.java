@@ -71,11 +71,13 @@ public class ApiKeyController {
         return ResponseEntity.ok(apiKeyService.fetchAllApiKeys(search, active, pageable));
     }
 
-    @Operation(summary = "Update an API key", description = "Change a key's expiry (expiresInDays 1 to 3650, neverExpires: true, or a future "
-            + "expirationDate) or turn it on or off. The usage can't be edited. The key's owner or an admin.")
+    @Operation(summary = "Update an API key", description = "Change an active key's expiry (expiresInDays 1 to 3650, neverExpires: true, or a future "
+            + "expirationDate) or revoke it with active: false. Revoking is final: a revoked or expired key can't be turned back on or changed, only "
+            + "deleted. The usage can't be edited. The key's owner or an admin.")
     @ApiResponse(responseCode = "400", description = "Days out of range, a past expirationDate, or more than one expiry")
     @ApiResponse(responseCode = "403", description = "Not the key's owner or an admin")
     @ApiResponse(responseCode = "404", description = "API key not found")
+    @ApiResponse(responseCode = "409", description = "The key is revoked or expired: it can only be deleted")
     @PutMapping("/{id}")
     @PreAuthorize("hasAnyRole('ROLE_ADMIN', 'ROLE_USER')")
     public ResponseEntity<ApiKeyResponse> updateApiKey(@PathVariable final Long id, @Valid @RequestBody final ApiKeyUpdateDto apiKeyUpdateDto) {
@@ -83,18 +85,11 @@ public class ApiKeyController {
         return ResponseEntity.ok(apiKeyService.updateKey(apiKeyUpdateDto));
     }
 
-    @Operation(summary = "Revoke an API key", description = "Revoke (deactivate) an API key by its ID. Authentication required.")
+    @Operation(summary = "Revoke an API key", description = "Revoke an API key by its ID. Revoking is final: the key can't be turned back on, only deleted. Authentication required.")
     @ApiResponse(responseCode = "404", description = "API key not found")
     @PatchMapping("/{id}/revoke")
     public ResponseEntity<ApiKeyResponse> revokeApiKey(@PathVariable("id") final Long id) {
         return ResponseEntity.ok(apiKeyService.revokeApiKey(id));
-    }
-
-    @Operation(summary = "Activate an API key", description = "Reactivate a previously revoked API key by its ID. Authentication required.")
-    @ApiResponse(responseCode = "404", description = "API key not found")
-    @PatchMapping("/{id}/activate")
-    public ResponseEntity<ApiKeyResponse> activateApiKey(@PathVariable("id") final Long id) {
-        return ResponseEntity.ok(apiKeyService.activateApiKey(id));
     }
 
     @Operation(summary = "Delete an inactive API key", description = "Permanently delete an expired or revoked API key by its ID. An active key must be revoked first. The key's owner or an admin.")

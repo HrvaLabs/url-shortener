@@ -15,7 +15,6 @@ public interface ApiKeyService {
     void deactivateExpired();
     CreatedApiKeyResponse generateNewApiKey(ApiKeyCreateDto expiry);
     ApiKeyResponse revokeApiKey(Long id);
-    ApiKeyResponse activateApiKey(Long id);
     void deleteApiKey(Long id);
     int deleteMyInactiveApiKeys();
     List<ApiKeyResponse> fetchMyApiKeys(Boolean active);

@@ -3,6 +3,7 @@ package cc.hrva.urlshortener.service.impl;
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.converter.ApiKeyUpdateDtoToApiKeyConverter;
 import cc.hrva.urlshortener.exception.ApiKeyActiveException;
+import cc.hrva.urlshortener.exception.ApiKeyInactiveException;
 import cc.hrva.urlshortener.exception.ApiKeyNotFoundException;
 import cc.hrva.urlshortener.exception.InvalidApiKeyException;
 import cc.hrva.urlshortener.repository.ApiKeyRepository;
@@ -43,6 +44,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class DefaultApiKeyService implements ApiKeyService {
 
     private static final String REVOKE_BEFORE_DELETING = "Revoke this key before deleting it.";
+    private static final String INACTIVE_KEY_IS_FINAL = "A revoked or expired key can't be turned back on or changed. Delete it and make a new key.";
     private static final String CREATE_DATE = "createDate";
     private static final String ID = "id";
     private static final String LAST_USED_AT = "lastUsedAt";
@@ -121,19 +123,6 @@ public class DefaultApiKeyService implements ApiKeyService {
 
     @Override
     @Transactional
-    public ApiKeyResponse activateApiKey(final Long id) {
-        log.info("Activated API key id={}", id);
-
-        final var apiKey = apiKeyRepository.findById(id)
-                .orElseThrow(() -> new ApiKeyNotFoundException("Api key doesn't exist"));
-
-        apiKeyValidator.verifyUserAdminOrOwner(apiKey);
-        apiKey.setActive(true);
-        return ApiKeyResponse.from(apiKeyRepository.save(apiKey));
-    }
-
-    @Override
-    @Transactional
     public void deleteApiKey(final Long id) {
         log.info("Delete API key id={}", id);
 
@@ -193,9 +182,13 @@ public class DefaultApiKeyService implements ApiKeyService {
     @Transactional
     public ApiKeyResponse updateKey(final ApiKeyUpdateDto apiKeyUpdateDto) {
         log.info("Updated API key id={}", apiKeyUpdateDto.getId());
-        final var apiKey = apiKeyRepository.findById(apiKeyUpdateDto.getId())
+        final var apiKey = apiKeyRepository.findForUpdateById(apiKeyUpdateDto.getId())
                 .orElseThrow(() -> new ApiKeyNotFoundException("Api key doesn't exist"));
         apiKeyValidator.verifyUserAdminOrOwner(apiKey);
+        if (!apiKey.isActive()) {
+            log.info("Edit of an inactive API key refused id={}", apiKey.getId());
+            throw new ApiKeyInactiveException(INACTIVE_KEY_IS_FINAL);
+        }
         apiKeyValidator.validateExpiry(apiKeyUpdateDto.getExpiresInDays(), apiKeyUpdateDto.getNeverExpires(), apiKeyUpdateDto.getExpirationDate());
         final var editedApiKey = Objects.requireNonNull(apiKeyConverter.convert(apiKeyUpdateDto));
 
