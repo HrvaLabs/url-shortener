@@ -115,7 +115,7 @@ class DefaultClickAnalyticsServiceTest {
 
     @Test
     void botClickCountsOnlyABotClick() {
-        clickAnalyticsService.recordClick(URL_ID, SHORT_URL, ClickRequest.of(CLIENT_IP, "Discordbot/2.0", "https://t.co/x", "hr"));
+        clickAnalyticsService.recordClick(URL_ID, ClickRequest.of(CLIENT_IP, "Discordbot/2.0", "https://t.co/x", "hr"));
 
         verify(linkStatsRepository).incrementDailyStats(URL_ID, DAY, 0, 0, 1);
         verifyNoInteractions(uniqueVisitorCounter);
@@ -126,14 +126,14 @@ class DefaultClickAnalyticsServiceTest {
 
     @Test
     void aHeadRequestCountsNoClickAndUsesNoVisit() {
-        clickAnalyticsService.recordClick(URL_ID, SHORT_URL, CLICK.asHead());
+        clickAnalyticsService.recordClick(URL_ID, CLICK.asHead());
 
         verifyNoInteractions(linkStatsRepository, uniqueVisitorCounter, urlRepository, cache);
     }
 
     @Test
     void aHeadRequestFromABotCountsNotEvenABotClick() {
-        clickAnalyticsService.recordClick(URL_ID, SHORT_URL, ClickRequest.of(CLIENT_IP, "Discordbot/2.0", "https://t.co/x", "hr").asHead());
+        clickAnalyticsService.recordClick(URL_ID, ClickRequest.of(CLIENT_IP, "Discordbot/2.0", "https://t.co/x", "hr").asHead());
 
         verifyNoInteractions(linkStatsRepository, uniqueVisitorCounter, urlRepository, cache);
     }
@@ -142,7 +142,7 @@ class DefaultClickAnalyticsServiceTest {
     void newVisitorCountsAVisitAndAllSixBreakdowns() {
         when(uniqueVisitorCounter.isNewVisitor(URL_ID, DAY, CLICK)).thenReturn(true);
 
-        clickAnalyticsService.recordClick(URL_ID, SHORT_URL, CLICK);
+        clickAnalyticsService.recordClick(URL_ID, CLICK);
 
         verify(urlRepository).recordVisit(eq(URL_ID), any(LocalDateTime.class));
         verify(linkStatsRepository).incrementDailyStats(URL_ID, DAY, 1, 1, 0);
@@ -153,7 +153,7 @@ class DefaultClickAnalyticsServiceTest {
 
     @Test
     void aQrScanIsCountedUnderSourceQr() {
-        clickAnalyticsService.recordClick(URL_ID, SHORT_URL, CLICK.withQrScan());
+        clickAnalyticsService.recordClick(URL_ID, CLICK.withQrScan());
 
         verify(linkStatsRepository).incrementDailyStats(URL_ID, DAY, 1, 0, 0);
         verify(linkStatsRepository).incrementBreakdown(URL_ID, DAY, Map.of(
@@ -164,7 +164,7 @@ class DefaultClickAnalyticsServiceTest {
     void repeatVisitorCountsAClickButNoVisit() {
         when(uniqueVisitorCounter.isNewVisitor(URL_ID, DAY, CLICK)).thenReturn(false);
 
-        clickAnalyticsService.recordClick(URL_ID, SHORT_URL, CLICK);
+        clickAnalyticsService.recordClick(URL_ID, CLICK);
 
         verify(linkStatsRepository).incrementDailyStats(URL_ID, DAY, 1, 0, 0);
         verify(linkStatsRepository).incrementBreakdown(URL_ID, DAY, CLICK_BREAKDOWN);
@@ -175,8 +175,8 @@ class DefaultClickAnalyticsServiceTest {
     void the51stNewValueOfTheDayIsCountedAsOther() {
         when(linkStatsRepository.findBreakdownValues(URL_ID, DAY)).thenReturn(Map.of(REFERRER, sites(50)));
 
-        clickAnalyticsService.recordClick(URL_ID, SHORT_URL, CLICK);
-        clickAnalyticsService.recordClick(URL_ID, SHORT_URL, ClickRequest.of(CLIENT_IP, SAFARI_IPHONE, "https://site3.com/menu", "hr"));
+        clickAnalyticsService.recordClick(URL_ID, CLICK);
+        clickAnalyticsService.recordClick(URL_ID, ClickRequest.of(CLIENT_IP, SAFARI_IPHONE, "https://site3.com/menu", "hr"));
 
         verify(linkStatsRepository, times(2)).incrementBreakdown(eq(URL_ID), eq(DAY), breakdown.capture());
         assertThat(breakdown.getAllValues()).extracting(values -> values.get(REFERRER)).containsExactly("other", "site3.com");
@@ -189,7 +189,7 @@ class DefaultClickAnalyticsServiceTest {
         stored.add("other");
         when(linkStatsRepository.findBreakdownValues(URL_ID, DAY)).thenReturn(Map.of(REFERRER, stored));
 
-        clickAnalyticsService.recordClick(URL_ID, SHORT_URL, CLICK);
+        clickAnalyticsService.recordClick(URL_ID, CLICK);
 
         verify(linkStatsRepository).incrementBreakdown(URL_ID, DAY, CLICK_BREAKDOWN);
     }
@@ -202,8 +202,8 @@ class DefaultClickAnalyticsServiceTest {
         final var longest = "app:" + "a".repeat(251);
         when(classifier.classify(any(ClickRequest.class))).thenReturn(longest, longest + "b");
 
-        service.recordClick(URL_ID, SHORT_URL, CLICK);
-        service.recordClick(URL_ID, SHORT_URL, CLICK);
+        service.recordClick(URL_ID, CLICK);
+        service.recordClick(URL_ID, CLICK);
 
         verify(linkStatsRepository, times(2)).incrementBreakdown(eq(URL_ID), eq(DAY), breakdown.capture());
         assertThat(breakdown.getAllValues()).extracting(values -> values.get(REFERRER)).containsExactly(longest, "other");
@@ -236,7 +236,7 @@ class DefaultClickAnalyticsServiceTest {
             return null;
         }).when(linkStatsRepository).incrementBreakdown(URL_ID, DAY, CLICK_BREAKDOWN);
 
-        service.recordClick(URL_ID, SHORT_URL, CLICK);
+        service.recordClick(URL_ID, CLICK);
 
         assertThat(visitInTransaction).hasValue(true);
         assertThat(statsInTransaction).hasValue(false);
@@ -250,7 +250,7 @@ class DefaultClickAnalyticsServiceTest {
         when(uniqueVisitorCounter.isNewVisitor(URL_ID, DAY, CLICK)).thenReturn(true);
         doThrow(new DataAccessResourceFailureException("connection refused")).when(linkStatsRepository).incrementDailyStats(URL_ID, DAY, 1, 1, 0);
 
-        assertThatCode(() -> clickAnalyticsService.recordClick(URL_ID, SHORT_URL, CLICK)).doesNotThrowAnyException();
+        assertThatCode(() -> clickAnalyticsService.recordClick(URL_ID, CLICK)).doesNotThrowAnyException();
 
         verify(urlRepository).recordVisit(eq(URL_ID), any(LocalDateTime.class));
         verify(linkStatsRepository).incrementBreakdown(URL_ID, DAY, CLICK_BREAKDOWN);
@@ -263,7 +263,7 @@ class DefaultClickAnalyticsServiceTest {
         when(uniqueVisitorCounter.isNewVisitor(URL_ID, DAY, CLICK)).thenReturn(true);
         when(urlRepository.recordVisit(eq(URL_ID), any(LocalDateTime.class))).thenThrow(new DataAccessResourceFailureException("connection refused"));
 
-        assertThatCode(() -> clickAnalyticsService.recordClick(URL_ID, SHORT_URL, CLICK)).doesNotThrowAnyException();
+        assertThatCode(() -> clickAnalyticsService.recordClick(URL_ID, CLICK)).doesNotThrowAnyException();
 
         verify(linkStatsRepository).incrementDailyStats(URL_ID, DAY, 1, 1, 0);
         verify(linkStatsRepository).incrementBreakdown(URL_ID, DAY, CLICK_BREAKDOWN);
@@ -276,7 +276,7 @@ class DefaultClickAnalyticsServiceTest {
         final var rejecting = mock(TaskExecutor.class);
         doThrow(new TaskRejectedException("queue full")).when(rejecting).execute(any(Runnable.class));
 
-        assertThatCode(() -> service(rejecting).recordClick(URL_ID, SHORT_URL, CLICK)).doesNotThrowAnyException();
+        assertThatCode(() -> service(rejecting).recordClick(URL_ID, CLICK)).doesNotThrowAnyException();
 
         verifyNoInteractions(linkStatsRepository, urlRepository);
         assertThat(output).contains("Click analytics dropped urlId=7 exception=" + TaskRejectedException.class.getName());
@@ -286,7 +286,7 @@ class DefaultClickAnalyticsServiceTest {
     void unlockClicksRecordUnknownReferrer() {
         final var click = CLICK.withUnknownReferrer();
 
-        clickAnalyticsService.recordClick(URL_ID, SHORT_URL, click);
+        clickAnalyticsService.recordClick(URL_ID, click);
 
         verify(linkStatsRepository).incrementBreakdown(eq(URL_ID), eq(DAY), breakdown.capture());
         assertThat(breakdown.getValue()).containsEntry(REFERRER, "unknown");
@@ -294,8 +294,8 @@ class DefaultClickAnalyticsServiceTest {
 
     @Test
     void aTorExitAndANoCountryHeaderAreStoredAsTorAndUnknown() {
-        clickAnalyticsService.recordClick(URL_ID, SHORT_URL, ClickRequest.of(CLIENT_IP, SAFARI_IPHONE, "https://t.co/x", "t1"));
-        clickAnalyticsService.recordClick(URL_ID, SHORT_URL, ClickRequest.of(CLIENT_IP, SAFARI_IPHONE, "https://t.co/x", "xx"));
+        clickAnalyticsService.recordClick(URL_ID, ClickRequest.of(CLIENT_IP, SAFARI_IPHONE, "https://t.co/x", "t1"));
+        clickAnalyticsService.recordClick(URL_ID, ClickRequest.of(CLIENT_IP, SAFARI_IPHONE, "https://t.co/x", "xx"));
 
         verify(linkStatsRepository, times(2)).incrementBreakdown(eq(URL_ID), eq(DAY), breakdown.capture());
         assertThat(breakdown.getAllValues()).extracting(values -> values.get(COUNTRY)).containsExactly("tor", "unknown");
@@ -306,7 +306,7 @@ class DefaultClickAnalyticsServiceTest {
         final var tasks = new ArrayList<Runnable>();
         when(analyticsDays.today()).thenReturn(DAY, DAY.plusDays(1));
 
-        service(tasks::add).recordClick(URL_ID, SHORT_URL, CLICK);
+        service(tasks::add).recordClick(URL_ID, CLICK);
 
         verifyNoInteractions(linkStatsRepository);
         verifyNoInteractions(uniqueVisitorCounter, urlRepository);
@@ -322,7 +322,7 @@ class DefaultClickAnalyticsServiceTest {
     void nullLinkIdRecordsNothing() {
         final var recording = mock(TaskExecutor.class);
 
-        service(recording).recordClick(null, SHORT_URL, CLICK);
+        service(recording).recordClick(null, CLICK);
 
         verifyNoInteractions(recording, analyticsDays, linkStatsRepository, urlRepository, uniqueVisitorCounter);
     }
@@ -344,8 +344,8 @@ class DefaultClickAnalyticsServiceTest {
         when(linkStatsRepository.findBreakdownValues(anyLong(), any())).thenThrow(failure);
 
         assertThatCode(() -> {
-            clickAnalyticsService.recordClick(URL_ID, SHORT_URL, CLICK);
-            clickAnalyticsService.recordClick(URL_ID, SHORT_URL, ClickRequest.of(CLIENT_IP, "Discordbot/2.0", null, null));
+            clickAnalyticsService.recordClick(URL_ID, CLICK);
+            clickAnalyticsService.recordClick(URL_ID, ClickRequest.of(CLIENT_IP, "Discordbot/2.0", null, null));
         }).doesNotThrowAnyException();
 
         assertThat(output)

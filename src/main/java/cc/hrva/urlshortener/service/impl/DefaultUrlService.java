@@ -304,7 +304,7 @@ public class DefaultUrlService implements UrlService {
             throw new NoAuthorizationException("Incorrect password");
         }
         if (refusedAsBot(url.getVisitLimit(), click)) {
-            clickAnalyticsService.recordClick(url.getId(), place.cacheKey(), click.withUnknownReferrer());
+            clickAnalyticsService.recordClick(url.getId(), click.withUnknownReferrer());
             throw new UrlNotFoundException("URL doesn't exist");
         }
         if (!clickCheckService.mayRedirect(url.getId(), url.getLongUrl())) {
@@ -314,7 +314,7 @@ public class DefaultUrlService implements UrlService {
             return new UnlockResponse(unavailablePageUrl(place, REASON_LIMIT));
         }
 
-        clickAnalyticsService.recordClick(url.getId(), place.cacheKey(), click.withUnknownReferrer());
+        clickAnalyticsService.recordClick(url.getId(), click.withUnknownReferrer());
         return new UnlockResponse(url.getLongUrl());
     }
 
@@ -732,13 +732,13 @@ public class DefaultUrlService implements UrlService {
 
         if (url.getPasswordHash() == null) {
             if (refusedAsBot(url.getVisitLimit(), click)) {
-                clickAnalyticsService.recordClick(url.getId(), place.cacheKey(), click);
+                clickAnalyticsService.recordClick(url.getId(), click);
                 throw new UrlNotFoundException("URL doesn't exist");
             }
             if (openRefused(place, url.getId(), url.getVisitLimit(), click)) {
                 throw new UrlNotFoundException("URL doesn't exist");
             }
-            clickAnalyticsService.recordClick(url.getId(), place.cacheKey(), click);
+            clickAnalyticsService.recordClick(url.getId(), click);
         }
         return UrlResponse.from(url).publicView();
     }
@@ -895,7 +895,7 @@ public class DefaultUrlService implements UrlService {
                     return gate;
                 }
                 if (refusedAsBot(cachedValue.visitLimit(), click)) {
-                    clickAnalyticsService.recordClick(cachedValue.id(), place.cacheKey(), click);
+                    clickAnalyticsService.recordClick(cachedValue.id(), click);
                     return unavailable(place, REASON_MISSING);
                 }
                 if (!clickCheckService.mayRedirect(cachedValue.id(), cachedValue.longUrl())) {
@@ -941,7 +941,7 @@ public class DefaultUrlService implements UrlService {
             return Found.answered(redirectTo(protectedPageUrl(place)));
         }
         if (refusedAsBot(url.getVisitLimit(), click)) {
-            clickAnalyticsService.recordClick(url.getId(), place.cacheKey(), click);
+            clickAnalyticsService.recordClick(url.getId(), click);
             return Found.answered(unavailable(place, REASON_MISSING));
         }
         if (!clickCheckService.mayRedirect(url.getId(), url.getLongUrl())) {
@@ -955,7 +955,7 @@ public class DefaultUrlService implements UrlService {
         if (openRefused(place, link.id(), link.visitLimit(), click)) {
             return unavailable(place, REASON_LIMIT);
         }
-        clickAnalyticsService.recordClick(link.id(), place.cacheKey(), click);
+        clickAnalyticsService.recordClick(link.id(), click);
         return destinationView(place, link, click);
     }
 

@@ -3376,7 +3376,7 @@ class UrlServiceTest {
 
         assertThat(urlService.unlockUrl(null, "a", "pw", CLICK).longUrl()).isEqualTo("https://a.com");
 
-        verify(clickAnalyticsService).recordClick(7L, "a", CLICK.withUnknownReferrer());
+        verify(clickAnalyticsService).recordClick(7L, CLICK.withUnknownReferrer());
     }
 
     @Test
@@ -3389,7 +3389,7 @@ class UrlServiceTest {
         assertThat(urlService.unlockUrl(null, "a", "pw", CLICK).longUrl()).isEqualTo("https://a.com");
 
         verify(urlRepository).consumeOpen(7L);
-        verify(clickAnalyticsService).recordClick(7L, "a", CLICK.withUnknownReferrer());
+        verify(clickAnalyticsService).recordClick(7L, CLICK.withUnknownReferrer());
     }
 
     @Test
@@ -3402,7 +3402,7 @@ class UrlServiceTest {
 
         assertThat(urlService.unlockUrl(null, "a", "pw", CLICK).longUrl()).isEqualTo(FRONTEND + "/unavailable?s=a&reason=limit");
 
-        verify(clickAnalyticsService, never()).recordClick(any(), any(), any());
+        verify(clickAnalyticsService, never()).recordClick(any(), any());
     }
 
     @Test
@@ -3416,7 +3416,7 @@ class UrlServiceTest {
                 .isInstanceOf(UrlNotFoundException.class)
                 .hasMessage("URL doesn't exist");
 
-        verify(clickAnalyticsService).recordClick(7L, "a", CLICK.withUnknownReferrer());
+        verify(clickAnalyticsService).recordClick(7L, CLICK.withUnknownReferrer());
         verify(clickCheckService, never()).mayRedirect(org.mockito.ArgumentMatchers.anyLong(), any());
     }
 
@@ -3609,7 +3609,7 @@ class UrlServiceTest {
 
         urlService.revealUrlAndRecordClick(null, "menu", CLICK);
 
-        verify(clickAnalyticsService).recordClick(3L, "menu", CLICK);
+        verify(clickAnalyticsService).recordClick(3L, CLICK);
         verify(clickAnalyticsService, never()).isBot(any());
     }
 
@@ -3623,7 +3623,7 @@ class UrlServiceTest {
                 .isInstanceOf(UrlNotFoundException.class)
                 .hasMessage("URL doesn't exist");
 
-        verify(clickAnalyticsService).recordClick(3L, "menu", CLICK);
+        verify(clickAnalyticsService).recordClick(3L, CLICK);
     }
 
     @Test
@@ -3636,7 +3636,7 @@ class UrlServiceTest {
         assertThat(urlService.revealUrlAndRecordClick(null, "menu", CLICK).longUrl()).isEqualTo("https://gableci.hrva.cc");
 
         verify(urlRepository).consumeOpen(3L);
-        verify(clickAnalyticsService).recordClick(3L, "menu", CLICK);
+        verify(clickAnalyticsService).recordClick(3L, CLICK);
     }
 
     @Test
@@ -3649,7 +3649,7 @@ class UrlServiceTest {
                 .isInstanceOf(UrlNotFoundException.class)
                 .hasMessage("URL doesn't exist");
 
-        verify(clickAnalyticsService, never()).recordClick(any(), any(), any());
+        verify(clickAnalyticsService, never()).recordClick(any(), any());
     }
 
     @Test
@@ -3710,7 +3710,7 @@ class UrlServiceTest {
 
         assertThat(result.longUrl()).isNull();
         assertThat(result.passwordProtected()).isTrue();
-        verify(clickAnalyticsService, never()).recordClick(any(), any(), any());
+        verify(clickAnalyticsService, never()).recordClick(any(), any());
         verify(clickAnalyticsService, never()).isBot(any());
     }
 
@@ -3748,7 +3748,7 @@ class UrlServiceTest {
 
         assertThat(locationOf(urlServiceWithMeters().redirectResultUrl("abc", CLICK))).isEqualTo("https://example.com/a");
 
-        verify(clickAnalyticsService).recordClick(7L, "abc", CLICK);
+        verify(clickAnalyticsService).recordClick(7L, CLICK);
     }
 
     @Test
@@ -3760,7 +3760,7 @@ class UrlServiceTest {
 
         assertThat(locationOf(urlServiceWithMeters().redirectResultUrl("abc", CLICK))).isEqualTo("https://example.com/a");
 
-        verify(clickAnalyticsService).recordClick(5L, "abc", CLICK);
+        verify(clickAnalyticsService).recordClick(5L, CLICK);
         verifyNoInteractions(urlRepository);
     }
 
@@ -3777,7 +3777,7 @@ class UrlServiceTest {
 
         final var order = org.mockito.Mockito.inOrder(urlRepository, clickAnalyticsService);
         order.verify(urlRepository).consumeOpen(5L);
-        order.verify(clickAnalyticsService).recordClick(5L, "abc", CLICK);
+        order.verify(clickAnalyticsService).recordClick(5L, CLICK);
         verify(cache, never()).evict(any());
     }
 
@@ -3793,7 +3793,7 @@ class UrlServiceTest {
         assertThat(locationOf(urlServiceWithMeters().redirectResultUrl("abc", CLICK))).isEqualTo("https://example.com/a");
 
         verify(cache).evict("abc");
-        verify(clickAnalyticsService).recordClick(5L, "abc", CLICK);
+        verify(clickAnalyticsService).recordClick(5L, CLICK);
     }
 
     @Test
@@ -3809,7 +3809,7 @@ class UrlServiceTest {
 
         assertUnavailable(redirect, "abc", null, "limit");
         verify(cache).evict("abc");
-        verify(clickAnalyticsService, never()).recordClick(any(), any(), any());
+        verify(clickAnalyticsService, never()).recordClick(any(), any());
     }
 
     @Test
@@ -3868,7 +3868,7 @@ class UrlServiceTest {
         final var order = org.mockito.Mockito.inOrder(urlRepository, clickAnalyticsService);
         order.verify(urlRepository).findServed(null, "abc");
         order.verify(urlRepository).consumeOpen(7L);
-        order.verify(clickAnalyticsService).recordClick(7L, "abc", CLICK);
+        order.verify(clickAnalyticsService).recordClick(7L, CLICK);
     }
 
     @Test
@@ -3904,7 +3904,7 @@ class UrlServiceTest {
         final var redirect = urlServiceWithMeters().redirectResultUrl("abc", CLICK);
 
         assertUnavailable(redirect, "abc", null, "missing");
-        verify(clickAnalyticsService).recordClick(7L, "abc", CLICK);
+        verify(clickAnalyticsService).recordClick(7L, CLICK);
         verifyNoInteractions(clickCheckService);
         verify(cache, never()).put(any(), any());
     }
@@ -3921,7 +3921,7 @@ class UrlServiceTest {
         final var redirect = urlServiceWithMeters().redirectResultUrl("abc", CLICK);
 
         assertUnavailable(redirect, "abc", null, "missing");
-        verify(clickAnalyticsService).recordClick(5L, "abc", CLICK);
+        verify(clickAnalyticsService).recordClick(5L, CLICK);
         verifyNoInteractions(clickCheckService, urlRepository);
     }
 
@@ -3934,7 +3934,7 @@ class UrlServiceTest {
         assertThat(locationOf(urlServiceWithMeters().redirectResultUrl("abc", bot))).isEqualTo("https://example.com/a");
 
         verify(clickAnalyticsService, never()).isBot(any());
-        verify(clickAnalyticsService).recordClick(7L, "abc", bot);
+        verify(clickAnalyticsService).recordClick(7L, bot);
     }
 
     @Test
@@ -3966,7 +3966,7 @@ class UrlServiceTest {
         final var redirect = urlServiceWithMeters().redirectResultUrl("abc", CLICK);
 
         assertUnavailable(redirect, "abc", null, "blocked");
-        verify(clickAnalyticsService, never()).recordClick(any(), any(), any());
+        verify(clickAnalyticsService, never()).recordClick(any(), any());
     }
 
     @Test
@@ -3982,7 +3982,7 @@ class UrlServiceTest {
 
         assertUnavailable(redirect, "abc", null, "blocked");
         verify(cache, never()).put(any(), any());
-        verify(clickAnalyticsService, never()).recordClick(any(), any(), any());
+        verify(clickAnalyticsService, never()).recordClick(any(), any());
     }
 
     @Test
@@ -3997,7 +3997,7 @@ class UrlServiceTest {
         assertThat(locationOf(redirect)).isEqualTo("https://example.com/a");
         verify(clickCheckService).mayRedirect(5L, "https://example.com/a");
         verify(cache).put(eq("abc"), any(UrlResponse.class));
-        verify(clickAnalyticsService).recordClick(5L, "abc", CLICK);
+        verify(clickAnalyticsService).recordClick(5L, CLICK);
     }
 
     @Test
@@ -4023,7 +4023,7 @@ class UrlServiceTest {
         final var result = urlService.unlockUrl(null, "a", "pw", CLICK);
 
         assertThat(result.longUrl()).isEqualTo(FRONTEND + "/unavailable?s=a&reason=blocked");
-        verify(clickAnalyticsService, never()).recordClick(any(), any(), any());
+        verify(clickAnalyticsService, never()).recordClick(any(), any());
     }
 
     @Test
@@ -4143,7 +4143,7 @@ class UrlServiceTest {
 
         assertThat(locationOf(redirect)).isEqualTo(location);
         verify(clickCheckService).mayRedirect(5L, stored);
-        verify(clickAnalyticsService).recordClick(5L, "abc", CLICK);
+        verify(clickAnalyticsService).recordClick(5L, CLICK);
     }
 
     @org.junit.jupiter.params.ParameterizedTest
@@ -4239,14 +4239,14 @@ class UrlServiceTest {
             assertThat(page.alias()).isEqualTo("abc");
             assertThat(page.frontendUrl()).isEqualTo(FRONTEND);
         });
-        verify(clickAnalyticsService, times(1)).recordClick(5L, "abc", CLICK);
+        verify(clickAnalyticsService, times(1)).recordClick(5L, CLICK);
         assertThat(((UrlResponse) urls.getCache("urls").get("abc").get()).warningPage()).isTrue();
 
         final var fromTheCache = service.redirectResultUrl("abc", CLICK);
 
         assertThat(fromTheCache).isEqualTo(fromTheDatabase);
         verify(urlRepository, times(1)).findServed(null, "abc");
-        verify(clickAnalyticsService, times(2)).recordClick(5L, "abc", CLICK);
+        verify(clickAnalyticsService, times(2)).recordClick(5L, CLICK);
         verify(clickCheckService, times(2)).mayRedirect(5L, RANDOM_LINK);
     }
 
@@ -4321,8 +4321,7 @@ class UrlServiceTest {
 
         assertThat(locationOf(urlServiceWithMeters().redirectResultUrl("abc", CLICK))).isEqualTo(RANDOM_LINK);
         assertThat(locationOf(urlServiceWithMeters().redirectResultUrl("stored", CLICK))).isEqualTo(RANDOM_LINK);
-        verify(clickAnalyticsService).recordClick(5L, "abc", CLICK);
-        verify(clickAnalyticsService).recordClick(5L, "stored", CLICK);
+        verify(clickAnalyticsService, times(2)).recordClick(5L, CLICK);
     }
 
     @Test
@@ -4345,8 +4344,7 @@ class UrlServiceTest {
 
         assertUnavailable(urlServiceWithMeters().redirectResultUrl("abc", CLICK), "abc", null, "missing");
         assertUnavailable(urlServiceWithMeters().redirectResultUrl("stored", CLICK), "stored", null, "missing");
-        verify(clickAnalyticsService).recordClick(5L, "abc", CLICK);
-        verify(clickAnalyticsService).recordClick(5L, "stored", CLICK);
+        verify(clickAnalyticsService, times(2)).recordClick(5L, CLICK);
         verifyNoInteractions(clickCheckService);
     }
 
@@ -4360,7 +4358,7 @@ class UrlServiceTest {
 
         assertUnavailable(urlServiceWithMeters().redirectResultUrl("abc", CLICK), "abc", null, "blocked");
         assertUnavailable(urlServiceWithMeters().redirectResultUrl("stored", CLICK), "stored", null, "blocked");
-        verify(clickAnalyticsService, never()).recordClick(any(), any(), any());
+        verify(clickAnalyticsService, never()).recordClick(any(), any());
     }
 
     @Test
@@ -4370,7 +4368,7 @@ class UrlServiceTest {
         when(appProperties.getFrontendUrl()).thenReturn(FRONTEND);
 
         assertThat(locationOf(urlServiceWithMeters().redirectResultUrl("abc", CLICK))).isEqualTo(FRONTEND + "/protected/abc");
-        verify(clickAnalyticsService, never()).recordClick(any(), any(), any());
+        verify(clickAnalyticsService, never()).recordClick(any(), any());
     }
 
     @Test
@@ -4470,8 +4468,8 @@ class UrlServiceTest {
         verify(urlRepository).findServed(7L, "menu");
         assertThat(((UrlResponse) urls.getCache("urls").get("menu").get()).id()).isEqualTo(1L);
         assertThat(((UrlResponse) urls.getCache("urls").get("7/menu").get()).id()).isEqualTo(2L);
-        verify(clickAnalyticsService, times(2)).recordClick(1L, "menu", CLICK);
-        verify(clickAnalyticsService, times(2)).recordClick(2L, "7/menu", CLICK);
+        verify(clickAnalyticsService, times(2)).recordClick(1L, CLICK);
+        verify(clickAnalyticsService, times(2)).recordClick(2L, CLICK);
     }
 
     @Test
@@ -4630,8 +4628,8 @@ class UrlServiceTest {
         assertThat(urlService.revealUrlAndRecordClick(null, "menu", CLICK).longUrl()).isEqualTo("https://a.example/menu");
         assertThat(urlService.peekUrlByShortUrl("go.example.com", "menu")).isSameAs(peek);
 
-        verify(clickAnalyticsService).recordClick(2L, "7/menu", CLICK);
-        verify(clickAnalyticsService).recordClick(1L, "menu", CLICK);
+        verify(clickAnalyticsService).recordClick(2L, CLICK);
+        verify(clickAnalyticsService).recordClick(1L, CLICK);
     }
 
     @Test
@@ -4680,7 +4678,7 @@ class UrlServiceTest {
         verify(rateLimiter).tryAcquire(RateLimiter.clientKey("unlock:7/menu", CLIENT_IP), 10, Duration.ofMinutes(15));
         verify(rateLimiter).tryAcquire("unlock:7/menu", 50, Duration.ofMinutes(15));
         verify(rateLimiter, never()).tryAcquire(eq("unlock:menu"), anyInt(), any());
-        verify(clickAnalyticsService).recordClick(2L, "7/menu", CLICK.withUnknownReferrer());
+        verify(clickAnalyticsService).recordClick(2L, CLICK.withUnknownReferrer());
         verify(urlRepository, never()).findActive(isNull(), any());
     }
 

@@ -46,7 +46,7 @@ public class DefaultClickAnalyticsService implements ClickAnalyticsService {
     private final TransactionOperations transactionOperations;
 
     @Override
-    public void recordClick(final Long urlId, final String cacheKey, final ClickRequest click) {
+    public void recordClick(final Long urlId, final ClickRequest click) {
         if (urlId == null || click.head()) {
             return;
         }

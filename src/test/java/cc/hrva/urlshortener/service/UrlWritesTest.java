@@ -268,8 +268,8 @@ class UrlWritesTest {
         }
 
         assertThat(transactionDuringTheCheck).isFalse();
-        verify(clickAnalyticsService, times(2)).recordClick(ON_HRVA, "menu", CLICK);
-        verify(clickAnalyticsService, times(2)).recordClick(ON_DOMAIN, domainId + "/menu", CLICK);
+        verify(clickAnalyticsService, times(2)).recordClick(ON_HRVA, CLICK);
+        verify(clickAnalyticsService, times(2)).recordClick(ON_DOMAIN, CLICK);
     }
 
     @Test
