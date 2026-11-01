@@ -101,7 +101,7 @@ public record LinkUnavailableView(TemplateEngine templateEngine, String frontend
         return HttpMethod.HEAD.matches(request.getMethod());
     }
 
-    private static boolean wantsJson(final HttpServletRequest request) {
+    static boolean wantsJson(final HttpServletRequest request) {
         final var accept = request.getHeader(HttpHeaders.ACCEPT);
         if (StringUtils.isBlank(accept)) {
             return false;
@@ -120,9 +120,9 @@ public record LinkUnavailableView(TemplateEngine templateEngine, String frontend
         return trimmed.contains(SCHEME_SEPARATOR) ? StringUtils.substringAfter(trimmed, SCHEME_SEPARATOR) : trimmed;
     }
 
-    private static final class BodylessResponse extends jakarta.servlet.http.HttpServletResponseWrapper {
+    static final class BodylessResponse extends jakarta.servlet.http.HttpServletResponseWrapper {
 
-        private BodylessResponse(final HttpServletResponse response) {
+        BodylessResponse(final HttpServletResponse response) {
             super(response);
         }
 

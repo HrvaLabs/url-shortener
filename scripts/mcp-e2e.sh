@@ -69,7 +69,8 @@
 # destination (its own parameters win, qr dropped, the fragment kept, the host never changes); with Redis paused a create without an
 # account and a link-password unlock are 503 with Retry-After while signed-in and API-key creates go on, and a real unlock limit stays 429;
 # the security chain denies by default: signed-in routes under a public pattern, wrong methods and unknown paths are 401 without a sign-in;
-# with Postgres paused an uncached link and a signed-in request answer 503 within 8 seconds while a cached link still redirects.
+# with Postgres paused an uncached link and a signed-in request answer 503 within 8 seconds (a small HTML page for a browser on the
+# link, the problem for Accept: application/json) while a cached link still redirects.
 #
 #   scripts/mcp-e2e.sh                         builds the jar, then runs every step
 #   MCP_E2E_SKIP_BUILD=1 scripts/mcp-e2e.sh    reuses target/url-shortener-*.jar
@@ -2630,10 +2631,17 @@ started=$SECONDS
 http -A "$BROWSER_USER_AGENT" "$BASE/e2e-db-uncached"
 waited=$(( SECONDS - started ))
 show "the uncached link with Postgres paused -> $HTTP_STATUS after ${waited}s"
-expect_eq "$HTTP_STATUS $(header_value retry-after) $(jq -r .detail <<<"$HTTP_BODY")" \
-    "503 60 hrva.cc can't reach its database right now. Try again in a minute." "an uncached link is 503 with Retry-After"
+expect_eq "$HTTP_STATUS $(header_value retry-after) $(header_value content-type)" "503 60 text/html;charset=UTF-8" \
+    "an uncached link is a 503 page with Retry-After for a browser"
 (( waited <= 8 )) || fail "the uncached link took ${waited}s, more than 8"
 ok "it answered within ${waited}s"
+expect_contains "$HTTP_BODY" "hrva.cc can&#39;t open links right now. Try again in a minute." "the page says links can't open right now"
+expect_eq "$(page_headers)" "no-store, no-transform|$PAGE_CSP|noindex, nofollow|no-referrer" "with the warning page's headers"
+[[ $HTTP_BODY != *"<script"* ]] || fail "the links down page has a <script"
+ok "the page has no <script"
+http -A "$BROWSER_USER_AGENT" -H 'Accept: application/json' "$BASE/e2e-db-uncached"
+expect_eq "$HTTP_STATUS $(header_value retry-after) $(header_value content-type) $(jq -r .detail <<<"$HTTP_BODY")" \
+    "503 60 application/problem+json hrva.cc can't reach its database right now. Try again in a minute." "an API client gets the problem"
 http -A "$BROWSER_USER_AGENT" "$BASE/e2e-db-cached"
 expect_eq "$HTTP_STATUS $HTTP_LOCATION" "302 https://e2e-links.com/e2e-db-cached" "a cached link still redirects"
 started=$SECONDS

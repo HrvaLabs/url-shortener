@@ -3839,6 +3839,24 @@ class UrlServiceTest {
     }
 
     @Test
+    void anUnreachableDatabaseOnTheRedirectAnswersTheLinksDownPage() {
+        when(urlRepository.findServed(null, "abc")).thenThrow(new org.springframework.dao.QueryTimeoutException("hung"));
+
+        assertThat(urlServiceWithMeters().redirectResultUrl("abc", CLICK)).isInstanceOfSatisfying(cc.hrva.urlshortener.controller.LinksDownView.class, page -> {
+            assertThat(page.shortLink()).endsWith("/abc");
+            assertThat(page.detail()).isEqualTo("hrva.cc can't reach its database right now. Try again in a minute.");
+            assertThat(page.retryAfter()).isEqualTo(Duration.ofMinutes(1));
+        });
+    }
+
+    @Test
+    void anyOtherFailureOnTheRedirectIsNotHidden() {
+        when(urlRepository.findServed(null, "abc")).thenThrow(new IllegalStateException("bug"));
+
+        assertThatThrownBy(() -> urlServiceWithMeters().redirectResultUrl("abc", CLICK)).isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
     void aLimitedLinkFromTheDatabaseUsesAnOpenAfterItsReadAndBeforeItRedirects() {
         final var url = Url.builder().id(7L).shortUrl("abc").longUrl("https://example.com/a").visits(0L).visitLimit(2L).active(true).build();
         when(urlRepository.findServed(null, "abc")).thenReturn(Optional.of(url));

@@ -1,6 +1,7 @@
 package cc.hrva.urlshortener.service.impl;
 
 import cc.hrva.urlshortener.controller.LinkUnavailableView;
+import cc.hrva.urlshortener.controller.LinksDownView;
 import cc.hrva.urlshortener.util.ApiDates;
 import cc.hrva.urlshortener.exception.RateLimitExceededException;
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
@@ -64,6 +65,7 @@ import cc.hrva.urlshortener.service.linksignal.AnonymousLinkSignals.Signals;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiter;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiterUnavailableException;
 import cc.hrva.urlshortener.service.settings.SettingKey;
+import cc.hrva.urlshortener.util.DatabaseOutages;
 import cc.hrva.urlshortener.util.DomainNames;
 import cc.hrva.urlshortener.util.ForwardedQueries;
 import cc.hrva.urlshortener.util.RedirectLocations;
@@ -144,6 +146,7 @@ public class DefaultUrlService implements UrlService {
     private static final String ANONYMOUS_CREATE_UNAVAILABLE = "Links without an account can't be made right now. Try again in a minute, or sign in.";
     private static final String UNLOCK_UNAVAILABLE = "Password checks are paused for a moment. Try again in a minute.";
     private static final Duration LIMITER_RETRY = Duration.ofMinutes(1);
+    private static final Duration LINKS_DOWN_RETRY = Duration.ofMinutes(1);
     private static final int REDIRECT_DATABASE_SECONDS = 3;
     private static final String ROLE_ADMIN = "ROLE_ADMIN";
     private static final String BLOCKED_WHILE_EDITING = "This link was blocked while you were editing it. Reload and try again.";
@@ -822,6 +825,25 @@ public class DefaultUrlService implements UrlService {
     }
 
     private View redirect(final LinkPlace place, final ClickRequest click) {
+        try {
+            return redirectOrFail(place, click);
+        } catch (final ServiceBusyException exception) {
+            log.warn("Redirect answered with the links down page shortUrl={} reason=busy", place.alias());
+            return linksDown(place, exception.getMessage(), exception.getRetryAfter());
+        } catch (final RuntimeException exception) {
+            if (!DatabaseOutages.isOutage(exception)) {
+                throw exception;
+            }
+            log.warn("Redirect answered with the links down page shortUrl={} exception={}", place.alias(), exception.getClass().getName());
+            return linksDown(place, DatabaseOutages.UNREACHABLE, LINKS_DOWN_RETRY);
+        }
+    }
+
+    private View linksDown(final LinkPlace place, final String detail, final Duration retryAfter) {
+        return LinksDownView.of(templateEngine, appProperties.getFrontendUrl(), appProperties.getServerUrl(), place.alias(), place.hostname(), detail, retryAfter);
+    }
+
+    private View redirectOrFail(final LinkPlace place, final ClickRequest click) {
         final var sample = Timer.start(meterRegistry);
         if (place.domainId() == null) {
             log.info("Redirect shortUrl={}", place.alias());
