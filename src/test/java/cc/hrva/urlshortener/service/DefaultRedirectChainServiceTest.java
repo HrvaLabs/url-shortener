@@ -475,7 +475,7 @@ class DefaultRedirectChainServiceTest {
 
     private RedirectChainService serviceFollowingRedirectsOn(final HttpServer server) {
         final var loopbackOnly = "http://127.0.0.1:" + server.getAddress().getPort() + "/";
-        final RedirectFollower follower = new PublicHttpFetcher(url -> url.startsWith(loopbackOnly))::followRedirects;
+        final RedirectFollower follower = new PublicHttpFetcher(url -> url.startsWith(loopbackOnly), InetAddress::isLoopbackAddress)::followRedirects;
         return new DefaultRedirectChainService(urlRepository, follower, linkCheckService, safeBrowsingService, moderationService,
                 reviewQueueService, Clock.fixed(NOW, ZoneOffset.UTC));
     }

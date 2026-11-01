@@ -37,7 +37,7 @@ class PublicHttpFetcherTest {
     private static final String LAST_MODIFIED = "Tue, 21 Oct 2026 08:00:00 GMT";
 
     private final List<String> requestedPaths = new CopyOnWriteArrayList<>();
-    private final PublicHttpFetcher permissiveFetcher = new PublicHttpFetcher(url -> true);
+    private final PublicHttpFetcher permissiveFetcher = loopbackFetcher(url -> true);
 
     @TempDir
     private Path downloads;
@@ -111,7 +111,7 @@ class PublicHttpFetcherTest {
     @Test
     void targetRefusedByThePolicyIsNeverRequested() {
         respond("/list", exchange -> send(exchange, 200, "example.com\n"));
-        final var fetcher = new PublicHttpFetcher(url -> false);
+        final var fetcher = loopbackFetcher(url -> false);
 
         assertThatThrownBy(() -> fetcher.fetch(baseUrl + "/list", 100, null, null, TIMEOUT))
                 .isInstanceOf(UrlValidationException.class)
@@ -124,7 +124,7 @@ class PublicHttpFetcherTest {
         respond("/start", exchange -> redirect(exchange, "/private/list"));
         respond("/private/list", exchange -> send(exchange, 200, "example.com\n"));
         final Predicate<String> policy = url -> !url.contains("/private");
-        final var fetcher = new PublicHttpFetcher(policy);
+        final var fetcher = loopbackFetcher(policy);
 
         assertThatThrownBy(() -> fetcher.fetch(baseUrl + "/start", 100, null, null, TIMEOUT))
                 .isInstanceOf(UrlValidationException.class)
@@ -244,7 +244,7 @@ class PublicHttpFetcherTest {
                 send(exchange, 200, "0123456789A");
             }
         });
-        final var fetcher = new PublicHttpFetcher(url -> true, downloads);
+        final var fetcher = new PublicHttpFetcher(url -> true, downloads, InetAddress::isLoopbackAddress);
 
         assertThatThrownBy(() -> fetcher.fetch(baseUrl + "/list", 10, null, null, TIMEOUT))
                 .isInstanceOf(UrlValidationException.class)
@@ -328,7 +328,7 @@ class PublicHttpFetcherTest {
     void deadlineSpentBeforeAHopIsReportedAsTimedOut() {
         respond("/start", exchange -> redirect(exchange, "/next"));
         respond("/next", exchange -> send(exchange, 200, "example.com\n"));
-        final var fetcher = new PublicHttpFetcher(url -> {
+        final var fetcher = loopbackFetcher(url -> {
             if (url.endsWith("/next")) {
                 sleep(Duration.ofMillis(1200));
             }
@@ -350,7 +350,7 @@ class PublicHttpFetcherTest {
             sleep(Duration.ofSeconds(5));
             exchange.close();
         });
-        final var fetcher = new PublicHttpFetcher(url -> true, downloads);
+        final var fetcher = new PublicHttpFetcher(url -> true, downloads, InetAddress::isLoopbackAddress);
         final var startedAt = System.nanoTime();
 
         assertThatThrownBy(() -> fetcher.fetch(baseUrl + "/list", 100, null, null, Duration.ofSeconds(1)))
@@ -366,7 +366,7 @@ class PublicHttpFetcherTest {
     void aDownloadIsWrittenToTheDirectoryTheFetcherWasGiven() throws IOException {
         respond("/list", exchange -> send(exchange, 200, "example.com\n"));
 
-        final var fetched = new PublicHttpFetcher(url -> true, downloads).fetch(baseUrl + "/list", 100, null, null, TIMEOUT);
+        final var fetched = new PublicHttpFetcher(url -> true, downloads, InetAddress::isLoopbackAddress).fetch(baseUrl + "/list", 100, null, null, TIMEOUT);
 
         assertThat(fetched.body().getParent()).isEqualTo(downloads);
         assertThat(fetched.body().getFileName().toString()).startsWith("hrva-fetch-");
@@ -417,7 +417,7 @@ class PublicHttpFetcherTest {
     @Test
     void aDestinationThePolicyRefusesIsAnErrorWithoutARequest() {
         respond("/start", exchange -> send(exchange, 200, ""));
-        final var fetcher = new PublicHttpFetcher(url -> false);
+        final var fetcher = loopbackFetcher(url -> false);
 
         assertThatThrownBy(() -> fetcher.followRedirects(baseUrl + "/start", 5, TIMEOUT))
                 .isInstanceOf(UrlValidationException.class)
@@ -462,7 +462,7 @@ class PublicHttpFetcherTest {
         final var port = server.getAddress().getPort();
         respond("/start", exchange -> redirect(exchange, inUtf8("http://ｌｏｃａｌｈｏｓｔ:" + port + "/admin")));
         respond("/admin", exchange -> send(exchange, 200, ""));
-        final var fetcher = new PublicHttpFetcher(url -> url.startsWith(baseUrl) || PublicHttpFetcher.httpOrHttpsPublicOnly().test(url));
+        final var fetcher = loopbackFetcher(url -> url.startsWith(baseUrl) || PublicHttpFetcher.httpOrHttpsPublicOnly().test(url));
 
         final var chain = fetcher.followRedirects(baseUrl + "/start", 5, TIMEOUT);
 
@@ -477,7 +477,7 @@ class PublicHttpFetcherTest {
         respond("/start", exchange -> redirect(exchange, "/landing"));
         respond("/landing", exchange -> send(exchange, 200, ""));
         final var asked = new CopyOnWriteArrayList<String>();
-        final var fetcher = new PublicHttpFetcher(url -> asked.add(url) && url.startsWith(baseUrl));
+        final var fetcher = loopbackFetcher(url -> asked.add(url) && url.startsWith(baseUrl));
         final var destination = unicodeLoopbackUrl() + "/start";
 
         final var chain = fetcher.followRedirects(destination, 5, TIMEOUT);
@@ -512,7 +512,7 @@ class PublicHttpFetcherTest {
     })
     void aUnicodeSpellingOfAPrivateDestinationIsRefusedByTheGuardInItsAsciiForm(final String destination, final String ascii) {
         final var asked = new CopyOnWriteArrayList<String>();
-        final var fetcher = new PublicHttpFetcher(url -> asked.add(url) && PublicHttpFetcher.httpOrHttpsPublicOnly().test(url));
+        final var fetcher = loopbackFetcher(url -> asked.add(url) && PublicHttpFetcher.httpOrHttpsPublicOnly().test(url));
 
         assertThatThrownBy(() -> fetcher.followRedirects(destination, 5, TIMEOUT))
                 .isInstanceOf(UrlValidationException.class)
@@ -525,7 +525,7 @@ class PublicHttpFetcherTest {
     void anAbsoluteLocationIsKeptAsReceivedAndJudgedInItsAsciiForm() {
         respond("/start", exchange -> redirect(exchange, inUtf8("https://\u010devapi.example/menu")));
         final var asked = new CopyOnWriteArrayList<String>();
-        final var fetcher = new PublicHttpFetcher(url -> asked.add(url) && url.startsWith(baseUrl));
+        final var fetcher = loopbackFetcher(url -> asked.add(url) && url.startsWith(baseUrl));
 
         final var chain = fetcher.followRedirects(baseUrl + "/start", 5, TIMEOUT);
 
@@ -585,7 +585,7 @@ class PublicHttpFetcherTest {
     void aRefusedHopEndsTheChainWithoutBeingRequested() {
         respond("/start", exchange -> redirect(exchange, "/private/admin"));
         respond("/private/admin", exchange -> send(exchange, 200, ""));
-        final var fetcher = new PublicHttpFetcher(url -> !url.contains("/private"));
+        final var fetcher = loopbackFetcher(url -> !url.contains("/private"));
 
         final var chain = fetcher.followRedirects(baseUrl + "/start", 5, TIMEOUT);
 
@@ -677,8 +677,12 @@ class PublicHttpFetcherTest {
                 .hasMessage("connection failed");
     }
 
+    private static PublicHttpFetcher loopbackFetcher(final Predicate<String> policy) {
+        return new PublicHttpFetcher(policy, InetAddress::isLoopbackAddress);
+    }
+
     private PublicHttpFetcher loopbackOnlyFetcher() {
-        return new PublicHttpFetcher(url -> url.startsWith(baseUrl));
+        return loopbackFetcher(url -> url.startsWith(baseUrl));
     }
 
     private String unicodeLoopbackUrl() {

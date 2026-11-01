@@ -248,6 +248,12 @@
             <version>${jsoupVersion}</version>
         </dependency>
 
+        <!-- Apache HttpClient (outbound fetches pinned to the checked address) -->
+        <dependency>
+            <groupId>org.apache.httpcomponents.client5</groupId>
+            <artifactId>httpclient5</artifactId>
+        </dependency>
+
         <!-- Guava (public suffix list for registrable domains) -->
         <dependency>
             <groupId>com.google.guava</groupId>

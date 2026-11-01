@@ -31,7 +31,16 @@ class PublicAddressesTest {
             "https://198.51.100.7/",
             "https://203.0.113.9/",
             "https://240.0.0.1/",
-            "https://255.255.255.255/"
+            "https://255.255.255.255/",
+            "https://192.88.99.1/",
+            "https://[::ffff:10.0.0.1]/",
+            "https://[64:ff9b::a00:1]/",
+            "https://[100::1]/",
+            "https://[2001:2::1]/",
+            "https://[2001:10::1]/",
+            "https://[2001:20::1]/",
+            "https://[3fff::1]/",
+            "https://[5f00::1]/"
     })
     void refusesReservedAndTunnelledAddresses(final String url) {
         assertThat(PublicAddresses.isPublicTarget(url)).isFalse();

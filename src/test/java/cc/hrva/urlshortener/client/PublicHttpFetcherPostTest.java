@@ -35,7 +35,7 @@ class PublicHttpFetcherPostTest {
     private static final String JSON = "application/json";
 
     private final List<ReceivedPost> received = new CopyOnWriteArrayList<>();
-    private final PublicHttpFetcher permissiveFetcher = new PublicHttpFetcher(url -> true);
+    private final PublicHttpFetcher permissiveFetcher = new PublicHttpFetcher(url -> true, InetAddress::isLoopbackAddress);
     private final Logger fetcherLogger = (Logger) LoggerFactory.getLogger(PublicHttpFetcher.class);
     private final ListAppender<ILoggingEvent> logEvents = new ListAppender<>();
 

@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.client;
 
+import cc.hrva.urlshortener.client.PinnedHttpTransport.RefusedAddressException;
 import cc.hrva.urlshortener.exception.UrlValidationException;
 import cc.hrva.urlshortener.util.PublicAddresses;
 import cc.hrva.urlshortener.util.RedirectLocations;
@@ -9,11 +10,9 @@ import java.io.InputStream;
 import java.net.ConnectException;
 import java.net.InetAddress;
 import java.net.SocketException;
+import java.net.SocketTimeoutException;
 import java.net.URI;
 import java.net.UnknownHostException;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.net.http.HttpTimeoutException;
 import java.nio.channels.ClosedChannelException;
 import java.nio.channels.UnresolvedAddressException;
@@ -22,28 +21,27 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.TimeoutException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
+import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLException;
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.io.input.BoundedInputStream;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.exception.ExceptionUtils;
+import org.apache.hc.core5.http.NoHttpResponseException;
+import org.apache.hc.core5.ssl.SSLContexts;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
-import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 
 public class PublicHttpFetcher {
@@ -58,6 +56,7 @@ public class PublicHttpFetcher {
     private static final Set<Integer> REDIRECT_STATUSES = Set.of(301, 302, 303, 307, 308);
     private static final String USER_AGENT = "hrva.cc-linkcheck/1.0 (+https://hrva.cc/.well-known/security.txt)";
     private static final String TEMP_FILE_PREFIX = "hrva-fetch-";
+    private static final Path TEMP_DIRECTORY = Path.of(System.getProperty("java.io.tmpdir"));
     private static final String NOT_ALLOWED = "not a public https address";
     private static final String NOT_PUBLIC = "not a public address";
     private static final String TIMED_OUT = "timed out";
@@ -67,36 +66,45 @@ public class PublicHttpFetcher {
     private static final String PROBE_RANGE = "bytes=0-1023";
     private static final String PROBE_ERROR = "error";
     private static final String PROBE_UNREACHABLE = "unreachable";
-    private static final ExecutorService RESOLVER_THREADS = Executors.newThreadPerTaskExecutor(Thread.ofVirtual().name("probe-dns-", 1).factory());
     private static final String POST_NOT_ALLOWED = "not-allowed";
     private static final String POST_REDIRECTED = "redirected";
     private static final String POST_TIMEOUT = "timeout";
     private static final String POST_ERROR = "error";
 
-    private final HttpClient httpClient = HttpClient.newBuilder()
-            .connectTimeout(CONNECT_TIMEOUT)
-            .followRedirects(HttpClient.Redirect.NEVER)
-            .build();
     private final Predicate<String> targetPolicy;
     private final Path downloadDirectory;
-    private final Resolver resolver;
+    private final PinnedHttpTransport transport;
 
     public PublicHttpFetcher(final Predicate<String> targetPolicy) {
-        this(targetPolicy, Path.of(System.getProperty("java.io.tmpdir")));
+        this(targetPolicy, TEMP_DIRECTORY);
     }
 
     public PublicHttpFetcher(final Predicate<String> targetPolicy, final Path downloadDirectory) {
-        this(targetPolicy, downloadDirectory, Resolver.SYSTEM);
+        this(targetPolicy, downloadDirectory, Resolver.SYSTEM, PublicAddresses::isPublicAddress, SSLContexts.createSystemDefault());
     }
 
-    PublicHttpFetcher(final Predicate<String> targetPolicy, final Resolver resolver) {
-        this(targetPolicy, Path.of(System.getProperty("java.io.tmpdir")), resolver);
+    public PublicHttpFetcher(final Predicate<String> targetPolicy, final Predicate<InetAddress> addressPolicy) {
+        this(targetPolicy, TEMP_DIRECTORY, Resolver.SYSTEM, addressPolicy, SSLContexts.createSystemDefault());
     }
 
-    private PublicHttpFetcher(final Predicate<String> targetPolicy, final Path downloadDirectory, final Resolver resolver) {
+    PublicHttpFetcher(final Predicate<String> targetPolicy, final Path downloadDirectory, final Predicate<InetAddress> addressPolicy) {
+        this(targetPolicy, downloadDirectory, Resolver.SYSTEM, addressPolicy, SSLContexts.createSystemDefault());
+    }
+
+    PublicHttpFetcher(final Predicate<String> targetPolicy, final Resolver resolver, final Predicate<InetAddress> addressPolicy) {
+        this(targetPolicy, resolver, addressPolicy, SSLContexts.createSystemDefault());
+    }
+
+    PublicHttpFetcher(final Predicate<String> targetPolicy, final Resolver resolver, final Predicate<InetAddress> addressPolicy,
+            final SSLContext sslContext) {
+        this(targetPolicy, TEMP_DIRECTORY, resolver, addressPolicy, sslContext);
+    }
+
+    private PublicHttpFetcher(final Predicate<String> targetPolicy, final Path downloadDirectory, final Resolver resolver,
+            final Predicate<InetAddress> addressPolicy, final SSLContext sslContext) {
         this.targetPolicy = targetPolicy;
         this.downloadDirectory = downloadDirectory;
-        this.resolver = resolver;
+        this.transport = new PinnedHttpTransport(resolver, addressPolicy, sslContext, CONNECT_TIMEOUT);
     }
 
     public static Predicate<String> httpsPublicOnly() {
@@ -138,17 +146,16 @@ public class PublicHttpFetcher {
                 throw new UrlValidationException(NOT_ALLOWED);
             }
 
-            final var remaining = deadline - System.nanoTime();
-            if (remaining <= 0) {
+            if (deadline - System.nanoTime() <= 0) {
                 throw new UrlValidationException(TIMED_OUT);
             }
-            final var response = send(request(target, etag, lastModified, Duration.ofNanos(remaining)));
-            final var location = response.headers().firstValue(HttpHeaders.LOCATION);
-            if (!REDIRECT_STATUSES.contains(response.statusCode()) || location.isEmpty()) {
+            final var response = send(target, validators(etag, lastModified), deadline);
+            final var location = response.header(HttpHeaders.LOCATION);
+            if (!REDIRECT_STATUSES.contains(response.status()) || location.isEmpty()) {
                 return result(response, maxBytes, deadline);
             }
 
-            IOUtils.closeQuietly(response.body());
+            response.close();
             if (redirects == MAX_REDIRECTS) {
                 throw new UrlValidationException("too many redirects");
             }
@@ -175,16 +182,17 @@ public class PublicHttpFetcher {
             return new PostResult(0, POST_NOT_ALLOWED);
         }
         try {
-            final var builder = HttpRequest.newBuilder(URI.create(url))
-                    .timeout(timeout)
-                    .header(HttpHeaders.CONTENT_TYPE, contentType)
-                    .header(HttpHeaders.USER_AGENT, NOTIFY_USER_AGENT)
-                    .POST(HttpRequest.BodyPublishers.ofByteArray(body));
-            headers.forEach(builder::header);
-            final var response = httpClient.send(builder.build(), HttpResponse.BodyHandlers.ofInputStream());
-            IOUtils.closeQuietly(response.body());
-            final var status = response.statusCode();
+            final var sent = new LinkedHashMap<String, String>();
+            sent.put(HttpHeaders.CONTENT_TYPE, contentType);
+            sent.put(HttpHeaders.USER_AGENT, NOTIFY_USER_AGENT);
+            sent.putAll(headers);
+            final var response = transport.post(URI.create(url), sent, body, System.nanoTime() + timeout.toNanos());
+            response.close();
+            final var status = response.status();
             return new PostResult(status, status / 100 == 3 ? POST_REDIRECTED : null);
+        } catch (final RefusedAddressException exception) {
+            log.debug("Channel post refused a non-public address");
+            return new PostResult(0, POST_NOT_ALLOWED);
         } catch (final IllegalArgumentException exception) {
             log.debug("Channel post refused before sending exception={}", exception.getClass().getName());
             return new PostResult(0, POST_INVALID);
@@ -224,54 +232,23 @@ public class PublicHttpFetcher {
         }
     }
 
-    private Optional<ProbeResult> refusal(final String host, final ProbeDeadline deadline) throws IOException, InterruptedException {
-        final var bare = host.startsWith("[") ? host.substring(1, host.length() - 1) : host;
-        final var lookup = CompletableFuture.supplyAsync(() -> {
-            try {
-                return resolver.resolve(bare);
-            } catch (final UnknownHostException exception) {
-                return null;
-            }
-        }, RESOLVER_THREADS);
-        final InetAddress[] addresses;
-        try {
-            addresses = lookup.get(Math.max(0, deadline.remaining()), TimeUnit.NANOSECONDS);
-        } catch (final TimeoutException exception) {
-            lookup.cancel(true);
-            throw new HttpTimeoutException(TIMED_OUT);
-        } catch (final ExecutionException exception) {
-            throw new IOException("lookup failed", exception.getCause());
-        }
-        if (addresses == null) {
-            return Optional.of(new ProbeResult(ProbeOutcome.DEAD, "nxdomain", null));
-        }
-        return PublicAddresses.arePublic(addresses) ? Optional.empty() : Optional.of(new ProbeResult(ProbeOutcome.UNKNOWN, "private", null));
-    }
-
     private ProbeAnswer probeRequest(final URI uri, final boolean get, final ProbeDeadline deadline,
             final Consumer<String> beforeEachRequest) throws IOException, InterruptedException {
         final var waitStarted = System.nanoTime();
         beforeEachRequest.accept(uri.getHost());
         deadline.extend(System.nanoTime() - waitStarted);
-        final var refusal = refusal(uri.getHost(), deadline);
-        if (refusal.isPresent()) {
-            return new ProbeAnswer(0, null, refusal.get());
+        final PinnedHttpTransport.Response response;
+        try {
+            response = get
+                    ? transport.get(uri, Map.of(HttpHeaders.USER_AGENT, LINK_CHECKER_USER_AGENT, HttpHeaders.RANGE, PROBE_RANGE), deadline.expiresAt())
+                    : transport.head(uri, Map.of(HttpHeaders.USER_AGENT, LINK_CHECKER_USER_AGENT), deadline.expiresAt());
+        } catch (final UnknownHostException exception) {
+            return new ProbeAnswer(0, null, new ProbeResult(ProbeOutcome.DEAD, "nxdomain", null));
+        } catch (final RefusedAddressException exception) {
+            return new ProbeAnswer(0, null, new ProbeResult(ProbeOutcome.UNKNOWN, "private", null));
         }
-        final var remaining = deadline.remaining();
-        if (remaining <= 0) {
-            throw new HttpTimeoutException(TIMED_OUT);
-        }
-        final var builder = HttpRequest.newBuilder(uri)
-                .timeout(Duration.ofNanos(remaining))
-                .header(HttpHeaders.USER_AGENT, LINK_CHECKER_USER_AGENT);
-        if (get) {
-            builder.header(HttpHeaders.RANGE, PROBE_RANGE).GET();
-        } else {
-            builder.method(HttpMethod.HEAD.name(), HttpRequest.BodyPublishers.noBody());
-        }
-        final var response = httpClient.send(builder.build(), HttpResponse.BodyHandlers.ofInputStream());
-        IOUtils.closeQuietly(response.body());
-        return new ProbeAnswer(response.statusCode(), response.headers().firstValue(HttpHeaders.LOCATION).orElse(null), null);
+        response.close();
+        return new ProbeAnswer(response.status(), response.header(HttpHeaders.LOCATION).orElse(null), null);
     }
 
     private static Optional<URI> webAddress(final String url) {
@@ -303,7 +280,8 @@ public class PublicHttpFetcher {
         if (rootCause instanceof ConnectException || refusedThenClosed(chain)) {
             return new ProbeResult(ProbeOutcome.DEAD, "refused", null);
         }
-        if (rootCause instanceof SocketException || rootCause instanceof EOFException || rootCause instanceof UnresolvedAddressException) {
+        if (rootCause instanceof SocketException || rootCause instanceof EOFException || rootCause instanceof UnresolvedAddressException
+                || rootCause instanceof NoHttpResponseException) {
             return new ProbeResult(ProbeOutcome.UNKNOWN, PROBE_UNREACHABLE, null);
         }
         if (ExceptionUtils.indexOfType(exception, SSLException.class) >= 0) {
@@ -329,14 +307,13 @@ public class PublicHttpFetcher {
     }
 
     private Optional<RedirectHop> redirectTarget(final String url, final long deadline) {
-        final var remaining = deadline - System.nanoTime();
-        if (remaining <= 0) {
+        if (deadline - System.nanoTime() <= 0) {
             throw new UrlValidationException(TIMED_OUT);
         }
-        final var response = send(request(url, null, null, Duration.ofNanos(remaining)));
-        IOUtils.closeQuietly(response.body());
-        final var location = response.headers().firstValue(HttpHeaders.LOCATION);
-        if (!REDIRECT_STATUSES.contains(response.statusCode()) || location.isEmpty()) {
+        final var response = send(url, Map.of(), deadline);
+        response.close();
+        final var location = response.header(HttpHeaders.LOCATION);
+        if (!REDIRECT_STATUSES.contains(response.status()) || location.isEmpty()) {
             return Optional.empty();
         }
         final var received = readAsUtf8(location.get());
@@ -369,28 +346,26 @@ public class PublicHttpFetcher {
         }
     }
 
-    private static HttpRequest request(final String url, final String etag, final String lastModified,
-            final Duration timeout) {
-        try {
-            final var builder = HttpRequest.newBuilder(URI.create(url))
-                    .timeout(timeout)
-                    .header(HttpHeaders.USER_AGENT, USER_AGENT)
-                    .GET();
-            if (StringUtils.isNotBlank(etag)) {
-                builder.header(HttpHeaders.IF_NONE_MATCH, etag);
-            }
-            if (StringUtils.isNotBlank(lastModified)) {
-                builder.header(HttpHeaders.IF_MODIFIED_SINCE, lastModified);
-            }
-            return builder.build();
-        } catch (final IllegalArgumentException exception) {
-            throw new UrlValidationException("not a valid address", exception);
+    private static Map<String, String> validators(final String etag, final String lastModified) {
+        final var headers = new LinkedHashMap<String, String>();
+        if (StringUtils.isNotBlank(etag)) {
+            headers.put(HttpHeaders.IF_NONE_MATCH, etag);
         }
+        if (StringUtils.isNotBlank(lastModified)) {
+            headers.put(HttpHeaders.IF_MODIFIED_SINCE, lastModified);
+        }
+        return headers;
     }
 
-    private HttpResponse<InputStream> send(final HttpRequest request) {
+    private PinnedHttpTransport.Response send(final String url, final Map<String, String> headers, final long deadline) {
         try {
-            return httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
+            final var sent = new LinkedHashMap<>(headers);
+            sent.put(HttpHeaders.USER_AGENT, USER_AGENT);
+            return transport.get(URI.create(url), sent, deadline);
+        } catch (final IllegalArgumentException exception) {
+            throw new UrlValidationException("not a valid address", exception);
+        } catch (final RefusedAddressException exception) {
+            throw new UrlValidationException(NOT_PUBLIC, exception);
         } catch (final HttpTimeoutException exception) {
             throw new UrlValidationException(TIMED_OUT, exception);
         } catch (final IOException exception) {
@@ -409,25 +384,24 @@ public class PublicHttpFetcher {
         }
     }
 
-    private FetchResult result(final HttpResponse<InputStream> response, final long maxBytes, final long deadline) {
-        final var headers = response.headers();
-        final var etag = headers.firstValue(HttpHeaders.ETAG).orElse(null);
-        final var lastModified = headers.firstValue(HttpHeaders.LAST_MODIFIED).orElse(null);
-        if (response.statusCode() == HttpStatus.NOT_MODIFIED.value()) {
-            IOUtils.closeQuietly(response.body());
+    private FetchResult result(final PinnedHttpTransport.Response response, final long maxBytes, final long deadline) {
+        final var etag = response.header(HttpHeaders.ETAG).orElse(null);
+        final var lastModified = response.header(HttpHeaders.LAST_MODIFIED).orElse(null);
+        if (response.status() == HttpStatus.NOT_MODIFIED.value()) {
+            response.close();
             return new FetchResult(true, null, etag, lastModified);
         }
-        if (response.statusCode() / 100 != 2) {
-            IOUtils.closeQuietly(response.body());
-            throw new UrlValidationException("HTTP " + response.statusCode());
+        if (response.status() / 100 != 2) {
+            response.close();
+            throw new UrlValidationException("HTTP " + response.status());
         }
         try {
-            if (headers.firstValueAsLong(HttpHeaders.CONTENT_LENGTH).orElse(0) > maxBytes) {
+            if (response.longHeader(HttpHeaders.CONTENT_LENGTH).orElse(0) > maxBytes) {
                 throw tooLarge(maxBytes);
             }
             return new FetchResult(false, download(response.body(), maxBytes, deadline), etag, lastModified);
         } catch (final RuntimeException exception) {
-            IOUtils.closeQuietly(response.body());
+            response.close();
             throw exception;
         }
     }
@@ -450,7 +424,7 @@ public class PublicHttpFetcher {
             return file;
         } catch (final IOException exception) {
             delete(file);
-            throw new UrlValidationException(timedOut.get() ? TIMED_OUT : "download failed", exception);
+            throw new UrlValidationException(timedOut.get() || exception instanceof SocketTimeoutException ? TIMED_OUT : "download failed", exception);
         } catch (final RuntimeException exception) {
             delete(file);
             throw exception;
@@ -500,8 +474,8 @@ public class PublicHttpFetcher {
             deadline += nanos;
         }
 
-        private long remaining() {
-            return deadline - System.nanoTime();
+        private long expiresAt() {
+            return deadline;
         }
 
     }

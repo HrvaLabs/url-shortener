@@ -1,6 +1,7 @@
 package cc.hrva.urlshortener.client;
 
 import cc.hrva.urlshortener.configuration.PublicHttpFetcherConfiguration;
+import cc.hrva.urlshortener.util.PublicAddresses;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import java.io.EOFException;
@@ -31,6 +32,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
+import java.util.function.Predicate;
 import javax.net.ssl.SSLException;
 import javax.net.ssl.SSLHandshakeException;
 import org.junit.jupiter.api.AfterEach;
@@ -46,13 +48,15 @@ class PublicHttpFetcherProbeTest {
 
     private static final Duration BUDGET = Duration.ofSeconds(5);
     private static final Consumer<String> NO_HOOK = host -> {};
-    private static final byte[] PUBLIC_ADDRESS = {93, (byte) 184, (byte) 215, 14};
+    private static final byte[] LOOPBACK_ADDRESS = {127, 0, 0, 1};
     private static final byte[] PRIVATE_ADDRESS = {10, 0, 0, 5};
+    private static final Predicate<InetAddress> LOOPBACK_OR_PUBLIC =
+            address -> address.isLoopbackAddress() || PublicAddresses.isPublicAddress(address);
 
     private final List<String> requests = new CopyOnWriteArrayList<>();
     private final Map<String, String> rangeHeaders = new ConcurrentHashMap<>();
     private final Map<String, String> userAgents = new ConcurrentHashMap<>();
-    private final Resolver publicResolver = host -> new InetAddress[] {InetAddress.getByAddress(host, PUBLIC_ADDRESS)};
+    private final Resolver loopbackResolver = host -> new InetAddress[] {InetAddress.getByAddress(host, LOOPBACK_ADDRESS)};
 
     @TempDir
     private Path keys;
@@ -68,7 +72,7 @@ class PublicHttpFetcherProbeTest {
         server.setExecutor(executor);
         server.start();
         baseUrl = "http://127.0.0.1:" + server.getAddress().getPort();
-        fetcher = new PublicHttpFetcher(PublicHttpFetcher.httpOrHttpsPublicOnly(), publicResolver);
+        fetcher = fetcherResolvingWith(loopbackResolver);
     }
 
     @AfterEach
@@ -200,8 +204,8 @@ class PublicHttpFetcherProbeTest {
     void redirectToPrivateIsUnknown() {
         final Resolver resolver = host -> "internal.test".equals(host)
                 ? new InetAddress[] {InetAddress.getByAddress(host, PRIVATE_ADDRESS)}
-                : publicResolver.resolve(host);
-        final var guarded = new PublicHttpFetcher(PublicHttpFetcher.httpOrHttpsPublicOnly(), resolver);
+                : loopbackResolver.resolve(host);
+        final var guarded = fetcherResolvingWith(resolver);
         redirect("/out", "http://internal.test:" + server.getAddress().getPort() + "/admin");
 
         assertThat(guarded.probe(baseUrl + "/out", BUDGET, NO_HOOK)).isEqualTo(new ProbeResult(ProbeOutcome.UNKNOWN, "private", null));
@@ -211,8 +215,7 @@ class PublicHttpFetcherProbeTest {
     @Test
     void privateDestinationIsUnknownWithoutARequest() {
         answer("/ok", 200, 200);
-        final var guarded = new PublicHttpFetcher(PublicHttpFetcher.httpOrHttpsPublicOnly(),
-                host -> new InetAddress[] {InetAddress.getByAddress(host, PRIVATE_ADDRESS)});
+        final var guarded = fetcherResolvingWith(host -> new InetAddress[] {InetAddress.getByAddress(host, PRIVATE_ADDRESS)});
 
         assertThat(guarded.probe(baseUrl + "/ok", BUDGET, NO_HOOK)).isEqualTo(new ProbeResult(ProbeOutcome.UNKNOWN, "private", null));
         assertThat(requests).isEmpty();
@@ -230,7 +233,7 @@ class PublicHttpFetcherProbeTest {
 
     @Test
     void unknownHostIsNxdomain() {
-        final var unresolvable = new PublicHttpFetcher(PublicHttpFetcher.httpOrHttpsPublicOnly(), host -> {
+        final var unresolvable = fetcherResolvingWith(host -> {
             throw new UnknownHostException(host);
         });
 
@@ -246,11 +249,11 @@ class PublicHttpFetcherProbeTest {
             if ("expired-domain.test".equals(host)) {
                 throw new UnknownHostException(host);
             }
-            return publicResolver.resolve(host);
+            return loopbackResolver.resolve(host);
         };
         redirect("/parked", "https://expired-domain.test/landing");
 
-        assertThat(new PublicHttpFetcher(PublicHttpFetcher.httpOrHttpsPublicOnly(), resolver).probe(baseUrl + "/parked", BUDGET, NO_HOOK))
+        assertThat(fetcherResolvingWith(resolver).probe(baseUrl + "/parked", BUDGET, NO_HOOK))
                 .isEqualTo(new ProbeResult(ProbeOutcome.DEAD, "nxdomain", null));
     }
 
@@ -345,8 +348,8 @@ class PublicHttpFetcherProbeTest {
 
     @Test
     void everyRequestWaitsForItsHostsTurnAndTheWaitIsNotCountedAgainstTheBudget() throws IOException {
-        final Resolver resolver = host -> new InetAddress[] {InetAddress.getByAddress(host, PUBLIC_ADDRESS)};
-        final var paced = new PublicHttpFetcher(PublicHttpFetcher.httpOrHttpsPublicOnly(), resolver);
+        final Resolver resolver = host -> new InetAddress[] {InetAddress.getByAddress(host, LOOPBACK_ADDRESS)};
+        final var paced = fetcherResolvingWith(resolver);
         final var turns = new CopyOnWriteArrayList<String>();
         final var everyAddress = HttpServer.create(new InetSocketAddress(0), 0);
         everyAddress.createContext("/landing", exchange -> {
@@ -375,8 +378,8 @@ class PublicHttpFetcherProbeTest {
     void theAddressIsCheckedAgainAfterTheWaitRightBeforeTheRequest() {
         answer("/ok", 200, 200);
         final var rebound = new AtomicBoolean();
-        final Resolver resolver = host -> new InetAddress[] {InetAddress.getByAddress(host, rebound.get() ? PRIVATE_ADDRESS : PUBLIC_ADDRESS)};
-        final var guarded = new PublicHttpFetcher(PublicHttpFetcher.httpOrHttpsPublicOnly(), resolver);
+        final Resolver resolver = host -> new InetAddress[] {InetAddress.getByAddress(host, rebound.get() ? PRIVATE_ADDRESS : LOOPBACK_ADDRESS)};
+        final var guarded = fetcherResolvingWith(resolver);
 
         final var result = guarded.probe(baseUrl + "/ok", BUDGET, host -> rebound.set(true));
 
@@ -388,8 +391,8 @@ class PublicHttpFetcherProbeTest {
     void theGetFallbackChecksTheAddressAgainToo() {
         answer("/head-only", 404, 200);
         final var turns = new AtomicInteger();
-        final Resolver resolver = host -> new InetAddress[] {InetAddress.getByAddress(host, turns.get() > 1 ? PRIVATE_ADDRESS : PUBLIC_ADDRESS)};
-        final var guarded = new PublicHttpFetcher(PublicHttpFetcher.httpOrHttpsPublicOnly(), resolver);
+        final Resolver resolver = host -> new InetAddress[] {InetAddress.getByAddress(host, turns.get() > 1 ? PRIVATE_ADDRESS : LOOPBACK_ADDRESS)};
+        final var guarded = fetcherResolvingWith(resolver);
 
         final var result = guarded.probe(baseUrl + "/head-only", BUDGET, host -> turns.incrementAndGet());
 
@@ -399,9 +402,9 @@ class PublicHttpFetcherProbeTest {
 
     @Test
     void aSlowResolverIsBoundByTheProbeBudget() {
-        final var slow = new PublicHttpFetcher(PublicHttpFetcher.httpOrHttpsPublicOnly(), host -> {
+        final var slow = fetcherResolvingWith(host -> {
             sleep(Duration.ofSeconds(5));
-            return publicResolver.resolve(host);
+            return loopbackResolver.resolve(host);
         });
 
         final var started = System.nanoTime();
@@ -494,7 +497,7 @@ class PublicHttpFetcherProbeTest {
     @Test
     void aUnicodeHostIsResolvedInItsAsciiForm() {
         final var resolved = new CopyOnWriteArrayList<String>();
-        final var recording = new PublicHttpFetcher(PublicHttpFetcher.httpOrHttpsPublicOnly(), host -> {
+        final var recording = fetcherResolvingWith(host -> {
             resolved.add(host);
             throw new UnknownHostException(host);
         });
@@ -502,6 +505,10 @@ class PublicHttpFetcherProbeTest {
         assertThat(recording.probe("https://\u017euti.example/stranica", BUDGET, NO_HOOK))
                 .isEqualTo(new ProbeResult(ProbeOutcome.DEAD, "nxdomain", null));
         assertThat(resolved).containsExactly("xn--uti-b3a.example");
+    }
+
+    private static PublicHttpFetcher fetcherResolvingWith(final Resolver resolver) {
+        return new PublicHttpFetcher(PublicHttpFetcher.httpOrHttpsPublicOnly(), resolver, LOOPBACK_OR_PUBLIC);
     }
 
     private static ConnectException connectFailure(final Throwable rootCause) {

@@ -2,6 +2,7 @@ package cc.hrva.urlshortener.configuration;
 
 import cc.hrva.urlshortener.client.ChannelPoster;
 import cc.hrva.urlshortener.client.DestinationProber;
+import cc.hrva.urlshortener.client.PageFetcher;
 import cc.hrva.urlshortener.client.PublicHttpFetcher;
 import cc.hrva.urlshortener.client.RedirectFollower;
 import cc.hrva.urlshortener.client.Resolver;
@@ -24,6 +25,12 @@ public class PublicHttpFetcherConfiguration {
     @Bean
     public DestinationProber destinationProber() {
         return new PublicHttpFetcher(PublicHttpFetcher.httpOrHttpsPublicOnly())::probe;
+    }
+
+    @Bean
+    public PageFetcher pageFetcher() {
+        final var fetcher = new PublicHttpFetcher(PublicHttpFetcher.httpOrHttpsPublicOnly());
+        return (url, maxBytes, timeout) -> fetcher.fetch(url, maxBytes, null, null, timeout);
     }
 
     @Bean
