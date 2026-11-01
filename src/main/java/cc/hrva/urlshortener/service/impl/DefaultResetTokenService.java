@@ -45,8 +45,8 @@ public class DefaultResetTokenService implements ResetTokenService {
 
     @Override
     @Transactional
-    public ResetToken claim(final User user, final String token) {
-        final var resetToken = resetTokenRepository.findByUserAndTokenHashAndActiveTrue(user, ResetTokens.hash(token))
+    public ResetToken claim(final String token) {
+        final var resetToken = resetTokenRepository.findByTokenHashAndActiveTrue(ResetTokens.hash(token))
                 .orElseThrow(ResetLinkExpiredException::new);
         if (resetTokenRepository.claim(resetToken.getId(), now()) == 0) {
             throw new ResetLinkExpiredException();

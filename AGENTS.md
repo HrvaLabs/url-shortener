@@ -145,7 +145,7 @@ cc.hrva.urlshortener
 | POST | `/api/v1/auth/passkeys/options` | None, 30 per 10 min per network | Passwordless sign-in options: `allowCredentials: []`, `userVerification: required` |
 | POST | `/api/v1/auth/passkeys/verify` | None | `{ceremonyId, credential, rememberMe}` → the login body; no second step, even with two-step verification on |
 | POST | `/api/v1/auth/password-reset` | None | Request reset: `{email}` → 202 whether or not an account uses the address; an account gets a link valid for 1 hour (see Password reset tokens) |
-| POST | `/api/v1/auth/password-reset/confirm` | None | Confirm reset: `{token, email, password}` → 204, no body; every session of the account ends. A token that is unknown, used, or expired → 410 problem `This reset link has expired or was already used. Ask for a new one.`; a password over 72 bytes or under 8 characters → 400 `{"password": …}` |
+| POST | `/api/v1/auth/password-reset/confirm` | None | Confirm reset: `{token, password}` → 204 (the token alone names the account since v2.23; an `email` sent by an older page is ignored), no body; every session of the account ends. A token that is unknown, used, or expired → 410 problem `This reset link has expired or was already used. Ask for a new one.`; a password over 72 bytes or under 8 characters → 400 `{"password": …}` |
 | POST | `/api/v1/auth/verify-email/confirm` | None | Confirm email with token |
 | POST | `/api/v1/auth/verify-email/resend` | None | Resend verification email (always 202) |
 | POST | `/api/v1/auth/2fa/setup` | Required | Start TOTP enrollment; 400 when an authenticator app is already set up |

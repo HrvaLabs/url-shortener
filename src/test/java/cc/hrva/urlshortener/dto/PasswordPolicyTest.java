@@ -29,7 +29,7 @@ class PasswordPolicyTest {
 
     @Test
     void passwordResetNeedsAtLeastEightCharacters() {
-        assertThat(violations(PasswordResetDto.builder().token("t").email("a@b.co").password("1").build())).contains(TOO_SHORT);
+        assertThat(violations(PasswordResetDto.builder().token("t").password("1").build())).contains(TOO_SHORT);
     }
 
     @Test
@@ -41,7 +41,7 @@ class PasswordPolicyTest {
     @Test
     void everyPasswordThatIsSetFitsInSeventyTwoBytes() {
         assertThat(violationsOf(UserRegisterDto.builder().email("a@b.co").password(SEVENTY_THREE_BYTES).build())).containsEntry("password", TOO_LONG);
-        assertThat(violationsOf(PasswordResetDto.builder().token("t").email("a@b.co").password(SEVENTY_THREE_BYTES).build())).containsEntry("password", TOO_LONG);
+        assertThat(violationsOf(PasswordResetDto.builder().token("t").password(SEVENTY_THREE_BYTES).build())).containsEntry("password", TOO_LONG);
         assertThat(violationsOf(UpdatePasswordDto.builder().oldPassword("whatever").newPassword(SEVENTY_THREE_BYTES).build())).containsEntry("newPassword", TOO_LONG);
         assertThat(violationsOf(CreateUrlDto.builder().longUrl("https://example.com").password(SEVENTY_THREE_BYTES).build())).containsEntry("password", TOO_LONG);
         assertThat(violationsOf(UrlUpdateDto.builder().id(1L).password(SEVENTY_THREE_BYTES).build())).containsEntry("password", TOO_LONG);

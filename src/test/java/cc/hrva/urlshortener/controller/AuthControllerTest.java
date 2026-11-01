@@ -126,14 +126,24 @@ class AuthControllerTest {
     }
 
     @Test
-    void aPasswordResetAnswers204WithNoBody() throws Exception {
+    void aPasswordResetTakesTheTokenAloneAndAnswers204WithNoBody() throws Exception {
         mockMvc.perform(post("/api/v1/auth/password-reset/confirm")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(PasswordResetDto.builder().email("test@example.com").token("token").password("newPassword").build())))
+                        .content("{\"token\":\"token\",\"password\":\"newPassword\"}"))
                 .andExpect(status().isNoContent())
                 .andExpect(content().string(""));
 
-        verify(userService).resetPassword(any(PasswordResetDto.class));
+        verify(userService).resetPassword(PasswordResetDto.builder().token("token").password("newPassword").build());
+    }
+
+    @Test
+    void anEmailSentByAnOlderPageIsIgnored() throws Exception {
+        mockMvc.perform(post("/api/v1/auth/password-reset/confirm")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"token\":\"token\",\"email\":\"test@example.com\",\"password\":\"newPassword\"}"))
+                .andExpect(status().isNoContent());
+
+        verify(userService).resetPassword(PasswordResetDto.builder().token("token").password("newPassword").build());
     }
 
     @Test

@@ -41,9 +41,6 @@ class ResetTokenClaimTest {
     private ResetTokenRepository resetTokenRepository;
 
     @Autowired
-    private UserRepository userRepository;
-
-    @Autowired
     private JdbcTemplate jdbcTemplate;
 
     @Autowired
@@ -63,12 +60,13 @@ class ResetTokenClaimTest {
     }
 
     @Test
-    void aTokenIsFoundByItsHashForItsAccount() {
-        final var owner = userRepository.findById(OWNER).orElseThrow();
-
-        assertThat(resetTokenRepository.findByUserAndTokenHashAndActiveTrue(owner, ApiKeyTokens.hash("the-token")))
-                .hasValueSatisfying(token -> assertThat(token.getId()).isEqualTo(TOKEN));
-        assertThat(resetTokenRepository.findByUserAndTokenHashAndActiveTrue(owner, ApiKeyTokens.hash("another-token"))).isEmpty();
+    void aTokenAloneFindsItsAccount() {
+        assertThat(resetTokenRepository.findByTokenHashAndActiveTrue(ApiKeyTokens.hash("the-token")))
+                .hasValueSatisfying(token -> {
+                    assertThat(token.getId()).isEqualTo(TOKEN);
+                    assertThat(token.getUser().getEmail()).isEqualTo("reset@example.com");
+                });
+        assertThat(resetTokenRepository.findByTokenHashAndActiveTrue(ApiKeyTokens.hash("another-token"))).isEmpty();
     }
 
     @Test

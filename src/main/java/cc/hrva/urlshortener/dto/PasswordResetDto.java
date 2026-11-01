@@ -17,10 +17,6 @@ public class PasswordResetDto {
     @Schema(description = "Password reset token", example = "reset-token-abc123")
     private String token;
 
-    @NotBlank(message = "Email is required")
-    @Schema(description = "User email address", example = "user@example.com")
-    private String email;
-
     @NotBlank(message = "Password is required")
     @Size(min = 8, message = "Password must be at least 8 characters long")
     @PasswordFitsBcrypt

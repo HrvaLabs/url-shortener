@@ -17,7 +17,6 @@ import cc.hrva.urlshortener.dto.UserUpdateDto;
 import cc.hrva.urlshortener.exception.ApiException;
 import cc.hrva.urlshortener.exception.NoAuthorizationException;
 import cc.hrva.urlshortener.exception.NotSignedInException;
-import cc.hrva.urlshortener.exception.ResetLinkExpiredException;
 import cc.hrva.urlshortener.exception.UserNotFoundException;
 import cc.hrva.urlshortener.listener.UserRegisteredEvent;
 import cc.hrva.urlshortener.mcp.apps.ConnectedAppsService;
@@ -339,9 +338,7 @@ public class DefaultUserService implements UserService {
     @Override
     @Transactional
     public void resetPassword(final PasswordResetDto passwordResetDto) {
-        final var user = userRepository.findByEmail(passwordResetDto.getEmail())
-                .orElseThrow(ResetLinkExpiredException::new);
-        resetTokenService.claim(user, passwordResetDto.getToken());
+        final var user = resetTokenService.claim(passwordResetDto.getToken()).getUser();
 
         final var locked = accountLock.lock(user);
         locked.setPassword(passwordEncoder.encode(passwordResetDto.getPassword()));

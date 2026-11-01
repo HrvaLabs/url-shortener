@@ -82,6 +82,9 @@ class UserEndpointsWithoutOpenInViewTest {
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
+    @Autowired
+    private UserRepository userRepository;
+
     @MockitoBean
     private AppProperties appProperties;
 
@@ -205,9 +208,9 @@ class UserEndpointsWithoutOpenInViewTest {
     @Test
     void aResetPasswordEndsEverySession() {
         when(passwordEncoder.encode(anyString())).thenReturn("new-hash");
-        when(resetTokenService.claim(any(), anyString())).thenReturn(ResetToken.builder().active(false).build());
+        when(resetTokenService.claim(anyString())).thenReturn(ResetToken.builder().user(userRepository.findById(MEMBER).orElseThrow()).active(false).build());
 
-        userService.resetPassword(new PasswordResetDto("reset-token", MEMBER_EMAIL, "new-password"));
+        userService.resetPassword(new PasswordResetDto("reset-token", "new-password"));
 
         assertThat(jdbcTemplate.queryForObject("select password from user_account where id = ?", String.class, MEMBER)).isEqualTo("new-hash");
         assertThat(tokensValidAfter()).as("the reset ends every session").isNotNull();
@@ -235,9 +238,9 @@ class UserEndpointsWithoutOpenInViewTest {
                 insert into user_sign_in_method (user_id, method, first_used_at, last_used_at, turned_off_at)
                 values (?, 'PASSWORD', timestamp '2026-01-02 03:04:05', timestamp '2026-10-28 09:30:00', timestamp '2026-10-29 10:00:00')""", MEMBER);
         when(passwordEncoder.encode(anyString())).thenReturn("$2a$10$" + "n".repeat(53));
-        when(resetTokenService.claim(any(), anyString())).thenReturn(ResetToken.builder().active(false).build());
+        when(resetTokenService.claim(anyString())).thenReturn(ResetToken.builder().user(userRepository.findById(MEMBER).orElseThrow()).active(false).build());
 
-        userService.resetPassword(new PasswordResetDto("reset-token", MEMBER_EMAIL, "new-password"));
+        userService.resetPassword(new PasswordResetDto("reset-token", "new-password"));
 
         assertThat(jdbcTemplate.queryForObject("select password from user_account where id = ?", String.class, MEMBER))
                 .isEqualTo("$2a$10$" + "n".repeat(53));
@@ -254,9 +257,9 @@ class UserEndpointsWithoutOpenInViewTest {
     @Test
     void aResetOfAnAccountWhosePasswordSignInIsOnAuditsNothing() {
         when(passwordEncoder.encode(anyString())).thenReturn("new-hash");
-        when(resetTokenService.claim(any(), anyString())).thenReturn(ResetToken.builder().active(false).build());
+        when(resetTokenService.claim(anyString())).thenReturn(ResetToken.builder().user(userRepository.findById(MEMBER).orElseThrow()).active(false).build());
 
-        userService.resetPassword(new PasswordResetDto("reset-token", MEMBER_EMAIL, "new-password"));
+        userService.resetPassword(new PasswordResetDto("reset-token", "new-password"));
 
         assertThat(jdbcTemplate.queryForObject("select count(*) from audit_log", Long.class)).isZero();
     }

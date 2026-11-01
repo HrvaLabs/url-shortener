@@ -9,6 +9,6 @@ public interface ResetTokenService {
     String createTokenForUser(User user);
     void deactivateExpiredPasswordResetTokens();
     void deactivateActiveResetTokenIfExists(User user);
-    ResetToken claim(User user, String token);
+    ResetToken claim(String token);
 
 }

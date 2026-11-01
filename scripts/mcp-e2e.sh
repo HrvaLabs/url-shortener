@@ -1146,7 +1146,7 @@ expect_eq "$HTTP_STATUS $(jq -r .email <<<"$HTTP_BODY")" "200 $USER_EMAIL" "the 
 RESET_TOKEN=$(reset_token_from_mail "$USER_EMAIL")
 expect_eq "${#RESET_TOKEN}" 43 "POST /api/v1/auth/password-reset is 202, and the email carries a 43-character token in its link"
 http -X POST "$BASE/api/v1/auth/password-reset/confirm" -H 'Content-Type: application/json' \
-    -d "{\"token\":\"$RESET_TOKEN\",\"email\":\"$USER_EMAIL\",\"password\":\"reset-$USER_PASSWORD\"}"
+    -d "{\"token\":\"$RESET_TOKEN\",\"password\":\"reset-$USER_PASSWORD\"}"
 expect_eq "$HTTP_STATUS ${#HTTP_BODY}" "204 0" "POST /api/v1/auth/password-reset/confirm answers 204 with no body"
 
 section "21. Notifications and consent"
@@ -2335,16 +2335,16 @@ expect_eq "$(psql_value "select extract(epoch from expiration_date - create_date
 expect_eq "$(psql_value "select count(*) from email_log where subject = '$RESET_SUBJECT' and body like '%$RESET_TOKEN%';")" 0 \
     "no email log row keeps the token"
 http -X POST "$BASE/api/v1/auth/password-reset/confirm" -H 'Content-Type: application/json' \
-    -d "{\"token\":\"$RESET_TOKEN\",\"email\":\"$USER_EMAIL\",\"password\":\"reset-$USER_PASSWORD\"}"
+    -d "{\"token\":\"$RESET_TOKEN\",\"password\":\"reset-$USER_PASSWORD\"}"
 expect_eq "$HTTP_STATUS" 204 "the token sets a password once"
 http -X POST "$BASE/api/v1/auth/password-reset/confirm" -H 'Content-Type: application/json' \
-    -d "{\"token\":\"$RESET_TOKEN\",\"email\":\"$USER_EMAIL\",\"password\":\"again-$USER_PASSWORD\"}"
+    -d "{\"token\":\"$RESET_TOKEN\",\"password\":\"again-$USER_PASSWORD\"}"
 expect_eq "$HTTP_STATUS $(header_value content-type) $(jq -r .detail <<<"$HTTP_BODY")" \
     "410 application/problem+json This reset link has expired or was already used. Ask for a new one." "a second use is a 410 problem"
 RESET_TOKEN=$(reset_token_from_mail "$USER_EMAIL")
 psql_value "update reset_token set expiration_date = (now() at time zone 'utc') - interval '1 second' where active;" >/dev/null
 http -X POST "$BASE/api/v1/auth/password-reset/confirm" -H 'Content-Type: application/json' \
-    -d "{\"token\":\"$RESET_TOKEN\",\"email\":\"$USER_EMAIL\",\"password\":\"again-$USER_PASSWORD\"}"
+    -d "{\"token\":\"$RESET_TOKEN\",\"password\":\"again-$USER_PASSWORD\"}"
 expect_eq "$HTTP_STATUS" 410 "an expired token is refused before the minute job deactivates it"
 session_login 203.0.113.252 "$USER_EMAIL" "$SESSION_PASSWORD"
 expect_eq "$HTTP_STATUS" 200 "the password is still the one the first use set"

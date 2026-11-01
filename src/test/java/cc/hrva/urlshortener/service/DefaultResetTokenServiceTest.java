@@ -117,18 +117,17 @@ class DefaultResetTokenServiceTest {
     void aTokenIsClaimedByItsHashOnceAndOnlyBeforeItExpires() {
         final var user = User.builder().id(1L).build();
         final var token = ResetToken.builder().id(7L).user(user).active(true).build();
-        when(resetTokenRepository.findByUserAndTokenHashAndActiveTrue(user, ApiKeyTokens.hash("the-token"))).thenReturn(Optional.of(token));
+        when(resetTokenRepository.findByTokenHashAndActiveTrue(ApiKeyTokens.hash("the-token"))).thenReturn(Optional.of(token));
         when(resetTokenRepository.claim(7L, NOW)).thenReturn(1);
 
-        assertThat(resetTokenService.claim(user, "the-token")).isEqualTo(token);
+        assertThat(resetTokenService.claim("the-token")).isEqualTo(token);
     }
 
     @Test
     void anUnknownOrUsedTokenIsRefused() {
-        final var user = User.builder().id(1L).build();
-        when(resetTokenRepository.findByUserAndTokenHashAndActiveTrue(user, ApiKeyTokens.hash("the-token"))).thenReturn(Optional.empty());
+        when(resetTokenRepository.findByTokenHashAndActiveTrue(ApiKeyTokens.hash("the-token"))).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> resetTokenService.claim(user, "the-token"))
+        assertThatThrownBy(() -> resetTokenService.claim("the-token"))
                 .isInstanceOf(ResetLinkExpiredException.class)
                 .hasMessage(EXPIRED);
         verify(resetTokenRepository, never()).claim(any(), any());
@@ -137,11 +136,11 @@ class DefaultResetTokenServiceTest {
     @Test
     void aTokenUsedOrExpiredSinceItWasReadIsRefused() {
         final var user = User.builder().id(1L).build();
-        when(resetTokenRepository.findByUserAndTokenHashAndActiveTrue(user, ApiKeyTokens.hash("the-token")))
+        when(resetTokenRepository.findByTokenHashAndActiveTrue(ApiKeyTokens.hash("the-token")))
                 .thenReturn(Optional.of(ResetToken.builder().id(7L).user(user).active(true).build()));
         when(resetTokenRepository.claim(7L, NOW)).thenReturn(0);
 
-        assertThatThrownBy(() -> resetTokenService.claim(user, "the-token"))
+        assertThatThrownBy(() -> resetTokenService.claim("the-token"))
                 .isInstanceOf(ResetLinkExpiredException.class)
                 .hasMessage(EXPIRED);
     }

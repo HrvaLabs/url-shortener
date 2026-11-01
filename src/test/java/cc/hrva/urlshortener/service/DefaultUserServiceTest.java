@@ -752,11 +752,10 @@ class DefaultUserServiceTest {
 
     @Test
     void shouldResetPassword() {
-        final var resetDto = PasswordResetDto.builder().email("test@example.com").token("token").password("newPassword").build();
+        final var resetDto = PasswordResetDto.builder().token("token").password("newPassword").build();
         final var user = User.builder().id(1L).email("test@example.com").build();
 
-        when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
-        when(resetTokenService.claim(user, "token")).thenReturn(ResetToken.builder().id(1L).user(user).build());
+        when(resetTokenService.claim("token")).thenReturn(ResetToken.builder().id(1L).user(user).build());
         when(passwordEncoder.encode("newPassword")).thenReturn("newEncoded");
         when(userRepository.save(user)).thenReturn(user);
 
@@ -767,16 +766,15 @@ class DefaultUserServiceTest {
         assertThat(user.getPassword()).isEqualTo("newEncoded");
         assertThat(user.sessionEndedFor(before.minusSeconds(1))).as("every session from before the reset ends").isTrue();
         final var order = org.mockito.Mockito.inOrder(resetTokenService, accountLock);
-        order.verify(resetTokenService).claim(user, "token");
+        order.verify(resetTokenService).claim("token");
         order.verify(accountLock).lock(user);
     }
 
     @Test
     void aPasswordResetLocksTheAccountAndTurnsPasswordSignInBackOnAfterSaving() {
-        final var resetDto = PasswordResetDto.builder().email("test@example.com").token("token").password("newPassword").build();
+        final var resetDto = PasswordResetDto.builder().token("token").password("newPassword").build();
         final var user = User.builder().id(1L).email("test@example.com").build();
-        when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
-        when(resetTokenService.claim(user, "token")).thenReturn(ResetToken.builder().id(1L).user(user).build());
+        when(resetTokenService.claim("token")).thenReturn(ResetToken.builder().id(1L).user(user).build());
         when(passwordEncoder.encode("newPassword")).thenReturn("newEncoded");
         when(userRepository.save(user)).thenReturn(user);
 
@@ -790,10 +788,9 @@ class DefaultUserServiceTest {
 
     @Test
     void aRefusedPasswordResetTurnsNothingOn() {
-        final var resetDto = PasswordResetDto.builder().email("test@example.com").token("token").password("newPassword").build();
+        final var resetDto = PasswordResetDto.builder().token("token").password("newPassword").build();
         final var user = User.builder().id(1L).email("test@example.com").build();
-        when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
-        when(resetTokenService.claim(user, "token")).thenThrow(new ResetLinkExpiredException());
+        when(resetTokenService.claim("token")).thenThrow(new ResetLinkExpiredException());
 
         assertThatThrownBy(() -> userService.resetPassword(resetDto)).hasMessage(RESET_LINK_EXPIRED);
 
@@ -802,23 +799,25 @@ class DefaultUserServiceTest {
     }
 
     @Test
-    void aResetForAnUnknownEmailIsRefusedLikeAnExpiredLink() {
-        final var resetDto = PasswordResetDto.builder().email("nobody@example.com").token("token").password("newPassword").build();
-        when(userRepository.findByEmail("nobody@example.com")).thenReturn(Optional.empty());
+    void theTokenAloneNamesTheAccount() {
+        final var resetDto = PasswordResetDto.builder().token("token").password("newPassword").build();
+        final var user = User.builder().id(1L).email("test@example.com").build();
+        when(resetTokenService.claim("token")).thenReturn(ResetToken.builder().id(1L).user(user).build());
+        when(passwordEncoder.encode("newPassword")).thenReturn("newEncoded");
+        when(userRepository.save(user)).thenReturn(user);
 
-        assertThatThrownBy(() -> userService.resetPassword(resetDto))
-                .isInstanceOf(ResetLinkExpiredException.class)
-                .hasMessage(RESET_LINK_EXPIRED);
-        verifyNoInteractions(resetTokenService);
+        userService.resetPassword(resetDto);
+
+        verify(accountLock).lock(user);
+        verify(userRepository, org.mockito.Mockito.never()).findByEmail(any());
     }
 
     @Test
     void aPasswordResetLeavesTwoStepOn() {
-        final var resetDto = PasswordResetDto.builder().email("test@example.com").token("token").password("newPassword").build();
+        final var resetDto = PasswordResetDto.builder().token("token").password("newPassword").build();
         final var user = User.builder().id(1L).email("test@example.com").twoStepEnabled(true).twoFactorEnabled(true)
                 .twoFactorSecret("SECRET").build();
-        when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
-        when(resetTokenService.claim(user, "token")).thenReturn(ResetToken.builder().id(1L).user(user).build());
+        when(resetTokenService.claim("token")).thenReturn(ResetToken.builder().id(1L).user(user).build());
         when(passwordEncoder.encode("newPassword")).thenReturn("newEncoded");
         when(userRepository.save(user)).thenReturn(user);
 
@@ -833,10 +832,9 @@ class DefaultUserServiceTest {
 
     @Test
     void aPasswordResetClearsTheWrongPasswordCounter() {
-        final var resetDto = PasswordResetDto.builder().email("test@example.com").token("token").password("newPassword").build();
+        final var resetDto = PasswordResetDto.builder().token("token").password("newPassword").build();
         final var user = User.builder().id(1L).email("test@example.com").authProvider("local").password(LOCAL_PASSWORD_HASH).build();
-        when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
-        when(resetTokenService.claim(user, "token")).thenReturn(ResetToken.builder().id(1L).user(user).build());
+        when(resetTokenService.claim("token")).thenReturn(ResetToken.builder().id(1L).user(user).build());
         when(passwordEncoder.encode("newPassword")).thenReturn("newEncoded");
         when(userRepository.save(user)).thenReturn(user);
         IntStream.rangeClosed(1, 20).forEach(attempt -> loginAttemptService.loginFailed("reauth:1"));
@@ -850,10 +848,9 @@ class DefaultUserServiceTest {
 
     @Test
     void aRefusedPasswordResetKeepsTheWrongPasswordCounter() {
-        final var resetDto = PasswordResetDto.builder().email("test@example.com").token("token").password("newPassword").build();
+        final var resetDto = PasswordResetDto.builder().token("token").password("newPassword").build();
         final var user = User.builder().id(1L).email("test@example.com").build();
-        when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
-        when(resetTokenService.claim(user, "token")).thenThrow(new ResetLinkExpiredException());
+        when(resetTokenService.claim("token")).thenThrow(new ResetLinkExpiredException());
         IntStream.rangeClosed(1, 20).forEach(attempt -> loginAttemptService.loginFailed("reauth:1"));
 
         assertThatThrownBy(() -> userService.resetPassword(resetDto)).hasMessage(RESET_LINK_EXPIRED);

@@ -16,7 +16,7 @@ public interface ResetTokenRepository extends JpaRepository<ResetToken, Long> {
 
     List<ResetToken> findByActiveTrue();
     List<ResetToken> findByUserAndActiveTrue(User user);
-    Optional<ResetToken> findByUserAndTokenHashAndActiveTrue(User user, String tokenHash);
+    Optional<ResetToken> findByTokenHashAndActiveTrue(String tokenHash);
     List<ResetToken> findByExpirationDateIsLessThanEqualAndActiveTrue(LocalDateTime expirationDate);
     List<ResetToken> findByExpirationDateIsLessThanEqualAndActiveFalse(LocalDateTime expirationDate);
     void deleteByUser(User user);
