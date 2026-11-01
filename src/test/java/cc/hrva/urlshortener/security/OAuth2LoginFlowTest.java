@@ -310,6 +310,7 @@ class OAuth2LoginFlowTest {
         }
 
         @Bean
+        @Primary
         OAuth2AccessTokenResponseClient<OAuth2AuthorizationCodeGrantRequest> tokenEndpoint() {
             return grantRequest -> OAuth2AccessTokenResponse.withToken(ACCESS_TOKEN)
                     .tokenType(OAuth2AccessToken.TokenType.BEARER)
