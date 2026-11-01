@@ -1,0 +1,72 @@
+name: Dependency vulnerabilities
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  schedule:
+    - cron: '41 4 * * *'
+
+permissions:
+  contents: read
+
+jobs:
+  review:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Review the dependencies this pull request adds
+        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: high
+
+  scan:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Scan the Maven dependencies with OSV-Scanner
+        id: osv
+        continue-on-error: true
+        uses: google/osv-scanner-action/osv-scanner-action@b1d267aea5211fa648d9d442fa64b90dbdcbdd36 # v2.7.0
+        with:
+          scan-args: |-
+            --format=json
+            --output=osv-results.json
+            --recursive
+            ./
+
+      - name: Fail on a high or critical vulnerability
+        shell: bash
+        env:
+          SERIOUS: >-
+            [.results[]?.packages[]? | . as $found | .groups[]?
+            | select((.max_severity // "") != "" and (.max_severity | tonumber) >= 7)
+            | "\($found.package.name) \($found.package.version): \(.ids | join(", ")) (CVSS \(.max_severity))"]
+        run: |
+          set -euo pipefail
+          if [ ! -s osv-results.json ]; then
+            echo "::error::OSV-Scanner wrote no results"
+            exit 1
+          fi
+          jq -r "$SERIOUS | .[]" osv-results.json
+          count=$(jq "$SERIOUS | length" osv-results.json)
+          if [ "$count" -gt 0 ]; then
+            echo "::error::$count high or critical vulnerabilities in the dependencies"
+            exit 1
+          fi
+          echo "No high or critical vulnerabilities"
