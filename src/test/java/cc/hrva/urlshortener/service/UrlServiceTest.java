@@ -305,14 +305,15 @@ class UrlServiceTest {
         when(userService.getUserFromToken()).thenReturn(owner);
         when(urlRepository.findAllByOwner(owner, org.springframework.data.domain.Pageable.unpaged())).thenReturn(new PageImpl<>(List.of(
                 Url.builder().shortUrl("menu").longUrl("https://example.com/menu,today").visits(3L).createDate(created).active(true).domain(domain).build(),
-                Url.builder().shortUrl("shop").longUrl("https://example.com/shop").visits(0L).visitLimit(5L).createDate(created).active(false).build())));
+                Url.builder().shortUrl("shop").longUrl("https://example.com/shop").visits(0L).visitLimit(5L).createDate(created)
+                        .expirationDate(LocalDateTime.of(2026, 12, 31, 23, 59, 59)).active(false).build())));
 
         final var csv = new String(urlService.exportMyUrlsAsCsv(null), java.nio.charset.StandardCharsets.UTF_8);
 
         assertThat(csv.lines()).containsExactly(
                 "Short URL,Domain,Long URL,Visits,Visit Limit,Created,Expires,Active",
-                "menu,go.example.com,\"https://example.com/menu,today\",3,0,2026-10-20T09:30,,true",
-                "shop,,https://example.com/shop,0,5,2026-10-20T09:30,,false");
+                "menu,go.example.com,\"https://example.com/menu,today\",3,0,2026-10-20T09:30:00Z,,true",
+                "shop,,https://example.com/shop,0,5,2026-10-20T09:30:00Z,2026-12-31T23:59:59Z,false");
     }
 
     @Test

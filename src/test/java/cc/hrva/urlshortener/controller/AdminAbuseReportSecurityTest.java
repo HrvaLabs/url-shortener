@@ -145,7 +145,7 @@ class AdminAbuseReportSecurityTest {
                         {"reports":[{"registrar":"NameSilo, LLC","to":"abuse@namesilo.com","cc":["reportphishing@apwg.org"],
                           "subject":"Phishing: 2 domains used in links to wwkn0gb.bgp37.sbs","body":"Hello,\\n\\nI run hrva.cc",
                           "domains":[{"domain":"omaehhm.com","registeredOn":"2026-08-14",
-                                      "report":{"reportedAt":"2026-10-28T07:00:00","reportedBy":"karlo@hrva.cc","registrar":"NameSilo, LLC","suspendedAt":null}},
+                                      "report":{"reportedAt":"2026-10-28T07:00:00Z","reportedBy":"karlo@hrva.cc","registrar":"NameSilo, LLC","suspendedAt":null}},
                                      {"domain":"buokpky.com","registeredOn":null,"report":null}]}],
                          "noContact":[{"domain":"example.hr","registrar":null,"lookupFailed":false,"reason":"noRegistry","report":null},
                                       {"domain":"slow.com","registrar":"Some Registrar","lookupFailed":true,"reason":"lookupFailed","report":null},

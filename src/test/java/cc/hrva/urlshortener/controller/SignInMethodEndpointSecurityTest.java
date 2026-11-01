@@ -213,8 +213,8 @@ class SignInMethodEndpointSecurityTest {
                 .andExpect(jsonPath("$.signInMethods[0].method").value("PASSWORD"))
                 .andExpect(jsonPath("$.signInMethods[0].turnedOffAt").value(nullValue()))
                 .andExpect(jsonPath("$.signInMethods[1].method").value("GOOGLE"))
-                .andExpect(jsonPath("$.signInMethods[1].firstUsedAt").value("2026-05-16T10:00:00"))
-                .andExpect(jsonPath("$.signInMethods[1].lastUsedAt").value("2026-10-29T08:00:00"))
+                .andExpect(jsonPath("$.signInMethods[1].firstUsedAt").value("2026-05-16T10:00:00Z"))
+                .andExpect(jsonPath("$.signInMethods[1].lastUsedAt").value("2026-10-29T08:00:00Z"))
                 .andExpect(jsonPath("$.signInMethods[1].turnedOffAt").isString());
 
         assertThat(turnedOff(ANA)).containsExactly("GOOGLE");

@@ -161,8 +161,8 @@ class AdminBioPageSecurityTest {
                 .andExpect(content().json("""
                         {"content":[{"id":12,"handle":"ana","displayName":"Ana Horvat","bio":"Photos from Zagreb","ownerId":7,
                         "ownerEmail":"ana@example.com","ownerActive":true,"hidden":false,"hiddenReason":null,"hiddenAt":null,"hiddenBy":null,
-                        "handleRevokedReason":null,"buttons":3,"visibleButtons":2,"reviewOpen":true,"createdAt":"2026-10-26T09:00:00",
-                        "updatedAt":"2026-10-26T09:05:00"}],"page":{"totalElements":1}}
+                        "handleRevokedReason":null,"buttons":3,"visibleButtons":2,"reviewOpen":true,"createdAt":"2026-10-26T09:00:00Z",
+                        "updatedAt":"2026-10-26T09:05:00Z"}],"page":{"totalElements":1}}
                         """));
 
         verify(adminBioPageService).search("ana", true, PageRequest.of(0, 20));

@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.service.impl;
 
+import cc.hrva.urlshortener.util.ApiDates;
 import cc.hrva.urlshortener.exception.RateLimitExceededException;
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.controller.LinkWarningView;
@@ -721,8 +722,8 @@ public class DefaultUrlService implements UrlService {
                     escapeCsv(url.getLongUrl()),
                     url.getVisits(),
                     url.getVisitLimit() != null ? url.getVisitLimit() : 0,
-                    url.getCreateDate() != null ? url.getCreateDate().toString() : "",
-                    url.getExpirationDate() != null ? url.getExpirationDate().toString() : "",
+                    StringUtils.defaultString(ApiDates.utc(url.getCreateDate())),
+                    StringUtils.defaultString(ApiDates.utc(url.getExpirationDate())),
                     url.isActive()));
         }
         return sb.toString().getBytes(StandardCharsets.UTF_8);

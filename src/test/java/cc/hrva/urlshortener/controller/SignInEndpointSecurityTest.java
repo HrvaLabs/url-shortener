@@ -154,7 +154,7 @@ class SignInEndpointSecurityTest {
             {"ceremonyId":"%s","credential":{"id":"a2V5","rawId":"a2V5","type":"public-key","clientExtensionResults":{},"response":{"authenticatorData":"e30","clientDataJSON":"e30","signature":"e30"}}}"""
             .formatted(CEREMONY_ID);
     private static final String MACBOOK_JSON = """
-            {"id":7,"label":"MacBook","kind":"SYNCED","backupEligible":true,"backedUp":true,"discoverable":true,"transports":["hybrid","internal"],"createdAt":"2026-10-25T14:05:00","lastUsedAt":null}""";
+            {"id":7,"label":"MacBook","kind":"SYNCED","backupEligible":true,"backedUp":true,"discoverable":true,"transports":["hybrid","internal"],"createdAt":"2026-10-25T14:05:00Z","lastUsedAt":null}""";
 
     @Autowired
     private MockMvc mockMvc;

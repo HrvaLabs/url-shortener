@@ -295,7 +295,7 @@ class CustomDomainEndpointSecurityTest {
                 .andExpect(status().isOk())
                 .andExpect(content().json("""
                         {"id":%d,"hostname":"go.example.com","status":"PENDING_REVIEW","reason":"Menu links for my cafe","reviewNote":null,
-                         "createdAt":"2026-10-29T09:00:00","reviewedAt":null,"activatedAt":null,"lastCheckedAt":null,
+                         "createdAt":"2026-10-29T09:00:00Z","reviewedAt":null,"activatedAt":null,"lastCheckedAt":null,
                          "dnsRecord":null,"steps":null,"problem":null,"problemText":null,"disabledNote":null,"links":0}""".formatted(id),
                         JsonCompareMode.STRICT));
     }
@@ -314,7 +314,7 @@ class CustomDomainEndpointSecurityTest {
                 .andExpect(status().isOk())
                 .andExpect(content().json("""
                         {"id":%d,"hostname":"menu.example.org","status":"AWAITING_DNS","reason":"Menu links for my cafe","reviewNote":"Welcome",
-                         "createdAt":"2026-10-28T09:00:00","reviewedAt":"2026-10-29T08:40:00","activatedAt":null,"lastCheckedAt":"2026-10-29T08:59:00",
+                         "createdAt":"2026-10-28T09:00:00Z","reviewedAt":"2026-10-29T08:40:00Z","activatedAt":null,"lastCheckedAt":"2026-10-29T08:59:00Z",
                          "dnsRecord":{"type":"CNAME","name":"menu.example.org","target":"domains.hrva.cc"},
                          "steps":{"dnsFound":false,"certificateIssued":false},
                          "problem":"DNS_NOT_FOUND","problemText":"We can't see the CNAME record yet. DNS changes can take up to an hour.",

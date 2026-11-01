@@ -23,7 +23,7 @@ public class UrlUpdateDto {
     private String longUrl;
     @Schema(description = "Maximum number of visits allowed", example = "200")
     private Long visitLimit;
-    @Schema(description = "Expiration date and time", example = "2026-12-31T23:59:59")
+    @Schema(description = "Expiration date and time", example = "2026-12-31T23:59:59Z")
     private LocalDateTime expirationDate;
     @Schema(description = "Tags (replaces existing when provided; null leaves them unchanged)", example = "[\"work\"]")
     private Set<String> tags;

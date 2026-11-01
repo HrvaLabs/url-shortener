@@ -16,9 +16,9 @@ public record CreatedApiKeyResponse(
         Long apiCallsUsed,
         @Schema(description = "When the last request was made with the key; null until its first request", example = "null")
         LocalDateTime lastUsedAt,
-        @Schema(description = "Creation date and time", example = "2026-10-30T10:00:00")
+        @Schema(description = "Creation date and time", example = "2026-10-30T10:00:00Z")
         LocalDateTime createDate,
-        @Schema(description = "Expiration date and time; null when the key never expires", example = "2027-01-28T10:00:00")
+        @Schema(description = "Expiration date and time; null when the key never expires", example = "2027-01-28T10:00:00Z")
         LocalDateTime expirationDate,
         @Schema(description = "Whether the API key is active", example = "true")
         boolean active,

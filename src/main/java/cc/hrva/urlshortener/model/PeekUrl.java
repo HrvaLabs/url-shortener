@@ -22,7 +22,7 @@ public class PeekUrl {
   @Schema(description = "Short URL alias", example = "abc123")
   private String shortUrl;
 
-  @Schema(description = "Creation date and time", example = "2026-05-16T10:00:00")
+  @Schema(description = "Creation date and time", example = "2026-05-16T10:00:00Z")
   private LocalDateTime createDate;
 
   @Schema(description = "Whether the link needs a password; its destination is then left out", example = "false")

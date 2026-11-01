@@ -17,9 +17,9 @@ public record UrlResponse(
         String longUrl,
         @Schema(description = "Short URL alias", example = "abc123")
         String shortUrl,
-        @Schema(description = "Creation date and time", example = "2026-05-16T10:00:00")
+        @Schema(description = "Creation date and time", example = "2026-05-16T10:00:00Z")
         LocalDateTime createDate,
-        @Schema(description = "Expiration date and time", example = "2026-12-31T23:59:59")
+        @Schema(description = "Expiration date and time", example = "2026-12-31T23:59:59Z")
         LocalDateTime expirationDate,
         @Schema(description = "Number of visits", example = "42")
         Long visits,

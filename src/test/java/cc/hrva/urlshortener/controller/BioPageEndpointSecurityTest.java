@@ -199,7 +199,7 @@ class BioPageEndpointSecurityTest {
                 .andExpect(jsonPath("$.buttons[0].shortUrl").value("ana-ig"))
                 .andExpect(jsonPath("$.buttons[0].linkState").value("LIVE"))
                 .andExpect(jsonPath("$.buttons[0].shownOnPage").value(true))
-                .andExpect(jsonPath("$.createdAt").value("2026-10-26T09:00:00"));
+                .andExpect(jsonPath("$.createdAt").value("2026-10-26T09:00:00Z"));
     }
 
     @Test
@@ -420,9 +420,9 @@ class BioPageEndpointSecurityTest {
         when(bioPageService.update(any(BioPageUpdateDto.class))).thenReturn(ana());
 
         mockMvc.perform(signedIn(put(MY_PAGE)).content("{\"displayName\":\"Ana\",\"avatarKind\":\"INITIALS\",\"accent\":\"TEAL\",\"theme\":\"AUTO\","
-                        + "\"buttons\":[],\"expectedUpdatedAt\":\"2026-10-26T09:05:00.1234\"}"))
+                        + "\"buttons\":[],\"expectedUpdatedAt\":\"2026-10-26T09:05:00.1234Z\"}"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.updatedAt").value("2026-10-26T09:05:00"));
+                .andExpect(jsonPath("$.updatedAt").value("2026-10-26T09:05:00Z"));
 
         final var saved = ArgumentCaptor.forClass(BioPageUpdateDto.class);
         verify(bioPageService).update(saved.capture());

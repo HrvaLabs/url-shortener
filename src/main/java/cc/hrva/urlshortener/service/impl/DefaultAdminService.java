@@ -1,5 +1,7 @@
 package cc.hrva.urlshortener.service.impl;
 
+import org.apache.commons.lang3.StringUtils;
+import cc.hrva.urlshortener.util.ApiDates;
 import cc.hrva.urlshortener.dto.AdminStatsResponse;
 import cc.hrva.urlshortener.dto.AdminStatsResponse.RecentUrl;
 import cc.hrva.urlshortener.dto.stats.CacheStats;
@@ -53,8 +55,8 @@ public class DefaultAdminService implements AdminService {
                     url.getOwner() != null ? url.getOwner().getEmail() : "",
                     url.getVisits(),
                     url.getVisitLimit() != null ? url.getVisitLimit() : 0,
-                    url.getCreateDate() != null ? url.getCreateDate().toString() : "",
-                    url.getExpirationDate() != null ? url.getExpirationDate().toString() : "",
+                    StringUtils.defaultString(ApiDates.utc(url.getCreateDate())),
+                    StringUtils.defaultString(ApiDates.utc(url.getExpirationDate())),
                     url.isActive()));
         }
         return sb.toString().getBytes(StandardCharsets.UTF_8);

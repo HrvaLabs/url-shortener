@@ -121,7 +121,7 @@ class PublicStatsEndpointSecurityTest {
                 .andExpect(status().isOk())
                 .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "max-age=600, public"))
                 .andExpect(jsonPath("$.from").value("2026-09-26"))
-                .andExpect(jsonPath("$.updatedAt").value("2026-10-26T10:00:00"))
+                .andExpect(jsonPath("$.updatedAt").value("2026-10-26T10:00:00Z"))
                 .andExpect(jsonPath("$.averageReviewMinutes").value(210));
     }
 

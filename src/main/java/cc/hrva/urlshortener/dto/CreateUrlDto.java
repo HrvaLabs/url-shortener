@@ -26,7 +26,7 @@ public class CreateUrlDto {
   private String shortUrl;
   @Schema(description = "Maximum number of visits allowed", example = "100")
   private Long visitLimit;
-  @Schema(description = "Expiration date and time of the URL", example = "2026-12-31T23:59:59")
+  @Schema(description = "Expiration date and time of the URL", example = "2026-12-31T23:59:59Z")
   private LocalDateTime expirationDate;
   @Schema(description = "Tags for organizing the URL (max 10, each ≤30 chars, normalized to lowercase)", example = "[\"work\", \"campaign\"]")
   private Set<String> tags;

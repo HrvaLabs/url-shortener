@@ -22,9 +22,9 @@ public class UserDto {
     private Long apiKeySlots;
     @Schema(description = "User authorities/roles", example = "[\"ROLE_USER\"]")
     private List<Authorities> authorities;
-    @Schema(description = "Account creation date and time", example = "2026-05-16T10:00:00")
+    @Schema(description = "Account creation date and time", example = "2026-05-16T10:00:00Z")
     private LocalDateTime createDate;
-    @Schema(description = "Last login date and time", example = "2026-05-16T12:00:00")
+    @Schema(description = "Last login date and time", example = "2026-05-16T12:00:00Z")
     private LocalDateTime lastLogin;
     @Schema(description = "Authentication provider", example = "local", allowableValues = {"local", "google", "github"})
     private String authProvider;

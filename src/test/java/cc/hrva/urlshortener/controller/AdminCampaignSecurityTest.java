@@ -100,7 +100,7 @@ class AdminCampaignSecurityTest {
             new CampaignResponse.Reports(39, 12));
     private static final String CAMPAIGN_JSON = """
             {"id":4,"shape":"/wqamhcsom?r&t","path":"/wqamhcsom","queryNames":["r","t"],"status":"HOLDING","holding":true,"holdingOff":null,
-             "firstSeenAt":"2026-10-20T08:15:00","lastSeenAt":"2026-10-29T09:30:00","activeUntil":"2026-11-05T09:30:00",
+             "firstSeenAt":"2026-10-20T08:15:00Z","lastSeenAt":"2026-10-29T09:30:00Z","activeUntil":"2026-11-05T09:30:00Z",
              "allowedBy":null,"allowedAt":null,"links":{"total":62,"active":0,"held":58,"blocked":4},"domains":39,"clicks":970,
              "reports":{"reported":39,"suspended":12}}""";
     private static final RSAKey SIGNING_KEY = generateSigningKey();
@@ -177,8 +177,8 @@ class AdminCampaignSecurityTest {
         mockMvc.perform(signedIn(get(DETAIL), "admin-token"))
                 .andExpect(status().isOk())
                 .andExpect(content().json("{\"campaign\":" + CAMPAIGN_JSON + ",\"domains\":["
-                        + "{\"domain\":\"omaehhm.com\",\"links\":2,\"report\":{\"reportedAt\":\"2026-10-28T07:00:00\",\"reportedBy\":\"karlo@hrva.cc\","
-                        + "\"registrar\":\"NameSilo, LLC\",\"suspendedAt\":\"2026-10-29T02:00:00\"}},"
+                        + "{\"domain\":\"omaehhm.com\",\"links\":2,\"report\":{\"reportedAt\":\"2026-10-28T07:00:00Z\",\"reportedBy\":\"karlo@hrva.cc\","
+                        + "\"registrar\":\"NameSilo, LLC\",\"suspendedAt\":\"2026-10-29T02:00:00Z\"}},"
                         + "{\"domain\":\"c.com\",\"links\":1,\"report\":null}]}", JsonCompareMode.STRICT));
     }
 
@@ -191,7 +191,7 @@ class AdminCampaignSecurityTest {
         mockMvc.perform(signedIn(get(LINKS), "admin-token"))
                 .andExpect(status().isOk())
                 .andExpect(content().json("{\"content\":[{\"id\":41,\"shortUrl\":\"qf9qb\",\"longUrl\":\"https://ll.omaehhm.com/wqamhcsom/?r=plfN8D&t=1793210826\","
-                        + "\"domain\":\"omaehhm.com\",\"createDate\":\"2026-10-21T10:05:00\",\"active\":false,\"blockReason\":\"CAMPAIGN\",\"clicks\":123}],"
+                        + "\"domain\":\"omaehhm.com\",\"createDate\":\"2026-10-21T10:05:00Z\",\"active\":false,\"blockReason\":\"CAMPAIGN\",\"clicks\":123}],"
                         + "\"page\":{\"size\":20,\"number\":0,\"totalElements\":62,\"totalPages\":4}}", JsonCompareMode.STRICT));
         mockMvc.perform(signedIn(get(LINKS + "?page=2&size=101&sort=createDate,asc&search=qf9"), "admin-token"))
                 .andExpect(status().isOk());

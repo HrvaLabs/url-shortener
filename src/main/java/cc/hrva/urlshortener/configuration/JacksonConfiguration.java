@@ -19,6 +19,11 @@ public class JacksonConfiguration {
         return builder -> builder.enable(EnumFeature.FAIL_ON_NUMBERS_FOR_ENUMS);
     }
 
+    @Bean
+    public JsonMapperBuilderCustomizer utcDateTimes() {
+        return builder -> builder.addModule(UtcDateTimes.module());
+    }
+
     @JsonIgnoreProperties({"stackTrace", "cause", "suppressed", "localizedMessage"})
     abstract static class ThrowableMixin {
     }

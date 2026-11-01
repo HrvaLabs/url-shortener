@@ -17,7 +17,7 @@ public class ApiKeyUpdateDto {
     @NotNull(message = "API key ID is required")
     @Schema(description = "Unique identifier of the API key to update", example = "1")
     private Long id;
-    @Schema(description = "Expiration date and time, in the future. Kept for older clients; expiresInDays or neverExpires is the usual way", example = "2026-12-31T23:59:59")
+    @Schema(description = "Expiration date and time, in the future. Kept for older clients; expiresInDays or neverExpires is the usual way", example = "2026-12-31T23:59:59Z")
     private LocalDateTime expirationDate;
     @Min(value = 1, message = ApiKeyCreateDto.DAYS_RANGE)
     @Max(value = 3650, message = ApiKeyCreateDto.DAYS_RANGE)

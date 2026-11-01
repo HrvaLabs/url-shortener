@@ -307,7 +307,7 @@ class AdminCustomDomainSecurityTest {
                 .andExpect(jsonPath("$.status").value("DISABLED"))
                 .andExpect(jsonPath("$.disabledReason").value("ADMIN"))
                 .andExpect(jsonPath("$.disabledNote").value("Phishing kit"))
-                .andExpect(jsonPath("$.disabledAt").value("2026-10-29T09:00:00"))
+                .andExpect(jsonPath("$.disabledAt").value("2026-10-29T09:00:00Z"))
                 .andExpect(jsonPath("$.cloudflareId").value("b0361ed9-0000-4000-8000-000000000001"))
                 .andExpect(jsonPath("$.owner.email").value(ANA_EMAIL));
         assertThat(jdbcTemplate.queryForObject("select next_check_at from custom_domain where id = ?", LocalDateTime.class, id)).isNull();
@@ -397,11 +397,11 @@ class AdminCustomDomainSecurityTest {
                 .andExpect(status().isOk())
                 .andExpect(content().json("""
                         {"content":[{"id":%d,"hostname":"go.example.com","status":"ACTIVE","reason":"Menu links for my cafe","reviewNote":"Looks fine",
-                        "createdAt":"2026-10-27T09:00:00","reviewedAt":"2026-10-28T09:00:00","activatedAt":"2026-10-28T09:30:00",
-                        "lastCheckedAt":"2026-10-29T08:00:00",
+                        "createdAt":"2026-10-27T09:00:00Z","reviewedAt":"2026-10-28T09:00:00Z","activatedAt":"2026-10-28T09:30:00Z",
+                        "lastCheckedAt":"2026-10-29T08:00:00Z",
                         "dnsRecord":{"type":"CNAME","name":"go.example.com","target":"domains.hrva.cc"},
                         "steps":{"dnsFound":true,"certificateIssued":true},"problem":null,"problemText":null,"disabledNote":null,"links":2,
-                        "owner":{"id":%d,"email":"ana@example.com","active":true,"createdAt":"2026-09-19T09:00:00","links":3,"blockedLinks":1,
+                        "owner":{"id":%d,"email":"ana@example.com","active":true,"createdAt":"2026-09-19T09:00:00Z","links":3,"blockedLinks":1,
                         "openReviews":1,"possibleScammer":true},
                         "applyFlags":["Registered 3 days ago"],"cloudflareId":"b0361ed9-0000-4000-8000-000000000001","cloudflareStatus":"active",
                         "sslStatus":"active","lastError":null,"disabledReason":null,"disabledAt":null,"deletedAt":null,"clicks":1204}],
@@ -468,8 +468,8 @@ class AdminCustomDomainSecurityTest {
                 .andExpect(status().isOk())
                 .andExpect(content().json("""
                         {"slotsInUse":1,"maxActive":90,"freeAllowance":100,"cloudflareTotal":4,"cloudflareQuota":null,"pending":1,"active":1,
-                        "token":{"status":"OK","checkedAt":"2026-10-29T08:55:00","message":null},
-                        "reconcile":{"ranAt":"2026-10-29T03:40:00","cloudflareTotal":3,"oursInCloudflare":2,"unknownHostnames":["stray.example.com"],
+                        "token":{"status":"OK","checkedAt":"2026-10-29T08:55:00Z","message":null},
+                        "reconcile":{"ranAt":"2026-10-29T03:40:00Z","cloudflareTotal":3,"oursInCloudflare":2,"unknownHostnames":["stray.example.com"],
                         "missing":[{"id":9,"hostname":"x.example.org"}],"ignored":["test.karlo.cc"],"error":null}}
                         """, JsonCompareMode.STRICT));
         verify(cloudflareTokenCheck, never()).check();
@@ -498,7 +498,7 @@ class AdminCustomDomainSecurityTest {
                 .andExpect(jsonPath("$.id").value(id))
                 .andExpect(jsonPath("$.status").value("APPROVED_PROVISIONING"))
                 .andExpect(jsonPath("$.reviewNote").value("Looks fine"))
-                .andExpect(jsonPath("$.reviewedAt").value("2026-10-29T09:00:00"))
+                .andExpect(jsonPath("$.reviewedAt").value("2026-10-29T09:00:00Z"))
                 .andExpect(jsonPath("$.dnsRecord.target").value("domains.hrva.cc"))
                 .andExpect(jsonPath("$.owner.email").value(ANA_EMAIL));
 
@@ -674,7 +674,7 @@ class AdminCustomDomainSecurityTest {
         mockMvc.perform(as(ADMIN_TOKEN, post(DOMAINS + "/reconcile")))
                 .andExpect(status().isOk())
                 .andExpect(content().json("""
-                        {"ranAt":"2026-10-29T09:00:00","cloudflareTotal":4,"oursInCloudflare":3,"unknownHostnames":["stray.example.com"],
+                        {"ranAt":"2026-10-29T09:00:00Z","cloudflareTotal":4,"oursInCloudflare":3,"unknownHostnames":["stray.example.com"],
                         "missing":[{"id":9,"hostname":"x.example.org"}],"ignored":["test.karlo.cc"],"error":null}
                         """, JsonCompareMode.STRICT));
     }
@@ -697,7 +697,7 @@ class AdminCustomDomainSecurityTest {
         mockMvc.perform(as(ADMIN_TOKEN, post(DOMAINS + "/cloudflare-check")))
                 .andExpect(status().isOk())
                 .andExpect(content().json("""
-                        {"status":"INVALID","checkedAt":"2026-10-29T09:00:00",
+                        {"status":"INVALID","checkedAt":"2026-10-29T09:00:00Z",
                         "message":"Cloudflare refused the token. Check that it's valid and has SSL and Certificates edit permission on the hrva.cc zone."}
                         """, JsonCompareMode.STRICT));
     }
@@ -709,7 +709,7 @@ class AdminCustomDomainSecurityTest {
                 .andExpect(content().json("{\"userId\":%d,\"maxDomains\":1,\"reason\":null,\"grantedBy\":null,\"grantedAt\":null}".formatted(ANA),
                         JsonCompareMode.STRICT));
 
-        final var granted = "{\"userId\":%d,\"maxDomains\":3,\"reason\":\"Agency with three brands\",\"grantedBy\":\"admin@hrva.cc\",\"grantedAt\":\"2026-10-29T09:00:00\"}"
+        final var granted = "{\"userId\":%d,\"maxDomains\":3,\"reason\":\"Agency with three brands\",\"grantedBy\":\"admin@hrva.cc\",\"grantedAt\":\"2026-10-29T09:00:00Z\"}"
                 .formatted(ANA);
         mockMvc.perform(as(ADMIN_TOKEN, put(ALLOWANCES + ANA)).contentType(MediaType.APPLICATION_JSON)
                         .content("{\"maxDomains\":3,\"reason\":\" Agency with three brands \"}"))

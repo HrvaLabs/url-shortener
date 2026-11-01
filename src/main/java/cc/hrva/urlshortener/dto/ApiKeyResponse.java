@@ -12,11 +12,11 @@ public record ApiKeyResponse(
         String keyPrefix,
         @Schema(description = "How many requests have been made with the key in total", example = "42")
         Long apiCallsUsed,
-        @Schema(description = "When the last request was made with the key; null until its first request", example = "2026-10-30T09:15:00")
+        @Schema(description = "When the last request was made with the key; null until its first request", example = "2026-10-30T09:15:00Z")
         LocalDateTime lastUsedAt,
-        @Schema(description = "Creation date and time", example = "2026-05-16T10:00:00")
+        @Schema(description = "Creation date and time", example = "2026-05-16T10:00:00Z")
         LocalDateTime createDate,
-        @Schema(description = "Expiration date and time; null when the key never expires", example = "2026-12-31T23:59:59")
+        @Schema(description = "Expiration date and time; null when the key never expires", example = "2026-12-31T23:59:59Z")
         LocalDateTime expirationDate,
         @Schema(description = "Whether the API key is active", example = "true")
         boolean active,

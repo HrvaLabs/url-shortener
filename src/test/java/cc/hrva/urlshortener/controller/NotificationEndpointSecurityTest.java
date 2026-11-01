@@ -513,7 +513,7 @@ class NotificationEndpointSecurityTest {
         final var response = mockMvc.perform(as(ANA_TOKEN, put(CHANNELS + "/" + id)).contentType(MediaType.APPLICATION_JSON).content(body))
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString();
-        return LocalDateTime.parse(com.jayway.jsonpath.JsonPath.read(response, "$.updatedAt"));
+        return LocalDateTime.ofInstant(java.time.Instant.parse(com.jayway.jsonpath.JsonPath.read(response, "$.updatedAt")), java.time.ZoneOffset.UTC);
     }
 
     private LocalDateTime storedUpdatedAt(final long id) {

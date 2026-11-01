@@ -52,7 +52,7 @@ public class BioPageUpdateDto {
     private List<@NotNull(message = BioPageButtonDto.LINK_REQUIRED) BioPageButtonDto> buttons;
     @Schema(description = "The page's updatedAt as last read, in the format it was sent; when it doesn't match the stored page "
             + "to the microsecond, the save is refused with 409 and nothing is written. Left out, the save isn't checked",
-            example = "2026-10-26T09:00:00.123456")
+            example = "2026-10-26T09:00:00.123456Z")
     private LocalDateTime expectedUpdatedAt;
 
 }
