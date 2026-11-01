@@ -6,7 +6,6 @@ import cc.hrva.urlshortener.exception.SignInUnavailableException;
 import cc.hrva.urlshortener.listener.UserRegisteredEvent;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.enums.SignInMethod;
-import cc.hrva.urlshortener.model.enums.TwoStepMethod;
 import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.service.AuthoritiesService;
 import cc.hrva.urlshortener.service.SettingsService;
@@ -14,8 +13,6 @@ import cc.hrva.urlshortener.service.SignInMethodService;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent;
 import cc.hrva.urlshortener.service.settings.SettingKey;
 import cc.hrva.urlshortener.service.signin.OAuthSignInCodes;
-import cc.hrva.urlshortener.service.twostep.PendingLoginStore;
-import cc.hrva.urlshortener.service.twostep.TwoStepMethods;
 import cc.hrva.urlshortener.util.EmailAddresses;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -26,7 +23,6 @@ import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
-import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
@@ -55,8 +51,6 @@ public class OAuth2LoginSuccessHandler implements AuthenticationSuccessHandler {
     private final AppProperties appProperties;
     private final Validator validator;
     private final ApplicationEventPublisher eventPublisher;
-    private final PendingLoginStore pendingLoginStore;
-    private final TwoStepMethods twoStepMethods;
     private final SignInMethodService signInMethodService;
     private final SettingsService settingsService;
 
@@ -67,8 +61,6 @@ public class OAuth2LoginSuccessHandler implements AuthenticationSuccessHandler {
             final AppProperties appProperties,
             final Validator validator,
             final ApplicationEventPublisher eventPublisher,
-            final PendingLoginStore pendingLoginStore,
-            final TwoStepMethods twoStepMethods,
             final SignInMethodService signInMethodService,
             final SettingsService settingsService) {
         this.userRepository = userRepository;
@@ -77,8 +69,6 @@ public class OAuth2LoginSuccessHandler implements AuthenticationSuccessHandler {
         this.appProperties = appProperties;
         this.validator = validator;
         this.eventPublisher = eventPublisher;
-        this.pendingLoginStore = pendingLoginStore;
-        this.twoStepMethods = twoStepMethods;
         this.signInMethodService = signInMethodService;
         this.settingsService = settingsService;
     }
@@ -97,13 +87,13 @@ public class OAuth2LoginSuccessHandler implements AuthenticationSuccessHandler {
         final var providerSwitch = method.flatMap(OAuthProviders::switchOf);
         if (providerSwitch.isPresent() && !settingsService.isOn(providerSwitch.get())) {
             log.info("OAuth2 login refused: this provider is turned off on hrva.cc provider={}", provider);
-            response.sendRedirect(appProperties.getFrontendUrl() + "/auth/callback?error=" + PROVIDER_DISABLED + "&provider=" + method.get().name());
+            redirectToCallback(response, "?error=" + PROVIDER_DISABLED + "&provider=" + method.get().name());
             return;
         }
 
         if (!emailVerified(oAuth2User)) {
             log.warn("OAuth2 login refused: the provider sent no verified email provider={}", provider);
-            response.sendRedirect(appProperties.getFrontendUrl() + "/auth/callback?error=" + unverifiedEmailError(provider));
+            redirectToCallback(response, "?error=" + unverifiedEmailError(provider));
             return;
         }
 
@@ -111,20 +101,20 @@ public class OAuth2LoginSuccessHandler implements AuthenticationSuccessHandler {
 
         if (email == null) {
             log.warn("OAuth2 login failed: no email returned from provider");
-            response.sendRedirect(appProperties.getFrontendUrl() + "/auth/callback?error=no_email");
+            redirectToCallback(response, "?error=no_email");
             return;
         }
 
         if (!validator.validateValue(User.class, EMAIL, email).isEmpty()) {
             log.warn("OAuth2 login failed: the provider's email is not a valid address");
-            response.sendRedirect(appProperties.getFrontendUrl() + "/auth/callback?error=invalid_email");
+            redirectToCallback(response, "?error=invalid_email");
             return;
         }
 
         final var existingUser = userRepository.findByEmail(email);
         if (existingUser.isEmpty() && !settingsService.isOn(SettingKey.NEW_SIGNUPS)) {
             log.warn("OAuth2 sign-up refused: registrations are disabled provider={}", provider);
-            response.sendRedirect(appProperties.getFrontendUrl() + "/auth/callback?error=registration_disabled");
+            redirectToCallback(response, "?error=registration_disabled");
             return;
         }
 
@@ -132,13 +122,13 @@ public class OAuth2LoginSuccessHandler implements AuthenticationSuccessHandler {
 
         if (Boolean.FALSE.equals(user.getActive())) {
             log.warn("OAuth2 login blocked: inactive account email={} user id={}", EmailAddresses.masked(email), user.getId());
-            response.sendRedirect(appProperties.getFrontendUrl() + "/auth/callback?error=account_inactive");
+            redirectToCallback(response, "?error=account_inactive");
             return;
         }
 
         if (existingUser.isPresent() && method.isPresent() && signInMethodService.isTurnedOff(user.getId(), method.get())) {
             log.info("OAuth2 login refused: the account turned this provider off provider={} user id={}", provider, user.getId());
-            response.sendRedirect(appProperties.getFrontendUrl() + "/auth/callback?error=" + PROVIDER_TURNED_OFF + "&provider=" + method.get().name());
+            redirectToCallback(response, "?error=" + PROVIDER_TURNED_OFF + "&provider=" + method.get().name());
             return;
         }
 
@@ -152,17 +142,18 @@ public class OAuth2LoginSuccessHandler implements AuthenticationSuccessHandler {
             log.warn("OAuth2 sign-in method not recorded, unrecognised provider={} user id={}", provider, user.getId());
         }
 
-        if (Boolean.TRUE.equals(user.getTwoStepEnabled())) {
-            redirectToSecondStep(response, user, method.orElse(null));
-            return;
-        }
-
         final String code;
         try {
             code = signInCodes.create(user.getId(), method.orElse(null));
         } catch (final SignInUnavailableException exception) {
             log.warn("OAuth2 login code unavailable user id={}", user.getId());
-            response.sendRedirect(appProperties.getFrontendUrl() + "/auth/callback?error=" + SIGN_IN_UNAVAILABLE);
+            redirectToCallback(response, "?error=" + SIGN_IN_UNAVAILABLE);
+            return;
+        }
+
+        if (Boolean.TRUE.equals(user.getTwoStepEnabled())) {
+            log.info("OAuth2 login needs the second step, the code leads to it user id={}", user.getId());
+            redirectToCallback(response, "?code=" + URLEncoder.encode(code, StandardCharsets.UTF_8));
             return;
         }
 
@@ -171,26 +162,11 @@ public class OAuth2LoginSuccessHandler implements AuthenticationSuccessHandler {
         method.ifPresent(signInMethod -> signInMethodService.record(user.getId(), signInMethod, signedInAt));
 
         log.info("OAuth2 login success email={} user id={}", EmailAddresses.masked(email), user.getId());
-        response.sendRedirect(appProperties.getFrontendUrl() + "/auth/callback?code=" + URLEncoder.encode(code, StandardCharsets.UTF_8));
+        redirectToCallback(response, "?code=" + URLEncoder.encode(code, StandardCharsets.UTF_8));
     }
 
-    private void redirectToSecondStep(final HttpServletResponse response, final User user, final SignInMethod method) throws IOException {
-        try {
-            final var methods = twoStepMethods.of(user).stream()
-                    .map(TwoStepMethod::name)
-                    .collect(Collectors.joining(","));
-            final var pendingToken = pendingLoginStore.create(user.getId(), false, method);
-            final var redirectUrl = String.format("%s/auth/callback?pendingToken=%s&methods=%s",
-                    appProperties.getFrontendUrl(),
-                    URLEncoder.encode(pendingToken, StandardCharsets.UTF_8),
-                    methods);
-
-            log.info("OAuth2 login needs the second step user id={}", user.getId());
-            response.sendRedirect(redirectUrl);
-        } catch (final SignInUnavailableException exception) {
-            log.warn("OAuth2 login second step unavailable user id={}", user.getId());
-            response.sendRedirect(appProperties.getFrontendUrl() + "/auth/callback?error=two_step_unavailable");
-        }
+    private void redirectToCallback(final HttpServletResponse response, final String query) throws IOException {
+        CallbackRedirects.send(response, appProperties.getFrontendUrl() + "/auth/callback" + query);
     }
 
     private static String providerOf(final Authentication authentication) {

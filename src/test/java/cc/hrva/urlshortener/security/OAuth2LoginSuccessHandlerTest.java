@@ -11,7 +11,6 @@ import cc.hrva.urlshortener.listener.UserRegisteredEvent;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.codebook.Authorities;
 import cc.hrva.urlshortener.model.enums.SignInMethod;
-import cc.hrva.urlshortener.model.enums.TwoStepMethod;
 import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.service.AuthoritiesService;
 import cc.hrva.urlshortener.service.SignInMethodService;
@@ -20,8 +19,6 @@ import cc.hrva.urlshortener.service.impl.DefaultSettingsService;
 import cc.hrva.urlshortener.service.settings.SettingKey;
 import cc.hrva.urlshortener.service.signin.OAuthSignInCodes;
 import cc.hrva.urlshortener.service.settings.SettingsServiceFixtures;
-import cc.hrva.urlshortener.service.twostep.PendingLoginStore;
-import cc.hrva.urlshortener.service.twostep.TwoStepMethods;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Validation;
@@ -39,7 +36,6 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.context.ApplicationEventPublisher;
-import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.oauth2.client.authentication.OAuth2AuthenticationToken;
 import org.springframework.security.oauth2.core.user.OAuth2User;
@@ -60,8 +56,6 @@ import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class OAuth2LoginSuccessHandlerTest {
-
-    private static final String PENDING_TOKEN = "Ab-_cD3fGh1jKlMnOpQrStUvWxYz0123456789-_AbC";
 
     private OAuth2LoginSuccessHandler handler;
 
@@ -95,19 +89,13 @@ class OAuth2LoginSuccessHandlerTest {
     private ApplicationEventPublisher eventPublisher;
 
     @Mock
-    private PendingLoginStore pendingLoginStore;
-
-    @Mock
-    private TwoStepMethods twoStepMethods;
-
-    @Mock
     private SignInMethodService signInMethodService;
 
     @BeforeEach
     void setUp() {
         this.handler = new OAuth2LoginSuccessHandler(userRepository, authoritiesService, signInCodes,
                 appProperties, Validation.buildDefaultValidatorFactory().getValidator(), eventPublisher,
-                pendingLoginStore, twoStepMethods, signInMethodService, settingsService);
+                signInMethodService, settingsService);
         lenient().when(authentication.getPrincipal()).thenReturn(oAuth2User);
         lenient().when(appProperties.getFrontendUrl()).thenReturn("http://fe");
         lenient().when(oAuth2User.getAttribute("email_verified")).thenReturn(true);
@@ -154,7 +142,6 @@ class OAuth2LoginSuccessHandlerTest {
         verify(userRepository, never()).save(any());
         verify(response).sendRedirect(contains("http://fe/auth/callback?code=one-time-code"));
         verify(eventPublisher, never()).publishEvent(any(Object.class));
-        verifyNoInteractions(pendingLoginStore, twoStepMethods);
         assertThat(output).contains("OAuth2 login success email=o***@example.com user id=1").doesNotContain("ok@example.com");
     }
 
@@ -304,46 +291,34 @@ class OAuth2LoginSuccessHandlerTest {
     }
 
     @Test
-    void aTwoStepAccountGetsAPendingTokenInsteadOfAJwt() throws Exception {
+    void aTwoStepAccountGetsOnlyAOneTimeCodeAndNoSignInIsRecordedYet() throws Exception {
         final var user = twoStepUser(7L, "two@example.com", "google");
         when(appProperties.getFrontendUrl()).thenReturn("http://localhost:3000");
         when(oAuth2User.getAttribute("email")).thenReturn("two@example.com");
         when(userRepository.findByEmail("two@example.com")).thenReturn(Optional.of(user));
-        when(pendingLoginStore.create(7L, false, SignInMethod.GOOGLE)).thenReturn(PENDING_TOKEN);
-        when(twoStepMethods.of(user)).thenReturn(List.of(TwoStepMethod.TOTP, TwoStepMethod.RECOVERY_CODE));
+        when(signInCodes.create(7L, SignInMethod.GOOGLE)).thenReturn("Cd3_one-time");
 
         handler.onAuthenticationSuccess(request, response, authentication);
 
-        final var redirect = redirectSent();
-        assertThat(redirect)
-                .startsWith("http://localhost:3000/auth/callback?pendingToken=")
-                .contains("&methods=TOTP,RECOVERY_CODE")
-                .doesNotContain("token=")
-                .isEqualTo("http://localhost:3000/auth/callback?pendingToken=" + PENDING_TOKEN
-                        + "&methods=TOTP,RECOVERY_CODE");
-        verify(pendingLoginStore).create(7L, false, SignInMethod.GOOGLE);
-        verifyNoInteractions(signInCodes);
+        assertThat(redirectSent()).isEqualTo("http://localhost:3000/auth/callback?code=Cd3_one-time");
         verify(userRepository, never()).save(any());
+        verify(userRepository, never()).recordLastLogin(any(), any());
         verify(signInMethodService, never()).record(any(), any(), any());
         assertThat(user.getLastLogin()).isNull();
     }
 
     @Test
-    void aGoogleSignInToAPasswordAccountWithTwoStepNeedsTheSecondStep() throws Exception {
+    void aGoogleSignInToAPasswordAccountWithTwoStepGetsOnlyAOneTimeCode() throws Exception {
         final var google = new OAuth2AuthenticationToken(oAuth2User, List.of(), "google");
         final var user = twoStepUser(8L, "local@example.com", "local");
         when(appProperties.getFrontendUrl()).thenReturn("http://localhost:3000");
         when(oAuth2User.getAttribute("email")).thenReturn("local@example.com");
         when(userRepository.findByEmail("local@example.com")).thenReturn(Optional.of(user));
-        when(pendingLoginStore.create(8L, false, SignInMethod.GOOGLE)).thenReturn(PENDING_TOKEN);
-        when(twoStepMethods.of(user))
-                .thenReturn(List.of(TwoStepMethod.TOTP, TwoStepMethod.WEBAUTHN, TwoStepMethod.RECOVERY_CODE));
+        when(signInCodes.create(8L, SignInMethod.GOOGLE)).thenReturn("Cd3_two-step");
 
         handler.onAuthenticationSuccess(request, response, google);
 
-        assertThat(redirectSent()).isEqualTo("http://localhost:3000/auth/callback?pendingToken=" + PENDING_TOKEN
-                + "&methods=TOTP,WEBAUTHN,RECOVERY_CODE");
-        verifyNoInteractions(signInCodes);
+        assertThat(redirectSent()).isEqualTo("http://localhost:3000/auth/callback?code=Cd3_two-step");
         verify(userRepository, never()).save(any());
         assertThat(user.getAuthProvider()).isEqualTo("local");
         assertThat(user.getLastLogin()).isNull();
@@ -382,37 +357,42 @@ class OAuth2LoginSuccessHandlerTest {
     }
 
     @Test
-    void redisDownSendsTheCallbackAnError() throws Exception {
+    void redisDownForATwoStepAccountsCodeSendsTheCallbackAnError() throws Exception {
         final var user = twoStepUser(9L, "two@example.com", "github");
         when(appProperties.getFrontendUrl()).thenReturn("http://localhost:3000");
         when(oAuth2User.getAttribute("email")).thenReturn("two@example.com");
         when(userRepository.findByEmail("two@example.com")).thenReturn(Optional.of(user));
-        when(twoStepMethods.of(user)).thenReturn(List.of(TwoStepMethod.TOTP, TwoStepMethod.RECOVERY_CODE));
-        when(pendingLoginStore.create(9L, false, SignInMethod.GOOGLE))
-                .thenThrow(new SignInUnavailableException(PendingLoginStore.UNAVAILABLE, new IllegalStateException()));
+        when(signInCodes.create(any(), any())).thenThrow(new SignInUnavailableException(OAuthSignInCodes.UNAVAILABLE, new IllegalStateException()));
 
         handler.onAuthenticationSuccess(request, response, authentication);
 
-        assertThat(redirectSent()).isEqualTo("http://localhost:3000/auth/callback?error=two_step_unavailable");
-        final var order = inOrder(twoStepMethods, pendingLoginStore);
-        order.verify(twoStepMethods).of(user);
-        order.verify(pendingLoginStore).create(9L, false, SignInMethod.GOOGLE);
-        verifyNoInteractions(signInCodes);
+        assertThat(redirectSent()).isEqualTo("http://localhost:3000/auth/callback?error=sign_in_unavailable");
         verify(userRepository, never()).save(any());
     }
 
     @Test
-    void aFailedMethodLookupLeavesNoPendingToken() {
-        final var user = twoStepUser(11L, "two@example.com", "google");
+    void everyRedirectToTheCallbackIsNeitherStoredNorSentAsAReferrer() throws Exception {
+        final var user = twoStepUser(12L, "two@example.com", "google");
         when(oAuth2User.getAttribute("email")).thenReturn("two@example.com");
         when(userRepository.findByEmail("two@example.com")).thenReturn(Optional.of(user));
-        when(twoStepMethods.of(user)).thenThrow(new DataAccessResourceFailureException("database down"));
+        when(signInCodes.create(any(), any())).thenReturn("one-time-code");
 
-        assertThatThrownBy(() -> handler.onAuthenticationSuccess(request, response, authentication))
-                .isInstanceOf(DataAccessResourceFailureException.class);
+        handler.onAuthenticationSuccess(request, response, authentication);
 
-        verifyNoInteractions(pendingLoginStore, signInCodes);
-        verify(userRepository, never()).save(any());
+        verify(response).setHeader("Referrer-Policy", "no-referrer");
+        verify(response).setHeader("Cache-Control", "no-store");
+        verify(response).sendRedirect("http://fe/auth/callback?code=one-time-code");
+    }
+
+    @Test
+    void anErrorRedirectToTheCallbackIsNeitherStoredNorSentAsAReferrer() throws Exception {
+        when(oAuth2User.getAttribute("email")).thenReturn(null);
+
+        handler.onAuthenticationSuccess(request, response, authentication);
+
+        verify(response).setHeader("Referrer-Policy", "no-referrer");
+        verify(response).setHeader("Cache-Control", "no-store");
+        verify(response).sendRedirect("http://fe/auth/callback?error=no_email");
     }
 
     @Test
@@ -425,7 +405,7 @@ class OAuth2LoginSuccessHandlerTest {
         handler.onAuthenticationSuccess(request, response, authentication);
 
         verify(response).sendRedirect("http://fe/auth/callback?error=account_inactive");
-        verifyNoInteractions(signInCodes, pendingLoginStore, twoStepMethods);
+        verifyNoInteractions(signInCodes);
         verify(userRepository, never()).save(any());
     }
 
@@ -438,7 +418,7 @@ class OAuth2LoginSuccessHandlerTest {
         handler.onAuthenticationSuccess(request, response, signIn(provider));
 
         verify(response).sendRedirect("http://fe/auth/callback?error=" + error);
-        verifyNoInteractions(userRepository, signInCodes, eventPublisher, pendingLoginStore, twoStepMethods);
+        verifyNoInteractions(userRepository, signInCodes, eventPublisher);
     }
 
     @ParameterizedTest
@@ -480,7 +460,7 @@ class OAuth2LoginSuccessHandlerTest {
         verify(response).sendRedirect("http://fe/auth/callback?error=registration_disabled");
         verify(userRepository, never()).save(any());
         verify(userRepository, never()).recordLastLogin(any(), any());
-        verifyNoInteractions(signInCodes, eventPublisher, authoritiesService, pendingLoginStore, signInMethodService);
+        verifyNoInteractions(signInCodes, eventPublisher, authoritiesService, signInMethodService);
     }
 
     @ParameterizedTest
@@ -572,20 +552,17 @@ class OAuth2LoginSuccessHandlerTest {
     }
 
     @Test
-    void aGitHubSignInToATwoStepAccountGetsAPendingTokenInsteadOfAJwt() throws Exception {
+    void aGitHubSignInToATwoStepAccountGetsOnlyAOneTimeCode() throws Exception {
         final var user = twoStepUser(15L, "octo@example.com", "github");
         user.setEmailVerified(true);
         when(appProperties.getFrontendUrl()).thenReturn("http://localhost:3000");
         when(oAuth2User.getAttribute("email")).thenReturn("octo@example.com");
         when(userRepository.findByEmail("octo@example.com")).thenReturn(Optional.of(user));
-        when(pendingLoginStore.create(15L, false, SignInMethod.GITHUB)).thenReturn(PENDING_TOKEN);
-        when(twoStepMethods.of(user)).thenReturn(List.of(TwoStepMethod.WEBAUTHN, TwoStepMethod.RECOVERY_CODE));
+        when(signInCodes.create(15L, SignInMethod.GITHUB)).thenReturn("Cd3_octo");
 
         handler.onAuthenticationSuccess(request, response, signIn("github"));
 
-        assertThat(redirectSent()).isEqualTo("http://localhost:3000/auth/callback?pendingToken=" + PENDING_TOKEN
-                + "&methods=WEBAUTHN,RECOVERY_CODE");
-        verifyNoInteractions(signInCodes);
+        assertThat(redirectSent()).isEqualTo("http://localhost:3000/auth/callback?code=Cd3_octo");
         verify(userRepository, never()).save(any());
         verify(userRepository, never()).recordLastLogin(any(), any());
     }
@@ -608,7 +585,7 @@ class OAuth2LoginSuccessHandlerTest {
         verify(userRepository, never()).recordLastLogin(any(), any());
         verify(userRepository, never()).save(any());
         verify(signInMethodService, never()).record(any(), any(), any());
-        verifyNoInteractions(signInCodes, pendingLoginStore, twoStepMethods, eventPublisher);
+        verifyNoInteractions(signInCodes, eventPublisher);
     }
 
     @Test
@@ -621,7 +598,7 @@ class OAuth2LoginSuccessHandlerTest {
         handler.onAuthenticationSuccess(request, response, signIn("github"));
 
         verify(response).sendRedirect("http://fe/auth/callback?error=provider_turned_off&provider=GITHUB");
-        verifyNoInteractions(signInCodes, pendingLoginStore, twoStepMethods);
+        verifyNoInteractions(signInCodes);
     }
 
     @Test
@@ -653,7 +630,7 @@ class OAuth2LoginSuccessHandlerTest {
         handler.onAuthenticationSuccess(request, response, signIn(provider));
 
         verify(response).sendRedirect("http://fe/auth/callback?error=provider_disabled&provider=" + method.name());
-        verifyNoInteractions(userRepository, signInMethodService, signInCodes, eventPublisher, authoritiesService, pendingLoginStore, twoStepMethods);
+        verifyNoInteractions(userRepository, signInMethodService, signInCodes, eventPublisher, authoritiesService);
         assertThat(output).contains("OAuth2 login refused: this provider is turned off on hrva.cc provider=" + provider)
                 .doesNotContain("member@example.com");
     }

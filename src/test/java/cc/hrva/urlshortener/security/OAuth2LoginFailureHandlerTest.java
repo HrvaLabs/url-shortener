@@ -24,6 +24,8 @@ class OAuth2LoginFailureHandlerTest {
                 new OAuth2AuthenticationException(new OAuth2Error("access_denied", "<script>the user said no</script>", null)));
 
         assertThat(response.getRedirectedUrl()).isEqualTo("http://fe/auth/callback?error=provider_error");
+        assertThat(response.getHeader("Referrer-Policy")).isEqualTo("no-referrer");
+        assertThat(response.getHeader("Cache-Control")).isEqualTo("no-store");
     }
 
     @Test

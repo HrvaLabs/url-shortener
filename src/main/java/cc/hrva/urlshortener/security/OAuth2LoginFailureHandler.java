@@ -29,7 +29,7 @@ public class OAuth2LoginFailureHandler implements AuthenticationFailureHandler {
                 ? oAuth2Exception.getError().getErrorCode()
                 : exception.getClass().getSimpleName();
         log.warn("OAuth2 login failed reason={}", sanitised(reason));
-        response.sendRedirect(frontendUrl + "/auth/callback?error=provider_error");
+        CallbackRedirects.send(response, frontendUrl + "/auth/callback?error=provider_error");
     }
 
     private static String sanitised(final String reason) {

@@ -51,7 +51,7 @@
 # trailing slash opening the same link.
 # Section 20 also checks that the password change ends the older token (a 401 problem, "Your session ended. Sign in again.") and renews this
 # device's. Section 29 checks sessions and sign-in: 039's column, sign out everywhere (the new token, the old ones refused, the API key
-# untouched), the one-time OAuth code put straight into Redis (exchanged once, then 410), passwords over 72 bytes (field errors, and a
+# untouched), the one-time OAuth code put straight into Redis (exchanged once, then 410; a two-step account's code answers the pending step), passwords over 72 bytes (field errors, and a
 # sign-in answered like a wrong password) and the Redis login limit per account and per network (429 with Retry-After, a success that
 # doesn't clear the network, hashed keys, the admin list and clearing it).
 #
@@ -2209,6 +2209,13 @@ http -X POST "$BASE/api/v1/auth/oauth/exchange" -H 'Content-Type: application/js
 expect_eq "$HTTP_STATUS $(header_value content-type) $(jq -r .detail <<<"$HTTP_BODY")" '410 application/problem+json Your sign-in expired. Sign in again.' "a used code is 410"
 http -X POST "$BASE/api/v1/auth/oauth/exchange" -H 'Content-Type: application/json' -d '{}'
 expect_eq "$HTTP_STATUS $(jq -c .errors <<<"$HTTP_BODY")" '400 {"code":"Code is required"}' "no code is 400, under errors"
+psql_query "update user_account set two_step_enabled = true where id = $SESSION_USER_ID;"
+OAUTH_CODE=$(openssl rand -hex 24)
+docker exec "$REDIS_CONTAINER" redis-cli SET "auth:oauth-code:$OAUTH_CODE" "{\"userId\":$SESSION_USER_ID,\"method\":\"GOOGLE\"}" EX 60 >/dev/null
+http -X POST "$BASE/api/v1/auth/oauth/exchange" -H 'Content-Type: application/json' -d "{\"code\":\"$OAUTH_CODE\"}"
+expect_eq "$HTTP_STATUS $(jq -c '[.twoStepRequired, (.pendingToken | type), .token]' <<<"$HTTP_BODY")" '200 [true,"string",null]' \
+    "a two-step account's code answers the pending second step, with no token (the pending token never travels in a URL)"
+psql_query "update user_account set two_step_enabled = false where id = $SESSION_USER_ID;"
 
 echo "  --- passwords over 72 bytes"
 TOO_LONG_TEXT="This password is too long. Use at most 72 bytes; accented letters count as two."

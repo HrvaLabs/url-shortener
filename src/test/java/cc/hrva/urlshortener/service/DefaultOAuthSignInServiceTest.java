@@ -5,6 +5,7 @@ import cc.hrva.urlshortener.exception.RateLimitExceededException;
 import cc.hrva.urlshortener.exception.SignInExpiredException;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.enums.SignInMethod;
+import cc.hrva.urlshortener.model.enums.TwoStepMethod;
 import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.security.ClientIpResolver;
 import cc.hrva.urlshortener.service.impl.DefaultOAuthSignInService;
@@ -14,6 +15,7 @@ import cc.hrva.urlshortener.service.signin.SignInMethodGuard;
 import cc.hrva.urlshortener.service.twostep.AccountLock;
 import jakarta.servlet.http.HttpServletRequest;
 import java.time.Duration;
+import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -64,6 +66,22 @@ class DefaultOAuthSignInServiceTest {
         lenient().when(clientIpResolver.getClientIp(request)).thenReturn(CLIENT_IP);
         lenient().when(accountLock.lock(any())).thenAnswer(invocation -> invocation.getArgument(0));
         lenient().when(signInMethodGuard.stillOn(any(), any())).thenReturn(true);
+    }
+
+    @Test
+    void aTwoStepAccountsCodeAnswersThePendingSecondStepWithNoToken() {
+        final var user = User.builder().id(8L).email("two@hrva.cc").active(true).twoStepEnabled(true).build();
+        final ResponseEntity<JWTTokenDto> pending = ResponseEntity.ok(JWTTokenDto.builder()
+                .twoStepRequired(true).pendingToken("pending").methods(List.of(TwoStepMethod.TOTP, TwoStepMethod.RECOVERY_CODE)).build());
+        when(signInCodes.consume("code")).thenReturn(Optional.of(new OAuthSignIn(8L, SignInMethod.GOOGLE)));
+        when(userRepository.findById(8L)).thenReturn(Optional.of(user));
+        when(signInService.requireSecondStep(user, SignInMethod.GOOGLE, false)).thenReturn(pending);
+
+        final var answer = service.exchange("code", request);
+
+        assertThat(answer).isSameAs(pending);
+        assertThat(answer.getBody().getToken()).isNull();
+        verify(signInService, never()).tokenFor(any(), anyBoolean());
     }
 
     @Test

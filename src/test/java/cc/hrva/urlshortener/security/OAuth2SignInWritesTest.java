@@ -12,8 +12,6 @@ import cc.hrva.urlshortener.service.AuthoritiesService;
 import cc.hrva.urlshortener.service.SignInMethodService;
 import cc.hrva.urlshortener.service.impl.DefaultSignInMethodService;
 import cc.hrva.urlshortener.service.settings.SettingsServiceFixtures;
-import cc.hrva.urlshortener.service.twostep.PendingLoginStore;
-import cc.hrva.urlshortener.service.twostep.TwoStepMethods;
 import jakarta.validation.Validation;
 import java.sql.Timestamp;
 import java.time.LocalDateTime;
@@ -90,8 +88,7 @@ class OAuth2SignInWritesTest {
         when(appProperties.getFrontendUrl()).thenReturn("http://fe");
         when(appProperties.getUserApiKeySlots()).thenReturn(2L);
         handler = new OAuth2LoginSuccessHandler(userRepository, authoritiesService, signInCodes, appProperties,
-                Validation.buildDefaultValidatorFactory().getValidator(), mock(ApplicationEventPublisher.class),
-                mock(PendingLoginStore.class), mock(TwoStepMethods.class), signInMethodService,
+                Validation.buildDefaultValidatorFactory().getValidator(), mock(ApplicationEventPublisher.class), signInMethodService,
                 SettingsServiceFixtures.defaults(new AppProperties()));
     }
 
