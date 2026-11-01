@@ -45,6 +45,10 @@
 # Section 27 checks API keys after v2.21: the expiry a user chooses on create and on update (the refusals included), the
 # RateLimit-* headers on an API-key request and their CORS exposure, and a 429 with Retry-After once API_KEY_REQUESTS_PER_HOUR is
 # set to 10 in Site settings, which is then reset.
+# Section 28 checks the v2.22 API answers: problem details (RFC 9457) with 401 for nobody signed in and 403 for no rights, a field
+# error under errors, dates written in UTC with Z and read with or without an offset, HEAD counting no click and using no visit on a
+# cache miss and hit, the 404 and 410 pages with the warning page's headers (and a problem for Accept: application/json), and a
+# trailing slash opening the same link.
 #
 #   scripts/mcp-e2e.sh                         builds the jar, then runs every step
 #   MCP_E2E_SKIP_BUILD=1 scripts/mcp-e2e.sh    reuses target/url-shortener-*.jar
@@ -604,7 +608,7 @@ expect_eq "$(jq -r '.accountClicks >= 1' <<<"$HTTP_BODY")" true "traffic: accoun
 expect_eq "$(jq -r '.breakdowns.referrers | length > 0' <<<"$HTTP_BODY")" true "traffic: the referrer breakdown is filled"
 http -H "Authorization: Bearer $ADMIN_JWT" "$BASE/api/v1/admin/stats/traffic?days=14"
 expect_eq "$HTTP_STATUS" 400 "days=14 is refused"
-expect_eq "$(jq -r .error <<<"$HTTP_BODY")" "days must be 7, 30, 90 or 365" "with the range message"
+expect_eq "$(jq -r .detail <<<"$HTTP_BODY")" "days must be 7, 30, 90 or 365" "with the range message"
 
 http -H "Authorization: Bearer $ADMIN_JWT" "$BASE/api/v1/admin/stats/links?days=7"
 expect_eq "$HTTP_STATUS" 200 "GET /api/v1/admin/stats/links?days=7"
@@ -659,7 +663,7 @@ http -X POST "$BASE/api/v1/urls" -H "Authorization: Bearer $APP_JWT" -H 'Content
     -d '{"longUrl":"https://example.com/hrva-mcp-e2e-reserved","shortUrl":"e2e-RESERVED"}'
 show "POST /api/v1/urls shortUrl=e2e-RESERVED as $USER_EMAIL -> $HTTP_STATUS $HTTP_BODY"
 expect_eq "$HTTP_STATUS" 409 "the user cannot take the reserved alias in another case"
-expect_eq "$(jq -r .error <<<"$HTTP_BODY")" "This short URL is reserved. Try another." "with the usual refusal"
+expect_eq "$(jq -r .detail <<<"$HTTP_BODY")" "This short URL is reserved. Try another." "with the usual refusal"
 http -X DELETE "$BASE/api/v1/admin/reserved-aliases/$RESERVED_ID" -H "Authorization: Bearer $ADMIN_JWT"
 expect_eq "$HTTP_STATUS" 204 "DELETE /api/v1/admin/reserved-aliases/{id}"
 IDN_DESTINATION="https://čokolada.hr/torta"
@@ -776,7 +780,8 @@ expect_eq "$ALLOWED" 60 "60 calls in the hour from one network are answered"
 public_stats "$STATS_NETWORK"
 show "call 61 -> $HTTP_STATUS $HTTP_BODY"
 expect_eq "$HTTP_STATUS" 429 "the 61st call in the hour is refused"
-expect_eq "$(jq -r .error <<<"$HTTP_BODY")" "You've opened these numbers a lot in a short time. Try again in an hour." "with the plan's text"
+expect_eq "$(header_value retry-after) $(header_value content-type)" "3600 application/problem+json" "with Retry-After: 3600 and a problem"
+expect_eq "$(jq -r .detail <<<"$HTTP_BODY")" "You've opened these numbers a lot in a short time. Try again in an hour." "with the plan's text"
 public_stats 198.51.100.7
 expect_eq "$HTTP_STATUS" 200 "another network still gets the numbers"
 RATE_KEYS=$(docker exec "$REDIS_CONTAINER" redis-cli --raw --scan --pattern 'rate-limit:public-stats:*')
@@ -829,10 +834,10 @@ echo "  --- two accounts create a page with the same handle at the same moment"
 http_bg race-user -X POST "$BIO_PAGES/me" -H "Authorization: Bearer $APP_JWT" -H 'Content-Type: application/json' -d '{"handle":"e2e-race"}'
 http_bg race-admin -X POST "$BIO_PAGES/me" -H "Authorization: Bearer $ADMIN_JWT" -H 'Content-Type: application/json' -d '{"handle":"e2e-race"}'
 wait_bg
-show "user -> $(bg_status race-user) $(bg_body race-user | jq -c '{handle, error}'), admin -> $(bg_status race-admin) $(bg_body race-admin | jq -c '{handle, error}')"
+show "user -> $(bg_status race-user) $(bg_body race-user | jq -c '{handle, detail}'), admin -> $(bg_status race-admin) $(bg_body race-admin | jq -c '{handle, detail}')"
 expect_eq "$(printf '%s\n' "$(bg_status race-user)" "$(bg_status race-admin)" | sort | tr '\n' ' ')" "201 409 " "one create wins the handle, the other is a 409"
 if [[ $(bg_status race-user) == 201 ]]; then RACE_WINNER_JWT=$APP_JWT RACE_LOSER=race-admin; else RACE_WINNER_JWT=$ADMIN_JWT RACE_LOSER=race-user; fi
-expect_eq "$(bg_body "$RACE_LOSER" | jq -r .error)" "This handle is taken. Try another." "the losing account is told the handle is taken"
+expect_eq "$(bg_body "$RACE_LOSER" | jq -r .detail)" "This handle is taken. Try another." "the losing account is told the handle is taken"
 expect_eq "$(psql_value "select count(*) from bio_page where handle = 'e2e-race';")" 1 "one bio_page row holds e2e-race"
 http -X DELETE "$BIO_PAGES/me" -H "Authorization: Bearer $RACE_WINNER_JWT"
 expect_eq "$HTTP_STATUS" 204 "the winner deletes the page"
@@ -843,18 +848,18 @@ echo "  --- the same account sends its create twice at the same moment"
 http_bg create-1 -X POST "$BIO_PAGES/me" -H "Authorization: Bearer $APP_JWT" -H 'Content-Type: application/json' -d '{"handle":"E2E-Bio"}'
 http_bg create-2 -X POST "$BIO_PAGES/me" -H "Authorization: Bearer $APP_JWT" -H 'Content-Type: application/json' -d '{"handle":"E2E-Bio"}'
 wait_bg
-show "first -> $(bg_status create-1) $(bg_body create-1 | jq -c '{handle, error}'), second -> $(bg_status create-2) $(bg_body create-2 | jq -c '{handle, error}')"
+show "first -> $(bg_status create-1) $(bg_body create-1 | jq -c '{handle, detail}'), second -> $(bg_status create-2) $(bg_body create-2 | jq -c '{handle, detail}')"
 expect_eq "$(printf '%s\n' "$(bg_status create-1)" "$(bg_status create-2)" | sort | tr '\n' ' ')" "201 409 " "one create makes the page, the other is a 409, never a 500"
 if [[ $(bg_status create-1) == 201 ]]; then CREATED=create-1 REFUSED=create-2; else CREATED=create-2 REFUSED=create-1; fi
 expect_eq "$(bg_body "$CREATED" | jq -r .handle)" e2e-bio "POST /api/v1/bio-pages/me stores the handle E2E-Bio as e2e-bio"
-REFUSAL=$(bg_body "$REFUSED" | jq -r .error)
+REFUSAL=$(bg_body "$REFUSED" | jq -r .detail)
 [[ $REFUSAL == "You already have a bio page." || $REFUSAL == "This handle is taken. Try another." ]] || fail "the second create: unexpected answer '$REFUSAL'"
 ok "the second create is refused with \"$REFUSAL\""
 echo "  lost the insert race on Postgres (logged by the create): $(grep -q 'Bio page was created by a concurrent request' "$WORK/app.log" && echo yes || echo 'no, refused before the insert')"
 PAGE_ID=$(bg_body "$CREATED" | jq -r .id)
 expect_eq "$(psql_value "select count(*) from bio_page p join user_account u on u.id = p.user_id where u.email = '$USER_EMAIL';")" 1 "$USER_EMAIL has exactly one page"
 http -X POST "$BIO_PAGES/me" -H "Authorization: Bearer $ADMIN_JWT" -H 'Content-Type: application/json' -d '{"handle":"e2e-bio"}'
-expect_eq "$HTTP_STATUS $(jq -r .error <<<"$HTTP_BODY")" "409 This handle is taken. Try another." "another account can't take e2e-bio"
+expect_eq "$HTTP_STATUS $(jq -r .detail <<<"$HTTP_BODY")" "409 This handle is taken. Try another." "another account can't take e2e-bio"
 http -X POST "$BIO_PAGES/me" -H "Authorization: Bearer $ADMIN_JWT" -H 'Content-Type: application/json' -d '{"handle":"e2e_admin"}'
 expect_eq "$HTTP_STATUS" 201 "admin@localhost creates e2e_admin"
 http -X PUT "$BIO_PAGES/me" -H "Authorization: Bearer $ADMIN_JWT" -H 'Content-Type: application/json' \
@@ -905,7 +910,7 @@ expect_eq "$(jq -r .updatedAt <<<"$HTTP_BODY")" "$THIRD_SAVED_AT" "GET /api/v1/b
 STORED_BEFORE=$(psql_value "select bio || ' | ' || updated_at from bio_page where id = $PAGE_ID;")
 http -X PUT "$BIO_PAGES/me" -H "Authorization: Bearer $APP_JWT" -H 'Content-Type: application/json' \
     -d "$(jq -c --arg at "$FIRST_SAVED_AT" '. + {bio: "From an outdated tab", expectedUpdatedAt: $at}' <<<"$SAVE")"
-expect_eq "$HTTP_STATUS $(jq -r .error <<<"$HTTP_BODY")" \
+expect_eq "$HTTP_STATUS $(jq -r .detail <<<"$HTTP_BODY")" \
     "409 Your bio page changed in another tab or window. We loaded the latest version; check your changes and save again." \
     "a save still sending the first save's updatedAt is a 409"
 [[ $STORED_BEFORE == "Photos from Zagreb | "* ]] || fail "the page before the outdated save: unexpected '$STORED_BEFORE'"
@@ -986,16 +991,17 @@ for search in 'a\b:e2e-bio' '%:e2e-bio' '_:e2e_admin'; do
 done
 http -X POST "$BASE/api/v1/admin/bio-pages/$PAGE_ID/revoke-handle" -H "Authorization: Bearer $ADMIN_JWT" -H 'Content-Type: application/json' \
     -d '{"reason":"E2E","expectedHandle":"someone-else"}'
-expect_eq "$HTTP_STATUS $(jq -r .error <<<"$HTTP_BODY")" "409 This handle changed. Reload and try again." "a revoke from a stale list is a 409"
+expect_eq "$HTTP_STATUS $(jq -r .detail <<<"$HTTP_BODY")" "409 This handle changed. Reload and try again." "a revoke from a stale list is a 409"
 http -X POST "$BASE/api/v1/admin/bio-pages/$PAGE_ID/hide" -H "Authorization: Bearer $ADMIN_JWT" -H 'Content-Type: application/json' -d '{"reason":"E2E"}'
 expect_eq "$HTTP_STATUS $(jq -r '"\(.hidden) \(.hiddenReason)"' <<<"$HTTP_BODY")" "200 true E2E" "POST /api/v1/admin/bio-pages/{id}/hide"
 http "$BASE/api/v1/public/bio-pages/e2e-bio"
-expect_eq "$HTTP_STATUS $HTTP_BODY" "404 {\"error\":\"This page isn't available.\"}" "the hidden page is not available"
+expect_eq "$HTTP_STATUS $(header_value content-type) $(jq -r .detail <<<"$HTTP_BODY")" "404 application/problem+json This page isn't available." \
+    "the hidden page is not available, as a problem"
 http -H "Authorization: Bearer $ADMIN_JWT" "$BASE/api/v1/admin/bio-page-reviews"
 expect_eq "$(jq -r .page.totalElements <<<"$HTTP_BODY")" 0 "hiding resolved the review"
 expect_eq "$(psql_value "select resolution || ' ' || resolved_by from bio_page_review where page_id = $PAGE_ID;")" "HIDDEN admin@localhost" "as HIDDEN, by the admin"
 http -X DELETE "$BIO_PAGES/me" -H "Authorization: Bearer $APP_JWT"
-expect_eq "$HTTP_STATUS $(jq -r .error <<<"$HTTP_BODY")" \
+expect_eq "$HTTP_STATUS $(jq -r .detail <<<"$HTTP_BODY")" \
     "409 An admin hid this page, so it can't be deleted here. You can still delete your whole account in Settings." "the owner can't delete a hidden page"
 http -X POST "$BASE/api/v1/admin/bio-pages/$PAGE_ID/revoke-handle" -H "Authorization: Bearer $ADMIN_JWT" -H 'Content-Type: application/json' \
     -d '{"reason":"E2E","expectedHandle":"E2E-Bio"}'
@@ -1030,7 +1036,7 @@ for _ in 1 2 3; do
     KEY_IDS+=("$(jq -r .id <<<"$HTTP_BODY")")
 done
 http -X DELETE "$BASE/api/v1/api-keys/${KEY_IDS[0]}" -H "Authorization: Bearer $KEY_JWT"
-expect_eq "$HTTP_STATUS $(jq -r .error <<<"$HTTP_BODY")" "409 Revoke this key before deleting it." "an active key can't be deleted"
+expect_eq "$HTTP_STATUS $(jq -r .detail <<<"$HTTP_BODY")" "409 Revoke this key before deleting it." "an active key can't be deleted"
 for id in "${KEY_IDS[@]}"; do
     http -X PATCH "$BASE/api/v1/api-keys/$id/revoke" -H "Authorization: Bearer $KEY_JWT"
     expect_eq "$HTTP_STATUS" 200 "PATCH /api/v1/api-keys/$id/revoke"
@@ -1149,7 +1155,7 @@ NOTIFY_CHANNELS=$BASE/api/v1/users/me/notification-channels
 http -X POST "$NOTIFY_CHANNELS" -H "Authorization: Bearer $NOTIFY_JWT" -H 'Content-Type: application/json' \
     -d '{"name":"E2E","type":"WEBHOOK","events":["LINK_DEAD"],"target":"https://127.0.0.1/hook"}'
 expect_eq "$HTTP_STATUS" 400 "a webhook to 127.0.0.1 is refused"
-expect_contains "$(jq -r .target <<<"$HTTP_BODY")" "public" "the target error asks for a public address"
+expect_contains "$(jq -r .errors.target <<<"$HTTP_BODY")" "public" "the target error asks for a public address, under errors"
 DISCORD_CHANNEL_SECRET=e2e-secret-abcd
 http -X POST "$NOTIFY_CHANNELS" -H "Authorization: Bearer $NOTIFY_JWT" -H 'Content-Type: application/json' \
     -d "{\"name\":\"E2E\",\"type\":\"DISCORD\",\"events\":[\"LINK_DEAD\"],\"target\":\"https://discord.com/api/webhooks/1/$DISCORD_CHANNEL_SECRET\"}"
@@ -1251,11 +1257,11 @@ DOMAIN_ID=$(jq -r .id <<<"$HTTP_BODY")
 http -X POST "$MY_DOMAINS" -H "Authorization: Bearer $DOMAIN_JWT" -H 'Content-Type: application/json' \
     -d '{"hostname":"second.example.com","reason":"E2E"}'
 expect_eq "$HTTP_STATUS" 400 "a second application is refused"
-expect_contains "$(jq -r .error <<<"$HTTP_BODY")" "You can have 1 custom domain." "with the limit text"
+expect_contains "$(jq -r .detail <<<"$HTTP_BODY")" "You can have 1 custom domain." "with the limit text"
 http -X POST "$MY_DOMAINS" -H "Authorization: Bearer $DOMAIN_JWT" -H 'Content-Type: application/json' \
     -d '{"hostname":"example.com","reason":"E2E"}'
 expect_eq "$HTTP_STATUS" 400 "an apex is refused"
-expect_contains "$(jq -r .hostname <<<"$HTTP_BODY")" "Use a subdomain" "with the hostname field text"
+expect_contains "$(jq -r .errors.hostname <<<"$HTTP_BODY")" "Use a subdomain" "with the hostname field text under errors"
 expect_eq "$(cf_calls | jq -c .calls)" "[]" "the fake Cloudflare got no call: nothing reaches Cloudflare before approval"
 
 echo "  --- the token check, and approval refused while the token can't manage hostnames"
@@ -1268,7 +1274,7 @@ expect_eq "$(jq -r .status <<<"$HTTP_BODY")" NO_PERMISSION "an active token refu
 http -X POST "$ADMIN_DOMAINS/$DOMAIN_ID/approve" -H "Authorization: Bearer $ADMIN_JWT"
 show "approve -> $HTTP_STATUS $HTTP_BODY"
 expect_eq "$HTTP_STATUS" 409 "approval is refused"
-expect_contains "$(jq -r .error <<<"$HTTP_BODY")" "Cloudflare isn't set up" "because Cloudflare isn't set up"
+expect_contains "$(jq -r .detail <<<"$HTTP_BODY")" "Cloudflare isn't set up" "because Cloudflare isn't set up"
 expect_eq "$(cf_count POST)" 0 "and nothing was created"
 cf_control 'token?mode=ok'
 
@@ -1309,6 +1315,7 @@ DOMAIN_LINK_ID=$(jq -r .id <<<"$HTTP_BODY")
 
 echo "  --- Host header routing"
 expect_eq "$(host_redirect -H "Host: $DOMAIN_HOST" "$BASE/e2e-menu")" "302 https://example.org/e2e-b" "Host: $DOMAIN_HOST /e2e-menu -> the domain's link"
+expect_eq "$(host_redirect -H "Host: $DOMAIN_HOST" "$BASE/e2e-menu/")" "302 https://example.org/e2e-b" "Host: $DOMAIN_HOST /e2e-menu/ -> the same link"
 expect_eq "$(host_redirect "$BASE/e2e-menu")" "302 https://example.org/e2e-a" "the primary host's /e2e-menu -> its own link"
 expect_eq "$(host_redirect -H "Host: $DOMAIN_HOST" "$BASE/")" "302 $FRONTEND_URL/" "Host: $DOMAIN_HOST / -> the frontend's home page"
 for path in /login /api/v1/users/me /actuator/health /@x; do
@@ -1321,8 +1328,15 @@ expect_eq "$HTTP_STATUS $(jq -r .longUrl <<<"$HTTP_BODY")" "200 https://example.
 echo "  --- turned off and on"
 http -X POST "$ADMIN_DOMAINS/$DOMAIN_ID/disable" -H "Authorization: Bearer $ADMIN_JWT" -H 'Content-Type: application/json' -d '{"note":"E2E"}'
 expect_eq "$HTTP_STATUS $(jq -r '"\(.status) \(.disabledReason)"' <<<"$HTTP_BODY")" "200 DISABLED ADMIN" "POST /api/v1/admin/domains/{id}/disable"
-expect_eq "$(host_redirect -H "Host: $DOMAIN_HOST" "$BASE/e2e-menu")" "302 $FRONTEND_URL/unavailable?s=e2e-menu&reason=domain&d=$DOMAIN_HOST" \
-    "at once, the domain's link goes to the unavailable page (reason=domain), its cached entry bypassed"
+http -H "Host: $DOMAIN_HOST" -A "$BROWSER_USER_AGENT" "$BASE/e2e-menu"
+expect_eq "$HTTP_STATUS $(header_value content-type) $HTTP_LOCATION" "410 text/html;charset=UTF-8 " \
+    "at once, the domain's link answers 410 with the unavailable page, its cached entry bypassed"
+expect_contains "$HTTP_BODY" "This link&#39;s domain is turned off right now." "the page says the domain is off"
+expect_contains "$HTTP_BODY" "$DOMAIN_HOST/e2e-menu" "and names the domain's short link"
+expect_eq "$(header_value content-security-policy)" "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'" \
+    "with the warning page's CSP"
+http -H "Host: $DOMAIN_HOST" -H 'Accept: application/json' "$BASE/e2e-menu"
+expect_eq "$HTTP_STATUS $(header_value content-type) $(jq -r .reason <<<"$HTTP_BODY")" "410 application/problem+json domain" "Accept: application/json gets a problem with reason domain"
 http -X POST "$ADMIN_DOMAINS/$DOMAIN_ID/enable" -H "Authorization: Bearer $ADMIN_JWT"
 show "POST /api/v1/admin/domains/{id}/enable -> $HTTP_STATUS $(jq -c '{status, disabledReason}' <<<"$HTTP_BODY")"
 expect_eq "$HTTP_STATUS" 200 "turned on again"
@@ -1479,7 +1493,7 @@ expect_eq "$(jq -c '[.value, .changed, .changedBy]' <<<"$HTTP_BODY")" '[false,tr
 http -X POST "$BASE/api/v1/urls" -H 'CF-Connecting-IP: 203.0.113.30' -H 'Content-Type: application/json' -d '{"longUrl":"https://e2e-settings-anon.com/a"}'
 show "POST /api/v1/urls without an account -> $HTTP_STATUS $HTTP_BODY"
 expect_eq "$HTTP_STATUS" 400 "a link without an account is refused"
-expect_eq "$(jq -r .error <<<"$HTTP_BODY")" "Sign in to create short URLs" "with the sign-in text"
+expect_eq "$(jq -r .detail <<<"$HTTP_BODY")" "Sign in to create short URLs" "with the sign-in text"
 http "$BASE/api/v1/public/settings"
 expect_eq "$(jq -r .anonymousLinks <<<"$HTTP_BODY")" false "GET /api/v1/public/settings: anonymousLinks is false"
 http -X POST "$BASE/api/v1/urls" -H "Authorization: Bearer $SETTINGS_JWT" -H 'Content-Type: application/json' -d '{"longUrl":"https://e2e-settings-anon.com/signed-in"}'
@@ -1508,7 +1522,7 @@ http -X POST "$BASE/api/v1/urls" -H "Authorization: Bearer $SETTINGS_JWT" -H 'Co
     -d '{"longUrl":"https://e2e-settings-alias.com/a","shortUrl":"e2e-settings-alias"}'
 show "POST /api/v1/urls shortUrl=e2e-settings-alias as $USER_EMAIL -> $HTTP_STATUS $HTTP_BODY"
 expect_eq "$HTTP_STATUS" 400 "a chosen alias is refused"
-expect_eq "$(jq -r .error <<<"$HTTP_BODY")" "Custom aliases are turned off right now." "with the turned-off text"
+expect_eq "$(jq -r .detail <<<"$HTTP_BODY")" "Custom aliases are turned off right now." "with the turned-off text"
 http "$BASE/api/v1/public/settings"
 expect_eq "$(jq -r .customAliases <<<"$HTTP_BODY")" false "GET /api/v1/public/settings: customAliases is false"
 http -X POST "$BASE/api/v1/urls" -H "Authorization: Bearer $SETTINGS_JWT" -H 'Content-Type: application/json' -d '{"longUrl":"https://e2e-settings-alias.com/b"}'
@@ -1525,7 +1539,7 @@ expect_eq "$HTTP_STATUS" 200 "PUT /api/v1/admin/settings/NEW_SIGNUPS false"
 http -X POST "$BASE/api/v1/auth/register" -H 'Content-Type: application/json' -d '{"email":"e2e-settings-signup@example.org","password":"e2e-settings-signup"}'
 show "POST /api/v1/auth/register -> $HTTP_STATUS $HTTP_BODY"
 expect_eq "$HTTP_STATUS" 400 "an email sign-up is refused"
-expect_eq "$(jq -r .error <<<"$HTTP_BODY")" "Creating new accounts is paused." "with the paused text"
+expect_eq "$(jq -r .detail <<<"$HTTP_BODY")" "Creating new accounts is paused." "with the paused text"
 http "$BASE/api/v1/public/settings"
 expect_eq "$(jq -r .newSignups <<<"$HTTP_BODY")" false "GET /api/v1/public/settings: newSignups is false"
 reset_setting NEW_SIGNUPS
@@ -1664,7 +1678,7 @@ expect_eq "$(jq -r '[.content[].status] | join(",")' <<<"$HTTP_BODY")" "ALERT_ON
 admin_get "$CAMPAIGNS_URL?size=1&page=2&sort=firstSeenAt,asc"
 expect_eq "$(jq -r '[.content[0].path, .page.totalPages, .page.number] | map(tostring) | join(" ")' <<<"$HTTP_BODY")" "/e2ecamp 3 2" "size=1&page=2&sort=firstSeenAt,asc is the newest campaign on the third page"
 admin_get "$CAMPAIGNS_URL?sort=clicks,desc"
-expect_eq "$HTTP_STATUS $(jq -r .error <<<"$HTTP_BODY")" "400 Sort must be lastSeenAt, firstSeenAt or status" "another sort field is a 400"
+expect_eq "$HTTP_STATUS $(jq -r .detail <<<"$HTTP_BODY")" "400 Sort must be lastSeenAt, firstSeenAt or status" "another sort field is a 400"
 
 echo "  --- the detail"
 admin_get "$CAMPAIGNS_URL/$CAMPAIGN_ID"
@@ -1675,7 +1689,7 @@ expect_eq "$(jq -c '[.domains[] | {domain, links, report}]' <<<"$HTTP_BODY")" \
     '[{"domain":"e2e-camp-a.com","links":1,"report":null},{"domain":"e2e-camp-b.com","links":1,"report":null},{"domain":"e2e-camp-c.com","links":1,"report":null},{"domain":"e2e-camp-d.com","links":1,"report":null}]' \
     "it lists the four domains, one link each, none reported"
 admin_get "$CAMPAIGNS_URL/999999"
-expect_eq "$HTTP_STATUS $(jq -r .error <<<"$HTTP_BODY")" "404 There is no campaign 999999." "an unknown campaign is a 404"
+expect_eq "$HTTP_STATUS $(jq -r .detail <<<"$HTTP_BODY")" "404 There is no campaign 999999." "an unknown campaign is a 404"
 
 echo "  --- the links"
 admin_get "$CAMPAIGNS_URL/$CAMPAIGN_ID/links?sort=createDate,asc"
@@ -1688,7 +1702,7 @@ expect_eq "$(jq -r '.content[0].shortUrl' <<<"$HTTP_BODY")" "${SHAPE_ALIASES[$((
 admin_get "$CAMPAIGNS_URL/$CAMPAIGN_ID/links?search=e2e-camp-c"
 expect_eq "$(jq -r '[.page.totalElements, .content[0].domain] | map(tostring) | join(" ")' <<<"$HTTP_BODY")" "1 e2e-camp-c.com" "search finds a link by its destination"
 admin_get "$CAMPAIGNS_URL/$CAMPAIGN_ID/links?sort=domain,asc"
-expect_eq "$HTTP_STATUS $(jq -r .error <<<"$HTTP_BODY")" "400 Sort must be createDate or id" "another sort field is a 400"
+expect_eq "$HTTP_STATUS $(jq -r .detail <<<"$HTTP_BODY")" "400 Sort must be createDate or id" "another sort field is a 400"
 admin_get "$CAMPAIGNS_URL/999999/links"
 expect_eq "$HTTP_STATUS" 404 "the links of an unknown campaign are a 404"
 
@@ -1733,9 +1747,9 @@ admin_post "$ABUSE_URL" "{\"urlIds\":[$(psql_value "select string_agg(id::text, 
 expect_eq "$HTTP_STATUS $(jq -c '[.reports[] | [.to, (.domains | length)]]' <<<"$HTTP_BODY")" '200 [["abuse@e2e-registrar.example",2],["abuse@e2e-other.example",1]]' \
     "the same links given by id give the same cards"
 admin_post "$ABUSE_URL" '{}'
-expect_eq "$HTTP_STATUS $(jq -c . <<<"$HTTP_BODY")" '400 {"urlIds":"Select between 1 and 100 links"}' "neither urlIds nor campaignId is a 400"
+expect_eq "$HTTP_STATUS $(jq -c .errors <<<"$HTTP_BODY")" '400 {"urlIds":"Select between 1 and 100 links"}' "neither urlIds nor campaignId is a 400, under errors"
 admin_post "$ABUSE_URL" '{"campaignId":999999}'
-expect_eq "$HTTP_STATUS $(jq -r .error <<<"$HTTP_BODY")" "404 There is no campaign 999999." "an unknown campaign is a 404"
+expect_eq "$HTTP_STATUS $(jq -r .detail <<<"$HTTP_BODY")" "404 There is no campaign 999999." "an unknown campaign is a 404"
 expect_eq "$(grep -c 'RDAP' "$WORK/app.log" || true)" "$RDAP_LOG_LINES" "the app logged no RDAP lookup or failure for the report"
 
 echo "  --- marking domains as reported"
@@ -1757,7 +1771,7 @@ expect_eq "$(psql_value "select (reported_at = '$FIRST_REPORTED_AT') || ' ' || r
 expect_eq "$(psql_value "select coalesce(registrar, 'none') || ' ' || coalesce(abuse_email, 'none') from reported_domain where domain = 'e2e-camp-c.com';")" "none none" "the new domain has no contact"
 expect_eq "$(psql_value "select count(*) from audit_log where action = 'REPORT_DOMAINS' and details = 'domains: 2, registrar: unknown';")" 1 "the second call has its own audit row, registrar unknown"
 admin_post "$ABUSE_URL/reported" '{"domains":[]}'
-expect_eq "$HTTP_STATUS $(jq -c . <<<"$HTTP_BODY")" '400 {"domains":"Select between 1 and 100 domains"}' "an empty list is a 400"
+expect_eq "$HTTP_STATUS $(jq -c .errors <<<"$HTTP_BODY")" '400 {"domains":"Select between 1 and 100 domains"}' "an empty list is a 400, under errors"
 psql_value "update reported_domain set suspended_at = now() where domain = 'e2e-camp-b.com';" >/dev/null
 admin_get "$CAMPAIGNS_URL/$CAMPAIGN_ID"
 expect_eq "$(jq -c '.campaign.reports' <<<"$HTTP_BODY")" '{"reported":3,"suspended":1}' "the campaign counts three reported domains, one of them suspended"
@@ -1870,9 +1884,12 @@ show "expirationDate $LIMIT_EXPIRY"
 expect_eq "$(python3 -c '
 import sys
 from datetime import datetime, timedelta
-stamp, _, fraction = sys.argv[1].partition(".")
-end = datetime.fromisoformat(stamp + "." + fraction.ljust(6, "0") if fraction else stamp)
-print("within" if abs(end - (datetime.now() + timedelta(days=30))) < timedelta(minutes=1) else "off by " + str(end - datetime.now()))
+from datetime import timezone
+assert sys.argv[1].endswith("Z"), sys.argv[1]
+stamp, _, fraction = sys.argv[1].removesuffix("Z").partition(".")
+end = datetime.fromisoformat(stamp + "." + fraction.ljust(6, "0")[:6] if fraction else stamp).replace(tzinfo=timezone.utc)
+now = datetime.now(timezone.utc)
+print("within" if abs(end - (now + timedelta(days=30))) < timedelta(minutes=1) else "off by " + str(end - now))
 ' "$LIMIT_EXPIRY")" within "the link ends within a minute of now + 30 days"
 anonymous_create 203.0.113.62 'https://e2e-limits.com/expiry-later' ',"expirationDate":"2099-01-01T00:00:00"'
 expect_eq "$HTTP_STATUS" 200 "a link without an account asking to end in 2099"
@@ -1964,16 +1981,16 @@ http "$BASE/api/v1/users/me/export" -H "Authorization: Bearer $EXPIRY_JWT"
 expect_eq "$HTTP_STATUS $(jq -c "[.apiKeys[] | select(.id == $LIMITED_KEY_ID) | has(\"key\"), .keyPrefix]" <<<"$HTTP_BODY") $(grep -c "$LIMITED_KEY" <<<"$HTTP_BODY" || true)" \
     "200 [false,\"${LIMITED_KEY:0:11}\"] 0" "the data export has the prefix only"
 http -X POST "$BASE/api/v1/api-keys" -H "Authorization: Bearer $EXPIRY_JWT" -H 'Content-Type: application/json' -d '{"expiresInDays":30,"neverExpires":true}'
-expect_eq "$HTTP_STATUS $(jq -c . <<<"$HTTP_BODY")" '400 {"error":"Choose either an expiry in days or no expiry."}' "both choices are refused"
+expect_eq "$HTTP_STATUS $(jq -c .detail <<<"$HTTP_BODY")" '400 "Choose either an expiry in days or no expiry."' "both choices are refused"
 http -X POST "$BASE/api/v1/api-keys" -H "Authorization: Bearer $EXPIRY_JWT" -H 'Content-Type: application/json' -d '{"expiresInDays":3651}'
-expect_eq "$HTTP_STATUS $(jq -c . <<<"$HTTP_BODY")" '400 {"expiresInDays":"Use a number of days from 1 to 3,650."}' "3651 days are refused"
+expect_eq "$HTTP_STATUS $(jq -c .errors <<<"$HTTP_BODY")" '400 {"expiresInDays":"Use a number of days from 1 to 3,650."}' "3651 days are refused"
 http -X PUT "$BASE/api/v1/api-keys/$DAYS_KEY_ID" -H "Authorization: Bearer $EXPIRY_JWT" -H 'Content-Type: application/json' \
     -d "{\"id\":$DAYS_KEY_ID,\"neverExpires\":true,\"apiCallsLimit\":5,\"apiCallsUsed\":99}"
 expect_eq "$HTTP_STATUS $(jq -c '[.expirationDate, .apiCallsUsed, has("apiCallsLimit")]' <<<"$HTTP_BODY")" '200 [null,0,false]' \
     "the owner's PUT turns the expiry off; apiCallsLimit and apiCallsUsed are ignored"
 http -X PUT "$BASE/api/v1/api-keys/$DAYS_KEY_ID" -H "Authorization: Bearer $EXPIRY_JWT" -H 'Content-Type: application/json' \
     -d "{\"id\":$DAYS_KEY_ID,\"expirationDate\":\"2020-01-01T00:00:00\"}"
-expect_eq "$HTTP_STATUS $(jq -c . <<<"$HTTP_BODY")" '400 {"expirationDate":"Choose a date in the future."}' "a past expirationDate is refused"
+expect_eq "$HTTP_STATUS $(jq -c .errors <<<"$HTTP_BODY")" '400 {"expirationDate":"Choose a date in the future."}' "a past expirationDate is refused"
 http -X PUT "$BASE/api/v1/api-keys/$DAYS_KEY_ID" -H "Authorization: Bearer $EXPIRY_JWT" -H 'Content-Type: application/json' \
     -d "{\"id\":$DAYS_KEY_ID,\"expiresInDays\":90}"
 expect_eq "$HTTP_STATUS $(psql_value "select abs(extract(epoch from expiration_date - (create_date + interval '90 days'))) < 60 from api_key where id = $DAYS_KEY_ID;")" "200 t" "the owner's PUT sets 90 days, to the minute"
@@ -2037,5 +2054,105 @@ for id in "$DAYS_KEY_ID" "$LIMITED_KEY_ID"; do
 done
 http "$BASE/api/v1/admin/settings" -H "Authorization: Bearer $ADMIN_JWT"
 expect_eq "$(jq -r '[.[] | select(.changed)] | length' <<<"$HTTP_BODY")" 0 "no setting is left changed"
+
+section "28. API answers: problem details, 401 and 403, dates in UTC, HEAD, the 404 and 410 pages and a trailing slash"
+PAGE_CSP="default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+page_headers() {
+    printf '%s|%s|%s|%s' "$(header_value cache-control)" "$(header_value content-security-policy)" "$(header_value x-robots-tag)" "$(header_value referrer-policy)"
+}
+url_visits() {
+    psql_value "select visits from url where short_url = '$1';"
+}
+
+echo "  --- problem details, 401 and 403"
+http "$BASE/api/v1/urls"
+show "GET /api/v1/urls without a token -> $HTTP_STATUS $HTTP_BODY"
+expect_eq "$HTTP_STATUS $(header_value content-type)" "401 application/problem+json" "GET /api/v1/urls without a token is a 401 problem, not a 403"
+expect_eq "$(jq -c '[.type, .title, .status, .detail, .instance]' <<<"$HTTP_BODY")" '["about:blank","Unauthorized",401,"Sign in to continue.","/api/v1/urls"]' \
+    "type, title, status, detail and instance"
+http "$BASE/api/v1/users/me"
+expect_eq "$HTTP_STATUS $(header_value content-type) $(jq -r .detail <<<"$HTTP_BODY")" "401 application/problem+json Sign in to continue." \
+    "GET /api/v1/users/me without a token: the same 401 from the security chain"
+http "$BASE/api/v1/admin/settings" -H "Authorization: Bearer $SETTINGS_JWT"
+expect_eq "$HTTP_STATUS $(header_value content-type) $(jq -r .detail <<<"$HTTP_BODY")" "403 application/problem+json Access denied" \
+    "GET /api/v1/admin/settings as $USER_EMAIL is a 403 problem"
+http -X POST "$BASE/api/v1/urls" -H "Authorization: Bearer $SETTINGS_JWT" -H 'Content-Type: application/json' \
+    -d '{"longUrl":"https://e2e-api.com/x","shortUrl":"bad alias!"}'
+show "a bad alias -> $HTTP_STATUS $HTTP_BODY"
+expect_eq "$HTTP_STATUS $(jq -r .errors.shortUrl <<<"$HTTP_BODY")" "400 Custom short URL can only contain letters, numbers, hyphens and underscores" \
+    "a field error comes back under errors.shortUrl"
+expect_eq "$(jq -r .detail <<<"$HTTP_BODY")" "Custom short URL can only contain letters, numbers, hyphens and underscores" "and detail repeats it"
+
+echo "  --- dates in UTC"
+http -X POST "$BASE/api/v1/urls" -H "Authorization: Bearer $SETTINGS_JWT" -H 'Content-Type: application/json' \
+    -d '{"longUrl":"https://e2e-api.com/dated","shortUrl":"e2e-dated","expirationDate":"2099-01-01T00:00:00"}'
+expect_eq "$HTTP_STATUS $(jq -r .expirationDate <<<"$HTTP_BODY")" "200 2099-01-01T00:00:00Z" "an expirationDate without an offset is read as UTC and written back with Z"
+expect_contains "$(jq -r .createDate <<<"$HTTP_BODY")" "Z" "createDate ends with Z"
+[[ $(jq -r .createDate <<<"$HTTP_BODY") =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z$ ]] || fail "createDate is not ISO 8601 with Z"
+ok "createDate is ISO 8601 UTC: $(jq -r .createDate <<<"$HTTP_BODY")"
+DATED_ID=$(jq -r .id <<<"$HTTP_BODY")
+expect_eq "$(psql_value "select expiration_date from url where id = $DATED_ID;")" "2099-01-01 00:00:00" "Postgres stores 2099-01-01 00:00:00"
+http -X PUT "$BASE/api/v1/urls/$DATED_ID" -H "Authorization: Bearer $SETTINGS_JWT" -H 'Content-Type: application/json' \
+    -d "{\"id\":$DATED_ID,\"expirationDate\":\"2099-01-01T02:00:00+01:00\"}"
+expect_eq "$HTTP_STATUS $(jq -r .expirationDate <<<"$HTTP_BODY")" "200 2099-01-01T01:00:00Z" "an update with +01:00 is the same instant in UTC"
+expect_eq "$(psql_value "select expiration_date from url where id = $DATED_ID;")" "2099-01-01 01:00:00" "Postgres stores it in UTC"
+
+echo "  --- HEAD isn't a click, on a cache miss and a cache hit"
+http -X POST "$BASE/api/v1/urls" -H "Authorization: Bearer $SETTINGS_JWT" -H 'Content-Type: application/json' \
+    -d '{"longUrl":"https://e2e-api.com/head","shortUrl":"e2e-head","visitLimit":1}'
+expect_eq "$HTTP_STATUS" 200 "a link with visitLimit 1"
+docker exec "$REDIS_CONTAINER" redis-cli --raw del "urls::e2e-head" >/dev/null
+expect_eq "$(cache_entries e2e-head)" 0 "not cached"
+http -I -A "$BROWSER_USER_AGENT" "$BASE/e2e-head"
+expect_eq "$HTTP_STATUS $HTTP_LOCATION" "302 https://e2e-api.com/head" "HEAD on a cache miss: 302 to the destination"
+expect_eq "$(cache_entries e2e-head)" 1 "the miss cached the link"
+http -I -A "$BROWSER_USER_AGENT" "$BASE/e2e-head"
+expect_eq "$HTTP_STATUS $HTTP_LOCATION" "302 https://e2e-api.com/head" "HEAD on a cache hit: the same 302"
+http -I -A "$BROWSER_USER_AGENT" "$BASE/e2e-head/"
+expect_eq "$HTTP_STATUS $HTTP_LOCATION" "302 https://e2e-api.com/head" "HEAD with a trailing slash: the same 302"
+http -A "$BROWSER_USER_AGENT" "$BASE/e2e-head"
+expect_eq "$HTTP_STATUS $HTTP_LOCATION" "302 https://e2e-api.com/head" "the first GET still opens the link: the HEADs used no visit"
+wait_until 30 "the GET's click" link_has_clicks e2e-head 1
+sleep 2
+expect_eq "$(link_clicks e2e-head) $(url_visits e2e-head)" "1 1" "one click and one visit, both from the GET"
+expect_eq "$(grep -c "Redirect shortUrl=e2e-head" "$WORK/app.log")" 4 "the app served all four requests"
+
+echo "  --- the 404 and 410 pages"
+http -A "$BROWSER_USER_AGENT" "$BASE/e2e-head"
+show "$(printf '%s\n' "$HTTP_HEADERS" | grep -iE '^(HTTP|cache-control|content-security-policy|content-type|x-robots-tag|referrer-policy|location)')"
+expect_eq "$HTTP_STATUS $(header_value content-type) $HTTP_LOCATION" "410 text/html;charset=UTF-8 " "a used-up link answers 410 with a page, not a 302"
+expect_eq "$(page_headers)" "no-store, no-transform|$PAGE_CSP|noindex, nofollow|no-referrer" "the warning page's headers"
+expect_contains "$HTTP_BODY" "This link has reached its visit limit." "the page says why"
+expect_contains "$HTTP_BODY" "$FRONTEND_URL/report?s=e2e-head" "and links the frontend's report page"
+[[ $HTTP_BODY != *"<script"* ]] || fail "the page has a <script"
+ok "the page has no <script"
+http -A "$BROWSER_USER_AGENT" "$BASE/e2e-no-such-link"
+expect_eq "$HTTP_STATUS $(header_value content-type)" "404 text/html;charset=UTF-8" "an unknown link answers 404 with a page"
+expect_eq "$(page_headers)" "no-store, no-transform|$PAGE_CSP|noindex, nofollow|no-referrer" "with the same headers"
+expect_contains "$HTTP_BODY" "There&#39;s no localhost:$PORT link with this name." "the page names the short host"
+http -I -A "$BROWSER_USER_AGENT" "$BASE/e2e-no-such-link"
+expect_eq "$HTTP_STATUS $(header_value content-type) $(header_value cache-control)" "404 text/html;charset=UTF-8 no-store, no-transform" "HEAD answers the same status and headers"
+http -A "$BROWSER_USER_AGENT" "$BASE/e2e-no-such-link/"
+expect_eq "$HTTP_STATUS $(header_value content-type)" "404 text/html;charset=UTF-8" "with a trailing slash too: a page, not JSON"
+http -H 'Accept: application/json' "$BASE/e2e-no-such-link"
+expect_eq "$HTTP_STATUS $(header_value content-type) $(jq -c '[.status, .detail, .reason, .instance]' <<<"$HTTP_BODY")" \
+    "404 application/problem+json [404,\"There's no localhost:$PORT link with this name.\",\"missing\",\"/e2e-no-such-link\"]" "Accept: application/json gets a problem"
+http -X PATCH "$BASE/api/v1/urls/$DATED_ID/deactivate" -H "Authorization: Bearer $SETTINGS_JWT"
+expect_eq "$HTTP_STATUS" 200 "the owner turns e2e-dated off"
+http -A "$BROWSER_USER_AGENT" "$BASE/e2e-dated"
+expect_eq "$HTTP_STATUS" 410 "a turned-off link answers 410"
+expect_contains "$HTTP_BODY" "Its owner has turned this link off." "saying its owner turned it off"
+http -X POST "$BASE/api/v1/urls" -H "Authorization: Bearer $SETTINGS_JWT" -H 'Content-Type: application/json' \
+    -d '{"longUrl":"https://e2e-api.com/blocked","shortUrl":"e2e-blocked"}'
+expect_eq "$HTTP_STATUS" 200 "a link to block"
+http -A "$BROWSER_USER_AGENT" "$BASE/e2e-blocked/"
+expect_eq "$HTTP_STATUS $HTTP_LOCATION" "302 https://e2e-api.com/blocked" "GET /e2e-blocked/ redirects like /e2e-blocked"
+psql_query "update url set block_reason = 'ADMIN', active = false where short_url = 'e2e-blocked';"
+docker exec "$REDIS_CONTAINER" redis-cli --raw del "urls::e2e-blocked" >/dev/null
+http -A "$BROWSER_USER_AGENT" "$BASE/e2e-blocked"
+expect_eq "$HTTP_STATUS $HTTP_LOCATION" "410 " "a blocked link answers 410, not a 302 to the frontend"
+expect_contains "$HTTP_BODY" "hrva.cc disabled this link because it led to a site reported for phishing, malware or scams." "saying hrva.cc disabled it"
+http -H 'Accept: application/json' "$BASE/e2e-blocked"
+expect_eq "$HTTP_STATUS $(jq -r '"\(.title) \(.reason)"' <<<"$HTTP_BODY")" "410 Gone blocked" "Accept: application/json: Gone, reason blocked"
 
 section "Done: every step passed"
