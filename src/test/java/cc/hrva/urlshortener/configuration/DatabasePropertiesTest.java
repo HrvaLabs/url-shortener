@@ -29,13 +29,13 @@ class DatabasePropertiesTest {
 
         socketTimeout.postProcessAfterInitialization(postgres, "dataSource");
 
-        assertThat(postgres.getDataSourceProperties()).containsEntry("socketTimeout", "30");
+        assertThat(postgres.getDataSourceProperties()).containsEntry("socketTimeout", "30").containsEntry("cancelSignalTimeout", "2");
     }
 
     @Test
     void aTimeoutAlreadyInTheAddressIsKeptAndOtherDatabasesAreLeftAlone() {
         final var configured = new HikariDataSource();
-        configured.setJdbcUrl("jdbc:postgresql://db.internal:5432/url_shortener?socketTimeout=10");
+        configured.setJdbcUrl("jdbc:postgresql://db.internal:5432/url_shortener?socketTimeout=10&cancelSignalTimeout=5");
         final var h2 = new HikariDataSource();
         h2.setJdbcUrl("jdbc:h2:mem:test");
 
@@ -43,7 +43,7 @@ class DatabasePropertiesTest {
         socketTimeout.postProcessAfterInitialization(h2, "dataSource");
         socketTimeout.postProcessAfterInitialization("not a data source", "other");
 
-        assertThat(configured.getDataSourceProperties()).doesNotContainKey("socketTimeout");
+        assertThat(configured.getDataSourceProperties()).doesNotContainKeys("socketTimeout", "cancelSignalTimeout");
         assertThat(h2.getDataSourceProperties()).isEmpty();
     }
 

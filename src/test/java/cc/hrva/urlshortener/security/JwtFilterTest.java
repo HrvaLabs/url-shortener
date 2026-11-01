@@ -85,6 +85,31 @@ class JwtFilterTest {
     }
 
     @Test
+    void aSessionLookupThatCannotReachTheDatabaseIsA503AndStopsTheRequest() throws Exception {
+        signedInAs("test@example.com", User.builder().id(1L).active(true).build());
+        when(userRepository.findByEmail("test@example.com")).thenThrow(new org.springframework.transaction.CannotCreateTransactionException("no connection",
+                new java.sql.SQLTransientConnectionException("HikariPool-1 - Connection is not available, request timed out after 3000ms.")));
+
+        jwtFilter.doFilter(request, response, filterChain);
+
+        assertThat(response.getStatus()).isEqualTo(503);
+        assertThat(response.getHeader("Retry-After")).isEqualTo("60");
+        assertThat(response.getContentType()).isEqualTo("application/problem+json");
+        assertThat(response.getContentAsString()).contains("\"detail\":\"hrva.cc can't reach its database right now. Try again in a minute.\"")
+                .doesNotContain("HikariPool");
+        verify(filterChain, never()).doFilter(any(), any());
+    }
+
+    @Test
+    void anyOtherFailureOfTheSessionLookupIsLeftToTheErrorPage() {
+        signedInAs("test@example.com", User.builder().id(1L).active(true).build());
+        when(userRepository.findByEmail("test@example.com")).thenThrow(new IllegalStateException("a bug"));
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> jwtFilter.doFilter(request, response, filterChain))
+                .isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
     void shouldNotAuthenticateInactiveUser() throws Exception {
         signedInAs("evil@example.com", User.builder().id(1L).active(false).build());
 

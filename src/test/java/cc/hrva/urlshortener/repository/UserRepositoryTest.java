@@ -1,7 +1,6 @@
 package cc.hrva.urlshortener.repository;
 
 import cc.hrva.urlshortener.model.User;
-import jakarta.persistence.QueryHint;
 import java.time.LocalDateTime;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -13,15 +12,14 @@ import org.springframework.boot.persistence.autoconfigure.EntityScan;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.FilterType;
-import org.springframework.data.jpa.repository.QueryHints;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.tuple;
 
 @SpringBootTest(
         classes = UserRepositoryTest.TestApplication.class,
@@ -92,9 +90,10 @@ class UserRepositoryTest {
 
     @Test
     void theSessionLookupOfEveryRequestGivesUpAfterThreeSeconds() throws NoSuchMethodException {
-        final var hints = UserRepository.class.getMethod("findByEmail", String.class).getAnnotation(QueryHints.class);
+        final var transaction = UserRepository.class.getMethod("findByEmail", String.class).getAnnotation(Transactional.class);
 
-        assertThat(hints.value()).extracting(QueryHint::name, QueryHint::value).containsExactly(tuple("jakarta.persistence.query.timeout", "3000"));
+        assertThat(transaction.readOnly()).isTrue();
+        assertThat(transaction.timeout()).isEqualTo(3);
     }
 
     @Test

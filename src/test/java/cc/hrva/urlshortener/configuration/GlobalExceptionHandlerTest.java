@@ -44,7 +44,8 @@ class GlobalExceptionHandlerTest {
 
     @Test
     void aDatabaseThatDoesNotAnswerIsA503WithRetryAfterAndNoInternals(final CapturedOutput output) throws Exception {
-        for (final var probe : java.util.List.of("/probe/no-connection", "/probe/socket-timeout", "/probe/statement-timeout", "/probe/rollback-after-outage")) {
+        for (final var probe : java.util.List.of("/probe/no-connection", "/probe/socket-timeout", "/probe/statement-timeout", "/probe/rollback-after-outage",
+                "/probe/closed-connection")) {
             mockMvc.perform(get(probe))
                     .andExpect(status().isServiceUnavailable())
                     .andExpect(header().string("Retry-After", "60"))
@@ -222,6 +223,12 @@ class GlobalExceptionHandlerTest {
             final var rollback = new org.springframework.transaction.TransactionSystemException("Could not roll back JPA transaction");
             rollback.initApplicationException(new org.springframework.dao.DataAccessResourceFailureException("This connection has been closed."));
             throw rollback;
+        }
+
+        @GetMapping("/probe/closed-connection")
+        String probeClosedConnection() {
+            throw new org.springframework.orm.jpa.JpaSystemException(new org.hibernate.TransactionException("Unable to rollback against JDBC Connection",
+                    new java.sql.SQLException("Connection is closed")));
         }
 
         @GetMapping("/probe/rate-limit")

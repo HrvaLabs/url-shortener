@@ -2,6 +2,7 @@ package cc.hrva.urlshortener.security;
 
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.repository.UserRepository;
+import cc.hrva.urlshortener.util.DatabaseOutages;
 import cc.hrva.urlshortener.util.ProblemResponses;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -10,6 +11,7 @@ import jakarta.servlet.ServletResponse;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
+import java.time.Duration;
 import java.util.Optional;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -28,6 +30,7 @@ public class JwtFilter extends GenericFilterBean {
   public static final String SESSION_ENDED = "Your session ended. Sign in again.";
   private static final String PUBLIC_API = "/api/v1/public/";
   private static final String CHANGELOG = "/api/changelog";
+  private static final Duration DATABASE_RETRY = Duration.ofMinutes(1);
 
   private final TokenProvider tokenProvider;
   private final UserRepository userRepository;
@@ -42,7 +45,18 @@ public class JwtFilter extends GenericFilterBean {
     final var jwt = getToken(httpServletRequest);
     final var token = StringUtils.hasText(jwt) ? tokenProvider.read(jwt) : Optional.<SessionToken>empty();
     if (token.isPresent()) {
-      final var user = activeUser(token.get().authentication().getName());
+      final Optional<User> user;
+      try {
+        user = activeUser(token.get().authentication().getName());
+      } catch (final RuntimeException exception) {
+        if (!DatabaseOutages.isOutage(exception)) {
+          throw exception;
+        }
+        log.warn("Session lookup refused, the database isn't answering exception={}", exception.getClass().getName());
+        ProblemResponses.retryAfter(httpServletResponse, DATABASE_RETRY);
+        ProblemResponses.write(httpServletRequest, httpServletResponse, HttpStatus.SERVICE_UNAVAILABLE, DatabaseOutages.UNREACHABLE);
+        return;
+      }
       final var ended = user.isPresent() && sessionEnded(user.get(), token.get());
       if (ended && !isPublic(httpServletRequest)) {
         log.info("Refused a token issued before the account's sessions ended user id={}", user.get().getId());

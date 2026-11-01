@@ -1,7 +1,10 @@
 package cc.hrva.urlshortener.util;
 
+import java.sql.SQLException;
 import java.sql.SQLTimeoutException;
 import java.sql.SQLTransientConnectionException;
+import org.apache.commons.lang3.StringUtils;
+import org.hibernate.TransactionException;
 import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.dao.QueryTimeoutException;
 import org.springframework.dao.TransientDataAccessResourceException;
@@ -13,6 +16,7 @@ public final class DatabaseOutages {
     public static final String UNREACHABLE = "hrva.cc can't reach its database right now. Try again in a minute.";
 
     private static final int MAX_CAUSES = 10;
+    private static final String CONNECTION_EXCEPTION = "08";
 
     private DatabaseOutages() {}
 
@@ -22,6 +26,9 @@ public final class DatabaseOutages {
             if (current instanceof CannotCreateTransactionException || current instanceof DataAccessResourceFailureException
                     || current instanceof QueryTimeoutException || current instanceof TransientDataAccessResourceException
                     || current instanceof SQLTransientConnectionException || current instanceof SQLTimeoutException) {
+                return true;
+            }
+            if (current instanceof TransactionException || current instanceof SQLException sql && StringUtils.startsWith(sql.getSQLState(), CONNECTION_EXCEPTION)) {
                 return true;
             }
             if (current instanceof TransactionSystemException rollback && rollback.getApplicationException() != null

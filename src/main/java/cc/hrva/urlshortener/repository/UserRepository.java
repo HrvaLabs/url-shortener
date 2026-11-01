@@ -6,14 +6,12 @@ import java.util.List;
 import java.util.Optional;
 import cc.hrva.urlshortener.model.User;
 import jakarta.persistence.LockModeType;
-import jakarta.persistence.QueryHint;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
-import org.springframework.data.jpa.repository.QueryHints;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
@@ -24,7 +22,7 @@ public interface UserRepository extends JpaRepository<User, Long>, JpaSpecificat
     boolean existsByEmail(String email);
     boolean existsByIdAndAuthoritiesName(Long id, String name);
     @EntityGraph(attributePaths = "authorities", type = EntityGraph.EntityGraphType.LOAD)
-    @QueryHints(@QueryHint(name = "jakarta.persistence.query.timeout", value = "3000"))
+    @Transactional(readOnly = true, timeout = 3)
     Optional<User> findByEmail(String email);
     Optional<User> findByWebauthnUserHandle(String handle);
 
