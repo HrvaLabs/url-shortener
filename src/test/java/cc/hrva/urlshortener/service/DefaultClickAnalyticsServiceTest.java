@@ -126,6 +126,20 @@ class DefaultClickAnalyticsServiceTest {
     }
 
     @Test
+    void aHeadRequestCountsNoClickAndUsesNoVisit() {
+        clickAnalyticsService.recordClick(URL_ID, SHORT_URL, CLICK.asHead());
+
+        verifyNoInteractions(linkStatsRepository, uniqueVisitorCounter, urlRepository, cache);
+    }
+
+    @Test
+    void aHeadRequestFromABotCountsNotEvenABotClick() {
+        clickAnalyticsService.recordClick(URL_ID, SHORT_URL, ClickRequest.of(CLIENT_IP, "Discordbot/2.0", "https://t.co/x", "hr").asHead());
+
+        verifyNoInteractions(linkStatsRepository, uniqueVisitorCounter, urlRepository, cache);
+    }
+
+    @Test
     void newVisitorCountsAVisitAndAllSixBreakdowns() {
         when(uniqueVisitorCounter.isNewVisitor(URL_ID, DAY, CLICK)).thenReturn(true);
 

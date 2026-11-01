@@ -49,7 +49,7 @@ public class DefaultClickAnalyticsService implements ClickAnalyticsService {
 
     @Override
     public void recordClick(final Long urlId, final String cacheKey, final ClickRequest click) {
-        if (urlId == null) {
+        if (urlId == null || click.head()) {
             return;
         }
 

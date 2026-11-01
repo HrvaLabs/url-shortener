@@ -24,6 +24,23 @@ class ClickRequestResolverTest {
     }
 
     @Test
+    void aHeadRequestIsMarkedSoItIsNotCounted() {
+        final var request = cloudflareRequest();
+        request.setMethod("HEAD");
+
+        assertThat(clickRequestResolver.resolve(request))
+                .isEqualTo(ClickRequest.of("203.0.113.7", "UA", "https://t.co/x", "HR").asHead());
+    }
+
+    @Test
+    void aGetRequestIsCounted() {
+        final var request = cloudflareRequest();
+        request.setMethod("GET");
+
+        assertThat(clickRequestResolver.resolve(request).head()).isFalse();
+    }
+
+    @Test
     void repeatedCountryHeaderLeavesTheCountryOut() {
         final var request = cloudflareRequest();
         request.addHeader(CF_IP_COUNTRY, "DE");

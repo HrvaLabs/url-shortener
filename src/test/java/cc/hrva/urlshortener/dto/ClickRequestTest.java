@@ -21,7 +21,14 @@ class ClickRequestTest {
     @Test
     void unknownReferrerKeepsEverythingButTheReferer() {
         assertThat(click.withUnknownReferrer())
-                .isEqualTo(new ClickRequest("203.0.113.7", "Mozilla/5.0 secret-ua", null, "HR", false, false));
+                .isEqualTo(new ClickRequest("203.0.113.7", "Mozilla/5.0 secret-ua", null, "HR", false, false, false));
+    }
+
+    @Test
+    void aClickIsCountedUnlessItIsAHeadRequest() {
+        assertThat(click.head()).isFalse();
+        assertThat(click.asHead().head()).isTrue();
+        assertThat(click.asHead().withQrScan().withUnknownReferrer().head()).isTrue();
     }
 
     @Test

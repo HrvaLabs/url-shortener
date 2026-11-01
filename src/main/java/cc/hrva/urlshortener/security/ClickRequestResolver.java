@@ -5,6 +5,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import java.util.Collections;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -23,7 +24,8 @@ public class ClickRequestResolver {
 
         final var click = ClickRequest.of(clientIpResolver.getClientIp(request), request.getHeader(HttpHeaders.USER_AGENT),
                 request.getHeader(HttpHeaders.REFERER), cloudflareCountry(request));
-        return hasQrMarker(request) ? click.withQrScan() : click;
+        final var marked = hasQrMarker(request) ? click.withQrScan() : click;
+        return HttpMethod.HEAD.matches(request.getMethod()) ? marked.asHead() : marked;
     }
 
     private static boolean hasQrMarker(final HttpServletRequest request) {
