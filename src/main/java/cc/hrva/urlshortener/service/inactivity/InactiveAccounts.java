@@ -13,10 +13,15 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.stream.Stream;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Limit;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionTemplate;
 
 @Slf4j
 @Component
@@ -24,6 +29,7 @@ import org.springframework.stereotype.Component;
 public class InactiveAccounts {
 
     private static final long WARNING_DAYS_AHEAD = 30;
+    private static final int CANDIDATES_PER_PAGE = 100;
 
     private final UserRepository userRepository;
     private final ApiKeyRepository apiKeyRepository;
@@ -31,6 +37,7 @@ public class InactiveAccounts {
     private final SendingEmailService sendingEmailService;
     private final AppProperties appProperties;
     private final Clock clock;
+    private final PlatformTransactionManager transactionManager;
 
     public List<User> warnAndSelectForDeactivation() {
         final var now = LocalDateTime.now(clock);
@@ -39,18 +46,37 @@ public class InactiveAccounts {
         final var warnBefore = now.minusDays(Math.max(inactiveDays - WARNING_DAYS_AHEAD, 0));
         final var due = new ArrayList<User>();
 
-        for (final var user : userRepository.findByLastLoginIsLessThanEqualAndActiveTrue(warnBefore)) {
-            final var activity = lastActivityOf(user);
-            if (activity.isAfter(warnBefore)) {
-                continue;
+        var afterId = 0L;
+        List<User> page;
+        do {
+            page = userRepository.findByLastLoginIsLessThanEqualAndActiveTrueAndIdGreaterThanOrderByIdAsc(warnBefore, afterId,
+                    Limit.of(CANDIDATES_PER_PAGE));
+            for (final var user : page) {
+                try {
+                    check(user, now, inactiveDays, warnBefore, deactivateBefore).ifPresent(due::add);
+                } catch (final RuntimeException exception) {
+                    log.warn("Inactivity check skipped user id={} exception={}", user.getId(), exception.getClass().getName());
+                }
             }
-            if (!isWarnedFor(user, activity)) {
-                warn(user, activity, now, inactiveDays);
-            } else if (!activity.isAfter(deactivateBefore) && !user.getInactivityWarnedAt().isAfter(now.minusDays(WARNING_DAYS_AHEAD))) {
-                due.add(user);
-            }
-        }
+            afterId = page.isEmpty() ? afterId : page.getLast().getId();
+        } while (page.size() == CANDIDATES_PER_PAGE);
         return due;
+    }
+
+    private Optional<User> check(final User user, final LocalDateTime now, final long inactiveDays, final LocalDateTime warnBefore,
+                                 final LocalDateTime deactivateBefore) {
+        final var activity = lastActivityOf(user);
+        if (activity.isAfter(warnBefore)) {
+            return Optional.empty();
+        }
+        if (!isWarnedFor(user, activity)) {
+            warn(user, activity, now, inactiveDays);
+            return Optional.empty();
+        }
+        if (!activity.isAfter(deactivateBefore) && !user.getInactivityWarnedAt().isAfter(now.minusDays(WARNING_DAYS_AHEAD))) {
+            return Optional.of(user);
+        }
+        return Optional.empty();
     }
 
     private static boolean isWarnedFor(final User user, final LocalDateTime activity) {
@@ -58,7 +84,9 @@ public class InactiveAccounts {
     }
 
     private void warn(final User user, final LocalDateTime activity, final LocalDateTime now, final long inactiveDays) {
-        if (userRepository.claimInactivityWarning(user.getId(), now, activity) == 0) {
+        final var claims = new TransactionTemplate(transactionManager);
+        claims.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        if (!Boolean.TRUE.equals(claims.execute(status -> userRepository.claimInactivityWarning(user.getId(), now, activity) > 0))) {
             return;
         }
         final var earliest = Stream.of(activity.plusDays(inactiveDays), now.plusDays(WARNING_DAYS_AHEAD)).max(LocalDateTime::compareTo).orElseThrow();

@@ -19,6 +19,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.domain.Limit;
+import org.springframework.transaction.PlatformTransactionManager;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -47,6 +49,9 @@ class InactiveAccountsTest {
     @Mock
     private SendingEmailService sendingEmailService;
 
+    @Mock
+    private PlatformTransactionManager transactionManager;
+
     private InactiveAccounts inactiveAccounts;
 
     @BeforeEach
@@ -54,10 +59,10 @@ class InactiveAccountsTest {
         final var appProperties = new AppProperties();
         appProperties.setDeactivateUserAccountAfterDays(DAYS);
         inactiveAccounts = new InactiveAccounts(userRepository, apiKeyRepository, connectedAppsService, sendingEmailService, appProperties,
-                Clock.fixed(NOW, ZoneOffset.UTC));
+                Clock.fixed(NOW, ZoneOffset.UTC), transactionManager);
         lenient().when(connectedAppsService.findConnectedApps(any())).thenReturn(List.of());
         lenient().when(apiKeyRepository.findLastUseByOwnerId(any())).thenReturn(Optional.empty());
-        lenient().when(userRepository.findByLastLoginIsLessThanEqualAndActiveTrue(any())).thenReturn(List.of());
+        lenient().when(userRepository.findByLastLoginIsLessThanEqualAndActiveTrueAndIdGreaterThanOrderByIdAsc(any(), any(), any())).thenReturn(List.of());
     }
 
     @Test
@@ -188,7 +193,8 @@ class InactiveAccountsTest {
     }
 
     private void candidates(final User... users) {
-        when(userRepository.findByLastLoginIsLessThanEqualAndActiveTrue(NOW_LOCAL.minusDays(DAYS - 30))).thenReturn(List.of(users));
+        when(userRepository.findByLastLoginIsLessThanEqualAndActiveTrueAndIdGreaterThanOrderByIdAsc(NOW_LOCAL.minusDays(DAYS - 30), 0L, Limit.of(100)))
+                .thenReturn(List.of(users));
     }
 
     private static User idle(final long id, final LocalDateTime lastLogin) {

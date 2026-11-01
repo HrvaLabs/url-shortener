@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Optional;
 import cc.hrva.urlshortener.model.User;
 import jakarta.persistence.LockModeType;
+import org.springframework.data.domain.Limit;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
@@ -70,7 +71,7 @@ public interface UserRepository extends JpaRepository<User, Long>, JpaSpecificat
     @Query("update User u set u.active = false, u.tokensValidAfter = :endedAt where u.id = :id and (u.active is null or u.active = true)")
     int deactivateAndEndSessionsById(@Param("id") Long id, @Param("endedAt") LocalDateTime endedAt);
 
-    List<User> findByLastLoginIsLessThanEqualAndActiveTrue(LocalDateTime limitDate);
+    List<User> findByLastLoginIsLessThanEqualAndActiveTrueAndIdGreaterThanOrderByIdAsc(LocalDateTime limitDate, Long afterId, Limit limit);
     long countByCreateDateAfter(LocalDateTime dateTime);
 
 }
