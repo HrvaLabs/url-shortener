@@ -23,13 +23,17 @@ import cc.hrva.urlshortener.security.TokenProvider;
 import cc.hrva.urlshortener.service.UserService;
 import cc.hrva.urlshortener.service.impl.DefaultApiKeyService;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiter;
+import cc.hrva.urlshortener.service.notification.MutableClock;
+import cc.hrva.urlshortener.validator.ApiKeyValidator;
 import cc.hrva.urlshortener.validator.impl.DefaultApiKeyValidator;
 import com.nimbusds.jose.JOSEException;
 import com.nimbusds.jose.jwk.RSAKey;
 import com.nimbusds.jose.jwk.gen.RSAKeyGenerator;
+import java.time.Clock;
+import java.time.Instant;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
-import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -39,6 +43,7 @@ import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.persistence.autoconfigure.EntityScan;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.FilterType;
 import org.springframework.context.annotation.Import;
@@ -59,6 +64,8 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -98,9 +105,15 @@ class ApiKeyExpiryFlowTest {
     private static final long ROLE_USER = 1L;
     private static final long ROLE_ADMIN = 2L;
     private static final RSAKey SIGNING_KEY = generateSigningKey();
+    private static final Instant LATE_EVENING = Instant.parse("2026-10-30T23:50:00Z");
+    private static final LocalDateTime NOW = LocalDateTime.of(2026, 10, 30, 23, 50);
+    private static final MutableClock CLOCK = new MutableClock(LATE_EVENING);
 
     @Autowired
     private MockMvc mockMvc;
+
+    @Autowired
+    private ApiKeyValidator apiKeyValidator;
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
@@ -139,6 +152,7 @@ class ApiKeyExpiryFlowTest {
 
     @BeforeEach
     void setUp() {
+        CLOCK.set(LATE_EVENING);
         account(OWNER, OWNER_EMAIL, ROLE_USER);
         account(OTHER, OTHER_EMAIL, ROLE_USER);
         account(ADMIN, ADMIN_EMAIL, ROLE_USER, ROLE_ADMIN);
@@ -167,7 +181,7 @@ class ApiKeyExpiryFlowTest {
                 .andExpect(jsonPath("$.apiCallsLimit").doesNotExist())
                 .andExpect(jsonPath("$.status").value("ACTIVE")));
 
-        assertThat(expiryOf(id)).isEqualTo(LocalDate.now().plusMonths(12));
+        assertThat(expiryOf(id)).isEqualTo(NOW.plusMonths(12));
     }
 
     @Test
@@ -200,14 +214,14 @@ class ApiKeyExpiryFlowTest {
     void aNewKeyWithAnEmptyJsonBodyGetsTheDefaultToo() throws Exception {
         final var id = idOf(create("{}").andExpect(status().isOk()));
 
-        assertThat(expiryOf(id)).isEqualTo(LocalDate.now().plusMonths(12));
+        assertThat(expiryOf(id)).isEqualTo(NOW.plusMonths(12));
     }
 
     @Test
     void aNewKeyExpiresAfterTheChosenDays() throws Exception {
         final var id = idOf(create("{\"expiresInDays\":30}").andExpect(status().isOk()));
 
-        assertThat(expiryOf(id)).isEqualTo(LocalDate.now().plusDays(30));
+        assertThat(expiryOf(id)).isEqualTo(NOW.plusDays(30));
     }
 
     @Test
@@ -254,7 +268,7 @@ class ApiKeyExpiryFlowTest {
     void theOwnerChangesTheExpiryToSomeDays() throws Exception {
         update(OWNERS_KEY, OWNER_TOKEN, "{\"expiresInDays\":90}").andExpect(status().isOk());
 
-        assertThat(expiryOf(OWNERS_KEY)).isEqualTo(LocalDate.now().plusDays(90));
+        assertThat(expiryOf(OWNERS_KEY)).isEqualTo(NOW.plusDays(90));
     }
 
     @Test
@@ -266,19 +280,70 @@ class ApiKeyExpiryFlowTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(content().json("{\"expiresInDays\":\"" + DAYS_RANGE + "\"}", JsonCompareMode.STRICT));
 
-        assertThat(expiryOf(OWNERS_KEY)).isEqualTo(LocalDate.of(2027, 1, 1));
+        assertThat(expiryOf(OWNERS_KEY)).isEqualTo(LocalDateTime.of(2027, 1, 1, 0, 0));
     }
 
     @Test
     void theOldExpirationDateStillWorksForAFutureDateOnly() throws Exception {
-        final var future = LocalDate.now().plusYears(2);
-        update(OWNERS_KEY, ADMIN_TOKEN, "{\"expirationDate\":\"" + future + "T00:00:00\"}").andExpect(status().isOk());
+        final var future = LocalDateTime.of(2028, 10, 30, 0, 0);
+        update(OWNERS_KEY, ADMIN_TOKEN, "{\"expirationDate\":\"2028-10-30T00:00:00\"}").andExpect(status().isOk());
         assertThat(expiryOf(OWNERS_KEY)).isEqualTo(future);
 
         update(OWNERS_KEY, ADMIN_TOKEN, "{\"expirationDate\":\"2020-01-01T00:00:00\"}")
                 .andExpect(status().isBadRequest())
                 .andExpect(content().json("{\"expirationDate\":\"Choose a date in the future.\"}", JsonCompareMode.STRICT));
         assertThat(expiryOf(OWNERS_KEY)).isEqualTo(future);
+    }
+
+    @Test
+    void theCreateAnswerAndALaterListAgreeOnTheExpiryToTheSecond() throws Exception {
+        CLOCK.set(Instant.parse("2026-10-30T23:50:07.123456789Z"));
+        final var answer = create("{\"expiresInDays\":1}").andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        final long id = ((Number) com.jayway.jsonpath.JsonPath.read(answer, "$.id")).longValue();
+
+        assertThat(com.jayway.jsonpath.JsonPath.<String>read(answer, "$.expirationDate")).isEqualTo("2026-10-31T23:50:07");
+        mockMvc.perform(get("/api/v1/api-keys").header(JwtFilter.AUTHORIZATION_HEADER, OWNER_TOKEN))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[?(@.id == " + id + ")].expirationDate").value("2026-10-31T23:50:07"));
+        assertThat(expiryOf(id)).isEqualTo(LocalDateTime.of(2026, 10, 31, 23, 50, 7));
+    }
+
+    @Test
+    void aOneDayKeyMadeLateInTheEveningWorksForAWholeDay() throws Exception {
+        final var key = com.jayway.jsonpath.JsonPath.<String>read(create("{\"expiresInDays\":1}").andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString(), "$.key");
+
+        CLOCK.set(Instant.parse("2026-10-30T23:59:00Z"));
+        assertThatCode(() -> apiKeyValidator.apiKeyExistsByKeyAndIsValid(key)).doesNotThrowAnyException();
+        CLOCK.set(Instant.parse("2026-10-31T12:00:00Z"));
+        assertThatCode(() -> apiKeyValidator.apiKeyExistsByKeyAndIsValid(key)).doesNotThrowAnyException();
+        CLOCK.set(Instant.parse("2026-10-31T23:49:59Z"));
+        assertThatCode(() -> apiKeyValidator.apiKeyExistsByKeyAndIsValid(key)).doesNotThrowAnyException();
+        CLOCK.set(Instant.parse("2026-10-31T23:50:01Z"));
+        assertThatThrownBy(() -> apiKeyValidator.apiKeyExistsByKeyAndIsValid(key)).hasMessage("API key has expired");
+    }
+
+    @Test
+    void anExpirationDateLaterTodayKeepsTheKeyAliveUntilThatTime() throws Exception {
+        CLOCK.set(Instant.parse("2026-10-30T10:00:00Z"));
+        final var key = com.jayway.jsonpath.JsonPath.<String>read(create(null).andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString(), "$.key");
+        final var id = jdbcTemplate.queryForObject("select id from api_key where key_hash = ?", Long.class, ApiKeyTokens.hash(key));
+
+        update(id, OWNER_TOKEN, "{\"expirationDate\":\"2026-10-30T18:00:00\"}").andExpect(status().isOk());
+
+        assertThat(expiryOf(id)).isEqualTo(LocalDateTime.of(2026, 10, 30, 18, 0));
+        CLOCK.set(Instant.parse("2026-10-30T17:59:00Z"));
+        assertThatCode(() -> apiKeyValidator.apiKeyExistsByKeyAndIsValid(key)).doesNotThrowAnyException();
+        CLOCK.set(Instant.parse("2026-10-30T18:01:00Z"));
+        assertThatThrownBy(() -> apiKeyValidator.apiKeyExistsByKeyAndIsValid(key)).hasMessage("API key has expired");
+    }
+
+    @Test
+    void anExpirationDateEarlierTodayIsRefused() throws Exception {
+        update(OWNERS_KEY, OWNER_TOKEN, "{\"expirationDate\":\"2026-10-30T23:00:00\"}")
+                .andExpect(status().isBadRequest())
+                .andExpect(content().json("{\"expirationDate\":\"Choose a date in the future.\"}", JsonCompareMode.STRICT));
     }
 
     @Test
@@ -297,7 +362,7 @@ class ApiKeyExpiryFlowTest {
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.error").value("You don't have authorization for this action"));
 
-        assertThat(expiryOf(OWNERS_KEY)).isEqualTo(LocalDate.of(2027, 1, 1));
+        assertThat(expiryOf(OWNERS_KEY)).isEqualTo(LocalDateTime.of(2027, 1, 1, 0, 0));
     }
 
     @Test
@@ -358,10 +423,8 @@ class ApiKeyExpiryFlowTest {
         return ((Number) com.jayway.jsonpath.JsonPath.read(created.andReturn().getResponse().getContentAsString(), "$.id")).longValue();
     }
 
-    private LocalDate expiryOf(final long id) {
-        final Map<String, Object> row = jdbcTemplate.queryForMap("select expiration_date from api_key where id = ?", id);
-        final var value = row.get("EXPIRATION_DATE");
-        return value == null ? null : ((java.sql.Date) value).toLocalDate();
+    private LocalDateTime expiryOf(final long id) {
+        return jdbcTemplate.queryForObject("select expiration_date from api_key where id = ?", LocalDateTime.class, id);
     }
 
     private Long keysOf(final long owner) {
@@ -420,6 +483,12 @@ class ApiKeyExpiryFlowTest {
             ApiKeyUpdateDtoToApiKeyConverter.class
     })
     static class TestApplication {
+
+        @Bean
+        Clock clock() {
+            return CLOCK;
+        }
+
     }
 
 }

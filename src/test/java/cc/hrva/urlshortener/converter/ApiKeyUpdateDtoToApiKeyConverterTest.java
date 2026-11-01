@@ -14,14 +14,13 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
-import static org.assertj.core.api.Assertions.within;
-import static java.time.temporal.ChronoUnit.SECONDS;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class ApiKeyUpdateDtoToApiKeyConverterTest {
 
+    private static final java.time.Clock CLOCK = java.time.Clock.fixed(java.time.Instant.parse("2026-10-30T23:50:07.987654321Z"), java.time.ZoneOffset.UTC);
     private static final LocalDateTime EXPIRY = LocalDateTime.of(2027, 12, 1, 0, 0);
 
     private ApiKeyUpdateDtoToApiKeyConverter converter;
@@ -31,7 +30,7 @@ class ApiKeyUpdateDtoToApiKeyConverterTest {
 
     @BeforeEach
     void setUp() {
-        this.converter = new ApiKeyUpdateDtoToApiKeyConverter(this.apiKeyRepository);
+        this.converter = new ApiKeyUpdateDtoToApiKeyConverter(this.apiKeyRepository, CLOCK);
     }
 
     @Test
@@ -76,7 +75,7 @@ class ApiKeyUpdateDtoToApiKeyConverterTest {
 
         final var result = converter.convert(ApiKeyUpdateDto.builder().id(1L).expiresInDays(30).build());
 
-        assertThat(result.getExpirationDate()).isCloseTo(LocalDateTime.now().plusDays(30), within(5, SECONDS));
+        assertThat(result.getExpirationDate()).isEqualTo(LocalDateTime.of(2026, 11, 29, 23, 50, 7));
         assertThat(result.isActive()).isTrue();
     }
 

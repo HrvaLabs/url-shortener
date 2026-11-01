@@ -42,7 +42,8 @@ class DefaultApiKeyValidatorTest {
     void setUp() {
         this.apiKeyValidator = new DefaultApiKeyValidator(
                 this.userService,
-                this.apiKeyRepository
+                this.apiKeyRepository,
+                java.time.Clock.systemUTC()
         );
 
         this.apiKey = ApiKey.builder()
@@ -159,6 +160,31 @@ class DefaultApiKeyValidatorTest {
 
         assertThatCode(() -> apiKeyValidator.apiKeyExistsByKeyAndIsValid(key))
                 .doesNotThrowAnyException();
+    }
+
+    @Test
+    void aKeyWorksUntilTheSecondItExpiresOnTheValidatorsClock() {
+        final var expiry = LocalDateTime.of(2026, 10, 31, 23, 50);
+        apiKey.setExpirationDate(expiry);
+        when(apiKeyRepository.findApiKeyByKeyHash(ApiKeyTokens.hash("test"))).thenReturn(Optional.ofNullable(apiKey));
+
+        assertThatCode(() -> validatorAt("2026-10-31T23:50:00Z").apiKeyExistsByKeyAndIsValid("test")).doesNotThrowAnyException();
+        assertThatThrownBy(() -> validatorAt("2026-10-31T23:50:01Z").apiKeyExistsByKeyAndIsValid("test"))
+                .isInstanceOf(InvalidApiKeyException.class)
+                .hasMessage("API key has expired");
+    }
+
+    @Test
+    void anExpirationDateLaterTodayIsInTheFutureOnTheValidatorsClock() {
+        assertThatCode(() -> validatorAt("2026-10-30T10:00:00Z").validateExpiry(null, null, LocalDateTime.of(2026, 10, 30, 18, 0)))
+                .doesNotThrowAnyException();
+        assertThatThrownBy(() -> validatorAt("2026-10-30T18:00:00Z").validateExpiry(null, null, LocalDateTime.of(2026, 10, 30, 18, 0)))
+                .isInstanceOf(FieldValidationException.class);
+    }
+
+    private ApiKeyValidator validatorAt(final String instant) {
+        return new DefaultApiKeyValidator(userService, apiKeyRepository,
+                java.time.Clock.fixed(java.time.Instant.parse(instant), java.time.ZoneOffset.UTC));
     }
 
     @Test

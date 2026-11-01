@@ -2,8 +2,9 @@ package cc.hrva.urlshortener.validator.impl;
 
 import cc.hrva.urlshortener.repository.ApiKeyRepository;
 import cc.hrva.urlshortener.security.ApiKeyTokens;
+import java.time.Clock;
 import java.time.LocalDateTime;
-import java.util.Optional;
+import java.time.ZoneId;
 import java.util.stream.Stream;
 import cc.hrva.urlshortener.exception.ApiException;
 import cc.hrva.urlshortener.exception.FieldValidationException;
@@ -28,6 +29,7 @@ public class DefaultApiKeyValidator implements ApiKeyValidator {
 
     private final UserService userService;
     private final ApiKeyRepository apiKeyRepository;
+    private final Clock clock;
 
     @Override
     public void apiKeyExistsByKeyAndIsValid(final String key) {
@@ -36,8 +38,7 @@ public class DefaultApiKeyValidator implements ApiKeyValidator {
                 .filter(found -> ApiKeyTokens.sameHash(found.getKeyHash(), hash))
                 .orElseThrow(() -> new ApiKeyNotFoundException("API key doesn't exist"));
 
-        if (LocalDateTime.now().isAfter(Optional.ofNullable(apiKey.getExpirationDate())
-                .orElse(LocalDateTime.now().plusDays(1)))) {
+        if (apiKey.getExpirationDate() != null && LocalDateTime.now(clock.withZone(ZoneId.systemDefault())).isAfter(apiKey.getExpirationDate())) {
             throw new InvalidApiKeyException("API key has expired");
         }
 
@@ -58,7 +59,7 @@ public class DefaultApiKeyValidator implements ApiKeyValidator {
         if (choices > 1) {
             throw new ApiException(CHOOSE_ONE_EXPIRY);
         }
-        if (expirationDate != null && !expirationDate.isAfter(LocalDateTime.now())) {
+        if (expirationDate != null && !expirationDate.isAfter(LocalDateTime.now(clock.withZone(ZoneId.systemDefault())))) {
             throw new FieldValidationException(EXPIRATION_DATE, EXPIRATION_DATE_IN_THE_PAST);
         }
     }

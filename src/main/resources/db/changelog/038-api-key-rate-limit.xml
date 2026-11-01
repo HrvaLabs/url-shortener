@@ -79,4 +79,12 @@
         </rollback>
     </changeSet>
 
+    <changeSet author="khrvacic" id="038-api-key-expiration-timestamp">
+        <comment>The expiry keeps its time of day. An existing date becomes its midnight, the moment it already ended at.</comment>
+        <modifyDataType tableName="api_key" columnName="expiration_date" newDataType="TIMESTAMP"/>
+        <rollback>
+            <modifyDataType tableName="api_key" columnName="expiration_date" newDataType="DATE"/>
+        </rollback>
+    </changeSet>
+
 </databaseChangeLog>

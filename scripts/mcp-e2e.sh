@@ -376,8 +376,8 @@ expect_eq "$(psql_value "select string_agg(id || ' ' || exectype, ', ' order by 
     "030-url-short-url-rename-duplicates EXECUTED, 030-url-short-url-unique MARK_RAN" "030 finds no duplicate to rename and keeps the index 027 made"
 expect_eq "$(psql_value "select count(*) from databasechangelog where id like '032-%' and exectype = 'EXECUTED';")" 8 \
     "032 ran all eight changesets, the Postgres 15 check included"
-expect_eq "$(psql_value "select count(*) from databasechangelog where id like '038-%' and exectype = 'EXECUTED';") $(psql_value "select string_agg(column_name, ',' order by column_name) from information_schema.columns where table_name = 'api_key' and column_name in ('api_calls_limit', 'last_used_at', 'key', 'key_hash', 'key_prefix');")" \
-    "7 key_hash,key_prefix,last_used_at" "038 ran its seven Postgres changesets: api_key has last_used_at, key_hash and key_prefix, and no api_calls_limit or plaintext key"
+expect_eq "$(psql_value "select count(*) from databasechangelog where id like '038-%' and exectype = 'EXECUTED';") $(psql_value "select string_agg(column_name, ',' order by column_name) from information_schema.columns where table_name = 'api_key' and column_name in ('api_calls_limit', 'last_used_at', 'key', 'key_hash', 'key_prefix');") $(psql_value "select data_type from information_schema.columns where table_name = 'api_key' and column_name = 'expiration_date';")" \
+    "8 key_hash,key_prefix,last_used_at timestamp without time zone" "038 ran its eight Postgres changesets: api_key has last_used_at, key_hash and key_prefix, no api_calls_limit or plaintext key, and a timestamp expiry"
 expect_eq "$(psql_value "select count(*) from pg_indexes where indexname = 'ux_url_short_url';") $(psql_value "select count(*) from pg_indexes where indexname = 'ux_url_domain_short_url' and indexdef like '%NULLS NOT DISTINCT%';")" \
     "0 1" "032 replaced ux_url_short_url with ux_url_domain_short_url (domain_id, short_url) NULLS NOT DISTINCT"
 
@@ -1945,7 +1945,7 @@ http -X POST "$BASE/api/v1/api-keys" -H "Authorization: Bearer $EXPIRY_JWT" -H '
 expect_eq "$HTTP_STATUS $(jq -c '[has("apiCallsLimit"), .apiCallsUsed, .lastUsedAt, .status]' <<<"$HTTP_BODY")" '200 [false,0,null,"ACTIVE"]' \
     "POST /api/v1/api-keys {expiresInDays: 30}: no apiCallsLimit, lastUsedAt null"
 DAYS_KEY_ID=$(jq -r .id <<<"$HTTP_BODY")
-expect_eq "$(psql_value "select expiration_date = current_date + 30 from api_key where id = $DAYS_KEY_ID;")" t "it expires in 30 days"
+expect_eq "$(psql_value "select abs(extract(epoch from expiration_date - (create_date + interval '30 days'))) < 60 from api_key where id = $DAYS_KEY_ID;")" t "it expires in 30 days, to the minute"
 http -X POST "$BASE/api/v1/api-keys" -H "Authorization: Bearer $EXPIRY_JWT" -H 'Content-Type: application/json' -d '{"neverExpires":true}'
 expect_eq "$HTTP_STATUS $(jq -c '[.expirationDate, .status]' <<<"$HTTP_BODY")" '200 [null,"ACTIVE"]' "POST /api/v1/api-keys {neverExpires: true}"
 LIMITED_KEY_ID=$(jq -r .id <<<"$HTTP_BODY")
@@ -1976,7 +1976,10 @@ http -X PUT "$BASE/api/v1/api-keys/$DAYS_KEY_ID" -H "Authorization: Bearer $EXPI
 expect_eq "$HTTP_STATUS $(jq -c . <<<"$HTTP_BODY")" '400 {"expirationDate":"Choose a date in the future."}' "a past expirationDate is refused"
 http -X PUT "$BASE/api/v1/api-keys/$DAYS_KEY_ID" -H "Authorization: Bearer $EXPIRY_JWT" -H 'Content-Type: application/json' \
     -d "{\"id\":$DAYS_KEY_ID,\"expiresInDays\":90}"
-expect_eq "$HTTP_STATUS $(psql_value "select expiration_date = current_date + 90 from api_key where id = $DAYS_KEY_ID;")" "200 t" "the owner's PUT sets 90 days"
+expect_eq "$HTTP_STATUS $(psql_value "select abs(extract(epoch from expiration_date - (create_date + interval '90 days'))) < 60 from api_key where id = $DAYS_KEY_ID;")" "200 t" "the owner's PUT sets 90 days, to the minute"
+http "$BASE/api/v1/api-keys" -H "Authorization: Bearer $EXPIRY_JWT"
+expect_eq "$(jq -r ".[] | select(.id == $DAYS_KEY_ID) | .expirationDate[0:16]" <<<"$HTTP_BODY")" "$(psql_value "select to_char(expiration_date, 'YYYY-MM-DD\"T\"HH24:MI') from api_key where id = $DAYS_KEY_ID;")" \
+    "the list shows the stored expiry with its time of day"
 
 echo "  --- the RateLimit-* headers"
 http -X POST "$BASE/api/v1/urls" -H "X-Api-Key: $LIMITED_KEY" -H "Origin: $FRONTEND_URL" -H 'Content-Type: application/json' \

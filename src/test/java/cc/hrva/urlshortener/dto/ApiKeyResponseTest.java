@@ -84,4 +84,20 @@ class ApiKeyResponseTest {
         assertThat(created.keyPrefix()).isEqualTo("hrva_a1b2c3");
         assertThat(created.status()).isEqualTo("ACTIVE");
     }
+
+    @Test
+    void theDocumentationDescribesTheRequestCounterAndAFullLengthKey() throws Exception {
+        for (final var type : java.util.List.of(ApiKeyResponse.class, CreatedApiKeyResponse.class)) {
+            assertThat(schemaOf(type, "apiCallsUsed").description()).isEqualTo("How many requests have been made with the key in total");
+            assertThat(schemaOf(type, "lastUsedAt").description()).isEqualTo("When the last request was made with the key; null until its first request");
+        }
+        assertThat(schemaOf(CreatedApiKeyResponse.class, "key").example()).matches("hrva_[0-9A-Za-z]{43}").hasSize(48);
+    }
+
+    private static io.swagger.v3.oas.annotations.media.Schema schemaOf(final Class<?> type, final String component) throws Exception {
+        return type.getDeclaredField(component).getAnnotation(io.swagger.v3.oas.annotations.media.Schema.class) != null
+                ? type.getDeclaredField(component).getAnnotation(io.swagger.v3.oas.annotations.media.Schema.class)
+                : Arrays.stream(type.getRecordComponents()).filter(recordComponent -> recordComponent.getName().equals(component)).findFirst().orElseThrow()
+                        .getAnnotation(io.swagger.v3.oas.annotations.media.Schema.class);
+    }
 }

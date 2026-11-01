@@ -9,7 +9,10 @@ import cc.hrva.urlshortener.repository.ApiKeyRepository;
 import cc.hrva.urlshortener.repository.specification.ApiKeySpecification;
 import cc.hrva.urlshortener.util.SortWhitelist;
 import cc.hrva.urlshortener.validator.ApiKeyValidator;
+import java.time.Clock;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -57,6 +60,7 @@ public class DefaultApiKeyService implements ApiKeyService {
     private final ApiKeyValidator apiKeyValidator;
     private final ApiKeyRepository apiKeyRepository;
     private final ApiKeyUpdateDtoToApiKeyConverter apiKeyConverter;
+    private final Clock clock;
 
     @Override
     @Transactional
@@ -79,9 +83,13 @@ public class DefaultApiKeyService implements ApiKeyService {
             return null;
         }
         if (expiresInDays != null) {
-            return LocalDateTime.now().plusDays(expiresInDays);
+            return now().plusDays(expiresInDays);
         }
-        return LocalDateTime.now().plusMonths(appProperties.getApiKeyExpirationInMonths());
+        return now().plusMonths(appProperties.getApiKeyExpirationInMonths());
+    }
+
+    private LocalDateTime now() {
+        return LocalDateTime.now(clock.withZone(ZoneId.systemDefault())).truncatedTo(ChronoUnit.SECONDS);
     }
 
     @Override
@@ -198,7 +206,7 @@ public class DefaultApiKeyService implements ApiKeyService {
     @Override
     @Transactional
     public void deactivateExpired() {
-        final var apiKeys = apiKeyRepository.findByExpirationDateIsLessThanEqualAndActiveTrue(LocalDateTime.now()).stream()
+        final var apiKeys = apiKeyRepository.findByExpirationDateIsLessThanEqualAndActiveTrue(LocalDateTime.now(clock.withZone(ZoneId.systemDefault()))).stream()
                 .map(ApiKey::deactivate)
                 .toList();
 

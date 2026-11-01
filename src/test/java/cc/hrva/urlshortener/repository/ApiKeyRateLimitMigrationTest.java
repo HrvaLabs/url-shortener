@@ -83,6 +83,24 @@ class ApiKeyRateLimitMigrationTest {
                 .isEqualTo(usedAt);
     }
 
+    @Test
+    void theExpiryIsATimestampAndAnExistingDateBecomesItsMidnight() {
+        assertThat(jdbcTemplate.queryForObject(
+                "select data_type from information_schema.columns where upper(table_name) = 'API_KEY' and upper(column_name) = 'EXPIRATION_DATE'",
+                String.class)).isEqualTo("TIMESTAMP");
+        assertThat(jdbcTemplate.queryForObject("select expiration_date from api_key where id = 3", LocalDateTime.class))
+                .isEqualTo(LocalDateTime.of(2027, 1, 1, 0, 0));
+    }
+
+    @Test
+    void anExpiryKeepsItsTimeOfDay() {
+        final var expiry = LocalDateTime.of(2027, 1, 1, 23, 50, 7);
+
+        jdbcTemplate.update("update api_key set expiration_date = ? where id = 4", expiry);
+
+        assertThat(jdbcTemplate.queryForObject("select expiration_date from api_key where id = 4", LocalDateTime.class)).isEqualTo(expiry);
+    }
+
     private Long columns(final String name) {
         return jdbcTemplate.queryForObject(
                 "select count(*) from information_schema.columns where upper(table_name) = 'API_KEY' and upper(column_name) = ?", Long.class, name);

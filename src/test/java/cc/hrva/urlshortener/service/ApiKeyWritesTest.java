@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.service;
 
+import cc.hrva.urlshortener.configuration.ClockConfiguration;
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.converter.ApiKeyUpdateDtoToApiKeyConverter;
 import cc.hrva.urlshortener.model.Url;
@@ -171,7 +172,7 @@ class ApiKeyWritesTest {
             includeFilters = @ComponentScan.Filter(
                     type = FilterType.ASSIGNABLE_TYPE,
                     classes = {UrlRepository.class, UserRepository.class, ApiKeyRepository.class}))
-    @Import(DefaultApiKeyService.class)
+    @Import({DefaultApiKeyService.class, ClockConfiguration.class})
     static class TestApplication {
     }
 

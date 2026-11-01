@@ -1,7 +1,6 @@
 package cc.hrva.urlshortener.service;
 
 import java.time.LocalDateTime;
-import java.time.temporal.ChronoUnit;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
@@ -37,7 +36,6 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.assertj.core.api.Assertions.within;
 import static org.assertj.core.api.AssertionsForClassTypes.assertThatCode;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
@@ -52,6 +50,7 @@ class ApiKeyServiceTest {
 
     private ApiKeyService apiKeyService;
 
+    private static final java.time.Clock CLOCK = java.time.Clock.fixed(java.time.Instant.parse("2026-10-30T23:50:07.987654321Z"), java.time.ZoneOffset.UTC);
     private static final Sort NEWEST_FIRST = Sort.by(Sort.Order.desc("createDate"), Sort.Order.desc("id"));
 
     @Mock
@@ -76,7 +75,8 @@ class ApiKeyServiceTest {
                 appProperties,
                 apiKeyValidator,
                 apiKeyRepository,
-                apiKeyConverter);
+                apiKeyConverter,
+                CLOCK);
     }
 
     @Test
@@ -100,7 +100,7 @@ class ApiKeyServiceTest {
 
         final var created = apiKeyService.generateNewApiKey(new ApiKeyCreateDto(null, null));
 
-        assertThat(created.expirationDate()).isCloseTo(LocalDateTime.now().plusMonths(12), within(5, ChronoUnit.SECONDS));
+        assertThat(created.expirationDate()).isEqualTo(LocalDateTime.of(2027, 10, 30, 23, 50, 7));
         verify(apiKeyValidator).validateExpiry(null, null, null);
     }
 
@@ -111,7 +111,7 @@ class ApiKeyServiceTest {
 
         final var created = apiKeyService.generateNewApiKey(new ApiKeyCreateDto(90, false));
 
-        assertThat(created.expirationDate()).isCloseTo(LocalDateTime.now().plusDays(90), within(5, ChronoUnit.SECONDS));
+        assertThat(created.expirationDate()).isEqualTo(LocalDateTime.of(2027, 1, 28, 23, 50, 7));
         verify(apiKeyValidator).validateExpiry(90, false, null);
     }
 

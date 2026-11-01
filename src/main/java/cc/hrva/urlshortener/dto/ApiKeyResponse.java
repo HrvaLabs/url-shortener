@@ -10,9 +10,9 @@ public record ApiKeyResponse(
         @Schema(description = "The start of the key, to recognise it: hrva_ and 6 characters, or the first 6 characters of a key made before v2.21. "
                 + "The full key is shown only once, when it is made", example = "hrva_a1b2c3")
         String keyPrefix,
-        @Schema(description = "How many links the key has created in total", example = "42")
+        @Schema(description = "How many requests have been made with the key in total", example = "42")
         Long apiCallsUsed,
-        @Schema(description = "When the key last created a link; null until its first use", example = "2026-10-30T09:15:00")
+        @Schema(description = "When the last request was made with the key; null until its first request", example = "2026-10-30T09:15:00")
         LocalDateTime lastUsedAt,
         @Schema(description = "Creation date and time", example = "2026-05-16T10:00:00")
         LocalDateTime createDate,

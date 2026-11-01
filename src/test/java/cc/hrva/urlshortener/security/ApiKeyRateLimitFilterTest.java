@@ -81,7 +81,6 @@ class ApiKeyRateLimitFilterTest {
     void anAllowedRequestIsCountedOnceAsAUseOfTheKey() throws Exception {
         knownKey();
         when(rateLimiter.incrementWindow(anyString(), any())).thenReturn(new RateLimitWindow(1, HOUR));
-        final var before = LocalDateTime.now();
         final var counted = new ArrayList<LocalDateTime>();
         when(apiKeyRepository.recordRequest(eq(KEY_ID), any(LocalDateTime.class))).thenAnswer(invocation -> {
             counted.add(invocation.getArgument(1));
@@ -90,7 +89,7 @@ class ApiKeyRateLimitFilterTest {
 
         filter.doFilter(apiKeyRequest("/api/v1/urls/abc/peek"), new MockHttpServletResponse(), new MockFilterChain());
 
-        assertThat(counted).singleElement().satisfies(at -> assertThat(at).isBetween(before, LocalDateTime.now()));
+        assertThat(counted).containsExactly(LocalDateTime.of(2026, 10, 30, 10, 0));
         verify(apiKeyRepository, never()).save(any());
     }
 

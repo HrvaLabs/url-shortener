@@ -8,13 +8,13 @@ public record CreatedApiKeyResponse(
         @Schema(description = "Unique identifier", example = "1")
         Long id,
         @Schema(description = "The full API key. Shown only in this answer: hrva.cc stores its hash, so it can't be shown again",
-                example = "hrva_a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0u1v")
+                example = "hrva_7Gq2LmN8pXs4TzVb6KdR0wYcHj3FuEa9QeWi5Ro1SkA")
         String key,
         @Schema(description = "The start of the key, as the key lists show it", example = "hrva_a1b2c3")
         String keyPrefix,
-        @Schema(description = "How many links the key has created in total", example = "0")
+        @Schema(description = "How many requests have been made with the key in total", example = "0")
         Long apiCallsUsed,
-        @Schema(description = "When the key last created a link; null until its first use", example = "null")
+        @Schema(description = "When the last request was made with the key; null until its first request", example = "null")
         LocalDateTime lastUsedAt,
         @Schema(description = "Creation date and time", example = "2026-10-30T10:00:00")
         LocalDateTime createDate,

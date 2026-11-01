@@ -2,7 +2,10 @@ package cc.hrva.urlshortener.converter;
 
 import cc.hrva.urlshortener.exception.ApiKeyNotFoundException;
 import cc.hrva.urlshortener.repository.ApiKeyRepository;
+import java.time.Clock;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.temporal.ChronoUnit;
 import lombok.RequiredArgsConstructor;
 import cc.hrva.urlshortener.dto.ApiKeyUpdateDto;
 import cc.hrva.urlshortener.model.ApiKey;
@@ -14,6 +17,7 @@ import org.springframework.stereotype.Component;
 public class ApiKeyUpdateDtoToApiKeyConverter implements Converter<ApiKeyUpdateDto, ApiKey> {
 
     private final ApiKeyRepository apiKeyRepository;
+    private final Clock clock;
 
     @Override
     public ApiKey convert(final ApiKeyUpdateDto apiKeyUpdateDto) {
@@ -30,7 +34,7 @@ public class ApiKeyUpdateDtoToApiKeyConverter implements Converter<ApiKeyUpdateD
         if (Boolean.TRUE.equals(apiKeyUpdateDto.getNeverExpires())) {
             editedApiKey.setExpirationDate(null);
         } else if (apiKeyUpdateDto.getExpiresInDays() != null) {
-            editedApiKey.setExpirationDate(LocalDateTime.now().plusDays(apiKeyUpdateDto.getExpiresInDays()));
+            editedApiKey.setExpirationDate(LocalDateTime.now(clock.withZone(ZoneId.systemDefault())).truncatedTo(ChronoUnit.SECONDS).plusDays(apiKeyUpdateDto.getExpiresInDays()));
         } else if (apiKeyUpdateDto.getExpirationDate() != null) {
             editedApiKey.setExpirationDate(apiKeyUpdateDto.getExpirationDate());
         }

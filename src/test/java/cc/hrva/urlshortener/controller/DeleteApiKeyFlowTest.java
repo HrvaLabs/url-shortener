@@ -1,6 +1,7 @@
 package cc.hrva.urlshortener.controller;
 
 import cc.hrva.urlshortener.configuration.AppConfiguration;
+import cc.hrva.urlshortener.configuration.ClockConfiguration;
 import cc.hrva.urlshortener.configuration.GlobalExceptionHandler;
 import cc.hrva.urlshortener.configuration.JacksonConfiguration;
 import cc.hrva.urlshortener.configuration.SecurityConfiguration;
@@ -321,6 +322,7 @@ class DeleteApiKeyFlowTest {
             ClientIpResolver.class,
             ApiKeyController.class,
             DefaultApiKeyService.class,
+            ClockConfiguration.class,
             DefaultApiKeyValidator.class,
             ApiKeyUpdateDtoToApiKeyConverter.class
     })
