@@ -22,9 +22,9 @@ import org.springframework.security.core.context.SecurityContextHolder;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -105,7 +105,7 @@ class JwtFilterTest {
     @Test
     void anInvalidTokenLeavesTheRequestSignedOut() throws Exception {
         request.addHeader("Authorization", "Bearer jwt");
-        when(tokenProvider.validateToken("jwt")).thenReturn(false);
+        when(tokenProvider.read("jwt")).thenReturn(Optional.empty());
 
         jwtFilter.doFilter(request, response, filterChain);
 
@@ -197,8 +197,7 @@ class JwtFilterTest {
     void aTokenWithoutAnIssueTimeIsRefusedOnceTheAccountsSessionsEnded() throws Exception {
         final var user = User.builder().id(1L).active(true).build();
         user.endSessions(ISSUED_AT);
-        signedInAs("test@example.com", user);
-        when(tokenProvider.issuedAt("jwt")).thenReturn(Optional.empty());
+        signedInAs("test@example.com", user, null);
 
         jwtFilter.doFilter(request, response, filterChain);
 
@@ -207,23 +206,28 @@ class JwtFilterTest {
     }
 
     @Test
-    void anAccountWhoseSessionsNeverEndedSkipsTheIssueTime() throws Exception {
-        signedInAs("test@example.com", User.builder().id(1L).active(true).build());
+    void theTokenIsVerifiedAndReadOnceAPerRequest() throws Exception {
+        final var user = User.builder().id(1L).active(true).build();
+        user.endSessions(ISSUED_AT.minusSeconds(60));
+        signedInAs("test@example.com", user);
 
         jwtFilter.doFilter(request, response, filterChain);
 
-        verify(tokenProvider, never()).issuedAt(any());
+        verify(tokenProvider).read("jwt");
+        verifyNoMoreInteractions(tokenProvider);
         verify(filterChain).doFilter(request, response);
     }
 
     private void signedInAs(final String email, final User user) {
+        signedInAs(email, user, ISSUED_AT);
+    }
+
+    private void signedInAs(final String email, final User user, final Instant issuedAt) {
         user.setEmail(email);
         request.addHeader("Authorization", "Bearer jwt");
         final var authorities = List.of(new SimpleGrantedAuthority("ROLE_USER"));
         final var authentication = new UsernamePasswordAuthenticationToken(email, "jwt", authorities);
-        when(tokenProvider.validateToken("jwt")).thenReturn(true);
-        when(tokenProvider.getAuthentication("jwt")).thenReturn(authentication);
-        lenient().when(tokenProvider.issuedAt("jwt")).thenReturn(Optional.of(ISSUED_AT));
+        when(tokenProvider.read("jwt")).thenReturn(Optional.of(new SessionToken(authentication, issuedAt, issuedAt, ISSUED_AT.plusSeconds(36_000))));
         when(userRepository.findByEmail(email)).thenReturn(Optional.of(user));
     }
 }

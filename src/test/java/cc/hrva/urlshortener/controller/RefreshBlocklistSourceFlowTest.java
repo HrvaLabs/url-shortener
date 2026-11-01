@@ -23,6 +23,7 @@ import cc.hrva.urlshortener.security.ClientIpResolver;
 import cc.hrva.urlshortener.security.JwtFilter;
 import cc.hrva.urlshortener.security.OAuth2LoginSuccessHandler;
 import cc.hrva.urlshortener.security.OAuth2LoginUserService;
+import cc.hrva.urlshortener.security.SessionToken;
 import cc.hrva.urlshortener.security.TokenProvider;
 import cc.hrva.urlshortener.service.UserService;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent;
@@ -43,6 +44,7 @@ import java.nio.file.Path;
 import java.sql.Timestamp;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -179,9 +181,8 @@ class RefreshBlocklistSourceFlowTest {
         jdbcTemplate.update("""
                 insert into blocklist_source (id, name, url, kind, action, enabled, refresh_interval_hours)
                 values (?, 'Flow list', ?, 'DOMAINS', 'BLOCK', true, 6)""", SOURCE, LIST_URL);
-        when(tokenProvider.validateToken("admin-token")).thenReturn(true);
-        when(tokenProvider.getAuthentication("admin-token"))
-                .thenReturn(UsernamePasswordAuthenticationToken.authenticated(ADMIN_EMAIL, null, List.of(new SimpleGrantedAuthority("ROLE_ADMIN"))));
+        when(tokenProvider.read("admin-token"))
+                .thenReturn(Optional.of(new SessionToken(UsernamePasswordAuthenticationToken.authenticated(ADMIN_EMAIL, null, List.of(new SimpleGrantedAuthority("ROLE_ADMIN"))), null, null, null)));
         when(userService.getUserFromToken()).thenAnswer(invocation -> signedInAccount());
         when(blocklistStore.memory()).thenReturn(new BlocklistStore.RedisMemory(0, 1_000_000_000L));
         when(publicHttpFetcher.fetch(eq(LIST_URL), anyLong(), any(), any(), any())).thenAnswer(invocation -> {

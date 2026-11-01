@@ -24,6 +24,7 @@ import cc.hrva.urlshortener.security.OAuth2LoginUserService;
 import cc.hrva.urlshortener.security.Reauthentication;
 import cc.hrva.urlshortener.security.RecentSignIn;
 import cc.hrva.urlshortener.security.StoredPasswords;
+import cc.hrva.urlshortener.security.SessionToken;
 import cc.hrva.urlshortener.security.TokenProvider;
 import cc.hrva.urlshortener.service.LoginAttemptService;
 import cc.hrva.urlshortener.service.SendingEmailService;
@@ -611,17 +612,15 @@ class SignInMethodEndpointSecurityTest {
     }
 
     private void signedIn(final String token, final String email) {
-        lenient().when(tokenProvider.issuedAt(token)).thenReturn(Optional.of(Instant.now().plusSeconds(60)));
-        when(tokenProvider.validateToken(token)).thenReturn(true);
-        when(tokenProvider.getAuthentication(token))
-                .thenReturn(UsernamePasswordAuthenticationToken.authenticated(email, null, List.of(new SimpleGrantedAuthority("ROLE_USER"))));
+        final var issuedAt = Instant.now().plusSeconds(60);
+        when(tokenProvider.read(token)).thenReturn(Optional.of(new SessionToken(
+                UsernamePasswordAuthenticationToken.authenticated(email, null, List.of(new SimpleGrantedAuthority("ROLE_USER"))), issuedAt, issuedAt, issuedAt.plusSeconds(3_600))));
     }
 
     private void signedInJustNow(final String token, final String email) {
-        lenient().when(tokenProvider.issuedAt(token)).thenReturn(Optional.of(Instant.now().plusSeconds(60)));
-        when(tokenProvider.validateToken(token)).thenReturn(true);
-        when(tokenProvider.getAuthentication(token))
-                .thenReturn(UsernamePasswordAuthenticationToken.authenticated(email, token, List.of(new SimpleGrantedAuthority("ROLE_USER"))));
+        final var issuedAt = Instant.now().plusSeconds(60);
+        when(tokenProvider.read(token)).thenReturn(Optional.of(new SessionToken(
+                UsernamePasswordAuthenticationToken.authenticated(email, token, List.of(new SimpleGrantedAuthority("ROLE_USER"))), issuedAt, issuedAt, issuedAt.plusSeconds(3_600))));
         when(tokenProvider.signedInAt(token)).thenReturn(Optional.of(Instant.now()));
     }
 

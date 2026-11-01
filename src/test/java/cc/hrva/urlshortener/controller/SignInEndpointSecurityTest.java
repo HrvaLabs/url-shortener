@@ -35,6 +35,7 @@ import cc.hrva.urlshortener.security.ClientIpResolver;
 import cc.hrva.urlshortener.security.JwtFilter;
 import cc.hrva.urlshortener.security.OAuth2LoginSuccessHandler;
 import cc.hrva.urlshortener.security.OAuth2LoginUserService;
+import cc.hrva.urlshortener.security.SessionToken;
 import cc.hrva.urlshortener.security.TokenProvider;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.codebook.Authorities;
@@ -601,9 +602,8 @@ class SignInEndpointSecurityTest {
 
     private void signedIn() {
         final var authorities = List.of(new SimpleGrantedAuthority("ROLE_USER"));
-        when(tokenProvider.validateToken(SIGNED_IN_TOKEN)).thenReturn(true);
-        when(tokenProvider.getAuthentication(SIGNED_IN_TOKEN))
-                .thenReturn(new UsernamePasswordAuthenticationToken("user@localhost", SIGNED_IN_TOKEN, authorities));
+        when(tokenProvider.read(SIGNED_IN_TOKEN))
+                .thenReturn(Optional.of(new SessionToken(new UsernamePasswordAuthenticationToken("user@localhost", SIGNED_IN_TOKEN, authorities), null, null, null)));
         when(userRepository.findByEmail("user@localhost"))
                 .thenReturn(Optional.of(User.builder().email("user@localhost").active(true).authorities(List.of(Authorities.builder().name("ROLE_USER").build())).build()));
     }

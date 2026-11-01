@@ -600,7 +600,7 @@ class AuthorizationServerConfigurationTest {
     void appJwtFilterRunsOnlyInsideItsSecurityChain() throws Exception {
         mockMvc.perform(get("/api/changelog").header(HttpHeaders.AUTHORIZATION, "Bearer app-jwt"));
 
-        verify(tokenProvider, times(1)).validateToken("app-jwt");
+        verify(tokenProvider, times(1)).read("app-jwt");
     }
 
     @Test

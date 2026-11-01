@@ -36,6 +36,7 @@ import cc.hrva.urlshortener.security.ClientIpResolver;
 import cc.hrva.urlshortener.security.JwtFilter;
 import cc.hrva.urlshortener.security.OAuth2LoginSuccessHandler;
 import cc.hrva.urlshortener.security.OAuth2LoginUserService;
+import cc.hrva.urlshortener.security.SessionToken;
 import cc.hrva.urlshortener.security.TokenProvider;
 import cc.hrva.urlshortener.service.AnalyticsService;
 import cc.hrva.urlshortener.service.BioPageAnalyticsService;
@@ -165,9 +166,8 @@ class BioPageEndpointSecurityTest {
 
     @BeforeEach
     void setUp() {
-        lenient().when(tokenProvider.validateToken(USER_TOKEN)).thenReturn(true);
-        lenient().when(tokenProvider.getAuthentication(USER_TOKEN))
-                .thenReturn(UsernamePasswordAuthenticationToken.authenticated(USER, null, List.of(new SimpleGrantedAuthority("ROLE_USER"))));
+        lenient().when(tokenProvider.read(USER_TOKEN))
+                .thenReturn(Optional.of(new SessionToken(UsernamePasswordAuthenticationToken.authenticated(USER, null, List.of(new SimpleGrantedAuthority("ROLE_USER"))), null, null, null)));
         lenient().when(userRepository.findByEmail(USER)).thenReturn(Optional.of(User.builder().email(USER).active(true).authorities(List.of(Authorities.builder().name("ROLE_USER").build())).build()));
     }
 

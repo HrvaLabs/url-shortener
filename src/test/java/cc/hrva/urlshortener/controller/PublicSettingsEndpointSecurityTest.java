@@ -21,6 +21,7 @@ import cc.hrva.urlshortener.service.ratelimit.RateLimiter;
 import com.nimbusds.jose.JOSEException;
 import com.nimbusds.jose.jwk.RSAKey;
 import com.nimbusds.jose.jwk.gen.RSAKeyGenerator;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.SpringBootConfiguration;
@@ -132,7 +133,7 @@ class PublicSettingsEndpointSecurityTest {
     @Test
     void aStaleTokenDoesNotBreakIt() throws Exception {
         when(settingsService.publicSettings()).thenReturn(SETTINGS);
-        when(tokenProvider.validateToken("expired.jwt.token")).thenReturn(false);
+        when(tokenProvider.read("expired.jwt.token")).thenReturn(Optional.empty());
 
         mockMvc.perform(get(PUBLIC_SETTINGS).header(HttpHeaders.AUTHORIZATION, "Bearer expired.jwt.token"))
                 .andExpect(status().isOk());

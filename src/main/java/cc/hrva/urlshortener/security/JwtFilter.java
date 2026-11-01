@@ -40,10 +40,10 @@ public class JwtFilter extends GenericFilterBean {
     final var httpServletResponse = (HttpServletResponse) servletResponse;
 
     final var jwt = getToken(httpServletRequest);
-    if (StringUtils.hasText(jwt) && this.tokenProvider.validateToken(jwt)) {
-      final var authentication = this.tokenProvider.getAuthentication(jwt);
-      final var user = activeUser(authentication.getName());
-      final var ended = user.isPresent() && sessionEnded(user.get(), jwt);
+    final var token = StringUtils.hasText(jwt) ? tokenProvider.read(jwt) : Optional.<SessionToken>empty();
+    if (token.isPresent()) {
+      final var user = activeUser(token.get().authentication().getName());
+      final var ended = user.isPresent() && sessionEnded(user.get(), token.get());
       if (ended && !isPublic(httpServletRequest)) {
         log.info("Refused a token issued before the account's sessions ended user id={}", user.get().getId());
         ProblemResponses.write(httpServletRequest, httpServletResponse, HttpStatus.UNAUTHORIZED, SESSION_ENDED);
@@ -56,8 +56,8 @@ public class JwtFilter extends GenericFilterBean {
     filterChain.doFilter(servletRequest, servletResponse);
   }
 
-  private boolean sessionEnded(final User user, final String jwt) {
-    return user.needsTokenIssueTime() && user.sessionEndedFor(tokenProvider.issuedAt(jwt).orElse(null));
+  private static boolean sessionEnded(final User user, final SessionToken token) {
+    return user.needsTokenIssueTime() && user.sessionEndedFor(token.issuedAt());
   }
 
   private static boolean isPublic(final HttpServletRequest request) {

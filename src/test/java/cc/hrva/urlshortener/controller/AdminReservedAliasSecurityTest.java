@@ -22,6 +22,7 @@ import cc.hrva.urlshortener.security.ClientIpResolver;
 import cc.hrva.urlshortener.security.JwtFilter;
 import cc.hrva.urlshortener.security.OAuth2LoginSuccessHandler;
 import cc.hrva.urlshortener.security.OAuth2LoginUserService;
+import cc.hrva.urlshortener.security.SessionToken;
 import cc.hrva.urlshortener.security.TokenProvider;
 import cc.hrva.urlshortener.service.ReservedAliasService;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiter;
@@ -252,9 +253,8 @@ class AdminReservedAliasSecurityTest {
     }
 
     private void signedIn(final String token, final String email, final String role) {
-        lenient().when(tokenProvider.validateToken(token)).thenReturn(true);
-        lenient().when(tokenProvider.getAuthentication(token))
-                .thenReturn(UsernamePasswordAuthenticationToken.authenticated(email, null, List.of(new SimpleGrantedAuthority(role))));
+        lenient().when(tokenProvider.read(token))
+                .thenReturn(Optional.of(new SessionToken(UsernamePasswordAuthenticationToken.authenticated(email, null, List.of(new SimpleGrantedAuthority(role))), null, null, null)));
         lenient().when(userRepository.findByEmail(email)).thenReturn(Optional.of(User.builder().email(email).active(true).authorities(List.of(Authorities.builder().name(role).build())).build()));
     }
 
