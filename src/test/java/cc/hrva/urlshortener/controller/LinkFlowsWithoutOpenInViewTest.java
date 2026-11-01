@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.controller;
 
+import org.springframework.http.HttpStatus;
 import cc.hrva.urlshortener.audit.AdminAuditAspect;
 import cc.hrva.urlshortener.configuration.AppConfiguration;
 import cc.hrva.urlshortener.configuration.ClockConfiguration;
@@ -417,7 +418,8 @@ class LinkFlowsWithoutOpenInViewTest {
             assertThat(stored.get("BLOCK_DETAIL")).isEqualTo("/wqamhcsom?r&t");
             final var alias = (String) stored.get("SHORT_URL");
             verify(campaignService).addHeldLink(eq(77L), anyLong(), eq("omaehhm.com"));
-            assertThat(locationOf(urlService.redirectResultUrl(alias, ClickRequest.of("203.0.113.7", "UA", null, "HR")))).isNotEqualTo(longUrl);
+            assertThat(urlService.redirectResultUrl(alias, ClickRequest.of("203.0.113.7", "UA", null, "HR")))
+                    .isInstanceOfSatisfying(LinkUnavailableView.class, page -> assertThat(page.status()).isEqualTo(HttpStatus.GONE));
         } finally {
             jdbcTemplate.update("delete from url where long_url = ?", longUrl);
         }

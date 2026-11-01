@@ -25,7 +25,7 @@ public class UrlRedirectController {
     private final HttpServletRequest request;
     private final AppProperties appProperties;
 
-    @GetMapping("/{short}")
+    @GetMapping({"/{short}", "/{short}/"})
     public View fetchUrlByShortUrlOrRedirectToFrontend(@PathVariable("short") final String shortUrl) {
         return urlService.redirectResultUrl(shortUrl, clickRequestResolver.resolve(request));
     }

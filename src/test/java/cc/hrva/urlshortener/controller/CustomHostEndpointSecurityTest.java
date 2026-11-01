@@ -1,5 +1,9 @@
 package cc.hrva.urlshortener.controller;
 
+import cc.hrva.urlshortener.controller.LinkPageHeaders;
+import cc.hrva.urlshortener.controller.LinkUnavailableView;
+import cc.hrva.urlshortener.controller.LinkWarningTemplates;
+import com.jayway.jsonpath.JsonPath;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
@@ -68,6 +72,8 @@ import org.springframework.test.web.servlet.ResultMatcher;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.springframework.web.servlet.view.RedirectView;
 
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.hamcrest.Matchers.containsString;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -211,7 +217,8 @@ class CustomHostEndpointSecurityTest {
                 options("/menu"),
                 post("/"),
                 get("/a/b"),
-                get("/menu/"),
+                get("/menu/x"),
+                rawPath("/menu//"),
                 get("/menu;jsessionid=x"),
                 get(URI.create("/menu%3Bjsessionid=x")),
                 rawPath("//menu"),
@@ -219,8 +226,8 @@ class CustomHostEndpointSecurityTest {
             final var result = mockMvc.perform(on(CUSTOM_HOST, request)).andReturn();
             final var description = result.getRequest().getMethod() + " " + result.getRequest().getRequestURI();
             assertThat(result.getResponse().getStatus()).as(description).isEqualTo(404);
-            assertThat(result.getResponse().getContentAsString()).as(description).isEqualTo(NOT_FOUND);
-            assertThat(result.getResponse().getContentType()).as(description).startsWith(MediaType.TEXT_PLAIN_VALUE);
+            assertThat(JsonPath.<String>read(result.getResponse().getContentAsString(), "$.detail")).as(description).isEqualTo(NOT_FOUND);
+            assertThat(result.getResponse().getContentType()).as(description).isEqualTo(MediaType.APPLICATION_PROBLEM_JSON_VALUE);
             neverCached().match(result);
         }
 
@@ -232,7 +239,7 @@ class CustomHostEndpointSecurityTest {
     void getAndHeadOfAnAliasRedirect() throws Exception {
         when(urlService.redirectResultUrl(eq(GO), eq("menu"), any())).thenReturn(new RedirectView("https://example.com/b"));
 
-        for (final var request : List.of(get("/menu"), head("/menu"), get("/menu?qr"))) {
+        for (final var request : List.of(get("/menu"), head("/menu"), get("/menu?qr"), get("/menu/"), head("/menu/"))) {
             mockMvc.perform(on(CUSTOM_HOST, request))
                     .andExpect(status().isFound())
                     .andExpect(redirectedUrl("https://example.com/b"))
@@ -256,12 +263,18 @@ class CustomHostEndpointSecurityTest {
     @Test
     void aTurnedOffDomainIsHandedToTheRedirectSoItsVisitorsAreToldWhy() throws Exception {
         when(urlService.redirectResultUrl(eq(OFF), eq("menu"), any()))
-                .thenReturn(new RedirectView("https://app.hrva.cc/unavailable?s=menu&reason=domain&d=off.example.com"));
+                .thenReturn(LinkUnavailableView.of(LinkWarningTemplates.engine(), "https://app.hrva.cc", "https://hrva.cc", "menu", "off.example.com", "domain"));
 
         mockMvc.perform(on("off.example.com", get("/menu")))
-                .andExpect(status().isFound())
-                .andExpect(redirectedUrl("https://app.hrva.cc/unavailable?s=menu&reason=domain&d=off.example.com"))
-                .andExpect(neverCached());
+                .andExpect(status().isGone())
+                .andExpect(content().contentType("text/html;charset=UTF-8"))
+                .andExpect(content().string(containsString("This link&#39;s domain is turned off right now.")))
+                .andExpect(header().string(HttpHeaders.CACHE_CONTROL, LinkPageHeaders.CACHE_CONTROL))
+                .andExpect(header().string("Content-Security-Policy", LinkPageHeaders.CONTENT_SECURITY_POLICY));
+        mockMvc.perform(on("off.example.com", get("/menu")).accept(MediaType.APPLICATION_JSON))
+                .andExpect(status().isGone())
+                .andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON))
+                .andExpect(jsonPath("$.reason").value("domain"));
     }
 
     @Test
@@ -270,7 +283,7 @@ class CustomHostEndpointSecurityTest {
 
         mockMvc.perform(on(CUSTOM_HOST, get("/favicon.ico")))
                 .andExpect(status().isNotFound())
-                .andExpect(content().string(NOT_FOUND))
+                .andExpect(jsonPath("$.detail").value(NOT_FOUND))
                 .andExpect(neverCached());
     }
 
@@ -292,7 +305,7 @@ class CustomHostEndpointSecurityTest {
         for (final var request : List.of(get("/menu"), get("/login"), get("/"), get("/api/v1/urls/menu"))) {
             mockMvc.perform(on("unknown.example.org", request))
                     .andExpect(status().isNotFound())
-                    .andExpect(content().string(NOT_FOUND))
+                    .andExpect(jsonPath("$.detail").value(NOT_FOUND))
                     .andExpect(neverCached());
         }
         CLOCK.advance(Duration.ofMinutes(59));
@@ -313,7 +326,7 @@ class CustomHostEndpointSecurityTest {
     void aPendingDomainIs404() throws Exception {
         mockMvc.perform(on("pending.example.com", get("/menu")))
                 .andExpect(status().isNotFound())
-                .andExpect(content().string(NOT_FOUND));
+                .andExpect(jsonPath("$.detail").value(NOT_FOUND));
 
         verifyNoInteractions(urlService);
     }
@@ -341,7 +354,7 @@ class CustomHostEndpointSecurityTest {
                 .andExpect(neverCached());
         mockMvc.perform(on(CUSTOM_HOST, get("/login")).header("X-Forwarded-Host", "hrva.cc"))
                 .andExpect(status().isNotFound())
-                .andExpect(content().string(NOT_FOUND));
+                .andExpect(jsonPath("$.detail").value(NOT_FOUND));
 
         verify(urlService, never()).redirectResultUrl(eq("menu"), any());
         verify(springSecurityFilterChain, never()).doFilter(any(), any(), any());
@@ -352,8 +365,8 @@ class CustomHostEndpointSecurityTest {
         for (final var host : List.of(CUSTOM_HOST, "stray.example.org")) {
             mockMvc.perform(on(host, errorDispatchFor("/menu")))
                     .andExpect(status().isNotFound())
-                    .andExpect(content().string(NOT_FOUND))
-                    .andExpect(content().contentTypeCompatibleWith(MediaType.TEXT_PLAIN))
+                    .andExpect(jsonPath("$.detail").value(NOT_FOUND))
+                    .andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON))
                     .andExpect(neverCached());
         }
 
@@ -372,16 +385,20 @@ class CustomHostEndpointSecurityTest {
     void primaryHostsWorkAsBefore() throws Exception {
         final var link = UrlResponse.from(Url.builder().id(1L).shortUrl("menu").longUrl("https://example.com/a").active(true).build());
         when(urlService.revealUrlAndRecordClick(isNull(), eq("menu"), any())).thenReturn(link);
-        when(urlService.redirectResultUrl(eq("login"), any())).thenReturn(new RedirectView("https://app.hrva.cc/unavailable?s=login&reason=missing"));
+        when(urlService.redirectResultUrl(eq("login"), any()))
+                .thenReturn(LinkUnavailableView.of(LinkWarningTemplates.engine(), "https://app.hrva.cc", "https://hrva.cc", "login", null, "missing"));
+        when(urlService.redirectResultUrl(eq("menu"), any())).thenReturn(new RedirectView("https://example.com/a"));
 
         for (final var host : List.of("localhost", "127.0.0.1", "domains.hrva.cc", "hrva.cc", "HRVA.cc.")) {
             mockMvc.perform(on(host, get("/api/v1/urls/menu")))
                     .andExpect(status().isOk())
                     .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON));
             mockMvc.perform(on(host, get("/login")))
+                    .andExpect(status().isNotFound())
+                    .andExpect(content().string(containsString("There&#39;s no hrva.cc link with this name.")));
+            mockMvc.perform(on(host, get("/menu/")))
                     .andExpect(status().isFound())
-                    .andExpect(redirectedUrl("https://app.hrva.cc/unavailable?s=login&reason=missing"))
-                    .andExpect(neverCached());
+                    .andExpect(redirectedUrl("https://example.com/a"));
             mockMvc.perform(on(host, get("/api/v1/users/me")))
                     .andExpect(status().isUnauthorized());
         }

@@ -6,6 +6,7 @@ import cc.hrva.urlshortener.service.ReservedAliasService;
 import cc.hrva.urlshortener.service.UrlService;
 import cc.hrva.urlshortener.service.domain.DomainRoute;
 import cc.hrva.urlshortener.service.domain.HostRouting;
+import cc.hrva.urlshortener.util.ProblemResponses;
 import com.google.common.base.Ticker;
 import com.google.common.cache.Cache;
 import com.google.common.cache.CacheBuilder;
@@ -19,6 +20,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
@@ -26,9 +28,11 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
-import org.springframework.http.MediaType;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
+import org.springframework.web.servlet.View;
+import org.springframework.web.servlet.view.RedirectView;
 import org.springframework.web.util.UriUtils;
 
 @Slf4j
@@ -86,16 +90,16 @@ public class CustomHostFilter extends OncePerRequestFilter {
         try {
             serve(route, request, response);
         } catch (final UrlNotFoundException exception) {
-            notFound(response);
+            notFound(request, response);
         } catch (final RuntimeException exception) {
             log.warn("Custom host redirect failed domainId={} exception={}", route.id(), exception.getClass().getName());
-            plain(response, HttpServletResponse.SC_INTERNAL_SERVER_ERROR, FAILED);
+            problem(request, response, HttpStatus.INTERNAL_SERVER_ERROR, FAILED);
         }
     }
 
     private void serve(final DomainRoute route, final HttpServletRequest request, final HttpServletResponse response) throws IOException {
         if (request.getDispatcherType() != DispatcherType.REQUEST || !SERVED_METHODS.contains(request.getMethod())) {
-            notFound(response);
+            notFound(request, response);
             return;
         }
         final var path = StringUtils.removeStart(request.getRequestURI(), request.getContextPath());
@@ -105,17 +109,36 @@ public class CustomHostFilter extends OncePerRequestFilter {
         }
         final var alias = aliasOf(path);
         if (alias.isEmpty()) {
-            notFound(response);
+            notFound(request, response);
             return;
         }
-        redirect(response, urlService.redirectResultUrl(route, alias.get(), clickRequestResolver.resolve(request)).getUrl());
+        final var view = urlService.redirectResultUrl(route, alias.get(), clickRequestResolver.resolve(request));
+        if (view instanceof RedirectView redirectView) {
+            redirect(response, redirectView.getUrl());
+            return;
+        }
+        if (view == null) {
+            throw new IllegalStateException("No answer for the link");
+        }
+        renderView(view, request, response);
+    }
+
+    private static void renderView(final View view, final HttpServletRequest request, final HttpServletResponse response) throws IOException {
+        try {
+            view.render(Map.of(), request, response);
+        } catch (final IOException | RuntimeException exception) {
+            throw exception;
+        } catch (final Exception exception) {
+            throw new IllegalStateException(exception);
+        }
     }
 
     private static String homePageOf(final String frontendUrl) {
         return frontendUrl.endsWith(ROOT) ? frontendUrl : frontendUrl + ROOT;
     }
 
-    private static Optional<String> aliasOf(final String path) {
+    private static Optional<String> aliasOf(final String requestPath) {
+        final var path = requestPath.length() > 2 && requestPath.endsWith(ROOT) ? requestPath.substring(0, requestPath.length() - 1) : requestPath;
         if (!path.startsWith(ROOT) || path.indexOf('/', 1) >= 0) {
             return Optional.empty();
         }
@@ -135,7 +158,7 @@ public class CustomHostFilter extends OncePerRequestFilter {
         if (loggedUnknownHosts.asMap().putIfAbsent(host, Boolean.TRUE) == null) {
             log.info("Unknown host refused host={}", StringUtils.replaceChars(host, "\r\n\t", "   "));
         }
-        notFound(response);
+        notFound(request, response);
     }
 
     private static void redirect(final HttpServletResponse response, final String location) {
@@ -144,20 +167,18 @@ public class CustomHostFilter extends OncePerRequestFilter {
         response.setHeader(HttpHeaders.LOCATION, location);
     }
 
-    private static void notFound(final HttpServletResponse response) throws IOException {
-        plain(response, HttpServletResponse.SC_NOT_FOUND, NOT_FOUND);
+    private static void notFound(final HttpServletRequest request, final HttpServletResponse response) throws IOException {
+        problem(request, response, HttpStatus.NOT_FOUND, NOT_FOUND);
     }
 
-    private static void plain(final HttpServletResponse response, final int status, final String body) throws IOException {
+    private static void problem(final HttpServletRequest request, final HttpServletResponse response, final HttpStatus status, final String detail)
+            throws IOException {
         if (response.isCommitted()) {
             return;
         }
         response.reset();
         neverCached(response);
-        response.setStatus(status);
-        response.setContentType(MediaType.TEXT_PLAIN_VALUE);
-        response.setCharacterEncoding(StandardCharsets.UTF_8.name());
-        response.getWriter().write(body);
+        ProblemResponses.write(request, response, status, detail);
     }
 
     private static void neverCached(final HttpServletResponse response) {

@@ -8,7 +8,6 @@ import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import org.apache.commons.lang3.StringUtils;
-import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.web.servlet.View;
 import org.thymeleaf.TemplateEngine;
@@ -18,11 +17,6 @@ public record LinkWarningView(TemplateEngine templateEngine, String frontendUrl,
 
     private static final String TEMPLATE = "link_warning";
     private static final String CONTENT_TYPE = "text/html;charset=UTF-8";
-    private static final String CACHE_CONTROL = "no-store, no-transform";
-    private static final String CONTENT_SECURITY_POLICY =
-            "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
-    private static final String ROBOTS = "noindex, nofollow";
-    private static final String NO_REFERRER = "no-referrer";
 
     @Override
     public String getContentType() {
@@ -34,10 +28,7 @@ public record LinkWarningView(TemplateEngine templateEngine, String frontendUrl,
         final var body = templateEngine.process(TEMPLATE, context()).getBytes(StandardCharsets.UTF_8);
         response.setStatus(HttpServletResponse.SC_OK);
         response.setContentType(CONTENT_TYPE);
-        response.setHeader(HttpHeaders.CACHE_CONTROL, CACHE_CONTROL);
-        response.setHeader("Content-Security-Policy", CONTENT_SECURITY_POLICY);
-        response.setHeader("X-Robots-Tag", ROBOTS);
-        response.setHeader("Referrer-Policy", NO_REFERRER);
+        LinkPageHeaders.apply(response);
         response.setContentLength(body.length);
         if (!HttpMethod.HEAD.matches(request.getMethod())) {
             response.getOutputStream().write(body);

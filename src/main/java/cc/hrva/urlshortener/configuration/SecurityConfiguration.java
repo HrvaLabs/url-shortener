@@ -84,7 +84,8 @@ public class SecurityConfiguration {
                                         "/v3/api-docs/**",
                                         "/.well-known/security.txt",
                                         "/",
-                                        "/*"
+                                        "/*",
+                                        "/*/"
                                 )
                                 .permitAll()
                                 .requestMatchers(HttpMethod.POST, ReportController.REPORTS_ENDPOINT)

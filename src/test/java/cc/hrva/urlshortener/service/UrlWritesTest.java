@@ -1,5 +1,7 @@
 package cc.hrva.urlshortener.service;
 
+import cc.hrva.urlshortener.controller.LinkUnavailableView;
+import org.springframework.http.HttpStatus;
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.converter.CreateUrlToUrlConverter;
 import cc.hrva.urlshortener.converter.UrlToPeekUrlConverter;
@@ -216,7 +218,7 @@ class UrlWritesTest {
         menu(ON_DOMAIN, "https://example.com/b", domainId);
 
         assertThat(locationOf(urlService.redirectResultUrl("menu", CLICK))).isEqualTo("https://example.com/a");
-        assertThat(urlService.redirectResultUrl(route, "menu", CLICK).getUrl()).isEqualTo("https://example.com/b");
+        assertThat(locationOf(urlService.redirectResultUrl(route, "menu", CLICK))).isEqualTo("https://example.com/b");
         assertThat(((UrlResponse) cache.get("menu").get()).id()).isEqualTo(ON_HRVA);
         assertThat(((UrlResponse) cache.get(domainId + "/menu").get()).id()).isEqualTo(ON_DOMAIN);
 
@@ -224,8 +226,11 @@ class UrlWritesTest {
 
         assertThat(cache.get(domainId + "/menu")).isNull();
         assertThat(cache.get("menu")).isNotNull();
-        assertThat(urlService.redirectResultUrl(route, "menu", CLICK).getUrl())
-                .isEqualTo("https://app.hrva.cc/unavailable?s=menu&reason=blocked&d=go.example.com");
+        assertThat(urlService.redirectResultUrl(route, "menu", CLICK)).isInstanceOfSatisfying(LinkUnavailableView.class, page -> {
+            assertThat(page.status()).isEqualTo(HttpStatus.GONE);
+            assertThat(page.reason()).isEqualTo("blocked");
+            assertThat(page.shortLink()).isEqualTo("go.example.com/menu");
+        });
         assertThat(locationOf(urlService.redirectResultUrl("menu", CLICK))).isEqualTo("https://example.com/a");
     }
 
@@ -247,12 +252,12 @@ class UrlWritesTest {
         assertThat(locationOf(urlService.redirectResultUrl("menu", CLICK))).isEqualTo("https://example.com/a");
         assertThat(transactionDuringTheCheck).isTrue();
         assertThat(readOnlyDuringTheCheck).isTrue();
-        assertThat(urlService.redirectResultUrl(route, "menu", CLICK).getUrl()).isEqualTo("https://example.com/b");
+        assertThat(locationOf(urlService.redirectResultUrl(route, "menu", CLICK))).isEqualTo("https://example.com/b");
 
         doThrow(new SQLException("Connection refused")).when(dataSource).getConnection();
         try {
             assertThat(locationOf(urlService.redirectResultUrl("menu", CLICK))).isEqualTo("https://example.com/a");
-            assertThat(urlService.redirectResultUrl(route, "menu", CLICK).getUrl()).isEqualTo("https://example.com/b");
+            assertThat(locationOf(urlService.redirectResultUrl(route, "menu", CLICK))).isEqualTo("https://example.com/b");
         } finally {
             doCallRealMethod().when(dataSource).getConnection();
         }

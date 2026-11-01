@@ -57,6 +57,16 @@ class UrlRedirectControllerTest {
     }
 
     @Test
+    void aTrailingSlashOpensTheSameLink() throws Exception {
+        when(clickRequestResolver.resolve(any())).thenReturn(CLICK);
+        when(urlService.redirectResultUrl("short", CLICK)).thenReturn(new RedirectView("https://example.com"));
+
+        mockMvc.perform(get("/short/"))
+                .andExpect(status().isFound())
+                .andExpect(redirectedUrl("https://example.com"));
+    }
+
+    @Test
     void theQrMarkerNeverReachesTheDestination() throws Exception {
         final var redirectView = new RedirectView();
         redirectView.setUrl("https://example.com/page?qr=keep&x=1");

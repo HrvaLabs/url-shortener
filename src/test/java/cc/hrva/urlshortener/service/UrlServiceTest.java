@@ -3617,7 +3617,7 @@ class UrlServiceTest {
 
         final var redirect = urlServiceWithMeters().redirectResultUrl("abc", CLICK);
 
-        assertThat(locationOf(redirect)).isEqualTo(FRONTEND + "/unavailable?s=abc&reason=missing");
+        assertUnavailable(redirect, "abc", null, "missing");
         verify(clickAnalyticsService).recordClick(7L, "abc", CLICK);
         verifyNoInteractions(clickCheckService);
         verify(cache, never()).put(any(), any());
@@ -3634,7 +3634,7 @@ class UrlServiceTest {
 
         final var redirect = urlServiceWithMeters().redirectResultUrl("abc", CLICK);
 
-        assertThat(locationOf(redirect)).isEqualTo(FRONTEND + "/unavailable?s=abc&reason=missing");
+        assertUnavailable(redirect, "abc", null, "missing");
         verify(clickAnalyticsService).recordClick(5L, "abc", CLICK);
         verifyNoInteractions(clickCheckService, urlRepository);
     }
@@ -3679,7 +3679,7 @@ class UrlServiceTest {
 
         final var redirect = urlServiceWithMeters().redirectResultUrl("abc", CLICK);
 
-        assertThat(locationOf(redirect)).isEqualTo(FRONTEND + "/unavailable?s=abc&reason=blocked");
+        assertUnavailable(redirect, "abc", null, "blocked");
         verify(clickAnalyticsService, never()).recordClick(any(), any(), any());
     }
 
@@ -3694,7 +3694,7 @@ class UrlServiceTest {
 
         final var redirect = urlServiceWithMeters().redirectResultUrl("abc", CLICK);
 
-        assertThat(locationOf(redirect)).isEqualTo(FRONTEND + "/unavailable?s=abc&reason=blocked");
+        assertUnavailable(redirect, "abc", null, "blocked");
         verify(cache, never()).put(any(), any());
         verify(clickAnalyticsService, never()).recordClick(any(), any(), any());
     }
@@ -3756,21 +3756,21 @@ class UrlServiceTest {
     void aBlockedLinkGoesToTheUnavailablePageSayingItWasBlocked() {
         final var url = storedLink().active(false).blockReason(BlockReason.BLOCKLIST).build();
 
-        assertThat(redirectOf(url)).isEqualTo(FRONTEND + "/unavailable?s=abc&reason=blocked");
+        assertUnavailable(viewOf(url), "abc", null, "blocked");
     }
 
     @Test
     void aLinkSafeBrowsingFlaggedBeforeBlockReasonsExistedSaysBlocked() {
         final var url = storedLink().active(false).threatType(cc.hrva.urlshortener.model.enums.ThreatType.MALWARE).build();
 
-        assertThat(redirectOf(url)).isEqualTo(FRONTEND + "/unavailable?s=abc&reason=blocked");
+        assertUnavailable(viewOf(url), "abc", null, "blocked");
     }
 
     @Test
     void anExpiredLinkSaysExpired() {
         final var url = storedLink().active(false).expirationDate(LocalDateTime.now().minusDays(1)).build();
 
-        assertThat(redirectOf(url)).isEqualTo(FRONTEND + "/unavailable?s=abc&reason=expired");
+        assertUnavailable(viewOf(url), "abc", null, "expired");
     }
 
     @Test
@@ -3779,7 +3779,7 @@ class UrlServiceTest {
         when(cacheManager.getCache("urls")).thenReturn(cache);
         final var url = storedLink().active(true).expirationDate(LocalDateTime.now().minusSeconds(10)).build();
 
-        assertThat(redirectOf(url)).isEqualTo(FRONTEND + "/unavailable?s=abc&reason=expired");
+        assertUnavailable(viewOf(url), "abc", null, "expired");
         verify(cache, never()).put(any(), any());
         verify(clickCheckService, never()).mayRedirect(org.mockito.ArgumentMatchers.anyLong(), any());
     }
@@ -3788,14 +3788,14 @@ class UrlServiceTest {
     void aLinkThatReachedItsVisitLimitSaysLimit() {
         final var url = storedLink().active(false).visits(3L).visitLimit(3L).build();
 
-        assertThat(redirectOf(url)).isEqualTo(FRONTEND + "/unavailable?s=abc&reason=limit");
+        assertUnavailable(viewOf(url), "abc", null, "limit");
     }
 
     @Test
     void aLinkItsOwnerSwitchedOffSaysInactive() {
         final var url = storedLink().active(false).build();
 
-        assertThat(redirectOf(url)).isEqualTo(FRONTEND + "/unavailable?s=abc&reason=inactive");
+        assertUnavailable(viewOf(url), "abc", null, "inactive");
     }
 
     @Test
@@ -3804,7 +3804,7 @@ class UrlServiceTest {
 
         final var redirect = urlServiceWithMeters().redirectResultUrl("nope", CLICK);
 
-        assertThat(locationOf(redirect)).isEqualTo(FRONTEND + "/unavailable?s=nope&reason=missing");
+        assertUnavailable(redirect, "nope", null, "missing");
     }
 
     @Test
@@ -3836,7 +3836,7 @@ class UrlServiceTest {
 
         final var redirect = urlServiceWithMeters().redirectResultUrl("a".repeat(31) + "é" + "b".repeat(8000), CLICK);
 
-        assertThat(locationOf(redirect)).isEqualTo(FRONTEND + "/unavailable?s=" + "a".repeat(31) + "%C3%A9&reason=missing");
+        assertUnavailable(redirect, "a".repeat(31) + "é", null, "missing");
     }
 
     @Test
@@ -3845,7 +3845,7 @@ class UrlServiceTest {
 
         final var redirect = urlServiceWithMeters().redirectResultUrl("a b&c=d+é", CLICK);
 
-        assertThat(locationOf(redirect)).isEqualTo(FRONTEND + "/unavailable?s=a+b%26c%3Dd%2B%C3%A9&reason=missing");
+        assertUnavailable(redirect, "a b&c=d+é", null, "missing");
     }
 
     @org.junit.jupiter.params.ParameterizedTest
@@ -4017,8 +4017,8 @@ class UrlServiceTest {
         when(appProperties.getFrontendUrl()).thenReturn(FRONTEND);
         when(clickAnalyticsService.isBot(CLICK)).thenReturn(true);
 
-        assertThat(locationOf(urlServiceWithMeters().redirectResultUrl("abc", CLICK))).isEqualTo(FRONTEND + "/unavailable?s=abc&reason=missing");
-        assertThat(locationOf(urlServiceWithMeters().redirectResultUrl("stored", CLICK))).isEqualTo(FRONTEND + "/unavailable?s=stored&reason=missing");
+        assertUnavailable(urlServiceWithMeters().redirectResultUrl("abc", CLICK), "abc", null, "missing");
+        assertUnavailable(urlServiceWithMeters().redirectResultUrl("stored", CLICK), "stored", null, "missing");
         verify(clickAnalyticsService).recordClick(5L, "abc", CLICK);
         verify(clickAnalyticsService).recordClick(5L, "stored", CLICK);
         verifyNoInteractions(clickCheckService);
@@ -4032,8 +4032,8 @@ class UrlServiceTest {
         when(appProperties.getFrontendUrl()).thenReturn(FRONTEND);
         when(clickCheckService.mayRedirect(5L, RANDOM_LINK)).thenReturn(false);
 
-        assertThat(locationOf(urlServiceWithMeters().redirectResultUrl("abc", CLICK))).isEqualTo(FRONTEND + "/unavailable?s=abc&reason=blocked");
-        assertThat(locationOf(urlServiceWithMeters().redirectResultUrl("stored", CLICK))).isEqualTo(FRONTEND + "/unavailable?s=stored&reason=blocked");
+        assertUnavailable(urlServiceWithMeters().redirectResultUrl("abc", CLICK), "abc", null, "blocked");
+        assertUnavailable(urlServiceWithMeters().redirectResultUrl("stored", CLICK), "stored", null, "blocked");
         verify(clickAnalyticsService, never()).recordClick(any(), any(), any());
     }
 
@@ -4053,7 +4053,7 @@ class UrlServiceTest {
         flagged.setWarningPage(true);
         when(urlRepository.findServed(7L, "menu")).thenReturn(Optional.of(flagged));
 
-        assertThat(urlServiceWithMeters().redirectResultUrl(GO, "menu", CLICK).getUrl()).isEqualTo("https://b.example/menu");
+        assertThat(urlOf(urlServiceWithMeters().redirectResultUrl(GO, "menu", CLICK))).isEqualTo("https://b.example/menu");
     }
 
     private void cachedWithTheWarningPage(final String longUrl) {
@@ -4136,9 +4136,9 @@ class UrlServiceTest {
         when(urlRepository.findServed(7L, "menu")).thenReturn(Optional.of(onGoExampleCom()));
 
         assertThat(locationOf(service.redirectResultUrl("menu", CLICK))).isEqualTo("https://a.example/menu");
-        assertThat(service.redirectResultUrl(GO, "menu", CLICK).getUrl()).isEqualTo("https://b.example/menu");
+        assertThat(urlOf(service.redirectResultUrl(GO, "menu", CLICK))).isEqualTo("https://b.example/menu");
         assertThat(locationOf(service.redirectResultUrl("menu", CLICK))).isEqualTo("https://a.example/menu");
-        assertThat(service.redirectResultUrl(GO, "menu", CLICK).getUrl()).isEqualTo("https://b.example/menu");
+        assertThat(urlOf(service.redirectResultUrl(GO, "menu", CLICK))).isEqualTo("https://b.example/menu");
 
         verify(urlRepository).findServed(null, "menu");
         verify(urlRepository).findServed(7L, "menu");
@@ -4203,8 +4203,7 @@ class UrlServiceTest {
         when(appProperties.getFrontendUrl()).thenReturn(FRONTEND);
         final var off = new DomainRoute(7L, "go.example.com", CustomDomainStatus.DISABLED, true);
 
-        assertThat(urlServiceWithMeters().redirectResultUrl(off, "menu", CLICK).getUrl())
-                .isEqualTo(FRONTEND + "/unavailable?s=menu&reason=domain&d=go.example.com");
+        assertUnavailable(urlServiceWithMeters().redirectResultUrl(off, "menu", CLICK), "menu", "go.example.com", "domain");
 
         verify(cacheManager, never()).getCache(any());
         verifyNoInteractions(urlRepository, clickAnalyticsService, clickCheckService);
@@ -4215,8 +4214,7 @@ class UrlServiceTest {
         when(appProperties.getFrontendUrl()).thenReturn(FRONTEND);
         final var off = new DomainRoute(7L, "go.example.com", CustomDomainStatus.DISABLED, false);
 
-        assertThat(urlServiceWithMeters().redirectResultUrl(off, "menu", CLICK).getUrl())
-                .isEqualTo(FRONTEND + "/unavailable?s=menu&reason=domain&d=go.example.com");
+        assertUnavailable(urlServiceWithMeters().redirectResultUrl(off, "menu", CLICK), "menu", "go.example.com", "domain");
     }
 
     @Test
@@ -4224,8 +4222,7 @@ class UrlServiceTest {
         when(appProperties.getFrontendUrl()).thenReturn(FRONTEND);
         final var ofAnInactiveOwner = new DomainRoute(7L, "go.example.com", CustomDomainStatus.ACTIVE, false);
 
-        assertThat(urlServiceWithMeters().redirectResultUrl(ofAnInactiveOwner, "menu", CLICK).getUrl())
-                .isEqualTo(FRONTEND + "/unavailable?s=menu&reason=inactive&d=go.example.com");
+        assertUnavailable(urlServiceWithMeters().redirectResultUrl(ofAnInactiveOwner, "menu", CLICK), "menu", "go.example.com", "inactive");
 
         verify(cacheManager, never()).getCache(any());
         verifyNoInteractions(urlRepository, clickAnalyticsService);
@@ -4238,8 +4235,7 @@ class UrlServiceTest {
         link.getDomain().setStatus(CustomDomainStatus.DISABLED);
         when(urlRepository.findServed(7L, "menu")).thenReturn(Optional.of(link));
 
-        assertThat(urlServiceWithMeters().redirectResultUrl(GO, "menu", CLICK).getUrl())
-                .isEqualTo(FRONTEND + "/unavailable?s=menu&reason=domain&d=go.example.com");
+        assertUnavailable(urlServiceWithMeters().redirectResultUrl(GO, "menu", CLICK), "menu", "go.example.com", "domain");
 
         verifyNoInteractions(clickAnalyticsService);
     }
@@ -4258,9 +4254,9 @@ class UrlServiceTest {
         when(urlRepository.findServed(7L, "old")).thenReturn(Optional.of(expired));
         when(urlRepository.findServed(7L, "nope")).thenReturn(Optional.empty());
 
-        assertThat(service.redirectResultUrl(GO, "nope", CLICK).getUrl()).isEqualTo(FRONTEND + "/unavailable?s=nope&reason=missing&d=go.example.com");
-        assertThat(service.redirectResultUrl(GO, "old", CLICK).getUrl()).isEqualTo(FRONTEND + "/unavailable?s=old&reason=expired&d=go.example.com");
-        assertThat(service.redirectResultUrl(GO, "menu", CLICK).getUrl()).isEqualTo(FRONTEND + "/protected/menu?domain=go.example.com");
+        assertUnavailable(service.redirectResultUrl(GO, "nope", CLICK), "nope", "go.example.com", "missing");
+        assertUnavailable(service.redirectResultUrl(GO, "old", CLICK), "old", "go.example.com", "expired");
+        assertThat(urlOf(service.redirectResultUrl(GO, "menu", CLICK))).isEqualTo(FRONTEND + "/protected/menu?domain=go.example.com");
     }
 
     @Test
@@ -4271,7 +4267,7 @@ class UrlServiceTest {
         locked.setPasswordHash("hash");
         urls.getCache("urls").put("7/menu", UrlResponse.from(locked));
 
-        assertThat(urlServiceCachingIn(urls).redirectResultUrl(GO, "menu", CLICK).getUrl()).isEqualTo(FRONTEND + "/protected/menu?domain=go.example.com");
+        assertThat(urlOf(urlServiceCachingIn(urls).redirectResultUrl(GO, "menu", CLICK))).isEqualTo(FRONTEND + "/protected/menu?domain=go.example.com");
 
         verifyNoInteractions(urlRepository);
     }
@@ -4282,8 +4278,7 @@ class UrlServiceTest {
         when(urlRepository.findServed(7L, "menu")).thenReturn(Optional.of(onGoExampleCom()));
         when(clickCheckService.mayRedirect(2L, "https://b.example/menu")).thenReturn(false);
 
-        assertThat(urlServiceWithMeters().redirectResultUrl(GO, "menu", CLICK).getUrl())
-                .isEqualTo(FRONTEND + "/unavailable?s=menu&reason=blocked&d=go.example.com");
+        assertUnavailable(urlServiceWithMeters().redirectResultUrl(GO, "menu", CLICK), "menu", "go.example.com", "blocked");
     }
 
     @Test
@@ -4407,10 +4402,26 @@ class UrlServiceTest {
         return Url.builder().id(5L).shortUrl("abc").longUrl("https://example.com/a").visits(0L);
     }
 
-    private String redirectOf(final Url url) {
+    private org.springframework.web.servlet.View viewOf(final Url url) {
         when(appProperties.getFrontendUrl()).thenReturn(FRONTEND);
         when(urlRepository.findServed(null, url.getShortUrl())).thenReturn(Optional.of(url));
-        return locationOf(urlServiceWithMeters().redirectResultUrl(url.getShortUrl(), CLICK));
+        return urlServiceWithMeters().redirectResultUrl(url.getShortUrl(), CLICK);
+    }
+
+    private static String urlOf(final org.springframework.web.servlet.View view) {
+        assertThat(view).isInstanceOf(RedirectView.class);
+        return ((RedirectView) view).getUrl();
+    }
+
+    private static void assertUnavailable(final org.springframework.web.servlet.View view, final String alias, final String hostname, final String reason) {
+        assertThat(view).isInstanceOfSatisfying(cc.hrva.urlshortener.controller.LinkUnavailableView.class, page -> {
+            if (hostname == null) {
+                assertThat(page.shortLink()).endsWith("/" + alias);
+            } else {
+                assertThat(page.shortLink()).isEqualTo(hostname + "/" + alias);
+            }
+            assertThat(page.reason()).isEqualTo(reason);
+        });
     }
 
     private UrlService urlServiceWithMeters() {
