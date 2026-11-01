@@ -19,6 +19,9 @@ A security page that lists what hrva.cc checks and protects and how to report a 
 ### 🔒 Privacy
 - The privacy page says exactly what is kept about signing in: the audit log records admin actions and changes to sign-in methods, not sign-ins. An account keeps only when it last signed in, and failed attempts are short-lived counters.
 
+### 🐛 Fixes
+- A tab left open across an update reloads itself once when it can't load part of the site, instead of showing an error such as "Couldn't load these stats".
+
 ---
 
 ## [v2.24] — 2026-11-01
