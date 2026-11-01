@@ -19,6 +19,7 @@ import cc.hrva.urlshortener.dto.UrlUpdateDto;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.enums.BlockReason;
 import cc.hrva.urlshortener.model.enums.CustomDomainStatus;
+import cc.hrva.urlshortener.model.enums.ReviewAction;
 import cc.hrva.urlshortener.repository.DestinationCheckRepository;
 import cc.hrva.urlshortener.repository.CampaignRepository;
 import cc.hrva.urlshortener.repository.DomainRuleRepository;
@@ -302,6 +303,52 @@ class UrlWritesTest {
                         .extracting(LinkUnavailableView::status, LinkUnavailableView::reason)
                         .containsExactly(HttpStatus.GONE, "limit"));
         assertThat(linkRow()).containsEntry("OPENS", 5L).containsEntry("ACTIVE", false);
+    }
+
+    @Test
+    void aLinkThatRunsOutOfOpensIsNeverServedFromTheCacheAgain() {
+        final var cache = new ConcurrentMapCache("urls");
+        when(cacheManager.getCache("urls")).thenReturn(cache);
+        when(appProperties.getFrontendUrl()).thenReturn("https://app.hrva.cc");
+        when(clickCheckService.mayRedirect(anyLong(), any())).thenReturn(true);
+        link(0, 2L);
+
+        assertThat(locationOf(urlService.redirectResultUrl(ALIAS, CLICK))).isEqualTo("https://example.com/visited");
+        assertThat(cache.get(ALIAS)).isNotNull();
+        assertThat(locationOf(urlService.redirectResultUrl(ALIAS, CLICK))).isEqualTo("https://example.com/visited");
+        assertThat(cache.get(ALIAS)).isNull();
+
+        assertThat(urlService.redirectResultUrl(ALIAS, CLICK)).isInstanceOfSatisfying(LinkUnavailableView.class,
+                page -> assertThat(page.reason()).isEqualTo("limit"));
+        assertThat(cache.get(ALIAS)).isNull();
+        assertThat(linkRow()).containsEntry("OPENS", 2L).containsEntry("ACTIVE", false);
+    }
+
+    @Test
+    void aCachedLinkHeldForASignInFormAndThenBlockedIsNeverServedFromTheCacheAgain() {
+        final var cache = new ConcurrentMapCache("urls");
+        when(cacheManager.getCache("urls")).thenReturn(cache);
+        when(appProperties.getFrontendUrl()).thenReturn("https://app.hrva.cc");
+        when(clickCheckService.mayRedirect(anyLong(), any())).thenReturn(true);
+        jdbcTemplate.update("""
+                insert into url (id, long_url, short_url, visits, create_date, active, warning_page)
+                values (?, 'https://verniqindexone.com/cache-trash/', 'menu', 0, ?, true, true)""", ON_HRVA, LocalDateTime.of(2026, 10, 1, 9, 0));
+
+        assertThat(urlService.redirectResultUrl("menu", CLICK)).isNotInstanceOf(LinkUnavailableView.class);
+        assertThat(cache.get("menu")).isNotNull();
+
+        assertThat(moderationService.holdForSignInForm(ON_HRVA, "https://verniqindexone.com/cache-trash/", "a password field")).isTrue();
+
+        assertThat(cache.get("menu")).isNull();
+        assertThat(urlService.redirectResultUrl("menu", CLICK)).isInstanceOfSatisfying(LinkUnavailableView.class,
+                page -> assertThat(page.reason()).isEqualTo("checking"));
+        assertThat(cache.get("menu")).isNull();
+
+        moderationService.resolveReview(ON_HRVA, ReviewAction.BLOCK_LINK, null, "admin@hrva.cc", "admin");
+
+        assertThat(urlService.redirectResultUrl("menu", CLICK)).isInstanceOfSatisfying(LinkUnavailableView.class,
+                page -> assertThat(page.reason()).isEqualTo("blocked"));
+        assertThat(cache.get("menu")).isNull();
     }
 
     @Test
