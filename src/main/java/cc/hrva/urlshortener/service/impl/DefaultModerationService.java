@@ -157,8 +157,7 @@ public class DefaultModerationService implements ModerationService {
     @Override
     public UrlResponse blockLink(final long urlId, final BlockReason reason, final String detail, final String performedBy, final String via) {
         final var url = findUrl(urlId);
-        final var blocked = blockAndTellOwner(urlId, reason, detail, ReviewResolution.LINK_BLOCKED, performedBy, candidate -> true,
-                this::notifyOwner);
+        final var blocked = blockAndTellOwner(urlId, reason, detail, performedBy, candidate -> true, this::notifyOwner);
         auditLogService.log(performedBy, AuditAction.BLOCK_LINK, TARGET_URL, String.valueOf(urlId),
                 details(via, blocked.isPresent() ? 1 : 0, field(REASON, reason), field("detail", detail)));
         return UrlResponse.from(blocked.orElse(url));
@@ -482,8 +481,7 @@ public class DefaultModerationService implements ModerationService {
 
     private String blockLinkFromReview(final Url url, final Consumer<Url> tellOwner, final String performedBy, final String via) {
         final var converted = convertSignInFormHold(url.getId(), BlockReason.ADMIN, null);
-        final var blocked = converted || blockAndTellOwner(url.getId(), BlockReason.ADMIN, null, ReviewResolution.LINK_BLOCKED, performedBy,
-                candidate -> true, tellOwner).isPresent();
+        final var blocked = converted || blockAndTellOwner(url.getId(), BlockReason.ADMIN, null, performedBy, candidate -> true, tellOwner).isPresent();
         return details(via, blocked ? 1 : 0, field(ACTION, ReviewAction.BLOCK_LINK));
     }
 
@@ -576,14 +574,11 @@ public class DefaultModerationService implements ModerationService {
         final var converted = Optional.ofNullable(transactionOperations.execute(status -> urlRepository.findById(urlId)
                 .filter(url -> !url.isActive() && HELD.contains(url.getBlockReason()) && isBlockedBy(domain, rulesBelow, url.getLongUrl()))
                 .map(url -> {
-                    final var heldForASignInForm = url.getBlockReason() == BlockReason.SIGN_IN_FORM;
                     url.setBlockReason(BlockReason.DOMAIN_RULE);
                     url.setBlockDetail(StringUtils.abbreviate(domain, MAX_COLUMN_LENGTH));
                     url.setBlockedAt(LocalDateTime.now());
                     final var saved = urlRepository.save(url);
-                    if (heldForASignInForm) {
-                        reviewQueueService.resolveOpen(saved, ReviewResolution.DOMAIN_BLOCKED, performedBy);
-                    }
+                    closeReview(saved, BlockReason.DOMAIN_RULE, performedBy);
                     return saved;
                 })
                 .orElse(null)));
@@ -596,7 +591,7 @@ public class DefaultModerationService implements ModerationService {
 
     private boolean blockOnDomain(final long urlId, final String domain, final List<DomainRule> rulesBelow, final String performedBy,
                                   final Consumer<Url> blockedLinks) {
-        return block(urlId, BlockReason.DOMAIN_RULE, domain, ReviewResolution.DOMAIN_BLOCKED, performedBy,
+        return block(urlId, BlockReason.DOMAIN_RULE, domain, performedBy,
                 url -> url.isActive() && isBlockedBy(domain, rulesBelow, url.getLongUrl()))
                 .map(url -> {
                     alertWhenAutomatic(url, performedBy);
@@ -663,7 +658,7 @@ public class DefaultModerationService implements ModerationService {
             userService.deactivate(user);
         }
         final var domains = customDomainModeration.disableForUser(user.getId(), performedBy);
-        final var blocked = eachLink(ids, Long::longValue, id -> block(id, BlockReason.USER_BLOCKED, null, ReviewResolution.USER_BLOCKED, performedBy,
+        final var blocked = eachLink(ids, Long::longValue, id -> block(id, BlockReason.USER_BLOCKED, null, performedBy,
                 url -> url.isActive() && ownedBy(url, user)).isPresent());
         scammerSignalService.invalidate();
         return new Affected(blocked, domains, 0);
@@ -738,7 +733,7 @@ public class DefaultModerationService implements ModerationService {
 
     @Override
     public boolean holdForCampaign(final long urlId, final long campaignId, final String shape) {
-        return block(urlId, BlockReason.CAMPAIGN, shape, ReviewResolution.LINK_BLOCKED, SYSTEM,
+        return block(urlId, BlockReason.CAMPAIGN, shape, SYSTEM,
                 url -> url.isActive() && url.getOwner() == null && stillHolds(campaignId, urlId))
                 .isPresent();
     }
@@ -805,19 +800,23 @@ public class DefaultModerationService implements ModerationService {
                     if (verdict.blockReason() == BlockReason.SAFE_BROWSING) {
                         url.setThreatType(ThreatType.MALWARE);
                     }
-                    reviewQueueService.resolveOpen(urlRepository.save(url), ReviewResolution.LINK_BLOCKED, SYSTEM);
+                    closeReview(urlRepository.save(url), verdict.blockReason(), SYSTEM);
                     log.info("Held link blocked for its own reason under the allowed shape urlId={} reason={}", url.getId(), verdict.blockReason());
                 }));
     }
 
-    private Optional<Url> blockAndTellOwner(final long urlId, final BlockReason reason, final String detail, final ReviewResolution resolution,
-                                            final String performedBy, final Predicate<Url> stillApplies, final Consumer<Url> tellOwner) {
-        final var blocked = block(urlId, reason, detail, resolution, performedBy, stillApplies);
+    private Optional<Url> blockAndTellOwner(final long urlId, final BlockReason reason, final String detail, final String performedBy,
+                                            final Predicate<Url> stillApplies, final Consumer<Url> tellOwner) {
+        final var blocked = block(urlId, reason, detail, performedBy, stillApplies);
         blocked.ifPresent(url -> {
             tellOwner.accept(url);
             alertWhenAutomatic(url, performedBy);
         });
         return blocked;
+    }
+
+    private void closeReview(final Url url, final BlockReason reason, final String performedBy) {
+        ReviewResolution.ofBlock(reason).ifPresent(resolution -> reviewQueueService.resolveOpen(url, resolution, performedBy));
     }
 
     private void alertWhenAutomatic(final Url url, final String performedBy) {
@@ -826,8 +825,8 @@ public class DefaultModerationService implements ModerationService {
         }
     }
 
-    private Optional<Url> block(final long urlId, final BlockReason reason, final String detail, final ReviewResolution resolution,
-                                final String performedBy, final Predicate<Url> stillApplies) {
+    private Optional<Url> block(final long urlId, final BlockReason reason, final String detail, final String performedBy,
+                                final Predicate<Url> stillApplies) {
         final var blocked = Optional.ofNullable(transactionOperations.execute(status -> urlRepository.findById(urlId)
                 .filter(url -> !isBlocked(url) && stillApplies.test(url))
                 .map(url -> {
@@ -839,9 +838,7 @@ public class DefaultModerationService implements ModerationService {
                         url.setThreatType(ThreatType.MALWARE);
                     }
                     final var saved = urlRepository.save(url);
-                    if (reason != BlockReason.CAMPAIGN) {
-                        reviewQueueService.resolveOpen(saved, resolution, performedBy);
-                    }
+                    closeReview(saved, reason, performedBy);
                     return saved;
                 })
                 .orElse(null)));

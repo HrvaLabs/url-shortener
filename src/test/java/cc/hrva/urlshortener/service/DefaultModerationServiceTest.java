@@ -799,7 +799,7 @@ class DefaultModerationServiceTest {
     }
 
     @Test
-    void blockingTheDomainFromAReviewBlocksEverySignInFormHoldOnItAndClosesTheirReviews() {
+    void blockingTheDomainFromAReviewBlocksEveryHeldLinkOnItAndClosesTheirReviewsAsDomainBlocked() {
         final var reviewed = blocked(89L, "https://verniqindexone.com/cache-trash/", BlockReason.SIGN_IN_FORM, null);
         final var another = blocked(90L, "https://login.verniqindexone.com/acceso", BlockReason.SIGN_IN_FORM, null);
         final var campaign = held(91L, "https://verniqindexone.com/wqamhcsom/?r=1&t=2");
@@ -812,7 +812,7 @@ class DefaultModerationServiceTest {
         assertThat(elsewhere.getBlockReason()).isEqualTo(BlockReason.SIGN_IN_FORM);
         verify(reviewQueueService, atLeastOnce()).resolveOpen(reviewed, ReviewResolution.DOMAIN_BLOCKED, ADMIN);
         verify(reviewQueueService).resolveOpen(another, ReviewResolution.DOMAIN_BLOCKED, ADMIN);
-        verify(reviewQueueService, never()).resolveOpen(eq(campaign), any(), any());
+        verify(reviewQueueService).resolveOpen(campaign, ReviewResolution.DOMAIN_BLOCKED, ADMIN);
         verify(reviewQueueService, never()).resolveOpen(eq(elsewhere), any(), any());
     }
 
@@ -2165,7 +2165,7 @@ class DefaultModerationServiceTest {
         verify(taskScheduler, times(2)).schedule(evictions.capture(), any(Instant.class));
         evictions.getAllValues().forEach(Runnable::run);
         verify(cache, times(2)).evict("s11");
-        verify(reviewQueueService, never()).resolveOpen(eq(held), any(), any());
+        verify(reviewQueueService).resolveOpen(held, ReviewResolution.DOMAIN_BLOCKED, ADMIN);
         verify(auditLogService).log(ADMIN, AuditAction.BLOCK_DOMAIN, "Domain", "omaehhm.com", "reason: Phishing, held links: 1, links: 1, via: admin-bulk");
         verifyNoMoreInteractions(auditLogService);
         verifyNoInteractions(sendingEmailService);
@@ -2243,6 +2243,7 @@ class DefaultModerationServiceTest {
 
         assertThat(reviewed.getBlockReason()).isEqualTo(BlockReason.DOMAIN_RULE);
         assertThat(held.getBlockReason()).isEqualTo(BlockReason.DOMAIN_RULE);
+        verify(reviewQueueService).resolveOpen(held, ReviewResolution.DOMAIN_BLOCKED, ADMIN);
     }
 
     @Test
@@ -2295,6 +2296,7 @@ class DefaultModerationServiceTest {
 
         assertThat(stillBlocked).extracting(Url::isActive, Url::getBlockReason, Url::getBlockDetail).containsExactly(false, BlockReason.DOMAIN_RULE,
                 "jofogas.cards");
+        verify(reviewQueueService).resolveOpen(stillBlocked, ReviewResolution.DOMAIN_BLOCKED, "system");
         verifyNoInteractions(sendingEmailService, eventPublisher, auditLogService);
         assertThat(outOfPlace).isEmpty();
     }
