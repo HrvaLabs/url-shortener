@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.dto;
 
+import cc.hrva.urlshortener.validator.constraint.PasswordFitsBcrypt;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
@@ -21,6 +22,7 @@ public class UserRegisterDto {
 
     @NotBlank(message = "Password is required")
     @Size(min = 8, message = "Password must be at least 8 characters long")
+    @PasswordFitsBcrypt
     @Schema(description = "User password", example = "securePassword123")
     private String password;
 

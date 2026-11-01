@@ -286,6 +286,18 @@ class UserControllerTest {
                 .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.header().string("Authorization", "Bearer renewed"));
     }
 
+    @Test
+    void aNewPasswordOverSeventyTwoBytesIsAFieldError() throws Exception {
+        mockMvc.perform(patch("/api/v1/users/password")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(UpdatePasswordDto.builder().oldPassword("old").newPassword("p".repeat(73)).build())))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().json("""
+                        {"newPassword":"This password is too long. Use at most 72 bytes; accented letters count as two."}""", JsonCompareMode.STRICT));
+
+        verifyNoInteractions(userService);
+    }
+
     private MockMvc withErrorHandling() {
         return MockMvcBuilders.standaloneSetup(new UserController(userService, currentSession))
                 .setControllerAdvice(new GlobalExceptionHandler())

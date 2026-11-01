@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.dto;
 
+import cc.hrva.urlshortener.validator.constraint.PasswordFitsBcrypt;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
@@ -22,6 +23,7 @@ public class PasswordResetDto {
 
     @NotBlank(message = "Password is required")
     @Size(min = 8, message = "Password must be at least 8 characters long")
+    @PasswordFitsBcrypt
     @Schema(description = "New password", example = "newSecurePassword456")
     private String password;
     

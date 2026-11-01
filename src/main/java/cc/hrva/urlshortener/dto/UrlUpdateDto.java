@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.dto;
 
+import cc.hrva.urlshortener.validator.constraint.PasswordFitsBcrypt;
 import cc.hrva.urlshortener.validator.UrlValidator;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotNull;
@@ -28,6 +29,7 @@ public class UrlUpdateDto {
     @Schema(description = "Tags (replaces existing when provided; null leaves them unchanged)", example = "[\"work\"]")
     private Set<String> tags;
     @Schema(description = "Password: non-empty sets/replaces it, empty string clears it, null leaves it unchanged", example = "s3cret")
+    @PasswordFitsBcrypt
     private String password;
 
 }

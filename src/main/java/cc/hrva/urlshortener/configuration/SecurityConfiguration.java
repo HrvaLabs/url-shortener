@@ -4,6 +4,7 @@ import cc.hrva.urlshortener.controller.ReportController;
 import cc.hrva.urlshortener.controller.UnsubscribeController;
 import cc.hrva.urlshortener.security.AccessAnswers;
 import cc.hrva.urlshortener.security.ApiKeyRateLimitFilter;
+import cc.hrva.urlshortener.security.BcryptPasswords;
 import cc.hrva.urlshortener.security.JwtFilter;
 import cc.hrva.urlshortener.security.OAuth2LoginFailureHandler;
 import cc.hrva.urlshortener.security.OAuth2LoginSuccessHandler;
@@ -126,7 +127,7 @@ public class SecurityConfiguration {
 
     @Bean
     public PasswordEncoder passwordEncoder() {
-        return new BCryptPasswordEncoder();
+        return new BcryptPasswords(new BCryptPasswordEncoder());
     }
 
     @Bean

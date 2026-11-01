@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.dto;
 
+import cc.hrva.urlshortener.validator.constraint.PasswordFitsBcrypt;
 import cc.hrva.urlshortener.validator.UrlValidator;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotBlank;
@@ -31,6 +32,7 @@ public class CreateUrlDto {
   @Schema(description = "Tags for organizing the URL (max 10, each ≤30 chars, normalized to lowercase)", example = "[\"work\", \"campaign\"]")
   private Set<String> tags;
   @Schema(description = "Optional password to protect the link (registered users only; ignored for anonymous)", example = "s3cret")
+  @PasswordFitsBcrypt
   private String password;
   @Size(max = 253, message = UrlValidator.DOMAIN_NOT_USABLE)
   @Schema(description = "One of your active custom domains to put the link on (optional, signed-in only); empty means hrva.cc", example = "go.example.com")
