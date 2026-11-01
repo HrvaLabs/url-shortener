@@ -4,7 +4,7 @@ All notable changes to hrva.cc — the URL shortener.
 
 ---
 
-## [v2.21] — 2026-10-30
+## [v2.21] — 2026-11-01
 
 An hourly rate limit for API keys instead of a lifetime cap, a key expiry you choose, and keys stored hashed.
 

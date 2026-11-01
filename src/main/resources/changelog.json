@@ -2,7 +2,7 @@
   "releases": [
     {
       "version": "v2.21",
-      "date": "2026-10-30",
+      "date": "2026-11-01",
       "badge": "Latest",
       "badgeVariant": "default",
       "summary": "An hourly rate limit for API keys instead of a lifetime cap, a key expiry you choose, and keys stored hashed.",
