@@ -157,7 +157,8 @@ public class DefaultModerationService implements ModerationService {
     @Override
     public UrlResponse blockLink(final long urlId, final BlockReason reason, final String detail, final String performedBy, final String via) {
         final var url = findUrl(urlId);
-        final var blocked = blockAndTellOwner(urlId, reason, detail, performedBy, candidate -> true, this::notifyOwner);
+        final var blocked = (reason == BlockReason.ADMIN ? convertHeldToBlock(urlId, reason, detail, performedBy) : Optional.<Url>empty())
+                .or(() -> blockAndTellOwner(urlId, reason, detail, performedBy, candidate -> true, this::notifyOwner));
         auditLogService.log(performedBy, AuditAction.BLOCK_LINK, TARGET_URL, String.valueOf(urlId),
                 details(via, blocked.isPresent() ? 1 : 0, field(REASON, reason), field("detail", detail)));
         return UrlResponse.from(blocked.orElse(url));
@@ -480,7 +481,7 @@ public class DefaultModerationService implements ModerationService {
     }
 
     private String blockLinkFromReview(final Url url, final Consumer<Url> tellOwner, final String performedBy, final String via) {
-        final var converted = convertSignInFormHold(url.getId(), BlockReason.ADMIN, null);
+        final var converted = convertHold(url.getId(), BlockReason.ADMIN, null).isPresent();
         final var blocked = converted || blockAndTellOwner(url.getId(), BlockReason.ADMIN, null, performedBy, candidate -> true, tellOwner).isPresent();
         return details(via, blocked ? 1 : 0, field(ACTION, ReviewAction.BLOCK_LINK));
     }
@@ -492,21 +493,30 @@ public class DefaultModerationService implements ModerationService {
                 heldField(blocked.held()));
     }
 
-    private boolean convertSignInFormHold(final long urlId, final BlockReason reason, final String detail) {
+    private Optional<Url> convertHeldToBlock(final long urlId, final BlockReason reason, final String detail, final String performedBy) {
+        final var converted = convertHold(urlId, reason, detail);
+        converted.ifPresent(url -> {
+            transactionOperations.executeWithoutResult(status -> closeReview(url, reason, performedBy));
+            notifyOwner(url);
+        });
+        return converted;
+    }
+
+    private Optional<Url> convertHold(final long urlId, final BlockReason reason, final String detail) {
         final var converted = Optional.ofNullable(transactionOperations.execute(status -> urlRepository.findById(urlId)
-                .filter(url -> !url.isActive() && url.getBlockReason() == BlockReason.SIGN_IN_FORM)
+                .filter(url -> !url.isActive() && HELD.contains(url.getBlockReason()))
                 .map(url -> {
                     url.setBlockReason(reason);
-                    url.setBlockDetail(detail);
+                    url.setBlockDetail(StringUtils.abbreviate(detail, MAX_COLUMN_LENGTH));
                     url.setBlockedAt(LocalDateTime.now());
                     return urlRepository.save(url);
                 })
                 .orElse(null)));
         converted.ifPresent(url -> {
-            log.info("Link held for a sign-in form blocked urlId={} reason={}", url.getId(), reason);
+            log.info("Held link blocked urlId={} reason={}", url.getId(), reason);
             evictNowAndAgainLater(cacheKeyOf(url));
         });
-        return converted.isPresent();
+        return converted;
     }
 
     private String blockUserFromReview(final Url url, final String performedBy, final String via) {

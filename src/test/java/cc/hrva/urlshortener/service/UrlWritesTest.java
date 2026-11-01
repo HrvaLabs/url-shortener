@@ -20,6 +20,7 @@ import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.enums.BlockReason;
 import cc.hrva.urlshortener.model.enums.CustomDomainStatus;
 import cc.hrva.urlshortener.model.enums.ReviewAction;
+import cc.hrva.urlshortener.model.enums.ReviewResolution;
 import cc.hrva.urlshortener.repository.DestinationCheckRepository;
 import cc.hrva.urlshortener.repository.CampaignRepository;
 import cc.hrva.urlshortener.repository.DomainRuleRepository;
@@ -349,6 +350,68 @@ class UrlWritesTest {
         assertThat(urlService.redirectResultUrl("menu", CLICK)).isInstanceOfSatisfying(LinkUnavailableView.class,
                 page -> assertThat(page.reason()).isEqualTo("blocked"));
         assertThat(cache.get("menu")).isNull();
+    }
+
+    @Test
+    void thePlainBlockTurnsALinkHeldForASignInFormIntoABlockedOneThatClosesItsReviewAndLeavesTheCache() {
+        final var cache = new ConcurrentMapCache("urls");
+        when(cacheManager.getCache("urls")).thenReturn(cache);
+        when(appProperties.getFrontendUrl()).thenReturn("https://app.hrva.cc");
+        when(clickCheckService.mayRedirect(anyLong(), any())).thenReturn(true);
+        jdbcTemplate.update("""
+                insert into url (id, long_url, short_url, visits, create_date, active, warning_page)
+                values (?, 'https://verniqindexone.com/cache-trash/', 'menu', 0, ?, true, true)""", ON_HRVA, LocalDateTime.of(2026, 10, 1, 9, 0));
+        urlService.redirectResultUrl("menu", CLICK);
+        final var staleEntry = cache.get("menu").get();
+        assertThat(moderationService.holdForSignInForm(ON_HRVA, "https://verniqindexone.com/cache-trash/", "a password field")).isTrue();
+        cache.put("menu", staleEntry);
+
+        final var blocked = moderationService.blockLink(ON_HRVA, BlockReason.ADMIN, "phishing", "admin@hrva.cc", "admin");
+
+        assertThat(blocked.active()).isFalse();
+        assertThat(jdbcTemplate.queryForMap("select active, block_reason, block_detail from url where id = ?", ON_HRVA))
+                .containsEntry("ACTIVE", false).containsEntry("BLOCK_REASON", "ADMIN").containsEntry("BLOCK_DETAIL", "phishing");
+        verify(reviewQueueService).resolveOpen(org.mockito.ArgumentMatchers.argThat(url -> url.getId() == ON_HRVA),
+                org.mockito.ArgumentMatchers.eq(ReviewResolution.LINK_BLOCKED), org.mockito.ArgumentMatchers.eq("admin@hrva.cc"));
+        assertThat(cache.get("menu")).isNull();
+        assertThat(urlService.redirectResultUrl("menu", CLICK)).isInstanceOfSatisfying(LinkUnavailableView.class,
+                page -> assertThat(page.reason()).isEqualTo("blocked"));
+        assertThat(cache.get("menu")).isNull();
+    }
+
+    @Test
+    void thePlainBlockTurnsALinkHeldForACampaignIntoABlockedOneThatClosesItsReviewAndLeavesTheCache() {
+        final var cache = new ConcurrentMapCache("urls");
+        when(cacheManager.getCache("urls")).thenReturn(cache);
+        when(appProperties.getFrontendUrl()).thenReturn("https://app.hrva.cc");
+        when(clickCheckService.mayRedirect(anyLong(), any())).thenReturn(true);
+        menu(ON_HRVA, "https://jofogas.cards/login?r=1", null);
+        urlService.redirectResultUrl("menu", CLICK);
+        final var staleEntry = cache.get("menu").get();
+        jdbcTemplate.update("update url set active = false, block_reason = 'CAMPAIGN', block_detail = 'campaign 4' where id = ?", ON_HRVA);
+        cache.put("menu", staleEntry);
+
+        moderationService.blockLink(ON_HRVA, BlockReason.ADMIN, null, "admin@hrva.cc", "admin");
+
+        assertThat(jdbcTemplate.queryForMap("select active, block_reason, block_detail from url where id = ?", ON_HRVA))
+                .containsEntry("ACTIVE", false).containsEntry("BLOCK_REASON", "ADMIN").containsEntry("BLOCK_DETAIL", null);
+        verify(reviewQueueService).resolveOpen(org.mockito.ArgumentMatchers.argThat(url -> url.getId() == ON_HRVA),
+                org.mockito.ArgumentMatchers.eq(ReviewResolution.LINK_BLOCKED), org.mockito.ArgumentMatchers.eq("admin@hrva.cc"));
+        assertThat(cache.get("menu")).isNull();
+        assertThat(urlService.redirectResultUrl("menu", CLICK)).isInstanceOfSatisfying(LinkUnavailableView.class,
+                page -> assertThat(page.reason()).isEqualTo("blocked"));
+        assertThat(cache.get("menu")).isNull();
+    }
+
+    @Test
+    void theReviewsBlockLinkTurnsALinkHeldForACampaignIntoABlockedOne() {
+        menu(ON_HRVA, "https://jofogas.cards/login?r=2", null);
+        jdbcTemplate.update("update url set active = false, block_reason = 'CAMPAIGN' where id = ?", ON_HRVA);
+        when(cacheManager.getCache("urls")).thenReturn(new ConcurrentMapCache("urls"));
+
+        moderationService.resolveReview(ON_HRVA, ReviewAction.BLOCK_LINK, null, "admin@hrva.cc", "admin");
+
+        assertThat(jdbcTemplate.queryForObject("select block_reason from url where id = ?", String.class, ON_HRVA)).isEqualTo("ADMIN");
     }
 
     @Test
