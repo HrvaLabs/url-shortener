@@ -3,6 +3,7 @@ package cc.hrva.urlshortener.mcp.authorization;
 import cc.hrva.urlshortener.security.ClientIpResolver;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiter;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiterUnavailableException;
+import cc.hrva.urlshortener.util.ProblemResponses;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -55,7 +56,7 @@ public class DcrRateLimitFilter extends OncePerRequestFilter {
 
         if (!allowed) {
             log.info("Client registration refused by the rate limit");
-            response.setHeader(HttpHeaders.RETRY_AFTER, Long.toString(REGISTRATION_WINDOW.toSeconds()));
+            ProblemResponses.retryAfter(response, rateLimiter.resetsIn(key).orElse(REGISTRATION_WINDOW));
             writeError(response, HttpStatus.TOO_MANY_REQUESTS, RATE_LIMITED);
             return;
         }

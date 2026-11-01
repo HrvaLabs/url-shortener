@@ -262,15 +262,16 @@ public class DefaultCustomDomainService implements CustomDomainService {
     }
 
     private void requireWithinApplyLimit(final User user) {
-        if (!withinApplyLimit(user)) {
+        final var limitKey = APPLY_LIMIT + user.getId();
+        if (!withinApplyLimit(user, limitKey)) {
             log.info("Custom domain application refused by the rate limit userId={}", user.getId());
-            throw new RateLimitExceededException(TOO_MANY_APPLICATIONS, APPLY_WINDOW);
+            throw new RateLimitExceededException(TOO_MANY_APPLICATIONS, rateLimiter.resetsIn(limitKey).orElse(APPLY_WINDOW));
         }
     }
 
-    private boolean withinApplyLimit(final User user) {
+    private boolean withinApplyLimit(final User user, final String limitKey) {
         try {
-            return rateLimiter.tryAcquire(APPLY_LIMIT + user.getId(), APPLICATIONS_PER_USER, APPLY_WINDOW);
+            return rateLimiter.tryAcquire(limitKey, APPLICATIONS_PER_USER, APPLY_WINDOW);
         } catch (final RateLimiterUnavailableException exception) {
             log.warn("Custom domain application rate limit unavailable, allowing the request userId={}", user.getId());
             return true;
@@ -292,16 +293,17 @@ public class DefaultCustomDomainService implements CustomDomainService {
     }
 
     private void requireWithinRetryLimit(final long id) {
+        final var limitKey = RETRY_LIMIT + id;
         final boolean allowed;
         try {
-            allowed = rateLimiter.tryAcquire(RETRY_LIMIT + id, 1, CHECK_WINDOW);
+            allowed = rateLimiter.tryAcquire(limitKey, 1, CHECK_WINDOW);
         } catch (final RateLimiterUnavailableException exception) {
             log.warn("Custom domain retry rate limit unavailable, allowing the retry domainId={}", id);
             return;
         }
         if (!allowed) {
             log.info("Custom domain retry refused, the last one was moments ago domainId={}", id);
-            throw new RateLimitExceededException(RETRY_TOO_SOON, CHECK_WINDOW);
+            throw new RateLimitExceededException(RETRY_TOO_SOON, rateLimiter.resetsIn(limitKey).orElse(CHECK_WINDOW));
         }
     }
 

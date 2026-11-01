@@ -578,6 +578,28 @@ class ReportControllerTest {
     }
 
     @Test
+    void theSixthReportWaitsOnlyTheSecondsLeftInTheHour() throws Exception {
+        final var rateLimiter = new RateLimiter() {
+            @Override
+            public long increment(final String key, final Duration window) {
+                return 6;
+            }
+
+            @Override
+            public Optional<Duration> resetsIn(final String key) {
+                return Optional.of(Duration.ofSeconds(300));
+            }
+        };
+
+        mockMvc = mockMvcWith(rateLimiter);
+
+        report(SHORT, "PHISHING", DETAILS)
+                .andExpect(status().isTooManyRequests())
+                .andExpect(header().string(HttpHeaders.RETRY_AFTER, "300"))
+                .andExpect(jsonPath("$.detail").value(TOO_MANY_REPORTS));
+    }
+
+    @Test
     void theLimitIsKeptPerHashedClientAddress() throws Exception {
         when(urlRepository.findActive(null, SHORT)).thenReturn(Optional.of(url));
         for (var sent = 0; sent < 5; sent++) {

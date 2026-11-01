@@ -2135,6 +2135,18 @@ class UrlServiceTest {
     }
 
     @Test
+    void aCreateOverTheRateLimitWaitsOnlyUntilTheWindowResets() {
+        final var service = urlServiceWithRealLongUrlHandling();
+        final var createUrlDto = CreateUrlDto.builder().longUrl("https://example.com/menu").build();
+        when(apiKeyService.fetchApiKeyByKey("apikey")).thenReturn(ApiKey.builder().owner(User.builder().id(1L).build()).build());
+        when(rateLimiter.tryAcquire(eq("create:user:1"), anyInt(), any())).thenReturn(false);
+        when(rateLimiter.resetsIn("create:user:1")).thenReturn(Optional.of(Duration.ofMinutes(23)));
+
+        assertThatThrownBy(() -> service.saveUrlWithApiKey(createUrlDto, "apikey", CreatedVia.API_KEY))
+                .isInstanceOfSatisfying(RateLimitExceededException.class, refusal -> assertThat(refusal.getRetryAfter()).isEqualTo(Duration.ofMinutes(23)));
+    }
+
+    @Test
     void anAnonymousCreateOverTheRateLimitIsRefusedBeforeTheSlowLinkCheck() {
         final var service = urlServiceWithRealLongUrlHandling();
         final var createUrlDto = CreateUrlDto.builder().longUrl("https://example.com/menu").build();
@@ -2147,6 +2159,18 @@ class UrlServiceTest {
         verify(linkCheckService, never()).check(anyString());
         verify(safeBrowsingService, never()).checkUrlsForThreats(anyString());
         verify(urlRepository, never()).save(any(Url.class));
+    }
+
+    @Test
+    void anAnonymousCreateOverTheRateLimitWaitsOnlyUntilItsNetworksWindowResets() {
+        final var service = urlServiceWithRealLongUrlHandling();
+        final var createUrlDto = CreateUrlDto.builder().longUrl("https://example.com/menu").build();
+        final var networkKey = RateLimiter.clientKey("create:anon", CLIENT_IP);
+        when(rateLimiter.tryAcquire(eq(networkKey), anyInt(), any())).thenReturn(false);
+        when(rateLimiter.resetsIn(networkKey)).thenReturn(Optional.of(Duration.ofSeconds(5)));
+
+        assertThatThrownBy(() -> service.saveUrlRouting(createUrlDto, CLIENT_IP, CreatedVia.WEB))
+                .isInstanceOfSatisfying(RateLimitExceededException.class, refusal -> assertThat(refusal.getRetryAfter()).isEqualTo(Duration.ofSeconds(5)));
     }
 
     @Test
@@ -3309,6 +3333,29 @@ class UrlServiceTest {
                 .isInstanceOf(cc.hrva.urlshortener.exception.RateLimitExceededException.class)
                 .hasMessage("Too many password attempts. Try again in a few minutes.");
         verify(passwordEncoder, never()).matches(any(), any());
+    }
+
+    @Test
+    void unlockWaitsOnlyUntilTheLimitThatRefusedResets() {
+        final var clientKey = RateLimiter.clientKey("unlock:board", CLICK.clientIp());
+        when(rateLimiter.tryAcquire(eq(clientKey), anyInt(), any())).thenReturn(true);
+        when(rateLimiter.tryAcquire(eq("unlock:board"), anyInt(), any())).thenReturn(false);
+        when(rateLimiter.resetsIn("unlock:board")).thenReturn(Optional.of(Duration.ofSeconds(61)));
+
+        assertThatThrownBy(() -> urlService.unlockUrl(null, "board", "guess", CLICK))
+                .isInstanceOfSatisfying(RateLimitExceededException.class, refusal -> assertThat(refusal.getRetryAfter()).isEqualTo(Duration.ofSeconds(61)));
+        verify(rateLimiter, never()).resetsIn(clientKey);
+    }
+
+    @Test
+    void unlockWaitsForTheNetworksLimitWhenThatOneRefused() {
+        final var clientKey = RateLimiter.clientKey("unlock:board", CLICK.clientIp());
+        when(rateLimiter.tryAcquire(eq(clientKey), anyInt(), any())).thenReturn(false);
+        when(rateLimiter.resetsIn(clientKey)).thenReturn(Optional.of(Duration.ofSeconds(8)));
+
+        assertThatThrownBy(() -> urlService.unlockUrl(null, "board", "guess", CLICK))
+                .isInstanceOfSatisfying(RateLimitExceededException.class, refusal -> assertThat(refusal.getRetryAfter()).isEqualTo(Duration.ofSeconds(8)));
+        verify(rateLimiter, never()).tryAcquire(eq("unlock:board"), anyInt(), any());
     }
 
     @Test

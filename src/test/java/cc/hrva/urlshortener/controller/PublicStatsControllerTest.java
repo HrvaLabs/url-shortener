@@ -13,6 +13,7 @@ import cc.hrva.urlshortener.service.ratelimit.RateLimiterUnavailableException;
 import io.swagger.v3.oas.annotations.Operation;
 import jakarta.servlet.http.HttpServletRequest;
 import java.time.Duration;
+import java.util.Optional;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -125,6 +126,26 @@ class PublicStatsControllerTest {
                 .andExpect(jsonPath("$.detail").value(TOO_MANY));
 
         verifyNoInteractions(publicStatsService);
+    }
+
+    @Test
+    void theSixtyFirstRequestWaitsOnlyTheSecondsLeftInTheHour() throws Exception {
+        final var rateLimiter = new RateLimiter() {
+            @Override
+            public long increment(final String key, final Duration window) {
+                return 61;
+            }
+
+            @Override
+            public Optional<Duration> resetsIn(final String key) {
+                return Optional.of(Duration.ofMillis(41_500));
+            }
+        };
+
+        mockMvcWith(rateLimiter).perform(get(PUBLIC_STATS))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(header().string(HttpHeaders.RETRY_AFTER, "42"))
+                .andExpect(jsonPath("$.detail").value(TOO_MANY));
     }
 
     @Test

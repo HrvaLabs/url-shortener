@@ -212,6 +212,15 @@ class DefaultNotificationConsentServiceTest {
     }
 
     @Test
+    void overTheLimitWaitsOnlyUntilTheWindowResets() {
+        when(rateLimiter.tryAcquire(SETTINGS_KEY, 60, Duration.ofHours(1))).thenReturn(false);
+        when(rateLimiter.resetsIn(SETTINGS_KEY)).thenReturn(Optional.of(Duration.ofMinutes(31)));
+
+        assertThatThrownBy(() -> service.set("WEEKLY_SUMMARY_EMAIL", true))
+                .isInstanceOfSatisfying(RateLimitExceededException.class, refusal -> assertThat(refusal.getRetryAfter()).isEqualTo(Duration.ofMinutes(31)));
+    }
+
+    @Test
     void limiterDownAllows() {
         when(rateLimiter.tryAcquire(SETTINGS_KEY, 60, Duration.ofHours(1))).thenThrow(new RateLimiterUnavailableException(new RuntimeException()));
         when(notificationConsentRepository.findFirstByOwnerIdAndTypeAndChannelIdIsNullAndRevokedAtIsNull(7L, NotificationType.WEEKLY_SUMMARY_EMAIL))

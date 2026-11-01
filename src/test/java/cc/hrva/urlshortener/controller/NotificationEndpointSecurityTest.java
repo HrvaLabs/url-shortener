@@ -69,6 +69,7 @@ import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.FilterType;
 import org.springframework.context.annotation.Import;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -409,6 +410,17 @@ class NotificationEndpointSecurityTest {
                 .andExpect(status().isTooManyRequests())
                 .andExpect(content().json("{\"detail\":\"Too many tries from your network. Try again in a few minutes.\"}", JsonCompareMode.LENIENT));
         assertThat(isActive(ANA, NotificationType.WEEKLY_SUMMARY_EMAIL)).isTrue();
+    }
+
+    @Test
+    void overTheLimitWaitsOnlyTheSecondsLeftInTheWindow() throws Exception {
+        consentOf(ANA, NotificationType.WEEKLY_SUMMARY_EMAIL);
+        when(rateLimiter.tryAcquire(startsWith("unsubscribe:"), eq(30), eq(Duration.ofMinutes(10)))).thenReturn(false);
+        when(rateLimiter.resetsIn(startsWith("unsubscribe:"))).thenReturn(Optional.of(Duration.ofSeconds(90)));
+
+        mockMvc.perform(oneClick(unsubscribeTokens.issue(ANA, NotificationType.WEEKLY_SUMMARY_EMAIL)))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(header().string(HttpHeaders.RETRY_AFTER, "90"));
     }
 
     @Test

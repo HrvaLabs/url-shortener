@@ -964,6 +964,23 @@ class DefaultBioPageServiceTest {
     }
 
     @Test
+    void saveOverTheLimitWaitsOnlyUntilTheWindowResets() {
+        when(rateLimiter.tryAcquire(SAVE_KEY, 60, SAVE_WINDOW)).thenReturn(false);
+        when(rateLimiter.resetsIn(SAVE_KEY)).thenReturn(Optional.of(Duration.ofSeconds(42)));
+
+        assertThatThrownBy(() -> bioPageService.update(update()))
+                .isInstanceOfSatisfying(RateLimitExceededException.class, refusal -> assertThat(refusal.getRetryAfter()).isEqualTo(Duration.ofSeconds(42)));
+    }
+
+    @Test
+    void saveOverTheLimitWaitsTheWholeWindowWhenItsResetIsUnknown() {
+        when(rateLimiter.tryAcquire(SAVE_KEY, 60, SAVE_WINDOW)).thenReturn(false);
+
+        assertThatThrownBy(() -> bioPageService.update(update()))
+                .isInstanceOfSatisfying(RateLimitExceededException.class, refusal -> assertThat(refusal.getRetryAfter()).isEqualTo(SAVE_WINDOW));
+    }
+
+    @Test
     void redisDownLetsTheSaveThrough() {
         hasPage();
         savesReturnTheirArgument();

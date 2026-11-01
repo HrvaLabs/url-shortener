@@ -9,6 +9,7 @@ import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.HexFormat;
+import java.util.Optional;
 
 public interface RateLimiter {
 
@@ -20,6 +21,10 @@ public interface RateLimiter {
 
     default boolean tryAcquire(final String key, final int limit, final Duration window) {
         return increment(key, window) <= limit;
+    }
+
+    default Optional<Duration> resetsIn(final String key) {
+        return Optional.empty();
     }
 
     static String clientKey(final String name, final String clientIp) {

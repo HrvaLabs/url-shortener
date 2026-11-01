@@ -2,6 +2,7 @@ package cc.hrva.urlshortener.service.ratelimit;
 
 import java.time.Duration;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -63,6 +64,36 @@ class RedisFixedWindowRateLimiterTest {
         assertThatThrownBy(() -> rateLimiter.incrementWindow(KEY, WINDOW))
                 .isInstanceOf(RateLimiterUnavailableException.class)
                 .hasCauseInstanceOf(RedisConnectionFailureException.class);
+    }
+
+    @Test
+    void aCounterResetsWhenItsKeyExpires() {
+        when(redisTemplate.getExpire("rate-limit:" + KEY, TimeUnit.MILLISECONDS)).thenReturn(1_799_001L);
+
+        assertThat(rateLimiter.resetsIn(KEY)).contains(Duration.ofMillis(1_799_001L));
+    }
+
+    @Test
+    void aCounterThatIsAlreadyGoneResetsNow() {
+        when(redisTemplate.getExpire("rate-limit:" + KEY, TimeUnit.MILLISECONDS)).thenReturn(-2L);
+
+        assertThat(rateLimiter.resetsIn(KEY)).contains(Duration.ZERO);
+    }
+
+    @Test
+    void aCounterWithoutAnExpiryOrAnAnswerHasNoKnownReset() {
+        when(redisTemplate.getExpire("rate-limit:" + KEY, TimeUnit.MILLISECONDS)).thenReturn(-1L).thenReturn(null);
+
+        assertThat(rateLimiter.resetsIn(KEY)).isEmpty();
+        assertThat(rateLimiter.resetsIn(KEY)).isEmpty();
+    }
+
+    @Test
+    void aResetThatCannotBeReadIsLeftToTheCaller(final CapturedOutput output) {
+        when(redisTemplate.getExpire("rate-limit:" + KEY, TimeUnit.MILLISECONDS)).thenThrow(new RedisConnectionFailureException("Unable to connect"));
+
+        assertThat(rateLimiter.resetsIn(KEY)).isEmpty();
+        assertThat(output).contains("Rate limit reset lookup failed exception=org.springframework.data.redis.RedisConnectionFailureException");
     }
 
     @Test

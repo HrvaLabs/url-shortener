@@ -443,6 +443,15 @@ class DefaultNotificationChannelServiceTest {
     }
 
     @Test
+    void settingsChangesOverTheLimitWaitOnlyUntilTheWindowResets() {
+        when(rateLimiter.tryAcquire(SETTINGS_KEY, 60, Duration.ofHours(1))).thenReturn(false);
+        when(rateLimiter.resetsIn(SETTINGS_KEY)).thenReturn(Optional.of(Duration.ofMinutes(9)));
+
+        assertThatThrownBy(() -> service.delete(4L))
+                .isInstanceOfSatisfying(RateLimitExceededException.class, refusal -> assertThat(refusal.getRetryAfter()).isEqualTo(Duration.ofMinutes(9)));
+    }
+
+    @Test
     void aSettingsLimiterThatIsDownAllowsTheChange() {
         when(rateLimiter.tryAcquire(SETTINGS_KEY, 60, Duration.ofHours(1))).thenThrow(new RateLimiterUnavailableException(new IllegalStateException("redis down")));
 
@@ -788,6 +797,16 @@ class DefaultNotificationChannelServiceTest {
                 .isInstanceOf(RateLimitExceededException.class)
                 .hasMessage("You've sent a lot of tests in a short time. Try again in a few minutes.");
         assertThat(posted).isEmpty();
+    }
+
+    @Test
+    void testsOverTheLimitWaitOnlyUntilTheWindowResets() {
+        owned(channel(ChannelType.DISCORD));
+        when(rateLimiter.tryAcquire(TEST_KEY, 10, Duration.ofMinutes(10))).thenReturn(false);
+        when(rateLimiter.resetsIn(TEST_KEY)).thenReturn(Optional.of(Duration.ofSeconds(75)));
+
+        assertThatThrownBy(() -> service.test(4L))
+                .isInstanceOfSatisfying(RateLimitExceededException.class, refusal -> assertThat(refusal.getRetryAfter()).isEqualTo(Duration.ofSeconds(75)));
     }
 
     @Test

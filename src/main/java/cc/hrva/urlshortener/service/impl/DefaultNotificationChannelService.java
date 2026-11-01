@@ -305,31 +305,33 @@ public class DefaultNotificationChannelService implements NotificationChannelSer
     }
 
     private void requireWithinSettingsLimit(final long userId) {
+        final var limitKey = DefaultNotificationConsentService.SETTINGS_LIMIT_NAME + ":user:" + userId;
         final boolean allowed;
         try {
-            allowed = rateLimiter.tryAcquire(DefaultNotificationConsentService.SETTINGS_LIMIT_NAME + ":user:" + userId,
-                    DefaultNotificationConsentService.SETTINGS_CHANGES_PER_HOUR, DefaultNotificationConsentService.SETTINGS_WINDOW);
+            allowed = rateLimiter.tryAcquire(limitKey, DefaultNotificationConsentService.SETTINGS_CHANGES_PER_HOUR, DefaultNotificationConsentService.SETTINGS_WINDOW);
         } catch (final RateLimiterUnavailableException exception) {
             log.warn("Notification settings rate limit unavailable, allowing the change");
             return;
         }
         if (!allowed) {
             log.info("Notification channel change refused by the rate limit user id={}", userId);
-            throw new RateLimitExceededException(DefaultNotificationConsentService.TOO_MANY_CHANGES, DefaultNotificationConsentService.SETTINGS_WINDOW);
+            throw new RateLimitExceededException(DefaultNotificationConsentService.TOO_MANY_CHANGES,
+                    rateLimiter.resetsIn(limitKey).orElse(DefaultNotificationConsentService.SETTINGS_WINDOW));
         }
     }
 
     private void requireWithinTestLimit(final long userId) {
+        final var limitKey = TEST_LIMIT_NAME + ":user:" + userId;
         final boolean allowed;
         try {
-            allowed = rateLimiter.tryAcquire(TEST_LIMIT_NAME + ":user:" + userId, TESTS_PER_WINDOW, TEST_WINDOW);
+            allowed = rateLimiter.tryAcquire(limitKey, TESTS_PER_WINDOW, TEST_WINDOW);
         } catch (final RateLimiterUnavailableException exception) {
             log.warn("Notification test rate limit unavailable, refusing the test user id={}", userId);
             throw new NotificationTestUnavailableException(TESTS_UNAVAILABLE);
         }
         if (!allowed) {
             log.info("Notification test refused by the rate limit user id={}", userId);
-            throw new RateLimitExceededException(TOO_MANY_TESTS, TEST_WINDOW);
+            throw new RateLimitExceededException(TOO_MANY_TESTS, rateLimiter.resetsIn(limitKey).orElse(TEST_WINDOW));
         }
     }
 

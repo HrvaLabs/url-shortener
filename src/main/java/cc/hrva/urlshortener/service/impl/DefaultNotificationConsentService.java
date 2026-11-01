@@ -170,16 +170,17 @@ public class DefaultNotificationConsentService implements NotificationConsentSer
     }
 
     private void requireWithinSettingsLimit(final long userId) {
+        final var limitKey = SETTINGS_LIMIT_NAME + ":user:" + userId;
         final boolean allowed;
         try {
-            allowed = rateLimiter.tryAcquire(SETTINGS_LIMIT_NAME + ":user:" + userId, SETTINGS_CHANGES_PER_HOUR, SETTINGS_WINDOW);
+            allowed = rateLimiter.tryAcquire(limitKey, SETTINGS_CHANGES_PER_HOUR, SETTINGS_WINDOW);
         } catch (final RateLimiterUnavailableException exception) {
             log.warn("Notification settings rate limit unavailable, allowing the change");
             return;
         }
         if (!allowed) {
             log.info("Notification settings change refused by the rate limit user id={}", userId);
-            throw new RateLimitExceededException(TOO_MANY_CHANGES, SETTINGS_WINDOW);
+            throw new RateLimitExceededException(TOO_MANY_CHANGES, rateLimiter.resetsIn(limitKey).orElse(SETTINGS_WINDOW));
         }
     }
 

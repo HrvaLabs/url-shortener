@@ -246,20 +246,20 @@ public class DefaultUrlService implements UrlService {
     }
 
     private void ensureCreateAllowed(final User creator, final String clientIP) {
-        if (!createAllowed(creator, clientIP)) {
+        final var limitKey = creator != null ? "create:user:" + creator.getId() : RateLimiter.clientKey("create:anon", clientIP);
+        if (!createAllowed(creator, clientIP, limitKey)) {
             log.info("Link creation refused by the rate limit userId={}", creator != null ? creator.getId() : null);
-            throw new RateLimitExceededException(CREATE_LIMIT_REFUSAL, CREATE_WINDOW);
+            throw new RateLimitExceededException(CREATE_LIMIT_REFUSAL, rateLimiter.resetsIn(limitKey).orElse(CREATE_WINDOW));
         }
     }
 
-    private boolean createAllowed(final User creator, final String clientIP) {
+    private boolean createAllowed(final User creator, final String clientIP, final String limitKey) {
         try {
             if (creator != null) {
-                return isAdmin(creator) || rateLimiter.tryAcquire("create:user:" + creator.getId(), CREATES_PER_USER, CREATE_WINDOW);
+                return isAdmin(creator) || rateLimiter.tryAcquire(limitKey, CREATES_PER_USER, CREATE_WINDOW);
             }
             return clientIP == null
-                    || rateLimiter.tryAcquire(RateLimiter.clientKey("create:anon", clientIP), settingsService.number(SettingKey.ANONYMOUS_LINKS_PER_HOUR),
-                    CREATE_WINDOW);
+                    || rateLimiter.tryAcquire(limitKey, settingsService.number(SettingKey.ANONYMOUS_LINKS_PER_HOUR), CREATE_WINDOW);
         } catch (final RateLimiterUnavailableException exception) {
             if (creator == null) {
                 log.warn("Create rate limit unavailable, refusing the link without an account");
@@ -275,10 +275,14 @@ public class DefaultUrlService implements UrlService {
                 .anyMatch(authority -> ROLE_ADMIN.equals(authority.getName()));
     }
 
-    private boolean unlockAttemptAllowed(final String cacheKey, final String clientIP) {
+    private Optional<String> unlockLimitReached(final String cacheKey, final String clientIP) {
+        final var clientLimitKey = RateLimiter.clientKey("unlock:" + cacheKey, clientIP);
+        final var linkLimitKey = "unlock:" + cacheKey;
         try {
-            return rateLimiter.tryAcquire(RateLimiter.clientKey("unlock:" + cacheKey, clientIP), UNLOCK_ATTEMPTS_PER_CLIENT, UNLOCK_WINDOW)
-                    && rateLimiter.tryAcquire("unlock:" + cacheKey, UNLOCK_ATTEMPTS_PER_LINK, UNLOCK_WINDOW);
+            if (!rateLimiter.tryAcquire(clientLimitKey, UNLOCK_ATTEMPTS_PER_CLIENT, UNLOCK_WINDOW)) {
+                return Optional.of(clientLimitKey);
+            }
+            return rateLimiter.tryAcquire(linkLimitKey, UNLOCK_ATTEMPTS_PER_LINK, UNLOCK_WINDOW) ? Optional.empty() : Optional.of(linkLimitKey);
         } catch (final RateLimiterUnavailableException exception) {
             log.warn("Unlock rate limit unavailable, refusing the attempt");
             throw new ServiceBusyException(UNLOCK_UNAVAILABLE, LIMITER_RETRY);
@@ -295,8 +299,10 @@ public class DefaultUrlService implements UrlService {
     @Transactional
     public UnlockResponse unlockUrl(final String domain, final String shortUrl, final String password, final ClickRequest click) {
         final var place = placeOf(domain, shortUrl);
-        if (!unlockAttemptAllowed(place.cacheKey(), click.clientIp())) {
-            throw new RateLimitExceededException("Too many password attempts. Try again in a few minutes.", UNLOCK_WINDOW);
+        final var reachedLimit = unlockLimitReached(place.cacheKey(), click.clientIp());
+        if (reachedLimit.isPresent()) {
+            throw new RateLimitExceededException("Too many password attempts. Try again in a few minutes.",
+                    rateLimiter.resetsIn(reachedLimit.get()).orElse(UNLOCK_WINDOW));
         }
 
         final var url = urlRepository.findActive(place.domainId(), shortUrl)

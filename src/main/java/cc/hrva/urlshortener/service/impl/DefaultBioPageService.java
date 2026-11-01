@@ -309,15 +309,16 @@ public class DefaultBioPageService implements BioPageService {
     }
 
     private void requireWithinLimit(final String name, final User user, final int limit, final Duration window, final String refusal) {
-        if (!withinLimit(name, user, limit, window)) {
+        final var limitKey = name + ":user:" + user.getId();
+        if (!withinLimit(name, limitKey, limit, window)) {
             log.info("Bio page request refused by the rate limit limit={} userId={}", name, user.getId());
-            throw new RateLimitExceededException(refusal, window);
+            throw new RateLimitExceededException(refusal, rateLimiter.resetsIn(limitKey).orElse(window));
         }
     }
 
-    private boolean withinLimit(final String name, final User user, final int limit, final Duration window) {
+    private boolean withinLimit(final String name, final String limitKey, final int limit, final Duration window) {
         try {
-            return rateLimiter.tryAcquire(name + ":user:" + user.getId(), limit, window);
+            return rateLimiter.tryAcquire(limitKey, limit, window);
         } catch (final RateLimiterUnavailableException exception) {
             log.warn("Bio page rate limit unavailable, allowing the request limit={}", name);
             return true;

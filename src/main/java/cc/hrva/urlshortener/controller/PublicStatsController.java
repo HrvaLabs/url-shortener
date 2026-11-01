@@ -40,8 +40,9 @@ public class PublicStatsController {
     @ApiResponse(responseCode = "429", description = "Too many requests from this client")
     @GetMapping("/stats")
     public ResponseEntity<PublicStatsResponse> publicStats(final HttpServletRequest request) {
-        if (!requestAllowed(request)) {
-            throw new RateLimitExceededException(TOO_MANY_REQUESTS, REQUEST_WINDOW);
+        final var limitKey = RateLimiter.clientKey(RATE_LIMIT_NAME, clientIpResolver.getClientIp(request));
+        if (!requestAllowed(limitKey)) {
+            throw new RateLimitExceededException(TOO_MANY_REQUESTS, rateLimiter.resetsIn(limitKey).orElse(REQUEST_WINDOW));
         }
 
         return ResponseEntity.ok()
@@ -49,9 +50,9 @@ public class PublicStatsController {
                 .body(publicStatsService.stats());
     }
 
-    private boolean requestAllowed(final HttpServletRequest request) {
+    private boolean requestAllowed(final String limitKey) {
         try {
-            return rateLimiter.tryAcquire(RateLimiter.clientKey(RATE_LIMIT_NAME, clientIpResolver.getClientIp(request)), REQUESTS_PER_CLIENT, REQUEST_WINDOW);
+            return rateLimiter.tryAcquire(limitKey, REQUESTS_PER_CLIENT, REQUEST_WINDOW);
         } catch (final RateLimiterUnavailableException exception) {
             log.warn("Public stats rate limit unavailable, allowing the request");
             return true;

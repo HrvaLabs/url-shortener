@@ -372,6 +372,15 @@ class DefaultCustomDomainServiceTest {
     }
 
     @Test
+    void overTheRateLimitWaitsOnlyUntilTheWindowResets() {
+        when(rateLimiter.tryAcquire(APPLY_KEY, 5, APPLY_WINDOW)).thenReturn(false);
+        when(rateLimiter.resetsIn(APPLY_KEY)).thenReturn(Optional.of(Duration.ofMinutes(17)));
+
+        assertThatThrownBy(() -> customDomainService.apply(apply("go.example.com")))
+                .isInstanceOfSatisfying(RateLimitExceededException.class, refusal -> assertThat(refusal.getRetryAfter()).isEqualTo(Duration.ofMinutes(17)));
+    }
+
+    @Test
     void limiterDownAllows() {
         when(rateLimiter.tryAcquire(APPLY_KEY, 5, APPLY_WINDOW)).thenThrow(new RateLimiterUnavailableException(new IllegalStateException("redis down")));
 
@@ -521,6 +530,18 @@ class DefaultCustomDomainServiceTest {
                 .isInstanceOf(RateLimitExceededException.class)
                 .hasMessage("Wait a few seconds and try again.");
         verify(customDomainSetup, times(1)).retry(failed);
+    }
+
+    @Test
+    void aRetryTooSoonWaitsOnlyTheSecondsLeft() {
+        final var failed = domain(12L, CustomDomainStatus.ERROR, NOW);
+        failed.setProblem(DomainProblem.PROVISIONING_FAILED);
+        when(customDomainRepository.findByIdAndOwnerId(12L, 7L)).thenReturn(Optional.of(failed));
+        when(rateLimiter.tryAcquire("domain-retry:domain:12", 1, Duration.ofSeconds(15))).thenReturn(false);
+        when(rateLimiter.resetsIn("domain-retry:domain:12")).thenReturn(Optional.of(Duration.ofMillis(3_200)));
+
+        assertThatThrownBy(() -> customDomainService.retry(12L))
+                .isInstanceOfSatisfying(RateLimitExceededException.class, refusal -> assertThat(refusal.getRetryAfter()).isEqualTo(Duration.ofMillis(3_200)));
     }
 
     @Test

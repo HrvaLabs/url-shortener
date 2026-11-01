@@ -29,16 +29,17 @@ public class PasskeyCeremonies {
     private final RateLimiter rateLimiter;
 
     public void checkOptionsLimit(final String name, final String clientIp) {
+        final var limitKey = RateLimiter.clientKey(name, clientIp);
         final boolean allowed;
         try {
-            allowed = rateLimiter.tryAcquire(RateLimiter.clientKey(name, clientIp), OPTIONS_PER_NETWORK, OPTIONS_WINDOW);
+            allowed = rateLimiter.tryAcquire(limitKey, OPTIONS_PER_NETWORK, OPTIONS_WINDOW);
         } catch (final RateLimiterUnavailableException exception) {
             log.warn("Passkey options refused, rate limiter unavailable name={}", name);
             throw new SignInUnavailableException(PasskeyCeremonyStore.UNAVAILABLE, exception);
         }
 
         if (!allowed) {
-            throw new RateLimitExceededException(TOO_MANY_OPTIONS, OPTIONS_WINDOW);
+            throw new RateLimitExceededException(TOO_MANY_OPTIONS, rateLimiter.resetsIn(limitKey).orElse(OPTIONS_WINDOW));
         }
     }
 

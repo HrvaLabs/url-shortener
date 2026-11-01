@@ -81,8 +81,9 @@ public class ReportController {
         final var category = categoryOf(linkReportDto.getCategory());
         final var details = detailsOf(linkReportDto.getDetails());
 
-        if (!reportAllowed()) {
-            throw new RateLimitExceededException(TOO_MANY_REPORTS, REPORT_WINDOW);
+        final var limitKey = RateLimiter.clientKey(RATE_LIMIT_NAME, clientIpResolver.getClientIp(request));
+        if (!reportAllowed(limitKey)) {
+            throw new RateLimitExceededException(TOO_MANY_REPORTS, rateLimiter.resetsIn(limitKey).orElse(REPORT_WINDOW));
         }
 
         if (target.handle() != null) {
@@ -116,9 +117,9 @@ public class ReportController {
         log.info("Visitor report dropped because the bio page was deleted meanwhile pageId={}", page.getId());
     }
 
-    private boolean reportAllowed() {
+    private boolean reportAllowed(final String limitKey) {
         try {
-            return rateLimiter.tryAcquire(RateLimiter.clientKey(RATE_LIMIT_NAME, clientIpResolver.getClientIp(request)), REPORTS_PER_CLIENT, REPORT_WINDOW);
+            return rateLimiter.tryAcquire(limitKey, REPORTS_PER_CLIENT, REPORT_WINDOW);
         } catch (final RateLimiterUnavailableException exception) {
             log.warn("Report rate limit unavailable, allowing the report");
             return true;

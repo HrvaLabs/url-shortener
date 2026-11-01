@@ -66,8 +66,9 @@ public class UnsubscribeController {
     @ApiResponse(responseCode = "429", description = "Too many tries from this network")
     @PostMapping
     public ResponseEntity<UnsubscribeResponse> unsubscribe(@RequestParam(required = false) final String token) {
-        if (!withinLimit()) {
-            throw new RateLimitExceededException(TOO_MANY_TRIES, TRY_WINDOW);
+        final var limitKey = RateLimiter.clientKey(RATE_LIMIT_NAME, clientIpResolver.getClientIp(request));
+        if (!withinLimit(limitKey)) {
+            throw new RateLimitExceededException(TOO_MANY_TRIES, rateLimiter.resetsIn(limitKey).orElse(TRY_WINDOW));
         }
 
         final var target = unsubscribeTokens.read(token).orElseThrow(() -> new ApiException(INVALID_TOKEN));
@@ -76,9 +77,9 @@ public class UnsubscribeController {
         return ResponseEntity.ok(new UnsubscribeResponse(target.type(), !revoked));
     }
 
-    private boolean withinLimit() {
+    private boolean withinLimit(final String limitKey) {
         try {
-            return rateLimiter.tryAcquire(RateLimiter.clientKey(RATE_LIMIT_NAME, clientIpResolver.getClientIp(request)), TRIES_PER_NETWORK, TRY_WINDOW);
+            return rateLimiter.tryAcquire(limitKey, TRIES_PER_NETWORK, TRY_WINDOW);
         } catch (final RateLimiterUnavailableException exception) {
             log.warn("Unsubscribe rate limit unavailable, allowing the request");
             return true;

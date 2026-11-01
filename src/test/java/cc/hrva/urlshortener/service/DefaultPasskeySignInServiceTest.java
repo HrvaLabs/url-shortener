@@ -143,6 +143,15 @@ class DefaultPasskeySignInServiceTest {
     }
 
     @Test
+    void optionsOverTheLimitWaitOnlyUntilTheWindowResets() {
+        when(rateLimiter.tryAcquire(OPTIONS_KEY, 30, TEN_MINUTES)).thenReturn(false);
+        when(rateLimiter.resetsIn(OPTIONS_KEY)).thenReturn(Optional.of(Duration.ofSeconds(140)));
+
+        assertThatThrownBy(() -> passkeySignInService.options(request))
+                .isInstanceOfSatisfying(RateLimitExceededException.class, refusal -> assertThat(refusal.getRetryAfter()).isEqualTo(Duration.ofSeconds(140)));
+    }
+
+    @Test
     void optionsWithoutRedisAre503(final CapturedOutput output) {
         when(rateLimiter.tryAcquire(OPTIONS_KEY, 30, TEN_MINUTES))
                 .thenThrow(new RateLimiterUnavailableException(new QueryTimeoutException("down")));

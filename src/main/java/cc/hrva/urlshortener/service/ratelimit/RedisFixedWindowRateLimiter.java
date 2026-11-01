@@ -2,6 +2,8 @@ package cc.hrva.urlshortener.service.ratelimit;
 
 import java.time.Duration;
 import java.util.List;
+import java.util.Optional;
+import java.util.concurrent.TimeUnit;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataAccessException;
@@ -15,6 +17,7 @@ import org.springframework.stereotype.Component;
 public class RedisFixedWindowRateLimiter implements RateLimiter {
 
     public static final String KEY_PREFIX = "rate-limit:";
+    private static final long NO_EXPIRY = -1;
     private static final RedisScript<Long> FIXED_WINDOW_INCREMENT = RedisScript.of("""
             local count = redis.call('INCR', KEYS[1])
             if redis.call('PTTL', KEYS[1]) < 0 then
@@ -56,6 +59,20 @@ public class RedisFixedWindowRateLimiter implements RateLimiter {
         } catch (final DataAccessException exception) {
             log.warn("Rate limit check failed exception={}", exception.getClass().getName());
             throw new RateLimiterUnavailableException(exception);
+        }
+    }
+
+    @Override
+    public Optional<Duration> resetsIn(final String key) {
+        try {
+            final var millisLeft = redisTemplate.getExpire(KEY_PREFIX + key, TimeUnit.MILLISECONDS);
+            if (millisLeft == null || millisLeft == NO_EXPIRY) {
+                return Optional.empty();
+            }
+            return Optional.of(Duration.ofMillis(Math.max(0, millisLeft)));
+        } catch (final DataAccessException exception) {
+            log.warn("Rate limit reset lookup failed exception={}", exception.getClass().getName());
+            return Optional.empty();
         }
     }
 
