@@ -6,7 +6,7 @@ All notable changes to hrva.cc — the URL shortener.
 
 ## [v2.23] — 2026-11-01
 
-A warning before an inactive account is deactivated, and tighter handling of email addresses and password tries.
+Admin pages need two-step sign-in, password reset links that work once for an hour, sign-up that never shows whether an email is taken, API keys as Bearer tokens, limits on account emails, and a warning before an inactive account is deactivated.
 
 ### 🛡️ Accounts & Security
 - You get an email 30 days before an account is deactivated for 5 years without use. Signing in, using an API key or using a connected MCP app keeps it active.
@@ -25,6 +25,7 @@ A warning before an inactive account is deactivated, and tighter handling of ema
 
 ### 🔒 Privacy
 - Email addresses are masked in every server log line.
+- Counters for password reset and verification emails keep a hash of the network or email address for an hour, never the address itself.
 
 ### 🔧 Admin
 - Admin pages and the MCP moderation tools need two-step sign-in on the admin's account. Until it's on, they answer "Turn on two-step sign-in to use admin pages." and the dashboard opens the two-step settings. Your own account pages keep working.
