@@ -863,6 +863,38 @@ class DefaultSendingEmailServiceTest {
     }
 
     @Test
+    void theInactivityWarningHandsTheTemplateItsVariablesAndNamesTheDate() throws Exception {
+        saveReturnsArgument();
+        final var context = ArgumentCaptor.forClass(IContext.class);
+        when(templateEngine.process(eq("inactivity_warning"), context.capture())).thenReturn("<p>warning</p>");
+
+        configuredEmailService(templateEngine).sendInactivityWarningEmail(OWNER, LocalDate.of(2026, 11, 29));
+
+        assertThat(context.getValue().getVariable("name")).isEqualTo("alice@example.com");
+        assertThat(context.getValue().getVariable("deactivation_date")).isEqualTo("29 November 2026");
+        assertThat(context.getValue().getVariable("days_of_inactivity")).isEqualTo("180");
+        assertThat(context.getValue().getVariable("login_page")).isEqualTo("https://hrva.cc/login/");
+        assertThat(context.getValue().getVariable("contact_email")).isEqualTo("support@hrva.cc");
+        verify(emailService).sendEmail(any(Email.class), eq(null));
+    }
+
+    @Test
+    void theInactivityWarningTellsThePersonHowToKeepTheAccount() throws Exception {
+        saveReturnsArgument();
+        final var sent = ArgumentCaptor.forClass(Email.class);
+        doAnswer(invocation -> null).when(emailService).sendEmail(sent.capture(), eq(null));
+
+        configuredEmailService(realTemplateEngine()).sendInactivityWarningEmail(OWNER, LocalDate.of(2026, 11, 29));
+
+        assertThat(sent.getValue().getSubject()).isEqualTo("Your account will be deactivated for inactivity");
+        assertThat(textOf(sent.getValue().getText()))
+                .contains("alice@example.com", "29 November 2026", "180 days")
+                .contains("API key", "MCP")
+                .contains("support@hrva.cc");
+        assertThat(linksIn(sent.getValue().getText())).contains("https://hrva.cc/login/");
+    }
+
+    @Test
     void thePasskeyAddedEmailHandsTheTemplateItsVariables() throws Exception {
         saveReturnsArgument();
         final var context = ArgumentCaptor.forClass(IContext.class);
@@ -1579,7 +1611,9 @@ class DefaultSendingEmailServiceTest {
                 Arguments.of("passkey_added", (Consumer<DefaultSendingEmailService>) service -> service.sendPasskeyAddedEmail(OWNER, "Laptop", PASSKEY_ADDED_AT)),
                 Arguments.of("sign_in_method_changed", (Consumer<DefaultSendingEmailService>) service ->
                         service.sendSignInMethodChangedEmail(OWNER, "Your password was removed.", PASSKEY_ADDED_AT)),
-                Arguments.of("account_deactivated", (Consumer<DefaultSendingEmailService>) service -> service.sendEmailAccountDeactivated(OWNER)));
+                Arguments.of("account_deactivated", (Consumer<DefaultSendingEmailService>) service -> service.sendEmailAccountDeactivated(OWNER)),
+                Arguments.of("inactivity_warning", (Consumer<DefaultSendingEmailService>) service ->
+                        service.sendInactivityWarningEmail(OWNER, LocalDate.of(2026, 11, 29))));
     }
 
     private List<EmailLog> savedEntries() {

@@ -24,6 +24,7 @@ import cc.hrva.urlshortener.service.settings.SettingKey;
 import jakarta.mail.MessagingException;
 import java.text.MessageFormat;
 import java.time.Duration;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
@@ -74,6 +75,7 @@ public class DefaultSendingEmailService implements SendingEmailService {
     private static final String CONTACT_LINE = "If you think that's a mistake, contact %s.";
     private static final String ARROW = " " + Character.toString(0x2192) + " ";
     private static final int LISTED_RENAMES = 20;
+    private static final DateTimeFormatter DEACTIVATION_DATE_FORMAT = DateTimeFormatter.ofPattern("d MMMM yyyy", Locale.ENGLISH);
     private static final DateTimeFormatter PASSKEY_ADDED_AT_FORMAT = DateTimeFormatter.ofPattern("d MMMM yyyy 'at' HH:mm 'UTC'", Locale.ENGLISH);
 
     private final AppProperties appProperties;
@@ -116,6 +118,24 @@ public class DefaultSendingEmailService implements SendingEmailService {
                 .sender(appProperties.getEmailSenderAddress())
                 .receivers(new String[]{user.getEmail()})
                 .subject("Account deactivated")
+                .text(htmlContent)
+                .build();
+
+        tryToSendEmail(email);
+    }
+
+    @Override
+    @Async
+    public void sendInactivityWarningEmail(final User user, final LocalDate deactivationDate) {
+        final var ctx = getContext(user);
+        ctx.setVariable("deactivation_date", deactivationDate.format(DEACTIVATION_DATE_FORMAT));
+
+        final var htmlContent = templateEngine.process("inactivity_warning", ctx);
+
+        final var email = Email.builder()
+                .sender(appProperties.getEmailSenderAddress())
+                .receivers(new String[]{user.getEmail()})
+                .subject("Your account will be deactivated for inactivity")
                 .text(htmlContent)
                 .build();
 

@@ -11,6 +11,7 @@ import cc.hrva.urlshortener.model.ResetToken;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.enums.DomainLinkMode;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -22,6 +23,7 @@ public interface SendingEmailService {
     void sendEmailUrlBlocked(User owner, Url url);
     void sendEmailUrlsBlocked(User owner, List<Url> urls);
     void sendEmailAccountDeactivated(User user);
+    void sendInactivityWarningEmail(User user, LocalDate deactivationDate);
     void sendEmailForgotPassword(User user, ResetToken resetToken);
     void sendPasskeyAddedEmail(User user, String label, LocalDateTime addedAt);
     void sendSignInMethodChangedEmail(User user, String change, LocalDateTime changedAt);
