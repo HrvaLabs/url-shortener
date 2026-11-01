@@ -2,6 +2,7 @@ package cc.hrva.urlshortener.client;
 
 import cc.hrva.urlshortener.configuration.PublicHttpFetcherConfiguration;
 import cc.hrva.urlshortener.exception.UrlValidationException;
+import cc.hrva.urlshortener.util.LinkKeys;
 import cc.hrva.urlshortener.util.PublicAddresses;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
@@ -158,6 +159,17 @@ class PublicHttpFetcherTest {
         assertThatThrownBy(() -> permissiveFetcher.fetch(baseUrl + "/r1", 100, null, null, TIMEOUT))
                 .isInstanceOf(UrlValidationException.class)
                 .hasMessage("too many redirects");
+    }
+
+    @Test
+    void aRedirectToAnAddressLongerThanTheLinkKeyLimitIsRefused() {
+        final var start = "/" + "d".repeat(28_000) + "/start";
+        respond(start, exchange -> redirect(exchange, "x".repeat(6_000)));
+
+        assertThatThrownBy(() -> permissiveFetcher.fetch(baseUrl + start, 100, null, null, TIMEOUT))
+                .isInstanceOf(UrlValidationException.class)
+                .hasMessage("redirect to an address that is too long");
+        assertThat(requestedPaths).containsExactly(start);
     }
 
     @Test
@@ -698,6 +710,40 @@ class PublicHttpFetcherTest {
         final var chain = permissiveFetcher.followRedirects(baseUrl + "/start", 5, TIMEOUT);
 
         assertThat(chain).extracting(RedirectHop::original).containsExactly(baseUrl + "/start");
+    }
+
+    @Test
+    void aLocationLongerThanTheLinkKeyLimitEndsTheChainWithoutBeingRequested() {
+        final var directory = "/" + "d".repeat(22_000) + "/";
+        final var middle = directory + "m".repeat(6_000) + "/";
+        respond(directory + "start", exchange -> redirect(exchange, "m".repeat(6_000) + "/"));
+        respond(middle, exchange -> redirect(exchange, "x".repeat(6_000)));
+
+        final var chain = permissiveFetcher.followRedirects(baseUrl + directory + "start", 5, TIMEOUT);
+
+        assertThat(chain).extracting(RedirectHop::original).containsExactly(baseUrl + directory + "start", baseUrl + middle);
+        assertThat(requestedPaths).containsExactly(directory + "start", middle);
+    }
+
+    @Test
+    void aLocationThatGrowsPastTheLinkKeyLimitOnceEncodedEndsTheChain() {
+        final var start = "/" + "d".repeat(16_000) + "/start";
+        respond(start, exchange -> redirect(exchange, inUtf8("\u017e".repeat(3_000))));
+
+        final var chain = permissiveFetcher.followRedirects(baseUrl + start, 5, TIMEOUT);
+
+        assertThat(chain).extracting(RedirectHop::original).containsExactly(baseUrl + start);
+    }
+
+    @Test
+    void aLocationUpToTheLinkKeyLimitIsFollowed() {
+        final var start = "/" + "d".repeat(20_000) + "/start";
+        respond(start, exchange -> redirect(exchange, "x".repeat(6_000)));
+
+        final var chain = permissiveFetcher.followRedirects(baseUrl + start, 5, TIMEOUT);
+
+        assertThat(chain).extracting(RedirectHop::normalized)
+                .containsExactly(baseUrl + start, baseUrl + "/" + "d".repeat(20_000) + "/" + "x".repeat(6_000));
     }
 
     @Test

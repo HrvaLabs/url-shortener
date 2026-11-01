@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.util;
 
+import java.time.Duration;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -32,6 +33,34 @@ class LinkKeysTest {
     @Test
     void hostLosesItsTrailingDotAndUserInfo() {
         assertThat(LinkKeys.of("https://paypal.com:pw@Evil.Example./login")).containsExactly("evil.example/login");
+    }
+
+    @Test
+    void theLastAtSignEndsTheUserInfo() {
+        assertThat(LinkKeys.of("https://a@b:c@Ex.com/x")).containsExactly("ex.com/x");
+        assertThat(LinkKeys.of("https://user@[2001:db8::1]/x")).containsExactly("[2001:db8::1]/x");
+    }
+
+    @Test
+    void manyAtSignsAndBracketsTakeMillisecondsNotSeconds() {
+        final var attack = "http://[" + "@[".repeat(64 * 1024);
+
+        final var started = System.nanoTime();
+        final var matches = LinkKeys.LINK.matcher(attack).matches();
+        final var took = Duration.ofNanos(System.nanoTime() - started);
+
+        assertThat(matches).isFalse();
+        assertThat(took).isLessThan(Duration.ofMillis(500));
+        assertThat(LinkKeys.of(attack)).isEmpty();
+    }
+
+    @Test
+    void aLinkUpToTheLengthLimitIsKeyedAndALongerOneIsNot() {
+        final var prefix = "https://ex.com/";
+        final var longest = prefix + "a".repeat(LinkKeys.MAX_LENGTH - prefix.length());
+
+        assertThat(LinkKeys.of(longest)).containsExactly(longest.substring("https://".length()));
+        assertThat(LinkKeys.of(longest + "a")).isEmpty();
     }
 
     @Test

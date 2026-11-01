@@ -7,15 +7,17 @@ import org.apache.commons.lang3.StringUtils;
 
 public final class LinkKeys {
 
-    private static final Pattern LINK = Pattern.compile(
-            "^(?<scheme>https?)://(?:[^/?#\\s]*@)?(?<host>\\[[^\\]/?#\\s]*\\]|[^/?#\\s:@\\[\\]]+)(?::(?<port>\\d{0,5}))?"
-                    + "(?<path>/[^?#]*)?(?:\\?(?<query>[^#]*))?(?:#.*)?$",
+    public static final int MAX_LENGTH = 32_768;
+
+    static final Pattern LINK = Pattern.compile(
+            "^(?<scheme>https?)://(?>[^/?#\\s]*@)?(?<host>\\[[^\\]/?#\\s]*+\\]|[^/?#\\s:@\\[\\]]++)(?::(?<port>\\d{0,5}))?"
+                    + "(?<path>/[^?#]*+)?(?:\\?(?<query>[^#]*+))?(?:#.*)?$",
             Pattern.CASE_INSENSITIVE);
 
     private LinkKeys() {}
 
     public static List<String> of(final String url) {
-        if (url == null) {
+        if (url == null || url.length() > MAX_LENGTH) {
             return List.of();
         }
         final var matcher = LINK.matcher(url.strip());

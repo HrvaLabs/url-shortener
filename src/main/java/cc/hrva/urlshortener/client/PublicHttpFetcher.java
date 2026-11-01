@@ -2,6 +2,7 @@ package cc.hrva.urlshortener.client;
 
 import cc.hrva.urlshortener.client.PinnedHttpTransport.RefusedAddressException;
 import cc.hrva.urlshortener.exception.UrlValidationException;
+import cc.hrva.urlshortener.util.LinkKeys;
 import cc.hrva.urlshortener.util.PublicAddresses;
 import cc.hrva.urlshortener.util.RedirectLocations;
 import java.io.EOFException;
@@ -60,6 +61,7 @@ public class PublicHttpFetcher {
     private static final String NOT_ALLOWED = "not a public https address";
     private static final String NOT_PUBLIC = "not a public address";
     private static final String TIMED_OUT = "timed out";
+    private static final String LOCATION_TOO_LONG = "redirect to an address that is too long";
     private static final String NOTIFY_USER_AGENT = "hrva.cc-notify/1.0 (+https://app.hrva.cc/help/notifications)";
     private static final int MAX_PROBE_REDIRECTS = 5;
     private static final Set<Integer> CONFIRMED_WITH_GET = Set.of(404, 405, 410, 501);
@@ -173,6 +175,9 @@ public class PublicHttpFetcher {
                 throw new UrlValidationException("too many redirects");
             }
             target = resolve(target, location.get());
+            if (tooLong(target)) {
+                throw new UrlValidationException(LOCATION_TOO_LONG);
+            }
         }
     }
 
@@ -333,10 +338,18 @@ public class PublicHttpFetcher {
         try {
             final var normalizedLocation = URI.create(RedirectLocations.normalized(received));
             final var next = URI.create(url).resolve(normalizedLocation).toString();
-            return Optional.of(new RedirectHop(normalizedLocation.isAbsolute() ? received : next, next));
+            return tooLong(next) ? Optional.empty() : Optional.of(new RedirectHop(normalizedLocation.isAbsolute() ? received : next, next));
         } catch (final IllegalArgumentException exception) {
             return Optional.empty();
         }
+    }
+
+    private static boolean tooLong(final String location) {
+        if (location.length() <= LinkKeys.MAX_LENGTH) {
+            return false;
+        }
+        log.debug("Redirect location is too long length={}", location.length());
+        return true;
     }
 
     private static String normalizedDestination(final String url) {
