@@ -2387,4 +2387,40 @@ expect_eq "$(docker exec "$REDIS_CONTAINER" redis-cli --scan --pattern 'rate-lim
     "no account email counter holds a plain address or network"
 clear_account_email_limits
 
+echo "  --- sign-up never says whether an address is taken"
+SIGNUP_EMAIL=e2e-new-signup@example.org
+VERIFY_SUBJECT="Verify your email"
+ATTEMPT_SUBJECT="Someone tried to sign up with your email"
+sign_up() {
+    http -X POST "$BASE/api/v1/auth/register" -H "CF-Connecting-IP: $3" -H 'Content-Type: application/json' -d "{\"email\":\"$1\",\"password\":\"$2\"}"
+}
+VERIFY_BEFORE=$(mails_to "$SIGNUP_EMAIL" "$VERIFY_SUBJECT")
+sign_up "$SIGNUP_EMAIL" e2e-new-signup-password 198.51.100.80
+NEW_ANSWER="$HTTP_STATUS $(header_value content-type) $(jq -c . <<<"$HTTP_BODY")"
+expect_eq "$NEW_ANSWER" "202 application/json {\"email\":\"$SIGNUP_EMAIL\",\"message\":\"Check your inbox for an email from hrva.cc.\"}" \
+    "a new address: 202 with a JSON body"
+wait_for_mail "$SIGNUP_EMAIL" "$VERIFY_SUBJECT" "$VERIFY_BEFORE"
+ok "and a verification email"
+USERS_BEFORE=$(psql_value "select count(*) from user_account;")
+ATTEMPT_BEFORE=$(mails_to "$USER_EMAIL" "$ATTEMPT_SUBJECT")
+sign_up "$USER_EMAIL" "another-$USER_PASSWORD" 198.51.100.81
+expect_eq "$HTTP_STATUS $(header_value content-type) $(jq -c . <<<"$HTTP_BODY")" \
+    "202 application/json {\"email\":\"$USER_EMAIL\",\"message\":\"Check your inbox for an email from hrva.cc.\"}" \
+    "a taken address gets the same answer (status, type and body apart from the address)"
+wait_for_mail "$USER_EMAIL" "$ATTEMPT_SUBJECT" "$ATTEMPT_BEFORE"
+ATTEMPT_TEXT=$(newest_mail_text "$USER_EMAIL" "$ATTEMPT_SUBJECT")
+expect_contains "$ATTEMPT_TEXT" "nothing was created or changed" "the account's owner gets a note that nothing changed"
+expect_contains "$ATTEMPT_TEXT" "$FRONTEND_URL/reset-password" "with the reset link"
+expect_contains "$ATTEMPT_TEXT" "$FRONTEND_URL/login/" "and the sign-in link"
+expect_eq "$(psql_value "select count(*) from user_account;")" "$USERS_BEFORE" "no account was created"
+session_login 203.0.113.253 "$USER_EMAIL" "$SESSION_PASSWORD"
+expect_eq "$HTTP_STATUS" 200 "the password didn't change"
+VERIFY_BEFORE=$(mails_to "$SIGNUP_EMAIL" "$VERIFY_SUBJECT")
+sign_up "$SIGNUP_EMAIL" e2e-new-signup-password 198.51.100.82
+expect_eq "$HTTP_STATUS $(jq -r .message <<<"$HTTP_BODY")" "202 Check your inbox for an email from hrva.cc." "an unverified address signed up again gets the same answer"
+wait_for_mail "$SIGNUP_EMAIL" "$VERIFY_SUBJECT" "$VERIFY_BEFORE"
+ok "and a new verification email instead of the note"
+expect_eq "$(psql_value "select count(*) from user_account where email = '$SIGNUP_EMAIL';")" 1 "still one account for it"
+clear_account_email_limits
+
 section "Done: every step passed"

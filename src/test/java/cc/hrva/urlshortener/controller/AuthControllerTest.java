@@ -1,5 +1,7 @@
 package cc.hrva.urlshortener.controller;
 
+import cc.hrva.urlshortener.dto.RegistrationResponse;
+import org.springframework.test.json.JsonCompareMode;
 import cc.hrva.urlshortener.exception.RateLimitExceededException;
 import cc.hrva.urlshortener.security.ClientIpResolver;
 import cc.hrva.urlshortener.service.ratelimit.AccountEmailLimits;
@@ -77,13 +79,17 @@ class AuthControllerTest {
     }
 
     @Test
-    void shouldRegister() throws Exception {
-        when(authService.register(any(UserRegisterDto.class))).thenReturn("test@example.com");
+    void aSignUpAnswers202WithJson() throws Exception {
+        when(authService.register(any(UserRegisterDto.class)))
+                .thenReturn(new RegistrationResponse("test@example.com", "Check your inbox for an email from hrva.cc."));
 
         mockMvc.perform(post("/api/v1/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(UserRegisterDto.builder().email("test@example.com").password("password123").build())))
-                .andExpect(status().isOk());
+                .andExpect(status().isAccepted())
+                .andExpect(content().contentType(MediaType.APPLICATION_JSON))
+                .andExpect(content().json("""
+                        {"email":"test@example.com","message":"Check your inbox for an email from hrva.cc."}""", JsonCompareMode.STRICT));
     }
 
     @ParameterizedTest
@@ -118,12 +124,12 @@ class AuthControllerTest {
     @Test
     void acceptsALocalPartOfExactly64Characters() throws Exception {
         final var email = "a".repeat(64) + "@example.com";
-        when(authService.register(any(UserRegisterDto.class))).thenReturn(email);
+        when(authService.register(any(UserRegisterDto.class))).thenReturn(new RegistrationResponse(email, "Check your inbox for an email from hrva.cc."));
 
         mockMvc.perform(post("/api/v1/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(UserRegisterDto.builder().email(email).password("password123").build())))
-                .andExpect(status().isOk());
+                .andExpect(status().isAccepted());
     }
 
     @Test

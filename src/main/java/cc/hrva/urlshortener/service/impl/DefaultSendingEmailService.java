@@ -143,6 +143,24 @@ public class DefaultSendingEmailService implements SendingEmailService {
 
     @Override
     @Async
+    public void sendSignUpAttemptEmail(final User user) {
+        final var ctx = getContext(user);
+        ctx.setVariable("reset_url", frontendPage("/reset-password"));
+
+        final var htmlContent = templateEngine.process("sign_up_attempt", ctx);
+
+        final var email = Email.builder()
+                .sender(appProperties.getEmailSenderAddress())
+                .receivers(new String[]{user.getEmail()})
+                .subject("Someone tried to sign up with your email")
+                .text(htmlContent)
+                .build();
+
+        tryToSendEmail(email);
+    }
+
+    @Override
+    @Async
     public void sendVerificationEmail(final User user, final cc.hrva.urlshortener.model.VerificationToken token) {
         final var ctx = getContext(user);
         ctx.setVariable("token", token.getToken());

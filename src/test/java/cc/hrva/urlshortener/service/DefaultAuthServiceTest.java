@@ -7,6 +7,7 @@ import cc.hrva.urlshortener.model.enums.SignInMethod;
 import cc.hrva.urlshortener.model.enums.TwoStepMethod;
 import cc.hrva.urlshortener.security.ClientIpResolver;
 import cc.hrva.urlshortener.dto.LoginDto;
+import cc.hrva.urlshortener.dto.RegistrationResponse;
 import cc.hrva.urlshortener.dto.UserRegisterDto;
 import cc.hrva.urlshortener.exception.RateLimitExceededException;
 import cc.hrva.urlshortener.exception.NoAuthorizationException;
@@ -32,6 +33,7 @@ import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.config.annotation.authentication.builders.AuthenticationManagerBuilder;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.crypto.password.PasswordEncoder;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -45,6 +47,8 @@ import static org.mockito.Mockito.when;
 
 @ExtendWith({MockitoExtension.class, OutputCaptureExtension.class})
 class DefaultAuthServiceTest {
+
+    private static final String CHECK_YOUR_INBOX = "Check your inbox for an email from hrva.cc.";
 
     private static final String PENDING_TOKEN = "Pn4m1qL0rT8vWx2yZ3aB4cD5eF6gH7iJ8kL9mN0oP1q";
 
@@ -98,27 +102,99 @@ class DefaultAuthServiceTest {
     @Mock
     private AccountEmailLimits accountEmailLimits;
 
+    @Mock
+    private PasswordEncoder passwordEncoder;
+
     @BeforeEach
     void setUp() {
         this.authService = new DefaultAuthService(userService, userValidator, signInService, userRepository,
                 clientIpResolver, loginAttemptService, sendingEmailService, twoFactorService,
                 verificationTokenService, authenticationManagerBuilder, userRegisterDtoToUserConverter,
-                new TwoStepLockMessage(passkeyCredentialRepository), accountEmailLimits);
+                new TwoStepLockMessage(passkeyCredentialRepository), accountEmailLimits, passwordEncoder);
     }
 
     @Test
-    void shouldRegisterUser() {
+    void aNewEmailCreatesTheAccountAndAnswersCheckYourInbox() {
         final var registerDto = UserRegisterDto.builder().email("test@example.com").password("password123").build();
         final var user = User.builder().email("test@example.com").build();
-
+        when(userRepository.findByEmail("test@example.com")).thenReturn(java.util.Optional.empty());
         when(userRegisterDtoToUserConverter.convert(registerDto)).thenReturn(user);
         when(userService.register(user)).thenReturn(user);
 
         final var result = authService.register(registerDto);
 
-        assertThat(result).isEqualTo("test@example.com");
+        assertThat(result).isEqualTo(new RegistrationResponse("test@example.com", CHECK_YOUR_INBOX));
         verify(userValidator).checkRegistrationEnabled();
-        verify(userValidator).checkEmailUniqueness("test@example.com");
+        verify(userService).register(user);
+        verifyNoInteractions(sendingEmailService);
+    }
+
+    @Test
+    void anEmailWithAVerifiedAccountGetsTheSameAnswerAndItsOwnerANote() {
+        final var registerDto = UserRegisterDto.builder().email("test@example.com").password("password123").build();
+        final var existing = User.builder().id(4L).email("test@example.com").emailVerified(true).active(true).build();
+        when(userRepository.findByEmail("test@example.com")).thenReturn(java.util.Optional.of(existing));
+        when(accountEmailLimits.allowsEmailTo("test@example.com")).thenReturn(true);
+
+        final var result = authService.register(registerDto);
+
+        assertThat(result).isEqualTo(new RegistrationResponse("test@example.com", CHECK_YOUR_INBOX));
+        verify(sendingEmailService).sendSignUpAttemptEmail(existing);
+        verify(passwordEncoder).encode("password123");
+        verify(userService, never()).register(any());
+        verifyNoInteractions(userRegisterDtoToUserConverter, verificationTokenService);
+    }
+
+    @Test
+    void anEmailWithAnUnverifiedAccountGetsAFreshVerificationLinkInstead() {
+        final var registerDto = UserRegisterDto.builder().email("test@example.com").password("password123").build();
+        final var existing = User.builder().id(4L).email("test@example.com").emailVerified(false).active(true).build();
+        final var token = cc.hrva.urlshortener.model.VerificationToken.builder().id(1L).user(existing).build();
+        when(userRepository.findByEmail("test@example.com")).thenReturn(java.util.Optional.of(existing));
+        when(accountEmailLimits.allowsEmailTo("test@example.com")).thenReturn(true);
+        when(verificationTokenService.createTokenForUser(existing)).thenReturn(token);
+
+        final var result = authService.register(registerDto);
+
+        assertThat(result).isEqualTo(new RegistrationResponse("test@example.com", CHECK_YOUR_INBOX));
+        verify(verificationTokenService).deactivateActiveTokensForUser(existing);
+        verify(sendingEmailService).sendVerificationEmail(existing, token);
+        verify(sendingEmailService, never()).sendSignUpAttemptEmail(any());
+        verify(userService, never()).register(any());
+    }
+
+    @Test
+    void aDeactivatedAccountGetsNoEmailAndTheSameAnswer() {
+        final var registerDto = UserRegisterDto.builder().email("test@example.com").password("password123").build();
+        when(userRepository.findByEmail("test@example.com"))
+                .thenReturn(java.util.Optional.of(User.builder().id(4L).email("test@example.com").emailVerified(true).active(false).build()));
+
+        assertThat(authService.register(registerDto)).isEqualTo(new RegistrationResponse("test@example.com", CHECK_YOUR_INBOX));
+
+        verifyNoInteractions(sendingEmailService, accountEmailLimits);
+        verify(userService, never()).register(any());
+    }
+
+    @Test
+    void anAddressOverItsEmailLimitGetsNoNoteAndTheSameAnswer() {
+        final var registerDto = UserRegisterDto.builder().email("test@example.com").password("password123").build();
+        when(userRepository.findByEmail("test@example.com"))
+                .thenReturn(java.util.Optional.of(User.builder().id(4L).email("test@example.com").emailVerified(true).active(true).build()));
+        when(accountEmailLimits.allowsEmailTo("test@example.com")).thenReturn(false);
+
+        assertThat(authService.register(registerDto)).isEqualTo(new RegistrationResponse("test@example.com", CHECK_YOUR_INBOX));
+
+        verifyNoInteractions(sendingEmailService);
+    }
+
+    @Test
+    void pausedSignUpsAreRefusedBeforeTheAddressIsLookedUp() {
+        doThrow(new cc.hrva.urlshortener.exception.ApiException("Creating new accounts is paused.")).when(userValidator).checkRegistrationEnabled();
+
+        assertThatThrownBy(() -> authService.register(UserRegisterDto.builder().email("test@example.com").password("password123").build()))
+                .hasMessage("Creating new accounts is paused.");
+
+        verifyNoInteractions(userRepository, sendingEmailService, userService);
     }
 
     @Test

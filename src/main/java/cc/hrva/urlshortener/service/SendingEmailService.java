@@ -22,6 +22,7 @@ public interface SendingEmailService {
     void sendEmailUrlBlocked(User owner, Url url);
     void sendEmailUrlsBlocked(User owner, List<Url> urls);
     void sendEmailAccountDeactivated(User user);
+    void sendSignUpAttemptEmail(User user);
     void sendInactivityWarningEmail(User user, LocalDate deactivationDate);
     void sendEmailForgotPassword(User user, String resetToken);
     void sendPasskeyAddedEmail(User user, String label, LocalDateTime addedAt);

@@ -14,9 +14,13 @@ A warning before an inactive account is deactivated, and tighter handling of ema
 - A password reset link works once and for 1 hour, and only a hash of it is stored. Links sent before this release no longer work; ask for a new one.
 - Setting a new password from a reset link no longer asks for your email. The link already names the account.
 - Asking for a password reset or a new verification email is limited per network and per email address, so nobody can flood an inbox. The answer never says whether an account uses the address.
+- Signing up with an email that already has an account answers the same as a new sign-up. The account gets an email saying someone tried, with links to sign in and reset the password.
 
 ### 🔗 Links
 - If the rate limiter is unavailable, password tries on a protected link are paused for a minute instead of left unlimited.
+
+### 🔑 API
+- POST /api/v1/auth/register answers 202 with a JSON body, the same for a new and a taken address. POST /api/v1/auth/password-reset/confirm answers 204 with no body.
 
 ### 🔒 Privacy
 - Email addresses are masked in every server log line.

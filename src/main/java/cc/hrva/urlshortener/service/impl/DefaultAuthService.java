@@ -21,6 +21,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import cc.hrva.urlshortener.dto.JWTTokenDto;
 import cc.hrva.urlshortener.dto.LoginDto;
+import cc.hrva.urlshortener.dto.RegistrationResponse;
 import cc.hrva.urlshortener.dto.UserRegisterDto;
 import cc.hrva.urlshortener.service.AuthService;
 import cc.hrva.urlshortener.service.LoginAttemptService;
@@ -28,6 +29,7 @@ import cc.hrva.urlshortener.service.UserService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.config.annotation.authentication.builders.AuthenticationManagerBuilder;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -50,17 +52,39 @@ public class DefaultAuthService implements AuthService {
     private final UserRegisterDtoToUserConverter userRegisterDtoToUserConverter;
     private final TwoStepLockMessage twoStepLockMessage;
     private final AccountEmailLimits accountEmailLimits;
+    private final PasswordEncoder passwordEncoder;
 
     @Override
     @Transactional
-    public String register(final UserRegisterDto userRegisterDto) {
+    public RegistrationResponse register(final UserRegisterDto userRegisterDto) {
         log.info("Registration requested email={}", EmailAddresses.masked(userRegisterDto.getEmail()));
 
         userValidator.checkRegistrationEnabled();
-        userValidator.checkEmailUniqueness(userRegisterDto.getEmail());
+        userRepository.findByEmail(userRegisterDto.getEmail()).ifPresentOrElse(
+                existing -> signUpAttempted(existing, userRegisterDto.getPassword()),
+                () -> userService.register(userRegisterDtoToUserConverter.convert(userRegisterDto)));
 
-        final var user = userRegisterDtoToUserConverter.convert(userRegisterDto);
-        return userService.register(user).getEmail();
+        return RegistrationResponse.of(userRegisterDto.getEmail());
+    }
+
+    private void signUpAttempted(final User existing, final String password) {
+        passwordEncoder.encode(password);
+        if (Boolean.FALSE.equals(existing.getActive())) {
+            log.info("Sign-up with the address of a deactivated account, nothing sent user id={}", existing.getId());
+            return;
+        }
+        if (!accountEmailLimits.allowsEmailTo(existing.getEmail())) {
+            log.info("Sign-up with the address of an existing account, the address had its account emails for the hour user id={}", existing.getId());
+            return;
+        }
+        if (Boolean.TRUE.equals(existing.getEmailVerified())) {
+            log.info("Sign-up with the address of an existing account, sending a note user id={}", existing.getId());
+            sendingEmailService.sendSignUpAttemptEmail(existing);
+            return;
+        }
+        log.info("Sign-up with the address of an unverified account, sending a new verification link user id={}", existing.getId());
+        verificationTokenService.deactivateActiveTokensForUser(existing);
+        sendingEmailService.sendVerificationEmail(existing, verificationTokenService.createTokenForUser(existing));
     }
 
     @Override

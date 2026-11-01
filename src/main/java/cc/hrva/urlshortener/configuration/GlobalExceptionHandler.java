@@ -17,7 +17,6 @@ import cc.hrva.urlshortener.exception.ConnectedAppNotFoundException;
 import cc.hrva.urlshortener.exception.CustomDomainConflictException;
 import cc.hrva.urlshortener.exception.CustomDomainNotFoundException;
 import cc.hrva.urlshortener.exception.DomainRuleNotFoundException;
-import cc.hrva.urlshortener.exception.EmailExistsException;
 import cc.hrva.urlshortener.exception.EmailLogNotFoundException;
 import cc.hrva.urlshortener.exception.EmailNotVerifiedException;
 import cc.hrva.urlshortener.exception.FeatureUnavailableException;
@@ -199,11 +198,6 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(BioPageNotFoundException.class)
     public ResponseEntity<ProblemDetail> handleBioPageNotFound(final BioPageNotFoundException ex) {
         return ProblemResponses.entity(HttpStatus.NOT_FOUND, safeMessage(ex));
-    }
-
-    @ExceptionHandler(EmailExistsException.class)
-    public ResponseEntity<ProblemDetail> handleEmailExists(final EmailExistsException ex) {
-        return ProblemResponses.entity(HttpStatus.CONFLICT, safeMessage(ex));
     }
 
     @ExceptionHandler(ShortUrlAlreadyExistsException.class)

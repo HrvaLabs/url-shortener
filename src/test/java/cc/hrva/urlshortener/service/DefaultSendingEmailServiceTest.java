@@ -844,6 +844,8 @@ class DefaultSendingEmailServiceTest {
                         "Verify your email", List.of("https://hrva.cc/verify-email/verify-token-42", "https://hrva.cc/verify-email/verify-token-42")),
                 Arguments.of("account_deactivated", (Consumer<DefaultSendingEmailService>) service -> service.sendEmailAccountDeactivated(OWNER),
                         "Account deactivated", List.of("mailto:support@hrva.cc")),
+                Arguments.of("sign_up_attempt", (Consumer<DefaultSendingEmailService>) service -> service.sendSignUpAttemptEmail(OWNER),
+                        "You already have an account", List.of("https://hrva.cc/login/", "https://hrva.cc/reset-password")),
                 Arguments.of("sign_in_method_changed", (Consumer<DefaultSendingEmailService>) service ->
                                 service.sendSignInMethodChangedEmail(OWNER, "GitHub sign-in was turned off.", PASSKEY_ADDED_AT),
                         "A sign-in method changed", List.of("https://hrva.cc/reset-password", "https://hrva.cc/dashboard/settings", "mailto:support@hrva.cc")),
@@ -859,6 +861,22 @@ class DefaultSendingEmailServiceTest {
                 .doesNotContain("<b>x</b>")
                 .doesNotContain("<script>")
                 .contains("&lt;b&gt;x&lt;/b&gt;&lt;script&gt;alert(1)&lt;/script&gt;");
+    }
+
+    @Test
+    void theSignUpAttemptNoteSaysNothingChangedAndHowToGetIn() throws Exception {
+        saveReturnsArgument();
+        final var sent = ArgumentCaptor.forClass(Email.class);
+        doAnswer(invocation -> null).when(emailService).sendEmail(sent.capture(), eq(null));
+
+        configuredEmailService(realTemplateEngine()).sendSignUpAttemptEmail(OWNER);
+
+        assertThat(sent.getValue().getReceivers()).containsExactly("alice@example.com");
+        assertThat(sent.getValue().getSubject()).isEqualTo("Someone tried to sign up with your email");
+        assertThat(textOf(sent.getValue().getText()))
+                .contains("Someone tried to create a new hrva.cc account with this email address. You already have one, so nothing was created or changed.")
+                .contains("If it was you, sign in: https://hrva.cc/login/. If you forgot your password, reset it: https://hrva.cc/reset-password.")
+                .contains("If it wasn't you, you can ignore this email.");
     }
 
     @Test
@@ -1612,7 +1630,8 @@ class DefaultSendingEmailServiceTest {
                         service.sendSignInMethodChangedEmail(OWNER, "Your password was removed.", PASSKEY_ADDED_AT)),
                 Arguments.of("account_deactivated", (Consumer<DefaultSendingEmailService>) service -> service.sendEmailAccountDeactivated(OWNER)),
                 Arguments.of("inactivity_warning", (Consumer<DefaultSendingEmailService>) service ->
-                        service.sendInactivityWarningEmail(OWNER, LocalDate.of(2026, 11, 29))));
+                        service.sendInactivityWarningEmail(OWNER, LocalDate.of(2026, 11, 29))),
+                Arguments.of("sign_up_attempt", (Consumer<DefaultSendingEmailService>) service -> service.sendSignUpAttemptEmail(OWNER)));
     }
 
     private List<EmailLog> savedEntries() {

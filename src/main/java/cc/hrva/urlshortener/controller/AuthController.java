@@ -35,13 +35,15 @@ public class AuthController {
     private final ClientIpResolver clientIpResolver;
     private final AccountEmailLimits accountEmailLimits;
 
-    @Operation(summary = "Register a new user", description = "Create a new user account with email and password.")
-    @ApiResponse(responseCode = "400", description = "Validation error or bad request")
-    @ApiResponse(responseCode = "409", description = "Email already exists")
+    @Operation(summary = "Register a new user", description = "Create a new user account with email and password. The answer is the same "
+            + "whether or not an account already uses the address: a new address gets a verification link, an existing verified account gets a note "
+            + "that someone tried to sign up with it, and an unverified one gets a new verification link.")
+    @ApiResponse(responseCode = "202", description = "Accepted: {email, message}")
+    @ApiResponse(responseCode = "400", description = "Validation error, or new accounts are paused")
     @PostMapping("/register")
-    public ResponseEntity<String> register(@Valid @RequestBody final UserRegisterDto user) {
+    public ResponseEntity<RegistrationResponse> register(@Valid @RequestBody final UserRegisterDto user) {
         log.info("Register controller invoked for user {}", EmailAddresses.masked(user.getEmail()));
-        return ResponseEntity.ok(authService.register(user));
+        return ResponseEntity.accepted().body(authService.register(user));
     }
 
     @Operation(summary = "Request password reset", description = "Send a password reset link to the given email address. The answer is the same whether or not an account uses it.")
