@@ -1415,7 +1415,7 @@ expect_eq "$HTTP_STATUS $(header_value content-type) $HTTP_LOCATION" "410 text/h
     "at once, the domain's link answers 410 with the unavailable page, its cached entry bypassed"
 expect_contains "$HTTP_BODY" "This link&#39;s domain is turned off right now." "the page says the domain is off"
 expect_contains "$HTTP_BODY" "$DOMAIN_HOST/e2e-menu" "and names the domain's short link"
-expect_eq "$(header_value content-security-policy)" "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'" \
+expect_eq "$(header_value content-security-policy)" "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'" \
     "with the warning page's CSP"
 http -H "Host: $DOMAIN_HOST" -H 'Accept: application/json' "$BASE/e2e-menu"
 expect_eq "$HTTP_STATUS $(header_value content-type) $(jq -r .reason <<<"$HTTP_BODY")" "410 application/problem+json domain" "Accept: application/json gets a problem with reason domain"
@@ -1921,8 +1921,8 @@ show "$(printf '%s\n' "$HTTP_HEADERS" | grep -iE '^(HTTP|cache-control|content-s
 expect_eq "$HTTP_STATUS" 200 "GET /$WARN_ALIAS answers the warning page, not a redirect"
 expect_eq "$HTTP_LOCATION" "" "with no Location header"
 expect_eq "$(header_value cache-control)" "no-store, no-transform" "Cache-Control: no-store, no-transform"
-expect_eq "$(header_value content-security-policy)" "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'" \
-    "the CSP allows no script, image or frame"
+expect_eq "$(header_value content-security-policy)" "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'" \
+    "the CSP allows no script or frame, and images only from hrva.cc itself"
 expect_eq "$(header_value content-type)" "text/html;charset=UTF-8" "Content-Type: text/html;charset=UTF-8"
 expect_eq "$(header_value x-robots-tag)" "noindex, nofollow" "X-Robots-Tag: noindex, nofollow"
 expect_eq "$(header_value referrer-policy)" "no-referrer" "Referrer-Policy: no-referrer"
@@ -2138,7 +2138,7 @@ http "$BASE/api/v1/admin/settings" -H "Authorization: Bearer $ADMIN_JWT"
 expect_eq "$(jq -r '[.[] | select(.changed)] | length' <<<"$HTTP_BODY")" 0 "no setting is left changed"
 
 section "28. API answers: problem details, 401 and 403, dates in UTC, HEAD, the 404 and 410 pages and a trailing slash"
-PAGE_CSP="default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+PAGE_CSP="default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
 page_headers() {
     printf '%s|%s|%s|%s' "$(header_value cache-control)" "$(header_value content-security-policy)" "$(header_value x-robots-tag)" "$(header_value referrer-policy)"
 }

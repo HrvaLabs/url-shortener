@@ -7,7 +7,7 @@ public final class LinkPageHeaders {
 
     public static final String CACHE_CONTROL = "no-store, no-transform";
     public static final String CONTENT_SECURITY_POLICY =
-            "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
+            "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
     public static final String ROBOTS = "noindex, nofollow";
     public static final String NO_REFERRER = "no-referrer";
 

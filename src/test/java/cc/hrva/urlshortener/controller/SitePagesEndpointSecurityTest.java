@@ -136,7 +136,8 @@ class SitePagesEndpointSecurityTest {
                     .andExpect(status().isNotFound())
                     .andExpect(content().contentType(HTML))
                     .andExpect(header().string(HttpHeaders.CACHE_CONTROL, LinkPageHeaders.CACHE_CONTROL))
-                    .andExpect(header().string("Content-Security-Policy", LinkPageHeaders.CONTENT_SECURITY_POLICY))
+                    .andExpect(header().string("Content-Security-Policy",
+                            "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"))
                     .andExpect(header().string("X-Robots-Tag", LinkPageHeaders.ROBOTS))
                     .andExpect(content().string(containsString("<h1>This link isn&#39;t available</h1>")))
                     .andExpect(content().string(containsString("hrva.cc/wp-admin/setup-config.php")))

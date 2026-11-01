@@ -38,7 +38,7 @@ class LinkWarningViewTest {
         assertThat(response.getContentType()).isEqualTo("text/html;charset=UTF-8");
         assertThat(response.getHeader(HttpHeaders.CACHE_CONTROL)).isEqualTo("no-store, no-transform");
         assertThat(response.getHeader("Content-Security-Policy"))
-                .isEqualTo("default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'");
+                .isEqualTo("default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'");
         assertThat(response.getHeader("X-Robots-Tag")).isEqualTo("noindex, nofollow");
         assertThat(response.getHeader("Referrer-Policy")).isEqualTo("no-referrer");
         assertThat(response.getHeader(HttpHeaders.SET_COOKIE)).isNull();
