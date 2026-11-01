@@ -21,6 +21,7 @@ A warning before an inactive account is deactivated, and tighter handling of ema
 
 ### 🔑 API
 - POST /api/v1/auth/register answers 202 with a JSON body, the same for a new and a taken address. POST /api/v1/auth/password-reset/confirm answers 204 with no body.
+- An API key also works as Authorization: Bearer <key>, besides X-Api-Key. A Bearer value that starts with hrva_ is read as a key, anything else as a sign-in.
 
 ### 🔒 Privacy
 - Email addresses are masked in every server log line.

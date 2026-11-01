@@ -23,6 +23,7 @@ import cc.hrva.urlshortener.repository.CustomDomainRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.security.AnyHostIsPrimary;
+import cc.hrva.urlshortener.security.ApiKeyBearerFilter;
 import cc.hrva.urlshortener.security.ApiKeyRateLimitFilter;
 import cc.hrva.urlshortener.security.ApiKeyTokens;
 import cc.hrva.urlshortener.security.ClickRequestResolver;
@@ -98,6 +99,9 @@ import static org.assertj.core.api.Assertions.within;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -126,6 +130,8 @@ class ApiKeyUseOnCreateFlowTest {
     private static final long OWNERS_KEY = 540L;
     private static final String OWNER_EMAIL = "keyholder@hrva.cc";
     private static final String OWNERS_KEY_VALUE = "keyholders-key";
+    private static final long BEARER_KEY = 541L;
+    private static final String BEARER_KEY_VALUE = "hrva_" + "B".repeat(43);
     private static final long ROLE_USER = 1L;
     private static final RSAKey SIGNING_KEY = generateSigningKey();
 
@@ -315,6 +321,33 @@ class ApiKeyUseOnCreateFlowTest {
     }
 
     @Test
+    void aKeySentAsABearerTokenCreatesTheLinkAndCountsLikeXApiKey() throws Exception {
+        jdbcTemplate.update("""
+                insert into api_key (id, key_hash, key_prefix, owner_id, api_calls_used, expiration_date, active)
+                values (?, ?, 'hrva_B', ?, 0, ?, true)""", BEARER_KEY, ApiKeyTokens.hash(BEARER_KEY_VALUE), OWNER, LocalDateTime.now().plusMonths(6));
+
+        mockMvc.perform(post("/api/v1/urls")
+                        .header("Authorization", "Bearer " + BEARER_KEY_VALUE)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"longUrl\":\"https://example.com/bearer\"}"))
+                .andExpect(status().isOk())
+                .andExpect(header().string("RateLimit-Limit", "600"));
+
+        assertThat(jdbcTemplate.queryForObject("select api_calls_used from api_key where id = ?", Long.class, BEARER_KEY)).isOne();
+        assertThat(linksOfTheOwner()).isOne();
+        verifyNoInteractions(tokenProvider);
+    }
+
+    @Test
+    void aJwtBearerTokenIsStillReadAsASessionAndNeverAsAKey() throws Exception {
+        mockMvc.perform(get("/api/v1/urls/{short}/peek", "nothing").header("Authorization", "Bearer eyJhbGciOiJIUzUxMiJ9.e30.c2ln"))
+                .andExpect(header().doesNotExist("RateLimit-Limit"));
+
+        verify(tokenProvider).read("eyJhbGciOiJIUzUxMiJ9.e30.c2ln");
+        verify(rateLimiter, never()).incrementWindow(anyString(), any());
+    }
+
+    @Test
     void aKeyOverItsHourlyLimitIsRefusedBeforeAnythingIsCreatedOrCounted() throws Exception {
         key(5, LocalDateTime.now().plusMonths(6));
         when(rateLimiter.incrementWindow("api-key:" + OWNERS_KEY, Duration.ofHours(1))).thenReturn(new RateLimitWindow(601, Duration.ofSeconds(90)));
@@ -438,6 +471,7 @@ class ApiKeyUseOnCreateFlowTest {
             AuthorizationServerConfiguration.class,
             McpResourceServerConfiguration.class,
             JwtFilter.class,
+            ApiKeyBearerFilter.class,
             ApiKeyRateLimitFilter.class,
             ClockConfiguration.class,
             ClientIpResolver.class,

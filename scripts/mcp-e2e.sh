@@ -2439,4 +2439,22 @@ ok "and a new verification email instead of the note"
 expect_eq "$(psql_value "select count(*) from user_account where email = '$SIGNUP_EMAIL';")" 1 "still one account for it"
 clear_account_email_limits
 
+echo "  --- an API key as Authorization: Bearer"
+OWNER_KEY_ID=$(psql_value "select id from api_key where key_hash = '$(printf '%s' "$OWNER_KEY" | shasum -a 256 | cut -d' ' -f1)';")
+CALLS_BEFORE=$(psql_value "select api_calls_used from api_key where id = $OWNER_KEY_ID;")
+http -X POST "$BASE/api/v1/urls" -H "Authorization: Bearer $OWNER_KEY" -H 'Content-Type: application/json' -d '{"longUrl":"https://example.com/bearer-key"}'
+expect_eq "$HTTP_STATUS $(header_value ratelimit-limit)" "200 600" "POST /api/v1/urls with Authorization: Bearer <key> creates the link, with the key's RateLimit headers"
+expect_eq "$(psql_value "select u.email from url l join user_account u on u.id = l.owner_id where l.long_url = 'https://example.com/bearer-key';") $(psql_value "select created_via from url where long_url = 'https://example.com/bearer-key';")" \
+    "$USER_EMAIL API_KEY" "the link belongs to the key's owner and is created via API_KEY"
+expect_eq "$(psql_value "select api_calls_used from api_key where id = $OWNER_KEY_ID;")" "$((CALLS_BEFORE + 1))" "and the request counts once on the key"
+http -X POST "$BASE/api/v1/urls" -H "Authorization: Bearer $OWNER_KEY" -H "X-Api-Key: hrva_$(printf 'Z%.0s' {1..43})" -H 'Content-Type: application/json' \
+    -d '{"longUrl":"https://example.com/two-keys"}'
+expect_eq "$HTTP_STATUS $(header_value content-type) $(jq -r .detail <<<"$HTTP_BODY")" \
+    "400 application/problem+json Send one API key: in X-Api-Key or as Authorization: Bearer, not two different ones." "two different keys are a 400 problem"
+session_login 203.0.113.254 "$USER_EMAIL" "$SESSION_PASSWORD"
+BEARER_JWT=$(jq -r .token <<<"$HTTP_BODY")
+http -X POST "$BASE/api/v1/urls" -H "Authorization: $BEARER_JWT" -H 'Content-Type: application/json' -d '{"longUrl":"https://example.com/bearer-jwt"}'
+expect_eq "$HTTP_STATUS $(header_value ratelimit-limit) $(psql_value "select created_via from url where long_url = 'https://example.com/bearer-jwt';")" \
+    "200  WEB" "a JWT as Bearer still signs the request in: a web create, no API key headers"
+
 section "Done: every step passed"

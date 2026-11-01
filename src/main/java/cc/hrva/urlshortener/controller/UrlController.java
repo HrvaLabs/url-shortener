@@ -65,7 +65,9 @@ public class UrlController {
     private final HttpServletRequest request;
     private final AppProperties appProperties;
 
-    @Operation(summary = "Create a short URL", description = "Create a short URL. Requires X-Api-Key header for programmatic access, otherwise optional for authenticated users. Set domain to one of your active custom domains to put the link on it; leave it out for hrva.cc.")
+    @Operation(summary = "Create a short URL", description = "Create a short URL. For programmatic access send an API key, as X-Api-Key: <key> or as Authorization: Bearer <key> "
+            + "(a Bearer value starting with hrva_ is read as an API key, anything else as a sign-in token; two different keys are a 400); "
+            + "signed-in users need neither. Set domain to one of your active custom domains to put the link on it; leave it out for hrva.cc.")
     @ApiResponse(responseCode = "400", description = "Validation error or bad request")
     @ApiResponse(responseCode = "409", description = "Short URL already exists")
     @ApiResponse(responseCode = "429", description = "Too many links created in the last hour, or the API key's requests this hour are over its limit (Retry-After)")
