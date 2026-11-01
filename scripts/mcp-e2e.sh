@@ -2274,4 +2274,18 @@ expect_eq "$(docker exec "$REDIS_CONTAINER" redis-cli --scan --pattern 'rate-lim
 session_login 203.0.113.250 "$USER_EMAIL" "$SESSION_PASSWORD"
 expect_eq "$HTTP_STATUS" 200 "the network signs in again"
 
+section "30. Accounts (v2.23): the login limit fails closed"
+echo "  --- password sign-in while Redis doesn't answer (CLIENT PAUSE, longer than the 3 s Redis timeout)"
+docker exec "$REDIS_CONTAINER" redis-cli CLIENT PAUSE 6000 ALL >/dev/null
+session_login 203.0.113.251 "$USER_EMAIL" "$SESSION_PASSWORD"
+expect_eq "$HTTP_STATUS $(header_value retry-after) $(header_value content-type) $(jq -r .detail <<<"$HTTP_BODY")" \
+    "503 60 application/problem+json Signing in with a password isn't available right now. Try again in a minute." \
+    "a password sign-in is a 503 problem with Retry-After: 60"
+signs_in_again() {
+    session_login 203.0.113.251 "$USER_EMAIL" "$SESSION_PASSWORD"
+    [[ $HTTP_STATUS == 200 ]]
+}
+wait_until 20 "password sign-in after the pause" signs_in_again
+ok "once Redis answers again, the same sign-in is 200"
+
 section "Done: every step passed"

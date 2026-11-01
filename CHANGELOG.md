@@ -10,6 +10,7 @@ A warning before an inactive account is deactivated, and tighter handling of ema
 
 ### 🛡️ Accounts & Security
 - You get an email 30 days before an account is deactivated for 5 years without use. Signing in, using an API key or using a connected MCP app keeps it active.
+- If the sign-in counters can't be reached, signing in with a password pauses for a minute instead of going unlimited. The message says when to try again.
 
 ### 🔗 Links
 - If the rate limiter is unavailable, password tries on a protected link are paused for a minute instead of left unlimited.

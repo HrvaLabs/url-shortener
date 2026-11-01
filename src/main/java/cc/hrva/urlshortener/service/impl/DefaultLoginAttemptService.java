@@ -3,6 +3,7 @@ package cc.hrva.urlshortener.service.impl;
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.dto.LoginAttemptResponse;
 import cc.hrva.urlshortener.exception.RateLimitExceededException;
+import cc.hrva.urlshortener.exception.SignInUnavailableException;
 import cc.hrva.urlshortener.service.LoginAttemptService;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiter;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiterUnavailableException;
@@ -43,6 +44,8 @@ public class DefaultLoginAttemptService implements LoginAttemptService {
     private static final int SCAN_BATCH = 500;
     private static final int MOST_KEYS_LISTED = 10_000;
     private static final String TOO_MANY_SIGN_INS = "Too many sign-in attempts. Try again in %s.";
+    private static final String PASSWORD_SIGN_IN_UNAVAILABLE = "Signing in with a password isn't available right now. Try again in a minute.";
+    private static final Duration UNAVAILABLE_RETRY = Duration.ofMinutes(1);
     private static final String ATTEMPTS = "attempts";
     private static final String KEY = "key";
     private static final SortWhitelist ATTEMPT_SORTS = SortWhitelist.of(ATTEMPTS, KEY)
@@ -55,12 +58,12 @@ public class DefaultLoginAttemptService implements LoginAttemptService {
 
     @Override
     public void checkSignIn(final String clientIp, final String email) {
-        refuseWhileBlocked(Stream.concat(Stream.of(networkLimit(clientIp)), accountLimit(email).stream()));
+        refuseWhileBlocked(Stream.concat(Stream.of(networkLimit(clientIp)), accountLimit(email).stream()), true);
     }
 
     @Override
     public void checkNetwork(final String clientIp) {
-        refuseWhileBlocked(Stream.of(networkLimit(clientIp)));
+        refuseWhileBlocked(Stream.of(networkLimit(clientIp)), false);
     }
 
     @Override
@@ -86,7 +89,7 @@ public class DefaultLoginAttemptService implements LoginAttemptService {
 
     @Override
     public boolean isBlocked(final String key) {
-        return blockedFor(accountLockOf(key)).isPresent();
+        return blockedFor(accountLockOf(key), false).isPresent();
     }
 
     @Override
@@ -125,8 +128,8 @@ public class DefaultLoginAttemptService implements LoginAttemptService {
         log.info("Cleared login rate limits keys={}", keys.size());
     }
 
-    private void refuseWhileBlocked(final Stream<Limit> limits) {
-        final var wait = limits.map(this::blockedFor)
+    private void refuseWhileBlocked(final Stream<Limit> limits, final boolean failClosed) {
+        final var wait = limits.map(limit -> blockedFor(limit, failClosed))
                 .flatMap(Optional::stream)
                 .max(Comparator.naturalOrder());
         if (wait.isPresent()) {
@@ -135,14 +138,14 @@ public class DefaultLoginAttemptService implements LoginAttemptService {
         }
     }
 
-    private Optional<Duration> blockedFor(final Limit limit) {
+    private Optional<Duration> blockedFor(final Limit limit, final boolean failClosed) {
         final var storedKey = RedisFixedWindowRateLimiter.KEY_PREFIX + limit.key();
-        final var attempts = attemptsOf(inRedis(() -> redisTemplate.opsForValue().get(storedKey), null));
+        final var attempts = attemptsOf(read(() -> redisTemplate.opsForValue().get(storedKey), failClosed));
         if (attempts < limit.attempts()) {
             return Optional.empty();
         }
 
-        final var millisLeft = inRedis(() -> redisTemplate.getExpire(storedKey, TimeUnit.MILLISECONDS), null);
+        final var millisLeft = read(() -> redisTemplate.getExpire(storedKey, TimeUnit.MILLISECONDS), failClosed);
         return Optional.of(millisLeft != null && millisLeft > 0 ? Duration.ofMillis(millisLeft) : limit.window());
     }
 
@@ -216,6 +219,18 @@ public class DefaultLoginAttemptService implements LoginAttemptService {
     private static String minutesOf(final Duration wait) {
         final var minutes = Math.max(1, (wait.toSeconds() + 59) / 60);
         return minutes == 1 ? "1 minute" : minutes + " minutes";
+    }
+
+    private static <T> T read(final Supplier<T> command, final boolean failClosed) {
+        if (!failClosed) {
+            return inRedis(command, null);
+        }
+        try {
+            return command.get();
+        } catch (final DataAccessException exception) {
+            log.warn("Login limit unavailable, refusing the password sign-in exception={}", exception.getClass().getName());
+            throw new SignInUnavailableException(PASSWORD_SIGN_IN_UNAVAILABLE, UNAVAILABLE_RETRY);
+        }
     }
 
     private static <T> T inRedis(final Supplier<T> command, final T whenUnavailable) {

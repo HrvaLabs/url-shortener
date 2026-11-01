@@ -291,7 +291,21 @@ class SignInEndpointSecurityTest {
 
         mockMvc.perform(post(TOTP_SECOND_STEP).contentType(MediaType.APPLICATION_JSON).content(TOTP_BODY))
                 .andExpect(status().isServiceUnavailable())
+                .andExpect(header().string("Retry-After", "60"))
                 .andExpect(content().json("{\"detail\":\"Two-step sign-in isn't available right now. Try again in a minute.\"}", JsonCompareMode.LENIENT));
+    }
+
+    @Test
+    void aPasswordSignInWhileTheLimitCantCountIsA503WithRetryAfter() throws Exception {
+        when(authService.login(any(), any())).thenThrow(new SignInUnavailableException(
+                "Signing in with a password isn't available right now. Try again in a minute.", java.time.Duration.ofMinutes(1)));
+
+        mockMvc.perform(post(LOGIN).contentType(MediaType.APPLICATION_JSON).content("""
+                        {"email":"user@example.com","password":"password123"}"""))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(header().string("Retry-After", "60"))
+                .andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON))
+                .andExpect(jsonPath("$.detail").value("Signing in with a password isn't available right now. Try again in a minute."));
     }
 
     @Test

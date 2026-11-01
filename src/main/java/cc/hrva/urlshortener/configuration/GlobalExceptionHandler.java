@@ -257,7 +257,9 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(SignInUnavailableException.class)
     public ResponseEntity<ProblemDetail> handleSignInUnavailable(final SignInUnavailableException ex) {
-        return ProblemResponses.entity(HttpStatus.SERVICE_UNAVAILABLE, safeMessage(ex));
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .header(HttpHeaders.RETRY_AFTER, ProblemResponses.retryAfterSeconds(ex.getRetryAfter()))
+                .body(ProblemResponses.of(HttpStatus.SERVICE_UNAVAILABLE, safeMessage(ex)));
     }
 
     @ExceptionHandler(PasskeyVerificationException.class)

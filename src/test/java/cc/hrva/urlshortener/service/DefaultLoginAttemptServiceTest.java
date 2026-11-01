@@ -4,6 +4,7 @@ import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.dto.LoginAttemptResponse;
 import cc.hrva.urlshortener.exception.InvalidSortException;
 import cc.hrva.urlshortener.exception.RateLimitExceededException;
+import cc.hrva.urlshortener.exception.SignInUnavailableException;
 import cc.hrva.urlshortener.mcp.bridge.InMemoryRedis;
 import cc.hrva.urlshortener.service.impl.DefaultLoginAttemptService;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiter;
@@ -159,11 +160,26 @@ class DefaultLoginAttemptServiceTest {
 
         assertThatCode(() -> {
             service.signInFailed(HOME, ANA);
-            service.checkSignIn(HOME, ANA);
+            service.checkNetwork(HOME);
             service.loginFailed("2fa:1");
         }).doesNotThrowAnyException();
         assertThat(service.isBlocked("2fa:1")).isFalse();
         assertThat(service.attempts(null, PageRequest.of(0, 20))).isEmpty();
+    }
+
+    @Test
+    void redisDownRefusesAPasswordSignInWithARetryTime() {
+        final var redisTemplate = mock(StringRedisTemplate.class);
+        when(redisTemplate.opsForValue()).thenThrow(new QueryTimeoutException("down"));
+        final var properties = new AppProperties();
+        properties.setMaxLoginAttempts(20L);
+        final var service = new DefaultLoginAttemptService(properties, new RedisFixedWindowRateLimiter(redisTemplate), redisTemplate);
+
+        assertThatThrownBy(() -> service.checkSignIn(HOME, ANA))
+                .isInstanceOfSatisfying(SignInUnavailableException.class, refused -> {
+                    assertThat(refused).hasMessage("Signing in with a password isn't available right now. Try again in a minute.");
+                    assertThat(refused.getRetryAfter()).isEqualTo(Duration.ofMinutes(1));
+                });
     }
 
     @Test

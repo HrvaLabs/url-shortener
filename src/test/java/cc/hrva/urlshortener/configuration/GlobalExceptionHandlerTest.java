@@ -7,6 +7,7 @@ import cc.hrva.urlshortener.exception.BulkBlockIncompleteException;
 import cc.hrva.urlshortener.exception.FieldValidationException;
 import cc.hrva.urlshortener.exception.RateLimitExceededException;
 import cc.hrva.urlshortener.exception.SettingNotFoundException;
+import cc.hrva.urlshortener.exception.SignInUnavailableException;
 import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -148,8 +149,21 @@ class GlobalExceptionHandlerTest {
                 .andExpect(header().string("Retry-After", "60"));
     }
 
+    @Test
+    void anUnavailableSignInIsAServiceUnavailableWithRetryAfter() throws Exception {
+        mockMvc.perform(get("/probe/sign-in-unavailable"))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(header().string("Retry-After", "60"))
+                .andExpect(jsonPath("$.detail").value("Signing in isn't available right now. Try again in a minute."));
+    }
+
     @RestController
     static class ProbeController {
+
+        @GetMapping("/probe/sign-in-unavailable")
+        String probeSignInUnavailable() {
+            throw new SignInUnavailableException("Signing in isn't available right now. Try again in a minute.");
+        }
 
         @GetMapping("/probe/fields")
         String probeFields() {
