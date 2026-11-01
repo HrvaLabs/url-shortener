@@ -6,6 +6,7 @@ import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.repository.ApiKeyRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
+import cc.hrva.urlshortener.security.ApiKeyTokens;
 import cc.hrva.urlshortener.service.impl.DefaultApiKeyService;
 import cc.hrva.urlshortener.validator.ApiKeyValidator;
 import java.time.LocalDateTime;
@@ -79,8 +80,8 @@ class ApiKeyWritesTest {
     void useTheKeyRightAfterTheRevokeLoadsIt() {
         jdbcTemplate.update("insert into user_account (id, email, password, active) values (?, 'keys@example.com', 'secret-hash', true)", OWNER);
         jdbcTemplate.update("""
-                insert into api_key (id, "KEY", owner_id, api_calls_limit, api_calls_used, expiration_date, active)
-                values (?, 'revoked-while-used', ?, 100, 4, ?, true)""", KEY, OWNER, EXPIRES);
+                insert into api_key (id, key_hash, key_prefix, owner_id, api_calls_used, expiration_date, active)
+                values (?, ?, 'revoke', ?, 4, ?, true)""", KEY, ApiKeyTokens.hash("revoked-while-used"), OWNER, EXPIRES);
         final var useCommits = new TransactionTemplate(transactionManager);
         useCommits.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
         doAnswer(invocation -> {
@@ -104,10 +105,10 @@ class ApiKeyWritesTest {
         apiKeyService.revokeApiKey(KEY);
 
         assertThat(concurrentUseDone).isTrue();
-        assertThat(jdbcTemplate.queryForMap("select active, api_calls_used, api_calls_limit from api_key where id = ?", KEY))
+        assertThat(jdbcTemplate.queryForMap("select active, api_calls_used, last_used_at from api_key where id = ?", KEY))
                 .containsEntry("ACTIVE", false)
                 .containsEntry("API_CALLS_USED", 5L)
-                .containsEntry("API_CALLS_LIMIT", 100L);
+                .extractingByKey("LAST_USED_AT").isNotNull();
     }
 
     @SpringBootConfiguration

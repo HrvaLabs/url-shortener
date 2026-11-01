@@ -2,6 +2,7 @@ package cc.hrva.urlshortener.converter;
 
 import cc.hrva.urlshortener.exception.ApiKeyNotFoundException;
 import cc.hrva.urlshortener.repository.ApiKeyRepository;
+import java.time.LocalDateTime;
 import lombok.RequiredArgsConstructor;
 import cc.hrva.urlshortener.dto.ApiKeyUpdateDto;
 import cc.hrva.urlshortener.model.ApiKey;
@@ -21,19 +22,16 @@ public class ApiKeyUpdateDtoToApiKeyConverter implements Converter<ApiKeyUpdateD
                         apiKeyUpdateDto.getId())));
         final var editedApiKey = ApiKey.builder()
                 .id(existingApiKey.getId())
-                .apiCallsLimit(existingApiKey.getApiCallsLimit())
                 .apiCallsUsed(existingApiKey.getApiCallsUsed())
                 .expirationDate(existingApiKey.getExpirationDate())
                 .active(existingApiKey.isActive())
                 .build();
 
-        if (apiKeyUpdateDto.getApiCallsLimit() != null) {
-            editedApiKey.setApiCallsLimit(apiKeyUpdateDto.getApiCallsLimit() > 0 ? apiKeyUpdateDto.getApiCallsLimit() : null);
-        }
-        if (apiKeyUpdateDto.getApiCallsUsed() != null) {
-            editedApiKey.setApiCallsUsed(apiKeyUpdateDto.getApiCallsUsed());
-        }
-        if (apiKeyUpdateDto.getExpirationDate() != null) {
+        if (Boolean.TRUE.equals(apiKeyUpdateDto.getNeverExpires())) {
+            editedApiKey.setExpirationDate(null);
+        } else if (apiKeyUpdateDto.getExpiresInDays() != null) {
+            editedApiKey.setExpirationDate(LocalDateTime.now().plusDays(apiKeyUpdateDto.getExpiresInDays()));
+        } else if (apiKeyUpdateDto.getExpirationDate() != null) {
             editedApiKey.setExpirationDate(apiKeyUpdateDto.getExpirationDate());
         }
         if (apiKeyUpdateDto.getActive() != null) {

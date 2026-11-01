@@ -42,6 +42,30 @@ class RedisFixedWindowRateLimiterTest {
     }
 
     @Test
+    void aWindowHasItsCountAndTheTimeUntilItResets() {
+        when(redisTemplate.execute(any(RedisScript.class), eq(List.of("rate-limit:" + KEY)), eq("3600000"))).thenReturn(List.of(3L, 1_799_001L));
+
+        assertThat(rateLimiter.incrementWindow(KEY, WINDOW)).isEqualTo(new RateLimitWindow(3, Duration.ofMillis(1_799_001L)));
+    }
+
+    @Test
+    void aWindowWithoutAnAnswerIsOverEveryLimitForTheWholeWindow() {
+        when(redisTemplate.execute(any(RedisScript.class), anyList(), any(Object[].class))).thenReturn(null);
+
+        assertThat(rateLimiter.incrementWindow(KEY, WINDOW)).isEqualTo(new RateLimitWindow(Long.MAX_VALUE, WINDOW));
+    }
+
+    @Test
+    void aWindowThatCannotBeCountedIsLeftToTheCaller() {
+        when(redisTemplate.execute(any(RedisScript.class), anyList(), any(Object[].class)))
+                .thenThrow(new RedisConnectionFailureException("Unable to connect"));
+
+        assertThatThrownBy(() -> rateLimiter.incrementWindow(KEY, WINDOW))
+                .isInstanceOf(RateLimiterUnavailableException.class)
+                .hasCauseInstanceOf(RedisConnectionFailureException.class);
+    }
+
+    @Test
     void aMissingCountIsOverEveryLimit() {
         when(redisTemplate.execute(any(RedisScript.class), anyList(), any(Object[].class))).thenReturn(null);
 

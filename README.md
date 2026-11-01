@@ -10,7 +10,7 @@ The changelog is shown at [app.hrva.cc/changelog](https://app.hrva.cc/changelog)
 ### Links
 - Random short links, or a custom alias when you're signed in. Links can also be made without an account, with a stricter rate limit.
 - Expiry dates, visit limits, password protection and tags.
-- Bulk creation, and an API with API keys.
+- Bulk creation, and an API with API keys (`X-Api-Key`). Each key makes up to 600 requests an hour by default (Site settings); every response carries `RateLimit-Limit`, `RateLimit-Remaining` and `RateLimit-Reset`, and a key over the limit gets a 429 with `Retry-After`. A key expires after the days you choose (1 to 3,650), after 12 months by default, or never. Keys are stored as SHA-256 hashes: the full key is shown once, when it is made, and the lists show its first characters.
 - A campaign tag (UTM) builder.
 - QR codes that count their scans.
 - Opt-in notifications by email or to Discord, Slack, Telegram, ntfy or a webhook: dead destinations, expiry reminders, and daily or weekly summaries.

@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.9.xsd">
+
+    <changeSet author="khrvacic" id="038-delete-api-keys-switched-off-by-the-call-limit">
+        <comment>No foreign key references api_key (url.api_key_id was dropped in 010). A rollback can't bring the deleted keys back.</comment>
+        <delete tableName="api_key">
+            <where>active = false and api_calls_limit is not null and api_calls_used &gt;= api_calls_limit</where>
+        </delete>
+        <rollback/>
+    </changeSet>
+
+    <changeSet author="khrvacic" id="038-drop-api-key-call-limit">
+        <dropColumn tableName="api_key" columnName="api_calls_limit"/>
+        <rollback>
+            <addColumn tableName="api_key">
+                <column name="api_calls_limit" type="BIGINT">
+                    <constraints nullable="true"/>
+                </column>
+            </addColumn>
+        </rollback>
+    </changeSet>
+
+    <changeSet author="khrvacic" id="038-api-key-last-used-at">
+        <addColumn tableName="api_key">
+            <column name="last_used_at" type="TIMESTAMP">
+                <constraints nullable="true"/>
+            </column>
+        </addColumn>
+        <rollback>
+            <dropColumn tableName="api_key" columnName="last_used_at"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet author="khrvacic" id="038-api-key-hash-columns">
+        <addColumn tableName="api_key">
+            <column name="key_hash" type="VARCHAR(64)"/>
+            <column name="key_prefix" type="VARCHAR(16)"/>
+        </addColumn>
+        <rollback>
+            <dropColumn tableName="api_key" columnName="key_prefix"/>
+            <dropColumn tableName="api_key" columnName="key_hash"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet author="khrvacic" id="038-api-key-hash-existing-keys-postgresql" dbms="postgresql">
+        <comment>sha256() is built into Postgres 11 and later; pgcrypto isn't needed.</comment>
+        <sql>update api_key set key_hash = encode(sha256(convert_to(key, 'UTF8')), 'hex'), key_prefix = left(key, 6)</sql>
+        <rollback/>
+    </changeSet>
+
+    <changeSet author="khrvacic" id="038-api-key-hash-existing-keys-h2" dbms="h2">
+        <sql>update api_key set key_hash = lower(rawtohex(hash('SHA-256', stringtoutf8("KEY")))), key_prefix = left("KEY", 6)</sql>
+        <rollback/>
+    </changeSet>
+
+    <changeSet author="khrvacic" id="038-api-key-hash-required">
+        <comment>Fails, before the plaintext column is dropped, if any key was left without a hash.</comment>
+        <addNotNullConstraint tableName="api_key" columnName="key_hash" columnDataType="VARCHAR(64)"/>
+        <addNotNullConstraint tableName="api_key" columnName="key_prefix" columnDataType="VARCHAR(16)"/>
+        <addUniqueConstraint tableName="api_key" columnNames="key_hash" constraintName="ux_api_key_key_hash"/>
+        <rollback>
+            <dropUniqueConstraint tableName="api_key" constraintName="ux_api_key_key_hash"/>
+            <dropNotNullConstraint tableName="api_key" columnName="key_prefix" columnDataType="VARCHAR(16)"/>
+            <dropNotNullConstraint tableName="api_key" columnName="key_hash" columnDataType="VARCHAR(64)"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet author="khrvacic" id="038-drop-api-key-plaintext">
+        <comment>Only the hash is kept. A rollback re-adds the column empty: the keys can't be read back from their hashes.</comment>
+        <dropColumn tableName="api_key" columnName="KEY"/>
+        <rollback>
+            <addColumn tableName="api_key">
+                <column name="KEY" type="VARCHAR(255)"/>
+            </addColumn>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>

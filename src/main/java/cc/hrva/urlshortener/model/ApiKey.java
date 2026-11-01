@@ -1,6 +1,6 @@
 package cc.hrva.urlshortener.model;
 
-import cc.hrva.urlshortener.configuration.properties.AppProperties;
+import cc.hrva.urlshortener.security.ApiKeyTokens;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
@@ -10,7 +10,6 @@ import jakarta.persistence.ManyToOne;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.SequenceGenerator;
 import java.time.LocalDateTime;
-import java.util.UUID;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
@@ -32,15 +31,18 @@ public class ApiKey {
     @GeneratedValue(generator = "api_key_id_seq", strategy = GenerationType.SEQUENCE)
     private Long id;
 
-    @Column(unique = true)
-    private String key;
+    @Column(unique = true, nullable = false, length = 64)
+    private String keyHash;
+
+    @Column(nullable = false, length = 16)
+    private String keyPrefix;
 
     @ManyToOne
     private User owner;
 
-    private Long apiCallsLimit;
-
     private Long apiCallsUsed;
+
+    private LocalDateTime lastUsedAt;
 
     private LocalDateTime createDate;
 
@@ -48,11 +50,11 @@ public class ApiKey {
 
     private boolean active;
 
-    public ApiKey(final User user, final AppProperties appProperties) {
-        this.key = UUID.randomUUID().toString();
+    public ApiKey(final User user, final LocalDateTime expirationDate, final ApiKeyTokens.NewApiKey token) {
+        this.keyHash = token.hash();
+        this.keyPrefix = token.prefix();
         this.owner = user;
-        this.apiCallsLimit = appProperties.getApiKeyCallsLimit();
-        this.expirationDate = LocalDateTime.now().plusMonths(appProperties.getApiKeyExpirationInMonths());
+        this.expirationDate = expirationDate;
     }
 
     @PrePersist

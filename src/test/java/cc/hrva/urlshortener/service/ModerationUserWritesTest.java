@@ -17,6 +17,7 @@ import cc.hrva.urlshortener.repository.TwoFactorRecoveryCodeRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.repository.VerificationTokenRepository;
+import cc.hrva.urlshortener.security.ApiKeyTokens;
 import cc.hrva.urlshortener.security.Reauthentication;
 import cc.hrva.urlshortener.service.bio.BioAccountData;
 import cc.hrva.urlshortener.service.domain.CustomDomainAccountData;
@@ -263,8 +264,9 @@ class ModerationUserWritesTest {
     void blockingAUserTurnsItsActiveKeysOffInOneUpdateAndKeepsTheirCounts() {
         member(true);
         jdbcTemplate.update("""
-                insert into api_key (id, "KEY", owner_id, api_calls_limit, api_calls_used, active)
-                values (731, 'members-first-key', ?, 100, 3, true), (732, 'members-second-key', ?, 100, 9, true)""", MEMBER, MEMBER);
+                insert into api_key (id, key_hash, key_prefix, owner_id, api_calls_used, active)
+                values (731, ?, 'member', ?, 3, true), (732, ?, 'member', ?, 9, true)""",
+                ApiKeyTokens.hash("members-first-key"), MEMBER, ApiKeyTokens.hash("members-second-key"), MEMBER);
 
         moderationService.blockUser(MEMBER, ADMIN, "admin", null);
 

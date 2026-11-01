@@ -24,6 +24,7 @@ import cc.hrva.urlshortener.repository.CustomDomainRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.security.AnyHostIsPrimary;
+import cc.hrva.urlshortener.security.ApiKeyTokens;
 import cc.hrva.urlshortener.security.ClickRequestResolver;
 import cc.hrva.urlshortener.security.ClientIpResolver;
 import cc.hrva.urlshortener.security.JwtFilter;
@@ -236,8 +237,8 @@ class LinkFlowsWithoutOpenInViewTest {
         signedIn("owner-token", OWNER_EMAIL);
         signedIn("other-token", OTHER_EMAIL);
         jdbcTemplate.update("""
-                insert into api_key (id, "KEY", owner_id, api_calls_limit, api_calls_used, expiration_date, active)
-                values (?, ?, ?, 100, 0, dateadd('MONTH', 6, current_date), true)""", OWNERS_KEY, OWNERS_KEY_VALUE, OWNER);
+                insert into api_key (id, key_hash, key_prefix, owner_id, api_calls_used, expiration_date, active)
+                values (?, ?, 'owners', ?, 0, dateadd('MONTH', 6, current_date), true)""", OWNERS_KEY, ApiKeyTokens.hash(OWNERS_KEY_VALUE), OWNER);
         when(userService.getUserFromToken()).thenAnswer(invocation -> signedInAccount());
         when(linkCheckService.check(any())).thenReturn(LinkVerdict.clean());
         when(rateLimiter.tryAcquire(anyString(), anyInt(), any())).thenReturn(true);

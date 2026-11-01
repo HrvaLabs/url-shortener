@@ -25,7 +25,9 @@ public interface ApiKeyRepository extends JpaRepository<ApiKey, Long>, JpaSpecif
     Page<ApiKey> findAll(Specification<ApiKey> spec, Pageable pageable);
 
     @EntityGraph(attributePaths = {"owner", "owner.authorities"}, type = EntityGraph.EntityGraphType.LOAD)
-    Optional<ApiKey> findApiKeyByKey(String key);
+    Optional<ApiKey> findApiKeyByKeyHash(String keyHash);
+    @Query("select k.id from ApiKey k where k.keyHash = :keyHash")
+    Optional<Long> findIdByKeyHash(@Param("keyHash") String keyHash);
     List<ApiKey> findByOwner(User owner);
     List<ApiKey> findByOwner(User owner, Sort sort);
     List<ApiKey> findByOwnerAndActive(User owner, boolean active, Sort sort);
@@ -37,11 +39,11 @@ public interface ApiKeyRepository extends JpaRepository<ApiKey, Long>, JpaSpecif
     @Query("""
             update ApiKey k
             set k.active = case
-                    when (k.apiCallsLimit is not null and k.apiCallsUsed + 1 >= k.apiCallsLimit)
-                            or (k.expirationDate is not null and k.expirationDate < :now) then false
+                    when k.expirationDate is not null and k.expirationDate < :now then false
                     else k.active
                 end,
-                k.apiCallsUsed = k.apiCallsUsed + 1
+                k.apiCallsUsed = k.apiCallsUsed + 1,
+                k.lastUsedAt = :now
             where k.id = :id and k.active = true""")
     int recordUse(@Param("id") Long id, @Param("now") LocalDateTime now);
 

@@ -1,33 +1,38 @@
 package cc.hrva.urlshortener.model;
 
+import cc.hrva.urlshortener.security.ApiKeyTokens;
 import java.time.LocalDateTime;
-import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.Mockito.when;
 
-@ExtendWith(MockitoExtension.class)
 class ApiKeyTest {
 
-    @Mock
-    private AppProperties appProperties;
+    @Test
+    void aNewKeyBelongsToItsOwnerAndExpiresWhenAsked() {
+        final var user = User.builder().id(1L).build();
+        final var expiry = LocalDateTime.of(2027, 1, 30, 10, 0);
+
+        final var token = ApiKeyTokens.generate();
+
+        final var apiKey = new ApiKey(user, expiry, token);
+
+        assertThat(apiKey.getKeyHash()).isEqualTo(token.hash());
+        assertThat(apiKey.getKeyPrefix()).isEqualTo(token.prefix());
+        assertThat(apiKey.getOwner()).isEqualTo(user);
+        assertThat(apiKey.getExpirationDate()).isEqualTo(expiry);
+        assertThat(apiKey.getLastUsedAt()).isNull();
+    }
 
     @Test
-    void shouldCreateApiKeyWithDefaults() {
-        final var user = User.builder().id(1L).build();
-        when(appProperties.getApiKeyCallsLimit()).thenReturn(100L);
-        when(appProperties.getApiKeyExpirationInMonths()).thenReturn(3L);
+    void aNewKeyCanNeverExpire() {
+        assertThat(new ApiKey(User.builder().id(1L).build(), null, ApiKeyTokens.generate()).getExpirationDate()).isNull();
+    }
 
-        final var apiKey = new ApiKey(user, appProperties);
-
-        assertThat(apiKey.getKey()).isNotNull();
-        assertThat(apiKey.getOwner()).isEqualTo(user);
-        assertThat(apiKey.getApiCallsLimit()).isEqualTo(100L);
-        assertThat(apiKey.getExpirationDate()).isAfter(LocalDateTime.now());
+    @Test
+    void theKeyItselfIsNeverPartOfTheEntity() {
+        assertThat(java.util.Arrays.stream(ApiKey.class.getDeclaredFields()).map(java.lang.reflect.Field::getName))
+                .contains("keyHash", "keyPrefix").doesNotContain("key");
     }
 
     @Test

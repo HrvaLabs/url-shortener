@@ -245,8 +245,8 @@ class UsersStatsRepositoryTest {
     }
 
     private void apiKey(final long id, final boolean active, final LocalDate expirationDate, final Long apiCallsUsed) {
-        jdbcTemplate.update("insert into api_key (id, key, active, expiration_date, api_calls_used) values (?, ?, ?, ?, ?)",
-                id, "key-" + id, active, expirationDate, apiCallsUsed);
+        jdbcTemplate.update("insert into api_key (id, key_hash, key_prefix, active, expiration_date, api_calls_used) values (?, ?, ?, ?, ?, ?)",
+                id, "hash-" + id, "key-" + id, active, expirationDate, apiCallsUsed);
     }
 
     private void client(final String id) {

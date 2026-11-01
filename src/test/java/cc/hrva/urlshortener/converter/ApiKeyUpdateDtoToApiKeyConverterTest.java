@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.converter;
 
+import java.time.LocalDateTime;
 import java.util.Optional;
 import cc.hrva.urlshortener.dto.ApiKeyUpdateDto;
 import cc.hrva.urlshortener.exception.ApiKeyNotFoundException;
@@ -11,13 +12,17 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
-import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
-import static org.assertj.core.api.AssertionsForClassTypes.assertThatCode;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.within;
+import static java.time.temporal.ChronoUnit.SECONDS;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class ApiKeyUpdateDtoToApiKeyConverterTest {
+
+    private static final LocalDateTime EXPIRY = LocalDateTime.of(2027, 12, 1, 0, 0);
 
     private ApiKeyUpdateDtoToApiKeyConverter converter;
 
@@ -43,43 +48,58 @@ class ApiKeyUpdateDtoToApiKeyConverterTest {
 
     @Test
     void theLoadedKeyIsLeftUntouched() {
-        final var expiry = java.time.LocalDateTime.of(2026, 12, 1, 0, 0);
-        final var apiKey = ApiKey.builder().id(1L).key("secret-key").apiCallsLimit(100L).apiCallsUsed(42L).expirationDate(expiry).active(true).build();
-        when(apiKeyRepository.findById(1L)).thenReturn(Optional.of(apiKey));
+        final var apiKey = loaded();
 
-        final var edited = converter.convert(ApiKeyUpdateDto.builder().id(1L).apiCallsLimit(500L).apiCallsUsed(0L)
-                .expirationDate(expiry.plusMonths(6)).active(false).build());
+        final var edited = converter.convert(ApiKeyUpdateDto.builder().id(1L).expirationDate(EXPIRY.plusMonths(6)).active(false).build());
 
-        org.assertj.core.api.Assertions.assertThat(edited).isNotSameAs(apiKey);
-        org.assertj.core.api.Assertions.assertThat(edited.getKey()).isNull();
-        org.assertj.core.api.Assertions.assertThat(apiKey.getApiCallsLimit()).isEqualTo(100L);
-        org.assertj.core.api.Assertions.assertThat(apiKey.getApiCallsUsed()).isEqualTo(42L);
-        org.assertj.core.api.Assertions.assertThat(apiKey.getExpirationDate()).isEqualTo(expiry);
-        org.assertj.core.api.Assertions.assertThat(apiKey.isActive()).isTrue();
+        assertThat(edited).isNotSameAs(apiKey);
+        assertThat(edited.getKeyHash()).isNull();
+        assertThat(apiKey.getApiCallsUsed()).isEqualTo(42L);
+        assertThat(apiKey.getExpirationDate()).isEqualTo(EXPIRY);
+        assertThat(apiKey.isActive()).isTrue();
     }
 
     @Test
-    void changesOnlyTheLimitWhenOnlyTheLimitIsSent() {
-        final var expiry = java.time.LocalDateTime.now().plusDays(30);
-        final var apiKey = ApiKey.builder().id(1L).apiCallsLimit(100L).apiCallsUsed(42L).expirationDate(expiry).active(true).build();
-        when(apiKeyRepository.findById(1L)).thenReturn(java.util.Optional.of(apiKey));
+    void theUsageIsNeverEdited() {
+        loaded();
 
-        final var result = converter.convert(ApiKeyUpdateDto.builder().id(1L).apiCallsLimit(500L).build());
+        final var result = converter.convert(ApiKeyUpdateDto.builder().id(1L).active(false).build());
 
-        org.assertj.core.api.Assertions.assertThat(result.getApiCallsLimit()).isEqualTo(500L);
-        org.assertj.core.api.Assertions.assertThat(result.getApiCallsUsed()).isEqualTo(42L);
-        org.assertj.core.api.Assertions.assertThat(result.getExpirationDate()).isEqualTo(expiry);
-        org.assertj.core.api.Assertions.assertThat(result.isActive()).isTrue();
+        assertThat(result.getApiCallsUsed()).isEqualTo(42L);
+        assertThat(result.getExpirationDate()).isEqualTo(EXPIRY);
+        assertThat(result.isActive()).isFalse();
     }
 
     @Test
-    void aZeroLimitMeansUnlimited() {
-        final var apiKey = ApiKey.builder().id(1L).apiCallsLimit(100L).apiCallsUsed(0L).active(true).build();
-        when(apiKeyRepository.findById(1L)).thenReturn(java.util.Optional.of(apiKey));
+    void anExpiryInDaysCountsFromNow() {
+        loaded();
 
-        final var result = converter.convert(ApiKeyUpdateDto.builder().id(1L).apiCallsLimit(0L).build());
+        final var result = converter.convert(ApiKeyUpdateDto.builder().id(1L).expiresInDays(30).build());
 
-        org.assertj.core.api.Assertions.assertThat(result.getApiCallsLimit()).isNull();
+        assertThat(result.getExpirationDate()).isCloseTo(LocalDateTime.now().plusDays(30), within(5, SECONDS));
+        assertThat(result.isActive()).isTrue();
+    }
+
+    @Test
+    void noExpiryClearsTheDate() {
+        loaded();
+
+        assertThat(converter.convert(ApiKeyUpdateDto.builder().id(1L).neverExpires(true).build()).getExpirationDate()).isNull();
+    }
+
+    @Test
+    void neverExpiresFalseAloneKeepsTheDate() {
+        loaded();
+
+        assertThat(converter.convert(ApiKeyUpdateDto.builder().id(1L).neverExpires(false).build()).getExpirationDate()).isEqualTo(EXPIRY);
+    }
+
+    @Test
+    void anExpirationDateStillSetsTheDate() {
+        loaded();
+
+        assertThat(converter.convert(ApiKeyUpdateDto.builder().id(1L).expirationDate(EXPIRY.plusYears(1)).build()).getExpirationDate())
+                .isEqualTo(EXPIRY.plusYears(1));
     }
 
     @Test
@@ -91,5 +111,11 @@ class ApiKeyUpdateDtoToApiKeyConverterTest {
         assertThatCode(() -> converter.convert(apiKeyUpdateDto))
                 .isInstanceOf(ApiKeyNotFoundException.class)
                 .hasMessage(String.format("API key with ID %d has not been found", apiKeyUpdateDto.getId()));
+    }
+
+    private ApiKey loaded() {
+        final var apiKey = ApiKey.builder().id(1L).keyHash("stored-hash").apiCallsUsed(42L).expirationDate(EXPIRY).active(true).build();
+        when(apiKeyRepository.findById(1L)).thenReturn(Optional.of(apiKey));
+        return apiKey;
     }
 }

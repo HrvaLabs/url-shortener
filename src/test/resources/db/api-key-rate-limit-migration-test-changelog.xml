@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.9.xsd">
+
+    <include file="classpath:/db/changelog/codebook/authorities.xml"/>
+    <include file="classpath:/db/changelog/table/user.xml"/>
+    <include file="classpath:/db/changelog/table/V1.0.0_remove_name_from_user_table.xml"/>
+    <include file="classpath:/db/changelog/table/api_key.xml"/>
+
+    <changeSet author="test" id="api-key-rate-limit-existing-keys">
+        <insert tableName="user_account">
+            <column name="id" valueNumeric="1"/>
+            <column name="email" value="keys@example.com"/>
+            <column name="password" value="$2a$10$hash"/>
+        </insert>
+        <sql>
+            insert into api_key (id, "KEY", owner_id, api_calls_limit, api_calls_used, expiration_date, active) values
+                (1, 'used-up', 1, 256, 256, '2027-01-01', false),
+                (2, 'used-past-its-limit', 1, 256, 300, '2027-01-01', false),
+                (3, 'revoked-early', 1, 256, 10, '2027-01-01', false),
+                (4, 'active-at-its-limit', 1, 256, 256, '2027-01-01', true),
+                (5, 'revoked-without-a-limit', 1, null, 1000, '2027-01-01', false),
+                (6, '0b7c4f2e-6a1d-4e8b-9f3a-2c5d7e9f1a3b', 1, 256, 3, '2025-01-01', false)
+        </sql>
+    </changeSet>
+
+    <include file="classpath:/db/changelog/038-api-key-rate-limit.xml"/>
+
+</databaseChangeLog>

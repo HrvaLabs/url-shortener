@@ -1,8 +1,12 @@
 package cc.hrva.urlshortener.validator.impl;
 
 import cc.hrva.urlshortener.repository.ApiKeyRepository;
+import cc.hrva.urlshortener.security.ApiKeyTokens;
 import java.time.LocalDateTime;
 import java.util.Optional;
+import java.util.stream.Stream;
+import cc.hrva.urlshortener.exception.ApiException;
+import cc.hrva.urlshortener.exception.FieldValidationException;
 import lombok.RequiredArgsConstructor;
 import cc.hrva.urlshortener.exception.ApiKeyNotFoundException;
 import cc.hrva.urlshortener.exception.InvalidApiKeyException;
@@ -18,18 +22,19 @@ import org.springframework.stereotype.Component;
 @RequiredArgsConstructor
 public class DefaultApiKeyValidator implements ApiKeyValidator {
 
+    private static final String CHOOSE_ONE_EXPIRY = "Choose either an expiry in days or no expiry.";
+    private static final String EXPIRATION_DATE = "expirationDate";
+    private static final String EXPIRATION_DATE_IN_THE_PAST = "Choose a date in the future.";
+
     private final UserService userService;
     private final ApiKeyRepository apiKeyRepository;
 
     @Override
     public void apiKeyExistsByKeyAndIsValid(final String key) {
-        final var apiKey = apiKeyRepository.findApiKeyByKey(key)
+        final var hash = ApiKeyTokens.hash(key);
+        final var apiKey = apiKeyRepository.findApiKeyByKeyHash(hash)
+                .filter(found -> ApiKeyTokens.sameHash(found.getKeyHash(), hash))
                 .orElseThrow(() -> new ApiKeyNotFoundException("API key doesn't exist"));
-
-        if (apiKey.getApiCallsUsed() >= Optional.ofNullable(apiKey.getApiCallsLimit())
-                .orElse(apiKey.getApiCallsUsed()) + 1) {
-            throw new InvalidApiKeyException("API key call limit reached");
-        }
 
         if (LocalDateTime.now().isAfter(Optional.ofNullable(apiKey.getExpirationDate())
                 .orElse(LocalDateTime.now().plusDays(1)))) {
@@ -42,6 +47,19 @@ public class DefaultApiKeyValidator implements ApiKeyValidator {
 
         if (apiKey.getOwner() == null || Boolean.FALSE.equals(apiKey.getOwner().getActive())) {
             throw new InvalidApiKeyException("API key owner account is inactive");
+        }
+    }
+
+    @Override
+    public void validateExpiry(final Integer expiresInDays, final Boolean neverExpires, final LocalDateTime expirationDate) {
+        final var choices = Stream.of(expiresInDays != null, Boolean.TRUE.equals(neverExpires), expirationDate != null)
+                .filter(Boolean::booleanValue)
+                .count();
+        if (choices > 1) {
+            throw new ApiException(CHOOSE_ONE_EXPIRY);
+        }
+        if (expirationDate != null && !expirationDate.isAfter(LocalDateTime.now())) {
+            throw new FieldValidationException(EXPIRATION_DATE, EXPIRATION_DATE_IN_THE_PAST);
         }
     }
 

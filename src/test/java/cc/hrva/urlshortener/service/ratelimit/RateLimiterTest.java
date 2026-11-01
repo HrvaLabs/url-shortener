@@ -3,6 +3,7 @@ package cc.hrva.urlshortener.service.ratelimit;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.time.Duration;
 import java.util.HexFormat;
 import org.junit.jupiter.api.Test;
 
@@ -43,6 +44,13 @@ class RateLimiterTest {
         assertThat(RateLimiter.clientKey(NAME, "not-an-ip.example")).matches(KEY_PATTERN)
                 .isEqualTo(NAME + ":" + sha256("not-an-ip.example"))
                 .isNotEqualTo(RateLimiter.clientKey(NAME, ""));
+    }
+
+    @Test
+    void aLimiterThatOnlyCountsResetsAfterTheWholeWindow() {
+        final RateLimiter countsTwo = (key, window) -> 2;
+
+        assertThat(countsTwo.incrementWindow("api-key:1", Duration.ofHours(1))).isEqualTo(new RateLimitWindow(2, Duration.ofHours(1)));
     }
 
     @Test

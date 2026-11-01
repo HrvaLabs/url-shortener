@@ -4,6 +4,7 @@ import cc.hrva.urlshortener.model.ApiKey;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.repository.ApiKeyRepository;
+import cc.hrva.urlshortener.security.ApiKeyTokens;
 import jakarta.persistence.EntityManager;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -64,7 +65,7 @@ class ApiKeySpecificationTest {
     }
 
     private void persistKey(final User owner, final String key, final boolean active, final long callsUsed, final int day) {
-        final var apiKey = ApiKey.builder().key(key).owner(owner).apiCallsLimit(1000L).expirationDate(LocalDateTime.of(2027, 1, 10 - day, 0, 0)).build();
+        final var apiKey = ApiKey.builder().keyHash(ApiKeyTokens.hash(key)).keyPrefix(key.substring(0, key.startsWith("hrva_") ? 11 : 6)).owner(owner).expirationDate(LocalDateTime.of(2027, 1, 10 - day, 0, 0)).build();
         entityManager.persist(apiKey);
         entityManager.flush();
         apiKey.setCreateDate(LocalDateTime.of(2026, 10, day, 9, 0));
@@ -73,25 +74,32 @@ class ApiKeySpecificationTest {
     }
 
     private List<String> keys(final Specification<ApiKey> spec, final Sort sort) {
-        return apiKeyRepository.findAll(spec, PageRequest.of(0, 20, sort)).stream().map(apiKey -> apiKey.getKey().substring(0, 8)).toList();
+        return apiKeyRepository.findAll(spec, PageRequest.of(0, 20, sort)).stream().map(ApiKey::getKeyPrefix).toList();
     }
 
     @Test
     void matchesAPartOfTheOwnerEmailInAnyCase() {
-        assertThat(keys(ApiKeySpecification.searchMatches("ana.HORVAT@"), NEWEST_FIRST)).containsExactly("a1b2c3d4", "3f2b9c1e");
-        assertThat(keys(ApiKeySpecification.searchMatches("studio"), NEWEST_FIRST)).containsExactly("50_off%0", "a1b2ffff");
+        assertThat(keys(ApiKeySpecification.searchMatches("ana.HORVAT@"), NEWEST_FIRST)).containsExactly("a1b2c3", "3f2b9c");
+        assertThat(keys(ApiKeySpecification.searchMatches("studio"), NEWEST_FIRST)).containsExactly("50_off", "a1b2ff");
     }
 
     @Test
     void matchesTheStartOfTheKeyOnly() {
-        assertThat(keys(ApiKeySpecification.searchMatches("A1B2"), NEWEST_FIRST)).containsExactly("a1b2ffff", "a1b2c3d4");
-        assertThat(keys(ApiKeySpecification.searchMatches("a1b2c"), NEWEST_FIRST)).containsExactly("a1b2c3d4");
+        assertThat(keys(ApiKeySpecification.searchMatches("A1B2"), NEWEST_FIRST)).containsExactly("a1b2ff", "a1b2c3");
+        assertThat(keys(ApiKeySpecification.searchMatches("a1b2c"), NEWEST_FIRST)).containsExactly("a1b2c3");
         assertThat(keys(ApiKeySpecification.searchMatches("c3d4"), NEWEST_FIRST)).isEmpty();
     }
 
     @Test
+    void aWholeKeyFindsItsKeyByItsHash() {
+        assertThat(keys(ApiKeySpecification.searchMatches("a1b2c3d4-0000-4000-8000-000000000002"), NEWEST_FIRST)).containsExactly("a1b2c3");
+        assertThat(keys(ApiKeySpecification.searchMatches("a1b2c3d4-0000-4000-8000-000000000009"), NEWEST_FIRST)).isEmpty();
+    }
+
+    @Test
     void anUnderscoreAPercentSignOrABackslashIsNotAWildcard() {
-        assertThat(keys(ApiKeySpecification.searchMatches("50_off%"), NEWEST_FIRST)).containsExactly("50_off%0");
+        assertThat(keys(ApiKeySpecification.searchMatches("50_off"), NEWEST_FIRST)).containsExactly("50_off");
+        assertThat(keys(ApiKeySpecification.searchMatches("50%"), NEWEST_FIRST)).isEmpty();
         assertThat(keys(ApiKeySpecification.searchMatches("5_"), NEWEST_FIRST)).isEmpty();
         assertThat(keys(ApiKeySpecification.searchMatches("%"), NEWEST_FIRST)).isEmpty();
         assertThat(keys(ApiKeySpecification.searchMatches("\\"), NEWEST_FIRST)).isEmpty();
@@ -99,16 +107,16 @@ class ApiKeySpecificationTest {
 
     @Test
     void theActiveFilterKeepsActiveOrInactiveKeys() {
-        assertThat(keys(ApiKeySpecification.hasActive(true), NEWEST_FIRST)).containsExactly("a1b2ffff", "3f2b9c1e");
-        assertThat(keys(ApiKeySpecification.hasActive(false).and(ApiKeySpecification.searchMatches("ana")), NEWEST_FIRST)).containsExactly("a1b2c3d4");
+        assertThat(keys(ApiKeySpecification.hasActive(true), NEWEST_FIRST)).containsExactly("a1b2ff", "3f2b9c");
+        assertThat(keys(ApiKeySpecification.hasActive(false).and(ApiKeySpecification.searchMatches("ana")), NEWEST_FIRST)).containsExactly("a1b2c3");
     }
 
     @Test
     void keysSortByCallsUsedOrByExpiry() {
         assertThat(keys(Specification.unrestricted(), Sort.by(Sort.Order.desc("apiCallsUsed"))))
-                .containsExactly("a1b2c3d4", "a1b2ffff", "3f2b9c1e", "50_off%0");
+                .containsExactly("a1b2c3", "a1b2ff", "3f2b9c", "50_off");
         assertThat(keys(Specification.unrestricted(), Sort.by(Sort.Order.asc("expirationDate"))))
-                .containsExactly("50_off%0", "a1b2ffff", "a1b2c3d4", "3f2b9c1e");
+                .containsExactly("50_off", "a1b2ff", "a1b2c3", "3f2b9c");
     }
 
     @Test

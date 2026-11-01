@@ -1,6 +1,7 @@
 package cc.hrva.urlshortener.repository.specification;
 
 import cc.hrva.urlshortener.model.ApiKey;
+import cc.hrva.urlshortener.security.ApiKeyTokens;
 import jakarta.persistence.criteria.JoinType;
 import org.springframework.data.jpa.domain.Specification;
 
@@ -13,7 +14,8 @@ public final class ApiKeySpecification {
             final var owner = root.join("owner", JoinType.LEFT);
             return cb.or(
                     cb.like(cb.lower(owner.get("email")), LikePatterns.containing(search), LikePatterns.ESCAPE),
-                    cb.like(cb.lower(root.get("key")), LikePatterns.startingWith(search), LikePatterns.ESCAPE));
+                    cb.like(cb.lower(root.get("keyPrefix")), LikePatterns.startingWith(search), LikePatterns.ESCAPE),
+                    cb.equal(root.get("keyHash"), ApiKeyTokens.hash(search)));
         };
     }
 

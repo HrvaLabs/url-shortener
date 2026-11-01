@@ -14,6 +14,10 @@ public interface RateLimiter {
 
     long increment(String key, Duration window);
 
+    default RateLimitWindow incrementWindow(final String key, final Duration window) {
+        return new RateLimitWindow(increment(key, window), window);
+    }
+
     default boolean tryAcquire(final String key, final int limit, final Duration window) {
         return increment(key, window) <= limit;
     }

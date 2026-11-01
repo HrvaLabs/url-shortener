@@ -14,6 +14,7 @@ import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.repository.ApiKeyRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.security.AnyHostIsPrimary;
+import cc.hrva.urlshortener.security.ApiKeyTokens;
 import cc.hrva.urlshortener.security.ClientIpResolver;
 import cc.hrva.urlshortener.security.JwtFilter;
 import cc.hrva.urlshortener.security.OAuth2LoginSuccessHandler;
@@ -271,8 +272,8 @@ class DeleteApiKeyFlowTest {
 
     private void key(final long id, final long owner, final boolean active, final String expirationDate) {
         jdbcTemplate.update("""
-                insert into api_key (id, "KEY", owner_id, api_calls_limit, api_calls_used, expiration_date, active)
-                values (?, ?, ?, 100, 0, cast(? as date), ?)""", id, "key-" + id, owner, expirationDate, active);
+                insert into api_key (id, key_hash, key_prefix, owner_id, api_calls_used, expiration_date, active)
+                values (?, ?, ?, ?, 0, cast(? as date), ?)""", id, ApiKeyTokens.hash("key-" + id), "key-" + id, owner, expirationDate, active);
     }
 
     private List<Long> keyIds() {

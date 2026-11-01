@@ -1,6 +1,7 @@
 package cc.hrva.urlshortener.service;
 
 import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
@@ -12,8 +13,11 @@ import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.converter.ApiKeyUpdateDtoToApiKeyConverter;
+import cc.hrva.urlshortener.dto.ApiKeyCreateDto;
 import cc.hrva.urlshortener.dto.ApiKeyResponse;
+import cc.hrva.urlshortener.dto.CreatedApiKeyResponse;
 import cc.hrva.urlshortener.dto.ApiKeyUpdateDto;
+import cc.hrva.urlshortener.exception.ApiException;
 import cc.hrva.urlshortener.exception.ApiKeyActiveException;
 import cc.hrva.urlshortener.exception.ApiKeyNotFoundException;
 import cc.hrva.urlshortener.exception.InvalidApiKeyException;
@@ -22,6 +26,7 @@ import cc.hrva.urlshortener.exception.NoAuthorizationException;
 import cc.hrva.urlshortener.model.ApiKey;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.repository.ApiKeyRepository;
+import cc.hrva.urlshortener.security.ApiKeyTokens;
 import cc.hrva.urlshortener.service.impl.DefaultApiKeyService;
 import cc.hrva.urlshortener.validator.ApiKeyValidator;
 import org.junit.jupiter.api.BeforeEach;
@@ -32,6 +37,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.within;
 import static org.assertj.core.api.AssertionsForClassTypes.assertThatCode;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
@@ -79,10 +85,71 @@ class ApiKeyServiceTest {
         final ApiKey apiKey = ApiKey.builder().build();
 
         when(userService.getUserFromToken()).thenReturn(user);
+        when(appProperties.getApiKeyExpirationInMonths()).thenReturn(12L);
         when(apiKeyRepository.save(any(ApiKey.class))).thenReturn(apiKey);
 
-        final var result = apiKeyService.generateNewApiKey();
-        assertThat(result).isInstanceOf(ApiKeyResponse.class);
+        final var result = apiKeyService.generateNewApiKey(null);
+        assertThat(result).isInstanceOf(CreatedApiKeyResponse.class);
+    }
+
+    @Test
+    void aNewKeyWithoutAnExpiryChoiceExpiresAfterTheConfiguredMonths() {
+        when(userService.getUserFromToken()).thenReturn(User.builder().id(3L).build());
+        when(appProperties.getApiKeyExpirationInMonths()).thenReturn(12L);
+        when(apiKeyRepository.save(any(ApiKey.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        final var created = apiKeyService.generateNewApiKey(new ApiKeyCreateDto(null, null));
+
+        assertThat(created.expirationDate()).isCloseTo(LocalDateTime.now().plusMonths(12), within(5, ChronoUnit.SECONDS));
+        verify(apiKeyValidator).validateExpiry(null, null, null);
+    }
+
+    @Test
+    void aNewKeyExpiresAfterTheChosenDays() {
+        when(userService.getUserFromToken()).thenReturn(User.builder().id(3L).build());
+        when(apiKeyRepository.save(any(ApiKey.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        final var created = apiKeyService.generateNewApiKey(new ApiKeyCreateDto(90, false));
+
+        assertThat(created.expirationDate()).isCloseTo(LocalDateTime.now().plusDays(90), within(5, ChronoUnit.SECONDS));
+        verify(apiKeyValidator).validateExpiry(90, false, null);
+    }
+
+    @Test
+    void aNewKeyCanNeverExpire() {
+        when(userService.getUserFromToken()).thenReturn(User.builder().id(3L).build());
+        when(apiKeyRepository.save(any(ApiKey.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        final var created = apiKeyService.generateNewApiKey(new ApiKeyCreateDto(null, true));
+
+        assertThat(created.expirationDate()).isNull();
+    }
+
+    @Test
+    void aNewKeyIsShownOnceAndOnlyItsHashAndPrefixAreSaved() {
+        when(userService.getUserFromToken()).thenReturn(User.builder().id(3L).build());
+        when(appProperties.getApiKeyExpirationInMonths()).thenReturn(12L);
+        final var saved = new java.util.concurrent.atomic.AtomicReference<ApiKey>();
+        when(apiKeyRepository.save(any(ApiKey.class))).thenAnswer(invocation -> {
+            saved.set(invocation.getArgument(0));
+            return invocation.getArgument(0);
+        });
+
+        final var created = apiKeyService.generateNewApiKey(null);
+
+        assertThat(created.key()).matches("hrva_[0-9A-Za-z]{43}");
+        assertThat(saved.get().getKeyHash()).isEqualTo(ApiKeyTokens.hash(created.key()));
+        assertThat(saved.get().getKeyPrefix()).isEqualTo(created.key().substring(0, 11)).isEqualTo(created.keyPrefix());
+    }
+
+    @Test
+    void aRefusedExpiryChoiceCreatesNoKey() {
+        when(userService.getUserFromToken()).thenReturn(User.builder().id(3L).build());
+        doThrow(new ApiException("Choose either an expiry in days or no expiry.")).when(apiKeyValidator).validateExpiry(30, true, null);
+
+        assertThatThrownBy(() -> apiKeyService.generateNewApiKey(new ApiKeyCreateDto(30, true)))
+                .isInstanceOf(ApiException.class);
+        verify(apiKeyRepository, never()).save(any());
     }
 
     @Test
@@ -253,9 +320,9 @@ class ApiKeyServiceTest {
 
     @Test
     void shouldFetchApiKeyByKey() {
-        final ApiKey apiKey = ApiKey.builder().apiCallsUsed(1L).build();
         final String key = "key";
-        when(apiKeyRepository.findApiKeyByKey(key)).thenReturn(Optional.ofNullable(apiKey));
+        final ApiKey apiKey = ApiKey.builder().apiCallsUsed(1L).keyHash(ApiKeyTokens.hash(key)).build();
+        when(apiKeyRepository.findApiKeyByKeyHash(ApiKeyTokens.hash(key))).thenReturn(Optional.ofNullable(apiKey));
 
         assertThat(apiKeyService.fetchApiKeyByKey(key)).usingRecursiveComparison().isEqualTo(apiKey);
     }
@@ -264,7 +331,7 @@ class ApiKeyServiceTest {
     void shouldFailFetchApiKeyByKey() {
         final String key = "key";
 
-        when(apiKeyRepository.findApiKeyByKey(key)).thenReturn(Optional.empty());
+        when(apiKeyRepository.findApiKeyByKeyHash(ApiKeyTokens.hash(key))).thenReturn(Optional.empty());
 
         assertThatCode(() -> apiKeyService.fetchApiKeyByKey(key))
                 .isInstanceOf(ApiKeyNotFoundException.class)
@@ -290,14 +357,25 @@ class ApiKeyServiceTest {
         apiKeyService.fetchAllApiKeys(null, true, PageRequest.of(0, 20, Sort.by(Sort.Order.asc("expirationDate"))));
 
         verify(apiKeyRepository).findAll(anySpecification(), eq(PageRequest.of(0, 20, Sort.by(Sort.Order.desc("apiCallsUsed"), Sort.Order.desc("id")))));
-        verify(apiKeyRepository).findAll(anySpecification(), eq(PageRequest.of(0, 20, Sort.by(Sort.Order.asc("expirationDate"), Sort.Order.desc("id")))));
+        verify(apiKeyRepository).findAll(anySpecification(),
+                eq(PageRequest.of(0, 20, Sort.by(Sort.Order.asc("expirationDate").nullsLast(), Sort.Order.desc("id")))));
+    }
+
+    @Test
+    void allKeysSortByLastUseWithTheNeverUsedLast() {
+        when(apiKeyRepository.findAll(anySpecification(), any(Pageable.class))).thenReturn(Page.empty());
+
+        apiKeyService.fetchAllApiKeys(null, null, PageRequest.of(0, 20, Sort.by(Sort.Order.desc("lastUsedAt"))));
+
+        verify(apiKeyRepository).findAll(anySpecification(),
+                eq(PageRequest.of(0, 20, Sort.by(Sort.Order.desc("lastUsedAt").nullsLast(), Sort.Order.desc("id")))));
     }
 
     @Test
     void allKeysRefuseToSortByAFieldOffTheList() {
         assertThatThrownBy(() -> apiKeyService.fetchAllApiKeys(null, null, PageRequest.of(0, 20, Sort.by("key"))))
                 .isInstanceOf(InvalidSortException.class)
-                .hasMessage("Sort must be createDate, apiCallsUsed or expirationDate");
+                .hasMessage("Sort must be createDate, apiCallsUsed, lastUsedAt or expirationDate");
         verify(apiKeyRepository, never()).findAll(anySpecification(), any(Pageable.class));
     }
 
@@ -322,8 +400,8 @@ class ApiKeyServiceTest {
     @Test
     void anEditIsAppliedToTheKeyLoadedInTheWriteTransactionAndThatKeyIsSaved() {
         final var expiry = LocalDateTime.of(2027, 6, 1, 0, 0);
-        final var loaded = ApiKey.builder().id(1L).key("secret-key").apiCallsLimit(100L).apiCallsUsed(42L).active(true).build();
-        final var edited = ApiKey.builder().id(1L).apiCallsLimit(500L).apiCallsUsed(0L).expirationDate(expiry).active(false).build();
+        final var loaded = ApiKey.builder().id(1L).keyHash("stored-hash").apiCallsUsed(42L).active(true).build();
+        final var edited = ApiKey.builder().id(1L).apiCallsUsed(0L).expirationDate(expiry).active(false).build();
         final var apiKeyUpdateDto = ApiKeyUpdateDto.builder().id(1L).build();
 
         when(apiKeyConverter.convert(apiKeyUpdateDto)).thenReturn(edited);
@@ -334,11 +412,36 @@ class ApiKeyServiceTest {
 
         verify(apiKeyRepository).save(loaded);
         verify(apiKeyRepository, never()).save(edited);
-        assertThat(loaded.getKey()).isEqualTo("secret-key");
-        assertThat(loaded.getApiCallsLimit()).isEqualTo(500L);
-        assertThat(loaded.getApiCallsUsed()).isZero();
+        assertThat(loaded.getKeyHash()).isEqualTo("stored-hash");
+        assertThat(loaded.getApiCallsUsed()).isEqualTo(42L);
         assertThat(loaded.getExpirationDate()).isEqualTo(expiry);
         assertThat(loaded.isActive()).isFalse();
+    }
+
+    @Test
+    void anEditIsCheckedForTheOwnerAndTheExpiryChoiceBeforeAnythingChanges() {
+        final var loaded = ApiKey.builder().id(1L).keyHash("stored-hash").apiCallsUsed(42L).active(true).build();
+        final var later = LocalDateTime.of(2027, 6, 1, 0, 0);
+        final var apiKeyUpdateDto = ApiKeyUpdateDto.builder().id(1L).expiresInDays(30).neverExpires(true).expirationDate(later).build();
+        when(apiKeyRepository.findById(1L)).thenReturn(Optional.of(loaded));
+        doThrow(new NoAuthorizationException("You don't have authorization for this action")).when(apiKeyValidator).verifyUserAdminOrOwner(loaded);
+
+        assertThatThrownBy(() -> apiKeyService.updateKey(apiKeyUpdateDto)).isInstanceOf(NoAuthorizationException.class);
+
+        verify(apiKeyConverter, never()).convert(any());
+        verify(apiKeyRepository, never()).save(any());
+    }
+
+    @Test
+    void anEditChecksTheExpiryChoice() {
+        final var loaded = ApiKey.builder().id(1L).keyHash("stored-hash").apiCallsUsed(42L).active(true).build();
+        final var apiKeyUpdateDto = ApiKeyUpdateDto.builder().id(1L).expiresInDays(30).neverExpires(true).build();
+        when(apiKeyRepository.findById(1L)).thenReturn(Optional.of(loaded));
+        doThrow(new ApiException("Choose either an expiry in days or no expiry.")).when(apiKeyValidator).validateExpiry(30, true, null);
+
+        assertThatThrownBy(() -> apiKeyService.updateKey(apiKeyUpdateDto)).isInstanceOf(ApiException.class);
+
+        verify(apiKeyRepository, never()).save(any());
     }
 
 }

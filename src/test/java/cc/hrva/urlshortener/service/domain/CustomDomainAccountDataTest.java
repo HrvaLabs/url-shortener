@@ -303,7 +303,7 @@ class CustomDomainAccountDataTest {
         link(ANA, null, "ana-blog", true);
         jdbcTemplate.update("insert into custom_domain_allowance (user_id, max_domains, reason, granted_by, granted_at) values (?, 3, 'Agency', "
                 + "'admin@localhost', ?)", ANA, NOW.minusDays(5));
-        jdbcTemplate.update("insert into api_key (id, key, owner_id, api_calls_used, active) values (9301, 'ana-key', ?, 0, true)", ANA);
+        jdbcTemplate.update("insert into api_key (id, key_hash, key_prefix, owner_id, api_calls_used, active) values (9301, 'ana-key-hash', 'ana-ke', ?, 0, true)", ANA);
         jdbcTemplate.update("insert into user_account_authorities (user_id, authorities_id) values (?, 1)", ANA);
         registry.reload();
         assertThat(registry.active("go.example.com")).isPresent();

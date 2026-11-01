@@ -2,8 +2,10 @@ package cc.hrva.urlshortener.controller;
 
 import java.util.List;
 import java.util.Collections;
+import cc.hrva.urlshortener.dto.ApiKeyCreateDto;
 import cc.hrva.urlshortener.dto.ApiKeyResponse;
 import cc.hrva.urlshortener.dto.ApiKeyUpdateDto;
+import cc.hrva.urlshortener.dto.CreatedApiKeyResponse;
 import cc.hrva.urlshortener.model.ApiKey;
 import cc.hrva.urlshortener.service.ApiKeyService;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -54,10 +56,20 @@ class ApiKeyControllerTest {
 
     @Test
     void shouldGenerateNewApiKey() throws Exception {
-        final var apiKey = ApiKey.builder().id(1L).key("new-key").build();
-        when(apiKeyService.generateNewApiKey()).thenReturn(ApiKeyResponse.from(apiKey));
+        final var apiKey = ApiKey.builder().id(1L).keyPrefix("hrva_new123").build();
+        when(apiKeyService.generateNewApiKey(null)).thenReturn(CreatedApiKeyResponse.from(apiKey, "new-key"));
 
         mockMvc.perform(post("/api/v1/api-keys"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.key").value("new-key"));
+    }
+
+    @Test
+    void aNewKeyTakesTheExpiryChoice() throws Exception {
+        final var apiKey = ApiKey.builder().id(1L).keyPrefix("hrva_new123").build();
+        when(apiKeyService.generateNewApiKey(new ApiKeyCreateDto(30, null))).thenReturn(CreatedApiKeyResponse.from(apiKey, "new-key"));
+
+        mockMvc.perform(post("/api/v1/api-keys").contentType(MediaType.APPLICATION_JSON).content("{\"expiresInDays\":30}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.key").value("new-key"));
     }
@@ -121,7 +133,7 @@ class ApiKeyControllerTest {
 
     @Test
     void shouldUpdateApiKey() throws Exception {
-        final var apiKey = ApiKey.builder().id(1L).key("updated-key").build();
+        final var apiKey = ApiKey.builder().id(1L).keyPrefix("hrva_upd123").build();
         when(apiKeyService.updateKey(any(ApiKeyUpdateDto.class))).thenReturn(ApiKeyResponse.from(apiKey));
 
         mockMvc.perform(put("/api/v1/api-keys/1")

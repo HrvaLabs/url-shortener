@@ -82,7 +82,7 @@ app:
     scope: user:email
     redirect-uri: https://hrva.cc/login/oauth2/code/github
   short-url-length: 5
-  api-key-calls-limit: 256
+  api-key-requests-per-hour: 600
   jwt-token-validity-seconds: 36000
   api-key-expiration-in-months: 12
   reset-token-expiration-in-hours: 24

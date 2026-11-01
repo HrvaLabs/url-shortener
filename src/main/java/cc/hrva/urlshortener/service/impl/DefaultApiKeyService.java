@@ -12,6 +12,7 @@ import cc.hrva.urlshortener.validator.ApiKeyValidator;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -19,8 +20,11 @@ import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import cc.hrva.urlshortener.dto.ApiKeyCreateDto;
 import cc.hrva.urlshortener.dto.ApiKeyResponse;
 import cc.hrva.urlshortener.dto.ApiKeyUpdateDto;
+import cc.hrva.urlshortener.dto.CreatedApiKeyResponse;
+import cc.hrva.urlshortener.security.ApiKeyTokens;
 import cc.hrva.urlshortener.model.ApiKey;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.service.ApiKeyService;
@@ -37,10 +41,13 @@ public class DefaultApiKeyService implements ApiKeyService {
     private static final String REVOKE_BEFORE_DELETING = "Revoke this key before deleting it.";
     private static final String CREATE_DATE = "createDate";
     private static final String ID = "id";
+    private static final String LAST_USED_AT = "lastUsedAt";
+    private static final String EXPIRATION_DATE = "expirationDate";
     private static final Sort NEWEST_FIRST = Sort.by(Sort.Order.desc(CREATE_DATE), Sort.Order.desc(ID));
-    private static final SortWhitelist API_KEY_SORTS = SortWhitelist.of(CREATE_DATE, "apiCallsUsed", "expirationDate")
+    private static final SortWhitelist API_KEY_SORTS = SortWhitelist.of(CREATE_DATE, "apiCallsUsed", LAST_USED_AT, EXPIRATION_DATE)
             .byDefault(Sort.by(Sort.Order.desc(CREATE_DATE)))
-            .thenBy(Sort.Order.desc(ID));
+            .thenBy(Sort.Order.desc(ID))
+            .nullsLast(LAST_USED_AT, EXPIRATION_DATE);
     private static final SortWhitelist MY_INACTIVE_KEY_SORTS = SortWhitelist.of(CREATE_DATE)
             .byDefault(Sort.by(Sort.Order.desc(CREATE_DATE)))
             .thenBy(Sort.Order.desc(ID));
@@ -53,13 +60,28 @@ public class DefaultApiKeyService implements ApiKeyService {
 
     @Override
     @Transactional
-    public ApiKeyResponse generateNewApiKey() {
+    public CreatedApiKeyResponse generateNewApiKey(final ApiKeyCreateDto expiry) {
         final var user = userService.getUserFromToken();
-        log.info("Generated new API key for user email={}", user.getEmail());
-
+        final var expiresInDays = expiry != null ? expiry.expiresInDays() : null;
+        final var neverExpires = expiry != null ? expiry.neverExpires() : null;
+        apiKeyValidator.validateExpiry(expiresInDays, neverExpires, null);
         apiKeyValidator.apiKeySlotsAvailable(user);
 
-        return ApiKeyResponse.from(apiKeyRepository.save(new ApiKey(user, appProperties)));
+        final var token = ApiKeyTokens.generate();
+        final var apiKey = apiKeyRepository.save(new ApiKey(user, expirationOf(expiresInDays, neverExpires), token));
+        log.info("Generated new API key for user email={} keyPrefix={} neverExpires={}", user.getEmail(), apiKey.getKeyPrefix(),
+                apiKey.getExpirationDate() == null);
+        return CreatedApiKeyResponse.from(apiKey, token.key());
+    }
+
+    private LocalDateTime expirationOf(final Integer expiresInDays, final Boolean neverExpires) {
+        if (Boolean.TRUE.equals(neverExpires)) {
+            return null;
+        }
+        if (expiresInDays != null) {
+            return LocalDateTime.now().plusDays(expiresInDays);
+        }
+        return LocalDateTime.now().plusMonths(appProperties.getApiKeyExpirationInMonths());
     }
 
     @Override
@@ -142,7 +164,7 @@ public class DefaultApiKeyService implements ApiKeyService {
 
     @Override
     public ApiKey fetchApiKeyByKey(final String key) {
-        return apiKeyRepository.findApiKeyByKey(key)
+        return findByKey(key)
                 .orElseThrow(() -> new ApiKeyNotFoundException("Sent API key doesn't exist"));
     }
 
@@ -163,12 +185,12 @@ public class DefaultApiKeyService implements ApiKeyService {
     @Transactional
     public ApiKeyResponse updateKey(final ApiKeyUpdateDto apiKeyUpdateDto) {
         log.info("Updated API key id={}", apiKeyUpdateDto.getId());
-        final var editedApiKey = Objects.requireNonNull(apiKeyConverter.convert(apiKeyUpdateDto));
-        final var apiKey = apiKeyRepository.findById(editedApiKey.getId())
+        final var apiKey = apiKeyRepository.findById(apiKeyUpdateDto.getId())
                 .orElseThrow(() -> new ApiKeyNotFoundException("Api key doesn't exist"));
+        apiKeyValidator.verifyUserAdminOrOwner(apiKey);
+        apiKeyValidator.validateExpiry(apiKeyUpdateDto.getExpiresInDays(), apiKeyUpdateDto.getNeverExpires(), apiKeyUpdateDto.getExpirationDate());
+        final var editedApiKey = Objects.requireNonNull(apiKeyConverter.convert(apiKeyUpdateDto));
 
-        apiKey.setApiCallsLimit(editedApiKey.getApiCallsLimit());
-        apiKey.setApiCallsUsed(editedApiKey.getApiCallsUsed());
         apiKey.setExpirationDate(editedApiKey.getExpirationDate());
         apiKey.setActive(editedApiKey.isActive());
         return ApiKeyResponse.from(apiKeyRepository.save(apiKey));
@@ -192,8 +214,13 @@ public class DefaultApiKeyService implements ApiKeyService {
 
     @Override
     public ApiKey findApiKeyByKey(final String key) {
-        return apiKeyRepository.findApiKeyByKey(key)
+        return findByKey(key)
             .orElseThrow(() -> new ApiKeyNotFoundException("API key doesn't exist"));
+    }
+
+    private Optional<ApiKey> findByKey(final String key) {
+        final var hash = ApiKeyTokens.hash(key);
+        return apiKeyRepository.findApiKeyByKeyHash(hash).filter(apiKey -> ApiKeyTokens.sameHash(apiKey.getKeyHash(), hash));
     }
 
 }

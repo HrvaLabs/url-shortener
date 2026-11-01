@@ -2,6 +2,7 @@ package cc.hrva.urlshortener.controller;
 
 import cc.hrva.urlshortener.audit.AdminAuditAspect;
 import cc.hrva.urlshortener.configuration.AppConfiguration;
+import cc.hrva.urlshortener.configuration.ClockConfiguration;
 import cc.hrva.urlshortener.configuration.GlobalExceptionHandler;
 import cc.hrva.urlshortener.configuration.JacksonConfiguration;
 import cc.hrva.urlshortener.configuration.SecurityConfiguration;
@@ -22,6 +23,8 @@ import cc.hrva.urlshortener.repository.CustomDomainRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.security.AnyHostIsPrimary;
+import cc.hrva.urlshortener.security.ApiKeyRateLimitFilter;
+import cc.hrva.urlshortener.security.ApiKeyTokens;
 import cc.hrva.urlshortener.security.ClickRequestResolver;
 import cc.hrva.urlshortener.security.ClientIpResolver;
 import cc.hrva.urlshortener.security.JwtFilter;
@@ -47,6 +50,7 @@ import cc.hrva.urlshortener.service.domain.UrlCache;
 import cc.hrva.urlshortener.service.impl.DefaultApiKeyService;
 import cc.hrva.urlshortener.service.impl.DefaultAuditLogService;
 import cc.hrva.urlshortener.service.impl.DefaultUrlService;
+import cc.hrva.urlshortener.service.ratelimit.RateLimitWindow;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiter;
 import cc.hrva.urlshortener.service.HumanCheckTestConfiguration;
 import cc.hrva.urlshortener.service.linksignal.AnonymousLinkSignalsTestConfiguration;
@@ -56,7 +60,9 @@ import cc.hrva.urlshortener.validator.impl.DefaultUrlValidator;
 import com.nimbusds.jose.JOSEException;
 import com.nimbusds.jose.jwk.RSAKey;
 import com.nimbusds.jose.jwk.gen.RSAKeyGenerator;
+import java.time.Duration;
 import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -83,15 +89,20 @@ import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.json.JsonCompareMode;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.within;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -206,6 +217,7 @@ class ApiKeyUseOnCreateFlowTest {
             return LinkVerdict.clean();
         });
         when(rateLimiter.tryAcquire(anyString(), anyInt(), any())).thenReturn(true);
+        when(rateLimiter.incrementWindow(anyString(), any())).thenReturn(new RateLimitWindow(1, Duration.ofHours(1)));
     }
 
     @AfterEach
@@ -218,7 +230,7 @@ class ApiKeyUseOnCreateFlowTest {
 
     @Test
     void aKeyRevokedWhileTheLinkIsCheckedStaysRevokedAndTheLinkIsRefused() throws Exception {
-        key(100, 0, LocalDateTime.now().plusMonths(6));
+        key(0, LocalDateTime.now().plusMonths(6));
         duringChecks = () -> meanwhile("update api_key set active = false where id = ?", OWNERS_KEY);
 
         create("https://example.com/revoked-meanwhile")
@@ -231,7 +243,7 @@ class ApiKeyUseOnCreateFlowTest {
 
     @Test
     void twoCreatesWithOneKeyAtTheSameTimeBothCount() throws Exception {
-        key(100, 0, LocalDateTime.now().plusMonths(6));
+        key(0, LocalDateTime.now().plusMonths(6));
         final var bothChecking = new CyclicBarrier(2);
         duringChecks = () -> {
             try {
@@ -250,59 +262,8 @@ class ApiKeyUseOnCreateFlowTest {
     }
 
     @Test
-    void twoCreatesAtTheSameTimeForTheLastCallOfAKeyLetOnlyOneThrough() throws Exception {
-        key(2, 1, LocalDateTime.now().plusMonths(6));
-        final var bothChecking = new CyclicBarrier(2);
-        duringChecks = () -> {
-            try {
-                bothChecking.await(10, TimeUnit.SECONDS);
-            } catch (final Exception exception) {
-                throw new IllegalStateException(exception);
-            }
-        };
-
-        final var first = CompletableFuture.supplyAsync(() -> createdAnswer("https://example.com/last-call-first"));
-        final var second = CompletableFuture.supplyAsync(() -> createdAnswer("https://example.com/last-call-second"));
-
-        final var answers = List.of(first.get(30, TimeUnit.SECONDS), second.get(30, TimeUnit.SECONDS));
-        assertThat(answers).extracting(MockHttpServletResponse::getStatus).containsExactlyInAnyOrder(200, 400);
-        assertThat(answers).filteredOn(answer -> answer.getStatus() == 400).singleElement()
-                .satisfies(refused -> assertThat(refused.getContentAsString()).contains("API key is invalid"));
-        assertThat(keyRow()).containsEntry("API_CALLS_USED", 2L).containsEntry("ACTIVE", false);
-        assertThat(linksOfTheOwner()).isOne();
-    }
-
-    @Test
-    void theKeyTurnsOffAtExactlyItsLimit() throws Exception {
-        key(3, 1, LocalDateTime.now().plusMonths(6));
-
-        create("https://example.com/second-call").andExpect(status().isOk());
-        assertThat(keyRow()).containsEntry("API_CALLS_USED", 2L).containsEntry("ACTIVE", true);
-
-        create("https://example.com/third-call").andExpect(status().isOk());
-        assertThat(keyRow()).containsEntry("API_CALLS_USED", 3L).containsEntry("ACTIVE", false);
-
-        create("https://example.com/fourth-call")
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.error").value("API key is invalid"));
-        assertThat(keyRow()).containsEntry("API_CALLS_USED", 3L);
-        assertThat(linksOfTheOwner()).isEqualTo(2L);
-    }
-
-    @Test
-    void aKeyWithoutALimitNeverTurnsOffForItsCalls() throws Exception {
-        jdbcTemplate.update("""
-                insert into api_key (id, "KEY", owner_id, api_calls_limit, api_calls_used, expiration_date, active)
-                values (?, ?, ?, null, 7, null, true)""", OWNERS_KEY, OWNERS_KEY_VALUE, OWNER);
-
-        create("https://example.com/unlimited").andExpect(status().isOk());
-
-        assertThat(keyRow()).containsEntry("API_CALLS_USED", 8L).containsEntry("ACTIVE", true);
-    }
-
-    @Test
     void aKeyThatExpiresWhileTheLinkIsCheckedCountsTheLinkAndTurnsOff() throws Exception {
-        key(100, 0, LocalDateTime.now().plusMonths(6));
+        key(0, LocalDateTime.now().plusMonths(6));
         duringChecks = () -> meanwhile("update api_key set expiration_date = ? where id = ?", LocalDateTime.now().minusMinutes(1), OWNERS_KEY);
 
         create("https://example.com/expired-meanwhile").andExpect(status().isOk());
@@ -311,10 +272,82 @@ class ApiKeyUseOnCreateFlowTest {
         assertThat(linksOfTheOwner()).isEqualTo(1L);
     }
 
-    private void key(final long limit, final long used, final LocalDateTime expires) {
+    @Test
+    void aKeyKeepsWorkingWhateverItsTotalAndRecordsItsLastUse() throws Exception {
+        key(256, LocalDateTime.now().plusMonths(6));
+
+        create("https://example.com/past-the-old-cap").andExpect(status().isOk());
+        create("https://example.com/and-again").andExpect(status().isOk());
+
+        assertThat(keyRow()).containsEntry("API_CALLS_USED", 258L).containsEntry("ACTIVE", true);
+        assertThat(jdbcTemplate.queryForObject("select last_used_at from api_key where id = ?", LocalDateTime.class, OWNERS_KEY))
+                .isCloseTo(LocalDateTime.now(), within(1, ChronoUnit.MINUTES));
+    }
+
+    @Test
+    void aKeyThatNeverExpiresWorks() throws Exception {
+        key(7, null);
+
+        create("https://example.com/never-expires").andExpect(status().isOk());
+
+        assertThat(keyRow()).containsEntry("API_CALLS_USED", 8L).containsEntry("ACTIVE", true);
+    }
+
+    @Test
+    void anApiKeyResponseCarriesItsRateLimitHeadersAndExposesThemToTheFrontend() throws Exception {
+        key(0, LocalDateTime.now().plusMonths(6));
+        when(rateLimiter.incrementWindow("api-key:" + OWNERS_KEY, Duration.ofHours(1))).thenReturn(new RateLimitWindow(3, Duration.ofSeconds(1_200)));
+
+        mockMvc.perform(post("/api/v1/urls")
+                        .header("X-Api-Key", OWNERS_KEY_VALUE)
+                        .header("Origin", "http://localhost:3000")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"longUrl\":\"https://example.com/with-headers\"}"))
+                .andExpect(status().isOk())
+                .andExpect(header().string("RateLimit-Limit", "600"))
+                .andExpect(header().string("RateLimit-Remaining", "597"))
+                .andExpect(header().string("RateLimit-Reset", "1200"))
+                .andExpect(header().string("Access-Control-Allow-Origin", "http://localhost:3000"))
+                .andExpect(header().string("Access-Control-Expose-Headers",
+                        org.hamcrest.Matchers.allOf(org.hamcrest.Matchers.containsString("RateLimit-Limit"),
+                                org.hamcrest.Matchers.containsString("RateLimit-Remaining"), org.hamcrest.Matchers.containsString("RateLimit-Reset"),
+                                org.hamcrest.Matchers.containsString("Retry-After"))));
+    }
+
+    @Test
+    void aKeyOverItsHourlyLimitIsRefusedBeforeAnythingIsCreatedOrCounted() throws Exception {
+        key(5, LocalDateTime.now().plusMonths(6));
+        when(rateLimiter.incrementWindow("api-key:" + OWNERS_KEY, Duration.ofHours(1))).thenReturn(new RateLimitWindow(601, Duration.ofSeconds(90)));
+
+        mockMvc.perform(post("/api/v1/urls")
+                        .header("X-Api-Key", OWNERS_KEY_VALUE)
+                        .header("Origin", "http://localhost:3000")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"longUrl\":\"https://example.com/too-many\"}"))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(content().json("{\"error\":\"This API key made too many requests. Try again in 2 minutes.\"}", JsonCompareMode.STRICT))
+                .andExpect(header().string("Retry-After", "90"))
+                .andExpect(header().string("RateLimit-Remaining", "0"))
+                .andExpect(header().string("Access-Control-Allow-Origin", "http://localhost:3000"));
+
+        assertThat(keyRow()).containsEntry("API_CALLS_USED", 5L);
+        assertThat(linksOfTheOwner()).isZero();
+    }
+
+    @Test
+    void aRequestWithAKeyCountsOnceWhateverTheEndpoint() throws Exception {
+        key(0, LocalDateTime.now().plusMonths(6));
+
+        mockMvc.perform(get("/api/v1/urls/{short}/peek", "nothing").header("X-Api-Key", OWNERS_KEY_VALUE))
+                .andExpect(header().string("RateLimit-Limit", "600"));
+
+        org.mockito.Mockito.verify(rateLimiter).incrementWindow("api-key:" + OWNERS_KEY, Duration.ofHours(1));
+    }
+
+    private void key(final long used, final LocalDateTime expires) {
         jdbcTemplate.update("""
-                insert into api_key (id, "KEY", owner_id, api_calls_limit, api_calls_used, expiration_date, active)
-                values (?, ?, ?, ?, ?, ?, true)""", OWNERS_KEY, OWNERS_KEY_VALUE, OWNER, limit, used, expires);
+                insert into api_key (id, key_hash, key_prefix, owner_id, api_calls_used, expiration_date, active)
+                values (?, ?, 'keyhol', ?, ?, ?, true)""", OWNERS_KEY, ApiKeyTokens.hash(OWNERS_KEY_VALUE), OWNER, used, expires);
     }
 
     private void meanwhile(final String sql, final Object... arguments) {
@@ -376,6 +409,8 @@ class ApiKeyUseOnCreateFlowTest {
             AuthorizationServerConfiguration.class,
             McpResourceServerConfiguration.class,
             JwtFilter.class,
+            ApiKeyRateLimitFilter.class,
+            ClockConfiguration.class,
             ClientIpResolver.class,
             ClickRequestResolver.class,
             UrlController.class,

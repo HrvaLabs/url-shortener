@@ -43,5 +43,6 @@
     <include file="classpath:/db/changelog/035-warning-page.xml"/>
     <include file="classpath:/db/changelog/036-sign-in-methods.xml"/>
     <include file="classpath:/db/changelog/037-sign-in-method-turned-off.xml"/>
+    <include file="classpath:/db/changelog/038-api-key-rate-limit.xml"/>
 
 </databaseChangeLog>

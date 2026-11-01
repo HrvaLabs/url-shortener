@@ -286,7 +286,7 @@ class SettingValuesTest {
                                 + "can't open these links.", SettingKey.ANONYMOUS_LINKS, false, 1, 1_000_000, "visits", true,
                         "Unlimited");
         assertThat(Arrays.asList(SettingKey.values()).subList(SettingKey.HUMAN_CHECK.ordinal() + 1, SettingKey.values().length))
-                .containsExactly(SettingKey.ANONYMOUS_EXPIRY_DAYS, SettingKey.ANONYMOUS_VISIT_LIMIT);
+                .containsExactly(SettingKey.ANONYMOUS_EXPIRY_DAYS, SettingKey.ANONYMOUS_VISIT_LIMIT, SettingKey.API_KEY_REQUESTS_PER_HOUR);
         final var appProperties = new AppProperties();
         final var defaults = new SettingDefaults(appProperties, SettingsServiceFixtures.bothProviders());
         assertThat(defaults.defaultOf(SettingKey.ANONYMOUS_EXPIRY_DAYS)).isNull();

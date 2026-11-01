@@ -73,6 +73,7 @@ public class SettingDefaults {
         register(SettingKey.HUMAN_CHECK, moderation::isHumanCheck);
         register(SettingKey.ANONYMOUS_EXPIRY_DAYS, moderation::getAnonymousExpiryDays);
         register(SettingKey.ANONYMOUS_VISIT_LIMIT, moderation::getAnonymousVisitLimit);
+        register(SettingKey.API_KEY_REQUESTS_PER_HOUR, appProperties::getApiKeyRequestsPerHour);
         registerAvailability(SettingKey.GOOGLE_SIGN_IN,
                 () -> unavailableUnless(oAuthProviders.configured(OAuthProviders.GOOGLE), GOOGLE_NOT_CONFIGURED));
         registerAvailability(SettingKey.GITHUB_SIGN_IN,

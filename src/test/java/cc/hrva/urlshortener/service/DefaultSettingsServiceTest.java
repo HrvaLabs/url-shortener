@@ -14,6 +14,7 @@ import cc.hrva.urlshortener.service.impl.DefaultSettingsService;
 import cc.hrva.urlshortener.service.notification.MutableClock;
 import cc.hrva.urlshortener.service.settings.EmailKind;
 import cc.hrva.urlshortener.service.settings.SettingDefaults;
+import cc.hrva.urlshortener.service.settings.SettingGroup;
 import cc.hrva.urlshortener.service.settings.SettingKey;
 import cc.hrva.urlshortener.service.settings.SettingType;
 import cc.hrva.urlshortener.service.settings.SettingsServiceFixtures;
@@ -123,6 +124,22 @@ class DefaultSettingsServiceTest {
         assertThat(settingsService.number(SettingKey.ANONYMOUS_LINKS_PER_HOUR)).isEqualTo(10);
         assertThat(settingsService.isOn(SettingKey.SEND_EMAILS)).isTrue();
         assertThat(settingsService.isOn(SettingKey.EMAIL_CUSTOM_DOMAIN)).isTrue();
+    }
+
+    @Test
+    void apiKeyRequestsPerHourIsAnAccessNumberThatDefaultsToTheConfiguration() {
+        final var key = SettingKey.API_KEY_REQUESTS_PER_HOUR;
+
+        assertThat(settingsService.number(key)).isEqualTo(600);
+        assertThat(List.<Object>of(key.getGroup(), key.getType(), key.getLabel(), key.getDescription(), key.getMin(), key.getMax(), key.getUnit()))
+                .containsExactly(SettingGroup.ACCESS, SettingType.NUMBER, "API requests per key per hour",
+                        "How many requests one API key can make in an hour. A key over the limit gets a 429 with the time to wait.", 10, 100_000, "requests");
+        assertThat(key.getParent()).isNull();
+
+        appProperties.setApiKeyRequestsPerHour(1200);
+        settingsService.refresh();
+
+        assertThat(settingsService.number(key)).isEqualTo(1200);
     }
 
     @Test

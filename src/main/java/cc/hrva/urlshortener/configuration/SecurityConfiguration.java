@@ -2,6 +2,7 @@ package cc.hrva.urlshortener.configuration;
 
 import cc.hrva.urlshortener.controller.ReportController;
 import cc.hrva.urlshortener.controller.UnsubscribeController;
+import cc.hrva.urlshortener.security.ApiKeyRateLimitFilter;
 import cc.hrva.urlshortener.security.JwtFilter;
 import cc.hrva.urlshortener.security.OAuth2LoginFailureHandler;
 import cc.hrva.urlshortener.security.OAuth2LoginSuccessHandler;
@@ -138,6 +139,7 @@ public class SecurityConfiguration {
         configuration.setAllowedOrigins(List.of(appProperties.getFrontendUrl()));
         configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         configuration.setAllowedHeaders(List.of("*"));
+        configuration.setExposedHeaders(ApiKeyRateLimitFilter.EXPOSED_HEADERS);
         configuration.setAllowCredentials(true);
         source.registerCorsConfiguration("/**", configuration);
 

@@ -42,6 +42,9 @@
 # redirects again once the admin clears the flag), the maximums for links without an account (ANONYMOUS_EXPIRY_DAYS and ANONYMOUS_VISIT_LIMIT),
 # the human check without Turnstile keys (HUMAN_CHECK is on but unavailable, no check runs; no key is ever set in this script) and the
 # Google and GitHub sign-in switches. Every setting is reset.
+# Section 27 checks API keys after v2.21: the expiry a user chooses on create and on update (the refusals included), the
+# RateLimit-* headers on an API-key request and their CORS exposure, and a 429 with Retry-After once API_KEY_REQUESTS_PER_HOUR is
+# set to 10 in Site settings, which is then reset.
 #
 #   scripts/mcp-e2e.sh                         builds the jar, then runs every step
 #   MCP_E2E_SKIP_BUILD=1 scripts/mcp-e2e.sh    reuses target/url-shortener-*.jar
@@ -373,6 +376,8 @@ expect_eq "$(psql_value "select string_agg(id || ' ' || exectype, ', ' order by 
     "030-url-short-url-rename-duplicates EXECUTED, 030-url-short-url-unique MARK_RAN" "030 finds no duplicate to rename and keeps the index 027 made"
 expect_eq "$(psql_value "select count(*) from databasechangelog where id like '032-%' and exectype = 'EXECUTED';")" 8 \
     "032 ran all eight changesets, the Postgres 15 check included"
+expect_eq "$(psql_value "select count(*) from databasechangelog where id like '038-%' and exectype = 'EXECUTED';") $(psql_value "select string_agg(column_name, ',' order by column_name) from information_schema.columns where table_name = 'api_key' and column_name in ('api_calls_limit', 'last_used_at', 'key', 'key_hash', 'key_prefix');")" \
+    "7 key_hash,key_prefix,last_used_at" "038 ran its seven Postgres changesets: api_key has last_used_at, key_hash and key_prefix, and no api_calls_limit or plaintext key"
 expect_eq "$(psql_value "select count(*) from pg_indexes where indexname = 'ux_url_short_url';") $(psql_value "select count(*) from pg_indexes where indexname = 'ux_url_domain_short_url' and indexdef like '%NULLS NOT DISTINCT%';")" \
     "0 1" "032 replaced ux_url_short_url with ux_url_domain_short_url (domain_id, short_url) NULLS NOT DISTINCT"
 
@@ -1070,8 +1075,9 @@ OWNER_KEY=$(jq -r .key <<<"$HTTP_BODY")
 http -X POST "$BASE/api/v1/urls" -H "X-Api-Key: $OWNER_KEY" -H 'Content-Type: application/json' -d '{"longUrl":"https://example.com/created-with-a-key"}'
 expect_eq "$HTTP_STATUS" 200 "POST /api/v1/urls with X-Api-Key"
 KEY_LINK_ID=$(jq -r .id <<<"$HTTP_BODY")
-expect_eq "$(psql_value "select u.email || ' ' || k.api_calls_used from url l join user_account u on u.id = l.owner_id join api_key k on k.owner_id = u.id where l.id = $KEY_LINK_ID and k.key = '$OWNER_KEY';")" \
+expect_eq "$(psql_value "select u.email || ' ' || k.api_calls_used from url l join user_account u on u.id = l.owner_id join api_key k on k.owner_id = u.id where l.id = $KEY_LINK_ID and k.key_hash = encode(sha256(convert_to('$OWNER_KEY', 'UTF8')), 'hex');")" \
     "$USER_EMAIL 1" "the link belongs to the key's owner and the key counts one call"
+expect_eq "$(psql_value "select count(*) from api_key where key_hash = encode(sha256(convert_to('$OWNER_KEY', 'UTF8')), 'hex') and last_used_at > now() - interval '5 minutes';")" 1 "the key's last use is recorded"
 http -X PATCH "$BASE/api/v1/urls/$KEY_LINK_ID/deactivate" -H "Authorization: Bearer $KEY_JWT"
 expect_eq "$HTTP_STATUS" 200 "the owner deactivates the link"
 http -X PATCH "$BASE/api/v1/urls/$KEY_LINK_ID/activate" -H "Authorization: Bearer $KEY_JWT"
@@ -1928,5 +1934,100 @@ echo "  --- every setting is back to its default"
 http "$BASE/api/v1/admin/settings" -H "Authorization: Bearer $ADMIN_JWT"
 expect_eq "$(jq -r '[.[] | select(.changed)] | length' <<<"$HTTP_BODY")" 0 "no setting is left changed"
 expect_eq "$(psql_value "select count(*) from app_setting;")" 0 "app_setting holds no row"
+
+section "27. API keys: the expiry a user chooses and the hourly rate limit"
+http -X POST "$BASE/api/v1/auth/login" -H 'Content-Type: application/json' \
+    -d "{\"email\":\"$USER_EMAIL\",\"password\":\"reset-$USER_PASSWORD\"}"
+expect_eq "$HTTP_STATUS" 200 "POST /api/v1/auth/login as $USER_EMAIL"
+EXPIRY_JWT=$(jq -r .token <<<"$HTTP_BODY")
+EXPIRY_JWT=${EXPIRY_JWT#Bearer }
+http -X POST "$BASE/api/v1/api-keys" -H "Authorization: Bearer $EXPIRY_JWT" -H 'Content-Type: application/json' -d '{"expiresInDays":30}'
+expect_eq "$HTTP_STATUS $(jq -c '[has("apiCallsLimit"), .apiCallsUsed, .lastUsedAt, .status]' <<<"$HTTP_BODY")" '200 [false,0,null,"ACTIVE"]' \
+    "POST /api/v1/api-keys {expiresInDays: 30}: no apiCallsLimit, lastUsedAt null"
+DAYS_KEY_ID=$(jq -r .id <<<"$HTTP_BODY")
+expect_eq "$(psql_value "select expiration_date = current_date + 30 from api_key where id = $DAYS_KEY_ID;")" t "it expires in 30 days"
+http -X POST "$BASE/api/v1/api-keys" -H "Authorization: Bearer $EXPIRY_JWT" -H 'Content-Type: application/json' -d '{"neverExpires":true}'
+expect_eq "$HTTP_STATUS $(jq -c '[.expirationDate, .status]' <<<"$HTTP_BODY")" '200 [null,"ACTIVE"]' "POST /api/v1/api-keys {neverExpires: true}"
+LIMITED_KEY_ID=$(jq -r .id <<<"$HTTP_BODY")
+LIMITED_KEY=$(jq -r .key <<<"$HTTP_BODY")
+expect_eq "$(psql_value "select count(*) from api_key where id = $LIMITED_KEY_ID and expiration_date is null;")" 1 "its expiration_date is null"
+expect_eq "$( [[ $LIMITED_KEY =~ ^hrva_[0-9A-Za-z]{43}$ ]] && echo hrva) $(jq -r .keyPrefix <<<"$HTTP_BODY")" "hrva ${LIMITED_KEY:0:11}" "the key is hrva_ and 43 base62 characters, shown once with its prefix"
+expect_eq "$(psql_value "select key_prefix || ' ' || (key_hash = encode(sha256(convert_to('$LIMITED_KEY', 'UTF8')), 'hex')) from api_key where id = $LIMITED_KEY_ID;")" "${LIMITED_KEY:0:11} true" \
+    "Postgres holds only its SHA-256 and its prefix"
+http "$BASE/api/v1/api-keys" -H "Authorization: Bearer $EXPIRY_JWT"
+expect_eq "$HTTP_STATUS $(jq -c "[.[] | select(.id == $LIMITED_KEY_ID) | has(\"key\"), .keyPrefix]" <<<"$HTTP_BODY") $(grep -c "$LIMITED_KEY" <<<"$HTTP_BODY" || true)" \
+    "200 [false,\"${LIMITED_KEY:0:11}\"] 0" "GET /api/v1/api-keys lists the prefix, never the key"
+http -G "$BASE/api/v1/api-keys/all" -H "Authorization: Bearer $ADMIN_JWT" --data-urlencode "search=$LIMITED_KEY"
+expect_eq "$HTTP_STATUS $(jq -c '[.content[].id]' <<<"$HTTP_BODY") $(grep -c "$LIMITED_KEY" <<<"$HTTP_BODY" || true)" "200 [$LIMITED_KEY_ID] 0" \
+    "an admin finds the key by pasting it whole, and the answer doesn't carry it"
+http "$BASE/api/v1/users/me/export" -H "Authorization: Bearer $EXPIRY_JWT"
+expect_eq "$HTTP_STATUS $(jq -c "[.apiKeys[] | select(.id == $LIMITED_KEY_ID) | has(\"key\"), .keyPrefix]" <<<"$HTTP_BODY") $(grep -c "$LIMITED_KEY" <<<"$HTTP_BODY" || true)" \
+    "200 [false,\"${LIMITED_KEY:0:11}\"] 0" "the data export has the prefix only"
+http -X POST "$BASE/api/v1/api-keys" -H "Authorization: Bearer $EXPIRY_JWT" -H 'Content-Type: application/json' -d '{"expiresInDays":30,"neverExpires":true}'
+expect_eq "$HTTP_STATUS $(jq -c . <<<"$HTTP_BODY")" '400 {"error":"Choose either an expiry in days or no expiry."}' "both choices are refused"
+http -X POST "$BASE/api/v1/api-keys" -H "Authorization: Bearer $EXPIRY_JWT" -H 'Content-Type: application/json' -d '{"expiresInDays":3651}'
+expect_eq "$HTTP_STATUS $(jq -c . <<<"$HTTP_BODY")" '400 {"expiresInDays":"Use a number of days from 1 to 3,650."}' "3651 days are refused"
+http -X PUT "$BASE/api/v1/api-keys/$DAYS_KEY_ID" -H "Authorization: Bearer $EXPIRY_JWT" -H 'Content-Type: application/json' \
+    -d "{\"id\":$DAYS_KEY_ID,\"neverExpires\":true,\"apiCallsLimit\":5,\"apiCallsUsed\":99}"
+expect_eq "$HTTP_STATUS $(jq -c '[.expirationDate, .apiCallsUsed, has("apiCallsLimit")]' <<<"$HTTP_BODY")" '200 [null,0,false]' \
+    "the owner's PUT turns the expiry off; apiCallsLimit and apiCallsUsed are ignored"
+http -X PUT "$BASE/api/v1/api-keys/$DAYS_KEY_ID" -H "Authorization: Bearer $EXPIRY_JWT" -H 'Content-Type: application/json' \
+    -d "{\"id\":$DAYS_KEY_ID,\"expirationDate\":\"2020-01-01T00:00:00\"}"
+expect_eq "$HTTP_STATUS $(jq -c . <<<"$HTTP_BODY")" '400 {"expirationDate":"Choose a date in the future."}' "a past expirationDate is refused"
+http -X PUT "$BASE/api/v1/api-keys/$DAYS_KEY_ID" -H "Authorization: Bearer $EXPIRY_JWT" -H 'Content-Type: application/json' \
+    -d "{\"id\":$DAYS_KEY_ID,\"expiresInDays\":90}"
+expect_eq "$HTTP_STATUS $(psql_value "select expiration_date = current_date + 90 from api_key where id = $DAYS_KEY_ID;")" "200 t" "the owner's PUT sets 90 days"
+
+echo "  --- the RateLimit-* headers"
+http -X POST "$BASE/api/v1/urls" -H "X-Api-Key: $LIMITED_KEY" -H "Origin: $FRONTEND_URL" -H 'Content-Type: application/json' \
+    -d '{"longUrl":"https://example.com/rate-limited-key"}'
+expect_eq "$HTTP_STATUS $(header_value RateLimit-Limit) $(header_value RateLimit-Remaining)" "200 600 599" "POST /api/v1/urls with the key: RateLimit-Limit 600, RateLimit-Remaining 599"
+RESET=$(header_value RateLimit-Reset)
+expect_eq "$(( RESET >= 3590 && RESET <= 3600 ))" 1 "RateLimit-Reset is the seconds left in the hour ($RESET)"
+expect_contains "$(header_value Access-Control-Expose-Headers)" "RateLimit-Remaining" "CORS exposes the headers to the frontend"
+show "Access-Control-Expose-Headers: $(header_value Access-Control-Expose-Headers)"
+LIMITED_ALIAS=$(jq -r .shortUrl <<<"$HTTP_BODY")
+expect_eq "$(docker exec "$REDIS_CONTAINER" redis-cli --raw get "rate-limit:api-key:$LIMITED_KEY_ID") $(( $(docker exec "$REDIS_CONTAINER" redis-cli --raw pttl "rate-limit:api-key:$LIMITED_KEY_ID") > 0 ))" \
+    "1 1" "Redis counts the key under rate-limit:api-key:<id>, with an expiry"
+http "$BASE/api/v1/urls/$LIMITED_ALIAS/peek" -H "X-Api-Key: $LIMITED_KEY"
+expect_eq "$HTTP_STATUS $(header_value RateLimit-Remaining)" "200 598" "a peek with the key counts too"
+http "$BASE/api/v1/urls/$LIMITED_ALIAS/peek"
+expect_eq "$HTTP_STATUS $(header_value RateLimit-Limit)" "200 " "a request without a key gets no RateLimit headers"
+
+echo "  --- a 429 with a limit of 10 set in Site settings"
+put_setting API_KEY_REQUESTS_PER_HOUR 10
+expect_eq "$HTTP_STATUS $(jq -c '[.value, .changed, .unit, .min, .max, .group]' <<<"$HTTP_BODY")" '200 [10,true,"requests",10,100000,"ACCESS"]' \
+    "PUT /api/v1/admin/settings/API_KEY_REQUESTS_PER_HOUR 10"
+put_setting API_KEY_REQUESTS_PER_HOUR 9
+expect_eq "$HTTP_STATUS" 400 "9 is under the minimum"
+for _ in $(seq 3 10); do
+    http "$BASE/api/v1/urls/$LIMITED_ALIAS/peek" -H "X-Api-Key: $LIMITED_KEY"
+    [[ $HTTP_STATUS == 200 ]] || fail "request under the limit answered $HTTP_STATUS"
+done
+expect_eq "$(header_value RateLimit-Limit) $(header_value RateLimit-Remaining)" "10 0" "the tenth request is the last allowed one"
+http "$BASE/api/v1/urls/$LIMITED_ALIAS/peek" -H "X-Api-Key: $LIMITED_KEY" -H "Origin: $FRONTEND_URL"
+RETRY_AFTER=$(header_value Retry-After)
+MINUTES=$(( (RETRY_AFTER + 59) / 60 ))
+if (( MINUTES == 1 )); then WAIT="1 minute"; else WAIT="$MINUTES minutes"; fi
+expect_eq "$HTTP_STATUS $(jq -c . <<<"$HTTP_BODY")" "429 {\"error\":\"This API key made too many requests. Try again in $WAIT.\"}" "the eleventh is a 429 with the minutes to wait"
+expect_eq "$(header_value RateLimit-Remaining) $(header_value RateLimit-Reset) $(header_value Access-Control-Allow-Origin)" "0 $RETRY_AFTER $FRONTEND_URL" \
+    "Retry-After $RETRY_AFTER equals RateLimit-Reset, and the 429 carries CORS"
+show "429 headers: $(grep -iE '^(retry-after|ratelimit-|access-control-expose)' <<<"$HTTP_HEADERS" | paste -sd';' -)"
+http -X POST "$BASE/api/v1/urls" -H "X-Api-Key: $LIMITED_KEY" -H 'Content-Type: application/json' -d '{"longUrl":"https://example.com/refused-by-the-key-limit"}'
+expect_eq "$HTTP_STATUS $(psql_value "select count(*) from url where long_url = 'https://example.com/refused-by-the-key-limit';") $(psql_value "select api_calls_used from api_key where id = $LIMITED_KEY_ID;")" \
+    "429 0 1" "a create over the limit makes no link and isn't counted as a use"
+expect_contains "$(grep 'API key request refused by the rate limit' "$WORK/app.log" | tail -n1)" "apiKeyId=$LIMITED_KEY_ID" "the refusal is logged with the key id, not the key"
+expect_eq "$(grep -c "$LIMITED_KEY" "$WORK/app.log" || true)" 0 "the key itself is never logged"
+reset_setting API_KEY_REQUESTS_PER_HOUR
+expect_eq "$HTTP_STATUS $(jq -c '[.value, .changed]' <<<"$HTTP_BODY")" "200 [600,false]" "DELETE API_KEY_REQUESTS_PER_HOUR resets it to 600"
+http "$BASE/api/v1/urls/$LIMITED_ALIAS/peek" -H "X-Api-Key: $LIMITED_KEY"
+expect_eq "$HTTP_STATUS $(header_value RateLimit-Limit) $(header_value RateLimit-Remaining)" "200 600 587" "back under the default limit: allowed again"
+for id in "$DAYS_KEY_ID" "$LIMITED_KEY_ID"; do
+    http -X PATCH "$BASE/api/v1/api-keys/$id/revoke" -H "Authorization: Bearer $EXPIRY_JWT"
+    http -X DELETE "$BASE/api/v1/api-keys/$id" -H "Authorization: Bearer $EXPIRY_JWT"
+    expect_eq "$HTTP_STATUS" 204 "the key $id is revoked and deleted"
+done
+http "$BASE/api/v1/admin/settings" -H "Authorization: Bearer $ADMIN_JWT"
+expect_eq "$(jq -r '[.[] | select(.changed)] | length' <<<"$HTTP_BODY")" 0 "no setting is left changed"
 
 section "Done: every step passed"

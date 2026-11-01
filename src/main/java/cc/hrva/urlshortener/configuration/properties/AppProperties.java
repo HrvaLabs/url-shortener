@@ -39,7 +39,7 @@ public class AppProperties {
 
     @NotNull
     @Positive
-    private Long apiKeyCallsLimit;
+    private Integer apiKeyRequestsPerHour = 600;
 
     @NotNull
     @Positive

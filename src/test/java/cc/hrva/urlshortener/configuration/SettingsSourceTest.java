@@ -26,7 +26,8 @@ class SettingsSourceTest {
             "\\bgetTrafficAlerts\\b",
             "\\bgetModeration\\b",
             "\\bgetBurst\\b(?!\\s*\\(\\s*\\)\\s*\\.\\s*getWindow\\s*\\()",
-            "\\bgetAbuseReports\\b"
+            "\\bgetAbuseReports\\b",
+            "\\bgetApiKeyRequestsPerHour\\b"
     ).map(Pattern::compile).toList();
 
     @Test

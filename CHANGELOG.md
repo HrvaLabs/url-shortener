@@ -4,6 +4,20 @@ All notable changes to hrva.cc — the URL shortener.
 
 ---
 
+## [v2.21] — 2026-10-30
+
+An hourly rate limit for API keys instead of a lifetime cap, a key expiry you choose, and keys stored hashed.
+
+### 🔑 API Keys
+- API keys no longer stop working after a fixed number of calls. Each key can make 600 requests an hour, and a key over the limit is told when to try again.
+- You choose when a new API key expires, or that it never does.
+- API keys are stored hashed: the full key is shown once when you make it.
+
+### 🔧 Admin
+- Site settings sets how many requests an API key can make in an hour.
+
+---
+
 ## [v2.20] — 2026-10-30
 
 A human check and a warning page for links made without an account, limits on those links, and sign-in switches.

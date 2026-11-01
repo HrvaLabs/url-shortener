@@ -22,6 +22,15 @@ public class RedisFixedWindowRateLimiter implements RateLimiter {
             end
             return count
             """, Long.class);
+    private static final RedisScript<List> FIXED_WINDOW_INCREMENT_WITH_RESET = RedisScript.of("""
+            local count = redis.call('INCR', KEYS[1])
+            local ttl = redis.call('PTTL', KEYS[1])
+            if ttl < 0 then
+                redis.call('PEXPIRE', KEYS[1], ARGV[1])
+                ttl = tonumber(ARGV[1])
+            end
+            return {count, ttl}
+            """, List.class);
 
     private final StringRedisTemplate redisTemplate;
 
@@ -30,6 +39,20 @@ public class RedisFixedWindowRateLimiter implements RateLimiter {
         try {
             final var count = redisTemplate.execute(FIXED_WINDOW_INCREMENT, List.of(KEY_PREFIX + key), Long.toString(window.toMillis()));
             return count != null ? count : Long.MAX_VALUE;
+        } catch (final DataAccessException exception) {
+            log.warn("Rate limit check failed exception={}", exception.getClass().getName());
+            throw new RateLimiterUnavailableException(exception);
+        }
+    }
+
+    @Override
+    public RateLimitWindow incrementWindow(final String key, final Duration window) {
+        try {
+            final List<?> result = redisTemplate.execute(FIXED_WINDOW_INCREMENT_WITH_RESET, List.of(KEY_PREFIX + key), Long.toString(window.toMillis()));
+            if (result == null || result.size() < 2) {
+                return new RateLimitWindow(Long.MAX_VALUE, window);
+            }
+            return new RateLimitWindow(((Number) result.get(0)).longValue(), Duration.ofMillis(((Number) result.get(1)).longValue()));
         } catch (final DataAccessException exception) {
             log.warn("Rate limit check failed exception={}", exception.getClass().getName());
             throw new RateLimiterUnavailableException(exception);

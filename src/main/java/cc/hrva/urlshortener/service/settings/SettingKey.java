@@ -102,7 +102,9 @@ public enum SettingKey {
             "The latest end a link made without an account can have.", ANONYMOUS_LINKS, 1, 3650, "Never", "days"),
     ANONYMOUS_VISIT_LIMIT(SettingGroup.ACCESS, "Visit limit for links without an account",
             "The highest visit limit a link made without an account can have. While it's set, link previews (Slack, WhatsApp, X) and other bots "
-                    + "can't open these links.", ANONYMOUS_LINKS, 1, 1_000_000, "Unlimited", "visits");
+                    + "can't open these links.", ANONYMOUS_LINKS, 1, 1_000_000, "Unlimited", "visits"),
+    API_KEY_REQUESTS_PER_HOUR(SettingGroup.ACCESS, "API requests per key per hour",
+            "How many requests one API key can make in an hour. A key over the limit gets a 429 with the time to wait.", null, 10, 100_000, "requests");
 
     private final SettingGroup group;
     private final SettingType type;

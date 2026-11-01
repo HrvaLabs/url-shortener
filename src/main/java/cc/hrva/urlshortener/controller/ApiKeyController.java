@@ -5,8 +5,10 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import jakarta.validation.Valid;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
+import cc.hrva.urlshortener.dto.ApiKeyCreateDto;
 import cc.hrva.urlshortener.dto.ApiKeyResponse;
 import cc.hrva.urlshortener.dto.ApiKeyUpdateDto;
+import cc.hrva.urlshortener.dto.CreatedApiKeyResponse;
 import cc.hrva.urlshortener.dto.DeletedApiKeysResponse;
 import cc.hrva.urlshortener.service.ApiKeyService;
 import org.springframework.data.domain.Page;
@@ -32,11 +34,14 @@ public class ApiKeyController {
 
     private final ApiKeyService apiKeyService;
 
-    @Operation(summary = "Generate a new API key", description = "Generate a new API key for the authenticated user. Requires ROLE_USER.")
+    @Operation(summary = "Generate a new API key", description = "Generate a new API key for the authenticated user. The body is optional: "
+            + "expiresInDays (1 to 3650) or neverExpires: true. Without either the key expires after 12 months. The answer carries the full key once, "
+            + "in key; only its hash is stored, and every other answer has keyPrefix only. Requires ROLE_USER.")
+    @ApiResponse(responseCode = "400", description = "Days out of range, or both expiresInDays and neverExpires")
     @PostMapping
     @PreAuthorize("hasRole('ROLE_USER')")
-    public ResponseEntity<ApiKeyResponse> generateNewApiKey() {
-        return ResponseEntity.ok(apiKeyService.generateNewApiKey());
+    public ResponseEntity<CreatedApiKeyResponse> generateNewApiKey(@Valid @RequestBody(required = false) final ApiKeyCreateDto expiry) {
+        return ResponseEntity.ok(apiKeyService.generateNewApiKey(expiry));
     }
 
     @Operation(summary = "Get my API keys", description = "Retrieve the API keys belonging to the authenticated user, newest first. "
@@ -47,7 +52,7 @@ public class ApiKeyController {
         return ResponseEntity.ok(apiKeyService.fetchMyApiKeys(active));
     }
 
-    @Operation(summary = "Get my inactive API keys", description = "A page of the authenticated user's expired, revoked or used-up keys, newest first. "
+    @Operation(summary = "Get my inactive API keys", description = "A page of the authenticated user's expired or revoked keys, newest first. "
             + "Requires ROLE_USER.")
     @GetMapping("/inactive")
     @PreAuthorize("hasRole('ROLE_USER')")
@@ -66,12 +71,13 @@ public class ApiKeyController {
         return ResponseEntity.ok(apiKeyService.fetchAllApiKeys(search, active, pageable));
     }
 
-    @io.swagger.v3.oas.annotations.Hidden
-    @Operation(summary = "Update an API key", description = "Update API key settings. Requires ROLE_ADMIN.")
-    @ApiResponse(responseCode = "400", description = "Validation error or bad request")
+    @Operation(summary = "Update an API key", description = "Change a key's expiry (expiresInDays 1 to 3650, neverExpires: true, or a future "
+            + "expirationDate) or turn it on or off. The usage can't be edited. The key's owner or an admin.")
+    @ApiResponse(responseCode = "400", description = "Days out of range, a past expirationDate, or more than one expiry")
+    @ApiResponse(responseCode = "403", description = "Not the key's owner or an admin")
     @ApiResponse(responseCode = "404", description = "API key not found")
     @PutMapping("/{id}")
-    @PreAuthorize("hasRole('ROLE_ADMIN')")
+    @PreAuthorize("hasAnyRole('ROLE_ADMIN', 'ROLE_USER')")
     public ResponseEntity<ApiKeyResponse> updateApiKey(@PathVariable final Long id, @Valid @RequestBody final ApiKeyUpdateDto apiKeyUpdateDto) {
         apiKeyUpdateDto.setId(id);
         return ResponseEntity.ok(apiKeyService.updateKey(apiKeyUpdateDto));

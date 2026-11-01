@@ -3,13 +3,16 @@ package cc.hrva.urlshortener.validator;
 import java.time.LocalDateTime;
 import java.util.Collections;
 import java.util.Optional;
+import cc.hrva.urlshortener.exception.ApiException;
 import cc.hrva.urlshortener.exception.ApiKeyNotFoundException;
+import cc.hrva.urlshortener.exception.FieldValidationException;
 import cc.hrva.urlshortener.exception.InvalidApiKeyException;
 import cc.hrva.urlshortener.exception.NoAuthorizationException;
 import cc.hrva.urlshortener.model.ApiKey;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.codebook.Authorities;
 import cc.hrva.urlshortener.repository.ApiKeyRepository;
+import cc.hrva.urlshortener.security.ApiKeyTokens;
 import cc.hrva.urlshortener.service.UserService;
 import cc.hrva.urlshortener.validator.impl.DefaultApiKeyValidator;
 import org.junit.jupiter.api.BeforeEach;
@@ -43,7 +46,7 @@ class DefaultApiKeyValidatorTest {
         );
 
         this.apiKey = ApiKey.builder()
-                .apiCallsLimit(100L)
+                .keyHash(ApiKeyTokens.hash("test"))
                 .apiCallsUsed(0L)
                 .createDate(LocalDateTime.now())
                 .expirationDate(LocalDateTime.now().plusDays(1L))
@@ -119,7 +122,7 @@ class DefaultApiKeyValidatorTest {
     void shouldApiKeyExistsByKeyAndIsValid() {
         final String key = "test";
 
-        when(apiKeyRepository.findApiKeyByKey(key)).thenReturn(Optional.ofNullable(apiKey));
+        when(apiKeyRepository.findApiKeyByKeyHash(ApiKeyTokens.hash(key))).thenReturn(Optional.ofNullable(apiKey));
 
         assertThatCode(() -> apiKeyValidator.apiKeyExistsByKeyAndIsValid(key))
                 .doesNotThrowAnyException();
@@ -129,7 +132,7 @@ class DefaultApiKeyValidatorTest {
     void shouldFailApiKeyExistsByKeyAndIsValidApiKeyDoesntExist() {
         final String key = "test";
 
-        when(apiKeyRepository.findApiKeyByKey(key)).thenReturn(Optional.empty());
+        when(apiKeyRepository.findApiKeyByKeyHash(ApiKeyTokens.hash(key))).thenReturn(Optional.empty());
 
         assertThatCode(() -> apiKeyValidator.apiKeyExistsByKeyAndIsValid(key))
                 .isInstanceOf(ApiKeyNotFoundException.class)
@@ -137,15 +140,60 @@ class DefaultApiKeyValidatorTest {
     }
 
     @Test
-    void shouldFailApiKeyExistsByKeyAndIsValidExceededCallLimit() {
+    void aKeyWithManyCallsIsStillValid() {
         final String key = "test";
 
-        apiKey.setApiCallsUsed(101L);
-        when(apiKeyRepository.findApiKeyByKey(key)).thenReturn(Optional.ofNullable(apiKey));
+        apiKey.setApiCallsUsed(1_000_000L);
+        when(apiKeyRepository.findApiKeyByKeyHash(ApiKeyTokens.hash(key))).thenReturn(Optional.ofNullable(apiKey));
 
         assertThatCode(() -> apiKeyValidator.apiKeyExistsByKeyAndIsValid(key))
-                .isInstanceOf(InvalidApiKeyException.class)
-                .hasMessage("API key call limit reached");
+                .doesNotThrowAnyException();
+    }
+
+    @Test
+    void aKeyWithoutAnExpiryIsValid() {
+        final String key = "test";
+
+        apiKey.setExpirationDate(null);
+        when(apiKeyRepository.findApiKeyByKeyHash(ApiKeyTokens.hash(key))).thenReturn(Optional.ofNullable(apiKey));
+
+        assertThatCode(() -> apiKeyValidator.apiKeyExistsByKeyAndIsValid(key))
+                .doesNotThrowAnyException();
+    }
+
+    @Test
+    void oneExpiryChoiceOrNoneIsAccepted() {
+        assertThatCode(() -> apiKeyValidator.validateExpiry(null, null, null)).doesNotThrowAnyException();
+        assertThatCode(() -> apiKeyValidator.validateExpiry(30, null, null)).doesNotThrowAnyException();
+        assertThatCode(() -> apiKeyValidator.validateExpiry(null, true, null)).doesNotThrowAnyException();
+        assertThatCode(() -> apiKeyValidator.validateExpiry(30, false, null)).doesNotThrowAnyException();
+        assertThatCode(() -> apiKeyValidator.validateExpiry(null, false, LocalDateTime.now().plusDays(2))).doesNotThrowAnyException();
+    }
+
+    @Test
+    void anExpiryInDaysAndNoExpiryTogetherAreRefused() {
+        assertThatThrownBy(() -> apiKeyValidator.validateExpiry(30, true, null))
+                .isInstanceOf(ApiException.class)
+                .hasMessage("Choose either an expiry in days or no expiry.");
+    }
+
+    @Test
+    void anExpirationDateWithAnotherChoiceIsRefused() {
+        final var later = LocalDateTime.now().plusDays(2);
+
+        assertThatThrownBy(() -> apiKeyValidator.validateExpiry(30, null, later))
+                .isInstanceOf(ApiException.class)
+                .hasMessage("Choose either an expiry in days or no expiry.");
+        assertThatThrownBy(() -> apiKeyValidator.validateExpiry(null, true, later))
+                .isInstanceOf(ApiException.class)
+                .hasMessage("Choose either an expiry in days or no expiry.");
+    }
+
+    @Test
+    void anExpirationDateInThePastIsRefusedOnItsField() {
+        assertThatThrownBy(() -> apiKeyValidator.validateExpiry(null, null, LocalDateTime.now().minusMinutes(1)))
+                .isInstanceOfSatisfying(FieldValidationException.class, exception -> org.assertj.core.api.Assertions.assertThat(exception.getFieldErrors())
+                        .containsExactly(java.util.Map.entry("expirationDate", "Choose a date in the future.")));
     }
 
     @Test
@@ -153,7 +201,7 @@ class DefaultApiKeyValidatorTest {
         final String key = "test";
 
         apiKey.setExpirationDate(LocalDateTime.now().minusDays(1));
-        when(apiKeyRepository.findApiKeyByKey(key)).thenReturn(Optional.ofNullable(apiKey));
+        when(apiKeyRepository.findApiKeyByKeyHash(ApiKeyTokens.hash(key))).thenReturn(Optional.ofNullable(apiKey));
 
         assertThatCode(() -> apiKeyValidator.apiKeyExistsByKeyAndIsValid(key))
                 .isInstanceOf(InvalidApiKeyException.class)
@@ -165,7 +213,7 @@ class DefaultApiKeyValidatorTest {
         final String key = "test";
 
         apiKey.setActive(false);
-        when(apiKeyRepository.findApiKeyByKey(key)).thenReturn(Optional.ofNullable(apiKey));
+        when(apiKeyRepository.findApiKeyByKeyHash(ApiKeyTokens.hash(key))).thenReturn(Optional.ofNullable(apiKey));
 
         assertThatCode(() -> apiKeyValidator.apiKeyExistsByKeyAndIsValid(key))
                 .isInstanceOf(InvalidApiKeyException.class)
@@ -177,7 +225,7 @@ class DefaultApiKeyValidatorTest {
         final String key = "test";
 
         apiKey.setOwner(User.builder().id(1L).active(false).build());
-        when(apiKeyRepository.findApiKeyByKey(key)).thenReturn(Optional.ofNullable(apiKey));
+        when(apiKeyRepository.findApiKeyByKeyHash(ApiKeyTokens.hash(key))).thenReturn(Optional.ofNullable(apiKey));
 
         assertThatCode(() -> apiKeyValidator.apiKeyExistsByKeyAndIsValid(key))
                 .isInstanceOf(InvalidApiKeyException.class)
@@ -189,7 +237,7 @@ class DefaultApiKeyValidatorTest {
         final String key = "test";
 
         apiKey.setOwner(null);
-        when(apiKeyRepository.findApiKeyByKey(key)).thenReturn(Optional.ofNullable(apiKey));
+        when(apiKeyRepository.findApiKeyByKeyHash(ApiKeyTokens.hash(key))).thenReturn(Optional.ofNullable(apiKey));
 
         assertThatCode(() -> apiKeyValidator.apiKeyExistsByKeyAndIsValid(key))
                 .isInstanceOf(InvalidApiKeyException.class)

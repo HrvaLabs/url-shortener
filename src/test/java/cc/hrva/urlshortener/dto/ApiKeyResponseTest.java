@@ -1,6 +1,8 @@
 package cc.hrva.urlshortener.dto;
 
+import java.lang.reflect.RecordComponent;
 import java.time.LocalDateTime;
+import java.util.Arrays;
 import cc.hrva.urlshortener.model.ApiKey;
 import org.junit.jupiter.api.Test;
 
@@ -11,8 +13,8 @@ class ApiKeyResponseTest {
     private ApiKey.ApiKeyBuilder baseKey() {
         return ApiKey.builder()
                 .id(1L)
-                .key("k")
-                .apiCallsLimit(100L)
+                .keyHash("0".repeat(64))
+                .keyPrefix("hrva_a1b2c3")
                 .apiCallsUsed(10L)
                 .createDate(LocalDateTime.now())
                 .expirationDate(LocalDateTime.now().plusDays(1));
@@ -24,9 +26,14 @@ class ApiKeyResponseTest {
     }
 
     @Test
-    void shouldBeLimitReached() {
-        final var key = baseKey().active(false).apiCallsUsed(100L).build();
-        assertThat(ApiKeyResponse.from(key).status()).isEqualTo("LIMIT_REACHED");
+    void aKeyThatNeverExpiresIsActive() {
+        assertThat(ApiKeyResponse.from(baseKey().active(true).expirationDate(null).build()).status()).isEqualTo("ACTIVE");
+    }
+
+    @Test
+    void anInactiveKeyWithManyCallsIsRevokedNotLimitReached() {
+        final var key = baseKey().active(false).apiCallsUsed(100_000L).build();
+        assertThat(ApiKeyResponse.from(key).status()).isEqualTo("REVOKED");
     }
 
     @Test
@@ -38,5 +45,43 @@ class ApiKeyResponseTest {
     @Test
     void shouldBeRevoked() {
         assertThat(ApiKeyResponse.from(baseKey().active(false).build()).status()).isEqualTo("REVOKED");
+    }
+
+    @Test
+    void anInactiveKeyThatNeverExpiresIsRevoked() {
+        assertThat(ApiKeyResponse.from(baseKey().active(false).expirationDate(null).build()).status()).isEqualTo("REVOKED");
+    }
+
+    @Test
+    void theUsageAndTheLastUseAreShown() {
+        final var lastUsed = LocalDateTime.of(2026, 10, 30, 9, 15);
+
+        final var response = ApiKeyResponse.from(baseKey().active(true).apiCallsUsed(7L).lastUsedAt(lastUsed).build());
+
+        assertThat(response.apiCallsUsed()).isEqualTo(7L);
+        assertThat(response.lastUsedAt()).isEqualTo(lastUsed);
+        assertThat(ApiKeyResponse.from(baseKey().active(true).build()).lastUsedAt()).isNull();
+    }
+
+    @Test
+    void theResponseHasNoCallLimit() {
+        assertThat(Arrays.stream(ApiKeyResponse.class.getRecordComponents()).map(RecordComponent::getName))
+                .containsExactly("id", "keyPrefix", "apiCallsUsed", "lastUsedAt", "createDate", "expirationDate", "active", "status", "ownerEmail");
+    }
+
+    @Test
+    void aListedKeyShowsItsPrefixOnly() {
+        assertThat(ApiKeyResponse.from(baseKey().active(true).build()).keyPrefix()).isEqualTo("hrva_a1b2c3");
+    }
+
+    @Test
+    void theCreateResponseIsTheListedKeyWithTheKeyOnce() {
+        final var created = CreatedApiKeyResponse.from(baseKey().active(true).build(), "hrva_a1b2c3secret");
+
+        assertThat(Arrays.stream(CreatedApiKeyResponse.class.getRecordComponents()).map(RecordComponent::getName))
+                .containsExactly("id", "key", "keyPrefix", "apiCallsUsed", "lastUsedAt", "createDate", "expirationDate", "active", "status", "ownerEmail");
+        assertThat(created.key()).isEqualTo("hrva_a1b2c3secret");
+        assertThat(created.keyPrefix()).isEqualTo("hrva_a1b2c3");
+        assertThat(created.status()).isEqualTo("ACTIVE");
     }
 }
