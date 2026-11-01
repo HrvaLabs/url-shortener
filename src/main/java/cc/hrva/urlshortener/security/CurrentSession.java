@@ -24,6 +24,7 @@ public class CurrentSession {
         }
 
         return tokenProvider.read(jwt)
+                .filter(current -> current.issuedAt() != null)
                 .flatMap(current -> userRepository.findByEmail(authentication.getName())
                         .filter(user -> !Boolean.FALSE.equals(user.getActive()))
                         .map(user -> BEARER_PREFIX + tokenProvider.renewToken(TokenProvider.authenticationOf(user), current)));

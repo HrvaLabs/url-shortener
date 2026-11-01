@@ -197,6 +197,27 @@ class SessionEndpointSecurityTest {
                 .andExpect(status().isNotFound());
     }
 
+    @Test
+    void aTokenFromBeforeIssueTimesEndsEveryDeviceWithoutARenewal() throws Exception {
+        final var oldRememberMe = Jwts.builder()
+                .subject(EMAIL)
+                .claim("auth", "ROLE_USER")
+                .expiration(Date.from(Instant.now().plus(Duration.ofDays(20))))
+                .signWith(Keys.hmacShaKeyFor(Decoders.BASE64.decode(JWT_SECRET)), Jwts.SIG.HS512)
+                .compact();
+
+        final var answer = mockMvc.perform(post(END_SESSIONS).header(JwtFilter.AUTHORIZATION_HEADER, "Bearer " + oldRememberMe))
+                .andExpect(status().isOk())
+                .andReturn().getResponse();
+
+        assertThat(answer.getHeader(JwtFilter.AUTHORIZATION_HEADER)).isNull();
+        assertThat(com.jayway.jsonpath.JsonPath.<String>read(answer.getContentAsString(), "$.token")).isNull();
+        assertThat(ana.getTokensValidAfter()).isNotNull();
+        mockMvc.perform(post(END_SESSIONS).header(JwtFilter.AUTHORIZATION_HEADER, "Bearer " + oldRememberMe))
+                .andExpect(status().isUnauthorized())
+                .andExpect(content().json(SESSION_ENDED, JsonCompareMode.STRICT));
+    }
+
     private static String tokenIssued(final Duration ago) {
         return tokenIssued(ago, "ROLE_USER");
     }

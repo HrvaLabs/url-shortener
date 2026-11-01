@@ -75,6 +75,20 @@ class CurrentSessionTest {
     }
 
     @Test
+    void aTokenWithoutAnIssueTimeIsNotRenewed() {
+        signedInWith(Jwts.builder()
+                .subject(EMAIL)
+                .claim("auth", "ROLE_USER")
+                .expiration(Date.from(Instant.now().plus(20, ChronoUnit.DAYS)))
+                .signWith(Keys.hmacShaKeyFor(Decoders.BASE64.decode(SECRET)), Jwts.SIG.HS512)
+                .compact());
+        org.mockito.Mockito.lenient().when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.of(user(true, "ROLE_USER")));
+
+        assertThat(currentSession.renewedToken()).isEmpty();
+        assertThat(currentSession.keepThisDeviceSignedIn().containsHeader("Authorization")).isFalse();
+    }
+
+    @Test
     void aDeactivatedAccountGetsNoNewToken() {
         signedInWith(tokenIssued(Instant.now().minusSeconds(60), Instant.now().plusSeconds(3600), "ROLE_USER"));
         when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.of(user(false, "ROLE_USER")));
