@@ -54,6 +54,14 @@
 # untouched), the one-time OAuth code put straight into Redis (exchanged once, then 410; a two-step account's code answers the pending step), passwords over 72 bytes (field errors, and a
 # sign-in answered like a wrong password) and the Redis login limit per account and per network (429 with Retry-After, a success that
 # doesn't clear the network, hashed keys, the admin list and clearing it).
+# Section 14 first checks that admin@localhost, whose two-step sign-in is off, gets the 403 "Turn on two-step sign-in to use admin pages."
+# on an admin page and on GET /api/v1/users while its own /users/me and two-step setting work, then sets two_step_enabled in Postgres, so the
+# same token opens admin pages from then on. Section 20 reads the reset token from the link in the email (Mailpit's API port is published on a
+# random loopback port too). Section 30 checks v2.23's accounts work: a password sign-in is a 503 with Retry-After while Redis doesn't answer
+# (CLIENT PAUSE), reset tokens (041, only the SHA-256 stored, an hour, used once, an expired one refused), the account email limits per
+# address and per network (the same 202, then a 429), sign-up answering a taken address like a new one (the note email, nothing created, a new
+# verification link for an unverified one), and an API key as Authorization: Bearer (counted once, two different keys a 400, a JWT still a
+# sign-in).
 #
 #   scripts/mcp-e2e.sh                         builds the jar, then runs every step
 #   MCP_E2E_SKIP_BUILD=1 scripts/mcp-e2e.sh    reuses target/url-shortener-*.jar
