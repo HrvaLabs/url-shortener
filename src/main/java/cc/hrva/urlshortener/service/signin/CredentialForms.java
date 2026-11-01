@@ -2,9 +2,11 @@ package cc.hrva.urlshortener.service.signin;
 
 import java.text.Normalizer;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Pattern;
@@ -49,9 +51,10 @@ public final class CredentialForms {
         if (autocomplete.isPresent()) {
             return Optional.of("a credential autocomplete (" + autocomplete.get() + ")");
         }
+        final var labels = labelTextsById(page);
         return Stream.concat(page.select("form").stream().map(CredentialForms::typedInputs), Stream.of(formlessInputsNextToAButton(page)))
                 .flatMap(List::stream)
-                .map(input -> signInWordOf(page, input))
+                .map(input -> signInWordOf(labels, input))
                 .flatMap(Optional::stream)
                 .findFirst()
                 .map(word -> "a sign-in field (" + word + ")");
@@ -70,21 +73,24 @@ public final class CredentialForms {
         return typedInputs(page).stream().filter(input -> input.closest("form") == null).toList();
     }
 
-    private static Optional<String> signInWordOf(final Document page, final Element input) {
+    private static Map<String, String> labelTextsById(final Document page) {
+        final var labels = new HashMap<String, String>();
+        page.select("label[for]").forEach(label -> labels.putIfAbsent(label.attr("for"), label.text()));
+        return labels;
+    }
+
+    private static Optional<String> signInWordOf(final Map<String, String> labels, final Element input) {
         final var descriptions = Stream.of(input.attr("name"), input.attr("id"), input.attr("placeholder"), input.attr("aria-label"),
-                        labelFor(page, input), enclosingLabel(input))
+                        labelFor(labels, input), enclosingLabel(input))
                 .filter(StringUtils::isNotBlank)
                 .map(CredentialForms::normalized)
                 .toList();
         return WORDS.stream().filter(word -> descriptions.stream().anyMatch(description -> mentions(description, word))).findFirst();
     }
 
-    private static String labelFor(final Document page, final Element input) {
+    private static String labelFor(final Map<String, String> labels, final Element input) {
         final var id = input.id();
-        if (id.isEmpty()) {
-            return "";
-        }
-        return page.select("label").stream().filter(label -> id.equals(label.attr("for"))).findFirst().map(Element::text).orElse("");
+        return id.isEmpty() ? "" : labels.getOrDefault(id, "");
     }
 
     private static String enclosingLabel(final Element input) {

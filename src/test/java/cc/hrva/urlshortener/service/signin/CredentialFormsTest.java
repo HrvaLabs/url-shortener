@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.service.signin;
 
+import java.time.Duration;
 import org.jsoup.Jsoup;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -7,6 +8,7 @@ import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 
 class CredentialFormsTest {
 
@@ -77,4 +79,17 @@ class CredentialFormsTest {
         assertThat(CredentialForms.find(page)).isEmpty();
     }
 
+
+    @Test
+    void aLargePageWithManyLabelledInputsIsReadInWellUnderASecond() {
+        final var html = new StringBuilder("<form>");
+        for (int field = 0; field < 20_000; field++) {
+            html.append("<label for=\"f").append(field).append("\">Size</label><input id=\"f").append(field).append("\">");
+        }
+        final var page = Jsoup.parse(html.append("<label for=\"last\">Contraseña</label><input id=\"last\"></form>").toString());
+
+        final var found = assertTimeoutPreemptively(Duration.ofSeconds(1), () -> CredentialForms.find(page));
+
+        assertThat(found).contains("a sign-in field (contrasena)");
+    }
 }
