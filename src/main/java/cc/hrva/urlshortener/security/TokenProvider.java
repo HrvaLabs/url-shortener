@@ -65,7 +65,7 @@ public class TokenProvider {
   }
 
   public static Authentication authenticationOf(final cc.hrva.urlshortener.model.User user, final String token) {
-    final var authorities = authoritiesOf(user);
+    final var authorities = AdminTwoStep.sessionAuthoritiesOf(user, authoritiesOf(user));
 
     return new UsernamePasswordAuthenticationToken(new User(user.getEmail(), "", authorities), token, authorities);
   }

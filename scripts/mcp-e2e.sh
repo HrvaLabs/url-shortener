@@ -638,6 +638,22 @@ expect_eq "$HTTP_STATUS" 200 "POST /api/v1/auth/login as admin@localhost"
 ADMIN_JWT=$(jq -r .token <<<"$HTTP_BODY")
 ADMIN_JWT=${ADMIN_JWT#Bearer }
 show "admin JWT: $(redact <<<"$ADMIN_JWT")"
+echo "  --- admin pages need two-step sign-in (v2.23): admin@localhost has it off"
+TWO_STEP_REQUIRED="Turn on two-step sign-in to use admin pages."
+http -H "Authorization: Bearer $ADMIN_JWT" "$BASE/api/v1/admin/stats/traffic?days=7"
+expect_eq "$HTTP_STATUS $(header_value content-type) $(jq -r .detail <<<"$HTTP_BODY")" "403 application/problem+json $TWO_STEP_REQUIRED" \
+    "an admin page is a 403 problem that says to turn two-step on"
+http -H "Authorization: Bearer $ADMIN_JWT" "$BASE/api/v1/users?page=0&size=1"
+expect_eq "$HTTP_STATUS $(jq -r .detail <<<"$HTTP_BODY")" "403 $TWO_STEP_REQUIRED" "so is an admin-only endpoint outside /admin (GET /api/v1/users)"
+http -H "Authorization: Bearer $ADMIN_JWT" "$BASE/api/v1/users/me"
+expect_eq "$HTTP_STATUS $(jq -r .email <<<"$HTTP_BODY")" "200 admin@localhost" "the admin's own account page still works"
+http -H "Authorization: Bearer $ADMIN_JWT" "$BASE/api/v1/users/me/two-step"
+expect_eq "$HTTP_STATUS $(jq -r .enabled <<<"$HTTP_BODY")" "200 false" "and so does the two-step setting, to turn it on"
+psql_value "update user_account set two_step_enabled = true where email = 'admin@localhost';" >/dev/null
+ok "two_step_enabled set for admin@localhost in Postgres (the same token, no second step needed for this script)"
+http -H "Authorization: Bearer $ADMIN_JWT" "$BASE/api/v1/admin/stats/traffic?days=7"
+expect_eq "$HTTP_STATUS" 200 "with two-step on, the same token opens admin pages on its next request"
+
 
 http -H "Authorization: Bearer $ADMIN_JWT" "$BASE/api/v1/admin/stats/traffic?days=7"
 expect_eq "$HTTP_STATUS" 200 "GET /api/v1/admin/stats/traffic?days=7"

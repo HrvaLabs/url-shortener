@@ -385,7 +385,7 @@ class McpEndpointSecurityTest {
     @Test
     void nonAdminCallingAModerationToolIsRefusedAndNothingIsBlocked() throws Exception {
         final var token = accessTokens.issue(EMAIL, RESOURCE);
-        when(userService.fetchActiveUserByEmail(EMAIL)).thenReturn(User.builder().id(7L).email(EMAIL).active(true).build());
+        when(userService.fetchActiveUserByEmail(EMAIL)).thenReturn(User.builder().id(7L).email(EMAIL).active(true).twoStepEnabled(true).build());
 
         mockMvc.perform(mcpRequest(BLOCK_DOMAIN_CALL).header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
                 .andExpect(status().isOk())
@@ -401,7 +401,7 @@ class McpEndpointSecurityTest {
     void adminBlocksADomainAsTheTokenSubjectViaMcp(final CapturedOutput output) throws Exception {
         final var token = accessTokens.issue(EMAIL, RESOURCE);
         final var callerDuringBlock = new AtomicReference<String>();
-        when(userService.fetchActiveUserByEmail(EMAIL)).thenReturn(User.builder().id(7L).email(EMAIL).active(true).build());
+        when(userService.fetchActiveUserByEmail(EMAIL)).thenReturn(User.builder().id(7L).email(EMAIL).active(true).twoStepEnabled(true).build());
         when(userRepository.existsByIdAndAuthoritiesName(7L, "ROLE_ADMIN")).thenReturn(true);
         when(urlRepository.findFlaggedOrBlockedDestinationsMentioning("jofogas.cards", "jofogas.cards"))
                 .thenReturn(List.of("https://login.jofogas.cards/pay"));
@@ -427,7 +427,7 @@ class McpEndpointSecurityTest {
         final var token = accessTokens.issue(EMAIL, RESOURCE);
         final var callerDuringCreate = new AtomicReference<String>();
         final var request = new AtomicReference<CreateUrlDto>();
-        when(userService.fetchActiveUserByEmail(EMAIL)).thenReturn(User.builder().id(7L).email(EMAIL).active(true).build());
+        when(userService.fetchActiveUserByEmail(EMAIL)).thenReturn(User.builder().id(7L).email(EMAIL).active(true).twoStepEnabled(true).build());
         when(urlService.saveUrlRouting(any(), any(), eq(CreatedVia.MCP))).thenAnswer(invocation -> {
             callerDuringCreate.set(SecurityContextHolder.getContext().getAuthentication().getName());
             request.set(invocation.getArgument(0));
@@ -459,7 +459,7 @@ class McpEndpointSecurityTest {
     void linkStatsReadsOwnerOnlyStatsAsTheTokenSubject(final CapturedOutput output) throws Exception {
         final var token = accessTokens.issue(EMAIL, RESOURCE);
         final var callerDuringStats = new AtomicReference<String>();
-        when(userService.fetchActiveUserByEmail(EMAIL)).thenReturn(User.builder().id(7L).email(EMAIL).active(true).build());
+        when(userService.fetchActiveUserByEmail(EMAIL)).thenReturn(User.builder().id(7L).email(EMAIL).active(true).twoStepEnabled(true).build());
         when(urlService.getAllMyUrls(isNull(), any(), any())).thenReturn(new PageImpl<>(List.of(link("secret-alias", "https://example.com/a"))));
         when(analyticsService.getUrlAnalyticsForOwner(1L, null)).thenAnswer(invocation -> {
             callerDuringStats.set(SecurityContextHolder.getContext().getAuthentication().getName());
@@ -487,7 +487,7 @@ class McpEndpointSecurityTest {
     void listLinksRunsAsTheTokenSubject(final CapturedOutput output) throws Exception {
         final var token = accessTokens.issue(EMAIL, RESOURCE);
         final var callerDuringLookup = new AtomicReference<String>();
-        when(userService.fetchActiveUserByEmail(EMAIL)).thenReturn(User.builder().id(7L).email(EMAIL).active(true).build());
+        when(userService.fetchActiveUserByEmail(EMAIL)).thenReturn(User.builder().id(7L).email(EMAIL).active(true).twoStepEnabled(true).build());
         when(urlService.getAllMyUrls(isNull(), any(), any())).thenAnswer(invocation -> {
             callerDuringLookup.set(SecurityContextHolder.getContext().getAuthentication().getName());
             return new PageImpl<>(List.of(link("abc12", "https://example.com/a")));
@@ -510,7 +510,7 @@ class McpEndpointSecurityTest {
     @Test
     void toolFailureReturnsGenericErrorWithoutInternals() throws Exception {
         final var token = accessTokens.issue(EMAIL, RESOURCE);
-        when(userService.fetchActiveUserByEmail(EMAIL)).thenReturn(User.builder().id(7L).email(EMAIL).active(true).build());
+        when(userService.fetchActiveUserByEmail(EMAIL)).thenReturn(User.builder().id(7L).email(EMAIL).active(true).twoStepEnabled(true).build());
         when(urlService.getAllMyUrls(isNull(), any(), any())).thenThrow(new IllegalStateException("internal-detail-from-the-database"));
 
         mockMvc.perform(mcpRequest(LIST_LINKS_CALL).header(HttpHeaders.AUTHORIZATION, "Bearer " + token))

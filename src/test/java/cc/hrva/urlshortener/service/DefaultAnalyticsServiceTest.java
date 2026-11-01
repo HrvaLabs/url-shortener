@@ -458,6 +458,21 @@ class DefaultAnalyticsServiceTest {
     }
 
     @Test
+    void anAdminWithoutTwoStepIsToldToTurnItOnToReadSomeoneElsesAnalytics() {
+        final var url = Url.builder().id(7L).shortUrl("a").longUrl("https://a.com").visits(1L).active(true)
+                .owner(User.builder().id(99L).build()).build();
+        final var pending = admin();
+        pending.setTwoStepEnabled(false);
+        when(userService.getUserFromToken()).thenReturn(pending);
+        when(urlRepository.findById(7L)).thenReturn(Optional.of(url));
+
+        assertThatThrownBy(() -> analyticsService.getUrlAnalytics(7L, null))
+                .isInstanceOf(NoAuthorizationException.class)
+                .hasMessage("Turn on two-step sign-in to use admin pages.");
+        verifyNoInteractions(linkStatsRepository);
+    }
+
+    @Test
     void shouldFailUrlAnalyticsWhenUrlMissing() {
         when(userService.getUserFromToken()).thenReturn(owner);
         when(urlRepository.findById(7L)).thenReturn(Optional.empty());
@@ -540,7 +555,7 @@ class DefaultAnalyticsServiceTest {
     }
 
     private static User admin() {
-        return User.builder().id(2L).email("admin@example.com")
+        return User.builder().id(2L).email("admin@example.com").twoStepEnabled(true)
                 .authorities(Collections.singletonList(Authorities.builder().id(1L).name("ROLE_ADMIN").build()))
                 .build();
     }

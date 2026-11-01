@@ -39,6 +39,13 @@
           "items": [
             "Email addresses are masked in every server log line."
           ]
+        },
+        {
+          "title": "Admin",
+          "icon": "wrench",
+          "items": [
+            "Admin pages and the MCP moderation tools need two-step sign-in on the admin's account. Until it's on, they answer \"Turn on two-step sign-in to use admin pages.\" and the dashboard opens the two-step settings. Your own account pages keep working."
+          ]
         }
       ]
     },

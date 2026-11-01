@@ -258,7 +258,7 @@ class PagedEndpointsTest {
     private void signedIn(final String token, final String email, final String role) {
         lenient().when(tokenProvider.read(token))
                 .thenReturn(Optional.of(new SessionToken(UsernamePasswordAuthenticationToken.authenticated(email, null, List.of(new SimpleGrantedAuthority(role))), null, null, null)));
-        lenient().when(userRepository.findByEmail(email)).thenReturn(Optional.of(User.builder().email(email).active(true).authorities(List.of(Authorities.builder().name(role).build())).build()));
+        lenient().when(userRepository.findByEmail(email)).thenReturn(Optional.of(User.builder().email(email).active(true).twoStepEnabled(true).authorities(List.of(Authorities.builder().name(role).build())).build()));
     }
 
     private static RSAKey generateSigningKey() {

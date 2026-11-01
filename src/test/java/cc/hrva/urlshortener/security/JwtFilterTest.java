@@ -74,7 +74,7 @@ class JwtFilterTest {
     void theSessionHasTheAccountsRolesAndKeepsTheToken() throws Exception {
         final var admin = new Authorities();
         admin.setName("ROLE_ADMIN");
-        signedInAs("test@example.com", User.builder().id(1L).active(true).authorities(List.of(admin)).build());
+        signedInAs("test@example.com", User.builder().id(1L).active(true).twoStepEnabled(true).authorities(List.of(admin)).build());
 
         jwtFilter.doFilter(request, response, filterChain);
 

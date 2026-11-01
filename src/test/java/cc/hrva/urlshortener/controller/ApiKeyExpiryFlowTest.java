@@ -158,6 +158,7 @@ class ApiKeyExpiryFlowTest {
         account(OWNER, OWNER_EMAIL, ROLE_USER);
         account(OTHER, OTHER_EMAIL, ROLE_USER);
         account(ADMIN, ADMIN_EMAIL, ROLE_USER, ROLE_ADMIN);
+        jdbcTemplate.update("update user_account set two_step_enabled = true where id = ?", ADMIN);
         jdbcTemplate.update("""
                 insert into api_key (id, key_hash, key_prefix, owner_id, api_calls_used, expiration_date, active)
                 values (?, ?, 'owners', ?, 42, cast('2027-01-01' as date), true)""", OWNERS_KEY, ApiKeyTokens.hash("owners-expiry-key"), OWNER);

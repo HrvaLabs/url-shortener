@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.service.impl;
 
+import cc.hrva.urlshortener.security.AdminTwoStep;
 import cc.hrva.urlshortener.dto.AnalyticsOverviewDto;
 import cc.hrva.urlshortener.dto.AnalyticsOverviewDto.TopLink;
 import cc.hrva.urlshortener.dto.LinkClicks;
@@ -38,7 +39,6 @@ import org.springframework.transaction.annotation.Transactional;
 public class DefaultAnalyticsService implements AnalyticsService {
 
     private static final int TOP_LINKS_LIMIT = 10;
-    private static final String ROLE_ADMIN = "ROLE_ADMIN";
     private static final String NO_AUTHORIZATION = "You don't have authorization for this action";
 
     private final UserService userService;
@@ -87,8 +87,8 @@ public class DefaultAnalyticsService implements AnalyticsService {
         final var user = currentUser();
         final var url = findUrl(urlId);
 
-        if (!isOwner(url, user) && !isAdmin(user)) {
-            throw new NoAuthorizationException(NO_AUTHORIZATION);
+        if (!isOwner(url, user) && !AdminTwoStep.hasAdminPowers(user)) {
+            throw new NoAuthorizationException(AdminTwoStep.refusalFor(user, NO_AUTHORIZATION));
         }
 
         return buildAnalytics(url, range);
@@ -158,10 +158,6 @@ public class DefaultAnalyticsService implements AnalyticsService {
 
     private boolean isOwner(final Url url, final User user) {
         return url.getOwner() != null && Objects.equals(url.getOwner().getId(), user.getId());
-    }
-
-    private boolean isAdmin(final User user) {
-        return user.getAuthorities().stream().anyMatch(authority -> ROLE_ADMIN.equals(authority.getName()));
     }
 
     private User currentUser() {

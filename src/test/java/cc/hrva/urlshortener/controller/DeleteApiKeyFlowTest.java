@@ -142,6 +142,7 @@ class DeleteApiKeyFlowTest {
         account(OWNER, OWNER_EMAIL, ROLE_USER);
         account(OTHER, OTHER_EMAIL, ROLE_USER);
         account(ADMIN, ADMIN_EMAIL, ROLE_USER, ROLE_ADMIN);
+        jdbcTemplate.update("update user_account set two_step_enabled = true where id = ?", ADMIN);
         key(OWNERS_REVOKED_KEY, OWNER, false, "2027-01-01");
         key(OWNERS_ACTIVE_KEY, OWNER, true, "2027-01-01");
         key(OWNERS_EXPIRED_KEY, OWNER, false, "2026-10-21");

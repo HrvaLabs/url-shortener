@@ -72,7 +72,8 @@ class ModerationToolsTest {
 
     private static final Instant NOW = Instant.parse("2026-10-21T10:00:00Z");
     private static final String ADMIN_EMAIL = "admin@hrva.cc";
-    private static final User ADMIN = User.builder().id(1L).email(ADMIN_EMAIL).active(true).build();
+    private static final User ADMIN = User.builder().id(1L).email(ADMIN_EMAIL).active(true).twoStepEnabled(true).build();
+    private static final User ADMIN_WITHOUT_TWO_STEP = User.builder().id(2L).email("admin2@localhost").active(true).twoStepEnabled(false).build();
     private static final User NON_ADMIN = User.builder().id(7L).email("user@localhost").active(true).build();
     private static final String ADMINS_ONLY = "Moderation tools are for hrva.cc admins only.";
     private static final String NO_EVIDENCE = "No flagged or blocked links on this domain. Use the dashboard to block it.";
@@ -133,6 +134,28 @@ class ModerationToolsTest {
         assertThat(result.content()).hasSize(1);
         assertThat(text(result)).isEqualTo(ADMINS_ONLY);
         verifyNoInteractions(moderationService);
+    }
+
+    @Test
+    void everyToolTellsAnAdminWithoutTwoStepToTurnItOnBeforeTouchingAnything() {
+        signedInAs(ADMIN_WITHOUT_TWO_STEP, true);
+
+        final List<CallToolResult> results = List.of(
+                moderationTools.moderationSummary(),
+                moderationTools.reviewQueue(null, null),
+                moderationTools.possibleScammers(null),
+                moderationTools.checkUrl("https://evil.example/login"),
+                moderationTools.blockLink(42L, null),
+                moderationTools.blockDomain("evil.example", null),
+                moderationTools.blockUser(27L),
+                moderationTools.deleteLink(42L));
+
+        assertThat(results).hasSize(TOOL_NAMES.size()).allSatisfy(result -> {
+            assertThat(result.isError()).isTrue();
+            assertThat(text(result)).isEqualTo("Turn on two-step sign-in to use admin pages.");
+        });
+        verifyNoInteractions(moderationService, reviewQueueService, scammerSignalService, linkCheckService, blocklistSourceService,
+                urlRepository, linkReviewRepository);
     }
 
     @Test

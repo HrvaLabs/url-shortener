@@ -220,6 +220,7 @@ class AdminCustomDomainSecurityTest {
     @BeforeEach
     void setUp() {
         account(ADMIN, ADMIN_EMAIL, NOW.minusYears(1), ROLE_USER, ROLE_ADMIN);
+        jdbcTemplate.update("update user_account set two_step_enabled = true where id = ?", ADMIN);
         account(ANA, ANA_EMAIL, NOW.minusDays(40), ROLE_USER);
         account(BOB, BOB_EMAIL, NOW.minusDays(3), ROLE_USER);
         signedIn(ADMIN_TOKEN, ADMIN_EMAIL, "ROLE_ADMIN");

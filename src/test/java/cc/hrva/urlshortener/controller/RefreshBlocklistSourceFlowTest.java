@@ -175,7 +175,7 @@ class RefreshBlocklistSourceFlowTest {
 
     @BeforeEach
     void setUp() throws IOException {
-        jdbcTemplate.update("insert into user_account (id, email, password) values (?, ?, 'secret-hash')", ADMIN, ADMIN_EMAIL);
+        jdbcTemplate.update("insert into user_account (id, email, password, two_step_enabled) values (?, ?, 'secret-hash', true)", ADMIN, ADMIN_EMAIL);
         jdbcTemplate.update("insert into user_account_authorities (user_id, authorities_id) values (?, ?)", ADMIN, ROLE_USER);
         jdbcTemplate.update("insert into user_account_authorities (user_id, authorities_id) values (?, ?)", ADMIN, ROLE_ADMIN);
         jdbcTemplate.update("""

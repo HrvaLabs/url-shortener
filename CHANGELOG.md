@@ -25,6 +25,9 @@ A warning before an inactive account is deactivated, and tighter handling of ema
 ### 🔒 Privacy
 - Email addresses are masked in every server log line.
 
+### 🔧 Admin
+- Admin pages and the MCP moderation tools need two-step sign-in on the admin's account. Until it's on, they answer "Turn on two-step sign-in to use admin pages." and the dashboard opens the two-step settings. Your own account pages keep working.
+
 ---
 
 ## [v2.22] — 2026-11-01

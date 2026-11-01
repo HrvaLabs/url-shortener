@@ -19,7 +19,11 @@ public final class AccessAnswers {
     }
 
     public static AccessDeniedHandler denied() {
-        return (request, response, exception) -> ProblemResponses.write(request, response, HttpStatus.FORBIDDEN, ACCESS_DENIED);
+        return (request, response, exception) -> ProblemResponses.write(request, response, HttpStatus.FORBIDDEN, deniedDetail());
+    }
+
+    public static String deniedDetail() {
+        return AdminTwoStep.pendingInThisSession() ? AdminTwoStep.REQUIRED : ACCESS_DENIED;
     }
 
     public static boolean nobodySignedIn() {

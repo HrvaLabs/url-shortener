@@ -152,7 +152,7 @@ public class GlobalExceptionHandler {
         if (AccessAnswers.nobodySignedIn()) {
             return ProblemResponses.entity(HttpStatus.UNAUTHORIZED, AccessAnswers.SIGN_IN_TO_CONTINUE);
         }
-        return ProblemResponses.entity(HttpStatus.FORBIDDEN, AccessAnswers.ACCESS_DENIED);
+        return ProblemResponses.entity(HttpStatus.FORBIDDEN, AccessAnswers.deniedDetail());
     }
 
     @ExceptionHandler(NotSignedInException.class)

@@ -4502,7 +4502,7 @@ class UrlServiceTest {
     }
 
     private static User admin() {
-        return User.builder().id(3L).authorities(List.of(Authorities.builder().name("ROLE_ADMIN").build())).build();
+        return User.builder().id(3L).twoStepEnabled(true).authorities(List.of(Authorities.builder().name("ROLE_ADMIN").build())).build();
     }
 
     private UrlService transactionalUrlService() {

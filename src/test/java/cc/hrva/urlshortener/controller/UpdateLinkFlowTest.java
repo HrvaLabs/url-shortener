@@ -226,6 +226,7 @@ class UpdateLinkFlowTest {
     void setUp() {
         account(OWNER, OWNER_EMAIL, ROLE_USER);
         account(ADMIN, ADMIN_EMAIL, ROLE_USER, ROLE_ADMIN);
+        jdbcTemplate.update("update user_account set two_step_enabled = true where id = ?", ADMIN);
         jdbcTemplate.update("""
                 insert into url (id, short_url, long_url, owner_id, active, visits, final_url, chain_checked_at)
                 values (?, 'edit1', ?, ?, true, 0, ?, current_timestamp)""",

@@ -57,6 +57,17 @@ class DefaultApiKeyValidatorTest {
     }
 
     @Test
+    void anAdminWithoutTwoStepIsToldToTurnItOnForSomeoneElsesKey() {
+        final User pending = User.builder().id(2L).twoStepEnabled(false)
+                .authorities(Collections.singletonList(Authorities.builder().id(1L).name("ROLE_ADMIN").build())).build();
+        when(userService.getUserFromToken()).thenReturn(pending);
+
+        assertThatThrownBy(() -> apiKeyValidator.verifyUserAdminOrOwner(apiKey))
+                .isInstanceOf(NoAuthorizationException.class)
+                .hasMessage("Turn on two-step sign-in to use admin pages.");
+    }
+
+    @Test
     void shouldVerifyUserAdminOrOwner() {
         final Authorities authorities = Authorities.builder().id(1L).name("ROLE_ADMIN").build();
         final User user = User.builder().id(1L).authorities(Collections.singletonList(authorities)).build();

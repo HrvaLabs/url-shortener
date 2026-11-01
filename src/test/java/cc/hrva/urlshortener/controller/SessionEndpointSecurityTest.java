@@ -1,5 +1,8 @@
 package cc.hrva.urlshortener.controller;
 
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RestController;
 import cc.hrva.urlshortener.configuration.AppConfiguration;
 import cc.hrva.urlshortener.configuration.GlobalExceptionHandler;
 import cc.hrva.urlshortener.configuration.JacksonConfiguration;
@@ -57,6 +60,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @SpringBootTest(
@@ -78,6 +82,7 @@ class SessionEndpointSecurityTest {
             "c2Vzc2lvbi1lbmRwb2ludC1zZWN1cml0eS10ZXN0LW9ubHktand0LXNlY3JldC1mb3ItdGhlLXJlYWwtdG9rZW4tcHJvdmlkZXItaHM1MTI=";
 
     private static final String END_SESSIONS = "/api/v1/users/me/sessions/end";
+    private static final String ADMIN_ONLY = "/api/v1/probe/admin-only";
     private static final String EMAIL = "ana@hrva.cc";
     private static final String SESSION_ENDED = """
             {"type":"about:blank","title":"Unauthorized","status":401,"detail":"Your session ended. Sign in again.",
@@ -192,9 +197,63 @@ class SessionEndpointSecurityTest {
         final var admin = new Authorities();
         admin.setName("ROLE_ADMIN");
         ana.setAuthorities(List.of(admin));
+        ana.setTwoStepEnabled(true);
 
         mockMvc.perform(get("/api/v1/admin/settings").header(JwtFilter.AUTHORIZATION_HEADER, "Bearer " + tokenIssued(Duration.ofMinutes(5))))
                 .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void anAdminWithoutTwoStepIsToldToTurnItOnByEveryAdminPage() throws Exception {
+        signedInAs("ROLE_ADMIN", false);
+
+        mockMvc.perform(get("/api/v1/admin/settings").header(JwtFilter.AUTHORIZATION_HEADER, "Bearer " + tokenIssued(Duration.ofMinutes(5))))
+                .andExpect(status().isForbidden())
+                .andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON))
+                .andExpect(content().json("""
+                        {"type":"about:blank","title":"Forbidden","status":403,"detail":"Turn on two-step sign-in to use admin pages.",
+                         "instance":"/api/v1/admin/settings"}""", JsonCompareMode.STRICT));
+        mockMvc.perform(get(ADMIN_ONLY).header(JwtFilter.AUTHORIZATION_HEADER, "Bearer " + tokenIssued(Duration.ofMinutes(5))))
+                .andExpect(status().isForbidden())
+                .andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON))
+                .andExpect(jsonPath("$.detail").value("Turn on two-step sign-in to use admin pages."));
+    }
+
+    @Test
+    void anAdminWithoutTwoStepKeepsTheirOwnAccountPages() throws Exception {
+        signedInAs("ROLE_ADMIN", false);
+
+        mockMvc.perform(post(END_SESSIONS).header(JwtFilter.AUTHORIZATION_HEADER, "Bearer " + tokenIssued(Duration.ofMinutes(5))))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void anAdminWithTwoStepOnUsesAdminPages() throws Exception {
+        signedInAs("ROLE_ADMIN", true);
+
+        mockMvc.perform(get(ADMIN_ONLY).header(JwtFilter.AUTHORIZATION_HEADER, "Bearer " + tokenIssued(Duration.ofMinutes(5))))
+                .andExpect(status().isOk());
+        mockMvc.perform(get("/api/v1/admin/settings").header(JwtFilter.AUTHORIZATION_HEADER, "Bearer " + tokenIssued(Duration.ofMinutes(5))))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void aUserWithTwoStepOffIsStillJustDeniedAdminPages() throws Exception {
+        signedInAs("ROLE_USER", false);
+
+        mockMvc.perform(get("/api/v1/admin/settings").header(JwtFilter.AUTHORIZATION_HEADER, "Bearer " + tokenIssued(Duration.ofMinutes(5))))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.detail").value("Access denied"));
+        mockMvc.perform(get(ADMIN_ONLY).header(JwtFilter.AUTHORIZATION_HEADER, "Bearer " + tokenIssued(Duration.ofMinutes(5))))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.detail").value("Access denied"));
+    }
+
+    private void signedInAs(final String roleName, final boolean twoStep) {
+        final var role = new Authorities();
+        role.setName(roleName);
+        ana.setAuthorities(List.of(role));
+        ana.setTwoStepEnabled(twoStep);
     }
 
     @Test
@@ -258,9 +317,21 @@ class SessionEndpointSecurityTest {
             TokenProvider.class,
             CurrentSession.class,
             DefaultSessionService.class,
-            SessionController.class
+            SessionController.class,
+            AdminOnlyProbe.class
     })
     static class TestApplication {
+    }
+
+    @RestController
+    static class AdminOnlyProbe {
+
+        @GetMapping(ADMIN_ONLY)
+        @PreAuthorize("hasRole('ROLE_ADMIN')")
+        public String adminOnly() {
+            return "ok";
+        }
+
     }
 
 }

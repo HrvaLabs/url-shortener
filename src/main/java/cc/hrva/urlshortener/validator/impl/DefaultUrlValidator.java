@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.validator.impl;
 
+import cc.hrva.urlshortener.security.AdminTwoStep;
 import cc.hrva.urlshortener.dto.LinkVerdict;
 import cc.hrva.urlshortener.exception.*;
 import cc.hrva.urlshortener.model.Url;
@@ -140,27 +141,22 @@ public class DefaultUrlValidator implements UrlValidator {
             throw new NoAuthorizationException("You don't have authorization for this action");
         }
 
-        final var isCurrentUserAdmin = currentUser.getAuthorities().stream()
-                .anyMatch(authorities -> authorities.getName().equals("ROLE_ADMIN"));
-
         final var owner = url.getOwner();
         final var isOwner = owner != null && currentUser.getId() != null && currentUser.getId().equals(owner.getId());
-        if (!isOwner && !isCurrentUserAdmin) {
-            throw new NoAuthorizationException("You don't have authorization for this action");
+        if (!isOwner && !AdminTwoStep.hasAdminPowers(currentUser)) {
+            throw new NoAuthorizationException(AdminTwoStep.refusalFor(currentUser, "You don't have authorization for this action"));
         }
     }
 
     @Override
     public void verifyUserAdmin() {
         if (!isCurrentUserAdmin()) {
-            throw new NoAuthorizationException("Only admins can change where a link points");
+            throw new NoAuthorizationException(AdminTwoStep.refusalFor(userService.getUserFromToken(), "Only admins can change where a link points"));
         }
     }
 
     private boolean isCurrentUserAdmin() {
-        final var currentUser = userService.getUserFromToken();
-        return currentUser != null && currentUser.getAuthorities().stream()
-                .anyMatch(authorities -> authorities.getName().equals("ROLE_ADMIN"));
+        return AdminTwoStep.hasAdminPowers(userService.getUserFromToken());
     }
 
     @Override

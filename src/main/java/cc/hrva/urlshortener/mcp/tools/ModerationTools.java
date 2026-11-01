@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.mcp.tools;
 
+import cc.hrva.urlshortener.security.AdminTwoStep;
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.dto.BlocklistSourceResponse;
 import cc.hrva.urlshortener.dto.LinkVerdict;
@@ -482,6 +483,10 @@ public class ModerationTools {
         if (!userRepository.existsByIdAndAuthoritiesName(user.getId(), ROLE_ADMIN)) {
             log.info("MCP moderation refused tool={} userId={}", toolName, user.getId());
             throw new NoAuthorizationException(ADMINS_ONLY);
+        }
+        if (!Boolean.TRUE.equals(user.getTwoStepEnabled())) {
+            log.info("MCP moderation refused, two-step sign-in is off tool={} userId={}", toolName, user.getId());
+            throw new NoAuthorizationException(AdminTwoStep.REQUIRED);
         }
         return user;
     }

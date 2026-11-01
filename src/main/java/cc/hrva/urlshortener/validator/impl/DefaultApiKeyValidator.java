@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.validator.impl;
 
+import cc.hrva.urlshortener.security.AdminTwoStep;
 import cc.hrva.urlshortener.repository.ApiKeyRepository;
 import cc.hrva.urlshortener.security.ApiKeyTokens;
 import java.time.Clock;
@@ -67,12 +68,10 @@ public class DefaultApiKeyValidator implements ApiKeyValidator {
     @Override
     public void verifyUserAdminOrOwner(final ApiKey apiKey) {
         final var currentUser = userService.getUserFromToken();
-        final boolean isCurrentUserAdmin = currentUser.getAuthorities().stream()
-                .anyMatch(authorities -> authorities.getName().equals("ROLE_ADMIN"));
         final var owner = apiKey.getOwner();
         final var isOwner = owner != null && currentUser.getId() != null && currentUser.getId().equals(owner.getId());
-        if (!isOwner && !isCurrentUserAdmin) {
-            throw new NoAuthorizationException("You don't have authorization for this action");
+        if (!isOwner && !AdminTwoStep.hasAdminPowers(currentUser)) {
+            throw new NoAuthorizationException(AdminTwoStep.refusalFor(currentUser, "You don't have authorization for this action"));
         }
     }
 

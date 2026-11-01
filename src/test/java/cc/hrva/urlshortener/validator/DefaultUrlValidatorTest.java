@@ -289,6 +289,22 @@ class DefaultUrlValidatorTest {
     }
 
     @Test
+    void anAdminWithoutTwoStepIsToldToTurnItOnToChangeDestinationsOrOtherPeoplesLinks() {
+        final var pending = userWithRole(3L, "ROLE_ADMIN");
+        pending.setTwoStepEnabled(false);
+        when(userService.getUserFromToken()).thenReturn(pending);
+
+        assertThatThrownBy(() -> urlValidator.verifyUserAdmin())
+                .isInstanceOf(NoAuthorizationException.class)
+                .hasMessage("Turn on two-step sign-in to use admin pages.");
+        assertThatThrownBy(() -> urlValidator.verifyUserAdminOrOwner(Url.builder().owner(User.builder().id(9L).build()).build()))
+                .isInstanceOf(NoAuthorizationException.class)
+                .hasMessage("Turn on two-step sign-in to use admin pages.");
+        assertThatCode(() -> urlValidator.verifyUserAdminOrOwner(Url.builder().owner(User.builder().id(3L).build()).build()))
+                .doesNotThrowAnyException();
+    }
+
+    @Test
     void shouldLetAdminsChangeDestinations() {
         when(userService.getUserFromToken()).thenReturn(userWithRole(3L, "ROLE_ADMIN"));
 
@@ -714,6 +730,7 @@ class DefaultUrlValidatorTest {
     private static User userWithRole(final Long id, final String role) {
         return User.builder()
                 .id(id)
+                .twoStepEnabled(true)
                 .authorities(List.of(Authorities.builder().name(role).build()))
                 .build();
     }
