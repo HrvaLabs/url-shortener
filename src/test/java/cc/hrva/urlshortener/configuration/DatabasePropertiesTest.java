@@ -23,13 +23,13 @@ class DatabasePropertiesTest {
     }
 
     @Test
-    void aPostgresConnectionGivesUpOnAnAnswerAfterThirtySeconds() {
+    void aPostgresConnectionGivesUpOnAnAnswerAfterTwoMinutesOutsideATimedTransaction() {
         final var postgres = new HikariDataSource();
         postgres.setJdbcUrl("jdbc:postgresql://db.internal:5432/url_shortener");
 
         socketTimeout.postProcessAfterInitialization(postgres, "dataSource");
 
-        assertThat(postgres.getDataSourceProperties()).containsEntry("socketTimeout", "30").containsEntry("cancelSignalTimeout", "2");
+        assertThat(postgres.getDataSourceProperties()).containsEntry("socketTimeout", "120").containsEntry("cancelSignalTimeout", "2");
     }
 
     @Test

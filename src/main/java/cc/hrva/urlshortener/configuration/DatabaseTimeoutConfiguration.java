@@ -35,7 +35,7 @@ public class DatabaseTimeoutConfiguration {
     static final class PostgresSocketTimeout implements BeanPostProcessor {
 
         private static final String POSTGRES_URL = "jdbc:postgresql:";
-        private static final Map<String, String> TIMEOUT_SECONDS = Map.of("socketTimeout", "30", "cancelSignalTimeout", "2");
+        private static final Map<String, String> TIMEOUT_SECONDS = Map.of("socketTimeout", "120", "cancelSignalTimeout", "2");
 
         @Override
         public Object postProcessAfterInitialization(final Object bean, final String beanName) {
