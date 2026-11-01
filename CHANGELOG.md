@@ -14,10 +14,10 @@ Retry-After that gives the seconds left, the hrva.cc icon and a small not-found 
 - The unavailable page a password-protected link can lead to answers with an error status, 404 or 410 like the short link itself, instead of 200. Its text stays the same.
 
 ### 🔑 API
-- Retry-After on a 429 is the number of seconds until that limit resets, not the length of its whole window. This applies to every limit, from creating links to reports, sign-in and connected app registration.
+- Retry-After on a 429 is the number of seconds until that limit resets, not the length of its whole window. This applies to every limit, from creating links to reports and connected app registration.
 
 ### 🔒 Privacy
-- The privacy page says what happens when you follow a donation link: you leave hrva.cc for Revolut or PayPal, and hrva.cc sends them nothing beyond that click. It links to each company's own privacy terms.
+- The privacy page explains the donation buttons: each one is a hrva.cc short link, so the click is counted like any other short-link visit, then your browser goes to Revolut or PayPal. hrva.cc sends them nothing beyond that redirect. It links to each company's own privacy terms.
 
 ### 🐛 Fixes
 - Updated dependencies, and fixed a pattern that a very long link could make slow.
