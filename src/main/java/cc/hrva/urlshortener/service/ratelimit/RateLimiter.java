@@ -23,8 +23,12 @@ public interface RateLimiter {
     }
 
     static String clientKey(final String name, final String clientIp) {
+        return hashedKey(name, networkOf(clientIp));
+    }
+
+    static String hashedKey(final String name, final String value) {
         try {
-            final var digest = MessageDigest.getInstance("SHA-256").digest(networkOf(clientIp).getBytes(StandardCharsets.UTF_8));
+            final var digest = MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8));
             return name + ":" + HexFormat.of().formatHex(digest);
         } catch (final NoSuchAlgorithmException exception) {
             throw new IllegalStateException(exception);

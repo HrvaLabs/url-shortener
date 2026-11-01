@@ -1,7 +1,6 @@
 package cc.hrva.urlshortener.service.impl;
 
 import cc.hrva.urlshortener.dto.JWTTokenDto;
-import cc.hrva.urlshortener.exception.NoAuthorizationException;
 import cc.hrva.urlshortener.exception.SignInExpiredException;
 import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.security.ClientIpResolver;
@@ -37,9 +36,7 @@ public class DefaultOAuthSignInService implements OAuthSignInService {
     @Transactional
     public ResponseEntity<JWTTokenDto> exchange(final String code, final HttpServletRequest request) {
         final var clientIp = clientIpResolver.getClientIp(request);
-        if (loginAttemptService.isBlocked(clientIp)) {
-            throw new NoAuthorizationException(LoginAttemptService.NETWORK_BLOCKED);
-        }
+        loginAttemptService.checkNetwork(clientIp);
 
         final var signIn = signInCodes.consume(code).orElseThrow(() -> expired(clientIp));
         final var user = accountLock.lock(userRepository.findById(signIn.userId()).orElseThrow(() -> expired(clientIp)));
@@ -59,7 +56,7 @@ public class DefaultOAuthSignInService implements OAuthSignInService {
     }
 
     private SignInExpiredException expired(final String clientIp) {
-        loginAttemptService.loginFailed(clientIp);
+        loginAttemptService.networkFailed(clientIp);
 
         return new SignInExpiredException();
     }

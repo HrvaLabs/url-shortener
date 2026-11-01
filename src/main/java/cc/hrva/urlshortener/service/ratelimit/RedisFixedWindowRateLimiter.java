@@ -14,7 +14,7 @@ import org.springframework.stereotype.Component;
 @RequiredArgsConstructor
 public class RedisFixedWindowRateLimiter implements RateLimiter {
 
-    private static final String KEY_PREFIX = "rate-limit:";
+    public static final String KEY_PREFIX = "rate-limit:";
     private static final RedisScript<Long> FIXED_WINDOW_INCREMENT = RedisScript.of("""
             local count = redis.call('INCR', KEYS[1])
             if redis.call('PTTL', KEYS[1]) < 0 then

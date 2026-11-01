@@ -121,6 +121,10 @@ public class AppProperties {
 
     @Valid
     @NotNull
+    private LoginLimit loginLimit = new LoginLimit();
+
+    @Valid
+    @NotNull
     private Campaign campaign = new Campaign();
 
     @Valid
@@ -225,6 +229,22 @@ public class AppProperties {
         @NotNull
         @DurationMin(seconds = 1, message = "must be at least 1 second")
         private Duration window = Duration.ofHours(1);
+
+    }
+
+    @Data
+    public static class LoginLimit {
+
+        @NotNull
+        @DurationMin(seconds = 1, message = "must be at least 1 second")
+        private Duration networkWindow = Duration.ofHours(1);
+
+        @Min(1)
+        private int accountAttempts = 10;
+
+        @NotNull
+        @DurationMin(seconds = 1, message = "must be at least 1 second")
+        private Duration accountWindow = Duration.ofMinutes(15);
 
     }
 

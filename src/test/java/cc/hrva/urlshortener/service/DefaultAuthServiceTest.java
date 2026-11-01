@@ -8,6 +8,7 @@ import cc.hrva.urlshortener.model.enums.TwoStepMethod;
 import cc.hrva.urlshortener.security.ClientIpResolver;
 import cc.hrva.urlshortener.dto.LoginDto;
 import cc.hrva.urlshortener.dto.UserRegisterDto;
+import cc.hrva.urlshortener.exception.RateLimitExceededException;
 import cc.hrva.urlshortener.exception.NoAuthorizationException;
 import cc.hrva.urlshortener.model.PasskeyCredential;
 import cc.hrva.urlshortener.model.User;
@@ -15,6 +16,7 @@ import cc.hrva.urlshortener.repository.PasskeyCredentialRepository;
 import cc.hrva.urlshortener.service.impl.DefaultAuthService;
 import cc.hrva.urlshortener.service.twostep.TwoStepLockMessage;
 import cc.hrva.urlshortener.validator.UserValidator;
+import java.time.Duration;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -34,6 +36,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -153,11 +156,11 @@ class DefaultAuthServiceTest {
         final var loginDto = LoginDto.builder().email("test@example.com").password("password123").build();
 
         when(clientIpResolver.getClientIp(request)).thenReturn("127.0.0.1");
-        when(loginAttemptService.isBlocked("127.0.0.1")).thenReturn(true);
+        doThrow(new RateLimitExceededException("Too many sign-in attempts. Try again in 42 minutes.", Duration.ofMinutes(42))).when(loginAttemptService).checkSignIn("127.0.0.1", "test@example.com");
 
         assertThatThrownBy(() -> authService.login(loginDto, request))
-                .isInstanceOf(NoAuthorizationException.class)
-                .hasMessage("Too many failed sign-ins from this network. Try again tomorrow.");
+                .isInstanceOf(RateLimitExceededException.class)
+                .hasMessage("Too many sign-in attempts. Try again in 42 minutes.");
         verifyNoInteractions(authenticationManagerBuilder, signInService);
     }
 
@@ -268,7 +271,7 @@ class DefaultAuthServiceTest {
                 .isInstanceOf(NoAuthorizationException.class)
                 .hasMessage("Invalid two-factor code");
         verify(loginAttemptService).loginFailed("2fa:1");
-        verify(loginAttemptService).loginFailed("127.0.0.1");
+        verify(loginAttemptService).networkFailed("127.0.0.1");
         verifyNoInteractions(signInService);
     }
 
@@ -286,7 +289,7 @@ class DefaultAuthServiceTest {
                 .isInstanceOf(NoAuthorizationException.class)
                 .hasMessage("Invalid two-factor code");
         verify(loginAttemptService).loginFailed("2fa:1");
-        verify(loginAttemptService).loginFailed("127.0.0.1");
+        verify(loginAttemptService).networkFailed("127.0.0.1");
         verifyNoInteractions(signInService);
     }
 
@@ -372,7 +375,6 @@ class DefaultAuthServiceTest {
 
     private void givenTheRightPassword(final User user) {
         when(clientIpResolver.getClientIp(request)).thenReturn("127.0.0.1");
-        when(loginAttemptService.isBlocked("127.0.0.1")).thenReturn(false);
         when(authenticationManagerBuilder.getObject()).thenReturn(authenticationManager);
         when(authenticationManager.authenticate(any(UsernamePasswordAuthenticationToken.class))).thenReturn(authentication);
         when(userService.fetchUserFromEmail(user.getEmail())).thenReturn(user);

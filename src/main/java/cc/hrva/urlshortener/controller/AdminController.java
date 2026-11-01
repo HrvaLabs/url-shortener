@@ -52,8 +52,10 @@ public class AdminController {
                 .body(csv);
     }
 
-    @Operation(summary = "Get login attempts", description = "A page of the rate-limited keys and their attempt counts, most attempts first; "
-            + "search keeps the keys that contain it, sort takes attempts or key. Requires ROLE_ADMIN.")
+    @Operation(summary = "Get login attempts", description = "A page of the sign-in counters in Redis and their attempt counts, most attempts first: "
+            + "network:<hash> per network (an hour), account:<hash> per email (15 minutes), 2fa:<user id> and reauth:<user id> (a day). "
+            + "search keeps the keys that contain it, or finds a network by its IP address and an account by its email; sort takes attempts or key. "
+            + "Requires ROLE_ADMIN.")
     @GetMapping("/login-attempts")
     public ResponseEntity<Page<LoginAttemptResponse>> getLoginAttempts(
             @PageableDefault(size = 20) final Pageable pageable,
@@ -61,7 +63,7 @@ public class AdminController {
         return ResponseEntity.ok(loginAttemptService.attempts(search, pageable));
     }
 
-    @Operation(summary = "Clear login attempts", description = "Clear all rate limit data for all IPs. Requires ROLE_ADMIN.")
+    @Operation(summary = "Clear login attempts", description = "Clear every sign-in counter: networks, accounts, two-step and password confirmation. Requires ROLE_ADMIN.")
     @DeleteMapping("/login-attempts")
     @Audited(AuditAction.CLEAR_LOGIN_ATTEMPTS)
     public ResponseEntity<Void> clearLoginAttempts() {

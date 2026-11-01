@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.security;
 
+import cc.hrva.urlshortener.service.InMemoryLoginAttempts;
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.dto.LoginAttemptResponse;
 import cc.hrva.urlshortener.exception.ApiException;
@@ -63,9 +64,7 @@ class ReauthenticationTest {
 
     @BeforeEach
     void setUp() {
-        final var appProperties = new AppProperties();
-        appProperties.setMaxLoginAttempts(20L);
-        loginAttemptService = new DefaultLoginAttemptService(appProperties);
+        loginAttemptService = InMemoryLoginAttempts.withMaxAttempts(20L);
         reauthentication = new Reauthentication(new RecentSignIn(tokenProvider, Clock.fixed(NOW, ZoneOffset.UTC)), authValidator,
                 loginAttemptService);
     }

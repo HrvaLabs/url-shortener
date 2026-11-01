@@ -68,9 +68,7 @@ public class DefaultAuthService implements AuthService {
         log.info("User logged in email={}", EmailAddresses.masked(loginDto.getEmail()));
 
         final var clientIp = clientIpResolver.getClientIp(request);
-        if (loginAttemptService.isBlocked(clientIp)) {
-            throw new NoAuthorizationException(LoginAttemptService.NETWORK_BLOCKED);
-        }
+        loginAttemptService.checkSignIn(clientIp, loginDto.getEmail());
         checkPassword(loginDto);
         final var user = userService.fetchUserFromEmail(loginDto.getEmail());
 
@@ -131,7 +129,7 @@ public class DefaultAuthService implements AuthService {
         }
         if (!twoFactorService.verifyLoginCode(user, code)) {
             loginAttemptService.loginFailed(twoFactorAttemptsKey);
-            loginAttemptService.loginFailed(clientIp);
+            loginAttemptService.networkFailed(clientIp);
             throw new NoAuthorizationException("Invalid two-factor code");
         }
         loginAttemptService.loginSucceeded(twoFactorAttemptsKey);

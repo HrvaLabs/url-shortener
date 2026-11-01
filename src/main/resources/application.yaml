@@ -90,6 +90,10 @@ app:
   ip-retention-duration-in-hours: 48
   deactivate-user-account-after-days: 1825
   max-login-attempts: 20
+  login-limit:
+    network-window: 1h
+    account-attempts: 10
+    account-window: 15m
   url-expiration-notification-hours: 24
   registration-enabled: true
   anonymous-url-creation-enabled: false

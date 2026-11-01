@@ -3,18 +3,24 @@ package cc.hrva.urlshortener.mcp.bridge;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
+import java.util.regex.Pattern;
 import java.util.stream.Stream;
 import org.mockito.quality.Strictness;
+import org.springframework.data.redis.core.Cursor;
+import org.springframework.data.redis.core.ScanOptions;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
 import org.springframework.data.redis.core.script.RedisScript;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.lenient;
@@ -42,6 +48,21 @@ public final class InMemoryRedis {
         lenient().when(valueOperations.get(anyString())).thenAnswer(invocation -> valueOf(values.get(invocation.<String>getArgument(0))));
         lenient().when(valueOperations.getAndDelete(anyString())).thenAnswer(invocation -> valueOf(values.remove(invocation.<String>getArgument(0))));
         lenient().when(redisTemplate.delete(anyString())).thenAnswer(invocation -> values.remove(invocation.<String>getArgument(0)) != null);
+        lenient().when(redisTemplate.delete(anyCollection())).thenAnswer(invocation -> invocation.<Collection<String>>getArgument(0).stream()
+                .filter(key -> values.remove(key) != null)
+                .count());
+        lenient().when(valueOperations.multiGet(anyCollection())).thenAnswer(invocation -> invocation.<Collection<String>>getArgument(0).stream()
+                .map(key -> valueOf(values.get(key)))
+                .toList());
+        lenient().when(redisTemplate.getExpire(anyString(), any(TimeUnit.class))).thenAnswer(invocation -> {
+            final var stored = values.get(invocation.<String>getArgument(0));
+            if (stored == null) {
+                return -2L;
+            }
+            return stored.timeToLive() == null ? -1L : invocation.<TimeUnit>getArgument(1).convert(stored.timeToLive());
+        });
+        lenient().when(redisTemplate.scan(any(ScanOptions.class))).thenAnswer(invocation -> cursorOver(
+                keysMatching(invocation.<ScanOptions>getArgument(0).getPattern())));
         lenient().when(redisTemplate.execute(any(RedisScript.class), anyList(), any(Object[].class))).thenAnswer(invocation -> {
             final var arguments = invocation.getArguments();
             final RedisScript<?> script = invocation.getArgument(0);
@@ -112,6 +133,20 @@ public final class InMemoryRedis {
                         current.timeToLive() == null ? window : current.timeToLive()));
 
         return Long.parseLong(counter.value());
+    }
+
+    private List<String> keysMatching(final String pattern) {
+        final var regex = pattern == null ? ".*" : Pattern.quote(pattern).replace("*", "\\E.*\\Q");
+        return values.keySet().stream().filter(key -> key.matches(regex)).sorted().toList();
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Cursor<String> cursorOver(final List<String> keys) {
+        final var iterator = keys.iterator();
+        final Cursor<String> cursor = mock(Cursor.class, withSettings().strictness(Strictness.LENIENT));
+        lenient().when(cursor.hasNext()).thenAnswer(invocation -> iterator.hasNext());
+        lenient().when(cursor.next()).thenAnswer(invocation -> iterator.next());
+        return cursor;
     }
 
     private static String valueOf(final StoredValue storedValue) {

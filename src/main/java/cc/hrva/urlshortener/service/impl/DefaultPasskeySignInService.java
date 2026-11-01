@@ -5,7 +5,6 @@ import cc.hrva.urlshortener.dto.PasskeyOptionsResponse;
 import cc.hrva.urlshortener.dto.PasskeySignInDto;
 import cc.hrva.urlshortener.exception.ApiException;
 import cc.hrva.urlshortener.exception.EmailNotVerifiedException;
-import cc.hrva.urlshortener.exception.NoAuthorizationException;
 import cc.hrva.urlshortener.exception.PasskeyVerificationException;
 import cc.hrva.urlshortener.exception.SignInExpiredException;
 import cc.hrva.urlshortener.model.User;
@@ -61,9 +60,7 @@ public class DefaultPasskeySignInService implements PasskeySignInService {
     @Transactional
     public ResponseEntity<JWTTokenDto> verify(final PasskeySignInDto dto, final HttpServletRequest request) {
         final var clientIp = clientIpResolver.getClientIp(request);
-        if (loginAttemptService.isBlocked(clientIp)) {
-            throw new NoAuthorizationException(LoginAttemptService.NETWORK_BLOCKED);
-        }
+        loginAttemptService.checkNetwork(clientIp);
 
         final var ceremony = passkeyCeremonyStore.consume(dto.getCeremonyId())
                 .filter(stored -> stored.purpose() == PasskeyCeremonyPurpose.SIGN_IN)
@@ -77,7 +74,6 @@ public class DefaultPasskeySignInService implements PasskeySignInService {
             throw new EmailNotVerifiedException();
         }
 
-        loginAttemptService.loginSucceeded(clientIp);
         passkeySignInStatsRepository.increment(analyticsDays.today());
         log.info("Passkey sign-in user id={}", user.getId());
 
@@ -88,13 +84,13 @@ public class DefaultPasskeySignInService implements PasskeySignInService {
         try {
             return passkeyAssertions.verify(ceremony, credential, null);
         } catch (final PasskeyVerificationException | ApiException exception) {
-            loginAttemptService.loginFailed(clientIp);
+            loginAttemptService.networkFailed(clientIp);
             throw exception;
         }
     }
 
     private SignInExpiredException signInExpired(final String clientIp) {
-        loginAttemptService.loginFailed(clientIp);
+        loginAttemptService.networkFailed(clientIp);
 
         return new SignInExpiredException(PasskeyCeremonyStore.EXPIRED);
     }

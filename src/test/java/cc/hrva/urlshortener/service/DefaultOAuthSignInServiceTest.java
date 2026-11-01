@@ -1,6 +1,7 @@
 package cc.hrva.urlshortener.service;
 
 import cc.hrva.urlshortener.dto.JWTTokenDto;
+import cc.hrva.urlshortener.exception.RateLimitExceededException;
 import cc.hrva.urlshortener.exception.SignInExpiredException;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.enums.SignInMethod;
@@ -12,6 +13,7 @@ import cc.hrva.urlshortener.service.signin.OAuthSignInCodes;
 import cc.hrva.urlshortener.service.signin.SignInMethodGuard;
 import cc.hrva.urlshortener.service.twostep.AccountLock;
 import jakarta.servlet.http.HttpServletRequest;
+import java.time.Duration;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -25,6 +27,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -82,7 +85,7 @@ class DefaultOAuthSignInServiceTest {
         assertThatThrownBy(() -> service.exchange("used", request))
                 .isInstanceOf(SignInExpiredException.class)
                 .hasMessage("Your sign-in expired. Sign in again.");
-        verify(loginAttemptService).loginFailed(CLIENT_IP);
+        verify(loginAttemptService).networkFailed(CLIENT_IP);
     }
 
     @Test

@@ -69,6 +69,7 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.startsWith;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
@@ -180,6 +181,7 @@ class DefaultSecondStepServiceTest {
         assertThat(response).isSameAs(signedIn);
         verify(loginAttemptService).loginSucceeded("2fa:7");
         verify(loginAttemptService, never()).loginFailed(anyString());
+        verify(loginAttemptService, never()).networkFailed(anyString());
     }
 
     @Test
@@ -215,7 +217,7 @@ class DefaultSecondStepServiceTest {
         assertThatThrownBy(() -> secondStepService.completeWithCode(totp("000000"), request))
                 .isInstanceOf(TwoStepFailedException.class)
                 .hasMessage(INVALID_CODE);
-        verify(loginAttemptService).loginFailed(CLIENT_IP);
+        verify(loginAttemptService).networkFailed(CLIENT_IP);
         verify(loginAttemptService).loginFailed("2fa:7");
         verify(pendingLoginStore, never()).consume(anyString());
         verify(pendingLoginStore, never()).discard(anyString());
@@ -230,7 +232,7 @@ class DefaultSecondStepServiceTest {
                 .isInstanceOf(SignInExpiredException.class)
                 .hasMessage(OUT_OF_ATTEMPTS);
         verify(pendingLoginStore).discard(TOKEN);
-        verify(loginAttemptService).loginFailed(CLIENT_IP);
+        verify(loginAttemptService).networkFailed(CLIENT_IP);
         verifyNoInteractions(twoFactorService, signInService);
     }
 
@@ -249,7 +251,7 @@ class DefaultSecondStepServiceTest {
         assertThatThrownBy(() -> secondStepService.completeWithCode(totp("000000"), request))
                 .isInstanceOf(TwoStepFailedException.class)
                 .hasMessage(message);
-        verify(loginAttemptService).loginFailed(CLIENT_IP);
+        verify(loginAttemptService).networkFailed(CLIENT_IP);
         verify(loginAttemptService).loginFailed("2fa:7");
         verify(pendingLoginStore, never()).discard(anyString());
     }
@@ -264,7 +266,7 @@ class DefaultSecondStepServiceTest {
                 .isInstanceOf(SignInExpiredException.class)
                 .hasMessage(OUT_OF_ATTEMPTS);
         verify(pendingLoginStore).discard(TOKEN);
-        verify(loginAttemptService).loginFailed(CLIENT_IP);
+        verify(loginAttemptService).networkFailed(CLIENT_IP);
         verify(loginAttemptService).loginFailed("2fa:7");
         verify(pendingLoginStore, never()).consume(anyString());
         verifyNoInteractions(signInService);
@@ -282,6 +284,7 @@ class DefaultSecondStepServiceTest {
         assertThat(secondStepService.completeWithCode(totp("123456"), request)).isSameAs(signedIn);
         verify(pendingLoginStore, never()).discard(anyString());
         verify(loginAttemptService, never()).loginFailed(anyString());
+        verify(loginAttemptService, never()).networkFailed(anyString());
     }
 
     @ParameterizedTest
@@ -325,7 +328,7 @@ class DefaultSecondStepServiceTest {
                 .isInstanceOf(SignInExpiredException.class)
                 .hasMessage(OUT_OF_ATTEMPTS);
         verify(pendingLoginStore).discard(TOKEN);
-        verify(loginAttemptService).loginFailed(CLIENT_IP);
+        verify(loginAttemptService).networkFailed(CLIENT_IP);
         verify(loginAttemptService).loginFailed("2fa:7");
         verifyNoInteractions(signInService, passkeySignInStatsRepository);
     }
@@ -357,7 +360,7 @@ class DefaultSecondStepServiceTest {
 
         assertThatThrownBy(() -> secondStepService.completeWithCode(totp("123456"), request))
                 .isInstanceOf(SignInExpiredException.class);
-        verify(loginAttemptService).loginFailed(CLIENT_IP);
+        verify(loginAttemptService).networkFailed(CLIENT_IP);
         verify(loginAttemptService, never()).loginFailed(startsWith("2fa:"));
     }
 
@@ -373,6 +376,7 @@ class DefaultSecondStepServiceTest {
                 .hasMessage(SIGN_IN_EXPIRED);
         verify(loginAttemptService, never()).loginSucceeded(anyString());
         verify(loginAttemptService, never()).loginFailed(anyString());
+        verify(loginAttemptService, never()).networkFailed(anyString());
         verifyNoInteractions(signInService);
     }
 
@@ -441,11 +445,11 @@ class DefaultSecondStepServiceTest {
 
     @Test
     void aBlockedNetworkIsRefusedBeforeTheTokenIsRead() {
-        when(loginAttemptService.isBlocked(CLIENT_IP)).thenReturn(true);
+        doThrow(new RateLimitExceededException("Too many sign-in attempts. Try again in 42 minutes.", Duration.ofMinutes(42))).when(loginAttemptService).checkNetwork(CLIENT_IP);
 
         assertThatThrownBy(() -> secondStepService.completeWithCode(totp("123456"), request))
-                .isInstanceOf(NoAuthorizationException.class)
-                .hasMessage(NETWORK_BLOCKED);
+                .isInstanceOf(RateLimitExceededException.class)
+                .hasMessage("Too many sign-in attempts. Try again in 42 minutes.");
         verifyNoInteractions(pendingLoginStore, rateLimiter, userRepository, twoFactorService, signInService);
     }
 
@@ -486,7 +490,7 @@ class DefaultSecondStepServiceTest {
                 .isInstanceOf(NoAuthorizationException.class)
                 .hasMessage(ACCOUNT_LOCKED);
         verify(loginAttemptService).loginFailed("2fa:7");
-        verify(loginAttemptService).loginFailed(CLIENT_IP);
+        verify(loginAttemptService).networkFailed(CLIENT_IP);
         verify(pendingLoginStore, never()).discard(anyString());
         verifyNoInteractions(signInService);
     }
@@ -528,7 +532,7 @@ class DefaultSecondStepServiceTest {
         assertThatThrownBy(() -> secondStepService.completeWithCode(totp("123456"), request))
                 .isInstanceOf(SignInExpiredException.class)
                 .hasMessage(SIGN_IN_EXPIRED);
-        verify(loginAttemptService).loginFailed(CLIENT_IP);
+        verify(loginAttemptService).networkFailed(CLIENT_IP);
         verifyNoInteractions(twoFactorService, signInService);
     }
 
@@ -542,6 +546,7 @@ class DefaultSecondStepServiceTest {
                 .isInstanceOf(SignInUnavailableException.class)
                 .hasMessage("Two-step sign-in isn't available right now. Try again in a minute.");
         verify(loginAttemptService, never()).loginFailed(anyString());
+        verify(loginAttemptService, never()).networkFailed(anyString());
         verifyNoInteractions(twoFactorService, signInService);
         assertThat(output).containsOnlyOnce("Second step refused, attempt counter unavailable user id=7").doesNotContain(CLIENT_IP, TOKEN);
     }
@@ -570,6 +575,7 @@ class DefaultSecondStepServiceTest {
         verify(rateLimiter, never()).increment(eq(ATTEMPTS_KEY), any());
         verifyNoInteractions(passkeyAssertions, signInService);
         verify(loginAttemptService, never()).loginFailed(anyString());
+        verify(loginAttemptService, never()).networkFailed(anyString());
     }
 
     @Test
@@ -586,6 +592,7 @@ class DefaultSecondStepServiceTest {
         verify(rateLimiter, never()).increment(eq(ATTEMPTS_KEY), any());
         verifyNoInteractions(passkeyCeremonyStore);
         verify(loginAttemptService, never()).loginFailed(anyString());
+        verify(loginAttemptService, never()).networkFailed(anyString());
     }
 
     @Test
@@ -596,19 +603,19 @@ class DefaultSecondStepServiceTest {
         assertThatThrownBy(() -> secondStepService.passkeyOptions(pendingToken(), request))
                 .isInstanceOf(SignInExpiredException.class)
                 .hasMessage(SIGN_IN_EXPIRED);
-        verify(loginAttemptService).loginFailed(CLIENT_IP);
+        verify(loginAttemptService).networkFailed(CLIENT_IP);
         verify(loginAttemptService, never()).loginFailed(startsWith("2fa:"));
         verify(rateLimiter, never()).increment(eq(ATTEMPTS_KEY), any());
         verifyNoInteractions(userRepository, passkeyCeremonyStore);
     }
 
     @Test
-    void passkeyOptionsForABlockedNetworkAre403() {
-        when(loginAttemptService.isBlocked(CLIENT_IP)).thenReturn(true);
+    void passkeyOptionsForABlockedNetworkAre429() {
+        doThrow(new RateLimitExceededException("Too many sign-in attempts. Try again in 42 minutes.", Duration.ofMinutes(42))).when(loginAttemptService).checkNetwork(CLIENT_IP);
 
         assertThatThrownBy(() -> secondStepService.passkeyOptions(pendingToken(), request))
-                .isInstanceOf(NoAuthorizationException.class)
-                .hasMessage(NETWORK_BLOCKED);
+                .isInstanceOf(RateLimitExceededException.class)
+                .hasMessage("Too many sign-in attempts. Try again in 42 minutes.");
         verifyNoInteractions(rateLimiter, pendingLoginStore, userRepository, passkeyCeremonyStore);
     }
 
@@ -622,6 +629,7 @@ class DefaultSecondStepServiceTest {
         verify(rateLimiter, never()).tryAcquire(eq(PASSWORDLESS_OPTIONS_KEY), anyInt(), any());
         verifyNoInteractions(pendingLoginStore, userRepository, passkeyCeremonyStore);
         verify(loginAttemptService, never()).loginFailed(anyString());
+        verify(loginAttemptService, never()).networkFailed(anyString());
     }
 
     @Test
@@ -634,6 +642,7 @@ class DefaultSecondStepServiceTest {
                 .hasMessage("Passkeys aren't available right now. Try again in a minute.");
         verifyNoInteractions(pendingLoginStore, userRepository, passkeyCeremonyStore);
         verify(loginAttemptService, never()).loginFailed(anyString());
+        verify(loginAttemptService, never()).networkFailed(anyString());
         assertThat(output).containsOnlyOnce("Passkey options refused, rate limiter unavailable name=passkey-second-step-options")
                 .doesNotContain(CLIENT_IP, TOKEN);
     }
@@ -662,6 +671,7 @@ class DefaultSecondStepServiceTest {
         inOrder.verify(signInService).signIn(user, SignInMethod.PASSWORD, true);
         inOrder.verify(passkeySignInStatsRepository).increment(TODAY);
         verify(loginAttemptService, never()).loginFailed(anyString());
+        verify(loginAttemptService, never()).networkFailed(anyString());
     }
 
     @Test
@@ -674,7 +684,7 @@ class DefaultSecondStepServiceTest {
         assertThatThrownBy(() -> secondStepService.completeWithPasskey(passkey(), request))
                 .isInstanceOf(PasskeyVerificationException.class)
                 .hasMessage(COULD_NOT_VERIFY);
-        verify(loginAttemptService).loginFailed(CLIENT_IP);
+        verify(loginAttemptService).networkFailed(CLIENT_IP);
         verify(loginAttemptService).loginFailed("2fa:7");
         verify(pendingLoginStore, never()).consume(anyString());
         verifyNoInteractions(signInService, passkeySignInStatsRepository);
@@ -690,7 +700,7 @@ class DefaultSecondStepServiceTest {
         assertThatThrownBy(() -> secondStepService.completeWithPasskey(passkey(), request))
                 .isInstanceOf(ApiException.class)
                 .hasMessage("That passkey response couldn't be read. Try again.");
-        verify(loginAttemptService).loginFailed(CLIENT_IP);
+        verify(loginAttemptService).networkFailed(CLIENT_IP);
         verify(loginAttemptService).loginFailed("2fa:7");
         verify(pendingLoginStore, never()).consume(anyString());
         verifyNoInteractions(signInService, passkeySignInStatsRepository);
@@ -705,7 +715,7 @@ class DefaultSecondStepServiceTest {
         assertThatThrownBy(() -> secondStepService.completeWithPasskey(passkey(), request))
                 .isInstanceOf(SignInExpiredException.class)
                 .hasMessage(CEREMONY_EXPIRED);
-        verify(loginAttemptService).loginFailed(CLIENT_IP);
+        verify(loginAttemptService).networkFailed(CLIENT_IP);
         verify(loginAttemptService, never()).loginFailed("2fa:7");
         verify(pendingLoginStore, never()).consume(anyString());
         verifyNoInteractions(passkeyAssertions, signInService, passkeySignInStatsRepository);
@@ -739,7 +749,6 @@ class DefaultSecondStepServiceTest {
     }
 
     private void givenALockedAccount(final User user) {
-        when(loginAttemptService.isBlocked(CLIENT_IP)).thenReturn(false);
         when(pendingLoginStore.find(TOKEN)).thenReturn(Optional.of(new PendingLogin(7L, false, SignInMethod.PASSWORD)));
         when(userRepository.findById(7L)).thenReturn(Optional.of(user));
         when(loginAttemptService.isBlocked("2fa:7")).thenReturn(true);
@@ -750,7 +759,6 @@ class DefaultSecondStepServiceTest {
     }
 
     private void givenAPendingLoginOnAttempt(final PendingLogin pendingLogin, final User user, final long attempt) {
-        when(loginAttemptService.isBlocked(CLIENT_IP)).thenReturn(false);
         when(pendingLoginStore.find(TOKEN)).thenReturn(Optional.of(pendingLogin));
         when(rateLimiter.increment(ATTEMPTS_KEY, FIVE_MINUTES)).thenReturn(attempt);
         when(userRepository.findById(pendingLogin.userId())).thenReturn(Optional.of(user));

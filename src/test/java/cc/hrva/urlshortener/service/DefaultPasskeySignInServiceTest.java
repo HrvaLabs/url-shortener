@@ -52,6 +52,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.ArgumentMatchers.startsWith;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
@@ -155,13 +156,14 @@ class DefaultPasskeySignInServiceTest {
 
     @Test
     void aBlockedNetworkIsRefusedBeforeTheCeremonyIsRead() {
-        when(loginAttemptService.isBlocked(CLIENT_IP)).thenReturn(true);
+        doThrow(new RateLimitExceededException("Too many sign-in attempts. Try again in 42 minutes.", Duration.ofMinutes(42))).when(loginAttemptService).checkNetwork(CLIENT_IP);
 
         assertThatThrownBy(() -> passkeySignInService.verify(signIn(true), request))
-                .isInstanceOf(NoAuthorizationException.class)
-                .hasMessage("Too many failed sign-ins from this network. Try again tomorrow.");
+                .isInstanceOf(RateLimitExceededException.class)
+                .hasMessage("Too many sign-in attempts. Try again in 42 minutes.");
         verifyNoInteractions(passkeyCeremonyStore, passkeyAssertions, passkeySignInStatsRepository, signInService);
         verify(loginAttemptService, never()).loginFailed(anyString());
+        verify(loginAttemptService, never()).networkFailed(anyString());
     }
 
     @Test
@@ -173,7 +175,7 @@ class DefaultPasskeySignInServiceTest {
         assertThatThrownBy(() -> passkeySignInService.verify(signIn(true), request))
                 .isInstanceOf(PasskeyVerificationException.class)
                 .hasMessage(COULD_NOT_VERIFY);
-        verify(loginAttemptService).loginFailed(CLIENT_IP);
+        verify(loginAttemptService).networkFailed(CLIENT_IP);
         verify(loginAttemptService, never()).loginSucceeded(anyString());
         verifyNoInteractions(passkeySignInStatsRepository, signInService);
     }
@@ -186,7 +188,7 @@ class DefaultPasskeySignInServiceTest {
         assertThatThrownBy(() -> passkeySignInService.verify(signIn(true), request))
                 .isInstanceOf(ApiException.class)
                 .hasMessage(PasskeyJson.UNREADABLE);
-        verify(loginAttemptService).loginFailed(CLIENT_IP);
+        verify(loginAttemptService).networkFailed(CLIENT_IP);
         verifyNoInteractions(passkeySignInStatsRepository, signInService);
     }
 
@@ -197,7 +199,7 @@ class DefaultPasskeySignInServiceTest {
         assertThatThrownBy(() -> passkeySignInService.verify(signIn(true), request))
                 .isInstanceOf(SignInExpiredException.class)
                 .hasMessage(EXPIRED);
-        verify(loginAttemptService).loginFailed(CLIENT_IP);
+        verify(loginAttemptService).networkFailed(CLIENT_IP);
         verifyNoInteractions(passkeyAssertions, passkeySignInStatsRepository, signInService);
     }
 
@@ -209,7 +211,7 @@ class DefaultPasskeySignInServiceTest {
         assertThatThrownBy(() -> passkeySignInService.verify(signIn(true), request))
                 .isInstanceOf(SignInExpiredException.class)
                 .hasMessage(EXPIRED);
-        verify(loginAttemptService).loginFailed(CLIENT_IP);
+        verify(loginAttemptService).networkFailed(CLIENT_IP);
         verifyNoInteractions(passkeyAssertions, signInService);
     }
 
@@ -221,6 +223,7 @@ class DefaultPasskeySignInServiceTest {
         assertThatThrownBy(() -> passkeySignInService.verify(signIn(true), request))
                 .isInstanceOf(SignInUnavailableException.class);
         verify(loginAttemptService, never()).loginFailed(anyString());
+        verify(loginAttemptService, never()).networkFailed(anyString());
         verifyNoInteractions(passkeyAssertions, signInService);
     }
 
@@ -239,11 +242,13 @@ class DefaultPasskeySignInServiceTest {
 
         final var order = inOrder(passkeyAssertions, loginAttemptService, passkeySignInStatsRepository, signInService);
         order.verify(passkeyAssertions).verify(ceremony, credential(), null);
-        order.verify(loginAttemptService).loginSucceeded(CLIENT_IP);
         order.verify(passkeySignInStatsRepository).increment(TODAY);
         order.verify(signInService).signIn(user, SignInMethod.PASSKEY, true);
         verify(signInService, never()).requireSecondStep(any(), any(), anyBoolean());
         verify(loginAttemptService, never()).loginFailed(anyString());
+        verify(loginAttemptService, never()).networkFailed(anyString());
+        verify(loginAttemptService, never()).loginSucceeded(anyString());
+        verify(loginAttemptService, never()).signInSucceeded(any());
     }
 
     @Test

@@ -20,6 +20,7 @@ import cc.hrva.urlshortener.dto.TwoStepDisableDto;
 import cc.hrva.urlshortener.dto.TwoStepStatusResponse;
 import cc.hrva.urlshortener.exception.ApiException;
 import cc.hrva.urlshortener.exception.PasskeyVerificationException;
+import cc.hrva.urlshortener.exception.RateLimitExceededException;
 import cc.hrva.urlshortener.exception.SignInExpiredException;
 import cc.hrva.urlshortener.exception.SignInUnavailableException;
 import cc.hrva.urlshortener.exception.TwoStepFailedException;
@@ -233,6 +234,19 @@ class SignInEndpointSecurityTest {
                 .andExpect(content().string("""
                         {"token":null,"user":null,"twoFactorRequired":true,"twoStepRequired":true,"pendingToken":"%s","methods":["TOTP","RECOVERY_CODE"]}"""
                         .formatted(PENDING_TOKEN)));
+    }
+
+    @Test
+    void aSignInOverTheLimitIsA429WithRetryAfterAndItsText() throws Exception {
+        when(authService.login(any(), any())).thenThrow(new RateLimitExceededException(
+                "Too many sign-in attempts. Try again in 42 minutes.", java.time.Duration.ofSeconds(2_519, 400_000_000)));
+
+        mockMvc.perform(post(LOGIN).contentType(MediaType.APPLICATION_JSON).content("""
+                        {"email":"user@example.com","password":"password123"}"""))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(header().string("Retry-After", "2520"))
+                .andExpect(content().json("""
+                        {"error":"Too many sign-in attempts. Try again in 42 minutes."}""", JsonCompareMode.STRICT));
     }
 
     @Test

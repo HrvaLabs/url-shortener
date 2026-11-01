@@ -546,7 +546,8 @@ class PasskeyFlowsTest {
                         assertThat(stored.getSignCount()).isEqualTo(2L);
                         assertThat(stored.getLastUsedAt()).isNotNull();
                     });
-            verify(loginAttemptService).loginSucceeded(CLIENT_IP);
+            verify(loginAttemptService, never()).loginSucceeded(CLIENT_IP);
+            verify(loginAttemptService).checkNetwork(CLIENT_IP);
             assertThat(flows.signInMethodsOf(user)).containsExactly("PASSKEY");
         } finally {
             flows.remove(user);
@@ -603,7 +604,7 @@ class PasskeyFlowsTest {
             assertThat(stored.getSignCount()).isEqualTo(1L);
             assertThat(stored.getLastUsedAt()).isNull();
         });
-        verify(loginAttemptService).loginFailed(CLIENT_IP);
+        verify(loginAttemptService).networkFailed(CLIENT_IP);
     }
 
     @Test

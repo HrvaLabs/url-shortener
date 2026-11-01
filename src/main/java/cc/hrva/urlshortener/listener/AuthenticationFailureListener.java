@@ -17,8 +17,8 @@ public class AuthenticationFailureListener implements ApplicationListener<Authen
     private final LoginAttemptService loginAttemptService;
 
     @Override
-    public void onApplicationEvent(final AuthenticationFailureBadCredentialsEvent ignored) {
-        loginAttemptService.loginFailed(clientIpResolver.getClientIp(request));
+    public void onApplicationEvent(final AuthenticationFailureBadCredentialsEvent event) {
+        loginAttemptService.signInFailed(clientIpResolver.getClientIp(request), event.getAuthentication().getName());
     }
 
 }

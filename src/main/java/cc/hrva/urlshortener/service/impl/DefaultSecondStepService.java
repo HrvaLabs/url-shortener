@@ -132,9 +132,7 @@ public class DefaultSecondStepService implements SecondStepService {
 
     private String allowedClientIp(final HttpServletRequest request) {
         final var clientIp = clientIpResolver.getClientIp(request);
-        if (loginAttemptService.isBlocked(clientIp)) {
-            throw new NoAuthorizationException(LoginAttemptService.NETWORK_BLOCKED);
-        }
+        loginAttemptService.checkNetwork(clientIp);
 
         return clientIp;
     }
@@ -157,7 +155,7 @@ public class DefaultSecondStepService implements SecondStepService {
         }
 
         if (attempts > PendingLoginStore.MAX_ATTEMPTS) {
-            loginAttemptService.loginFailed(clientIp);
+            loginAttemptService.networkFailed(clientIp);
             throw outOfAttempts(pendingToken, pendingLogin.userId());
         }
 
@@ -190,7 +188,7 @@ public class DefaultSecondStepService implements SecondStepService {
     }
 
     private SignInExpiredException expired(final String clientIp, final String message) {
-        loginAttemptService.loginFailed(clientIp);
+        loginAttemptService.networkFailed(clientIp);
 
         return new SignInExpiredException(message);
     }
@@ -198,7 +196,7 @@ public class DefaultSecondStepService implements SecondStepService {
     private void secondStepFailed(final SecondStepAttempt attempt) {
         final var twoFactorAttemptsKey = twoFactorAttemptsKey(attempt.user());
         loginAttemptService.loginFailed(twoFactorAttemptsKey);
-        loginAttemptService.loginFailed(attempt.clientIp());
+        loginAttemptService.networkFailed(attempt.clientIp());
         log.info("Second step failed user id={} attempts left={}", attempt.user().getId(), attempt.attemptsLeft());
 
         if (loginAttemptService.isBlocked(twoFactorAttemptsKey)) {

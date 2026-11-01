@@ -9,6 +9,7 @@ import cc.hrva.urlshortener.dto.PendingTokenDto;
 import cc.hrva.urlshortener.dto.TotpSecondStepDto;
 import cc.hrva.urlshortener.dto.TwoFactorCodeDto;
 import cc.hrva.urlshortener.dto.TwoStepDisableDto;
+import cc.hrva.urlshortener.exception.RateLimitExceededException;
 import cc.hrva.urlshortener.exception.ApiException;
 import cc.hrva.urlshortener.exception.PasskeyVerificationException;
 import cc.hrva.urlshortener.exception.SignInExpiredException;
@@ -73,6 +74,7 @@ import static org.assertj.core.api.Assertions.within;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.startsWith;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -223,6 +225,7 @@ class PasskeySecondStepFlowsTest {
             assertThat(redis.keys()).noneMatch(key -> key.startsWith(PENDING_LOGIN_KEY_PREFIX));
             verify(loginAttemptService).loginSucceeded("2fa:" + user.getId());
             verify(loginAttemptService, never()).loginFailed(anyString());
+        verify(loginAttemptService, never()).networkFailed(anyString());
             assertThat(output)
                     .contains("Second step completed user id=" + user.getId())
                     .doesNotContain(login.getPendingToken())
@@ -264,7 +267,7 @@ class PasskeySecondStepFlowsTest {
                 .hasMessage(COULD_NOT_VERIFY);
 
         verify(loginAttemptService).loginFailed("2fa:" + alice.getId());
-        verify(loginAttemptService).loginFailed(CLIENT_IP);
+        verify(loginAttemptService).networkFailed(CLIENT_IP);
         verify(loginAttemptService, never()).loginSucceeded(startsWith("2fa:"));
         verify(userService, never()).userHasLoggedIn(any(), any());
         assertThat(flows.stored(bobsPasskey).getLastUsedAt()).isNull();
@@ -294,7 +297,7 @@ class PasskeySecondStepFlowsTest {
                 .hasMessage(EXPIRED);
 
         assertThat(flows.stored(alicesKey).getLastUsedAt()).isNull();
-        verify(loginAttemptService).loginFailed(CLIENT_IP);
+        verify(loginAttemptService).networkFailed(CLIENT_IP);
         verify(loginAttemptService, never()).loginFailed("2fa:" + bob.getId());
         verify(loginAttemptService, never()).loginSucceeded(startsWith("2fa:"));
         verify(userService, never()).userHasLoggedIn(any(), any());
@@ -405,7 +408,7 @@ class PasskeySecondStepFlowsTest {
         assertThat(redis.keys()).doesNotContain(PENDING_LOGIN_KEY_PREFIX + pendingToken);
         assertThat(flows.stored(authenticator).getLastUsedAt()).isNull();
         verify(loginAttemptService, times(5)).loginFailed("2fa:" + user.getId());
-        verify(loginAttemptService, times(5)).loginFailed(CLIENT_IP);
+        verify(loginAttemptService, times(5)).networkFailed(CLIENT_IP);
         assertThatThrownBy(() -> passkeyOptions(pendingToken))
                 .isInstanceOf(SignInExpiredException.class)
                 .hasMessage(SIGN_IN_EXPIRED);
@@ -567,6 +570,7 @@ class PasskeySecondStepFlowsTest {
                     });
             verify(loginAttemptService).loginSucceeded("2fa:" + user.getId());
             verify(loginAttemptService, never()).loginFailed(anyString());
+        verify(loginAttemptService, never()).networkFailed(anyString());
             assertThat(output)
                     .contains("Two-step verification turned off user id=" + user.getId())
                     .doesNotContain(options.ceremonyId())
@@ -600,6 +604,7 @@ class PasskeySecondStepFlowsTest {
         assertThat(recoveryCodesOf(alice)).isEqualTo(10L);
         assertThat(flows.stored(bobsKey).getLastUsedAt()).isNull();
         verify(loginAttemptService, never()).loginFailed(anyString());
+        verify(loginAttemptService, never()).networkFailed(anyString());
         verify(loginAttemptService, never()).loginSucceeded(startsWith("2fa:"));
     }
 

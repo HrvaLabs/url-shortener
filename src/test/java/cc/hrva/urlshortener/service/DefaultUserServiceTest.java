@@ -216,9 +216,7 @@ class DefaultUserServiceTest {
 
     @BeforeEach
     void setUp() {
-        final var loginAttemptProperties = new AppProperties();
-        loginAttemptProperties.setMaxLoginAttempts(20L);
-        loginAttemptService = new DefaultLoginAttemptService(loginAttemptProperties);
+        loginAttemptService = InMemoryLoginAttempts.withMaxAttempts(20L);
         this.userService = userServicePublishingTo(eventPublisher);
         lenient().when(userRepository.findByEmail(null)).thenReturn(Optional.empty());
         lenient().when(accountLock.lock(any())).thenAnswer(invocation -> invocation.getArgument(0));
