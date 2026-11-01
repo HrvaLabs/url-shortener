@@ -5,7 +5,7 @@
       "date": "2026-11-01",
       "badge": "Latest",
       "badgeVariant": "default",
-      "summary": "Sign out everywhere, a one-time code instead of the sign-in token in the address bar, sign-in limits per account and per network, standard API errors and UTC dates, real statuses for dead links, and a content security policy for the dashboard.",
+      "summary": "Sign out everywhere, a one-time code instead of any token in the address bar, sign-in limits per account and per network, standard API errors and UTC dates, real statuses for dead links, and a content security policy for the dashboard.",
       "sections": [
         {
           "title": "Accounts & Security",
@@ -13,9 +13,10 @@
           "items": [
             "Sign out everywhere in Settings signs out every other browser and device. The one you use stays signed in. API keys and connected apps keep working.",
             "Changing your password, removing it, or turning off Google or GitHub sign-in signs out your other devices. Resetting a forgotten password signs out every device.",
-            "Signing in with Google or GitHub no longer puts your sign-in token in the address bar. The sign-in page swaps a one-time code for it.",
+            "Signing in with Google or GitHub no longer puts a token of any kind in the address bar, with two-step verification on too. The sign-in page swaps a one-time code for it.",
             "Passwords can be up to 72 bytes; accented letters count as two. A longer one shows a message under the field instead of an error.",
-            "After too many wrong passwords for one account, or from one network, sign-in pauses for up to 15 minutes or an hour. The message says how long to wait.",
+            "After too many wrong passwords for one account, or from one network, sign-in pauses for up to 15 minutes or an hour. The message says how long to wait. Signing into a different account in between resets neither count.",
+            "A role taken away from an account stops working on its next request, not when its sign-in expires.",
             "The dashboard sends a content security policy, so pages load scripts only from hrva.cc and Cloudflare Turnstile and can't be framed by other sites."
           ]
         },
