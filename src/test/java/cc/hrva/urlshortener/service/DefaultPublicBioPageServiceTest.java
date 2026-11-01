@@ -141,7 +141,7 @@ class DefaultPublicBioPageServiceTest {
         expired.setExpirationDate(NOW.minusSeconds(1));
         final var atItsLimit = link(44L, "at-its-limit");
         atItsLimit.setVisitLimit(10L);
-        atItsLimit.setVisits(10L);
+        atItsLimit.setOpens(10L);
         final var inReview = link(45L, "in-review");
         final var live = link(46L, "live");
         onPage(button(31L, blocked, "Blocked", 0, true), button(32L, deactivated, "Deactivated", 1, true),

@@ -224,7 +224,7 @@ public class DefaultClickSummaryService implements ClickSummaryService {
             return new EndingSoon(url.getShortUrl(), hostOf(url), WeeklySummary.EXPIRES, notificationMessages.day(expiration), null,
                     ShortLinks.hostnameOf(url));
         }
-        final var visitsLeft = url.getVisitLimit() - Objects.requireNonNullElse(url.getVisits(), 0L);
+        final var visitsLeft = url.getVisitLimit() - url.getOpens();
         return new EndingSoon(url.getShortUrl(), hostOf(url), WeeklySummary.VISIT_LIMIT, null, visitsLeft, ShortLinks.hostnameOf(url));
     }
 

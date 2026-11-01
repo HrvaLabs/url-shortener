@@ -23,8 +23,10 @@ public record UrlResponse(
         LocalDateTime expirationDate,
         @Schema(description = "Number of visits", example = "42")
         Long visits,
-        @Schema(description = "Maximum number of visits allowed", example = "100")
+        @Schema(description = "How many clicks the link allows: every click counts, not counting bots and HEAD requests", example = "100")
         Long visitLimit,
+        @Schema(description = "How many clicks have counted towards the visit limit", example = "12")
+        Long opens,
         @Schema(description = "Whether the URL is active", example = "true")
         boolean active,
         @Schema(description = "Reason for the current state: ACTIVE, LIMIT_REACHED, EXPIRED, BLOCKED, DEACTIVATED", example = "ACTIVE")
@@ -72,40 +74,40 @@ public record UrlResponse(
     public UrlResponse(final Long id, final String longUrl, final String shortUrl, final LocalDateTime createDate,
                        final LocalDateTime expirationDate, final Long visits, final Long visitLimit, final boolean active,
                        final String status, final Set<String> tags, final boolean passwordProtected, final String ownerEmail) {
-        this(id, longUrl, shortUrl, createDate, expirationDate, visits, visitLimit, active, status, tags, passwordProtected,
+        this(id, longUrl, shortUrl, createDate, expirationDate, visits, visitLimit, null, active, status, tags, passwordProtected,
                 ownerEmail, List.of(), null, null, null, null, null, null, null, null);
     }
 
     public UrlResponse publicView() {
-        return new UrlResponse(id, passwordProtected ? null : longUrl, shortUrl, createDate, expirationDate, visits, visitLimit,
+        return new UrlResponse(id, passwordProtected ? null : longUrl, shortUrl, createDate, expirationDate, visits, visitLimit, opens,
                 active, status, Set.of(), passwordProtected, null, List.of(), null, null, null, null, null, domain, null, null);
     }
 
     public UrlResponse withSuspiciousReasons(final List<String> reasons) {
-        return new UrlResponse(id, longUrl, shortUrl, createDate, expirationDate, visits, visitLimit, active, status, tags,
+        return new UrlResponse(id, longUrl, shortUrl, createDate, expirationDate, visits, visitLimit, opens, active, status, tags,
                 passwordProtected, ownerEmail, reasons, blockReason, reviewOpen, ownerPossibleScammer, finalUrl, destinationHealth, domain, warningPage,
                 shortLink);
     }
 
     public UrlResponse withBlockReason(final BlockReason reason) {
-        return new UrlResponse(id, longUrl, shortUrl, createDate, expirationDate, visits, visitLimit, active, status, tags,
+        return new UrlResponse(id, longUrl, shortUrl, createDate, expirationDate, visits, visitLimit, opens, active, status, tags,
                 passwordProtected, ownerEmail, suspiciousReasons, reason, reviewOpen, ownerPossibleScammer, finalUrl, destinationHealth, domain, warningPage,
                 shortLink);
     }
 
     public UrlResponse withModeration(final boolean inReview, final boolean ownerLooksLikeAScammer, final String chainEnd) {
-        return new UrlResponse(id, longUrl, shortUrl, createDate, expirationDate, visits, visitLimit, active, status, tags,
+        return new UrlResponse(id, longUrl, shortUrl, createDate, expirationDate, visits, visitLimit, opens, active, status, tags,
                 passwordProtected, ownerEmail, suspiciousReasons, blockReason, inReview, ownerLooksLikeAScammer, chainEnd, destinationHealth, domain,
                 warningPage, shortLink);
     }
 
     public UrlResponse asCreated() {
-        return new UrlResponse(id, longUrl, shortUrl, createDate, expirationDate, visits, visitLimit, true, ACTIVE, tags, passwordProtected,
+        return new UrlResponse(id, longUrl, shortUrl, createDate, expirationDate, visits, visitLimit, opens, true, ACTIVE, tags, passwordProtected,
                 ownerEmail, suspiciousReasons, null, reviewOpen, ownerPossibleScammer, finalUrl, destinationHealth, domain, null, shortLink);
     }
 
     public UrlResponse withShortLink(final String link) {
-        return new UrlResponse(id, longUrl, shortUrl, createDate, expirationDate, visits, visitLimit, active, status, tags,
+        return new UrlResponse(id, longUrl, shortUrl, createDate, expirationDate, visits, visitLimit, opens, active, status, tags,
                 passwordProtected, ownerEmail, suspiciousReasons, blockReason, reviewOpen, ownerPossibleScammer, finalUrl, destinationHealth, domain,
                 warningPage, link);
     }
@@ -124,6 +126,7 @@ public record UrlResponse(
                 url.getExpirationDate(),
                 url.getVisits(),
                 url.getVisitLimit(),
+                url.getOpens(),
                 url.isActive(),
                 resolveStatus(url),
                 url.getTags() != null ? url.getTags() : java.util.Set.of(),
@@ -152,8 +155,7 @@ public record UrlResponse(
         if (url.getBlockReason() != null || url.getThreatType() != null) {
             return "BLOCKED";
         }
-        if (url.getVisitLimit() != null && url.getVisits() != null
-                && url.getVisits() >= url.getVisitLimit()) {
+        if (url.getVisitLimit() != null && url.getVisitLimit() > 0 && url.getOpens() >= url.getVisitLimit()) {
             return "LIMIT_REACHED";
         }
         if (url.getExpirationDate() != null && url.getExpirationDate().isBefore(LocalDateTime.now())) {

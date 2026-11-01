@@ -101,6 +101,60 @@ class UrlRepositoryTest {
     }
 
     @Test
+    void eachOpenOfALimitedLinkIsCountedUpToTheLimitAndTheLastOneSwitchesItOff() {
+        final var limited = limitedLink("limited", 3L);
+
+        final var opens = IntStream.rangeClosed(1, 5).map(attempt -> urlRepository.consumeOpen(limited.getId())).boxed().toList();
+
+        entityManager.clear();
+        assertThat(opens).containsExactly(1, 1, 1, 0, 0);
+        assertThat(urlRepository.findById(limited.getId()).orElseThrow())
+                .extracting(Url::getOpens, Url::isActive, Url::getVisits)
+                .containsExactly(3L, false, 0L);
+    }
+
+    @Test
+    void anOpenBelowTheLimitKeepsTheLinkOn() {
+        final var limited = limitedLink("roomy", 3L);
+
+        urlRepository.consumeOpen(limited.getId());
+
+        entityManager.clear();
+        assertThat(urlRepository.findById(limited.getId()).orElseThrow())
+                .extracting(Url::getOpens, Url::isActive)
+                .containsExactly(1L, true);
+    }
+
+    @Test
+    void aLinkWithoutALimitOrSwitchedOffUsesNoOpen() {
+        final var unlimited = link("unlimited", null);
+        final var switchedOff = limitedLink("switched-off", 3L);
+        urlRepository.deactivateIfActive(List.of(switchedOff.getId()));
+
+        final var used = urlRepository.consumeOpen(unlimited.getId()) + urlRepository.consumeOpen(switchedOff.getId());
+
+        entityManager.clear();
+        assertThat(used).isZero();
+        assertThat(urlRepository.findAllById(List.of(unlimited.getId(), switchedOff.getId())))
+                .extracting(Url::getOpens)
+                .containsOnly(0L);
+    }
+
+    @Test
+    void theVisitOfTheLastOpenIsStillCountedAfterTheLimitSwitchedTheLinkOff() {
+        final var limited = limitedLink("last-open", 1L);
+        urlRepository.consumeOpen(limited.getId());
+
+        final var recorded = urlRepository.recordVisit(limited.getId(), VISITED_AT);
+
+        entityManager.clear();
+        assertThat(recorded).isEqualTo(1);
+        assertThat(urlRepository.findById(limited.getId()).orElseThrow())
+                .extracting(Url::getVisits, Url::getLastAccessed, Url::isActive)
+                .containsExactly(1L, VISITED_AT, false);
+    }
+
+    @Test
     void aVisitToAnActiveLinkCountsItAndStampsTheTime() {
         final var active = link("live", null);
 
@@ -186,6 +240,13 @@ class UrlRepositoryTest {
 
     private Url link(final String shortUrl, final LocalDateTime expirationDate) {
         final var url = Url.builder().shortUrl(shortUrl).longUrl("https://" + shortUrl + ".example/").expirationDate(expirationDate).build();
+        entityManager.persist(url);
+        entityManager.flush();
+        return url;
+    }
+
+    private Url limitedLink(final String shortUrl, final long visitLimit) {
+        final var url = Url.builder().shortUrl(shortUrl).longUrl("https://" + shortUrl + ".example/").visitLimit(visitLimit).build();
         entityManager.persist(url);
         entityManager.flush();
         return url;

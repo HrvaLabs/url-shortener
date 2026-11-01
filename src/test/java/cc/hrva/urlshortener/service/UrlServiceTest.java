@@ -1702,7 +1702,7 @@ class UrlServiceTest {
     void aLinkAtItsVisitLimitIsNeverReused() {
         SettingsServiceFixtures.change(settingsService, SettingKey.ANONYMOUS_VISIT_LIMIT, 5);
         final var used = candidate(12L, null, 5L, false);
-        used.setVisits(5L);
+        used.setOpens(5L);
         anonymousCreateOf(LIMITED_LINK, LinkVerdict.clean());
         when(urlRepository.findByLongUrlAndActiveTrueAndOwnerIsNull(LIMITED_LINK)).thenReturn(List.of(used));
 
@@ -3347,6 +3347,32 @@ class UrlServiceTest {
     }
 
     @Test
+    void unlockingALimitedLinkUsesAnOpen() {
+        final var url = Url.builder().id(7L).shortUrl("a").longUrl("https://a.com").active(true).passwordHash("hash").visits(0L).visitLimit(2L).build();
+        when(urlRepository.findActive(null, "a")).thenReturn(Optional.of(url));
+        when(passwordEncoder.matches("pw", "hash")).thenReturn(true);
+        when(urlRepository.consumeOpen(7L)).thenReturn(1);
+
+        assertThat(urlService.unlockUrl(null, "a", "pw", CLICK).longUrl()).isEqualTo("https://a.com");
+
+        verify(urlRepository).consumeOpen(7L);
+        verify(clickAnalyticsService).recordClick(7L, "a", CLICK.withUnknownReferrer());
+    }
+
+    @Test
+    void unlockingALinkWithNoOpenLeftSendsTheVisitorToTheUnavailablePage() {
+        final var url = Url.builder().id(7L).shortUrl("a").longUrl("https://a.com").active(true).passwordHash("hash").visits(0L).visitLimit(2L).build();
+        when(urlRepository.findActive(null, "a")).thenReturn(Optional.of(url));
+        when(passwordEncoder.matches("pw", "hash")).thenReturn(true);
+        when(appProperties.getFrontendUrl()).thenReturn(FRONTEND);
+        when(urlRepository.consumeOpen(7L)).thenReturn(0);
+
+        assertThat(urlService.unlockUrl(null, "a", "pw", CLICK).longUrl()).isEqualTo(FRONTEND + "/unavailable?s=a&reason=limit");
+
+        verify(clickAnalyticsService, never()).recordClick(any(), any(), any());
+    }
+
+    @Test
     void unlockAnswersABotOnAVisitLimitedLinkAsMissing() {
         final var url = Url.builder().id(7L).shortUrl("a").longUrl("https://a.com").active(true).passwordHash("hash").visits(0L).visitLimit(1L).build();
         when(urlRepository.findActive(null, "a")).thenReturn(Optional.of(url));
@@ -3568,6 +3594,32 @@ class UrlServiceTest {
     }
 
     @Test
+    void revealingALimitedLinkUsesAnOpen() {
+        final var url = Url.builder().id(3L).shortUrl("menu").longUrl("https://gableci.hrva.cc").visits(0L).visitLimit(2L).active(true).build();
+        when(urlRepository.findActive(null, "menu")).thenReturn(Optional.of(url));
+        when(urlRepository.consumeOpen(3L)).thenReturn(1);
+        when(urlRepository.existsByIdAndActiveTrue(3L)).thenReturn(true);
+
+        assertThat(urlService.revealUrlAndRecordClick(null, "menu", CLICK).longUrl()).isEqualTo("https://gableci.hrva.cc");
+
+        verify(urlRepository).consumeOpen(3L);
+        verify(clickAnalyticsService).recordClick(3L, "menu", CLICK);
+    }
+
+    @Test
+    void revealingALinkWithNoOpenLeftIsNotFoundAndRecordsNoClick() {
+        final var url = Url.builder().id(3L).shortUrl("menu").longUrl("https://gableci.hrva.cc").visits(0L).visitLimit(2L).active(true).build();
+        when(urlRepository.findActive(null, "menu")).thenReturn(Optional.of(url));
+        when(urlRepository.consumeOpen(3L)).thenReturn(0);
+
+        assertThatThrownBy(() -> urlService.revealUrlAndRecordClick(null, "menu", CLICK))
+                .isInstanceOf(UrlNotFoundException.class)
+                .hasMessage("URL doesn't exist");
+
+        verify(clickAnalyticsService, never()).recordClick(any(), any(), any());
+    }
+
+    @Test
     void publicLookupOfALinkFoundOnABlocklistIsNotFoundAndRecordsNoClick() {
         final var url = Url.builder().id(3L).shortUrl("menu").longUrl("https://jofogas.cards/login").active(true).build();
         when(urlRepository.findActive(null, "menu")).thenReturn(Optional.of(url));
@@ -3670,13 +3722,109 @@ class UrlServiceTest {
     void redirectFromTheCacheRecordsTheClickByIdWithoutReadingTheLink() {
         final var cache = org.mockito.Mockito.mock(org.springframework.cache.Cache.class);
         when(cacheManager.getCache("urls")).thenReturn(cache);
-        final var cached = new UrlResponse(5L, "https://example.com/a", "abc", null, null, 0L, 3L, true, "ACTIVE", java.util.Set.of(), false, null);
+        final var cached = new UrlResponse(5L, "https://example.com/a", "abc", null, null, 0L, null, true, "ACTIVE", java.util.Set.of(), false, null);
         when(cache.get("abc")).thenReturn(() -> cached);
 
         assertThat(locationOf(urlServiceWithMeters().redirectResultUrl("abc", CLICK))).isEqualTo("https://example.com/a");
 
         verify(clickAnalyticsService).recordClick(5L, "abc", CLICK);
         verifyNoInteractions(urlRepository);
+    }
+
+    @Test
+    void aCachedLimitedLinkUsesAnOpenBeforeItRedirects() {
+        final var cache = org.mockito.Mockito.mock(org.springframework.cache.Cache.class);
+        when(cacheManager.getCache("urls")).thenReturn(cache);
+        final var cached = new UrlResponse(5L, "https://example.com/a", "abc", null, null, 0L, 3L, true, "ACTIVE", java.util.Set.of(), false, null);
+        when(cache.get("abc")).thenReturn(() -> cached);
+        when(urlRepository.consumeOpen(5L)).thenReturn(1);
+        when(urlRepository.existsByIdAndActiveTrue(5L)).thenReturn(true);
+
+        assertThat(locationOf(urlServiceWithMeters().redirectResultUrl("abc", CLICK))).isEqualTo("https://example.com/a");
+
+        final var order = org.mockito.Mockito.inOrder(urlRepository, clickAnalyticsService);
+        order.verify(urlRepository).consumeOpen(5L);
+        order.verify(clickAnalyticsService).recordClick(5L, "abc", CLICK);
+        verify(cache, never()).evict(any());
+    }
+
+    @Test
+    void theLastOpenStillRedirectsAndTakesTheLinkOutOfTheCache() {
+        final var cache = org.mockito.Mockito.mock(org.springframework.cache.Cache.class);
+        when(cacheManager.getCache("urls")).thenReturn(cache);
+        final var cached = new UrlResponse(5L, "https://example.com/a", "abc", null, null, 0L, 3L, true, "ACTIVE", java.util.Set.of(), false, null);
+        when(cache.get("abc")).thenReturn(() -> cached);
+        when(urlRepository.consumeOpen(5L)).thenReturn(1);
+        when(urlRepository.existsByIdAndActiveTrue(5L)).thenReturn(false);
+
+        assertThat(locationOf(urlServiceWithMeters().redirectResultUrl("abc", CLICK))).isEqualTo("https://example.com/a");
+
+        verify(cache).evict("abc");
+        verify(clickAnalyticsService).recordClick(5L, "abc", CLICK);
+    }
+
+    @Test
+    void aCachedLinkWithNoOpenLeftIsGoneAndLeavesTheCache() {
+        final var cache = org.mockito.Mockito.mock(org.springframework.cache.Cache.class);
+        when(cacheManager.getCache("urls")).thenReturn(cache);
+        final var cached = new UrlResponse(5L, "https://example.com/a", "abc", null, null, 0L, 3L, true, "ACTIVE", java.util.Set.of(), false, null);
+        when(cache.get("abc")).thenReturn(() -> cached);
+        when(appProperties.getFrontendUrl()).thenReturn(FRONTEND);
+        when(urlRepository.consumeOpen(5L)).thenReturn(0);
+
+        final var redirect = urlServiceWithMeters().redirectResultUrl("abc", CLICK);
+
+        assertUnavailable(redirect, "abc", null, "limit");
+        verify(cache).evict("abc");
+        verify(clickAnalyticsService, never()).recordClick(any(), any(), any());
+    }
+
+    @Test
+    void aHeadRequestOnALimitedLinkUsesNoOpen() {
+        final var cache = org.mockito.Mockito.mock(org.springframework.cache.Cache.class);
+        when(cacheManager.getCache("urls")).thenReturn(cache);
+        final var cached = new UrlResponse(5L, "https://example.com/a", "abc", null, null, 0L, 3L, true, "ACTIVE", java.util.Set.of(), false, null);
+        when(cache.get("abc")).thenReturn(() -> cached);
+
+        assertThat(locationOf(urlServiceWithMeters().redirectResultUrl("abc", CLICK.asHead()))).isEqualTo("https://example.com/a");
+
+        verify(urlRepository, never()).consumeOpen(org.mockito.ArgumentMatchers.anyLong());
+    }
+
+    @Test
+    void aLimitedLinkFromTheDatabaseUsesAnOpenAfterItsReadAndBeforeItRedirects() {
+        final var url = Url.builder().id(7L).shortUrl("abc").longUrl("https://example.com/a").visits(0L).visitLimit(2L).active(true).build();
+        when(urlRepository.findServed(null, "abc")).thenReturn(Optional.of(url));
+        when(urlRepository.consumeOpen(7L)).thenReturn(1);
+        when(urlRepository.existsByIdAndActiveTrue(7L)).thenReturn(true);
+
+        assertThat(locationOf(urlServiceWithMeters().redirectResultUrl("abc", CLICK))).isEqualTo("https://example.com/a");
+
+        final var order = org.mockito.Mockito.inOrder(urlRepository, clickAnalyticsService);
+        order.verify(urlRepository).findServed(null, "abc");
+        order.verify(urlRepository).consumeOpen(7L);
+        order.verify(clickAnalyticsService).recordClick(7L, "abc", CLICK);
+    }
+
+    @Test
+    void aLinkWhoseOpensAreUsedUpIsGoneWithoutTryingAnother() {
+        final var url = Url.builder().id(7L).shortUrl("abc").longUrl("https://example.com/a").visits(1L).opens(2L).visitLimit(2L).active(true).build();
+        when(urlRepository.findServed(null, "abc")).thenReturn(Optional.of(url));
+        when(appProperties.getFrontendUrl()).thenReturn(FRONTEND);
+
+        assertUnavailable(urlServiceWithMeters().redirectResultUrl("abc", CLICK), "abc", null, "limit");
+
+        verify(urlRepository, never()).consumeOpen(org.mockito.ArgumentMatchers.anyLong());
+    }
+
+    @Test
+    void manyUniqueVisitorsBelowTheOpensLeftKeepALinkWorking() {
+        final var url = Url.builder().id(7L).shortUrl("abc").longUrl("https://example.com/a").visits(9L).opens(1L).visitLimit(2L).active(true).build();
+        when(urlRepository.findServed(null, "abc")).thenReturn(Optional.of(url));
+        when(urlRepository.consumeOpen(7L)).thenReturn(1);
+        when(urlRepository.existsByIdAndActiveTrue(7L)).thenReturn(false);
+
+        assertThat(locationOf(urlServiceWithMeters().redirectResultUrl("abc", CLICK))).isEqualTo("https://example.com/a");
     }
 
     @Test
@@ -3859,7 +4007,7 @@ class UrlServiceTest {
 
     @Test
     void aLinkThatReachedItsVisitLimitSaysLimit() {
-        final var url = storedLink().active(false).visits(3L).visitLimit(3L).build();
+        final var url = storedLink().active(false).visits(1L).opens(3L).visitLimit(3L).build();
 
         assertUnavailable(viewOf(url), "abc", null, "limit");
     }

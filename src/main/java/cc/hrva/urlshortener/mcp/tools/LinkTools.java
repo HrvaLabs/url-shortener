@@ -101,7 +101,7 @@ public class LinkTools {
             @McpToolParam(description = "The destination URL to shorten, for example https://example.com/page") final String url,
             @McpToolParam(required = false, description = "Custom alias for the short link: letters, numbers, hyphens and underscores, "
                     + "up to 32 characters. A random alias is generated when omitted.") final String alias,
-            @McpToolParam(required = false, description = "Number of visits after which the link stops working") final Long visitLimit,
+            @McpToolParam(required = false, description = "Number of clicks after which the link stops working; every click counts, not counting bots") final Long visitLimit,
             @McpToolParam(required = false, description = "When the link stops working, as an ISO-8601 date-time with a time zone, "
                     + "for example 2026-12-31T23:59:00Z or 2026-12-31T23:59:00+01:00") final String expiresAt,
             @McpToolParam(required = false, description = "Tags for the link. The tag ai is always added, "

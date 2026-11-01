@@ -46,7 +46,7 @@ class UrlTest {
 
     @Test
     void shouldVerifyUrlValidityAndDeactivate() {
-        final var url = Url.builder().visits(10L).visitLimit(10L).active(true).build();
+        final var url = Url.builder().visits(1L).opens(10L).visitLimit(10L).active(true).build();
 
         url.verifyUrlValidity(url);
 

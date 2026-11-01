@@ -50,5 +50,6 @@
     <include file="classpath:/db/changelog/031-notifications.xml"/>
     <include file="classpath:/db/changelog/032-custom-domains.xml"/>
     <include file="classpath:/db/changelog/035-warning-page.xml"/>
+    <include file="classpath:/db/changelog/043-url-opens.xml"/>
 
 </databaseChangeLog>

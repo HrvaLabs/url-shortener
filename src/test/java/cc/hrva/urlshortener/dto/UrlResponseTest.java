@@ -148,8 +148,16 @@ class UrlResponseTest {
 
     @Test
     void shouldBeLimitReached() {
-        final var url = baseUrl().active(false).visits(100L).build();
+        final var url = baseUrl().active(false).opens(100L).build();
         assertThat(UrlResponse.from(url).status()).isEqualTo("LIMIT_REACHED");
+    }
+
+    @Test
+    void manyUniqueVisitorsDontReachTheLimitOnlyOpensDo() {
+        final var url = baseUrl().active(false).visits(100L).opens(99L).build();
+        assertThat(UrlResponse.from(url))
+                .extracting(UrlResponse::status, UrlResponse::opens)
+                .containsExactly("DEACTIVATED", 99L);
     }
 
     @Test

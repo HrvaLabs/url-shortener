@@ -26,7 +26,7 @@ class BioLinkStatesTest {
     @ParameterizedTest(name = "{0}")
     @MethodSource("links")
     void eachLinkGetsTheFirstMatchingState(final UnaryOperator<Url.UrlBuilder> link, final boolean inReview, final BioLinkState expected) {
-        final var url = link.apply(Url.builder().id(41L).shortUrl("ana-ig").longUrl("https://instagram.com/ana").active(true).visits(3L)).build();
+        final var url = link.apply(Url.builder().id(41L).shortUrl("ana-ig").longUrl("https://instagram.com/ana").active(true).visits(3L).opens(3L)).build();
 
         assertThat(BioLinkStates.of(url, inReview, NOW)).isEqualTo(expected);
     }
@@ -54,8 +54,10 @@ class BioLinkStatesTest {
                         .visitLimit(4L)), false, BioLinkState.LIVE),
                 arguments(named("aZeroLimitIsNoLimit", (UnaryOperator<Url.UrlBuilder>) link -> link
                         .visitLimit(0L)), false, BioLinkState.LIVE),
-                arguments(named("noVisitsYetIsBelowTheLimit", (UnaryOperator<Url.UrlBuilder>) link -> link
-                        .visits(null).visitLimit(1L)), false, BioLinkState.LIVE),
+                arguments(named("noOpensYetIsBelowTheLimit", (UnaryOperator<Url.UrlBuilder>) link -> link
+                        .visits(null).opens(0L).visitLimit(1L)), false, BioLinkState.LIVE),
+                arguments(named("manyUniqueVisitorsBelowTheOpensLeftAreLive", (UnaryOperator<Url.UrlBuilder>) link -> link
+                        .visits(30L).opens(2L).visitLimit(3L)), false, BioLinkState.LIVE),
                 arguments(named("anOpenSystemReviewIsInReview", (UnaryOperator<Url.UrlBuilder>) link -> link
                         .expirationDate(NOW.plusDays(1)).visitLimit(4L)), true, BioLinkState.IN_REVIEW),
                 arguments(named("aLinkOnAnActiveDomainIsLive", (UnaryOperator<Url.UrlBuilder>) link -> link

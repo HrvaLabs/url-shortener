@@ -645,10 +645,10 @@ class DefaultClickSummaryServiceTest {
         return link;
     }
 
-    private Url ending(final User owner, final String alias, final LocalDateTime expiresAt, final Long visitLimit, final Long visits) {
+    private Url ending(final User owner, final String alias, final LocalDateTime expiresAt, final Long visitLimit, final Long opens) {
         final var link = urlRepository.saveAndFlush(Url.builder().shortUrl(alias).longUrl("https://" + alias + ".example.org/page").owner(owner)
                 .active(true).expirationDate(expiresAt).visitLimit(visitLimit).build());
-        jdbcTemplate.update("update url set visits = ? where id = ?", visits, link.getId());
+        jdbcTemplate.update("update url set opens = ?, visits = 1000 where id = ?", opens == null ? 0 : opens, link.getId());
         return link;
     }
 

@@ -219,7 +219,7 @@ class ModerationToolsTest {
         when(reviewQueueService.open(any(), isNull())).thenReturn(new PageImpl<>(List.of(onDomain,
                 review(43L, "xyz89", "https://fake-bank.example/", null, "punycode domain")), PageRequest.of(0, 20), 2));
         when(moderationService.blockLink(42L, BlockReason.ADMIN, null, ADMIN_EMAIL, "mcp"))
-                .thenReturn(new UrlResponse(42L, "https://evil.example/login", "menu", LocalDateTime.now(), null, 3L, null, false, "BLOCKED",
+                .thenReturn(new UrlResponse(42L, "https://evil.example/login", "menu", LocalDateTime.now(), null, 3L, null, null, false, "BLOCKED",
                         Set.of(), false, "rade.scam@gmail.com", List.of(), null, null, null, null, null, new DomainRef(7L, "go.example.com"), null, null));
 
         final var queue = text(moderationTools.reviewQueue(null, null)).lines().toList();

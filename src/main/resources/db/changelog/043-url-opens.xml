@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.9.xsd">
+
+    <changeSet author="khrvacic" id="043-url-opens">
+        <addColumn tableName="url">
+            <column name="opens" type="BIGINT" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+        </addColumn>
+        <rollback>
+            <dropColumn tableName="url" columnName="opens"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet author="khrvacic" id="043-url-opens-from-visits">
+        <update tableName="url">
+            <column name="opens" valueComputed="visits"/>
+            <where>visit_limit &gt; 0 and visits is not null</where>
+        </update>
+        <rollback/>
+    </changeSet>
+
+</databaseChangeLog>

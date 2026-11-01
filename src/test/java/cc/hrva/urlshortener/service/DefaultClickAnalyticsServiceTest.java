@@ -8,7 +8,6 @@ import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.service.analytics.AnalyticsDays;
 import cc.hrva.urlshortener.service.analytics.ReferrerClassifier;
 import cc.hrva.urlshortener.service.analytics.UniqueVisitorCounter;
-import cc.hrva.urlshortener.service.domain.UrlCache;
 import cc.hrva.urlshortener.service.impl.DefaultClickAnalyticsService;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -32,7 +31,6 @@ import org.springframework.cache.CacheManager;
 import org.springframework.core.task.TaskExecutor;
 import org.springframework.core.task.TaskRejectedException;
 import org.springframework.dao.DataAccessResourceFailureException;
-import org.springframework.data.redis.RedisConnectionFailureException;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.transaction.support.TransactionOperations;
@@ -59,6 +57,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -146,10 +145,10 @@ class DefaultClickAnalyticsServiceTest {
         clickAnalyticsService.recordClick(URL_ID, SHORT_URL, CLICK);
 
         verify(urlRepository).recordVisit(eq(URL_ID), any(LocalDateTime.class));
-        verify(urlRepository).deactivateAtVisitLimit(URL_ID);
         verify(linkStatsRepository).incrementDailyStats(URL_ID, DAY, 1, 1, 0);
         verify(linkStatsRepository).incrementBreakdown(URL_ID, DAY, CLICK_BREAKDOWN);
-        verify(cache, never()).evict(any());
+        verifyNoMoreInteractions(urlRepository);
+        verifyNoInteractions(cache);
     }
 
     @Test
@@ -170,41 +169,6 @@ class DefaultClickAnalyticsServiceTest {
         verify(linkStatsRepository).incrementDailyStats(URL_ID, DAY, 1, 0, 0);
         verify(linkStatsRepository).incrementBreakdown(URL_ID, DAY, CLICK_BREAKDOWN);
         verify(urlRepository, never()).recordVisit(anyLong(), any());
-        verify(urlRepository, never()).deactivateAtVisitLimit(anyLong());
-    }
-
-    @Test
-    void reachingTheLimitEvictsTheCachedLink() {
-        when(uniqueVisitorCounter.isNewVisitor(URL_ID, DAY, CLICK)).thenReturn(true);
-        when(urlRepository.deactivateAtVisitLimit(URL_ID)).thenReturn(1);
-
-        clickAnalyticsService.recordClick(URL_ID, SHORT_URL, CLICK);
-
-        verify(cache).evict(SHORT_URL);
-        verify(linkStatsRepository).incrementDailyStats(URL_ID, DAY, 1, 1, 0);
-    }
-
-    @Test
-    void aVisitLimitStopEvictsTheDomainKey() {
-        when(uniqueVisitorCounter.isNewVisitor(URL_ID, DAY, CLICK)).thenReturn(true);
-        when(urlRepository.deactivateAtVisitLimit(URL_ID)).thenReturn(1);
-
-        clickAnalyticsService.recordClick(URL_ID, "7/menu", CLICK);
-
-        verify(cache).evict("7/menu");
-        verify(cache, never()).evict("menu");
-    }
-
-    @Test
-    void aFailingCacheEvictionStillCountsTheClick() {
-        when(uniqueVisitorCounter.isNewVisitor(URL_ID, DAY, CLICK)).thenReturn(true);
-        when(urlRepository.deactivateAtVisitLimit(URL_ID)).thenReturn(1);
-        doThrow(new RedisConnectionFailureException("Unable to connect to Redis")).when(cache).evict(SHORT_URL);
-
-        assertThatCode(() -> clickAnalyticsService.recordClick(URL_ID, SHORT_URL, CLICK)).doesNotThrowAnyException();
-
-        verify(linkStatsRepository).incrementDailyStats(URL_ID, DAY, 1, 1, 0);
-        verify(linkStatsRepository).incrementBreakdown(URL_ID, DAY, CLICK_BREAKDOWN);
     }
 
     @Test
@@ -234,7 +198,7 @@ class DefaultClickAnalyticsServiceTest {
     void aValueTooLongForItsColumnIsCountedAsOther() {
         final var classifier = mock(ReferrerClassifier.class);
         final var service = new DefaultClickAnalyticsService(executor, linkStatsRepository, uniqueVisitorCounter, classifier,
-                analyticsDays, urlRepository, TransactionOperations.withoutTransaction(), new UrlCache(cacheManager));
+                analyticsDays, urlRepository, TransactionOperations.withoutTransaction());
         final var longest = "app:" + "a".repeat(251);
         when(classifier.classify(any(ClickRequest.class))).thenReturn(longest, longest + "b");
 
@@ -249,7 +213,7 @@ class DefaultClickAnalyticsServiceTest {
     void theStatsIncrementsRunWithoutATransactionAndTheVisitInsideOne() {
         final var transactions = new TransactionTemplate(new DataSourceTransactionManager(new DriverManagerDataSource("jdbc:h2:mem:")));
         final var service = new DefaultClickAnalyticsService(executor, linkStatsRepository, uniqueVisitorCounter, referrerClassifier,
-                analyticsDays, urlRepository, transactions, new UrlCache(cacheManager));
+                analyticsDays, urlRepository, transactions);
         final var visitInTransaction = new AtomicReference<Boolean>();
         final var statsInTransaction = new AtomicReference<Boolean>();
         final var breakdownReadInTransaction = new AtomicReference<Boolean>();
@@ -397,7 +361,7 @@ class DefaultClickAnalyticsServiceTest {
 
     private ClickAnalyticsService service(final TaskExecutor taskExecutor) {
         return new DefaultClickAnalyticsService(taskExecutor, linkStatsRepository, uniqueVisitorCounter, referrerClassifier,
-                analyticsDays, urlRepository, TransactionOperations.withoutTransaction(), new UrlCache(cacheManager));
+                analyticsDays, urlRepository, TransactionOperations.withoutTransaction());
     }
 
     private static Set<String> sites(final int count) {

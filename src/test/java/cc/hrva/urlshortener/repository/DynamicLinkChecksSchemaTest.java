@@ -601,11 +601,11 @@ class DynamicLinkChecksSchemaTest {
         entityManager.clear();
 
         final var recorded = urlRepository.recordVisit(loadedByTheRedirect.getId(), LocalDateTime.of(2026, 10, 21, 9, 15));
-        final var switchedOff = urlRepository.deactivateAtVisitLimit(loadedByTheRedirect.getId());
+        final var opened = urlRepository.consumeOpen(loadedByTheRedirect.getId());
         entityManager.clear();
 
         assertThat(recorded).isZero();
-        assertThat(switchedOff).isZero();
+        assertThat(opened).isZero();
         assertThat(urlRepository.findById(loadedByTheRedirect.getId())).hasValueSatisfying(stored -> {
             assertThat(stored.isActive()).isFalse();
             assertThat(stored.getBlockReason()).isEqualTo(BlockReason.BLOCKLIST);
@@ -616,28 +616,26 @@ class DynamicLinkChecksSchemaTest {
     }
 
     @Test
-    void theVisitThatReachesTheLimitSwitchesTheLinkOffOnce() {
+    void theOpenThatReachesTheLimitSwitchesTheLinkOffOnce() {
         final var limited = savedLink("limited", "https://example.org/", null);
-        limited.setVisits(2L);
         limited.setVisitLimit(3L);
         entityManager.flush();
         entityManager.clear();
 
-        urlRepository.recordVisit(limited.getId(), LocalDateTime.now());
-        final var first = urlRepository.deactivateAtVisitLimit(limited.getId());
-        final var second = urlRepository.deactivateAtVisitLimit(limited.getId());
+        final var opens = List.of(urlRepository.consumeOpen(limited.getId()), urlRepository.consumeOpen(limited.getId()),
+                urlRepository.consumeOpen(limited.getId()), urlRepository.consumeOpen(limited.getId()));
         entityManager.clear();
 
-        assertThat(first).isEqualTo(1);
-        assertThat(second).isZero();
+        assertThat(opens).containsExactly(1, 1, 1, 0);
         assertThat(urlRepository.findById(limited.getId())).hasValueSatisfying(stored -> {
-            assertThat(stored.getVisits()).isEqualTo(3L);
+            assertThat(stored.getOpens()).isEqualTo(3L);
+            assertThat(stored.getVisits()).isZero();
             assertThat(stored.isActive()).isFalse();
         });
     }
 
     @Test
-    void aVisitBelowTheLimitOrWithoutOneKeepsTheLinkActive() {
+    void anOpenBelowTheLimitOrWithoutOneKeepsTheLinkActiveAndVisitsCountAsBefore() {
         final var belowTheLimit = savedLink("below", "https://example.org/a", null);
         belowTheLimit.setVisits(1L);
         belowTheLimit.setVisitLimit(3L);
@@ -646,15 +644,15 @@ class DynamicLinkChecksSchemaTest {
         entityManager.flush();
         entityManager.clear();
 
+        final var opened = urlRepository.consumeOpen(belowTheLimit.getId()) + urlRepository.consumeOpen(withoutALimit.getId());
         urlRepository.recordVisit(belowTheLimit.getId(), LocalDateTime.now());
         urlRepository.recordVisit(withoutALimit.getId(), LocalDateTime.now());
-        final var switchedOff = urlRepository.deactivateAtVisitLimit(belowTheLimit.getId()) + urlRepository.deactivateAtVisitLimit(withoutALimit.getId());
         entityManager.clear();
 
-        assertThat(switchedOff).isZero();
+        assertThat(opened).isOne();
         assertThat(urlRepository.findAllById(List.of(belowTheLimit.getId(), withoutALimit.getId())))
-                .extracting(Url::getShortUrl, Url::getVisits, Url::isActive)
-                .containsExactlyInAnyOrder(tuple("below", 2L, true), tuple("unlimited", 101L, true));
+                .extracting(Url::getShortUrl, Url::getVisits, Url::getOpens, Url::isActive)
+                .containsExactlyInAnyOrder(tuple("below", 2L, 1L, true), tuple("unlimited", 101L, 0L, true));
     }
 
     @Test

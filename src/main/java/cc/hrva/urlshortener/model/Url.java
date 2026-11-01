@@ -10,11 +10,11 @@ import jakarta.persistence.*;
 import jakarta.validation.constraints.NotBlank;
 import lombok.*;
 import org.hibernate.annotations.BatchSize;
+import org.hibernate.annotations.ColumnDefault;
 import org.hibernate.annotations.DynamicUpdate;
 import org.hibernate.validator.constraints.URL;
 
 import java.time.LocalDateTime;
-import java.util.Optional;
 import java.util.Set;
 
 @Entity
@@ -50,6 +50,11 @@ public class Url {
     private LocalDateTime lastAccessed;
     private LocalDateTime expirationDate;
     private Long visits;
+
+    @ColumnDefault("0")
+    @Column(name = "opens", insertable = false, updatable = false)
+    private long opens;
+
     private Long visitLimit;
     private LocalDateTime lastSafeBrowsingCheck;
 
@@ -106,7 +111,7 @@ public class Url {
     }
 
     public void verifyUrlValidity(final Url url) {
-        if (this.visits >= Optional.ofNullable(visitLimit).orElse(this.visits + 1)) {
+        if (visitLimit != null && visitLimit > 0 && opens >= visitLimit) {
             this.active = false;
         }
     }

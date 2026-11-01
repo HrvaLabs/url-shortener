@@ -22,7 +22,7 @@ public class UrlUpdateDto {
     @Size(max = UrlValidator.MAX_LONG_URL_LENGTH, message = UrlValidator.LONG_URL_TOO_LONG)
     @Schema(description = "New destination URL. Admins only; null leaves it unchanged", example = "https://example.com/new-page")
     private String longUrl;
-    @Schema(description = "Maximum number of visits allowed", example = "200")
+    @Schema(description = "How many clicks the link allows: every click counts, not counting bots and HEAD requests", example = "200")
     private Long visitLimit;
     @Schema(description = "Expiration date and time", example = "2026-12-31T23:59:59Z")
     private LocalDateTime expirationDate;

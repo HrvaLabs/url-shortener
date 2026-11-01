@@ -16,7 +16,7 @@ public final class BioLinkStates {
         if (domainIsOff(url)) {
             return BioLinkState.DOMAIN_OFF;
         }
-        final var atLimit = hasReachedVisitLimit(url.getVisits(), url.getVisitLimit());
+        final var atLimit = hasReachedVisitLimit(url.getOpens(), url.getVisitLimit());
         final var expired = url.getExpirationDate() != null && url.getExpirationDate().isBefore(now);
         if (!url.isActive()) {
             if (atLimit) {
@@ -41,8 +41,8 @@ public final class BioLinkStates {
         return domain.getStatus() != CustomDomainStatus.ACTIVE || url.getOwner() == null || Boolean.FALSE.equals(url.getOwner().getActive());
     }
 
-    private static boolean hasReachedVisitLimit(final Long visits, final Long visitLimit) {
-        return visitLimit != null && visitLimit > 0 && visits != null && visits >= visitLimit;
+    private static boolean hasReachedVisitLimit(final long opens, final Long visitLimit) {
+        return visitLimit != null && visitLimit > 0 && opens >= visitLimit;
     }
 
 }

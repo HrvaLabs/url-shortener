@@ -97,8 +97,8 @@ public interface UrlRepository extends JpaRepository<Url, Long>, JpaSpecificatio
             where u.owner.id = :ownerId and u.active = true
               and ((u.expirationDate > :now and u.expirationDate <= :until)
                 or (u.visitLimit is not null
-                    and u.visitLimit - coalesce(u.visits, 0) >= 1
-                    and (u.visitLimit - coalesce(u.visits, 0) - 1) * 10 < u.visitLimit))
+                    and u.visitLimit - u.opens >= 1
+                    and (u.visitLimit - u.opens - 1) * 10 < u.visitLimit))
             order by u.expirationDate asc nulls last, u.id""")
     List<Url> findOwnerLinksEndingSoon(@Param("ownerId") long ownerId, @Param("now") LocalDateTime now, @Param("until") LocalDateTime until,
                                        Limit limit);
@@ -114,8 +114,8 @@ public interface UrlRepository extends JpaRepository<Url, Long>, JpaSpecificatio
             where u.owner.id = :ownerId and u.active = true
               and ((u.expirationDate > :now and u.expirationDate <= :until)
                 or (u.visitLimit is not null
-                    and u.visitLimit - coalesce(u.visits, 0) >= 1
-                    and (u.visitLimit - coalesce(u.visits, 0) - 1) * 10 < u.visitLimit))""")
+                    and u.visitLimit - u.opens >= 1
+                    and (u.visitLimit - u.opens - 1) * 10 < u.visitLimit))""")
     long countOwnerLinksEndingSoon(@Param("ownerId") long ownerId, @Param("now") LocalDateTime now, @Param("until") LocalDateTime until);
 
     @Query("select u.id from Url u where u.id in :ids and u.active = true and u.destinationDeadSince is not null")
@@ -218,13 +218,21 @@ public interface UrlRepository extends JpaRepository<Url, Long>, JpaSpecificatio
 
     @Modifying
     @Transactional
-    @Query("update Url u set u.visits = u.visits + 1, u.lastAccessed = :visitedAt where u.id = :id and u.active = true")
+    @Query("""
+            update Url u set u.visits = u.visits + 1, u.lastAccessed = :visitedAt
+            where u.id = :id
+              and (u.active = true
+                or (u.visitLimit > 0 and u.opens >= u.visitLimit and u.blockReason is null and u.threatType is null))""")
     int recordVisit(@Param("id") long id, @Param("visitedAt") LocalDateTime visitedAt);
 
     @Modifying
     @Transactional
-    @Query("update Url u set u.active = false where u.id = :id and u.active = true and u.visitLimit is not null and u.visits >= u.visitLimit")
-    int deactivateAtVisitLimit(@Param("id") long id);
+    @Query(value = """
+            update url set opens = opens + 1, active = (opens + 1 < visit_limit)
+            where id = :id and active = true and visit_limit > 0 and opens < visit_limit""", nativeQuery = true)
+    int consumeOpen(@Param("id") long id);
+
+    boolean existsByIdAndActiveTrue(long id);
 
     @Modifying
     @Transactional

@@ -421,7 +421,7 @@ class DefaultBioPageServiceTest {
         hasPage();
         final var full = link(43L, "full", ana);
         full.setVisitLimit(5L);
-        full.setVisits(5L);
+        full.setOpens(5L);
         ownsLinks(full);
 
         assertRefusedBeforeWriting(update(buttonDto(43L, "Full")), "Only working links can be added. /full isn't working right now.");

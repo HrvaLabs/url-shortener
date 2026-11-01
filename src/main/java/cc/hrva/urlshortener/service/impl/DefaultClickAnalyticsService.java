@@ -11,7 +11,6 @@ import cc.hrva.urlshortener.service.analytics.ReferrerClassifier;
 import cc.hrva.urlshortener.service.analytics.UniqueVisitorCounter;
 import cc.hrva.urlshortener.service.analytics.UserAgentClassifier;
 import cc.hrva.urlshortener.service.analytics.UserAgentDetails;
-import cc.hrva.urlshortener.service.domain.UrlCache;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.EnumMap;
@@ -45,7 +44,6 @@ public class DefaultClickAnalyticsService implements ClickAnalyticsService {
     private final AnalyticsDays analyticsDays;
     private final UrlRepository urlRepository;
     private final TransactionOperations transactionOperations;
-    private final UrlCache urlCache;
 
     @Override
     public void recordClick(final Long urlId, final String cacheKey, final ClickRequest click) {
@@ -55,7 +53,7 @@ public class DefaultClickAnalyticsService implements ClickAnalyticsService {
 
         try {
             final var day = analyticsDays.today();
-            applicationTaskExecutor.execute(() -> step(urlId, STEP_CLICK, () -> record(urlId, cacheKey, day, click)));
+            applicationTaskExecutor.execute(() -> step(urlId, STEP_CLICK, () -> record(urlId, day, click)));
         } catch (final RuntimeException exception) {
             log.warn("Click analytics dropped urlId={} exception={}", urlId, exception.getClass().getName());
         }
@@ -70,7 +68,7 @@ public class DefaultClickAnalyticsService implements ClickAnalyticsService {
         }
     }
 
-    private void record(final long urlId, final String cacheKey, final LocalDate day, final ClickRequest click) {
+    private void record(final long urlId, final LocalDate day, final ClickRequest click) {
         final var userAgent = UserAgentClassifier.classify(click.userAgent());
         if (userAgent.bot()) {
             step(urlId, STEP_BOT, () -> linkStatsRepository.incrementDailyStats(urlId, day, 0, 0, 1));
@@ -79,20 +77,10 @@ public class DefaultClickAnalyticsService implements ClickAnalyticsService {
 
         final var newVisitor = uniqueVisitorCounter.isNewVisitor(urlId, day, click);
         if (newVisitor) {
-            step(urlId, STEP_VISIT, () -> recordVisit(urlId, cacheKey));
+            step(urlId, STEP_VISIT, () -> transactionOperations.executeWithoutResult(status -> urlRepository.recordVisit(urlId, LocalDateTime.now())));
         }
         step(urlId, STEP_STATS, () -> linkStatsRepository.incrementDailyStats(urlId, day, 1, newVisitor ? 1 : 0, 0));
         step(urlId, STEP_BREAKDOWN, () -> incrementBreakdown(urlId, day, click, userAgent));
-    }
-
-    private void recordVisit(final long urlId, final String cacheKey) {
-        final var switchedOff = transactionOperations.execute(status -> {
-            urlRepository.recordVisit(urlId, LocalDateTime.now());
-            return urlRepository.deactivateAtVisitLimit(urlId) > 0;
-        });
-        if (Boolean.TRUE.equals(switchedOff)) {
-            urlCache.evict(cacheKey);
-        }
     }
 
     private void incrementBreakdown(final long urlId, final LocalDate day, final ClickRequest click, final UserAgentDetails userAgent) {

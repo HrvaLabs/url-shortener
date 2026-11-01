@@ -25,7 +25,7 @@ public class CreateUrlDto {
   @Size(max = 32, message = "Custom short URL must be 32 characters or fewer")
   @Schema(description = "Custom short URL alias (optional)", example = "my-custom-alias")
   private String shortUrl;
-  @Schema(description = "Maximum number of visits allowed", example = "100")
+  @Schema(description = "How many clicks the link allows: every click counts, not counting bots and HEAD requests", example = "100")
   private Long visitLimit;
   @Schema(description = "Expiration date and time of the URL", example = "2026-12-31T23:59:59Z")
   private LocalDateTime expirationDate;

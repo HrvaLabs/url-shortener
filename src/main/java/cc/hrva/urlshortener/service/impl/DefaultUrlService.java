@@ -303,6 +303,9 @@ public class DefaultUrlService implements UrlService {
         if (!clickCheckService.mayRedirect(url.getId(), url.getLongUrl())) {
             return new UnlockResponse(unavailablePageUrl(place, REASON_BLOCKED));
         }
+        if (openRefused(place, url.getId(), url.getVisitLimit(), click)) {
+            return new UnlockResponse(unavailablePageUrl(place, REASON_LIMIT));
+        }
 
         clickAnalyticsService.recordClick(url.getId(), place.cacheKey(), click.withUnknownReferrer());
         return new UnlockResponse(url.getLongUrl());
@@ -721,10 +724,14 @@ public class DefaultUrlService implements UrlService {
         final var url = findUrlToReveal(place);
 
         if (url.getPasswordHash() == null) {
-            clickAnalyticsService.recordClick(url.getId(), place.cacheKey(), click);
             if (refusedAsBot(url.getVisitLimit(), click)) {
+                clickAnalyticsService.recordClick(url.getId(), place.cacheKey(), click);
                 throw new UrlNotFoundException("URL doesn't exist");
             }
+            if (openRefused(place, url.getId(), url.getVisitLimit(), click)) {
+                throw new UrlNotFoundException("URL doesn't exist");
+            }
+            clickAnalyticsService.recordClick(url.getId(), place.cacheKey(), click);
         }
         return UrlResponse.from(url).publicView();
     }
@@ -868,8 +875,7 @@ public class DefaultUrlService implements UrlService {
                 if (!clickCheckService.mayRedirect(cachedValue.id(), cachedValue.longUrl())) {
                     return unavailable(place, REASON_BLOCKED);
                 }
-                clickAnalyticsService.recordClick(cachedValue.id(), place.cacheKey(), click);
-                return destinationView(place, cachedValue);
+                return open(place, cachedValue, click);
             }
             urlCache.evict(place.cacheKey());
         }
@@ -877,7 +883,8 @@ public class DefaultUrlService implements UrlService {
     }
 
     private View fetchAndRedirectFromDb(final LinkPlace place, final ClickRequest click) {
-        return readTransaction().execute(status -> redirectFromDb(place, click));
+        final var found = Objects.requireNonNull(readTransaction().execute(status -> redirectFromDb(place, click)));
+        return found.link() == null ? found.answer() : open(place, found.link(), click);
     }
 
     private TransactionTemplate readTransaction() {
@@ -886,31 +893,59 @@ public class DefaultUrlService implements UrlService {
         return template;
     }
 
-    private View redirectFromDb(final LinkPlace place, final ClickRequest click) {
+    private Found redirectFromDb(final LinkPlace place, final ClickRequest click) {
         final var urlOpt = urlRepository.findServed(place.domainId(), place.alias());
         if (urlOpt.isEmpty()) {
-            return unavailable(place, REASON_MISSING);
+            return Found.answered(unavailable(place, REASON_MISSING));
         }
         final var url = urlOpt.get();
         final var unavailableReason = unavailableReason(url);
         if (unavailableReason.isPresent()) {
-            return unavailable(place, unavailableReason.get());
+            return Found.answered(unavailable(place, unavailableReason.get()));
         }
         final var response = UrlResponse.from(url);
         if (response.passwordProtected()) {
             urlCache.put(place.cacheKey(), response);
-            return redirectTo(protectedPageUrl(place));
+            return Found.answered(redirectTo(protectedPageUrl(place)));
         }
         if (refusedAsBot(url.getVisitLimit(), click)) {
             clickAnalyticsService.recordClick(url.getId(), place.cacheKey(), click);
-            return unavailable(place, REASON_MISSING);
+            return Found.answered(unavailable(place, REASON_MISSING));
         }
         if (!clickCheckService.mayRedirect(url.getId(), url.getLongUrl())) {
-            return unavailable(place, REASON_BLOCKED);
+            return Found.answered(unavailable(place, REASON_BLOCKED));
         }
         urlCache.put(place.cacheKey(), response);
-        clickAnalyticsService.recordClick(url.getId(), place.cacheKey(), click);
-        return destinationView(place, response);
+        return Found.toOpen(response);
+    }
+
+    private View open(final LinkPlace place, final UrlResponse link, final ClickRequest click) {
+        if (openRefused(place, link.id(), link.visitLimit(), click)) {
+            return unavailable(place, REASON_LIMIT);
+        }
+        clickAnalyticsService.recordClick(link.id(), place.cacheKey(), click);
+        return destinationView(place, link);
+    }
+
+    private boolean openRefused(final LinkPlace place, final long urlId, final Long visitLimit, final ClickRequest click) {
+        if (!hasVisitLimit(visitLimit) || click.head()) {
+            return false;
+        }
+        final var open = Objects.requireNonNull(transactionOperations.execute(status -> consumeOpen(urlId)));
+        if (open != Open.ALLOWED) {
+            urlCache.evict(place.cacheKey());
+        }
+        if (open == Open.REFUSED) {
+            log.info("Open refused, the visit limit is used up urlId={}", urlId);
+        }
+        return open == Open.REFUSED;
+    }
+
+    private Open consumeOpen(final long urlId) {
+        if (urlRepository.consumeOpen(urlId) == 0) {
+            return Open.REFUSED;
+        }
+        return urlRepository.existsByIdAndActiveTrue(urlId) ? Open.ALLOWED : Open.LAST;
     }
 
     private View destinationView(final LinkPlace place, final UrlResponse link) {
@@ -936,7 +971,11 @@ public class DefaultUrlService implements UrlService {
     }
 
     private boolean refusedAsBot(final Long visitLimit, final ClickRequest click) {
-        return visitLimit != null && visitLimit > 0 && clickAnalyticsService.isBot(click);
+        return hasVisitLimit(visitLimit) && clickAnalyticsService.isBot(click);
+    }
+
+    private static boolean hasVisitLimit(final Long visitLimit) {
+        return visitLimit != null && visitLimit > 0;
     }
 
     private static Optional<String> unavailableReason(final Url url) {
@@ -949,7 +988,7 @@ public class DefaultUrlService implements UrlService {
         if (url.getBlockReason() != null || url.getThreatType() != null) {
             return Optional.of(REASON_BLOCKED);
         }
-        if (hasReachedVisitLimit(url.getVisits(), url.getVisitLimit())) {
+        if (hasReachedVisitLimit(url.getOpens(), url.getVisitLimit())) {
             return Optional.of(REASON_LIMIT);
         }
         if (isExpired(url.getExpirationDate())) {
@@ -987,15 +1026,15 @@ public class DefaultUrlService implements UrlService {
     private static boolean isUrlRedirectValid(final UrlResponse response) {
         return response.active()
                 && !isExpired(response.expirationDate())
-                && !hasReachedVisitLimit(response.visits(), response.visitLimit());
+                && !hasReachedVisitLimit(response.opens(), response.visitLimit());
     }
 
     private static boolean isExpired(final LocalDateTime expirationDate) {
         return expirationDate != null && LocalDateTime.now().isAfter(expirationDate);
     }
 
-    private static boolean hasReachedVisitLimit(final Long visits, final Long visitLimit) {
-        return visitLimit != null && visitLimit > 0 && visits != null && visits >= visitLimit;
+    private static boolean hasReachedVisitLimit(final Long opens, final Long visitLimit) {
+        return hasVisitLimit(visitLimit) && opens != null && opens >= visitLimit;
     }
 
     @SuppressWarnings("unchecked")
@@ -1109,7 +1148,7 @@ public class DefaultUrlService implements UrlService {
                 .filter(candidate -> candidate.isWarningPage() == warningPage)
                 .filter(candidate -> Objects.equals(candidate.getExpirationDate(), url.getExpirationDate()))
                 .filter(candidate -> Objects.equals(candidate.getVisitLimit(), url.getVisitLimit()))
-                .filter(candidate -> !isExpired(candidate.getExpirationDate()) && !hasReachedVisitLimit(candidate.getVisits(), candidate.getVisitLimit()))
+                .filter(candidate -> !isExpired(candidate.getExpirationDate()) && !hasReachedVisitLimit(candidate.getOpens(), candidate.getVisitLimit()))
                 .findFirst();
     }
 
@@ -1158,6 +1197,20 @@ public class DefaultUrlService implements UrlService {
     }
 
     private record HeldShape(long campaignId, String shape, String domain) {}
+
+    private enum Open { ALLOWED, LAST, REFUSED }
+
+    private record Found(View answer, UrlResponse link) {
+
+        private static Found answered(final View answer) {
+            return new Found(answer, null);
+        }
+
+        private static Found toOpen(final UrlResponse link) {
+            return new Found(null, link);
+        }
+
+    }
 
     private record BlockState(BlockReason reason, ThreatType threatType, LocalDateTime blockedAt) {
 

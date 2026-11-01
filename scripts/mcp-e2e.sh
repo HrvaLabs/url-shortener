@@ -64,7 +64,8 @@
 # sign-in).
 # Section 30 checks the v2.23 links work as the admin (section 29 ended the user's sessions): a create answers 201 with Location and
 # shortLink (signed in, without an account and with an API key; bulk stays 200); a revoked API key can't be turned on again (no
-# PATCH /activate, PUT active:true or a new expiry is 409) and can be deleted.
+# PATCH /activate, PUT active:true or a new expiry is 409) and can be deleted; a visit limit counts every click but not bots or HEAD, and
+# 20 opens at once of a link limited to 5 give exactly 5 redirects and 15 answers of 410.
 #
 #   scripts/mcp-e2e.sh                         builds the jar, then runs every step
 #   MCP_E2E_SKIP_BUILD=1 scripts/mcp-e2e.sh    reuses target/url-shortener-*.jar
@@ -2508,5 +2509,35 @@ http -X POST "$BASE/api/v1/urls" -H "X-Api-Key: $FINAL_KEY" -H 'Content-Type: ap
 expect_eq "$HTTP_STATUS" 400 "the revoked key creates nothing"
 http -X DELETE "$BASE/api/v1/api-keys/$FINAL_KEY_ID" -H "Authorization: Bearer $ADMIN_JWT"
 expect_eq "$HTTP_STATUS" 204 "the revoked key can be deleted"
+
+section "30c. Visit limits: every click counts, not bots or HEAD, and never more than the limit"
+http -X POST "$BASE/api/v1/urls" -H "Authorization: Bearer $ADMIN_JWT" -H 'Content-Type: application/json' \
+    -d '{"longUrl":"https://e2e-links.com/limited","shortUrl":"e2e-limit-2","visitLimit":2}'
+expect_eq "$HTTP_STATUS $(jq -r .opens <<<"$HTTP_BODY")" "201 0" "a link with visitLimit 2 starts with no opens"
+http -I -A "$BROWSER_USER_AGENT" -H 'CF-Connecting-IP: 198.51.100.200' "$BASE/e2e-limit-2"
+expect_eq "$HTTP_STATUS" 302 "HEAD redirects"
+http -A 'Googlebot/2.1 (+http://www.google.com/bot.html)' -H 'CF-Connecting-IP: 198.51.100.201' "$BASE/e2e-limit-2"
+expect_eq "$HTTP_STATUS" 404 "a bot gets the missing page"
+expect_eq "$(psql_value "select opens from url where short_url = 'e2e-limit-2';")" 0 "neither the HEAD nor the bot used an open"
+for attempt in 1 2; do
+    http -A "$BROWSER_USER_AGENT" -H 'CF-Connecting-IP: 198.51.100.200' "$BASE/e2e-limit-2"
+    expect_eq "$HTTP_STATUS $HTTP_LOCATION" "302 https://e2e-links.com/limited" "click $attempt of the same visitor redirects"
+done
+http -A "$BROWSER_USER_AGENT" -H 'CF-Connecting-IP: 198.51.100.200' "$BASE/e2e-limit-2"
+expect_eq "$HTTP_STATUS" 410 "the third click is 410: a repeat click counts as well"
+wait_until 30 "the visit of e2e-limit-2" link_has_clicks e2e-limit-2 2
+sleep 2
+expect_eq "$(psql_value "select opens || ',' || visits || ',' || active from url where short_url = 'e2e-limit-2';")" "2,1,false" \
+    "2 opens, 1 unique visitor (the analytics count as before), and the link is off"
+
+http -X POST "$BASE/api/v1/urls" -H "Authorization: Bearer $ADMIN_JWT" -H 'Content-Type: application/json' \
+    -d '{"longUrl":"https://e2e-links.com/twenty","shortUrl":"e2e-limit-5","visitLimit":5}'
+expect_eq "$HTTP_STATUS" 201 "a link with visitLimit 5"
+seq 1 20 | xargs -P 20 -I{} curl -s -o /dev/null -w '%{http_code}\n' -A "$BROWSER_USER_AGENT" -H 'CF-Connecting-IP: 198.51.100.{}' \
+    "$BASE/e2e-limit-5" >"$WORK/twenty-opens.txt"
+show "20 opens at once: $(sort "$WORK/twenty-opens.txt" | uniq -c | awk '{print $2 " x" $1}' | paste -sd',' -)"
+expect_eq "$(grep -c '^302$' "$WORK/twenty-opens.txt") $(grep -c '^410$' "$WORK/twenty-opens.txt")" "5 15" \
+    "20 opens at once of a link limited to 5: exactly 5 redirects and 15 answers of 410"
+expect_eq "$(psql_value "select opens || ',' || active from url where short_url = 'e2e-limit-5';")" "5,false" "opens stopped at 5 and the link is off"
 
 section "Done: every step passed"

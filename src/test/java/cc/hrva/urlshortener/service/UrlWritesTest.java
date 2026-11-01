@@ -1,5 +1,10 @@
 package cc.hrva.urlshortener.service;
 
+import java.util.stream.IntStream;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.Executors;
+import java.util.concurrent.CountDownLatch;
+import java.util.ArrayList;
 import cc.hrva.urlshortener.controller.LinkUnavailableView;
 import org.springframework.http.HttpStatus;
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
@@ -268,17 +273,50 @@ class UrlWritesTest {
     }
 
     @Test
+    void twentyOpensAtOnceOfALinkLimitedToFiveRedirectExactlyFive() throws Exception {
+        when(cacheManager.getCache("urls")).thenReturn(new ConcurrentMapCache("urls"));
+        when(appProperties.getFrontendUrl()).thenReturn("https://app.hrva.cc");
+        when(clickCheckService.mayRedirect(anyLong(), any())).thenReturn(true);
+        link(0, 5L);
+        final var start = new CountDownLatch(1);
+        final var executor = Executors.newFixedThreadPool(20);
+        final var views = new ArrayList<View>();
+        try {
+            final var opens = IntStream.range(0, 20)
+                    .mapToObj(attempt -> executor.submit(() -> {
+                        start.await();
+                        return urlService.redirectResultUrl(ALIAS, CLICK);
+                    }))
+                    .toList();
+            start.countDown();
+            for (final var open : opens) {
+                views.add(open.get(30, TimeUnit.SECONDS));
+            }
+        } finally {
+            executor.shutdownNow();
+        }
+
+        assertThat(views).filteredOn(RedirectView.class::isInstance).hasSize(5);
+        assertThat(views).filteredOn(LinkUnavailableView.class::isInstance).hasSize(15)
+                .allSatisfy(view -> assertThat((LinkUnavailableView) view)
+                        .extracting(LinkUnavailableView::status, LinkUnavailableView::reason)
+                        .containsExactly(HttpStatus.GONE, "limit"));
+        assertThat(linkRow()).containsEntry("OPENS", 5L).containsEntry("ACTIVE", false);
+    }
+
+    @Test
     void anEditKeepsAClickAndTheVisitLimitStopThatLandedAfterTheReRead() {
         link(4, 5L);
         visitMeanwhile = () -> {
+            assertThat(urlRepository.consumeOpen(LINK)).isOne();
             assertThat(urlRepository.recordVisit(LINK, VISITED_AT)).isOne();
-            assertThat(urlRepository.deactivateAtVisitLimit(LINK)).isOne();
         };
 
         urlService.updateUrl(UrlUpdateDto.builder().id(LINK).visitLimit(5L).expirationDate(NEW_EXPIRY).build());
 
         assertThat(visitDone).isTrue();
         assertThat(linkRow())
+                .containsEntry("OPENS", 5L)
                 .containsEntry("VISITS", 5L)
                 .containsEntry("LAST_ACCESSED", Timestamp.valueOf(VISITED_AT))
                 .containsEntry("ACTIVE", false)
@@ -377,13 +415,13 @@ class UrlWritesTest {
 
     private void link(final long visits, final Long visitLimit) {
         jdbcTemplate.update("""
-                insert into url (id, long_url, short_url, visits, visit_limit, expiration_date, create_date, active)
-                values (?, 'https://example.com/visited', ?, ?, ?, ?, ?, true)""",
-                LINK, ALIAS, visits, visitLimit, EXPIRES, LocalDateTime.of(2026, 10, 1, 9, 0));
+                insert into url (id, long_url, short_url, visits, opens, visit_limit, expiration_date, create_date, active)
+                values (?, 'https://example.com/visited', ?, ?, ?, ?, ?, ?, true)""",
+                LINK, ALIAS, visits, visitLimit == null ? 0 : visits, visitLimit, EXPIRES, LocalDateTime.of(2026, 10, 1, 9, 0));
     }
 
     private Map<String, Object> linkRow() {
-        return jdbcTemplate.queryForMap("select visits, last_accessed, active, expiration_date, block_reason from url where id = ?", LINK);
+        return jdbcTemplate.queryForMap("select visits, opens, last_accessed, active, expiration_date, block_reason from url where id = ?", LINK);
     }
 
     private static String locationOf(final View view) {
