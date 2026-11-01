@@ -799,6 +799,24 @@ class DefaultModerationServiceTest {
     }
 
     @Test
+    void blockingTheDomainFromAReviewBlocksEverySignInFormHoldOnItAndClosesTheirReviews() {
+        final var reviewed = blocked(89L, "https://verniqindexone.com/cache-trash/", BlockReason.SIGN_IN_FORM, null);
+        final var another = blocked(90L, "https://login.verniqindexone.com/acceso", BlockReason.SIGN_IN_FORM, null);
+        final var campaign = held(91L, "https://verniqindexone.com/wqamhcsom/?r=1&t=2");
+        final var elsewhere = blocked(92L, "https://other-bank.com/login", BlockReason.SIGN_IN_FORM, null);
+
+        moderationService.resolveReview(89L, ReviewAction.BLOCK_DOMAIN, null, ADMIN, "admin");
+
+        assertThat(List.of(reviewed, another, campaign)).allSatisfy(url -> assertThat(url)
+                .extracting(Url::isActive, Url::getBlockReason, Url::getBlockDetail).containsExactly(false, BlockReason.DOMAIN_RULE, "verniqindexone.com"));
+        assertThat(elsewhere.getBlockReason()).isEqualTo(BlockReason.SIGN_IN_FORM);
+        verify(reviewQueueService).resolveOpen(reviewed, ReviewResolution.DOMAIN_BLOCKED, ADMIN);
+        verify(reviewQueueService).resolveOpen(another, ReviewResolution.DOMAIN_BLOCKED, ADMIN);
+        verify(reviewQueueService, never()).resolveOpen(eq(campaign), any(), any());
+        verify(reviewQueueService, never()).resolveOpen(eq(elsewhere), any(), any());
+    }
+
+    @Test
     void trustingTheDomainRestoresALinkHeldForASignInForm() {
         final var url = blocked(88L, "https://login.verniqindexone.com/login", BlockReason.SIGN_IN_FORM, null);
         when(linkCheckService.check("https://login.verniqindexone.com/login")).thenReturn(ALLOWED);

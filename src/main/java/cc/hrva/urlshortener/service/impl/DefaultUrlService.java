@@ -125,6 +125,7 @@ public class DefaultUrlService implements UrlService {
             .nullsLast(OWNER_EMAIL);
     private static final String SYSTEM = "system";
     private static final String REASON_BLOCKED = LinkUnavailableView.BLOCKED;
+    private static final String REASON_CHECKING = LinkUnavailableView.CHECKING;
     private static final String REASON_EXPIRED = LinkUnavailableView.EXPIRED;
     private static final String REASON_LIMIT = LinkUnavailableView.LIMIT;
     private static final String REASON_INACTIVE = LinkUnavailableView.INACTIVE;
@@ -940,6 +941,9 @@ public class DefaultUrlService implements UrlService {
     private static Optional<String> unavailableReason(final Url url) {
         if (url.getDomain() != null && url.getDomain().getStatus() != CustomDomainStatus.ACTIVE) {
             return Optional.of(REASON_DOMAIN);
+        }
+        if (url.getBlockReason() == BlockReason.SIGN_IN_FORM && url.getThreatType() == null) {
+            return Optional.of(REASON_CHECKING);
         }
         if (url.getBlockReason() != null || url.getThreatType() != null) {
             return Optional.of(REASON_BLOCKED);

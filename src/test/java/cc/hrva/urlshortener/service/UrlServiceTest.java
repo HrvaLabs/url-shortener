@@ -1816,10 +1816,17 @@ class UrlServiceTest {
     }
 
     @Test
-    void aLinkHeldForASignInFormAnswersTheHeldPage() {
+    void aLinkHeldForASignInFormAnswersThatItIsBeingChecked() {
         final var url = storedLink().active(false).warningPage(true).blockReason(BlockReason.SIGN_IN_FORM).blockDetail("a password field").build();
 
-        assertThat(redirectOf(url)).isEqualTo(FRONTEND + "/unavailable?s=abc&reason=blocked");
+        assertUnavailable(viewOf(url), "abc", null, "checking");
+    }
+
+    @Test
+    void aSignInFormHoldTheAdminBlockedAnswersBlocked() {
+        final var url = storedLink().active(false).warningPage(true).blockReason(BlockReason.ADMIN).build();
+
+        assertUnavailable(viewOf(url), "abc", null, "blocked");
     }
 
     @Test

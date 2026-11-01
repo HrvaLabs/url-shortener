@@ -24,7 +24,7 @@
           "icon": "shield",
           "items": [
             "When hrva.cc fetches a destination to follow its redirects, see whether it still works or read its preview, it connects only to the address it checked, and checks again on every redirect.",
-            "For some links made without an account that open the warning page, hrva.cc reads the destination page once after the link is made. A page with a sign-in or card form puts the link on hold until an admin checks it."
+            "For some links made without an account that open the warning page, hrva.cc reads the destination page once after the link is made. A page with a sign-in or card form puts the link on hold until an admin checks it. Until then, visitors are told the link is being checked."
           ]
         },
         {

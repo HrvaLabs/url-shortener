@@ -23,6 +23,7 @@ public record LinkUnavailableView(TemplateEngine templateEngine, String frontend
 
     public static final String MISSING = "missing";
     public static final String BLOCKED = "blocked";
+    public static final String CHECKING = "checking";
     public static final String EXPIRED = "expired";
     public static final String LIMIT = "limit";
     public static final String INACTIVE = "inactive";
@@ -35,6 +36,7 @@ public record LinkUnavailableView(TemplateEngine templateEngine, String frontend
     private static final String SLASH = "/";
     private static final Map<String, String> MESSAGES = Map.of(
             BLOCKED, "hrva.cc disabled this link because it led to a site reported for phishing, malware or scams.",
+            CHECKING, "This link is being checked. Try again later.",
             EXPIRED, "This link has expired.",
             LIMIT, "This link has reached its visit limit.",
             INACTIVE, "Its owner has turned this link off.",

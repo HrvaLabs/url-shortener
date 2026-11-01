@@ -21,6 +21,7 @@ class LinkUnavailableViewTest {
     @CsvSource(delimiter = '|', value = {
             "missing|404|There's no hrva.cc link with this name.",
             "blocked|410|hrva.cc disabled this link because it led to a site reported for phishing, malware or scams.",
+            "checking|410|This link is being checked. Try again later.",
             "expired|410|This link has expired.",
             "limit|410|This link has reached its visit limit.",
             "inactive|410|Its owner has turned this link off.",
