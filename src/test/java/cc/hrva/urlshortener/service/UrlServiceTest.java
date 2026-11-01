@@ -3807,6 +3807,20 @@ class UrlServiceTest {
     }
 
     @Test
+    void theRedirectsDatabaseWorkGivesUpAfterThreeSeconds() {
+        final var url = Url.builder().id(7L).shortUrl("abc").longUrl("https://example.com/a").visits(0L).visitLimit(2L).active(true).build();
+        when(urlRepository.findServed(null, "abc")).thenReturn(Optional.of(url));
+        when(urlRepository.consumeOpen(7L)).thenReturn(1);
+
+        urlServiceWithMeters().redirectResultUrl("abc", CLICK);
+
+        verify(withoutTransactions).getTransaction(org.mockito.ArgumentMatchers.argThat(definition -> definition != null
+                && definition.isReadOnly() && definition.getTimeout() == 3));
+        verify(withoutTransactions).getTransaction(org.mockito.ArgumentMatchers.argThat(definition -> definition != null
+                && !definition.isReadOnly() && definition.getTimeout() == 3));
+    }
+
+    @Test
     void aLimitedLinkFromTheDatabaseUsesAnOpenAfterItsReadAndBeforeItRedirects() {
         final var url = Url.builder().id(7L).shortUrl("abc").longUrl("https://example.com/a").visits(0L).visitLimit(2L).active(true).build();
         when(urlRepository.findServed(null, "abc")).thenReturn(Optional.of(url));

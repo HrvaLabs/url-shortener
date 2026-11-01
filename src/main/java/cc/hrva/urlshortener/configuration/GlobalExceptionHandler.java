@@ -45,8 +45,10 @@ import cc.hrva.urlshortener.exception.NotificationChannelNotFoundException;
 import cc.hrva.urlshortener.exception.NotificationTestUnavailableException;
 import cc.hrva.urlshortener.exception.UrlNotFoundException;
 import cc.hrva.urlshortener.exception.UserNotFoundException;
+import cc.hrva.urlshortener.util.DatabaseOutages;
 import cc.hrva.urlshortener.util.ProblemResponses;
 import jakarta.validation.ConstraintViolationException;
+import java.time.Duration;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -58,6 +60,9 @@ import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.exception.ExceptionUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataAccessResourceFailureException;
+import org.springframework.dao.QueryTimeoutException;
+import org.springframework.dao.TransientDataAccessResourceException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
@@ -68,6 +73,7 @@ import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.DisabledException;
+import org.springframework.transaction.CannotCreateTransactionException;
 import org.springframework.transaction.TransactionSystemException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.HttpMediaTypeNotSupportedException;
@@ -86,6 +92,7 @@ import tools.jackson.databind.exc.InvalidFormatException;
 public class GlobalExceptionHandler {
 
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
+    private static final Duration DATABASE_RETRY = Duration.ofMinutes(1);
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ProblemDetail> handleValidation(final MethodArgumentNotValidException ex) {
@@ -120,6 +127,9 @@ public class GlobalExceptionHandler {
         Throwable cause = ex.getRootCause();
         if (cause instanceof ConstraintViolationException cve) {
             return violations(cve);
+        }
+        if (DatabaseOutages.isOutage(ex)) {
+            return databaseUnreachable(ex);
         }
         log.error("Unhandled transaction exception", ex);
         return ProblemResponses.entity(HttpStatus.INTERNAL_SERVER_ERROR, "Internal server error");
@@ -371,6 +381,19 @@ public class GlobalExceptionHandler {
                 .body(ProblemResponses.of(HttpStatus.TOO_MANY_REQUESTS, safeMessage(ex)));
     }
 
+    @ExceptionHandler({CannotCreateTransactionException.class, DataAccessResourceFailureException.class, QueryTimeoutException.class,
+            TransientDataAccessResourceException.class})
+    public ResponseEntity<ProblemDetail> handleDatabaseUnreachable(final Exception ex) {
+        return databaseUnreachable(ex);
+    }
+
+    private static ResponseEntity<ProblemDetail> databaseUnreachable(final Exception ex) {
+        log.warn("Database unreachable exception={}", ex.getClass().getName());
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .header(HttpHeaders.RETRY_AFTER, ProblemResponses.retryAfterSeconds(DATABASE_RETRY))
+                .body(ProblemResponses.of(HttpStatus.SERVICE_UNAVAILABLE, DatabaseOutages.UNREACHABLE));
+    }
+
     @ExceptionHandler(ServiceBusyException.class)
     public ResponseEntity<ProblemDetail> handleServiceBusy(final ServiceBusyException ex) {
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
@@ -446,6 +469,9 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ProblemDetail> handleGeneric(final Exception ex) {
+        if (DatabaseOutages.isOutage(ex)) {
+            return databaseUnreachable(ex);
+        }
         log.error("Unhandled exception", ex);
         return ProblemResponses.entity(HttpStatus.INTERNAL_SERVER_ERROR, "Internal server error");
     }

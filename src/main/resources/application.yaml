@@ -1,4 +1,8 @@
 spring:
+  datasource:
+    hikari:
+      connection-timeout: 3000
+      validation-timeout: 2000
   liquibase:
     change-log: classpath:/db/dbchangelog.xml
   jpa:

@@ -68,7 +68,8 @@
 # 20 opens at once of a link limited to 5 give exactly 5 redirects and 15 answers of 410; a short link's query is forwarded to the
 # destination (its own parameters win, qr dropped, the fragment kept, the host never changes); with Redis paused a create without an
 # account and a link-password unlock are 503 with Retry-After while signed-in and API-key creates go on, and a real unlock limit stays 429;
-# the security chain denies by default: signed-in routes under a public pattern, wrong methods and unknown paths are 401 without a sign-in.
+# the security chain denies by default: signed-in routes under a public pattern, wrong methods and unknown paths are 401 without a sign-in;
+# with Postgres paused an uncached link and a signed-in request answer 503 within 8 seconds while a cached link still redirects.
 #
 #   scripts/mcp-e2e.sh                         builds the jar, then runs every step
 #   MCP_E2E_SKIP_BUILD=1 scripts/mcp-e2e.sh    reuses target/url-shortener-*.jar
@@ -2613,5 +2614,41 @@ for endpoint in "/api/v1/public/settings" "/api/changelog" "/.well-known/securit
 done
 http -I "$BASE/api/v1/urls/e2e-query/peek"
 expect_eq "$HTTP_STATUS" 200 "and HEAD of a public GET too"
+
+section "30g. Postgres paused: an uncached link answers 503 within seconds, a cached one still redirects"
+for alias in e2e-db-cached e2e-db-uncached; do
+    http -X POST "$BASE/api/v1/urls" -H "Authorization: Bearer $ADMIN_JWT" -H 'Content-Type: application/json' \
+        -d "{\"longUrl\":\"https://e2e-links.com/$alias\",\"shortUrl\":\"$alias\"}"
+    expect_eq "$HTTP_STATUS" 201 "a link $alias"
+done
+http -A "$BROWSER_USER_AGENT" "$BASE/e2e-db-cached"
+expect_eq "$HTTP_STATUS" 302 "e2e-db-cached redirects"
+docker exec "$REDIS_CONTAINER" redis-cli --raw del "urls::e2e-db-uncached" >/dev/null
+expect_eq "$(cache_entries e2e-db-cached) $(cache_entries e2e-db-uncached)" "1 0" "one link cached, the other not"
+docker pause "$POSTGRES_CONTAINER" >/dev/null
+started=$SECONDS
+http -A "$BROWSER_USER_AGENT" "$BASE/e2e-db-uncached"
+waited=$(( SECONDS - started ))
+show "the uncached link with Postgres paused -> $HTTP_STATUS after ${waited}s"
+expect_eq "$HTTP_STATUS $(header_value retry-after) $(jq -r .detail <<<"$HTTP_BODY")" \
+    "503 60 hrva.cc can't reach its database right now. Try again in a minute." "an uncached link is 503 with Retry-After"
+(( waited <= 8 )) || fail "the uncached link took ${waited}s, more than 8"
+ok "it answered within ${waited}s"
+http -A "$BROWSER_USER_AGENT" "$BASE/e2e-db-cached"
+expect_eq "$HTTP_STATUS $HTTP_LOCATION" "302 https://e2e-links.com/e2e-db-cached" "a cached link still redirects"
+started=$SECONDS
+http "$BASE/api/v1/users/me" -H "Authorization: Bearer $ADMIN_JWT"
+waited=$(( SECONDS - started ))
+show "a signed-in request with Postgres paused -> $HTTP_STATUS after ${waited}s"
+expect_eq "$HTTP_STATUS $(header_value retry-after)" "503 60" "the session lookup in JwtFilter is 503 too"
+(( waited <= 8 )) || fail "the signed-in request took ${waited}s, more than 8"
+ok "it answered within ${waited}s"
+docker unpause "$POSTGRES_CONTAINER" >/dev/null
+uncached_redirects_again() {
+    http -A "$BROWSER_USER_AGENT" "$BASE/e2e-db-uncached"
+    [[ $HTTP_STATUS == 302 ]]
+}
+wait_until 30 "the uncached link after Postgres came back" uncached_redirects_again
+ok "with Postgres back the uncached link redirects again"
 
 section "Done: every step passed"

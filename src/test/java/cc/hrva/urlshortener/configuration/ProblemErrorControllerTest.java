@@ -39,6 +39,19 @@ class ProblemErrorControllerTest {
     }
 
     @Test
+    void aFilterThatCouldNotReachTheDatabaseIsA503() {
+        final var request = errorRequest(500, null, "/api/v1/users/me");
+        request.setAttribute(RequestDispatcher.ERROR_EXCEPTION, new org.springframework.transaction.CannotCreateTransactionException("no connection",
+                new java.sql.SQLTransientConnectionException("request timed out after 3000ms")));
+
+        final var answer = controller.error(request);
+
+        assertThat(answer.getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
+        assertThat(answer.getHeaders().getFirst("Retry-After")).isEqualTo("60");
+        assertThat(answer.getBody().getDetail()).isEqualTo("hrva.cc can't reach its database right now. Try again in a minute.");
+    }
+
+    @Test
     void anErrorWithoutAStatusIsAServerError() {
         final var answer = controller.error(new MockHttpServletRequest("GET", "/error"));
 

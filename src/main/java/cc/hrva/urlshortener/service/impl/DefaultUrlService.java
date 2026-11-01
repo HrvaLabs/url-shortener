@@ -144,6 +144,7 @@ public class DefaultUrlService implements UrlService {
     private static final String ANONYMOUS_CREATE_UNAVAILABLE = "Links without an account can't be made right now. Try again in a minute, or sign in.";
     private static final String UNLOCK_UNAVAILABLE = "Password checks are paused for a moment. Try again in a minute.";
     private static final Duration LIMITER_RETRY = Duration.ofMinutes(1);
+    private static final int REDIRECT_DATABASE_SECONDS = 3;
     private static final String ROLE_ADMIN = "ROLE_ADMIN";
     private static final String BLOCKED_WHILE_EDITING = "This link was blocked while you were editing it. Reload and try again.";
     private static final int MAX_GENERATED_ALIAS_ATTEMPTS = 10;
@@ -895,8 +896,14 @@ public class DefaultUrlService implements UrlService {
     }
 
     private TransactionTemplate readTransaction() {
-        final var template = new TransactionTemplate(transactionManager);
+        final var template = redirectTransaction();
         template.setReadOnly(true);
+        return template;
+    }
+
+    private TransactionTemplate redirectTransaction() {
+        final var template = new TransactionTemplate(transactionManager);
+        template.setTimeout(REDIRECT_DATABASE_SECONDS);
         return template;
     }
 
@@ -938,7 +945,7 @@ public class DefaultUrlService implements UrlService {
         if (!hasVisitLimit(visitLimit) || click.head()) {
             return false;
         }
-        final var open = Objects.requireNonNull(transactionOperations.execute(status -> consumeOpen(urlId)));
+        final var open = Objects.requireNonNull(redirectTransaction().execute(status -> consumeOpen(urlId)));
         if (open != Open.ALLOWED) {
             urlCache.evict(place.cacheKey());
         }

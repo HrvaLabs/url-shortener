@@ -43,6 +43,19 @@ class GlobalExceptionHandlerTest {
     }
 
     @Test
+    void aDatabaseThatDoesNotAnswerIsA503WithRetryAfterAndNoInternals(final CapturedOutput output) throws Exception {
+        for (final var probe : java.util.List.of("/probe/no-connection", "/probe/socket-timeout", "/probe/statement-timeout", "/probe/rollback-after-outage")) {
+            mockMvc.perform(get(probe))
+                    .andExpect(status().isServiceUnavailable())
+                    .andExpect(header().string("Retry-After", "60"))
+                    .andExpect(jsonPath("$.detail").value("hrva.cc can't reach its database right now. Try again in a minute."));
+        }
+
+        assertThat(output).contains("Database unreachable exception=").doesNotContain("Unhandled").doesNotContain("\tat ")
+                .doesNotContain("HikariPool-1").doesNotContain("backend");
+    }
+
+    @Test
     void aQueryValueOfTheWrongTypeIsABadRequestNamingTheParameter(final CapturedOutput output) throws Exception {
         mockMvc.perform(get("/probe").param("days", "abc"))
                 .andExpect(status().isBadRequest())
@@ -185,6 +198,30 @@ class GlobalExceptionHandlerTest {
             errors.put("alias", "Use letters and digits.");
             errors.put("longUrl", "Enter a URL.");
             throw new FieldValidationException(errors);
+        }
+
+        @GetMapping("/probe/no-connection")
+        String probeNoConnection() {
+            throw new org.springframework.transaction.CannotCreateTransactionException("Could not open JPA EntityManager for transaction",
+                    new java.sql.SQLTransientConnectionException("HikariPool-1 - Connection is not available, request timed out after 3000ms."));
+        }
+
+        @GetMapping("/probe/socket-timeout")
+        String probeSocketTimeout() {
+            throw new org.springframework.dao.DataAccessResourceFailureException("An I/O error occurred while sending to the backend.",
+                    new java.net.SocketTimeoutException("Read timed out"));
+        }
+
+        @GetMapping("/probe/statement-timeout")
+        String probeStatementTimeout() {
+            throw new org.springframework.dao.QueryTimeoutException("canceling statement due to user request");
+        }
+
+        @GetMapping("/probe/rollback-after-outage")
+        String probeRollbackAfterOutage() {
+            final var rollback = new org.springframework.transaction.TransactionSystemException("Could not roll back JPA transaction");
+            rollback.initApplicationException(new org.springframework.dao.DataAccessResourceFailureException("This connection has been closed."));
+            throw rollback;
         }
 
         @GetMapping("/probe/rate-limit")
