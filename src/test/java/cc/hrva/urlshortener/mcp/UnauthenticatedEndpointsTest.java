@@ -239,6 +239,10 @@ class UnauthenticatedEndpointsTest {
         final var outputBeforeRequests = output.length();
 
         mockMvc.perform(post("/some-alias"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.detail").value("Sign in to continue."))
+                .andExpect(this::hasNoJavaInternals);
+        mockMvc.perform(post("/some-alias").header(HttpHeaders.AUTHORIZATION, "Bearer " + appJwt))
                 .andExpect(status().isMethodNotAllowed())
                 .andExpect(header().string(HttpHeaders.ALLOW, containsString("GET")))
                 .andExpect(jsonPath("$.detail").value("Method not allowed"))

@@ -140,12 +140,12 @@ class PublicSettingsEndpointSecurityTest {
     }
 
     @Test
-    void onlyGetIsAnswered() throws Exception {
+    void onlyGetIsPublic() throws Exception {
         mockMvc.perform(post(PUBLIC_SETTINGS))
-                .andExpect(status().isMethodNotAllowed())
-                .andExpect(header().string(HttpHeaders.ALLOW, "GET"));
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.detail").value("Sign in to continue."));
         mockMvc.perform(delete(PUBLIC_SETTINGS))
-                .andExpect(status().isMethodNotAllowed());
+                .andExpect(status().isUnauthorized());
 
         verifyNoInteractions(settingsService);
     }

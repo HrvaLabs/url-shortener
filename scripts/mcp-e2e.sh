@@ -67,7 +67,8 @@
 # PATCH /activate, PUT active:true or a new expiry is 409) and can be deleted; a visit limit counts every click but not bots or HEAD, and
 # 20 opens at once of a link limited to 5 give exactly 5 redirects and 15 answers of 410; a short link's query is forwarded to the
 # destination (its own parameters win, qr dropped, the fragment kept, the host never changes); with Redis paused a create without an
-# account and a link-password unlock are 503 with Retry-After while signed-in and API-key creates go on, and a real unlock limit stays 429.
+# account and a link-password unlock are 503 with Retry-After while signed-in and API-key creates go on, and a real unlock limit stays 429;
+# the security chain denies by default: signed-in routes under a public pattern, wrong methods and unknown paths are 401 without a sign-in.
 #
 #   scripts/mcp-e2e.sh                         builds the jar, then runs every step
 #   MCP_E2E_SKIP_BUILD=1 scripts/mcp-e2e.sh    reuses target/url-shortener-*.jar
@@ -2599,5 +2600,18 @@ unlock_e2e_locked 203.0.113.82 wrong-pw
 expect_eq "$HTTP_STATUS" 403 "the 10th wrong one is still 403"
 unlock_e2e_locked 203.0.113.82 secret-pw
 expect_eq "$HTTP_STATUS $(header_value retry-after)" "429 900" "a real limit stays 429 with Retry-After 900"
+
+section "30f. Deny by default: only the listed public routes answer without a sign-in"
+for endpoint in "GET /api/v1/urls/export" "GET /api/v1/urls/tags" "GET /api/v1/urls/all" "POST /api/v1/auth/2fa/setup" "GET /actuator" \
+        "PUT /e2e-query" "POST /api/v1/public/settings" "GET /api/v1/public/nothing-here" "DELETE /api/v1/urls/1"; do
+    http -X "${endpoint%% *}" "$BASE${endpoint#* }"
+    expect_eq "$HTTP_STATUS $(jq -r .detail <<<"$HTTP_BODY")" "401 Sign in to continue." "$endpoint without a sign-in is 401"
+done
+for endpoint in "/api/v1/public/settings" "/api/changelog" "/.well-known/security.txt" "/api/v1/urls/e2e-query/peek"; do
+    http "$BASE$endpoint"
+    expect_eq "$HTTP_STATUS" 200 "GET $endpoint stays public"
+done
+http -I "$BASE/api/v1/urls/e2e-query/peek"
+expect_eq "$HTTP_STATUS" 200 "and HEAD of a public GET too"
 
 section "Done: every step passed"

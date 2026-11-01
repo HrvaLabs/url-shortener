@@ -1,7 +1,5 @@
 package cc.hrva.urlshortener.configuration;
 
-import cc.hrva.urlshortener.controller.ReportController;
-import cc.hrva.urlshortener.controller.UnsubscribeController;
 import cc.hrva.urlshortener.security.AccessAnswers;
 import cc.hrva.urlshortener.security.ApiKeyRateLimitFilter;
 import cc.hrva.urlshortener.security.BcryptPasswords;
@@ -10,6 +8,7 @@ import cc.hrva.urlshortener.security.OAuth2LoginFailureHandler;
 import cc.hrva.urlshortener.security.OAuth2LoginSuccessHandler;
 import cc.hrva.urlshortener.security.OAuth2LoginUserService;
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
+import jakarta.servlet.DispatcherType;
 import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Stream;
@@ -74,36 +73,23 @@ public class SecurityConfiguration {
     public SecurityFilterChain filterChain(final HttpSecurity http) throws Exception {
         http.csrf(AbstractHttpConfigurer::disable)
                 .cors(Customizer.withDefaults())
-                .authorizeHttpRequests(authorizeRequests ->
-                        authorizeRequests
-                                .requestMatchers(
-                                        "/api/v1/auth/**",
-                                        "/api/v1/urls/**",
-                                        "/api/v1/public/**",
-                                        "/api/changelog",
-                                        "/oauth2/**",
-                                        "/login/**",
-                                        "/swagger-ui/**",
-                                        "/v3/api-docs/**",
-                                        "/.well-known/security.txt",
-                                        "/",
-                                        "/*",
-                                        "/*/"
-                                )
-                                .permitAll()
-                                .requestMatchers(HttpMethod.POST, ReportController.REPORTS_ENDPOINT)
-                                .permitAll()
-                                .requestMatchers(UnsubscribeController.UNSUBSCRIBE_ENDPOINT)
-                                .permitAll()
-                                .requestMatchers("/actuator/health", "/actuator/health/liveness", "/actuator/health/readiness")
-                                .permitAll()
-                                .requestMatchers("/actuator/**", "/api/v1/admin/**")
-                                .hasRole("ADMIN")
-                                .requestMatchers("/api/v1/connect/**")
-                                .hasAnyRole("ADMIN", "USER")
-                                .anyRequest()
-                                .authenticated()
-                ).exceptionHandling(exceptionHandling ->
+                .authorizeHttpRequests(authorizeRequests -> {
+                    authorizeRequests
+                            .dispatcherTypeMatchers(DispatcherType.ERROR)
+                            .permitAll()
+                            .requestMatchers(HttpMethod.GET, "/actuator/health")
+                            .permitAll()
+                            .requestMatchers("/actuator", "/actuator/**", "/api/v1/admin/**")
+                            .hasRole("ADMIN")
+                            .requestMatchers("/api/v1/connect/**")
+                            .hasAnyRole("ADMIN", "USER")
+                            .requestMatchers(PublicRoutes.SIGNED_IN_UNDER_A_PUBLIC_PATTERN.toArray(String[]::new))
+                            .authenticated();
+                    PublicRoutes.permit(authorizeRequests);
+                    authorizeRequests
+                            .anyRequest()
+                            .authenticated();
+                }).exceptionHandling(exceptionHandling ->
                         exceptionHandling
                                 .authenticationEntryPoint(AccessAnswers.notSignedIn())
                                 .accessDeniedHandler(AccessAnswers.denied())

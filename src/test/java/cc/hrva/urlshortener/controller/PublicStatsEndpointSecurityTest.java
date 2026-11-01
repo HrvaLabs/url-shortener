@@ -136,20 +136,20 @@ class PublicStatsEndpointSecurityTest {
     }
 
     @Test
-    void onlyGetIsAnswered() throws Exception {
+    void onlyGetIsPublic() throws Exception {
         mockMvc.perform(post(PUBLIC_STATS))
-                .andExpect(status().isMethodNotAllowed())
-                .andExpect(header().string(HttpHeaders.ALLOW, "GET"));
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.detail").value("Sign in to continue."));
         mockMvc.perform(delete(PUBLIC_STATS))
-                .andExpect(status().isMethodNotAllowed());
+                .andExpect(status().isUnauthorized());
 
         verifyNoInteractions(publicStatsService, rateLimiter);
     }
 
     @Test
-    void otherPathsUnderPublicAreNotFound() throws Exception {
+    void otherPathsUnderPublicAreNotPublic() throws Exception {
         mockMvc.perform(get("/api/v1/public/stats/links"))
-                .andExpect(status().isNotFound());
+                .andExpect(status().isUnauthorized());
 
         verifyNoInteractions(publicStatsService);
     }
