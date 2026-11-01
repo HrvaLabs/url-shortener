@@ -92,9 +92,26 @@ class DefaultSuspiciousUrlServiceTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"https://www.amazon.de/dp/B0CX23V2ZK", "https://www.ebay.co.uk/itm/1234", "https://www.olx.pl/oferta"})
-    void trustsABrandThatAcceptsAnyEndingUnderEachCountryEnding(final String longUrl) {
+    @ValueSource(strings = {"https://www.amazon.de/dp/B0CX23V2ZK", "https://www.ebay.co.uk/itm/1234", "https://www.olx.pl/oferta",
+            "https://www.google.hr/maps", "https://www.airbnb.it/rooms/1", "https://www.vinted.hr/items/1", "https://www.dhl.de/de/privatkunden.html",
+            "https://www.olx.ba/artikal/1"})
+    void trustsEachListedCountryDomainOfABrand(final String longUrl) {
         assertThat(suspiciousUrlService.findReasons(longUrl)).isEmpty();
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            "https://amazon.xyz/, imitates amazon",
+            "https://google.com.evil.io/, imitates google",
+            "https://amazon.hr/, imitates amazon",
+            "https://ebay.me/, imitates ebay",
+            "https://dhl.hr/track, imitates dhl",
+            "https://vinted.info/, imitates vinted",
+            "https://airbnb.com.de/, imitates airbnb",
+            "https://olx.hr/, imitates olx"
+    })
+    void aBrandOnAnEndingItsOwnerDoesNotListIsALookalike(final String longUrl, final String reason) {
+        assertThat(suspiciousUrlService.findReasons(longUrl)).contains(reason);
     }
 
     @Test

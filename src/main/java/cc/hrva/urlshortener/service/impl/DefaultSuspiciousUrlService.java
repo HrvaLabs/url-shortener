@@ -22,8 +22,6 @@ import org.springframework.stereotype.Service;
 @Service
 public class DefaultSuspiciousUrlService implements SuspiciousUrlService {
 
-    private static final String ANY_ENDING = "*";
-
     private static final Map<String, Set<String>> BRAND_DOMAINS = Map.ofEntries(
             Map.entry("njuskalo", Set.of("njuskalo.hr")),
             Map.entry("jofogas", Set.of("jofogas.hu")),
@@ -33,19 +31,33 @@ public class DefaultSuspiciousUrlService implements SuspiciousUrlService {
             Map.entry("icloud", Set.of("icloud.com")),
             Map.entry("microsoft", Set.of("microsoft.com")),
             Map.entry("outlook", Set.of("outlook.com")),
-            Map.entry("google", Set.of(ANY_ENDING)),
+            Map.entry("google", Set.of("google.com", "google.hr", "google.si", "google.ba", "google.rs", "google.me", "google.mk",
+                    "google.al", "google.bg", "google.ro", "google.hu", "google.sk", "google.cz", "google.pl", "google.at", "google.de",
+                    "google.ch", "google.li", "google.it", "google.fr", "google.es", "google.pt", "google.be", "google.nl", "google.lu",
+                    "google.co.uk", "google.ie", "google.dk", "google.se", "google.no", "google.fi", "google.is", "google.ee", "google.lv",
+                    "google.lt", "google.gr", "google.com.cy", "google.com.mt", "google.com.tr", "google.com.ua", "google.ca",
+                    "google.com.mx", "google.com.br", "google.com.ar", "google.com.au", "google.co.nz", "google.co.in", "google.co.jp",
+                    "google.co.kr", "google.co.za", "google.ae")),
             Map.entry("gmail", Set.of("gmail.com")),
             Map.entry("facebook", Set.of("facebook.com")),
             Map.entry("instagram", Set.of("instagram.com")),
             Map.entry("whatsapp", Set.of("whatsapp.com", "whatsapp.net")),
             Map.entry("netflix", Set.of("netflix.com")),
-            Map.entry("amazon", Set.of(ANY_ENDING)),
+            Map.entry("amazon", Set.of("amazon.com", "amazon.de", "amazon.co.uk", "amazon.fr", "amazon.it", "amazon.es", "amazon.nl",
+                    "amazon.pl", "amazon.se", "amazon.com.be", "amazon.ca", "amazon.com.mx", "amazon.com.br", "amazon.com.au",
+                    "amazon.co.jp", "amazon.in", "amazon.com.tr", "amazon.ae", "amazon.sa", "amazon.sg", "amazon.eg", "amazon.cn")),
             Map.entry("booking", Set.of("booking.com")),
-            Map.entry("airbnb", Set.of(ANY_ENDING)),
-            Map.entry("vinted", Set.of(ANY_ENDING)),
-            Map.entry("ebay", Set.of(ANY_ENDING)),
-            Map.entry("olx", Set.of(ANY_ENDING)),
-            Map.entry("dhl", Set.of(ANY_ENDING)),
+            Map.entry("airbnb", Set.of("airbnb.com", "airbnb.co.uk", "airbnb.de", "airbnb.at", "airbnb.ch", "airbnb.fr", "airbnb.it",
+                    "airbnb.es", "airbnb.pt", "airbnb.nl", "airbnb.be", "airbnb.ie", "airbnb.dk", "airbnb.se", "airbnb.no", "airbnb.fi",
+                    "airbnb.pl", "airbnb.gr", "airbnb.ca", "airbnb.mx", "airbnb.com.br", "airbnb.com.au", "airbnb.co.in", "airbnb.jp")),
+            Map.entry("vinted", Set.of("vinted.com", "vinted.hr", "vinted.de", "vinted.at", "vinted.fr", "vinted.it", "vinted.es",
+                    "vinted.pt", "vinted.nl", "vinted.be", "vinted.lu", "vinted.co.uk", "vinted.ie", "vinted.pl", "vinted.cz", "vinted.sk",
+                    "vinted.hu", "vinted.ro", "vinted.lt", "vinted.se", "vinted.dk", "vinted.fi", "vinted.gr")),
+            Map.entry("ebay", Set.of("ebay.com", "ebay.de", "ebay.at", "ebay.ch", "ebay.co.uk", "ebay.ie", "ebay.fr", "ebay.it",
+                    "ebay.es", "ebay.nl", "ebay.be", "ebay.pl", "ebay.ca", "ebay.com.au")),
+            Map.entry("olx", Set.of("olx.com", "olx.ba", "olx.pl", "olx.ro", "olx.bg", "olx.pt", "olx.ua", "olx.kz", "olx.uz",
+                    "olx.com.br", "olx.in")),
+            Map.entry("dhl", Set.of("dhl.com", "dhl.de")),
             Map.entry("coinbase", Set.of("coinbase.com")),
             Map.entry("binance", Set.of("binance.com")));
 
@@ -296,10 +308,7 @@ public class DefaultSuspiciousUrlService implements SuspiciousUrlService {
     }
 
     private static boolean isOfficialDomainOf(final String brand, final String domain) {
-        final var official = BRAND_DOMAINS.get(brand);
-        return official.contains(domain)
-                || official.contains(ANY_ENDING) && domain.split("\\.")[0].equals(brand)
-                && DomainNames.isUnderRegistrySuffix(domain) && DomainNames.registryDomain(domain).equals(domain);
+        return BRAND_DOMAINS.get(brand).contains(domain);
     }
 
     private static boolean hasLure(final String[] labels, final String longUrl) {

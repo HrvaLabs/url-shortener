@@ -235,6 +235,11 @@ class DefaultLinkCheckServiceTest {
     }
 
     @Test
+    void aBrandOnAnEndingItsOwnerDoesNotListIsFlaggedForReviewNotBlocked() {
+        assertThat(withRealHeuristics().check("https://amazon.hr/")).isEqualTo(new LinkVerdict(Outcome.FLAG, List.of("imitates amazon"), null, null));
+    }
+
+    @Test
     void outlookWithALoginHintIsNotBlocked() {
         final var url = "https://outlook.office365.com/owa/?login_hint=x";
         heuristics(url, "imitates outlook", LURE);
