@@ -56,7 +56,7 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info,metrics,caches,env,beans
+        include: health
   endpoint:
     health:
       show-details: when-authorized
