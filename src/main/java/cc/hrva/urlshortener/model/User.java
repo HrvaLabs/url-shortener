@@ -15,6 +15,7 @@ import org.hibernate.validator.constraints.Length;
 
 import java.time.Instant;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
@@ -111,7 +112,20 @@ public class User {
     }
 
     public boolean sessionEndedFor(final Instant tokenIssuedAt) {
+        return endedByCutOff(tokenIssuedAt) || issuedBeforeTheAccount(tokenIssuedAt);
+    }
+
+    public boolean needsTokenIssueTime() {
+        return tokensValidAfter != null || createDate != null;
+    }
+
+    private boolean endedByCutOff(final Instant tokenIssuedAt) {
         return tokensValidAfter != null && (tokenIssuedAt == null || tokenIssuedAt.isBefore(tokensValidAfter.toInstant(ZoneOffset.UTC)));
+    }
+
+    private boolean issuedBeforeTheAccount(final Instant tokenIssuedAt) {
+        return createDate != null && tokenIssuedAt != null
+                && tokenIssuedAt.isBefore(createDate.atZone(ZoneId.systemDefault()).toInstant().truncatedTo(ChronoUnit.SECONDS));
     }
 
     public static LocalDateTime sessionCutOffOf(final Instant endedAt) {

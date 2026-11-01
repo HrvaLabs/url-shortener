@@ -60,7 +60,7 @@ public class JwtFilter extends GenericFilterBean {
   }
 
   private boolean sessionEnded(final User user, final String jwt) {
-    return user.getTokensValidAfter() != null && user.sessionEndedFor(tokenProvider.issuedAt(jwt).orElse(null));
+    return user.needsTokenIssueTime() && user.sessionEndedFor(tokenProvider.issuedAt(jwt).orElse(null));
   }
 
   private static boolean isPublic(final HttpServletRequest request) {

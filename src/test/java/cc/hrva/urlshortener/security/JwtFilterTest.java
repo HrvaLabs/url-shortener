@@ -111,6 +111,45 @@ class JwtFilterTest {
     }
 
     @Test
+    void aTokenIssuedBeforeTheAccountWasCreatedIsRefusedLikeAnEndedSession() throws Exception {
+        final var user = User.builder().id(2L).active(true)
+                .createDate(java.time.LocalDateTime.ofInstant(ISSUED_AT.plusSeconds(60), java.time.ZoneId.systemDefault())).build();
+        signedInAs("reused@example.com", user);
+
+        jwtFilter.doFilter(request, response, filterChain);
+
+        assertThat(response.getStatus()).isEqualTo(401);
+        assertThat(response.getContentAsString()).isEqualTo("{\"error\":\"Your session ended. Sign in again.\"}");
+        verify(filterChain, never()).doFilter(any(), any());
+    }
+
+    @Test
+    void aTokenIssuedBeforeTheAccountWasCreatedIsIgnoredOnAPublicRead() throws Exception {
+        final var user = User.builder().id(2L).active(true)
+                .createDate(java.time.LocalDateTime.ofInstant(ISSUED_AT.plusSeconds(60), java.time.ZoneId.systemDefault())).build();
+        signedInAs("reused@example.com", user);
+        request.setRequestURI("/api/changelog");
+
+        jwtFilter.doFilter(request, response, filterChain);
+
+        assertThat(response.getStatus()).isEqualTo(200);
+        assertThat(SecurityContextHolder.getContext().getAuthentication()).isNull();
+        verify(filterChain).doFilter(request, response);
+    }
+
+    @Test
+    void aTokenIssuedInTheSecondTheAccountWasCreatedWorks() throws Exception {
+        final var user = User.builder().id(2L).active(true)
+                .createDate(java.time.LocalDateTime.ofInstant(ISSUED_AT.plusMillis(700), java.time.ZoneId.systemDefault())).build();
+        signedInAs("new@example.com", user);
+
+        jwtFilter.doFilter(request, response, filterChain);
+
+        assertThat(SecurityContextHolder.getContext().getAuthentication()).isNotNull();
+        verify(filterChain).doFilter(request, response);
+    }
+
+    @Test
     void anEndedTokenOnAPublicEndpointIsJustIgnored() throws Exception {
         final var user = User.builder().id(1L).active(true).build();
         user.endSessions(ISSUED_AT.plusSeconds(1));

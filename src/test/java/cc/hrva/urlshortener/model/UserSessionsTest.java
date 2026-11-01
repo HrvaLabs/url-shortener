@@ -55,4 +55,50 @@ class UserSessionsTest {
         assertThat(user.sessionEndedFor(null)).isTrue();
     }
 
+
+    @Test
+    void aTokenIssuedBeforeTheAccountWasCreatedIsRefused() {
+        final var user = createdAt(Instant.parse("2026-10-31T09:15:42.600Z"));
+
+        assertThat(user.sessionEndedFor(Instant.parse("2026-10-31T09:15:41Z"))).isTrue();
+        assertThat(user.sessionEndedFor(Instant.parse("2026-01-01T00:00:00Z"))).isTrue();
+    }
+
+    @Test
+    void aTokenIssuedInTheSecondTheAccountWasCreatedStaysValid() {
+        final var user = createdAt(Instant.parse("2026-10-31T09:15:42.600Z"));
+
+        assertThat(user.sessionEndedFor(Instant.parse("2026-10-31T09:15:42Z"))).isFalse();
+        assertThat(user.sessionEndedFor(Instant.parse("2026-10-31T09:15:43Z"))).isFalse();
+    }
+
+    @Test
+    void theCreationTimeIsReadInTheZoneItWasWrittenIn() {
+        final var created = Instant.parse("2026-10-31T09:15:42Z");
+        final var user = createdAt(created);
+
+        assertThat(user.sessionEndedFor(created.minusSeconds(1))).isTrue();
+        assertThat(user.sessionEndedFor(created)).isFalse();
+    }
+
+    @Test
+    void aTokenWithoutAnIssueTimeIsNotDatedAgainstTheCreationTime() {
+        assertThat(createdAt(Instant.parse("2026-10-31T09:15:42Z")).sessionEndedFor(null)).isFalse();
+    }
+
+    @Test
+    void onlyAnAccountWithACutOffOrACreationTimeNeedsTheIssueTime() {
+        assertThat(new User().needsTokenIssueTime()).isFalse();
+        assertThat(createdAt(Instant.now()).needsTokenIssueTime()).isTrue();
+        final var ended = new User();
+        ended.endSessions(CUT_OFF);
+        assertThat(ended.needsTokenIssueTime()).isTrue();
+    }
+
+    private static User createdAt(final Instant created) {
+        final var user = new User();
+        user.setCreateDate(LocalDateTime.ofInstant(created, java.time.ZoneId.systemDefault()));
+        return user;
+    }
+
 }
