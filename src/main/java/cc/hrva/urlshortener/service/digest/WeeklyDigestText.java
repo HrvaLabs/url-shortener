@@ -46,7 +46,8 @@ public final class WeeklyDigestText {
             BlockReason.BLOCKLIST.name(), "blocklist",
             BlockReason.DOMAIN_RULE.name(), "domain rule",
             BlockReason.SCAM_SIGNALS.name(), "scam signals",
-            BlockReason.CAMPAIGN.name(), "campaign hold");
+            BlockReason.CAMPAIGN.name(), "campaign hold",
+            BlockReason.SIGN_IN_FORM.name(), "sign-in form hold");
 
     private WeeklyDigestText() {}
 

@@ -13,9 +13,9 @@ class BlockReasonTest {
     }
 
     @Test
-    void aCampaignHoldIsAutomaticAndLast() {
-        assertThat(BlockReason.MANUAL).doesNotContain(BlockReason.CAMPAIGN);
-        assertThat(BlockReason.values()).endsWith(BlockReason.CAMPAIGN);
+    void theHoldsAreAutomaticAndLast() {
+        assertThat(BlockReason.MANUAL).doesNotContain(BlockReason.CAMPAIGN, BlockReason.SIGN_IN_FORM);
+        assertThat(BlockReason.values()).endsWith(BlockReason.CAMPAIGN, BlockReason.SIGN_IN_FORM);
     }
 
     @Test

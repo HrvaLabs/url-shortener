@@ -139,6 +139,10 @@ public class PublicHttpFetcher {
 
     public FetchResult fetch(final String url, final long maxBytes, final String etag, final String lastModified,
             final Duration requestTimeout) {
+        return fetch(url, maxBytes, validators(etag, lastModified), requestTimeout);
+    }
+
+    public FetchResult fetch(final String url, final long maxBytes, final Map<String, String> headers, final Duration requestTimeout) {
         final var deadline = System.nanoTime() + requestTimeout.toNanos();
         var target = url;
         for (int redirects = 0; ; redirects++) {
@@ -149,7 +153,7 @@ public class PublicHttpFetcher {
             if (deadline - System.nanoTime() <= 0) {
                 throw new UrlValidationException(TIMED_OUT);
             }
-            final var response = send(target, validators(etag, lastModified), deadline);
+            final var response = send(target, headers, deadline);
             final var location = response.header(HttpHeaders.LOCATION);
             if (!REDIRECT_STATUSES.contains(response.status()) || location.isEmpty()) {
                 return result(response, maxBytes, deadline);
@@ -360,7 +364,7 @@ public class PublicHttpFetcher {
     private PinnedHttpTransport.Response send(final String url, final Map<String, String> headers, final long deadline) {
         try {
             final var sent = new LinkedHashMap<>(headers);
-            sent.put(HttpHeaders.USER_AGENT, USER_AGENT);
+            sent.putIfAbsent(HttpHeaders.USER_AGENT, USER_AGENT);
             return transport.get(URI.create(url), sent, deadline);
         } catch (final IllegalArgumentException exception) {
             throw new UrlValidationException("not a valid address", exception);

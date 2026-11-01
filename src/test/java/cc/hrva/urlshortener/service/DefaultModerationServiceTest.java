@@ -43,6 +43,7 @@ import cc.hrva.urlshortener.service.domain.CustomDomainModeration;
 import cc.hrva.urlshortener.service.domain.LifecycleOutcome;
 import cc.hrva.urlshortener.service.domain.UrlCache;
 import cc.hrva.urlshortener.service.impl.DefaultModerationService;
+import cc.hrva.urlshortener.util.ReviewReasons;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -90,6 +91,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.tuple;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyCollection;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.argThat;
@@ -729,6 +731,81 @@ class DefaultModerationServiceTest {
 
         assertThat(url.isWarningPage()).isFalse();
         verify(cache).evict("s60");
+    }
+
+    @Test
+    void aSignInFormHoldOpensAReviewWhileTheLinkIsActiveThenTakesItOff() {
+        final var url = flaggedLink(80L, "https://verniqindexone.com/cache-trash/");
+        final var activeWhenFlagged = new ArrayList<Boolean>();
+        doAnswer(invocation -> {
+            activeWhenFlagged.add(invocation.<Url>getArgument(0).isActive() && inTransaction);
+            return null;
+        }).when(reviewQueueService).flag(any(Url.class), anyList());
+
+        assertThat(moderationService.holdForSignInForm(80L, "https://verniqindexone.com/cache-trash/", "a sign-in field (identificacion)")).isTrue();
+
+        verify(reviewQueueService).flag(url, List.of(ReviewReasons.SIGN_IN_FORM));
+        assertThat(activeWhenFlagged).containsExactly(true);
+        assertThat(url).extracting(Url::isActive, Url::getBlockReason, Url::getBlockDetail, Url::isWarningPage)
+                .containsExactly(false, BlockReason.SIGN_IN_FORM, "a sign-in field (identificacion)", true);
+        assertThat(url.getBlockedAt()).isNotNull();
+        verify(reviewQueueService, never()).resolveOpen(any(Url.class), any(ReviewResolution.class), anyString());
+        verify(cache).evict("s80");
+        verifyNoInteractions(sendingEmailService, auditLogService);
+        assertThat(outOfPlace).isEmpty();
+    }
+
+    @Test
+    void aSignInFormHoldSkipsAnOwnedLinkOneWithoutTheWarningPageOneThatIsOffOrOneThatWasRepointed() {
+        final var owned = link(81L, "https://a.example/login", user(1L, "alice@example.com"));
+        owned.setWarningPage(true);
+        final var noWarningPage = link(82L, "https://b.example/login", null);
+        final var off = flaggedLink(83L, "https://c.example/login");
+        off.setActive(false);
+        flaggedLink(84L, "https://d.example/new");
+
+        assertThat(moderationService.holdForSignInForm(81L, "https://a.example/login", "a password field")).isFalse();
+        assertThat(moderationService.holdForSignInForm(82L, "https://b.example/login", "a password field")).isFalse();
+        assertThat(moderationService.holdForSignInForm(83L, "https://c.example/login", "a password field")).isFalse();
+        assertThat(moderationService.holdForSignInForm(84L, "https://d.example/old", "a password field")).isFalse();
+        assertThat(moderationService.holdForSignInForm(85L, "https://e.example/login", "a password field")).isFalse();
+
+        verify(urlRepository, never()).save(any(Url.class));
+        verifyNoInteractions(reviewQueueService, cache);
+    }
+
+    @Test
+    void lookingFineRestoresALinkHeldForASignInFormWithItsWarningPage() {
+        final var url = blocked(86L, "https://verniqindexone.com/cache-trash/", BlockReason.SIGN_IN_FORM, null);
+        url.setWarningPage(true);
+
+        moderationService.resolveReview(86L, ReviewAction.OK, null, ADMIN, "admin");
+
+        assertThat(url).extracting(Url::isActive, Url::getBlockReason, Url::isWarningPage).containsExactly(true, null, true);
+        verify(reviewQueueService).resolveOpen(url, ReviewResolution.OK, ADMIN);
+        verify(auditLogService).log(ADMIN, AuditAction.RESOLVE_REVIEW, "Url", "86", "action: OK, links: 1, via: admin");
+    }
+
+    @Test
+    void blockingALinkHeldForASignInFormMakesItTheAdminsBlock() {
+        final var url = blocked(87L, "https://verniqindexone.com/cache-trash/", BlockReason.SIGN_IN_FORM, null);
+        url.setWarningPage(true);
+
+        moderationService.resolveReview(87L, ReviewAction.BLOCK_LINK, null, ADMIN, "admin");
+
+        assertThat(url).extracting(Url::isActive, Url::getBlockReason, Url::getBlockDetail).containsExactly(false, BlockReason.ADMIN, null);
+        verify(reviewQueueService).resolveOpen(url, ReviewResolution.LINK_BLOCKED, ADMIN);
+        verify(auditLogService).log(ADMIN, AuditAction.RESOLVE_REVIEW, "Url", "87", "action: BLOCK_LINK, links: 1, via: admin");
+    }
+
+    @Test
+    void trustingTheDomainRestoresALinkHeldForASignInForm() {
+        final var url = blocked(88L, "https://login.verniqindexone.com/login", BlockReason.SIGN_IN_FORM, null);
+        when(linkCheckService.check("https://login.verniqindexone.com/login")).thenReturn(ALLOWED);
+
+        moderationService.resolveReview(88L, ReviewAction.TRUST_DOMAIN, null, ADMIN, "admin");
+
+        assertThat(url).extracting(Url::isActive, Url::getBlockReason).containsExactly(true, null);
     }
 
     @Test

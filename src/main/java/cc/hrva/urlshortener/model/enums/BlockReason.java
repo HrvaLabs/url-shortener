@@ -10,7 +10,8 @@ public enum BlockReason {
     ADMIN,
     USER_BLOCKED,
     SCAM_SIGNALS,
-    CAMPAIGN;
+    CAMPAIGN,
+    SIGN_IN_FORM;
 
     public static final Set<BlockReason> MANUAL = Set.of(ADMIN, USER_BLOCKED);
 

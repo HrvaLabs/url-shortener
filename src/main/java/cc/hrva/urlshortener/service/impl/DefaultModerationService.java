@@ -46,6 +46,7 @@ import cc.hrva.urlshortener.service.domain.CustomDomainModeration;
 import cc.hrva.urlshortener.service.domain.UrlCache;
 import cc.hrva.urlshortener.service.domain.UrlCacheKeys;
 import cc.hrva.urlshortener.util.DomainNames;
+import cc.hrva.urlshortener.util.ReviewReasons;
 import cc.hrva.urlshortener.util.SortWhitelist;
 import com.google.common.collect.Lists;
 import java.time.Duration;
@@ -130,7 +131,7 @@ public class DefaultModerationService implements ModerationService {
             .byDefault(Sort.by(Sort.Order.desc(CREATED_AT)))
             .thenBy(Sort.Order.desc(CREATED_AT), Sort.Order.desc(ID));
     private static final Set<BlockReason> RESTORED_BY_ALLOW = EnumSet.of(BlockReason.BLOCKLIST, BlockReason.SCAM_SIGNALS, BlockReason.DOMAIN_RULE,
-            BlockReason.CAMPAIGN);
+            BlockReason.CAMPAIGN, BlockReason.SIGN_IN_FORM);
     private static final Set<BlockReason> HELD = EnumSet.of(BlockReason.CAMPAIGN);
     private static final int IDS_PER_QUERY = 1_000;
     private static final Duration SECOND_EVICTION_DELAY = Duration.ofSeconds(2);
@@ -397,7 +398,7 @@ public class DefaultModerationService implements ModerationService {
                                final String performedBy, final String via) {
         final var url = findUrl(urlId);
         final var details = switch (action) {
-            case OK -> details(via, 0, field(ACTION, action));
+            case OK -> allowFromReview(url, via);
             case TRUST_DOMAIN -> trustFromReview(url, domain, performedBy, via);
             case BLOCK_LINK -> blockLinkFromReview(url, tellOwner, performedBy, via);
             case BLOCK_DOMAIN -> blockDomainFromReview(url, domain, performedBy, via);
@@ -472,17 +473,42 @@ public class DefaultModerationService implements ModerationService {
                 warningPagesField(trusted.warningPages()));
     }
 
+    private String allowFromReview(final Url url, final String via) {
+        final var restored = url.getBlockReason() == BlockReason.SIGN_IN_FORM
+                && reactivate(url.getId(), candidate -> candidate.getBlockReason() == BlockReason.SIGN_IN_FORM && candidate.getThreatType() == null);
+        return details(via, restored ? 1 : 0, field(ACTION, ReviewAction.OK));
+    }
+
     private String blockLinkFromReview(final Url url, final Consumer<Url> tellOwner, final String performedBy, final String via) {
-        final var blocked = blockAndTellOwner(url.getId(), BlockReason.ADMIN, null, ReviewResolution.LINK_BLOCKED, performedBy, candidate -> true,
-                tellOwner);
-        return details(via, blocked.isPresent() ? 1 : 0, field(ACTION, ReviewAction.BLOCK_LINK));
+        final var converted = convertSignInFormHold(url.getId(), BlockReason.ADMIN, null);
+        final var blocked = converted || blockAndTellOwner(url.getId(), BlockReason.ADMIN, null, ReviewResolution.LINK_BLOCKED, performedBy,
+                candidate -> true, tellOwner).isPresent();
+        return details(via, blocked ? 1 : 0, field(ACTION, ReviewAction.BLOCK_LINK));
     }
 
     private String blockDomainFromReview(final Url url, final String domain, final String performedBy, final String via) {
         final var ruleDomain = domainForReview(url, domain, BLOCKED_BY_DEFAULT);
         final var blocked = blockLinksOn(ruleDomain, null, performedBy, null);
-        return details(via, blocked.links(), field(ACTION, ReviewAction.BLOCK_DOMAIN), field(DOMAIN, ruleDomain), domainsField(blocked.domains()),
-                heldField(blocked.held()));
+        final var converted = convertSignInFormHold(url.getId(), BlockReason.DOMAIN_RULE, ruleDomain) ? 1 : 0;
+        return details(via, blocked.links() + converted, field(ACTION, ReviewAction.BLOCK_DOMAIN), field(DOMAIN, ruleDomain),
+                domainsField(blocked.domains()), heldField(blocked.held()));
+    }
+
+    private boolean convertSignInFormHold(final long urlId, final BlockReason reason, final String detail) {
+        final var converted = Optional.ofNullable(transactionOperations.execute(status -> urlRepository.findById(urlId)
+                .filter(url -> !url.isActive() && url.getBlockReason() == BlockReason.SIGN_IN_FORM)
+                .map(url -> {
+                    url.setBlockReason(reason);
+                    url.setBlockDetail(detail);
+                    url.setBlockedAt(LocalDateTime.now());
+                    return urlRepository.save(url);
+                })
+                .orElse(null)));
+        converted.ifPresent(url -> {
+            log.info("Link held for a sign-in form blocked urlId={} reason={}", url.getId(), reason);
+            evictNowAndAgainLater(cacheKeyOf(url));
+        });
+        return converted.isPresent();
     }
 
     private String blockUserFromReview(final Url url, final String performedBy, final String via) {
@@ -718,6 +744,27 @@ public class DefaultModerationService implements ModerationService {
         }
         log.info("Hold skipped because the shape is allowed campaignId={} urlId={}", campaignId, urlId);
         return false;
+    }
+
+    @Override
+    public boolean holdForSignInForm(final long urlId, final String checkedUrl, final String evidence) {
+        final var held = Optional.ofNullable(transactionOperations.execute(status -> urlRepository.findById(urlId)
+                .filter(url -> url.isActive() && !isBlocked(url) && url.getOwner() == null && url.isWarningPage()
+                        && checkedUrl.equals(url.getLongUrl()))
+                .map(url -> {
+                    reviewQueueService.flag(url, List.of(ReviewReasons.SIGN_IN_FORM));
+                    url.setActive(false);
+                    url.setBlockReason(BlockReason.SIGN_IN_FORM);
+                    url.setBlockDetail(StringUtils.abbreviate(evidence, MAX_COLUMN_LENGTH));
+                    url.setBlockedAt(LocalDateTime.now());
+                    return urlRepository.save(url);
+                })
+                .orElse(null)));
+        held.ifPresent(url -> {
+            log.info("Link held for a sign-in form urlId={}", url.getId());
+            evictNowAndAgainLater(cacheKeyOf(url));
+        });
+        return held.isPresent();
     }
 
     @Override

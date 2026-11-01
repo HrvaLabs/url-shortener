@@ -46,6 +46,7 @@ import cc.hrva.urlshortener.service.ReservedAliasService;
 import cc.hrva.urlshortener.service.ReviewQueueService;
 import cc.hrva.urlshortener.service.ScammerSignalService;
 import cc.hrva.urlshortener.service.SettingsService;
+import cc.hrva.urlshortener.service.SignInFormCheckService;
 import cc.hrva.urlshortener.service.SuspiciousUrlService;
 import cc.hrva.urlshortener.service.UrlService;
 import cc.hrva.urlshortener.service.UserService;
@@ -103,6 +104,7 @@ import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Stream;
 
 @Service
@@ -183,6 +185,7 @@ public class DefaultUrlService implements UrlService {
     private final AnonymousLinkSignals anonymousLinkSignals;
     private final TemplateEngine templateEngine;
     private final HumanCheckService humanCheckService;
+    private final SignInFormCheckService signInFormCheckService;
 
     @Override
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
@@ -208,6 +211,7 @@ public class DefaultUrlService implements UrlService {
                 ? anonymousLinkSignals.signalsFor(url.getLongUrl(), verdict.outcome())
                 : Signals.none();
 
+        final var newWarningPageLink = new AtomicReference<Long>();
         final var created = transactionOperations.execute(status -> {
             if (currentUser != null) {
                 url.setDomain(resolveAndLockDomain(createUrlDto.getDomain(), currentUser));
@@ -217,13 +221,19 @@ public class DefaultUrlService implements UrlService {
             }
             url.setCreatedVia(createdVia.anonymous());
             applyAnonymousMaximums(url);
-            return heldShape.map(held -> holdNewAnonymousLink(url, held, verdict))
-                    .orElseGet(() -> UrlResponse.from(createUrlForAnonymousUser(url, verdict, signals)));
+            return heldShape.map(held -> holdNewAnonymousLink(url, held, verdict)).orElseGet(() -> {
+                final var made = createUrlForAnonymousUser(url, verdict, signals);
+                if (made.isNew() && made.url().isWarningPage()) {
+                    newWarningPageLink.set(made.url().getId());
+                }
+                return UrlResponse.from(made.url());
+            });
         });
         checkRedirectsLater(created.id());
         reportCreated(created, CreatedLink.creatorOf(currentUser != null ? currentUser.getId() : null, clientIP), verdict);
         if (currentUser == null) {
             reportAnonymousShape(created, verdict);
+            Optional.ofNullable(newWarningPageLink.get()).ifPresent(this::checkSignInFormLater);
         }
         return created;
     }
@@ -666,6 +676,14 @@ public class DefaultUrlService implements UrlService {
         }
     }
 
+    private void checkSignInFormLater(final long urlId) {
+        try {
+            signInFormCheckService.checkLater(urlId);
+        } catch (final RuntimeException exception) {
+            log.warn("Could not schedule the sign-in form check urlId={} exception={}", urlId, exception.getClass().getName());
+        }
+    }
+
     private void reportCreated(final UrlResponse created, final String creator, final LinkVerdict verdict) {
         try {
             burstAlertService.linkCreated(new CreatedLink(created.id(), created.longUrl(), creator, verdict.outcome()));
@@ -1030,7 +1048,7 @@ public class DefaultUrlService implements UrlService {
     private UrlResponse holdNewAnonymousLink(final Url url, final HeldShape held, final LinkVerdict verdict) {
         if (!campaignService.confirmHold(held.campaignId())) {
             log.info("Campaign stopped holding before the link was saved, saving it as usual campaignId={}", held.campaignId());
-            return UrlResponse.from(createUrlForAnonymousUser(url, verdict, Signals.none()));
+            return UrlResponse.from(createUrlForAnonymousUser(url, verdict, Signals.none()).url());
         }
         url.clearForAnonymousUser();
         url.setShortUrl(nextFreeShortUrl(null));
@@ -1044,7 +1062,7 @@ public class DefaultUrlService implements UrlService {
         return UrlResponse.from(saved).asCreated();
     }
 
-    private Url createUrlForAnonymousUser(final Url url, final LinkVerdict verdict, final Signals signals) {
+    private AnonymousLink createUrlForAnonymousUser(final Url url, final LinkVerdict verdict, final Signals signals) {
         url.clearForAnonymousUser();
 
         final var equivalent = equivalentAnonymousLink(url, signals.warningPage());
@@ -1053,7 +1071,7 @@ public class DefaultUrlService implements UrlService {
             log.warn("Long url already exists in DB, will return the existing anonymous URL");
             queueIfFlagged(existingLongUrl, verdict, signals);
             cacheUrlResponse(existingLongUrl);
-            return existingLongUrl;
+            return new AnonymousLink(existingLongUrl, false);
         }
 
         url.setShortUrl(nextFreeShortUrl(null));
@@ -1063,7 +1081,7 @@ public class DefaultUrlService implements UrlService {
         final var saved = insertNewLink(url, NO_FREE_ALIAS);
         queueIfFlagged(saved, verdict, signals);
         cacheUrlResponse(saved);
-        return saved;
+        return new AnonymousLink(saved, true);
     }
 
     private void applyAnonymousMaximums(final Url url) {
@@ -1115,6 +1133,8 @@ public class DefaultUrlService implements UrlService {
         url.setActive(true);
         return url;
     }
+
+    private record AnonymousLink(Url url, boolean isNew) {}
 
     private record LinkPlace(Long domainId, String hostname, String alias) {
 

@@ -15,6 +15,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -381,6 +382,27 @@ class PublicHttpFetcherTest {
 
         try {
             assertThat(result.body()).content().isEqualTo("hrva.cc-linkcheck/1.0 (+https://hrva.cc/.well-known/security.txt)");
+        } finally {
+            Files.deleteIfExists(result.body());
+        }
+    }
+
+    @Test
+    void sendsTheHeadersItIsGivenOnEveryHopInsteadOfTheLinkCheckUserAgent() throws IOException {
+        final var seen = new CopyOnWriteArrayList<String>();
+        respond("/start", exchange -> {
+            seen.add(exchange.getRequestHeaders().getFirst("User-Agent") + " | " + exchange.getRequestHeaders().getFirst("Accept-Language"));
+            redirect(exchange, "/page");
+        });
+        respond("/page", exchange -> {
+            seen.add(exchange.getRequestHeaders().getFirst("User-Agent") + " | " + exchange.getRequestHeaders().getFirst("Accept-Language"));
+            send(exchange, 200, "<html></html>");
+        });
+
+        final var result = permissiveFetcher.fetch(baseUrl + "/start", 1000, Map.of("User-Agent", "Mozilla/5.0 Test", "Accept-Language", "es"), TIMEOUT);
+
+        try {
+            assertThat(seen).containsExactly("Mozilla/5.0 Test | es", "Mozilla/5.0 Test | es");
         } finally {
             Files.deleteIfExists(result.body());
         }

@@ -18,6 +18,7 @@ Admin pages need two-step sign-in, password reset links that work once for an ho
 
 ### 🛡️ Link Safety
 - When hrva.cc fetches a destination to follow its redirects, see whether it still works or read its preview, it connects only to the address it checked, and checks again on every redirect.
+- For some links made without an account that open the warning page, hrva.cc reads the destination page once after the link is made. A page with a sign-in or card form puts the link on hold until an admin checks it.
 
 ### 🔗 Links
 - If the rate limiter is unavailable, password tries on a protected link are paused for a minute instead of left unlimited.

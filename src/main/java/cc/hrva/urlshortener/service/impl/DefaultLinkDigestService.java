@@ -138,6 +138,7 @@ public class DefaultLinkDigestService implements LinkDigestService {
             case ADMIN -> "an admin";
             case USER_BLOCKED -> "a blocked account";
             case CAMPAIGN -> "a campaign hold";
+            case SIGN_IN_FORM -> "a sign-in form hold";
         };
         return StringUtils.isBlank(url.getBlockDetail()) ? words : words + " (" + url.getBlockDetail() + ")";
     }

@@ -253,6 +253,9 @@ class UrlServiceTest {
     @Mock
     private HumanCheckService humanCheckService;
 
+    @Mock
+    private SignInFormCheckService signInFormCheckService;
+
     private AnonymousLinkSignals anonymousLinkSignals;
 
     @BeforeEach
@@ -293,7 +296,7 @@ class UrlServiceTest {
                 campaignService,
                 settingsService,
                 withoutTransactions,
-                anonymousLinkSignals, LinkWarningTemplates.engine(), humanCheckService
+                anonymousLinkSignals, LinkWarningTemplates.engine(), humanCheckService, signInFormCheckService
         );
     }
 
@@ -1768,6 +1771,58 @@ class UrlServiceTest {
     }
 
     @Test
+    void aNewLinkWithTheWarningPageHasItsPageCheckedForASignInForm() {
+        anonymousCreateOf(RANDOM_LINK, LinkVerdict.clean());
+        when(domainAgeService.registeredOn("xdvqnxj.com")).thenReturn(Optional.empty());
+
+        final var created = createAnonymously(RANDOM_LINK);
+
+        assertThat(created.warningPage()).isTrue();
+        verify(signInFormCheckService).checkLater(created.id());
+    }
+
+    @Test
+    void aLinkWithoutTheWarningPageIsNeverFetched() {
+        anonymousCreateOf(LIMITED_LINK, LinkVerdict.clean());
+
+        createAnonymously(LIMITED_LINK);
+
+        verifyNoInteractions(signInFormCheckService);
+    }
+
+    @Test
+    void aReusedLinkWithTheWarningPageIsNotFetchedAgain() {
+        final var url = Url.builder().longUrl(RANDOM_LINK).build();
+        when(createUrlToUrlConverter.convert(any(CreateUrlDto.class))).thenReturn(url);
+        when(urlValidator.checkIfLongUrlIsNotBlocklisted(url)).thenReturn(LinkVerdict.clean());
+        when(urlRepository.findByLongUrlAndActiveTrueAndOwnerIsNull(RANDOM_LINK))
+                .thenReturn(List.of(Url.builder().id(12L).shortUrl("v0DB3").longUrl(RANDOM_LINK).active(true).warningPage(true).build()));
+        when(domainAgeService.registeredOn("xdvqnxj.com")).thenReturn(Optional.empty());
+
+        assertThat(createAnonymously(RANDOM_LINK).id()).isEqualTo(12L);
+
+        verifyNoInteractions(signInFormCheckService);
+    }
+
+    @Test
+    void aSignedInOrMcpCreateIsNeverFetched() {
+        stubLinkCreation();
+        when(userService.getUserFromToken()).thenReturn(User.builder().id(7L).build());
+
+        urlService.saveUrlRouting(CreateUrlDto.builder().longUrl(RANDOM_LINK).build(), CLIENT_IP, CreatedVia.WEB, null);
+        urlService.saveUrlRouting(CreateUrlDto.builder().longUrl(RANDOM_LINK).build(), null, CreatedVia.MCP);
+
+        verifyNoInteractions(signInFormCheckService);
+    }
+
+    @Test
+    void aLinkHeldForASignInFormAnswersTheHeldPage() {
+        final var url = storedLink().active(false).warningPage(true).blockReason(BlockReason.SIGN_IN_FORM).blockDetail("a password field").build();
+
+        assertThat(redirectOf(url)).isEqualTo(FRONTEND + "/unavailable?s=abc&reason=blocked");
+    }
+
+    @Test
     void aRandomLookingLinkThatIsDeduplicatedQueuesTheExistingLink() {
         final var url = Url.builder().longUrl(RANDOM_LINK).build();
         when(createUrlToUrlConverter.convert(any(CreateUrlDto.class))).thenReturn(url);
@@ -1941,7 +1996,7 @@ class UrlServiceTest {
                 urlToPeekUrlConverter, createUrlToUrlConverter, urlUpdateDtoToUrlConverter, new UrlCache(cacheManager), objectMapper, meterRegistry,
                 passwordEncoder, suspiciousUrlService, rateLimiter, reviewQueueService, scammerSignalService, clickCheckService, redirectChainService,
                 transactionOperations, reservedAliasService, burstAlertService, destinationCheckRepository, customDomainRegistry, customDomainRepository,
-                campaignService, settingsService, withoutTransactions, anonymousLinkSignals, LinkWarningTemplates.engine(), humanCheckService);
+                campaignService, settingsService, withoutTransactions, anonymousLinkSignals, LinkWarningTemplates.engine(), humanCheckService, signInFormCheckService);
     }
 
     private Url anonymousCreateOf(final String longUrl, final LinkVerdict verdict) {
@@ -4387,7 +4442,7 @@ class UrlServiceTest {
                 new io.micrometer.core.instrument.simple.SimpleMeterRegistry(), passwordEncoder, suspiciousUrlService, rateLimiter,
                 reviewQueueService, scammerSignalService, clickCheckService, redirectChainService, TransactionOperations.withoutTransaction(),
                 reservedAliasService, burstAlertService, destinationCheckRepository, customDomainRegistry, customDomainRepository, campaignService, settingsService,
-                withoutTransactions, anonymousLinkSignals, LinkWarningTemplates.engine(), humanCheckService);
+                withoutTransactions, anonymousLinkSignals, LinkWarningTemplates.engine(), humanCheckService, signInFormCheckService);
     }
 
     private static UrlService withTheCacheAnnotations(final UrlService service, final CacheManager urls) {
@@ -4458,7 +4513,7 @@ class UrlServiceTest {
                 campaignService,
                 settingsService,
                 withoutTransactions,
-                anonymousLinkSignals, LinkWarningTemplates.engine(), humanCheckService
+                anonymousLinkSignals, LinkWarningTemplates.engine(), humanCheckService, signInFormCheckService
         );
     }
 
@@ -4538,7 +4593,7 @@ class UrlServiceTest {
                 campaignService,
                 settingsService,
                 transactionManager,
-                anonymousLinkSignals, LinkWarningTemplates.engine(), humanCheckService
+                anonymousLinkSignals, LinkWarningTemplates.engine(), humanCheckService, signInFormCheckService
         );
         final var proxyFactory = new ProxyFactory(service);
         proxyFactory.addAdvice(new TransactionInterceptor(transactionManager, new AnnotationTransactionAttributeSource()));
@@ -4577,7 +4632,7 @@ class UrlServiceTest {
                 campaignService,
                 settingsService,
                 withoutTransactions,
-                anonymousLinkSignals, LinkWarningTemplates.engine(), humanCheckService
+                anonymousLinkSignals, LinkWarningTemplates.engine(), humanCheckService, signInFormCheckService
         );
     }
 
@@ -4612,7 +4667,7 @@ class UrlServiceTest {
                 campaignService,
                 settingsService,
                 withoutTransactions,
-                anonymousLinkSignals, LinkWarningTemplates.engine(), humanCheckService
+                anonymousLinkSignals, LinkWarningTemplates.engine(), humanCheckService, signInFormCheckService
         );
     }
 

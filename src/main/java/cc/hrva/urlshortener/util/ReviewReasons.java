@@ -10,6 +10,7 @@ import org.apache.commons.lang3.StringUtils;
 public final class ReviewReasons {
 
     public static final String VISITOR_REPORT = "reported by a visitor";
+    public static final String SIGN_IN_FORM = "Sign-in form on a warning-page link";
     private static final String VISITOR_REPORT_PREFIX = VISITOR_REPORT + ": ";
 
     private ReviewReasons() {}

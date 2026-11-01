@@ -308,6 +308,7 @@ public class DiscordAlertFormatter {
             case ADMIN -> "by an admin:";
             case USER_BLOCKED -> "account blocked";
             case CAMPAIGN -> "campaign hold";
+            case SIGN_IN_FORM -> "sign-in form hold";
         };
         if (detail.isEmpty()) {
             return StringUtils.removeEnd(text, ":");

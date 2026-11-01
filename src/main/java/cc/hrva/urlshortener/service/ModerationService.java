@@ -32,6 +32,7 @@ public interface ModerationService {
     void deleteLink(long urlId, String performedBy, String via);
     boolean holdForCampaign(long urlId, long campaignId, String shape);
     int restoreCampaignHolds(List<Long> urlIds);
+    boolean holdForSignInForm(long urlId, String checkedUrl, String evidence);
     UrlResponse clearWarningPage(long urlId, String performedBy);
 
 }
