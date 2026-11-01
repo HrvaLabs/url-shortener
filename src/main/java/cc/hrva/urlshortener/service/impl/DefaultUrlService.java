@@ -144,6 +144,7 @@ public class DefaultUrlService implements UrlService {
     private static final String ROLE_ADMIN = "ROLE_ADMIN";
     private static final String BLOCKED_WHILE_EDITING = "This link was blocked while you were editing it. Reload and try again.";
     private static final int MAX_GENERATED_ALIAS_ATTEMPTS = 10;
+    private static final char[] GENERATED_ALIAS_CHARACTERS = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789".toCharArray();
     private static final String NO_FREE_ALIAS = "Couldn't pick a free short URL. Try again.";
     private static final String CUSTOM_ALIASES_OFF = "Custom aliases are turned off right now.";
     private static final String DOMAIN_FIELD = "domain";
@@ -1020,7 +1021,7 @@ public class DefaultUrlService implements UrlService {
 
     @Override
     public String generateShortUrl(final Long length) {
-        return RandomStringUtils.secureStrong().nextAlphanumeric(Math.toIntExact(length));
+        return RandomStringUtils.secureStrong().next(Math.toIntExact(length), GENERATED_ALIAS_CHARACTERS);
     }
 
     private Url findUrlToReveal(final LinkPlace place) {

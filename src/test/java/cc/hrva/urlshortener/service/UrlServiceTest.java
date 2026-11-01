@@ -301,6 +301,14 @@ class UrlServiceTest {
     }
 
     @Test
+    void generatedAliasesLeaveOutCharactersThatLookAlike() {
+        final var aliases = IntStream.range(0, 2000).mapToObj(attempt -> urlService.generateShortUrl(8L)).toList();
+
+        assertThat(aliases).allSatisfy(alias -> assertThat(alias).hasSize(8).matches("[A-HJ-NP-Za-km-z2-9]+"));
+        assertThat(String.join("", aliases).chars().distinct().count()).isEqualTo(57);
+    }
+
+    @Test
     void csvHasADomainColumn() {
         final var owner = User.builder().id(1L).email("ana@example.com").build();
         final var created = LocalDateTime.of(2026, 10, 20, 9, 30);
