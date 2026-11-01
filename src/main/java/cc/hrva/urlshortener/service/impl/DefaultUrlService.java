@@ -133,6 +133,8 @@ public class DefaultUrlService implements UrlService {
     private static final int UNLOCK_ATTEMPTS_PER_CLIENT = 10;
     private static final int UNLOCK_ATTEMPTS_PER_LINK = 50;
     private static final Duration UNLOCK_WINDOW = Duration.ofMinutes(15);
+    private static final Duration UNLOCK_UNAVAILABLE_RETRY = Duration.ofMinutes(1);
+    private static final String UNLOCK_PAUSED = "Password checks are paused for a moment. Try again in a minute.";
     private static final int CREATES_PER_USER = 60;
     private static final Duration CREATE_WINDOW = Duration.ofHours(1);
     private static final String CREATE_LIMIT_REFUSAL = "You've created a lot of links in a short time. Try again in an hour.";
@@ -257,8 +259,8 @@ public class DefaultUrlService implements UrlService {
             return rateLimiter.tryAcquire(RateLimiter.clientKey("unlock:" + cacheKey, clientIP), UNLOCK_ATTEMPTS_PER_CLIENT, UNLOCK_WINDOW)
                     && rateLimiter.tryAcquire("unlock:" + cacheKey, UNLOCK_ATTEMPTS_PER_LINK, UNLOCK_WINDOW);
         } catch (final RateLimiterUnavailableException exception) {
-            log.warn("Unlock rate limit unavailable, allowing the attempt");
-            return true;
+            log.warn("Unlock rate limit unavailable, refusing the attempt");
+            throw new RateLimitExceededException(UNLOCK_PAUSED, UNLOCK_UNAVAILABLE_RETRY);
         }
     }
 

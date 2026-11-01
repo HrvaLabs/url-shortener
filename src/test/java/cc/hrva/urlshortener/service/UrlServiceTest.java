@@ -3209,14 +3209,17 @@ class UrlServiceTest {
     }
 
     @Test
-    void unlockStillWorksWhenTheRateLimiterIsDown() {
-        final var url = Url.builder().id(1L).shortUrl("a").longUrl("https://a.com").active(true).passwordHash("hash").build();
+    void unlockFailsClosedWithAWaitTimeWhenTheRateLimiterIsDown() {
         when(rateLimiter.tryAcquire(any(), org.mockito.ArgumentMatchers.anyInt(), any()))
                 .thenThrow(new RateLimiterUnavailableException(new RuntimeException("down")));
-        when(urlRepository.findActive(null, "a")).thenReturn(Optional.of(url));
-        when(passwordEncoder.matches("secret", "hash")).thenReturn(true);
 
-        assertThat(urlService.unlockUrl(null, "a", "secret", CLICK).longUrl()).isEqualTo("https://a.com");
+        assertThatThrownBy(() -> urlService.unlockUrl(null, "a", "secret", CLICK))
+                .isInstanceOfSatisfying(cc.hrva.urlshortener.exception.RateLimitExceededException.class, exception -> {
+                    assertThat(exception).hasMessage("Password checks are paused for a moment. Try again in a minute.");
+                    assertThat(exception.getRetryAfter()).isEqualTo(Duration.ofSeconds(60));
+                });
+        verify(urlRepository, never()).findActive(any(), any());
+        verify(passwordEncoder, never()).matches(any(), any());
     }
 
     @Test
