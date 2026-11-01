@@ -21,7 +21,7 @@ public class SecurityTxtController {
             Expires: %s
             Preferred-Languages: en, hr
             Canonical: https://hrva.cc/.well-known/security.txt
-            Policy: https://app.hrva.cc/terms
+            Policy: https://app.hrva.cc/security
             """;
 
     private final Clock clock;

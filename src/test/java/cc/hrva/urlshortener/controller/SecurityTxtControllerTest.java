@@ -66,7 +66,7 @@ class SecurityTxtControllerTest {
             Expires: 2027-10-21T10:00:00Z
             Preferred-Languages: en, hr
             Canonical: https://hrva.cc/.well-known/security.txt
-            Policy: https://app.hrva.cc/terms
+            Policy: https://app.hrva.cc/security
             """;
     private static final RSAKey SIGNING_KEY = generateSigningKey();
 
