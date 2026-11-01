@@ -1358,6 +1358,24 @@ class UrlServiceTest {
     }
 
     @Test
+    void aCreateWhoseCampaignWasAllowedMeanwhileStillGetsTheRandomDomainReviewAndTheWarningPage() {
+        final var longUrl = "https://xdvqnxj.com/wqamhcsom/?r=plfN8D&t=1793210826";
+        final var url = anonymousCreateOf(longUrl, LinkVerdict.clean());
+        when(domainAgeService.registeredOn("xdvqnxj.com")).thenReturn(Optional.empty());
+        when(campaignService.holdingCampaignId(any())).thenReturn(Optional.of(4L));
+        when(campaignService.confirmHold(4L)).thenReturn(false);
+
+        final var created = createAnonymously(longUrl);
+
+        assertThat(url.getBlockReason()).isNull();
+        assertThat(created.warningPage()).isTrue();
+        assertThat(url.isWarningPage()).isTrue();
+        verify(reviewQueueService).flag(url, List.of(RANDOM_LOOKING_DOMAIN));
+        verify(campaignService, never()).addHeldLink(anyLong(), anyLong(), any());
+        verify(signInFormCheckService).checkLater(created.id());
+    }
+
+    @Test
     void aHeldShapeIsNeverDeduplicated() {
         final var url = anonymousCreateOf(CAMPAIGN_LINK, LinkVerdict.clean());
         org.mockito.Mockito.lenient().when(urlRepository.findByLongUrlAndActiveTrueAndOwnerIsNull(CAMPAIGN_LINK))

@@ -429,7 +429,7 @@ class LinkFlowsWithoutOpenInViewTest {
     }
 
     @Test
-    void aHoldAllowedBeforeTheCreateCommitsLeavesTheLinkActiveAndRedirecting() throws Exception {
+    void aHoldAllowedBeforeTheCreateCommitsLeavesTheLinkActiveWithItsSignals() throws Exception {
         final var longUrl = "https://ll.omaehhm.com/wqamhcsom/?r=allowed1&t=1";
         doReturn(null).when(userService).getUserFromToken();
         when(campaignService.holdingCampaignId(any())).thenReturn(Optional.of(78L));
@@ -440,12 +440,13 @@ class LinkFlowsWithoutOpenInViewTest {
             mockMvc.perform(post("/api/v1/urls").contentType(MediaType.APPLICATION_JSON).content("{\"longUrl\":\"" + longUrl + "\"}"))
                     .andExpect(status().isCreated());
 
-            final var stored = jdbcTemplate.queryForMap("select short_url, active, block_reason from url where long_url = ?", longUrl);
+            final var stored = jdbcTemplate.queryForMap("select short_url, active, block_reason, warning_page from url where long_url = ?", longUrl);
             assertThat(stored.get("ACTIVE")).isEqualTo(true);
             assertThat(stored.get("BLOCK_REASON")).isNull();
+            assertThat(stored.get("WARNING_PAGE")).isEqualTo(true);
             verify(campaignService, org.mockito.Mockito.never()).addHeldLink(anyLong(), anyLong(), any());
-            assertThat(locationOf(urlService.redirectResultUrl((String) stored.get("SHORT_URL"), ClickRequest.of("203.0.113.7", "UA", null, "HR"))))
-                    .isEqualTo(longUrl);
+            assertThat(urlService.redirectResultUrl((String) stored.get("SHORT_URL"), ClickRequest.of("203.0.113.7", "UA", null, "HR")))
+                    .isInstanceOfSatisfying(LinkWarningView.class, page -> assertThat(page.location()).isEqualTo(longUrl));
         } finally {
             jdbcTemplate.update("delete from url where long_url = ?", longUrl);
         }

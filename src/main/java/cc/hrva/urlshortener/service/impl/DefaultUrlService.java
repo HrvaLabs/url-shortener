@@ -218,23 +218,19 @@ public class DefaultUrlService implements UrlService {
                 : Signals.none();
 
         final var newWarningPageLink = new AtomicReference<Long>();
-        final var created = transactionOperations.execute(status -> {
+        final var created = Objects.requireNonNull(transactionOperations.execute(status -> {
             if (currentUser != null) {
                 url.setDomain(resolveAndLockDomain(createUrlDto.getDomain(), currentUser));
                 url.setCreatedVia(createdVia);
                 applyPassword(url, createUrlDto.getPassword());
-                return saveUrlForUser(url, currentUser, verdict);
+                return Optional.of(saveUrlForUser(url, currentUser, verdict));
             }
             url.setCreatedVia(createdVia.anonymous());
             applyAnonymousMaximums(url);
-            return heldShape.map(held -> holdNewAnonymousLink(url, held, verdict)).orElseGet(() -> {
-                final var made = createUrlForAnonymousUser(url, verdict, signals);
-                if (made.isNew() && made.url().isWarningPage()) {
-                    newWarningPageLink.set(made.url().getId());
-                }
-                return UrlResponse.from(made.url());
-            });
-        });
+            return heldShape.isPresent()
+                    ? holdNewAnonymousLink(url, heldShape.get())
+                    : Optional.of(madeWithoutAnAccount(createUrlForAnonymousUser(url, verdict, signals), newWarningPageLink));
+        })).orElseGet(() -> saveNoLongerHeld(url, verdict, newWarningPageLink));
         checkRedirectsLater(created.id());
         reportCreated(created, CreatedLink.creatorOf(currentUser != null ? currentUser.getId() : null, clientIP), verdict);
         if (currentUser == null) {
@@ -1103,10 +1099,10 @@ public class DefaultUrlService implements UrlService {
         }
     }
 
-    private UrlResponse holdNewAnonymousLink(final Url url, final HeldShape held, final LinkVerdict verdict) {
+    private Optional<UrlResponse> holdNewAnonymousLink(final Url url, final HeldShape held) {
         if (!campaignService.confirmHold(held.campaignId())) {
             log.info("Campaign stopped holding before the link was saved, saving it as usual campaignId={}", held.campaignId());
-            return UrlResponse.from(createUrlForAnonymousUser(url, verdict, Signals.none()).url());
+            return Optional.empty();
         }
         url.clearForAnonymousUser();
         url.setShortUrl(nextFreeShortUrl(null));
@@ -1117,7 +1113,20 @@ public class DefaultUrlService implements UrlService {
         final var saved = insertNewLink(url, NO_FREE_ALIAS);
         campaignService.addHeldLink(held.campaignId(), saved.getId(), held.domain());
         log.info("New link held for a campaign urlId={} campaignId={}", saved.getId(), held.campaignId());
-        return UrlResponse.from(saved).asCreated();
+        return Optional.of(UrlResponse.from(saved).asCreated());
+    }
+
+    private UrlResponse saveNoLongerHeld(final Url url, final LinkVerdict verdict, final AtomicReference<Long> newWarningPageLink) {
+        final var signals = anonymousLinkSignals.signalsFor(url.getLongUrl(), verdict.outcome());
+        return Objects.requireNonNull(transactionOperations.execute(status ->
+                madeWithoutAnAccount(createUrlForAnonymousUser(url, verdict, signals), newWarningPageLink)));
+    }
+
+    private static UrlResponse madeWithoutAnAccount(final AnonymousLink made, final AtomicReference<Long> newWarningPageLink) {
+        if (made.isNew() && made.url().isWarningPage()) {
+            newWarningPageLink.set(made.url().getId());
+        }
+        return UrlResponse.from(made.url());
     }
 
     private AnonymousLink createUrlForAnonymousUser(final Url url, final LinkVerdict verdict, final Signals signals) {
