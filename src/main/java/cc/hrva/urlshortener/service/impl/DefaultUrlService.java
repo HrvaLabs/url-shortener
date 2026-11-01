@@ -812,8 +812,11 @@ public class DefaultUrlService implements UrlService {
     @Override
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public View redirectResultUrl(final String shortUrl, final ClickRequest click) {
-        refuseBotProbe(shortUrl);
-        return redirect(LinkPlace.primary(shortUrl), click);
+        final var place = LinkPlace.primary(shortUrl);
+        if (isBotProbe(shortUrl)) {
+            return unavailable(place, REASON_MISSING).asPageOnly();
+        }
+        return redirect(place, click);
     }
 
     @Override
@@ -829,9 +832,13 @@ public class DefaultUrlService implements UrlService {
     }
 
     private static void refuseBotProbe(final String shortUrl) {
-        if (shortUrl != null && BOT_PROBE_PATHS.contains(shortUrl.toLowerCase(Locale.ROOT))) {
+        if (isBotProbe(shortUrl)) {
             throw new UrlNotFoundException("URL doesn't exist");
         }
+    }
+
+    private static boolean isBotProbe(final String shortUrl) {
+        return shortUrl != null && BOT_PROBE_PATHS.contains(shortUrl.toLowerCase(Locale.ROOT));
     }
 
     private View redirect(final LinkPlace place, final ClickRequest click) {
@@ -1043,7 +1050,7 @@ public class DefaultUrlService implements UrlService {
         return appProperties.getFrontendUrl() + "/protected/" + place.alias() + (place.hostname() == null ? "" : "?domain=" + encoded(place.hostname()));
     }
 
-    private View unavailable(final LinkPlace place, final String reason) {
+    private LinkUnavailableView unavailable(final LinkPlace place, final String reason) {
         return LinkUnavailableView.of(templateEngine, appProperties.getFrontendUrl(), appProperties.getServerUrl(), place.alias(), place.hostname(), reason);
     }
 

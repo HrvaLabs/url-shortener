@@ -32,6 +32,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
+import cc.hrva.urlshortener.controller.LinkUnavailableView;
 import cc.hrva.urlshortener.controller.LinkWarningTemplates;
 import cc.hrva.urlshortener.controller.LinkWarningView;
 import cc.hrva.urlshortener.converter.CreateUrlToUrlConverter;
@@ -4482,8 +4483,8 @@ class UrlServiceTest {
         try {
             java.util.Locale.setDefault(java.util.Locale.forLanguageTag("tr-TR"));
 
-            assertThatThrownBy(() -> urlServiceWithMeters().redirectResultUrl("FAVICON.ICO", CLICK))
-                    .isInstanceOf(cc.hrva.urlshortener.exception.UrlNotFoundException.class);
+            assertThat(urlServiceWithMeters().redirectResultUrl("FAVICON.ICO", CLICK)).isInstanceOfSatisfying(LinkUnavailableView.class, page ->
+                    assertThat(page.pageOnly()).isTrue());
         } finally {
             java.util.Locale.setDefault(serverLocale);
         }
@@ -4492,9 +4493,14 @@ class UrlServiceTest {
     }
 
     @Test
-    void botProbesStillGetANotFound() {
-        assertThatThrownBy(() -> urlServiceWithMeters().redirectResultUrl("favicon.ico", CLICK))
-                .isInstanceOf(cc.hrva.urlshortener.exception.UrlNotFoundException.class);
+    void botProbesGetTheNotFoundPageWhateverTheyAccept() {
+        for (final var probe : List.of("robots.txt", "wp-login.php", ".env", "favicon.ico")) {
+            assertThat(urlServiceWithMeters().redirectResultUrl(probe, CLICK)).as(probe).isInstanceOfSatisfying(LinkUnavailableView.class, page -> {
+                assertThat(page.pageOnly()).isTrue();
+                assertThat(page.status()).isEqualTo(org.springframework.http.HttpStatus.NOT_FOUND);
+                assertThat(page.shortLink()).endsWith("/" + probe);
+            });
+        }
 
         org.mockito.Mockito.verifyNoInteractions(urlRepository);
     }

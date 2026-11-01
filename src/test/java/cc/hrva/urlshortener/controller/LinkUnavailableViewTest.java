@@ -126,6 +126,21 @@ class LinkUnavailableViewTest {
     }
 
     @Test
+    void aPageOnlyViewAnswersAJsonClientWithThePageToo() throws Exception {
+        final var view = page("wp-login.php", null, "missing").asPageOnly();
+
+        for (final var accept : new String[] {"application/json", "application/problem+json"}) {
+            final var response = render(view, "GET", accept);
+
+            assertThat(response.getStatus()).isEqualTo(404);
+            assertThat(response.getContentType()).isEqualTo("text/html;charset=UTF-8");
+            assertThat(response.getHeader(HttpHeaders.CACHE_CONTROL)).isEqualTo(LinkPageHeaders.CACHE_CONTROL);
+            assertThat(response.getContentAsString()).contains("hrva.cc/wp-login.php", "There&#39;s no hrva.cc link with this name.");
+        }
+        assertThat(render(view, "HEAD", "application/json").getContentAsByteArray()).isEmpty();
+    }
+
+    @Test
     void anyOtherClientGetsThePage() throws Exception {
         assertThat(render(page("abc", null, "missing"), "GET", "*/*").getContentType()).isEqualTo("text/html;charset=UTF-8");
         assertThat(render(page("abc", null, "missing"), "GET", null).getContentType()).isEqualTo("text/html;charset=UTF-8");

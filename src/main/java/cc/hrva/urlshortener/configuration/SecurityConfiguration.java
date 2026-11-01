@@ -7,6 +7,7 @@ import cc.hrva.urlshortener.security.JwtFilter;
 import cc.hrva.urlshortener.security.OAuth2LoginFailureHandler;
 import cc.hrva.urlshortener.security.OAuth2LoginSuccessHandler;
 import cc.hrva.urlshortener.security.OAuth2LoginUserService;
+import cc.hrva.urlshortener.security.UnknownPageFilter;
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import jakarta.servlet.DispatcherType;
 import java.util.Arrays;
@@ -39,6 +40,7 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
+import org.thymeleaf.TemplateEngine;
 
 @Configuration
 @EnableWebSecurity
@@ -51,6 +53,7 @@ public class SecurityConfiguration {
     private final UserDetailsService userDetailsService;
     private final OAuth2LoginSuccessHandler oAuth2LoginSuccessHandler;
     private final OAuth2LoginUserService oAuth2LoginUserService;
+    private final TemplateEngine templateEngine;
 
     @Bean
     public AuthenticationProvider authenticationProvider(final PasswordEncoder passwordEncoder) {
@@ -103,6 +106,7 @@ public class SecurityConfiguration {
                         .failureHandler(new OAuth2LoginFailureHandler(appProperties.getFrontendUrl()))
                 )
                 .headers(headers -> headers.frameOptions(HeadersConfigurer.FrameOptionsConfig::disable))
+                .addFilterBefore(new UnknownPageFilter(templateEngine, appProperties), UsernamePasswordAuthenticationFilter.class)
                 .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();

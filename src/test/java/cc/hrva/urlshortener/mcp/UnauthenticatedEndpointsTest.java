@@ -247,9 +247,13 @@ class UnauthenticatedEndpointsTest {
                 .andExpect(header().string(HttpHeaders.ALLOW, containsString("GET")))
                 .andExpect(jsonPath("$.detail").value("Method not allowed"))
                 .andExpect(this::hasNoJavaInternals);
-        mockMvc.perform(get("/no/such/path").header(HttpHeaders.AUTHORIZATION, "Bearer " + appJwt))
+        mockMvc.perform(get("/api/v1/no/such/path").header(HttpHeaders.AUTHORIZATION, "Bearer " + appJwt))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.detail").value("Not found"))
+                .andExpect(this::hasNoJavaInternals);
+        mockMvc.perform(get("/no/such/path").header(HttpHeaders.AUTHORIZATION, "Bearer " + appJwt))
+                .andExpect(status().isNotFound())
+                .andExpect(content().contentType("text/html;charset=UTF-8"))
                 .andExpect(this::hasNoJavaInternals);
 
         verify(urlService, never()).redirectResultUrl(any(), any());

@@ -10,6 +10,7 @@ import cc.hrva.urlshortener.security.JwtFilter;
 import cc.hrva.urlshortener.security.OAuth2LoginSuccessHandler;
 import cc.hrva.urlshortener.security.OAuth2LoginUserService;
 import cc.hrva.urlshortener.security.TokenProvider;
+import cc.hrva.urlshortener.security.UnknownPageFilter;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiter;
 import com.nimbusds.jose.JOSEException;
 import com.nimbusds.jose.jwk.RSAKey;
@@ -70,6 +71,7 @@ class EveryEndpointIsPublicOrSignedInTest {
             "GET /",
             "GET /{short}",
             "GET /{short}/",
+            "GET /favicon.ico",
             "GET /@{handle:.+}",
             "GET /error",
             "GET /.well-known/security.txt",
@@ -155,6 +157,18 @@ class EveryEndpointIsPublicOrSignedInTest {
     @Test
     void everyPublicEntryIsARealEndpoint() {
         assertThat(endpoints()).containsAll(PUBLIC);
+    }
+
+    @Test
+    void noEndpointIsAnsweredAsAnUnknownPage() {
+        final var answeredAsUnknown = endpoints().stream()
+                .filter(endpoint -> {
+                    final var methodAndPath = endpoint.split(" ", 2);
+                    return UnknownPageFilter.isUnknownPage(methodAndPath[0], sample(methodAndPath[1]));
+                })
+                .toList();
+
+        assertThat(answeredAsUnknown).isEmpty();
     }
 
     @Test

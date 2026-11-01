@@ -19,7 +19,7 @@ import org.thymeleaf.TemplateEngine;
 import org.thymeleaf.context.Context;
 
 public record LinkUnavailableView(TemplateEngine templateEngine, String frontendUrl, String shortLink, String reportTarget, String reason,
-                                  String message) implements View {
+                                  String message, boolean pageOnly) implements View {
 
     public static final String MISSING = "missing";
     public static final String BLOCKED = "blocked";
@@ -49,7 +49,12 @@ public record LinkUnavailableView(TemplateEngine templateEngine, String frontend
         final var shownAlias = StringUtils.left(StringUtils.defaultString(alias), MAX_ALIAS_LENGTH);
         final var shortLink = host + SLASH + shownAlias;
         final var message = MISSING.equals(reason) ? "There's no " + host + " link with this name." : MESSAGES.getOrDefault(reason, MESSAGES.get(INACTIVE));
-        return new LinkUnavailableView(templateEngine, frontendUrl, shortLink, StringUtils.isBlank(hostname) ? shownAlias : shortLink, reason, message);
+        return new LinkUnavailableView(templateEngine, frontendUrl, shortLink, StringUtils.isBlank(hostname) ? shownAlias : shortLink, reason, message,
+                false);
+    }
+
+    public LinkUnavailableView asPageOnly() {
+        return new LinkUnavailableView(templateEngine, frontendUrl, shortLink, reportTarget, reason, message, true);
     }
 
     public HttpStatus status() {
@@ -67,7 +72,7 @@ public record LinkUnavailableView(TemplateEngine templateEngine, String frontend
 
     @Override
     public void render(final Map<String, ?> model, final HttpServletRequest request, final HttpServletResponse response) throws IOException {
-        if (wantsJson(request)) {
+        if (!pageOnly && wantsJson(request)) {
             if (!response.isCommitted()) {
                 response.reset();
             }
