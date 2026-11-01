@@ -1,6 +1,6 @@
 package cc.hrva.urlshortener.service;
 
-import cc.hrva.urlshortener.exception.NoAuthorizationException;
+import cc.hrva.urlshortener.exception.NotSignedInException;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.service.impl.DefaultSessionService;
@@ -45,8 +45,12 @@ class DefaultSessionServiceTest {
     }
 
     @Test
-    void signingOutEverywhereNeedsASignedInAccount() {
-        assertThatThrownBy(sessionService::endEverywhere).isInstanceOf(NoAuthorizationException.class);
+    void signingOutEverywhereNeedsASignedInAccountAndAnswers401() {
+        assertThatThrownBy(sessionService::endEverywhere).isInstanceOf(NotSignedInException.class);
+
+        SecurityContextHolder.getContext().setAuthentication(UsernamePasswordAuthenticationToken.authenticated("gone@hrva.cc", null, List.of()));
+        when(userRepository.findByEmail("gone@hrva.cc")).thenReturn(Optional.empty());
+        assertThatThrownBy(sessionService::endEverywhere).isInstanceOf(NotSignedInException.class);
     }
 
 }

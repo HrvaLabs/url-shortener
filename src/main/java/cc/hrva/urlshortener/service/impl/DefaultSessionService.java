@@ -1,6 +1,6 @@
 package cc.hrva.urlshortener.service.impl;
 
-import cc.hrva.urlshortener.exception.NoAuthorizationException;
+import cc.hrva.urlshortener.exception.NotSignedInException;
 import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.service.SessionService;
 import cc.hrva.urlshortener.service.twostep.AccountLock;
@@ -27,10 +27,10 @@ public class DefaultSessionService implements SessionService {
     public void endEverywhere() {
         final var authentication = SecurityContextHolder.getContext().getAuthentication();
         if (authentication == null) {
-            throw new NoAuthorizationException(NOT_AUTHENTICATED);
+            throw new NotSignedInException(NOT_AUTHENTICATED);
         }
         final var user = userRepository.findByEmail(authentication.getName())
-                .orElseThrow(() -> new NoAuthorizationException(NOT_AUTHENTICATED));
+                .orElseThrow(() -> new NotSignedInException(NOT_AUTHENTICATED));
 
         accountLock.lock(user).endSessions(Instant.now());
         log.info("Signed out everywhere user id={}", user.getId());
