@@ -328,15 +328,35 @@ class ApiKeyUseOnCreateFlowTest {
                 insert into api_key (id, key_hash, key_prefix, owner_id, api_calls_used, expiration_date, active)
                 values (?, ?, 'hrva_B', ?, 0, ?, true)""", BEARER_KEY, ApiKeyTokens.hash(BEARER_KEY_VALUE), OWNER, LocalDateTime.now().plusMonths(6));
 
-        mockMvc.perform(post("/api/v1/urls")
+        final var created = mockMvc.perform(post("/api/v1/urls")
                         .header("Authorization", "Bearer " + BEARER_KEY_VALUE)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"longUrl\":\"https://example.com/bearer\"}"))
-                .andExpect(status().isOk())
-                .andExpect(header().string("RateLimit-Limit", "600"));
+                .andExpect(status().isCreated())
+                .andExpect(header().string("RateLimit-Limit", "600"))
+                .andReturn().getResponse();
 
         assertThat(jdbcTemplate.queryForObject("select api_calls_used from api_key where id = ?", Long.class, BEARER_KEY)).isOne();
         assertThat(linksOfTheOwner()).isOne();
+        verifyNoInteractions(tokenProvider);
+        assertThat(created.getHeader("Location")).endsWith("/peek");
+    }
+
+    @Test
+    void underDenyByDefaultAKeySentAsABearerTokenPassesThePublicGetsAndNeverSignsAnyoneIn() throws Exception {
+        jdbcTemplate.update("""
+                insert into api_key (id, key_hash, key_prefix, owner_id, api_calls_used, expiration_date, active)
+                values (?, ?, 'hrva_B', ?, 0, ?, true)""", BEARER_KEY, ApiKeyTokens.hash(BEARER_KEY_VALUE), OWNER, LocalDateTime.now().plusMonths(6));
+
+        mockMvc.perform(get("/api/v1/urls/{short}/peek", "nothing").header("Authorization", "Bearer " + BEARER_KEY_VALUE))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.detail").value("URL doesn't exist"))
+                .andExpect(header().string("RateLimit-Limit", "600"));
+        mockMvc.perform(get("/api/v1/urls").header("Authorization", "Bearer " + BEARER_KEY_VALUE))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.detail").value("Sign in to continue."));
+
+        assertThat(jdbcTemplate.queryForObject("select api_calls_used from api_key where id = ?", Long.class, BEARER_KEY)).isOne();
         verifyNoInteractions(tokenProvider);
     }
 
