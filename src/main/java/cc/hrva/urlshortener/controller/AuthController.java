@@ -1,7 +1,6 @@
 package cc.hrva.urlshortener.controller;
 
 import cc.hrva.urlshortener.dto.*;
-import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.service.AuthService;
 import cc.hrva.urlshortener.service.TwoFactorService;
 import cc.hrva.urlshortener.service.TwoStepSettingsService;
@@ -41,8 +40,8 @@ public class AuthController {
         return ResponseEntity.ok(authService.register(user));
     }
 
-    @Operation(summary = "Request password reset", description = "Send a password reset link to the given email address.")
-    @ApiResponse(responseCode = "404", description = "User not found")
+    @Operation(summary = "Request password reset", description = "Send a password reset link to the given email address. The answer is the same whether or not an account uses it.")
+    @ApiResponse(responseCode = "202", description = "Accepted; a link valid for 1 hour is emailed if an account uses the address")
     @PostMapping("/password-reset")
     public ResponseEntity<Void> requestPasswordReset(@Valid @RequestBody final RequestPasswordResetDto dto) {
         log.info("Forgot password controller invoked for {}", EmailAddresses.masked(dto.getEmail()));
@@ -51,13 +50,15 @@ public class AuthController {
         return ResponseEntity.accepted().build();
     }
 
-    @Operation(summary = "Confirm password reset", description = "Complete the password reset process using the token sent via email.")
+    @Operation(summary = "Confirm password reset", description = "Set a new password with the token from the reset email. A token works once, for 1 hour. Every session of the account ends.")
+    @ApiResponse(responseCode = "204", description = "Password changed")
     @ApiResponse(responseCode = "400", description = "Validation error or bad request")
-    @ApiResponse(responseCode = "404", description = "User or token not found")
+    @ApiResponse(responseCode = "410", description = "The link expired or was already used")
     @PostMapping("/password-reset/confirm")
-    public ResponseEntity<User> resetPassword(@Valid @RequestBody final PasswordResetDto passwordResetDto) {
-        log.info("Forgot password controller invoked for {}", EmailAddresses.masked(passwordResetDto.getEmail()));
-        return ResponseEntity.ok(userService.resetPassword(passwordResetDto));
+    public ResponseEntity<Void> resetPassword(@Valid @RequestBody final PasswordResetDto passwordResetDto) {
+        log.info("Password reset confirm controller invoked");
+        userService.resetPassword(passwordResetDto);
+        return ResponseEntity.noContent().build();
     }
 
     @Operation(summary = "Verify email", description = "Confirm a user's email address using the token sent at registration.")

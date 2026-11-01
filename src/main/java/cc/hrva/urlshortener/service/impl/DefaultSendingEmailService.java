@@ -41,7 +41,6 @@ import lombok.RequiredArgsConstructor;
 import org.apache.commons.lang3.StringUtils;
 import lombok.extern.slf4j.Slf4j;
 import cc.hrva.urlshortener.model.Email;
-import cc.hrva.urlshortener.model.ResetToken;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.security.StoredPasswords;
@@ -90,10 +89,10 @@ public class DefaultSendingEmailService implements SendingEmailService {
 
     @Override
     @Async
-    public void sendEmailForgotPassword(final User user, final ResetToken resetToken) {
+    public void sendEmailForgotPassword(final User user, final String resetToken) {
         final var ctx = getContext(user);
-        ctx.setVariable("token", resetToken.getToken());
-        ctx.setVariable("full_password_reset_link", MessageFormat.format("{0}/reset-password/{1}", appProperties.getFrontendUrl(), resetToken.getToken()));
+        ctx.setVariable("token", resetToken);
+        ctx.setVariable("full_password_reset_link", MessageFormat.format("{0}/reset-password/{1}", appProperties.getFrontendUrl(), resetToken));
 
         final var htmlContent = templateEngine.process("reset_password", ctx);
 

@@ -2,7 +2,6 @@ package cc.hrva.urlshortener.controller;
 
 import cc.hrva.urlshortener.configuration.GlobalExceptionHandler;
 import cc.hrva.urlshortener.dto.*;
-import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.service.AuthService;
 import cc.hrva.urlshortener.service.TwoStepSettingsService;
 import cc.hrva.urlshortener.service.UserService;
@@ -30,6 +29,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -126,15 +126,14 @@ class AuthControllerTest {
     }
 
     @Test
-    void shouldResetPassword() throws Exception {
-        final var user = User.builder().id(1L).email("test@example.com").build();
-        when(userService.resetPassword(any(PasswordResetDto.class))).thenReturn(user);
-
+    void aPasswordResetAnswers204WithNoBody() throws Exception {
         mockMvc.perform(post("/api/v1/auth/password-reset/confirm")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(PasswordResetDto.builder().email("test@example.com").token("token").password("newPassword").build())))
-                .andExpect(status().isOk())
-                .andExpect(header().string("Content-Type", "application/json"));
+                .andExpect(status().isNoContent())
+                .andExpect(content().string(""));
+
+        verify(userService).resetPassword(any(PasswordResetDto.class));
     }
 
     @Test

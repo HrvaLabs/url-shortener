@@ -7,7 +7,6 @@ import cc.hrva.urlshortener.dto.domain.DomainRemovalResponse;
 import cc.hrva.urlshortener.dto.notification.DeadLinksEmail;
 import cc.hrva.urlshortener.dto.notification.WeeklySummary;
 import cc.hrva.urlshortener.model.EmailLog;
-import cc.hrva.urlshortener.model.ResetToken;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.enums.DomainLinkMode;
@@ -24,7 +23,7 @@ public interface SendingEmailService {
     void sendEmailUrlsBlocked(User owner, List<Url> urls);
     void sendEmailAccountDeactivated(User user);
     void sendInactivityWarningEmail(User user, LocalDate deactivationDate);
-    void sendEmailForgotPassword(User user, ResetToken resetToken);
+    void sendEmailForgotPassword(User user, String resetToken);
     void sendPasskeyAddedEmail(User user, String label, LocalDateTime addedAt);
     void sendSignInMethodChangedEmail(User user, String change, LocalDateTime changedAt);
     void sendDecisionsEmailToAdmin(DecisionsDigest digest);

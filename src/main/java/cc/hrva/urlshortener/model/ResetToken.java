@@ -8,7 +8,6 @@ import jakarta.persistence.ManyToOne;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.SequenceGenerator;
 import java.time.LocalDateTime;
-import java.util.UUID;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
@@ -31,7 +30,7 @@ public class ResetToken {
     @ManyToOne
     private User user;
 
-    private String token;
+    private String tokenHash;
 
     private LocalDateTime createDate;
 
@@ -41,7 +40,6 @@ public class ResetToken {
 
     @PrePersist
     public void onCreate() {
-        this.token = UUID.randomUUID().toString();
         this.createDate = LocalDateTime.now();
         this.active = true;
     }

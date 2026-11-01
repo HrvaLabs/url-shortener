@@ -16,7 +16,6 @@ import cc.hrva.urlshortener.exception.MailingException;
 import cc.hrva.urlshortener.model.CustomDomain;
 import cc.hrva.urlshortener.model.Email;
 import cc.hrva.urlshortener.model.EmailLog;
-import cc.hrva.urlshortener.model.ResetToken;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.VerificationToken;
@@ -835,7 +834,7 @@ class DefaultSendingEmailServiceTest {
     }
 
     private static Stream<Arguments> accountEmails() {
-        final var resetToken = ResetToken.builder().token("reset-token-41").createDate(LocalDateTime.of(2026, 10, 29, 9, 14, 2)).build();
+        final var resetToken = "reset-token-41";
         final var verificationToken = VerificationToken.builder().token("verify-token-42").build();
         final var flaggedLink = Url.builder().shortUrl("menu").longUrl("https://example.com/menu").build();
         return Stream.of(
@@ -1603,7 +1602,7 @@ class DefaultSendingEmailServiceTest {
     }
 
     private static Stream<Arguments> accountEmailSenders() {
-        final var resetToken = ResetToken.builder().token("reset-token-41").createDate(LocalDateTime.of(2026, 10, 29, 9, 14, 2)).build();
+        final var resetToken = "reset-token-41";
         final var verificationToken = VerificationToken.builder().token("verify-token-42").build();
         return Stream.of(
                 Arguments.of("reset_password", (Consumer<DefaultSendingEmailService>) service -> service.sendEmailForgotPassword(OWNER, resetToken)),

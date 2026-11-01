@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.9.xsd">
+
+    <include file="classpath:/db/changelog/codebook/authorities.xml"/>
+    <include file="classpath:/db/changelog/table/user.xml"/>
+    <include file="classpath:/db/changelog/table/V1.0.0_remove_name_from_user_table.xml"/>
+    <include file="classpath:/db/changelog/table/reset_token.xml"/>
+
+    <changeSet author="test" id="reset-token-hash-existing-tokens">
+        <insert tableName="user_account">
+            <column name="id" valueNumeric="1"/>
+            <column name="email" value="reset@example.com"/>
+            <column name="password" value="$2a$10$hash"/>
+        </insert>
+        <sql>
+            insert into reset_token (id, user_id, token, create_date, expiration_date, active) values
+                (1, 1, '6f1c2a9e-0b7d-4c3e-9a51-2d8e4f7a1b30', '2026-10-31 22:00:00', '2026-11-01 22:00:00', true),
+                (2, 1, 'a4e8d2c1-5b3f-4e6a-8d9c-1f2e3a4b5c6d', '2026-10-30 10:00:00', '2026-10-31 10:00:00', false)
+        </sql>
+    </changeSet>
+
+    <include file="classpath:/db/changelog/041-reset-token-hash.xml"/>
+
+</databaseChangeLog>

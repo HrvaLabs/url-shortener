@@ -164,6 +164,41 @@ wait_until() {
     fail "$what was not ready within ${seconds}s"
 }
 
+# mails_to <address> <subject>: how many emails Mailpit holds for <address> with exactly <subject>.
+mails_to() {
+    curl -sf "$MAIL_API/messages?limit=500" | jq -r --arg to "$1" --arg subject "$2" \
+        '[.messages[] | select(.Subject == $subject and any(.To[]; (.Address | ascii_downcase) == ($to | ascii_downcase)))] | length'
+}
+
+# newest_mail_text <address> <subject>: the plain text of the newest such email.
+newest_mail_text() {
+    local id
+    id=$(curl -sf "$MAIL_API/messages?limit=500" | jq -r --arg to "$1" --arg subject "$2" \
+        '[.messages[] | select(.Subject == $subject and any(.To[]; (.Address | ascii_downcase) == ($to | ascii_downcase)))][0].ID')
+    curl -sf "$MAIL_API/message/$id" | jq -r '.Text + "\n" + .HTML'
+}
+
+# wait_for_mail <address> <subject> <count before>: waits up to 20 s for one more such email.
+wait_for_mail() {
+    local second
+    for (( second = 0; second < 20; second++ )); do
+        (( $(mails_to "$1" "$2") > $3 )) && return 0
+        sleep 1
+    done
+    fail "no new '$2' email to $1 within 20s"
+}
+
+# reset_token_from_mail <address>: asks for a password reset and reads the token from the link in the email.
+reset_token_from_mail() {
+    local before
+    before=$(mails_to "$1" "$RESET_SUBJECT")
+    http -X POST "$BASE/api/v1/auth/password-reset" -H "CF-Connecting-IP: ${2:-192.0.2.200}" -H 'Content-Type: application/json' -d "{\"email\":\"$1\"}"
+    [[ $HTTP_STATUS == 202 ]] || fail "POST /api/v1/auth/password-reset for $1: expected 202, got $HTTP_STATUS"
+    wait_for_mail "$1" "$RESET_SUBJECT" "$before"
+    newest_mail_text "$1" "$RESET_SUBJECT" | grep -oE '/reset-password/[A-Za-z0-9_-]{43}' | head -n1 | sed 's#/reset-password/##'
+}
+RESET_SUBJECT="Password reset token"
+
 psql_query() {
     docker exec "$POSTGRES_CONTAINER" psql -U "$DB_USER" -d url_shortener -P pager=off -c "$1" | sed 's/^/  /'
 }
@@ -304,13 +339,15 @@ docker run -d --rm --name "$POSTGRES_CONTAINER" --label hrva-mcp-e2e \
     -e POSTGRES_USER="$DB_USER" -e POSTGRES_PASSWORD="$DB_PASSWORD" -e POSTGRES_DB=url_shortener \
     -p 127.0.0.1::5432 postgres:18 >/dev/null
 docker run -d --rm --name "$REDIS_CONTAINER" --label hrva-mcp-e2e -p 127.0.0.1::6379 redis:8 >/dev/null
-docker run -d --rm --name "$MAIL_CONTAINER" --label hrva-mcp-e2e -p 127.0.0.1::1025 axllent/mailpit >/dev/null
+docker run -d --rm --name "$MAIL_CONTAINER" --label hrva-mcp-e2e -p 127.0.0.1::1025 -p 127.0.0.1::8025 axllent/mailpit >/dev/null
 POSTGRES_PORT=$(host_port "$POSTGRES_CONTAINER" 5432)
 REDIS_PORT=$(host_port "$REDIS_CONTAINER" 6379)
 MAIL_PORT=$(host_port "$MAIL_CONTAINER" 1025)
+MAIL_API="http://127.0.0.1:$(host_port "$MAIL_CONTAINER" 8025)/api/v1"
 wait_until 60 "Postgres" docker exec "$POSTGRES_CONTAINER" pg_isready -q -h 127.0.0.1 -U "$DB_USER" -d url_shortener
 wait_until 30 "Redis" docker exec "$REDIS_CONTAINER" redis-cli ping
 wait_until 30 "Mailpit" bash -c "exec 3<>/dev/tcp/127.0.0.1/$MAIL_PORT"
+wait_until 30 "Mailpit API" curl -sf "$MAIL_API/messages"
 echo "  containers $RUN_ID-{postgres,redis,mail}: Postgres 18 on 127.0.0.1:$POSTGRES_PORT, Redis 8 on 127.0.0.1:$REDIS_PORT, Mailpit SMTP on 127.0.0.1:$MAIL_PORT"
 
 CF_PORT=$(python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')
@@ -1106,13 +1143,11 @@ http "$BASE/api/v1/users/me" -H "Authorization: Bearer $KEY_JWT"
 expect_eq "$HTTP_STATUS $(header_value content-type) $(jq -r .detail <<<"$HTTP_BODY")" '401 application/problem+json Your session ended. Sign in again.' "the token from before the change is refused: a 401 problem, session ended"
 http "$BASE/api/v1/users/me" -H "Authorization: $RENEWED_JWT"
 expect_eq "$HTTP_STATUS $(jq -r .email <<<"$HTTP_BODY")" "200 $USER_EMAIL" "the new token keeps this device signed in"
-http -X POST "$BASE/api/v1/auth/password-reset" -H 'Content-Type: application/json' -d "{\"email\":\"$USER_EMAIL\"}"
-expect_eq "$HTTP_STATUS" 202 "POST /api/v1/auth/password-reset"
-RESET_TOKEN=$(psql_value "select r.token from reset_token r join user_account u on u.id = r.user_id where u.email = '$USER_EMAIL' and r.active order by r.id desc limit 1;")
+RESET_TOKEN=$(reset_token_from_mail "$USER_EMAIL")
+expect_eq "${#RESET_TOKEN}" 43 "POST /api/v1/auth/password-reset is 202, and the email carries a 43-character token in its link"
 http -X POST "$BASE/api/v1/auth/password-reset/confirm" -H 'Content-Type: application/json' \
     -d "{\"token\":\"$RESET_TOKEN\",\"email\":\"$USER_EMAIL\",\"password\":\"reset-$USER_PASSWORD\"}"
-expect_eq "$HTTP_STATUS" 200 "POST /api/v1/auth/password-reset/confirm"
-expect_contains "$(jq -c '[.authorities[].name]' <<<"$HTTP_BODY")" '"ROLE_USER"' "the answer carries the roles"
+expect_eq "$HTTP_STATUS ${#HTTP_BODY}" "204 0" "POST /api/v1/auth/password-reset/confirm answers 204 with no body"
 
 section "21. Notifications and consent"
 NOTIFY_PASSWORD=reset-$USER_PASSWORD
@@ -2287,5 +2322,31 @@ signs_in_again() {
 }
 wait_until 20 "password sign-in after the pause" signs_in_again
 ok "once Redis answers again, the same sign-in is 200"
+
+echo "  --- password reset tokens: hashed, 1 hour, single use"
+expect_eq "$(psql_value "select exectype from databasechangelog where id = '041-reset-token-hash';")" EXECUTED "041 ran"
+expect_eq "$(psql_value "select count(*) from information_schema.columns where table_name = 'reset_token' and column_name = 'token';")" 0 \
+    "reset_token has no plaintext column"
+RESET_TOKEN=$(reset_token_from_mail "$USER_EMAIL")
+expect_eq "$(psql_value "select token_hash from reset_token where active order by id desc limit 1;")" \
+    "$(printf '%s' "$RESET_TOKEN" | shasum -a 256 | cut -d' ' -f1)" "only the SHA-256 of the emailed token is stored"
+expect_eq "$(psql_value "select extract(epoch from expiration_date - create_date)::int from reset_token where active order by id desc limit 1;")" 3600 \
+    "it expires an hour after it was made"
+expect_eq "$(psql_value "select count(*) from email_log where subject = '$RESET_SUBJECT' and body like '%$RESET_TOKEN%';")" 0 \
+    "no email log row keeps the token"
+http -X POST "$BASE/api/v1/auth/password-reset/confirm" -H 'Content-Type: application/json' \
+    -d "{\"token\":\"$RESET_TOKEN\",\"email\":\"$USER_EMAIL\",\"password\":\"reset-$USER_PASSWORD\"}"
+expect_eq "$HTTP_STATUS" 204 "the token sets a password once"
+http -X POST "$BASE/api/v1/auth/password-reset/confirm" -H 'Content-Type: application/json' \
+    -d "{\"token\":\"$RESET_TOKEN\",\"email\":\"$USER_EMAIL\",\"password\":\"again-$USER_PASSWORD\"}"
+expect_eq "$HTTP_STATUS $(header_value content-type) $(jq -r .detail <<<"$HTTP_BODY")" \
+    "410 application/problem+json This reset link has expired or was already used. Ask for a new one." "a second use is a 410 problem"
+RESET_TOKEN=$(reset_token_from_mail "$USER_EMAIL")
+psql_value "update reset_token set expiration_date = (now() at time zone 'utc') - interval '1 second' where active;" >/dev/null
+http -X POST "$BASE/api/v1/auth/password-reset/confirm" -H 'Content-Type: application/json' \
+    -d "{\"token\":\"$RESET_TOKEN\",\"email\":\"$USER_EMAIL\",\"password\":\"again-$USER_PASSWORD\"}"
+expect_eq "$HTTP_STATUS" 410 "an expired token is refused before the minute job deactivates it"
+session_login 203.0.113.252 "$USER_EMAIL" "$SESSION_PASSWORD"
+expect_eq "$HTTP_STATUS" 200 "the password is still the one the first use set"
 
 section "Done: every step passed"

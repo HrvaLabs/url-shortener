@@ -1,8 +1,10 @@
 package cc.hrva.urlshortener.service.impl;
 
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
-import cc.hrva.urlshortener.exception.NoAuthorizationException;
+import cc.hrva.urlshortener.exception.ResetLinkExpiredException;
 import cc.hrva.urlshortener.repository.ResetTokenRepository;
+import cc.hrva.urlshortener.security.ResetTokens;
+import java.time.Clock;
 import java.time.LocalDateTime;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
@@ -20,10 +22,11 @@ public class DefaultResetTokenService implements ResetTokenService {
 
     private final AppProperties appProperties;
     private final ResetTokenRepository resetTokenRepository;
+    private final Clock clock;
 
     @Override
     public void deactivateExpiredPasswordResetTokens() {
-        deactivateResetTokens(resetTokenRepository.findByExpirationDateIsLessThanEqualAndActiveTrue(LocalDateTime.now()));
+        deactivateResetTokens(resetTokenRepository.findByExpirationDateIsLessThanEqualAndActiveTrue(now()));
     }
 
     @Override
@@ -34,31 +37,36 @@ public class DefaultResetTokenService implements ResetTokenService {
     @Override
     public void deleteExpiredPasswordResetTokens() {
         final var resetTokens = resetTokenRepository.findByExpirationDateIsLessThanEqualAndActiveFalse(
-                LocalDateTime.now().minusHours(appProperties.getIpRetentionDurationInHours()));
+                now().minusHours(appProperties.getIpRetentionDurationInHours()));
 
         resetTokenRepository.deleteAll(resetTokens);
         if (!resetTokens.isEmpty()) log.info("Deleted {} reset tokens", resetTokens.size());
     }
 
     @Override
-    public ResetToken getResetTokenFromUserAndToken(final User user, final String token) {
-        return resetTokenRepository.findResetTokenByUserAndTokenAndActiveTrue(user, token)
-                .orElseThrow(() -> new NoAuthorizationException("Invalid credentials"));
-    }
-
-    @Override
     @Transactional
-    public void deactivateAndSaveToken(final ResetToken token) {
-        token.setActive(false);
-        resetTokenRepository.save(token);
+    public ResetToken claim(final User user, final String token) {
+        final var resetToken = resetTokenRepository.findByUserAndTokenHashAndActiveTrue(user, ResetTokens.hash(token))
+                .orElseThrow(ResetLinkExpiredException::new);
+        if (resetTokenRepository.claim(resetToken.getId(), now()) == 0) {
+            throw new ResetLinkExpiredException();
+        }
+        return resetToken;
     }
 
     @Override
-    public ResetToken createTokenForUser(final User user) {
-        return resetTokenRepository.save(ResetToken.builder()
+    public String createTokenForUser(final User user) {
+        final var token = ResetTokens.generate();
+        resetTokenRepository.save(ResetToken.builder()
                 .user(user)
-                .expirationDate(LocalDateTime.now().plusHours(appProperties.getResetTokenExpirationInHours()))
+                .tokenHash(ResetTokens.hash(token))
+                .expirationDate(now().plusHours(appProperties.getResetTokenExpirationInHours()))
                 .build());
+        return token;
+    }
+
+    private LocalDateTime now() {
+        return LocalDateTime.now(clock);
     }
 
     private void deactivateResetTokens(List<ResetToken> resetTokens) {

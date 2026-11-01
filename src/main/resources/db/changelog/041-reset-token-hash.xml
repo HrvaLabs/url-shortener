@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.9.xsd">
+
+    <changeSet author="khrvacic" id="041-reset-token-hash">
+        <comment>Reset tokens are stored as a SHA-256 hash. Every plaintext token is deleted; anyone mid-reset asks for a new link.</comment>
+        <delete tableName="reset_token"/>
+        <dropColumn tableName="reset_token" columnName="token"/>
+        <addColumn tableName="reset_token">
+            <column name="token_hash" type="VARCHAR(64)">
+                <constraints nullable="false" unique="true" uniqueConstraintName="ux_reset_token_token_hash"/>
+            </column>
+        </addColumn>
+        <rollback>
+            <delete tableName="reset_token"/>
+            <dropColumn tableName="reset_token" columnName="token_hash"/>
+            <addColumn tableName="reset_token">
+                <column name="token" type="VARCHAR(255)">
+                    <constraints nullable="false" unique="true"/>
+                </column>
+            </addColumn>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>

@@ -38,6 +38,7 @@ import cc.hrva.urlshortener.dto.UserUpdateDto;
 import cc.hrva.urlshortener.exception.InvalidSortException;
 import cc.hrva.urlshortener.exception.ApiException;
 import cc.hrva.urlshortener.exception.NoAuthorizationException;
+import cc.hrva.urlshortener.exception.ResetLinkExpiredException;
 import cc.hrva.urlshortener.exception.ReauthenticationRequiredException;
 import cc.hrva.urlshortener.exception.UserNotFoundException;
 import cc.hrva.urlshortener.listener.SignUpEmailListener;
@@ -117,6 +118,8 @@ import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class DefaultUserServiceTest {
+
+    private static final String RESET_LINK_EXPIRED = "This reset link has expired or was already used. Ask for a new one.";
 
     private static final String LOCAL_PASSWORD_HASH = "$2a$10$" + "e".repeat(53);
 
@@ -726,15 +729,14 @@ class DefaultUserServiceTest {
     void shouldSendPasswordResetLink() {
         final var requestDto = RequestPasswordResetDto.builder().email("test@example.com").build();
         final var user = User.builder().id(1L).email("test@example.com").build();
-        final var token = ResetToken.builder().id(1L).build();
 
         when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
-        when(resetTokenService.createTokenForUser(user)).thenReturn(token);
+        when(resetTokenService.createTokenForUser(user)).thenReturn("plain-reset-token");
 
         userService.sendPasswordResetLinkToUser(requestDto);
 
         verify(resetTokenService).deactivateActiveResetTokenIfExists(user);
-        verify(sendingEmailService).sendEmailForgotPassword(user, token);
+        verify(sendingEmailService).sendEmailForgotPassword(user, "plain-reset-token");
     }
 
     @Test
@@ -752,34 +754,29 @@ class DefaultUserServiceTest {
     void shouldResetPassword() {
         final var resetDto = PasswordResetDto.builder().email("test@example.com").token("token").password("newPassword").build();
         final var user = User.builder().id(1L).email("test@example.com").build();
-        final var token = ResetToken.builder().id(1L).active(true).build();
 
         when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
-        when(resetTokenService.getResetTokenFromUserAndToken(user, "token")).thenReturn(token);
+        when(resetTokenService.claim(user, "token")).thenReturn(ResetToken.builder().id(1L).user(user).build());
         when(passwordEncoder.encode("newPassword")).thenReturn("newEncoded");
         when(userRepository.save(user)).thenReturn(user);
-        org.mockito.Mockito.doAnswer(inv -> {
-            ResetToken t = inv.getArgument(0);
-            t.setActive(false);
-            return null;
-        }).when(resetTokenService).deactivateAndSaveToken(token);
 
         final var before = Instant.now().truncatedTo(java.time.temporal.ChronoUnit.SECONDS);
 
-        final var result = userService.resetPassword(resetDto);
+        userService.resetPassword(resetDto);
 
-        assertThat(result.getPassword()).isEqualTo("newEncoded");
-        assertThat(token.isActive()).isFalse();
-        assertThat(result.sessionEndedFor(before.minusSeconds(1))).as("every session from before the reset ends").isTrue();
+        assertThat(user.getPassword()).isEqualTo("newEncoded");
+        assertThat(user.sessionEndedFor(before.minusSeconds(1))).as("every session from before the reset ends").isTrue();
+        final var order = org.mockito.Mockito.inOrder(resetTokenService, accountLock);
+        order.verify(resetTokenService).claim(user, "token");
+        order.verify(accountLock).lock(user);
     }
 
     @Test
     void aPasswordResetLocksTheAccountAndTurnsPasswordSignInBackOnAfterSaving() {
         final var resetDto = PasswordResetDto.builder().email("test@example.com").token("token").password("newPassword").build();
         final var user = User.builder().id(1L).email("test@example.com").build();
-        final var token = ResetToken.builder().id(1L).active(true).build();
         when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
-        when(resetTokenService.getResetTokenFromUserAndToken(user, "token")).thenReturn(token);
+        when(resetTokenService.claim(user, "token")).thenReturn(ResetToken.builder().id(1L).user(user).build());
         when(passwordEncoder.encode("newPassword")).thenReturn("newEncoded");
         when(userRepository.save(user)).thenReturn(user);
 
@@ -796,11 +793,23 @@ class DefaultUserServiceTest {
         final var resetDto = PasswordResetDto.builder().email("test@example.com").token("token").password("newPassword").build();
         final var user = User.builder().id(1L).email("test@example.com").build();
         when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
-        when(resetTokenService.getResetTokenFromUserAndToken(user, "token")).thenReturn(ResetToken.builder().id(1L).active(false).build());
+        when(resetTokenService.claim(user, "token")).thenThrow(new ResetLinkExpiredException());
 
-        assertThatThrownBy(() -> userService.resetPassword(resetDto)).hasMessage("Token expired");
+        assertThatThrownBy(() -> userService.resetPassword(resetDto)).hasMessage(RESET_LINK_EXPIRED);
 
         verifyNoInteractions(signInMethodChangeService);
+        verify(passwordEncoder, org.mockito.Mockito.never()).encode(any());
+    }
+
+    @Test
+    void aResetForAnUnknownEmailIsRefusedLikeAnExpiredLink() {
+        final var resetDto = PasswordResetDto.builder().email("nobody@example.com").token("token").password("newPassword").build();
+        when(userRepository.findByEmail("nobody@example.com")).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> userService.resetPassword(resetDto))
+                .isInstanceOf(ResetLinkExpiredException.class)
+                .hasMessage(RESET_LINK_EXPIRED);
+        verifyNoInteractions(resetTokenService);
     }
 
     @Test
@@ -808,18 +817,17 @@ class DefaultUserServiceTest {
         final var resetDto = PasswordResetDto.builder().email("test@example.com").token("token").password("newPassword").build();
         final var user = User.builder().id(1L).email("test@example.com").twoStepEnabled(true).twoFactorEnabled(true)
                 .twoFactorSecret("SECRET").build();
-        final var token = ResetToken.builder().id(1L).active(true).build();
         when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
-        when(resetTokenService.getResetTokenFromUserAndToken(user, "token")).thenReturn(token);
+        when(resetTokenService.claim(user, "token")).thenReturn(ResetToken.builder().id(1L).user(user).build());
         when(passwordEncoder.encode("newPassword")).thenReturn("newEncoded");
         when(userRepository.save(user)).thenReturn(user);
 
-        final var result = userService.resetPassword(resetDto);
+        userService.resetPassword(resetDto);
 
-        assertThat(result.getPassword()).isEqualTo("newEncoded");
-        assertThat(result.getTwoStepEnabled()).isTrue();
-        assertThat(result.getTwoFactorEnabled()).isTrue();
-        assertThat(result.getTwoFactorSecret()).isEqualTo("SECRET");
+        assertThat(user.getPassword()).isEqualTo("newEncoded");
+        assertThat(user.getTwoStepEnabled()).isTrue();
+        assertThat(user.getTwoFactorEnabled()).isTrue();
+        assertThat(user.getTwoFactorSecret()).isEqualTo("SECRET");
         verifyNoInteractions(twoFactorRecoveryCodeRepository);
     }
 
@@ -827,9 +835,8 @@ class DefaultUserServiceTest {
     void aPasswordResetClearsTheWrongPasswordCounter() {
         final var resetDto = PasswordResetDto.builder().email("test@example.com").token("token").password("newPassword").build();
         final var user = User.builder().id(1L).email("test@example.com").authProvider("local").password(LOCAL_PASSWORD_HASH).build();
-        final var token = ResetToken.builder().id(1L).active(true).build();
         when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
-        when(resetTokenService.getResetTokenFromUserAndToken(user, "token")).thenReturn(token);
+        when(resetTokenService.claim(user, "token")).thenReturn(ResetToken.builder().id(1L).user(user).build());
         when(passwordEncoder.encode("newPassword")).thenReturn("newEncoded");
         when(userRepository.save(user)).thenReturn(user);
         IntStream.rangeClosed(1, 20).forEach(attempt -> loginAttemptService.loginFailed("reauth:1"));
@@ -846,26 +853,12 @@ class DefaultUserServiceTest {
         final var resetDto = PasswordResetDto.builder().email("test@example.com").token("token").password("newPassword").build();
         final var user = User.builder().id(1L).email("test@example.com").build();
         when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
-        when(resetTokenService.getResetTokenFromUserAndToken(user, "token")).thenReturn(ResetToken.builder().id(1L).active(false).build());
+        when(resetTokenService.claim(user, "token")).thenThrow(new ResetLinkExpiredException());
         IntStream.rangeClosed(1, 20).forEach(attempt -> loginAttemptService.loginFailed("reauth:1"));
 
-        assertThatThrownBy(() -> userService.resetPassword(resetDto)).hasMessage("Token expired");
+        assertThatThrownBy(() -> userService.resetPassword(resetDto)).hasMessage(RESET_LINK_EXPIRED);
 
         assertThat(loginAttemptService.isBlocked("reauth:1")).isTrue();
-    }
-
-    @Test
-    void shouldFailResetPasswordWhenTokenInactive() {
-        final var resetDto = PasswordResetDto.builder().email("test@example.com").token("token").password("newPassword").build();
-        final var user = User.builder().id(1L).email("test@example.com").build();
-        final var token = ResetToken.builder().id(1L).active(false).build();
-
-        when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
-        when(resetTokenService.getResetTokenFromUserAndToken(user, "token")).thenReturn(token);
-
-        assertThatThrownBy(() -> userService.resetPassword(resetDto))
-                .isInstanceOf(NoAuthorizationException.class)
-                .hasMessage("Token expired");
     }
 
     @Test

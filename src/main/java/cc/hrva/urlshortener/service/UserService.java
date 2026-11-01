@@ -32,7 +32,7 @@ public interface UserService {
     User fetchActiveUserByEmail(String email);
     AdminUserResponse updateUser(UserUpdateDto userUpdateDto);
     User updatePassword(UpdatePasswordDto updatePasswordDto);
-    User resetPassword(PasswordResetDto passwordResetDto);
+    void resetPassword(PasswordResetDto passwordResetDto);
     void sendPasswordResetLinkToUser(RequestPasswordResetDto requestPasswordResetDto);
 
 }

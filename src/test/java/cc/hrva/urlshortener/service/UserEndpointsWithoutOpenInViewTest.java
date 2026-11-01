@@ -203,16 +203,13 @@ class UserEndpointsWithoutOpenInViewTest {
     }
 
     @Test
-    void aResetPasswordAnswerIsWrittenAfterItsTransactionWithTheRoles() {
+    void aResetPasswordEndsEverySession() {
         when(passwordEncoder.encode(anyString())).thenReturn("new-hash");
-        when(resetTokenService.getResetTokenFromUserAndToken(any(), anyString())).thenReturn(ResetToken.builder().token("reset-token").active(true).build());
+        when(resetTokenService.claim(any(), anyString())).thenReturn(ResetToken.builder().active(false).build());
 
-        final var answer = userService.resetPassword(new PasswordResetDto("reset-token", MEMBER_EMAIL, "new-password"));
+        userService.resetPassword(new PasswordResetDto("reset-token", MEMBER_EMAIL, "new-password"));
 
-        final var json = JSON.readTree(JSON.writeValueAsString(answer));
-        assertThat(json.get("email").asString()).isEqualTo(MEMBER_EMAIL);
-        assertThat(json.get("authorities").get(0).get("name").asString()).isEqualTo("ROLE_USER");
-        assertThat(json.has("password")).isFalse();
+        assertThat(jdbcTemplate.queryForObject("select password from user_account where id = ?", String.class, MEMBER)).isEqualTo("new-hash");
         assertThat(tokensValidAfter()).as("the reset ends every session").isNotNull();
     }
 
@@ -238,11 +235,10 @@ class UserEndpointsWithoutOpenInViewTest {
                 insert into user_sign_in_method (user_id, method, first_used_at, last_used_at, turned_off_at)
                 values (?, 'PASSWORD', timestamp '2026-01-02 03:04:05', timestamp '2026-10-28 09:30:00', timestamp '2026-10-29 10:00:00')""", MEMBER);
         when(passwordEncoder.encode(anyString())).thenReturn("$2a$10$" + "n".repeat(53));
-        when(resetTokenService.getResetTokenFromUserAndToken(any(), anyString())).thenReturn(ResetToken.builder().token("reset-token").active(true).build());
+        when(resetTokenService.claim(any(), anyString())).thenReturn(ResetToken.builder().active(false).build());
 
-        final var answer = userService.resetPassword(new PasswordResetDto("reset-token", MEMBER_EMAIL, "new-password"));
+        userService.resetPassword(new PasswordResetDto("reset-token", MEMBER_EMAIL, "new-password"));
 
-        assertThat(JSON.readTree(JSON.writeValueAsString(answer)).get("authorities").get(0).get("name").asString()).isEqualTo("ROLE_USER");
         assertThat(jdbcTemplate.queryForObject("select password from user_account where id = ?", String.class, MEMBER))
                 .isEqualTo("$2a$10$" + "n".repeat(53));
         assertThat(jdbcTemplate.queryForObject("select count(*) from user_sign_in_method where user_id = ? and method = 'PASSWORD' and turned_off_at is null",
@@ -258,7 +254,7 @@ class UserEndpointsWithoutOpenInViewTest {
     @Test
     void aResetOfAnAccountWhosePasswordSignInIsOnAuditsNothing() {
         when(passwordEncoder.encode(anyString())).thenReturn("new-hash");
-        when(resetTokenService.getResetTokenFromUserAndToken(any(), anyString())).thenReturn(ResetToken.builder().token("reset-token").active(true).build());
+        when(resetTokenService.claim(any(), anyString())).thenReturn(ResetToken.builder().active(false).build());
 
         userService.resetPassword(new PasswordResetDto("reset-token", MEMBER_EMAIL, "new-password"));
 

@@ -33,6 +33,7 @@ import cc.hrva.urlshortener.exception.ReauthenticationRequiredException;
 import cc.hrva.urlshortener.exception.ReservedAliasNotFoundException;
 import cc.hrva.urlshortener.exception.SettingNotFoundException;
 import cc.hrva.urlshortener.exception.ShortUrlAlreadyExistsException;
+import cc.hrva.urlshortener.exception.ResetLinkExpiredException;
 import cc.hrva.urlshortener.exception.SignInExpiredException;
 import cc.hrva.urlshortener.exception.SignInUnavailableException;
 import cc.hrva.urlshortener.exception.TwoStepFailedException;
@@ -247,6 +248,11 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(SignInExpiredException.class)
     public ResponseEntity<ProblemDetail> handleSignInExpired(final SignInExpiredException ex) {
+        return ProblemResponses.entity(HttpStatus.GONE, safeMessage(ex));
+    }
+
+    @ExceptionHandler(ResetLinkExpiredException.class)
+    public ResponseEntity<ProblemDetail> handleResetLinkExpired(final ResetLinkExpiredException ex) {
         return ProblemResponses.entity(HttpStatus.GONE, safeMessage(ex));
     }
 

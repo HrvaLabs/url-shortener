@@ -6,10 +6,9 @@ import cc.hrva.urlshortener.model.User;
 public interface ResetTokenService {
 
     void deleteExpiredPasswordResetTokens();
-    ResetToken createTokenForUser(User user);
+    String createTokenForUser(User user);
     void deactivateExpiredPasswordResetTokens();
-    void deactivateAndSaveToken(ResetToken token);
     void deactivateActiveResetTokenIfExists(User user);
-    ResetToken getResetTokenFromUserAndToken(User user, String token);
+    ResetToken claim(User user, String token);
 
 }

@@ -17,6 +17,7 @@ import cc.hrva.urlshortener.dto.UserUpdateDto;
 import cc.hrva.urlshortener.exception.ApiException;
 import cc.hrva.urlshortener.exception.NoAuthorizationException;
 import cc.hrva.urlshortener.exception.NotSignedInException;
+import cc.hrva.urlshortener.exception.ResetLinkExpiredException;
 import cc.hrva.urlshortener.exception.UserNotFoundException;
 import cc.hrva.urlshortener.listener.UserRegisteredEvent;
 import cc.hrva.urlshortener.mcp.apps.ConnectedAppsService;
@@ -54,7 +55,6 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import org.apache.commons.lang3.StringUtils;
-import org.hibernate.Hibernate;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
@@ -338,28 +338,18 @@ public class DefaultUserService implements UserService {
 
     @Override
     @Transactional
-    public User resetPassword(final PasswordResetDto passwordResetDto) {
-        log.info("Password reset for user email={}", EmailAddresses.masked(passwordResetDto.getEmail()));
-
+    public void resetPassword(final PasswordResetDto passwordResetDto) {
         final var user = userRepository.findByEmail(passwordResetDto.getEmail())
-                .orElseThrow(() -> new NoAuthorizationException("Invalid credentials"));
+                .orElseThrow(ResetLinkExpiredException::new);
+        resetTokenService.claim(user, passwordResetDto.getToken());
 
-        final var token = resetTokenService.getResetTokenFromUserAndToken(user, passwordResetDto.getToken());
-
-        if (token.isActive()) {
-            final var locked = accountLock.lock(user);
-            Hibernate.initialize(locked.getAuthorities());
-            locked.setPassword(passwordEncoder.encode(passwordResetDto.getPassword()));
-            locked.endSessions(Instant.now());
-            resetTokenService.deactivateAndSaveToken(token);
-            reauthentication.forgetWrongPasswords(locked);
-            final var saved = userRepository.save(locked);
-            signInMethodChangeService.passwordWasReset(saved);
-
-            return saved;
-        }
-
-        throw new NoAuthorizationException("Token expired");
+        final var locked = accountLock.lock(user);
+        locked.setPassword(passwordEncoder.encode(passwordResetDto.getPassword()));
+        locked.endSessions(Instant.now());
+        reauthentication.forgetWrongPasswords(locked);
+        final var saved = userRepository.save(locked);
+        signInMethodChangeService.passwordWasReset(saved);
+        log.info("Password reset for user id={}", saved.getId());
     }
 
     @Override
