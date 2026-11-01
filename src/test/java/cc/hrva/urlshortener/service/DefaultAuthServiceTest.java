@@ -20,6 +20,7 @@ import cc.hrva.urlshortener.service.twostep.TwoStepLockMessage;
 import cc.hrva.urlshortener.validator.UserValidator;
 import java.time.Duration;
 import java.util.List;
+import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -185,6 +186,22 @@ class DefaultAuthServiceTest {
         assertThat(authService.register(registerDto)).isEqualTo(new RegistrationResponse("test@example.com", CHECK_YOUR_INBOX));
 
         verifyNoInteractions(sendingEmailService);
+    }
+
+    @Test
+    void anAddressThatGotAnAccountMeanwhileIsAnsweredLikeAnyOtherSignUp() {
+        when(userRepository.findByEmail("race@example.com")).thenReturn(Optional.of(User.builder().id(4L).email("race@example.com").build()));
+
+        assertThat(authService.registeredMeanwhile("race@example.com"))
+                .contains(new RegistrationResponse("race@example.com", "Check your inbox for an email from hrva.cc."));
+        verifyNoInteractions(sendingEmailService);
+    }
+
+    @Test
+    void anAddressWithNoAccountIsNotARaceToHide() {
+        when(userRepository.findByEmail("nobody@example.com")).thenReturn(Optional.empty());
+
+        assertThat(authService.registeredMeanwhile("nobody@example.com")).isEmpty();
     }
 
     @Test

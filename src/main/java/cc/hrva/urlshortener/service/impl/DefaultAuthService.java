@@ -17,6 +17,7 @@ import cc.hrva.urlshortener.util.EmailAddresses;
 import cc.hrva.urlshortener.validator.UserValidator;
 import org.apache.commons.lang3.StringUtils;
 import jakarta.servlet.http.HttpServletRequest;
+import java.util.Optional;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import cc.hrva.urlshortener.dto.JWTTokenDto;
@@ -65,6 +66,14 @@ public class DefaultAuthService implements AuthService {
                 () -> userService.register(userRegisterDtoToUserConverter.convert(userRegisterDto)));
 
         return RegistrationResponse.of(userRegisterDto.getEmail());
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Optional<RegistrationResponse> registeredMeanwhile(final String email) {
+        final var registered = userRepository.findByEmail(email);
+        registered.ifPresent(user -> log.info("Sign-up lost the race for a new address to another sign-up, answering like any other user id={}", user.getId()));
+        return registered.map(user -> RegistrationResponse.of(email));
     }
 
     private void signUpAttempted(final User existing, final String password) {

@@ -15,6 +15,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -43,7 +44,11 @@ public class AuthController {
     @PostMapping("/register")
     public ResponseEntity<RegistrationResponse> register(@Valid @RequestBody final UserRegisterDto user) {
         log.info("Register controller invoked for user {}", EmailAddresses.masked(user.getEmail()));
-        return ResponseEntity.accepted().body(authService.register(user));
+        try {
+            return ResponseEntity.accepted().body(authService.register(user));
+        } catch (final DataIntegrityViolationException exception) {
+            return ResponseEntity.accepted().body(authService.registeredMeanwhile(user.getEmail()).orElseThrow(() -> exception));
+        }
     }
 
     @Operation(summary = "Request password reset", description = "Send a password reset link to the given email address. The answer is the same whether or not an account uses it.")

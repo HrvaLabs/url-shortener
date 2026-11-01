@@ -1,5 +1,7 @@
 package cc.hrva.urlshortener.controller;
 
+import java.util.Optional;
+import org.springframework.dao.DataIntegrityViolationException;
 import cc.hrva.urlshortener.dto.RegistrationResponse;
 import org.springframework.test.json.JsonCompareMode;
 import cc.hrva.urlshortener.exception.RateLimitExceededException;
@@ -130,6 +132,32 @@ class AuthControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(UserRegisterDto.builder().email(email).password("password123").build())))
                 .andExpect(status().isAccepted());
+    }
+
+    @Test
+    void theLoserOfTwoSignUpsForTheSameNewAddressGetsTheSameAnswerAsEveryoneElse() throws Exception {
+        final var answer = new RegistrationResponse("race@example.com", "Check your inbox for an email from hrva.cc.");
+        when(authService.register(any(UserRegisterDto.class))).thenThrow(new DataIntegrityViolationException("duplicate key value violates unique constraint"));
+        when(authService.registeredMeanwhile("race@example.com")).thenReturn(Optional.of(answer));
+
+        mockMvc.perform(post("/api/v1/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(UserRegisterDto.builder().email("race@example.com").password("password123").build())))
+                .andExpect(status().isAccepted())
+                .andExpect(content().json("""
+                        {"email":"race@example.com","message":"Check your inbox for an email from hrva.cc."}""", JsonCompareMode.STRICT));
+    }
+
+    @Test
+    void anyOtherIntegrityFailureOnSignUpIsNotHidden() throws Exception {
+        when(authService.register(any(UserRegisterDto.class))).thenThrow(new DataIntegrityViolationException("something else"));
+        when(authService.registeredMeanwhile("other@example.com")).thenReturn(Optional.empty());
+
+        mockMvc.perform(post("/api/v1/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(UserRegisterDto.builder().email("other@example.com").password("password123").build())))
+                .andExpect(status().isInternalServerError())
+                .andExpect(jsonPath("$.detail").value("Internal server error"));
     }
 
     @Test

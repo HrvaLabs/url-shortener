@@ -60,8 +60,8 @@
 # random loopback port too). Section 30 checks v2.23's accounts work: a password sign-in is a 503 with Retry-After while Redis doesn't answer
 # (CLIENT PAUSE), reset tokens (041, only the SHA-256 stored, an hour, used once, an expired one refused), the account email limits per
 # address and per network (the same 202, then a 429), sign-up answering a taken address like a new one (the note email, nothing created, a new
-# verification link for an unverified one), and an API key as Authorization: Bearer (counted once, two different keys a 400, a JWT still a
-# sign-in).
+# verification link for an unverified one, ten sign-ups for one new address at once all 202 with one account), and an API key as
+# Authorization: Bearer (counted once, two different keys a 400, a JWT still a sign-in).
 # Section 31 checks the v2.23 links work as the admin (section 29 ended the user's sessions): a create answers 201 with Location and
 # shortLink (signed in, without an account and with an API key; bulk stays 200); a revoked API key can't be turned on again (no
 # PATCH /activate, PUT active:true or a new expiry is 409) and can be deleted; a visit limit counts every click but not bots or HEAD, and
@@ -2455,6 +2455,12 @@ expect_eq "$HTTP_STATUS $(jq -r .message <<<"$HTTP_BODY")" "202 Check your inbox
 wait_for_mail "$SIGNUP_EMAIL" "$VERIFY_SUBJECT" "$VERIFY_BEFORE"
 ok "and a new verification email instead of the note"
 expect_eq "$(psql_value "select count(*) from user_account where email = '$SIGNUP_EMAIL';")" 1 "still one account for it"
+RACE_EMAIL=e2e-race-signup@example.org
+RACE_ANSWERS=$(seq 111 120 | xargs -P 10 -I{} curl -sS -o /dev/null -w '%{http_code}\n' -X POST "$BASE/api/v1/auth/register" \
+    -H "CF-Connecting-IP: 198.51.100.{}" -H 'Content-Type: application/json' -d "{\"email\":\"$RACE_EMAIL\",\"password\":\"e2e-race-password\"}" | sort | uniq -c | tr -s ' ' | tr -d '\n')
+show "10 sign-ups for one new address at once -> $RACE_ANSWERS"
+expect_eq "$RACE_ANSWERS" " 10 202" "ten sign-ups for one new address at once all get the same 202, the loser of the insert race too"
+expect_eq "$(psql_value "select count(*) from user_account where email = '$RACE_EMAIL';")" 1 "and exactly one account was made"
 clear_account_email_limits
 
 echo "  --- an API key as Authorization: Bearer"
