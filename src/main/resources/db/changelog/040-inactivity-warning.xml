@@ -7,12 +7,10 @@
 
     <changeSet author="khrvacic" id="040-user-inactivity-warning">
         <addColumn tableName="user_account">
-            <column name="last_active_at" type="TIMESTAMP"/>
             <column name="inactivity_warned_at" type="TIMESTAMP"/>
         </addColumn>
         <rollback>
             <dropColumn tableName="user_account" columnName="inactivity_warned_at"/>
-            <dropColumn tableName="user_account" columnName="last_active_at"/>
         </rollback>
     </changeSet>
 

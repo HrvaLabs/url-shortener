@@ -364,13 +364,6 @@ public class DefaultUserService implements UserService {
 
     @Override
     @Transactional
-    public void recordActivity(final Long userId) {
-        final var now = LocalDateTime.now();
-        userRepository.recordActivity(userId, now, now.minusDays(1));
-    }
-
-    @Override
-    @Transactional
     public void deactivateUnusedUserAccounts() {
         final var users = inactiveAccounts.warnAndSelectForDeactivation().stream()
                 .map(this::deactivateUser)

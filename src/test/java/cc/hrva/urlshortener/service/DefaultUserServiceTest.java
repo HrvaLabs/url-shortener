@@ -869,16 +869,6 @@ class DefaultUserServiceTest {
     }
 
     @Test
-    void recordingActivityWritesOncePerDayAtMost() {
-        userService.recordActivity(7L);
-
-        final var now = ArgumentCaptor.forClass(java.time.LocalDateTime.class);
-        final var staleBefore = ArgumentCaptor.forClass(java.time.LocalDateTime.class);
-        verify(userRepository).recordActivity(eq(7L), now.capture(), staleBefore.capture());
-        assertThat(java.time.Duration.between(staleBefore.getValue(), now.getValue())).isEqualTo(java.time.Duration.ofDays(1));
-    }
-
-    @Test
     void shouldDeactivateUnusedUserAccounts() {
         final var user = User.builder().id(1L).active(true).build();
         when(inactiveAccounts.warnAndSelectForDeactivation()).thenReturn(Collections.singletonList(user));

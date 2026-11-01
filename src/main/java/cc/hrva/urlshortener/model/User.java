@@ -65,9 +65,6 @@ public class User {
     private LocalDateTime lastLogin;
 
     @JsonIgnore
-    private LocalDateTime lastActiveAt;
-
-    @JsonIgnore
     private LocalDateTime inactivityWarnedAt;
 
     private Boolean active;

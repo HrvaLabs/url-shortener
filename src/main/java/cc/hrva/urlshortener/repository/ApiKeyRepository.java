@@ -50,6 +50,9 @@ public interface ApiKeyRepository extends JpaRepository<ApiKey, Long>, JpaSpecif
 
     boolean existsByIdAndActiveTrue(Long id);
 
+    @Query("select max(k.lastUsedAt) from ApiKey k where k.owner.id = :ownerId")
+    Optional<LocalDateTime> findLastUseByOwnerId(@Param("ownerId") Long ownerId);
+
     @Modifying(flushAutomatically = true)
     @Query("update ApiKey k set k.active = false where k.owner.id = :ownerId and k.active = true")
     int deactivateActiveByOwnerId(@Param("ownerId") Long ownerId);

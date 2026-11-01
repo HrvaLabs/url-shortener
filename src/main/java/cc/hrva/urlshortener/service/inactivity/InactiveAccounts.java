@@ -4,6 +4,7 @@ import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.mcp.apps.ConnectedAppDto;
 import cc.hrva.urlshortener.mcp.apps.ConnectedAppsService;
 import cc.hrva.urlshortener.model.User;
+import cc.hrva.urlshortener.repository.ApiKeyRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.service.SendingEmailService;
 import java.time.Clock;
@@ -25,6 +26,7 @@ public class InactiveAccounts {
     private static final long WARNING_DAYS_AHEAD = 30;
 
     private final UserRepository userRepository;
+    private final ApiKeyRepository apiKeyRepository;
     private final ConnectedAppsService connectedAppsService;
     private final SendingEmailService sendingEmailService;
     private final AppProperties appProperties;
@@ -69,7 +71,7 @@ public class InactiveAccounts {
                 .map(ConnectedAppDto::lastUsed)
                 .filter(Objects::nonNull)
                 .map(lastUsed -> LocalDateTime.ofInstant(lastUsed, clock.getZone()));
-        return Stream.concat(Stream.of(user.getLastLogin(), user.getLastActiveAt()), mcpUse)
+        return Stream.concat(Stream.of(user.getLastLogin(), apiKeyRepository.findLastUseByOwnerId(user.getId()).orElse(null)), mcpUse)
                 .filter(Objects::nonNull)
                 .max(LocalDateTime::compareTo)
                 .orElseThrow();

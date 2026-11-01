@@ -4,6 +4,7 @@ import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.mcp.apps.ConnectedAppDto;
 import cc.hrva.urlshortener.mcp.apps.ConnectedAppsService;
 import cc.hrva.urlshortener.model.User;
+import cc.hrva.urlshortener.repository.ApiKeyRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.service.SendingEmailService;
 import java.time.Clock;
@@ -12,6 +13,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -37,6 +39,9 @@ class InactiveAccountsTest {
     private UserRepository userRepository;
 
     @Mock
+    private ApiKeyRepository apiKeyRepository;
+
+    @Mock
     private ConnectedAppsService connectedAppsService;
 
     @Mock
@@ -48,9 +53,10 @@ class InactiveAccountsTest {
     void setUp() {
         final var appProperties = new AppProperties();
         appProperties.setDeactivateUserAccountAfterDays(DAYS);
-        inactiveAccounts = new InactiveAccounts(userRepository, connectedAppsService, sendingEmailService, appProperties,
+        inactiveAccounts = new InactiveAccounts(userRepository, apiKeyRepository, connectedAppsService, sendingEmailService, appProperties,
                 Clock.fixed(NOW, ZoneOffset.UTC));
         lenient().when(connectedAppsService.findConnectedApps(any())).thenReturn(List.of());
+        lenient().when(apiKeyRepository.findLastUseByOwnerId(any())).thenReturn(Optional.empty());
         lenient().when(userRepository.findByLastLoginIsLessThanEqualAndActiveTrue(any())).thenReturn(List.of());
     }
 
@@ -139,8 +145,9 @@ class InactiveAccountsTest {
 
     @Test
     void anApiKeyUseCountsAsActivity() {
-        final var user = idleBuilder(1L, NOW_LOCAL.minusDays(DAYS + 5)).lastActiveAt(NOW_LOCAL.minusDays(40)).build();
+        final var user = idle(1L, NOW_LOCAL.minusDays(DAYS + 5));
         candidates(user);
+        when(apiKeyRepository.findLastUseByOwnerId(1L)).thenReturn(Optional.of(NOW_LOCAL.minusDays(40)));
 
         assertThat(inactiveAccounts.warnAndSelectForDeactivation()).isEmpty();
         verifyNoInteractions(sendingEmailService);

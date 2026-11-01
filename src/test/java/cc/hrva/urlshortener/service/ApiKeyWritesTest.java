@@ -164,6 +164,17 @@ class ApiKeyWritesTest {
         assertThat(apiKeyRepository.recordRequest(KEY + 1000, LocalDateTime.now())).isZero();
     }
 
+    @Test
+    void theLastUseOfAnAccountIsItsNewestKeyUseRevokedKeysIncluded() {
+        jdbcTemplate.update("""
+                insert into api_key (id, key_hash, key_prefix, owner_id, api_calls_used, last_used_at, active)
+                values (?, ?, 'newest', ?, 1, ?, false)""", KEY + 1, ApiKeyTokens.hash("revoked-but-newest"), OWNER, EXPIRES.minusDays(1));
+        jdbcTemplate.update("update api_key set last_used_at = ? where id = ?", EXPIRES.minusDays(9), KEY);
+
+        assertThat(apiKeyRepository.findLastUseByOwnerId(OWNER)).contains(EXPIRES.minusDays(1));
+        assertThat(apiKeyRepository.findLastUseByOwnerId(OWNER + 1)).isEmpty();
+    }
+
     @SpringBootConfiguration
     @EnableAutoConfiguration
     @EntityScan(basePackageClasses = Url.class)
