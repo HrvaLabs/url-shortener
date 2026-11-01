@@ -67,6 +67,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @SpringBootTest(
@@ -88,7 +89,7 @@ class ReportEndpointSecurityTest {
     private static final String REPORT = """
             {"shortUrl":"v0DB3","category":"PHISHING","details":"asks for my bank login"}""";
     private static final int BODY_LIMIT = 64 * 1024;
-    private static final String REQUEST_TOO_LARGE = "{\"error\":\"request_too_large\"}";
+    private static final String REQUEST_TOO_LARGE = "The request body is over 64 KB.";
     private static final RSAKey SIGNING_KEY = generateSigningKey();
 
     @Autowired
@@ -181,7 +182,7 @@ class ReportEndpointSecurityTest {
 
         mockMvc.perform(post(REPORTS).contentType(MediaType.APPLICATION_JSON).content("{\"shortUrl\":\"example.org/abc\",\"category\":\"SPAM\"}"))
                 .andExpect(status().isBadRequest())
-                .andExpect(content().json("{\"error\":\"Enter a hrva.cc short link or bio page, like hrva.cc/abc or hrva.cc/@name\"}", JsonCompareMode.STRICT));
+                .andExpect(content().json("{\"detail\":\"Enter a hrva.cc short link or bio page, like hrva.cc/abc or hrva.cc/@name\"}", JsonCompareMode.LENIENT));
         mockMvc.perform(post(REPORTS).contentType(MediaType.APPLICATION_JSON).content("{\"shortUrl\":\"abc\",\"category\":\"SPAM\"}"))
                 .andExpect(status().isAccepted());
 
@@ -209,7 +210,7 @@ class ReportEndpointSecurityTest {
     void anUnreadableTargetIs400WithTheNewText() throws Exception {
         mockMvc.perform(post(REPORTS).contentType(MediaType.APPLICATION_JSON).content("{\"shortUrl\":\"@a\",\"category\":\"SPAM\"}"))
                 .andExpect(status().isBadRequest())
-                .andExpect(content().json("{\"error\":\"Enter a hrva.cc short link or bio page, like hrva.cc/abc or hrva.cc/@name\"}", JsonCompareMode.STRICT));
+                .andExpect(content().json("{\"detail\":\"Enter a hrva.cc short link or bio page, like hrva.cc/abc or hrva.cc/@name\"}", JsonCompareMode.LENIENT));
 
         verifyNoInteractions(rateLimiter, bioPageRepository, bioPageReviewService, urlRepository, reviewQueueService);
     }
@@ -230,7 +231,7 @@ class ReportEndpointSecurityTest {
     void anOversizedReportIsRefusedBeforeItIsRead() throws Exception {
         mockMvc.perform(post(REPORTS).contentType(MediaType.APPLICATION_JSON).content(padded(REPORT, BODY_LIMIT + 1)))
                 .andExpect(status().isContentTooLarge())
-                .andExpect(content().string(REQUEST_TOO_LARGE));
+                .andExpect(jsonPath("$.detail").value(REQUEST_TOO_LARGE));
 
         verifyNoInteractions(rateLimiter, urlRepository, reviewQueueService);
     }

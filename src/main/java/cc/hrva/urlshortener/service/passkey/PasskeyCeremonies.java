@@ -38,7 +38,7 @@ public class PasskeyCeremonies {
         }
 
         if (!allowed) {
-            throw new RateLimitExceededException(TOO_MANY_OPTIONS);
+            throw new RateLimitExceededException(TOO_MANY_OPTIONS, OPTIONS_WINDOW);
         }
     }
 

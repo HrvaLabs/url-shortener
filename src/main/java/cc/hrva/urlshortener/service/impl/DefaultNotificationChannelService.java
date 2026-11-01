@@ -7,7 +7,7 @@ import cc.hrva.urlshortener.dto.notification.NotificationChannelResponse;
 import cc.hrva.urlshortener.dto.notification.SigningSecretResponse;
 import cc.hrva.urlshortener.exception.ApiException;
 import cc.hrva.urlshortener.exception.ChannelValidationException;
-import cc.hrva.urlshortener.exception.NoAuthorizationException;
+import cc.hrva.urlshortener.exception.NotSignedInException;
 import cc.hrva.urlshortener.exception.NotificationChannelNotFoundException;
 import cc.hrva.urlshortener.exception.NotificationTestUnavailableException;
 import cc.hrva.urlshortener.exception.RateLimitExceededException;
@@ -315,7 +315,7 @@ public class DefaultNotificationChannelService implements NotificationChannelSer
         }
         if (!allowed) {
             log.info("Notification channel change refused by the rate limit user id={}", userId);
-            throw new RateLimitExceededException(DefaultNotificationConsentService.TOO_MANY_CHANGES);
+            throw new RateLimitExceededException(DefaultNotificationConsentService.TOO_MANY_CHANGES, DefaultNotificationConsentService.SETTINGS_WINDOW);
         }
     }
 
@@ -329,14 +329,14 @@ public class DefaultNotificationChannelService implements NotificationChannelSer
         }
         if (!allowed) {
             log.info("Notification test refused by the rate limit user id={}", userId);
-            throw new RateLimitExceededException(TOO_MANY_TESTS);
+            throw new RateLimitExceededException(TOO_MANY_TESTS, TEST_WINDOW);
         }
     }
 
     private User currentUser() {
         final var user = userService.getUserFromToken();
         if (user == null) {
-            throw new NoAuthorizationException(NOT_AUTHENTICATED);
+            throw new NotSignedInException(NOT_AUTHENTICATED);
         }
         return user;
     }

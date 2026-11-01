@@ -3,6 +3,7 @@ package cc.hrva.urlshortener.service.impl;
 import cc.hrva.urlshortener.dto.notification.NotificationConsentResponse;
 import cc.hrva.urlshortener.exception.ApiException;
 import cc.hrva.urlshortener.exception.NoAuthorizationException;
+import cc.hrva.urlshortener.exception.NotSignedInException;
 import cc.hrva.urlshortener.exception.RateLimitExceededException;
 import cc.hrva.urlshortener.model.NotificationChannel;
 import cc.hrva.urlshortener.model.NotificationConsent;
@@ -178,14 +179,14 @@ public class DefaultNotificationConsentService implements NotificationConsentSer
         }
         if (!allowed) {
             log.info("Notification settings change refused by the rate limit user id={}", userId);
-            throw new RateLimitExceededException(TOO_MANY_CHANGES);
+            throw new RateLimitExceededException(TOO_MANY_CHANGES, SETTINGS_WINDOW);
         }
     }
 
     private User currentUser() {
         final var user = userService.getUserFromToken();
         if (user == null) {
-            throw new NoAuthorizationException(NOT_AUTHENTICATED);
+            throw new NotSignedInException(NOT_AUTHENTICATED);
         }
 
         return user;

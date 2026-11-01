@@ -10,7 +10,7 @@ import cc.hrva.urlshortener.exception.ApiException;
 import cc.hrva.urlshortener.exception.BioHandleUnavailableException;
 import cc.hrva.urlshortener.exception.BioPageConflictException;
 import cc.hrva.urlshortener.exception.BioPageNotFoundException;
-import cc.hrva.urlshortener.exception.NoAuthorizationException;
+import cc.hrva.urlshortener.exception.NotSignedInException;
 import cc.hrva.urlshortener.exception.ShortUrlAlreadyExistsException;
 import cc.hrva.urlshortener.model.BioPage;
 import cc.hrva.urlshortener.model.enums.BioPageReviewResolution;
@@ -213,7 +213,7 @@ public class DefaultAdminBioPageService implements AdminBioPageService {
     private String adminEmail() {
         final var admin = userService.getUserFromToken();
         if (admin == null) {
-            throw new NoAuthorizationException(NOT_AUTHENTICATED);
+            throw new NotSignedInException(NOT_AUTHENTICATED);
         }
         return admin.getEmail();
     }

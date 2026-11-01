@@ -112,7 +112,7 @@ class PublicStatsControllerTest {
 
         mockMvc.perform(get(PUBLIC_STATS))
                 .andExpect(status().isTooManyRequests())
-                .andExpect(jsonPath("$.error").value(TOO_MANY));
+                .andExpect(jsonPath("$.detail").value(TOO_MANY));
         assertThat(windows).containsOnly(Duration.ofHours(1));
         assertThat(keys).containsOnly(RateLimiter.clientKey("public-stats", CLIENT_IP));
         assertThat(keys.getFirst()).doesNotContain(CLIENT_IP);
@@ -122,7 +122,7 @@ class PublicStatsControllerTest {
     void theSixtyFirstRequestInAnHourIs429() throws Exception {
         mockMvcWith((key, window) -> 61).perform(get(PUBLIC_STATS))
                 .andExpect(status().isTooManyRequests())
-                .andExpect(jsonPath("$.error").value(TOO_MANY));
+                .andExpect(jsonPath("$.detail").value(TOO_MANY));
 
         verifyNoInteractions(publicStatsService);
     }

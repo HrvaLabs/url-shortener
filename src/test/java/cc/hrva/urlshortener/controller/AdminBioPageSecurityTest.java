@@ -182,7 +182,7 @@ class AdminBioPageSecurityTest {
     void aHiddenFilterThatIsNotABooleanIs400() throws Exception {
         mockMvc.perform(asAdmin(get(BIO_PAGES).param("hidden", "abc")))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.error").value("Invalid value for hidden"));
+                .andExpect(jsonPath("$.detail").value("Invalid value for hidden"));
 
         verifyNoInteractions(adminBioPageService);
     }
@@ -221,7 +221,7 @@ class AdminBioPageSecurityTest {
 
         mockMvc.perform(asAdmin(put(HANDLE)).content("{\"handle\":\"bob\"}"))
                 .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.error").value("This handle is taken. Try another."));
+                .andExpect(jsonPath("$.detail").value("This handle is taken. Try another."));
     }
 
     @Test
@@ -249,7 +249,7 @@ class AdminBioPageSecurityTest {
 
         mockMvc.perform(asAdmin(post(REVOKE)).content("{\"reason\":\"Impersonation\",\"expectedHandle\":\"ana-old\"}"))
                 .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.error").value("This handle changed. Reload and try again."));
+                .andExpect(jsonPath("$.detail").value("This handle changed. Reload and try again."));
     }
 
     @Test
@@ -258,7 +258,7 @@ class AdminBioPageSecurityTest {
 
         mockMvc.perform(asAdmin(post(REVOKE)).content(REASON_BODY))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.error").value("This page has no handle."));
+                .andExpect(jsonPath("$.detail").value("This page has no handle."));
     }
 
     @Test
@@ -302,7 +302,7 @@ class AdminBioPageSecurityTest {
 
         mockMvc.perform(asAdmin(post(RESOLVE)).content(RESOLVE_BODY))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.error").value("This bio page is no longer in the review queue."));
+                .andExpect(jsonPath("$.detail").value("This bio page is no longer in the review queue."));
     }
 
     @Test
@@ -331,7 +331,7 @@ class AdminBioPageSecurityTest {
             for (final var path : List.of(HIDE, REVOKE)) {
                 mockMvc.perform(asAdmin(post(path)).content(body))
                         .andExpect(status().isBadRequest())
-                        .andExpect(jsonPath("$.reason").value("Reason is required"));
+                        .andExpect(jsonPath("$.errors.reason").value("Reason is required"));
             }
         }
 
@@ -344,11 +344,11 @@ class AdminBioPageSecurityTest {
         for (final var path : List.of(HIDE, REVOKE)) {
             mockMvc.perform(asAdmin(post(path)).content(body))
                     .andExpect(status().isBadRequest())
-                    .andExpect(jsonPath("$.reason").value("Reason must be 200 characters or fewer"));
+                    .andExpect(jsonPath("$.errors.reason").value("Reason must be 200 characters or fewer"));
         }
         mockMvc.perform(asAdmin(post(RESOLVE)).content("{\"action\":\"HIDE\",\"reason\":\"" + "r".repeat(201) + "\"}"))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.reason").value("Reason must be 200 characters or fewer"));
+                .andExpect(jsonPath("$.errors.reason").value("Reason must be 200 characters or fewer"));
 
         verifyNoInteractions(adminBioPageService);
     }
@@ -376,7 +376,7 @@ class AdminBioPageSecurityTest {
                 post(RESOLVE).content(RESOLVE_BODY))) {
             mockMvc.perform(asAdmin(request))
                     .andExpect(status().isNotFound())
-                    .andExpect(jsonPath("$.error").value("Bio page not found"));
+                    .andExpect(jsonPath("$.detail").value("Bio page not found"));
         }
     }
 
@@ -384,7 +384,7 @@ class AdminBioPageSecurityTest {
     void anUnknownActionIs400() throws Exception {
         mockMvc.perform(asAdmin(post(RESOLVE)).content("{\"action\":\"BLOCK\"}"))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.error").value("Action must be OK or HIDE"));
+                .andExpect(jsonPath("$.detail").value("Action must be OK or HIDE"));
 
         verifyNoInteractions(adminBioPageService);
     }
@@ -393,7 +393,7 @@ class AdminBioPageSecurityTest {
     void aMissingActionIsAFieldError() throws Exception {
         mockMvc.perform(asAdmin(post(RESOLVE)).content("{\"reason\":\"Spam\"}"))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.action").value("Action is required"));
+                .andExpect(jsonPath("$.errors.action").value("Action is required"));
 
         verifyNoInteractions(adminBioPageService);
     }

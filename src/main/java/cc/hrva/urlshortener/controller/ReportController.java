@@ -82,7 +82,7 @@ public class ReportController {
         final var details = detailsOf(linkReportDto.getDetails());
 
         if (!reportAllowed()) {
-            throw new RateLimitExceededException(TOO_MANY_REPORTS);
+            throw new RateLimitExceededException(TOO_MANY_REPORTS, REPORT_WINDOW);
         }
 
         if (target.handle() != null) {

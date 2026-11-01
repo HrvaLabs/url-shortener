@@ -120,9 +120,11 @@ class SignInMethodEndpointSecurityTest {
     private static final LocalDateTime LAST = LocalDateTime.of(2026, 10, 29, 8, 0);
     private static final long ROLE_USER = 1L;
     private static final String KEEP_ONE = """
-            {"error":"Keep at least one way to sign in. Add a passkey or another method first."}""";
+{"detail":"Keep at least one way to sign in. Add a passkey or another method first."}
+""";
     private static final String NOT_A_PROVIDER = """
-            {"error":"Only Google and GitHub sign-in can be turned off or on here."}""";
+{"detail":"Only Google and GitHub sign-in can be turned off or on here."}
+""";
     private static final RSAKey SIGNING_KEY = generateSigningKey();
 
     @Autowired
@@ -264,10 +266,10 @@ class SignInMethodEndpointSecurityTest {
 
         mockMvc.perform(as(ANA_TOKEN, post(METHODS + "GOOGLE/turn-on")))
                 .andExpect(status().isBadRequest())
-                .andExpect(content().json("{\"error\":\"Enter your current password.\"}", JsonCompareMode.STRICT));
+                .andExpect(content().json("{\"detail\":\"Enter your current password.\"}", JsonCompareMode.LENIENT));
         mockMvc.perform(as(ANA_TOKEN, post(METHODS + "GOOGLE/turn-on")).contentType(MediaType.APPLICATION_JSON).content(reauthBody("not it")))
                 .andExpect(status().isForbidden())
-                .andExpect(content().json("{\"error\":\"Current password is incorrect\"}", JsonCompareMode.STRICT));
+                .andExpect(content().json("{\"detail\":\"Current password is incorrect\"}", JsonCompareMode.LENIENT));
 
         assertThat(turnedOff(ANA)).containsExactly("GOOGLE");
         assertThat(auditActions()).containsExactly("TURN_OFF_SIGN_IN_METHOD");
@@ -281,8 +283,8 @@ class SignInMethodEndpointSecurityTest {
 
         mockMvc.perform(as(BOB_TOKEN, post(METHODS + "GOOGLE/turn-on")).contentType(MediaType.APPLICATION_JSON).content(reauthBody(PASSWORD)))
                 .andExpect(status().isUnauthorized())
-                .andExpect(content().json("{\"error\":\"For your security, sign in again to change your sign-in methods.\"}",
-                        JsonCompareMode.STRICT));
+                .andExpect(content().json("{\"detail\":\"For your security, sign in again to change your sign-in methods.\"}",
+                        JsonCompareMode.LENIENT));
         assertThat(turnedOff(BOB)).containsExactly("GOOGLE");
 
         signedInJustNow(BOB_FRESH_TOKEN, BOB_EMAIL);
@@ -304,7 +306,7 @@ class SignInMethodEndpointSecurityTest {
         for (final var action : List.of("turn-off", "turn-on")) {
             mockMvc.perform(as(ANA_TOKEN, post(METHODS + "GITHUB/" + action)).contentType(MediaType.APPLICATION_JSON).content(reauthBody(PASSWORD)))
                     .andExpect(status().isNotFound())
-                    .andExpect(content().json("{\"error\":\"This account has never signed in with GitHub.\"}", JsonCompareMode.STRICT));
+                    .andExpect(content().json("{\"detail\":\"This account has never signed in with GitHub.\"}", JsonCompareMode.LENIENT));
         }
 
         assertThat(auditActions()).isEmpty();
@@ -318,12 +320,12 @@ class SignInMethodEndpointSecurityTest {
             for (final var action : List.of("turn-off", "turn-on")) {
                 mockMvc.perform(as(ANA_TOKEN, post(METHODS + method + "/" + action)))
                         .andExpect(status().isBadRequest())
-                        .andExpect(content().json(NOT_A_PROVIDER, JsonCompareMode.STRICT));
+                        .andExpect(content().json(NOT_A_PROVIDER, JsonCompareMode.LENIENT));
             }
         }
         mockMvc.perform(as(ANA_TOKEN, post(METHODS + "FACEBOOK/turn-off")))
                 .andExpect(status().isBadRequest())
-                .andExpect(content().json("{\"error\":\"Invalid value for method\"}", JsonCompareMode.STRICT));
+                .andExpect(content().json("{\"detail\":\"Invalid value for method\"}", JsonCompareMode.LENIENT));
 
         assertThat(turnedOff(ANA)).isEmpty();
         assertThat(auditActions()).isEmpty();
@@ -333,7 +335,7 @@ class SignInMethodEndpointSecurityTest {
     void theLastWayInCantBeTurnedOff() throws Exception {
         mockMvc.perform(as(BOB_TOKEN, post(METHODS + "GOOGLE/turn-off")))
                 .andExpect(status().isConflict())
-                .andExpect(content().json(KEEP_ONE, JsonCompareMode.STRICT));
+                .andExpect(content().json(KEEP_ONE, JsonCompareMode.LENIENT));
 
         assertThat(turnedOff(BOB)).isEmpty();
         assertThat(auditActions()).isEmpty();
@@ -355,7 +357,7 @@ class SignInMethodEndpointSecurityTest {
 
         mockMvc.perform(as(BOB_TOKEN, post(METHODS + "GOOGLE/turn-off")))
                 .andExpect(status().isConflict())
-                .andExpect(content().json(KEEP_ONE, JsonCompareMode.STRICT));
+                .andExpect(content().json(KEEP_ONE, JsonCompareMode.LENIENT));
     }
 
     @Test
@@ -364,14 +366,14 @@ class SignInMethodEndpointSecurityTest {
 
         mockMvc.perform(as(BOB_TOKEN, post(METHODS + "GOOGLE/turn-off")))
                 .andExpect(status().isConflict())
-                .andExpect(content().json(KEEP_ONE, JsonCompareMode.STRICT));
+                .andExpect(content().json(KEEP_ONE, JsonCompareMode.LENIENT));
     }
 
     @Test
     void aWrongCurrentPasswordIsAFieldErrorAndCounted() throws Exception {
         mockMvc.perform(as(ANA_TOKEN, post(REMOVE_PASSWORD)).contentType(MediaType.APPLICATION_JSON).content(passwordBody("not it")))
                 .andExpect(status().isBadRequest())
-                .andExpect(content().json("{\"currentPassword\":\"That password isn't right.\"}", JsonCompareMode.STRICT));
+                .andExpect(content().json("{\"errors\":{\"currentPassword\":\"That password isn't right.\"}}", JsonCompareMode.LENIENT));
 
         assertThat(passwordOf(ANA)).isEqualTo(PASSWORD_HASH);
         assertThat(turnedOff(ANA)).isEmpty();
@@ -385,7 +387,7 @@ class SignInMethodEndpointSecurityTest {
         for (final var body : List.of("{}", passwordBody("  "))) {
             mockMvc.perform(as(ANA_TOKEN, post(REMOVE_PASSWORD)).contentType(MediaType.APPLICATION_JSON).content(body))
                     .andExpect(status().isBadRequest())
-                    .andExpect(content().json("{\"currentPassword\":\"Enter your current password.\"}", JsonCompareMode.STRICT));
+                    .andExpect(content().json("{\"errors\":{\"currentPassword\":\"Enter your current password.\"}}", JsonCompareMode.LENIENT));
         }
 
         assertThat(passwordOf(ANA)).isEqualTo(PASSWORD_HASH);
@@ -397,7 +399,7 @@ class SignInMethodEndpointSecurityTest {
 
         mockMvc.perform(as(ANA_TOKEN, post(REMOVE_PASSWORD)).contentType(MediaType.APPLICATION_JSON).content(passwordBody(PASSWORD)))
                 .andExpect(status().isForbidden())
-                .andExpect(content().json("{\"error\":\"Too many wrong passwords. Try again in 24 hours.\"}", JsonCompareMode.STRICT));
+                .andExpect(content().json("{\"detail\":\"Too many wrong passwords. Try again in 24 hours.\"}", JsonCompareMode.LENIENT));
 
         assertThat(passwordOf(ANA)).isEqualTo(PASSWORD_HASH);
     }
@@ -426,7 +428,7 @@ class SignInMethodEndpointSecurityTest {
     void anAccountWithoutAPasswordHasNoneToRemove() throws Exception {
         mockMvc.perform(as(BOB_TOKEN, post(REMOVE_PASSWORD)).contentType(MediaType.APPLICATION_JSON).content(passwordBody(PASSWORD)))
                 .andExpect(status().isNotFound())
-                .andExpect(content().json("{\"error\":\"This account has no password to remove.\"}", JsonCompareMode.STRICT));
+                .andExpect(content().json("{\"detail\":\"This account has no password to remove.\"}", JsonCompareMode.LENIENT));
 
         mockMvc.perform(as(ANA_TOKEN, post(REMOVE_PASSWORD)).contentType(MediaType.APPLICATION_JSON).content(passwordBody(PASSWORD)))
                 .andExpect(status().isOk());
@@ -441,7 +443,7 @@ class SignInMethodEndpointSecurityTest {
 
         mockMvc.perform(as(ANA_TOKEN, post(REMOVE_PASSWORD)).contentType(MediaType.APPLICATION_JSON).content(passwordBody(PASSWORD)))
                 .andExpect(status().isConflict())
-                .andExpect(content().json(KEEP_ONE, JsonCompareMode.STRICT));
+                .andExpect(content().json(KEEP_ONE, JsonCompareMode.LENIENT));
 
         assertThat(passwordOf(ANA)).isEqualTo(PASSWORD_HASH);
         assertThat(turnedOff(ANA)).isEmpty();
@@ -454,7 +456,7 @@ class SignInMethodEndpointSecurityTest {
 
         mockMvc.perform(as(ANA_TOKEN, post(REMOVE_PASSWORD)).contentType(MediaType.APPLICATION_JSON).content(passwordBody(PASSWORD)))
                 .andExpect(status().isConflict())
-                .andExpect(content().json(KEEP_ONE, JsonCompareMode.STRICT));
+                .andExpect(content().json(KEEP_ONE, JsonCompareMode.LENIENT));
         assertThat(passwordOf(ANA)).isEqualTo(PASSWORD_HASH);
     }
 
@@ -464,7 +466,7 @@ class SignInMethodEndpointSecurityTest {
 
         mockMvc.perform(as(ANA_TOKEN, post(REMOVE_PASSWORD)).contentType(MediaType.APPLICATION_JSON).content(passwordBody(PASSWORD)))
                 .andExpect(status().isConflict())
-                .andExpect(content().json(KEEP_ONE, JsonCompareMode.STRICT));
+                .andExpect(content().json(KEEP_ONE, JsonCompareMode.LENIENT));
         assertThat(passwordOf(ANA)).isEqualTo(PASSWORD_HASH);
         assertThat(turnedOff(ANA)).isEmpty();
 
@@ -481,7 +483,7 @@ class SignInMethodEndpointSecurityTest {
 
         mockMvc.perform(as(BOB_TOKEN, post(METHODS + "GOOGLE/turn-off")))
                 .andExpect(status().isConflict())
-                .andExpect(content().json(KEEP_ONE, JsonCompareMode.STRICT));
+                .andExpect(content().json(KEEP_ONE, JsonCompareMode.LENIENT));
         assertThat(turnedOff(BOB)).isEmpty();
 
         SettingsServiceFixtures.turnOn(settingsService, SettingKey.GITHUB_SIGN_IN);
@@ -508,7 +510,7 @@ class SignInMethodEndpointSecurityTest {
 
         mockMvc.perform(as(ANA_TOKEN, post(METHODS + "GOOGLE/turn-off")))
                 .andExpect(status().isConflict())
-                .andExpect(content().json(KEEP_ONE, JsonCompareMode.STRICT));
+                .andExpect(content().json(KEEP_ONE, JsonCompareMode.LENIENT));
         assertThat(turnedOff(ANA)).containsExactly("PASSWORD");
     }
 
@@ -520,7 +522,7 @@ class SignInMethodEndpointSecurityTest {
 
         mockMvc.perform(as(ANA_TOKEN, post(REMOVE_PASSWORD)).contentType(MediaType.APPLICATION_JSON).content(passwordBody(PASSWORD)))
                 .andExpect(status().isConflict())
-                .andExpect(content().json(KEEP_ONE, JsonCompareMode.STRICT));
+                .andExpect(content().json(KEEP_ONE, JsonCompareMode.LENIENT));
 
         assertThat(passwordOf(ANA)).isEqualTo(PASSWORD_HASH);
         jdbcTemplate.update("update user_account set two_step_enabled = false where id = ?", ANA);
@@ -535,7 +537,7 @@ class SignInMethodEndpointSecurityTest {
 
         mockMvc.perform(as(BOB_TOKEN, post(METHODS + "GOOGLE/turn-off")))
                 .andExpect(status().isConflict())
-                .andExpect(content().json(KEEP_ONE, JsonCompareMode.STRICT));
+                .andExpect(content().json(KEEP_ONE, JsonCompareMode.LENIENT));
     }
 
     @Test

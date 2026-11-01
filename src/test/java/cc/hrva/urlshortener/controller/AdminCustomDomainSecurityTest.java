@@ -151,7 +151,7 @@ class AdminCustomDomainSecurityTest {
     private static final long ROLE_USER = 1L;
     private static final long ROLE_ADMIN = 2L;
     private static final long FIRST_EXTRA_OWNER = 1000L;
-    private static final String ALREADY_REVIEWED = "{\"error\":\"This application was already reviewed.\"}";
+    private static final String ALREADY_REVIEWED = "{\"detail\":\"This application was already reviewed.\"}";
     private static final RSAKey SIGNING_KEY = generateSigningKey();
 
     @Autowired
@@ -330,16 +330,16 @@ class AdminCustomDomainSecurityTest {
 
         mockMvc.perform(as(ADMIN_TOKEN, post(DOMAINS + "/" + live + "/disable")).contentType(MediaType.APPLICATION_JSON).content("{\"note\":\"   \"}"))
                 .andExpect(status().isBadRequest())
-                .andExpect(content().json("{\"note\":\"Reason is required\"}", JsonCompareMode.STRICT));
+                .andExpect(content().json("{\"errors\":{\"note\":\"Reason is required\"}}", JsonCompareMode.LENIENT));
         mockMvc.perform(as(ADMIN_TOKEN, post(DOMAINS + "/" + live + "/disable")).contentType(MediaType.APPLICATION_JSON).content("{}"))
                 .andExpect(status().isBadRequest())
-                .andExpect(content().json("{\"note\":\"Reason is required\"}", JsonCompareMode.STRICT));
+                .andExpect(content().json("{\"errors\":{\"note\":\"Reason is required\"}}", JsonCompareMode.LENIENT));
         mockMvc.perform(as(ADMIN_TOKEN, post(DOMAINS + "/" + pending + "/disable")).contentType(MediaType.APPLICATION_JSON).content("{\"note\":\"Spam\"}"))
                 .andExpect(status().isConflict())
-                .andExpect(content().json("{\"error\":\"This domain can't be turned off now.\"}", JsonCompareMode.STRICT));
+                .andExpect(content().json("{\"detail\":\"This domain can't be turned off now.\"}", JsonCompareMode.LENIENT));
         mockMvc.perform(as(ADMIN_TOKEN, post(DOMAINS + "/" + live + "/enable")))
                 .andExpect(status().isConflict())
-                .andExpect(content().json("{\"error\":\"This domain isn't turned off.\"}", JsonCompareMode.STRICT));
+                .andExpect(content().json("{\"detail\":\"This domain isn't turned off.\"}", JsonCompareMode.LENIENT));
         mockMvc.perform(as(ADMIN_TOKEN, post(DOMAINS + "/987654/enable"))).andExpect(status().isNotFound());
 
         assertThat(statusOf(pending)).isEqualTo("PENDING_REVIEW");
@@ -380,10 +380,10 @@ class AdminCustomDomainSecurityTest {
                 .andExpect(content().json("{\"moved\":0,\"renamed\":[],\"deactivated\":2}", JsonCompareMode.STRICT));
         mockMvc.perform(as(ADMIN_TOKEN, delete(DOMAINS + "/" + id)))
                 .andExpect(status().isNotFound())
-                .andExpect(content().json("{\"error\":\"Custom domain not found\"}", JsonCompareMode.STRICT));
+                .andExpect(content().json("{\"detail\":\"Custom domain not found\"}", JsonCompareMode.LENIENT));
         mockMvc.perform(as(ADMIN_TOKEN, delete(DOMAINS + "/" + id).param("links", "move")))
                 .andExpect(status().isBadRequest())
-                .andExpect(content().json("{\"error\":\"links must be MOVE or DEACTIVATE\"}", JsonCompareMode.STRICT));
+                .andExpect(content().json("{\"detail\":\"links must be MOVE or DEACTIVATE\"}", JsonCompareMode.LENIENT));
 
         assertThat(jdbcTemplate.queryForList("select active from url where domain_id = ?", Boolean.class, id)).containsOnly(false);
     }
@@ -534,7 +534,7 @@ class AdminCustomDomainSecurityTest {
 
         mockMvc.perform(as(ADMIN_TOKEN, post(DOMAINS + "/" + id + "/approve")))
                 .andExpect(status().isConflict())
-                .andExpect(content().json("{\"error\":\"This domain matches a block rule.\"}", JsonCompareMode.STRICT));
+                .andExpect(content().json("{\"detail\":\"This domain matches a block rule.\"}", JsonCompareMode.LENIENT));
 
         assertThat(statusOf(id)).isEqualTo("PENDING_REVIEW");
         assertThat(auditRows()).singleElement().satisfies(audit -> assertThat(audit)
@@ -550,36 +550,36 @@ class AdminCustomDomainSecurityTest {
         when(cloudflareTokenCheck.check()).thenReturn(new TokenState(CloudflareTokenStatus.MISSING, NOW, "CLOUDFLARE_API_TOKEN or CLOUDFLARE_ZONE_ID isn't set.", null));
         mockMvc.perform(as(ADMIN_TOKEN, post(DOMAINS + "/" + id + "/approve")))
                 .andExpect(status().isConflict())
-                .andExpect(content().json("{\"error\":\"Cloudflare isn't set up: the API token is missing. Check CLOUDFLARE_API_TOKEN and CLOUDFLARE_ZONE_ID.\"}",
-                        JsonCompareMode.STRICT));
+                .andExpect(content().json("{\"detail\":\"Cloudflare isn't set up: the API token is missing. Check CLOUDFLARE_API_TOKEN and CLOUDFLARE_ZONE_ID.\"}",
+                        JsonCompareMode.LENIENT));
 
         when(cloudflareTokenCheck.check()).thenReturn(new TokenState(CloudflareTokenStatus.OK, NOW, null, 100));
         mockMvc.perform(as(ADMIN_TOKEN, post(DOMAINS + "/" + id + "/approve")))
                 .andExpect(status().isConflict())
-                .andExpect(content().json("{\"error\":\"Cloudflare already has 100 custom hostnames and 100 are free. Delete one here or in Cloudflare first.\"}",
-                        JsonCompareMode.STRICT));
+                .andExpect(content().json("{\"detail\":\"Cloudflare already has 100 custom hostnames and 100 are free. Delete one here or in Cloudflare first.\"}",
+                        JsonCompareMode.LENIENT));
 
         when(cloudflareTokenCheck.check()).thenReturn(new TokenState(CloudflareTokenStatus.OK, NOW, null, 4));
         mockMvc.perform(as(ADMIN_TOKEN, post(DOMAINS + "/" + reviewed + "/approve")))
                 .andExpect(status().isConflict())
-                .andExpect(content().json(ALREADY_REVIEWED, JsonCompareMode.STRICT));
+                .andExpect(content().json(ALREADY_REVIEWED, JsonCompareMode.LENIENT));
         mockMvc.perform(as(ADMIN_TOKEN, post(DOMAINS + "/" + reviewed + "/reject")))
                 .andExpect(status().isConflict())
-                .andExpect(content().json(ALREADY_REVIEWED, JsonCompareMode.STRICT));
+                .andExpect(content().json(ALREADY_REVIEWED, JsonCompareMode.LENIENT));
         mockMvc.perform(as(ADMIN_TOKEN, post(DOMAINS + "/987654/approve")))
                 .andExpect(status().isNotFound())
-                .andExpect(content().json("{\"error\":\"Custom domain not found\"}", JsonCompareMode.STRICT));
+                .andExpect(content().json("{\"detail\":\"Custom domain not found\"}", JsonCompareMode.LENIENT));
         mockMvc.perform(as(ADMIN_TOKEN, post(DOMAINS + "/987654/reject")))
                 .andExpect(status().isNotFound());
         mockMvc.perform(as(ADMIN_TOKEN, post(DOMAINS + "/" + id + "/approve")).contentType(MediaType.APPLICATION_JSON)
                         .content("{\"note\":\"" + "a".repeat(501) + "\"}"))
                 .andExpect(status().isBadRequest())
-                .andExpect(content().json("{\"note\":\"Keep it to 500 characters or fewer\"}", JsonCompareMode.STRICT));
+                .andExpect(content().json("{\"errors\":{\"note\":\"Keep it to 500 characters or fewer\"}}", JsonCompareMode.LENIENT));
 
         jdbcTemplate.update("update user_account set active = false where id = ?", ANA);
         mockMvc.perform(as(ADMIN_TOKEN, post(DOMAINS + "/" + id + "/approve")))
                 .andExpect(status().isConflict())
-                .andExpect(content().json("{\"error\":\"This account is deactivated, so its domain can't be approved.\"}", JsonCompareMode.STRICT));
+                .andExpect(content().json("{\"detail\":\"This account is deactivated, so its domain can't be approved.\"}", JsonCompareMode.LENIENT));
 
         assertThat(statusOf(id)).isEqualTo("PENDING_REVIEW");
         assertThat(auditRows()).extracting(audit -> audit.get("action")).containsOnly("APPROVE_DOMAIN", "REJECT_DOMAIN");
@@ -659,7 +659,7 @@ class AdminCustomDomainSecurityTest {
 
         mockMvc.perform(as(ADMIN_TOKEN, post(DOMAINS + "/" + id + "/retry")))
                 .andExpect(status().isConflict())
-                .andExpect(content().json("{\"error\":\"There's nothing to retry for this domain.\"}", JsonCompareMode.STRICT));
+                .andExpect(content().json("{\"detail\":\"There's nothing to retry for this domain.\"}", JsonCompareMode.LENIENT));
         mockMvc.perform(as(ADMIN_TOKEN, post(DOMAINS + "/987654/retry"))).andExpect(status().isNotFound());
 
         verifyNoInteractions(customDomainLifecycle, customDomainProvisioner);
@@ -736,15 +736,15 @@ class AdminCustomDomainSecurityTest {
         for (final var body : List.of("{\"maxDomains\":0,\"reason\":\"Agency\"}", "{\"maxDomains\":21,\"reason\":\"Agency\"}", "{\"reason\":\"Agency\"}")) {
             mockMvc.perform(as(ADMIN_TOKEN, put(ALLOWANCES + ANA)).contentType(MediaType.APPLICATION_JSON).content(body))
                     .andExpect(status().isBadRequest())
-                    .andExpect(content().json("{\"maxDomains\":\"Choose 1 to 20\"}", JsonCompareMode.STRICT));
+                    .andExpect(content().json("{\"errors\":{\"maxDomains\":\"Choose 1 to 20\"}}", JsonCompareMode.LENIENT));
         }
         mockMvc.perform(as(ADMIN_TOKEN, put(ALLOWANCES + ANA)).contentType(MediaType.APPLICATION_JSON).content("{\"maxDomains\":3,\"reason\":\"  \"}"))
                 .andExpect(status().isBadRequest())
-                .andExpect(content().json("{\"reason\":\"Reason is required\"}", JsonCompareMode.STRICT));
+                .andExpect(content().json("{\"errors\":{\"reason\":\"Reason is required\"}}", JsonCompareMode.LENIENT));
         mockMvc.perform(as(ADMIN_TOKEN, put(ALLOWANCES + ANA)).contentType(MediaType.APPLICATION_JSON)
                         .content("{\"maxDomains\":3,\"reason\":\"" + "a".repeat(301) + "\"}"))
                 .andExpect(status().isBadRequest())
-                .andExpect(content().json("{\"reason\":\"Keep it to 300 characters or fewer\"}", JsonCompareMode.STRICT));
+                .andExpect(content().json("{\"errors\":{\"reason\":\"Keep it to 300 characters or fewer\"}}", JsonCompareMode.LENIENT));
 
         assertThat(count("custom_domain_allowance")).isZero();
     }
@@ -753,7 +753,7 @@ class AdminCustomDomainSecurityTest {
     void anUnknownAccountHasNoAllowance() throws Exception {
         mockMvc.perform(as(ADMIN_TOKEN, get(ALLOWANCES + 987654)))
                 .andExpect(status().isNotFound())
-                .andExpect(content().json("{\"error\":\"User not found\"}", JsonCompareMode.STRICT));
+                .andExpect(content().json("{\"detail\":\"User not found\"}", JsonCompareMode.LENIENT));
         mockMvc.perform(as(ADMIN_TOKEN, put(ALLOWANCES + 987654)).contentType(MediaType.APPLICATION_JSON)
                         .content("{\"maxDomains\":3,\"reason\":\"Agency\"}"))
                 .andExpect(status().isNotFound());

@@ -282,7 +282,7 @@ class UpdateLinkFlowTest {
 
         mockMvc.perform(edit("admin-token", "{\"id\":" + LINK + ",\"longUrl\":\"https://example.org/new\"}"))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.error").value(BLOCKED_WHILE_EDITING));
+                .andExpect(jsonPath("$.detail").value(BLOCKED_WHILE_EDITING));
 
         assertThat(jdbcTemplate.queryForMap("select long_url, active, block_reason, block_detail from url where id = ?", LINK))
                 .containsEntry("LONG_URL", OLD_DESTINATION)
@@ -295,7 +295,7 @@ class UpdateLinkFlowTest {
     void anOwnerWhoIsRefusedANewDestinationKeepsTheOldOne() throws Exception {
         mockMvc.perform(edit("owner-token", "{\"id\":" + LINK + ",\"longUrl\":\"https://example.net/elsewhere\"}"))
                 .andExpect(status().isForbidden())
-                .andExpect(jsonPath("$.error").value("Only admins can change where a link points"));
+                .andExpect(jsonPath("$.detail").value("Only admins can change where a link points"));
 
         assertThat(jdbcTemplate.queryForObject("select long_url from url where id = ?", String.class, LINK)).isEqualTo(OLD_DESTINATION);
     }
@@ -304,7 +304,7 @@ class UpdateLinkFlowTest {
     void aRefusedExpirationDateIsNotSaved() throws Exception {
         mockMvc.perform(edit("owner-token", "{\"id\":" + LINK + ",\"expirationDate\":\"2020-01-01T00:00:00\",\"visitLimit\":5}"))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.error").value("Expiration date can't be in the past"));
+                .andExpect(jsonPath("$.detail").value("Expiration date can't be in the past"));
 
         assertThat(jdbcTemplate.queryForMap("select expiration_date, visit_limit from url where id = ?", LINK))
                 .containsEntry("EXPIRATION_DATE", null)
@@ -323,7 +323,7 @@ class UpdateLinkFlowTest {
 
         mockMvc.perform(edit("owner-token", "{\"id\":" + LINK + ",\"visitLimit\":5}"))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.error").value(BLOCKED_WHILE_EDITING));
+                .andExpect(jsonPath("$.detail").value(BLOCKED_WHILE_EDITING));
 
         assertThat(jdbcTemplate.queryForMap("select visit_limit, active, block_reason, block_detail from url where id = ?", LINK))
                 .containsEntry("VISIT_LIMIT", null)
@@ -338,7 +338,7 @@ class UpdateLinkFlowTest {
 
         mockMvc.perform(edit("admin-token", "{\"id\":" + LINK + ",\"longUrl\":\"https://njuskaio.cam/a/MAUB3\",\"visitLimit\":5}"))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.error").value("This destination is on a blocklist and can't be shortened. If you think that's a mistake, contact us."));
+                .andExpect(jsonPath("$.detail").value("This destination is on a blocklist and can't be shortened. If you think that's a mistake, contact us."));
 
         assertThat(jdbcTemplate.queryForMap("select * from url where id = ?", LINK)).isEqualTo(before);
     }
@@ -350,7 +350,7 @@ class UpdateLinkFlowTest {
 
         mockMvc.perform(edit("admin-token", "{\"id\":" + LINK + ",\"longUrl\":\"https://bit.ly/abc\",\"visitLimit\":5}"))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.error").value("Links to other URL shorteners can't be shortened. Use the final destination instead."));
+                .andExpect(jsonPath("$.detail").value("Links to other URL shorteners can't be shortened. Use the final destination instead."));
 
         assertThat(jdbcTemplate.queryForMap("select * from url where id = ?", LINK)).isEqualTo(before);
     }

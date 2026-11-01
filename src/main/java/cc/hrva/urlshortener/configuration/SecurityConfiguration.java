@@ -2,13 +2,13 @@ package cc.hrva.urlshortener.configuration;
 
 import cc.hrva.urlshortener.controller.ReportController;
 import cc.hrva.urlshortener.controller.UnsubscribeController;
+import cc.hrva.urlshortener.security.AccessAnswers;
 import cc.hrva.urlshortener.security.ApiKeyRateLimitFilter;
 import cc.hrva.urlshortener.security.JwtFilter;
 import cc.hrva.urlshortener.security.OAuth2LoginFailureHandler;
 import cc.hrva.urlshortener.security.OAuth2LoginSuccessHandler;
 import cc.hrva.urlshortener.security.OAuth2LoginUserService;
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
-import jakarta.servlet.http.HttpServletResponse;
 import java.util.Arrays;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
@@ -101,12 +101,8 @@ public class SecurityConfiguration {
                                 .authenticated()
                 ).exceptionHandling(exceptionHandling ->
                         exceptionHandling
-                                .authenticationEntryPoint(
-                                        (request, response, ex) -> response.sendError(
-                                                HttpServletResponse.SC_UNAUTHORIZED,
-                                                ex.getMessage()
-                                        )
-                                )
+                                .authenticationEntryPoint(AccessAnswers.notSignedIn())
+                                .accessDeniedHandler(AccessAnswers.denied())
                 ).sessionManagement(sessionManagement ->
                         sessionManagement
                                 .sessionCreationPolicy(SessionCreationPolicy.STATELESS)

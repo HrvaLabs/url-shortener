@@ -353,7 +353,7 @@ class ConnectedAppsTest {
 
         final var foreign = mockMvc.perform(delete(CONNECTED_APP, othersApp.clientId()).header(HttpHeaders.AUTHORIZATION, bearer(appJwt(EMAIL))))
                 .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.error").isNotEmpty())
+                .andExpect(jsonPath("$.detail").isNotEmpty())
                 .andReturn()
                 .getResponse()
                 .getContentAsString();
@@ -368,7 +368,8 @@ class ConnectedAppsTest {
                 .getResponse()
                 .getContentAsString();
 
-        assertThat(foreign).isEqualTo(unknown).isEqualTo(unused).doesNotContain(othersApp.clientId());
+        assertThat(List.of(foreign, unknown, unused)).extracting(ConnectedAppsTest::detailOf).containsOnly("Connected app not found");
+        assertThat(detailOf(foreign)).doesNotContain(othersApp.clientId());
         mockMvc.perform(delete(CONNECTED_APP, othersApp.clientId()))
                 .andExpect(status().isUnauthorized());
         mockMvc.perform(mcpRequest(othersApp.accessToken()))
@@ -661,6 +662,10 @@ class ConnectedAppsTest {
             return fired.get();
         }
 
+    }
+
+    private static String detailOf(final String body) {
+        return JsonPath.read(body, "$.detail");
     }
 
 }

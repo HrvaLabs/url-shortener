@@ -30,6 +30,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.web.PageableHandlerMethodArgumentResolver;
 import org.springframework.http.MediaType;
+import org.springframework.test.json.JsonCompareMode;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
@@ -176,7 +177,7 @@ class UserControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(UserUpdateDto.builder().id(1L).email("a".repeat(65) + "@example.com").build())))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.email").value("Enter a valid email address (e.g. you@example.com)"));
+                .andExpect(jsonPath("$.errors.email").value("Enter a valid email address (e.g. you@example.com)"));
 
         verifyNoInteractions(userService);
     }
@@ -189,7 +190,7 @@ class UserControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(UserUpdateDto.builder().id(1L).email(email).build())))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.email").value("Email must be 255 characters or fewer"));
+                .andExpect(jsonPath("$.errors.email").value("Email must be 255 characters or fewer"));
 
         verifyNoInteractions(userService);
     }
@@ -247,7 +248,8 @@ class UserControllerTest {
         withErrorHandling().perform(delete("/api/v1/users/me"))
                 .andExpect(status().isUnauthorized())
                 .andExpect(content().json("""
-                        {"error":"For your security, sign in again to delete your account."}"""));
+{"detail":"For your security, sign in again to delete your account."}
+""", JsonCompareMode.LENIENT));
     }
 
     @Test
@@ -260,7 +262,8 @@ class UserControllerTest {
                         .content("{\"password\":\"wrong\"}"))
                 .andExpect(status().isForbidden())
                 .andExpect(content().json("""
-                        {"error":"Too many wrong passwords. Try again in 24 hours."}"""));
+{"detail":"Too many wrong passwords. Try again in 24 hours."}
+""", JsonCompareMode.LENIENT));
     }
 
     @Test

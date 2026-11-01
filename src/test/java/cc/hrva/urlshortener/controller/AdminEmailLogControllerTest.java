@@ -133,7 +133,7 @@ class AdminEmailLogControllerTest {
     void anUnknownStatusIsABadRequest(final String status) throws Exception {
         mockMvc.perform(get(EMAIL_LOG).param("status", status))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.error").value("Invalid value for status"));
+                .andExpect(jsonPath("$.detail").value("Invalid value for status"));
 
         verifyNoInteractions(emailLogService);
     }

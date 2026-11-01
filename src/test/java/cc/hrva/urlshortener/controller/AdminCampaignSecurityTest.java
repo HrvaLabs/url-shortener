@@ -231,7 +231,7 @@ class AdminCampaignSecurityTest {
                 post(CAMPAIGNS + "/99/block-preview"))) {
             mockMvc.perform(signedIn(request, "admin-token"))
                     .andExpect(status().isNotFound())
-                    .andExpect(content().json("{\"error\":\"There is no campaign 99.\"}", JsonCompareMode.STRICT));
+                    .andExpect(content().json("{\"detail\":\"There is no campaign 99.\"}", JsonCompareMode.LENIENT));
         }
     }
 

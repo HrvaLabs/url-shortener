@@ -170,14 +170,14 @@ class AdminAbuseReportSecurityTest {
         for (final var body : List.of("{\"urlIds\":[" + tooMany + "]}", "{\"urlIds\":[]}")) {
             mockMvc.perform(signedIn(post(PREPARE), "admin-token").content(body))
                     .andExpect(status().isBadRequest())
-                    .andExpect(content().json("{\"urlIds\":\"Select between 1 and 100 links\"}", JsonCompareMode.STRICT));
+                    .andExpect(content().json("{\"errors\":{\"urlIds\":\"Select between 1 and 100 links\"}}", JsonCompareMode.LENIENT));
         }
         mockMvc.perform(signedIn(post(PREPARE), "admin-token").content("{\"urlIds\":[1,1]}"))
                 .andExpect(status().isBadRequest())
-                .andExpect(content().json("{\"urlIds\":\"Select each link only once\"}", JsonCompareMode.STRICT));
+                .andExpect(content().json("{\"errors\":{\"urlIds\":\"Select each link only once\"}}", JsonCompareMode.LENIENT));
         mockMvc.perform(signedIn(post(PREPARE), "admin-token").content("{\"urlIds\":[1,null]}"))
                 .andExpect(status().isBadRequest())
-                .andExpect(content().json("{\"urlIds[1]\":\"Every selected link needs its id\"}", JsonCompareMode.STRICT));
+                .andExpect(content().json("{\"errors\":{\"urlIds[1]\":\"Every selected link needs its id\"}}", JsonCompareMode.LENIENT));
         verifyNoInteractions(abuseReportService);
     }
 
@@ -187,7 +187,7 @@ class AdminAbuseReportSecurityTest {
 
         mockMvc.perform(signedIn(post(PREPARE), "admin-token").content("{}"))
                 .andExpect(status().isBadRequest())
-                .andExpect(content().json("{\"urlIds\":\"Select between 1 and 100 links\"}", JsonCompareMode.STRICT));
+                .andExpect(content().json("{\"errors\":{\"urlIds\":\"Select between 1 and 100 links\"}}", JsonCompareMode.LENIENT));
     }
 
     @Test
@@ -196,7 +196,7 @@ class AdminAbuseReportSecurityTest {
 
         mockMvc.perform(signedIn(post(PREPARE), "admin-token").content("{\"campaignId\":99}"))
                 .andExpect(status().isNotFound())
-                .andExpect(content().json("{\"error\":\"There is no campaign 99.\"}", JsonCompareMode.STRICT));
+                .andExpect(content().json("{\"detail\":\"There is no campaign 99.\"}", JsonCompareMode.LENIENT));
     }
 
     @Test
@@ -214,7 +214,7 @@ class AdminAbuseReportSecurityTest {
         for (final var body : List.of("{\"domains\":[" + tooMany + "],\"registrar\":null,\"abuseEmail\":null}", "{\"domains\":[]}", "{}")) {
             mockMvc.perform(signedIn(post(REPORTED), "admin-token").content(body))
                     .andExpect(status().isBadRequest())
-                    .andExpect(content().json("{\"domains\":\"Select between 1 and 100 domains\"}", JsonCompareMode.STRICT));
+                    .andExpect(content().json("{\"errors\":{\"domains\":\"Select between 1 and 100 domains\"}}", JsonCompareMode.LENIENT));
         }
         verifyNoInteractions(abuseReportService);
     }
@@ -225,8 +225,8 @@ class AdminAbuseReportSecurityTest {
 
         mockMvc.perform(signedIn(post(REPORTED), "admin-token").content(body))
                 .andExpect(status().isBadRequest())
-                .andExpect(content().json("{\"registrar\":\"Use at most 255 characters for the registrar\","
-                        + "\"abuseEmail\":\"Use at most 254 characters for the abuse address\"}", JsonCompareMode.STRICT));
+                .andExpect(content().json("{\"errors\":{\"registrar\":\"Use at most 255 characters for the registrar\","
+                        + "\"abuseEmail\":\"Use at most 254 characters for the abuse address\"}}", JsonCompareMode.LENIENT));
         verifyNoInteractions(abuseReportService);
     }
 

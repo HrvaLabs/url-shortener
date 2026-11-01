@@ -4,7 +4,7 @@ import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.dto.TwoFactorEnableResponse;
 import cc.hrva.urlshortener.dto.TwoFactorSetupResponse;
 import cc.hrva.urlshortener.exception.ApiException;
-import cc.hrva.urlshortener.exception.NoAuthorizationException;
+import cc.hrva.urlshortener.exception.NotSignedInException;
 import cc.hrva.urlshortener.model.TwoFactorRecoveryCode;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.repository.TwoFactorRecoveryCodeRepository;
@@ -100,7 +100,7 @@ public class DefaultTwoFactorService implements TwoFactorService {
     private User currentUser() {
         final var user = userService.getUserFromToken();
         if (user == null) {
-            throw new NoAuthorizationException("Not authenticated");
+            throw new NotSignedInException("Not authenticated");
         }
         return user;
     }

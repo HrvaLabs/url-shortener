@@ -132,14 +132,14 @@ class AdminDomainRuleControllerTest {
 
         mockMvc.perform(get("/api/v1/admin/domain-rules").param("sort", "createDate,desc").principal(SIGNED_IN_ADMIN))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.error").value("Sort must be domain, type or createdAt"));
+                .andExpect(jsonPath("$.detail").value("Sort must be domain, type or createdAt"));
     }
 
     @Test
     void listingAnUnknownRuleTypeIsABadRequest() throws Exception {
         mockMvc.perform(get("/api/v1/admin/domain-rules").param("type", "MAYBE").principal(SIGNED_IN_ADMIN))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.error").value("Invalid value for type"));
+                .andExpect(jsonPath("$.detail").value("Invalid value for type"));
 
         verifyNoInteractions(moderationService);
     }
@@ -179,7 +179,7 @@ class AdminDomainRuleControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"domain\":\"jofogas.cards\",\"type\":\"MAYBE\"}"))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.error").exists());
+                .andExpect(jsonPath("$.detail").exists());
 
         verify(moderationService, never()).createDomainRule(any(), anyString(), anyString());
     }
@@ -193,7 +193,7 @@ class AdminDomainRuleControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"domain\":\"com\",\"type\":\"BLOCK\"}"))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.error").value("Enter a domain such as example.com, not a top-level domain or an IP address."));
+                .andExpect(jsonPath("$.detail").value("Enter a domain such as example.com, not a top-level domain or an IP address."));
     }
 
     @Test
@@ -223,7 +223,7 @@ class AdminDomainRuleControllerTest {
         for (final var body : List.of("{\"urlIds\":[]}", "{}", "{\"urlIds\":" + hundredAndOne + "}")) {
             mockMvc.perform(post(BULK_PREVIEW).principal(SIGNED_IN_ADMIN).contentType(MediaType.APPLICATION_JSON).content(body))
                     .andExpect(status().isBadRequest())
-                    .andExpect(jsonPath("$.urlIds").value("Select between 1 and 100 links"));
+                    .andExpect(jsonPath("$.errors.urlIds").value("Select between 1 and 100 links"));
         }
 
         verifyNoInteractions(moderationService);
@@ -233,10 +233,10 @@ class AdminDomainRuleControllerTest {
     void aBulkPreviewOfTheSameLinkTwiceOrAnEmptyIdIsABadRequest() throws Exception {
         mockMvc.perform(post(BULK_PREVIEW).principal(SIGNED_IN_ADMIN).contentType(MediaType.APPLICATION_JSON).content("{\"urlIds\":[287,287]}"))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.urlIds").value("Select each link only once"));
+                .andExpect(jsonPath("$.errors.urlIds").value("Select each link only once"));
         mockMvc.perform(post(BULK_PREVIEW).principal(SIGNED_IN_ADMIN).contentType(MediaType.APPLICATION_JSON).content("{\"urlIds\":[287,null]}"))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$['urlIds[1]']").value("Every selected link needs its id"));
+                .andExpect(jsonPath("$.errors['urlIds[1]']").value("Every selected link needs its id"));
 
         verifyNoInteractions(moderationService);
     }
@@ -280,7 +280,7 @@ class AdminDomainRuleControllerTest {
             mockMvc.perform(post(BULK).principal(SIGNED_IN_ADMIN).contentType(MediaType.APPLICATION_JSON)
                             .content("{" + domains + "\"reason\":\"Phishing\"}"))
                     .andExpect(status().isBadRequest())
-                    .andExpect(jsonPath("$.domains").value("Select between 1 and 100 domains"));
+                    .andExpect(jsonPath("$.errors.domains").value("Select between 1 and 100 domains"));
         }
 
         verify(moderationService, never()).blockDomains(anyList(), anyString(), anyString(), anyString());
@@ -292,7 +292,7 @@ class AdminDomainRuleControllerTest {
             mockMvc.perform(post(BULK).principal(SIGNED_IN_ADMIN).contentType(MediaType.APPLICATION_JSON)
                             .content("{\"domains\":[\"omaehhm.com\"]" + reason + "}"))
                     .andExpect(status().isBadRequest())
-                    .andExpect(jsonPath("$.reason").value("Reason is required"));
+                    .andExpect(jsonPath("$.errors.reason").value("Reason is required"));
         }
 
         verify(moderationService, never()).blockDomains(anyList(), anyString(), anyString(), anyString());
@@ -303,15 +303,15 @@ class AdminDomainRuleControllerTest {
         mockMvc.perform(post(BULK).principal(SIGNED_IN_ADMIN).contentType(MediaType.APPLICATION_JSON)
                         .content("{\"domains\":[\"omaehhm.com\",\"omaehhm.com\"],\"reason\":\"Phishing\"}"))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.domains").value("Select each domain only once"));
+                .andExpect(jsonPath("$.errors.domains").value("Select each domain only once"));
         mockMvc.perform(post(BULK).principal(SIGNED_IN_ADMIN).contentType(MediaType.APPLICATION_JSON)
                         .content("{\"domains\":[\"omaehhm.com\",\" \"],\"reason\":\"Phishing\"}"))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$['domains[1]']").value("Every selected domain needs a name"));
+                .andExpect(jsonPath("$.errors['domains[1]']").value("Every selected domain needs a name"));
         mockMvc.perform(post(BULK).principal(SIGNED_IN_ADMIN).contentType(MediaType.APPLICATION_JSON)
                         .content("{\"domains\":[\"omaehhm.com\"],\"reason\":\"" + "x".repeat(256) + "\"}"))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.reason").value("Reason must be 255 characters or fewer"));
+                .andExpect(jsonPath("$.errors.reason").value("Reason must be 255 characters or fewer"));
 
         verify(moderationService, never()).blockDomains(anyList(), anyString(), anyString(), anyString());
     }
@@ -330,7 +330,7 @@ class AdminDomainRuleControllerTest {
 
         mockMvc.perform(delete("/api/v1/admin/domain-rules/99").principal(SIGNED_IN_ADMIN))
                 .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.error").value("There is no rule with id 99."));
+                .andExpect(jsonPath("$.detail").value("There is no rule with id 99."));
     }
 
 }

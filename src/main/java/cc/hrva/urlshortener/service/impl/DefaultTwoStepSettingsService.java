@@ -7,6 +7,7 @@ import cc.hrva.urlshortener.dto.TwoStepDisableDto;
 import cc.hrva.urlshortener.dto.TwoStepStatusResponse;
 import cc.hrva.urlshortener.exception.ApiException;
 import cc.hrva.urlshortener.exception.NoAuthorizationException;
+import cc.hrva.urlshortener.exception.NotSignedInException;
 import cc.hrva.urlshortener.exception.PasskeyVerificationException;
 import cc.hrva.urlshortener.exception.SignInExpiredException;
 import cc.hrva.urlshortener.model.User;
@@ -175,7 +176,7 @@ public class DefaultTwoStepSettingsService implements TwoStepSettingsService {
     private User currentUser() {
         final var user = userService.getUserFromToken();
         if (user == null) {
-            throw new NoAuthorizationException(NOT_AUTHENTICATED);
+            throw new NotSignedInException(NOT_AUTHENTICATED);
         }
 
         return user;

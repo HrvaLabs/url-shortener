@@ -41,7 +41,7 @@ public class PublicStatsController {
     @GetMapping("/stats")
     public ResponseEntity<PublicStatsResponse> publicStats(final HttpServletRequest request) {
         if (!requestAllowed(request)) {
-            throw new RateLimitExceededException(TOO_MANY_REQUESTS);
+            throw new RateLimitExceededException(TOO_MANY_REQUESTS, REQUEST_WINDOW);
         }
 
         return ResponseEntity.ok()

@@ -7,7 +7,7 @@ import cc.hrva.urlshortener.dto.PasskeyRegistrationOptionsDto;
 import cc.hrva.urlshortener.dto.PasskeyRenameDto;
 import cc.hrva.urlshortener.dto.PasskeyResponse;
 import cc.hrva.urlshortener.exception.ApiException;
-import cc.hrva.urlshortener.exception.NoAuthorizationException;
+import cc.hrva.urlshortener.exception.NotSignedInException;
 import cc.hrva.urlshortener.exception.PasskeyNotFoundException;
 import cc.hrva.urlshortener.exception.PasskeyVerificationException;
 import cc.hrva.urlshortener.exception.SignInExpiredException;
@@ -174,7 +174,7 @@ public class DefaultPasskeyService implements PasskeyService {
             log.info("Passkey user handle created user id={}", user.getId());
         }
         user.setWebauthnUserHandle(userRepository.findWebauthnUserHandleById(user.getId())
-                .orElseThrow(() -> new NoAuthorizationException(NOT_AUTHENTICATED)));
+                .orElseThrow(() -> new NotSignedInException(NOT_AUTHENTICATED)));
     }
 
     private PasskeyCeremony registrationCeremonyOf(final String ceremonyId, final User user) {
@@ -199,7 +199,7 @@ public class DefaultPasskeyService implements PasskeyService {
     private User currentUser() {
         final var user = userService.getUserFromToken();
         if (user == null) {
-            throw new NoAuthorizationException(NOT_AUTHENTICATED);
+            throw new NotSignedInException(NOT_AUTHENTICATED);
         }
 
         return user;

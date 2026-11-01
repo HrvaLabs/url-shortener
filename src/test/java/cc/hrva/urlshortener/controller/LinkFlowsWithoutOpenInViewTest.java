@@ -137,7 +137,7 @@ class LinkFlowsWithoutOpenInViewTest {
     private static final long OWNERS_LINK = 510L;
     private static final long OWNERS_KEY = 520L;
     private static final long OWNERS_DOMAIN = 530L;
-    private static final String DOMAIN_REFUSAL = "{\"domain\":\"Choose one of your active domains, or leave it empty for hrva.cc.\"}";
+    private static final String DOMAIN_REFUSAL = "{\"errors\":{\"domain\":\"Choose one of your active domains, or leave it empty for hrva.cc.\"}}";
     private static final String OWNER_EMAIL = "owner@hrva.cc";
     private static final String OTHER_EMAIL = "other@hrva.cc";
     private static final String OWNER_TOKEN = "Bearer owner-token";
@@ -359,7 +359,7 @@ class LinkFlowsWithoutOpenInViewTest {
                 .andExpect(jsonPath("$.domain.hostname").value("go.example.com"));
         create(OWNER_TOKEN, "{\"longUrl\":\"https://example.com/c\",\"shortUrl\":\"menu\",\"domain\":\"go.example.com\"}")
                 .andExpect(status().isConflict())
-                .andExpect(content().json("{\"error\":\"This short URL is already taken. Try another.\"}", JsonCompareMode.STRICT));
+                .andExpect(content().json("{\"detail\":\"This short URL is already taken. Try another.\"}", JsonCompareMode.LENIENT));
 
         assertThat(jdbcTemplate.queryForList("select long_url from url where short_url = 'menu' order by id", String.class))
                 .containsExactly("https://example.com/a", "https://example.com/b");
@@ -372,13 +372,13 @@ class LinkFlowsWithoutOpenInViewTest {
 
         create(OTHER_TOKEN, "{\"longUrl\":\"https://example.com/a\",\"domain\":\"go.example.com\"}")
                 .andExpect(status().isBadRequest())
-                .andExpect(content().json(DOMAIN_REFUSAL, JsonCompareMode.STRICT));
+                .andExpect(content().json(DOMAIN_REFUSAL, JsonCompareMode.LENIENT));
         create(OWNER_TOKEN, "{\"longUrl\":\"https://example.com/a\",\"domain\":\"pending.example.com\"}")
                 .andExpect(status().isBadRequest())
-                .andExpect(content().json(DOMAIN_REFUSAL, JsonCompareMode.STRICT));
+                .andExpect(content().json(DOMAIN_REFUSAL, JsonCompareMode.LENIENT));
         create(OWNER_TOKEN, "{\"longUrl\":\"https://example.com/a\",\"domain\":\"" + "a".repeat(250) + ".com\"}")
                 .andExpect(status().isBadRequest())
-                .andExpect(content().json(DOMAIN_REFUSAL, JsonCompareMode.STRICT));
+                .andExpect(content().json(DOMAIN_REFUSAL, JsonCompareMode.LENIENT));
 
         assertThat(linkCount()).isEqualTo(1L);
     }
@@ -392,7 +392,7 @@ class LinkFlowsWithoutOpenInViewTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"longUrl\":\"https://example.com/anonymous\",\"domain\":\"go.example.com\"}"))
                 .andExpect(status().isBadRequest())
-                .andExpect(content().json(DOMAIN_REFUSAL, JsonCompareMode.STRICT));
+                .andExpect(content().json(DOMAIN_REFUSAL, JsonCompareMode.LENIENT));
 
         assertThat(jdbcTemplate.queryForObject("select count(*) from url where long_url = 'https://example.com/anonymous'", Long.class)).isZero();
     }
@@ -480,7 +480,7 @@ class LinkFlowsWithoutOpenInViewTest {
 
         create(OWNER_TOKEN, "{\"longUrl\":\"https://example.com/a\",\"domain\":\"go.example.com\"}")
                 .andExpect(status().isBadRequest())
-                .andExpect(content().json(DOMAIN_REFUSAL, JsonCompareMode.STRICT));
+                .andExpect(content().json(DOMAIN_REFUSAL, JsonCompareMode.LENIENT));
 
         assertThat(linkCount()).isEqualTo(1L);
     }
@@ -501,7 +501,7 @@ class LinkFlowsWithoutOpenInViewTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"longUrl\":\"https://example.com/by-key-2\",\"domain\":\"other.example.com\"}"))
                 .andExpect(status().isBadRequest())
-                .andExpect(content().json(DOMAIN_REFUSAL, JsonCompareMode.STRICT));
+                .andExpect(content().json(DOMAIN_REFUSAL, JsonCompareMode.LENIENT));
 
         assertThat(jdbcTemplate.queryForObject("select count(*) from url where owner_id = ? and domain_id = ?", Long.class, OWNER, OWNERS_DOMAIN))
                 .isEqualTo(1L);
@@ -519,7 +519,7 @@ class LinkFlowsWithoutOpenInViewTest {
                         .content("[{\"longUrl\":\"https://example.com/1\"},{\"longUrl\":\"https://example.com/2\",\"domain\":\"go.example.com\"},"
                                 + "{\"longUrl\":\"https://example.com/3\",\"domain\":\"elsewhere.example.com\"}]"))
                 .andExpect(status().isBadRequest())
-                .andExpect(content().json(DOMAIN_REFUSAL, JsonCompareMode.STRICT));
+                .andExpect(content().json(DOMAIN_REFUSAL, JsonCompareMode.LENIENT));
 
         assertThat(linkCount()).isEqualTo(1L);
 
@@ -539,7 +539,7 @@ class LinkFlowsWithoutOpenInViewTest {
 
         mockMvc.perform(patch("/api/v1/urls/{id}/activate", OWNERS_LINK).header(JwtFilter.AUTHORIZATION_HEADER, OWNER_TOKEN))
                 .andExpect(status().isBadRequest())
-                .andExpect(content().json("{\"error\":\"This link's domain isn't active, so the link can't be turned on.\"}", JsonCompareMode.STRICT));
+                .andExpect(content().json("{\"detail\":\"This link's domain isn't active, so the link can't be turned on.\"}", JsonCompareMode.LENIENT));
 
         assertThat(jdbcTemplate.queryForObject("select active from url where id = ?", Boolean.class, OWNERS_LINK)).isFalse();
     }

@@ -10,7 +10,7 @@ import cc.hrva.urlshortener.exception.ApiException;
 import cc.hrva.urlshortener.exception.BioHandleUnavailableException;
 import cc.hrva.urlshortener.exception.BioPageConflictException;
 import cc.hrva.urlshortener.exception.BioPageNotFoundException;
-import cc.hrva.urlshortener.exception.NoAuthorizationException;
+import cc.hrva.urlshortener.exception.NotSignedInException;
 import cc.hrva.urlshortener.exception.RateLimitExceededException;
 import cc.hrva.urlshortener.model.BioPage;
 import cc.hrva.urlshortener.model.BioPageButton;
@@ -265,7 +265,7 @@ public class DefaultBioPageService implements BioPageService {
     private User currentUser() {
         final var user = userService.getUserFromToken();
         if (user == null) {
-            throw new NoAuthorizationException(NOT_AUTHENTICATED);
+            throw new NotSignedInException(NOT_AUTHENTICATED);
         }
         return user;
     }
@@ -311,7 +311,7 @@ public class DefaultBioPageService implements BioPageService {
     private void requireWithinLimit(final String name, final User user, final int limit, final Duration window, final String refusal) {
         if (!withinLimit(name, user, limit, window)) {
             log.info("Bio page request refused by the rate limit limit={} userId={}", name, user.getId());
-            throw new RateLimitExceededException(refusal);
+            throw new RateLimitExceededException(refusal, window);
         }
     }
 

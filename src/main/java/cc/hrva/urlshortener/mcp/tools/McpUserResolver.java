@@ -1,6 +1,6 @@
 package cc.hrva.urlshortener.mcp.tools;
 
-import cc.hrva.urlshortener.exception.NoAuthorizationException;
+import cc.hrva.urlshortener.exception.NotSignedInException;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.service.UserService;
 import lombok.RequiredArgsConstructor;
@@ -16,7 +16,7 @@ public class McpUserResolver {
 
     public User currentUser() {
         if (!(SecurityContextHolder.getContext().getAuthentication() instanceof JwtAuthenticationToken authentication)) {
-            throw new NoAuthorizationException("Not signed in");
+            throw new NotSignedInException("Not signed in");
         }
 
         return userService.fetchActiveUserByEmail(authentication.getToken().getSubject());

@@ -235,7 +235,7 @@ class ApiKeyUseOnCreateFlowTest {
 
         create("https://example.com/revoked-meanwhile")
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.error").value("API key is invalid"));
+                .andExpect(jsonPath("$.detail").value("API key is invalid"));
 
         assertThat(keyRow()).containsEntry("ACTIVE", false).containsEntry("API_CALLS_USED", 1L);
         assertThat(linksOfTheOwner()).isZero();
@@ -355,7 +355,7 @@ class ApiKeyUseOnCreateFlowTest {
 
         create("https://example.com/with-a-revoked-key")
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.error").value("API key is invalid"));
+                .andExpect(jsonPath("$.detail").value("API key is invalid"));
 
         assertThat(keyRow()).containsEntry("API_CALLS_USED", 3L);
         assertThat(jdbcTemplate.queryForObject("select last_used_at from api_key where id = ?", LocalDateTime.class, OWNERS_KEY)).isNull();

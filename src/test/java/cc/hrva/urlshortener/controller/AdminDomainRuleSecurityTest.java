@@ -172,7 +172,7 @@ class AdminDomainRuleSecurityTest {
 
         mockMvc.perform(signedInGet(RULES, "admin-token").param("sort", "createDate,desc"))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.error").value("Sort must be domain, type or createdAt"));
+                .andExpect(jsonPath("$.detail").value("Sort must be domain, type or createdAt"));
     }
 
     @Test
@@ -212,10 +212,10 @@ class AdminDomainRuleSecurityTest {
 
         mockMvc.perform(signedInPost(BULK_PREVIEW, "admin-token").content("{\"urlIds\":" + ids + "}"))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.urlIds").value("Select between 1 and 100 links"));
+                .andExpect(jsonPath("$.errors.urlIds").value("Select between 1 and 100 links"));
         mockMvc.perform(signedInPost(BULK, "admin-token").content("{\"domains\":" + domains + ",\"reason\":\"Phishing\"}"))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.domains").value("Select between 1 and 100 domains"));
+                .andExpect(jsonPath("$.errors.domains").value("Select between 1 and 100 domains"));
 
         verifyNoInteractions(moderationService);
     }
@@ -224,7 +224,7 @@ class AdminDomainRuleSecurityTest {
     void aBulkBlockWithoutAReasonIsABadRequestThroughTheRealStack() throws Exception {
         mockMvc.perform(signedInPost(BULK, "admin-token").content("{\"domains\":[\"omaehhm.com\"]}"))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.reason").value("Reason is required"));
+                .andExpect(jsonPath("$.errors.reason").value("Reason is required"));
 
         verifyNoInteractions(moderationService);
     }

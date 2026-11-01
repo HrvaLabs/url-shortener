@@ -120,7 +120,7 @@ class AdminBlocklistControllerTest {
 
         mockMvc.perform(delete("/api/v1/admin/blocklist-sources/99"))
                 .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.error").value("Blocklist source not found"));
+                .andExpect(jsonPath("$.detail").value("Blocklist source not found"));
     }
 
     @Test
@@ -129,7 +129,7 @@ class AdminBlocklistControllerTest {
 
         mockMvc.perform(post("/api/v1/admin/blocklist-sources").contentType(MediaType.APPLICATION_JSON).content(SOURCE_JSON))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.error").value("URL must be a valid https:// address"));
+                .andExpect(jsonPath("$.detail").value("URL must be a valid https:// address"));
     }
 
 }

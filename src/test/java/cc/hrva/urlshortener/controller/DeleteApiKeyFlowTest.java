@@ -186,7 +186,7 @@ class DeleteApiKeyFlowTest {
     void anActiveKeyMustBeRevokedFirst() throws Exception {
         mockMvc.perform(delete("/api/v1/api-keys/{id}", OWNERS_ACTIVE_KEY).header(JwtFilter.AUTHORIZATION_HEADER, OWNER_TOKEN))
                 .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.error").value("Revoke this key before deleting it."));
+                .andExpect(jsonPath("$.detail").value("Revoke this key before deleting it."));
 
         assertThat(keyIds()).contains(OWNERS_ACTIVE_KEY);
     }
@@ -195,7 +195,7 @@ class DeleteApiKeyFlowTest {
     void anotherUserIsRefusedLikeARevoke() throws Exception {
         mockMvc.perform(delete("/api/v1/api-keys/{id}", OWNERS_REVOKED_KEY).header(JwtFilter.AUTHORIZATION_HEADER, OTHER_TOKEN))
                 .andExpect(status().isForbidden())
-                .andExpect(jsonPath("$.error").value("You don't have authorization for this action"));
+                .andExpect(jsonPath("$.detail").value("You don't have authorization for this action"));
         mockMvc.perform(delete("/api/v1/api-keys/{id}", OWNERS_ACTIVE_KEY).header(JwtFilter.AUTHORIZATION_HEADER, OTHER_TOKEN))
                 .andExpect(status().isForbidden());
 
@@ -222,7 +222,7 @@ class DeleteApiKeyFlowTest {
     void anUnknownKeyIsNotFound() throws Exception {
         mockMvc.perform(delete("/api/v1/api-keys/{id}", 999L).header(JwtFilter.AUTHORIZATION_HEADER, OWNER_TOKEN))
                 .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.error").value("Api key doesn't exist"));
+                .andExpect(jsonPath("$.detail").value("Api key doesn't exist"));
     }
 
     @Test

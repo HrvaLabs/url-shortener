@@ -5,6 +5,7 @@ import cc.hrva.urlshortener.exception.BioPageConflictException;
 import cc.hrva.urlshortener.exception.BioPageNotFoundException;
 import cc.hrva.urlshortener.exception.BulkBlockIncompleteException;
 import cc.hrva.urlshortener.exception.FieldValidationException;
+import cc.hrva.urlshortener.exception.RateLimitExceededException;
 import cc.hrva.urlshortener.exception.SettingNotFoundException;
 import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
@@ -23,6 +24,7 @@ import org.springframework.web.bind.annotation.RestController;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -42,7 +44,7 @@ class GlobalExceptionHandlerTest {
     void aQueryValueOfTheWrongTypeIsABadRequestNamingTheParameter(final CapturedOutput output) throws Exception {
         mockMvc.perform(get("/probe").param("days", "abc"))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.error").value("Invalid value for days"));
+                .andExpect(jsonPath("$.detail").value("Invalid value for days"));
 
         assertThat(output).doesNotContain("Unhandled exception").doesNotContain("\tat ");
     }
@@ -51,7 +53,7 @@ class GlobalExceptionHandlerTest {
     void aPathValueOfTheWrongTypeIsABadRequestNamingTheParameter(final CapturedOutput output) throws Exception {
         mockMvc.perform(get("/probe/abc"))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.error").value("Invalid value for id"));
+                .andExpect(jsonPath("$.detail").value("Invalid value for id"));
 
         assertThat(output).doesNotContain("Unhandled exception").doesNotContain("\tat ");
     }
@@ -60,7 +62,7 @@ class GlobalExceptionHandlerTest {
     void aMissingRequiredParameterIsABadRequestNamingIt(final CapturedOutput output) throws Exception {
         mockMvc.perform(get("/probe"))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.error").value("Missing parameter days"));
+                .andExpect(jsonPath("$.detail").value("Missing parameter days"));
 
         assertThat(output).doesNotContain("Unhandled exception").doesNotContain("\tat ");
     }
@@ -69,54 +71,103 @@ class GlobalExceptionHandlerTest {
     void anUnavailableBioHandleIsAConflictWithItsText() throws Exception {
         mockMvc.perform(get("/probe/handle"))
                 .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.error").value("This handle is taken. Try another."));
+                .andExpect(jsonPath("$.detail").value("This handle is taken. Try another."));
     }
 
     @Test
     void aMissingBioPageIsNotFoundWithItsText() throws Exception {
         mockMvc.perform(get("/probe/bio-page"))
                 .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.error").value("You don't have a bio page yet."));
+                .andExpect(jsonPath("$.detail").value("You don't have a bio page yet."));
     }
 
     @Test
     void aBioPageChangedMeanwhileIsAConflictWithItsText() throws Exception {
         mockMvc.perform(get("/probe/bio-page-changed"))
                 .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.error").value("This page changed. Reload and try again."));
+                .andExpect(jsonPath("$.detail").value("This page changed. Reload and try again."));
     }
 
     @Test
     void aFieldValidationErrorIsABadRequestWithTheFieldMapAsTheBody() throws Exception {
         mockMvc.perform(get("/probe/field"))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.hostname").value("Enter a domain, like go.example.com"))
-                .andExpect(jsonPath("$.error").doesNotExist());
+                .andExpect(content().contentType("application/problem+json"))
+                .andExpect(jsonPath("$.errors.hostname").value("Enter a domain, like go.example.com"))
+                .andExpect(jsonPath("$.detail").value("Enter a domain, like go.example.com"))
+                .andExpect(jsonPath("$.hostname").doesNotExist());
     }
 
     @Test
     void aSettingValueErrorIsABadRequestWithExactlyTheValueMap() throws Exception {
         mockMvc.perform(get("/probe/setting-value"))
                 .andExpect(status().isBadRequest())
-                .andExpect(content().json("{\"value\": \"Use a number from 2 to 50.\"}", JsonCompareMode.STRICT));
+                .andExpect(content().json("""
+                        {"type": "about:blank", "title": "Bad Request", "status": 400, "detail": "Use a number from 2 to 50.",
+                         "instance": "/probe/setting-value", "errors": {"value": "Use a number from 2 to 50."}}""", JsonCompareMode.STRICT));
     }
 
     @Test
     void anUnknownSettingIsNotFoundWithItsText() throws Exception {
         mockMvc.perform(get("/probe/setting"))
                 .andExpect(status().isNotFound())
-                .andExpect(content().json("{\"error\": \"There is no setting NOPE.\"}", JsonCompareMode.STRICT));
+                .andExpect(content().contentType("application/problem+json"))
+                .andExpect(content().json("""
+                        {"type": "about:blank", "title": "Not Found", "status": 404, "detail": "There is no setting NOPE.",
+                         "instance": "/probe/setting"}""", JsonCompareMode.STRICT));
     }
 
     @Test
     void anUnfinishedBulkBlockIsServiceUnavailableWithItsText() throws Exception {
         mockMvc.perform(get("/probe/bulk-block"))
                 .andExpect(status().isServiceUnavailable())
-                .andExpect(jsonPath("$.error").value("The domains are blocked, but turning off their links failed. Block the same domains again to finish."));
+                .andExpect(jsonPath("$.detail").value("The domains are blocked, but turning off their links failed. Block the same domains again to finish."));
+    }
+
+    @Test
+    void severalFieldErrorsKeepEveryFieldAndNameTheFirstInTheDetail() throws Exception {
+        mockMvc.perform(get("/probe/fields"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errors.alias").value("Use letters and digits."))
+                .andExpect(jsonPath("$.errors.longUrl").value("Enter a URL."))
+                .andExpect(jsonPath("$.detail").value("Use letters and digits."));
+    }
+
+    @Test
+    void aRateLimitAnswersRetryAfterInSeconds() throws Exception {
+        mockMvc.perform(get("/probe/rate-limit"))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(header().string("Retry-After", "3600"))
+                .andExpect(jsonPath("$.detail").value("Too many links created in the last hour."));
+    }
+
+    @Test
+    void aRateLimitWithoutAWindowStillAnswersRetryAfter() throws Exception {
+        mockMvc.perform(get("/probe/rate-limit-unknown"))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(header().string("Retry-After", "60"));
     }
 
     @RestController
     static class ProbeController {
+
+        @GetMapping("/probe/fields")
+        String probeFields() {
+            final var errors = new java.util.LinkedHashMap<String, String>();
+            errors.put("alias", "Use letters and digits.");
+            errors.put("longUrl", "Enter a URL.");
+            throw new FieldValidationException(errors);
+        }
+
+        @GetMapping("/probe/rate-limit")
+        String probeRateLimit() {
+            throw new RateLimitExceededException("Too many links created in the last hour.", java.time.Duration.ofHours(1));
+        }
+
+        @GetMapping("/probe/rate-limit-unknown")
+        String probeRateLimitUnknown() {
+            throw new RateLimitExceededException("Too many tries.");
+        }
 
         @GetMapping("/probe/field")
         String probeField() {

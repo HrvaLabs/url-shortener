@@ -208,7 +208,7 @@ class BioPageEndpointSecurityTest {
 
         mockMvc.perform(signedIn(get(MY_PAGE)))
                 .andExpect(status().isNotFound())
-                .andExpect(content().json("{\"error\":\"You don't have a bio page yet.\"}", true));
+                .andExpect(content().json("{\"detail\":\"You don't have a bio page yet.\"}", false));
     }
 
     @Test
@@ -249,7 +249,7 @@ class BioPageEndpointSecurityTest {
 
         mockMvc.perform(signedIn(put(MY_PAGE)).content(page("[" + button("\"Instagram\"") + "]")))
                 .andExpect(status().isConflict())
-                .andExpect(content().json("{\"error\":\"This page changed. Reload and try again.\"}", true));
+                .andExpect(content().json("{\"detail\":\"This page changed. Reload and try again.\"}", false));
     }
 
     @Test
@@ -258,7 +258,7 @@ class BioPageEndpointSecurityTest {
 
         mockMvc.perform(signedIn(delete(MY_PAGE)))
                 .andExpect(status().isNotFound())
-                .andExpect(content().json("{\"error\":\"You don't have a bio page yet.\"}", true));
+                .andExpect(content().json("{\"detail\":\"You don't have a bio page yet.\"}", false));
     }
 
     @Test
@@ -269,7 +269,7 @@ class BioPageEndpointSecurityTest {
         mockMvc.perform(signedIn(delete(MY_PAGE)))
                 .andExpect(status().isConflict())
                 .andExpect(content().json(
-                        "{\"error\":\"An admin hid this page, so it can't be deleted here. You can still delete your whole account in Settings.\"}", true));
+                        "{\"detail\":\"An admin hid this page, so it can't be deleted here. You can still delete your whole account in Settings.\"}", false));
     }
 
     @Test
@@ -318,7 +318,7 @@ class BioPageEndpointSecurityTest {
         mockMvc.perform(get(PUBLIC_PAGE))
                 .andExpect(status().isNotFound())
                 .andExpect(header().string(HttpHeaders.CACHE_CONTROL, containsString("no-store")))
-                .andExpect(content().json("{\"error\":\"This page isn't available.\"}", true));
+                .andExpect(content().json("{\"detail\":\"This page isn't available.\"}", false));
     }
 
     @Test
@@ -389,7 +389,7 @@ class BioPageEndpointSecurityTest {
 
         mockMvc.perform(signedIn(get(BIO_ANALYTICS + "?days=14")))
                 .andExpect(status().isBadRequest())
-                .andExpect(content().json("{\"error\":\"days must be 7, 30, 90 or 365\"}", true));
+                .andExpect(content().json("{\"detail\":\"days must be 7, 30, 90 or 365\"}", false));
     }
 
     @Test
@@ -398,7 +398,7 @@ class BioPageEndpointSecurityTest {
 
         mockMvc.perform(signedIn(get(BIO_ANALYTICS)))
                 .andExpect(status().isNotFound())
-                .andExpect(content().json("{\"error\":\"You don't have a bio page yet.\"}", true));
+                .andExpect(content().json("{\"detail\":\"You don't have a bio page yet.\"}", false));
     }
 
     @Test
@@ -436,14 +436,14 @@ class BioPageEndpointSecurityTest {
 
         mockMvc.perform(signedIn(put(MY_PAGE)).content(page("[]")))
                 .andExpect(status().isConflict())
-                .andExpect(content().json("{\"error\":\"" + outdated + "\"}", true));
+                .andExpect(content().json("{\"detail\":\"" + outdated + "\"}", false));
     }
 
     @Test
     void aTooLongNameIsAFieldError() throws Exception {
         mockMvc.perform(signedIn(put(MY_PAGE)).content(page("[]").replace("\"Ana Horvat\"", "\"" + "a".repeat(51) + "\"")))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.displayName").value("Name must be 50 characters or fewer"));
+                .andExpect(jsonPath("$.errors.displayName").value("Name must be 50 characters or fewer"));
 
         verifyNoInteractions(bioPageService);
     }
@@ -452,7 +452,7 @@ class BioPageEndpointSecurityTest {
     void aTooLongBioIsAFieldError() throws Exception {
         mockMvc.perform(signedIn(put(MY_PAGE)).content(page("[]").replace("\"Photos from Zagreb\"", "\"" + "b".repeat(161) + "\"")))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.bio").value("Bio must be 160 characters or fewer"));
+                .andExpect(jsonPath("$.errors.bio").value("Bio must be 160 characters or fewer"));
 
         verifyNoInteractions(bioPageService);
     }
@@ -461,10 +461,10 @@ class BioPageEndpointSecurityTest {
     void aBlankTitleIsAFieldError() throws Exception {
         mockMvc.perform(signedIn(put(MY_PAGE)).content(page("[" + button("\"  \"") + "]")))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$['buttons[0].title']").value("Give the button a title"));
+                .andExpect(jsonPath("$.errors['buttons[0].title']").value("Give the button a title"));
         mockMvc.perform(signedIn(put(MY_PAGE)).content(page("[" + button("\"" + "t".repeat(61) + "\"") + "]")))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$['buttons[0].title']").value("Button title must be 60 characters or fewer"));
+                .andExpect(jsonPath("$.errors['buttons[0].title']").value("Button title must be 60 characters or fewer"));
 
         verifyNoInteractions(bioPageService);
     }
@@ -473,10 +473,10 @@ class BioPageEndpointSecurityTest {
     void aButtonWithoutALinkIsAFieldError() throws Exception {
         mockMvc.perform(signedIn(put(MY_PAGE)).content(page("[{\"title\":\"Instagram\"}]")))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$['buttons[0].urlId']").value("Pick a link"));
+                .andExpect(jsonPath("$.errors['buttons[0].urlId']").value("Pick a link"));
         mockMvc.perform(signedIn(put(MY_PAGE)).content(page("[null]")))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$['buttons[0]']").value("Pick a link"));
+                .andExpect(jsonPath("$.errors['buttons[0]']").value("Pick a link"));
 
         verifyNoInteractions(bioPageService);
     }
@@ -489,7 +489,7 @@ class BioPageEndpointSecurityTest {
 
         mockMvc.perform(signedIn(put(MY_PAGE)).content(page(buttons)))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.buttons").value("A page can have at most 30 buttons"));
+                .andExpect(jsonPath("$.errors.buttons").value("A page can have at most 30 buttons"));
 
         verifyNoInteractions(bioPageService);
     }
@@ -498,9 +498,9 @@ class BioPageEndpointSecurityTest {
     void missingChoicesAreFieldErrors() throws Exception {
         mockMvc.perform(signedIn(put(MY_PAGE)).content("{\"displayName\":\"Ana\",\"bio\":\"\",\"buttons\":[]}"))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.avatarKind").value("Choose an avatar"))
-                .andExpect(jsonPath("$.accent").value("Choose an accent colour"))
-                .andExpect(jsonPath("$.theme").value("Choose a theme"));
+                .andExpect(jsonPath("$.errors.avatarKind").value("Choose an avatar"))
+                .andExpect(jsonPath("$.errors.accent").value("Choose an accent colour"))
+                .andExpect(jsonPath("$.errors.theme").value("Choose a theme"));
 
         verifyNoInteractions(bioPageService);
     }
@@ -509,7 +509,7 @@ class BioPageEndpointSecurityTest {
     void anUnknownIconIs400() throws Exception {
         mockMvc.perform(signedIn(put(MY_PAGE)).content(page("[{\"urlId\":41,\"title\":\"Myspace\",\"icon\":\"MYSPACE\"}]")))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.error").value(allOf(
+                .andExpect(jsonPath("$.detail").value(allOf(
                         containsString("WEBSITE, EMAIL, INSTAGRAM, TIKTOK, YOUTUBE, X, FACEBOOK, LINKEDIN, GITHUB, SPOTIFY, WHATSAPP or TELEGRAM"),
                         containsString("icon"))));
 

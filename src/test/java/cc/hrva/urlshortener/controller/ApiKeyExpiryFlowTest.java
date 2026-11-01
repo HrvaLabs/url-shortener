@@ -360,7 +360,7 @@ class ApiKeyExpiryFlowTest {
     void someoneElsesKeyCannotBeUpdated() throws Exception {
         update(OWNERS_KEY, OTHER_TOKEN, "{\"neverExpires\":true}")
                 .andExpect(status().isForbidden())
-                .andExpect(jsonPath("$.error").value("You don't have authorization for this action"));
+                .andExpect(jsonPath("$.detail").value("You don't have authorization for this action"));
 
         assertThat(expiryOf(OWNERS_KEY)).isEqualTo(LocalDateTime.of(2027, 1, 1, 0, 0));
     }

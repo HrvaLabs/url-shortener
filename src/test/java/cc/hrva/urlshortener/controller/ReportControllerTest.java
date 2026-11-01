@@ -183,7 +183,7 @@ class ReportControllerTest {
     void anythingButAShortLinkIsRefused(final String shortUrl) throws Exception {
         report(shortUrl, "PHISHING", DETAILS)
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.error").value(TARGET_INVALID));
+                .andExpect(jsonPath("$.detail").value(TARGET_INVALID));
 
         verifyNoInteractions(urlRepository, reviewQueueService, bioPageRepository, bioPageReviewService);
         assertThat(attempts).isEmpty();
@@ -241,7 +241,7 @@ class ReportControllerTest {
     void aMalformedTargetIs400WithTheNewText(final String target) throws Exception {
         report(target, "SPAM", DETAILS)
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.error").value(TARGET_INVALID));
+                .andExpect(jsonPath("$.detail").value(TARGET_INVALID));
 
         verifyNoInteractions(urlRepository, reviewQueueService, bioPageRepository, bioPageReviewService);
         assertThat(attempts).isEmpty();
@@ -285,7 +285,7 @@ class ReportControllerTest {
     void wwwBeforeACustomHostIsAnotherHost() throws Exception {
         report("https://www.go.example.com/menu", "SPAM", null)
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.error").value(TARGET_INVALID));
+                .andExpect(jsonPath("$.detail").value(TARGET_INVALID));
 
         verifyNoInteractions(urlRepository, reviewQueueService);
     }
@@ -315,7 +315,7 @@ class ReportControllerTest {
     void onACustomHostOnlyAShortCodeCanBeReported(final String target) throws Exception {
         report(target, "SPAM", null)
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.error").value(TARGET_INVALID));
+                .andExpect(jsonPath("$.detail").value(TARGET_INVALID));
 
         verifyNoInteractions(urlRepository, reviewQueueService, bioPageRepository, bioPageReviewService);
     }
@@ -352,7 +352,7 @@ class ReportControllerTest {
 
         report(SHORT, "PHISHING", DETAILS)
                 .andExpect(status().isTooManyRequests())
-                .andExpect(jsonPath("$.error").value(TOO_MANY_REPORTS));
+                .andExpect(jsonPath("$.detail").value(TOO_MANY_REPORTS));
         report("@ana", "SPAM", null).andExpect(status().isTooManyRequests());
 
         verify(bioPageReviewService, times(5)).report(page, ReportCategory.SPAM, null);
@@ -485,7 +485,7 @@ class ReportControllerTest {
     void theCategoryMustBeOneOfTheFive(final String category) throws Exception {
         report(SHORT, category, DETAILS)
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.error").value("Category must be PHISHING, MALWARE, SPAM, IMPERSONATION or OTHER"));
+                .andExpect(jsonPath("$.detail").value("Category must be PHISHING, MALWARE, SPAM, IMPERSONATION or OTHER"));
 
         verifyNoInteractions(urlRepository, reviewQueueService);
     }
@@ -494,7 +494,7 @@ class ReportControllerTest {
     void detailsOverFiveHundredCharactersAreRefused() throws Exception {
         report(SHORT, "OTHER", "a".repeat(501))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.error").value("Details must be 500 characters or fewer"));
+                .andExpect(jsonPath("$.detail").value("Details must be 500 characters or fewer"));
 
         verifyNoInteractions(urlRepository, reviewQueueService);
         assertThat(attempts).isEmpty();
@@ -542,7 +542,7 @@ class ReportControllerTest {
         for (final var body : List.of("{\"shortUrl\":\"v0DB3\",", "", "{\"shortUrl\":{\"nested\":true},\"category\":\"SPAM\"}")) {
             mockMvc.perform(post(REPORTS).contentType(MediaType.APPLICATION_JSON).content(body))
                     .andExpect(status().isBadRequest())
-                    .andExpect(jsonPath("$.error").value("Malformed request body"));
+                    .andExpect(jsonPath("$.detail").value("Malformed request body"));
         }
 
         verifyNoInteractions(urlRepository, reviewQueueService);
@@ -556,7 +556,7 @@ class ReportControllerTest {
         mockMvc.perform(post(REPORTS).contentType(MediaType.TEXT_PLAIN).content("hrva.cc/v0DB3 is phishing"))
                 .andExpect(status().isUnsupportedMediaType())
                 .andExpect(header().string(HttpHeaders.ACCEPT, containsString(MediaType.APPLICATION_JSON_VALUE)))
-                .andExpect(jsonPath("$.error").value("Unsupported media type"));
+                .andExpect(jsonPath("$.detail").value("Unsupported media type"));
 
         verifyNoInteractions(urlRepository, reviewQueueService);
         assertThat(output).doesNotContain("Unhandled exception").doesNotContain("\tat ");
@@ -571,7 +571,7 @@ class ReportControllerTest {
         }
         report(SHORT, "PHISHING", DETAILS)
                 .andExpect(status().isTooManyRequests())
-                .andExpect(jsonPath("$.error").value(TOO_MANY_REPORTS));
+                .andExpect(jsonPath("$.detail").value(TOO_MANY_REPORTS));
 
         verify(reviewQueueService, times(5)).report(url, ReportCategory.PHISHING, DETAILS);
         assertThat(windows).hasSize(6).containsOnly(Duration.ofHours(1));

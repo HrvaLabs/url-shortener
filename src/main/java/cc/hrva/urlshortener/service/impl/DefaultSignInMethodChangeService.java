@@ -5,7 +5,7 @@ import cc.hrva.urlshortener.dto.SignInMethodTurnOnDto;
 import cc.hrva.urlshortener.dto.SignInMethodsResponse;
 import cc.hrva.urlshortener.exception.ApiException;
 import cc.hrva.urlshortener.exception.FieldValidationException;
-import cc.hrva.urlshortener.exception.NoAuthorizationException;
+import cc.hrva.urlshortener.exception.NotSignedInException;
 import cc.hrva.urlshortener.exception.SignInMethodNotFoundException;
 import cc.hrva.urlshortener.model.SignInMethodState;
 import cc.hrva.urlshortener.model.User;
@@ -142,11 +142,11 @@ public class DefaultSignInMethodChangeService implements SignInMethodChangeServi
     private User currentUser() {
         final var authentication = SecurityContextHolder.getContext().getAuthentication();
         if (authentication == null) {
-            throw new NoAuthorizationException(NOT_AUTHENTICATED);
+            throw new NotSignedInException(NOT_AUTHENTICATED);
         }
 
         return userRepository.findByEmail(authentication.getName())
-                .orElseThrow(() -> new NoAuthorizationException(NOT_AUTHENTICATED));
+                .orElseThrow(() -> new NotSignedInException(NOT_AUTHENTICATED));
     }
 
     private static void requireProvider(final SignInMethod method) {

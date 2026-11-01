@@ -85,7 +85,7 @@ class AdminModerationControllerTest {
 
         mockMvc.perform(post("/api/v1/admin/users/99/block").principal(SIGNED_IN_ADMIN))
                 .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.error").value("User not found"));
+                .andExpect(jsonPath("$.detail").value("User not found"));
     }
 
     @Test
@@ -94,7 +94,7 @@ class AdminModerationControllerTest {
 
         mockMvc.perform(post("/api/v1/admin/users/1/block").principal(SIGNED_IN_ADMIN))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.error").value("Admin accounts can't be blocked here."));
+                .andExpect(jsonPath("$.detail").value("Admin accounts can't be blocked here."));
     }
 
     @Test
@@ -159,7 +159,7 @@ class AdminModerationControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"url\":\"  \"}"))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.error").value("Enter a URL to check"));
+                .andExpect(jsonPath("$.detail").value("Enter a URL to check"));
 
         verifyNoInteractions(linkCheckService);
     }

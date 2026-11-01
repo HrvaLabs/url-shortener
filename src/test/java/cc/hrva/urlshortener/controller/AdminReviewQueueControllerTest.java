@@ -143,7 +143,7 @@ class AdminReviewQueueControllerTest {
     void aLinkAgeThatIsNotANumberIsABadRequestWithoutAStackTrace(final CapturedOutput output) throws Exception {
         mockMvc.perform(get("/api/v1/admin/review-queue").param("olderThanDays", "abc").principal(SIGNED_IN_ADMIN))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.error").value("Invalid value for olderThanDays"));
+                .andExpect(jsonPath("$.detail").value("Invalid value for olderThanDays"));
 
         verifyNoInteractions(reviewQueueService);
         assertThat(output).doesNotContain("Unhandled exception").doesNotContain("\tat ");
@@ -176,7 +176,7 @@ class AdminReviewQueueControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"action\":\"DELETE_EVERYTHING\"}"))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.error").value("Action must be OK, TRUST_DOMAIN, BLOCK_LINK, BLOCK_DOMAIN or BLOCK_USER"));
+                .andExpect(jsonPath("$.detail").value("Action must be OK, TRUST_DOMAIN, BLOCK_LINK, BLOCK_DOMAIN or BLOCK_USER"));
 
         verifyNoInteractions(moderationService);
         assertThat(output).doesNotContain("DELETE_EVERYTHING").doesNotContain("Unhandled exception").doesNotContain("\tat ");
@@ -188,7 +188,7 @@ class AdminReviewQueueControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{}"))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.action").value("Action must be OK, TRUST_DOMAIN, BLOCK_LINK, BLOCK_DOMAIN or BLOCK_USER"));
+                .andExpect(jsonPath("$.errors.action").value("Action must be OK, TRUST_DOMAIN, BLOCK_LINK, BLOCK_DOMAIN or BLOCK_USER"));
 
         verifyNoInteractions(moderationService);
     }
@@ -199,7 +199,7 @@ class AdminReviewQueueControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"action\":\"ok\"}"))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.error").value("Action must be OK, TRUST_DOMAIN, BLOCK_LINK, BLOCK_DOMAIN or BLOCK_USER"));
+                .andExpect(jsonPath("$.detail").value("Action must be OK, TRUST_DOMAIN, BLOCK_LINK, BLOCK_DOMAIN or BLOCK_USER"));
 
         verifyNoInteractions(moderationService);
     }
@@ -210,7 +210,7 @@ class AdminReviewQueueControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"action\":4}"))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.error").value("Action must be OK, TRUST_DOMAIN, BLOCK_LINK, BLOCK_DOMAIN or BLOCK_USER"));
+                .andExpect(jsonPath("$.detail").value("Action must be OK, TRUST_DOMAIN, BLOCK_LINK, BLOCK_DOMAIN or BLOCK_USER"));
 
         verifyNoInteractions(moderationService);
     }
@@ -223,7 +223,7 @@ class AdminReviewQueueControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"action\":\"OK\"}"))
                 .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.error").value("Url doesn't exist"));
+                .andExpect(jsonPath("$.detail").value("Url doesn't exist"));
     }
 
     @Test
@@ -259,7 +259,7 @@ class AdminReviewQueueControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(bulkBody(LongStream.rangeClosed(1, 101).boxed().toList(), "OK")))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.urlIds").value("Select between 1 and 100 links"));
+                .andExpect(jsonPath("$.errors.urlIds").value("Select between 1 and 100 links"));
 
         verifyNoInteractions(moderationService);
     }
@@ -269,7 +269,7 @@ class AdminReviewQueueControllerTest {
         for (final var body : List.of("{\"urlIds\":[],\"action\":\"OK\"}", "{\"action\":\"OK\"}")) {
             mockMvc.perform(post(BULK_RESOLVE).principal(SIGNED_IN_ADMIN).contentType(MediaType.APPLICATION_JSON).content(body))
                     .andExpect(status().isBadRequest())
-                    .andExpect(jsonPath("$.urlIds").value("Select between 1 and 100 links"));
+                    .andExpect(jsonPath("$.errors.urlIds").value("Select between 1 and 100 links"));
         }
 
         verifyNoInteractions(moderationService);
@@ -281,7 +281,7 @@ class AdminReviewQueueControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"urlIds\":[287,288,287],\"action\":\"OK\"}"))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.urlIds").value("Select each link only once"));
+                .andExpect(jsonPath("$.errors.urlIds").value("Select each link only once"));
 
         verifyNoInteractions(moderationService);
     }
@@ -302,7 +302,7 @@ class AdminReviewQueueControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"urlIds\":[287],\"action\":\"DELETE_EVERYTHING\"}"))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.error").value("Action must be OK, TRUST_DOMAIN, BLOCK_LINK, BLOCK_DOMAIN or BLOCK_USER"));
+                .andExpect(jsonPath("$.detail").value("Action must be OK, TRUST_DOMAIN, BLOCK_LINK, BLOCK_DOMAIN or BLOCK_USER"));
 
         verifyNoInteractions(moderationService);
     }
@@ -313,7 +313,7 @@ class AdminReviewQueueControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"urlIds\":[287]}"))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.action").value("Action must be OK, TRUST_DOMAIN, BLOCK_LINK, BLOCK_DOMAIN or BLOCK_USER"));
+                .andExpect(jsonPath("$.errors.action").value("Action must be OK, TRUST_DOMAIN, BLOCK_LINK, BLOCK_DOMAIN or BLOCK_USER"));
 
         verifyNoInteractions(moderationService);
     }

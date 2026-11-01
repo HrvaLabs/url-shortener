@@ -67,7 +67,7 @@ public class UnsubscribeController {
     @PostMapping
     public ResponseEntity<UnsubscribeResponse> unsubscribe(@RequestParam(required = false) final String token) {
         if (!withinLimit()) {
-            throw new RateLimitExceededException(TOO_MANY_TRIES);
+            throw new RateLimitExceededException(TOO_MANY_TRIES, TRY_WINDOW);
         }
 
         final var target = unsubscribeTokens.read(token).orElseThrow(() -> new ApiException(INVALID_TOKEN));

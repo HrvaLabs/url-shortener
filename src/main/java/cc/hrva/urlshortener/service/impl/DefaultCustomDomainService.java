@@ -11,7 +11,7 @@ import cc.hrva.urlshortener.exception.CustomDomainCapacityException;
 import cc.hrva.urlshortener.exception.CustomDomainConflictException;
 import cc.hrva.urlshortener.exception.CustomDomainNotFoundException;
 import cc.hrva.urlshortener.exception.FeatureUnavailableException;
-import cc.hrva.urlshortener.exception.NoAuthorizationException;
+import cc.hrva.urlshortener.exception.NotSignedInException;
 import cc.hrva.urlshortener.exception.RateLimitExceededException;
 import cc.hrva.urlshortener.model.CustomDomain;
 import cc.hrva.urlshortener.model.User;
@@ -264,7 +264,7 @@ public class DefaultCustomDomainService implements CustomDomainService {
     private void requireWithinApplyLimit(final User user) {
         if (!withinApplyLimit(user)) {
             log.info("Custom domain application refused by the rate limit userId={}", user.getId());
-            throw new RateLimitExceededException(TOO_MANY_APPLICATIONS);
+            throw new RateLimitExceededException(TOO_MANY_APPLICATIONS, APPLY_WINDOW);
         }
     }
 
@@ -301,7 +301,7 @@ public class DefaultCustomDomainService implements CustomDomainService {
         }
         if (!allowed) {
             log.info("Custom domain retry refused, the last one was moments ago domainId={}", id);
-            throw new RateLimitExceededException(RETRY_TOO_SOON);
+            throw new RateLimitExceededException(RETRY_TOO_SOON, CHECK_WINDOW);
         }
     }
 
@@ -341,7 +341,7 @@ public class DefaultCustomDomainService implements CustomDomainService {
     private User currentUser() {
         final var user = userService.getUserFromToken();
         if (user == null) {
-            throw new NoAuthorizationException(NOT_AUTHENTICATED);
+            throw new NotSignedInException(NOT_AUTHENTICATED);
         }
         return user;
     }

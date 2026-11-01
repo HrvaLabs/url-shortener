@@ -124,7 +124,7 @@ class AnalyticsControllerTest {
 
         mockMvc.perform(get("/api/v1/analytics/overview").param("days", "14"))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.error").value(RANGE_ERROR));
+                .andExpect(jsonPath("$.detail").value(RANGE_ERROR));
     }
 
     @Test
@@ -190,7 +190,7 @@ class AnalyticsControllerTest {
 
         mockMvc.perform(get("/api/v1/analytics/urls/7").param("days", "14"))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.error").value(RANGE_ERROR));
+                .andExpect(jsonPath("$.detail").value(RANGE_ERROR));
     }
 
     @Test

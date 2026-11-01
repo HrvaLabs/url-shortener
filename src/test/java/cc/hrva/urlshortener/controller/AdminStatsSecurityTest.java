@@ -209,7 +209,7 @@ class AdminStatsSecurityTest {
 
         mockMvc.perform(tabRequest(tab, "admin-token").param("days", "14"))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.error").value(RANGE_ERROR));
+                .andExpect(jsonPath("$.detail").value(RANGE_ERROR));
     }
 
     @ParameterizedTest
@@ -217,7 +217,7 @@ class AdminStatsSecurityTest {
     void aMistypedRangeIsABadRequest(final String tab) throws Exception {
         mockMvc.perform(tabRequest(tab, "admin-token").param("days", "abc"))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.error").value("Invalid value for days"));
+                .andExpect(jsonPath("$.detail").value("Invalid value for days"));
 
         verifyNoInteractions(adminStatsService);
     }

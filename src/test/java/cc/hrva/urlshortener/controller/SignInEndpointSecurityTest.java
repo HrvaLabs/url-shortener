@@ -254,7 +254,7 @@ class SignInEndpointSecurityTest {
 
         mockMvc.perform(post(TOTP_SECOND_STEP).contentType(MediaType.APPLICATION_JSON).content(TOTP_BODY))
                 .andExpect(status().isGone())
-                .andExpect(content().json("{\"error\":\"Your sign-in expired. Sign in again.\"}", JsonCompareMode.STRICT));
+                .andExpect(content().json("{\"detail\":\"Your sign-in expired. Sign in again.\"}", JsonCompareMode.LENIENT));
     }
 
     @Test
@@ -263,7 +263,7 @@ class SignInEndpointSecurityTest {
 
         mockMvc.perform(post(TOTP_SECOND_STEP).contentType(MediaType.APPLICATION_JSON).content(TOTP_BODY))
                 .andExpect(status().isUnauthorized())
-                .andExpect(content().json("{\"error\":\"Invalid two-factor code\"}", JsonCompareMode.STRICT));
+                .andExpect(content().json("{\"detail\":\"Invalid two-factor code\"}", JsonCompareMode.LENIENT));
     }
 
     @Test
@@ -273,14 +273,14 @@ class SignInEndpointSecurityTest {
 
         mockMvc.perform(post(TOTP_SECOND_STEP).contentType(MediaType.APPLICATION_JSON).content(TOTP_BODY))
                 .andExpect(status().isServiceUnavailable())
-                .andExpect(content().json("{\"error\":\"Two-step sign-in isn't available right now. Try again in a minute.\"}", JsonCompareMode.STRICT));
+                .andExpect(content().json("{\"detail\":\"Two-step sign-in isn't available right now. Try again in a minute.\"}", JsonCompareMode.LENIENT));
     }
 
     @Test
     void aSecondStepWithoutACodeIsRefusedBeforeTheServiceRuns() throws Exception {
         mockMvc.perform(post(TOTP_SECOND_STEP).contentType(MediaType.APPLICATION_JSON).content("{\"pendingToken\":\"" + PENDING_TOKEN + "\"}"))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").exists());
+                .andExpect(jsonPath("$.errors.code").exists());
 
         verifyNoInteractions(secondStepService);
     }
@@ -325,8 +325,8 @@ class SignInEndpointSecurityTest {
         mockMvc.perform(post(PASSWORDLESS + "/options"))
                 .andExpect(status().isTooManyRequests())
                 .andExpect(content().json(
-                        "{\"error\":\"Too many passkey sign-in attempts from this network. Try again in a few minutes.\"}",
-                        JsonCompareMode.STRICT));
+                        "{\"detail\":\"Too many passkey sign-in attempts from this network. Try again in a few minutes.\"}",
+                        JsonCompareMode.LENIENT));
 
         verifyNoInteractions(passkeyCeremonyStore);
     }
@@ -336,7 +336,7 @@ class SignInEndpointSecurityTest {
         mockMvc.perform(post(PASSWORDLESS + "/verify").contentType(MediaType.APPLICATION_JSON)
                         .content("{\"ceremonyId\":\"" + CEREMONY_ID + "\"}"))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.credential").exists());
+                .andExpect(jsonPath("$.errors.credential").exists());
 
         verifyNoInteractions(passkeyCeremonyStore, passkeyAssertions);
     }
@@ -372,11 +372,11 @@ class SignInEndpointSecurityTest {
     void aWebauthnSecondStepWithoutATokenOrCredentialIsRefusedBeforeTheServiceRuns() throws Exception {
         mockMvc.perform(post(WEBAUTHN_SECOND_STEP + "/options").contentType(MediaType.APPLICATION_JSON).content("{}"))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.pendingToken").exists());
+                .andExpect(jsonPath("$.errors.pendingToken").exists());
         mockMvc.perform(post(WEBAUTHN_SECOND_STEP + "/verify").contentType(MediaType.APPLICATION_JSON)
                         .content("{\"pendingToken\":\"" + PENDING_TOKEN + "\",\"ceremonyId\":\"" + CEREMONY_ID + "\"}"))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.credential").exists());
+                .andExpect(jsonPath("$.errors.credential").exists());
 
         verifyNoInteractions(secondStepService);
     }
@@ -416,7 +416,7 @@ class SignInEndpointSecurityTest {
         mockMvc.perform(post(PASSKEYS).header(JwtFilter.AUTHORIZATION_HEADER, BEARER)
                         .contentType(MediaType.APPLICATION_JSON).content(REGISTRATION_BODY))
                 .andExpect(status().isUnauthorized())
-                .andExpect(content().json("{\"error\":\"That passkey or security key couldn't be verified. Try again.\"}", JsonCompareMode.STRICT));
+                .andExpect(content().json("{\"detail\":\"That passkey or security key couldn't be verified. Try again.\"}", JsonCompareMode.LENIENT));
     }
 
     @Test
@@ -462,11 +462,11 @@ class SignInEndpointSecurityTest {
         mockMvc.perform(post(PASSKEYS).header(JwtFilter.AUTHORIZATION_HEADER, BEARER)
                         .contentType(MediaType.APPLICATION_JSON).content(REGISTRATION_BODY.replace("MacBook", "x".repeat(65))))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.label").exists());
+                .andExpect(jsonPath("$.errors.label").exists());
         mockMvc.perform(patch(PASSKEYS + "/7").header(JwtFilter.AUTHORIZATION_HEADER, BEARER)
                         .contentType(MediaType.APPLICATION_JSON).content("{\"label\":\"  \"}"))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.label").exists());
+                .andExpect(jsonPath("$.errors.label").exists());
 
         verify(passkeyService, never()).register(any());
         verify(passkeyService, never()).rename(any(), any());
@@ -539,7 +539,7 @@ class SignInEndpointSecurityTest {
 
         mockMvc.perform(post(TWO_STEP + "/disable").header(JwtFilter.AUTHORIZATION_HEADER, BEARER))
                 .andExpect(status().isBadRequest())
-                .andExpect(content().json("{\"error\":\"Confirm with a code, a recovery code or a passkey.\"}", JsonCompareMode.STRICT));
+                .andExpect(content().json("{\"detail\":\"Confirm with a code, a recovery code or a passkey.\"}", JsonCompareMode.LENIENT));
     }
 
     @Test
@@ -549,7 +549,7 @@ class SignInEndpointSecurityTest {
         mockMvc.perform(delete(TWO_STEP + "/totp").header(JwtFilter.AUTHORIZATION_HEADER, BEARER)
                         .contentType(MediaType.APPLICATION_JSON).content("{}"))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").exists());
+                .andExpect(jsonPath("$.errors.code").exists());
 
         verifyNoInteractions(twoStepSettingsService);
     }
@@ -568,15 +568,15 @@ class SignInEndpointSecurityTest {
         mockMvc.perform(post(LEGACY_DISABLE).header(JwtFilter.AUTHORIZATION_HEADER, BEARER)
                         .contentType(MediaType.APPLICATION_JSON).content("{\"code\":\"123456\"}"))
                 .andExpect(status().isBadRequest())
-                .andExpect(content().json("{\"error\":\"Invalid verification code\"}", JsonCompareMode.STRICT));
+                .andExpect(content().json("{\"detail\":\"Invalid verification code\"}", JsonCompareMode.LENIENT));
         mockMvc.perform(post(LEGACY_DISABLE).header(JwtFilter.AUTHORIZATION_HEADER, BEARER)
                         .contentType(MediaType.APPLICATION_JSON).content("{\"code\":\"123456\"}"))
                 .andExpect(status().isBadRequest())
-                .andExpect(content().json("{\"error\":\"Two-step verification is off.\"}", JsonCompareMode.STRICT));
+                .andExpect(content().json("{\"detail\":\"Two-step verification is off.\"}", JsonCompareMode.LENIENT));
         mockMvc.perform(post(LEGACY_DISABLE).header(JwtFilter.AUTHORIZATION_HEADER, BEARER)
                         .contentType(MediaType.APPLICATION_JSON).content("{}"))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").exists());
+                .andExpect(jsonPath("$.errors.code").exists());
 
         verify(twoStepSettingsService, times(3)).disable(TwoStepDisableDto.builder().code("123456").build());
         verifyNoInteractions(twoFactorService);

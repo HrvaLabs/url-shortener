@@ -9,6 +9,7 @@ import cc.hrva.urlshortener.dto.DestinationHealth;
 import cc.hrva.urlshortener.dto.DomainRef;
 import cc.hrva.urlshortener.dto.UrlResponse;
 import cc.hrva.urlshortener.exception.NoAuthorizationException;
+import cc.hrva.urlshortener.exception.NotSignedInException;
 import cc.hrva.urlshortener.exception.UrlNotFoundException;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.User;
@@ -166,7 +167,7 @@ public class DefaultAnalyticsService implements AnalyticsService {
     private User currentUser() {
         final var user = userService.getUserFromToken();
         if (user == null) {
-            throw new NoAuthorizationException("Not authenticated");
+            throw new NotSignedInException("Not authenticated");
         }
         return user;
     }

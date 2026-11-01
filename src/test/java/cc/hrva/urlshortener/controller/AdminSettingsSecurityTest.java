@@ -193,7 +193,7 @@ class AdminSettingsSecurityTest {
     void aNumberOutOfRangeIsABadRequestAndChangesNothing() throws Exception {
         mockMvc.perform(signedIn(put(SETTINGS + "/CAMPAIGN_LINKS"), "admin-token").content("{\"value\":1}"))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.value").value("Use a number from 2 to 50."));
+                .andExpect(jsonPath("$.errors.value").value("Use a number from 2 to 50."));
 
         verifyNoInteractions(auditLogService);
         verify(appSettingRepository, never()).save(any());
@@ -204,7 +204,7 @@ class AdminSettingsSecurityTest {
     void aSwitchWithoutAValueIsABadRequestAndChangesNothing(final String body) throws Exception {
         mockMvc.perform(signedIn(put(ANONYMOUS_LINKS), "admin-token").content(body))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.value").value("Choose on or off."));
+                .andExpect(jsonPath("$.errors.value").value("Choose on or off."));
 
         verifyNoInteractions(auditLogService);
         verify(appSettingRepository, never()).save(any());
@@ -214,7 +214,7 @@ class AdminSettingsSecurityTest {
     void aChangeWithoutABodyIsAMalformedRequest() throws Exception {
         mockMvc.perform(signedIn(put(ANONYMOUS_LINKS), "admin-token"))
                 .andExpect(status().isBadRequest())
-                .andExpect(content().json("{\"error\":\"Malformed request body\"}", JsonCompareMode.STRICT));
+                .andExpect(content().json("{\"detail\":\"Malformed request body\"}", JsonCompareMode.LENIENT));
 
         verifyNoInteractions(auditLogService);
         verify(appSettingRepository, never()).save(any());
@@ -224,10 +224,10 @@ class AdminSettingsSecurityTest {
     void anUnknownKeyIsNotFound() throws Exception {
         mockMvc.perform(signedIn(put(SETTINGS + "/NOPE"), "admin-token").content(OFF))
                 .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.error").value("There is no setting NOPE."));
+                .andExpect(jsonPath("$.detail").value("There is no setting NOPE."));
         mockMvc.perform(signedIn(delete(SETTINGS + "/NOPE"), "admin-token"))
                 .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.error").value("There is no setting NOPE."));
+                .andExpect(jsonPath("$.detail").value("There is no setting NOPE."));
 
         verifyNoInteractions(auditLogService);
     }

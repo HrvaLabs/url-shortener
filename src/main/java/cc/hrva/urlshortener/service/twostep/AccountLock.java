@@ -1,6 +1,6 @@
 package cc.hrva.urlshortener.service.twostep;
 
-import cc.hrva.urlshortener.exception.NoAuthorizationException;
+import cc.hrva.urlshortener.exception.NotSignedInException;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.repository.UserRepository;
 import jakarta.persistence.EntityManager;
@@ -28,7 +28,7 @@ public class AccountLock {
         }
 
         final var locked = userRepository.findByIdForUpdate(user.getId())
-                .orElseThrow(() -> new NoAuthorizationException(NOT_AUTHENTICATED));
+                .orElseThrow(() -> new NotSignedInException(NOT_AUTHENTICATED));
         entityManager.refresh(locked);
 
         return locked;

@@ -196,7 +196,7 @@ class UrlControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(CreateUrlDto.builder().longUrl("https://example.com").build())))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.error").value("Complete the check and try again."));
+                .andExpect(jsonPath("$.detail").value("Complete the check and try again."));
     }
 
     @Test
@@ -208,8 +208,8 @@ class UrlControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(CreateUrlDto.builder().longUrl("https://example.com").build())))
                 .andExpect(status().isServiceUnavailable())
-                .andExpect(jsonPath("$.error").value("We couldn't run the check. Try again in a minute."))
-                .andExpect(jsonPath("$.length()").value(1));
+                .andExpect(jsonPath("$.detail").value("We couldn't run the check. Try again in a minute."))
+                .andExpect(jsonPath("$.length()").value(5));
     }
 
     @Test
@@ -244,7 +244,7 @@ class UrlControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(links)))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.domain").value("Choose one of your active domains, or leave it empty for hrva.cc."));
+                .andExpect(jsonPath("$.errors.domain").value("Choose one of your active domains, or leave it empty for hrva.cc."));
 
         verify(urlService, never()).saveUrlWithApiKey(any(), any(), any());
         verify(urlService, never()).saveUrlRouting(any(), any(), any());
@@ -257,7 +257,7 @@ class UrlControllerTest {
                         .content(objectMapper.writeValueAsString(CreateUrlDto.builder().longUrl("https://example.com")
                                 .domain("a".repeat(250) + ".com").build())))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.domain").value("Choose one of your active domains, or leave it empty for hrva.cc."));
+                .andExpect(jsonPath("$.errors.domain").value("Choose one of your active domains, or leave it empty for hrva.cc."));
 
         verifyNoInteractions(urlService);
     }
@@ -272,7 +272,7 @@ class UrlControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(CreateUrlDto.builder().longUrl("https://example.com").build())))
                 .andExpect(status().isTooManyRequests())
-                .andExpect(jsonPath("$.error").value("You've created a lot of links in a short time. Try again in an hour."));
+                .andExpect(jsonPath("$.detail").value("You've created a lot of links in a short time. Try again in an hour."));
     }
 
     @Test
@@ -292,7 +292,7 @@ class UrlControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(links)))
                 .andExpect(status().isTooManyRequests())
-                .andExpect(jsonPath("$.error").value("You've created a lot of links in a short time. Try again in an hour."));
+                .andExpect(jsonPath("$.detail").value("You've created a lot of links in a short time. Try again in an hour."));
 
         verify(urlService, times(3)).saveUrlRouting(any(CreateUrlDto.class), eq("203.0.113.7"), any());
     }
@@ -316,7 +316,7 @@ class UrlControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(CreateUrlDto.builder().longUrl(TOO_LONG_DESTINATION).build())))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.longUrl").value(DESTINATION_TOO_LONG));
+                .andExpect(jsonPath("$.errors.longUrl").value(DESTINATION_TOO_LONG));
 
         verifyNoInteractions(urlService);
     }
@@ -331,7 +331,7 @@ class UrlControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(links)))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.longUrl").value(DESTINATION_TOO_LONG));
+                .andExpect(jsonPath("$.errors.longUrl").value(DESTINATION_TOO_LONG));
 
         verifyNoInteractions(urlService);
     }
@@ -346,7 +346,7 @@ class UrlControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(links)))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.longUrl").value("Long URL is required"));
+                .andExpect(jsonPath("$.errors.longUrl").value("Long URL is required"));
 
         verifyNoInteractions(urlService);
     }
@@ -357,7 +357,7 @@ class UrlControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(UrlUpdateDto.builder().id(1L).longUrl(TOO_LONG_DESTINATION).build())))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.longUrl").value(DESTINATION_TOO_LONG));
+                .andExpect(jsonPath("$.errors.longUrl").value(DESTINATION_TOO_LONG));
 
         verifyNoInteractions(urlService);
     }
@@ -506,7 +506,7 @@ class UrlControllerTest {
         for (final var path : List.of("/api/v1/urls/menu", "/api/v1/urls/menu/peek", "/api/v1/urls/menu/preview", "/api/v1/urls/menu/qr")) {
             mockMvc.perform(get(path).param("domain", "off.example.com"))
                     .andExpect(status().isNotFound())
-                    .andExpect(content().json("{\"error\":\"URL doesn't exist\"}"));
+                    .andExpect(content().json("{\"detail\":\"URL doesn't exist\"}"));
         }
         verifyNoInteractions(qrCodeService, linkPreviewService);
     }

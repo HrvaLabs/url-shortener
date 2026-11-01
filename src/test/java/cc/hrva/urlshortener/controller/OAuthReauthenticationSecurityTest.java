@@ -165,7 +165,7 @@ class OAuthReauthenticationSecurityTest {
         mockMvc.perform(post(REGISTRATION_OPTIONS).header(JwtFilter.AUTHORIZATION_HEADER, "Bearer " + tokenIssuedMinutesAgo(16)))
                 .andExpect(status().isUnauthorized())
                 .andExpect(content().json("""
-                        {"error":"%s"}""".formatted(SIGN_IN_AGAIN), JsonCompareMode.STRICT));
+                        {"detail":"%s"}""".formatted(SIGN_IN_AGAIN), JsonCompareMode.LENIENT));
 
         verify(passkeyCeremonyStore, times(1)).save(ceremony.getValue());
         assertThat(ceremony.getValue().purpose()).isEqualTo(PasskeyCeremonyPurpose.REGISTRATION);

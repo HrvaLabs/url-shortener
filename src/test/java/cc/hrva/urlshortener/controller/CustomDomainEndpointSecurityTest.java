@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.controller;
 
+import org.springframework.test.json.JsonAssert;
 import cc.hrva.urlshortener.configuration.AppConfiguration;
 import cc.hrva.urlshortener.configuration.GlobalExceptionHandler;
 import cc.hrva.urlshortener.configuration.JacksonConfiguration;
@@ -130,9 +131,9 @@ class CustomDomainEndpointSecurityTest {
     private static final LocalDateTime NOW = LocalDateTime.ofInstant(NOW_INSTANT, ZoneOffset.UTC);
     private static final String APPLICATION = """
             {"hostname":"Go.Example.com.","reason":"Menu links for my cafe"}""";
-    private static final String NOT_FOUND = "{\"error\":\"Custom domain not found\"}";
-    private static final String OVER_THE_LIMIT = "{\"error\":\"You can have 1 custom domain. Remove or withdraw one to apply for another.\"}";
-    private static final String TAKEN = "{\"error\":\"This domain has already been applied for.\"}";
+    private static final String NOT_FOUND = "{\"detail\":\"Custom domain not found\"}";
+    private static final String OVER_THE_LIMIT = "{\"detail\":\"You can have 1 custom domain. Remove or withdraw one to apply for another.\"}";
+    private static final String TAKEN = "{\"detail\":\"This domain has already been applied for.\"}";
     private static final long ANA = 700L;
     private static final long BOB = 701L;
     private static final String ANA_EMAIL = "ana@hrva.cc";
@@ -276,7 +277,7 @@ class CustomDomainEndpointSecurityTest {
         assertThat(row.get("cloudflare_delete_pending")).isEqualTo(false);
         mockMvc.perform(as(ANA_TOKEN, get(DOMAINS + "/" + id)))
                 .andExpect(status().isNotFound())
-                .andExpect(content().json(NOT_FOUND, JsonCompareMode.STRICT));
+                .andExpect(content().json(NOT_FOUND, JsonCompareMode.LENIENT));
         mockMvc.perform(as(ANA_TOKEN, get(DOMAINS)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.domains[0].status").value("DELETED"))
@@ -331,7 +332,8 @@ class CustomDomainEndpointSecurityTest {
         mockMvc.perform(as(ANA_TOKEN, post(DOMAINS)).contentType(MediaType.APPLICATION_JSON).content("{}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(content().json("""
-                        {"hostname":"Enter a domain, like go.example.com","reason":"Tell us what you'll use it for"}""", JsonCompareMode.STRICT));
+{"errors":{"hostname":"Enter a domain, like go.example.com","reason":"Tell us what you'll use it for"}}
+""", JsonCompareMode.LENIENT));
 
         assertThat(countOf(ANA)).isZero();
     }
@@ -342,8 +344,8 @@ class CustomDomainEndpointSecurityTest {
                         .content("{\"hostname\":\"example.com\",\"reason\":\"Menu links for my cafe\"}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(content().json("""
-                        {"hostname":"Use a subdomain, like go.example.com. Root domains like example.com aren't supported yet."}""",
-                        JsonCompareMode.STRICT));
+{"errors":{"hostname":"Use a subdomain, like go.example.com. Root domains like example.com aren't supported yet."}}
+""", JsonCompareMode.LENIENT));
 
         assertThat(countOf(ANA)).isZero();
     }
@@ -353,11 +355,11 @@ class CustomDomainEndpointSecurityTest {
         mockMvc.perform(as(ANA_TOKEN, post(DOMAINS)).contentType(MediaType.APPLICATION_JSON)
                         .content("{\"hostname\":\"go.example.com\",\"reason\":\"" + "x".repeat(301) + "\"}"))
                 .andExpect(status().isBadRequest())
-                .andExpect(content().json("{\"reason\":\"Keep it to 300 characters or fewer\"}", JsonCompareMode.STRICT));
+                .andExpect(content().json("{\"errors\":{\"reason\":\"Keep it to 300 characters or fewer\"}}", JsonCompareMode.LENIENT));
         mockMvc.perform(as(ANA_TOKEN, post(DOMAINS)).contentType(MediaType.APPLICATION_JSON)
                         .content("{\"hostname\":\"go.example.com\",\"reason\":\"   \"}"))
                 .andExpect(status().isBadRequest())
-                .andExpect(content().json("{\"reason\":\"Tell us what you'll use it for\"}", JsonCompareMode.STRICT));
+                .andExpect(content().json("{\"errors\":{\"reason\":\"Tell us what you'll use it for\"}}", JsonCompareMode.LENIENT));
 
         mockMvc.perform(as(ANA_TOKEN, post(DOMAINS)).contentType(MediaType.APPLICATION_JSON)
                         .content("{\"hostname\":\"go.example.com\",\"reason\":\"  " + "x".repeat(300) + " \\n\"}"))
@@ -371,13 +373,13 @@ class CustomDomainEndpointSecurityTest {
 
         mockMvc.perform(as(ANA_TOKEN, get(DOMAINS + "/" + id)))
                 .andExpect(status().isNotFound())
-                .andExpect(content().json(NOT_FOUND, JsonCompareMode.STRICT));
+                .andExpect(content().json(NOT_FOUND, JsonCompareMode.LENIENT));
         mockMvc.perform(as(ANA_TOKEN, delete(DOMAINS + "/" + id)))
                 .andExpect(status().isNotFound())
-                .andExpect(content().json(NOT_FOUND, JsonCompareMode.STRICT));
+                .andExpect(content().json(NOT_FOUND, JsonCompareMode.LENIENT));
         mockMvc.perform(as(ANA_TOKEN, get(DOMAINS + "/999999")))
                 .andExpect(status().isNotFound())
-                .andExpect(content().json(NOT_FOUND, JsonCompareMode.STRICT));
+                .andExpect(content().json(NOT_FOUND, JsonCompareMode.LENIENT));
         mockMvc.perform(as(ANA_TOKEN, get(DOMAINS)))
                 .andExpect(status().isOk())
                 .andExpect(content().json("{\"domains\":[],\"limit\":1,\"used\":0,\"canApply\":true}", JsonCompareMode.STRICT));
@@ -391,7 +393,7 @@ class CustomDomainEndpointSecurityTest {
 
         mockMvc.perform(as(ANA_TOKEN, post(DOMAINS)).contentType(MediaType.APPLICATION_JSON).content(APPLICATION))
                 .andExpect(status().isConflict())
-                .andExpect(content().json("{\"error\":\"This domain has already been applied for.\"}", JsonCompareMode.STRICT));
+                .andExpect(content().json("{\"detail\":\"This domain has already been applied for.\"}", JsonCompareMode.LENIENT));
 
         assertThat(countOf(ANA)).isZero();
     }
@@ -407,7 +409,7 @@ class CustomDomainEndpointSecurityTest {
         mockMvc.perform(as(ANA_TOKEN, post(DOMAINS)).contentType(MediaType.APPLICATION_JSON)
                         .content("{\"hostname\":\"old.example.com\",\"reason\":\"Again\"}"))
                 .andExpect(status().isBadRequest())
-                .andExpect(content().json("{\"error\":\"You can have 1 custom domain. Remove or withdraw one to apply for another.\"}", JsonCompareMode.STRICT));
+                .andExpect(content().json("{\"detail\":\"You can have 1 custom domain. Remove or withdraw one to apply for another.\"}", JsonCompareMode.LENIENT));
     }
 
     @Test
@@ -423,7 +425,7 @@ class CustomDomainEndpointSecurityTest {
         mockMvc.perform(as(ANA_TOKEN, post(DOMAINS)).contentType(MediaType.APPLICATION_JSON)
                         .content("{\"hostname\":\"three.example.com\",\"reason\":\"Third brand\"}"))
                 .andExpect(status().isBadRequest())
-                .andExpect(content().json("{\"error\":\"You can have 2 custom domains. Remove or withdraw one to apply for another.\"}", JsonCompareMode.STRICT));
+                .andExpect(content().json("{\"detail\":\"You can have 2 custom domains. Remove or withdraw one to apply for another.\"}", JsonCompareMode.LENIENT));
         mockMvc.perform(as(ANA_TOKEN, get(DOMAINS)))
                 .andExpect(jsonPath("$.limit").value(2))
                 .andExpect(jsonPath("$.used").value(2))
@@ -436,7 +438,7 @@ class CustomDomainEndpointSecurityTest {
 
         mockMvc.perform(as(ANA_TOKEN, post(DOMAINS)).contentType(MediaType.APPLICATION_JSON).content(APPLICATION))
                 .andExpect(status().isServiceUnavailable())
-                .andExpect(content().json("{\"error\":\"Custom domains aren't available right now.\"}", JsonCompareMode.STRICT));
+                .andExpect(content().json("{\"detail\":\"Custom domains aren't available right now.\"}", JsonCompareMode.LENIENT));
         mockMvc.perform(as(ANA_TOKEN, get(DOMAINS)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.canApply").value(false));
@@ -450,7 +452,7 @@ class CustomDomainEndpointSecurityTest {
 
         mockMvc.perform(as(ANA_TOKEN, post(DOMAINS)).contentType(MediaType.APPLICATION_JSON).content(APPLICATION))
                 .andExpect(status().isTooManyRequests())
-                .andExpect(content().json("{\"error\":\"You've applied for a lot of domains today. Try again tomorrow.\"}", JsonCompareMode.STRICT));
+                .andExpect(content().json("{\"detail\":\"You've applied for a lot of domains today. Try again tomorrow.\"}", JsonCompareMode.LENIENT));
 
         assertThat(countOf(ANA)).isZero();
     }
@@ -461,7 +463,7 @@ class CustomDomainEndpointSecurityTest {
 
         mockMvc.perform(as(ANA_TOKEN, delete(DOMAINS + "/" + id + "?links=FOO")))
                 .andExpect(status().isBadRequest())
-                .andExpect(content().json("{\"error\":\"links must be MOVE or DEACTIVATE\"}", JsonCompareMode.STRICT));
+                .andExpect(content().json("{\"detail\":\"links must be MOVE or DEACTIVATE\"}", JsonCompareMode.LENIENT));
         assertThat(statusOf(id)).isEqualTo("PENDING_REVIEW");
 
         mockMvc.perform(as(ANA_TOKEN, delete(DOMAINS + "/" + id + "?links=MOVE")))
@@ -502,7 +504,7 @@ class CustomDomainEndpointSecurityTest {
                 .andExpect(content().json("{\"moved\":0,\"renamed\":[],\"deactivated\":1}", JsonCompareMode.STRICT));
         mockMvc.perform(as(ANA_TOKEN, delete(DOMAINS + "/" + id)))
                 .andExpect(status().isNotFound())
-                .andExpect(content().json(NOT_FOUND, JsonCompareMode.STRICT));
+                .andExpect(content().json(NOT_FOUND, JsonCompareMode.LENIENT));
 
         assertThat(jdbcTemplate.queryForList("select active from url where domain_id = ?", Boolean.class, id)).containsExactly(false);
         assertThat(committedEvents.events()).containsExactly(new CustomDomainChangedEvent(id));
@@ -514,10 +516,10 @@ class CustomDomainEndpointSecurityTest {
 
         mockMvc.perform(as(ANA_TOKEN, delete(DOMAINS + "/" + id).param("links", "MOVE")))
                 .andExpect(status().isNotFound())
-                .andExpect(content().json(NOT_FOUND, JsonCompareMode.STRICT));
+                .andExpect(content().json(NOT_FOUND, JsonCompareMode.LENIENT));
         mockMvc.perform(as(ANA_TOKEN, post(DOMAINS + "/" + id + "/retry")))
                 .andExpect(status().isNotFound())
-                .andExpect(content().json(NOT_FOUND, JsonCompareMode.STRICT));
+                .andExpect(content().json(NOT_FOUND, JsonCompareMode.LENIENT));
 
         assertThat(statusOf(id)).isEqualTo("ERROR");
         verifyNoInteractions(customDomainSetup);
@@ -551,7 +553,7 @@ class CustomDomainEndpointSecurityTest {
         mockMvc.perform(as(ANA_TOKEN, post(DOMAINS + "/" + id + "/retry"))).andExpect(status().isOk());
         mockMvc.perform(as(ANA_TOKEN, post(DOMAINS + "/" + id + "/retry")))
                 .andExpect(status().isTooManyRequests())
-                .andExpect(content().json("{\"error\":\"Wait a few seconds and try again.\"}", JsonCompareMode.STRICT));
+                .andExpect(content().json("{\"detail\":\"Wait a few seconds and try again.\"}", JsonCompareMode.LENIENT));
 
         verify(customDomainLifecycle, times(1)).checkNow(id);
         verify(customDomainSetup, times(1)).retry(argThat(domain -> domain.getId() == id));
@@ -567,8 +569,8 @@ class CustomDomainEndpointSecurityTest {
         mockMvc.perform(as(ANA_TOKEN, delete(DOMAINS + "/" + id).param("links", "MOVE")))
                 .andExpect(status().isConflict())
                 .andExpect(content().json("""
-                        {"error":"This domain was turned off by hrva.cc, so its links can't move to hrva.cc. Remove it with its links turned off instead."}""",
-                        JsonCompareMode.STRICT));
+{"detail":"This domain was turned off by hrva.cc, so its links can't move to hrva.cc. Remove it with its links turned off instead."}
+""", JsonCompareMode.LENIENT));
         assertThat(statusOf(id)).isEqualTo("DISABLED");
         assertThat(jdbcTemplate.queryForObject("select domain_id from url where short_url = 'menu' and owner_id = ?", Long.class, ANA)).isEqualTo(id);
 
@@ -583,7 +585,7 @@ class CustomDomainEndpointSecurityTest {
 
         mockMvc.perform(as(ANA_TOKEN, post(DOMAINS + "/" + id + "/retry")))
                 .andExpect(status().isConflict())
-                .andExpect(content().json("{\"error\":\"There's nothing to retry for this domain.\"}", JsonCompareMode.STRICT));
+                .andExpect(content().json("{\"detail\":\"There's nothing to retry for this domain.\"}", JsonCompareMode.LENIENT));
 
         verifyNoInteractions(customDomainSetup);
     }
@@ -618,7 +620,7 @@ class CustomDomainEndpointSecurityTest {
         final var answers = List.of(first.get(30, TimeUnit.SECONDS), second.get(30, TimeUnit.SECONDS));
         assertThat(answers).extracting(MockHttpServletResponse::getStatus).containsExactlyInAnyOrder(201, 400);
         assertThat(answers).filteredOn(answer -> answer.getStatus() == 400).singleElement()
-                .satisfies(refused -> assertThat(refused.getContentAsString()).isEqualTo(OVER_THE_LIMIT));
+                .satisfies(refused -> JsonAssert.comparator(JsonCompareMode.LENIENT).assertIsMatch(OVER_THE_LIMIT, refused.getContentAsString()));
         assertThat(countOf(ANA)).isOne();
         assertThat(committedEvents.events()).filteredOn(DomainApplied.class::isInstance).hasSize(1);
         assertThat(arrived.getCount()).isOne();
@@ -635,7 +637,7 @@ class CustomDomainEndpointSecurityTest {
         final var answers = List.of(first.get(30, TimeUnit.SECONDS), second.get(30, TimeUnit.SECONDS));
         assertThat(answers).extracting(MockHttpServletResponse::getStatus).containsExactlyInAnyOrder(201, 409);
         assertThat(answers).filteredOn(answer -> answer.getStatus() == 409).singleElement()
-                .satisfies(refused -> assertThat(refused.getContentAsString()).isEqualTo(TAKEN));
+                .satisfies(refused -> JsonAssert.comparator(JsonCompareMode.LENIENT).assertIsMatch(TAKEN, refused.getContentAsString()));
         assertThat(jdbcTemplate.queryForObject("select count(*) from custom_domain where hostname = 'go.example.com'", Integer.class)).isOne();
         assertThat(committedEvents.events()).filteredOn(DomainApplied.class::isInstance).hasSize(1);
         verify(customDomainRepository, times(2)).findByHostnameKey("go.example.com");

@@ -4,7 +4,7 @@ import cc.hrva.urlshortener.dto.bio.BioPageAnalyticsResponse;
 import cc.hrva.urlshortener.dto.bio.BioPageAnalyticsResponse.ButtonClicks;
 import cc.hrva.urlshortener.dto.bio.BioViewDay;
 import cc.hrva.urlshortener.exception.BioPageNotFoundException;
-import cc.hrva.urlshortener.exception.NoAuthorizationException;
+import cc.hrva.urlshortener.exception.NotSignedInException;
 import cc.hrva.urlshortener.model.BioPage;
 import cc.hrva.urlshortener.model.BioPageButton;
 import cc.hrva.urlshortener.model.Url;
@@ -98,7 +98,7 @@ public class DefaultBioPageAnalyticsService implements BioPageAnalyticsService {
     private User currentUser() {
         final var user = userService.getUserFromToken();
         if (user == null) {
-            throw new NoAuthorizationException(NOT_AUTHENTICATED);
+            throw new NotSignedInException(NOT_AUTHENTICATED);
         }
         return user;
     }

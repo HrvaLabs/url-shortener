@@ -16,6 +16,7 @@ import cc.hrva.urlshortener.dto.UserSearchDto;
 import cc.hrva.urlshortener.dto.UserUpdateDto;
 import cc.hrva.urlshortener.exception.ApiException;
 import cc.hrva.urlshortener.exception.NoAuthorizationException;
+import cc.hrva.urlshortener.exception.NotSignedInException;
 import cc.hrva.urlshortener.exception.UserNotFoundException;
 import cc.hrva.urlshortener.listener.UserRegisteredEvent;
 import cc.hrva.urlshortener.mcp.apps.ConnectedAppsService;
@@ -210,7 +211,7 @@ public class DefaultUserService implements UserService {
     public void deleteOwnAccount(final DeleteAccountDto deleteAccountDto) {
         final var user = getUserFromToken();
         if (user == null) {
-            throw new NoAuthorizationException("Not authenticated");
+            throw new NotSignedInException("Not authenticated");
         }
 
         reauthentication.confirmAccountDeletion(user, deleteAccountDto.getPassword());
@@ -223,7 +224,7 @@ public class DefaultUserService implements UserService {
     public DataExportDto exportMyData() {
         final var user = getUserFromToken();
         if (user == null) {
-            throw new NoAuthorizationException("Not authenticated");
+            throw new NotSignedInException("Not authenticated");
         }
         log.info("Data export requested by user id={}", user.getId());
 

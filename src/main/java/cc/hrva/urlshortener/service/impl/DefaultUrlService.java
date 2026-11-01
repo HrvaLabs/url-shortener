@@ -227,7 +227,7 @@ public class DefaultUrlService implements UrlService {
     private void ensureCreateAllowed(final User creator, final String clientIP) {
         if (!createAllowed(creator, clientIP)) {
             log.info("Link creation refused by the rate limit userId={}", creator != null ? creator.getId() : null);
-            throw new RateLimitExceededException(CREATE_LIMIT_REFUSAL);
+            throw new RateLimitExceededException(CREATE_LIMIT_REFUSAL, CREATE_WINDOW);
         }
     }
 
@@ -271,7 +271,7 @@ public class DefaultUrlService implements UrlService {
     public UnlockResponse unlockUrl(final String domain, final String shortUrl, final String password, final ClickRequest click) {
         final var place = placeOf(domain, shortUrl);
         if (!unlockAttemptAllowed(place.cacheKey(), click.clientIp())) {
-            throw new RateLimitExceededException("Too many password attempts. Try again in a few minutes.");
+            throw new RateLimitExceededException("Too many password attempts. Try again in a few minutes.", UNLOCK_WINDOW);
         }
 
         final var url = urlRepository.findActive(place.domainId(), shortUrl)

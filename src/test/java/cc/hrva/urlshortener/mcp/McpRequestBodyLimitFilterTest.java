@@ -26,7 +26,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class McpRequestBodyLimitFilterTest {
 
     private static final int LIMIT = 64 * 1024;
-    private static final String REQUEST_TOO_LARGE = "{\"error\":\"request_too_large\"}";
+    private static final String REQUEST_TOO_LARGE = "The request body is over 64 KB.";
 
     private final McpRequestBodyLimitFilter filter = new McpRequestBodyLimitFilter();
 
@@ -128,9 +128,9 @@ class McpRequestBodyLimitFilterTest {
 
     private static void assertTooLarge(final MockHttpServletResponse response) throws Exception {
         assertThat(response.getStatus()).isEqualTo(413);
-        assertThat(response.getContentType()).startsWith("application/json");
+        assertThat(response.getContentType()).isEqualTo("application/problem+json");
         assertThat(response.getHeader(HttpHeaders.CACHE_CONTROL)).isEqualTo("no-store");
-        assertThat(response.getContentAsString()).isEqualTo(REQUEST_TOO_LARGE);
+        assertThat(response.getContentAsString()).contains("\"status\":413", "\"detail\":\"" + REQUEST_TOO_LARGE + "\"");
     }
 
     private static MockHttpServletRequest unknownLength(final String path, final ServletInputStream body) {

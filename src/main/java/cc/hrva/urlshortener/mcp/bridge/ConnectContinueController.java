@@ -6,11 +6,12 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.time.Duration;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ProblemDetail;
+import cc.hrva.urlshortener.util.ProblemResponses;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
@@ -41,20 +42,20 @@ public class ConnectContinueController {
     private final SecurityContextHolderStrategy securityContextHolderStrategy = SecurityContextHolder.getContextHolderStrategy();
 
     @GetMapping(CONTINUE_PATH)
-    public ResponseEntity<Map<String, String>> continueAuthorization(@RequestParam(name = CODE_PARAMETER, required = false) final String code,
+    public ResponseEntity<ProblemDetail> continueAuthorization(@RequestParam(name = CODE_PARAMETER, required = false) final String code,
                                                                      final HttpServletRequest request,
                                                                      final HttpServletResponse response) {
         final var redeemedRequest = Optional.ofNullable(code)
                 .filter(StringUtils::hasText)
                 .flatMap(connectRequestStore::redeem);
         if (redeemedRequest.isEmpty()) {
-            return ResponseEntity.badRequest().body(Map.of("error", "invalid_code"));
+            return ProblemResponses.entity(HttpStatus.BAD_REQUEST, "invalid_code");
         }
 
         final var approvedConnectRequest = redeemedRequest.get();
         final var session = request.getSession(false);
         if (session == null || !approvedConnectRequest.handle().equals(session.getAttribute(ConnectRedirectEntryPoint.HANDLE_ATTRIBUTE))) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "session_mismatch"));
+            return ProblemResponses.entity(HttpStatus.FORBIDDEN, "session_mismatch");
         }
 
         session.removeAttribute(ConnectRedirectEntryPoint.HANDLE_ATTRIBUTE);

@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.mcp;
 
+import org.springframework.http.MediaType;
 import cc.hrva.urlshortener.configuration.AppConfiguration;
 import cc.hrva.urlshortener.configuration.ClockConfiguration;
 import cc.hrva.urlshortener.configuration.GlobalExceptionHandler;
@@ -106,7 +107,7 @@ class UnauthenticatedEndpointsTest {
     private static final String CLIENT_IP = "203.0.113.7";
     private static final String MCP_ACCEPT = "application/json, text/event-stream";
     private static final int BODY_LIMIT = 64 * 1024;
-    private static final String REQUEST_TOO_LARGE = "{\"error\":\"request_too_large\"}";
+    private static final String REQUEST_TOO_LARGE = "The request body is over 64 KB.";
     private static final String REGISTRATION = """
             {"redirect_uris":["http://localhost:53682/callback"],"token_endpoint_auth_method":"none"}""";
     private static final String TOOLS_LIST = """
@@ -240,11 +241,11 @@ class UnauthenticatedEndpointsTest {
         mockMvc.perform(post("/some-alias"))
                 .andExpect(status().isMethodNotAllowed())
                 .andExpect(header().string(HttpHeaders.ALLOW, containsString("GET")))
-                .andExpect(jsonPath("$.error").value("Method not allowed"))
+                .andExpect(jsonPath("$.detail").value("Method not allowed"))
                 .andExpect(this::hasNoJavaInternals);
         mockMvc.perform(get("/no/such/path").header(HttpHeaders.AUTHORIZATION, "Bearer " + appJwt))
                 .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.error").value("Not found"))
+                .andExpect(jsonPath("$.detail").value("Not found"))
                 .andExpect(this::hasNoJavaInternals);
 
         verify(urlService, never()).redirectResultUrl(any(), any());
@@ -263,8 +264,8 @@ class UnauthenticatedEndpointsTest {
         for (final var request : List.of(jsonPost("/oauth2/register", registration), jsonPost("/mcp", toolsList))) {
             mockMvc.perform(request.with(from(CLIENT_IP)))
                     .andExpect(status().isContentTooLarge())
-                    .andExpect(content().contentTypeCompatibleWith(APPLICATION_JSON))
-                    .andExpect(content().string(REQUEST_TOO_LARGE));
+                    .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+                    .andExpect(jsonPath("$.detail").value(REQUEST_TOO_LARGE));
         }
 
         assertThat(redis.isEmpty()).isTrue();
@@ -278,7 +279,7 @@ class UnauthenticatedEndpointsTest {
 
         mockMvc.perform(jsonPost("/oauth2/register", registration).with(unknownLength()))
                 .andExpect(status().isContentTooLarge())
-                .andExpect(content().string(REQUEST_TOO_LARGE));
+                .andExpect(jsonPath("$.detail").value(REQUEST_TOO_LARGE));
         mockMvc.perform(jsonPost("/mcp", toolsList).header(HttpHeaders.AUTHORIZATION, "Bearer " + token).with(unknownLength()))
                 .andExpect(status().isBadRequest())
                 .andExpect(content().string(containsString("Invalid message format")));

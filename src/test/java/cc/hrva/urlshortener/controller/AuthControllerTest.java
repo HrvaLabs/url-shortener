@@ -86,7 +86,7 @@ class AuthControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(UserRegisterDto.builder().email(email).password("password123").build())))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.email").value("Enter a valid email address (e.g. you@example.com)"));
+                .andExpect(jsonPath("$.errors.email").value("Enter a valid email address (e.g. you@example.com)"));
 
         verifyNoInteractions(authService);
     }
@@ -99,7 +99,7 @@ class AuthControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(UserRegisterDto.builder().email(email).password("password123").build())))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.email").value("Email must be 255 characters or fewer"));
+                .andExpect(jsonPath("$.errors.email").value("Email must be 255 characters or fewer"));
 
         verifyNoInteractions(authService);
     }

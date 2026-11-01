@@ -1,5 +1,7 @@
 package cc.hrva.urlshortener.mcp.bridge;
 
+import org.springframework.test.json.JsonCompareMode;
+import org.springframework.test.json.JsonAssert;
 import cc.hrva.urlshortener.configuration.AppConfiguration;
 import cc.hrva.urlshortener.configuration.GlobalExceptionHandler;
 import cc.hrva.urlshortener.configuration.JacksonConfiguration;
@@ -118,8 +120,8 @@ class LoginBridgeTest {
     private static final String REGISTRATION = """
             {"client_name":"Claude","redirect_uris":["http://localhost:53682/callback"],"token_endpoint_auth_method":"none"}""";
     private static final String CODE_CHALLENGE = s256(McpAccessTokens.CODE_VERIFIER);
-    private static final String EXPIRED = "{\"error\":\"expired\"}";
-    private static final String ALREADY_APPROVED = "{\"error\":\"already_approved\"}";
+    private static final String EXPIRED = "{\"detail\":\"expired\"}";
+    private static final String ALREADY_APPROVED = "{\"detail\":\"already_approved\"}";
     private static final Duration REQUEST_TIME_TO_LIVE = Duration.ofMinutes(10);
     private static final Duration CODE_TIME_TO_LIVE = Duration.ofSeconds(60);
     private static final Duration AUTHORIZED_SESSION_TIME_TO_LIVE = Duration.ofSeconds(60);
@@ -306,9 +308,9 @@ class LoginBridgeTest {
         assertThat(code).matches("[A-Za-z0-9_-]{43}");
         assertThat(redis.timeToLiveOfKeyContaining(code)).isEqualTo(CODE_TIME_TO_LIVE);
         assertThat(secondApproval.getStatus()).isEqualTo(409);
-        assertThat(secondApproval.getContentAsString()).isEqualTo(ALREADY_APPROVED);
+        JsonAssert.comparator(JsonCompareMode.LENIENT).assertIsMatch(ALREADY_APPROVED, secondApproval.getContentAsString());
         assertThat(denialAfterApproval.getStatus()).isEqualTo(409);
-        assertThat(denialAfterApproval.getContentAsString()).isEqualTo(ALREADY_APPROVED);
+        JsonAssert.comparator(JsonCompareMode.LENIENT).assertIsMatch(ALREADY_APPROVED, denialAfterApproval.getContentAsString());
         assertExpired(viewAfterApproval);
     }
 
@@ -640,7 +642,7 @@ class LoginBridgeTest {
 
     private static void assertExpired(final MockHttpServletResponse response) throws Exception {
         assertThat(response.getStatus()).isEqualTo(410);
-        assertThat(response.getContentAsString()).isEqualTo(EXPIRED);
+        JsonAssert.comparator(JsonCompareMode.LENIENT).assertIsMatch(EXPIRED, response.getContentAsString());
     }
 
     private static String continueUrl(final MockHttpServletResponse approval) throws Exception {

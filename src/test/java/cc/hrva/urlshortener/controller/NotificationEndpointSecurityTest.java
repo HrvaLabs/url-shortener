@@ -123,9 +123,10 @@ class NotificationEndpointSecurityTest {
     private static final String DISCORD_CHANNEL = """
             {"name":"Team alerts","type":"DISCORD","enabled":true,"events":["WEEKLY_SUMMARY","LINK_DEAD"],
              "target":"https://discord.com/api/webhooks/123/abc-secret-xyz","botToken":null,"chatId":null,"accessToken":null}""";
-    private static final String CHANNEL_NOT_FOUND = "{\"error\":\"Notification channel not found\"}";
+    private static final String CHANNEL_NOT_FOUND = "{\"detail\":\"Notification channel not found\"}";
     private static final String INVALID_LINK = """
-            {"error":"This unsubscribe link isn't valid. You can turn emails off in Settings, under Notifications."}""";
+{"detail":"This unsubscribe link isn't valid. You can turn emails off in Settings, under Notifications."}
+""";
     private static final long ANA = 600L;
     private static final long BOB = 601L;
     private static final String ANA_EMAIL = "ana@hrva.cc";
@@ -264,11 +265,13 @@ class NotificationEndpointSecurityTest {
         mockMvc.perform(as(ANA_TOKEN, put(NOTIFICATIONS + "/LINK_DEAD")).contentType(MediaType.APPLICATION_JSON).content("{\"consented\":true}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(content().json("""
-                        {"error":"Notification type must be DEAD_LINK_EMAIL, WEEKLY_SUMMARY_EMAIL or EXPIRY_REMINDER_EMAIL"}""", JsonCompareMode.STRICT));
+{"detail":"Notification type must be DEAD_LINK_EMAIL, WEEKLY_SUMMARY_EMAIL or EXPIRY_REMINDER_EMAIL"}
+""", JsonCompareMode.LENIENT));
         mockMvc.perform(as(ANA_TOKEN, put(NOTIFICATIONS + "/FOO")).contentType(MediaType.APPLICATION_JSON).content("{\"consented\":true}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(content().json("""
-                        {"error":"Notification type must be DEAD_LINK_EMAIL, WEEKLY_SUMMARY_EMAIL or EXPIRY_REMINDER_EMAIL"}""", JsonCompareMode.STRICT));
+{"detail":"Notification type must be DEAD_LINK_EMAIL, WEEKLY_SUMMARY_EMAIL or EXPIRY_REMINDER_EMAIL"}
+""", JsonCompareMode.LENIENT));
 
         assertThat(notificationConsentRepository.count()).isZero();
     }
@@ -277,7 +280,7 @@ class NotificationEndpointSecurityTest {
     void consentedIsRequired() throws Exception {
         mockMvc.perform(as(ANA_TOKEN, put(NOTIFICATIONS + "/DEAD_LINK_EMAIL")).contentType(MediaType.APPLICATION_JSON).content("{}"))
                 .andExpect(status().isBadRequest())
-                .andExpect(content().json("{\"consented\":\"Choose on or off\"}", JsonCompareMode.STRICT));
+                .andExpect(content().json("{\"errors\":{\"consented\":\"Choose on or off\"}}", JsonCompareMode.LENIENT));
     }
 
     @Test
@@ -387,11 +390,11 @@ class NotificationEndpointSecurityTest {
         for (final var token : List.of("x", valid + "x", valid.substring(1))) {
             mockMvc.perform(oneClick(token))
                     .andExpect(status().isBadRequest())
-                    .andExpect(content().json(INVALID_LINK, JsonCompareMode.STRICT));
+                    .andExpect(content().json(INVALID_LINK, JsonCompareMode.LENIENT));
         }
         mockMvc.perform(post(UNSUBSCRIBE))
                 .andExpect(status().isBadRequest())
-                .andExpect(content().json(INVALID_LINK, JsonCompareMode.STRICT));
+                .andExpect(content().json(INVALID_LINK, JsonCompareMode.LENIENT));
         assertThat(isActive(ANA, NotificationType.WEEKLY_SUMMARY_EMAIL)).isTrue();
     }
 
@@ -402,7 +405,7 @@ class NotificationEndpointSecurityTest {
 
         mockMvc.perform(oneClick(unsubscribeTokens.issue(ANA, NotificationType.WEEKLY_SUMMARY_EMAIL)))
                 .andExpect(status().isTooManyRequests())
-                .andExpect(content().json("{\"error\":\"Too many tries from your network. Try again in a few minutes.\"}", JsonCompareMode.STRICT));
+                .andExpect(content().json("{\"detail\":\"Too many tries from your network. Try again in a few minutes.\"}", JsonCompareMode.LENIENT));
         assertThat(isActive(ANA, NotificationType.WEEKLY_SUMMARY_EMAIL)).isTrue();
     }
 
@@ -521,26 +524,26 @@ class NotificationEndpointSecurityTest {
     void channelFieldErrorsComeBackByField() throws Exception {
         mockMvc.perform(as(ANA_TOKEN, post(CHANNELS)).contentType(MediaType.APPLICATION_JSON).content(DISCORD_CHANNEL.replace("\"Team alerts\"", "\" \"")))
                 .andExpect(status().isBadRequest())
-                .andExpect(content().json("{\"name\":\"Give the channel a name\"}", JsonCompareMode.STRICT));
+                .andExpect(content().json("{\"errors\":{\"name\":\"Give the channel a name\"}}", JsonCompareMode.LENIENT));
         mockMvc.perform(as(ANA_TOKEN, post(CHANNELS)).contentType(MediaType.APPLICATION_JSON)
                         .content(DISCORD_CHANNEL.replace("Team alerts", "x".repeat(61))))
                 .andExpect(status().isBadRequest())
-                .andExpect(content().json("{\"name\":\"Name must be 60 characters or fewer\"}", JsonCompareMode.STRICT));
+                .andExpect(content().json("{\"errors\":{\"name\":\"Name must be 60 characters or fewer\"}}", JsonCompareMode.LENIENT));
         mockMvc.perform(as(ANA_TOKEN, post(CHANNELS)).contentType(MediaType.APPLICATION_JSON).content(DISCORD_CHANNEL.replace("\"DISCORD\"", "null")))
                 .andExpect(status().isBadRequest())
-                .andExpect(content().json("{\"type\":\"Choose a channel type\"}", JsonCompareMode.STRICT));
+                .andExpect(content().json("{\"errors\":{\"type\":\"Choose a channel type\"}}", JsonCompareMode.LENIENT));
         mockMvc.perform(as(ANA_TOKEN, post(CHANNELS)).contentType(MediaType.APPLICATION_JSON).content(DISCORD_CHANNEL.replace("https://", "http://")))
                 .andExpect(status().isBadRequest())
-                .andExpect(content().json("{\"target\":\"Use an https URL.\"}", JsonCompareMode.STRICT));
+                .andExpect(content().json("{\"errors\":{\"target\":\"Use an https URL.\"}}", JsonCompareMode.LENIENT));
         mockMvc.perform(as(ANA_TOKEN, post(CHANNELS)).contentType(MediaType.APPLICATION_JSON).content("""
                         {"name":"Phone","type":"TELEGRAM","events":[],"botToken":"nope","chatId":"nope"}"""))
                 .andExpect(status().isBadRequest())
                 .andExpect(content().json("""
-                        {"botToken":"Paste the bot token from @BotFather, like 123456789:AAH4Fq2xYzExample",
-                         "chatId":"Enter the chat ID, a number like -1001234567890 or a channel name like @mychannel"}""", JsonCompareMode.STRICT));
+{"errors":{"botToken":"Paste the bot token from @BotFather, like 123456789:AAH4Fq2xYzExample","chatId":"Enter the chat ID, a number like -1001234567890 or a channel name like @mychannel"}}
+""", JsonCompareMode.LENIENT));
         mockMvc.perform(as(ANA_TOKEN, post(CHANNELS)).contentType(MediaType.APPLICATION_JSON).content(DISCORD_CHANNEL.replace("WEEKLY_SUMMARY", "WEEKLY_SUMMARY_EMAIL")))
                 .andExpect(status().isBadRequest())
-                .andExpect(content().json("{\"error\":\"Events must be LINK_DEAD, LINK_BACK, DAILY_SUMMARY or WEEKLY_SUMMARY\"}", JsonCompareMode.STRICT));
+                .andExpect(content().json("{\"detail\":\"Events must be LINK_DEAD, LINK_BACK, DAILY_SUMMARY or WEEKLY_SUMMARY\"}", JsonCompareMode.LENIENT));
 
         assertThat(notificationChannelRepository.count()).isZero();
     }
@@ -551,16 +554,14 @@ class NotificationEndpointSecurityTest {
                         {"name":" ","type":"NTFY","events":[],"target":"http://ntfy.sh/alerts","accessToken":"tk abc"}"""))
                 .andExpect(status().isBadRequest())
                 .andExpect(content().json("""
-                        {"name":"Give the channel a name",
-                         "target":"Use an https URL.",
-                         "accessToken":"Paste the access token from ntfy. It has no spaces, like tk_AbC123"}""", JsonCompareMode.STRICT));
+{"errors":{"name":"Give the channel a name","target":"Use an https URL.","accessToken":"Paste the access token from ntfy. It has no spaces, like tk_AbC123"}}
+""", JsonCompareMode.LENIENT));
         mockMvc.perform(as(ANA_TOKEN, post(CHANNELS)).contentType(MediaType.APPLICATION_JSON).content("""
                         {"name":"%s","type":"TELEGRAM","events":[],"botToken":"nope","chatId":"nope"}""".formatted("x".repeat(61))))
                 .andExpect(status().isBadRequest())
                 .andExpect(content().json("""
-                        {"name":"Name must be 60 characters or fewer",
-                         "botToken":"Paste the bot token from @BotFather, like 123456789:AAH4Fq2xYzExample",
-                         "chatId":"Enter the chat ID, a number like -1001234567890 or a channel name like @mychannel"}""", JsonCompareMode.STRICT));
+{"errors":{"name":"Name must be 60 characters or fewer","botToken":"Paste the bot token from @BotFather, like 123456789:AAH4Fq2xYzExample","chatId":"Enter the chat ID, a number like -1001234567890 or a channel name like @mychannel"}}
+""", JsonCompareMode.LENIENT));
 
         assertThat(notificationChannelRepository.count()).isZero();
     }
@@ -576,13 +577,12 @@ class NotificationEndpointSecurityTest {
                         {"name":"","type":"NTFY","events":[],"target":"https://ntfy.sh/","accessToken":"tk abc"}"""))
                 .andExpect(status().isBadRequest())
                 .andExpect(content().json("""
-                        {"name":"Give the channel a name",
-                         "target":"Paste your ntfy topic URL, like https://ntfy.sh/your-topic",
-                         "accessToken":"Paste the access token from ntfy. It has no spaces, like tk_AbC123"}""", JsonCompareMode.STRICT));
+{"errors":{"name":"Give the channel a name","target":"Paste your ntfy topic URL, like https://ntfy.sh/your-topic","accessToken":"Paste the access token from ntfy. It has no spaces, like tk_AbC123"}}
+""", JsonCompareMode.LENIENT));
         mockMvc.perform(as(ANA_TOKEN, put(CHANNELS + "/" + channel.getId())).contentType(MediaType.APPLICATION_JSON).content("""
                         {"name":"","type":null,"events":[]}"""))
                 .andExpect(status().isBadRequest())
-                .andExpect(content().json("{\"name\":\"Give the channel a name\",\"type\":\"Choose a channel type\"}", JsonCompareMode.STRICT));
+                .andExpect(content().json("{\"errors\":{\"name\":\"Give the channel a name\",\"type\":\"Choose a channel type\"}}", JsonCompareMode.LENIENT));
 
         assertThat(notificationChannelRepository.findById(channel.getId()).orElseThrow().getName()).isEqualTo("Phone");
     }
@@ -597,8 +597,7 @@ class NotificationEndpointSecurityTest {
         mockMvc.perform(as(ANA_TOKEN, put(CHANNELS + "/" + channel.getId())).contentType(MediaType.APPLICATION_JSON).content("""
                         {"name":"Phone","type":"NTFY","events":[],"target":"","accessToken":"tk abc"}"""))
                 .andExpect(status().isBadRequest())
-                .andExpect(content().json("{\"accessToken\":\"Paste the access token from ntfy. It has no spaces, like tk_AbC123\"}",
-                        JsonCompareMode.STRICT));
+                .andExpect(content().json("{\"errors\":{\"accessToken\":\"Paste the access token from ntfy. It has no spaces, like tk_AbC123\"}}", JsonCompareMode.LENIENT));
         mockMvc.perform(as(ANA_TOKEN, put(CHANNELS + "/" + channel.getId())).contentType(MediaType.APPLICATION_JSON).content("""
                         {"name":"Phone","type":"NTFY","events":[],"target":"","accessToken":" "}"""))
                 .andExpect(status().isOk());
@@ -612,17 +611,17 @@ class NotificationEndpointSecurityTest {
         mockMvc.perform(as(ANA_TOKEN, post(CHANNELS)).contentType(MediaType.APPLICATION_JSON)
                         .content(DISCORD_CHANNEL.replace("abc-secret-xyz", "a".repeat(2049 - "https://discord.com/api/webhooks/123/".length()))))
                 .andExpect(status().isBadRequest())
-                .andExpect(content().json("{\"target\":\"URL must be 2048 characters or fewer\"}", JsonCompareMode.STRICT));
+                .andExpect(content().json("{\"errors\":{\"target\":\"URL must be 2048 characters or fewer\"}}", JsonCompareMode.LENIENT));
         mockMvc.perform(as(ANA_TOKEN, post(CHANNELS)).contentType(MediaType.APPLICATION_JSON).content("""
                         {"name":"Phone","type":"TELEGRAM","events":[],"botToken":"%s","chatId":"%s"}""".formatted("1".repeat(256), "1".repeat(41))))
                 .andExpect(status().isBadRequest())
                 .andExpect(content().json("""
-                        {"botToken":"Bot token must be 255 characters or fewer",
-                         "chatId":"Chat ID must be 40 characters or fewer"}""", JsonCompareMode.STRICT));
+{"errors":{"botToken":"Bot token must be 255 characters or fewer","chatId":"Chat ID must be 40 characters or fewer"}}
+""", JsonCompareMode.LENIENT));
         mockMvc.perform(as(ANA_TOKEN, post(CHANNELS)).contentType(MediaType.APPLICATION_JSON).content("""
                         {"name":"Phone","type":"NTFY","events":[],"target":"https://ntfy.sh/alerts","accessToken":"%s"}""".formatted("t".repeat(256))))
                 .andExpect(status().isBadRequest())
-                .andExpect(content().json("{\"accessToken\":\"Access token must be 255 characters or fewer\"}", JsonCompareMode.STRICT));
+                .andExpect(content().json("{\"errors\":{\"accessToken\":\"Access token must be 255 characters or fewer\"}}", JsonCompareMode.LENIENT));
 
         assertThat(notificationChannelRepository.count()).isZero();
     }
@@ -666,7 +665,7 @@ class NotificationEndpointSecurityTest {
 
         mockMvc.perform(as(ANA_TOKEN, post(CHANNELS)).contentType(MediaType.APPLICATION_JSON).content(DISCORD_CHANNEL))
                 .andExpect(status().isBadRequest())
-                .andExpect(content().json("{\"error\":\"You can have up to 10 channels. Remove one to add another.\"}", JsonCompareMode.STRICT));
+                .andExpect(content().json("{\"detail\":\"You can have up to 10 channels. Remove one to add another.\"}", JsonCompareMode.LENIENT));
         mockMvc.perform(as(BOB_TOKEN, post(CHANNELS)).contentType(MediaType.APPLICATION_JSON).content(DISCORD_CHANNEL))
                 .andExpect(status().isCreated());
     }
@@ -680,16 +679,16 @@ class NotificationEndpointSecurityTest {
 
         mockMvc.perform(as(BOB_TOKEN, put(CHANNELS + "/" + id)).contentType(MediaType.APPLICATION_JSON).content(DISCORD_CHANNEL))
                 .andExpect(status().isNotFound())
-                .andExpect(content().json(CHANNEL_NOT_FOUND, JsonCompareMode.STRICT));
+                .andExpect(content().json(CHANNEL_NOT_FOUND, JsonCompareMode.LENIENT));
         mockMvc.perform(as(BOB_TOKEN, delete(CHANNELS + "/" + id)))
                 .andExpect(status().isNotFound())
-                .andExpect(content().json(CHANNEL_NOT_FOUND, JsonCompareMode.STRICT));
+                .andExpect(content().json(CHANNEL_NOT_FOUND, JsonCompareMode.LENIENT));
         mockMvc.perform(as(BOB_TOKEN, post(CHANNELS + "/" + id + "/signing-secret")))
                 .andExpect(status().isNotFound())
-                .andExpect(content().json(CHANNEL_NOT_FOUND, JsonCompareMode.STRICT));
+                .andExpect(content().json(CHANNEL_NOT_FOUND, JsonCompareMode.LENIENT));
         mockMvc.perform(as(ANA_TOKEN, delete(CHANNELS + "/999999")))
                 .andExpect(status().isNotFound())
-                .andExpect(content().json(CHANNEL_NOT_FOUND, JsonCompareMode.STRICT));
+                .andExpect(content().json(CHANNEL_NOT_FOUND, JsonCompareMode.LENIENT));
         assertThat(notificationChannelRepository.count()).isEqualTo(1L);
     }
 
@@ -710,7 +709,7 @@ class NotificationEndpointSecurityTest {
         assertThat(jdbcTemplate.queryForObject("select failed_days from notification_channel where id = ?", Integer.class, id)).isZero();
         mockMvc.perform(as(BOB_TOKEN, post(CHANNELS + "/" + id + "/test")))
                 .andExpect(status().isNotFound())
-                .andExpect(content().json(CHANNEL_NOT_FOUND, JsonCompareMode.STRICT));
+                .andExpect(content().json(CHANNEL_NOT_FOUND, JsonCompareMode.LENIENT));
     }
 
     @Test
@@ -736,7 +735,7 @@ class NotificationEndpointSecurityTest {
 
         mockMvc.perform(as(ANA_TOKEN, post(CHANNELS + "/" + id + "/signing-secret")))
                 .andExpect(status().isBadRequest())
-                .andExpect(content().json("{\"error\":\"Only webhook channels have a signing secret.\"}", JsonCompareMode.STRICT));
+                .andExpect(content().json("{\"detail\":\"Only webhook channels have a signing secret.\"}", JsonCompareMode.LENIENT));
     }
 
     @Test
@@ -746,7 +745,8 @@ class NotificationEndpointSecurityTest {
         mockMvc.perform(as(ANA_TOKEN, post(CHANNELS)).contentType(MediaType.APPLICATION_JSON).content(DISCORD_CHANNEL))
                 .andExpect(status().isTooManyRequests())
                 .andExpect(content().json("""
-                        {"error":"You've changed your notification settings a lot in a short time. Try again in a few minutes."}""", JsonCompareMode.STRICT));
+{"detail":"You've changed your notification settings a lot in a short time. Try again in a few minutes."}
+""", JsonCompareMode.LENIENT));
         assertThat(notificationChannelRepository.count()).isZero();
     }
 
@@ -761,7 +761,8 @@ class NotificationEndpointSecurityTest {
         mockMvc.perform(as(ANA_TOKEN, post(CHANNELS + "/" + id + "/signing-secret")))
                 .andExpect(status().isTooManyRequests())
                 .andExpect(content().json("""
-                        {"error":"You've sent a lot of tests in a short time. Try again in a few minutes."}""", JsonCompareMode.STRICT));
+{"detail":"You've sent a lot of tests in a short time. Try again in a few minutes."}
+""", JsonCompareMode.LENIENT));
     }
 
     @Test
@@ -776,7 +777,8 @@ class NotificationEndpointSecurityTest {
         mockMvc.perform(as(ANA_TOKEN, post(CHANNELS + "/" + id + "/signing-secret")))
                 .andExpect(status().isServiceUnavailable())
                 .andExpect(content().json("""
-                        {"error":"Sending a test isn't available right now. Try again in a minute."}""", JsonCompareMode.STRICT));
+{"detail":"Sending a test isn't available right now. Try again in a minute."}
+""", JsonCompareMode.LENIENT));
     }
 
     private static MockHttpServletRequestBuilder oneClick(final String token) {

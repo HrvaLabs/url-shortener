@@ -149,7 +149,7 @@ class AdminReviewQueueSecurityTest {
         for (final var action : List.of("\"DELETE_EVERYTHING\"", "1")) {
             mockMvc.perform(bulkResolve("admin-token").content("{\"urlIds\":[287],\"action\":" + action + "}"))
                     .andExpect(status().isBadRequest())
-                    .andExpect(jsonPath("$.error").value("Action must be OK, TRUST_DOMAIN, BLOCK_LINK, BLOCK_DOMAIN or BLOCK_USER"));
+                    .andExpect(jsonPath("$.detail").value("Action must be OK, TRUST_DOMAIN, BLOCK_LINK, BLOCK_DOMAIN or BLOCK_USER"));
         }
 
         verifyNoInteractions(moderationService);
@@ -161,7 +161,7 @@ class AdminReviewQueueSecurityTest {
 
         mockMvc.perform(bulkResolve("admin-token").content("{\"urlIds\":" + ids + ",\"action\":\"OK\"}"))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.urlIds").value("Select between 1 and 100 links"));
+                .andExpect(jsonPath("$.errors.urlIds").value("Select between 1 and 100 links"));
 
         verifyNoInteractions(moderationService);
     }

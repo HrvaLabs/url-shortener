@@ -109,7 +109,7 @@ class AdminAuditLogControllerTest {
     void aDateThatIsNotADateIsABadRequest() throws Exception {
         mockMvc.perform(get("/api/v1/admin/audit-log").param("from", "23.10.2026"))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.error").value("Invalid value for from"));
+                .andExpect(jsonPath("$.detail").value("Invalid value for from"));
 
         verifyNoInteractions(auditLogService);
     }
@@ -118,7 +118,7 @@ class AdminAuditLogControllerTest {
     void anUnknownActionFilterIsABadRequest() throws Exception {
         mockMvc.perform(get("/api/v1/admin/audit-log").param("action", "resolveReview"))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.error").value("Invalid value for action"));
+                .andExpect(jsonPath("$.detail").value("Invalid value for action"));
 
         verifyNoInteractions(auditLogService);
     }

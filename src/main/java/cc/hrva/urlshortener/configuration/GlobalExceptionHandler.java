@@ -37,12 +37,17 @@ import cc.hrva.urlshortener.exception.SignInExpiredException;
 import cc.hrva.urlshortener.exception.SignInUnavailableException;
 import cc.hrva.urlshortener.exception.TwoStepFailedException;
 import cc.hrva.urlshortener.exception.NoAuthorizationException;
+import cc.hrva.urlshortener.exception.NotSignedInException;
+import cc.hrva.urlshortener.security.AccessAnswers;
 import cc.hrva.urlshortener.exception.NotificationChannelNotFoundException;
 import cc.hrva.urlshortener.exception.NotificationTestUnavailableException;
 import cc.hrva.urlshortener.exception.UrlNotFoundException;
 import cc.hrva.urlshortener.exception.UserNotFoundException;
+import cc.hrva.urlshortener.util.ProblemResponses;
 import jakarta.validation.ConstraintViolationException;
 import java.util.Arrays;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -55,6 +60,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.access.AccessDeniedException;
@@ -80,13 +86,13 @@ public class GlobalExceptionHandler {
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
-    public ResponseEntity<Map<String, String>> handleValidation(final MethodArgumentNotValidException ex) {
-        return ResponseEntity.badRequest().body(fieldErrors(ex.getBindingResult().getFieldErrors().stream()));
+    public ResponseEntity<ProblemDetail> handleValidation(final MethodArgumentNotValidException ex) {
+        return ProblemResponses.entityWithErrors(HttpStatus.BAD_REQUEST, fieldErrors(ex.getBindingResult().getFieldErrors().stream()));
     }
 
     @ExceptionHandler(HandlerMethodValidationException.class)
-    public ResponseEntity<Map<String, String>> handleMethodValidation(final HandlerMethodValidationException ex) {
-        return ResponseEntity.badRequest().body(fieldErrors(ex.getBeanResults().stream()
+    public ResponseEntity<ProblemDetail> handleMethodValidation(final HandlerMethodValidationException ex) {
+        return ProblemResponses.entityWithErrors(HttpStatus.BAD_REQUEST, fieldErrors(ex.getBeanResults().stream()
                 .flatMap(result -> result.getFieldErrors().stream())));
     }
 
@@ -94,7 +100,8 @@ public class GlobalExceptionHandler {
         return errors.collect(Collectors.toMap(
                 FieldError::getField,
                 e -> e.getDefaultMessage() != null ? e.getDefaultMessage() : "Invalid value",
-                (a, b) -> b));
+                (a, b) -> b,
+                LinkedHashMap::new));
     }
 
     private static String safeMessage(final Exception ex) {
@@ -102,274 +109,284 @@ public class GlobalExceptionHandler {
     }
 
     @ExceptionHandler(ConstraintViolationException.class)
-    public ResponseEntity<Map<String, String>> handleConstraintViolation(final ConstraintViolationException ex) {
-        return ResponseEntity.badRequest().body(buildViolationBody(ex));
+    public ResponseEntity<ProblemDetail> handleConstraintViolation(final ConstraintViolationException ex) {
+        return violations(ex);
     }
 
     @ExceptionHandler(TransactionSystemException.class)
-    public ResponseEntity<Map<String, String>> handleTransactionSystem(final TransactionSystemException ex) {
+    public ResponseEntity<ProblemDetail> handleTransactionSystem(final TransactionSystemException ex) {
         Throwable cause = ex.getRootCause();
         if (cause instanceof ConstraintViolationException cve) {
-            return ResponseEntity.badRequest().body(buildViolationBody(cve));
+            return violations(cve);
         }
         log.error("Unhandled transaction exception", ex);
-        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                .body(Map.of("error", "Internal server error"));
+        return ProblemResponses.entity(HttpStatus.INTERNAL_SERVER_ERROR, "Internal server error");
     }
 
-    private static Map<String, String> buildViolationBody(final ConstraintViolationException ex) {
+    private static ResponseEntity<ProblemDetail> violations(final ConstraintViolationException ex) {
         final var violations = ex.getConstraintViolations();
         if (violations == null || violations.isEmpty()) {
-            return Map.of("error", safeMessage(ex));
+            return ProblemResponses.entity(HttpStatus.BAD_REQUEST, safeMessage(ex));
         }
-        return violations.stream()
+        return ProblemResponses.entityWithErrors(HttpStatus.BAD_REQUEST, violations.stream()
+                .sorted(Comparator.comparing(violation -> violation.getPropertyPath().toString()))
                 .collect(Collectors.toMap(
                         v -> v.getPropertyPath().toString(),
                         v -> v.getMessage() != null ? v.getMessage() : "Invalid value",
-                        (a, b) -> b));
+                        (a, b) -> b,
+                        LinkedHashMap::new)));
     }
 
     @ExceptionHandler(UrlNotFoundException.class)
-    public ResponseEntity<Map<String, String>> handleNotFound(final UrlNotFoundException ex) {
-        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", safeMessage(ex)));
+    public ResponseEntity<ProblemDetail> handleNotFound(final UrlNotFoundException ex) {
+        return ProblemResponses.entity(HttpStatus.NOT_FOUND, safeMessage(ex));
     }
 
     @ExceptionHandler(NoAuthorizationException.class)
-    public ResponseEntity<Map<String, String>> handleUnauthorized(final NoAuthorizationException ex) {
-        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", safeMessage(ex)));
+    public ResponseEntity<ProblemDetail> handleUnauthorized(final NoAuthorizationException ex) {
+        return ProblemResponses.entity(HttpStatus.FORBIDDEN, safeMessage(ex));
     }
 
     @ExceptionHandler(AccessDeniedException.class)
-    public ResponseEntity<Map<String, String>> handleAccessDenied(final AccessDeniedException ex) {
-        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Access denied"));
+    public ResponseEntity<ProblemDetail> handleAccessDenied(final AccessDeniedException ex) {
+        if (AccessAnswers.nobodySignedIn()) {
+            return ProblemResponses.entity(HttpStatus.UNAUTHORIZED, AccessAnswers.SIGN_IN_TO_CONTINUE);
+        }
+        return ProblemResponses.entity(HttpStatus.FORBIDDEN, AccessAnswers.ACCESS_DENIED);
+    }
+
+    @ExceptionHandler(NotSignedInException.class)
+    public ResponseEntity<ProblemDetail> handleNotSignedIn(final NotSignedInException ex) {
+        return ProblemResponses.entity(HttpStatus.UNAUTHORIZED, safeMessage(ex));
     }
 
     @ExceptionHandler(ApiException.class)
-    public ResponseEntity<Map<String, String>> handleApiException(final ApiException ex) {
-        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("error", safeMessage(ex)));
+    public ResponseEntity<ProblemDetail> handleApiException(final ApiException ex) {
+        return ProblemResponses.entity(HttpStatus.BAD_REQUEST, safeMessage(ex));
     }
 
     @ExceptionHandler(UserNotFoundException.class)
-    public ResponseEntity<Map<String, String>> handleUserNotFound(final UserNotFoundException ex) {
-        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", safeMessage(ex)));
+    public ResponseEntity<ProblemDetail> handleUserNotFound(final UserNotFoundException ex) {
+        return ProblemResponses.entity(HttpStatus.NOT_FOUND, safeMessage(ex));
     }
 
     @ExceptionHandler(ApiKeyNotFoundException.class)
-    public ResponseEntity<Map<String, String>> handleApiKeyNotFound(final ApiKeyNotFoundException ex) {
-        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", safeMessage(ex)));
+    public ResponseEntity<ProblemDetail> handleApiKeyNotFound(final ApiKeyNotFoundException ex) {
+        return ProblemResponses.entity(HttpStatus.NOT_FOUND, safeMessage(ex));
     }
 
     @ExceptionHandler(EmailLogNotFoundException.class)
-    public ResponseEntity<Map<String, String>> handleEmailLogNotFound(final EmailLogNotFoundException ex) {
-        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", safeMessage(ex)));
+    public ResponseEntity<ProblemDetail> handleEmailLogNotFound(final EmailLogNotFoundException ex) {
+        return ProblemResponses.entity(HttpStatus.NOT_FOUND, safeMessage(ex));
     }
 
     @ExceptionHandler(BlocklistSourceNotFoundException.class)
-    public ResponseEntity<Map<String, String>> handleBlocklistSourceNotFound(final BlocklistSourceNotFoundException ex) {
-        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", safeMessage(ex)));
+    public ResponseEntity<ProblemDetail> handleBlocklistSourceNotFound(final BlocklistSourceNotFoundException ex) {
+        return ProblemResponses.entity(HttpStatus.NOT_FOUND, safeMessage(ex));
     }
 
     @ExceptionHandler(DomainRuleNotFoundException.class)
-    public ResponseEntity<Map<String, String>> handleDomainRuleNotFound(final DomainRuleNotFoundException ex) {
-        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", safeMessage(ex)));
+    public ResponseEntity<ProblemDetail> handleDomainRuleNotFound(final DomainRuleNotFoundException ex) {
+        return ProblemResponses.entity(HttpStatus.NOT_FOUND, safeMessage(ex));
     }
 
     @ExceptionHandler(ReservedAliasNotFoundException.class)
-    public ResponseEntity<Map<String, String>> handleReservedAliasNotFound(final ReservedAliasNotFoundException ex) {
-        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", safeMessage(ex)));
+    public ResponseEntity<ProblemDetail> handleReservedAliasNotFound(final ReservedAliasNotFoundException ex) {
+        return ProblemResponses.entity(HttpStatus.NOT_FOUND, safeMessage(ex));
     }
 
     @ExceptionHandler(BioPageNotFoundException.class)
-    public ResponseEntity<Map<String, String>> handleBioPageNotFound(final BioPageNotFoundException ex) {
-        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", safeMessage(ex)));
+    public ResponseEntity<ProblemDetail> handleBioPageNotFound(final BioPageNotFoundException ex) {
+        return ProblemResponses.entity(HttpStatus.NOT_FOUND, safeMessage(ex));
     }
 
     @ExceptionHandler(EmailExistsException.class)
-    public ResponseEntity<Map<String, String>> handleEmailExists(final EmailExistsException ex) {
-        return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("error", safeMessage(ex)));
+    public ResponseEntity<ProblemDetail> handleEmailExists(final EmailExistsException ex) {
+        return ProblemResponses.entity(HttpStatus.CONFLICT, safeMessage(ex));
     }
 
     @ExceptionHandler(ShortUrlAlreadyExistsException.class)
-    public ResponseEntity<Map<String, String>> handleShortUrlExists(final ShortUrlAlreadyExistsException ex) {
-        return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("error", safeMessage(ex)));
+    public ResponseEntity<ProblemDetail> handleShortUrlExists(final ShortUrlAlreadyExistsException ex) {
+        return ProblemResponses.entity(HttpStatus.CONFLICT, safeMessage(ex));
     }
 
     @ExceptionHandler(BioHandleUnavailableException.class)
-    public ResponseEntity<Map<String, String>> handleBioHandleUnavailable(final BioHandleUnavailableException ex) {
-        return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("error", safeMessage(ex)));
+    public ResponseEntity<ProblemDetail> handleBioHandleUnavailable(final BioHandleUnavailableException ex) {
+        return ProblemResponses.entity(HttpStatus.CONFLICT, safeMessage(ex));
     }
 
     @ExceptionHandler(BioPageConflictException.class)
-    public ResponseEntity<Map<String, String>> handleBioPageConflict(final BioPageConflictException ex) {
-        return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("error", safeMessage(ex)));
+    public ResponseEntity<ProblemDetail> handleBioPageConflict(final BioPageConflictException ex) {
+        return ProblemResponses.entity(HttpStatus.CONFLICT, safeMessage(ex));
     }
 
     @ExceptionHandler(ApiKeyActiveException.class)
-    public ResponseEntity<Map<String, String>> handleApiKeyActive(final ApiKeyActiveException ex) {
-        return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("error", safeMessage(ex)));
+    public ResponseEntity<ProblemDetail> handleApiKeyActive(final ApiKeyActiveException ex) {
+        return ProblemResponses.entity(HttpStatus.CONFLICT, safeMessage(ex));
     }
 
     @ExceptionHandler(InvalidApiKeyException.class)
-    public ResponseEntity<Map<String, String>> handleInvalidApiKey(final InvalidApiKeyException ex) {
-        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("error", safeMessage(ex)));
+    public ResponseEntity<ProblemDetail> handleInvalidApiKey(final InvalidApiKeyException ex) {
+        return ProblemResponses.entity(HttpStatus.BAD_REQUEST, safeMessage(ex));
     }
 
     @ExceptionHandler(BadCredentialsException.class)
-    public ResponseEntity<Map<String, String>> handleBadCredentials(final BadCredentialsException ex) {
-        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Invalid email or password"));
+    public ResponseEntity<ProblemDetail> handleBadCredentials(final BadCredentialsException ex) {
+        return ProblemResponses.entity(HttpStatus.UNAUTHORIZED, "Invalid email or password");
     }
 
     @ExceptionHandler(DisabledException.class)
-    public ResponseEntity<Map<String, String>> handleDisabled(final DisabledException ex) {
-        return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                .body(Map.of("error", "Your account is deactivated. Contact an administrator."));
+    public ResponseEntity<ProblemDetail> handleDisabled(final DisabledException ex) {
+        return ProblemResponses.entity(HttpStatus.FORBIDDEN, "Your account is deactivated. Contact an administrator.");
     }
 
     @ExceptionHandler(EmailNotVerifiedException.class)
-    public ResponseEntity<Map<String, String>> handleEmailNotVerified(final EmailNotVerifiedException ex) {
-        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", safeMessage(ex)));
+    public ResponseEntity<ProblemDetail> handleEmailNotVerified(final EmailNotVerifiedException ex) {
+        return ProblemResponses.entity(HttpStatus.FORBIDDEN, safeMessage(ex));
     }
 
     @ExceptionHandler(SignInExpiredException.class)
-    public ResponseEntity<Map<String, String>> handleSignInExpired(final SignInExpiredException ex) {
-        return ResponseEntity.status(HttpStatus.GONE).body(Map.of("error", safeMessage(ex)));
+    public ResponseEntity<ProblemDetail> handleSignInExpired(final SignInExpiredException ex) {
+        return ProblemResponses.entity(HttpStatus.GONE, safeMessage(ex));
     }
 
     @ExceptionHandler(TwoStepFailedException.class)
-    public ResponseEntity<Map<String, String>> handleTwoStepFailed(final TwoStepFailedException ex) {
-        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", safeMessage(ex)));
+    public ResponseEntity<ProblemDetail> handleTwoStepFailed(final TwoStepFailedException ex) {
+        return ProblemResponses.entity(HttpStatus.UNAUTHORIZED, safeMessage(ex));
     }
 
     @ExceptionHandler(SignInUnavailableException.class)
-    public ResponseEntity<Map<String, String>> handleSignInUnavailable(final SignInUnavailableException ex) {
-        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(Map.of("error", safeMessage(ex)));
+    public ResponseEntity<ProblemDetail> handleSignInUnavailable(final SignInUnavailableException ex) {
+        return ProblemResponses.entity(HttpStatus.SERVICE_UNAVAILABLE, safeMessage(ex));
     }
 
     @ExceptionHandler(PasskeyVerificationException.class)
-    public ResponseEntity<Map<String, String>> handlePasskeyVerification(final PasskeyVerificationException ex) {
-        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", safeMessage(ex)));
+    public ResponseEntity<ProblemDetail> handlePasskeyVerification(final PasskeyVerificationException ex) {
+        return ProblemResponses.entity(HttpStatus.UNAUTHORIZED, safeMessage(ex));
     }
 
     @ExceptionHandler(ReauthenticationRequiredException.class)
-    public ResponseEntity<Map<String, String>> handleReauthenticationRequired(final ReauthenticationRequiredException ex) {
-        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", safeMessage(ex)));
+    public ResponseEntity<ProblemDetail> handleReauthenticationRequired(final ReauthenticationRequiredException ex) {
+        return ProblemResponses.entity(HttpStatus.UNAUTHORIZED, safeMessage(ex));
     }
 
     @ExceptionHandler(SignInMethodNotFoundException.class)
-    public ResponseEntity<Map<String, String>> handleSignInMethodNotFound(final SignInMethodNotFoundException ex) {
-        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", safeMessage(ex)));
+    public ResponseEntity<ProblemDetail> handleSignInMethodNotFound(final SignInMethodNotFoundException ex) {
+        return ProblemResponses.entity(HttpStatus.NOT_FOUND, safeMessage(ex));
     }
 
     @ExceptionHandler(LastSignInMethodException.class)
-    public ResponseEntity<Map<String, String>> handleLastSignInMethod(final LastSignInMethodException ex) {
-        return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("error", safeMessage(ex)));
+    public ResponseEntity<ProblemDetail> handleLastSignInMethod(final LastSignInMethodException ex) {
+        return ProblemResponses.entity(HttpStatus.CONFLICT, safeMessage(ex));
     }
 
     @ExceptionHandler(PasskeyNotFoundException.class)
-    public ResponseEntity<Map<String, String>> handlePasskeyNotFound(final PasskeyNotFoundException ex) {
-        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", safeMessage(ex)));
+    public ResponseEntity<ProblemDetail> handlePasskeyNotFound(final PasskeyNotFoundException ex) {
+        return ProblemResponses.entity(HttpStatus.NOT_FOUND, safeMessage(ex));
     }
 
     @ExceptionHandler(ConnectRequestExpiredException.class)
-    public ResponseEntity<Map<String, String>> handleConnectRequestExpired(final ConnectRequestExpiredException ex) {
-        return ResponseEntity.status(HttpStatus.GONE).body(Map.of("error", safeMessage(ex)));
+    public ResponseEntity<ProblemDetail> handleConnectRequestExpired(final ConnectRequestExpiredException ex) {
+        return ProblemResponses.entity(HttpStatus.GONE, safeMessage(ex));
     }
 
     @ExceptionHandler(ConnectRequestAlreadyApprovedException.class)
-    public ResponseEntity<Map<String, String>> handleConnectRequestAlreadyApproved(final ConnectRequestAlreadyApprovedException ex) {
-        return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("error", safeMessage(ex)));
+    public ResponseEntity<ProblemDetail> handleConnectRequestAlreadyApproved(final ConnectRequestAlreadyApprovedException ex) {
+        return ProblemResponses.entity(HttpStatus.CONFLICT, safeMessage(ex));
     }
 
     @ExceptionHandler(ConnectedAppNotFoundException.class)
-    public ResponseEntity<Map<String, String>> handleConnectedAppNotFound(final ConnectedAppNotFoundException ex) {
-        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", safeMessage(ex)));
+    public ResponseEntity<ProblemDetail> handleConnectedAppNotFound(final ConnectedAppNotFoundException ex) {
+        return ProblemResponses.entity(HttpStatus.NOT_FOUND, safeMessage(ex));
     }
 
     @ExceptionHandler(NotificationChannelNotFoundException.class)
-    public ResponseEntity<Map<String, String>> handleNotificationChannelNotFound(final NotificationChannelNotFoundException ex) {
-        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", safeMessage(ex)));
+    public ResponseEntity<ProblemDetail> handleNotificationChannelNotFound(final NotificationChannelNotFoundException ex) {
+        return ProblemResponses.entity(HttpStatus.NOT_FOUND, safeMessage(ex));
     }
 
     @ExceptionHandler(ChannelValidationException.class)
-    public ResponseEntity<Map<String, String>> handleChannelValidation(final ChannelValidationException ex) {
-        return ResponseEntity.badRequest().body(ex.getFieldErrors());
+    public ResponseEntity<ProblemDetail> handleChannelValidation(final ChannelValidationException ex) {
+        return ProblemResponses.entityWithErrors(HttpStatus.BAD_REQUEST, ex.getFieldErrors());
     }
 
     @ExceptionHandler(FieldValidationException.class)
-    public ResponseEntity<Map<String, String>> handleFieldValidation(final FieldValidationException ex) {
-        return ResponseEntity.badRequest().body(ex.getFieldErrors());
+    public ResponseEntity<ProblemDetail> handleFieldValidation(final FieldValidationException ex) {
+        return ProblemResponses.entityWithErrors(HttpStatus.BAD_REQUEST, ex.getFieldErrors());
     }
 
     @ExceptionHandler(NotificationTestUnavailableException.class)
-    public ResponseEntity<Map<String, String>> handleNotificationTestUnavailable(final NotificationTestUnavailableException ex) {
-        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(Map.of("error", safeMessage(ex)));
+    public ResponseEntity<ProblemDetail> handleNotificationTestUnavailable(final NotificationTestUnavailableException ex) {
+        return ProblemResponses.entity(HttpStatus.SERVICE_UNAVAILABLE, safeMessage(ex));
     }
 
     @ExceptionHandler(CustomDomainNotFoundException.class)
-    public ResponseEntity<Map<String, String>> handleCustomDomainNotFound(final CustomDomainNotFoundException ex) {
-        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", safeMessage(ex)));
+    public ResponseEntity<ProblemDetail> handleCustomDomainNotFound(final CustomDomainNotFoundException ex) {
+        return ProblemResponses.entity(HttpStatus.NOT_FOUND, safeMessage(ex));
     }
 
     @ExceptionHandler(SettingNotFoundException.class)
-    public ResponseEntity<Map<String, String>> handleSettingNotFound(final SettingNotFoundException ex) {
-        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", safeMessage(ex)));
+    public ResponseEntity<ProblemDetail> handleSettingNotFound(final SettingNotFoundException ex) {
+        return ProblemResponses.entity(HttpStatus.NOT_FOUND, safeMessage(ex));
     }
 
     @ExceptionHandler(CampaignNotFoundException.class)
-    public ResponseEntity<Map<String, String>> handleCampaignNotFound(final CampaignNotFoundException ex) {
-        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", safeMessage(ex)));
+    public ResponseEntity<ProblemDetail> handleCampaignNotFound(final CampaignNotFoundException ex) {
+        return ProblemResponses.entity(HttpStatus.NOT_FOUND, safeMessage(ex));
     }
 
     @ExceptionHandler(CustomDomainConflictException.class)
-    public ResponseEntity<Map<String, String>> handleCustomDomainConflict(final CustomDomainConflictException ex) {
-        return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("error", safeMessage(ex)));
+    public ResponseEntity<ProblemDetail> handleCustomDomainConflict(final CustomDomainConflictException ex) {
+        return ProblemResponses.entity(HttpStatus.CONFLICT, safeMessage(ex));
     }
 
     @ExceptionHandler(HumanCheckUnavailableException.class)
-    public ResponseEntity<Map<String, String>> handleHumanCheckUnavailable(final HumanCheckUnavailableException ex) {
-        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(Map.of("error", safeMessage(ex)));
+    public ResponseEntity<ProblemDetail> handleHumanCheckUnavailable(final HumanCheckUnavailableException ex) {
+        return ProblemResponses.entity(HttpStatus.SERVICE_UNAVAILABLE, safeMessage(ex));
     }
 
     @ExceptionHandler(FeatureUnavailableException.class)
-    public ResponseEntity<Map<String, String>> handleFeatureUnavailable(final FeatureUnavailableException ex) {
-        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(Map.of("error", safeMessage(ex)));
+    public ResponseEntity<ProblemDetail> handleFeatureUnavailable(final FeatureUnavailableException ex) {
+        return ProblemResponses.entity(HttpStatus.SERVICE_UNAVAILABLE, safeMessage(ex));
     }
 
     @ExceptionHandler(BulkBlockIncompleteException.class)
-    public ResponseEntity<Map<String, String>> handleBulkBlockIncomplete(final BulkBlockIncompleteException ex) {
-        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(Map.of("error", safeMessage(ex)));
+    public ResponseEntity<ProblemDetail> handleBulkBlockIncomplete(final BulkBlockIncompleteException ex) {
+        return ProblemResponses.entity(HttpStatus.SERVICE_UNAVAILABLE, safeMessage(ex));
     }
 
     @ExceptionHandler(RateLimitExceededException.class)
-    public ResponseEntity<Map<String, String>> handleRateLimitExceeded(final RateLimitExceededException ex) {
-        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS).body(Map.of("error", safeMessage(ex)));
+    public ResponseEntity<ProblemDetail> handleRateLimitExceeded(final RateLimitExceededException ex) {
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                .header(HttpHeaders.RETRY_AFTER, ProblemResponses.retryAfterSeconds(ex.getRetryAfter()))
+                .body(ProblemResponses.of(HttpStatus.TOO_MANY_REQUESTS, safeMessage(ex)));
     }
 
     @ExceptionHandler(NoResourceFoundException.class)
-    public ResponseEntity<Map<String, String>> handleNoResourceFound(final NoResourceFoundException ex) {
+    public ResponseEntity<ProblemDetail> handleNoResourceFound(final NoResourceFoundException ex) {
         log.info("No handler found method={}", ex.getHttpMethod());
-        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", "Not found"));
+        return ProblemResponses.entity(HttpStatus.NOT_FOUND, "Not found");
     }
 
     @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
-    public ResponseEntity<Map<String, String>> handleMethodNotSupported(final HttpRequestMethodNotSupportedException ex) {
+    public ResponseEntity<ProblemDetail> handleMethodNotSupported(final HttpRequestMethodNotSupportedException ex) {
         log.info("Method not supported method={}", ex.getMethod());
         final var supportedMethods = ex.getSupportedHttpMethods();
         return ResponseEntity.status(HttpStatus.METHOD_NOT_ALLOWED)
                 .allow(supportedMethods == null ? new HttpMethod[0] : supportedMethods.toArray(HttpMethod[]::new))
-                .body(Map.of("error", "Method not allowed"));
+                .body(ProblemResponses.of(HttpStatus.METHOD_NOT_ALLOWED, "Method not allowed"));
     }
 
     @ExceptionHandler(HttpMessageNotReadableException.class)
-    public ResponseEntity<Map<String, String>> handleMessageNotReadable(final HttpMessageNotReadableException ex) {
+    public ResponseEntity<ProblemDetail> handleMessageNotReadable(final HttpMessageNotReadableException ex) {
         final var invalidFormat = ExceptionUtils.throwableOfType(ex, InvalidFormatException.class);
         if (invalidFormat != null && invalidFormat.getTargetType() != null && invalidFormat.getTargetType().isEnum()) {
             final var field = fieldOf(invalidFormat.getPath());
             log.info("Unknown value in request body field={}", field);
-            return ResponseEntity.badRequest().body(Map.of("error", StringUtils.capitalize(field) + " must be " + oneOf(invalidFormat.getTargetType())));
+            return ProblemResponses.entity(HttpStatus.BAD_REQUEST, StringUtils.capitalize(field) + " must be " + oneOf(invalidFormat.getTargetType()));
         }
         log.info("Malformed request body");
-        return ResponseEntity.badRequest().body(Map.of("error", "Malformed request body"));
+        return ProblemResponses.entity(HttpStatus.BAD_REQUEST, "Malformed request body");
     }
 
     private static String fieldOf(final List<JacksonException.Reference> path) {
@@ -387,35 +404,34 @@ public class GlobalExceptionHandler {
     }
 
     @ExceptionHandler(MethodArgumentTypeMismatchException.class)
-    public ResponseEntity<Map<String, String>> handleArgumentTypeMismatch(final MethodArgumentTypeMismatchException ex) {
+    public ResponseEntity<ProblemDetail> handleArgumentTypeMismatch(final MethodArgumentTypeMismatchException ex) {
         log.info("Invalid request parameter name={}", ex.getName());
-        return ResponseEntity.badRequest().body(Map.of("error", "Invalid value for " + ex.getName()));
+        return ProblemResponses.entity(HttpStatus.BAD_REQUEST, "Invalid value for " + ex.getName());
     }
 
     @ExceptionHandler(MissingServletRequestParameterException.class)
-    public ResponseEntity<Map<String, String>> handleMissingParameter(final MissingServletRequestParameterException ex) {
+    public ResponseEntity<ProblemDetail> handleMissingParameter(final MissingServletRequestParameterException ex) {
         log.info("Missing request parameter name={}", ex.getParameterName());
-        return ResponseEntity.badRequest().body(Map.of("error", "Missing parameter " + ex.getParameterName()));
+        return ProblemResponses.entity(HttpStatus.BAD_REQUEST, "Missing parameter " + ex.getParameterName());
     }
 
     @ExceptionHandler(HttpMediaTypeNotSupportedException.class)
-    public ResponseEntity<Map<String, String>> handleMediaTypeNotSupported(final HttpMediaTypeNotSupportedException ex) {
+    public ResponseEntity<ProblemDetail> handleMediaTypeNotSupported(final HttpMediaTypeNotSupportedException ex) {
         log.info("Media type not supported contentType={}", ex.getContentType());
         return ResponseEntity.status(HttpStatus.UNSUPPORTED_MEDIA_TYPE)
                 .header(HttpHeaders.ACCEPT, MediaType.toString(ex.getSupportedMediaTypes()))
-                .body(Map.of("error", "Unsupported media type"));
+                .body(ProblemResponses.of(HttpStatus.UNSUPPORTED_MEDIA_TYPE, "Unsupported media type"));
     }
 
     @ExceptionHandler(CommonException.class)
-    public ResponseEntity<Map<String, String>> handleCommonException(final CommonException ex) {
-        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("error", safeMessage(ex)));
+    public ResponseEntity<ProblemDetail> handleCommonException(final CommonException ex) {
+        return ProblemResponses.entity(HttpStatus.BAD_REQUEST, safeMessage(ex));
     }
 
     @ExceptionHandler(Exception.class)
-    public ResponseEntity<Map<String, String>> handleGeneric(final Exception ex) {
+    public ResponseEntity<ProblemDetail> handleGeneric(final Exception ex) {
         log.error("Unhandled exception", ex);
-        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                .body(Map.of("error", "Internal server error"));
+        return ProblemResponses.entity(HttpStatus.INTERNAL_SERVER_ERROR, "Internal server error");
     }
 
 }

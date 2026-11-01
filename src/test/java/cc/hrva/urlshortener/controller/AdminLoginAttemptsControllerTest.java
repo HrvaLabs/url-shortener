@@ -76,7 +76,7 @@ class AdminLoginAttemptsControllerTest {
 
         mockMvc.perform(get(LOGIN_ATTEMPTS).param("sort", "blocked"))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.error").value("Sort must be attempts or key"));
+                .andExpect(jsonPath("$.detail").value("Sort must be attempts or key"));
     }
 
 }

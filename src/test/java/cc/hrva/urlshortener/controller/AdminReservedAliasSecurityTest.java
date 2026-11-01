@@ -161,7 +161,7 @@ class AdminReservedAliasSecurityTest {
 
         mockMvc.perform(asAdmin(get(RESERVED_ALIASES)).param("sort", "createdBy"))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.error").value("Sort must be alias or createdAt"));
+                .andExpect(jsonPath("$.detail").value("Sort must be alias or createdAt"));
     }
 
     @Test
@@ -210,11 +210,11 @@ class AdminReservedAliasSecurityTest {
     @Test
     void invalidReservationsAreBadRequests() throws Exception {
         final var invalid = Map.of(
-                "{\"alias\":\"bad alias!\",\"reason\":\"x\"}", Map.entry("$.alias", "Alias can only contain letters, numbers, hyphens and underscores"),
-                "{\"alias\":\"" + "a".repeat(33) + "\",\"reason\":\"x\"}", Map.entry("$.alias", "Alias must be 32 characters or fewer"),
-                "{\"alias\":\"\",\"reason\":\"x\"}", Map.entry("$.alias", "Alias is required"),
-                "{\"alias\":\"promo\",\"reason\":\"\"}", Map.entry("$.reason", "Reason is required"),
-                "{\"alias\":\"promo\",\"reason\":\"" + "r".repeat(201) + "\"}", Map.entry("$.reason", "Reason must be 200 characters or fewer"));
+                "{\"alias\":\"bad alias!\",\"reason\":\"x\"}", Map.entry("$.errors.alias", "Alias can only contain letters, numbers, hyphens and underscores"),
+                "{\"alias\":\"" + "a".repeat(33) + "\",\"reason\":\"x\"}", Map.entry("$.errors.alias", "Alias must be 32 characters or fewer"),
+                "{\"alias\":\"\",\"reason\":\"x\"}", Map.entry("$.errors.alias", "Alias is required"),
+                "{\"alias\":\"promo\",\"reason\":\"\"}", Map.entry("$.errors.reason", "Reason is required"),
+                "{\"alias\":\"promo\",\"reason\":\"" + "r".repeat(201) + "\"}", Map.entry("$.errors.reason", "Reason must be 200 characters or fewer"));
 
         for (final var reservation : invalid.entrySet()) {
             final var error = reservation.getValue();
@@ -233,7 +233,7 @@ class AdminReservedAliasSecurityTest {
 
         mockMvc.perform(asAdmin(post(RESERVED_ALIASES)).content(BODY))
                 .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.error").value("This alias is already reserved."));
+                .andExpect(jsonPath("$.detail").value("This alias is already reserved."));
     }
 
     @Test
@@ -242,7 +242,7 @@ class AdminReservedAliasSecurityTest {
 
         mockMvc.perform(asAdmin(delete(RESERVED_ALIAS)))
                 .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.error").value("Reserved alias not found"));
+                .andExpect(jsonPath("$.detail").value("Reserved alias not found"));
     }
 
     private static ReservedAliasResponse promo() {

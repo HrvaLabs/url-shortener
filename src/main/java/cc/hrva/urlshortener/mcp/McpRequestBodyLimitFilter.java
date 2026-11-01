@@ -17,16 +17,15 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
-import org.springframework.http.MediaType;
 import org.springframework.web.filter.OncePerRequestFilter;
+import cc.hrva.urlshortener.util.ProblemResponses;
 
 @Slf4j
 public class McpRequestBodyLimitFilter extends OncePerRequestFilter {
 
     public static final int MAX_BODY_BYTES = 64 * 1024;
 
-    private static final String REQUEST_TOO_LARGE = """
-            {"error":"request_too_large"}""";
+    private static final String REQUEST_TOO_LARGE = "The request body is over 64 KB.";
     private static final String NO_STORE = "no-store";
 
     @Override
@@ -38,7 +37,7 @@ public class McpRequestBodyLimitFilter extends OncePerRequestFilter {
     protected void doFilterInternal(final HttpServletRequest request, final HttpServletResponse response, final FilterChain filterChain)
             throws ServletException, IOException {
         if (request.getContentLengthLong() > MAX_BODY_BYTES) {
-            rejectTooLarge(response);
+            rejectTooLarge(request, response);
             return;
         }
 
@@ -49,17 +48,14 @@ public class McpRequestBodyLimitFilter extends OncePerRequestFilter {
                 throw exception;
             }
             response.reset();
-            rejectTooLarge(response);
+            rejectTooLarge(request, response);
         }
     }
 
-    private static void rejectTooLarge(final HttpServletResponse response) throws IOException {
+    private static void rejectTooLarge(final HttpServletRequest request, final HttpServletResponse response) throws IOException {
         log.info("Rejected a request body over the size limit");
-        response.setStatus(HttpStatus.CONTENT_TOO_LARGE.value());
         response.setHeader(HttpHeaders.CACHE_CONTROL, NO_STORE);
-        response.setContentType(MediaType.APPLICATION_JSON_VALUE);
-        response.setCharacterEncoding(StandardCharsets.UTF_8.name());
-        response.getWriter().write(REQUEST_TOO_LARGE);
+        ProblemResponses.write(request, response, HttpStatus.CONTENT_TOO_LARGE, REQUEST_TOO_LARGE);
     }
 
     private static final class BoundedBodyRequest extends HttpServletRequestWrapper {
