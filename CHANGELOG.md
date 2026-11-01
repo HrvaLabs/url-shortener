@@ -4,6 +4,28 @@ All notable changes to hrva.cc — the URL shortener.
 
 ---
 
+## [v2.22] — 2026-11-01
+
+Clearer API answers, real statuses for dead links, and a content security policy for the dashboard.
+
+### 🔗 Links
+- A link that doesn't exist answers 404, and one that is blocked, expired, used up or turned off answers 410, with a short page that says why. Before, they redirected to a page that answered 200.
+- A HEAD request to a short link answers like a visit but counts no click and uses no visit, so link checkers and uptime monitors don't use up a visit limit.
+- A short link with a slash at the end, like hrva.cc/abc/, opens the same link.
+
+### 🔑 API
+- API errors use the standard problem details format (RFC 9457).
+- Every date and time in the API is in UTC with a Z, like 2026-10-30T19:02:13Z. Dates you send without an offset are still read as UTC.
+- A request that needs a signed-in account answers 401 when nobody is signed in, and 403 only when the account isn't allowed. Every 429 says how long to wait in a Retry-After header.
+
+### 🛡️ Security
+- The dashboard sends a content security policy, so pages load scripts only from hrva.cc and Cloudflare Turnstile and can't be framed by other sites.
+
+### 🌐 Site
+- The developers page covers dates, error answers, status codes and what a short link answers.
+
+---
+
 ## [v2.21] — 2026-11-01
 
 An hourly rate limit for API keys instead of a lifetime cap, a key expiry you choose, and keys stored hashed.
