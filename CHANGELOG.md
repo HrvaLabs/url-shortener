@@ -4,6 +4,16 @@ All notable changes to hrva.cc — the URL shortener.
 
 ---
 
+## [v2.26] — 2026-11-01
+
+The blog posts from May rewritten to match what hrva.cc does today, and a plain heading on the blog.
+
+### 🌐 Site
+- The twelve blog posts from May are rewritten so each one matches hrva.cc as it is now: the guides on why to use a URL shortener, link analytics, expiration dates and visit limits, and best practices, and the posts on database migrations, background work, caching, Google Safe Browsing, the audit log, the Angular rewrite, the interface and open source. Each shows the date it was updated, and eight have new titles that say what they cover.
+- The blog's heading is now simply Blog.
+
+---
+
 ## [v2.25] — 2026-11-01
 
 A security page that lists what hrva.cc checks and protects and how to report a vulnerability, security blog posts rewritten for today, and emails signed off with hrva.cc.
