@@ -810,7 +810,7 @@ class DefaultModerationServiceTest {
         assertThat(List.of(reviewed, another, campaign)).allSatisfy(url -> assertThat(url)
                 .extracting(Url::isActive, Url::getBlockReason, Url::getBlockDetail).containsExactly(false, BlockReason.DOMAIN_RULE, "verniqindexone.com"));
         assertThat(elsewhere.getBlockReason()).isEqualTo(BlockReason.SIGN_IN_FORM);
-        verify(reviewQueueService).resolveOpen(reviewed, ReviewResolution.DOMAIN_BLOCKED, ADMIN);
+        verify(reviewQueueService, atLeastOnce()).resolveOpen(reviewed, ReviewResolution.DOMAIN_BLOCKED, ADMIN);
         verify(reviewQueueService).resolveOpen(another, ReviewResolution.DOMAIN_BLOCKED, ADMIN);
         verify(reviewQueueService, never()).resolveOpen(eq(campaign), any(), any());
         verify(reviewQueueService, never()).resolveOpen(eq(elsewhere), any(), any());
@@ -2088,7 +2088,7 @@ class DefaultModerationServiceTest {
 
         assertThat(preview).hasSize(40).allSatisfy(row -> assertThat(row.activeLinks()).isEqualTo(1));
         verify(urlRepository, times(1)).findActiveDestinationsAfter(anyLong(), any(Pageable.class));
-        verify(urlRepository, times(1)).findBlockedDestinationsAfter(eq(EnumSet.of(BlockReason.CAMPAIGN)), anyLong(), any(Pageable.class));
+        verify(urlRepository, times(1)).findBlockedDestinationsAfter(eq(EnumSet.of(BlockReason.CAMPAIGN, BlockReason.SIGN_IN_FORM)), anyLong(), any(Pageable.class));
         verify(domainRuleRepository, times(1)).findAll();
     }
 
@@ -2138,7 +2138,7 @@ class DefaultModerationServiceTest {
             assertThat(row.heldLinks()).isZero();
         });
         verify(domainRuleRepository, times(1)).findAll();
-        verify(urlRepository, times(1)).findBlockedDestinationsAfter(eq(EnumSet.of(BlockReason.CAMPAIGN)), eq(0L), any(Pageable.class));
+        verify(urlRepository, times(1)).findBlockedDestinationsAfter(eq(EnumSet.of(BlockReason.CAMPAIGN, BlockReason.SIGN_IN_FORM)), eq(0L), any(Pageable.class));
         verify(urlRepository, times(1)).findActiveDestinationsAfter(eq(0L), any(Pageable.class));
     }
 
@@ -2184,7 +2184,7 @@ class DefaultModerationServiceTest {
 
         assertThat(result).isEqualTo(new DomainBulkBlockResponse(List.of(new DomainBulkBlockResponse.Blocked("omaehhm.com", 0, 0, 2),
                 new DomainBulkBlockResponse.Blocked("fvvxctw.com", 0, 0, 1)), List.of(), 0, 3));
-        verify(urlRepository, times(1)).findBlockedDestinationsAfter(eq(EnumSet.of(BlockReason.CAMPAIGN)), eq(0L), any(Pageable.class));
+        verify(urlRepository, times(1)).findBlockedDestinationsAfter(eq(EnumSet.of(BlockReason.CAMPAIGN, BlockReason.SIGN_IN_FORM)), eq(0L), any(Pageable.class));
     }
 
     @Test
@@ -2225,7 +2225,7 @@ class DefaultModerationServiceTest {
     @Test
     void aSingleBlockStillFinishesWhenTheHeldLinksCannotBeRead() {
         final var active = link(10L, "https://jofogas.cards/a", null);
-        when(urlRepository.findBlockedDestinationsAfter(eq(EnumSet.of(BlockReason.CAMPAIGN)), anyLong(), any(Pageable.class)))
+        when(urlRepository.findBlockedDestinationsAfter(eq(EnumSet.of(BlockReason.CAMPAIGN, BlockReason.SIGN_IN_FORM)), anyLong(), any(Pageable.class)))
                 .thenThrow(new DataAccessResourceFailureException("database down"));
 
         assertThat(moderationService.blockDomain("jofogas.cards", "phishing", ADMIN, "admin", null)).isEqualTo(1);

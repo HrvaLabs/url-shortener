@@ -132,7 +132,8 @@ public class DefaultModerationService implements ModerationService {
             .thenBy(Sort.Order.desc(CREATED_AT), Sort.Order.desc(ID));
     private static final Set<BlockReason> RESTORED_BY_ALLOW = EnumSet.of(BlockReason.BLOCKLIST, BlockReason.SCAM_SIGNALS, BlockReason.DOMAIN_RULE,
             BlockReason.CAMPAIGN, BlockReason.SIGN_IN_FORM);
-    private static final Set<BlockReason> HELD = EnumSet.of(BlockReason.CAMPAIGN);
+    private static final Set<BlockReason> HELD = EnumSet.of(BlockReason.CAMPAIGN, BlockReason.SIGN_IN_FORM);
+    private static final Set<BlockReason> CAMPAIGN_HOLDS = EnumSet.of(BlockReason.CAMPAIGN);
     private static final int IDS_PER_QUERY = 1_000;
     private static final Duration SECOND_EVICTION_DELAY = Duration.ofSeconds(2);
     private static final int MAX_COLUMN_LENGTH = 255;
@@ -216,7 +217,7 @@ public class DefaultModerationService implements ModerationService {
                 final var rulesBelow = rulesBelow(ruleDomain, scan.rules());
                 final var count = eachLink(scan.idsByDomain().getOrDefault(ruleDomain, List.of()), Long::longValue,
                         id -> blockOnDomain(id, ruleDomain, rulesBelow, performedBy, linksBlocked::add));
-                final var held = convertHeld(scan.heldIdsByDomain().getOrDefault(ruleDomain, List.of()), ruleDomain, rulesBelow);
+                final var held = convertHeld(scan.heldIdsByDomain().getOrDefault(ruleDomain, List.of()), ruleDomain, rulesBelow, performedBy);
                 blocked.add(new DomainBulkBlockResponse.Blocked(ruleDomain, count, domainsDisabled.orElse(0), held));
                 logBulkDomainBlock(ruleDomain, count, domainsDisabled, held, reason, performedBy, via);
             }
@@ -489,9 +490,8 @@ public class DefaultModerationService implements ModerationService {
     private String blockDomainFromReview(final Url url, final String domain, final String performedBy, final String via) {
         final var ruleDomain = domainForReview(url, domain, BLOCKED_BY_DEFAULT);
         final var blocked = blockLinksOn(ruleDomain, null, performedBy, null);
-        final var converted = convertSignInFormHold(url.getId(), BlockReason.DOMAIN_RULE, ruleDomain) ? 1 : 0;
-        return details(via, blocked.links() + converted, field(ACTION, ReviewAction.BLOCK_DOMAIN), field(DOMAIN, ruleDomain),
-                domainsField(blocked.domains()), heldField(blocked.held()));
+        return details(via, blocked.links(), field(ACTION, ReviewAction.BLOCK_DOMAIN), field(DOMAIN, ruleDomain), domainsField(blocked.domains()),
+                heldField(blocked.held()));
     }
 
     private boolean convertSignInFormHold(final long urlId, final BlockReason reason, final String detail) {
@@ -551,10 +551,10 @@ public class DefaultModerationService implements ModerationService {
         final var blocked = new ArrayList<Url>();
         final var count = eachLink(ids, Long::longValue, id -> blockOnDomain(id, domain, rulesBelow, performedBy, blocked::add));
         notifyOwners(blocked);
-        return new Affected(count, domains, convertHeldOn(domain, rulesBelow));
+        return new Affected(count, domains, convertHeldOn(domain, rulesBelow, performedBy));
     }
 
-    private int convertHeldOn(final String domain, final List<DomainRule> rulesBelow) {
+    private int convertHeldOn(final String domain, final List<DomainRule> rulesBelow, final String performedBy) {
         final List<Long> heldIds;
         try {
             heldIds = destinationsOn(domain, afterId -> urlRepository.findBlockedDestinationsAfter(HELD, afterId, FIRST_PAGE)).stream()
@@ -565,21 +565,26 @@ public class DefaultModerationService implements ModerationService {
             log.warn("Reading the held links of a blocked domain failed, continuing domain={}", domain, exception);
             return 0;
         }
-        return convertHeld(heldIds, domain, rulesBelow);
+        return convertHeld(heldIds, domain, rulesBelow, performedBy);
     }
 
-    private int convertHeld(final List<Long> heldIds, final String domain, final List<DomainRule> rulesBelow) {
-        return eachLink(heldIds, Long::longValue, id -> convertHeldLink(id, domain, rulesBelow));
+    private int convertHeld(final List<Long> heldIds, final String domain, final List<DomainRule> rulesBelow, final String performedBy) {
+        return eachLink(heldIds, Long::longValue, id -> convertHeldLink(id, domain, rulesBelow, performedBy));
     }
 
-    private boolean convertHeldLink(final long urlId, final String domain, final List<DomainRule> rulesBelow) {
+    private boolean convertHeldLink(final long urlId, final String domain, final List<DomainRule> rulesBelow, final String performedBy) {
         final var converted = Optional.ofNullable(transactionOperations.execute(status -> urlRepository.findById(urlId)
-                .filter(url -> !url.isActive() && url.getBlockReason() == BlockReason.CAMPAIGN && isBlockedBy(domain, rulesBelow, url.getLongUrl()))
+                .filter(url -> !url.isActive() && HELD.contains(url.getBlockReason()) && isBlockedBy(domain, rulesBelow, url.getLongUrl()))
                 .map(url -> {
+                    final var heldForASignInForm = url.getBlockReason() == BlockReason.SIGN_IN_FORM;
                     url.setBlockReason(BlockReason.DOMAIN_RULE);
                     url.setBlockDetail(StringUtils.abbreviate(domain, MAX_COLUMN_LENGTH));
                     url.setBlockedAt(LocalDateTime.now());
-                    return urlRepository.save(url);
+                    final var saved = urlRepository.save(url);
+                    if (heldForASignInForm) {
+                        reviewQueueService.resolveOpen(saved, ReviewResolution.DOMAIN_BLOCKED, performedBy);
+                    }
+                    return saved;
                 })
                 .orElse(null)));
         converted.ifPresent(url -> {
@@ -772,7 +777,7 @@ public class DefaultModerationService implements ModerationService {
         if (urlIds.isEmpty()) {
             return 0;
         }
-        return eachLink(urlRepository.findBlockedDestinationsByIdIn(HELD, urlIds), LinkDestination::id, this::restoreHoldUnlessStillBlocked);
+        return eachLink(urlRepository.findBlockedDestinationsByIdIn(CAMPAIGN_HOLDS, urlIds), LinkDestination::id, this::restoreHoldUnlessStillBlocked);
     }
 
     private boolean restoreHoldUnlessStillBlocked(final LinkDestination destination) {
