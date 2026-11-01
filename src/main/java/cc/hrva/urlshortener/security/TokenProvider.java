@@ -1,6 +1,7 @@
 package cc.hrva.urlshortener.security;
 
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
+import cc.hrva.urlshortener.model.codebook.Authorities;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.JwtException;
 import io.jsonwebtoken.Jwts;
@@ -11,6 +12,7 @@ import javax.crypto.SecretKey;
 import java.time.Instant;
 import java.util.Arrays;
 import java.util.Date;
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.stream.Collectors;
@@ -59,11 +61,13 @@ public class TokenProvider {
   }
 
   public static Authentication authenticationOf(final cc.hrva.urlshortener.model.User user) {
-    final var authorities = user.getAuthorities().stream()
-                                .map(authority -> new SimpleGrantedAuthority(authority.getName()))
-                                .toList();
+    return new UsernamePasswordAuthenticationToken(user.getEmail(), null, authoritiesOf(user));
+  }
 
-    return new UsernamePasswordAuthenticationToken(user.getEmail(), null, authorities);
+  public static Authentication authenticationOf(final cc.hrva.urlshortener.model.User user, final String token) {
+    final var authorities = authoritiesOf(user);
+
+    return new UsernamePasswordAuthenticationToken(new User(user.getEmail(), "", authorities), token, authorities);
   }
 
   public Authentication getAuthentication(final String token) {
@@ -146,6 +150,12 @@ public class TokenProvider {
     final var principal = new User(claims.getSubject(), "", authorities);
 
     return new UsernamePasswordAuthenticationToken(principal, token, authorities);
+  }
+
+  private static List<SimpleGrantedAuthority> authoritiesOf(final cc.hrva.urlshortener.model.User user) {
+    return Objects.requireNonNullElse(user.getAuthorities(), List.<Authorities>of()).stream()
+               .map(authority -> new SimpleGrantedAuthority(authority.getName()))
+               .toList();
   }
 
   private static Instant signedInAtOf(final Claims claims, final Instant issuedAt) {

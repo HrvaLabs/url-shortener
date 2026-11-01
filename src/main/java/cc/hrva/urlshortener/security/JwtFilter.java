@@ -50,7 +50,7 @@ public class JwtFilter extends GenericFilterBean {
         return;
       }
       if (user.isPresent() && !ended) {
-        SecurityContextHolder.getContext().setAuthentication(authentication);
+        SecurityContextHolder.getContext().setAuthentication(TokenProvider.authenticationOf(user.get(), jwt));
       }
     }
     filterChain.doFilter(servletRequest, servletResponse);

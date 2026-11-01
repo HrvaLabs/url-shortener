@@ -10,6 +10,7 @@ import cc.hrva.urlshortener.mcp.McpResourceServerConfiguration;
 import cc.hrva.urlshortener.mcp.authorization.AuthorizationServerConfiguration;
 import cc.hrva.urlshortener.mcp.bridge.ConnectRequestStore;
 import cc.hrva.urlshortener.model.User;
+import cc.hrva.urlshortener.model.codebook.Authorities;
 import cc.hrva.urlshortener.model.enums.ReviewAction;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
@@ -170,7 +171,7 @@ class AdminReviewQueueSecurityTest {
         lenient().when(tokenProvider.validateToken(token)).thenReturn(true);
         lenient().when(tokenProvider.getAuthentication(token))
                 .thenReturn(UsernamePasswordAuthenticationToken.authenticated(email, null, List.of(new SimpleGrantedAuthority(role))));
-        lenient().when(userRepository.findByEmail(email)).thenReturn(Optional.of(User.builder().email(email).active(true).build()));
+        lenient().when(userRepository.findByEmail(email)).thenReturn(Optional.of(User.builder().email(email).active(true).authorities(List.of(Authorities.builder().name(role).build())).build()));
     }
 
     private static MockHttpServletRequestBuilder bulkResolve(final String token) {

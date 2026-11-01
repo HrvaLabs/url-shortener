@@ -22,6 +22,7 @@ import cc.hrva.urlshortener.mcp.McpResourceServerConfiguration;
 import cc.hrva.urlshortener.mcp.authorization.AuthorizationServerConfiguration;
 import cc.hrva.urlshortener.mcp.bridge.ConnectRequestStore;
 import cc.hrva.urlshortener.model.User;
+import cc.hrva.urlshortener.model.codebook.Authorities;
 import cc.hrva.urlshortener.model.enums.BioAccent;
 import cc.hrva.urlshortener.model.enums.BioAvatarKind;
 import cc.hrva.urlshortener.model.enums.BioIcon;
@@ -167,7 +168,7 @@ class BioPageEndpointSecurityTest {
         lenient().when(tokenProvider.validateToken(USER_TOKEN)).thenReturn(true);
         lenient().when(tokenProvider.getAuthentication(USER_TOKEN))
                 .thenReturn(UsernamePasswordAuthenticationToken.authenticated(USER, null, List.of(new SimpleGrantedAuthority("ROLE_USER"))));
-        lenient().when(userRepository.findByEmail(USER)).thenReturn(Optional.of(User.builder().email(USER).active(true).build()));
+        lenient().when(userRepository.findByEmail(USER)).thenReturn(Optional.of(User.builder().email(USER).active(true).authorities(List.of(Authorities.builder().name("ROLE_USER").build())).build()));
     }
 
     @Test

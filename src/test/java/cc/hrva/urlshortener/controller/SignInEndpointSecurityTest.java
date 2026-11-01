@@ -37,6 +37,7 @@ import cc.hrva.urlshortener.security.OAuth2LoginSuccessHandler;
 import cc.hrva.urlshortener.security.OAuth2LoginUserService;
 import cc.hrva.urlshortener.security.TokenProvider;
 import cc.hrva.urlshortener.model.User;
+import cc.hrva.urlshortener.model.codebook.Authorities;
 import cc.hrva.urlshortener.model.enums.PasskeyKind;
 import cc.hrva.urlshortener.model.enums.TwoStepMethod;
 import cc.hrva.urlshortener.service.AuthService;
@@ -604,7 +605,7 @@ class SignInEndpointSecurityTest {
         when(tokenProvider.getAuthentication(SIGNED_IN_TOKEN))
                 .thenReturn(new UsernamePasswordAuthenticationToken("user@localhost", SIGNED_IN_TOKEN, authorities));
         when(userRepository.findByEmail("user@localhost"))
-                .thenReturn(Optional.of(User.builder().email("user@localhost").active(true).build()));
+                .thenReturn(Optional.of(User.builder().email("user@localhost").active(true).authorities(List.of(Authorities.builder().name("ROLE_USER").build())).build()));
     }
 
     private static RSAKey generateSigningKey() {

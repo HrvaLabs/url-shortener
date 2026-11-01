@@ -1,6 +1,7 @@
 package cc.hrva.urlshortener.security;
 
 import cc.hrva.urlshortener.model.User;
+import cc.hrva.urlshortener.model.codebook.Authorities;
 import cc.hrva.urlshortener.repository.UserRepository;
 import jakarta.servlet.FilterChain;
 import java.time.Instant;
@@ -15,6 +16,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 
@@ -66,6 +68,20 @@ class JwtFilterTest {
 
         assertThat(SecurityContextHolder.getContext().getAuthentication()).isNotNull();
         verify(filterChain).doFilter(request, response);
+    }
+
+    @Test
+    void theSessionHasTheAccountsRolesAndKeepsTheToken() throws Exception {
+        final var admin = new Authorities();
+        admin.setName("ROLE_ADMIN");
+        signedInAs("test@example.com", User.builder().id(1L).active(true).authorities(List.of(admin)).build());
+
+        jwtFilter.doFilter(request, response, filterChain);
+
+        final var authentication = SecurityContextHolder.getContext().getAuthentication();
+        assertThat(authentication.getName()).isEqualTo("test@example.com");
+        assertThat(authentication.getCredentials()).isEqualTo("jwt");
+        assertThat(authentication.getAuthorities()).extracting(GrantedAuthority::getAuthority).containsExactly("ROLE_ADMIN");
     }
 
     @Test
@@ -201,6 +217,7 @@ class JwtFilterTest {
     }
 
     private void signedInAs(final String email, final User user) {
+        user.setEmail(email);
         request.addHeader("Authorization", "Bearer jwt");
         final var authorities = List.of(new SimpleGrantedAuthority("ROLE_USER"));
         final var authentication = new UsernamePasswordAuthenticationToken(email, "jwt", authorities);

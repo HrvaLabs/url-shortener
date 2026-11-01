@@ -52,6 +52,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.options;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
@@ -175,11 +176,36 @@ class SessionEndpointSecurityTest {
                 .andExpect(header().string("Access-Control-Expose-Headers", "Authorization, RateLimit-Limit, RateLimit-Remaining, RateLimit-Reset, Retry-After"));
     }
 
+    @Test
+    void aTokenStillSayingAdminGetsOnlyTheRolesTheAccountHasNow() throws Exception {
+        final var formerAdmin = tokenIssued(Duration.ofMinutes(5), "ROLE_USER,ROLE_ADMIN");
+
+        mockMvc.perform(get("/api/v1/admin/settings").header(JwtFilter.AUTHORIZATION_HEADER, "Bearer " + formerAdmin))
+                .andExpect(status().isForbidden())
+                .andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON));
+        mockMvc.perform(post(END_SESSIONS).header(JwtFilter.AUTHORIZATION_HEADER, "Bearer " + formerAdmin))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void aRoleAddedInTheAccountCountsWithoutANewToken() throws Exception {
+        final var admin = new Authorities();
+        admin.setName("ROLE_ADMIN");
+        ana.setAuthorities(List.of(admin));
+
+        mockMvc.perform(get("/api/v1/admin/settings").header(JwtFilter.AUTHORIZATION_HEADER, "Bearer " + tokenIssued(Duration.ofMinutes(5))))
+                .andExpect(status().isNotFound());
+    }
+
     private static String tokenIssued(final Duration ago) {
+        return tokenIssued(ago, "ROLE_USER");
+    }
+
+    private static String tokenIssued(final Duration ago, final String roles) {
         final var issuedAt = Instant.now().minus(ago);
         return Jwts.builder()
                 .subject(EMAIL)
-                .claim("auth", "ROLE_USER")
+                .claim("auth", roles)
                 .claim("auth_time", issuedAt.getEpochSecond())
                 .issuedAt(Date.from(issuedAt))
                 .expiration(Date.from(Instant.now().plus(Duration.ofHours(9))))

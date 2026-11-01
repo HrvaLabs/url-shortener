@@ -9,6 +9,7 @@ import cc.hrva.urlshortener.mcp.McpResourceServerConfiguration;
 import cc.hrva.urlshortener.mcp.authorization.AuthorizationServerConfiguration;
 import cc.hrva.urlshortener.mcp.bridge.ConnectRequestStore;
 import cc.hrva.urlshortener.model.User;
+import cc.hrva.urlshortener.model.codebook.Authorities;
 import cc.hrva.urlshortener.repository.PasskeyCredentialRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.security.AnyHostIsPrimary;
@@ -43,6 +44,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.Date;
+import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -151,6 +153,7 @@ class OAuthReauthenticationSecurityTest {
                 .authProvider("google")
                 .active(true)
                 .webauthnUserHandle("Xk3vUserHandleOfTheGoogleAccount43Character")
+                .authorities(List.of(Authorities.builder().name("ROLE_USER").build()))
                 .build();
         when(userRepository.findByEmail(GOOGLE_EMAIL)).thenReturn(Optional.of(google));
         when(userService.getUserFromToken()).thenReturn(google);

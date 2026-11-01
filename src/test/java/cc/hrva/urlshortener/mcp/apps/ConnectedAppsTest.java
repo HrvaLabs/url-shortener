@@ -11,6 +11,7 @@ import cc.hrva.urlshortener.mcp.authorization.AuthorizationServerConfiguration;
 import cc.hrva.urlshortener.mcp.bridge.ConnectRequestStore;
 import cc.hrva.urlshortener.mcp.bridge.InMemoryRedis;
 import cc.hrva.urlshortener.model.User;
+import cc.hrva.urlshortener.model.codebook.Authorities;
 import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.security.AnyHostIsPrimary;
 import cc.hrva.urlshortener.security.ClientIpResolver;
@@ -180,8 +181,8 @@ class ConnectedAppsTest {
         jdbcTemplate.update("DELETE FROM oauth2_registered_client");
         redis.backing(redisTemplate);
         accessTokens = new McpAccessTokens(mockMvc);
-        when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.of(User.builder().id(7L).email(EMAIL).active(true).build()));
-        when(userRepository.findByEmail(OTHER_EMAIL)).thenReturn(Optional.of(User.builder().id(8L).email(OTHER_EMAIL).active(true).build()));
+        when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.of(User.builder().id(7L).email(EMAIL).active(true).authorities(List.of(Authorities.builder().name("ROLE_USER").build())).build()));
+        when(userRepository.findByEmail(OTHER_EMAIL)).thenReturn(Optional.of(User.builder().id(8L).email(OTHER_EMAIL).active(true).authorities(List.of(Authorities.builder().name("ROLE_USER").build())).build()));
     }
 
     @Test

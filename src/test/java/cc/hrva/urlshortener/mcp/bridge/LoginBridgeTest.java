@@ -13,6 +13,7 @@ import cc.hrva.urlshortener.mcp.McpAccessTokens;
 import cc.hrva.urlshortener.mcp.McpResourceServerConfiguration;
 import cc.hrva.urlshortener.mcp.authorization.AuthorizationServerConfiguration;
 import cc.hrva.urlshortener.model.User;
+import cc.hrva.urlshortener.model.codebook.Authorities;
 import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.security.AnyHostIsPrimary;
 import cc.hrva.urlshortener.security.ClientIpResolver;
@@ -174,6 +175,7 @@ class LoginBridgeTest {
     private final List<String> locations = new ArrayList<>();
     private McpAccessTokens accessTokens;
     private String appJwt;
+    private User account;
 
     @DynamicPropertySource
     static void signingKey(final DynamicPropertyRegistry registry) {
@@ -185,9 +187,9 @@ class LoginBridgeTest {
         when(rateLimiter.tryAcquire(anyString(), anyInt(), any())).thenReturn(true);
         redis.backing(redisTemplate);
         accessTokens = new McpAccessTokens(mockMvc);
-        final var user = User.builder().email(EMAIL).active(true).build();
-        when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.of(user));
-        when(userService.fetchActiveUserByEmail(EMAIL)).thenReturn(user);
+        account = User.builder().email(EMAIL).active(true).authorities(List.of(Authorities.builder().name("ROLE_USER").build())).build();
+        when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.of(account));
+        when(userService.fetchActiveUserByEmail(EMAIL)).thenReturn(account);
         appJwt = appJwt(EMAIL, "ROLE_USER");
     }
 
@@ -275,6 +277,7 @@ class LoginBridgeTest {
         final var denied = startAuthorization(clientId, REGISTERED_REDIRECT_URI);
         final var adminOnly = bearer(appJwt(EMAIL, "ROLE_ADMIN"));
         final var neitherRole = bearer(appJwt(EMAIL, "ROLE_OTHER"));
+        account.setAuthorities(List.of(Authorities.builder().name("ROLE_OTHER").build()));
 
         assertThat(perform(get(VIEW_PATH, approved.handle())).getStatus()).isEqualTo(401);
         assertThat(perform(post(APPROVE_PATH, approved.handle())).getStatus()).isEqualTo(401);
@@ -283,6 +286,7 @@ class LoginBridgeTest {
         assertThat(perform(post(APPROVE_PATH, approved.handle()).header(HttpHeaders.AUTHORIZATION, neitherRole)).getStatus()).isEqualTo(403);
         assertThat(perform(post(DENY_PATH, denied.handle()).header(HttpHeaders.AUTHORIZATION, neitherRole)).getStatus()).isEqualTo(403);
 
+        account.setAuthorities(List.of(Authorities.builder().name("ROLE_ADMIN").build()));
         final var view = perform(get(VIEW_PATH, approved.handle()).header(HttpHeaders.AUTHORIZATION, adminOnly));
         final var approval = perform(post(APPROVE_PATH, approved.handle()).header(HttpHeaders.AUTHORIZATION, adminOnly));
         final var denial = perform(post(DENY_PATH, denied.handle()).header(HttpHeaders.AUTHORIZATION, adminOnly));

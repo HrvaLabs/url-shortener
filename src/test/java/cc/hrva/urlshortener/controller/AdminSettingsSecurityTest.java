@@ -11,6 +11,7 @@ import cc.hrva.urlshortener.mcp.authorization.AuthorizationServerConfiguration;
 import cc.hrva.urlshortener.mcp.bridge.ConnectRequestStore;
 import cc.hrva.urlshortener.model.AppSetting;
 import cc.hrva.urlshortener.model.User;
+import cc.hrva.urlshortener.model.codebook.Authorities;
 import cc.hrva.urlshortener.model.enums.AuditAction;
 import cc.hrva.urlshortener.repository.AppSettingRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
@@ -260,7 +261,7 @@ class AdminSettingsSecurityTest {
         lenient().when(tokenProvider.validateToken(token)).thenReturn(true);
         lenient().when(tokenProvider.getAuthentication(token))
                 .thenReturn(UsernamePasswordAuthenticationToken.authenticated(email, null, List.of(new SimpleGrantedAuthority(role))));
-        lenient().when(userRepository.findByEmail(email)).thenReturn(Optional.of(User.builder().email(email).active(true).build()));
+        lenient().when(userRepository.findByEmail(email)).thenReturn(Optional.of(User.builder().email(email).active(true).authorities(List.of(Authorities.builder().name(role).build())).build()));
     }
 
     private static MockHttpServletRequestBuilder signedIn(final MockHttpServletRequestBuilder request, final String token) {
