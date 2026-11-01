@@ -2,6 +2,7 @@ package cc.hrva.urlshortener.service;
 
 import cc.hrva.urlshortener.dto.BlocklistSourceDto;
 import cc.hrva.urlshortener.dto.BlocklistSourceResponse;
+import cc.hrva.urlshortener.dto.BlocklistStatus;
 import java.util.List;
 
 public interface BlocklistSourceService {
@@ -14,5 +15,6 @@ public interface BlocklistSourceService {
     void refreshAll();
     void refreshDue();
     void reloadMissing();
+    List<BlocklistStatus> health();
 
 }

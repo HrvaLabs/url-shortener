@@ -2,13 +2,16 @@ package cc.hrva.urlshortener.service.impl;
 
 import cc.hrva.urlshortener.dto.BlocklistSourceDto;
 import cc.hrva.urlshortener.dto.BlocklistSourceResponse;
+import cc.hrva.urlshortener.dto.BlocklistStatus;
 import cc.hrva.urlshortener.exception.BlocklistSourceNotFoundException;
 import cc.hrva.urlshortener.exception.UrlValidationException;
 import cc.hrva.urlshortener.model.BlocklistSource;
 import cc.hrva.urlshortener.model.enums.SourceKind;
 import cc.hrva.urlshortener.repository.BlocklistSourceRepository;
 import cc.hrva.urlshortener.service.BlocklistSourceService;
+import cc.hrva.urlshortener.service.SendingEmailService;
 import cc.hrva.urlshortener.service.blocklist.BlocklistConfigurationChangedEvent;
+import cc.hrva.urlshortener.service.blocklist.BlocklistHealth;
 import cc.hrva.urlshortener.service.blocklist.BlocklistRefresher;
 import cc.hrva.urlshortener.service.blocklist.BlocklistStore;
 import cc.hrva.urlshortener.service.blocklist.RefreshTrigger;
@@ -16,6 +19,7 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -50,6 +54,8 @@ public class DefaultBlocklistSourceService implements BlocklistSourceService {
     private final BlocklistStore blocklistStore;
     private final BlocklistRefresher blocklistRefresher;
     private final ApplicationEventPublisher eventPublisher;
+    private final BlocklistHealth blocklistHealth;
+    private final SendingEmailService sendingEmailService;
 
     @Override
     public List<BlocklistSourceResponse> list() {
@@ -102,6 +108,7 @@ public class DefaultBlocklistSourceService implements BlocklistSourceService {
     public void delete(final long id) {
         blocklistSourceRepository.delete(find(id));
         blocklistStore.remove(id);
+        blocklistHealth.forget(id);
         eventPublisher.publishEvent(new BlocklistConfigurationChangedEvent());
     }
 
@@ -121,6 +128,25 @@ public class DefaultBlocklistSourceService implements BlocklistSourceService {
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public void refreshDue() {
         refreshEnabled(this::isDue);
+        emailStaleSources();
+    }
+
+    @Override
+    public List<BlocklistStatus> health() {
+        return blocklistSourceRepository.findByEnabledTrue().stream()
+                .sorted(Comparator.comparing(BlocklistSource::getName, String.CASE_INSENSITIVE_ORDER))
+                .map(blocklistHealth::statusOf)
+                .toList();
+    }
+
+    private void emailStaleSources() {
+        for (final var source : blocklistSourceRepository.findByEnabledTrue()) {
+            final var status = blocklistHealth.statusOf(source);
+            if (status.stale() && blocklistHealth.claimStaleAlert(source.getId())) {
+                log.warn("Blocklist source {} is stale, last refreshed {}", source.getName(), status.lastRefreshedAt());
+                sendingEmailService.sendBlocklistStaleEmail(status);
+            }
+        }
     }
 
     @Async

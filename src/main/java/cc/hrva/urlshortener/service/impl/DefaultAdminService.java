@@ -2,14 +2,15 @@ package cc.hrva.urlshortener.service.impl;
 
 import org.apache.commons.lang3.StringUtils;
 import cc.hrva.urlshortener.util.ApiDates;
-import cc.hrva.urlshortener.dto.AdminStatsResponse;
 import cc.hrva.urlshortener.dto.AdminStatsResponse.RecentUrl;
+import cc.hrva.urlshortener.dto.AdminStatsResponse;
 import cc.hrva.urlshortener.dto.stats.CacheStats;
 import cc.hrva.urlshortener.dto.stats.RedirectTiming;
 import cc.hrva.urlshortener.repository.ApiKeyRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.service.AdminService;
+import cc.hrva.urlshortener.service.BlocklistSourceService;
 import cc.hrva.urlshortener.service.stats.AppVersion;
 import cc.hrva.urlshortener.service.stats.HealthStatuses;
 import cc.hrva.urlshortener.service.stats.RuntimeMetrics;
@@ -41,6 +42,7 @@ public class DefaultAdminService implements AdminService {
     private final RuntimeMetrics runtimeMetrics;
     private final HealthStatuses healthStatuses;
     private final AppVersion appVersion;
+    private final BlocklistSourceService blocklistSourceService;
 
     @Override
     public byte[] exportAllUrlsAsCsv() {
@@ -100,7 +102,8 @@ public class DefaultAdminService implements AdminService {
                 runtimeMetrics.requestCounts().total(),
                 formatRedirectAvgMs(redirectTimings, redirectCount),
                 formatRedirectMaxMs(redirectTimings, redirectCount),
-                redirectCount);
+                redirectCount,
+                blocklistSourceService.health());
     }
 
     private List<RecentUrl> fetchRecentUrls() {

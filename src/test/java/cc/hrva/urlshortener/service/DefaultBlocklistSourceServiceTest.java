@@ -5,6 +5,7 @@ import cc.hrva.urlshortener.client.PublicHttpFetcher;
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.dto.BlocklistSourceDto;
 import cc.hrva.urlshortener.dto.BlocklistSourceResponse;
+import cc.hrva.urlshortener.dto.BlocklistStatus;
 import cc.hrva.urlshortener.exception.BlocklistSourceNotFoundException;
 import cc.hrva.urlshortener.exception.UrlValidationException;
 import cc.hrva.urlshortener.model.BlocklistSource;
@@ -12,7 +13,9 @@ import cc.hrva.urlshortener.model.enums.BlocklistAction;
 import cc.hrva.urlshortener.model.enums.SourceKind;
 import cc.hrva.urlshortener.repository.BlocklistSourceRepository;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent;
+import cc.hrva.urlshortener.service.SendingEmailService;
 import cc.hrva.urlshortener.service.blocklist.BlocklistConfigurationChangedEvent;
+import cc.hrva.urlshortener.service.blocklist.BlocklistHealth;
 import cc.hrva.urlshortener.service.blocklist.BlocklistMemoryGuard;
 import cc.hrva.urlshortener.service.blocklist.BlocklistParser;
 import cc.hrva.urlshortener.service.blocklist.BlocklistRefresher;
@@ -126,6 +129,12 @@ class DefaultBlocklistSourceServiceTest {
     @Mock
     private ApplicationEventPublisher alertPublisher;
 
+    @Mock
+    private BlocklistHealth blocklistHealth;
+
+    @Mock
+    private SendingEmailService sendingEmailService;
+
     private final Map<Long, BlocklistSource> rows = new HashMap<>();
     private FakeFetcher fetcher;
     private BlocklistSourceService blocklistSourceService;
@@ -135,8 +144,10 @@ class DefaultBlocklistSourceServiceTest {
         fetcher = new FakeFetcher(downloads);
         final var memoryGuard = new BlocklistMemoryGuard(blocklistStore, blocklistSourceRepository, new AppProperties());
         final var refresher = new BlocklistRefresher(blocklistSourceRepository, blocklistStore, memoryGuard, fetcher,
-                new BlocklistParser(), new LinkListParser(), alertPublisher);
-        blocklistSourceService = new DefaultBlocklistSourceService(blocklistSourceRepository, blocklistStore, refresher, eventPublisher);
+                new BlocklistParser(), new LinkListParser(), alertPublisher, blocklistHealth);
+        blocklistSourceService = new DefaultBlocklistSourceService(blocklistSourceRepository, blocklistStore, refresher, eventPublisher,
+                blocklistHealth, sendingEmailService);
+        lenient().when(blocklistHealth.statusOf(any())).thenAnswer(invocation -> healthy(invocation.getArgument(0)));
         lenient().when(blocklistSourceRepository.save(any(BlocklistSource.class))).thenAnswer(invocation -> invocation.getArgument(0));
         lenient().when(blocklistSourceRepository.recordRefresh(anyLong(), any(), any(), any())).thenAnswer(invocation ->
                 recordedOnTheRow(invocation.getArgument(0), invocation.getArgument(1), row -> {
@@ -238,6 +249,83 @@ class DefaultBlocklistSourceServiceTest {
     }
 
     @Test
+    void aRefreshThatLoadsTheListOrFindsItUnchangedIsRecordedAsARefresh() {
+        stored(source(1).build());
+        stored(source(2).url(OTHER).lastSuccessUrl(OTHER).etag(ETAG).build());
+        when(blocklistStore.exists(2)).thenReturn(true);
+        fetcher.serves(MAIN, LIST);
+        fetcher.notModified(OTHER);
+        redisHasRoom();
+
+        blocklistSourceService.refresh(1);
+        blocklistSourceService.refresh(2);
+
+        verify(blocklistHealth).refreshed(1);
+        verify(blocklistHealth).refreshed(2);
+        verify(blocklistHealth, never()).failed(anyLong());
+    }
+
+    @Test
+    void aRefreshThatLoadsNothingCountsAnErrorInARow() {
+        stored(source(1).build());
+        fetcher.fails(MAIN, "HTTP 503");
+
+        blocklistSourceService.refresh(1);
+
+        verify(blocklistHealth).failed(1);
+        verify(blocklistHealth, never()).refreshed(anyLong());
+    }
+
+    @Test
+    void aFallbackThatLoadsCountsAsARefresh() {
+        stored(source(1).fallbackUrls(List.of(FALLBACK)).build());
+        fetcher.fails(MAIN, "HTTP 503");
+        fetcher.serves(FALLBACK, LIST);
+        redisHasRoom();
+
+        blocklistSourceService.refresh(1);
+
+        verify(blocklistHealth).refreshed(1);
+        verify(blocklistHealth, never()).failed(anyLong());
+    }
+
+    @Test
+    void theHourlyRunEmailsTheOwnerOnceWhenAListGoesStale() {
+        final var source = source(1).lastFetchedAt(LocalDateTime.now().minusMinutes(10)).build();
+        final var stale = new BlocklistStatus(1, "HaGeZi Fake", 6, LocalDateTime.now().minusDays(2), 4, true);
+        when(blocklistSourceRepository.findByEnabledTrue()).thenReturn(List.of(source));
+        when(blocklistStore.exists(1)).thenReturn(true);
+        when(blocklistHealth.statusOf(source)).thenReturn(stale);
+        when(blocklistHealth.claimStaleAlert(1)).thenReturn(true, false);
+
+        blocklistSourceService.refreshDue();
+        blocklistSourceService.refreshDue();
+
+        verify(sendingEmailService, times(1)).sendBlocklistStaleEmail(stale);
+    }
+
+    @Test
+    void theHourlyRunSendsNoEmailForAHealthyList() {
+        final var source = source(1).lastFetchedAt(LocalDateTime.now().minusMinutes(10)).build();
+        when(blocklistSourceRepository.findByEnabledTrue()).thenReturn(List.of(source));
+        when(blocklistStore.exists(1)).thenReturn(true);
+
+        blocklistSourceService.refreshDue();
+
+        verify(blocklistHealth, never()).claimStaleAlert(anyLong());
+        verifyNoInteractions(sendingEmailService);
+    }
+
+    @Test
+    void healthListsEachListInUseWithItsLastRefreshAndErrors() {
+        final var first = source(1).build();
+        final var second = source(2).name("Abuse.ch").url(OTHER).build();
+        when(blocklistSourceRepository.findByEnabledTrue()).thenReturn(List.of(first, second));
+
+        assertThat(blocklistSourceService.health()).extracting(BlocklistStatus::name).containsExactly("Abuse.ch", "HaGeZi Fake");
+    }
+
+    @Test
     void aNotModifiedMainUrlClearsTheLastError() {
         final var source = stored(source(1).lastSuccessUrl(MAIN).etag(ETAG).lastError("main: HTTP 503").build());
         when(blocklistStore.exists(1)).thenReturn(true);
@@ -266,6 +354,7 @@ class DefaultBlocklistSourceServiceTest {
 
         verify(blocklistSourceRepository).delete(source);
         verify(blocklistStore).remove(1);
+        verify(blocklistHealth).forget(1);
     }
 
     @Test
@@ -1126,6 +1215,10 @@ class DefaultBlocklistSourceServiceTest {
 
     private static String domains(final int count) {
         return IntStream.range(0, count).mapToObj(index -> "scam-" + index + ".example\n").collect(Collectors.joining());
+    }
+
+    private static BlocklistStatus healthy(final BlocklistSource source) {
+        return new BlocklistStatus(source.getId(), source.getName(), source.getRefreshIntervalHours(), source.getLastFetchedAt(), 0, false);
     }
 
     private void redisHasRoom() {

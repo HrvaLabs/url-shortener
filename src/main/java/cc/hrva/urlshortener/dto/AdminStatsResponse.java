@@ -24,7 +24,8 @@ public record AdminStatsResponse(
         long requestsCount,
         String redirectAvgMs,
         String redirectMaxMs,
-        long redirectCount) {
+        long redirectCount,
+        List<BlocklistStatus> blocklists) {
 
     public record RecentUrl(Long id, String shortUrl, String longUrl, LocalDateTime createDate, long visits, String ownerEmail) {}
 

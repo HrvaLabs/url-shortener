@@ -1,6 +1,7 @@
 package cc.hrva.urlshortener.service.impl;
 
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
+import cc.hrva.urlshortener.dto.BlocklistStatus;
 import cc.hrva.urlshortener.dto.DecisionsDigest;
 import cc.hrva.urlshortener.dto.WeeklyDigest;
 import cc.hrva.urlshortener.dto.domain.DnsRecord;
@@ -51,6 +52,7 @@ import cc.hrva.urlshortener.service.domain.ShortLinks;
 import cc.hrva.urlshortener.util.EmailAddresses;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
+import org.springframework.web.util.HtmlUtils;
 import org.thymeleaf.TemplateEngine;
 import org.thymeleaf.context.Context;
 
@@ -66,6 +68,8 @@ public class DefaultSendingEmailService implements SendingEmailService {
     private static final int LISTED_BLOCKED_LINKS = 20;
     private static final String STATS_PAGE = "/admin/dashboard?days=7";
     private static final String REVIEW_PAGE = "/admin/review";
+    private static final String BLOCKLISTS_PAGE = "/admin/blocklists";
+    private static final DateTimeFormatter STALE_TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm 'UTC'", Locale.ENGLISH);
     private static final String DASHBOARD_PAGE = "/dashboard";
     private static final String NOT_SENT = "Not sent: %s is off";
     private static final String CONSENT_WITHDRAWN = "This person has turned this email off since, so it can't be resent.";
@@ -320,7 +324,7 @@ public class DefaultSendingEmailService implements SendingEmailService {
         ctx.setVariable("site_url", appProperties.getFrontendUrl());
         ctx.setVariable("short_links", shortLinks);
         ctx.setVariable("review_page", frontendPage(REVIEW_PAGE));
-        ctx.setVariable("blocklists_page", frontendPage("/admin/blocklists"));
+        ctx.setVariable("blocklists_page", frontendPage(BLOCKLISTS_PAGE));
 
         final var htmlContent = templateEngine.process("decisions", ctx);
 
@@ -360,6 +364,33 @@ public class DefaultSendingEmailService implements SendingEmailService {
                 .build();
 
         send(email, EmailKind.ADMIN_WEEKLY_DIGEST);
+    }
+
+    @Override
+    @Async
+    public void sendBlocklistStaleEmail(final BlocklistStatus status) {
+        final var blocklistsPage = frontendPage(BLOCKLISTS_PAGE);
+        final var lastRefresh = status.lastRefreshedAt() == null
+                ? "The list has never loaded."
+                : "The last refresh that worked was on " + status.lastRefreshedAt().truncatedTo(ChronoUnit.MINUTES).format(STALE_TIME) + ".";
+        final var errors = status.consecutiveErrors() + " refreshes in a row failed.";
+        final var schedule = "It refreshes every " + status.refreshIntervalHours() + " hours.";
+        final var body = """
+                <p>The blocklist <strong>%s</strong> missed two refreshes. Links are still checked against the copy it loaded last.</p>
+                <p>%s %s %s</p>
+                <p><a href="%s">Open the blocklists</a></p>
+                """.formatted(HtmlUtils.htmlEscape(status.name()), lastRefresh, schedule, errors, blocklistsPage);
+
+        final var email = Email.builder()
+                .sender(appProperties.getEmailSenderAddress())
+                .receivers(new String[]{appProperties.getContactEmail()})
+                .subject("Blocklist %s hasn't refreshed".formatted(status.name()))
+                .plainText("The blocklist %s missed two refreshes. Links are still checked against the copy it loaded last.%n%n%s %s %s%n%nBlocklists: %s"
+                        .formatted(status.name(), lastRefresh, schedule, errors, blocklistsPage))
+                .text(body)
+                .build();
+
+        tryToSendEmail(email);
     }
 
     @Override

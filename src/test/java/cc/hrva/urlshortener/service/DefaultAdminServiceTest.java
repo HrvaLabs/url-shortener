@@ -1,7 +1,8 @@
 package cc.hrva.urlshortener.service;
 
-import cc.hrva.urlshortener.dto.AdminStatsResponse;
 import cc.hrva.urlshortener.dto.AdminStatsResponse.RecentUrl;
+import cc.hrva.urlshortener.dto.AdminStatsResponse;
+import cc.hrva.urlshortener.dto.BlocklistStatus;
 import cc.hrva.urlshortener.dto.stats.CacheStats;
 import cc.hrva.urlshortener.dto.stats.RedirectTiming;
 import cc.hrva.urlshortener.dto.stats.RequestCounts;
@@ -10,11 +11,12 @@ import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.repository.ApiKeyRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
+import cc.hrva.urlshortener.service.BlocklistSourceService;
 import cc.hrva.urlshortener.service.impl.DefaultAdminService;
 import cc.hrva.urlshortener.service.stats.AppVersion;
 import cc.hrva.urlshortener.service.stats.HealthStatuses;
-import cc.hrva.urlshortener.service.stats.RuntimeMetrics;
 import cc.hrva.urlshortener.service.stats.RuntimeMetrics.JvmHeap;
+import cc.hrva.urlshortener.service.stats.RuntimeMetrics;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -53,6 +55,9 @@ class DefaultAdminServiceTest {
     @Mock
     private AppVersion appVersion;
 
+    @Mock
+    private BlocklistSourceService blocklistSourceService;
+
     private AdminService adminService;
 
     @BeforeEach
@@ -69,7 +74,15 @@ class DefaultAdminServiceTest {
         lenient().when(appVersion.current()).thenReturn("2.8.1");
 
         adminService = new DefaultAdminService(userRepository, urlRepository, apiKeyRepository, new MockEnvironment(),
-                runtimeMetrics, healthStatuses, appVersion);
+                runtimeMetrics, healthStatuses, appVersion, blocklistSourceService);
+    }
+
+    @Test
+    void statsListEachBlocklistWithItsLastRefreshErrorsAndStaleness() {
+        final var stale = new BlocklistStatus(1, "HaGeZi Fake", 6, LocalDateTime.of(2026, 10, 30, 8, 0), 4, true);
+        when(blocklistSourceService.health()).thenReturn(List.of(stale));
+
+        assertThat(stats().blocklists()).containsExactly(stale);
     }
 
     @Test

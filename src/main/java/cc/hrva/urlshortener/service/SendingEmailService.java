@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.service;
 
+import cc.hrva.urlshortener.dto.BlocklistStatus;
 import cc.hrva.urlshortener.dto.DecisionsDigest;
 import cc.hrva.urlshortener.dto.WeeklyDigest;
 import cc.hrva.urlshortener.dto.domain.DnsRecord;
@@ -29,6 +30,7 @@ public interface SendingEmailService {
     void sendSignInMethodChangedEmail(User user, String change, LocalDateTime changedAt);
     void sendDecisionsEmailToAdmin(DecisionsDigest digest);
     void sendWeeklyDigestToAdmin(WeeklyDigest digest);
+    void sendBlocklistStaleEmail(BlocklistStatus status);
     void sendDeadLinksEmail(DeadLinksEmail email);
     void sendWeeklySummaryEmail(WeeklySummary summary);
     void sendDomainApprovedEmail(String to, String hostname, DnsRecord record);

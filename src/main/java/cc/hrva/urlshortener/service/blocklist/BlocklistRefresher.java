@@ -53,6 +53,7 @@ public class BlocklistRefresher {
     private final BlocklistParser blocklistParser;
     private final LinkListParser linkListParser;
     private final ApplicationEventPublisher eventPublisher;
+    private final BlocklistHealth blocklistHealth;
     private final Set<Long> refreshing = ConcurrentHashMap.newKeySet();
 
     public BlocklistSource refresh(final BlocklistSource source, final RefreshTrigger trigger) {
@@ -85,11 +86,11 @@ public class BlocklistRefresher {
                         conditional ? source.getEtag() : null, conditional ? source.getLastModified() : null, REQUEST_TIMEOUT);
                 if (fetched.notModified()) {
                     log.info("Blocklist source {} is unchanged ({})", source.getName(), attempt.label());
-                    return new Download(errors, null);
+                    return new Download(errors, null, true);
                 }
                 final var parsed = parse(source.getKind(), fetched.body());
                 refuseShrunkenList(source, parsed, trigger);
-                return new Download(errors, new Loaded(attempt, parsed, fetched));
+                return new Download(errors, new Loaded(attempt, parsed, fetched), false);
             } catch (final RuntimeException exception) {
                 final var message = describe(exception);
                 log.warn("Blocklist source {} could not be loaded ({}): {}", source.getName(), attempt.label(), message);
@@ -97,7 +98,7 @@ public class BlocklistRefresher {
                 errors.add(attempts.size() == 1 ? message : attempt.label() + ": " + message);
             }
         }
-        return new Download(errors, null);
+        return new Download(errors, null, false);
     }
 
     private BlocklistSource record(final BlocklistSource source, final Download download) {
@@ -122,6 +123,7 @@ public class BlocklistRefresher {
                 removeStoredSet(current);
             }
         } else {
+            recordHealth(current.getId(), stored || download.unchanged());
             alertWhenHealthChanged(current.getName(), previousError, lastError, stored);
         }
         return current;
@@ -132,6 +134,14 @@ public class BlocklistRefresher {
             blocklistStore.remove(source.getId());
         } catch (final RuntimeException exception) {
             log.warn("Could not remove the Redis set of blocklist source {} exception={}", source.getName(), exception.getClass().getName());
+        }
+    }
+
+    private void recordHealth(final long sourceId, final boolean refreshed) {
+        if (refreshed) {
+            blocklistHealth.refreshed(sourceId);
+        } else {
+            blocklistHealth.failed(sourceId);
         }
     }
 
@@ -238,6 +248,6 @@ public class BlocklistRefresher {
 
     private record Loaded(Attempt attempt, ParsedBlocklist list, FetchResult fetched) {}
 
-    private record Download(List<String> errors, Loaded loaded) {}
+    private record Download(List<String> errors, Loaded loaded, boolean unchanged) {}
 
 }

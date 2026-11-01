@@ -1,6 +1,7 @@
 package cc.hrva.urlshortener.service;
 
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
+import cc.hrva.urlshortener.dto.BlocklistStatus;
 import cc.hrva.urlshortener.dto.DecisionsDigest;
 import cc.hrva.urlshortener.dto.LinkDigestEntry;
 import cc.hrva.urlshortener.dto.WeeklyDigest;
@@ -378,6 +379,34 @@ class DefaultSendingEmailServiceTest {
         when(emailLogRepository.findById(10L)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> sendingEmailService.resendEmail(10L)).isInstanceOf(EmailLogNotFoundException.class);
+    }
+
+    @Test
+    void theStaleBlocklistEmailGoesToTheOwnerWithTheLastRefreshAndErrors() throws Exception {
+        saveReturnsArgument();
+        final var sent = ArgumentCaptor.forClass(Email.class);
+        doAnswer(invocation -> null).when(emailService).sendEmail(sent.capture(), eq(null));
+
+        configuredEmailService(realTemplateEngine()).sendBlocklistStaleEmail(
+                new BlocklistStatus(1, "HaGeZi <Fake>", 6, LocalDateTime.of(2026, 10, 30, 8, 15), 4, true));
+
+        final var email = sent.getValue();
+        assertThat(email.getReceivers()).containsExactly("support@hrva.cc");
+        assertThat(email.getSubject()).isEqualTo("Blocklist HaGeZi <Fake> hasn't refreshed");
+        assertThat(email.getText()).contains("HaGeZi &lt;Fake&gt;").contains("2026-10-30 08:15").contains("every 6 hours")
+                .contains("4 refreshes in a row failed").contains("https://hrva.cc/admin/blocklists");
+        assertThat(email.getPlainText()).contains("HaGeZi <Fake>").contains("https://hrva.cc/admin/blocklists");
+    }
+
+    @Test
+    void theStaleBlocklistEmailSaysWhenAListNeverLoaded() throws Exception {
+        saveReturnsArgument();
+        final var sent = ArgumentCaptor.forClass(Email.class);
+        doAnswer(invocation -> null).when(emailService).sendEmail(sent.capture(), eq(null));
+
+        configuredEmailService(realTemplateEngine()).sendBlocklistStaleEmail(new BlocklistStatus(1, "OpenPhish", 6, null, 2, true));
+
+        assertThat(sent.getValue().getText()).contains("has never loaded");
     }
 
     @Test
