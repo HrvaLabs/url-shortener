@@ -83,6 +83,7 @@ class DefaultSignInFormCheckServiceTest {
                 case "/cache-trash/" -> send(exchange, 200, DAVIVIENDA_CLONE);
                 case "/password" -> send(exchange, 200, PASSWORD_PAGE);
                 case "/article" -> send(exchange, 200, ARTICLE);
+                case "/huge" -> send(exchange, 200, PASSWORD_PAGE + "<!--" + "x".repeat(600 * 1024) + "-->");
                 case "/moved" -> {
                     exchange.getResponseHeaders().add("Location", "/password");
                     send(exchange, 302, "");
@@ -101,7 +102,7 @@ class DefaultSignInFormCheckServiceTest {
                 : InetAddress.getLoopbackAddress()};
         final var fetcher = ScriptedFetchers.resolvingWith(resolver, LOOPBACK_OR_PUBLIC);
         service = new DefaultSignInFormCheckService(urlRepository,
-                (url, maxBytes, timeout) -> fetcher.fetch(url, maxBytes, PublicHttpFetcherConfiguration.BROWSER_HEADERS, timeout), moderationService);
+                (url, maxBytes, timeout) -> fetcher.fetchFirst(url, maxBytes, PublicHttpFetcherConfiguration.BROWSER_HEADERS, timeout), moderationService);
         when(moderationService.holdForSignInForm(anyLong(), anyString(), anyString())).thenReturn(true);
         logEvents.start();
         serviceLogger.addAppender(logEvents);
@@ -133,6 +134,15 @@ class DefaultSignInFormCheckServiceTest {
         verify(moderationService).holdForSignInForm(LINK_ID, url, "a sign-in field (identificacion)");
         assertThat(headers).containsEntry("Accept-Language", "en-US,en;q=0.9");
         assertThat(headers.get("User-Agent")).startsWith("Mozilla/5.0 (Windows NT 10.0; Win64; x64)");
+    }
+
+    @Test
+    void aPageOverTheCapIsCheckedOnItsFirst512Kilobytes() {
+        final var url = warningPageLink("http://shop.test:" + port + "/huge");
+
+        assertThat(service.check(LINK_ID)).isTrue();
+
+        verify(moderationService).holdForSignInForm(LINK_ID, url, "a password field");
     }
 
     @Test

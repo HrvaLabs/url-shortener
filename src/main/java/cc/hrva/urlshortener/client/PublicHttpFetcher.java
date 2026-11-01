@@ -143,6 +143,15 @@ public class PublicHttpFetcher {
     }
 
     public FetchResult fetch(final String url, final long maxBytes, final Map<String, String> headers, final Duration requestTimeout) {
+        return fetch(url, maxBytes, headers, requestTimeout, false);
+    }
+
+    public FetchResult fetchFirst(final String url, final long maxBytes, final Map<String, String> headers, final Duration requestTimeout) {
+        return fetch(url, maxBytes, headers, requestTimeout, true);
+    }
+
+    private FetchResult fetch(final String url, final long maxBytes, final Map<String, String> headers, final Duration requestTimeout,
+            final boolean firstBytesOnly) {
         final var deadline = System.nanoTime() + requestTimeout.toNanos();
         var target = url;
         for (int redirects = 0; ; redirects++) {
@@ -156,7 +165,7 @@ public class PublicHttpFetcher {
             final var response = send(target, headers, deadline);
             final var location = response.header(HttpHeaders.LOCATION);
             if (!REDIRECT_STATUSES.contains(response.status()) || location.isEmpty()) {
-                return result(response, maxBytes, deadline);
+                return result(response, maxBytes, deadline, firstBytesOnly);
             }
 
             response.close();
@@ -388,7 +397,8 @@ public class PublicHttpFetcher {
         }
     }
 
-    private FetchResult result(final PinnedHttpTransport.Response response, final long maxBytes, final long deadline) {
+    private FetchResult result(final PinnedHttpTransport.Response response, final long maxBytes, final long deadline,
+            final boolean firstBytesOnly) {
         final var etag = response.header(HttpHeaders.ETAG).orElse(null);
         final var lastModified = response.header(HttpHeaders.LAST_MODIFIED).orElse(null);
         if (response.status() == HttpStatus.NOT_MODIFIED.value()) {
@@ -400,23 +410,23 @@ public class PublicHttpFetcher {
             throw new UrlValidationException("HTTP " + response.status());
         }
         try {
-            if (response.longHeader(HttpHeaders.CONTENT_LENGTH).orElse(0) > maxBytes) {
+            if (!firstBytesOnly && response.longHeader(HttpHeaders.CONTENT_LENGTH).orElse(0) > maxBytes) {
                 throw tooLarge(maxBytes);
             }
-            return new FetchResult(false, download(response.body(), maxBytes, deadline), etag, lastModified);
+            return new FetchResult(false, download(response.body(), maxBytes, deadline, firstBytesOnly), etag, lastModified);
         } catch (final RuntimeException exception) {
             response.close();
             throw exception;
         }
     }
 
-    private Path download(final InputStream body, final long maxBytes, final long deadline) {
+    private Path download(final InputStream body, final long maxBytes, final long deadline, final boolean firstBytesOnly) {
         final var file = createTempFile();
         final var timedOut = new AtomicBoolean();
         final var watchdog = CompletableFuture.runAsync(() -> abort(body, timedOut),
                 CompletableFuture.delayedExecutor(Math.max(0, deadline - System.nanoTime()), TimeUnit.NANOSECONDS));
         try (body;
-                final var bounded = BoundedInputStream.builder().setInputStream(body).setMaxCount(maxBytes + 1).get();
+                final var bounded = BoundedInputStream.builder().setInputStream(body).setMaxCount(firstBytesOnly ? maxBytes : maxBytes + 1).get();
                 final var output = Files.newOutputStream(file)) {
             final var size = bounded.transferTo(output);
             if (timedOut.get()) {

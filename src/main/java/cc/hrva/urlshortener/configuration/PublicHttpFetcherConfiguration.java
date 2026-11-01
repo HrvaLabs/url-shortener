@@ -43,7 +43,7 @@ public class PublicHttpFetcherConfiguration {
     @Bean
     public BrowserPageFetcher browserPageFetcher() {
         final var fetcher = new PublicHttpFetcher(PublicHttpFetcher.httpOrHttpsPublicOnly());
-        return (url, maxBytes, timeout) -> fetcher.fetch(url, maxBytes, BROWSER_HEADERS, timeout);
+        return (url, maxBytes, timeout) -> fetcher.fetchFirst(url, maxBytes, BROWSER_HEADERS, timeout);
     }
 
     @Bean

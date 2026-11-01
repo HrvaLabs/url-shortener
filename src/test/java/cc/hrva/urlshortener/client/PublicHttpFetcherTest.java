@@ -387,6 +387,27 @@ class PublicHttpFetcherTest {
         }
     }
 
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void theFirstBytesOfALargerBodyAreKeptWhenAskedFor(final boolean chunked) throws IOException {
+        respond("/page", exchange -> {
+            if (chunked) {
+                sendChunked(exchange, "0123456789ABCDEF");
+            } else {
+                send(exchange, 200, "0123456789ABCDEF");
+            }
+        });
+        final var fetcher = new PublicHttpFetcher(url -> true, downloads, InetAddress::isLoopbackAddress);
+
+        final var result = fetcher.fetchFirst(baseUrl + "/page", 10, Map.of(), TIMEOUT);
+
+        try {
+            assertThat(result.body()).content().isEqualTo("0123456789");
+        } finally {
+            Files.deleteIfExists(result.body());
+        }
+    }
+
     @Test
     void sendsTheHeadersItIsGivenOnEveryHopInsteadOfTheLinkCheckUserAgent() throws IOException {
         final var seen = new CopyOnWriteArrayList<String>();
