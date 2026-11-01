@@ -111,6 +111,20 @@ class JwtFilterTest {
     }
 
     @Test
+    void anEndedTokenOnAPublicEndpointIsJustIgnored() throws Exception {
+        final var user = User.builder().id(1L).active(true).build();
+        user.endSessions(ISSUED_AT.plusSeconds(1));
+        signedInAs("test@example.com", user);
+        request.setRequestURI("/api/v1/public/settings");
+
+        jwtFilter.doFilter(request, response, filterChain);
+
+        assertThat(response.getStatus()).isEqualTo(200);
+        assertThat(SecurityContextHolder.getContext().getAuthentication()).isNull();
+        verify(filterChain).doFilter(request, response);
+    }
+
+    @Test
     void aTokenIssuedInTheSecondTheSessionsEndedStillWorks() throws Exception {
         final var user = User.builder().id(1L).active(true).build();
         user.endSessions(ISSUED_AT.plusMillis(900));

@@ -28,6 +28,8 @@ public class JwtFilter extends GenericFilterBean {
 
   public static final String AUTHORIZATION_HEADER = "Authorization";
   public static final String SESSION_ENDED = "Your session ended. Sign in again.";
+  private static final String PUBLIC_API = "/api/v1/public/";
+  private static final String CHANGELOG = "/api/changelog";
 
   private final TokenProvider tokenProvider;
   private final UserRepository userRepository;
@@ -44,12 +46,13 @@ public class JwtFilter extends GenericFilterBean {
     if (StringUtils.hasText(jwt) && this.tokenProvider.validateToken(jwt)) {
       final var authentication = this.tokenProvider.getAuthentication(jwt);
       final var user = activeUser(authentication.getName());
-      if (user.isPresent() && sessionEnded(user.get(), jwt)) {
+      final var ended = user.isPresent() && sessionEnded(user.get(), jwt);
+      if (ended && !isPublic(httpServletRequest)) {
         log.info("Refused a token issued before the account's sessions ended user id={}", user.get().getId());
         writeSessionEnded(httpServletResponse);
         return;
       }
-      if (user.isPresent()) {
+      if (user.isPresent() && !ended) {
         SecurityContextHolder.getContext().setAuthentication(authentication);
       }
     }
@@ -58,6 +61,11 @@ public class JwtFilter extends GenericFilterBean {
 
   private boolean sessionEnded(final User user, final String jwt) {
     return user.getTokensValidAfter() != null && user.sessionEndedFor(tokenProvider.issuedAt(jwt).orElse(null));
+  }
+
+  private static boolean isPublic(final HttpServletRequest request) {
+    final var path = request.getRequestURI().substring(request.getContextPath().length());
+    return path.startsWith(PUBLIC_API) || CHANGELOG.equals(path);
   }
 
   private Optional<User> activeUser(final String email) {

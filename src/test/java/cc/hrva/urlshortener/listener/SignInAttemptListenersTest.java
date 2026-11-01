@@ -41,4 +41,16 @@ class SignInAttemptListenersTest {
         verifyNoMoreInteractions(loginAttemptService);
     }
 
+
+    @Test
+    void otherAuthenticationsNeverTouchTheSignInCounters() {
+        final var bearer = new org.springframework.security.authentication.TestingAuthenticationToken("mcp-client", "token");
+
+        new AuthenticationSuccessEventListener(loginAttemptService).onApplicationEvent(new AuthenticationSuccessEvent(bearer));
+        new AuthenticationFailureListener(request, clientIpResolver, loginAttemptService).onApplicationEvent(
+                new AuthenticationFailureBadCredentialsEvent(bearer, new BadCredentialsException("Bad credentials")));
+
+        org.mockito.Mockito.verifyNoInteractions(loginAttemptService);
+    }
+
 }
