@@ -62,7 +62,7 @@
 # address and per network (the same 202, then a 429), sign-up answering a taken address like a new one (the note email, nothing created, a new
 # verification link for an unverified one), and an API key as Authorization: Bearer (counted once, two different keys a 400, a JWT still a
 # sign-in).
-# Section 30 checks the v2.23 links work as the admin (section 29 ended the user's sessions): a create answers 201 with Location and
+# Section 31 checks the v2.23 links work as the admin (section 29 ended the user's sessions): a create answers 201 with Location and
 # shortLink (signed in, without an account and with an API key; bulk stays 200); a revoked API key can't be turned on again (no
 # PATCH /activate, PUT active:true or a new expiry is 409) and can be deleted; a visit limit counts every click but not bots or HEAD, and
 # 20 opens at once of a link limited to 5 give exactly 5 redirects and 15 answers of 410; a short link's query is forwarded to the
@@ -2475,7 +2475,7 @@ http -X POST "$BASE/api/v1/urls" -H "Authorization: $BEARER_JWT" -H 'Content-Typ
 expect_eq "$HTTP_STATUS $(header_value ratelimit-limit) $(psql_value "select created_via from url where long_url = 'https://example.com/bearer-jwt';")" \
     "201  WEB" "a JWT as Bearer still signs the request in: a web create, no API key headers"
 
-section "30. Links: 201 with Location"
+section "31. Links: 201 with Location"
 http -X POST "$BASE/api/v1/urls" -H "Authorization: Bearer $ADMIN_JWT" -H 'Content-Type: application/json' -d '{"longUrl":"https://e2e-links.com/created"}'
 CREATED_ALIAS=$(jq -r .shortUrl <<<"$HTTP_BODY")
 show "POST /api/v1/urls -> $HTTP_STATUS Location: $HTTP_LOCATION shortLink: $(jq -r .shortLink <<<"$HTTP_BODY")"
@@ -2496,7 +2496,7 @@ expect_contains "$(header_value access-control-expose-headers)" "Location" "the 
 http -X POST "$BASE/api/v1/urls/bulk" -H "Authorization: Bearer $ADMIN_JWT" -H 'Content-Type: application/json' -d '[{"longUrl":"https://e2e-links.com/bulk"}]'
 expect_eq "$HTTP_STATUS $(jq -r '.[0].shortLink == ("'"$BASE"'/" + .[0].shortUrl)' <<<"$HTTP_BODY")" "200 true" "a bulk create stays 200, each link with its shortLink"
 
-section "30b. API keys: revoking is final"
+section "31b. API keys: revoking is final"
 http -X POST "$BASE/api/v1/api-keys" -H "Authorization: Bearer $ADMIN_JWT" -H 'Content-Type: application/json' -d '{"expiresInDays":30}'
 FINAL_KEY_ID=$(jq -r .id <<<"$HTTP_BODY")
 FINAL_KEY=$(jq -r .key <<<"$HTTP_BODY")
@@ -2516,7 +2516,7 @@ expect_eq "$HTTP_STATUS" 400 "the revoked key creates nothing"
 http -X DELETE "$BASE/api/v1/api-keys/$FINAL_KEY_ID" -H "Authorization: Bearer $ADMIN_JWT"
 expect_eq "$HTTP_STATUS" 204 "the revoked key can be deleted"
 
-section "30c. Visit limits: every click counts, not bots or HEAD, and never more than the limit"
+section "31c. Visit limits: every click counts, not bots or HEAD, and never more than the limit"
 http -X POST "$BASE/api/v1/urls" -H "Authorization: Bearer $ADMIN_JWT" -H 'Content-Type: application/json' \
     -d '{"longUrl":"https://e2e-links.com/limited","shortUrl":"e2e-limit-2","visitLimit":2}'
 expect_eq "$HTTP_STATUS $(jq -r .opens <<<"$HTTP_BODY")" "201 0" "a link with visitLimit 2 starts with no opens"
@@ -2546,7 +2546,7 @@ expect_eq "$(grep -c '^302$' "$WORK/twenty-opens.txt") $(grep -c '^410$' "$WORK/
     "20 opens at once of a link limited to 5: exactly 5 redirects and 15 answers of 410"
 expect_eq "$(psql_value "select opens || ',' || active from url where short_url = 'e2e-limit-5';")" "5,false" "opens stopped at 5 and the link is off"
 
-section "30d. Query strings: forwarded to the destination"
+section "31d. Query strings: forwarded to the destination"
 http -X POST "$BASE/api/v1/urls" -H "Authorization: Bearer $ADMIN_JWT" -H 'Content-Type: application/json' \
     -d '{"longUrl":"https://e2e-links.com/q?id=7#top","shortUrl":"e2e-query"}'
 expect_eq "$HTTP_STATUS" 201 "a link to a destination with its own query and a fragment"
@@ -2564,7 +2564,7 @@ done
 http -A "$BROWSER_USER_AGENT" "$BASE/e2e-query?qr"
 expect_eq "$HTTP_LOCATION" "https://e2e-links.com/q?id=7#top" "a QR scan alone forwards nothing"
 
-section "30e. Redis down: links without an account and password checks wait, the rest goes on"
+section "31e. Redis down: links without an account and password checks wait, the rest goes on"
 session_login 192.0.2.30 "$USER_EMAIL" "$SESSION_PASSWORD"
 expect_eq "$HTTP_STATUS" 200 "the user signs in while Redis is up"
 DOWN_JWT=$(jq -r .token <<<"$HTTP_BODY")
@@ -2603,7 +2603,7 @@ expect_eq "$HTTP_STATUS" 403 "the 10th wrong one is still 403"
 unlock_e2e_locked 203.0.113.82 secret-pw
 expect_eq "$HTTP_STATUS $(header_value retry-after)" "429 900" "a real limit stays 429 with Retry-After 900"
 
-section "30f. Deny by default: only the listed public routes answer without a sign-in"
+section "31f. Deny by default: only the listed public routes answer without a sign-in"
 for endpoint in "GET /api/v1/urls/export" "GET /api/v1/urls/tags" "GET /api/v1/urls/all" "POST /api/v1/auth/2fa/setup" "GET /actuator" \
         "PUT /e2e-query" "POST /api/v1/public/settings" "GET /api/v1/public/nothing-here" "DELETE /api/v1/urls/1"; do
     http -X "${endpoint%% *}" "$BASE${endpoint#* }"
@@ -2615,8 +2615,14 @@ for endpoint in "/api/v1/public/settings" "/api/changelog" "/.well-known/securit
 done
 http -I "$BASE/api/v1/urls/e2e-query/peek"
 expect_eq "$HTTP_STATUS" 200 "and HEAD of a public GET too"
+http "$BASE/api/v1/urls/e2e-query/peek" -H "Authorization: Bearer $OWNER_KEY"
+expect_eq "$HTTP_STATUS $(header_value ratelimit-limit)" "200 600" "a GET with an API key as Bearer reaches a public route, counted like X-Api-Key"
+http -X POST "$BASE/api/v1/urls" -H "Authorization: Bearer $OWNER_KEY" -H 'Content-Type: application/json' -d '{"longUrl":"https://e2e-links.com/bearer-deny-by-default"}'
+expect_eq "$HTTP_STATUS $(header_value ratelimit-limit)" "201 600" "a create with an API key as Bearer is 201"
+http "$BASE/api/v1/urls" -H "Authorization: Bearer $OWNER_KEY"
+expect_eq "$HTTP_STATUS $(jq -r .detail <<<"$HTTP_BODY")" "401 Sign in to continue." "a key never signs anyone in: GET /api/v1/urls with only a key is 401"
 
-section "30g. Postgres paused: an uncached link answers 503 within seconds, a cached one still redirects"
+section "31g. Postgres paused: an uncached link answers 503 within seconds, a cached one still redirects"
 for alias in e2e-db-cached e2e-db-uncached; do
     http -X POST "$BASE/api/v1/urls" -H "Authorization: Bearer $ADMIN_JWT" -H 'Content-Type: application/json' \
         -d "{\"longUrl\":\"https://e2e-links.com/$alias\",\"shortUrl\":\"$alias\"}"
