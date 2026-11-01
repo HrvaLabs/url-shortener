@@ -13,6 +13,7 @@ A warning before an inactive account is deactivated, and tighter handling of ema
 - If the sign-in counters can't be reached, signing in with a password pauses for a minute instead of going unlimited. The message says when to try again.
 - A password reset link works once and for 1 hour, and only a hash of it is stored. Links sent before this release no longer work; ask for a new one.
 - Setting a new password from a reset link no longer asks for your email. The link already names the account.
+- Asking for a password reset or a new verification email is limited per network and per email address, so nobody can flood an inbox. The answer never says whether an account uses the address.
 
 ### 🔗 Links
 - If the rate limiter is unavailable, password tries on a protected link are paused for a minute instead of left unlimited.

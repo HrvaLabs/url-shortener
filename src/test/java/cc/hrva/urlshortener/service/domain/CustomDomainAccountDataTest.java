@@ -44,6 +44,7 @@ import cc.hrva.urlshortener.service.notification.MutableClock;
 import cc.hrva.urlshortener.service.notification.NotificationAccountData;
 import cc.hrva.urlshortener.service.twostep.AccountLock;
 import cc.hrva.urlshortener.service.inactivity.InactiveAccounts;
+import cc.hrva.urlshortener.service.ratelimit.AccountEmailLimits;
 import com.zaxxer.hikari.HikariDataSource;
 import java.sql.Timestamp;
 import java.time.Duration;
@@ -217,6 +218,9 @@ class CustomDomainAccountDataTest {
 
     @MockitoBean
     private InactiveAccounts inactiveAccounts;
+
+    @MockitoBean
+    private AccountEmailLimits accountEmailLimits;
 
     @MockitoBean
     private ScammerSignalService scammerSignalService;

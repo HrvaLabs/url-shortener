@@ -1,5 +1,9 @@
 package cc.hrva.urlshortener.controller;
 
+import cc.hrva.urlshortener.exception.RateLimitExceededException;
+import cc.hrva.urlshortener.security.ClientIpResolver;
+import cc.hrva.urlshortener.service.ratelimit.AccountEmailLimits;
+import java.time.Duration;
 import cc.hrva.urlshortener.configuration.GlobalExceptionHandler;
 import cc.hrva.urlshortener.dto.*;
 import cc.hrva.urlshortener.service.AuthService;
@@ -25,6 +29,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -54,11 +59,17 @@ class AuthControllerTest {
     @Mock
     private HttpServletRequest request;
 
+    @Mock
+    private ClientIpResolver clientIpResolver;
+
+    @Mock
+    private AccountEmailLimits accountEmailLimits;
+
     private ObjectMapper objectMapper;
 
     @BeforeEach
     void setUp() {
-        this.mockMvc = MockMvcBuilders.standaloneSetup(new AuthController(authService, userService, twoFactorService, twoStepSettingsService, request))
+        this.mockMvc = MockMvcBuilders.standaloneSetup(new AuthController(authService, userService, twoFactorService, twoStepSettingsService, request, clientIpResolver, accountEmailLimits))
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .build();
         this.objectMapper = new ObjectMapper();
@@ -126,6 +137,27 @@ class AuthControllerTest {
     }
 
     @Test
+    void aNetworkOverItsEmailLimitIsToldWhenToTryAgainAndNothingIsLookedUp() throws Exception {
+        when(clientIpResolver.getClientIp(request)).thenReturn("203.0.113.7");
+        doThrow(new RateLimitExceededException("Too many emails asked for from this network. Try again in 42 minutes.", Duration.ofSeconds(2_520)))
+                .when(accountEmailLimits).checkNetwork("203.0.113.7");
+
+        mockMvc.perform(post("/api/v1/auth/password-reset")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"test@example.com\"}"))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(header().string("Retry-After", "2520"))
+                .andExpect(jsonPath("$.detail").value("Too many emails asked for from this network. Try again in 42 minutes."));
+        mockMvc.perform(post("/api/v1/auth/verify-email/resend")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"test@example.com\"}"))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(header().string("Retry-After", "2520"));
+
+        verifyNoInteractions(userService, authService);
+    }
+
+    @Test
     void aPasswordResetTakesTheTokenAloneAndAnswers204WithNoBody() throws Exception {
         mockMvc.perform(post("/api/v1/auth/password-reset/confirm")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -163,6 +195,7 @@ class AuthControllerTest {
                         .content(objectMapper.writeValueAsString(ResendVerificationDto.builder().email("test@example.com").build())))
                 .andExpect(status().isAccepted());
 
+        verify(accountEmailLimits).checkNetwork(any());
         verify(authService).resendVerificationEmail("test@example.com");
     }
 

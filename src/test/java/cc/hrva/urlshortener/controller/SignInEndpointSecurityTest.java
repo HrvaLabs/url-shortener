@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.controller;
 
+import cc.hrva.urlshortener.service.ratelimit.AccountEmailLimits;
 import cc.hrva.urlshortener.configuration.AppConfiguration;
 import cc.hrva.urlshortener.configuration.GlobalExceptionHandler;
 import cc.hrva.urlshortener.configuration.JacksonConfiguration;
@@ -218,6 +219,9 @@ class SignInEndpointSecurityTest {
 
     @MockitoBean
     private SignInService signInService;
+
+    @MockitoBean
+    private AccountEmailLimits accountEmailLimits;
 
     @DynamicPropertySource
     static void signingKey(final DynamicPropertyRegistry registry) {

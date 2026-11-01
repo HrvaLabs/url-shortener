@@ -104,6 +104,7 @@ import tools.jackson.databind.json.JsonMapper;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import cc.hrva.urlshortener.service.inactivity.InactiveAccounts;
+import cc.hrva.urlshortener.service.ratelimit.AccountEmailLimits;
 import org.mockito.ArgumentCaptor;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -220,6 +221,9 @@ class DefaultUserServiceTest {
     @Mock
     private InactiveAccounts inactiveAccounts;
 
+    @Mock
+    private AccountEmailLimits accountEmailLimits;
+
     private DefaultLoginAttemptService loginAttemptService;
 
     @BeforeEach
@@ -236,7 +240,7 @@ class DefaultUserServiceTest {
         return new DefaultUserService(appProperties, reauthentication, urlRepository, userRepository,
                 passwordEncoder, apiKeyRepository, emailLogRepository, resetTokenService,
                 resetTokenRepository, twoFactorRecoveryCodeRepository, passkeyCredentialRepository, bioAccountData, notificationAccountData, customDomainAccountData, userToUserDtoConverter, sendingEmailService,
-                verificationTokenService, verificationTokenRepository, userUpdateDtoToUserConverter, connectedAppsService, scammerSignalService, signInMethodService, signInMethodChangeService, accountLock, publisher, inactiveAccounts);
+                verificationTokenService, verificationTokenRepository, userUpdateDtoToUserConverter, connectedAppsService, scammerSignalService, signInMethodService, signInMethodChangeService, accountLock, publisher, inactiveAccounts, accountEmailLimits);
     }
 
     @Test
@@ -731,12 +735,24 @@ class DefaultUserServiceTest {
         final var user = User.builder().id(1L).email("test@example.com").build();
 
         when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
+        when(accountEmailLimits.allowsEmailTo("test@example.com")).thenReturn(true);
         when(resetTokenService.createTokenForUser(user)).thenReturn("plain-reset-token");
 
         userService.sendPasswordResetLinkToUser(requestDto);
 
         verify(resetTokenService).deactivateActiveResetTokenIfExists(user);
         verify(sendingEmailService).sendEmailForgotPassword(user, "plain-reset-token");
+    }
+
+    @Test
+    void anAddressOverItsEmailLimitGetsNoResetLinkAndKeepsItsEarlierOne() {
+        final var user = User.builder().id(1L).email("test@example.com").build();
+        when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
+        when(accountEmailLimits.allowsEmailTo("test@example.com")).thenReturn(false);
+
+        userService.sendPasswordResetLinkToUser(RequestPasswordResetDto.builder().email("test@example.com").build());
+
+        verifyNoInteractions(resetTokenService, sendingEmailService);
     }
 
     @Test
@@ -748,6 +764,7 @@ class DefaultUserServiceTest {
         userService.sendPasswordResetLinkToUser(requestDto);
 
         verify(resetTokenService, org.mockito.Mockito.never()).deactivateActiveResetTokenIfExists(any());
+        verifyNoInteractions(accountEmailLimits);
     }
 
     @Test

@@ -120,7 +120,7 @@ public final class InMemoryRedis {
         return added ? 1L : 0L;
     }
 
-    private Long fixedWindowIncrement(final RedisScript<?> script, final List<String> keys, final Object[] scriptArguments) {
+    private Object fixedWindowIncrement(final RedisScript<?> script, final List<String> keys, final Object[] scriptArguments) {
         final var source = script.getScriptAsString();
         if (!FIXED_WINDOW_COMMANDS.stream().allMatch(source::contains) || keys.size() != 1 || scriptArguments.length != 1) {
             throw new UnsupportedOperationException("InMemoryRedis only models the fixed-window counter script");
@@ -132,6 +132,9 @@ public final class InMemoryRedis {
                 : new StoredValue(Long.toString(Long.parseLong(current.value()) + 1),
                         current.timeToLive() == null ? window : current.timeToLive()));
 
+        if (List.class.equals(script.getResultType())) {
+            return List.of(Long.parseLong(counter.value()), counter.timeToLive().toMillis());
+        }
         return Long.parseLong(counter.value());
     }
 

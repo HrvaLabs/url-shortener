@@ -33,6 +33,7 @@ import cc.hrva.urlshortener.service.settings.DefaultSettingsTestConfiguration;
 import cc.hrva.urlshortener.service.signin.SignInMethodGuard;
 import cc.hrva.urlshortener.service.twostep.AccountLock;
 import cc.hrva.urlshortener.service.inactivity.InactiveAccounts;
+import cc.hrva.urlshortener.service.ratelimit.AccountEmailLimits;
 import java.util.List;
 import java.util.Set;
 import org.junit.jupiter.api.AfterEach;
@@ -138,6 +139,9 @@ class UserEndpointsWithoutOpenInViewTest {
 
     @MockitoBean
     private InactiveAccounts inactiveAccounts;
+
+    @MockitoBean
+    private AccountEmailLimits accountEmailLimits;
 
     @MockitoBean
     private ScammerSignalService scammerSignalService;

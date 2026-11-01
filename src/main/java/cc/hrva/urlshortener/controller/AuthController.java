@@ -1,10 +1,12 @@
 package cc.hrva.urlshortener.controller;
 
 import cc.hrva.urlshortener.dto.*;
+import cc.hrva.urlshortener.security.ClientIpResolver;
 import cc.hrva.urlshortener.service.AuthService;
 import cc.hrva.urlshortener.service.TwoFactorService;
 import cc.hrva.urlshortener.service.TwoStepSettingsService;
 import cc.hrva.urlshortener.service.UserService;
+import cc.hrva.urlshortener.service.ratelimit.AccountEmailLimits;
 import cc.hrva.urlshortener.util.EmailAddresses;
 import org.springframework.security.access.prepost.PreAuthorize;
 import io.swagger.v3.oas.annotations.Operation;
@@ -30,6 +32,8 @@ public class AuthController {
     private final TwoFactorService twoFactorService;
     private final TwoStepSettingsService twoStepSettingsService;
     private final HttpServletRequest request;
+    private final ClientIpResolver clientIpResolver;
+    private final AccountEmailLimits accountEmailLimits;
 
     @Operation(summary = "Register a new user", description = "Create a new user account with email and password.")
     @ApiResponse(responseCode = "400", description = "Validation error or bad request")
@@ -41,10 +45,12 @@ public class AuthController {
     }
 
     @Operation(summary = "Request password reset", description = "Send a password reset link to the given email address. The answer is the same whether or not an account uses it.")
-    @ApiResponse(responseCode = "202", description = "Accepted; a link valid for 1 hour is emailed if an account uses the address")
+    @ApiResponse(responseCode = "202", description = "Accepted; a link valid for 1 hour is emailed if an account uses the address and it got fewer than 3 account emails in the last hour")
+    @ApiResponse(responseCode = "429", description = "Over 10 requests for account emails from this network in an hour, with Retry-After")
     @PostMapping("/password-reset")
     public ResponseEntity<Void> requestPasswordReset(@Valid @RequestBody final RequestPasswordResetDto dto) {
         log.info("Forgot password controller invoked for {}", EmailAddresses.masked(dto.getEmail()));
+        accountEmailLimits.checkNetwork(clientIpResolver.getClientIp(request));
         userService.sendPasswordResetLinkToUser(dto);
 
         return ResponseEntity.accepted().build();
@@ -71,10 +77,13 @@ public class AuthController {
         return ResponseEntity.noContent().build();
     }
 
-    @Operation(summary = "Resend verification email", description = "Resend the email verification link to the given address.")
+    @Operation(summary = "Resend verification email", description = "Resend the email verification link to the given address. The answer is the same whether or not an unverified account uses it.")
+    @ApiResponse(responseCode = "202", description = "Accepted; a new link is emailed if an unverified account uses the address and it got fewer than 3 account emails in the last hour")
+    @ApiResponse(responseCode = "429", description = "Over 10 requests for account emails from this network in an hour, with Retry-After")
     @PostMapping("/verify-email/resend")
     public ResponseEntity<Void> resendVerificationEmail(@Valid @RequestBody final ResendVerificationDto dto) {
         log.info("Resend verification email controller invoked for {}", EmailAddresses.masked(dto.getEmail()));
+        accountEmailLimits.checkNetwork(clientIpResolver.getClientIp(request));
         authService.resendVerificationEmail(dto.getEmail());
 
         return ResponseEntity.accepted().build();

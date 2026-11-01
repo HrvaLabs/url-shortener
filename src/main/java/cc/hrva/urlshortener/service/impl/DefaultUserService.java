@@ -38,6 +38,7 @@ import cc.hrva.urlshortener.service.ScammerSignalService;
 import cc.hrva.urlshortener.service.SignInMethodChangeService;
 import cc.hrva.urlshortener.service.SignInMethodService;
 import cc.hrva.urlshortener.service.inactivity.InactiveAccounts;
+import cc.hrva.urlshortener.service.ratelimit.AccountEmailLimits;
 import cc.hrva.urlshortener.service.UserService;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent;
 import cc.hrva.urlshortener.service.bio.BioAccountData;
@@ -104,6 +105,7 @@ public class DefaultUserService implements UserService {
     private final AccountLock accountLock;
     private final ApplicationEventPublisher eventPublisher;
     private final InactiveAccounts inactiveAccounts;
+    private final AccountEmailLimits accountEmailLimits;
 
     @Override
     @Transactional
@@ -327,12 +329,14 @@ public class DefaultUserService implements UserService {
     public void sendPasswordResetLinkToUser(final RequestPasswordResetDto requestPasswordResetDto) {
         log.info("Password reset requested email={}", EmailAddresses.masked(requestPasswordResetDto.getEmail()));
 
-        final var user = userRepository.findByEmail(requestPasswordResetDto.getEmail());
-
-        if (user.isPresent()) {
-            resetTokenService.deactivateActiveResetTokenIfExists(user.get());
-            sendingEmailService.sendEmailForgotPassword(user.get(), resetTokenService.createTokenForUser(user.get()));
-        }
+        userRepository.findByEmail(requestPasswordResetDto.getEmail()).ifPresent(user -> {
+            if (!accountEmailLimits.allowsEmailTo(user.getEmail())) {
+                log.info("Password reset email not sent, the address had its account emails for the hour user id={}", user.getId());
+                return;
+            }
+            resetTokenService.deactivateActiveResetTokenIfExists(user);
+            sendingEmailService.sendEmailForgotPassword(user, resetTokenService.createTokenForUser(user));
+        });
     }
 
     @Override

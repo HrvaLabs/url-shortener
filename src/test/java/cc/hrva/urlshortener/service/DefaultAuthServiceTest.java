@@ -14,6 +14,7 @@ import cc.hrva.urlshortener.model.PasskeyCredential;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.repository.PasskeyCredentialRepository;
 import cc.hrva.urlshortener.service.impl.DefaultAuthService;
+import cc.hrva.urlshortener.service.ratelimit.AccountEmailLimits;
 import cc.hrva.urlshortener.service.twostep.TwoStepLockMessage;
 import cc.hrva.urlshortener.validator.UserValidator;
 import java.time.Duration;
@@ -94,12 +95,15 @@ class DefaultAuthServiceTest {
     @Mock
     private PasskeyCredentialRepository passkeyCredentialRepository;
 
+    @Mock
+    private AccountEmailLimits accountEmailLimits;
+
     @BeforeEach
     void setUp() {
         this.authService = new DefaultAuthService(userService, userValidator, signInService, userRepository,
                 clientIpResolver, loginAttemptService, sendingEmailService, twoFactorService,
                 verificationTokenService, authenticationManagerBuilder, userRegisterDtoToUserConverter,
-                new TwoStepLockMessage(passkeyCredentialRepository));
+                new TwoStepLockMessage(passkeyCredentialRepository), accountEmailLimits);
     }
 
     @Test
@@ -346,12 +350,24 @@ class DefaultAuthServiceTest {
         final var token = cc.hrva.urlshortener.model.VerificationToken.builder().id(1L).user(user).build();
 
         when(userRepository.findByEmail("test@example.com")).thenReturn(java.util.Optional.of(user));
+        when(accountEmailLimits.allowsEmailTo("test@example.com")).thenReturn(true);
         when(verificationTokenService.createTokenForUser(user)).thenReturn(token);
 
         authService.resendVerificationEmail("test@example.com");
 
         verify(verificationTokenService).deactivateActiveTokensForUser(user);
         verify(sendingEmailService).sendVerificationEmail(user, token);
+    }
+
+    @Test
+    void anAddressOverItsEmailLimitGetsNoNewVerificationLink() {
+        final var user = User.builder().id(1L).email("test@example.com").emailVerified(false).build();
+        when(userRepository.findByEmail("test@example.com")).thenReturn(java.util.Optional.of(user));
+        when(accountEmailLimits.allowsEmailTo("test@example.com")).thenReturn(false);
+
+        authService.resendVerificationEmail("test@example.com");
+
+        verifyNoInteractions(verificationTokenService, sendingEmailService);
     }
 
     @Test

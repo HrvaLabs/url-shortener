@@ -11,6 +11,7 @@ import cc.hrva.urlshortener.service.SendingEmailService;
 import cc.hrva.urlshortener.service.SignInService;
 import cc.hrva.urlshortener.service.TwoFactorService;
 import cc.hrva.urlshortener.service.VerificationTokenService;
+import cc.hrva.urlshortener.service.ratelimit.AccountEmailLimits;
 import cc.hrva.urlshortener.service.twostep.TwoStepLockMessage;
 import cc.hrva.urlshortener.util.EmailAddresses;
 import cc.hrva.urlshortener.validator.UserValidator;
@@ -48,6 +49,7 @@ public class DefaultAuthService implements AuthService {
     private final AuthenticationManagerBuilder authenticationManagerBuilder;
     private final UserRegisterDtoToUserConverter userRegisterDtoToUserConverter;
     private final TwoStepLockMessage twoStepLockMessage;
+    private final AccountEmailLimits accountEmailLimits;
 
     @Override
     @Transactional
@@ -103,11 +105,15 @@ public class DefaultAuthService implements AuthService {
     public void resendVerificationEmail(final String email) {
         log.info("Verification resend requested email={}", EmailAddresses.masked(email));
         userRepository.findByEmail(email).ifPresent(user -> {
-            if (!Boolean.TRUE.equals(user.getEmailVerified())) {
-                verificationTokenService.deactivateActiveTokensForUser(user);
-                final var token = verificationTokenService.createTokenForUser(user);
-                sendingEmailService.sendVerificationEmail(user, token);
+            if (Boolean.TRUE.equals(user.getEmailVerified())) {
+                return;
             }
+            if (!accountEmailLimits.allowsEmailTo(user.getEmail())) {
+                log.info("Verification email not sent, the address had its account emails for the hour user id={}", user.getId());
+                return;
+            }
+            verificationTokenService.deactivateActiveTokensForUser(user);
+            sendingEmailService.sendVerificationEmail(user, verificationTokenService.createTokenForUser(user));
         });
     }
 

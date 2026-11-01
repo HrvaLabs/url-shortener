@@ -2323,6 +2323,13 @@ signs_in_again() {
 wait_until 20 "password sign-in after the pause" signs_in_again
 ok "once Redis answers again, the same sign-in is 200"
 
+clear_account_email_limits() {
+    docker exec "$REDIS_CONTAINER" redis-cli --scan --pattern 'rate-limit:account-email:*' | while read -r key; do
+        docker exec "$REDIS_CONTAINER" redis-cli del "$key" >/dev/null
+    done
+}
+clear_account_email_limits
+
 echo "  --- password reset tokens: hashed, 1 hour, single use"
 expect_eq "$(psql_value "select exectype from databasechangelog where id = '041-reset-token-hash';")" EXECUTED "041 ran"
 expect_eq "$(psql_value "select count(*) from information_schema.columns where table_name = 'reset_token' and column_name = 'token';")" 0 \
@@ -2348,5 +2355,36 @@ http -X POST "$BASE/api/v1/auth/password-reset/confirm" -H 'Content-Type: applic
 expect_eq "$HTTP_STATUS" 410 "an expired token is refused before the minute job deactivates it"
 session_login 203.0.113.252 "$USER_EMAIL" "$SESSION_PASSWORD"
 expect_eq "$HTTP_STATUS" 200 "the password is still the one the first use set"
+
+echo "  --- account emails: limited per recipient and per network, the same answer either way"
+clear_account_email_limits
+for attempt in 1 2 3; do
+    RESET_TOKEN=$(reset_token_from_mail "$USER_EMAIL" "198.51.100.$((60 + attempt))")
+    [[ ${#RESET_TOKEN} == 43 ]] || fail "reset request $attempt to one address: expected an email with a token"
+done
+ok "three reset requests to one address in an hour, from three networks, each get an email"
+MAILS_BEFORE=$(mails_to "$USER_EMAIL" "$RESET_SUBJECT")
+http -X POST "$BASE/api/v1/auth/password-reset" -H 'CF-Connecting-IP: 198.51.100.64' -H 'Content-Type: application/json' -d "{\"email\":\"$USER_EMAIL\"}"
+expect_eq "$HTTP_STATUS ${#HTTP_BODY}" "202 0" "the fourth answers the same 202"
+http -X POST "$BASE/api/v1/auth/verify-email/resend" -H 'CF-Connecting-IP: 198.51.100.65' -H 'Content-Type: application/json' -d "{\"email\":\"$USER_EMAIL\"}"
+expect_eq "$HTTP_STATUS ${#HTTP_BODY}" "202 0" "a verification resend to a verified address answers 202 too"
+http -X POST "$BASE/api/v1/auth/password-reset" -H 'CF-Connecting-IP: 198.51.100.66' -H 'Content-Type: application/json' -d '{"email":"nobody-at-all@example.com"}'
+expect_eq "$HTTP_STATUS ${#HTTP_BODY}" "202 0" "and so does an address no account uses"
+sleep 3
+expect_eq "$(mails_to "$USER_EMAIL" "$RESET_SUBJECT")" "$MAILS_BEFORE" "but the fourth sent no email"
+for attempt in $(seq 1 10); do
+    http -X POST "$BASE/api/v1/auth/password-reset" -H 'CF-Connecting-IP: 198.51.100.70' -H 'Content-Type: application/json' -d "{\"email\":\"network-$attempt@example.com\"}"
+    [[ $HTTP_STATUS == 202 ]] || fail "reset request $attempt from one network: expected 202, got $HTTP_STATUS"
+done
+ok "ten requests from one network are each 202"
+http -X POST "$BASE/api/v1/auth/verify-email/resend" -H 'CF-Connecting-IP: 198.51.100.70' -H 'Content-Type: application/json' -d '{"email":"network-11@example.com"}'
+RETRY_AFTER=$(header_value retry-after)
+expect_eq "$HTTP_STATUS $(header_value content-type) $(jq -r .detail <<<"$HTTP_BODY")" \
+    "429 application/problem+json Too many emails asked for from this network. Try again in 60 minutes." "the eleventh, a resend, is a 429 problem"
+(( RETRY_AFTER > 3500 && RETRY_AFTER <= 3600 )) || fail "Retry-After for the account email limit: expected 3501 to 3600 seconds, got '$RETRY_AFTER'"
+ok "Retry-After: $RETRY_AFTER"
+expect_eq "$(docker exec "$REDIS_CONTAINER" redis-cli --scan --pattern 'rate-limit:account-email:*' | grep -c -e '@' -e '198\.51\.100' || true)" 0 \
+    "no account email counter holds a plain address or network"
+clear_account_email_limits
 
 section "Done: every step passed"

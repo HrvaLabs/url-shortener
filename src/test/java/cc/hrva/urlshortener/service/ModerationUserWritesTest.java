@@ -29,6 +29,7 @@ import cc.hrva.urlshortener.service.impl.DefaultSendingEmailService;
 import cc.hrva.urlshortener.service.impl.DefaultUserService;
 import cc.hrva.urlshortener.service.twostep.AccountLock;
 import cc.hrva.urlshortener.service.inactivity.InactiveAccounts;
+import cc.hrva.urlshortener.service.ratelimit.AccountEmailLimits;
 import java.sql.Timestamp;
 import java.time.LocalDateTime;
 import java.util.Map;
@@ -169,6 +170,9 @@ class ModerationUserWritesTest {
 
     @MockitoBean
     private InactiveAccounts inactiveAccounts;
+
+    @MockitoBean
+    private AccountEmailLimits accountEmailLimits;
 
     @MockitoBean
     private ScammerSignalService scammerSignalService;
