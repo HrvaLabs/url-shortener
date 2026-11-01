@@ -24,6 +24,7 @@ import cc.hrva.urlshortener.exception.FeatureUnavailableException;
 import cc.hrva.urlshortener.exception.FieldValidationException;
 import cc.hrva.urlshortener.exception.HumanCheckUnavailableException;
 import cc.hrva.urlshortener.exception.InvalidApiKeyException;
+import cc.hrva.urlshortener.exception.LinkClicksUsedUpException;
 import cc.hrva.urlshortener.exception.LastSignInMethodException;
 import cc.hrva.urlshortener.exception.PasskeyNotFoundException;
 import cc.hrva.urlshortener.exception.SignInMethodNotFoundException;
@@ -229,6 +230,11 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(ApiKeyActiveException.class)
     public ResponseEntity<ProblemDetail> handleApiKeyActive(final ApiKeyActiveException ex) {
+        return ProblemResponses.entity(HttpStatus.CONFLICT, safeMessage(ex));
+    }
+
+    @ExceptionHandler(LinkClicksUsedUpException.class)
+    public ResponseEntity<ProblemDetail> handleLinkClicksUsedUp(final LinkClicksUsedUpException ex) {
         return ProblemResponses.entity(HttpStatus.CONFLICT, safeMessage(ex));
     }
 

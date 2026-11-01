@@ -17,6 +17,7 @@ import cc.hrva.urlshortener.dto.UrlSearchDto;
 import cc.hrva.urlshortener.dto.UrlUpdateDto;
 import cc.hrva.urlshortener.dto.UnlockResponse;
 import cc.hrva.urlshortener.exception.FieldValidationException;
+import cc.hrva.urlshortener.exception.LinkClicksUsedUpException;
 import cc.hrva.urlshortener.exception.NoAuthorizationException;
 import cc.hrva.urlshortener.exception.ServiceBusyException;
 import cc.hrva.urlshortener.exception.ShortUrlAlreadyExistsException;
@@ -147,6 +148,7 @@ public class DefaultUrlService implements UrlService {
     private static final String UNLOCK_UNAVAILABLE = "Password checks are paused for a moment. Try again in a minute.";
     private static final Duration LIMITER_RETRY = Duration.ofMinutes(1);
     private static final Duration LINKS_DOWN_RETRY = Duration.ofMinutes(1);
+    private static final String CLICKS_USED_UP = "This link has used all its clicks. Raise its visit limit first.";
     private static final int REDIRECT_DATABASE_SECONDS = 3;
     private static final String ROLE_ADMIN = "ROLE_ADMIN";
     private static final String BLOCKED_WHILE_EDITING = "This link was blocked while you were editing it. Reload and try again.";
@@ -579,6 +581,7 @@ public class DefaultUrlService implements UrlService {
         urlValidator.verifyUserAdminOrOwner(url);
         urlValidator.checkIfUrlNotBlocked(url);
         requireActiveDomain(url);
+        requireClicksLeft(url);
         urlValidator.checkIfShortUrlIsFreeToReactivate(url.domainId(), url.getShortUrl());
         urlValidator.checkIfDestinationNotBlocked(url);
         urlValidator.checkIfUrlSafe(url);
@@ -586,6 +589,7 @@ public class DefaultUrlService implements UrlService {
         return transactionOperations.execute(status -> {
             final var current = reloadUnlessBlockedSince(url, blockAtStart);
             requireActiveDomain(current);
+            requireClicksLeft(current);
             current.setThreatType(null);
             current.setBlockReason(null);
             current.setBlockDetail(null);
@@ -1063,6 +1067,13 @@ public class DefaultUrlService implements UrlService {
 
     private static boolean isExpired(final LocalDateTime expirationDate) {
         return expirationDate != null && LocalDateTime.now().isAfter(expirationDate);
+    }
+
+    private static void requireClicksLeft(final Url url) {
+        if (hasReachedVisitLimit(url.getOpens(), url.getVisitLimit())) {
+            log.info("Activation refused, the link used all its clicks urlId={}", url.getId());
+            throw new LinkClicksUsedUpException(CLICKS_USED_UP);
+        }
     }
 
     private static boolean hasReachedVisitLimit(final Long opens, final Long visitLimit) {

@@ -63,6 +63,7 @@ import java.util.Optional;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.http.MediaType;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.SpringBootConfiguration;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
@@ -86,6 +87,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
@@ -240,6 +242,25 @@ class ReactivateLinkFlowTest {
                 .andExpect(jsonPath("$.active").value(true));
 
         assertThat(jdbcTemplate.queryForObject("select active from url where id = ?", Boolean.class, OWNERS_LINK)).isTrue();
+    }
+
+    @Test
+    void aLinkThatUsedAllItsClicksIsRefusedUntilItsVisitLimitIsRaised() throws Exception {
+        jdbcTemplate.update("update url set visit_limit = 2, opens = 2 where id = ?", OWNERS_LINK);
+
+        mockMvc.perform(patch("/api/v1/urls/{id}/activate", OWNERS_LINK).header(JwtFilter.AUTHORIZATION_HEADER, "Bearer owner-token"))
+                .andExpect(status().isConflict())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+                .andExpect(jsonPath("$.detail").value("This link has used all its clicks. Raise its visit limit first."));
+        mockMvc.perform(patch("/api/v1/urls/{id}/activate", OWNERS_LINK).header(JwtFilter.AUTHORIZATION_HEADER, "Bearer admin-token"))
+                .andExpect(status().isConflict());
+        assertThat(jdbcTemplate.queryForObject("select active from url where id = ?", Boolean.class, OWNERS_LINK)).isFalse();
+
+        jdbcTemplate.update("update url set visit_limit = 5 where id = ?", OWNERS_LINK);
+
+        mockMvc.perform(patch("/api/v1/urls/{id}/activate", OWNERS_LINK).header(JwtFilter.AUTHORIZATION_HEADER, "Bearer owner-token"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.active").value(true));
     }
 
     @Test
