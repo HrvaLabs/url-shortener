@@ -1,4 +1,4 @@
-FROM eclipse-temurin:25-jre AS layers
+FROM --platform=$BUILDPLATFORM eclipse-temurin:25-jre AS layers
 
 WORKDIR /build
 
