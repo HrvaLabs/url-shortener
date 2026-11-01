@@ -5,6 +5,7 @@ import java.net.URI;
 import java.net.UnknownHostException;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Optional;
 import java.util.stream.Stream;
 import org.apache.commons.lang3.StringUtils;
 
@@ -21,16 +22,24 @@ public final class PublicAddresses {
 
     private PublicAddresses() {}
 
-    public static boolean isPublicTarget(final String url) {
+    public static boolean isWebAddressWithoutAPrivateLiteral(final String url) {
         try {
             final var uri = URI.create(url);
             if (!"http".equalsIgnoreCase(uri.getScheme()) && !"https".equalsIgnoreCase(uri.getScheme()) || uri.getHost() == null) {
                 return false;
             }
             final var host = uri.getHost().startsWith("[") ? uri.getHost().substring(1, uri.getHost().length() - 1) : uri.getHost();
-            return arePublic(InetAddress.getAllByName(host));
-        } catch (final IllegalArgumentException | UnknownHostException exception) {
+            return literalOf(host).map(PublicAddresses::isPublicAddress).orElse(true);
+        } catch (final IllegalArgumentException exception) {
             return false;
+        }
+    }
+
+    private static Optional<InetAddress> literalOf(final String host) {
+        try {
+            return Optional.of(InetAddress.ofLiteral(host));
+        } catch (final IllegalArgumentException exception) {
+            return Optional.empty();
         }
     }
 

@@ -108,11 +108,11 @@ public class PublicHttpFetcher {
     }
 
     public static Predicate<String> httpsPublicOnly() {
-        return url -> isHttps(url) && PublicAddresses.isPublicTarget(url);
+        return url -> isHttps(url) && PublicAddresses.isWebAddressWithoutAPrivateLiteral(url);
     }
 
     public static Predicate<String> httpOrHttpsPublicOnly() {
-        return PublicAddresses::isPublicTarget;
+        return PublicAddresses::isWebAddressWithoutAPrivateLiteral;
     }
 
     public List<RedirectHop> followRedirects(final String url, final int maxHops, final Duration budget) {

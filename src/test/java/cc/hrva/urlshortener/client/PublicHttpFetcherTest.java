@@ -2,6 +2,7 @@ package cc.hrva.urlshortener.client;
 
 import cc.hrva.urlshortener.configuration.PublicHttpFetcherConfiguration;
 import cc.hrva.urlshortener.exception.UrlValidationException;
+import cc.hrva.urlshortener.util.PublicAddresses;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpServer;
@@ -505,13 +506,15 @@ class PublicHttpFetcherTest {
         final var port = server.getAddress().getPort();
         respond("/start", exchange -> redirect(exchange, inUtf8("http://ｌｏｃａｌｈｏｓｔ:" + port + "/admin")));
         respond("/admin", exchange -> send(exchange, 200, ""));
-        final var fetcher = loopbackFetcher(url -> url.startsWith(baseUrl) || PublicHttpFetcher.httpOrHttpsPublicOnly().test(url));
+        final var resolved = new CopyOnWriteArrayList<String>();
+        final var fetcher = privateNameFetcher(url -> url.startsWith(baseUrl) || PublicHttpFetcher.httpOrHttpsPublicOnly().test(url), resolved);
 
         final var chain = fetcher.followRedirects(baseUrl + "/start", 5, TIMEOUT);
 
         assertThat(chain).extracting(RedirectHop::original)
                 .containsExactly(baseUrl + "/start", "http://\uff4c\uff4f\uff43\uff41\uff4c\uff48\uff4f\uff53\uff54:" + port + "/admin");
         assertThat(chain).extracting(RedirectHop::normalized).containsExactly(baseUrl + "/start", "http://localhost:" + port + "/admin");
+        assertThat(resolved).containsExactly("localhost");
         assertThat(requestedPaths).containsExactly("/start");
     }
 
@@ -555,12 +558,14 @@ class PublicHttpFetcherTest {
     })
     void aUnicodeSpellingOfAPrivateDestinationIsRefusedByTheGuardInItsAsciiForm(final String destination, final String ascii) {
         final var asked = new CopyOnWriteArrayList<String>();
-        final var fetcher = loopbackFetcher(url -> asked.add(url) && PublicHttpFetcher.httpOrHttpsPublicOnly().test(url));
+        final var resolved = new CopyOnWriteArrayList<String>();
+        final var fetcher = privateNameFetcher(url -> asked.add(url) && PublicHttpFetcher.httpOrHttpsPublicOnly().test(url), resolved);
 
         assertThatThrownBy(() -> fetcher.followRedirects(destination, 5, TIMEOUT))
                 .isInstanceOf(UrlValidationException.class)
                 .hasMessage("not a public address");
         assertThat(asked).containsExactly(ascii);
+        assertThat(resolved).allMatch(host -> ascii.contains("//" + host + "/"));
         assertThat(requestedPaths).isEmpty();
     }
 
@@ -722,6 +727,17 @@ class PublicHttpFetcherTest {
 
     private static PublicHttpFetcher loopbackFetcher(final Predicate<String> policy) {
         return new PublicHttpFetcher(policy, InetAddress::isLoopbackAddress);
+    }
+
+    private static PublicHttpFetcher privateNameFetcher(final Predicate<String> policy, final List<String> resolved) {
+        final Resolver aNameResolvesPrivate = host -> {
+            if (host.equals(InetAddress.getLoopbackAddress().getHostAddress())) {
+                return new InetAddress[] {InetAddress.getLoopbackAddress()};
+            }
+            resolved.add(host);
+            return new InetAddress[] {InetAddress.getByAddress(host, new byte[] {10, 0, 0, 1})};
+        };
+        return new PublicHttpFetcher(policy, aNameResolvesPrivate, address -> address.isLoopbackAddress() || PublicAddresses.isPublicAddress(address));
     }
 
     private PublicHttpFetcher loopbackOnlyFetcher() {

@@ -43,7 +43,7 @@ class PublicAddressesTest {
             "https://[5f00::1]/"
     })
     void refusesReservedAndTunnelledAddresses(final String url) {
-        assertThat(PublicAddresses.isPublicTarget(url)).isFalse();
+        assertThat(PublicAddresses.isWebAddressWithoutAPrivateLiteral(url)).isFalse();
     }
 
     @ParameterizedTest
@@ -60,7 +60,14 @@ class PublicAddressesTest {
             "https://[::ffff:1.1.1.1]/"
     })
     void allowsPublicAddressesNextToTheReservedBlocks(final String url) {
-        assertThat(PublicAddresses.isPublicTarget(url)).isTrue();
+        assertThat(PublicAddresses.isWebAddressWithoutAPrivateLiteral(url)).isTrue();
+    }
+
+    @ParameterizedTest
+    @CsvSource({"https://example.com/, true", "http://localhost:8080/, true", "ftp://1.1.1.1/, false", "file:///etc/passwd, false",
+            "https:///nothing, false", "not a url, false"})
+    void aNameIsLeftToThePinnedConnectionAndOnlyTheSchemeAndHostAreCheckedWithoutALookup(final String url, final boolean expected) {
+        assertThat(PublicAddresses.isWebAddressWithoutAPrivateLiteral(url)).isEqualTo(expected);
     }
 
     @ParameterizedTest

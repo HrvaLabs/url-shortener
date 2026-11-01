@@ -92,6 +92,42 @@ class PublicHttpFetcherPinningTest {
     }
 
     @Test
+    void aResolverThatHangsIsCutOffAtTheDeadlineOnEveryPath() {
+        final Resolver hangs = host -> {
+            try {
+                Thread.sleep(30_000);
+            } catch (final InterruptedException exception) {
+                Thread.currentThread().interrupt();
+            }
+            throw new UnknownHostException(host);
+        };
+        final var deadline = Duration.ofMillis(300);
+        final var fetcher = new PublicHttpFetcher(PublicHttpFetcher.httpOrHttpsPublicOnly(), hangs, PublicAddresses::isPublicAddress);
+        final var httpsFetcher = new PublicHttpFetcher(PublicHttpFetcher.httpsPublicOnly(), hangs, PublicAddresses::isPublicAddress);
+
+        final var started = System.nanoTime();
+        assertThatThrownBy(() -> fetcher.fetch("http://dead-nameserver.example/", 1024, Map.of(), deadline)).hasMessage("timed out");
+        assertThatThrownBy(() -> fetcher.fetchFirst("http://dead-nameserver.example/", 1024, Map.of(), deadline)).hasMessage("timed out");
+        assertThatThrownBy(() -> httpsFetcher.fetch("https://dead-nameserver.example/", 1024, Map.of(), deadline)).hasMessage("timed out");
+        assertThatThrownBy(() -> fetcher.followRedirects("http://dead-nameserver.example/", 3, deadline)).hasMessage("timed out");
+        assertThat(fetcher.probe("http://dead-nameserver.example/", deadline, NO_HOOK)).isEqualTo(new ProbeResult(ProbeOutcome.UNKNOWN, "timeout", null));
+
+        assertThat(Duration.ofNanos(System.nanoTime() - started)).isLessThan(Duration.ofSeconds(4));
+    }
+
+    @Test
+    void aPrivateAddressLiteralIsStillRefusedBeforeAnyLookup() {
+        final Resolver neverAsked = host -> {
+            throw new AssertionError("no lookup for an address literal");
+        };
+        final var fetcher = new PublicHttpFetcher(PublicHttpFetcher.httpOrHttpsPublicOnly(), neverAsked, PublicAddresses::isPublicAddress);
+
+        assertThatThrownBy(() -> fetcher.fetch("http://169.254.169.254/latest/meta-data/", 1024, Map.of(), TIMEOUT)).isInstanceOf(UrlValidationException.class);
+        assertThatThrownBy(() -> fetcher.fetch("http://[::ffff:10.0.0.1]/", 1024, Map.of(), TIMEOUT)).isInstanceOf(UrlValidationException.class);
+        assertThatThrownBy(() -> fetcher.fetch("file:///etc/passwd", 1024, Map.of(), TIMEOUT)).isInstanceOf(UrlValidationException.class);
+    }
+
+    @Test
     void aNameThatRebindsToAPrivateAddressIsNeverRequested() throws IOException {
         final var lookups = new AtomicInteger();
         final Resolver rebinding = host -> new InetAddress[] {lookups.incrementAndGet() == 1 ? InetAddress.getLoopbackAddress() : address("10.0.0.1")};
