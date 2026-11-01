@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.security;
 
+import cc.hrva.urlshortener.service.signin.OAuthSignInCodes;
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.codebook.Authorities;
@@ -82,13 +83,13 @@ class OAuth2SignInWritesTest {
     @BeforeEach
     void handlerOutsideAnyTransaction() {
         final var authoritiesService = mock(AuthoritiesService.class);
-        final var tokenProvider = mock(TokenProvider.class);
+        final var signInCodes = mock(OAuthSignInCodes.class);
         final var appProperties = mock(AppProperties.class);
         when(authoritiesService.getDefaultAuthority()).thenReturn(Authorities.builder().id(1L).name("ROLE_USER").build());
-        when(tokenProvider.createToken(any())).thenReturn("jwt-token");
+        when(signInCodes.create(any(), any())).thenReturn("one-time-code");
         when(appProperties.getFrontendUrl()).thenReturn("http://fe");
         when(appProperties.getUserApiKeySlots()).thenReturn(2L);
-        handler = new OAuth2LoginSuccessHandler(userRepository, authoritiesService, tokenProvider, appProperties,
+        handler = new OAuth2LoginSuccessHandler(userRepository, authoritiesService, signInCodes, appProperties,
                 Validation.buildDefaultValidatorFactory().getValidator(), mock(ApplicationEventPublisher.class),
                 mock(PendingLoginStore.class), mock(TwoStepMethods.class), signInMethodService,
                 SettingsServiceFixtures.defaults(new AppProperties()));
@@ -120,7 +121,7 @@ class OAuth2SignInWritesTest {
         final var response = signIn(MEMBER_EMAIL);
 
         assertThat(concurrentChangeDone).isTrue();
-        assertThat(response.getRedirectedUrl()).startsWith("http://fe/auth/callback?token=jwt-token");
+        assertThat(response.getRedirectedUrl()).startsWith("http://fe/auth/callback?code=one-time-code");
         final var row = jdbcTemplate.queryForMap("select password, two_step_enabled, active, last_login from user_account where id = ?", MEMBER);
         assertThat(row)
                 .containsEntry("PASSWORD", "changed-hash")
@@ -136,7 +137,7 @@ class OAuth2SignInWritesTest {
 
         final var response = signIn(NEWCOMER_EMAIL);
 
-        assertThat(response.getRedirectedUrl()).startsWith("http://fe/auth/callback?token=jwt-token");
+        assertThat(response.getRedirectedUrl()).startsWith("http://fe/auth/callback?code=one-time-code");
         final var row = jdbcTemplate.queryForMap("select id, auth_provider, active, last_login from user_account where email = ?", NEWCOMER_EMAIL);
         assertThat(row).containsEntry("AUTH_PROVIDER", "google").containsEntry("ACTIVE", true);
         assertThat(((Timestamp) row.get("LAST_LOGIN")).toLocalDateTime()).isAfter(startedAt);
@@ -154,7 +155,7 @@ class OAuth2SignInWritesTest {
 
         final var response = signIn(PRE_REGISTERED_EMAIL, "github");
 
-        assertThat(response.getRedirectedUrl()).startsWith("http://fe/auth/callback?token=jwt-token");
+        assertThat(response.getRedirectedUrl()).startsWith("http://fe/auth/callback?code=one-time-code");
         final var row = jdbcTemplate.queryForMap("select password, email_verified, auth_provider from user_account where id = ?", PRE_REGISTERED);
         assertThat(row).containsEntry("EMAIL_VERIFIED", true).containsEntry("AUTH_PROVIDER", "local");
         assertThat((String) row.get("PASSWORD")).isNotEqualTo("pre-registered-hash").isNotBlank();
@@ -212,7 +213,7 @@ class OAuth2SignInWritesTest {
         signInMethodService.turnOn(MEMBER, SignInMethod.GOOGLE);
         final var response = signIn(MEMBER_EMAIL);
 
-        assertThat(response.getRedirectedUrl()).startsWith("http://fe/auth/callback?token=jwt-token");
+        assertThat(response.getRedirectedUrl()).startsWith("http://fe/auth/callback?code=one-time-code");
         final var lastLogin = jdbcTemplate.queryForObject("select last_login from user_account where id = ?", Timestamp.class, MEMBER);
         assertThat(lastLogin.toLocalDateTime()).isAfter(LOADED_LOGIN);
         assertThat(signInMethodsOf(MEMBER)).containsExactly(Map.entry("GOOGLE", lastLogin));

@@ -18,8 +18,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
-import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -47,14 +45,20 @@ public class DefaultSignInService implements SignInService {
         userService.userHasLoggedIn(user, signedInAt);
         signInMethodService.record(user.getId(), method, signedInAt);
 
-        final var token = BEARER_PREFIX + tokenProvider.createToken(authenticationOf(user), validitySeconds(rememberMe));
+        log.info("Signed in user id={}", user.getId());
+
+        return tokenFor(user, rememberMe);
+    }
+
+    @Override
+    public ResponseEntity<JWTTokenDto> tokenFor(final User user, final boolean rememberMe) {
+        final var token = BEARER_PREFIX + tokenProvider.createToken(TokenProvider.authenticationOf(user), validitySeconds(rememberMe));
         final var httpHeaders = new HttpHeaders();
         httpHeaders.add(JwtFilter.AUTHORIZATION_HEADER, token);
         final var jwtTokenDto = JWTTokenDto.builder()
                 .token(token)
                 .user(userToUserDtoConverter.convert(user))
                 .build();
-        log.info("Signed in user id={}", user.getId());
 
         return new ResponseEntity<>(jwtTokenDto, httpHeaders, HttpStatus.OK);
     }
@@ -70,14 +74,6 @@ public class DefaultSignInService implements SignInService {
 
     private long validitySeconds(final boolean rememberMe) {
         return rememberMe ? REMEMBER_ME_VALIDITY_SECONDS : appProperties.getJwtTokenValiditySeconds();
-    }
-
-    private static UsernamePasswordAuthenticationToken authenticationOf(final User user) {
-        final var authorities = user.getAuthorities().stream()
-                .map(authority -> new SimpleGrantedAuthority(authority.getName()))
-                .toList();
-
-        return new UsernamePasswordAuthenticationToken(user.getEmail(), null, authorities);
     }
 
 }

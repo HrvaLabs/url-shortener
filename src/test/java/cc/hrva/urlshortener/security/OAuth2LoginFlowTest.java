@@ -10,6 +10,7 @@ import cc.hrva.urlshortener.model.codebook.Authorities;
 import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.service.AuthoritiesService;
 import cc.hrva.urlshortener.service.SignInMethodService;
+import cc.hrva.urlshortener.service.signin.OAuthSignInCodes;
 import cc.hrva.urlshortener.service.settings.DefaultSettingsTestConfiguration;
 import cc.hrva.urlshortener.service.twostep.PendingLoginStore;
 import cc.hrva.urlshortener.service.twostep.TwoStepMethods;
@@ -102,6 +103,9 @@ class OAuth2LoginFlowTest {
     private TokenProvider tokenProvider;
 
     @MockitoBean
+    private OAuthSignInCodes signInCodes;
+
+    @MockitoBean
     private AuthoritiesService authoritiesService;
 
     @MockitoBean
@@ -127,13 +131,13 @@ class OAuth2LoginFlowTest {
                 .authorities(List.of(Authorities.builder().id(1L).name("ROLE_USER").build()))
                 .build();
         when(userRepository.findByEmail("octocat@example.com")).thenReturn(Optional.of(member));
-        when(tokenProvider.createToken(any())).thenReturn("jwt-token");
+        when(signInCodes.create(any(), any())).thenReturn("one-time-code");
         expectProfileAndEmails("""
                 [{"email": "octocat@example.com", "primary": true, "verified": true, "visibility": null}]""");
 
         returnFrom("github", authorizeAtGitHub())
                 .andExpect(status().isFound())
-                .andExpect(redirectedUrl("http://localhost:3000/auth/callback?token=jwt-token"));
+                .andExpect(redirectedUrl("http://localhost:3000/auth/callback?code=one-time-code"));
 
         providers.verify();
         verify(userRepository).recordLastLogin(eq(7L), any());
@@ -150,7 +154,7 @@ class OAuth2LoginFlowTest {
 
         providers.verify();
         verify(userRepository, never()).findByEmail(anyString());
-        verifyNoInteractions(tokenProvider);
+        verifyNoInteractions(signInCodes);
     }
 
     @Test
@@ -165,7 +169,7 @@ class OAuth2LoginFlowTest {
                 .andExpect(redirectedUrl("http://localhost:3000/auth/callback?error=provider_error"));
 
         providers.verify();
-        verifyNoInteractions(tokenProvider);
+        verifyNoInteractions(signInCodes);
     }
 
     @Test
@@ -179,7 +183,7 @@ class OAuth2LoginFlowTest {
                 .andExpect(status().isFound())
                 .andExpect(redirectedUrl("http://localhost:3000/auth/callback?error=provider_error"));
 
-        verifyNoInteractions(tokenProvider, userRepository);
+        verifyNoInteractions(signInCodes, userRepository);
     }
 
     @Test
@@ -188,7 +192,7 @@ class OAuth2LoginFlowTest {
                 .authorities(List.of(Authorities.builder().id(1L).name("ROLE_USER").build()))
                 .build();
         when(userRepository.findByEmail("someone@gmail.com")).thenReturn(Optional.of(member));
-        when(tokenProvider.createToken(any())).thenReturn("jwt-token");
+        when(signInCodes.create(any(), any())).thenReturn("one-time-code");
         expectGoogleUserInfo(true);
         final var authorization = authorize("google");
         assertThat(queryParameter(authorization, "scope")).isEqualTo("profile email");
@@ -196,7 +200,7 @@ class OAuth2LoginFlowTest {
 
         returnFrom("google", authorization)
                 .andExpect(status().isFound())
-                .andExpect(redirectedUrl("http://localhost:3000/auth/callback?token=jwt-token"));
+                .andExpect(redirectedUrl("http://localhost:3000/auth/callback?code=one-time-code"));
 
         providers.verify();
     }

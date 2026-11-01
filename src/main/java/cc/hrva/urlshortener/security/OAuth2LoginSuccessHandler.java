@@ -13,6 +13,7 @@ import cc.hrva.urlshortener.service.SettingsService;
 import cc.hrva.urlshortener.service.SignInMethodService;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent;
 import cc.hrva.urlshortener.service.settings.SettingKey;
+import cc.hrva.urlshortener.service.signin.OAuthSignInCodes;
 import cc.hrva.urlshortener.service.twostep.PendingLoginStore;
 import cc.hrva.urlshortener.service.twostep.TwoStepMethods;
 import cc.hrva.urlshortener.util.EmailAddresses;
@@ -29,9 +30,7 @@ import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
-import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
-import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.oauth2.client.authentication.OAuth2AuthenticationToken;
 import org.springframework.security.oauth2.core.user.OAuth2User;
 import org.springframework.security.web.authentication.AuthenticationSuccessHandler;
@@ -48,10 +47,11 @@ public class OAuth2LoginSuccessHandler implements AuthenticationSuccessHandler {
     private static final String GOOGLE_EMAIL_UNVERIFIED = "google_email_unverified";
     private static final String PROVIDER_TURNED_OFF = "provider_turned_off";
     private static final String PROVIDER_DISABLED = "provider_disabled";
+    private static final String SIGN_IN_UNAVAILABLE = "sign_in_unavailable";
 
     private final UserRepository userRepository;
     private final AuthoritiesService authoritiesService;
-    private final TokenProvider tokenProvider;
+    private final OAuthSignInCodes signInCodes;
     private final AppProperties appProperties;
     private final Validator validator;
     private final ApplicationEventPublisher eventPublisher;
@@ -63,7 +63,7 @@ public class OAuth2LoginSuccessHandler implements AuthenticationSuccessHandler {
     public OAuth2LoginSuccessHandler(
             final UserRepository userRepository,
             final AuthoritiesService authoritiesService,
-            final TokenProvider tokenProvider,
+            final OAuthSignInCodes signInCodes,
             final AppProperties appProperties,
             final Validator validator,
             final ApplicationEventPublisher eventPublisher,
@@ -73,7 +73,7 @@ public class OAuth2LoginSuccessHandler implements AuthenticationSuccessHandler {
             final SettingsService settingsService) {
         this.userRepository = userRepository;
         this.authoritiesService = authoritiesService;
-        this.tokenProvider = tokenProvider;
+        this.signInCodes = signInCodes;
         this.appProperties = appProperties;
         this.validator = validator;
         this.eventPublisher = eventPublisher;
@@ -157,23 +157,21 @@ public class OAuth2LoginSuccessHandler implements AuthenticationSuccessHandler {
             return;
         }
 
+        final String code;
+        try {
+            code = signInCodes.create(user.getId(), method.orElse(null));
+        } catch (final SignInUnavailableException exception) {
+            log.warn("OAuth2 login code unavailable user id={}", user.getId());
+            response.sendRedirect(appProperties.getFrontendUrl() + "/auth/callback?error=" + SIGN_IN_UNAVAILABLE);
+            return;
+        }
+
         final var signedInAt = LocalDateTime.now();
         userRepository.recordLastLogin(user.getId(), signedInAt);
         method.ifPresent(signInMethod -> signInMethodService.record(user.getId(), signInMethod, signedInAt));
 
-        final var springAuth = new UsernamePasswordAuthenticationToken(
-                user.getEmail(), null,
-                user.getAuthorities().stream()
-                        .map(a -> new SimpleGrantedAuthority(a.getName()))
-                        .toList());
-
-        final var jwt = tokenProvider.createToken(springAuth);
-        final var redirectUrl = String.format("%s/auth/callback?token=%s",
-                appProperties.getFrontendUrl(),
-                URLEncoder.encode(jwt, StandardCharsets.UTF_8));
-
         log.info("OAuth2 login success email={} user id={}", EmailAddresses.masked(email), user.getId());
-        response.sendRedirect(redirectUrl);
+        response.sendRedirect(appProperties.getFrontendUrl() + "/auth/callback?code=" + URLEncoder.encode(code, StandardCharsets.UTF_8));
     }
 
     private void redirectToSecondStep(final HttpServletResponse response, final User user, final SignInMethod method) throws IOException {

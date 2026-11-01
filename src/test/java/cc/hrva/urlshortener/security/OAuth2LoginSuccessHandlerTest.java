@@ -18,6 +18,7 @@ import cc.hrva.urlshortener.service.SignInMethodService;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent;
 import cc.hrva.urlshortener.service.impl.DefaultSettingsService;
 import cc.hrva.urlshortener.service.settings.SettingKey;
+import cc.hrva.urlshortener.service.signin.OAuthSignInCodes;
 import cc.hrva.urlshortener.service.settings.SettingsServiceFixtures;
 import cc.hrva.urlshortener.service.twostep.PendingLoginStore;
 import cc.hrva.urlshortener.service.twostep.TwoStepMethods;
@@ -71,7 +72,7 @@ class OAuth2LoginSuccessHandlerTest {
     private AuthoritiesService authoritiesService;
 
     @Mock
-    private TokenProvider tokenProvider;
+    private OAuthSignInCodes signInCodes;
 
     @Mock
     private AppProperties appProperties;
@@ -104,7 +105,7 @@ class OAuth2LoginSuccessHandlerTest {
 
     @BeforeEach
     void setUp() {
-        this.handler = new OAuth2LoginSuccessHandler(userRepository, authoritiesService, tokenProvider,
+        this.handler = new OAuth2LoginSuccessHandler(userRepository, authoritiesService, signInCodes,
                 appProperties, Validation.buildDefaultValidatorFactory().getValidator(), eventPublisher,
                 pendingLoginStore, twoStepMethods, signInMethodService, settingsService);
         lenient().when(authentication.getPrincipal()).thenReturn(oAuth2User);
@@ -119,7 +120,7 @@ class OAuth2LoginSuccessHandlerTest {
         handler.onAuthenticationSuccess(request, response, authentication);
 
         verify(response).sendRedirect("http://fe/auth/callback?error=no_email");
-        verify(tokenProvider, never()).createToken(any());
+        verify(signInCodes, never()).create(any(), any());
     }
 
     @Test
@@ -132,7 +133,7 @@ class OAuth2LoginSuccessHandlerTest {
         handler.onAuthenticationSuccess(request, response, authentication);
 
         verify(response).sendRedirect("http://fe/auth/callback?error=account_inactive");
-        verify(tokenProvider, never()).createToken(any());
+        verify(signInCodes, never()).create(any(), any());
         verifyNoInteractions(signInMethodService);
         assertThat(output).contains("OAuth2 login blocked: inactive account email=e***@example.com user id=1").doesNotContain("evil@example.com");
     }
@@ -145,13 +146,13 @@ class OAuth2LoginSuccessHandlerTest {
                 .build();
         when(oAuth2User.getAttribute("email")).thenReturn("ok@example.com");
         when(userRepository.findByEmail("ok@example.com")).thenReturn(Optional.of(user));
-        when(tokenProvider.createToken(any())).thenReturn("jwt-token");
+        when(signInCodes.create(any(), any())).thenReturn("one-time-code");
 
         handler.onAuthenticationSuccess(request, response, authentication);
 
         verify(userRepository).recordLastLogin(eq(1L), argThat(signedInAt -> signedInAt != null));
         verify(userRepository, never()).save(any());
-        verify(response).sendRedirect(contains("http://fe/auth/callback?token=jwt-token"));
+        verify(response).sendRedirect(contains("http://fe/auth/callback?code=one-time-code"));
         verify(eventPublisher, never()).publishEvent(any(Object.class));
         verifyNoInteractions(pendingLoginStore, twoStepMethods);
         assertThat(output).contains("OAuth2 login success email=o***@example.com user id=1").doesNotContain("ok@example.com");
@@ -165,7 +166,7 @@ class OAuth2LoginSuccessHandlerTest {
                 .build();
         when(oAuth2User.getAttribute("email")).thenReturn("ok@example.com");
         when(userRepository.findByEmail("ok@example.com")).thenReturn(Optional.of(user));
-        when(tokenProvider.createToken(any())).thenReturn("jwt-token");
+        when(signInCodes.create(any(), any())).thenReturn("one-time-code");
 
         handler.onAuthenticationSuccess(request, response, signIn(provider));
 
@@ -182,12 +183,12 @@ class OAuth2LoginSuccessHandlerTest {
                 .build();
         when(oAuth2User.getAttribute("email")).thenReturn("ok@example.com");
         when(userRepository.findByEmail("ok@example.com")).thenReturn(Optional.of(user));
-        when(tokenProvider.createToken(any())).thenReturn("jwt-token");
+        when(signInCodes.create(any(), any())).thenReturn("one-time-code");
 
         handler.onAuthenticationSuccess(request, response, signIn("facebook"));
 
         verify(userRepository).recordLastLogin(eq(1L), any());
-        verify(response).sendRedirect(contains("http://fe/auth/callback?token=jwt-token"));
+        verify(response).sendRedirect(contains("http://fe/auth/callback?code=one-time-code"));
         verifyNoInteractions(signInMethodService);
         assertThat(output).contains("OAuth2 sign-in method not recorded, unrecognised provider=facebook user id=1").doesNotContain("ok@example.com");
     }
@@ -202,7 +203,7 @@ class OAuth2LoginSuccessHandlerTest {
             saved.setId(33L);
             return saved;
         });
-        when(tokenProvider.createToken(any())).thenReturn("jwt-token");
+        when(signInCodes.create(any(), any())).thenReturn("one-time-code");
 
         handler.onAuthenticationSuccess(request, response, signIn("github"));
 
@@ -218,7 +219,7 @@ class OAuth2LoginSuccessHandlerTest {
 
         verify(response).sendRedirect("http://fe/auth/callback?error=invalid_email");
         verify(userRepository, never()).save(any());
-        verify(tokenProvider, never()).createToken(any());
+        verify(signInCodes, never()).create(any(), any());
         verify(eventPublisher, never()).publishEvent(any(Object.class));
     }
 
@@ -235,13 +236,13 @@ class OAuth2LoginSuccessHandlerTest {
             saved.setId(31L);
             return saved;
         });
-        when(tokenProvider.createToken(any())).thenReturn("jwt-token");
+        when(signInCodes.create(any(), any())).thenReturn("one-time-code");
 
         handler.onAuthenticationSuccess(request, response, authentication);
 
         verify(eventPublisher).publishEvent(argThat((Object event) -> event instanceof UserRegisteredEvent registered
                 && "new@example.com".equals(registered.user().getEmail()) && registered.verificationToken() == null));
-        verify(response).sendRedirect(contains("token=jwt-token"));
+        verify(response).sendRedirect(contains("code=one-time-code"));
         assertThat(output).contains("Created OAuth2 user email=n***@example.com user id=31", "OAuth2 login success email=n***@example.com user id=31")
                 .doesNotContain("new@example.com");
     }
@@ -258,7 +259,7 @@ class OAuth2LoginSuccessHandlerTest {
             saved.setId(31L);
             return saved;
         });
-        when(tokenProvider.createToken(any())).thenReturn("jwt-token");
+        when(signInCodes.create(any(), any())).thenReturn("one-time-code");
 
         handler.onAuthenticationSuccess(request, response, authentication);
 
@@ -278,7 +279,7 @@ class OAuth2LoginSuccessHandlerTest {
             saved.setId(32L);
             return saved;
         });
-        when(tokenProvider.createToken(any())).thenReturn("jwt-token");
+        when(signInCodes.create(any(), any())).thenReturn("one-time-code");
 
         handler.onAuthenticationSuccess(request, response, gitHub);
 
@@ -295,7 +296,7 @@ class OAuth2LoginSuccessHandlerTest {
                 .thenReturn(Authorities.builder().id(1L).name("ROLE_USER").build());
         when(appProperties.getUserApiKeySlots()).thenReturn(2L);
         when(userRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
-        when(tokenProvider.createToken(any())).thenReturn("jwt-token");
+        when(signInCodes.create(any(), any())).thenReturn("one-time-code");
 
         handler.onAuthenticationSuccess(request, response, google);
 
@@ -321,7 +322,7 @@ class OAuth2LoginSuccessHandlerTest {
                 .isEqualTo("http://localhost:3000/auth/callback?pendingToken=" + PENDING_TOKEN
                         + "&methods=TOTP,RECOVERY_CODE");
         verify(pendingLoginStore).create(7L, false, SignInMethod.GOOGLE);
-        verifyNoInteractions(tokenProvider);
+        verifyNoInteractions(signInCodes);
         verify(userRepository, never()).save(any());
         verify(signInMethodService, never()).record(any(), any(), any());
         assertThat(user.getLastLogin()).isNull();
@@ -342,10 +343,42 @@ class OAuth2LoginSuccessHandlerTest {
 
         assertThat(redirectSent()).isEqualTo("http://localhost:3000/auth/callback?pendingToken=" + PENDING_TOKEN
                 + "&methods=TOTP,WEBAUTHN,RECOVERY_CODE");
-        verifyNoInteractions(tokenProvider);
+        verifyNoInteractions(signInCodes);
         verify(userRepository, never()).save(any());
         assertThat(user.getAuthProvider()).isEqualTo("local");
         assertThat(user.getLastLogin()).isNull();
+    }
+
+    @Test
+    void theCallbackCarriesAOneTimeCodeAndNeverTheSignInToken() throws Exception {
+        final var user = User.builder().id(1L).email("ok@example.com").active(true)
+                .authorities(Collections.singletonList(Authorities.builder().id(1L).name("ROLE_USER").build()))
+                .build();
+        when(appProperties.getFrontendUrl()).thenReturn("http://localhost:3000");
+        when(oAuth2User.getAttribute("email")).thenReturn("ok@example.com");
+        when(userRepository.findByEmail("ok@example.com")).thenReturn(Optional.of(user));
+        when(signInCodes.create(1L, SignInMethod.GOOGLE)).thenReturn("Cd3_one-time");
+
+        handler.onAuthenticationSuccess(request, response, authentication);
+
+        assertThat(redirectSent()).isEqualTo("http://localhost:3000/auth/callback?code=Cd3_one-time");
+    }
+
+    @Test
+    void redisDownForTheCodeSendsTheCallbackAnErrorAndRecordsNoSignIn() throws Exception {
+        final var user = User.builder().id(1L).email("ok@example.com").active(true)
+                .authorities(Collections.singletonList(Authorities.builder().id(1L).name("ROLE_USER").build()))
+                .build();
+        when(appProperties.getFrontendUrl()).thenReturn("http://localhost:3000");
+        when(oAuth2User.getAttribute("email")).thenReturn("ok@example.com");
+        when(userRepository.findByEmail("ok@example.com")).thenReturn(Optional.of(user));
+        when(signInCodes.create(any(), any())).thenThrow(new SignInUnavailableException(OAuthSignInCodes.UNAVAILABLE, new IllegalStateException()));
+
+        handler.onAuthenticationSuccess(request, response, authentication);
+
+        assertThat(redirectSent()).isEqualTo("http://localhost:3000/auth/callback?error=sign_in_unavailable");
+        verify(userRepository, never()).recordLastLogin(any(), any());
+        verify(signInMethodService, never()).record(any(), any(), any());
     }
 
     @Test
@@ -364,7 +397,7 @@ class OAuth2LoginSuccessHandlerTest {
         final var order = inOrder(twoStepMethods, pendingLoginStore);
         order.verify(twoStepMethods).of(user);
         order.verify(pendingLoginStore).create(9L, false, SignInMethod.GOOGLE);
-        verifyNoInteractions(tokenProvider);
+        verifyNoInteractions(signInCodes);
         verify(userRepository, never()).save(any());
     }
 
@@ -378,7 +411,7 @@ class OAuth2LoginSuccessHandlerTest {
         assertThatThrownBy(() -> handler.onAuthenticationSuccess(request, response, authentication))
                 .isInstanceOf(DataAccessResourceFailureException.class);
 
-        verifyNoInteractions(pendingLoginStore, tokenProvider);
+        verifyNoInteractions(pendingLoginStore, signInCodes);
         verify(userRepository, never()).save(any());
     }
 
@@ -392,7 +425,7 @@ class OAuth2LoginSuccessHandlerTest {
         handler.onAuthenticationSuccess(request, response, authentication);
 
         verify(response).sendRedirect("http://fe/auth/callback?error=account_inactive");
-        verifyNoInteractions(tokenProvider, pendingLoginStore, twoStepMethods);
+        verifyNoInteractions(signInCodes, pendingLoginStore, twoStepMethods);
         verify(userRepository, never()).save(any());
     }
 
@@ -405,7 +438,7 @@ class OAuth2LoginSuccessHandlerTest {
         handler.onAuthenticationSuccess(request, response, signIn(provider));
 
         verify(response).sendRedirect("http://fe/auth/callback?error=" + error);
-        verifyNoInteractions(userRepository, tokenProvider, eventPublisher, pendingLoginStore, twoStepMethods);
+        verifyNoInteractions(userRepository, signInCodes, eventPublisher, pendingLoginStore, twoStepMethods);
     }
 
     @ParameterizedTest
@@ -417,7 +450,7 @@ class OAuth2LoginSuccessHandlerTest {
         handler.onAuthenticationSuccess(request, response, signIn(provider));
 
         verify(response).sendRedirect("http://fe/auth/callback?error=" + error);
-        verifyNoInteractions(userRepository, tokenProvider, eventPublisher);
+        verifyNoInteractions(userRepository, signInCodes, eventPublisher);
     }
 
     @Test
@@ -428,11 +461,11 @@ class OAuth2LoginSuccessHandlerTest {
         when(oAuth2User.getAttribute("email_verified")).thenReturn("true");
         when(oAuth2User.getAttribute("email")).thenReturn("ok@example.com");
         when(userRepository.findByEmail("ok@example.com")).thenReturn(Optional.of(user));
-        when(tokenProvider.createToken(any())).thenReturn("jwt-token");
+        when(signInCodes.create(any(), any())).thenReturn("one-time-code");
 
         handler.onAuthenticationSuccess(request, response, signIn("google"));
 
-        verify(response).sendRedirect(contains("http://fe/auth/callback?token=jwt-token"));
+        verify(response).sendRedirect(contains("http://fe/auth/callback?code=one-time-code"));
     }
 
     @ParameterizedTest
@@ -447,7 +480,7 @@ class OAuth2LoginSuccessHandlerTest {
         verify(response).sendRedirect("http://fe/auth/callback?error=registration_disabled");
         verify(userRepository, never()).save(any());
         verify(userRepository, never()).recordLastLogin(any(), any());
-        verifyNoInteractions(tokenProvider, eventPublisher, authoritiesService, pendingLoginStore, signInMethodService);
+        verifyNoInteractions(signInCodes, eventPublisher, authoritiesService, pendingLoginStore, signInMethodService);
     }
 
     @ParameterizedTest
@@ -459,11 +492,11 @@ class OAuth2LoginSuccessHandlerTest {
         SettingsServiceFixtures.turnOff(settingsService, SettingKey.NEW_SIGNUPS);
         when(oAuth2User.getAttribute("email")).thenReturn("member@example.com");
         when(userRepository.findByEmail("member@example.com")).thenReturn(Optional.of(user));
-        when(tokenProvider.createToken(any())).thenReturn("jwt-token");
+        when(signInCodes.create(any(), any())).thenReturn("one-time-code");
 
         handler.onAuthenticationSuccess(request, response, signIn(provider));
 
-        verify(response).sendRedirect(contains("http://fe/auth/callback?token=jwt-token"));
+        verify(response).sendRedirect(contains("http://fe/auth/callback?code=one-time-code"));
         verify(userRepository).recordLastLogin(eq(5L), any());
         verify(userRepository, never()).save(any());
         verify(eventPublisher, never()).publishEvent(any(Object.class));
@@ -478,17 +511,17 @@ class OAuth2LoginSuccessHandlerTest {
                 .build();
         when(oAuth2User.getAttribute("email")).thenReturn("claimed@example.com");
         when(userRepository.findByEmail("claimed@example.com")).thenReturn(Optional.of(user));
-        when(tokenProvider.createToken(any())).thenReturn("jwt-token");
+        when(signInCodes.create(any(), any())).thenReturn("one-time-code");
 
         handler.onAuthenticationSuccess(request, response, signIn(provider));
 
-        final var order = inOrder(userRepository, tokenProvider);
+        final var order = inOrder(signInCodes, userRepository);
         order.verify(userRepository).confirmEmailAndReplacePassword(eq(12L), argThat(password -> password != null
                 && password.length() >= 32 && !password.startsWith("$2") && !password.equals(user.getPassword())));
+        order.verify(signInCodes).create(any(), any());
         order.verify(userRepository).recordLastLogin(eq(12L), any());
-        order.verify(tokenProvider).createToken(any());
         verify(userRepository, never()).save(any());
-        verify(response).sendRedirect(contains("http://fe/auth/callback?token=jwt-token"));
+        verify(response).sendRedirect(contains("http://fe/auth/callback?code=one-time-code"));
     }
 
     @Test
@@ -500,7 +533,7 @@ class OAuth2LoginSuccessHandlerTest {
         when(oAuth2User.getAttribute("email")).thenReturn("raced@example.com");
         when(userRepository.findByEmail("raced@example.com")).thenReturn(Optional.of(user));
         when(userRepository.confirmEmailAndReplacePassword(eq(16L), any())).thenReturn(0, 1);
-        when(tokenProvider.createToken(any())).thenReturn("jwt-token");
+        when(signInCodes.create(any(), any())).thenReturn("one-time-code");
 
         handler.onAuthenticationSuccess(request, response, signIn("google"));
         assertThat(output).doesNotContain("replaced its unconfirmed password");
@@ -518,12 +551,12 @@ class OAuth2LoginSuccessHandlerTest {
                 .build();
         when(oAuth2User.getAttribute("email")).thenReturn("member@example.com");
         when(userRepository.findByEmail("member@example.com")).thenReturn(Optional.of(user));
-        when(tokenProvider.createToken(any())).thenReturn("jwt-token");
+        when(signInCodes.create(any(), any())).thenReturn("one-time-code");
 
         handler.onAuthenticationSuccess(request, response, signIn(provider));
 
         verify(userRepository, never()).confirmEmailAndReplacePassword(any(), any());
-        verify(response).sendRedirect(contains("http://fe/auth/callback?token=jwt-token"));
+        verify(response).sendRedirect(contains("http://fe/auth/callback?code=one-time-code"));
     }
 
     @Test
@@ -552,7 +585,7 @@ class OAuth2LoginSuccessHandlerTest {
 
         assertThat(redirectSent()).isEqualTo("http://localhost:3000/auth/callback?pendingToken=" + PENDING_TOKEN
                 + "&methods=WEBAUTHN,RECOVERY_CODE");
-        verifyNoInteractions(tokenProvider);
+        verifyNoInteractions(signInCodes);
         verify(userRepository, never()).save(any());
         verify(userRepository, never()).recordLastLogin(any(), any());
     }
@@ -575,7 +608,7 @@ class OAuth2LoginSuccessHandlerTest {
         verify(userRepository, never()).recordLastLogin(any(), any());
         verify(userRepository, never()).save(any());
         verify(signInMethodService, never()).record(any(), any(), any());
-        verifyNoInteractions(tokenProvider, pendingLoginStore, twoStepMethods, eventPublisher);
+        verifyNoInteractions(signInCodes, pendingLoginStore, twoStepMethods, eventPublisher);
     }
 
     @Test
@@ -588,7 +621,7 @@ class OAuth2LoginSuccessHandlerTest {
         handler.onAuthenticationSuccess(request, response, signIn("github"));
 
         verify(response).sendRedirect("http://fe/auth/callback?error=provider_turned_off&provider=GITHUB");
-        verifyNoInteractions(tokenProvider, pendingLoginStore, twoStepMethods);
+        verifyNoInteractions(signInCodes, pendingLoginStore, twoStepMethods);
     }
 
     @Test
@@ -600,11 +633,11 @@ class OAuth2LoginSuccessHandlerTest {
         when(oAuth2User.getAttribute("email")).thenReturn("both@example.com");
         when(userRepository.findByEmail("both@example.com")).thenReturn(Optional.of(user));
         lenient().when(signInMethodService.isTurnedOff(19L, SignInMethod.GITHUB)).thenReturn(true);
-        when(tokenProvider.createToken(any())).thenReturn("jwt-token");
+        when(signInCodes.create(any(), any())).thenReturn("one-time-code");
 
         handler.onAuthenticationSuccess(request, response, signIn("google"));
 
-        verify(response).sendRedirect(contains("http://fe/auth/callback?token=jwt-token"));
+        verify(response).sendRedirect(contains("http://fe/auth/callback?code=one-time-code"));
         verify(signInMethodService).record(eq(19L), eq(SignInMethod.GOOGLE), any());
     }
 
@@ -620,7 +653,7 @@ class OAuth2LoginSuccessHandlerTest {
         handler.onAuthenticationSuccess(request, response, signIn(provider));
 
         verify(response).sendRedirect("http://fe/auth/callback?error=provider_disabled&provider=" + method.name());
-        verifyNoInteractions(userRepository, signInMethodService, tokenProvider, eventPublisher, authoritiesService, pendingLoginStore, twoStepMethods);
+        verifyNoInteractions(userRepository, signInMethodService, signInCodes, eventPublisher, authoritiesService, pendingLoginStore, twoStepMethods);
         assertThat(output).contains("OAuth2 login refused: this provider is turned off on hrva.cc provider=" + provider)
                 .doesNotContain("member@example.com");
     }
@@ -644,11 +677,11 @@ class OAuth2LoginSuccessHandlerTest {
         SettingsServiceFixtures.turnOff(settingsService, SettingKey.GITHUB_SIGN_IN);
         when(oAuth2User.getAttribute("email")).thenReturn("member@example.com");
         when(userRepository.findByEmail("member@example.com")).thenReturn(Optional.of(user));
-        when(tokenProvider.createToken(any())).thenReturn("jwt-token");
+        when(signInCodes.create(any(), any())).thenReturn("one-time-code");
 
         handler.onAuthenticationSuccess(request, response, signIn("google"));
 
-        verify(response).sendRedirect(contains("http://fe/auth/callback?token=jwt-token"));
+        verify(response).sendRedirect(contains("http://fe/auth/callback?code=one-time-code"));
         verify(signInMethodService).record(eq(20L), eq(SignInMethod.GOOGLE), any());
     }
 
@@ -661,11 +694,11 @@ class OAuth2LoginSuccessHandlerTest {
         SettingsServiceFixtures.turnOff(settingsService, SettingKey.GITHUB_SIGN_IN);
         when(oAuth2User.getAttribute("email")).thenReturn("member@example.com");
         when(userRepository.findByEmail("member@example.com")).thenReturn(Optional.of(user));
-        when(tokenProvider.createToken(any())).thenReturn("jwt-token");
+        when(signInCodes.create(any(), any())).thenReturn("one-time-code");
 
         handler.onAuthenticationSuccess(request, response, signIn("gitlab"));
 
-        verify(response).sendRedirect(contains("http://fe/auth/callback?token=jwt-token"));
+        verify(response).sendRedirect(contains("http://fe/auth/callback?code=one-time-code"));
     }
 
     @Test
