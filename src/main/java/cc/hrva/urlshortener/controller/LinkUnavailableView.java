@@ -65,13 +65,17 @@ public record LinkUnavailableView(TemplateEngine templateEngine, String frontend
 
     @Override
     public void render(final Map<String, ?> model, final HttpServletRequest request, final HttpServletResponse response) throws IOException {
-        LinkPageHeaders.apply(response);
         if (wantsJson(request)) {
+            if (!response.isCommitted()) {
+                response.reset();
+            }
+            LinkPageHeaders.apply(response);
             final var problem = ProblemResponses.of(status(), message);
             problem.setProperty("reason", reason);
             ProblemResponses.write(request, isHead(request) ? new BodylessResponse(response) : response, problem);
             return;
         }
+        LinkPageHeaders.apply(response);
         final var body = templateEngine.process(TEMPLATE, context()).getBytes(StandardCharsets.UTF_8);
         response.setStatus(status().value());
         response.setContentType(CONTENT_TYPE);
