@@ -6,12 +6,12 @@ import cc.hrva.urlshortener.service.ratelimit.RateLimitWindow;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiter;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiterUnavailableException;
 import cc.hrva.urlshortener.service.settings.SettingKey;
+import cc.hrva.urlshortener.util.ProblemResponses;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -25,7 +25,6 @@ import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
-import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
@@ -44,7 +43,7 @@ public class ApiKeyRateLimitFilter extends OncePerRequestFilter {
     private static final String RATE_LIMIT_NAME = "api-key:";
     private static final Duration WINDOW = Duration.ofHours(1);
     private static final Duration WARNING_INTERVAL = Duration.ofMinutes(1);
-    private static final String REFUSAL = "{\"error\":\"This API key made too many requests. Try again in %s.\"}";
+    private static final String REFUSAL = "This API key made too many requests. Try again in %s.";
 
     private final ApiKeyRepository apiKeyRepository;
     private final RateLimiter rateLimiter;
@@ -94,11 +93,8 @@ public class ApiKeyRateLimitFilter extends OncePerRequestFilter {
 
         if (window.count() > limit) {
             log.info("API key request refused by the rate limit apiKeyId={}", keyId.get());
-            response.setStatus(HttpStatus.TOO_MANY_REQUESTS.value());
             response.setHeader(HttpHeaders.RETRY_AFTER, Long.toString(resetSeconds));
-            response.setContentType(MediaType.APPLICATION_JSON_VALUE);
-            response.setCharacterEncoding(StandardCharsets.UTF_8.name());
-            response.getWriter().write(REFUSAL.formatted(minutesOf(resetSeconds)));
+            ProblemResponses.write(request, response, HttpStatus.TOO_MANY_REQUESTS, REFUSAL.formatted(minutesOf(resetSeconds)));
             return;
         }
 

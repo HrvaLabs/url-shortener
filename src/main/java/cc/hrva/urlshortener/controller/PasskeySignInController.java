@@ -36,8 +36,9 @@ public class PasskeySignInController {
     @ApiResponse(responseCode = "200", description = "Signed in")
     @ApiResponse(responseCode = "400", description = "The credential is missing or couldn't be read")
     @ApiResponse(responseCode = "401", description = "The passkey isn't registered, or couldn't be verified")
-    @ApiResponse(responseCode = "403", description = "Network blocked after too many attempts, account deactivated, or email not verified")
+    @ApiResponse(responseCode = "403", description = "Account deactivated, or email not verified")
     @ApiResponse(responseCode = "410", description = "The ceremony expired, was used, or belongs to another request")
+    @ApiResponse(responseCode = "429", description = "Too many sign-in attempts from this network, with Retry-After")
     @ApiResponse(responseCode = "503", description = "Passkeys are unavailable")
     @PostMapping("/verify")
     public ResponseEntity<JWTTokenDto> verify(@Valid @RequestBody final PasskeySignInDto dto) {

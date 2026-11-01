@@ -129,9 +129,10 @@ class ApiKeyRateLimitFilterTest {
 
         assertThat(chain.getRequest()).isNull();
         assertThat(response.getStatus()).isEqualTo(429);
-        assertThat(response.getContentType()).startsWith("application/json");
-        assertThat(response.getContentAsString())
-                .isEqualTo("{\"error\":\"This API key made too many requests. Try again in 26 minutes.\"}");
+        assertThat(response.getContentType()).isEqualTo("application/problem+json");
+        assertThat(response.getContentAsString()).isEqualTo("""
+                {"type":"about:blank","title":"Too Many Requests","status":429,\
+                "detail":"This API key made too many requests. Try again in 26 minutes.","instance":"/api/v1/urls"}""");
         assertThat(response.getHeader("Retry-After")).isEqualTo("1501");
         assertThat(response.getHeader("RateLimit-Limit")).isEqualTo("600");
         assertThat(response.getHeader("RateLimit-Remaining")).isEqualTo("0");

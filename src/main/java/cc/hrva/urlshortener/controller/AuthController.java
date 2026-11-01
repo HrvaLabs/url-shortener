@@ -108,6 +108,7 @@ public class AuthController {
 
     @Operation(summary = "Login", description = "Authenticate with email and password and receive a JWT token. When two-step verification is on, the response has no token but twoStepRequired, a pendingToken valid for 5 minutes and the methods the account can use; finish with POST /api/v1/auth/2fa/totp. Sending code with the password is deprecated.")
     @ApiResponse(responseCode = "401", description = "Bad credentials")
+    @ApiResponse(responseCode = "429", description = "Too many sign-in attempts from this network or for this account, with Retry-After")
     @PostMapping("/login")
     public ResponseEntity<JWTTokenDto> login(@Valid @RequestBody final LoginDto login) {
         log.info("Login controller invoked for user {}", EmailAddresses.masked(login.getEmail()));

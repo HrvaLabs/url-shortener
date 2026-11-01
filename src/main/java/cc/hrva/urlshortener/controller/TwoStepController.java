@@ -28,8 +28,9 @@ public class TwoStepController {
     @Operation(summary = "Finish a two-step sign-in with a code", description = "Send the pendingToken from the login response with a TOTP code from the authenticator app or a recovery code. Returns the login body and the Authorization header.")
     @ApiResponse(responseCode = "200", description = "Signed in")
     @ApiResponse(responseCode = "401", description = "Invalid two-factor code, with the tries left once 2 or fewer remain")
-    @ApiResponse(responseCode = "403", description = "Network or account blocked after too many attempts, account deactivated, or email not verified")
+    @ApiResponse(responseCode = "403", description = "Account locked after too many attempts, account deactivated, or email not verified")
     @ApiResponse(responseCode = "410", description = "The sign-in expired, was used, or ran out of attempts")
+    @ApiResponse(responseCode = "429", description = "Too many sign-in attempts from this network, with Retry-After")
     @ApiResponse(responseCode = "503", description = "Two-step sign-in is unavailable")
     @PostMapping("/totp")
     public ResponseEntity<JWTTokenDto> completeWithCode(@Valid @RequestBody final TotpSecondStepDto dto) {
@@ -39,8 +40,8 @@ public class TwoStepController {
     @Operation(summary = "Start the second step with a passkey or security key", description = "Send the pendingToken from the login response. Returns the WebAuthn request options for the account's passkeys and security keys (allowCredentials lists them all, user verification preferred) and a single-use ceremonyId valid for 5 minutes. Asking for options doesn't use one of the sign-in's 5 attempts.")
     @ApiResponse(responseCode = "200", description = "Request options")
     @ApiResponse(responseCode = "400", description = "The account has no passkeys or security keys")
-    @ApiResponse(responseCode = "403", description = "Network blocked after too many attempts")
     @ApiResponse(responseCode = "410", description = "The sign-in expired, was used, or ran out of attempts")
+    @ApiResponse(responseCode = "429", description = "Too many sign-in attempts from this network, with Retry-After")
     @ApiResponse(responseCode = "503", description = "Two-step sign-in or passkeys are unavailable")
     @PostMapping("/webauthn/options")
     public ResponseEntity<PasskeyOptionsResponse> passkeyOptions(@Valid @RequestBody final PendingTokenDto dto) {
@@ -51,8 +52,9 @@ public class TwoStepController {
     @ApiResponse(responseCode = "200", description = "Signed in")
     @ApiResponse(responseCode = "400", description = "The credential is missing or couldn't be read")
     @ApiResponse(responseCode = "401", description = "The passkey isn't registered, isn't this account's, or couldn't be verified, with the tries left once 2 or fewer remain")
-    @ApiResponse(responseCode = "403", description = "Network or account blocked after too many attempts, account deactivated, or email not verified")
+    @ApiResponse(responseCode = "403", description = "Account locked after too many attempts, account deactivated, or email not verified")
     @ApiResponse(responseCode = "410", description = "The sign-in expired, was used, or ran out of attempts, or the ceremony expired or belongs to another request")
+    @ApiResponse(responseCode = "429", description = "Too many sign-in attempts from this network, with Retry-After")
     @ApiResponse(responseCode = "503", description = "Two-step sign-in or passkeys are unavailable")
     @PostMapping("/webauthn/verify")
     public ResponseEntity<JWTTokenDto> completeWithPasskey(@Valid @RequestBody final PasskeySecondStepDto dto) {

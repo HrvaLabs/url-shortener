@@ -43,13 +43,13 @@
 # the human check without Turnstile keys (HUMAN_CHECK is on but unavailable, no check runs; no key is ever set in this script) and the
 # Google and GitHub sign-in switches. Every setting is reset.
 # Section 27 checks API keys after v2.21: the expiry a user chooses on create and on update (the refusals included), the
-# RateLimit-* headers on an API-key request and their CORS exposure, and a 429 with Retry-After once API_KEY_REQUESTS_PER_HOUR is
+# RateLimit-* headers on an API-key request and their CORS exposure, and a 429 problem with Retry-After once API_KEY_REQUESTS_PER_HOUR is
 # set to 10 in Site settings, which is then reset.
 # Section 28 checks the v2.22 API answers: problem details (RFC 9457) with 401 for nobody signed in and 403 for no rights, a field
 # error under errors, dates written in UTC with Z and read with or without an offset, HEAD counting no click and using no visit on a
 # cache miss and hit, the 404 and 410 pages with the warning page's headers (and a problem for Accept: application/json), and a
 # trailing slash opening the same link.
-# Section 20 also checks that the password change ends the older token (401, "Your session ended. Sign in again.") and renews this
+# Section 20 also checks that the password change ends the older token (a 401 problem, "Your session ended. Sign in again.") and renews this
 # device's. Section 29 checks sessions and sign-in: 039's column, sign out everywhere (the new token, the old ones refused, the API key
 # untouched), the one-time OAuth code put straight into Redis (exchanged once, then 410), passwords over 72 bytes (field errors, and a
 # sign-in answered like a wrong password) and the Redis login limit per account and per network (429 with Retry-After, a success that
@@ -1103,7 +1103,7 @@ expect_contains "$(jq -c '[.authorities[].name]' <<<"$HTTP_BODY")" '"ROLE_USER"'
 RENEWED_JWT=$(header_value authorization)
 expect_contains "$RENEWED_JWT" "Bearer eyJ" "the answer's Authorization header carries a new token for this device"
 http "$BASE/api/v1/users/me" -H "Authorization: Bearer $KEY_JWT"
-expect_eq "$HTTP_STATUS $(jq -c . <<<"$HTTP_BODY")" '401 {"error":"Your session ended. Sign in again."}' "the token from before the change is refused: 401, session ended"
+expect_eq "$HTTP_STATUS $(header_value content-type) $(jq -r .detail <<<"$HTTP_BODY")" '401 application/problem+json Your session ended. Sign in again.' "the token from before the change is refused: a 401 problem, session ended"
 http "$BASE/api/v1/users/me" -H "Authorization: $RENEWED_JWT"
 expect_eq "$HTTP_STATUS $(jq -r .email <<<"$HTTP_BODY")" "200 $USER_EMAIL" "the new token keeps this device signed in"
 http -X POST "$BASE/api/v1/auth/password-reset" -H 'Content-Type: application/json' -d "{\"email\":\"$USER_EMAIL\"}"
@@ -2041,7 +2041,7 @@ http "$BASE/api/v1/urls/$LIMITED_ALIAS/peek" -H "X-Api-Key: $LIMITED_KEY" -H "Or
 RETRY_AFTER=$(header_value Retry-After)
 MINUTES=$(( (RETRY_AFTER + 59) / 60 ))
 if (( MINUTES == 1 )); then WAIT="1 minute"; else WAIT="$MINUTES minutes"; fi
-expect_eq "$HTTP_STATUS $(jq -c . <<<"$HTTP_BODY")" "429 {\"error\":\"This API key made too many requests. Try again in $WAIT.\"}" "the eleventh is a 429 with the minutes to wait"
+expect_eq "$HTTP_STATUS $(header_value content-type) $(jq -r .detail <<<"$HTTP_BODY")" "429 application/problem+json This API key made too many requests. Try again in $WAIT." "the eleventh is a 429 problem with the minutes to wait"
 expect_eq "$(header_value RateLimit-Remaining) $(header_value RateLimit-Reset) $(header_value Access-Control-Allow-Origin)" "0 $RETRY_AFTER $FRONTEND_URL" \
     "Retry-After $RETRY_AFTER equals RateLimit-Reset, and the 429 carries CORS"
 show "429 headers: $(grep -iE '^(retry-after|ratelimit-|access-control-expose)' <<<"$HTTP_HEADERS" | paste -sd';' -)"
@@ -2188,9 +2188,9 @@ expect_eq "$HTTP_STATUS $(header_value authorization)" "200 $FRESH_JWT" "POST /a
 expect_contains "$(header_value access-control-expose-headers)" "Authorization" "the frontend may read it (Access-Control-Expose-Headers)"
 expect_contains "$(header_value access-control-expose-headers)" "Retry-After" "and Retry-After"
 http "$BASE/api/v1/users/me" -H "Authorization: $PHONE_JWT"
-expect_eq "$HTTP_STATUS $(jq -c . <<<"$HTTP_BODY")" '401 {"error":"Your session ended. Sign in again."}' "the phone's token is refused: 401, session ended"
+expect_eq "$HTTP_STATUS $(header_value content-type) $(jq -r .detail <<<"$HTTP_BODY")" '401 application/problem+json Your session ended. Sign in again.' "the phone's token is refused: a 401 problem, session ended"
 http "$BASE/api/v1/users/me" -H "Authorization: $LAPTOP_JWT"
-expect_eq "$HTTP_STATUS $(jq -c . <<<"$HTTP_BODY")" '401 {"error":"Your session ended. Sign in again."}' "so is the laptop's, which asked"
+expect_eq "$HTTP_STATUS $(header_value content-type) $(jq -r .detail <<<"$HTTP_BODY")" '401 application/problem+json Your session ended. Sign in again.' "so is the laptop's, which asked"
 http "$BASE/api/v1/users/me" -H "Authorization: $FRESH_JWT"
 expect_eq "$HTTP_STATUS $(jq -r .email <<<"$HTTP_BODY")" "200 $USER_EMAIL" "the new token keeps this device signed in"
 expect_eq "$(psql_value "select tokens_valid_after is not null and tokens_valid_after <= (now() at time zone 'utc') from user_account where id = $SESSION_USER_ID;")" t \
@@ -2206,26 +2206,26 @@ expect_eq "$HTTP_STATUS $(jq -r '.user.email' <<<"$HTTP_BODY") $(jq -r '.token |
     "POST /api/v1/auth/oauth/exchange answers like a sign-in"
 expect_eq "$(docker exec "$REDIS_CONTAINER" redis-cli EXISTS "auth:oauth-code:$OAUTH_CODE")" 0 "the code is gone from Redis"
 http -X POST "$BASE/api/v1/auth/oauth/exchange" -H 'Content-Type: application/json' -d "{\"code\":\"$OAUTH_CODE\"}"
-expect_eq "$HTTP_STATUS $(jq -c . <<<"$HTTP_BODY")" '410 {"error":"Your sign-in expired. Sign in again."}' "a used code is 410"
+expect_eq "$HTTP_STATUS $(header_value content-type) $(jq -r .detail <<<"$HTTP_BODY")" '410 application/problem+json Your sign-in expired. Sign in again.' "a used code is 410"
 http -X POST "$BASE/api/v1/auth/oauth/exchange" -H 'Content-Type: application/json' -d '{}'
-expect_eq "$HTTP_STATUS $(jq -c . <<<"$HTTP_BODY")" '400 {"code":"Code is required"}' "no code is 400"
+expect_eq "$HTTP_STATUS $(jq -c .errors <<<"$HTTP_BODY")" '400 {"code":"Code is required"}' "no code is 400, under errors"
 
 echo "  --- passwords over 72 bytes"
 TOO_LONG_TEXT="This password is too long. Use at most 72 bytes; accented letters count as two."
 http -X POST "$BASE/api/v1/auth/register" -H 'Content-Type: application/json' \
     -d "{\"email\":\"long-password@example.com\",\"password\":\"$(printf 'x%.0s' {1..73})\"}"
-expect_eq "$HTTP_STATUS $(jq -c . <<<"$HTTP_BODY")" "400 {\"password\":\"$TOO_LONG_TEXT\"}" "sign-up with 73 bytes is a 400 field error"
+expect_eq "$HTTP_STATUS $(jq -c .errors <<<"$HTTP_BODY")" "400 {\"password\":\"$TOO_LONG_TEXT\"}" "sign-up with 73 bytes is a 400 field error"
 http -X POST "$BASE/api/v1/auth/register" -H 'Content-Type: application/json' \
     -d "{\"email\":\"long-password@example.com\",\"password\":\"$(printf '\\u010d%.0s' {1..37})\"}"
-expect_eq "$HTTP_STATUS $(jq -r .password <<<"$HTTP_BODY")" "400 $TOO_LONG_TEXT" "37 accented letters are 74 bytes: refused"
+expect_eq "$HTTP_STATUS $(jq -r .errors.password <<<"$HTTP_BODY")" "400 $TOO_LONG_TEXT" "37 accented letters are 74 bytes: refused"
 http -X PATCH "$BASE/api/v1/users/password" -H "Authorization: $FRESH_JWT" -H 'Content-Type: application/json' \
     -d "{\"oldPassword\":\"$SESSION_PASSWORD\",\"newPassword\":\"$(printf 'x%.0s' {1..73})\"}"
-expect_eq "$HTTP_STATUS $(jq -c . <<<"$HTTP_BODY")" "400 {\"newPassword\":\"$TOO_LONG_TEXT\"}" "a password change to 73 bytes is a 400 field error"
+expect_eq "$HTTP_STATUS $(jq -c .errors <<<"$HTTP_BODY")" "400 {\"newPassword\":\"$TOO_LONG_TEXT\"}" "a password change to 73 bytes is a 400 field error"
 http -X POST "$BASE/api/v1/urls" -H "Authorization: $FRESH_JWT" -H 'Content-Type: application/json' \
     -d "{\"longUrl\":\"https://example.com/long-link-password\",\"password\":\"$(printf 'x%.0s' {1..73})\"}"
-expect_eq "$HTTP_STATUS $(jq -c . <<<"$HTTP_BODY")" "400 {\"password\":\"$TOO_LONG_TEXT\"}" "a link password of 73 bytes is a 400 field error"
+expect_eq "$HTTP_STATUS $(jq -c .errors <<<"$HTTP_BODY")" "400 {\"password\":\"$TOO_LONG_TEXT\"}" "a link password of 73 bytes is a 400 field error"
 session_login 192.0.2.11 "$USER_EMAIL" "$SESSION_PASSWORD$(printf 'x%.0s' {1..80})"
-expect_eq "$HTTP_STATUS $(jq -c . <<<"$HTTP_BODY")" '401 {"error":"Invalid email or password"}' "signing in with a password over 72 bytes answers like a wrong one"
+expect_eq "$HTTP_STATUS $(jq -r .detail <<<"$HTTP_BODY")" '401 Invalid email or password' "signing in with a password over 72 bytes answers like a wrong one"
 
 echo "  --- the login limit (Redis, per network and per account)"
 for network in $(seq 1 10); do
@@ -2235,7 +2235,7 @@ done
 ok "10 wrong passwords for one account from 10 networks are each 401"
 session_login 198.51.100.99 Limited-Account@Example.com wrong-password
 RETRY_AFTER=$(header_value retry-after)
-expect_eq "$HTTP_STATUS $(jq -c . <<<"$HTTP_BODY")" '429 {"error":"Too many sign-in attempts. Try again in 15 minutes."}' "the 11th, from a new network and in other case, is 429"
+expect_eq "$HTTP_STATUS $(header_value content-type) $(jq -r .detail <<<"$HTTP_BODY")" '429 application/problem+json Too many sign-in attempts. Try again in 15 minutes.' "the 11th, from a new network and in other case, is a 429 problem"
 (( RETRY_AFTER > 840 && RETRY_AFTER <= 900 )) || fail "Retry-After for the account limit: expected 841 to 900 seconds, got '$RETRY_AFTER'"
 ok "Retry-After: $RETRY_AFTER"
 for attempt in $(seq 1 19); do
@@ -2249,7 +2249,7 @@ session_login 203.0.113.250 nobody-20@example.com wrong-password
 expect_eq "$HTTP_STATUS" 401 "the 20th wrong password is 401: the success didn't clear the network's count"
 session_login 203.0.113.250 "$USER_EMAIL" "$SESSION_PASSWORD"
 RETRY_AFTER=$(header_value retry-after)
-expect_eq "$HTTP_STATUS $(jq -c . <<<"$HTTP_BODY")" '429 {"error":"Too many sign-in attempts. Try again in 60 minutes."}' "then even the right password is 429"
+expect_eq "$HTTP_STATUS $(header_value content-type) $(jq -r .detail <<<"$HTTP_BODY")" '429 application/problem+json Too many sign-in attempts. Try again in 60 minutes.' "then even the right password is 429"
 (( RETRY_AFTER > 3500 && RETRY_AFTER <= 3600 )) || fail "Retry-After for the network limit: expected 3501 to 3600 seconds, got '$RETRY_AFTER'"
 ok "Retry-After: $RETRY_AFTER"
 http -X POST "$BASE/api/v1/auth/oauth/exchange" -H 'CF-Connecting-IP: 203.0.113.250' -H 'Content-Type: application/json' -d '{"code":"any"}'

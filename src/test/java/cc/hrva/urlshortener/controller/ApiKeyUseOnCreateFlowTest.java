@@ -325,7 +325,10 @@ class ApiKeyUseOnCreateFlowTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"longUrl\":\"https://example.com/too-many\"}"))
                 .andExpect(status().isTooManyRequests())
-                .andExpect(content().json("{\"error\":\"This API key made too many requests. Try again in 2 minutes.\"}", JsonCompareMode.STRICT))
+                .andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON))
+                .andExpect(content().json("""
+                        {"type":"about:blank","title":"Too Many Requests","status":429,
+                         "detail":"This API key made too many requests. Try again in 2 minutes.","instance":"/api/v1/urls"}""", JsonCompareMode.STRICT))
                 .andExpect(header().string("Retry-After", "90"))
                 .andExpect(header().string("RateLimit-Remaining", "0"))
                 .andExpect(header().string("Access-Control-Allow-Origin", "http://localhost:3000"));

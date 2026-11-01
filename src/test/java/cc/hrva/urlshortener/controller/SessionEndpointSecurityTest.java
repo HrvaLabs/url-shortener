@@ -45,6 +45,7 @@ import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.http.MediaType;
 import org.springframework.test.json.JsonCompareMode;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -78,7 +79,8 @@ class SessionEndpointSecurityTest {
     private static final String END_SESSIONS = "/api/v1/users/me/sessions/end";
     private static final String EMAIL = "ana@hrva.cc";
     private static final String SESSION_ENDED = """
-            {"error":"Your session ended. Sign in again."}""";
+            {"type":"about:blank","title":"Unauthorized","status":401,"detail":"Your session ended. Sign in again.",
+             "instance":"/api/v1/users/me/sessions/end"}""";
     private static final RSAKey SIGNING_KEY = generateSigningKey();
 
     @Autowired
@@ -147,6 +149,7 @@ class SessionEndpointSecurityTest {
         for (final var ended : List.of(phone, laptop)) {
             mockMvc.perform(post(END_SESSIONS).header(JwtFilter.AUTHORIZATION_HEADER, "Bearer " + ended))
                     .andExpect(status().isUnauthorized())
+                    .andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON))
                     .andExpect(content().json(SESSION_ENDED, JsonCompareMode.STRICT));
         }
         mockMvc.perform(post(END_SESSIONS).header(JwtFilter.AUTHORIZATION_HEADER, fresh))

@@ -2,6 +2,7 @@ package cc.hrva.urlshortener.security;
 
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.repository.UserRepository;
+import cc.hrva.urlshortener.util.ProblemResponses;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.ServletRequest;
@@ -9,17 +10,14 @@ import jakarta.servlet.ServletResponse;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.util.Map;
 import java.util.Optional;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.http.MediaType;
+import org.springframework.http.HttpStatus;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 import org.springframework.web.filter.GenericFilterBean;
-import tools.jackson.databind.json.JsonMapper;
 
 @Slf4j
 @Component
@@ -33,7 +31,6 @@ public class JwtFilter extends GenericFilterBean {
 
   private final TokenProvider tokenProvider;
   private final UserRepository userRepository;
-  private final JsonMapper jsonMapper;
 
   @Override
   public void doFilter(final ServletRequest servletRequest, final ServletResponse servletResponse, final FilterChain filterChain)
@@ -49,7 +46,7 @@ public class JwtFilter extends GenericFilterBean {
       final var ended = user.isPresent() && sessionEnded(user.get(), jwt);
       if (ended && !isPublic(httpServletRequest)) {
         log.info("Refused a token issued before the account's sessions ended user id={}", user.get().getId());
-        writeSessionEnded(httpServletResponse);
+        ProblemResponses.write(httpServletRequest, httpServletResponse, HttpStatus.UNAUTHORIZED, SESSION_ENDED);
         return;
       }
       if (user.isPresent() && !ended) {
@@ -71,13 +68,6 @@ public class JwtFilter extends GenericFilterBean {
   private Optional<User> activeUser(final String email) {
     return userRepository.findByEmail(email)
         .filter(user -> !Boolean.FALSE.equals(user.getActive()));
-  }
-
-  private void writeSessionEnded(final HttpServletResponse response) throws IOException {
-    response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
-    response.setContentType(MediaType.APPLICATION_JSON_VALUE);
-    response.setCharacterEncoding(StandardCharsets.UTF_8.name());
-    response.getWriter().write(jsonMapper.writeValueAsString(Map.of("error", SESSION_ENDED)));
   }
 
   private String getToken(final HttpServletRequest request) {

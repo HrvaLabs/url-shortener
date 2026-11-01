@@ -17,7 +17,6 @@ import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
-import tools.jackson.databind.json.JsonMapper;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -30,6 +29,8 @@ import static org.mockito.Mockito.when;
 class JwtFilterTest {
 
     private static final Instant ISSUED_AT = Instant.parse("2026-10-30T19:02:13Z");
+    private static final String SESSION_ENDED_PROBLEM = """
+            {"type":"about:blank","title":"Unauthorized","status":401,"detail":"Your session ended. Sign in again.","instance":"/api/v1/urls"}""";
 
     private JwtFilter jwtFilter;
 
@@ -47,7 +48,8 @@ class JwtFilterTest {
 
     @BeforeEach
     void setUp() {
-        this.jwtFilter = new JwtFilter(tokenProvider, userRepository, JsonMapper.builder().build());
+        this.jwtFilter = new JwtFilter(tokenProvider, userRepository);
+        request.setRequestURI("/api/v1/urls");
         SecurityContextHolder.clearContext();
     }
 
@@ -104,8 +106,8 @@ class JwtFilterTest {
         jwtFilter.doFilter(request, response, filterChain);
 
         assertThat(response.getStatus()).isEqualTo(401);
-        assertThat(response.getContentType()).startsWith("application/json");
-        assertThat(response.getContentAsString()).isEqualTo("{\"error\":\"Your session ended. Sign in again.\"}");
+        assertThat(response.getContentType()).isEqualTo("application/problem+json");
+        assertThat(response.getContentAsString()).isEqualTo(SESSION_ENDED_PROBLEM);
         assertThat(SecurityContextHolder.getContext().getAuthentication()).isNull();
         verify(filterChain, never()).doFilter(any(), any());
     }
@@ -119,7 +121,7 @@ class JwtFilterTest {
         jwtFilter.doFilter(request, response, filterChain);
 
         assertThat(response.getStatus()).isEqualTo(401);
-        assertThat(response.getContentAsString()).isEqualTo("{\"error\":\"Your session ended. Sign in again.\"}");
+        assertThat(response.getContentAsString()).isEqualTo(SESSION_ENDED_PROBLEM);
         verify(filterChain, never()).doFilter(any(), any());
     }
 
