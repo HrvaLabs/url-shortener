@@ -229,7 +229,7 @@ class ApiKeyUseOnCreateFlowTest {
     }
 
     @Test
-    void aKeyRevokedWhileTheLinkIsCheckedStaysRevokedAndTheLinkIsRefused() throws Exception {
+    void aKeyRevokedWhileTheLinkIsCheckedStaysRevokedAndTheLinkIsRefusedThoughTheAuthenticatedRequestCounted() throws Exception {
         key(0, LocalDateTime.now().plusMonths(6));
         duringChecks = () -> meanwhile("update api_key set active = false where id = ?", OWNERS_KEY);
 
@@ -237,7 +237,7 @@ class ApiKeyUseOnCreateFlowTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error").value("API key is invalid"));
 
-        assertThat(keyRow()).containsEntry("ACTIVE", false).containsEntry("API_CALLS_USED", 0L);
+        assertThat(keyRow()).containsEntry("ACTIVE", false).containsEntry("API_CALLS_USED", 1L);
         assertThat(linksOfTheOwner()).isZero();
     }
 
@@ -262,18 +262,18 @@ class ApiKeyUseOnCreateFlowTest {
     }
 
     @Test
-    void aKeyThatExpiresWhileTheLinkIsCheckedCountsTheLinkAndTurnsOff() throws Exception {
+    void aKeyThatExpiresWhileTheLinkIsCheckedStillMakesTheLinkItsRequestWasAuthenticatedFor() throws Exception {
         key(0, LocalDateTime.now().plusMonths(6));
         duringChecks = () -> meanwhile("update api_key set expiration_date = ? where id = ?", LocalDateTime.now().minusMinutes(1), OWNERS_KEY);
 
         create("https://example.com/expired-meanwhile").andExpect(status().isOk());
 
-        assertThat(keyRow()).containsEntry("ACTIVE", false).containsEntry("API_CALLS_USED", 1L);
+        assertThat(keyRow()).containsEntry("ACTIVE", true).containsEntry("API_CALLS_USED", 1L);
         assertThat(linksOfTheOwner()).isEqualTo(1L);
     }
 
     @Test
-    void aKeyKeepsWorkingWhateverItsTotalAndRecordsItsLastUse() throws Exception {
+    void aKeyKeepsWorkingWhateverItsTotalAndEachCreateCountsOnce() throws Exception {
         key(256, LocalDateTime.now().plusMonths(6));
 
         create("https://example.com/past-the-old-cap").andExpect(status().isOk());
@@ -339,9 +339,35 @@ class ApiKeyUseOnCreateFlowTest {
         key(0, LocalDateTime.now().plusMonths(6));
 
         mockMvc.perform(get("/api/v1/urls/{short}/peek", "nothing").header("X-Api-Key", OWNERS_KEY_VALUE))
+                .andExpect(status().isNotFound())
                 .andExpect(header().string("RateLimit-Limit", "600"));
 
         org.mockito.Mockito.verify(rateLimiter).incrementWindow("api-key:" + OWNERS_KEY, Duration.ofHours(1));
+        assertThat(keyRow()).containsEntry("API_CALLS_USED", 1L);
+        assertThat(jdbcTemplate.queryForObject("select last_used_at from api_key where id = ?", LocalDateTime.class, OWNERS_KEY))
+                .isCloseTo(LocalDateTime.now(), within(1, ChronoUnit.MINUTES));
+    }
+
+    @Test
+    void aRequestWithARevokedKeyIsNotCounted() throws Exception {
+        key(3, LocalDateTime.now().plusMonths(6));
+        jdbcTemplate.update("update api_key set active = false where id = ?", OWNERS_KEY);
+
+        create("https://example.com/with-a-revoked-key")
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("API key is invalid"));
+
+        assertThat(keyRow()).containsEntry("API_CALLS_USED", 3L);
+        assertThat(jdbcTemplate.queryForObject("select last_used_at from api_key where id = ?", LocalDateTime.class, OWNERS_KEY)).isNull();
+    }
+
+    @Test
+    void aRequestWithAnExpiredKeyIsNotCounted() throws Exception {
+        key(3, LocalDateTime.now().minusDays(2));
+
+        create("https://example.com/with-an-expired-key").andExpect(status().isBadRequest());
+
+        assertThat(keyRow()).containsEntry("API_CALLS_USED", 3L);
     }
 
     private void key(final long used, final LocalDateTime expires) {

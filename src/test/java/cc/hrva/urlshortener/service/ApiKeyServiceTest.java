@@ -300,20 +300,20 @@ class ApiKeyServiceTest {
     }
 
     @Test
-    void aUseIsRecordedWithOneGuardedUpdateAndNeverASaveOfTheLoadedKey() {
-        when(apiKeyRepository.recordUse(eq(5L), any(LocalDateTime.class))).thenReturn(1);
+    void aCreateChecksTheKeyIsStillActiveWithoutCountingIt() {
+        when(apiKeyRepository.existsByIdAndActiveTrue(5L)).thenReturn(true);
 
-        apiKeyService.recordUse(5L);
+        apiKeyService.requireActive(5L);
 
-        verify(apiKeyRepository).recordUse(eq(5L), any(LocalDateTime.class));
+        verify(apiKeyRepository, never()).recordRequest(any(), any());
         verify(apiKeyRepository, never()).save(any());
     }
 
     @Test
-    void aUseOfAKeyThatIsNoLongerActiveIsRefusedAsAnInvalidKey() {
-        when(apiKeyRepository.recordUse(eq(5L), any(LocalDateTime.class))).thenReturn(0);
+    void aCreateWithAKeyRevokedSinceItsRequestStartedIsRefusedAsAnInvalidKey() {
+        when(apiKeyRepository.existsByIdAndActiveTrue(5L)).thenReturn(false);
 
-        assertThatThrownBy(() -> apiKeyService.recordUse(5L))
+        assertThatThrownBy(() -> apiKeyService.requireActive(5L))
                 .isInstanceOf(InvalidApiKeyException.class)
                 .hasMessage("API key is invalid");
     }

@@ -88,7 +88,7 @@ class ApiKeyWritesTest {
             final var loaded = mockingDetails(apiKeyRepository).getMockCreationSettings().getDefaultAnswer().answer(invocation);
             if (concurrentUseDone.compareAndSet(false, true)) {
                 CompletableFuture.runAsync(() -> useCommits.executeWithoutResult(
-                        status -> assertThat(apiKeyRepository.recordUse(KEY, LocalDateTime.now())).isOne())).join();
+                        status -> assertThat(apiKeyRepository.recordRequest(KEY, LocalDateTime.now())).isOne())).join();
             }
             return loaded;
         }).when(apiKeyRepository).findById(KEY);
@@ -109,6 +109,58 @@ class ApiKeyWritesTest {
                 .containsEntry("ACTIVE", false)
                 .containsEntry("API_CALLS_USED", 5L)
                 .extractingByKey("LAST_USED_AT").isNotNull();
+    }
+
+    @Test
+    void aRequestCountsWithOneTargetedUpdateOutsideAnyTransaction() {
+        final var at = LocalDateTime.of(2026, 10, 30, 23, 0);
+
+        assertThat(apiKeyRepository.recordRequest(KEY, at)).isOne();
+
+        assertThat(jdbcTemplate.queryForMap("select api_calls_used, last_used_at, active from api_key where id = ?", KEY))
+                .containsEntry("API_CALLS_USED", 5L)
+                .containsEntry("ACTIVE", true)
+                .satisfies(row -> assertThat(((java.sql.Timestamp) row.get("LAST_USED_AT")).toLocalDateTime()).isEqualTo(at));
+    }
+
+    @Test
+    void concurrentRequestsAreEachCounted() {
+        final var requests = java.util.stream.IntStream.range(0, 40)
+                .mapToObj(request -> CompletableFuture.supplyAsync(() -> apiKeyRepository.recordRequest(KEY, LocalDateTime.now())))
+                .toList();
+
+        assertThat(requests.stream().map(CompletableFuture::join)).containsOnly(1);
+        assertThat(jdbcTemplate.queryForObject("select api_calls_used from api_key where id = ?", Long.class, KEY)).isEqualTo(44L);
+    }
+
+    @Test
+    void aRevokedKeyIsNotCounted() {
+        jdbcTemplate.update("update api_key set active = false where id = ?", KEY);
+
+        assertThat(apiKeyRepository.recordRequest(KEY, LocalDateTime.now())).isZero();
+        assertThat(jdbcTemplate.queryForMap("select api_calls_used, last_used_at from api_key where id = ?", KEY))
+                .containsEntry("API_CALLS_USED", 4L).containsEntry("LAST_USED_AT", null);
+    }
+
+    @Test
+    void anExpiredKeyIsNotCountedAndAKeyThatNeverExpiresIs() {
+        assertThat(apiKeyRepository.recordRequest(KEY, EXPIRES.plusDays(1))).isZero();
+
+        jdbcTemplate.update("update api_key set expiration_date = null where id = ?", KEY);
+        assertThat(apiKeyRepository.recordRequest(KEY, EXPIRES.plusYears(10))).isOne();
+        assertThat(jdbcTemplate.queryForObject("select api_calls_used from api_key where id = ?", Long.class, KEY)).isEqualTo(5L);
+    }
+
+    @Test
+    void aKeyOfAnInactiveAccountIsNotCounted() {
+        jdbcTemplate.update("update user_account set active = false where id = ?", OWNER);
+
+        assertThat(apiKeyRepository.recordRequest(KEY, LocalDateTime.now())).isZero();
+    }
+
+    @Test
+    void anUnknownKeyIsNotCounted() {
+        assertThat(apiKeyRepository.recordRequest(KEY + 1000, LocalDateTime.now())).isZero();
     }
 
     @SpringBootConfiguration

@@ -1990,7 +1990,8 @@ LIMITED_ALIAS=$(jq -r .shortUrl <<<"$HTTP_BODY")
 expect_eq "$(docker exec "$REDIS_CONTAINER" redis-cli --raw get "rate-limit:api-key:$LIMITED_KEY_ID") $(( $(docker exec "$REDIS_CONTAINER" redis-cli --raw pttl "rate-limit:api-key:$LIMITED_KEY_ID") > 0 ))" \
     "1 1" "Redis counts the key under rate-limit:api-key:<id>, with an expiry"
 http "$BASE/api/v1/urls/$LIMITED_ALIAS/peek" -H "X-Api-Key: $LIMITED_KEY"
-expect_eq "$HTTP_STATUS $(header_value RateLimit-Remaining)" "200 598" "a peek with the key counts too"
+expect_eq "$HTTP_STATUS $(header_value RateLimit-Remaining) $(psql_value "select api_calls_used || ' ' || (last_used_at > now() - interval '5 minutes') from api_key where id = $LIMITED_KEY_ID;")" "200 598 2 true" \
+    "a peek with the key counts too, in the hourly limit and in apiCallsUsed and lastUsedAt"
 http "$BASE/api/v1/urls/$LIMITED_ALIAS/peek"
 expect_eq "$HTTP_STATUS $(header_value RateLimit-Limit)" "200 " "a request without a key gets no RateLimit headers"
 
@@ -2015,13 +2016,17 @@ expect_eq "$(header_value RateLimit-Remaining) $(header_value RateLimit-Reset) $
 show "429 headers: $(grep -iE '^(retry-after|ratelimit-|access-control-expose)' <<<"$HTTP_HEADERS" | paste -sd';' -)"
 http -X POST "$BASE/api/v1/urls" -H "X-Api-Key: $LIMITED_KEY" -H 'Content-Type: application/json' -d '{"longUrl":"https://example.com/refused-by-the-key-limit"}'
 expect_eq "$HTTP_STATUS $(psql_value "select count(*) from url where long_url = 'https://example.com/refused-by-the-key-limit';") $(psql_value "select api_calls_used from api_key where id = $LIMITED_KEY_ID;")" \
-    "429 0 1" "a create over the limit makes no link and isn't counted as a use"
+    "429 0 10" "a create over the limit makes no link, and the two refused requests aren't counted: apiCallsUsed is the ten allowed ones"
 expect_contains "$(grep 'API key request refused by the rate limit' "$WORK/app.log" | tail -n1)" "apiKeyId=$LIMITED_KEY_ID" "the refusal is logged with the key id, not the key"
 expect_eq "$(grep -c "$LIMITED_KEY" "$WORK/app.log" || true)" 0 "the key itself is never logged"
 reset_setting API_KEY_REQUESTS_PER_HOUR
 expect_eq "$HTTP_STATUS $(jq -c '[.value, .changed]' <<<"$HTTP_BODY")" "200 [600,false]" "DELETE API_KEY_REQUESTS_PER_HOUR resets it to 600"
 http "$BASE/api/v1/urls/$LIMITED_ALIAS/peek" -H "X-Api-Key: $LIMITED_KEY"
-expect_eq "$HTTP_STATUS $(header_value RateLimit-Limit) $(header_value RateLimit-Remaining)" "200 600 587" "back under the default limit: allowed again"
+expect_eq "$HTTP_STATUS $(header_value RateLimit-Limit) $(header_value RateLimit-Remaining) $(psql_value "select api_calls_used from api_key where id = $LIMITED_KEY_ID;")" "200 600 587 11" \
+    "back under the default limit: allowed again and counted"
+http -X PATCH "$BASE/api/v1/api-keys/$LIMITED_KEY_ID/revoke" -H "Authorization: Bearer $EXPIRY_JWT"
+http "$BASE/api/v1/urls/$LIMITED_ALIAS/peek" -H "X-Api-Key: $LIMITED_KEY"
+expect_eq "$(psql_value "select api_calls_used from api_key where id = $LIMITED_KEY_ID;")" 11 "a request with the revoked key isn't counted"
 for id in "$DAYS_KEY_ID" "$LIMITED_KEY_ID"; do
     http -X PATCH "$BASE/api/v1/api-keys/$id/revoke" -H "Authorization: Bearer $EXPIRY_JWT"
     http -X DELETE "$BASE/api/v1/api-keys/$id" -H "Authorization: Bearer $EXPIRY_JWT"

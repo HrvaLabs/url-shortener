@@ -11,6 +11,8 @@ import cc.hrva.urlshortener.service.settings.SettingKey;
 import cc.hrva.urlshortener.service.settings.SettingsServiceFixtures;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -27,6 +29,9 @@ import org.springframework.mock.web.MockHttpServletResponse;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -69,6 +74,36 @@ class ApiKeyRateLimitFilterTest {
         assertThat(response.getHeader("RateLimit-Remaining")).isEqualTo("595");
         assertThat(response.getHeader("RateLimit-Reset")).isEqualTo("1800");
         assertThat(response.getHeader("Retry-After")).isNull();
+        verify(apiKeyRepository).recordRequest(eq(KEY_ID), any(LocalDateTime.class));
+    }
+
+    @Test
+    void anAllowedRequestIsCountedOnceAsAUseOfTheKey() throws Exception {
+        knownKey();
+        when(rateLimiter.incrementWindow(anyString(), any())).thenReturn(new RateLimitWindow(1, HOUR));
+        final var before = LocalDateTime.now();
+        final var counted = new ArrayList<LocalDateTime>();
+        when(apiKeyRepository.recordRequest(eq(KEY_ID), any(LocalDateTime.class))).thenAnswer(invocation -> {
+            counted.add(invocation.getArgument(1));
+            return 1;
+        });
+
+        filter.doFilter(apiKeyRequest("/api/v1/urls/abc/peek"), new MockHttpServletResponse(), new MockFilterChain());
+
+        assertThat(counted).singleElement().satisfies(at -> assertThat(at).isBetween(before, LocalDateTime.now()));
+        verify(apiKeyRepository, never()).save(any());
+    }
+
+    @Test
+    void aKeyThatIsNoLongerValidIsNotCountedAndLeftToTheEndpoint() throws Exception {
+        knownKey();
+        when(rateLimiter.incrementWindow(anyString(), any())).thenReturn(new RateLimitWindow(1, HOUR));
+        when(apiKeyRepository.recordRequest(eq(KEY_ID), any(LocalDateTime.class))).thenReturn(0);
+        final var chain = new MockFilterChain();
+
+        filter.doFilter(apiKeyRequest("/api/v1/urls"), new MockHttpServletResponse(), chain);
+
+        assertThat(chain.getRequest()).isNotNull();
     }
 
     @Test
@@ -102,6 +137,7 @@ class ApiKeyRateLimitFilterTest {
         assertThat(response.getHeader("RateLimit-Limit")).isEqualTo("600");
         assertThat(response.getHeader("RateLimit-Remaining")).isEqualTo("0");
         assertThat(response.getHeader("RateLimit-Reset")).isEqualTo("1501");
+        verify(apiKeyRepository, never()).recordRequest(any(), any());
     }
 
     @Test
@@ -154,6 +190,7 @@ class ApiKeyRateLimitFilterTest {
         assertThat(chain.getRequest()).isNotNull();
         assertThat(response.getHeader("RateLimit-Limit")).isNull();
         verifyNoInteractions(rateLimiter);
+        verify(apiKeyRepository, never()).recordRequest(any(), any());
     }
 
     @Test
@@ -198,6 +235,7 @@ class ApiKeyRateLimitFilterTest {
         filter.doFilter(apiKeyRequest("/api/v1/urls"), new MockHttpServletResponse(), new MockFilterChain());
         assertThat(warnings(output)).isEqualTo(2);
         assertThat(output.getAll()).doesNotContain(KEY);
+        verify(apiKeyRepository, times(5)).recordRequest(eq(KEY_ID), any(LocalDateTime.class));
     }
 
     private static long warnings(final CapturedOutput output) {

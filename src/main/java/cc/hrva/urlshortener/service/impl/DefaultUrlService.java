@@ -307,7 +307,7 @@ public class DefaultUrlService implements UrlService {
 
         final var created = transactionOperations.execute(status -> {
             url.setDomain(resolveAndLockDomain(createUrlDto.getDomain(), apiKey.getOwner()));
-            apiKeyService.recordUse(apiKey.getId());
+            apiKeyService.requireActive(apiKey.getId());
 
             url.setCreatedVia(createdVia);
             applyPassword(url, createUrlDto.getPassword());

@@ -23,7 +23,7 @@ public interface ApiKeyService {
     Page<ApiKeyResponse> fetchAllApiKeys(String search, Boolean active, Pageable pageable);
     ApiKey findApiKeyByKey(String key);
     ApiKey fetchApiKeyByKey(String key);
-    void recordUse(Long apiKeyId);
+    void requireActive(Long apiKeyId);
     int getActiveApiKeysCountForUser(User user);
     ApiKeyResponse updateKey(ApiKeyUpdateDto apiKeyUpdateDto);
 

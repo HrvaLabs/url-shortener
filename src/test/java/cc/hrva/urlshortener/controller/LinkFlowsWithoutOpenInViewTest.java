@@ -2,6 +2,7 @@ package cc.hrva.urlshortener.controller;
 
 import cc.hrva.urlshortener.audit.AdminAuditAspect;
 import cc.hrva.urlshortener.configuration.AppConfiguration;
+import cc.hrva.urlshortener.configuration.ClockConfiguration;
 import cc.hrva.urlshortener.configuration.GlobalExceptionHandler;
 import cc.hrva.urlshortener.configuration.JacksonConfiguration;
 import cc.hrva.urlshortener.configuration.SecurityConfiguration;
@@ -24,6 +25,7 @@ import cc.hrva.urlshortener.repository.CustomDomainRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.security.AnyHostIsPrimary;
+import cc.hrva.urlshortener.security.ApiKeyRateLimitFilter;
 import cc.hrva.urlshortener.security.ApiKeyTokens;
 import cc.hrva.urlshortener.security.ClickRequestResolver;
 import cc.hrva.urlshortener.security.ClientIpResolver;
@@ -51,6 +53,7 @@ import cc.hrva.urlshortener.service.domain.UrlCache;
 import cc.hrva.urlshortener.service.impl.DefaultApiKeyService;
 import cc.hrva.urlshortener.service.impl.DefaultAuditLogService;
 import cc.hrva.urlshortener.service.impl.DefaultUrlService;
+import cc.hrva.urlshortener.service.ratelimit.RateLimitWindow;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiter;
 import cc.hrva.urlshortener.service.HumanCheckTestConfiguration;
 import cc.hrva.urlshortener.service.linksignal.AnonymousLinkSignalsTestConfiguration;
@@ -60,6 +63,7 @@ import cc.hrva.urlshortener.validator.impl.DefaultUrlValidator;
 import com.nimbusds.jose.JOSEException;
 import com.nimbusds.jose.jwk.RSAKey;
 import com.nimbusds.jose.jwk.gen.RSAKeyGenerator;
+import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.AfterEach;
@@ -242,6 +246,7 @@ class LinkFlowsWithoutOpenInViewTest {
         when(userService.getUserFromToken()).thenAnswer(invocation -> signedInAccount());
         when(linkCheckService.check(any())).thenReturn(LinkVerdict.clean());
         when(rateLimiter.tryAcquire(anyString(), anyInt(), any())).thenReturn(true);
+        when(rateLimiter.incrementWindow(anyString(), any())).thenReturn(new RateLimitWindow(1, Duration.ofHours(1)));
     }
 
     @AfterEach
@@ -500,7 +505,8 @@ class LinkFlowsWithoutOpenInViewTest {
 
         assertThat(jdbcTemplate.queryForObject("select count(*) from url where owner_id = ? and domain_id = ?", Long.class, OWNER, OWNERS_DOMAIN))
                 .isEqualTo(1L);
-        assertThat(jdbcTemplate.queryForObject("select api_calls_used from api_key where id = ?", Long.class, OWNERS_KEY)).isEqualTo(1L);
+        assertThat(jdbcTemplate.queryForObject("select api_calls_used from api_key where id = ?", Long.class, OWNERS_KEY))
+                .as("both requests were made with a valid key, the refused one too").isEqualTo(2L);
     }
 
     @Test
@@ -611,6 +617,8 @@ class LinkFlowsWithoutOpenInViewTest {
             AuthorizationServerConfiguration.class,
             McpResourceServerConfiguration.class,
             JwtFilter.class,
+            ApiKeyRateLimitFilter.class,
+            ClockConfiguration.class,
             ClientIpResolver.class,
             ClickRequestResolver.class,
             UrlController.class,

@@ -16,6 +16,7 @@ import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 
 @Repository
 public interface ApiKeyRepository extends JpaRepository<ApiKey, Long>, JpaSpecificationExecutor<ApiKey> {
@@ -35,17 +36,19 @@ public interface ApiKeyRepository extends JpaRepository<ApiKey, Long>, JpaSpecif
     List<ApiKey> findByOwnerAndActiveTrue(User owner);
     List<ApiKey> findByExpirationDateIsLessThanEqualAndActiveTrue(LocalDateTime createDate);
 
-    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Transactional
+    @Modifying
     @Query("""
             update ApiKey k
-            set k.active = case
-                    when k.expirationDate is not null and k.expirationDate < :now then false
-                    else k.active
-                end,
-                k.apiCallsUsed = k.apiCallsUsed + 1,
+            set k.apiCallsUsed = coalesce(k.apiCallsUsed, 0) + 1,
                 k.lastUsedAt = :now
-            where k.id = :id and k.active = true""")
-    int recordUse(@Param("id") Long id, @Param("now") LocalDateTime now);
+            where k.id = :id
+                and k.active = true
+                and (k.expirationDate is null or k.expirationDate >= :now)
+                and exists (select u.id from User u where u.id = k.owner.id and (u.active is null or u.active = true))""")
+    int recordRequest(@Param("id") Long id, @Param("now") LocalDateTime now);
+
+    boolean existsByIdAndActiveTrue(Long id);
 
     @Modifying(flushAutomatically = true)
     @Query("update ApiKey k set k.active = false where k.owner.id = :ownerId and k.active = true")

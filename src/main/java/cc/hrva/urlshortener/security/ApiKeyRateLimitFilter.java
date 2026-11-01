@@ -15,6 +15,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 import lombok.extern.slf4j.Slf4j;
@@ -79,6 +80,7 @@ public class ApiKeyRateLimitFilter extends OncePerRequestFilter {
             window = rateLimiter.incrementWindow(RATE_LIMIT_NAME + keyId.get(), WINDOW);
         } catch (final RateLimiterUnavailableException exception) {
             warnAtMostOncePerInterval();
+            apiKeyRepository.recordRequest(keyId.get(), LocalDateTime.now());
             filterChain.doFilter(request, response);
             return;
         }
@@ -99,6 +101,7 @@ public class ApiKeyRateLimitFilter extends OncePerRequestFilter {
             return;
         }
 
+        apiKeyRepository.recordRequest(keyId.get(), LocalDateTime.now());
         filterChain.doFilter(request, response);
     }
 

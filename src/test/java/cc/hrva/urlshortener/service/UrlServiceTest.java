@@ -770,7 +770,7 @@ class UrlServiceTest {
                 .isInstanceOf(UrlValidationException.class)
                 .hasMessage(BLOCKLIST_REFUSAL);
 
-        verify(apiKeyService, never()).recordUse(any());
+        verify(apiKeyService, never()).requireActive(any());
         verify(safeBrowsingService, never()).checkUrlsForThreats(anyString());
         verify(urlRepository, never()).save(any(Url.class));
     }
@@ -816,7 +816,7 @@ class UrlServiceTest {
         org.mockito.Mockito.doAnswer(invocation -> {
             keyUsedInTransaction.set(TransactionSynchronizationManager.isActualTransactionActive());
             return null;
-        }).when(apiKeyService).recordUse(any());
+        }).when(apiKeyService).requireActive(any());
         when(appProperties.getShortUrlLength()).thenReturn(5L);
         recordTransactionDuringCheck("https://example.com/menu", checkedInTransaction);
         recordTransactionDuringSave(savedInTransaction);
@@ -2008,7 +2008,7 @@ class UrlServiceTest {
 
         verify(linkCheckService, never()).check(anyString());
         verify(safeBrowsingService, never()).checkUrlsForThreats(anyString());
-        verify(apiKeyService, never()).recordUse(any());
+        verify(apiKeyService, never()).requireActive(any());
         verify(urlRepository, never()).save(any(Url.class));
     }
 
@@ -2040,7 +2040,7 @@ class UrlServiceTest {
 
         verify(linkCheckService, never()).check(anyString());
         verify(safeBrowsingService, never()).checkUrlsForThreats(anyString());
-        verify(apiKeyService, never()).recordUse(any());
+        verify(apiKeyService, never()).requireActive(any());
         verify(urlRepository, never()).save(any(Url.class));
     }
 
@@ -2417,7 +2417,7 @@ class UrlServiceTest {
 
         assertThat(created.domain()).isEqualTo(new DomainRef(7L, "go.example.com"));
         verify(userService, never()).getUserFromToken();
-        verify(apiKeyService).recordUse(3L);
+        verify(apiKeyService).requireActive(3L);
     }
 
     @Test
@@ -2431,7 +2431,7 @@ class UrlServiceTest {
                 .isInstanceOfSatisfying(FieldValidationException.class,
                         exception -> assertThat(exception.getFieldErrors()).containsExactly(entry("domain", DOMAIN_REFUSAL)));
 
-        verify(apiKeyService, never()).recordUse(anyLong());
+        verify(apiKeyService, never()).requireActive(anyLong());
         verify(urlRepository, never()).save(any());
     }
 
@@ -2466,7 +2466,7 @@ class UrlServiceTest {
         final var order = org.mockito.Mockito.inOrder(customDomainRepository, apiKeyService);
         order.verify(customDomainRepository, times(2)).findUsable("go.example.com", 5L);
         order.verify(customDomainRepository).findStatusForUpdate(7L);
-        order.verify(apiKeyService).recordUse(3L);
+        order.verify(apiKeyService).requireActive(3L);
         verify(customDomainRepository, times(1)).findStatusForUpdate(7L);
     }
 
@@ -2836,7 +2836,7 @@ class UrlServiceTest {
 
         verify(apiKeyValidator).apiKeyExistsByKeyAndIsValid(api);
         final var order = org.mockito.Mockito.inOrder(apiKeyService, urlRepository);
-        order.verify(apiKeyService).recordUse(3L);
+        order.verify(apiKeyService).requireActive(3L);
         order.verify(urlRepository).save(url);
     }
 
@@ -3037,7 +3037,7 @@ class UrlServiceTest {
         assertThat(result).isInstanceOf(UrlResponse.class);
 
         verify(apiKeyValidator, org.mockito.Mockito.never()).apiKeyExistsByKeyAndIsValid(any());
-        verify(apiKeyService, org.mockito.Mockito.never()).recordUse(any());
+        verify(apiKeyService, org.mockito.Mockito.never()).requireActive(any());
     }
 
     @Test
@@ -3100,7 +3100,7 @@ class UrlServiceTest {
                 .isInstanceOf(RateLimitExceededException.class)
                 .hasMessage(CREATE_LIMIT_REFUSAL);
         verify(urlRepository, times(60)).save(any(Url.class));
-        verify(apiKeyService, times(30)).recordUse(3L);
+        verify(apiKeyService, times(30)).requireActive(3L);
         assertThat(limiter.counts).containsOnlyKeys("create:user:1");
         assertThat(limiter.windows).containsOnly(Duration.ofHours(1));
     }

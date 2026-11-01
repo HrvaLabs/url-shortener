@@ -155,9 +155,8 @@ public class DefaultApiKeyService implements ApiKeyService {
     }
 
     @Override
-    @Transactional
-    public void recordUse(final Long apiKeyId) {
-        if (apiKeyRepository.recordUse(apiKeyId, LocalDateTime.now()) == 0) {
+    public void requireActive(final Long apiKeyId) {
+        if (!apiKeyRepository.existsByIdAndActiveTrue(apiKeyId)) {
             throw new InvalidApiKeyException("API key is invalid");
         }
     }
