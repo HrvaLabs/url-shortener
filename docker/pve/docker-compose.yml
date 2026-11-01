@@ -1,6 +1,4 @@
 services:
   url-shortener-backend:
-    image: ghcr.io/karlohrvacic/url-shortener-be:main
+    image: ghcr.io/hrvalabs/url-shortener:latest
     restart: always
-    ports:
-      - "8080:8080"
