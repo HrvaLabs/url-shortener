@@ -34,6 +34,7 @@ import cc.hrva.urlshortener.exception.SettingNotFoundException;
 import cc.hrva.urlshortener.exception.ShortUrlAlreadyExistsException;
 import cc.hrva.urlshortener.exception.ResetLinkExpiredException;
 import cc.hrva.urlshortener.exception.SignInExpiredException;
+import cc.hrva.urlshortener.exception.ServiceBusyException;
 import cc.hrva.urlshortener.exception.SignInUnavailableException;
 import cc.hrva.urlshortener.exception.TwoStepFailedException;
 import cc.hrva.urlshortener.exception.NoAuthorizationException;
@@ -362,6 +363,13 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
                 .header(HttpHeaders.RETRY_AFTER, ProblemResponses.retryAfterSeconds(ex.getRetryAfter()))
                 .body(ProblemResponses.of(HttpStatus.TOO_MANY_REQUESTS, safeMessage(ex)));
+    }
+
+    @ExceptionHandler(ServiceBusyException.class)
+    public ResponseEntity<ProblemDetail> handleServiceBusy(final ServiceBusyException ex) {
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .header(HttpHeaders.RETRY_AFTER, ProblemResponses.retryAfterSeconds(ex.getRetryAfter()))
+                .body(ProblemResponses.of(HttpStatus.SERVICE_UNAVAILABLE, safeMessage(ex)));
     }
 
     @ExceptionHandler(NoResourceFoundException.class)

@@ -31,4 +31,7 @@ public class PeekUrl {
   @JsonIgnore
   private String domain;
 
+  @JsonIgnore
+  private Long id;
+
 }

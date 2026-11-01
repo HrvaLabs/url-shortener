@@ -1,8 +1,10 @@
 package cc.hrva.urlshortener.service;
 
+import cc.hrva.urlshortener.client.PageFetcher;
 import cc.hrva.urlshortener.client.PublicHttpFetcher;
 import cc.hrva.urlshortener.configuration.PublicHttpFetcherConfiguration;
 import cc.hrva.urlshortener.dto.LinkPreviewResponse;
+import cc.hrva.urlshortener.service.LinkPreviewOutcome.Ready;
 import cc.hrva.urlshortener.service.impl.DefaultLinkPreviewService;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
@@ -19,10 +21,18 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.ValueOperations;
+import tools.jackson.databind.json.JsonMapper;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class DefaultLinkPreviewServiceTest {
+
+    private static final long LINK_ID = 7L;
+    private static final String CLIENT_IP = "203.0.113.7";
 
     private static final String PAGE = """
             <html><head>
@@ -66,10 +76,10 @@ class DefaultLinkPreviewServiceTest {
 
     @Test
     void readsTheOpenGraphTagsOfThePageThroughThePinnedFetcher() {
-        final var service = new DefaultLinkPreviewService((url, maxBytes, timeout) -> loopbackFetcher.fetch(url, maxBytes, null, null, timeout));
+        final var service = service((url, maxBytes, timeout) -> loopbackFetcher.fetch(url, maxBytes, null, null, timeout));
 
-        assertThat(service.fetchPreview(baseUrl + "/moved"))
-                .isEqualTo(new LinkPreviewResponse(baseUrl + "/moved", "Ćevapi u Zagrebu", "Gdje jesti", "https://cdn.example/cevapi.jpg"));
+        assertThat(service.preview(LINK_ID, baseUrl + "/moved", CLIENT_IP)).isEqualTo(new Ready(
+                new LinkPreviewResponse(baseUrl + "/moved", "Ćevapi u Zagrebu", "Gdje jesti", "https://cdn.example/cevapi.jpg")));
         assertThat(requests).containsExactly("/moved", "/article");
     }
 
@@ -87,17 +97,25 @@ class DefaultLinkPreviewServiceTest {
             "not a url"
     })
     void returnsAnEmptyPreviewForATargetThatIsNotAPublicWebAddress(final String url) {
-        final var service = new DefaultLinkPreviewService(new PublicHttpFetcherConfiguration().pageFetcher());
+        final var service = service(new PublicHttpFetcherConfiguration().pageFetcher());
 
-        assertThat(service.fetchPreview(url)).isEqualTo(new LinkPreviewResponse(url, null, null, null));
+        assertThat(service.preview(LINK_ID, url, CLIENT_IP)).isEqualTo(new Ready(new LinkPreviewResponse(url, null, null, null)));
     }
 
     @Test
     void theApplicationPreviewFetcherNeverRequestsALoopbackServer() {
-        final var service = new DefaultLinkPreviewService(new PublicHttpFetcherConfiguration().pageFetcher());
+        final var service = service(new PublicHttpFetcherConfiguration().pageFetcher());
 
-        assertThat(service.fetchPreview(baseUrl + "/article")).isEqualTo(new LinkPreviewResponse(baseUrl + "/article", null, null, null));
+        assertThat(service.preview(LINK_ID, baseUrl + "/article", CLIENT_IP))
+                .isEqualTo(new Ready(new LinkPreviewResponse(baseUrl + "/article", null, null, null)));
         assertThat(requests).isEmpty();
+    }
+
+    private static DefaultLinkPreviewService service(final PageFetcher pageFetcher) {
+        final StringRedisTemplate redisTemplate = mock(StringRedisTemplate.class);
+        final ValueOperations<String, String> values = mock();
+        when(redisTemplate.opsForValue()).thenReturn(values);
+        return new DefaultLinkPreviewService(pageFetcher, (key, window) -> 1L, redisTemplate, JsonMapper.builder().build());
     }
 
     private boolean isLocal(final String url) {

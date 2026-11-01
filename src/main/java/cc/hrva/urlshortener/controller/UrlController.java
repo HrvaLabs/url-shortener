@@ -1,10 +1,13 @@
 package cc.hrva.urlshortener.controller;
 
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
+import java.time.Duration;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -18,11 +21,16 @@ import cc.hrva.urlshortener.dto.UrlResponse;
 import cc.hrva.urlshortener.dto.UrlSearchDto;
 import cc.hrva.urlshortener.dto.UrlUpdateDto;
 import cc.hrva.urlshortener.exception.ApiException;
+import cc.hrva.urlshortener.exception.RateLimitExceededException;
+import cc.hrva.urlshortener.exception.ServiceBusyException;
 import cc.hrva.urlshortener.model.PeekUrl;
 import cc.hrva.urlshortener.model.enums.AuditAction;
 import cc.hrva.urlshortener.model.enums.CreatedVia;
 import cc.hrva.urlshortener.security.ClickRequestResolver;
 import cc.hrva.urlshortener.security.ClientIpResolver;
+import cc.hrva.urlshortener.service.LinkPreviewOutcome.Busy;
+import cc.hrva.urlshortener.service.LinkPreviewOutcome.Limited;
+import cc.hrva.urlshortener.service.LinkPreviewOutcome.Ready;
 import cc.hrva.urlshortener.service.LinkPreviewService;
 import cc.hrva.urlshortener.service.QrCodeService;
 import cc.hrva.urlshortener.service.UrlService;
@@ -56,6 +64,9 @@ public class UrlController {
     private static final int MAX_QR_SIZE = 1024;
     private static final String QR_MARKER_QUERY = "?qr";
     private static final String HTTPS = "https://";
+    private static final String PREVIEWS_LIMITED = "Too many link previews. Try again later.";
+    private static final String PREVIEWS_BUSY = "Link previews are busy. Try again in a few seconds.";
+    private static final Duration PREVIEWS_BUSY_RETRY_AFTER = Duration.ofSeconds(5);
 
     private final UrlService urlService;
     private final QrCodeService qrCodeService;
@@ -111,8 +122,11 @@ public class UrlController {
         return ResponseEntity.ok(urlService.unlockUrl(domain, shortUrl, dto.getPassword(), clickRequestResolver.resolve(request)));
     }
 
-    @Operation(summary = "Get rich link preview", description = "Fetch Open Graph metadata (title, description, image) for a short URL. Add domain=go.example.com for a link on a custom domain.")
+    @Operation(summary = "Get rich link preview", description = "Fetch Open Graph metadata (title, description, image) for a short URL. A preview is kept for 10 minutes. 30 previews per minute per network. Add domain=go.example.com for a link on a custom domain.")
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = LinkPreviewResponse.class)))
     @ApiResponse(responseCode = "404", description = "URL not found")
+    @ApiResponse(responseCode = "429", description = "Too many previews from this network, or of this link (Retry-After)")
+    @ApiResponse(responseCode = "503", description = "Too many previews are being fetched right now (Retry-After)")
     @GetMapping("/{short}/preview")
     public ResponseEntity<LinkPreviewResponse> previewUrl(
             @PathVariable("short") final String shortUrl,
@@ -122,7 +136,11 @@ public class UrlController {
             return ResponseEntity.ok(new LinkPreviewResponse(null, null, null, null));
         }
 
-        return ResponseEntity.ok(linkPreviewService.fetchPreview(urlInfo.getLongUrl()));
+        return switch (linkPreviewService.preview(urlInfo.getId(), urlInfo.getLongUrl(), clientIpResolver.getClientIp(request))) {
+            case Ready ready -> ResponseEntity.ok(ready.preview());
+            case Limited limited -> throw new RateLimitExceededException(PREVIEWS_LIMITED, limited.retryAfter());
+            case Busy busy -> throw new ServiceBusyException(PREVIEWS_BUSY, PREVIEWS_BUSY_RETRY_AFTER);
+        };
     }
 
     @Operation(summary = "Generate QR code", description = "Generate a QR code PNG for the short URL. It encodes the short link with the ?qr marker, so its scans count as QR scans in the link's analytics. Optional size parameter. Add domain=go.example.com for a link on a custom domain.")

@@ -6,6 +6,7 @@ import cc.hrva.urlshortener.exception.BioPageNotFoundException;
 import cc.hrva.urlshortener.exception.BulkBlockIncompleteException;
 import cc.hrva.urlshortener.exception.FieldValidationException;
 import cc.hrva.urlshortener.exception.RateLimitExceededException;
+import cc.hrva.urlshortener.exception.ServiceBusyException;
 import cc.hrva.urlshortener.exception.SettingNotFoundException;
 import cc.hrva.urlshortener.exception.SignInUnavailableException;
 import java.util.Map;
@@ -157,8 +158,21 @@ class GlobalExceptionHandlerTest {
                 .andExpect(jsonPath("$.detail").value("Signing in isn't available right now. Try again in a minute."));
     }
 
+    @Test
+    void aBusyServiceIsAServiceUnavailableWithItsRetryAfter() throws Exception {
+        mockMvc.perform(get("/probe/busy"))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(header().string("Retry-After", "5"))
+                .andExpect(jsonPath("$.detail").value("Link previews are busy. Try again in a few seconds."));
+    }
+
     @RestController
     static class ProbeController {
+
+        @GetMapping("/probe/busy")
+        String probeBusy() {
+            throw new ServiceBusyException("Link previews are busy. Try again in a few seconds.", java.time.Duration.ofSeconds(5));
+        }
 
         @GetMapping("/probe/sign-in-unavailable")
         String probeSignInUnavailable() {

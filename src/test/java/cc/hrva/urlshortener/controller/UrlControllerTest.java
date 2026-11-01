@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.controller;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.Collections;
 import java.util.List;
@@ -23,6 +24,9 @@ import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.enums.CreatedVia;
 import cc.hrva.urlshortener.security.ClickRequestResolver;
 import cc.hrva.urlshortener.security.ClientIpResolver;
+import cc.hrva.urlshortener.service.LinkPreviewOutcome.Busy;
+import cc.hrva.urlshortener.service.LinkPreviewOutcome.Limited;
+import cc.hrva.urlshortener.service.LinkPreviewOutcome.Ready;
 import cc.hrva.urlshortener.service.LinkPreviewService;
 import cc.hrva.urlshortener.service.QrCodeService;
 import cc.hrva.urlshortener.service.UrlService;
@@ -45,6 +49,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.never;
@@ -58,6 +63,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -401,13 +407,40 @@ class UrlControllerTest {
     }
 
     @Test
+    void aPreviewOverItsLimitAnswers429WithRetryAfter() throws Exception {
+        when(urlService.peekUrlByShortUrl(null, "menu")).thenReturn(PeekUrl.builder().id(3L).shortUrl("menu").longUrl("https://a.example/menu").build());
+        when(clientIpResolver.getClientIp(any())).thenReturn("203.0.113.7");
+        when(linkPreviewService.preview(3L, "https://a.example/menu", "203.0.113.7")).thenReturn(new Limited(Duration.ofSeconds(42)));
+
+        mockMvc.perform(get("/api/v1/urls/menu/preview"))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(header().string("Retry-After", "42"))
+                .andExpect(content().contentTypeCompatibleWith("application/problem+json"))
+                .andExpect(jsonPath("$.status").value(429))
+                .andExpect(jsonPath("$.detail").value("Too many link previews. Try again later."));
+    }
+
+    @Test
+    void aPreviewWhileEveryFetchSlotIsBusyAnswers503WithRetryAfter() throws Exception {
+        when(urlService.peekUrlByShortUrl(null, "menu")).thenReturn(PeekUrl.builder().id(3L).shortUrl("menu").longUrl("https://a.example/menu").build());
+        when(linkPreviewService.preview(eq(3L), eq("https://a.example/menu"), any())).thenReturn(new Busy());
+
+        mockMvc.perform(get("/api/v1/urls/menu/preview"))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(header().string("Retry-After", "5"))
+                .andExpect(content().contentTypeCompatibleWith("application/problem+json"))
+                .andExpect(jsonPath("$.status").value(503))
+                .andExpect(jsonPath("$.detail").value("Link previews are busy. Try again in a few seconds."));
+    }
+
+    @Test
     void previewOfAPasswordProtectedLinkFetchesNothing() throws Exception {
         when(urlService.peekUrlByShortUrl(null, "board")).thenReturn(PeekUrl.builder().shortUrl("board").passwordProtected(true).build());
 
         mockMvc.perform(get("/api/v1/urls/board/preview"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.url").doesNotExist());
-        verify(linkPreviewService, never()).fetchPreview(any());
+        verify(linkPreviewService, never()).preview(anyLong(), any(), any());
     }
 
     @Test
@@ -468,8 +501,9 @@ class UrlControllerTest {
         when(clickRequestResolver.resolve(any())).thenReturn(CLICK);
         when(urlService.revealUrlAndRecordClick("go.example.com", "menu", CLICK)).thenReturn(UrlResponse.from(onDomain).publicView());
         when(urlService.peekUrlByShortUrl("go.example.com", "menu"))
-                .thenReturn(PeekUrl.builder().shortUrl("menu").longUrl("https://b.example/menu").domain("go.example.com").build());
-        when(linkPreviewService.fetchPreview("https://b.example/menu")).thenReturn(new LinkPreviewResponse("https://b.example/menu", "B", null, null));
+                .thenReturn(PeekUrl.builder().id(2L).shortUrl("menu").longUrl("https://b.example/menu").domain("go.example.com").build());
+        when(linkPreviewService.preview(eq(2L), eq("https://b.example/menu"), any()))
+                .thenReturn(new Ready(new LinkPreviewResponse("https://b.example/menu", "B", null, null)));
 
         mockMvc.perform(get("/api/v1/urls/menu").param("domain", "go.example.com"))
                 .andExpect(status().isOk())
