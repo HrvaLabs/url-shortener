@@ -1,10 +1,12 @@
 package cc.hrva.urlshortener.service;
 
+import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.model.Email;
 import cc.hrva.urlshortener.service.impl.DefaultEmailService;
 import jakarta.mail.Multipart;
 import jakarta.mail.Part;
 import jakarta.mail.Session;
+import jakarta.mail.internet.InternetAddress;
 import jakarta.mail.internet.MimeMessage;
 import java.util.ArrayList;
 import java.util.List;
@@ -32,11 +34,14 @@ class DefaultEmailServiceTest {
     @Mock
     private JavaMailSender javaMailSender;
 
+    private AppProperties appProperties;
+
     private DefaultEmailService emailService;
 
     @BeforeEach
     void setUp() {
-        emailService = new DefaultEmailService(javaMailSender);
+        appProperties = new AppProperties();
+        emailService = new DefaultEmailService(javaMailSender, appProperties);
         when(javaMailSender.createMimeMessage()).thenReturn(new MimeMessage((Session) null));
     }
 
@@ -90,6 +95,26 @@ class DefaultEmailServiceTest {
         final var message = sentMessage();
         assertThat(message.getHeader("List-Unsubscribe")).isNull();
         assertThat(message.getHeader("List-Unsubscribe-Post")).isNull();
+    }
+
+    @Test
+    void senderGoesOutWithTheDisplayName() throws Exception {
+        emailService.sendEmail(email(null), null);
+
+        final var from = (InternetAddress) sentMessage().getFrom()[0];
+        assertThat(from.getPersonal()).isEqualTo("hrva.cc");
+        assertThat(from.getAddress()).isEqualTo("noreply@hrva.cc");
+    }
+
+    @Test
+    void blankNameSendsTheBareAddress() throws Exception {
+        appProperties.setEmailSenderName(" ");
+
+        emailService.sendEmail(email(null), null);
+
+        final var from = (InternetAddress) sentMessage().getFrom()[0];
+        assertThat(from.getPersonal()).isNull();
+        assertThat(from.getAddress()).isEqualTo("noreply@hrva.cc");
     }
 
     private static Email email(final String plainText) {

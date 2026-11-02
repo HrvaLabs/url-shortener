@@ -26,6 +26,7 @@ spring:
 app:
   jwt-base64-secret: MzMzYjg3YTRmYmU0YmM4YzJkZWE4NTJlZGEzMDgzZjkzOWNjM2MwMWQ4NzI2MjgwZWU0MzM5ZTY0MGEzMjg1YzIwMjU1MWM5ZTNkMzg5YWNiMjExNGJlMTE4NjZlMWMxODIxNjYwMTBkZTRiZWRlNzU3MDc5ZThhMDcxMjlkMGE
   email-sender-address: no-reply@hrva.cc
+  email-sender-name: hrva.cc
   contact-email: info@localhost
   server-url: http://localhost:8080
   frontend-url: http://localhost:3000

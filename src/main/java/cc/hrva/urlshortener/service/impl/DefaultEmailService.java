@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.service.impl;
 
+import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.exception.MailingException;
 import jakarta.mail.MessagingException;
 import jakarta.mail.Multipart;
@@ -7,6 +8,7 @@ import jakarta.mail.internet.MimeBodyPart;
 import jakarta.mail.internet.MimeMessage;
 import java.io.File;
 import java.io.IOException;
+import java.io.UnsupportedEncodingException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import cc.hrva.urlshortener.model.Email;
@@ -22,6 +24,7 @@ import org.springframework.stereotype.Service;
 public class DefaultEmailService implements EmailService {
 
     private final JavaMailSender javaMailSender;
+    private final AppProperties appProperties;
 
     @Override
     public void sendEmail(final Email email, final File attachment) throws MessagingException {
@@ -52,7 +55,7 @@ public class DefaultEmailService implements EmailService {
 
     private void setEmailMessageParameters(final Email email, final MimeMessageHelper message) throws MessagingException {
         if (StringUtils.isNotEmpty(email.getSender())) {
-            message.setFrom(email.getSender());
+            setSender(email, message);
         }
         message.setTo(email.getReceivers());
         if (email.getBcc() != null) {
@@ -63,6 +66,20 @@ public class DefaultEmailService implements EmailService {
             message.setText(email.getPlainText(), email.getText());
         } else {
             message.setText(email.getText(), true);
+        }
+    }
+
+    private void setSender(final Email email, final MimeMessageHelper message) throws MessagingException {
+        final var name = appProperties.getEmailSenderName();
+        if (StringUtils.isBlank(name)) {
+            message.setFrom(email.getSender());
+            return;
+        }
+        try {
+            message.setFrom(email.getSender(), name);
+        } catch (final UnsupportedEncodingException e) {
+            log.error("Exception while encoding the sender name.", e);
+            throw new MailingException("Error while encoding the sender name.");
         }
     }
 

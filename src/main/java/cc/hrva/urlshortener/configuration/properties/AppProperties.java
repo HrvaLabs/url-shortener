@@ -60,6 +60,8 @@ public class AppProperties {
     @NotBlank
     private String emailSenderAddress;
 
+    private String emailSenderName = "hrva.cc";
+
     @NotNull
     @Positive
     private Long ipRetentionDurationInHours;
