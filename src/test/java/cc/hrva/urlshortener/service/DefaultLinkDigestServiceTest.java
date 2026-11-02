@@ -134,8 +134,7 @@ class DefaultLinkDigestServiceTest {
         lenient().when(reviewQueueService.open(any(), any())).thenReturn(Page.empty());
         blockedAutomatically();
         sources(source("HaGeZi Fake", null));
-        lenient().when(scammerSignalService.possibleScammerIds()).thenReturn(Set.of(NEWCOMER.getId()));
-        lenient().when(userRepository.findAllById(any())).thenReturn(List.of(NEWCOMER));
+        lenient().when(scammerSignalService.possibleScammerIds()).thenReturn(Set.of());
         lenient().when(urlRepository.findTop10ByCreateDateAfterAndOwnerCreateDateAfterOrderByCreateDateDesc(any(), any()))
                 .thenReturn(List.of(link(70L, "fresh", "https://example.com/fresh", NEWCOMER)));
 
@@ -247,6 +246,23 @@ class DefaultLinkDigestServiceTest {
         final var digest = sentDigest();
         assertThat(digest.openCount()).isZero();
         assertThat(digest.failingSources()).containsExactly(new DecisionsDigest.FailingSource("HaGeZi Fake", "HTTP 503 from every mirror"));
+    }
+
+    @Test
+    void aPossibleScammerSendsTheEmailOnItsOwn() {
+        openEntries(0L);
+        blockedAutomatically();
+        sources(source("HaGeZi Fake", null));
+        when(scammerSignalService.possibleScammerIds()).thenReturn(Set.of(NEWCOMER.getId()));
+        when(userRepository.findAllById(Set.of(NEWCOMER.getId()))).thenReturn(List.of(NEWCOMER));
+        when(urlRepository.countByOwnerAndBlockReasonIsNotNull(NEWCOMER)).thenReturn(3L);
+        when(urlRepository.countFlaggedByOwner(NEWCOMER)).thenReturn(0L);
+
+        linkDigestService.sendDailyDigest();
+
+        final var digest = sentDigest();
+        assertThat(digest.openCount()).isZero();
+        assertThat(digest.possibleScammers()).containsExactly(new DecisionsDigest.PossibleScammer("raulsado50w@gmail.com", 3, 0));
     }
 
     @Test

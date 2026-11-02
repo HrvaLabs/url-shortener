@@ -69,13 +69,15 @@ public class DefaultLinkDigestService implements LinkDigestService {
             return;
         }
 
-        log.info("Decisions email: {} open, {} bio pages open, {} blocked automatically, {} failing sources",
-                digest.openCount(), digest.openBioPageReviews(), digest.autoBlocked().size(), digest.failingSources().size());
+        log.info("Decisions email: {} open, {} bio pages open, {} possible scammers, {} blocked automatically, {} failing sources",
+                digest.openCount(), digest.openBioPageReviews(), digest.possibleScammers().size(), digest.autoBlocked().size(),
+                digest.failingSources().size());
         sendingEmailService.sendDecisionsEmailToAdmin(digest);
     }
 
     private static boolean needsAttention(final DecisionsDigest digest) {
-        return digest.openCount() > 0 || digest.openBioPageReviews() > 0 || !digest.autoBlocked().isEmpty() || !digest.failingSources().isEmpty();
+        return digest.openCount() > 0 || digest.openBioPageReviews() > 0 || !digest.possibleScammers().isEmpty() || !digest.autoBlocked().isEmpty()
+                || !digest.failingSources().isEmpty();
     }
 
     private List<LinkDigestEntry> newestOpen() {
