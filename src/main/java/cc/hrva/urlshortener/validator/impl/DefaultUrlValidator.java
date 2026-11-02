@@ -14,7 +14,10 @@ import cc.hrva.urlshortener.service.UserService;
 import cc.hrva.urlshortener.service.settings.SettingKey;
 import cc.hrva.urlshortener.util.DomainNames;
 import cc.hrva.urlshortener.validator.UrlValidator;
+import cc.hrva.urlshortener.model.enums.BlockReason;
 import java.net.URI;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.regex.Pattern;
 import lombok.RequiredArgsConstructor;
 import org.apache.commons.lang3.StringUtils;
@@ -38,6 +41,7 @@ public class DefaultUrlValidator implements UrlValidator {
     private static final String BLOCKLISTED = "This destination is on a blocklist and can't be shortened. If you think that's a mistake, contact us.";
     private static final String STILL_BLOCKED = "This destination is still blocked: ";
     private static final String REASON_SEPARATOR = ", ";
+    private static final String SAFE_BROWSING_REASON = "Google Safe Browsing: ";
 
     private static final int MAX_HOST_LENGTH = 253;
     private static final Pattern WEB_ADDRESS_PREFIX = Pattern.compile("^https?://[^/]", Pattern.CASE_INSENSITIVE);
@@ -73,6 +77,18 @@ public class DefaultUrlValidator implements UrlValidator {
             throw new UrlValidationException(BLOCKLISTED);
         }
         return verdict;
+    }
+
+    @Override
+    public LinkVerdict destinationVerdict(final Url url) {
+        final var verdict = linkCheckService.check(url.getLongUrl());
+        final var threats = settingsService.isOn(SettingKey.SAFE_BROWSING_CHECK) ? safeBrowsingService.checkUrlsForThreats(url.getLongUrl()) : List.<String>of();
+        if (threats.isEmpty()) {
+            return verdict;
+        }
+        final var reasons = new ArrayList<>(verdict.reasons());
+        threats.stream().map(threat -> SAFE_BROWSING_REASON + threat).forEach(reasons::add);
+        return new LinkVerdict(LinkVerdict.Outcome.BLOCK, List.copyOf(reasons), BlockReason.SAFE_BROWSING, String.join(REASON_SEPARATOR, threats));
     }
 
     private static boolean isWebAddress(final String longUrl) {

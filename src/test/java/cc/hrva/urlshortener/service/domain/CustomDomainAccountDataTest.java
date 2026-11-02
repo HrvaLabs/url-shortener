@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.service.domain;
 
+import cc.hrva.urlshortener.service.DestinationChangeService;
 import cc.hrva.urlshortener.client.CloudflareClient;
 import cc.hrva.urlshortener.client.CloudflareResult;
 import cc.hrva.urlshortener.configuration.AppConfiguration;
@@ -162,6 +163,9 @@ class CustomDomainAccountDataTest {
 
     @MockitoSpyBean
     private UrlDomainMoves urlDomainMoves;
+
+    @MockitoBean
+    private DestinationChangeService destinationChangeService;
 
     @MockitoBean
     private SignInMethodService signInMethodService;

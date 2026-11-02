@@ -2,6 +2,7 @@ package cc.hrva.urlshortener.service.impl;
 
 import cc.hrva.urlshortener.dto.AccountStanding;
 import cc.hrva.urlshortener.dto.MissingRequirement;
+import cc.hrva.urlshortener.dto.SignInMethodResponse;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.enums.BlockReason;
 import cc.hrva.urlshortener.model.enums.RequirementCode;
@@ -16,9 +17,13 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -44,6 +49,27 @@ public class DefaultAccountStandingService implements AccountStandingService {
 
     @Override
     public AccountStanding standingOf(final User user) {
+        return standing(user, new Links(
+                urlRepository.ownerHasBlockedLink(user.getId(), BlockReason.HOLDS),
+                urlRepository.ownerHasHeldLink(user.getId(), BlockReason.HOLDS) || linkReviewRepository.existsByUrl_Owner_IdAndResolvedAtIsNullAndSystemFlaggedTrue(user.getId())),
+                signInMethodService.methodsOf(user.getId()));
+    }
+
+    @Override
+    public Map<Long, AccountStanding> standingsOf(final Collection<User> users) {
+        if (users.isEmpty()) {
+            return Map.of();
+        }
+        final var ids = users.stream().map(User::getId).toList();
+        final var blocked = Set.copyOf(urlRepository.ownersWithBlockedLinks(ids, BlockReason.HOLDS));
+        final var beingChecked = new HashSet<>(urlRepository.ownersWithHeldLinks(ids, BlockReason.HOLDS));
+        beingChecked.addAll(linkReviewRepository.findOwnerIdsWithOpenSystemReviews(ids));
+        final var methods = signInMethodService.methodsOf(ids);
+        return users.stream().collect(Collectors.toMap(User::getId, user -> standing(user,
+                new Links(blocked.contains(user.getId()), beingChecked.contains(user.getId())), methods.getOrDefault(user.getId(), List.of()))));
+    }
+
+    private AccountStanding standing(final User user, final Links links, final List<SignInMethodResponse> methods) {
         final var now = LocalDateTime.now(clock.withZone(ZoneId.systemDefault()));
         final var missing = new ArrayList<MissingRequirement>();
         if (!Boolean.TRUE.equals(user.getTwoStepEnabled())) {
@@ -53,27 +79,27 @@ public class DefaultAccountStandingService implements AccountStandingService {
         if (now.isBefore(oldEnoughFrom)) {
             missing.add(new MissingRequirement(RequirementCode.ACCOUNT_AGE, AVAILABLE_FROM.formatted(DAY.format(oldEnoughFrom)), oldEnoughFrom));
         }
-        if (!Boolean.TRUE.equals(user.getEmailVerified()) && !signsInWithAProvider(user)) {
+        if (!Boolean.TRUE.equals(user.getEmailVerified()) && !signsInWithAProvider(methods)) {
             missing.add(MissingRequirement.of(RequirementCode.VERIFIED_EMAIL, VERIFY_EMAIL));
         }
-        final var blockedNow = urlRepository.ownerHasBlockedLink(user.getId(), BlockReason.HOLDS);
-        if (blockedNow) {
+        if (links.blocked()) {
             missing.add(MissingRequirement.of(RequirementCode.NO_BLOCKED_LINKS, LINK_BLOCKED));
         }
-        if (urlRepository.ownerHasHeldLink(user.getId(), BlockReason.HOLDS) || linkReviewRepository.existsByUrl_Owner_IdAndResolvedAtIsNull(user.getId())) {
+        if (links.beingChecked()) {
             missing.add(MissingRequirement.of(RequirementCode.NO_LINKS_BEING_CHECKED, LINK_BEING_CHECKED));
         }
         final var lastBlock = user.getLastLinkBlockedAt();
-        if (!blockedNow && lastBlock != null && now.isBefore(lastBlock.plus(BLOCK_COOLDOWN))) {
+        if (!links.blocked() && lastBlock != null && now.isBefore(lastBlock.plus(BLOCK_COOLDOWN))) {
             final var clearFrom = lastBlock.plus(BLOCK_COOLDOWN);
             missing.add(new MissingRequirement(RequirementCode.NO_RECENT_BLOCKS, RECENT_BLOCK.formatted(DAY.format(clearFrom)), clearFrom));
         }
         return new AccountStanding(List.copyOf(missing));
     }
 
-    private boolean signsInWithAProvider(final User user) {
-        return signInMethodService.methodsOf(user.getId()).stream()
-                .anyMatch(method -> PROVIDERS.contains(method.method()) && method.turnedOffAt() == null);
+    private static boolean signsInWithAProvider(final List<SignInMethodResponse> methods) {
+        return methods.stream().anyMatch(method -> PROVIDERS.contains(method.method()) && method.turnedOffAt() == null);
     }
+
+    private record Links(boolean blocked, boolean beingChecked) {}
 
 }

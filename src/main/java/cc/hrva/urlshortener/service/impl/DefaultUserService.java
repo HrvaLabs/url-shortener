@@ -36,6 +36,7 @@ import cc.hrva.urlshortener.security.Reauthentication;
 import cc.hrva.urlshortener.service.ResetTokenService;
 import cc.hrva.urlshortener.service.ScammerSignalService;
 import cc.hrva.urlshortener.service.SignInMethodChangeService;
+import cc.hrva.urlshortener.service.DestinationChangeService;
 import cc.hrva.urlshortener.service.SignInMethodService;
 import cc.hrva.urlshortener.service.inactivity.InactiveAccounts;
 import cc.hrva.urlshortener.service.ratelimit.AccountEmailLimits;
@@ -106,6 +107,7 @@ public class DefaultUserService implements UserService {
     private final ApplicationEventPublisher eventPublisher;
     private final InactiveAccounts inactiveAccounts;
     private final AccountEmailLimits accountEmailLimits;
+    private final DestinationChangeService destinationChangeService;
 
     @Override
     @Transactional
@@ -176,7 +178,9 @@ public class DefaultUserService implements UserService {
         final var spec = buildSpecification(search, onlyPossibleScammers ? possibleScammers : null);
         final var users = spec == null ? userRepository.findAll(sorted) : userRepository.findAll(spec, sorted);
         final var signInMethods = signInMethodService.methodsOf(users.map(User::getId).getContent());
-        return users.map(user -> AdminUserResponse.from(user, signInMethods, possibleScammers.contains(user.getId())));
+        final var destinationChanges = destinationChangeService.standingsOf(users.getContent());
+        return users.map(user -> AdminUserResponse.from(user, signInMethods, possibleScammers.contains(user.getId()))
+                .withDestinationChanges(destinationChanges.get(user.getId())));
     }
 
     private Specification<User> buildSpecification(final UserSearchDto search, final Set<Long> possibleScammers) {
@@ -310,7 +314,8 @@ public class DefaultUserService implements UserService {
             eventPublisher.publishEvent(new AccountActiveChangedEvent(List.of(updatedUser.getId())));
         }
 
-        return AdminUserResponse.from(updatedUser, signInMethodService.methodsOf(updatedUser.getId()));
+        return AdminUserResponse.from(updatedUser, signInMethodService.methodsOf(updatedUser.getId()))
+                .withDestinationChanges(destinationChangeService.standingOf(updatedUser));
     }
 
     @Override

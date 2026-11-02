@@ -174,6 +174,13 @@ public interface UrlRepository extends JpaRepository<Url, Long>, JpaSpecificatio
     @Query("select count(u) > 0 from Url u where u.owner.id = :ownerId and u.threatType is null and u.blockReason in :holds")
     boolean ownerHasHeldLink(@Param("ownerId") long ownerId, @Param("holds") Collection<BlockReason> holds);
 
+    @Query("select distinct u.owner.id from Url u where u.owner.id in :ownerIds and (u.threatType is not null "
+            + "or (u.blockReason is not null and u.blockReason not in :holds))")
+    List<Long> ownersWithBlockedLinks(@Param("ownerIds") Collection<Long> ownerIds, @Param("holds") Collection<BlockReason> holds);
+
+    @Query("select distinct u.owner.id from Url u where u.owner.id in :ownerIds and u.threatType is null and u.blockReason in :holds")
+    List<Long> ownersWithHeldLinks(@Param("ownerIds") Collection<Long> ownerIds, @Param("holds") Collection<BlockReason> holds);
+
     @Query("select distinct t from Url u join u.tags t where u.owner = :owner order by t")
     List<String> findDistinctTagsByOwner(@Param("owner") User owner);
 

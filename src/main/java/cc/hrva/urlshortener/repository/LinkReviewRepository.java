@@ -27,10 +27,13 @@ public interface LinkReviewRepository extends JpaRepository<LinkReview, Long>, J
     long countByResolvedAtIsNull();
     long countByResolvedAtIsNullAndReasonsContaining(String reason);
     long countByUrlOwnerAndResolvedAtIsNull(User owner);
-    boolean existsByUrl_Owner_IdAndResolvedAtIsNull(Long ownerId);
-    boolean existsByUrl_IdAndResolvedAtIsNull(Long urlId);
+    boolean existsByUrl_Owner_IdAndResolvedAtIsNullAndSystemFlaggedTrue(Long ownerId);
+    boolean existsByUrl_IdAndResolvedAtIsNullAndSystemFlaggedTrue(Long urlId);
     boolean existsByUrlAndResolvedAtIsNullAndSystemFlaggedTrue(Url url);
     boolean existsByUrlOwnerAndResolvedAtIsNullAndSystemFlaggedTrue(User owner);
+
+    @Query("select distinct r.url.owner.id from LinkReview r where r.resolvedAt is null and r.systemFlagged = true and r.url.owner.id in :ownerIds")
+    List<Long> findOwnerIdsWithOpenSystemReviews(@Param("ownerIds") Collection<Long> ownerIds);
 
     @Query("select distinct r.url.id from LinkReview r where r.resolvedAt is null and r.url.id in :urlIds")
     List<Long> findOpenUrlIds(@Param("urlIds") Collection<Long> urlIds);

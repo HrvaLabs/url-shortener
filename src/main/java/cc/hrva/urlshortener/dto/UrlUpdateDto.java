@@ -38,5 +38,8 @@ public class UrlUpdateDto {
     @Schema(description = "true turns the link back on after the save, with the same checks as a new link; false turns it off; null leaves it as it is",
             example = "true")
     private Boolean active;
+    @Schema(description = "Admins only: true saves a new destination the link checks would block or send to review (the 409 answer lists why); "
+            + "the change is marked as forced. Ignored for owners", example = "false")
+    private Boolean force;
 
 }

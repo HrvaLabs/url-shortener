@@ -26,6 +26,9 @@
             <column name="via" type="VARCHAR(20)">
                 <constraints nullable="false"/>
             </column>
+            <column name="forced" type="BOOLEAN" defaultValueBoolean="false">
+                <constraints nullable="false"/>
+            </column>
             <column name="changed_at" type="TIMESTAMP">
                 <constraints nullable="false"/>
             </column>
@@ -45,6 +48,17 @@
         </addColumn>
         <rollback>
             <dropColumn tableName="user_account" columnName="last_link_blocked_at"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet author="khrvacic" id="044-user-destination-change-override">
+        <addColumn tableName="user_account">
+            <column name="destination_change_override" type="VARCHAR(20)" defaultValue="AUTOMATIC">
+                <constraints nullable="false"/>
+            </column>
+        </addColumn>
+        <rollback>
+            <dropColumn tableName="user_account" columnName="destination_change_override"/>
         </rollback>
     </changeSet>
 

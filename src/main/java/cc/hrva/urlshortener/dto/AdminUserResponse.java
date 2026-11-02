@@ -20,7 +20,8 @@ public record AdminUserResponse(
         Boolean twoStepEnabled,
         String authProvider,
         List<SignInMethodResponse> signInMethods,
-        @JsonInclude(JsonInclude.Include.NON_NULL) Boolean possibleScammer) {
+        @JsonInclude(JsonInclude.Include.NON_NULL) Boolean possibleScammer,
+        @JsonInclude(JsonInclude.Include.NON_NULL) DestinationChangeStanding destinationChanges) {
 
     public static AdminUserResponse from(final User user, final List<SignInMethodResponse> signInMethods) {
         return from(user, signInMethods, null);
@@ -44,7 +45,13 @@ public record AdminUserResponse(
                 user.getTwoStepEnabled(),
                 user.getAuthProvider(),
                 signInMethods == null ? List.of() : List.copyOf(signInMethods),
-                possibleScammer);
+                possibleScammer,
+                null);
+    }
+
+    public AdminUserResponse withDestinationChanges(final DestinationChangeStanding standing) {
+        return new AdminUserResponse(id, email, apiKeySlots, authorities, createDate, lastLogin, active, emailVerified, twoFactorEnabled, twoStepEnabled,
+                authProvider, signInMethods, possibleScammer, standing);
     }
 
 }

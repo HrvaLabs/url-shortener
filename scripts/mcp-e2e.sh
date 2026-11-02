@@ -82,7 +82,10 @@
 # an API key refused with the list of what's missing, then allowed once the account is in good standing (set in Postgres), recorded in
 # the history and the audit log, and the redirect follows at once; a blocked destination and another shortener refused; the sixth change
 # of the day a 429 with the counter's time left; the DESTINATION_CHANGES switch stopping the owner but not the admin; a used-up and an
-# expired link turned back on by one save; and the admin's paged history of the link.
+# expired link turned back on by one save; an admin's blocked destination answered with the verdict and saved, marked forced, only with
+# force: true; the per-account override (Never allowed stopping an owner in good standing, Always allowed letting one with two-step off, the
+# audit rows and the user list, with a visitor's report on the link counting against nothing and staying open); and the admin's paged
+# history of the link.
 #
 #   scripts/mcp-e2e.sh                         builds the jar, then runs every step
 #   MCP_E2E_SKIP_BUILD=1 scripts/mcp-e2e.sh    reuses target/url-shortener-*.jar
@@ -1157,8 +1160,10 @@ section "19. Admin user list and edit"
 http -G "$BASE/api/v1/users" -H "Authorization: Bearer $ADMIN_JWT" --data-urlencode "search=$USER_EMAIL"
 expect_eq "$HTTP_STATUS" 200 "GET /api/v1/users as admin@localhost"
 expect_eq "$(jq -c '.content[0] | keys' <<<"$HTTP_BODY")" \
-    '["active","apiKeySlots","authProvider","authorities","createDate","email","emailVerified","id","lastLogin","possibleScammer","signInMethods","twoFactorEnabled","twoStepEnabled"]' \
-    "a user row has the fields the User entity had, plus signInMethods"
+    '["active","apiKeySlots","authProvider","authorities","createDate","destinationChanges","email","emailVerified","id","lastLogin","possibleScammer","signInMethods","twoFactorEnabled","twoStepEnabled"]' \
+    "a user row has the fields the User entity had, plus signInMethods and destinationChanges"
+expect_eq "$(jq -c '.content[0].destinationChanges | keys' <<<"$HTTP_BODY")" '["allowed","inGoodStanding","missing","override"]' \
+    "destinationChanges has the override, whether the account is allowed, its standing and what is missing"
 expect_contains "$(jq -c '[.content[0].signInMethods[].method]' <<<"$HTTP_BODY")" '"PASSWORD"' "the password sign-ins are recorded as a sign-in method"
 expect_eq "$(jq -c '.content[0].authorities | map(keys) | unique' <<<"$HTTP_BODY")" '[["active","authority","id","name"]]' "each role has id, name, active and authority"
 expect_contains "$(jq -c '[.content[0].authorities[].name]' <<<"$HTTP_BODY")" '"ROLE_USER"' "the roles are read inside the transaction"
@@ -2959,6 +2964,59 @@ http -X PUT "$BASE/api/v1/urls/$SWITCH_ID" -H "Authorization: Bearer $ADMIN_JWT"
 expect_eq "$HTTP_STATUS" 200 "and an admin isn't"
 reset_setting DESTINATION_CHANGES
 expect_eq "$HTTP_STATUS" 200 "DESTINATION_CHANGES is reset"
+
+echo "  --- an admin edits any link, and confirms a destination the checks would refuse"
+http -X POST "$BASE/api/v1/admin/domain-rules" -H "Authorization: Bearer $ADMIN_JWT" -H 'Content-Type: application/json' \
+    -d '{"domain":"e2e-edit-forced.com","type":"BLOCK","reason":"E2E edit"}'
+FORCED_RULE_ID=$(jq -r .rule.id <<<"$HTTP_BODY")
+http -X PUT "$BASE/api/v1/urls/$SWITCH_ID" -H "Authorization: Bearer $ADMIN_JWT" -H 'Content-Type: application/json' \
+    -d "{\"id\":$SWITCH_ID,\"longUrl\":\"https://e2e-edit-forced.com/x\"}"
+show "the admin's blocked destination -> $HTTP_STATUS $(jq -c '{detail, verdict}' <<<"$HTTP_BODY")"
+expect_eq "$HTTP_STATUS $(jq -r .verdict.outcome <<<"$HTTP_BODY")" "409 BLOCK" "the admin gets the verdict and nothing is saved"
+expect_eq "$(psql_value "select long_url from url where id = $SWITCH_ID;")" "https://e2e-edit.com/switched" "the destination is unchanged"
+http -X PUT "$BASE/api/v1/urls/$SWITCH_ID" -H "Authorization: Bearer $ADMIN_JWT" -H 'Content-Type: application/json' \
+    -d "{\"id\":$SWITCH_ID,\"longUrl\":\"https://e2e-edit-forced.com/x\",\"force\":true}"
+expect_eq "$HTTP_STATUS" 200 "with force: true it is saved"
+expect_eq "$(psql_value "select changed_by || ' ' || forced from link_destination_change where url_id = $SWITCH_ID order by id desc limit 1;")" "admin@localhost t" \
+    "the history marks it forced"
+expect_contains "$(psql_value "select details from audit_log where action = 'CHANGE_LINK_DESTINATION' and target_identifier = '$SWITCH_ID' order by id desc limit 1;")" \
+    ", forced: true" "and so does the audit log"
+http -X DELETE "$BASE/api/v1/admin/domain-rules/$FORCED_RULE_ID" -H "Authorization: Bearer $ADMIN_JWT"
+
+echo "  --- the admin's override for an account"
+http -X POST "$BASE/api/v1/reports" -H 'CF-Connecting-IP: 198.51.100.140' -H 'Content-Type: application/json' \
+    -d '{"shortUrl":"e2e-edit-switch","category":"PHISHING"}'
+expect_contains "$HTTP_STATUS" 20 "a visitor reports e2e-edit-switch"
+expect_eq "$(psql_value "select count(*) || ' ' || bool_or(system_flagged) from link_review where url_id = $SWITCH_ID and resolved_at is null;")" "1 f" \
+    "the report is in the review queue"
+http "$BASE/api/v1/admin/users/$EDIT_USER_ID/destination-changes" -H "Authorization: Bearer $ADMIN_JWT"
+expect_eq "$HTTP_STATUS $(jq -c . <<<"$HTTP_BODY")" '200 {"override":"AUTOMATIC","allowed":true,"inGoodStanding":true,"missing":[]}' \
+    "the admin reads the account's override and standing"
+http -X PUT "$BASE/api/v1/admin/users/$EDIT_USER_ID/destination-changes" -H "Authorization: Bearer $ADMIN_JWT" -H 'Content-Type: application/json' \
+    -d '{"override":"NEVER"}'
+expect_eq "$HTTP_STATUS $(jq -r '[.override, .allowed] | map(tostring) | join(",")' <<<"$HTTP_BODY")" "200 NEVER,false" "Never allowed"
+http -X PUT "$BASE/api/v1/urls/$SWITCH_ID" -H "Authorization: Bearer $EDIT_JWT" -H 'Content-Type: application/json' \
+    -d "{\"id\":$SWITCH_ID,\"longUrl\":\"https://e2e-edit.com/by-the-owner\"}"
+expect_eq "$HTTP_STATUS $(jq -r .detail <<<"$HTTP_BODY")" "403 An admin turned off destination changes for your account." \
+    "stops the owner in good standing, with a plain reason"
+psql_value "update user_account set two_step_enabled = false where id = $EDIT_USER_ID;" >/dev/null
+http -X PUT "$BASE/api/v1/admin/users/$EDIT_USER_ID/destination-changes" -H "Authorization: Bearer $ADMIN_JWT" -H 'Content-Type: application/json' \
+    -d '{"override":"ALWAYS"}'
+expect_eq "$HTTP_STATUS $(jq -r '[.override, .allowed, .inGoodStanding, .missing[0].code] | map(tostring) | join(",")' <<<"$HTTP_BODY")" \
+    "200 ALWAYS,true,false,TWO_STEP_SIGN_IN" "Always allowed with two-step off: allowed, the missing requirement still shown"
+http -X PUT "$BASE/api/v1/urls/$SWITCH_ID" -H "Authorization: Bearer $EDIT_JWT" -H 'Content-Type: application/json' \
+    -d "{\"id\":$SWITCH_ID,\"longUrl\":\"https://e2e-edit.com/by-the-owner\"}"
+expect_eq "$HTTP_STATUS" 200 "the owner changes the destination"
+expect_eq "$(psql_value "select count(*) from link_review where url_id = $SWITCH_ID and resolved_at is null;")" 1 \
+    "the visitor's report neither paused the change nor was closed by it"
+http -X PUT "$BASE/api/v1/admin/users/$EDIT_USER_ID/destination-changes" -H "Authorization: Bearer $ADMIN_JWT" -H 'Content-Type: application/json' \
+    -d '{"override":"AUTOMATIC"}'
+expect_eq "$(psql_value "select string_agg(details, ' | ' order by id) from audit_log where action = 'SET_DESTINATION_CHANGE_OVERRIDE' and target_identifier = '$EDIT_USER_ID';")" \
+    "from: AUTOMATIC, to: NEVER | from: NEVER, to: ALWAYS | from: ALWAYS, to: AUTOMATIC" "every override change is in the audit log"
+psql_value "update user_account set two_step_enabled = true where id = $EDIT_USER_ID;" >/dev/null
+http "$BASE/api/v1/users?search=$USER_EMAIL" -H "Authorization: Bearer $ADMIN_JWT"
+expect_eq "$(jq -r '.content[0].destinationChanges | [.override, .allowed] | map(tostring) | join(",")' <<<"$HTTP_BODY")" "AUTOMATIC,true" \
+    "the admin user list shows it"
 
 echo "  --- turning a used-up and an expired link back on"
 http -X POST "$BASE/api/v1/urls" -H "Authorization: Bearer $EDIT_JWT" -H 'Content-Type: application/json' \

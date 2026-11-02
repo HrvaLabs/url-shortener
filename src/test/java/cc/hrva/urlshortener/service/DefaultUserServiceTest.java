@@ -215,6 +215,9 @@ class DefaultUserServiceTest {
     private SignInMethodService signInMethodService;
 
     @Mock
+    private DestinationChangeService destinationChangeService;
+
+    @Mock
     private SignInMethodChangeService signInMethodChangeService;
 
     @Mock
@@ -242,7 +245,8 @@ class DefaultUserServiceTest {
         return new DefaultUserService(appProperties, reauthentication, urlRepository, userRepository,
                 passwordEncoder, apiKeyRepository, emailLogRepository, resetTokenService,
                 resetTokenRepository, twoFactorRecoveryCodeRepository, passkeyCredentialRepository, bioAccountData, notificationAccountData, customDomainAccountData, userToUserDtoConverter, sendingEmailService,
-                verificationTokenService, verificationTokenRepository, userUpdateDtoToUserConverter, connectedAppsService, scammerSignalService, signInMethodService, signInMethodChangeService, accountLock, publisher, inactiveAccounts, accountEmailLimits);
+                verificationTokenService, verificationTokenRepository, userUpdateDtoToUserConverter, connectedAppsService, scammerSignalService, signInMethodService, signInMethodChangeService, accountLock, publisher, inactiveAccounts, accountEmailLimits,
+                destinationChangeService);
     }
 
     @Test
@@ -453,6 +457,19 @@ class DefaultUserServiceTest {
         when(userRepository.findAll(newestFirst(pageable))).thenReturn(users);
 
         assertThat(userService.fetchAllUsers(pageable, new UserSearchDto()).getContent()).extracting(AdminUserResponse::id).containsExactly(1L);
+    }
+
+    @Test
+    void eachUserRowCarriesTheOverrideAndTheLiveStanding() {
+        final var pageable = PageRequest.of(0, 20);
+        final var user = User.builder().id(1L).build();
+        when(userRepository.findAll(newestFirst(pageable))).thenReturn(new PageImpl<>(List.of(user)));
+        final var standing = new cc.hrva.urlshortener.dto.DestinationChangeStanding(cc.hrva.urlshortener.model.enums.DestinationChangeOverride.NEVER, false, true,
+                List.of());
+        when(destinationChangeService.standingsOf(List.of(user))).thenReturn(java.util.Map.of(1L, standing));
+
+        assertThat(userService.fetchAllUsers(pageable, new UserSearchDto()).getContent()).extracting(AdminUserResponse::destinationChanges)
+                .containsExactly(standing);
     }
 
     @Test

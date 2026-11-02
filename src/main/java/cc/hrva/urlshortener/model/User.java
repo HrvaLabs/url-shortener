@@ -1,5 +1,7 @@
 package cc.hrva.urlshortener.model;
 
+import cc.hrva.urlshortener.model.enums.DestinationChangeOverride;
+
 import cc.hrva.urlshortener.model.codebook.Authorities;
 import com.fasterxml.jackson.annotation.JsonIdentityInfo;
 import com.fasterxml.jackson.annotation.JsonIgnore;
@@ -89,6 +91,10 @@ public class User {
     @JsonIgnore
     private LocalDateTime lastLinkBlockedAt;
 
+    @JsonIgnore
+    @Enumerated(EnumType.STRING)
+    private DestinationChangeOverride destinationChangeOverride;
+
     @PrePersist
     public void onCreate() {
         this.createDate = LocalDateTime.now();
@@ -106,6 +112,9 @@ public class User {
         }
         if (this.authProvider == null) {
             this.authProvider = "local";
+        }
+        if (this.destinationChangeOverride == null) {
+            this.destinationChangeOverride = DestinationChangeOverride.AUTOMATIC;
         }
     }
 

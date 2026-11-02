@@ -272,6 +272,7 @@ class UrlServiceTest {
         org.mockito.Mockito.lenient().when(customDomainRepository.findStatusForUpdate(anyLong())).thenReturn(Optional.of("ACTIVE"));
         org.mockito.Mockito.lenient().when(urlValidator.checkIfLongUrlIsNotBlocklisted(any())).thenReturn(LinkVerdict.clean());
         org.mockito.Mockito.lenient().when(urlValidator.checkIfDestinationNotBlocked(any())).thenReturn(LinkVerdict.clean());
+        org.mockito.Mockito.lenient().when(urlValidator.destinationVerdict(any())).thenReturn(LinkVerdict.clean());
         org.mockito.Mockito.lenient().when(clickCheckService.mayRedirect(org.mockito.ArgumentMatchers.anyLong(), any())).thenReturn(true);
         org.mockito.Mockito.lenient().when(domainAgeService.registeredOn(any())).thenReturn(Optional.of(REGISTERED_LONG_AGO));
         anonymousLinkSignals = new AnonymousLinkSignals(RANDOM_LOOKING_LABELS, domainAgeService, settingsService, Clock.systemUTC());
@@ -384,7 +385,7 @@ class UrlServiceTest {
         verify(urlValidator, never()).checkIfLongUrlIsValid(any());
         verify(destinationChangeService, never()).countChange(any(), any());
         verify(urlRepository, never()).save(any());
-        verify(destinationChangeService, never()).record(any(), any(), any());
+        verify(destinationChangeService, never()).record(any(), any(), any(), org.mockito.ArgumentMatchers.anyBoolean());
     }
 
     @Test
@@ -406,10 +407,9 @@ class UrlServiceTest {
         order.verify(urlValidator).checkIfLongUrlIsValid(changed);
         order.verify(urlValidator).checkIfLongUrlIsNotAShortener(changed);
         order.verify(destinationChangeService).countChange(eq(url), any());
-        order.verify(urlValidator).checkIfLongUrlIsNotBlocklisted(changed);
-        order.verify(urlValidator).checkIfUrlSafe(changed);
+        order.verify(urlValidator).destinationVerdict(changed);
         order.verify(urlRepository).save(url);
-        order.verify(destinationChangeService).record(eq(url), eq("https://old.example"), any());
+        order.verify(destinationChangeService).record(eq(url), eq("https://old.example"), any(), eq(false));
         order.verify(burstAlertService).linkCreated(any());
         verify(reviewQueueService).resolveOpen(url, ReviewResolution.DESTINATION_CHANGED, "system");
         verify(reviewQueueService, never()).flag(any(), any());
@@ -480,7 +480,7 @@ class UrlServiceTest {
         final var url = Url.builder().id(7L).shortUrl("abc").longUrl("https://old.example").visits(0L).active(true).build();
         final var update = UrlUpdateDto.builder().id(7L).longUrl("https://findfavoritedate.life/?u=f6yp608").build();
         final var changed = Url.builder().id(7L).shortUrl("abc").longUrl("https://findfavoritedate.life/?u=f6yp608").visits(0L).active(true).build();
-        when(userService.getUserFromToken()).thenReturn(admin());
+        when(userService.getUserFromToken()).thenReturn(User.builder().id(1L).build());
         when(urlRepository.findById(7L)).thenReturn(Optional.of(url));
         when(urlUpdateDtoToUrlConverter.convert(update)).thenReturn(changed);
         when(urlValidator.checkIfLongUrlIsNotBlocklisted(changed)).thenReturn(new LinkVerdict(Outcome.FLAG, YOUNG_DOMAIN, null, null));
@@ -490,13 +490,63 @@ class UrlServiceTest {
 
         final var order = org.mockito.Mockito.inOrder(urlRepository, reviewQueueService);
         order.verify(urlRepository).save(url);
-        order.verify(reviewQueueService).resolveOpen(url, ReviewResolution.DESTINATION_CHANGED, "system");
         order.verify(reviewQueueService).flag(url, YOUNG_DOMAIN);
+        verify(reviewQueueService, never()).resolveOpen(any(), any(), any());
         assertThat(url.getLongUrl()).isEqualTo("https://findfavoritedate.life/?u=f6yp608");
     }
 
     @Test
-    void evenAnAdminCannotPointALinkAtABlocklistedDestination() {
+    void anAdminIsShownWhyTheChecksWouldRefuseADestinationAndNothingIsSaved() {
+        final var url = Url.builder().id(7L).shortUrl("abc").longUrl("https://old.example").visits(0L).active(true).build();
+        final var update = UrlUpdateDto.builder().id(7L).longUrl("https://njuskaio.cam/a/MAUB3").build();
+        final var changed = Url.builder().id(7L).shortUrl("abc").longUrl("https://njuskaio.cam/a/MAUB3").visits(0L).active(true).build();
+        when(userService.getUserFromToken()).thenReturn(admin());
+        when(urlRepository.findById(7L)).thenReturn(Optional.of(url));
+        when(urlUpdateDtoToUrlConverter.convert(update)).thenReturn(changed);
+        when(urlValidator.destinationVerdict(changed)).thenReturn(new LinkVerdict(Outcome.BLOCK, List.of("On the phishing list"), BlockReason.BLOCKLIST, null));
+
+        assertThatThrownBy(() -> urlService.updateUrl(update, null))
+                .isInstanceOf(cc.hrva.urlshortener.exception.DestinationNeedsConfirmationException.class)
+                .hasMessage("The link checks would block this destination: On the phishing list.");
+
+        verify(urlRepository, never()).save(any());
+        verify(destinationChangeService, never()).record(any(), any(), any(), org.mockito.ArgumentMatchers.anyBoolean());
+    }
+
+    @Test
+    void anAdminWhoConfirmsSavesTheDestinationMarkedAsForcedAndUnqueued() {
+        final var url = Url.builder().id(7L).shortUrl("abc").longUrl("https://old.example").visits(0L).active(true).build();
+        final var update = UrlUpdateDto.builder().id(7L).longUrl("https://young.example").force(true).build();
+        final var changed = Url.builder().id(7L).shortUrl("abc").longUrl("https://young.example").visits(0L).active(true).build();
+        when(userService.getUserFromToken()).thenReturn(admin());
+        when(urlRepository.findById(7L)).thenReturn(Optional.of(url));
+        when(urlUpdateDtoToUrlConverter.convert(update)).thenReturn(changed);
+        when(urlRepository.save(url)).thenReturn(url);
+        when(urlValidator.destinationVerdict(changed)).thenReturn(new LinkVerdict(Outcome.FLAG, YOUNG_DOMAIN, null, null));
+
+        assertThat(urlService.updateUrl(update, null).longUrl()).isEqualTo("https://young.example");
+
+        verify(destinationChangeService).record(eq(url), eq("https://old.example"), any(), eq(true));
+        verify(reviewQueueService, never()).flag(any(), any());
+    }
+
+    @Test
+    void forceMeansNothingForAnOwner() {
+        final var url = Url.builder().id(7L).shortUrl("abc").longUrl("https://old.example").visits(0L).active(true).build();
+        final var update = UrlUpdateDto.builder().id(7L).longUrl("https://njuskaio.cam/a/MAUB3").force(true).build();
+        final var changed = Url.builder().id(7L).shortUrl("abc").longUrl("https://njuskaio.cam/a/MAUB3").visits(0L).active(true).build();
+        when(userService.getUserFromToken()).thenReturn(User.builder().id(1L).build());
+        when(urlRepository.findById(7L)).thenReturn(Optional.of(url));
+        when(urlUpdateDtoToUrlConverter.convert(update)).thenReturn(changed);
+        when(urlValidator.checkIfLongUrlIsNotBlocklisted(changed)).thenThrow(new UrlValidationException(BLOCKLIST_REFUSAL));
+
+        assertThatThrownBy(() -> urlService.updateUrl(update, null)).hasMessage(BLOCKLIST_REFUSAL);
+
+        verify(urlRepository, never()).save(any());
+    }
+
+    @Test
+    void anOwnerCannotPointALinkAtABlocklistedDestination() {
         final var url = Url.builder().id(7L).shortUrl("abc").longUrl("https://old.example").visits(0L).active(true).build();
         final var update = UrlUpdateDto.builder().id(7L).longUrl("https://njuskaio.cam/a/MAUB3").build();
         final var changed = Url.builder().id(7L).shortUrl("abc").longUrl("https://njuskaio.cam/a/MAUB3").visits(0L).active(true).build();
@@ -881,21 +931,17 @@ class UrlServiceTest {
     }
 
     @Test
-    void theOldReviewIsClosedAndTheNewOneQueuedInsideTheTransactionThatSavesANewDestination() {
-        final var resolvedInTransaction = new AtomicReference<Boolean>();
+    void anOwnersNewDestinationIsQueuedInsideTheTransactionThatSavesItAndOpenReportsStayOpen() {
         final var queuedInTransaction = new AtomicReference<Boolean>();
-        final var url = Url.builder().id(7L).shortUrl("abc").longUrl("https://old.example").visits(0L).active(true).build();
+        final var owner = User.builder().id(1L).build();
+        final var url = Url.builder().id(7L).shortUrl("abc").longUrl("https://old.example").owner(owner).visits(0L).active(true).build();
         final var update = UrlUpdateDto.builder().id(7L).longUrl("https://findfavoritedate.life/?u=f6yp608").build();
         final var changed = Url.builder().id(7L).shortUrl("abc").longUrl("https://findfavoritedate.life/?u=f6yp608").visits(0L).active(true).build();
-        when(userService.getUserFromToken()).thenReturn(admin());
+        when(userService.getUserFromToken()).thenReturn(owner);
         when(urlRepository.findById(7L)).thenReturn(Optional.of(url));
         when(urlUpdateDtoToUrlConverter.convert(update)).thenReturn(changed);
         when(linkCheckService.check("https://findfavoritedate.life/?u=f6yp608")).thenReturn(new LinkVerdict(Outcome.FLAG, YOUNG_DOMAIN, null, null));
         when(urlRepository.save(any(Url.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        org.mockito.Mockito.doAnswer(invocation -> {
-            resolvedInTransaction.set(TransactionSynchronizationManager.isActualTransactionActive());
-            return null;
-        }).when(reviewQueueService).resolveOpen(any(), any(), any());
         org.mockito.Mockito.doAnswer(invocation -> {
             queuedInTransaction.set(TransactionSynchronizationManager.isActualTransactionActive());
             return null;
@@ -903,7 +949,7 @@ class UrlServiceTest {
 
         transactionalUrlService().updateUrl(update, null);
 
-        assertThat(resolvedInTransaction).hasValue(true);
+        verify(reviewQueueService, never()).resolveOpen(any(), any(), any());
         assertThat(queuedInTransaction).hasValue(true);
     }
 
@@ -3325,6 +3371,37 @@ class UrlServiceTest {
 
         verify(rateLimiter, never()).tryAcquire(startsWith("create:"), anyInt(), any());
         verify(urlRepository).save(any(Url.class));
+    }
+
+    @Test
+    void reactivatingALinkFollowsItsRedirectChainAgainLikeANewLink() {
+        final var url = Url.builder().id(1L).shortUrl("promo").longUrl("https://example.com").active(false).build();
+        when(urlRepository.findById(1L)).thenReturn(Optional.of(url));
+        when(urlRepository.save(any(Url.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        urlService.activateUrl(1L);
+
+        verify(redirectChainService).checkLater(1L);
+    }
+
+    @Test
+    void turningALinkBackOnInAnEditFollowsItsRedirectChainAndAPlainEditDoesNot() {
+        final var off = Url.builder().id(7L).shortUrl("abc").longUrl("https://same.example").visits(0L).active(false).build();
+        final var edited = Url.builder().id(7L).shortUrl("abc").longUrl("https://same.example").visits(0L).build();
+        when(urlRepository.findById(7L)).thenReturn(Optional.of(off));
+        when(urlRepository.save(off)).thenReturn(off);
+        when(userService.getUserFromToken()).thenReturn(User.builder().id(1L).build());
+
+        final var plain = UrlUpdateDto.builder().id(7L).tags(java.util.Set.of("x")).build();
+        when(urlUpdateDtoToUrlConverter.convert(plain)).thenReturn(edited);
+        urlService.updateUrl(plain, null);
+        verify(redirectChainService, never()).checkLater(anyLong());
+
+        final var turnOn = UrlUpdateDto.builder().id(7L).active(true).build();
+        when(urlUpdateDtoToUrlConverter.convert(turnOn)).thenReturn(edited);
+        urlService.updateUrl(turnOn, null);
+        verify(redirectChainService).checkLater(7L);
+        verify(urlValidator).checkIfDestinationNotBlocked(edited);
     }
 
     @Test

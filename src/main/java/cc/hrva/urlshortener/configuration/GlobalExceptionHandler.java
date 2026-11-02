@@ -4,6 +4,7 @@ import cc.hrva.urlshortener.exception.ApiException;
 import cc.hrva.urlshortener.exception.ApiKeyActiveException;
 import cc.hrva.urlshortener.exception.ApiKeyInactiveException;
 import cc.hrva.urlshortener.exception.DestinationChangeRefusedException;
+import cc.hrva.urlshortener.exception.DestinationNeedsConfirmationException;
 import cc.hrva.urlshortener.exception.ApiKeyNotFoundException;
 import cc.hrva.urlshortener.exception.BioHandleUnavailableException;
 import cc.hrva.urlshortener.exception.BioPageConflictException;
@@ -97,6 +98,7 @@ public class GlobalExceptionHandler {
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
     private static final Duration DATABASE_RETRY = Duration.ofMinutes(1);
     private static final String MISSING = "missing";
+    private static final String VERDICT = "verdict";
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ProblemDetail> handleValidation(final MethodArgumentNotValidException ex) {
@@ -241,6 +243,16 @@ public class GlobalExceptionHandler {
         final var problem = ProblemResponses.of(HttpStatus.FORBIDDEN, safeMessage(ex));
         problem.setProperty(MISSING, ex.getMissing());
         return ResponseEntity.status(HttpStatus.FORBIDDEN).body(problem);
+    }
+
+    @ExceptionHandler(DestinationNeedsConfirmationException.class)
+    public ResponseEntity<ProblemDetail> handleDestinationNeedsConfirmation(final DestinationNeedsConfirmationException ex) {
+        final var problem = ProblemResponses.of(HttpStatus.CONFLICT, safeMessage(ex));
+        final var verdict = new LinkedHashMap<String, Object>();
+        verdict.put("outcome", ex.getVerdict().outcome());
+        verdict.put("reasons", ex.getVerdict().reasons());
+        problem.setProperty(VERDICT, verdict);
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(problem);
     }
 
     @ExceptionHandler(LinkClicksUsedUpException.class)

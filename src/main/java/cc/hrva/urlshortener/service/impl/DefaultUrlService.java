@@ -17,6 +17,7 @@ import cc.hrva.urlshortener.dto.UrlResponse;
 import cc.hrva.urlshortener.dto.UrlSearchDto;
 import cc.hrva.urlshortener.dto.UrlUpdateDto;
 import cc.hrva.urlshortener.dto.UnlockResponse;
+import cc.hrva.urlshortener.exception.DestinationNeedsConfirmationException;
 import cc.hrva.urlshortener.exception.FieldValidationException;
 import cc.hrva.urlshortener.exception.LinkClicksUsedUpException;
 import cc.hrva.urlshortener.exception.LinkExpiredException;
@@ -161,6 +162,8 @@ public class DefaultUrlService implements UrlService {
     private static final String LINK_EXPIRED = "This link has expired. Edit it to set a later expiry or remove it first.";
     private static final String BLOCKED_LINK_NOT_TURNED_ON = "This link is blocked, so saving can't turn it back on.";
     private static final String NO_AUTHORIZATION = "You don't have authorization for this action";
+    private static final String WOULD_BLOCK = "The link checks would block this destination";
+    private static final String WOULD_REVIEW = "The link checks would send this destination to review";
     private static final int REDIRECT_DATABASE_SECONDS = 3;
     private static final String ROLE_ADMIN = "ROLE_ADMIN";
     private static final String BLOCKED_WHILE_EDITING = "This link was blocked while you were editing it. Reload and try again.";
@@ -619,7 +622,7 @@ public class DefaultUrlService implements UrlService {
         final var verdict = checkDestinationToTurnOn(url);
         final var queueFlagged = !AdminTwoStep.hasAdminPowers(userService.getUserFromToken());
 
-        return transactionOperations.execute(status -> {
+        final var activated = Objects.requireNonNull(transactionOperations.execute(status -> {
             final var current = reloadUnlessBlockedSince(url, blockAtStart);
             requireActiveDomain(current);
             requireClicksLeft(current, current.getVisitLimit());
@@ -633,7 +636,9 @@ public class DefaultUrlService implements UrlService {
                 queueIfFlagged(saved, verdict);
             }
             return UrlResponse.from(saved);
-        });
+        }));
+        checkRedirectsLater(activated.id());
+        return activated;
     }
 
     private void requireCanTurnOn(final Url link, final Long visitLimit, final LocalDateTime expirationDate) {
@@ -679,7 +684,8 @@ public class DefaultUrlService implements UrlService {
         final var url = urlUpdateDtoToUrlConverter.convert(updateDto);
         final var destinationChanged = !Objects.equals(previousLongUrl, url.getLongUrl());
         final var turnOn = Boolean.TRUE.equals(updateDto.getActive()) && !existing.isActive();
-        final var verdict = destinationChanged ? validateNewDestination(existing, url, editor) : LinkVerdict.clean();
+        final var verdict = destinationChanged ? validateNewDestination(existing, url, editor, Boolean.TRUE.equals(updateDto.getForce())) : LinkVerdict.clean();
+        final var forced = editor.admin() && needsConfirmation(verdict);
         requireExpiryAllowed(existing, url, turnOn);
         final var turnOnVerdict = turnOn ? checkTurnOnAfterEdit(existing, url, editor, destinationChanged) : LinkVerdict.clean();
 
@@ -696,17 +702,23 @@ public class DefaultUrlService implements UrlService {
             final var saved = urlRepository.save(current);
             if (destinationChanged) {
                 destinationCheckRepository.reset(saved.getId());
-                reviewQueueService.resolveOpen(saved, ReviewResolution.DESTINATION_CHANGED, SYSTEM);
-                destinationChangeService.record(saved, previousLongUrl, editor);
+                if (editor.admin()) {
+                    reviewQueueService.resolveOpen(saved, ReviewResolution.DESTINATION_CHANGED, SYSTEM);
+                }
+                destinationChangeService.record(saved, previousLongUrl, editor, forced);
             }
-            queueIfFlagged(saved, verdict);
+            if (!forced) {
+                queueIfFlagged(saved, verdict);
+            }
             if (!editor.admin()) {
                 queueIfFlagged(saved, turnOnVerdict);
             }
             return UrlResponse.from(saved);
         });
-        if (destinationChanged) {
+        if (destinationChanged || turnOn) {
             checkRedirectsLater(updated.id());
+        }
+        if (destinationChanged) {
             reportCreated(updated, CreatedLink.creatorOf(editor.user().getId(), null), verdict);
         }
         return updated;
@@ -827,13 +839,30 @@ public class DefaultUrlService implements UrlService {
         }
     }
 
-    private LinkVerdict validateNewDestination(final Url existing, final Url url, final LinkEditor editor) {
+    private LinkVerdict validateNewDestination(final Url existing, final Url url, final LinkEditor editor, final boolean force) {
         destinationChangeService.requireAllowed(existing, editor);
         checkDestinationShape(url);
         destinationChangeService.countChange(existing, editor);
-        final var verdict = checkDestinationSafety(url);
-        log.info("New destination passed the checks urlId={}", url.getId());
+        if (!editor.admin()) {
+            final var verdict = checkDestinationSafety(url);
+            log.info("New destination passed the checks urlId={}", url.getId());
+            return verdict;
+        }
+        final var verdict = urlValidator.destinationVerdict(url);
+        if (needsConfirmation(verdict) && !force) {
+            log.info("Admin's new destination needs a confirmation urlId={} outcome={}", url.getId(), verdict.outcome());
+            throw new DestinationNeedsConfirmationException(confirmationOf(verdict), verdict);
+        }
         return verdict;
+    }
+
+    private static boolean needsConfirmation(final LinkVerdict verdict) {
+        return verdict.outcome() == LinkVerdict.Outcome.BLOCK || verdict.outcome() == LinkVerdict.Outcome.FLAG;
+    }
+
+    private static String confirmationOf(final LinkVerdict verdict) {
+        final var what = verdict.outcome() == LinkVerdict.Outcome.BLOCK ? WOULD_BLOCK : WOULD_REVIEW;
+        return verdict.reasons().isEmpty() ? what + "." : what + ": " + String.join(", ", verdict.reasons()) + ".";
     }
 
     @Override

@@ -303,7 +303,7 @@ class PagedEndpointsTest {
             AdminDomainRuleController.class,
             AdminCustomDomainController.class,
             AdminReservedAliasController.class,
-            AdminLinkHistoryController.class,
+            AdminDestinationChangeController.class,
             AdminController.class
     })
     static class TestApplication {

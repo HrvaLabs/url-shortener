@@ -405,14 +405,145 @@ class UpdateLinkFlowTest {
     }
 
     @Test
-    void anAdminsDestinationRefusedByTheBlocklistLeavesTheLinkAsItWas() throws Exception {
+    void anAdminIsShownTheVerdictOnABlockedDestinationAndNothingIsSaved() throws Exception {
         final var before = jdbcTemplate.queryForMap("select * from url where id = ?", LINK);
 
         mockMvc.perform(edit("admin-token", "{\"id\":" + LINK + ",\"longUrl\":\"https://njuskaio.cam/a/MAUB3\",\"visitLimit\":5}"))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.detail").value("This destination is on a blocklist and can't be shortened. If you think that's a mistake, contact us."));
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.detail").value(org.hamcrest.Matchers.startsWith("The link checks would block this destination: ")))
+                .andExpect(jsonPath("$.verdict.outcome").value("BLOCK"))
+                .andExpect(jsonPath("$.verdict.reasons").isNotEmpty());
 
         assertThat(jdbcTemplate.queryForMap("select * from url where id = ?", LINK)).isEqualTo(before);
+        assertThat(jdbcTemplate.queryForObject("select count(*) from link_destination_change", Long.class)).isZero();
+    }
+
+    @Test
+    void anAdminWhoConfirmsABlockedDestinationSavesItMarkedAsForced() throws Exception {
+        mockMvc.perform(edit("admin-token", "{\"id\":" + LINK + ",\"longUrl\":\"https://njuskaio.cam/a/MAUB3\",\"force\":true}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.longUrl").value("https://njuskaio.cam/a/MAUB3"));
+
+        assertThat(jdbcTemplate.queryForMap("select changed_by, forced from link_destination_change"))
+                .containsEntry("CHANGED_BY", ADMIN_EMAIL)
+                .containsEntry("FORCED", true);
+        assertThat(jdbcTemplate.queryForObject("select details from audit_log where action = 'CHANGE_LINK_DESTINATION'", String.class))
+                .endsWith(", via: WEB, forced: true");
+        verify(reviewQueueService, never()).flag(any(), any());
+    }
+
+    @Test
+    void anAdminsUnsafeDestinationNeedsAConfirmationToo() throws Exception {
+        when(safeBrowsingService.checkUrlsForThreats(NEW_DESTINATION)).thenReturn(List.of("MALWARE"));
+
+        mockMvc.perform(edit("admin-token", "{\"id\":" + LINK + ",\"longUrl\":\"" + NEW_DESTINATION + "\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.detail").value("The link checks would block this destination: Google Safe Browsing: MALWARE."))
+                .andExpect(jsonPath("$.verdict.reasons[0]").value("Google Safe Browsing: MALWARE"));
+    }
+
+    @Test
+    void anAdminsFlaggedDestinationNeedsAConfirmationAndIsThenNotQueued() throws Exception {
+        when(suspiciousUrlService.findReasons(NEW_DESTINATION)).thenReturn(List.of("Young domain"));
+
+        mockMvc.perform(edit("admin-token", "{\"id\":" + LINK + ",\"longUrl\":\"" + NEW_DESTINATION + "\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.detail").value("The link checks would send this destination to review: Young domain."))
+                .andExpect(jsonPath("$.verdict.outcome").value("FLAG"));
+        mockMvc.perform(edit("admin-token", "{\"id\":" + LINK + ",\"longUrl\":\"" + NEW_DESTINATION + "\",\"force\":true}"))
+                .andExpect(status().isOk());
+
+        verify(reviewQueueService, never()).flag(any(), any());
+    }
+
+    @Test
+    void anAdminEditsEveryFieldOfALinkWhoseOwnerIsNotInGoodStanding() throws Exception {
+        mockMvc.perform(edit("admin-token", "{\"id\":" + LINK + ",\"longUrl\":\"" + NEW_DESTINATION + "\",\"visitLimit\":7,"
+                        + "\"expirationDate\":\"2099-01-01T00:00:00Z\",\"password\":\"s3cret\",\"tags\":[\"fixed\"],\"active\":false}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.longUrl").value(NEW_DESTINATION))
+                .andExpect(jsonPath("$.visitLimit").value(7))
+                .andExpect(jsonPath("$.passwordProtected").value(true))
+                .andExpect(jsonPath("$.active").value(false));
+
+        assertThat(jdbcTemplate.queryForList("select tag from url_tags where url_id = ?", String.class, LINK)).containsExactly("fixed");
+        assertThat(jdbcTemplate.queryForObject("select changed_by from link_destination_change", String.class)).isEqualTo(ADMIN_EMAIL);
+        verify(rateLimiter, never()).tryAcquire(anyString(), anyInt(), any());
+    }
+
+    @Test
+    void neverAllowedStopsAnOwnerInGoodStandingOnEveryHost() throws Exception {
+        goodStanding();
+        override("NEVER")
+                .andExpect(jsonPath("$.override").value("NEVER"))
+                .andExpect(jsonPath("$.allowed").value(false))
+                .andExpect(jsonPath("$.inGoodStanding").value(true));
+
+        mockMvc.perform(edit("owner-token", "{\"id\":" + LINK + ",\"longUrl\":\"" + NEW_DESTINATION + "\"}"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.detail").value("An admin turned off destination changes for your account."))
+                .andExpect(jsonPath("$.missing[0].code").value("ACCOUNT_TURNED_OFF"));
+        onCustomDomain("ACTIVE");
+        mockMvc.perform(edit("owner-token", "{\"id\":" + LINK + ",\"longUrl\":\"" + NEW_DESTINATION + "\"}"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.missing[0].code").value("ACCOUNT_TURNED_OFF"));
+        mockMvc.perform(get("/api/v1/urls/{id}/destination-change", LINK).header(JwtFilter.AUTHORIZATION_HEADER, "Bearer owner-token"))
+                .andExpect(jsonPath("$.missing[0].text").value("An admin turned off destination changes for your account"));
+
+        assertThat(jdbcTemplate.queryForMap("select performed_by, target_identifier, details from audit_log where action = 'SET_DESTINATION_CHANGE_OVERRIDE'"))
+                .containsEntry("PERFORMED_BY", ADMIN_EMAIL)
+                .containsEntry("TARGET_IDENTIFIER", String.valueOf(OWNER))
+                .containsEntry("DETAILS", "from: AUTOMATIC, to: NEVER");
+    }
+
+    @Test
+    void alwaysAllowedLetsAnOwnerNotInGoodStandingChangeTheDestination() throws Exception {
+        override("ALWAYS")
+                .andExpect(jsonPath("$.allowed").value(true))
+                .andExpect(jsonPath("$.inGoodStanding").value(false))
+                .andExpect(jsonPath("$.missing[*].code").value(org.hamcrest.Matchers.contains("TWO_STEP_SIGN_IN", "VERIFIED_EMAIL")));
+
+        mockMvc.perform(edit("owner-token", "{\"id\":" + LINK + ",\"longUrl\":\"" + NEW_DESTINATION + "\"}"))
+                .andExpect(status().isOk());
+        verify(rateLimiter).tryAcquire("destination-change:" + LINK, 5, Duration.ofDays(1));
+
+        SettingsServiceFixtures.turnOff(settingsService, SettingKey.DESTINATION_CHANGES);
+        mockMvc.perform(edit("owner-token", "{\"id\":" + LINK + ",\"longUrl\":\"https://example.org/again\"}"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.missing[0].code").value("CHANGES_TURNED_ON"));
+    }
+
+    @Test
+    void automaticPutsTheAccountBackUnderGoodStanding() throws Exception {
+        override("ALWAYS");
+        override("AUTOMATIC").andExpect(jsonPath("$.allowed").value(false));
+
+        mockMvc.perform(edit("owner-token", "{\"id\":" + LINK + ",\"longUrl\":\"" + NEW_DESTINATION + "\"}"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.missing[0].code").value("TWO_STEP_SIGN_IN"));
+        assertThat(jdbcTemplate.queryForList("select details from audit_log where action = 'SET_DESTINATION_CHANGE_OVERRIDE' order by id", String.class))
+                .containsExactly("from: AUTOMATIC, to: ALWAYS", "from: ALWAYS, to: AUTOMATIC");
+    }
+
+    @Test
+    void onlyAdminsReadOrSetTheOverride() throws Exception {
+        mockMvc.perform(get("/api/v1/admin/users/{id}/destination-changes", OWNER).header(JwtFilter.AUTHORIZATION_HEADER, "Bearer admin-token"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.override").value("AUTOMATIC"));
+        mockMvc.perform(get("/api/v1/admin/users/{id}/destination-changes", OWNER).header(JwtFilter.AUTHORIZATION_HEADER, "Bearer owner-token"))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(put("/api/v1/admin/users/{id}/destination-changes", OWNER).header(JwtFilter.AUTHORIZATION_HEADER, "Bearer owner-token")
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"override\":\"ALWAYS\"}"))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(put("/api/v1/admin/users/{id}/destination-changes", OWNER).header(JwtFilter.AUTHORIZATION_HEADER, "Bearer admin-token")
+                        .contentType(MediaType.APPLICATION_JSON).content("{}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errors.override").value("Choose Automatic, Always allowed or Never allowed"));
+        mockMvc.perform(put("/api/v1/admin/users/{id}/destination-changes", 999_999L).header(JwtFilter.AUTHORIZATION_HEADER, "Bearer admin-token")
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"override\":\"NEVER\"}"))
+                .andExpect(status().isNotFound());
+
+        assertThat(jdbcTemplate.queryForObject("select destination_change_override from user_account where id = ?", String.class, OWNER)).isEqualTo("AUTOMATIC");
     }
 
     @Test
@@ -521,6 +652,33 @@ class UpdateLinkFlowTest {
     }
 
     @Test
+    void aPublicReportAloneDoesNotPauseDestinationChangesUntilAnAdminActsOnIt() throws Exception {
+        goodStanding();
+        otherLink("active = true");
+        jdbcTemplate.update("insert into link_review (url_id, reasons, flagged_at, system_flagged) values (?, 'Reported: phishing', current_timestamp, false)",
+                OTHER_LINK);
+
+        mockMvc.perform(edit("owner-token", "{\"id\":" + LINK + ",\"longUrl\":\"" + NEW_DESTINATION + "\"}"))
+                .andExpect(status().isOk());
+
+        jdbcTemplate.update("update url set active = false, block_reason = 'ADMIN' where id = ?", OTHER_LINK);
+        mockMvc.perform(edit("owner-token", "{\"id\":" + LINK + ",\"longUrl\":\"https://example.org/after-the-block\"}"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.missing[0].code").value("NO_BLOCKED_LINKS"));
+    }
+
+    @Test
+    void aPublicReportOnACustomDomainLinkDoesNotPauseItEither() throws Exception {
+        onCustomDomain("ACTIVE");
+        jdbcTemplate.update("insert into link_review (url_id, reasons, flagged_at, system_flagged) values (?, 'Reported: phishing', current_timestamp, false)", LINK);
+
+        mockMvc.perform(edit("owner-token", "{\"id\":" + LINK + ",\"longUrl\":\"" + NEW_DESTINATION + "\"}"))
+                .andExpect(status().isOk());
+
+        verify(reviewQueueService, never()).resolveOpen(any(), any(), any());
+    }
+
+    @Test
     void anAccountThatSignsInWithGoogleNeedsNoVerifiedEmail() throws Exception {
         goodStanding();
         jdbcTemplate.update("update user_account set email_verified = false where id = ?", OWNER);
@@ -569,7 +727,7 @@ class UpdateLinkFlowTest {
                 .andExpect(jsonPath("$.missing[0].code").value("DOMAIN_ACTIVE"));
 
         jdbcTemplate.update("update custom_domain set status = 'ACTIVE' where id = ?", DOMAIN);
-        jdbcTemplate.update("insert into link_review (url_id, reasons, flagged_at, system_flagged) values (?, 'Reported', current_timestamp, false)", LINK);
+        jdbcTemplate.update("insert into link_review (url_id, reasons, flagged_at, system_flagged) values (?, 'Young domain', current_timestamp, true)", LINK);
         mockMvc.perform(edit("owner-token", "{\"id\":" + LINK + ",\"longUrl\":\"" + NEW_DESTINATION + "\"}"))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.missing[0].code").value("LINK_NOT_BEING_CHECKED"));
@@ -675,6 +833,7 @@ class UpdateLinkFlowTest {
         assertThat(jdbcTemplate.queryForMap("select active, expiration_date from url where id = ?", LINK))
                 .containsEntry("ACTIVE", true)
                 .containsEntry("EXPIRATION_DATE", Timestamp.valueOf(later));
+        verify(redirectChainService).checkLater(LINK);
     }
 
     @Test
@@ -711,6 +870,7 @@ class UpdateLinkFlowTest {
         assertThat(jdbcTemplate.queryForMap("select active, visit_limit from url where id = ?", LINK))
                 .containsEntry("ACTIVE", true)
                 .containsEntry("VISIT_LIMIT", 10L);
+        verify(redirectChainService).checkLater(LINK);
     }
 
     @Test
@@ -860,6 +1020,12 @@ class UpdateLinkFlowTest {
                 .andExpect(status().isForbidden());
     }
 
+    private ResultActions override(final String override) throws Exception {
+        return mockMvc.perform(put("/api/v1/admin/users/{id}/destination-changes", OWNER).header(JwtFilter.AUTHORIZATION_HEADER, "Bearer admin-token")
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"override\":\"" + override + "\"}"))
+                .andExpect(status().isOk());
+    }
+
     private ResultActions expectOnlyMissing(final String code, final String text) throws Exception {
         return mockMvc.perform(edit("owner-token", "{\"id\":" + LINK + ",\"longUrl\":\"" + NEW_DESTINATION + "\"}"))
                 .andExpect(status().isForbidden())
@@ -980,7 +1146,7 @@ class UpdateLinkFlowTest {
             DefaultDestinationChangeService.class,
             DefaultAccountStandingService.class,
             ClockConfiguration.class,
-            AdminLinkHistoryController.class
+            AdminDestinationChangeController.class
     })
     static class TestApplication {
     }

@@ -33,6 +33,7 @@ public class LinkDestinationChange {
     private String changedBy;
     @Enumerated(EnumType.STRING)
     private ChangeChannel via;
+    private boolean forced;
     private LocalDateTime changedAt;
 
 }

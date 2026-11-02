@@ -13,10 +13,12 @@ import cc.hrva.urlshortener.model.enums.AuditAction;
 import cc.hrva.urlshortener.model.enums.BlockReason;
 import cc.hrva.urlshortener.model.enums.ChangeChannel;
 import cc.hrva.urlshortener.model.enums.CustomDomainStatus;
+import cc.hrva.urlshortener.model.enums.DestinationChangeOverride;
 import cc.hrva.urlshortener.model.enums.RequirementCode;
 import cc.hrva.urlshortener.model.enums.ThreatType;
 import cc.hrva.urlshortener.repository.LinkDestinationChangeRepository;
 import cc.hrva.urlshortener.repository.LinkReviewRepository;
+import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.service.domain.UrlCache;
 import cc.hrva.urlshortener.service.impl.DefaultDestinationChangeService;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiter;
@@ -66,6 +68,9 @@ class DefaultDestinationChangeServiceTest {
     private SettingsService settingsService;
 
     @Mock
+    private UserRepository userRepository;
+
+    @Mock
     private LinkReviewRepository linkReviewRepository;
 
     @Mock
@@ -90,7 +95,7 @@ class DefaultDestinationChangeServiceTest {
 
     @BeforeEach
     void setUp() {
-        destinationChanges = new DefaultDestinationChangeService(accountStandingService, settingsService, linkReviewRepository, linkDestinationChangeRepository,
+        destinationChanges = new DefaultDestinationChangeService(accountStandingService, userRepository, settingsService, linkReviewRepository, linkDestinationChangeRepository,
                 auditLogService, rateLimiter, new UrlCache(cacheManager), taskScheduler, Clock.fixed(NOW.toInstant(ZoneOffset.UTC), ZoneOffset.UTC));
         lenient().when(settingsService.isOn(SettingKey.DESTINATION_CHANGES)).thenReturn(true);
         lenient().when(accountStandingService.standingOf(OWNER)).thenReturn(new AccountStanding(List.of()));
@@ -138,7 +143,7 @@ class DefaultDestinationChangeServiceTest {
         assertThat(refusal(held)).containsExactly(MissingRequirement.of(RequirementCode.LINK_NOT_BEING_CHECKED, "This link is being checked"));
 
         final var reviewed = link(domain(CustomDomainStatus.ACTIVE));
-        when(linkReviewRepository.existsByUrl_IdAndResolvedAtIsNull(40L)).thenReturn(true);
+        when(linkReviewRepository.existsByUrl_IdAndResolvedAtIsNullAndSystemFlaggedTrue(40L)).thenReturn(true);
         assertThat(refusal(reviewed)).containsExactly(MissingRequirement.of(RequirementCode.LINK_NOT_BEING_CHECKED, "This link is being checked"));
     }
 
@@ -212,7 +217,7 @@ class DefaultDestinationChangeServiceTest {
         final var url = link(null);
         url.setLongUrl("https://example.com/new");
 
-        destinationChanges.record(url, "https://example.com/old", LinkEditor.withApiKey(OWNER));
+        destinationChanges.record(url, "https://example.com/old", LinkEditor.withApiKey(OWNER), false);
 
         final var saved = ArgumentCaptor.forClass(LinkDestinationChange.class);
         verify(linkDestinationChangeRepository).save(saved.capture());
@@ -252,6 +257,110 @@ class DefaultDestinationChangeServiceTest {
         assertThat(info.allowed()).isFalse();
         assertThat(info.missing()).containsExactly(TWO_STEP);
         assertThat(info.changesLeft()).isNull();
+    }
+
+    @Test
+    void neverAllowedStopsTheAccountOnEveryHostWithItsOwnReason() {
+        final var never = User.builder().id(7L).email("owner@example.com").destinationChangeOverride(DestinationChangeOverride.NEVER).build();
+        final var editor = LinkEditor.signedIn(never);
+
+        for (final var url : List.of(link(null), link(domain(CustomDomainStatus.ACTIVE)))) {
+            assertThatThrownBy(() -> destinationChanges.requireAllowed(url, editor))
+                    .isInstanceOf(DestinationChangeRefusedException.class)
+                    .hasMessage("An admin turned off destination changes for your account.")
+                    .satisfies(refusal -> assertThat(((DestinationChangeRefusedException) refusal).getMissing())
+                            .containsExactly(MissingRequirement.of(RequirementCode.ACCOUNT_TURNED_OFF, "An admin turned off destination changes for your account")));
+        }
+        verifyNoInteractions(accountStandingService);
+    }
+
+    @Test
+    void alwaysAllowedSkipsGoodStandingButNotTheDomainRulesOrTheSwitch() {
+        final var always = User.builder().id(7L).email("owner@example.com").destinationChangeOverride(DestinationChangeOverride.ALWAYS).build();
+        final var editor = LinkEditor.signedIn(always);
+        final var hrva = link(null);
+        hrva.setOwner(always);
+
+        assertThatCode(() -> destinationChanges.requireAllowed(hrva, editor)).doesNotThrowAnyException();
+        verifyNoInteractions(accountStandingService);
+
+        final var offDomain = link(domain(CustomDomainStatus.DISABLED));
+        assertThatThrownBy(() -> destinationChanges.requireAllowed(offDomain, editor)).isInstanceOf(DestinationChangeRefusedException.class);
+
+        when(settingsService.isOn(SettingKey.DESTINATION_CHANGES)).thenReturn(false);
+        assertThatThrownBy(() -> destinationChanges.requireAllowed(hrva, editor))
+                .hasMessage("Changing where links point is turned off right now.");
+    }
+
+    @Test
+    void automaticLeavesItToGoodStanding() {
+        final var automatic = User.builder().id(7L).destinationChangeOverride(DestinationChangeOverride.AUTOMATIC).build();
+        when(accountStandingService.standingOf(automatic)).thenReturn(new AccountStanding(List.of(TWO_STEP)));
+
+        assertThatThrownBy(() -> destinationChanges.requireAllowed(link(null), LinkEditor.signedIn(automatic)))
+                .isInstanceOf(DestinationChangeRefusedException.class)
+                .hasMessage("You can't change where this link points yet. Turn on two-step sign-in.");
+    }
+
+    @Test
+    void anAdminSetsTheOverrideWithItsOldAndNewValueInTheAuditLog() {
+        final var user = User.builder().id(7L).build();
+        when(userRepository.findById(7L)).thenReturn(Optional.of(user));
+        when(accountStandingService.standingOf(user)).thenReturn(new AccountStanding(List.of(TWO_STEP)));
+
+        final var standing = destinationChanges.setOverride(7L, DestinationChangeOverride.ALWAYS, "admin@example.com");
+
+        assertThat(user.getDestinationChangeOverride()).isEqualTo(DestinationChangeOverride.ALWAYS);
+        verify(userRepository).save(user);
+        verify(auditLogService).log("admin@example.com", AuditAction.SET_DESTINATION_CHANGE_OVERRIDE, "User", "7", "from: AUTOMATIC, to: ALWAYS");
+        assertThat(standing).isEqualTo(new cc.hrva.urlshortener.dto.DestinationChangeStanding(DestinationChangeOverride.ALWAYS, true, false, List.of(TWO_STEP)));
+    }
+
+    @Test
+    void settingTheSameOverrideAgainChangesAndRecordsNothing() {
+        final var user = User.builder().id(7L).destinationChangeOverride(DestinationChangeOverride.NEVER).build();
+        when(userRepository.findById(7L)).thenReturn(Optional.of(user));
+        when(accountStandingService.standingOf(user)).thenReturn(new AccountStanding(List.of()));
+
+        final var standing = destinationChanges.setOverride(7L, DestinationChangeOverride.NEVER, "admin@example.com");
+
+        verify(userRepository, never()).save(any());
+        verifyNoInteractions(auditLogService);
+        assertThat(standing.allowed()).isFalse();
+        assertThat(standing.inGoodStanding()).isTrue();
+    }
+
+    @Test
+    void anUnknownAccountIsNotFound() {
+        assertThatThrownBy(() -> destinationChanges.setOverride(8L, DestinationChangeOverride.NEVER, "admin@example.com"))
+                .isInstanceOf(cc.hrva.urlshortener.exception.UserNotFoundException.class)
+                .hasMessage("User not found");
+    }
+
+    @Test
+    void theStandingShowsWhetherTheAccountIsAllowedUnderTheSwitchAndTheOverride() {
+        final var user = User.builder().id(7L).build();
+        when(accountStandingService.standingsOf(List.of(user))).thenReturn(java.util.Map.of(7L, new AccountStanding(List.of())));
+
+        assertThat(destinationChanges.standingsOf(List.of(user)).get(7L))
+                .isEqualTo(new cc.hrva.urlshortener.dto.DestinationChangeStanding(DestinationChangeOverride.AUTOMATIC, true, true, List.of()));
+
+        when(settingsService.isOn(SettingKey.DESTINATION_CHANGES)).thenReturn(false);
+        assertThat(destinationChanges.standingsOf(List.of(user)).get(7L).allowed()).isFalse();
+    }
+
+    @Test
+    void aForcedChangeIsMarkedInTheHistoryAndTheAuditLog() {
+        final var url = link(null);
+        url.setLongUrl("https://example.com/new");
+
+        destinationChanges.record(url, "https://example.com/old", new LinkEditor(User.builder().id(1L).email("admin@example.com").build(), ChangeChannel.WEB, true), true);
+
+        final var saved = ArgumentCaptor.forClass(LinkDestinationChange.class);
+        verify(linkDestinationChangeRepository).save(saved.capture());
+        assertThat(saved.getValue().isForced()).isTrue();
+        verify(auditLogService).log("admin@example.com", AuditAction.CHANGE_LINK_DESTINATION, "Url", "40",
+                "from: https://example.com/old, to: https://example.com/new, via: WEB, forced: true");
     }
 
     private List<MissingRequirement> refusal(final Url url) {

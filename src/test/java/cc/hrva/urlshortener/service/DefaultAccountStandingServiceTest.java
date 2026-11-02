@@ -104,7 +104,7 @@ class DefaultAccountStandingServiceTest {
 
     @Test
     void aLinkInTheReviewQueueCountsAsBeingChecked() {
-        when(linkReviewRepository.existsByUrl_Owner_IdAndResolvedAtIsNull(OWNER)).thenReturn(true);
+        when(linkReviewRepository.existsByUrl_Owner_IdAndResolvedAtIsNullAndSystemFlaggedTrue(OWNER)).thenReturn(true);
 
         assertThat(standingService.standingOf(inGoodStanding().build()).missing())
                 .containsExactly(MissingRequirement.of(RequirementCode.NO_LINKS_BEING_CHECKED, "One of your links is being checked"));
@@ -131,12 +131,37 @@ class DefaultAccountStandingServiceTest {
     @Test
     void everyMissingRequirementIsListedInOrder() {
         when(urlRepository.ownerHasBlockedLink(OWNER, BlockReason.HOLDS)).thenReturn(true);
-        when(linkReviewRepository.existsByUrl_Owner_IdAndResolvedAtIsNull(OWNER)).thenReturn(true);
+        when(linkReviewRepository.existsByUrl_Owner_IdAndResolvedAtIsNullAndSystemFlaggedTrue(OWNER)).thenReturn(true);
 
         assertThat(standingService.standingOf(User.builder().id(OWNER).createDate(NOW.minusDays(1)).build()).missing())
                 .extracting(MissingRequirement::code)
                 .containsExactly(RequirementCode.TWO_STEP_SIGN_IN, RequirementCode.ACCOUNT_AGE, RequirementCode.VERIFIED_EMAIL,
                         RequirementCode.NO_BLOCKED_LINKS, RequirementCode.NO_LINKS_BEING_CHECKED);
+    }
+
+    @Test
+    void aPageOfAccountsIsReadInOneQueryPerRequirement() {
+        final var clean = inGoodStanding().build();
+        final var blocked = inGoodStanding().id(8L).build();
+        final var reviewed = inGoodStanding().id(9L).emailVerified(false).build();
+        final var ids = List.of(OWNER, 8L, 9L);
+        when(urlRepository.ownersWithBlockedLinks(ids, BlockReason.HOLDS)).thenReturn(List.of(8L));
+        when(urlRepository.ownersWithHeldLinks(ids, BlockReason.HOLDS)).thenReturn(List.of());
+        when(linkReviewRepository.findOwnerIdsWithOpenSystemReviews(ids)).thenReturn(List.of(9L));
+        when(signInMethodService.methodsOf(ids)).thenReturn(java.util.Map.of(9L, List.of(new SignInMethodResponse(SignInMethod.GITHUB, NOW, NOW, null))));
+
+        final var standings = standingService.standingsOf(List.of(clean, blocked, reviewed));
+
+        assertThat(standings.get(OWNER).good()).isTrue();
+        assertThat(standings.get(8L).missing()).extracting(MissingRequirement::code).containsExactly(RequirementCode.NO_BLOCKED_LINKS);
+        assertThat(standings.get(9L).missing()).extracting(MissingRequirement::code).containsExactly(RequirementCode.NO_LINKS_BEING_CHECKED);
+        org.mockito.Mockito.verify(urlRepository, org.mockito.Mockito.never()).ownerHasBlockedLink(org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void noAccountsNeedNoQueries() {
+        assertThat(standingService.standingsOf(List.of())).isEmpty();
+        org.mockito.Mockito.verifyNoInteractions(urlRepository, linkReviewRepository);
     }
 
     private static User.UserBuilder inGoodStanding() {

@@ -1,5 +1,7 @@
 package cc.hrva.urlshortener.dto;
 
+import cc.hrva.urlshortener.model.enums.DestinationChangeOverride;
+import cc.hrva.urlshortener.model.enums.RequirementCode;
 import cc.hrva.urlshortener.model.ApiKey;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.codebook.Authorities;
@@ -63,6 +65,17 @@ class AdminUserResponseTest {
 
         assertThat(json).isEqualTo(entityJson);
         assertThat(json.has("possibleScammer")).isFalse();
+    }
+
+    @Test
+    void aRowWithItsDestinationChangeStandingShowsIt() {
+        final var standing = new DestinationChangeStanding(DestinationChangeOverride.ALWAYS, true, false,
+                List.of(MissingRequirement.of(RequirementCode.TWO_STEP_SIGN_IN, "Turn on two-step sign-in")));
+
+        final JsonNode json = JSON.valueToTree(AdminUserResponse.from(fullUser(), List.of()).withDestinationChanges(standing));
+
+        assertThat(json.get("destinationChanges").toString()).isEqualTo("{\"override\":\"ALWAYS\",\"allowed\":true,\"inGoodStanding\":false,"
+                + "\"missing\":[{\"code\":\"TWO_STEP_SIGN_IN\",\"text\":\"Turn on two-step sign-in\",\"availableFrom\":null}]}");
     }
 
     @Test

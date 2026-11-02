@@ -100,6 +100,9 @@ class ModerationUserWritesTest {
     private ApiKeyRepository apiKeyRepository;
 
     @MockitoBean
+    private DestinationChangeService destinationChangeService;
+
+    @MockitoBean
     private SignInMethodService signInMethodService;
 
     @MockitoBean

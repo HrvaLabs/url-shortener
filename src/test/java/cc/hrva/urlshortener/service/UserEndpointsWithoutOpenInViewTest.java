@@ -87,6 +87,9 @@ class UserEndpointsWithoutOpenInViewTest {
     private UserRepository userRepository;
 
     @MockitoBean
+    private DestinationChangeService destinationChangeService;
+
+    @MockitoBean
     private AppProperties appProperties;
 
     @MockitoBean

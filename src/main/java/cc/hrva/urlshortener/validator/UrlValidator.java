@@ -15,6 +15,7 @@ public interface UrlValidator {
     void checkIfLongUrlIsValid(Url url);
     void checkIfLongUrlIsNotAShortener(Url url);
     LinkVerdict checkIfLongUrlIsNotBlocklisted(Url url);
+    LinkVerdict destinationVerdict(Url url);
     void verifyUserAdminOrOwner(Url url);
     void checkIfAnonymousUrlCreationEnabled();
     void checkIfShortUrlIsUnique(Long domainId, String shortUrl);

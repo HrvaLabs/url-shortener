@@ -1,19 +1,25 @@
 package cc.hrva.urlshortener.service.impl;
 
+import cc.hrva.urlshortener.dto.AccountStanding;
 import cc.hrva.urlshortener.dto.DestinationChangeResponse;
+import cc.hrva.urlshortener.dto.DestinationChangeStanding;
 import cc.hrva.urlshortener.dto.LinkDestinationChangeResponse;
 import cc.hrva.urlshortener.dto.MissingRequirement;
 import cc.hrva.urlshortener.exception.DestinationChangeRefusedException;
 import cc.hrva.urlshortener.exception.RateLimitExceededException;
 import cc.hrva.urlshortener.exception.ServiceBusyException;
+import cc.hrva.urlshortener.exception.UserNotFoundException;
 import cc.hrva.urlshortener.model.LinkDestinationChange;
 import cc.hrva.urlshortener.model.Url;
+import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.enums.AuditAction;
 import cc.hrva.urlshortener.model.enums.BlockReason;
 import cc.hrva.urlshortener.model.enums.CustomDomainStatus;
+import cc.hrva.urlshortener.model.enums.DestinationChangeOverride;
 import cc.hrva.urlshortener.model.enums.RequirementCode;
 import cc.hrva.urlshortener.repository.LinkDestinationChangeRepository;
 import cc.hrva.urlshortener.repository.LinkReviewRepository;
+import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.repository.specification.LinkDestinationChangeSpecification;
 import cc.hrva.urlshortener.service.AccountStandingService;
 import cc.hrva.urlshortener.service.AuditLogService;
@@ -32,8 +38,11 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
@@ -44,6 +53,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.scheduling.TaskScheduler;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 @Slf4j
 @Service
@@ -61,10 +71,13 @@ public class DefaultDestinationChangeService implements DestinationChangeService
             .byDefault(Sort.by(Sort.Order.desc(CHANGED_AT)))
             .thenBy(Sort.Order.desc(CHANGED_AT), Sort.Order.desc("id"));
     private static final DateTimeFormatter MOMENT = DateTimeFormatter.ofPattern("d MMMM yyyy 'at' HH:mm 'UTC'", Locale.ENGLISH);
-    private static final Set<RequirementCode> STANDALONE = Set.of(RequirementCode.CHANGES_TURNED_ON, RequirementCode.LINK_WITH_ACCOUNT);
+    private static final Set<RequirementCode> STANDALONE = Set.of(RequirementCode.CHANGES_TURNED_ON, RequirementCode.LINK_WITH_ACCOUNT,
+            RequirementCode.ACCOUNT_TURNED_OFF);
     private static final String REFUSED = "You can't change where this link points yet. %s.";
     private static final String NO_ACCOUNT = "Links made without an account can't change where they point";
     private static final String TURNED_OFF = "Changing where links point is turned off right now";
+    private static final String ACCOUNT_TURNED_OFF = "An admin turned off destination changes for your account";
+    private static final String TARGET_USER = "User";
     private static final String DOMAIN_NOT_ACTIVE = "This link's domain isn't active";
     private static final String LINK_BLOCKED = "This link is blocked";
     private static final String LINK_BEING_CHECKED = "This link is being checked";
@@ -72,7 +85,10 @@ public class DefaultDestinationChangeService implements DestinationChangeService
     private static final String LIMIT_REFUSAL = "This link's destination can change " + CHANGES_PER_DAY + " times a day. Try again in %s.";
     private static final String LIMIT_UNAVAILABLE = "Changing where a link points isn't available right now. Try again in a minute.";
 
+    private static final String USER_NOT_FOUND = "User not found";
+
     private final AccountStandingService accountStandingService;
+    private final UserRepository userRepository;
     private final SettingsService settingsService;
     private final LinkReviewRepository linkReviewRepository;
     private final LinkDestinationChangeRepository linkDestinationChangeRepository;
@@ -132,7 +148,7 @@ public class DefaultDestinationChangeService implements DestinationChangeService
     }
 
     @Override
-    public void record(final Url url, final String oldLongUrl, final LinkEditor editor) {
+    public void record(final Url url, final String oldLongUrl, final LinkEditor editor, final boolean forced) {
         final var changedBy = editor.user().getEmail();
         linkDestinationChangeRepository.save(LinkDestinationChange.builder()
                 .urlId(url.getId())
@@ -140,10 +156,11 @@ public class DefaultDestinationChangeService implements DestinationChangeService
                 .newLongUrl(url.getLongUrl())
                 .changedBy(changedBy)
                 .via(editor.via())
+                .forced(forced)
                 .changedAt(now())
                 .build());
         auditLogService.log(changedBy, AuditAction.CHANGE_LINK_DESTINATION, TARGET_URL, String.valueOf(url.getId()),
-                "from: %s, to: %s, via: %s".formatted(oldLongUrl, url.getLongUrl(), editor.via()));
+                "from: %s, to: %s, via: %s%s".formatted(oldLongUrl, url.getLongUrl(), editor.via(), forced ? ", forced: true" : ""));
         log.info("Destination changed urlId={} userId={} via={}", url.getId(), editor.user().getId(), editor.via());
         evictAgainShortly(UrlCacheKeys.of(url.domainId(), url.getShortUrl()));
     }
@@ -172,8 +189,12 @@ public class DefaultDestinationChangeService implements DestinationChangeService
         if (!settingsService.isOn(SettingKey.DESTINATION_CHANGES)) {
             return List.of(MissingRequirement.of(RequirementCode.CHANGES_TURNED_ON, TURNED_OFF));
         }
+        final var override = overrideOf(editor.user());
+        if (override == DestinationChangeOverride.NEVER) {
+            return List.of(MissingRequirement.of(RequirementCode.ACCOUNT_TURNED_OFF, ACCOUNT_TURNED_OFF));
+        }
         if (url.getDomain() == null) {
-            return accountStandingService.standingOf(editor.user()).missing();
+            return override == DestinationChangeOverride.ALWAYS ? List.of() : accountStandingService.standingOf(editor.user()).missing();
         }
         final var missing = new ArrayList<MissingRequirement>();
         if (url.getDomain().getStatus() != CustomDomainStatus.ACTIVE) {
@@ -183,10 +204,54 @@ public class DefaultDestinationChangeService implements DestinationChangeService
         if (!held && (url.getThreatType() != null || url.getBlockReason() != null)) {
             missing.add(MissingRequirement.of(RequirementCode.LINK_NOT_BLOCKED, LINK_BLOCKED));
         }
-        if (held || linkReviewRepository.existsByUrl_IdAndResolvedAtIsNull(url.getId())) {
+        if (held || linkReviewRepository.existsByUrl_IdAndResolvedAtIsNullAndSystemFlaggedTrue(url.getId())) {
             missing.add(MissingRequirement.of(RequirementCode.LINK_NOT_BEING_CHECKED, LINK_BEING_CHECKED));
         }
         return List.copyOf(missing);
+    }
+
+    @Override
+    public DestinationChangeStanding standingOf(final User user) {
+        return standing(user, accountStandingService.standingOf(user));
+    }
+
+    @Override
+    public Map<Long, DestinationChangeStanding> standingsOf(final Collection<User> users) {
+        final var standings = accountStandingService.standingsOf(users);
+        return users.stream().collect(Collectors.toMap(User::getId, user -> standing(user, standings.get(user.getId()))));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public DestinationChangeStanding standingOf(final long userId) {
+        return standingOf(userRepository.findById(userId).orElseThrow(() -> new UserNotFoundException(USER_NOT_FOUND)));
+    }
+
+    @Override
+    @Transactional
+    public DestinationChangeStanding setOverride(final long userId, final DestinationChangeOverride override, final String admin) {
+        final var user = userRepository.findById(userId).orElseThrow(() -> new UserNotFoundException(USER_NOT_FOUND));
+        final var before = overrideOf(user);
+        if (before != override) {
+            user.setDestinationChangeOverride(override);
+            userRepository.save(user);
+            auditLogService.log(admin, AuditAction.SET_DESTINATION_CHANGE_OVERRIDE, TARGET_USER, String.valueOf(userId),
+                    "from: %s, to: %s".formatted(before, override));
+            log.info("Destination change override set userId={} from={} to={}", userId, before, override);
+        }
+        return standingOf(user);
+    }
+
+    private DestinationChangeStanding standing(final User user, final AccountStanding standing) {
+        final var override = overrideOf(user);
+        final var allowed = settingsService.isOn(SettingKey.DESTINATION_CHANGES)
+                && override != DestinationChangeOverride.NEVER
+                && (override == DestinationChangeOverride.ALWAYS || standing.good());
+        return new DestinationChangeStanding(override, allowed, standing.good(), standing.missing());
+    }
+
+    private static DestinationChangeOverride overrideOf(final User user) {
+        return Objects.requireNonNullElse(user.getDestinationChangeOverride(), DestinationChangeOverride.AUTOMATIC);
     }
 
     private static String refusalOf(final List<MissingRequirement> missing) {
