@@ -23,6 +23,8 @@ class RedisOAuthSignInCodesTest {
 
     private final InMemoryRedis redis = new InMemoryRedis();
 
+    private static final String CHALLENGE = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM";
+
     private StringRedisTemplate redisTemplate;
     private RedisOAuthSignInCodes codes;
 
@@ -35,21 +37,21 @@ class RedisOAuthSignInCodesTest {
 
     @Test
     void aCodeIsRandomAndLivesSixtySeconds() {
-        final var code = codes.create(42L, SignInMethod.GITHUB);
+        final var code = codes.create(42L, SignInMethod.GITHUB, CHALLENGE);
 
         assertThat(code).matches("[A-Za-z0-9_-]{43}");
-        assertThat(codes.create(42L, SignInMethod.GITHUB)).isNotEqualTo(code);
+        assertThat(codes.create(42L, SignInMethod.GITHUB, CHALLENGE)).isNotEqualTo(code);
         assertThat(redis.keys()).contains(KEY_PREFIX + code);
         assertThat(redis.timeToLiveOfKeyContaining(code)).isEqualTo(Duration.ofSeconds(60));
         assertThat(JSON.readTree(redisTemplate.opsForValue().get(KEY_PREFIX + code)))
-                .isEqualTo(JSON.readTree("{\"userId\":42,\"method\":\"GITHUB\"}"));
+                .isEqualTo(JSON.readTree("{\"userId\":42,\"method\":\"GITHUB\",\"challenge\":\"" + CHALLENGE + "\"}"));
     }
 
     @Test
     void aCodeWorksOnce() {
-        final var code = codes.create(42L, SignInMethod.GOOGLE);
+        final var code = codes.create(42L, SignInMethod.GOOGLE, CHALLENGE);
 
-        assertThat(codes.consume(code)).contains(new OAuthSignIn(42L, SignInMethod.GOOGLE));
+        assertThat(codes.consume(code)).contains(new OAuthSignIn(42L, SignInMethod.GOOGLE, CHALLENGE));
         assertThat(codes.consume(code)).isEmpty();
     }
 
@@ -67,6 +69,13 @@ class RedisOAuthSignInCodesTest {
         assertThatThrownBy(() -> codes.consume("code"))
                 .isInstanceOf(SignInUnavailableException.class)
                 .hasMessage("Signing in isn't available right now. Try again in a minute.");
+    }
+
+    @Test
+    void aCodeStoredBeforeChallengesReadsWithoutOne() {
+        redisTemplate.opsForValue().set(KEY_PREFIX + "old", "{\"userId\":42,\"method\":\"GOOGLE\"}", Duration.ofSeconds(60));
+
+        assertThat(codes.consume("old")).contains(new OAuthSignIn(42L, SignInMethod.GOOGLE, null));
     }
 
 }

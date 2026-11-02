@@ -24,16 +24,17 @@ public class OAuthSignInController {
 
     @Operation(summary = "Finish a Google or GitHub sign-in",
             description = "Exchanges the one-time code from the sign-in callback (/auth/callback?code=…) for the same answer as POST /api/v1/auth/login. "
-                    + "A code lives 60 seconds and works once.")
+                    + "A code lives 60 seconds and works once, and only with the verifier whose S256 challenge started the sign-in "
+                    + "(/oauth2/authorization/{provider}?challenge=…), so only the browser that started it can finish it.")
     @ApiResponse(responseCode = "200", description = "Signed in: token and user")
-    @ApiResponse(responseCode = "400", description = "No code")
+    @ApiResponse(responseCode = "400", description = "No code or no verifier")
     @ApiResponse(responseCode = "403", description = "The account is deactivated")
-    @ApiResponse(responseCode = "410", description = "The code is unknown, used or expired; sign in again")
+    @ApiResponse(responseCode = "410", description = "The code is unknown, used or expired, or the verifier doesn't match; sign in again")
     @ApiResponse(responseCode = "429", description = "Too many sign-in attempts from this network")
     @ApiResponse(responseCode = "503", description = "Signing in isn't available right now")
     @PostMapping("/exchange")
     public ResponseEntity<JWTTokenDto> exchange(@Valid @RequestBody final OAuthCodeDto dto) {
-        return oAuthSignInService.exchange(dto.getCode(), request);
+        return oAuthSignInService.exchange(dto.getCode(), dto.getVerifier(), request);
     }
 
 }

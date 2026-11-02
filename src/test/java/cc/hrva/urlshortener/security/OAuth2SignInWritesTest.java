@@ -84,7 +84,7 @@ class OAuth2SignInWritesTest {
         final var signInCodes = mock(OAuthSignInCodes.class);
         final var appProperties = mock(AppProperties.class);
         when(authoritiesService.getDefaultAuthority()).thenReturn(Authorities.builder().id(1L).name("ROLE_USER").build());
-        when(signInCodes.create(any(), any())).thenReturn("one-time-code");
+        when(signInCodes.create(any(), any(), any())).thenReturn("one-time-code");
         when(appProperties.getFrontendUrl()).thenReturn("http://fe");
         when(appProperties.getUserApiKeySlots()).thenReturn(2L);
         handler = new OAuth2LoginSuccessHandler(userRepository, authoritiesService, signInCodes, appProperties,
@@ -230,7 +230,7 @@ class OAuth2SignInWritesTest {
     private MockHttpServletResponse signIn(final String email, final String provider) throws Exception {
         final var principal = new DefaultOAuth2User(List.of(), Map.of("email", email, "email_verified", true, "sub", email), "sub");
         final var response = new MockHttpServletResponse();
-        handler.onAuthenticationSuccess(new MockHttpServletRequest(), response, new OAuth2AuthenticationToken(principal, List.of(), provider));
+        handler.onAuthenticationSuccess(startedWithAChallenge(), response, new OAuth2AuthenticationToken(principal, List.of(), provider));
         return response;
     }
 
@@ -242,6 +242,12 @@ class OAuth2SignInWritesTest {
             includeFilters = @ComponentScan.Filter(type = FilterType.ASSIGNABLE_TYPE, classes = {UrlRepository.class, UserRepository.class, UserSignInMethodRepository.class}))
     @Import(DefaultSignInMethodService.class)
     static class TestApplication {
+    }
+
+    private static MockHttpServletRequest startedWithAChallenge() {
+        final var request = new MockHttpServletRequest();
+        request.setAttribute(OAuthChallenges.ATTRIBUTE, "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM");
+        return request;
     }
 
 }

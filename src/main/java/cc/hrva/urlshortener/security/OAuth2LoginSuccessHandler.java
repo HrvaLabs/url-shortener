@@ -44,6 +44,7 @@ public class OAuth2LoginSuccessHandler implements AuthenticationSuccessHandler {
     private static final String PROVIDER_TURNED_OFF = "provider_turned_off";
     private static final String PROVIDER_DISABLED = "provider_disabled";
     private static final String SIGN_IN_UNAVAILABLE = "sign_in_unavailable";
+    private static final String PROVIDER_ERROR = "provider_error";
 
     private final UserRepository userRepository;
     private final AuthoritiesService authoritiesService;
@@ -82,6 +83,12 @@ public class OAuth2LoginSuccessHandler implements AuthenticationSuccessHandler {
 
         final var oAuth2User = (OAuth2User) authentication.getPrincipal();
         final var provider = providerOf(authentication);
+        final var challenge = OAuthChallenges.of(request);
+        if (challenge.isEmpty()) {
+            log.warn("OAuth2 login refused: the sign-in was started without a challenge provider={}", provider);
+            redirectToCallback(response, "?error=" + PROVIDER_ERROR);
+            return;
+        }
 
         final var method = SignInMethod.ofProvider(provider);
         final var providerSwitch = method.flatMap(OAuthProviders::switchOf);
@@ -144,7 +151,7 @@ public class OAuth2LoginSuccessHandler implements AuthenticationSuccessHandler {
 
         final String code;
         try {
-            code = signInCodes.create(user.getId(), method.orElse(null));
+            code = signInCodes.create(user.getId(), method.orElse(null), challenge.get());
         } catch (final SignInUnavailableException exception) {
             log.warn("OAuth2 login code unavailable user id={}", user.getId());
             redirectToCallback(response, "?error=" + SIGN_IN_UNAVAILABLE);

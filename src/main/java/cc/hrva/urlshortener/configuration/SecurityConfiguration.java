@@ -7,6 +7,8 @@ import cc.hrva.urlshortener.security.JwtFilter;
 import cc.hrva.urlshortener.security.OAuth2LoginFailureHandler;
 import cc.hrva.urlshortener.security.OAuth2LoginSuccessHandler;
 import cc.hrva.urlshortener.security.OAuth2LoginUserService;
+import cc.hrva.urlshortener.security.OAuthChallengeRequestRepository;
+import cc.hrva.urlshortener.security.OAuthChallengeRequestResolver;
 import cc.hrva.urlshortener.security.UnknownPageFilter;
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import jakarta.servlet.DispatcherType;
@@ -31,10 +33,13 @@ import org.springframework.security.config.annotation.web.configuration.EnableWe
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.annotation.web.configurers.HeadersConfigurer;
 import org.springframework.security.config.Customizer;
+import org.springframework.security.config.ObjectPostProcessor;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.oauth2.client.registration.ClientRegistrationRepository;
+import org.springframework.security.oauth2.client.web.OAuth2AuthorizationRequestRedirectFilter;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.web.cors.CorsConfiguration;
@@ -73,7 +78,8 @@ public class SecurityConfiguration {
 
     @Bean
     @Order(Ordered.LOWEST_PRECEDENCE)
-    public SecurityFilterChain filterChain(final HttpSecurity http) throws Exception {
+    public SecurityFilterChain filterChain(final HttpSecurity http, final ClientRegistrationRepository clientRegistrationRepository) throws Exception {
+        final var oAuth2LoginFailureHandler = new OAuth2LoginFailureHandler(appProperties.getFrontendUrl());
         http.csrf(AbstractHttpConfigurer::disable)
                 .cors(Customizer.withDefaults())
                 .authorizeHttpRequests(authorizeRequests -> {
@@ -101,9 +107,19 @@ public class SecurityConfiguration {
                                 .sessionCreationPolicy(SessionCreationPolicy.STATELESS)
                 ).authenticationProvider(authenticationProvider(passwordEncoder()))
                 .oauth2Login(oauth2 -> oauth2
+                        .authorizationEndpoint(authorization -> authorization
+                                .authorizationRequestResolver(new OAuthChallengeRequestResolver(clientRegistrationRepository))
+                                .authorizationRequestRepository(new OAuthChallengeRequestRepository()))
                         .userInfoEndpoint(userInfo -> userInfo.userService(oAuth2LoginUserService))
                         .successHandler(oAuth2LoginSuccessHandler)
-                        .failureHandler(new OAuth2LoginFailureHandler(appProperties.getFrontendUrl()))
+                        .failureHandler(oAuth2LoginFailureHandler)
+                        .withObjectPostProcessor(new ObjectPostProcessor<OAuth2AuthorizationRequestRedirectFilter>() {
+                            @Override
+                            public <O extends OAuth2AuthorizationRequestRedirectFilter> O postProcess(final O redirectFilter) {
+                                redirectFilter.setAuthenticationFailureHandler(oAuth2LoginFailureHandler);
+                                return redirectFilter;
+                            }
+                        })
                 )
                 .headers(headers -> headers.frameOptions(HeadersConfigurer.FrameOptionsConfig::disable))
                 .addFilterBefore(new UnknownPageFilter(templateEngine, appProperties), UsernamePasswordAuthenticationFilter.class)

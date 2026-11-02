@@ -51,7 +51,9 @@
 # trailing slash opening the same link.
 # Section 20 also checks that the password change ends the older token (a 401 problem, "Your session ended. Sign in again.") and renews this
 # device's. Section 29 checks sessions and sign-in: 039's column, sign out everywhere (the new token, the old ones refused, the API key
-# untouched), the one-time OAuth code put straight into Redis (exchanged once, then 410; a two-step account's code answers the pending step), passwords over 72 bytes (field errors, and a
+# untouched), the one-time OAuth code put straight into Redis with a challenge (a sign-in start without a challenge goes back to the site;
+# another verifier is 410 and spends the code; the right one is exchanged once, then 410; a code without a challenge is 410; a two-step
+# account's code answers the pending step), passwords over 72 bytes (field errors, and a
 # sign-in answered like a wrong password) and the Redis login limit per account and per network (429 with Retry-After, a success that
 # doesn't clear the network, hashed keys, the admin list and clearing it).
 # Section 14 first checks that admin@localhost, whose two-step sign-in is off, gets the 403 "Turn on two-step sign-in to use admin pages."
@@ -2271,21 +2273,43 @@ expect_eq "$(psql_value "select tokens_valid_after is not null and tokens_valid_
 http -X POST "$BASE/api/v1/urls" -H "X-Api-Key: $OWNER_KEY" -H 'Content-Type: application/json' -d '{"longUrl":"https://example.com/after-sign-out-everywhere"}'
 expect_eq "$HTTP_STATUS" 201 "the API key keeps working after signing out everywhere"
 
-echo "  --- the one-time OAuth code"
-OAUTH_CODE=$(openssl rand -hex 24)
-docker exec "$REDIS_CONTAINER" redis-cli SET "auth:oauth-code:$OAUTH_CODE" "{\"userId\":$SESSION_USER_ID,\"method\":\"GOOGLE\"}" EX 60 >/dev/null
-http -X POST "$BASE/api/v1/auth/oauth/exchange" -H 'Content-Type: application/json' -d "{\"code\":\"$OAUTH_CODE\"}"
+echo "  --- the one-time OAuth code, bound to the browser that started the sign-in"
+SIGN_IN_VERIFIER=$(openssl rand -hex 32)
+SIGN_IN_CHALLENGE=$(printf '%s' "$SIGN_IN_VERIFIER" | openssl dgst -sha256 -binary | b64url)
+oauth_code_in_redis() {
+    OAUTH_CODE=$(openssl rand -hex 24)
+    docker exec "$REDIS_CONTAINER" redis-cli SET "auth:oauth-code:$OAUTH_CODE" "{\"userId\":$SESSION_USER_ID,\"method\":\"GOOGLE\",\"challenge\":\"$1\"}" EX 60 >/dev/null
+}
+exchange_oauth_code() {
+    http -X POST "$BASE/api/v1/auth/oauth/exchange" -H 'Content-Type: application/json' -d "{\"code\":\"$OAUTH_CODE\",\"verifier\":\"$1\"}"
+}
+http "$BASE/oauth2/authorization/google"
+expect_eq "$HTTP_STATUS $HTTP_LOCATION" "302 $FRONTEND_URL/auth/callback?error=provider_error" "a sign-in started without a challenge goes back to the site, never to Google"
+http "$BASE/oauth2/authorization/google?challenge=$SIGN_IN_CHALLENGE"
+expect_contains "$HTTP_STATUS $HTTP_LOCATION" "302 https://accounts.google.com/" "with a challenge it goes on to Google"
+expect_eq "$(grep -c "$SIGN_IN_CHALLENGE" <<<"$HTTP_LOCATION")" 0 "and the challenge stays on hrva.cc"
+oauth_code_in_redis "$SIGN_IN_CHALLENGE"
+exchange_oauth_code "$(openssl rand -hex 32)"
+expect_eq "$HTTP_STATUS $(jq -r .detail <<<"$HTTP_BODY")" '410 Your sign-in expired. Sign in again.' "another browser's verifier is 410, like an unknown code"
+expect_eq "$(docker exec "$REDIS_CONTAINER" redis-cli EXISTS "auth:oauth-code:$OAUTH_CODE")" 0 "and the code is spent"
+exchange_oauth_code "$SIGN_IN_VERIFIER"
+expect_eq "$HTTP_STATUS" 410 "so the right verifier can't use it after that"
+oauth_code_in_redis "$SIGN_IN_CHALLENGE"
+exchange_oauth_code "$SIGN_IN_VERIFIER"
 expect_eq "$HTTP_STATUS $(jq -r '.user.email' <<<"$HTTP_BODY") $(jq -r '.token | startswith("Bearer eyJ")' <<<"$HTTP_BODY")" "200 $USER_EMAIL true" \
-    "POST /api/v1/auth/oauth/exchange answers like a sign-in"
+    "POST /api/v1/auth/oauth/exchange with the verifier answers like a sign-in"
 expect_eq "$(docker exec "$REDIS_CONTAINER" redis-cli EXISTS "auth:oauth-code:$OAUTH_CODE")" 0 "the code is gone from Redis"
-http -X POST "$BASE/api/v1/auth/oauth/exchange" -H 'Content-Type: application/json' -d "{\"code\":\"$OAUTH_CODE\"}"
+exchange_oauth_code "$SIGN_IN_VERIFIER"
 expect_eq "$HTTP_STATUS $(header_value content-type) $(jq -r .detail <<<"$HTTP_BODY")" '410 application/problem+json Your sign-in expired. Sign in again.' "a used code is 410"
 http -X POST "$BASE/api/v1/auth/oauth/exchange" -H 'Content-Type: application/json' -d '{}'
-expect_eq "$HTTP_STATUS $(jq -c .errors <<<"$HTTP_BODY")" '400 {"code":"Code is required"}' "no code is 400, under errors"
-psql_query "update user_account set two_step_enabled = true where id = $SESSION_USER_ID;"
+expect_eq "$HTTP_STATUS $(jq -c .errors <<<"$HTTP_BODY")" '400 {"code":"Code is required","verifier":"Verifier is required"}' "no code and no verifier is 400, under errors"
 OAUTH_CODE=$(openssl rand -hex 24)
 docker exec "$REDIS_CONTAINER" redis-cli SET "auth:oauth-code:$OAUTH_CODE" "{\"userId\":$SESSION_USER_ID,\"method\":\"GOOGLE\"}" EX 60 >/dev/null
-http -X POST "$BASE/api/v1/auth/oauth/exchange" -H 'Content-Type: application/json' -d "{\"code\":\"$OAUTH_CODE\"}"
+exchange_oauth_code "$SIGN_IN_VERIFIER"
+expect_eq "$HTTP_STATUS" 410 "a code stored without a challenge (before v2.27) is 410"
+psql_query "update user_account set two_step_enabled = true where id = $SESSION_USER_ID;"
+oauth_code_in_redis "$SIGN_IN_CHALLENGE"
+exchange_oauth_code "$SIGN_IN_VERIFIER"
 expect_eq "$HTTP_STATUS $(jq -c '[.twoStepRequired, (.pendingToken | type), .token]' <<<"$HTTP_BODY")" '200 [true,"string",null]' \
     "a two-step account's code answers the pending second step, with no token (the pending token never travels in a URL)"
 psql_query "update user_account set two_step_enabled = false where id = $SESSION_USER_ID;"
@@ -2332,7 +2356,7 @@ RETRY_AFTER=$(header_value retry-after)
 expect_eq "$HTTP_STATUS $(header_value content-type) $(jq -r .detail <<<"$HTTP_BODY")" '429 application/problem+json Too many sign-in attempts. Try again in 60 minutes.' "then even the right password is 429"
 (( RETRY_AFTER > 3500 && RETRY_AFTER <= 3600 )) || fail "Retry-After for the network limit: expected 3501 to 3600 seconds, got '$RETRY_AFTER'"
 ok "Retry-After: $RETRY_AFTER"
-http -X POST "$BASE/api/v1/auth/oauth/exchange" -H 'CF-Connecting-IP: 203.0.113.250' -H 'Content-Type: application/json' -d '{"code":"any"}'
+http -X POST "$BASE/api/v1/auth/oauth/exchange" -H 'CF-Connecting-IP: 203.0.113.250' -H 'Content-Type: application/json' -d '{"code":"any","verifier":"any"}'
 expect_eq "$HTTP_STATUS" 429 "the code exchange is limited per network too"
 expect_eq "$(docker exec "$REDIS_CONTAINER" redis-cli --scan --pattern 'rate-limit:login:*' | grep -c -e '@' -e '203\.0\.113' -e '198\.51\.100' || true)" 0 \
     "no counter key holds a plain address or email"

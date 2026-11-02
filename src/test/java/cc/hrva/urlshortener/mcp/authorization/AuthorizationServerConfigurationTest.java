@@ -585,7 +585,7 @@ class AuthorizationServerConfigurationTest {
 
     @Test
     void googleOauthLoginStillRedirects() throws Exception {
-        mockMvc.perform(get("/oauth2/authorization/google"))
+        mockMvc.perform(get("/oauth2/authorization/google").param("challenge", "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"))
                 .andExpect(status().isFound())
                 .andExpect(header().string(HttpHeaders.LOCATION, startsWith("https://accounts.google.com/")));
     }

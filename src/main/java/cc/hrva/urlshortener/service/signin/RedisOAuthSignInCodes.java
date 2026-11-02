@@ -24,9 +24,9 @@ public class RedisOAuthSignInCodes implements OAuthSignInCodes {
     private final JsonMapper jsonMapper;
 
     @Override
-    public String create(final Long userId, final SignInMethod method) {
+    public String create(final Long userId, final SignInMethod method, final String challenge) {
         final var code = SecureTokens.random();
-        final var signIn = jsonMapper.writeValueAsString(new OAuthSignIn(userId, method));
+        final var signIn = jsonMapper.writeValueAsString(new OAuthSignIn(userId, method, challenge));
         inRedis(() -> {
             redisTemplate.opsForValue().set(KEY_PREFIX + code, signIn, TIME_TO_LIVE);
             return null;

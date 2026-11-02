@@ -4,6 +4,7 @@ import cc.hrva.urlshortener.dto.JWTTokenDto;
 import cc.hrva.urlshortener.exception.SignInExpiredException;
 import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.security.ClientIpResolver;
+import cc.hrva.urlshortener.security.OAuthChallenges;
 import cc.hrva.urlshortener.service.LoginAttemptService;
 import cc.hrva.urlshortener.service.OAuthSignInService;
 import cc.hrva.urlshortener.service.SignInService;
@@ -34,11 +35,15 @@ public class DefaultOAuthSignInService implements OAuthSignInService {
 
     @Override
     @Transactional
-    public ResponseEntity<JWTTokenDto> exchange(final String code, final HttpServletRequest request) {
+    public ResponseEntity<JWTTokenDto> exchange(final String code, final String verifier, final HttpServletRequest request) {
         final var clientIp = clientIpResolver.getClientIp(request);
         loginAttemptService.checkNetwork(clientIp);
 
         final var signIn = signInCodes.consume(code).orElseThrow(() -> expired(clientIp));
+        if (!OAuthChallenges.matches(verifier, signIn.challenge())) {
+            log.info("OAuth sign-in code refused, the verifier doesn't match the sign-in's challenge user id={}", signIn.userId());
+            throw expired(clientIp);
+        }
         final var user = accountLock.lock(userRepository.findById(signIn.userId()).orElseThrow(() -> expired(clientIp)));
         if (Boolean.FALSE.equals(user.getActive())) {
             throw new DisabledException("Account is deactivated");

@@ -86,6 +86,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class OAuth2LoginFlowTest {
 
     private static final String ACCESS_TOKEN = "gho_flow-test-token";
+    private static final String CHALLENGE = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM";
     private static final String CALLBACK = "https://hrva.cc:443/login/oauth2/code/";
     private static final String PROFILE = """
             {"id": 583231, "login": "octocat", "name": "The Octocat", "email": null}""";
@@ -131,7 +132,7 @@ class OAuth2LoginFlowTest {
                 .authorities(List.of(Authorities.builder().id(1L).name("ROLE_USER").build()))
                 .build();
         when(userRepository.findByEmail("octocat@example.com")).thenReturn(Optional.of(member));
-        when(signInCodes.create(any(), any())).thenReturn("one-time-code");
+        when(signInCodes.create(any(), any(), eq(CHALLENGE))).thenReturn("one-time-code");
         expectProfileAndEmails("""
                 [{"email": "octocat@example.com", "primary": true, "verified": true, "visibility": null}]""");
 
@@ -192,7 +193,7 @@ class OAuth2LoginFlowTest {
                 .authorities(List.of(Authorities.builder().id(1L).name("ROLE_USER").build()))
                 .build();
         when(userRepository.findByEmail("someone@gmail.com")).thenReturn(Optional.of(member));
-        when(signInCodes.create(any(), any())).thenReturn("one-time-code");
+        when(signInCodes.create(any(), any(), eq(CHALLENGE))).thenReturn("one-time-code");
         expectGoogleUserInfo(true);
         final var authorization = authorize("google");
         assertThat(queryParameter(authorization, "scope")).isEqualTo("profile email");
@@ -217,6 +218,33 @@ class OAuth2LoginFlowTest {
         verify(userRepository, never()).findByEmail(anyString());
     }
 
+    @Test
+    void aSignInStartedWithoutAWellFormedChallengeGoesBackToTheSiteAndNeverToTheProvider() throws Exception {
+        for (final var start : List.of(get("/oauth2/authorization/google"), get("/oauth2/authorization/github").param("challenge", "short"),
+                get("/oauth2/authorization/google").param("challenge", CHALLENGE.replace('-', '+')))) {
+            final var refused = mockMvc.perform(start)
+                    .andExpect(status().isFound())
+                    .andExpect(redirectedUrl("http://localhost:3000/auth/callback?error=provider_error"))
+                    .andReturn();
+            assertThat(refused.getResponse().getHeader("Referrer-Policy")).isEqualTo("no-referrer");
+        }
+
+        verifyNoInteractions(signInCodes, userRepository);
+    }
+
+    @Test
+    void aCallbackWithoutTheStartsSessionCreatesNoCode() throws Exception {
+        final var authorization = authorize("google");
+
+        mockMvc.perform(get(CALLBACK + "google")
+                        .param("code", "google-authorization-code")
+                        .param("state", queryParameter(authorization, "state")))
+                .andExpect(status().isFound())
+                .andExpect(redirectedUrl("http://localhost:3000/auth/callback?error=provider_error"));
+
+        verifyNoInteractions(signInCodes);
+    }
+
     private MvcResult authorizeAtGitHub() throws Exception {
         final var authorization = authorize("github");
 
@@ -230,9 +258,13 @@ class OAuth2LoginFlowTest {
     }
 
     private MvcResult authorize(final String provider) throws Exception {
-        return mockMvc.perform(get("/oauth2/authorization/" + provider))
+        final var authorization = mockMvc.perform(get("/oauth2/authorization/" + provider).param("challenge", CHALLENGE))
                 .andExpect(status().isFound())
                 .andReturn();
+        assertThat(authorization.getResponse().getRedirectedUrl()).doesNotContain(CHALLENGE);
+        assertThat(UriComponentsBuilder.fromUriString(authorization.getResponse().getRedirectedUrl()).build().getQueryParams()).doesNotContainKey("challenge");
+
+        return authorization;
     }
 
     private ResultActions returnFrom(final String provider, final MvcResult authorization) throws Exception {

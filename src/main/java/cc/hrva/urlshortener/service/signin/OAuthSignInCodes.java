@@ -9,7 +9,7 @@ public interface OAuthSignInCodes {
     Duration TIME_TO_LIVE = Duration.ofSeconds(60);
     String UNAVAILABLE = "Signing in isn't available right now. Try again in a minute.";
 
-    String create(Long userId, SignInMethod method);
+    String create(Long userId, SignInMethod method, String challenge);
     Optional<OAuthSignIn> consume(String code);
 
 }

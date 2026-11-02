@@ -6,6 +6,6 @@ import org.springframework.http.ResponseEntity;
 
 public interface OAuthSignInService {
 
-    ResponseEntity<JWTTokenDto> exchange(String code, HttpServletRequest request);
+    ResponseEntity<JWTTokenDto> exchange(String code, String verifier, HttpServletRequest request);
 
 }

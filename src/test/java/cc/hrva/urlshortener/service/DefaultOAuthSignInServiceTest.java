@@ -32,6 +32,7 @@ import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -39,6 +40,8 @@ import static org.mockito.Mockito.when;
 class DefaultOAuthSignInServiceTest {
 
     private static final String CLIENT_IP = "203.0.113.9";
+    private static final String VERIFIER = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
+    private static final String CHALLENGE = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM";
 
     @Mock
     private ClientIpResolver clientIpResolver;
@@ -73,11 +76,11 @@ class DefaultOAuthSignInServiceTest {
         final var user = User.builder().id(8L).email("two@hrva.cc").active(true).twoStepEnabled(true).build();
         final ResponseEntity<JWTTokenDto> pending = ResponseEntity.ok(JWTTokenDto.builder()
                 .twoStepRequired(true).pendingToken("pending").methods(List.of(TwoStepMethod.TOTP, TwoStepMethod.RECOVERY_CODE)).build());
-        when(signInCodes.consume("code")).thenReturn(Optional.of(new OAuthSignIn(8L, SignInMethod.GOOGLE)));
+        when(signInCodes.consume("code")).thenReturn(Optional.of(new OAuthSignIn(8L, SignInMethod.GOOGLE, CHALLENGE)));
         when(userRepository.findById(8L)).thenReturn(Optional.of(user));
         when(signInService.requireSecondStep(user, SignInMethod.GOOGLE, false)).thenReturn(pending);
 
-        final var answer = service.exchange("code", request);
+        final var answer = service.exchange("code", VERIFIER, request);
 
         assertThat(answer).isSameAs(pending);
         assertThat(answer.getBody().getToken()).isNull();
@@ -88,11 +91,11 @@ class DefaultOAuthSignInServiceTest {
     void aFreshCodeAnswersLikeASignInWithoutRecordingItTwice() {
         final var user = User.builder().id(7L).email("ana@hrva.cc").active(true).build();
         final ResponseEntity<JWTTokenDto> signedIn = ResponseEntity.ok(JWTTokenDto.builder().token("Bearer jwt").build());
-        when(signInCodes.consume("code")).thenReturn(Optional.of(new OAuthSignIn(7L, SignInMethod.GITHUB)));
+        when(signInCodes.consume("code")).thenReturn(Optional.of(new OAuthSignIn(7L, SignInMethod.GITHUB, CHALLENGE)));
         when(userRepository.findById(7L)).thenReturn(Optional.of(user));
         when(signInService.tokenFor(user, false)).thenReturn(signedIn);
 
-        assertThat(service.exchange("code", request)).isSameAs(signedIn);
+        assertThat(service.exchange("code", VERIFIER, request)).isSameAs(signedIn);
         verify(signInService, never()).signIn(any(), any(), anyBoolean());
     }
 
@@ -100,7 +103,7 @@ class DefaultOAuthSignInServiceTest {
     void anUnknownOrUsedCodeHasExpiredAndCountsAsAFailedSignIn() {
         when(signInCodes.consume("used")).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> service.exchange("used", request))
+        assertThatThrownBy(() -> service.exchange("used", VERIFIER, request))
                 .isInstanceOf(SignInExpiredException.class)
                 .hasMessage("Your sign-in expired. Sign in again.");
         verify(loginAttemptService).networkFailed(CLIENT_IP);
@@ -108,21 +111,45 @@ class DefaultOAuthSignInServiceTest {
 
     @Test
     void aDeactivatedAccountIsRefused() {
-        when(signInCodes.consume("code")).thenReturn(Optional.of(new OAuthSignIn(7L, SignInMethod.GOOGLE)));
+        when(signInCodes.consume("code")).thenReturn(Optional.of(new OAuthSignIn(7L, SignInMethod.GOOGLE, CHALLENGE)));
         when(userRepository.findById(7L)).thenReturn(Optional.of(User.builder().id(7L).active(false).build()));
 
-        assertThatThrownBy(() -> service.exchange("code", request)).isInstanceOf(DisabledException.class);
+        assertThatThrownBy(() -> service.exchange("code", VERIFIER, request)).isInstanceOf(DisabledException.class);
     }
 
     @Test
     void aMethodTurnedOffSinceTheRedirectIsRefused() {
         final var user = User.builder().id(7L).active(true).build();
-        when(signInCodes.consume("code")).thenReturn(Optional.of(new OAuthSignIn(7L, SignInMethod.GOOGLE)));
+        when(signInCodes.consume("code")).thenReturn(Optional.of(new OAuthSignIn(7L, SignInMethod.GOOGLE, CHALLENGE)));
         when(userRepository.findById(7L)).thenReturn(Optional.of(user));
         when(signInMethodGuard.stillOn(user, SignInMethod.GOOGLE)).thenReturn(false);
 
-        assertThatThrownBy(() -> service.exchange("code", request)).isInstanceOf(SignInExpiredException.class);
+        assertThatThrownBy(() -> service.exchange("code", VERIFIER, request)).isInstanceOf(SignInExpiredException.class);
         verify(signInService, never()).tokenFor(any(), anyBoolean());
+    }
+
+    @Test
+    void aCodeExchangedWithAnotherBrowsersVerifierIsSpentAndAnsweredLikeAnUnknownCode() {
+        when(signInCodes.consume("code")).thenReturn(Optional.of(new OAuthSignIn(7L, SignInMethod.GOOGLE, CHALLENGE)));
+
+        for (final var verifier : new String[] {"another-browsers-verifier-that-is-long-enough-to-pass", VERIFIER + "x", "", null}) {
+            assertThatThrownBy(() -> service.exchange("code", verifier, request))
+                    .isInstanceOf(SignInExpiredException.class)
+                    .hasMessage("Your sign-in expired. Sign in again.");
+        }
+
+        verify(loginAttemptService, times(4)).networkFailed(CLIENT_IP);
+        verify(userRepository, never()).findById(any());
+        verify(signInService, never()).tokenFor(any(), anyBoolean());
+        verify(signInService, never()).requireSecondStep(any(), any(), anyBoolean());
+    }
+
+    @Test
+    void aCodeStoredWithoutAChallengeIsRefused() {
+        when(signInCodes.consume("code")).thenReturn(Optional.of(new OAuthSignIn(7L, SignInMethod.GOOGLE, null)));
+
+        assertThatThrownBy(() -> service.exchange("code", VERIFIER, request)).isInstanceOf(SignInExpiredException.class);
+        verify(userRepository, never()).findById(any());
     }
 
 }

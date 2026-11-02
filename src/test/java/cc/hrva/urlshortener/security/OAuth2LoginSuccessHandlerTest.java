@@ -57,6 +57,8 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class OAuth2LoginSuccessHandlerTest {
 
+    private static final String CHALLENGE = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM";
+
     private OAuth2LoginSuccessHandler handler;
 
     @Mock
@@ -99,6 +101,20 @@ class OAuth2LoginSuccessHandlerTest {
         lenient().when(authentication.getPrincipal()).thenReturn(oAuth2User);
         lenient().when(appProperties.getFrontendUrl()).thenReturn("http://fe");
         lenient().when(oAuth2User.getAttribute("email_verified")).thenReturn(true);
+        lenient().when(request.getAttribute(OAuthChallenges.ATTRIBUTE)).thenReturn(CHALLENGE);
+    }
+
+    @Test
+    @ExtendWith(OutputCaptureExtension.class)
+    void aSignInStartedWithoutAChallengeIsSentBackBeforeAnythingIsLookedUp(final CapturedOutput output) throws Exception {
+        when(request.getAttribute(OAuthChallenges.ATTRIBUTE)).thenReturn(null);
+        lenient().when(oAuth2User.getAttribute("email")).thenReturn("ok@example.com");
+
+        handler.onAuthenticationSuccess(request, response, authentication);
+
+        verify(response).sendRedirect("http://fe/auth/callback?error=provider_error");
+        verifyNoInteractions(userRepository, signInCodes, signInMethodService);
+        assertThat(output).contains("OAuth2 login refused: the sign-in was started without a challenge");
     }
 
     @Test
@@ -108,7 +124,7 @@ class OAuth2LoginSuccessHandlerTest {
         handler.onAuthenticationSuccess(request, response, authentication);
 
         verify(response).sendRedirect("http://fe/auth/callback?error=no_email");
-        verify(signInCodes, never()).create(any(), any());
+        verify(signInCodes, never()).create(any(), any(), any());
     }
 
     @Test
@@ -121,7 +137,7 @@ class OAuth2LoginSuccessHandlerTest {
         handler.onAuthenticationSuccess(request, response, authentication);
 
         verify(response).sendRedirect("http://fe/auth/callback?error=account_inactive");
-        verify(signInCodes, never()).create(any(), any());
+        verify(signInCodes, never()).create(any(), any(), any());
         verifyNoInteractions(signInMethodService);
         assertThat(output).contains("OAuth2 login blocked: inactive account email=e***@example.com user id=1").doesNotContain("evil@example.com");
     }
@@ -134,7 +150,7 @@ class OAuth2LoginSuccessHandlerTest {
                 .build();
         when(oAuth2User.getAttribute("email")).thenReturn("ok@example.com");
         when(userRepository.findByEmail("ok@example.com")).thenReturn(Optional.of(user));
-        when(signInCodes.create(any(), any())).thenReturn("one-time-code");
+        when(signInCodes.create(any(), any(), any())).thenReturn("one-time-code");
 
         handler.onAuthenticationSuccess(request, response, authentication);
 
@@ -153,7 +169,7 @@ class OAuth2LoginSuccessHandlerTest {
                 .build();
         when(oAuth2User.getAttribute("email")).thenReturn("ok@example.com");
         when(userRepository.findByEmail("ok@example.com")).thenReturn(Optional.of(user));
-        when(signInCodes.create(any(), any())).thenReturn("one-time-code");
+        when(signInCodes.create(any(), any(), any())).thenReturn("one-time-code");
 
         handler.onAuthenticationSuccess(request, response, signIn(provider));
 
@@ -170,7 +186,7 @@ class OAuth2LoginSuccessHandlerTest {
                 .build();
         when(oAuth2User.getAttribute("email")).thenReturn("ok@example.com");
         when(userRepository.findByEmail("ok@example.com")).thenReturn(Optional.of(user));
-        when(signInCodes.create(any(), any())).thenReturn("one-time-code");
+        when(signInCodes.create(any(), any(), any())).thenReturn("one-time-code");
 
         handler.onAuthenticationSuccess(request, response, signIn("facebook"));
 
@@ -190,7 +206,7 @@ class OAuth2LoginSuccessHandlerTest {
             saved.setId(33L);
             return saved;
         });
-        when(signInCodes.create(any(), any())).thenReturn("one-time-code");
+        when(signInCodes.create(any(), any(), any())).thenReturn("one-time-code");
 
         handler.onAuthenticationSuccess(request, response, signIn("github"));
 
@@ -206,7 +222,7 @@ class OAuth2LoginSuccessHandlerTest {
 
         verify(response).sendRedirect("http://fe/auth/callback?error=invalid_email");
         verify(userRepository, never()).save(any());
-        verify(signInCodes, never()).create(any(), any());
+        verify(signInCodes, never()).create(any(), any(), any());
         verify(eventPublisher, never()).publishEvent(any(Object.class));
     }
 
@@ -223,7 +239,7 @@ class OAuth2LoginSuccessHandlerTest {
             saved.setId(31L);
             return saved;
         });
-        when(signInCodes.create(any(), any())).thenReturn("one-time-code");
+        when(signInCodes.create(any(), any(), any())).thenReturn("one-time-code");
 
         handler.onAuthenticationSuccess(request, response, authentication);
 
@@ -246,7 +262,7 @@ class OAuth2LoginSuccessHandlerTest {
             saved.setId(31L);
             return saved;
         });
-        when(signInCodes.create(any(), any())).thenReturn("one-time-code");
+        when(signInCodes.create(any(), any(), any())).thenReturn("one-time-code");
 
         handler.onAuthenticationSuccess(request, response, authentication);
 
@@ -266,7 +282,7 @@ class OAuth2LoginSuccessHandlerTest {
             saved.setId(32L);
             return saved;
         });
-        when(signInCodes.create(any(), any())).thenReturn("one-time-code");
+        when(signInCodes.create(any(), any(), any())).thenReturn("one-time-code");
 
         handler.onAuthenticationSuccess(request, response, gitHub);
 
@@ -283,7 +299,7 @@ class OAuth2LoginSuccessHandlerTest {
                 .thenReturn(Authorities.builder().id(1L).name("ROLE_USER").build());
         when(appProperties.getUserApiKeySlots()).thenReturn(2L);
         when(userRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
-        when(signInCodes.create(any(), any())).thenReturn("one-time-code");
+        when(signInCodes.create(any(), any(), any())).thenReturn("one-time-code");
 
         handler.onAuthenticationSuccess(request, response, google);
 
@@ -296,7 +312,7 @@ class OAuth2LoginSuccessHandlerTest {
         when(appProperties.getFrontendUrl()).thenReturn("http://localhost:3000");
         when(oAuth2User.getAttribute("email")).thenReturn("two@example.com");
         when(userRepository.findByEmail("two@example.com")).thenReturn(Optional.of(user));
-        when(signInCodes.create(7L, SignInMethod.GOOGLE)).thenReturn("Cd3_one-time");
+        when(signInCodes.create(7L, SignInMethod.GOOGLE, CHALLENGE)).thenReturn("Cd3_one-time");
 
         handler.onAuthenticationSuccess(request, response, authentication);
 
@@ -314,7 +330,7 @@ class OAuth2LoginSuccessHandlerTest {
         when(appProperties.getFrontendUrl()).thenReturn("http://localhost:3000");
         when(oAuth2User.getAttribute("email")).thenReturn("local@example.com");
         when(userRepository.findByEmail("local@example.com")).thenReturn(Optional.of(user));
-        when(signInCodes.create(8L, SignInMethod.GOOGLE)).thenReturn("Cd3_two-step");
+        when(signInCodes.create(8L, SignInMethod.GOOGLE, CHALLENGE)).thenReturn("Cd3_two-step");
 
         handler.onAuthenticationSuccess(request, response, google);
 
@@ -332,7 +348,7 @@ class OAuth2LoginSuccessHandlerTest {
         when(appProperties.getFrontendUrl()).thenReturn("http://localhost:3000");
         when(oAuth2User.getAttribute("email")).thenReturn("ok@example.com");
         when(userRepository.findByEmail("ok@example.com")).thenReturn(Optional.of(user));
-        when(signInCodes.create(1L, SignInMethod.GOOGLE)).thenReturn("Cd3_one-time");
+        when(signInCodes.create(1L, SignInMethod.GOOGLE, CHALLENGE)).thenReturn("Cd3_one-time");
 
         handler.onAuthenticationSuccess(request, response, authentication);
 
@@ -347,7 +363,7 @@ class OAuth2LoginSuccessHandlerTest {
         when(appProperties.getFrontendUrl()).thenReturn("http://localhost:3000");
         when(oAuth2User.getAttribute("email")).thenReturn("ok@example.com");
         when(userRepository.findByEmail("ok@example.com")).thenReturn(Optional.of(user));
-        when(signInCodes.create(any(), any())).thenThrow(new SignInUnavailableException(OAuthSignInCodes.UNAVAILABLE, new IllegalStateException()));
+        when(signInCodes.create(any(), any(), any())).thenThrow(new SignInUnavailableException(OAuthSignInCodes.UNAVAILABLE, new IllegalStateException()));
 
         handler.onAuthenticationSuccess(request, response, authentication);
 
@@ -362,7 +378,7 @@ class OAuth2LoginSuccessHandlerTest {
         when(appProperties.getFrontendUrl()).thenReturn("http://localhost:3000");
         when(oAuth2User.getAttribute("email")).thenReturn("two@example.com");
         when(userRepository.findByEmail("two@example.com")).thenReturn(Optional.of(user));
-        when(signInCodes.create(any(), any())).thenThrow(new SignInUnavailableException(OAuthSignInCodes.UNAVAILABLE, new IllegalStateException()));
+        when(signInCodes.create(any(), any(), any())).thenThrow(new SignInUnavailableException(OAuthSignInCodes.UNAVAILABLE, new IllegalStateException()));
 
         handler.onAuthenticationSuccess(request, response, authentication);
 
@@ -375,7 +391,7 @@ class OAuth2LoginSuccessHandlerTest {
         final var user = twoStepUser(12L, "two@example.com", "google");
         when(oAuth2User.getAttribute("email")).thenReturn("two@example.com");
         when(userRepository.findByEmail("two@example.com")).thenReturn(Optional.of(user));
-        when(signInCodes.create(any(), any())).thenReturn("one-time-code");
+        when(signInCodes.create(any(), any(), any())).thenReturn("one-time-code");
 
         handler.onAuthenticationSuccess(request, response, authentication);
 
@@ -441,7 +457,7 @@ class OAuth2LoginSuccessHandlerTest {
         when(oAuth2User.getAttribute("email_verified")).thenReturn("true");
         when(oAuth2User.getAttribute("email")).thenReturn("ok@example.com");
         when(userRepository.findByEmail("ok@example.com")).thenReturn(Optional.of(user));
-        when(signInCodes.create(any(), any())).thenReturn("one-time-code");
+        when(signInCodes.create(any(), any(), any())).thenReturn("one-time-code");
 
         handler.onAuthenticationSuccess(request, response, signIn("google"));
 
@@ -472,7 +488,7 @@ class OAuth2LoginSuccessHandlerTest {
         SettingsServiceFixtures.turnOff(settingsService, SettingKey.NEW_SIGNUPS);
         when(oAuth2User.getAttribute("email")).thenReturn("member@example.com");
         when(userRepository.findByEmail("member@example.com")).thenReturn(Optional.of(user));
-        when(signInCodes.create(any(), any())).thenReturn("one-time-code");
+        when(signInCodes.create(any(), any(), any())).thenReturn("one-time-code");
 
         handler.onAuthenticationSuccess(request, response, signIn(provider));
 
@@ -491,14 +507,14 @@ class OAuth2LoginSuccessHandlerTest {
                 .build();
         when(oAuth2User.getAttribute("email")).thenReturn("claimed@example.com");
         when(userRepository.findByEmail("claimed@example.com")).thenReturn(Optional.of(user));
-        when(signInCodes.create(any(), any())).thenReturn("one-time-code");
+        when(signInCodes.create(any(), any(), any())).thenReturn("one-time-code");
 
         handler.onAuthenticationSuccess(request, response, signIn(provider));
 
         final var order = inOrder(signInCodes, userRepository);
         order.verify(userRepository).confirmEmailAndReplacePassword(eq(12L), argThat(password -> password != null
                 && password.length() >= 32 && !password.startsWith("$2") && !password.equals(user.getPassword())));
-        order.verify(signInCodes).create(any(), any());
+        order.verify(signInCodes).create(any(), any(), any());
         order.verify(userRepository).recordLastLogin(eq(12L), any());
         verify(userRepository, never()).save(any());
         verify(response).sendRedirect(contains("http://fe/auth/callback?code=one-time-code"));
@@ -513,7 +529,7 @@ class OAuth2LoginSuccessHandlerTest {
         when(oAuth2User.getAttribute("email")).thenReturn("raced@example.com");
         when(userRepository.findByEmail("raced@example.com")).thenReturn(Optional.of(user));
         when(userRepository.confirmEmailAndReplacePassword(eq(16L), any())).thenReturn(0, 1);
-        when(signInCodes.create(any(), any())).thenReturn("one-time-code");
+        when(signInCodes.create(any(), any(), any())).thenReturn("one-time-code");
 
         handler.onAuthenticationSuccess(request, response, signIn("google"));
         assertThat(output).doesNotContain("replaced its unconfirmed password");
@@ -531,7 +547,7 @@ class OAuth2LoginSuccessHandlerTest {
                 .build();
         when(oAuth2User.getAttribute("email")).thenReturn("member@example.com");
         when(userRepository.findByEmail("member@example.com")).thenReturn(Optional.of(user));
-        when(signInCodes.create(any(), any())).thenReturn("one-time-code");
+        when(signInCodes.create(any(), any(), any())).thenReturn("one-time-code");
 
         handler.onAuthenticationSuccess(request, response, signIn(provider));
 
@@ -558,7 +574,7 @@ class OAuth2LoginSuccessHandlerTest {
         when(appProperties.getFrontendUrl()).thenReturn("http://localhost:3000");
         when(oAuth2User.getAttribute("email")).thenReturn("octo@example.com");
         when(userRepository.findByEmail("octo@example.com")).thenReturn(Optional.of(user));
-        when(signInCodes.create(15L, SignInMethod.GITHUB)).thenReturn("Cd3_octo");
+        when(signInCodes.create(15L, SignInMethod.GITHUB, CHALLENGE)).thenReturn("Cd3_octo");
 
         handler.onAuthenticationSuccess(request, response, signIn("github"));
 
@@ -610,7 +626,7 @@ class OAuth2LoginSuccessHandlerTest {
         when(oAuth2User.getAttribute("email")).thenReturn("both@example.com");
         when(userRepository.findByEmail("both@example.com")).thenReturn(Optional.of(user));
         lenient().when(signInMethodService.isTurnedOff(19L, SignInMethod.GITHUB)).thenReturn(true);
-        when(signInCodes.create(any(), any())).thenReturn("one-time-code");
+        when(signInCodes.create(any(), any(), any())).thenReturn("one-time-code");
 
         handler.onAuthenticationSuccess(request, response, signIn("google"));
 
@@ -654,7 +670,7 @@ class OAuth2LoginSuccessHandlerTest {
         SettingsServiceFixtures.turnOff(settingsService, SettingKey.GITHUB_SIGN_IN);
         when(oAuth2User.getAttribute("email")).thenReturn("member@example.com");
         when(userRepository.findByEmail("member@example.com")).thenReturn(Optional.of(user));
-        when(signInCodes.create(any(), any())).thenReturn("one-time-code");
+        when(signInCodes.create(any(), any(), any())).thenReturn("one-time-code");
 
         handler.onAuthenticationSuccess(request, response, signIn("google"));
 
@@ -671,7 +687,7 @@ class OAuth2LoginSuccessHandlerTest {
         SettingsServiceFixtures.turnOff(settingsService, SettingKey.GITHUB_SIGN_IN);
         when(oAuth2User.getAttribute("email")).thenReturn("member@example.com");
         when(userRepository.findByEmail("member@example.com")).thenReturn(Optional.of(user));
-        when(signInCodes.create(any(), any())).thenReturn("one-time-code");
+        when(signInCodes.create(any(), any(), any())).thenReturn("one-time-code");
 
         handler.onAuthenticationSuccess(request, response, signIn("gitlab"));
 

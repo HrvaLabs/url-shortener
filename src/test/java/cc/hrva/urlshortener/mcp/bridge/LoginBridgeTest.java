@@ -544,7 +544,7 @@ class LoginBridgeTest {
     void sessionCookieIsHttpOnlyAndSameSiteLax() throws Exception {
         final var clientId = accessTokens.register(REGISTRATION);
         final var authorizeUri = authorizeUri(clientId);
-        final var googleLoginUri = URI.create("http://localhost:" + port + "/oauth2/authorization/google");
+        final var googleLoginUri = URI.create("http://localhost:" + port + "/oauth2/authorization/google?challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM");
 
         try (final var httpClient = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NEVER).build()) {
             final var authorize = httpClient.send(HttpRequest.newBuilder(authorizeUri).GET().build(), HttpResponse.BodyHandlers.discarding());
