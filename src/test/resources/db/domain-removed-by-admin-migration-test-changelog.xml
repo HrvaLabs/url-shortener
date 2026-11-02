@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.9.xsd">
+
+    <include file="classpath:/db/changelog/codebook/authorities.xml"/>
+    <include file="classpath:/db/changelog/table/user.xml"/>
+    <include file="classpath:/db/changelog/table/api_key.xml"/>
+    <include file="classpath:/db/changelog/table/url.xml"/>
+    <include file="classpath:/db/changelog/032-custom-domains.xml"/>
+
+    <changeSet author="test" id="removed-by-admin-existing-domains">
+        <sql>
+            insert into custom_domain (hostname, status, reason, disabled_reason, created_at, updated_at) values
+                ('admin.example.com', 'DELETED', 'r', 'ADMIN', current_timestamp, current_timestamp),
+                ('rule.example.com', 'DELETED', 'r', 'DOMAIN_RULE', current_timestamp, current_timestamp),
+                ('blocklist.example.com', 'DELETED', 'r', 'BLOCKLIST', current_timestamp, current_timestamp),
+                ('blocked-account.example.com', 'DELETED', 'r', 'USER_BLOCKED', current_timestamp, current_timestamp),
+                ('owner.example.com', 'DELETED', 'r', null, current_timestamp, current_timestamp),
+                ('still-off.example.com', 'DISABLED', 'r', 'ADMIN', current_timestamp, current_timestamp),
+                ('active.example.com', 'ACTIVE', 'r', null, current_timestamp, current_timestamp)
+        </sql>
+    </changeSet>
+
+    <include file="classpath:/db/changelog/046-domain-removed-by-admin.xml"/>
+
+</databaseChangeLog>

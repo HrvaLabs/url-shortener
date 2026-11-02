@@ -16,4 +16,12 @@
         </rollback>
     </changeSet>
 
+    <changeSet author="khrvacic" id="046-domain-removed-by-admin-backfill">
+        <update tableName="custom_domain">
+            <column name="removed_by_admin" valueBoolean="true"/>
+            <where>status = 'DELETED' and disabled_reason in ('ADMIN', 'DOMAIN_RULE', 'BLOCKLIST')</where>
+        </update>
+        <rollback/>
+    </changeSet>
+
 </databaseChangeLog>
