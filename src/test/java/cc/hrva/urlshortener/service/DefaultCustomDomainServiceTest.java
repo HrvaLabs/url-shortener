@@ -923,6 +923,27 @@ class DefaultCustomDomainServiceTest {
     }
 
     @Test
+    void useAgainRefusesAHostnameNowReserved() {
+        ownsRemoved(removed(false, NOW.minusDays(20)));
+        appProperties.getDomains().setReserved(List.of("hrva.cc", "again.example.com"));
+
+        assertThatThrownBy(() -> customDomainService.useAgain(REMOVED))
+                .isInstanceOfSatisfying(FieldValidationException.class,
+                        exception -> assertThat(exception.getFieldErrors()).isEqualTo(Map.of("hostname", RESERVED)));
+        verify(customDomainRepository, never()).saveAndFlush(any());
+        verifyNoInteractions(rateLimiter, linkCheckService, accountLock, eventPublisher);
+    }
+
+    @Test
+    void mineOffersNoUseAgainForAHostnameNowReserved() {
+        when(customDomainRepository.findByOwnerIdOrderByCreatedAtDescIdDesc(7L))
+                .thenReturn(List.of(removedRow(31L, "own.example.com", false, NOW.minusDays(20))));
+        appProperties.getDomains().setReserved(List.of("hrva.cc", "own.example.com"));
+
+        assertThat(customDomainService.mine().domains()).extracting(CustomDomainResponse::useAgain).containsExactly((UseAgain) null);
+    }
+
+    @Test
     void mineSaysWhatUseAgainWouldDoForEachRemovedDomain() {
         final var byTheOwner = removedRow(31L, "own.example.com", false, NOW.minusDays(20));
         final var byAnAdmin = removedRow(32L, "admin.example.com", true, NOW.minusDays(20));

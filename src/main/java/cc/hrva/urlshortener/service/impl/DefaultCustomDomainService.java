@@ -13,6 +13,7 @@ import cc.hrva.urlshortener.exception.CustomDomainCapacityException;
 import cc.hrva.urlshortener.exception.CustomDomainConflictException;
 import cc.hrva.urlshortener.exception.CustomDomainNotFoundException;
 import cc.hrva.urlshortener.exception.FeatureUnavailableException;
+import cc.hrva.urlshortener.exception.FieldValidationException;
 import cc.hrva.urlshortener.exception.NotSignedInException;
 import cc.hrva.urlshortener.exception.RateLimitExceededException;
 import cc.hrva.urlshortener.exception.ServiceBusyException;
@@ -177,10 +178,10 @@ public class DefaultCustomDomainService implements CustomDomainService {
             log.info("Custom domain use again refused, it is still being removed from Cloudflare domainId={}", id);
             throw new CustomDomainConflictException(STILL_BEING_REMOVED);
         }
+        final var hostname = customDomainHostnames.normalize(removed.getHostname());
         requireActive(user);
         requireBelowTheLimit(user.getId());
         requireWithinApplyLimit(user);
-        final var hostname = removed.getHostname();
         final var flags = flagsOf(hostname, linkCheckService.check(HTTPS + hostname + "/"), user);
         final var cloudflareTotal = skipsReview(removed, flags, user) ? cloudflareTotal(id) : OptionalInt.empty();
         final var created = inserted(user, hostname, status -> insertAgain(user, removed, flags, cloudflareTotal));
@@ -347,10 +348,19 @@ public class DefaultCustomDomainService implements CustomDomainService {
         if (domain.isCloudflareDeletePending()) {
             return UseAgain.CLOUDFLARE_REMOVAL_PENDING;
         }
-        if (heldByAnother(domain)) {
+        if (!usable(domain.getHostname()) || heldByAnother(domain)) {
             return null;
         }
         return !possibleScammer && reviewFree(domain) ? UseAgain.SKIPS_REVIEW : UseAgain.NEEDS_REVIEW;
+    }
+
+    private boolean usable(final String hostname) {
+        try {
+            customDomainHostnames.normalize(hostname);
+            return true;
+        } catch (final FieldValidationException exception) {
+            return false;
+        }
     }
 
     private boolean heldByAnother(final CustomDomain domain) {
