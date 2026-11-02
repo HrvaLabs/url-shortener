@@ -1,6 +1,7 @@
 package cc.hrva.urlshortener.service.ratelimit;
 
 import cc.hrva.urlshortener.exception.RateLimitExceededException;
+import cc.hrva.urlshortener.exception.ServiceBusyException;
 import java.time.Duration;
 import java.util.Locale;
 import lombok.RequiredArgsConstructor;
@@ -19,6 +20,8 @@ public class AccountEmailLimits {
     private static final String NETWORK = "account-email:network";
     private static final String RECIPIENT = "account-email:recipient";
     private static final String TOO_MANY = "Too many emails asked for from this network. Try again in %s.";
+    private static final String UNAVAILABLE = "Account emails are paused for a moment. Try again in a minute.";
+    private static final Duration UNAVAILABLE_RETRY = Duration.ofMinutes(1);
 
     private final RateLimiter rateLimiter;
 
@@ -27,8 +30,8 @@ public class AccountEmailLimits {
         try {
             window = rateLimiter.incrementWindow(RateLimiter.clientKey(NETWORK, StringUtils.defaultString(clientIp)), WINDOW);
         } catch (final RateLimiterUnavailableException exception) {
-            log.warn("Account email network limit unavailable, allowing the request");
-            return;
+            log.warn("Account email network limit unavailable, refusing the request");
+            throw new ServiceBusyException(UNAVAILABLE, UNAVAILABLE_RETRY);
         }
         if (window.count() > REQUESTS_PER_NETWORK) {
             log.info("Account email request refused by the network limit retryAfterSeconds={}", window.resetsIn().toSeconds());
@@ -41,8 +44,8 @@ public class AccountEmailLimits {
             return rateLimiter.tryAcquire(RateLimiter.hashedKey(RECIPIENT, StringUtils.defaultString(email).strip().toLowerCase(Locale.ROOT)),
                     EMAILS_PER_RECIPIENT, WINDOW);
         } catch (final RateLimiterUnavailableException exception) {
-            log.warn("Account email recipient limit unavailable, sending the email");
-            return true;
+            log.warn("Account email recipient limit unavailable, not sending the email");
+            return false;
         }
     }
 

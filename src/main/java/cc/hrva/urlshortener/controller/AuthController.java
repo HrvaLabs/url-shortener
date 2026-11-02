@@ -54,6 +54,7 @@ public class AuthController {
     @Operation(summary = "Request password reset", description = "Send a password reset link to the given email address. The answer is the same whether or not an account uses it.")
     @ApiResponse(responseCode = "202", description = "Accepted; a link valid for 1 hour is emailed if an account uses the address and it got fewer than 3 account emails in the last hour")
     @ApiResponse(responseCode = "429", description = "Over 10 requests for account emails from this network in an hour, with Retry-After")
+    @ApiResponse(responseCode = "503", description = "Account emails are paused while the email limits can't count, the same for every address, with Retry-After")
     @PostMapping("/password-reset")
     public ResponseEntity<Void> requestPasswordReset(@Valid @RequestBody final RequestPasswordResetDto dto) {
         log.info("Forgot password controller invoked for {}", EmailAddresses.masked(dto.getEmail()));
@@ -87,6 +88,7 @@ public class AuthController {
     @Operation(summary = "Resend verification email", description = "Resend the email verification link to the given address. The answer is the same whether or not an unverified account uses it.")
     @ApiResponse(responseCode = "202", description = "Accepted; a new link is emailed if an unverified account uses the address and it got fewer than 3 account emails in the last hour")
     @ApiResponse(responseCode = "429", description = "Over 10 requests for account emails from this network in an hour, with Retry-After")
+    @ApiResponse(responseCode = "503", description = "Account emails are paused while the email limits can't count, the same for every address, with Retry-After")
     @PostMapping("/verify-email/resend")
     public ResponseEntity<Void> resendVerificationEmail(@Valid @RequestBody final ResendVerificationDto dto) {
         log.info("Resend verification email controller invoked for {}", EmailAddresses.masked(dto.getEmail()));

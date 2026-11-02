@@ -12,6 +12,7 @@ import cc.hrva.urlshortener.exception.BioPageConflictException;
 import cc.hrva.urlshortener.exception.BioPageNotFoundException;
 import cc.hrva.urlshortener.exception.NotSignedInException;
 import cc.hrva.urlshortener.exception.RateLimitExceededException;
+import cc.hrva.urlshortener.exception.ServiceBusyException;
 import cc.hrva.urlshortener.model.BioPage;
 import cc.hrva.urlshortener.model.BioPageButton;
 import cc.hrva.urlshortener.model.Url;
@@ -78,6 +79,8 @@ public class DefaultBioPageService implements BioPageService {
     private static final String SAVES_REFUSED = "You've saved your bio page a lot in a short time. Try again in a few minutes.";
     private static final String HANDLE_CHANGES_REFUSED = "You've changed your handle a lot today. Try again tomorrow.";
     private static final String HANDLE_CHECKS_REFUSED = "Too many handle checks. Try again in a few minutes.";
+    private static final String CHANGES_UNAVAILABLE = "Bio page changes are paused for a moment. Try again in a minute.";
+    private static final Duration LIMITER_RETRY = Duration.ofMinutes(1);
     private static final String SAVE_LIMIT = "bio-save";
     private static final String HANDLE_LIMIT = "bio-handle";
     private static final String HANDLE_CHECK_LIMIT = "bio-handle-check";
@@ -320,8 +323,12 @@ public class DefaultBioPageService implements BioPageService {
         try {
             return rateLimiter.tryAcquire(limitKey, limit, window);
         } catch (final RateLimiterUnavailableException exception) {
-            log.warn("Bio page rate limit unavailable, allowing the request limit={}", name);
-            return true;
+            if (HANDLE_CHECK_LIMIT.equals(name)) {
+                log.warn("Bio page rate limit unavailable, allowing the check limit={}", name);
+                return true;
+            }
+            log.warn("Bio page rate limit unavailable, refusing the change limit={}", name);
+            throw new ServiceBusyException(CHANGES_UNAVAILABLE, LIMITER_RETRY);
         }
     }
 

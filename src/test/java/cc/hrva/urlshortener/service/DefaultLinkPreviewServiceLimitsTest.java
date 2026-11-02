@@ -113,13 +113,16 @@ class DefaultLinkPreviewServiceLimitsTest {
     }
 
     @Test
-    void aLimiterThatIsDownLetsThePreviewThrough() {
+    void aLimiterThatIsDownTurnsThePreviewAwayWithoutFetching() {
         final RateLimiter down = (key, window) -> {
             throw new RateLimiterUnavailableException(new IllegalStateException("redis down"));
         };
         final var service = new DefaultLinkPreviewService(page(), down, redisTemplate, JsonMapper.builder().build());
 
-        assertThat(service.preview(LINK_ID, URL, CLIENT_IP)).isEqualTo(new Ready(PREVIEW));
+        assertThat(service.preview(LINK_ID, URL, CLIENT_IP)).isEqualTo(new Busy());
+        assertThat(fetches).hasValue(0);
+        assertThat(logEvents.list).extracting(ILoggingEvent::getFormattedMessage)
+                .containsExactly("Link preview rate limit unavailable, refusing the preview linkId=" + LINK_ID);
     }
 
     @Test

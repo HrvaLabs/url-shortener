@@ -44,6 +44,8 @@ public class ApiKeyRateLimitFilter extends OncePerRequestFilter {
     private static final Duration WINDOW = Duration.ofHours(1);
     private static final Duration WARNING_INTERVAL = Duration.ofMinutes(1);
     private static final String REFUSAL = "This API key made too many requests. Try again in %s.";
+    private static final String UNAVAILABLE = "API key requests are paused for a moment. Try again in a minute.";
+    private static final Duration UNAVAILABLE_RETRY = Duration.ofMinutes(1);
 
     private final ApiKeyRepository apiKeyRepository;
     private final RateLimiter rateLimiter;
@@ -80,8 +82,8 @@ public class ApiKeyRateLimitFilter extends OncePerRequestFilter {
             window = rateLimiter.incrementWindow(RATE_LIMIT_NAME + keyId.get(), WINDOW);
         } catch (final RateLimiterUnavailableException exception) {
             warnAtMostOncePerInterval();
-            apiKeyRepository.recordRequest(keyId.get(), LocalDateTime.now(clock.withZone(ZoneId.systemDefault())));
-            filterChain.doFilter(request, response);
+            ProblemResponses.retryAfter(response, UNAVAILABLE_RETRY);
+            ProblemResponses.write(request, response, HttpStatus.SERVICE_UNAVAILABLE, UNAVAILABLE);
             return;
         }
 
@@ -111,7 +113,7 @@ public class ApiKeyRateLimitFilter extends OncePerRequestFilter {
         final var now = clock.instant();
         final var due = nextWarningAt.get();
         if (!now.isBefore(due) && nextWarningAt.compareAndSet(due, now.plus(WARNING_INTERVAL))) {
-            log.warn("API key rate limit unavailable, allowing the request");
+            log.warn("API key rate limit unavailable, refusing the request");
         }
     }
 

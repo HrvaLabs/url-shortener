@@ -32,6 +32,7 @@ import cc.hrva.urlshortener.service.bio.BioPageTextSignals;
 import cc.hrva.urlshortener.service.impl.DefaultBioPageService;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiter;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiterUnavailableException;
+import cc.hrva.urlshortener.exception.ServiceBusyException;
 import java.sql.SQLException;
 import java.time.Clock;
 import java.time.Duration;
@@ -981,18 +982,20 @@ class DefaultBioPageServiceTest {
     }
 
     @Test
-    void redisDownLetsTheSaveThrough() {
-        hasPage();
-        savesReturnTheirArgument();
+    void redisDownRefusesTheSaveWithA503() {
         when(rateLimiter.tryAcquire(SAVE_KEY, 60, SAVE_WINDOW)).thenThrow(new RateLimiterUnavailableException(new IllegalStateException("down")));
 
-        bioPageService.update(update());
+        assertThatThrownBy(() -> bioPageService.update(update()))
+                .isInstanceOfSatisfying(ServiceBusyException.class, refusal -> {
+                    assertThat(refusal).hasMessage("Bio page changes are paused for a moment. Try again in a minute.");
+                    assertThat(refusal.getRetryAfter()).isEqualTo(Duration.ofMinutes(1));
+                });
 
-        verify(bioPageRepository).saveAndFlush(page);
+        verify(bioPageRepository, never()).saveAndFlush(any());
     }
 
     @Test
-    void redisDownLetsHandleChangesAndChecksThrough() {
+    void redisDownRefusesHandleChangesButLetsHandleChecksThrough() {
         hasPage();
         savesReturnTheirArgument();
         final var unavailable = new RateLimiterUnavailableException(new IllegalStateException("down"));
@@ -1001,7 +1004,9 @@ class DefaultBioPageServiceTest {
         when(bioHandles.unavailableReason("carl", page)).thenReturn(Optional.empty());
 
         assertThat(bioPageService.availability("carl").available()).isTrue();
-        assertThat(bioPageService.changeHandle(new BioHandleDto("bob")).handle()).isEqualTo("bob");
+        assertThatThrownBy(() -> bioPageService.changeHandle(new BioHandleDto("bob")))
+                .isInstanceOf(ServiceBusyException.class)
+                .hasMessage("Bio page changes are paused for a moment. Try again in a minute.");
     }
 
     @Test

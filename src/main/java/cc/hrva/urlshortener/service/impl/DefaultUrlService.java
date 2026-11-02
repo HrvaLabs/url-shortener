@@ -145,6 +145,7 @@ public class DefaultUrlService implements UrlService {
     private static final Duration CREATE_WINDOW = Duration.ofHours(1);
     private static final String CREATE_LIMIT_REFUSAL = "You've created a lot of links in a short time. Try again in an hour.";
     private static final String ANONYMOUS_CREATE_UNAVAILABLE = "Links without an account can't be made right now. Try again in a minute, or sign in.";
+    private static final String CREATE_UNAVAILABLE = "Links can't be made right now. Try again in a minute.";
     private static final String UNLOCK_UNAVAILABLE = "Password checks are paused for a moment. Try again in a minute.";
     private static final Duration LIMITER_RETRY = Duration.ofMinutes(1);
     private static final Duration LINKS_DOWN_RETRY = Duration.ofMinutes(1);
@@ -265,8 +266,8 @@ public class DefaultUrlService implements UrlService {
                 log.warn("Create rate limit unavailable, refusing the link without an account");
                 throw new ServiceBusyException(ANONYMOUS_CREATE_UNAVAILABLE, LIMITER_RETRY);
             }
-            log.warn("Create rate limit unavailable, allowing the link userId={}", creator.getId());
-            return true;
+            log.warn("Create rate limit unavailable, refusing the link userId={}", creator.getId());
+            throw new ServiceBusyException(CREATE_UNAVAILABLE, LIMITER_RETRY);
         }
     }
 

@@ -42,7 +42,7 @@ public class CustomDomainController {
     @ApiResponse(responseCode = "400", description = "A field error, a domain that can't be used, or the limit of custom domains reached")
     @ApiResponse(responseCode = "409", description = "This domain has already been applied for")
     @ApiResponse(responseCode = "429", description = "Too many applications today")
-    @ApiResponse(responseCode = "503", description = "Custom domains are turned off")
+    @ApiResponse(responseCode = "503", description = "Custom domains are turned off, or applications are paused for a moment (Retry-After)")
     @PostMapping
     @PreAuthorize("hasAnyRole('ROLE_ADMIN', 'ROLE_USER')")
     public ResponseEntity<CustomDomainResponse> apply(@Valid @RequestBody final CustomDomainApplyDto customDomainApplyDto) {
@@ -63,6 +63,7 @@ public class CustomDomainController {
     @ApiResponse(responseCode = "200", description = "The domain after the retry")
     @ApiResponse(responseCode = "404", description = "No such domain of yours")
     @ApiResponse(responseCode = "409", description = "There's nothing to retry, or the domain can't be set up right now")
+    @ApiResponse(responseCode = "503", description = "Retries are paused for a moment (Retry-After)")
     @PostMapping("/{id}/retry")
     @PreAuthorize("hasAnyRole('ROLE_ADMIN', 'ROLE_USER')")
     public ResponseEntity<CustomDomainResponse> retry(@PathVariable final long id) {

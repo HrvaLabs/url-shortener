@@ -28,6 +28,7 @@ import org.springframework.mock.web.MockHttpServletResponse;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
@@ -215,7 +216,7 @@ class ApiKeyRateLimitFilterTest {
     }
 
     @Test
-    void whenTheLimiterIsDownTheRequestGoesOnWithoutHeadersAndOneWarningAMinute(final CapturedOutput output) throws Exception {
+    void whenTheLimiterIsDownTheRequestIsRefusedWithA503AndOneWarningAMinute(final CapturedOutput output) throws Exception {
         knownKey();
         when(rateLimiter.incrementWindow(anyString(), any()))
                 .thenThrow(new RateLimiterUnavailableException(new RedisConnectionFailureException("down")));
@@ -224,8 +225,12 @@ class ApiKeyRateLimitFilterTest {
             final var chain = new MockFilterChain();
             final var response = new MockHttpServletResponse();
             filter.doFilter(apiKeyRequest("/api/v1/urls"), response, chain);
-            assertThat(chain.getRequest()).isNotNull();
+            assertThat(chain.getRequest()).isNull();
+            assertThat(response.getStatus()).isEqualTo(503);
+            assertThat(response.getHeader("Retry-After")).isEqualTo("60");
             assertThat(response.getHeader("RateLimit-Limit")).isNull();
+            assertThat(response.getContentType()).isEqualTo("application/problem+json");
+            assertThat(response.getContentAsString()).contains("API key requests are paused for a moment. Try again in a minute.");
         }
         clock.advance(Duration.ofSeconds(59));
         filter.doFilter(apiKeyRequest("/api/v1/urls"), new MockHttpServletResponse(), new MockFilterChain());
@@ -234,8 +239,8 @@ class ApiKeyRateLimitFilterTest {
         clock.advance(Duration.ofSeconds(1));
         filter.doFilter(apiKeyRequest("/api/v1/urls"), new MockHttpServletResponse(), new MockFilterChain());
         assertThat(warnings(output)).isEqualTo(2);
-        assertThat(output.getAll()).doesNotContain(KEY);
-        verify(apiKeyRepository, times(5)).recordRequest(eq(KEY_ID), any(LocalDateTime.class));
+        assertThat(output.getAll()).doesNotContain(KEY).contains("API key rate limit unavailable, refusing the request");
+        verify(apiKeyRepository, never()).recordRequest(anyLong(), any(LocalDateTime.class));
     }
 
     private static long warnings(final CapturedOutput output) {

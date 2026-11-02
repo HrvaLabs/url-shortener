@@ -13,6 +13,7 @@ import cc.hrva.urlshortener.exception.CustomDomainNotFoundException;
 import cc.hrva.urlshortener.exception.FeatureUnavailableException;
 import cc.hrva.urlshortener.exception.NotSignedInException;
 import cc.hrva.urlshortener.exception.RateLimitExceededException;
+import cc.hrva.urlshortener.exception.ServiceBusyException;
 import cc.hrva.urlshortener.model.CustomDomain;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.enums.CustomDomainStatus;
@@ -79,6 +80,8 @@ public class DefaultCustomDomainService implements CustomDomainService {
     private static final String CHECK_LIMIT = "domain-check:domain:";
     private static final String RETRY_LIMIT = "domain-retry:domain:";
     private static final String RETRY_TOO_SOON = "Wait a few seconds and try again.";
+    private static final String CHANGES_UNAVAILABLE = "Domain applications and retries are paused for a moment. Try again in a minute.";
+    private static final Duration LIMITER_RETRY = Duration.ofMinutes(1);
     private static final Duration CHECK_WINDOW = Duration.ofSeconds(15);
     private static final int APPLICATIONS_PER_USER = 5;
     private static final Duration APPLY_WINDOW = Duration.ofHours(24);
@@ -273,8 +276,8 @@ public class DefaultCustomDomainService implements CustomDomainService {
         try {
             return rateLimiter.tryAcquire(limitKey, APPLICATIONS_PER_USER, APPLY_WINDOW);
         } catch (final RateLimiterUnavailableException exception) {
-            log.warn("Custom domain application rate limit unavailable, allowing the request userId={}", user.getId());
-            return true;
+            log.warn("Custom domain application rate limit unavailable, refusing the request userId={}", user.getId());
+            throw new ServiceBusyException(CHANGES_UNAVAILABLE, LIMITER_RETRY);
         }
     }
 
@@ -298,8 +301,8 @@ public class DefaultCustomDomainService implements CustomDomainService {
         try {
             allowed = rateLimiter.tryAcquire(limitKey, 1, CHECK_WINDOW);
         } catch (final RateLimiterUnavailableException exception) {
-            log.warn("Custom domain retry rate limit unavailable, allowing the retry domainId={}", id);
-            return;
+            log.warn("Custom domain retry rate limit unavailable, refusing the retry domainId={}", id);
+            throw new ServiceBusyException(CHANGES_UNAVAILABLE, LIMITER_RETRY);
         }
         if (!allowed) {
             log.info("Custom domain retry refused, the last one was moments ago domainId={}", id);

@@ -13,6 +13,7 @@ import cc.hrva.urlshortener.exception.CustomDomainNotFoundException;
 import cc.hrva.urlshortener.exception.FeatureUnavailableException;
 import cc.hrva.urlshortener.exception.FieldValidationException;
 import cc.hrva.urlshortener.exception.RateLimitExceededException;
+import cc.hrva.urlshortener.exception.ServiceBusyException;
 import cc.hrva.urlshortener.model.CustomDomain;
 import cc.hrva.urlshortener.model.CustomDomainAllowance;
 import cc.hrva.urlshortener.model.User;
@@ -381,12 +382,17 @@ class DefaultCustomDomainServiceTest {
     }
 
     @Test
-    void limiterDownAllows() {
+    void limiterDownRefusesTheApplicationWithA503() {
         when(rateLimiter.tryAcquire(APPLY_KEY, 5, APPLY_WINDOW)).thenThrow(new RateLimiterUnavailableException(new IllegalStateException("redis down")));
 
-        customDomainService.apply(apply("go.example.com"));
+        assertThatThrownBy(() -> customDomainService.apply(apply("go.example.com")))
+                .isInstanceOfSatisfying(ServiceBusyException.class, refusal -> {
+                    assertThat(refusal).hasMessage("Domain applications and retries are paused for a moment. Try again in a minute.");
+                    assertThat(refusal.getRetryAfter()).isEqualTo(Duration.ofMinutes(1));
+                });
 
-        verify(customDomainRepository).saveAndFlush(any());
+        verify(customDomainRepository, never()).saveAndFlush(any());
+        verifyNoInteractions(eventPublisher);
     }
 
     @Test
@@ -560,16 +566,17 @@ class DefaultCustomDomainServiceTest {
     }
 
     @Test
-    void aRetryGoesAheadWhenTheLimiterIsDown() {
+    void aRetryIsRefusedWithA503WhenTheLimiterIsDown() {
         final var failed = domain(12L, CustomDomainStatus.ERROR, NOW);
         failed.setProblem(DomainProblem.PROVISIONING_FAILED);
         when(customDomainRepository.findByIdAndOwnerId(12L, 7L)).thenReturn(Optional.of(failed));
         when(rateLimiter.tryAcquire("domain-retry:domain:12", 1, Duration.ofSeconds(15)))
                 .thenThrow(new RateLimiterUnavailableException(new IllegalStateException("redis down")));
 
-        customDomainService.retry(12L);
+        assertThatThrownBy(() -> customDomainService.retry(12L))
+                .isInstanceOfSatisfying(ServiceBusyException.class, refusal -> assertThat(refusal.getRetryAfter()).isEqualTo(Duration.ofMinutes(1)));
 
-        verify(customDomainSetup).retry(failed);
+        verify(customDomainSetup, never()).retry(any());
     }
 
     @Test

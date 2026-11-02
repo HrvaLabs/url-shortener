@@ -1,6 +1,7 @@
 package cc.hrva.urlshortener.service.ratelimit;
 
 import cc.hrva.urlshortener.exception.RateLimitExceededException;
+import cc.hrva.urlshortener.exception.ServiceBusyException;
 import cc.hrva.urlshortener.mcp.bridge.InMemoryRedis;
 import java.time.Duration;
 import java.util.stream.IntStream;
@@ -61,14 +62,18 @@ class AccountEmailLimitsTest {
     }
 
     @Test
-    void redisDownLetsTheRequestAndTheEmailThrough() {
+    void redisDownRefusesTheRequestTheSameForEveryAddressAndSendsNoEmail() {
         final var redisTemplate = mock(StringRedisTemplate.class);
         when(redisTemplate.execute(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(Object[].class)))
                 .thenThrow(new org.springframework.dao.QueryTimeoutException("down"));
         final var unavailable = new AccountEmailLimits(new RedisFixedWindowRateLimiter(redisTemplate));
 
-        assertThatCode(() -> unavailable.checkNetwork(HOME)).doesNotThrowAnyException();
-        assertThat(unavailable.allowsEmailTo("ana@hrva.cc")).isTrue();
+        assertThatThrownBy(() -> unavailable.checkNetwork(HOME))
+                .isInstanceOfSatisfying(ServiceBusyException.class, refused -> {
+                    assertThat(refused).hasMessage("Account emails are paused for a moment. Try again in a minute.");
+                    assertThat(refused.getRetryAfter()).isEqualTo(Duration.ofMinutes(1));
+                });
+        assertThat(unavailable.allowsEmailTo("ana@hrva.cc")).isFalse();
     }
 
 }

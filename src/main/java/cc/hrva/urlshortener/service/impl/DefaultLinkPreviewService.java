@@ -54,7 +54,16 @@ public class DefaultLinkPreviewService implements LinkPreviewService {
 
     @Override
     public LinkPreviewOutcome preview(final long linkId, final String url, final String clientIp) {
-        final var networkWait = wait(RateLimiter.clientKey(NETWORK_LIMIT_NAME, clientIp), PREVIEWS_PER_NETWORK, NETWORK_WINDOW, linkId);
+        try {
+            return limitedPreview(linkId, url, clientIp);
+        } catch (final RateLimiterUnavailableException exception) {
+            log.warn("Link preview rate limit unavailable, refusing the preview linkId={}", linkId);
+            return new Busy();
+        }
+    }
+
+    private LinkPreviewOutcome limitedPreview(final long linkId, final String url, final String clientIp) {
+        final var networkWait = wait(RateLimiter.clientKey(NETWORK_LIMIT_NAME, clientIp), PREVIEWS_PER_NETWORK, NETWORK_WINDOW);
         if (networkWait.isPresent()) {
             return new Limited(networkWait.get());
         }
@@ -63,7 +72,7 @@ public class DefaultLinkPreviewService implements LinkPreviewService {
         if (cached.isPresent()) {
             return new Ready(cached.get());
         }
-        final var linkWait = wait(LINK_LIMIT_PREFIX + linkId, FETCHES_PER_LINK, LINK_WINDOW, linkId);
+        final var linkWait = wait(LINK_LIMIT_PREFIX + linkId, FETCHES_PER_LINK, LINK_WINDOW);
         if (linkWait.isPresent()) {
             return new Limited(linkWait.get());
         }
@@ -102,14 +111,9 @@ public class DefaultLinkPreviewService implements LinkPreviewService {
         return new LinkPreviewResponse(url, null, null, null);
     }
 
-    private Optional<Duration> wait(final String key, final int limit, final Duration window, final long linkId) {
-        try {
-            final var counted = rateLimiter.incrementWindow(key, window);
-            return counted.count() > limit ? Optional.of(counted.resetsIn()) : Optional.empty();
-        } catch (final RateLimiterUnavailableException exception) {
-            log.warn("Link preview rate limit unavailable, allowing the preview linkId={}", linkId);
-            return Optional.empty();
-        }
+    private Optional<Duration> wait(final String key, final int limit, final Duration window) {
+        final var counted = rateLimiter.incrementWindow(key, window);
+        return counted.count() > limit ? Optional.of(counted.resetsIn()) : Optional.empty();
     }
 
     private Optional<LinkPreviewResponse> cached(final String key, final long linkId) {

@@ -1,10 +1,12 @@
 package cc.hrva.urlshortener.controller;
 
+import java.util.List;
 import java.util.Optional;
 import org.springframework.dao.DataIntegrityViolationException;
 import cc.hrva.urlshortener.dto.RegistrationResponse;
 import org.springframework.test.json.JsonCompareMode;
 import cc.hrva.urlshortener.exception.RateLimitExceededException;
+import cc.hrva.urlshortener.exception.ServiceBusyException;
 import cc.hrva.urlshortener.security.ClientIpResolver;
 import cc.hrva.urlshortener.service.ratelimit.AccountEmailLimits;
 import java.time.Duration;
@@ -187,6 +189,26 @@ class AuthControllerTest {
                         .content("{\"email\":\"test@example.com\"}"))
                 .andExpect(status().isTooManyRequests())
                 .andExpect(header().string("Retry-After", "2520"));
+
+        verifyNoInteractions(userService, authService);
+    }
+
+    @Test
+    void whileTheEmailLimitCantCountEveryAddressGetsTheSame503AndNothingIsLookedUp() throws Exception {
+        when(clientIpResolver.getClientIp(request)).thenReturn("203.0.113.7");
+        doThrow(new ServiceBusyException("Account emails are paused for a moment. Try again in a minute.", Duration.ofMinutes(1)))
+                .when(accountEmailLimits).checkNetwork("203.0.113.7");
+
+        for (final var path : List.of("/api/v1/auth/password-reset", "/api/v1/auth/verify-email/resend")) {
+            for (final var email : List.of("test@example.com", "nobody@example.com")) {
+                mockMvc.perform(post(path)
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content("{\"email\":\"" + email + "\"}"))
+                        .andExpect(status().isServiceUnavailable())
+                        .andExpect(header().string("Retry-After", "60"))
+                        .andExpect(jsonPath("$.detail").value("Account emails are paused for a moment. Try again in a minute."));
+            }
+        }
 
         verifyNoInteractions(userService, authService);
     }

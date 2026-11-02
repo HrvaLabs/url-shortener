@@ -127,6 +127,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.ArgumentMatchers.startsWith;
 import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -3250,16 +3251,33 @@ class UrlServiceTest {
     }
 
     @Test
-    void signedInLinksAreStillCreatedWhenTheRateLimiterIsDown() {
-        stubLinkCreation();
+    void aSignedInCreateIsRefusedWithA503WhileTheRateLimiterIsDown() {
+        when(createUrlToUrlConverter.convert(any())).thenReturn(Url.builder().longUrl("https://example.com/1").build());
         when(rateLimiter.tryAcquire(startsWith("create:"), anyInt(), any()))
                 .thenThrow(new RateLimiterUnavailableException(new RuntimeException("down")));
         when(userService.getUserFromToken()).thenReturn(User.builder().id(1L).build());
 
-        final var signedIn = urlService.saveUrlRouting(link(1), CLIENT_IP, CreatedVia.WEB);
+        assertThatThrownBy(() -> urlService.saveUrlRouting(link(1), CLIENT_IP, CreatedVia.WEB))
+                .isInstanceOfSatisfying(ServiceBusyException.class, refusal -> {
+                    assertThat(refusal).hasMessage("Links can't be made right now. Try again in a minute.");
+                    assertThat(refusal.getRetryAfter()).isEqualTo(Duration.ofMinutes(1));
+                });
 
-        assertThat(signedIn.longUrl()).isEqualTo("https://example.com/1");
         verify(rateLimiter).tryAcquire("create:user:1", 60, Duration.ofHours(1));
+        verify(urlRepository, never()).save(any(Url.class));
+    }
+
+    @Test
+    void anAdminsCreateNeverAsksTheRateLimiterSoItWorksWhileTheLimiterIsDown() {
+        stubLinkCreation();
+        lenient().when(rateLimiter.tryAcquire(startsWith("create:"), anyInt(), any()))
+                .thenThrow(new RateLimiterUnavailableException(new RuntimeException("down")));
+        when(userService.getUserFromToken()).thenReturn(User.builder().id(2L).authorities(List.of(Authorities.builder().name("ROLE_ADMIN").build())).build());
+
+        final var created = urlService.saveUrlRouting(link(1), CLIENT_IP, CreatedVia.WEB);
+
+        assertThat(created.longUrl()).isEqualTo("https://example.com/1");
+        verify(rateLimiter, never()).tryAcquire(anyString(), anyInt(), any());
         verify(urlRepository).save(any(Url.class));
     }
 

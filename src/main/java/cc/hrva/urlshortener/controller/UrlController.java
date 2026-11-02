@@ -82,6 +82,7 @@ public class UrlController {
     @ApiResponse(responseCode = "400", description = "Validation error or bad request")
     @ApiResponse(responseCode = "409", description = "Short URL already exists")
     @ApiResponse(responseCode = "429", description = "Too many links created in the last hour, or the API key's requests this hour are over its limit (Retry-After)")
+    @ApiResponse(responseCode = "503", description = "Links can't be made for a moment, or the API key's requests are paused (Retry-After)")
     @PostMapping
     public ResponseEntity<UrlResponse> saveUrl(
             @Valid @RequestBody final CreateUrlDto createUrlDto,
@@ -130,7 +131,7 @@ public class UrlController {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = LinkPreviewResponse.class)))
     @ApiResponse(responseCode = "404", description = "URL not found")
     @ApiResponse(responseCode = "429", description = "Too many previews from this network, or of this link (Retry-After)")
-    @ApiResponse(responseCode = "503", description = "Too many previews are being fetched right now (Retry-After)")
+    @ApiResponse(responseCode = "503", description = "Too many previews are being fetched right now, or previews are paused for a moment (Retry-After)")
     @GetMapping("/{short}/preview")
     public ResponseEntity<LinkPreviewResponse> previewUrl(
             @PathVariable("short") final String shortUrl,
@@ -166,6 +167,7 @@ public class UrlController {
     @ApiResponse(responseCode = "400", description = "Validation error or bad request")
     @ApiResponse(responseCode = "409", description = "Short URL already exists")
     @ApiResponse(responseCode = "429", description = "Too many links created in the last hour, or the API key's requests this hour are over its limit (Retry-After)")
+    @ApiResponse(responseCode = "503", description = "Links can't be made for a moment, or the API key's requests are paused (Retry-After)")
     @PostMapping("/bulk")
     @PreAuthorize("hasRole('ROLE_USER')")
     public ResponseEntity<List<UrlResponse>> createBulkUrls(
