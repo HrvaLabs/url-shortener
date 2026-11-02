@@ -2860,7 +2860,7 @@ wait_until 30 "the uncached link after Postgres came back" uncached_redirects_ag
 ok "with Postgres back the uncached link redirects again"
 
 section "32. Edit link (v2.27): changing the destination, the daily limit, the site switch and turning links back on"
-expect_eq "$(psql_value "select count(*) from databasechangelog where id like '044-%';")" 3 "044's three changesets ran"
+expect_eq "$(psql_value "select count(*) from databasechangelog where id like '044-%';")" 4 "044's four changesets ran"
 expect_eq "$(psql_value "select data_type from information_schema.columns where table_name = 'user_account' and column_name = 'last_link_blocked_at';")" \
     "timestamp without time zone" "user_account.last_link_blocked_at is a TIMESTAMP"
 EDIT_USER_ID=$(psql_value "select id from user_account where email = '$USER_EMAIL';")
