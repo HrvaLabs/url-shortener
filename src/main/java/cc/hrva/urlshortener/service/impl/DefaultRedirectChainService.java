@@ -23,6 +23,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
@@ -162,9 +163,19 @@ public class DefaultRedirectChainService implements RedirectChainService {
 
     private static String viaRedirect(final BlockReason reason, final String detail, final String host) {
         final var suffix = VIA_REDIRECT_TO + host;
-        final var room = Math.max(0, BLOCK_DETAIL_LENGTH - suffix.length());
-        final var shown = reason == BlockReason.SAFE_BROWSING ? BlockDetails.flaggedUrls(detail, room) : StringUtils.truncate(detail, room);
-        return StringUtils.truncate(shown + suffix, BLOCK_DETAIL_LENGTH);
+        return shownWithin(reason, detail, BLOCK_DETAIL_LENGTH - suffix.length())
+                .map(shown -> (shown + suffix).strip())
+                .or(() -> Stream.of(suffix.strip(), host).filter(form -> form.length() <= BLOCK_DETAIL_LENGTH).findFirst())
+                .or(() -> shownWithin(reason, detail, BLOCK_DETAIL_LENGTH))
+                .orElse(null);
+    }
+
+    private static Optional<String> shownWithin(final BlockReason reason, final String detail, final int room) {
+        if (room < 0) {
+            return Optional.empty();
+        }
+        final var shown = reason == BlockReason.SAFE_BROWSING ? BlockDetails.flaggedUrls(detail, room) : StringUtils.defaultString(detail);
+        return Optional.ofNullable(shown).filter(text -> text.length() <= room);
     }
 
     private static String hostOf(final String url) {

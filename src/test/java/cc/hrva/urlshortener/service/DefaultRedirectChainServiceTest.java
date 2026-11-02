@@ -261,6 +261,48 @@ class DefaultRedirectChainServiceTest {
     }
 
     @Test
+    void aRedirectHostTooLongForTheFlaggedAddressesIsNamedWholeWithoutThem() {
+        final var host = hostOfLength(238);
+        final var threat = "https://" + host + "/a";
+        chain(DESTINATION, threat);
+        when(safeBrowsingService.checkUrlsForThreats(List.of(threat))).thenReturn(List.of(threat));
+        final var detail = ArgumentCaptor.forClass(String.class);
+
+        redirectChainService.check(LINK_ID);
+
+        verify(moderationService).blockLink(eq(LINK_ID), eq(BlockReason.SAFE_BROWSING), detail.capture(), eq("system"), eq("redirect-check"));
+        assertThat(detail.getValue()).isEqualTo("via redirect to " + host).hasSizeLessThanOrEqualTo(255);
+    }
+
+    @Test
+    void aRedirectHostTooLongForTheViaRedirectWordsIsStoredAsTheWholeHost() {
+        final var host = hostOfLength(250);
+        final var threat = "https://" + host + "/a";
+        chain(DESTINATION, threat);
+        when(safeBrowsingService.checkUrlsForThreats(List.of(threat))).thenReturn(List.of(threat));
+        final var detail = ArgumentCaptor.forClass(String.class);
+
+        redirectChainService.check(LINK_ID);
+
+        verify(moderationService).blockLink(eq(LINK_ID), eq(BlockReason.SAFE_BROWSING), detail.capture(), eq("system"), eq("redirect-check"));
+        assertThat(detail.getValue()).isEqualTo(host);
+    }
+
+    @Test
+    void aBlocklistedHopOnAHostThatLongIsStoredAsTheWholeHost() {
+        final var host = hostOfLength(250);
+        final var hop = "https://" + host + "/a";
+        chain(DESTINATION, hop);
+        when(linkCheckService.check(hop)).thenReturn(blocked(BlockReason.BLOCKLIST, "URLhaus"));
+        final var detail = ArgumentCaptor.forClass(String.class);
+
+        redirectChainService.check(LINK_ID);
+
+        verify(moderationService).blockLink(eq(LINK_ID), eq(BlockReason.BLOCKLIST), detail.capture(), eq("system"), eq("redirect-check"));
+        assertThat(detail.getValue()).isEqualTo(host);
+    }
+
+    @Test
     void manyFlaggedUrlsKeepWholeUrlsThenSayHowManyMoreAndStillNameTheRedirectHost() {
         final var threats = IntStream.range(0, 9).mapToObj(index -> "https://njuskaio.cam/" + index + "p".repeat(30)).toList();
         chain(DESTINATION, threats.getFirst());
@@ -493,6 +535,12 @@ class DefaultRedirectChainServiceTest {
         final RedirectFollower follower = new PublicHttpFetcher(url -> url.startsWith(loopbackOnly), InetAddress::isLoopbackAddress)::followRedirects;
         return new DefaultRedirectChainService(urlRepository, follower, linkCheckService, safeBrowsingService, moderationService,
                 reviewQueueService, Clock.fixed(NOW, ZoneOffset.UTC));
+    }
+
+    private static String hostOfLength(final int length) {
+        final var label = "c".repeat(63);
+        final var tail = ".com";
+        return label + "." + label + "." + label + "." + "c".repeat(length - 3 * 64 - tail.length()) + tail;
     }
 
     private static LinkVerdict blocked(final BlockReason reason, final String detail) {
