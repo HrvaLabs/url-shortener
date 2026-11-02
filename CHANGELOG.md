@@ -9,10 +9,10 @@ All notable changes to hrva.cc — the URL shortener.
 Use a removed custom domain again, analytics breakdowns across all your links, emails and chat messages that name hrva.cc and say what happened, and a round of fixes.
 
 ### 🌐 Custom Domains
-- A custom domain you removed stays on the Custom domains card in Settings for 30 days, in a closed Removed domains section, newest removal first. Select Use again next to it to add the domain as a new one, with no links on it.
+- A custom domain you removed stays on the Custom domains card in Settings for 30 days, in a closed Removed domains section, newest first. Select Use again next to it to add the domain as a new one, with no links on it.
 - A domain you removed yourself after it was active is set up again without a review. A check that flags the domain, or no room for new domains right now, still sends it to review.
-- A domain goes back to review, as when you first applied, when an admin removed it, when an admin or a blocklist rule turned it off before you removed it, when it never became active, when its name is international (an xn-- name), when its name is on a blocklist now, or when your account has been flagged as a possible scammer. The card says whether the domain will be reviewed before you select Use again.
-- Use again isn't offered when another account holds the name, and the removed domain then shows with no button. While Cloudflare is still removing a domain, the card says to check back in a few minutes.
+- A domain goes back to review, as when you first applied, when an admin removed it, when an admin or a blocklist rule turned it off before you removed it, when it never became active, when its name is international (an xn-- name), when an admin block rule matches its name, or when your account has been flagged as a possible scammer. A name the link check blocks is refused with "This domain can't be used on hrva.cc." The card says before you select Use again whether the domain is reviewed again.
+- Use again isn't offered when another domain, yours or someone else's, holds the name, and the removed domain then shows with no button. While Cloudflare is still removing a domain, the card says to check back in a few minutes.
 - A domain you use again counts toward your domain limit and toward the 5 applications a day, like any other application. At the limit, Use again is refused until you remove or withdraw another domain. Removed domains don't count.
 - Domains removed before this release are treated the same way: one hrva.cc turned off and you then removed, and one an admin removed, go back to review.
 - Admin Domains no longer lists removed domains with the others. They are in a closed Removed domains section, newest removal first, and can be sorted by when they were removed. Domains removed without a recorded date come last.
@@ -22,7 +22,7 @@ Use a removed custom domain again, analytics breakdowns across all your links, e
 
 ### ✉️ Emails
 - Emails come from "hrva.cc" instead of a bare address.
-- Email subjects changed to name hrva.cc and say what happened, so a mail filter on an old subject stops matching. The new subjects are Reset your hrva.cc password, Verify your email for hrva.cc, Your hrva.cc account was deactivated, Your hrva.cc account will be deactivated on 29 November 2026, Someone tried to sign up to hrva.cc with your email, A passkey was added to your hrva.cc account, Your link was blocked as unsafe, Your link hrva.cc/abc expires on 3 November 2026, Your domain go.example.com wasn't approved, and Your request for more custom domains wasn't approved.
+- Email subjects changed to name hrva.cc and say what happened, so a mail filter on an old subject stops matching. The new subjects are Reset your hrva.cc password, Verify your email for hrva.cc, Your hrva.cc account was deactivated, Your hrva.cc account will be deactivated on 29 November 2026, Someone tried to sign up to hrva.cc with your email, A passkey was added to your hrva.cc account, Your link was blocked as unsafe, and Your link hrva.cc/abc expires on 3 November 2026.
 - "Best regards" is removed from every email. Each one greets you with Hi and your email address, and says "blocked" for a blocked link.
 - The email about a link blocked as unsafe names the flagged address instead of "malware".
 - The expiry email shows the date and time in UTC, and its button opens your dashboard.
@@ -50,7 +50,7 @@ Use a removed custom domain again, analytics breakdowns across all your links, e
 - Admin Discord alerts say "no account" for a link made without one, and write a domain rule's reason after a colon.
 
 ### 🔑 API
-- POST /api/v1/users/me/domains/{id}/use-again uses a removed custom domain again and answers 201 with the new domain. Custom domain responses have a useAgain field: SKIPS_REVIEW, NEEDS_REVIEW or CLOUDFLARE_REMOVAL_PENDING on a removed domain, and null on any other domain or when another account holds the name.
+- POST /api/v1/users/me/domains/{id}/use-again uses a removed custom domain again and answers 201 with the new domain. Custom domain responses have a useAgain field: SKIPS_REVIEW, NEEDS_REVIEW or CLOUDFLARE_REMOVAL_PENDING on a removed domain, and null on any other domain, when another domain, yours or someone else's, holds the name, or when the name no longer passes the hostname check.
 - GET /api/v1/admin/domains leaves removed domains out unless status=DELETED is given, which lists only them, newest removal first, and can be sorted by deletedAt.
 - GET /api/v1/analytics/overview has a breakdowns object, in the same shape as a link's analytics.
 - The webhook summaries have the new moreLinks, moreDeadLinks and moreEndingSoon fields.
