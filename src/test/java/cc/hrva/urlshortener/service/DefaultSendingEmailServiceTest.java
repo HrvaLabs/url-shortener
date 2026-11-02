@@ -274,7 +274,7 @@ class DefaultSendingEmailServiceTest {
         saveReturnsArgument();
         doThrow(new MailingException("Email couldn't be sent")).when(emailService).sendEmail(any(Email.class), eq(null));
 
-        sendingEmailService.sendNewUserNotificationToAdmin(User.builder().email("new@example.com").build());
+        configuredEmailService(realTemplateEngine()).sendNewUserNotificationToAdmin(User.builder().email("new@example.com").build());
 
         verify(emailService, times(3)).sendEmail(any(Email.class), eq(null));
         final var entry = lastSavedEntry();
@@ -287,7 +287,7 @@ class DefaultSendingEmailServiceTest {
         saveReturnsArgument();
         doThrow(new MailingException("Email couldn't be sent")).when(emailService).sendEmail(any(Email.class), eq(null));
 
-        sendingEmailService.sendNewUserNotificationToAdmin(User.builder().email("new@example.com").build());
+        configuredEmailService(realTemplateEngine()).sendNewUserNotificationToAdmin(User.builder().email("new@example.com").build());
 
         final var entry = lastSavedEntry();
         assertThat(entry.getSender()).isEqualTo("noreply@hrva.cc");
@@ -299,7 +299,7 @@ class DefaultSendingEmailServiceTest {
     void dropsTheContentOnceTheEmailIsSent() {
         saveReturnsArgument();
 
-        sendingEmailService.sendNewUserNotificationToAdmin(User.builder().email("new@example.com").build());
+        configuredEmailService(realTemplateEngine()).sendNewUserNotificationToAdmin(User.builder().email("new@example.com").build());
 
         assertThat(bodiesWhileSending).singleElement().asString().contains("new@example.com");
         final var entry = lastSavedEntry();
@@ -312,7 +312,7 @@ class DefaultSendingEmailServiceTest {
     void recordsRecipientsWithoutArrayBrackets() {
         saveReturnsArgument();
 
-        sendingEmailService.sendNewUserNotificationToAdmin(User.builder().email("new@example.com").build());
+        configuredEmailService(realTemplateEngine()).sendNewUserNotificationToAdmin(User.builder().email("new@example.com").build());
 
         assertThat(lastSavedEntry().getRecipient()).isEqualTo("support@hrva.cc");
     }
@@ -440,9 +440,14 @@ class DefaultSendingEmailServiceTest {
         final var email = sent.getValue();
         assertThat(email.getReceivers()).containsExactly("support@hrva.cc");
         assertThat(email.getSubject()).isEqualTo("Blocklist HaGeZi <Fake> hasn't refreshed");
-        assertThat(email.getText()).contains("HaGeZi &lt;Fake&gt;").contains("2026-10-30 08:15").contains("every 6 hours")
-                .contains("4 refreshes in a row failed").contains("https://hrva.cc/admin/blocklists");
-        assertThat(email.getPlainText()).contains("HaGeZi <Fake>").contains("https://hrva.cc/admin/blocklists");
+        assertThat(email.getText()).contains("HaGeZi &lt;Fake&gt;").doesNotContain("HaGeZi <Fake>")
+                .containsPattern("<h1[^>]*>Blocklist HaGeZi &lt;Fake&gt; hasn&#39;t refreshed</h1>");
+        assertThat(textOf(email.getText()))
+                .contains("The blocklist HaGeZi <Fake> missed two refreshes. Links are still checked against the copy it loaded last.")
+                .contains("The last refresh that worked was on 30 October 2026 at 08:15 UTC. It refreshes every 6 hours. 4 refreshes in a row failed.")
+                .doesNotContain("2026-10-30");
+        assertThat(linksIn(email.getText())).containsExactly("https://hrva.cc/admin/blocklists", SITE_LINK, HRVALABS_LINK);
+        assertThat(email.getPlainText()).contains("HaGeZi <Fake>").contains("30 October 2026 at 08:15 UTC").contains("https://hrva.cc/admin/blocklists");
     }
 
     @Test
@@ -453,7 +458,8 @@ class DefaultSendingEmailServiceTest {
 
         configuredEmailService(realTemplateEngine()).sendBlocklistStaleEmail(new BlocklistStatus(1, "OpenPhish", 6, null, 2, true));
 
-        assertThat(sent.getValue().getText()).contains("has never loaded");
+        assertThat(textOf(sent.getValue().getText())).contains("The list has never loaded.");
+        assertThat(sent.getValue().getPlainText()).contains("The list has never loaded.");
     }
 
     @Test
@@ -716,10 +722,25 @@ class DefaultSendingEmailServiceTest {
         assertThat(sent.getValue().getReceivers()).containsExactly("alice@example.com");
         assertThat(sent.getValue().getSubject()).isEqualTo("Your link was blocked as unsafe");
         assertThat(sent.getValue().getText()).isEqualTo("<p>blocked</p>");
-        assertThat(context.getValue().getVariable("short_link")).isEqualTo("https://hrva.cc/promo");
+        assertThat(context.getValue().getVariable("short_link")).isEqualTo("hrva.cc/promo");
         assertThat(context.getValue().getVariableNames()).allSatisfy(name -> assertThat(String.valueOf(context.getValue().getVariable(name)))
                 .doesNotContain("HaGeZi")
                 .doesNotContain("jofogas.cards"));
+    }
+
+    @Test
+    void theMalwareEmailSaysSignInAndShowsTheShortLinkWithoutTheScheme() throws Exception {
+        saveReturnsArgument();
+        final var sent = ArgumentCaptor.forClass(Email.class);
+        doAnswer(invocation -> null).when(emailService).sendEmail(sent.capture(), eq(null));
+        final var flagged = Url.builder().shortUrl("menu").longUrl("https://example.com/menu").build();
+
+        configuredEmailService(realTemplateEngine()).sendEmailUrlMalwareDetected(OWNER, flagged, "https://example.com/menu");
+
+        assertThat(textOf(sent.getValue().getText()))
+                .contains("Sign in to your dashboard to review or delete it.")
+                .doesNotContainIgnoringCase("log in")
+                .doesNotContain("https://hrva.cc/menu");
     }
 
     @Test
@@ -736,9 +757,9 @@ class DefaultSendingEmailServiceTest {
         service.sendEmailUrlBlocked(OWNER, onDomain);
         service.sendEmailUrlsBlocked(OWNER, List.of(alsoOnDomain, domainBlockedLinks(1).getFirst()));
 
-        assertThat(sent.getAllValues().getFirst().getText()).contains("https://go.example.com/promo").doesNotContain("hrva.cc/promo");
-        assertThat(sent.getAllValues().get(1).getText()).contains("https://go.example.com/deal<", "https://hrva.cc/deal1<")
-                .doesNotContain("hrva.cc/deal<");
+        assertThat(sent.getAllValues().getFirst().getText()).contains(">go.example.com/promo<").doesNotContain("hrva.cc/promo", "https://go.example.com");
+        assertThat(sent.getAllValues().get(1).getText()).contains(">go.example.com/deal<", ">hrva.cc/deal1<")
+                .doesNotContain("hrva.cc/deal<", "https://go.example.com", "https://hrva.cc/deal");
     }
 
     @Test
@@ -751,7 +772,8 @@ class DefaultSendingEmailServiceTest {
 
         assertThat(sent.getValue().getText())
                 .contains("hrva.cc blocked your link because it led to a site reported for phishing, malware or scams.")
-                .contains("https://hrva.cc/promo")
+                .contains(">hrva.cc/promo<")
+                .doesNotContain("https://hrva.cc/promo")
                 .contains("alice@example.com")
                 .contains("support@hrva.cc")
                 .doesNotContain("HaGeZi")
@@ -772,8 +794,8 @@ class DefaultSendingEmailServiceTest {
         assertThat(email.getSubject()).isEqualTo("Your links were blocked as unsafe");
         assertThat(email.getText())
                 .contains("hrva.cc blocked 25 of your links because their destinations were reported for phishing, malware or scams.")
-                .contains("https://hrva.cc/deal1<", "https://hrva.cc/deal20<")
-                .doesNotContain("https://hrva.cc/deal21")
+                .contains(">hrva.cc/deal1<", ">hrva.cc/deal20<")
+                .doesNotContain("hrva.cc/deal21", "https://hrva.cc/deal")
                 .contains("and 5 more")
                 .contains("alice@example.com", "support@hrva.cc")
                 .doesNotContain("jofogas.cards")
@@ -790,7 +812,7 @@ class DefaultSendingEmailServiceTest {
 
         assertThat(sent.getValue().getText())
                 .contains("hrva.cc blocked 20 of your links")
-                .contains("https://hrva.cc/deal1<", "https://hrva.cc/deal20<")
+                .contains(">hrva.cc/deal1<", ">hrva.cc/deal20<")
                 .doesNotContain("more");
     }
 
@@ -804,7 +826,7 @@ class DefaultSendingEmailServiceTest {
 
         assertThat(context.getValue().getVariable("link_count")).isEqualTo(89);
         assertThat(context.getValue().getVariable("more_links")).isEqualTo(69);
-        assertThat((List<?>) context.getValue().getVariable("short_links")).hasSize(20).first().isEqualTo("https://hrva.cc/deal1");
+        assertThat((List<?>) context.getValue().getVariable("short_links")).hasSize(20).first().isEqualTo("hrva.cc/deal1");
     }
 
     @Test
@@ -985,17 +1007,25 @@ class DefaultSendingEmailServiceTest {
         final var sent = ArgumentCaptor.forClass(Email.class);
         doAnswer(invocation -> null).when(emailService).sendEmail(sent.capture(), eq(null));
 
-        sendingEmailService.sendNewUserNotificationToAdmin(User.builder().email("new@example.com").build());
-        sendingEmailService.sendNewUserNotificationToAdmin(User.builder().email("g@example.com").authProvider("google").build());
-        sendingEmailService.sendNewUserNotificationToAdmin(User.builder().email("h@example.com").authProvider("github").build());
+        final var service = configuredEmailService(realTemplateEngine());
+        service.sendNewUserNotificationToAdmin(User.builder().email("new@example.com").build());
+        service.sendNewUserNotificationToAdmin(User.builder().email("g@example.com").authProvider("google").build());
+        service.sendNewUserNotificationToAdmin(User.builder().email("h@example.com").authProvider("github").build());
 
         assertThat(sent.getAllValues()).hasSize(3);
-        assertThat(textOf(sent.getAllValues().getFirst().getText()))
+        final var first = sent.getAllValues().getFirst();
+        assertThat(first.getText()).containsPattern("<h1[^>]*>New user registered</h1>");
+        assertThat(textOf(first.getText()))
+                .contains("A new user registered on hrva.cc.", "Email new@example.com", "Signed up with email")
+                .containsPattern("Registered at \\d{1,2} [A-Z][a-z]+ \\d{4} at \\d{2}:\\d{2} UTC")
+                .doesNotContain("Url Shortener", "Auth provider", "local", "2026-");
+        assertThat(linksIn(first.getText())).containsExactly(SITE_LINK, HRVALABS_LINK);
+        assertThat(first.getPlainText())
                 .contains("A new user registered on hrva.cc.", "Email: new@example.com", "Signed up with: email")
-                .containsPattern("Registered at: \\d{1,2} [A-Z][a-z]+ \\d{4} at \\d{2}:\\d{2} UTC")
-                .doesNotContain("Url Shortener", "Auth provider", "local");
-        assertThat(textOf(sent.getAllValues().get(1).getText())).contains("Signed up with: Google");
-        assertThat(textOf(sent.getAllValues().get(2).getText())).contains("Signed up with: GitHub");
+                .containsPattern("Registered at: \\d{1,2} [A-Z][a-z]+ \\d{4} at \\d{2}:\\d{2} UTC");
+        assertThat(textOf(sent.getAllValues().get(1).getText())).contains("Signed up with Google");
+        assertThat(sent.getAllValues().get(1).getPlainText()).contains("Signed up with: Google");
+        assertThat(textOf(sent.getAllValues().get(2).getText())).contains("Signed up with GitHub");
     }
 
     @Test
@@ -1151,7 +1181,7 @@ class DefaultSendingEmailServiceTest {
     void theNewAccountNoticeIsLoggedWithTheNewAddressMaskedInItsSubject(final CapturedOutput output) {
         saveReturnsArgument();
 
-        sendingEmailService.sendNewUserNotificationToAdmin(User.builder().email("new@example.com").build());
+        configuredEmailService(realTemplateEngine()).sendNewUserNotificationToAdmin(User.builder().email("new@example.com").build());
 
         assertThat(output)
                 .contains("Sending New user registered: n***@example.com email to 1 recipient(s): [s***@hrva.cc]")
@@ -1300,7 +1330,7 @@ class DefaultSendingEmailServiceTest {
         final var sent = ArgumentCaptor.forClass(Email.class);
         doAnswer(invocation -> null).when(emailService).sendEmail(sent.capture(), eq(null));
 
-        sendingEmailService.sendNewUserNotificationToAdmin(User.builder().email("new@example.com").build());
+        configuredEmailService(realTemplateEngine()).sendNewUserNotificationToAdmin(User.builder().email("new@example.com").build());
 
         assertThat(sent.getValue().getHeaders()).isEmpty();
         assertThat(lastSavedEntry().getConsentType()).isNull();

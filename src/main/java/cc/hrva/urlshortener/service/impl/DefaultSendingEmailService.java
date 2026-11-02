@@ -29,7 +29,6 @@ import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
-import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -53,7 +52,6 @@ import cc.hrva.urlshortener.service.domain.ShortLinks;
 import cc.hrva.urlshortener.util.EmailAddresses;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
-import org.springframework.web.util.HtmlUtils;
 import org.thymeleaf.TemplateEngine;
 import org.thymeleaf.context.Context;
 
@@ -70,7 +68,6 @@ public class DefaultSendingEmailService implements SendingEmailService {
     private static final String STATS_PAGE = "/admin/dashboard?days=7";
     private static final String REVIEW_PAGE = "/admin/review";
     private static final String BLOCKLISTS_PAGE = "/admin/blocklists";
-    private static final DateTimeFormatter STALE_TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm 'UTC'", Locale.ENGLISH);
     private static final String DASHBOARD_PAGE = "/dashboard";
     private static final String NOT_SENT = "Not sent: %s is off";
     private static final String CONSENT_WITHDRAWN = "This person has turned this email off since, so it can't be resent.";
@@ -190,21 +187,23 @@ public class DefaultSendingEmailService implements SendingEmailService {
     @Override
     @Async
     public void sendNewUserNotificationToAdmin(final User user) {
-        final var body = """
-                <p>A new user registered on hrva.cc.</p>
-                <p><strong>Email:</strong> %s</p>
-                <p><strong>Signed up with:</strong> %s</p>
-                <p><strong>Registered at:</strong> %s</p>
-                """.formatted(
-                user.getEmail(),
-                signUpMethod(user.getAuthProvider()),
-                LocalDateTime.now().format(LONG_DATE_TIME_UTC_FORMAT));
+        final var signUpMethod = signUpMethod(user.getAuthProvider());
+        final var registeredAt = LocalDateTime.now().format(LONG_DATE_TIME_UTC_FORMAT);
+        final var ctx = new Context();
+        ctx.setVariable("user_email", user.getEmail());
+        ctx.setVariable("sign_up_method", signUpMethod);
+        ctx.setVariable("registered_at", registeredAt);
+        ctx.setVariable("site_url", appProperties.getFrontendUrl());
+
+        final var htmlContent = templateEngine.process("admin_new_user_notice", ctx);
 
         final var email = Email.builder()
                 .sender(appProperties.getEmailSenderAddress())
                 .receivers(new String[]{appProperties.getContactEmail()})
                 .subject("New user registered: %s".formatted(user.getEmail()))
-                .text(body)
+                .plainText("A new user registered on hrva.cc.%n%nEmail: %s%nSigned up with: %s%nRegistered at: %s"
+                        .formatted(user.getEmail(), signUpMethod, registeredAt))
+                .text(htmlContent)
                 .build();
 
         send(email, EmailKind.NEW_USER_NOTICE);
@@ -235,7 +234,7 @@ public class DefaultSendingEmailService implements SendingEmailService {
     @Async
     public void sendEmailUrlBlocked(final User owner, final Url url) {
         final var ctx = getContext(owner);
-        ctx.setVariable("short_link", shortLink(url));
+        ctx.setVariable("short_link", shortLinkDisplay(url));
 
         final var htmlContent = templateEngine.process("url_blocked", ctx);
 
@@ -254,7 +253,7 @@ public class DefaultSendingEmailService implements SendingEmailService {
     public void sendEmailUrlsBlocked(final User owner, final List<Url> urls) {
         final var ctx = getContext(owner);
         ctx.setVariable("link_count", urls.size());
-        ctx.setVariable("short_links", urls.stream().limit(LISTED_BLOCKED_LINKS).map(this::shortLink).toList());
+        ctx.setVariable("short_links", urls.stream().limit(LISTED_BLOCKED_LINKS).map(this::shortLinkDisplay).toList());
         ctx.setVariable("more_links", Math.max(0, urls.size() - LISTED_BLOCKED_LINKS));
 
         final var htmlContent = templateEngine.process("urls_blocked", ctx);
@@ -395,22 +394,28 @@ public class DefaultSendingEmailService implements SendingEmailService {
         final var blocklistsPage = frontendPage(BLOCKLISTS_PAGE);
         final var lastRefresh = status.lastRefreshedAt() == null
                 ? "The list has never loaded."
-                : "The last refresh that worked was on " + status.lastRefreshedAt().truncatedTo(ChronoUnit.MINUTES).format(STALE_TIME) + ".";
+                : "The last refresh that worked was on " + status.lastRefreshedAt().format(LONG_DATE_TIME_UTC_FORMAT) + ".";
         final var errors = status.consecutiveErrors() + " refreshes in a row failed.";
         final var schedule = "It refreshes every " + status.refreshIntervalHours() + " hours.";
-        final var body = """
-                <p>The blocklist <strong>%s</strong> missed two refreshes. Links are still checked against the copy it loaded last.</p>
-                <p>%s %s %s</p>
-                <p><a href="%s">Open the blocklists</a></p>
-                """.formatted(HtmlUtils.htmlEscape(status.name()), lastRefresh, schedule, errors, blocklistsPage);
+        final var subject = "Blocklist %s hasn't refreshed".formatted(status.name());
+        final var ctx = new Context();
+        ctx.setVariable("headline", subject);
+        ctx.setVariable("blocklist_name", status.name());
+        ctx.setVariable("last_refresh", lastRefresh);
+        ctx.setVariable("schedule", schedule);
+        ctx.setVariable("errors", errors);
+        ctx.setVariable("blocklists_page", blocklistsPage);
+        ctx.setVariable("site_url", appProperties.getFrontendUrl());
+
+        final var htmlContent = templateEngine.process("admin_blocklist_stale", ctx);
 
         final var email = Email.builder()
                 .sender(appProperties.getEmailSenderAddress())
                 .receivers(new String[]{appProperties.getContactEmail()})
-                .subject("Blocklist %s hasn't refreshed".formatted(status.name()))
+                .subject(subject)
                 .plainText("The blocklist %s missed two refreshes. Links are still checked against the copy it loaded last.%n%n%s %s %s%n%nBlocklists: %s"
                         .formatted(status.name(), lastRefresh, schedule, errors, blocklistsPage))
-                .text(body)
+                .text(htmlContent)
                 .build();
 
         tryToSendEmail(email);
@@ -869,8 +874,8 @@ public class DefaultSendingEmailService implements SendingEmailService {
         return StringUtils.removeEnd(StringUtils.defaultString(appProperties.getFrontendUrl()), "/") + path;
     }
 
-    private String shortLink(final Url url) {
-        return shortLinks.url(ShortLinks.hostnameOf(url), url.getShortUrl());
+    private String shortLinkDisplay(final Url url) {
+        return shortLinks.display(ShortLinks.hostnameOf(url), url.getShortUrl());
     }
 
     private static String signUpMethod(final String authProvider) {

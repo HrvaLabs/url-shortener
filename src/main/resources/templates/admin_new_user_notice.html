@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="https://www.thymeleaf.org"
+      th:replace="~{fragments/email :: layout(title='New user registered', heading='New user registered', preheader=~{::preheader}, content=~{::content}, footer=~{})}">
+<body>
+<th:block th:fragment="preheader"><th:block th:text="${user_email}">new@example.com</th:block> signed up with <th:block th:text="${sign_up_method}">email</th:block>.</th:block>
+<th:block th:fragment="content">
+  <p class="e-fg" th:style="${s.p}">A new user registered on hrva.cc.</p>
+  <table class="e-bd" role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" th:style="${s.panel}">
+    <tr>
+      <td class="e-fg" th:style="${s.row}"><div class="e-mu" th:style="${s.label}">Email</div>
+          <span th:text="${user_email}">new@example.com</span></td>
+    </tr>
+    <tr>
+      <td class="e-fg e-bd" th:style="${s.rowNext}"><div class="e-mu" th:style="${s.label}">Signed up with</div>
+          <span th:text="${sign_up_method}">email</span></td>
+    </tr>
+    <tr>
+      <td class="e-fg e-bd" th:style="${s.rowNext}"><div class="e-mu" th:style="${s.label}">Registered at</div>
+          <span th:text="${registered_at}">27 October 2026 at 06:00 UTC</span></td>
+    </tr>
+  </table>
+</th:block>
+</body>
+</html>
