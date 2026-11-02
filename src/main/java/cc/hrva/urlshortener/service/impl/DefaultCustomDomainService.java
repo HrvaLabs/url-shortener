@@ -54,7 +54,9 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.OptionalInt;
+import java.util.function.BooleanSupplier;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.ObjectUtils;
@@ -183,7 +185,7 @@ public class DefaultCustomDomainService implements CustomDomainService {
         requireBelowTheLimit(user.getId());
         requireWithinApplyLimit(user);
         final var flags = flagsOf(hostname, linkCheckService.check(HTTPS + hostname + "/"), user);
-        final var cloudflareTotal = skipsReview(removed, flags, user) ? cloudflareTotal(id) : OptionalInt.empty();
+        final var cloudflareTotal = skipsReview(removed, flags, () -> possibleScammer(user)) ? cloudflareTotal(id) : OptionalInt.empty();
         final var created = inserted(user, hostname, status -> insertAgain(user, removed, flags, cloudflareTotal));
         if (created.getStatus() == CustomDomainStatus.APPROVED_PROVISIONING) {
             customDomainApproval.handOver(created.getId());
@@ -309,8 +311,8 @@ public class DefaultCustomDomainService implements CustomDomainService {
         return saved;
     }
 
-    private boolean skipsReview(final CustomDomain removed, final List<String> flags, final User user) {
-        return flags.isEmpty() && reviewFree(removed) && !possibleScammer(user);
+    private boolean skipsReview(final CustomDomain removed, final List<String> flags, final BooleanSupplier possibleScammer) {
+        return flags.isEmpty() && reviewFree(removed) && !possibleScammer.getAsBoolean();
     }
 
     private boolean reviewFree(final CustomDomain removed) {
@@ -348,18 +350,18 @@ public class DefaultCustomDomainService implements CustomDomainService {
         if (domain.isCloudflareDeletePending()) {
             return UseAgain.CLOUDFLARE_REMOVAL_PENDING;
         }
-        if (!usable(domain.getHostname()) || heldByAnother(domain)) {
+        final var hostname = usableHostname(domain.getHostname());
+        if (hostname.isEmpty() || heldByAnother(domain)) {
             return null;
         }
-        return !possibleScammer && reviewFree(domain) ? UseAgain.SKIPS_REVIEW : UseAgain.NEEDS_REVIEW;
+        return skipsReview(domain, hostnameFlags(hostname.get()), () -> possibleScammer) ? UseAgain.SKIPS_REVIEW : UseAgain.NEEDS_REVIEW;
     }
 
-    private boolean usable(final String hostname) {
+    private Optional<String> usableHostname(final String hostname) {
         try {
-            customDomainHostnames.normalize(hostname);
-            return true;
+            return Optional.of(customDomainHostnames.normalize(hostname));
         } catch (final FieldValidationException exception) {
-            return false;
+            return Optional.empty();
         }
     }
 
@@ -374,14 +376,15 @@ public class DefaultCustomDomainService implements CustomDomainService {
             log.info("Custom domain application refused by the link check userId={}", user.getId());
             throw HostnameRefusal.RESERVED.toException();
         }
-        final var candidates = new ArrayList<String>();
-        if (Arrays.stream(hostname.split("\\.")).anyMatch(label -> label.startsWith(PUNYCODE_PREFIX))) {
-            candidates.add(PUNYCODE_FLAG);
-        }
+        final var candidates = new ArrayList<>(hostnameFlags(hostname));
         if (verdict.outcome() == LinkVerdict.Outcome.FLAG) {
             candidates.addAll(verdict.reasons());
         }
         return withinColumn(candidates);
+    }
+
+    private static List<String> hostnameFlags(final String hostname) {
+        return Arrays.stream(hostname.split("\\.")).anyMatch(label -> label.startsWith(PUNYCODE_PREFIX)) ? List.of(PUNYCODE_FLAG) : List.of();
     }
 
     private static List<String> withinColumn(final List<String> candidates) {

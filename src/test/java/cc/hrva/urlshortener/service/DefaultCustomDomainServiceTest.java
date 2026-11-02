@@ -968,6 +968,21 @@ class DefaultCustomDomainServiceTest {
     }
 
     @Test
+    void mineSaysAnInternationalNameGoesToReviewAsUseAgainDoes() {
+        final var punycode = removedRow(REMOVED, "go.xn--bcher-kva.com", false, NOW.minusDays(20));
+        when(customDomainRepository.findByOwnerIdOrderByCreatedAtDescIdDesc(7L)).thenReturn(List.of(punycode));
+        ownsRemoved(punycode);
+
+        assertThat(customDomainService.mine().domains()).extracting(CustomDomainResponse::useAgain).containsExactly(UseAgain.NEEDS_REVIEW);
+        final var response = customDomainService.useAgain(REMOVED);
+
+        assertThat(response.status()).isEqualTo(CustomDomainStatus.PENDING_REVIEW);
+        verify(customDomainRepository).saveAndFlush(saved.capture());
+        assertThat(saved.getValue().getApplyFlags())
+                .containsExactly("International name (punycode): check it doesn't imitate another domain");
+    }
+
+    @Test
     void mineSendsAPossibleScammerToReview() {
         when(customDomainRepository.findByOwnerIdOrderByCreatedAtDescIdDesc(7L))
                 .thenReturn(List.of(removedRow(31L, "own.example.com", false, NOW.minusDays(20))));
