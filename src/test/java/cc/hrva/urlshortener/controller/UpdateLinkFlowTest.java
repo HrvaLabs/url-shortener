@@ -625,7 +625,7 @@ class UpdateLinkFlowTest {
         expectOnlyMissing("TWO_STEP_SIGN_IN", "Turn on two-step sign-in");
 
         goodStanding();
-        final var created = LocalDateTime.now().minusDays(10);
+        final var created = LocalDateTime.now().minusDays(10).withNano(0);
         jdbcTemplate.update("update user_account set create_date = ? where id = ?", created, OWNER);
         expectOnlyMissing("ACCOUNT_AGE", "Available from " + DAY.format(created.plusDays(30)))
                 .andExpect(jsonPath("$.missing[0].availableFrom").value(ApiDates.utc(created.plusDays(30))));
