@@ -107,6 +107,23 @@ app:
   discord-webhook-url: ${DISCORD_WEBHOOK_URL:}
   mcp:
     issuer: https://hrva.cc
+    known-apps:
+      - names: [Claude, Anthropic]
+        domains: [claude.ai, claude.com, anthropic.com]
+      - names: [ChatGPT, OpenAI]
+        domains: [chatgpt.com, openai.com]
+      - names: [Cursor]
+        domains: [cursor.com, cursor.sh]
+      - names: [VS Code, VSCode, Visual Studio Code]
+        domains: [visualstudio.com, vscode.dev]
+      - names: [GitHub Copilot, Copilot]
+        domains: [github.com, githubcopilot.com]
+      - names: [Windsurf]
+        domains: [windsurf.com, codeium.com]
+      - names: [Gemini]
+        domains: [gemini.google.com]
+      - names: [Perplexity]
+        domains: [perplexity.ai]
   analytics:
     zone: ${APP_ANALYTICS_ZONE:Europe/Zagreb}
   digest:

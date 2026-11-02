@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.service.impl;
 
+import cc.hrva.urlshortener.mcp.bridge.ConnectRequestView;
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.dto.BlocklistStatus;
 import cc.hrva.urlshortener.dto.DecisionsDigest;
@@ -74,6 +75,7 @@ public class DefaultSendingEmailService implements SendingEmailService {
     private static final String NOT_SENT = "Not sent: %s is off";
     private static final String CONSENT_WITHDRAWN = "This person has turned this email off since, so it can't be resent.";
     private static final String CUSTOM_DOMAINS_SETTINGS = "/dashboard/settings#custom-domains";
+    private static final String CONNECTED_APPS_SETTINGS = "/dashboard/settings#connected-apps";
     private static final String ADD_THE_RECORD_HELP = "/help/custom-domains#add-the-record";
     private static final String CONTACT_LINE = "If you think that's a mistake, contact %s.";
     private static final String ARROW = " " + Character.toString(0x2192) + " ";
@@ -307,6 +309,28 @@ public class DefaultSendingEmailService implements SendingEmailService {
                 .sender(appProperties.getEmailSenderAddress())
                 .receivers(new String[]{user.getEmail()})
                 .subject("A sign-in method changed on your hrva.cc account")
+                .text(htmlContent)
+                .build();
+
+        tryToSendEmail(email);
+    }
+
+    @Override
+    @Async
+    public void sendAppConnectedEmail(final User user, final ConnectRequestView destination, final LocalDateTime connectedAt) {
+        final var ctx = getContext(user);
+        ctx.setVariable("client_name", destination.clientName());
+        ctx.setVariable("redirect_host", destination.redirectHost());
+        ctx.setVariable("on_this_device", destination.loopback());
+        ctx.setVariable("connected_at", connectedAt.format(PASSKEY_ADDED_AT_FORMAT));
+        ctx.setVariable("connected_apps_url", frontendPage(CONNECTED_APPS_SETTINGS));
+
+        final var htmlContent = templateEngine.process("app_connected", ctx);
+
+        final var email = Email.builder()
+                .sender(appProperties.getEmailSenderAddress())
+                .receivers(new String[]{user.getEmail()})
+                .subject("An app was connected to your hrva.cc account")
                 .text(htmlContent)
                 .build();
 

@@ -173,6 +173,20 @@ public class AppProperties {
         @ToString.Exclude
         private String signingKey;
 
+        @Valid
+        private List<KnownApp> knownApps = List.of();
+
+    }
+
+    @Data
+    public static class KnownApp {
+
+        @NotEmpty
+        private List<String> names = List.of();
+
+        @NotEmpty
+        private List<String> domains = List.of();
+
     }
 
     @Data

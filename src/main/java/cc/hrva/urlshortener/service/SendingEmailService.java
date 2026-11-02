@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.service;
 
+import cc.hrva.urlshortener.mcp.bridge.ConnectRequestView;
 import cc.hrva.urlshortener.dto.BlocklistStatus;
 import cc.hrva.urlshortener.dto.DecisionsDigest;
 import cc.hrva.urlshortener.dto.WeeklyDigest;
@@ -28,6 +29,7 @@ public interface SendingEmailService {
     void sendEmailForgotPassword(User user, String resetToken);
     void sendPasskeyAddedEmail(User user, String label, LocalDateTime addedAt);
     void sendSignInMethodChangedEmail(User user, String change, LocalDateTime changedAt);
+    void sendAppConnectedEmail(User user, ConnectRequestView destination, LocalDateTime connectedAt);
     void sendDecisionsEmailToAdmin(DecisionsDigest digest);
     void sendWeeklyDigestToAdmin(WeeklyDigest digest);
     void sendBlocklistStaleEmail(BlocklistStatus status);

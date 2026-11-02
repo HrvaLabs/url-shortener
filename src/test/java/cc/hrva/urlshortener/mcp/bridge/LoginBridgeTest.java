@@ -22,6 +22,9 @@ import cc.hrva.urlshortener.security.JwtFilter;
 import cc.hrva.urlshortener.security.OAuth2LoginSuccessHandler;
 import cc.hrva.urlshortener.security.OAuth2LoginUserService;
 import cc.hrva.urlshortener.security.TokenProvider;
+import cc.hrva.urlshortener.listener.AppConnectedEmailListener;
+import cc.hrva.urlshortener.mcp.apps.DefaultConnectedAppsService;
+import cc.hrva.urlshortener.service.SendingEmailService;
 import cc.hrva.urlshortener.service.UserService;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiter;
 import com.jayway.jsonpath.JsonPath;
@@ -85,7 +88,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.http.MediaType.APPLICATION_FORM_URLENCODED;
@@ -115,6 +120,10 @@ class LoginBridgeTest {
     private static final String CONTINUE_URL = ISSUER + "/oauth2/connect/continue?otc=";
     private static final String EMAIL = "user@localhost";
     private static final String CLIENT_NAME = "Claude";
+    private static final String LOCAL_VIEW = "{\"clientName\":\"" + CLIENT_NAME + "\",\"redirectHost\":\"localhost\",\"loopback\":true,\"lookalike\":false}";
+    private static final String LOOKALIKE_REDIRECT_URI = "https://claude.ai.evil.example/callback";
+    private static final String LOOKALIKE_REGISTRATION = """
+            {"client_name":"Claude","redirect_uris":["https://claude.ai.evil.example/callback"],"token_endpoint_auth_method":"none"}""";
     private static final String REGISTERED_REDIRECT_URI = McpAccessTokens.REDIRECT_URI;
     private static final String OTHER_PORT_REDIRECT_URI = "http://localhost:61111/callback";
     private static final String STATE = "state 1/2&x";
@@ -170,6 +179,9 @@ class LoginBridgeTest {
 
     @MockitoBean
     private RateLimiter rateLimiter;
+
+    @MockitoBean
+    private SendingEmailService sendingEmailService;
 
     private final InMemoryRedis redis = new InMemoryRedis();
     private final List<String> locations = new ArrayList<>();
@@ -237,8 +249,29 @@ class LoginBridgeTest {
         final var anonymousView = perform(get("/api/v1/connect/requests/{handle}", started.handle()));
 
         assertThat(view.getStatus()).isEqualTo(200);
-        assertThat(view.getContentAsString()).isEqualTo("{\"clientName\":\"" + CLIENT_NAME + "\"}");
+        assertThat(view.getContentAsString()).isEqualTo(LOCAL_VIEW);
         assertThat(anonymousView.getStatus()).isEqualTo(401);
+    }
+
+    @Test
+    void aClientNamedLikeAKnownAppThatSendsYouElsewhereIsFlaggedWithItsHost() throws Exception {
+        final var started = startAuthorization(accessTokens.register(LOOKALIKE_REGISTRATION), LOOKALIKE_REDIRECT_URI);
+
+        final var view = perform(view(started.handle()));
+
+        assertThat(view.getStatus()).isEqualTo(200);
+        assertThat(view.getContentAsString()).isEqualTo(
+                "{\"clientName\":\"Claude\",\"redirectHost\":\"claude.ai.evil.example\",\"loopback\":false,\"lookalike\":true}");
+    }
+
+    @Test
+    void approvingANewAppEmailsTheAccountWithTheAppsNameAndWhereItSendsYou() throws Exception {
+        final var started = startAuthorization(accessTokens.register(LOOKALIKE_REGISTRATION), LOOKALIKE_REDIRECT_URI);
+
+        assertThat(perform(approve(started.handle())).getStatus()).isEqualTo(200);
+
+        verify(sendingEmailService, timeout(5_000)).sendAppConnectedEmail(eq(account),
+                eq(new ConnectRequestView("Claude", "claude.ai.evil.example", false, true)), any());
     }
 
     @Test
@@ -292,7 +325,7 @@ class LoginBridgeTest {
         final var denial = perform(post(DENY_PATH, denied.handle()).header(HttpHeaders.AUTHORIZATION, adminOnly));
 
         assertThat(view.getStatus()).isEqualTo(200);
-        assertThat(view.getContentAsString()).isEqualTo("{\"clientName\":\"" + CLIENT_NAME + "\"}");
+        assertThat(view.getContentAsString()).isEqualTo(LOCAL_VIEW);
         assertThat(continueUrl(approval)).startsWith(CONTINUE_URL);
         assertThat(denial.getStatus()).isEqualTo(200);
         assertThat(JsonPath.<String>read(denial.getContentAsString(), "$.redirectTo"))
@@ -700,6 +733,9 @@ class LoginBridgeTest {
             TokenProvider.class,
             RedisConnectRequestStore.class,
             ConnectController.class,
+            ConnectDestinations.class,
+            DefaultConnectedAppsService.class,
+            AppConnectedEmailListener.class,
             ConnectContinueController.class,
             CurrentSession.class,
             UserController.class

@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.service;
 
+import cc.hrva.urlshortener.mcp.bridge.ConnectRequestView;
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.dto.BlocklistStatus;
 import cc.hrva.urlshortener.dto.DecisionsDigest;
@@ -224,6 +225,16 @@ class DefaultSendingEmailServiceTest {
                 List.of(new DecisionsDigest.NewAccountLink("fresh" + userText, "example.com/fresh" + userText, "newcomer@example.com" + userText, null)),
                 0,
                 List.of(new DecisionsDigest.BusyAnonymousLink("busy" + userText, "shop.example.com" + userText, 120)));
+    }
+
+    private Email sentAppConnectedEmail(final ConnectRequestView destination) throws Exception {
+        saveReturnsArgument();
+        final var sent = ArgumentCaptor.forClass(Email.class);
+        doAnswer(invocation -> null).when(emailService).sendEmail(sent.capture(), eq(null));
+
+        configuredEmailService(realTemplateEngine()).sendAppConnectedEmail(OWNER, destination, PASSKEY_ADDED_AT);
+
+        return sent.getValue();
     }
 
     private Email sentPasskeyAddedEmail(final String label) throws Exception {
@@ -817,6 +828,40 @@ class DefaultSendingEmailServiceTest {
                 .contains("This changed on your hrva.cc account on 25 October 2026 at 14:05 UTC.")
                 .contains("If this wasn't you, reset your password and check your sign-in methods.")
                 .contains("Settings \u2192 Sign-in methods (https://hrva.cc/dashboard/settings)");
+    }
+
+    @Test
+    void theAppConnectedEmailNamesTheAppWhereItSentYouWhenAndHowToDisconnectIt() throws Exception {
+        final var email = sentAppConnectedEmail(new ConnectRequestView("Claude", "evil.example", false, true));
+
+        assertThat(email.getReceivers()).containsExactly("alice@example.com");
+        assertThat(email.getSubject()).isEqualTo("An app was connected to your hrva.cc account");
+        assertThat(email.getText()).containsPattern("<h1[^>]*>An app was connected</h1>");
+        assertThat(textOf(email.getText()))
+                .contains("Hello alice@example.com,")
+                .contains("An app that calls itself Claude was connected to your hrva.cc account on 25 October 2026 at 14:05 UTC."
+                        + " The name is chosen by the app and is not checked by hrva.cc.")
+                .contains("After the connection was allowed, hrva.cc sent you to evil.example.")
+                .contains("If it wasn't you, sign in, open Settings \u2192 Connected apps (https://hrva.cc/dashboard/settings#connected-apps) and disconnect it.")
+                .contains("Best regards,")
+                .doesNotContain("an app on your device");
+        assertThat(linksIn(email.getText())).contains("https://hrva.cc/dashboard/settings#connected-apps");
+    }
+
+    @Test
+    void theAppConnectedEmailForADesktopAppSaysItWentBackToTheDevice() throws Exception {
+        final var email = sentAppConnectedEmail(new ConnectRequestView("Claude Desktop", "localhost", true, false));
+
+        assertThat(textOf(email.getText()))
+                .contains("hrva.cc sent you back to an app on your device.")
+                .doesNotContain("sent you to localhost");
+    }
+
+    @Test
+    void theAppConnectedEmailEscapesTheAppsName() throws Exception {
+        final var email = sentAppConnectedEmail(new ConnectRequestView("<script>alert(1)</script>", "evil.example", false, false));
+
+        assertThat(email.getText()).doesNotContain("<script>").contains("&lt;script&gt;");
     }
 
     @Test
