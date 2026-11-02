@@ -2423,7 +2423,7 @@ expect_eq "$(docker exec "$REDIS_CONTAINER" redis-cli EXISTS "auth:oauth-code:$O
 exchange_oauth_code "$SIGN_IN_VERIFIER"
 expect_eq "$HTTP_STATUS $(header_value content-type) $(jq -r .detail <<<"$HTTP_BODY")" '410 application/problem+json Your sign-in expired. Sign in again.' "a used code is 410"
 http -X POST "$BASE/api/v1/auth/oauth/exchange" -H 'Content-Type: application/json' -d '{}'
-expect_eq "$HTTP_STATUS $(jq -c .errors <<<"$HTTP_BODY")" '400 {"code":"Code is required","verifier":"Verifier is required"}' "no code and no verifier is 400, under errors"
+expect_eq "$HTTP_STATUS $(jq -cS .errors <<<"$HTTP_BODY")" '400 {"code":"Code is required","verifier":"Verifier is required"}' "no code and no verifier is 400, under errors"
 OAUTH_CODE=$(openssl rand -hex 24)
 docker exec "$REDIS_CONTAINER" redis-cli SET "auth:oauth-code:$OAUTH_CODE" "{\"userId\":$SESSION_USER_ID,\"method\":\"GOOGLE\"}" EX 60 >/dev/null
 exchange_oauth_code "$SIGN_IN_VERIFIER"
