@@ -113,6 +113,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -290,6 +291,18 @@ class LinkFlowsWithoutOpenInViewTest {
                 .andExpect(jsonPath("$.active").value(true));
 
         assertThat(jdbcTemplate.queryForObject("select active from url where id = ?", Boolean.class, OWNERS_LINK)).isTrue();
+    }
+
+    @Test
+    void aDeletedLinkStillHasAnAuditRowThatNamesIt() throws Exception {
+        mockMvc.perform(delete("/api/v1/urls/{id}", OWNERS_LINK).header(JwtFilter.AUTHORIZATION_HEADER, OWNER_TOKEN))
+                .andExpect(status().isNoContent());
+
+        assertThat(jdbcTemplate.queryForObject("select count(*) from url where id = ?", Long.class, OWNERS_LINK)).isZero();
+        assertThat(jdbcTemplate.queryForMap("select performed_by, target_identifier, details from audit_log where action = 'DELETE_URL'"))
+                .containsEntry("PERFORMED_BY", OWNER_EMAIL)
+                .containsEntry("TARGET_IDENTIFIER", String.valueOf(OWNERS_LINK))
+                .containsEntry("DETAILS", "link: localhost/mine2, destination: https://example.com/mine");
     }
 
     @Test

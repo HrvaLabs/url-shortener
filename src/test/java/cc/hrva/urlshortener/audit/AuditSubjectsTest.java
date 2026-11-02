@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.audit;
 
+import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.repository.CustomDomainRepository;
 import cc.hrva.urlshortener.repository.CustomDomainRequestRepository;
 import cc.hrva.urlshortener.repository.DomainAuditSubject;
@@ -7,6 +8,7 @@ import cc.hrva.urlshortener.repository.DomainRequestAuditSubject;
 import cc.hrva.urlshortener.repository.LinkAuditSubject;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
+import cc.hrva.urlshortener.service.domain.ShortLinks;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -44,7 +46,9 @@ class AuditSubjectsTest {
 
     @BeforeEach
     void setUp() {
-        auditSubjects = new AuditSubjects(customDomainRepository, customDomainRequestRepository, urlRepository, userRepository, transactionManager);
+        final var appProperties = new AppProperties();
+        appProperties.setServerUrl("https://hrva.cc");
+        auditSubjects = new AuditSubjects(customDomainRepository, customDomainRequestRepository, urlRepository, userRepository, new ShortLinks(appProperties), transactionManager);
     }
 
     @Test

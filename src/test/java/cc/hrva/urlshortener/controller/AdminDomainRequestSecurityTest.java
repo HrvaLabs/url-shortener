@@ -50,6 +50,7 @@ import cc.hrva.urlshortener.service.impl.DefaultAuditLogService;
 import cc.hrva.urlshortener.service.impl.DefaultCustomDomainAdminService;
 import cc.hrva.urlshortener.service.impl.DefaultCustomDomainRequestAdminService;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiter;
+import cc.hrva.urlshortener.service.domain.ShortLinks;
 import com.jayway.jsonpath.JsonPath;
 import com.nimbusds.jose.JOSEException;
 import com.nimbusds.jose.jwk.RSAKey;
@@ -555,6 +556,7 @@ class AdminDomainRequestSecurityTest {
             ClientIpResolver.class,
             AdminAuditAspect.class,
             AuditSubjects.class,
+            ShortLinks.class,
             DefaultAuditLogService.class,
             AdminDomainRequestController.class,
             DefaultCustomDomainRequestAdminService.class,
