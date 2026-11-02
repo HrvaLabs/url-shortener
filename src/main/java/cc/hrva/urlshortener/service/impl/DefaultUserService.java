@@ -256,7 +256,8 @@ public class DefaultUserService implements UserService {
                 twoFactorRecoveryCodeRepository.countByUserAndUsedFalse(user),
                 bioAccountData.exportFor(user).orElse(null),
                 notificationAccountData.exportFor(user),
-                customDomainAccountData.exportFor(user));
+                customDomainAccountData.exportFor(user),
+                customDomainAccountData.requestsFor(user));
     }
 
     private void deleteUserAndOwnedData(final User user) {

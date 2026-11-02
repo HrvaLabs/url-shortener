@@ -2,11 +2,13 @@ package cc.hrva.urlshortener.repository;
 
 import cc.hrva.urlshortener.model.CustomDomain;
 import cc.hrva.urlshortener.model.CustomDomainAllowance;
+import cc.hrva.urlshortener.model.CustomDomainRequest;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.enums.CustomDomainStatus;
 import cc.hrva.urlshortener.model.enums.DomainDisableReason;
 import cc.hrva.urlshortener.model.enums.DomainProblem;
+import cc.hrva.urlshortener.model.enums.DomainRequestStatus;
 import cc.hrva.urlshortener.repository.CustomDomainReconcileRepository.MissingDomain;
 import cc.hrva.urlshortener.repository.CustomDomainReconcileRepository.ReconcileRun;
 import cc.hrva.urlshortener.repository.UrlDomainMoves.DomainLink;
@@ -70,6 +72,9 @@ class CustomDomainSchemaTest {
 
     @Autowired
     private CustomDomainReconcileRepository customDomainReconcileRepository;
+
+    @Autowired
+    private CustomDomainRequestRepository customDomainRequestRepository;
 
     @Autowired
     private CustomDomainCapLock customDomainCapLock;
@@ -215,6 +220,56 @@ class CustomDomainSchemaTest {
             assertThat(saved.getGrantedBy()).isEqualTo("admin@localhost");
             assertThat(saved.getGrantedAt()).isEqualTo(NOW);
         });
+    }
+
+    @Test
+    void requestsGoWithTheirAccount() {
+        final var owner = savedUser("ana@example.com");
+        final var other = savedUser("bob@example.com");
+        customDomainRequestRepository.saveAndFlush(request(owner, DomainRequestStatus.DECLINED));
+        customDomainRequestRepository.saveAndFlush(request(other, DomainRequestStatus.WAITING));
+        entityManager.clear();
+
+        jdbcTemplate.update("delete from user_account where id = ?", owner.getId());
+
+        assertThat(jdbcTemplate.queryForList("select user_id from custom_domain_request", Long.class)).containsExactly(other.getId());
+    }
+
+    @Test
+    void aRequestIsReviewedOnlyWhileItWaitsAndWithdrawnOnlyByItsAccount() {
+        final var owner = savedUser("ana@example.com");
+        final var other = savedUser("bob@example.com");
+        final var waiting = customDomainRequestRepository.saveAndFlush(request(owner, DomainRequestStatus.WAITING));
+        final var withdrawing = customDomainRequestRepository.saveAndFlush(request(other, DomainRequestStatus.WAITING));
+        entityManager.clear();
+
+        assertThat(customDomainRequestRepository.markReviewed(waiting.getId(), DomainRequestStatus.APPROVED, "admin@localhost", "Fine", NOW)).isOne();
+        assertThat(customDomainRequestRepository.markReviewed(waiting.getId(), DomainRequestStatus.DECLINED, "admin@localhost", null, NOW)).isZero();
+        assertThat(customDomainRequestRepository.deleteWaiting(waiting.getId(), owner.getId())).isZero();
+        assertThat(customDomainRequestRepository.deleteWaiting(withdrawing.getId(), owner.getId())).isZero();
+        assertThat(customDomainRequestRepository.deleteWaiting(withdrawing.getId(), other.getId())).isOne();
+
+        assertThat(customDomainRequestRepository.findWithUser(waiting.getId())).hasValueSatisfying(reviewed -> {
+            assertThat(reviewed.getStatus()).isEqualTo(DomainRequestStatus.APPROVED);
+            assertThat(reviewed.getAdminNote()).isEqualTo("Fine");
+            assertThat(reviewed.getReviewedBy()).isEqualTo("admin@localhost");
+            assertThat(reviewed.getReviewedAt()).isEqualTo(NOW);
+            assertThat(reviewed.getUser().getEmail()).isEqualTo("ana@example.com");
+        });
+        assertThat(customDomainRequestRepository.existsById(withdrawing.getId())).isFalse();
+    }
+
+    @Test
+    void domainsInUseAreCountedPerOwner() {
+        final var ana = savedUser("ana@example.com");
+        final var bob = savedUser("bob@example.com");
+        savedDomain(domain("go.example.com", CustomDomainStatus.ACTIVE).owner(ana));
+        savedDomain(domain("links.example.com", CustomDomainStatus.PENDING_REVIEW).owner(ana));
+        savedDomain(domain("old.example.com", CustomDomainStatus.REJECTED).owner(ana).hostnameKey(null));
+        savedDomain(domain("bob.example.org", CustomDomainStatus.DISABLED).owner(bob));
+
+        assertThat(customDomainRepository.countDomainsOfOwners(List.of(ana.getId(), bob.getId()), CustomDomainStatus.COUNTS_FOR_USER))
+                .containsExactlyInAnyOrder(new OwnerDomainCount(ana.getId(), 2L), new OwnerDomainCount(bob.getId(), 1L));
     }
 
     @Test
@@ -839,6 +894,10 @@ class CustomDomainSchemaTest {
         return jdbcTemplate.queryForObject("select max(id) from url", Long.class);
     }
 
+    private static CustomDomainRequest request(final User user, final DomainRequestStatus status) {
+        return CustomDomainRequest.builder().user(user).requestedTotal(3).limitAtRequest(1).reason("Three shops").status(status).createdAt(NOW).build();
+    }
+
     private User savedUser(final String email) {
         return userRepository.saveAndFlush(User.builder().email(email).password("correct horse battery").apiKeySlots(4L).build());
     }
@@ -878,6 +937,7 @@ class CustomDomainSchemaTest {
                     classes = {
                             CustomDomainRepository.class,
                             CustomDomainAllowanceRepository.class,
+                            CustomDomainRequestRepository.class,
                             UrlRepository.class,
                             UserRepository.class}))
     static class TestApplication {

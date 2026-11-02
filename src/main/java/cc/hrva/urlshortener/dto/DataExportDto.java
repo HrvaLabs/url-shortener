@@ -11,6 +11,7 @@ import cc.hrva.urlshortener.model.enums.ChannelType;
 import cc.hrva.urlshortener.model.enums.ConsentSource;
 import cc.hrva.urlshortener.model.enums.CustomDomainStatus;
 import cc.hrva.urlshortener.model.enums.DomainDisableReason;
+import cc.hrva.urlshortener.model.enums.DomainRequestStatus;
 import cc.hrva.urlshortener.model.enums.LastDeliveryStatus;
 import cc.hrva.urlshortener.model.enums.NotificationType;
 import cc.hrva.urlshortener.model.enums.PasskeyKind;
@@ -28,7 +29,8 @@ public record DataExportDto(
         long recoveryCodesRemaining,
         BioPageExport bioPage,
         NotificationExport notifications,
-        List<DomainExport> domains) {
+        List<DomainExport> domains,
+        List<DomainRequestExport> domainRequests) {
 
     public record EmailExport(String subject, String status, LocalDateTime sentAt, LocalDateTime createdAt) {}
 
@@ -124,5 +126,13 @@ public record DataExportDto(
             LocalDateTime deletedAt,
             DomainDisableReason disabledReason,
             String disabledNote) {}
+
+    public record DomainRequestExport(
+            int requestedTotal,
+            String reason,
+            DomainRequestStatus status,
+            String adminNote,
+            LocalDateTime createdAt,
+            LocalDateTime reviewedAt) {}
 
 }

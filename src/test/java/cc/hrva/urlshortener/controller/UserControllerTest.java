@@ -212,6 +212,7 @@ class UserControllerTest {
                 3L,
                 null,
                 new cc.hrva.urlshortener.dto.DataExportDto.NotificationExport(java.util.List.of(), java.util.List.of()),
+                java.util.List.of(),
                 java.util.List.of());
         when(userService.exportMyData()).thenReturn(export);
 
@@ -223,7 +224,8 @@ class UserControllerTest {
                 .andExpect(jsonPath("$.bioPage").value(org.hamcrest.Matchers.nullValue()))
                 .andExpect(jsonPath("$.notifications.consentHistory").isEmpty())
                 .andExpect(jsonPath("$.notifications.channels").isEmpty())
-                .andExpect(jsonPath("$.domains").isEmpty());
+                .andExpect(jsonPath("$.domains").isEmpty())
+                .andExpect(jsonPath("$.domainRequests").isEmpty());
     }
 
     @Test

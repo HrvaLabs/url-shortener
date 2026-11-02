@@ -1,10 +1,12 @@
 package cc.hrva.urlshortener.service.domain;
 
 import cc.hrva.urlshortener.dto.DataExportDto.DomainExport;
+import cc.hrva.urlshortener.dto.DataExportDto.DomainRequestExport;
 import cc.hrva.urlshortener.model.CustomDomain;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.repository.CustomDomainReconcileRepository;
 import cc.hrva.urlshortener.repository.CustomDomainRepository;
+import cc.hrva.urlshortener.repository.CustomDomainRequestRepository;
 import cc.hrva.urlshortener.service.twostep.AccountLock;
 import com.google.common.collect.Iterables;
 import java.time.Clock;
@@ -24,6 +26,7 @@ public class CustomDomainAccountData {
     private static final int IDS_PER_QUERY = 1_000;
 
     private final CustomDomainRepository customDomainRepository;
+    private final CustomDomainRequestRepository customDomainRequestRepository;
     private final CustomDomainReconcileRepository customDomainReconcileRepository;
     private final AccountLock accountLock;
     private final ApplicationEventPublisher eventPublisher;
@@ -32,6 +35,18 @@ public class CustomDomainAccountData {
     public List<DomainExport> exportFor(final User user) {
         return customDomainRepository.findByOwnerIdOrderByCreatedAtDescIdDesc(user.getId()).stream()
                 .map(CustomDomainAccountData::export)
+                .toList();
+    }
+
+    public List<DomainRequestExport> requestsFor(final User user) {
+        return customDomainRequestRepository.findByUser_IdOrderByCreatedAtDescIdDesc(user.getId()).stream()
+                .map(request -> new DomainRequestExport(
+                        request.getRequestedTotal(),
+                        request.getReason(),
+                        request.getStatus(),
+                        request.getAdminNote(),
+                        CustomDomainResponses.seconds(request.getCreatedAt()),
+                        CustomDomainResponses.seconds(request.getReviewedAt())))
                 .toList();
     }
 

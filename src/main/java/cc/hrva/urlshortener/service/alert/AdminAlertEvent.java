@@ -48,6 +48,8 @@ public sealed interface AdminAlertEvent {
 
     }
 
+    record DomainLimitRequested(long requestId, long userId, int currentLimit, int requestedTotal) implements AdminAlertEvent {}
+
     record DomainDisabled(long domainId, String hostname, DomainDisableReason reason, String note) implements AdminAlertEvent {}
 
     record DomainNeedsAttention(long domainId, String hostname, DomainProblem problem) implements AdminAlertEvent {}

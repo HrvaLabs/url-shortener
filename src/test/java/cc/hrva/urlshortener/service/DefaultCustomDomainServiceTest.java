@@ -6,6 +6,7 @@ import cc.hrva.urlshortener.dto.LinkVerdict;
 import cc.hrva.urlshortener.dto.domain.CustomDomainApplyDto;
 import cc.hrva.urlshortener.dto.domain.CustomDomainResponse;
 import cc.hrva.urlshortener.dto.domain.DomainRemovalResponse;
+import cc.hrva.urlshortener.dto.domain.DomainRequestResponse;
 import cc.hrva.urlshortener.exception.ApiException;
 import cc.hrva.urlshortener.exception.CustomDomainCapacityException;
 import cc.hrva.urlshortener.exception.CustomDomainConflictException;
@@ -16,13 +17,16 @@ import cc.hrva.urlshortener.exception.RateLimitExceededException;
 import cc.hrva.urlshortener.exception.ServiceBusyException;
 import cc.hrva.urlshortener.model.CustomDomain;
 import cc.hrva.urlshortener.model.CustomDomainAllowance;
+import cc.hrva.urlshortener.model.CustomDomainRequest;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.enums.BlockReason;
 import cc.hrva.urlshortener.model.enums.CustomDomainStatus;
 import cc.hrva.urlshortener.model.enums.DomainLinkMode;
 import cc.hrva.urlshortener.model.enums.DomainProblem;
+import cc.hrva.urlshortener.model.enums.DomainRequestStatus;
 import cc.hrva.urlshortener.repository.CustomDomainAllowanceRepository;
 import cc.hrva.urlshortener.repository.CustomDomainRepository;
+import cc.hrva.urlshortener.repository.CustomDomainRequestRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.DomainApplied;
 import cc.hrva.urlshortener.service.domain.CustomDomainChangedEvent;
@@ -44,6 +48,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -120,6 +125,9 @@ class DefaultCustomDomainServiceTest {
     private CloudflareClient cloudflareClient;
 
     @Mock
+    private CustomDomainRequestRepository customDomainRequestRepository;
+
+    @Mock
     private CustomDomainLifecycle customDomainLifecycle;
 
     @Mock
@@ -158,7 +166,7 @@ class DefaultCustomDomainServiceTest {
             domain.setId(12L);
             return domain;
         });
-        customDomainService = new DefaultCustomDomainService(userService, customDomainRepository, urlRepository,
+        customDomainService = new DefaultCustomDomainService(userService, customDomainRepository, customDomainRequestRepository, urlRepository,
                 new CustomDomainHostnames(appProperties), new CustomDomainLimits(customDomainRepository, customDomainAllowanceRepository, appProperties),
                 new CustomDomainResponses(appProperties), customDomainLifecycle, customDomainProvisioner, customDomainSetup, customDomainRemoval,
                 linkCheckService, accountLock, rateLimiter, eventPublisher, TransactionOperations.withoutTransaction(), appProperties, clock);
@@ -655,6 +663,55 @@ class DefaultCustomDomainServiceTest {
         assertThat(mine.used()).isEqualTo(1L);
         assertThat(mine.limit()).isEqualTo(1);
         assertThat(mine.canApply()).isFalse();
+    }
+
+    @Test
+    void mineOffersARequestOnlyAtTheLimitBelowTheHighestLimitWithNoneWaiting() {
+        when(customDomainRepository.findByOwnerIdOrderByCreatedAtDescIdDesc(7L)).thenReturn(List.of());
+        assertThat(customDomainService.mine().canRequest()).isFalse();
+
+        when(customDomainRepository.findByOwnerIdOrderByCreatedAtDescIdDesc(7L)).thenReturn(List.of(domain(15L, CustomDomainStatus.ACTIVE, NOW)));
+        final var atTheLimit = customDomainService.mine();
+        assertThat(atTheLimit.canRequest()).isTrue();
+        assertThat(atTheLimit.request()).isNull();
+
+        appProperties.getDomains().setEnabled(false);
+        assertThat(customDomainService.mine().canRequest()).isFalse();
+        appProperties.getDomains().setEnabled(true);
+
+        when(customDomainRequestRepository.findFirstByUser_IdOrderByCreatedAtDescIdDesc(7L))
+                .thenReturn(Optional.of(request(31L, DomainRequestStatus.WAITING, null)));
+        final var waiting = customDomainService.mine();
+        assertThat(waiting.canRequest()).isFalse();
+        assertThat(waiting.request()).isEqualTo(new DomainRequestResponse(31L, DomainRequestStatus.WAITING, 3, "Three shops", null,
+                NOW.minusDays(1), null));
+
+        when(customDomainRequestRepository.findFirstByUser_IdOrderByCreatedAtDescIdDesc(7L)).thenReturn(Optional.empty());
+        when(customDomainAllowanceRepository.findById(7L))
+                .thenReturn(Optional.of(CustomDomainAllowance.builder().userId(7L).maxDomains(20).reason("Agency").build()));
+        when(customDomainRepository.findByOwnerIdOrderByCreatedAtDescIdDesc(7L)).thenReturn(Collections.nCopies(20, domain(15L, CustomDomainStatus.ACTIVE, NOW)));
+        assertThat(customDomainService.mine().canRequest()).isFalse();
+    }
+
+    @Test
+    void mineShowsAReviewedRequestFor30Days() {
+        when(customDomainRepository.findByOwnerIdOrderByCreatedAtDescIdDesc(7L)).thenReturn(List.of(domain(15L, CustomDomainStatus.ACTIVE, NOW)));
+        final var declined = request(31L, DomainRequestStatus.DECLINED, NOW.minusDays(30));
+        declined.setAdminNote("Use paths on one domain");
+        when(customDomainRequestRepository.findFirstByUser_IdOrderByCreatedAtDescIdDesc(7L)).thenReturn(Optional.of(declined));
+
+        final var recent = customDomainService.mine();
+        assertThat(recent.request()).extracting(DomainRequestResponse::status, DomainRequestResponse::adminNote, DomainRequestResponse::reviewedAt)
+                .containsExactly(DomainRequestStatus.DECLINED, "Use paths on one domain", NOW.minusDays(30));
+        assertThat(recent.canRequest()).isTrue();
+
+        declined.setReviewedAt(NOW.minusDays(30).minusSeconds(1));
+        assertThat(customDomainService.mine().request()).isNull();
+    }
+
+    private static CustomDomainRequest request(final long id, final DomainRequestStatus status, final LocalDateTime reviewedAt) {
+        return CustomDomainRequest.builder().id(id).requestedTotal(3).limitAtRequest(1).reason("Three shops").status(status)
+                .createdAt(NOW.minusDays(1)).reviewedAt(reviewedAt).build();
     }
 
     private static CustomDomainApplyDto apply(final String hostname) {

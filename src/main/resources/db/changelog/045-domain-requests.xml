@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.9.xsd">
+
+    <changeSet author="khrvacic" id="045-custom-domain-request">
+        <createTable tableName="custom_domain_request">
+            <column name="id" type="BIGINT" autoIncrement="true">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="user_id" type="BIGINT">
+                <constraints nullable="false"/>
+            </column>
+            <column name="requested_total" type="INT">
+                <constraints nullable="false"/>
+            </column>
+            <column name="limit_at_request" type="INT">
+                <constraints nullable="false"/>
+            </column>
+            <column name="reason" type="VARCHAR(300)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="status" type="VARCHAR(20)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="admin_note" type="VARCHAR(500)"/>
+            <column name="reviewed_by" type="VARCHAR(255)"/>
+            <column name="reviewed_at" type="TIMESTAMP"/>
+            <column name="created_at" type="TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+        <addForeignKeyConstraint baseTableName="custom_domain_request" baseColumnNames="user_id" constraintName="fk_custom_domain_request_user"
+                                 referencedTableName="user_account" referencedColumnNames="id" onDelete="CASCADE"/>
+        <createIndex tableName="custom_domain_request" indexName="idx_custom_domain_request_user_id">
+            <column name="user_id"/>
+            <column name="status"/>
+        </createIndex>
+        <createIndex tableName="custom_domain_request" indexName="idx_custom_domain_request_status">
+            <column name="status"/>
+            <column name="created_at"/>
+        </createIndex>
+        <rollback>
+            <dropTable tableName="custom_domain_request"/>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>

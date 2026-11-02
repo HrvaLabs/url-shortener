@@ -1,6 +1,5 @@
 package cc.hrva.urlshortener.controller;
 
-import org.springframework.test.json.JsonAssert;
 import cc.hrva.urlshortener.configuration.AppConfiguration;
 import cc.hrva.urlshortener.configuration.GlobalExceptionHandler;
 import cc.hrva.urlshortener.configuration.JacksonConfiguration;
@@ -14,6 +13,7 @@ import cc.hrva.urlshortener.mcp.bridge.ConnectRequestStore;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.repository.CustomDomainAllowanceRepository;
 import cc.hrva.urlshortener.repository.CustomDomainRepository;
+import cc.hrva.urlshortener.repository.CustomDomainRequestRepository;
 import cc.hrva.urlshortener.repository.UrlDomainMoves;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
@@ -31,6 +31,7 @@ import cc.hrva.urlshortener.service.UrlService;
 import cc.hrva.urlshortener.service.UserService;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.DomainApplied;
+import cc.hrva.urlshortener.service.alert.AdminAlertEvent.DomainLimitRequested;
 import cc.hrva.urlshortener.service.domain.CustomDomainChangedEvent;
 import cc.hrva.urlshortener.service.domain.CustomDomainHostnames;
 import cc.hrva.urlshortener.service.domain.CustomDomainLifecycle;
@@ -40,9 +41,12 @@ import cc.hrva.urlshortener.service.domain.CustomDomainRemoval;
 import cc.hrva.urlshortener.service.domain.CustomDomainResponses;
 import cc.hrva.urlshortener.service.domain.CustomDomainSetup;
 import cc.hrva.urlshortener.service.domain.UrlCache;
+import cc.hrva.urlshortener.service.impl.DefaultCustomDomainRequestService;
 import cc.hrva.urlshortener.service.impl.DefaultCustomDomainService;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiter;
+import cc.hrva.urlshortener.service.ratelimit.RateLimiterUnavailableException;
 import cc.hrva.urlshortener.service.twostep.AccountLock;
+import com.jayway.jsonpath.JsonPath;
 import com.nimbusds.jose.JOSEException;
 import com.nimbusds.jose.jwk.RSAKey;
 import com.nimbusds.jose.jwk.gen.RSAKeyGenerator;
@@ -75,8 +79,10 @@ import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.FilterType;
 import org.springframework.context.annotation.Import;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -85,7 +91,7 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
-import org.springframework.mock.web.MockHttpServletResponse;
+import org.springframework.test.json.JsonAssert;
 import org.springframework.test.json.JsonCompareMode;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
@@ -94,6 +100,7 @@ import org.springframework.transaction.event.TransactionalEventListener;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.nullValue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -101,6 +108,7 @@ import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mockingDetails;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -109,6 +117,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -136,6 +145,9 @@ class CustomDomainEndpointSecurityTest {
     private static final String NOT_FOUND = "{\"detail\":\"Custom domain not found\"}";
     private static final String OVER_THE_LIMIT = "{\"detail\":\"You can have 1 custom domain. Remove or withdraw one to apply for another.\"}";
     private static final String TAKEN = "{\"detail\":\"This domain has already been applied for.\"}";
+    private static final String REQUESTS = DOMAINS + "/requests";
+    private static final String REQUEST = """
+            {"requestedTotal":3,"reason":"  One domain for each of my three shops  "}""";
     private static final long ANA = 700L;
     private static final long BOB = 701L;
     private static final String ANA_EMAIL = "ana@hrva.cc";
@@ -231,6 +243,7 @@ class CustomDomainEndpointSecurityTest {
         jdbcTemplate.update("delete from url where domain_id in (select id from custom_domain where owner_id in (?, ?))", ANA, BOB);
         jdbcTemplate.update("delete from url where owner_id in (?, ?)", ANA, BOB);
         jdbcTemplate.update("delete from custom_domain_allowance where user_id in (?, ?)", ANA, BOB);
+        jdbcTemplate.update("delete from custom_domain_request where user_id in (?, ?)", ANA, BOB);
         jdbcTemplate.update("delete from custom_domain where owner_id in (?, ?)", ANA, BOB);
         jdbcTemplate.update("delete from user_account_authorities where user_id in (?, ?)", ANA, BOB);
         jdbcTemplate.update("delete from user_account where id in (?, ?)", ANA, BOB);
@@ -244,9 +257,12 @@ class CustomDomainEndpointSecurityTest {
         mockMvc.perform(post(DOMAINS).contentType(MediaType.APPLICATION_JSON).content(APPLICATION)).andExpect(status().isUnauthorized());
         mockMvc.perform(get(DOMAINS + "/" + id)).andExpect(status().isUnauthorized());
         mockMvc.perform(delete(DOMAINS + "/" + id)).andExpect(status().isUnauthorized());
+        mockMvc.perform(post(REQUESTS).contentType(MediaType.APPLICATION_JSON).content(REQUEST)).andExpect(status().isUnauthorized());
+        mockMvc.perform(delete(REQUESTS + "/1")).andExpect(status().isUnauthorized());
 
         assertThat(statusOf(id)).isEqualTo("PENDING_REVIEW");
         assertThat(countOf(ANA)).isEqualTo(1);
+        assertThat(requestsOf(ANA)).isZero();
     }
 
     @Test
@@ -384,7 +400,7 @@ class CustomDomainEndpointSecurityTest {
                 .andExpect(content().json(NOT_FOUND, JsonCompareMode.LENIENT));
         mockMvc.perform(as(ANA_TOKEN, get(DOMAINS)))
                 .andExpect(status().isOk())
-                .andExpect(content().json("{\"domains\":[],\"limit\":1,\"used\":0,\"canApply\":true}", JsonCompareMode.STRICT));
+                .andExpect(content().json("{\"domains\":[],\"limit\":1,\"used\":0,\"canApply\":true,\"request\":null,\"canRequest\":false}", JsonCompareMode.STRICT));
 
         assertThat(statusOf(id)).isEqualTo("PENDING_REVIEW");
     }
@@ -646,6 +662,161 @@ class CustomDomainEndpointSecurityTest {
         assertThat(arrived.getCount()).isZero();
     }
 
+    @Test
+    void aUserAtTheLimitAsksForMoreSeesItWaitingAndWithdrawsIt() throws Exception {
+        domain(ANA, "go.example.com", "ACTIVE");
+
+        mockMvc.perform(as(ANA_TOKEN, get(DOMAINS)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.canApply").value(false))
+                .andExpect(jsonPath("$.canRequest").value(true))
+                .andExpect(jsonPath("$.request").value(nullValue()));
+        final var body = mockMvc.perform(as(ANA_TOKEN, post(REQUESTS)).contentType(MediaType.APPLICATION_JSON).content(REQUEST))
+                .andExpect(status().isCreated())
+                .andExpect(content().json("""
+                        {"status":"WAITING","requestedTotal":3,"reason":"One domain for each of my three shops","adminNote":null,
+                        "createdAt":"2026-10-29T09:00:00Z","reviewedAt":null}""", JsonCompareMode.LENIENT))
+                .andReturn().getResponse().getContentAsString();
+        final long id = JsonPath.<Integer>read(body, "$.id");
+
+        mockMvc.perform(as(ANA_TOKEN, get(DOMAINS)))
+                .andExpect(jsonPath("$.canRequest").value(false))
+                .andExpect(jsonPath("$.request.id").value(id))
+                .andExpect(jsonPath("$.request.status").value("WAITING"));
+        mockMvc.perform(as(ANA_TOKEN, post(REQUESTS)).contentType(MediaType.APPLICATION_JSON).content(REQUEST))
+                .andExpect(status().isConflict())
+                .andExpect(content().json("{\"detail\":\"You already have a request waiting for review.\"}", JsonCompareMode.LENIENT));
+        assertThat(jdbcTemplate.queryForMap("select requested_total, limit_at_request, status from custom_domain_request where id = ?", id))
+                .containsEntry("REQUESTED_TOTAL", 3).containsEntry("LIMIT_AT_REQUEST", 1).containsEntry("STATUS", "WAITING");
+        assertThat(committedEvents.events()).filteredOn(DomainLimitRequested.class::isInstance)
+                .containsExactly(new DomainLimitRequested(id, ANA, 1, 3));
+
+        mockMvc.perform(as(BOB_TOKEN, delete(REQUESTS + "/" + id)))
+                .andExpect(status().isNotFound())
+                .andExpect(content().json("{\"detail\":\"Request not found\"}", JsonCompareMode.LENIENT));
+        mockMvc.perform(as(ANA_TOKEN, delete(REQUESTS + "/" + id))).andExpect(status().isNoContent());
+        mockMvc.perform(as(ANA_TOKEN, delete(REQUESTS + "/" + id))).andExpect(status().isNotFound());
+        mockMvc.perform(as(ANA_TOKEN, get(DOMAINS)))
+                .andExpect(jsonPath("$.canRequest").value(true))
+                .andExpect(jsonPath("$.request").value(nullValue()));
+        assertThat(requestsOf(ANA)).isZero();
+    }
+
+    @Test
+    void aReviewedRequestCannotBeWithdrawn() throws Exception {
+        domain(ANA, "go.example.com", "ACTIVE");
+        jdbcTemplate.update("""
+                insert into custom_domain_request (user_id, requested_total, limit_at_request, reason, status, admin_note, reviewed_by, reviewed_at, created_at)
+                values (?, 3, 1, 'Three shops', 'DECLINED', 'Use paths', 'admin@hrva.cc', ?, ?)""", ANA, NOW.minusHours(1), NOW.minusDays(1));
+        final var id = jdbcTemplate.queryForObject("select id from custom_domain_request where user_id = ?", Long.class, ANA);
+
+        mockMvc.perform(as(ANA_TOKEN, delete(REQUESTS + "/" + id)))
+                .andExpect(status().isConflict())
+                .andExpect(content().json("{\"detail\":\"This request was already reviewed.\"}", JsonCompareMode.LENIENT));
+        mockMvc.perform(as(ANA_TOKEN, get(DOMAINS)))
+                .andExpect(jsonPath("$.canRequest").value(true))
+                .andExpect(content().json("""
+                        {"request":{"id":%d,"status":"DECLINED","requestedTotal":3,"reason":"Three shops","adminNote":"Use paths",
+                        "createdAt":"2026-10-28T09:00:00Z","reviewedAt":"2026-10-29T08:00:00Z"}}""".formatted(id), JsonCompareMode.LENIENT))
+                .andExpect(jsonPath("$.request.reviewedBy").doesNotExist());
+        assertThat(requestsOf(ANA)).isOne();
+    }
+
+    @Test
+    void refusedRequestsAnswerWithTheirTextsAndCostNothing() throws Exception {
+        mockMvc.perform(as(ANA_TOKEN, post(REQUESTS)).contentType(MediaType.APPLICATION_JSON).content(REQUEST))
+                .andExpect(status().isConflict())
+                .andExpect(content().json("{\"detail\":\"You can still add a domain. Ask for more once you're at your limit.\"}",
+                        JsonCompareMode.LENIENT));
+        domain(ANA, "go.example.com", "PENDING_REVIEW");
+        mockMvc.perform(as(ANA_TOKEN, post(REQUESTS)).contentType(MediaType.APPLICATION_JSON).content("{\"requestedTotal\":1,\"reason\":\"   \"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().json("{\"errors\":{\"requestedTotal\":\"Choose 2 to 20\",\"reason\":\"Reason is required\"}}",
+                        JsonCompareMode.LENIENT));
+        mockMvc.perform(as(ANA_TOKEN, post(REQUESTS)).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"requestedTotal\":21,\"reason\":\"" + "x".repeat(301) + "\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().json("{\"errors\":{\"requestedTotal\":\"Choose 2 to 20\",\"reason\":\"Keep it to 300 characters or fewer\"}}",
+                        JsonCompareMode.LENIENT));
+        allowance(ANA, 3);
+        domain(ANA, "two.example.com", "ACTIVE");
+        domain(ANA, "three.example.com", "DISABLED");
+        mockMvc.perform(as(ANA_TOKEN, post(REQUESTS)).contentType(MediaType.APPLICATION_JSON).content(REQUEST))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().json("{\"errors\":{\"requestedTotal\":\"Choose more than your limit of 3.\"}}", JsonCompareMode.LENIENT));
+        jdbcTemplate.update("update custom_domain_allowance set max_domains = 20 where user_id = ?", ANA);
+        mockMvc.perform(as(ANA_TOKEN, post(REQUESTS)).contentType(MediaType.APPLICATION_JSON).content("{\"requestedTotal\":20,\"reason\":\"More\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(content().json("{\"detail\":\"Your account already has the highest limit, 20 custom domains.\"}", JsonCompareMode.LENIENT));
+        appProperties.getDomains().setEnabled(false);
+        mockMvc.perform(as(ANA_TOKEN, post(REQUESTS)).contentType(MediaType.APPLICATION_JSON).content(REQUEST))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(content().json("{\"detail\":\"Custom domains aren't available right now.\"}", JsonCompareMode.LENIENT));
+
+        assertThat(requestsOf(ANA)).isZero();
+        verify(rateLimiter, never()).tryAcquire(eq("domain-request:user:" + ANA), anyInt(), any());
+        assertThat(committedEvents.events()).noneMatch(DomainLimitRequested.class::isInstance);
+    }
+
+    @Test
+    void requestsOverTheRateLimitAre429WithTheSecondsLeft() throws Exception {
+        domain(ANA, "go.example.com", "ACTIVE");
+        when(rateLimiter.tryAcquire(eq("domain-request:user:" + ANA), eq(3), eq(Duration.ofHours(24)))).thenReturn(false);
+        when(rateLimiter.resetsIn("domain-request:user:" + ANA)).thenReturn(Optional.of(Duration.ofSeconds(4321)));
+
+        mockMvc.perform(as(ANA_TOKEN, post(REQUESTS)).contentType(MediaType.APPLICATION_JSON).content(REQUEST))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(header().string(HttpHeaders.RETRY_AFTER, "4321"))
+                .andExpect(content().json("{\"detail\":\"You've sent several requests today. Try again tomorrow.\"}", JsonCompareMode.LENIENT));
+
+        assertThat(requestsOf(ANA)).isZero();
+    }
+
+    @Test
+    void aRequestGoesAheadWhenTheRateLimitCannotBeChecked() throws Exception {
+        domain(ANA, "go.example.com", "ACTIVE");
+        when(rateLimiter.tryAcquire(eq("domain-request:user:" + ANA), anyInt(), any())).thenThrow(new RateLimiterUnavailableException(new IllegalStateException("redis down")));
+
+        mockMvc.perform(as(ANA_TOKEN, post(REQUESTS)).contentType(MediaType.APPLICATION_JSON).content(REQUEST)).andExpect(status().isCreated());
+
+        assertThat(requestsOf(ANA)).isOne();
+    }
+
+    @Test
+    void twoRequestsAtOnceLeaveOneWaiting() throws Exception {
+        domain(ANA, "go.example.com", "ACTIVE");
+        final var bothChecked = new CyclicBarrier(2);
+        when(rateLimiter.tryAcquire(eq("domain-request:user:" + ANA), anyInt(), any())).thenAnswer(invocation -> {
+            bothChecked.await(10, TimeUnit.SECONDS);
+            return true;
+        });
+
+        final var first = CompletableFuture.supplyAsync(() -> requestedAnswer(ANA_TOKEN));
+        final var second = CompletableFuture.supplyAsync(() -> requestedAnswer(ANA_TOKEN));
+
+        final var answers = List.of(first.get(30, TimeUnit.SECONDS), second.get(30, TimeUnit.SECONDS));
+        assertThat(answers).extracting(MockHttpServletResponse::getStatus).containsExactlyInAnyOrder(201, 409);
+        assertThat(requestsOf(ANA)).isOne();
+        assertThat(committedEvents.events()).filteredOn(DomainLimitRequested.class::isInstance).hasSize(1);
+    }
+
+    private MockHttpServletResponse requestedAnswer(final String token) {
+        try {
+            return mockMvc.perform(as(token, post(REQUESTS)).contentType(MediaType.APPLICATION_JSON).content(REQUEST)).andReturn().getResponse();
+        } catch (final Exception exception) {
+            throw new IllegalStateException(exception);
+        }
+    }
+
+    private void allowance(final long userId, final int maxDomains) {
+        jdbcTemplate.update("insert into custom_domain_allowance (user_id, max_domains, reason, granted_by, granted_at) values (?, ?, 'Agency', 'admin', ?)",
+                userId, maxDomains, NOW);
+    }
+
+    private int requestsOf(final long userId) {
+        return jdbcTemplate.queryForObject("select count(*) from custom_domain_request where user_id = ?", Integer.class, userId);
+    }
+
     private void bothPassTheLinkCheckTogether() {
         final var bothChecking = new CyclicBarrier(2);
         when(linkCheckService.check(anyString())).thenAnswer(invocation -> {
@@ -734,7 +905,8 @@ class CustomDomainEndpointSecurityTest {
             basePackageClasses = UserRepository.class,
             includeFilters = @ComponentScan.Filter(
                     type = FilterType.ASSIGNABLE_TYPE,
-                    classes = {UserRepository.class, CustomDomainRepository.class, CustomDomainAllowanceRepository.class, UrlRepository.class}))
+                    classes = {UserRepository.class, CustomDomainRepository.class, CustomDomainAllowanceRepository.class, UrlRepository.class,
+                            CustomDomainRequestRepository.class}))
     @Import({
             AppConfiguration.class,
             WebConfiguration.class,
@@ -749,6 +921,7 @@ class CustomDomainEndpointSecurityTest {
             AccountLock.class,
             CustomDomainController.class,
             DefaultCustomDomainService.class,
+            DefaultCustomDomainRequestService.class,
             CustomDomainHostnames.class,
             CustomDomainLimits.class,
             CustomDomainResponses.class,

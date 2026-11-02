@@ -17,6 +17,7 @@ import cc.hrva.urlshortener.service.alert.AdminAlertEvent.BurstDetected;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.DomainApplied;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.DomainDisabled;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.DomainDrift;
+import cc.hrva.urlshortener.service.alert.AdminAlertEvent.DomainLimitRequested;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.DomainNeedsAttention;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.DomainsSuspended;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.LinkBlocked;
@@ -55,6 +56,7 @@ public class DiscordAlertFormatter {
     private static final String BLOCKLISTS_PAGE = "/admin/blocklists";
     private static final String STATS_PAGE = "/admin/dashboard?days=7";
     private static final String DOMAINS_PAGE = "/admin/domains";
+    private static final String DOMAIN_REQUESTS_PAGE = "/admin/domains/requests";
     private static final String CAMPAIGNS_PAGE = "/admin/campaigns";
     private static final String ROOT_PATH = "/";
     private static final String IP_DESTINATION = "an IP address";
@@ -161,6 +163,9 @@ public class DiscordAlertFormatter {
             case DomainApplied applied -> "New custom domain application: %s%s, %s, <%s>".formatted(
                     DiscordText.hostname(applied.hostname()), applied.flags().isEmpty() ? "" : " (" + plain(String.join(", ", applied.flags())) + ")",
                     owner(applied.userId()), domainPage(applied.domainId(), applied.hostname()));
+            case DomainLimitRequested requested -> "New custom domain limit request: %s asks for %s in total (limit %d), <%s>".formatted(
+                    owner(requested.userId()), count(requested.requestedTotal(), "domain"), requested.currentLimit(),
+                    frontendPage(DOMAIN_REQUESTS_PAGE) + "?id=" + requested.requestId());
             case DomainDisabled disabled -> "Custom domain turned off: %s (%s), <%s>".formatted(
                     DiscordText.hostname(disabled.hostname()), disableReason(disabled), domainPage(disabled.domainId(), disabled.hostname()));
             case DomainNeedsAttention attention -> "Custom domain needs attention: %s (%s), <%s>".formatted(

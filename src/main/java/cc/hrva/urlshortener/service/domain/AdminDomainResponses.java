@@ -44,27 +44,32 @@ public class AdminDomainResponses {
         if (domains.isEmpty()) {
             return List.of();
         }
-        final var owners = domains.stream()
-                .map(CustomDomain::getOwner)
-                .filter(Objects::nonNull)
-                .collect(Collectors.toMap(User::getId, Function.identity(), (first, second) -> first, LinkedHashMap::new));
-        final var ownerIds = owners.keySet();
-        final var linkCounts = byId(inChunks(ownerIds, customDomainRepository::countLinksOfOwners), OwnerLinkCount::ownerId);
-        final var reviewCounts = byId(inChunks(ownerIds, customDomainRepository::countOpenReviewsOfOwners), OwnerReviewCount::ownerId);
+        final var owners = ownersOf(domains.stream().map(CustomDomain::getOwner).filter(Objects::nonNull).toList());
         final var domainCounts = byId(inChunks(domains.stream().map(CustomDomain::getId).collect(Collectors.toSet()),
                 customDomainRepository::countLinksOfDomains), DomainLinkCount::domainId);
-        final var possibleScammers = owners.isEmpty() ? Set.<Long>of() : scammerSignalService.possibleScammers(owners.values());
         return domains.stream()
-                .map(domain -> responseOf(domain, linkCounts, reviewCounts, domainCounts.get(domain.getId()), possibleScammers))
+                .map(domain -> responseOf(domain, owners, domainCounts.get(domain.getId())))
                 .toList();
     }
 
-    private AdminDomainResponse responseOf(final CustomDomain domain, final Map<Long, OwnerLinkCount> linkCounts,
-                                           final Map<Long, OwnerReviewCount> reviewCounts, final DomainLinkCount counts,
-                                           final Set<Long> possibleScammers) {
+    public Map<Long, DomainOwnerSummary> ownersOf(final Collection<User> users) {
+        final var owners = users.stream()
+                .collect(Collectors.toMap(User::getId, Function.identity(), (first, second) -> first, LinkedHashMap::new));
+        if (owners.isEmpty()) {
+            return Map.of();
+        }
+        final var ownerIds = owners.keySet();
+        final var linkCounts = byId(inChunks(ownerIds, customDomainRepository::countLinksOfOwners), OwnerLinkCount::ownerId);
+        final var reviewCounts = byId(inChunks(ownerIds, customDomainRepository::countOpenReviewsOfOwners), OwnerReviewCount::ownerId);
+        final var possibleScammers = scammerSignalService.possibleScammers(owners.values());
+        return owners.values().stream()
+                .collect(Collectors.toMap(User::getId, owner -> ownerOf(owner, linkCounts, reviewCounts, possibleScammers)));
+    }
+
+    private AdminDomainResponse responseOf(final CustomDomain domain, final Map<Long, DomainOwnerSummary> owners, final DomainLinkCount counts) {
         return new AdminDomainResponse(
                 customDomainResponses.of(domain, counts == null ? 0 : counts.links(), clock),
-                ownerOf(domain.getOwner(), linkCounts, reviewCounts, possibleScammers),
+                domain.getOwner() == null ? null : owners.get(domain.getOwner().getId()),
                 domain.getApplyFlags(),
                 domain.getCloudflareId(),
                 domain.getCloudflareStatus(),
@@ -78,9 +83,6 @@ public class AdminDomainResponses {
 
     private static DomainOwnerSummary ownerOf(final User owner, final Map<Long, OwnerLinkCount> linkCounts, final Map<Long, OwnerReviewCount> reviewCounts,
                                               final Set<Long> possibleScammers) {
-        if (owner == null) {
-            return null;
-        }
         final var links = linkCounts.get(owner.getId());
         final var reviews = reviewCounts.get(owner.getId());
         return new DomainOwnerSummary(

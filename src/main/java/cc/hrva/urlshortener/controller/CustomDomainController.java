@@ -3,8 +3,11 @@ package cc.hrva.urlshortener.controller;
 import cc.hrva.urlshortener.dto.domain.CustomDomainApplyDto;
 import cc.hrva.urlshortener.dto.domain.CustomDomainResponse;
 import cc.hrva.urlshortener.dto.domain.DomainRemovalResponse;
+import cc.hrva.urlshortener.dto.domain.DomainRequestDto;
+import cc.hrva.urlshortener.dto.domain.DomainRequestResponse;
 import cc.hrva.urlshortener.dto.domain.MyDomainsResponse;
 import cc.hrva.urlshortener.model.enums.DomainLinkMode;
+import cc.hrva.urlshortener.service.CustomDomainRequestService;
 import cc.hrva.urlshortener.service.CustomDomainService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
@@ -28,8 +31,9 @@ import org.springframework.web.bind.annotation.RestController;
 public class CustomDomainController {
 
     private final CustomDomainService customDomainService;
+    private final CustomDomainRequestService customDomainRequestService;
 
-    @Operation(summary = "Your custom domains", description = "The signed-in user's custom domains, newest first, with how many they may have and whether they can apply for another. Removed and rejected domains are listed for 30 days.")
+    @Operation(summary = "Your custom domains", description = "The signed-in user's custom domains, newest first, with how many they may have and whether they can apply for another. Removed and rejected domains are listed for 30 days. request is your newest request for more domains (a reviewed one for 30 days), and canRequest says whether you can ask for more now.")
     @ApiResponse(responseCode = "200", description = "The domains, the limit and how many count toward it")
     @GetMapping
     @PreAuthorize("hasAnyRole('ROLE_ADMIN', 'ROLE_USER')")
@@ -47,6 +51,29 @@ public class CustomDomainController {
     @PreAuthorize("hasAnyRole('ROLE_ADMIN', 'ROLE_USER')")
     public ResponseEntity<CustomDomainResponse> apply(@Valid @RequestBody final CustomDomainApplyDto customDomainApplyDto) {
         return ResponseEntity.status(HttpStatus.CREATED).body(customDomainService.apply(customDomainApplyDto));
+    }
+
+    @Operation(summary = "Ask for more custom domains", description = "Asks an admin to raise your limit to requestedTotal (more than your limit, at most 20), with a reason. Only once you're at your limit, one request at a time. 3 requests per day.")
+    @ApiResponse(responseCode = "201", description = "Request received, waiting for review")
+    @ApiResponse(responseCode = "400", description = "A field error, or requestedTotal isn't above your limit")
+    @ApiResponse(responseCode = "409", description = "A request is already waiting, you can still add a domain, or your limit is already the highest")
+    @ApiResponse(responseCode = "429", description = "Too many requests today")
+    @ApiResponse(responseCode = "503", description = "Custom domains are turned off")
+    @PostMapping("/requests")
+    @PreAuthorize("hasAnyRole('ROLE_ADMIN', 'ROLE_USER')")
+    public ResponseEntity<DomainRequestResponse> request(@Valid @RequestBody final DomainRequestDto domainRequestDto) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(customDomainRequestService.request(domainRequestDto));
+    }
+
+    @Operation(summary = "Withdraw a request for more custom domains", description = "Withdraws your request while it waits for review; it's deleted.")
+    @ApiResponse(responseCode = "204", description = "Withdrawn")
+    @ApiResponse(responseCode = "404", description = "No such request of yours")
+    @ApiResponse(responseCode = "409", description = "The request was already reviewed")
+    @DeleteMapping("/requests/{id}")
+    @PreAuthorize("hasAnyRole('ROLE_ADMIN', 'ROLE_USER')")
+    public ResponseEntity<Void> withdrawRequest(@PathVariable final long id) {
+        customDomainRequestService.withdraw(id);
+        return ResponseEntity.noContent().build();
     }
 
     @Operation(summary = "One of your custom domains", description = "A custom domain of yours with its DNS record, setup steps and any problem that needs your attention.")

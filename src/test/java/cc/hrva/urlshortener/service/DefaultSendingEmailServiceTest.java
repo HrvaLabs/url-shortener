@@ -1587,15 +1587,77 @@ class DefaultSendingEmailServiceTest {
     }
 
     @Test
+    void domainRequestApprovedNamesTheNewLimitAndTheNoteOnlyWhenGiven() throws Exception {
+        final var emails = sentDomainEmails(service -> {
+            service.sendDomainRequestApprovedEmail("alice@example.com", 3, "Fine for your shops");
+            service.sendDomainRequestApprovedEmail("alice@example.com", 5, null);
+        });
+
+        final var withNote = emails.getFirst();
+        assertThat(withNote.getReceivers()).containsExactly("alice@example.com");
+        assertThat(withNote.getSubject()).isEqualTo("You can now have 3 custom domains");
+        assertThat(withNote.getText()).containsPattern("<h1[^>]*>More custom domains approved</h1>");
+        assertThat(textOf(withNote.getText())).contains(
+                "Hi alice@example.com,",
+                "We approved your request. Your account can now have 3 custom domains.",
+                "Note from the admin: Fine for your shops",
+                "Best regards,");
+        assertThat(linksIn(withNote.getText())).containsExactly("https://hrva.cc/dashboard/settings#custom-domains", SITE_LINK, HRVALABS_LINK);
+        assertThat(withNote.getPlainText()).isEqualTo("""
+                You can now have 3 custom domains
+
+                We approved your request. Your account can now have 3 custom domains.
+                Note from the admin: Fine for your shops
+
+                Open Custom domains: https://hrva.cc/dashboard/settings#custom-domains""");
+        final var withoutNote = emails.get(1);
+        assertThat(withoutNote.getSubject()).isEqualTo("You can now have 5 custom domains");
+        assertThat(textOf(withoutNote.getText())).doesNotContain("Note from the admin");
+    }
+
+    @Test
+    void domainRequestDeclinedKeepsTheLimitAndShowsTheNoteOnlyWhenGiven() throws Exception {
+        final var emails = sentDomainEmails(service -> {
+            service.sendDomainRequestDeclinedEmail("alice@example.com", 3, 1, "Use paths on one domain");
+            service.sendDomainRequestDeclinedEmail("alice@example.com", 6, 4, null);
+        });
+
+        final var withNote = emails.getFirst();
+        assertThat(withNote.getSubject()).isEqualTo("Your request for more custom domains");
+        assertThat(withNote.getText()).containsPattern("<h1[^>]*>More custom domains not approved</h1>");
+        assertThat(textOf(withNote.getText())).contains(
+                "We didn't approve your request for 3 custom domains. Your limit stays at 1 custom domain.",
+                "Note from the admin: Use paths on one domain",
+                "If you think that's a mistake, contact support@hrva.cc.",
+                "Best regards,");
+        assertThat(linksIn(withNote.getText())).containsExactly("mailto:support@hrva.cc", SITE_LINK, HRVALABS_LINK);
+        assertThat(withNote.getPlainText()).isEqualTo("""
+                Your request for more custom domains
+
+                We didn't approve your request for 3 custom domains. Your limit stays at 1 custom domain.
+                Note from the admin: Use paths on one domain
+
+                If you think that's a mistake, contact support@hrva.cc.""");
+        assertThat(emails.get(1).getPlainText()).isEqualTo("""
+                Your request for more custom domains
+
+                We didn't approve your request for 6 custom domains. Your limit stays at 4 custom domains.
+
+                If you think that's a mistake, contact support@hrva.cc.""");
+    }
+
+    @Test
     void domainEmailsAreTransactional() throws Exception {
         final var emails = sentDomainEmails(service -> {
             service.sendDomainApprovedEmail("alice@example.com", "go.example.com", DnsRecord.cname("go.example.com", "domains.hrva.cc"));
             service.sendDomainRejectedEmail("alice@example.com", "go.example.com", "Use a domain you own");
             service.sendDomainDisabledEmail("alice@example.com", "go.example.com", "Phishing kit");
             service.sendDomainRemovedEmail("alice@example.com", "go.example.com", new DomainRemovalResponse(0, List.of(), 2), DomainLinkMode.DEACTIVATE);
+            service.sendDomainRequestApprovedEmail("alice@example.com", 3, null);
+            service.sendDomainRequestDeclinedEmail("alice@example.com", 3, 1, null);
         });
 
-        assertThat(emails).hasSize(4).allSatisfy(email -> {
+        assertThat(emails).hasSize(6).allSatisfy(email -> {
             assertThat(email.getHeaders()).isEmpty();
             assertThat(email.getText()).doesNotContain("unsubscribe", "Notification settings", "You get this because");
             assertThat(email.getPlainText()).doesNotContain("unsubscribe", "You get this because");
@@ -1606,7 +1668,9 @@ class DefaultSendingEmailServiceTest {
                 "Your domain go.example.com is approved: one step left",
                 "Your domain application for go.example.com",
                 "Your domain go.example.com was turned off",
-                "Your domain go.example.com was removed");
+                "Your domain go.example.com was removed",
+                "You can now have 3 custom domains",
+                "Your request for more custom domains");
         assertThat(logged.getAllValues()).allSatisfy(entry -> {
             assertThat(entry.getConsentType()).isNull();
             assertThat(entry.getUserId()).isNull();
@@ -1619,7 +1683,10 @@ class DefaultSendingEmailServiceTest {
         final var emails = sentDomainEmails(service -> {
             service.sendDomainRejectedEmail("alice@example.com", "go.example.com", "<b>no</b><script>alert(1)</script>");
             service.sendDomainDisabledEmail("alice@example.com", "go.example.com", "<i>spam</i>");
+            service.sendDomainRequestDeclinedEmail("alice@example.com", 3, 1, "<b>paths</b>");
         });
+
+        assertThat(emails.get(2).getText()).doesNotContain("<b>paths</b>").contains("&lt;b&gt;paths&lt;/b&gt;");
 
         assertThat(emails.getFirst().getText()).doesNotContain("<b>no</b>", "<script>").contains("&lt;b&gt;no&lt;/b&gt;&lt;script&gt;");
         assertThat(emails.getFirst().getPlainText()).contains("Note from the admin: <b>no</b><script>alert(1)</script>");

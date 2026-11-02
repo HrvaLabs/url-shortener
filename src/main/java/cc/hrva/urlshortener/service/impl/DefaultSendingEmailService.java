@@ -589,6 +589,45 @@ public class DefaultSendingEmailService implements SendingEmailService {
     }
 
     @Override
+    @Async
+    public void sendDomainRequestApprovedEmail(final String to, final int limit, final String note) {
+        final var subject = "You can now have %d custom domains".formatted(limit);
+        final var shownNote = StringUtils.stripToNull(note);
+        final var settingsUrl = frontendPage(CUSTOM_DOMAINS_SETTINGS);
+        final var ctx = domainContext(to, subject, null);
+        ctx.setVariable("limit", limit);
+        ctx.setVariable("note", shownNote);
+        ctx.setVariable("settings_url", settingsUrl);
+
+        final var lines = new ArrayList<>(List.of(subject, "", "We approved your request. Your account can now have %d custom domains.".formatted(limit)));
+        if (shownNote != null) {
+            lines.add("Note from the admin: " + shownNote);
+        }
+        lines.addAll(List.of("", "Open Custom domains: " + settingsUrl));
+        sendDomainEmail(to, subject, "domain_request_approved", ctx, lines);
+    }
+
+    @Override
+    @Async
+    public void sendDomainRequestDeclinedEmail(final String to, final int requestedTotal, final int limit, final String note) {
+        final var subject = "Your request for more custom domains";
+        final var shownNote = StringUtils.stripToNull(note);
+        final var limitText = limit == 1 ? "1 custom domain" : limit + " custom domains";
+        final var ctx = domainContext(to, subject, null);
+        ctx.setVariable("requested", requestedTotal);
+        ctx.setVariable("limit_text", limitText);
+        ctx.setVariable("note", shownNote);
+
+        final var lines = new ArrayList<>(List.of(subject, "",
+                "We didn't approve your request for %d custom domains. Your limit stays at %s.".formatted(requestedTotal, limitText)));
+        if (shownNote != null) {
+            lines.add("Note from the admin: " + shownNote);
+        }
+        lines.addAll(List.of("", contactLine()));
+        sendDomainEmail(to, subject, "domain_request_declined", ctx, lines);
+    }
+
+    @Override
     public EmailLog resendEmail(final Long emailLogId) {
         final var failed = emailLogRepository.findById(emailLogId)
                 .orElseThrow(() -> new EmailLogNotFoundException("Email log entry doesn't exist"));

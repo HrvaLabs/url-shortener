@@ -23,6 +23,7 @@ import cc.hrva.urlshortener.service.alert.AdminAlertEvent.BurstDetected;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.DomainApplied;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.DomainDisabled;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.DomainDrift;
+import cc.hrva.urlshortener.service.alert.AdminAlertEvent.DomainLimitRequested;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.DomainNeedsAttention;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.LinkBlocked;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.ReviewOpened;
@@ -782,6 +783,14 @@ class DiscordAlertFormatterTest {
                 "New custom domain application: go.example.com, account #7, <https://app.hrva.cc/admin/domains?search=go.example.com&id=12>",
                 "New custom domain application: xn--g-1tb.example.com (International name (punycode): check it doesn't imitate another domain, "
                         + "Registered 3 days ago), account #8, <https://app.hrva.cc/admin/domains?search=xn--g-1tb.example.com&id=13>");
+    }
+
+    @Test
+    void aDomainLimitRequestNamesTheAccountTheTotalTheLimitAndTheRequestsRow() {
+        final var lines = formatter.message(List.of(new DomainLimitRequested(31L, 7L, 1, 3)), 0).content().lines().toList();
+
+        assertThat(lines).containsExactly(
+                "New custom domain limit request: account #7 asks for 3 domains in total (limit 1), <https://app.hrva.cc/admin/domains/requests?id=31>");
     }
 
     @Test

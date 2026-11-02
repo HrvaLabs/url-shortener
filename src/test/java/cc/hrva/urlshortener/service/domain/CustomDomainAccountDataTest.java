@@ -17,6 +17,7 @@ import cc.hrva.urlshortener.repository.CustomDomainReconcileRepository.MissingDo
 import cc.hrva.urlshortener.repository.CustomDomainReconcileRepository.ReconcileRun;
 import cc.hrva.urlshortener.repository.CustomDomainReconcileRepository;
 import cc.hrva.urlshortener.repository.CustomDomainRepository;
+import cc.hrva.urlshortener.repository.CustomDomainRequestRepository;
 import cc.hrva.urlshortener.repository.EmailLogRepository;
 import cc.hrva.urlshortener.repository.PasskeyCredentialRepository;
 import cc.hrva.urlshortener.repository.ResetTokenRepository;
@@ -241,6 +242,7 @@ class CustomDomainAccountDataTest {
         jdbcTemplate.update("delete from url");
         jdbcTemplate.update("delete from custom_domain");
         jdbcTemplate.update("delete from custom_domain_allowance");
+        jdbcTemplate.update("delete from custom_domain_request");
         jdbcTemplate.update("delete from custom_domain_reconcile");
         jdbcTemplate.update("delete from api_key where owner_id in (?, ?)", ANA, BOB);
         jdbcTemplate.update("delete from user_account_authorities where user_id in (?, ?)", ANA, BOB);
@@ -284,6 +286,39 @@ class CustomDomainAccountDataTest {
                 .doesNotContain("\"cloudflareId\"", "\"lastError\"", "\"applyFlags\"", "\"reviewedBy\"", "\"cloudflareStatus\"")
                 .doesNotContain("cf-secret-1", "cf-secret-2", "Cloudflare said no", "Registered 3 days ago", "reviewer@hrva.cc")
                 .doesNotContain("bob.example.com", "moderator@hrva.cc");
+    }
+
+    @Test
+    void exportListsEveryLimitRequestWithoutWhoReviewedIt() {
+        jdbcTemplate.update("""
+                insert into custom_domain_request (user_id, requested_total, limit_at_request, reason, status, admin_note, reviewed_by, reviewed_at, created_at)
+                values (?, 3, 1, 'Three shops', 'DECLINED', 'Use paths', 'reviewer@hrva.cc', ?, ?)""", ANA, NOW.minusDays(4).plusNanos(5_000), NOW.minusDays(5));
+        jdbcTemplate.update("""
+                insert into custom_domain_request (user_id, requested_total, limit_at_request, reason, status, created_at)
+                values (?, 4, 1, 'Four shops now', 'WAITING', ?)""", ANA, NOW.minusDays(1));
+        jdbcTemplate.update("""
+                insert into custom_domain_request (user_id, requested_total, limit_at_request, reason, status, created_at)
+                values (?, 2, 1, 'Bob needs two', 'WAITING', ?)""", BOB, NOW.minusDays(1));
+        signedIn();
+
+        final var json = JSON.writeValueAsString(userService.exportMyData());
+
+        assertThat(JSON.readTree(json).get("domainRequests").toString()).isEqualTo("""
+                [{"requestedTotal":4,"reason":"Four shops now","status":"WAITING","adminNote":null,"createdAt":"2026-10-28T09:00:00","reviewedAt":null},\
+                {"requestedTotal":3,"reason":"Three shops","status":"DECLINED","adminNote":"Use paths","createdAt":"2026-10-24T09:00:00",\
+                "reviewedAt":"2026-10-25T09:00:00"}]""");
+        assertThat(json).doesNotContain("reviewer@hrva.cc", "Bob needs two");
+    }
+
+    @Test
+    void deletionRemovesTheLimitRequests() {
+        jdbcTemplate.update("""
+                insert into custom_domain_request (user_id, requested_total, limit_at_request, reason, status, created_at)
+                values (?, 3, 1, 'Three shops', 'WAITING', ?)""", ANA, NOW.minusDays(1));
+
+        userService.deleteUserById(ANA);
+
+        assertThat(count("select count(*) from custom_domain_request")).isZero();
     }
 
     @Test
@@ -675,7 +710,8 @@ class CustomDomainAccountDataTest {
             basePackageClasses = UserRepository.class,
             includeFilters = @ComponentScan.Filter(
                     type = FilterType.ASSIGNABLE_TYPE,
-                    classes = {UserRepository.class, UrlRepository.class, CustomDomainRepository.class, CustomDomainAllowanceRepository.class}))
+                    classes = {UserRepository.class, UrlRepository.class, CustomDomainRepository.class, CustomDomainAllowanceRepository.class,
+                            CustomDomainRequestRepository.class}))
     @Import({
             AppConfiguration.class,
             AccountLock.class,

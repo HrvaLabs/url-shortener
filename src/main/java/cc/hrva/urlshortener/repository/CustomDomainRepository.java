@@ -46,6 +46,10 @@ public interface CustomDomainRepository extends JpaRepository<CustomDomain, Long
             + " from Url u where u.owner.id in :ownerIds group by u.owner.id")
     List<OwnerLinkCount> countLinksOfOwners(@Param("ownerIds") Collection<Long> ownerIds);
 
+    @Query("select new cc.hrva.urlshortener.repository.OwnerDomainCount(d.owner.id, count(d))"
+            + " from CustomDomain d where d.owner.id in :ownerIds and d.status in :statuses group by d.owner.id")
+    List<OwnerDomainCount> countDomainsOfOwners(@Param("ownerIds") Collection<Long> ownerIds, @Param("statuses") Collection<CustomDomainStatus> statuses);
+
     @Query("select new cc.hrva.urlshortener.repository.OwnerReviewCount(r.url.owner.id, count(distinct r.url.id))"
             + " from LinkReview r where r.resolvedAt is null and r.url.owner.id in :ownerIds group by r.url.owner.id")
     List<OwnerReviewCount> countOpenReviewsOfOwners(@Param("ownerIds") Collection<Long> ownerIds);

@@ -4,6 +4,8 @@ import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.dto.LinkVerdict;
 import cc.hrva.urlshortener.dto.domain.CustomDomainApplyDto;
 import cc.hrva.urlshortener.dto.domain.CustomDomainResponse;
+import cc.hrva.urlshortener.dto.domain.DomainAllowanceDto;
+import cc.hrva.urlshortener.dto.domain.DomainRequestResponse;
 import cc.hrva.urlshortener.dto.domain.DomainRemovalResponse;
 import cc.hrva.urlshortener.dto.domain.MyDomainsResponse;
 import cc.hrva.urlshortener.exception.ApiException;
@@ -19,7 +21,9 @@ import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.enums.CustomDomainStatus;
 import cc.hrva.urlshortener.model.enums.DomainLinkMode;
 import cc.hrva.urlshortener.model.enums.DomainProblem;
+import cc.hrva.urlshortener.model.enums.DomainRequestStatus;
 import cc.hrva.urlshortener.repository.CustomDomainRepository;
+import cc.hrva.urlshortener.repository.CustomDomainRequestRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.service.CustomDomainService;
 import cc.hrva.urlshortener.service.LinkCheckService;
@@ -92,6 +96,7 @@ public class DefaultCustomDomainService implements CustomDomainService {
 
     private final UserService userService;
     private final CustomDomainRepository customDomainRepository;
+    private final CustomDomainRequestRepository customDomainRequestRepository;
     private final UrlRepository urlRepository;
     private final CustomDomainHostnames customDomainHostnames;
     private final CustomDomainLimits customDomainLimits;
@@ -119,7 +124,12 @@ public class DefaultCustomDomainService implements CustomDomainService {
                 .toList();
         final var used = domains.stream().filter(domain -> CustomDomainStatus.COUNTS_FOR_USER.contains(domain.getStatus())).count();
         final var limit = customDomainLimits.limitFor(user.getId());
-        return new MyDomainsResponse(shown, limit, used, enabled() && used < limit);
+        final var request = customDomainRequestRepository.findFirstByUser_IdOrderByCreatedAtDescIdDesc(user.getId())
+                .filter(newest -> newest.getStatus() == DomainRequestStatus.WAITING || !newest.getReviewedAt().isBefore(cutoff))
+                .orElse(null);
+        final var waiting = request != null && request.getStatus() == DomainRequestStatus.WAITING;
+        final var canRequest = enabled() && used >= limit && limit < DomainAllowanceDto.MAX_DOMAINS && !waiting;
+        return new MyDomainsResponse(shown, limit, used, enabled() && used < limit, request == null ? null : DomainRequestResponse.of(request), canRequest);
     }
 
     @Override

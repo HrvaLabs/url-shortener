@@ -18,12 +18,14 @@ import org.apache.commons.lang3.StringUtils;
 @AllArgsConstructor
 public class DomainAllowanceDto {
 
-    private static final String RANGE = "Choose 1 to 20";
+    public static final int MAX_DOMAINS = 20;
+
+    private static final String RANGE = "Choose 1 to " + MAX_DOMAINS;
 
     @Schema(description = "How many custom domains the account may have, 1 to 20", example = "3")
     @NotNull(message = RANGE)
     @Min(value = 1, message = RANGE)
-    @Max(value = 20, message = RANGE)
+    @Max(value = MAX_DOMAINS, message = RANGE)
     private Integer maxDomains;
 
     @Schema(description = "Why the account gets this limit, 1 to 300 characters after trimming", example = "Agency with three brands")

@@ -13,6 +13,7 @@ import cc.hrva.urlshortener.model.enums.CustomDomainStatus;
 import cc.hrva.urlshortener.model.enums.DomainProblem;
 import cc.hrva.urlshortener.repository.CustomDomainAllowanceRepository;
 import cc.hrva.urlshortener.repository.CustomDomainRepository;
+import cc.hrva.urlshortener.repository.CustomDomainRequestRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.service.CustomDomainService;
@@ -835,7 +836,8 @@ class CustomDomainLifecycleTest {
             basePackageClasses = UserRepository.class,
             includeFilters = @ComponentScan.Filter(
                     type = FilterType.ASSIGNABLE_TYPE,
-                    classes = {UserRepository.class, CustomDomainRepository.class, CustomDomainAllowanceRepository.class, UrlRepository.class}))
+                    classes = {UserRepository.class, CustomDomainRepository.class, CustomDomainAllowanceRepository.class, UrlRepository.class,
+                            CustomDomainRequestRepository.class}))
     @Import({
             AppConfiguration.class,
             AccountLock.class,

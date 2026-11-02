@@ -39,6 +39,8 @@ public interface SendingEmailService {
     void sendDomainRejectedEmail(String to, String hostname, String note);
     void sendDomainDisabledEmail(String to, String hostname, String reasonText);
     void sendDomainRemovedEmail(String to, String hostname, DomainRemovalResponse summary, DomainLinkMode mode);
+    void sendDomainRequestApprovedEmail(String to, int limit, String note);
+    void sendDomainRequestDeclinedEmail(String to, int requestedTotal, int limit, String note);
     EmailLog resendEmail(Long emailLogId);
     void failInterruptedEmails();
     void forgetOldEmailContent();

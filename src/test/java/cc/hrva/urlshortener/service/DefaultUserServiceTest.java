@@ -1,20 +1,5 @@
 package cc.hrva.urlshortener.service;
 
-import java.lang.reflect.RecordComponent;
-import java.time.Clock;
-import java.time.Duration;
-import java.time.Instant;
-import java.time.LocalDateTime;
-import java.time.ZoneOffset;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
-import java.util.Set;
-import java.util.regex.Pattern;
-import java.util.stream.Collectors;
-import java.util.stream.IntStream;
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.converter.UserToUserDtoConverter;
 import cc.hrva.urlshortener.converter.UserUpdateDtoToUserConverter;
@@ -25,21 +10,22 @@ import cc.hrva.urlshortener.dto.DataExportDto.BioPageExport;
 import cc.hrva.urlshortener.dto.DataExportDto.ChannelExport;
 import cc.hrva.urlshortener.dto.DataExportDto.ConsentExport;
 import cc.hrva.urlshortener.dto.DataExportDto.DomainExport;
+import cc.hrva.urlshortener.dto.DataExportDto.DomainRequestExport;
 import cc.hrva.urlshortener.dto.DataExportDto.NotificationExport;
 import cc.hrva.urlshortener.dto.DeleteAccountDto;
 import cc.hrva.urlshortener.dto.LoginAttemptResponse;
-import cc.hrva.urlshortener.dto.SignInMethodResponse;
 import cc.hrva.urlshortener.dto.PasswordResetDto;
 import cc.hrva.urlshortener.dto.RequestPasswordResetDto;
+import cc.hrva.urlshortener.dto.SignInMethodResponse;
 import cc.hrva.urlshortener.dto.UpdatePasswordDto;
 import cc.hrva.urlshortener.dto.UserDto;
 import cc.hrva.urlshortener.dto.UserSearchDto;
 import cc.hrva.urlshortener.dto.UserUpdateDto;
-import cc.hrva.urlshortener.exception.InvalidSortException;
 import cc.hrva.urlshortener.exception.ApiException;
+import cc.hrva.urlshortener.exception.InvalidSortException;
 import cc.hrva.urlshortener.exception.NoAuthorizationException;
-import cc.hrva.urlshortener.exception.ResetLinkExpiredException;
 import cc.hrva.urlshortener.exception.ReauthenticationRequiredException;
+import cc.hrva.urlshortener.exception.ResetLinkExpiredException;
 import cc.hrva.urlshortener.exception.UserNotFoundException;
 import cc.hrva.urlshortener.listener.SignUpEmailListener;
 import cc.hrva.urlshortener.listener.UserRegisteredEvent;
@@ -55,6 +41,7 @@ import cc.hrva.urlshortener.model.enums.BioTheme;
 import cc.hrva.urlshortener.model.enums.ChannelType;
 import cc.hrva.urlshortener.model.enums.ConsentSource;
 import cc.hrva.urlshortener.model.enums.CustomDomainStatus;
+import cc.hrva.urlshortener.model.enums.DomainRequestStatus;
 import cc.hrva.urlshortener.model.enums.NotificationType;
 import cc.hrva.urlshortener.model.enums.SignInMethod;
 import cc.hrva.urlshortener.repository.ApiKeyRepository;
@@ -70,11 +57,26 @@ import cc.hrva.urlshortener.service.bio.BioAccountData;
 import cc.hrva.urlshortener.service.domain.AccountActiveChangedEvent;
 import cc.hrva.urlshortener.service.domain.CustomDomainAccountData;
 import cc.hrva.urlshortener.service.impl.DefaultLoginAttemptService;
-import cc.hrva.urlshortener.service.notification.NotificationAccountData;
 import cc.hrva.urlshortener.service.impl.DefaultSendingEmailService;
 import cc.hrva.urlshortener.service.impl.DefaultUserService;
+import cc.hrva.urlshortener.service.notification.NotificationAccountData;
 import cc.hrva.urlshortener.service.twostep.AccountLock;
 import cc.hrva.urlshortener.validator.AuthValidator;
+import java.lang.reflect.RecordComponent;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -90,9 +92,9 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.event.TransactionalEventListenerFactory;
@@ -1089,17 +1091,19 @@ class DefaultUserServiceTest {
     }
 
     @Test
-    void theDomainsComeLastInTheExport() {
+    void theDomainsAndTheirLimitRequestsComeLastInTheExport() {
         assertThat(Arrays.stream(DataExportDto.class.getRecordComponents()).map(RecordComponent::getName))
                 .containsExactly("exportedAt", "profile", "urls", "apiKeys", "emails", "passkeys", "signInMethods", "recoveryCodesRemaining",
-                        "bioPage", "notifications", "domains");
+                        "bioPage", "notifications", "domains", "domainRequests");
+        assertThat(Arrays.stream(DomainRequestExport.class.getRecordComponents()).map(RecordComponent::getName))
+                .containsExactly("requestedTotal", "reason", "status", "adminNote", "createdAt", "reviewedAt");
         assertThat(Arrays.stream(DomainExport.class.getRecordComponents()).map(RecordComponent::getName))
                 .containsExactly("hostname", "status", "reason", "reviewNote", "createdAt", "reviewedAt", "activatedAt", "disabledAt", "deletedAt",
                         "disabledReason", "disabledNote");
     }
 
     @Test
-    void exportCarriesTheDomains() {
+    void exportCarriesTheDomainsAndTheirLimitRequests() {
         final var user = User.builder().id(1L).email("test@example.com").build();
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken("test@example.com", null));
@@ -1108,8 +1112,12 @@ class DefaultUserServiceTest {
         final var domain = new DomainExport("go.example.com", CustomDomainStatus.ACTIVE, "Menu links for my cafe", null,
                 LocalDateTime.of(2026, 10, 19, 9, 0), LocalDateTime.of(2026, 10, 20, 9, 0), LocalDateTime.of(2026, 10, 21, 9, 0), null, null, null, null);
         when(customDomainAccountData.exportFor(user)).thenReturn(List.of(domain));
+        final var request = new DomainRequestExport(3, "Three shops", DomainRequestStatus.WAITING, null, LocalDateTime.of(2026, 10, 28, 9, 0), null);
+        when(customDomainAccountData.requestsFor(user)).thenReturn(List.of(request));
 
-        assertThat(userService.exportMyData().domains()).containsExactly(domain);
+        final var export = userService.exportMyData();
+        assertThat(export.domains()).containsExactly(domain);
+        assertThat(export.domainRequests()).containsExactly(request);
         SecurityContextHolder.clearContext();
     }
 
