@@ -9,6 +9,8 @@
     <include file="classpath:/db/changelog/table/user.xml"/>
     <include file="classpath:/db/changelog/table/api_key.xml"/>
     <include file="classpath:/db/changelog/table/url.xml"/>
+    <include file="classpath:/db/changelog/008-audit-log.xml"/>
+    <include file="classpath:/db/changelog/025-audit-log-typed-action.xml"/>
     <include file="classpath:/db/changelog/032-custom-domains.xml"/>
 
     <changeSet author="test" id="removed-by-admin-existing-domains">
@@ -20,7 +22,22 @@
                 ('blocked-account.example.com', 'DELETED', 'r', 'USER_BLOCKED', current_timestamp, current_timestamp),
                 ('owner.example.com', 'DELETED', 'r', null, current_timestamp, current_timestamp),
                 ('still-off.example.com', 'DISABLED', 'r', 'ADMIN', current_timestamp, current_timestamp),
-                ('active.example.com', 'ACTIVE', 'r', null, current_timestamp, current_timestamp)
+                ('active.example.com', 'ACTIVE', 'r', null, current_timestamp, current_timestamp),
+                ('admin-removed-active.example.com', 'DELETED', 'r', null, current_timestamp, current_timestamp),
+                ('admin-removal-failed.example.com', 'DELETED', 'r', null, current_timestamp, current_timestamp),
+                ('admin-removal-elsewhere.example.com', 'DELETED', 'r', null, current_timestamp, current_timestamp);
+            insert into audit_log (performed_by, action, target_type, target_identifier, performed_at, failed)
+            select 'admin@example.com', 'DELETE_DOMAIN', 'CustomDomain', cast(id as varchar(255)), current_timestamp, false
+            from custom_domain where hostname = 'admin-removed-active.example.com';
+            insert into audit_log (performed_by, action, target_type, target_identifier, performed_at, failed)
+            select 'admin@example.com', 'DELETE_DOMAIN', 'CustomDomain', cast(id as varchar(255)), current_timestamp, true
+            from custom_domain where hostname = 'admin-removal-failed.example.com';
+            insert into audit_log (performed_by, action, target_type, target_identifier, performed_at, failed)
+            select 'admin@example.com', 'DELETE_DOMAIN', 'Url', cast(id as varchar(255)), current_timestamp, false
+            from custom_domain where hostname = 'admin-removal-elsewhere.example.com';
+            insert into audit_log (performed_by, action, target_type, target_identifier, performed_at, failed) values
+                ('admin@example.com', 'DELETE_DOMAIN', 'CustomDomain', 'not-a-number', current_timestamp, false),
+                ('admin@example.com', 'DELETE_DOMAIN', 'CustomDomain', null, current_timestamp, false)
         </sql>
     </changeSet>
 

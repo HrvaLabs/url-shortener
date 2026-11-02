@@ -50,10 +50,28 @@ class DomainRemovedByAdminMigrationTest {
     }
 
     @Test
-    void onlyTheThreeRemovedDomainsAreMarked() {
+    void aRemovedDomainWithASuccessfulAdminRemovalInTheAuditLogIsMarked() {
+        assertThat(flagOf("admin-removed-active.example.com")).isTrue();
+    }
+
+    @Test
+    void aFailedAdminRemovalOrOneOnAnotherTargetTypeMarksNothing() {
+        assertThat(flagOf("admin-removal-failed.example.com")).isFalse();
+        assertThat(flagOf("admin-removal-elsewhere.example.com")).isFalse();
+    }
+
+    @Test
+    void anAuditRowWhoseTargetIsNotANumberOrIsMissingDoesNotBreakTheMigration() {
+        assertThat(jdbcTemplate.queryForObject("select count(*) from audit_log where action = 'DELETE_DOMAIN'", Long.class)).isEqualTo(5);
+        assertThat(jdbcTemplate.queryForObject("select count(*) from custom_domain", Long.class)).isEqualTo(10);
+    }
+
+    @Test
+    void onlyTheRemovedDomainsHrvaTurnedOffOrAnAdminRemovedAreMarked() {
         assertThat(jdbcTemplate.query("select hostname from custom_domain where removed_by_admin = true order by hostname",
                 (row, index) -> tuple(row.getString("hostname"))))
-                .containsExactly(tuple("admin.example.com"), tuple("blocklist.example.com"), tuple("rule.example.com"));
+                .containsExactly(tuple("admin-removed-active.example.com"), tuple("admin.example.com"), tuple("blocklist.example.com"),
+                        tuple("rule.example.com"));
     }
 
     private Boolean flagOf(final String hostname) {

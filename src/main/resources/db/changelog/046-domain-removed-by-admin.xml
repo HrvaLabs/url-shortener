@@ -24,4 +24,12 @@
         <rollback/>
     </changeSet>
 
+    <changeSet author="khrvacic" id="046-domain-removed-by-admin-audited">
+        <update tableName="custom_domain">
+            <column name="removed_by_admin" valueBoolean="true"/>
+            <where>status = 'DELETED' and cast(id as varchar(255)) in (select target_identifier from audit_log where action = 'DELETE_DOMAIN' and target_type = 'CustomDomain' and failed = false)</where>
+        </update>
+        <rollback/>
+    </changeSet>
+
 </databaseChangeLog>
