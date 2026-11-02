@@ -363,6 +363,8 @@ Custom domains add fields at the end of existing answers, each `NON_NULL` (absen
 ## MCP connector
 AI apps (Claude, Claude Code, the MCP Inspector) use hrva.cc over MCP. The app is its own OAuth 2.1 authorization server (Spring Authorization Server through `mcp-authorization-server` 0.1.14), protects `/mcp` as a resource server (`mcp-server-security` 0.1.14) and serves the tools from Spring AI 2.0.2's MCP server. Code: `cc.hrva.urlshortener.mcp` (`authorization/`, `bridge/`, `tools/`, `apps/`). MCP is sign-in only: the no-account server at `/mcp/anon` was removed in v2.11 and now answers 404.
 
+- **MCP Registry** (`server.json` at the repo root, name `cc.hrva/url-shortener`, remote `https://hrva.cc/mcp`): keep `version` at the release (`2.27.0` for v2.27). To republish, from the repo root: `mcp-publisher login dns --domain hrva.cc --private-key <key>`, then `mcp-publisher publish`. The key lives outside the repo; never commit it.
+
 ### Endpoints
 | Method | Path | Auth | Notes |
 |--------|------|------|-------|
