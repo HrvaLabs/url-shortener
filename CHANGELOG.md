@@ -4,6 +4,72 @@ All notable changes to hrva.cc — the URL shortener.
 
 ---
 
+## [v2.28] — 2026-11-02
+
+Use a removed custom domain again, analytics breakdowns across all your links, emails and chat messages that name hrva.cc and say what happened, and a round of fixes.
+
+### 🌐 Custom Domains
+- A custom domain you removed stays on the Custom domains card in Settings for 30 days, in a closed Removed domains section, newest removal first. Select Use again next to it to add the domain as a new one, with no links on it.
+- A domain you removed yourself after it was active is set up again without a review. A check that flags the domain, or no room for new domains right now, still sends it to review.
+- A domain goes back to review, as when you first applied, when an admin removed it, when an admin or a blocklist rule turned it off before you removed it, when it never became active, when its name is international (an xn-- name), when its name is on a blocklist now, or when your account has been flagged as a possible scammer. The card says whether the domain will be reviewed before you select Use again.
+- Use again isn't offered when another account holds the name, and the removed domain then shows with no button. While Cloudflare is still removing a domain, the card says to check back in a few minutes.
+- A domain you use again counts toward your domain limit and toward the 5 applications a day, like any other application. At the limit, Use again is refused until you remove or withdraw another domain. Removed domains don't count.
+- Domains removed before this release are treated the same way: one hrva.cc turned off and you then removed, and one an admin removed, go back to review.
+- Admin Domains no longer lists removed domains with the others. They are in a closed Removed domains section, newest removal first, and can be sorted by when they were removed. Domains removed without a recorded date come last.
+
+### 📊 Analytics
+- The analytics overview breaks clicks down across all your links, for the range you pick: QR scans and other clicks, referrers, countries, devices, browsers and operating systems. Each list shows the 10 with the most clicks and adds the rest together as Other. The Statistics help page explains it.
+
+### ✉️ Emails
+- Emails come from "hrva.cc" instead of a bare address.
+- Email subjects changed to name hrva.cc and say what happened, so a mail filter on an old subject stops matching. The new subjects are Reset your hrva.cc password, Verify your email for hrva.cc, Your hrva.cc account was deactivated, Your hrva.cc account will be deactivated on 29 November 2026, Someone tried to sign up to hrva.cc with your email, A passkey was added to your hrva.cc account, Your link was blocked as unsafe, Your link hrva.cc/abc expires on 3 November 2026, Your domain go.example.com wasn't approved, and Your request for more custom domains wasn't approved.
+- "Best regards" is removed from every email. Each one greets you with Hi and your email address, and says "blocked" for a blocked link.
+- The email about a link blocked as unsafe names the flagged address instead of "malware".
+- The expiry email shows the date and time in UTC, and its button opens your dashboard.
+- The inactivity warning gives the time without use in whole years when it is a whole number of years, and the new-sign-up email to admins says what the account signed up with.
+- The email asking you to verify your address says verify throughout.
+- The decisions email to admins is sent when a possible scammer is waiting.
+
+### 🔔 Notifications
+- A Discord channel you add shows a destination that is an IP address, or a name that looks like an email address, as it is, like the other channel types.
+- The daily summary lists up to 20 links and then says "and N more", counting the links left out.
+- ntfy messages with a title that has a non-ASCII character, such as the dash in the weekly summary, now arrive.
+- Titles and wording were made consistent: hrva.cc: 1 of your links looks broken, hrva.cc: your week of 19–25 October 2026, and a test message that reads "This channel works" followed by the channel's name.
+- The webhook bodies for the daily and weekly summaries gain moreLinks, moreDeadLinks and moreEndingSoon, the number of links left out of a list. No existing field changed. The /help/notifications page now describes the body of every event.
+
+### 🛡️ Link Safety
+- The addresses Google Safe Browsing flagged for a blocked link are never cut off. Whole addresses are kept, and an address too long to keep is shown as its host. This holds for links blocked after a redirect too.
+
+### 🔒 Security
+- An authenticator entry you add from now on is labelled "hrva.cc" instead of "hrva.cc Url Shortener". Entries you added earlier keep their label, and their codes keep working.
+
+### 🔧 Admin
+- The sidebar badges count only their own queue: Review counts links and bio pages, and Domains counts domain applications and limit requests.
+- Every audit log row names what it acted on: the domain and its owner, the account, or the link and its destination. A limit request shows the old and new limit.
+- A link on a custom domain is named by that domain in audit rows.
+- Admin Discord alerts say "no account" for a link made without one, and write a domain rule's reason after a colon.
+
+### 🔑 API
+- POST /api/v1/users/me/domains/{id}/use-again uses a removed custom domain again and answers 201 with the new domain. Custom domain responses have a useAgain field: SKIPS_REVIEW, NEEDS_REVIEW or CLOUDFLARE_REMOVAL_PENDING on a removed domain, and null on any other domain or when another account holds the name.
+- GET /api/v1/admin/domains leaves removed domains out unless status=DELETED is given, which lists only them, newest removal first, and can be sorted by deletedAt.
+- GET /api/v1/analytics/overview has a breakdowns object, in the same shape as a link's analytics.
+- The webhook summaries have the new moreLinks, moreDeadLinks and moreEndingSoon fields.
+
+### ✨ AI Connector
+- The MCP Registry listing shows the hrva.cc icon, and the server version is 2.28.0.
+
+### 🐛 Fixes
+- Status tags on admin All URLs show in full, and the status and owner columns appear only where the table has room beside the Actions column.
+- Every dropdown has space before its arrow.
+- The passkey sign-in method on Settings has a Manage passkeys button that takes you to your passkeys.
+- Proton Pass no longer offers a two-step code on Settings.
+- While hrva.cc restarts, pages keep trying for two minutes instead of showing an error, and the session check keeps loading.
+- Pages keep their own tab title when opened directly, and the sign-in, account and egg pages show the same title as in the page source.
+- Recent UTM tags are remembered on this device, the last five for each field, with a Clear button under the fields to forget them. The privacy page says so.
+- A late reply to the session check can no longer sign you back in after you sign out.
+
+---
+
 ## [v2.27] — 2026-11-01
 
 Edit a link from the dashboard, turn expired and used-up links back on and change where a link points, ask for more custom domains, and see where an app will send you before you allow it.
