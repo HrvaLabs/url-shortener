@@ -78,6 +78,11 @@
 # the security chain denies by default: signed-in routes under a public pattern, wrong methods and unknown paths are 401 without a sign-in;
 # with Postgres paused an uncached link and a signed-in request answer 503 within 8 seconds (a small HTML page for a browser on the
 # link, the problem for Accept: application/json) while a cached link still redirects.
+# Section 32 checks v2.27's Edit link: 044 ran and the earlier domain block was recorded on the account; a destination change through
+# an API key refused with the list of what's missing, then allowed once the account is in good standing (set in Postgres), recorded in
+# the history and the audit log, and the redirect follows at once; a blocked destination and another shortener refused; the sixth change
+# of the day a 429 with the counter's time left; the DESTINATION_CHANGES switch stopping the owner but not the admin; a used-up and an
+# expired link turned back on by one save; and the admin's paged history of the link.
 #
 #   scripts/mcp-e2e.sh                         builds the jar, then runs every step
 #   MCP_E2E_SKIP_BUILD=1 scripts/mcp-e2e.sh    reuses target/url-shortener-*.jar
@@ -2848,5 +2853,152 @@ uncached_redirects_again() {
 }
 wait_until 30 "the uncached link after Postgres came back" uncached_redirects_again
 ok "with Postgres back the uncached link redirects again"
+
+section "32. Edit link (v2.27): changing the destination, the daily limit, the site switch and turning links back on"
+expect_eq "$(psql_value "select count(*) from databasechangelog where id like '044-%';")" 3 "044's three changesets ran"
+expect_eq "$(psql_value "select data_type from information_schema.columns where table_name = 'user_account' and column_name = 'last_link_blocked_at';")" \
+    "timestamp without time zone" "user_account.last_link_blocked_at is a TIMESTAMP"
+EDIT_USER_ID=$(psql_value "select id from user_account where email = '$USER_EMAIL';")
+docker exec "$REDIS_CONTAINER" redis-cli --raw del "rate-limit:create:user:$EDIT_USER_ID" >/dev/null
+expect_eq "$(psql_value "select last_link_blocked_at is not null from user_account where id = $EDIT_USER_ID;")" t \
+    "section 24's domain block of $USER_EMAIL's link was recorded on the account"
+session_login 203.0.113.60 "$USER_EMAIL" "$SESSION_PASSWORD"
+expect_eq "$HTTP_STATUS" 200 "$USER_EMAIL signs in"
+EDIT_JWT=$(jq -r .token <<<"$HTTP_BODY")
+EDIT_JWT=${EDIT_JWT#Bearer }
+http -X POST "$BASE/api/v1/urls" -H "X-Api-Key: $OWNER_KEY" -H 'Content-Type: application/json' \
+    -d '{"longUrl":"https://e2e-edit.com/first","shortUrl":"e2e-edit"}'
+expect_eq "$HTTP_STATUS" 201 "a link e2e-edit made with $USER_EMAIL's API key"
+EDIT_ID=$(jq -r .id <<<"$HTTP_BODY")
+edit_link() {
+    http -X PUT "$BASE/api/v1/urls/$1" -H "X-Api-Key: $OWNER_KEY" -H 'Content-Type: application/json' -d "{\"id\":$1,$2}"
+}
+http -A "$BROWSER_USER_AGENT" "$BASE/e2e-edit"
+expect_eq "$HTTP_STATUS $HTTP_LOCATION" "302 https://e2e-edit.com/first" "e2e-edit redirects to the first destination"
+expect_eq "$(cache_entries e2e-edit)" 1 "and is in the redirect cache"
+
+echo "  --- not in good standing: two-step off, an account under 30 days old and a recent block"
+psql_value "update user_account set two_step_enabled = false, create_date = now() - interval '10 days', email_verified = true where id = $EDIT_USER_ID;" >/dev/null
+http "$BASE/api/v1/urls/$EDIT_ID/destination-change" -H "Authorization: Bearer $EDIT_JWT"
+show "GET /api/v1/urls/$EDIT_ID/destination-change -> $HTTP_STATUS $(jq -c . <<<"$HTTP_BODY")"
+expect_eq "$HTTP_STATUS $(jq -r '[.allowed, .changesLeft] | map(tostring) | join(",")' <<<"$HTTP_BODY")" "200 false,5" "not allowed, 5 changes left"
+expect_contains "$(jq -r '[.missing[].code] | join(",")' <<<"$HTTP_BODY")" "TWO_STEP_SIGN_IN,ACCOUNT_AGE" "two-step sign-in and the account's age are missing"
+expect_contains "$(jq -r '[.missing[].code] | join(",")' <<<"$HTTP_BODY")" "NO_" "and the blocked link"
+edit_link "$EDIT_ID" '"longUrl":"https://e2e-edit.com/second"'
+expect_eq "$HTTP_STATUS $(jq -r '.missing[0].text' <<<"$HTTP_BODY")" "403 Turn on two-step sign-in" "the API key gets the same 403 with the list of what's missing"
+expect_contains "$(jq -r .detail <<<"$HTTP_BODY")" "You can't change where this link points yet. Turn on two-step sign-in. Available from " "and a detail that says it"
+expect_eq "$(psql_value "select long_url from url where id = $EDIT_ID;")" "https://e2e-edit.com/first" "the destination is unchanged"
+expect_eq "$(docker exec "$REDIS_CONTAINER" redis-cli --raw exists "rate-limit:destination-change:$EDIT_ID")" 0 "and nothing was counted"
+
+echo "  --- in good standing"
+psql_value "update url set block_reason = null, threat_type = null, block_detail = null, blocked_at = null where owner_id = $EDIT_USER_ID;" >/dev/null
+psql_value "update link_review set resolved_at = now() where resolved_at is null and url_id in (select id from url where owner_id = $EDIT_USER_ID);" >/dev/null
+psql_value "update user_account set two_step_enabled = true, create_date = now() - interval '60 days', last_link_blocked_at = now() - interval '91 days' where id = $EDIT_USER_ID;" >/dev/null
+http "$BASE/api/v1/urls/$EDIT_ID/destination-change" -H "Authorization: Bearer $EDIT_JWT"
+expect_eq "$HTTP_STATUS $(jq -c . <<<"$HTTP_BODY")" '200 {"allowed":true,"missing":[],"changesLeft":5}' "allowed, 5 changes left"
+edit_link "$EDIT_ID" '"longUrl":"https://e2e-edit.com/second","visitLimit":100'
+expect_eq "$HTTP_STATUS $(jq -r '[.longUrl, .visitLimit] | map(tostring) | join(" ")' <<<"$HTTP_BODY")" "200 https://e2e-edit.com/second 100" \
+    "PUT with the API key changes the destination and the visit limit"
+http -A "$BROWSER_USER_AGENT" "$BASE/e2e-edit"
+expect_eq "$HTTP_STATUS $HTTP_LOCATION" "302 https://e2e-edit.com/second" "the short link redirects to the new destination at once"
+expect_eq "$(psql_value "select old_long_url || ' ' || new_long_url || ' ' || changed_by || ' ' || via from link_destination_change where url_id = $EDIT_ID;")" \
+    "https://e2e-edit.com/first https://e2e-edit.com/second $USER_EMAIL API_KEY" "the history keeps old and new, who and how"
+expect_eq "$(psql_value "select performed_by || ' ' || details from audit_log where action = 'CHANGE_LINK_DESTINATION' and target_identifier = '$EDIT_ID';")" \
+    "$USER_EMAIL from: https://e2e-edit.com/first, to: https://e2e-edit.com/second, via: API_KEY" "the audit log has the change"
+expect_eq "$(psql_value "select performed_by from audit_log where action = 'UPDATE_URL' and target_identifier = '$EDIT_ID' and not failed;")" "$USER_EMAIL" \
+    "and the edit, by the key's owner"
+http "$BASE/api/v1/urls/$EDIT_ID/destination-change" -H "Authorization: Bearer $EDIT_JWT"
+expect_eq "$(jq -r .changesLeft <<<"$HTTP_BODY")" 4 "4 changes left today"
+
+echo "  --- the same checks as a new link"
+http -X POST "$BASE/api/v1/admin/domain-rules" -H "Authorization: Bearer $ADMIN_JWT" -H 'Content-Type: application/json' \
+    -d '{"domain":"e2e-edit-blocked.com","type":"BLOCK","reason":"E2E edit"}'
+expect_eq "$HTTP_STATUS" 200 "the admin blocks e2e-edit-blocked.com"
+EDIT_RULE_ID=$(jq -r .rule.id <<<"$HTTP_BODY")
+edit_link "$EDIT_ID" '"longUrl":"https://e2e-edit-blocked.com/x"'
+expect_eq "$HTTP_STATUS $(jq -r .detail <<<"$HTTP_BODY")" \
+    "400 This destination is on a blocklist and can't be shortened. If you think that's a mistake, contact us." "a blocked destination is refused like a new link"
+edit_link "$EDIT_ID" '"longUrl":"https://bit.ly/e2e-edit"'
+expect_eq "$HTTP_STATUS $(jq -r .detail <<<"$HTTP_BODY")" \
+    "400 Links to other URL shorteners can't be shortened. Use the final destination instead." "another shortener is refused like a new link"
+expect_eq "$(psql_value "select long_url from url where id = $EDIT_ID;")" "https://e2e-edit.com/second" "the destination is unchanged"
+http -X DELETE "$BASE/api/v1/admin/domain-rules/$EDIT_RULE_ID" -H "Authorization: Bearer $ADMIN_JWT"
+
+echo "  --- at most 5 changes per link a day"
+EDIT_COUNT=$(docker exec "$REDIS_CONTAINER" redis-cli --raw get "rate-limit:destination-change:$EDIT_ID")
+show "changes counted so far, refused checks included: $EDIT_COUNT"
+for (( change = EDIT_COUNT + 1; change <= 5; change++ )); do
+    edit_link "$EDIT_ID" "\"longUrl\":\"https://e2e-edit.com/change-$change\""
+    expect_eq "$HTTP_STATUS" 200 "change $change of 5"
+done
+edit_link "$EDIT_ID" '"longUrl":"https://e2e-edit.com/sixth"'
+EDIT_TTL=$(docker exec "$REDIS_CONTAINER" redis-cli --raw ttl "rate-limit:destination-change:$EDIT_ID")
+show "the sixth -> $HTTP_STATUS Retry-After $(header_value retry-after), counter TTL ${EDIT_TTL}s"
+expect_eq "$HTTP_STATUS $(header_value content-type)" "429 application/problem+json" "the sixth change in a day is a 429 problem"
+(( $(header_value retry-after) <= 86400 && $(header_value retry-after) >= EDIT_TTL )) || fail "Retry-After isn't the counter's time left"
+ok "Retry-After is the counter's time left"
+expect_eq "$(jq -r .detail <<<"$HTTP_BODY")" "This link's destination can change 5 times a day. Try again in 24 hours." "the detail says when"
+edit_link "$EDIT_ID" '"visitLimit":200'
+expect_eq "$HTTP_STATUS $(jq -r .visitLimit <<<"$HTTP_BODY")" "200 200" "other edits go on"
+http -X PUT "$BASE/api/v1/urls/$EDIT_ID" -H "Authorization: Bearer $ADMIN_JWT" -H 'Content-Type: application/json' \
+    -d "{\"id\":$EDIT_ID,\"longUrl\":\"https://e2e-edit.com/by-the-admin\",\"visitLimit\":200}"
+expect_eq "$HTTP_STATUS" 200 "an admin isn't counted"
+
+echo "  --- the site switch"
+put_setting DESTINATION_CHANGES false
+expect_eq "$HTTP_STATUS" 200 "PUT /api/v1/admin/settings/DESTINATION_CHANGES false"
+http -X POST "$BASE/api/v1/urls" -H "Authorization: Bearer $EDIT_JWT" -H 'Content-Type: application/json' \
+    -d '{"longUrl":"https://e2e-edit.com/switch","shortUrl":"e2e-edit-switch"}'
+SWITCH_ID=$(jq -r .id <<<"$HTTP_BODY")
+http -X PUT "$BASE/api/v1/urls/$SWITCH_ID" -H "Authorization: Bearer $EDIT_JWT" -H 'Content-Type: application/json' \
+    -d "{\"id\":$SWITCH_ID,\"longUrl\":\"https://e2e-edit.com/switched\"}"
+expect_eq "$HTTP_STATUS $(jq -r '.detail + " " + .missing[0].code' <<<"$HTTP_BODY")" "403 Changing where links point is turned off right now. CHANGES_TURNED_ON" \
+    "with the switch off the owner is refused"
+http -X PUT "$BASE/api/v1/urls/$SWITCH_ID" -H "Authorization: Bearer $ADMIN_JWT" -H 'Content-Type: application/json' \
+    -d "{\"id\":$SWITCH_ID,\"longUrl\":\"https://e2e-edit.com/switched\"}"
+expect_eq "$HTTP_STATUS" 200 "and an admin isn't"
+reset_setting DESTINATION_CHANGES
+expect_eq "$HTTP_STATUS" 200 "DESTINATION_CHANGES is reset"
+
+echo "  --- turning a used-up and an expired link back on"
+http -X POST "$BASE/api/v1/urls" -H "Authorization: Bearer $EDIT_JWT" -H 'Content-Type: application/json' \
+    -d '{"longUrl":"https://e2e-edit.com/once","shortUrl":"e2e-edit-once","visitLimit":1}'
+ONCE_ID=$(jq -r .id <<<"$HTTP_BODY")
+http -A "$BROWSER_USER_AGENT" "$BASE/e2e-edit-once"
+expect_eq "$HTTP_STATUS" 302 "e2e-edit-once opens once"
+http -A "$BROWSER_USER_AGENT" "$BASE/e2e-edit-once"
+expect_eq "$HTTP_STATUS" 410 "and is used up"
+http -X PATCH "$BASE/api/v1/urls/$ONCE_ID/activate" -H "Authorization: Bearer $EDIT_JWT"
+expect_eq "$HTTP_STATUS $(jq -r .detail <<<"$HTTP_BODY")" "409 This link has used all its clicks. Edit it to raise or remove its visit limit first." \
+    "activating it points to Edit"
+http -X PUT "$BASE/api/v1/urls/$ONCE_ID" -H "Authorization: Bearer $EDIT_JWT" -H 'Content-Type: application/json' -d "{\"id\":$ONCE_ID,\"visitLimit\":1,\"active\":true}"
+expect_eq "$HTTP_STATUS" 409 "turning it on with the same limit is refused"
+http -X PUT "$BASE/api/v1/urls/$ONCE_ID" -H "Authorization: Bearer $EDIT_JWT" -H 'Content-Type: application/json' -d "{\"id\":$ONCE_ID,\"visitLimit\":3,\"active\":true}"
+expect_eq "$HTTP_STATUS $(jq -r '[.active, .visitLimit] | map(tostring) | join(",")' <<<"$HTTP_BODY")" "200 true,3" "a higher limit and active: true turn it back on in one save"
+http -A "$BROWSER_USER_AGENT" "$BASE/e2e-edit-once"
+expect_eq "$HTTP_STATUS" 302 "and it opens again"
+psql_value "update url set expiration_date = now() - interval '1 day', active = false where id = $ONCE_ID;" >/dev/null
+http -X PATCH "$BASE/api/v1/urls/$ONCE_ID/activate" -H "Authorization: Bearer $EDIT_JWT"
+expect_eq "$HTTP_STATUS $(jq -r .detail <<<"$HTTP_BODY")" "409 This link has expired. Edit it to set a later expiry or remove it first." \
+    "an expired link can't be activated as it is"
+EXPIRED_AT=$(psql_value "select to_char(expiration_date, 'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"') from url where id = $ONCE_ID;")
+http -X PUT "$BASE/api/v1/urls/$ONCE_ID" -H "Authorization: Bearer $EDIT_JWT" -H 'Content-Type: application/json' \
+    -d "{\"id\":$ONCE_ID,\"visitLimit\":3,\"expirationDate\":\"$EXPIRED_AT\",\"tags\":[\"e2e\"]}"
+expect_eq "$HTTP_STATUS $(jq -r .active <<<"$HTTP_BODY")" "200 false" "an edit that keeps the past expiry and leaves it off is saved"
+http -X PUT "$BASE/api/v1/urls/$ONCE_ID" -H "Authorization: Bearer $EDIT_JWT" -H 'Content-Type: application/json' \
+    -d "{\"id\":$ONCE_ID,\"visitLimit\":3,\"expirationDate\":\"2099-01-01T00:00:00Z\",\"active\":true}"
+expect_eq "$HTTP_STATUS $(jq -r '[.active, .expirationDate] | map(tostring) | join(",")' <<<"$HTTP_BODY")" "200 true,2099-01-01T00:00:00Z" \
+    "a new expiry and active: true turn it back on"
+
+echo "  --- the admin's history of a link's destinations"
+http "$BASE/api/v1/admin/urls/$EDIT_ID/destination-changes?sort=changedAt,asc&size=10" -H "Authorization: Bearer $ADMIN_JWT"
+show "$(jq -c '[.content[] | {newLongUrl, changedBy, via}]' <<<"$HTTP_BODY")"
+EDIT_CHANGES=$(( 5 - EDIT_COUNT + 2 ))
+expect_eq "$HTTP_STATUS $(jq -r '.page.totalElements' <<<"$HTTP_BODY") $(jq -r '.content[0].oldLongUrl' <<<"$HTTP_BODY")" \
+    "200 $EDIT_CHANGES https://e2e-edit.com/first" "$EDIT_CHANGES changes, the first from the first destination"
+expect_eq "$(jq -r --argjson last $(( EDIT_CHANGES - 1 )) '.content[$last].changedBy + " " + .content[$last].via' <<<"$HTTP_BODY")" "admin@localhost WEB" \
+    "the last by the admin"
+http "$BASE/api/v1/admin/urls/$EDIT_ID/destination-changes" -H "Authorization: Bearer $EDIT_JWT"
+expect_eq "$HTTP_STATUS" 403 "a user can't read it"
 
 section "Done: every step passed"
