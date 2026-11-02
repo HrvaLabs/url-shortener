@@ -3,6 +3,7 @@ package cc.hrva.urlshortener.service.ratelimit;
 import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.concurrent.TimeUnit;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -59,6 +60,17 @@ public class RedisFixedWindowRateLimiter implements RateLimiter {
         } catch (final DataAccessException exception) {
             log.warn("Rate limit check failed exception={}", exception.getClass().getName());
             throw new RateLimiterUnavailableException(exception);
+        }
+    }
+
+    @Override
+    public OptionalLong count(final String key) {
+        try {
+            final var value = redisTemplate.opsForValue().get(KEY_PREFIX + key);
+            return OptionalLong.of(value == null ? 0 : Long.parseLong(value));
+        } catch (final DataAccessException | NumberFormatException exception) {
+            log.warn("Rate limit count lookup failed exception={}", exception.getClass().getName());
+            return OptionalLong.empty();
         }
     }
 

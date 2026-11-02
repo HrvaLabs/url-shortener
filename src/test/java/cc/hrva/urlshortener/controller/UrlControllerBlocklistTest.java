@@ -30,6 +30,7 @@ import cc.hrva.urlshortener.service.QrCodeService;
 import cc.hrva.urlshortener.service.RedirectChainService;
 import cc.hrva.urlshortener.service.ReservedAliasService;
 import cc.hrva.urlshortener.service.ReviewQueueService;
+import cc.hrva.urlshortener.service.DestinationChangeService;
 import cc.hrva.urlshortener.service.SignInFormCheckService;
 import cc.hrva.urlshortener.service.ScammerSignalService;
 import cc.hrva.urlshortener.service.SuspiciousUrlService;
@@ -189,7 +190,7 @@ class UrlControllerBlocklistTest {
                 redirectChainService, TransactionOperations.withoutTransaction(), reservedAliasService, burstAlertService,
                 destinationCheckRepository, customDomainRegistry, customDomainRepository, campaignService, settingsService,
                 mock(PlatformTransactionManager.class), mock(AnonymousLinkSignals.class), LinkWarningTemplates.engine(),
-                mock(HumanCheckService.class), mock(SignInFormCheckService.class));
+                mock(HumanCheckService.class), mock(SignInFormCheckService.class), mock(DestinationChangeService.class));
         mockMvc = MockMvcBuilders.standaloneSetup(new UrlController(urlService, qrCodeService, linkPreviewService, clientIpResolver,
                         new ClickRequestResolver(clientIpResolver), request, new ShortLinks(appProperties)))
                 .setControllerAdvice(new GlobalExceptionHandler())

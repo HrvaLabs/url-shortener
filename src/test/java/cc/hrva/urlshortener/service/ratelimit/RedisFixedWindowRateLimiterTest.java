@@ -12,6 +12,7 @@ import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.data.redis.RedisConnectionFailureException;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.ValueOperations;
 import org.springframework.data.redis.core.script.RedisScript;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -94,6 +95,24 @@ class RedisFixedWindowRateLimiterTest {
 
         assertThat(rateLimiter.resetsIn(KEY)).isEmpty();
         assertThat(output).contains("Rate limit reset lookup failed exception=org.springframework.data.redis.RedisConnectionFailureException");
+    }
+
+    @Test
+    void aCounterIsReadWithoutCounting() {
+        final var values = org.mockito.Mockito.mock(ValueOperations.class);
+        when(redisTemplate.opsForValue()).thenReturn(values);
+        when(values.get("rate-limit:" + KEY)).thenReturn("4").thenReturn(null);
+
+        assertThat(rateLimiter.count(KEY)).hasValue(4);
+        assertThat(rateLimiter.count(KEY)).hasValue(0);
+    }
+
+    @Test
+    void aCounterThatCannotBeReadIsLeftToTheCaller(final CapturedOutput output) {
+        when(redisTemplate.opsForValue()).thenThrow(new RedisConnectionFailureException("Unable to connect"));
+
+        assertThat(rateLimiter.count(KEY)).isEmpty();
+        assertThat(output).contains("Rate limit count lookup failed exception=org.springframework.data.redis.RedisConnectionFailureException");
     }
 
     @Test

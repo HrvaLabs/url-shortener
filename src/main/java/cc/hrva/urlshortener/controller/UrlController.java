@@ -13,6 +13,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import cc.hrva.urlshortener.audit.Audited;
 import cc.hrva.urlshortener.dto.CreateUrlDto;
+import cc.hrva.urlshortener.dto.DestinationChangeResponse;
 import cc.hrva.urlshortener.dto.LinkPreviewResponse;
 import cc.hrva.urlshortener.dto.UnlockResponse;
 import cc.hrva.urlshortener.dto.UnlockUrlDto;
@@ -25,6 +26,7 @@ import cc.hrva.urlshortener.exception.ServiceBusyException;
 import cc.hrva.urlshortener.model.PeekUrl;
 import cc.hrva.urlshortener.model.enums.AuditAction;
 import cc.hrva.urlshortener.model.enums.CreatedVia;
+import cc.hrva.urlshortener.security.ApiKeyRateLimitFilter;
 import cc.hrva.urlshortener.security.ClickRequestResolver;
 import cc.hrva.urlshortener.security.ClientIpResolver;
 import cc.hrva.urlshortener.service.LinkPreviewOutcome.Busy;
@@ -188,17 +190,39 @@ public class UrlController {
         return ResponseEntity.ok(urls);
     }
 
-    @Operation(summary = "Update a short URL", description = "Update visit limit and/or expiration date of an existing short URL. Authentication required.")
-    @ApiResponse(responseCode = "400", description = "Validation error or bad request")
-    @ApiResponse(responseCode = "404", description = "URL not found")
+    @Operation(summary = "Edit a short URL", description = "Change a link you own: visit limit and expiration date (both replaced by what is sent, "
+            + "null removes them), password and tags (null leaves them), destination (null leaves it) and active (true turns the link back on, false "
+            + "turns it off). Sign in, or send an API key as X-Api-Key: <key> or Authorization: Bearer <key>; a key edits only its account's links. "
+            + "A new destination gets the same checks as a new link. Owners can change the destination of a link on their own custom domain, and of "
+            + "a hrva.cc link while the account is in good standing; GET /api/v1/urls/{id}/destination-change says what is missing. "
+            + "A link's destination can change 5 times a day.")
+    @ApiResponse(responseCode = "200", description = "The edited link")
+    @ApiResponse(responseCode = "400", description = "Validation error, a refused destination or a past expiration date")
+    @ApiResponse(responseCode = "401", description = "Not signed in and no API key")
+    @ApiResponse(responseCode = "403", description = "Not your link, or the destination can't change yet: the problem's missing lists what is missing")
+    @ApiResponse(responseCode = "404", description = "URL not found, or an unknown API key")
+    @ApiResponse(responseCode = "409", description = "active is true but the link used all its clicks under the visit limit sent")
+    @ApiResponse(responseCode = "429", description = "The link's destination changed 5 times in the current day, or the API key's requests this hour are over "
+            + "its limit (Retry-After)")
+    @ApiResponse(responseCode = "503", description = "Destination changes can't be counted right now (Retry-After)")
     @PutMapping("/{id}")
-    @PreAuthorize("hasAnyRole('ROLE_ADMIN', 'ROLE_USER')")
     @Audited(AuditAction.UPDATE_URL)
     public ResponseEntity<UrlResponse> updateUrl(
             @PathVariable final Long id,
             @Valid @RequestBody final UrlUpdateDto urlUpdateDto) {
         urlUpdateDto.setId(id);
-        return ResponseEntity.ok(urlService.updateUrl(urlUpdateDto));
+        return ResponseEntity.ok(urlService.updateUrl(urlUpdateDto, request.getHeader(ApiKeyRateLimitFilter.API_KEY_HEADER)));
+    }
+
+    @Operation(summary = "Can this link's destination change", description = "Whether you can change where this link points now and, when not, a "
+            + "plain list of what is missing. Signed-in owners and admins.")
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = DestinationChangeResponse.class)))
+    @ApiResponse(responseCode = "403", description = "Not your link")
+    @ApiResponse(responseCode = "404", description = "URL not found")
+    @GetMapping("/{id}/destination-change")
+    @PreAuthorize("hasAnyRole('ROLE_ADMIN', 'ROLE_USER')")
+    public ResponseEntity<DestinationChangeResponse> destinationChange(@PathVariable("id") final Long id) {
+        return ResponseEntity.ok(urlService.destinationChange(id));
     }
 
     @Operation(summary = "Export my URLs as CSV", description = "Download your URLs as a CSV file. Requires ROLE_USER.")
@@ -251,8 +275,10 @@ public class UrlController {
         return ResponseEntity.ok(urlService.revokeUrl(id));
     }
 
-    @Operation(summary = "Activate a short URL", description = "Reactivate a previously deactivated short URL by its ID. Authentication required.")
+    @Operation(summary = "Activate a short URL", description = "Reactivate a previously deactivated short URL by its ID, with the same checks as a "
+            + "new link. Authentication required.")
     @ApiResponse(responseCode = "404", description = "URL not found")
+    @ApiResponse(responseCode = "409", description = "The link used all its clicks or has expired: edit it first")
     @PatchMapping("/{id}/activate")
     @Audited(AuditAction.ACTIVATE_URL)
     public ResponseEntity<UrlResponse> activateUrl(@PathVariable("id") final Long id) {

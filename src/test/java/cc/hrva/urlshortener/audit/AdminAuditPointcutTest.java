@@ -9,6 +9,7 @@ import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.enums.AuditAction;
 import cc.hrva.urlshortener.model.enums.BlocklistAction;
 import cc.hrva.urlshortener.model.enums.SourceKind;
+import cc.hrva.urlshortener.repository.ApiKeyRepository;
 import cc.hrva.urlshortener.service.AuditLogService;
 import cc.hrva.urlshortener.service.BlocklistSourceService;
 import cc.hrva.urlshortener.service.UserService;
@@ -27,6 +28,7 @@ import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
+import org.springframework.beans.factory.support.StaticListableBeanFactory;
 
 @ExtendWith(MockitoExtension.class)
 class AdminAuditPointcutTest {
@@ -53,7 +55,7 @@ class AdminAuditPointcutTest {
         lenient().when(userService.getUserFromToken()).thenReturn(User.builder().email(ADMIN).build());
         final var proxyFactory = new AspectJProxyFactory(new AdminBlocklistController(blocklistSourceService));
         proxyFactory.setProxyTargetClass(true);
-        proxyFactory.addAspect(new AdminAuditAspect(auditLogService, userService, JsonMapper.builder().build()));
+        proxyFactory.addAspect(new AdminAuditAspect(auditLogService, userService, JsonMapper.builder().build(), new StaticListableBeanFactory().getBeanProvider(ApiKeyRepository.class)));
         controller = proxyFactory.getProxy();
     }
 

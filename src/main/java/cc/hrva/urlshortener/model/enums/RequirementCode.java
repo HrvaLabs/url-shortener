@@ -1,0 +1,18 @@
+package cc.hrva.urlshortener.model.enums;
+
+public enum RequirementCode {
+
+    TWO_STEP_SIGN_IN,
+    ACCOUNT_AGE,
+    VERIFIED_EMAIL,
+    NO_BLOCKED_LINKS,
+    NO_LINKS_BEING_CHECKED,
+    NO_RECENT_BLOCKS,
+    CHANGES_TURNED_ON,
+    LINK_WITH_ACCOUNT,
+    DOMAIN_ACTIVE,
+    LINK_NOT_BLOCKED,
+    LINK_NOT_BEING_CHECKED,
+    DAILY_CHANGES_LEFT
+
+}

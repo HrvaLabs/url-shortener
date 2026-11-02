@@ -49,6 +49,7 @@
     <include file="classpath:/db/changelog/041-reset-token-hash.xml"/>
     <include file="classpath:/db/changelog/042-long-url-index.xml"/>
     <include file="classpath:/db/changelog/043-url-opens.xml"/>
+    <include file="classpath:/db/changelog/044-link-destination-changes.xml"/>
     <include file="classpath:/db/changelog/045-domain-requests.xml"/>
 
 </databaseChangeLog>

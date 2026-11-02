@@ -20,16 +20,23 @@ public class UrlUpdateDto {
     @Schema(description = "Unique identifier of the URL to update", example = "1")
     private Long id;
     @Size(max = UrlValidator.MAX_LONG_URL_LENGTH, message = UrlValidator.LONG_URL_TOO_LONG)
-    @Schema(description = "New destination URL. Admins only; null leaves it unchanged", example = "https://example.com/new-page")
+    @Schema(description = "New destination URL; null or blank leaves it unchanged. It gets the same checks as a new link. Owners can change it on a "
+            + "custom domain link, and on a hrva.cc link while the account is in good standing (see GET /api/v1/urls/{id}/destination-change); "
+            + "at most 5 changes per link a day", example = "https://example.com/new-page")
     private String longUrl;
-    @Schema(description = "How many clicks the link allows: every click counts, not counting bots and HEAD requests", example = "200")
+    @Schema(description = "How many clicks the link allows: every click counts, not counting bots and HEAD requests. Null or 0 removes the limit",
+            example = "200")
     private Long visitLimit;
-    @Schema(description = "Expiration date and time", example = "2026-12-31T23:59:59Z")
+    @Schema(description = "Expiration date and time. Null removes it. A new one can't be in the past; the current one is kept as sent, even when it "
+            + "has passed, unless active is true", example = "2026-12-31T23:59:59Z")
     private LocalDateTime expirationDate;
     @Schema(description = "Tags (replaces existing when provided; null leaves them unchanged)", example = "[\"work\"]")
     private Set<String> tags;
     @Schema(description = "Password: non-empty sets/replaces it, empty string clears it, null leaves it unchanged", example = "s3cret")
     @PasswordFitsBcrypt
     private String password;
+    @Schema(description = "true turns the link back on after the save, with the same checks as a new link; false turns it off; null leaves it as it is",
+            example = "true")
+    private Boolean active;
 
 }

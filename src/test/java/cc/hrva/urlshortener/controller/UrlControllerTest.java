@@ -518,7 +518,7 @@ class UrlControllerTest {
     @Test
     void shouldUpdateUrl() throws Exception {
         final var url = Url.builder().id(1L).longUrl("https://example.com").build();
-        when(urlService.updateUrl(any(UrlUpdateDto.class))).thenReturn(UrlResponse.from(url));
+        when(urlService.updateUrl(any(UrlUpdateDto.class), any())).thenReturn(UrlResponse.from(url));
 
         mockMvc.perform(put("/api/v1/urls/1")
                         .contentType(MediaType.APPLICATION_JSON)

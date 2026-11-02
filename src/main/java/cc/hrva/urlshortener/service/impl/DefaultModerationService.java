@@ -509,7 +509,7 @@ public class DefaultModerationService implements ModerationService {
                     url.setBlockReason(reason);
                     url.setBlockDetail(StringUtils.abbreviate(detail, MAX_COLUMN_LENGTH));
                     url.setBlockedAt(LocalDateTime.now());
-                    return urlRepository.save(url);
+                    return savedAsBlocked(url);
                 })
                 .orElse(null)));
         converted.ifPresent(url -> {
@@ -587,7 +587,7 @@ public class DefaultModerationService implements ModerationService {
                     url.setBlockReason(BlockReason.DOMAIN_RULE);
                     url.setBlockDetail(StringUtils.abbreviate(domain, MAX_COLUMN_LENGTH));
                     url.setBlockedAt(LocalDateTime.now());
-                    final var saved = urlRepository.save(url);
+                    final var saved = savedAsBlocked(url);
                     closeReview(saved, BlockReason.DOMAIN_RULE, performedBy);
                     return saved;
                 })
@@ -810,7 +810,7 @@ public class DefaultModerationService implements ModerationService {
                     if (verdict.blockReason() == BlockReason.SAFE_BROWSING) {
                         url.setThreatType(ThreatType.MALWARE);
                     }
-                    closeReview(urlRepository.save(url), verdict.blockReason(), SYSTEM);
+                    closeReview(savedAsBlocked(url), verdict.blockReason(), SYSTEM);
                     log.info("Held link blocked for its own reason under the allowed shape urlId={} reason={}", url.getId(), verdict.blockReason());
                 }));
     }
@@ -847,7 +847,7 @@ public class DefaultModerationService implements ModerationService {
                     if (reason == BlockReason.SAFE_BROWSING) {
                         url.setThreatType(ThreatType.MALWARE);
                     }
-                    final var saved = urlRepository.save(url);
+                    final var saved = savedAsBlocked(url);
                     closeReview(saved, reason, performedBy);
                     return saved;
                 })
@@ -857,6 +857,14 @@ public class DefaultModerationService implements ModerationService {
             evictNowAndAgainLater(cacheKeyOf(url));
         });
         return blocked;
+    }
+
+    private Url savedAsBlocked(final Url url) {
+        final var saved = urlRepository.save(url);
+        if (saved.getOwner() != null) {
+            userRepository.recordLinkBlocked(saved.getOwner().getId(), saved.getBlockedAt());
+        }
+        return saved;
     }
 
     private boolean reactivate(final long urlId, final Predicate<Url> stillApplies) {

@@ -14,5 +14,6 @@ public enum BlockReason {
     SIGN_IN_FORM;
 
     public static final Set<BlockReason> MANUAL = Set.of(ADMIN, USER_BLOCKED);
+    public static final Set<BlockReason> HOLDS = Set.of(CAMPAIGN, SIGN_IN_FORM);
 
 }

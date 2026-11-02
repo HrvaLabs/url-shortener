@@ -2,15 +2,21 @@ package cc.hrva.urlshortener.configuration;
 
 import cc.hrva.urlshortener.controller.ReportController;
 import cc.hrva.urlshortener.controller.UnsubscribeController;
+import cc.hrva.urlshortener.security.ApiKeyRateLimitFilter;
+import jakarta.servlet.http.HttpServletRequest;
 import java.util.List;
 import java.util.stream.Stream;
+import org.apache.commons.lang3.StringUtils;
 import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.web.configurers.AuthorizeHttpRequestsConfigurer;
+import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher;
+import org.springframework.security.web.util.matcher.AndRequestMatcher;
 
 final class PublicRoutes {
 
     static final List<String> HEALTH_PROBES = List.of("/actuator/health", "/actuator/health/liveness", "/actuator/health/readiness");
     static final List<String> SIGNED_IN_UNDER_A_PUBLIC_PATTERN = List.of("/api/v1/urls/export", "/api/v1/urls/tags", "/api/v1/urls/all");
+    static final String LINK_EDIT = "/api/v1/urls/*";
 
     private static final List<PublicRoute> ROUTES = List.of(
             get("/"),
@@ -57,6 +63,12 @@ final class PublicRoutes {
         ROUTES.stream()
                 .flatMap(PublicRoute::withHead)
                 .forEach(route -> registry.requestMatchers(route.method(), route.pattern()).permitAll());
+        registry.requestMatchers(new AndRequestMatcher(PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.PUT, LINK_EDIT),
+                PublicRoutes::carriesApiKey)).permitAll();
+    }
+
+    private static boolean carriesApiKey(final HttpServletRequest request) {
+        return StringUtils.isNotBlank(request.getHeader(ApiKeyRateLimitFilter.API_KEY_HEADER));
     }
 
     private static PublicRoute get(final String pattern) {

@@ -31,6 +31,7 @@ import cc.hrva.urlshortener.security.SessionToken;
 import cc.hrva.urlshortener.security.TokenProvider;
 import cc.hrva.urlshortener.service.ApiKeyService;
 import cc.hrva.urlshortener.service.BurstAlertService;
+import cc.hrva.urlshortener.service.DestinationChangeService;
 import cc.hrva.urlshortener.service.CampaignService;
 import cc.hrva.urlshortener.service.ClickAnalyticsService;
 import cc.hrva.urlshortener.service.ClickCheckService;
@@ -191,6 +192,9 @@ class ReactivateLinkFlowTest {
     private BurstAlertService burstAlertService;
 
     @MockitoBean
+    private DestinationChangeService destinationChangeService;
+
+    @MockitoBean
     private CampaignService campaignService;
 
     @MockitoBean
@@ -251,7 +255,7 @@ class ReactivateLinkFlowTest {
         mockMvc.perform(patch("/api/v1/urls/{id}/activate", OWNERS_LINK).header(JwtFilter.AUTHORIZATION_HEADER, "Bearer owner-token"))
                 .andExpect(status().isConflict())
                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
-                .andExpect(jsonPath("$.detail").value("This link has used all its clicks. Raise its visit limit first."));
+                .andExpect(jsonPath("$.detail").value("This link has used all its clicks. Edit it to raise or remove its visit limit first."));
         mockMvc.perform(patch("/api/v1/urls/{id}/activate", OWNERS_LINK).header(JwtFilter.AUTHORIZATION_HEADER, "Bearer admin-token"))
                 .andExpect(status().isConflict());
         assertThat(jdbcTemplate.queryForObject("select active from url where id = ?", Boolean.class, OWNERS_LINK)).isFalse();

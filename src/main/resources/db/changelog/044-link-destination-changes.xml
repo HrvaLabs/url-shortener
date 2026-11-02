@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.9.xsd">
+
+    <changeSet author="khrvacic" id="044-link-destination-change">
+        <createTable tableName="link_destination_change">
+            <column name="id" type="BIGINT" autoIncrement="true">
+                <constraints primaryKey="true" primaryKeyName="pk_link_destination_change" nullable="false"/>
+            </column>
+            <column name="url_id" type="BIGINT">
+                <constraints nullable="false" foreignKeyName="link_destination_change_url_fk" referencedTableName="url"
+                             referencedColumnNames="id" deleteCascade="true"/>
+            </column>
+            <column name="old_long_url" type="VARCHAR(2048)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="new_long_url" type="VARCHAR(2048)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="changed_by" type="VARCHAR(255)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="via" type="VARCHAR(20)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="changed_at" type="TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+        <createIndex tableName="link_destination_change" indexName="idx_link_destination_change_url_changed_at">
+            <column name="url_id"/>
+            <column name="changed_at"/>
+        </createIndex>
+        <rollback>
+            <dropTable tableName="link_destination_change"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet author="khrvacic" id="044-user-last-link-blocked-at">
+        <addColumn tableName="user_account">
+            <column name="last_link_blocked_at" type="TIMESTAMP"/>
+        </addColumn>
+        <rollback>
+            <dropColumn tableName="user_account" columnName="last_link_blocked_at"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet author="khrvacic" id="044-user-last-link-blocked-at-from-blocked-links">
+        <sql>
+            update user_account set last_link_blocked_at = (select max(u.blocked_at) from url u where u.owner_id = user_account.id)
+            where exists (select 1 from url u where u.owner_id = user_account.id and u.blocked_at is not null)
+        </sql>
+        <rollback/>
+    </changeSet>
+
+</databaseChangeLog>

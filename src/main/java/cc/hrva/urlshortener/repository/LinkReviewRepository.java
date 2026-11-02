@@ -27,6 +27,8 @@ public interface LinkReviewRepository extends JpaRepository<LinkReview, Long>, J
     long countByResolvedAtIsNull();
     long countByResolvedAtIsNullAndReasonsContaining(String reason);
     long countByUrlOwnerAndResolvedAtIsNull(User owner);
+    boolean existsByUrl_Owner_IdAndResolvedAtIsNull(Long ownerId);
+    boolean existsByUrl_IdAndResolvedAtIsNull(Long urlId);
     boolean existsByUrlAndResolvedAtIsNullAndSystemFlaggedTrue(Url url);
     boolean existsByUrlOwnerAndResolvedAtIsNullAndSystemFlaggedTrue(User owner);
 

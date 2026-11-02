@@ -30,6 +30,7 @@ import cc.hrva.urlshortener.service.BioPageReviewService;
 import cc.hrva.urlshortener.service.CustomDomainAdminService;
 import cc.hrva.urlshortener.service.EmailLogService;
 import cc.hrva.urlshortener.service.LinkPreviewService;
+import cc.hrva.urlshortener.service.DestinationChangeService;
 import cc.hrva.urlshortener.service.LoginAttemptService;
 import cc.hrva.urlshortener.service.ModerationService;
 import cc.hrva.urlshortener.service.QrCodeService;
@@ -69,6 +70,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.lenient;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -150,6 +152,9 @@ class PagedEndpointsTest {
     private LoginAttemptService loginAttemptService;
 
     @MockitoBean
+    private DestinationChangeService destinationChangeService;
+
+    @MockitoBean
     private UrlRepository urlRepository;
 
     @MockitoBean
@@ -193,6 +198,7 @@ class PagedEndpointsTest {
                 "/api/v1/admin/domains",
                 "/api/v1/admin/reserved-aliases",
                 "/api/v1/admin/login-attempts",
+                "/api/v1/admin/urls/1/destination-changes",
                 "/api/v1/api-keys/inactive");
     }
 
@@ -214,6 +220,7 @@ class PagedEndpointsTest {
         lenient().when(reservedAliasService.list(any(), any(Pageable.class))).thenAnswer(this::emptyPage);
         lenient().when(loginAttemptService.attempts(any(), any(Pageable.class))).thenAnswer(this::emptyPage);
         lenient().when(apiKeyService.fetchMyInactiveApiKeys(any(Pageable.class))).thenAnswer(this::emptyPage);
+        lenient().when(destinationChangeService.history(anyLong(), any(), any(Pageable.class))).thenAnswer(this::emptyPage);
     }
 
     @ParameterizedTest
@@ -296,6 +303,7 @@ class PagedEndpointsTest {
             AdminDomainRuleController.class,
             AdminCustomDomainController.class,
             AdminReservedAliasController.class,
+            AdminLinkHistoryController.class,
             AdminController.class
     })
     static class TestApplication {

@@ -3,6 +3,7 @@ package cc.hrva.urlshortener.configuration;
 import cc.hrva.urlshortener.exception.ApiException;
 import cc.hrva.urlshortener.exception.ApiKeyActiveException;
 import cc.hrva.urlshortener.exception.ApiKeyInactiveException;
+import cc.hrva.urlshortener.exception.DestinationChangeRefusedException;
 import cc.hrva.urlshortener.exception.ApiKeyNotFoundException;
 import cc.hrva.urlshortener.exception.BioHandleUnavailableException;
 import cc.hrva.urlshortener.exception.BioPageConflictException;
@@ -25,6 +26,7 @@ import cc.hrva.urlshortener.exception.FieldValidationException;
 import cc.hrva.urlshortener.exception.HumanCheckUnavailableException;
 import cc.hrva.urlshortener.exception.InvalidApiKeyException;
 import cc.hrva.urlshortener.exception.LinkClicksUsedUpException;
+import cc.hrva.urlshortener.exception.LinkExpiredException;
 import cc.hrva.urlshortener.exception.LastSignInMethodException;
 import cc.hrva.urlshortener.exception.PasskeyNotFoundException;
 import cc.hrva.urlshortener.exception.SignInMethodNotFoundException;
@@ -94,6 +96,7 @@ public class GlobalExceptionHandler {
 
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
     private static final Duration DATABASE_RETRY = Duration.ofMinutes(1);
+    private static final String MISSING = "missing";
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ProblemDetail> handleValidation(final MethodArgumentNotValidException ex) {
@@ -233,8 +236,20 @@ public class GlobalExceptionHandler {
         return ProblemResponses.entity(HttpStatus.CONFLICT, safeMessage(ex));
     }
 
+    @ExceptionHandler(DestinationChangeRefusedException.class)
+    public ResponseEntity<ProblemDetail> handleDestinationChangeRefused(final DestinationChangeRefusedException ex) {
+        final var problem = ProblemResponses.of(HttpStatus.FORBIDDEN, safeMessage(ex));
+        problem.setProperty(MISSING, ex.getMissing());
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(problem);
+    }
+
     @ExceptionHandler(LinkClicksUsedUpException.class)
     public ResponseEntity<ProblemDetail> handleLinkClicksUsedUp(final LinkClicksUsedUpException ex) {
+        return ProblemResponses.entity(HttpStatus.CONFLICT, safeMessage(ex));
+    }
+
+    @ExceptionHandler(LinkExpiredException.class)
+    public ResponseEntity<ProblemDetail> handleLinkExpired(final LinkExpiredException ex) {
         return ProblemResponses.entity(HttpStatus.CONFLICT, safeMessage(ex));
     }
 

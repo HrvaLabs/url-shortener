@@ -11,6 +11,7 @@ import cc.hrva.urlshortener.converter.UrlToPeekUrlConverter;
 import cc.hrva.urlshortener.converter.UrlUpdateDtoToUrlConverter;
 import cc.hrva.urlshortener.dto.ClickRequest;
 import cc.hrva.urlshortener.dto.CreateUrlDto;
+import cc.hrva.urlshortener.dto.DestinationChangeResponse;
 import cc.hrva.urlshortener.dto.LinkVerdict;
 import cc.hrva.urlshortener.dto.UrlResponse;
 import cc.hrva.urlshortener.dto.UrlSearchDto;
@@ -18,6 +19,7 @@ import cc.hrva.urlshortener.dto.UrlUpdateDto;
 import cc.hrva.urlshortener.dto.UnlockResponse;
 import cc.hrva.urlshortener.exception.FieldValidationException;
 import cc.hrva.urlshortener.exception.LinkClicksUsedUpException;
+import cc.hrva.urlshortener.exception.LinkExpiredException;
 import cc.hrva.urlshortener.exception.NoAuthorizationException;
 import cc.hrva.urlshortener.exception.ServiceBusyException;
 import cc.hrva.urlshortener.exception.ShortUrlAlreadyExistsException;
@@ -38,12 +40,15 @@ import cc.hrva.urlshortener.repository.ShortUrlUniqueIndex;
 import cc.hrva.urlshortener.repository.DestinationCheckRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.specification.UrlSpecification;
+import cc.hrva.urlshortener.security.AdminTwoStep;
 import cc.hrva.urlshortener.service.ApiKeyService;
 import cc.hrva.urlshortener.service.BurstAlertService;
 import cc.hrva.urlshortener.service.CampaignService;
 import cc.hrva.urlshortener.service.HumanCheckService;
 import cc.hrva.urlshortener.service.ClickAnalyticsService;
 import cc.hrva.urlshortener.service.ClickCheckService;
+import cc.hrva.urlshortener.service.DestinationChangeService;
+import cc.hrva.urlshortener.service.LinkEditor;
 import cc.hrva.urlshortener.service.RedirectChainService;
 import cc.hrva.urlshortener.service.ReservedAliasService;
 import cc.hrva.urlshortener.service.ReviewQueueService;
@@ -104,6 +109,7 @@ import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -151,7 +157,10 @@ public class DefaultUrlService implements UrlService {
     private static final String UNLOCK_UNAVAILABLE = "Password checks are paused for a moment. Try again in a minute.";
     private static final Duration LIMITER_RETRY = Duration.ofMinutes(1);
     private static final Duration LINKS_DOWN_RETRY = Duration.ofMinutes(1);
-    private static final String CLICKS_USED_UP = "This link has used all its clicks. Raise its visit limit first.";
+    private static final String CLICKS_USED_UP = "This link has used all its clicks. Edit it to raise or remove its visit limit first.";
+    private static final String LINK_EXPIRED = "This link has expired. Edit it to set a later expiry or remove it first.";
+    private static final String BLOCKED_LINK_NOT_TURNED_ON = "This link is blocked, so saving can't turn it back on.";
+    private static final String NO_AUTHORIZATION = "You don't have authorization for this action";
     private static final int REDIRECT_DATABASE_SECONDS = 3;
     private static final String ROLE_ADMIN = "ROLE_ADMIN";
     private static final String BLOCKED_WHILE_EDITING = "This link was blocked while you were editing it. Reload and try again.";
@@ -203,6 +212,7 @@ public class DefaultUrlService implements UrlService {
     private final TemplateEngine templateEngine;
     private final HumanCheckService humanCheckService;
     private final SignInFormCheckService signInFormCheckService;
+    private final DestinationChangeService destinationChangeService;
     private final Cache<Long, Boolean> droppedQueryLogs = CacheBuilder.newBuilder()
             .expireAfterWrite(DROPPED_QUERY_LOG_INTERVAL)
             .maximumSize(MAX_DROPPED_QUERY_LOGS)
@@ -442,12 +452,21 @@ public class DefaultUrlService implements UrlService {
     }
 
     private LinkVerdict validateUrl(final Url url) {
+        checkDestinationShape(url);
+        final var verdict = checkDestinationSafety(url);
+        urlValidator.checkIfUrlExpirationDateIsInThePast(url);
+        return verdict;
+    }
+
+    private void checkDestinationShape(final Url url) {
         urlValidator.longUrlInUrl(url);
         urlValidator.checkIfLongUrlIsValid(url);
         urlValidator.checkIfLongUrlIsNotAShortener(url);
+    }
+
+    private LinkVerdict checkDestinationSafety(final Url url) {
         final var verdict = urlValidator.checkIfLongUrlIsNotBlocklisted(url);
         urlValidator.checkIfUrlSafe(url);
-        urlValidator.checkIfUrlExpirationDateIsInThePast(url);
         return verdict;
     }
 
@@ -596,22 +615,39 @@ public class DefaultUrlService implements UrlService {
 
         urlValidator.verifyUserAdminOrOwner(url);
         urlValidator.checkIfUrlNotBlocked(url);
-        requireActiveDomain(url);
-        requireClicksLeft(url);
-        urlValidator.checkIfShortUrlIsFreeToReactivate(url.domainId(), url.getShortUrl());
-        urlValidator.checkIfDestinationNotBlocked(url);
-        urlValidator.checkIfUrlSafe(url);
+        requireCanTurnOn(url, url.getVisitLimit(), url.getExpirationDate());
+        final var verdict = checkDestinationToTurnOn(url);
+        final var queueFlagged = !AdminTwoStep.hasAdminPowers(userService.getUserFromToken());
 
         return transactionOperations.execute(status -> {
             final var current = reloadUnlessBlockedSince(url, blockAtStart);
             requireActiveDomain(current);
-            requireClicksLeft(current);
+            requireClicksLeft(current, current.getVisitLimit());
+            requireNotExpired(current, current.getExpirationDate());
             current.setThreatType(null);
             current.setBlockReason(null);
             current.setBlockDetail(null);
             current.setBlockedAt(null);
-            return UrlResponse.from(urlRepository.save(activateUrl(current)));
+            final var saved = urlRepository.save(activateUrl(current));
+            if (queueFlagged) {
+                queueIfFlagged(saved, verdict);
+            }
+            return UrlResponse.from(saved);
         });
+    }
+
+    private void requireCanTurnOn(final Url link, final Long visitLimit, final LocalDateTime expirationDate) {
+        requireActiveDomain(link);
+        requireClicksLeft(link, visitLimit);
+        requireNotExpired(link, expirationDate);
+        urlValidator.checkIfShortUrlIsFreeToReactivate(link.domainId(), link.getShortUrl());
+    }
+
+    private LinkVerdict checkDestinationToTurnOn(final Url url) {
+        urlValidator.checkIfLongUrlIsNotAShortener(url);
+        final var verdict = urlValidator.checkIfDestinationNotBlocked(url);
+        urlValidator.checkIfUrlSafe(url);
+        return verdict;
     }
 
     @Override
@@ -630,35 +666,93 @@ public class DefaultUrlService implements UrlService {
     @Override
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
     @CacheEvict(value = "urls", key = "#result.cacheKey()")
-    public UrlResponse updateUrl(final UrlUpdateDto updateDto) {
+    public UrlResponse updateUrl(final UrlUpdateDto updateDto, final String apiKey) {
         log.info("Update URL id={}", updateDto.getId());
 
         final var existing = urlRepository.findById(updateDto.getId())
                 .orElseThrow(() -> new UrlNotFoundException(String.format("Url with id %d doesn't exist", updateDto.getId())));
-        urlValidator.verifyUserAdminOrOwner(existing);
+        final var editor = editorFor(existing, apiKey);
         final var previousLongUrl = existing.getLongUrl();
         final var blockAtStart = BlockState.of(existing);
 
         final var url = urlUpdateDtoToUrlConverter.convert(updateDto);
         final var destinationChanged = !Objects.equals(previousLongUrl, url.getLongUrl());
-        final var verdict = destinationChanged ? validateNewDestination(url) : LinkVerdict.clean();
-        urlValidator.checkIfUrlExpirationDateIsInThePast(url);
+        final var turnOn = Boolean.TRUE.equals(updateDto.getActive()) && !existing.isActive();
+        final var verdict = destinationChanged ? validateNewDestination(existing, url, editor) : LinkVerdict.clean();
+        requireExpiryAllowed(existing, url, turnOn);
+        final var turnOnVerdict = turnOn ? checkTurnOnAfterEdit(existing, url, editor, destinationChanged) : LinkVerdict.clean();
 
         final var updated = transactionOperations.execute(status -> {
             final var current = reloadUnlessBlockedSince(existing, blockAtStart);
             applyEdit(updateDto, url, current, destinationChanged);
+            if (turnOn) {
+                requireActiveDomain(current);
+                requireClicksLeft(current, current.getVisitLimit());
+                current.setActive(true);
+            } else if (Boolean.FALSE.equals(updateDto.getActive())) {
+                current.setActive(false);
+            }
             final var saved = urlRepository.save(current);
             if (destinationChanged) {
                 destinationCheckRepository.reset(saved.getId());
                 reviewQueueService.resolveOpen(saved, ReviewResolution.DESTINATION_CHANGED, SYSTEM);
+                destinationChangeService.record(saved, previousLongUrl, editor);
             }
             queueIfFlagged(saved, verdict);
+            if (!editor.admin()) {
+                queueIfFlagged(saved, turnOnVerdict);
+            }
             return UrlResponse.from(saved);
         });
         if (destinationChanged) {
             checkRedirectsLater(updated.id());
+            reportCreated(updated, CreatedLink.creatorOf(editor.user().getId(), null), verdict);
         }
         return updated;
+    }
+
+    @Override
+    public DestinationChangeResponse destinationChange(final Long id) {
+        final var url = urlRepository.findById(id).orElseThrow(() -> new UrlNotFoundException("Url doesn't exist"));
+        return destinationChangeService.permissionFor(url, editorFor(url, null));
+    }
+
+    private LinkEditor editorFor(final Url url, final String apiKey) {
+        if (apiKey == null) {
+            urlValidator.verifyUserAdminOrOwner(url);
+            return LinkEditor.signedIn(userService.getUserFromToken());
+        }
+        final var editor = LinkEditor.withApiKey(callerOf(apiKey));
+        if (!editor.owns(url)) {
+            log.info("Link edit with an API key refused, the link isn't the key owner's urlId={}", url.getId());
+            throw new NoAuthorizationException(NO_AUTHORIZATION);
+        }
+        return editor;
+    }
+
+    private void requireExpiryAllowed(final Url existing, final Url edited, final boolean turnOn) {
+        if (!turnOn && sameSecond(existing.getExpirationDate(), edited.getExpirationDate())) {
+            return;
+        }
+        urlValidator.checkIfUrlExpirationDateIsInThePast(edited);
+    }
+
+    private static boolean sameSecond(final LocalDateTime stored, final LocalDateTime sent) {
+        if (stored == null || sent == null) {
+            return stored == sent;
+        }
+        return stored.truncatedTo(ChronoUnit.SECONDS).equals(sent.truncatedTo(ChronoUnit.SECONDS));
+    }
+
+    private LinkVerdict checkTurnOnAfterEdit(final Url existing, final Url edited, final LinkEditor editor, final boolean destinationChecked) {
+        if (BlockState.of(existing).isBlocked()) {
+            if (!editor.admin()) {
+                urlValidator.checkIfUrlNotBlocked(existing);
+            }
+            throw new UrlValidationException(BLOCKED_LINK_NOT_TURNED_ON);
+        }
+        requireCanTurnOn(existing, edited.getVisitLimit(), edited.getExpirationDate());
+        return destinationChecked ? LinkVerdict.clean() : checkDestinationToTurnOn(edited);
     }
 
     private static void requireActiveDomain(final Url url) {
@@ -732,13 +826,12 @@ public class DefaultUrlService implements UrlService {
         }
     }
 
-    private LinkVerdict validateNewDestination(final Url url) {
-        urlValidator.verifyUserAdmin();
-        urlValidator.checkIfLongUrlIsValid(url);
-        urlValidator.checkIfLongUrlIsNotAShortener(url);
-        final var verdict = urlValidator.checkIfLongUrlIsNotBlocklisted(url);
-        urlValidator.checkIfUrlSafe(url);
-        log.info("Changed destination of URL id={}", url.getId());
+    private LinkVerdict validateNewDestination(final Url existing, final Url url, final LinkEditor editor) {
+        destinationChangeService.requireAllowed(existing, editor);
+        checkDestinationShape(url);
+        destinationChangeService.countChange(existing, editor);
+        final var verdict = checkDestinationSafety(url);
+        log.info("New destination passed the checks urlId={}", url.getId());
         return verdict;
     }
 
@@ -1105,10 +1198,17 @@ public class DefaultUrlService implements UrlService {
         return expirationDate != null && LocalDateTime.now().isAfter(expirationDate);
     }
 
-    private static void requireClicksLeft(final Url url) {
-        if (hasReachedVisitLimit(url.getOpens(), url.getVisitLimit())) {
+    private static void requireClicksLeft(final Url url, final Long visitLimit) {
+        if (hasReachedVisitLimit(url.getOpens(), visitLimit)) {
             log.info("Activation refused, the link used all its clicks urlId={}", url.getId());
             throw new LinkClicksUsedUpException(CLICKS_USED_UP);
+        }
+    }
+
+    private static void requireNotExpired(final Url url, final LocalDateTime expirationDate) {
+        if (isExpired(expirationDate)) {
+            log.info("Activation refused, the link has expired urlId={}", url.getId());
+            throw new LinkExpiredException(LINK_EXPIRED);
         }
     }
 

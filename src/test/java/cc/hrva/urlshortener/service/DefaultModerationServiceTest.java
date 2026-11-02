@@ -925,6 +925,24 @@ class DefaultModerationServiceTest {
     }
 
     @Test
+    void blockingAnOwnedLinkRecordsWhenTheOwnersLinkWasLastBlocked() {
+        final var url = link(30L, "https://example.org/x", user(1L, "alice@example.com"));
+
+        moderationService.blockLink(30L, BlockReason.BLOCKLIST, "phishing list", "system", "nightly");
+
+        verify(userRepository).recordLinkBlocked(1L, url.getBlockedAt());
+    }
+
+    @Test
+    void blockingALinkWithoutAnAccountRecordsNoOwner() {
+        link(30L, "https://example.org/x", null);
+
+        moderationService.blockLink(30L, BlockReason.ADMIN, null, ADMIN, "admin");
+
+        verify(userRepository, never()).recordLinkBlocked(anyLong(), any());
+    }
+
+    @Test
     void aBlockDetailLongerThanItsColumnIsShortenedSoTheBlockStillGoesThrough() {
         final var url = link(30L, "https://example.org/x", null);
         final var detail = "reported by a visitor: " + "x".repeat(300);

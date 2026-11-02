@@ -289,43 +289,16 @@ class DefaultUrlValidatorTest {
     }
 
     @Test
-    void anAdminWithoutTwoStepIsToldToTurnItOnToChangeDestinationsOrOtherPeoplesLinks() {
+    void anAdminWithoutTwoStepIsToldToTurnItOnToEditOtherPeoplesLinks() {
         final var pending = userWithRole(3L, "ROLE_ADMIN");
         pending.setTwoStepEnabled(false);
         when(userService.getUserFromToken()).thenReturn(pending);
 
-        assertThatThrownBy(() -> urlValidator.verifyUserAdmin())
-                .isInstanceOf(NoAuthorizationException.class)
-                .hasMessage("Turn on two-step sign-in to use admin pages.");
         assertThatThrownBy(() -> urlValidator.verifyUserAdminOrOwner(Url.builder().owner(User.builder().id(9L).build()).build()))
                 .isInstanceOf(NoAuthorizationException.class)
                 .hasMessage("Turn on two-step sign-in to use admin pages.");
         assertThatCode(() -> urlValidator.verifyUserAdminOrOwner(Url.builder().owner(User.builder().id(3L).build()).build()))
                 .doesNotThrowAnyException();
-    }
-
-    @Test
-    void shouldLetAdminsChangeDestinations() {
-        when(userService.getUserFromToken()).thenReturn(userWithRole(3L, "ROLE_ADMIN"));
-
-        assertThatCode(() -> urlValidator.verifyUserAdmin()).doesNotThrowAnyException();
-    }
-
-    @Test
-    void shouldRefuseRegularUsersChangingDestinations() {
-        when(userService.getUserFromToken()).thenReturn(userWithRole(2L, "ROLE_USER"));
-
-        assertThatThrownBy(() -> urlValidator.verifyUserAdmin())
-                .isInstanceOf(NoAuthorizationException.class)
-                .hasMessage("Only admins can change where a link points");
-    }
-
-    @Test
-    void shouldRefuseDestinationChangesWithoutSignedInUser() {
-        when(userService.getUserFromToken()).thenReturn(null);
-
-        assertThatThrownBy(() -> urlValidator.verifyUserAdmin())
-                .isInstanceOf(NoAuthorizationException.class);
     }
 
     @Test

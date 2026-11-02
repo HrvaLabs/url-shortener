@@ -86,6 +86,9 @@ public class User {
     @JsonIgnore
     private LocalDateTime tokensValidAfter;
 
+    @JsonIgnore
+    private LocalDateTime lastLinkBlockedAt;
+
     @PrePersist
     public void onCreate() {
         this.createDate = LocalDateTime.now();

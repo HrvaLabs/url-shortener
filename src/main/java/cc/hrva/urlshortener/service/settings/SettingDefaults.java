@@ -32,6 +32,7 @@ public class SettingDefaults {
         register(SettingKey.NEW_SIGNUPS, appProperties::isRegistrationEnabled);
         register(SettingKey.ANONYMOUS_LINKS_PER_HOUR, moderation::getAnonymousLinksPerHour);
         register(SettingKey.CUSTOM_ALIASES, moderation::isCustomAliases);
+        register(SettingKey.DESTINATION_CHANGES, moderation::isDestinationChanges);
         register(SettingKey.SAFE_BROWSING_CHECK, moderation::isSafeBrowsingCheck);
         register(SettingKey.SAFE_BROWSING_FAIL_CLOSED, appProperties::isSafeBrowsingFailClosed);
         register(SettingKey.BLOCKLIST_CHECK, moderation::isBlocklistCheck);

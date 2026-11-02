@@ -9,6 +9,7 @@ import cc.hrva.urlshortener.dto.UserUpdateDto;
 import cc.hrva.urlshortener.exception.UrlNotFoundException;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.enums.AuditAction;
+import cc.hrva.urlshortener.repository.ApiKeyRepository;
 import cc.hrva.urlshortener.service.AuditLogService;
 import cc.hrva.urlshortener.service.UserService;
 import java.util.Arrays;
@@ -27,6 +28,7 @@ import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import org.springframework.beans.factory.support.StaticListableBeanFactory;
 
 @ExtendWith(MockitoExtension.class)
 class AdminAuditAspectTest {
@@ -47,7 +49,7 @@ class AdminAuditAspectTest {
 
     @BeforeEach
     void setUp() {
-        aspect = new AdminAuditAspect(auditLogService, userService, JsonMapper.builder().build());
+        aspect = new AdminAuditAspect(auditLogService, userService, JsonMapper.builder().build(), new StaticListableBeanFactory().getBeanProvider(ApiKeyRepository.class));
         when(userService.getUserFromToken()).thenReturn(User.builder().email("admin@hrva.cc").build());
         when(joinPoint.getSignature()).thenReturn(signature);
     }

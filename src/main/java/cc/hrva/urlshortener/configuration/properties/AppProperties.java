@@ -387,6 +387,7 @@ public class AppProperties {
         private int anonymousLinksPerHour = 10;
 
         private boolean customAliases = true;
+        private boolean destinationChanges = true;
         private boolean safeBrowsingCheck = true;
         private boolean blocklistCheck = true;
         private boolean suspiciousLinkCheck = true;

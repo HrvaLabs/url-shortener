@@ -10,6 +10,7 @@ import java.time.Duration;
 import java.util.Arrays;
 import java.util.HexFormat;
 import java.util.Optional;
+import java.util.OptionalLong;
 
 public interface RateLimiter {
 
@@ -25,6 +26,10 @@ public interface RateLimiter {
 
     default Optional<Duration> resetsIn(final String key) {
         return Optional.empty();
+    }
+
+    default OptionalLong count(final String key) {
+        return OptionalLong.empty();
     }
 
     static String clientKey(final String name, final String clientIp) {

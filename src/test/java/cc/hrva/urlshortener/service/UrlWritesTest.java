@@ -17,6 +17,7 @@ import cc.hrva.urlshortener.dto.LinkVerdict;
 import cc.hrva.urlshortener.dto.UrlResponse;
 import cc.hrva.urlshortener.dto.UrlUpdateDto;
 import cc.hrva.urlshortener.model.Url;
+import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.enums.BlockReason;
 import cc.hrva.urlshortener.model.enums.CustomDomainStatus;
 import cc.hrva.urlshortener.model.enums.ReviewAction;
@@ -173,6 +174,9 @@ class UrlWritesTest {
 
     @MockitoBean
     private BurstAlertService burstAlertService;
+
+    @MockitoBean
+    private DestinationChangeService destinationChangeService;
 
     @MockitoBean
     private CampaignService campaignService;
@@ -422,7 +426,7 @@ class UrlWritesTest {
             assertThat(urlRepository.recordVisit(LINK, VISITED_AT)).isOne();
         };
 
-        urlService.updateUrl(UrlUpdateDto.builder().id(LINK).visitLimit(5L).expirationDate(NEW_EXPIRY).build());
+        urlService.updateUrl(UrlUpdateDto.builder().id(LINK).visitLimit(5L).expirationDate(NEW_EXPIRY).build(), null);
 
         assertThat(visitDone).isTrue();
         assertThat(linkRow())
@@ -468,8 +472,9 @@ class UrlWritesTest {
         markDead();
         visitMeanwhile = () -> {};
         when(urlValidator.checkIfLongUrlIsNotBlocklisted(any())).thenReturn(LinkVerdict.clean());
+        when(userService.getUserFromToken()).thenReturn(User.builder().id(1L).email("owner@hrva.cc").build());
 
-        final var response = urlService.updateUrl(UrlUpdateDto.builder().id(LINK).longUrl("https://example.com/moved").build());
+        final var response = urlService.updateUrl(UrlUpdateDto.builder().id(LINK).longUrl("https://example.com/moved").build(), null);
 
         assertThat(response.destinationHealth()).isNull();
         assertThat(destinationRow())
@@ -486,7 +491,7 @@ class UrlWritesTest {
         markDead();
         visitMeanwhile = () -> {};
 
-        final var response = urlService.updateUrl(UrlUpdateDto.builder().id(LINK).visitLimit(9L).build());
+        final var response = urlService.updateUrl(UrlUpdateDto.builder().id(LINK).visitLimit(9L).build(), null);
 
         assertThat(response.destinationHealth()).isEqualTo(new DestinationHealth(DEAD_SINCE, "404"));
         assertThat(destinationRow())

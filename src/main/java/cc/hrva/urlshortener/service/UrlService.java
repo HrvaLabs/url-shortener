@@ -2,6 +2,7 @@ package cc.hrva.urlshortener.service;
 
 import cc.hrva.urlshortener.dto.ClickRequest;
 import cc.hrva.urlshortener.dto.CreateUrlDto;
+import cc.hrva.urlshortener.dto.DestinationChangeResponse;
 import cc.hrva.urlshortener.dto.UnlockResponse;
 import cc.hrva.urlshortener.dto.UrlResponse;
 import cc.hrva.urlshortener.dto.UrlSearchDto;
@@ -21,7 +22,8 @@ public interface UrlService {
     UrlResponse activateUrl(Long id);
     void deleteUrl(Long id);
     void deactivateExpiredUrls();
-    UrlResponse updateUrl(UrlUpdateDto url);
+    UrlResponse updateUrl(UrlUpdateDto url, String apiKey);
+    DestinationChangeResponse destinationChange(Long id);
     String generateShortUrl(Long length);
     UrlResponse saveUrlRouting(CreateUrlDto url, String clientIP, CreatedVia createdVia, String humanCheckToken);
 

@@ -52,6 +52,7 @@ import cc.hrva.urlshortener.dto.UrlSearchDto;
 import cc.hrva.urlshortener.dto.UrlUpdateDto;
 import cc.hrva.urlshortener.exception.ApiException;
 import cc.hrva.urlshortener.exception.ApiKeyNotFoundException;
+import cc.hrva.urlshortener.exception.DestinationChangeRefusedException;
 import cc.hrva.urlshortener.exception.FieldValidationException;
 import cc.hrva.urlshortener.exception.HumanCheckUnavailableException;
 import cc.hrva.urlshortener.exception.InvalidApiKeyException;
@@ -260,6 +261,9 @@ class UrlServiceTest {
     @Mock
     private SignInFormCheckService signInFormCheckService;
 
+    @Mock
+    private DestinationChangeService destinationChangeService;
+
     private AnonymousLinkSignals anonymousLinkSignals;
 
     @BeforeEach
@@ -267,6 +271,7 @@ class UrlServiceTest {
         org.mockito.Mockito.lenient().when(rateLimiter.tryAcquire(any(), org.mockito.ArgumentMatchers.anyInt(), any())).thenReturn(true);
         org.mockito.Mockito.lenient().when(customDomainRepository.findStatusForUpdate(anyLong())).thenReturn(Optional.of("ACTIVE"));
         org.mockito.Mockito.lenient().when(urlValidator.checkIfLongUrlIsNotBlocklisted(any())).thenReturn(LinkVerdict.clean());
+        org.mockito.Mockito.lenient().when(urlValidator.checkIfDestinationNotBlocked(any())).thenReturn(LinkVerdict.clean());
         org.mockito.Mockito.lenient().when(clickCheckService.mayRedirect(org.mockito.ArgumentMatchers.anyLong(), any())).thenReturn(true);
         org.mockito.Mockito.lenient().when(domainAgeService.registeredOn(any())).thenReturn(Optional.of(REGISTERED_LONG_AGO));
         anonymousLinkSignals = new AnonymousLinkSignals(RANDOM_LOOKING_LABELS, domainAgeService, settingsService, Clock.systemUTC());
@@ -300,7 +305,8 @@ class UrlServiceTest {
                 campaignService,
                 settingsService,
                 withoutTransactions,
-                anonymousLinkSignals, LinkWarningTemplates.engine(), humanCheckService, signInFormCheckService
+                anonymousLinkSignals, LinkWarningTemplates.engine(), humanCheckService, signInFormCheckService,
+                destinationChangeService
         );
     }
 
@@ -339,7 +345,7 @@ class UrlServiceTest {
         org.mockito.Mockito.doThrow(new NoAuthorizationException("You don't have authorization for this action"))
                 .when(urlValidator).verifyUserAdminOrOwner(url);
 
-        assertThatThrownBy(() -> urlService.updateUrl(update))
+        assertThatThrownBy(() -> urlService.updateUrl(update, null))
                 .isInstanceOf(NoAuthorizationException.class);
 
         verify(urlUpdateDtoToUrlConverter, never()).convert(any());
@@ -354,7 +360,7 @@ class UrlServiceTest {
         when(urlUpdateDtoToUrlConverter.convert(update)).thenReturn(url);
         when(urlRepository.save(url)).thenReturn(url);
 
-        urlService.updateUrl(update);
+        urlService.updateUrl(update, null);
 
         final var order = org.mockito.Mockito.inOrder(urlValidator, urlUpdateDtoToUrlConverter);
         order.verify(urlValidator).verifyUserAdminOrOwner(url);
@@ -362,19 +368,23 @@ class UrlServiceTest {
     }
 
     @Test
-    void changingTheDestinationRequiresAnAdminAndNeverSaves() {
+    void aDestinationChangeTheEditorCantMakeIsRefusedBeforeAnyCheckOrCount() {
         final var url = Url.builder().id(7L).shortUrl("abc").longUrl("https://old.example").visits(0L).active(true).build();
         final var update = UrlUpdateDto.builder().id(7L).longUrl("https://new.example").build();
         final var changed = Url.builder().id(7L).shortUrl("abc").longUrl("https://new.example").visits(0L).active(true).build();
+        when(userService.getUserFromToken()).thenReturn(User.builder().id(1L).build());
         when(urlRepository.findById(7L)).thenReturn(Optional.of(url));
         when(urlUpdateDtoToUrlConverter.convert(update)).thenReturn(changed);
-        org.mockito.Mockito.doThrow(new NoAuthorizationException("Only admins can change where a link points"))
-                .when(urlValidator).verifyUserAdmin();
+        org.mockito.Mockito.doThrow(new DestinationChangeRefusedException("You can't change where this link points yet. Verify your email.", List.of()))
+                .when(destinationChangeService).requireAllowed(eq(url), any());
 
-        assertThatThrownBy(() -> urlService.updateUrl(update))
-                .isInstanceOf(NoAuthorizationException.class);
+        assertThatThrownBy(() -> urlService.updateUrl(update, null))
+                .isInstanceOf(DestinationChangeRefusedException.class);
 
+        verify(urlValidator, never()).checkIfLongUrlIsValid(any());
+        verify(destinationChangeService, never()).countChange(any(), any());
         verify(urlRepository, never()).save(any());
+        verify(destinationChangeService, never()).record(any(), any(), any());
     }
 
     @Test
@@ -385,17 +395,22 @@ class UrlServiceTest {
         when(urlRepository.findById(7L)).thenReturn(Optional.of(url));
         when(urlUpdateDtoToUrlConverter.convert(update)).thenReturn(changed);
         when(urlRepository.save(url)).thenReturn(url);
+        when(userService.getUserFromToken()).thenReturn(admin());
 
-        final var result = urlService.updateUrl(update);
+        final var result = urlService.updateUrl(update, null);
 
         assertThat(result.longUrl()).isEqualTo("https://new.example");
-        final var order = org.mockito.Mockito.inOrder(urlValidator, urlRepository);
-        order.verify(urlValidator).verifyUserAdmin();
+        final var order = org.mockito.Mockito.inOrder(urlValidator, destinationChangeService, urlRepository, burstAlertService);
+        order.verify(destinationChangeService).requireAllowed(eq(url), any());
+        order.verify(urlValidator).longUrlInUrl(changed);
         order.verify(urlValidator).checkIfLongUrlIsValid(changed);
         order.verify(urlValidator).checkIfLongUrlIsNotAShortener(changed);
+        order.verify(destinationChangeService).countChange(eq(url), any());
         order.verify(urlValidator).checkIfLongUrlIsNotBlocklisted(changed);
         order.verify(urlValidator).checkIfUrlSafe(changed);
         order.verify(urlRepository).save(url);
+        order.verify(destinationChangeService).record(eq(url), eq("https://old.example"), any());
+        order.verify(burstAlertService).linkCreated(any());
         verify(reviewQueueService).resolveOpen(url, ReviewResolution.DESTINATION_CHANGED, "system");
         verify(reviewQueueService, never()).flag(any(), any());
     }
@@ -407,11 +422,12 @@ class UrlServiceTest {
                 .destinationDeadSince(deadSince).destinationLastStatus("404").destinationFailStreak(4).build();
         final var update = UrlUpdateDto.builder().id(7L).longUrl("https://new.example").build();
         final var changed = Url.builder().id(7L).shortUrl("abc").longUrl("https://new.example").visits(0L).active(true).build();
+        when(userService.getUserFromToken()).thenReturn(admin());
         when(urlRepository.findById(7L)).thenReturn(Optional.of(url));
         when(urlUpdateDtoToUrlConverter.convert(update)).thenReturn(changed);
         when(urlRepository.save(url)).thenReturn(url);
 
-        final var result = urlService.updateUrl(update);
+        final var result = urlService.updateUrl(update, null);
 
         final var order = org.mockito.Mockito.inOrder(urlRepository, destinationCheckRepository);
         order.verify(urlRepository).save(url);
@@ -430,7 +446,7 @@ class UrlServiceTest {
         when(urlUpdateDtoToUrlConverter.convert(update)).thenReturn(edited);
         when(urlRepository.save(url)).thenReturn(url);
 
-        final var result = urlService.updateUrl(update);
+        final var result = urlService.updateUrl(update, null);
 
         verify(destinationCheckRepository, never()).reset(anyLong());
         assertThat(result.destinationHealth()).isEqualTo(new DestinationHealth(deadSince, "410"));
@@ -464,12 +480,13 @@ class UrlServiceTest {
         final var url = Url.builder().id(7L).shortUrl("abc").longUrl("https://old.example").visits(0L).active(true).build();
         final var update = UrlUpdateDto.builder().id(7L).longUrl("https://findfavoritedate.life/?u=f6yp608").build();
         final var changed = Url.builder().id(7L).shortUrl("abc").longUrl("https://findfavoritedate.life/?u=f6yp608").visits(0L).active(true).build();
+        when(userService.getUserFromToken()).thenReturn(admin());
         when(urlRepository.findById(7L)).thenReturn(Optional.of(url));
         when(urlUpdateDtoToUrlConverter.convert(update)).thenReturn(changed);
         when(urlValidator.checkIfLongUrlIsNotBlocklisted(changed)).thenReturn(new LinkVerdict(Outcome.FLAG, YOUNG_DOMAIN, null, null));
         when(urlRepository.save(url)).thenReturn(url);
 
-        urlService.updateUrl(update);
+        urlService.updateUrl(update, null);
 
         final var order = org.mockito.Mockito.inOrder(urlRepository, reviewQueueService);
         order.verify(urlRepository).save(url);
@@ -487,7 +504,7 @@ class UrlServiceTest {
         when(urlUpdateDtoToUrlConverter.convert(update)).thenReturn(changed);
         when(urlValidator.checkIfLongUrlIsNotBlocklisted(changed)).thenThrow(new UrlValidationException(BLOCKLIST_REFUSAL));
 
-        assertThatThrownBy(() -> urlService.updateUrl(update))
+        assertThatThrownBy(() -> urlService.updateUrl(update, null))
                 .isInstanceOf(UrlValidationException.class)
                 .hasMessage(BLOCKLIST_REFUSAL);
 
@@ -505,9 +522,10 @@ class UrlServiceTest {
         when(urlUpdateDtoToUrlConverter.convert(update)).thenReturn(url);
         when(urlRepository.save(url)).thenReturn(url);
 
-        urlService.updateUrl(update);
+        urlService.updateUrl(update, null);
 
-        verify(urlValidator, never()).verifyUserAdmin();
+        verify(destinationChangeService, never()).requireAllowed(any(), any());
+        verify(destinationChangeService, never()).countChange(any(), any());
         verify(urlValidator, never()).checkIfLongUrlIsNotBlocklisted(any());
         verify(urlValidator, never()).checkIfUrlSafe(any());
         verify(reviewQueueService, never()).resolveOpen(any(), any(), any());
@@ -524,7 +542,7 @@ class UrlServiceTest {
         when(urlRepository.findById(7L)).thenReturn(Optional.of(loaded), Optional.of(blockedMeanwhile));
         when(urlUpdateDtoToUrlConverter.convert(update)).thenReturn(changed);
 
-        assertThatThrownBy(() -> urlService.updateUrl(update))
+        assertThatThrownBy(() -> urlService.updateUrl(update, null))
                 .isInstanceOf(UrlValidationException.class)
                 .hasMessage(BLOCKED_WHILE_EDITING);
 
@@ -547,7 +565,7 @@ class UrlServiceTest {
         when(urlUpdateDtoToUrlConverter.convert(update)).thenReturn(edited);
         when(urlRepository.save(any(Url.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
-        urlService.updateUrl(update);
+        urlService.updateUrl(update, null);
 
         final var order = org.mockito.Mockito.inOrder(urlRepository);
         order.verify(urlRepository, times(2)).findById(7L);
@@ -572,7 +590,7 @@ class UrlServiceTest {
         });
         when(urlRepository.save(any(Url.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
-        urlService.updateUrl(update);
+        urlService.updateUrl(update, null);
 
         verify(urlRepository).save(current);
         assertThat(current)
@@ -678,7 +696,7 @@ class UrlServiceTest {
         assertThatThrownBy(() -> urlService.saveUrlRouting(createUrlDto, CLIENT_IP, CreatedVia.WEB))
                 .isInstanceOf(UrlValidationException.class)
                 .hasMessage(UrlValidator.LONG_URL_TOO_LONG);
-        assertThatThrownBy(() -> urlService.updateUrl(update))
+        assertThatThrownBy(() -> urlService.updateUrl(update, null))
                 .isInstanceOf(UrlValidationException.class)
                 .hasMessage(UrlValidator.LONG_URL_TOO_LONG);
 
@@ -883,7 +901,7 @@ class UrlServiceTest {
             return null;
         }).when(reviewQueueService).flag(any(), any());
 
-        transactionalUrlService().updateUrl(update);
+        transactionalUrlService().updateUrl(update, null);
 
         assertThat(resolvedInTransaction).hasValue(true);
         assertThat(queuedInTransaction).hasValue(true);
@@ -948,7 +966,7 @@ class UrlServiceTest {
         when(linkCheckService.check("https://example.com/menu")).thenReturn(LinkVerdict.clean());
         recordTransactionDuringChainCheck(7L, checkedInTransaction);
 
-        transactionalUrlService().updateUrl(update);
+        transactionalUrlService().updateUrl(update, null);
 
         assertThat(checkedInTransaction).hasValue(false);
         assertThat(url.getLongUrl()).isEqualTo("https://example.com/menu");
@@ -966,7 +984,7 @@ class UrlServiceTest {
         when(urlUpdateDtoToUrlConverter.convert(update)).thenReturn(url);
         when(urlRepository.save(url)).thenReturn(url);
 
-        urlService.updateUrl(update);
+        urlService.updateUrl(update, null);
 
         verify(redirectChainService, never()).checkLater(org.mockito.ArgumentMatchers.anyLong());
         assertThat(url.getFinalUrl()).isEqualTo("https://landing.example/");
@@ -2033,7 +2051,7 @@ class UrlServiceTest {
                 urlToPeekUrlConverter, createUrlToUrlConverter, urlUpdateDtoToUrlConverter, new UrlCache(cacheManager), objectMapper, meterRegistry,
                 passwordEncoder, suspiciousUrlService, rateLimiter, reviewQueueService, scammerSignalService, clickCheckService, redirectChainService,
                 transactionOperations, reservedAliasService, burstAlertService, destinationCheckRepository, customDomainRegistry, customDomainRepository,
-                campaignService, settingsService, withoutTransactions, anonymousLinkSignals, LinkWarningTemplates.engine(), humanCheckService, signInFormCheckService);
+                campaignService, settingsService, withoutTransactions, anonymousLinkSignals, LinkWarningTemplates.engine(), humanCheckService, signInFormCheckService, destinationChangeService);
     }
 
     private Url anonymousCreateOf(final String longUrl, final LinkVerdict verdict) {
@@ -2205,7 +2223,7 @@ class UrlServiceTest {
         recordTransactionDuringCheck("https://example.com/menu", checkedInTransaction);
         recordTransactionDuringSave(savedInTransaction);
 
-        transactionalUrlService().updateUrl(update);
+        transactionalUrlService().updateUrl(update, null);
 
         assertThat(checkedInTransaction).hasValue(false);
         assertThat(savedInTransaction).hasValue(true);
@@ -2855,7 +2873,7 @@ class UrlServiceTest {
         when(urlUpdateDtoToUrlConverter.convert(update)).thenReturn(Url.builder().id(7L).longUrl("https://example.com").visitLimit(10L).build());
         when(urlRepository.save(url)).thenReturn(url);
 
-        final var result = urlService.updateUrl(update);
+        final var result = urlService.updateUrl(update, null);
 
         assertThat(url.getDomain()).isSameAs(domain);
         assertThat(url.getVisitLimit()).isEqualTo(10L);
@@ -3310,6 +3328,61 @@ class UrlServiceTest {
     }
 
     @Test
+    void anExpiredLinkIsNotReactivatedUntilItsExpiryIsEdited() {
+        final var url = Url.builder().id(1L).shortUrl("promo").longUrl("https://example.com")
+                .expirationDate(java.time.LocalDateTime.now().minusMinutes(1)).active(false).build();
+        when(urlRepository.findById(1L)).thenReturn(Optional.of(url));
+
+        assertThatThrownBy(() -> urlService.activateUrl(1L))
+                .isInstanceOf(cc.hrva.urlshortener.exception.LinkExpiredException.class)
+                .hasMessage("This link has expired. Edit it to set a later expiry or remove it first.");
+
+        verify(urlValidator, never()).checkIfDestinationNotBlocked(any());
+        verify(urlRepository, never()).save(any());
+    }
+
+    @Test
+    void reactivatingRefusesALinkToAnotherShortenerLikeANewLink() {
+        final var url = Url.builder().id(1L).shortUrl("promo").longUrl("https://bit.ly/abc").active(false).build();
+        when(urlRepository.findById(1L)).thenReturn(Optional.of(url));
+        org.mockito.Mockito.doThrow(new UrlValidationException("Links to other URL shorteners can't be shortened. Use the final destination instead."))
+                .when(urlValidator).checkIfLongUrlIsNotAShortener(url);
+
+        assertThatThrownBy(() -> urlService.activateUrl(1L))
+                .isInstanceOf(UrlValidationException.class);
+
+        verify(urlRepository, never()).save(any());
+    }
+
+    @Test
+    void anOwnerReactivatingAFlaggedDestinationSendsItToReviewLikeANewLink() {
+        final var url = Url.builder().id(1L).shortUrl("promo").longUrl("https://young.example").active(false).build();
+        when(urlRepository.findById(1L)).thenReturn(Optional.of(url));
+        when(urlRepository.save(any(Url.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(userService.getUserFromToken()).thenReturn(User.builder().id(1L).build());
+        when(urlValidator.checkIfDestinationNotBlocked(url)).thenReturn(new LinkVerdict(Outcome.FLAG, YOUNG_DOMAIN, null, null));
+
+        urlService.activateUrl(1L);
+
+        final var order = org.mockito.Mockito.inOrder(urlRepository, reviewQueueService);
+        order.verify(urlRepository).save(url);
+        order.verify(reviewQueueService).flag(url, YOUNG_DOMAIN);
+    }
+
+    @Test
+    void anAdminReactivatingAFlaggedDestinationDoesNotSendItBackToReview() {
+        final var url = Url.builder().id(1L).shortUrl("promo").longUrl("https://young.example").active(false).build();
+        when(urlRepository.findById(1L)).thenReturn(Optional.of(url));
+        when(urlRepository.save(any(Url.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(userService.getUserFromToken()).thenReturn(admin());
+        when(urlValidator.checkIfDestinationNotBlocked(url)).thenReturn(new LinkVerdict(Outcome.FLAG, YOUNG_DOMAIN, null, null));
+
+        assertThat(urlService.activateUrl(1L).active()).isTrue();
+
+        verify(reviewQueueService, never()).flag(any(), any());
+    }
+
+    @Test
     void reactivationChecksTheBlockTheAliasAndSafetyBeforeSaving() {
         final var url = Url.builder().id(1L).shortUrl("promo").longUrl("https://example.com")
                 .threatType(cc.hrva.urlshortener.model.enums.ThreatType.MALWARE)
@@ -3324,6 +3397,7 @@ class UrlServiceTest {
         order.verify(urlValidator).verifyUserAdminOrOwner(url);
         order.verify(urlValidator).checkIfUrlNotBlocked(url);
         order.verify(urlValidator).checkIfShortUrlIsFreeToReactivate(null, "promo");
+        order.verify(urlValidator).checkIfLongUrlIsNotAShortener(url);
         order.verify(urlValidator).checkIfDestinationNotBlocked(url);
         order.verify(urlValidator).checkIfUrlSafe(url);
         order.verify(urlRepository).save(url);
@@ -4832,7 +4906,7 @@ class UrlServiceTest {
                 new io.micrometer.core.instrument.simple.SimpleMeterRegistry(), passwordEncoder, suspiciousUrlService, rateLimiter,
                 reviewQueueService, scammerSignalService, clickCheckService, redirectChainService, TransactionOperations.withoutTransaction(),
                 reservedAliasService, burstAlertService, destinationCheckRepository, customDomainRegistry, customDomainRepository, campaignService, settingsService,
-                withoutTransactions, anonymousLinkSignals, LinkWarningTemplates.engine(), humanCheckService, signInFormCheckService);
+                withoutTransactions, anonymousLinkSignals, LinkWarningTemplates.engine(), humanCheckService, signInFormCheckService, destinationChangeService);
     }
 
     private static UrlService withTheCacheAnnotations(final UrlService service, final CacheManager urls) {
@@ -4903,7 +4977,8 @@ class UrlServiceTest {
                 campaignService,
                 settingsService,
                 withoutTransactions,
-                anonymousLinkSignals, LinkWarningTemplates.engine(), humanCheckService, signInFormCheckService
+                anonymousLinkSignals, LinkWarningTemplates.engine(), humanCheckService, signInFormCheckService,
+                destinationChangeService
         );
     }
 
@@ -4983,7 +5058,8 @@ class UrlServiceTest {
                 campaignService,
                 settingsService,
                 transactionManager,
-                anonymousLinkSignals, LinkWarningTemplates.engine(), humanCheckService, signInFormCheckService
+                anonymousLinkSignals, LinkWarningTemplates.engine(), humanCheckService, signInFormCheckService,
+                destinationChangeService
         );
         final var proxyFactory = new ProxyFactory(service);
         proxyFactory.addAdvice(new TransactionInterceptor(transactionManager, new AnnotationTransactionAttributeSource()));
@@ -5022,7 +5098,8 @@ class UrlServiceTest {
                 campaignService,
                 settingsService,
                 withoutTransactions,
-                anonymousLinkSignals, LinkWarningTemplates.engine(), humanCheckService, signInFormCheckService
+                anonymousLinkSignals, LinkWarningTemplates.engine(), humanCheckService, signInFormCheckService,
+                destinationChangeService
         );
     }
 
@@ -5057,7 +5134,8 @@ class UrlServiceTest {
                 campaignService,
                 settingsService,
                 withoutTransactions,
-                anonymousLinkSignals, LinkWarningTemplates.engine(), humanCheckService, signInFormCheckService
+                anonymousLinkSignals, LinkWarningTemplates.engine(), humanCheckService, signInFormCheckService,
+                destinationChangeService
         );
     }
 

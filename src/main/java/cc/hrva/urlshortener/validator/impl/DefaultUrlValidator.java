@@ -116,15 +116,16 @@ public class DefaultUrlValidator implements UrlValidator {
     }
 
     @Override
-    public void checkIfDestinationNotBlocked(final Url url) {
+    public LinkVerdict checkIfDestinationNotBlocked(final Url url) {
         final var admin = isCurrentUserAdmin();
         if (admin && linkCheckService.isAllowListed(url.getLongUrl())) {
-            return;
+            return LinkVerdict.clean();
         }
         final var verdict = linkCheckService.check(url.getLongUrl());
         if (verdict.outcome() == LinkVerdict.Outcome.BLOCK) {
             throw new UrlValidationException(admin ? STILL_BLOCKED + String.join(REASON_SEPARATOR, verdict.reasons()) : BLOCKLISTED);
         }
+        return verdict;
     }
 
     @Override
@@ -145,13 +146,6 @@ public class DefaultUrlValidator implements UrlValidator {
         final var isOwner = owner != null && currentUser.getId() != null && currentUser.getId().equals(owner.getId());
         if (!isOwner && !AdminTwoStep.hasAdminPowers(currentUser)) {
             throw new NoAuthorizationException(AdminTwoStep.refusalFor(currentUser, "You don't have authorization for this action"));
-        }
-    }
-
-    @Override
-    public void verifyUserAdmin() {
-        if (!isCurrentUserAdmin()) {
-            throw new NoAuthorizationException(AdminTwoStep.refusalFor(userService.getUserFromToken(), "Only admins can change where a link points"));
         }
     }
 

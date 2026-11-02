@@ -201,9 +201,26 @@ class EveryEndpointIsPublicOrSignedInTest {
         assertThat(anonymousAllowed("POST /api/v1/urls/bulk")).isFalse();
     }
 
+    @Test
+    void anApiKeyReachesTheLinkEditAndNothingElseThatNeedsASignIn() {
+        assertThat(anonymousAllowed("PUT /api/v1/urls/{id}", "hrva_key")).isTrue();
+        assertThat(anonymousAllowed("PUT /api/v1/urls/{id}", " ")).isFalse();
+        assertThat(anonymousAllowed("DELETE /api/v1/urls/{id}", "hrva_key")).isFalse();
+        assertThat(anonymousAllowed("PATCH /api/v1/urls/{id}/activate", "hrva_key")).isFalse();
+        assertThat(anonymousAllowed("GET /api/v1/urls/{id}/destination-change", "hrva_key")).isFalse();
+        assertThat(anonymousAllowed("PUT /api/v1/users", "hrva_key")).isFalse();
+    }
+
     private boolean anonymousAllowed(final String endpoint) {
+        return anonymousAllowed(endpoint, null);
+    }
+
+    private boolean anonymousAllowed(final String endpoint, final String apiKey) {
         final var methodAndPath = endpoint.split(" ", 2);
         final var request = new MockHttpServletRequest(methodAndPath[0], sample(methodAndPath[1]));
+        if (apiKey != null) {
+            request.addHeader("X-Api-Key", apiKey);
+        }
         final var chain = springSecurityFilterChain.getFilterChains().stream()
                 .filter(candidate -> candidate.matches(request))
                 .findFirst()

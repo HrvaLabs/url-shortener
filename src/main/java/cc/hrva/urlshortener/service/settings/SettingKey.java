@@ -13,6 +13,8 @@ public enum SettingKey {
             "Counted over a fixed hour.", ANONYMOUS_LINKS, 1, 100, "links"),
     CUSTOM_ALIASES(SettingGroup.LINKS, "Custom aliases",
             "Signed-in users choose their own short link on the web, the API and MCP. Links on a custom domain keep their aliases.", null, false),
+    DESTINATION_CHANGES(SettingGroup.LINKS, "Destination changes",
+            "Owners change where their links point, on the web and the API. Admins always can.", null, false),
     SAFE_BROWSING_CHECK(SettingGroup.SAFETY, "Google Safe Browsing check on new links",
             "New links, links turned back on and changed destinations are checked with Google Safe Browsing.", null, true),
     SAFE_BROWSING_FAIL_CLOSED(SettingGroup.SAFETY, "Refuse links when Google Safe Browsing is down",

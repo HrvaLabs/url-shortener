@@ -46,6 +46,11 @@ public interface UserRepository extends JpaRepository<User, Long>, JpaSpecificat
 
     @Modifying(flushAutomatically = true)
     @Transactional
+    @Query("update User u set u.lastLinkBlockedAt = :blockedAt where u.id = :id and (u.lastLinkBlockedAt is null or u.lastLinkBlockedAt < :blockedAt)")
+    int recordLinkBlocked(@Param("id") Long id, @Param("blockedAt") LocalDateTime blockedAt);
+
+    @Modifying(flushAutomatically = true)
+    @Transactional
     @Query("update User u set u.inactivityWarnedAt = :now where u.id = :id and (u.inactivityWarnedAt is null or u.inactivityWarnedAt < :activity)")
     int claimInactivityWarning(@Param("id") Long id, @Param("now") LocalDateTime now, @Param("activity") LocalDateTime activity);
 

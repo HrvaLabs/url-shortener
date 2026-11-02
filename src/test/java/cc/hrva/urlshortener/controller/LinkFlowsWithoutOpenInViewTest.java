@@ -37,6 +37,7 @@ import cc.hrva.urlshortener.security.OAuth2LoginUserService;
 import cc.hrva.urlshortener.security.SessionToken;
 import cc.hrva.urlshortener.security.TokenProvider;
 import cc.hrva.urlshortener.service.BurstAlertService;
+import cc.hrva.urlshortener.service.DestinationChangeService;
 import cc.hrva.urlshortener.service.CampaignService;
 import cc.hrva.urlshortener.service.ClickAnalyticsService;
 import cc.hrva.urlshortener.service.ClickCheckService;
@@ -215,6 +216,9 @@ class LinkFlowsWithoutOpenInViewTest {
 
     @MockitoBean
     private BurstAlertService burstAlertService;
+
+    @MockitoBean
+    private DestinationChangeService destinationChangeService;
 
     @MockitoBean
     private CampaignService campaignService;
