@@ -243,6 +243,66 @@ class LinkStatsRepositoryTest {
     }
 
     @Test
+    void overviewSumsBreakdownsAcrossTheOwnersLinks() {
+        final var owner = savedOwner("breakdowns-owner@example.com");
+        final var first = savedLink("owner-breakdown-1", owner);
+        final var second = savedLink("owner-breakdown-2", owner);
+        linkStatsRepository.incrementBreakdown(first.getId(), DAY, Map.of(COUNTRY, "HR", REFERRER, "direct", SOURCE, "qr"));
+        linkStatsRepository.incrementBreakdown(first.getId(), DAY, Map.of(COUNTRY, "HR", REFERRER, "direct", SOURCE, "direct"));
+        linkStatsRepository.incrementBreakdown(second.getId(), DAY, Map.of(COUNTRY, "HR", REFERRER, "t.co", SOURCE, "qr"));
+        linkStatsRepository.incrementBreakdown(second.getId(), DAY.plusDays(1), Map.of(COUNTRY, "DE", DEVICE, "mobile", BROWSER, "safari", OS, "ios"));
+
+        assertThat(linkStatsRepository.findOwnerBreakdownTotals(owner.getId(), DAY, DAY.plusDays(1))).isEqualTo(Map.of(
+                COUNTRY, List.of(new BreakdownEntry("HR", 3), new BreakdownEntry("DE", 1)),
+                REFERRER, List.of(new BreakdownEntry("direct", 2), new BreakdownEntry("t.co", 1)),
+                SOURCE, List.of(new BreakdownEntry("qr", 2), new BreakdownEntry("direct", 1)),
+                DEVICE, List.of(new BreakdownEntry("mobile", 1)),
+                BROWSER, List.of(new BreakdownEntry("safari", 1)),
+                OS, List.of(new BreakdownEntry("ios", 1))));
+    }
+
+    @Test
+    void overviewLeavesOtherOwnersOut() {
+        final var owner = savedOwner("breakdowns-mine@example.com");
+        final var otherOwner = savedOwner("breakdowns-theirs@example.com");
+        final var mine = savedLink("owner-breakdown-mine", owner);
+        final var theirs = savedLink("owner-breakdown-theirs", otherOwner);
+        final var anonymous = savedLink("owner-breakdown-anonymous");
+        linkStatsRepository.incrementBreakdown(mine.getId(), DAY, Map.of(COUNTRY, "HR"));
+        linkStatsRepository.incrementBreakdown(theirs.getId(), DAY, Map.of(COUNTRY, "DE", REFERRER, "elsewhere.example"));
+        linkStatsRepository.incrementBreakdown(anonymous.getId(), DAY, Map.of(COUNTRY, "AT"));
+
+        assertThat(linkStatsRepository.findOwnerBreakdownTotals(owner.getId(), DAY, DAY))
+                .isEqualTo(Map.of(COUNTRY, List.of(new BreakdownEntry("HR", 1))));
+        assertThat(linkStatsRepository.findOwnerBreakdownTotals(otherOwner.getId(), DAY, DAY)).isEqualTo(Map.of(
+                COUNTRY, List.of(new BreakdownEntry("DE", 1)),
+                REFERRER, List.of(new BreakdownEntry("elsewhere.example", 1))));
+    }
+
+    @Test
+    void overviewBreakdownsRespectTheRange() {
+        final var owner = savedOwner("breakdowns-range@example.com");
+        final var link = savedLink("owner-breakdown-range", owner);
+        linkStatsRepository.incrementBreakdown(link.getId(), DAY.minusDays(1), Map.of(COUNTRY, "BEFORE"));
+        linkStatsRepository.incrementBreakdown(link.getId(), DAY, Map.of(COUNTRY, "FIRST"));
+        linkStatsRepository.incrementBreakdown(link.getId(), DAY.plusDays(2), Map.of(COUNTRY, "LAST"));
+        linkStatsRepository.incrementBreakdown(link.getId(), DAY.plusDays(3), Map.of(COUNTRY, "AFTER"));
+
+        assertThat(linkStatsRepository.findOwnerBreakdownTotals(owner.getId(), DAY, DAY.plusDays(2))).isEqualTo(Map.of(
+                COUNTRY, List.of(new BreakdownEntry("FIRST", 1), new BreakdownEntry("LAST", 1))));
+        assertThat(linkStatsRepository.findOwnerBreakdownTotals(owner.getId(), DAY.plusDays(4), DAY.plusDays(9))).isEmpty();
+    }
+
+    @Test
+    void breakdownRowsAreIndexedByLinkAndDayForTheOverview() {
+        assertThat(jdbcTemplate.queryForList(
+                "select column_name from information_schema.index_columns where upper(table_name) = 'LINK_DAILY_BREAKDOWN' "
+                        + "and upper(index_name) like 'PRIMARY_KEY%' order by ordinal_position"))
+                .extracting(row -> row.get("COLUMN_NAME"))
+                .containsExactly("URL_ID", "STAT_DATE", "DIMENSION", "DIMENSION_VALUE");
+    }
+
+    @Test
     void ownerTopLinksOrderByClicksAndSkipBotOnlyLinks() {
         final var owner = savedOwner("top-owner@example.com");
         final var otherOwner = savedOwner("top-other@example.com");

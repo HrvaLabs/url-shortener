@@ -168,6 +168,47 @@ class DefaultAnalyticsServiceTest {
     }
 
     @Test
+    void overviewCarriesTheBreakdownsOfAllTheOwnersLinks() {
+        givenOwnLinks(List.of(ownLink()));
+        givenNoOwnerStats();
+        final var referrers = new ArrayList<BreakdownEntry>();
+        for (int index = 0; index < 12; index++) {
+            referrers.add(new BreakdownEntry("site-" + index, 20 - index));
+        }
+        when(linkStatsRepository.findOwnerBreakdownTotals(1L, LocalDate.of(2026, 9, 25), TODAY)).thenReturn(Map.of(
+                REFERRER, referrers,
+                COUNTRY, List.of(new BreakdownEntry("HR", 3), new BreakdownEntry("DE", 2)),
+                DEVICE, List.of(new BreakdownEntry("mobile", 5)),
+                BROWSER, List.of(new BreakdownEntry("safari", 3)),
+                OS, List.of(new BreakdownEntry("ios", 3)),
+                SOURCE, List.of(new BreakdownEntry("direct", 4), new BreakdownEntry("qr", 1))));
+
+        final var breakdowns = analyticsService.getOverview(30).breakdowns();
+
+        assertThat(breakdowns.referrers()).hasSize(11).last().isEqualTo(new BreakdownEntry("other", 10 + 9));
+        assertThat(breakdowns.countries()).containsExactly(new BreakdownEntry("HR", 3), new BreakdownEntry("DE", 2));
+        assertThat(breakdowns.devices()).containsExactly(new BreakdownEntry("mobile", 5));
+        assertThat(breakdowns.browsers()).containsExactly(new BreakdownEntry("safari", 3));
+        assertThat(breakdowns.operatingSystems()).containsExactly(new BreakdownEntry("ios", 3));
+        assertThat(breakdowns.sources()).containsExactly(new BreakdownEntry("direct", 4), new BreakdownEntry("qr", 1));
+    }
+
+    @Test
+    void overviewWithoutClicksHasEmptyBreakdowns() {
+        givenOwnLinks(List.of(ownLink()));
+        givenNoOwnerStats();
+
+        final var breakdowns = analyticsService.getOverview(30).breakdowns();
+
+        assertThat(breakdowns.referrers()).isEmpty();
+        assertThat(breakdowns.countries()).isEmpty();
+        assertThat(breakdowns.devices()).isEmpty();
+        assertThat(breakdowns.browsers()).isEmpty();
+        assertThat(breakdowns.operatingSystems()).isEmpty();
+        assertThat(breakdowns.sources()).isEmpty();
+    }
+
+    @Test
     void overviewSkipsATopLinkMissingFromTheOwnersLinks() {
         givenOwnLinks(List.of(ownLink()));
         when(analyticsDays.today()).thenReturn(TODAY);

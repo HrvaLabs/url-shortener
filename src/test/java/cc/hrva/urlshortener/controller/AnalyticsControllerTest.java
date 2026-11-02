@@ -105,7 +105,14 @@ class AnalyticsControllerTest {
                 .andExpect(jsonPath("$.totalUrls").value(12))
                 .andExpect(jsonPath("$.activeUrls").value(9))
                 .andExpect(jsonPath("$.expiredUrls").value(2))
-                .andExpect(jsonPath("$.totalVisits").value(4120));
+                .andExpect(jsonPath("$.totalVisits").value(4120))
+                .andExpect(jsonPath("$.breakdowns.referrers[0].value").value("direct"))
+                .andExpect(jsonPath("$.breakdowns.referrers[0].clicks").value(200))
+                .andExpect(jsonPath("$.breakdowns.countries[0].value").value("HR"))
+                .andExpect(jsonPath("$.breakdowns.devices").isEmpty())
+                .andExpect(jsonPath("$.breakdowns.browsers").isEmpty())
+                .andExpect(jsonPath("$.breakdowns.operatingSystems").isEmpty())
+                .andExpect(jsonPath("$.breakdowns.sources[0].value").value("qr"));
     }
 
     @Test
@@ -205,7 +212,9 @@ class AnalyticsControllerTest {
         return new AnalyticsOverviewDto(90, LocalDate.of(2026, 7, 27), LocalDate.of(2026, 10, 24), new AnalyticsTotals(300, 250, 40),
                 List.of(new AnalyticsDay(LocalDate.of(2026, 7, 27), 4, 3, 1)),
                 List.of(new TopLink(7L, "menu", "example.com", 120, 95, null)),
-                12, 9, 2, 4120);
+                12, 9, 2, 4120,
+                new Breakdowns(List.of(new BreakdownEntry("direct", 200)), List.of(new BreakdownEntry("HR", 150)), List.of(), List.of(),
+                        List.of(), List.of(new BreakdownEntry("qr", 12))));
     }
 
     private static UrlAnalyticsDto analytics() {

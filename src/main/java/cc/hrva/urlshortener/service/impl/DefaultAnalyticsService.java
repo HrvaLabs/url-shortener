@@ -55,6 +55,7 @@ public class DefaultAnalyticsService implements AnalyticsService {
         final var to = analyticsDays.today();
         final var from = firstDayOf(range, to);
         final var stored = linkStatsRepository.findOwnerDaily(user.getId(), from, to);
+        final var breakdowns = linkStatsRepository.findOwnerBreakdownTotals(user.getId(), from, to);
 
         final var urlsById = urls.stream().collect(Collectors.toMap(Url::getId, Function.identity()));
         final var topLinks = linkStatsRepository.findOwnerTopLinks(user.getId(), from, to, TOP_LINKS_LIMIT).stream()
@@ -78,7 +79,8 @@ public class DefaultAnalyticsService implements AnalyticsService {
                 urls.size(),
                 activeUrls,
                 expiredUrls,
-                totalVisits);
+                totalVisits,
+                AnalyticsSeries.breakdownsOf(breakdowns));
     }
 
     @Override

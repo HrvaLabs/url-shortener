@@ -14,7 +14,8 @@ public record AnalyticsOverviewDto(
         long totalUrls,
         long activeUrls,
         long expiredUrls,
-        long totalVisits) {
+        long totalVisits,
+        UrlAnalyticsDto.Breakdowns breakdowns) {
 
     public record TopLink(Long id, String shortUrl, String destinationHost, long clicks, long uniqueVisitors,
                           @JsonInclude(JsonInclude.Include.NON_NULL) DomainRef domain) {}

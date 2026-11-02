@@ -81,6 +81,14 @@ public class LinkStatsRepository {
             order by dimension, sum(clicks) desc, dimension_value
             """;
 
+    private static final String FIND_OWNER_BREAKDOWN_TOTALS = """
+            select b.dimension, b.dimension_value, sum(b.clicks) as total_clicks
+            from link_daily_breakdown b join url u on u.id = b.url_id
+            where u.owner_id = :ownerId and b.stat_date between :from and :to
+            group by b.dimension, b.dimension_value
+            order by b.dimension, sum(b.clicks) desc, b.dimension_value
+            """;
+
     private static final String FIND_OWNER_DAILY = """
             select s.stat_date, sum(s.clicks) as total_clicks, sum(s.unique_visitors) as total_unique_visitors,
                    sum(s.bot_clicks) as total_bot_clicks
@@ -191,11 +199,11 @@ public class LinkStatsRepository {
     }
 
     public Map<StatDimension, List<BreakdownEntry>> findBreakdownTotals(final long urlId, final LocalDate from, final LocalDate to) {
-        final var totals = new EnumMap<StatDimension, List<BreakdownEntry>>(StatDimension.class);
-        jdbcTemplate.query(FIND_BREAKDOWN_TOTALS, Map.of(URL_ID, urlId, FROM, from, TO, to), (RowCallbackHandler) row ->
-                totals.computeIfAbsent(StatDimension.valueOf(row.getString("dimension")), dimension -> new ArrayList<>())
-                        .add(new BreakdownEntry(row.getString("dimension_value"), row.getLong("total_clicks"))));
-        return totals;
+        return breakdownTotals(FIND_BREAKDOWN_TOTALS, Map.of(URL_ID, urlId, FROM, from, TO, to));
+    }
+
+    public Map<StatDimension, List<BreakdownEntry>> findOwnerBreakdownTotals(final long ownerId, final LocalDate from, final LocalDate to) {
+        return breakdownTotals(FIND_OWNER_BREAKDOWN_TOTALS, Map.of(OWNER_ID, ownerId, FROM, from, TO, to));
     }
 
     public List<AnalyticsDay> findOwnerDaily(final long ownerId, final LocalDate from, final LocalDate to) {
@@ -262,6 +270,14 @@ public class LinkStatsRepository {
                 .limit(limit)
                 .map(entry -> new BreakdownEntry(entry.getKey(), entry.getValue()))
                 .toList();
+    }
+
+    private Map<StatDimension, List<BreakdownEntry>> breakdownTotals(final String sql, final Map<String, ?> parameters) {
+        final var totals = new EnumMap<StatDimension, List<BreakdownEntry>>(StatDimension.class);
+        jdbcTemplate.query(sql, parameters, (RowCallbackHandler) row ->
+                totals.computeIfAbsent(StatDimension.valueOf(row.getString("dimension")), dimension -> new ArrayList<>())
+                        .add(new BreakdownEntry(row.getString("dimension_value"), row.getLong("total_clicks"))));
+        return totals;
     }
 
     private Map<Long, Long> sumsByUrl(final String sql, final Map<String, ?> parameters) {
