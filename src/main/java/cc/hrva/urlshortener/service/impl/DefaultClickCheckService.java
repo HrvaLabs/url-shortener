@@ -24,6 +24,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
@@ -66,6 +67,24 @@ public class DefaultClickCheckService implements ClickCheckService {
     }
 
     @Override
+    public boolean anyBlocked(final List<String> urls) {
+        if (urls.isEmpty()) {
+            return false;
+        }
+        final var lists = snapshot.get();
+        if (urls.stream().anyMatch(url -> blockedByRule(lists, url))) {
+            return true;
+        }
+        if (!settingsService.isOn(SettingKey.BLOCKLIST_CHECK)) {
+            return false;
+        }
+        final var lookups = new HashMap<Long, List<String>>();
+        urls.forEach(url -> lookupsFor(lists, url).forEach((sourceId, keys) -> lookups.merge(sourceId, keys,
+                (known, more) -> Stream.concat(known.stream(), more.stream()).distinct().toList())));
+        return !lookups.isEmpty() && firstMatch(lists, lookups).isPresent();
+    }
+
+    @Override
     @Scheduled(fixedDelay = 300_000)
     @EventListener(ApplicationReadyEvent.class)
     public synchronized void reload() {
@@ -73,10 +92,8 @@ public class DefaultClickCheckService implements ClickCheckService {
             final var sources = blocklistSourceRepository.findByEnabledTrue().stream()
                     .filter(source -> source.getAction() == BlocklistAction.BLOCK)
                     .toList();
-            final var allowedDomains = domainRuleRepository.findByType(DomainRuleType.ALLOW).stream()
-                    .map(DomainRule::getDomain)
-                    .collect(Collectors.toUnmodifiableSet());
-            snapshot.set(new Snapshot(namesOf(sources, SourceKind.DOMAINS), namesOf(sources, SourceKind.LINKS), allowedDomains));
+            snapshot.set(new Snapshot(namesOf(sources, SourceKind.DOMAINS), namesOf(sources, SourceKind.LINKS), domainsRuledAs(DomainRuleType.ALLOW),
+                    domainsRuledAs(DomainRuleType.BLOCK)));
         } catch (final RuntimeException exception) {
             log.warn("Could not reload the click-time blocklists, keeping the previous ones exception={}", exception.getClass().getName());
         }
@@ -98,6 +115,20 @@ public class DefaultClickCheckService implements ClickCheckService {
             lists.linkSources().keySet().forEach(id -> lookups.put(id, linkKeys));
         }
         return lookups;
+    }
+
+    private Set<String> domainsRuledAs(final DomainRuleType type) {
+        return domainRuleRepository.findByType(type).stream()
+                .map(DomainRule::getDomain)
+                .collect(Collectors.toUnmodifiableSet());
+    }
+
+    private static boolean blockedByRule(final Snapshot lists, final String url) {
+        return domainsOf(url).stream()
+                .filter(domain -> lists.allowedDomains().contains(domain) || lists.blockedDomains().contains(domain))
+                .findFirst()
+                .map(lists.blockedDomains()::contains)
+                .orElse(false);
     }
 
     private static List<String> domainsOf(final String longUrl) {
@@ -132,9 +163,10 @@ public class DefaultClickCheckService implements ClickCheckService {
                 .collect(Collectors.toUnmodifiableMap(BlocklistSource::getId, BlocklistSource::getName));
     }
 
-    private record Snapshot(Map<Long, String> domainSources, Map<Long, String> linkSources, Set<String> allowedDomains) {
+    private record Snapshot(Map<Long, String> domainSources, Map<Long, String> linkSources, Set<String> allowedDomains,
+                            Set<String> blockedDomains) {
 
-        private static final Snapshot EMPTY = new Snapshot(Map.of(), Map.of(), Set.of());
+        private static final Snapshot EMPTY = new Snapshot(Map.of(), Map.of(), Set.of(), Set.of());
 
         private String nameOf(final long sourceId) {
             return domainSources.getOrDefault(sourceId, linkSources.get(sourceId));

@@ -76,6 +76,8 @@ import cc.hrva.urlshortener.validator.UrlValidator;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import com.google.common.cache.Cache;
+import com.google.common.cache.CacheBuilder;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import tools.jackson.databind.ObjectMapper;
@@ -160,6 +162,9 @@ public class DefaultUrlService implements UrlService {
     private static final String DOMAIN_FIELD = "domain";
     private static final String DOMAIN_NOT_ACTIVE = "This link's domain isn't active, so the link can't be turned on.";
 
+    private static final Duration DROPPED_QUERY_LOG_INTERVAL = Duration.ofMinutes(10);
+    private static final int MAX_DROPPED_QUERY_LOGS = 10_000;
+
     private static final Set<String> BOT_PROBE_PATHS = Set.of(
             "favicon.ico", "favicon.png", "robots.txt", "sitemap.xml",
             ".env", ".git", ".ds_store", "wp-login.php", "wp-admin",
@@ -198,6 +203,10 @@ public class DefaultUrlService implements UrlService {
     private final TemplateEngine templateEngine;
     private final HumanCheckService humanCheckService;
     private final SignInFormCheckService signInFormCheckService;
+    private final Cache<Long, Boolean> droppedQueryLogs = CacheBuilder.newBuilder()
+            .expireAfterWrite(DROPPED_QUERY_LOG_INTERVAL)
+            .maximumSize(MAX_DROPPED_QUERY_LOGS)
+            .build();
 
     @Override
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
@@ -999,12 +1008,25 @@ public class DefaultUrlService implements UrlService {
     }
 
     private View destinationView(final LinkPlace place, final UrlResponse link, final ClickRequest click) {
-        final var location = redirectLocation(link.id(), ForwardedQueries.appendTo(link.longUrl(), click.query()));
+        final var location = redirectLocation(link.id(), withForwardedQuery(link, click));
         if (showsWarningPage(place, link)) {
             log.info("Warning page shown urlId={}", link.id());
             return new LinkWarningView(templateEngine, appProperties.getFrontendUrl(), place.alias(), link.longUrl(), location);
         }
         return redirectTo(location);
+    }
+
+    private String withForwardedQuery(final UrlResponse link, final ClickRequest click) {
+        if (link.ownerEmail() == null) {
+            return link.longUrl();
+        }
+        if (clickCheckService.anyBlocked(ForwardedQueries.linksIn(link.longUrl(), click.query()))) {
+            if (droppedQueryLogs.asMap().putIfAbsent(link.id(), Boolean.TRUE) == null) {
+                log.info("Forwarded query dropped, it carries a blocked link urlId={}", link.id());
+            }
+            return link.longUrl();
+        }
+        return ForwardedQueries.appendTo(link.longUrl(), click.query());
     }
 
     private boolean showsWarningPage(final LinkPlace place, final UrlResponse link) {

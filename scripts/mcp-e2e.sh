@@ -67,7 +67,9 @@
 # PATCH /activate, PUT active:true or a new expiry is 409) and can be deleted; a visit limit counts every click but not bots or HEAD, and
 # 20 opens at once of a link limited to 5 give exactly 5 redirects and 15 answers of 410; a short link's query is forwarded to the
 # destination (its own parameters win, qr dropped, the fragment kept, the host never changes); with Redis paused a create without an
-# account and a link-password unlock are 503 with Retry-After while signed-in and API-key creates go on, and a real unlock limit stays 429;
+# account, a signed-in create, an API-key request, a password reset (any address) and a link-password unlock are 503 with Retry-After
+# while redirects go on, and a real unlock limit stays 429; a forwarded value that is (or decodes to) a blocked link drops the forwarded
+# query (GET and HEAD), and a link without an account forwards nothing;
 # the security chain denies by default: signed-in routes under a public pattern, wrong methods and unknown paths are 401 without a sign-in;
 # with Postgres paused an uncached link and a signed-in request answer 503 within 8 seconds (a small HTML page for a browser on the
 # link, the problem for Accept: application/json) while a cached link still redirects.
@@ -2571,8 +2573,34 @@ for query in '@evil.example' 'x=//evil.example' 'next=https://evil.example/'; do
 done
 http -A "$BROWSER_USER_AGENT" "$BASE/e2e-query?qr"
 expect_eq "$HTTP_LOCATION" "https://e2e-links.com/q?id=7#top" "a QR scan alone forwards nothing"
+http -X POST "$BASE/api/v1/admin/domain-rules" -H "Authorization: Bearer $ADMIN_JWT" -H 'Content-Type: application/json' \
+    -d '{"domain":"e2e-forward-blocked.com","type":"BLOCK","reason":"E2E forwarded links"}'
+expect_eq "$HTTP_STATUS" 200 "the admin blocks e2e-forward-blocked.com"
+FORWARD_RULE_ID=$(jq -r .rule.id <<<"$HTTP_BODY")
+for query in 'utm_source=news&next=https://e2e-forward-blocked.com/login' 'url=https%3A%2F%2Fe2e-forward-blocked.com%2Flogin&utm_source=news' \
+    'redirect=https%253A%252F%252Fe2e-forward-blocked.com' 'q=//e2e-forward-blocked.com/x'; do
+    http -A "$BROWSER_USER_AGENT" "$BASE/e2e-query?$query"
+    expect_eq "$HTTP_STATUS $HTTP_LOCATION" "302 https://e2e-links.com/q?id=7#top" "?$query carries a blocked link, so nothing is forwarded"
+done
+http -I -A "$BROWSER_USER_AGENT" "$BASE/e2e-query?next=https://e2e-forward-blocked.com/login"
+expect_eq "$HTTP_STATUS $HTTP_LOCATION" "302 https://e2e-links.com/q?id=7#top" "a HEAD drops it the same way"
+http -A "$BROWSER_USER_AGENT" "$BASE/e2e-query?next=https://e2e-forward-fine.com/login"
+expect_eq "$HTTP_LOCATION" "https://e2e-links.com/q?id=7&next=https://e2e-forward-fine.com/login#top" "a link that passes the checks is forwarded"
+http -X DELETE "$BASE/api/v1/admin/domain-rules/$FORWARD_RULE_ID" -H "Authorization: Bearer $ADMIN_JWT"
+expect_eq "$HTTP_STATUS" 204 "the domain rule is removed"
+http -X POST "$BASE/api/v1/urls" -H 'CF-Connecting-IP: 203.0.113.70' -H 'Content-Type: application/json' -d '{"longUrl":"https://e2e-links.com/anonymous-query?id=7"}'
+expect_eq "$HTTP_STATUS" 201 "a link without an account"
+ANON_QUERY_ALIAS=$(jq -r .shortUrl <<<"$HTTP_BODY")
+http -A "$BROWSER_USER_AGENT" "$BASE/$ANON_QUERY_ALIAS?utm_source=news&next=https://e2e-forward-fine.com/"
+if [[ $HTTP_STATUS == 302 ]]; then
+    expect_eq "$HTTP_LOCATION" "https://e2e-links.com/anonymous-query?id=7" "a link without an account forwards nothing: its checked destination as stored"
+else
+    expect_eq "$HTTP_STATUS" 200 "a link without an account answers its warning page"
+    expect_contains "$HTTP_BODY" 'href="https://e2e-links.com/anonymous-query?id=7"' "whose way on is the checked destination as stored"
+    expect_eq "$(grep -c 'e2e-forward-fine' <<<"$HTTP_BODY")" 0 "with nothing forwarded"
+fi
 
-section "31e. Redis down: links without an account and password checks wait, the rest goes on"
+section "31e. Redis down: creates, API key requests, account emails and password checks wait, redirects go on"
 session_login 192.0.2.30 "$USER_EMAIL" "$SESSION_PASSWORD"
 expect_eq "$HTTP_STATUS" 200 "the user signs in while Redis is up"
 DOWN_JWT=$(jq -r .token <<<"$HTTP_BODY")
@@ -2588,9 +2616,19 @@ expect_eq "$HTTP_STATUS $(header_value retry-after) $(header_value content-type)
 expect_eq "$(jq -r .detail <<<"$HTTP_BODY")" "Links without an account can't be made right now. Try again in a minute, or sign in." "and says why"
 expect_eq "$(psql_value "select count(*) from url where long_url = 'https://e2e-links.com/anonymous-while-down';")" 0 "nothing is saved"
 http -X POST "$BASE/api/v1/urls" -H "Authorization: $DOWN_JWT" -H 'Content-Type: application/json' -d '{"longUrl":"https://e2e-links.com/signed-in-while-down"}'
-expect_eq "$HTTP_STATUS" 201 "a signed-in create goes on"
+expect_eq "$HTTP_STATUS $(header_value retry-after) $(jq -r .detail <<<"$HTTP_BODY")" "503 60 Links can't be made right now. Try again in a minute." \
+    "a signed-in create is 503 too (v2.27)"
 http -X POST "$BASE/api/v1/urls" -H "X-Api-Key: $OWNER_KEY" -H 'Content-Type: application/json' -d '{"longUrl":"https://e2e-links.com/key-while-down"}'
-expect_eq "$HTTP_STATUS" 201 "an API-key create goes on"
+expect_eq "$HTTP_STATUS $(header_value retry-after) $(jq -r .detail <<<"$HTTP_BODY")" "503 60 API key requests are paused for a moment. Try again in a minute." \
+    "an API-key request is 503 before it reaches the create"
+expect_eq "$(psql_value "select count(*) from url where long_url in ('https://e2e-links.com/signed-in-while-down', 'https://e2e-links.com/key-while-down');")" 0 "neither is saved"
+http -X POST "$BASE/api/v1/auth/password-reset" -H 'CF-Connecting-IP: 203.0.113.82' -H 'Content-Type: application/json' -d "{\"email\":\"$USER_EMAIL\"}"
+expect_eq "$HTTP_STATUS $(header_value retry-after) $(jq -r .detail <<<"$HTTP_BODY")" "503 60 Account emails are paused for a moment. Try again in a minute." \
+    "a password reset is 503 while the email limits can't count"
+http -X POST "$BASE/api/v1/auth/password-reset" -H 'CF-Connecting-IP: 203.0.113.82' -H 'Content-Type: application/json' -d '{"email":"nobody-e2e@example.com"}'
+expect_eq "$HTTP_STATUS $(jq -r .detail <<<"$HTTP_BODY")" "503 Account emails are paused for a moment. Try again in a minute." "the same for an address no account uses"
+http -A "$BROWSER_USER_AGENT" "$BASE/e2e-query?x=1"
+expect_eq "$HTTP_STATUS" 302 "a redirect still works"
 unlock_e2e_locked 203.0.113.81 secret-pw
 expect_eq "$HTTP_STATUS $(header_value retry-after) $(jq -r .detail <<<"$HTTP_BODY")" "503 60 Password checks are paused for a moment. Try again in a minute." \
     "the link-password unlock is 503 while the limiter is down"

@@ -92,4 +92,35 @@ class ForwardedQueriesTest {
         }
     }
 
+    @ParameterizedTest
+    @CsvSource(delimiterString = " | ", value = {
+            "url=https://evil.example/login | https://evil.example/login",
+            "next=http://evil.example | http://evil.example",
+            "redirect=HTTPS://Evil.example/a?b=1 | https://Evil.example/a?b=1",
+            "q=https%3A%2F%2Fevil.example%2Flogin | https://evil.example/login",
+            "q=https%253A%252F%252Fevil.example | https://evil.example",
+            "q=%2F%2Fevil.example | https://evil.example",
+            "q=//evil.example | https://evil.example",
+            "q=https:%5C%5Cevil.example | https://evil.example",
+            "q=https:evil.example | https://evil.example",
+            "q=ht%09tps://evil.example | https://evil.example",
+            "q=%20https://evil.example | https://evil.example"
+    })
+    void aForwardedValueThatIsOrDecodesToALinkIsFound(final String query, final String link) {
+        assertThat(ForwardedQueries.linksIn("https://shop.example/offer", query)).contains(link);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"q=hello", "utm_source=news&page=2", "q=evil.example", "q=ftp://evil.example", "q=javascript:alert(1)", "url", "url=", "q=/home"})
+    void aForwardedValueThatIsNoLinkIsNotChecked(final String query) {
+        assertThat(ForwardedQueries.linksIn("https://shop.example/offer", query)).isEmpty();
+    }
+
+    @Test
+    void onlyTheValuesThatWouldBeForwardedAreChecked() {
+        assertThat(ForwardedQueries.linksIn("https://shop.example/offer?next=/home", "next=https://evil.example&qr=https://evil.example&u=https://a.example&v=https://a.example"))
+                .containsExactly("https://a.example");
+        assertThat(ForwardedQueries.linksIn("https://shop.example/offer", null)).isEmpty();
+    }
+
 }

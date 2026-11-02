@@ -144,6 +144,7 @@ class UrlServiceTest {
     private static final String FRONTEND = "https://hrva.cc";
     private static final String CLIENT_IP = "203.0.113.7";
     private static final ClickRequest CLICK = ClickRequest.of(CLIENT_IP, "UA", "https://t.co/x", "HR");
+    private static final User OWNER = User.builder().id(42L).email("ana@hrva.cc").build();
     private static final String CREATE_LIMIT_REFUSAL = "You've created a lot of links in a short time. Try again in an hour.";
     private static final String BLOCKED_WHILE_EDITING = "This link was blocked while you were editing it. Reload and try again.";
     private static final DomainRoute GO = new DomainRoute(7L, "go.example.com", CustomDomainStatus.ACTIVE, true);
@@ -4329,19 +4330,20 @@ class UrlServiceTest {
     }
 
     @Test
-    void theWarningPageContinuesWithTheForwardedQuery() {
+    void theWarningPageOfALinkWithoutAnAccountContinuesWithoutTheVisitorsQuery() {
         when(appProperties.getFrontendUrl()).thenReturn(FRONTEND);
         when(urlRepository.findServed(null, "abc")).thenReturn(Optional.of(storedLink().longUrl(RANDOM_LINK).active(true).warningPage(true).build()));
 
-        assertThat(urlServiceWithMeters().redirectResultUrl("abc", CLICK.withQuery("ref=mail&qr"))).isInstanceOfSatisfying(LinkWarningView.class, page -> {
+        assertThat(urlServiceWithMeters().redirectResultUrl("abc", CLICK.withQuery("ref=mail&next=https://evil.example&qr"))).isInstanceOfSatisfying(LinkWarningView.class, page -> {
             assertThat(page.destination()).isEqualTo(RANDOM_LINK);
-            assertThat(page.location()).isEqualTo(RANDOM_LINK + "?ref=mail");
+            assertThat(page.location()).isEqualTo(RANDOM_LINK);
         });
+        verify(clickCheckService, never()).anyBlocked(any());
     }
 
     @Test
     void aRedirectForwardsTheQueryAndTheDestinationKeepsItsOwnParametersAndFragment() {
-        final var url = Url.builder().id(7L).shortUrl("abc").longUrl("https://example.com/a?id=7#top").visits(0L).active(true).build();
+        final var url = Url.builder().id(7L).shortUrl("abc").longUrl("https://example.com/a?id=7#top").visits(0L).active(true).owner(OWNER).build();
         when(urlRepository.findServed(null, "abc")).thenReturn(Optional.of(url));
 
         assertThat(locationOf(urlServiceWithMeters().redirectResultUrl("abc", CLICK.withQuery("utm_source=news&id=9&qr"))))
@@ -4349,10 +4351,51 @@ class UrlServiceTest {
     }
 
     @Test
+    void aLinkWithoutAnAccountRedirectsToItsCheckedDestinationWithoutTheVisitorsQuery() {
+        final var url = Url.builder().id(7L).shortUrl("abc").longUrl("https://example.com/a?id=7").visits(0L).active(true).build();
+        when(urlRepository.findServed(null, "abc")).thenReturn(Optional.of(url));
+        final var service = urlServiceWithMeters();
+
+        assertThat(locationOf(service.redirectResultUrl("abc", CLICK.withQuery("utm_source=news&url=https://evil.example"))))
+                .isEqualTo("https://example.com/a?id=7");
+        assertThat(locationOf(service.redirectResultUrl("abc", CLICK.asHead().withQuery("utm_source=news"))))
+                .isEqualTo("https://example.com/a?id=7");
+        verify(clickCheckService, never()).anyBlocked(any());
+    }
+
+    @Test
+    @ExtendWith(OutputCaptureExtension.class)
+    void aForwardedValueThatIsABlockedLinkDropsTheWholeForwardedQueryAndIsLoggedOncePerLink(final CapturedOutput output) {
+        final var url = Url.builder().id(7L).shortUrl("abc").longUrl("https://example.com/a?id=7#top").visits(0L).active(true).owner(OWNER).build();
+        when(urlRepository.findServed(null, "abc")).thenReturn(Optional.of(url));
+        when(clickCheckService.anyBlocked(List.of("https://evil.example/login"))).thenReturn(true);
+        final var service = urlServiceWithMeters();
+
+        for (final var query : List.of("utm_source=news&next=https%3A%2F%2Fevil.example%2Flogin&qr", "redirect=https%253A%252F%252Fevil.example%252Flogin")) {
+            assertThat(locationOf(service.redirectResultUrl("abc", CLICK.withQuery(query)))).isEqualTo("https://example.com/a?id=7#top");
+        }
+        assertThat(locationOf(service.redirectResultUrl("abc", CLICK.asHead().withQuery("q=HTTPS://evil.example/login"))))
+                .isEqualTo("https://example.com/a?id=7#top");
+
+        assertThat(output.getAll().lines().filter(line -> line.contains("Forwarded query dropped, it carries a blocked link urlId=7")).count()).isOne();
+        assertThat(output.getAll()).doesNotContain("evil.example");
+    }
+
+    @Test
+    void aForwardedLinkThatPassesTheChecksIsForwardedAndTheDestinationsOwnParameterStillWins() {
+        final var url = Url.builder().id(7L).shortUrl("abc").longUrl("https://example.com/a?next=/home").visits(0L).active(true).owner(OWNER).build();
+        when(urlRepository.findServed(null, "abc")).thenReturn(Optional.of(url));
+
+        assertThat(locationOf(urlServiceWithMeters().redirectResultUrl("abc", CLICK.withQuery("next=https://evil.example&url=https://shop.example/cart&qr"))))
+                .isEqualTo("https://example.com/a?next=/home&url=https://shop.example/cart");
+        verify(clickCheckService).anyBlocked(List.of("https://shop.example/cart"));
+    }
+
+    @Test
     void aCachedRedirectForwardsTheQueryToo() {
         final var cache = org.mockito.Mockito.mock(org.springframework.cache.Cache.class);
         when(cacheManager.getCache("urls")).thenReturn(cache);
-        final var cached = new UrlResponse(5L, "https://example.com/a", "abc", null, null, 0L, null, true, "ACTIVE", java.util.Set.of(), false, null);
+        final var cached = new UrlResponse(5L, "https://example.com/a", "abc", null, null, 0L, null, true, "ACTIVE", java.util.Set.of(), false, OWNER.getEmail());
         when(cache.get("abc")).thenReturn(() -> cached);
 
         assertThat(locationOf(urlServiceWithMeters().redirectResultUrl("abc", CLICK.withQuery("x=1&city=%C4%90akovo"))))
@@ -4360,8 +4403,18 @@ class UrlServiceTest {
     }
 
     @Test
+    void aCachedLinkWithoutAnAccountForwardsNothing() {
+        final var cache = org.mockito.Mockito.mock(org.springframework.cache.Cache.class);
+        when(cacheManager.getCache("urls")).thenReturn(cache);
+        final var cached = new UrlResponse(5L, "https://example.com/a", "abc", null, null, 0L, null, true, "ACTIVE", java.util.Set.of(), false, null);
+        when(cache.get("abc")).thenReturn(() -> cached);
+
+        assertThat(locationOf(urlServiceWithMeters().redirectResultUrl("abc", CLICK.withQuery("x=1")))).isEqualTo("https://example.com/a");
+    }
+
+    @Test
     void aRedirectOnACustomDomainForwardsTheQuery() {
-        final var url = Url.builder().id(7L).shortUrl("menu").longUrl("https://cafe.example/menu").visits(0L).active(true).build();
+        final var url = Url.builder().id(7L).shortUrl("menu").longUrl("https://cafe.example/menu").visits(0L).active(true).owner(OWNER).build();
         when(urlRepository.findServed(7L, "menu")).thenReturn(Optional.of(url));
 
         assertThat(locationOf(urlServiceWithMeters().redirectResultUrl(GO, "menu", CLICK.withQuery("table=4"))))

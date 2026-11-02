@@ -290,6 +290,54 @@ class DefaultClickCheckServiceTest {
         return context;
     }
 
+    @Test
+    void aForwardedLinkOnABlockListIsBlockedInOneLookupAndNeverBlocksTheShortLink() {
+        lists(TIF, OPENPHISH);
+        when(blocklistStore.matchingSources(any())).thenReturn(Set.of(2L));
+        clickCheckService.reload();
+
+        assertThat(clickCheckService.anyBlocked(List.of("https://shop.example/cart", PHISHING_LINK))).isTrue();
+
+        verify(blocklistStore, times(1)).matchingSources(lookups.capture());
+        assertThat(lookups.getValue()).containsOnlyKeys(1L, 2L);
+        assertThat(lookups.getValue().get(1L)).containsExactlyInAnyOrder("shop.example", "login.jofogas.cards", "jofogas.cards");
+        assertThat(lookups.getValue().get(2L)).containsAll(PHISHING_LINK_KEYS).contains("shop.example/cart");
+        verifyNoInteractions(moderationService);
+    }
+
+    @Test
+    void aForwardedLinkOnABlockedDomainIsBlockedFromMemoryEvenWithTheListsOff() {
+        allowed();
+        ruled(DomainRuleType.BLOCK, "jofogas.cards");
+        clickCheckService.reload();
+        SettingsServiceFixtures.turnOff(settingsService, SettingKey.BLOCKLIST_CHECK);
+
+        assertThat(clickCheckService.anyBlocked(List.of(PHISHING_LINK))).isTrue();
+        assertThat(clickCheckService.anyBlocked(List.of("https://shop.example/cart"))).isFalse();
+
+        verifyNoInteractions(blocklistStore, moderationService);
+    }
+
+    @Test
+    void theMostSpecificDomainRuleDecidesForAForwardedLink() {
+        ruled(DomainRuleType.BLOCK, "jofogas.cards");
+        allowed("login.jofogas.cards");
+        clickCheckService.reload();
+
+        assertThat(clickCheckService.anyBlocked(List.of(PHISHING_LINK))).isFalse();
+        assertThat(clickCheckService.anyBlocked(List.of("https://pay.jofogas.cards/"))).isTrue();
+    }
+
+    @Test
+    void noForwardedLinksAsksNothing() {
+        lists(TIF);
+        clickCheckService.reload();
+
+        assertThat(clickCheckService.anyBlocked(List.of())).isFalse();
+
+        verifyNoInteractions(blocklistStore, moderationService);
+    }
+
     private void lists(final BlocklistSource... sources) {
         when(blocklistSourceRepository.findByEnabledTrue()).thenReturn(List.of(sources));
     }
@@ -297,6 +345,12 @@ class DefaultClickCheckServiceTest {
     private void allowed(final String... domains) {
         when(domainRuleRepository.findByType(DomainRuleType.ALLOW)).thenReturn(Arrays.stream(domains)
                 .map(domain -> DomainRule.builder().domain(domain).type(DomainRuleType.ALLOW).build())
+                .toList());
+    }
+
+    private void ruled(final DomainRuleType type, final String... domains) {
+        when(domainRuleRepository.findByType(type)).thenReturn(Arrays.stream(domains)
+                .map(domain -> DomainRule.builder().domain(domain).type(type).build())
                 .toList());
     }
 
