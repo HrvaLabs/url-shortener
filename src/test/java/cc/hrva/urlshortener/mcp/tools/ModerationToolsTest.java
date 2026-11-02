@@ -806,8 +806,11 @@ class ModerationToolsTest {
             assertThat(tool.annotations().destructiveHint()).isEqualTo(DESTRUCTIVE_TOOLS.contains(tool.name()));
             assertThat(tool.annotations().readOnlyHint()).isEqualTo(!DESTRUCTIVE_TOOLS.contains(tool.name()));
         });
-        assertThat(tools.get("block_domain").description()).contains("subdomains", "50", "email");
-        assertThat(tools.get("block_user").description()).contains("deactivate", "50");
+        assertThat(tools.get("block_domain").description()).contains("subdomains", "too many links", "email").doesNotContain("50");
+        assertThat(tools.get("block_user").description()).contains("deactivate", "too many").doesNotContain("50");
+        assertThat(tools.get("block_link").description()).contains("block_domain", "delete_link");
+        assertThat(tools.get("possible_scammers").description()).doesNotContain("7 days", "24 hours", "3 or more");
+        assertThat(tools.get("check_url").description()).doesNotContain("Spamhaus", "domain age", "lookalike");
         assertThat(tools.get("delete_link").description()).contains("Permanently", "block_link");
     }
 

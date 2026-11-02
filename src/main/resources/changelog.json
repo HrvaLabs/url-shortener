@@ -57,6 +57,13 @@
           ]
         },
         {
+          "title": "AI Connector",
+          "icon": "sparkles",
+          "items": [
+            "MCP tool descriptions say when to use each tool and what happens when a call is refused."
+          ]
+        },
+        {
           "title": "Privacy",
           "icon": "lock",
           "items": [

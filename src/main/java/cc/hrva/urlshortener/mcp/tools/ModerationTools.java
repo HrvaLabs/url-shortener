@@ -134,11 +134,11 @@ public class ModerationTools {
     @McpTool(
             name = POSSIBLE_SCAMMERS,
             title = "Possible scammers",
-            description = "Admin only. Lists active hrva.cc accounts that match the possible-scammer signal, newest first, 20 per page: "
-                    + "an account under 7 days old with 2 or more flagged or blocked links, an account with 3 or more blocked links, or "
-                    + "10 or more links within 24 hours of signup. Each line shows the masked email with the user id after #, the account "
-                    + "age, and how many of its links are active, waiting for review and blocked. The signal is a hint, not proof: check "
-                    + "the account's links in review_queue before using block_user.",
+            description = "Admin only. Lists active hrva.cc accounts that hrva.cc's checks mark as possible "
+                    + "scammers, newest first, 20 per page. Each line shows the masked email with the user id after "
+                    + "#, the account age, and how many of its links are active, waiting for review and blocked. "
+                    + "The mark is a hint, not proof: check the account's links in review_queue before using "
+                    + "block_user.",
             annotations = @McpTool.McpAnnotations(
                     title = "Possible scammers",
                     readOnlyHint = true,
@@ -155,10 +155,11 @@ public class ModerationTools {
     @McpTool(
             name = CHECK_URL,
             title = "Check a URL",
-            description = "Admin only. Runs every hrva.cc safety check on a URL without creating a link, and shows the verdict with every "
-                    + "matching reason: domain rules, blocklist sources, Spamhaus, domain age and lookalike heuristics. BLOCK means hrva.cc "
-                    + "treats it as unsafe and refuses new links to it, FLAG means new links to it go to the review queue, ALLOWED means "
-                    + "an admin allow rule trusts its domain, and CLEAN means nothing matched. Use it to judge a destination before blocking.",
+            description = "Admin only. Runs every hrva.cc safety check on a URL without creating a link, and "
+                    + "shows the verdict with every matching reason. BLOCK means hrva.cc treats it as unsafe and "
+                    + "refuses new links to it, FLAG means new links to it go to the review queue, ALLOWED means an "
+                    + "admin allow rule trusts its domain, and CLEAN means nothing matched. Use it to judge a "
+                    + "destination before blocking.",
             annotations = @McpTool.McpAnnotations(
                     title = "Check a URL",
                     readOnlyHint = true,
@@ -175,9 +176,11 @@ public class ModerationTools {
     @McpTool(
             name = BLOCK_LINK,
             title = "Block a link",
-            description = "Admin only. Blocks one hrva.cc short link by its urlId, as review_queue shows it. The link stops redirecting, "
-                    + "its review queue entry is closed, and its owner is emailed that the link was blocked as unsafe. Use it for a single "
-                    + "bad link. Only the hrva.cc dashboard can unblock it.",
+            description = "Admin only. Blocks one hrva.cc short link by its urlId, as review_queue shows it. "
+                    + "The link stops redirecting, its review queue entry is closed, and its owner is emailed that "
+                    + "the link was blocked as unsafe. Use it for a single bad link; for a domain that exists to "
+                    + "scam use block_domain, which covers every link on it, and use delete_link only to remove a "
+                    + "link for good without keeping a record. Only the hrva.cc dashboard can unblock it.",
             annotations = @McpTool.McpAnnotations(
                     title = "Block a link",
                     readOnlyHint = false,
@@ -196,16 +199,17 @@ public class ModerationTools {
     @McpTool(
             name = BLOCK_DOMAIN,
             title = "Block a domain",
-            description = "Admin only. Blocks a domain and all its subdomains, so blocking evil.example also blocks www.evil.example and "
-                    + "login.evil.example. It only works when hrva.cc's own checks flagged every active link on the domain and at least one "
-                    + "link on it is flagged that way or already blocked; a visitor report alone doesn't count. Otherwise it changes nothing "
-                    + "and asks you to use the dashboard. It saves a block rule that refuses new links to the domain, and blocks every "
-                    + "active link on it, at most 50 per call; when more would be affected it changes nothing and asks you to use the "
-                    + "dashboard. Every affected link owner is emailed. Use it only for a domain that exists to scam, such as a lookalike "
-                    + "registered days ago, and never for a shared host such as google.com, github.io, a cloud storage host or another link "
-                    + "shortener, because every link there would be blocked. A shared hosting domain such as github.io, pages.dev or "
-                    + "ddns.net is always refused; block the one site on it instead, such as evil.github.io. Only the hrva.cc dashboard can "
-                    + "undo it.",
+            description = "Admin only. Blocks a domain and all its subdomains, so blocking evil.example also "
+                    + "blocks www.evil.example and login.evil.example. It saves a block rule that refuses new links "
+                    + "to the domain, blocks every active link on it, and emails every affected link owner. It only "
+                    + "works when hrva.cc's own checks flagged every active link on the domain and at least one "
+                    + "link on it is flagged that way or already blocked; a visitor report alone doesn't count. "
+                    + "When that isn't so, or when too many links would be affected, it changes nothing and asks "
+                    + "you to use the dashboard. Use it only for a domain that exists to scam, such as a lookalike "
+                    + "registered days ago. Never use it for a shared host such as google.com, a cloud storage host "
+                    + "or another link shortener, because every link there would be blocked: a shared hosting "
+                    + "domain such as github.io, pages.dev or ddns.net is always refused, so block the one site on "
+                    + "it instead, such as evil.github.io. Only the hrva.cc dashboard can undo it.",
             annotations = @McpTool.McpAnnotations(
                     title = "Block a domain",
                     readOnlyHint = false,
@@ -224,12 +228,14 @@ public class ModerationTools {
     @McpTool(
             name = BLOCK_USER,
             title = "Block a user",
-            description = "Admin only. Blocks an hrva.cc account by its user id, the number after # in review_queue or possible_scammers. "
-                    + "It deactivates the account, so it can no longer sign in or create links, and blocks all its active links, at most "
-                    + "50 per call; when it has more it changes nothing and asks you to use the dashboard. The owner isn't emailed about "
-                    + "each link. Admin accounts can't be blocked. It only works for an account with at least one blocked link or one that "
-                    + "hrva.cc's own checks flagged and that still waits in review_queue; a visitor report alone doesn't count. Use it only "
-                    + "when the account itself is clearly a scammer, not for one bad link. Only the hrva.cc dashboard can undo it.",
+            description = "Admin only. Blocks an hrva.cc account by its user id, the number after # in "
+                    + "review_queue or possible_scammers. It deactivates the account, so it can no longer sign in "
+                    + "or create links, and blocks all its active links; when it has too many it changes nothing "
+                    + "and asks you to use the dashboard. The owner isn't emailed about each link. Admin accounts "
+                    + "can't be blocked. It only works for an account with at least one blocked link or one that "
+                    + "hrva.cc's own checks flagged and that still waits in review_queue; a visitor report alone "
+                    + "doesn't count. Use it only when the account itself is clearly a scammer, not for one bad "
+                    + "link. Only the hrva.cc dashboard can undo it.",
             annotations = @McpTool.McpAnnotations(
                     title = "Block a user",
                     readOnlyHint = false,

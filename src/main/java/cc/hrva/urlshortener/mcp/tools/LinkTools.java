@@ -66,8 +66,13 @@ public class LinkTools {
     @McpTool(
             name = LIST_LINKS,
             title = "List my links",
-            description = "Lists the signed-in user's hrva.cc short links, newest first, 20 per page. "
-                    + "Each line shows the short link, its destination, its visit count and its status.",
+            description = "Lists the signed-in user's own hrva.cc short links, newest first, 20 per page; "
+                    + "links of other accounts never appear. Use it to find a link's short URL before calling "
+                    + "link_stats. Each line shows the short link, its destination, its visit count and its status: "
+                    + "ACTIVE (it redirects), LIMIT_REACHED (its visit limit is used up), EXPIRED (its expiry has "
+                    + "passed), BLOCKED (hrva.cc blocked it as unsafe) or DEACTIVATED (it was turned off). search "
+                    + "and tag can be used together, and then a link must match both. For the next page, call it "
+                    + "again with page one higher; No links found. means there are no more.",
             annotations = @McpTool.McpAnnotations(
                     title = "List my links",
                     readOnlyHint = true,
@@ -86,9 +91,18 @@ public class LinkTools {
     @McpTool(
             name = SHORTEN_URL,
             title = "Shorten a URL",
-            description = "Creates a hrva.cc short link in the signed-in user's account. "
-                    + "Returns the full short URL and its destination, plus the visit limit and expiry when set. "
-                    + "Every link created here gets the tag ai.",
+            description = "Creates a new hrva.cc short link in the signed-in user's account. Each call makes "
+                    + "a new link, so calling it again makes a second one; use list_links to find links that "
+                    + "already exist. The destination gets the same safety checks as a link made on the hrva.cc "
+                    + "website. Returns the full short URL and its destination, plus the visit limit and expiry "
+                    + "when set. Every link created here gets the tag ai. A refused call creates nothing and "
+                    + "returns the reason, for example \"This destination is on a blocklist and can't be shortened. "
+                    + "If you think that's a mistake, contact us.\", \"Links to other URL shorteners can't be "
+                    + "shortened. Use the final destination instead.\", \"This short URL is already taken. Try "
+                    + "another.\" or \"Custom short URL can only contain letters, numbers, hyphens and underscores\". "
+                    + "Once the visit limit is used up or the expiry has passed, the short link stops redirecting "
+                    + "and visitors are told it is no longer available; the owner can turn it back on by editing it "
+                    + "on hrva.cc.",
             annotations = @McpTool.McpAnnotations(
                     title = "Shorten a URL",
                     readOnlyHint = false,
@@ -112,9 +126,11 @@ public class LinkTools {
     @McpTool(
             name = LINK_STATS,
             title = "Link stats",
-            description = "Shows click statistics for one of the signed-in user's hrva.cc short links over the last 7, 30, 90 or 365 days "
-                    + "(30 by default): clicks, daily unique visitors, bot clicks, top referrers, countries and devices, all-time visits, "
-                    + "last visit and creation time (times in UTC).",
+            description = "Shows click statistics for one of the signed-in user's own hrva.cc short links "
+                    + "over the last 7, 30, 90 or 365 days (30 by default): clicks, daily unique visitors, bot "
+                    + "clicks, top referrers, countries and devices, all-time visits, last visit and creation time "
+                    + "(times in UTC). When the short link isn't known, call list_links first. It only works for "
+                    + "the user's own links; for any other link it answers No link hrva.cc/<alias> in your account.",
             annotations = @McpTool.McpAnnotations(
                     title = "Link stats",
                     readOnlyHint = true,

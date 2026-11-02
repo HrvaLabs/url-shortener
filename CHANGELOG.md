@@ -37,6 +37,9 @@ Edit a link from the dashboard, turn expired and used-up links back on and chang
 - PUT /api/v1/urls/{id} works with an API key for your own links, under the same rules as the dashboard. It takes active to turn a link back on or off, and answers 429 with Retry-After on the sixth destination change of the day.
 - GET /api/v1/urls/{id}/destination-change says whether a link's destination can change and lists what is missing, and a refused change answers 403 with the same list. The developers page documents both.
 
+### ✨ AI Connector
+- MCP tool descriptions say when to use each tool and what happens when a call is refused.
+
 ### 🔒 Privacy
 - Every destination change is kept with its link: the old and new destination, when, and which account made it. Admins can read it, and the audit log records it too. The privacy and security pages say so.
 - Requests for more custom domains are in your account export, and are deleted with your account.
