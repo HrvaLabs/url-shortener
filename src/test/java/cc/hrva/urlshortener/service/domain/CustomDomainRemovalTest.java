@@ -359,6 +359,18 @@ class CustomDomainRemovalTest {
     }
 
     @Test
+    void anOwnerRemovalOfADomainHrvaTurnedOffIsRecordedAsHrvas() {
+        for (final var reason : List.of("ADMIN", "DOMAIN_RULE", "BLOCKLIST")) {
+            final var id = domain(reason.toLowerCase(Locale.ROOT).replace('_', '-') + ".example.com", "DISABLED", "cf-" + reason);
+            jdbcTemplate.update("update custom_domain set disabled_reason = ? where id = ?", reason, id);
+
+            customDomainRemoval.remove(id, DomainLinkMode.DEACTIVATE, OWNER);
+
+            assertThat(removedByAdmin(id)).as(reason).isTrue();
+        }
+    }
+
+    @Test
     void onlyAnAdminRemovalEmails() {
         final var removedByItsOwner = domain("mine.example.com", "ACTIVE", "cf-1");
         link(removedByItsOwner, "cafe", true);

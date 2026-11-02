@@ -74,14 +74,14 @@ public class CustomDomainRemoval {
         final var ownerEmail = actor.admin() && from != CustomDomainStatus.REJECTED && domain.getOwner() != null
                 ? domain.getOwner().getEmail()
                 : null;
-        if (mode == DomainLinkMode.MOVE && !actor.admin() && from == CustomDomainStatus.DISABLED
-                && TURNED_OFF_BY_HRVA.contains(domain.getDisabledReason())) {
+        final var turnedOffByHrva = from == CustomDomainStatus.DISABLED && TURNED_OFF_BY_HRVA.contains(domain.getDisabledReason());
+        if (mode == DomainLinkMode.MOVE && !actor.admin() && turnedOffByHrva) {
             log.info("Custom domain removal with its links moved refused, hrva.cc turned it off domainId={} reason={}", domainId,
                     domain.getDisabledReason());
             throw new CustomDomainConflictException(NO_MOVE_AFTER_TURN_OFF);
         }
         final var links = from == CustomDomainStatus.PENDING_REVIEW ? List.<DomainLink>of() : urlDomainMoves.linksOf(domainId);
-        if (customDomainRepository.markDeleted(domainId, from, actor.admin(), LocalDateTime.now(clock)) != 1) {
+        if (customDomainRepository.markDeleted(domainId, from, actor.admin() || turnedOffByHrva, LocalDateTime.now(clock)) != 1) {
             log.warn("Custom domain could not be marked removed under its lock domainId={} from={}", domainId, from);
             throw new CustomDomainNotFoundException(NOT_FOUND);
         }

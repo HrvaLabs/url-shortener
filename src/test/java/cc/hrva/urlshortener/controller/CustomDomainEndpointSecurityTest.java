@@ -106,6 +106,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.nullValue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
@@ -412,6 +413,25 @@ class CustomDomainEndpointSecurityTest {
         assertThat(countOf(ANA)).isEqualTo(2);
         assertThat(countOf(BOB)).isOne();
         verifyNoInteractions(customDomainProvisioner);
+    }
+
+    @Test
+    void useAgainAfterAnAdminTurnOffGoesToReview() throws Exception {
+        final var turnedOff = domain(ANA, "off.example.com", "DISABLED");
+        jdbcTemplate.update("update custom_domain set activated_at = ?, disabled_reason = 'ADMIN', disabled_note = 'Phishing', disabled_at = ? where id = ?",
+                NOW.minusDays(5), NOW.minusDays(1), turnedOff);
+        mockMvc.perform(as(ANA_TOKEN, delete(DOMAINS + "/" + turnedOff).param("links", "DEACTIVATE"))).andExpect(status().isOk());
+        mockMvc.perform(as(ANA_TOKEN, get(DOMAINS)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.domains[0].useAgain").value("NEEDS_REVIEW"));
+
+        mockMvc.perform(as(ANA_TOKEN, post(DOMAINS + "/" + turnedOff + "/use-again")))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.status").value("PENDING_REVIEW"));
+
+        assertThat(jdbcTemplate.queryForObject("select removed_by_admin from custom_domain where id = ?", Boolean.class, turnedOff)).isTrue();
+        verifyNoInteractions(customDomainProvisioner);
+        verify(customDomainSetup, never()).liveTotal(anyLong());
     }
 
     @Test
