@@ -1036,7 +1036,7 @@ class DefaultSendingEmailServiceTest {
                         "Reset your hrva.cc password", "Reset your password", "Someone asked to reset the password of your hrva.cc account.",
                         List.of("https://hrva.cc/reset-password/reset-token-41", "https://hrva.cc/reset-password/reset-token-41")),
                 Arguments.of("verify_email", (Consumer<DefaultSendingEmailService>) service -> service.sendVerificationEmail(OWNER, verificationToken),
-                        "Verify your email for hrva.cc", "Verify your email", "Welcome to hrva.cc. Confirm your email address to activate your account.",
+                        "Verify your email for hrva.cc", "Verify your email", "Welcome to hrva.cc. Verify your email address to activate your account.",
                         List.of("https://hrva.cc/verify-email/verify-token-42", "https://hrva.cc/verify-email/verify-token-42")),
                 Arguments.of("account_deactivated", (Consumer<DefaultSendingEmailService>) service -> service.sendEmailAccountDeactivated(OWNER),
                         "Your hrva.cc account was deactivated", "Account deactivated",
