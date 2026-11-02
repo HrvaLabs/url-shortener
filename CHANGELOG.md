@@ -6,7 +6,7 @@ All notable changes to hrva.cc — the URL shortener.
 
 ## [v2.27] — 2026-11-01
 
-Edit a link from the dashboard: its visit limit, expiry, password and tags, turning expired and used-up links back on, and changing where it points.
+Edit a link from the dashboard, turn expired and used-up links back on and change where a link points, ask for more custom domains, and see where an app will send you before you allow it.
 
 ### 🔗 Links
 - Each link in the dashboard has an Edit action. Change or remove its visit limit and expiry, add, change or remove its password, and change its tags.
@@ -17,10 +17,21 @@ Edit a link from the dashboard: its visit limit, expiry, password and tags, turn
 - A link's destination can change 5 times a day.
 - Activating a link that used all its clicks or has expired says to edit it first, and the help pages and the bio page hint point to Edit.
 
+### 🌐 Custom Domains
+- An account at its custom domain limit can ask for more from the Custom domains card in Settings: say how many in total, up to 20, and what for. An admin approves or declines it, and you get an email either way. One request can wait at a time, and you can withdraw it while it waits.
+
 ### 🛡️ Link Safety
 - A new destination gets the same checks as a new link. A destination that would be refused for a new link is refused, and one that would be sent to review is saved and sent to review.
 - Admins can turn destination changes off for everyone in Site settings.
 - Admins can edit every field of any link. When an admin's new destination would be blocked or sent to review, the admin is shown why and has to save it again to confirm, and the change is marked as confirmed in the link's history.
+- A link made without an account no longer passes the visitor's query string on: it opens its destination exactly as it was checked.
+- When a value passed on in a short link's query is a web address hrva.cc would block, the query isn't passed on, and the link opens its destination as saved.
+
+### 🔒 Security
+- The screen where you allow an AI app to use your account now shows where the app will send you, and warns when an app uses the name of a well-known app but sends you somewhere else.
+- You now get an email when an app is connected to your account for the first time, with a link to disconnect it.
+- A Google or GitHub sign-in can now only be finished in the browser that started it.
+- While hrva.cc's request counters are unavailable, it now pauses what could be abused instead of letting it through: API key requests, making links, account emails, link previews, bio page changes, custom domain applications and retries, requests for more custom domains and destination changes answer "try again in a minute". Short links keep working.
 
 ### 🔑 API
 - PUT /api/v1/urls/{id} works with an API key for your own links, under the same rules as the dashboard. It takes active to turn a link back on or off, and answers 429 with Retry-After on the sixth destination change of the day.
@@ -28,6 +39,10 @@ Edit a link from the dashboard: its visit limit, expiry, password and tags, turn
 
 ### 🔒 Privacy
 - Every destination change is kept with its link: the old and new destination, when, and which account made it. Admins can read it, and the audit log records it too. The privacy and security pages say so.
+- Requests for more custom domains are in your account export, and are deleted with your account.
+
+### 🔧 Admin
+- Admin Domains has a Limit requests page to approve or decline requests for more custom domains, paged, sorted and searchable, and the review count includes waiting requests.
 
 ---
 
