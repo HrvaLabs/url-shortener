@@ -29,6 +29,16 @@ import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import org.springframework.beans.factory.support.StaticListableBeanFactory;
+import cc.hrva.urlshortener.model.ApiKey;
+import cc.hrva.urlshortener.security.ApiKeyTokens;
+import java.util.Optional;
+import org.junit.jupiter.api.AfterEach;
+import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verifyNoInteractions;
 
 @ExtendWith(MockitoExtension.class)
 class AdminAuditAspectTest {
@@ -50,8 +60,52 @@ class AdminAuditAspectTest {
     @BeforeEach
     void setUp() {
         aspect = new AdminAuditAspect(auditLogService, userService, JsonMapper.builder().build(), new StaticListableBeanFactory().getBeanProvider(ApiKeyRepository.class));
-        when(userService.getUserFromToken()).thenReturn(User.builder().email("admin@hrva.cc").build());
+        lenient().when(userService.getUserFromToken()).thenReturn(User.builder().email("admin@hrva.cc").build());
         when(joinPoint.getSignature()).thenReturn(signature);
+    }
+
+    @AfterEach
+    void clearRequest() {
+        RequestContextHolder.resetRequestAttributes();
+    }
+
+    @Test
+    void anEditWithAnApiKeyIsRecordedAsTheKeysOwner() throws Throwable {
+        final var apiKeyRepository = mock(ApiKeyRepository.class);
+        final var beans = new StaticListableBeanFactory();
+        beans.addBean("apiKeyRepository", apiKeyRepository);
+        final var keyAware = new AdminAuditAspect(auditLogService, userService, JsonMapper.builder().build(), beans.getBeanProvider(ApiKeyRepository.class));
+        final var hash = ApiKeyTokens.hash("hrva_audited");
+        when(apiKeyRepository.findApiKeyByKeyHash(hash)).thenReturn(Optional.of(ApiKey.builder().keyHash(hash)
+                .owner(User.builder().email("owner@hrva.cc").build()).build()));
+        onRequest("/api/v1/urls/265", "hrva_audited");
+        final var audited = invoking(UrlController.class, "updateUrl", 265L, UrlUpdateDto.builder().id(265L).visitLimit(10L).build());
+
+        keyAware.logAdminAction(joinPoint, audited);
+
+        verify(auditLogService).log("owner@hrva.cc", AuditAction.UPDATE_URL, "Url", "265", "visitLimit: 10");
+        verify(userService, never()).getUserFromToken();
+    }
+
+    @Test
+    void aKeySentOutsideTheLinkApiIsIgnored() throws Throwable {
+        final var apiKeyRepository = mock(ApiKeyRepository.class);
+        final var beans = new StaticListableBeanFactory();
+        beans.addBean("apiKeyRepository", apiKeyRepository);
+        final var keyAware = new AdminAuditAspect(auditLogService, userService, JsonMapper.builder().build(), beans.getBeanProvider(ApiKeyRepository.class));
+        onRequest("/api/v1/users/5", "hrva_audited");
+        final var audited = invoking(UrlController.class, "updateUrl", 265L, UrlUpdateDto.builder().id(265L).visitLimit(10L).build());
+
+        keyAware.logAdminAction(joinPoint, audited);
+
+        verify(auditLogService).log("admin@hrva.cc", AuditAction.UPDATE_URL, "Url", "265", "visitLimit: 10");
+        verifyNoInteractions(apiKeyRepository);
+    }
+
+    private static void onRequest(final String path, final String apiKey) {
+        final var request = new MockHttpServletRequest("PUT", path);
+        request.addHeader("X-Api-Key", apiKey);
+        RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
     }
 
     private Audited invoking(final Class<?> controller, final String method, final Object... args) {

@@ -33,6 +33,7 @@ public class AdminAuditAspect {
     private static final String ADMIN_PREFIX = "Admin";
     private static final String ID = "id";
     private static final String ANONYMOUS = "anonymous";
+    private static final String LINK_API = "/api/v1/urls";
     private static final Set<String> UNAUDITED_FIELDS = Set.of(ID, "url", "fallbackUrls");
 
     private final AuditLogService auditLogService;
@@ -70,8 +71,9 @@ public class AdminAuditAspect {
         if (repository == null || !(RequestContextHolder.getRequestAttributes() instanceof ServletRequestAttributes attributes)) {
             return Optional.empty();
         }
-        final var key = attributes.getRequest().getHeader(ApiKeyRateLimitFilter.API_KEY_HEADER);
-        if (StringUtils.isBlank(key)) {
+        final var request = attributes.getRequest();
+        final var key = request.getHeader(ApiKeyRateLimitFilter.API_KEY_HEADER);
+        if (StringUtils.isBlank(key) || !StringUtils.startsWith(StringUtils.removeStart(request.getRequestURI(), request.getContextPath()), LINK_API)) {
             return Optional.empty();
         }
         final var hash = ApiKeyTokens.hash(key);
