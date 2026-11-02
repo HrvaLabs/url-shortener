@@ -495,9 +495,18 @@ show "app JWT: $(redact <<<"$APP_JWT")"
 http -H "Authorization: Bearer $APP_JWT" "$BASE/api/v1/connect/requests/$HANDLE"
 show "GET /api/v1/connect/requests/<handle> -> $HTTP_STATUS $HTTP_BODY"
 expect_eq "$(jq -r .clientName <<<"$HTTP_BODY")" "hrva e2e (curl)" "consent screen gets the client name"
+expect_eq "$(jq -c '[.redirectHost, .loopback, .lookalike]' <<<"$HTTP_BODY")" '["localhost",true,false]' \
+    "and where the app sends the user: back to an app on this device, not a lookalike"
+CONNECTED_SUBJECT="An app was connected to your hrva.cc account"
+CONNECTED_BEFORE=$(mails_to "$USER_EMAIL" "$CONNECTED_SUBJECT")
 http -X POST -H "Authorization: Bearer $APP_JWT" -H "Origin: $FRONTEND_URL" "$BASE/api/v1/connect/requests/$HANDLE/approve"
 show "POST /api/v1/connect/requests/<handle>/approve -> $HTTP_STATUS $HTTP_BODY"
 expect_eq "$HTTP_STATUS" 200 "approved"
+wait_for_mail "$USER_EMAIL" "$CONNECTED_SUBJECT" "$CONNECTED_BEFORE"
+CONNECTED_TEXT=$(newest_mail_text "$USER_EMAIL" "$CONNECTED_SUBJECT")
+expect_contains "$CONNECTED_TEXT" "hrva e2e (curl)" "the account is emailed that a new app was connected, with its name"
+expect_contains "$CONNECTED_TEXT" "back to an app on your device" "and where it sent the user"
+expect_contains "$CONNECTED_TEXT" "/dashboard/settings#connected-apps" "and where to disconnect it"
 CONTINUE_URL=$(jq -r .continueUrl <<<"$HTTP_BODY")
 expect_contains "$CONTINUE_URL" "$BASE/oauth2/connect/continue?otc=" "continueUrl is absolute, from the issuer"
 
