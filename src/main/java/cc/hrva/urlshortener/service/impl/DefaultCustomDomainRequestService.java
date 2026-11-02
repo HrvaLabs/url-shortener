@@ -10,6 +10,7 @@ import cc.hrva.urlshortener.exception.FeatureUnavailableException;
 import cc.hrva.urlshortener.exception.FieldValidationException;
 import cc.hrva.urlshortener.exception.NotSignedInException;
 import cc.hrva.urlshortener.exception.RateLimitExceededException;
+import cc.hrva.urlshortener.exception.ServiceBusyException;
 import cc.hrva.urlshortener.model.CustomDomainRequest;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.enums.DomainRequestStatus;
@@ -54,6 +55,8 @@ public class DefaultCustomDomainRequestService implements CustomDomainRequestSer
     private static final String REQUEST_LIMIT = "domain-request:user:";
     private static final int REQUESTS_PER_USER = 3;
     private static final Duration REQUEST_WINDOW = Duration.ofHours(24);
+    private static final String REQUESTS_PAUSED = "Requests for more domains are paused for a moment. Try again in a minute.";
+    private static final Duration LIMITER_RETRY = Duration.ofMinutes(1);
 
     private final UserService userService;
     private final CustomDomainRequestRepository customDomainRequestRepository;
@@ -142,8 +145,8 @@ public class DefaultCustomDomainRequestService implements CustomDomainRequestSer
         try {
             return rateLimiter.tryAcquire(limitKey, REQUESTS_PER_USER, REQUEST_WINDOW);
         } catch (final RateLimiterUnavailableException exception) {
-            log.warn("Custom domain limit request rate limit unavailable, allowing the request userId={}", user.getId());
-            return true;
+            log.warn("Custom domain limit request refused, the rate limit is unavailable userId={}", user.getId());
+            throw new ServiceBusyException(REQUESTS_PAUSED, LIMITER_RETRY);
         }
     }
 

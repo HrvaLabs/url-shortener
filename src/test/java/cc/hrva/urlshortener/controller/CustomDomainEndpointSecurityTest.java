@@ -773,13 +773,19 @@ class CustomDomainEndpointSecurityTest {
     }
 
     @Test
-    void aRequestGoesAheadWhenTheRateLimitCannotBeChecked() throws Exception {
+    void aRequestIsRefusedWhileTheRateLimitCannotBeChecked() throws Exception {
         domain(ANA, "go.example.com", "ACTIVE");
         when(rateLimiter.tryAcquire(eq("domain-request:user:" + ANA), anyInt(), any())).thenThrow(new RateLimiterUnavailableException(new IllegalStateException("redis down")));
 
-        mockMvc.perform(as(ANA_TOKEN, post(REQUESTS)).contentType(MediaType.APPLICATION_JSON).content(REQUEST)).andExpect(status().isCreated());
+        mockMvc.perform(as(ANA_TOKEN, post(REQUESTS)).contentType(MediaType.APPLICATION_JSON).content(REQUEST))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(header().string(HttpHeaders.RETRY_AFTER, "60"))
+                .andExpect(content().json("{\"detail\":\"Requests for more domains are paused for a moment. Try again in a minute.\"}",
+                        JsonCompareMode.LENIENT));
 
-        assertThat(requestsOf(ANA)).isOne();
+        assertThat(requestsOf(ANA)).isZero();
+        assertThat(committedEvents.events()).noneMatch(DomainLimitRequested.class::isInstance);
+        verifyNoInteractions(sendingEmailService);
     }
 
     @Test
