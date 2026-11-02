@@ -35,6 +35,7 @@ import cc.hrva.urlshortener.service.UserService;
 import cc.hrva.urlshortener.service.domain.AdminDomainRequestResponses;
 import cc.hrva.urlshortener.service.domain.AdminDomainResponses;
 import cc.hrva.urlshortener.service.domain.CloudflareTokenCheck;
+import cc.hrva.urlshortener.service.domain.CustomDomainApproval;
 import cc.hrva.urlshortener.service.domain.CustomDomainLifecycle;
 import cc.hrva.urlshortener.service.domain.CustomDomainLimits;
 import cc.hrva.urlshortener.service.domain.CustomDomainModeration;
@@ -563,6 +564,7 @@ class AdminDomainRequestSecurityTest {
             CustomDomainCapLock.class,
             CustomDomainReconcileRepository.class,
             CustomDomainSetup.class,
+            CustomDomainApproval.class,
             CustomDomainModeration.class,
             CustomDomainRemoval.class,
             UrlDomainMoves.class,

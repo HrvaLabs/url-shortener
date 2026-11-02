@@ -24,11 +24,14 @@ import cc.hrva.urlshortener.model.enums.CustomDomainStatus;
 import cc.hrva.urlshortener.model.enums.DomainLinkMode;
 import cc.hrva.urlshortener.model.enums.DomainProblem;
 import cc.hrva.urlshortener.model.enums.DomainRequestStatus;
+import cc.hrva.urlshortener.model.enums.UseAgain;
 import cc.hrva.urlshortener.repository.CustomDomainAllowanceRepository;
+import cc.hrva.urlshortener.repository.CustomDomainCapLock;
 import cc.hrva.urlshortener.repository.CustomDomainRepository;
 import cc.hrva.urlshortener.repository.CustomDomainRequestRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.DomainApplied;
+import cc.hrva.urlshortener.service.domain.CustomDomainApproval;
 import cc.hrva.urlshortener.service.domain.CustomDomainChangedEvent;
 import cc.hrva.urlshortener.service.domain.CustomDomainHostnames;
 import cc.hrva.urlshortener.service.domain.CustomDomainLifecycle;
@@ -52,6 +55,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import org.hibernate.exception.ConstraintViolationException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -68,9 +72,12 @@ import org.springframework.transaction.support.TransactionOperations;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.lenient;
@@ -96,6 +103,8 @@ class DefaultCustomDomainServiceTest {
     private static final String TURNED_OFF = "Custom domains aren't available right now.";
     private static final String NOT_FOUND = "Custom domain not found";
     private static final String PUNYCODE_FLAG = "International name (punycode): check it doesn't imitate another domain";
+    private static final String STILL_BEING_REMOVED = "This domain is still being removed from Cloudflare. Try again in a few minutes.";
+    private static final long REMOVED = 5L;
 
     @Mock
     private UserService userService;
@@ -139,6 +148,12 @@ class DefaultCustomDomainServiceTest {
     @Mock
     private CustomDomainRemoval customDomainRemoval;
 
+    @Mock
+    private CustomDomainCapLock customDomainCapLock;
+
+    @Mock
+    private ScammerSignalService scammerSignalService;
+
     @Captor
     private ArgumentCaptor<CustomDomain> saved;
 
@@ -167,9 +182,11 @@ class DefaultCustomDomainServiceTest {
             return domain;
         });
         customDomainService = new DefaultCustomDomainService(userService, customDomainRepository, customDomainRequestRepository, urlRepository,
-                new CustomDomainHostnames(appProperties), new CustomDomainLimits(customDomainRepository, customDomainAllowanceRepository, appProperties),
-                new CustomDomainResponses(appProperties), customDomainLifecycle, customDomainProvisioner, customDomainSetup, customDomainRemoval,
-                linkCheckService, accountLock, rateLimiter, eventPublisher, TransactionOperations.withoutTransaction(), appProperties, clock);
+                customDomainCapLock, new CustomDomainHostnames(appProperties),
+                new CustomDomainLimits(customDomainRepository, customDomainAllowanceRepository, appProperties), new CustomDomainResponses(appProperties),
+                customDomainLifecycle, customDomainProvisioner, customDomainSetup, customDomainRemoval,
+                new CustomDomainApproval(linkCheckService, customDomainProvisioner), linkCheckService, scammerSignalService, accountLock, rateLimiter,
+                eventPublisher, TransactionOperations.withoutTransaction(), appProperties, clock);
     }
 
     @Test
@@ -190,7 +207,7 @@ class DefaultCustomDomainServiceTest {
         assertThat(domain.getCloudflareId()).isNull();
         verify(linkCheckService).check("https://go.example.com/");
         assertThat(response).isEqualTo(new CustomDomainResponse(12L, "go.example.com", CustomDomainStatus.PENDING_REVIEW, REASON, null,
-                NOW, null, null, null, null, null, null, null, null, 0L));
+                NOW, null, null, null, null, null, null, null, null, 0L, null));
     }
 
     @Test
@@ -459,7 +476,7 @@ class DefaultCustomDomainServiceTest {
 
             assertThat(customDomainService.remove(12L, DomainLinkMode.DEACTIVATE)).isEqualTo(summary);
         }
-        verify(customDomainRepository, never()).markDeleted(anyLong(), any(), any());
+        verify(customDomainRepository, never()).markDeleted(anyLong(), any(), anyBoolean(), any());
         verifyNoInteractions(cloudflareClient);
     }
 
@@ -707,6 +724,273 @@ class DefaultCustomDomainServiceTest {
 
         declined.setReviewedAt(NOW.minusDays(30).minusSeconds(1));
         assertThat(customDomainService.mine().request()).isNull();
+    }
+
+    @Test
+    void useAgainSkipsReviewForTheOwnersOwnRemoval() {
+        ownsRemoved(removed(false, NOW.minusDays(20)));
+        when(customDomainSetup.liveTotal(REMOVED)).thenReturn(4);
+
+        final var response = customDomainService.useAgain(REMOVED);
+
+        assertThat(response.id()).isEqualTo(12L);
+        assertThat(response.status()).isEqualTo(CustomDomainStatus.APPROVED_PROVISIONING);
+        assertThat(response.useAgain()).isNull();
+        verify(customDomainRepository).saveAndFlush(saved.capture());
+        final var domain = saved.getValue();
+        assertThat(domain.getHostname()).isEqualTo("again.example.com");
+        assertThat(domain.getHostnameKey()).isEqualTo("again.example.com");
+        assertThat(domain.getStatus()).isEqualTo(CustomDomainStatus.APPROVED_PROVISIONING);
+        assertThat(domain.getReviewedBy()).isEqualTo("use again");
+        assertThat(domain.getReviewedAt()).isEqualTo(NOW);
+        assertThat(domain.getNextCheckAt()).isEqualTo(NOW);
+        assertThat(domain.getReason()).isEqualTo(REASON);
+        assertThat(domain.getOwner()).isSameAs(ana);
+        assertThat(domain.getApplyFlags()).isEmpty();
+        assertThat(domain.getActivatedAt()).isNull();
+        assertThat(domain.isRemovedByAdmin()).isFalse();
+        final var order = inOrder(accountLock, customDomainCapLock, customDomainSetup, customDomainRepository, customDomainProvisioner);
+        order.verify(accountLock).lock(ana);
+        order.verify(customDomainCapLock).lock();
+        order.verify(customDomainSetup).requireRoom(REMOVED, 4, false);
+        order.verify(customDomainRepository).saveAndFlush(any(CustomDomain.class));
+        order.verify(customDomainProvisioner).provisionAsync(12L);
+        verify(eventPublisher).publishEvent(published.capture());
+        assertThat(published.getAllValues()).containsExactly(new CustomDomainChangedEvent(12L));
+        verify(rateLimiter).tryAcquire(APPLY_KEY, 5, APPLY_WINDOW);
+        verify(linkCheckService).check("https://again.example.com/");
+    }
+
+    @Test
+    void useAgainAfterAnAdminRemovalGoesToReview() {
+        ownsRemoved(removed(true, NOW.minusDays(20)));
+
+        final var response = customDomainService.useAgain(REMOVED);
+
+        assertThat(response.status()).isEqualTo(CustomDomainStatus.PENDING_REVIEW);
+        assertWentToReview(List.of());
+    }
+
+    @Test
+    void useAgainOfANeverActiveDomainGoesToReview() {
+        ownsRemoved(removed(false, null));
+
+        final var response = customDomainService.useAgain(REMOVED);
+
+        assertThat(response.status()).isEqualTo(CustomDomainStatus.PENDING_REVIEW);
+        assertWentToReview(List.of());
+    }
+
+    @Test
+    void useAgainRunsTheApplyChecks() {
+        ownsRemoved(removed(false, NOW.minusDays(20)));
+        when(linkCheckService.check("https://again.example.com/"))
+                .thenReturn(new LinkVerdict(LinkVerdict.Outcome.FLAG, List.of("Registered 3 days ago"), null, null));
+
+        assertThat(customDomainService.useAgain(REMOVED).status()).isEqualTo(CustomDomainStatus.PENDING_REVIEW);
+        assertWentToReview(List.of("Registered 3 days ago"));
+
+        when(linkCheckService.check("https://again.example.com/"))
+                .thenReturn(new LinkVerdict(LinkVerdict.Outcome.BLOCK, List.of("on HaGeZi TIF"), BlockReason.BLOCKLIST, "HaGeZi TIF"));
+
+        assertThatThrownBy(() -> customDomainService.useAgain(REMOVED))
+                .isInstanceOfSatisfying(FieldValidationException.class,
+                        exception -> assertThat(exception.getFieldErrors()).isEqualTo(Map.of("hostname", RESERVED)));
+        verify(customDomainRepository, times(1)).saveAndFlush(any());
+    }
+
+    @Test
+    void useAgainOfADomainMatchingABlockRuleGoesToReview() {
+        ownsRemoved(removed(false, NOW.minusDays(20)));
+        when(linkCheckService.isBlockedByRule("https://again.example.com/")).thenReturn(true);
+
+        assertThat(customDomainService.useAgain(REMOVED).status()).isEqualTo(CustomDomainStatus.PENDING_REVIEW);
+        assertWentToReview(List.of());
+    }
+
+    @Test
+    void possibleScammerGoesToReview() {
+        ownsRemoved(removed(false, NOW.minusDays(20)));
+        when(scammerSignalService.possibleScammers(List.of(ana))).thenReturn(Set.of(7L));
+
+        assertThat(customDomainService.useAgain(REMOVED).status()).isEqualTo(CustomDomainStatus.PENDING_REVIEW);
+        assertWentToReview(List.of());
+    }
+
+    @Test
+    void useAgainFallsBackToReviewWhenTheCapOrCloudflareRefuses() {
+        ownsRemoved(removed(false, NOW.minusDays(20)));
+        when(customDomainSetup.liveTotal(REMOVED)).thenReturn(4);
+        doThrow(new CustomDomainCapacityException("Cap reached: 90 of 90 custom domains are in use. Remove one or raise the cap (APP_DOMAINS_MAX_ACTIVE)."))
+                .when(customDomainSetup).requireRoom(REMOVED, 4, false);
+
+        assertThat(customDomainService.useAgain(REMOVED).status()).isEqualTo(CustomDomainStatus.PENDING_REVIEW);
+        verify(customDomainCapLock).lock();
+        assertWentToReview(List.of());
+    }
+
+    @Test
+    void useAgainFallsBackToReviewWhenCloudflareCannotBeAsked() {
+        ownsRemoved(removed(false, NOW.minusDays(20)));
+        when(customDomainSetup.liveTotal(REMOVED))
+                .thenThrow(new CustomDomainCapacityException("Cloudflare isn't set up: Cloudflare can't be reached. Check CLOUDFLARE_API_TOKEN and CLOUDFLARE_ZONE_ID."));
+
+        assertThat(customDomainService.useAgain(REMOVED).status()).isEqualTo(CustomDomainStatus.PENDING_REVIEW);
+        verify(customDomainSetup, never()).requireRoom(anyLong(), anyInt(), anyBoolean());
+        verifyNoInteractions(customDomainCapLock);
+        assertWentToReview(List.of());
+    }
+
+    @Test
+    void useAgainRefusesAHostnameHeldByAnotherAccount() {
+        ownsRemoved(removed(false, NOW.minusDays(20)));
+        when(customDomainRepository.findByHostnameKey("again.example.com"))
+                .thenReturn(Optional.of(CustomDomain.builder().id(30L).hostname("again.example.com").build()));
+
+        assertThatThrownBy(() -> customDomainService.useAgain(REMOVED))
+                .isInstanceOf(CustomDomainConflictException.class)
+                .hasMessage(TAKEN);
+        verify(customDomainRepository, never()).saveAndFlush(any());
+        verifyNoInteractions(eventPublisher, customDomainProvisioner);
+    }
+
+    @Test
+    void useAgainLosingARaceForItsHostnameIsThe409Too() {
+        ownsRemoved(removed(true, NOW.minusDays(20)));
+        when(customDomainRepository.saveAndFlush(any(CustomDomain.class))).thenThrow(violation("UX_CUSTOM_DOMAIN_HOSTNAME_KEY"));
+
+        assertThatThrownBy(() -> customDomainService.useAgain(REMOVED))
+                .isInstanceOf(CustomDomainConflictException.class)
+                .hasMessage(TAKEN);
+        verifyNoInteractions(eventPublisher);
+    }
+
+    @Test
+    void useAgainAtTheLimitIsRefused() {
+        ownsRemoved(removed(false, NOW.minusDays(20)));
+        when(customDomainRepository.countByOwnerIdAndStatusIn(7L, CustomDomainStatus.COUNTS_FOR_USER)).thenReturn(1L);
+
+        assertThatThrownBy(() -> customDomainService.useAgain(REMOVED))
+                .isInstanceOf(ApiException.class)
+                .hasMessage(OVER_ONE);
+        verify(customDomainRepository, never()).saveAndFlush(any());
+        verifyNoInteractions(rateLimiter, linkCheckService, accountLock, eventPublisher);
+    }
+
+    @Test
+    void useAgainSharesTheDailyApplicationLimit() {
+        ownsRemoved(removed(false, NOW.minusDays(20)));
+        when(rateLimiter.tryAcquire(APPLY_KEY, 5, APPLY_WINDOW)).thenReturn(false);
+
+        assertThatThrownBy(() -> customDomainService.useAgain(REMOVED))
+                .isInstanceOf(RateLimitExceededException.class)
+                .hasMessage(TOO_MANY_APPLICATIONS);
+        verifyNoInteractions(linkCheckService, accountLock, eventPublisher);
+    }
+
+    @Test
+    void useAgainOfALiveDomainIs404() {
+        when(customDomainRepository.findByIdAndOwnerId(12L, 7L)).thenReturn(Optional.of(domain(12L, CustomDomainStatus.ACTIVE, NOW)));
+        when(customDomainRepository.findByIdAndOwnerId(13L, 7L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> customDomainService.useAgain(12L)).isInstanceOf(CustomDomainNotFoundException.class).hasMessage(NOT_FOUND);
+        assertThatThrownBy(() -> customDomainService.useAgain(13L)).isInstanceOf(CustomDomainNotFoundException.class).hasMessage(NOT_FOUND);
+        verifyNoInteractions(rateLimiter, linkCheckService, accountLock, eventPublisher);
+    }
+
+    @Test
+    void useAgainIs503WhenCustomDomainsAreTurnedOff() {
+        appProperties.getDomains().setEnabled(false);
+
+        assertThatThrownBy(() -> customDomainService.useAgain(REMOVED))
+                .isInstanceOf(FeatureUnavailableException.class)
+                .hasMessage(TURNED_OFF);
+        verifyNoInteractions(customDomainRepository, rateLimiter, linkCheckService, accountLock, eventPublisher);
+    }
+
+    @Test
+    void useAgainWaitsForTheCloudflareRemoval() {
+        final var removing = removed(false, NOW.minusDays(20));
+        removing.setCloudflareDeletePending(true);
+        removing.setHostnameKey("again.example.com");
+        ownsRemoved(removing);
+
+        assertThatThrownBy(() -> customDomainService.useAgain(REMOVED))
+                .isInstanceOf(CustomDomainConflictException.class)
+                .hasMessage(STILL_BEING_REMOVED);
+        verify(customDomainRepository, never()).saveAndFlush(any());
+        verifyNoInteractions(rateLimiter, linkCheckService, accountLock, eventPublisher);
+    }
+
+    @Test
+    void mineSaysWhatUseAgainWouldDoForEachRemovedDomain() {
+        final var byTheOwner = removedRow(31L, "own.example.com", false, NOW.minusDays(20));
+        final var byAnAdmin = removedRow(32L, "admin.example.com", true, NOW.minusDays(20));
+        final var neverActive = removedRow(33L, "never.example.com", false, null);
+        final var stillInCloudflare = removedRow(34L, "cloudflare.example.com", false, NOW.minusDays(20));
+        stillInCloudflare.setCloudflareDeletePending(true);
+        stillInCloudflare.setHostnameKey("cloudflare.example.com");
+        final var heldByAnother = removedRow(35L, "held.example.com", false, NOW.minusDays(20));
+        final var blockedByRule = removedRow(36L, "rule.example.com", false, NOW.minusDays(20));
+        final var live = domain(37L, CustomDomainStatus.ACTIVE, NOW.minusDays(1));
+        when(customDomainRepository.findByOwnerIdOrderByCreatedAtDescIdDesc(7L))
+                .thenReturn(List.of(byTheOwner, byAnAdmin, neverActive, stillInCloudflare, heldByAnother, blockedByRule, live));
+        when(customDomainRepository.findByHostnameKey("held.example.com"))
+                .thenReturn(Optional.of(CustomDomain.builder().id(40L).hostname("held.example.com").build()));
+        when(linkCheckService.isBlockedByRule(anyString())).thenAnswer(invocation -> "https://rule.example.com/".equals(invocation.getArgument(0)));
+
+        final var mine = customDomainService.mine();
+
+        assertThat(mine.domains()).extracting(CustomDomainResponse::useAgain).containsExactly(UseAgain.SKIPS_REVIEW, UseAgain.NEEDS_REVIEW,
+                UseAgain.NEEDS_REVIEW, UseAgain.CLOUDFLARE_REMOVAL_PENDING, null, UseAgain.NEEDS_REVIEW, null);
+        verify(scammerSignalService, times(1)).possibleScammers(List.of(ana));
+    }
+
+    @Test
+    void mineSendsAPossibleScammerToReview() {
+        when(customDomainRepository.findByOwnerIdOrderByCreatedAtDescIdDesc(7L))
+                .thenReturn(List.of(removedRow(31L, "own.example.com", false, NOW.minusDays(20))));
+        when(scammerSignalService.possibleScammers(List.of(ana))).thenReturn(Set.of(7L));
+
+        assertThat(customDomainService.mine().domains()).extracting(CustomDomainResponse::useAgain).containsExactly(UseAgain.NEEDS_REVIEW);
+    }
+
+    @Test
+    void mineAsksNothingAboutUseAgainWithoutARemovedDomain() {
+        when(customDomainRepository.findByOwnerIdOrderByCreatedAtDescIdDesc(7L)).thenReturn(List.of(domain(15L, CustomDomainStatus.ACTIVE, NOW)));
+
+        assertThat(customDomainService.mine().domains()).extracting(CustomDomainResponse::useAgain).containsExactly((UseAgain) null);
+        verifyNoInteractions(scammerSignalService);
+        verify(customDomainRepository, never()).findByHostnameKey(anyString());
+    }
+
+    private void ownsRemoved(final CustomDomain removed) {
+        when(customDomainRepository.findByIdAndOwnerId(REMOVED, 7L)).thenReturn(Optional.of(removed));
+    }
+
+    private void assertWentToReview(final List<String> flags) {
+        verify(customDomainRepository, atLeastOnce()).saveAndFlush(saved.capture());
+        final var domain = saved.getValue();
+        assertThat(domain.getStatus()).isEqualTo(CustomDomainStatus.PENDING_REVIEW);
+        assertThat(domain.getHostname()).isEqualTo("again.example.com");
+        assertThat(domain.getHostnameKey()).isEqualTo("again.example.com");
+        assertThat(domain.getReason()).isEqualTo(REASON);
+        assertThat(domain.getReviewedBy()).isNull();
+        assertThat(domain.getReviewedAt()).isNull();
+        assertThat(domain.getApplyFlags()).isEqualTo(flags);
+        verify(eventPublisher, atLeastOnce()).publishEvent(new DomainApplied(12L, "again.example.com", 7L, flags));
+        verify(eventPublisher, atLeastOnce()).publishEvent(new CustomDomainChangedEvent(12L));
+        verify(customDomainProvisioner, never()).provisionAsync(anyLong());
+    }
+
+    private CustomDomain removed(final boolean byAdmin, final LocalDateTime activatedAt) {
+        return removedRow(REMOVED, "again.example.com", byAdmin, activatedAt);
+    }
+
+    private CustomDomain removedRow(final long id, final String hostname, final boolean byAdmin, final LocalDateTime activatedAt) {
+        return CustomDomain.builder().id(id).owner(ana).hostname(hostname).status(CustomDomainStatus.DELETED).reason(REASON)
+                .activatedAt(activatedAt).removedByAdmin(byAdmin).deletedAt(NOW.minusDays(1)).createdAt(NOW.minusDays(40))
+                .updatedAt(NOW.minusDays(1)).build();
     }
 
     private static CustomDomainRequest request(final long id, final DomainRequestStatus status, final LocalDateTime reviewedAt) {

@@ -341,6 +341,24 @@ class CustomDomainRemovalTest {
     }
 
     @Test
+    void adminRemovalIsRecorded() {
+        final var id = domain("go.example.com", "ACTIVE", "cf-1");
+
+        customDomainRemoval.remove(id, DomainLinkMode.DEACTIVATE, ADMIN);
+
+        assertThat(removedByAdmin(id)).isTrue();
+    }
+
+    @Test
+    void ownerRemovalIsRecorded() {
+        final var id = domain("go.example.com", "ACTIVE", "cf-1");
+
+        customDomainRemoval.remove(id, DomainLinkMode.DEACTIVATE, OWNER);
+
+        assertThat(removedByAdmin(id)).isFalse();
+    }
+
+    @Test
     void onlyAnAdminRemovalEmails() {
         final var removedByItsOwner = domain("mine.example.com", "ACTIVE", "cf-1");
         link(removedByItsOwner, "cafe", true);
@@ -517,6 +535,10 @@ class CustomDomainRemovalTest {
 
     private String statusOf(final long id) {
         return jdbcTemplate.queryForObject("select status from custom_domain where id = ?", String.class, id);
+    }
+
+    private Boolean removedByAdmin(final long id) {
+        return jdbcTemplate.queryForObject("select removed_by_admin from custom_domain where id = ?", Boolean.class, id);
     }
 
     @SpringBootConfiguration

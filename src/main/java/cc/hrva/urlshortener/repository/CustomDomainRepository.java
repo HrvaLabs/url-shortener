@@ -224,10 +224,11 @@ public interface CustomDomainRepository extends JpaRepository<CustomDomain, Long
             set d.status = cc.hrva.urlshortener.model.enums.CustomDomainStatus.DELETED, d.deletedAt = :now, d.nextCheckAt = null,
                 d.cloudflareDeletePending = case when d.cloudflareId is null then false else true end,
                 d.hostnameKey = case when d.cloudflareId is null then null else d.hostnameKey end,
-                d.updatedAt = :now
+                d.removedByAdmin = :byAdmin, d.updatedAt = :now
             where d.id = :id and d.status = :expectedStatus
               and d.status <> cc.hrva.urlshortener.model.enums.CustomDomainStatus.DELETED""")
-    int markDeleted(@Param("id") long id, @Param("expectedStatus") CustomDomainStatus expectedStatus, @Param("now") LocalDateTime now);
+    int markDeleted(@Param("id") long id, @Param("expectedStatus") CustomDomainStatus expectedStatus, @Param("byAdmin") boolean byAdmin,
+                    @Param("now") LocalDateTime now);
 
     @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Transactional

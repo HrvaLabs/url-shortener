@@ -12,12 +12,14 @@ import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.enums.CustomDomainStatus;
 import cc.hrva.urlshortener.model.enums.DomainProblem;
 import cc.hrva.urlshortener.repository.CustomDomainAllowanceRepository;
+import cc.hrva.urlshortener.repository.CustomDomainCapLock;
 import cc.hrva.urlshortener.repository.CustomDomainRepository;
 import cc.hrva.urlshortener.repository.CustomDomainRequestRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.service.CustomDomainService;
 import cc.hrva.urlshortener.service.LinkCheckService;
+import cc.hrva.urlshortener.service.ScammerSignalService;
 import cc.hrva.urlshortener.service.UserService;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.DomainNeedsAttention;
@@ -133,6 +135,9 @@ class CustomDomainLifecycleTest {
 
     @MockitoBean
     private LinkCheckService linkCheckService;
+
+    @MockitoBean
+    private ScammerSignalService scammerSignalService;
 
     @MockitoBean
     private CustomDomainSetup customDomainSetup;
@@ -843,6 +848,8 @@ class CustomDomainLifecycleTest {
             AccountLock.class,
             CustomDomainLifecycle.class,
             CustomDomainProvisioner.class,
+            CustomDomainApproval.class,
+            CustomDomainCapLock.class,
             CustomDomainHostnames.class,
             CustomDomainLimits.class,
             CustomDomainResponses.class,

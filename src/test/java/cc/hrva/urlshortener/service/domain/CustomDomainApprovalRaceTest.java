@@ -370,6 +370,7 @@ class CustomDomainApprovalRaceTest {
             CustomDomainCapLock.class,
             CustomDomainReconcileRepository.class,
             CustomDomainSetup.class,
+            CustomDomainApproval.class,
             TestApplication.FixedClock.class,
             TestApplication.CommittedChanges.class
     })

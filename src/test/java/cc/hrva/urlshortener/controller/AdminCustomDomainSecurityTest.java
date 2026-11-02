@@ -40,6 +40,7 @@ import cc.hrva.urlshortener.service.domain.CloudflareTokenCheck;
 import cc.hrva.urlshortener.service.domain.CloudflareTokenCheck.TokenState;
 import cc.hrva.urlshortener.service.domain.CustomDomainLifecycle;
 import cc.hrva.urlshortener.service.domain.CustomDomainModeration;
+import cc.hrva.urlshortener.service.domain.CustomDomainApproval;
 import cc.hrva.urlshortener.service.domain.CustomDomainProvisioner;
 import cc.hrva.urlshortener.service.domain.CustomDomainReconciler;
 import cc.hrva.urlshortener.service.domain.CustomDomainReconciler.QuotaReading;
@@ -402,7 +403,7 @@ class AdminCustomDomainSecurityTest {
                         "createdAt":"2026-10-27T09:00:00Z","reviewedAt":"2026-10-28T09:00:00Z","activatedAt":"2026-10-28T09:30:00Z",
                         "lastCheckedAt":"2026-10-29T08:00:00Z",
                         "dnsRecord":{"type":"CNAME","name":"go.example.com","target":"domains.hrva.cc"},
-                        "steps":{"dnsFound":true,"certificateIssued":true},"problem":null,"problemText":null,"disabledNote":null,"links":2,
+                        "steps":{"dnsFound":true,"certificateIssued":true},"problem":null,"problemText":null,"disabledNote":null,"links":2,"useAgain":null,
                         "owner":{"id":%d,"email":"ana@example.com","active":true,"createdAt":"2026-09-19T09:00:00Z","links":3,"blockedLinks":1,
                         "openReviews":1,"possibleScammer":true},
                         "applyFlags":["Registered 3 days ago"],"cloudflareId":"b0361ed9-0000-4000-8000-000000000001","cloudflareStatus":"active",
@@ -882,6 +883,7 @@ class AdminCustomDomainSecurityTest {
             CustomDomainCapLock.class,
             CustomDomainReconcileRepository.class,
             CustomDomainSetup.class,
+            CustomDomainApproval.class,
             CustomDomainModeration.class,
             CustomDomainRemoval.class,
             UrlDomainMoves.class,

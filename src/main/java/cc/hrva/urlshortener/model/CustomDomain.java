@@ -67,6 +67,7 @@ public class CustomDomain {
     private LocalDateTime disabledAt;
     private LocalDateTime deletedAt;
     private boolean cloudflareDeletePending;
+    private boolean removedByAdmin;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 

@@ -62,7 +62,7 @@ class CustomDomainSchemaTest {
 
     private static final LocalDateTime NOW = LocalDateTime.of(2026, 10, 29, 12, 0);
     private static final String DOMAIN_ROW = "select status, check_count, last_checked_at, activated_at, problem, last_error, next_check_at, "
-            + "hostname_key, cloudflare_delete_pending, deleted_at, disabled_reason, disabled_note from custom_domain where id = ?";
+            + "hostname_key, cloudflare_delete_pending, deleted_at, disabled_reason, disabled_note, removed_by_admin from custom_domain where id = ?";
 
     @Autowired
     private CustomDomainRepository customDomainRepository;
@@ -542,26 +542,47 @@ class CustomDomainSchemaTest {
         final var inCloudflare = savedDomain(domain("go.example.com", CustomDomainStatus.ACTIVE).cloudflareId("cf-1"));
         final var neverCreated = savedDomain(domain("go.example.org", CustomDomainStatus.ERROR).problem(DomainProblem.PROVISIONING_FAILED));
 
-        assertThat(customDomainRepository.markDeleted(inCloudflare.getId(), CustomDomainStatus.AWAITING_DNS, NOW)).isZero();
-        assertThat(customDomainRepository.markDeleted(inCloudflare.getId(), CustomDomainStatus.ACTIVE, NOW)).isOne();
-        assertThat(customDomainRepository.markDeleted(neverCreated.getId(), CustomDomainStatus.ERROR, NOW)).isOne();
-        assertThat(customDomainRepository.markDeleted(neverCreated.getId(), CustomDomainStatus.DELETED, NOW)).isZero();
+        assertThat(customDomainRepository.markDeleted(inCloudflare.getId(), CustomDomainStatus.AWAITING_DNS, false, NOW)).isZero();
+        assertThat(customDomainRepository.markDeleted(inCloudflare.getId(), CustomDomainStatus.ACTIVE, false, NOW)).isOne();
+        assertThat(customDomainRepository.markDeleted(neverCreated.getId(), CustomDomainStatus.ERROR, false, NOW)).isOne();
+        assertThat(customDomainRepository.markDeleted(neverCreated.getId(), CustomDomainStatus.DELETED, true, NOW)).isZero();
 
         assertThat(domainRow(inCloudflare.getId()))
                 .containsEntry("STATUS", "DELETED")
                 .containsEntry("DELETED_AT", timestamp(NOW))
                 .containsEntry("CLOUDFLARE_DELETE_PENDING", true)
-                .containsEntry("HOSTNAME_KEY", "go.example.com");
+                .containsEntry("HOSTNAME_KEY", "go.example.com")
+                .containsEntry("REMOVED_BY_ADMIN", false);
         assertThat(domainRow(neverCreated.getId()))
                 .containsEntry("STATUS", "DELETED")
                 .containsEntry("CLOUDFLARE_DELETE_PENDING", false)
-                .containsEntry("HOSTNAME_KEY", null);
+                .containsEntry("HOSTNAME_KEY", null)
+                .containsEntry("REMOVED_BY_ADMIN", false);
 
         assertThat(customDomainRepository.clearDeletePending(inCloudflare.getId(), NOW)).isOne();
         assertThat(customDomainRepository.clearDeletePending(inCloudflare.getId(), NOW)).isZero();
         assertThat(domainRow(inCloudflare.getId()))
                 .containsEntry("CLOUDFLARE_DELETE_PENDING", false)
                 .containsEntry("HOSTNAME_KEY", null);
+    }
+
+    @Test
+    void aRemovalRecordsWhetherAnAdminDidItAndOlderRowsReadAsRemovedByTheirOwner() {
+        final var byAdmin = savedDomain(domain("admin.example.com", CustomDomainStatus.ACTIVE));
+        final var byOwner = savedDomain(domain("owner.example.com", CustomDomainStatus.ACTIVE));
+        final var untouched = jdbcTemplate.update("""
+                insert into custom_domain (hostname, hostname_key, status, reason, created_at, updated_at)
+                values ('old.example.com', null, 'DELETED', 'Menu links for my cafe', ?, ?)""", NOW, NOW);
+
+        assertThat(customDomainRepository.markDeleted(byAdmin.getId(), CustomDomainStatus.ACTIVE, true, NOW)).isOne();
+        assertThat(customDomainRepository.markDeleted(byOwner.getId(), CustomDomainStatus.ACTIVE, false, NOW)).isOne();
+
+        assertThat(untouched).isOne();
+        assertThat(domainRow(byAdmin.getId())).containsEntry("REMOVED_BY_ADMIN", true);
+        assertThat(domainRow(byOwner.getId())).containsEntry("REMOVED_BY_ADMIN", false);
+        assertThat(jdbcTemplate.queryForObject("select removed_by_admin from custom_domain where hostname = 'old.example.com'", Boolean.class))
+                .isFalse();
+        assertThat(customDomainRepository.findById(byAdmin.getId())).get().extracting(CustomDomain::isRemovedByAdmin).isEqualTo(true);
     }
 
     @Test

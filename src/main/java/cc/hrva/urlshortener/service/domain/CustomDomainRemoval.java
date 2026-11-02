@@ -81,7 +81,7 @@ public class CustomDomainRemoval {
             throw new CustomDomainConflictException(NO_MOVE_AFTER_TURN_OFF);
         }
         final var links = from == CustomDomainStatus.PENDING_REVIEW ? List.<DomainLink>of() : urlDomainMoves.linksOf(domainId);
-        if (customDomainRepository.markDeleted(domainId, from, LocalDateTime.now(clock)) != 1) {
+        if (customDomainRepository.markDeleted(domainId, from, actor.admin(), LocalDateTime.now(clock)) != 1) {
             log.warn("Custom domain could not be marked removed under its lock domainId={} from={}", domainId, from);
             throw new CustomDomainNotFoundException(NOT_FOUND);
         }

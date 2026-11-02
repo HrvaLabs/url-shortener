@@ -97,6 +97,19 @@ public class CustomDomainController {
         return ResponseEntity.ok(customDomainService.retry(id));
     }
 
+    @Operation(summary = "Use a removed custom domain again", description = "Applies again for a removed domain. It's set up straight away when you removed it yourself after it was active; otherwise it's reviewed like a new application.")
+    @ApiResponse(responseCode = "201", description = "The new domain, being set up or waiting for review")
+    @ApiResponse(responseCode = "400", description = "A domain that can't be used, or the limit of custom domains reached")
+    @ApiResponse(responseCode = "404", description = "No such removed domain of yours")
+    @ApiResponse(responseCode = "409", description = "This domain has already been applied for, or it's still being removed from Cloudflare")
+    @ApiResponse(responseCode = "429", description = "Too many applications today")
+    @ApiResponse(responseCode = "503", description = "Custom domains are turned off, or applications are paused for a moment (Retry-After)")
+    @PostMapping("/{id}/use-again")
+    @PreAuthorize("hasAnyRole('ROLE_ADMIN', 'ROLE_USER')")
+    public ResponseEntity<CustomDomainResponse> useAgain(@PathVariable final long id) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(customDomainService.useAgain(id));
+    }
+
     @Operation(summary = "Remove a custom domain", description = "Withdraws an application that is waiting for review; links is ignored then. Otherwise removes the domain: links=MOVE moves its links to hrva.cc, renaming any alias hrva.cc already has; links=DEACTIVATE (the default) turns them off.")
     @ApiResponse(responseCode = "200", description = "Removed, with what happened to the links")
     @ApiResponse(responseCode = "400", description = "links isn't MOVE or DEACTIVATE")

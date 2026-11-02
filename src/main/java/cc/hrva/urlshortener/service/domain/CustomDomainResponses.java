@@ -8,6 +8,7 @@ import cc.hrva.urlshortener.model.CustomDomain;
 import cc.hrva.urlshortener.model.enums.CustomDomainStatus;
 import cc.hrva.urlshortener.model.enums.DomainDisableReason;
 import cc.hrva.urlshortener.model.enums.DomainProblem;
+import cc.hrva.urlshortener.model.enums.UseAgain;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.LocalDateTime;
@@ -31,6 +32,10 @@ public class CustomDomainResponses {
     private final AppProperties appProperties;
 
     public CustomDomainResponse of(final CustomDomain domain, final long links, final Clock clock) {
+        return of(domain, links, null, clock);
+    }
+
+    public CustomDomainResponse of(final CustomDomain domain, final long links, final UseAgain useAgain, final Clock clock) {
         final var approved = APPROVED.contains(domain.getStatus());
         final var problem = shownProblem(domain, LocalDateTime.now(clock));
         return new CustomDomainResponse(
@@ -48,7 +53,8 @@ public class CustomDomainResponses {
                 problem,
                 DomainProblems.text(problem),
                 disabledNote(domain),
-                links);
+                links,
+                domain.getStatus() == CustomDomainStatus.DELETED ? useAgain : null);
     }
 
     private static DomainProblem shownProblem(final CustomDomain domain, final LocalDateTime now) {

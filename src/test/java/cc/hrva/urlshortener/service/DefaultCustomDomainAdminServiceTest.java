@@ -39,6 +39,7 @@ import cc.hrva.urlshortener.service.alert.AdminAlertEvent.DomainDisabled;
 import cc.hrva.urlshortener.service.domain.AdminDomainResponses;
 import cc.hrva.urlshortener.service.domain.CloudflareTokenCheck;
 import cc.hrva.urlshortener.service.domain.CloudflareTokenCheck.TokenState;
+import cc.hrva.urlshortener.service.domain.CustomDomainApproval;
 import cc.hrva.urlshortener.service.domain.CustomDomainChangedEvent;
 import cc.hrva.urlshortener.service.domain.CustomDomainLifecycle;
 import cc.hrva.urlshortener.service.domain.CustomDomainModeration;
@@ -91,6 +92,7 @@ import org.springframework.transaction.support.TransactionOperations;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -198,9 +200,9 @@ class DefaultCustomDomainAdminServiceTest {
         final var moderation = new CustomDomainModeration(customDomainRepository, customDomainLifecycle, linkCheckService, sendingEmailService,
                 eventPublisher, transactions, clock);
         customDomainAdminService = new DefaultCustomDomainAdminService(customDomainRepository, customDomainAllowanceRepository,
-                customDomainReconcileRepository, userRepository, customDomainCapLock, cloudflareTokenCheck, customDomainProvisioner, setup, moderation,
-                customDomainRemoval, customDomainReconciler, responses, linkCheckService, sendingEmailService, eventPublisher, transactions, appProperties,
-                clock);
+                customDomainReconcileRepository, userRepository, customDomainCapLock, cloudflareTokenCheck, setup, moderation, customDomainRemoval,
+                customDomainReconciler, new CustomDomainApproval(linkCheckService, customDomainProvisioner), responses, sendingEmailService,
+                eventPublisher, transactions, appProperties, clock);
     }
 
     @Test
@@ -988,7 +990,7 @@ class DefaultCustomDomainAdminServiceTest {
         assertThat(steps).containsSubsequence("begin", "markDisabled", "commit");
         verify(eventPublisher).publishEvent(new CustomDomainChangedEvent(ID));
         verify(eventPublisher).publishEvent(new DomainDisabled(ID, "go.example.com", DomainDisableReason.ADMIN, "Phishing"));
-        verify(customDomainRepository, never()).markDeleted(anyLong(), any(), any());
+        verify(customDomainRepository, never()).markDeleted(anyLong(), any(), anyBoolean(), any());
         verify(customDomainRepository, never()).clearDeletePending(anyLong(), any());
         verifyNoInteractions(cloudflareClient, customDomainProvisioner, customDomainLifecycle, customDomainRemoval);
     }

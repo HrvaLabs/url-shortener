@@ -22,13 +22,17 @@ import cc.hrva.urlshortener.model.enums.CustomDomainStatus;
 import cc.hrva.urlshortener.model.enums.DomainLinkMode;
 import cc.hrva.urlshortener.model.enums.DomainProblem;
 import cc.hrva.urlshortener.model.enums.DomainRequestStatus;
+import cc.hrva.urlshortener.model.enums.UseAgain;
+import cc.hrva.urlshortener.repository.CustomDomainCapLock;
 import cc.hrva.urlshortener.repository.CustomDomainRepository;
 import cc.hrva.urlshortener.repository.CustomDomainRequestRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.service.CustomDomainService;
 import cc.hrva.urlshortener.service.LinkCheckService;
+import cc.hrva.urlshortener.service.ScammerSignalService;
 import cc.hrva.urlshortener.service.UserService;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.DomainApplied;
+import cc.hrva.urlshortener.service.domain.CustomDomainApproval;
 import cc.hrva.urlshortener.service.domain.CustomDomainChangedEvent;
 import cc.hrva.urlshortener.service.domain.CustomDomainHostnames;
 import cc.hrva.urlshortener.service.domain.CustomDomainLifecycle;
@@ -49,6 +53,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
+import java.util.OptionalInt;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.ObjectUtils;
@@ -61,6 +66,7 @@ import org.springframework.security.authentication.DisabledException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionCallback;
 import org.springframework.transaction.support.TransactionOperations;
 
 @Slf4j
@@ -93,11 +99,15 @@ public class DefaultCustomDomainService implements CustomDomainService {
     private static final int MAX_FLAGS_LENGTH = 1000;
     private static final String FLAG_SEPARATOR = "\n";
     private static final String HOSTNAME_KEY_CONSTRAINT = "ux_custom_domain_hostname_key";
+    private static final String STILL_BEING_REMOVED = "This domain is still being removed from Cloudflare. Try again in a few minutes.";
+    private static final String USED_AGAIN = "use again";
+    private static final String HTTPS = "https://";
 
     private final UserService userService;
     private final CustomDomainRepository customDomainRepository;
     private final CustomDomainRequestRepository customDomainRequestRepository;
     private final UrlRepository urlRepository;
+    private final CustomDomainCapLock customDomainCapLock;
     private final CustomDomainHostnames customDomainHostnames;
     private final CustomDomainLimits customDomainLimits;
     private final CustomDomainResponses customDomainResponses;
@@ -105,7 +115,9 @@ public class DefaultCustomDomainService implements CustomDomainService {
     private final CustomDomainProvisioner customDomainProvisioner;
     private final CustomDomainSetup customDomainSetup;
     private final CustomDomainRemoval customDomainRemoval;
+    private final CustomDomainApproval customDomainApproval;
     private final LinkCheckService linkCheckService;
+    private final ScammerSignalService scammerSignalService;
     private final AccountLock accountLock;
     private final RateLimiter rateLimiter;
     private final ApplicationEventPublisher eventPublisher;
@@ -118,9 +130,12 @@ public class DefaultCustomDomainService implements CustomDomainService {
         final var user = currentUser();
         final var domains = customDomainRepository.findByOwnerIdOrderByCreatedAtDescIdDesc(user.getId());
         final var cutoff = LocalDateTime.now(clock).minus(ENDINGS_SHOWN);
-        final var shown = domains.stream()
+        final var listed = domains.stream()
                 .filter(domain -> !endedBefore(domain, cutoff))
-                .map(this::response)
+                .toList();
+        final var possibleScammer = listed.stream().anyMatch(domain -> domain.getStatus() == CustomDomainStatus.DELETED) && possibleScammer(user);
+        final var shown = listed.stream()
+                .map(domain -> response(domain, useAgainOf(domain, possibleScammer)))
                 .toList();
         final var used = domains.stream().filter(domain -> CustomDomainStatus.COUNTS_FOR_USER.contains(domain.getStatus())).count();
         final var limit = customDomainLimits.limitFor(user.getId());
@@ -144,19 +159,38 @@ public class DefaultCustomDomainService implements CustomDomainService {
         requireBelowTheLimit(user.getId());
         requireWithinApplyLimit(user);
         final var reason = StringUtils.strip(customDomainApplyDto.getReason());
-        final var flags = flagsOf(hostname, linkCheckService.check("https://" + hostname + "/"), user);
-
-        final CustomDomain created;
-        try {
-            created = transactionOperations.execute(status -> insert(user, hostname, reason, flags));
-        } catch (final DataIntegrityViolationException exception) {
-            if (violates(exception, HOSTNAME_KEY_CONSTRAINT) || customDomainRepository.findByHostnameKey(hostname).isPresent()) {
-                log.info("Custom domain application lost a race for its hostname userId={}", user.getId());
-                throw new CustomDomainConflictException(TAKEN);
-            }
-            throw exception;
-        }
+        final var flags = flagsOf(hostname, linkCheckService.check(HTTPS + hostname + "/"), user);
+        final var created = inserted(user, hostname, status -> insert(user, hostname, reason, flags));
         log.info("Custom domain applied for domainId={} userId={} flags={}", created.getId(), user.getId(), flags.size());
+        return customDomainResponses.of(created, 0, clock);
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    public CustomDomainResponse useAgain(final long id) {
+        if (!enabled()) {
+            throw new FeatureUnavailableException(TURNED_OFF);
+        }
+        final var user = currentUser();
+        final var removed = Objects.requireNonNull(transactionOperations.execute(status -> removedDomain(id, user)));
+        if (removed.isCloudflareDeletePending()) {
+            log.info("Custom domain use again refused, it is still being removed from Cloudflare domainId={}", id);
+            throw new CustomDomainConflictException(STILL_BEING_REMOVED);
+        }
+        requireActive(user);
+        requireBelowTheLimit(user.getId());
+        requireWithinApplyLimit(user);
+        final var hostname = removed.getHostname();
+        final var flags = flagsOf(hostname, linkCheckService.check(HTTPS + hostname + "/"), user);
+        final var cloudflareTotal = skipsReview(removed, flags, user) ? cloudflareTotal(id) : OptionalInt.empty();
+        final var created = inserted(user, hostname, status -> insertAgain(user, removed, flags, cloudflareTotal));
+        if (created.getStatus() == CustomDomainStatus.APPROVED_PROVISIONING) {
+            customDomainApproval.handOver(created.getId());
+            log.info("Custom domain used again and set up straight away domainId={} removedDomainId={} userId={}", created.getId(), id, user.getId());
+        } else {
+            log.info("Custom domain used again, waiting for review domainId={} removedDomainId={} userId={} flags={}", created.getId(), id,
+                    user.getId(), flags.size());
+        }
         return customDomainResponses.of(created, 0, clock);
     }
 
@@ -206,11 +240,58 @@ public class DefaultCustomDomainService implements CustomDomainService {
         return customDomainRemoval.remove(id, mode, new Actor(user.getEmail(), false));
     }
 
+    private CustomDomain inserted(final User user, final String hostname, final TransactionCallback<CustomDomain> insert) {
+        try {
+            return transactionOperations.execute(insert);
+        } catch (final DataIntegrityViolationException exception) {
+            if (violates(exception, HOSTNAME_KEY_CONSTRAINT) || customDomainRepository.findByHostnameKey(hostname).isPresent()) {
+                log.info("Custom domain application lost a race for its hostname userId={}", user.getId());
+                throw new CustomDomainConflictException(TAKEN);
+            }
+            throw exception;
+        }
+    }
+
     private CustomDomain insert(final User user, final String hostname, final String reason, final List<String> flags) {
+        return pending(lockedOwner(user, hostname), hostname, reason, flags);
+    }
+
+    private CustomDomain insertAgain(final User user, final CustomDomain removed, final List<String> flags, final OptionalInt cloudflareTotal) {
+        final var owner = lockedOwner(user, removed.getHostname());
+        if (cloudflareTotal.isPresent() && roomToSetUp(removed.getId(), cloudflareTotal.getAsInt())) {
+            return setUpStraightAway(owner, removed, flags);
+        }
+        return pending(owner, removed.getHostname(), removed.getReason(), flags);
+    }
+
+    private User lockedOwner(final User user, final String hostname) {
         final var owner = accountLock.lock(user);
         requireActive(owner);
         requireBelowTheLimit(owner.getId());
         requireFree(hostname, owner.getId());
+        return owner;
+    }
+
+    private CustomDomain setUpStraightAway(final User owner, final CustomDomain removed, final List<String> flags) {
+        final var now = LocalDateTime.now(clock);
+        final var saved = customDomainRepository.saveAndFlush(CustomDomain.builder()
+                .owner(owner)
+                .hostname(removed.getHostname())
+                .hostnameKey(removed.getHostname())
+                .status(CustomDomainStatus.APPROVED_PROVISIONING)
+                .reason(removed.getReason())
+                .applyFlags(flags)
+                .reviewedBy(USED_AGAIN)
+                .reviewedAt(now)
+                .nextCheckAt(now)
+                .createdAt(now)
+                .updatedAt(now)
+                .build());
+        eventPublisher.publishEvent(new CustomDomainChangedEvent(saved.getId()));
+        return saved;
+    }
+
+    private CustomDomain pending(final User owner, final String hostname, final String reason, final List<String> flags) {
         final var now = LocalDateTime.now(clock);
         final var saved = customDomainRepository.saveAndFlush(CustomDomain.builder()
                 .owner(owner)
@@ -225,6 +306,57 @@ public class DefaultCustomDomainService implements CustomDomainService {
         eventPublisher.publishEvent(new DomainApplied(saved.getId(), hostname, owner.getId(), flags));
         eventPublisher.publishEvent(new CustomDomainChangedEvent(saved.getId()));
         return saved;
+    }
+
+    private boolean skipsReview(final CustomDomain removed, final List<String> flags, final User user) {
+        return flags.isEmpty() && reviewFree(removed) && !possibleScammer(user);
+    }
+
+    private boolean reviewFree(final CustomDomain removed) {
+        return !removed.isRemovedByAdmin() && removed.getActivatedAt() != null && !customDomainApproval.blockedByRule(removed.getHostname());
+    }
+
+    private boolean possibleScammer(final User user) {
+        return !scammerSignalService.possibleScammers(List.of(user)).isEmpty();
+    }
+
+    private OptionalInt cloudflareTotal(final long removedId) {
+        try {
+            return OptionalInt.of(customDomainSetup.liveTotal(removedId));
+        } catch (final CustomDomainCapacityException exception) {
+            log.info("Custom domain used again goes to review, Cloudflare can't take it now removedDomainId={}", removedId);
+            return OptionalInt.empty();
+        }
+    }
+
+    private boolean roomToSetUp(final long removedId, final int cloudflareTotal) {
+        customDomainCapLock.lock();
+        try {
+            customDomainSetup.requireRoom(removedId, cloudflareTotal, false);
+            return true;
+        } catch (final CustomDomainCapacityException exception) {
+            log.info("Custom domain used again goes to review, there is no room to set it up removedDomainId={}", removedId);
+            return false;
+        }
+    }
+
+    private UseAgain useAgainOf(final CustomDomain domain, final boolean possibleScammer) {
+        if (domain.getStatus() != CustomDomainStatus.DELETED) {
+            return null;
+        }
+        if (domain.isCloudflareDeletePending()) {
+            return UseAgain.CLOUDFLARE_REMOVAL_PENDING;
+        }
+        if (heldByAnother(domain)) {
+            return null;
+        }
+        return !possibleScammer && reviewFree(domain) ? UseAgain.SKIPS_REVIEW : UseAgain.NEEDS_REVIEW;
+    }
+
+    private boolean heldByAnother(final CustomDomain domain) {
+        return customDomainRepository.findByHostnameKey(domain.getHostname())
+                .filter(holder -> !Objects.equals(holder.getId(), domain.getId()))
+                .isPresent();
     }
 
     private List<String> flagsOf(final String hostname, final LinkVerdict verdict, final User user) {
@@ -336,8 +468,18 @@ public class DefaultCustomDomainService implements CustomDomainService {
                 .orElseThrow(() -> new CustomDomainNotFoundException(NOT_FOUND));
     }
 
+    private CustomDomain removedDomain(final long id, final User user) {
+        return customDomainRepository.findByIdAndOwnerId(id, user.getId())
+                .filter(domain -> domain.getStatus() == CustomDomainStatus.DELETED)
+                .orElseThrow(() -> new CustomDomainNotFoundException(NOT_FOUND));
+    }
+
     private CustomDomainResponse response(final CustomDomain domain) {
-        return customDomainResponses.of(domain, urlRepository.countByDomain_Id(domain.getId()), clock);
+        return response(domain, null);
+    }
+
+    private CustomDomainResponse response(final CustomDomain domain, final UseAgain useAgain) {
+        return customDomainResponses.of(domain, urlRepository.countByDomain_Id(domain.getId()), useAgain, clock);
     }
 
     private static boolean endedBefore(final CustomDomain domain, final LocalDateTime cutoff) {

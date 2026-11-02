@@ -2,6 +2,7 @@ package cc.hrva.urlshortener.dto.domain;
 
 import cc.hrva.urlshortener.model.enums.CustomDomainStatus;
 import cc.hrva.urlshortener.model.enums.DomainProblem;
+import cc.hrva.urlshortener.model.enums.UseAgain;
 import java.time.LocalDateTime;
 
 public record CustomDomainResponse(
@@ -19,5 +20,6 @@ public record CustomDomainResponse(
         DomainProblem problem,
         String problemText,
         String disabledNote,
-        long links) {
+        long links,
+        UseAgain useAgain) {
 }

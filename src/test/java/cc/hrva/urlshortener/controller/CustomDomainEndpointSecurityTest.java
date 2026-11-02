@@ -12,6 +12,7 @@ import cc.hrva.urlshortener.mcp.authorization.AuthorizationServerConfiguration;
 import cc.hrva.urlshortener.mcp.bridge.ConnectRequestStore;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.repository.CustomDomainAllowanceRepository;
+import cc.hrva.urlshortener.repository.CustomDomainCapLock;
 import cc.hrva.urlshortener.repository.CustomDomainRepository;
 import cc.hrva.urlshortener.repository.CustomDomainRequestRepository;
 import cc.hrva.urlshortener.repository.UrlDomainMoves;
@@ -26,12 +27,14 @@ import cc.hrva.urlshortener.security.SessionToken;
 import cc.hrva.urlshortener.security.TokenProvider;
 import cc.hrva.urlshortener.service.LinkCheckService;
 import cc.hrva.urlshortener.service.ReservedAliasService;
+import cc.hrva.urlshortener.service.ScammerSignalService;
 import cc.hrva.urlshortener.service.SendingEmailService;
 import cc.hrva.urlshortener.service.UrlService;
 import cc.hrva.urlshortener.service.UserService;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.DomainApplied;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.DomainLimitRequested;
+import cc.hrva.urlshortener.service.domain.CustomDomainApproval;
 import cc.hrva.urlshortener.service.domain.CustomDomainChangedEvent;
 import cc.hrva.urlshortener.service.domain.CustomDomainHostnames;
 import cc.hrva.urlshortener.service.domain.CustomDomainLifecycle;
@@ -220,6 +223,9 @@ class CustomDomainEndpointSecurityTest {
     @MockitoBean
     private SendingEmailService sendingEmailService;
 
+    @MockitoBean
+    private ScammerSignalService scammerSignalService;
+
     @DynamicPropertySource
     static void signingKey(final DynamicPropertyRegistry registry) {
         registry.add("app.mcp.signing-key", SIGNING_KEY::toJSONString);
@@ -257,6 +263,7 @@ class CustomDomainEndpointSecurityTest {
         mockMvc.perform(post(DOMAINS).contentType(MediaType.APPLICATION_JSON).content(APPLICATION)).andExpect(status().isUnauthorized());
         mockMvc.perform(get(DOMAINS + "/" + id)).andExpect(status().isUnauthorized());
         mockMvc.perform(delete(DOMAINS + "/" + id)).andExpect(status().isUnauthorized());
+        mockMvc.perform(post(DOMAINS + "/" + id + "/use-again")).andExpect(status().isUnauthorized());
         mockMvc.perform(post(REQUESTS).contentType(MediaType.APPLICATION_JSON).content(REQUEST)).andExpect(status().isUnauthorized());
         mockMvc.perform(delete(REQUESTS + "/1")).andExpect(status().isUnauthorized());
 
@@ -314,7 +321,7 @@ class CustomDomainEndpointSecurityTest {
                 .andExpect(content().json("""
                         {"id":%d,"hostname":"go.example.com","status":"PENDING_REVIEW","reason":"Menu links for my cafe","reviewNote":null,
                          "createdAt":"2026-10-29T09:00:00Z","reviewedAt":null,"activatedAt":null,"lastCheckedAt":null,
-                         "dnsRecord":null,"steps":null,"problem":null,"problemText":null,"disabledNote":null,"links":0}""".formatted(id),
+                         "dnsRecord":null,"steps":null,"problem":null,"problemText":null,"disabledNote":null,"links":0,"useAgain":null}""".formatted(id),
                         JsonCompareMode.STRICT));
     }
 
@@ -336,12 +343,74 @@ class CustomDomainEndpointSecurityTest {
                          "dnsRecord":{"type":"CNAME","name":"menu.example.org","target":"domains.hrva.cc"},
                          "steps":{"dnsFound":false,"certificateIssued":false},
                          "problem":"DNS_NOT_FOUND","problemText":"We can't see the CNAME record yet. DNS changes can take up to an hour.",
-                         "disabledNote":null,"links":2}""".formatted(id), JsonCompareMode.STRICT));
+                         "disabledNote":null,"links":2,"useAgain":null}""".formatted(id), JsonCompareMode.STRICT));
         mockMvc.perform(as(ANA_TOKEN, get(DOMAINS)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.domains[0].links").value(2));
         verify(rateLimiter).tryAcquire("domain-check:domain:" + id, 1, Duration.ofSeconds(15));
         verify(customDomainLifecycle).checkNow(id);
+        verifyNoInteractions(customDomainProvisioner);
+    }
+
+    @Test
+    void anOwnerUsesTheirRemovedDomainAgainAndItIsSetUpStraightAway() throws Exception {
+        final var removed = domain(ANA, "again.example.com", "ACTIVE");
+        jdbcTemplate.update("update custom_domain set activated_at = ? where id = ?", NOW.minusDays(5), removed);
+        mockMvc.perform(as(ANA_TOKEN, delete(DOMAINS + "/" + removed))).andExpect(status().isOk());
+        mockMvc.perform(as(ANA_TOKEN, get(DOMAINS)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.domains[0].status").value("DELETED"))
+                .andExpect(jsonPath("$.domains[0].useAgain").value("SKIPS_REVIEW"));
+        committedEvents.clear();
+
+        mockMvc.perform(as(ANA_TOKEN, post(DOMAINS + "/" + removed + "/use-again")))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.hostname").value("again.example.com"))
+                .andExpect(jsonPath("$.status").value("APPROVED_PROVISIONING"))
+                .andExpect(jsonPath("$.reason").value("Menu links for my cafe"))
+                .andExpect(jsonPath("$.useAgain").doesNotExist());
+        final var again = idOf("again.example.com");
+
+        assertThat(again).isNotEqualTo(removed);
+        assertThat(jdbcTemplate.queryForMap("select status, hostname_key, reviewed_by, removed_by_admin from custom_domain where id = ?", again))
+                .containsEntry("STATUS", "APPROVED_PROVISIONING")
+                .containsEntry("HOSTNAME_KEY", "again.example.com")
+                .containsEntry("REVIEWED_BY", "use again")
+                .containsEntry("REMOVED_BY_ADMIN", false);
+        verify(customDomainProvisioner).provisionAsync(again);
+        assertThat(committedEvents.events()).containsExactly(new CustomDomainChangedEvent(again));
+        mockMvc.perform(as(ANA_TOKEN, get(DOMAINS)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.domains[0].id").value(again))
+                .andExpect(jsonPath("$.domains[1].id").value(removed))
+                .andExpect(jsonPath("$.domains[1].useAgain").doesNotExist());
+    }
+
+    @Test
+    void aDomainAnAdminRemovedIsReviewedAgainAndOneStillInCloudflareWaits() throws Exception {
+        final var byAdmin = domain(ANA, "admin.example.com", "DELETED");
+        final var inCloudflare = domain(BOB, "cloudflare.example.com", "DELETED");
+        jdbcTemplate.update("update custom_domain set hostname_key = null, removed_by_admin = true, activated_at = ?, deleted_at = ? where id = ?",
+                NOW.minusDays(5), NOW.minusDays(1), byAdmin);
+        jdbcTemplate.update("update custom_domain set cloudflare_id = 'cf-9', cloudflare_delete_pending = true, deleted_at = ? where id = ?",
+                NOW.minusDays(1), inCloudflare);
+
+        mockMvc.perform(as(ANA_TOKEN, post(DOMAINS + "/" + byAdmin + "/use-again")))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.status").value("PENDING_REVIEW"));
+        mockMvc.perform(as(BOB_TOKEN, get(DOMAINS)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.domains[0].useAgain").value("CLOUDFLARE_REMOVAL_PENDING"));
+        mockMvc.perform(as(BOB_TOKEN, post(DOMAINS + "/" + inCloudflare + "/use-again")))
+                .andExpect(status().isConflict())
+                .andExpect(content().json("{\"detail\":\"This domain is still being removed from Cloudflare. Try again in a few minutes.\"}",
+                        JsonCompareMode.LENIENT));
+        mockMvc.perform(as(BOB_TOKEN, post(DOMAINS + "/" + byAdmin + "/use-again")))
+                .andExpect(status().isNotFound())
+                .andExpect(content().json(NOT_FOUND, JsonCompareMode.LENIENT));
+
+        assertThat(countOf(ANA)).isEqualTo(2);
+        assertThat(countOf(BOB)).isOne();
         verifyNoInteractions(customDomainProvisioner);
     }
 
@@ -932,6 +1001,8 @@ class CustomDomainEndpointSecurityTest {
             CustomDomainLimits.class,
             CustomDomainResponses.class,
             CustomDomainRemoval.class,
+            CustomDomainApproval.class,
+            CustomDomainCapLock.class,
             UrlDomainMoves.class,
             UrlCache.class,
             TestApplication.FixedClock.class,
