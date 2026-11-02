@@ -59,7 +59,7 @@ class NotificationPayloadsTest {
     void dailySummaryBody() {
         final var summary = new DailySummary(LocalDate.of(2026, 10, 26), 41, 30, 7, List.of(
                 new DailySummary.SummaryLink("abc", "example.com", 20, 15, 2, null),
-                new DailySummary.SummaryLink("bots", null, 0, 0, 3, null)));
+                new DailySummary.SummaryLink("bots", null, 0, 0, 3, null)), 0);
 
         final var json = payloads.json(NotificationType.DAILY_SUMMARY, "uid-3", CREATED_AT, payloads.daily(summary));
 
@@ -108,7 +108,7 @@ class NotificationPayloadsTest {
         final var dead = payloads.json(NotificationType.LINK_DEAD, "u", CREATED_AT, payloads.linkDead(List.of(onDomain)));
         final var back = payloads.json(NotificationType.LINK_BACK, "u", CREATED_AT, payloads.linkBack(List.of(onDomain), LocalDate.of(2026, 10, 28)));
         final var daily = payloads.json(NotificationType.DAILY_SUMMARY, "u", CREATED_AT, payloads.daily(new DailySummary(LocalDate.of(2026, 10, 26), 3, 2, 0,
-                List.of(new DailySummary.SummaryLink("day", "example.org", 3, 2, 0, "go.example.com")))));
+                List.of(new DailySummary.SummaryLink("day", "example.org", 3, 2, 0, "go.example.com")), 0)));
         final var week = payloads.json(NotificationType.WEEKLY_SUMMARY, "u", CREATED_AT, payloads.weekly(weekly));
 
         assertThat(dead).contains("\"shortUrl\":\"https://go.example.com/menu\"").doesNotContain("hrva.cc");

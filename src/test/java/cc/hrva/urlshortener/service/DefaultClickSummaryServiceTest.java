@@ -166,7 +166,7 @@ class DefaultClickSummaryServiceTest {
 
         clickSummaryService.sendDaily();
 
-        final var expected = new DailySummary(YESTERDAY, 5, 4, 1, List.of(new SummaryLink("menu", "menu.example.org", 5, 4, 1, null)));
+        final var expected = new DailySummary(YESTERDAY, 5, 4, 1, List.of(new SummaryLink("menu", "menu.example.org", 5, 4, 1, null)), 0);
         final var channels = channelsCaptor();
         final var content = contentCaptor();
         verify(deliveryService).enqueue(eq(NotificationType.DAILY_SUMMARY), eq("summary.daily:2026-10-26"), channels.capture(), content.capture());

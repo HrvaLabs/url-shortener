@@ -44,7 +44,7 @@ class NotificationMessagesTest {
         final var message = messages.daily(new DailySummary(LocalDate.of(2026, 10, 26), 1241, 1, 7, List.of(
                 new DailySummary.SummaryLink("abc", "example.com", 1240, 1, 2, null),
                 new DailySummary.SummaryLink("one", "example.org", 1, 0, 1, null),
-                new DailySummary.SummaryLink("bots", null, 0, 0, 4, null))));
+                new DailySummary.SummaryLink("bots", null, 0, 0, 4, null)), 0));
 
         assertThat(message.title()).isEqualTo("hrva.cc: clicks on 26 October 2026");
         assertThat(message.lines()).containsExactly(
@@ -91,7 +91,7 @@ class NotificationMessagesTest {
                 .mapToObj(index -> new DailySummary.SummaryLink("a".repeat(120) + index, "example.com", 20 - index, 1, 0, null))
                 .toList();
 
-        final var message = messages.daily(new DailySummary(LocalDate.of(2026, 10, 26), 210, 20, 0, links));
+        final var message = messages.daily(new DailySummary(LocalDate.of(2026, 10, 26), 210, 20, 0, links, 0));
 
         assertThat(plain(message)).hasSizeLessThanOrEqualTo(NotificationMessages.MOST_CHARACTERS).endsWith("http://localhost:3000/dashboard");
     }
@@ -205,7 +205,7 @@ class NotificationMessagesTest {
         assertThat(messages.linkBack(List.of(onDomain)).lines())
                 .containsExactly("go.example.com/menu " + ARROW + " example.org, works again after looking broken since 27 October 2026");
         assertThat(messages.daily(new DailySummary(LocalDate.of(2026, 10, 26), 3, 2, 0,
-                List.of(new DailySummary.SummaryLink("menu", "example.org", 3, 2, 0, "go.example.com")))).lines())
+                List.of(new DailySummary.SummaryLink("menu", "example.org", 3, 2, 0, "go.example.com")), 0)).lines())
                 .contains("go.example.com/menu " + ARROW + " example.org: 3 clicks, 2 visitors, 0 bot clicks");
         final var weekly = new WeeklySummary(7L, "ana@example.com", LocalDate.of(2026, 10, 19), LocalDate.of(2026, 10, 25),
                 new WeeklyDigest.Change(3, 0), 2, List.of(new WeeklyDigest.TopLink("menu", "example.org", 3, "go.example.com")), List.of(onDomain),
