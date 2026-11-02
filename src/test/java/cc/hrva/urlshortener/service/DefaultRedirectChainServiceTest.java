@@ -24,6 +24,7 @@ import java.time.ZoneOffset;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
+import java.util.stream.IntStream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -247,7 +248,7 @@ class DefaultRedirectChainServiceTest {
     }
 
     @Test
-    void aLongBlockDetailIsCutToTheColumnButKeepsTheHost() {
+    void aLongBlockDetailNamesTheHostInsteadOfCuttingTheUrl() {
         final var longThreat = "https://njuskaio.cam/" + "a".repeat(300);
         chain(DESTINATION, longThreat);
         when(safeBrowsingService.checkUrlsForThreats(List.of(longThreat))).thenReturn(List.of(longThreat));
@@ -256,7 +257,21 @@ class DefaultRedirectChainServiceTest {
         redirectChainService.check(LINK_ID);
 
         verify(moderationService).blockLink(eq(LINK_ID), eq(BlockReason.SAFE_BROWSING), detail.capture(), eq("system"), eq("redirect-check"));
-        assertThat(detail.getValue()).hasSize(255).startsWith("https://njuskaio.cam/aaa").endsWith(" via redirect to njuskaio.cam");
+        assertThat(detail.getValue()).isEqualTo("njuskaio.cam via redirect to njuskaio.cam");
+    }
+
+    @Test
+    void manyFlaggedUrlsKeepWholeUrlsThenSayHowManyMoreAndStillNameTheRedirectHost() {
+        final var threats = IntStream.range(0, 9).mapToObj(index -> "https://njuskaio.cam/" + index + "p".repeat(30)).toList();
+        chain(DESTINATION, threats.getFirst());
+        when(safeBrowsingService.checkUrlsForThreats(List.of(threats.getFirst()))).thenReturn(threats);
+        final var detail = ArgumentCaptor.forClass(String.class);
+
+        redirectChainService.check(LINK_ID);
+
+        verify(moderationService).blockLink(eq(LINK_ID), eq(BlockReason.SAFE_BROWSING), detail.capture(), eq("system"), eq("redirect-check"));
+        assertThat(detail.getValue()).hasSizeLessThanOrEqualTo(255).startsWith(String.join(", ", threats.subList(0, 3)) + ", ")
+                .contains(", and ").endsWith(" more via redirect to njuskaio.cam").doesNotContain("...");
     }
 
     @Test

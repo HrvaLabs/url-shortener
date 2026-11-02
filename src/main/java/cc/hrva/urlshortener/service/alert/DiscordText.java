@@ -26,7 +26,14 @@ public final class DiscordText {
         if (StringUtils.isBlank(text)) {
             return "";
         }
-        return escaped(cleaned(text));
+        return escaped(cleaned(text, true));
+    }
+
+    public static String userText(final String text) {
+        if (StringUtils.isBlank(text)) {
+            return "";
+        }
+        return escaped(cleaned(text, false));
     }
 
     public static String hostname(final String hostname) {
@@ -41,12 +48,14 @@ public final class DiscordText {
         return MARKDOWN.matcher(StringUtils.normalizeSpace(visible)).replaceAll("\\\\$0");
     }
 
-    private static String cleaned(final String text) {
+    private static String cleaned(final String text, final boolean redacted) {
         var cleaned = INVISIBLE.matcher(text).replaceAll(" ");
         cleaned = MASKED_LINK.matcher(cleaned).replaceAll("$1 $2");
-        cleaned = EMAIL.matcher(cleaned).replaceAll(EMAIL_REMOVED);
-        cleaned = IPV6.matcher(cleaned).replaceAll(DiscordText::withoutIpAddress);
-        cleaned = IPV4.matcher(cleaned).replaceAll(DiscordText::withoutIpAddress);
+        if (redacted) {
+            cleaned = EMAIL.matcher(cleaned).replaceAll(EMAIL_REMOVED);
+            cleaned = IPV6.matcher(cleaned).replaceAll(DiscordText::withoutIpAddress);
+            cleaned = IPV4.matcher(cleaned).replaceAll(DiscordText::withoutIpAddress);
+        }
         cleaned = FORMATTING.matcher(cleaned).replaceAll("");
         return StringUtils.normalizeSpace(cleaned);
     }

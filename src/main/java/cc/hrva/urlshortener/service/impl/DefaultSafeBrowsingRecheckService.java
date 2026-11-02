@@ -21,7 +21,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.commons.lang3.StringUtils;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
@@ -38,7 +37,6 @@ public class DefaultSafeBrowsingRecheckService implements SafeBrowsingRecheckSer
     private static final String PERFORMED_BY = "system";
     private static final String VIA = "nightly";
     private static final String THREAT_SEPARATOR = ", ";
-    private static final int BLOCK_DETAIL_LENGTH = 255;
 
     private final UrlRepository urlRepository;
     private final SafeBrowsingService safeBrowsingService;
@@ -130,7 +128,7 @@ public class DefaultSafeBrowsingRecheckService implements SafeBrowsingRecheckSer
         if (!threats.isEmpty()) {
             log.warn("URL /{} flagged as malicious: {}", url.getShortUrl(), threats);
             final var detail = threats.stream().distinct().collect(Collectors.joining(THREAT_SEPARATOR));
-            moderationService.blockLink(url.getId(), BlockReason.SAFE_BROWSING, StringUtils.truncate(detail, BLOCK_DETAIL_LENGTH), PERFORMED_BY, VIA);
+            moderationService.blockLink(url.getId(), BlockReason.SAFE_BROWSING, detail, PERFORMED_BY, VIA);
             return ScanResult.BLOCKED;
         }
 

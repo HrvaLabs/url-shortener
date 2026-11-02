@@ -126,7 +126,7 @@ class DiscordAlertFormatterTest {
                 List.of("imitates paypal", "domain registered in the last 30 days"))), 0);
 
         assertThat(message.content()).isEqualTo("New review: hrva.cc/abc12 → example-login.top "
-                + "(imitates paypal, domain registered in the last 30 days), anonymous, <https://app.hrva.cc/admin/review?entry=42>");
+                + "(imitates paypal, domain registered in the last 30 days), no account, <https://app.hrva.cc/admin/review?entry=42>");
     }
 
     @Test
@@ -164,7 +164,7 @@ class DiscordAlertFormatterTest {
 
         assertThat(content).isEqualTo("Visitor report on an open review: hrva.cc/abc12 → example-login.top (phishing: \"@everyone see code hrva.cc/admin "
                 + "<https://evil.example/phish> # fake heading quote \\*\\*bold\\*\\* \\_it\\_ \\|\\|spoiler\\|\\| @123 " + "x".repeat(400)
-                + "\"), anonymous, <https://app.hrva.cc/admin/review?entry=42>");
+                + "\"), no account, <https://app.hrva.cc/admin/review?entry=42>");
         assertThat(content).doesNotContain("\n", "`", "[", "](", "<@", "…");
     }
 
@@ -183,7 +183,7 @@ class DiscordAlertFormatterTest {
                 new UserSignedUp(3L, "p".repeat(60))), 0).content().lines().toList();
 
         assertThat(lines).containsExactly(
-                "New review: hrva.cc/" + alias + " → " + host + " (" + "r".repeat(150) + ", " + "s".repeat(150) + "), anonymous, "
+                "New review: hrva.cc/" + alias + " → " + host + " (" + "r".repeat(150) + ", " + "s".repeat(150) + "), no account, "
                         + "<https://app.hrva.cc/admin/review?entry=1>",
                 "Blocked: hrva.cc/" + alias + " → " + host + " (by an admin: " + "d".repeat(200) + "), account #9, <https://app.hrva.cc/admin/urls>",
                 sourceName + " failed to load: " + error + ", <https://app.hrva.cc/admin/blocklists>",
@@ -322,7 +322,7 @@ class DiscordAlertFormatterTest {
     void eachKindOfAlertHasItsOwnPlainLine() {
         final var content = formatter.message(List.of(
                 new LinkBlocked(new AlertedLink(30L, "s30", "login-paypa1.top", null, null), BlockReason.BLOCKLIST, "HaGeZi TIF medium"),
-                new LinkBlocked(new AlertedLink(31L, "s31", "example.org", 7L, null), BlockReason.SAFE_BROWSING, "SOCIAL_ENGINEERING"),
+                new LinkBlocked(new AlertedLink(31L, "s31", "example.org", 7L, null), BlockReason.SAFE_BROWSING, "https://malware.example/a"),
                 new LinkBlocked(new AlertedLink(32L, "s32", "jofogas.cards", null, null), BlockReason.DOMAIN_RULE, "jofogas.cards"),
                 new LinkBlocked(new AlertedLink(33L, "s33", "example.net", null, null), BlockReason.ADMIN, null),
                 new UserSignedUp(31L, "local"),
@@ -332,10 +332,10 @@ class DiscordAlertFormatterTest {
                 new BlocklistSourceRecovered("HaGeZi TIF medium")), 0).content();
 
         assertThat(content.lines().toList()).containsExactly(
-                "Blocked: hrva.cc/s30 → login-paypa1.top (on HaGeZi TIF medium), anonymous, <https://app.hrva.cc/admin/urls>",
-                "Blocked: hrva.cc/s31 → example.org (Safe Browsing: SOCIAL\\_ENGINEERING), account #7, <https://app.hrva.cc/admin/urls>",
-                "Blocked: hrva.cc/s32 → jofogas.cards (domain rule jofogas.cards), anonymous, <https://app.hrva.cc/admin/urls>",
-                "Blocked: hrva.cc/s33 → example.net (by an admin), anonymous, <https://app.hrva.cc/admin/urls>",
+                "Blocked: hrva.cc/s30 → login-paypa1.top (on HaGeZi TIF medium), no account, <https://app.hrva.cc/admin/urls>",
+                "Blocked: hrva.cc/s31 → example.org (Safe Browsing: <https://malware.example/a>), account #7, <https://app.hrva.cc/admin/urls>",
+                "Blocked: hrva.cc/s32 → jofogas.cards (domain rule: jofogas.cards), no account, <https://app.hrva.cc/admin/urls>",
+                "Blocked: hrva.cc/s33 → example.net (by an admin), no account, <https://app.hrva.cc/admin/urls>",
                 "New user: account #31 signed up with email, <https://app.hrva.cc/admin>",
                 "New user: account #32 signed up with GitHub, <https://app.hrva.cc/admin>",
                 "HaGeZi TIF medium failed to load: main: HTTP 503 (a fallback loaded), <https://app.hrva.cc/admin/blocklists>",
@@ -431,7 +431,7 @@ class DiscordAlertFormatterTest {
         final var fitting = formatter.message(batchWithLastDetailsOfLength(exactLength), 0).content();
         final var tooLong = formatter.message(batchWithLastDetailsOfLength(exactLength + 1), 0).content();
 
-        assertThat(fitting).hasSize(2000).doesNotContain(" more", "…").endsWith("x".repeat(exactLength) + "\"), anonymous, <https://app.hrva.cc/admin/review?entry=3>");
+        assertThat(fitting).hasSize(2000).doesNotContain(" more", "…").endsWith("x".repeat(exactLength) + "\"), no account, <https://app.hrva.cc/admin/review?entry=3>");
         assertThat(tooLong.length()).isLessThanOrEqualTo(2000);
         assertThat(tooLong).doesNotContain("x".repeat(10), "…");
         assertThat(tooLong.lines().toList()).hasSize(4).last().isEqualTo("and 1 more, see " + REVIEW_PAGE);
@@ -444,7 +444,7 @@ class DiscordAlertFormatterTest {
         final var fitting = formatter.message(batchWithLastDetailsOfLength(exactLength), 1).content();
         final var tooLong = formatter.message(batchWithLastDetailsOfLength(exactLength + 1), 1).content().lines().toList();
 
-        assertThat(fitting).hasSize(2000).endsWith("x".repeat(exactLength) + "\"), anonymous, <https://app.hrva.cc/admin/review?entry=3>\n"
+        assertThat(fitting).hasSize(2000).endsWith("x".repeat(exactLength) + "\"), no account, <https://app.hrva.cc/admin/review?entry=3>\n"
                 + "and 1 more, see " + REVIEW_PAGE);
         assertThat(tooLong).hasSize(4).last().isEqualTo("and 2 more, see " + REVIEW_PAGE);
     }
@@ -653,8 +653,8 @@ class DiscordAlertFormatterTest {
                 new LinkBlocked(ANONYMOUS_LINK, BlockReason.CAMPAIGN, null)), 0).content();
 
         assertThat(content.lines()).containsExactly(
-                "Blocked: hrva.cc/abc12 → example-login.top (campaign hold /wqamhcsom?r&t), anonymous, <https://app.hrva.cc/admin/urls>",
-                "Blocked: hrva.cc/abc12 → example-login.top (campaign hold), anonymous, <https://app.hrva.cc/admin/urls>");
+                "Blocked: hrva.cc/abc12 → example-login.top (campaign hold /wqamhcsom?r&t), no account, <https://app.hrva.cc/admin/urls>",
+                "Blocked: hrva.cc/abc12 → example-login.top (campaign hold), no account, <https://app.hrva.cc/admin/urls>");
     }
 
     @Test
@@ -806,7 +806,7 @@ class DiscordAlertFormatterTest {
                 "Custom domain turned off: go.example.com (by an admin: Phishing kit), <https://app.hrva.cc/admin/domains?search=go.example.com&id=12>",
                 "Custom domain turned off: menu.example.org (by an admin), <https://app.hrva.cc/admin/domains?search=menu.example.org&id=13>",
                 "Custom domain turned off: a.example.net (account blocked), <https://app.hrva.cc/admin/domains?search=a.example.net&id=14>",
-                "Custom domain turned off: b.example.net (domain rule example.net), <https://app.hrva.cc/admin/domains?search=b.example.net&id=15>",
+                "Custom domain turned off: b.example.net (domain rule: example.net), <https://app.hrva.cc/admin/domains?search=b.example.net&id=15>",
                 "Custom domain turned off: c.example.net (on HaGeZi TIF medium), <https://app.hrva.cc/admin/domains?search=c.example.net&id=16>");
     }
 
@@ -843,11 +843,11 @@ class DiscordAlertFormatterTest {
                 new DomainDrift(List.of(), List.of("x.example.org", "y.example.org"), 1, 100)), 0).content().lines().toList();
 
         assertThat(lines).containsExactly(
-                "Custom domain drift: Cloudflare has 2 hostnames we don't know (a.example.com, b.example.com); 1 of ours is missing in Cloudflare "
+                "Custom domain drift: Cloudflare has 2 hostnames hrva.cc doesn't know (a.example.com, b.example.com); 1 hrva.cc domain is missing in Cloudflare "
                         + "(x.example.org). Cloudflare has 5 custom hostnames and 100 are free, <https://app.hrva.cc/admin/domains>",
-                "Custom domain drift: Cloudflare has 1 hostname we don't know (a.example.com). Cloudflare's total is unknown, "
+                "Custom domain drift: Cloudflare has 1 hostname hrva.cc doesn't know (a.example.com). Cloudflare's total is unknown, "
                         + "<https://app.hrva.cc/admin/domains>",
-                "Custom domain drift: 2 of ours are missing in Cloudflare (x.example.org, y.example.org). "
+                "Custom domain drift: 2 hrva.cc domains are missing in Cloudflare (x.example.org, y.example.org). "
                         + "Cloudflare has 1 custom hostname and 100 are free, <https://app.hrva.cc/admin/domains>");
     }
 
@@ -881,7 +881,7 @@ class DiscordAlertFormatterTest {
                 "Custom domain turned off: a\\_b.example.com (by an admin: \\*\\*phish\\*\\* @everyone), "
                         + "<https://app.hrva.cc/admin/domains?search=a_b.example.com&id=13>",
                 "Custom domain needs attention: c\\*d.example.com (its CNAME record is gone), <https://app.hrva.cc/admin/domains?search=c*d.example.com&id=14>",
-                "Custom domain drift: Cloudflare has 1 hostname we don't know (e\\_f.example.com); 1 of ours is missing in Cloudflare (g\\*h.example.com). "
+                "Custom domain drift: Cloudflare has 1 hostname hrva.cc doesn't know (e\\_f.example.com); 1 hrva.cc domain is missing in Cloudflare (g\\*h.example.com). "
                         + "Cloudflare has 2 custom hostnames and 100 are free, <https://app.hrva.cc/admin/domains>");
     }
 
@@ -897,9 +897,9 @@ class DiscordAlertFormatterTest {
         final var content = formatter.weeklyDigest(busyWeek(List.of(new TopLink("menu", "example.com", 120, null)))).content();
 
         assertThat(content).isEqualTo("""
-                **hrva.cc weekly summary: 19–25 October 2026**
+                **hrva.cc weekly digest: 19–25 October 2026**
                 Clicks: 1,204 (up 12% on the week before)
-                Visitors: 950 (each link's daily visitors, added up)
+                Visitors: 950 (daily visitors per link, summed)
                 Bots and link previews: 20.0% of all clicks
                 New links: 40 (down 5% on the week before)
                 How they were made: 30 website, 6 API key, 4 AI connector
@@ -919,9 +919,9 @@ class DiscordAlertFormatterTest {
                 List.of(), List.of());
 
         assertThat(formatter.weeklyDigest(empty).content()).isEqualTo("""
-                **hrva.cc weekly summary: 19–25 October 2026**
+                **hrva.cc weekly digest: 19–25 October 2026**
                 Clicks: 0 (same as the week before)
-                Visitors: 0 (each link's daily visitors, added up)
+                Visitors: 0 (daily visitors per link, summed)
                 Bots and link previews: no clicks
                 New links: 0 (same as the week before)
                 New users: 0 (same as the week before)
@@ -949,7 +949,7 @@ class DiscordAlertFormatterTest {
         final var content = formatter.weeklyDigest(digest).content();
 
         assertThat(content.length()).isLessThan(2000);
-        assertThat(content).startsWith("**hrva.cc weekly summary: 19–25 October 2026**\n");
+        assertThat(content).startsWith("**hrva.cc weekly digest: 19–25 October 2026**\n");
         topLinks.forEach(link -> assertThat(content).contains("hrva.cc/" + link.shortUrl() + " → " + link.destinationHost() + ", "));
         assertThat(content).doesNotContain("…", " more");
         assertThat(content.lines().toList().getLast()).isEqualTo("Stats (last 7 days): <https://app.hrva.cc/admin/dashboard?days=7>");

@@ -644,12 +644,12 @@ class DefaultSendingEmailServiceTest {
         assertThat(email.getSender()).isEqualTo("noreply@hrva.cc");
         assertThat(email.getReceivers()).containsExactly("support@hrva.cc");
         assertThat(email.getBcc()).isNull();
-        assertThat(email.getSubject()).isEqualTo("hrva.cc weekly summary: 19–25 October 2026");
+        assertThat(email.getSubject()).isEqualTo("hrva.cc weekly digest: 19–25 October 2026");
         assertThat(email.getPlainText()).isEqualTo("""
-                hrva.cc weekly summary: 19–25 October 2026
+                hrva.cc weekly digest: 19–25 October 2026
 
                 Clicks: 1,204 (up 12% on the week before)
-                Visitors: 950 (each link's daily visitors, added up)
+                Visitors: 950 (daily visitors per link, summed)
                 Bots and link previews: 20.0% of all clicks
                 New links: 40 (down 5% on the week before)
                 How they were made: 30 website, 6 API key, 4 AI connector
@@ -662,9 +662,9 @@ class DefaultSendingEmailServiceTest {
                 1. hrva.cc/my_menu → example.com, 120 clicks
 
                 Stats (last 7 days): https://hrva.cc/admin/dashboard?days=7""");
-        assertThat(textOf(email.getText())).contains("hrva.cc weekly summary: 19–25 October 2026 "
+        assertThat(textOf(email.getText())).contains("hrva.cc weekly digest: 19–25 October 2026 "
                 + "Clicks: 1,204 (up 12% on the week before) "
-                + "Visitors: 950 (each link's daily visitors, added up) "
+                + "Visitors: 950 (daily visitors per link, summed) "
                 + "Bots and link previews: 20.0% of all clicks "
                 + "New links: 40 (down 5% on the week before) "
                 + "How they were made: 30 website, 6 API key, 4 AI connector "
@@ -676,7 +676,7 @@ class DefaultSendingEmailServiceTest {
                 + "Top links by clicks: "
                 + "1. hrva.cc/my_menu → example.com, 120 clicks "
                 + "Open stats (last 7 days) ");
-        assertThat(email.getText()).contains("<title>hrva.cc weekly summary: 19–25 October 2026</title>");
+        assertThat(email.getText()).contains("<title>hrva.cc weekly digest: 19–25 October 2026</title>");
     }
 
     @Test
@@ -700,7 +700,7 @@ class DefaultSendingEmailServiceTest {
 
         assertThat(bodiesWhileSending).containsExactly(email.getText());
         assertThat(lastSavedEntry().getStatus()).isEqualTo(EmailLog.STATUS_SENT);
-        assertThat(lastSavedEntry().getSubject()).isEqualTo("hrva.cc weekly summary: 19–25 October 2026");
+        assertThat(lastSavedEntry().getSubject()).isEqualTo("hrva.cc weekly digest: 19–25 October 2026");
     }
 
     @Test
@@ -1464,7 +1464,7 @@ class DefaultSendingEmailServiceTest {
                 Your hrva.cc week: %s
 
                 Clicks: 210 (up 17%% on the week before)
-                Visitors: 150 (each link's daily visitors, added up)
+                Visitors: 150 (daily visitors per link, summed)
                 Top links:
                 1. hrva.cc/abc → example.com, 90 clicks
                 Links that stopped working:
@@ -1478,7 +1478,7 @@ class DefaultSendingEmailServiceTest {
                 You get this because you turned on the weekly summary.
                 Turn off the weekly summary: https://hrva.cc/unsubscribe?token=%s""".formatted(week, token));
         assertThat(textOf(email.getText())).contains(
-                "Clicks Clicks: 210 (up 17% on the week before) Visitors: 150 (each link's daily visitors, added up)",
+                "Clicks: 210 (up 17% on the week before) Visitors: 150 (daily visitors per link, summed)",
                 "Top links 1. hrva.cc/abc → example.com, 90 clicks",
                 "Links that stopped working hrva.cc/dead → example.net, since 22 October 2026, the page was removed (410)",
                 "Ending soon hrva.cc/soon → example.org, expires on 30 October 2026 hrva.cc/limited → example.org, 9 visits left",

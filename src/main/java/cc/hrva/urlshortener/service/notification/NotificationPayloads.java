@@ -45,7 +45,7 @@ public class NotificationPayloads {
     public record TestData(String message) {
     }
 
-    public record DailyData(String date, DailyTotals totals, List<DailyLinkData> links) {
+    public record DailyData(String date, DailyTotals totals, List<DailyLinkData> links, long moreLinks) {
     }
 
     public record DailyTotals(long clicks, long uniqueVisitors, long botClicks) {
@@ -80,7 +80,7 @@ public class NotificationPayloads {
     }
 
     public record WeeklyData(String from, String to, WeeklyTotals totals, List<TopLinkData> topLinks, List<DeadLinkData> deadLinks,
-                             List<EndingSoonData> endingSoon) {
+                             List<EndingSoonData> endingSoon, long moreDeadLinks, long moreEndingSoon) {
     }
 
     public record WeeklyTotals(long clicks, long clicksWeekBefore, long uniqueVisitors) {
@@ -102,7 +102,8 @@ public class NotificationPayloads {
                 summary.endingSoon().stream()
                         .map(link -> new EndingSoonData(shortLinks.url(link.domain(), link.shortUrl()), link.destinationHost(), link.reason(),
                                 link.expiresOn() == null ? null : link.expiresOn().toString(), link.visitsLeft()))
-                        .toList());
+                        .toList(),
+                summary.moreDeadLinks(), summary.moreEndingSoon());
     }
 
     public DailyData daily(final DailySummary summary) {
@@ -112,7 +113,8 @@ public class NotificationPayloads {
                         .limit(NotificationMessages.MOST_LINKS)
                         .map(link -> new DailyLinkData(shortLinks.url(link.domain(), link.shortUrl()), link.destinationHost(), link.clicks(),
                                 link.uniqueVisitors(), link.botClicks()))
-                        .toList());
+                        .toList(),
+                summary.moreLinks());
     }
 
     public TestData test() {

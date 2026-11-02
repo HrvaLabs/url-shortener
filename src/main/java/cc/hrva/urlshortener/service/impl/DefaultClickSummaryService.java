@@ -168,12 +168,16 @@ public class DefaultClickSummaryService implements ClickSummaryService {
             return null;
         }
         final var uniqueVisitors = totals.stream().mapToLong(AnalyticsDay::uniqueVisitors).sum();
-        final var counts = linkStatsRepository.findOwnerLinkDay(ownerId, day, NotificationMessages.MOST_LINKS);
-        final var links = linksById(counts.stream().map(LinkDayCounts::urlId).toList());
-        return new DailySummary(day, clicks, uniqueVisitors, botClicks, counts.stream()
+        final var counts = linkStatsRepository.findOwnerLinkDay(ownerId, day, NotificationMessages.MOST_LINKS + 1);
+        final var moreLinks = counts.size() > NotificationMessages.MOST_LINKS
+                ? linkStatsRepository.countOwnerLinkDay(ownerId, day) - NotificationMessages.MOST_LINKS
+                : 0;
+        final var shown = counts.stream().limit(NotificationMessages.MOST_LINKS).toList();
+        final var links = linksById(shown.stream().map(LinkDayCounts::urlId).toList());
+        return new DailySummary(day, clicks, uniqueVisitors, botClicks, shown.stream()
                 .filter(count -> links.containsKey(count.urlId()))
                 .map(count -> summaryLink(links.get(count.urlId()), count))
-                .toList());
+                .toList(), Math.max(0, moreLinks));
     }
 
     private WeeklySummary weekly(final long userId, final DigestWeek week, final LocalDateTime now) {

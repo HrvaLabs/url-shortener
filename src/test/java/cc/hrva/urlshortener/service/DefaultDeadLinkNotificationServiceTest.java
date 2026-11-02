@@ -321,7 +321,7 @@ class DefaultDeadLinkNotificationServiceTest {
         assertThat(channels.getValue()).extracting(NotificationChannel::getId).containsExactly(withEvent.getId());
         assertThat(content.getValue()).containsOnlyKeys(ana.getId());
         assertThat(content.getValue().get(ana.getId())).isEqualTo(new ChannelContent(payloads.linkDead(List.of(link)), messages.linkDead(List.of(link))));
-        assertThat(content.getValue().get(ana.getId()).message().title()).isEqualTo("hrva.cc: 1 link looks broken");
+        assertThat(content.getValue().get(ana.getId()).message().title()).isEqualTo("hrva.cc: 1 of your links looks broken");
         verify(sendingEmailService, never()).sendDeadLinksEmail(any());
     }
 

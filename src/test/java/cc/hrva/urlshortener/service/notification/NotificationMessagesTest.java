@@ -46,13 +46,43 @@ class NotificationMessagesTest {
                 new DailySummary.SummaryLink("one", "example.org", 1, 0, 1, null),
                 new DailySummary.SummaryLink("bots", null, 0, 0, 4, null))));
 
-        assertThat(message).isEqualTo(new NotificationMessage("hrva.cc: clicks on 26 October 2026", List.of(
-                "1,241 clicks from 1 visitor, and 7 bot clicks",
+        assertThat(message.title()).isEqualTo("hrva.cc: clicks on 26 October 2026");
+        assertThat(message.lines()).containsExactly(
+                "1,241 clicks from 1 visitor, plus 7 bot clicks",
+                "Links:",
                 "hrva.cc/abc " + ARROW + " example.com: 1,240 clicks, 1 visitor, 2 bot clicks",
                 "hrva.cc/one " + ARROW + " example.org: 1 click, 0 visitors, 1 bot click",
-                "hrva.cc/bots " + ARROW + " an unreadable destination: 0 clicks, 0 visitors, 4 bot clicks"),
-                "http://localhost:3000/dashboard", 0));
-        assertThat(plain(message)).hasSizeLessThanOrEqualTo(NotificationMessages.MOST_CHARACTERS);
+                "hrva.cc/bots " + ARROW + " an unreadable destination: 0 clicks, 0 visitors, 4 bot clicks");
+        assertThat(message.link()).isEqualTo("http://localhost:3000/dashboard");
+        assertThat(message.moreCount()).isZero();
+        assertThat(plain(message)).hasSizeLessThanOrEqualTo(NotificationMessages.MOST_CHARACTERS).doesNotContain(" more");
+    }
+
+    @Test
+    void aDailySummaryWithMoreThanTwentyLinksSaysHowManyMore() {
+        final var links = IntStream.range(0, 20)
+                .mapToObj(index -> new DailySummary.SummaryLink("link" + index, "example.com", 100 - index, 1, 0, null))
+                .toList();
+
+        final var message = messages.daily(new DailySummary(LocalDate.of(2026, 10, 26), 2000, 90, 0, links, 15));
+
+        assertThat(message.moreCount()).isEqualTo(15);
+        assertThat(plain(message)).endsWith("\nand 15 more: http://localhost:3000/dashboard");
+        assertThat(plain(message).lines().filter(line -> line.startsWith("hrva.cc/link"))).hasSize(20);
+    }
+
+    @Test
+    void aDailySummaryThatDoesNotFitCountsOnlyLinksAsHidden() {
+        final var links = IntStream.range(0, 20)
+                .mapToObj(index -> new DailySummary.SummaryLink("a".repeat(120) + index, "e".repeat(60) + ".example.com", 20 - index, 1, 0, null))
+                .toList();
+
+        final var text = plain(messages.daily(new DailySummary(LocalDate.of(2026, 10, 26), 210, 20, 0, links, 5)));
+
+        final var shown = text.lines().filter(line -> line.startsWith("hrva.cc/")).count();
+        assertThat(shown).isLessThan(20);
+        assertThat(text).hasSizeLessThanOrEqualTo(NotificationMessages.MOST_CHARACTERS)
+                .endsWith("\nand " + (20 - shown + 5) + " more: http://localhost:3000/dashboard");
     }
 
     @Test
@@ -70,13 +100,13 @@ class NotificationMessagesTest {
     void weeklySummaryHasEachSectionThatHasSomething() {
         final var message = messages.weekly(weeklySummary());
 
-        assertThat(message.title()).isEqualTo("hrva.cc: your week, " + WeeklyDigestText.weekLabel(LocalDate.of(2026, 10, 19), LocalDate.of(2026, 10, 25)));
+        assertThat(message.title()).isEqualTo("hrva.cc: your week of " + WeeklyDigestText.weekLabel(LocalDate.of(2026, 10, 19), LocalDate.of(2026, 10, 25)));
         assertThat(message.link()).isEqualTo("http://localhost:3000/dashboard");
         assertThat(message.moreCount()).isZero();
         assertThat(message.lines()).isEqualTo(
                 List.of(
                         "Clicks: 210 (up 17% on the week before)",
-                        "Visitors: 150 (each link's daily visitors, added up)",
+                        "Visitors: 150 (daily visitors per link, summed)",
                         "Top links:",
                         "1. hrva.cc/abc " + ARROW + " example.com, 90 clicks",
                         "Links that stopped working:",
@@ -140,7 +170,7 @@ class NotificationMessagesTest {
         final var summary = new WeeklySummary(7L, "ana@example.com", LocalDate.of(2026, 10, 19), LocalDate.of(2026, 10, 25),
                 new WeeklyDigest.Change(1, 0), 1, List.of(), List.of(), List.of());
 
-        assertThat(messages.weekly(summary).lines()).containsExactly("Clicks: 1 (none the week before)", "Visitors: 1 (each link's daily visitors, added up)");
+        assertThat(messages.weekly(summary).lines()).containsExactly("Clicks: 1 (none the week before)", "Visitors: 1 (daily visitors per link, summed)");
     }
 
     @Test
@@ -160,7 +190,7 @@ class NotificationMessagesTest {
     void deadLinkLine() {
         final var message = messages.linkDead(List.of(dead("abc", "example.com", "404")));
 
-        assertThat(message).isEqualTo(new NotificationMessage("hrva.cc: 1 link looks broken",
+        assertThat(message).isEqualTo(new NotificationMessage("hrva.cc: 1 of your links looks broken",
                 List.of("hrva.cc/abc " + ARROW + " example.com, since 27 October 2026, the page wasn't found (404)"),
                 "http://localhost:3000/dashboard", 0));
     }
@@ -225,8 +255,8 @@ class NotificationMessagesTest {
 
     @Test
     void titlesAreSingularAndPlural() {
-        assertThat(messages.linkDead(links(1)).title()).isEqualTo("hrva.cc: 1 link looks broken");
-        assertThat(messages.linkDead(links(2)).title()).isEqualTo("hrva.cc: 2 links look broken");
+        assertThat(messages.linkDead(links(1)).title()).isEqualTo("hrva.cc: 1 of your links looks broken");
+        assertThat(messages.linkDead(links(2)).title()).isEqualTo("hrva.cc: 2 of your links look broken");
         assertThat(messages.linkBack(links(1)).title()).isEqualTo("hrva.cc: 1 link works again");
         assertThat(messages.linkBack(links(3)).title()).isEqualTo("hrva.cc: 3 links work again");
     }
@@ -235,8 +265,8 @@ class NotificationMessagesTest {
     void theTestMessageNamesTheChannel() {
         final var channel = NotificationChannel.builder().id(4L).name("Team alerts").type(ChannelType.DISCORD).build();
 
-        assertThat(messages.test(channel)).isEqualTo(new NotificationMessage("hrva.cc test: this channel works",
-                List.of("This is a test from hrva.cc. Your channel works.", "Channel: Team alerts"),
+        assertThat(messages.test(channel)).isEqualTo(new NotificationMessage("hrva.cc test message",
+                List.of("This channel works: Team alerts"),
                 "http://localhost:3000/dashboard/settings#notifications", 0));
     }
 
@@ -244,7 +274,7 @@ class NotificationMessagesTest {
     void renderIsTheTitleTheLinesAndTheLink() {
         assertThat(plain(messages.linkDead(List.of(dead("abc", "example.com", "404"), dead("xyz", "example.org", "tls")))))
                 .isEqualTo("""
-                        hrva.cc: 2 links look broken
+                        hrva.cc: 2 of your links look broken
                         hrva.cc/abc %1$s example.com, since 27 October 2026, the page wasn't found (404)
                         hrva.cc/xyz %1$s example.org, since 27 October 2026, the website's secure connection failed
                         http://localhost:3000/dashboard""".formatted(ARROW));

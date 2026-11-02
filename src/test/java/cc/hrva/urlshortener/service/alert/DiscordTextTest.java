@@ -28,6 +28,15 @@ class DiscordTextTest {
     }
 
     @Test
+    void theUsersOwnTextKeepsItsIpAddressesAndEmailsButStaysDefused() {
+        assertThat(DiscordText.userText("mail victim@example.com, sent from 198.51.100.23 and 2001:db8::7, or [::ffff:192.0.2.9]."))
+                .isEqualTo("mail victim@example.com, sent from 198.51.100.23 and 2001:db8::7, or ::ffff:192.0.2.9.");
+        assertThat(DiscordText.userText("hrva.cc/_a \u2192 203.0.113.5 **x** [y](https://evil.example) `z`\n@everyone"))
+                .isEqualTo("hrva.cc/\\_a \u2192 203.0.113.5 \\*\\*x\\*\\* y <https://evil.example> z @everyone");
+        assertThat(DiscordText.userText(null)).isEmpty();
+    }
+
+    @Test
     void ordinaryNumbersAndTimesAreNotTakenForIpAddresses() {
         assertThat(DiscordText.plain("costs 9.99 at 12:30:45 on version 1.2.3")).isEqualTo("costs 9.99 at 12:30:45 on version 1.2.3");
     }

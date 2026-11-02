@@ -11,7 +11,7 @@ public final class NotificationDescriptions {
     public static String of(final NotificationType type) {
         return switch (type) {
             case DEAD_LINK_EMAIL -> "Email me when one of my links stops working. Links are checked every night.";
-            case WEEKLY_SUMMARY_EMAIL -> "A summary of last week's clicks every Monday morning.";
+            case WEEKLY_SUMMARY_EMAIL -> "Email me a summary of last week's clicks every Monday morning.";
             case EXPIRY_REMINDER_EMAIL -> "Email me a day before one of my links expires.";
             case LINK_DEAD, LINK_BACK, DAILY_SUMMARY, WEEKLY_SUMMARY -> label(type);
         };

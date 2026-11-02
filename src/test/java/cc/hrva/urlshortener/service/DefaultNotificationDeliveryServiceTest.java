@@ -242,7 +242,7 @@ class DefaultNotificationDeliveryServiceTest {
 
         assertThat(POSTER.posts).singleElement().satisfies(post -> {
             assertThat(post.url()).isEqualTo(DISCORD_URL);
-            assertThat(post.body()).contains("**hrva.cc: 1 link looks broken**", "\"flags\":4");
+            assertThat(post.body()).contains("**hrva.cc: 1 of your links looks broken**", "\"flags\":4");
         });
         assertThat(row("key:1")).containsEntry("STATUS", "SENT").containsEntry("ATTEMPTS", 1).containsEntry("LAST_HTTP", 204)
                 .containsEntry("LAST_ERROR", null).containsEntry("CLAIMED_AT", null)

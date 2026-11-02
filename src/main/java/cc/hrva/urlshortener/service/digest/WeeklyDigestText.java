@@ -22,7 +22,7 @@ import org.apache.commons.lang3.StringUtils;
 
 public final class WeeklyDigestText {
 
-    private static final String TITLE_PREFIX = "hrva.cc weekly summary: ";
+    private static final String TITLE_PREFIX = "hrva.cc weekly digest: ";
     private static final DateTimeFormatter DAY_MONTH_YEAR = DateTimeFormatter.ofPattern("d MMMM uuuu", Locale.ENGLISH);
     private static final DateTimeFormatter DAY_MONTH = DateTimeFormatter.ofPattern("d MMMM", Locale.ENGLISH);
     private static final String DAYS_DASH = "–";
@@ -47,7 +47,9 @@ public final class WeeklyDigestText {
             BlockReason.DOMAIN_RULE.name(), "domain rule",
             BlockReason.SCAM_SIGNALS.name(), "scam signals",
             BlockReason.CAMPAIGN.name(), "campaign hold",
-            BlockReason.SIGN_IN_FORM.name(), "sign-in form hold");
+            BlockReason.SIGN_IN_FORM.name(), "sign-in form hold",
+            BlockReason.ADMIN.name(), "by an admin",
+            BlockReason.USER_BLOCKED.name(), "account blocked");
 
     private WeeklyDigestText() {}
 
@@ -105,7 +107,7 @@ public final class WeeklyDigestText {
     public static List<Line> summary(final WeeklyDigest digest, final String reviewPage) {
         final var lines = new ArrayList<Line>();
         lines.add(textLine("Clicks: " + withChange(digest.clicks())));
-        lines.add(textLine("Visitors: " + number(digest.uniqueVisitors()) + " (each link's daily visitors, added up)"));
+        lines.add(textLine("Visitors: " + number(digest.uniqueVisitors()) + " (daily visitors per link, summed)"));
         lines.add(textLine("Bots and link previews: " + botShare(digest.clicks().current(), digest.botClicks())));
         lines.add(textLine("New links: " + withChange(digest.newLinks())));
         if (!digest.linksByChannel().isEmpty()) {

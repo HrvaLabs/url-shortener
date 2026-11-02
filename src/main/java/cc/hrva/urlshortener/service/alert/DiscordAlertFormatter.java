@@ -187,12 +187,12 @@ public class DiscordAlertFormatter {
     private String driftLine(final DomainDrift drift) {
         final var parts = new ArrayList<String>();
         if (!drift.unknownHostnames().isEmpty()) {
-            parts.add("Cloudflare has %s we don't know (%s)".formatted(count(drift.unknownHostnames().size(), "hostname"),
+            parts.add("Cloudflare has %s hrva.cc doesn't know (%s)".formatted(count(drift.unknownHostnames().size(), "hostname"),
                     plain(String.join(", ", drift.unknownHostnames()))));
         }
         if (!drift.missingHostnames().isEmpty()) {
             final var missing = drift.missingHostnames().size();
-            parts.add("%d of ours %s missing in Cloudflare (%s)".formatted(missing, missing == 1 ? "is" : "are",
+            parts.add("%s %s missing in Cloudflare (%s)".formatted(count(missing, "hrva.cc domain"), missing == 1 ? "is" : "are",
                     plain(String.join(", ", drift.missingHostnames()))));
         }
         final var total = drift.cloudflareTotal() == null
@@ -207,7 +207,7 @@ public class DiscordAlertFormatter {
         return switch (reason) {
             case ADMIN -> note.isEmpty() ? "by an admin" : "by an admin: " + note;
             case USER_BLOCKED -> "account blocked";
-            case DOMAIN_RULE -> note.isEmpty() ? "domain rule" : "domain rule " + note;
+            case DOMAIN_RULE -> note.isEmpty() ? "domain rule" : "domain rule: " + note;
             case BLOCKLIST -> note.isEmpty() ? "on a blocklist" : "on " + note;
         };
     }
@@ -292,7 +292,7 @@ public class DiscordAlertFormatter {
     }
 
     private static String owner(final Long ownerId) {
-        return ownerId == null ? "anonymous" : "account #" + ownerId;
+        return ownerId == null ? "no account" : "account #" + ownerId;
     }
 
     private static String report(final ReportCategory reportCategory, final String details) {
@@ -308,7 +308,7 @@ public class DiscordAlertFormatter {
         final var text = switch (reason) {
             case SAFE_BROWSING -> "Safe Browsing";
             case BLOCKLIST -> "on";
-            case DOMAIN_RULE -> "domain rule";
+            case DOMAIN_RULE -> "domain rule:";
             case SCAM_SIGNALS -> "scam signals:";
             case ADMIN -> "by an admin:";
             case USER_BLOCKED -> "account blocked";

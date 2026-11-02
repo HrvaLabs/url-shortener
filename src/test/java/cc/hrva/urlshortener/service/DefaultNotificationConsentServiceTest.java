@@ -85,7 +85,7 @@ class DefaultNotificationConsentServiceTest {
                 new NotificationConsentResponse(NotificationType.DEAD_LINK_EMAIL, false, null,
                         "Email me when one of my links stops working. Links are checked every night."),
                 new NotificationConsentResponse(NotificationType.WEEKLY_SUMMARY_EMAIL, false, null,
-                        "A summary of last week's clicks every Monday morning."),
+                        "Email me a summary of last week's clicks every Monday morning."),
                 new NotificationConsentResponse(NotificationType.EXPIRY_REMINDER_EMAIL, false, null,
                         "Email me a day before one of my links expires."));
     }
@@ -127,7 +127,7 @@ class DefaultNotificationConsentServiceTest {
         assertThat(saved.getValue().getGrantedAt()).isEqualTo(GRANTED_AT);
         assertThat(saved.getValue().getRevokedAt()).isNull();
         assertThat(response).isEqualTo(new NotificationConsentResponse(NotificationType.WEEKLY_SUMMARY_EMAIL, true, GRANTED_AT,
-                "A summary of last week's clicks every Monday morning."));
+                "Email me a summary of last week's clicks every Monday morning."));
     }
 
     @Test

@@ -151,7 +151,7 @@ class DefaultSafeBrowsingRecheckServiceTest {
     }
 
     @Test
-    void aSafeBrowsingDetailNamesEachThreatOnceAndFitsTheColumn() {
+    void aSafeBrowsingDetailNamesEachThreatOnceAndLeavesTheFittingToModeration() {
         final var longUrl = "https://site14.example/" + "a".repeat(300);
         database.get(14L).setLongUrl(longUrl);
         when(safeBrowsingService.checkUrlsForThreats(longUrl)).thenReturn(List.of(longUrl));
@@ -159,7 +159,7 @@ class DefaultSafeBrowsingRecheckServiceTest {
 
         recheckService.recheckActiveUrls();
 
-        verify(moderationService).blockLink(14L, BlockReason.SAFE_BROWSING, longUrl.substring(0, 255), "system", "nightly");
+        verify(moderationService).blockLink(14L, BlockReason.SAFE_BROWSING, longUrl, "system", "nightly");
         verify(moderationService).blockLink(15L, BlockReason.SAFE_BROWSING, "https://site15.example", "system", "nightly");
     }
 

@@ -67,7 +67,8 @@ class NotificationPayloadsTest {
                 {"event":"summary.daily","deliveryId":"uid-3","createdAt":"2026-10-27T01:14:00Z","date":"2026-10-26",
                  "totals":{"clicks":41,"uniqueVisitors":30,"botClicks":7},
                  "links":[{"shortUrl":"https://hrva.cc/abc","destinationHost":"example.com","clicks":20,"uniqueVisitors":15,"botClicks":2},
-                          {"shortUrl":"https://hrva.cc/bots","destinationHost":null,"clicks":0,"uniqueVisitors":0,"botClicks":3}]}""");
+                          {"shortUrl":"https://hrva.cc/bots","destinationHost":null,"clicks":0,"uniqueVisitors":0,"botClicks":3}],
+                 "moreLinks":0}""");
         assertThat(json).startsWith("{\"event\":\"summary.daily\",\"deliveryId\":\"uid-3\",\"createdAt\":\"2026-10-27T01:14:00Z\",\"date\":");
     }
 
@@ -81,8 +82,20 @@ class NotificationPayloadsTest {
                  "topLinks":[{"shortUrl":"https://hrva.cc/abc","destinationHost":"example.com","clicks":90}],
                  "deadLinks":[{"shortUrl":"https://hrva.cc/dead","destinationHost":"example.net","deadSince":"2026-10-22","lastStatus":"410"}],
                  "endingSoon":[{"shortUrl":"https://hrva.cc/soon","destinationHost":"example.org","reason":"EXPIRES","expiresOn":"2026-10-30","visitsLeft":null},
-                               {"shortUrl":"https://hrva.cc/limited","destinationHost":"example.org","reason":"VISIT_LIMIT","expiresOn":null,"visitsLeft":1}]}""");
+                               {"shortUrl":"https://hrva.cc/limited","destinationHost":"example.org","reason":"VISIT_LIMIT","expiresOn":null,"visitsLeft":1}],
+                 "moreDeadLinks":0,"moreEndingSoon":0}""");
         assertThat(json).doesNotContain("ana@example.com", "userId", "email");
+    }
+
+    @Test
+    void theSummariesCountTheLinksTheyLeaveOut() {
+        final var daily = payloads.json(NotificationType.DAILY_SUMMARY, "uid-3", CREATED_AT, payloads.daily(new DailySummary(LocalDate.of(2026, 10, 26), 41, 30,
+                7, List.of(new DailySummary.SummaryLink("abc", "example.com", 20, 15, 2, null)), 15)));
+        final var weekly = payloads.json(NotificationType.WEEKLY_SUMMARY, "uid-4", CREATED_AT, payloads.weekly(new WeeklySummary(7L, "ana@example.com",
+                LocalDate.of(2026, 10, 19), LocalDate.of(2026, 10, 25), new WeeklyDigest.Change(3, 0), 2, List.of(), List.of(), List.of(), 4, 1)));
+
+        assertThat(daily).contains("\"moreLinks\":15");
+        assertThat(weekly).contains("\"deadLinks\":[]", "\"moreDeadLinks\":4", "\"endingSoon\":[]", "\"moreEndingSoon\":1");
     }
 
     @Test

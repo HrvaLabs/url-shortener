@@ -14,6 +14,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.StringJoiner;
 import lombok.RequiredArgsConstructor;
@@ -108,6 +109,16 @@ public class LinkStatsRepository {
             having sum(s.clicks) + sum(s.bot_clicks) > 0
             order by sum(s.clicks) desc, sum(s.bot_clicks) desc, s.url_id
             fetch first :limit rows only
+            """;
+
+    private static final String COUNT_OWNER_LINK_DAY = """
+            select count(*) from (
+                select s.url_id
+                from link_daily_stats s join url u on u.id = s.url_id
+                where u.owner_id = :ownerId and s.stat_date = :day
+                group by s.url_id
+                having sum(s.clicks) + sum(s.bot_clicks) > 0
+            ) busy
             """;
 
     private static final String SUM_CLICKS_BY_URL = """
@@ -210,6 +221,10 @@ public class LinkStatsRepository {
                         row.getLong("total_clicks"),
                         row.getLong("total_unique_visitors"),
                         row.getLong("total_bot_clicks")));
+    }
+
+    public long countOwnerLinkDay(final long ownerId, final LocalDate day) {
+        return Objects.requireNonNull(jdbcTemplate.queryForObject(COUNT_OWNER_LINK_DAY, Map.of(OWNER_ID, ownerId, DAY, day), Long.class));
     }
 
     public Map<Long, Long> sumClicksByUrl(final Collection<Long> urlIds, final LocalDate from, final LocalDate to) {

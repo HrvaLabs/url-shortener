@@ -16,8 +16,8 @@ import tools.jackson.databind.json.JsonMapper;
 public class DiscordChannelSender implements ChannelSender {
 
     private static final NotificationMessages.Format DISCORD = new NotificationMessages.Format(
-            title -> "**" + DiscordText.plain(title) + "**",
-            DiscordText::plain,
+            title -> "**" + DiscordText.userText(title) + "**",
+            DiscordText::userText,
             link -> "<" + link + ">",
             hidden -> "and " + hidden + " more:");
 

@@ -139,7 +139,7 @@ class NotificationEndpointSecurityTest {
     private static final long ROLE_USER = 1L;
     private static final String ALL_OFF = """
             [{"type":"DEAD_LINK_EMAIL","consented":false,"grantedAt":null,"description":"Email me when one of my links stops working. Links are checked every night."},
-             {"type":"WEEKLY_SUMMARY_EMAIL","consented":false,"grantedAt":null,"description":"A summary of last week's clicks every Monday morning."},
+             {"type":"WEEKLY_SUMMARY_EMAIL","consented":false,"grantedAt":null,"description":"Email me a summary of last week's clicks every Monday morning."},
              {"type":"EXPIRY_REMINDER_EMAIL","consented":false,"grantedAt":null,"description":"Email me a day before one of my links expires."}]""";
     private static final RSAKey SIGNING_KEY = generateSigningKey();
 
@@ -235,7 +235,7 @@ class NotificationEndpointSecurityTest {
                 .andExpect(jsonPath("$.type").value("WEEKLY_SUMMARY_EMAIL"))
                 .andExpect(jsonPath("$.consented").value(true))
                 .andExpect(jsonPath("$.grantedAt").isString())
-                .andExpect(jsonPath("$.description").value("A summary of last week's clicks every Monday morning."));
+                .andExpect(jsonPath("$.description").value("Email me a summary of last week's clicks every Monday morning."));
         mockMvc.perform(as(ANA_TOKEN, get(NOTIFICATIONS)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[1].consented").value(true))

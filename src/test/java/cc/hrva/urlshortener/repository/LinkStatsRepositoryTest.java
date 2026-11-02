@@ -301,6 +301,8 @@ class LinkStatsRepositoryTest {
                 new LinkDayCounts(busiest.getId(), 9, 7, 0),
                 new LinkDayCounts(tiedMoreBots.getId(), 4, 4, 5));
         assertThat(linkStatsRepository.findOwnerLinkDay(owner.getId(), DAY.minusDays(1), 20)).isEmpty();
+        assertThat(linkStatsRepository.countOwnerLinkDay(owner.getId(), DAY)).isEqualTo(5);
+        assertThat(linkStatsRepository.countOwnerLinkDay(owner.getId(), DAY.minusDays(1))).isZero();
     }
 
     @Test

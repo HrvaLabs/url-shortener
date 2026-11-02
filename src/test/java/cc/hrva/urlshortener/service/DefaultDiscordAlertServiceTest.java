@@ -124,7 +124,7 @@ class DefaultDiscordAlertServiceTest {
         final var message = ArgumentCaptor.forClass(DiscordMessage.class);
         verify(discordWebhookClient).send(eq(WEBHOOK_URL), message.capture(), eq(Duration.ofSeconds(5)));
         assertThat(message.getValue().content().lines().toList()).containsExactly(
-                "New review: hrva.cc/abc12 → example-login.top (imitates paypal, domain registered in the last 30 days), anonymous, "
+                "New review: hrva.cc/abc12 → example-login.top (imitates paypal, domain registered in the last 30 days), no account, "
                         + "<https://app.hrva.cc/admin/review?entry=42>",
                 "Blocked: hrva.cc/k3Xa1 → paypa1-login.top (on HaGeZi TIF medium), account #27, <https://app.hrva.cc/admin/urls>",
                 "New user: account #31 signed up with email, <https://app.hrva.cc/admin>");
@@ -282,7 +282,7 @@ class DefaultDiscordAlertServiceTest {
         assertThat(bodies).hasSize(1);
         final var json = JsonMapper.builder().build().readTree(bodies.getFirst());
         assertThat(json.path("content").asString().lines().toList()).containsExactly(
-                "Visitor report on an open review: hrva.cc/abc12 → example-login.top (phishing: \"@everyone it asks for my card\"), anonymous, "
+                "Visitor report on an open review: hrva.cc/abc12 → example-login.top (phishing: \"@everyone it asks for my card\"), no account, "
                         + "<https://app.hrva.cc/admin/review?entry=42>",
                 "HaGeZi TIF medium failed to load: HTTP 503, <https://app.hrva.cc/admin/blocklists>");
         assertThat(json.path("allowed_mentions").path("parse").isEmpty()).isTrue();
@@ -358,7 +358,7 @@ class DefaultDiscordAlertServiceTest {
         final var message = ArgumentCaptor.forClass(DiscordMessage.class);
         verify(discordWebhookClient).sendWithoutWaiting(eq(WEBHOOK_URL), message.capture(), eq(Duration.ofSeconds(5)));
         assertThat(message.getValue().content().lines().toList()).containsExactly(
-                "New review: hrva.cc/abc12 → example-login.top (imitates paypal, domain registered in the last 30 days), anonymous, "
+                "New review: hrva.cc/abc12 → example-login.top (imitates paypal, domain registered in the last 30 days), no account, "
                         + "<https://app.hrva.cc/admin/review?entry=42>",
                 "Blocked: hrva.cc/k3Xa1 → paypa1-login.top (on HaGeZi TIF medium), account #27, <https://app.hrva.cc/admin/urls>",
                 "New user: account #31 signed up with email, <https://app.hrva.cc/admin>");

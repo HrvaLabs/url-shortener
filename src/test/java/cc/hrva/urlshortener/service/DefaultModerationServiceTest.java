@@ -59,6 +59,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.function.Predicate;
+import java.util.stream.IntStream;
 import java.util.stream.LongStream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -986,6 +987,26 @@ class DefaultModerationServiceTest {
 
         verify(sendingEmailService).sendEmailUrlMalwareDetected(owner, url, null);
         verifyNoMoreInteractions(sendingEmailService);
+    }
+
+    @Test
+    void aSafeBrowsingDetailTooLongForItsColumnKeepsWholeUrlsAndSaysHowManyMore() {
+        final var url = link(30L, "https://example.org/x", user(1L, "alice@example.com"));
+        final var threats = IntStream.range(0, 10).mapToObj(index -> "https://threat-" + index + ".example/" + "p".repeat(20)).toList();
+
+        moderationService.blockLink(30L, BlockReason.SAFE_BROWSING, String.join(", ", threats), "system", "nightly");
+
+        assertThat(url.getBlockDetail()).isEqualTo(String.join(", ", threats.subList(0, 5)) + ", and 5 more");
+        verify(sendingEmailService).sendEmailUrlMalwareDetected(any(), eq(url), eq(url.getBlockDetail()));
+    }
+
+    @Test
+    void aSingleSafeBrowsingUrlTooLongForItsColumnIsStoredAsItsHost() {
+        final var url = link(30L, "https://example.org/x", user(1L, "alice@example.com"));
+
+        moderationService.blockLink(30L, BlockReason.SAFE_BROWSING, "https://phish.example/" + "a".repeat(400), "system", "nightly");
+
+        assertThat(url.getBlockDetail()).isEqualTo("phish.example");
     }
 
     @Test

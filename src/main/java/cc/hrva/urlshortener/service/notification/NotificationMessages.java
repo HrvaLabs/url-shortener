@@ -31,6 +31,7 @@ public class NotificationMessages {
     public static final int MOST_CHARACTERS = 1900;
     public static final int MOST_LINKS = 20;
     public static final String TEST_TEXT = "This is a test from hrva.cc. Your channel works.";
+    public static final String LINKS = "Links";
     public static final String TOP_LINKS = "Top links";
     public static final String STOPPED_WORKING = "Links that stopped working";
     public static final String ENDING_SOON = "Ending soon";
@@ -55,10 +56,14 @@ public class NotificationMessages {
         public static final Format PLAIN = new Format(UnaryOperator.identity(), UnaryOperator.identity(), UnaryOperator.identity(),
                 hidden -> "and " + hidden + " more:");
 
+        public static final Format WITHOUT_TITLE = new Format(title -> "", UnaryOperator.identity(), UnaryOperator.identity(),
+                hidden -> "and " + hidden + " more:");
+
     }
 
     public NotificationMessage linkDead(final List<DeadLink> links) {
-        final var title = links.size() == 1 ? "hrva.cc: 1 link looks broken" : "hrva.cc: %d links look broken".formatted(links.size());
+        final var title = links.size() == 1 ? "hrva.cc: 1 of your links looks broken"
+                : "hrva.cc: %d of your links look broken".formatted(links.size());
         return listed(title, links, this::deadLine);
     }
 
@@ -69,14 +74,25 @@ public class NotificationMessages {
 
     public NotificationMessage daily(final DailySummary summary) {
         final var lines = new ArrayList<String>();
-        lines.add(counted(summary.clicks(), CLICK) + " from " + counted(summary.uniqueVisitors(), VISITOR) + ", and "
+        final var linkCounts = new ArrayList<Integer>();
+        final var headings = new ArrayList<Integer>();
+        lines.add(counted(summary.clicks(), CLICK) + " from " + counted(summary.uniqueVisitors(), VISITOR) + ", plus "
                 + counted(summary.botClicks(), BOT_CLICK));
-        summary.links().stream()
+        linkCounts.add(0);
+        final var links = summary.links().stream()
                 .limit(MOST_LINKS)
                 .map(link -> target(link.domain(), link.shortUrl(), link.destinationHost()) + ": " + counted(link.clicks(), CLICK) + ", "
                         + counted(link.uniqueVisitors(), VISITOR) + ", " + counted(link.botClicks(), BOT_CLICK))
-                .forEach(lines::add);
-        return new NotificationMessage("hrva.cc: clicks on " + DAY.format(summary.date()), lines, frontendPage(DASHBOARD), 0);
+                .toList();
+        if (!links.isEmpty()) {
+            headings.add(lines.size());
+            lines.add(LINKS + ":");
+            linkCounts.add(0);
+            lines.addAll(links);
+            linkCounts.addAll(Collections.nCopies(links.size(), 1));
+        }
+        return new NotificationMessage("hrva.cc: clicks on " + DAY.format(summary.date()), lines, frontendPage(DASHBOARD),
+                Math.toIntExact(summary.moreLinks()), linkCounts, headings);
     }
 
     public record WeeklySections(List<String> clicks, List<String> topLinks, List<String> deadLinks, String deadLinksMore, List<String> endingSoon,
@@ -86,7 +102,7 @@ public class NotificationMessages {
     public WeeklySections weeklySections(final WeeklySummary summary) {
         final var clicks = summary.clicks().current() == 0 && summary.clicks().previous() == 0 ? List.<String>of() : List.of(
                 "Clicks: " + number(summary.clicks().current()) + " (" + WeeklyDigestText.change(summary.clicks()) + ")",
-                "Visitors: " + number(summary.uniqueVisitors()) + " (each link's daily visitors, added up)");
+                "Visitors: " + number(summary.uniqueVisitors()) + " (daily visitors per link, summed)");
         final var topLinks = summary.topLinks();
         return new WeeklySections(
                 clicks,
@@ -108,12 +124,12 @@ public class NotificationMessages {
         section(lines, linkCounts, headings, TOP_LINKS, sections.topLinks(), 0);
         section(lines, linkCounts, headings, STOPPED_WORKING, sections.deadLinks(), summary.moreDeadLinks());
         section(lines, linkCounts, headings, ENDING_SOON, sections.endingSoon(), summary.moreEndingSoon());
-        return new NotificationMessage("hrva.cc: your week, " + WeeklyDigestText.weekLabel(summary.from(), summary.to()), lines,
+        return new NotificationMessage("hrva.cc: your week of " + WeeklyDigestText.weekLabel(summary.from(), summary.to()), lines,
                 frontendPage(DASHBOARD), 0, linkCounts, headings);
     }
 
     public NotificationMessage test(final NotificationChannel channel) {
-        return new NotificationMessage("hrva.cc test: this channel works", List.of(TEST_TEXT, "Channel: " + channel.getName()), frontendPage(SETTINGS), 0);
+        return new NotificationMessage("hrva.cc test message", List.of("This channel works: " + channel.getName()), frontendPage(SETTINGS), 0);
     }
 
     public static String fitted(final NotificationMessage message, final Format format) {
@@ -202,7 +218,10 @@ public class NotificationMessages {
 
     private static String joined(final NotificationMessage message, final Format format, final List<String> lines, final int shown) {
         final var parts = new ArrayList<String>();
-        parts.add(format.title().apply(message.title()));
+        final var title = format.title().apply(message.title());
+        if (!title.isEmpty()) {
+            parts.add(title);
+        }
         parts.addAll(lines.subList(0, shown));
         final var hidden = message.linkCounts().subList(shown, lines.size()).stream().mapToInt(Integer::intValue).sum() + message.moreCount();
         final var link = message.link() == null ? null : format.link().apply(message.link());

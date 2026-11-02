@@ -14,9 +14,11 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Base64;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
@@ -101,6 +103,24 @@ class ChannelSendersTest {
     }
 
     @Test
+    void discordShowsTheIpsAndEmailsOfTheUsersOwnLinks() {
+        final var message = new NotificationMessage("hrva.cc: 2 of your links look broken",
+                List.of("hrva.cc/abc " + ARROW + " 203.0.113.5, since 27 October 2026, the page wasn't found (404)",
+                        "hrva.cc/def " + ARROW + " 2001:db8::1, since 27 October 2026, the page was removed (410)",
+                        "Channel: ana@example.com"),
+                "https://app.hrva.cc/dashboard", 0);
+
+        senders.send(channel(ChannelType.DISCORD), new ChannelTarget(DISCORD_URL, null, null, null), "link.dead", "uid-1", JSON_BODY, message);
+
+        assertThat(json(onlyPost()).get("content").asString()).isEqualTo("""
+                **hrva.cc: 2 of your links look broken**
+                hrva.cc/abc %1$s 203.0.113.5, since 27 October 2026, the page wasn't found (404)
+                hrva.cc/def %1$s 2001:db8::1, since 27 October 2026, the page was removed (410)
+                Channel: ana@example.com
+                <https://app.hrva.cc/dashboard>""".formatted(ARROW));
+    }
+
+    @Test
     void discordStaysWithinTheLimitAfterEscaping() {
         final var lines = IntStream.range(0, 20).mapToObj(index -> "hrva.cc/" + "_".repeat(40) + index + " " + ARROW + " " + "*".repeat(40) + ".example").toList();
         final var message = new NotificationMessage("hrva.cc: 25 links look broken", lines, "https://app.hrva.cc/dashboard", 5);
@@ -151,8 +171,30 @@ class ChannelSendersTest {
         final var request = onlyPost();
         assertThat(request.url()).isEqualTo(NTFY_URL);
         assertThat(request.contentType()).isEqualTo("text/plain; charset=utf-8");
-        assertThat(request.headers()).containsExactlyInAnyOrderEntriesOf(Map.of("Title", "hrva.cc", "Click", "https://app.hrva.cc/dashboard", "Tags", "link"));
-        assertThat(new String(request.body(), StandardCharsets.UTF_8)).startsWith("hrva.cc: 1 link looks broken\n").endsWith("\nhttps://app.hrva.cc/dashboard");
+        assertThat(request.headers()).containsExactlyInAnyOrderEntriesOf(
+                Map.of("Title", "hrva.cc: 1 link looks broken", "Click", "https://app.hrva.cc/dashboard", "Tags", "link"));
+        assertThat(new String(request.body(), StandardCharsets.UTF_8)).isEqualTo(
+                "hrva.cc/my_link " + ARROW + " a_b*c.example, since 27 October 2026, the page wasn't found (404)\n"
+                        + "Channel: <!channel> @everyone @here [x](https://evil.example)\nhttps://app.hrva.cc/dashboard");
+    }
+
+    @Test
+    void ntfySendsAnEnDashInTheTitleAsAnRfc2047Word() {
+        final var enDash = Character.toString(0x2013);
+        final var message = new NotificationMessage("hrva.cc: your week of 19" + enDash + "25 October 2026", List.of("Clicks: 210"),
+                "https://app.hrva.cc/dashboard", 0);
+
+        senders.send(channel(ChannelType.NTFY), new ChannelTarget(NTFY_URL, null, null, null), "summary.weekly", "uid-1", JSON_BODY, message);
+
+        final var title = onlyPost().headers().get("Title");
+        assertThat(title).matches("(=\\?UTF-8\\?B\\?[A-Za-z0-9+/=]+\\?= ?)+").isNotEqualTo(message.title());
+        final var decoded = Arrays.stream(title.split(" "))
+                .map(word -> word.substring("=?UTF-8?B?".length(), word.length() - "?=".length()))
+                .map(encoded -> new String(Base64.getDecoder().decode(encoded), StandardCharsets.UTF_8))
+                .collect(Collectors.joining());
+        assertThat(decoded).isEqualTo(message.title());
+        assertThat(title.chars()).allMatch(character -> character < 0x7F);
+        assertThat(new String(onlyPost().body(), StandardCharsets.UTF_8)).isEqualTo("Clicks: 210\nhttps://app.hrva.cc/dashboard");
     }
 
     @Test

@@ -722,7 +722,7 @@ class DefaultNotificationChannelServiceTest {
 
         assertThat(response).isEqualTo(new ChannelTestResponse(true, 204, null));
         assertThat(posted).singleElement().satisfies(post -> assertThat(post).startsWith(DISCORD_URL + " {")
-                .contains("**hrva.cc test: this channel works**", "This is a test from hrva.cc. Your channel works.", "Channel: Team alerts",
+                .contains("**hrva.cc test message**", "This channel works: Team alerts",
                         "<https://app.hrva.cc/dashboard/settings#notifications>"));
         verify(notificationChannelRepository).recordDelivery(4L, NOW_UTC, LastDeliveryStatus.SENT, 204, null);
     }

@@ -45,6 +45,7 @@ import cc.hrva.urlshortener.service.blocklist.BlocklistConfigurationChangedEvent
 import cc.hrva.urlshortener.service.domain.CustomDomainModeration;
 import cc.hrva.urlshortener.service.domain.UrlCache;
 import cc.hrva.urlshortener.service.domain.UrlCacheKeys;
+import cc.hrva.urlshortener.util.BlockDetails;
 import cc.hrva.urlshortener.util.DomainNames;
 import cc.hrva.urlshortener.util.ReviewReasons;
 import cc.hrva.urlshortener.util.SortWhitelist;
@@ -507,7 +508,7 @@ public class DefaultModerationService implements ModerationService {
                 .filter(url -> !url.isActive() && HELD.contains(url.getBlockReason()))
                 .map(url -> {
                     url.setBlockReason(reason);
-                    url.setBlockDetail(StringUtils.abbreviate(detail, MAX_COLUMN_LENGTH));
+                    url.setBlockDetail(storedDetail(reason, detail));
                     url.setBlockedAt(LocalDateTime.now());
                     return savedAsBlocked(url);
                 })
@@ -805,7 +806,7 @@ public class DefaultModerationService implements ModerationService {
                 .filter(url -> url.getBlockReason() == BlockReason.CAMPAIGN && destination.longUrl().equals(url.getLongUrl()))
                 .ifPresent(url -> {
                     url.setBlockReason(verdict.blockReason());
-                    url.setBlockDetail(StringUtils.abbreviate(verdict.blockDetail(), MAX_COLUMN_LENGTH));
+                    url.setBlockDetail(storedDetail(verdict.blockReason(), verdict.blockDetail()));
                     url.setBlockedAt(LocalDateTime.now());
                     if (verdict.blockReason() == BlockReason.SAFE_BROWSING) {
                         url.setThreatType(ThreatType.MALWARE);
@@ -813,6 +814,12 @@ public class DefaultModerationService implements ModerationService {
                     closeReview(savedAsBlocked(url), verdict.blockReason(), SYSTEM);
                     log.info("Held link blocked for its own reason under the allowed shape urlId={} reason={}", url.getId(), verdict.blockReason());
                 }));
+    }
+
+    private static String storedDetail(final BlockReason reason, final String detail) {
+        return reason == BlockReason.SAFE_BROWSING
+                ? BlockDetails.flaggedUrls(detail, MAX_COLUMN_LENGTH)
+                : StringUtils.abbreviate(detail, MAX_COLUMN_LENGTH);
     }
 
     private Optional<Url> blockAndTellOwner(final long urlId, final BlockReason reason, final String detail, final String performedBy,
@@ -842,7 +849,7 @@ public class DefaultModerationService implements ModerationService {
                 .map(url -> {
                     url.setActive(false);
                     url.setBlockReason(reason);
-                    url.setBlockDetail(StringUtils.abbreviate(detail, MAX_COLUMN_LENGTH));
+                    url.setBlockDetail(storedDetail(reason, detail));
                     url.setBlockedAt(LocalDateTime.now());
                     if (reason == BlockReason.SAFE_BROWSING) {
                         url.setThreatType(ThreatType.MALWARE);

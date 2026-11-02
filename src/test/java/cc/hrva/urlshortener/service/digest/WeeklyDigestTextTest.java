@@ -35,7 +35,7 @@ class WeeklyDigestTextTest {
 
     @Test
     void theTitleNamesTheWeek() {
-        assertThat(WeeklyDigestText.title(busyWeek())).isEqualTo("hrva.cc weekly summary: 19–25 October 2026");
+        assertThat(WeeklyDigestText.title(busyWeek())).isEqualTo("hrva.cc weekly digest: 19–25 October 2026");
     }
 
     @Test
@@ -70,7 +70,7 @@ class WeeklyDigestTextTest {
     void linesForABusyWeek() {
         assertThat(WeeklyDigestText.lines(busyWeek(), SHORT_LINKS, REVIEW_PAGE, UnaryOperator.identity())).containsExactly(
                 "Clicks: 1,204 (up 12% on the week before)",
-                "Visitors: 950 (each link's daily visitors, added up)",
+                "Visitors: 950 (daily visitors per link, summed)",
                 "Bots and link previews: 20.0% of all clicks",
                 "New links: 40 (down 5% on the week before)",
                 "How they were made: 30 website, 6 API key, 4 AI connector",
@@ -90,7 +90,7 @@ class WeeklyDigestTextTest {
 
         assertThat(WeeklyDigestText.lines(empty, SHORT_LINKS, REVIEW_PAGE, UnaryOperator.identity())).containsExactly(
                 "Clicks: 0 (same as the week before)",
-                "Visitors: 0 (each link's daily visitors, added up)",
+                "Visitors: 0 (daily visitors per link, summed)",
                 "Bots and link previews: no clicks",
                 "New links: 0 (same as the week before)",
                 "New users: 0 (same as the week before)",
@@ -197,13 +197,15 @@ class WeeklyDigestTextTest {
                         new CountEntry("DOMAIN_RULE", 2),
                         new CountEntry("SCAM_SIGNALS", 1),
                         new CountEntry("CAMPAIGN", 1),
-                        new CountEntry("SIGN_IN_FORM", 1)),
+                        new CountEntry("SIGN_IN_FORM", 1),
+                        new CountEntry("ADMIN", 2),
+                        new CountEntry("USER_BLOCKED", 1)),
                 List.of());
 
         assertThat(WeeklyDigestText.lines(digest, SHORT_LINKS, REVIEW_PAGE, UnaryOperator.identity())).contains(
                 "How they were made: 1,500 website, 12 API key, 6 bulk, 4 AI connector, 3 website without an account, "
                         + "2 AI connector without an account, 1 unknown",
-                "Automatic blocks: 4 Safe Browsing, 3 blocklist, 2 domain rule, 1 scam signals, 1 campaign hold, 1 sign-in form hold");
+                "Automatic blocks: 4 Safe Browsing, 3 blocklist, 2 domain rule, 1 scam signals, 1 campaign hold, 1 sign-in form hold, 2 by an admin, 1 account blocked");
     }
 
     @Test
@@ -255,7 +257,7 @@ class WeeklyDigestTextTest {
 
         assertThat(WeeklyDigestText.lines(digest, SHORT_LINKS, REVIEW_PAGE, value)).containsExactly(
                 "Clicks: 1,204 (up 12% on the week before)",
-                "Visitors: 950 (each link's daily visitors, added up)",
+                "Visitors: 950 (daily visitors per link, summed)",
                 "Bots and link previews: 20.0% of all clicks",
                 "New links: 40 (down 5% on the week before)",
                 "How they were made: 30 website, 6 API key, 4 AI connector",

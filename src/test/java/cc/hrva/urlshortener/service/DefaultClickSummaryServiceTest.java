@@ -196,11 +196,11 @@ class DefaultClickSummaryServiceTest {
 
         final var content = contentCaptor();
         verify(deliveryService).enqueue(eq(NotificationType.DAILY_SUMMARY), eq("summary.daily:2026-10-26"), any(), content.capture());
-        assertThat(content.getValue().get(ana.getId()).message().lines()).first().isEqualTo("0 clicks from 0 visitors, and 3 bot clicks");
+        assertThat(content.getValue().get(ana.getId()).message().lines()).first().isEqualTo("0 clicks from 0 visitors, plus 3 bot clicks");
     }
 
     @Test
-    void topTwentyOnly() {
+    void topTwentyOnlyThenTheNumberOfTheRest() {
         channel(ana, NotificationType.DAILY_SUMMARY);
         IntStream.rangeClosed(1, 25).forEach(index -> clicks(link(ana, "link" + index), YESTERDAY, index, 1, 0));
 
@@ -213,7 +213,10 @@ class DefaultClickSummaryServiceTest {
         assertThat(data.links().getFirst().shortUrl()).isEqualTo("https://hrva.cc/link25");
         assertThat(data.links().getLast().shortUrl()).isEqualTo("https://hrva.cc/link6");
         assertThat(data.totals()).isEqualTo(new NotificationPayloads.DailyTotals(325, 25, 0));
-        assertThat(content.getValue().get(ana.getId()).message().lines()).hasSize(21);
+        assertThat(data.moreLinks()).isEqualTo(5);
+        final var message = content.getValue().get(ana.getId()).message();
+        assertThat(message.lines()).hasSize(22).element(1).isEqualTo("Links:");
+        assertThat(message.moreCount()).isEqualTo(5);
     }
 
     @Test

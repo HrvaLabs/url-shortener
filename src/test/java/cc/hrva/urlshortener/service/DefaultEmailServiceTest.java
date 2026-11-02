@@ -27,7 +27,7 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class DefaultEmailServiceTest {
 
-    private static final String SUBJECT = "hrva.cc weekly summary: 19–25 October 2026";
+    private static final String SUBJECT = "hrva.cc weekly digest: 19–25 October 2026";
     private static final String PLAIN_TEXT = SUBJECT + "\n\nClicks: 1,204 (up 12% on the week before)\n1. hrva.cc/menu → example.com, 120 clicks";
     private static final String HTML = "<h2>" + SUBJECT + "</h2><p>Clicks: 1,204 (up 12% on the week before)</p>";
 

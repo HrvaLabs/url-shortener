@@ -13,6 +13,7 @@ import cc.hrva.urlshortener.service.ModerationService;
 import cc.hrva.urlshortener.service.RedirectChainService;
 import cc.hrva.urlshortener.service.ReviewQueueService;
 import cc.hrva.urlshortener.service.SafeBrowsingService;
+import cc.hrva.urlshortener.util.BlockDetails;
 import cc.hrva.urlshortener.util.DomainNames;
 import java.time.Clock;
 import java.time.Duration;
@@ -159,10 +160,11 @@ public class DefaultRedirectChainService implements RedirectChainService {
         return verdict.outcome() == LinkVerdict.Outcome.BLOCK && verdict.blockReason() != BlockReason.SCAM_SIGNALS;
     }
 
-    private static String viaRedirect(final String detail, final String host) {
+    private static String viaRedirect(final BlockReason reason, final String detail, final String host) {
         final var suffix = VIA_REDIRECT_TO + host;
         final var room = Math.max(0, BLOCK_DETAIL_LENGTH - suffix.length());
-        return StringUtils.truncate(StringUtils.truncate(detail, room) + suffix, BLOCK_DETAIL_LENGTH);
+        final var shown = reason == BlockReason.SAFE_BROWSING ? BlockDetails.flaggedUrls(detail, room) : StringUtils.truncate(detail, room);
+        return StringUtils.truncate(shown + suffix, BLOCK_DETAIL_LENGTH);
     }
 
     private static String hostOf(final String url) {
@@ -176,7 +178,7 @@ public class DefaultRedirectChainService implements RedirectChainService {
     private record Finding(BlockReason blockReason, String blockDetail, List<String> reviewReasons) {
 
         private static Finding block(final BlockReason reason, final String detail, final String host) {
-            return new Finding(reason, viaRedirect(detail, host), List.of());
+            return new Finding(reason, viaRedirect(reason, detail, host), List.of());
         }
 
         private static Finding review(final List<String> reasons) {
