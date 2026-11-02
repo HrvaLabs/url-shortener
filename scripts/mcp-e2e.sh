@@ -2977,7 +2977,7 @@ expect_eq "$(psql_value "select long_url from url where id = $SWITCH_ID;")" "htt
 http -X PUT "$BASE/api/v1/urls/$SWITCH_ID" -H "Authorization: Bearer $ADMIN_JWT" -H 'Content-Type: application/json' \
     -d "{\"id\":$SWITCH_ID,\"longUrl\":\"https://e2e-edit-forced.com/x\",\"force\":true}"
 expect_eq "$HTTP_STATUS" 200 "with force: true it is saved"
-expect_eq "$(psql_value "select changed_by || ' ' || forced from link_destination_change where url_id = $SWITCH_ID order by id desc limit 1;")" "admin@localhost t" \
+expect_eq "$(psql_value "select changed_by || ' ' || forced from link_destination_change where url_id = $SWITCH_ID order by id desc limit 1;")" "admin@localhost true" \
     "the history marks it forced"
 expect_contains "$(psql_value "select details from audit_log where action = 'CHANGE_LINK_DESTINATION' and target_identifier = '$SWITCH_ID' order by id desc limit 1;")" \
     ", forced: true" "and so does the audit log"
