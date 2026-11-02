@@ -1,6 +1,7 @@
 package cc.hrva.urlshortener.controller;
 
 import cc.hrva.urlshortener.audit.AdminAuditAspect;
+import cc.hrva.urlshortener.audit.AuditSubjects;
 import cc.hrva.urlshortener.configuration.AppConfiguration;
 import cc.hrva.urlshortener.configuration.GlobalExceptionHandler;
 import cc.hrva.urlshortener.configuration.JacksonConfiguration;
@@ -553,6 +554,7 @@ class AdminDomainRequestSecurityTest {
             JwtFilter.class,
             ClientIpResolver.class,
             AdminAuditAspect.class,
+            AuditSubjects.class,
             DefaultAuditLogService.class,
             AdminDomainRequestController.class,
             DefaultCustomDomainRequestAdminService.class,

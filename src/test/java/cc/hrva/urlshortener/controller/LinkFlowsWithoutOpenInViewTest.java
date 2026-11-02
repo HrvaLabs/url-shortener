@@ -3,6 +3,7 @@ package cc.hrva.urlshortener.controller;
 import cc.hrva.urlshortener.service.domain.ShortLinks;
 import org.springframework.http.HttpStatus;
 import cc.hrva.urlshortener.audit.AdminAuditAspect;
+import cc.hrva.urlshortener.audit.AuditSubjects;
 import cc.hrva.urlshortener.configuration.AppConfiguration;
 import cc.hrva.urlshortener.configuration.ClockConfiguration;
 import cc.hrva.urlshortener.configuration.GlobalExceptionHandler;
@@ -24,6 +25,7 @@ import cc.hrva.urlshortener.repository.ApiKeyRepository;
 import cc.hrva.urlshortener.repository.AuditLogRepository;
 import cc.hrva.urlshortener.repository.DestinationCheckRepository;
 import cc.hrva.urlshortener.repository.CustomDomainRepository;
+import cc.hrva.urlshortener.repository.CustomDomainRequestRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.security.AnyHostIsPrimary;
@@ -613,7 +615,7 @@ class LinkFlowsWithoutOpenInViewTest {
             basePackageClasses = UrlRepository.class,
             includeFilters = @ComponentScan.Filter(
                     type = FilterType.ASSIGNABLE_TYPE,
-                    classes = {UrlRepository.class, CustomDomainRepository.class, UserRepository.class, ApiKeyRepository.class, AuditLogRepository.class}))
+                    classes = {UrlRepository.class, CustomDomainRepository.class, CustomDomainRequestRepository.class, UserRepository.class, ApiKeyRepository.class, AuditLogRepository.class}))
     @Import({
             DefaultSettingsTestConfiguration.class,
             AnonymousLinkSignalsTestConfiguration.class, HumanCheckTestConfiguration.class, SignInFormCheckTestConfiguration.class,
@@ -643,6 +645,7 @@ class LinkFlowsWithoutOpenInViewTest {
             UrlUpdateDtoToUrlConverter.class,
             ApiKeyUpdateDtoToApiKeyConverter.class,
             AdminAuditAspect.class,
+            AuditSubjects.class,
             DefaultAuditLogService.class
     })
     static class TestApplication {

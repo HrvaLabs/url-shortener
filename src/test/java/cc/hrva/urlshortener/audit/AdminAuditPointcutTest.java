@@ -46,6 +46,9 @@ class AdminAuditPointcutTest {
     private UserService userService;
 
     @Mock
+    private AuditSubjects auditSubjects;
+
+    @Mock
     private BlocklistSourceService blocklistSourceService;
 
     private AdminBlocklistController controller;
@@ -55,7 +58,7 @@ class AdminAuditPointcutTest {
         lenient().when(userService.getUserFromToken()).thenReturn(User.builder().email(ADMIN).build());
         final var proxyFactory = new AspectJProxyFactory(new AdminBlocklistController(blocklistSourceService));
         proxyFactory.setProxyTargetClass(true);
-        proxyFactory.addAspect(new AdminAuditAspect(auditLogService, userService, JsonMapper.builder().build(), new StaticListableBeanFactory().getBeanProvider(ApiKeyRepository.class)));
+        proxyFactory.addAspect(new AdminAuditAspect(auditLogService, userService, auditSubjects, JsonMapper.builder().build(), new StaticListableBeanFactory().getBeanProvider(ApiKeyRepository.class)));
         controller = proxyFactory.getProxy();
     }
 

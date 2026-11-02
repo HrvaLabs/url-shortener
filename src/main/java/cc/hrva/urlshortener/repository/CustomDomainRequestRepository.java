@@ -27,6 +27,10 @@ public interface CustomDomainRequestRepository extends JpaRepository<CustomDomai
     @Query("select r from CustomDomainRequest r join fetch r.user where r.id = :id")
     Optional<CustomDomainRequest> findWithUser(@Param("id") long id);
 
+    @Query("select new cc.hrva.urlshortener.repository.DomainRequestAuditSubject(u.email, r.limitAtRequest, r.requestedTotal) "
+            + "from CustomDomainRequest r join r.user u where r.id = :id")
+    Optional<DomainRequestAuditSubject> findAuditSubjectById(@Param("id") long id);
+
     Optional<CustomDomainRequest> findFirstByUser_IdOrderByCreatedAtDescIdDesc(Long userId);
 
     List<CustomDomainRequest> findByUser_IdOrderByCreatedAtDescIdDesc(Long userId);

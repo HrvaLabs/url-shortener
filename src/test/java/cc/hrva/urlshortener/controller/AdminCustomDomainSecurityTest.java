@@ -1,6 +1,7 @@
 package cc.hrva.urlshortener.controller;
 
 import cc.hrva.urlshortener.audit.AdminAuditAspect;
+import cc.hrva.urlshortener.audit.AuditSubjects;
 import cc.hrva.urlshortener.configuration.AppConfiguration;
 import cc.hrva.urlshortener.configuration.GlobalExceptionHandler;
 import cc.hrva.urlshortener.configuration.JacksonConfiguration;
@@ -19,6 +20,7 @@ import cc.hrva.urlshortener.repository.CustomDomainReconcileRepository;
 import cc.hrva.urlshortener.repository.CustomDomainReconcileRepository.MissingDomain;
 import cc.hrva.urlshortener.repository.CustomDomainReconcileRepository.ReconcileRun;
 import cc.hrva.urlshortener.repository.CustomDomainRepository;
+import cc.hrva.urlshortener.repository.CustomDomainRequestRepository;
 import cc.hrva.urlshortener.repository.UrlDomainMoves;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
@@ -551,7 +553,7 @@ class AdminCustomDomainSecurityTest {
                 .containsEntry("performed_by", ADMIN_EMAIL)
                 .containsEntry("target_type", "CustomDomain")
                 .containsEntry("target_identifier", String.valueOf(id))
-                .containsEntry("details", "note: Looks fine")
+                .containsEntry("details", "domain: go.example.com, owner: ana@example.com, note: Looks fine")
                 .containsEntry("failed", false));
         verify(customDomainProvisioner).provisionAsync(id);
     }
@@ -768,7 +770,7 @@ class AdminCustomDomainSecurityTest {
         assertThat(auditRows()).extracting(audit -> audit.get("action"))
                 .containsExactly("SET_DOMAIN_ALLOWANCE", "SET_DOMAIN_ALLOWANCE", "REMOVE_DOMAIN_ALLOWANCE", "REMOVE_DOMAIN_ALLOWANCE");
         assertThat(auditRows().getFirst()).containsEntry("target_identifier", String.valueOf(ANA))
-                .containsEntry("details", "maxDomains: 3, reason: Agency with three brands");
+                .containsEntry("details", "account: ana@example.com, maxDomains: 3, reason: Agency with three brands");
     }
 
     @Test
@@ -904,7 +906,7 @@ class AdminCustomDomainSecurityTest {
             basePackageClasses = UserRepository.class,
             includeFilters = @ComponentScan.Filter(
                     type = FilterType.ASSIGNABLE_TYPE,
-                    classes = {UserRepository.class, CustomDomainRepository.class, CustomDomainAllowanceRepository.class, AuditLogRepository.class,
+                    classes = {UserRepository.class, CustomDomainRepository.class, CustomDomainRequestRepository.class, CustomDomainAllowanceRepository.class, AuditLogRepository.class,
                             UrlRepository.class}))
     @Import({
             AppConfiguration.class,
@@ -918,6 +920,7 @@ class AdminCustomDomainSecurityTest {
             JwtFilter.class,
             ClientIpResolver.class,
             AdminAuditAspect.class,
+            AuditSubjects.class,
             DefaultAuditLogService.class,
             AdminCustomDomainController.class,
             DefaultCustomDomainAdminService.class,

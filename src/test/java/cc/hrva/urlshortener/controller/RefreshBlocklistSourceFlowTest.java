@@ -1,6 +1,7 @@
 package cc.hrva.urlshortener.controller;
 
 import cc.hrva.urlshortener.audit.AdminAuditAspect;
+import cc.hrva.urlshortener.audit.AuditSubjects;
 import cc.hrva.urlshortener.client.FetchResult;
 import cc.hrva.urlshortener.client.PublicHttpFetcher;
 import cc.hrva.urlshortener.configuration.AppConfiguration;
@@ -142,6 +143,9 @@ class RefreshBlocklistSourceFlowTest {
 
     @Autowired
     private BlocklistSourceRepository blocklistSourceRepository;
+
+    @MockitoBean
+    private AuditSubjects auditSubjects;
 
     @MockitoBean
     private UserService userService;

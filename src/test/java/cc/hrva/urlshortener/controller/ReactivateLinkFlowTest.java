@@ -2,6 +2,7 @@ package cc.hrva.urlshortener.controller;
 
 import cc.hrva.urlshortener.service.domain.ShortLinks;
 import cc.hrva.urlshortener.audit.AdminAuditAspect;
+import cc.hrva.urlshortener.audit.AuditSubjects;
 import cc.hrva.urlshortener.configuration.AppConfiguration;
 import cc.hrva.urlshortener.configuration.GlobalExceptionHandler;
 import cc.hrva.urlshortener.configuration.JacksonConfiguration;
@@ -19,6 +20,7 @@ import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.repository.AuditLogRepository;
 import cc.hrva.urlshortener.repository.DestinationCheckRepository;
 import cc.hrva.urlshortener.repository.CustomDomainRepository;
+import cc.hrva.urlshortener.repository.CustomDomainRequestRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.security.AnyHostIsPrimary;
@@ -313,7 +315,7 @@ class ReactivateLinkFlowTest {
             basePackageClasses = UrlRepository.class,
             includeFilters = @ComponentScan.Filter(
                     type = FilterType.ASSIGNABLE_TYPE,
-                    classes = {UrlRepository.class, CustomDomainRepository.class, UserRepository.class, AuditLogRepository.class}))
+                    classes = {UrlRepository.class, CustomDomainRepository.class, CustomDomainRequestRepository.class, UserRepository.class, AuditLogRepository.class}))
     @Import({
             DefaultSettingsTestConfiguration.class,
             AnonymousLinkSignalsTestConfiguration.class, HumanCheckTestConfiguration.class, SignInFormCheckTestConfiguration.class,
@@ -338,6 +340,7 @@ class ReactivateLinkFlowTest {
             UrlToPeekUrlConverter.class,
             UrlUpdateDtoToUrlConverter.class,
             AdminAuditAspect.class,
+            AuditSubjects.class,
             DefaultAuditLogService.class
     })
     static class TestApplication {

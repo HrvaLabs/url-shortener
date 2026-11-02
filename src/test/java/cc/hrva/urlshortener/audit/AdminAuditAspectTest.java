@@ -1,18 +1,23 @@
 package cc.hrva.urlshortener.audit;
 
+import cc.hrva.urlshortener.controller.AdminBlocklistController;
 import cc.hrva.urlshortener.controller.AdminCustomDomainController;
 import cc.hrva.urlshortener.controller.AdminEmailLogController;
 import cc.hrva.urlshortener.controller.UrlController;
 import cc.hrva.urlshortener.controller.UserController;
+import cc.hrva.urlshortener.dto.BlocklistSourceDto;
 import cc.hrva.urlshortener.dto.UrlUpdateDto;
 import cc.hrva.urlshortener.dto.UserUpdateDto;
 import cc.hrva.urlshortener.exception.UrlNotFoundException;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.enums.AuditAction;
+import cc.hrva.urlshortener.model.enums.BlocklistAction;
+import cc.hrva.urlshortener.model.enums.SourceKind;
 import cc.hrva.urlshortener.repository.ApiKeyRepository;
 import cc.hrva.urlshortener.service.AuditLogService;
 import cc.hrva.urlshortener.service.UserService;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Set;
 import org.aspectj.lang.ProceedingJoinPoint;
 import org.aspectj.lang.Signature;
@@ -24,7 +29,9 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import tools.jackson.databind.json.JsonMapper;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -49,6 +56,9 @@ class AdminAuditAspectTest {
     private UserService userService;
 
     @Mock
+    private AuditSubjects auditSubjects;
+
+    @Mock
     private ProceedingJoinPoint joinPoint;
 
     @Mock
@@ -58,9 +68,10 @@ class AdminAuditAspectTest {
 
     @BeforeEach
     void setUp() {
-        aspect = new AdminAuditAspect(auditLogService, userService, JsonMapper.builder().build(), new StaticListableBeanFactory().getBeanProvider(ApiKeyRepository.class));
+        aspect = new AdminAuditAspect(auditLogService, userService, auditSubjects, JsonMapper.builder().build(), new StaticListableBeanFactory().getBeanProvider(ApiKeyRepository.class));
         lenient().when(userService.getUserFromToken()).thenReturn(User.builder().email("admin@hrva.cc").build());
         lenient().when(joinPoint.getSignature()).thenReturn(signature);
+        lenient().when(auditSubjects.describe(anyString(), anyString())).thenReturn(Optional.empty());
     }
 
     @Test
@@ -85,7 +96,7 @@ class AdminAuditAspectTest {
         final var apiKeyRepository = mock(ApiKeyRepository.class);
         final var beans = new StaticListableBeanFactory();
         beans.addBean("apiKeyRepository", apiKeyRepository);
-        final var keyAware = new AdminAuditAspect(auditLogService, userService, JsonMapper.builder().build(), beans.getBeanProvider(ApiKeyRepository.class));
+        final var keyAware = new AdminAuditAspect(auditLogService, userService, auditSubjects, JsonMapper.builder().build(), beans.getBeanProvider(ApiKeyRepository.class));
         final var hash = ApiKeyTokens.hash("hrva_audited");
         when(userService.getUserFromToken()).thenReturn(null);
         when(apiKeyRepository.findApiKeyByKeyHash(hash)).thenReturn(Optional.of(ApiKey.builder().keyHash(hash).active(true)
@@ -103,7 +114,7 @@ class AdminAuditAspectTest {
         final var apiKeyRepository = mock(ApiKeyRepository.class);
         final var beans = new StaticListableBeanFactory();
         beans.addBean("apiKeyRepository", apiKeyRepository);
-        final var keyAware = new AdminAuditAspect(auditLogService, userService, JsonMapper.builder().build(), beans.getBeanProvider(ApiKeyRepository.class));
+        final var keyAware = new AdminAuditAspect(auditLogService, userService, auditSubjects, JsonMapper.builder().build(), beans.getBeanProvider(ApiKeyRepository.class));
         onRequest("PATCH", "/api/v1/urls/265/activate", "hrva_someone_elses");
         final var audited = invoking(UrlController.class, "activateUrl", 265L);
 
@@ -118,7 +129,7 @@ class AdminAuditAspectTest {
         final var apiKeyRepository = mock(ApiKeyRepository.class);
         final var beans = new StaticListableBeanFactory();
         beans.addBean("apiKeyRepository", apiKeyRepository);
-        final var keyAware = new AdminAuditAspect(auditLogService, userService, JsonMapper.builder().build(), beans.getBeanProvider(ApiKeyRepository.class));
+        final var keyAware = new AdminAuditAspect(auditLogService, userService, auditSubjects, JsonMapper.builder().build(), beans.getBeanProvider(ApiKeyRepository.class));
         when(userService.getUserFromToken()).thenReturn(null);
         onRequest("DELETE", "/api/v1/urls/265", "hrva_audited");
         when(joinPoint.proceed()).thenThrow(new IllegalStateException("Sign in to continue."));
@@ -134,7 +145,7 @@ class AdminAuditAspectTest {
         final var apiKeyRepository = mock(ApiKeyRepository.class);
         final var beans = new StaticListableBeanFactory();
         beans.addBean("apiKeyRepository", apiKeyRepository);
-        final var keyAware = new AdminAuditAspect(auditLogService, userService, JsonMapper.builder().build(), beans.getBeanProvider(ApiKeyRepository.class));
+        final var keyAware = new AdminAuditAspect(auditLogService, userService, auditSubjects, JsonMapper.builder().build(), beans.getBeanProvider(ApiKeyRepository.class));
         final var hash = ApiKeyTokens.hash("hrva_revoked");
         when(userService.getUserFromToken()).thenReturn(null);
         when(apiKeyRepository.findApiKeyByKeyHash(hash)).thenReturn(Optional.of(ApiKey.builder().keyHash(hash).active(false)
@@ -153,7 +164,7 @@ class AdminAuditAspectTest {
         final var apiKeyRepository = mock(ApiKeyRepository.class);
         final var beans = new StaticListableBeanFactory();
         beans.addBean("apiKeyRepository", apiKeyRepository);
-        final var keyAware = new AdminAuditAspect(auditLogService, userService, JsonMapper.builder().build(), beans.getBeanProvider(ApiKeyRepository.class));
+        final var keyAware = new AdminAuditAspect(auditLogService, userService, auditSubjects, JsonMapper.builder().build(), beans.getBeanProvider(ApiKeyRepository.class));
         onRequest("/api/v1/users/5", "hrva_audited");
         final var audited = invoking(UrlController.class, "updateUrl", 265L, UrlUpdateDto.builder().id(265L).visitLimit(10L).build());
 
@@ -275,5 +286,72 @@ class AdminAuditAspectTest {
 
         verify(auditLogService).logFailure("admin@hrva.cc", AuditAction.UPDATE_URL, "Url", "9", "Url with id 9 doesn't exist");
     }
+
+    @Test
+    void subjectIsTakenBeforeTheActionRuns() throws Throwable {
+        final var audited = invoking(UrlController.class, "deleteUrl", 265L);
+        when(auditSubjects.describe("Url", "265")).thenReturn(Optional.of("link: hrva.cc/promo, destination: https://example.com/page"));
+        when(joinPoint.proceed()).thenReturn(null);
+
+        aspect.logAdminAction(joinPoint, audited);
+
+        final var order = inOrder(auditSubjects, joinPoint, auditLogService);
+        order.verify(auditSubjects).describe("Url", "265");
+        order.verify(joinPoint).proceed();
+        order.verify(auditLogService).log("admin@hrva.cc", AuditAction.DELETE_URL, "Url", "265", "link: hrva.cc/promo, destination: https://example.com/page");
+    }
+
+    @Test
+    void subjectAndChangesAreJoined() throws Throwable {
+        final var audited = invoking(UrlController.class, "updateUrl", 265L, UrlUpdateDto.builder().id(265L).longUrl("https://new.example/page").build());
+        when(auditSubjects.describe("Url", "265")).thenReturn(Optional.of("link: hrva.cc/promo, destination: https://old.example/page"));
+
+        aspect.logAdminAction(joinPoint, audited);
+
+        verify(auditLogService).log("admin@hrva.cc", AuditAction.UPDATE_URL, "Url", "265",
+                "link: hrva.cc/promo, destination: https://old.example/page, longUrl: https://new.example/page");
+    }
+
+    @Test
+    void failureRowsCarryTheSubject() throws Throwable {
+        final var audited = invoking(UrlController.class, "deleteUrl", 9L);
+        when(auditSubjects.describe("Url", "9")).thenReturn(Optional.of("link: hrva.cc/promo, destination: https://example.com/page"));
+        when(joinPoint.proceed()).thenThrow(new UrlNotFoundException("Url with id 9 doesn't exist"));
+
+        assertThatThrownBy(() -> aspect.logAdminAction(joinPoint, audited)).isInstanceOf(UrlNotFoundException.class);
+
+        verify(auditLogService).logFailure("admin@hrva.cc", AuditAction.DELETE_URL, "Url", "9",
+                "link: hrva.cc/promo, destination: https://example.com/page, Url with id 9 doesn't exist");
+    }
+
+    @Test
+    void aFailureWithoutASubjectKeepsOnlyItsReason() throws Throwable {
+        final var audited = invoking(UrlController.class, "deleteUrl", 9L);
+        when(joinPoint.proceed()).thenThrow(new UrlNotFoundException("Url with id 9 doesn't exist"));
+
+        assertThatThrownBy(() -> aspect.logAdminAction(joinPoint, audited)).isInstanceOf(UrlNotFoundException.class);
+
+        verify(auditLogService).logFailure("admin@hrva.cc", AuditAction.DELETE_URL, "Url", "9", "Url with id 9 doesn't exist");
+    }
+
+    @Test
+    void anActionWithNothingToTargetAsksForNoSubject() throws Throwable {
+        final var audited = invoking(AdminBlocklistController.class, "createSource", new BlocklistSourceDto("List", "https://list.example/a.txt", SourceKind.DOMAINS, BlocklistAction.BLOCK, true, 6, List.of()));
+
+        aspect.logAdminAction(joinPoint, audited);
+
+        verifyNoInteractions(auditSubjects);
+    }
+
+    @Test
+    void nobodySignedInReadsNoSubject() throws Throwable {
+        when(userService.getUserFromToken()).thenReturn(null);
+        final var audited = UrlController.class.getDeclaredMethod("deleteUrl", Long.class).getAnnotation(Audited.class);
+
+        aspect.logAdminAction(joinPoint, audited);
+
+        verifyNoInteractions(auditSubjects);
+    }
+
 
 }

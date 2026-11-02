@@ -34,6 +34,9 @@ public interface UserRepository extends JpaRepository<User, Long>, JpaSpecificat
     @Query("select u.webauthnUserHandle from User u where u.id = :id")
     Optional<String> findWebauthnUserHandleById(@Param("id") Long id);
 
+    @Query("select u.email from User u where u.id = :id")
+    Optional<String> findEmailById(@Param("id") long id);
+
     @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Transactional
     @Query("update User u set u.webauthnUserHandle = :handle where u.id = :id and u.webauthnUserHandle is null")

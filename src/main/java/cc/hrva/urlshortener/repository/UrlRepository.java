@@ -215,6 +215,9 @@ public interface UrlRepository extends JpaRepository<Url, Long>, JpaSpecificatio
     @Query("select u.longUrl from Url u where u.id = :id")
     Optional<String> findLongUrlById(@Param("id") long id);
 
+    @Query("select new cc.hrva.urlshortener.repository.LinkAuditSubject(u.shortUrl, u.longUrl, d.hostname) from Url u left join u.domain d where u.id = :id")
+    Optional<LinkAuditSubject> findAuditSubjectById(@Param("id") long id);
+
     @Query("select u.id from Url u where u.active = true and (u.chainCheckedAt is null or u.chainCheckedAt < :checkedBefore) "
             + "order by u.chainCheckedAt asc nulls first, u.id")
     List<Long> findIdsDueForRedirectCheck(@Param("checkedBefore") LocalDateTime checkedBefore, Pageable pageable);

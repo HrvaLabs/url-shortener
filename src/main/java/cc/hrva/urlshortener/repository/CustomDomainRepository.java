@@ -74,6 +74,9 @@ public interface CustomDomainRepository extends JpaRepository<CustomDomain, Long
     @Query("select d from CustomDomain d left join fetch d.owner where d.id = :id")
     Optional<CustomDomain> findWithOwner(@Param("id") long id);
 
+    @Query("select new cc.hrva.urlshortener.repository.DomainAuditSubject(d.hostname, o.email) from CustomDomain d left join d.owner o where d.id = :id")
+    Optional<DomainAuditSubject> findAuditSubjectById(@Param("id") long id);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select d from CustomDomain d where d.id = :id")
     Optional<CustomDomain> findByIdForUpdate(@Param("id") long id);

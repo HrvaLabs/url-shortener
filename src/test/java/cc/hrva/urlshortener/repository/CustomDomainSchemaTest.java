@@ -901,6 +901,27 @@ class CustomDomainSchemaTest {
         }
     }
 
+    @Test
+    void theAuditSubjectQueriesNameAnOwnedDomainAnOwnerlessDomainALimitRequestALinkAndAnAccount() {
+        final var owner = savedUser("subject-owner@example.com");
+        final var owned = savedDomain(domain("go.subject.example", CustomDomainStatus.ACTIVE).owner(owner));
+        final var ownerless = savedDomain(domain("old.subject.example", CustomDomainStatus.DELETED));
+        final var request = customDomainRequestRepository.saveAndFlush(request(owner, DomainRequestStatus.WAITING));
+        final var onDomain = insertLink("onDomain", owned.getId());
+        final var onHrva = insertLink("onHrva", null);
+        entityManager.clear();
+
+        assertThat(customDomainRepository.findAuditSubjectById(owned.getId())).contains(new DomainAuditSubject("go.subject.example", "subject-owner@example.com"));
+        assertThat(customDomainRepository.findAuditSubjectById(ownerless.getId())).contains(new DomainAuditSubject("old.subject.example", null));
+        assertThat(customDomainRepository.findAuditSubjectById(-1L)).isEmpty();
+        assertThat(customDomainRequestRepository.findAuditSubjectById(request.getId()))
+                .contains(new DomainRequestAuditSubject("subject-owner@example.com", 1, 3));
+        assertThat(urlRepository.findAuditSubjectById(onDomain)).contains(new LinkAuditSubject("onDomain", "https://example.com/onDomain", "go.subject.example"));
+        assertThat(urlRepository.findAuditSubjectById(onHrva)).contains(new LinkAuditSubject("onHrva", "https://example.com/onHrva", null));
+        assertThat(userRepository.findEmailById(owner.getId())).contains("subject-owner@example.com");
+        assertThat(userRepository.findEmailById(-1L)).isEmpty();
+    }
+
     private Map<String, Object> domainRow(final long id) {
         return jdbcTemplate.queryForMap(DOMAIN_ROW, id);
     }

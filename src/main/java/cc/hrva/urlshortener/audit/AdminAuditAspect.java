@@ -14,6 +14,7 @@ import java.util.Set;
 import java.util.TreeMap;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 import lombok.RequiredArgsConstructor;
 import org.apache.commons.lang3.StringUtils;
 import org.aspectj.lang.ProceedingJoinPoint;
@@ -41,6 +42,7 @@ public class AdminAuditAspect {
 
     private final AuditLogService auditLogService;
     private final UserService userService;
+    private final AuditSubjects auditSubjects;
     private final JsonMapper jsonMapper;
     private final ObjectProvider<ApiKeyRepository> apiKeyRepository;
 
@@ -56,16 +58,21 @@ public class AdminAuditAspect {
         final var targetType = audited.targetType().isEmpty() ? targetType(signature.getDeclaringType()) : audited.targetType();
         final var targeted = args.length > 0 && args[0] != null && BeanUtils.isSimpleValueType(args[0].getClass());
         final var targetIdentifier = targeted ? String.valueOf(args[0]) : "";
-        final var details = describeChanges(args, targeted ? 1 : 0);
+        final var subject = targeted ? auditSubjects.describe(targetType, targetIdentifier).orElse("") : "";
+        final var details = joined(subject, describeChanges(args, targeted ? 1 : 0));
 
         try {
             final var result = joinPoint.proceed();
             auditLogService.log(performedBy, audited.value(), targetType, targeted ? targetIdentifier : createdIdentifier(result), details);
             return result;
         } catch (final Throwable e) {
-            auditLogService.logFailure(performedBy, audited.value(), targetType, targetIdentifier, e.getMessage());
+            auditLogService.logFailure(performedBy, audited.value(), targetType, targetIdentifier, joined(subject, e.getMessage()));
             throw e;
         }
+    }
+
+    private static String joined(final String subject, final String rest) {
+        return Stream.of(subject, rest).filter(StringUtils::isNotEmpty).collect(Collectors.joining(", "));
     }
 
     private Optional<String> signedInEmail() {
