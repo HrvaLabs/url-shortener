@@ -2987,7 +2987,7 @@ echo "  --- the admin's override for an account"
 http -X POST "$BASE/api/v1/reports" -H 'CF-Connecting-IP: 198.51.100.140' -H 'Content-Type: application/json' \
     -d '{"shortUrl":"e2e-edit-switch","category":"PHISHING"}'
 expect_contains "$HTTP_STATUS" 20 "a visitor reports e2e-edit-switch"
-expect_eq "$(psql_value "select count(*) || ' ' || bool_or(system_flagged) from link_review where url_id = $SWITCH_ID and resolved_at is null;")" "1 f" \
+expect_eq "$(psql_value "select count(*) || ' ' || bool_or(system_flagged) from link_review where url_id = $SWITCH_ID and resolved_at is null;")" "1 false" \
     "the report is in the review queue"
 http "$BASE/api/v1/admin/users/$EDIT_USER_ID/destination-changes" -H "Authorization: Bearer $ADMIN_JWT"
 expect_eq "$HTTP_STATUS $(jq -c . <<<"$HTTP_BODY")" '200 {"override":"AUTOMATIC","allowed":true,"inGoodStanding":true,"missing":[]}' \
