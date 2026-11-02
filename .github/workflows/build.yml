@@ -68,6 +68,7 @@ jobs:
           platforms: linux/amd64,linux/arm64
 
       - name: Redeploy on Portainer
+        id: redeploy
         if: github.event_name == 'push'
         shell: bash
         env:
@@ -89,3 +90,40 @@ jobs:
             exit 1
           fi
           echo "Portainer redeploy triggered (HTTP $status)"
+          echo "triggered=true" >> "$GITHUB_OUTPUT"
+
+      - name: Smoke test the deploy
+        if: success() && github.event_name == 'push' && steps.redeploy.outputs.triggered == 'true'
+        shell: bash
+        env:
+          SITE: https://hrva.cc
+          PROBE_LINK: revolut
+        run: |
+          set -euo pipefail
+          expected=$(jq -r '.releases[0].version' src/main/resources/changelog.json)
+          deadline=$((SECONDS + 300))
+
+          until [[ "$(curl --silent --max-time 10 "$SITE/actuator/health/readiness" | jq -r '.status' 2>/dev/null)" == "UP" ]]; do
+            if (( SECONDS >= deadline )); then
+              echo "::error::$SITE/actuator/health/readiness wasn't UP within 5 minutes"
+              exit 1
+            fi
+            sleep 10
+          done
+          echo "Readiness is UP"
+
+          until [[ "$(curl --silent --max-time 10 "$SITE/api/changelog" | jq -r '.releases[0].version' 2>/dev/null)" == "$expected" ]]; do
+            if (( SECONDS >= deadline )); then
+              echo "::error::$SITE/api/changelog didn't show $expected within 5 minutes"
+              exit 1
+            fi
+            sleep 10
+          done
+          echo "The changelog shows $expected"
+
+          read -r status location < <(curl --silent --max-time 10 --head --output /dev/null --write-out '%{http_code} %{redirect_url}\n' "$SITE/$PROBE_LINK")
+          if [[ "$status" != 302 || -z "$location" || "$location" == "$SITE"* ]]; then
+            echo "::error::HEAD $SITE/$PROBE_LINK answered $status ${location:-without a Location}, expected a 302 to its destination"
+            exit 1
+          fi
+          echo "HEAD /$PROBE_LINK redirects (HTTP $status)"
