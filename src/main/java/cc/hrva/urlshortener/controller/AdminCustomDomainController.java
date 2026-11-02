@@ -42,8 +42,8 @@ public class AdminCustomDomainController {
 
     private final CustomDomainAdminService customDomainAdminService;
 
-    @Operation(summary = "Custom domains", description = "Every custom domain, newest first, with its owner, links and clicks. "
-            + "status keeps one status; search matches the hostname or the owner's email.")
+    @Operation(summary = "Custom domains", description = "Every custom domain except removed ones, newest first, with its owner, links and clicks. "
+            + "status keeps one status; DELETED lists only the removed ones, newest removal first; search matches the hostname or the owner's email.")
     @GetMapping
     @PreAuthorize("hasRole('ROLE_ADMIN')")
     public ResponseEntity<Page<AdminDomainResponse>> fetchDomains(

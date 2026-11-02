@@ -49,7 +49,6 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
-import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -72,6 +71,9 @@ public class DefaultCustomDomainAdminService implements CustomDomainAdminService
     private static final SortWhitelist DOMAIN_SORTS = SortWhitelist.of(CREATED_AT, "hostname", "status")
             .byDefault(Sort.by(Sort.Order.desc(CREATED_AT)))
             .thenBy(Sort.Order.desc(CREATED_AT), Sort.Order.desc("id"));
+    private static final SortWhitelist REMOVED_DOMAIN_SORTS = SortWhitelist.of(CREATED_AT, "hostname", "status")
+            .byDefault(Sort.by(Sort.Order.desc("deletedAt")))
+            .thenBy(Sort.Order.desc(CREATED_AT), Sort.Order.desc("id"));
 
     private final CustomDomainRepository customDomainRepository;
     private final CustomDomainAllowanceRepository customDomainAllowanceRepository;
@@ -93,11 +95,9 @@ public class DefaultCustomDomainAdminService implements CustomDomainAdminService
 
     @Override
     public Page<AdminDomainResponse> list(final CustomDomainStatus status, final String search, final Pageable pageable) {
-        final var sorted = DOMAIN_SORTS.apply(pageable);
-        var spec = Specification.<CustomDomain>unrestricted();
-        if (status != null) {
-            spec = spec.and(CustomDomainSpecification.hasStatus(status));
-        }
+        final var removed = status == CustomDomainStatus.DELETED;
+        final var sorted = (removed ? REMOVED_DOMAIN_SORTS : DOMAIN_SORTS).apply(pageable);
+        var spec = status == null ? CustomDomainSpecification.notRemoved() : CustomDomainSpecification.hasStatus(status);
         if (StringUtils.isNotBlank(search)) {
             spec = spec.and(CustomDomainSpecification.searchMatches(search.strip()));
         }

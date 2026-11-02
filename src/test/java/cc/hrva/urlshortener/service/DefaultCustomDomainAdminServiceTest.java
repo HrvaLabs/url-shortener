@@ -74,6 +74,10 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import jakarta.persistence.criteria.CriteriaBuilder;
+import jakarta.persistence.criteria.CriteriaQuery;
+import jakarta.persistence.criteria.Root;
+import org.mockito.ArgumentCaptor;
 import org.mockito.ArgumentMatcher;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -103,6 +107,8 @@ import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -686,6 +692,53 @@ class DefaultCustomDomainAdminServiceTest {
 
         verify(customDomainRepository).findAll(any(Specification.class),
                 eq(PageRequest.of(2, 20, Sort.by(Sort.Order.desc("createdAt"), Sort.Order.desc("id")))));
+    }
+
+    @Test
+    void listWithoutAStatusLeavesRemovedOut() {
+        when(customDomainRepository.findAll(any(Specification.class), any(Pageable.class)))
+                .thenAnswer(invocation -> new PageImpl<>(List.of(), invocation.getArgument(1), 0));
+
+        customDomainAdminService.list(null, null, PageRequest.of(0, 20));
+
+        final var builder = specificationBuilder();
+        verify(builder).notEqual(any(), eq(CustomDomainStatus.DELETED));
+        verify(builder, never()).equal(any(), any());
+    }
+
+    @Test
+    void listOfRemovedShowsOnlyRemoved() {
+        when(customDomainRepository.findAll(any(Specification.class), any(Pageable.class)))
+                .thenAnswer(invocation -> new PageImpl<>(List.of(), invocation.getArgument(1), 0));
+
+        customDomainAdminService.list(CustomDomainStatus.DELETED, null, PageRequest.of(0, 20));
+
+        final var builder = specificationBuilder();
+        verify(builder).equal(any(), eq(CustomDomainStatus.DELETED));
+        verify(builder, never()).notEqual(any(), any());
+        verify(customDomainRepository).findAll(any(Specification.class),
+                eq(PageRequest.of(0, 20, Sort.by(Sort.Order.desc("deletedAt"), Sort.Order.desc("createdAt"), Sort.Order.desc("id")))));
+    }
+
+    @Test
+    void listOfRemovedKeepsAChosenSort() {
+        when(customDomainRepository.findAll(any(Specification.class), any(Pageable.class)))
+                .thenAnswer(invocation -> new PageImpl<>(List.of(), invocation.getArgument(1), 0));
+
+        customDomainAdminService.list(CustomDomainStatus.DELETED, null, PageRequest.of(0, 20, Sort.by(Sort.Order.asc("hostname"))));
+
+        verify(customDomainRepository).findAll(any(Specification.class),
+                eq(PageRequest.of(0, 20, Sort.by(Sort.Order.asc("hostname"), Sort.Order.desc("createdAt"), Sort.Order.desc("id")))));
+    }
+
+    @SuppressWarnings("unchecked")
+    private CriteriaBuilder specificationBuilder() {
+        final var captor = ArgumentCaptor.forClass(Specification.class);
+        verify(customDomainRepository).findAll(captor.capture(), any(Pageable.class));
+        final var root = mock(Root.class, RETURNS_DEEP_STUBS);
+        final var builder = mock(CriteriaBuilder.class, RETURNS_DEEP_STUBS);
+        captor.getValue().toPredicate(root, mock(CriteriaQuery.class), builder);
+        return builder;
     }
 
     @ParameterizedTest

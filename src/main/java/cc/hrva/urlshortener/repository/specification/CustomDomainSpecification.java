@@ -19,6 +19,10 @@ public final class CustomDomainSpecification {
         };
     }
 
+    public static Specification<CustomDomain> notRemoved() {
+        return (root, query, cb) -> cb.notEqual(root.get("status"), CustomDomainStatus.DELETED);
+    }
+
     public static Specification<CustomDomain> hasStatus(final CustomDomainStatus status) {
         return (root, query, cb) -> cb.equal(root.get("status"), status);
     }

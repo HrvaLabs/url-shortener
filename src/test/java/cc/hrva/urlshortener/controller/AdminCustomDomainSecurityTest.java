@@ -420,7 +420,8 @@ class AdminCustomDomainSecurityTest {
         final var percent = domain(BOB, "percent50.example.org", "PENDING_REVIEW", NOW.minusDays(2));
 
         mockMvc.perform(as(ADMIN_TOKEN, get(DOMAINS)))
-                .andExpect(jsonPath("$.content[*].id").value(contains((int) newer, (int) percent, (int) ownerless, (int) older)));
+                .andExpect(jsonPath("$.content[*].id").value(contains((int) newer, (int) percent, (int) older)))
+                .andExpect(jsonPath("$.page.totalElements").value(3));
         mockMvc.perform(as(ADMIN_TOKEN, get(DOMAINS).param("status", "PENDING_REVIEW").param("size", "1")))
                 .andExpect(jsonPath("$.content[*].id").value(contains((int) newer)))
                 .andExpect(jsonPath("$.page.totalElements").value(2));
@@ -429,6 +430,10 @@ class AdminCustomDomainSecurityTest {
         mockMvc.perform(as(ADMIN_TOKEN, get(DOMAINS).param("search", "BOB@example")))
                 .andExpect(jsonPath("$.content[*].id").value(contains((int) newer, (int) percent)));
         mockMvc.perform(as(ADMIN_TOKEN, get(DOMAINS).param("search", "left.example")))
+                .andExpect(jsonPath("$.content.length()").value(0));
+        mockMvc.perform(as(ADMIN_TOKEN, get(DOMAINS).param("status", "DELETED")))
+                .andExpect(jsonPath("$.content[*].id").value(contains((int) ownerless)));
+        mockMvc.perform(as(ADMIN_TOKEN, get(DOMAINS).param("status", "DELETED").param("search", "left.example")))
                 .andExpect(jsonPath("$.content[*].id").value(contains((int) ownerless)))
                 .andExpect(jsonPath("$.content[0].owner").doesNotExist());
         mockMvc.perform(as(ADMIN_TOKEN, get(DOMAINS).param("search", "%")))
