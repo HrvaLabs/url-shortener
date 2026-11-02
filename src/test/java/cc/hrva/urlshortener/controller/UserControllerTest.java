@@ -204,6 +204,9 @@ class UserControllerTest {
         final var export = new cc.hrva.urlshortener.dto.DataExportDto(
                 java.time.LocalDateTime.now(),
                 UserDto.builder().id(1L).email("test@example.com").build(),
+                null,
+                cc.hrva.urlshortener.model.enums.DestinationChangeOverride.AUTOMATIC,
+                java.util.Collections.emptyList(),
                 java.util.Collections.emptyList(),
                 java.util.Collections.emptyList(),
                 java.util.Collections.emptyList(),

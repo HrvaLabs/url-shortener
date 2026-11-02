@@ -8,8 +8,10 @@ import cc.hrva.urlshortener.model.enums.BioAvatarKind;
 import cc.hrva.urlshortener.model.enums.BioIcon;
 import cc.hrva.urlshortener.model.enums.BioTheme;
 import cc.hrva.urlshortener.model.enums.ChannelType;
+import cc.hrva.urlshortener.model.enums.ChangeChannel;
 import cc.hrva.urlshortener.model.enums.ConsentSource;
 import cc.hrva.urlshortener.model.enums.CustomDomainStatus;
+import cc.hrva.urlshortener.model.enums.DestinationChangeOverride;
 import cc.hrva.urlshortener.model.enums.DomainDisableReason;
 import cc.hrva.urlshortener.model.enums.DomainRequestStatus;
 import cc.hrva.urlshortener.model.enums.LastDeliveryStatus;
@@ -21,7 +23,10 @@ import java.util.List;
 public record DataExportDto(
         LocalDateTime exportedAt,
         UserDto profile,
+        LocalDateTime lastLinkBlockedAt,
+        DestinationChangeOverride destinationChangeOverride,
         List<UrlResponse> urls,
+        List<DestinationChangeExport> destinationChanges,
         List<ApiKeyResponse> apiKeys,
         List<EmailExport> emails,
         List<PasskeyExport> passkeys,
@@ -31,6 +36,15 @@ public record DataExportDto(
         NotificationExport notifications,
         List<DomainExport> domains,
         List<DomainRequestExport> domainRequests) {
+
+    public record DestinationChangeExport(
+            String shortUrl,
+            String domain,
+            String oldLongUrl,
+            String newLongUrl,
+            ChangeChannel via,
+            boolean forced,
+            LocalDateTime changedAt) {}
 
     public record EmailExport(String subject, String status, LocalDateTime sentAt, LocalDateTime createdAt) {}
 

@@ -2931,7 +2931,7 @@ http -X DELETE "$BASE/api/v1/admin/domain-rules/$EDIT_RULE_ID" -H "Authorization
 
 echo "  --- at most 5 changes per link a day"
 EDIT_COUNT=$(docker exec "$REDIS_CONTAINER" redis-cli --raw get "rate-limit:destination-change:$EDIT_ID")
-show "changes counted so far, refused checks included: $EDIT_COUNT"
+expect_eq "$EDIT_COUNT" 1 "only the saved change was counted, not the two refused ones"
 for (( change = EDIT_COUNT + 1; change <= 5; change++ )); do
     edit_link "$EDIT_ID" "\"longUrl\":\"https://e2e-edit.com/change-$change\""
     expect_eq "$HTTP_STATUS" 200 "change $change of 5"

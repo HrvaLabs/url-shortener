@@ -6,11 +6,13 @@ import cc.hrva.urlshortener.security.ApiKeyRateLimitFilter;
 import cc.hrva.urlshortener.security.ApiKeyTokens;
 import cc.hrva.urlshortener.service.AuditLogService;
 import cc.hrva.urlshortener.service.UserService;
+import java.time.LocalDateTime;
 import java.util.Arrays;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.apache.commons.lang3.StringUtils;
@@ -19,6 +21,7 @@ import org.aspectj.lang.annotation.Around;
 import org.aspectj.lang.annotation.Aspect;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
 import org.springframework.web.context.request.RequestContextHolder;
@@ -33,7 +36,7 @@ public class AdminAuditAspect {
 
     private static final String ADMIN_PREFIX = "Admin";
     private static final String ID = "id";
-    private static final String LINK_API = "/api/v1/urls";
+    private static final Pattern LINK_EDIT = Pattern.compile("/api/v1/urls/[^/]+");
     private static final Set<String> UNAUDITED_FIELDS = Set.of(ID, "url", "fallbackUrls");
 
     private final AuditLogService auditLogService;
@@ -43,7 +46,7 @@ public class AdminAuditAspect {
 
     @Around("@annotation(audited)")
     public Object logAdminAction(final ProceedingJoinPoint joinPoint, final Audited audited) throws Throwable {
-        final var performer = apiKeyOwner().or(this::signedInEmail);
+        final var performer = signedInEmail().or(this::apiKeyOwner);
         if (performer.isEmpty()) {
             return joinPoint.proceed();
         }
@@ -76,12 +79,14 @@ public class AdminAuditAspect {
         }
         final var request = attributes.getRequest();
         final var key = request.getHeader(ApiKeyRateLimitFilter.API_KEY_HEADER);
-        if (StringUtils.isBlank(key) || !StringUtils.startsWith(StringUtils.removeStart(request.getRequestURI(), request.getContextPath()), LINK_API)) {
+        if (StringUtils.isBlank(key) || !HttpMethod.PUT.matches(request.getMethod())
+                || !LINK_EDIT.matcher(StringUtils.removeStart(request.getRequestURI(), request.getContextPath())).matches()) {
             return Optional.empty();
         }
         final var hash = ApiKeyTokens.hash(key);
         return repository.findApiKeyByKeyHash(hash)
-                .filter(found -> ApiKeyTokens.sameHash(found.getKeyHash(), hash) && found.getOwner() != null)
+                .filter(found -> ApiKeyTokens.sameHash(found.getKeyHash(), hash) && found.isActive() && found.getOwner() != null)
+                .filter(found -> found.getExpirationDate() == null || found.getExpirationDate().isAfter(LocalDateTime.now()))
                 .map(found -> found.getOwner().getEmail());
     }
 

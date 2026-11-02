@@ -246,6 +246,26 @@ class DefaultUrlValidatorTest {
     }
 
     @Test
+    void anAdminsNewDestinationOnAnAllowListedDomainSkipsTheChecksLikeReactivating() {
+        final var url = Url.builder().longUrl("https://docs.google.com/x").build();
+        when(userService.getUserFromToken()).thenReturn(userWithRole(3L, "ROLE_ADMIN"));
+        when(linkCheckService.isAllowListed("https://docs.google.com/x")).thenReturn(true);
+
+        assertThat(urlValidator.destinationVerdict(url)).isEqualTo(LinkVerdict.clean());
+        verify(linkCheckService, never()).check(anyString());
+    }
+
+    @Test
+    void anOwnersNewDestinationOnAnAllowListedDomainIsStillChecked() {
+        final var url = Url.builder().longUrl("https://docs.google.com/x").build();
+        when(userService.getUserFromToken()).thenReturn(userWithRole(2L, "ROLE_USER"));
+        when(linkCheckService.check("https://docs.google.com/x")).thenReturn(LinkVerdict.clean());
+
+        assertThat(urlValidator.destinationVerdict(url)).isEqualTo(LinkVerdict.clean());
+        verify(linkCheckService, never()).isAllowListed(anyString());
+    }
+
+    @Test
     void anAdminIsToldWhyADestinationIsStillBlocked() {
         final var url = Url.builder().longUrl("https://jofogas.cards/x").blockReason(BlockReason.DOMAIN_RULE).build();
         when(userService.getUserFromToken()).thenReturn(userWithRole(3L, "ROLE_ADMIN"));

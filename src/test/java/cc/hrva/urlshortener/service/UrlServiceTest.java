@@ -406,8 +406,8 @@ class UrlServiceTest {
         order.verify(urlValidator).longUrlInUrl(changed);
         order.verify(urlValidator).checkIfLongUrlIsValid(changed);
         order.verify(urlValidator).checkIfLongUrlIsNotAShortener(changed);
-        order.verify(destinationChangeService).countChange(eq(url), any());
         order.verify(urlValidator).destinationVerdict(changed);
+        order.verify(destinationChangeService).countChange(eq(url), any());
         order.verify(urlRepository).save(url);
         order.verify(destinationChangeService).record(eq(url), eq("https://old.example"), any(), eq(false));
         order.verify(burstAlertService).linkCreated(any());

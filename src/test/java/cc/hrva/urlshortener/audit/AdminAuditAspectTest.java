@@ -37,7 +37,6 @@ import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verifyNoInteractions;
 
 @ExtendWith(MockitoExtension.class)
@@ -88,7 +87,8 @@ class AdminAuditAspectTest {
         beans.addBean("apiKeyRepository", apiKeyRepository);
         final var keyAware = new AdminAuditAspect(auditLogService, userService, JsonMapper.builder().build(), beans.getBeanProvider(ApiKeyRepository.class));
         final var hash = ApiKeyTokens.hash("hrva_audited");
-        when(apiKeyRepository.findApiKeyByKeyHash(hash)).thenReturn(Optional.of(ApiKey.builder().keyHash(hash)
+        when(userService.getUserFromToken()).thenReturn(null);
+        when(apiKeyRepository.findApiKeyByKeyHash(hash)).thenReturn(Optional.of(ApiKey.builder().keyHash(hash).active(true)
                 .owner(User.builder().email("owner@hrva.cc").build()).build()));
         onRequest("/api/v1/urls/265", "hrva_audited");
         final var audited = invoking(UrlController.class, "updateUrl", 265L, UrlUpdateDto.builder().id(265L).visitLimit(10L).build());
@@ -96,7 +96,56 @@ class AdminAuditAspectTest {
         keyAware.logAdminAction(joinPoint, audited);
 
         verify(auditLogService).log("owner@hrva.cc", AuditAction.UPDATE_URL, "Url", "265", "visitLimit: 10");
-        verify(userService, never()).getUserFromToken();
+    }
+
+    @Test
+    void aSignedInUserIsTheActorEvenWhenAKeyIsSent() throws Throwable {
+        final var apiKeyRepository = mock(ApiKeyRepository.class);
+        final var beans = new StaticListableBeanFactory();
+        beans.addBean("apiKeyRepository", apiKeyRepository);
+        final var keyAware = new AdminAuditAspect(auditLogService, userService, JsonMapper.builder().build(), beans.getBeanProvider(ApiKeyRepository.class));
+        onRequest("PATCH", "/api/v1/urls/265/activate", "hrva_someone_elses");
+        final var audited = invoking(UrlController.class, "activateUrl", 265L);
+
+        keyAware.logAdminAction(joinPoint, audited);
+
+        verify(auditLogService).log("admin@hrva.cc", AuditAction.ACTIVATE_URL, "Url", "265", "");
+        verifyNoInteractions(apiKeyRepository);
+    }
+
+    @Test
+    void aKeyIsTheActorOnlyOnTheEditItself() throws Throwable {
+        final var apiKeyRepository = mock(ApiKeyRepository.class);
+        final var beans = new StaticListableBeanFactory();
+        beans.addBean("apiKeyRepository", apiKeyRepository);
+        final var keyAware = new AdminAuditAspect(auditLogService, userService, JsonMapper.builder().build(), beans.getBeanProvider(ApiKeyRepository.class));
+        when(userService.getUserFromToken()).thenReturn(null);
+        onRequest("DELETE", "/api/v1/urls/265", "hrva_audited");
+        when(joinPoint.proceed()).thenThrow(new IllegalStateException("Sign in to continue."));
+        final var audited = UrlController.class.getDeclaredMethod("deleteUrl", Long.class).getAnnotation(Audited.class);
+
+        assertThatThrownBy(() -> keyAware.logAdminAction(joinPoint, audited)).hasMessage("Sign in to continue.");
+
+        verifyNoInteractions(auditLogService, apiKeyRepository);
+    }
+
+    @Test
+    void aRevokedKeyNamesNobody() throws Throwable {
+        final var apiKeyRepository = mock(ApiKeyRepository.class);
+        final var beans = new StaticListableBeanFactory();
+        beans.addBean("apiKeyRepository", apiKeyRepository);
+        final var keyAware = new AdminAuditAspect(auditLogService, userService, JsonMapper.builder().build(), beans.getBeanProvider(ApiKeyRepository.class));
+        final var hash = ApiKeyTokens.hash("hrva_revoked");
+        when(userService.getUserFromToken()).thenReturn(null);
+        when(apiKeyRepository.findApiKeyByKeyHash(hash)).thenReturn(Optional.of(ApiKey.builder().keyHash(hash).active(false)
+                .owner(User.builder().email("owner@hrva.cc").build()).build()));
+        onRequest("/api/v1/urls/265", "hrva_revoked");
+        when(joinPoint.proceed()).thenThrow(new IllegalStateException("API key is invalid"));
+        final var audited = UrlController.class.getDeclaredMethod("updateUrl", Long.class, UrlUpdateDto.class).getAnnotation(Audited.class);
+
+        assertThatThrownBy(() -> keyAware.logAdminAction(joinPoint, audited)).hasMessage("API key is invalid");
+
+        verifyNoInteractions(auditLogService);
     }
 
     @Test
@@ -115,7 +164,11 @@ class AdminAuditAspectTest {
     }
 
     private static void onRequest(final String path, final String apiKey) {
-        final var request = new MockHttpServletRequest("PUT", path);
+        onRequest("PUT", path, apiKey);
+    }
+
+    private static void onRequest(final String method, final String path, final String apiKey) {
+        final var request = new MockHttpServletRequest(method, path);
         request.addHeader("X-Api-Key", apiKey);
         RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
     }

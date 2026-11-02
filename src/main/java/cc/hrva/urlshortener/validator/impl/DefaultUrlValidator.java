@@ -81,7 +81,9 @@ public class DefaultUrlValidator implements UrlValidator {
 
     @Override
     public LinkVerdict destinationVerdict(final Url url) {
-        final var verdict = linkCheckService.check(url.getLongUrl());
+        final var verdict = isCurrentUserAdmin() && linkCheckService.isAllowListed(url.getLongUrl())
+                ? LinkVerdict.clean()
+                : linkCheckService.check(url.getLongUrl());
         final var threats = settingsService.isOn(SettingKey.SAFE_BROWSING_CHECK) ? safeBrowsingService.checkUrlsForThreats(url.getLongUrl()) : List.<String>of();
         if (threats.isEmpty()) {
             return verdict;

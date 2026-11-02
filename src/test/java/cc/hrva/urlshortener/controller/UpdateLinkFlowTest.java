@@ -103,6 +103,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import cc.hrva.urlshortener.configuration.ClockConfiguration;
 import cc.hrva.urlshortener.dto.SignInMethodResponse;
 import cc.hrva.urlshortener.exception.ApiKeyNotFoundException;
+import cc.hrva.urlshortener.model.enums.ChangeChannel;
 import cc.hrva.urlshortener.model.enums.SignInMethod;
 import cc.hrva.urlshortener.repository.ApiKeyRepository;
 import cc.hrva.urlshortener.repository.LinkDestinationChangeRepository;
@@ -182,6 +183,9 @@ class UpdateLinkFlowTest {
 
     @Autowired
     private UserRepository userRepository;
+
+    @Autowired
+    private LinkDestinationChangeRepository linkDestinationChangeRepository;
 
     @Autowired
     private PlatformTransactionManager transactionManager;
@@ -781,7 +785,6 @@ class UpdateLinkFlowTest {
                 .andExpect(jsonPath("$.detail").value("This link's destination can change 5 times a day. Try again in 4 hours."));
 
         assertThat(jdbcTemplate.queryForObject("select long_url from url where id = ?", String.class, LINK)).isEqualTo(OLD_DESTINATION);
-        verify(safeBrowsingService, never()).checkUrlsForThreats(anyString());
     }
 
     @Test
@@ -807,6 +810,31 @@ class UpdateLinkFlowTest {
 
         assertThat(jdbcTemplate.queryForObject("select long_url from url where id = ?", String.class, LINK)).isEqualTo(OLD_DESTINATION);
         assertThat(jdbcTemplate.queryForObject("select count(*) from link_destination_change", Long.class)).isZero();
+        verify(rateLimiter, never()).tryAcquire(eq("destination-change:" + LINK), anyInt(), any());
+    }
+
+    @Test
+    void aNewDestinationSentWithAPastExpiryIsNotCounted() throws Exception {
+        goodStanding();
+
+        mockMvc.perform(edit("owner-token", "{\"id\":" + LINK + ",\"longUrl\":\"" + NEW_DESTINATION + "\",\"expirationDate\":\"2020-01-01T00:00:00\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.detail").value("Expiration date can't be in the past"));
+
+        assertThat(jdbcTemplate.queryForObject("select long_url from url where id = ?", String.class, LINK)).isEqualTo(OLD_DESTINATION);
+        verify(rateLimiter, never()).tryAcquire(eq("destination-change:" + LINK), anyInt(), any());
+    }
+
+    @Test
+    void aNewDestinationWhoseTurnOnIsRefusedIsNotCounted() throws Exception {
+        goodStanding();
+        jdbcTemplate.update("update url set active = false, visit_limit = 2, opens = 2 where id = ?", LINK);
+
+        mockMvc.perform(edit("owner-token", "{\"id\":" + LINK + ",\"longUrl\":\"" + NEW_DESTINATION + "\",\"visitLimit\":2,\"active\":true}"))
+                .andExpect(status().isConflict());
+
+        assertThat(jdbcTemplate.queryForObject("select long_url from url where id = ?", String.class, LINK)).isEqualTo(OLD_DESTINATION);
+        verify(rateLimiter, never()).tryAcquire(eq("destination-change:" + LINK), anyInt(), any());
     }
 
     @Test
@@ -819,6 +847,7 @@ class UpdateLinkFlowTest {
                 .andExpect(jsonPath("$.detail").value("This URL was flagged as unsafe and cannot be shortened"));
 
         assertThat(jdbcTemplate.queryForObject("select long_url from url where id = ?", String.class, LINK)).isEqualTo(OLD_DESTINATION);
+        verify(rateLimiter, never()).tryAcquire(eq("destination-change:" + LINK), anyInt(), any());
     }
 
     @Test
@@ -925,6 +954,28 @@ class UpdateLinkFlowTest {
                 .containsEntry("VIA", "API_KEY");
         assertThat(jdbcTemplate.queryForList("select performed_by from audit_log where action in ('UPDATE_URL', 'CHANGE_LINK_DESTINATION') and failed = false",
                 String.class)).containsOnly(OWNER_EMAIL).hasSize(2);
+        assertThat(linkDestinationChangeRepository.exportOf(userRepository.findById(OWNER).orElseThrow()))
+                .singleElement()
+                .satisfies(change -> {
+                    assertThat(change.shortUrl()).isEqualTo(jdbcTemplate.queryForObject("select short_url from url where id = ?", String.class, LINK));
+                    assertThat(change.oldLongUrl()).isEqualTo(OLD_DESTINATION);
+                    assertThat(change.newLongUrl()).isEqualTo(NEW_DESTINATION);
+                    assertThat(change.via()).isEqualTo(ChangeChannel.API_KEY);
+                    assertThat(change.forced()).isFalse();
+                });
+        assertThat(linkDestinationChangeRepository.exportOf(userRepository.findById(ADMIN).orElseThrow())).isEmpty();
+    }
+
+    @Test
+    void aSignedInEditIgnoresAKeySentWithIt() throws Exception {
+        apiKey();
+        jdbcTemplate.update("update url set owner_id = ? where id = ?", ADMIN, LINK);
+
+        mockMvc.perform(withKey("{\"id\":" + LINK + ",\"visitLimit\":5}").header(HttpHeaders.AUTHORIZATION, "Bearer admin-token"))
+                .andExpect(status().isOk());
+
+        assertThat(jdbcTemplate.queryForList("select performed_by from audit_log where action = 'UPDATE_URL' and failed = false", String.class))
+                .containsExactly(ADMIN_EMAIL);
     }
 
     @Test

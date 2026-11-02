@@ -674,7 +674,7 @@ public class DefaultUrlService implements UrlService {
     public UrlResponse updateUrl(final UrlUpdateDto updateDto, final String apiKey) {
         log.info("Update URL id={}", updateDto.getId());
 
-        final var keyEditor = apiKey == null ? null : LinkEditor.withApiKey(callerOf(apiKey));
+        final var keyEditor = apiKey == null || userService.getUserFromToken() != null ? null : LinkEditor.withApiKey(callerOf(apiKey));
         final var existing = urlRepository.findById(updateDto.getId())
                 .orElseThrow(() -> new UrlNotFoundException(String.format("Url with id %d doesn't exist", updateDto.getId())));
         final var editor = keyEditor == null ? signedInEditor(existing) : ownerWithKey(existing, keyEditor);
@@ -684,10 +684,13 @@ public class DefaultUrlService implements UrlService {
         final var url = urlUpdateDtoToUrlConverter.convert(updateDto);
         final var destinationChanged = !Objects.equals(previousLongUrl, url.getLongUrl());
         final var turnOn = Boolean.TRUE.equals(updateDto.getActive()) && !existing.isActive();
+        requireExpiryAllowed(existing, url, turnOn);
         final var verdict = destinationChanged ? validateNewDestination(existing, url, editor, Boolean.TRUE.equals(updateDto.getForce())) : LinkVerdict.clean();
         final var forced = editor.admin() && needsConfirmation(verdict);
-        requireExpiryAllowed(existing, url, turnOn);
         final var turnOnVerdict = turnOn ? checkTurnOnAfterEdit(existing, url, editor, destinationChanged) : LinkVerdict.clean();
+        if (destinationChanged) {
+            destinationChangeService.countChange(existing, editor);
+        }
 
         final var updated = transactionOperations.execute(status -> {
             final var current = reloadUnlessBlockedSince(existing, blockAtStart);
@@ -842,7 +845,6 @@ public class DefaultUrlService implements UrlService {
     private LinkVerdict validateNewDestination(final Url existing, final Url url, final LinkEditor editor, final boolean force) {
         destinationChangeService.requireAllowed(existing, editor);
         checkDestinationShape(url);
-        destinationChangeService.countChange(existing, editor);
         if (!editor.admin()) {
             final var verdict = checkDestinationSafety(url);
             log.info("New destination passed the checks urlId={}", url.getId());

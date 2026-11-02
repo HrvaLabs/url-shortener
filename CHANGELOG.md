@@ -42,6 +42,7 @@ Edit a link from the dashboard, turn expired and used-up links back on and chang
 
 ### 🔒 Privacy
 - Every destination change is kept with its link: the old and new destination, when, and which account made it. Admins can read it, and the audit log records it too. The privacy and security pages say so.
+- Your account export now includes the destination history of your links, when one of your links was last blocked, and an admin's setting for your account's destination changes.
 - Requests for more custom domains are in your account export, and are deleted with your account.
 
 ### 🔧 Admin

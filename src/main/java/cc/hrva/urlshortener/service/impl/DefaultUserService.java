@@ -252,7 +252,10 @@ public class DefaultUserService implements UserService {
         return new DataExportDto(
                 LocalDateTime.now(),
                 userToUserDtoConverter.convert(user),
+                user.getLastLinkBlockedAt(),
+                user.getDestinationChangeOverride(),
                 urls,
+                destinationChangeService.exportFor(user),
                 apiKeys,
                 emails,
                 passkeys,

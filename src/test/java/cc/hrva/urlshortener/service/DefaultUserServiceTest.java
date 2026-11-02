@@ -9,6 +9,7 @@ import cc.hrva.urlshortener.dto.DataExportDto.BioButtonExport;
 import cc.hrva.urlshortener.dto.DataExportDto.BioPageExport;
 import cc.hrva.urlshortener.dto.DataExportDto.ChannelExport;
 import cc.hrva.urlshortener.dto.DataExportDto.ConsentExport;
+import cc.hrva.urlshortener.dto.DataExportDto.DestinationChangeExport;
 import cc.hrva.urlshortener.dto.DataExportDto.DomainExport;
 import cc.hrva.urlshortener.dto.DataExportDto.DomainRequestExport;
 import cc.hrva.urlshortener.dto.DataExportDto.NotificationExport;
@@ -38,9 +39,11 @@ import cc.hrva.urlshortener.model.enums.BioAccent;
 import cc.hrva.urlshortener.model.enums.BioAvatarKind;
 import cc.hrva.urlshortener.model.enums.BioIcon;
 import cc.hrva.urlshortener.model.enums.BioTheme;
+import cc.hrva.urlshortener.model.enums.ChangeChannel;
 import cc.hrva.urlshortener.model.enums.ChannelType;
 import cc.hrva.urlshortener.model.enums.ConsentSource;
 import cc.hrva.urlshortener.model.enums.CustomDomainStatus;
+import cc.hrva.urlshortener.model.enums.DestinationChangeOverride;
 import cc.hrva.urlshortener.model.enums.DomainRequestStatus;
 import cc.hrva.urlshortener.model.enums.NotificationType;
 import cc.hrva.urlshortener.model.enums.SignInMethod;
@@ -1110,8 +1113,10 @@ class DefaultUserServiceTest {
     @Test
     void theDomainsAndTheirLimitRequestsComeLastInTheExport() {
         assertThat(Arrays.stream(DataExportDto.class.getRecordComponents()).map(RecordComponent::getName))
-                .containsExactly("exportedAt", "profile", "urls", "apiKeys", "emails", "passkeys", "signInMethods", "recoveryCodesRemaining",
-                        "bioPage", "notifications", "domains", "domainRequests");
+                .containsExactly("exportedAt", "profile", "lastLinkBlockedAt", "destinationChangeOverride", "urls", "destinationChanges", "apiKeys",
+                        "emails", "passkeys", "signInMethods", "recoveryCodesRemaining", "bioPage", "notifications", "domains", "domainRequests");
+        assertThat(Arrays.stream(DestinationChangeExport.class.getRecordComponents()).map(RecordComponent::getName))
+                .containsExactly("shortUrl", "domain", "oldLongUrl", "newLongUrl", "via", "forced", "changedAt");
         assertThat(Arrays.stream(DomainRequestExport.class.getRecordComponents()).map(RecordComponent::getName))
                 .containsExactly("requestedTotal", "reason", "status", "adminNote", "createdAt", "reviewedAt");
         assertThat(Arrays.stream(DomainExport.class.getRecordComponents()).map(RecordComponent::getName))
@@ -1135,6 +1140,28 @@ class DefaultUserServiceTest {
         final var export = userService.exportMyData();
         assertThat(export.domains()).containsExactly(domain);
         assertThat(export.domainRequests()).containsExactly(request);
+        SecurityContextHolder.clearContext();
+    }
+
+    @Test
+    void exportCarriesTheDestinationHistoryTheLastBlockAndTheOverride() {
+        final var user = User.builder().id(1L).email("test@example.com").lastLinkBlockedAt(LocalDateTime.of(2026, 9, 2, 10, 0))
+                .destinationChangeOverride(DestinationChangeOverride.NEVER).build();
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken("test@example.com", null));
+        when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
+        when(userToUserDtoConverter.convert(user)).thenReturn(UserDto.builder().id(1L).email("test@example.com").build());
+        when(destinationChangeService.exportFor(user)).thenReturn(List.of(new DestinationChangeExport("menu", null, "https://example.com/old",
+                "https://example.com/new", ChangeChannel.API_KEY, false, LocalDateTime.of(2026, 10, 30, 12, 0))));
+
+        final var mapper = JsonMapper.builder().build();
+        final var export = mapper.readTree(mapper.writeValueAsString(userService.exportMyData()));
+
+        assertThat(export.get("lastLinkBlockedAt").asString()).isEqualTo("2026-09-02T10:00:00");
+        assertThat(export.get("destinationChangeOverride").asString()).isEqualTo("NEVER");
+        assertThat(export.get("destinationChanges").toString()).isEqualTo("""
+                [{"shortUrl":"menu","domain":null,"oldLongUrl":"https://example.com/old","newLongUrl":"https://example.com/new",\
+                "via":"API_KEY","forced":false,"changedAt":"2026-10-30T12:00:00"}]""");
         SecurityContextHolder.clearContext();
     }
 

@@ -204,7 +204,7 @@ public class UrlController {
     @ApiResponse(responseCode = "409", description = "active is true but the link used all its clicks under the visit limit sent")
     @ApiResponse(responseCode = "429", description = "The link's destination changed 5 times in the current day, or the API key's requests this hour are over "
             + "its limit (Retry-After)")
-    @ApiResponse(responseCode = "503", description = "Destination changes can't be counted right now (Retry-After)")
+    @ApiResponse(responseCode = "503", description = "Destination changes can't be counted, or the API key's requests are paused, right now (Retry-After)")
     @PutMapping("/{id}")
     @Audited(AuditAction.UPDATE_URL)
     public ResponseEntity<UrlResponse> updateUrl(

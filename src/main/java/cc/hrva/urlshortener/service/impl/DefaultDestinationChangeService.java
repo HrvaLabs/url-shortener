@@ -1,6 +1,7 @@
 package cc.hrva.urlshortener.service.impl;
 
 import cc.hrva.urlshortener.dto.AccountStanding;
+import cc.hrva.urlshortener.dto.DataExportDto.DestinationChangeExport;
 import cc.hrva.urlshortener.dto.DestinationChangeResponse;
 import cc.hrva.urlshortener.dto.DestinationChangeStanding;
 import cc.hrva.urlshortener.dto.LinkDestinationChangeResponse;
@@ -180,6 +181,11 @@ public class DefaultDestinationChangeService implements DestinationChangeService
             spec = spec.and(LinkDestinationChangeSpecification.searchMatches(search.strip()));
         }
         return linkDestinationChangeRepository.findAll(spec, HISTORY_SORTS.apply(pageable)).map(LinkDestinationChangeResponse::from);
+    }
+
+    @Override
+    public List<DestinationChangeExport> exportFor(final User user) {
+        return linkDestinationChangeRepository.exportOf(user);
     }
 
     private List<MissingRequirement> missingFor(final Url url, final LinkEditor editor) {
