@@ -71,7 +71,7 @@ public class DefaultCustomDomainAdminService implements CustomDomainAdminService
     private static final SortWhitelist DOMAIN_SORTS = SortWhitelist.of(CREATED_AT, "hostname", "status")
             .byDefault(Sort.by(Sort.Order.desc(CREATED_AT)))
             .thenBy(Sort.Order.desc(CREATED_AT), Sort.Order.desc("id"));
-    private static final SortWhitelist REMOVED_DOMAIN_SORTS = SortWhitelist.of(CREATED_AT, "hostname", "status")
+    private static final SortWhitelist REMOVED_DOMAIN_SORTS = SortWhitelist.of(CREATED_AT, "hostname", "status", "deletedAt")
             .byDefault(Sort.by(Sort.Order.desc("deletedAt")))
             .thenBy(Sort.Order.desc(CREATED_AT), Sort.Order.desc("id"));
 

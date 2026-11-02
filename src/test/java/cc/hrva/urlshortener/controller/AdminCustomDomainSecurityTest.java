@@ -445,6 +445,24 @@ class AdminCustomDomainSecurityTest {
     }
 
     @Test
+    void theRemovedListSortsByWhenEachDomainWasRemoved() throws Exception {
+        final var active = domain(ANA, "go.example.com", "ACTIVE", NOW.minusDays(2));
+        final var removedLongAgo = removedDomain("old.example.com", NOW.minusDays(10), NOW.minusDays(1));
+        final var removedRecently = removedDomain("new.example.com", NOW.minusDays(5), NOW.minusDays(4));
+
+        mockMvc.perform(as(ADMIN_TOKEN, get(DOMAINS)))
+                .andExpect(jsonPath("$.content[*].id").value(contains((int) active)));
+        mockMvc.perform(as(ADMIN_TOKEN, get(DOMAINS).param("status", "DELETED")))
+                .andExpect(jsonPath("$.content[*].id").value(contains((int) removedLongAgo, (int) removedRecently)));
+        mockMvc.perform(as(ADMIN_TOKEN, get(DOMAINS).param("status", "DELETED").param("sort", "deletedAt,asc")))
+                .andExpect(jsonPath("$.content[*].id").value(contains((int) removedRecently, (int) removedLongAgo)));
+        mockMvc.perform(as(ADMIN_TOKEN, get(DOMAINS).param("status", "DELETED").param("sort", "deletedAt,desc")))
+                .andExpect(jsonPath("$.content[*].id").value(contains((int) removedLongAgo, (int) removedRecently)));
+        mockMvc.perform(as(ADMIN_TOKEN, get(DOMAINS).param("sort", "deletedAt,asc")))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
     void theListRunsTheSameStatementsForOneRowAndTwenty() throws Exception {
         activeDomainWithLinks();
         final var statistics = entityManagerFactory.unwrap(SessionFactory.class).getStatistics();
@@ -806,6 +824,12 @@ class AdminCustomDomainSecurityTest {
                 insert into custom_domain (owner_id, hostname, hostname_key, status, reason, created_at, updated_at)
                 values (?, ?, ?, ?, 'Menu links for my cafe', ?, ?)""", ownerId, hostname, hostname, status, createdAt, createdAt);
         return jdbcTemplate.queryForObject("select id from custom_domain where hostname = ?", Long.class, hostname);
+    }
+
+    private long removedDomain(final String hostname, final LocalDateTime createdAt, final LocalDateTime deletedAt) {
+        final var id = domain(null, hostname, "DELETED", createdAt);
+        jdbcTemplate.update("update custom_domain set deleted_at = ? where id = ?", deletedAt, id);
+        return id;
     }
 
     private long link(final long ownerId, final Long domainId, final String alias, final long visits, final String blockReason) {
