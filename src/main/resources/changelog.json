@@ -1,10 +1,52 @@
 {
   "releases": [
     {
-      "version": "v2.26",
+      "version": "v2.27",
       "date": "2026-11-01",
       "badge": "Latest",
       "badgeVariant": "default",
+      "summary": "Edit a link from the dashboard: its visit limit, expiry, password and tags, turning expired and used-up links back on, and changing where it points.",
+      "sections": [
+        {
+          "title": "Links",
+          "icon": "link",
+          "items": [
+            "Each link in the dashboard has an Edit action. Change or remove its visit limit and expiry, add, change or remove its password, and change its tags.",
+            "An expired or used-up link opens in the same form. Set a later expiry or a higher visit limit, and the same save can turn it back on. Turning a link back on checks its destination again, like a new link.",
+            "You can change where a link points. A link on hrva.cc needs an account in good standing: two-step sign-in on, the account at least 30 days old, a verified email or sign-in with Google or GitHub, and none of your links blocked, being checked, or blocked in the last 90 days. A link on your own custom domain can change without these. A link made without an account can't change.",
+            "When a destination can't change yet, the Edit form lists what is missing, such as \"Turn on two-step sign-in\" or the date it becomes available.",
+            "A link's destination can change 5 times a day.",
+            "Activating a link that used all its clicks or has expired says to edit it first, and the help pages and the bio page hint point to Edit."
+          ]
+        },
+        {
+          "title": "Link Safety",
+          "icon": "shield",
+          "items": [
+            "A new destination gets the same checks as a new link. A destination that would be refused for a new link is refused, and one that would be sent to review is saved and sent to review.",
+            "Admins can turn destination changes off for everyone in Site settings."
+          ]
+        },
+        {
+          "title": "API",
+          "icon": "key",
+          "items": [
+            "PUT /api/v1/urls/{id} works with an API key for your own links, under the same rules as the dashboard. It takes active to turn a link back on or off, and answers 429 with Retry-After on the sixth destination change of the day.",
+            "GET /api/v1/urls/{id}/destination-change says whether a link's destination can change and lists what is missing. The developers page documents both."
+          ]
+        },
+        {
+          "title": "Privacy",
+          "icon": "lock",
+          "items": [
+            "Every destination change is kept with its link: the old and new destination, when, and which account made it. Admins can read it, and the audit log records it too. The privacy and security pages say so."
+          ]
+        }
+      ]
+    },
+    {
+      "version": "v2.26",
+      "date": "2026-11-01",
       "summary": "The blog posts from May rewritten to match what hrva.cc does today, and a plain heading on the blog.",
       "sections": [
         {
