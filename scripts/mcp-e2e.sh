@@ -28,6 +28,9 @@
 # check, approval and the automatic setup, the CNAME seen, links on the domain beside the same alias on the primary host,
 # the Host header routing and its 404s, turning the domain off and on, the removal with its links moved and the queued
 # Cloudflare delete, the three emails (a Mailpit container on a random port is the app's SMTP server) and the export.
+# Section 22b checks custom domain limit requests: nothing to ask below the limit, asking at the limit, one waiting request, withdrawing,
+# the Discord line (without the reason), the admin list, approve (the allowance and its audit row) and decline, the 3-a-day limit with
+# Retry-After equal to the Redis key's TTL, the two emails in Mailpit and the export.
 # Section 23 checks campaign holds: links without an account (distinct CF-Connecting-IP values, so the 10-per-hour create limit is
 # never reached) to one URL shape on three domains are held as CAMPAIGN (three url rows, one campaign row, one Campaign held: line at
 # the stub, no campaign:alerted: key), a fourth link is answered active but held, and index.php?id=1 on three domains is a generic
@@ -1476,6 +1479,105 @@ expect_eq "$(jq -r '.domains[0] | [has("cloudflareId"), has("lastError"), has("a
     "with no Cloudflare id, last error or apply flags"
 expect_eq "$(jq -r '.domains[0] | [has("disabledReason"), has("disabledNote")] | all' <<<"$HTTP_BODY")" true \
     "and with disabledReason and disabledNote (null once turned on again)"
+
+section "22b. Custom domain limit requests"
+MY_REQUESTS=$MY_DOMAINS/requests
+ADMIN_REQUESTS=$ADMIN_DOMAINS/requests
+REQUEST_USER_ID=$(psql_value "select id from user_account where email = '$USER_EMAIL';")
+request_lines() {
+    jq -s --arg line "$1" '[.[].content | split("\n")[] | select(contains($line))] | length' "$DISCORD_POSTS"
+}
+request_line_posted() {
+    [[ $(request_lines "$1") -ge 1 ]]
+}
+expect_eq "$(psql_value "select exectype from databasechangelog where id = '045-custom-domain-request';")" EXECUTED "045 created custom_domain_request"
+http -H "Authorization: Bearer $DOMAIN_JWT" "$MY_DOMAINS"
+expect_eq "$(jq -r '"\(.used) \(.limit) \(.canRequest) \(.request)"' <<<"$HTTP_BODY")" "0 1 false null" "below the limit there is nothing to request"
+http -X POST "$MY_REQUESTS" -H "Authorization: Bearer $DOMAIN_JWT" -H 'Content-Type: application/json' -d '{"requestedTotal":3,"reason":"E2E shops"}'
+expect_eq "$HTTP_STATUS $(jq -r .detail <<<"$HTTP_BODY")" "409 You can still add a domain. Ask for more once you're at your limit." "a request below the limit is refused"
+http -X POST "$MY_DOMAINS" -H "Authorization: Bearer $DOMAIN_JWT" -H 'Content-Type: application/json' -d '{"hostname":"requests.example.com","reason":"E2E"}'
+expect_eq "$HTTP_STATUS" 201 "an application for requests.example.com puts the account at its limit"
+REQUEST_DOMAIN_ID=$(jq -r .id <<<"$HTTP_BODY")
+http -H "Authorization: Bearer $DOMAIN_JWT" "$MY_DOMAINS"
+expect_eq "$(jq -r '"\(.used) \(.limit) \(.canApply) \(.canRequest)"' <<<"$HTTP_BODY")" "1 1 false true" "at the limit, canRequest is true"
+
+echo "  --- asking, the one waiting request, and withdrawing"
+http -X POST "$MY_REQUESTS" -H "Authorization: Bearer $DOMAIN_JWT" -H 'Content-Type: application/json' -d '{"requestedTotal":1,"reason":"  "}'
+expect_eq "$HTTP_STATUS $(jq -cS .errors <<<"$HTTP_BODY")" '400 {"reason":"Reason is required","requestedTotal":"Choose 2 to 20"}' "field errors for the total and the reason"
+http -X POST "$MY_REQUESTS" -H "Authorization: Bearer $DOMAIN_JWT" -H 'Content-Type: application/json' -d '{"requestedTotal":3,"reason":"  E2E shops  "}'
+show "POST /api/v1/users/me/domains/requests -> $HTTP_STATUS $HTTP_BODY"
+expect_eq "$HTTP_STATUS $(jq -r '"\(.status) \(.requestedTotal) \(.reason)"' <<<"$HTTP_BODY")" "201 WAITING 3 E2E shops" "the request waits, its reason trimmed"
+WITHDRAWN_REQUEST_ID=$(jq -r .id <<<"$HTTP_BODY")
+http -X POST "$MY_REQUESTS" -H "Authorization: Bearer $DOMAIN_JWT" -H 'Content-Type: application/json' -d '{"requestedTotal":4,"reason":"E2E again"}'
+expect_eq "$HTTP_STATUS $(jq -r .detail <<<"$HTTP_BODY")" "409 You already have a request waiting for review." "a second request is refused while one waits"
+http -H "Authorization: Bearer $DOMAIN_JWT" "$MY_DOMAINS"
+expect_eq "$(jq -r '"\(.canRequest) \(.request.id) \(.request.status)"' <<<"$HTTP_BODY")" "false $WITHDRAWN_REQUEST_ID WAITING" "the card's data shows it waiting"
+http -X DELETE "$MY_REQUESTS/$WITHDRAWN_REQUEST_ID" -H "Authorization: Bearer $ADMIN_JWT"
+expect_eq "$HTTP_STATUS" 404 "someone else can't withdraw it"
+http -X DELETE "$MY_REQUESTS/$WITHDRAWN_REQUEST_ID" -H "Authorization: Bearer $DOMAIN_JWT"
+expect_eq "$HTTP_STATUS" 204 "DELETE /api/v1/users/me/domains/requests/{id} withdraws it"
+expect_eq "$(psql_value "select count(*) from custom_domain_request where id = $WITHDRAWN_REQUEST_ID;")" 0 "Postgres: the withdrawn request is deleted"
+wait_until 45 "the request line at the Discord stub (30-second buffer)" request_line_posted \
+    "New custom domain limit request: account #$REQUEST_USER_ID asks for 3 domains in total (limit 1), <$FRONTEND_URL/admin/domains/requests?id=$WITHDRAWN_REQUEST_ID>"
+expect_eq "$(request_lines "E2E shops")" 0 "the Discord line never carries the reason"
+
+echo "  --- approved"
+http -X POST "$MY_REQUESTS" -H "Authorization: Bearer $DOMAIN_JWT" -H 'Content-Type: application/json' -d '{"requestedTotal":3,"reason":"E2E shops"}'
+expect_eq "$HTTP_STATUS" 201 "asked again"
+APPROVED_REQUEST_ID=$(jq -r .id <<<"$HTTP_BODY")
+http -G "$ADMIN_REQUESTS" -H "Authorization: Bearer $ADMIN_JWT" --data-urlencode status=WAITING --data-urlencode "search=$USER_EMAIL"
+show "GET /api/v1/admin/domains/requests?status=WAITING&search=$USER_EMAIL -> $(jq -c '.content[0] | {id, status, requestedTotal, limitAtRequest, currentLimit, used, owner: .owner.email}' <<<"$HTTP_BODY")"
+expect_eq "$HTTP_STATUS $(jq -r '.content[0] | "\(.id) \(.currentLimit) \(.used) \(.owner.email)"' <<<"$HTTP_BODY")" "200 $APPROVED_REQUEST_ID 1 1 $USER_EMAIL" \
+    "the admin list finds it with the account's limit, domains in use and email"
+http -G "$ADMIN_REQUESTS" -H "Authorization: Bearer $DOMAIN_JWT"
+expect_eq "$HTTP_STATUS" 403 "a user can't read the admin list"
+http -X POST "$ADMIN_REQUESTS/$APPROVED_REQUEST_ID/approve" -H "Authorization: Bearer $ADMIN_JWT" -H 'Content-Type: application/json' -d '{"note":"Fine for E2E"}'
+expect_eq "$HTTP_STATUS $(jq -r '"\(.status) \(.currentLimit) \(.adminNote)"' <<<"$HTTP_BODY")" "200 APPROVED 3 Fine for E2E" "approved: the limit is 3"
+expect_eq "$(psql_value "select max_domains || ' ' || reason || ' ' || granted_by from custom_domain_allowance where user_id = $REQUEST_USER_ID;")" "3 E2E shops admin@localhost" \
+    "Postgres: the allowance is 3 with the request's reason, granted by the admin"
+expect_eq "$(psql_value "select target_type || ' ' || target_identifier || ' ' || failed from audit_log where action = 'APPROVE_DOMAIN_REQUEST';")" "DomainRequest $APPROVED_REQUEST_ID false" \
+    "audit_log: APPROVE_DOMAIN_REQUEST on the request"
+http -X POST "$ADMIN_REQUESTS/$APPROVED_REQUEST_ID/decline" -H "Authorization: Bearer $ADMIN_JWT"
+expect_eq "$HTTP_STATUS $(jq -r .detail <<<"$HTTP_BODY")" "409 This request was already reviewed." "a reviewed request can't be reviewed again"
+http -H "Authorization: Bearer $DOMAIN_JWT" "$MY_DOMAINS"
+expect_eq "$(jq -r '"\(.limit) \(.canApply) \(.canRequest) \(.request.status) \(.request.adminNote) \(.request | has("reviewedBy"))"' <<<"$HTTP_BODY")" \
+    "3 true false APPROVED Fine for E2E false" "the account can apply again and sees the approval and the note, not who reviewed it"
+
+echo "  --- declined"
+http -X DELETE "$ADMIN_DOMAINS/allowances/$REQUEST_USER_ID" -H "Authorization: Bearer $ADMIN_JWT"
+expect_eq "$HTTP_STATUS" 204 "the admin removes the allowance, so the account is at its limit of 1 again"
+http -X POST "$MY_REQUESTS" -H "Authorization: Bearer $DOMAIN_JWT" -H 'Content-Type: application/json' -d '{"requestedTotal":2,"reason":"E2E second"}'
+expect_eq "$HTTP_STATUS" 201 "asked for 2"
+DECLINED_REQUEST_ID=$(jq -r .id <<<"$HTTP_BODY")
+http -X POST "$ADMIN_REQUESTS/$DECLINED_REQUEST_ID/decline" -H "Authorization: Bearer $ADMIN_JWT" -H 'Content-Type: application/json' -d '{"note":"One is enough for E2E"}'
+expect_eq "$HTTP_STATUS $(jq -r '"\(.status) \(.currentLimit)"' <<<"$HTTP_BODY")" "200 DECLINED 1" "declined: the limit stays 1"
+expect_eq "$(psql_value "select count(*) from custom_domain_allowance where user_id = $REQUEST_USER_ID;")" 0 "Postgres: no allowance"
+
+echo "  --- the rate limit, the emails and the export"
+http -X POST "$MY_REQUESTS" -H "Authorization: Bearer $DOMAIN_JWT" -H 'Content-Type: application/json' -d '{"requestedTotal":2,"reason":"E2E fourth"}'
+RETRY_AFTER=$(header_value Retry-After)
+REQUEST_TTL=$(docker exec "$REDIS_CONTAINER" redis-cli --raw ttl "rate-limit:domain-request:user:$REQUEST_USER_ID")
+show "the fourth request today -> $HTTP_STATUS Retry-After: $RETRY_AFTER (the key's TTL: $REQUEST_TTL)"
+expect_eq "$HTTP_STATUS $(jq -r .detail <<<"$HTTP_BODY")" "429 You've sent several requests today. Try again tomorrow." "the fourth request in a day is refused"
+(( RETRY_AFTER > 86000 && RETRY_AFTER <= 86400 && RETRY_AFTER - REQUEST_TTL <= 1 && REQUEST_TTL - RETRY_AFTER <= 1 )) \
+    || fail "Retry-After: expected the seconds left on rate-limit:domain-request:user:$REQUEST_USER_ID ($REQUEST_TTL), got '$RETRY_AFTER'"
+ok "Retry-After is the seconds left in the 24-hour window, the key's TTL"
+request_emails_sent() {
+    [[ $(email_statuses "You can now have 3 custom domains") == SENT && $(email_statuses "Your request for more custom domains") == SENT ]]
+}
+wait_until 30 "the approved and declined emails" request_emails_sent
+expect_eq "$(mails_to "$USER_EMAIL" "You can now have 3 custom domains") $(mails_to "$USER_EMAIL" "Your request for more custom domains")" "1 1" \
+    "Mailpit holds the approved and the declined email for $USER_EMAIL"
+expect_contains "$(newest_mail_text "$USER_EMAIL" "Your request for more custom domains")" "Your limit stays at 1 custom domain." "the decline names the limit that stays"
+expect_contains "$(newest_mail_text "$USER_EMAIL" "Your request for more custom domains")" "Note from the admin: One is enough for E2E" "and the note"
+http -H "Authorization: Bearer $DOMAIN_JWT" "$BASE/api/v1/users/me/export"
+show "GET /api/v1/users/me/export .domainRequests -> $(jq -c .domainRequests <<<"$HTTP_BODY")"
+expect_eq "$(jq -r '[.domainRequests[] | .status] | join(" ")' <<<"$HTTP_BODY")" "DECLINED APPROVED" "the export lists both reviewed requests, newest first, not the withdrawn one"
+expect_eq "$(jq -r '[.domainRequests[] | has("reviewedBy")] | any' <<<"$HTTP_BODY")" false "without who reviewed them"
+http -X DELETE "$MY_DOMAINS/$REQUEST_DOMAIN_ID" -H "Authorization: Bearer $DOMAIN_JWT"
+expect_eq "$HTTP_STATUS" 200 "the requests.example.com application is withdrawn, leaving the account as section 22 did"
+wait_until 45 "the last request line at the Discord stub, so section 23's campaign line starts its own message" request_line_posted \
+    "asks for 2 domains in total (limit 1), <$FRONTEND_URL/admin/domains/requests?id=$DECLINED_REQUEST_ID>"
 
 section "23. Moderation: campaign holds"
 CAMPAIGN_LINE_PREFIX='Campaign held: 3 links without an account on 3 domains'
