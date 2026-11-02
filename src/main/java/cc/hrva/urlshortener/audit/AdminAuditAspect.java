@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.audit;
 
+import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.repository.ApiKeyRepository;
 import cc.hrva.urlshortener.security.ApiKeyRateLimitFilter;
 import cc.hrva.urlshortener.security.ApiKeyTokens;
@@ -32,7 +33,6 @@ public class AdminAuditAspect {
 
     private static final String ADMIN_PREFIX = "Admin";
     private static final String ID = "id";
-    private static final String ANONYMOUS = "anonymous";
     private static final String LINK_API = "/api/v1/urls";
     private static final Set<String> UNAUDITED_FIELDS = Set.of(ID, "url", "fallbackUrls");
 
@@ -43,7 +43,11 @@ public class AdminAuditAspect {
 
     @Around("@annotation(audited)")
     public Object logAdminAction(final ProceedingJoinPoint joinPoint, final Audited audited) throws Throwable {
-        final var performedBy = apiKeyOwner().orElseGet(this::signedInEmail);
+        final var performer = apiKeyOwner().or(this::signedInEmail);
+        if (performer.isEmpty()) {
+            return joinPoint.proceed();
+        }
+        final var performedBy = performer.get();
         final var signature = joinPoint.getSignature();
         final var args = joinPoint.getArgs();
         final var targetType = audited.targetType().isEmpty() ? targetType(signature.getDeclaringType()) : audited.targetType();
@@ -61,9 +65,8 @@ public class AdminAuditAspect {
         }
     }
 
-    private String signedInEmail() {
-        final var user = userService.getUserFromToken();
-        return user != null ? user.getEmail() : ANONYMOUS;
+    private Optional<String> signedInEmail() {
+        return Optional.ofNullable(userService.getUserFromToken()).map(User::getEmail);
     }
 
     private Optional<String> apiKeyOwner() {

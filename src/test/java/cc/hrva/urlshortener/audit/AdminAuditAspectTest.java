@@ -61,7 +61,19 @@ class AdminAuditAspectTest {
     void setUp() {
         aspect = new AdminAuditAspect(auditLogService, userService, JsonMapper.builder().build(), new StaticListableBeanFactory().getBeanProvider(ApiKeyRepository.class));
         lenient().when(userService.getUserFromToken()).thenReturn(User.builder().email("admin@hrva.cc").build());
-        when(joinPoint.getSignature()).thenReturn(signature);
+        lenient().when(joinPoint.getSignature()).thenReturn(signature);
+    }
+
+    @Test
+    void anActionWithNobodySignedInAndNoKnownKeyRunsWithoutARow() throws Throwable {
+        when(userService.getUserFromToken()).thenReturn(null);
+        onRequest("/api/v1/urls/265", "hrva_unknown");
+        when(joinPoint.proceed()).thenThrow(new IllegalStateException("Sent API key doesn't exist"));
+        final var audited = UrlController.class.getDeclaredMethod("updateUrl", Long.class, UrlUpdateDto.class).getAnnotation(Audited.class);
+
+        assertThatThrownBy(() -> aspect.logAdminAction(joinPoint, audited)).hasMessage("Sent API key doesn't exist");
+
+        verifyNoInteractions(auditLogService);
     }
 
     @AfterEach

@@ -669,9 +669,10 @@ public class DefaultUrlService implements UrlService {
     public UrlResponse updateUrl(final UrlUpdateDto updateDto, final String apiKey) {
         log.info("Update URL id={}", updateDto.getId());
 
+        final var keyEditor = apiKey == null ? null : LinkEditor.withApiKey(callerOf(apiKey));
         final var existing = urlRepository.findById(updateDto.getId())
                 .orElseThrow(() -> new UrlNotFoundException(String.format("Url with id %d doesn't exist", updateDto.getId())));
-        final var editor = editorFor(existing, apiKey);
+        final var editor = keyEditor == null ? signedInEditor(existing) : ownerWithKey(existing, keyEditor);
         final var previousLongUrl = existing.getLongUrl();
         final var blockAtStart = BlockState.of(existing);
 
@@ -714,15 +715,15 @@ public class DefaultUrlService implements UrlService {
     @Override
     public DestinationChangeResponse destinationChange(final Long id) {
         final var url = urlRepository.findById(id).orElseThrow(() -> new UrlNotFoundException("Url doesn't exist"));
-        return destinationChangeService.permissionFor(url, editorFor(url, null));
+        return destinationChangeService.permissionFor(url, signedInEditor(url));
     }
 
-    private LinkEditor editorFor(final Url url, final String apiKey) {
-        if (apiKey == null) {
-            urlValidator.verifyUserAdminOrOwner(url);
-            return LinkEditor.signedIn(userService.getUserFromToken());
-        }
-        final var editor = LinkEditor.withApiKey(callerOf(apiKey));
+    private LinkEditor signedInEditor(final Url url) {
+        urlValidator.verifyUserAdminOrOwner(url);
+        return LinkEditor.signedIn(userService.getUserFromToken());
+    }
+
+    private static LinkEditor ownerWithKey(final Url url, final LinkEditor editor) {
         if (!editor.owns(url)) {
             log.info("Link edit with an API key refused, the link isn't the key owner's urlId={}", url.getId());
             throw new NoAuthorizationException(NO_AUTHORIZATION);

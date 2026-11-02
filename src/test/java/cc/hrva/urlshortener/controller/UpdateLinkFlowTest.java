@@ -102,6 +102,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 import cc.hrva.urlshortener.configuration.ClockConfiguration;
 import cc.hrva.urlshortener.dto.SignInMethodResponse;
+import cc.hrva.urlshortener.exception.ApiKeyNotFoundException;
 import cc.hrva.urlshortener.model.enums.SignInMethod;
 import cc.hrva.urlshortener.repository.ApiKeyRepository;
 import cc.hrva.urlshortener.repository.LinkDestinationChangeRepository;
@@ -775,6 +776,21 @@ class UpdateLinkFlowTest {
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.detail").value("You don't have authorization for this action"));
 
+        assertThat(jdbcTemplate.queryForObject("select visit_limit from url where id = ?", Long.class, LINK)).isNull();
+    }
+
+    @Test
+    void anUnknownKeyLearnsNothingAboutTheLinkAndWritesNoAuditRow() throws Exception {
+        when(apiKeyService.fetchApiKeyByKey("hrva_unknown")).thenThrow(new ApiKeyNotFoundException("Sent API key doesn't exist"));
+
+        for (final var id : List.of(LINK, 999_999L)) {
+            mockMvc.perform(put("/api/v1/urls/{id}", id).header(ApiKeyRateLimitFilter.API_KEY_HEADER, "hrva_unknown")
+                            .contentType(MediaType.APPLICATION_JSON).content("{\"id\":" + id + ",\"visitLimit\":5}"))
+                    .andExpect(status().isNotFound())
+                    .andExpect(jsonPath("$.detail").value("Sent API key doesn't exist"));
+        }
+
+        assertThat(jdbcTemplate.queryForObject("select count(*) from audit_log", Long.class)).isZero();
         assertThat(jdbcTemplate.queryForObject("select visit_limit from url where id = ?", Long.class, LINK)).isNull();
     }
 
