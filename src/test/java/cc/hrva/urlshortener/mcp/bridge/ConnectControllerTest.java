@@ -81,7 +81,7 @@ class ConnectControllerTest {
         final var event = ArgumentCaptor.forClass(AppConnectedEvent.class);
         verify(eventPublisher).publishEvent(event.capture());
         assertThat(event.getValue().user()).isSameAs(user);
-        assertThat(event.getValue().destination()).isEqualTo(new ConnectRequestView("Claude", "evil.example", false, true));
+        assertThat(event.getValue().destination()).isEqualTo(new ConnectRequestView("Claude", "evil.example", false, true, null, false));
         assertThat(event.getValue().connectedAt()).isAfter(before).isBefore(LocalDateTime.now(ZoneOffset.UTC).plusSeconds(1));
     }
 

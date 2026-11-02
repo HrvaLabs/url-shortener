@@ -120,7 +120,7 @@ class LoginBridgeTest {
     private static final String CONTINUE_URL = ISSUER + "/oauth2/connect/continue?otc=";
     private static final String EMAIL = "user@localhost";
     private static final String CLIENT_NAME = "Claude";
-    private static final String LOCAL_VIEW = "{\"clientName\":\"" + CLIENT_NAME + "\",\"redirectHost\":\"localhost\",\"loopback\":true,\"lookalike\":false}";
+    private static final String LOCAL_VIEW = "{\"clientName\":\"" + CLIENT_NAME + "\",\"redirectHost\":\"localhost\",\"loopback\":true,\"lookalike\":false,\"appScheme\":null,\"unknownDestination\":false}";
     private static final String LOOKALIKE_REDIRECT_URI = "https://claude.ai.evil.example/callback";
     private static final String LOOKALIKE_REGISTRATION = """
             {"client_name":"Claude","redirect_uris":["https://claude.ai.evil.example/callback"],"token_endpoint_auth_method":"none"}""";
@@ -261,7 +261,7 @@ class LoginBridgeTest {
 
         assertThat(view.getStatus()).isEqualTo(200);
         assertThat(view.getContentAsString()).isEqualTo(
-                "{\"clientName\":\"Claude\",\"redirectHost\":\"claude.ai.evil.example\",\"loopback\":false,\"lookalike\":true}");
+                "{\"clientName\":\"Claude\",\"redirectHost\":\"claude.ai.evil.example\",\"loopback\":false,\"lookalike\":true,\"appScheme\":null,\"unknownDestination\":false}");
     }
 
     @Test
@@ -271,7 +271,7 @@ class LoginBridgeTest {
         assertThat(perform(approve(started.handle())).getStatus()).isEqualTo(200);
 
         verify(sendingEmailService, timeout(5_000)).sendAppConnectedEmail(eq(account),
-                eq(new ConnectRequestView("Claude", "claude.ai.evil.example", false, true)), any());
+                eq(new ConnectRequestView("Claude", "claude.ai.evil.example", false, true, null, false)), any());
     }
 
     @Test

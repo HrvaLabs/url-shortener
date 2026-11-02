@@ -31,13 +31,32 @@ class ConnectDestinationsTest {
             "Claude Desktop | http://localhost:53682/callback | localhost | true | false",
             "Claude Desktop | http://127.0.0.1:6274/oauth/callback | 127.0.0.1 | true | false",
             "Claude Desktop | http://[::1]:6274/cb | [::1] | true | false",
-            "Claude Desktop | http://app.localhost/cb | app.localhost | true | false",
-            "Cursor | cursor://anysphere.cursor-retrieval/oauth/callback | cursor | true | false",
-            "Claude | not a uri | '' | true | false"
+            "Claude Desktop | http://app.localhost/cb | app.localhost | true | false"
     })
     void theViewSaysWhereTheAppSendsYouAndWhetherItsNameClaimsAnotherAppsName(final String clientName, final String redirectUri,
                                                                                final String host, final boolean loopback, final boolean lookalike) {
-        assertThat(destinations.viewOf(clientName, redirectUri)).isEqualTo(new ConnectRequestView(clientName, host, loopback, lookalike));
+        assertThat(destinations.viewOf(clientName, redirectUri)).isEqualTo(new ConnectRequestView(clientName, host, loopback, lookalike, null, false));
+    }
+
+    @ParameterizedTest
+    @CsvSource(delimiterString = " | ", value = {
+            "Cursor | cursor://anysphere.cursor-retrieval/oauth/callback | cursor",
+            "Claude | Claude-Desktop://callback | claude-desktop",
+            "Claude | com.example.app:/oauth | com.example.app"
+    })
+    void aCustomSchemeIsShownAsAnAppOnThisDeviceThatOpensItsLinks(final String clientName, final String redirectUri, final String scheme) {
+        assertThat(destinations.viewOf(clientName, redirectUri)).isEqualTo(new ConnectRequestView(clientName, null, false, false, scheme, false));
+    }
+
+    @ParameterizedTest
+    @CsvSource(delimiterString = " | ", value = {
+            "Claude | not a uri",
+            "Claude | /relative/callback",
+            "Claude | https:///no-host",
+            "Claude | http:callback"
+    })
+    void aRedirectWithoutAHostOrThatDoesNotParseIsUnknownNotThisDevice(final String clientName, final String redirectUri) {
+        assertThat(destinations.viewOf(clientName, redirectUri)).isEqualTo(new ConnectRequestView(clientName, null, false, false, null, true));
     }
 
     private static AppProperties withKnownApps(final AppProperties.KnownApp... apps) {

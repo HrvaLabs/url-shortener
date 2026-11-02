@@ -31,12 +31,22 @@ public class ConnectDestinations {
     public ConnectRequestView viewOf(final String clientName, final String redirectUri) {
         final var uri = parsed(redirectUri);
         final var scheme = StringUtils.lowerCase(uri == null ? null : uri.getScheme(), Locale.ROOT);
-        if (uri == null || !WEB_SCHEMES.contains(scheme) || StringUtils.isBlank(uri.getHost())) {
-            return new ConnectRequestView(clientName, StringUtils.defaultString(scheme), true, false);
+        if (StringUtils.isBlank(scheme)) {
+            return unknown(clientName);
+        }
+        if (!WEB_SCHEMES.contains(scheme)) {
+            return new ConnectRequestView(clientName, null, false, false, scheme, false);
+        }
+        if (StringUtils.isBlank(uri.getHost())) {
+            return unknown(clientName);
         }
         final var host = uri.getHost().toLowerCase(Locale.ROOT);
         final var loopback = isLoopback(host);
-        return new ConnectRequestView(clientName, host, loopback, !loopback && claimsAnotherApp(clientName, host));
+        return new ConnectRequestView(clientName, host, loopback, !loopback && claimsAnotherApp(clientName, host), null, false);
+    }
+
+    private static ConnectRequestView unknown(final String clientName) {
+        return new ConnectRequestView(clientName, null, false, false, null, true);
     }
 
     private boolean claimsAnotherApp(final String clientName, final String host) {

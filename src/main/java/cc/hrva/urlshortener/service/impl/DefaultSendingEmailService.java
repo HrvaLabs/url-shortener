@@ -322,6 +322,8 @@ public class DefaultSendingEmailService implements SendingEmailService {
         ctx.setVariable("client_name", destination.clientName());
         ctx.setVariable("redirect_host", destination.redirectHost());
         ctx.setVariable("on_this_device", destination.loopback());
+        ctx.setVariable("app_scheme", destination.appScheme());
+        ctx.setVariable("unknown_destination", destination.unknownDestination());
         ctx.setVariable("connected_at", connectedAt.format(PASSKEY_ADDED_AT_FORMAT));
         ctx.setVariable("connected_apps_url", frontendPage(CONNECTED_APPS_SETTINGS));
 

@@ -832,7 +832,7 @@ class DefaultSendingEmailServiceTest {
 
     @Test
     void theAppConnectedEmailNamesTheAppWhereItSentYouWhenAndHowToDisconnectIt() throws Exception {
-        final var email = sentAppConnectedEmail(new ConnectRequestView("Claude", "evil.example", false, true));
+        final var email = sentAppConnectedEmail(new ConnectRequestView("Claude", "evil.example", false, true, null, false));
 
         assertThat(email.getReceivers()).containsExactly("alice@example.com");
         assertThat(email.getSubject()).isEqualTo("An app was connected to your hrva.cc account");
@@ -850,7 +850,7 @@ class DefaultSendingEmailServiceTest {
 
     @Test
     void theAppConnectedEmailForADesktopAppSaysItWentBackToTheDevice() throws Exception {
-        final var email = sentAppConnectedEmail(new ConnectRequestView("Claude Desktop", "localhost", true, false));
+        final var email = sentAppConnectedEmail(new ConnectRequestView("Claude Desktop", "localhost", true, false, null, false));
 
         assertThat(textOf(email.getText()))
                 .contains("hrva.cc sent you back to an app on your device.")
@@ -858,8 +858,26 @@ class DefaultSendingEmailServiceTest {
     }
 
     @Test
+    void theAppConnectedEmailForACustomSchemeNamesTheScheme() throws Exception {
+        final var email = sentAppConnectedEmail(new ConnectRequestView("Cursor", null, false, false, "cursor", false));
+
+        assertThat(textOf(email.getText()))
+                .contains("hrva.cc sent you to an app on your device that opens cursor:// links.")
+                .doesNotContain("sent you back to an app", "sent you to null", "couldn't tell");
+    }
+
+    @Test
+    void theAppConnectedEmailForAnUnknownRedirectSaysSo() throws Exception {
+        final var email = sentAppConnectedEmail(new ConnectRequestView("Claude", null, false, false, null, true));
+
+        assertThat(textOf(email.getText()))
+                .contains("hrva.cc couldn't tell where the app sent you after the connection was allowed.")
+                .doesNotContain("sent you to", "an app on your device");
+    }
+
+    @Test
     void theAppConnectedEmailEscapesTheAppsName() throws Exception {
-        final var email = sentAppConnectedEmail(new ConnectRequestView("<script>alert(1)</script>", "evil.example", false, false));
+        final var email = sentAppConnectedEmail(new ConnectRequestView("<script>alert(1)</script>", "evil.example", false, false, null, false));
 
         assertThat(email.getText()).doesNotContain("<script>").contains("&lt;script&gt;");
     }
