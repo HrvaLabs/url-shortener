@@ -73,7 +73,8 @@ public class DefaultCustomDomainAdminService implements CustomDomainAdminService
             .thenBy(Sort.Order.desc(CREATED_AT), Sort.Order.desc("id"));
     private static final SortWhitelist REMOVED_DOMAIN_SORTS = SortWhitelist.of(CREATED_AT, "hostname", "status", "deletedAt")
             .byDefault(Sort.by(Sort.Order.desc("deletedAt")))
-            .thenBy(Sort.Order.desc(CREATED_AT), Sort.Order.desc("id"));
+            .thenBy(Sort.Order.desc(CREATED_AT), Sort.Order.desc("id"))
+            .nullsLast("deletedAt");
 
     private final CustomDomainRepository customDomainRepository;
     private final CustomDomainAllowanceRepository customDomainAllowanceRepository;

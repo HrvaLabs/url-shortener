@@ -3,6 +3,7 @@ package cc.hrva.urlshortener.util;
 import cc.hrva.urlshortener.exception.InvalidSortException;
 import java.util.List;
 import java.util.Set;
+import java.util.stream.Stream;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
@@ -44,14 +45,16 @@ public final class SortWhitelist {
 
     public Sort sortOf(final Sort requested) {
         if (requested.isUnsorted()) {
-            return withTieBreakers(defaultSort);
+            return withTieBreakers(withNullsLast(defaultSort.stream()));
         }
         if (requested.stream().anyMatch(order -> !fields.contains(order.getProperty()))) {
             throw new InvalidSortException(refusal());
         }
-        return withTieBreakers(Sort.by(requested.stream()
-                .map(order -> nullsLast.contains(order.getProperty()) ? order.nullsLast() : order)
-                .toList()));
+        return withTieBreakers(withNullsLast(requested.stream()));
+    }
+
+    private Sort withNullsLast(final Stream<Sort.Order> orders) {
+        return Sort.by(orders.map(order -> nullsLast.contains(order.getProperty()) ? order.nullsLast() : order).toList());
     }
 
     private Sort withTieBreakers(final Sort sort) {

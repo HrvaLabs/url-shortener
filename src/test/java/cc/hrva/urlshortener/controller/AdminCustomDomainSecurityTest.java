@@ -463,6 +463,20 @@ class AdminCustomDomainSecurityTest {
     }
 
     @Test
+    void theRemovedListPutsADomainWithoutARemovalDateLastEitherWay() throws Exception {
+        final var removedLongAgo = removedDomain("old.example.com", NOW.minusDays(10), NOW.minusDays(1));
+        final var removedRecently = removedDomain("new.example.com", NOW.minusDays(5), NOW.minusDays(4));
+        final var undated = domain(null, "undated.example.com", "DELETED", NOW.minusDays(3));
+
+        mockMvc.perform(as(ADMIN_TOKEN, get(DOMAINS).param("status", "DELETED")))
+                .andExpect(jsonPath("$.content[*].id").value(contains((int) removedLongAgo, (int) removedRecently, (int) undated)));
+        mockMvc.perform(as(ADMIN_TOKEN, get(DOMAINS).param("status", "DELETED").param("sort", "deletedAt,desc")))
+                .andExpect(jsonPath("$.content[*].id").value(contains((int) removedLongAgo, (int) removedRecently, (int) undated)));
+        mockMvc.perform(as(ADMIN_TOKEN, get(DOMAINS).param("status", "DELETED").param("sort", "deletedAt,asc")))
+                .andExpect(jsonPath("$.content[*].id").value(contains((int) removedRecently, (int) removedLongAgo, (int) undated)));
+    }
+
+    @Test
     void theListRunsTheSameStatementsForOneRowAndTwenty() throws Exception {
         activeDomainWithLinks();
         final var statistics = entityManagerFactory.unwrap(SessionFactory.class).getStatistics();

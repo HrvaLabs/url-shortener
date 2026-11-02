@@ -717,7 +717,7 @@ class DefaultCustomDomainAdminServiceTest {
         verify(builder).equal(any(), eq(CustomDomainStatus.DELETED));
         verify(builder, never()).notEqual(any(), any());
         verify(customDomainRepository).findAll(any(Specification.class),
-                eq(PageRequest.of(0, 20, Sort.by(Sort.Order.desc("deletedAt"), Sort.Order.desc("createdAt"), Sort.Order.desc("id")))));
+                eq(PageRequest.of(0, 20, Sort.by(Sort.Order.desc("deletedAt").nullsLast(), Sort.Order.desc("createdAt"), Sort.Order.desc("id")))));
     }
 
     @Test

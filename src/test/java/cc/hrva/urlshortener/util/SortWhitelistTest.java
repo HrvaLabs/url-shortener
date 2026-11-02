@@ -71,6 +71,15 @@ class SortWhitelistTest {
     }
 
     @Test
+    void aFieldThatMayBeEmptySortsItsEmptyRowsLastInTheDefaultToo() {
+        final var removed = SortWhitelist.of("deletedAt", "createdAt").byDefault(Sort.by(desc("deletedAt"))).thenBy(desc("createdAt"), desc("id"))
+                .nullsLast("deletedAt");
+
+        assertThat(removed.apply(PageRequest.of(0, 20))).isEqualTo(
+                PageRequest.of(0, 20, Sort.by(desc("deletedAt").nullsLast(), desc("createdAt"), desc("id"))));
+    }
+
+    @Test
     void theSortOfARequestCanBeCheckedWithoutAPage() {
         assertThat(whitelist.sortOf(Sort.unsorted())).isEqualTo(NEWEST_FIRST);
         assertThat(whitelist.sortOf(Sort.by(desc("domain")))).isEqualTo(Sort.by(desc("domain"), desc("createdAt"), desc("id")));
