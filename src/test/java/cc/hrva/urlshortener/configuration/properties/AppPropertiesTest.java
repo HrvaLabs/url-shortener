@@ -131,6 +131,15 @@ class AppPropertiesTest {
     }
 
     @Test
+    void theApplicationYamlNamesTheAppHrvaCcSoEveryEmailAndTheAuthenticatorSayThat() throws IOException {
+        final var yaml = new YamlPropertySourceLoader().load("application", new ClassPathResource("application.yaml"));
+
+        final var appName = new Binder(ConfigurationPropertySources.from(yaml.getFirst())).bind("app.app-name", String.class);
+
+        assertThat(appName.get()).isEqualTo("hrva.cc");
+    }
+
+    @Test
     void emailLogsAreKeptNinetyDaysAndTheAuditLogTwelveMonthsByDefault() throws IOException {
         final var retention = new AppProperties().getRetention();
         final var yaml = new YamlPropertySourceLoader().load("application", new ClassPathResource("application.yaml"));

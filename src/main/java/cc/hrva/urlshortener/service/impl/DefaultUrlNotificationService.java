@@ -11,7 +11,6 @@ import cc.hrva.urlshortener.service.notification.ConsentEmails;
 import cc.hrva.urlshortener.service.notification.EmailConsentReader;
 import java.text.MessageFormat;
 import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -30,7 +29,6 @@ import org.thymeleaf.context.Context;
 @RequiredArgsConstructor
 public class DefaultUrlNotificationService implements UrlNotificationService {
 
-    private static final String SUBJECT = "Your short link is expiring soon";
     private static final NotificationType REMINDER = NotificationType.EXPIRY_REMINDER_EMAIL;
 
     private final UrlRepository urlRepository;
@@ -77,19 +75,18 @@ public class DefaultUrlNotificationService implements UrlNotificationService {
     }
 
     private void sendExpirationNotification(final ExpiringLink link) {
-        final var expirationDate = link.expirationDate() != null
-                ? link.expirationDate().format(DateTimeFormatter.ISO_LOCAL_DATE)
-                : "unknown";
+        final var shortLink = shortLinks.display(link.domain(), link.shortUrl());
+        final var expirationDate = link.expirationDate().format(DefaultSendingEmailService.LONG_DATE_TIME_UTC_FORMAT);
+        final var subject = "Your link %s expires on %s".formatted(shortLink, link.expirationDate().format(DefaultSendingEmailService.LONG_DATE_FORMAT));
 
         final var ctx = new Context();
         ctx.setVariable("name", link.ownerEmail());
         ctx.setVariable("shortUrl", link.shortUrl());
-        ctx.setVariable("short_link", shortLinks.display(link.domain(), link.shortUrl()));
+        ctx.setVariable("short_link", shortLink);
         ctx.setVariable("longUrl", link.longUrl());
         ctx.setVariable("expirationDate", expirationDate);
-        ctx.setVariable("app_name", appProperties.getAppName());
         ctx.setVariable("site_url", appProperties.getFrontendUrl());
-        ctx.setVariable("login_page", MessageFormat.format("{0}/login/", appProperties.getFrontendUrl()));
+        ctx.setVariable("dashboard_page", MessageFormat.format("{0}/dashboard", appProperties.getFrontendUrl()));
         ctx.setVariable("unsubscribe_page", consentEmails.unsubscribePage(link.ownerId(), REMINDER));
         ctx.setVariable("settings_page", consentEmails.settingsPage());
 
@@ -98,7 +95,7 @@ public class DefaultUrlNotificationService implements UrlNotificationService {
         final var email = Email.builder()
                 .sender(appProperties.getEmailSenderAddress())
                 .receivers(new String[]{link.ownerEmail()})
-                .subject(SUBJECT)
+                .subject(subject)
                 .text(htmlContent)
                 .build();
 

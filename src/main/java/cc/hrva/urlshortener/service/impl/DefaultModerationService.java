@@ -979,8 +979,7 @@ public class DefaultModerationService implements ModerationService {
         }
         try {
             if (url.getBlockReason() == BlockReason.SAFE_BROWSING) {
-                sendingEmailService.sendEmailUrlMalwareDetected(url.getOwner(), url,
-                        StringUtils.defaultIfBlank(url.getBlockDetail(), ThreatType.MALWARE.name()));
+                sendingEmailService.sendEmailUrlMalwareDetected(url.getOwner(), url, url.getBlockDetail());
             } else {
                 sendingEmailService.sendEmailUrlBlocked(url.getOwner(), url);
             }

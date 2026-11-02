@@ -80,8 +80,9 @@ public class DefaultSendingEmailService implements SendingEmailService {
     private static final String CONTACT_LINE = "If you think that's a mistake, contact %s.";
     private static final String ARROW = " " + Character.toString(0x2192) + " ";
     private static final int LISTED_RENAMES = 20;
-    private static final DateTimeFormatter DEACTIVATION_DATE_FORMAT = DateTimeFormatter.ofPattern("d MMMM yyyy", Locale.ENGLISH);
-    private static final DateTimeFormatter PASSKEY_ADDED_AT_FORMAT = DateTimeFormatter.ofPattern("d MMMM yyyy 'at' HH:mm 'UTC'", Locale.ENGLISH);
+    private static final long DAYS_PER_YEAR = 365;
+    static final DateTimeFormatter LONG_DATE_FORMAT = DateTimeFormatter.ofPattern("d MMMM yyyy", Locale.ENGLISH);
+    static final DateTimeFormatter LONG_DATE_TIME_UTC_FORMAT = DateTimeFormatter.ofPattern("d MMMM yyyy 'at' HH:mm 'UTC'", Locale.ENGLISH);
 
     private final AppProperties appProperties;
     private final TemplateEngine templateEngine;
@@ -105,7 +106,7 @@ public class DefaultSendingEmailService implements SendingEmailService {
         final var email = Email.builder()
                 .sender(appProperties.getEmailSenderAddress())
                 .receivers(new String[]{user.getEmail()})
-                .subject("Password reset token")
+                .subject("Reset your hrva.cc password")
                 .text(htmlContent)
                 .build();
 
@@ -122,7 +123,7 @@ public class DefaultSendingEmailService implements SendingEmailService {
         final var email = Email.builder()
                 .sender(appProperties.getEmailSenderAddress())
                 .receivers(new String[]{user.getEmail()})
-                .subject("Account deactivated")
+                .subject("Your hrva.cc account was deactivated")
                 .text(htmlContent)
                 .build();
 
@@ -133,14 +134,14 @@ public class DefaultSendingEmailService implements SendingEmailService {
     @Async
     public void sendInactivityWarningEmail(final User user, final LocalDate deactivationDate) {
         final var ctx = getContext(user);
-        ctx.setVariable("deactivation_date", deactivationDate.format(DEACTIVATION_DATE_FORMAT));
+        ctx.setVariable("deactivation_date", deactivationDate.format(LONG_DATE_FORMAT));
 
         final var htmlContent = templateEngine.process("inactivity_warning", ctx);
 
         final var email = Email.builder()
                 .sender(appProperties.getEmailSenderAddress())
                 .receivers(new String[]{user.getEmail()})
-                .subject("Your account will be deactivated for inactivity")
+                .subject("Your hrva.cc account will be deactivated on %s".formatted(deactivationDate.format(LONG_DATE_FORMAT)))
                 .text(htmlContent)
                 .build();
 
@@ -158,7 +159,7 @@ public class DefaultSendingEmailService implements SendingEmailService {
         final var email = Email.builder()
                 .sender(appProperties.getEmailSenderAddress())
                 .receivers(new String[]{user.getEmail()})
-                .subject("Someone tried to sign up with your email")
+                .subject("Someone tried to sign up to hrva.cc with your email")
                 .text(htmlContent)
                 .build();
 
@@ -179,7 +180,7 @@ public class DefaultSendingEmailService implements SendingEmailService {
         final var email = Email.builder()
                 .sender(appProperties.getEmailSenderAddress())
                 .receivers(new String[]{user.getEmail()})
-                .subject("Verify your email")
+                .subject("Verify your email for hrva.cc")
                 .text(htmlContent)
                 .build();
 
@@ -189,17 +190,15 @@ public class DefaultSendingEmailService implements SendingEmailService {
     @Override
     @Async
     public void sendNewUserNotificationToAdmin(final User user) {
-        final var provider = user.getAuthProvider() != null ? user.getAuthProvider() : "local";
         final var body = """
-                <p>A new user just registered on %s.</p>
+                <p>A new user registered on hrva.cc.</p>
                 <p><strong>Email:</strong> %s</p>
-                <p><strong>Auth provider:</strong> %s</p>
+                <p><strong>Signed up with:</strong> %s</p>
                 <p><strong>Registered at:</strong> %s</p>
                 """.formatted(
-                appProperties.getAppName(),
                 user.getEmail(),
-                provider,
-                LocalDateTime.now().truncatedTo(ChronoUnit.SECONDS));
+                signUpMethod(user.getAuthProvider()),
+                LocalDateTime.now().format(LONG_DATE_TIME_UTC_FORMAT));
 
         final var email = Email.builder()
                 .sender(appProperties.getEmailSenderAddress())
@@ -213,19 +212,19 @@ public class DefaultSendingEmailService implements SendingEmailService {
 
     @Override
     @Async
-    public void sendEmailUrlMalwareDetected(final User user, final Url url, final String threatType) {
+    public void sendEmailUrlMalwareDetected(final User user, final Url url, final String flaggedAddress) {
         final var ctx = getContext(user);
         ctx.setVariable("shortUrl", url.getShortUrl());
         ctx.setVariable("short_link", shortLinks.display(ShortLinks.hostnameOf(url), url.getShortUrl()));
         ctx.setVariable("longUrl", url.getLongUrl());
-        ctx.setVariable("threatType", threatType);
+        ctx.setVariable("flaggedAddress", flaggedAddress);
 
         final var htmlContent = templateEngine.process("url_malware_detected", ctx);
 
         final var email = Email.builder()
                 .sender(appProperties.getEmailSenderAddress())
                 .receivers(new String[]{user.getEmail()})
-                .subject("URL deactivated — malware detected")
+                .subject("Your link was blocked as unsafe")
                 .text(htmlContent)
                 .build();
 
@@ -275,7 +274,7 @@ public class DefaultSendingEmailService implements SendingEmailService {
     public void sendPasskeyAddedEmail(final User user, final String label, final LocalDateTime addedAt) {
         final var ctx = getContext(user);
         ctx.setVariable("label", label);
-        ctx.setVariable("added_at", addedAt.format(PASSKEY_ADDED_AT_FORMAT));
+        ctx.setVariable("added_at", addedAt.format(LONG_DATE_TIME_UTC_FORMAT));
         ctx.setVariable("settings_url", frontendPage("/dashboard/settings"));
         ctx.setVariable("help_url", frontendPage("/help/passkeys"));
         ctx.setVariable("local_account", isLocalAccount(user));
@@ -287,7 +286,7 @@ public class DefaultSendingEmailService implements SendingEmailService {
         final var email = Email.builder()
                 .sender(appProperties.getEmailSenderAddress())
                 .receivers(new String[]{user.getEmail()})
-                .subject("A passkey was added to your account")
+                .subject("A passkey was added to your hrva.cc account")
                 .text(htmlContent)
                 .build();
 
@@ -299,7 +298,7 @@ public class DefaultSendingEmailService implements SendingEmailService {
     public void sendSignInMethodChangedEmail(final User user, final String change, final LocalDateTime changedAt) {
         final var ctx = getContext(user);
         ctx.setVariable("change", change);
-        ctx.setVariable("changed_at", changedAt.format(PASSKEY_ADDED_AT_FORMAT));
+        ctx.setVariable("changed_at", changedAt.format(LONG_DATE_TIME_UTC_FORMAT));
         ctx.setVariable("settings_url", frontendPage("/dashboard/settings"));
         ctx.setVariable("reset_url", frontendPage("/reset-password"));
 
@@ -324,7 +323,7 @@ public class DefaultSendingEmailService implements SendingEmailService {
         ctx.setVariable("on_this_device", destination.loopback());
         ctx.setVariable("app_scheme", destination.appScheme());
         ctx.setVariable("unknown_destination", destination.unknownDestination());
-        ctx.setVariable("connected_at", connectedAt.format(PASSKEY_ADDED_AT_FORMAT));
+        ctx.setVariable("connected_at", connectedAt.format(LONG_DATE_TIME_UTC_FORMAT));
         ctx.setVariable("connected_apps_url", frontendPage(CONNECTED_APPS_SETTINGS));
 
         final var htmlContent = templateEngine.process("app_connected", ctx);
@@ -346,7 +345,6 @@ public class DefaultSendingEmailService implements SendingEmailService {
         final var ctx = new Context();
         ctx.setVariable("digest", digest);
         ctx.setVariable("headline", subject);
-        ctx.setVariable("app_name", appProperties.getAppName());
         ctx.setVariable("site_url", appProperties.getFrontendUrl());
         ctx.setVariable("short_links", shortLinks);
         ctx.setVariable("review_page", frontendPage(REVIEW_PAGE));
@@ -376,7 +374,6 @@ public class DefaultSendingEmailService implements SendingEmailService {
         ctx.setVariable("summary", WeeklyDigestText.summary(digest, reviewPage));
         ctx.setVariable("top_links", WeeklyDigestText.topLinkLines(digest, shortLinks, UnaryOperator.identity()));
         ctx.setVariable("stats_page", statsPage);
-        ctx.setVariable("app_name", appProperties.getAppName());
         ctx.setVariable("site_url", appProperties.getFrontendUrl());
 
         final var htmlContent = templateEngine.process("weekly_digest", ctx);
@@ -434,7 +431,6 @@ public class DefaultSendingEmailService implements SendingEmailService {
         ctx.setVariable("dashboard_url", deadLinks.dashboardUrl());
         ctx.setVariable("unsubscribe_page", unsubscribePage);
         ctx.setVariable("settings_page", consentEmails.settingsPage());
-        ctx.setVariable("app_name", appProperties.getAppName());
         ctx.setVariable("site_url", appProperties.getFrontendUrl());
 
         final var htmlContent = templateEngine.process("dead_links", ctx);
@@ -480,7 +476,6 @@ public class DefaultSendingEmailService implements SendingEmailService {
         ctx.setVariable("dashboard_url", dashboard);
         ctx.setVariable("unsubscribe_page", unsubscribePage);
         ctx.setVariable("settings_page", consentEmails.settingsPage());
-        ctx.setVariable("app_name", appProperties.getAppName());
         ctx.setVariable("site_url", appProperties.getFrontendUrl());
 
         final var htmlContent = templateEngine.process("weekly_summary", ctx);
@@ -528,7 +523,7 @@ public class DefaultSendingEmailService implements SendingEmailService {
     @Override
     @Async
     public void sendDomainRejectedEmail(final String to, final String hostname, final String note) {
-        final var subject = "Your domain application for %s".formatted(hostname);
+        final var subject = "Your domain %s wasn't approved".formatted(hostname);
         final var shownNote = StringUtils.stripToNull(note);
         final var ctx = domainContext(to, subject, hostname);
         ctx.setVariable("note", shownNote);
@@ -612,7 +607,7 @@ public class DefaultSendingEmailService implements SendingEmailService {
     @Override
     @Async
     public void sendDomainRequestDeclinedEmail(final String to, final int requestedTotal, final int limit, final String note) {
-        final var subject = "Your request for more custom domains";
+        final var subject = "Your request for more custom domains wasn't approved";
         final var shownNote = StringUtils.stripToNull(note);
         final var limitText = limit == 1 ? "1 custom domain" : limit + " custom domains";
         final var ctx = domainContext(to, subject, null);
@@ -853,7 +848,6 @@ public class DefaultSendingEmailService implements SendingEmailService {
         ctx.setVariable("name", to);
         ctx.setVariable("subject", subject);
         ctx.setVariable("hostname", hostname);
-        ctx.setVariable("app_name", appProperties.getAppName());
         ctx.setVariable("site_url", appProperties.getFrontendUrl());
         ctx.setVariable("contact_email", appProperties.getContactEmail());
         return ctx;
@@ -879,6 +873,25 @@ public class DefaultSendingEmailService implements SendingEmailService {
         return shortLinks.url(ShortLinks.hostnameOf(url), url.getShortUrl());
     }
 
+    private static String signUpMethod(final String authProvider) {
+        if (authProvider == null || LOCAL_PROVIDER.equals(authProvider)) {
+            return "email";
+        }
+        return switch (authProvider.toLowerCase(Locale.ROOT)) {
+            case "google" -> "Google";
+            case "github" -> "GitHub";
+            default -> authProvider;
+        };
+    }
+
+    private static String inactivityPeriod(final long days) {
+        if (days > 0 && days % DAYS_PER_YEAR == 0) {
+            final var years = days / DAYS_PER_YEAR;
+            return years == 1 ? "1 year" : years + " years";
+        }
+        return days == 1 ? "1 day" : days + " days";
+    }
+
     private static boolean isLocalAccount(final User user) {
         return user.getAuthProvider() == null || LOCAL_PROVIDER.equals(user.getAuthProvider());
     }
@@ -886,11 +899,10 @@ public class DefaultSendingEmailService implements SendingEmailService {
     private Context getContext(final User user) {
         final var ctx = new Context();
         ctx.setVariable("name", user.getEmail());
-        ctx.setVariable("app_name", appProperties.getAppName());
         ctx.setVariable("site_url", appProperties.getFrontendUrl());
         ctx.setVariable("contact_email", appProperties.getContactEmail());
         ctx.setVariable("login_page", MessageFormat.format("{0}/login/", appProperties.getFrontendUrl()));
-        ctx.setVariable("days_of_inactivity", appProperties.getDeactivateUserAccountAfterDays().toString());
+        ctx.setVariable("inactivity_period", inactivityPeriod(appProperties.getDeactivateUserAccountAfterDays()));
         ctx.setVariable("token_expiration", appProperties.getResetTokenExpirationInHours().toString());
 
         return ctx;

@@ -978,6 +978,17 @@ class DefaultModerationServiceTest {
     }
 
     @Test
+    void aSafeBrowsingBlockWithoutADetailNeverMakesUpAThreatTypeForTheOwner() {
+        final var owner = user(1L, "alice@example.com");
+        final var url = link(30L, "https://example.org/x", owner);
+
+        moderationService.blockLink(30L, BlockReason.SAFE_BROWSING, null, "system", "nightly");
+
+        verify(sendingEmailService).sendEmailUrlMalwareDetected(owner, url, null);
+        verifyNoMoreInteractions(sendingEmailService);
+    }
+
+    @Test
     void aSafeBrowsingBlockMarksTheLinkAsMalwareInTheSameTransaction() {
         final var url = link(30L, "https://example.org/x", user(1L, "alice@example.com"));
 

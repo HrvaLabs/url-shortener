@@ -523,12 +523,29 @@ class DefaultSendingEmailServiceTest {
         final var onDomain = Url.builder().shortUrl("menu").longUrl("https://evil.example/login").domain(GO_EXAMPLE).active(false).build();
         final var service = configuredEmailService(realTemplateEngine());
 
-        service.sendEmailUrlMalwareDetected(OWNER, onDomain, "SOCIAL_ENGINEERING");
-        service.sendEmailUrlMalwareDetected(OWNER, BLOCKED_LINK, "MALWARE");
+        service.sendEmailUrlMalwareDetected(OWNER, onDomain, "https://evil.example/login");
+        service.sendEmailUrlMalwareDetected(OWNER, BLOCKED_LINK, null);
 
-        assertThat(textOf(sent.getAllValues().getFirst().getText())).contains("Your short link go.example.com/menu has been automatically deactivated")
-                .doesNotContain("hrva.cc/menu");
-        assertThat(textOf(sent.getAllValues().get(1).getText())).contains("Your short link hrva.cc/promo has been automatically deactivated");
+        assertThat(sent.getAllValues()).extracting(Email::getSubject).containsOnly("Your link was blocked as unsafe");
+        assertThat(textOf(sent.getAllValues().getFirst().getText()))
+                .contains("hrva.cc blocked your link go.example.com/menu because Google Safe Browsing flagged where it leads.")
+                .contains("Flagged address https://evil.example/login")
+                .doesNotContain("hrva.cc/menu", "deactivated", "Threat type", "MALWARE");
+        assertThat(textOf(sent.getAllValues().get(1).getText()))
+                .contains("hrva.cc blocked your link hrva.cc/promo because Google Safe Browsing flagged where it leads.")
+                .doesNotContain("Flagged address", "Threat type", "MALWARE", "deactivated");
+    }
+
+    @Test
+    void theMalwareEmailListsEveryFlaggedAddressWithoutCuttingThemShort() throws Exception {
+        saveReturnsArgument();
+        final var sent = ArgumentCaptor.forClass(Email.class);
+        doAnswer(invocation -> null).when(emailService).sendEmail(sent.capture(), eq(null));
+        final var flagged = "https://evil.example/" + "a".repeat(200) + ", https://worse.example/login";
+
+        configuredEmailService(realTemplateEngine()).sendEmailUrlMalwareDetected(OWNER, BLOCKED_LINK, flagged);
+
+        assertThat(textOf(sent.getValue().getText())).contains("Flagged address " + flagged).doesNotContain("...");
     }
 
     @Test
@@ -733,7 +750,7 @@ class DefaultSendingEmailServiceTest {
         configuredEmailService(realTemplateEngine()).sendEmailUrlBlocked(OWNER, BLOCKED_LINK);
 
         assertThat(sent.getValue().getText())
-                .contains("hrva.cc disabled your link because it led to a site reported for phishing, malware or scams.")
+                .contains("hrva.cc blocked your link because it led to a site reported for phishing, malware or scams.")
                 .contains("https://hrva.cc/promo")
                 .contains("alice@example.com")
                 .contains("support@hrva.cc")
@@ -754,7 +771,7 @@ class DefaultSendingEmailServiceTest {
         assertThat(email.getReceivers()).containsExactly("alice@example.com");
         assertThat(email.getSubject()).isEqualTo("Your links were blocked as unsafe");
         assertThat(email.getText())
-                .contains("hrva.cc disabled 25 of your links because their destinations were reported for phishing, malware or scams.")
+                .contains("hrva.cc blocked 25 of your links because their destinations were reported for phishing, malware or scams.")
                 .contains("https://hrva.cc/deal1<", "https://hrva.cc/deal20<")
                 .doesNotContain("https://hrva.cc/deal21")
                 .contains("and 5 more")
@@ -772,7 +789,7 @@ class DefaultSendingEmailServiceTest {
         configuredEmailService(realTemplateEngine()).sendEmailUrlsBlocked(OWNER, domainBlockedLinks(20));
 
         assertThat(sent.getValue().getText())
-                .contains("hrva.cc disabled 20 of your links")
+                .contains("hrva.cc blocked 20 of your links")
                 .contains("https://hrva.cc/deal1<", "https://hrva.cc/deal20<")
                 .doesNotContain("more");
     }
@@ -795,12 +812,13 @@ class DefaultSendingEmailServiceTest {
         final var email = sentPasskeyAddedEmail("Work YubiKey");
 
         assertThat(email.getReceivers()).containsExactly("alice@example.com");
-        assertThat(email.getSubject()).isEqualTo("A passkey was added to your account");
+        assertThat(email.getSubject()).isEqualTo("A passkey was added to your hrva.cc account");
         assertThat(email.getText())
                 .contains("Work YubiKey", "25 October 2026 at 14:05 UTC", "/dashboard/settings", "Passkeys and security keys")
                 .containsPattern("<h1[^>]*>A passkey was added</h1>");
         assertThat(textOf(email.getText()))
-                .contains("Hello alice@example.com,")
+                .contains("Hi alice@example.com,")
+                .doesNotContain("Hello", "Best regards")
                 .contains("A passkey or security key named Work YubiKey was added to your hrva.cc account on 25 October 2026 at 14:05 UTC.")
                 .contains("If this was you, there's nothing else to do.")
                 .contains("If it wasn't you, sign in, open Settings \u2192 Passkeys and security keys (https://hrva.cc/dashboard/settings),"
@@ -823,7 +841,8 @@ class DefaultSendingEmailServiceTest {
         assertThat(email.getSubject()).isEqualTo("A sign-in method changed on your hrva.cc account");
         assertThat(email.getText()).containsPattern("<h1[^>]*>A sign-in method changed</h1>");
         assertThat(textOf(email.getText()))
-                .contains("Hello alice@example.com,")
+                .contains("Hi alice@example.com,")
+                .doesNotContain("Hello", "Best regards")
                 .contains("Google sign-in was turned off.")
                 .contains("This changed on your hrva.cc account on 25 October 2026 at 14:05 UTC.")
                 .contains("If this wasn't you, reset your password and check your sign-in methods.")
@@ -838,13 +857,13 @@ class DefaultSendingEmailServiceTest {
         assertThat(email.getSubject()).isEqualTo("An app was connected to your hrva.cc account");
         assertThat(email.getText()).containsPattern("<h1[^>]*>An app was connected</h1>");
         assertThat(textOf(email.getText()))
-                .contains("Hello alice@example.com,")
+                .contains("Hi alice@example.com,")
+                .doesNotContain("Hello")
                 .contains("An app that calls itself Claude was connected to your hrva.cc account on 25 October 2026 at 14:05 UTC."
                         + " The name is chosen by the app and is not checked by hrva.cc.")
                 .contains("After the connection was allowed, hrva.cc sent you to evil.example.")
                 .contains("If it wasn't you, sign in, open Settings \u2192 Connected apps (https://hrva.cc/dashboard/settings#connected-apps) and disconnect it.")
-                .contains("Best regards,")
-                .doesNotContain("an app on your device");
+                .doesNotContain("Best regards", "an app on your device");
         assertThat(linksIn(email.getText())).contains("https://hrva.cc/dashboard/settings#connected-apps");
     }
 
@@ -926,12 +945,57 @@ class DefaultSendingEmailServiceTest {
         final var email = sentPasskeyAddedEmail(user, "Work YubiKey");
 
         assertThat(textOf(email.getText()))
-                .contains("If it wasn't you, sign in, open Settings \u2192 Passkeys and security keys (https://hrva.cc/dashboard/settings)"
-                        + " and remove it. If you can't sign in, email support@hrva.cc.")
-                .contains("If this wasn't you, reset your password and check your sign-in methods. Reset it here: https://hrva.cc/reset-password.")
-                .doesNotContain("change your password")
+                .contains("If it wasn't you, reset your password here: https://hrva.cc/reset-password, then sign in,"
+                        + " open Settings \u2192 Passkeys and security keys (https://hrva.cc/dashboard/settings) and remove it."
+                        + " If you can't sign in, email support@hrva.cc.")
+                .doesNotContain("If this wasn't you, reset", "change your password")
                 .doesNotContain("Google or GitHub");
         assertThat(linksIn(email.getText())).contains("https://hrva.cc/reset-password");
+    }
+
+    @Test
+    void anAccountDeactivatedAfterFiveYearsSaysFiveYearsWithoutUse() throws Exception {
+        saveReturnsArgument();
+        final var sent = ArgumentCaptor.forClass(Email.class);
+        doAnswer(invocation -> null).when(emailService).sendEmail(sent.capture(), eq(null));
+        final var appProperties = new AppProperties();
+        appProperties.setEmailSenderAddress("noreply@hrva.cc");
+        appProperties.setContactEmail("support@hrva.cc");
+        appProperties.setAppName("hrva.cc");
+        appProperties.setFrontendUrl("https://hrva.cc");
+        appProperties.setDeactivateUserAccountAfterDays(1825L);
+        appProperties.setResetTokenExpirationInHours(1L);
+        final var service = new DefaultSendingEmailService(appProperties, realTemplateEngine(), emailService, emailLogRepository,
+                emailConsentReader, new ConsentEmails(unsubscribeTokens, appProperties),
+                new NotificationMessages(appProperties, Clock.systemUTC(), new ShortLinks(appProperties)), new ShortLinks(appProperties),
+                settingsService);
+
+        service.sendEmailAccountDeactivated(OWNER);
+        service.sendInactivityWarningEmail(OWNER, LocalDate.of(2026, 11, 29));
+
+        assertThat(textOf(sent.getAllValues().getFirst().getText()))
+                .contains("deactivated after 5 years without use")
+                .doesNotContain("1825", "We do this to protect your account security");
+        assertThat(textOf(sent.getAllValues().get(1).getText())).contains("after 5 years without use").doesNotContain("1825");
+    }
+
+    @Test
+    void theNewUserNoticeNamesTheSignUpMethodAndTheTimeInUtc() throws Exception {
+        saveReturnsArgument();
+        final var sent = ArgumentCaptor.forClass(Email.class);
+        doAnswer(invocation -> null).when(emailService).sendEmail(sent.capture(), eq(null));
+
+        sendingEmailService.sendNewUserNotificationToAdmin(User.builder().email("new@example.com").build());
+        sendingEmailService.sendNewUserNotificationToAdmin(User.builder().email("g@example.com").authProvider("google").build());
+        sendingEmailService.sendNewUserNotificationToAdmin(User.builder().email("h@example.com").authProvider("github").build());
+
+        assertThat(sent.getAllValues()).hasSize(3);
+        assertThat(textOf(sent.getAllValues().getFirst().getText()))
+                .contains("A new user registered on hrva.cc.", "Email: new@example.com", "Signed up with: email")
+                .containsPattern("Registered at: \\d{1,2} [A-Z][a-z]+ \\d{4} at \\d{2}:\\d{2} UTC")
+                .doesNotContain("Url Shortener", "Auth provider", "local");
+        assertThat(textOf(sent.getAllValues().get(1).getText())).contains("Signed up with: Google");
+        assertThat(textOf(sent.getAllValues().get(2).getText())).contains("Signed up with: GitHub");
     }
 
     @Test
@@ -947,8 +1011,9 @@ class DefaultSendingEmailServiceTest {
 
     @ParameterizedTest(name = "{0}")
     @MethodSource("accountEmails")
-    void anAccountEmailRendersItsHeadlineAndExactlyItsLinks(final String template, final Consumer<DefaultSendingEmailService> send,
-                                                           final String headline, final List<String> links) throws Exception {
+    void anAccountEmailRendersItsSubjectHeadlineSentenceAndExactlyItsLinks(final String template, final Consumer<DefaultSendingEmailService> send,
+                                                                            final String subject, final String headline, final String sentence,
+                                                                            final List<String> links) throws Exception {
         saveReturnsArgument();
         final var sent = ArgumentCaptor.forClass(Email.class);
         doAnswer(invocation -> null).when(emailService).sendEmail(sent.capture(), eq(null));
@@ -956,7 +1021,8 @@ class DefaultSendingEmailServiceTest {
         send.accept(configuredEmailService(realTemplateEngine()));
 
         final var html = sent.getValue().getText();
-        assertThat(textOf(html)).contains(headline);
+        assertThat(sent.getValue().getSubject()).isEqualTo(subject);
+        assertThat(textOf(html)).contains(headline, sentence).doesNotContain("Best regards", "Hello");
         assertThat(html).containsPattern("<h1[^>]*>" + Pattern.quote(headline) + "</h1>");
         assertThat(linksIn(html)).containsExactlyElementsOf(Stream.concat(links.stream(), Stream.of(SITE_LINK, HRVALABS_LINK)).toList());
     }
@@ -967,18 +1033,27 @@ class DefaultSendingEmailServiceTest {
         final var flaggedLink = Url.builder().shortUrl("menu").longUrl("https://example.com/menu").build();
         return Stream.of(
                 Arguments.of("reset_password", (Consumer<DefaultSendingEmailService>) service -> service.sendEmailForgotPassword(OWNER, resetToken),
-                        "Reset your password", List.of("https://hrva.cc/reset-password/reset-token-41", "https://hrva.cc/reset-password/reset-token-41")),
+                        "Reset your hrva.cc password", "Reset your password", "Someone asked to reset the password of your hrva.cc account.",
+                        List.of("https://hrva.cc/reset-password/reset-token-41", "https://hrva.cc/reset-password/reset-token-41")),
                 Arguments.of("verify_email", (Consumer<DefaultSendingEmailService>) service -> service.sendVerificationEmail(OWNER, verificationToken),
-                        "Verify your email", List.of("https://hrva.cc/verify-email/verify-token-42", "https://hrva.cc/verify-email/verify-token-42")),
+                        "Verify your email for hrva.cc", "Verify your email", "Welcome to hrva.cc. Confirm your email address to activate your account.",
+                        List.of("https://hrva.cc/verify-email/verify-token-42", "https://hrva.cc/verify-email/verify-token-42")),
                 Arguments.of("account_deactivated", (Consumer<DefaultSendingEmailService>) service -> service.sendEmailAccountDeactivated(OWNER),
-                        "Account deactivated", List.of("mailto:support@hrva.cc")),
+                        "Your hrva.cc account was deactivated", "Account deactivated",
+                        "Your account has been deactivated after 180 days without use. To get it back, email support@hrva.cc.",
+                        List.of("mailto:support@hrva.cc")),
                 Arguments.of("sign_up_attempt", (Consumer<DefaultSendingEmailService>) service -> service.sendSignUpAttemptEmail(OWNER),
-                        "You already have an account", List.of("https://hrva.cc/login/", "https://hrva.cc/reset-password")),
+                        "Someone tried to sign up to hrva.cc with your email", "You already have an account",
+                        "Someone tried to create a new hrva.cc account with this email address.",
+                        List.of("https://hrva.cc/login/", "https://hrva.cc/reset-password")),
                 Arguments.of("sign_in_method_changed", (Consumer<DefaultSendingEmailService>) service ->
                                 service.sendSignInMethodChangedEmail(OWNER, "GitHub sign-in was turned off.", PASSKEY_ADDED_AT),
-                        "A sign-in method changed", List.of("https://hrva.cc/reset-password", "https://hrva.cc/dashboard/settings", "mailto:support@hrva.cc")),
-                Arguments.of("url_malware_detected", (Consumer<DefaultSendingEmailService>) service -> service.sendEmailUrlMalwareDetected(OWNER, flaggedLink, "MALWARE"),
-                        "Malicious URL detected", List.of("https://hrva.cc/login/")));
+                        "A sign-in method changed on your hrva.cc account", "A sign-in method changed", "GitHub sign-in was turned off.",
+                        List.of("https://hrva.cc/reset-password", "https://hrva.cc/dashboard/settings", "mailto:support@hrva.cc")),
+                Arguments.of("url_malware_detected", (Consumer<DefaultSendingEmailService>) service -> service.sendEmailUrlMalwareDetected(OWNER, flaggedLink, "https://example.com/menu"),
+                        "Your link was blocked as unsafe", "Link blocked as unsafe",
+                        "hrva.cc blocked your link hrva.cc/menu because Google Safe Browsing flagged where it leads.",
+                        List.of("https://hrva.cc/login/")));
     }
 
     @Test
@@ -1000,7 +1075,7 @@ class DefaultSendingEmailServiceTest {
         configuredEmailService(realTemplateEngine()).sendSignUpAttemptEmail(OWNER);
 
         assertThat(sent.getValue().getReceivers()).containsExactly("alice@example.com");
-        assertThat(sent.getValue().getSubject()).isEqualTo("Someone tried to sign up with your email");
+        assertThat(sent.getValue().getSubject()).isEqualTo("Someone tried to sign up to hrva.cc with your email");
         assertThat(textOf(sent.getValue().getText()))
                 .contains("Someone tried to create a new hrva.cc account with this email address. You already have one, so nothing was created or changed.")
                 .contains("If it was you, sign in: https://hrva.cc/login/. If you forgot your password, reset it: https://hrva.cc/reset-password.")
@@ -1017,7 +1092,7 @@ class DefaultSendingEmailServiceTest {
 
         assertThat(context.getValue().getVariable("name")).isEqualTo("alice@example.com");
         assertThat(context.getValue().getVariable("deactivation_date")).isEqualTo("29 November 2026");
-        assertThat(context.getValue().getVariable("days_of_inactivity")).isEqualTo("180");
+        assertThat(context.getValue().getVariable("inactivity_period")).isEqualTo("180 days");
         assertThat(context.getValue().getVariable("login_page")).isEqualTo("https://hrva.cc/login/");
         assertThat(context.getValue().getVariable("contact_email")).isEqualTo("support@hrva.cc");
         verify(emailService).sendEmail(any(Email.class), eq(null));
@@ -1031,9 +1106,11 @@ class DefaultSendingEmailServiceTest {
 
         configuredEmailService(realTemplateEngine()).sendInactivityWarningEmail(OWNER, LocalDate.of(2026, 11, 29));
 
-        assertThat(sent.getValue().getSubject()).isEqualTo("Your account will be deactivated for inactivity");
+        assertThat(sent.getValue().getSubject()).isEqualTo("Your hrva.cc account will be deactivated on 29 November 2026");
         assertThat(textOf(sent.getValue().getText()))
-                .contains("alice@example.com", "29 November 2026", "180 days")
+                .contains("alice@example.com", "29 November 2026", "180 days without use")
+                .contains("Hi alice@example.com,")
+                .doesNotContain("Hello", "Best regards")
                 .contains("API key", "MCP")
                 .contains("support@hrva.cc");
         assertThat(linksIn(sent.getValue().getText())).contains("https://hrva.cc/login/");
@@ -1065,7 +1142,7 @@ class DefaultSendingEmailServiceTest {
         sentPasskeyAddedEmail("Work YubiKey");
 
         assertThat(output)
-                .contains("Sending A passkey was added to your account email to 1 recipient(s): [a***@example.com]")
+                .contains("Sending A passkey was added to your hrva.cc account email to 1 recipient(s): [a***@example.com]")
                 .doesNotContain("alice@example.com");
     }
 
@@ -1203,7 +1280,7 @@ class DefaultSendingEmailServiceTest {
     void resendOfATransactionalEmailIsUnchanged() throws Exception {
         saveReturnsArgument();
         final var failed = EmailLog.builder().id(22L).sender("noreply@hrva.cc").recipient("alice@example.com")
-                .subject("Password reset token").body("<p>reset</p>").status(EmailLog.STATUS_FAILED).build();
+                .subject("Reset your hrva.cc password").body("<p>reset</p>").status(EmailLog.STATUS_FAILED).build();
         when(emailLogRepository.findById(22L)).thenReturn(Optional.of(failed));
         final var sent = ArgumentCaptor.forClass(Email.class);
         doAnswer(invocation -> null).when(emailService).sendEmail(sent.capture(), eq(null));
@@ -1497,7 +1574,7 @@ class DefaultSendingEmailServiceTest {
 
         final var withNote = emails.getFirst();
         assertThat(withNote.getReceivers()).containsExactly("alice@example.com");
-        assertThat(withNote.getSubject()).isEqualTo("Your domain application for go.example.com");
+        assertThat(withNote.getSubject()).isEqualTo("Your domain go.example.com wasn't approved");
         assertThat(withNote.getText()).containsPattern("<h1[^>]*>Domain not approved</h1>");
         assertThat(textOf(withNote.getText())).contains(
                 "Hi alice@example.com,",
@@ -1506,7 +1583,7 @@ class DefaultSendingEmailServiceTest {
                 "If you think that's a mistake, contact support@hrva.cc.");
         assertThat(linksIn(withNote.getText())).containsExactly("mailto:support@hrva.cc", SITE_LINK, HRVALABS_LINK);
         assertThat(withNote.getPlainText()).isEqualTo("""
-                Your domain application for go.example.com
+                Your domain go.example.com wasn't approved
 
                 We didn't approve go.example.com.
                 Note from the admin: Use a domain you own
@@ -1515,7 +1592,7 @@ class DefaultSendingEmailServiceTest {
         final var withoutNote = emails.get(1);
         assertThat(textOf(withoutNote.getText())).contains("We didn't approve go.example.com.").doesNotContain("Note from the admin");
         assertThat(withoutNote.getPlainText()).isEqualTo("""
-                Your domain application for go.example.com
+                Your domain go.example.com wasn't approved
 
                 We didn't approve go.example.com.
 
@@ -1618,8 +1695,8 @@ class DefaultSendingEmailServiceTest {
         assertThat(textOf(withNote.getText())).contains(
                 "Hi alice@example.com,",
                 "We approved your request. Your account can now have 3 custom domains.",
-                "Note from the admin: Fine for your shops",
-                "Best regards,");
+                "Note from the admin: Fine for your shops");
+        assertThat(textOf(withNote.getText())).doesNotContain("Best regards");
         assertThat(linksIn(withNote.getText())).containsExactly("https://hrva.cc/dashboard/settings#custom-domains", SITE_LINK, HRVALABS_LINK);
         assertThat(withNote.getPlainText()).isEqualTo("""
                 You can now have 3 custom domains
@@ -1641,23 +1718,23 @@ class DefaultSendingEmailServiceTest {
         });
 
         final var withNote = emails.getFirst();
-        assertThat(withNote.getSubject()).isEqualTo("Your request for more custom domains");
+        assertThat(withNote.getSubject()).isEqualTo("Your request for more custom domains wasn't approved");
         assertThat(withNote.getText()).containsPattern("<h1[^>]*>More custom domains not approved</h1>");
         assertThat(textOf(withNote.getText())).contains(
                 "We didn't approve your request for 3 custom domains. Your limit stays at 1 custom domain.",
                 "Note from the admin: Use paths on one domain",
-                "If you think that's a mistake, contact support@hrva.cc.",
-                "Best regards,");
+                "If you think that's a mistake, contact support@hrva.cc.");
+        assertThat(textOf(withNote.getText())).doesNotContain("Best regards");
         assertThat(linksIn(withNote.getText())).containsExactly("mailto:support@hrva.cc", SITE_LINK, HRVALABS_LINK);
         assertThat(withNote.getPlainText()).isEqualTo("""
-                Your request for more custom domains
+                Your request for more custom domains wasn't approved
 
                 We didn't approve your request for 3 custom domains. Your limit stays at 1 custom domain.
                 Note from the admin: Use paths on one domain
 
                 If you think that's a mistake, contact support@hrva.cc.""");
         assertThat(emails.get(1).getPlainText()).isEqualTo("""
-                Your request for more custom domains
+                Your request for more custom domains wasn't approved
 
                 We didn't approve your request for 6 custom domains. Your limit stays at 4 custom domains.
 
@@ -1684,11 +1761,11 @@ class DefaultSendingEmailServiceTest {
         verify(emailLogRepository, atLeastOnce()).save(logged.capture());
         assertThat(logged.getAllValues()).extracting(EmailLog::getSubject).containsSubsequence(
                 "Your domain go.example.com is approved: one step left",
-                "Your domain application for go.example.com",
+                "Your domain go.example.com wasn't approved",
                 "Your domain go.example.com was turned off",
                 "Your domain go.example.com was removed",
                 "You can now have 3 custom domains",
-                "Your request for more custom domains");
+                "Your request for more custom domains wasn't approved");
         assertThat(logged.getAllValues()).allSatisfy(entry -> {
             assertThat(entry.getConsentType()).isNull();
             assertThat(entry.getUserId()).isNull();

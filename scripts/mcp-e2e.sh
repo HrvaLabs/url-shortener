@@ -230,7 +230,7 @@ reset_token_from_mail() {
     wait_for_mail "$1" "$RESET_SUBJECT" "$before"
     newest_mail_text "$1" "$RESET_SUBJECT" | grep -oE '/reset-password/[A-Za-z0-9_-]{43}' | head -n1 | sed 's#/reset-password/##'
 }
-RESET_SUBJECT="Password reset token"
+RESET_SUBJECT="Reset your hrva.cc password"
 
 psql_query() {
     docker exec "$POSTGRES_CONTAINER" psql -U "$DB_USER" -d url_shortener -P pager=off -c "$1" | sed 's/^/  /'
@@ -1343,7 +1343,8 @@ admin_domain_row() {
     ADMIN_ROW=$(jq -c --argjson id "$DOMAIN_ID" '.content[] | select(.id == $id)' <<<"$HTTP_BODY")
 }
 email_statuses() {
-    psql_value "select coalesce(string_agg(status, ','), 'none') from email_log where subject = '$1';"
+    local subject=${1//\'/\'\'}
+    psql_value "select coalesce(string_agg(status, ','), 'none') from email_log where subject = '$subject';"
 }
 expect_eq "$(psql_value "select count(*) from information_schema.tables where table_name in ('custom_domain', 'custom_domain_allowance', 'custom_domain_reconcile', 'custom_domain_cap_lock');")" \
     4 "032 created the four custom domain tables"
@@ -1573,13 +1574,13 @@ expect_eq "$HTTP_STATUS $(jq -r .detail <<<"$HTTP_BODY")" "429 You've sent sever
     || fail "Retry-After: expected the seconds left on rate-limit:domain-request:user:$REQUEST_USER_ID ($REQUEST_TTL), got '$RETRY_AFTER'"
 ok "Retry-After is the seconds left in the 24-hour window, the key's TTL"
 request_emails_sent() {
-    [[ $(email_statuses "You can now have 3 custom domains") == SENT && $(email_statuses "Your request for more custom domains") == SENT ]]
+    [[ $(email_statuses "You can now have 3 custom domains") == SENT && $(email_statuses "Your request for more custom domains wasn't approved") == SENT ]]
 }
 wait_until 30 "the approved and declined emails" request_emails_sent
-expect_eq "$(mails_to "$USER_EMAIL" "You can now have 3 custom domains") $(mails_to "$USER_EMAIL" "Your request for more custom domains")" "1 1" \
+expect_eq "$(mails_to "$USER_EMAIL" "You can now have 3 custom domains") $(mails_to "$USER_EMAIL" "Your request for more custom domains wasn't approved")" "1 1" \
     "Mailpit holds the approved and the declined email for $USER_EMAIL"
-expect_contains "$(newest_mail_text "$USER_EMAIL" "Your request for more custom domains")" "Your limit stays at 1 custom domain." "the decline names the limit that stays"
-expect_contains "$(newest_mail_text "$USER_EMAIL" "Your request for more custom domains")" "Note from the admin: One is enough for E2E" "and the note"
+expect_contains "$(newest_mail_text "$USER_EMAIL" "Your request for more custom domains wasn't approved")" "Your limit stays at 1 custom domain." "the decline names the limit that stays"
+expect_contains "$(newest_mail_text "$USER_EMAIL" "Your request for more custom domains wasn't approved")" "Note from the admin: One is enough for E2E" "and the note"
 http -H "Authorization: Bearer $DOMAIN_JWT" "$BASE/api/v1/users/me/export"
 show "GET /api/v1/users/me/export .domainRequests -> $(jq -c .domainRequests <<<"$HTTP_BODY")"
 expect_eq "$(jq -r '[.domainRequests[] | .status] | join(" ")' <<<"$HTTP_BODY")" "DECLINED APPROVED" "the export lists both reviewed requests, newest first, not the withdrawn one"
@@ -2572,8 +2573,8 @@ clear_account_email_limits
 
 echo "  --- sign-up never says whether an address is taken"
 SIGNUP_EMAIL=e2e-new-signup@example.org
-VERIFY_SUBJECT="Verify your email"
-ATTEMPT_SUBJECT="Someone tried to sign up with your email"
+VERIFY_SUBJECT="Verify your email for hrva.cc"
+ATTEMPT_SUBJECT="Someone tried to sign up to hrva.cc with your email"
 sign_up() {
     http -X POST "$BASE/api/v1/auth/register" -H "CF-Connecting-IP: $3" -H 'Content-Type: application/json' -d "{\"email\":\"$1\",\"password\":\"$2\"}"
 }

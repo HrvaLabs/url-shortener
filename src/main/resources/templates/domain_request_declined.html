@@ -8,7 +8,6 @@
   <p class="e-fg" th:style="${s.p}">We didn't approve your request for <strong class="e-fg" th:style="${s.strong}" th:text="${requested}">3</strong> custom domains. Your limit stays at <th:block th:text="${limit_text}">1 custom domain</th:block>.</p>
   <p class="e-fg" th:if="${note != null}" th:style="${s.p}">Note from the admin: <span th:text="${note}">Use one domain with paths</span></p>
   <p class="e-fg" th:style="${s.p}">If you think that's a mistake, contact <a class="e-lk" th:href="@{'mailto:' + ${contact_email}}" th:style="${s.link}" th:text="${contact_email}">support@hrva.cc</a>.</p>
-  <th:block th:replace="~{fragments/email :: signoff}"/>
 </th:block>
 </body>
 </html>

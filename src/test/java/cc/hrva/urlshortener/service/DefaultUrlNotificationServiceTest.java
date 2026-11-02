@@ -106,8 +106,10 @@ class DefaultUrlNotificationServiceTest {
         verify(sendingEmailService, never()).tryToSendEmail(any(Email.class));
         assertThat(sent.getAllValues()).allSatisfy(email -> {
             assertThat(email.getReceivers()).containsExactly("ana@example.com");
-            assertThat(email.getSubject()).isEqualTo("Your short link is expiring soon");
+            assertThat(email.getSubject()).startsWith("Your link hrva.cc/").endsWith(" expires on 28 October 2026");
         });
+        assertThat(sent.getAllValues()).extracting(Email::getSubject)
+                .containsExactly("Your link hrva.cc/anas-menu expires on 28 October 2026", "Your link hrva.cc/anas-shop expires on 28 October 2026");
         assertThat(sent.getAllValues()).extracting(email -> email.getText().contains("anas-menu"), email -> email.getText().contains("anas-shop"))
                 .containsExactly(org.assertj.core.groups.Tuple.tuple(true, false), org.assertj.core.groups.Tuple.tuple(false, true));
     }
@@ -167,7 +169,11 @@ class DefaultUrlNotificationServiceTest {
                 .contains("You get this because you turned on expiry reminders.")
                 .contains("Turn off expiry reminders")
                 .contains("Notification settings")
-                .contains("2026-10-28");
+                .contains("Hi ana@example.com,")
+                .contains("Your link hrva.cc/anas-menu expires on 28 October 2026 at 09:30 UTC.")
+                .contains("Sign in to extend it.")
+                .doesNotContain("2026-10-28", "Best regards", "Log in");
+        assertThat(html).contains("href=\"https://app.hrva.cc/dashboard\"").doesNotContain("href=\"https://app.hrva.cc/login/\"");
     }
 
     @Test
@@ -181,9 +187,11 @@ class DefaultUrlNotificationServiceTest {
 
         final var sent = ArgumentCaptor.forClass(Email.class);
         verify(sendingEmailService, org.mockito.Mockito.times(2)).tryToSendConsentedEmail(sent.capture(), eq(7L), eq(NotificationType.EXPIRY_REMINDER_EMAIL));
-        assertThat(textOf(sent.getAllValues().getFirst().getText())).contains("Your short link go.example.com/menu is expiring on 2026-10-28")
+        assertThat(textOf(sent.getAllValues().getFirst().getText())).contains("Your link go.example.com/menu expires on 28 October 2026 at 09:30 UTC.")
                 .doesNotContain("hrva.cc/menu");
-        assertThat(textOf(sent.getAllValues().get(1).getText())).contains("Your short link hrva.cc/shop is expiring on 2026-10-28");
+        assertThat(textOf(sent.getAllValues().get(1).getText())).contains("Your link hrva.cc/shop expires on 28 October 2026 at 09:30 UTC.");
+        assertThat(sent.getAllValues()).extracting(Email::getSubject)
+                .containsExactly("Your link go.example.com/menu expires on 28 October 2026", "Your link hrva.cc/shop expires on 28 October 2026");
     }
 
     @Test

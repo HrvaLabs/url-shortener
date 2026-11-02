@@ -13,7 +13,6 @@
     </tr>
   </table>
   <p class="e-fg" th:style="${s.p}">If you think that's a mistake, contact <a class="e-lk" th:href="@{'mailto:' + ${contact_email}}" th:style="${s.link}" th:text="${contact_email}">support@hrva.cc</a>.</p>
-  <th:block th:replace="~{fragments/email :: signoff}"/>
 </th:block>
 </body>
 </html>

@@ -4,8 +4,8 @@
 <body>
 <th:block th:fragment="preheader">Confirm your email address to activate your account. The link expires in <th:block th:text="${token_expiration}">24</th:block> <th:block th:text="${token_expiration == '1'} ? 'hour' : 'hours'">hours</th:block>.</th:block>
 <th:block th:fragment="content">
-  <p class="e-fg" th:style="${s.p}">Hello <strong class="e-fg" th:style="${s.strong}" th:text="${name}">alice@example.com</strong>,</p>
-  <p class="e-fg" th:style="${s.p}">Welcome to <strong class="e-fg" th:style="${s.strong}" th:text="${app_name}">hrva.cc</strong>. Confirm your email address to activate your account.</p>
+  <p class="e-fg" th:style="${s.p}">Hi <strong class="e-fg" th:style="${s.strong}" th:text="${name}">alice@example.com</strong>,</p>
+  <p class="e-fg" th:style="${s.p}">Welcome to hrva.cc. Confirm your email address to activate your account.</p>
   <th:block th:replace="~{fragments/email :: button(@{${full_verification_link}}, 'Verify email')}"/>
   <p class="e-mu" th:style="${s.small} + 'margin: 28px 0 8px;'">If the button doesn't work, copy this link into your browser: <a class="e-lk" th:href="@{${full_verification_link}}" th:style="${s.link}" th:text="${full_verification_link}">https://app.hrva.cc/verify-email/token</a></p>
   <p class="e-mu" th:style="${s.small}">This link expires in <strong class="e-fg" th:style="${s.strong}" th:text="${token_expiration}">24</strong> <th:block th:text="${token_expiration == '1'} ? 'hour' : 'hours'">hours</th:block>.</p>

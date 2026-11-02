@@ -5,7 +5,7 @@
 <th:block th:fragment="preheader"><th:block th:text="${link_count}">25</th:block> of your short links led to sites reported for phishing, malware or scams, so they no longer work.</th:block>
 <th:block th:fragment="content">
   <p class="e-fg" th:style="${s.p}">Hi <strong class="e-fg" th:style="${s.strong}" th:text="${name}">alice@example.com</strong>,</p>
-  <p class="e-fg" th:style="${s.p}">hrva.cc disabled <th:block th:text="${link_count}">25</th:block> of your links because their destinations were reported for phishing, malware or scams.</p>
+  <p class="e-fg" th:style="${s.p}">hrva.cc blocked <th:block th:text="${link_count}">25</th:block> of your links because their destinations were reported for phishing, malware or scams.</p>
   <table class="e-bd" role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" th:style="${s.panel}">
     <tr>
       <td class="e-mu" th:style="${s.row} + 'padding-bottom: 10px; font-size: 13px; line-height: 20px; color: #67676f;'">Short links</td>
@@ -19,7 +19,6 @@
   </table>
   <p class="e-fg" th:style="${s.p}">If you think that's a mistake, contact <a class="e-lk" th:href="@{'mailto:' + ${contact_email}}" th:style="${s.link}" th:text="${contact_email}">support@hrva.cc</a>.</p>
   <th:block th:replace="~{fragments/email :: button(@{${login_page}}, 'Go to dashboard')}"/>
-  <th:block th:replace="~{fragments/email :: signoff}"/>
 </th:block>
 </body>
 </html>

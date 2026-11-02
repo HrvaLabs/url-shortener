@@ -78,7 +78,7 @@ server:
         secure: true
 
 app:
-  app-name: hrva.cc Url Shortener
+  app-name: hrva.cc
   google-api:
     client-id: hrva.cc
     client-version: 1.0.0

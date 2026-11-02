@@ -4,11 +4,10 @@
 <body>
 <th:block th:fragment="preheader">Someone tried to sign up with this email address. Nothing was created or changed.</th:block>
 <th:block th:fragment="content">
-  <p class="e-fg" th:style="${s.p}">Hello <strong class="e-fg" th:style="${s.strong}" th:text="${name}">alice@example.com</strong>,</p>
-  <p class="e-fg" th:style="${s.p}">Someone tried to create a new <span th:text="${app_name}">hrva.cc</span> account with this email address. You already have one, so nothing was created or changed.</p>
+  <p class="e-fg" th:style="${s.p}">Hi <strong class="e-fg" th:style="${s.strong}" th:text="${name}">alice@example.com</strong>,</p>
+  <p class="e-fg" th:style="${s.p}">Someone tried to create a new hrva.cc account with this email address. You already have one, so nothing was created or changed.</p>
   <p class="e-fg" th:style="${s.p}">If it was you, sign in: <a class="e-lk" th:href="@{${login_page}}" th:style="${s.link}" th:text="${login_page}">https://app.hrva.cc/login/</a>. If you forgot your password, reset it: <a class="e-lk" th:href="@{${reset_url}}" th:style="${s.link}" th:text="${reset_url}">https://app.hrva.cc/reset-password</a>.</p>
   <p class="e-fg" th:style="${s.p}">If it wasn't you, you can ignore this email.</p>
-  <th:block th:replace="~{fragments/email :: signoff}"/>
 </th:block>
 </body>
 </html>

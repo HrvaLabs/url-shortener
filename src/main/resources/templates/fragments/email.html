@@ -147,10 +147,6 @@
   </tr>
 </table>
 
-<th:block th:fragment="signoff">
-  <p class="e-mu" th:style="${s.small} + 'margin: 28px 0 0;'">Best regards,<br><span th:text="${app_name}">hrva.cc</span></p>
-</th:block>
-
 <th:block th:fragment="consent(reason, turn_off)">
   <p class="e-mu" th:style="${s.foot} + 'margin: 0;'" th:text="${reason}">You get this because you turned it on.</p>
   <p class="e-mu" th:style="${s.foot} + 'margin: 0;'"><a class="e-mu" th:href="${unsubscribe_page}" target="_blank" th:style="${s.footLink}" th:text="${turn_off}">Turn it off</a> &middot; <a class="e-mu" th:href="${settings_page}" target="_blank" th:style="${s.footLink}">Notification settings</a></p>

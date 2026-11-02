@@ -8,7 +8,6 @@
   <p class="e-fg" th:style="${s.p}">We approved your request. Your account can now have <strong class="e-fg" th:style="${s.strong}" th:text="${limit}">3</strong> custom domains.</p>
   <p class="e-fg" th:if="${note != null}" th:style="${s.p}">Note from the admin: <span th:text="${note}">Fine for your shops</span></p>
   <th:block th:replace="~{fragments/email :: button(${settings_url}, 'Open Custom domains')}"/>
-  <th:block th:replace="~{fragments/email :: signoff}"/>
 </th:block>
 </body>
 </html>
