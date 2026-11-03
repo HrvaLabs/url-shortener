@@ -311,6 +311,8 @@
                 <artifactId>maven-surefire-plugin</artifactId>
                 <configuration>
                     <argLine>-Duser.timezone=UTC</argLine>
+                    <forkedProcessTimeoutInSeconds>1200</forkedProcessTimeoutInSeconds>
+                    <forkedProcessExitTimeoutInSeconds>60</forkedProcessExitTimeoutInSeconds>
                 </configuration>
             </plugin>
         </plugins>
