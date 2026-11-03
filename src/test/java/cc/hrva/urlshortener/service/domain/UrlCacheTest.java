@@ -23,6 +23,7 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.doThrow;
@@ -233,6 +234,46 @@ class UrlCacheTest {
         verify(taskScheduler).schedule(later.capture(), eq(NOW.plusSeconds(30)));
         verify(taskScheduler).schedule(later.capture(), eq(NOW.plusSeconds(2)));
         verify(cache, times(1)).clear();
+    }
+
+    @Test
+    void twoHundredFailingEvictionsScheduleAtMostFiftyKeyRetriesAndOneFullClearOfEachTiming() {
+        final var cache = mock(Cache.class);
+        doThrow(new IllegalStateException("redis down")).when(cache).evict(anyString());
+        final var failingCache = overCache(cache);
+
+        for (var index = 0; index < 200; index++) {
+            failingCache.evict("link" + index);
+        }
+
+        final var atThirtySeconds = ArgumentCaptor.forClass(Runnable.class);
+        verify(taskScheduler, times(51)).schedule(atThirtySeconds.capture(), eq(NOW.plusSeconds(30)));
+        final var atFiveMinutes = ArgumentCaptor.forClass(Runnable.class);
+        verify(taskScheduler, times(1)).schedule(atFiveMinutes.capture(), eq(NOW.plusSeconds(300)));
+        atFiveMinutes.getValue().run();
+        verify(cache).clear();
+        atThirtySeconds.getAllValues().forEach(Runnable::run);
+        verify(cache, times(2)).clear();
+        verify(cache, times(250)).evict(anyString());
+    }
+
+    @Test
+    void aFullClearIsScheduledAgainOnlyAfterThePendingOneRan() {
+        final var cache = mock(Cache.class);
+        doThrow(new IllegalStateException("redis down")).when(cache).evict(anyString());
+        final var failingCache = overCache(cache);
+        for (var index = 0; index < 51; index++) {
+            failingCache.evict("link" + index);
+        }
+        final var atFiveMinutes = ArgumentCaptor.forClass(Runnable.class);
+        verify(taskScheduler).schedule(atFiveMinutes.capture(), eq(NOW.plusSeconds(300)));
+
+        failingCache.evict("another");
+        verify(taskScheduler, times(1)).schedule(any(Runnable.class), eq(NOW.plusSeconds(300)));
+
+        atFiveMinutes.getValue().run();
+        failingCache.evict("after the clear");
+        verify(taskScheduler, times(2)).schedule(any(Runnable.class), eq(NOW.plusSeconds(300)));
     }
 
     private UrlCache overCache(final Cache cache) {

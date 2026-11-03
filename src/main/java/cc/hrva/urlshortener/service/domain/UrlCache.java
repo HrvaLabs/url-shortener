@@ -4,7 +4,10 @@ import cc.hrva.urlshortener.dto.stats.CacheStats;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.LongAdder;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -24,12 +27,16 @@ public class UrlCache {
 
     private static final Duration SECOND_EVICTION_DELAY = Duration.ofSeconds(2);
     private static final List<Duration> RETRIES_AFTER_A_FAILURE = List.of(Duration.ofSeconds(30), Duration.ofMinutes(5));
+    private static final int MAX_PENDING_RETRIES = 50;
 
     private final CacheManager cacheManager;
     private final TaskScheduler taskScheduler;
     private final Clock clock;
     private final LongAdder redirectHits = new LongAdder();
     private final LongAdder redirectMisses = new LongAdder();
+    private final AtomicInteger pendingRetries = new AtomicInteger();
+    private final Map<Duration, AtomicBoolean> pendingClears = Map.of(RETRIES_AFTER_A_FAILURE.get(0), new AtomicBoolean(),
+            RETRIES_AFTER_A_FAILURE.get(1), new AtomicBoolean());
 
     public Object get(final String cacheKey) {
         try {
@@ -95,9 +102,34 @@ public class UrlCache {
                 log.warn("URL cache eviction failed, no retries left key={} exception={}", cacheKey, exception.getClass().getName());
                 return;
             }
+            if (pendingRetries.incrementAndGet() > MAX_PENDING_RETRIES) {
+                pendingRetries.decrementAndGet();
+                log.warn("URL cache eviction failed, too many retries pending, clearing the whole cache later key={} exception={}", cacheKey,
+                        exception.getClass().getName());
+                RETRIES_AFTER_A_FAILURE.forEach(this::clearOnceLater);
+                return;
+            }
             log.warn("URL cache eviction failed, retrying in {} s key={} exception={}", retries.getFirst().toSeconds(), cacheKey,
                     exception.getClass().getName());
-            later(() -> evict(cacheKey, retries.subList(1, retries.size())), retries.getFirst());
+            if (!later(() -> {
+                pendingRetries.decrementAndGet();
+                evict(cacheKey, retries.subList(1, retries.size()));
+            }, retries.getFirst())) {
+                pendingRetries.decrementAndGet();
+            }
+        }
+    }
+
+    private void clearOnceLater(final Duration delay) {
+        final var pending = pendingClears.get(delay);
+        if (!pending.compareAndSet(false, true)) {
+            return;
+        }
+        if (!later(() -> {
+            pending.set(false);
+            clear(List.of());
+        }, delay)) {
+            pending.set(false);
         }
     }
 
@@ -117,11 +149,13 @@ public class UrlCache {
         }
     }
 
-    private void later(final Runnable eviction, final Duration delay) {
+    private boolean later(final Runnable eviction, final Duration delay) {
         try {
             taskScheduler.schedule(eviction, clock.instant().plus(delay));
+            return true;
         } catch (final RuntimeException exception) {
             log.warn("Scheduling a URL cache eviction failed exception={}", exception.getClass().getName());
+            return false;
         }
     }
 
