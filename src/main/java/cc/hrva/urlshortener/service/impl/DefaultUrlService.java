@@ -796,6 +796,7 @@ public class DefaultUrlService implements UrlService {
         if (destinationChanged) {
             current.setLongUrl(edited.getLongUrl());
             current.setFinalUrl(null);
+            current.setRedirectChain(null);
             current.setChainCheckedAt(null);
             current.setDestinationCheckedAt(null);
             current.setDestinationDeadSince(null);

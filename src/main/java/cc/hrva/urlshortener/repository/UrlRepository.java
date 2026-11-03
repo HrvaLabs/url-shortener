@@ -224,9 +224,10 @@ public interface UrlRepository extends JpaRepository<Url, Long>, JpaSpecificatio
 
     @Modifying
     @Transactional
-    @Query("update Url u set u.finalUrl = :finalUrl, u.chainCheckedAt = :checkedAt where u.id = :id and u.longUrl = :longUrl")
+    @Query("update Url u set u.finalUrl = :finalUrl, u.redirectChain = :redirectChain, u.chainCheckedAt = :checkedAt "
+            + "where u.id = :id and u.longUrl = :longUrl")
     int recordRedirectChain(@Param("id") long id, @Param("longUrl") String longUrl, @Param("finalUrl") String finalUrl,
-            @Param("checkedAt") LocalDateTime checkedAt);
+            @Param("redirectChain") String redirectChain, @Param("checkedAt") LocalDateTime checkedAt);
 
     @Modifying
     @Transactional

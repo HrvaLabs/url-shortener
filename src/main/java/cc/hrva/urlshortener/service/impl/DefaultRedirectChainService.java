@@ -15,6 +15,7 @@ import cc.hrva.urlshortener.service.ReviewQueueService;
 import cc.hrva.urlshortener.service.SafeBrowsingService;
 import cc.hrva.urlshortener.util.BlockDetails;
 import cc.hrva.urlshortener.util.DomainNames;
+import cc.hrva.urlshortener.util.RedirectChains;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.LocalDateTime;
@@ -72,7 +73,8 @@ public class DefaultRedirectChainService implements RedirectChainService {
             return Result.UNREACHABLE;
         }
         if (!url.get().isActive()) {
-            urlRepository.recordRedirectChain(urlId, longUrl, StringUtils.truncate(chain.get().getLast().original(), FINAL_URL_LENGTH), now());
+            urlRepository.recordRedirectChain(urlId, longUrl, StringUtils.truncate(chain.get().getLast().original(), FINAL_URL_LENGTH),
+                    RedirectChains.join(chain.get()), now());
             log.info("Recorded where a held link ends without judging its hops urlId={}", urlId);
             return Result.CHECKED;
         }
@@ -93,7 +95,8 @@ public class DefaultRedirectChainService implements RedirectChainService {
             log.info("Safe Browsing was unavailable, the redirects are checked again in the next nightly scan urlId={}", urlId);
             return Result.SAFE_BROWSING_UNAVAILABLE;
         }
-        urlRepository.recordRedirectChain(urlId, longUrl, StringUtils.truncate(chain.get().getLast().original(), FINAL_URL_LENGTH), now());
+        urlRepository.recordRedirectChain(urlId, longUrl, StringUtils.truncate(chain.get().getLast().original(), FINAL_URL_LENGTH),
+                RedirectChains.join(chain.get()), now());
         return Result.CHECKED;
     }
 

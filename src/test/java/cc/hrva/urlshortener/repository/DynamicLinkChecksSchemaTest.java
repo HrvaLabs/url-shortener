@@ -698,14 +698,17 @@ class DynamicLinkChecksSchemaTest {
         entityManager.flush();
         entityManager.clear();
 
-        final var recorded = urlRepository.recordRedirectChain(blocked.getId(), "https://bit.example/abc", "https://njuskaio.cam/a", checkedAt);
-        final var stale = urlRepository.recordRedirectChain(repointed.getId(), "https://old.example/", "https://old-landing.example/", checkedAt);
+        final var recorded = urlRepository.recordRedirectChain(blocked.getId(), "https://bit.example/abc", "https://njuskaio.cam/a",
+                "https://bit.example/abc\nhttps://njuskaio.cam/a", checkedAt);
+        final var stale = urlRepository.recordRedirectChain(repointed.getId(), "https://old.example/", "https://old-landing.example/",
+                "https://old.example/\nhttps://old-landing.example/", checkedAt);
         entityManager.clear();
 
         assertThat(recorded).isEqualTo(1);
         assertThat(stale).isZero();
         assertThat(urlRepository.findById(blocked.getId())).hasValueSatisfying(stored -> {
             assertThat(stored.getFinalUrl()).isEqualTo("https://njuskaio.cam/a");
+            assertThat(stored.getRedirectChain()).isEqualTo("https://bit.example/abc\nhttps://njuskaio.cam/a");
             assertThat(stored.getChainCheckedAt()).isEqualTo(checkedAt);
             assertThat(stored.isActive()).isFalse();
             assertThat(stored.getBlockReason()).isEqualTo(BlockReason.BLOCKLIST);
@@ -713,6 +716,7 @@ class DynamicLinkChecksSchemaTest {
         });
         assertThat(urlRepository.findById(repointed.getId())).hasValueSatisfying(stored -> {
             assertThat(stored.getFinalUrl()).isNull();
+            assertThat(stored.getRedirectChain()).isNull();
             assertThat(stored.getChainCheckedAt()).isNull();
         });
     }

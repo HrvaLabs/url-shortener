@@ -103,7 +103,7 @@ class DefaultRedirectChainServiceTest {
 
         assertThat(result).isEqualTo(Result.CHECKED);
         verify(redirectFollower).followRedirects(DESTINATION, 5, Duration.ofSeconds(5));
-        verify(urlRepository).recordRedirectChain(LINK_ID, DESTINATION, "https://shop.example/offer", CHECKED_AT);
+        verify(urlRepository).recordRedirectChain(LINK_ID, DESTINATION, "https://shop.example/offer", joined(DESTINATION, TRACKER, "https://shop.example/offer"), CHECKED_AT);
         verify(urlRepository, never()).save(any(Url.class));
         verifyNoInteractions(moderationService, reviewQueueService);
     }
@@ -117,7 +117,7 @@ class DefaultRedirectChainServiceTest {
 
         verify(moderationService).blockLink(LINK_ID, BlockReason.BLOCKLIST, "URLhaus via redirect to njuskaio.cam", "system", "redirect-check");
         verifyNoInteractions(reviewQueueService);
-        verify(urlRepository).recordRedirectChain(LINK_ID, DESTINATION, PHISHING, CHECKED_AT);
+        verify(urlRepository).recordRedirectChain(LINK_ID, DESTINATION, PHISHING, joined(DESTINATION, TRACKER, PHISHING), CHECKED_AT);
     }
 
     @Test
@@ -155,7 +155,7 @@ class DefaultRedirectChainServiceTest {
         verify(moderationService).blockLink(LINK_ID, BlockReason.SAFE_BROWSING, PHISHING + " via redirect to njuskaio.cam", "system",
                 "redirect-check");
         verifyNoInteractions(reviewQueueService);
-        verify(urlRepository).recordRedirectChain(LINK_ID, DESTINATION, PHISHING, CHECKED_AT);
+        verify(urlRepository).recordRedirectChain(LINK_ID, DESTINATION, PHISHING, joined(DESTINATION, TRACKER, PHISHING), CHECKED_AT);
     }
 
     @Test
@@ -199,7 +199,7 @@ class DefaultRedirectChainServiceTest {
 
         redirectChainService.check(LINK_ID);
 
-        verify(urlRepository).recordRedirectChain(LINK_ID, DESTINATION, DESTINATION, CHECKED_AT);
+        verify(urlRepository).recordRedirectChain(LINK_ID, DESTINATION, DESTINATION, DESTINATION, CHECKED_AT);
         verifyNoInteractions(linkCheckService, safeBrowsingService, moderationService, reviewQueueService);
     }
 
@@ -226,7 +226,7 @@ class DefaultRedirectChainServiceTest {
 
         assertThat(result).isEqualTo(Result.UNREACHABLE);
         verify(urlRepository).markRedirectChainChecked(LINK_ID, DESTINATION, CHECKED_AT);
-        verify(urlRepository, never()).recordRedirectChain(anyLong(), anyString(), anyString(), any(LocalDateTime.class));
+        verify(urlRepository, never()).recordRedirectChain(anyLong(), anyString(), anyString(), anyString(), any(LocalDateTime.class));
         verifyNoInteractions(linkCheckService, safeBrowsingService, moderationService, reviewQueueService);
     }
 
@@ -243,7 +243,7 @@ class DefaultRedirectChainServiceTest {
         assertThat(result).isEqualTo(Result.SAFE_BROWSING_UNAVAILABLE);
         assertThat(output).contains("Safe Browsing failed").doesNotContain("\tat cc.hrva");
         verify(moderationService).blockLink(LINK_ID, BlockReason.BLOCKLIST, "URLhaus via redirect to njuskaio.cam", "system", "redirect-check");
-        verify(urlRepository, never()).recordRedirectChain(anyLong(), anyString(), anyString(), any(LocalDateTime.class));
+        verify(urlRepository, never()).recordRedirectChain(anyLong(), anyString(), anyString(), anyString(), any(LocalDateTime.class));
         verify(urlRepository, never()).markRedirectChainChecked(anyLong(), anyString(), any(LocalDateTime.class));
     }
 
@@ -317,13 +317,35 @@ class DefaultRedirectChainServiceTest {
     }
 
     @Test
+    void theCheckStoresEveryHopOfAnActiveLinkWhole() {
+        final var longHop = "https://shop.example/" + "b".repeat(3000);
+        chain(DESTINATION, TRACKER, longHop);
+
+        redirectChainService.check(LINK_ID);
+
+        final var stored = ArgumentCaptor.forClass(String.class);
+        verify(urlRepository).recordRedirectChain(eq(LINK_ID), eq(DESTINATION), anyString(), stored.capture(), eq(CHECKED_AT));
+        assertThat(stored.getValue()).isEqualTo(DESTINATION + "\n" + TRACKER + "\n" + longHop);
+    }
+
+    @Test
+    void theCheckStoresEveryHopOfACampaignHeldLink() {
+        heldForACampaign();
+        chain(DESTINATION, TRACKER, PHISHING);
+
+        redirectChainService.check(LINK_ID);
+
+        verify(urlRepository).recordRedirectChain(LINK_ID, DESTINATION, PHISHING, DESTINATION + "\n" + TRACKER + "\n" + PHISHING, CHECKED_AT);
+    }
+
+    @Test
     void aVeryLongFinalUrlIsCutToTheColumn() {
         final var landing = "https://shop.example/" + "b".repeat(3000);
         chain(DESTINATION, landing);
 
         redirectChainService.check(LINK_ID);
 
-        verify(urlRepository).recordRedirectChain(LINK_ID, DESTINATION, landing.substring(0, 2048), CHECKED_AT);
+        verify(urlRepository).recordRedirectChain(LINK_ID, DESTINATION, landing.substring(0, 2048), joined(DESTINATION, landing), CHECKED_AT);
     }
 
     @Test
@@ -334,7 +356,7 @@ class DefaultRedirectChainServiceTest {
 
         assertThat(result).isEqualTo(Result.SKIPPED);
         verifyNoInteractions(redirectFollower, linkCheckService, safeBrowsingService, moderationService, reviewQueueService);
-        verify(urlRepository, never()).recordRedirectChain(anyLong(), anyString(), anyString(), any(LocalDateTime.class));
+        verify(urlRepository, never()).recordRedirectChain(anyLong(), anyString(), anyString(), anyString(), any(LocalDateTime.class));
         verify(urlRepository, never()).markRedirectChainChecked(anyLong(), anyString(), any(LocalDateTime.class));
     }
 
@@ -347,7 +369,7 @@ class DefaultRedirectChainServiceTest {
         final var result = redirectChainService.check(LINK_ID);
 
         assertThat(result).isEqualTo(Result.CHECKED);
-        verify(urlRepository).recordRedirectChain(LINK_ID, DESTINATION, PHISHING, CHECKED_AT);
+        verify(urlRepository).recordRedirectChain(LINK_ID, DESTINATION, PHISHING, joined(DESTINATION, TRACKER, PHISHING), CHECKED_AT);
         verifyNoInteractions(linkCheckService, safeBrowsingService, moderationService, reviewQueueService);
     }
 
@@ -378,7 +400,7 @@ class DefaultRedirectChainServiceTest {
 
         redirectChainService.checkLater(LINK_ID);
 
-        verify(urlRepository).recordRedirectChain(LINK_ID, DESTINATION, TRACKER, CHECKED_AT);
+        verify(urlRepository).recordRedirectChain(LINK_ID, DESTINATION, TRACKER, joined(DESTINATION, TRACKER), CHECKED_AT);
         assertThat(DefaultRedirectChainService.class.getMethod("checkLater", long.class).getAnnotation(Async.class).value())
                 .isEqualTo("redirectCheckExecutor");
     }
@@ -393,7 +415,7 @@ class DefaultRedirectChainServiceTest {
 
         assertThat(result).isEqualTo(Result.SKIPPED);
         verifyNoInteractions(moderationService, reviewQueueService);
-        verify(urlRepository, never()).recordRedirectChain(anyLong(), anyString(), anyString(), any(LocalDateTime.class));
+        verify(urlRepository, never()).recordRedirectChain(anyLong(), anyString(), anyString(), anyString(), any(LocalDateTime.class));
     }
 
     @Test
@@ -439,7 +461,7 @@ class DefaultRedirectChainServiceTest {
 
         verify(safeBrowsingService).checkUrlsForThreats(List.of(ascii));
         verify(reviewQueueService).flag(link, List.of("redirects to xn--evapi-gya.example: on list HaGeZi badware hosters"));
-        verify(urlRepository).recordRedirectChain(LINK_ID, DESTINATION, received, CHECKED_AT);
+        verify(urlRepository).recordRedirectChain(LINK_ID, DESTINATION, received, joined(DESTINATION, received), CHECKED_AT);
     }
 
     @Test
@@ -453,7 +475,7 @@ class DefaultRedirectChainServiceTest {
 
             assertThat(result).isEqualTo(Result.CHECKED);
             verify(moderationService).blockLink(LINK_ID, BlockReason.BLOCKLIST, "URLhaus via redirect to njuskaio.cam", "system", "redirect-check");
-            verify(urlRepository).recordRedirectChain(LINK_ID, destination, PHISHING, CHECKED_AT);
+            verify(urlRepository).recordRedirectChain(LINK_ID, destination, PHISHING, joined(destination, PHISHING), CHECKED_AT);
         } finally {
             server.stop(0);
         }
@@ -484,7 +506,7 @@ class DefaultRedirectChainServiceTest {
             final var result = serviceFollowingRedirectsOn(server).check(LINK_ID);
 
             assertThat(result).isEqualTo(Result.CHECKED);
-            verify(urlRepository).recordRedirectChain(LINK_ID, destination, destination, CHECKED_AT);
+            verify(urlRepository).recordRedirectChain(LINK_ID, destination, destination, destination, CHECKED_AT);
             verifyNoInteractions(linkCheckService, safeBrowsingService, moderationService, reviewQueueService);
         } finally {
             server.stop(0);
@@ -503,6 +525,10 @@ class DefaultRedirectChainServiceTest {
         link.setActive(false);
         link.setBlockReason(BlockReason.CAMPAIGN);
         link.setBlockDetail("/wqamhcsom?r&t");
+    }
+
+    private static String joined(final String... urls) {
+        return String.join("\n", urls);
     }
 
     private void chain(final String... urls) {

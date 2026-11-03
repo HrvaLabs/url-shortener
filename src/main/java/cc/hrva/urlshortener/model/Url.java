@@ -73,6 +73,10 @@ public class Url {
     private String blockDetail;
     private LocalDateTime blockedAt;
     private String finalUrl;
+
+    @Column(columnDefinition = "TEXT")
+    private String redirectChain;
+
     private LocalDateTime chainCheckedAt;
 
     @Enumerated(EnumType.STRING)
