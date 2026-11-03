@@ -201,6 +201,7 @@ public class DefaultLinkInspectionService implements LinkInspectionService {
             inspection.setVtState(InspectionState.PENDING);
             inspection.setVtRequestedAt(now.plus(LOOKUP_AFTER_SUBMIT));
             inspection.setVtSubmittedAt(now);
+            inspection.setVtNextCandidate(null);
             inspection.setVtFailure(null);
             return virusTotalViewOf(linkInspectionRepository.saveAndFlush(inspection), true);
         });
@@ -218,6 +219,7 @@ public class DefaultLinkInspectionService implements LinkInspectionService {
             }
             inspection.setVtState(InspectionState.PENDING);
             inspection.setVtRequestedAt(now());
+            inspection.setVtNextCandidate(null);
             inspection.setVtFailure(null);
             linkInspectionRepository.saveAndFlush(inspection);
             log.info("VirusTotal lookup requested urlId={}", urlId);

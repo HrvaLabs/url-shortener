@@ -23,11 +23,11 @@ import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.commons.lang3.StringUtils;
 import org.springframework.data.domain.Limit;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -148,20 +148,29 @@ public class InspectionWorker {
     }
 
     private void lookUp(final Lookup lookup) {
+        final var candidates = VirusTotalCandidates.of(lookup.longUrl(), lookup.finalUrl());
+        if (lookup.nextCandidate() >= candidates.size()) {
+            recordNotFound(lookup);
+            return;
+        }
         if (!countedWithinTheDailyLimit()) {
             reachedTheDailyLimit(lookup);
             return;
         }
-        final var report = virusTotalClient.lookup(lookup.longUrl());
-        if (report.outcome() == VirusTotalReport.Outcome.NOT_FOUND && lookup.hasItsOwnFinalUrl()) {
-            if (!countedWithinTheDailyLimit()) {
-                reachedTheDailyLimit(lookup);
-                return;
-            }
-            recordReport(lookup, virusTotalClient.lookup(lookup.finalUrl()), lookup.finalUrl());
+        final var candidate = candidates.get(lookup.nextCandidate());
+        final var report = virusTotalClient.lookup(candidate);
+        if (report.outcome() == VirusTotalReport.Outcome.NOT_FOUND && lookup.nextCandidate() + 1 < candidates.size()) {
+            virusTotalFailedBefore.set(null);
+            recordNextCandidate(lookup, lookup.nextCandidate() + 1);
             return;
         }
-        recordReport(lookup, report, lookup.longUrl());
+        recordReport(lookup, report, candidate);
+    }
+
+    private void recordNextCandidate(final Lookup lookup, final int nextCandidate) {
+        final var updated = transactionOperations.execute(status -> linkInspectionRepository.recordVirusTotalNextCandidate(lookup.urlId(),
+                lookup.requestedAt(), nextCandidate));
+        logRecorded(lookup, updated, InspectionState.PENDING);
     }
 
     private boolean countedWithinTheDailyLimit() {
@@ -357,14 +366,11 @@ public class InspectionWorker {
     private record Attempt(long urlId, LocalDateTime requestedAt) {
     }
 
-    private record Lookup(long urlId, LocalDateTime requestedAt, String longUrl, String finalUrl) {
+    private record Lookup(long urlId, LocalDateTime requestedAt, String longUrl, String finalUrl, int nextCandidate) {
 
         static Lookup of(final LinkInspection inspection, final Url url) {
-            return new Lookup(inspection.getUrlId(), inspection.getVtRequestedAt(), url.getLongUrl(), url.getFinalUrl());
-        }
-
-        boolean hasItsOwnFinalUrl() {
-            return StringUtils.isNotBlank(finalUrl) && !finalUrl.equals(longUrl);
+            return new Lookup(inspection.getUrlId(), inspection.getVtRequestedAt(), url.getLongUrl(), url.getFinalUrl(),
+                    Math.max(0, Objects.requireNonNullElse(inspection.getVtNextCandidate(), 0)));
         }
 
         Attempt attempt() {

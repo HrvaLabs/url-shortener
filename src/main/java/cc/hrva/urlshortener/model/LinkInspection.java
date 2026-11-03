@@ -79,4 +79,6 @@ public class LinkInspection {
 
     private LocalDateTime vtSubmittedAt;
 
+    private Integer vtNextCandidate;
+
 }

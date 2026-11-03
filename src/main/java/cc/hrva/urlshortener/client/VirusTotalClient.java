@@ -10,7 +10,9 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
-import java.util.Base64;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.HexFormat;
 import java.util.Optional;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -64,8 +66,7 @@ public class VirusTotalClient {
             log.debug("VirusTotal lookup skipped, the API key is not set");
             return VirusTotalReport.notConfigured();
         }
-        final var id = Base64.getUrlEncoder().withoutPadding().encodeToString(url.getBytes(StandardCharsets.UTF_8));
-        return call(LOOKUP, () -> request(apiKey, URLS_PATH + "/" + id).GET().build(), this::report);
+        return call(LOOKUP, () -> request(apiKey, URLS_PATH + "/" + sha256Of(url)).GET().build(), this::report);
     }
 
     public VirusTotalReport submit(final String url) {
@@ -135,6 +136,14 @@ public class VirusTotalClient {
 
     private VirusTotalReport submitted(final JsonNode body) {
         return body.path("data").isObject() ? VirusTotalReport.submitted() : null;
+    }
+
+    private static String sha256Of(final String url) {
+        try {
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(url.getBytes(StandardCharsets.UTF_8)));
+        } catch (final NoSuchAlgorithmException exception) {
+            throw new IllegalStateException(exception);
+        }
     }
 
     private static Integer count(final JsonNode stats, final String field) {

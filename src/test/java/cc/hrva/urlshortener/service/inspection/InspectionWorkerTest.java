@@ -591,6 +591,7 @@ class InspectionWorkerTest {
         when(virusTotalClient.lookup(LONG_URL)).thenReturn(VirusTotalReport.notFound());
 
         inspectionWorker.lookUpNextOnVirusTotal();
+        inspectionWorker.lookUpNextOnVirusTotal();
 
         verify(virusTotalClient).lookup(LONG_URL);
         verify(virusTotalClient, never()).lookup(FINAL_URL);
@@ -606,11 +607,67 @@ class InspectionWorkerTest {
 
         inspectionWorker.lookUpNextOnVirusTotal();
 
+        verify(virusTotalClient).lookup(LONG_URL);
+        verify(virusTotalClient, never()).lookup(FINAL_URL);
+        assertThat(row(LINK)).containsEntry("VT_STATE", "PENDING").containsEntry("VT_NEXT_CANDIDATE", 1).containsEntry("VT_FAILURE", null);
+
+        inspectionWorker.lookUpNextOnVirusTotal();
+
         final InOrder order = inOrder(virusTotalClient);
         order.verify(virusTotalClient).lookup(LONG_URL);
         order.verify(virusTotalClient).lookup(FINAL_URL);
         assertThat(row(LINK)).containsEntry("VT_STATE", "DONE").containsEntry("VT_URL", FINAL_URL).containsEntry("VT_MALICIOUS", 7);
         assertThat(rateLimiter.count("virustotal:2026-11-03")).hasValue(2);
+    }
+
+    @Test
+    void aUrlWithAnEmptyPathIsAlsoLookedUpWithASlash() {
+        link(9303L, "bare", "https://njuskaio.cam?ref=1");
+        vtPending(9303L, NOW_UTC);
+        chainChecked(9303L, null);
+        when(virusTotalClient.lookup("https://njuskaio.cam?ref=1")).thenReturn(VirusTotalReport.notFound());
+        when(virusTotalClient.lookup("https://njuskaio.cam/?ref=1")).thenReturn(FOUND);
+
+        inspectionWorker.lookUpNextOnVirusTotal();
+        inspectionWorker.lookUpNextOnVirusTotal();
+
+        verify(virusTotalClient, times(2)).lookup(anyString());
+        assertThat(row(9303L)).containsEntry("VT_STATE", "DONE").containsEntry("VT_URL", "https://njuskaio.cam/?ref=1");
+    }
+
+    @Test
+    void aRestartedWorkerGoesOnWithTheNextCandidate() {
+        vtPending(LINK, NOW_UTC);
+        chainChecked(LINK, FINAL_URL);
+        when(virusTotalClient.lookup(LONG_URL)).thenReturn(VirusTotalReport.notFound());
+        when(virusTotalClient.lookup(FINAL_URL)).thenReturn(FOUND);
+
+        inspectionWorker.lookUpNextOnVirusTotal();
+        beanFactory.createBean(InspectionWorker.class).lookUpNextOnVirusTotal();
+
+        verify(virusTotalClient, times(1)).lookup(LONG_URL);
+        verify(virusTotalClient, times(1)).lookup(FINAL_URL);
+        assertThat(row(LINK)).containsEntry("VT_STATE", "DONE");
+    }
+
+    @Test
+    void aBurstOfFiftyQueuedLinksNeverMakesMoreThanOneCallPerTick() {
+        for (var index = 0; index < 50; index++) {
+            final var id = 9400L + index;
+            link(id, "burst" + index, "https://burst" + index + ".example");
+            vtPending(id, NOW_UTC.minusSeconds(50 - index));
+            chainChecked(id, "https://landing" + index + ".example/x");
+        }
+        when(virusTotalClient.lookup(anyString())).thenReturn(VirusTotalReport.notFound());
+
+        for (var tick = 1; tick <= 160; tick++) {
+            final var before = calls();
+            inspectionWorker.lookUpNextOnVirusTotal();
+            assertThat(calls() - before).isLessThanOrEqualTo(1);
+        }
+
+        assertThat(calls()).isEqualTo(150);
+        assertThat(jdbcTemplate.queryForObject("select count(*) from link_inspection where vt_state = 'NOT_FOUND'", Integer.class)).isEqualTo(50);
     }
 
     @Test
@@ -620,6 +677,8 @@ class InspectionWorkerTest {
         jdbcTemplate.update("update link_inspection set vt_report_id = 'old', vt_malicious = 3 where url_id = ?", LINK);
         when(virusTotalClient.lookup(anyString())).thenReturn(VirusTotalReport.notFound());
 
+        inspectionWorker.lookUpNextOnVirusTotal();
+        inspectionWorker.lookUpNextOnVirusTotal();
         inspectionWorker.lookUpNextOnVirusTotal();
 
         verify(virusTotalClient, times(2)).lookup(anyString());
@@ -886,6 +945,10 @@ class InspectionWorkerTest {
     private void pending(final long urlId, final LocalDateTime requestedAt, final String requestedBy) {
         jdbcTemplate.update("insert into link_inspection (url_id, screenshot_state, screenshot_requested_at, screenshot_requested_by) values (?, 'PENDING', ?, ?)",
                 urlId, requestedAt, requestedBy);
+    }
+
+    private int calls() {
+        return org.mockito.Mockito.mockingDetails(virusTotalClient).getInvocations().size();
     }
 
     private void vtPending(final long urlId, final LocalDateTime requestedAt) {

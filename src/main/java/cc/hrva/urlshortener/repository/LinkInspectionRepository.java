@@ -66,6 +66,12 @@ public interface LinkInspectionRepository extends JpaRepository<LinkInspection, 
                                 @Param("failure") String failure);
 
     @Modifying(flushAutomatically = true)
+    @Query("update LinkInspection i set i.vtNextCandidate = :nextCandidate, i.vtFailure = null "
+            + "where i.urlId = :urlId and i.vtState = cc.hrva.urlshortener.model.enums.InspectionState.PENDING and i.vtRequestedAt = :requestedAt")
+    int recordVirusTotalNextCandidate(@Param("urlId") long urlId, @Param("requestedAt") LocalDateTime requestedAt,
+                                      @Param("nextCandidate") int nextCandidate);
+
+    @Modifying(flushAutomatically = true)
     @Query("delete from LinkInspection i where i.urlId = :urlId")
     int deleteByUrlId(@Param("urlId") long urlId);
 

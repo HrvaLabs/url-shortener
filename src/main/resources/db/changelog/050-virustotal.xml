@@ -19,6 +19,7 @@
             <column name="vt_analysed_at" type="TIMESTAMP"/>
             <column name="vt_failure" type="VARCHAR(255)"/>
             <column name="vt_submitted_at" type="TIMESTAMP"/>
+            <column name="vt_next_candidate" type="INT"/>
         </addColumn>
         <createIndex tableName="link_inspection" indexName="idx_link_inspection_vt_state">
             <column name="vt_state"/>
@@ -39,6 +40,7 @@
                 <column name="vt_analysed_at"/>
                 <column name="vt_failure"/>
                 <column name="vt_submitted_at"/>
+                <column name="vt_next_candidate"/>
             </dropColumn>
         </rollback>
     </changeSet>

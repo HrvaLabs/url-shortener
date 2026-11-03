@@ -31,7 +31,8 @@ class VirusTotalClientTest {
     private static final String KEY = "vt-test-key-S3CRET-4b19";
     private static final String URLS = "/api/v3/urls";
     private static final String TARGET = "https://findfavoritedate.life/?u=f6yp608&s=~~?";
-    private static final String TARGET_ID = "aHR0cHM6Ly9maW5kZmF2b3JpdGVkYXRlLmxpZmUvP3U9ZjZ5cDYwOCZzPX5-Pw";
+    private static final String TARGET_BASE64_ID = "aHR0cHM6Ly9maW5kZmF2b3JpdGVkYXRlLmxpZmUvP3U9ZjZ5cDYwOCZzPX5-Pw";
+    private static final String TARGET_SHA256 = "25793058843bded85280e1a10ec107cea5b9bbd03b7d83c77e01e119c472cb80";
     private static final String REPORT_ID = "1db0ad7dbcec0676710ea0eaacd35d5e471d3e11944d53bcbd31f0cbd11bce31";
     private static final String FOUND = """
             {"data": {"id": "%s", "type": "url", "attributes": {
@@ -75,17 +76,35 @@ class VirusTotalClientTest {
     }
 
     @Test
-    void lookupUsesTheUnpaddedBase64UrlId() {
+    void lookupUsesTheSha256OfTheUrl() {
+        answer(200, FOUND);
+
+        client.lookup(TARGET);
+        client.lookup("https://radarkobiet.pl/link/2994/95993394");
+
+        assertThat(received).extracting(Received::method).containsOnly("GET");
+        assertThat(received).extracting(Received::path).containsExactly(URLS + "/" + TARGET_SHA256,
+                URLS + "/3809527bd834fe2d1466b9dab8a1fec976426cf1cba58e5bbb55010c412cd889");
+        assertThat(received).extracting(Received::apiKey).containsOnly(KEY);
+        assertThat(received).extracting(Received::body).containsOnly("");
+    }
+
+    @Test
+    void aLookupNeverCarriesTheUrl() {
         answer(200, FOUND);
 
         client.lookup(TARGET);
 
-        assertThat(received).singleElement().satisfies(request -> {
-            assertThat(request.method()).isEqualTo("GET");
-            assertThat(request.path()).isEqualTo(URLS + "/" + TARGET_ID);
-            assertThat(request.apiKey()).isEqualTo(KEY);
-            assertThat(request.body()).isEmpty();
-        });
+        final var encoded = java.net.URLEncoder.encode(TARGET, StandardCharsets.UTF_8);
+        final var standardBase64 = java.util.Base64.getEncoder().encodeToString(TARGET.getBytes(StandardCharsets.UTF_8));
+        assertThat(received).singleElement().satisfies(request -> assertThat(List.of(request.path(), String.valueOf(request.query()), request.body(),
+                request.headers())).allSatisfy(part -> assertThat(part)
+                .doesNotContain(TARGET)
+                .doesNotContain(encoded)
+                .doesNotContain(TARGET_BASE64_ID)
+                .doesNotContain(standardBase64)
+                .doesNotContain(standardBase64.replace("=", ""))
+                .doesNotContain("findfavoritedate")));
     }
 
     @Test
@@ -207,7 +226,8 @@ class VirusTotalClientTest {
         assertThat(logEvents.list).isNotEmpty().allSatisfy(event -> assertThat(event.getFormattedMessage())
                 .doesNotContain(KEY)
                 .doesNotContain("findfavoritedate")
-                .doesNotContain(TARGET_ID));
+                .doesNotContain(TARGET_SHA256)
+                .doesNotContain(TARGET_BASE64_ID));
     }
 
     private void answer(final int status, final String body) {
@@ -224,8 +244,9 @@ class VirusTotalClientTest {
 
     private void record(final HttpExchange exchange) throws IOException {
         final var headers = exchange.getRequestHeaders();
-        received.add(new Received(exchange.getRequestMethod(), exchange.getRequestURI().getRawPath(), headers.getFirst("x-apikey"),
-                headers.getFirst("Content-Type"), new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8)));
+        received.add(new Received(exchange.getRequestMethod(), exchange.getRequestURI().getRawPath(), exchange.getRequestURI().getRawQuery(),
+                headers.getFirst("x-apikey"), headers.getFirst("Content-Type"), headers.toString(),
+                new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8)));
     }
 
     private static void send(final HttpExchange exchange, final int status, final String body) throws IOException {
@@ -254,7 +275,7 @@ class VirusTotalClientTest {
         }
     }
 
-    private record Received(String method, String path, String apiKey, String contentType, String body) {
+    private record Received(String method, String path, String query, String apiKey, String contentType, String headers, String body) {
     }
 
 }

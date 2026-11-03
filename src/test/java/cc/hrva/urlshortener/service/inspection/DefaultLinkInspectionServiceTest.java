@@ -219,6 +219,18 @@ class DefaultLinkInspectionServiceTest {
     }
 
     @Test
+    void aNewRequestStartsFromTheFirstCandidate() {
+        verdict(LINK, "NOT_FOUND", null, 0);
+        jdbcTemplate.update("update link_inspection set vt_next_candidate = 2 where url_id = ?", LINK);
+
+        linkInspectionService.requestVirusTotal(LINK);
+
+        assertThat(jdbcTemplate.queryForMap("select vt_state, vt_next_candidate from link_inspection where url_id = ?", LINK))
+                .containsEntry("VT_STATE", "PENDING")
+                .containsEntry("VT_NEXT_CANDIDATE", null);
+    }
+
+    @Test
     void aVirusTotalRequestThatRacesAnotherInsertIsRetriedOnce() {
         final var inspections = mock(LinkInspectionRepository.class);
         final var urls = mock(UrlRepository.class);
@@ -260,7 +272,7 @@ class DefaultLinkInspectionServiceTest {
     @Test
     void submitKeepsTheOldVerdictUntilTheNewOneArrives() {
         verdict(LINK, "DONE", REPORT_ID, 4);
-        jdbcTemplate.update("update link_inspection set vt_failure = 'old' where url_id = ?", LINK);
+        jdbcTemplate.update("update link_inspection set vt_failure = 'old', vt_next_candidate = 2 where url_id = ?", LINK);
         when(virusTotalClient.submit(LONG_URL)).thenReturn(VirusTotalReport.submitted());
 
         final var view = linkInspectionService.submitToVirusTotal(LINK, ADMIN);
@@ -268,7 +280,8 @@ class DefaultLinkInspectionServiceTest {
         assertThat(view.malicious()).isEqualTo(4);
         assertThat(view.reportUrl()).isEqualTo("https://www.virustotal.com/gui/url/" + REPORT_ID);
         assertThat(view.failure()).isNull();
-        assertThat(jdbcTemplate.queryForMap("select vt_state, vt_requested_at, vt_report_id from link_inspection where url_id = ?", LINK))
+        assertThat(jdbcTemplate.queryForMap("select vt_state, vt_requested_at, vt_report_id, vt_next_candidate from link_inspection where url_id = ?", LINK))
+                .containsEntry("VT_NEXT_CANDIDATE", null)
                 .containsEntry("VT_STATE", "PENDING")
                 .containsEntry("VT_REQUESTED_AT", java.sql.Timestamp.valueOf(NOW_UTC.plusSeconds(60)))
                 .containsEntry("VT_REPORT_ID", REPORT_ID);
