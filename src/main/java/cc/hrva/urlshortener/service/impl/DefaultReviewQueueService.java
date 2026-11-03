@@ -125,6 +125,15 @@ public class DefaultReviewQueueService implements ReviewQueueService {
 
     @Override
     @Transactional
+    public void inspectAgainIfOpen(final Url url) {
+        linkReviewRepository.findFirstByUrlAndResolvedAtIsNullOrderByFlaggedAtDesc(url).ifPresent(review -> {
+            log.info("Repointed link is still in review, inspecting it again urlId={}", url.getId());
+            eventPublisher.publishEvent(new LinkReviewOpened(url.getId()));
+        });
+    }
+
+    @Override
+    @Transactional
     public void report(final Url url, final ReportCategory category, final String details) {
         final var incoming = normalized(List.of(reportReason(category, details)));
         log.info("Visitor report received urlId={} category={}", url.getId(), category);

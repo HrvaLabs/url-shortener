@@ -710,6 +710,8 @@ public class DefaultUrlService implements UrlService {
                 linkInspectionService.dropFor(saved.getId());
                 if (editor.admin()) {
                     reviewQueueService.resolveOpen(saved, ReviewResolution.DESTINATION_CHANGED, SYSTEM);
+                } else {
+                    reviewQueueService.inspectAgainIfOpen(saved);
                 }
                 destinationChangeService.record(saved, previousLongUrl, editor, forced);
             }

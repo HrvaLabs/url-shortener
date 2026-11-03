@@ -437,6 +437,28 @@ class DefaultReviewQueueServiceTest {
     }
 
     @Test
+    void aLinkWithAnOpenReviewIsInspectedAgain() {
+        final var url = Url.builder().id(287L).shortUrl("menu").longUrl("https://new.example").build();
+        final var open = LinkReview.builder().id(1L).url(url).reasons(YOUNG).systemFlagged(true).flaggedAt(LocalDateTime.now()).build();
+        when(linkReviewRepository.findFirstByUrlAndResolvedAtIsNullOrderByFlaggedAtDesc(url)).thenReturn(Optional.of(open));
+
+        reviewQueueService.inspectAgainIfOpen(url);
+
+        verify(eventPublisher).publishEvent(new LinkReviewOpened(287L));
+        verify(linkReviewRepository, never()).save(any());
+    }
+
+    @Test
+    void aLinkWithoutAnOpenReviewIsNotInspectedAgain() {
+        final var url = Url.builder().id(287L).shortUrl("menu").longUrl("https://new.example").build();
+        when(linkReviewRepository.findFirstByUrlAndResolvedAtIsNullOrderByFlaggedAtDesc(url)).thenReturn(Optional.empty());
+
+        reviewQueueService.inspectAgainIfOpen(url);
+
+        verify(eventPublisher, never()).publishEvent(any(Object.class));
+    }
+
+    @Test
     @SuppressWarnings("unchecked")
     void aQueueEntryOnADomainCarriesTheHostname() {
         final var link = Url.builder().id(287L).shortUrl("menu").longUrl("https://findfavoritedate.life/?u=f6yp608")

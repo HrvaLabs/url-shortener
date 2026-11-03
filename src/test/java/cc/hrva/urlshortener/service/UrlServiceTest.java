@@ -135,6 +135,7 @@ import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.ArgumentMatchers.startsWith;
 import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -376,7 +377,7 @@ class UrlServiceTest {
 
         urlService.updateUrl(update, null);
 
-        final var order = org.mockito.Mockito.inOrder(urlValidator, urlUpdateDtoToUrlConverter);
+        final var order = inOrder(urlValidator, urlUpdateDtoToUrlConverter);
         order.verify(urlValidator).verifyUserAdminOrOwner(url);
         order.verify(urlUpdateDtoToUrlConverter).convert(update);
     }
@@ -414,7 +415,7 @@ class UrlServiceTest {
         final var result = urlService.updateUrl(update, null);
 
         assertThat(result.longUrl()).isEqualTo("https://new.example");
-        final var order = org.mockito.Mockito.inOrder(urlValidator, destinationChangeService, urlRepository, burstAlertService);
+        final var order = inOrder(urlValidator, destinationChangeService, urlRepository, burstAlertService);
         order.verify(destinationChangeService).requireAllowed(eq(url), any());
         order.verify(urlValidator).longUrlInUrl(changed);
         order.verify(urlValidator).checkIfLongUrlIsValid(changed);
@@ -442,7 +443,7 @@ class UrlServiceTest {
 
         final var result = urlService.updateUrl(update, null);
 
-        final var order = org.mockito.Mockito.inOrder(urlRepository, destinationCheckRepository);
+        final var order = inOrder(urlRepository, destinationCheckRepository);
         order.verify(urlRepository).save(url);
         order.verify(destinationCheckRepository).reset(7L);
         assertThat(result.destinationHealth()).isNull();
@@ -460,10 +461,45 @@ class UrlServiceTest {
 
         urlService.updateUrl(update, null);
 
-        final var order = org.mockito.Mockito.inOrder(urlRepository, linkInspectionService, reviewQueueService);
+        final var order = inOrder(urlRepository, linkInspectionService, reviewQueueService);
         order.verify(urlRepository).save(url);
         order.verify(linkInspectionService).dropFor(7L);
         order.verify(reviewQueueService).resolveOpen(url, ReviewResolution.DESTINATION_CHANGED, "system");
+    }
+
+    @Test
+    void anOwnerRepointingALinkInReviewGetsItInspectedAgain() {
+        final var owner = User.builder().id(11L).build();
+        final var url = Url.builder().id(7L).shortUrl("abc").longUrl("https://old.example").visits(0L).active(true).owner(owner).build();
+        final var update = UrlUpdateDto.builder().id(7L).longUrl("https://new.example").build();
+        final var changed = Url.builder().id(7L).shortUrl("abc").longUrl("https://new.example").visits(0L).active(true).build();
+        when(userService.getUserFromToken()).thenReturn(owner);
+        when(urlRepository.findById(7L)).thenReturn(Optional.of(url));
+        when(urlUpdateDtoToUrlConverter.convert(update)).thenReturn(changed);
+        when(urlRepository.save(url)).thenReturn(url);
+
+        urlService.updateUrl(update, null);
+
+        final var order = inOrder(urlRepository, linkInspectionService, reviewQueueService);
+        order.verify(urlRepository).save(url);
+        order.verify(linkInspectionService).dropFor(7L);
+        order.verify(reviewQueueService).inspectAgainIfOpen(url);
+        verify(reviewQueueService, never()).resolveOpen(any(), any(), any());
+    }
+
+    @Test
+    void anAdminRepointClosesTheReviewInsteadOfInspectingAgain() {
+        final var url = Url.builder().id(7L).shortUrl("abc").longUrl("https://old.example").visits(0L).active(true).build();
+        final var update = UrlUpdateDto.builder().id(7L).longUrl("https://new.example").build();
+        final var changed = Url.builder().id(7L).shortUrl("abc").longUrl("https://new.example").visits(0L).active(true).build();
+        when(userService.getUserFromToken()).thenReturn(admin());
+        when(urlRepository.findById(7L)).thenReturn(Optional.of(url));
+        when(urlUpdateDtoToUrlConverter.convert(update)).thenReturn(changed);
+        when(urlRepository.save(url)).thenReturn(url);
+
+        urlService.updateUrl(update, null);
+
+        verify(reviewQueueService, never()).inspectAgainIfOpen(any());
     }
 
     @Test
@@ -533,7 +569,7 @@ class UrlServiceTest {
 
         urlService.updateUrl(update, null);
 
-        final var order = org.mockito.Mockito.inOrder(urlRepository, reviewQueueService);
+        final var order = inOrder(urlRepository, reviewQueueService);
         order.verify(urlRepository).save(url);
         order.verify(reviewQueueService).flag(url, YOUNG_DOMAIN);
         verify(reviewQueueService, never()).resolveOpen(any(), any(), any());
@@ -662,7 +698,7 @@ class UrlServiceTest {
 
         urlService.updateUrl(update, null);
 
-        final var order = org.mockito.Mockito.inOrder(urlRepository);
+        final var order = inOrder(urlRepository);
         order.verify(urlRepository, times(2)).findById(7L);
         order.verify(urlRepository).save(current);
         assertThat(current)
@@ -762,7 +798,7 @@ class UrlServiceTest {
 
         urlService.saveUrlRouting(createUrlDto, CLIENT_IP, CreatedVia.WEB);
 
-        final var order = org.mockito.Mockito.inOrder(urlValidator, urlRepository);
+        final var order = inOrder(urlValidator, urlRepository);
         order.verify(urlValidator).longUrlInUrl(url);
         order.verify(urlValidator).checkIfLongUrlIsValid(url);
         order.verify(urlValidator).checkIfLongUrlIsNotAShortener(url);
@@ -830,7 +866,7 @@ class UrlServiceTest {
 
         urlService.saveUrlRouting(createUrlDto, CLIENT_IP, CreatedVia.WEB);
 
-        final var order = org.mockito.Mockito.inOrder(urlRepository, reviewQueueService);
+        final var order = inOrder(urlRepository, reviewQueueService);
         order.verify(urlRepository).save(url);
         order.verify(reviewQueueService).flag(url, YOUNG_DOMAIN);
     }
@@ -848,7 +884,7 @@ class UrlServiceTest {
 
         urlService.saveUrlWithApiKey(createUrlDto, "apikey", CreatedVia.API_KEY);
 
-        final var order = org.mockito.Mockito.inOrder(urlValidator, urlRepository, reviewQueueService);
+        final var order = inOrder(urlValidator, urlRepository, reviewQueueService);
         order.verify(urlValidator).checkIfLongUrlIsNotAShortener(url);
         order.verify(urlValidator).checkIfLongUrlIsNotBlocklisted(url);
         order.verify(urlValidator).checkIfUrlSafe(url);
@@ -1268,7 +1304,7 @@ class UrlServiceTest {
 
         urlService.saveUrlRouting(link(0), CLIENT_IP, CreatedVia.WEB, HUMAN_CHECK_TOKEN);
 
-        final var order = org.mockito.Mockito.inOrder(rateLimiter, urlValidator, humanCheckService, urlRepository);
+        final var order = inOrder(rateLimiter, urlValidator, humanCheckService, urlRepository);
         order.verify(rateLimiter).tryAcquire(any(), org.mockito.ArgumentMatchers.anyInt(), any());
         order.verify(urlValidator).checkIfAnonymousUrlCreationEnabled();
         order.verify(humanCheckService).verify(HUMAN_CHECK_TOKEN);
@@ -1438,7 +1474,7 @@ class UrlServiceTest {
         assertThat(url.getBlockReason()).isEqualTo(BlockReason.CAMPAIGN);
         assertThat(url.getBlockDetail()).isEqualTo("/wqamhcsom?r&t");
         assertThat(url.getBlockedAt()).isNotNull();
-        final var order = org.mockito.Mockito.inOrder(urlRepository, campaignService);
+        final var order = inOrder(urlRepository, campaignService);
         order.verify(campaignService).confirmHold(4L);
         order.verify(urlRepository).save(url);
         order.verify(campaignService).addHeldLink(4L, 1L, "omaehhm.com");
@@ -2179,7 +2215,7 @@ class UrlServiceTest {
 
         urlServiceIn(transactionOperations).saveUrlRouting(CreateUrlDto.builder().longUrl(RANDOM_LINK).build(), CLIENT_IP, CreatedVia.WEB);
 
-        final var order = org.mockito.Mockito.inOrder(domainAgeService, transactionOperations, urlRepository, reviewQueueService);
+        final var order = inOrder(domainAgeService, transactionOperations, urlRepository, reviewQueueService);
         order.verify(domainAgeService).registeredOn("xdvqnxj.com");
         order.verify(transactionOperations).execute(any());
         order.verify(urlRepository).save(url);
@@ -2559,7 +2595,7 @@ class UrlServiceTest {
 
         urlService.saveUrlRouting(createUrlDto, CLIENT_IP, CreatedVia.WEB);
 
-        final var order = org.mockito.Mockito.inOrder(urlValidator, urlRepository);
+        final var order = inOrder(urlValidator, urlRepository);
         order.verify(urlValidator).checkIfShortUrlIsUnique(null, "promo");
         order.verify(urlValidator).checkIfShortUrlIsReserved("promo");
         order.verify(urlRepository).save(url);
@@ -2755,7 +2791,7 @@ class UrlServiceTest {
 
         urlService.saveUrlWithApiKey(createUrlDto, "k", CreatedVia.API_KEY);
 
-        final var order = org.mockito.Mockito.inOrder(customDomainRepository, apiKeyService);
+        final var order = inOrder(customDomainRepository, apiKeyService);
         order.verify(customDomainRepository, times(2)).findUsable("go.example.com", 5L);
         order.verify(customDomainRepository).findStatusForUpdate(7L);
         order.verify(apiKeyService).requireActive(3L);
@@ -3127,7 +3163,7 @@ class UrlServiceTest {
         assertThat(result).isInstanceOf(UrlResponse.class);
 
         verify(apiKeyValidator).apiKeyExistsByKeyAndIsValid(api);
-        final var order = org.mockito.Mockito.inOrder(apiKeyService, urlRepository);
+        final var order = inOrder(apiKeyService, urlRepository);
         order.verify(apiKeyService).requireActive(3L);
         order.verify(urlRepository).save(url);
     }
@@ -3552,7 +3588,7 @@ class UrlServiceTest {
 
         urlService.activateUrl(1L);
 
-        final var order = org.mockito.Mockito.inOrder(urlRepository, reviewQueueService);
+        final var order = inOrder(urlRepository, reviewQueueService);
         order.verify(urlRepository).save(url);
         order.verify(reviewQueueService).flag(url, YOUNG_DOMAIN);
     }
@@ -3581,7 +3617,7 @@ class UrlServiceTest {
 
         final var result = urlService.activateUrl(1L);
 
-        final var order = org.mockito.Mockito.inOrder(urlValidator, urlRepository);
+        final var order = inOrder(urlValidator, urlRepository);
         order.verify(urlValidator).verifyUserAdminOrOwner(url);
         order.verify(urlValidator).checkIfUrlNotBlocked(url);
         order.verify(urlValidator).checkIfShortUrlIsFreeToReactivate(null, "promo");
@@ -4104,7 +4140,7 @@ class UrlServiceTest {
 
         assertThat(locationOf(urlServiceWithMeters().redirectResultUrl("abc", CLICK))).isEqualTo("https://example.com/a");
 
-        final var order = org.mockito.Mockito.inOrder(urlRepository, clickAnalyticsService);
+        final var order = inOrder(urlRepository, clickAnalyticsService);
         order.verify(urlRepository).consumeOpen(5L);
         order.verify(clickAnalyticsService).recordClick(5L, CLICK);
         verify(cache, never()).evict(any());
@@ -4194,7 +4230,7 @@ class UrlServiceTest {
 
         assertThat(locationOf(urlServiceWithMeters().redirectResultUrl("abc", CLICK))).isEqualTo("https://example.com/a");
 
-        final var order = org.mockito.Mockito.inOrder(urlRepository, clickAnalyticsService);
+        final var order = inOrder(urlRepository, clickAnalyticsService);
         order.verify(urlRepository).findServed(null, "abc");
         order.verify(urlRepository).consumeOpen(7L);
         order.verify(clickAnalyticsService).recordClick(7L, CLICK);
