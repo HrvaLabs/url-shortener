@@ -58,7 +58,12 @@ public class DefaultLinkInspectionService implements LinkInspectionService {
         try {
             request(urlId, InspectionRequester.QUEUE);
         } catch (final DataIntegrityViolationException exception) {
-            log.info("Screenshot request skipped, the link is gone or already queued urlId={}", urlId);
+            log.info("Screenshot request raced another one, retrying once urlId={}", urlId);
+            try {
+                request(urlId, InspectionRequester.QUEUE);
+            } catch (final DataIntegrityViolationException again) {
+                log.info("Screenshot request skipped, the link is gone urlId={}", urlId);
+            }
         }
     }
 

@@ -421,6 +421,48 @@ class InspectionWorkerTest {
     }
 
     @Test
+    void aDailyLimitPauseOutlastsAFailureToRecordIt() {
+        clock.set(Instant.parse("2026-11-03T22:15:00Z"));
+        pending(LINK, NOW_UTC, "QUEUE");
+        when(browserRunClient.snapshot(anyString())).thenAnswer(invocation -> {
+            jdbcTemplate.execute("alter table link_inspection rename to link_inspection_gone");
+            return PageSnapshot.dailyLimit();
+        }).thenReturn(PageSnapshot.taken(JPEG, "image/jpeg", null, 200));
+        try {
+            inspectionWorker.takeNextScreenshot();
+        } finally {
+            jdbcTemplate.execute("alter table link_inspection_gone rename to link_inspection");
+        }
+
+        clock.advance(Duration.ofMinutes(2));
+        inspectionWorker.takeNextScreenshot();
+        clock.set(Instant.parse("2026-11-03T23:59:59Z"));
+        inspectionWorker.takeNextScreenshot();
+
+        verify(browserRunClient, times(1)).snapshot(anyString());
+        clock.set(Instant.parse("2026-11-04T00:00:00Z"));
+        inspectionWorker.takeNextScreenshot();
+        verify(browserRunClient, times(2)).snapshot(anyString());
+    }
+
+    @Test
+    void aFailureIsForgottenOnceTheQueueRunsEmpty() {
+        pending(LINK, NOW_UTC, "QUEUE");
+        when(browserRunClient.snapshot(anyString())).thenThrow(new IllegalStateException("boom"));
+
+        inspectionWorker.takeNextScreenshot();
+        jdbcTemplate.update("delete from link_inspection where url_id = ?", LINK);
+        clock.advance(Duration.ofMinutes(1));
+        inspectionWorker.takeNextScreenshot();
+        pending(LINK, NOW_UTC, "QUEUE");
+        clock.advance(Duration.ofMinutes(1));
+        inspectionWorker.takeNextScreenshot();
+
+        verify(browserRunClient, times(2)).snapshot(anyString());
+        assertThat(row(LINK)).containsEntry("SCREENSHOT_STATE", "PENDING").containsEntry("SCREENSHOT_FAILURE", null);
+    }
+
+    @Test
     void screenshotsOlderThanSevenDaysExpire() {
         done(LINK, NOW_UTC.minusDays(7).minusMinutes(1));
         done(OTHER_LINK, NOW_UTC.minusDays(7).plusMinutes(1));

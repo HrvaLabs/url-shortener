@@ -4,6 +4,7 @@ import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.dto.inspection.ScreenshotView;
 import cc.hrva.urlshortener.exception.ScreenshotsUnavailableException;
 import cc.hrva.urlshortener.exception.UrlNotFoundException;
+import cc.hrva.urlshortener.model.LinkInspection;
 import cc.hrva.urlshortener.model.LinkScreenshot;
 import cc.hrva.urlshortener.model.enums.InspectionState;
 import cc.hrva.urlshortener.repository.LinkInspectionRepository;
@@ -20,12 +21,14 @@ import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import org.hibernate.SessionFactory;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -33,7 +36,11 @@ import org.springframework.transaction.support.TransactionTemplate;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.inOrder;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 @SpringBootTest(
         classes = InspectionTestApplication.class,
@@ -249,6 +256,22 @@ class DefaultLinkInspectionServiceTest {
         final var order = inOrder(inspections, screenshots);
         order.verify(inspections).deleteByUrlId(LINK);
         order.verify(screenshots).deleteByUrlId(LINK);
+    }
+
+    @Test
+    void aQueueRequestThatRacesAnotherInsertIsRetriedOnce() {
+        final var inspections = mock(LinkInspectionRepository.class);
+        final var urls = mock(UrlRepository.class);
+        when(urls.existsById(LINK)).thenReturn(true);
+        when(inspections.findById(LINK)).thenReturn(Optional.empty());
+        when(inspections.saveAndFlush(any(LinkInspection.class))).thenThrow(new DataIntegrityViolationException("duplicate key"))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        final var service = new DefaultLinkInspectionService(inspections, mock(LinkScreenshotRepository.class), urls,
+                settingsService, mock(PlatformTransactionManager.class), clock);
+
+        service.requestScreenshot(LINK);
+
+        verify(inspections, times(2)).saveAndFlush(any(LinkInspection.class));
     }
 
     @Test

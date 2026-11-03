@@ -14,7 +14,7 @@ spring:
         await-termination-period: 10s
     scheduling:
       pool:
-        size: 4
+        size: 6
   cache:
     cache-names: urls
   data:
