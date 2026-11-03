@@ -323,13 +323,15 @@ class DefaultLinkInspectionServiceTest {
                 .hasMessage("VirusTotal is refusing requests for now. Try again in a minute.");
         assertThatThrownBy(() -> linkInspectionService.submitToVirusTotal(LINK, ADMIN))
                 .isInstanceOf(ServiceBusyException.class)
-                .hasMessage("VirusTotal didn't answer. Try again in a minute.");
+                .hasMessage("VirusTotal didn't answer. The link may have reached it. Try again in a minute.");
         assertThatThrownBy(() -> linkInspectionService.submitToVirusTotal(LINK, ADMIN))
                 .isInstanceOf(VirusTotalUnavailableException.class)
                 .hasMessage("VirusTotal refused the request (400).");
 
         assertThat(rows(LINK)).isZero();
         verify(auditLogService, times(4)).logFailure(anyString(), any(), anyString(), anyString(), anyString());
+        verify(auditLogService).logFailure(ADMIN, AuditAction.SUBMIT_TO_VIRUSTOTAL, "Url", String.valueOf(LINK),
+                SUBJECT + ", VirusTotal didn't answer. The link may have reached it. Try again in a minute.");
         verify(auditLogService, never()).log(anyString(), any(), anyString(), anyString(), anyString());
     }
 

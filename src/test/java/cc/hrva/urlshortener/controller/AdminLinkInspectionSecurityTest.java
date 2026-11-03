@@ -345,6 +345,23 @@ class AdminLinkInspectionSecurityTest {
     }
 
     @Test
+    void aSubmitWithoutAnAnswerSaysTheLinkMayHaveReachedVirusTotal() throws Exception {
+        when(virusTotalClient.submit(LONG_URL)).thenReturn(VirusTotalReport.unavailable("VirusTotal didn't answer."));
+
+        mockMvc.perform(as(ADMIN_TOKEN, post(VIRUSTOTAL)))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(header().string("Retry-After", "60"))
+                .andExpect(jsonPath("$.detail").value("VirusTotal didn't answer. The link may have reached it. Try again in a minute."));
+
+        assertThat(auditRows()).singleElement().satisfies(audit -> assertThat(audit)
+                .containsEntry("ACTION", "SUBMIT_TO_VIRUSTOTAL")
+                .containsEntry("FAILED", true)
+                .containsEntry("DETAILS", "link: hrva.cc/v0DB3, destination: " + LONG_URL
+                        + ", VirusTotal didn't answer. The link may have reached it. Try again in a minute."));
+        assertThat(count("link_inspection")).isZero();
+    }
+
+    @Test
     void submitAtTheLimitAnswers409() throws Exception {
         when(rateLimiter.increment(anyString(), any())).thenReturn(481L);
 

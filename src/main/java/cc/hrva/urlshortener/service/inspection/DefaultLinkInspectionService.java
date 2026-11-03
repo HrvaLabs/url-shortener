@@ -60,6 +60,7 @@ public class DefaultLinkInspectionService implements LinkInspectionService {
     private static final String VIRUSTOTAL_NOT_SET_UP = "VirusTotal isn't set up.";
     private static final String VIRUSTOTAL_USED_UP = "Today's VirusTotal lookups are used up. Try again after midnight UTC.";
     private static final String TRY_AGAIN = " Try again in a minute.";
+    private static final String MAY_HAVE_REACHED = " The link may have reached it.";
     private static final String VIRUSTOTAL_REFUSING = "VirusTotal is refusing requests for now." + TRY_AGAIN;
     private static final String LOOKUP_NOT_QUEUED = "The link was sent to VirusTotal, but its lookup couldn't be queued.";
     private static final String VIRUSTOTAL_UNCOUNTED = "hrva.cc can't count today's VirusTotal lookups right now. Try again in a minute.";
@@ -176,7 +177,7 @@ public class DefaultLinkInspectionService implements LinkInspectionService {
         switch (report.outcome()) {
             case SUBMITTED -> log.info("Link sent to VirusTotal urlId={}", urlId);
             case RATE_LIMITED -> throw new ServiceBusyException(VIRUSTOTAL_REFUSING, TRY_AGAIN_IN);
-            case UNAVAILABLE -> throw new ServiceBusyException(report.failure() + TRY_AGAIN, TRY_AGAIN_IN);
+            case UNAVAILABLE -> throw new ServiceBusyException(report.failure() + MAY_HAVE_REACHED + TRY_AGAIN, TRY_AGAIN_IN);
             case KEY_REFUSED, FAILED -> throw new VirusTotalUnavailableException(report.failure());
             case NOT_CONFIGURED -> throw new VirusTotalUnavailableException(VIRUSTOTAL_NOT_SET_UP);
             case FOUND, NOT_FOUND -> throw new IllegalStateException("VirusTotal answered a submit with " + report.outcome());
