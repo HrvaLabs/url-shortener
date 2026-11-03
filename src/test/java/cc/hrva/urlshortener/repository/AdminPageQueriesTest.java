@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.repository;
 
+import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.dto.ReviewEntryResponse;
 import cc.hrva.urlshortener.dto.AdminUserResponse;
 import cc.hrva.urlshortener.dto.UrlResponse;
@@ -16,7 +17,9 @@ import cc.hrva.urlshortener.repository.specification.UserSpecification;
 import cc.hrva.urlshortener.service.ScammerSignalService;
 import cc.hrva.urlshortener.service.impl.DefaultReviewQueueService;
 import cc.hrva.urlshortener.service.impl.DefaultSignInMethodService;
+import cc.hrva.urlshortener.service.inspection.DefaultLinkInspectionService;
 import cc.hrva.urlshortener.service.moderation.ReviewWarningPage;
+import cc.hrva.urlshortener.service.settings.SettingsServiceFixtures;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.EntityManagerFactory;
 import java.time.Clock;
@@ -40,6 +43,7 @@ import org.springframework.context.annotation.FilterType;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -78,6 +82,15 @@ class AdminPageQueriesTest {
     private UserSignInMethodRepository userSignInMethodRepository;
 
     @Autowired
+    private LinkInspectionRepository linkInspectionRepository;
+
+    @Autowired
+    private LinkScreenshotRepository linkScreenshotRepository;
+
+    @Autowired
+    private PlatformTransactionManager transactionManager;
+
+    @Autowired
     private EntityManager entityManager;
 
     @Autowired
@@ -105,14 +118,15 @@ class AdminPageQueriesTest {
         final var scammerSignalService = mock(ScammerSignalService.class);
         when(scammerSignalService.possibleScammerIds()).thenReturn(Set.of());
         final var reviewQueueService = new DefaultReviewQueueService(linkReviewRepository, urlRepository, scammerSignalService, Clock.systemUTC(),
-                mock(ApplicationEventPublisher.class), mock(ReviewWarningPage.class));
+                mock(ApplicationEventPublisher.class), mock(ReviewWarningPage.class), linkInspectionService());
 
         final var entries = reviewQueueService.openEntries(PageRequest.of(0, 10), null, null, null);
 
         assertThat(entries.getContent()).hasSize(10);
         assertThat(entries.getTotalElements()).isEqualTo(LINKS);
         assertThat(entries.getContent()).filteredOn(entry -> entry.ownerEmail() != null).isNotEmpty();
-        assertThat(statistics.getPrepareStatementCount()).isEqualTo(3);
+        assertThat(entries.getContent()).allSatisfy(entry -> assertThat(entry.screenshot()).isNotNull());
+        assertThat(statistics.getPrepareStatementCount()).isEqualTo(4);
     }
 
     @Test
@@ -125,12 +139,12 @@ class AdminPageQueriesTest {
         final var scammerSignalService = mock(ScammerSignalService.class);
         when(scammerSignalService.possibleScammerIds()).thenReturn(Set.of());
         final var reviewQueueService = new DefaultReviewQueueService(linkReviewRepository, urlRepository, scammerSignalService, Clock.systemUTC(),
-                mock(ApplicationEventPublisher.class), mock(ReviewWarningPage.class));
+                mock(ApplicationEventPublisher.class), mock(ReviewWarningPage.class), linkInspectionService());
 
         final var entries = reviewQueueService.openEntries(PageRequest.of(0, 10), null, null, null);
 
         assertThat(entries.getContent()).extracting(ReviewEntryResponse::domain).contains("go.example.com", "go.example.org");
-        assertThat(statistics.getPrepareStatementCount()).isEqualTo(3);
+        assertThat(statistics.getPrepareStatementCount()).isEqualTo(4);
     }
 
     @Test
@@ -277,6 +291,11 @@ class AdminPageQueriesTest {
         statistics.clear();
     }
 
+    private DefaultLinkInspectionService linkInspectionService() {
+        return new DefaultLinkInspectionService(linkInspectionRepository, linkScreenshotRepository, urlRepository,
+                SettingsServiceFixtures.defaults(new AppProperties()), transactionManager, Clock.systemUTC());
+    }
+
     private User owner(final int index) {
         final var role = Authorities.builder().id(index + 1L).name("ROLE_USER").active(true).build();
         entityManager.persist(role);
@@ -292,7 +311,7 @@ class AdminPageQueriesTest {
     @EnableJpaRepositories(
             basePackageClasses = UrlRepository.class,
             includeFilters = @ComponentScan.Filter(type = FilterType.ASSIGNABLE_TYPE, classes = {UrlRepository.class, LinkReviewRepository.class, UserRepository.class,
-                    UserSignInMethodRepository.class}))
+                    UserSignInMethodRepository.class, LinkInspectionRepository.class, LinkScreenshotRepository.class}))
     static class TestApplication {
     }
 

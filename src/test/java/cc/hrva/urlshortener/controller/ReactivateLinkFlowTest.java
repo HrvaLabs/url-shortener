@@ -52,6 +52,7 @@ import cc.hrva.urlshortener.service.domain.CustomDomainRegistry;
 import cc.hrva.urlshortener.service.domain.UrlCache;
 import cc.hrva.urlshortener.service.impl.DefaultAuditLogService;
 import cc.hrva.urlshortener.service.impl.DefaultUrlService;
+import cc.hrva.urlshortener.service.inspection.LinkInspectionService;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiter;
 import cc.hrva.urlshortener.service.HumanCheckTestConfiguration;
 import cc.hrva.urlshortener.service.SignInFormCheckTestConfiguration;
@@ -137,6 +138,9 @@ class ReactivateLinkFlowTest {
 
     @Autowired
     private PlatformTransactionManager transactionManager;
+
+    @MockitoBean
+    private LinkInspectionService linkInspectionService;
 
     @MockitoBean
     private UserService userService;

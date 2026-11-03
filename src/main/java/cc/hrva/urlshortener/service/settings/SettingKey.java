@@ -108,7 +108,10 @@ public enum SettingKey {
             "The highest visit limit a link made without an account can have. While it's set, link previews (Slack, WhatsApp, X) and other bots "
                     + "can't open these links.", ANONYMOUS_LINKS, 1, 1_000_000, "Unlimited", "visits"),
     API_KEY_REQUESTS_PER_HOUR(SettingGroup.ACCESS, "API requests per key per hour",
-            "How many requests one API key can make in an hour. A key over the limit gets a 429 with the time to wait.", null, 10, 100_000, "requests");
+            "How many requests one API key can make in an hour. A key over the limit gets a 429 with the time to wait.", null, 10, 100_000, "requests"),
+    LINK_SCREENSHOTS(SettingGroup.SAFETY, "Screenshots of links in review",
+            "Cloudflare opens each link that enters the review queue and takes one phone-sized screenshot, kept 7 days. "
+                    + "Needs CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_BROWSER_API_TOKEN on the server.", null, true);
 
     private final SettingGroup group;
     private final SettingType type;

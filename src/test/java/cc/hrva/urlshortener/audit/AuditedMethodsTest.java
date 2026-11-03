@@ -43,7 +43,8 @@ class AuditedMethodsTest {
             Map.entry("AdminCustomDomainController.setAllowance", AuditAction.SET_DOMAIN_ALLOWANCE),
             Map.entry("AdminCustomDomainController.removeAllowance", AuditAction.REMOVE_DOMAIN_ALLOWANCE),
             Map.entry("AdminDomainRequestController.approveRequest", AuditAction.APPROVE_DOMAIN_REQUEST),
-            Map.entry("AdminDomainRequestController.declineRequest", AuditAction.DECLINE_DOMAIN_REQUEST));
+            Map.entry("AdminDomainRequestController.declineRequest", AuditAction.DECLINE_DOMAIN_REQUEST),
+            Map.entry("AdminLinkInspectionController.takeScreenshot", AuditAction.TAKE_SCREENSHOT));
 
     @Test
     void exactlyTheseControllerMethodsAreAuditedEachWithItsOwnAction() {

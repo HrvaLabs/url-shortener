@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.dto;
 
+import cc.hrva.urlshortener.dto.inspection.ScreenshotView;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -18,5 +19,7 @@ public record ReviewEntryResponse(
         List<String> reasons,
         LocalDateTime flaggedAt,
         @JsonInclude(JsonInclude.Include.NON_NULL)
-        String domain) {
+        String domain,
+        List<String> redirectChain,
+        ScreenshotView screenshot) {
 }

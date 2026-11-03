@@ -85,6 +85,7 @@ import cc.hrva.urlshortener.service.domain.UrlCache;
 import cc.hrva.urlshortener.service.impl.DefaultSettingsService;
 import cc.hrva.urlshortener.service.impl.DefaultSuspiciousUrlService;
 import cc.hrva.urlshortener.service.impl.DefaultUrlService;
+import cc.hrva.urlshortener.service.inspection.LinkInspectionService;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiter;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiterUnavailableException;
 import cc.hrva.urlshortener.exception.ServiceBusyException;
@@ -270,6 +271,9 @@ class UrlServiceTest {
     @Mock
     private DestinationChangeService destinationChangeService;
 
+    @Mock
+    private LinkInspectionService linkInspectionService;
+
     private AnonymousLinkSignals anonymousLinkSignals;
 
     private UrlCache urlCache;
@@ -316,7 +320,7 @@ class UrlServiceTest {
                 settingsService,
                 withoutTransactions,
                 anonymousLinkSignals, LinkWarningTemplates.engine(), humanCheckService, signInFormCheckService,
-                destinationChangeService
+                destinationChangeService, linkInspectionService
         );
     }
 
@@ -442,6 +446,38 @@ class UrlServiceTest {
         order.verify(urlRepository).save(url);
         order.verify(destinationCheckRepository).reset(7L);
         assertThat(result.destinationHealth()).isNull();
+    }
+
+    @Test
+    void repointingALinkDropsItsInspection() {
+        final var url = Url.builder().id(7L).shortUrl("abc").longUrl("https://old.example").visits(0L).active(true).build();
+        final var update = UrlUpdateDto.builder().id(7L).longUrl("https://new.example").build();
+        final var changed = Url.builder().id(7L).shortUrl("abc").longUrl("https://new.example").visits(0L).active(true).build();
+        when(userService.getUserFromToken()).thenReturn(admin());
+        when(urlRepository.findById(7L)).thenReturn(Optional.of(url));
+        when(urlUpdateDtoToUrlConverter.convert(update)).thenReturn(changed);
+        when(urlRepository.save(url)).thenReturn(url);
+
+        urlService.updateUrl(update, null);
+
+        final var order = org.mockito.Mockito.inOrder(urlRepository, linkInspectionService, reviewQueueService);
+        order.verify(urlRepository).save(url);
+        order.verify(linkInspectionService).dropFor(7L);
+        order.verify(reviewQueueService).resolveOpen(url, ReviewResolution.DESTINATION_CHANGED, "system");
+    }
+
+    @Test
+    void anEditThatKeepsTheDestinationKeepsItsInspection() {
+        final var url = Url.builder().id(7L).shortUrl("abc").longUrl("https://same.example").visits(0L).active(true).build();
+        final var update = UrlUpdateDto.builder().id(7L).longUrl("https://same.example").visitLimit(5L).build();
+        final var edited = Url.builder().id(7L).shortUrl("abc").longUrl("https://same.example").visitLimit(5L).visits(0L).active(true).build();
+        when(urlRepository.findById(7L)).thenReturn(Optional.of(url));
+        when(urlUpdateDtoToUrlConverter.convert(update)).thenReturn(edited);
+        when(urlRepository.save(url)).thenReturn(url);
+
+        urlService.updateUrl(update, null);
+
+        verifyNoInteractions(linkInspectionService);
     }
 
     @Test
@@ -2172,7 +2208,7 @@ class UrlServiceTest {
                 urlToPeekUrlConverter, createUrlToUrlConverter, urlUpdateDtoToUrlConverter, urlCache, objectMapper, meterRegistry,
                 passwordEncoder, suspiciousUrlService, rateLimiter, reviewQueueService, scammerSignalService, clickCheckService, redirectChainService,
                 transactionOperations, reservedAliasService, burstAlertService, destinationCheckRepository, customDomainRegistry, customDomainRepository,
-                campaignService, settingsService, withoutTransactions, anonymousLinkSignals, LinkWarningTemplates.engine(), humanCheckService, signInFormCheckService, destinationChangeService);
+                campaignService, settingsService, withoutTransactions, anonymousLinkSignals, LinkWarningTemplates.engine(), humanCheckService, signInFormCheckService, destinationChangeService, linkInspectionService);
     }
 
     private Url anonymousCreateOf(final String longUrl, final LinkVerdict verdict) {
@@ -5215,7 +5251,7 @@ class UrlServiceTest {
                 new io.micrometer.core.instrument.simple.SimpleMeterRegistry(), passwordEncoder, suspiciousUrlService, rateLimiter,
                 reviewQueueService, scammerSignalService, clickCheckService, redirectChainService, TransactionOperations.withoutTransaction(),
                 reservedAliasService, burstAlertService, destinationCheckRepository, customDomainRegistry, customDomainRepository, campaignService, settingsService,
-                withoutTransactions, anonymousLinkSignals, LinkWarningTemplates.engine(), humanCheckService, signInFormCheckService, destinationChangeService);
+                withoutTransactions, anonymousLinkSignals, LinkWarningTemplates.engine(), humanCheckService, signInFormCheckService, destinationChangeService, linkInspectionService);
     }
 
     private static UrlService withTheCacheAnnotations(final UrlService service, final CacheManager urls) {
@@ -5287,7 +5323,7 @@ class UrlServiceTest {
                 settingsService,
                 withoutTransactions,
                 anonymousLinkSignals, LinkWarningTemplates.engine(), humanCheckService, signInFormCheckService,
-                destinationChangeService
+                destinationChangeService, linkInspectionService
         );
     }
 
@@ -5368,7 +5404,7 @@ class UrlServiceTest {
                 settingsService,
                 transactionManager,
                 anonymousLinkSignals, LinkWarningTemplates.engine(), humanCheckService, signInFormCheckService,
-                destinationChangeService
+                destinationChangeService, linkInspectionService
         );
         final var proxyFactory = new ProxyFactory(service);
         proxyFactory.addAdvice(new TransactionInterceptor(transactionManager, new AnnotationTransactionAttributeSource()));
@@ -5408,7 +5444,7 @@ class UrlServiceTest {
                 settingsService,
                 withoutTransactions,
                 anonymousLinkSignals, LinkWarningTemplates.engine(), humanCheckService, signInFormCheckService,
-                destinationChangeService
+                destinationChangeService, linkInspectionService
         );
     }
 
@@ -5444,7 +5480,7 @@ class UrlServiceTest {
                 settingsService,
                 withoutTransactions,
                 anonymousLinkSignals, LinkWarningTemplates.engine(), humanCheckService, signInFormCheckService,
-                destinationChangeService
+                destinationChangeService, linkInspectionService
         );
     }
 

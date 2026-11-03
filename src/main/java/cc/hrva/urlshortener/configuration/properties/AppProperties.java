@@ -165,6 +165,10 @@ public class AppProperties {
     @NotNull
     private Turnstile turnstile = new Turnstile();
 
+    @Valid
+    @NotNull
+    private Inspection inspection = new Inspection();
+
     @Data
     public static class Mcp {
 
@@ -369,6 +373,24 @@ public class AppProperties {
         @NotBlank
         private String apiBase = "https://api.cloudflare.com/client/v4";
 
+        private String accountId;
+
+        @ToString.Exclude
+        private String browserApiToken;
+
+    }
+
+    @Data
+    public static class Inspection {
+
+        @NotNull
+        @DurationMin(seconds = 10, message = "must be at least 10 seconds")
+        private Duration interval = Duration.ofSeconds(15);
+
+        @Min(1)
+        @Max(90)
+        private int keepScreenshotDays = 7;
+
     }
 
     @Data
@@ -402,6 +424,7 @@ public class AppProperties {
         private boolean warningPage = true;
         private boolean reviewWarningPage = true;
         private boolean humanCheck = true;
+        private boolean linkScreenshots = true;
 
         @Min(1)
         @Max(90)

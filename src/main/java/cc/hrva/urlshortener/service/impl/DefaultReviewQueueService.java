@@ -1,6 +1,7 @@
 package cc.hrva.urlshortener.service.impl;
 
 import cc.hrva.urlshortener.dto.ReviewEntryResponse;
+import cc.hrva.urlshortener.dto.inspection.ScreenshotView;
 import cc.hrva.urlshortener.model.LinkReview;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.User;
@@ -13,8 +14,11 @@ import cc.hrva.urlshortener.service.ReviewQueueService;
 import cc.hrva.urlshortener.service.ScammerSignalService;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent;
 import cc.hrva.urlshortener.service.alert.AlertedLink;
+import cc.hrva.urlshortener.service.alert.LinkReviewOpened;
+import cc.hrva.urlshortener.service.inspection.LinkInspectionService;
 import cc.hrva.urlshortener.service.moderation.ReviewWarningPage;
 import cc.hrva.urlshortener.util.DomainNames;
+import cc.hrva.urlshortener.util.RedirectChains;
 import cc.hrva.urlshortener.util.ReviewReasons;
 import cc.hrva.urlshortener.util.SortWhitelist;
 import java.time.Clock;
@@ -25,6 +29,7 @@ import java.util.Collection;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Stream;
@@ -60,6 +65,7 @@ public class DefaultReviewQueueService implements ReviewQueueService {
     private final Clock clock;
     private final ApplicationEventPublisher eventPublisher;
     private final ReviewWarningPage reviewWarningPage;
+    private final LinkInspectionService linkInspectionService;
 
     @Override
     @Transactional
@@ -107,6 +113,7 @@ public class DefaultReviewQueueService implements ReviewQueueService {
                 .build());
         log.info("Link queued for review urlId={}", url.getId());
         reviewWarningPage.showWhileInReview(url);
+        eventPublisher.publishEvent(new LinkReviewOpened(url.getId()));
     }
 
     private boolean reviewedFineFor(final Url url, final List<String> incoming) {
@@ -176,7 +183,10 @@ public class DefaultReviewQueueService implements ReviewQueueService {
         final var possibleScammers = reviews.stream().anyMatch(review -> review.getUrl().getOwner() != null)
                 ? scammerSignalService.possibleScammerIds()
                 : Set.<Long>of();
-        return reviews.map(review -> entryOf(review, possibleScammers));
+        final var screenshots = reviews.isEmpty()
+                ? Map.<Long, ScreenshotView>of()
+                : linkInspectionService.summaries(reviews.stream().map(review -> review.getUrl().getId()).toList());
+        return reviews.map(review -> entryOf(review, possibleScammers, screenshots));
     }
 
     @Override
@@ -202,7 +212,7 @@ public class DefaultReviewQueueService implements ReviewQueueService {
         return linkReviewRepository.findAll(Specification.allOf(filters), sorted);
     }
 
-    private static ReviewEntryResponse entryOf(final LinkReview review, final Set<Long> possibleScammers) {
+    private static ReviewEntryResponse entryOf(final LinkReview review, final Set<Long> possibleScammers, final Map<Long, ScreenshotView> screenshots) {
         final var url = review.getUrl();
         final var owner = Optional.ofNullable(url.getOwner());
         final var host = DomainNames.hostOf(url.getLongUrl());
@@ -219,7 +229,9 @@ public class DefaultReviewQueueService implements ReviewQueueService {
                 url.getCreateDate(),
                 reasonsOf(review),
                 review.getFlaggedAt(),
-                url.getDomain() == null ? null : url.getDomain().getHostname());
+                url.getDomain() == null ? null : url.getDomain().getHostname(),
+                RedirectChains.split(url.getRedirectChain()),
+                screenshots.get(url.getId()));
     }
 
     @Override

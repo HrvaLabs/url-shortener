@@ -5,6 +5,7 @@ import cc.hrva.urlshortener.controller.LinkWarningView;
 import cc.hrva.urlshortener.model.enums.ReportCategory;
 import cc.hrva.urlshortener.repository.LinkReviewRepository;
 import cc.hrva.urlshortener.service.impl.DefaultReviewQueueService;
+import cc.hrva.urlshortener.service.inspection.LinkInspectionService;
 import cc.hrva.urlshortener.service.moderation.ReviewWarningPage;
 import java.time.Instant;
 import java.util.List;
@@ -133,6 +134,9 @@ class UrlWritesTest {
 
     @MockitoSpyBean
     private DataSource dataSource;
+
+    @MockitoBean
+    private LinkInspectionService linkInspectionService;
 
     @MockitoBean
     private UserService userService;

@@ -2,11 +2,13 @@ package cc.hrva.urlshortener.service;
 
 import cc.hrva.urlshortener.exception.InvalidSortException;
 import cc.hrva.urlshortener.dto.ReviewEntryResponse;
+import cc.hrva.urlshortener.dto.inspection.ScreenshotView;
 import cc.hrva.urlshortener.model.CustomDomain;
 import cc.hrva.urlshortener.model.LinkReview;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.enums.BlockReason;
+import cc.hrva.urlshortener.model.enums.InspectionState;
 import cc.hrva.urlshortener.model.enums.ReportCategory;
 import cc.hrva.urlshortener.model.enums.ReviewResolution;
 import cc.hrva.urlshortener.repository.LinkReviewRepository;
@@ -14,7 +16,9 @@ import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.specification.LinkReviewSpecification;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent;
 import cc.hrva.urlshortener.service.alert.AlertedLink;
+import cc.hrva.urlshortener.service.alert.LinkReviewOpened;
 import cc.hrva.urlshortener.service.impl.DefaultReviewQueueService;
+import cc.hrva.urlshortener.service.inspection.LinkInspectionService;
 import cc.hrva.urlshortener.service.moderation.ReviewWarningPage;
 import java.time.Clock;
 import java.time.Instant;
@@ -79,6 +83,9 @@ class DefaultReviewQueueServiceTest {
     @Mock
     private ReviewWarningPage reviewWarningPage;
 
+    @Mock
+    private LinkInspectionService linkInspectionService;
+
     private final Clock clock = Clock.fixed(Instant.parse("2026-10-21T10:00:00Z"), ZoneOffset.UTC);
 
     private ReviewQueueService reviewQueueService;
@@ -87,7 +94,8 @@ class DefaultReviewQueueServiceTest {
 
     @BeforeEach
     void setUp() {
-        reviewQueueService = new DefaultReviewQueueService(linkReviewRepository, urlRepository, scammerSignalService, clock, eventPublisher, reviewWarningPage);
+        reviewQueueService = new DefaultReviewQueueService(linkReviewRepository, urlRepository, scammerSignalService, clock, eventPublisher, reviewWarningPage,
+                linkInspectionService);
         lenient().when(urlRepository.findById(287L)).thenReturn(Optional.of(url));
     }
 
@@ -366,7 +374,60 @@ class DefaultReviewQueueServiceTest {
 
         assertThat(entries.getContent()).containsExactly(new ReviewEntryResponse(287L, "v0DB3", "https://findfavoritedate.life/?u=f6yp608",
                 "findfavoritedate.life", "findfavoritedate.life", 27L, "rhea@gmail.com", LocalDateTime.of(2026, 10, 19, 12, 0), true, LocalDateTime.of(2026, 10, 20, 7, 15), List.of(YOUNG, LURE),
-                LocalDateTime.of(2026, 10, 20, 7, 16), null));
+                LocalDateTime.of(2026, 10, 20, 7, 16), null, List.of(), null));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void entriesCarryTheChainAndTheScreenshotSummary() {
+        final var chained = Url.builder().id(287L).shortUrl("v0DB3").longUrl("https://findfavoritedate.life/?u=f6yp608")
+                .redirectChain("https://findfavoritedate.life/?u=f6yp608\nhttps://sso.findfavoritedate.life/").build();
+        final var plain = Url.builder().id(288L).shortUrl("r3P0t").longUrl("https://utn.pl/x").build();
+        final var taken = new ScreenshotView(InspectionState.DONE, LocalDateTime.of(2026, 10, 20, 7, 16), LocalDateTime.of(2026, 10, 20, 7, 17),
+                "https://findfavoritedate.life/?u=f6yp608", "Find your date", 200, null, true);
+        final var nothingYet = new ScreenshotView(null, null, null, null, null, null, null, true);
+        when(linkReviewRepository.findAll(any(Specification.class), any(Pageable.class))).thenReturn(new PageImpl<>(List.of(
+                LinkReview.builder().id(8L).url(chained).reasons(LURE).build(),
+                LinkReview.builder().id(9L).url(plain).reasons(YOUNG).build())));
+        when(linkInspectionService.summaries(List.of(287L, 288L))).thenReturn(java.util.Map.of(287L, taken, 288L, nothingYet));
+
+        final var entries = reviewQueueService.openEntries(PageRequest.of(0, 20), null, null, null);
+
+        assertThat(entries.getContent())
+                .extracting(ReviewEntryResponse::redirectChain, ReviewEntryResponse::screenshot)
+                .containsExactly(tuple(List.of("https://findfavoritedate.life/?u=f6yp608", "https://sso.findfavoritedate.life/"), taken),
+                        tuple(List.of(), nothingYet));
+        verify(linkInspectionService, times(1)).summaries(any());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void anEmptyPageAsksForNoScreenshots() {
+        when(linkReviewRepository.findAll(any(Specification.class), any(Pageable.class))).thenReturn(new PageImpl<>(List.of()));
+
+        reviewQueueService.openEntries(PageRequest.of(0, 20), null, null, null);
+
+        verifyNoInteractions(linkInspectionService);
+    }
+
+    @Test
+    void aNewReviewAsksForAScreenshotAndAnExtendedOneDoesNot() {
+        final var reported = Url.builder().id(288L).shortUrl("r3P0t").longUrl("https://utn.pl/x").active(true).build();
+
+        reviewQueueService.flag(url, List.of(YOUNG));
+        reviewQueueService.report(reported, ReportCategory.PHISHING, "asks for my bank login");
+
+        verify(eventPublisher).publishEvent(new LinkReviewOpened(287L));
+        verify(eventPublisher).publishEvent(new LinkReviewOpened(288L));
+
+        final var open = LinkReview.builder().id(1L).url(url).reasons(YOUNG).systemFlagged(true).flaggedAt(LocalDateTime.now()).build();
+        when(linkReviewRepository.findFirstByUrlAndResolvedAtIsNullOrderByFlaggedAtDesc(url)).thenReturn(Optional.of(open));
+        Mockito.clearInvocations(eventPublisher);
+
+        reviewQueueService.flag(url, List.of(YOUNG, LURE));
+        reviewQueueService.report(url, ReportCategory.PHISHING, "asks for my bank login");
+
+        verify(eventPublisher, never()).publishEvent(any(LinkReviewOpened.class));
     }
 
     @Test

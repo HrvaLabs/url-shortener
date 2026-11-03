@@ -166,6 +166,11 @@ app:
     api-token: ${CLOUDFLARE_API_TOKEN:}
     zone-id: ${CLOUDFLARE_ZONE_ID:}
     api-base: ${APP_CLOUDFLARE_API_BASE:https://api.cloudflare.com/client/v4}
+    account-id: ${CLOUDFLARE_ACCOUNT_ID:}
+    browser-api-token: ${CLOUDFLARE_BROWSER_API_TOKEN:}
+  inspection:
+    interval: ${APP_INSPECTION_INTERVAL:15s}
+    keep-screenshot-days: ${APP_INSPECTION_KEEP_SCREENSHOT_DAYS:7}
   turnstile:
     site-key: ${APP_TURNSTILE_SITE_KEY:}
     secret-key: ${APP_TURNSTILE_SECRET_KEY:}

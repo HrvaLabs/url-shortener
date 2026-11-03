@@ -40,6 +40,7 @@ import cc.hrva.urlshortener.service.domain.CustomDomainRegistry;
 import cc.hrva.urlshortener.service.domain.UrlCache;
 import cc.hrva.urlshortener.service.impl.DefaultClickCheckService;
 import cc.hrva.urlshortener.service.impl.DefaultUrlService;
+import cc.hrva.urlshortener.service.inspection.LinkInspectionService;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiter;
 import cc.hrva.urlshortener.service.settings.SettingsServiceFixtures;
 import cc.hrva.urlshortener.validator.ApiKeyValidator;
@@ -192,7 +193,8 @@ class UrlControllerBlocklistTest {
                 redirectChainService, TransactionOperations.withoutTransaction(), reservedAliasService, burstAlertService,
                 destinationCheckRepository, customDomainRegistry, customDomainRepository, campaignService, settingsService,
                 mock(PlatformTransactionManager.class), mock(AnonymousLinkSignals.class), LinkWarningTemplates.engine(),
-                mock(HumanCheckService.class), mock(SignInFormCheckService.class), mock(DestinationChangeService.class));
+                mock(HumanCheckService.class), mock(SignInFormCheckService.class), mock(DestinationChangeService.class),
+                mock(LinkInspectionService.class));
         mockMvc = MockMvcBuilders.standaloneSetup(new UrlController(urlService, qrCodeService, linkPreviewService, clientIpResolver,
                         new ClickRequestResolver(clientIpResolver), request, new ShortLinks(appProperties)))
                 .setControllerAdvice(new GlobalExceptionHandler())

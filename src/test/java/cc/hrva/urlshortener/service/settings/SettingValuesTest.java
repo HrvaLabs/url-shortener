@@ -137,6 +137,8 @@ class SettingValuesTest {
         final var appProperties = new AppProperties();
         appProperties.getTurnstile().setSiteKey("site");
         appProperties.getTurnstile().setSecretKey("secret");
+        appProperties.getCloudflare().setAccountId("account");
+        appProperties.getCloudflare().setBrowserApiToken("token");
         final var defaults = new SettingDefaults(appProperties, SettingsServiceFixtures.bothProviders());
         final var value = defaults.defaultOf(key);
         assertThat(SettingValues.fromStored(key, SettingValues.stored(value))).isEqualTo(value);
@@ -271,6 +273,27 @@ class SettingValuesTest {
     }
 
     @Test
+    void theLinkScreenshotsRow() {
+        assertThat(SettingKey.LINK_SCREENSHOTS).extracting(SettingKey::getGroup, SettingKey::getType, SettingKey::getLabel, SettingKey::getDescription,
+                        SettingKey::getParent, SettingKey::isSafety)
+                .containsExactly(SettingGroup.SAFETY, SettingType.SWITCH, "Screenshots of links in review",
+                        "Cloudflare opens each link that enters the review queue and takes one phone-sized screenshot, kept 7 days. "
+                                + "Needs CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_BROWSER_API_TOKEN on the server.", null, true);
+        assertThat(SettingKey.values()[SettingKey.values().length - 1]).isEqualTo(SettingKey.LINK_SCREENSHOTS);
+        final var appProperties = new AppProperties();
+        final var defaults = new SettingDefaults(appProperties, SettingsServiceFixtures.bothProviders());
+        assertThat(defaults.defaultOf(SettingKey.LINK_SCREENSHOTS)).isEqualTo(true);
+        assertThat(defaults.unavailableReason(SettingKey.LINK_SCREENSHOTS)).contains(
+                "Cloudflare Browser Run isn't set up, so no screenshots are taken. Set CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_BROWSER_API_TOKEN.");
+        appProperties.getCloudflare().setAccountId("account-1");
+        assertThat(defaults.unavailableReason(SettingKey.LINK_SCREENSHOTS)).isPresent();
+        appProperties.getCloudflare().setBrowserApiToken("token-1");
+        assertThat(defaults.unavailableReason(SettingKey.LINK_SCREENSHOTS)).isEmpty();
+        appProperties.getModeration().setLinkScreenshots(false);
+        assertThat(defaults.defaultOf(SettingKey.LINK_SCREENSHOTS)).isEqualTo(false);
+    }
+
+    @Test
     void theHumanCheckRow() {
         assertThat(SettingKey.HUMAN_CHECK).extracting(SettingKey::getGroup, SettingKey::getType, SettingKey::getLabel, SettingKey::getDescription,
                         SettingKey::getParent, SettingKey::isSafety)
@@ -300,7 +323,8 @@ class SettingValuesTest {
                                 + "can't open these links.", SettingKey.ANONYMOUS_LINKS, false, 1, 1_000_000, "visits", true,
                         "Unlimited");
         assertThat(Arrays.asList(SettingKey.values()).subList(SettingKey.HUMAN_CHECK.ordinal() + 1, SettingKey.values().length))
-                .containsExactly(SettingKey.ANONYMOUS_EXPIRY_DAYS, SettingKey.ANONYMOUS_VISIT_LIMIT, SettingKey.API_KEY_REQUESTS_PER_HOUR);
+                .containsExactly(SettingKey.ANONYMOUS_EXPIRY_DAYS, SettingKey.ANONYMOUS_VISIT_LIMIT, SettingKey.API_KEY_REQUESTS_PER_HOUR,
+                        SettingKey.LINK_SCREENSHOTS);
         final var appProperties = new AppProperties();
         final var defaults = new SettingDefaults(appProperties, SettingsServiceFixtures.bothProviders());
         assertThat(defaults.defaultOf(SettingKey.ANONYMOUS_EXPIRY_DAYS)).isNull();

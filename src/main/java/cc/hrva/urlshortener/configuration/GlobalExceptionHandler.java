@@ -38,6 +38,7 @@ import cc.hrva.urlshortener.exception.ReservedAliasNotFoundException;
 import cc.hrva.urlshortener.exception.SettingNotFoundException;
 import cc.hrva.urlshortener.exception.ShortUrlAlreadyExistsException;
 import cc.hrva.urlshortener.exception.ResetLinkExpiredException;
+import cc.hrva.urlshortener.exception.ScreenshotsUnavailableException;
 import cc.hrva.urlshortener.exception.SignInExpiredException;
 import cc.hrva.urlshortener.exception.ServiceBusyException;
 import cc.hrva.urlshortener.exception.SignInUnavailableException;
@@ -257,6 +258,11 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(LinkClicksUsedUpException.class)
     public ResponseEntity<ProblemDetail> handleLinkClicksUsedUp(final LinkClicksUsedUpException ex) {
+        return ProblemResponses.entity(HttpStatus.CONFLICT, safeMessage(ex));
+    }
+
+    @ExceptionHandler(ScreenshotsUnavailableException.class)
+    public ResponseEntity<ProblemDetail> handleScreenshotsUnavailable(final ScreenshotsUnavailableException ex) {
         return ProblemResponses.entity(HttpStatus.CONFLICT, safeMessage(ex));
     }
 

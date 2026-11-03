@@ -67,6 +67,7 @@ import cc.hrva.urlshortener.service.domain.DomainRoute;
 import cc.hrva.urlshortener.service.domain.ShortLinks;
 import cc.hrva.urlshortener.service.domain.UrlCache;
 import cc.hrva.urlshortener.service.domain.UrlCacheKeys;
+import cc.hrva.urlshortener.service.inspection.LinkInspectionService;
 import cc.hrva.urlshortener.service.linksignal.AnonymousLinkSignals;
 import cc.hrva.urlshortener.service.linksignal.AnonymousLinkSignals.Signals;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiter;
@@ -216,6 +217,7 @@ public class DefaultUrlService implements UrlService {
     private final HumanCheckService humanCheckService;
     private final SignInFormCheckService signInFormCheckService;
     private final DestinationChangeService destinationChangeService;
+    private final LinkInspectionService linkInspectionService;
     private final Cache<Long, Boolean> droppedQueryLogs = CacheBuilder.newBuilder()
             .expireAfterWrite(DROPPED_QUERY_LOG_INTERVAL)
             .maximumSize(MAX_DROPPED_QUERY_LOGS)
@@ -705,6 +707,7 @@ public class DefaultUrlService implements UrlService {
             final var saved = urlRepository.save(current);
             if (destinationChanged) {
                 destinationCheckRepository.reset(saved.getId());
+                linkInspectionService.dropFor(saved.getId());
                 if (editor.admin()) {
                     reviewQueueService.resolveOpen(saved, ReviewResolution.DESTINATION_CHANGED, SYSTEM);
                 }

@@ -53,5 +53,6 @@
     <include file="classpath:/db/changelog/043-url-opens.xml"/>
     <include file="classpath:/db/changelog/047-review-warning-page.xml"/>
     <include file="classpath:/db/changelog/048-redirect-chain.xml"/>
+    <include file="classpath:/db/changelog/049-link-inspection.xml"/>
 
 </databaseChangeLog>
