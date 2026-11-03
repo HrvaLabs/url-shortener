@@ -62,15 +62,27 @@ class DefaultEmailServiceTest {
     }
 
     @Test
-    void anEmailWithoutPlainTextIsHtmlOnlyAsBefore() throws Exception {
+    void anHtmlOnlyEmailIsSentWithAGeneratedTextPart() throws Exception {
         emailService.sendEmail(email(null), null);
 
         final var parts = partsOf(sentMessage());
-        assertThat(parts).noneMatch(part -> typeOf(part).startsWith("multipart/alternative"));
-        assertThat(parts).noneMatch(part -> typeOf(part).startsWith("text/plain"));
-        final var html = parts.stream().filter(part -> typeOf(part).startsWith("text/html")).toList();
-        assertThat(html).hasSize(1);
-        assertThat(html.getFirst().getContent()).isEqualTo(HTML);
+        final var alternatives = parts.stream().filter(part -> typeOf(part).startsWith("multipart/alternative")).toList();
+        assertThat(alternatives).hasSize(1);
+        final var alternative = (Multipart) alternatives.getFirst().getContent();
+        assertThat(alternative.getCount()).isEqualTo(2);
+        assertThat(typeOf(alternative.getBodyPart(0))).startsWith("text/plain");
+        assertThat(alternative.getBodyPart(0).getContent()).isEqualTo(SUBJECT + "\n\nClicks: 1,204 (up 12% on the week before)");
+        assertThat(typeOf(alternative.getBodyPart(1))).startsWith("text/html");
+        assertThat(alternative.getBodyPart(1).getContent()).isEqualTo(HTML);
+    }
+
+    @Test
+    void aHandWrittenTextPartIsKept() throws Exception {
+        emailService.sendEmail(email(PLAIN_TEXT), null);
+
+        final var plain = partsOf(sentMessage()).stream().filter(part -> typeOf(part).startsWith("text/plain")).toList();
+        assertThat(plain).hasSize(1);
+        assertThat(plain.getFirst().getContent()).isEqualTo(PLAIN_TEXT);
     }
 
     @Test

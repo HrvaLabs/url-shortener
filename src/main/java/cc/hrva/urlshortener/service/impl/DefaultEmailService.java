@@ -13,6 +13,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import cc.hrva.urlshortener.model.Email;
 import cc.hrva.urlshortener.service.EmailService;
+import cc.hrva.urlshortener.util.EmailPlainText;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.mail.javamail.MimeMessageHelper;
@@ -62,11 +63,8 @@ public class DefaultEmailService implements EmailService {
             message.setBcc(email.getBcc());
         }
         message.setSubject(email.getSubject());
-        if (email.getPlainText() != null) {
-            message.setText(email.getPlainText(), email.getText());
-        } else {
-            message.setText(email.getText(), true);
-        }
+        final var plainText = email.getPlainText() != null ? email.getPlainText() : EmailPlainText.of(email.getText());
+        message.setText(plainText, email.getText());
     }
 
     private void setSender(final Email email, final MimeMessageHelper message) throws MessagingException {
