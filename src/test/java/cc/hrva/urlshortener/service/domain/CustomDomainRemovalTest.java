@@ -47,6 +47,7 @@ import org.springframework.context.annotation.Import;
 import org.springframework.core.task.TaskRejectedException;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.scheduling.TaskScheduler;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -121,6 +122,9 @@ class CustomDomainRemovalTest {
 
     @MockitoBean
     private SendingEmailService sendingEmailService;
+
+    @MockitoBean
+    private TaskScheduler taskScheduler;
 
     @BeforeEach
     void setUp() {

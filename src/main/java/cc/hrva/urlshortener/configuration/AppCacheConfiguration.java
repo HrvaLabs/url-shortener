@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.configuration;
 
+import cc.hrva.urlshortener.service.domain.UrlCache;
 import java.time.Duration;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
@@ -21,7 +22,6 @@ import tools.jackson.databind.ObjectMapper;
 public class AppCacheConfiguration {
 
     private static final Logger log = LoggerFactory.getLogger(AppCacheConfiguration.class);
-    private static final String URLS_CACHE = "urls";
     private static final Duration URLS_TTL = Duration.ofHours(24);
 
     private final ObjectMapper objectMapper;
@@ -37,7 +37,7 @@ public class AppCacheConfiguration {
 
     @Bean
     public RedisCacheManagerBuilderCustomizer urlsCacheKeepsEntriesForADay() {
-        return builder -> builder.withCacheConfiguration(URLS_CACHE, builder.cacheDefaults().entryTtl(URLS_TTL));
+        return builder -> builder.withCacheConfiguration(UrlCache.CACHE_NAME, builder.cacheDefaults().entryTtl(URLS_TTL));
     }
 
     @Bean

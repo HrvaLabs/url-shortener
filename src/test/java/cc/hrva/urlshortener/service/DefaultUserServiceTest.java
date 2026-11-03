@@ -59,6 +59,7 @@ import cc.hrva.urlshortener.service.alert.AdminAlertEvent;
 import cc.hrva.urlshortener.service.bio.BioAccountData;
 import cc.hrva.urlshortener.service.domain.AccountActiveChangedEvent;
 import cc.hrva.urlshortener.service.domain.CustomDomainAccountData;
+import cc.hrva.urlshortener.service.domain.UrlCache;
 import cc.hrva.urlshortener.service.impl.DefaultLoginAttemptService;
 import cc.hrva.urlshortener.service.impl.DefaultSendingEmailService;
 import cc.hrva.urlshortener.service.impl.DefaultUserService;
@@ -221,6 +222,9 @@ class DefaultUserServiceTest {
     private DestinationChangeService destinationChangeService;
 
     @Mock
+    private UrlCache urlCache;
+
+    @Mock
     private SignInMethodChangeService signInMethodChangeService;
 
     @Mock
@@ -249,20 +253,7 @@ class DefaultUserServiceTest {
                 passwordEncoder, apiKeyRepository, emailLogRepository, resetTokenService,
                 resetTokenRepository, twoFactorRecoveryCodeRepository, passkeyCredentialRepository, bioAccountData, notificationAccountData, customDomainAccountData, userToUserDtoConverter, sendingEmailService,
                 verificationTokenService, verificationTokenRepository, userUpdateDtoToUserConverter, connectedAppsService, scammerSignalService, signInMethodService, signInMethodChangeService, accountLock, publisher, inactiveAccounts, accountEmailLimits,
-                destinationChangeService);
-    }
-
-    @Test
-    void deletingAnAccountClearsItsLinksFromTheRedirectCache() throws NoSuchMethodException {
-        for (final var method : java.util.List.of(
-                DefaultUserService.class.getMethod("deleteUserById", Long.class),
-                DefaultUserService.class.getMethod("deleteOwnAccount", cc.hrva.urlshortener.dto.DeleteAccountDto.class))) {
-            final var evict = method.getAnnotation(org.springframework.cache.annotation.CacheEvict.class);
-
-            assertThat(evict).as(method.getName()).isNotNull();
-            assertThat(evict.value()).containsExactly("urls");
-            assertThat(evict.allEntries()).isTrue();
-        }
+                destinationChangeService, urlCache);
     }
 
     @Test
@@ -599,6 +590,7 @@ class DefaultUserServiceTest {
         verify(resetTokenRepository).deleteByUser(user);
         verify(urlRepository).deleteByOwner(user);
         verify(userRepository).delete(user);
+        verify(urlCache).clearNowAndAgainLater();
     }
 
     @Test
@@ -670,6 +662,7 @@ class DefaultUserServiceTest {
         order.verify(urlRepository).deleteByOwner(user);
         order.verify(customDomainAccountData).purgeFor(List.of(7L));
         order.verify(userRepository).delete(user);
+        verify(urlCache).clearNowAndAgainLater();
         SecurityContextHolder.clearContext();
     }
 

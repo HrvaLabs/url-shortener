@@ -66,6 +66,8 @@ import com.nimbusds.jose.JOSEException;
 import com.nimbusds.jose.jwk.RSAKey;
 import com.nimbusds.jose.jwk.gen.RSAKeyGenerator;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.Optional;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -605,19 +607,40 @@ class UpdateLinkFlowTest {
     }
 
     @Test
-    void aDestinationChangeEvictsTheRedirectCacheAgainShortlyAfter() throws Exception {
+    void aDestinationChangeEvictsTheRedirectCacheAfterTheCommitAndAgainShortlyAfter() throws Exception {
         goodStanding();
-        final var urls = mock(Cache.class);
-        when(cacheManager.getCache("urls")).thenReturn(urls);
+        final var evictions = evictionsSeeing("long_url");
 
         mockMvc.perform(edit("owner-token", "{\"id\":" + LINK + ",\"longUrl\":\"" + NEW_DESTINATION + "\"}"))
                 .andExpect(status().isOk());
 
-        final var later = ArgumentCaptor.forClass(Runnable.class);
-        verify(taskScheduler).schedule(later.capture(), any(Instant.class));
-        verify(urls, never()).evict(any());
-        later.getValue().run();
-        verify(urls).evict("edit1");
+        assertThat(evictions).containsExactly("edit1 seeing " + NEW_DESTINATION);
+        secondEviction().run();
+        assertThat(evictions).containsExactly("edit1 seeing " + NEW_DESTINATION, "edit1 seeing " + NEW_DESTINATION);
+    }
+
+    @Test
+    void anEditThatKeepsTheDestinationEvictsAfterTheCommitAndAgainShortlyAfter() throws Exception {
+        final var evictions = evictionsSeeing("visit_limit");
+
+        mockMvc.perform(edit("owner-token", "{\"id\":" + LINK + ",\"longUrl\":\"" + OLD_DESTINATION + "\",\"visitLimit\":7}"))
+                .andExpect(status().isOk());
+
+        assertThat(evictions).containsExactly("edit1 seeing 7");
+        secondEviction().run();
+        assertThat(evictions).containsExactly("edit1 seeing 7", "edit1 seeing 7");
+    }
+
+    @Test
+    void turningALinkOffEvictsAfterTheCommitAndAgainShortlyAfter() throws Exception {
+        final var evictions = evictionsSeeing("active");
+
+        mockMvc.perform(edit("owner-token", "{\"id\":" + LINK + ",\"longUrl\":\"" + OLD_DESTINATION + "\",\"active\":false}"))
+                .andExpect(status().isOk());
+
+        assertThat(evictions).containsExactly("edit1 seeing false");
+        secondEviction().run();
+        assertThat(evictions).containsExactly("edit1 seeing false", "edit1 seeing false");
     }
 
     @Test
@@ -1120,6 +1143,22 @@ class UpdateLinkFlowTest {
                 .header(ApiKeyRateLimitFilter.API_KEY_HEADER, KEY_VALUE)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(body);
+    }
+
+    private List<String> evictionsSeeing(final String column) {
+        final var evictions = new CopyOnWriteArrayList<String>();
+        final var urls = mock(Cache.class);
+        doAnswer(invocation -> evictions.add(invocation.getArgument(0) + " seeing " + CompletableFuture.supplyAsync(
+                () -> jdbcTemplate.queryForObject("select " + column + " from url where id = ?", Object.class, LINK)).join()))
+                .when(urls).evict(any());
+        when(cacheManager.getCache("urls")).thenReturn(urls);
+        return evictions;
+    }
+
+    private Runnable secondEviction() {
+        final var later = ArgumentCaptor.forClass(Runnable.class);
+        verify(taskScheduler).schedule(later.capture(), any(Instant.class));
+        return later.getValue();
     }
 
     private MockHttpServletRequestBuilder edit(final String token, final String body) {

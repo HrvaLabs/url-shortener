@@ -52,7 +52,6 @@ import org.apache.commons.lang3.StringUtils;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
-import org.springframework.scheduling.TaskScheduler;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -64,7 +63,6 @@ public class DefaultDestinationChangeService implements DestinationChangeService
     public static final int CHANGES_PER_DAY = 5;
     private static final Duration DAY = Duration.ofDays(1);
     private static final Duration UNAVAILABLE_RETRY = Duration.ofMinutes(1);
-    private static final Duration SECOND_EVICTION_DELAY = Duration.ofSeconds(2);
     private static final String LIMIT_KEY = "destination-change:";
     private static final String TARGET_URL = "Url";
     private static final String CHANGED_AT = "changedAt";
@@ -96,7 +94,6 @@ public class DefaultDestinationChangeService implements DestinationChangeService
     private final AuditLogService auditLogService;
     private final RateLimiter rateLimiter;
     private final UrlCache urlCache;
-    private final TaskScheduler taskScheduler;
     private final Clock clock;
 
     @Override
@@ -163,15 +160,7 @@ public class DefaultDestinationChangeService implements DestinationChangeService
         auditLogService.log(changedBy, AuditAction.CHANGE_LINK_DESTINATION, TARGET_URL, String.valueOf(url.getId()),
                 "from: %s, to: %s, via: %s%s".formatted(oldLongUrl, url.getLongUrl(), editor.via(), forced ? ", forced: true" : ""));
         log.info("Destination changed urlId={} userId={} via={}", url.getId(), editor.user().getId(), editor.via());
-        evictAgainShortly(UrlCacheKeys.of(url.domainId(), url.getShortUrl()));
-    }
-
-    private void evictAgainShortly(final String cacheKey) {
-        try {
-            taskScheduler.schedule(() -> urlCache.evict(cacheKey), clock.instant().plus(SECOND_EVICTION_DELAY));
-        } catch (final RuntimeException exception) {
-            log.warn("Scheduling the second URL cache eviction failed exception={}", exception.getClass().getName());
-        }
+        urlCache.evictNowAndAgainLater(UrlCacheKeys.of(url.domainId(), url.getShortUrl()));
     }
 
     @Override

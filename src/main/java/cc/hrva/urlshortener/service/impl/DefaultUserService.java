@@ -45,6 +45,7 @@ import cc.hrva.urlshortener.service.alert.AdminAlertEvent;
 import cc.hrva.urlshortener.service.bio.BioAccountData;
 import cc.hrva.urlshortener.service.domain.AccountActiveChangedEvent;
 import cc.hrva.urlshortener.service.domain.CustomDomainAccountData;
+import cc.hrva.urlshortener.service.domain.UrlCache;
 import cc.hrva.urlshortener.service.notification.NotificationAccountData;
 import cc.hrva.urlshortener.service.twostep.AccountLock;
 import cc.hrva.urlshortener.util.EmailAddresses;
@@ -64,7 +65,6 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.crypto.password.PasswordEncoder;
-import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -108,6 +108,7 @@ public class DefaultUserService implements UserService {
     private final InactiveAccounts inactiveAccounts;
     private final AccountEmailLimits accountEmailLimits;
     private final DestinationChangeService destinationChangeService;
+    private final UrlCache urlCache;
 
     @Override
     @Transactional
@@ -205,7 +206,6 @@ public class DefaultUserService implements UserService {
 
     @Override
     @Transactional
-    @CacheEvict(value = "urls", allEntries = true)
     public void deleteUserById(final Long id) {
         log.info("Delete user id={}", id);
         final var user = userRepository.findById(id)
@@ -215,7 +215,6 @@ public class DefaultUserService implements UserService {
 
     @Override
     @Transactional
-    @CacheEvict(value = "urls", allEntries = true)
     public void deleteOwnAccount(final DeleteAccountDto deleteAccountDto) {
         final var user = getUserFromToken();
         if (user == null) {
@@ -280,6 +279,7 @@ public class DefaultUserService implements UserService {
         disconnectConnectedApps(user.getId(), user.getEmail());
         // API keys are removed via CascadeType.ALL on User.apiKeys when the user is deleted.
         userRepository.delete(user);
+        urlCache.clearNowAndAgainLater();
         log.info("Deleted user id={} and all owned data", user.getId());
     }
 

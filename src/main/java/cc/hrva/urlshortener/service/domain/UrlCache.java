@@ -1,28 +1,37 @@
 package cc.hrva.urlshortener.service.domain;
 
 import cc.hrva.urlshortener.dto.stats.CacheStats;
+import java.time.Clock;
+import java.time.Duration;
 import java.util.Optional;
 import java.util.concurrent.atomic.LongAdder;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.cache.Cache;
 import org.springframework.cache.CacheManager;
+import org.springframework.scheduling.TaskScheduler;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 @Slf4j
 @Component
 @RequiredArgsConstructor
 public class UrlCache {
 
-    private static final String URLS_CACHE = "urls";
+    public static final String CACHE_NAME = "urls";
+
+    private static final Duration SECOND_EVICTION_DELAY = Duration.ofSeconds(2);
 
     private final CacheManager cacheManager;
+    private final TaskScheduler taskScheduler;
+    private final Clock clock;
     private final LongAdder redirectHits = new LongAdder();
     private final LongAdder redirectMisses = new LongAdder();
 
     public Object get(final String cacheKey) {
         try {
-            return Optional.ofNullable(cacheManager.getCache(URLS_CACHE))
+            return Optional.ofNullable(cacheManager.getCache(CACHE_NAME))
                     .map(cache -> cache.get(cacheKey))
                     .map(Cache.ValueWrapper::get)
                     .orElse(null);
@@ -34,7 +43,7 @@ public class UrlCache {
 
     public void put(final String cacheKey, final Object value) {
         try {
-            final var cache = cacheManager.getCache(URLS_CACHE);
+            final var cache = cacheManager.getCache(CACHE_NAME);
             if (cache != null) {
                 cache.put(cacheKey, value);
             }
@@ -45,13 +54,27 @@ public class UrlCache {
 
     public void evict(final String cacheKey) {
         try {
-            final var cache = cacheManager.getCache(URLS_CACHE);
+            final var cache = cacheManager.getCache(CACHE_NAME);
             if (cache != null) {
                 cache.evict(cacheKey);
             }
         } catch (final RuntimeException exception) {
             log.warn("URL cache eviction failed key={} exception={}", cacheKey, exception.getClass().getName());
         }
+    }
+
+    public void evictNowAndAgainLater(final String cacheKey) {
+        afterCommit(() -> {
+            evict(cacheKey);
+            again(() -> evict(cacheKey));
+        });
+    }
+
+    public void clearNowAndAgainLater() {
+        afterCommit(() -> {
+            clear();
+            again(this::clear);
+        });
     }
 
     public void recordRedirectHit() {
@@ -64,6 +87,38 @@ public class UrlCache {
 
     public CacheStats redirectStats() {
         return CacheStats.of(redirectHits.sum(), redirectMisses.sum());
+    }
+
+    private void clear() {
+        try {
+            final var cache = cacheManager.getCache(CACHE_NAME);
+            if (cache != null) {
+                cache.clear();
+            }
+        } catch (final RuntimeException exception) {
+            log.warn("URL cache clear failed exception={}", exception.getClass().getName());
+        }
+    }
+
+    private void again(final Runnable eviction) {
+        try {
+            taskScheduler.schedule(eviction, clock.instant().plus(SECOND_EVICTION_DELAY));
+        } catch (final RuntimeException exception) {
+            log.warn("Scheduling the second URL cache eviction failed exception={}", exception.getClass().getName());
+        }
+    }
+
+    private static void afterCommit(final Runnable eviction) {
+        if (!TransactionSynchronizationManager.isActualTransactionActive() || !TransactionSynchronizationManager.isSynchronizationActive()) {
+            eviction.run();
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                eviction.run();
+            }
+        });
     }
 
 }

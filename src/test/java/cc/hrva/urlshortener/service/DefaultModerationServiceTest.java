@@ -253,8 +253,8 @@ class DefaultModerationServiceTest {
         final var domainModeration = new CustomDomainModeration(customDomainRepository, customDomainLifecycle, linkCheckService, sendingEmailService, eventPublisher,
                 transactions, Clock.fixed(Instant.parse("2026-10-29T09:00:00Z"), ZoneOffset.UTC));
         moderationService = new DefaultModerationService(urlRepository, userRepository, domainRuleRepository, linkCheckService,
-                reviewQueueService, userService, sendingEmailService, auditLogService, new UrlCache(cacheManager), eventPublisher, transactions,
-                scammerSignalService, taskScheduler, domainModeration, campaignRepository);
+                reviewQueueService, userService, sendingEmailService, auditLogService, new UrlCache(cacheManager, taskScheduler, Clock.systemUTC()), eventPublisher, transactions,
+                scammerSignalService, domainModeration, campaignRepository);
     }
 
     @Test
@@ -348,6 +348,20 @@ class DefaultModerationServiceTest {
 
         verify(cache).evict("7/menu");
         verify(cache, never()).evict("menu");
+    }
+
+    @Test
+    void aDeletedLinkIsEvictedAfterItsTransactionCommitsAndAgainLater() {
+        link(80L, "https://example.org/x", user(1L, "alice@example.com"));
+        final var eviction = ArgumentCaptor.forClass(Runnable.class);
+
+        moderationService.deleteLink(80L, ADMIN, "mcp");
+
+        verify(cache).evict("s80");
+        verify(taskScheduler).schedule(eviction.capture(), any(Instant.class));
+        eviction.getValue().run();
+        verify(cache, times(2)).evict("s80");
+        assertThat(outOfPlace).isEmpty();
     }
 
     @Test

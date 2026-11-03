@@ -17,6 +17,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
 import io.micrometer.core.instrument.MeterRegistry;
+import org.springframework.scheduling.TaskScheduler;
 import tools.jackson.databind.ObjectMapper;
 import org.hibernate.exception.ConstraintViolationException;
 import org.hibernate.exception.DataException;
@@ -271,7 +272,7 @@ class UrlServiceTest {
 
     @BeforeEach
     void setUp() {
-        urlCache = new UrlCache(cacheManager);
+        urlCache = new UrlCache(cacheManager, mock(TaskScheduler.class), Clock.systemUTC());
         org.mockito.Mockito.lenient().when(rateLimiter.tryAcquire(any(), org.mockito.ArgumentMatchers.anyInt(), any())).thenReturn(true);
         org.mockito.Mockito.lenient().when(customDomainRepository.findStatusForUpdate(anyLong())).thenReturn(Optional.of("ACTIVE"));
         org.mockito.Mockito.lenient().when(urlValidator.checkIfLongUrlIsNotBlocklisted(any())).thenReturn(LinkVerdict.clean());
@@ -5068,7 +5069,7 @@ class UrlServiceTest {
 
     private UrlService urlServiceCachingIn(final CacheManager urls) {
         return new DefaultUrlService(userService, urlValidator, apiKeyService, urlRepository, appProperties, apiKeyValidator, clickAnalyticsService,
-                urlToPeekUrlConverter, createUrlToUrlConverter, urlUpdateDtoToUrlConverter, new UrlCache(urls), objectMapper,
+                urlToPeekUrlConverter, createUrlToUrlConverter, urlUpdateDtoToUrlConverter, new UrlCache(urls, mock(TaskScheduler.class), Clock.systemUTC()), objectMapper,
                 new io.micrometer.core.instrument.simple.SimpleMeterRegistry(), passwordEncoder, suspiciousUrlService, rateLimiter,
                 reviewQueueService, scammerSignalService, clickCheckService, redirectChainService, TransactionOperations.withoutTransaction(),
                 reservedAliasService, burstAlertService, destinationCheckRepository, customDomainRegistry, customDomainRepository, campaignService, settingsService,

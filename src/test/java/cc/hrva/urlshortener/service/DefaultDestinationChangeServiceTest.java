@@ -49,6 +49,7 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -96,7 +97,8 @@ class DefaultDestinationChangeServiceTest {
     @BeforeEach
     void setUp() {
         destinationChanges = new DefaultDestinationChangeService(accountStandingService, userRepository, settingsService, linkReviewRepository, linkDestinationChangeRepository,
-                auditLogService, rateLimiter, new UrlCache(cacheManager), taskScheduler, Clock.fixed(NOW.toInstant(ZoneOffset.UTC), ZoneOffset.UTC));
+                auditLogService, rateLimiter, new UrlCache(cacheManager, taskScheduler, Clock.fixed(NOW.toInstant(ZoneOffset.UTC), ZoneOffset.UTC)),
+                Clock.fixed(NOW.toInstant(ZoneOffset.UTC), ZoneOffset.UTC));
         lenient().when(settingsService.isOn(SettingKey.DESTINATION_CHANGES)).thenReturn(true);
         lenient().when(accountStandingService.standingOf(OWNER)).thenReturn(new AccountStanding(List.of()));
     }
@@ -227,9 +229,9 @@ class DefaultDestinationChangeServiceTest {
                 "from: https://example.com/old, to: https://example.com/new, via: API_KEY");
         final var later = ArgumentCaptor.forClass(Runnable.class);
         verify(taskScheduler).schedule(later.capture(), org.mockito.ArgumentMatchers.eq(NOW.toInstant(ZoneOffset.UTC).plusSeconds(2)));
-        verify(cache, never()).evict(any());
-        later.getValue().run();
         verify(cache).evict("abc");
+        later.getValue().run();
+        verify(cache, times(2)).evict("abc");
     }
 
     @Test

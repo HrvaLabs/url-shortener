@@ -23,6 +23,7 @@ import cc.hrva.urlshortener.repository.VerificationTokenRepository;
 import cc.hrva.urlshortener.security.Reauthentication;
 import cc.hrva.urlshortener.service.bio.BioAccountData;
 import cc.hrva.urlshortener.service.domain.CustomDomainAccountData;
+import cc.hrva.urlshortener.service.domain.UrlCache;
 import cc.hrva.urlshortener.service.notification.NotificationAccountData;
 import cc.hrva.urlshortener.service.impl.DefaultAuditLogService;
 import cc.hrva.urlshortener.service.impl.DefaultSendingEmailService;
@@ -148,6 +149,9 @@ class UserEndpointsWithoutOpenInViewTest {
 
     @MockitoBean
     private ScammerSignalService scammerSignalService;
+
+    @MockitoBean
+    private UrlCache urlCache;
 
     @BeforeEach
     void seedTheMember() {

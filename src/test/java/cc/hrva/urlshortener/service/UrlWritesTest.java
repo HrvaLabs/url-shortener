@@ -1,11 +1,18 @@
 package cc.hrva.urlshortener.service;
 
+import cc.hrva.urlshortener.configuration.ClockConfiguration;
+import java.time.Instant;
+import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.function.Supplier;
 import java.util.stream.IntStream;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.Executors;
 import java.util.concurrent.CountDownLatch;
 import java.util.ArrayList;
+import org.mockito.ArgumentCaptor;
 import cc.hrva.urlshortener.controller.LinkUnavailableView;
+import org.springframework.cache.Cache;
 import org.springframework.http.HttpStatus;
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.converter.CreateUrlToUrlConverter;
@@ -75,6 +82,7 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doCallRealMethod;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockingDetails;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -452,6 +460,30 @@ class UrlWritesTest {
     }
 
     @Test
+    void aRevokeEvictsTheLinkAfterItsTransactionCommitsAndAgainLater() {
+        link(4, null);
+        final var evictions = evictionsSeeing(() -> linkRow().get("ACTIVE"));
+
+        urlService.revokeUrl(LINK);
+
+        assertThat(evictions).containsExactly(ALIAS + " seeing false");
+        secondEviction().run();
+        assertThat(evictions).containsExactly(ALIAS + " seeing false", ALIAS + " seeing false");
+    }
+
+    @Test
+    void aDeleteEvictsOnlyThatLinkAfterItsTransactionCommitsAndAgainLater() {
+        link(4, null);
+        final var evictions = evictionsSeeing(() -> jdbcTemplate.queryForObject("select count(*) from url where id = ?", Long.class, LINK));
+
+        urlService.deleteUrl(LINK);
+
+        assertThat(evictions).containsExactly(ALIAS + " seeing 0");
+        secondEviction().run();
+        assertThat(evictions).containsExactly(ALIAS + " seeing 0", ALIAS + " seeing 0");
+    }
+
+    @Test
     void aModerationBlockKeepsAClickCountedAfterTheLinkWasReRead() {
         link(4, null);
         visitMeanwhile = () -> assertThat(urlRepository.recordVisit(LINK, VISITED_AT)).isOne();
@@ -535,6 +567,22 @@ class UrlWritesTest {
                 LINK, ALIAS, visits, visitLimit == null ? 0 : visits, visitLimit, EXPIRES, LocalDateTime.of(2026, 10, 1, 9, 0));
     }
 
+    private List<String> evictionsSeeing(final Supplier<Object> committedState) {
+        final var evictions = new CopyOnWriteArrayList<String>();
+        final var cache = mock(Cache.class);
+        doAnswer(invocation -> evictions.add(invocation.getArgument(0) + " seeing " + CompletableFuture.supplyAsync(committedState).join()))
+                .when(cache).evict(any());
+        doThrow(new AssertionError("the whole cache was cleared")).when(cache).clear();
+        when(cacheManager.getCache("urls")).thenReturn(cache);
+        return evictions;
+    }
+
+    private Runnable secondEviction() {
+        final var later = ArgumentCaptor.forClass(Runnable.class);
+        verify(taskScheduler).schedule(later.capture(), any(Instant.class));
+        return later.getValue();
+    }
+
     private Map<String, Object> linkRow() {
         return jdbcTemplate.queryForMap("select visits, opens, last_accessed, active, expiration_date, block_reason from url where id = ?", LINK);
     }
@@ -554,7 +602,8 @@ class UrlWritesTest {
                     classes = {UrlRepository.class, CustomDomainRepository.class, UserRepository.class, DomainRuleRepository.class,
                             CampaignRepository.class}))
     @Import({DefaultUrlService.class, DefaultModerationService.class, UrlUpdateDtoToUrlConverter.class, DestinationCheckRepository.class, UrlCache.class,
-            DefaultSettingsTestConfiguration.class, AnonymousLinkSignalsTestConfiguration.class, HumanCheckTestConfiguration.class, SignInFormCheckTestConfiguration.class})
+            DefaultSettingsTestConfiguration.class, AnonymousLinkSignalsTestConfiguration.class, HumanCheckTestConfiguration.class, SignInFormCheckTestConfiguration.class,
+            ClockConfiguration.class})
     static class TestApplication {
     }
 

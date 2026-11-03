@@ -46,6 +46,7 @@ import cc.hrva.urlshortener.validator.ApiKeyValidator;
 import cc.hrva.urlshortener.validator.UrlValidator;
 import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.servlet.http.HttpServletRequest;
+import java.time.Clock;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -55,6 +56,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.cache.CacheManager;
+import org.springframework.scheduling.TaskScheduler;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
@@ -185,7 +187,7 @@ class UrlControllerBlocklistTest {
         when(blocklistSourceRepository.findByEnabledTrue()).thenReturn(List.of(TIF));
         clickCheckService.reload();
         final var urlService = new DefaultUrlService(userService, urlValidator, apiKeyService, urlRepository, appProperties, apiKeyValidator,
-                clickAnalyticsService, new UrlToPeekUrlConverter(), createUrlToUrlConverter, urlUpdateDtoToUrlConverter, new UrlCache(cacheManager),
+                clickAnalyticsService, new UrlToPeekUrlConverter(), createUrlToUrlConverter, urlUpdateDtoToUrlConverter, new UrlCache(cacheManager, mock(TaskScheduler.class), Clock.systemUTC()),
                 objectMapper, meterRegistry, passwordEncoder, suspiciousUrlService, rateLimiter, reviewQueueService, scammerSignalService, clickCheckService,
                 redirectChainService, TransactionOperations.withoutTransaction(), reservedAliasService, burstAlertService,
                 destinationCheckRepository, customDomainRegistry, customDomainRepository, campaignService, settingsService,

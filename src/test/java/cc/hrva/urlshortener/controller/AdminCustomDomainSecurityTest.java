@@ -92,6 +92,7 @@ import org.springframework.context.annotation.Import;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.scheduling.TaskScheduler;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.userdetails.UserDetailsService;
@@ -215,6 +216,9 @@ class AdminCustomDomainSecurityTest {
 
     @MockitoBean
     private SendingEmailService sendingEmailService;
+
+    @MockitoBean
+    private TaskScheduler taskScheduler;
 
     @DynamicPropertySource
     static void signingKey(final DynamicPropertyRegistry registry) {

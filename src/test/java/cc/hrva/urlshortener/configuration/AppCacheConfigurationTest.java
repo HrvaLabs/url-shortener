@@ -26,7 +26,7 @@ class AppCacheConfigurationTest {
             .withPropertyValues("spring.data.redis.host=localhost", "spring.cache.cache-names=urls");
 
     @Test
-    void aCachedLinkIsForgottenAfterAnHour() {
+    void otherCachesAreForgottenAfterAnHour() {
         final var cacheConfiguration = appCacheConfiguration.cacheConfiguration();
 
         assertThat(cacheConfiguration.getTtlFunction().getTimeToLive("promo", null)).isEqualTo(Duration.ofHours(1));

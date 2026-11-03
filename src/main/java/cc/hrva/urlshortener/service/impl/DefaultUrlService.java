@@ -596,7 +596,6 @@ public class DefaultUrlService implements UrlService {
 
     @Override
     @Transactional
-    @CacheEvict(value = "urls", key = "#result.cacheKey()")
     public UrlResponse revokeUrl(final Long id) {
         log.info("Revoke URL id={}", id);
 
@@ -604,12 +603,14 @@ public class DefaultUrlService implements UrlService {
 
         urlValidator.verifyUserAdminOrOwner(url);
 
-        return UrlResponse.from(urlRepository.save(deactivateUrl(url)));
+        final var revoked = UrlResponse.from(urlRepository.save(deactivateUrl(url)));
+        urlCache.evictNowAndAgainLater(revoked.cacheKey());
+        return revoked;
     }
 
     @Override
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
-    @CacheEvict(value = "urls", key = "#result.cacheKey()")
+    @CacheEvict(value = UrlCache.CACHE_NAME, key = "#result.cacheKey()")
     public UrlResponse activateUrl(final Long id) {
         log.info("Activate URL id={}", id);
 
@@ -657,7 +658,6 @@ public class DefaultUrlService implements UrlService {
 
     @Override
     @Transactional
-    @CacheEvict(value = "urls", allEntries = true)
     public void deleteUrl(final Long id) {
         log.info("Delete URL id={}", id);
 
@@ -666,11 +666,11 @@ public class DefaultUrlService implements UrlService {
         urlValidator.verifyUserAdminOrOwner(url);
 
         urlRepository.delete(url);
+        urlCache.evictNowAndAgainLater(UrlCacheKeys.of(url.domainId(), url.getShortUrl()));
     }
 
     @Override
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
-    @CacheEvict(value = "urls", key = "#result.cacheKey()")
     public UrlResponse updateUrl(final UrlUpdateDto updateDto, final String apiKey) {
         log.info("Update URL id={}", updateDto.getId());
 
@@ -718,6 +718,9 @@ public class DefaultUrlService implements UrlService {
             }
             return UrlResponse.from(saved);
         });
+        if (!destinationChanged) {
+            urlCache.evictNowAndAgainLater(updated.cacheKey());
+        }
         if (destinationChanged || turnOn) {
             checkRedirectsLater(updated.id());
         }

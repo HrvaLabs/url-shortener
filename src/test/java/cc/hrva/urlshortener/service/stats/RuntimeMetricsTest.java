@@ -6,11 +6,14 @@ import cc.hrva.urlshortener.dto.stats.RequestCounts;
 import cc.hrva.urlshortener.service.domain.UrlCache;
 import io.micrometer.core.instrument.Timer;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import java.time.Clock;
 import java.time.Duration;
 import org.junit.jupiter.api.Test;
 import org.springframework.cache.concurrent.ConcurrentMapCacheManager;
+import org.springframework.scheduling.TaskScheduler;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
 
 class RuntimeMetricsTest {
 
@@ -49,7 +52,7 @@ class RuntimeMetricsTest {
 
     @Test
     void healthReportsTheRedirectHitRatio() {
-        final var urlCache = new UrlCache(new ConcurrentMapCacheManager("urls"));
+        final var urlCache = new UrlCache(new ConcurrentMapCacheManager(UrlCache.CACHE_NAME), mock(TaskScheduler.class), Clock.systemUTC());
         urlCache.recordRedirectHit();
         urlCache.recordRedirectHit();
         urlCache.recordRedirectHit();
@@ -79,7 +82,7 @@ class RuntimeMetricsTest {
     }
 
     private RuntimeMetrics runtimeMetrics() {
-        return runtimeMetrics(new UrlCache(new ConcurrentMapCacheManager("urls")));
+        return runtimeMetrics(new UrlCache(new ConcurrentMapCacheManager(UrlCache.CACHE_NAME), mock(TaskScheduler.class), Clock.systemUTC()));
     }
 
     private RuntimeMetrics runtimeMetrics(final UrlCache urlCache) {

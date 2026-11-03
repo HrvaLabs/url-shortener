@@ -3,6 +3,7 @@ package cc.hrva.urlshortener.configuration;
 import cc.hrva.urlshortener.dto.UrlResponse;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.specification.UrlSpecification;
+import cc.hrva.urlshortener.service.domain.UrlCache;
 import java.util.stream.Stream;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -28,7 +29,7 @@ public class CacheWarmup {
     public void warmup() {
         log.info("Warming up URL cache...");
 
-        final var cache = cacheManager.getCache("urls");
+        final var cache = cacheManager.getCache(UrlCache.CACHE_NAME);
         if (cache == null) {
             log.warn("Cache 'urls' not available, skipping warmup");
             return;

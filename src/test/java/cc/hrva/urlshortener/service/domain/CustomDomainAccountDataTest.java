@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.service.domain;
 
+import cc.hrva.urlshortener.dto.DeleteAccountDto;
 import cc.hrva.urlshortener.service.DestinationChangeService;
 import cc.hrva.urlshortener.client.CloudflareClient;
 import cc.hrva.urlshortener.client.CloudflareResult;
@@ -63,10 +64,12 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Supplier;
 import javax.sql.DataSource;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.SpringBootConfiguration;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
@@ -74,13 +77,15 @@ import org.springframework.boot.persistence.autoconfigure.EntityScan;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.cache.CacheManager;
-import org.springframework.cache.concurrent.ConcurrentMapCacheManager;
+import org.springframework.cache.concurrent.ConcurrentMapCache;
+import org.springframework.cache.support.SimpleCacheManager;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.FilterType;
 import org.springframework.context.annotation.Import;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.scheduling.TaskScheduler;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -94,7 +99,9 @@ import tools.jackson.databind.json.JsonMapper;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.tuple;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @SpringBootTest(
@@ -230,11 +237,19 @@ class CustomDomainAccountDataTest {
     @MockitoBean
     private ScammerSignalService scammerSignalService;
 
+    @MockitoBean
+    private TaskScheduler taskScheduler;
+
+    @Autowired
+    private TestApplication.CommittedClears urlsCache;
+
     @BeforeEach
     void setUp() {
         CLOCK.set(START);
         CLOUDFLARE.reset();
         committedChanges.clear();
+        urlsCache.clear();
+        urlsCache.seeing(() -> count("select count(*) from user_account where id = " + ANA));
         user(ANA, ANA_EMAIL);
         user(BOB, "bob@hrva.cc");
     }
@@ -312,6 +327,31 @@ class CustomDomainAccountDataTest {
                 {"requestedTotal":3,"reason":"Three shops","status":"DECLINED","adminNote":"Use paths","createdAt":"2026-10-24T09:00:00",\
                 "reviewedAt":"2026-10-25T09:00:00"}]""");
         assertThat(json).doesNotContain("reviewer@hrva.cc", "Bob needs two");
+    }
+
+    @Test
+    void anAdminDeletingAnAccountClearsTheRedirectCacheAfterTheCommitAndAgainLater() {
+        jdbcTemplate.update("insert into url (id, long_url, short_url, owner_id, visits, create_date, active) values (940, 'https://example.com/a', 'ana1', ?, 0, ?, true)",
+                ANA, NOW);
+        urlsCache.put("ana1", "cached");
+
+        userService.deleteUserById(ANA);
+
+        assertThat(urlsCache.clears()).containsExactly("cleared seeing 0");
+        assertThat(urlsCache.get("ana1")).isNull();
+        secondClear().run();
+        assertThat(urlsCache.clears()).containsExactly("cleared seeing 0", "cleared seeing 0");
+    }
+
+    @Test
+    void deletingYourOwnAccountClearsTheRedirectCacheAfterTheCommitAndAgainLater() {
+        signedIn();
+
+        userService.deleteOwnAccount(DeleteAccountDto.builder().password("secret").build());
+
+        assertThat(urlsCache.clears()).containsExactly("cleared seeing 0");
+        secondClear().run();
+        assertThat(urlsCache.clears()).containsExactly("cleared seeing 0", "cleared seeing 0");
     }
 
     @Test
@@ -654,6 +694,12 @@ class CustomDomainAccountDataTest {
         assertThat(committedChanges.changes()).isEmpty();
     }
 
+    private Runnable secondClear() {
+        final var later = ArgumentCaptor.forClass(Runnable.class);
+        verify(taskScheduler).schedule(later.capture(), any(Instant.class));
+        return later.getValue();
+    }
+
     private void signedIn() {
         SecurityContextHolder.getContext().setAuthentication(UsernamePasswordAuthenticationToken.authenticated(ANA_EMAIL, null, List.of()));
     }
@@ -755,6 +801,33 @@ class CustomDomainAccountDataTest {
 
         }
 
+        static class CommittedClears extends ConcurrentMapCache {
+
+            private final List<String> clears = new CopyOnWriteArrayList<>();
+
+            private Supplier<Object> committedState = () -> null;
+
+            CommittedClears() {
+                super(UrlCache.CACHE_NAME);
+            }
+
+            @Override
+            public void clear() {
+                clears.add("cleared seeing " + CompletableFuture.supplyAsync(committedState).join());
+                super.clear();
+            }
+
+            List<String> clears() {
+                return List.copyOf(clears);
+            }
+
+            void seeing(final Supplier<Object> state) {
+                committedState = state;
+                clears.clear();
+            }
+
+        }
+
         @TestConfiguration
         static class Fixed {
 
@@ -769,8 +842,15 @@ class CustomDomainAccountDataTest {
             }
 
             @Bean
-            CacheManager cacheManager() {
-                return new ConcurrentMapCacheManager("urls");
+            CommittedClears urlsCache() {
+                return new CommittedClears();
+            }
+
+            @Bean
+            CacheManager cacheManager(final CommittedClears urlsCache) {
+                final var cacheManager = new SimpleCacheManager();
+                cacheManager.setCaches(List.of(urlsCache));
+                return cacheManager;
             }
 
         }

@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.service;
 
+import cc.hrva.urlshortener.configuration.ClockConfiguration;
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.converter.UserToUserDtoConverter;
 import cc.hrva.urlshortener.converter.UserUpdateDtoToUserConverter;
@@ -303,7 +304,7 @@ class ModerationUserWritesTest {
                     classes = {UrlRepository.class, UserRepository.class, ApiKeyRepository.class, DomainRuleRepository.class,
                             CampaignRepository.class}))
     @Import({DefaultModerationService.class, DefaultUserService.class, UserToUserDtoConverter.class, UserUpdateDtoToUserConverter.class, UrlCache.class,
-            AccountLock.class})
+            AccountLock.class, ClockConfiguration.class})
     static class TestApplication {
     }
 

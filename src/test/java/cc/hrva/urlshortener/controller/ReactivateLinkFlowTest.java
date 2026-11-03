@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.controller;
 
+import cc.hrva.urlshortener.configuration.ClockConfiguration;
 import cc.hrva.urlshortener.service.domain.ShortLinks;
 import cc.hrva.urlshortener.audit.AdminAuditAspect;
 import cc.hrva.urlshortener.audit.AuditSubjects;
@@ -79,6 +80,7 @@ import org.springframework.context.annotation.FilterType;
 import org.springframework.context.annotation.Import;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.scheduling.TaskScheduler;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -211,6 +213,9 @@ class ReactivateLinkFlowTest {
     @MockitoBean
     private CustomDomainRegistry customDomainRegistry;
 
+    @MockitoBean
+    private TaskScheduler taskScheduler;
+
     @DynamicPropertySource
     static void signingKey(final DynamicPropertyRegistry registry) {
         registry.add("app.mcp.signing-key", SIGNING_KEY::toJSONString);
@@ -317,6 +322,7 @@ class ReactivateLinkFlowTest {
                     type = FilterType.ASSIGNABLE_TYPE,
                     classes = {UrlRepository.class, CustomDomainRepository.class, CustomDomainRequestRepository.class, UserRepository.class, AuditLogRepository.class}))
     @Import({
+            ClockConfiguration.class,
             DefaultSettingsTestConfiguration.class,
             AnonymousLinkSignalsTestConfiguration.class, HumanCheckTestConfiguration.class, SignInFormCheckTestConfiguration.class,
             AppConfiguration.class,

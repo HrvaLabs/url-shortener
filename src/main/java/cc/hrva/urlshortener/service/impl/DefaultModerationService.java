@@ -50,8 +50,6 @@ import cc.hrva.urlshortener.util.DomainNames;
 import cc.hrva.urlshortener.util.ReviewReasons;
 import cc.hrva.urlshortener.util.SortWhitelist;
 import com.google.common.collect.Lists;
-import java.time.Duration;
-import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -85,7 +83,6 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
-import org.springframework.scheduling.TaskScheduler;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -136,7 +133,6 @@ public class DefaultModerationService implements ModerationService {
     private static final Set<BlockReason> HELD = EnumSet.of(BlockReason.CAMPAIGN, BlockReason.SIGN_IN_FORM);
     private static final Set<BlockReason> CAMPAIGN_HOLDS = EnumSet.of(BlockReason.CAMPAIGN);
     private static final int IDS_PER_QUERY = 1_000;
-    private static final Duration SECOND_EVICTION_DELAY = Duration.ofSeconds(2);
     private static final int MAX_COLUMN_LENGTH = 255;
 
     private final UrlRepository urlRepository;
@@ -151,7 +147,6 @@ public class DefaultModerationService implements ModerationService {
     private final ApplicationEventPublisher eventPublisher;
     private final TransactionOperations transactionOperations;
     private final ScammerSignalService scammerSignalService;
-    private final TaskScheduler taskScheduler;
     private final CustomDomainModeration customDomainModeration;
     private final CampaignRepository campaignRepository;
 
@@ -463,7 +458,7 @@ public class DefaultModerationService implements ModerationService {
     public void deleteLink(final long urlId, final String performedBy, final String via) {
         final var url = findUrl(urlId);
         transactionOperations.executeWithoutResult(status -> urlRepository.delete(url));
-        urlCache.evict(cacheKeyOf(url));
+        urlCache.evictNowAndAgainLater(cacheKeyOf(url));
         log.info("Link deleted urlId={}", urlId);
         auditLogService.log(performedBy, AuditAction.DELETE_LINK, TARGET_URL, String.valueOf(urlId), details(via, 1, field("shortUrl", url.getShortUrl())));
     }
@@ -515,7 +510,7 @@ public class DefaultModerationService implements ModerationService {
                 .orElse(null)));
         converted.ifPresent(url -> {
             log.info("Held link blocked urlId={} reason={}", url.getId(), reason);
-            evictNowAndAgainLater(cacheKeyOf(url));
+            urlCache.evictNowAndAgainLater(cacheKeyOf(url));
         });
         return converted;
     }
@@ -595,7 +590,7 @@ public class DefaultModerationService implements ModerationService {
                 .orElse(null)));
         converted.ifPresent(url -> {
             log.info("Held link blocked by a domain rule urlId={}", url.getId());
-            evictNowAndAgainLater(cacheKeyOf(url));
+            urlCache.evictNowAndAgainLater(cacheKeyOf(url));
         });
         return converted.isPresent();
     }
@@ -693,7 +688,7 @@ public class DefaultModerationService implements ModerationService {
         final var url = findUrl(urlId);
         final var cleared = clearWarningPageOf(urlId);
         if (!cleared) {
-            evictNowAndAgainLater(cacheKeyOf(url));
+            urlCache.evictNowAndAgainLater(cacheKeyOf(url));
         }
         auditLogService.log(performedBy, AuditAction.CLEAR_WARNING_PAGE, TARGET_URL, String.valueOf(urlId),
                 String.join(DETAIL_SEPARATOR, field("shortUrl", url.getShortUrl()), field("links", cleared ? 1 : 0)));
@@ -710,7 +705,7 @@ public class DefaultModerationService implements ModerationService {
                 .orElse(null)));
         cleared.ifPresent(url -> {
             log.info("Warning page cleared urlId={}", url.getId());
-            evictNowAndAgainLater(cacheKeyOf(url));
+            urlCache.evictNowAndAgainLater(cacheKeyOf(url));
         });
         return cleared.isPresent();
     }
@@ -773,7 +768,7 @@ public class DefaultModerationService implements ModerationService {
                 .orElse(null)));
         held.ifPresent(url -> {
             log.info("Link held for a sign-in form urlId={}", url.getId());
-            evictNowAndAgainLater(cacheKeyOf(url));
+            urlCache.evictNowAndAgainLater(cacheKeyOf(url));
         });
         return held.isPresent();
     }
@@ -861,7 +856,7 @@ public class DefaultModerationService implements ModerationService {
                 .orElse(null)));
         blocked.ifPresent(url -> {
             log.info("Link blocked urlId={} reason={}", url.getId(), reason);
-            evictNowAndAgainLater(cacheKeyOf(url));
+            urlCache.evictNowAndAgainLater(cacheKeyOf(url));
         });
         return blocked;
     }
@@ -894,7 +889,7 @@ public class DefaultModerationService implements ModerationService {
                 log.info("Link block lifted, but the link stays off because its domain was removed urlId={} domainId={}", link.url().getId(),
                         link.url().domainId());
             }
-            evictNowAndAgainLater(cacheKeyOf(link.url()));
+            urlCache.evictNowAndAgainLater(cacheKeyOf(link.url()));
         });
         return restored.map(Restored::turnedOn).orElse(false);
     }
@@ -992,15 +987,6 @@ public class DefaultModerationService implements ModerationService {
             }
         } catch (final RuntimeException exception) {
             log.warn("Telling the owner about a blocked link failed urlId={}", url.getId(), exception);
-        }
-    }
-
-    private void evictNowAndAgainLater(final String cacheKey) {
-        urlCache.evict(cacheKey);
-        try {
-            taskScheduler.schedule(() -> urlCache.evict(cacheKey), Instant.now().plus(SECOND_EVICTION_DELAY));
-        } catch (final RuntimeException exception) {
-            log.warn("Scheduling the second URL cache eviction failed", exception);
         }
     }
 

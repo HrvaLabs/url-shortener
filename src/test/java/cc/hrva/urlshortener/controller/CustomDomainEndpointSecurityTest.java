@@ -86,6 +86,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.web.MockHttpServletResponse;
+import org.springframework.scheduling.TaskScheduler;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -226,6 +227,9 @@ class CustomDomainEndpointSecurityTest {
 
     @MockitoBean
     private ScammerSignalService scammerSignalService;
+
+    @MockitoBean
+    private TaskScheduler taskScheduler;
 
     @DynamicPropertySource
     static void signingKey(final DynamicPropertyRegistry registry) {

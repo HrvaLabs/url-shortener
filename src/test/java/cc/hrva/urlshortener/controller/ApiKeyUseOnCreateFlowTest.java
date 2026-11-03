@@ -91,6 +91,7 @@ import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.web.MockHttpServletResponse;
+import org.springframework.scheduling.TaskScheduler;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -216,6 +217,9 @@ class ApiKeyUseOnCreateFlowTest {
 
     @MockitoBean
     private CustomDomainRegistry customDomainRegistry;
+
+    @MockitoBean
+    private TaskScheduler taskScheduler;
 
     @DynamicPropertySource
     static void signingKey(final DynamicPropertyRegistry registry) {
