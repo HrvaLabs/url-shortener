@@ -1,12 +1,19 @@
 package cc.hrva.urlshortener.service.domain;
 
 import cc.hrva.urlshortener.dto.stats.CacheStats;
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.slf4j.LoggerFactory;
+import org.springframework.cache.Cache;
+import org.springframework.cache.CacheManager;
 import org.springframework.cache.concurrent.ConcurrentMapCacheManager;
 import org.springframework.core.task.TaskRejectedException;
 import org.springframework.scheduling.TaskScheduler;
@@ -17,9 +24,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doNothing;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 class UrlCacheTest {
@@ -136,6 +147,98 @@ class UrlCacheTest {
         assertThatCode(urlCache::clearNowAndAgainLater).doesNotThrowAnyException();
 
         assertThat(urlCache.get("abc")).isNull();
+    }
+
+    @Test
+    void aFailedEvictionIsTriedAgainThirtySecondsLaterThenFiveMinutesLater() {
+        final var cache = mock(Cache.class);
+        doThrow(new IllegalStateException("redis down")).doThrow(new IllegalStateException("redis down")).doNothing().when(cache).evict("abc");
+        final var failingCache = overCache(cache);
+
+        failingCache.evict("abc");
+
+        final var retry = ArgumentCaptor.forClass(Runnable.class);
+        verify(taskScheduler).schedule(retry.capture(), eq(NOW.plusSeconds(30)));
+        retry.getValue().run();
+        verify(taskScheduler).schedule(retry.capture(), eq(NOW.plusSeconds(300)));
+        retry.getValue().run();
+        verify(cache, times(3)).evict("abc");
+        verifyNoMoreInteractions(taskScheduler);
+    }
+
+    @Test
+    void aSuccessfulRetryEndsTheRetries() {
+        final var cache = mock(Cache.class);
+        doThrow(new IllegalStateException("redis down")).doNothing().when(cache).evict("abc");
+
+        overCache(cache).evict("abc");
+
+        final var retry = ArgumentCaptor.forClass(Runnable.class);
+        verify(taskScheduler).schedule(retry.capture(), eq(NOW.plusSeconds(30)));
+        retry.getValue().run();
+        verify(cache, times(2)).evict("abc");
+        verifyNoMoreInteractions(taskScheduler);
+    }
+
+    @Test
+    void anEvictionThatKeepsFailingStopsAfterTwoRetriesLoggingEachFailureOnce() {
+        final var cache = mock(Cache.class);
+        doThrow(new IllegalStateException("redis down")).when(cache).evict("abc");
+        final var logger = (Logger) LoggerFactory.getLogger(UrlCache.class);
+        final var events = new ListAppender<ILoggingEvent>();
+        events.start();
+        logger.addAppender(events);
+        try {
+            overCache(cache).evict("abc");
+            final var retry = ArgumentCaptor.forClass(Runnable.class);
+            verify(taskScheduler).schedule(retry.capture(), eq(NOW.plusSeconds(30)));
+            retry.getValue().run();
+            verify(taskScheduler).schedule(retry.capture(), eq(NOW.plusSeconds(300)));
+            retry.getValue().run();
+        } finally {
+            logger.detachAppender(events);
+        }
+
+        verify(cache, times(3)).evict("abc");
+        verifyNoMoreInteractions(taskScheduler);
+        assertThat(events.list).hasSize(3).allSatisfy(event -> assertThat(event.getLevel()).isEqualTo(Level.WARN));
+        assertThat(events.list.getLast().getFormattedMessage()).contains("no retries left");
+    }
+
+    @Test
+    void aFailedSecondEvictionIsTriedAgainToo() {
+        final var cache = mock(Cache.class);
+        doNothing().doThrow(new IllegalStateException("redis down")).doNothing().when(cache).evict("abc");
+        final var failingCache = overCache(cache);
+
+        failingCache.evictNowAndAgainLater("abc");
+
+        final var later = ArgumentCaptor.forClass(Runnable.class);
+        verify(taskScheduler).schedule(later.capture(), eq(NOW.plusSeconds(2)));
+        later.getValue().run();
+        verify(taskScheduler).schedule(later.capture(), eq(NOW.plusSeconds(30)));
+        later.getValue().run();
+        verify(cache, times(3)).evict("abc");
+        verifyNoMoreInteractions(taskScheduler);
+    }
+
+    @Test
+    void aFailedClearIsTriedAgainToo() {
+        final var cache = mock(Cache.class);
+        doThrow(new IllegalStateException("redis down")).doNothing().when(cache).clear();
+
+        overCache(cache).clearNowAndAgainLater();
+
+        final var later = ArgumentCaptor.forClass(Runnable.class);
+        verify(taskScheduler).schedule(later.capture(), eq(NOW.plusSeconds(30)));
+        verify(taskScheduler).schedule(later.capture(), eq(NOW.plusSeconds(2)));
+        verify(cache, times(1)).clear();
+    }
+
+    private UrlCache overCache(final Cache cache) {
+        final var manager = mock(CacheManager.class);
+        when(manager.getCache(UrlCache.CACHE_NAME)).thenReturn(cache);
+        return new UrlCache(manager, taskScheduler, Clock.fixed(NOW, ZoneOffset.UTC));
     }
 
     private static void inATransaction() {

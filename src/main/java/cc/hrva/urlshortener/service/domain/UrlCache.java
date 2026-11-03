@@ -3,6 +3,7 @@ package cc.hrva.urlshortener.service.domain;
 import cc.hrva.urlshortener.dto.stats.CacheStats;
 import java.time.Clock;
 import java.time.Duration;
+import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.atomic.LongAdder;
 import lombok.RequiredArgsConstructor;
@@ -22,6 +23,7 @@ public class UrlCache {
     public static final String CACHE_NAME = "urls";
 
     private static final Duration SECOND_EVICTION_DELAY = Duration.ofSeconds(2);
+    private static final List<Duration> RETRIES_AFTER_A_FAILURE = List.of(Duration.ofSeconds(30), Duration.ofMinutes(5));
 
     private final CacheManager cacheManager;
     private final TaskScheduler taskScheduler;
@@ -53,27 +55,20 @@ public class UrlCache {
     }
 
     public void evict(final String cacheKey) {
-        try {
-            final var cache = cacheManager.getCache(CACHE_NAME);
-            if (cache != null) {
-                cache.evict(cacheKey);
-            }
-        } catch (final RuntimeException exception) {
-            log.warn("URL cache eviction failed key={} exception={}", cacheKey, exception.getClass().getName());
-        }
+        evict(cacheKey, RETRIES_AFTER_A_FAILURE);
     }
 
     public void evictNowAndAgainLater(final String cacheKey) {
         afterCommit(() -> {
             evict(cacheKey);
-            again(() -> evict(cacheKey));
+            later(() -> evict(cacheKey), SECOND_EVICTION_DELAY);
         });
     }
 
     public void clearNowAndAgainLater() {
         afterCommit(() -> {
-            clear();
-            again(this::clear);
+            clear(RETRIES_AFTER_A_FAILURE);
+            later(() -> clear(RETRIES_AFTER_A_FAILURE), SECOND_EVICTION_DELAY);
         });
     }
 
@@ -89,22 +84,44 @@ public class UrlCache {
         return CacheStats.of(redirectHits.sum(), redirectMisses.sum());
     }
 
-    private void clear() {
+    private void evict(final String cacheKey, final List<Duration> retries) {
+        try {
+            final var cache = cacheManager.getCache(CACHE_NAME);
+            if (cache != null) {
+                cache.evict(cacheKey);
+            }
+        } catch (final RuntimeException exception) {
+            if (retries.isEmpty()) {
+                log.warn("URL cache eviction failed, no retries left key={} exception={}", cacheKey, exception.getClass().getName());
+                return;
+            }
+            log.warn("URL cache eviction failed, retrying in {} s key={} exception={}", retries.getFirst().toSeconds(), cacheKey,
+                    exception.getClass().getName());
+            later(() -> evict(cacheKey, retries.subList(1, retries.size())), retries.getFirst());
+        }
+    }
+
+    private void clear(final List<Duration> retries) {
         try {
             final var cache = cacheManager.getCache(CACHE_NAME);
             if (cache != null) {
                 cache.clear();
             }
         } catch (final RuntimeException exception) {
-            log.warn("URL cache clear failed exception={}", exception.getClass().getName());
+            if (retries.isEmpty()) {
+                log.warn("URL cache clear failed, no retries left exception={}", exception.getClass().getName());
+                return;
+            }
+            log.warn("URL cache clear failed, retrying in {} s exception={}", retries.getFirst().toSeconds(), exception.getClass().getName());
+            later(() -> clear(retries.subList(1, retries.size())), retries.getFirst());
         }
     }
 
-    private void again(final Runnable eviction) {
+    private void later(final Runnable eviction, final Duration delay) {
         try {
-            taskScheduler.schedule(eviction, clock.instant().plus(SECOND_EVICTION_DELAY));
+            taskScheduler.schedule(eviction, clock.instant().plus(delay));
         } catch (final RuntimeException exception) {
-            log.warn("Scheduling the second URL cache eviction failed exception={}", exception.getClass().getName());
+            log.warn("Scheduling a URL cache eviction failed exception={}", exception.getClass().getName());
         }
     }
 
