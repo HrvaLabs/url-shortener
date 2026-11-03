@@ -20,6 +20,10 @@ public record PageSnapshot(Outcome outcome, byte[] image, String contentType, St
         return new PageSnapshot(Outcome.DAILY_LIMIT, null, null, null, null, null, null);
     }
 
+    public static PageSnapshot tokenRefused() {
+        return new PageSnapshot(Outcome.TOKEN_REFUSED, null, null, null, null, null, null);
+    }
+
     public static PageSnapshot notConfigured() {
         return new PageSnapshot(Outcome.NOT_CONFIGURED, null, null, null, null, null, null);
     }
@@ -29,6 +33,7 @@ public record PageSnapshot(Outcome outcome, byte[] image, String contentType, St
         FAILED,
         RATE_LIMITED,
         DAILY_LIMIT,
+        TOKEN_REFUSED,
         NOT_CONFIGURED
     }
 

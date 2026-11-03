@@ -148,8 +148,8 @@ public class DefaultLinkInspectionService implements LinkInspectionService {
     @Override
     @Transactional
     public void dropFor(final long urlId) {
-        final var screenshots = linkScreenshotRepository.deleteByUrlId(urlId);
         final var inspections = linkInspectionRepository.deleteByUrlId(urlId);
+        final var screenshots = linkScreenshotRepository.deleteByUrlId(urlId);
         if (screenshots + inspections > 0) {
             log.info("Link inspection dropped urlId={}", urlId);
         }

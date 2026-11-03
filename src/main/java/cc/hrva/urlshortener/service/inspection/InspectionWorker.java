@@ -15,6 +15,7 @@ import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.service.SettingsService;
 import cc.hrva.urlshortener.service.settings.SettingKey;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
@@ -34,6 +35,10 @@ public class InspectionWorker {
 
     private static final String DAILY_LIMIT = "Today's screenshot time is used up. It's taken after midnight UTC.";
     private static final String BLOCKED_BEFORE = "The link was blocked before its screenshot was taken.";
+    private static final String TOKEN_REFUSED = "Cloudflare refused the API token.";
+    private static final String TAKING_FAILED = "Taking the screenshot failed. Take it again to retry.";
+    private static final Duration PAUSE_AFTER_EXCEPTION = Duration.ofMinutes(1);
+    private static final Duration PAUSE_AFTER_REFUSED_TOKEN = Duration.ofHours(1);
 
     private final LinkInspectionRepository linkInspectionRepository;
     private final LinkScreenshotRepository linkScreenshotRepository;
@@ -44,16 +49,22 @@ public class InspectionWorker {
     private final TransactionOperations transactionOperations;
     private final Clock clock;
     private final AtomicReference<Instant> pausedUntil = new AtomicReference<>(Instant.MIN);
+    private final AtomicReference<Attempt> failedBefore = new AtomicReference<>();
 
     @Scheduled(fixedDelayString = "${app.inspection.interval:15s}")
     public void takeNextScreenshot() {
+        final Optional<Request> next;
         try {
             if (clock.instant().isBefore(pausedUntil.get()) || !settingsService.isOnAndAvailable(SettingKey.LINK_SCREENSHOTS)) {
                 return;
             }
-            transactionOperations.execute(status -> nextRequest()).ifPresent(this::take);
+            next = transactionOperations.execute(status -> nextRequest());
         } catch (final RuntimeException exception) {
-            log.warn("Screenshot run failed exception={}", exception.getClass().getName());
+            pauseAfter(exception, null);
+            return;
+        }
+        if (next != null) {
+            next.ifPresent(this::takeOrCountTheFailure);
         }
     }
 
@@ -73,6 +84,35 @@ public class InspectionWorker {
 
     void resume() {
         pausedUntil.set(Instant.MIN);
+        failedBefore.set(null);
+    }
+
+    private void takeOrCountTheFailure(final Request request) {
+        try {
+            take(request);
+            failedBefore.set(null);
+        } catch (final RuntimeException exception) {
+            pauseAfter(exception, request.urlId());
+            failTheSecondTime(request);
+        }
+    }
+
+    private void pauseAfter(final RuntimeException exception, final Long urlId) {
+        pausedUntil.set(clock.instant().plus(PAUSE_AFTER_EXCEPTION));
+        log.warn("Screenshot run failed, paused for a minute urlId={} exception={}", urlId, exception.getClass().getName());
+    }
+
+    private void failTheSecondTime(final Request request) {
+        final var attempt = new Attempt(request.urlId(), request.requestedAt());
+        if (!attempt.equals(failedBefore.getAndSet(attempt))) {
+            return;
+        }
+        failedBefore.set(null);
+        try {
+            record(request, InspectionState.FAILED, TAKING_FAILED);
+        } catch (final RuntimeException exception) {
+            log.warn("Screenshot failure could not be recorded urlId={} exception={}", request.urlId(), exception.getClass().getName());
+        }
     }
 
     private Optional<Request> nextRequest() {
@@ -98,6 +138,11 @@ public class InspectionWorker {
             case RATE_LIMITED -> {
                 pausedUntil.set(clock.instant().plus(snapshot.retryAfter()));
                 log.info("Screenshots paused for Cloudflare's rate limit seconds={} urlId={}", snapshot.retryAfter().toSeconds(), request.urlId());
+            }
+            case TOKEN_REFUSED -> {
+                record(request, InspectionState.PENDING, TOKEN_REFUSED);
+                pausedUntil.set(clock.instant().plus(PAUSE_AFTER_REFUSED_TOKEN));
+                log.warn("Screenshots paused for an hour, Cloudflare refused the API token urlId={}", request.urlId());
             }
             case NOT_CONFIGURED -> log.debug("Screenshot not taken, Browser Run is not set up urlId={}", request.urlId());
         }
@@ -133,6 +178,9 @@ public class InspectionWorker {
 
     private Instant nextMidnightUtc() {
         return clock.instant().atZone(ZoneOffset.UTC).toLocalDate().plusDays(1).atStartOfDay(ZoneOffset.UTC).toInstant();
+    }
+
+    private record Attempt(long urlId, LocalDateTime requestedAt) {
     }
 
     private record Request(long urlId, LocalDateTime requestedAt, InspectionRequester requestedBy, String longUrl, boolean blocked) {

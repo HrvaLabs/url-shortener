@@ -45,7 +45,7 @@ public class BrowserRunClient {
     private static final int PAGE_LOAD_TIMEOUT_MILLIS = 20_000;
     private static final int MAX_TITLE_LENGTH = 300;
     private static final String DAILY_LIMIT_MARKER = "Browser time limit exceeded";
-    private static final String TIMEOUT_MARKER = "timeout";
+    private static final String NAVIGATION_TIMEOUT_MARKER = "Navigation timeout";
     private static final String TOO_LARGE = "The screenshot was too large.";
     private static final String TIMED_OUT = "The page didn't load within 20 seconds.";
     private static final String NOT_OPENED = "Cloudflare couldn't open the page (%s).";
@@ -148,8 +148,12 @@ public class BrowserRunClient {
             log.warn("Browser Run call refused status={} failure=rate limited retryAfterSeconds={}", status, retryAfter.toSeconds());
             return PageSnapshot.rateLimited(retryAfter);
         }
+        if (status == HttpStatus.UNAUTHORIZED.value() || status == HttpStatus.FORBIDDEN.value()) {
+            log.debug("Browser Run call refused status={} failure=token refused", status);
+            return PageSnapshot.tokenRefused();
+        }
         if (status / 100 != 2) {
-            return failed(status, StringUtils.containsIgnoreCase(body, TIMEOUT_MARKER) ? TIMED_OUT : NOT_OPENED.formatted(status), null);
+            return failed(status, StringUtils.containsIgnoreCase(body, NAVIGATION_TIMEOUT_MARKER) ? TIMED_OUT : NOT_OPENED.formatted(status), null);
         }
         final var json = parse(body);
         if (json.isEmpty() || !json.get().path("success").asBoolean(false)) {

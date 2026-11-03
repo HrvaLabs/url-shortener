@@ -6,6 +6,9 @@ import cc.hrva.urlshortener.exception.ScreenshotsUnavailableException;
 import cc.hrva.urlshortener.exception.UrlNotFoundException;
 import cc.hrva.urlshortener.model.LinkScreenshot;
 import cc.hrva.urlshortener.model.enums.InspectionState;
+import cc.hrva.urlshortener.repository.LinkInspectionRepository;
+import cc.hrva.urlshortener.repository.LinkScreenshotRepository;
+import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.service.SettingsService;
 import cc.hrva.urlshortener.service.alert.LinkReviewOpened;
 import cc.hrva.urlshortener.service.notification.MutableClock;
@@ -24,10 +27,13 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.mock;
 
 @SpringBootTest(
         classes = InspectionTestApplication.class,
@@ -229,6 +235,20 @@ class DefaultLinkInspectionServiceTest {
         assertThat(jdbcTemplate.queryForObject("select count(*) from link_screenshot where url_id = ?", Integer.class, LINK)).isZero();
         assertThat(rows(OTHER_LINK)).isOne();
         assertThat(linkInspectionService.screenshot(OTHER_LINK)).isPresent();
+    }
+
+    @Test
+    void dropForDeletesTheInspectionBeforeTheScreenshot() {
+        final var inspections = mock(LinkInspectionRepository.class);
+        final var screenshots = mock(LinkScreenshotRepository.class);
+        final var service = new DefaultLinkInspectionService(inspections, screenshots, mock(UrlRepository.class),
+                settingsService, mock(PlatformTransactionManager.class), clock);
+
+        service.dropFor(LINK);
+
+        final var order = inOrder(inspections, screenshots);
+        order.verify(inspections).deleteByUrlId(LINK);
+        order.verify(screenshots).deleteByUrlId(LINK);
     }
 
     @Test

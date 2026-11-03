@@ -7,6 +7,10 @@ import cc.hrva.urlshortener.service.SettingsService;
 import cc.hrva.urlshortener.service.notification.MutableClock;
 import cc.hrva.urlshortener.service.settings.SettingKey;
 import cc.hrva.urlshortener.service.settings.SettingsServiceFixtures;
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import java.lang.reflect.Method;
 import java.time.Duration;
 import java.time.Instant;
@@ -15,6 +19,7 @@ import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -312,6 +317,107 @@ class InspectionWorkerTest {
         } finally {
             jdbcTemplate.execute("alter table link_screenshot_gone rename to link_screenshot");
         }
+    }
+
+    @Test
+    void anExceptionPausesTheWorkerForAMinute() {
+        pending(LINK, NOW_UTC, "QUEUE");
+        when(browserRunClient.snapshot(anyString())).thenThrow(new IllegalStateException("boom"));
+
+        inspectionWorker.takeNextScreenshot();
+        clock.advance(Duration.ofSeconds(59));
+        inspectionWorker.takeNextScreenshot();
+
+        verify(browserRunClient, times(1)).snapshot(anyString());
+        assertThat(row(LINK)).containsEntry("SCREENSHOT_STATE", "PENDING");
+        clock.advance(Duration.ofSeconds(1));
+        inspectionWorker.takeNextScreenshot();
+        verify(browserRunClient, times(2)).snapshot(anyString());
+    }
+
+    @Test
+    void aRequestThatFailsTwiceInARowIsMarkedFailedAndTheQueueMovesOn() {
+        pending(LINK, NOW_UTC.minusMinutes(2), "QUEUE");
+        pending(OTHER_LINK, NOW_UTC.minusMinutes(1), "QUEUE");
+        when(browserRunClient.snapshot(LONG_URL)).thenThrow(new IllegalStateException("boom"));
+        when(browserRunClient.snapshot(OTHER_LONG_URL)).thenReturn(PageSnapshot.taken(JPEG, "image/jpeg", null, 200));
+
+        inspectionWorker.takeNextScreenshot();
+        assertThat(row(LINK)).containsEntry("SCREENSHOT_STATE", "PENDING");
+        clock.advance(Duration.ofMinutes(1));
+        inspectionWorker.takeNextScreenshot();
+        assertThat(row(LINK)).containsEntry("SCREENSHOT_STATE", "FAILED")
+                .containsEntry("SCREENSHOT_FAILURE", "Taking the screenshot failed. Take it again to retry.");
+
+        clock.advance(Duration.ofMinutes(1));
+        inspectionWorker.takeNextScreenshot();
+        verify(browserRunClient).snapshot(OTHER_LONG_URL);
+        assertThat(row(OTHER_LINK)).containsEntry("SCREENSHOT_STATE", "DONE");
+    }
+
+    @Test
+    void anExceptionWhileStoringIsRetriedOnceThenMarkedFailed() {
+        pending(LINK, NOW_UTC, "QUEUE");
+        when(browserRunClient.snapshot(anyString())).thenReturn(PageSnapshot.taken(JPEG, "image/jpeg", null, 200));
+        jdbcTemplate.execute("alter table link_screenshot rename to link_screenshot_gone");
+        try {
+            inspectionWorker.takeNextScreenshot();
+            assertThat(row(LINK)).containsEntry("SCREENSHOT_STATE", "PENDING");
+            clock.advance(Duration.ofMinutes(1));
+            inspectionWorker.takeNextScreenshot();
+        } finally {
+            jdbcTemplate.execute("alter table link_screenshot_gone rename to link_screenshot");
+        }
+
+        verify(browserRunClient, times(2)).snapshot(anyString());
+        assertThat(row(LINK)).containsEntry("SCREENSHOT_STATE", "FAILED")
+                .containsEntry("SCREENSHOT_FAILURE", "Taking the screenshot failed. Take it again to retry.");
+    }
+
+    @Test
+    void aSuccessInBetweenStartsTheCountAgain() {
+        pending(LINK, NOW_UTC, "QUEUE");
+        when(browserRunClient.snapshot(anyString())).thenThrow(new IllegalStateException("boom"))
+                .thenReturn(PageSnapshot.rateLimited(Duration.ofSeconds(10)))
+                .thenThrow(new IllegalStateException("boom"));
+
+        inspectionWorker.takeNextScreenshot();
+        clock.advance(Duration.ofMinutes(1));
+        inspectionWorker.takeNextScreenshot();
+        clock.advance(Duration.ofMinutes(1));
+        inspectionWorker.takeNextScreenshot();
+
+        verify(browserRunClient, times(3)).snapshot(anyString());
+        assertThat(row(LINK)).containsEntry("SCREENSHOT_STATE", "PENDING");
+    }
+
+    @Test
+    void aRefusedTokenKeepsTheRequestPendingAndPausesForAnHour() {
+        pending(LINK, NOW_UTC.minusMinutes(2), "QUEUE");
+        pending(OTHER_LINK, NOW_UTC.minusMinutes(1), "QUEUE");
+        when(browserRunClient.snapshot(anyString())).thenReturn(PageSnapshot.tokenRefused());
+        final var logger = (Logger) LoggerFactory.getLogger(InspectionWorker.class);
+        final var events = new ListAppender<ILoggingEvent>();
+        events.start();
+        logger.addAppender(events);
+        try {
+            inspectionWorker.takeNextScreenshot();
+            clock.advance(Duration.ofMinutes(59));
+            inspectionWorker.takeNextScreenshot();
+        } finally {
+            logger.detachAppender(events);
+        }
+
+        verify(browserRunClient, times(1)).snapshot(anyString());
+        assertThat(row(LINK)).containsEntry("SCREENSHOT_STATE", "PENDING").containsEntry("SCREENSHOT_FAILURE", "Cloudflare refused the API token.");
+        assertThat(row(OTHER_LINK)).containsEntry("SCREENSHOT_STATE", "PENDING").containsEntry("SCREENSHOT_FAILURE", null);
+        assertThat(events.list).filteredOn(event -> event.getLevel() == Level.WARN).hasSize(1);
+
+        when(browserRunClient.snapshot(anyString())).thenReturn(PageSnapshot.taken(JPEG, "image/jpeg", null, 200));
+        clock.advance(Duration.ofMinutes(1));
+        inspectionWorker.takeNextScreenshot();
+        verify(browserRunClient, times(2)).snapshot(LONG_URL);
+        assertThat(row(LINK)).containsEntry("SCREENSHOT_STATE", "DONE").containsEntry("SCREENSHOT_FAILURE", null);
     }
 
     @Test

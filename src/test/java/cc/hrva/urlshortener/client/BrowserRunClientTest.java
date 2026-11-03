@@ -191,6 +191,30 @@ class BrowserRunClientTest {
     }
 
     @Test
+    void aGatewayTimeoutIsNotAPageTimeout() {
+        answer(504, "<html><head><title>504 Gateway Timeout</title></head></html>");
+
+        assertThat(client.snapshot(TARGET)).isEqualTo(PageSnapshot.failed("Cloudflare couldn't open the page (504)."));
+    }
+
+    @Test
+    void aLinkThatSaysTimeoutIsNotAPageTimeout() {
+        answer(422, "{\"success\":false,\"errors\":[{\"code\":5010,\"message\":\"Could not open https://timeout.example/session-timeout\"}]}");
+
+        assertThat(client.snapshot(TARGET)).isEqualTo(PageSnapshot.failed("Cloudflare couldn't open the page (422)."));
+    }
+
+    @Test
+    void aRefusedTokenIsItsOwnOutcome() {
+        answer(401, "{\"success\":false,\"errors\":[{\"code\":10000,\"message\":\"Authentication error\"}]}");
+        assertThat(client.snapshot(TARGET).outcome()).isEqualTo(PageSnapshot.Outcome.TOKEN_REFUSED);
+
+        server.removeContext(SNAPSHOT);
+        answer(403, "{\"success\":false,\"errors\":[{\"code\":10000,\"message\":\"Authentication error\"}]}");
+        assertThat(client.snapshot(TARGET).outcome()).isEqualTo(PageSnapshot.Outcome.TOKEN_REFUSED);
+    }
+
+    @Test
     void oversizedImageFails() {
         answer(200, taken(new byte[3 * 1024 * 1024 + 1], "\"meta\":{\"status\":200}", ""));
 
