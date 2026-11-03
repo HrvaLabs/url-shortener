@@ -1794,20 +1794,35 @@ class UrlServiceTest {
     }
 
     @Test
-    void aNewIdenticalLinkDoesNotReuseALinkInReview() {
-        anonymousCreateOf(RANDOM_LINK, LinkVerdict.clean());
+    void aNewIdenticalLinkReusesALinkInReview() {
+        reusingCreateOf(LIMITED_LINK);
+        final var inReview = candidate(12L, null, null, true);
+        inReview.setWarningPageForReview(true);
+        when(urlRepository.findByLongUrlAndActiveTrueAndOwnerIsNull(LIMITED_LINK)).thenReturn(List.of(inReview));
+
+        final var created = createAnonymously(LIMITED_LINK);
+
+        assertThat(created.id()).isEqualTo(12L);
+        assertThat(created.warningPageForReview()).isTrue();
+        verify(urlRepository, never()).save(any(Url.class));
+        verifyNoInteractions(signInFormCheckService);
+    }
+
+    @Test
+    void aFlaggedIdenticalLinkReusesALinkInReviewToo() {
+        reusingCreateOf(RANDOM_LINK);
         when(domainAgeService.registeredOn("xdvqnxj.com")).thenReturn(Optional.empty());
         when(urlRepository.findByLongUrlAndActiveTrueAndOwnerIsNull(RANDOM_LINK)).thenReturn(List.of(
                 Url.builder().id(12L).shortUrl("v0DB3").longUrl(RANDOM_LINK).active(true).visits(0L).warningPage(true).warningPageForReview(true).build()));
 
         final var created = createAnonymously(RANDOM_LINK);
 
-        assertThat(created.id()).isEqualTo(1L);
+        assertThat(created.id()).isEqualTo(12L);
     }
 
     @Test
-    void aLinkWhoseReviewWarningOkClearedIsReusedAgain() {
-        when(createUrlToUrlConverter.convert(any(CreateUrlDto.class))).thenReturn(Url.builder().longUrl(LIMITED_LINK).build());
+    void afterTheReviewClosesReuseFollowsTheWarningPageMatchAgain() {
+        reusingCreateOf(LIMITED_LINK);
         final var reviewedFine = candidate(12L, null, null, false);
         when(urlRepository.findByLongUrlAndActiveTrueAndOwnerIsNull(LIMITED_LINK)).thenReturn(List.of(reviewedFine));
 
@@ -1890,6 +1905,12 @@ class UrlServiceTest {
 
     private UrlResponse createAnonymously(final String longUrl) {
         return urlService.saveUrlRouting(CreateUrlDto.builder().longUrl(longUrl).build(), CLIENT_IP, CreatedVia.WEB);
+    }
+
+    private void reusingCreateOf(final String longUrl) {
+        final var url = Url.builder().longUrl(longUrl).build();
+        when(createUrlToUrlConverter.convert(any(CreateUrlDto.class))).thenReturn(url);
+        when(urlValidator.checkIfLongUrlIsNotBlocklisted(url)).thenReturn(LinkVerdict.clean());
     }
 
     private static Url candidate(final long id, final LocalDateTime expirationDate, final Long visitLimit, final boolean warningPage) {

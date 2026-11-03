@@ -365,7 +365,7 @@ class UrlResponseTest {
     }
 
     @Test
-    void thePublicViewAndTheCreateAnswerLeaveTheReviewWarningOut() {
+    void publicViewAndAsCreatedLeaveTheReviewWarningOut() {
         final var inReview = UrlResponse.from(baseUrl().active(true).warningPage(true).warningPageForReview(true).build());
 
         assertThat(inReview.publicView().warningPageForReview()).isNull();

@@ -1380,8 +1380,7 @@ public class DefaultUrlService implements UrlService {
 
     private Optional<Url> equivalentAnonymousLink(final Url url, final boolean warningPage) {
         return urlRepository.findByLongUrlAndActiveTrueAndOwnerIsNull(url.getLongUrl()).stream()
-                .filter(candidate -> candidate.isWarningPage() == warningPage)
-                .filter(candidate -> !candidate.isWarningPageForReview())
+                .filter(candidate -> candidate.isWarningPage() == warningPage || candidate.isWarningPageForReview())
                 .filter(candidate -> Objects.equals(candidate.getExpirationDate(), url.getExpirationDate()))
                 .filter(candidate -> Objects.equals(candidate.getVisitLimit(), url.getVisitLimit()))
                 .filter(candidate -> !isExpired(candidate.getExpirationDate()) && !hasReachedVisitLimit(candidate.getOpens(), candidate.getVisitLimit()))

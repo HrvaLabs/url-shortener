@@ -261,7 +261,7 @@ class SettingValuesTest {
         assertThat(SettingKey.REVIEW_WARNING_PAGE).extracting(SettingKey::getGroup, SettingKey::getType, SettingKey::getLabel, SettingKey::getDescription,
                         SettingKey::getParent, SettingKey::isSafety)
                 .containsExactly(SettingGroup.SAFETY, SettingType.SWITCH, "Warning page while a link without an account waits for review",
-                        "Links without an account show the warning page while their review is open. Resolving the review as OK removes it.",
+                        "Links without an account show the warning page while their review is open. It goes away when the review is closed.",
                         SettingKey.WARNING_PAGE, true);
         final var appProperties = new AppProperties();
         final var defaults = new SettingDefaults(appProperties, SettingsServiceFixtures.bothProviders());

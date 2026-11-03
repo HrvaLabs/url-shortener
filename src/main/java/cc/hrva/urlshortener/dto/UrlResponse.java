@@ -61,7 +61,7 @@ public record UrlResponse(
         @Schema(description = "Whether a click opens the warning page first (links made without an account to young or random-looking domains)")
         @JsonInclude(JsonInclude.Include.NON_NULL)
         Boolean warningPage,
-        @Schema(description = "Whether the warning page is there because the link waits for review; resolving the review as OK removes it")
+        @Schema(description = "Whether the warning page is there because the link waits for review; it goes away when the review is closed")
         @JsonInclude(JsonInclude.Include.NON_NULL)
         Boolean warningPageForReview,
         @Schema(description = "The full short link; set in the answer to a create", example = "https://hrva.cc/abc123")
