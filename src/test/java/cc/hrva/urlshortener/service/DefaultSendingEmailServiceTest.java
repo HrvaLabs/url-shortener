@@ -37,6 +37,8 @@ import cc.hrva.urlshortener.service.notification.NotificationTestKeys;
 import cc.hrva.urlshortener.service.notification.UnsubscribeTokens;
 import cc.hrva.urlshortener.service.settings.EmailKind;
 import cc.hrva.urlshortener.service.settings.SettingKey;
+import cc.hrva.urlshortener.util.EmailPlainText;
+import java.net.IDN;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -914,6 +916,27 @@ class DefaultSendingEmailServiceTest {
         assertThat(textOf(email.getText()))
                 .contains("hrva.cc couldn't tell where the app sent you after the connection was allowed.")
                 .doesNotContain("sent you to", "an app on your device");
+    }
+
+    @Test
+    void appConnectedNamesThePlainSpellingOfALookalikeHost() throws Exception {
+        final var lookalikeHost = "cl" + new String(Character.toChars(0x430)) + "ude.example";
+        final var plainSpelling = IDN.toASCII(lookalikeHost, IDN.ALLOW_UNASSIGNED);
+        final var sentence = "This address uses letters outside A to Z. Its plain spelling is " + plainSpelling + ".";
+
+        final var email = sentAppConnectedEmail(new ConnectRequestView("Claude", lookalikeHost, false, true, null, false));
+
+        assertThat(plainSpelling).startsWith("xn--clude-");
+        assertThat(textOf(email.getText())).contains(lookalikeHost).contains(sentence);
+        assertThat(EmailPlainText.of(email.getText())).contains(lookalikeHost).contains(sentence);
+    }
+
+    @Test
+    void appConnectedLeavesOutThePlainSpellingOfAnOrdinaryHost() throws Exception {
+        final var email = sentAppConnectedEmail(new ConnectRequestView("Claude", "claude.ai", false, false, null, false));
+
+        assertThat(textOf(email.getText())).contains("hrva.cc sent you to claude.ai.").doesNotContain("plain spelling");
+        assertThat(EmailPlainText.of(email.getText())).doesNotContain("plain spelling");
     }
 
     @Test

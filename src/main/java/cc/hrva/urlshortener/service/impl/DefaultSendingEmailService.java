@@ -49,6 +49,7 @@ import cc.hrva.urlshortener.service.SendingEmailService;
 import cc.hrva.urlshortener.service.SettingsService;
 import cc.hrva.urlshortener.service.digest.WeeklyDigestText;
 import cc.hrva.urlshortener.service.domain.ShortLinks;
+import cc.hrva.urlshortener.util.DomainNames;
 import cc.hrva.urlshortener.util.EmailAddresses;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
@@ -319,6 +320,7 @@ public class DefaultSendingEmailService implements SendingEmailService {
         final var ctx = getContext(user);
         ctx.setVariable("client_name", destination.clientName());
         ctx.setVariable("redirect_host", destination.redirectHost());
+        ctx.setVariable("redirect_host_plain", plainSpellingOf(destination.redirectHost()));
         ctx.setVariable("on_this_device", destination.loopback());
         ctx.setVariable("app_scheme", destination.appScheme());
         ctx.setVariable("unknown_destination", destination.unknownDestination());
@@ -868,6 +870,10 @@ public class DefaultSendingEmailService implements SendingEmailService {
                 .build();
 
         send(email, EmailKind.CUSTOM_DOMAIN);
+    }
+
+    private static String plainSpellingOf(final String host) {
+        return host == null || StringUtils.isAsciiPrintable(host) ? null : DomainNames.toAscii(host);
     }
 
     private String frontendPage(final String path) {
