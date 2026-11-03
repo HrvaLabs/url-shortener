@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.9.xsd">
+
+    <changeSet author="khrvacic" id="050-virustotal">
+        <addColumn tableName="link_inspection">
+            <column name="vt_state" type="VARCHAR(20)"/>
+            <column name="vt_requested_at" type="TIMESTAMP"/>
+            <column name="vt_checked_at" type="TIMESTAMP"/>
+            <column name="vt_url" type="TEXT"/>
+            <column name="vt_report_id" type="VARCHAR(100)"/>
+            <column name="vt_malicious" type="INT"/>
+            <column name="vt_suspicious" type="INT"/>
+            <column name="vt_harmless" type="INT"/>
+            <column name="vt_undetected" type="INT"/>
+            <column name="vt_analysed_at" type="TIMESTAMP"/>
+            <column name="vt_failure" type="VARCHAR(255)"/>
+            <column name="vt_submitted_at" type="TIMESTAMP"/>
+        </addColumn>
+        <createIndex tableName="link_inspection" indexName="idx_link_inspection_vt_state">
+            <column name="vt_state"/>
+            <column name="vt_requested_at"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="link_inspection" indexName="idx_link_inspection_vt_state"/>
+            <dropColumn tableName="link_inspection">
+                <column name="vt_state"/>
+                <column name="vt_requested_at"/>
+                <column name="vt_checked_at"/>
+                <column name="vt_url"/>
+                <column name="vt_report_id"/>
+                <column name="vt_malicious"/>
+                <column name="vt_suspicious"/>
+                <column name="vt_harmless"/>
+                <column name="vt_undetected"/>
+                <column name="vt_analysed_at"/>
+                <column name="vt_failure"/>
+                <column name="vt_submitted_at"/>
+            </dropColumn>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>

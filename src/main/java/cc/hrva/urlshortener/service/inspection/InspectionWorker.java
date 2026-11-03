@@ -2,6 +2,8 @@ package cc.hrva.urlshortener.service.inspection;
 
 import cc.hrva.urlshortener.client.BrowserRunClient;
 import cc.hrva.urlshortener.client.PageSnapshot;
+import cc.hrva.urlshortener.client.VirusTotalClient;
+import cc.hrva.urlshortener.client.VirusTotalReport;
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.model.LinkInspection;
 import cc.hrva.urlshortener.model.LinkScreenshot;
@@ -13,6 +15,7 @@ import cc.hrva.urlshortener.repository.LinkInspectionRepository;
 import cc.hrva.urlshortener.repository.LinkScreenshotRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.service.SettingsService;
+import cc.hrva.urlshortener.service.ratelimit.RateLimiter;
 import cc.hrva.urlshortener.service.settings.SettingKey;
 import java.time.Clock;
 import java.time.Duration;
@@ -24,6 +27,8 @@ import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.lang3.StringUtils;
+import org.springframework.data.domain.Limit;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.support.TransactionOperations;
@@ -39,17 +44,27 @@ public class InspectionWorker {
     private static final String TAKING_FAILED = "Taking the screenshot failed. Take it again to retry.";
     private static final Duration PAUSE_AFTER_EXCEPTION = Duration.ofMinutes(1);
     private static final Duration PAUSE_AFTER_REFUSED_TOKEN = Duration.ofHours(1);
+    private static final String VIRUSTOTAL_DAILY_LIMIT = "Today's VirusTotal lookups are used up. They continue after midnight UTC.";
+    private static final String VIRUSTOTAL_LOOKUP_FAILED = "Looking up the link on VirusTotal failed. Send it to VirusTotal to try again.";
+    private static final Duration WAIT_FOR_THE_REDIRECT_CHECK = Duration.ofMinutes(2);
+    private static final Duration PAUSE_AFTER_VIRUSTOTAL_RATE_LIMIT = Duration.ofMinutes(1);
+    private static final Duration PAUSE_AFTER_VIRUSTOTAL_FAILURE = Duration.ofMinutes(1);
+    private static final Duration PAUSE_AFTER_REFUSED_KEY = Duration.ofHours(1);
 
     private final LinkInspectionRepository linkInspectionRepository;
     private final LinkScreenshotRepository linkScreenshotRepository;
     private final UrlRepository urlRepository;
     private final BrowserRunClient browserRunClient;
+    private final VirusTotalClient virusTotalClient;
+    private final RateLimiter rateLimiter;
     private final SettingsService settingsService;
     private final AppProperties appProperties;
     private final TransactionOperations transactionOperations;
     private final Clock clock;
     private final AtomicReference<Instant> pausedUntil = new AtomicReference<>(Instant.MIN);
     private final AtomicReference<Attempt> failedBefore = new AtomicReference<>();
+    private final AtomicReference<Instant> virusTotalPausedUntil = new AtomicReference<>(Instant.MIN);
+    private final AtomicReference<Attempt> virusTotalFailedBefore = new AtomicReference<>();
 
     @Scheduled(fixedDelayString = "${app.inspection.interval:15s}")
     public void takeNextScreenshot() {
@@ -70,6 +85,25 @@ public class InspectionWorker {
         next.ifPresent(this::takeOrCountTheFailure);
     }
 
+    @Scheduled(fixedDelayString = "${app.inspection.interval:15s}")
+    public void lookUpNextOnVirusTotal() {
+        final Optional<Lookup> next;
+        try {
+            if (clock.instant().isBefore(virusTotalPausedUntil.get()) || !settingsService.isOnAndAvailable(SettingKey.VIRUSTOTAL_LOOKUPS)) {
+                return;
+            }
+            next = transactionOperations.execute(status -> nextLookup());
+        } catch (final RuntimeException exception) {
+            pauseLookupsAfter(exception, null);
+            return;
+        }
+        if (next == null) {
+            return;
+        }
+        forgetFailureUnlessHead(virusTotalFailedBefore, next.map(Lookup::attempt));
+        next.ifPresent(this::lookUpOrCountTheFailure);
+    }
+
     @Scheduled(cron = "0 30 3 * * *", zone = "UTC")
     public void expireOldScreenshots() {
         try {
@@ -87,6 +121,138 @@ public class InspectionWorker {
     void resume() {
         pausedUntil.set(Instant.MIN);
         failedBefore.set(null);
+        virusTotalPausedUntil.set(Instant.MIN);
+        virusTotalFailedBefore.set(null);
+    }
+
+    private Optional<Lookup> nextLookup() {
+        final var now = LocalDateTime.now(clock);
+        return linkInspectionRepository.findDueOnVirusTotal(now, now.minus(WAIT_FOR_THE_REDIRECT_CHECK), Limit.of(1)).stream()
+                .findFirst()
+                .flatMap(inspection -> urlRepository.findById(inspection.getUrlId()).map(url -> Lookup.of(inspection, url)));
+    }
+
+    private void lookUpOrCountTheFailure(final Lookup lookup) {
+        try {
+            lookUp(lookup);
+        } catch (final RuntimeException exception) {
+            pauseLookupsAfter(exception, lookup.urlId());
+            if (failedTwice(virusTotalFailedBefore, lookup.attempt())) {
+                try {
+                    recordLookup(lookup, InspectionState.FAILED, VIRUSTOTAL_LOOKUP_FAILED);
+                } catch (final RuntimeException again) {
+                    log.warn("VirusTotal failure could not be recorded urlId={} exception={}", lookup.urlId(), again.getClass().getName());
+                }
+            }
+        }
+    }
+
+    private void lookUp(final Lookup lookup) {
+        if (!countedWithinTheDailyLimit()) {
+            reachedTheDailyLimit(lookup);
+            return;
+        }
+        final var report = virusTotalClient.lookup(lookup.longUrl());
+        if (report.outcome() == VirusTotalReport.Outcome.NOT_FOUND && lookup.hasItsOwnFinalUrl()) {
+            if (!countedWithinTheDailyLimit()) {
+                reachedTheDailyLimit(lookup);
+                return;
+            }
+            recordReport(lookup, virusTotalClient.lookup(lookup.finalUrl()), lookup.finalUrl());
+            return;
+        }
+        recordReport(lookup, report, lookup.longUrl());
+    }
+
+    private boolean countedWithinTheDailyLimit() {
+        return rateLimiter.increment(VirusTotalQuota.keyOfToday(clock), VirusTotalQuota.KEPT_FOR)
+                <= appProperties.getInspection().getVirusTotalDailyLimit();
+    }
+
+    private void reachedTheDailyLimit(final Lookup lookup) {
+        pause(virusTotalPausedUntil, nextMidnightUtc());
+        recordLookup(lookup, InspectionState.PENDING, VIRUSTOTAL_DAILY_LIMIT);
+        log.info("VirusTotal lookups paused until midnight UTC, today's lookups are used up urlId={}", lookup.urlId());
+    }
+
+    private void recordReport(final Lookup lookup, final VirusTotalReport report, final String checkedUrl) {
+        switch (report.outcome()) {
+            case FOUND -> {
+                virusTotalFailedBefore.set(null);
+                recordFound(lookup, report, checkedUrl);
+            }
+            case NOT_FOUND -> {
+                virusTotalFailedBefore.set(null);
+                recordNotFound(lookup);
+            }
+            case RATE_LIMITED -> {
+                virusTotalFailedBefore.set(null);
+                pause(virusTotalPausedUntil, clock.instant().plus(PAUSE_AFTER_VIRUSTOTAL_RATE_LIMIT));
+                log.info("VirusTotal lookups paused for a minute, VirusTotal's rate limit was hit urlId={}", lookup.urlId());
+            }
+            case FAILED -> recordFailure(lookup, report);
+            case NOT_CONFIGURED -> {
+                virusTotalFailedBefore.set(null);
+                log.debug("VirusTotal lookup skipped, the API key is not set urlId={}", lookup.urlId());
+            }
+            case SUBMITTED -> throw new IllegalStateException("VirusTotal answered a lookup with " + report.outcome());
+        }
+    }
+
+    private void recordFailure(final Lookup lookup, final VirusTotalReport report) {
+        if (report.keyRefused()) {
+            virusTotalFailedBefore.set(null);
+            pause(virusTotalPausedUntil, clock.instant().plus(PAUSE_AFTER_REFUSED_KEY));
+            recordLookup(lookup, InspectionState.PENDING, report.failure());
+            log.warn("VirusTotal lookups paused for an hour, VirusTotal refused the API key urlId={}", lookup.urlId());
+            return;
+        }
+        pause(virusTotalPausedUntil, clock.instant().plus(PAUSE_AFTER_VIRUSTOTAL_FAILURE));
+        final var state = failedTwice(virusTotalFailedBefore, lookup.attempt()) ? InspectionState.FAILED : InspectionState.PENDING;
+        recordLookup(lookup, state, report.failure());
+        log.info("VirusTotal lookup failed, paused for a minute urlId={} state={}", lookup.urlId(), state);
+    }
+
+    private void recordFound(final Lookup lookup, final VirusTotalReport report, final String checkedUrl) {
+        final var checkedAt = LocalDateTime.now(clock).truncatedTo(ChronoUnit.MICROS);
+        final var updated = transactionOperations.execute(status -> linkInspectionRepository.recordVirusTotalFound(lookup.urlId(), lookup.requestedAt(),
+                checkedAt, checkedUrl, report.reportId(), report.malicious(), report.suspicious(), report.harmless(), report.undetected(),
+                report.analysedAt()));
+        logRecorded(lookup, updated, InspectionState.DONE);
+    }
+
+    private void recordNotFound(final Lookup lookup) {
+        final var checkedAt = LocalDateTime.now(clock).truncatedTo(ChronoUnit.MICROS);
+        final var updated = transactionOperations.execute(status -> linkInspectionRepository.recordVirusTotalNotFound(lookup.urlId(),
+                lookup.requestedAt(), checkedAt, lookup.longUrl()));
+        logRecorded(lookup, updated, InspectionState.NOT_FOUND);
+    }
+
+    private void recordLookup(final Lookup lookup, final InspectionState state, final String failure) {
+        final var updated = transactionOperations.execute(status -> linkInspectionRepository.recordVirusTotalOutcome(lookup.urlId(),
+                lookup.requestedAt(), state, failure));
+        logRecorded(lookup, updated, state);
+    }
+
+    private static void logRecorded(final Lookup lookup, final Integer updated, final InspectionState state) {
+        if (updated == null || updated == 0) {
+            log.info("VirusTotal outcome dropped, the link changed or was asked again meanwhile urlId={}", lookup.urlId());
+        } else if (state != InspectionState.PENDING) {
+            log.info("VirusTotal lookup recorded urlId={} state={}", lookup.urlId(), state);
+        }
+    }
+
+    private void pauseLookupsAfter(final RuntimeException exception, final Long urlId) {
+        pause(virusTotalPausedUntil, clock.instant().plus(PAUSE_AFTER_EXCEPTION));
+        log.warn("VirusTotal run failed, paused for a minute urlId={} exception={}", urlId, exception.getClass().getName());
+    }
+
+    private static boolean failedTwice(final AtomicReference<Attempt> failure, final Attempt attempt) {
+        if (!attempt.equals(failure.getAndSet(attempt))) {
+            return false;
+        }
+        failure.set(null);
+        return true;
     }
 
     private void takeOrCountTheFailure(final Request request) {
@@ -105,11 +271,9 @@ public class InspectionWorker {
     }
 
     private void failTheSecondTime(final Request request) {
-        final var attempt = request.attempt();
-        if (!attempt.equals(failedBefore.getAndSet(attempt))) {
+        if (!failedTwice(failedBefore, request.attempt())) {
             return;
         }
-        failedBefore.set(null);
         try {
             record(request, InspectionState.FAILED, TAKING_FAILED);
         } catch (final RuntimeException exception) {
@@ -191,6 +355,22 @@ public class InspectionWorker {
     }
 
     private record Attempt(long urlId, LocalDateTime requestedAt) {
+    }
+
+    private record Lookup(long urlId, LocalDateTime requestedAt, String longUrl, String finalUrl) {
+
+        static Lookup of(final LinkInspection inspection, final Url url) {
+            return new Lookup(inspection.getUrlId(), inspection.getVtRequestedAt(), url.getLongUrl(), url.getFinalUrl());
+        }
+
+        boolean hasItsOwnFinalUrl() {
+            return StringUtils.isNotBlank(finalUrl) && !finalUrl.equals(longUrl);
+        }
+
+        Attempt attempt() {
+            return new Attempt(urlId, requestedAt);
+        }
+
     }
 
     private record Request(long urlId, LocalDateTime requestedAt, InspectionRequester requestedBy, String longUrl, boolean blocked) {

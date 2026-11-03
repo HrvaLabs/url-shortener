@@ -139,6 +139,7 @@ class SettingValuesTest {
         appProperties.getTurnstile().setSecretKey("secret");
         appProperties.getCloudflare().setAccountId("account");
         appProperties.getCloudflare().setBrowserApiToken("token");
+        appProperties.getInspection().setVirusTotalApiKey("key");
         final var defaults = new SettingDefaults(appProperties, SettingsServiceFixtures.bothProviders());
         final var value = defaults.defaultOf(key);
         assertThat(SettingValues.fromStored(key, SettingValues.stored(value))).isEqualTo(value);
@@ -279,7 +280,7 @@ class SettingValuesTest {
                 .containsExactly(SettingGroup.SAFETY, SettingType.SWITCH, "Screenshots of links in review",
                         "Cloudflare opens each link that enters the review queue and takes one phone-sized screenshot, kept 7 days. "
                                 + "Needs CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_BROWSER_API_TOKEN on the server.", null, true);
-        assertThat(SettingKey.values()[SettingKey.values().length - 1]).isEqualTo(SettingKey.LINK_SCREENSHOTS);
+        assertThat(SettingKey.values()[SettingKey.values().length - 2]).isEqualTo(SettingKey.LINK_SCREENSHOTS);
         final var appProperties = new AppProperties();
         final var defaults = new SettingDefaults(appProperties, SettingsServiceFixtures.bothProviders());
         assertThat(defaults.defaultOf(SettingKey.LINK_SCREENSHOTS)).isEqualTo(true);
@@ -291,6 +292,27 @@ class SettingValuesTest {
         assertThat(defaults.unavailableReason(SettingKey.LINK_SCREENSHOTS)).isEmpty();
         appProperties.getModeration().setLinkScreenshots(false);
         assertThat(defaults.defaultOf(SettingKey.LINK_SCREENSHOTS)).isEqualTo(false);
+    }
+
+    @Test
+    void theVirusTotalLookupsRow() {
+        assertThat(SettingKey.VIRUSTOTAL_LOOKUPS).extracting(SettingKey::getGroup, SettingKey::getType, SettingKey::getLabel, SettingKey::getDescription,
+                        SettingKey::getParent, SettingKey::isSafety)
+                .containsExactly(SettingGroup.SAFETY, SettingType.SWITCH, "VirusTotal lookups for links in review",
+                        "Looks up VirusTotal's existing report for each link that enters the review queue. Never sends a link to VirusTotal on its own. "
+                                + "Needs VIRUSTOTAL_API_KEY on the server.", null, true);
+        assertThat(SettingKey.values()[SettingKey.values().length - 1]).isEqualTo(SettingKey.VIRUSTOTAL_LOOKUPS);
+        final var appProperties = new AppProperties();
+        final var defaults = new SettingDefaults(appProperties, SettingsServiceFixtures.bothProviders());
+        assertThat(defaults.defaultOf(SettingKey.VIRUSTOTAL_LOOKUPS)).isEqualTo(true);
+        assertThat(defaults.unavailableReason(SettingKey.VIRUSTOTAL_LOOKUPS)).contains(
+                "VirusTotal isn't set up, so no links are looked up. Set VIRUSTOTAL_API_KEY.");
+        appProperties.getInspection().setVirusTotalApiKey(" ");
+        assertThat(defaults.unavailableReason(SettingKey.VIRUSTOTAL_LOOKUPS)).isPresent();
+        appProperties.getInspection().setVirusTotalApiKey("key-1");
+        assertThat(defaults.unavailableReason(SettingKey.VIRUSTOTAL_LOOKUPS)).isEmpty();
+        appProperties.getModeration().setVirusTotalLookups(false);
+        assertThat(defaults.defaultOf(SettingKey.VIRUSTOTAL_LOOKUPS)).isEqualTo(false);
     }
 
     @Test
@@ -324,7 +346,7 @@ class SettingValuesTest {
                         "Unlimited");
         assertThat(Arrays.asList(SettingKey.values()).subList(SettingKey.HUMAN_CHECK.ordinal() + 1, SettingKey.values().length))
                 .containsExactly(SettingKey.ANONYMOUS_EXPIRY_DAYS, SettingKey.ANONYMOUS_VISIT_LIMIT, SettingKey.API_KEY_REQUESTS_PER_HOUR,
-                        SettingKey.LINK_SCREENSHOTS);
+                        SettingKey.LINK_SCREENSHOTS, SettingKey.VIRUSTOTAL_LOOKUPS);
         final var appProperties = new AppProperties();
         final var defaults = new SettingDefaults(appProperties, SettingsServiceFixtures.bothProviders());
         assertThat(defaults.defaultOf(SettingKey.ANONYMOUS_EXPIRY_DAYS)).isNull();

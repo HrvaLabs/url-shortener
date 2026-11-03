@@ -1,5 +1,7 @@
 package cc.hrva.urlshortener.repository;
 
+import cc.hrva.urlshortener.audit.AuditSubjects;
+import cc.hrva.urlshortener.client.VirusTotalClient;
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.dto.ReviewEntryResponse;
 import cc.hrva.urlshortener.dto.AdminUserResponse;
@@ -14,10 +16,12 @@ import cc.hrva.urlshortener.model.enums.CustomDomainStatus;
 import cc.hrva.urlshortener.model.enums.SignInMethod;
 import cc.hrva.urlshortener.repository.specification.UrlSpecification;
 import cc.hrva.urlshortener.repository.specification.UserSpecification;
+import cc.hrva.urlshortener.service.AuditLogService;
 import cc.hrva.urlshortener.service.ScammerSignalService;
 import cc.hrva.urlshortener.service.impl.DefaultReviewQueueService;
 import cc.hrva.urlshortener.service.impl.DefaultSignInMethodService;
 import cc.hrva.urlshortener.service.inspection.DefaultLinkInspectionService;
+import cc.hrva.urlshortener.service.ratelimit.RateLimiter;
 import cc.hrva.urlshortener.service.moderation.ReviewWarningPage;
 import cc.hrva.urlshortener.service.settings.SettingsServiceFixtures;
 import jakarta.persistence.EntityManager;
@@ -292,8 +296,10 @@ class AdminPageQueriesTest {
     }
 
     private DefaultLinkInspectionService linkInspectionService() {
+        final var appProperties = new AppProperties();
         return new DefaultLinkInspectionService(linkInspectionRepository, linkScreenshotRepository, urlRepository,
-                SettingsServiceFixtures.defaults(new AppProperties()), transactionManager, Clock.systemUTC());
+                SettingsServiceFixtures.defaults(appProperties), transactionManager, Clock.systemUTC(), mock(VirusTotalClient.class),
+                mock(RateLimiter.class), appProperties, mock(AuditLogService.class), mock(AuditSubjects.class));
     }
 
     private User owner(final int index) {

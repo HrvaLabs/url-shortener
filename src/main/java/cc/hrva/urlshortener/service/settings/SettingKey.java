@@ -111,7 +111,10 @@ public enum SettingKey {
             "How many requests one API key can make in an hour. A key over the limit gets a 429 with the time to wait.", null, 10, 100_000, "requests"),
     LINK_SCREENSHOTS(SettingGroup.SAFETY, "Screenshots of links in review",
             "Cloudflare opens each link that enters the review queue and takes one phone-sized screenshot, kept 7 days. "
-                    + "Needs CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_BROWSER_API_TOKEN on the server.", null, true);
+                    + "Needs CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_BROWSER_API_TOKEN on the server.", null, true),
+    VIRUSTOTAL_LOOKUPS(SettingGroup.SAFETY, "VirusTotal lookups for links in review",
+            "Looks up VirusTotal's existing report for each link that enters the review queue. Never sends a link to VirusTotal on its own. "
+                    + "Needs VIRUSTOTAL_API_KEY on the server.", null, true);
 
     private final SettingGroup group;
     private final SettingType type;

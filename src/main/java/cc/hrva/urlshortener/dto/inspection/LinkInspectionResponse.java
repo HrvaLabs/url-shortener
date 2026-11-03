@@ -6,5 +6,6 @@ public record LinkInspectionResponse(
         long urlId,
         String longUrl,
         List<String> redirectChain,
-        ScreenshotView screenshot) {
+        ScreenshotView screenshot,
+        VirusTotalView virusTotal) {
 }

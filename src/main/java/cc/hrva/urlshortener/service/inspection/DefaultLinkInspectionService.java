@@ -1,21 +1,33 @@
 package cc.hrva.urlshortener.service.inspection;
 
+import cc.hrva.urlshortener.audit.AuditSubjects;
+import cc.hrva.urlshortener.client.VirusTotalClient;
+import cc.hrva.urlshortener.configuration.properties.AppProperties;
+import cc.hrva.urlshortener.dto.inspection.InspectionSummary;
 import cc.hrva.urlshortener.dto.inspection.LinkInspectionResponse;
 import cc.hrva.urlshortener.dto.inspection.ScreenshotView;
+import cc.hrva.urlshortener.dto.inspection.VirusTotalView;
 import cc.hrva.urlshortener.exception.ScreenshotsUnavailableException;
+import cc.hrva.urlshortener.exception.ServiceBusyException;
 import cc.hrva.urlshortener.exception.UrlNotFoundException;
+import cc.hrva.urlshortener.exception.VirusTotalUnavailableException;
 import cc.hrva.urlshortener.model.LinkInspection;
 import cc.hrva.urlshortener.model.LinkScreenshot;
+import cc.hrva.urlshortener.model.enums.AuditAction;
 import cc.hrva.urlshortener.model.enums.InspectionRequester;
 import cc.hrva.urlshortener.model.enums.InspectionState;
 import cc.hrva.urlshortener.repository.LinkInspectionRepository;
 import cc.hrva.urlshortener.repository.LinkScreenshotRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
+import cc.hrva.urlshortener.service.AuditLogService;
 import cc.hrva.urlshortener.service.SettingsService;
 import cc.hrva.urlshortener.service.alert.LinkReviewOpened;
+import cc.hrva.urlshortener.service.ratelimit.RateLimiter;
+import cc.hrva.urlshortener.service.ratelimit.RateLimiterUnavailableException;
 import cc.hrva.urlshortener.service.settings.SettingKey;
 import cc.hrva.urlshortener.util.RedirectChains;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.Collection;
@@ -24,8 +36,10 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.lang3.StringUtils;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -42,6 +56,13 @@ public class DefaultLinkInspectionService implements LinkInspectionService {
 
     private static final String LINK_NOT_FOUND = "Link not found.";
     private static final String NOT_SET_UP = "Screenshots aren't set up.";
+    private static final String VIRUSTOTAL_NOT_SET_UP = "VirusTotal isn't set up.";
+    private static final String VIRUSTOTAL_USED_UP = "Today's VirusTotal lookups are used up. Try again after midnight UTC.";
+    private static final String VIRUSTOTAL_BUSY = "VirusTotal takes 4 requests a minute. Try again in a minute.";
+    private static final String VIRUSTOTAL_UNCOUNTED = "hrva.cc can't count today's VirusTotal lookups right now. Try again in a minute.";
+    private static final String TARGET_URL = "Url";
+    private static final Duration TRY_AGAIN_IN = Duration.ofMinutes(1);
+    private static final Duration LOOKUP_AFTER_SUBMIT = Duration.ofSeconds(60);
 
     private final LinkInspectionRepository linkInspectionRepository;
     private final LinkScreenshotRepository linkScreenshotRepository;
@@ -49,6 +70,11 @@ public class DefaultLinkInspectionService implements LinkInspectionService {
     private final SettingsService settingsService;
     private final PlatformTransactionManager transactionManager;
     private final Clock clock;
+    private final VirusTotalClient virusTotalClient;
+    private final RateLimiter rateLimiter;
+    private final AppProperties appProperties;
+    private final AuditLogService auditLogService;
+    private final AuditSubjects auditSubjects;
 
     @Override
     public void requestScreenshot(final long urlId) {
@@ -84,6 +110,39 @@ public class DefaultLinkInspectionService implements LinkInspectionService {
     }
 
     @Override
+    public void requestVirusTotal(final long urlId) {
+        if (!virusTotalOn()) {
+            return;
+        }
+        try {
+            requestLookup(urlId);
+        } catch (final DataIntegrityViolationException exception) {
+            log.info("VirusTotal lookup request raced another one, retrying once urlId={}", urlId);
+            try {
+                requestLookup(urlId);
+            } catch (final DataIntegrityViolationException again) {
+                log.info("VirusTotal lookup request skipped, the link is gone urlId={}", urlId);
+            }
+        }
+    }
+
+    @Override
+    public VirusTotalView submitToVirusTotal(final long urlId, final String performedBy) {
+        final var targetIdentifier = String.valueOf(urlId);
+        final var subject = auditSubjects.describe(TARGET_URL, targetIdentifier).orElse("");
+        final VirusTotalView view;
+        try {
+            view = submit(urlId);
+        } catch (final RuntimeException exception) {
+            auditLogService.logFailure(performedBy, AuditAction.SUBMIT_TO_VIRUSTOTAL, TARGET_URL, targetIdentifier,
+                    Stream.of(subject, exception.getMessage()).filter(StringUtils::isNotEmpty).collect(Collectors.joining(", ")));
+            throw exception;
+        }
+        auditLogService.log(performedBy, AuditAction.SUBMIT_TO_VIRUSTOTAL, TARGET_URL, targetIdentifier, subject);
+        return view;
+    }
+
+    @Override
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void onReviewOpened(final LinkReviewOpened event) {
         try {
@@ -91,6 +150,78 @@ public class DefaultLinkInspectionService implements LinkInspectionService {
         } catch (final RuntimeException exception) {
             log.warn("Screenshot request failed urlId={} exception={}", event.urlId(), exception.getClass().getName());
         }
+        try {
+            requestVirusTotal(event.urlId());
+        } catch (final RuntimeException exception) {
+            log.warn("VirusTotal lookup request failed urlId={} exception={}", event.urlId(), exception.getClass().getName());
+        }
+    }
+
+    private VirusTotalView submit(final long urlId) {
+        final var url = urlRepository.findById(urlId).orElseThrow(() -> new UrlNotFoundException(LINK_NOT_FOUND));
+        if (!virusTotalOn()) {
+            throw new VirusTotalUnavailableException(VIRUSTOTAL_NOT_SET_UP);
+        }
+        if (!withinTheDailyLimit()) {
+            throw new VirusTotalUnavailableException(VIRUSTOTAL_USED_UP);
+        }
+        final var report = virusTotalClient.submit(url.getLongUrl());
+        switch (report.outcome()) {
+            case SUBMITTED -> log.info("Link sent to VirusTotal urlId={}", urlId);
+            case RATE_LIMITED -> throw new ServiceBusyException(VIRUSTOTAL_BUSY, TRY_AGAIN_IN);
+            case FAILED -> throw new VirusTotalUnavailableException(report.failure());
+            case NOT_CONFIGURED -> throw new VirusTotalUnavailableException(VIRUSTOTAL_NOT_SET_UP);
+            case FOUND, NOT_FOUND -> throw new IllegalStateException("VirusTotal answered a submit with " + report.outcome());
+        }
+        try {
+            return lookUpAfterTheAnalysis(urlId);
+        } catch (final DataIntegrityViolationException exception) {
+            log.info("VirusTotal lookup after a submit raced another request, retrying once urlId={}", urlId);
+            return lookUpAfterTheAnalysis(urlId);
+        }
+    }
+
+    private boolean withinTheDailyLimit() {
+        try {
+            return rateLimiter.increment(VirusTotalQuota.keyOfToday(clock), VirusTotalQuota.KEPT_FOR)
+                    <= appProperties.getInspection().getVirusTotalDailyLimit();
+        } catch (final RateLimiterUnavailableException exception) {
+            log.warn("VirusTotal submit refused, today's count is unavailable");
+            throw new ServiceBusyException(VIRUSTOTAL_UNCOUNTED, TRY_AGAIN_IN);
+        }
+    }
+
+    private VirusTotalView lookUpAfterTheAnalysis(final long urlId) {
+        return newTransaction().execute(status -> {
+            if (!urlRepository.existsById(urlId)) {
+                throw new UrlNotFoundException(LINK_NOT_FOUND);
+            }
+            final var now = now();
+            final var inspection = linkInspectionRepository.findById(urlId).orElseGet(() -> LinkInspection.builder().urlId(urlId).build());
+            inspection.setVtState(InspectionState.PENDING);
+            inspection.setVtRequestedAt(now.plus(LOOKUP_AFTER_SUBMIT));
+            inspection.setVtSubmittedAt(now);
+            inspection.setVtFailure(null);
+            return virusTotalViewOf(linkInspectionRepository.saveAndFlush(inspection), true);
+        });
+    }
+
+    private void requestLookup(final long urlId) {
+        newTransaction().executeWithoutResult(status -> {
+            if (!urlRepository.existsById(urlId)) {
+                log.info("VirusTotal lookup request skipped, the link is gone urlId={}", urlId);
+                return;
+            }
+            final var inspection = linkInspectionRepository.findById(urlId).orElseGet(() -> LinkInspection.builder().urlId(urlId).build());
+            if (inspection.getVtState() == InspectionState.PENDING) {
+                return;
+            }
+            inspection.setVtState(InspectionState.PENDING);
+            inspection.setVtRequestedAt(now());
+            inspection.setVtFailure(null);
+            linkInspectionRepository.saveAndFlush(inspection);
+            log.info("VirusTotal lookup requested urlId={}", urlId);
+        });
     }
 
     private void request(final long urlId, final InspectionRequester requester) {
@@ -99,7 +230,7 @@ public class DefaultLinkInspectionService implements LinkInspectionService {
                 log.info("Screenshot request skipped, the link is gone urlId={}", urlId);
                 return;
             }
-            final var now = LocalDateTime.now(clock).truncatedTo(ChronoUnit.MICROS);
+            final var now = now();
             final var inspection = linkInspectionRepository.findById(urlId).orElseGet(() -> LinkInspection.builder().urlId(urlId).build());
             if (inspection.getScreenshotState() == InspectionState.PENDING) {
                 if (requester == InspectionRequester.ADMIN && inspection.getScreenshotRequestedBy() != InspectionRequester.ADMIN) {
@@ -121,11 +252,9 @@ public class DefaultLinkInspectionService implements LinkInspectionService {
     @Transactional(readOnly = true)
     public LinkInspectionResponse inspection(final long urlId) {
         final var url = urlRepository.findById(urlId).orElseThrow(() -> new UrlNotFoundException(LINK_NOT_FOUND));
-        final var configured = screenshotsOn();
-        final var screenshot = linkInspectionRepository.findById(urlId)
-                .map(found -> viewOf(found, configured))
-                .orElseGet(() -> ScreenshotView.none(configured));
-        return new LinkInspectionResponse(urlId, url.getLongUrl(), RedirectChains.split(url.getRedirectChain()), screenshot);
+        final var summary = summaryOf(linkInspectionRepository.findById(urlId), screenshotsOn(), virusTotalOn());
+        return new LinkInspectionResponse(urlId, url.getLongUrl(), RedirectChains.split(url.getRedirectChain()), summary.screenshot(),
+                summary.virusTotal());
     }
 
     @Override
@@ -136,17 +265,16 @@ public class DefaultLinkInspectionService implements LinkInspectionService {
 
     @Override
     @Transactional(readOnly = true)
-    public Map<Long, ScreenshotView> summaries(final Collection<Long> urlIds) {
+    public Map<Long, InspectionSummary> summaries(final Collection<Long> urlIds) {
         if (urlIds.isEmpty()) {
             return Map.of();
         }
-        final var configured = screenshotsOn();
+        final var screenshotsConfigured = screenshotsOn();
+        final var virusTotalConfigured = virusTotalOn();
         final var found = linkInspectionRepository.findAllById(urlIds).stream()
                 .collect(Collectors.toMap(LinkInspection::getUrlId, Function.identity()));
-        final var summaries = new LinkedHashMap<Long, ScreenshotView>();
-        urlIds.forEach(urlId -> summaries.put(urlId, Optional.ofNullable(found.get(urlId))
-                .map(inspection -> viewOf(inspection, configured))
-                .orElseGet(() -> ScreenshotView.none(configured))));
+        final var summaries = new LinkedHashMap<Long, InspectionSummary>();
+        urlIds.forEach(urlId -> summaries.put(urlId, summaryOf(Optional.ofNullable(found.get(urlId)), screenshotsConfigured, virusTotalConfigured)));
         return summaries;
     }
 
@@ -162,6 +290,30 @@ public class DefaultLinkInspectionService implements LinkInspectionService {
 
     private boolean screenshotsOn() {
         return settingsService.isOnAndAvailable(SettingKey.LINK_SCREENSHOTS);
+    }
+
+    private boolean virusTotalOn() {
+        return settingsService.isOnAndAvailable(SettingKey.VIRUSTOTAL_LOOKUPS);
+    }
+
+    private LocalDateTime now() {
+        return LocalDateTime.now(clock).truncatedTo(ChronoUnit.MICROS);
+    }
+
+    private static InspectionSummary summaryOf(final Optional<LinkInspection> inspection, final boolean screenshotsConfigured,
+                                               final boolean virusTotalConfigured) {
+        return new InspectionSummary(
+                inspection.map(found -> viewOf(found, screenshotsConfigured)).orElseGet(() -> ScreenshotView.none(screenshotsConfigured)),
+                inspection.map(found -> virusTotalViewOf(found, virusTotalConfigured)).orElseGet(() -> VirusTotalView.none(virusTotalConfigured)));
+    }
+
+    private static VirusTotalView virusTotalViewOf(final LinkInspection inspection, final boolean configured) {
+        if (inspection.getVtState() == null) {
+            return VirusTotalView.none(configured);
+        }
+        return VirusTotalView.of(inspection.getVtState(), inspection.getVtUrl(), inspection.getVtReportId(), inspection.getVtMalicious(),
+                inspection.getVtSuspicious(), inspection.getVtHarmless(), inspection.getVtUndetected(), inspection.getVtAnalysedAt(),
+                inspection.getVtCheckedAt(), inspection.getVtSubmittedAt(), inspection.getVtFailure(), configured);
     }
 
     private static ScreenshotView viewOf(final LinkInspection inspection, final boolean configured) {

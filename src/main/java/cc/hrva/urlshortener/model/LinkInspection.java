@@ -51,4 +51,32 @@ public class LinkInspection {
 
     private String screenshotFailure;
 
+    @Enumerated(EnumType.STRING)
+    @Column(length = 20)
+    private InspectionState vtState;
+
+    private LocalDateTime vtRequestedAt;
+
+    private LocalDateTime vtCheckedAt;
+
+    @Column(columnDefinition = "TEXT")
+    private String vtUrl;
+
+    @Column(length = 100)
+    private String vtReportId;
+
+    private Integer vtMalicious;
+
+    private Integer vtSuspicious;
+
+    private Integer vtHarmless;
+
+    private Integer vtUndetected;
+
+    private LocalDateTime vtAnalysedAt;
+
+    private String vtFailure;
+
+    private LocalDateTime vtSubmittedAt;
+
 }

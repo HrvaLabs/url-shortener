@@ -2,6 +2,8 @@ package cc.hrva.urlshortener.controller;
 
 import cc.hrva.urlshortener.audit.AdminAuditAspect;
 import cc.hrva.urlshortener.audit.AuditSubjects;
+import cc.hrva.urlshortener.client.VirusTotalClient;
+import cc.hrva.urlshortener.client.VirusTotalReport;
 import cc.hrva.urlshortener.configuration.AppConfiguration;
 import cc.hrva.urlshortener.configuration.GlobalExceptionHandler;
 import cc.hrva.urlshortener.configuration.JacksonConfiguration;
@@ -71,6 +73,10 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -108,7 +114,9 @@ class AdminLinkInspectionSecurityTest {
     private static final long ROLE_ADMIN = 2L;
     private static final String INSPECTION = "/api/v1/admin/urls/" + LINK + "/inspection";
     private static final String SCREENSHOT = INSPECTION + "/screenshot";
+    private static final String VIRUSTOTAL = INSPECTION + "/virustotal";
     private static final String LONG_URL = "https://findfavoritedate.life/?u=f6yp608";
+    private static final String REPORT_ID = "1db0ad7dbcec0676710ea0eaacd35d5e471d3e11944d53bcbd31f0cbd11bce31";
     private static final byte[] JPEG = {(byte) 0xFF, (byte) 0xD8, (byte) 0xFF, 1, 2, 3};
     private static final RSAKey SIGNING_KEY = generateSigningKey();
 
@@ -145,6 +153,9 @@ class AdminLinkInspectionSecurityTest {
     @MockitoBean
     private RateLimiter rateLimiter;
 
+    @MockitoBean
+    private VirusTotalClient virusTotalClient;
+
     @DynamicPropertySource
     static void signingKey(final DynamicPropertyRegistry registry) {
         registry.add("app.mcp.signing-key", SIGNING_KEY::toJSONString);
@@ -163,6 +174,8 @@ class AdminLinkInspectionSecurityTest {
         appProperties.getCloudflare().setAccountId("account-1");
         appProperties.getCloudflare().setBrowserApiToken("token-1");
         SettingsServiceFixtures.turnOn(settingsService, SettingKey.LINK_SCREENSHOTS);
+        appProperties.getInspection().setVirusTotalApiKey("vt-key-1");
+        SettingsServiceFixtures.turnOn(settingsService, SettingKey.VIRUSTOTAL_LOOKUPS);
     }
 
     @AfterEach
@@ -175,12 +188,13 @@ class AdminLinkInspectionSecurityTest {
         jdbcTemplate.update("delete from user_account");
         appProperties.getCloudflare().setAccountId(null);
         appProperties.getCloudflare().setBrowserApiToken(null);
+        appProperties.getInspection().setVirusTotalApiKey(null);
     }
 
     @Test
-    void aNonAdminGets403OnAllThreeRoutesAndNobodySignedIn401() throws Exception {
+    void aNonAdminGets403OnEveryRouteAndNobodySignedIn401() throws Exception {
         done();
-        final var requests = List.of(get(INSPECTION), get(SCREENSHOT), post(SCREENSHOT));
+        final var requests = List.of(get(INSPECTION), get(SCREENSHOT), post(SCREENSHOT), post(VIRUSTOTAL));
 
         for (final var request : requests) {
             mockMvc.perform(request).andExpect(status().isUnauthorized());
@@ -189,6 +203,7 @@ class AdminLinkInspectionSecurityTest {
 
         assertThat(jdbcTemplate.queryForObject("select screenshot_state from link_inspection where url_id = ?", String.class, LINK)).isEqualTo("DONE");
         assertThat(count("audit_log")).isZero();
+        verify(virusTotalClient, never()).submit(anyString());
     }
 
     @Test
@@ -204,7 +219,17 @@ class AdminLinkInspectionSecurityTest {
                 .andExpect(jsonPath("$.screenshot.takenAt").value("2026-11-03T09:59:00Z"))
                 .andExpect(jsonPath("$.screenshot.pageTitle").value("Find your date"))
                 .andExpect(jsonPath("$.screenshot.pageStatus").value(200))
-                .andExpect(jsonPath("$.screenshot.configured").value(true));
+                .andExpect(jsonPath("$.screenshot.configured").value(true))
+                .andExpect(jsonPath("$.virusTotal.state").value("DONE"))
+                .andExpect(jsonPath("$.virusTotal.checkedUrl").value(LONG_URL))
+                .andExpect(jsonPath("$.virusTotal.malicious").value(7))
+                .andExpect(jsonPath("$.virusTotal.suspicious").value(2))
+                .andExpect(jsonPath("$.virusTotal.harmless").value(61))
+                .andExpect(jsonPath("$.virusTotal.undetected").value(25))
+                .andExpect(jsonPath("$.virusTotal.analysedAt").value("2026-11-02T18:30:00Z"))
+                .andExpect(jsonPath("$.virusTotal.checkedAt").value("2026-11-03T09:59:00Z"))
+                .andExpect(jsonPath("$.virusTotal.reportUrl").value("https://www.virustotal.com/gui/url/" + REPORT_ID))
+                .andExpect(jsonPath("$.virusTotal.configured").value(true));
     }
 
     @Test
@@ -276,10 +301,62 @@ class AdminLinkInspectionSecurityTest {
                 .containsExactly(org.assertj.core.groups.Tuple.tuple("TAKE_SCREENSHOT", true), org.assertj.core.groups.Tuple.tuple("TAKE_SCREENSHOT", true));
     }
 
+    @Test
+    void submitAudits() throws Exception {
+        when(virusTotalClient.submit(LONG_URL)).thenReturn(VirusTotalReport.submitted());
+
+        mockMvc.perform(as(ADMIN_TOKEN, post(VIRUSTOTAL)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.state").value("PENDING"))
+                .andExpect(jsonPath("$.submittedAt").value("2026-11-03T10:00:00Z"))
+                .andExpect(jsonPath("$.configured").value(true));
+
+        assertThat(jdbcTemplate.queryForMap("select vt_state, vt_requested_at from link_inspection where url_id = ?", LINK))
+                .containsEntry("VT_STATE", "PENDING")
+                .containsEntry("VT_REQUESTED_AT", java.sql.Timestamp.valueOf(NOW.plusSeconds(60)));
+        assertThat(auditRows()).singleElement().satisfies(audit -> assertThat(audit)
+                .containsEntry("ACTION", "SUBMIT_TO_VIRUSTOTAL")
+                .containsEntry("PERFORMED_BY", ADMIN_EMAIL)
+                .containsEntry("TARGET_TYPE", "Url")
+                .containsEntry("TARGET_IDENTIFIER", String.valueOf(LINK))
+                .containsEntry("FAILED", false)
+                .containsEntry("DETAILS", "link: hrva.cc/v0DB3, destination: " + LONG_URL));
+    }
+
+    @Test
+    void submitAtTheLimitAnswers409() throws Exception {
+        when(rateLimiter.increment(anyString(), any())).thenReturn(481L);
+
+        mockMvc.perform(as(ADMIN_TOKEN, post(VIRUSTOTAL)))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.detail").value("Today's VirusTotal lookups are used up. Try again after midnight UTC."));
+
+        verify(virusTotalClient, never()).submit(anyString());
+        assertThat(auditRows()).extracting(audit -> audit.get("ACTION"), audit -> audit.get("FAILED"))
+                .containsExactly(org.assertj.core.groups.Tuple.tuple("SUBMIT_TO_VIRUSTOTAL", true));
+    }
+
+    @Test
+    void submitWithoutVirusTotalAnswers409() throws Exception {
+        appProperties.getInspection().setVirusTotalApiKey("");
+
+        mockMvc.perform(as(ADMIN_TOKEN, post(VIRUSTOTAL)))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.detail").value("VirusTotal isn't set up."));
+        mockMvc.perform(as(ADMIN_TOKEN, post("/api/v1/admin/urls/9999/inspection/virustotal")))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.detail").value("Link not found."));
+
+        verify(virusTotalClient, never()).submit(anyString());
+        assertThat(count("link_inspection")).isZero();
+    }
+
     private void done() {
         jdbcTemplate.update("insert into link_inspection (url_id, screenshot_state, screenshot_requested_at, screenshot_requested_by, screenshot_taken_at, "
-                + "screenshot_url, page_title, page_status) values (?, 'DONE', ?, 'QUEUE', ?, ?, 'Find your date', 200)", LINK, NOW.minusMinutes(2),
-                NOW.minusMinutes(1), LONG_URL);
+                + "screenshot_url, page_title, page_status, vt_state, vt_requested_at, vt_checked_at, vt_url, vt_report_id, vt_malicious, vt_suspicious, "
+                + "vt_harmless, vt_undetected, vt_analysed_at) values (?, 'DONE', ?, 'QUEUE', ?, ?, 'Find your date', 200, 'DONE', ?, ?, ?, ?, 7, 2, 61, 25, ?)",
+                LINK, NOW.minusMinutes(2), NOW.minusMinutes(1), LONG_URL, NOW.minusMinutes(2), NOW.minusMinutes(1), LONG_URL, REPORT_ID,
+                LocalDateTime.of(2026, 11, 2, 18, 30));
         jdbcTemplate.update("insert into link_screenshot (url_id, image, content_type) values (?, ?, 'image/jpeg')", LINK, JPEG);
     }
 

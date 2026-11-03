@@ -2,6 +2,7 @@ package cc.hrva.urlshortener.controller;
 
 import cc.hrva.urlshortener.audit.Audited;
 import cc.hrva.urlshortener.dto.inspection.LinkInspectionResponse;
+import cc.hrva.urlshortener.dto.inspection.VirusTotalView;
 import cc.hrva.urlshortener.model.enums.AuditAction;
 import cc.hrva.urlshortener.service.inspection.LinkInspectionService;
 import cc.hrva.urlshortener.util.ProblemResponses;
@@ -12,6 +13,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -52,6 +54,12 @@ public class AdminLinkInspectionController {
     public ResponseEntity<Void> takeScreenshot(@PathVariable("urlId") final long urlId) {
         linkInspectionService.takeScreenshot(urlId);
         return ResponseEntity.accepted().build();
+    }
+
+    @PostMapping("/virustotal")
+    @PreAuthorize("hasRole('ROLE_ADMIN')")
+    public ResponseEntity<VirusTotalView> submitToVirusTotal(@PathVariable("urlId") final long urlId, final Authentication authentication) {
+        return ResponseEntity.ok(linkInspectionService.submitToVirusTotal(urlId, authentication.getName()));
     }
 
 }

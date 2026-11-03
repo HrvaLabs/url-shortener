@@ -391,6 +391,16 @@ public class AppProperties {
         @Max(90)
         private int keepScreenshotDays = 7;
 
+        @ToString.Exclude
+        private String virusTotalApiKey;
+
+        @NotBlank
+        private String virusTotalApiBase = "https://www.virustotal.com/api/v3";
+
+        @Min(1)
+        @Max(500)
+        private int virusTotalDailyLimit = 480;
+
     }
 
     @Data
@@ -425,6 +435,7 @@ public class AppProperties {
         private boolean reviewWarningPage = true;
         private boolean humanCheck = true;
         private boolean linkScreenshots = true;
+        private boolean virusTotalLookups = true;
 
         @Min(1)
         @Max(90)

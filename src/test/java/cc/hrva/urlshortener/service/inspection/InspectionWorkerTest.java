@@ -2,9 +2,13 @@ package cc.hrva.urlshortener.service.inspection;
 
 import cc.hrva.urlshortener.client.BrowserRunClient;
 import cc.hrva.urlshortener.client.PageSnapshot;
+import cc.hrva.urlshortener.client.VirusTotalClient;
+import cc.hrva.urlshortener.client.VirusTotalReport;
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
+import cc.hrva.urlshortener.mcp.bridge.InMemoryRedis;
 import cc.hrva.urlshortener.service.SettingsService;
 import cc.hrva.urlshortener.service.notification.MutableClock;
+import cc.hrva.urlshortener.service.ratelimit.RateLimiter;
 import cc.hrva.urlshortener.service.settings.SettingKey;
 import cc.hrva.urlshortener.service.settings.SettingsServiceFixtures;
 import ch.qos.logback.classic.Level;
@@ -21,6 +25,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.config.AutowireCapableBeanFactory;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -63,12 +68,33 @@ class InspectionWorkerTest {
     private static final byte[] JPEG = {(byte) 0xFF, (byte) 0xD8, (byte) 0xFF, 1, 2, 3};
     private static final String DAILY_LIMIT = "Today's screenshot time is used up. It's taken after midnight UTC.";
     private static final String BLOCKED_BEFORE = "The link was blocked before its screenshot was taken.";
+    private static final String FINAL_URL = "https://sso.findfavoritedate.life/login";
+    private static final String REPORT_ID = "1db0ad7dbcec0676710ea0eaacd35d5e471d3e11944d53bcbd31f0cbd11bce31";
+    private static final LocalDateTime ANALYSED_AT = LocalDateTime.of(2026, 11, 2, 18, 30);
+    private static final VirusTotalReport FOUND = new VirusTotalReport(VirusTotalReport.Outcome.FOUND, REPORT_ID, 7, 2, 61, 25, ANALYSED_AT, null);
+    private static final String VT_DAILY_LIMIT = "Today's VirusTotal lookups are used up. They continue after midnight UTC.";
+    private static final String VT_KEY_REFUSED = "VirusTotal refused the API key.";
 
     @Autowired
     private InspectionWorker inspectionWorker;
 
     @Autowired
     private BrowserRunClient browserRunClient;
+
+    @Autowired
+    private VirusTotalClient virusTotalClient;
+
+    @Autowired
+    private LinkInspectionService linkInspectionService;
+
+    @Autowired
+    private InMemoryRedis inMemoryRedis;
+
+    @Autowired
+    private RateLimiter rateLimiter;
+
+    @Autowired
+    private AutowireCapableBeanFactory beanFactory;
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
@@ -84,7 +110,8 @@ class InspectionWorkerTest {
 
     @BeforeEach
     void setUp() {
-        reset(browserRunClient);
+        reset(browserRunClient, virusTotalClient);
+        inMemoryRedis.expireKeysContaining("");
         jdbcTemplate.update("delete from link_screenshot");
         jdbcTemplate.update("delete from link_inspection");
         jdbcTemplate.update("delete from url");
@@ -94,6 +121,9 @@ class InspectionWorkerTest {
         appProperties.getCloudflare().setAccountId("account-1");
         appProperties.getCloudflare().setBrowserApiToken("token-1");
         SettingsServiceFixtures.turnOn(settingsService, SettingKey.LINK_SCREENSHOTS);
+        appProperties.getInspection().setVirusTotalApiKey("vt-key-1");
+        appProperties.getInspection().setVirusTotalDailyLimit(480);
+        SettingsServiceFixtures.turnOn(settingsService, SettingKey.VIRUSTOTAL_LOOKUPS);
         inspectionWorker.resume();
     }
 
@@ -463,6 +493,355 @@ class InspectionWorkerTest {
     }
 
     @Test
+    void waitsForTheRedirectCheckBeforeLookingUp() {
+        vtPending(LINK, NOW_UTC.minusSeconds(10));
+        vtPending(OTHER_LINK, NOW_UTC.minusSeconds(5));
+        chainChecked(OTHER_LINK, null);
+        when(virusTotalClient.lookup(anyString())).thenReturn(FOUND);
+
+        inspectionWorker.lookUpNextOnVirusTotal();
+        verify(virusTotalClient).lookup(OTHER_LONG_URL);
+        clock.set(NOW.plusSeconds(109));
+        inspectionWorker.lookUpNextOnVirusTotal();
+        verify(virusTotalClient, never()).lookup(LONG_URL);
+
+        clock.set(NOW.plusSeconds(110));
+        inspectionWorker.lookUpNextOnVirusTotal();
+        verify(virusTotalClient).lookup(LONG_URL);
+        assertThat(row(LINK)).containsEntry("VT_STATE", "DONE");
+    }
+
+    @Test
+    void aLinkWhoseRedirectCheckIsDoneIsLookedUpAtOnce() {
+        vtPending(LINK, NOW_UTC);
+        chainChecked(LINK, FINAL_URL);
+        when(virusTotalClient.lookup(anyString())).thenReturn(FOUND);
+
+        inspectionWorker.lookUpNextOnVirusTotal();
+
+        verify(virusTotalClient).lookup(LONG_URL);
+    }
+
+    @Test
+    void oneLookupPerTick() {
+        vtPending(LINK, NOW_UTC.minusMinutes(1));
+        vtPending(OTHER_LINK, NOW_UTC);
+        chainChecked(LINK, null);
+        chainChecked(OTHER_LINK, null);
+        when(virusTotalClient.lookup(anyString())).thenReturn(FOUND);
+
+        inspectionWorker.lookUpNextOnVirusTotal();
+
+        verify(virusTotalClient, times(1)).lookup(anyString());
+        verify(virusTotalClient).lookup(LONG_URL);
+        assertThat(row(LINK))
+                .containsEntry("VT_STATE", "DONE")
+                .containsEntry("VT_URL", LONG_URL)
+                .containsEntry("VT_REPORT_ID", REPORT_ID)
+                .containsEntry("VT_MALICIOUS", 7)
+                .containsEntry("VT_SUSPICIOUS", 2)
+                .containsEntry("VT_HARMLESS", 61)
+                .containsEntry("VT_UNDETECTED", 25)
+                .containsEntry("VT_ANALYSED_AT", java.sql.Timestamp.valueOf(ANALYSED_AT))
+                .containsEntry("VT_CHECKED_AT", java.sql.Timestamp.valueOf(NOW_UTC))
+                .containsEntry("VT_FAILURE", null);
+        assertThat(row(OTHER_LINK)).containsEntry("VT_STATE", "PENDING");
+
+        inspectionWorker.lookUpNextOnVirusTotal();
+        verify(virusTotalClient).lookup(OTHER_LONG_URL);
+        inspectionWorker.lookUpNextOnVirusTotal();
+        verify(virusTotalClient, times(2)).lookup(anyString());
+    }
+
+    @Test
+    void stopsAtTheDailyLimit() {
+        appProperties.getInspection().setVirusTotalDailyLimit(2);
+        vtPending(LINK, NOW_UTC.minusMinutes(2));
+        vtPending(OTHER_LINK, NOW_UTC.minusMinutes(1));
+        link(9303L, "third", "https://third.example/");
+        vtPending(9303L, NOW_UTC);
+        chainChecked(LINK, null);
+        chainChecked(OTHER_LINK, null);
+        chainChecked(9303L, null);
+        when(virusTotalClient.lookup(anyString())).thenReturn(FOUND);
+
+        inspectionWorker.lookUpNextOnVirusTotal();
+        inspectionWorker.lookUpNextOnVirusTotal();
+        inspectionWorker.lookUpNextOnVirusTotal();
+
+        verify(virusTotalClient, times(2)).lookup(anyString());
+        assertThat(row(9303L)).containsEntry("VT_STATE", "PENDING").containsEntry("VT_FAILURE", VT_DAILY_LIMIT);
+        assertThat(inMemoryRedis.timeToLiveOfKeyContaining("virustotal:2026-11-03")).isEqualTo(Duration.ofDays(2));
+
+        final var restarted = beanFactory.createBean(InspectionWorker.class);
+        restarted.lookUpNextOnVirusTotal();
+        verify(virusTotalClient, times(2)).lookup(anyString());
+
+        clock.set(Instant.parse("2026-11-04T00:00:00Z"));
+        restarted.lookUpNextOnVirusTotal();
+        verify(virusTotalClient).lookup("https://third.example/");
+        assertThat(row(9303L)).containsEntry("VT_STATE", "DONE").containsEntry("VT_FAILURE", null);
+    }
+
+    @Test
+    void theFinalUrlLookupCountsAndStopsAtTheLimitToo() {
+        appProperties.getInspection().setVirusTotalDailyLimit(1);
+        vtPending(LINK, NOW_UTC);
+        chainChecked(LINK, FINAL_URL);
+        when(virusTotalClient.lookup(LONG_URL)).thenReturn(VirusTotalReport.notFound());
+
+        inspectionWorker.lookUpNextOnVirusTotal();
+
+        verify(virusTotalClient).lookup(LONG_URL);
+        verify(virusTotalClient, never()).lookup(FINAL_URL);
+        assertThat(row(LINK)).containsEntry("VT_STATE", "PENDING").containsEntry("VT_FAILURE", VT_DAILY_LIMIT);
+    }
+
+    @Test
+    void fallsBackToTheFinalUrlWhenTheLongUrlHasNoReport() {
+        vtPending(LINK, NOW_UTC);
+        chainChecked(LINK, FINAL_URL);
+        when(virusTotalClient.lookup(LONG_URL)).thenReturn(VirusTotalReport.notFound());
+        when(virusTotalClient.lookup(FINAL_URL)).thenReturn(FOUND);
+
+        inspectionWorker.lookUpNextOnVirusTotal();
+
+        final InOrder order = inOrder(virusTotalClient);
+        order.verify(virusTotalClient).lookup(LONG_URL);
+        order.verify(virusTotalClient).lookup(FINAL_URL);
+        assertThat(row(LINK)).containsEntry("VT_STATE", "DONE").containsEntry("VT_URL", FINAL_URL).containsEntry("VT_MALICIOUS", 7);
+        assertThat(rateLimiter.count("virustotal:2026-11-03")).hasValue(2);
+    }
+
+    @Test
+    void noReportForEitherUrlIsNotFound() {
+        vtPending(LINK, NOW_UTC);
+        chainChecked(LINK, FINAL_URL);
+        jdbcTemplate.update("update link_inspection set vt_report_id = 'old', vt_malicious = 3 where url_id = ?", LINK);
+        when(virusTotalClient.lookup(anyString())).thenReturn(VirusTotalReport.notFound());
+
+        inspectionWorker.lookUpNextOnVirusTotal();
+
+        verify(virusTotalClient, times(2)).lookup(anyString());
+        assertThat(row(LINK)).containsEntry("VT_STATE", "NOT_FOUND")
+                .containsEntry("VT_URL", LONG_URL)
+                .containsEntry("VT_REPORT_ID", null)
+                .containsEntry("VT_MALICIOUS", null)
+                .containsEntry("VT_CHECKED_AT", java.sql.Timestamp.valueOf(NOW_UTC))
+                .containsEntry("VT_FAILURE", null);
+    }
+
+    @Test
+    void aFinalUrlThatIsTheLongUrlIsLookedUpOnce() {
+        vtPending(LINK, NOW_UTC);
+        chainChecked(LINK, LONG_URL);
+        when(virusTotalClient.lookup(anyString())).thenReturn(VirusTotalReport.notFound());
+
+        inspectionWorker.lookUpNextOnVirusTotal();
+
+        verify(virusTotalClient, times(1)).lookup(anyString());
+        assertThat(row(LINK)).containsEntry("VT_STATE", "NOT_FOUND");
+    }
+
+    @Test
+    void aSubmittedLinkIsLookedUpAfterAMinute() {
+        chainChecked(LINK, null);
+        when(virusTotalClient.submit(LONG_URL)).thenReturn(VirusTotalReport.submitted());
+        when(virusTotalClient.lookup(anyString())).thenReturn(FOUND);
+
+        linkInspectionService.submitToVirusTotal(LINK, "admin@hrva.cc");
+
+        assertThat(row(LINK)).containsEntry("VT_STATE", "PENDING")
+                .containsEntry("VT_REQUESTED_AT", java.sql.Timestamp.valueOf(NOW_UTC.plusSeconds(60)))
+                .containsEntry("VT_SUBMITTED_AT", java.sql.Timestamp.valueOf(NOW_UTC));
+        inspectionWorker.lookUpNextOnVirusTotal();
+        clock.advance(Duration.ofSeconds(59));
+        inspectionWorker.lookUpNextOnVirusTotal();
+        verify(virusTotalClient, never()).lookup(anyString());
+
+        clock.advance(Duration.ofSeconds(1));
+        inspectionWorker.lookUpNextOnVirusTotal();
+        verify(virusTotalClient).lookup(LONG_URL);
+        assertThat(row(LINK)).containsEntry("VT_STATE", "DONE").containsEntry("VT_SUBMITTED_AT", java.sql.Timestamp.valueOf(NOW_UTC));
+        assertThat(rateLimiter.count("virustotal:2026-11-03")).hasValue(2);
+    }
+
+    @Test
+    void aSubmittedLinkWithoutARedirectCheckIsLookedUpAfterAMinuteToo() {
+        when(virusTotalClient.submit(LONG_URL)).thenReturn(VirusTotalReport.submitted());
+        when(virusTotalClient.lookup(anyString())).thenReturn(FOUND);
+
+        linkInspectionService.submitToVirusTotal(LINK, "admin@hrva.cc");
+        clock.advance(Duration.ofSeconds(59));
+        inspectionWorker.lookUpNextOnVirusTotal();
+        verify(virusTotalClient, never()).lookup(anyString());
+
+        clock.advance(Duration.ofSeconds(1));
+        inspectionWorker.lookUpNextOnVirusTotal();
+        verify(virusTotalClient).lookup(LONG_URL);
+    }
+
+    @Test
+    void rateLimitPausesAMinute() {
+        vtPending(LINK, NOW_UTC);
+        chainChecked(LINK, null);
+        when(virusTotalClient.lookup(anyString())).thenReturn(VirusTotalReport.rateLimited());
+
+        inspectionWorker.lookUpNextOnVirusTotal();
+
+        assertThat(row(LINK)).containsEntry("VT_STATE", "PENDING").containsEntry("VT_FAILURE", null);
+        clock.advance(Duration.ofSeconds(59));
+        inspectionWorker.lookUpNextOnVirusTotal();
+        verify(virusTotalClient, times(1)).lookup(anyString());
+
+        when(virusTotalClient.lookup(anyString())).thenReturn(FOUND);
+        clock.advance(Duration.ofSeconds(1));
+        inspectionWorker.lookUpNextOnVirusTotal();
+        verify(virusTotalClient, times(2)).lookup(anyString());
+        assertThat(row(LINK)).containsEntry("VT_STATE", "DONE");
+    }
+
+    @Test
+    void aRefusedKeyKeepsTheRequestPendingAndPausesForAnHour() {
+        vtPending(LINK, NOW_UTC.minusMinutes(2));
+        vtPending(OTHER_LINK, NOW_UTC.minusMinutes(1));
+        chainChecked(LINK, null);
+        chainChecked(OTHER_LINK, null);
+        when(virusTotalClient.lookup(anyString())).thenReturn(VirusTotalReport.failed(VT_KEY_REFUSED));
+
+        inspectionWorker.lookUpNextOnVirusTotal();
+        clock.advance(Duration.ofMinutes(59));
+        inspectionWorker.lookUpNextOnVirusTotal();
+
+        verify(virusTotalClient, times(1)).lookup(anyString());
+        assertThat(row(LINK)).containsEntry("VT_STATE", "PENDING").containsEntry("VT_FAILURE", VT_KEY_REFUSED);
+        assertThat(row(OTHER_LINK)).containsEntry("VT_STATE", "PENDING").containsEntry("VT_FAILURE", null);
+
+        when(virusTotalClient.lookup(anyString())).thenReturn(FOUND);
+        clock.advance(Duration.ofMinutes(1));
+        inspectionWorker.lookUpNextOnVirusTotal();
+        assertThat(row(LINK)).containsEntry("VT_STATE", "DONE").containsEntry("VT_FAILURE", null);
+    }
+
+    @Test
+    void aFailedLookupIsRetriedOnceThenMarkedFailed() {
+        vtPending(LINK, NOW_UTC.minusMinutes(2));
+        vtPending(OTHER_LINK, NOW_UTC.minusMinutes(1));
+        chainChecked(LINK, null);
+        chainChecked(OTHER_LINK, null);
+        when(virusTotalClient.lookup(LONG_URL)).thenReturn(VirusTotalReport.failed("VirusTotal didn't answer."));
+        when(virusTotalClient.lookup(OTHER_LONG_URL)).thenReturn(FOUND);
+
+        inspectionWorker.lookUpNextOnVirusTotal();
+        assertThat(row(LINK)).containsEntry("VT_STATE", "PENDING").containsEntry("VT_FAILURE", "VirusTotal didn't answer.");
+        clock.advance(Duration.ofSeconds(59));
+        inspectionWorker.lookUpNextOnVirusTotal();
+        verify(virusTotalClient, times(1)).lookup(anyString());
+
+        clock.advance(Duration.ofSeconds(1));
+        inspectionWorker.lookUpNextOnVirusTotal();
+        assertThat(row(LINK)).containsEntry("VT_STATE", "FAILED").containsEntry("VT_FAILURE", "VirusTotal didn't answer.");
+        clock.advance(Duration.ofMinutes(1));
+        inspectionWorker.lookUpNextOnVirusTotal();
+        assertThat(row(OTHER_LINK)).containsEntry("VT_STATE", "DONE");
+    }
+
+    @Test
+    void anExceptionPausesTheLookupsForAMinuteAndTwiceInARowFails() {
+        vtPending(LINK, NOW_UTC);
+        chainChecked(LINK, null);
+        when(virusTotalClient.lookup(anyString())).thenThrow(new IllegalStateException("boom"));
+
+        assertThatCode(() -> inspectionWorker.lookUpNextOnVirusTotal()).doesNotThrowAnyException();
+        clock.advance(Duration.ofSeconds(59));
+        inspectionWorker.lookUpNextOnVirusTotal();
+        verify(virusTotalClient, times(1)).lookup(anyString());
+        assertThat(row(LINK)).containsEntry("VT_STATE", "PENDING");
+
+        clock.advance(Duration.ofSeconds(1));
+        inspectionWorker.lookUpNextOnVirusTotal();
+        assertThat(row(LINK)).containsEntry("VT_STATE", "FAILED")
+                .containsEntry("VT_FAILURE", "Looking up the link on VirusTotal failed. Send it to VirusTotal to try again.");
+    }
+
+    @Test
+    void aVirusTotalFailureIsForgottenOnceTheQueueRunsEmpty() {
+        vtPending(LINK, NOW_UTC);
+        chainChecked(LINK, null);
+        when(virusTotalClient.lookup(anyString())).thenThrow(new IllegalStateException("boom"));
+
+        inspectionWorker.lookUpNextOnVirusTotal();
+        jdbcTemplate.update("delete from link_inspection where url_id = ?", LINK);
+        clock.advance(Duration.ofMinutes(1));
+        inspectionWorker.lookUpNextOnVirusTotal();
+        vtPending(LINK, NOW_UTC);
+        clock.advance(Duration.ofMinutes(1));
+        inspectionWorker.lookUpNextOnVirusTotal();
+
+        verify(virusTotalClient, times(2)).lookup(anyString());
+        assertThat(row(LINK)).containsEntry("VT_STATE", "PENDING");
+    }
+
+    @Test
+    void theTwoTicksPauseApart() {
+        pending(LINK, NOW_UTC, "QUEUE");
+        jdbcTemplate.update("update link_inspection set vt_state = 'PENDING', vt_requested_at = ? where url_id = ?", NOW_UTC, LINK);
+        chainChecked(LINK, null);
+        when(browserRunClient.snapshot(anyString())).thenReturn(PageSnapshot.rateLimited(Duration.ofMinutes(10)));
+        when(virusTotalClient.lookup(anyString())).thenReturn(VirusTotalReport.rateLimited());
+
+        inspectionWorker.takeNextScreenshot();
+        inspectionWorker.lookUpNextOnVirusTotal();
+        clock.advance(Duration.ofMinutes(1));
+        inspectionWorker.lookUpNextOnVirusTotal();
+        inspectionWorker.takeNextScreenshot();
+
+        verify(virusTotalClient, times(2)).lookup(anyString());
+        verify(browserRunClient, times(1)).snapshot(anyString());
+    }
+
+    @Test
+    void aLinkRepointedWhileItIsLookedUpKeepsNoStaleVerdict() {
+        vtPending(LINK, NOW_UTC);
+        chainChecked(LINK, null);
+        when(virusTotalClient.lookup(anyString())).thenAnswer(invocation -> {
+            jdbcTemplate.update("delete from link_inspection where url_id = ?", LINK);
+            vtPending(LINK, NOW_UTC.plusSeconds(5));
+            return FOUND;
+        });
+
+        inspectionWorker.lookUpNextOnVirusTotal();
+
+        assertThat(row(LINK)).containsEntry("VT_STATE", "PENDING").containsEntry("VT_REPORT_ID", null);
+    }
+
+    @Test
+    void nothingIsLookedUpWhileLookupsAreOffOrNotSetUp() {
+        vtPending(LINK, NOW_UTC);
+        chainChecked(LINK, null);
+
+        SettingsServiceFixtures.turnOff(settingsService, SettingKey.VIRUSTOTAL_LOOKUPS);
+        inspectionWorker.lookUpNextOnVirusTotal();
+        SettingsServiceFixtures.turnOn(settingsService, SettingKey.VIRUSTOTAL_LOOKUPS);
+        appProperties.getInspection().setVirusTotalApiKey(" ");
+        inspectionWorker.lookUpNextOnVirusTotal();
+
+        verifyNoInteractions(virusTotalClient);
+        assertThat(row(LINK)).containsEntry("VT_STATE", "PENDING");
+    }
+
+    @Test
+    void notConfiguredLeavesTheLookupWaiting() {
+        vtPending(LINK, NOW_UTC);
+        chainChecked(LINK, null);
+        when(virusTotalClient.lookup(anyString())).thenReturn(VirusTotalReport.notConfigured());
+
+        inspectionWorker.lookUpNextOnVirusTotal();
+
+        assertThat(row(LINK)).containsEntry("VT_STATE", "PENDING").containsEntry("VT_FAILURE", null);
+    }
+
+    @Test
     void screenshotsOlderThanSevenDaysExpire() {
         done(LINK, NOW_UTC.minusDays(7).minusMinutes(1));
         done(OTHER_LINK, NOW_UTC.minusDays(7).plusMinutes(1));
@@ -494,6 +873,8 @@ class InspectionWorkerTest {
         final Method expire = InspectionWorker.class.getMethod("expireOldScreenshots");
 
         assertThat(tick.getAnnotation(Scheduled.class).fixedDelayString()).isEqualTo("${app.inspection.interval:15s}");
+        assertThat(InspectionWorker.class.getMethod("lookUpNextOnVirusTotal").getAnnotation(Scheduled.class).fixedDelayString())
+                .isEqualTo("${app.inspection.interval:15s}");
         assertThat(expire.getAnnotation(Scheduled.class).cron()).isEqualTo("0 30 3 * * *");
         assertThat(expire.getAnnotation(Scheduled.class).zone()).isEqualTo("UTC");
     }
@@ -505,6 +886,14 @@ class InspectionWorkerTest {
     private void pending(final long urlId, final LocalDateTime requestedAt, final String requestedBy) {
         jdbcTemplate.update("insert into link_inspection (url_id, screenshot_state, screenshot_requested_at, screenshot_requested_by) values (?, 'PENDING', ?, ?)",
                 urlId, requestedAt, requestedBy);
+    }
+
+    private void vtPending(final long urlId, final LocalDateTime requestedAt) {
+        jdbcTemplate.update("insert into link_inspection (url_id, vt_state, vt_requested_at) values (?, 'PENDING', ?)", urlId, requestedAt);
+    }
+
+    private void chainChecked(final long urlId, final String finalUrl) {
+        jdbcTemplate.update("update url set chain_checked_at = ?, final_url = ? where id = ?", NOW_UTC.minusMinutes(5), finalUrl, urlId);
     }
 
     private void done(final long urlId, final LocalDateTime takenAt) {

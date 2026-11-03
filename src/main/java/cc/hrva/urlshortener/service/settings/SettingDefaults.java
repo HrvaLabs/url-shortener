@@ -19,6 +19,7 @@ public class SettingDefaults {
             "Turnstile keys aren't set, so no check runs. Set APP_TURNSTILE_SITE_KEY and APP_TURNSTILE_SECRET_KEY.";
     private static final String BROWSER_RUN_NOT_CONFIGURED =
             "Cloudflare Browser Run isn't set up, so no screenshots are taken. Set CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_BROWSER_API_TOKEN.";
+    private static final String VIRUSTOTAL_NOT_CONFIGURED = "VirusTotal isn't set up, so no links are looked up. Set VIRUSTOTAL_API_KEY.";
 
     private final Map<SettingKey, Supplier<Object>> defaults = new EnumMap<>(SettingKey.class);
     private final Map<SettingKey, Supplier<Optional<String>>> availability = new EnumMap<>(SettingKey.class);
@@ -79,6 +80,7 @@ public class SettingDefaults {
         register(SettingKey.ANONYMOUS_VISIT_LIMIT, moderation::getAnonymousVisitLimit);
         register(SettingKey.API_KEY_REQUESTS_PER_HOUR, appProperties::getApiKeyRequestsPerHour);
         register(SettingKey.LINK_SCREENSHOTS, moderation::isLinkScreenshots);
+        register(SettingKey.VIRUSTOTAL_LOOKUPS, moderation::isVirusTotalLookups);
         registerAvailability(SettingKey.GOOGLE_SIGN_IN,
                 () -> unavailableUnless(oAuthProviders.configured(OAuthProviders.GOOGLE), GOOGLE_NOT_CONFIGURED));
         registerAvailability(SettingKey.GITHUB_SIGN_IN,
@@ -87,6 +89,8 @@ public class SettingDefaults {
                 () -> unavailableUnless(turnstileConfigured(appProperties.getTurnstile()), TURNSTILE_NOT_CONFIGURED));
         registerAvailability(SettingKey.LINK_SCREENSHOTS,
                 () -> unavailableUnless(browserRunConfigured(appProperties.getCloudflare()), BROWSER_RUN_NOT_CONFIGURED));
+        registerAvailability(SettingKey.VIRUSTOTAL_LOOKUPS,
+                () -> unavailableUnless(StringUtils.isNotBlank(appProperties.getInspection().getVirusTotalApiKey()), VIRUSTOTAL_NOT_CONFIGURED));
     }
 
     public Object defaultOf(final SettingKey key) {

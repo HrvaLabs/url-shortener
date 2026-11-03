@@ -1,7 +1,8 @@
 package cc.hrva.urlshortener.service.inspection;
 
+import cc.hrva.urlshortener.dto.inspection.InspectionSummary;
 import cc.hrva.urlshortener.dto.inspection.LinkInspectionResponse;
-import cc.hrva.urlshortener.dto.inspection.ScreenshotView;
+import cc.hrva.urlshortener.dto.inspection.VirusTotalView;
 import cc.hrva.urlshortener.model.LinkScreenshot;
 import cc.hrva.urlshortener.service.alert.LinkReviewOpened;
 import java.util.Collection;
@@ -14,11 +15,15 @@ public interface LinkInspectionService {
 
     void takeScreenshot(long urlId);
 
+    void requestVirusTotal(long urlId);
+
+    VirusTotalView submitToVirusTotal(long urlId, String performedBy);
+
     LinkInspectionResponse inspection(long urlId);
 
     Optional<LinkScreenshot> screenshot(long urlId);
 
-    Map<Long, ScreenshotView> summaries(Collection<Long> urlIds);
+    Map<Long, InspectionSummary> summaries(Collection<Long> urlIds);
 
     void dropFor(long urlId);
 

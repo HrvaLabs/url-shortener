@@ -2,7 +2,9 @@ package cc.hrva.urlshortener.service;
 
 import cc.hrva.urlshortener.exception.InvalidSortException;
 import cc.hrva.urlshortener.dto.ReviewEntryResponse;
+import cc.hrva.urlshortener.dto.inspection.InspectionSummary;
 import cc.hrva.urlshortener.dto.inspection.ScreenshotView;
+import cc.hrva.urlshortener.dto.inspection.VirusTotalView;
 import cc.hrva.urlshortener.model.CustomDomain;
 import cc.hrva.urlshortener.model.LinkReview;
 import cc.hrva.urlshortener.model.Url;
@@ -374,29 +376,32 @@ class DefaultReviewQueueServiceTest {
 
         assertThat(entries.getContent()).containsExactly(new ReviewEntryResponse(287L, "v0DB3", "https://findfavoritedate.life/?u=f6yp608",
                 "findfavoritedate.life", "findfavoritedate.life", 27L, "rhea@gmail.com", LocalDateTime.of(2026, 10, 19, 12, 0), true, LocalDateTime.of(2026, 10, 20, 7, 15), List.of(YOUNG, LURE),
-                LocalDateTime.of(2026, 10, 20, 7, 16), null, List.of(), null));
+                LocalDateTime.of(2026, 10, 20, 7, 16), null, List.of(), null, null));
     }
 
     @Test
     @SuppressWarnings("unchecked")
-    void entriesCarryTheChainAndTheScreenshotSummary() {
+    void entriesCarryTheChainTheScreenshotAndTheVirusTotalVerdict() {
         final var chained = Url.builder().id(287L).shortUrl("v0DB3").longUrl("https://findfavoritedate.life/?u=f6yp608")
                 .redirectChain("https://findfavoritedate.life/?u=f6yp608\nhttps://sso.findfavoritedate.life/").build();
         final var plain = Url.builder().id(288L).shortUrl("r3P0t").longUrl("https://utn.pl/x").build();
         final var taken = new ScreenshotView(InspectionState.DONE, LocalDateTime.of(2026, 10, 20, 7, 16), LocalDateTime.of(2026, 10, 20, 7, 17),
                 "https://findfavoritedate.life/?u=f6yp608", "Find your date", 200, null, true);
         final var nothingYet = new ScreenshotView(null, null, null, null, null, null, null, true);
+        final var verdict = VirusTotalView.of(InspectionState.DONE, "https://findfavoritedate.life/?u=f6yp608", "1db0ad7d", 7, 2, 61, 25,
+                LocalDateTime.of(2026, 10, 19, 7, 0), LocalDateTime.of(2026, 10, 20, 7, 18), null, null, true);
         when(linkReviewRepository.findAll(any(Specification.class), any(Pageable.class))).thenReturn(new PageImpl<>(List.of(
                 LinkReview.builder().id(8L).url(chained).reasons(LURE).build(),
                 LinkReview.builder().id(9L).url(plain).reasons(YOUNG).build())));
-        when(linkInspectionService.summaries(List.of(287L, 288L))).thenReturn(java.util.Map.of(287L, taken, 288L, nothingYet));
+        when(linkInspectionService.summaries(List.of(287L, 288L))).thenReturn(java.util.Map.of(287L, new InspectionSummary(taken, verdict),
+                288L, new InspectionSummary(nothingYet, VirusTotalView.none(true))));
 
         final var entries = reviewQueueService.openEntries(PageRequest.of(0, 20), null, null, null);
 
         assertThat(entries.getContent())
-                .extracting(ReviewEntryResponse::redirectChain, ReviewEntryResponse::screenshot)
-                .containsExactly(tuple(List.of("https://findfavoritedate.life/?u=f6yp608", "https://sso.findfavoritedate.life/"), taken),
-                        tuple(List.of(), nothingYet));
+                .extracting(ReviewEntryResponse::redirectChain, ReviewEntryResponse::screenshot, ReviewEntryResponse::virusTotal)
+                .containsExactly(tuple(List.of("https://findfavoritedate.life/?u=f6yp608", "https://sso.findfavoritedate.life/"), taken, verdict),
+                        tuple(List.of(), nothingYet, VirusTotalView.none(true)));
         verify(linkInspectionService, times(1)).summaries(any());
     }
 

@@ -39,6 +39,7 @@ import cc.hrva.urlshortener.exception.SettingNotFoundException;
 import cc.hrva.urlshortener.exception.ShortUrlAlreadyExistsException;
 import cc.hrva.urlshortener.exception.ResetLinkExpiredException;
 import cc.hrva.urlshortener.exception.ScreenshotsUnavailableException;
+import cc.hrva.urlshortener.exception.VirusTotalUnavailableException;
 import cc.hrva.urlshortener.exception.SignInExpiredException;
 import cc.hrva.urlshortener.exception.ServiceBusyException;
 import cc.hrva.urlshortener.exception.SignInUnavailableException;
@@ -263,6 +264,11 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(ScreenshotsUnavailableException.class)
     public ResponseEntity<ProblemDetail> handleScreenshotsUnavailable(final ScreenshotsUnavailableException ex) {
+        return ProblemResponses.entity(HttpStatus.CONFLICT, safeMessage(ex));
+    }
+
+    @ExceptionHandler(VirusTotalUnavailableException.class)
+    public ResponseEntity<ProblemDetail> handleVirusTotalUnavailable(final VirusTotalUnavailableException ex) {
         return ProblemResponses.entity(HttpStatus.CONFLICT, safeMessage(ex));
     }
 

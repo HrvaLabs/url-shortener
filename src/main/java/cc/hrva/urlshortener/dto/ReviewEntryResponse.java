@@ -1,6 +1,7 @@
 package cc.hrva.urlshortener.dto;
 
 import cc.hrva.urlshortener.dto.inspection.ScreenshotView;
+import cc.hrva.urlshortener.dto.inspection.VirusTotalView;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -21,5 +22,6 @@ public record ReviewEntryResponse(
         @JsonInclude(JsonInclude.Include.NON_NULL)
         String domain,
         List<String> redirectChain,
-        ScreenshotView screenshot) {
+        ScreenshotView screenshot,
+        VirusTotalView virusTotal) {
 }

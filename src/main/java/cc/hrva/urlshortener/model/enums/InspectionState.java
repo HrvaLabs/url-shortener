@@ -5,6 +5,7 @@ public enum InspectionState {
     PENDING,
     DONE,
     FAILED,
-    EXPIRED
+    EXPIRED,
+    NOT_FOUND
 
 }

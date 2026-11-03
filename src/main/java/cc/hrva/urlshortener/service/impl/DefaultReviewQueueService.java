@@ -1,7 +1,7 @@
 package cc.hrva.urlshortener.service.impl;
 
 import cc.hrva.urlshortener.dto.ReviewEntryResponse;
-import cc.hrva.urlshortener.dto.inspection.ScreenshotView;
+import cc.hrva.urlshortener.dto.inspection.InspectionSummary;
 import cc.hrva.urlshortener.model.LinkReview;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.User;
@@ -183,10 +183,10 @@ public class DefaultReviewQueueService implements ReviewQueueService {
         final var possibleScammers = reviews.stream().anyMatch(review -> review.getUrl().getOwner() != null)
                 ? scammerSignalService.possibleScammerIds()
                 : Set.<Long>of();
-        final var screenshots = reviews.isEmpty()
-                ? Map.<Long, ScreenshotView>of()
+        final var inspections = reviews.isEmpty()
+                ? Map.<Long, InspectionSummary>of()
                 : linkInspectionService.summaries(reviews.stream().map(review -> review.getUrl().getId()).toList());
-        return reviews.map(review -> entryOf(review, possibleScammers, screenshots));
+        return reviews.map(review -> entryOf(review, possibleScammers, inspections));
     }
 
     @Override
@@ -212,8 +212,9 @@ public class DefaultReviewQueueService implements ReviewQueueService {
         return linkReviewRepository.findAll(Specification.allOf(filters), sorted);
     }
 
-    private static ReviewEntryResponse entryOf(final LinkReview review, final Set<Long> possibleScammers, final Map<Long, ScreenshotView> screenshots) {
+    private static ReviewEntryResponse entryOf(final LinkReview review, final Set<Long> possibleScammers, final Map<Long, InspectionSummary> inspections) {
         final var url = review.getUrl();
+        final var inspection = Optional.ofNullable(inspections.get(url.getId()));
         final var owner = Optional.ofNullable(url.getOwner());
         final var host = DomainNames.hostOf(url.getLongUrl());
         return new ReviewEntryResponse(
@@ -231,7 +232,8 @@ public class DefaultReviewQueueService implements ReviewQueueService {
                 review.getFlaggedAt(),
                 url.getDomain() == null ? null : url.getDomain().getHostname(),
                 RedirectChains.split(url.getRedirectChain()),
-                screenshots.get(url.getId()));
+                inspection.map(InspectionSummary::screenshot).orElse(null),
+                inspection.map(InspectionSummary::virusTotal).orElse(null));
     }
 
     @Override
