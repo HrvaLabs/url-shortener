@@ -50,6 +50,7 @@ import cc.hrva.urlshortener.service.linksignal.RandomLookingLabels;
 import cc.hrva.urlshortener.dto.DestinationHealth;
 import cc.hrva.urlshortener.dto.UrlSearchDto;
 import cc.hrva.urlshortener.dto.UrlUpdateDto;
+import cc.hrva.urlshortener.dto.stats.CacheStats;
 import cc.hrva.urlshortener.exception.ApiException;
 import cc.hrva.urlshortener.exception.ApiKeyNotFoundException;
 import cc.hrva.urlshortener.exception.DestinationChangeRefusedException;
@@ -266,8 +267,11 @@ class UrlServiceTest {
 
     private AnonymousLinkSignals anonymousLinkSignals;
 
+    private UrlCache urlCache;
+
     @BeforeEach
     void setUp() {
+        urlCache = new UrlCache(cacheManager);
         org.mockito.Mockito.lenient().when(rateLimiter.tryAcquire(any(), org.mockito.ArgumentMatchers.anyInt(), any())).thenReturn(true);
         org.mockito.Mockito.lenient().when(customDomainRepository.findStatusForUpdate(anyLong())).thenReturn(Optional.of("ACTIVE"));
         org.mockito.Mockito.lenient().when(urlValidator.checkIfLongUrlIsNotBlocklisted(any())).thenReturn(LinkVerdict.clean());
@@ -287,7 +291,7 @@ class UrlServiceTest {
                 urlToPeekUrlConverter,
                 createUrlToUrlConverter,
                 urlUpdateDtoToUrlConverter,
-                new UrlCache(cacheManager),
+                urlCache,
                 objectMapper,
                 meterRegistry,
                 passwordEncoder,
@@ -2094,7 +2098,7 @@ class UrlServiceTest {
 
     private UrlService urlServiceIn(final TransactionOperations transactionOperations) {
         return new DefaultUrlService(userService, urlValidator, apiKeyService, urlRepository, appProperties, apiKeyValidator, clickAnalyticsService,
-                urlToPeekUrlConverter, createUrlToUrlConverter, urlUpdateDtoToUrlConverter, new UrlCache(cacheManager), objectMapper, meterRegistry,
+                urlToPeekUrlConverter, createUrlToUrlConverter, urlUpdateDtoToUrlConverter, urlCache, objectMapper, meterRegistry,
                 passwordEncoder, suspiciousUrlService, rateLimiter, reviewQueueService, scammerSignalService, clickCheckService, redirectChainService,
                 transactionOperations, reservedAliasService, burstAlertService, destinationCheckRepository, customDomainRegistry, customDomainRepository,
                 campaignService, settingsService, withoutTransactions, anonymousLinkSignals, LinkWarningTemplates.engine(), humanCheckService, signInFormCheckService, destinationChangeService);
@@ -4335,6 +4339,91 @@ class UrlServiceTest {
     }
 
     @Test
+    void aRedirectServedFromTheCacheCountsAHit() {
+        final var cache = new org.springframework.cache.concurrent.ConcurrentMapCache("urls");
+        when(cacheManager.getCache("urls")).thenReturn(cache);
+        cache.put("abc", new UrlResponse(5L, "https://example.com/a", "abc", null, null, 0L, null, true, "ACTIVE", java.util.Set.of(), false, null));
+
+        assertThat(locationOf(urlServiceWithMeters().redirectResultUrl("abc", CLICK))).isEqualTo("https://example.com/a");
+
+        assertThat(urlCache.redirectStats()).isEqualTo(new CacheStats(1, 0, 100.0));
+    }
+
+    @Test
+    void aRedirectOfAnExistingLinkReadFromTheDatabaseCountsAMiss() {
+        final var cache = new org.springframework.cache.concurrent.ConcurrentMapCache("urls");
+        when(cacheManager.getCache("urls")).thenReturn(cache);
+        final var url = Url.builder().id(5L).shortUrl("abc").longUrl("https://example.com/a").visits(0L).active(true).build();
+        when(urlRepository.findServed(null, "abc")).thenReturn(Optional.of(url));
+
+        assertThat(locationOf(urlServiceWithMeters().redirectResultUrl("abc", CLICK))).isEqualTo("https://example.com/a");
+
+        assertThat(urlCache.redirectStats()).isEqualTo(new CacheStats(0, 1, 0.0));
+    }
+
+    @Test
+    void aPasswordLinkReadFromTheDatabaseCountsAMiss() {
+        final var cache = new org.springframework.cache.concurrent.ConcurrentMapCache("urls");
+        when(cacheManager.getCache("urls")).thenReturn(cache);
+        when(appProperties.getFrontendUrl()).thenReturn(FRONTEND);
+        final var url = Url.builder().id(5L).shortUrl("abc").longUrl("https://example.com/a").visits(0L).active(true).passwordHash("hash").build();
+        when(urlRepository.findServed(null, "abc")).thenReturn(Optional.of(url));
+
+        urlServiceWithMeters().redirectResultUrl("abc", CLICK);
+
+        assertThat(urlCache.redirectStats()).isEqualTo(new CacheStats(0, 1, 0.0));
+    }
+
+    @Test
+    void aMissingCodeCountsNeither() {
+        final var cache = new org.springframework.cache.concurrent.ConcurrentMapCache("urls");
+        when(cacheManager.getCache("urls")).thenReturn(cache);
+        when(appProperties.getFrontendUrl()).thenReturn(FRONTEND);
+
+        assertUnavailable(urlServiceWithMeters().redirectResultUrl("nope", CLICK), "nope", null, "missing");
+
+        assertThat(urlCache.redirectStats()).isEqualTo(new CacheStats(0, 0, null));
+    }
+
+    @Test
+    void anUnavailableLinkReadFromTheDatabaseCountsNeither() {
+        final var cache = new org.springframework.cache.concurrent.ConcurrentMapCache("urls");
+        when(cacheManager.getCache("urls")).thenReturn(cache);
+        when(appProperties.getFrontendUrl()).thenReturn(FRONTEND);
+        final var url = Url.builder().id(5L).shortUrl("abc").longUrl("https://example.com/a").visits(0L).active(false).build();
+        when(urlRepository.findServed(null, "abc")).thenReturn(Optional.of(url));
+
+        assertUnavailable(urlServiceWithMeters().redirectResultUrl("abc", CLICK), "abc", null, "inactive");
+
+        assertThat(urlCache.redirectStats()).isEqualTo(new CacheStats(0, 0, null));
+    }
+
+    @Test
+    void aStaleCachedLinkReadAgainFromTheDatabaseCountsOnlyAMiss() {
+        final var cache = new org.springframework.cache.concurrent.ConcurrentMapCache("urls");
+        when(cacheManager.getCache("urls")).thenReturn(cache);
+        cache.put("abc", new UrlResponse(5L, "https://example.com/a", "abc", null, null, 0L, null, false, "INACTIVE", java.util.Set.of(), false, null));
+        final var url = Url.builder().id(5L).shortUrl("abc").longUrl("https://example.com/a").visits(0L).active(true).build();
+        when(urlRepository.findServed(null, "abc")).thenReturn(Optional.of(url));
+
+        assertThat(locationOf(urlServiceWithMeters().redirectResultUrl("abc", CLICK))).isEqualTo("https://example.com/a");
+
+        assertThat(urlCache.redirectStats()).isEqualTo(new CacheStats(0, 1, 0.0));
+    }
+
+    @Test
+    void aNewLinkPutInTheCacheCountsNeither() {
+        final var cache = new org.springframework.cache.concurrent.ConcurrentMapCache("urls");
+        when(cacheManager.getCache("urls")).thenReturn(cache);
+        anonymousCreateOf(RANDOM_LINK, LinkVerdict.clean());
+        when(domainAgeService.registeredOn("xdvqnxj.com")).thenReturn(Optional.empty());
+
+        urlService.saveUrlRouting(CreateUrlDto.builder().longUrl(RANDOM_LINK).build(), CLIENT_IP, CreatedVia.WEB);
+
+        assertThat(urlCache.redirectStats()).isEqualTo(new CacheStats(0, 0, null));
+    }
+
+    @Test
     void aLongAbusivePathIsCutTo32CharactersOnTheUnavailablePage() {
         when(appProperties.getFrontendUrl()).thenReturn(FRONTEND);
 
@@ -5035,7 +5124,7 @@ class UrlServiceTest {
                 urlToPeekUrlConverter,
                 createUrlToUrlConverter,
                 urlUpdateDtoToUrlConverter,
-                new UrlCache(cacheManager),
+                urlCache,
                 objectMapper,
                 new io.micrometer.core.instrument.simple.SimpleMeterRegistry(),
                 passwordEncoder,
@@ -5116,7 +5205,7 @@ class UrlServiceTest {
                 urlToPeekUrlConverter,
                 new CreateUrlToUrlConverter(),
                 urlUpdateDtoToUrlConverter,
-                new UrlCache(cacheManager),
+                urlCache,
                 objectMapper,
                 meterRegistry,
                 passwordEncoder,
@@ -5156,7 +5245,7 @@ class UrlServiceTest {
                 urlToPeekUrlConverter,
                 new CreateUrlToUrlConverter(),
                 urlUpdateDtoToUrlConverter,
-                new UrlCache(cacheManager),
+                urlCache,
                 objectMapper,
                 meterRegistry,
                 passwordEncoder,
@@ -5192,7 +5281,7 @@ class UrlServiceTest {
                 urlToPeekUrlConverter,
                 createUrlToUrlConverter,
                 urlUpdateDtoToUrlConverter,
-                new UrlCache(cacheManager),
+                urlCache,
                 objectMapper,
                 meterRegistry,
                 passwordEncoder,

@@ -1,6 +1,8 @@
 package cc.hrva.urlshortener.service.domain;
 
+import cc.hrva.urlshortener.dto.stats.CacheStats;
 import java.util.Optional;
+import java.util.concurrent.atomic.LongAdder;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.cache.Cache;
@@ -15,6 +17,8 @@ public class UrlCache {
     private static final String URLS_CACHE = "urls";
 
     private final CacheManager cacheManager;
+    private final LongAdder redirectHits = new LongAdder();
+    private final LongAdder redirectMisses = new LongAdder();
 
     public Object get(final String cacheKey) {
         try {
@@ -48,6 +52,18 @@ public class UrlCache {
         } catch (final RuntimeException exception) {
             log.warn("URL cache eviction failed key={} exception={}", cacheKey, exception.getClass().getName());
         }
+    }
+
+    public void recordRedirectHit() {
+        redirectHits.increment();
+    }
+
+    public void recordRedirectMiss() {
+        redirectMisses.increment();
+    }
+
+    public CacheStats redirectStats() {
+        return CacheStats.of(redirectHits.sum(), redirectMisses.sum());
     }
 
 }

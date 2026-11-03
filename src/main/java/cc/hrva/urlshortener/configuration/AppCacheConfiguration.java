@@ -4,6 +4,7 @@ import java.time.Duration;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.boot.cache.autoconfigure.RedisCacheManagerBuilderCustomizer;
 import org.springframework.cache.Cache;
 import org.springframework.cache.annotation.EnableCaching;
 import org.springframework.cache.interceptor.CacheErrorHandler;
@@ -20,6 +21,8 @@ import tools.jackson.databind.ObjectMapper;
 public class AppCacheConfiguration {
 
     private static final Logger log = LoggerFactory.getLogger(AppCacheConfiguration.class);
+    private static final String URLS_CACHE = "urls";
+    private static final Duration URLS_TTL = Duration.ofHours(24);
 
     private final ObjectMapper objectMapper;
 
@@ -30,6 +33,11 @@ public class AppCacheConfiguration {
                 .disableCachingNullValues()
                 .serializeValuesWith(RedisSerializationContext.SerializationPair.fromSerializer(
                         new GenericJacksonJsonRedisSerializer(objectMapper)));
+    }
+
+    @Bean
+    public RedisCacheManagerBuilderCustomizer urlsCacheKeepsEntriesForADay() {
+        return builder -> builder.withCacheConfiguration(URLS_CACHE, builder.cacheDefaults().entryTtl(URLS_TTL));
     }
 
     @Bean

@@ -1041,6 +1041,7 @@ public class DefaultUrlService implements UrlService {
                 .orElse(null);
         if (cachedValue != null) {
             if (isUrlRedirectValid(cachedValue)) {
+                urlCache.recordRedirectHit();
                 if (cachedValue.passwordProtected()) {
                     final var gate = new RedirectView();
                     gate.setUrl(protectedPageUrl(place));
@@ -1089,6 +1090,7 @@ public class DefaultUrlService implements UrlService {
         }
         final var response = UrlResponse.from(url);
         if (response.passwordProtected()) {
+            urlCache.recordRedirectMiss();
             urlCache.put(place.cacheKey(), response);
             return Found.answered(redirectTo(protectedPageUrl(place)));
         }
@@ -1099,6 +1101,7 @@ public class DefaultUrlService implements UrlService {
         if (!clickCheckService.mayRedirect(url.getId(), url.getLongUrl())) {
             return Found.answered(unavailable(place, REASON_BLOCKED));
         }
+        urlCache.recordRedirectMiss();
         urlCache.put(place.cacheKey(), response);
         return Found.toOpen(response);
     }

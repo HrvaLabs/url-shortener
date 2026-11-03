@@ -17,8 +17,6 @@ spring:
         size: 4
   cache:
     cache-names: urls
-    redis:
-      enable-statistics: true
   data:
     redis:
       host: redis.hrvalabs.net

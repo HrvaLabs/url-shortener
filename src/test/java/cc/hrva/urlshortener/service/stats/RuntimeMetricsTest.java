@@ -3,18 +3,14 @@ package cc.hrva.urlshortener.service.stats;
 import cc.hrva.urlshortener.dto.stats.CacheStats;
 import cc.hrva.urlshortener.dto.stats.RedirectTiming;
 import cc.hrva.urlshortener.dto.stats.RequestCounts;
+import cc.hrva.urlshortener.service.domain.UrlCache;
 import io.micrometer.core.instrument.Timer;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.Duration;
 import org.junit.jupiter.api.Test;
-import org.springframework.cache.CacheManager;
 import org.springframework.cache.concurrent.ConcurrentMapCacheManager;
-import org.springframework.data.redis.cache.CacheStatistics;
-import org.springframework.data.redis.cache.RedisCache;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
 
 class RuntimeMetricsTest {
 
@@ -52,26 +48,19 @@ class RuntimeMetricsTest {
     }
 
     @Test
-    void urlCacheStatsFromTheRedisCache() {
-        assertThat(runtimeMetrics(redisCacheManager(9, 1)).urlCacheStats()).isEqualTo(new CacheStats(9, 1, 90.0));
+    void healthReportsTheRedirectHitRatio() {
+        final var urlCache = new UrlCache(new ConcurrentMapCacheManager("urls"));
+        urlCache.recordRedirectHit();
+        urlCache.recordRedirectHit();
+        urlCache.recordRedirectHit();
+        urlCache.recordRedirectMiss();
+
+        assertThat(runtimeMetrics(urlCache).urlCacheStats()).isEqualTo(urlCache.redirectStats()).isEqualTo(new CacheStats(3, 1, 75.0));
     }
 
     @Test
-    void urlCacheStatsWithoutLookupsHaveNoRatio() {
-        assertThat(runtimeMetrics(redisCacheManager(0, 0)).urlCacheStats()).isEqualTo(new CacheStats(0, 0, null));
-    }
-
-    @Test
-    void aNonRedisCacheHasNoStats() {
-        assertThat(runtimeMetrics(new ConcurrentMapCacheManager("urls")).urlCacheStats()).isEqualTo(new CacheStats(0, 0, null));
-    }
-
-    @Test
-    void aFailingCacheHasNoStats() {
-        final var cacheManager = mock(CacheManager.class);
-        when(cacheManager.getCache("urls")).thenThrow(new IllegalStateException("Redis is down"));
-
-        assertThat(runtimeMetrics(cacheManager).urlCacheStats()).isEqualTo(new CacheStats(0, 0, null));
+    void urlCacheStatsWithoutRedirectsHaveNoRatio() {
+        assertThat(runtimeMetrics().urlCacheStats()).isEqualTo(new CacheStats(0, 0, null));
     }
 
     @Test
@@ -90,22 +79,11 @@ class RuntimeMetricsTest {
     }
 
     private RuntimeMetrics runtimeMetrics() {
-        return runtimeMetrics(new ConcurrentMapCacheManager("urls"));
+        return runtimeMetrics(new UrlCache(new ConcurrentMapCacheManager("urls")));
     }
 
-    private RuntimeMetrics runtimeMetrics(final CacheManager cacheManager) {
-        return new RuntimeMetrics(meterRegistry, cacheManager);
-    }
-
-    private static CacheManager redisCacheManager(final long hits, final long misses) {
-        final var statistics = mock(CacheStatistics.class);
-        when(statistics.getHits()).thenReturn(hits);
-        when(statistics.getMisses()).thenReturn(misses);
-        final var cache = mock(RedisCache.class);
-        when(cache.getStatistics()).thenReturn(statistics);
-        final var cacheManager = mock(CacheManager.class);
-        when(cacheManager.getCache("urls")).thenReturn(cache);
-        return cacheManager;
+    private RuntimeMetrics runtimeMetrics(final UrlCache urlCache) {
+        return new RuntimeMetrics(meterRegistry, urlCache);
     }
 
 }
