@@ -1453,16 +1453,6 @@ class DefaultModerationServiceTest {
     }
 
     @Test
-    void blockingResolvesWithoutTouchingTheFlags() {
-        final var url = inReviewWithTheWarningPage(64L, "https://utn.pl/b");
-
-        moderationService.resolveReview(64L, ReviewAction.BLOCK_LINK, null, ADMIN, "admin");
-
-        assertThat(url).extracting(Url::isActive, Url::isWarningPage, Url::isWarningPageForReview).containsExactly(false, true, true);
-        verify(reviewQueueService, atLeastOnce()).resolveOpen(url, ReviewResolution.LINK_BLOCKED, ADMIN);
-    }
-
-    @Test
     void clearWarningPageAndTrustDomainClearBothFlags() {
         final var cleared = inReviewWithTheWarningPage(65L, "https://utn.pl/c");
         final var trusted = inReviewWithTheWarningPage(66L, "https://radarkobiet.pl/t");

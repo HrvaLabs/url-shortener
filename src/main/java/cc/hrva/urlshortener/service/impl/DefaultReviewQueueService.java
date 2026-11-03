@@ -152,13 +152,17 @@ public class DefaultReviewQueueService implements ReviewQueueService {
     @Transactional
     public void resolveOpen(final Url url, final ReviewResolution resolution, final String resolvedBy) {
         final var resolvedAt = LocalDateTime.now();
-        linkReviewRepository.findByUrlAndResolvedAtIsNull(url).forEach(review -> {
+        final var open = linkReviewRepository.findByUrlAndResolvedAtIsNull(url);
+        open.forEach(review -> {
             review.setResolution(resolution);
             review.setResolvedBy(resolvedBy);
             review.setResolvedAt(resolvedAt);
             linkReviewRepository.save(review);
             log.info("Review resolved urlId={} reviewId={} resolution={}", url.getId(), review.getId(), resolution);
         });
+        if (!open.isEmpty()) {
+            reviewWarningPage.clearAfterReview(url.getId());
+        }
     }
 
     @Override

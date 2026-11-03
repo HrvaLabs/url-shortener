@@ -126,12 +126,14 @@ import static org.assertj.core.api.Assertions.entry;
 import static org.assertj.core.api.Assertions.tuple;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.ArgumentMatchers.startsWith;
 import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -1904,6 +1906,23 @@ class UrlServiceTest {
 
         assertThat(created.warningPage()).isTrue();
         verify(signInFormCheckService).checkLater(created.id());
+    }
+
+    @Test
+    void aNewLinkThatOnlyItsReviewGaveTheWarningPageIsNeverFetched() {
+        anonymousCreateOf(LIMITED_LINK, new LinkVerdict(Outcome.FLAG, YOUNG_DOMAIN, null, null));
+        doAnswer(invocation -> {
+            final Url flagged = invocation.getArgument(0);
+            flagged.setWarningPage(true);
+            flagged.setWarningPageForReview(true);
+            return null;
+        }).when(reviewQueueService).flag(any(Url.class), anyList());
+
+        final var created = createAnonymously(LIMITED_LINK);
+
+        assertThat(created.warningPageForReview()).isTrue();
+        verify(reviewQueueService).flag(any(Url.class), anyList());
+        verifyNoInteractions(signInFormCheckService);
     }
 
     @Test

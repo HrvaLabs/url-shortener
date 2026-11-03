@@ -96,9 +96,12 @@ class ReviewWarningPageTest {
 
     @Test
     void theSettingOffLeavesLinksAlone() {
-        SettingsServiceFixtures.turnOff(settingsService, SettingKey.REVIEW_WARNING_PAGE);
         final var link = stored(anonymousLink());
 
+        SettingsServiceFixtures.turnOff(settingsService, SettingKey.REVIEW_WARNING_PAGE);
+        reviewWarningPage.showWhileInReview(link);
+        SettingsServiceFixtures.turnOn(settingsService, SettingKey.REVIEW_WARNING_PAGE);
+        SettingsServiceFixtures.turnOff(settingsService, SettingKey.WARNING_PAGE);
         reviewWarningPage.showWhileInReview(link);
 
         assertThat(link).extracting(Url::isWarningPage, Url::isWarningPageForReview).containsExactly(false, false);

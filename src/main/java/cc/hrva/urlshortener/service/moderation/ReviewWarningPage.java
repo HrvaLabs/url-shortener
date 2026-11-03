@@ -23,7 +23,7 @@ public class ReviewWarningPage {
     private final TransactionOperations transactionOperations;
 
     public void showWhileInReview(final Url url) {
-        if (!settingsService.isOn(SettingKey.REVIEW_WARNING_PAGE)) {
+        if (!settingsService.isOn(SettingKey.WARNING_PAGE) || !settingsService.isOn(SettingKey.REVIEW_WARNING_PAGE)) {
             return;
         }
         urlRepository.findById(url.getId())

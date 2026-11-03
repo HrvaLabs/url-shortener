@@ -1,6 +1,10 @@
 package cc.hrva.urlshortener.service;
 
 import cc.hrva.urlshortener.configuration.ClockConfiguration;
+import cc.hrva.urlshortener.controller.LinkWarningView;
+import cc.hrva.urlshortener.model.enums.ReportCategory;
+import cc.hrva.urlshortener.repository.LinkReviewRepository;
+import cc.hrva.urlshortener.service.impl.DefaultReviewQueueService;
 import cc.hrva.urlshortener.service.moderation.ReviewWarningPage;
 import java.time.Instant;
 import java.util.List;
@@ -166,7 +170,7 @@ class UrlWritesTest {
     @MockitoBean
     private RateLimiter rateLimiter;
 
-    @MockitoBean
+    @MockitoSpyBean
     private ReviewQueueService reviewQueueService;
 
     @MockitoBean
@@ -208,9 +212,6 @@ class UrlWritesTest {
     @MockitoBean
     private CustomDomainModeration customDomainModeration;
 
-    @MockitoBean
-    private ReviewWarningPage reviewWarningPage;
-
     @BeforeEach
     void visitTheLinkRightAfterTheWriteTransactionReadsIt() {
         doAnswer(invocation -> {
@@ -224,6 +225,7 @@ class UrlWritesTest {
 
     @AfterEach
     void removeTheLink() {
+        jdbcTemplate.update("delete from link_review where url_id in (?, ?, ?)", LINK, ON_HRVA, ON_DOMAIN);
         jdbcTemplate.update("delete from url where id in (?, ?, ?)", LINK, ON_HRVA, ON_DOMAIN);
         jdbcTemplate.update("delete from custom_domain where owner_id = ?", DOMAIN_OWNER);
         jdbcTemplate.update("delete from user_account where id = ?", DOMAIN_OWNER);
@@ -488,6 +490,26 @@ class UrlWritesTest {
     }
 
     @Test
+    void aLinkBlockedFromReviewAndRestoredShowsNoReviewWarning() {
+        link(4, null);
+        when(clickCheckService.mayRedirect(anyLong(), any())).thenReturn(true);
+        when(urlValidator.checkIfDestinationNotBlocked(any(Url.class))).thenReturn(LinkVerdict.clean());
+        reviewQueueService.report(urlRepository.findById(LINK).orElseThrow(), ReportCategory.PHISHING, "asks for my bank login");
+        assertThat(reviewRow()).containsEntry("ACTIVE", true).containsEntry("WARNING_PAGE", true).containsEntry("WARNING_PAGE_FOR_REVIEW", true);
+        assertThat(urlService.redirectResultUrl(ALIAS, CLICK)).isInstanceOfSatisfying(LinkWarningView.class, page -> assertThat(page.inReview()).isTrue());
+
+        moderationService.resolveReview(LINK, ReviewAction.BLOCK_LINK, null, "admin@hrva.cc", "admin");
+
+        assertThat(reviewRow()).containsEntry("ACTIVE", false).containsEntry("WARNING_PAGE", false).containsEntry("WARNING_PAGE_FOR_REVIEW", false);
+        assertThat(jdbcTemplate.queryForObject("select resolution from link_review where url_id = ?", String.class, LINK)).isEqualTo("LINK_BLOCKED");
+
+        urlService.activateUrl(LINK);
+
+        assertThat(reviewRow()).containsEntry("ACTIVE", true).containsEntry("WARNING_PAGE", false).containsEntry("WARNING_PAGE_FOR_REVIEW", false);
+        assertThat(locationOf(urlService.redirectResultUrl(ALIAS, CLICK))).isEqualTo("https://example.com/visited");
+    }
+
+    @Test
     void aModerationBlockKeepsAClickCountedAfterTheLinkWasReRead() {
         link(4, null);
         visitMeanwhile = () -> assertThat(urlRepository.recordVisit(LINK, VISITED_AT)).isOne();
@@ -587,6 +609,10 @@ class UrlWritesTest {
         return later.getValue();
     }
 
+    private Map<String, Object> reviewRow() {
+        return jdbcTemplate.queryForMap("select active, warning_page, warning_page_for_review from url where id = ?", LINK);
+    }
+
     private Map<String, Object> linkRow() {
         return jdbcTemplate.queryForMap("select visits, opens, last_accessed, active, expiration_date, block_reason from url where id = ?", LINK);
     }
@@ -604,8 +630,9 @@ class UrlWritesTest {
             includeFilters = @ComponentScan.Filter(
                     type = FilterType.ASSIGNABLE_TYPE,
                     classes = {UrlRepository.class, CustomDomainRepository.class, UserRepository.class, DomainRuleRepository.class,
-                            CampaignRepository.class}))
+                            CampaignRepository.class, LinkReviewRepository.class}))
     @Import({DefaultUrlService.class, DefaultModerationService.class, UrlUpdateDtoToUrlConverter.class, DestinationCheckRepository.class, UrlCache.class,
+            DefaultReviewQueueService.class, ReviewWarningPage.class,
             DefaultSettingsTestConfiguration.class, AnonymousLinkSignalsTestConfiguration.class, HumanCheckTestConfiguration.class, SignInFormCheckTestConfiguration.class,
             ClockConfiguration.class})
     static class TestApplication {

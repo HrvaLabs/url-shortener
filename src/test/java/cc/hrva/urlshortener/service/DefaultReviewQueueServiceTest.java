@@ -51,6 +51,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -152,6 +153,25 @@ class DefaultReviewQueueServiceTest {
         when(linkReviewRepository.findFirstByUrlOrderByFlaggedAtDesc(url)).thenReturn(Optional.of(reviewedFine));
 
         reviewQueueService.flag(url, List.of(YOUNG));
+
+        verifyNoInteractions(reviewWarningPage);
+    }
+
+    @Test
+    void closingAReviewDropsItsReviewWarningWhateverTheResolution() {
+        final var open = LinkReview.builder().id(1L).url(url).reasons(YOUNG).systemFlagged(true).flaggedAt(LocalDateTime.now()).build();
+        when(linkReviewRepository.findByUrlAndResolvedAtIsNull(url)).thenAnswer(invocation -> List.of(open));
+
+        for (final var resolution : ReviewResolution.values()) {
+            reviewQueueService.resolveOpen(url, resolution, "admin@hrva.cc");
+        }
+
+        verify(reviewWarningPage, times(ReviewResolution.values().length)).clearAfterReview(287L);
+    }
+
+    @Test
+    void closingWithoutAnOpenReviewLeavesTheLinkAlone() {
+        reviewQueueService.resolveOpen(url, ReviewResolution.LINK_BLOCKED, "admin@hrva.cc");
 
         verifyNoInteractions(reviewWarningPage);
     }
