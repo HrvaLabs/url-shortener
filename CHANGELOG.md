@@ -4,6 +4,50 @@ All notable changes to hrva.cc — the URL shortener.
 
 ---
 
+## [v2.29] — 2026-11-03
+
+Screenshots, redirect chains and VirusTotal verdicts for links in the review queue, the warning page on links without an account while they wait for review, a plain-text part in every email, and a round of fixes.
+
+### 🛡️ Link Safety
+- A link made without an account that the checks flag, or that a visitor reports, shows the warning page while its review is open, with the note "hrva.cc is checking this link. Continue only if this is the address you expected." The page goes away when the review is closed, whatever the outcome. A warning page the link has because its site is new or its name looks machine-made stays. The help page on links without an account says so.
+- Making an identical link without an account while one is in review gives you that link, with its warning page, instead of a new one.
+- When a link you make without an account goes to review as it is made, the note under the new link reads "This link is being checked. People who open it see its address first until the check is done." instead of the note about a new site.
+
+### ✉️ Emails
+- Every email has a plain-text part as well as the HTML, with the full address behind every link and button.
+- When an app connected to your account sent you to an address with letters outside A to Z, the email about it also gives the plain spelling, such as xn--okolada-i6a.hr.
+
+### ⚡ Performance
+- Links stay in the redirect cache for 24 hours instead of one, so repeat visits are answered without the database for longer. A changed, turned off or deleted link leaves the cache right after the change is saved, and again 2 seconds later.
+
+### 🔒 Privacy
+- When a link enters the review queue, or an admin takes a screenshot from Inspect, Cloudflare receives the link's destination address to take the screenshot. When a link enters the review queue, VirusTotal receives a fingerprint (SHA-256) of the address, never the address itself. Only an admin's Send to VirusTotal sends the address, and VirusTotal then shows it to its paying users. The privacy page says so.
+
+### 🔧 Admin
+- Each link that enters the review queue gets a screenshot: Cloudflare Browser Run opens the link's destination at phone size, and hrva.cc keeps the screenshot for 7 days. The queue shows it in a new column. Select it, or Inspect, to open it with the page's title and status.
+- Inspect, in the review queue and on All URLs, has Take screenshot, or Take again once there is one. A screenshot an admin asks for is taken even when the link is blocked. One the queue asked for is not taken when the link was blocked first.
+- Screenshots pause until midnight UTC when the day's Browser Run time is used up, for as long as Cloudflare asks when it limits requests, and for an hour when Cloudflare refuses the API token. The link stays queued, and Inspect says why.
+- Each link that enters the review queue is looked up on VirusTotal by the SHA-256 fingerprint of its address, so only a report VirusTotal already has can match. The destination is looked up first, then the same address with a slash after a bare host name, then where its redirects end. Inspect shows how many scanners flag it and links to the report.
+- When VirusTotal has no report, Send to VirusTotal in Inspect sends the address to be scanned, after a confirmation that VirusTotal then shows the link to its paying users. The verdict is looked up a minute later, and every send is in the audit log.
+- VirusTotal lookups make at most one call every 15 seconds and stop at a daily cap, 480 by default, until midnight UTC. When VirusTotal doesn't answer, answers with an error or limits requests, the lookup keeps waiting and tries again a minute later. A refused API key pauses lookups for an hour.
+- Every hop of a link's redirect chain is kept in full, and Inspect lists them under Where it goes. A link checked before this release shows its chain after its next redirect check.
+- Site settings has three new switches under Safety, all on by default: "Warning page while a link without an account waits for review", under the warning page switch, "Screenshots of links in review" and "VirusTotal lookups for links in review". The last two do nothing, and say so, until CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_BROWSER_API_TOKEN, or VIRUSTOTAL_API_KEY, are set on the server.
+- A review closed with Looks fine that removed the warning page says warningPage: cleared in the audit log.
+- The link cache hit ratio on Stats › System and the Health page counts only redirects of links that exist.
+- Owner and Created in the review queue are their own columns only where the table has room beside the screenshot, and show inside the Short link cell otherwise.
+
+### 🔑 API
+- GET /api/v1/admin/urls/{urlId}/inspection answers a link's redirect chain, screenshot state and VirusTotal verdict. GET /api/v1/admin/urls/{urlId}/inspection/screenshot answers the image, POST /api/v1/admin/urls/{urlId}/inspection/screenshot queues a new one and answers 202, and POST /api/v1/admin/urls/{urlId}/inspection/virustotal sends the link to VirusTotal. All four are for admins.
+- Review queue entries have redirectChain, screenshot and virusTotal.
+- Link responses have warningPageForReview: true while the warning page shows because the link waits for review, and left out otherwise.
+
+### 🐛 Fixes
+- A "Reconnecting…" notice shows at the top of the page while hrva.cc restarts, and goes away once it answers.
+- Password managers no longer take the custom domain name box on Settings, or the box for asking for more domains, for a sign-in code field. The name box was why Proton Pass still offered a two-step code there.
+- A build that hangs stops after 30 minutes instead of running for up to 6 hours, a hung test run stops after 20, and Redis host names are looked up with Java's own resolver, which removes a cause of those hangs.
+
+---
+
 ## [v2.28] — 2026-11-02
 
 Use a removed custom domain again, analytics breakdowns across all your links, emails and chat messages that name hrva.cc and say what happened, and a round of fixes.
