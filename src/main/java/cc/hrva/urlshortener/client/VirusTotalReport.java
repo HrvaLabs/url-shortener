@@ -17,7 +17,11 @@ public record VirusTotalReport(Outcome outcome, String reportId, Integer malicio
     }
 
     public static VirusTotalReport submitted() {
-        return new VirusTotalReport(Outcome.SUBMITTED, null, null, null, null, null, null, null);
+        return submitted(null);
+    }
+
+    public static VirusTotalReport submitted(final String urlIdentifier) {
+        return new VirusTotalReport(Outcome.SUBMITTED, urlIdentifier, null, null, null, null, null, null);
     }
 
     public static VirusTotalReport rateLimited() {

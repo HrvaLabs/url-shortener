@@ -17,6 +17,8 @@ import java.util.Optional;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -41,6 +43,8 @@ public class VirusTotalClient {
     private static final String NO_ANSWER = "VirusTotal didn't answer.";
     private static final String ERROR_ANSWER = "VirusTotal answered with an error (%d).";
     private static final String REQUEST_REFUSED = "VirusTotal refused the request (%d).";
+    private static final Pattern URL_IDENTIFIER = Pattern.compile("[0-9a-f]{64}");
+    private static final Pattern ANALYSIS_ID = Pattern.compile("u-([0-9a-f]{64})-\\d+");
 
     private final AppProperties appProperties;
     private final JsonMapper jsonMapper;
@@ -62,12 +66,19 @@ public class VirusTotalClient {
     }
 
     public VirusTotalReport lookup(final String url) {
+        return lookUpByIdentifier(sha256Of(url));
+    }
+
+    public VirusTotalReport lookUpByIdentifier(final String urlIdentifier) {
+        if (urlIdentifier == null || !URL_IDENTIFIER.matcher(urlIdentifier).matches()) {
+            throw new IllegalArgumentException("Not a VirusTotal URL identifier");
+        }
         final var apiKey = appProperties.getInspection().getVirusTotalApiKey();
         if (StringUtils.isBlank(apiKey)) {
             log.debug("VirusTotal lookup skipped, the API key is not set");
             return VirusTotalReport.notConfigured();
         }
-        return call(LOOKUP, () -> request(apiKey, URLS_PATH + "/" + sha256Of(url)).GET().build(), this::report);
+        return call(LOOKUP, () -> request(apiKey, URLS_PATH + "/" + urlIdentifier).GET().build(), this::report);
     }
 
     public VirusTotalReport submit(final String url) {
@@ -139,7 +150,15 @@ public class VirusTotalClient {
     }
 
     private VirusTotalReport submitted(final JsonNode body) {
-        return body.path("data").isObject() ? VirusTotalReport.submitted() : null;
+        final var data = body.path("data");
+        if (!data.isObject()) {
+            return null;
+        }
+        return VirusTotalReport.submitted(data.path("id").stringValueOpt()
+                .map(ANALYSIS_ID::matcher)
+                .filter(Matcher::matches)
+                .map(matcher -> matcher.group(1))
+                .orElse(null));
     }
 
     private static String sha256Of(final String url) {

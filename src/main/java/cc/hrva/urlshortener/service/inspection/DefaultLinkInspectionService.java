@@ -109,7 +109,11 @@ public class DefaultLinkInspectionService implements LinkInspectionService {
             request(urlId, InspectionRequester.ADMIN);
         } catch (final DataIntegrityViolationException exception) {
             log.info("Screenshot request raced another one, retrying once urlId={}", urlId);
-            request(urlId, InspectionRequester.ADMIN);
+            try {
+                request(urlId, InspectionRequester.ADMIN);
+            } catch (final DataIntegrityViolationException again) {
+                log.info("Screenshot request raced another one again, taking it as queued urlId={}", urlId);
+            }
         }
     }
 
@@ -134,8 +138,9 @@ public class DefaultLinkInspectionService implements LinkInspectionService {
     public VirusTotalView submitToVirusTotal(final long urlId, final String performedBy) {
         final var targetIdentifier = String.valueOf(urlId);
         final var subject = auditSubjects.describe(TARGET_URL, targetIdentifier).orElse("");
+        final String submittedId;
         try {
-            send(urlId);
+            submittedId = send(urlId);
         } catch (final RuntimeException exception) {
             auditLogService.logFailure(performedBy, AuditAction.SUBMIT_TO_VIRUSTOTAL, TARGET_URL, targetIdentifier,
                     Stream.of(subject, exception.getMessage()).filter(StringUtils::isNotEmpty).collect(Collectors.joining(", ")));
@@ -143,10 +148,30 @@ public class DefaultLinkInspectionService implements LinkInspectionService {
         }
         auditLogService.log(performedBy, AuditAction.SUBMIT_TO_VIRUSTOTAL, TARGET_URL, targetIdentifier, subject);
         try {
-            return lookUpAfterTheAnalysisRetryingOnce(urlId);
+            return lookUpAfterTheAnalysisRetryingOnce(urlId, submittedId);
         } catch (final RuntimeException exception) {
             log.warn("Link sent to VirusTotal, but its lookup could not be queued urlId={} exception={}", urlId, exception.getClass().getName());
             throw new VirusTotalLookupNotQueuedException(LOOKUP_NOT_QUEUED);
+        }
+    }
+
+    @Override
+    public void lookUpOnVirusTotal(final long urlId) {
+        if (!urlRepository.existsById(urlId)) {
+            throw new UrlNotFoundException(LINK_NOT_FOUND);
+        }
+        if (!virusTotalOn()) {
+            throw new VirusTotalUnavailableException(VIRUSTOTAL_NOT_SET_UP);
+        }
+        try {
+            queueLookup(urlId);
+        } catch (final DataIntegrityViolationException exception) {
+            log.info("VirusTotal lookup raced another request, retrying once urlId={}", urlId);
+            try {
+                queueLookup(urlId);
+            } catch (final DataIntegrityViolationException again) {
+                log.info("VirusTotal lookup raced another request again, taking it as queued urlId={}", urlId);
+            }
         }
     }
 
@@ -165,7 +190,20 @@ public class DefaultLinkInspectionService implements LinkInspectionService {
         }
     }
 
-    private void send(final long urlId) {
+    private void queueLookup(final long urlId) {
+        newTransaction().executeWithoutResult(status -> {
+            if (!urlRepository.existsById(urlId)) {
+                throw new UrlNotFoundException(LINK_NOT_FOUND);
+            }
+            final var now = now();
+            if (linkInspectionRepository.queueVirusTotalLookup(urlId, now) == 0) {
+                linkInspectionRepository.saveAndFlush(LinkInspection.builder().urlId(urlId).vtState(InspectionState.PENDING).vtRequestedAt(now).build());
+            }
+            log.info("VirusTotal lookup requested by an admin urlId={}", urlId);
+        });
+    }
+
+    private String send(final long urlId) {
         final var url = urlRepository.findById(urlId).orElseThrow(() -> new UrlNotFoundException(LINK_NOT_FOUND));
         if (!virusTotalOn()) {
             throw new VirusTotalUnavailableException(VIRUSTOTAL_NOT_SET_UP);
@@ -182,14 +220,15 @@ public class DefaultLinkInspectionService implements LinkInspectionService {
             case NOT_CONFIGURED -> throw new VirusTotalUnavailableException(VIRUSTOTAL_NOT_SET_UP);
             case FOUND, NOT_FOUND -> throw new IllegalStateException("VirusTotal answered a submit with " + report.outcome());
         }
+        return report.reportId();
     }
 
-    private VirusTotalView lookUpAfterTheAnalysisRetryingOnce(final long urlId) {
+    private VirusTotalView lookUpAfterTheAnalysisRetryingOnce(final long urlId, final String submittedId) {
         try {
-            return lookUpAfterTheAnalysis(urlId);
+            return lookUpAfterTheAnalysis(urlId, submittedId);
         } catch (final DataIntegrityViolationException exception) {
             log.info("VirusTotal lookup after a submit raced another request, retrying once urlId={}", urlId);
-            return lookUpAfterTheAnalysis(urlId);
+            return lookUpAfterTheAnalysis(urlId, submittedId);
         }
     }
 
@@ -203,16 +242,16 @@ public class DefaultLinkInspectionService implements LinkInspectionService {
         }
     }
 
-    private VirusTotalView lookUpAfterTheAnalysis(final long urlId) {
+    private VirusTotalView lookUpAfterTheAnalysis(final long urlId, final String submittedId) {
         return newTransaction().execute(status -> {
             if (!urlRepository.existsById(urlId)) {
                 throw new UrlNotFoundException(LINK_NOT_FOUND);
             }
             final var now = now();
             final var requestedAt = now.plus(LOOKUP_AFTER_SUBMIT);
-            if (linkInspectionRepository.queueVirusTotalAfterSubmit(urlId, requestedAt, now) == 0) {
+            if (linkInspectionRepository.queueVirusTotalAfterSubmit(urlId, requestedAt, now, submittedId) == 0) {
                 linkInspectionRepository.saveAndFlush(LinkInspection.builder().urlId(urlId).vtState(InspectionState.PENDING).vtRequestedAt(requestedAt)
-                        .vtSubmittedAt(now).build());
+                        .vtSubmittedAt(now).vtSubmittedId(submittedId).build());
             }
             return linkInspectionRepository.findById(urlId)
                     .map(inspection -> virusTotalViewOf(inspection, true))
@@ -233,6 +272,8 @@ public class DefaultLinkInspectionService implements LinkInspectionService {
             inspection.setVtState(InspectionState.PENDING);
             inspection.setVtRequestedAt(now());
             inspection.setVtNextCandidate(null);
+            inspection.setVtSubmittedAt(null);
+            inspection.setVtSubmittedId(null);
             inspection.setVtFailure(null);
             linkInspectionRepository.saveAndFlush(inspection);
             log.info("VirusTotal lookup requested urlId={}", urlId);

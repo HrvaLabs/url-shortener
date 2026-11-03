@@ -81,4 +81,7 @@ public class LinkInspection {
 
     private Integer vtNextCandidate;
 
+    @Column(length = 64)
+    private String vtSubmittedId;
+
 }

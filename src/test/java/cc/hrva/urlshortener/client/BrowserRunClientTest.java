@@ -205,6 +205,18 @@ class BrowserRunClientTest {
     }
 
     @Test
+    void anInterruptedCallIsItsOwnOutcomeAndKeepsTheInterrupt() {
+        answer(200, taken(JPEG, "\"meta\":{\"status\":200}", "<html></html>"));
+
+        Thread.currentThread().interrupt();
+        final var snapshot = client.snapshot(TARGET);
+        final var stillInterrupted = Thread.interrupted();
+
+        assertThat(snapshot).isEqualTo(PageSnapshot.interrupted());
+        assertThat(stillInterrupted).isTrue();
+    }
+
+    @Test
     void aRefusedTokenIsItsOwnOutcome() {
         answer(401, "{\"success\":false,\"errors\":[{\"code\":10000,\"message\":\"Authentication error\"}]}");
         assertThat(client.snapshot(TARGET).outcome()).isEqualTo(PageSnapshot.Outcome.TOKEN_REFUSED);

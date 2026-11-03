@@ -78,6 +78,7 @@ class InspectionWorkerTest {
     private static final String BLOCKED_BEFORE = "The link was blocked before its screenshot was taken.";
     private static final String FINAL_URL = "https://sso.findfavoritedate.life/login";
     private static final String REPORT_ID = "1db0ad7dbcec0676710ea0eaacd35d5e471d3e11944d53bcbd31f0cbd11bce31";
+    private static final String SUBMITTED_ID = "9d11db1b0a1200ba75016e4c010bc93836366881d021a658ea7f85a8b65c3c1e";
     private static final LocalDateTime ANALYSED_AT = LocalDateTime.of(2026, 11, 2, 18, 30);
     private static final VirusTotalReport FOUND = new VirusTotalReport(VirusTotalReport.Outcome.FOUND, REPORT_ID, 7, 2, 61, 25, ANALYSED_AT, null);
     private static final String VT_DAILY_LIMIT = "Today's VirusTotal lookups are used up. They continue after midnight UTC.";
@@ -300,6 +301,19 @@ class InspectionWorkerTest {
         inspectionWorker.takeNextScreenshot();
 
         assertThat(row(LINK)).containsEntry("SCREENSHOT_STATE", "PENDING");
+    }
+
+    @Test
+    void anInterruptedCallLeavesTheRequestWaitingWithoutCountingAFailure() {
+        pending(LINK, NOW_UTC, "QUEUE");
+        when(browserRunClient.snapshot(anyString())).thenReturn(PageSnapshot.interrupted());
+
+        inspectionWorker.takeNextScreenshot();
+        inspectionWorker.takeNextScreenshot();
+        inspectionWorker.takeNextScreenshot();
+
+        verify(browserRunClient, times(3)).snapshot(LONG_URL);
+        assertThat(row(LINK)).containsEntry("SCREENSHOT_STATE", "PENDING").containsEntry("SCREENSHOT_FAILURE", null);
     }
 
     @Test
@@ -648,6 +662,72 @@ class InspectionWorkerTest {
     }
 
     @Test
+    void theWholeLastHopIsLookedUpNotTheCutFinalUrl() {
+        final var lastHop = "https://sso.findfavoritedate.life/login?state=" + "a".repeat(2100);
+        vtPending(LINK, NOW_UTC);
+        jdbcTemplate.update("update url set chain_checked_at = ?, final_url = ?, redirect_chain = ? where id = ?", NOW_UTC.minusMinutes(5),
+                lastHop.substring(0, 2048), LONG_URL + "\n" + lastHop, LINK);
+        when(virusTotalClient.lookup(LONG_URL)).thenReturn(VirusTotalReport.notFound());
+        when(virusTotalClient.lookup(lastHop)).thenReturn(FOUND);
+
+        inspectionWorker.lookUpNextOnVirusTotal();
+        inspectionWorker.lookUpNextOnVirusTotal();
+
+        verify(virusTotalClient).lookup(lastHop);
+        verify(virusTotalClient, never()).lookup(lastHop.substring(0, 2048));
+        assertThat(row(LINK)).containsEntry("VT_STATE", "DONE").containsEntry("VT_URL", lastHop);
+    }
+
+    @Test
+    void aLookupAfterASendAsksForVirusTotalsOwnIdentifierFirst() {
+        chainChecked(LINK, FINAL_URL);
+        when(virusTotalClient.submit(LONG_URL)).thenReturn(VirusTotalReport.submitted(SUBMITTED_ID));
+        when(virusTotalClient.lookUpByIdentifier(SUBMITTED_ID)).thenReturn(FOUND);
+
+        linkInspectionService.submitToVirusTotal(LINK, "admin@hrva.cc");
+        clock.advance(Duration.ofSeconds(60));
+        inspectionWorker.lookUpNextOnVirusTotal();
+
+        verify(virusTotalClient).lookUpByIdentifier(SUBMITTED_ID);
+        verify(virusTotalClient, never()).lookup(anyString());
+        assertThat(row(LINK)).containsEntry("VT_STATE", "DONE").containsEntry("VT_URL", LONG_URL).containsEntry("VT_REPORT_ID", REPORT_ID);
+    }
+
+    @Test
+    void aSentLinkThatVirusTotalHasNoReportForYetFallsBackToTheFingerprints() {
+        chainChecked(LINK, FINAL_URL);
+        when(virusTotalClient.submit(LONG_URL)).thenReturn(VirusTotalReport.submitted(SUBMITTED_ID));
+        when(virusTotalClient.lookUpByIdentifier(SUBMITTED_ID)).thenReturn(VirusTotalReport.notFound());
+        when(virusTotalClient.lookup(anyString())).thenReturn(VirusTotalReport.notFound());
+
+        linkInspectionService.submitToVirusTotal(LINK, "admin@hrva.cc");
+        clock.advance(Duration.ofSeconds(60));
+        for (var tick = 0; tick < 5; tick++) {
+            inspectionWorker.lookUpNextOnVirusTotal();
+        }
+
+        final InOrder order = inOrder(virusTotalClient);
+        order.verify(virusTotalClient).lookUpByIdentifier(SUBMITTED_ID);
+        order.verify(virusTotalClient).lookup(LONG_URL);
+        order.verify(virusTotalClient).lookup(FINAL_URL);
+        assertThat(row(LINK)).containsEntry("VT_STATE", "NOT_FOUND").containsEntry("VT_URL", LONG_URL);
+    }
+
+    @Test
+    void aSendWithoutAnIdentifierLooksUpTheFingerprints() {
+        chainChecked(LINK, null);
+        when(virusTotalClient.submit(LONG_URL)).thenReturn(VirusTotalReport.submitted(null));
+        when(virusTotalClient.lookup(anyString())).thenReturn(FOUND);
+
+        linkInspectionService.submitToVirusTotal(LINK, "admin@hrva.cc");
+        clock.advance(Duration.ofSeconds(60));
+        inspectionWorker.lookUpNextOnVirusTotal();
+
+        verify(virusTotalClient).lookup(LONG_URL);
+        verify(virusTotalClient, never()).lookUpByIdentifier(anyString());
+    }
+
+    @Test
     void aRestartedWorkerGoesOnWithTheNextCandidate() {
         vtPending(LINK, NOW_UTC);
         chainChecked(LINK, FINAL_URL);
@@ -968,6 +1048,35 @@ class InspectionWorkerTest {
         assertThat(row(LINK)).containsEntry("SCREENSHOT_STATE", "EXPIRED");
         assertThat(row(OTHER_LINK)).containsEntry("SCREENSHOT_STATE", "DONE");
         assertThat(jdbcTemplate.queryForList("select url_id from link_screenshot", Long.class)).containsExactly(OTHER_LINK);
+    }
+
+    @Test
+    void anOldImageIsDeletedWhateverTheStateAndARetakeNoLongerClaimsIt() {
+        done(LINK, NOW_UTC.minusDays(8));
+        done(OTHER_LINK, NOW_UTC.minusDays(8));
+        jdbcTemplate.update("update link_inspection set screenshot_state = 'PENDING', screenshot_requested_at = ? where url_id = ?", NOW_UTC, LINK);
+        jdbcTemplate.update("update link_inspection set screenshot_state = 'FAILED', screenshot_failure = 'Cloudflare couldn''t open the page (502).' "
+                + "where url_id = ?", OTHER_LINK);
+
+        inspectionWorker.expireOldScreenshots();
+
+        assertThat(jdbcTemplate.queryForObject("select count(*) from link_screenshot", Integer.class)).isZero();
+        assertThat(row(LINK)).containsEntry("SCREENSHOT_STATE", "PENDING")
+                .containsEntry("SCREENSHOT_REQUESTED_AT", Timestamp.valueOf(NOW_UTC))
+                .containsEntry("SCREENSHOT_TAKEN_AT", null);
+        assertThat(row(OTHER_LINK)).containsEntry("SCREENSHOT_STATE", "FAILED")
+                .containsEntry("SCREENSHOT_FAILURE", "Cloudflare couldn't open the page (502).")
+                .containsEntry("SCREENSHOT_TAKEN_AT", null);
+    }
+
+    @Test
+    void anExpiredRowKeepsWhenItWasTaken() {
+        done(LINK, NOW_UTC.minusDays(8));
+
+        inspectionWorker.expireOldScreenshots();
+        inspectionWorker.expireOldScreenshots();
+
+        assertThat(row(LINK)).containsEntry("SCREENSHOT_STATE", "EXPIRED").containsEntry("SCREENSHOT_TAKEN_AT", Timestamp.valueOf(NOW_UTC.minusDays(8)));
     }
 
     @Test

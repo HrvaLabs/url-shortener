@@ -18,15 +18,18 @@ import cc.hrva.urlshortener.service.SettingsService;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiter;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiterUnavailableException;
 import cc.hrva.urlshortener.service.settings.SettingKey;
+import cc.hrva.urlshortener.util.RedirectChains;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Stream;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Limit;
@@ -114,6 +117,7 @@ public class InspectionWorker {
             final var cutoff = LocalDateTime.now(clock).minusDays(appProperties.getInspection().getKeepScreenshotDays());
             final var expired = transactionOperations.execute(status -> {
                 linkScreenshotRepository.deleteTakenBefore(cutoff);
+                linkInspectionRepository.forgetTakenBefore(cutoff);
                 return linkInspectionRepository.expireTakenBefore(cutoff);
             });
             log.info("Scheduled cleanup: old screenshots expired={}", expired);
@@ -152,7 +156,7 @@ public class InspectionWorker {
     }
 
     private void lookUp(final Lookup lookup) {
-        final var candidates = VirusTotalCandidates.of(lookup.longUrl(), lookup.finalUrl());
+        final var candidates = lookup.candidates();
         if (lookup.nextCandidate() >= candidates.size()) {
             recordNotFound(lookup);
             return;
@@ -170,13 +174,13 @@ public class InspectionWorker {
             return;
         }
         final var candidate = candidates.get(lookup.nextCandidate());
-        final var report = virusTotalClient.lookup(candidate);
+        final var report = candidate.lookUpOn(virusTotalClient);
         if (report.outcome() == VirusTotalReport.Outcome.NOT_FOUND && lookup.nextCandidate() + 1 < candidates.size()) {
             virusTotalFailedBefore.set(null);
             recordNextCandidate(lookup, lookup.nextCandidate() + 1);
             return;
         }
-        recordReport(lookup, report, candidate);
+        recordReport(lookup, report, candidate.checkedUrl());
     }
 
     private void recordNextCandidate(final Lookup lookup, final int nextCandidate) {
@@ -318,6 +322,7 @@ public class InspectionWorker {
                 log.warn("Screenshots paused for an hour, Cloudflare refused the API token urlId={}", request.urlId());
             }
             case NOT_CONFIGURED -> log.debug("Screenshot not taken, Browser Run is not set up urlId={}", request.urlId());
+            case INTERRUPTED -> log.info("Screenshot not taken, the worker was interrupted urlId={}", request.urlId());
         }
     }
 
@@ -364,15 +369,36 @@ public class InspectionWorker {
     private record Attempt(long urlId, LocalDateTime requestedAt) {
     }
 
-    private record Lookup(long urlId, LocalDateTime requestedAt, String longUrl, String finalUrl, int nextCandidate) {
+    private record Lookup(long urlId, LocalDateTime requestedAt, String longUrl, String lastHop, String submittedId, int nextCandidate) {
 
         static Lookup of(final LinkInspection inspection, final Url url) {
-            return new Lookup(inspection.getUrlId(), inspection.getVtRequestedAt(), url.getLongUrl(), url.getFinalUrl(),
-                    Math.max(0, Objects.requireNonNullElse(inspection.getVtNextCandidate(), 0)));
+            final var hops = RedirectChains.split(url.getRedirectChain());
+            return new Lookup(inspection.getUrlId(), inspection.getVtRequestedAt(), url.getLongUrl(), hops.isEmpty() ? url.getFinalUrl() : hops.getLast(),
+                    inspection.getVtSubmittedId(), Math.max(0, Objects.requireNonNullElse(inspection.getVtNextCandidate(), 0)));
+        }
+
+        List<Candidate> candidates() {
+            final var fingerprints = VirusTotalCandidates.of(longUrl, lastHop).stream().map(Candidate::fingerprintOf);
+            if (submittedId == null) {
+                return fingerprints.toList();
+            }
+            return Stream.concat(Stream.of(new Candidate(longUrl, submittedId)), fingerprints).toList();
         }
 
         Attempt attempt() {
             return new Attempt(urlId, requestedAt);
+        }
+
+    }
+
+    private record Candidate(String checkedUrl, String urlIdentifier) {
+
+        static Candidate fingerprintOf(final String url) {
+            return new Candidate(url, null);
+        }
+
+        VirusTotalReport lookUpOn(final VirusTotalClient client) {
+            return urlIdentifier == null ? client.lookup(checkedUrl) : client.lookUpByIdentifier(urlIdentifier);
         }
 
     }

@@ -294,6 +294,25 @@ class AppPropertiesTest {
                 .containsExactly("window must be at least 1 second");
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"PT0S", "PT10S", "PT14.999S"})
+    void anInspectionIntervalUnderFifteenSecondsIsRefused(final String interval) {
+        final var inspection = new AppProperties.Inspection();
+        inspection.setInterval(Duration.parse(interval));
+
+        assertThat(Validation.buildDefaultValidatorFactory().getValidator().validate(inspection))
+                .extracting(violation -> violation.getPropertyPath() + " " + violation.getMessage())
+                .containsExactly("interval must be at least 15 seconds");
+    }
+
+    @Test
+    void anInspectionIntervalOfFifteenSecondsIsAllowed() {
+        final var inspection = new AppProperties.Inspection();
+        inspection.setInterval(Duration.ofSeconds(15));
+
+        assertThat(Validation.buildDefaultValidatorFactory().getValidator().validate(inspection)).isEmpty();
+    }
+
     @Test
     void aBurstWindowOfOneSecondIsAllowed() {
         final var burst = new AppProperties.Burst();

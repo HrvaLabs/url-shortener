@@ -19,6 +19,8 @@ public interface LinkInspectionService {
 
     VirusTotalView submitToVirusTotal(long urlId, String performedBy);
 
+    void lookUpOnVirusTotal(long urlId);
+
     LinkInspectionResponse inspection(long urlId);
 
     Optional<LinkScreenshot> screenshot(long urlId);

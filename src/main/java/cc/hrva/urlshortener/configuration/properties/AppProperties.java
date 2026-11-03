@@ -384,7 +384,7 @@ public class AppProperties {
     public static class Inspection {
 
         @NotNull
-        @DurationMin(seconds = 10, message = "must be at least 10 seconds")
+        @DurationMin(seconds = 15, message = "must be at least 15 seconds")
         private Duration interval = Duration.ofSeconds(15);
 
         @Min(1)

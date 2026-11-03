@@ -62,4 +62,11 @@ public class AdminLinkInspectionController {
         return ResponseEntity.ok(linkInspectionService.submitToVirusTotal(urlId, authentication.getName()));
     }
 
+    @PostMapping("/virustotal/lookup")
+    @PreAuthorize("hasRole('ROLE_ADMIN')")
+    public ResponseEntity<Void> lookUpOnVirusTotal(@PathVariable("urlId") final long urlId) {
+        linkInspectionService.lookUpOnVirusTotal(urlId);
+        return ResponseEntity.accepted().build();
+    }
+
 }

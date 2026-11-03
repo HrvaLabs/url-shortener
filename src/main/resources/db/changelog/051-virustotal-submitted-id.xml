@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.9.xsd">
+
+    <changeSet author="khrvacic" id="051-virustotal-submitted-id">
+        <addColumn tableName="link_inspection">
+            <column name="vt_submitted_id" type="VARCHAR(64)"/>
+        </addColumn>
+        <rollback>
+            <dropColumn tableName="link_inspection" columnName="vt_submitted_id"/>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>

@@ -27,6 +27,7 @@ import org.slf4j.LoggerFactory;
 import tools.jackson.databind.json.JsonMapper;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class VirusTotalClientTest {
 
@@ -212,6 +213,50 @@ class VirusTotalClientTest {
     }
 
     @Test
+    void aSendKeepsTheUrlIdentifierFromVirusTotalsAnalysisId() {
+        answer(200, "{\"data\": {\"type\": \"analysis\", \"id\": \"u-" + TARGET_SHA256 + "-1762163100\"}}");
+
+        assertThat(client.submit(TARGET)).isEqualTo(VirusTotalReport.submitted(TARGET_SHA256));
+    }
+
+    @Test
+    void aSendWhoseAnalysisIdDoesNotParseKeepsNoIdentifier() {
+        final var answers = List.of("u-" + TARGET_SHA256.toUpperCase() + "-1762163100", "u-" + TARGET_SHA256 + "-", "u-" + TARGET_SHA256.substring(1)
+                + "-1762163100", "f-" + TARGET_SHA256 + "-1762163100", "u-" + TARGET_SHA256 + "-1762163100/x", "");
+        for (final var analysisId : answers) {
+            answer(200, "{\"data\": {\"type\": \"analysis\", \"id\": \"" + analysisId + "\"}}");
+            assertThat(client.submit(TARGET)).isEqualTo(VirusTotalReport.submitted(null));
+            received.clear();
+        }
+        answer(200, "{\"data\": {\"type\": \"analysis\"}}");
+        assertThat(client.submit(TARGET)).isEqualTo(VirusTotalReport.submitted(null));
+    }
+
+    @Test
+    void aLookupByVirusTotalsIdentifierAsksForItAsIs() {
+        answer(200, FOUND);
+
+        assertThat(client.lookUpByIdentifier(REPORT_ID).outcome()).isEqualTo(VirusTotalReport.Outcome.FOUND);
+
+        assertThat(received).singleElement().satisfies(request -> {
+            assertThat(request.method()).isEqualTo("GET");
+            assertThat(request.path()).isEqualTo(URLS + "/" + REPORT_ID);
+            assertThat(request.apiKey()).isEqualTo(KEY);
+        });
+    }
+
+    @Test
+    void aLookupByAnythingButAnIdentifierIsRefusedWithoutACall() {
+        answer(200, FOUND);
+
+        for (final var identifier : List.of(TARGET, "../users", REPORT_ID.toUpperCase(), REPORT_ID + "0", "")) {
+            assertThatThrownBy(() -> client.lookUpByIdentifier(identifier)).isInstanceOf(IllegalArgumentException.class);
+        }
+
+        assertThat(received).isEmpty();
+    }
+
+    @Test
     void withoutAKeyNoCallIsMade() {
         answer(200, FOUND);
         appProperties.getInspection().setVirusTotalApiKey(" ");
@@ -230,6 +275,8 @@ class VirusTotalClientTest {
         client.lookup(TARGET);
         answer(200, FOUND);
         client.lookup(TARGET);
+        client.lookUpByIdentifier(TARGET_SHA256);
+        answer(200, "{\"data\": {\"type\": \"analysis\", \"id\": \"u-" + TARGET_SHA256 + "-1762163100\"}}");
         client.submit(TARGET);
 
         assertThat(logEvents.list).isNotEmpty().allSatisfy(event -> assertThat(event.getFormattedMessage())

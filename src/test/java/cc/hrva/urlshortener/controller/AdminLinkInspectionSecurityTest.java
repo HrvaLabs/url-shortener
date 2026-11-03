@@ -80,6 +80,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -118,6 +119,7 @@ class AdminLinkInspectionSecurityTest {
     private static final String INSPECTION = "/api/v1/admin/urls/" + LINK + "/inspection";
     private static final String SCREENSHOT = INSPECTION + "/screenshot";
     private static final String VIRUSTOTAL = INSPECTION + "/virustotal";
+    private static final String LOOKUP = VIRUSTOTAL + "/lookup";
     private static final String LONG_URL = "https://findfavoritedate.life/?u=f6yp608";
     private static final String REPORT_ID = "1db0ad7dbcec0676710ea0eaacd35d5e471d3e11944d53bcbd31f0cbd11bce31";
     private static final byte[] JPEG = {(byte) 0xFF, (byte) 0xD8, (byte) 0xFF, 1, 2, 3};
@@ -197,7 +199,7 @@ class AdminLinkInspectionSecurityTest {
     @Test
     void aNonAdminGets403OnEveryRouteAndNobodySignedIn401() throws Exception {
         done();
-        final var requests = List.of(get(INSPECTION), get(SCREENSHOT), post(SCREENSHOT), post(VIRUSTOTAL));
+        final var requests = List.of(get(INSPECTION), get(SCREENSHOT), post(SCREENSHOT), post(VIRUSTOTAL), post(LOOKUP));
 
         for (final var request : requests) {
             mockMvc.perform(request).andExpect(status().isUnauthorized());
@@ -207,6 +209,7 @@ class AdminLinkInspectionSecurityTest {
         assertThat(jdbcTemplate.queryForObject("select screenshot_state from link_inspection where url_id = ?", String.class, LINK)).isEqualTo("DONE");
         assertThat(count("audit_log")).isZero();
         verify(virusTotalClient, never()).submit(anyString());
+        assertThat(jdbcTemplate.queryForObject("select vt_state from link_inspection where url_id = ?", String.class, LINK)).isEqualTo("DONE");
     }
 
     @Test
@@ -387,6 +390,48 @@ class AdminLinkInspectionSecurityTest {
 
         verify(virusTotalClient, never()).submit(anyString());
         assertThat(count("link_inspection")).isZero();
+    }
+
+    @Test
+    void anAdminLookupQueuesAFreshFingerprintLookupWithoutABody() throws Exception {
+        done();
+        jdbcTemplate.update("update link_inspection set vt_next_candidate = 2, vt_submitted_at = ?, vt_submitted_id = ? where url_id = ?",
+                NOW.minusDays(1), REPORT_ID, LINK);
+
+        mockMvc.perform(as(ADMIN_TOKEN, post(LOOKUP)))
+                .andExpect(status().isAccepted())
+                .andExpect(content().string(""));
+
+        assertThat(jdbcTemplate.queryForMap("select vt_state, vt_requested_at, vt_next_candidate, vt_submitted_at, vt_submitted_id, vt_malicious "
+                + "from link_inspection where url_id = ?", LINK))
+                .containsEntry("VT_STATE", "PENDING")
+                .containsEntry("VT_REQUESTED_AT", Timestamp.valueOf(NOW))
+                .containsEntry("VT_NEXT_CANDIDATE", null)
+                .containsEntry("VT_SUBMITTED_AT", null)
+                .containsEntry("VT_SUBMITTED_ID", null)
+                .containsEntry("VT_MALICIOUS", 7);
+        verifyNoInteractions(virusTotalClient);
+        assertThat(count("audit_log")).isZero();
+    }
+
+    @Test
+    void anAdminLookupWithoutVirusTotalAnswers409AndAnUnknownLink404() throws Exception {
+        appProperties.getInspection().setVirusTotalApiKey("");
+
+        mockMvc.perform(as(ADMIN_TOKEN, post(LOOKUP)))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.detail").value("VirusTotal isn't set up."));
+        appProperties.getInspection().setVirusTotalApiKey("vt-key-1");
+        SettingsServiceFixtures.turnOff(settingsService, SettingKey.VIRUSTOTAL_LOOKUPS);
+        mockMvc.perform(as(ADMIN_TOKEN, post(LOOKUP)))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.detail").value("VirusTotal isn't set up."));
+        mockMvc.perform(as(ADMIN_TOKEN, post("/api/v1/admin/urls/9999/inspection/virustotal/lookup")))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.detail").value("Link not found."));
+
+        assertThat(count("link_inspection")).isZero();
+        verifyNoInteractions(virusTotalClient);
     }
 
     private void done() {

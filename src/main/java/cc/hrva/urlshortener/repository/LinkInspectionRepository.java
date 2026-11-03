@@ -35,6 +35,12 @@ public interface LinkInspectionRepository extends JpaRepository<LinkInspection, 
             + "where i.screenshotState = cc.hrva.urlshortener.model.enums.InspectionState.DONE and i.screenshotTakenAt < :cutoff")
     int expireTakenBefore(@Param("cutoff") LocalDateTime cutoff);
 
+    @Modifying(flushAutomatically = true)
+    @Query("update LinkInspection i set i.screenshotTakenAt = null, i.screenshotUrl = null, i.pageTitle = null, i.pageStatus = null "
+            + "where i.screenshotState in (cc.hrva.urlshortener.model.enums.InspectionState.PENDING, cc.hrva.urlshortener.model.enums.InspectionState.FAILED) "
+            + "and i.screenshotTakenAt < :cutoff")
+    int forgetTakenBefore(@Param("cutoff") LocalDateTime cutoff);
+
     @Query("select i from LinkInspection i, Url u where u.id = i.urlId "
             + "and i.vtState = cc.hrva.urlshortener.model.enums.InspectionState.PENDING and i.vtRequestedAt <= :now "
             + "and (u.chainCheckedAt is not null or i.vtSubmittedAt is not null or i.vtRequestedAt <= :chainDeadline) "
@@ -73,9 +79,14 @@ public interface LinkInspectionRepository extends JpaRepository<LinkInspection, 
 
     @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Query("update LinkInspection i set i.vtState = cc.hrva.urlshortener.model.enums.InspectionState.PENDING, i.vtRequestedAt = :requestedAt, "
-            + "i.vtSubmittedAt = :submittedAt, i.vtNextCandidate = null, i.vtFailure = null where i.urlId = :urlId")
+            + "i.vtSubmittedAt = :submittedAt, i.vtSubmittedId = :submittedId, i.vtNextCandidate = null, i.vtFailure = null where i.urlId = :urlId")
     int queueVirusTotalAfterSubmit(@Param("urlId") long urlId, @Param("requestedAt") LocalDateTime requestedAt,
-                                   @Param("submittedAt") LocalDateTime submittedAt);
+                                   @Param("submittedAt") LocalDateTime submittedAt, @Param("submittedId") String submittedId);
+
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query("update LinkInspection i set i.vtState = cc.hrva.urlshortener.model.enums.InspectionState.PENDING, i.vtRequestedAt = :requestedAt, "
+            + "i.vtSubmittedAt = null, i.vtSubmittedId = null, i.vtNextCandidate = null, i.vtFailure = null where i.urlId = :urlId")
+    int queueVirusTotalLookup(@Param("urlId") long urlId, @Param("requestedAt") LocalDateTime requestedAt);
 
     @Modifying(flushAutomatically = true)
     @Query("delete from LinkInspection i where i.urlId = :urlId")

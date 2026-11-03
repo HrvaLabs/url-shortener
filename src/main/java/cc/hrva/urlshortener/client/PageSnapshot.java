@@ -28,12 +28,17 @@ public record PageSnapshot(Outcome outcome, byte[] image, String contentType, St
         return new PageSnapshot(Outcome.NOT_CONFIGURED, null, null, null, null, null, null);
     }
 
+    public static PageSnapshot interrupted() {
+        return new PageSnapshot(Outcome.INTERRUPTED, null, null, null, null, null, null);
+    }
+
     public enum Outcome {
         TAKEN,
         FAILED,
         RATE_LIMITED,
         DAILY_LIMIT,
         TOKEN_REFUSED,
+        INTERRUPTED,
         NOT_CONFIGURED
     }
 

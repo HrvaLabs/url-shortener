@@ -90,7 +90,8 @@ public class BrowserRunClient {
             response = exchange(request);
         } catch (final InterruptedException exception) {
             Thread.currentThread().interrupt();
-            return failed(0, NOT_OPENED.formatted(NO_ANSWER), exception.getClass().getName());
+            log.info("Browser Run snapshot interrupted, the screenshot stays queued");
+            return PageSnapshot.interrupted();
         } catch (final TimeoutException exception) {
             return failed(0, TIMED_OUT, exception.getClass().getName());
         } catch (final ExecutionException exception) {
