@@ -9,9 +9,11 @@ import cc.hrva.urlshortener.dto.inspection.VirusTotalView;
 import cc.hrva.urlshortener.exception.ScreenshotsUnavailableException;
 import cc.hrva.urlshortener.exception.ServiceBusyException;
 import cc.hrva.urlshortener.exception.UrlNotFoundException;
+import cc.hrva.urlshortener.exception.VirusTotalLookupNotQueuedException;
 import cc.hrva.urlshortener.exception.VirusTotalUnavailableException;
 import cc.hrva.urlshortener.model.LinkInspection;
 import cc.hrva.urlshortener.model.LinkScreenshot;
+import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.enums.AuditAction;
 import cc.hrva.urlshortener.model.enums.InspectionState;
 import cc.hrva.urlshortener.repository.LinkInspectionRepository;
@@ -28,6 +30,7 @@ import cc.hrva.urlshortener.service.settings.SettingsServiceFixtures;
 import jakarta.persistence.EntityManagerFactory;
 import java.time.Duration;
 import java.time.Instant;
+import java.sql.Timestamp;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
@@ -38,6 +41,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -48,6 +52,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.mock;
@@ -84,6 +90,7 @@ class DefaultLinkInspectionServiceTest {
     private static final String REPORT_ID = "1db0ad7dbcec0676710ea0eaacd35d5e471d3e11944d53bcbd31f0cbd11bce31";
     private static final String NOT_SET_UP = "VirusTotal isn't set up.";
     private static final String USED_UP = "Today's VirusTotal lookups are used up. Try again after midnight UTC.";
+    private static final String NOT_QUEUED = "The link was sent to VirusTotal, but its lookup couldn't be queued.";
 
     @Autowired
     private LinkInspectionService linkInspectionService;
@@ -169,7 +176,7 @@ class DefaultLinkInspectionServiceTest {
         assertThat(jdbcTemplate.queryForMap("select screenshot_state, vt_state, vt_requested_at, vt_failure from link_inspection where url_id = ?", LINK))
                 .containsEntry("SCREENSHOT_STATE", "PENDING")
                 .containsEntry("VT_STATE", "PENDING")
-                .containsEntry("VT_REQUESTED_AT", java.sql.Timestamp.valueOf(NOW_UTC))
+                .containsEntry("VT_REQUESTED_AT", Timestamp.valueOf(NOW_UTC))
                 .containsEntry("VT_FAILURE", null);
         verify(virusTotalClient, never()).submit(anyString());
         verify(virusTotalClient, never()).lookup(anyString());
@@ -253,7 +260,7 @@ class DefaultLinkInspectionServiceTest {
 
         serviceOver(inspections, mock(LinkScreenshotRepository.class), urls).onReviewOpened(new LinkReviewOpened(LINK));
 
-        verify(inspections).saveAndFlush(org.mockito.ArgumentMatchers.argThat(inspection -> inspection.getVtState() == InspectionState.PENDING));
+        verify(inspections).saveAndFlush(argThat(inspection -> inspection.getVtState() == InspectionState.PENDING));
     }
 
     @Test
@@ -283,7 +290,7 @@ class DefaultLinkInspectionServiceTest {
         assertThat(jdbcTemplate.queryForMap("select vt_state, vt_requested_at, vt_report_id, vt_next_candidate from link_inspection where url_id = ?", LINK))
                 .containsEntry("VT_NEXT_CANDIDATE", null)
                 .containsEntry("VT_STATE", "PENDING")
-                .containsEntry("VT_REQUESTED_AT", java.sql.Timestamp.valueOf(NOW_UTC.plusSeconds(60)))
+                .containsEntry("VT_REQUESTED_AT", Timestamp.valueOf(NOW_UTC.plusSeconds(60)))
                 .containsEntry("VT_REPORT_ID", REPORT_ID);
     }
 
@@ -303,19 +310,78 @@ class DefaultLinkInspectionServiceTest {
 
     @Test
     void aSubmitVirusTotalRefusesChangesNothing() {
-        when(virusTotalClient.submit(LONG_URL)).thenReturn(VirusTotalReport.failed("VirusTotal refused the API key."))
-                .thenReturn(VirusTotalReport.rateLimited());
+        when(virusTotalClient.submit(LONG_URL)).thenReturn(VirusTotalReport.keyRefused())
+                .thenReturn(VirusTotalReport.rateLimited())
+                .thenReturn(VirusTotalReport.unavailable("VirusTotal didn't answer."))
+                .thenReturn(VirusTotalReport.failed("VirusTotal refused the request (400)."));
 
         assertThatThrownBy(() -> linkInspectionService.submitToVirusTotal(LINK, ADMIN))
                 .isInstanceOf(VirusTotalUnavailableException.class)
                 .hasMessage("VirusTotal refused the API key.");
         assertThatThrownBy(() -> linkInspectionService.submitToVirusTotal(LINK, ADMIN))
                 .isInstanceOf(ServiceBusyException.class)
-                .hasMessage("VirusTotal takes 4 requests a minute. Try again in a minute.");
+                .hasMessage("VirusTotal is refusing requests for now. Try again in a minute.");
+        assertThatThrownBy(() -> linkInspectionService.submitToVirusTotal(LINK, ADMIN))
+                .isInstanceOf(ServiceBusyException.class)
+                .hasMessage("VirusTotal didn't answer. Try again in a minute.");
+        assertThatThrownBy(() -> linkInspectionService.submitToVirusTotal(LINK, ADMIN))
+                .isInstanceOf(VirusTotalUnavailableException.class)
+                .hasMessage("VirusTotal refused the request (400).");
 
         assertThat(rows(LINK)).isZero();
-        verify(auditLogService, times(2)).logFailure(anyString(), any(), anyString(), anyString(), anyString());
+        verify(auditLogService, times(4)).logFailure(anyString(), any(), anyString(), anyString(), anyString());
         verify(auditLogService, never()).log(anyString(), any(), anyString(), anyString(), anyString());
+    }
+
+    @Test
+    void aSentLinkIsAuditedAsSentWhenItsLinkIsDeletedBeforeTheLookupIsQueued() {
+        when(virusTotalClient.submit(LONG_URL)).thenAnswer(invocation -> {
+            jdbcTemplate.update("delete from url where id = ?", LINK);
+            return VirusTotalReport.submitted();
+        });
+
+        assertThatThrownBy(() -> linkInspectionService.submitToVirusTotal(LINK, ADMIN))
+                .isInstanceOf(VirusTotalLookupNotQueuedException.class)
+                .hasMessage(NOT_QUEUED);
+
+        verify(auditLogService).log(ADMIN, AuditAction.SUBMIT_TO_VIRUSTOTAL, "Url", String.valueOf(LINK), SUBJECT);
+        verify(auditLogService, never()).logFailure(anyString(), any(), anyString(), anyString(), anyString());
+    }
+
+    @Test
+    void aSentLinkIsAuditedAsSentWhenTheDatabaseFailsAfterwards() {
+        final var inspections = mock(LinkInspectionRepository.class);
+        final var urls = mock(UrlRepository.class);
+        when(urls.findById(LINK)).thenReturn(Optional.of(Url.builder().id(LINK).longUrl(LONG_URL).build()));
+        when(urls.existsById(LINK)).thenReturn(true);
+        when(inspections.queueVirusTotalAfterSubmit(eq(LINK), any(), any())).thenThrow(new DataAccessResourceFailureException("down"));
+        when(virusTotalClient.submit(LONG_URL)).thenReturn(VirusTotalReport.submitted());
+
+        assertThatThrownBy(() -> serviceOver(inspections, mock(LinkScreenshotRepository.class), urls).submitToVirusTotal(LINK, ADMIN))
+                .isInstanceOf(VirusTotalLookupNotQueuedException.class)
+                .hasMessage(NOT_QUEUED);
+
+        verify(auditLogService).log(ADMIN, AuditAction.SUBMIT_TO_VIRUSTOTAL, "Url", String.valueOf(LINK), SUBJECT);
+        verify(auditLogService, never()).logFailure(anyString(), any(), anyString(), anyString(), anyString());
+    }
+
+    @Test
+    void theSubmitWritesItsStateInOneUpdate() {
+        final var inspections = mock(LinkInspectionRepository.class);
+        final var urls = mock(UrlRepository.class);
+        when(urls.findById(LINK)).thenReturn(Optional.of(Url.builder().id(LINK).longUrl(LONG_URL).build()));
+        when(urls.existsById(LINK)).thenReturn(true);
+        when(inspections.queueVirusTotalAfterSubmit(LINK, NOW_UTC.plusSeconds(60), NOW_UTC)).thenReturn(1);
+        when(inspections.findById(LINK)).thenReturn(Optional.of(LinkInspection.builder().urlId(LINK).vtState(InspectionState.PENDING)
+                .vtRequestedAt(NOW_UTC.plusSeconds(60)).vtSubmittedAt(NOW_UTC).build()));
+        when(virusTotalClient.submit(LONG_URL)).thenReturn(VirusTotalReport.submitted());
+
+        final var view = serviceOver(inspections, mock(LinkScreenshotRepository.class), urls).submitToVirusTotal(LINK, ADMIN);
+
+        assertThat(view.state()).isEqualTo(InspectionState.PENDING);
+        verify(inspections).queueVirusTotalAfterSubmit(LINK, NOW_UTC.plusSeconds(60), NOW_UTC);
+        verify(inspections, never()).save(any(LinkInspection.class));
+        verify(inspections, never()).saveAndFlush(any(LinkInspection.class));
     }
 
     @Test
@@ -353,7 +419,7 @@ class DefaultLinkInspectionServiceTest {
                 + "from link_inspection where url_id = ?", LINK))
                 .containsEntry("SCREENSHOT_STATE", "PENDING")
                 .containsEntry("SCREENSHOT_REQUESTED_BY", "QUEUE")
-                .containsEntry("SCREENSHOT_REQUESTED_AT", java.sql.Timestamp.valueOf(NOW_UTC))
+                .containsEntry("SCREENSHOT_REQUESTED_AT", Timestamp.valueOf(NOW_UTC))
                 .containsEntry("SCREENSHOT_FAILURE", null);
     }
 
@@ -408,9 +474,9 @@ class DefaultLinkInspectionServiceTest {
                 + "screenshot_taken_at from link_inspection where url_id = ?", LINK))
                 .containsEntry("SCREENSHOT_STATE", "PENDING")
                 .containsEntry("SCREENSHOT_REQUESTED_BY", "ADMIN")
-                .containsEntry("SCREENSHOT_REQUESTED_AT", java.sql.Timestamp.valueOf(NOW_UTC))
+                .containsEntry("SCREENSHOT_REQUESTED_AT", Timestamp.valueOf(NOW_UTC))
                 .containsEntry("SCREENSHOT_FAILURE", null)
-                .containsEntry("SCREENSHOT_TAKEN_AT", java.sql.Timestamp.valueOf(NOW_UTC.minusDays(1)));
+                .containsEntry("SCREENSHOT_TAKEN_AT", Timestamp.valueOf(NOW_UTC.minusDays(1)));
         assertThat(linkInspectionService.screenshot(LINK)).map(LinkScreenshot::getImage).contains(new byte[]{1, 2, 3});
     }
 

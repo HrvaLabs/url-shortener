@@ -11,9 +11,11 @@ import java.io.IOException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.ServerSocket;
+import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.Base64;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
@@ -95,8 +97,8 @@ class VirusTotalClientTest {
 
         client.lookup(TARGET);
 
-        final var encoded = java.net.URLEncoder.encode(TARGET, StandardCharsets.UTF_8);
-        final var standardBase64 = java.util.Base64.getEncoder().encodeToString(TARGET.getBytes(StandardCharsets.UTF_8));
+        final var encoded = URLEncoder.encode(TARGET, StandardCharsets.UTF_8);
+        final var standardBase64 = Base64.getEncoder().encodeToString(TARGET.getBytes(StandardCharsets.UTF_8));
         assertThat(received).singleElement().satisfies(request -> assertThat(List.of(request.path(), String.valueOf(request.query()), request.body(),
                 request.headers())).allSatisfy(part -> assertThat(part)
                 .doesNotContain(TARGET)
@@ -141,31 +143,38 @@ class VirusTotalClientTest {
     void badKey401() {
         answer(401, "{\"error\": {\"code\": \"WrongCredentialsError\", \"message\": \"Wrong API key\"}}");
 
-        assertThat(client.lookup(TARGET)).isEqualTo(VirusTotalReport.failed("VirusTotal refused the API key."));
-        assertThat(client.submit(TARGET)).isEqualTo(VirusTotalReport.failed("VirusTotal refused the API key."));
+        assertThat(client.lookup(TARGET)).isEqualTo(VirusTotalReport.keyRefused());
+        assertThat(client.submit(TARGET)).isEqualTo(VirusTotalReport.keyRefused());
+        assertThat(VirusTotalReport.keyRefused().failure()).isEqualTo("VirusTotal refused the API key.");
     }
 
     @Test
     void aForbiddenKeyIsRefusedToo() {
         answer(403, "{\"error\": {\"code\": \"ForbiddenError\"}}");
 
-        assertThat(client.lookup(TARGET)).isEqualTo(VirusTotalReport.failed("VirusTotal refused the API key."));
-        assertThat(VirusTotalReport.failed("VirusTotal refused the API key.").keyRefused()).isTrue();
-        assertThat(VirusTotalReport.failed("VirusTotal didn't answer.").keyRefused()).isFalse();
+        assertThat(client.lookup(TARGET)).isEqualTo(VirusTotalReport.keyRefused());
     }
 
     @Test
-    void aServerErrorFailsWithTheStatus() {
+    void anotherClientErrorIsARefusal() {
+        answer(400, "{\"error\": {\"code\": \"InvalidArgumentError\"}}");
+
+        assertThat(client.lookup(TARGET)).isEqualTo(VirusTotalReport.failed("VirusTotal refused the request (400)."));
+        assertThat(client.submit(TARGET)).isEqualTo(VirusTotalReport.failed("VirusTotal refused the request (400)."));
+    }
+
+    @Test
+    void aServerErrorIsUnavailable() {
         answer(503, "{\"error\": {\"code\": \"TransientError\"}}");
 
-        assertThat(client.lookup(TARGET)).isEqualTo(VirusTotalReport.failed("VirusTotal answered with an error (503)."));
+        assertThat(client.lookup(TARGET)).isEqualTo(VirusTotalReport.unavailable("VirusTotal answered with an error (503)."));
     }
 
     @Test
-    void anUnreadableAnswerFails() {
+    void anUnreadableAnswerIsUnavailable() {
         answer(200, "<html>maintenance</html>");
 
-        assertThat(client.lookup(TARGET)).isEqualTo(VirusTotalReport.failed("VirusTotal answered with an error (200)."));
+        assertThat(client.lookup(TARGET)).isEqualTo(VirusTotalReport.unavailable("VirusTotal answered with an error (200)."));
     }
 
     @Test
@@ -175,7 +184,7 @@ class VirusTotalClientTest {
         final var started = System.nanoTime();
         final var report = client.lookup(TARGET);
 
-        assertThat(report).isEqualTo(VirusTotalReport.failed("VirusTotal didn't answer."));
+        assertThat(report).isEqualTo(VirusTotalReport.unavailable("VirusTotal didn't answer."));
         assertThat(Duration.ofNanos(System.nanoTime() - started)).isLessThan(Duration.ofSeconds(4));
     }
 
@@ -183,7 +192,7 @@ class VirusTotalClientTest {
     void aClosedPortFailsWithTheSameReason() throws IOException {
         appProperties.getInspection().setVirusTotalApiBase("http://127.0.0.1:" + closedPort() + "/api/v3");
 
-        assertThat(client.lookup(TARGET)).isEqualTo(VirusTotalReport.failed("VirusTotal didn't answer."));
+        assertThat(client.lookup(TARGET)).isEqualTo(VirusTotalReport.unavailable("VirusTotal didn't answer."));
     }
 
     @Test

@@ -16,6 +16,7 @@ import cc.hrva.urlshortener.repository.LinkScreenshotRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.service.SettingsService;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiter;
+import cc.hrva.urlshortener.service.ratelimit.RateLimiterUnavailableException;
 import cc.hrva.urlshortener.service.settings.SettingKey;
 import java.time.Clock;
 import java.time.Duration;
@@ -45,10 +46,13 @@ public class InspectionWorker {
     private static final Duration PAUSE_AFTER_EXCEPTION = Duration.ofMinutes(1);
     private static final Duration PAUSE_AFTER_REFUSED_TOKEN = Duration.ofHours(1);
     private static final String VIRUSTOTAL_DAILY_LIMIT = "Today's VirusTotal lookups are used up. They continue after midnight UTC.";
-    private static final String VIRUSTOTAL_LOOKUP_FAILED = "Looking up the link on VirusTotal failed. Send it to VirusTotal to try again.";
+    private static final String VIRUSTOTAL_LOOKUP_FAILED = "VirusTotal couldn't look this link up.";
+    private static final String TRIES_AGAIN_IN_A_MINUTE = " The lookup tries again in a minute.";
+    private static final String TRY_AGAIN_IN_AN_HOUR = " Lookups try again in an hour.";
+    private static final String VIRUSTOTAL_REFUSING = "VirusTotal is refusing requests for now." + TRIES_AGAIN_IN_A_MINUTE;
+    private static final String VIRUSTOTAL_UNCOUNTED = "hrva.cc can't count today's VirusTotal lookups right now." + TRIES_AGAIN_IN_A_MINUTE;
     private static final Duration WAIT_FOR_THE_REDIRECT_CHECK = Duration.ofMinutes(2);
-    private static final Duration PAUSE_AFTER_VIRUSTOTAL_RATE_LIMIT = Duration.ofMinutes(1);
-    private static final Duration PAUSE_AFTER_VIRUSTOTAL_FAILURE = Duration.ofMinutes(1);
+    private static final Duration PAUSE_WHILE_VIRUSTOTAL_IS_UNAVAILABLE = Duration.ofMinutes(1);
     private static final Duration PAUSE_AFTER_REFUSED_KEY = Duration.ofHours(1);
 
     private final LinkInspectionRepository linkInspectionRepository;
@@ -153,7 +157,15 @@ public class InspectionWorker {
             recordNotFound(lookup);
             return;
         }
-        if (!countedWithinTheDailyLimit()) {
+        final boolean withinTheDailyLimit;
+        try {
+            withinTheDailyLimit = countedWithinTheDailyLimit();
+        } catch (final RateLimiterUnavailableException exception) {
+            virusTotalFailedBefore.set(null);
+            waitAMinute(lookup, VIRUSTOTAL_UNCOUNTED);
+            return;
+        }
+        if (!withinTheDailyLimit) {
             reachedTheDailyLimit(lookup);
             return;
         }
@@ -185,41 +197,27 @@ public class InspectionWorker {
     }
 
     private void recordReport(final Lookup lookup, final VirusTotalReport report, final String checkedUrl) {
+        virusTotalFailedBefore.set(null);
         switch (report.outcome()) {
-            case FOUND -> {
-                virusTotalFailedBefore.set(null);
-                recordFound(lookup, report, checkedUrl);
+            case FOUND -> recordFound(lookup, report, checkedUrl);
+            case NOT_FOUND -> recordNotFound(lookup);
+            case RATE_LIMITED -> waitAMinute(lookup, VIRUSTOTAL_REFUSING);
+            case UNAVAILABLE -> waitAMinute(lookup, report.failure() + TRIES_AGAIN_IN_A_MINUTE);
+            case KEY_REFUSED -> {
+                pause(virusTotalPausedUntil, clock.instant().plus(PAUSE_AFTER_REFUSED_KEY));
+                recordLookup(lookup, InspectionState.PENDING, report.failure() + TRY_AGAIN_IN_AN_HOUR);
+                log.warn("VirusTotal lookups paused for an hour, VirusTotal refused the API key urlId={}", lookup.urlId());
             }
-            case NOT_FOUND -> {
-                virusTotalFailedBefore.set(null);
-                recordNotFound(lookup);
-            }
-            case RATE_LIMITED -> {
-                virusTotalFailedBefore.set(null);
-                pause(virusTotalPausedUntil, clock.instant().plus(PAUSE_AFTER_VIRUSTOTAL_RATE_LIMIT));
-                log.info("VirusTotal lookups paused for a minute, VirusTotal's rate limit was hit urlId={}", lookup.urlId());
-            }
-            case FAILED -> recordFailure(lookup, report);
-            case NOT_CONFIGURED -> {
-                virusTotalFailedBefore.set(null);
-                log.debug("VirusTotal lookup skipped, the API key is not set urlId={}", lookup.urlId());
-            }
+            case FAILED -> recordLookup(lookup, InspectionState.FAILED, report.failure());
+            case NOT_CONFIGURED -> log.debug("VirusTotal lookup skipped, the API key is not set urlId={}", lookup.urlId());
             case SUBMITTED -> throw new IllegalStateException("VirusTotal answered a lookup with " + report.outcome());
         }
     }
 
-    private void recordFailure(final Lookup lookup, final VirusTotalReport report) {
-        if (report.keyRefused()) {
-            virusTotalFailedBefore.set(null);
-            pause(virusTotalPausedUntil, clock.instant().plus(PAUSE_AFTER_REFUSED_KEY));
-            recordLookup(lookup, InspectionState.PENDING, report.failure());
-            log.warn("VirusTotal lookups paused for an hour, VirusTotal refused the API key urlId={}", lookup.urlId());
-            return;
-        }
-        pause(virusTotalPausedUntil, clock.instant().plus(PAUSE_AFTER_VIRUSTOTAL_FAILURE));
-        final var state = failedTwice(virusTotalFailedBefore, lookup.attempt()) ? InspectionState.FAILED : InspectionState.PENDING;
-        recordLookup(lookup, state, report.failure());
-        log.info("VirusTotal lookup failed, paused for a minute urlId={} state={}", lookup.urlId(), state);
+    private void waitAMinute(final Lookup lookup, final String failure) {
+        pause(virusTotalPausedUntil, clock.instant().plus(PAUSE_WHILE_VIRUSTOTAL_IS_UNAVAILABLE));
+        recordLookup(lookup, InspectionState.PENDING, failure);
+        log.info("VirusTotal lookups paused for a minute urlId={}", lookup.urlId());
     }
 
     private void recordFound(final Lookup lookup, final VirusTotalReport report, final String checkedUrl) {

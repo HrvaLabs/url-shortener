@@ -16,6 +16,7 @@ import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import java.lang.reflect.Method;
+import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -27,13 +28,20 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.config.AutowireCapableBeanFactory;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.data.redis.RedisConnectionFailureException;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.script.RedisScript;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.mockingDetails;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.times;
@@ -73,7 +81,8 @@ class InspectionWorkerTest {
     private static final LocalDateTime ANALYSED_AT = LocalDateTime.of(2026, 11, 2, 18, 30);
     private static final VirusTotalReport FOUND = new VirusTotalReport(VirusTotalReport.Outcome.FOUND, REPORT_ID, 7, 2, 61, 25, ANALYSED_AT, null);
     private static final String VT_DAILY_LIMIT = "Today's VirusTotal lookups are used up. They continue after midnight UTC.";
-    private static final String VT_KEY_REFUSED = "VirusTotal refused the API key.";
+    private static final String VT_KEY_REFUSED = "VirusTotal refused the API key. Lookups try again in an hour.";
+    private static final String VT_NO_ANSWER = "VirusTotal didn't answer. The lookup tries again in a minute.";
 
     @Autowired
     private InspectionWorker inspectionWorker;
@@ -92,6 +101,9 @@ class InspectionWorkerTest {
 
     @Autowired
     private RateLimiter rateLimiter;
+
+    @Autowired
+    private StringRedisTemplate redisTemplate;
 
     @Autowired
     private AutowireCapableBeanFactory beanFactory;
@@ -141,7 +153,7 @@ class InspectionWorkerTest {
                 .containsEntry("PAGE_TITLE", "Find your date")
                 .containsEntry("PAGE_STATUS", 200)
                 .containsEntry("SCREENSHOT_FAILURE", null)
-                .containsEntry("SCREENSHOT_TAKEN_AT", java.sql.Timestamp.valueOf(NOW_UTC));
+                .containsEntry("SCREENSHOT_TAKEN_AT", Timestamp.valueOf(NOW_UTC));
         assertThat(jdbcTemplate.queryForObject("select image from link_screenshot where url_id = ?", byte[].class, LINK)).isEqualTo(JPEG);
         assertThat(jdbcTemplate.queryForObject("select content_type from link_screenshot where url_id = ?", String.class, LINK)).isEqualTo("image/jpeg");
     }
@@ -542,8 +554,8 @@ class InspectionWorkerTest {
                 .containsEntry("VT_SUSPICIOUS", 2)
                 .containsEntry("VT_HARMLESS", 61)
                 .containsEntry("VT_UNDETECTED", 25)
-                .containsEntry("VT_ANALYSED_AT", java.sql.Timestamp.valueOf(ANALYSED_AT))
-                .containsEntry("VT_CHECKED_AT", java.sql.Timestamp.valueOf(NOW_UTC))
+                .containsEntry("VT_ANALYSED_AT", Timestamp.valueOf(ANALYSED_AT))
+                .containsEntry("VT_CHECKED_AT", Timestamp.valueOf(NOW_UTC))
                 .containsEntry("VT_FAILURE", null);
         assertThat(row(OTHER_LINK)).containsEntry("VT_STATE", "PENDING");
 
@@ -686,7 +698,7 @@ class InspectionWorkerTest {
                 .containsEntry("VT_URL", LONG_URL)
                 .containsEntry("VT_REPORT_ID", null)
                 .containsEntry("VT_MALICIOUS", null)
-                .containsEntry("VT_CHECKED_AT", java.sql.Timestamp.valueOf(NOW_UTC))
+                .containsEntry("VT_CHECKED_AT", Timestamp.valueOf(NOW_UTC))
                 .containsEntry("VT_FAILURE", null);
     }
 
@@ -711,8 +723,8 @@ class InspectionWorkerTest {
         linkInspectionService.submitToVirusTotal(LINK, "admin@hrva.cc");
 
         assertThat(row(LINK)).containsEntry("VT_STATE", "PENDING")
-                .containsEntry("VT_REQUESTED_AT", java.sql.Timestamp.valueOf(NOW_UTC.plusSeconds(60)))
-                .containsEntry("VT_SUBMITTED_AT", java.sql.Timestamp.valueOf(NOW_UTC));
+                .containsEntry("VT_REQUESTED_AT", Timestamp.valueOf(NOW_UTC.plusSeconds(60)))
+                .containsEntry("VT_SUBMITTED_AT", Timestamp.valueOf(NOW_UTC));
         inspectionWorker.lookUpNextOnVirusTotal();
         clock.advance(Duration.ofSeconds(59));
         inspectionWorker.lookUpNextOnVirusTotal();
@@ -721,7 +733,7 @@ class InspectionWorkerTest {
         clock.advance(Duration.ofSeconds(1));
         inspectionWorker.lookUpNextOnVirusTotal();
         verify(virusTotalClient).lookup(LONG_URL);
-        assertThat(row(LINK)).containsEntry("VT_STATE", "DONE").containsEntry("VT_SUBMITTED_AT", java.sql.Timestamp.valueOf(NOW_UTC));
+        assertThat(row(LINK)).containsEntry("VT_STATE", "DONE").containsEntry("VT_SUBMITTED_AT", Timestamp.valueOf(NOW_UTC));
         assertThat(rateLimiter.count("virustotal:2026-11-03")).hasValue(2);
     }
 
@@ -748,7 +760,8 @@ class InspectionWorkerTest {
 
         inspectionWorker.lookUpNextOnVirusTotal();
 
-        assertThat(row(LINK)).containsEntry("VT_STATE", "PENDING").containsEntry("VT_FAILURE", null);
+        assertThat(row(LINK)).containsEntry("VT_STATE", "PENDING")
+                .containsEntry("VT_FAILURE", "VirusTotal is refusing requests for now. The lookup tries again in a minute.");
         clock.advance(Duration.ofSeconds(59));
         inspectionWorker.lookUpNextOnVirusTotal();
         verify(virusTotalClient, times(1)).lookup(anyString());
@@ -766,7 +779,7 @@ class InspectionWorkerTest {
         vtPending(OTHER_LINK, NOW_UTC.minusMinutes(1));
         chainChecked(LINK, null);
         chainChecked(OTHER_LINK, null);
-        when(virusTotalClient.lookup(anyString())).thenReturn(VirusTotalReport.failed(VT_KEY_REFUSED));
+        when(virusTotalClient.lookup(anyString())).thenReturn(VirusTotalReport.keyRefused());
 
         inspectionWorker.lookUpNextOnVirusTotal();
         clock.advance(Duration.ofMinutes(59));
@@ -783,25 +796,70 @@ class InspectionWorkerTest {
     }
 
     @Test
-    void aFailedLookupIsRetriedOnceThenMarkedFailed() {
+    void aRedisOutageAndTwoTimeoutsInARowKeepTheRequestPending() {
+        vtPending(LINK, NOW_UTC);
+        chainChecked(LINK, null);
+        when(virusTotalClient.lookup(anyString())).thenReturn(VirusTotalReport.unavailable("VirusTotal didn't answer."));
+
+        doThrow(new RedisConnectionFailureException("down")).when(redisTemplate).execute(any(RedisScript.class), anyList(), any(Object[].class));
+        try {
+            inspectionWorker.lookUpNextOnVirusTotal();
+        } finally {
+            reset(redisTemplate);
+            inMemoryRedis.backing(redisTemplate);
+        }
+        verifyNoInteractions(virusTotalClient);
+        assertThat(row(LINK)).containsEntry("VT_STATE", "PENDING")
+                .containsEntry("VT_FAILURE", "hrva.cc can't count today's VirusTotal lookups right now. The lookup tries again in a minute.");
+
+        clock.advance(Duration.ofSeconds(59));
+        inspectionWorker.lookUpNextOnVirusTotal();
+        verifyNoInteractions(virusTotalClient);
+        clock.advance(Duration.ofSeconds(1));
+        inspectionWorker.lookUpNextOnVirusTotal();
+        assertThat(row(LINK)).containsEntry("VT_STATE", "PENDING").containsEntry("VT_FAILURE", VT_NO_ANSWER);
+        clock.advance(Duration.ofMinutes(1));
+        inspectionWorker.lookUpNextOnVirusTotal();
+        assertThat(row(LINK)).containsEntry("VT_STATE", "PENDING").containsEntry("VT_FAILURE", VT_NO_ANSWER);
+        clock.advance(Duration.ofMinutes(1));
+        inspectionWorker.lookUpNextOnVirusTotal();
+        assertThat(row(LINK)).containsEntry("VT_STATE", "PENDING").containsEntry("VT_FAILURE", VT_NO_ANSWER);
+        verify(virusTotalClient, times(3)).lookup(LONG_URL);
+
+        when(virusTotalClient.lookup(anyString())).thenReturn(FOUND);
+        clock.advance(Duration.ofMinutes(1));
+        inspectionWorker.lookUpNextOnVirusTotal();
+        assertThat(row(LINK)).containsEntry("VT_STATE", "DONE").containsEntry("VT_FAILURE", null);
+    }
+
+    @Test
+    void aServerErrorKeepsTheRequestPendingAndPausesAMinute() {
+        vtPending(LINK, NOW_UTC);
+        chainChecked(LINK, null);
+        when(virusTotalClient.lookup(anyString())).thenReturn(VirusTotalReport.unavailable("VirusTotal answered with an error (503)."));
+
+        inspectionWorker.lookUpNextOnVirusTotal();
+        clock.advance(Duration.ofSeconds(59));
+        inspectionWorker.lookUpNextOnVirusTotal();
+
+        verify(virusTotalClient, times(1)).lookup(anyString());
+        assertThat(row(LINK)).containsEntry("VT_STATE", "PENDING")
+                .containsEntry("VT_FAILURE", "VirusTotal answered with an error (503). The lookup tries again in a minute.");
+    }
+
+    @Test
+    void aRefusedRequestFailsAtOnceAndTheQueueMovesOn() {
         vtPending(LINK, NOW_UTC.minusMinutes(2));
         vtPending(OTHER_LINK, NOW_UTC.minusMinutes(1));
         chainChecked(LINK, null);
         chainChecked(OTHER_LINK, null);
-        when(virusTotalClient.lookup(LONG_URL)).thenReturn(VirusTotalReport.failed("VirusTotal didn't answer."));
+        when(virusTotalClient.lookup(LONG_URL)).thenReturn(VirusTotalReport.failed("VirusTotal refused the request (400)."));
         when(virusTotalClient.lookup(OTHER_LONG_URL)).thenReturn(FOUND);
 
         inspectionWorker.lookUpNextOnVirusTotal();
-        assertThat(row(LINK)).containsEntry("VT_STATE", "PENDING").containsEntry("VT_FAILURE", "VirusTotal didn't answer.");
-        clock.advance(Duration.ofSeconds(59));
         inspectionWorker.lookUpNextOnVirusTotal();
-        verify(virusTotalClient, times(1)).lookup(anyString());
 
-        clock.advance(Duration.ofSeconds(1));
-        inspectionWorker.lookUpNextOnVirusTotal();
-        assertThat(row(LINK)).containsEntry("VT_STATE", "FAILED").containsEntry("VT_FAILURE", "VirusTotal didn't answer.");
-        clock.advance(Duration.ofMinutes(1));
-        inspectionWorker.lookUpNextOnVirusTotal();
+        assertThat(row(LINK)).containsEntry("VT_STATE", "FAILED").containsEntry("VT_FAILURE", "VirusTotal refused the request (400).");
         assertThat(row(OTHER_LINK)).containsEntry("VT_STATE", "DONE");
     }
 
@@ -820,7 +878,7 @@ class InspectionWorkerTest {
         clock.advance(Duration.ofSeconds(1));
         inspectionWorker.lookUpNextOnVirusTotal();
         assertThat(row(LINK)).containsEntry("VT_STATE", "FAILED")
-                .containsEntry("VT_FAILURE", "Looking up the link on VirusTotal failed. Send it to VirusTotal to try again.");
+                .containsEntry("VT_FAILURE", "VirusTotal couldn't look this link up.");
     }
 
     @Test
@@ -948,7 +1006,7 @@ class InspectionWorkerTest {
     }
 
     private int calls() {
-        return org.mockito.Mockito.mockingDetails(virusTotalClient).getInvocations().size();
+        return mockingDetails(virusTotalClient).getInvocations().size();
     }
 
     private void vtPending(final long urlId, final LocalDateTime requestedAt) {

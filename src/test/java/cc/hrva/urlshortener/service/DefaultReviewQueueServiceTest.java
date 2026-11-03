@@ -29,6 +29,7 @@ import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.stream.IntStream;
@@ -393,7 +394,7 @@ class DefaultReviewQueueServiceTest {
         when(linkReviewRepository.findAll(any(Specification.class), any(Pageable.class))).thenReturn(new PageImpl<>(List.of(
                 LinkReview.builder().id(8L).url(chained).reasons(LURE).build(),
                 LinkReview.builder().id(9L).url(plain).reasons(YOUNG).build())));
-        when(linkInspectionService.summaries(List.of(287L, 288L))).thenReturn(java.util.Map.of(287L, new InspectionSummary(taken, verdict),
+        when(linkInspectionService.summaries(List.of(287L, 288L))).thenReturn(Map.of(287L, new InspectionSummary(taken, verdict),
                 288L, new InspectionSummary(nothingYet, VirusTotalView.none(true))));
 
         final var entries = reviewQueueService.openEntries(PageRequest.of(0, 20), null, null, null);

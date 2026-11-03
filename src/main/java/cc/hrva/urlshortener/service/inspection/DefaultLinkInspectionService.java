@@ -10,6 +10,7 @@ import cc.hrva.urlshortener.dto.inspection.VirusTotalView;
 import cc.hrva.urlshortener.exception.ScreenshotsUnavailableException;
 import cc.hrva.urlshortener.exception.ServiceBusyException;
 import cc.hrva.urlshortener.exception.UrlNotFoundException;
+import cc.hrva.urlshortener.exception.VirusTotalLookupNotQueuedException;
 import cc.hrva.urlshortener.exception.VirusTotalUnavailableException;
 import cc.hrva.urlshortener.model.LinkInspection;
 import cc.hrva.urlshortener.model.LinkScreenshot;
@@ -58,7 +59,9 @@ public class DefaultLinkInspectionService implements LinkInspectionService {
     private static final String NOT_SET_UP = "Screenshots aren't set up.";
     private static final String VIRUSTOTAL_NOT_SET_UP = "VirusTotal isn't set up.";
     private static final String VIRUSTOTAL_USED_UP = "Today's VirusTotal lookups are used up. Try again after midnight UTC.";
-    private static final String VIRUSTOTAL_BUSY = "VirusTotal takes 4 requests a minute. Try again in a minute.";
+    private static final String TRY_AGAIN = " Try again in a minute.";
+    private static final String VIRUSTOTAL_REFUSING = "VirusTotal is refusing requests for now." + TRY_AGAIN;
+    private static final String LOOKUP_NOT_QUEUED = "The link was sent to VirusTotal, but its lookup couldn't be queued.";
     private static final String VIRUSTOTAL_UNCOUNTED = "hrva.cc can't count today's VirusTotal lookups right now. Try again in a minute.";
     private static final String TARGET_URL = "Url";
     private static final Duration TRY_AGAIN_IN = Duration.ofMinutes(1);
@@ -130,16 +133,20 @@ public class DefaultLinkInspectionService implements LinkInspectionService {
     public VirusTotalView submitToVirusTotal(final long urlId, final String performedBy) {
         final var targetIdentifier = String.valueOf(urlId);
         final var subject = auditSubjects.describe(TARGET_URL, targetIdentifier).orElse("");
-        final VirusTotalView view;
         try {
-            view = submit(urlId);
+            send(urlId);
         } catch (final RuntimeException exception) {
             auditLogService.logFailure(performedBy, AuditAction.SUBMIT_TO_VIRUSTOTAL, TARGET_URL, targetIdentifier,
                     Stream.of(subject, exception.getMessage()).filter(StringUtils::isNotEmpty).collect(Collectors.joining(", ")));
             throw exception;
         }
         auditLogService.log(performedBy, AuditAction.SUBMIT_TO_VIRUSTOTAL, TARGET_URL, targetIdentifier, subject);
-        return view;
+        try {
+            return lookUpAfterTheAnalysisRetryingOnce(urlId);
+        } catch (final RuntimeException exception) {
+            log.warn("Link sent to VirusTotal, but its lookup could not be queued urlId={} exception={}", urlId, exception.getClass().getName());
+            throw new VirusTotalLookupNotQueuedException(LOOKUP_NOT_QUEUED);
+        }
     }
 
     @Override
@@ -157,7 +164,7 @@ public class DefaultLinkInspectionService implements LinkInspectionService {
         }
     }
 
-    private VirusTotalView submit(final long urlId) {
+    private void send(final long urlId) {
         final var url = urlRepository.findById(urlId).orElseThrow(() -> new UrlNotFoundException(LINK_NOT_FOUND));
         if (!virusTotalOn()) {
             throw new VirusTotalUnavailableException(VIRUSTOTAL_NOT_SET_UP);
@@ -168,11 +175,15 @@ public class DefaultLinkInspectionService implements LinkInspectionService {
         final var report = virusTotalClient.submit(url.getLongUrl());
         switch (report.outcome()) {
             case SUBMITTED -> log.info("Link sent to VirusTotal urlId={}", urlId);
-            case RATE_LIMITED -> throw new ServiceBusyException(VIRUSTOTAL_BUSY, TRY_AGAIN_IN);
-            case FAILED -> throw new VirusTotalUnavailableException(report.failure());
+            case RATE_LIMITED -> throw new ServiceBusyException(VIRUSTOTAL_REFUSING, TRY_AGAIN_IN);
+            case UNAVAILABLE -> throw new ServiceBusyException(report.failure() + TRY_AGAIN, TRY_AGAIN_IN);
+            case KEY_REFUSED, FAILED -> throw new VirusTotalUnavailableException(report.failure());
             case NOT_CONFIGURED -> throw new VirusTotalUnavailableException(VIRUSTOTAL_NOT_SET_UP);
             case FOUND, NOT_FOUND -> throw new IllegalStateException("VirusTotal answered a submit with " + report.outcome());
         }
+    }
+
+    private VirusTotalView lookUpAfterTheAnalysisRetryingOnce(final long urlId) {
         try {
             return lookUpAfterTheAnalysis(urlId);
         } catch (final DataIntegrityViolationException exception) {
@@ -197,13 +208,14 @@ public class DefaultLinkInspectionService implements LinkInspectionService {
                 throw new UrlNotFoundException(LINK_NOT_FOUND);
             }
             final var now = now();
-            final var inspection = linkInspectionRepository.findById(urlId).orElseGet(() -> LinkInspection.builder().urlId(urlId).build());
-            inspection.setVtState(InspectionState.PENDING);
-            inspection.setVtRequestedAt(now.plus(LOOKUP_AFTER_SUBMIT));
-            inspection.setVtSubmittedAt(now);
-            inspection.setVtNextCandidate(null);
-            inspection.setVtFailure(null);
-            return virusTotalViewOf(linkInspectionRepository.saveAndFlush(inspection), true);
+            final var requestedAt = now.plus(LOOKUP_AFTER_SUBMIT);
+            if (linkInspectionRepository.queueVirusTotalAfterSubmit(urlId, requestedAt, now) == 0) {
+                linkInspectionRepository.saveAndFlush(LinkInspection.builder().urlId(urlId).vtState(InspectionState.PENDING).vtRequestedAt(requestedAt)
+                        .vtSubmittedAt(now).build());
+            }
+            return linkInspectionRepository.findById(urlId)
+                    .map(inspection -> virusTotalViewOf(inspection, true))
+                    .orElseThrow(() -> new IllegalStateException("The VirusTotal lookup was written but can't be read back"));
         });
     }
 

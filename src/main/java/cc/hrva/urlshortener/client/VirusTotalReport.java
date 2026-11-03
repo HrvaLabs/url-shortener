@@ -32,8 +32,12 @@ public record VirusTotalReport(Outcome outcome, String reportId, Integer malicio
         return new VirusTotalReport(Outcome.NOT_CONFIGURED, null, null, null, null, null, null, null);
     }
 
-    public boolean keyRefused() {
-        return outcome == Outcome.FAILED && KEY_REFUSED.equals(failure);
+    public static VirusTotalReport keyRefused() {
+        return new VirusTotalReport(Outcome.KEY_REFUSED, null, null, null, null, null, null, KEY_REFUSED);
+    }
+
+    public static VirusTotalReport unavailable(final String failure) {
+        return new VirusTotalReport(Outcome.UNAVAILABLE, null, null, null, null, null, null, failure);
     }
 
     public enum Outcome {
@@ -41,6 +45,8 @@ public record VirusTotalReport(Outcome outcome, String reportId, Integer malicio
         NOT_FOUND,
         SUBMITTED,
         RATE_LIMITED,
+        UNAVAILABLE,
+        KEY_REFUSED,
         FAILED,
         NOT_CONFIGURED
     }

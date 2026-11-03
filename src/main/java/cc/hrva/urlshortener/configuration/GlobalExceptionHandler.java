@@ -39,7 +39,6 @@ import cc.hrva.urlshortener.exception.SettingNotFoundException;
 import cc.hrva.urlshortener.exception.ShortUrlAlreadyExistsException;
 import cc.hrva.urlshortener.exception.ResetLinkExpiredException;
 import cc.hrva.urlshortener.exception.ScreenshotsUnavailableException;
-import cc.hrva.urlshortener.exception.VirusTotalUnavailableException;
 import cc.hrva.urlshortener.exception.SignInExpiredException;
 import cc.hrva.urlshortener.exception.ServiceBusyException;
 import cc.hrva.urlshortener.exception.SignInUnavailableException;
@@ -51,6 +50,8 @@ import cc.hrva.urlshortener.exception.NotificationChannelNotFoundException;
 import cc.hrva.urlshortener.exception.NotificationTestUnavailableException;
 import cc.hrva.urlshortener.exception.UrlNotFoundException;
 import cc.hrva.urlshortener.exception.UserNotFoundException;
+import cc.hrva.urlshortener.exception.VirusTotalLookupNotQueuedException;
+import cc.hrva.urlshortener.exception.VirusTotalUnavailableException;
 import cc.hrva.urlshortener.util.DatabaseOutages;
 import cc.hrva.urlshortener.util.ProblemResponses;
 import jakarta.validation.ConstraintViolationException;
@@ -270,6 +271,11 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(VirusTotalUnavailableException.class)
     public ResponseEntity<ProblemDetail> handleVirusTotalUnavailable(final VirusTotalUnavailableException ex) {
         return ProblemResponses.entity(HttpStatus.CONFLICT, safeMessage(ex));
+    }
+
+    @ExceptionHandler(VirusTotalLookupNotQueuedException.class)
+    public ResponseEntity<ProblemDetail> handleVirusTotalLookupNotQueued(final VirusTotalLookupNotQueuedException ex) {
+        return ProblemResponses.entity(HttpStatus.INTERNAL_SERVER_ERROR, safeMessage(ex));
     }
 
     @ExceptionHandler(LinkExpiredException.class)

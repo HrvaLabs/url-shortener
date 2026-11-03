@@ -7,11 +7,11 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
 import java.util.Optional;
 import java.util.concurrent.ExecutionException;
@@ -40,6 +40,7 @@ public class VirusTotalClient {
     private static final String SUBMIT = "submit";
     private static final String NO_ANSWER = "VirusTotal didn't answer.";
     private static final String ERROR_ANSWER = "VirusTotal answered with an error (%d).";
+    private static final String REQUEST_REFUSED = "VirusTotal refused the request (%d).";
 
     private final AppProperties appProperties;
     private final JsonMapper jsonMapper;
@@ -88,12 +89,12 @@ public class VirusTotalClient {
             response = exchange(requestSupplier.request());
         } catch (final InterruptedException exception) {
             Thread.currentThread().interrupt();
-            return failed(kind, 0, NO_ANSWER, exception.getClass().getName());
+            return warned(kind, 0, VirusTotalReport.unavailable(NO_ANSWER), exception.getClass().getName());
         } catch (final ExecutionException exception) {
             final var cause = exception.getCause();
-            return failed(kind, 0, NO_ANSWER, cause == null ? "unknown" : cause.getClass().getName());
+            return warned(kind, 0, VirusTotalReport.unavailable(NO_ANSWER), cause == null ? "unknown" : cause.getClass().getName());
         } catch (final TimeoutException | RuntimeException exception) {
-            return failed(kind, 0, NO_ANSWER, exception.getClass().getName());
+            return warned(kind, 0, VirusTotalReport.unavailable(NO_ANSWER), exception.getClass().getName());
         }
         final var status = response.statusCode();
         if (status == HttpStatus.TOO_MANY_REQUESTS.value()) {
@@ -101,18 +102,21 @@ public class VirusTotalClient {
             return VirusTotalReport.rateLimited();
         }
         if (status == HttpStatus.UNAUTHORIZED.value() || status == HttpStatus.FORBIDDEN.value()) {
-            return failed(kind, status, VirusTotalReport.KEY_REFUSED, null);
+            return warned(kind, status, VirusTotalReport.keyRefused(), null);
         }
         if (status == HttpStatus.NOT_FOUND.value() && LOOKUP.equals(kind)) {
             log.info("VirusTotal {} answered status={} outcome=not found", kind, status);
             return VirusTotalReport.notFound();
         }
+        if (status / 100 == 4) {
+            return warned(kind, status, VirusTotalReport.failed(REQUEST_REFUSED.formatted(status)), null);
+        }
         if (status / 100 != 2) {
-            return failed(kind, status, ERROR_ANSWER.formatted(status), null);
+            return warned(kind, status, VirusTotalReport.unavailable(ERROR_ANSWER.formatted(status)), null);
         }
         final var report = parse(response.body()).map(reader::read).orElse(null);
         if (report == null) {
-            return failed(kind, status, ERROR_ANSWER.formatted(status), null);
+            return warned(kind, status, VirusTotalReport.unavailable(ERROR_ANSWER.formatted(status)), null);
         }
         log.info("VirusTotal {} answered status={} outcome={}", kind, status, report.outcome());
         return report;
@@ -182,13 +186,13 @@ public class VirusTotalClient {
         }
     }
 
-    private static VirusTotalReport failed(final String kind, final int status, final String failure, final String exception) {
+    private static VirusTotalReport warned(final String kind, final int status, final VirusTotalReport report, final String exception) {
         if (exception == null) {
-            log.warn("VirusTotal {} failed status={} failure={}", kind, status, failure);
+            log.warn("VirusTotal {} failed status={} outcome={} failure={}", kind, status, report.outcome(), report.failure());
         } else {
-            log.warn("VirusTotal {} failed status={} failure={} exception={}", kind, status, failure, exception);
+            log.warn("VirusTotal {} failed status={} outcome={} failure={} exception={}", kind, status, report.outcome(), report.failure(), exception);
         }
-        return VirusTotalReport.failed(failure);
+        return report;
     }
 
     @FunctionalInterface

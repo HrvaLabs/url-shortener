@@ -40,6 +40,7 @@ import cc.hrva.urlshortener.service.settings.SettingsServiceFixtures;
 import com.nimbusds.jose.JOSEException;
 import com.nimbusds.jose.jwk.RSAKey;
 import com.nimbusds.jose.jwk.gen.RSAKeyGenerator;
+import java.sql.Timestamp;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -73,6 +74,8 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.groups.Tuple.tuple;
+import static org.hamcrest.Matchers.nullValue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.never;
@@ -236,7 +239,7 @@ class AdminLinkInspectionSecurityTest {
     void aLinkWithoutAScreenshotAnswersAnEmptyView() throws Exception {
         mockMvc.perform(as(ADMIN_TOKEN, get(INSPECTION)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.screenshot.state").value(org.hamcrest.Matchers.nullValue()))
+                .andExpect(jsonPath("$.screenshot.state").value(nullValue()))
                 .andExpect(jsonPath("$.screenshot.configured").value(true));
         mockMvc.perform(as(ADMIN_TOKEN, get(SCREENSHOT)))
                 .andExpect(status().isNotFound());
@@ -298,7 +301,7 @@ class AdminLinkInspectionSecurityTest {
 
         assertThat(count("link_inspection")).isZero();
         assertThat(auditRows()).extracting(audit -> audit.get("ACTION"), audit -> audit.get("FAILED"))
-                .containsExactly(org.assertj.core.groups.Tuple.tuple("TAKE_SCREENSHOT", true), org.assertj.core.groups.Tuple.tuple("TAKE_SCREENSHOT", true));
+                .containsExactly(tuple("TAKE_SCREENSHOT", true), tuple("TAKE_SCREENSHOT", true));
     }
 
     @Test
@@ -309,17 +312,34 @@ class AdminLinkInspectionSecurityTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.state").value("PENDING"))
                 .andExpect(jsonPath("$.submittedAt").value("2026-11-03T10:00:00Z"))
-                .andExpect(jsonPath("$.reportUrl").value(org.hamcrest.Matchers.nullValue()))
+                .andExpect(jsonPath("$.reportUrl").value(nullValue()))
                 .andExpect(jsonPath("$.configured").value(true));
 
         assertThat(jdbcTemplate.queryForMap("select vt_state, vt_requested_at from link_inspection where url_id = ?", LINK))
                 .containsEntry("VT_STATE", "PENDING")
-                .containsEntry("VT_REQUESTED_AT", java.sql.Timestamp.valueOf(NOW.plusSeconds(60)));
+                .containsEntry("VT_REQUESTED_AT", Timestamp.valueOf(NOW.plusSeconds(60)));
         assertThat(auditRows()).singleElement().satisfies(audit -> assertThat(audit)
                 .containsEntry("ACTION", "SUBMIT_TO_VIRUSTOTAL")
                 .containsEntry("PERFORMED_BY", ADMIN_EMAIL)
                 .containsEntry("TARGET_TYPE", "Url")
                 .containsEntry("TARGET_IDENTIFIER", String.valueOf(LINK))
+                .containsEntry("FAILED", false)
+                .containsEntry("DETAILS", "link: hrva.cc/v0DB3, destination: " + LONG_URL));
+    }
+
+    @Test
+    void aSentLinkWhoseLookupCantBeQueuedAnswers500AndIsAuditedAsSent() throws Exception {
+        when(virusTotalClient.submit(LONG_URL)).thenAnswer(invocation -> {
+            jdbcTemplate.update("delete from url where id = ?", LINK);
+            return VirusTotalReport.submitted();
+        });
+
+        mockMvc.perform(as(ADMIN_TOKEN, post(VIRUSTOTAL)))
+                .andExpect(status().isInternalServerError())
+                .andExpect(jsonPath("$.detail").value("The link was sent to VirusTotal, but its lookup couldn't be queued."));
+
+        assertThat(auditRows()).singleElement().satisfies(audit -> assertThat(audit)
+                .containsEntry("ACTION", "SUBMIT_TO_VIRUSTOTAL")
                 .containsEntry("FAILED", false)
                 .containsEntry("DETAILS", "link: hrva.cc/v0DB3, destination: " + LONG_URL));
     }
@@ -334,7 +354,7 @@ class AdminLinkInspectionSecurityTest {
 
         verify(virusTotalClient, never()).submit(anyString());
         assertThat(auditRows()).extracting(audit -> audit.get("ACTION"), audit -> audit.get("FAILED"))
-                .containsExactly(org.assertj.core.groups.Tuple.tuple("SUBMIT_TO_VIRUSTOTAL", true));
+                .containsExactly(tuple("SUBMIT_TO_VIRUSTOTAL", true));
     }
 
     @Test
