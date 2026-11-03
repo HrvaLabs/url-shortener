@@ -35,6 +35,8 @@ class VirusTotalClientTest {
     private static final String URLS = "/api/v3/urls";
     private static final String TARGET = "https://findfavoritedate.life/?u=f6yp608&s=~~?";
     private static final String TARGET_BASE64_ID = "aHR0cHM6Ly9maW5kZmF2b3JpdGVkYXRlLmxpZmUvP3U9ZjZ5cDYwOCZzPX5-Pw";
+    private static final String SUBMITTED_SHA256 = "0f115db062b7c0dd030b16878c99dea5c354b49dc37b38eb8846179c7783e9d7";
+    private static final String SUBMIT_ANSWER = "{\"data\": {\"type\": \"analysis\", \"id\": \"u-" + SUBMITTED_SHA256 + "-e1489251\"}}";
     private static final String TARGET_SHA256 = "25793058843bded85280e1a10ec107cea5b9bbd03b7d83c77e01e119c472cb80";
     private static final String REPORT_ID = "1db0ad7dbcec0676710ea0eaacd35d5e471d3e11944d53bcbd31f0cbd11bce31";
     private static final String FOUND = """
@@ -198,11 +200,11 @@ class VirusTotalClientTest {
 
     @Test
     void submitPostsTheUrlAsAForm() {
-        answer(200, "{\"data\": {\"type\": \"analysis\", \"id\": \"u-1db0ad7dbcec-1762163100\"}}");
+        answer(200, SUBMIT_ANSWER);
 
         final var report = client.submit(TARGET);
 
-        assertThat(report).isEqualTo(VirusTotalReport.submitted());
+        assertThat(report).isEqualTo(VirusTotalReport.submitted(SUBMITTED_SHA256));
         assertThat(received).singleElement().satisfies(request -> {
             assertThat(request.method()).isEqualTo("POST");
             assertThat(request.path()).isEqualTo(URLS);
@@ -214,15 +216,15 @@ class VirusTotalClientTest {
 
     @Test
     void aSendKeepsTheUrlIdentifierFromVirusTotalsAnalysisId() {
-        answer(200, "{\"data\": {\"type\": \"analysis\", \"id\": \"u-" + TARGET_SHA256 + "-1762163100\"}}");
+        answer(200, SUBMIT_ANSWER);
 
-        assertThat(client.submit(TARGET)).isEqualTo(VirusTotalReport.submitted(TARGET_SHA256));
+        assertThat(client.submit(TARGET)).isEqualTo(VirusTotalReport.submitted(SUBMITTED_SHA256));
     }
 
     @Test
     void aSendWhoseAnalysisIdDoesNotParseKeepsNoIdentifier() {
         final var answers = List.of("u-" + TARGET_SHA256.toUpperCase() + "-1762163100", "u-" + TARGET_SHA256 + "-", "u-" + TARGET_SHA256.substring(1)
-                + "-1762163100", "f-" + TARGET_SHA256 + "-1762163100", "u-" + TARGET_SHA256 + "-1762163100/x", "");
+                + "-1762163100", "f-" + TARGET_SHA256 + "-1762163100", "u-" + TARGET_SHA256 + "-1762163100/x", "u-" + TARGET_SHA256 + "-e148925g", "");
         for (final var analysisId : answers) {
             answer(200, "{\"data\": {\"type\": \"analysis\", \"id\": \"" + analysisId + "\"}}");
             assertThat(client.submit(TARGET)).isEqualTo(VirusTotalReport.submitted(null));

@@ -44,7 +44,7 @@ public class VirusTotalClient {
     private static final String ERROR_ANSWER = "VirusTotal answered with an error (%d).";
     private static final String REQUEST_REFUSED = "VirusTotal refused the request (%d).";
     private static final Pattern URL_IDENTIFIER = Pattern.compile("[0-9a-f]{64}");
-    private static final Pattern ANALYSIS_ID = Pattern.compile("u-([0-9a-f]{64})-\\d+");
+    private static final Pattern ANALYSIS_ID = Pattern.compile("u-([0-9a-f]{64})-[0-9a-f]+");
 
     private final AppProperties appProperties;
     private final JsonMapper jsonMapper;
