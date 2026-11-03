@@ -56,10 +56,13 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Collectors;
+import javax.sql.DataSource;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -73,6 +76,7 @@ import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
 import org.springframework.dao.DataAccessResourceFailureException;
+import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.http.HttpHeaders;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -102,6 +106,7 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -171,6 +176,12 @@ class McpEndpointSecurityTest {
 
     @MockitoSpyBean
     private OAuth2AuthorizationService authorizationService;
+
+    @MockitoSpyBean
+    private DataSource dataSource;
+
+    @MockitoSpyBean
+    private RedisConnectionFactory redisConnectionFactory;
 
     @MockitoBean
     private UrlService urlService;
@@ -246,6 +257,39 @@ class McpEndpointSecurityTest {
                 .andExpect(header().string(HttpHeaders.WWW_AUTHENTICATE, not(containsString("evil.example"))));
 
         verifyNoInteractions(urlService, userService);
+    }
+
+    @Test
+    void mcpWithoutTokenIsTheSame401WithoutAnyLookup() throws Exception {
+        clearInvocations(dataSource, redisConnectionFactory, authorizationService, rateLimiter);
+
+        try (final var httpClient = HttpClient.newHttpClient()) {
+            for (final var body : List.of(HttpRequest.BodyPublishers.ofString(TOOLS_LIST), HttpRequest.BodyPublishers.noBody())) {
+                final var response = httpClient.send(HttpRequest.newBuilder(URI.create("http://localhost:" + port + "/mcp"))
+                        .header(HttpHeaders.ACCEPT, MCP_ACCEPT)
+                        .header(HttpHeaders.CONTENT_TYPE, APPLICATION_JSON_VALUE)
+                        .header(HttpHeaders.USER_AGENT, "python-requests/2.32.3")
+                        .POST(body)
+                        .build(), HttpResponse.BodyHandlers.ofString());
+
+                assertThat(response.statusCode()).isEqualTo(401);
+                assertThat(response.body()).isEmpty();
+                assertThat(response.headers().firstValue(HttpHeaders.DATE)).isPresent();
+                assertThat(headersWithout(response.headers().map(), HttpHeaders.DATE)).isEqualTo(Map.of(
+                        "vary", List.of("Origin", "Access-Control-Request-Method", "Access-Control-Request-Headers"),
+                        "www-authenticate", List.of("Bearer resource_metadata=\"" + RESOURCE_METADATA + "\""),
+                        "x-content-type-options", List.of("nosniff"),
+                        "x-xss-protection", List.of("0"),
+                        "cache-control", List.of("no-cache, no-store, max-age=0, must-revalidate"),
+                        "pragma", List.of("no-cache"),
+                        "expires", List.of("0"),
+                        "x-frame-options", List.of("DENY"),
+                        "content-length", List.of("0")));
+            }
+        }
+
+        verifyNoInteractions(dataSource, redisConnectionFactory, authorizationService, rateLimiter,
+                userRepository, urlRepository, linkReviewRepository, connectRequestStore, urlService, userService);
     }
 
     @Test
@@ -657,6 +701,12 @@ class McpEndpointSecurityTest {
                 {"jsonrpc":"2.0","id":1,"method":"server/discover","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28"}}}""")
                 .header("MCP-Protocol-Version", "2026-07-28")
                 .header("Mcp-Method", "server/discover");
+    }
+
+    private static Map<String, List<String>> headersWithout(final Map<String, List<String>> headers, final String excluded) {
+        return headers.entrySet().stream()
+                .filter(header -> !header.getKey().equalsIgnoreCase(excluded))
+                .collect(Collectors.toMap(header -> header.getKey().toLowerCase(Locale.ROOT), Map.Entry::getValue));
     }
 
     private static MockHttpServletRequestBuilder mcpRequest(final String body) {
