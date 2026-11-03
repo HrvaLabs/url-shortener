@@ -103,6 +103,8 @@ public class Url {
 
     private boolean warningPage;
 
+    private boolean warningPageForReview;
+
     @PrePersist
     public void onCreate() {
         this.visits = 0L;

@@ -16,6 +16,7 @@ import cc.hrva.urlshortener.repository.specification.UserSpecification;
 import cc.hrva.urlshortener.service.ScammerSignalService;
 import cc.hrva.urlshortener.service.impl.DefaultReviewQueueService;
 import cc.hrva.urlshortener.service.impl.DefaultSignInMethodService;
+import cc.hrva.urlshortener.service.moderation.ReviewWarningPage;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.EntityManagerFactory;
 import java.time.Clock;
@@ -104,7 +105,7 @@ class AdminPageQueriesTest {
         final var scammerSignalService = mock(ScammerSignalService.class);
         when(scammerSignalService.possibleScammerIds()).thenReturn(Set.of());
         final var reviewQueueService = new DefaultReviewQueueService(linkReviewRepository, urlRepository, scammerSignalService, Clock.systemUTC(),
-                mock(ApplicationEventPublisher.class));
+                mock(ApplicationEventPublisher.class), mock(ReviewWarningPage.class));
 
         final var entries = reviewQueueService.openEntries(PageRequest.of(0, 10), null, null, null);
 
@@ -124,7 +125,7 @@ class AdminPageQueriesTest {
         final var scammerSignalService = mock(ScammerSignalService.class);
         when(scammerSignalService.possibleScammerIds()).thenReturn(Set.of());
         final var reviewQueueService = new DefaultReviewQueueService(linkReviewRepository, urlRepository, scammerSignalService, Clock.systemUTC(),
-                mock(ApplicationEventPublisher.class));
+                mock(ApplicationEventPublisher.class), mock(ReviewWarningPage.class));
 
         final var entries = reviewQueueService.openEntries(PageRequest.of(0, 10), null, null, null);
 

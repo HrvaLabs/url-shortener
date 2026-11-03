@@ -45,6 +45,7 @@ import cc.hrva.urlshortener.service.blocklist.BlocklistConfigurationChangedEvent
 import cc.hrva.urlshortener.service.domain.CustomDomainModeration;
 import cc.hrva.urlshortener.service.domain.UrlCache;
 import cc.hrva.urlshortener.service.domain.UrlCacheKeys;
+import cc.hrva.urlshortener.service.moderation.ReviewWarningPage;
 import cc.hrva.urlshortener.util.BlockDetails;
 import cc.hrva.urlshortener.util.DomainNames;
 import cc.hrva.urlshortener.util.ReviewReasons;
@@ -149,6 +150,7 @@ public class DefaultModerationService implements ModerationService {
     private final ScammerSignalService scammerSignalService;
     private final CustomDomainModeration customDomainModeration;
     private final CampaignRepository campaignRepository;
+    private final ReviewWarningPage reviewWarningPage;
 
     @Override
     public UrlResponse blockLink(final long urlId, final BlockReason reason, final String detail, final String performedBy, final String via) {
@@ -473,7 +475,8 @@ public class DefaultModerationService implements ModerationService {
     private String allowFromReview(final Url url, final String via) {
         final var restored = url.getBlockReason() == BlockReason.SIGN_IN_FORM
                 && reactivate(url.getId(), candidate -> candidate.getBlockReason() == BlockReason.SIGN_IN_FORM && candidate.getThreatType() == null);
-        return details(via, restored ? 1 : 0, field(ACTION, ReviewAction.OK));
+        final var warningPageCleared = reviewWarningPage.clearAfterReview(url.getId());
+        return details(via, restored ? 1 : 0, field(ACTION, ReviewAction.OK), warningPageCleared ? field("warningPage", "cleared") : null);
     }
 
     private String blockLinkFromReview(final Url url, final Consumer<Url> tellOwner, final String performedBy, final String via) {
@@ -700,6 +703,7 @@ public class DefaultModerationService implements ModerationService {
                 .filter(Url::isWarningPage)
                 .map(url -> {
                     url.setWarningPage(false);
+                    url.setWarningPageForReview(false);
                     return urlRepository.save(url);
                 })
                 .orElse(null)));

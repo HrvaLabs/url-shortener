@@ -245,7 +245,7 @@ class SettingValuesTest {
                 .containsExactly(SettingGroup.SAFETY, SettingType.NUMBER, "Warning page: maximum domain age",
                         "Domains with a known registration date younger than this get the page. Random-looking domains use the random-looking age.", SettingKey.WARNING_PAGE, false, 30, 3650, "days", false);
         assertThat(Arrays.asList(SettingKey.values()).subList(SettingKey.RANDOM_DOMAIN_MAX_AGE_DAYS.ordinal() + 1, SettingKey.HUMAN_CHECK.ordinal()))
-                .containsExactly(SettingKey.WARNING_PAGE, SettingKey.WARNING_PAGE_MAX_AGE_DAYS);
+                .containsExactly(SettingKey.WARNING_PAGE, SettingKey.WARNING_PAGE_MAX_AGE_DAYS, SettingKey.REVIEW_WARNING_PAGE);
         final var appProperties = new AppProperties();
         final var defaults = new SettingDefaults(appProperties, SettingsServiceFixtures.bothProviders());
         assertThat(defaults.defaultOf(SettingKey.WARNING_PAGE)).isEqualTo(true);
@@ -257,12 +257,26 @@ class SettingValuesTest {
     }
 
     @Test
+    void theReviewWarningPageRow() {
+        assertThat(SettingKey.REVIEW_WARNING_PAGE).extracting(SettingKey::getGroup, SettingKey::getType, SettingKey::getLabel, SettingKey::getDescription,
+                        SettingKey::getParent, SettingKey::isSafety)
+                .containsExactly(SettingGroup.SAFETY, SettingType.SWITCH, "Warning page while a link without an account waits for review",
+                        "Links without an account show the warning page while their review is open. Resolving the review as OK removes it.",
+                        SettingKey.WARNING_PAGE, true);
+        final var appProperties = new AppProperties();
+        final var defaults = new SettingDefaults(appProperties, SettingsServiceFixtures.bothProviders());
+        assertThat(defaults.defaultOf(SettingKey.REVIEW_WARNING_PAGE)).isEqualTo(true);
+        appProperties.getModeration().setReviewWarningPage(false);
+        assertThat(defaults.defaultOf(SettingKey.REVIEW_WARNING_PAGE)).isEqualTo(false);
+    }
+
+    @Test
     void theHumanCheckRow() {
         assertThat(SettingKey.HUMAN_CHECK).extracting(SettingKey::getGroup, SettingKey::getType, SettingKey::getLabel, SettingKey::getDescription,
                         SettingKey::getParent, SettingKey::isSafety)
                 .containsExactly(SettingGroup.SAFETY, SettingType.SWITCH, "Human check on links without an account",
                         "A Cloudflare Turnstile check on the homepage, /qr, /utm and /share.", null, true);
-        assertThat(Arrays.asList(SettingKey.values()).subList(SettingKey.WARNING_PAGE_MAX_AGE_DAYS.ordinal() + 1, SettingKey.ANONYMOUS_EXPIRY_DAYS.ordinal()))
+        assertThat(Arrays.asList(SettingKey.values()).subList(SettingKey.REVIEW_WARNING_PAGE.ordinal() + 1, SettingKey.ANONYMOUS_EXPIRY_DAYS.ordinal()))
                 .containsExactly(SettingKey.HUMAN_CHECK);
         final var appProperties = new AppProperties();
         final var defaults = new SettingDefaults(appProperties, SettingsServiceFixtures.bothProviders());

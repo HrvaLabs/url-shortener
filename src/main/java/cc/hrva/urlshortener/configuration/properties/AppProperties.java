@@ -400,6 +400,7 @@ public class AppProperties {
         private boolean githubSignIn = true;
         private boolean randomDomainReview = true;
         private boolean warningPage = true;
+        private boolean reviewWarningPage = true;
         private boolean humanCheck = true;
 
         @Min(1)

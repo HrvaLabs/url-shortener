@@ -71,6 +71,7 @@ public class SettingDefaults {
         register(SettingKey.RANDOM_DOMAIN_MAX_AGE_DAYS, moderation::getRandomDomainMaxAgeDays);
         register(SettingKey.WARNING_PAGE, moderation::isWarningPage);
         register(SettingKey.WARNING_PAGE_MAX_AGE_DAYS, moderation::getWarningPageMaxAgeDays);
+        register(SettingKey.REVIEW_WARNING_PAGE, moderation::isReviewWarningPage);
         register(SettingKey.HUMAN_CHECK, moderation::isHumanCheck);
         register(SettingKey.ANONYMOUS_EXPIRY_DAYS, moderation::getAnonymousExpiryDays);
         register(SettingKey.ANONYMOUS_VISIT_LIMIT, moderation::getAnonymousVisitLimit);

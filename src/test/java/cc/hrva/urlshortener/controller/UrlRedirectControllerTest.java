@@ -83,7 +83,7 @@ class UrlRedirectControllerTest {
         when(clickRequestResolver.resolve(any())).thenReturn(CLICK);
         when(urlService.redirectResultUrl("abc", CLICK))
                 .thenReturn(new LinkWarningView(LinkWarningTemplates.engine(), "https://hrva.cc", "abc", "https://xdvqnxj.com/login",
-                        "https://xdvqnxj.com/login"));
+                        "https://xdvqnxj.com/login", false));
 
         mockMvc.perform(get("/abc"))
                 .andExpect(status().isOk())

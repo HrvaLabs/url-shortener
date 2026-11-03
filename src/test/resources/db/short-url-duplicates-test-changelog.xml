@@ -51,5 +51,6 @@
     <include file="classpath:/db/changelog/032-custom-domains.xml"/>
     <include file="classpath:/db/changelog/035-warning-page.xml"/>
     <include file="classpath:/db/changelog/043-url-opens.xml"/>
+    <include file="classpath:/db/changelog/047-review-warning-page.xml"/>
 
 </databaseChangeLog>

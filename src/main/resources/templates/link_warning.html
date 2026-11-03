@@ -43,7 +43,8 @@
     <div class="card">
       <h1>This link was made without an account. It goes to:</h1>
       <p class="destination" style="overflow-wrap:anywhere" th:text="${destination}">https://example.com</p>
-      <p class="note">The site is new or its name looks machine-made. Continue only if this is the address you expected.</p>
+      <p class="note" th:if="${inReview}">hrva.cc is checking this link. Continue only if this is the address you expected.</p>
+      <p class="note" th:unless="${inReview}">The site is new or its name looks machine-made. Continue only if this is the address you expected.</p>
       <p class="note" th:if="${plainSpelling}" th:text="'This address uses letters outside A to Z. Its plain spelling is ' + ${plainSpelling} + '.'">This address uses letters outside A to Z.</p>
       <p class="actions"><a th:href="${location}" rel="nofollow" class="continue" th:text="'Continue to ' + ${host}">Continue to example.com</a></p>
       <p><a th:href="${reportUrl}" class="report">Report this link</a></p>

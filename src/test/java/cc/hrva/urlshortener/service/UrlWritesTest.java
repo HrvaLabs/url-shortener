@@ -1,6 +1,7 @@
 package cc.hrva.urlshortener.service;
 
 import cc.hrva.urlshortener.configuration.ClockConfiguration;
+import cc.hrva.urlshortener.service.moderation.ReviewWarningPage;
 import java.time.Instant;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -206,6 +207,9 @@ class UrlWritesTest {
 
     @MockitoBean
     private CustomDomainModeration customDomainModeration;
+
+    @MockitoBean
+    private ReviewWarningPage reviewWarningPage;
 
     @BeforeEach
     void visitTheLinkRightAfterTheWriteTransactionReadsIt() {

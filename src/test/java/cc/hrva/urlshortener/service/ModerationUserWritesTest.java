@@ -24,6 +24,7 @@ import cc.hrva.urlshortener.service.bio.BioAccountData;
 import cc.hrva.urlshortener.service.domain.CustomDomainAccountData;
 import cc.hrva.urlshortener.service.domain.CustomDomainModeration;
 import cc.hrva.urlshortener.service.domain.UrlCache;
+import cc.hrva.urlshortener.service.moderation.ReviewWarningPage;
 import cc.hrva.urlshortener.service.notification.NotificationAccountData;
 import cc.hrva.urlshortener.service.impl.DefaultModerationService;
 import cc.hrva.urlshortener.service.impl.DefaultSendingEmailService;
@@ -180,6 +181,9 @@ class ModerationUserWritesTest {
 
     @MockitoBean
     private ScammerSignalService scammerSignalService;
+
+    @MockitoBean
+    private ReviewWarningPage reviewWarningPage;
 
     @BeforeEach
     void changeTheAccountRightAfterModerationLoadsIt() {

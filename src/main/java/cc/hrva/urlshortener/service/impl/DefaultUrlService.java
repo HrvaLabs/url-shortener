@@ -1142,7 +1142,7 @@ public class DefaultUrlService implements UrlService {
         final var location = redirectLocation(link.id(), withForwardedQuery(link, click));
         if (showsWarningPage(place, link)) {
             log.info("Warning page shown urlId={}", link.id());
-            return new LinkWarningView(templateEngine, appProperties.getFrontendUrl(), place.alias(), link.longUrl(), location);
+            return new LinkWarningView(templateEngine, appProperties.getFrontendUrl(), place.alias(), link.longUrl(), location, waitsForReview(link));
         }
         return redirectTo(location);
     }
@@ -1161,7 +1161,12 @@ public class DefaultUrlService implements UrlService {
     }
 
     private boolean showsWarningPage(final LinkPlace place, final UrlResponse link) {
-        return place.domainId() == null && Boolean.TRUE.equals(link.warningPage()) && settingsService.isOn(SettingKey.WARNING_PAGE);
+        return place.domainId() == null && Boolean.TRUE.equals(link.warningPage()) && settingsService.isOn(SettingKey.WARNING_PAGE)
+                && (!waitsForReview(link) || settingsService.isOn(SettingKey.REVIEW_WARNING_PAGE));
+    }
+
+    private static boolean waitsForReview(final UrlResponse link) {
+        return Boolean.TRUE.equals(link.warningPageForReview());
     }
 
     private static String redirectLocation(final Long urlId, final String longUrl) {
@@ -1376,6 +1381,7 @@ public class DefaultUrlService implements UrlService {
     private Optional<Url> equivalentAnonymousLink(final Url url, final boolean warningPage) {
         return urlRepository.findByLongUrlAndActiveTrueAndOwnerIsNull(url.getLongUrl()).stream()
                 .filter(candidate -> candidate.isWarningPage() == warningPage)
+                .filter(candidate -> !candidate.isWarningPageForReview())
                 .filter(candidate -> Objects.equals(candidate.getExpirationDate(), url.getExpirationDate()))
                 .filter(candidate -> Objects.equals(candidate.getVisitLimit(), url.getVisitLimit()))
                 .filter(candidate -> !isExpired(candidate.getExpirationDate()) && !hasReachedVisitLimit(candidate.getOpens(), candidate.getVisitLimit()))

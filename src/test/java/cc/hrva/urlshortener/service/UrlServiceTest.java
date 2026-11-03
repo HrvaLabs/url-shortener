@@ -9,6 +9,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -117,6 +118,7 @@ import org.springframework.transaction.support.TransactionOperations;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.servlet.view.RedirectView;
+import tools.jackson.databind.json.JsonMapper;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -1787,6 +1789,30 @@ class UrlServiceTest {
 
         assertThat(created.id()).isEqualTo(1L);
         assertThat(created.warningPage()).isNull();
+    }
+
+    @Test
+    void aNewIdenticalLinkDoesNotReuseALinkInReview() {
+        anonymousCreateOf(RANDOM_LINK, LinkVerdict.clean());
+        when(domainAgeService.registeredOn("xdvqnxj.com")).thenReturn(Optional.empty());
+        when(urlRepository.findByLongUrlAndActiveTrueAndOwnerIsNull(RANDOM_LINK)).thenReturn(List.of(
+                Url.builder().id(12L).shortUrl("v0DB3").longUrl(RANDOM_LINK).active(true).visits(0L).warningPage(true).warningPageForReview(true).build()));
+
+        final var created = createAnonymously(RANDOM_LINK);
+
+        assertThat(created.id()).isEqualTo(1L);
+    }
+
+    @Test
+    void aLinkWhoseReviewWarningOkClearedIsReusedAgain() {
+        when(createUrlToUrlConverter.convert(any(CreateUrlDto.class))).thenReturn(Url.builder().longUrl(LIMITED_LINK).build());
+        final var reviewedFine = candidate(12L, null, null, false);
+        when(urlRepository.findByLongUrlAndActiveTrueAndOwnerIsNull(LIMITED_LINK)).thenReturn(List.of(reviewedFine));
+
+        final var created = createAnonymously(LIMITED_LINK);
+
+        assertThat(created.id()).isEqualTo(12L);
+        assertThat(created.warningPageForReview()).isNull();
     }
 
     @Test
@@ -4682,6 +4708,78 @@ class UrlServiceTest {
         assertThat(locationOf(urlServiceWithMeters().redirectResultUrl("abc", CLICK))).isEqualTo(RANDOM_LINK);
         assertThat(locationOf(urlServiceWithMeters().redirectResultUrl("stored", CLICK))).isEqualTo(RANDOM_LINK);
         verify(clickAnalyticsService, times(2)).recordClick(5L, CLICK);
+    }
+
+    @Test
+    void aReviewWarningShowsTheCheckingPageCachedAndUncached() {
+        final var urls = new ConcurrentMapCacheManager("urls");
+        final var service = urlServiceCachingIn(urls);
+        when(appProperties.getFrontendUrl()).thenReturn(FRONTEND);
+        when(urlRepository.findServed(null, "abc"))
+                .thenReturn(Optional.of(storedLink().longUrl(RANDOM_LINK).active(true).warningPage(true).warningPageForReview(true).build()));
+
+        final var fromTheDatabase = service.redirectResultUrl("abc", CLICK);
+        final var fromTheCache = service.redirectResultUrl("abc", CLICK);
+
+        assertThat(fromTheDatabase).isInstanceOfSatisfying(LinkWarningView.class, page -> assertThat(page.inReview()).isTrue());
+        assertThat(fromTheCache).isEqualTo(fromTheDatabase);
+        assertThat(((UrlResponse) urls.getCache("urls").get("abc").get()).warningPageForReview()).isTrue();
+        verify(urlRepository, times(1)).findServed(null, "abc");
+        verify(clickAnalyticsService, times(2)).recordClick(5L, CLICK);
+    }
+
+    @Test
+    void aYoungDomainWarningIsNotTheCheckingPage() {
+        cachedWithTheWarningPage(RANDOM_LINK);
+        when(appProperties.getFrontendUrl()).thenReturn(FRONTEND);
+
+        assertThat(urlServiceWithMeters().redirectResultUrl("abc", CLICK))
+                .isInstanceOfSatisfying(LinkWarningView.class, page -> assertThat(page.inReview()).isFalse());
+    }
+
+    @Test
+    void theReviewSwitchOffSkipsOnlyTheReviewWarning() {
+        SettingsServiceFixtures.turnOff(settingsService, SettingKey.REVIEW_WARNING_PAGE);
+        when(appProperties.getFrontendUrl()).thenReturn(FRONTEND);
+        when(urlRepository.findServed(null, "review"))
+                .thenReturn(Optional.of(storedLink().shortUrl("review").longUrl(RANDOM_LINK).active(true).warningPage(true).warningPageForReview(true).build()));
+        when(urlRepository.findServed(null, "young"))
+                .thenReturn(Optional.of(storedLink().shortUrl("young").longUrl(RANDOM_LINK).active(true).warningPage(true).build()));
+
+        assertThat(locationOf(urlServiceWithMeters().redirectResultUrl("review", CLICK))).isEqualTo(RANDOM_LINK);
+        assertThat(urlServiceWithMeters().redirectResultUrl("young", CLICK)).isInstanceOf(LinkWarningView.class);
+    }
+
+    @Test
+    void theWarningPageSwitchOffSkipsTheReviewWarningToo() {
+        SettingsServiceFixtures.turnOff(settingsService, SettingKey.WARNING_PAGE);
+        when(urlRepository.findServed(null, "review"))
+                .thenReturn(Optional.of(storedLink().shortUrl("review").longUrl(RANDOM_LINK).active(true).warningPage(true).warningPageForReview(true).build()));
+
+        assertThat(locationOf(urlServiceWithMeters().redirectResultUrl("review", CLICK))).isEqualTo(RANDOM_LINK);
+    }
+
+    @Test
+    void aCachedEntryWithoutTheNewFieldStillRedirects() {
+        final var json = JsonMapper.builder().build();
+        when(objectMapper.convertValue(any(), eq(UrlResponse.class)))
+                .thenAnswer(invocation -> json.convertValue(invocation.getArgument(0), UrlResponse.class));
+        final var cache = org.mockito.Mockito.mock(org.springframework.cache.Cache.class);
+        when(cacheManager.getCache("urls")).thenReturn(cache);
+        final var plain = json.readValue("""
+                {"id":5,"longUrl":"https://example.com/a","shortUrl":"abc","visits":0,"active":true,"status":"ACTIVE","tags":[],\
+                "passwordProtected":false}""", LinkedHashMap.class);
+        final var young = json.readValue("""
+                {"id":5,"longUrl":"https://xdvqnxj.com/login","shortUrl":"young","visits":0,"active":true,"status":"ACTIVE","tags":[],\
+                "passwordProtected":false,"warningPage":true}""", LinkedHashMap.class);
+        when(cache.get("abc")).thenReturn(() -> plain);
+        when(cache.get("young")).thenReturn(() -> young);
+        when(appProperties.getFrontendUrl()).thenReturn(FRONTEND);
+
+        assertThat(locationOf(urlServiceWithMeters().redirectResultUrl("abc", CLICK))).isEqualTo("https://example.com/a");
+        assertThat(urlServiceWithMeters().redirectResultUrl("young", CLICK))
+                .isInstanceOfSatisfying(LinkWarningView.class, page -> assertThat(page.inReview()).isFalse());
+        verify(urlRepository, never()).findServed(any(), anyString());
     }
 
     @Test

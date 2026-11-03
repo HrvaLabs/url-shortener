@@ -13,6 +13,7 @@ import cc.hrva.urlshortener.service.ReviewQueueService;
 import cc.hrva.urlshortener.service.ScammerSignalService;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent;
 import cc.hrva.urlshortener.service.alert.AlertedLink;
+import cc.hrva.urlshortener.service.moderation.ReviewWarningPage;
 import cc.hrva.urlshortener.util.DomainNames;
 import cc.hrva.urlshortener.util.ReviewReasons;
 import cc.hrva.urlshortener.util.SortWhitelist;
@@ -58,6 +59,7 @@ public class DefaultReviewQueueService implements ReviewQueueService {
     private final ScammerSignalService scammerSignalService;
     private final Clock clock;
     private final ApplicationEventPublisher eventPublisher;
+    private final ReviewWarningPage reviewWarningPage;
 
     @Override
     @Transactional
@@ -104,6 +106,7 @@ public class DefaultReviewQueueService implements ReviewQueueService {
                 .systemFlagged(systemFlagged)
                 .build());
         log.info("Link queued for review urlId={}", url.getId());
+        reviewWarningPage.showWhileInReview(url);
     }
 
     private boolean reviewedFineFor(final Url url, final List<String> incoming) {

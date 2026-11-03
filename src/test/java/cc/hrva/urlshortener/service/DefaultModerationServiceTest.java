@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.service;
 
+import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.dto.DomainBlockPreviewResponse;
 import cc.hrva.urlshortener.dto.DomainBulkBlockResponse;
 import cc.hrva.urlshortener.dto.DomainRuleDto;
@@ -43,6 +44,8 @@ import cc.hrva.urlshortener.service.domain.CustomDomainModeration;
 import cc.hrva.urlshortener.service.domain.LifecycleOutcome;
 import cc.hrva.urlshortener.service.domain.UrlCache;
 import cc.hrva.urlshortener.service.impl.DefaultModerationService;
+import cc.hrva.urlshortener.service.moderation.ReviewWarningPage;
+import cc.hrva.urlshortener.service.settings.SettingsServiceFixtures;
 import cc.hrva.urlshortener.util.ReviewReasons;
 import java.time.Clock;
 import java.time.Instant;
@@ -252,9 +255,11 @@ class DefaultModerationServiceTest {
         lenient().when(linkCheckService.isBlockedByRule(anyString())).thenReturn(true);
         final var domainModeration = new CustomDomainModeration(customDomainRepository, customDomainLifecycle, linkCheckService, sendingEmailService, eventPublisher,
                 transactions, Clock.fixed(Instant.parse("2026-10-29T09:00:00Z"), ZoneOffset.UTC));
+        final var urlCache = new UrlCache(cacheManager, taskScheduler, Clock.systemUTC());
+        final var reviewWarningPage = new ReviewWarningPage(urlRepository, SettingsServiceFixtures.defaults(new AppProperties()), urlCache, transactions);
         moderationService = new DefaultModerationService(urlRepository, userRepository, domainRuleRepository, linkCheckService,
-                reviewQueueService, userService, sendingEmailService, auditLogService, new UrlCache(cacheManager, taskScheduler, Clock.systemUTC()), eventPublisher, transactions,
-                scammerSignalService, domainModeration, campaignRepository);
+                reviewQueueService, userService, sendingEmailService, auditLogService, urlCache, eventPublisher, transactions,
+                scammerSignalService, domainModeration, campaignRepository, reviewWarningPage);
     }
 
     @Test
@@ -1408,6 +1413,67 @@ class DefaultModerationServiceTest {
         assertThat(url.isActive()).isTrue();
         assertThat(rules).isEmpty();
         verify(auditLogService).log(ADMIN, AuditAction.RESOLVE_REVIEW, "Url", "60", "action: OK, links: 0, via: admin");
+    }
+
+    @Test
+    void okRemovesAReviewWarning() {
+        final var url = inReviewWithTheWarningPage(62L, "https://utn.pl/r");
+
+        moderationService.resolveReview(62L, ReviewAction.OK, null, ADMIN, "admin");
+
+        assertThat(url).extracting(Url::isActive, Url::isWarningPage, Url::isWarningPageForReview).containsExactly(true, false, false);
+        verify(reviewQueueService).resolveOpen(url, ReviewResolution.OK, ADMIN);
+        verify(auditLogService).log(ADMIN, AuditAction.RESOLVE_REVIEW, "Url", "62", "action: OK, warningPage: cleared, links: 0, via: admin");
+        assertThat(outOfPlace).isEmpty();
+    }
+
+    @Test
+    void okKeepsAYoungDomainWarning() {
+        final var url = flaggedLink(63L, "https://xdvqnxj.com/login");
+
+        moderationService.resolveReview(63L, ReviewAction.OK, null, ADMIN, "admin");
+
+        assertThat(url).extracting(Url::isWarningPage, Url::isWarningPageForReview).containsExactly(true, false);
+        verify(urlRepository, never()).save(any(Url.class));
+        verify(auditLogService).log(ADMIN, AuditAction.RESOLVE_REVIEW, "Url", "63", "action: OK, links: 0, via: admin");
+    }
+
+    @Test
+    void okEvictsTheCachedRedirect() {
+        inReviewWithTheWarningPage(62L, "https://utn.pl/r");
+        final var eviction = ArgumentCaptor.forClass(Runnable.class);
+
+        moderationService.resolveReview(62L, ReviewAction.OK, null, ADMIN, "admin");
+
+        verify(cache).evict("s62");
+        verify(taskScheduler).schedule(eviction.capture(), any(Instant.class));
+        eviction.getValue().run();
+        verify(cache, times(2)).evict("s62");
+        assertThat(outOfPlace).isEmpty();
+    }
+
+    @Test
+    void blockingResolvesWithoutTouchingTheFlags() {
+        final var url = inReviewWithTheWarningPage(64L, "https://utn.pl/b");
+
+        moderationService.resolveReview(64L, ReviewAction.BLOCK_LINK, null, ADMIN, "admin");
+
+        assertThat(url).extracting(Url::isActive, Url::isWarningPage, Url::isWarningPageForReview).containsExactly(false, true, true);
+        verify(reviewQueueService, atLeastOnce()).resolveOpen(url, ReviewResolution.LINK_BLOCKED, ADMIN);
+    }
+
+    @Test
+    void clearWarningPageAndTrustDomainClearBothFlags() {
+        final var cleared = inReviewWithTheWarningPage(65L, "https://utn.pl/c");
+        final var trusted = inReviewWithTheWarningPage(66L, "https://radarkobiet.pl/t");
+        when(reviewQueueService.open(any(Pageable.class), isNull())).thenReturn(new PageImpl<>(List.of(review(trusted))));
+
+        moderationService.clearWarningPage(65L, ADMIN);
+        moderationService.resolveReview(66L, ReviewAction.TRUST_DOMAIN, null, ADMIN, "admin");
+
+        assertThat(cleared).extracting(Url::isWarningPage, Url::isWarningPageForReview).containsExactly(false, false);
+        assertThat(trusted).extracting(Url::isWarningPage, Url::isWarningPageForReview).containsExactly(false, false);
+        verify(auditLogService).log(ADMIN, AuditAction.CLEAR_WARNING_PAGE, "Url", "65", "shortUrl: s65, links: 1");
     }
 
     @Test
@@ -2729,6 +2795,12 @@ class DefaultModerationServiceTest {
     private Url link(final long id, final String longUrl, final User owner) {
         final var url = Url.builder().id(id).shortUrl("s" + id).longUrl(longUrl).owner(owner).active(true).build();
         links.put(id, url);
+        return url;
+    }
+
+    private Url inReviewWithTheWarningPage(final long id, final String longUrl) {
+        final var url = flaggedLink(id, longUrl);
+        url.setWarningPageForReview(true);
         return url;
     }
 

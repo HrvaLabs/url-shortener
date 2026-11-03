@@ -351,6 +351,49 @@ class UrlResponseTest {
         assertThat(mapper.convertValue(serializer.deserialize(legacyJson.getBytes()), UrlResponse.class).warningPage()).isNull();
     }
 
+    @Test
+    void aReviewWarningCarriesItsReason() {
+        final var inReview = UrlResponse.from(baseUrl().active(true).warningPage(true).warningPageForReview(true).build());
+        final var young = UrlResponse.from(baseUrl().active(true).warningPage(true).build());
+
+        assertThat(inReview.warningPageForReview()).isTrue();
+        assertThat(young.warningPageForReview()).isNull();
+        assertThat(JsonMapper.builder().build().writeValueAsString(inReview)).contains("\"warningPageForReview\":true");
+        assertThat(JsonMapper.builder().build().writeValueAsString(young)).doesNotContain("warningPageForReview");
+        assertThat(inReview.withModeration(true, false, null).warningPageForReview()).isTrue();
+        assertThat(inReview.withShortLink("https://hrva.cc/abc").warningPageForReview()).isTrue();
+    }
+
+    @Test
+    void thePublicViewAndTheCreateAnswerLeaveTheReviewWarningOut() {
+        final var inReview = UrlResponse.from(baseUrl().active(true).warningPage(true).warningPageForReview(true).build());
+
+        assertThat(inReview.publicView().warningPageForReview()).isNull();
+        assertThat(inReview.asCreated().warningPageForReview()).isNull();
+    }
+
+    @Test
+    void theReviewWarningSurvivesTheRedisRoundTrip() {
+        final var mapper = JsonMapper.builder().build();
+        final var serializer = new GenericJacksonJsonRedisSerializer(mapper);
+        final var response = UrlResponse.from(baseUrl().active(true).warningPage(true).warningPageForReview(true).build());
+
+        assertThat(mapper.convertValue(serializer.deserialize(serializer.serialize(response)), UrlResponse.class)).isEqualTo(response);
+    }
+
+    @Test
+    void aResponseCachedBeforeTheReviewWarningExistedKeepsItsWarningPage() {
+        final var mapper = JsonMapper.builder().build();
+        final var serializer = new GenericJacksonJsonRedisSerializer(mapper);
+        final var legacyJson = "{\"id\":1,\"longUrl\":\"https://example.com\",\"shortUrl\":\"abc\",\"visits\":5,"
+                + "\"active\":true,\"status\":\"ACTIVE\",\"tags\":[],\"passwordProtected\":false,\"ownerEmail\":null,\"warningPage\":true}";
+
+        final var cached = mapper.convertValue(serializer.deserialize(legacyJson.getBytes()), UrlResponse.class);
+
+        assertThat(cached.warningPage()).isTrue();
+        assertThat(cached.warningPageForReview()).isNull();
+    }
+
     private static CustomDomain goExampleCom() {
         return CustomDomain.builder().id(7L).hostname("go.example.com").build();
     }

@@ -13,7 +13,8 @@ import org.springframework.web.servlet.View;
 import org.thymeleaf.TemplateEngine;
 import org.thymeleaf.context.Context;
 
-public record LinkWarningView(TemplateEngine templateEngine, String frontendUrl, String alias, String destination, String location) implements View {
+public record LinkWarningView(TemplateEngine templateEngine, String frontendUrl, String alias, String destination, String location,
+                              boolean inReview) implements View {
 
     private static final String TEMPLATE = "link_warning";
     private static final String CONTENT_TYPE = "text/html;charset=UTF-8";
@@ -55,6 +56,7 @@ public record LinkWarningView(TemplateEngine templateEngine, String frontendUrl,
         context.setVariable("location", location);
         context.setVariable("host", host());
         context.setVariable("plainSpelling", plainSpelling());
+        context.setVariable("inReview", inReview);
         context.setVariable("reportUrl", reportUrl());
         context.setVariable("homeUrl", frontendUrl);
         return context;

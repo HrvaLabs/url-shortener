@@ -77,6 +77,27 @@ class LinkWarningViewTest {
     }
 
     @Test
+    void theWarningPageSaysTheLinkIsBeingChecked() throws Exception {
+        final var body = render(inReview("https://radarkobiet.pl/", "https://radarkobiet.pl/"), "GET").getContentAsString();
+
+        assertThat(body)
+                .contains("<h1>This link was made without an account. It goes to:</h1>")
+                .contains("<p class=\"note\">hrva.cc is checking this link. Continue only if this is the address you expected.</p>")
+                .doesNotContain("The site is new or its name looks machine-made.")
+                .contains("<a href=\"https://radarkobiet.pl/\" rel=\"nofollow\" class=\"continue\">Continue to radarkobiet.pl</a>")
+                .contains("<a href=\"https://hrva.cc/report?s=abc\" class=\"report\">Report this link</a>");
+    }
+
+    @Test
+    void theYoungDomainNoteIsUnchanged() throws Exception {
+        final var body = render(page("https://xdvqnxj.com/login", "https://xdvqnxj.com/login"), "GET").getContentAsString();
+
+        assertThat(body)
+                .contains("<p class=\"note\">The site is new or its name looks machine-made. Continue only if this is the address you expected.</p>")
+                .doesNotContain("hrva.cc is checking this link.");
+    }
+
+    @Test
     void thePageHasNoScriptAndNoExternalResource() throws Exception {
         final var body = render(page("https://xdvqnxj.com/login", "https://xdvqnxj.com/login"), "GET").getContentAsString();
 
@@ -122,13 +143,17 @@ class LinkWarningViewTest {
 
     @Test
     void theAliasIsEncodedInTheReportLink() throws Exception {
-        final var view = new LinkWarningView(LinkWarningTemplates.engine(), FRONTEND, "a b&c", "https://xdvqnxj.com/", "https://xdvqnxj.com/");
+        final var view = new LinkWarningView(LinkWarningTemplates.engine(), FRONTEND, "a b&c", "https://xdvqnxj.com/", "https://xdvqnxj.com/", false);
 
         assertThat(render(view, "GET").getContentAsString()).contains("href=\"https://hrva.cc/report?s=a+b%26c\"");
     }
 
     private static LinkWarningView page(final String destination, final String location) {
-        return new LinkWarningView(LinkWarningTemplates.engine(), FRONTEND, "abc", destination, location);
+        return new LinkWarningView(LinkWarningTemplates.engine(), FRONTEND, "abc", destination, location, false);
+    }
+
+    private static LinkWarningView inReview(final String destination, final String location) {
+        return new LinkWarningView(LinkWarningTemplates.engine(), FRONTEND, "abc", destination, location, true);
     }
 
     private static MockHttpServletResponse render(final LinkWarningView view, final String method) throws Exception {

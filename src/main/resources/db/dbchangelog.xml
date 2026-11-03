@@ -52,5 +52,6 @@
     <include file="classpath:/db/changelog/044-link-destination-changes.xml"/>
     <include file="classpath:/db/changelog/045-domain-requests.xml"/>
     <include file="classpath:/db/changelog/046-domain-removed-by-admin.xml"/>
+    <include file="classpath:/db/changelog/047-review-warning-page.xml"/>
 
 </databaseChangeLog>

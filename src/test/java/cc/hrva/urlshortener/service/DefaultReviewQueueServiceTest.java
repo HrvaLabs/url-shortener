@@ -15,6 +15,7 @@ import cc.hrva.urlshortener.repository.specification.LinkReviewSpecification;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent;
 import cc.hrva.urlshortener.service.alert.AlertedLink;
 import cc.hrva.urlshortener.service.impl.DefaultReviewQueueService;
+import cc.hrva.urlshortener.service.moderation.ReviewWarningPage;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -74,6 +75,9 @@ class DefaultReviewQueueServiceTest {
     @Mock
     private ApplicationEventPublisher eventPublisher;
 
+    @Mock
+    private ReviewWarningPage reviewWarningPage;
+
     private final Clock clock = Clock.fixed(Instant.parse("2026-10-21T10:00:00Z"), ZoneOffset.UTC);
 
     private ReviewQueueService reviewQueueService;
@@ -82,7 +86,7 @@ class DefaultReviewQueueServiceTest {
 
     @BeforeEach
     void setUp() {
-        reviewQueueService = new DefaultReviewQueueService(linkReviewRepository, urlRepository, scammerSignalService, clock, eventPublisher);
+        reviewQueueService = new DefaultReviewQueueService(linkReviewRepository, urlRepository, scammerSignalService, clock, eventPublisher, reviewWarningPage);
         lenient().when(urlRepository.findById(287L)).thenReturn(Optional.of(url));
     }
 
@@ -117,6 +121,39 @@ class DefaultReviewQueueServiceTest {
         assertThat(saved.getValue().getReasons()).isEqualTo(YOUNG + "\n" + LURE);
         assertThat(saved.getValue().getResolvedAt()).isNull();
         assertThat(saved.getValue().isSystemFlagged()).isTrue();
+    }
+
+    @Test
+    void anAnonymousLinkGetsTheWarningPageWhenItsReviewOpens() {
+        final var reported = Url.builder().id(288L).shortUrl("r3P0t").longUrl("https://utn.pl/x").active(true).build();
+
+        reviewQueueService.flag(url, List.of(YOUNG));
+        reviewQueueService.report(reported, ReportCategory.PHISHING, "asks for my bank login");
+
+        verify(reviewWarningPage).showWhileInReview(url);
+        verify(reviewWarningPage).showWhileInReview(reported);
+    }
+
+    @Test
+    void extendingAnOpenReviewChangesNothing() {
+        final var open = LinkReview.builder().id(1L).url(url).reasons(YOUNG).systemFlagged(true).flaggedAt(LocalDateTime.now()).build();
+        when(linkReviewRepository.findFirstByUrlAndResolvedAtIsNullOrderByFlaggedAtDesc(url)).thenReturn(Optional.of(open));
+
+        reviewQueueService.flag(url, List.of(YOUNG, LURE));
+        reviewQueueService.report(url, ReportCategory.PHISHING, "asks for my bank login");
+
+        verifyNoInteractions(reviewWarningPage);
+    }
+
+    @Test
+    void aFlagThatAnOkAlreadyCoveredOpensNoReviewAndNoWarningPage() {
+        final var reviewedFine = LinkReview.builder().id(1L).url(url).reasons(YOUNG).resolution(ReviewResolution.OK).flaggedAt(LocalDateTime.now())
+                .resolvedAt(LocalDateTime.now()).build();
+        when(linkReviewRepository.findFirstByUrlOrderByFlaggedAtDesc(url)).thenReturn(Optional.of(reviewedFine));
+
+        reviewQueueService.flag(url, List.of(YOUNG));
+
+        verifyNoInteractions(reviewWarningPage);
     }
 
     @Test

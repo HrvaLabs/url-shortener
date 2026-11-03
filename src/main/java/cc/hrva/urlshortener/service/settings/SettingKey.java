@@ -98,6 +98,8 @@ public enum SettingKey {
     WARNING_PAGE_MAX_AGE_DAYS(SettingGroup.SAFETY, "Warning page: maximum domain age",
             "Domains with a known registration date younger than this get the page. Random-looking domains use the random-looking age.",
             WARNING_PAGE, 30, 3650, "days"),
+    REVIEW_WARNING_PAGE(SettingGroup.SAFETY, "Warning page while a link without an account waits for review",
+            "Links without an account show the warning page while their review is open. Resolving the review as OK removes it.", WARNING_PAGE, true),
     HUMAN_CHECK(SettingGroup.SAFETY, "Human check on links without an account",
             "A Cloudflare Turnstile check on the homepage, /qr, /utm and /share.", null, true),
     ANONYMOUS_EXPIRY_DAYS(SettingGroup.ACCESS, "Expiry for links without an account",
