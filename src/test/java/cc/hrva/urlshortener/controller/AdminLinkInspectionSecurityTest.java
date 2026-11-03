@@ -309,6 +309,7 @@ class AdminLinkInspectionSecurityTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.state").value("PENDING"))
                 .andExpect(jsonPath("$.submittedAt").value("2026-11-03T10:00:00Z"))
+                .andExpect(jsonPath("$.reportUrl").value(org.hamcrest.Matchers.nullValue()))
                 .andExpect(jsonPath("$.configured").value(true));
 
         assertThat(jdbcTemplate.queryForMap("select vt_state, vt_requested_at from link_inspection where url_id = ?", LINK))

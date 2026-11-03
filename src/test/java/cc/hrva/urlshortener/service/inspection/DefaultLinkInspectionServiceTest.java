@@ -327,7 +327,7 @@ class DefaultLinkInspectionServiceTest {
     }
 
     @Test
-    void theReportLinkPointsAtTheReportOrASearch() {
+    void theReportLinkOnlyExistsWithAReport() {
         verdict(LINK, "DONE", REPORT_ID, 0);
         jdbcTemplate.update("insert into link_inspection (url_id, vt_state, vt_requested_at, vt_checked_at, vt_url) values (?, 'NOT_FOUND', ?, ?, ?)",
                 OTHER_LINK, NOW_UTC, NOW_UTC, "https://njuskaio.cam/a/MAUB3?x=1&y=2");
@@ -335,8 +335,11 @@ class DefaultLinkInspectionServiceTest {
         assertThat(linkInspectionService.inspection(LINK).virusTotal().reportUrl()).isEqualTo("https://www.virustotal.com/gui/url/" + REPORT_ID);
         assertThat(linkInspectionService.inspection(OTHER_LINK).virusTotal())
                 .extracting(VirusTotalView::state, VirusTotalView::checkedUrl, VirusTotalView::reportUrl)
-                .containsExactly(InspectionState.NOT_FOUND, "https://njuskaio.cam/a/MAUB3?x=1&y=2",
-                        "https://www.virustotal.com/gui/search/https%3A%2F%2Fnjuskaio.cam%2Fa%2FMAUB3%3Fx%3D1%26y%3D2");
+                .containsExactly(InspectionState.NOT_FOUND, "https://njuskaio.cam/a/MAUB3?x=1&y=2", null);
+        assertThat(VirusTotalView.of(InspectionState.PENDING, LONG_URL, null, null, null, null, null, null, null, NOW_UTC, null, true).reportUrl())
+                .isNull();
+        assertThat(VirusTotalView.of(InspectionState.FAILED, LONG_URL, null, null, null, null, null, null, NOW_UTC, null, "VirusTotal didn't answer.", true)
+                .reportUrl()).isNull();
     }
 
     @Test
