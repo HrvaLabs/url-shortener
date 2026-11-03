@@ -278,8 +278,8 @@ class SettingValuesTest {
         assertThat(SettingKey.LINK_SCREENSHOTS).extracting(SettingKey::getGroup, SettingKey::getType, SettingKey::getLabel, SettingKey::getDescription,
                         SettingKey::getParent, SettingKey::isSafety)
                 .containsExactly(SettingGroup.SAFETY, SettingType.SWITCH, "Screenshots of links in review",
-                        "Cloudflare opens each link that enters the review queue and takes one phone-sized screenshot, kept 7 days. "
-                                + "Needs CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_BROWSER_API_TOKEN on the server.", null, true);
+                        "Cloudflare opens each link that enters the review queue and takes one phone-sized screenshot. The nightly cleanup deletes "
+                                + "a screenshot once it's 7 days old. Needs CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_BROWSER_API_TOKEN on the server.", null, true);
         assertThat(SettingKey.values()[SettingKey.values().length - 2]).isEqualTo(SettingKey.LINK_SCREENSHOTS);
         final var appProperties = new AppProperties();
         final var defaults = new SettingDefaults(appProperties, SettingsServiceFixtures.bothProviders());
