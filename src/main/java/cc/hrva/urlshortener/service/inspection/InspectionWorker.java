@@ -127,6 +127,14 @@ public class InspectionWorker {
         }
     }
 
+    public Optional<Instant> screenshotsPausedUntil() {
+        return pausedAfterNow(pausedUntil);
+    }
+
+    public Optional<Instant> virusTotalPausedUntil() {
+        return pausedAfterNow(virusTotalPausedUntil);
+    }
+
     void resume() {
         pausedUntil.set(Instant.MIN);
         failedBefore.set(null);
@@ -362,6 +370,11 @@ public class InspectionWorker {
 
     private static void forgetFailureUnlessHead(final AtomicReference<Attempt> failure, final Optional<Attempt> head) {
         failure.updateAndGet(previous -> head.filter(attempt -> attempt.equals(previous)).orElse(null));
+    }
+
+    private Optional<Instant> pausedAfterNow(final AtomicReference<Instant> pause) {
+        final var until = pause.get();
+        return until.isAfter(clock.instant()) ? Optional.of(until) : Optional.empty();
     }
 
     private Instant nextMidnightUtc() {

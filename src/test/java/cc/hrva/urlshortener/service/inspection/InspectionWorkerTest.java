@@ -287,6 +287,30 @@ class InspectionWorkerTest {
     }
 
     @Test
+    void thePausesAreReadableUntilTheyEnd() {
+        clock.set(Instant.parse("2026-11-03T22:15:00Z"));
+        pending(LINK, NOW_UTC, "QUEUE");
+        vtPending(OTHER_LINK, NOW_UTC);
+        chainChecked(OTHER_LINK, null);
+        when(browserRunClient.snapshot(anyString())).thenReturn(PageSnapshot.dailyLimit());
+        when(virusTotalClient.lookup(anyString())).thenReturn(VirusTotalReport.unavailable("VirusTotal didn't answer."));
+
+        assertThat(inspectionWorker.screenshotsPausedUntil()).isEmpty();
+        assertThat(inspectionWorker.virusTotalPausedUntil()).isEmpty();
+
+        inspectionWorker.takeNextScreenshot();
+        inspectionWorker.lookUpNextOnVirusTotal();
+
+        assertThat(inspectionWorker.screenshotsPausedUntil()).contains(Instant.parse("2026-11-04T00:00:00Z"));
+        assertThat(inspectionWorker.virusTotalPausedUntil()).contains(Instant.parse("2026-11-03T22:16:00Z"));
+
+        clock.set(Instant.parse("2026-11-03T22:16:00Z"));
+        assertThat(inspectionWorker.virusTotalPausedUntil()).isEmpty();
+        clock.set(Instant.parse("2026-11-04T00:00:00Z"));
+        assertThat(inspectionWorker.screenshotsPausedUntil()).isEmpty();
+    }
+
+    @Test
     void rateLimitWaitsForRetryAfter() {
         pending(LINK, NOW_UTC, "QUEUE");
         when(browserRunClient.snapshot(anyString())).thenReturn(PageSnapshot.rateLimited(Duration.ofSeconds(30)));

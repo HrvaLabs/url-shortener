@@ -6,13 +6,19 @@ import cc.hrva.urlshortener.dto.stats.RequestCounts;
 import cc.hrva.urlshortener.service.domain.UrlCache;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
+import java.lang.management.GarbageCollectorMXBean;
 import java.lang.management.ManagementFactory;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
+import java.util.Optional;
+import java.util.OptionalDouble;
 import java.util.concurrent.TimeUnit;
 import lombok.RequiredArgsConstructor;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -25,6 +31,24 @@ public class RuntimeMetrics {
 
     private final MeterRegistry meterRegistry;
     private final UrlCache urlCache;
+    private volatile Duration startup;
+
+    @EventListener
+    public void ready(final ApplicationReadyEvent event) {
+        startup = event.getTimeTaken();
+    }
+
+    public Optional<Duration> startup() {
+        return Optional.ofNullable(startup);
+    }
+
+    public OptionalDouble gcPauseMillis() {
+        final var times = ManagementFactory.getGarbageCollectorMXBeans().stream()
+                .mapToLong(GarbageCollectorMXBean::getCollectionTime)
+                .filter(milliseconds -> milliseconds >= 0)
+                .toArray();
+        return times.length == 0 ? OptionalDouble.empty() : OptionalDouble.of(Arrays.stream(times).sum());
+    }
 
     public List<RedirectTiming> redirectTimings() {
         return REDIRECT_SOURCES.stream().map(this::redirectTiming).toList();

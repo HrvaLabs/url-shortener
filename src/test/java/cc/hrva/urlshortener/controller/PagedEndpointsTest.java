@@ -24,6 +24,7 @@ import cc.hrva.urlshortener.security.SessionToken;
 import cc.hrva.urlshortener.security.TokenProvider;
 import cc.hrva.urlshortener.service.AdminBioPageService;
 import cc.hrva.urlshortener.service.AdminService;
+import cc.hrva.urlshortener.service.SystemStatusService;
 import cc.hrva.urlshortener.service.ApiKeyService;
 import cc.hrva.urlshortener.service.AuditLogService;
 import cc.hrva.urlshortener.service.BioPageReviewService;
@@ -150,6 +151,9 @@ class PagedEndpointsTest {
 
     @MockitoBean
     private LoginAttemptService loginAttemptService;
+
+    @MockitoBean
+    private SystemStatusService systemStatusService;
 
     @MockitoBean
     private DestinationChangeService destinationChangeService;

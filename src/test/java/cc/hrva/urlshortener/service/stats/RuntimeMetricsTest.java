@@ -6,9 +6,14 @@ import cc.hrva.urlshortener.dto.stats.RequestCounts;
 import cc.hrva.urlshortener.service.domain.UrlCache;
 import io.micrometer.core.instrument.Timer;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import java.lang.management.GarbageCollectorMXBean;
+import java.lang.management.ManagementFactory;
 import java.time.Clock;
 import java.time.Duration;
 import org.junit.jupiter.api.Test;
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.cache.concurrent.ConcurrentMapCacheManager;
 import org.springframework.scheduling.TaskScheduler;
 
@@ -79,6 +84,28 @@ class RuntimeMetricsTest {
 
     private void request(final String uri, final String outcome) {
         Timer.builder("http.server.requests").tags("uri", uri, "outcome", outcome).register(meterRegistry).record(Duration.ofMillis(5));
+    }
+
+    @Test
+    void theStartupTimeIsKnownOnceTheAppIsReady() {
+        final var runtimeMetrics = runtimeMetrics();
+
+        assertThat(runtimeMetrics.startup()).isEmpty();
+
+        runtimeMetrics.ready(new ApplicationReadyEvent(new SpringApplication(), new String[0], mock(ConfigurableApplicationContext.class),
+                Duration.ofMillis(25_512)));
+
+        assertThat(runtimeMetrics.startup()).contains(Duration.ofMillis(25_512));
+    }
+
+    @Test
+    void garbageCollectionTimeIsTheSumOverTheCollectors() {
+        final var expected = ManagementFactory.getGarbageCollectorMXBeans().stream()
+                .mapToLong(GarbageCollectorMXBean::getCollectionTime)
+                .filter(milliseconds -> milliseconds >= 0)
+                .sum();
+
+        assertThat(runtimeMetrics().gcPauseMillis().orElseThrow()).isGreaterThanOrEqualTo(expected);
     }
 
     private RuntimeMetrics runtimeMetrics() {

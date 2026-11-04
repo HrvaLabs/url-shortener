@@ -3,9 +3,11 @@ package cc.hrva.urlshortener.controller;
 import cc.hrva.urlshortener.audit.Audited;
 import cc.hrva.urlshortener.dto.AdminStatsResponse;
 import cc.hrva.urlshortener.dto.LoginAttemptResponse;
+import cc.hrva.urlshortener.dto.SystemStatusResponse;
 import cc.hrva.urlshortener.model.enums.AuditAction;
 import cc.hrva.urlshortener.service.AdminService;
 import cc.hrva.urlshortener.service.LoginAttemptService;
+import cc.hrva.urlshortener.service.SystemStatusService;
 import io.swagger.v3.oas.annotations.Hidden;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -30,16 +32,26 @@ public class AdminController {
 
     private final AdminService adminService;
     private final LoginAttemptService loginAttemptService;
+    private final SystemStatusService systemStatusService;
 
-    public AdminController(final AdminService adminService, final LoginAttemptService loginAttemptService) {
+    public AdminController(final AdminService adminService, final LoginAttemptService loginAttemptService,
+                           final SystemStatusService systemStatusService) {
         this.adminService = adminService;
         this.loginAttemptService = loginAttemptService;
+        this.systemStatusService = systemStatusService;
     }
 
     @GetMapping("/stats")
     @Operation(summary = "Get admin dashboard stats", description = "Returns system-wide statistics. Requires ROLE_ADMIN.")
     public ResponseEntity<AdminStatsResponse> getDashboardStats() {
         return ResponseEntity.ok(adminService.getDashboardStats());
+    }
+
+    @GetMapping("/system-status")
+    @Operation(summary = "Get the system status", description = "Whether hrva.cc works right now: problems as sentences, the last hour of requests, "
+            + "the database, Redis, email, screenshots, VirusTotal, blocklists, the server and the scheduled jobs. Requires ROLE_ADMIN.")
+    public ResponseEntity<SystemStatusResponse> getSystemStatus() {
+        return ResponseEntity.ok(systemStatusService.status());
     }
 
     @Operation(summary = "Export all URLs as CSV", description = "Download all URLs as a CSV file. Requires ROLE_ADMIN.")

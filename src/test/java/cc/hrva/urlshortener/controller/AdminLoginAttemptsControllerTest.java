@@ -5,6 +5,7 @@ import cc.hrva.urlshortener.dto.LoginAttemptResponse;
 import cc.hrva.urlshortener.exception.InvalidSortException;
 import cc.hrva.urlshortener.service.AdminService;
 import cc.hrva.urlshortener.service.LoginAttemptService;
+import cc.hrva.urlshortener.service.SystemStatusService;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -37,11 +38,14 @@ class AdminLoginAttemptsControllerTest {
     @Mock
     private LoginAttemptService loginAttemptService;
 
+    @Mock
+    private SystemStatusService systemStatusService;
+
     private MockMvc mockMvc;
 
     @BeforeEach
     void setUp() {
-        mockMvc = MockMvcBuilders.standaloneSetup(new AdminController(adminService, loginAttemptService))
+        mockMvc = MockMvcBuilders.standaloneSetup(new AdminController(adminService, loginAttemptService, systemStatusService))
                 .setCustomArgumentResolvers(new PageableHandlerMethodArgumentResolver())
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .build();

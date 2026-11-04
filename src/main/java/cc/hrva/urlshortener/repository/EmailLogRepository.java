@@ -2,6 +2,7 @@ package cc.hrva.urlshortener.repository;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 import cc.hrva.urlshortener.model.EmailLog;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
@@ -15,6 +16,10 @@ public interface EmailLogRepository extends JpaRepository<EmailLog, Long>, JpaSp
     List<EmailLog> findByRecipientContainingIgnoreCase(String recipient);
     List<EmailLog> findAllByStatusAndCreatedAtBefore(String status, LocalDateTime createdBefore);
     List<EmailLog> findAllByBodyIsNotNullAndCreatedAtBefore(LocalDateTime createdBefore);
+    long countByStatusAndCreatedAtGreaterThanEqual(String status, LocalDateTime createdFrom);
+
+    @Query("select max(e.sentAt) from EmailLog e")
+    Optional<LocalDateTime> findLastSentAt();
 
     @Modifying
     @Transactional
