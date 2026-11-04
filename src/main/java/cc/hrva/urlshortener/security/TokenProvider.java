@@ -56,11 +56,14 @@ public class TokenProvider {
     return signedToken(authentication, now, now, now.plusMillis(SECONDS_TO_MILLISECONDS * ttlSeconds));
   }
 
-  public String renewToken(final Authentication authentication, final SessionToken current) {
+  public Optional<String> renewToken(final Authentication authentication, final SessionToken current) {
+    final var signedInAt = current.signedInAt();
+    if (signedInAt == null) {
+      return Optional.empty();
+    }
     final var now = Instant.now();
-    final var signedInAt = Objects.requireNonNullElse(current.signedInAt(), now);
 
-    return signedToken(authentication, now, signedInAt, renewedExpiry(signedInAt, current.expiresAt(), now));
+    return Optional.of(signedToken(authentication, now, signedInAt, renewedExpiry(signedInAt, current.expiresAt(), now)));
   }
 
   private Instant renewedExpiry(final Instant signedInAt, final Instant expiresAt, final Instant now) {

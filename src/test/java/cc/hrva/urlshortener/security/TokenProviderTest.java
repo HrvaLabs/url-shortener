@@ -182,7 +182,7 @@ class TokenProviderTest {
         final var signedIn = Instant.now().minus(3, ChronoUnit.HOURS).truncatedTo(ChronoUnit.SECONDS);
         final var oldToken = tokenProvider.read(token(signedIn, signedIn, Instant.now().plus(1, ChronoUnit.HOURS))).orElseThrow();
 
-        final var renewed = tokenProvider.read(tokenProvider.renewToken(userAuthentication(), oldToken)).orElseThrow();
+        final var renewed = tokenProvider.read(tokenProvider.renewToken(userAuthentication(), oldToken).orElseThrow()).orElseThrow();
 
         assertThat(renewed.issuedAt()).isCloseTo(Instant.now(), within(2, ChronoUnit.SECONDS));
         assertThat(renewed.signedInAt()).isEqualTo(signedIn);
@@ -195,7 +195,7 @@ class TokenProviderTest {
         final var oldToken = tokenProvider.read(token(signedIn, Instant.now().minus(1, ChronoUnit.HOURS), Instant.now().plus(1, ChronoUnit.HOURS)))
                 .orElseThrow();
 
-        final var renewed = tokenProvider.read(tokenProvider.renewToken(userAuthentication(), oldToken)).orElseThrow();
+        final var renewed = tokenProvider.read(tokenProvider.renewToken(userAuthentication(), oldToken).orElseThrow()).orElseThrow();
 
         assertThat(renewed.expiresAt()).isEqualTo(signedIn.plus(30, ChronoUnit.DAYS));
         assertThat(renewed.signedInAt()).isEqualTo(signedIn);
@@ -207,7 +207,7 @@ class TokenProviderTest {
         final var expires = signedIn.plus(30, ChronoUnit.DAYS);
         final var oldToken = tokenProvider.read(token(signedIn, signedIn, expires)).orElseThrow();
 
-        final var renewed = tokenProvider.read(tokenProvider.renewToken(userAuthentication(), oldToken)).orElseThrow();
+        final var renewed = tokenProvider.read(tokenProvider.renewToken(userAuthentication(), oldToken).orElseThrow()).orElseThrow();
 
         assertThat(renewed.expiresAt()).isEqualTo(expires);
     }
@@ -224,10 +224,23 @@ class TokenProviderTest {
                 .signWith(key, Jwts.SIG.HS512)
                 .compact();
 
-        final var renewed = tokenProvider.read(tokenProvider.renewToken(userAuthentication(), tokenProvider.read(old).orElseThrow())).orElseThrow();
+        final var renewed = tokenProvider.read(tokenProvider.renewToken(userAuthentication(), tokenProvider.read(old).orElseThrow()).orElseThrow()).orElseThrow();
 
         assertThat(renewed.signedInAt()).isEqualTo(issued);
         assertThat(renewed.expiresAt()).isEqualTo(issued.plus(30, ChronoUnit.DAYS));
+    }
+
+    @Test
+    void aTokenWithNeitherASignInTimeNorAnIssueTimeIsNeverRenewed() {
+        final var key = Keys.hmacShaKeyFor(Decoders.BASE64.decode(SECRET));
+        final var undated = Jwts.builder()
+                .subject("test@example.com")
+                .claim("auth", "ROLE_USER")
+                .expiration(Date.from(Instant.now().plus(1, ChronoUnit.HOURS)))
+                .signWith(key, Jwts.SIG.HS512)
+                .compact();
+
+        assertThat(tokenProvider.renewToken(userAuthentication(), tokenProvider.read(undated).orElseThrow())).isEmpty();
     }
 
     private String token(final Instant signedIn, final Instant issued, final Instant expires) {
@@ -255,13 +268,13 @@ class TokenProviderTest {
                 .compact();
         final var oldToken = tokenProvider.read(old).orElseThrow();
 
-        final var renewed = tokenProvider.read(tokenProvider.renewToken(userAuthentication(), oldToken)).orElseThrow();
+        final var renewed = tokenProvider.read(tokenProvider.renewToken(userAuthentication(), oldToken).orElseThrow()).orElseThrow();
 
         assertThat(renewed.issuedAt()).isCloseTo(Instant.now(), within(2, ChronoUnit.SECONDS));
         assertThat(renewed.signedInAt()).isEqualTo(signedIn);
         assertThat(renewed.expiresAt()).isCloseTo(Instant.now().plus(24, ChronoUnit.HOURS), within(2, ChronoUnit.SECONDS)).isAfter(expires);
         assertThat(renewed.authentication().getAuthorities()).extracting(Object::toString).containsExactly("ROLE_USER");
-        assertThat(tokenProvider.signedInAt(tokenProvider.renewToken(userAuthentication(), oldToken))).contains(signedIn);
+        assertThat(tokenProvider.signedInAt(tokenProvider.renewToken(userAuthentication(), oldToken).orElseThrow())).contains(signedIn);
     }
 
     @Test

@@ -27,7 +27,8 @@ public class CurrentSession {
                 .filter(current -> current.issuedAt() != null)
                 .flatMap(current -> userRepository.findByEmail(authentication.getName())
                         .filter(user -> !Boolean.FALSE.equals(user.getActive()))
-                        .map(user -> BEARER_PREFIX + tokenProvider.renewToken(TokenProvider.authenticationOf(user), current)));
+                        .flatMap(user -> tokenProvider.renewToken(TokenProvider.authenticationOf(user), current))
+                        .map(token -> BEARER_PREFIX + token));
     }
 
     public HttpHeaders keepThisDeviceSignedIn() {
