@@ -19,6 +19,7 @@
           "icon": "bug",
           "items": [
             "When hrva.cc can't reach its database, a page you open while signed in says so and tries again every 30 seconds, instead of loading for about two minutes and then showing the sign-in form. You aren't signed out because of it. \"Reconnecting…\" now shows only while hrva.cc restarts.",
+            "During a restart longer than two minutes, each page you open still waits and retries for its own two minutes, and pages that couldn't load reload by themselves when hrva.cc is back. \"Reconnecting…\" turns into \"Can't reach hrva.cc right now\" two minutes after hrva.cc stopped answering.",
             "A request that accepts only HTML at an address that answers JSON, such as /actuator/health, gets 406 Not Acceptable instead of a server error. Other malformed requests, such as one without a required header, get their 4xx answer too. None of them count as server errors any more.",
             "When Redis, the cache hrva.cc keeps links and limits in, fails in a way a request can't work around, the answer and the short link page say \"hrva.cc can't reach its cache right now.\" instead of saying the database is unreachable."
           ]
@@ -29,6 +30,7 @@
           "items": [
             "The Health page shows the times in its problem list in your own time zone and format, like the rest of the page. Each problem starts with the name of its card, such as Cache (Redis), and says in a second sentence what stops working or why it failed.",
             "Opened while the database is down, the Health page says \"hrva.cc can't reach its database right now.\" within seconds, and loads by itself when the database is back.",
+            "An open Health page that can't refresh for more than two minutes shows \"Can't reach hrva.cc right now\" instead of the last numbers.",
             "The server errors problem says how many errors came in the last 5 minutes, or that there were none and the errors have stopped. The Server errors card says the same.",
             "Each background job shows how often it runs and, for hourly, daily and weekly jobs, when it runs next, so \"No run yet\" on a daily job reads as expected. A failed job gives the reason in plain words, such as \"The database wasn't reachable.\", above the full error.",
             "The jobs that keep the server's copies of settings and lists, and its metrics, up to date are listed apart, under Internal jobs. \"Read the inspection numbers for Prometheus\" now fails when it can't read them, instead of always showing OK.",
