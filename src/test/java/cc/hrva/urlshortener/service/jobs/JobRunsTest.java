@@ -22,37 +22,40 @@ class JobRunsTest {
         final var runs = jobRuns.all();
 
         assertThat(runs).hasSize(JobLabels.all().size());
-        assertThat(runs.getFirst()).isEqualTo(new JobRun("deactivateExpiredUrls", "Turn off expired links", null, null, null, null));
+        assertThat(runs.getFirst()).isEqualTo(new JobRun("DefaultScheduledService.deactivateExpiredUrls", "Turn off expired links", false, null, null, null, null, null));
         assertThat(runs).extracting(JobRun::name).containsExactlyElementsOf(JobLabels.all().keySet());
     }
 
     @Test
     void aRunningJobHasAStartAfterItsLastFinish() {
-        jobRuns.started("deactivateExpiredUrls");
+        jobRuns.started("DefaultScheduledService.deactivateExpiredUrls");
         clock.advance(Duration.ofMillis(250));
-        jobRuns.finished("deactivateExpiredUrls");
+        jobRuns.finished("DefaultScheduledService.deactivateExpiredUrls");
         clock.advance(Duration.ofMinutes(1));
-        jobRuns.started("deactivateExpiredUrls");
+        jobRuns.started("DefaultScheduledService.deactivateExpiredUrls");
 
-        assertThat(jobRuns.all().getFirst()).isEqualTo(new JobRun("deactivateExpiredUrls", "Turn off expired links", NOW.plusMinutes(1).plusNanos(250_000_000),
-                NOW.plusNanos(250_000_000), JobOutcome.OK, null));
+        assertThat(jobRuns.all().getFirst()).isEqualTo(new JobRun("DefaultScheduledService.deactivateExpiredUrls", "Turn off expired links", false,
+                NOW.plusMinutes(1).plusNanos(250_000_000), NOW.plusNanos(250_000_000), JobOutcome.OK, null, null));
     }
 
     @Test
     void aFailedRunKeepsItsErrorUntilTheNextFailure() {
-        jobRuns.started("refreshDueBlocklists");
-        jobRuns.failed("refreshDueBlocklists", new IllegalStateException("Redis is down"));
+        jobRuns.started("DefaultScheduledService.refreshDueBlocklists");
+        jobRuns.failed("DefaultScheduledService.refreshDueBlocklists", new org.springframework.data.redis.RedisConnectionFailureException("Redis is down"));
 
-        assertThat(run("refreshDueBlocklists")).isEqualTo(new JobRun("refreshDueBlocklists", "Refresh due blocklists", NOW, NOW, JobOutcome.FAILED,
-                "java.lang.IllegalStateException: Redis is down"));
+        assertThat(run("DefaultScheduledService.refreshDueBlocklists")).isEqualTo(new JobRun("DefaultScheduledService.refreshDueBlocklists",
+                "Refresh due blocklists", false, NOW, NOW, JobOutcome.FAILED, "org.springframework.data.redis.RedisConnectionFailureException: Redis is down",
+                "Redis wasn't reachable."));
 
         clock.advance(Duration.ofHours(1));
-        jobRuns.started("refreshDueBlocklists");
-        jobRuns.finished("refreshDueBlocklists");
+        jobRuns.started("DefaultScheduledService.refreshDueBlocklists");
+        jobRuns.finished("DefaultScheduledService.refreshDueBlocklists");
 
-        assertThat(run("refreshDueBlocklists").lastOutcome()).isEqualTo(JobOutcome.OK);
-        assertThat(run("refreshDueBlocklists").lastFinishedAt()).isEqualTo(NOW.plusHours(1));
-        assertThat(run("refreshDueBlocklists").lastError()).isEqualTo("java.lang.IllegalStateException: Redis is down");
+        assertThat(run("DefaultScheduledService.refreshDueBlocklists").lastOutcome()).isEqualTo(JobOutcome.OK);
+        assertThat(run("DefaultScheduledService.refreshDueBlocklists").lastFinishedAt()).isEqualTo(NOW.plusHours(1));
+        assertThat(run("DefaultScheduledService.refreshDueBlocklists").lastError())
+                .isEqualTo("org.springframework.data.redis.RedisConnectionFailureException: Redis is down");
+        assertThat(run("DefaultScheduledService.refreshDueBlocklists").lastReason()).isEqualTo("Redis wasn't reachable.");
     }
 
     @Test
@@ -64,27 +67,43 @@ class JobRunsTest {
         final var runs = jobRuns.all();
 
         assertThat(runs).hasSize(JobLabels.all().size() + 2);
-        assertThat(runs.get(runs.size() - 2)).isEqualTo(new JobRun("alpha", "alpha", NOW, NOW, JobOutcome.OK, null));
-        assertThat(runs.getLast()).isEqualTo(new JobRun("zeta", "zeta", NOW, null, null, null));
+        assertThat(runs.get(runs.size() - 2)).isEqualTo(new JobRun("alpha", "alpha", false, NOW, NOW, JobOutcome.OK, null, null));
+        assertThat(runs.getLast()).isEqualTo(new JobRun("zeta", "zeta", false, NOW, null, null, null, null));
+    }
+
+    @Test
+    void anInternalJobSaysSo() {
+        assertThat(run("InspectionGauges.refreshInspectionGauges").internal()).isTrue();
+        assertThat(run("DefaultScheduledService.deactivateExpiredUrls").internal()).isFalse();
+    }
+
+    @Test
+    void theGaugesNameTheJobByItsLabelAndKeepTheClassAndMethodAsTheJobTag() {
+        jobRuns.bindTo(registry);
+
+        assertThat(registry.get(JobRuns.LAST_OUTCOME).tag("job", "DefaultDiscordAlertService.flush").tag("label", "Post Discord alerts").gauge()).isNotNull();
+        assertThat(registry.get(JobRuns.LAST_RUN).tag("job", "DefaultSettingsService.refresh").tag("label", "Reload the settings").gauge()).isNotNull();
+        assertThat(registry.get(JobRuns.LAST_OUTCOME).tag("job", "DefaultClickCheckService.reload").tag("label", "Reload the click-time blocklists").gauge())
+                .isNotNull();
     }
 
     @Test
     void eachJobHasAnOutcomeAndALastRunGauge() {
         jobRuns.bindTo(registry);
 
-        assertThat(registry.get(JobRuns.LAST_OUTCOME).tag("job", "deactivateExpiredUrls").gauge().value()).isNaN();
-        assertThat(registry.get(JobRuns.LAST_RUN).tag("job", "deactivateExpiredUrls").gauge().value()).isNaN();
-        assertThat(registry.get(JobRuns.LAST_RUN).tag("job", "deactivateExpiredUrls").gauge().getId().getBaseUnit()).isEqualTo("seconds");
+        assertThat(registry.get(JobRuns.LAST_OUTCOME).tag("job", "DefaultScheduledService.deactivateExpiredUrls").gauge().value()).isNaN();
+        assertThat(registry.get(JobRuns.LAST_RUN).tag("job", "DefaultScheduledService.deactivateExpiredUrls").gauge().value()).isNaN();
+        assertThat(registry.get(JobRuns.LAST_RUN).tag("job", "DefaultScheduledService.deactivateExpiredUrls").gauge().getId().getBaseUnit()).isEqualTo("seconds");
         assertThat(registry.get(JobRuns.LAST_OUTCOME).gauges()).hasSize(JobLabels.all().size());
 
-        jobRuns.started("deactivateExpiredUrls");
-        jobRuns.finished("deactivateExpiredUrls");
-        jobRuns.started("refreshDueBlocklists");
-        jobRuns.failed("refreshDueBlocklists", new IllegalStateException("down"));
+        jobRuns.started("DefaultScheduledService.deactivateExpiredUrls");
+        jobRuns.finished("DefaultScheduledService.deactivateExpiredUrls");
+        jobRuns.started("DefaultScheduledService.refreshDueBlocklists");
+        jobRuns.failed("DefaultScheduledService.refreshDueBlocklists", new IllegalStateException("down"));
 
-        assertThat(registry.get(JobRuns.LAST_OUTCOME).tag("job", "deactivateExpiredUrls").gauge().value()).isEqualTo(1.0);
-        assertThat(registry.get(JobRuns.LAST_OUTCOME).tag("job", "refreshDueBlocklists").gauge().value()).isZero();
-        assertThat(registry.get(JobRuns.LAST_RUN).tag("job", "refreshDueBlocklists").gauge().value())
+        assertThat(registry.get(JobRuns.LAST_OUTCOME).tag("job", "DefaultScheduledService.deactivateExpiredUrls").gauge().value()).isEqualTo(1.0);
+        assertThat(registry.get(JobRuns.LAST_OUTCOME).tag("job", "DefaultScheduledService.refreshDueBlocklists").gauge().value()).isZero();
+        assertThat(registry.get(JobRuns.LAST_RUN).tag("job", "DefaultScheduledService.refreshDueBlocklists").gauge().value())
                 .isEqualTo((double) Instant.parse("2026-11-03T22:31:00Z").getEpochSecond());
     }
 

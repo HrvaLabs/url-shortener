@@ -6,6 +6,9 @@ import java.time.Instant;
 import java.time.LocalDateTime;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -24,6 +27,7 @@ import org.springframework.transaction.support.SimpleTransactionStatus;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+@ExtendWith(OutputCaptureExtension.class)
 class ScheduledJobAspectTest {
 
     private static final LocalDateTime NOW = LocalDateTime.of(2026, 11, 3, 22, 31);
@@ -46,7 +50,7 @@ class ScheduledJobAspectTest {
     void anOkRunIsRecorded() {
         jobs.cleanUp();
 
-        assertThat(run("cleanUp")).isEqualTo(new JobRun("cleanUp", "cleanUp", NOW, NOW, JobOutcome.OK, null));
+        assertThat(run("SampleJobs.cleanUp")).isEqualTo(new JobRun("SampleJobs.cleanUp", "SampleJobs.cleanUp", false, NOW, NOW, JobOutcome.OK, null, null));
         assertThat(jobs.runCount()).isEqualTo(1);
     }
 
@@ -54,8 +58,8 @@ class ScheduledJobAspectTest {
     void aFailedRunIsRecordedAndTheFailureStillReachesTheScheduler() {
         assertThatThrownBy(jobs::failToSend).isInstanceOf(IllegalStateException.class).hasMessage("mail server down");
 
-        assertThat(run("failToSend")).isEqualTo(new JobRun("failToSend", "failToSend", NOW, NOW, JobOutcome.FAILED,
-                "java.lang.IllegalStateException: mail server down"));
+        assertThat(run("SampleJobs.failToSend")).isEqualTo(new JobRun("SampleJobs.failToSend", "SampleJobs.failToSend", false, NOW, NOW, JobOutcome.FAILED,
+                "java.lang.IllegalStateException: mail server down", null));
     }
 
     @Test
@@ -63,15 +67,25 @@ class ScheduledJobAspectTest {
         assertThatThrownBy(jobs::writeInATransaction).isInstanceOf(IllegalStateException.class).hasMessage("commit refused");
 
         assertThat(jobs.runCount()).isEqualTo(1);
-        assertThat(run("writeInATransaction").lastOutcome()).isEqualTo(JobOutcome.FAILED);
-        assertThat(run("writeInATransaction").lastError()).isEqualTo("java.lang.IllegalStateException: commit refused");
+        assertThat(run("SampleJobs.writeInATransaction").lastOutcome()).isEqualTo(JobOutcome.FAILED);
+        assertThat(run("SampleJobs.writeInATransaction").lastError()).isEqualTo("java.lang.IllegalStateException: commit refused");
     }
 
     @Test
     void aMethodThatIsNotScheduledIsNotTracked() {
         jobs.notAJob();
 
-        assertThat(jobRuns.all()).extracting(JobRun::name).doesNotContain("notAJob");
+        assertThat(jobRuns.all()).extracting(JobRun::name).doesNotContain("SampleJobs.notAJob");
+    }
+
+    @Test
+    void anExpectedFailureWithAPlainReasonIsRecordedAndNotThrownAtTheScheduler(final CapturedOutput output) {
+        jobs.failWithAReason();
+
+        assertThat(run("SampleJobs.failWithAReason").lastOutcome()).isEqualTo(JobOutcome.FAILED);
+        assertThat(run("SampleJobs.failWithAReason").lastReason()).isEqualTo("Redis wasn't reachable, so today's usage is unknown.");
+        assertThat(output).contains("Scheduled job failed job=SampleJobs.failWithAReason reason=Redis wasn't reachable, so today's usage is unknown.")
+                .doesNotContain("\tat ");
     }
 
     private JobRun run(final String name) {
@@ -127,6 +141,11 @@ class ScheduledJobAspectTest {
 
         public void notAJob() {
             runs++;
+        }
+
+        @Scheduled(fixedDelay = 60_000)
+        public void failWithAReason() {
+            throw new JobFailedException("Redis wasn't reachable, so today's usage is unknown.");
         }
 
     }

@@ -1,6 +1,7 @@
 package cc.hrva.urlshortener.service.jobs;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.aspectj.lang.ProceedingJoinPoint;
 import org.aspectj.lang.annotation.Around;
 import org.aspectj.lang.annotation.Aspect;
@@ -8,6 +9,7 @@ import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 
+@Slf4j
 @Aspect
 @Component
 @Order(Ordered.HIGHEST_PRECEDENCE)
@@ -18,12 +20,17 @@ public class ScheduledJobAspect {
 
     @Around("@annotation(org.springframework.scheduling.annotation.Scheduled) && within(cc.hrva.urlshortener..*)")
     public Object track(final ProceedingJoinPoint joinPoint) throws Throwable {
-        final var name = joinPoint.getSignature().getName();
+        final var signature = joinPoint.getSignature();
+        final var name = signature.getDeclaringType().getSimpleName() + "." + signature.getName();
         jobRuns.started(name);
         try {
             final var result = joinPoint.proceed();
             jobRuns.finished(name);
             return result;
+        } catch (final JobFailedException failed) {
+            jobRuns.failed(name, failed);
+            log.warn("Scheduled job failed job={} reason={}", name, failed.getMessage());
+            return null;
         } catch (final Throwable throwable) {
             jobRuns.failed(name, throwable);
             throw throwable;

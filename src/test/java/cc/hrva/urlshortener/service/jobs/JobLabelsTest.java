@@ -26,17 +26,36 @@ class JobLabelsTest {
     }
 
     @Test
+    void theKeyIsTheClassAndMethodSoFlushRefreshAndReloadCanBeToldApart() {
+        assertThat(JobLabels.all().keySet()).allSatisfy(name -> assertThat(name).matches("[A-Z][A-Za-z]+\\.[a-z][A-Za-z]+"));
+        assertThat(JobLabels.labelOf("DefaultDiscordAlertService.flush")).isEqualTo("Post Discord alerts");
+        assertThat(JobLabels.labelOf("DefaultSettingsService.refresh")).isEqualTo("Reload the settings");
+        assertThat(JobLabels.labelOf("DefaultClickCheckService.reload")).isEqualTo("Reload the click-time blocklists");
+    }
+
+    @Test
+    void onlyThePlumbingThatKeepsCopiesAndMetricsInStepIsInternal() {
+        assertThat(JobLabels.all().keySet().stream().filter(JobLabels::isInternal)).containsExactlyInAnyOrder(
+                "DefaultSettingsService.refresh",
+                "DefaultClickCheckService.reload",
+                "DefaultScheduledService.reloadMissingBlocklists",
+                "DefaultScheduledService.reloadCustomDomainRoutes",
+                "InspectionGauges.refreshInspectionGauges");
+        assertThat(JobLabels.isInternal("Unknown.job")).isFalse();
+    }
+
+    @Test
     void labelsAreReadableSentencesWithoutAFullStop() {
         assertThat(JobLabels.all().values()).allSatisfy(label -> {
             assertThat(label).matches("[A-Z][A-Za-z ,'-]+");
             assertThat(label).doesNotEndWith(".");
         });
-        assertThat(JobLabels.labelOf("deactivateExpiredUrls")).isEqualTo("Turn off expired links");
+        assertThat(JobLabels.labelOf("DefaultScheduledService.deactivateExpiredUrls")).isEqualTo("Turn off expired links");
     }
 
     @Test
     void aJobWithoutALabelShowsItsMethodName() {
-        assertThat(JobLabels.labelOf("somethingNew")).isEqualTo("somethingNew");
+        assertThat(JobLabels.labelOf("NewJobs.somethingNew")).isEqualTo("NewJobs.somethingNew");
     }
 
     private static List<String> scheduledMethodNames() {
@@ -46,7 +65,7 @@ class JobLabelsTest {
                 .filter(candidate -> !Objects.requireNonNull(candidate.getResourceDescription()).contains("test-classes"))
                 .map(candidate -> ClassUtils.resolveClassName(Objects.requireNonNull(candidate.getBeanClassName()), null))
                 .flatMap(type -> Arrays.stream(type.getDeclaredMethods()).filter(method -> method.isAnnotationPresent(Scheduled.class)))
-                .map(method -> method.getName())
+                .map(method -> method.getDeclaringClass().getSimpleName() + "." + method.getName())
                 .toList();
     }
 

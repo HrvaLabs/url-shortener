@@ -7,6 +7,7 @@ import cc.hrva.urlshortener.dto.SystemStatusResponse.Blocklists;
 import cc.hrva.urlshortener.dto.SystemStatusResponse.Database;
 import cc.hrva.urlshortener.dto.SystemStatusResponse.Email;
 import cc.hrva.urlshortener.dto.SystemStatusResponse.Job;
+import cc.hrva.urlshortener.dto.SystemStatusResponse.Problem;
 import cc.hrva.urlshortener.dto.SystemStatusResponse.Redis;
 import cc.hrva.urlshortener.dto.SystemStatusResponse.Screenshots;
 import cc.hrva.urlshortener.dto.SystemStatusResponse.Server;
@@ -22,6 +23,7 @@ import cc.hrva.urlshortener.service.inspection.InspectionUsage;
 import cc.hrva.urlshortener.service.inspection.InspectionWorker;
 import cc.hrva.urlshortener.service.jobs.JobOutcome;
 import cc.hrva.urlshortener.service.jobs.JobRuns;
+import cc.hrva.urlshortener.service.jobs.JobSchedules;
 import cc.hrva.urlshortener.service.settings.SettingKey;
 import cc.hrva.urlshortener.service.stats.AppVersion;
 import cc.hrva.urlshortener.service.stats.RecentRequests;
@@ -58,6 +60,20 @@ public class DefaultSystemStatusService implements SystemStatusService {
     private static final String UNKNOWN_VERSION = "unknown";
     private static final String VERSION_PREFIX = "v";
     private static final double MILLISECONDS_PER_SECOND = 1000.0;
+    private static final String AT = "{at}";
+    private static final String DATABASE_DOWN = "Database: not reachable.";
+    private static final String DATABASE_EFFECT = "Cached links still open, but other links, signing in and saving changes fail.";
+    private static final String REDIS_DOWN = "Cache (Redis): not reachable.";
+    private static final String REDIS_EFFECT = "Links still open from the database, but making links and unlocking password-protected links are refused.";
+    private static final String ERRORS_CONTINUE = "Some pages and links are failing right now.";
+    private static final String ERRORS_STOPPED = "They have stopped.";
+    private static final String SCREENSHOTS_WAIT_FOR_MIDNIGHT = "New screenshots wait until midnight UTC.";
+    private static final String SCREENSHOTS_NEAR_THE_LIMIT = "At the limit, new screenshots wait until midnight UTC.";
+    private static final String SCREENSHOTS_WAIT = "New screenshots wait until then.";
+    private static final String LOOKUPS_WAIT_FOR_MIDNIGHT = "New lookups wait until midnight UTC.";
+    private static final String LOOKUPS_WAIT = "New lookups wait until then.";
+    private static final String OLD_COPY = "Links are checked against an old copy of it.";
+    private static final String NOT_CHECKED = "Links aren't checked against it.";
 
     private final RecentRequests recentRequests;
     private final ServicePings servicePings;
@@ -69,6 +85,7 @@ public class DefaultSystemStatusService implements SystemStatusService {
     private final InspectionWorker inspectionWorker;
     private final SettingsService settingsService;
     private final JobRuns jobRuns;
+    private final JobSchedules jobSchedules;
     private final AppProperties appProperties;
     private final Clock clock;
 
@@ -82,12 +99,12 @@ public class DefaultSystemStatusService implements SystemStatusService {
         final var virusTotal = virusTotal(database.up(), redis.up());
         final var blocklistStatuses = blocklistStatuses(database.up(), redis.up());
         final var jobs = jobs();
-        final var problems = new ArrayList<String>();
+        final var problems = new ArrayList<Problem>();
         if (!database.up()) {
-            problems.add("Database: not reachable.");
+            problems.add(new Problem(DATABASE_DOWN, null, DATABASE_EFFECT));
         }
         if (!redis.up()) {
-            problems.add("Redis: not reachable.");
+            problems.add(new Problem(REDIS_DOWN, null, REDIS_EFFECT));
         }
         serverErrorsProblem(traffic).ifPresent(problems::add);
         screenshotsProblem(screenshots).ifPresent(problems::add);
@@ -95,8 +112,14 @@ public class DefaultSystemStatusService implements SystemStatusService {
         blocklistStatuses.stream().filter(BlocklistStatus::stale).map(DefaultSystemStatusService::staleProblem).forEach(problems::add);
         emailProblem(email).ifPresent(problems::add);
         jobs.stream().filter(job -> job.lastOutcome() == JobOutcome.FAILED).map(DefaultSystemStatusService::jobProblem).forEach(problems::add);
-        return new SystemStatusResponse(new Summary(problems.isEmpty(), List.copyOf(problems)), traffic, database, redis, email, screenshots, virusTotal,
-                blocklists(blocklistStatuses), server(), jobs);
+        final var sentences = problems.stream().map(DefaultSystemStatusService::sentence).toList();
+        return new SystemStatusResponse(new Summary(problems.isEmpty(), sentences, List.copyOf(problems)), traffic, database, redis, email, screenshots,
+                virusTotal, blocklists(blocklistStatuses), server(), jobs);
+    }
+
+    private static String sentence(final Problem problem) {
+        final var text = problem.at() == null ? problem.text() : problem.text().replace(AT, readable(problem.at()));
+        return problem.detail() == null ? text : text + " " + problem.detail();
     }
 
     private Database database() {
@@ -112,7 +135,8 @@ public class DefaultSystemStatusService implements SystemStatusService {
 
     private Traffic traffic() {
         final var window = recentRequests.window();
-        return new Traffic(window.windowMinutes(), window.requests(), window.redirects(), window.p50Ms(), window.p95Ms(), window.serverErrors());
+        return new Traffic(window.windowMinutes(), window.requests(), window.redirects(), window.p50Ms(), window.p95Ms(), window.serverErrors(),
+                window.recentMinutes(), window.recentServerErrors());
     }
 
     private Email email(final boolean databaseUp) {
@@ -181,69 +205,83 @@ public class DefaultSystemStatusService implements SystemStatusService {
     }
 
     private List<Job> jobs() {
+        final var schedules = jobSchedules.all();
         return jobRuns.all().stream()
-                .map(run -> new Job(run.name(), run.label(), run.lastStartedAt(), run.lastFinishedAt(), run.lastOutcome(), run.lastError()))
+                .map(run -> {
+                    final var schedule = schedules.get(run.name());
+                    return new Job(run.name(), run.label(), run.lastStartedAt(), run.lastFinishedAt(), run.lastOutcome(), run.lastError(), run.lastReason(),
+                            run.internal(), schedule == null ? null : schedule.text(), schedule == null ? null : schedule.nextRunAt());
+                })
                 .toList();
     }
 
-    private static Optional<String> serverErrorsProblem(final Traffic traffic) {
+    private static Optional<Problem> serverErrorsProblem(final Traffic traffic) {
         if (traffic.requests() < SERVER_ERRORS_FROM_REQUESTS || traffic.serverErrors() <= traffic.requests() * SERVER_ERRORS_SHARE) {
             return Optional.empty();
         }
-        return Optional.of("Server errors: %d of %d requests in the last %d minutes.".formatted(traffic.serverErrors(), traffic.requests(),
-                traffic.windowMinutes()));
+        final var hour = "Server errors: %d of %d requests in the last %d minutes, ".formatted(traffic.serverErrors(), traffic.requests(),
+                traffic.windowMinutes());
+        if (traffic.recentServerErrors() == 0) {
+            return Optional.of(new Problem(hour + "none in the last %d minutes.".formatted(traffic.recentMinutes()), null, ERRORS_STOPPED));
+        }
+        return Optional.of(new Problem(hour + "%d in the last %d minutes.".formatted(traffic.recentServerErrors(), traffic.recentMinutes()), null,
+                ERRORS_CONTINUE));
     }
 
     private boolean pausedForLong(final LocalDateTime pausedUntil) {
         return pausedUntil != null && pausedUntil.isAfter(LocalDateTime.now(clock).plus(LONG_PAUSE));
     }
 
-    private Optional<String> screenshotsProblem(final Screenshots screenshots) {
+    private Optional<Problem> screenshotsProblem(final Screenshots screenshots) {
         if (!screenshots.configured() || !screenshots.enabled()) {
             return Optional.empty();
         }
         final var used = screenshots.browserSecondsToday();
         final var limit = screenshots.browserSecondsLimit();
         if (used != null && used >= limit) {
-            return Optional.of("Screenshots: today's limit is used up.");
+            return Optional.of(new Problem("Screenshots: today's limit is used up.", null, SCREENSHOTS_WAIT_FOR_MIDNIGHT));
         }
         if (pausedForLong(screenshots.pausedUntil())) {
-            return Optional.of("Screenshots: paused until " + readable(screenshots.pausedUntil()) + ".");
+            return Optional.of(new Problem("Screenshots: paused until " + AT + ".", screenshots.pausedUntil(), SCREENSHOTS_WAIT));
         }
         if (used != null && used >= limit * NEAR_THE_LIMIT_SHARE) {
-            return Optional.of(String.format(Locale.ROOT, "Screenshots: %d of %d seconds of browser time used today.", (long) Math.floor(used), limit));
+            return Optional.of(new Problem(String.format(Locale.ROOT, "Screenshots: %d of %d seconds of browser time used today.", (long) Math.floor(used),
+                    limit), null, SCREENSHOTS_NEAR_THE_LIMIT));
         }
         return Optional.empty();
     }
 
-    private Optional<String> virusTotalProblem(final VirusTotal virusTotal) {
+    private Optional<Problem> virusTotalProblem(final VirusTotal virusTotal) {
         if (!virusTotal.configured() || !virusTotal.enabled()) {
             return Optional.empty();
         }
         if (virusTotal.lookupsToday() != null && virusTotal.lookupsToday() >= virusTotal.dailyLimit()) {
-            return Optional.of("VirusTotal: today's %d lookups are used up.".formatted(virusTotal.dailyLimit()));
+            return Optional.of(new Problem("VirusTotal: today's %d lookups are used up.".formatted(virusTotal.dailyLimit()), null, LOOKUPS_WAIT_FOR_MIDNIGHT));
         }
         if (pausedForLong(virusTotal.pausedUntil())) {
-            return Optional.of("VirusTotal: paused until " + readable(virusTotal.pausedUntil()) + ".");
+            return Optional.of(new Problem("VirusTotal: paused until " + AT + ".", virusTotal.pausedUntil(), LOOKUPS_WAIT));
         }
         return Optional.empty();
     }
 
-    private static String staleProblem(final BlocklistStatus status) {
+    private static Problem staleProblem(final BlocklistStatus status) {
         return status.lastRefreshedAt() == null
-                ? "Blocklist " + status.name() + " is stale: never refreshed."
-                : "Blocklist " + status.name() + " is stale: last refreshed " + readable(status.lastRefreshedAt()) + ".";
+                ? new Problem("Blocklists: " + status.name() + " is stale, never refreshed.", null, NOT_CHECKED)
+                : new Problem("Blocklists: " + status.name() + " is stale, last refreshed " + AT + ".", status.lastRefreshedAt(), OLD_COPY);
     }
 
-    private static Optional<String> emailProblem(final Email email) {
+    private static Optional<Problem> emailProblem(final Email email) {
         if (email.failures24h() == 0) {
             return Optional.empty();
         }
-        return Optional.of("Email: %d %s in the last 24 hours.".formatted(email.failures24h(), email.failures24h() == 1 ? "failure" : "failures"));
+        final var one = email.failures24h() == 1;
+        return Optional.of(new Problem("Email: %d %s in the last 24 hours.".formatted(email.failures24h(), one ? "failure" : "failures"), null,
+                one ? "That email wasn't delivered." : "Those emails weren't delivered."));
     }
 
-    private static String jobProblem(final Job job) {
-        return job.label() + " failed at " + readable(Objects.requireNonNullElse(job.lastFinishedAt(), job.lastStartedAt())) + ".";
+    private static Problem jobProblem(final Job job) {
+        return new Problem("Background jobs: " + job.label() + " failed at " + AT + ".", Objects.requireNonNullElse(job.lastFinishedAt(), job.lastStartedAt()),
+                job.lastReason());
     }
 
     private static String readable(final LocalDateTime at) {

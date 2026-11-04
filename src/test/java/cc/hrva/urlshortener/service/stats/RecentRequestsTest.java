@@ -16,7 +16,7 @@ class RecentRequestsTest {
 
     @Test
     void nothingRecordedIsAnEmptyHourWithoutPercentiles() {
-        assertThat(recentRequests.window()).isEqualTo(new RecentRequests.Window(60, 0, 0, 0, null, null));
+        assertThat(recentRequests.window()).isEqualTo(new RecentRequests.Window(60, 0, 0, 0, null, null, 5, 0));
     }
 
     @Test
@@ -105,7 +105,25 @@ class RecentRequestsTest {
         assertThat(window.p95Ms()).isEqualTo(5.0);
 
         clock.advance(Duration.ofMinutes(30));
-        assertThat(recentRequests.window()).isEqualTo(new RecentRequests.Window(60, 0, 0, 0, null, null));
+        assertThat(recentRequests.window()).isEqualTo(new RecentRequests.Window(60, 0, 0, 0, null, null, 5, 0));
+    }
+
+    @Test
+    void serverErrorsOfTheLastFiveMinutesAreCountedApart() {
+        recentRequests.record("/abc", 500, 3);
+        clock.advance(Duration.ofMinutes(5));
+        recentRequests.record("/abc", 502, 3);
+        recentRequests.record("/abc", 503, 3);
+        clock.advance(Duration.ofMinutes(4));
+
+        assertThat(recentRequests.window().serverErrors()).isEqualTo(3);
+        assertThat(recentRequests.window().recentMinutes()).isEqualTo(5);
+        assertThat(recentRequests.window().recentServerErrors()).isEqualTo(2);
+
+        clock.advance(Duration.ofMinutes(1));
+
+        assertThat(recentRequests.window().serverErrors()).isEqualTo(3);
+        assertThat(recentRequests.window().recentServerErrors()).isZero();
     }
 
     @Test

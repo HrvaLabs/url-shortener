@@ -12,6 +12,7 @@ import cc.hrva.urlshortener.service.inspection.InspectionUsage;
 import cc.hrva.urlshortener.service.inspection.InspectionWorker;
 import cc.hrva.urlshortener.service.jobs.JobOutcome;
 import cc.hrva.urlshortener.service.jobs.JobRuns;
+import cc.hrva.urlshortener.service.jobs.JobSchedules;
 import cc.hrva.urlshortener.service.notification.MutableClock;
 import cc.hrva.urlshortener.service.settings.SettingKey;
 import cc.hrva.urlshortener.service.settings.SettingsServiceFixtures;
@@ -23,11 +24,13 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalDouble;
 import java.util.OptionalLong;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.transaction.CannotCreateTransactionException;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
@@ -37,6 +40,9 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class DefaultSystemStatusServiceTest {
+
+    private static final String REDIS_DOWN =
+            "Cache (Redis): not reachable. Links still open from the database, but making links and unlocking password-protected links are refused.";
 
     private static final Instant NOW = Instant.parse("2026-11-03T22:31:00Z");
     private static final LocalDateTime NOW_UTC = LocalDateTime.of(2026, 11, 3, 22, 31);
@@ -54,8 +60,9 @@ class DefaultSystemStatusServiceTest {
     private final AppProperties appProperties = new AppProperties();
     private final SettingsService settingsService = SettingsServiceFixtures.defaults(appProperties);
     private final JobRuns jobRuns = new JobRuns(clock);
+    private final JobSchedules jobSchedules = mock(JobSchedules.class);
     private final DefaultSystemStatusService service = new DefaultSystemStatusService(recentRequests, servicePings, runtimeMetrics, appVersion,
-            emailLogRepository, blocklistSourceService, inspectionUsage, inspectionWorker, settingsService, jobRuns, appProperties, clock);
+            emailLogRepository, blocklistSourceService, inspectionUsage, inspectionWorker, settingsService, jobRuns, jobSchedules, appProperties, clock);
 
     @BeforeEach
     void everythingWorks() {
@@ -86,14 +93,17 @@ class DefaultSystemStatusServiceTest {
         when(inspectionUsage.virusTotalQueued()).thenReturn(OptionalLong.of(1));
         when(inspectionWorker.screenshotsPausedUntil()).thenReturn(Optional.empty());
         when(inspectionWorker.virusTotalPausedUntil()).thenReturn(Optional.empty());
+        when(jobSchedules.all()).thenReturn(Map.of(
+                "DefaultScheduledService.deactivateExpiredUrls", new JobSchedules.Schedule("Every minute", NOW_UTC.plusMinutes(1)),
+                "DefaultScheduledService.refreshDueBlocklists", new JobSchedules.Schedule("Every hour", null)));
     }
 
     @Test
     void whenEverythingWorksThereAreNoProblems() {
         final var status = service.status();
 
-        assertThat(status.summary()).isEqualTo(new SystemStatusResponse.Summary(true, List.of()));
-        assertThat(status.traffic()).isEqualTo(new SystemStatusResponse.Traffic(60, 80, 30, 4.0, 120.0, 0));
+        assertThat(status.summary()).isEqualTo(new SystemStatusResponse.Summary(true, List.of(), List.of()));
+        assertThat(status.traffic()).isEqualTo(new SystemStatusResponse.Traffic(60, 80, 30, 4.0, 120.0, 0, 5, 0));
         assertThat(status.database()).isEqualTo(new SystemStatusResponse.Database(true, 1.2, 1, 10));
         assertThat(status.redis()).isEqualTo(new SystemStatusResponse.Redis(true, 0.8, 99.0));
         assertThat(status.email()).isEqualTo(new SystemStatusResponse.Email(LocalDateTime.of(2026, 11, 3, 15, 25), 0));
@@ -103,7 +113,10 @@ class DefaultSystemStatusServiceTest {
         assertThat(status.server()).isEqualTo(new SystemStatusResponse.Server("v2.30", LocalDateTime.of(2026, 11, 3, 21, 28, 6, 250_000_000), 3_774L,
                 25.512, 430_000_000L, 1_200_000_000L, 184.0));
         assertThat(status.jobs()).hasSize(jobRuns.all().size());
-        assertThat(status.jobs().getFirst()).isEqualTo(new SystemStatusResponse.Job("deactivateExpiredUrls", "Turn off expired links", null, null, null, null));
+        assertThat(status.jobs().getFirst()).isEqualTo(new SystemStatusResponse.Job("DefaultScheduledService.deactivateExpiredUrls", "Turn off expired links",
+                null, null, null, null, null, false, "Every minute", NOW_UTC.plusMinutes(1)));
+        assertThat(status.jobs()).filteredOn(SystemStatusResponse.Job::internal).extracting(SystemStatusResponse.Job::name)
+                .contains("InspectionGauges.refreshInspectionGauges");
     }
 
     @Test
@@ -112,7 +125,10 @@ class DefaultSystemStatusServiceTest {
 
         final var status = service.status();
 
-        assertThat(status.summary()).isEqualTo(new SystemStatusResponse.Summary(false, List.of("Database: not reachable.")));
+        assertThat(status.summary().problems()).containsExactly(
+                "Database: not reachable. Cached links still open, but other links, signing in and saving changes fail.");
+        assertThat(status.summary().items()).containsExactly(new SystemStatusResponse.Problem("Database: not reachable.", null,
+                "Cached links still open, but other links, signing in and saving changes fail."));
         assertThat(status.database().up()).isFalse();
         assertThat(status.database().latencyMs()).isNull();
         assertThat(status.email()).isEqualTo(new SystemStatusResponse.Email(null, 0));
@@ -128,7 +144,9 @@ class DefaultSystemStatusServiceTest {
 
         final var status = service.status();
 
-        assertThat(status.summary().problems()).containsExactly("Redis: not reachable.");
+        assertThat(status.summary().problems()).containsExactly(REDIS_DOWN);
+        assertThat(status.summary().items()).containsExactly(new SystemStatusResponse.Problem("Cache (Redis): not reachable.", null,
+                "Links still open from the database, but making links and unlocking password-protected links are refused."));
         assertThat(status.redis()).isEqualTo(new SystemStatusResponse.Redis(false, null, 99.0));
         assertThat(status.screenshots().browserSecondsToday()).isNull();
         assertThat(status.virusTotal().lookupsToday()).isNull();
@@ -143,8 +161,8 @@ class DefaultSystemStatusServiceTest {
         final var status = service.status();
 
         assertThat(status.blocklists()).isEqualTo(new SystemStatusResponse.Blocklists(LocalDateTime.of(2026, 11, 3, 9, 0), List.of("URLhaus")));
-        assertThat(status.summary().problems()).containsExactly("Redis: not reachable.",
-                "Blocklist URLhaus is stale: last refreshed 3 November 2026 at 09:00 UTC.");
+        assertThat(status.summary().problems()).containsExactly(REDIS_DOWN,
+                "Blocklists: URLhaus is stale, last refreshed 3 November 2026 at 09:00 UTC. Links are checked against an old copy of it.");
         verify(blocklistSourceService, never()).health();
         verify(inspectionUsage, never()).browserSecondsToday();
         verify(inspectionUsage, never()).virusTotalLookupsToday();
@@ -154,7 +172,8 @@ class DefaultSystemStatusServiceTest {
     void serverErrorsAboveFivePercentOfAtLeastTwentyRequests() {
         traffic(80, 30, 5);
 
-        assertThat(service.status().summary().problems()).containsExactly("Server errors: 5 of 80 requests in the last 60 minutes.");
+        assertThat(service.status().summary().problems()).containsExactly(
+                "Server errors: 5 of 80 requests in the last 60 minutes, 5 in the last 5 minutes. Some pages and links are failing right now.");
 
         traffic(80, 30, 4);
         assertThat(service.status().summary().ok()).isTrue();
@@ -163,23 +182,47 @@ class DefaultSystemStatusServiceTest {
         assertThat(service.status().summary().ok()).isTrue();
 
         traffic(20, 0, 2);
-        assertThat(service.status().summary().problems()).containsExactly("Server errors: 2 of 20 requests in the last 60 minutes.");
+        assertThat(service.status().summary().items()).containsExactly(new SystemStatusResponse.Problem(
+                "Server errors: 2 of 20 requests in the last 60 minutes, 2 in the last 5 minutes.", null, "Some pages and links are failing right now."));
     }
 
     @Test
-    void aFailedJobNamesItsLabelAndWhenItFailed() {
-        jobRuns.started("refreshDueBlocklists");
+    void serverErrorsThatStoppedSaySo() {
+        traffic(290, 10, 82, 0);
+
+        assertThat(service.status().summary().items()).containsExactly(new SystemStatusResponse.Problem(
+                "Server errors: 82 of 290 requests in the last 60 minutes, none in the last 5 minutes.", null, "They have stopped."));
+    }
+
+    @Test
+    void aFailedJobNamesItsLabelWhenItFailedAndWhy() {
+        jobRuns.started("DefaultScheduledService.refreshDueBlocklists");
         clock.advance(Duration.ofSeconds(22));
-        jobRuns.failed("refreshDueBlocklists", new IllegalStateException("Redis is down"));
-        jobRuns.started("deactivateExpiredUrls");
-        jobRuns.finished("deactivateExpiredUrls");
+        jobRuns.failed("DefaultScheduledService.refreshDueBlocklists", new CannotCreateTransactionException("Could not open JPA EntityManager for transaction"));
+        jobRuns.started("DefaultScheduledService.deactivateExpiredUrls");
+        jobRuns.finished("DefaultScheduledService.deactivateExpiredUrls");
 
         final var status = service.status();
 
-        assertThat(status.summary().problems()).containsExactly("Refresh due blocklists failed at 3 November 2026 at 22:31 UTC.");
-        assertThat(status.jobs()).filteredOn(job -> job.name().equals("refreshDueBlocklists")).singleElement()
-                .isEqualTo(new SystemStatusResponse.Job("refreshDueBlocklists", "Refresh due blocklists", NOW_UTC, NOW_UTC.plusSeconds(22),
-                        JobOutcome.FAILED, "java.lang.IllegalStateException: Redis is down"));
+        assertThat(status.summary().problems()).containsExactly(
+                "Background jobs: Refresh due blocklists failed at 3 November 2026 at 22:31 UTC. The database wasn't reachable.");
+        assertThat(status.summary().items()).containsExactly(new SystemStatusResponse.Problem("Background jobs: Refresh due blocklists failed at {at}.",
+                NOW_UTC.plusSeconds(22), "The database wasn't reachable."));
+        assertThat(status.jobs()).filteredOn(job -> job.name().equals("DefaultScheduledService.refreshDueBlocklists")).singleElement()
+                .isEqualTo(new SystemStatusResponse.Job("DefaultScheduledService.refreshDueBlocklists", "Refresh due blocklists", NOW_UTC,
+                        NOW_UTC.plusSeconds(22), JobOutcome.FAILED,
+                        "org.springframework.transaction.CannotCreateTransactionException: Could not open JPA EntityManager for transaction",
+                        "The database wasn't reachable.", false, "Every hour", null));
+    }
+
+    @Test
+    void aFailedJobWithoutAKnownReasonHasNoSecondSentence() {
+        jobRuns.started("DefaultScheduledService.checkTraffic");
+        jobRuns.failed("DefaultScheduledService.checkTraffic", new IllegalStateException("x"));
+
+        assertThat(service.status().summary().items()).containsExactly(new SystemStatusResponse.Problem("Background jobs: Check traffic for alerts failed at {at}.",
+                NOW_UTC, null));
+        assertThat(service.status().summary().problems()).containsExactly("Background jobs: Check traffic for alerts failed at 3 November 2026 at 22:31 UTC.");
     }
 
     @Test
@@ -189,7 +232,7 @@ class DefaultSystemStatusServiceTest {
 
         final var status = service.status();
 
-        assertThat(status.summary().problems()).containsExactly("Screenshots: today's limit is used up.");
+        assertThat(status.summary().problems()).containsExactly("Screenshots: today's limit is used up. New screenshots wait until midnight UTC.");
         assertThat(status.screenshots().pausedUntil()).isEqualTo(MIDNIGHT);
     }
 
@@ -197,7 +240,8 @@ class DefaultSystemStatusServiceTest {
     void screenshotsOverNinetyPercentOfTheLimit() {
         when(inspectionUsage.browserSecondsToday()).thenReturn(OptionalDouble.of(561.7));
 
-        assertThat(service.status().summary().problems()).containsExactly("Screenshots: 561 of 600 seconds of browser time used today.");
+        assertThat(service.status().summary().problems()).containsExactly(
+                "Screenshots: 561 of 600 seconds of browser time used today. At the limit, new screenshots wait until midnight UTC.");
 
         when(inspectionUsage.browserSecondsToday()).thenReturn(OptionalDouble.of(539.9));
         assertThat(service.status().summary().ok()).isTrue();
@@ -207,7 +251,9 @@ class DefaultSystemStatusServiceTest {
     void screenshotsPausedForAnHour() {
         when(inspectionWorker.screenshotsPausedUntil()).thenReturn(Optional.of(Instant.parse("2026-11-03T23:31:00Z")));
 
-        assertThat(service.status().summary().problems()).containsExactly("Screenshots: paused until 3 November 2026 at 23:31 UTC.");
+        assertThat(service.status().summary().problems()).containsExactly("Screenshots: paused until 3 November 2026 at 23:31 UTC. New screenshots wait until then.");
+        assertThat(service.status().summary().items()).containsExactly(new SystemStatusResponse.Problem("Screenshots: paused until {at}.",
+                LocalDateTime.of(2026, 11, 3, 23, 31), "New screenshots wait until then."));
     }
 
     @Test
@@ -223,7 +269,7 @@ class DefaultSystemStatusServiceTest {
         assertThat(service.status().summary().ok()).isTrue();
 
         when(inspectionWorker.screenshotsPausedUntil()).thenReturn(Optional.of(Instant.parse("2026-11-03T22:36:01Z")));
-        assertThat(service.status().summary().problems()).containsExactly("Screenshots: paused until 3 November 2026 at 22:36 UTC.");
+        assertThat(service.status().summary().items()).extracting(SystemStatusResponse.Problem::at).containsExactly(LocalDateTime.of(2026, 11, 3, 22, 36, 1));
     }
 
     @Test
@@ -231,7 +277,8 @@ class DefaultSystemStatusServiceTest {
         when(inspectionWorker.screenshotsPausedUntil()).thenReturn(Optional.of(Instant.parse("2026-11-03T22:31:10Z")));
         when(inspectionUsage.browserSecondsToday()).thenReturn(OptionalDouble.of(570));
 
-        assertThat(service.status().summary().problems()).containsExactly("Screenshots: 570 of 600 seconds of browser time used today.");
+        assertThat(service.status().summary().items()).extracting(SystemStatusResponse.Problem::text)
+                .containsExactly("Screenshots: 570 of 600 seconds of browser time used today.");
     }
 
     @Test
@@ -241,7 +288,7 @@ class DefaultSystemStatusServiceTest {
 
         final var status = service.status();
 
-        assertThat(status.summary().problems()).containsExactly("VirusTotal: today's 480 lookups are used up.");
+        assertThat(status.summary().problems()).containsExactly("VirusTotal: today's 480 lookups are used up. New lookups wait until midnight UTC.");
         assertThat(status.virusTotal().pausedUntil()).isEqualTo(MIDNIGHT);
     }
 
@@ -249,7 +296,7 @@ class DefaultSystemStatusServiceTest {
     void virusTotalPausedForAnHour() {
         when(inspectionWorker.virusTotalPausedUntil()).thenReturn(Optional.of(Instant.parse("2026-11-03T23:31:00Z")));
 
-        assertThat(service.status().summary().problems()).containsExactly("VirusTotal: paused until 3 November 2026 at 23:31 UTC.");
+        assertThat(service.status().summary().problems()).containsExactly("VirusTotal: paused until 3 November 2026 at 23:31 UTC. New lookups wait until then.");
     }
 
     @Test
@@ -287,9 +334,10 @@ class DefaultSystemStatusServiceTest {
 
         final var status = service.status();
 
-        assertThat(status.summary().problems()).containsExactly(
-                "Blocklist URLhaus is stale: last refreshed 3 November 2026 at 09:00 UTC.",
-                "Blocklist Phishing Army is stale: never refreshed.");
+        assertThat(status.summary().items()).containsExactly(
+                new SystemStatusResponse.Problem("Blocklists: URLhaus is stale, last refreshed {at}.", LocalDateTime.of(2026, 11, 3, 9, 0),
+                        "Links are checked against an old copy of it."),
+                new SystemStatusResponse.Problem("Blocklists: Phishing Army is stale, never refreshed.", null, "Links aren't checked against it."));
         assertThat(status.blocklists()).isEqualTo(new SystemStatusResponse.Blocklists(LocalDateTime.of(2026, 11, 3, 21, 0),
                 List.of("URLhaus", "Phishing Army")));
     }
@@ -298,10 +346,10 @@ class DefaultSystemStatusServiceTest {
     void emailFailuresInTheLast24Hours() {
         when(emailLogRepository.countByStatusAndCreatedAtGreaterThanEqual(EmailLog.STATUS_FAILED, NOW_UTC.minusHours(24))).thenReturn(1L);
 
-        assertThat(service.status().summary().problems()).containsExactly("Email: 1 failure in the last 24 hours.");
+        assertThat(service.status().summary().problems()).containsExactly("Email: 1 failure in the last 24 hours. That email wasn't delivered.");
 
         when(emailLogRepository.countByStatusAndCreatedAtGreaterThanEqual(EmailLog.STATUS_FAILED, NOW_UTC.minusHours(24))).thenReturn(3L);
-        assertThat(service.status().summary().problems()).containsExactly("Email: 3 failures in the last 24 hours.");
+        assertThat(service.status().summary().problems()).containsExactly("Email: 3 failures in the last 24 hours. Those emails weren't delivered.");
     }
 
     @Test
@@ -312,20 +360,21 @@ class DefaultSystemStatusServiceTest {
         when(inspectionWorker.virusTotalPausedUntil()).thenReturn(Optional.of(Instant.parse("2026-11-03T23:32:00Z")));
         when(blocklistSourceService.healthFromDatabase()).thenReturn(List.of(new BlocklistStatus(2, "Phishing Army", 6, null, 3, true)));
         when(emailLogRepository.countByStatusAndCreatedAtGreaterThanEqual(EmailLog.STATUS_FAILED, NOW_UTC.minusHours(24))).thenReturn(2L);
-        jobRuns.started("checkTraffic");
-        jobRuns.failed("checkTraffic", new IllegalStateException("x"));
+        jobRuns.started("DefaultScheduledService.checkTraffic");
+        jobRuns.failed("DefaultScheduledService.checkTraffic", new IllegalStateException("x"));
 
         final var status = service.status();
 
         assertThat(status.summary().ok()).isFalse();
-        assertThat(status.summary().problems()).containsExactly(
-                "Redis: not reachable.",
-                "Server errors: 50 of 100 requests in the last 60 minutes.",
-                "Screenshots: paused until 3 November 2026 at 23:31 UTC.",
-                "VirusTotal: paused until 3 November 2026 at 23:32 UTC.",
-                "Blocklist Phishing Army is stale: never refreshed.",
+        assertThat(status.summary().items()).extracting(SystemStatusResponse.Problem::text).containsExactly(
+                "Cache (Redis): not reachable.",
+                "Server errors: 50 of 100 requests in the last 60 minutes, 50 in the last 5 minutes.",
+                "Screenshots: paused until {at}.",
+                "VirusTotal: paused until {at}.",
+                "Blocklists: Phishing Army is stale, never refreshed.",
                 "Email: 2 failures in the last 24 hours.",
-                "Check traffic for alerts failed at 3 November 2026 at 22:31 UTC.");
+                "Background jobs: Check traffic for alerts failed at {at}.");
+        assertThat(status.summary().problems()).hasSameSizeAs(status.summary().items());
     }
 
     @Test
@@ -338,7 +387,7 @@ class DefaultSystemStatusServiceTest {
         when(emailLogRepository.findLastSentAt()).thenReturn(Optional.empty());
         when(inspectionUsage.screenshotsQueued()).thenReturn(OptionalLong.empty());
         when(inspectionUsage.browserSecondsToday()).thenReturn(OptionalDouble.empty());
-        when(recentRequests.window()).thenReturn(new RecentRequests.Window(60, 0, 0, 0, null, null));
+        when(recentRequests.window()).thenReturn(new RecentRequests.Window(60, 0, 0, 0, null, null, 5, 0));
 
         final var status = service.status();
 
@@ -366,7 +415,11 @@ class DefaultSystemStatusServiceTest {
     }
 
     private void traffic(final long requests, final long redirects, final long serverErrors) {
-        when(recentRequests.window()).thenReturn(new RecentRequests.Window(60, requests, redirects, serverErrors, 4.0, 120.0));
+        traffic(requests, redirects, serverErrors, serverErrors);
+    }
+
+    private void traffic(final long requests, final long redirects, final long serverErrors, final long recentServerErrors) {
+        when(recentRequests.window()).thenReturn(new RecentRequests.Window(60, requests, redirects, serverErrors, 4.0, 120.0, 5, recentServerErrors));
     }
 
 }

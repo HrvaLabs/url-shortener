@@ -13,6 +13,7 @@ import org.springframework.stereotype.Component;
 public class RecentRequests {
 
     public static final int WINDOW_MINUTES = 60;
+    public static final int RECENT_MINUTES = 5;
     static final double[] UPPER_BOUNDS_MS = {1, 2, 3, 4, 5, 6, 8, 10, 12, 15, 20, 25, 30, 40, 50, 60, 80, 100, 120, 150, 200, 250, 300, 400, 500,
             600, 800, 1_000, 1_200, 1_500, 2_000, 2_500, 3_000, 4_000, 5_000, 6_000, 8_000, 10_000, 15_000, 20_000, 30_000, 60_000};
     private static final long MILLIS_PER_MINUTE = TimeUnit.MINUTES.toMillis(1);
@@ -48,6 +49,7 @@ public class RecentRequests {
         var requests = 0L;
         var redirects = 0L;
         var serverErrors = 0L;
+        var recentServerErrors = 0L;
         var slowest = 0.0;
         for (var slot = 0; slot < WINDOW_MINUTES; slot++) {
             final var minute = minutes.get(slot);
@@ -57,13 +59,16 @@ public class RecentRequests {
             requests += minute.requests.sum();
             redirects += minute.redirects.sum();
             serverErrors += minute.serverErrors.sum();
+            if (minute.index > now - RECENT_MINUTES) {
+                recentServerErrors += minute.serverErrors.sum();
+            }
             slowest = Math.max(slowest, minute.slowest.get());
             for (var bucket = 0; bucket < latency.length; bucket++) {
                 latency[bucket] += minute.latency.get(bucket);
             }
         }
         return new Window(WINDOW_MINUTES, requests, redirects, serverErrors, percentile(latency, MEDIAN, slowest),
-                percentile(latency, SLOWEST_FIVE_PERCENT, slowest));
+                percentile(latency, SLOWEST_FIVE_PERCENT, slowest), RECENT_MINUTES, recentServerErrors);
     }
 
     private Minute minuteOf(final long index) {
@@ -101,7 +106,8 @@ public class RecentRequests {
         return found >= 0 ? found : -found - 1;
     }
 
-    public record Window(int windowMinutes, long requests, long redirects, long serverErrors, Double p50Ms, Double p95Ms) {
+    public record Window(int windowMinutes, long requests, long redirects, long serverErrors, Double p50Ms, Double p95Ms, int recentMinutes,
+                         long recentServerErrors) {
     }
 
     private static final class Minute {

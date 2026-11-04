@@ -73,8 +73,10 @@ class AdminSystemStatusSecurityTest {
     private static final String SYSTEM_STATUS = "/api/v1/admin/system-status";
     private static final RSAKey SIGNING_KEY = generateSigningKey();
     private static final SystemStatusResponse STATUS = new SystemStatusResponse(
-            new SystemStatusResponse.Summary(false, List.of("Screenshots: today's limit is used up.")),
-            new SystemStatusResponse.Traffic(60, 120, 80, 3.0, 40.0, 0),
+            new SystemStatusResponse.Summary(false, List.of("Screenshots: paused until 4 November 2026 at 00:00 UTC. New screenshots wait until then."),
+                    List.of(new SystemStatusResponse.Problem("Screenshots: paused until {at}.", LocalDateTime.of(2026, 11, 4, 0, 0),
+                            "New screenshots wait until then."))),
+            new SystemStatusResponse.Traffic(60, 120, 80, 3.0, 40.0, 0, 5, 0),
             new SystemStatusResponse.Database(true, 1.2, 0, 10),
             new SystemStatusResponse.Redis(true, 0.8, null),
             new SystemStatusResponse.Email(LocalDateTime.of(2026, 11, 2, 15, 25), 0),
@@ -82,9 +84,11 @@ class AdminSystemStatusSecurityTest {
             new SystemStatusResponse.VirusTotal(false, true, 0L, 480, 0L, null),
             new SystemStatusResponse.Blocklists(LocalDateTime.of(2026, 11, 3, 21, 0), List.of()),
             new SystemStatusResponse.Server("v2.30", LocalDateTime.of(2026, 11, 3, 21, 28, 6), 3600L, 25.5, 430_000_000L, -1L, null),
-            List.of(new SystemStatusResponse.Job("deactivateExpiredUrls", "Turn off expired links", null, null, null, null),
-                    new SystemStatusResponse.Job("refreshDueBlocklists", "Refresh due blocklists", LocalDateTime.of(2026, 11, 3, 22, 0),
-                            LocalDateTime.of(2026, 11, 3, 22, 0, 4), JobOutcome.FAILED, "java.lang.IllegalStateException: Redis is down")));
+            List.of(new SystemStatusResponse.Job("DefaultScheduledService.deactivateExpiredUrls", "Turn off expired links", null, null, null, null, null,
+                            false, "Every minute", LocalDateTime.of(2026, 11, 3, 22, 1)),
+                    new SystemStatusResponse.Job("DefaultScheduledService.refreshDueBlocklists", "Refresh due blocklists", LocalDateTime.of(2026, 11, 3, 22, 0),
+                            LocalDateTime.of(2026, 11, 3, 22, 0, 4), JobOutcome.FAILED, "org.springframework.data.redis.RedisConnectionFailureException: down",
+                            "Redis wasn't reachable.", false, "Every hour", null)));
 
     @Autowired
     private MockMvc mockMvc;
@@ -167,13 +171,18 @@ class AdminSystemStatusSecurityTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.length()").value(10))
                 .andExpect(jsonPath("$.summary.ok").value(false))
-                .andExpect(jsonPath("$.summary.problems[0]").value("Screenshots: today's limit is used up."))
+                .andExpect(jsonPath("$.summary.problems[0]").value("Screenshots: paused until 4 November 2026 at 00:00 UTC. New screenshots wait until then."))
+                .andExpect(jsonPath("$.summary.items[0].text").value("Screenshots: paused until {at}."))
+                .andExpect(jsonPath("$.summary.items[0].at").value("2026-11-04T00:00:00Z"))
+                .andExpect(jsonPath("$.summary.items[0].detail").value("New screenshots wait until then."))
                 .andExpect(jsonPath("$.traffic.windowMinutes").value(60))
                 .andExpect(jsonPath("$.traffic.requests").value(120))
                 .andExpect(jsonPath("$.traffic.redirects").value(80))
                 .andExpect(jsonPath("$.traffic.p50Ms").value(3.0))
                 .andExpect(jsonPath("$.traffic.p95Ms").value(40.0))
                 .andExpect(jsonPath("$.traffic.serverErrors").value(0))
+                .andExpect(jsonPath("$.traffic.recentMinutes").value(5))
+                .andExpect(jsonPath("$.traffic.recentServerErrors").value(0))
                 .andExpect(jsonPath("$.database.up").value(true))
                 .andExpect(jsonPath("$.database.latencyMs").value(1.2))
                 .andExpect(jsonPath("$.database.poolActive").value(0))
@@ -204,15 +213,19 @@ class AdminSystemStatusSecurityTest {
                 .andExpect(jsonPath("$.server.heapMaxBytes").value(-1))
                 .andExpect(jsonPath("$.server.gcPauseMsTotal").value(nullValue()))
                 .andExpect(jsonPath("$.server.length()").value(7))
-                .andExpect(jsonPath("$.jobs[0].name").value("deactivateExpiredUrls"))
+                .andExpect(jsonPath("$.jobs[0].name").value("DefaultScheduledService.deactivateExpiredUrls"))
                 .andExpect(jsonPath("$.jobs[0].label").value("Turn off expired links"))
                 .andExpect(jsonPath("$.jobs[0].lastStartedAt").value(nullValue()))
                 .andExpect(jsonPath("$.jobs[0].lastOutcome").value(nullValue()))
-                .andExpect(jsonPath("$.jobs[0].length()").value(6))
+                .andExpect(jsonPath("$.jobs[0].schedule").value("Every minute"))
+                .andExpect(jsonPath("$.jobs[0].nextRunAt").value("2026-11-03T22:01:00Z"))
+                .andExpect(jsonPath("$.jobs[0].internal").value(false))
+                .andExpect(jsonPath("$.jobs[0].length()").value(10))
                 .andExpect(jsonPath("$.jobs[1].lastStartedAt").value("2026-11-03T22:00:00Z"))
                 .andExpect(jsonPath("$.jobs[1].lastFinishedAt").value("2026-11-03T22:00:04Z"))
                 .andExpect(jsonPath("$.jobs[1].lastOutcome").value("FAILED"))
-                .andExpect(jsonPath("$.jobs[1].lastError").value("java.lang.IllegalStateException: Redis is down"));
+                .andExpect(jsonPath("$.jobs[1].lastError").value("org.springframework.data.redis.RedisConnectionFailureException: down"))
+                .andExpect(jsonPath("$.jobs[1].lastReason").value("Redis wasn't reachable."));
     }
 
     private void signedIn(final String token, final String email, final boolean twoStep, final String... roles) {

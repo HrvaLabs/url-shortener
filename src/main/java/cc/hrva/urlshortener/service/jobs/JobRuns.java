@@ -21,6 +21,7 @@ public class JobRuns implements MeterBinder {
     public static final String LAST_OUTCOME = "hrva.job.last.outcome";
     public static final String LAST_RUN = "hrva.job.last.run.timestamp";
     private static final String JOB_TAG = "job";
+    private static final String LABEL_TAG = "label";
     private static final String SECONDS = "seconds";
 
     private final Clock clock;
@@ -48,7 +49,8 @@ public class JobRuns implements MeterBinder {
     public void failed(final String name, final Throwable throwable) {
         final var at = LocalDateTime.now(clock);
         final var error = JobErrors.describe(throwable);
-        runs.compute(name, (key, run) -> (run == null ? JobRun.neverRun(key) : run).failed(at, error));
+        final var reason = JobReasons.of(throwable);
+        runs.compute(name, (key, run) -> (run == null ? JobRun.neverRun(key) : run).failed(at, error, reason));
     }
 
     public List<JobRun> all() {
@@ -68,9 +70,10 @@ public class JobRuns implements MeterBinder {
         if (meterRegistry == null || withGauges.putIfAbsent(name, Boolean.TRUE) != null) {
             return;
         }
-        Gauge.builder(LAST_OUTCOME, this, jobRuns -> jobRuns.outcomeValue(name)).tag(JOB_TAG, name)
+        final var label = JobLabels.labelOf(name);
+        Gauge.builder(LAST_OUTCOME, this, jobRuns -> jobRuns.outcomeValue(name)).tag(JOB_TAG, name).tag(LABEL_TAG, label)
                 .description("Last outcome of a scheduled job: 1 OK, 0 failed, NaN not run since the start").register(meterRegistry);
-        Gauge.builder(LAST_RUN, this, jobRuns -> jobRuns.lastRunValue(name)).tag(JOB_TAG, name).baseUnit(SECONDS)
+        Gauge.builder(LAST_RUN, this, jobRuns -> jobRuns.lastRunValue(name)).tag(JOB_TAG, name).tag(LABEL_TAG, label).baseUnit(SECONDS)
                 .description("When a scheduled job last started, in seconds since the epoch").register(meterRegistry);
     }
 

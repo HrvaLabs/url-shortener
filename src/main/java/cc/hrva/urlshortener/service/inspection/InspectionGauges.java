@@ -1,9 +1,11 @@
 package cc.hrva.urlshortener.service.inspection;
 
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
+import cc.hrva.urlshortener.service.jobs.JobFailedException;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.binder.MeterBinder;
+import java.util.ArrayList;
 import java.util.OptionalDouble;
 import java.util.OptionalLong;
 import java.util.concurrent.atomic.AtomicReference;
@@ -22,6 +24,8 @@ public class InspectionGauges implements MeterBinder {
     public static final String VIRUSTOTAL_LOOKUPS_TODAY = "hrva.virustotal.lookups.today";
     private static final String QUEUE_TAG = "queue";
     private static final String SECONDS = "seconds";
+    private static final String QUEUES_UNREAD = "The database wasn't reachable, so the queue sizes are unknown.";
+    private static final String USAGE_UNREAD = "Redis wasn't reachable, so today's usage is unknown.";
 
     private final InspectionUsage inspectionUsage;
     private final AppProperties appProperties;
@@ -44,8 +48,19 @@ public class InspectionGauges implements MeterBinder {
         if (StringUtils.isBlank(appProperties.getMetrics().getToken())) {
             return;
         }
-        readings.set(new Readings(valueOf(inspectionUsage.screenshotsQueued()), valueOf(inspectionUsage.virusTotalQueued()),
-                valueOf(inspectionUsage.browserSecondsToday()), valueOf(inspectionUsage.virusTotalLookupsToday())));
+        final var current = new Readings(valueOf(inspectionUsage.screenshotsQueued()), valueOf(inspectionUsage.virusTotalQueued()),
+                valueOf(inspectionUsage.browserSecondsToday()), valueOf(inspectionUsage.virusTotalLookupsToday()));
+        readings.set(current);
+        final var unread = new ArrayList<String>();
+        if (Double.isNaN(current.screenshotsQueued()) || Double.isNaN(current.virusTotalQueued())) {
+            unread.add(QUEUES_UNREAD);
+        }
+        if (Double.isNaN(current.browserSecondsToday()) || Double.isNaN(current.virusTotalLookupsToday())) {
+            unread.add(USAGE_UNREAD);
+        }
+        if (!unread.isEmpty()) {
+            throw new JobFailedException(String.join(" ", unread));
+        }
     }
 
     private Gauge.Builder<AtomicReference<Readings>> gauge(final String name, final ToDoubleFunction<Readings> value) {
