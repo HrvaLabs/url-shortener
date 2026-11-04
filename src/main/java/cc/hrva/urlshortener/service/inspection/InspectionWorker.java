@@ -62,6 +62,7 @@ public class InspectionWorker {
     private final LinkScreenshotRepository linkScreenshotRepository;
     private final UrlRepository urlRepository;
     private final BrowserRunClient browserRunClient;
+    private final BrowserTimeUsed browserTimeUsed;
     private final VirusTotalClient virusTotalClient;
     private final RateLimiter rateLimiter;
     private final SettingsService settingsService;
@@ -304,6 +305,7 @@ public class InspectionWorker {
             return;
         }
         final var snapshot = browserRunClient.snapshot(request.longUrl());
+        browserTimeUsed.add(snapshot.browserMsUsed());
         switch (snapshot.outcome()) {
             case TAKEN -> store(request, snapshot);
             case FAILED -> record(request, InspectionState.FAILED, snapshot.failure());

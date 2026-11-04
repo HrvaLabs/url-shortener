@@ -44,6 +44,7 @@ public class BrowserRunClient {
     private static final int JPEG_QUALITY = 70;
     private static final int PAGE_LOAD_TIMEOUT_MILLIS = 20_000;
     private static final int MAX_TITLE_LENGTH = 300;
+    private static final String BROWSER_MS_USED = "X-Browser-Ms-Used";
     private static final String DAILY_LIMIT_MARKER = "Browser time limit exceeded";
     private static final String NAVIGATION_TIMEOUT_MARKER = "Navigation timeout";
     private static final String TOO_LARGE = "The screenshot was too large.";
@@ -138,6 +139,10 @@ public class BrowserRunClient {
     }
 
     private PageSnapshot answer(final HttpResponse<String> response) {
+        return outcomeOf(response).withBrowserMsUsed(browserMsUsed(response));
+    }
+
+    private PageSnapshot outcomeOf(final HttpResponse<String> response) {
         final var status = response.statusCode();
         final var body = StringUtils.defaultString(response.body());
         if (status == HttpStatus.TOO_MANY_REQUESTS.value()) {
@@ -216,6 +221,14 @@ public class BrowserRunClient {
             return Optional.of(WEBP);
         }
         return Optional.empty();
+    }
+
+    private static Long browserMsUsed(final HttpResponse<String> response) {
+        return response.headers().firstValue(BROWSER_MS_USED)
+                .map(String::strip)
+                .filter(value -> value.matches("\\d{1,9}"))
+                .map(Long::valueOf)
+                .orElse(null);
     }
 
     private static Duration retryAfter(final HttpResponse<String> response) {

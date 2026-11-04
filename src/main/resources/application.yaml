@@ -58,7 +58,7 @@ management:
   endpoints:
     web:
       exposure:
-        include: health
+        include: health,prometheus
   health:
     mail:
       enabled: false
@@ -176,6 +176,9 @@ app:
     keep-screenshot-days: ${APP_INSPECTION_KEEP_SCREENSHOT_DAYS:7}
     virus-total-api-key: ${VIRUSTOTAL_API_KEY:}
     virus-total-daily-limit: ${APP_INSPECTION_VIRUSTOTAL_DAILY_LIMIT:480}
+    browser-seconds-daily-limit: ${APP_INSPECTION_BROWSER_SECONDS_DAILY_LIMIT:600}
+  metrics:
+    token: ${APP_METRICS_TOKEN:}
   turnstile:
     site-key: ${APP_TURNSTILE_SITE_KEY:}
     secret-key: ${APP_TURNSTILE_SECRET_KEY:}

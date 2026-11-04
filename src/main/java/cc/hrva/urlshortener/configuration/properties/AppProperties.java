@@ -169,6 +169,10 @@ public class AppProperties {
     @NotNull
     private Inspection inspection = new Inspection();
 
+    @Valid
+    @NotNull
+    private Metrics metrics = new Metrics();
+
     @Data
     public static class Mcp {
 
@@ -400,6 +404,18 @@ public class AppProperties {
         @Min(1)
         @Max(500)
         private int virusTotalDailyLimit = 480;
+
+        @Min(1)
+        @Max(86_400)
+        private int browserSecondsDailyLimit = 600;
+
+    }
+
+    @Data
+    public static class Metrics {
+
+        @ToString.Exclude
+        private String token;
 
     }
 

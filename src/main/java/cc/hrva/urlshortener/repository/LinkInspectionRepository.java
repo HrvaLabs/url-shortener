@@ -15,6 +15,10 @@ public interface LinkInspectionRepository extends JpaRepository<LinkInspection, 
 
     Optional<LinkInspection> findFirstByScreenshotStateOrderByScreenshotRequestedAtAscUrlIdAsc(InspectionState screenshotState);
 
+    long countByScreenshotState(InspectionState screenshotState);
+
+    long countByVtState(InspectionState vtState);
+
     @Modifying(flushAutomatically = true)
     @Query("update LinkInspection i set i.screenshotState = cc.hrva.urlshortener.model.enums.InspectionState.DONE, i.screenshotTakenAt = :takenAt, "
             + "i.screenshotUrl = :screenshotUrl, i.pageTitle = :pageTitle, i.pageStatus = :pageStatus, i.screenshotFailure = null "

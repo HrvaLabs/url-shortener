@@ -34,7 +34,7 @@ import org.springframework.data.redis.core.StringRedisTemplate;
         includeFilters = @ComponentScan.Filter(
                 type = FilterType.ASSIGNABLE_TYPE,
                 classes = {UrlRepository.class, LinkInspectionRepository.class, LinkScreenshotRepository.class}))
-@Import({DefaultLinkInspectionService.class, InspectionWorker.class, RedisFixedWindowRateLimiter.class})
+@Import({DefaultLinkInspectionService.class, InspectionWorker.class, RedisFixedWindowRateLimiter.class, BrowserTimeUsed.class, InspectionUsage.class})
 class InspectionTestApplication {
 
     static final String DATABASE_URL = "spring.datasource.url=jdbc:h2:mem:link-inspection;DB_CLOSE_DELAY=-1;NON_KEYWORDS=KEY,VALUE";

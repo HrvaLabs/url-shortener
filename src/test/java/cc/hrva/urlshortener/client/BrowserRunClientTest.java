@@ -163,6 +163,48 @@ class BrowserRunClientTest {
     }
 
     @Test
+    void theBrowserTimeUsedComesWithATakenScreenshot() {
+        server.createContext(SNAPSHOT, exchange -> {
+            record(exchange);
+            exchange.getResponseHeaders().add("X-Browser-Ms-Used", "4210");
+            send(exchange, 200, taken(JPEG, "\"meta\":{\"status\":200}", ""));
+        });
+
+        final var snapshot = client.snapshot(TARGET);
+
+        assertThat(snapshot.outcome()).isEqualTo(PageSnapshot.Outcome.TAKEN);
+        assertThat(snapshot.browserMsUsed()).isEqualTo(4210L);
+    }
+
+    @Test
+    void theBrowserTimeUsedComesWithAFailureToo() {
+        server.createContext(SNAPSHOT, exchange -> {
+            record(exchange);
+            exchange.getResponseHeaders().add("X-Browser-Ms-Used", " 20013 ");
+            send(exchange, 422, "{\"success\":false,\"errors\":[{\"message\":\"Navigation timeout of 20000 ms exceeded\"}]}");
+        });
+
+        final var snapshot = client.snapshot(TARGET);
+
+        assertThat(snapshot.outcome()).isEqualTo(PageSnapshot.Outcome.FAILED);
+        assertThat(snapshot.browserMsUsed()).isEqualTo(20013L);
+    }
+
+    @Test
+    void aMissingOrMalformedBrowserTimeIsNone() {
+        server.createContext(SNAPSHOT, exchange -> {
+            record(exchange);
+            if (received.size() == 2) {
+                exchange.getResponseHeaders().add("X-Browser-Ms-Used", "-5");
+            }
+            send(exchange, 429, "{\"success\":false,\"errors\":[{\"code\":2001,\"message\":\"Rate limit exceeded\"}]}");
+        });
+
+        assertThat(client.snapshot(TARGET).browserMsUsed()).isNull();
+        assertThat(client.snapshot(TARGET).browserMsUsed()).isNull();
+    }
+
+    @Test
     void rateLimit429WithoutRetryAfterWaitsTenSeconds() {
         answer(429, "{\"success\":false,\"errors\":[{\"code\":2001,\"message\":\"Rate limit exceeded\"}]}");
 

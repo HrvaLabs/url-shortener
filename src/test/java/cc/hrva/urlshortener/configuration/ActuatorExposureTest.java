@@ -10,11 +10,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 class ActuatorExposureTest {
 
     @Test
-    void onlyHealthIsExposedOverHttp() throws IOException {
+    void onlyHealthAndPrometheusAreExposedOverHttp() throws IOException {
         final var sources = new YamlPropertySourceLoader().load("application", new ClassPathResource("application.yaml"));
 
         assertThat(sources).anySatisfy(source ->
-                assertThat(source.getProperty("management.endpoints.web.exposure.include")).isEqualTo("health"));
+                assertThat(source.getProperty("management.endpoints.web.exposure.include")).isEqualTo("health,prometheus"));
     }
 
     @Test

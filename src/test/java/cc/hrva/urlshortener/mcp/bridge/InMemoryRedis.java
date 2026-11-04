@@ -31,6 +31,7 @@ public final class InMemoryRedis {
 
     private static final List<String> FIXED_WINDOW_COMMANDS = List.of("INCR", "PTTL", "PEXPIRE");
     private static final List<String> ADD_WITH_EXPIRY_COMMANDS = List.of("SADD", "PEXPIREAT");
+    private static final List<String> INCREMENT_BY_WITH_EXPIRY_COMMANDS = List.of("INCRBY", "PEXPIRE");
 
     private final Map<String, StoredValue> values = new ConcurrentHashMap<>();
     private final Map<String, StoredSet> sets = new ConcurrentHashMap<>();
@@ -70,6 +71,9 @@ public final class InMemoryRedis {
             final var scriptArguments = Arrays.copyOfRange(arguments, 2, arguments.length);
             if (ADD_WITH_EXPIRY_COMMANDS.stream().allMatch(script.getScriptAsString()::contains)) {
                 return addWithExpiry(keys, scriptArguments);
+            }
+            if (INCREMENT_BY_WITH_EXPIRY_COMMANDS.stream().allMatch(script.getScriptAsString()::contains)) {
+                return incrementByWithExpiry(keys, scriptArguments);
             }
             return fixedWindowIncrement(script, keys, scriptArguments);
         });
@@ -118,6 +122,18 @@ public final class InMemoryRedis {
         sets.put(keys.getFirst(), new StoredSet(set.members(), expiresAt));
 
         return added ? 1L : 0L;
+    }
+
+    private Long incrementByWithExpiry(final List<String> keys, final Object[] scriptArguments) {
+        if (keys.size() != 1 || scriptArguments.length != 2) {
+            throw new UnsupportedOperationException("InMemoryRedis models INCRBY and PEXPIRE on one key with an amount and an expiry");
+        }
+        final var amount = Long.parseLong((String) scriptArguments[0]);
+        final var timeToLive = Duration.ofMillis(Long.parseLong((String) scriptArguments[1]));
+        final var total = values.compute(keys.getFirst(), (key, current) ->
+                new StoredValue(Long.toString((current == null ? 0 : Long.parseLong(current.value())) + amount), timeToLive));
+
+        return Long.parseLong(total.value());
     }
 
     private Object fixedWindowIncrement(final RedisScript<?> script, final List<String> keys, final Object[] scriptArguments) {

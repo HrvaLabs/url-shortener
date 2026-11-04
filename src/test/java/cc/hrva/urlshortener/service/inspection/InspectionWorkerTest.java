@@ -160,6 +160,30 @@ class InspectionWorkerTest {
     }
 
     @Test
+    void theBrowserTimeOfEveryAnswerIsAddedToToday() {
+        pending(LINK, NOW_UTC.minusMinutes(2), "QUEUE");
+        pending(OTHER_LINK, NOW_UTC.minusMinutes(1), "QUEUE");
+        when(browserRunClient.snapshot(LONG_URL)).thenReturn(PageSnapshot.taken(JPEG, "image/jpeg", null, 200).withBrowserMsUsed(4210L));
+        when(browserRunClient.snapshot(OTHER_LONG_URL)).thenReturn(PageSnapshot.failed("Cloudflare couldn't open the page (500).").withBrowserMsUsed(790L));
+
+        inspectionWorker.takeNextScreenshot();
+        inspectionWorker.takeNextScreenshot();
+
+        assertThat(redisTemplate.opsForValue().get("browser-run:ms:2026-11-03")).isEqualTo("5000");
+        assertThat(inMemoryRedis.timeToLiveOfKeyContaining("browser-run:ms:")).isEqualTo(Duration.ofDays(2));
+    }
+
+    @Test
+    void anAnswerWithoutBrowserTimeAddsNothing() {
+        pending(LINK, NOW_UTC.minusMinutes(1), "QUEUE");
+        when(browserRunClient.snapshot(anyString())).thenReturn(PageSnapshot.taken(JPEG, "image/jpeg", null, 200));
+
+        inspectionWorker.takeNextScreenshot();
+
+        assertThat(inMemoryRedis.keys()).noneMatch(key -> key.startsWith("browser-run:"));
+    }
+
+    @Test
     void aNewScreenshotReplacesTheOldOne() {
         pending(LINK, NOW_UTC.minusMinutes(1), "ADMIN");
         jdbcTemplate.update("insert into link_screenshot (url_id, image, content_type) values (?, ?, 'image/png')", LINK, new byte[]{9, 9});
