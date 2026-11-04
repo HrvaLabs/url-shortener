@@ -9,8 +9,9 @@ All notable changes to hrva.cc — the URL shortener.
 When the database is down, signed-in pages say so instead of sending you to sign in, and the Health page explains each problem in plain words, with local times.
 
 ### 🐛 Fixes
-- When hrva.cc can't reach its database, a page you open while signed in says so and tries again every 30 seconds, instead of loading for about two minutes and then showing the sign-in form. You stay signed in. "Reconnecting…" now shows only while hrva.cc restarts.
+- When hrva.cc can't reach its database, a page you open while signed in says so and tries again every 30 seconds, instead of loading for about two minutes and then showing the sign-in form. You aren't signed out because of it. "Reconnecting…" now shows only while hrva.cc restarts.
 - A request that accepts only HTML at an address that answers JSON, such as /actuator/health, gets 406 Not Acceptable instead of a server error. Other malformed requests, such as one without a required header, get their 4xx answer too. None of them count as server errors any more.
+- When Redis, the cache hrva.cc keeps links and limits in, fails in a way a request can't work around, the answer and the short link page say "hrva.cc can't reach its cache right now." instead of saying the database is unreachable.
 
 ### 🔧 Admin
 - The Health page shows the times in its problem list in your own time zone and format, like the rest of the page. Each problem starts with the name of its card, such as Cache (Redis), and says in a second sentence what stops working or why it failed.
@@ -20,8 +21,8 @@ When the database is down, signed-in pages say so instead of sending you to sign
 - The jobs that keep the server's copies of settings and lists, and its metrics, up to date are listed apart, under Internal jobs. "Read the inspection numbers for Prometheus" now fails when it can't read them, instead of always showing OK.
 - Screenshots and VirusTotal that aren't set up name what to set: CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_BROWSER_API_TOKEN, or VIRUSTOTAL_API_KEY.
 - The Garbage collection card no longer sits alone on its row on wide screens.
-- Prometheus: hrva_job_last_outcome and hrva_job_last_run_timestamp_seconds name each job by class and method in job, such as DefaultDiscordAlertService.flush instead of flush, and give its readable name in label, such as Post Discord alerts.
-- An error answer for a database outage carries "outage": "database", so the web app can tell an outage from a restart.
+- Prometheus: hrva_job_last_outcome and hrva_job_last_run_timestamp_seconds name each job by class and method in job, such as DefaultDiscordAlertService.flush instead of flush. Prometheus shows that label as exported_job, because it renames job. A new label, label, holds the readable name, such as Post Discord alerts.
+- An error answer for an outage carries "outage": "database" or "outage": "cache", so the web app can tell an outage from a restart.
 
 ---
 
