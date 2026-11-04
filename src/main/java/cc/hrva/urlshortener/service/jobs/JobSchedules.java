@@ -14,7 +14,9 @@ import org.springframework.scheduling.config.CronTask;
 import org.springframework.scheduling.config.IntervalTask;
 import org.springframework.scheduling.config.ScheduledTask;
 import org.springframework.scheduling.config.ScheduledTaskHolder;
+import org.springframework.scheduling.support.ScheduledMethodRunnable;
 import org.springframework.stereotype.Component;
+import org.springframework.util.ClassUtils;
 
 @Component
 @RequiredArgsConstructor
@@ -97,15 +99,16 @@ public class JobSchedules {
     }
 
     private static String nameOf(final ScheduledTask task) {
+        if (task.getTask().getRunnable() instanceof ScheduledMethodRunnable runnable) {
+            return JobNames.of(runnable.getMethod());
+        }
         final var target = task.getTask().toString();
-        final var method = StringUtils.substringAfterLast(target, ".");
-        final var type = StringUtils.substringBeforeLast(target, ".");
-        if (method.isEmpty() || type.isEmpty()) {
+        final var methodName = StringUtils.substringAfterLast(target, ".");
+        final var className = StringUtils.substringBeforeLast(target, ".");
+        if (methodName.isEmpty() || className.isEmpty() || !ClassUtils.isPresent(className, JobSchedules.class.getClassLoader())) {
             return null;
         }
-        final var className = StringUtils.substringAfterLast("." + type, ".");
-        final var simpleName = className.contains("$") ? StringUtils.substringAfterLast(className, "$") : className;
-        return simpleName + "." + method;
+        return JobNames.of(ClassUtils.resolveClassName(className, JobSchedules.class.getClassLoader()), methodName);
     }
 
     private static String textOf(final ScheduledTask task) {

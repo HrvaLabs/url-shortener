@@ -229,12 +229,35 @@ class GlobalExceptionHandlerTest {
     }
 
     @Test
+    void aClientErrorFromOutsideSpringShowsOnlyItsReasonPhrase(final CapturedOutput output) throws Exception {
+        mockMvc.perform(get("/probe/foreign-client-error"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.detail").value("Conflict"));
+
+        assertThat(output).doesNotContain("Unhandled").doesNotContain("table user_account");
+    }
+
+    @Test
     void aSpringServerErrorIsStillA500WithTheGenericText(final CapturedOutput output) throws Exception {
         mockMvc.perform(get("/probe/spring-server-error"))
                 .andExpect(status().isInternalServerError())
                 .andExpect(jsonPath("$.detail").value("Internal server error"));
 
         assertThat(output).contains("Unhandled exception");
+    }
+
+    static class ForeignClientError extends RuntimeException implements org.springframework.web.ErrorResponse {
+
+        @Override
+        public org.springframework.http.HttpStatusCode getStatusCode() {
+            return HttpStatus.CONFLICT;
+        }
+
+        @Override
+        public org.springframework.http.ProblemDetail getBody() {
+            return org.springframework.http.ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, "duplicate key in table user_account");
+        }
+
     }
 
     @RestController
@@ -253,6 +276,11 @@ class GlobalExceptionHandlerTest {
         @GetMapping("/probe/payload-too-large")
         String probePayloadTooLarge() {
             throw new MaxUploadSizeExceededException(1024);
+        }
+
+        @GetMapping("/probe/foreign-client-error")
+        String probeForeignClientError() {
+            throw new ForeignClientError();
         }
 
         @GetMapping("/probe/gone")

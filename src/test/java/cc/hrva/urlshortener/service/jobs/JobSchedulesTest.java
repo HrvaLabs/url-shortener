@@ -81,6 +81,7 @@ class JobSchedulesTest {
         final var schedules = new JobSchedules(beans.getBeanProvider(org.springframework.scheduling.config.ScheduledTaskHolder.class)).all();
 
         assertThat(schedules).containsOnlyKeys("SampleJobs.nightly", "SampleJobs.often");
+        assertThat(schedules).containsKeys(JobNames.of(SampleJobs.class.getMethod("nightly")), JobNames.of(SampleJobs.class.getMethod("often")));
         assertThat(schedules.get("SampleJobs.nightly").text()).isEqualTo("Daily");
         assertThat(schedules.get("SampleJobs.nightly").nextRunAt()).isAfter(LocalDateTime.now(ZoneOffset.UTC))
                 .isBefore(LocalDateTime.now(ZoneOffset.UTC).plusDays(1).plusMinutes(1));

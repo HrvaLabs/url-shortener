@@ -2,6 +2,7 @@ package cc.hrva.urlshortener.service.inspection;
 
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.service.jobs.JobFailedException;
+import cc.hrva.urlshortener.service.stats.ServicePings;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.binder.MeterBinder;
@@ -24,10 +25,11 @@ public class InspectionGauges implements MeterBinder {
     public static final String VIRUSTOTAL_LOOKUPS_TODAY = "hrva.virustotal.lookups.today";
     private static final String QUEUE_TAG = "queue";
     private static final String SECONDS = "seconds";
-    private static final String QUEUES_UNREAD = "The database wasn't reachable, so the queue sizes are unknown.";
-    private static final String USAGE_UNREAD = "Redis wasn't reachable, so today's usage is unknown.";
+    private static final String QUEUES_UNREAD = "The queue sizes couldn't be read, so they are unknown.";
+    private static final String USAGE_UNREAD = "Today's usage couldn't be read, so it is unknown.";
 
     private final InspectionUsage inspectionUsage;
+    private final ServicePings servicePings;
     private final AppProperties appProperties;
     private final AtomicReference<Readings> readings = new AtomicReference<>(Readings.UNKNOWN);
 
@@ -52,10 +54,10 @@ public class InspectionGauges implements MeterBinder {
                 valueOf(inspectionUsage.browserSecondsToday()), valueOf(inspectionUsage.virusTotalLookupsToday()));
         readings.set(current);
         final var unread = new ArrayList<String>();
-        if (Double.isNaN(current.screenshotsQueued()) || Double.isNaN(current.virusTotalQueued())) {
+        if ((Double.isNaN(current.screenshotsQueued()) || Double.isNaN(current.virusTotalQueued())) && servicePings.database().up()) {
             unread.add(QUEUES_UNREAD);
         }
-        if (Double.isNaN(current.browserSecondsToday()) || Double.isNaN(current.virusTotalLookupsToday())) {
+        if ((Double.isNaN(current.browserSecondsToday()) || Double.isNaN(current.virusTotalLookupsToday())) && servicePings.redis().up()) {
             unread.add(USAGE_UNREAD);
         }
         if (!unread.isEmpty()) {

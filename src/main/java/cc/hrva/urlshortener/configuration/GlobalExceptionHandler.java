@@ -93,6 +93,7 @@ import org.springframework.web.bind.annotation.ControllerAdvice;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.method.annotation.HandlerMethodValidationException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.exc.InvalidFormatException;
@@ -104,6 +105,7 @@ public class GlobalExceptionHandler {
     private static final Duration DATABASE_RETRY = Duration.ofMinutes(1);
     private static final String MISSING = "missing";
     private static final String VERDICT = "verdict";
+    private static final String SPRING_PACKAGE = "org.springframework.";
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ProblemDetail> handleValidation(final MethodArgumentNotValidException ex) {
@@ -552,7 +554,14 @@ public class GlobalExceptionHandler {
         if (status == HttpStatus.NOT_ACCEPTABLE) {
             return answer.build();
         }
-        return answer.body(ProblemResponses.of(status, StringUtils.defaultIfBlank(response.getBody().getDetail(), status.getReasonPhrase())));
+        return answer.body(ProblemResponses.of(status, StringUtils.defaultIfBlank(publicDetail(ex, response), status.getReasonPhrase())));
+    }
+
+    private static String publicDetail(final Exception ex, final ErrorResponse response) {
+        if (ex instanceof ResponseStatusException statusException) {
+            return statusException.getReason();
+        }
+        return ex.getClass().getName().startsWith(SPRING_PACKAGE) ? response.getBody().getDetail() : null;
     }
 
 }

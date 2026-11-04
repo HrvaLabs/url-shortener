@@ -16,6 +16,7 @@ import cc.hrva.urlshortener.service.SettingsService;
 import cc.hrva.urlshortener.service.inspection.InspectionGauges;
 import cc.hrva.urlshortener.service.inspection.InspectionUsage;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiter;
+import cc.hrva.urlshortener.service.stats.ServicePings;
 import com.nimbusds.jose.JOSEException;
 import com.nimbusds.jose.jwk.RSAKey;
 import com.nimbusds.jose.jwk.gen.RSAKeyGenerator;
@@ -85,6 +86,9 @@ class MetricsEndpointSecurityTest {
 
     @MockitoBean
     private InspectionUsage inspectionUsage;
+
+    @MockitoBean
+    private ServicePings servicePings;
 
     @MockitoBean
     private SettingsService settingsService;

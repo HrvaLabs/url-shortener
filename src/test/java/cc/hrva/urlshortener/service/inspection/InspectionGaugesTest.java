@@ -2,6 +2,7 @@ package cc.hrva.urlshortener.service.inspection;
 
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.service.jobs.JobFailedException;
+import cc.hrva.urlshortener.service.stats.ServicePings;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.util.OptionalDouble;
 import java.util.OptionalLong;
@@ -19,11 +20,14 @@ class InspectionGaugesTest {
     private final InspectionUsage inspectionUsage = mock(InspectionUsage.class);
     private final AppProperties appProperties = new AppProperties();
     private final SimpleMeterRegistry registry = new SimpleMeterRegistry();
-    private final InspectionGauges gauges = new InspectionGauges(inspectionUsage, appProperties);
+    private final ServicePings servicePings = mock(ServicePings.class);
+    private final InspectionGauges gauges = new InspectionGauges(inspectionUsage, servicePings, appProperties);
 
     @BeforeEach
     void setUp() {
         appProperties.getMetrics().setToken("metrics-token");
+        when(servicePings.database()).thenReturn(new ServicePings.Ping(true, 1.0));
+        when(servicePings.redis()).thenReturn(new ServicePings.Ping(true, 1.0));
         gauges.bindTo(registry);
     }
 
@@ -61,7 +65,7 @@ class InspectionGaugesTest {
         when(inspectionUsage.virusTotalLookupsToday()).thenReturn(OptionalLong.empty());
 
         assertThatThrownBy(gauges::refreshInspectionGauges).isInstanceOf(JobFailedException.class)
-                .hasMessage("The database wasn't reachable, so the queue sizes are unknown. Redis wasn't reachable, so today's usage is unknown.");
+                .hasMessage("The queue sizes couldn't be read, so they are unknown. Today's usage couldn't be read, so it is unknown.");
 
         assertThat(queue("screenshots")).isNaN();
         assertThat(queue("virustotal")).isZero();
@@ -77,8 +81,47 @@ class InspectionGaugesTest {
         when(inspectionUsage.virusTotalLookupsToday()).thenReturn(OptionalLong.empty());
 
         assertThatThrownBy(gauges::refreshInspectionGauges).isInstanceOf(JobFailedException.class)
-                .hasMessage("Redis wasn't reachable, so today's usage is unknown.");
+                .hasMessage("Today's usage couldn't be read, so it is unknown.");
         assertThat(queue("screenshots")).isEqualTo(1.0);
+    }
+
+    @Test
+    void aReadingMissingBecauseItsServiceIsDownIsNoExtraFailure() {
+        when(servicePings.database()).thenReturn(new ServicePings.Ping(false, null));
+        when(servicePings.redis()).thenReturn(new ServicePings.Ping(false, null));
+        when(inspectionUsage.screenshotsQueued()).thenReturn(OptionalLong.empty());
+        when(inspectionUsage.virusTotalQueued()).thenReturn(OptionalLong.empty());
+        when(inspectionUsage.browserSecondsToday()).thenReturn(OptionalDouble.empty());
+        when(inspectionUsage.virusTotalLookupsToday()).thenReturn(OptionalLong.empty());
+
+        gauges.refreshInspectionGauges();
+
+        assertThat(queue("screenshots")).isNaN();
+        assertThat(registry.get(InspectionGauges.BROWSER_USED_TODAY).gauge().value()).isNaN();
+    }
+
+    @Test
+    void onlyTheServiceThatIsUpCountsItsMissingReading() {
+        when(servicePings.database()).thenReturn(new ServicePings.Ping(false, null));
+        when(inspectionUsage.screenshotsQueued()).thenReturn(OptionalLong.empty());
+        when(inspectionUsage.virusTotalQueued()).thenReturn(OptionalLong.empty());
+        when(inspectionUsage.browserSecondsToday()).thenReturn(OptionalDouble.empty());
+        when(inspectionUsage.virusTotalLookupsToday()).thenReturn(OptionalLong.of(2));
+
+        assertThatThrownBy(gauges::refreshInspectionGauges).isInstanceOf(JobFailedException.class)
+                .hasMessage("Today's usage couldn't be read, so it is unknown.");
+    }
+
+    @Test
+    void withEveryReadingThereIsNoPing() {
+        when(inspectionUsage.screenshotsQueued()).thenReturn(OptionalLong.of(1));
+        when(inspectionUsage.virusTotalQueued()).thenReturn(OptionalLong.of(0));
+        when(inspectionUsage.browserSecondsToday()).thenReturn(OptionalDouble.of(1));
+        when(inspectionUsage.virusTotalLookupsToday()).thenReturn(OptionalLong.of(0));
+
+        gauges.refreshInspectionGauges();
+
+        org.mockito.Mockito.verifyNoInteractions(servicePings);
     }
 
     @Test

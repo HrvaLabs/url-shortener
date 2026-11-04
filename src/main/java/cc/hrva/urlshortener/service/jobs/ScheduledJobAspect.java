@@ -5,6 +5,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.aspectj.lang.ProceedingJoinPoint;
 import org.aspectj.lang.annotation.Around;
 import org.aspectj.lang.annotation.Aspect;
+import org.aspectj.lang.reflect.MethodSignature;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
@@ -20,8 +21,7 @@ public class ScheduledJobAspect {
 
     @Around("@annotation(org.springframework.scheduling.annotation.Scheduled) && within(cc.hrva.urlshortener..*)")
     public Object track(final ProceedingJoinPoint joinPoint) throws Throwable {
-        final var signature = joinPoint.getSignature();
-        final var name = signature.getDeclaringType().getSimpleName() + "." + signature.getName();
+        final var name = JobNames.of(((MethodSignature) joinPoint.getSignature()).getMethod());
         jobRuns.started(name);
         try {
             final var result = joinPoint.proceed();
