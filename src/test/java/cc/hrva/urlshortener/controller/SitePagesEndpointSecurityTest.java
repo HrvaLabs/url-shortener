@@ -139,9 +139,9 @@ class SitePagesEndpointSecurityTest {
                     .andExpect(header().string("Content-Security-Policy",
                             "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"))
                     .andExpect(header().string("X-Robots-Tag", LinkPageHeaders.ROBOTS))
-                    .andExpect(content().string(containsString("<h1>This link isn&#39;t available</h1>")))
-                    .andExpect(content().string(containsString("hrva.cc/wp-admin/setup-config.php")))
-                    .andExpect(content().string(containsString("There&#39;s no hrva.cc link with this name.")));
+                    .andExpect(content().string(containsString("<h1>This link doesn't exist</h1>")))
+                    .andExpect(content().string(containsString("<p>hrva.cc has no link with this name.</p>")))
+                    .andExpect(content().string(containsString("<a href=\"http://localhost:3000/\">Go to hrva.cc</a>")));
         }
         verifyNoInteractions(urlService, tokenProvider);
     }
