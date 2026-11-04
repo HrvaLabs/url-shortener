@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.security;
 
+import cc.hrva.urlshortener.service.stats.RecentRequests;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -116,7 +117,7 @@ class ServerTimingOnTomcatTest {
             ErrorMvcAutoConfiguration.class,
             HttpMessageConvertersAutoConfiguration.class
     })
-    @Import({ServerTimingFilter.class, TestApplication.Routes.class})
+    @Import({ServerTimingFilter.class, RecentRequests.class, TestApplication.Routes.class})
     static class TestApplication {
 
         @Bean
