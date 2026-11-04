@@ -49,12 +49,13 @@ public class JwtFilter extends GenericFilterBean {
       try {
         user = activeUser(token.get().authentication().getName());
       } catch (final RuntimeException exception) {
-        if (!DatabaseOutages.isOutage(exception)) {
+        final var redis = DatabaseOutages.isRedis(exception);
+        if (!redis && !DatabaseOutages.isOutage(exception)) {
           throw exception;
         }
-        log.warn("Session lookup refused, the database isn't answering exception={}", exception.getClass().getName());
+        log.warn("Session lookup refused, the {} isn't answering exception={}", redis ? "cache" : "database", exception.getClass().getName());
         ProblemResponses.retryAfter(httpServletResponse, DATABASE_RETRY);
-        ProblemResponses.write(httpServletRequest, httpServletResponse, DatabaseOutages.problem());
+        ProblemResponses.write(httpServletRequest, httpServletResponse, redis ? DatabaseOutages.cacheProblem() : DatabaseOutages.problem());
         return;
       }
       final var ended = user.isPresent() && sessionEnded(user.get(), token.get());

@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.util;
 
+import io.lettuce.core.RedisException;
 import java.sql.SQLException;
 import java.sql.SQLTimeoutException;
 import java.sql.SQLTransientConnectionException;
@@ -8,6 +9,8 @@ import org.hibernate.TransactionException;
 import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.dao.QueryTimeoutException;
 import org.springframework.dao.TransientDataAccessResourceException;
+import org.springframework.data.redis.RedisConnectionFailureException;
+import org.springframework.data.redis.RedisSystemException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.transaction.CannotCreateTransactionException;
@@ -16,8 +19,10 @@ import org.springframework.transaction.TransactionSystemException;
 public final class DatabaseOutages {
 
     public static final String UNREACHABLE = "hrva.cc can't reach its database right now. Try again in a minute.";
+    public static final String CACHE_UNREACHABLE = "hrva.cc can't reach its cache right now. Try again in a minute.";
     public static final String OUTAGE = "outage";
     public static final String DATABASE = "database";
+    public static final String CACHE = "cache";
 
     private static final int MAX_CAUSES = 10;
     private static final String CONNECTION_EXCEPTION = "08";
@@ -30,7 +35,27 @@ public final class DatabaseOutages {
         return problem;
     }
 
+    public static ProblemDetail cacheProblem() {
+        final var problem = ProblemResponses.of(HttpStatus.SERVICE_UNAVAILABLE, CACHE_UNREACHABLE);
+        problem.setProperty(OUTAGE, CACHE);
+        return problem;
+    }
+
+    public static boolean isRedis(final Throwable failure) {
+        var current = failure;
+        for (int depth = 0; current != null && depth < MAX_CAUSES; depth++) {
+            if (current instanceof RedisConnectionFailureException || current instanceof RedisSystemException || current instanceof RedisException) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
+    }
+
     public static boolean isOutage(final Throwable failure) {
+        if (isRedis(failure)) {
+            return false;
+        }
         var current = failure;
         for (int depth = 0; current != null && depth < MAX_CAUSES; depth++) {
             if (current instanceof CannotCreateTransactionException || current instanceof DataAccessResourceFailureException

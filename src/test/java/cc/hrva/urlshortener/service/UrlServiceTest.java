@@ -4215,6 +4215,20 @@ class UrlServiceTest {
     }
 
     @Test
+    void aRedisFailureOnTheRedirectNeverShowsTheDatabaseText() {
+        for (final var failure : java.util.List.<RuntimeException>of(
+                new org.springframework.data.redis.RedisConnectionFailureException("Unable to connect", new io.lettuce.core.RedisConnectionException("refused")),
+                new org.springframework.dao.QueryTimeoutException("Redis command timed out", new io.lettuce.core.RedisCommandTimeoutException("timed out")))) {
+            org.mockito.Mockito.doThrow(failure).when(urlRepository).findServed(null, "abc");
+
+            assertThat(urlServiceWithMeters().redirectResultUrl("abc", CLICK)).isInstanceOfSatisfying(cc.hrva.urlshortener.controller.LinksDownView.class, page -> {
+                assertThat(page.detail()).isEqualTo("hrva.cc can't reach its cache right now. Try again in a minute.");
+                assertThat(page.retryAfter()).isEqualTo(Duration.ofMinutes(1));
+            });
+        }
+    }
+
+    @Test
     void anyOtherFailureOnTheRedirectIsNotHidden() {
         when(urlRepository.findServed(null, "abc")).thenThrow(new IllegalStateException("bug"));
 

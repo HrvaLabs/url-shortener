@@ -102,6 +102,21 @@ class JwtFilterTest {
     }
 
     @Test
+    void aSessionLookupThatCannotReachRedisIsA503ForTheCache() throws Exception {
+        signedInAs("test@example.com", User.builder().id(1L).active(true).build());
+        when(userRepository.findByEmail("test@example.com")).thenThrow(new org.springframework.data.redis.RedisConnectionFailureException("Unable to connect",
+                new io.lettuce.core.RedisConnectionException("refused")));
+
+        jwtFilter.doFilter(request, response, filterChain);
+
+        assertThat(response.getStatus()).isEqualTo(503);
+        assertThat(response.getHeader("Retry-After")).isEqualTo("60");
+        assertThat(response.getContentAsString()).contains("\"detail\":\"hrva.cc can't reach its cache right now. Try again in a minute.\"")
+                .contains("\"outage\":\"cache\"").doesNotContain("database");
+        verify(filterChain, never()).doFilter(any(), any());
+    }
+
+    @Test
     void anyOtherFailureOfTheSessionLookupIsLeftToTheErrorPage() {
         signedInAs("test@example.com", User.builder().id(1L).active(true).build());
         when(userRepository.findByEmail("test@example.com")).thenThrow(new IllegalStateException("a bug"));

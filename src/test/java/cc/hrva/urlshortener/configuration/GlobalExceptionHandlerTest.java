@@ -63,6 +63,19 @@ class GlobalExceptionHandlerTest {
     }
 
     @Test
+    void aRedisFailureIsA503ForTheCacheNotTheDatabase(final CapturedOutput output) throws Exception {
+        for (final var probe : java.util.List.of("/probe/redis-refused", "/probe/redis-timeout", "/probe/redis-wrapped")) {
+            mockMvc.perform(get(probe))
+                    .andExpect(status().isServiceUnavailable())
+                    .andExpect(header().string("Retry-After", "60"))
+                    .andExpect(jsonPath("$.detail").value("hrva.cc can't reach its cache right now. Try again in a minute."))
+                    .andExpect(jsonPath("$.outage").value("cache"));
+        }
+
+        assertThat(output).contains("Cache unreachable exception=").doesNotContain("Database unreachable").doesNotContain("\tat ");
+    }
+
+    @Test
     void aQueryValueOfTheWrongTypeIsABadRequestNamingTheParameter(final CapturedOutput output) throws Exception {
         mockMvc.perform(get("/probe").param("days", "abc"))
                 .andExpect(status().isBadRequest())
@@ -268,6 +281,23 @@ class GlobalExceptionHandlerTest {
             errors.put("alias", "Use letters and digits.");
             errors.put("longUrl", "Enter a URL.");
             throw new FieldValidationException(errors);
+        }
+
+        @GetMapping("/probe/redis-refused")
+        String probeRedisRefused() {
+            throw new org.springframework.data.redis.RedisConnectionFailureException("Unable to connect to Redis",
+                    new io.lettuce.core.RedisConnectionException("refused"));
+        }
+
+        @GetMapping("/probe/redis-timeout")
+        String probeRedisTimeout() {
+            throw new org.springframework.dao.QueryTimeoutException("Redis command timed out",
+                    new io.lettuce.core.RedisCommandTimeoutException("Command timed out after 3 second(s)"));
+        }
+
+        @GetMapping("/probe/redis-wrapped")
+        String probeRedisWrapped() {
+            throw new IllegalStateException("wrapped", new io.lettuce.core.RedisConnectionException("refused"));
         }
 
         @GetMapping("/probe/no-connection")

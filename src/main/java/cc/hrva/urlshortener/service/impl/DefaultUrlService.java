@@ -992,6 +992,10 @@ public class DefaultUrlService implements UrlService {
             log.warn("Redirect answered with the links down page shortUrl={} reason=busy", place.alias());
             return linksDown(place, exception.getMessage(), exception.getRetryAfter());
         } catch (final RuntimeException exception) {
+            if (DatabaseOutages.isRedis(exception)) {
+                log.warn("Redirect answered with the links down page shortUrl={} reason=cache exception={}", place.alias(), exception.getClass().getName());
+                return linksDown(place, DatabaseOutages.CACHE_UNREACHABLE, LINKS_DOWN_RETRY);
+            }
             if (!DatabaseOutages.isOutage(exception)) {
                 throw exception;
             }

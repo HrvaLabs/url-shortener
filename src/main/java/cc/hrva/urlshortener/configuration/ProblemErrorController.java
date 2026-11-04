@@ -23,8 +23,13 @@ public class ProblemErrorController implements ErrorController {
 
     @RequestMapping("${server.error.path:${error.path:/error}}")
     public ResponseEntity<ProblemDetail> error(final HttpServletRequest request) {
-        if (request.getAttribute(RequestDispatcher.ERROR_EXCEPTION) instanceof Throwable failure && DatabaseOutages.isOutage(failure)) {
-            return databaseUnreachable(request);
+        if (request.getAttribute(RequestDispatcher.ERROR_EXCEPTION) instanceof Throwable failure) {
+            if (DatabaseOutages.isRedis(failure)) {
+                return unreachable(request, DatabaseOutages.cacheProblem());
+            }
+            if (DatabaseOutages.isOutage(failure)) {
+                return unreachable(request, DatabaseOutages.problem());
+            }
         }
         final var status = statusOf(request);
         final var message = request.getAttribute(RequestDispatcher.ERROR_MESSAGE) instanceof String text ? text : null;
@@ -36,8 +41,7 @@ public class ProblemErrorController implements ErrorController {
         return ResponseEntity.status(status).body(problem);
     }
 
-    private static ResponseEntity<ProblemDetail> databaseUnreachable(final HttpServletRequest request) {
-        final var problem = DatabaseOutages.problem();
+    private static ResponseEntity<ProblemDetail> unreachable(final HttpServletRequest request, final ProblemDetail problem) {
         if (request.getAttribute(RequestDispatcher.ERROR_REQUEST_URI) instanceof String path) {
             problem.setInstance(URI.create(path));
         }

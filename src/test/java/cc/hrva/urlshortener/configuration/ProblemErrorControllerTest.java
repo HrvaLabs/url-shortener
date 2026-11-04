@@ -39,6 +39,20 @@ class ProblemErrorControllerTest {
     }
 
     @Test
+    void aFilterThatCouldNotReachRedisIsA503ForTheCache() {
+        final var request = errorRequest(500, null, "/api/v1/users/me");
+        request.setAttribute(RequestDispatcher.ERROR_EXCEPTION, new org.springframework.data.redis.RedisConnectionFailureException("Unable to connect",
+                new io.lettuce.core.RedisConnectionException("refused")));
+
+        final var answer = controller.error(request);
+
+        assertThat(answer.getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
+        assertThat(answer.getHeaders().getFirst("Retry-After")).isEqualTo("60");
+        assertThat(answer.getBody().getDetail()).isEqualTo("hrva.cc can't reach its cache right now. Try again in a minute.");
+        assertThat(answer.getBody().getProperties()).containsEntry("outage", "cache");
+    }
+
+    @Test
     void aFilterThatCouldNotReachTheDatabaseIsA503() {
         final var request = errorRequest(500, null, "/api/v1/users/me");
         request.setAttribute(RequestDispatcher.ERROR_EXCEPTION, new org.springframework.transaction.CannotCreateTransactionException("no connection",

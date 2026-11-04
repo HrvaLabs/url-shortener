@@ -139,6 +139,9 @@ public class GlobalExceptionHandler {
         if (cause instanceof ConstraintViolationException cve) {
             return violations(cve);
         }
+        if (DatabaseOutages.isRedis(ex)) {
+            return cacheUnreachable(ex);
+        }
         if (DatabaseOutages.isOutage(ex)) {
             return databaseUnreachable(ex);
         }
@@ -437,7 +440,14 @@ public class GlobalExceptionHandler {
     @ExceptionHandler({CannotCreateTransactionException.class, DataAccessResourceFailureException.class, QueryTimeoutException.class,
             TransientDataAccessResourceException.class})
     public ResponseEntity<ProblemDetail> handleDatabaseUnreachable(final Exception ex) {
-        return databaseUnreachable(ex);
+        return DatabaseOutages.isRedis(ex) ? cacheUnreachable(ex) : databaseUnreachable(ex);
+    }
+
+    private static ResponseEntity<ProblemDetail> cacheUnreachable(final Exception ex) {
+        log.warn("Cache unreachable exception={}", ex.getClass().getName());
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .header(HttpHeaders.RETRY_AFTER, ProblemResponses.retryAfterSeconds(DATABASE_RETRY))
+                .body(DatabaseOutages.cacheProblem());
     }
 
     private static ResponseEntity<ProblemDetail> databaseUnreachable(final Exception ex) {
@@ -522,6 +532,9 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ProblemDetail> handleGeneric(final Exception ex) {
+        if (DatabaseOutages.isRedis(ex)) {
+            return cacheUnreachable(ex);
+        }
         if (DatabaseOutages.isOutage(ex)) {
             return databaseUnreachable(ex);
         }
