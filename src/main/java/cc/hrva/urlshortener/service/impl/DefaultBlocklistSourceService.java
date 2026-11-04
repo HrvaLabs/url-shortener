@@ -21,6 +21,7 @@ import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.Comparator;
 import java.util.List;
+import java.util.function.Function;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Predicate;
@@ -133,9 +134,18 @@ public class DefaultBlocklistSourceService implements BlocklistSourceService {
 
     @Override
     public List<BlocklistStatus> health() {
+        return health(blocklistHealth::statusOf);
+    }
+
+    @Override
+    public List<BlocklistStatus> healthFromDatabase() {
+        return health(blocklistHealth::statusFromDatabase);
+    }
+
+    private List<BlocklistStatus> health(final Function<BlocklistSource, BlocklistStatus> statusOf) {
         return blocklistSourceRepository.findByEnabledTrue().stream()
                 .sorted(Comparator.comparing(BlocklistSource::getName, String.CASE_INSENSITIVE_ORDER))
-                .map(blocklistHealth::statusOf)
+                .map(statusOf)
                 .toList();
     }
 

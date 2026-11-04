@@ -53,6 +53,7 @@ public class DefaultSystemStatusService implements SystemStatusService {
     static final long SERVER_ERRORS_FROM_REQUESTS = 20;
     static final double SERVER_ERRORS_SHARE = 0.05;
     static final double NEAR_THE_LIMIT_SHARE = 0.9;
+    static final Duration LONG_PAUSE = Duration.ofMinutes(5);
     private static final Duration EMAIL_FAILURES_WINDOW = Duration.ofHours(24);
     private static final String UNKNOWN_VERSION = "unknown";
     private static final String VERSION_PREFIX = "v";
@@ -79,7 +80,7 @@ public class DefaultSystemStatusService implements SystemStatusService {
         final var email = email(database.up());
         final var screenshots = screenshots(database.up(), redis.up());
         final var virusTotal = virusTotal(database.up(), redis.up());
-        final var blocklistStatuses = blocklistStatuses(database.up());
+        final var blocklistStatuses = blocklistStatuses(database.up(), redis.up());
         final var jobs = jobs();
         final var problems = new ArrayList<String>();
         if (!database.up()) {
@@ -146,12 +147,12 @@ public class DefaultSystemStatusService implements SystemStatusService {
                 utc(inspectionWorker.virusTotalPausedUntil()));
     }
 
-    private List<BlocklistStatus> blocklistStatuses(final boolean databaseUp) {
+    private List<BlocklistStatus> blocklistStatuses(final boolean databaseUp, final boolean redisUp) {
         if (!databaseUp) {
             return List.of();
         }
         try {
-            return blocklistSourceService.health();
+            return redisUp ? blocklistSourceService.health() : blocklistSourceService.healthFromDatabase();
         } catch (final RuntimeException exception) {
             log.warn("Could not read the blocklists for the system status exception={}", exception.getClass().getName());
             return List.of();
@@ -193,7 +194,11 @@ public class DefaultSystemStatusService implements SystemStatusService {
                 traffic.windowMinutes()));
     }
 
-    private static Optional<String> screenshotsProblem(final Screenshots screenshots) {
+    private boolean pausedForLong(final LocalDateTime pausedUntil) {
+        return pausedUntil != null && pausedUntil.isAfter(LocalDateTime.now(clock).plus(LONG_PAUSE));
+    }
+
+    private Optional<String> screenshotsProblem(final Screenshots screenshots) {
         if (!screenshots.configured() || !screenshots.enabled()) {
             return Optional.empty();
         }
@@ -202,7 +207,7 @@ public class DefaultSystemStatusService implements SystemStatusService {
         if (used != null && used >= limit) {
             return Optional.of("Screenshots: today's limit is used up.");
         }
-        if (screenshots.pausedUntil() != null) {
+        if (pausedForLong(screenshots.pausedUntil())) {
             return Optional.of("Screenshots: paused until " + readable(screenshots.pausedUntil()) + ".");
         }
         if (used != null && used >= limit * NEAR_THE_LIMIT_SHARE) {
@@ -211,14 +216,14 @@ public class DefaultSystemStatusService implements SystemStatusService {
         return Optional.empty();
     }
 
-    private static Optional<String> virusTotalProblem(final VirusTotal virusTotal) {
+    private Optional<String> virusTotalProblem(final VirusTotal virusTotal) {
         if (!virusTotal.configured() || !virusTotal.enabled()) {
             return Optional.empty();
         }
         if (virusTotal.lookupsToday() != null && virusTotal.lookupsToday() >= virusTotal.dailyLimit()) {
             return Optional.of("VirusTotal: today's %d lookups are used up.".formatted(virusTotal.dailyLimit()));
         }
-        if (virusTotal.pausedUntil() != null) {
+        if (pausedForLong(virusTotal.pausedUntil())) {
             return Optional.of("VirusTotal: paused until " + readable(virusTotal.pausedUntil()) + ".");
         }
         return Optional.empty();

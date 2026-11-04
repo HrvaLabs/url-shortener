@@ -334,6 +334,17 @@ class DefaultBlocklistSourceServiceTest {
     }
 
     @Test
+    void healthFromTheDatabaseUsesOnlyTheRowsInTheSameOrder() {
+        final var first = source(1).build();
+        final var second = source(2).name("Abuse.ch").url(OTHER).build();
+        when(blocklistSourceRepository.findByEnabledTrue()).thenReturn(List.of(first, second));
+        when(blocklistHealth.statusFromDatabase(any())).thenAnswer(invocation -> healthy(invocation.getArgument(0)));
+
+        assertThat(blocklistSourceService.healthFromDatabase()).extracting(BlocklistStatus::name).containsExactly("Abuse.ch", "HaGeZi Fake");
+        verify(blocklistHealth, never()).statusOf(any());
+    }
+
+    @Test
     void aNotModifiedMainUrlClearsTheLastError() {
         final var source = stored(source(1).lastSuccessUrl(MAIN).etag(ETAG).lastError("main: HTTP 503").build());
         when(blocklistStore.exists(1)).thenReturn(true);

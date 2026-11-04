@@ -18,8 +18,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class BlocklistHealthTest {
@@ -123,6 +125,18 @@ class BlocklistHealthTest {
         assertThat(blocklistHealth.statusOf(source().lastFetchedAt(NOW.minusHours(2)).build()))
                 .isEqualTo(new BlocklistStatus(1, "HaGeZi Fake", 6, NOW.minusHours(2), 0, false));
         assertThat(blocklistHealth.claimStaleAlert(1)).isFalse();
+    }
+
+    @Test
+    void theStatusFromTheDatabaseReadsNothingFromRedis() {
+        blocklistHealth.refreshed(1);
+        clearInvocations(redisTemplate, hashOperations);
+        final var fresh = source().lastFetchedAt(NOW.minusHours(2)).build();
+        final var old = source().lastFetchedAt(NOW.minusHours(13)).lastSuccessAt(NOW.minusHours(13)).build();
+
+        assertThat(blocklistHealth.statusFromDatabase(fresh)).isEqualTo(new BlocklistStatus(1, "HaGeZi Fake", 6, NOW.minusHours(2), 0, false));
+        assertThat(blocklistHealth.statusFromDatabase(old)).isEqualTo(new BlocklistStatus(1, "HaGeZi Fake", 6, NOW.minusHours(13), 0, true));
+        verifyNoInteractions(redisTemplate, hashOperations);
     }
 
     private Map<Object, Object> hash(final String key) {

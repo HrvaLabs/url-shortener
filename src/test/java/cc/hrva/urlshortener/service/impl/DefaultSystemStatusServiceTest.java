@@ -31,6 +31,8 @@ import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
@@ -133,6 +135,22 @@ class DefaultSystemStatusServiceTest {
     }
 
     @Test
+    void withRedisDownTheBlocklistsComeFromTheDatabaseOnly() {
+        when(servicePings.redis()).thenReturn(new ServicePings.Ping(false, null));
+        when(blocklistSourceService.healthFromDatabase()).thenReturn(List.of(
+                new BlocklistStatus(1, "URLhaus", 6, LocalDateTime.of(2026, 11, 3, 9, 0), 0, true)));
+
+        final var status = service.status();
+
+        assertThat(status.blocklists()).isEqualTo(new SystemStatusResponse.Blocklists(LocalDateTime.of(2026, 11, 3, 9, 0), List.of("URLhaus")));
+        assertThat(status.summary().problems()).containsExactly("Redis: not reachable.",
+                "Blocklist URLhaus is stale: last refreshed 3 November 2026 at 09:00 UTC.");
+        verify(blocklistSourceService, never()).health();
+        verify(inspectionUsage, never()).browserSecondsToday();
+        verify(inspectionUsage, never()).virusTotalLookupsToday();
+    }
+
+    @Test
     void serverErrorsAboveFivePercentOfAtLeastTwentyRequests() {
         traffic(80, 30, 5);
 
@@ -186,10 +204,34 @@ class DefaultSystemStatusServiceTest {
     }
 
     @Test
-    void screenshotsPaused() {
+    void screenshotsPausedForAnHour() {
         when(inspectionWorker.screenshotsPausedUntil()).thenReturn(Optional.of(Instant.parse("2026-11-03T23:31:00Z")));
 
         assertThat(service.status().summary().problems()).containsExactly("Screenshots: paused until 3 November 2026 at 23:31 UTC.");
+    }
+
+    @Test
+    void aScreenshotPauseOfFiveMinutesOrLessHasNoSentenceButStaysInTheJson() {
+        when(inspectionWorker.screenshotsPausedUntil()).thenReturn(Optional.of(Instant.parse("2026-11-03T22:32:00Z")));
+
+        final var oneMinute = service.status();
+
+        assertThat(oneMinute.summary().ok()).isTrue();
+        assertThat(oneMinute.screenshots().pausedUntil()).isEqualTo(LocalDateTime.of(2026, 11, 3, 22, 32));
+
+        when(inspectionWorker.screenshotsPausedUntil()).thenReturn(Optional.of(Instant.parse("2026-11-03T22:36:00Z")));
+        assertThat(service.status().summary().ok()).isTrue();
+
+        when(inspectionWorker.screenshotsPausedUntil()).thenReturn(Optional.of(Instant.parse("2026-11-03T22:36:01Z")));
+        assertThat(service.status().summary().problems()).containsExactly("Screenshots: paused until 3 November 2026 at 22:36 UTC.");
+    }
+
+    @Test
+    void aShortScreenshotPauseNearTheLimitStillReportsTheLimit() {
+        when(inspectionWorker.screenshotsPausedUntil()).thenReturn(Optional.of(Instant.parse("2026-11-03T22:31:10Z")));
+        when(inspectionUsage.browserSecondsToday()).thenReturn(OptionalDouble.of(570));
+
+        assertThat(service.status().summary().problems()).containsExactly("Screenshots: 570 of 600 seconds of browser time used today.");
     }
 
     @Test
@@ -204,10 +246,20 @@ class DefaultSystemStatusServiceTest {
     }
 
     @Test
-    void virusTotalPaused() {
+    void virusTotalPausedForAnHour() {
+        when(inspectionWorker.virusTotalPausedUntil()).thenReturn(Optional.of(Instant.parse("2026-11-03T23:31:00Z")));
+
+        assertThat(service.status().summary().problems()).containsExactly("VirusTotal: paused until 3 November 2026 at 23:31 UTC.");
+    }
+
+    @Test
+    void aOneMinuteVirusTotalPauseHasNoSentenceButStaysInTheJson() {
         when(inspectionWorker.virusTotalPausedUntil()).thenReturn(Optional.of(Instant.parse("2026-11-03T22:32:00Z")));
 
-        assertThat(service.status().summary().problems()).containsExactly("VirusTotal: paused until 3 November 2026 at 22:32 UTC.");
+        final var status = service.status();
+
+        assertThat(status.summary().ok()).isTrue();
+        assertThat(status.virusTotal().pausedUntil()).isEqualTo(LocalDateTime.of(2026, 11, 3, 22, 32));
     }
 
     @Test
@@ -257,8 +309,8 @@ class DefaultSystemStatusServiceTest {
         when(servicePings.redis()).thenReturn(new ServicePings.Ping(false, null));
         traffic(100, 10, 50);
         when(inspectionWorker.screenshotsPausedUntil()).thenReturn(Optional.of(Instant.parse("2026-11-03T23:31:00Z")));
-        when(inspectionWorker.virusTotalPausedUntil()).thenReturn(Optional.of(Instant.parse("2026-11-03T22:32:00Z")));
-        when(blocklistSourceService.health()).thenReturn(List.of(new BlocklistStatus(2, "Phishing Army", 6, null, 3, true)));
+        when(inspectionWorker.virusTotalPausedUntil()).thenReturn(Optional.of(Instant.parse("2026-11-03T23:32:00Z")));
+        when(blocklistSourceService.healthFromDatabase()).thenReturn(List.of(new BlocklistStatus(2, "Phishing Army", 6, null, 3, true)));
         when(emailLogRepository.countByStatusAndCreatedAtGreaterThanEqual(EmailLog.STATUS_FAILED, NOW_UTC.minusHours(24))).thenReturn(2L);
         jobRuns.started("checkTraffic");
         jobRuns.failed("checkTraffic", new IllegalStateException("x"));
@@ -270,7 +322,7 @@ class DefaultSystemStatusServiceTest {
                 "Redis: not reachable.",
                 "Server errors: 50 of 100 requests in the last 60 minutes.",
                 "Screenshots: paused until 3 November 2026 at 23:31 UTC.",
-                "VirusTotal: paused until 3 November 2026 at 22:32 UTC.",
+                "VirusTotal: paused until 3 November 2026 at 23:32 UTC.",
                 "Blocklist Phishing Army is stale: never refreshed.",
                 "Email: 2 failures in the last 24 hours.",
                 "Check traffic for alerts failed at 3 November 2026 at 22:31 UTC.");

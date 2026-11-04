@@ -44,7 +44,14 @@ public class BlocklistHealth {
     }
 
     public BlocklistStatus statusOf(final BlocklistSource source) {
-        final var recorded = recorded(source.getId());
+        return statusOf(source, recorded(source.getId()));
+    }
+
+    public BlocklistStatus statusFromDatabase(final BlocklistSource source) {
+        return statusOf(source, Map.of());
+    }
+
+    private BlocklistStatus statusOf(final BlocklistSource source, final Map<Object, Object> recorded) {
         final var lastRefreshedAt = Optional.ofNullable(recorded.get(REFRESHED_AT)).map(value -> LocalDateTime.parse(value.toString()))
                 .orElseGet(() -> source.getLastError() == null ? source.getLastFetchedAt() : source.getLastSuccessAt());
         final var errors = NumberUtils.toLong(String.valueOf(recorded.get(ERRORS)));

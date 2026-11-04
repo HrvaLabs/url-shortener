@@ -16,5 +16,6 @@ public interface BlocklistSourceService {
     void refreshDue();
     void reloadMissing();
     List<BlocklistStatus> health();
+    List<BlocklistStatus> healthFromDatabase();
 
 }

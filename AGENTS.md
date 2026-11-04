@@ -50,7 +50,7 @@ java -jar "$E2E/app.jar" --spring.profiles.active=local --server.port=18080 \
 - Run the jar from a copy, so `mvn clean` doesn't pull it from under the running app.
 
 ## Testing
-- `mvn test` (or `mvn -B verify`) — 7608 tests, JUnit 5 + Mockito + AssertJ
+- `mvn test` (or `mvn -B verify`) — 7614 tests, JUnit 5 + Mockito + AssertJ
 - Surefire runs them with `-Duser.timezone=UTC` (`pom.xml`), the container's zone, so stored timestamps and day boundaries in the tests match production on any machine.
 - Surefire stops a forked test JVM after 20 minutes (`forkedProcessTimeoutInSeconds` 1200) and waits at most 60 s for it to exit (`forkedProcessExitTimeoutInSeconds`), so a hung test fails the build within CI's 30-minute job limit (v2.29, see CI / Deploy).
 - Mostly plain `@ExtendWith(MockitoExtension.class)` unit tests. Each `@SpringBootTest` class boots its own nested `TestApplication` (a trimmed context) on embedded H2 and mocks the rest:
@@ -1254,15 +1254,15 @@ Site-wide aggregates for the FE stats page (`/admin/dashboard`), one endpoint pe
   - `email`: `lastSentAt` is the newest `email_log.sent_at` (set only by a send that worked), `failures24h` counts `FAILED` rows created in the last 24 hours (a resent one is `RESENT` and drops out).
   - `screenshots`: `configured` (account id and Browser Run token set), `enabled` (the `LINK_SCREENSHOTS` switch), `browserSecondsToday` (`BrowserTimeUsed`), `browserSecondsLimit` (`app.inspection.browser-seconds-daily-limit`), `queued` (`PENDING`) and `pausedUntil` (`InspectionWorker.screenshotsPausedUntil()`: the worker's pause while it lies ahead, a daily limit until midnight UTC, a rate limit, a refused token for an hour or a failure for a minute).
   - `virusTotal`: the same with the API key, the `VIRUSTOTAL_LOOKUPS` switch, `lookupsToday` (the `rate-limit:virustotal:<date>` counter, never above the limit), `dailyLimit` and `virusTotalPausedUntil()`.
-  - `blocklists`: from `BlocklistSourceService.health()` (`BlocklistHealth`, the enabled sources): `lastRefreshAt` is the newest refresh of any list, `stale` the names of the stale ones.
+  - `blocklists`: from `BlocklistSourceService.health()` (`BlocklistHealth`, the enabled sources): `lastRefreshAt` is the newest refresh of any list, `stale` the names of the stale ones. While the Redis ping fails it uses `healthFromDatabase()` instead (`BlocklistHealth.statusFromDatabase`: the row's `last_fetched_at` or `last_success_at`, no error count, no Redis read), so a Redis that drops packets costs one ping timeout, not one per list.
   - `server`: `version` is `v` plus `AppVersion.current()` (null when unknown), `startedAt` and `uptimeSeconds` from the JVM, `startupSeconds` from `ApplicationReadyEvent.getTimeTaken()` (null before ready), heap used and max (max -1 when the JVM sets none) and `gcPauseMsTotal`, the sum of the collectors' `getCollectionTime()` since the start.
   - `jobs`: `JobRuns.all()`, every labelled job in `JobLabels` order, then any unlabelled one.
-  - While the database ping fails, nothing else reads the database (email, queues and blocklists come back empty or null instead of waiting out more timeouts); while the Redis ping fails, today's browser seconds and lookups are null. Each read is fail-soft with one warn line.
+  - While the database ping fails, nothing else reads the database (email, queues and blocklists come back empty or null instead of waiting out more timeouts); while the Redis ping fails, today's browser seconds and lookups are null and the blocklists come from the database only. So the call is bounded by the two pings. Each read is fail-soft with one warn line.
   - `summary.problems`, in this order, facts only, times as `3 November 2026 at 22:31 UTC` (`LONG_DATE_TIME_UTC_FORMAT`); `ok` is true exactly when there are none:
     - `Database: not reachable.` and `Redis: not reachable.` when the ping fails;
     - `Server errors: 5 of 80 requests in the last 60 minutes.` when 5xx are more than 5% of the window's requests and there are at least 20;
-    - for screenshots, only when configured and on, one sentence: `Screenshots: today's limit is used up.` at or over the limit, else `Screenshots: paused until <time>.`, else `Screenshots: 561 of 600 seconds of browser time used today.` at 90% or more;
-    - for VirusTotal, only when configured and on: `VirusTotal: today's 480 lookups are used up.` at the limit, else `VirusTotal: paused until <time>.`;
+    - for screenshots, only when configured and on, one sentence: `Screenshots: today's limit is used up.` at or over the limit, else `Screenshots: paused until <time>.` when the pause ends more than 5 minutes from now, else `Screenshots: 561 of 600 seconds of browser time used today.` at 90% or more;
+    - for VirusTotal, only when configured and on: `VirusTotal: today's 480 lookups are used up.` at the limit, else `VirusTotal: paused until <time>.` when the pause ends more than 5 minutes from now (a shorter pause, such as the minute after a failure or a rate limit, has no sentence but stays in `pausedUntil`);
     - per stale blocklist `Blocklist URLhaus is stale: last refreshed <time>.` or `… is stale: never refreshed.`;
     - `Email: 1 failure in the last 24 hours.` (`failures` from 2);
     - per job whose last run failed `<label> failed at <time of the failed run's end>.`
