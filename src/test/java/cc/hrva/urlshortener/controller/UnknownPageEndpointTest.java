@@ -123,7 +123,7 @@ class UnknownPageEndpointTest {
             """;
     private static final List<String> PATHS_THAT_CANNOT_BE_LINKS = List.of(
             "/.env", "/config.php.bak", "/config.php.bak/", "/wp/v2/posts/1", "/ssl/server.key", "/.git", "/sitemap.xml", "/favicon.png", "/wp-login.php",
-            "/.env?x=1", "/%C3%A9");
+            "/.env?x=1", "/a%20b", "/my.link");
 
     @LocalServerPort
     private int port;
@@ -248,6 +248,15 @@ class UnknownPageEndpointTest {
 
         verify(urlService, times(3)).redirectResultUrl(eq("abc12"), any());
         verify(urlService).redirectResultUrl(eq("A_b-9"), any());
+    }
+
+    @Test
+    void aLinkSavedBeforeTheAliasRuleStillGoesToTheRedirect() throws Exception {
+        when(urlService.redirectResultUrl(eq("\u010duj mali"), any())).thenReturn(new RedirectView("https://example.com/c"));
+
+        mockMvc.perform(get(URI.create("/%C4%8Duj%20mali"))).andExpect(status().isFound()).andExpect(redirectedUrl("https://example.com/c"));
+
+        verify(urlService).redirectResultUrl(eq("\u010duj mali"), any());
     }
 
     @Test

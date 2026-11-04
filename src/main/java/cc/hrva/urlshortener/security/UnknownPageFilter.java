@@ -25,6 +25,7 @@ public class UnknownPageFilter extends OncePerRequestFilter {
             "api", "actuator", "oauth2", "login", "logout", ".well-known", "mcp", "swagger-ui", "v3", "error");
     private static final Set<String> KEPT_SINGLE_SEGMENTS = Set.of("favicon.ico", "robots.txt", ".well-known", "swagger-ui.html");
     private static final Pattern ALIAS = Pattern.compile("[a-zA-Z0-9_-]+");
+    private static final int ASCII_LIMIT = 128;
     private static final String HANDLE_PREFIX = "@";
     private static final String SLASH = "/";
     private static final String CONTENT_TYPE = "text/html;charset=UTF-8";
@@ -82,7 +83,11 @@ public class UnknownPageFilter extends OncePerRequestFilter {
         if (decoded.startsWith(HANDLE_PREFIX) || KEPT_SINGLE_SEGMENTS.contains(decoded.toLowerCase(Locale.ROOT))) {
             return false;
         }
-        return !ALIAS.matcher(decoded).matches();
+        return isAscii(decoded) && !ALIAS.matcher(decoded).matches();
+    }
+
+    private static boolean isAscii(final String value) {
+        return value.chars().allMatch(character -> character < ASCII_LIMIT);
     }
 
     @Override
