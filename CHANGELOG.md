@@ -4,6 +4,26 @@ All notable changes to hrva.cc — the URL shortener.
 
 ---
 
+## [v2.30] — 2026-11-04
+
+The Health page shows live system status, the app starts about a third faster after an update, addresses that can't be links get a quick answer, and the daily click summary arrives at 08:00.
+
+### 🔔 Notifications
+- The daily click summary arrives at 08:00 Croatian time instead of 01:15. It still covers yesterday. The weekly summary stays on Monday at 09:00.
+
+### ⚡ Performance
+- The app starts about a third faster after an update, so the gap while hrva.cc restarts is shorter.
+- An address that can't be a link, such as /.env, /wp-login.php or /config.php.bak, gets the small "This link doesn't exist" page right away, without a database lookup. Links saved with letters outside A to Z open as before.
+- The public health check no longer waits for the mail server.
+- Every response has a Server-Timing header with the time the server spent on it.
+
+### 🔧 Admin
+- The Health page shows live system status and refreshes every 30 seconds. At the top, one line lists anything that is wrong, in plain sentences. Below it are traffic and response times for the last 60 minutes, the database and Redis (up or down, response time), email (when the last one was sent, failures in the last 24 hours), screenshots and VirusTotal (today's use against the daily limit, the queue, and pauses longer than 5 minutes), blocklists (lists that are out of date), the server (version, uptime, startup time, memory) and the last run and outcome of each scheduled job. When the database is down, the page says so.
+- /actuator/prometheus serves Prometheus metrics, only with the header Authorization: Bearer <APP_METRICS_TOKEN>. A wrong or missing token gets 401. Without APP_METRICS_TOKEN set on the server the endpoint doesn't exist and answers 404, for admins too.
+- New settings for self-hosters: APP_METRICS_TOKEN, and APP_INSPECTION_BROWSER_SECONDS_DAILY_LIMIT, the Browser Run seconds per day the Health page compares today's use with (600 by default).
+
+---
+
 ## [v2.29] — 2026-11-03
 
 Screenshots, redirect chains and VirusTotal verdicts for links in the review queue, the warning page on links without an account while they wait for review, a plain-text part in every email, and a round of fixes.
