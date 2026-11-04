@@ -37,7 +37,7 @@ public class ProblemErrorController implements ErrorController {
     }
 
     private static ResponseEntity<ProblemDetail> databaseUnreachable(final HttpServletRequest request) {
-        final var problem = ProblemResponses.of(HttpStatus.SERVICE_UNAVAILABLE, DatabaseOutages.UNREACHABLE);
+        final var problem = DatabaseOutages.problem();
         if (request.getAttribute(RequestDispatcher.ERROR_REQUEST_URI) instanceof String path) {
             problem.setInstance(URI.create(path));
         }

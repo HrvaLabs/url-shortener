@@ -96,6 +96,7 @@ class JwtFilterTest {
         assertThat(response.getHeader("Retry-After")).isEqualTo("60");
         assertThat(response.getContentType()).isEqualTo("application/problem+json");
         assertThat(response.getContentAsString()).contains("\"detail\":\"hrva.cc can't reach its database right now. Try again in a minute.\"")
+                .contains("\"outage\":\"database\"")
                 .doesNotContain("HikariPool");
         verify(filterChain, never()).doFilter(any(), any());
     }

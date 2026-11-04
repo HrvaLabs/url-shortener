@@ -18,10 +18,15 @@ import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.test.json.JsonCompareMode;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import org.springframework.web.server.ResponseStatusException;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -49,7 +54,8 @@ class GlobalExceptionHandlerTest {
             mockMvc.perform(get(probe))
                     .andExpect(status().isServiceUnavailable())
                     .andExpect(header().string("Retry-After", "60"))
-                    .andExpect(jsonPath("$.detail").value("hrva.cc can't reach its database right now. Try again in a minute."));
+                    .andExpect(jsonPath("$.detail").value("hrva.cc can't reach its database right now. Try again in a minute."))
+                    .andExpect(jsonPath("$.outage").value("database"));
         }
 
         assertThat(output).contains("Database unreachable exception=").doesNotContain("Unhandled").doesNotContain("\tat ")
@@ -180,8 +186,71 @@ class GlobalExceptionHandlerTest {
                 .andExpect(jsonPath("$.detail").value("Link previews are busy. Try again in a few seconds."));
     }
 
+    @Test
+    void aClientThatAcceptsNoFormatTheEndpointAnswersGets406WithoutAStackTrace(final CapturedOutput output) throws Exception {
+        mockMvc.perform(get("/probe-json").accept(MediaType.TEXT_HTML))
+                .andExpect(status().isNotAcceptable());
+
+        assertThat(output).doesNotContain("Unhandled").doesNotContain("\tat ");
+    }
+
+    @Test
+    void aMissingRequiredHeaderIsABadRequestWithoutAStackTrace(final CapturedOutput output) throws Exception {
+        mockMvc.perform(get("/probe/header"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400));
+
+        assertThat(output).doesNotContain("Unhandled").doesNotContain("\tat ");
+    }
+
+    @Test
+    void anyOtherSpringClientErrorKeepsItsStatusAndHeadersWithoutAStackTrace(final CapturedOutput output) throws Exception {
+        mockMvc.perform(get("/probe/payload-too-large"))
+                .andExpect(status().isPayloadTooLarge())
+                .andExpect(jsonPath("$.status").value(413));
+        mockMvc.perform(get("/probe/gone"))
+                .andExpect(status().isGone())
+                .andExpect(jsonPath("$.detail").value("This was removed."));
+
+        assertThat(output).doesNotContain("Unhandled").doesNotContain("\tat ");
+    }
+
+    @Test
+    void aSpringServerErrorIsStillA500WithTheGenericText(final CapturedOutput output) throws Exception {
+        mockMvc.perform(get("/probe/spring-server-error"))
+                .andExpect(status().isInternalServerError())
+                .andExpect(jsonPath("$.detail").value("Internal server error"));
+
+        assertThat(output).contains("Unhandled exception");
+    }
+
     @RestController
     static class ProbeController {
+
+        @GetMapping(value = "/probe-json", produces = MediaType.APPLICATION_JSON_VALUE)
+        Map<String, String> probeJson() {
+            return Map.of("ok", "yes");
+        }
+
+        @GetMapping("/probe/header")
+        String probeHeader(@RequestHeader("X-Probe") final String probe) {
+            return probe;
+        }
+
+        @GetMapping("/probe/payload-too-large")
+        String probePayloadTooLarge() {
+            throw new MaxUploadSizeExceededException(1024);
+        }
+
+        @GetMapping("/probe/gone")
+        String probeGone() {
+            throw new ResponseStatusException(HttpStatus.GONE, "This was removed.");
+        }
+
+        @GetMapping("/probe/spring-server-error")
+        String probeSpringServerError() {
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "secret internals");
+        }
 
         @GetMapping("/probe/busy")
         String probeBusy() {

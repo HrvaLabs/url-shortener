@@ -54,7 +54,7 @@ public class JwtFilter extends GenericFilterBean {
         }
         log.warn("Session lookup refused, the database isn't answering exception={}", exception.getClass().getName());
         ProblemResponses.retryAfter(httpServletResponse, DATABASE_RETRY);
-        ProblemResponses.write(httpServletRequest, httpServletResponse, HttpStatus.SERVICE_UNAVAILABLE, DatabaseOutages.UNREACHABLE);
+        ProblemResponses.write(httpServletRequest, httpServletResponse, DatabaseOutages.problem());
         return;
       }
       final var ended = user.isPresent() && sessionEnded(user.get(), token.get());

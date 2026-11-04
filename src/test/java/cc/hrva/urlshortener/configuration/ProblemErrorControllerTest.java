@@ -49,6 +49,7 @@ class ProblemErrorControllerTest {
         assertThat(answer.getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
         assertThat(answer.getHeaders().getFirst("Retry-After")).isEqualTo("60");
         assertThat(answer.getBody().getDetail()).isEqualTo("hrva.cc can't reach its database right now. Try again in a minute.");
+        assertThat(answer.getBody().getProperties()).containsEntry("outage", "database");
     }
 
     @Test

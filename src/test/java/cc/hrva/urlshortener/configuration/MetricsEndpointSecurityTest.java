@@ -23,10 +23,13 @@ import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.SpringBootConfiguration;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpHeaders;
@@ -38,6 +41,7 @@ import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.containsString;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.never;
@@ -65,6 +69,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
                 "app.server-url=localhost"
         })
 @AutoConfigureMockMvc
+@ExtendWith(OutputCaptureExtension.class)
 class MetricsEndpointSecurityTest {
 
     private static final String PROMETHEUS = "/actuator/prometheus";
@@ -182,6 +187,14 @@ class MetricsEndpointSecurityTest {
         mockMvc.perform(get("/actuator/health"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("UP"));
+    }
+
+    @Test
+    void theHealthEndpointAnswers406ToAClientThatOnlyAcceptsHtml(final CapturedOutput output) throws Exception {
+        mockMvc.perform(get("/actuator/health").header(HttpHeaders.ACCEPT, "text/html"))
+                .andExpect(status().isNotAcceptable());
+
+        assertThat(output).doesNotContain("Unhandled").doesNotContain("\tat ");
     }
 
     @Test

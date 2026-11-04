@@ -61,6 +61,7 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import org.apache.commons.lang3.StringUtils;
@@ -84,6 +85,7 @@ import org.springframework.transaction.CannotCreateTransactionException;
 import org.springframework.transaction.TransactionSystemException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.HttpMediaTypeNotSupportedException;
+import org.springframework.web.ErrorResponse;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
@@ -442,7 +444,7 @@ public class GlobalExceptionHandler {
         log.warn("Database unreachable exception={}", ex.getClass().getName());
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
                 .header(HttpHeaders.RETRY_AFTER, ProblemResponses.retryAfterSeconds(DATABASE_RETRY))
-                .body(ProblemResponses.of(HttpStatus.SERVICE_UNAVAILABLE, DatabaseOutages.UNREACHABLE));
+                .body(DatabaseOutages.problem());
     }
 
     @ExceptionHandler(ServiceBusyException.class)
@@ -523,8 +525,21 @@ public class GlobalExceptionHandler {
         if (DatabaseOutages.isOutage(ex)) {
             return databaseUnreachable(ex);
         }
+        if (ex instanceof ErrorResponse response && response.getStatusCode().is4xxClientError()) {
+            return clientError(ex, response);
+        }
         log.error("Unhandled exception", ex);
         return ProblemResponses.entity(HttpStatus.INTERNAL_SERVER_ERROR, "Internal server error");
+    }
+
+    private static ResponseEntity<ProblemDetail> clientError(final Exception ex, final ErrorResponse response) {
+        final var status = Objects.requireNonNullElse(HttpStatus.resolve(response.getStatusCode().value()), HttpStatus.BAD_REQUEST);
+        log.info("Client error status={} exception={}", status.value(), ex.getClass().getName());
+        final var answer = ResponseEntity.status(status).headers(response.getHeaders());
+        if (status == HttpStatus.NOT_ACCEPTABLE) {
+            return answer.build();
+        }
+        return answer.body(ProblemResponses.of(status, StringUtils.defaultIfBlank(response.getBody().getDetail(), status.getReasonPhrase())));
     }
 
 }
