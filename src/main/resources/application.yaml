@@ -91,6 +91,7 @@ app:
   short-url-length: 5
   api-key-requests-per-hour: 600
   jwt-token-validity-seconds: 36000
+  jwt-session-max-seconds: ${APP_JWT_SESSION_MAX_SECONDS:2592000}
   api-key-expiration-in-months: 12
   reset-token-expiration-in-hours: 1
   user-api-key-slots: 4

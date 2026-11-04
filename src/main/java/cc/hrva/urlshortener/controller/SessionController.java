@@ -34,4 +34,16 @@ public class SessionController {
         return ResponseEntity.ok().headers(headers).body(new SessionsEndedResponse(headers.getFirst(CurrentSession.TOKEN_HEADER)));
     }
 
+    @Operation(summary = "Keep this sign-in going",
+            description = "Answers a new token in the Authorization header that ends app.jwt-token-validity-seconds (10 hours) from now, never later "
+                    + "than app.jwt-session-max-seconds (30 days) after the sign-in, and never sooner than the current one. The web app calls it "
+                    + "while you use it, at most every few minutes.")
+    @ApiResponse(responseCode = "204", description = "The new token is in the Authorization header")
+    @ApiResponse(responseCode = "401", description = "Not signed in, or this session ended")
+    @PostMapping("/renew")
+    @PreAuthorize("hasAnyRole('ROLE_ADMIN', 'ROLE_USER')")
+    public ResponseEntity<Void> renew() {
+        return ResponseEntity.noContent().headers(currentSession.keepThisDeviceSignedIn()).build();
+    }
+
 }

@@ -39,6 +39,10 @@ public class AppProperties {
 
     @NotNull
     @Positive
+    private Long jwtSessionMaxSeconds = 2_592_000L;
+
+    @NotNull
+    @Positive
     private Integer apiKeyRequestsPerHour = 600;
 
     @NotNull

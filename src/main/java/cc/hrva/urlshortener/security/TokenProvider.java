@@ -57,7 +57,18 @@ public class TokenProvider {
   }
 
   public String renewToken(final Authentication authentication, final SessionToken current) {
-    return signedToken(authentication, Instant.now(), current.signedInAt(), current.expiresAt());
+    final var now = Instant.now();
+    final var signedInAt = Objects.requireNonNullElse(current.signedInAt(), now);
+
+    return signedToken(authentication, now, signedInAt, renewedExpiry(signedInAt, current.expiresAt(), now));
+  }
+
+  private Instant renewedExpiry(final Instant signedInAt, final Instant expiresAt, final Instant now) {
+    final var longest = signedInAt.plusSeconds(appProperties.getJwtSessionMaxSeconds());
+    final var sliding = now.plusMillis(tokenValidityInMilliseconds);
+    final var capped = sliding.isAfter(longest) ? longest : sliding;
+
+    return expiresAt != null && expiresAt.isAfter(capped) ? expiresAt : capped;
   }
 
   public static Authentication authenticationOf(final cc.hrva.urlshortener.model.User user) {

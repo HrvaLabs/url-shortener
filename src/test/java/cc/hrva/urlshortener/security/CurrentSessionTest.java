@@ -47,7 +47,7 @@ class CurrentSessionTest {
     }
 
     @Test
-    void theDeviceGetsATokenIssuedNowWithTheSameSignInTimeAndExpiryAndTheRolesItHasNow() {
+    void theDeviceGetsATokenIssuedNowWithTheSameSignInTimeAndALongerSessionKeptAndTheRolesItHasNow() {
         final var signedIn = Instant.now().minus(2, ChronoUnit.HOURS).truncatedTo(ChronoUnit.SECONDS);
         final var expires = Instant.now().plus(28, ChronoUnit.DAYS).truncatedTo(ChronoUnit.SECONDS);
         signedInWith(tokenIssued(signedIn, expires, "ROLE_USER,ROLE_ADMIN"));

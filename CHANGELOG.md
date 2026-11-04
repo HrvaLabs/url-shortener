@@ -6,7 +6,10 @@ All notable changes to hrva.cc — the URL shortener.
 
 ## [v2.31] — 2026-11-04
 
-When the database is down, signed-in pages say so instead of sending you to sign in, and the Health page explains each problem in plain words, with local times.
+You stay signed in while you use hrva.cc, signed-in pages say so when the database is down instead of sending you to sign in, and the Health page explains each problem in plain words, with local times.
+
+### 🛡️ Accounts & Security
+- You stay signed in while you use hrva.cc: a sign-in ends after 10 hours without activity, and after 30 days at most. Before, it ended 10 hours after you signed in, even in the middle of using the site.
 
 ### 🐛 Fixes
 - When hrva.cc can't reach its database, a page you open while signed in says so and tries again every 30 seconds, instead of loading for about two minutes and then showing the sign-in form. You aren't signed out because of it. "Reconnecting…" now shows only while hrva.cc restarts.
@@ -23,6 +26,7 @@ When the database is down, signed-in pages say so instead of sending you to sign
 - The Garbage collection card no longer sits alone on its row on wide screens.
 - Prometheus: hrva_job_last_outcome and hrva_job_last_run_timestamp_seconds name each job by class and method in job, such as DefaultDiscordAlertService.flush instead of flush. Prometheus shows that label as exported_job, because it renames job. A new label, label, holds the readable name, such as Post Discord alerts.
 - An error answer for an outage carries "outage": "database" or "outage": "cache", so the web app can tell an outage from a restart.
+- New setting for self-hosters: APP_JWT_SESSION_MAX_SECONDS, the longest a sign-in can last, counted from the sign-in (2592000, 30 days, by default).
 
 ---
 

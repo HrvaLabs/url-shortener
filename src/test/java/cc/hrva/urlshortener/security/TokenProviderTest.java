@@ -36,6 +36,7 @@ class TokenProviderTest {
     void setUp() {
         when(appProperties.getJwtBase64Secret()).thenReturn(SECRET);
         when(appProperties.getJwtTokenValiditySeconds()).thenReturn(86400L);
+        org.mockito.Mockito.lenient().when(appProperties.getJwtSessionMaxSeconds()).thenReturn(2_592_000L);
         this.tokenProvider = new TokenProvider(appProperties);
         this.tokenProvider.init();
     }
@@ -177,7 +178,71 @@ class TokenProviderTest {
     }
 
     @Test
-    void aRenewedTokenIsIssuedNowButKeepsTheSignInTimeAndTheExpiry() {
+    void aRenewalSlidesTheExpiryToNowPlusTheValidity() {
+        final var signedIn = Instant.now().minus(3, ChronoUnit.HOURS).truncatedTo(ChronoUnit.SECONDS);
+        final var oldToken = tokenProvider.read(token(signedIn, signedIn, Instant.now().plus(1, ChronoUnit.HOURS))).orElseThrow();
+
+        final var renewed = tokenProvider.read(tokenProvider.renewToken(userAuthentication(), oldToken)).orElseThrow();
+
+        assertThat(renewed.issuedAt()).isCloseTo(Instant.now(), within(2, ChronoUnit.SECONDS));
+        assertThat(renewed.signedInAt()).isEqualTo(signedIn);
+        assertThat(renewed.expiresAt()).isCloseTo(Instant.now().plus(24, ChronoUnit.HOURS), within(2, ChronoUnit.SECONDS));
+    }
+
+    @Test
+    void aRenewalNeverGoesPastTheSignInPlusTheLongestSession() {
+        final var signedIn = Instant.now().minus(29, ChronoUnit.DAYS).minus(12, ChronoUnit.HOURS).truncatedTo(ChronoUnit.SECONDS);
+        final var oldToken = tokenProvider.read(token(signedIn, Instant.now().minus(1, ChronoUnit.HOURS), Instant.now().plus(1, ChronoUnit.HOURS)))
+                .orElseThrow();
+
+        final var renewed = tokenProvider.read(tokenProvider.renewToken(userAuthentication(), oldToken)).orElseThrow();
+
+        assertThat(renewed.expiresAt()).isEqualTo(signedIn.plus(30, ChronoUnit.DAYS));
+        assertThat(renewed.signedInAt()).isEqualTo(signedIn);
+    }
+
+    @Test
+    void aRenewalNeverShortensALongerSessionSuchAsRememberMe() {
+        final var signedIn = Instant.now().minus(2, ChronoUnit.HOURS).truncatedTo(ChronoUnit.SECONDS);
+        final var expires = signedIn.plus(30, ChronoUnit.DAYS);
+        final var oldToken = tokenProvider.read(token(signedIn, signedIn, expires)).orElseThrow();
+
+        final var renewed = tokenProvider.read(tokenProvider.renewToken(userAuthentication(), oldToken)).orElseThrow();
+
+        assertThat(renewed.expiresAt()).isEqualTo(expires);
+    }
+
+    @Test
+    void aTokenWithoutASignInTimeRenewsWithItsIssueTimeAsTheSignIn() {
+        final var key = Keys.hmacShaKeyFor(Decoders.BASE64.decode(SECRET));
+        final var issued = Instant.now().minus(30, ChronoUnit.DAYS).plus(1, ChronoUnit.HOURS).truncatedTo(ChronoUnit.SECONDS);
+        final var old = Jwts.builder()
+                .subject("test@example.com")
+                .claim("auth", "ROLE_USER")
+                .issuedAt(Date.from(issued))
+                .expiration(Date.from(Instant.now().plus(1, ChronoUnit.HOURS)))
+                .signWith(key, Jwts.SIG.HS512)
+                .compact();
+
+        final var renewed = tokenProvider.read(tokenProvider.renewToken(userAuthentication(), tokenProvider.read(old).orElseThrow())).orElseThrow();
+
+        assertThat(renewed.signedInAt()).isEqualTo(issued);
+        assertThat(renewed.expiresAt()).isEqualTo(issued.plus(30, ChronoUnit.DAYS));
+    }
+
+    private String token(final Instant signedIn, final Instant issued, final Instant expires) {
+        return Jwts.builder()
+                .subject("test@example.com")
+                .claim("auth", "ROLE_USER")
+                .claim("auth_time", signedIn.getEpochSecond())
+                .issuedAt(Date.from(issued))
+                .expiration(Date.from(expires))
+                .signWith(Keys.hmacShaKeyFor(Decoders.BASE64.decode(SECRET)), Jwts.SIG.HS512)
+                .compact();
+    }
+
+    @Test
+    void aRenewedTokenIsIssuedNowKeepsTheSignInTimeAndALaterExpiry() {
         final var key = Keys.hmacShaKeyFor(Decoders.BASE64.decode(SECRET));
         final var signedIn = Instant.now().minus(3, ChronoUnit.HOURS).truncatedTo(ChronoUnit.SECONDS);
         final var expires = Instant.now().plus(5, ChronoUnit.HOURS).truncatedTo(ChronoUnit.SECONDS);
@@ -194,7 +259,7 @@ class TokenProviderTest {
 
         assertThat(renewed.issuedAt()).isCloseTo(Instant.now(), within(2, ChronoUnit.SECONDS));
         assertThat(renewed.signedInAt()).isEqualTo(signedIn);
-        assertThat(renewed.expiresAt()).isEqualTo(expires);
+        assertThat(renewed.expiresAt()).isCloseTo(Instant.now().plus(24, ChronoUnit.HOURS), within(2, ChronoUnit.SECONDS)).isAfter(expires);
         assertThat(renewed.authentication().getAuthorities()).extracting(Object::toString).containsExactly("ROLE_USER");
         assertThat(tokenProvider.signedInAt(tokenProvider.renewToken(userAuthentication(), oldToken))).contains(signedIn);
     }

@@ -82,6 +82,7 @@ class SessionEndpointSecurityTest {
             "c2Vzc2lvbi1lbmRwb2ludC1zZWN1cml0eS10ZXN0LW9ubHktand0LXNlY3JldC1mb3ItdGhlLXJlYWwtdG9rZW4tcHJvdmlkZXItaHM1MTI=";
 
     private static final String END_SESSIONS = "/api/v1/users/me/sessions/end";
+    private static final String RENEW_SESSION = "/api/v1/users/me/sessions/renew";
     private static final String ADMIN_ONLY = "/api/v1/probe/admin-only";
     private static final String EMAIL = "ana@hrva.cc";
     private static final String SESSION_ENDED = """
@@ -149,7 +150,7 @@ class SessionEndpointSecurityTest {
         assertThat(answer.getContentAsString()).isEqualTo("{\"token\":\"" + fresh + "\"}");
         final var renewed = tokenProvider.read(fresh.substring(7)).orElseThrow();
         final var original = tokenProvider.read(laptop).orElseThrow();
-        assertThat(renewed.expiresAt()).isEqualTo(original.expiresAt());
+        assertThat(renewed.expiresAt()).isAfterOrEqualTo(original.expiresAt());
         assertThat(renewed.signedInAt()).isEqualTo(original.signedInAt());
 
         for (final var ended : List.of(phone, laptop)) {
@@ -160,6 +161,36 @@ class SessionEndpointSecurityTest {
         }
         mockMvc.perform(post(END_SESSIONS).header(JwtFilter.AUTHORIZATION_HEADER, fresh))
                 .andExpect(status().isOk());
+    }
+
+    @Test
+    void renewingASessionAnswersATokenThatEndsTenHoursFromNowWithTheSameSignIn() throws Exception {
+        final var active = tokenIssued(Duration.ofHours(3));
+
+        final var answer = mockMvc.perform(post(RENEW_SESSION).header(JwtFilter.AUTHORIZATION_HEADER, "Bearer " + active))
+                .andExpect(status().isNoContent())
+                .andReturn().getResponse();
+
+        final var renewed = tokenProvider.read(answer.getHeader(JwtFilter.AUTHORIZATION_HEADER).substring(7)).orElseThrow();
+        final var original = tokenProvider.read(active).orElseThrow();
+        assertThat(renewed.expiresAt()).isCloseTo(Instant.now().plus(Duration.ofHours(10)), org.assertj.core.api.Assertions.within(5, java.time.temporal.ChronoUnit.SECONDS));
+        assertThat(renewed.signedInAt()).isEqualTo(original.signedInAt());
+        assertThat(ana.getTokensValidAfter()).isNull();
+    }
+
+    @Test
+    void renewingNeedsASignInAndAnEndedSessionStaysEnded() throws Exception {
+        mockMvc.perform(post(RENEW_SESSION)).andExpect(status().isUnauthorized());
+
+        final var phone = tokenIssued(Duration.ofMinutes(30));
+        mockMvc.perform(post(END_SESSIONS).header(JwtFilter.AUTHORIZATION_HEADER, "Bearer " + tokenIssued(Duration.ofSeconds(5))))
+                .andExpect(status().isOk());
+
+        final var refused = mockMvc.perform(post(RENEW_SESSION).header(JwtFilter.AUTHORIZATION_HEADER, "Bearer " + phone))
+                .andExpect(status().isUnauthorized())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.detail").value("Your session ended. Sign in again."))
+                .andReturn().getResponse();
+        assertThat(refused.getHeader(JwtFilter.AUTHORIZATION_HEADER)).isNull();
     }
 
     @Test
