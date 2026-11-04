@@ -1,10 +1,40 @@
 {
   "releases": [
     {
-      "version": "v2.30",
+      "version": "v2.31",
       "date": "2026-11-04",
       "badge": "Latest",
       "badgeVariant": "default",
+      "summary": "When the database is down, signed-in pages say so instead of sending you to sign in, and the Health page explains each problem in plain words, with local times.",
+      "sections": [
+        {
+          "title": "Fixes",
+          "icon": "bug",
+          "items": [
+            "When hrva.cc can't reach its database, a page you open while signed in says so and tries again every 30 seconds, instead of loading for about two minutes and then showing the sign-in form. You stay signed in. \"Reconnecting…\" now shows only while hrva.cc restarts.",
+            "A request that accepts only HTML at an address that answers JSON, such as /actuator/health, gets 406 Not Acceptable instead of a server error. Other malformed requests, such as one without a required header, get their 4xx answer too. None of them count as server errors any more."
+          ]
+        },
+        {
+          "title": "Admin",
+          "icon": "wrench",
+          "items": [
+            "The Health page shows the times in its problem list in your own time zone and format, like the rest of the page. Each problem starts with the name of its card, such as Cache (Redis), and says in a second sentence what stops working or why it failed.",
+            "Opened while the database is down, the Health page says \"hrva.cc can't reach its database right now.\" within seconds, and loads by itself when the database is back.",
+            "The server errors problem says how many errors came in the last 5 minutes, or that there were none and the errors have stopped. The Server errors card says the same.",
+            "Each background job shows how often it runs and, for hourly, daily and weekly jobs, when it runs next, so \"No run yet\" on a daily job reads as expected. A failed job gives the reason in plain words, such as \"The database wasn't reachable.\", above the full error.",
+            "The jobs that keep the server's copies of settings and lists, and its metrics, up to date are listed apart, under Internal jobs. \"Read the inspection numbers for Prometheus\" now fails when it can't read them, instead of always showing OK.",
+            "Screenshots and VirusTotal that aren't set up name what to set: CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_BROWSER_API_TOKEN, or VIRUSTOTAL_API_KEY.",
+            "The Garbage collection card no longer sits alone on its row on wide screens.",
+            "Prometheus: hrva_job_last_outcome and hrva_job_last_run_timestamp_seconds name each job by class and method in job, such as DefaultDiscordAlertService.flush instead of flush, and give its readable name in label, such as Post Discord alerts.",
+            "An error answer for a database outage carries \"outage\": \"database\", so the web app can tell an outage from a restart."
+          ]
+        }
+      ]
+    },
+    {
+      "version": "v2.30",
+      "date": "2026-11-04",
       "summary": "The Health page shows live system status, the app starts about a third faster after an update, addresses that can't be links get a quick answer, and the daily click summary arrives at 08:00.",
       "sections": [
         {
