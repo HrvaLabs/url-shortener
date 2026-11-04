@@ -69,7 +69,7 @@ java -jar "$E2E/app.jar" --spring.profiles.active=local --server.port=18080 \
 - Run the jar from a copy, so `mvn clean` doesn't pull it from under the running app.
 
 ## Testing
-- `mvn test` (or `mvn -B verify`) — 7614 tests, JUnit 5 + Mockito + AssertJ
+- `mvn test` (or `mvn -B verify`) — 7640 tests, JUnit 5 + Mockito + AssertJ
 - Surefire runs them with `-Duser.timezone=UTC` (`pom.xml`), the container's zone, so stored timestamps and day boundaries in the tests match production on any machine.
 - Surefire stops a forked test JVM after 20 minutes (`forkedProcessTimeoutInSeconds` 1200) and waits at most 60 s for it to exit (`forkedProcessExitTimeoutInSeconds`), so a hung test fails the build within CI's 30-minute job limit (v2.29, see CI / Deploy).
 - Mostly plain `@ExtendWith(MockitoExtension.class)` unit tests. Each `@SpringBootTest` class boots its own nested `TestApplication` (a trimmed context) on embedded H2 and mocks the rest:
