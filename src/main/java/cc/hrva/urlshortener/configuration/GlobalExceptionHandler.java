@@ -71,6 +71,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.dao.QueryTimeoutException;
 import org.springframework.dao.TransientDataAccessResourceException;
+import org.springframework.data.redis.RedisSystemException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
@@ -446,7 +447,14 @@ public class GlobalExceptionHandler {
     }
 
     private static ResponseEntity<ProblemDetail> cacheUnreachable(final Exception ex) {
-        log.warn("Cache unreachable exception={}", ex.getClass().getName());
+        final var command = ExceptionUtils.throwableOfType(ex, RedisSystemException.class);
+        if (command == null) {
+            log.warn("Cache unreachable exception={}", ex.getClass().getName());
+        } else {
+            log.warn("Cache unreachable exception={} message={}", ex.getClass().getName(),
+                    StringUtils.substringBefore(StringUtils.defaultString(command.getMessage()), "\n"));
+        }
+        log.debug("Cache unreachable", ex);
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
                 .header(HttpHeaders.RETRY_AFTER, ProblemResponses.retryAfterSeconds(DATABASE_RETRY))
                 .body(DatabaseOutages.cacheProblem());

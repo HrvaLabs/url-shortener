@@ -22,6 +22,7 @@ import cc.hrva.urlshortener.service.notification.NotificationErrors;
 import cc.hrva.urlshortener.service.notification.NotificationMessage;
 import cc.hrva.urlshortener.service.notification.NotificationPayloads;
 import cc.hrva.urlshortener.service.notification.channel.ChannelSenders;
+import cc.hrva.urlshortener.util.DatabaseOutages;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.LocalDateTime;
@@ -147,7 +148,15 @@ public class DefaultNotificationDeliveryService implements NotificationDeliveryS
     @Override
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public void drainInBackground() {
-        drain();
+        try {
+            drain();
+        } catch (final RuntimeException exception) {
+            final var redis = DatabaseOutages.isRedis(exception);
+            if (!redis && !DatabaseOutages.isOutage(exception)) {
+                throw exception;
+            }
+            log.warn("Notification delivery drain skipped, the {} isn't answering exception={}", redis ? "cache" : "database", exception.getClass().getName());
+        }
     }
 
     @Override

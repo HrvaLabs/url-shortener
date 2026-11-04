@@ -76,6 +76,17 @@ class GlobalExceptionHandlerTest {
     }
 
     @Test
+    void aRedisCommandErrorIsStillTheCache503ButLogsItsFirstLine(final CapturedOutput output) throws Exception {
+        mockMvc.perform(get("/probe/redis-wrong-type"))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.outage").value("cache"));
+
+        assertThat(output).contains("Cache unreachable exception=org.springframework.data.redis.RedisSystemException "
+                        + "message=WRONGTYPE Operation against a key holding the wrong kind of value")
+                .doesNotContain("second line").doesNotContain("\tat ");
+    }
+
+    @Test
     void aQueryValueOfTheWrongTypeIsABadRequestNamingTheParameter(final CapturedOutput output) throws Exception {
         mockMvc.perform(get("/probe").param("days", "abc"))
                 .andExpect(status().isBadRequest())
@@ -321,6 +332,12 @@ class GlobalExceptionHandlerTest {
         String probeRedisTimeout() {
             throw new org.springframework.dao.QueryTimeoutException("Redis command timed out",
                     new io.lettuce.core.RedisCommandTimeoutException("Command timed out after 3 second(s)"));
+        }
+
+        @GetMapping("/probe/redis-wrong-type")
+        String probeRedisWrongType() {
+            throw new org.springframework.data.redis.RedisSystemException("WRONGTYPE Operation against a key holding the wrong kind of value\nsecond line",
+                    new io.lettuce.core.RedisCommandExecutionException("WRONGTYPE"));
         }
 
         @GetMapping("/probe/redis-wrapped")

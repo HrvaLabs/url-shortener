@@ -42,7 +42,7 @@ import static org.mockito.Mockito.when;
 class DefaultSystemStatusServiceTest {
 
     private static final String REDIS_DOWN =
-            "Cache (Redis): not reachable. Links still open from the database, but making links and unlocking password-protected links are refused.";
+            "Cache (Redis): not reachable. Links still open from the database, but making links, signing in with a password and unlocking password-protected links are refused.";
 
     private static final Instant NOW = Instant.parse("2026-11-03T22:31:00Z");
     private static final LocalDateTime NOW_UTC = LocalDateTime.of(2026, 11, 3, 22, 31);
@@ -146,7 +146,7 @@ class DefaultSystemStatusServiceTest {
 
         assertThat(status.summary().problems()).containsExactly(REDIS_DOWN);
         assertThat(status.summary().items()).containsExactly(new SystemStatusResponse.Problem("Cache (Redis): not reachable.", null,
-                "Links still open from the database, but making links and unlocking password-protected links are refused."));
+                "Links still open from the database, but making links, signing in with a password and unlocking password-protected links are refused."));
         assertThat(status.redis()).isEqualTo(new SystemStatusResponse.Redis(false, null, 99.0));
         assertThat(status.screenshots().browserSecondsToday()).isNull();
         assertThat(status.virusTotal().lookupsToday()).isNull();

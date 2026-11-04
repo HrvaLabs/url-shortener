@@ -64,7 +64,7 @@ public class DefaultSystemStatusService implements SystemStatusService {
     private static final String DATABASE_DOWN = "Database: not reachable.";
     private static final String DATABASE_EFFECT = "Cached links still open, but other links, signing in and saving changes fail.";
     private static final String REDIS_DOWN = "Cache (Redis): not reachable.";
-    private static final String REDIS_EFFECT = "Links still open from the database, but making links and unlocking password-protected links are refused.";
+    private static final String REDIS_EFFECT = "Links still open from the database, but making links, signing in with a password and unlocking password-protected links are refused.";
     private static final String ERRORS_CONTINUE = "Some pages and links are failing right now.";
     private static final String ERRORS_STOPPED = "They have stopped.";
     private static final String SCREENSHOTS_WAIT_FOR_MIDNIGHT = "New screenshots wait until midnight UTC.";
