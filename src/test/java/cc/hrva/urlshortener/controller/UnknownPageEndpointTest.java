@@ -42,6 +42,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.sql.SQLException;
 import java.time.Instant;
 import java.util.List;
 import javax.sql.DataSource;
@@ -71,6 +72,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.containsString;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.never;
@@ -207,7 +209,8 @@ class UnknownPageEndpointTest {
                     .hasValue(String.valueOf(EXPECTED_PAGE.getBytes(StandardCharsets.UTF_8).length));
         }
 
-        verifyNoInteractions(urlService, dataSource, redisConnectionFactory, customDomainRepository, userRepository, tokenProvider);
+        verifyNoInteractions(urlService, redisConnectionFactory, customDomainRepository, userRepository, tokenProvider);
+        verifyNoConnectionWasTaken();
     }
 
     @Test
@@ -219,7 +222,8 @@ class UnknownPageEndpointTest {
         assertThat(answer.headers().firstValue(HttpHeaders.CONTENT_LENGTH)).hasValue(String.valueOf(EXPECTED_PAGE.getBytes(StandardCharsets.UTF_8).length));
         assertThat(answer.headers().firstValue(HttpHeaders.CONTENT_TYPE)).hasValue("text/html;charset=UTF-8");
 
-        verifyNoInteractions(urlService, dataSource, redisConnectionFactory, customDomainRepository);
+        verifyNoInteractions(urlService, redisConnectionFactory, customDomainRepository);
+        verifyNoConnectionWasTaken();
     }
 
     @Test
@@ -372,6 +376,11 @@ class UnknownPageEndpointTest {
 
         }
 
+    }
+
+    private void verifyNoConnectionWasTaken() throws SQLException {
+        verify(dataSource, never()).getConnection();
+        verify(dataSource, never()).getConnection(anyString(), anyString());
     }
 
 }

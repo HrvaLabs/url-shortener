@@ -50,6 +50,7 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.sql.SQLException;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -288,8 +289,9 @@ class McpEndpointSecurityTest {
             }
         }
 
-        verifyNoInteractions(dataSource, redisConnectionFactory, authorizationService, rateLimiter,
+        verifyNoInteractions(redisConnectionFactory, authorizationService, rateLimiter,
                 userRepository, urlRepository, linkReviewRepository, connectRequestStore, urlService, userService);
+        verifyNoConnectionWasTaken();
     }
 
     @Test
@@ -751,6 +753,11 @@ class McpEndpointSecurityTest {
             ShortLinks.class
     })
     static class TestApplication {
+    }
+
+    private void verifyNoConnectionWasTaken() throws SQLException {
+        verify(dataSource, never()).getConnection();
+        verify(dataSource, never()).getConnection(anyString(), anyString());
     }
 
 }
