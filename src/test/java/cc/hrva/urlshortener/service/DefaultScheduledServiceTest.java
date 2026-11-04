@@ -373,16 +373,16 @@ class DefaultScheduledServiceTest {
     }
 
     @Test
-    void theDailyClickSummaryRunsAtQuarterPastOneInTheAnalyticsZone() throws NoSuchMethodException, IOException {
+    void theDailyClickSummaryRunsAtEightInTheMorningInTheAnalyticsZone() throws NoSuchMethodException, IOException {
         final var scheduled = DefaultScheduledService.class.getMethod("sendDailyClickSummaries").getAnnotation(Scheduled.class);
         final var sources = new MutablePropertySources();
         new YamlPropertySourceLoader().load("application", new ClassPathResource("application.yaml")).forEach(sources::addLast);
         final var zone = ZoneId.of(new PropertySourcesPropertyResolver(sources).resolveRequiredPlaceholders(scheduled.zone()));
 
-        assertThat(scheduled.cron()).isEqualTo("0 15 1 * * *");
+        assertThat(scheduled.cron()).isEqualTo("0 0 8 * * *");
         assertThat(scheduled.zone()).isEqualTo("${app.analytics.zone}");
-        assertThat(nextRun(CronExpression.parse(scheduled.cron()), "2026-10-26T12:00:00Z", zone)).isEqualTo("2026-10-27T00:15:00Z");
-        assertThat(nextRun(CronExpression.parse(scheduled.cron()), "2026-07-01T12:00:00Z", zone)).isEqualTo("2026-07-01T23:15:00Z");
+        assertThat(nextRun(CronExpression.parse(scheduled.cron()), "2026-10-26T12:00:00Z", zone)).isEqualTo("2026-10-27T07:00:00Z");
+        assertThat(nextRun(CronExpression.parse(scheduled.cron()), "2026-07-01T12:00:00Z", zone)).isEqualTo("2026-07-02T06:00:00Z");
     }
 
     @Test
