@@ -390,6 +390,18 @@ class DefaultReviewQueueServiceTest {
     }
 
     @Test
+    void aNewSupportingReasonOnARedirectDoesNotReopenAReviewMarkedFine() {
+        final var hop = "redirects to shop.top: ";
+        when(linkReviewRepository.findFirstByUrlOrderByFlaggedAtDesc(url))
+                .thenReturn(Optional.of(resolved(ReviewResolution.OK, hop + YOUNG)));
+
+        reviewQueueService.flag(url, List.of(hop + YOUNG, hop + SuspiciousUrlService.RISKY_ENDING_PREFIX + "top"));
+
+        verify(linkReviewRepository, never()).save(any());
+        verifyNoInteractions(reviewWarningPage, eventPublisher);
+    }
+
+    @Test
     void flaggingAfterAnOkWithANewReasonOpensANewEntry() {
         final var saved = ArgumentCaptor.forClass(LinkReview.class);
         when(linkReviewRepository.findFirstByUrlOrderByFlaggedAtDesc(url)).thenReturn(Optional.of(resolved(ReviewResolution.OK, YOUNG)));

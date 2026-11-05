@@ -136,7 +136,7 @@ public class DefaultReviewQueueService implements ReviewQueueService {
     }
 
     private boolean reviewedFineFor(final Url url, final List<String> incoming) {
-        final var deciding = incoming.stream().filter(reason -> !SuspiciousUrlService.isSupporting(reason)).toList();
+        final var deciding = SuspiciousUrlService.deciding(incoming);
         return linkReviewRepository.findFirstByUrlOrderByFlaggedAtDesc(url)
                 .filter(review -> review.getResolution() == ReviewResolution.OK)
                 .filter(review -> reasonsOf(review).containsAll(deciding))

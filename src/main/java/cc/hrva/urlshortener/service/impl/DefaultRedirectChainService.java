@@ -13,6 +13,7 @@ import cc.hrva.urlshortener.service.ModerationService;
 import cc.hrva.urlshortener.service.RedirectChainService;
 import cc.hrva.urlshortener.service.ReviewQueueService;
 import cc.hrva.urlshortener.service.SafeBrowsingService;
+import cc.hrva.urlshortener.service.SuspiciousUrlService;
 import cc.hrva.urlshortener.util.BlockDetails;
 import cc.hrva.urlshortener.util.DomainNames;
 import cc.hrva.urlshortener.util.RedirectChains;
@@ -44,8 +45,6 @@ public class DefaultRedirectChainService implements RedirectChainService {
     private static final String PERFORMED_BY = "system";
     private static final String VIA = "redirect-check";
     private static final String VIA_REDIRECT_TO = " via redirect to ";
-    private static final String REDIRECTS_TO = "redirects to ";
-    private static final String REASON_SEPARATOR = ": ";
     private static final String THREAT_SEPARATOR = ", ";
     private static final int BLOCK_DETAIL_LENGTH = 255;
     private static final int FINAL_URL_LENGTH = 2048;
@@ -141,7 +140,7 @@ public class DefaultRedirectChainService implements RedirectChainService {
                 return Optional.of(Finding.block(verdict.blockReason(), verdict.blockDetail(), hostOf(hop)));
             }
             if (verdict.outcome() == LinkVerdict.Outcome.BLOCK || verdict.outcome() == LinkVerdict.Outcome.FLAG) {
-                verdict.reasons().forEach(reason -> reasons.add(REDIRECTS_TO + hostOf(hop) + REASON_SEPARATOR + reason));
+                verdict.reasons().forEach(reason -> reasons.add(SuspiciousUrlService.redirectReason(hostOf(hop), reason)));
             }
         }
         return reasons.isEmpty() ? Optional.empty() : Optional.of(Finding.review(reasons));

@@ -140,6 +140,19 @@ class DefaultSuspiciousUrlServiceTest {
     }
 
     @Test
+    void aRedirectHopIsJudgedByTheReasonItCarries() {
+        assertThat(SuspiciousUrlService.isSupporting("redirects to bit.ly: " + SuspiciousUrlService.SHORTENER_REASON)).isTrue();
+        assertThat(SuspiciousUrlService.isSupporting("redirects to shop.top: " + SuspiciousUrlService.RISKY_ENDING_PREFIX + "top")).isTrue();
+        assertThat(SuspiciousUrlService.isSupporting("redirects to shop.top: imitates paypal")).isFalse();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"Spamhaus DBL: " + SuspiciousUrlService.SHORTENER_REASON, "on list " + SuspiciousUrlService.RISKY_ENDING_PREFIX + "top"})
+    void onlyARedirectHopIsReadForTheReasonItCarries(final String reason) {
+        assertThat(SuspiciousUrlService.isSupporting(reason)).isFalse();
+    }
+
+    @Test
     void stillFlagsPlatformShareShortenersForReview() {
         assertThat(suspiciousUrlService.findReasons("https://t.co/AbC123")).contains(SuspiciousUrlService.SHORTENER_REASON);
         assertThat(suspiciousUrlService.findReasons("https://lnkd.in/dX9yZ")).contains(SuspiciousUrlService.SHORTENER_REASON);

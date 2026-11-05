@@ -246,7 +246,7 @@ public class DefaultLinkCheckService implements LinkCheckService {
         }
 
         private List<String> deciding() {
-            return heuristics.stream().filter(reason -> !SuspiciousUrlService.isSupporting(reason)).toList();
+            return SuspiciousUrlService.deciding(heuristics);
         }
 
         private List<String> supporting() {
