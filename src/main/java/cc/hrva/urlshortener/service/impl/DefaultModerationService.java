@@ -372,7 +372,7 @@ public class DefaultModerationService implements ModerationService {
         final var user = findUser(userId);
         final var blocked = blockLinksOf(user, performedBy, maxLinks);
         auditLogService.log(performedBy, AuditAction.BLOCK_USER, TARGET_USER, String.valueOf(userId),
-                details(via, blocked.links(), domainsField(blocked.domains())));
+                details(via, blocked.links(), domainsField(blocked.domains()), heldField(blocked.held())));
         return blocked.links();
     }
 
@@ -529,7 +529,8 @@ public class DefaultModerationService implements ModerationService {
             throw new UrlValidationException(NO_OWNER);
         }
         final var blocked = blockLinksOf(owner, performedBy, null);
-        return details(via, blocked.links(), field(ACTION, ReviewAction.BLOCK_USER), field("user", owner.getId()), domainsField(blocked.domains()));
+        return details(via, blocked.links(), field(ACTION, ReviewAction.BLOCK_USER), field("user", owner.getId()), domainsField(blocked.domains()),
+                heldField(blocked.held()));
     }
 
     private static String domainForReview(final Url url, final String domain, final UnaryOperator<String> byDefault) {
@@ -678,8 +679,39 @@ public class DefaultModerationService implements ModerationService {
         final var domains = customDomainModeration.disableForUser(user.getId(), performedBy);
         final var blocked = eachLink(ids, Long::longValue, id -> block(id, BlockReason.USER_BLOCKED, null, performedBy,
                 url -> url.isActive() && ownedBy(url, user)).isPresent());
+        final var held = convertSignInHoldsOf(user, performedBy);
         scammerSignalService.invalidate();
-        return new Affected(blocked, domains, 0);
+        return new Affected(blocked, domains, held);
+    }
+
+    private int convertSignInHoldsOf(final User user, final String performedBy) {
+        final List<Long> heldIds;
+        try {
+            heldIds = urlRepository.findIdsByOwnerAndBlockReason(user, BlockReason.SIGN_IN_FORM);
+        } catch (final RuntimeException exception) {
+            log.warn("Reading the held links of a blocked user failed, continuing userId={}", user.getId(), exception);
+            return 0;
+        }
+        return eachLink(heldIds, Long::longValue, id -> convertSignInHoldOf(id, user, performedBy));
+    }
+
+    private boolean convertSignInHoldOf(final long urlId, final User user, final String performedBy) {
+        final var converted = Optional.ofNullable(transactionOperations.execute(status -> urlRepository.findById(urlId)
+                .filter(url -> !url.isActive() && url.getBlockReason() == BlockReason.SIGN_IN_FORM && ownedBy(url, user))
+                .map(url -> {
+                    url.setBlockReason(BlockReason.ADMIN);
+                    url.setBlockDetail(null);
+                    url.setBlockedAt(LocalDateTime.now());
+                    final var saved = savedAsBlocked(url);
+                    reviewQueueService.resolveOpen(saved, ReviewResolution.USER_BLOCKED, performedBy);
+                    return saved;
+                })
+                .orElse(null)));
+        converted.ifPresent(url -> {
+            log.info("Held link blocked with its account urlId={}", url.getId());
+            urlCache.evictNowAndAgainLater(cacheKeyOf(url));
+        });
+        return converted.isPresent();
     }
 
     private Trusted trust(final String domain, final String reason, final String performedBy) {

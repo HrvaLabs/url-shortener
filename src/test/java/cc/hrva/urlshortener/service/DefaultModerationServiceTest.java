@@ -1431,6 +1431,72 @@ class DefaultModerationServiceTest {
     }
 
     @Test
+    void blockingAUserTurnsTheirSignInHoldIntoAnAdminBlock() {
+        final var scammer = user(5L, "scammer@example.com");
+        when(userRepository.findById(5L)).thenReturn(Optional.of(scammer));
+        doAnswer(invocation -> {
+            sendingEmailService.sendEmailAccountDeactivated(invocation.getArgument(0));
+            return null;
+        }).when(userService).deactivate(scammer);
+        final var active = link(40L, "https://a.example/", scammer);
+        final var held = blocked(41L, "https://verniqindexone.com/cache-trash/", BlockReason.SIGN_IN_FORM, scammer);
+        final var someoneElsesHold = blocked(42L, "https://verniqindexone.com/acceso", BlockReason.SIGN_IN_FORM, user(6L, "bob@example.com"));
+        final var evictions = ArgumentCaptor.forClass(Runnable.class);
+
+        assertThat(moderationService.blockUser(5L, ADMIN, "admin", null)).isEqualTo(1);
+
+        assertThat(active.getBlockReason()).isEqualTo(BlockReason.USER_BLOCKED);
+        assertThat(held).extracting(Url::isActive, Url::getBlockReason, Url::getBlockDetail).containsExactly(false, BlockReason.ADMIN, null);
+        assertThat(held.getBlockedAt()).isAfter(BLOCKED_AT);
+        verify(userRepository, atLeastOnce()).recordLinkBlocked(5L, held.getBlockedAt());
+        verify(reviewQueueService).resolveOpen(held, ReviewResolution.USER_BLOCKED, ADMIN);
+        verify(taskScheduler, times(2)).schedule(evictions.capture(), any(Instant.class));
+        evictions.getAllValues().forEach(Runnable::run);
+        verify(cache, times(2)).evict("s41");
+        assertThat(someoneElsesHold.getBlockReason()).isEqualTo(BlockReason.SIGN_IN_FORM);
+        verify(sendingEmailService).sendEmailAccountDeactivated(scammer);
+        verifyNoMoreInteractions(sendingEmailService);
+        verify(eventPublisher, never()).publishEvent(any(AdminAlertEvent.class));
+        verify(auditLogService).log(ADMIN, AuditAction.BLOCK_USER, "User", "5", "held links: 1, links: 1, via: admin");
+        assertThat(savedPerTransaction).filteredOn(saved -> !saved.isEmpty()).containsExactly(List.of(40L), List.of(41L));
+        assertThat(outOfPlace).isEmpty();
+    }
+
+    @Test
+    void unblockingTheUserDoesNotBringTheFormerHoldBack() {
+        final var scammer = user(5L, "scammer@example.com");
+        when(userRepository.findById(5L)).thenReturn(Optional.of(scammer));
+        final var active = link(40L, "https://a.example/", scammer);
+        final var held = blocked(41L, "https://verniqindexone.com/cache-trash/", BlockReason.SIGN_IN_FORM, scammer);
+
+        moderationService.resolveReview(41L, ReviewAction.BLOCK_USER, null, ADMIN, "admin");
+        moderationService.reactivateUser(5L, ADMIN, "admin");
+
+        assertThat(active).extracting(Url::isActive, Url::getBlockReason).containsExactly(true, null);
+        assertThat(held).extracting(Url::isActive, Url::getBlockReason).containsExactly(false, BlockReason.ADMIN);
+        verify(reviewQueueService, atLeastOnce()).resolveOpen(held, ReviewResolution.USER_BLOCKED, ADMIN);
+        verify(auditLogService).log(ADMIN, AuditAction.RESOLVE_REVIEW, "Url", "41", "action: BLOCK_USER, user: 5, held links: 1, links: 1, via: admin");
+        verify(auditLogService).log(ADMIN, AuditAction.REACTIVATE_USER, "User", "5", "links: 1, via: admin");
+        assertThat(outOfPlace).isEmpty();
+    }
+
+    @Test
+    void aUserBlockStillFinishesWhenTheirHeldLinksCannotBeRead() {
+        final var scammer = user(5L, "scammer@example.com");
+        when(userRepository.findById(5L)).thenReturn(Optional.of(scammer));
+        final var active = link(40L, "https://a.example/", scammer);
+        final var held = blocked(41L, "https://verniqindexone.com/cache-trash/", BlockReason.SIGN_IN_FORM, scammer);
+        when(urlRepository.findIdsByOwnerAndBlockReason(scammer, BlockReason.SIGN_IN_FORM)).thenThrow(new DataAccessResourceFailureException("database down"));
+
+        assertThat(moderationService.blockUser(5L, ADMIN, "admin", null)).isEqualTo(1);
+
+        assertThat(active.getBlockReason()).isEqualTo(BlockReason.USER_BLOCKED);
+        assertThat(held.getBlockReason()).isEqualTo(BlockReason.SIGN_IN_FORM);
+        verify(auditLogService).log(ADMIN, AuditAction.BLOCK_USER, "User", "5", "links: 1, via: admin");
+        verify(scammerSignalService).invalidate();
+    }
+
+    @Test
     void aCappedUserBlockRefusesWithoutChangingAnythingWhenMoreLinksWouldBeAffected() {
         final var scammer = user(5L, "scammer@example.com");
         when(userRepository.findById(5L)).thenReturn(Optional.of(scammer));
