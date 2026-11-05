@@ -1,10 +1,56 @@
 {
   "releases": [
     {
-      "version": "v2.31",
-      "date": "2026-11-04",
+      "version": "v2.32",
+      "date": "2026-11-05",
       "badge": "Latest",
       "badgeVariant": "default",
+      "summary": "Links made, repointed or turned back on from an account are checked for sign-in and card forms, and a link on hold shows Being checked.",
+      "sections": [
+        {
+          "title": "Link Safety",
+          "icon": "shield",
+          "items": [
+            "Links from accounts are now checked for pages that ask for a password, a username or ID number, or a card number, as some links made without an account already were. hrva.cc's server opens the destination page once when a link is made (on the website, with an API key, in bulk or through the AI connector), gets a new destination or is turned back on. If the page asks for one of these, an admin checks the link, and the link can be put on hold until then. If the page can't be read, the link stays as it is.",
+            "On links from accounts, a sign-in page on one of the most-visited sites, such as Google's or Microsoft's own sign-in after a link to a private document, doesn't count. hrva.cc tells them apart with the Tranco list of the most-visited sites, which it downloads once a day.",
+            "A link on hold shows Being checked in My URLs, and visitors are told it is being checked. The bio page editor shows its button as Waiting for review. You can't turn it back on or change where it points until the check is done; the edit form says \"This link is being checked. It comes back on its own if it looks fine.\" If the admin finds it fine, it comes back on by itself. The help page on short links and the security page say so.",
+            "When an admin blocks a link that was on hold, you get the email about a blocked link, as for any other block. Nothing is emailed when a link is put on hold or comes back on."
+          ]
+        },
+        {
+          "title": "Privacy",
+          "icon": "lock",
+          "items": [
+            "The privacy policy says the hrva.cc server also opens the destination page of links made, repointed or turned back on from an account, to see whether it asks for sign-in or card details. The destination's server sees a request from hrva.cc, never from you or your visitors."
+          ]
+        },
+        {
+          "title": "Admin",
+          "icon": "wrench",
+          "items": [
+            "A sign-in or card form on a link from an account opens a review. A link from a new account is held, with the reason \"Sign-in form on a link from a new account\". A link from an older account stays live, with the reason \"Sign-in form on a link from an account\", and the review queue marks it \"Notice: the link stays live\". Links made by admins aren't checked, and neither are links to a domain an Allow rule trusts.",
+            "A notice doesn't hide the link's button from its bio page, doesn't pause the account's destination changes on hrva.cc or on a custom domain, and doesn't count toward the possible scammer mark unless the link is then blocked.",
+            "Looks fine on a sign-in form review covers only the destination the link had when the review was closed. A sign-in form found after the owner points the link elsewhere opens a new review. Reviews closed before this release cover no destination for sign-in forms. A link is held only together with an open review, so a link already found fine for its destination isn't held again.",
+            "Block link and Block domain on a held link from an account email its owner like any other block; a domain block or a bulk Block link sends each owner one email for all their links. Block user turns the account's held links into admin blocks and closes their reviews. They stay off when the account is unblocked, and the audit log says held links: N.",
+            "When the sign-in form check can't keep up, a link from a new account is held with the reason \"Sign-in form check couldn't run on a link from a new account\". A link from an older account is left as it is.",
+            "On All URLs, a link on hold, for a campaign or for a sign-in form, shows Being checked instead of Blocked. Visitors to a campaign link on hold still see that it's blocked.",
+            "Blocklists has a new kind, Top sites, and a new action, Real sign-in pages. The new source Tranco top sites (https://tranco-list.eu/api/lists/date/latest?subdomains=true) refreshes every 24 hours. Such a list never blocks or flags a link and isn't counted on hrva.cc in numbers. Saving a top sites list with another action, or another kind of list as Real sign-in pages, is refused.",
+            "Site settings has three new settings under Safety: \"Sign-in form check on links from accounts\" (on by default), \"Sign-in form check: new account age\" and \"Real sign-in pages: top sites\". A new number of top sites takes effect at the next refresh of the Tranco source, or with Refresh now."
+          ]
+        },
+        {
+          "title": "API",
+          "icon": "key",
+          "items": [
+            "Links on hold have the status CHECKING. Turning one on with active: true, or with PATCH /api/v1/urls/{id}/activate, answers 400 with \"This link is being checked. It comes back on its own if it looks fine.\" A new longUrl answers 403 with the missing code LINK_NOT_BEING_CHECKED, on any domain. The AI connector's list_links shows the same status. The API quickstart says so.",
+            "Review queue entries have notice: true for a link that stays live while an admin checks it."
+          ]
+        }
+      ]
+    },
+    {
+      "version": "v2.31",
+      "date": "2026-11-04",
       "summary": "You stay signed in while you use hrva.cc, signed-in pages say so when the database is down instead of sending you to sign in, and the Health page explains each problem in plain words, with local times.",
       "sections": [
         {
