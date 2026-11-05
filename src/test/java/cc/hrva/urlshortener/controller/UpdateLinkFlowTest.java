@@ -102,6 +102,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -963,6 +964,56 @@ class UpdateLinkFlowTest {
         mockMvc.perform(edit("admin-token", "{\"id\":" + LINK + ",\"active\":true}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.detail").value("This link is blocked, so saving can't turn it back on."));
+    }
+
+    private static final String BEING_CHECKED = "This link is being checked. It comes back on its own if it looks fine.";
+
+    @Test
+    void anOwnerCantTurnOnAHeldLink() throws Exception {
+        jdbcTemplate.update("update url set active = false, block_reason = 'SIGN_IN_FORM' where id = ?", LINK);
+
+        mockMvc.perform(edit("owner-token", "{\"id\":" + LINK + ",\"active\":true}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.detail").value(BEING_CHECKED));
+        mockMvc.perform(patch("/api/v1/urls/{id}/activate", LINK).header(JwtFilter.AUTHORIZATION_HEADER, "Bearer owner-token"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.detail").value(BEING_CHECKED));
+
+        assertThat(jdbcTemplate.queryForObject("select active from url where id = ?", Boolean.class, LINK)).isFalse();
+    }
+
+    @Test
+    void anApiKeyCantTurnOnAHeldLink() throws Exception {
+        apiKey();
+        jdbcTemplate.update("update url set active = false, block_reason = 'SIGN_IN_FORM' where id = ?", LINK);
+
+        mockMvc.perform(withKey("{\"id\":" + LINK + ",\"active\":true}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.detail").value(BEING_CHECKED));
+
+        assertThat(jdbcTemplate.queryForObject("select active from url where id = ?", Boolean.class, LINK)).isFalse();
+    }
+
+    @Test
+    void anAlwaysOverrideCantRepointAHeldLink() throws Exception {
+        override("ALWAYS");
+        jdbcTemplate.update("update url set active = false, block_reason = 'SIGN_IN_FORM' where id = ?", LINK);
+
+        mockMvc.perform(edit("owner-token", "{\"id\":" + LINK + ",\"longUrl\":\"" + NEW_DESTINATION + "\"}"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.missing[*].code").value(org.hamcrest.Matchers.contains("LINK_NOT_BEING_CHECKED")));
+
+        assertThat(jdbcTemplate.queryForObject("select long_url from url where id = ?", String.class, LINK)).isEqualTo(OLD_DESTINATION);
+    }
+
+    @Test
+    void anAdminCanStillActivateAHeldLink() throws Exception {
+        jdbcTemplate.update("update url set active = false, block_reason = 'SIGN_IN_FORM' where id = ?", LINK);
+
+        mockMvc.perform(patch("/api/v1/urls/{id}/activate", LINK).header(JwtFilter.AUTHORIZATION_HEADER, "Bearer admin-token"))
+                .andExpect(status().isOk());
+
+        assertThat(jdbcTemplate.queryForObject("select active from url where id = ?", Boolean.class, LINK)).isTrue();
     }
 
     @Test

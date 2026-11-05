@@ -128,7 +128,13 @@ public class DefaultUrlValidator implements UrlValidator {
 
     @Override
     public void checkIfUrlNotBlocked(final Url url) {
-        if ((url.getThreatType() != null || url.getBlockReason() != null) && !isCurrentUserAdmin()) {
+        if (isCurrentUserAdmin()) {
+            return;
+        }
+        if (url.getThreatType() == null && url.getBlockReason() != null && BlockReason.HOLDS.contains(url.getBlockReason())) {
+            throw new UrlValidationException("This link is being checked. It comes back on its own if it looks fine.");
+        }
+        if (url.getThreatType() != null || url.getBlockReason() != null) {
             throw new UrlValidationException("This link was blocked as unsafe. Contact support if you think that's a mistake.");
         }
     }

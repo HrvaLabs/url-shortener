@@ -2,6 +2,7 @@ package cc.hrva.urlshortener.service.bio;
 
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.enums.BioLinkState;
+import cc.hrva.urlshortener.model.enums.BlockReason;
 import cc.hrva.urlshortener.model.enums.CustomDomainStatus;
 import java.time.LocalDateTime;
 
@@ -10,6 +11,9 @@ public final class BioLinkStates {
     private BioLinkStates() {}
 
     public static BioLinkState of(final Url url, final boolean inReview, final LocalDateTime now) {
+        if (url.getThreatType() == null && url.getBlockReason() != null && BlockReason.HOLDS.contains(url.getBlockReason())) {
+            return BioLinkState.IN_REVIEW;
+        }
         if (url.getBlockReason() != null || url.getThreatType() != null) {
             return BioLinkState.BLOCKED;
         }

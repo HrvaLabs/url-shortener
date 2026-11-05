@@ -70,7 +70,7 @@ public class LinkTools {
                     + "links of other accounts never appear. Use it to find a link's short URL before calling "
                     + "link_stats. Each line shows the short link, its destination, its visit count and its status: "
                     + "ACTIVE (it redirects), LIMIT_REACHED (its visit limit is used up), EXPIRED (its expiry has "
-                    + "passed), BLOCKED (hrva.cc blocked it as unsafe) or DEACTIVATED (it was turned off). search "
+                    + "passed), CHECKING (hrva.cc is checking it and it comes back on its own if it looks fine), BLOCKED (hrva.cc blocked it as unsafe) or DEACTIVATED (it was turned off). search "
                     + "and tag can be used together, and then a link must match both. For the next page, call it "
                     + "again with page one higher; No links found. means there are no more.",
             annotations = @McpTool.McpAnnotations(

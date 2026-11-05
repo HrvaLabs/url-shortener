@@ -29,7 +29,7 @@ public record UrlResponse(
         Long opens,
         @Schema(description = "Whether the URL is active", example = "true")
         boolean active,
-        @Schema(description = "Reason for the current state: ACTIVE, LIMIT_REACHED, EXPIRED, BLOCKED, DEACTIVATED", example = "ACTIVE")
+        @Schema(description = "Reason for the current state: ACTIVE, LIMIT_REACHED, EXPIRED, CHECKING, BLOCKED, DEACTIVATED", example = "ACTIVE")
         String status,
         @Schema(description = "Tags assigned to the URL", example = "[\"work\"]")
         Set<String> tags,
@@ -155,6 +155,9 @@ public record UrlResponse(
     private static String resolveStatus(final Url url) {
         if (url.isActive()) {
             return ACTIVE;
+        }
+        if (url.getThreatType() == null && url.getBlockReason() != null && BlockReason.HOLDS.contains(url.getBlockReason())) {
+            return "CHECKING";
         }
         if (url.getBlockReason() != null || url.getThreatType() != null) {
             return "BLOCKED";

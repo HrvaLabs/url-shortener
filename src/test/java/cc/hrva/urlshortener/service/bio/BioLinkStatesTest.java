@@ -36,6 +36,10 @@ class BioLinkStatesTest {
                 arguments(named("liveIsLive", (UnaryOperator<Url.UrlBuilder>) link -> link), false, BioLinkState.LIVE),
                 arguments(named("blockedWinsOverEverything", (UnaryOperator<Url.UrlBuilder>) link -> link
                         .blockReason(BlockReason.BLOCKLIST).active(false).visitLimit(3L).expirationDate(NOW.minusDays(1))), true, BioLinkState.BLOCKED),
+                arguments(named("aHeldLinkShowsInReview", (UnaryOperator<Url.UrlBuilder>) link -> link
+                        .blockReason(BlockReason.SIGN_IN_FORM).active(false)), false, BioLinkState.IN_REVIEW),
+                arguments(named("aHeldLinkWithAThreatIsBlocked", (UnaryOperator<Url.UrlBuilder>) link -> link
+                        .blockReason(BlockReason.CAMPAIGN).threatType(ThreatType.MALWARE).active(false)), false, BioLinkState.BLOCKED),
                 arguments(named("aThreatIsBlocked", (UnaryOperator<Url.UrlBuilder>) link -> link
                         .threatType(ThreatType.SOCIAL_ENGINEERING)), false, BioLinkState.BLOCKED),
                 arguments(named("deactivatedAtItsLimitReachedTheLimit", (UnaryOperator<Url.UrlBuilder>) link -> link

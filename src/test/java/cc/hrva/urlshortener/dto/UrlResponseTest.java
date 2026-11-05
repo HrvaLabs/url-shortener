@@ -141,6 +141,20 @@ class UrlResponseTest {
     }
 
     @Test
+    void aHeldLinkIsChecking() {
+        for (final var reason : BlockReason.HOLDS) {
+            assertThat(UrlResponse.from(baseUrl().active(false).blockReason(reason).build()).status()).isEqualTo("CHECKING");
+        }
+    }
+
+    @Test
+    void aBlockedLinkIsStillBlocked() {
+        assertThat(UrlResponse.from(baseUrl().active(false).blockReason(BlockReason.CAMPAIGN).threatType(ThreatType.MALWARE).build()).status())
+                .isEqualTo("BLOCKED");
+        assertThat(UrlResponse.from(baseUrl().active(false).blockReason(BlockReason.ADMIN).build()).status()).isEqualTo("BLOCKED");
+    }
+
+    @Test
     void shouldBeBlockedWhenBlockReasonPresent() {
         final var url = baseUrl().active(false).blockReason(BlockReason.DOMAIN_RULE).build();
         assertThat(UrlResponse.from(url).status()).isEqualTo("BLOCKED");

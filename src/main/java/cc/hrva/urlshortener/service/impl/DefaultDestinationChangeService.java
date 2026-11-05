@@ -184,6 +184,9 @@ public class DefaultDestinationChangeService implements DestinationChangeService
         if (!settingsService.isOn(SettingKey.DESTINATION_CHANGES)) {
             return List.of(MissingRequirement.of(RequirementCode.CHANGES_TURNED_ON, TURNED_OFF));
         }
+        if (isHeld(url)) {
+            return List.of(MissingRequirement.of(RequirementCode.LINK_NOT_BEING_CHECKED, LINK_BEING_CHECKED));
+        }
         final var override = overrideOf(editor.user());
         if (override == DestinationChangeOverride.NEVER) {
             return List.of(MissingRequirement.of(RequirementCode.ACCOUNT_TURNED_OFF, ACCOUNT_TURNED_OFF));
@@ -195,14 +198,17 @@ public class DefaultDestinationChangeService implements DestinationChangeService
         if (url.getDomain().getStatus() != CustomDomainStatus.ACTIVE) {
             missing.add(MissingRequirement.of(RequirementCode.DOMAIN_ACTIVE, DOMAIN_NOT_ACTIVE));
         }
-        final var held = url.getThreatType() == null && url.getBlockReason() != null && BlockReason.HOLDS.contains(url.getBlockReason());
-        if (!held && (url.getThreatType() != null || url.getBlockReason() != null)) {
+        if (url.getThreatType() != null || url.getBlockReason() != null) {
             missing.add(MissingRequirement.of(RequirementCode.LINK_NOT_BLOCKED, LINK_BLOCKED));
         }
-        if (held || linkReviewRepository.existsByUrl_IdAndResolvedAtIsNullAndSystemFlaggedTrueAndNoticeFalse(url.getId())) {
+        if (linkReviewRepository.existsByUrl_IdAndResolvedAtIsNullAndSystemFlaggedTrueAndNoticeFalse(url.getId())) {
             missing.add(MissingRequirement.of(RequirementCode.LINK_NOT_BEING_CHECKED, LINK_BEING_CHECKED));
         }
         return List.copyOf(missing);
+    }
+
+    private static boolean isHeld(final Url url) {
+        return url.getThreatType() == null && url.getBlockReason() != null && BlockReason.HOLDS.contains(url.getBlockReason());
     }
 
     @Override
