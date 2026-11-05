@@ -22,6 +22,7 @@ import cc.hrva.urlshortener.service.alert.LinkReviewOpened;
 import cc.hrva.urlshortener.service.impl.DefaultReviewQueueService;
 import cc.hrva.urlshortener.service.inspection.LinkInspectionService;
 import cc.hrva.urlshortener.service.moderation.ReviewWarningPage;
+import cc.hrva.urlshortener.util.ReviewReasons;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -70,6 +71,7 @@ class DefaultReviewQueueServiceTest {
     private static final String LURE = "login or verification lure";
     private static final String ON_LIST = "on list Phishing.Database domains";
     private static final String REPORTED_PHISHING = "reported by a visitor: phishing: asks for my bank login";
+    private static final String SIGN_IN_FORM = ReviewReasons.SIGN_IN_FORM_ACCOUNT;
 
     @Mock
     private LinkReviewRepository linkReviewRepository;
@@ -133,6 +135,8 @@ class DefaultReviewQueueServiceTest {
         assertThat(saved.getValue().getReasons()).isEqualTo(YOUNG + "\n" + LURE);
         assertThat(saved.getValue().getResolvedAt()).isNull();
         assertThat(saved.getValue().isSystemFlagged()).isTrue();
+        assertThat(saved.getValue().isNotice()).isFalse();
+        assertThat(saved.getValue().getCheckedUrl()).isEqualTo(url.getLongUrl());
     }
 
     @Test
@@ -189,7 +193,8 @@ class DefaultReviewQueueServiceTest {
 
     @Test
     void flaggingTwiceKeepsOneOpenEntry() {
-        final var open = LinkReview.builder().id(1L).url(url).reasons(YOUNG + "\n" + LURE).systemFlagged(true).flaggedAt(LocalDateTime.now()).build();
+        final var open = LinkReview.builder().id(1L).url(url).reasons(YOUNG + "\n" + LURE).systemFlagged(true).checkedUrl(url.getLongUrl())
+                .flaggedAt(LocalDateTime.now()).build();
         when(linkReviewRepository.findFirstByUrlAndResolvedAtIsNullOrderByFlaggedAtDesc(url)).thenReturn(Optional.of(open));
 
         reviewQueueService.flag(url, List.of(LURE, YOUNG));
@@ -243,6 +248,112 @@ class DefaultReviewQueueServiceTest {
 
         verify(linkReviewRepository, never()).save(any());
         assertThat(open.isSystemFlagged()).isFalse();
+    }
+
+    @Test
+    void aNoticeOpensAReviewMarkedNotice() {
+        final var saved = ArgumentCaptor.forClass(LinkReview.class);
+
+        reviewQueueService.notice(url, List.of(SIGN_IN_FORM));
+
+        verify(linkReviewRepository).save(saved.capture());
+        assertThat(saved.getValue().getUrl()).isSameAs(url);
+        assertThat(saved.getValue().getReasons()).isEqualTo(SIGN_IN_FORM);
+        assertThat(saved.getValue().isSystemFlagged()).isTrue();
+        assertThat(saved.getValue().isNotice()).isTrue();
+        assertThat(saved.getValue().getCheckedUrl()).isEqualTo(url.getLongUrl());
+        verify(eventPublisher).publishEvent(new AdminAlertEvent.ReviewOpened(
+                new AlertedLink(287L, "v0DB3", "findfavoritedate.life", null, null), List.of(SIGN_IN_FORM)));
+        verify(eventPublisher).publishEvent(new LinkReviewOpened(287L));
+    }
+
+    @Test
+    void aNoticeOnALinkNoLongerActiveOpensNoReview() {
+        when(urlRepository.findById(287L)).thenReturn(Optional.empty());
+
+        reviewQueueService.notice(url, List.of(SIGN_IN_FORM));
+
+        verifyNoInteractions(linkReviewRepository, eventPublisher);
+    }
+
+    @Test
+    void aNoticeOnAnOpenNoticeAddsItsReasonsAndStaysANotice() {
+        final var open = openNotice();
+        when(linkReviewRepository.findFirstByUrlAndResolvedAtIsNullOrderByFlaggedAtDesc(url)).thenReturn(Optional.of(open));
+
+        reviewQueueService.notice(url, List.of(SIGN_IN_FORM, YOUNG));
+
+        verify(linkReviewRepository).save(open);
+        assertThat(open.getReasons()).isEqualTo(SIGN_IN_FORM + "\n" + YOUNG);
+        assertThat(open.isSystemFlagged()).isTrue();
+        assertThat(open.isNotice()).isTrue();
+    }
+
+    @Test
+    void aFlagOnAnOpenNoticeTurnsItIntoARealReview() {
+        final var open = openNotice();
+        when(linkReviewRepository.findFirstByUrlAndResolvedAtIsNullOrderByFlaggedAtDesc(url)).thenReturn(Optional.of(open));
+
+        reviewQueueService.flag(url, List.of(SIGN_IN_FORM));
+
+        verify(linkReviewRepository).save(open);
+        assertThat(open.getReasons()).isEqualTo(SIGN_IN_FORM);
+        assertThat(open.isSystemFlagged()).isTrue();
+        assertThat(open.isNotice()).isFalse();
+    }
+
+    @Test
+    void aNoticeOnAnOpenFlaggedReviewKeepsItFlagged() {
+        final var open = LinkReview.builder().id(1L).url(url).reasons(YOUNG).systemFlagged(true).checkedUrl(url.getLongUrl())
+                .flaggedAt(LocalDateTime.now()).build();
+        when(linkReviewRepository.findFirstByUrlAndResolvedAtIsNullOrderByFlaggedAtDesc(url)).thenReturn(Optional.of(open));
+
+        reviewQueueService.notice(url, List.of(SIGN_IN_FORM));
+
+        verify(linkReviewRepository).save(open);
+        assertThat(open.getReasons()).isEqualTo(YOUNG + "\n" + SIGN_IN_FORM);
+        assertThat(open.isSystemFlagged()).isTrue();
+        assertThat(open.isNotice()).isFalse();
+        verifyNoInteractions(eventPublisher);
+    }
+
+    @Test
+    void aNoticeOnAnEntryOnlyVisitorsReportedLeavesItAVisitorReport() {
+        final var open = LinkReview.builder().id(1L).url(url).reasons(REPORTED_PHISHING).checkedUrl(url.getLongUrl()).flaggedAt(LocalDateTime.now()).build();
+        when(linkReviewRepository.findFirstByUrlAndResolvedAtIsNullOrderByFlaggedAtDesc(url)).thenReturn(Optional.of(open));
+
+        reviewQueueService.notice(url, List.of(SIGN_IN_FORM));
+
+        verify(linkReviewRepository).save(open);
+        assertThat(open.getReasons()).isEqualTo(REPORTED_PHISHING + "\n" + SIGN_IN_FORM);
+        assertThat(open.isSystemFlagged()).isFalse();
+        assertThat(open.isNotice()).isFalse();
+    }
+
+    @Test
+    void aVisitorReportOnAnOpenNoticeKeepsItANotice() {
+        final var open = openNotice();
+        when(linkReviewRepository.findFirstByUrlAndResolvedAtIsNullOrderByFlaggedAtDesc(url)).thenReturn(Optional.of(open));
+
+        reviewQueueService.report(url, ReportCategory.PHISHING, "asks for my bank login");
+
+        verify(linkReviewRepository).save(open);
+        assertThat(open.getReasons()).isEqualTo(SIGN_IN_FORM + "\n" + REPORTED_PHISHING);
+        assertThat(open.isSystemFlagged()).isTrue();
+        assertThat(open.isNotice()).isTrue();
+    }
+
+    @Test
+    void extendingAnOpenReviewRecordsTheDestinationItWasExtendedFor() {
+        final var repointed = Url.builder().id(287L).shortUrl("v0DB3").longUrl("https://sso.findfavoritedate.life/login").active(true).build();
+        final var open = openNotice();
+        when(linkReviewRepository.findFirstByUrlAndResolvedAtIsNullOrderByFlaggedAtDesc(repointed)).thenReturn(Optional.of(open));
+
+        reviewQueueService.notice(repointed, List.of(SIGN_IN_FORM));
+
+        verify(linkReviewRepository).save(open);
+        assertThat(open.getReasons()).isEqualTo(SIGN_IN_FORM);
+        assertThat(open.getCheckedUrl()).isEqualTo("https://sso.findfavoritedate.life/login");
     }
 
     @Test
@@ -344,6 +455,60 @@ class DefaultReviewQueueServiceTest {
     }
 
     @Test
+    void anOkForOneDestinationDoesNotSuppressASignInReviewForAnother() {
+        final var saved = ArgumentCaptor.forClass(LinkReview.class);
+        final var reviewedFine = resolved(ReviewResolution.OK, SIGN_IN_FORM);
+        reviewedFine.setCheckedUrl("https://findfavoritedate.life/");
+        when(linkReviewRepository.findFirstByUrlOrderByFlaggedAtDesc(url)).thenReturn(Optional.of(reviewedFine));
+
+        reviewQueueService.notice(url, List.of(SIGN_IN_FORM));
+
+        verify(linkReviewRepository).save(saved.capture());
+        assertThat(saved.getValue().getId()).isNull();
+        assertThat(saved.getValue().getReasons()).isEqualTo(SIGN_IN_FORM);
+        assertThat(saved.getValue().getCheckedUrl()).isEqualTo(url.getLongUrl());
+    }
+
+    @Test
+    void anOkForThisDestinationSuppressesASignInReview() {
+        final var reviewedFine = resolved(ReviewResolution.OK, SIGN_IN_FORM);
+        reviewedFine.setCheckedUrl(url.getLongUrl());
+        when(linkReviewRepository.findFirstByUrlOrderByFlaggedAtDesc(url)).thenReturn(Optional.of(reviewedFine));
+
+        reviewQueueService.notice(url, List.of(SIGN_IN_FORM));
+        reviewQueueService.flag(url, List.of(SIGN_IN_FORM));
+
+        verify(linkReviewRepository, never()).save(any());
+        verifyNoInteractions(eventPublisher);
+    }
+
+    @Test
+    void anOkWithoutACheckedUrlDoesNotSuppressASignInReview() {
+        final var saved = ArgumentCaptor.forClass(LinkReview.class);
+        when(linkReviewRepository.findFirstByUrlOrderByFlaggedAtDesc(url))
+                .thenReturn(Optional.of(resolved(ReviewResolution.OK, ReviewReasons.SIGN_IN_FORM)));
+
+        reviewQueueService.flag(url, List.of(ReviewReasons.SIGN_IN_FORM));
+
+        verify(linkReviewRepository).save(saved.capture());
+        assertThat(saved.getValue().getId()).isNull();
+        assertThat(saved.getValue().getReasons()).isEqualTo(ReviewReasons.SIGN_IN_FORM);
+    }
+
+    @Test
+    void anOkStillSuppressesOtherReasonsAsBefore() {
+        final var beforeCheckedUrls = resolved(ReviewResolution.OK, YOUNG);
+        final var forAnotherDestination = resolved(ReviewResolution.OK, LURE);
+        forAnotherDestination.setCheckedUrl("https://findfavoritedate.life/");
+        when(linkReviewRepository.findFirstByUrlOrderByFlaggedAtDesc(url)).thenReturn(Optional.of(beforeCheckedUrls), Optional.of(forAnotherDestination));
+
+        reviewQueueService.flag(url, List.of(YOUNG));
+        reviewQueueService.flag(url, List.of(LURE));
+
+        verify(linkReviewRepository, never()).save(any());
+    }
+
+    @Test
     void resolvingALinkWithoutAnOpenEntryChangesNothing() {
         reviewQueueService.resolveOpen(url, ReviewResolution.OK, "admin@localhost");
 
@@ -377,7 +542,20 @@ class DefaultReviewQueueServiceTest {
 
         assertThat(entries.getContent()).containsExactly(new ReviewEntryResponse(287L, "v0DB3", "https://findfavoritedate.life/?u=f6yp608",
                 "findfavoritedate.life", "findfavoritedate.life", 27L, "rhea@gmail.com", LocalDateTime.of(2026, 10, 19, 12, 0), true, LocalDateTime.of(2026, 10, 20, 7, 15), List.of(YOUNG, LURE),
-                LocalDateTime.of(2026, 10, 20, 7, 16), null, List.of(), null, null));
+                LocalDateTime.of(2026, 10, 20, 7, 16), null, List.of(), null, null, false));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void aQueueEntryTellsANoticeFromARealReview() {
+        final var other = Url.builder().id(288L).shortUrl("r3P0t").longUrl("https://utn.pl/x").build();
+        when(linkReviewRepository.findAll(any(Specification.class), any(Pageable.class))).thenReturn(new PageImpl<>(List.of(
+                LinkReview.builder().id(8L).url(url).reasons(SIGN_IN_FORM).systemFlagged(true).notice(true).build(),
+                LinkReview.builder().id(9L).url(other).reasons(YOUNG).systemFlagged(true).build())));
+
+        final var entries = reviewQueueService.openEntries(PageRequest.of(0, 20), null, null, null);
+
+        assertThat(entries.getContent()).extracting(ReviewEntryResponse::notice).containsExactly(true, false);
     }
 
     @Test
@@ -808,6 +986,11 @@ class DefaultReviewQueueServiceTest {
     private static LinkReview openReview(final long id, final User owner) {
         final var link = Url.builder().id(id).shortUrl("s" + id).longUrl("https://example.org/" + id).owner(owner).createDate(LocalDateTime.now()).build();
         return LinkReview.builder().id(id).url(link).reasons(LURE).flaggedAt(LocalDateTime.now()).build();
+    }
+
+    private LinkReview openNotice() {
+        return LinkReview.builder().id(1L).url(url).reasons(SIGN_IN_FORM).systemFlagged(true).notice(true).checkedUrl(url.getLongUrl())
+                .flaggedAt(LocalDateTime.now()).build();
     }
 
     private LinkReview resolved(final ReviewResolution resolution, final String reasons) {

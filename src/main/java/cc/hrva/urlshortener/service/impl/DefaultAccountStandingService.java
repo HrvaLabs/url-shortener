@@ -51,7 +51,8 @@ public class DefaultAccountStandingService implements AccountStandingService {
     public AccountStanding standingOf(final User user) {
         return standing(user, new Links(
                 urlRepository.ownerHasBlockedLink(user.getId(), BlockReason.HOLDS),
-                urlRepository.ownerHasHeldLink(user.getId(), BlockReason.HOLDS) || linkReviewRepository.existsByUrl_Owner_IdAndResolvedAtIsNullAndSystemFlaggedTrue(user.getId())),
+                urlRepository.ownerHasHeldLink(user.getId(), BlockReason.HOLDS)
+                        || linkReviewRepository.existsByUrl_Owner_IdAndResolvedAtIsNullAndSystemFlaggedTrueAndNoticeFalse(user.getId())),
                 signInMethodService.methodsOf(user.getId()));
     }
 

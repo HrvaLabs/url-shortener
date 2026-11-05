@@ -14,6 +14,7 @@ import org.springframework.data.domain.Pageable;
 public interface ReviewQueueService {
 
     void flag(Url url, List<String> reasons);
+    void notice(Url url, List<String> reasons);
     void report(Url url, ReportCategory category, String details);
     void resolveOpen(Url url, ReviewResolution resolution, String resolvedBy);
     void inspectAgainIfOpen(Url url);

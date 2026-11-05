@@ -21,6 +21,8 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -104,10 +106,20 @@ class DefaultAccountStandingServiceTest {
 
     @Test
     void aLinkInTheReviewQueueCountsAsBeingChecked() {
-        when(linkReviewRepository.existsByUrl_Owner_IdAndResolvedAtIsNullAndSystemFlaggedTrue(OWNER)).thenReturn(true);
+        when(linkReviewRepository.existsByUrl_Owner_IdAndResolvedAtIsNullAndSystemFlaggedTrueAndNoticeFalse(OWNER)).thenReturn(true);
 
         assertThat(standingService.standingOf(inGoodStanding().build()).missing())
                 .containsExactly(MissingRequirement.of(RequirementCode.NO_LINKS_BEING_CHECKED, "One of your links is being checked"));
+    }
+
+    @Test
+    void aNoticeDoesNotPauseGoodStanding() {
+        assertThat(standingService.standingOf(inGoodStanding().build()).good()).isTrue();
+        assertThat(standingService.standingsOf(List.of(inGoodStanding().build())).get(OWNER).good()).isTrue();
+
+        verify(linkReviewRepository).existsByUrl_Owner_IdAndResolvedAtIsNullAndSystemFlaggedTrueAndNoticeFalse(OWNER);
+        verify(linkReviewRepository).findOwnerIdsWithOpenSystemReviews(List.of(OWNER));
+        verifyNoMoreInteractions(linkReviewRepository);
     }
 
     @Test
@@ -131,7 +143,7 @@ class DefaultAccountStandingServiceTest {
     @Test
     void everyMissingRequirementIsListedInOrder() {
         when(urlRepository.ownerHasBlockedLink(OWNER, BlockReason.HOLDS)).thenReturn(true);
-        when(linkReviewRepository.existsByUrl_Owner_IdAndResolvedAtIsNullAndSystemFlaggedTrue(OWNER)).thenReturn(true);
+        when(linkReviewRepository.existsByUrl_Owner_IdAndResolvedAtIsNullAndSystemFlaggedTrueAndNoticeFalse(OWNER)).thenReturn(true);
 
         assertThat(standingService.standingOf(User.builder().id(OWNER).createDate(NOW.minusDays(1)).build()).missing())
                 .extracting(MissingRequirement::code)

@@ -42,6 +42,10 @@ public class LinkReview {
     private ReviewResolution resolution;
     @Column(nullable = false)
     private boolean systemFlagged;
+    @Column(nullable = false)
+    private boolean notice;
+    @Column(length = 2048)
+    private String checkedUrl;
 
     @PrePersist
     public void onCreate() {

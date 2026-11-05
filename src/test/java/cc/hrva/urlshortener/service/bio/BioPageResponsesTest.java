@@ -25,6 +25,8 @@ import tools.jackson.databind.json.JsonMapper;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyCollection;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -68,6 +70,15 @@ class BioPageResponsesTest {
         assertThat(json.writeValueAsString(visitor.buttons().get(0))).contains("\"domain\":\"go.example.com\"");
         assertThat(json.writeValueAsString(visitor.buttons().get(1))).doesNotContain("domain");
         assertThat(json.writeValueAsString(editor.buttons().get(1))).doesNotContain("domain");
+    }
+
+    @Test
+    void aNoticeKeepsTheButtonLive() {
+        final var editor = bioPageResponses.editorView(page);
+
+        assertThat(editor.buttons()).extracting(BioPageResponse.Button::linkState).containsExactly(BioLinkState.LIVE, BioLinkState.LIVE);
+        verify(linkReviewRepository).findOpenSystemFlaggedUrlIds(List.of(41L, 42L));
+        verifyNoMoreInteractions(linkReviewRepository);
     }
 
     @Test

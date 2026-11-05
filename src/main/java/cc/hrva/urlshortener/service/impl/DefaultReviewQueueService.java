@@ -30,6 +30,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Stream;
@@ -70,6 +71,16 @@ public class DefaultReviewQueueService implements ReviewQueueService {
     @Override
     @Transactional
     public void flag(final Url url, final List<String> reasons) {
+        queue(url, reasons, false);
+    }
+
+    @Override
+    @Transactional
+    public void notice(final Url url, final List<String> reasons) {
+        queue(url, reasons, true);
+    }
+
+    private void queue(final Url url, final List<String> reasons, final boolean notice) {
         if (urlRepository.findById(url.getId()).filter(Url::isActive).isEmpty()) {
             log.info("Link is no longer active, not queued for review urlId={}", url.getId());
             return;
@@ -79,39 +90,46 @@ public class DefaultReviewQueueService implements ReviewQueueService {
             return;
         }
         linkReviewRepository.findFirstByUrlAndResolvedAtIsNullOrderByFlaggedAtDesc(url).ifPresentOrElse(
-                review -> extend(review, incoming, true),
-                () -> openUnlessReviewedFine(url, incoming));
+                review -> extend(review, url, incoming, !notice),
+                () -> openUnlessReviewedFine(url, incoming, notice));
     }
 
-    private boolean extend(final LinkReview review, final List<String> incoming, final boolean systemFlagged) {
+    private boolean extend(final LinkReview review, final Url url, final List<String> incoming, final boolean fromFlag) {
         final var known = reasonsOf(review);
         final var added = incoming.stream().filter(reason -> !known.contains(reason)).toList();
-        final var newlySystemFlagged = systemFlagged && !review.isSystemFlagged();
-        if (added.isEmpty() && !newlySystemFlagged) {
+        final var flagChanged = fromFlag && (!review.isSystemFlagged() || review.isNotice());
+        final var destinationChanged = !Objects.equals(url.getLongUrl(), review.getCheckedUrl());
+        if (added.isEmpty() && !flagChanged && !destinationChanged) {
             return false;
         }
         review.setReasons(joined(Stream.concat(known.stream(), added.stream()).toList()));
-        review.setSystemFlagged(review.isSystemFlagged() || systemFlagged);
+        if (fromFlag) {
+            review.setSystemFlagged(true);
+            review.setNotice(false);
+        }
+        review.setCheckedUrl(url.getLongUrl());
         linkReviewRepository.save(review);
-        log.info("Review got new reasons urlId={} reviewId={}", review.getUrl().getId(), review.getId());
+        log.info("Review extended urlId={} reviewId={} notice={}", review.getUrl().getId(), review.getId(), review.isNotice());
         return !added.isEmpty();
     }
 
-    private void openUnlessReviewedFine(final Url url, final List<String> incoming) {
+    private void openUnlessReviewedFine(final Url url, final List<String> incoming, final boolean notice) {
         if (reviewedFineFor(url, incoming)) {
             return;
         }
-        openReview(url, incoming, true);
+        openReview(url, incoming, true, notice);
         eventPublisher.publishEvent(new AdminAlertEvent.ReviewOpened(AlertedLink.of(url), incoming));
     }
 
-    private void openReview(final Url url, final List<String> reasons, final boolean systemFlagged) {
+    private void openReview(final Url url, final List<String> reasons, final boolean systemFlagged, final boolean notice) {
         linkReviewRepository.save(LinkReview.builder()
                 .url(url)
                 .reasons(joined(reasons))
                 .systemFlagged(systemFlagged)
+                .notice(notice)
+                .checkedUrl(url.getLongUrl())
                 .build());
-        log.info("Link queued for review urlId={}", url.getId());
+        log.info("Link queued for review urlId={} notice={}", url.getId(), notice);
         reviewWarningPage.showWhileInReview(url);
         eventPublisher.publishEvent(new LinkReviewOpened(url.getId()));
     }
@@ -119,8 +137,13 @@ public class DefaultReviewQueueService implements ReviewQueueService {
     private boolean reviewedFineFor(final Url url, final List<String> incoming) {
         return linkReviewRepository.findFirstByUrlOrderByFlaggedAtDesc(url)
                 .filter(review -> review.getResolution() == ReviewResolution.OK)
-                .map(review -> reasonsOf(review).containsAll(incoming))
-                .orElse(false);
+                .filter(review -> reasonsOf(review).containsAll(incoming))
+                .filter(review -> incoming.stream().noneMatch(ReviewReasons::isSignInForm) || coversDestination(review, url))
+                .isPresent();
+    }
+
+    private static boolean coversDestination(final LinkReview review, final Url url) {
+        return review.getCheckedUrl() != null && review.getCheckedUrl().equals(url.getLongUrl());
     }
 
     @Override
@@ -149,13 +172,13 @@ public class DefaultReviewQueueService implements ReviewQueueService {
             log.info("Review already holds the most visitor reports urlId={} reviewId={}", review.getUrl().getId(), review.getId());
             return;
         }
-        if (extend(review, incoming, false)) {
+        if (extend(review, review.getUrl(), incoming, false)) {
             eventPublisher.publishEvent(new AdminAlertEvent.VisitorReported(AlertedLink.of(review.getUrl()), category, details, false));
         }
     }
 
     private void openFromReport(final Url url, final List<String> incoming, final ReportCategory category, final String details) {
-        openReview(url, incoming, false);
+        openReview(url, incoming, false, false);
         eventPublisher.publishEvent(new AdminAlertEvent.VisitorReported(AlertedLink.of(url), category, details, true));
     }
 
@@ -242,7 +265,8 @@ public class DefaultReviewQueueService implements ReviewQueueService {
                 url.getDomain() == null ? null : url.getDomain().getHostname(),
                 RedirectChains.split(url.getRedirectChain()),
                 inspection.map(InspectionSummary::screenshot).orElse(null),
-                inspection.map(InspectionSummary::virusTotal).orElse(null));
+                inspection.map(InspectionSummary::virusTotal).orElse(null),
+                review.isNotice());
     }
 
     @Override

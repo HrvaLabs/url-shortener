@@ -145,8 +145,16 @@ class DefaultDestinationChangeServiceTest {
         assertThat(refusal(held)).containsExactly(MissingRequirement.of(RequirementCode.LINK_NOT_BEING_CHECKED, "This link is being checked"));
 
         final var reviewed = link(domain(CustomDomainStatus.ACTIVE));
-        when(linkReviewRepository.existsByUrl_IdAndResolvedAtIsNullAndSystemFlaggedTrue(40L)).thenReturn(true);
+        when(linkReviewRepository.existsByUrl_IdAndResolvedAtIsNullAndSystemFlaggedTrueAndNoticeFalse(40L)).thenReturn(true);
         assertThat(refusal(reviewed)).containsExactly(MissingRequirement.of(RequirementCode.LINK_NOT_BEING_CHECKED, "This link is being checked"));
+    }
+
+    @Test
+    void aNoticeDoesNotBlockACustomDomainChange() {
+        final var url = link(domain(CustomDomainStatus.ACTIVE));
+
+        assertThatCode(() -> destinationChanges.requireAllowed(url, owner())).doesNotThrowAnyException();
+        verify(linkReviewRepository).existsByUrl_IdAndResolvedAtIsNullAndSystemFlaggedTrueAndNoticeFalse(40L);
     }
 
     @Test

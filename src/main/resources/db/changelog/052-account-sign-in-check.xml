@@ -21,4 +21,24 @@
         </rollback>
     </changeSet>
 
+    <changeSet author="khrvacic" id="052-link-review-notice">
+        <addColumn tableName="link_review">
+            <column name="notice" type="BOOLEAN" defaultValueBoolean="false">
+                <constraints nullable="false"/>
+            </column>
+        </addColumn>
+        <rollback>
+            <dropColumn tableName="link_review" columnName="notice"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet author="khrvacic" id="052-link-review-checked-url">
+        <addColumn tableName="link_review">
+            <column name="checked_url" type="VARCHAR(2048)"/>
+        </addColumn>
+        <rollback>
+            <dropColumn tableName="link_review" columnName="checked_url"/>
+        </rollback>
+    </changeSet>
+
 </databaseChangeLog>

@@ -57,9 +57,9 @@ class AdminReviewQueueControllerTest {
     private static final ReviewEntryResponse ENTRY = new ReviewEntryResponse(287L, "v0DB3", "https://findfavoritedate.life/?u=f6yp608",
             "findfavoritedate.life", "findfavoritedate.life", 27L,
             "rhea@gmail.com", LocalDateTime.of(2026, 10, 19, 12, 0), true, LocalDateTime.of(2026, 10, 20, 7, 15),
-            List.of("domain registered in the last 30 days", "high-risk domain ending .life"), LocalDateTime.of(2026, 10, 20, 7, 16), null, List.of(), null, null);
+            List.of("domain registered in the last 30 days", "high-risk domain ending .life"), LocalDateTime.of(2026, 10, 20, 7, 16), null, List.of(), null, null, true);
     private static final ReviewEntryResponse ANONYMOUS_ENTRY = new ReviewEntryResponse(288L, "njuskaio_verify", "https://njuskaio.cam/a/MAUB3",
-            "njuskaio.cam", "njuskaio.cam", null, null, null, false, LocalDateTime.of(2026, 10, 20, 6, 0), List.of("imitates njuskalo"), LocalDateTime.of(2026, 10, 20, 6, 1), null, List.of(), null, null);
+            "njuskaio.cam", "njuskaio.cam", null, null, null, false, LocalDateTime.of(2026, 10, 20, 6, 0), List.of("imitates njuskalo"), LocalDateTime.of(2026, 10, 20, 6, 1), null, List.of(), null, null, false);
 
     private MockMvc mockMvc;
 
@@ -99,6 +99,8 @@ class AdminReviewQueueControllerTest {
                 .andExpect(jsonPath("$.content[0].createDate").exists())
                 .andExpect(jsonPath("$.content[0].reasons").value(contains("domain registered in the last 30 days", "high-risk domain ending .life")))
                 .andExpect(jsonPath("$.content[0].flaggedAt").exists())
+                .andExpect(jsonPath("$.content[0].notice").value(true))
+                .andExpect(jsonPath("$.content[1].notice").value(false))
                 .andExpect(jsonPath("$.content[1].ownerId").value(nullValue()))
                 .andExpect(jsonPath("$.content[1].ownerEmail").value(nullValue()))
                 .andExpect(jsonPath("$.content[1].ownerCreatedAt").value(nullValue()))

@@ -23,5 +23,6 @@ public record ReviewEntryResponse(
         String domain,
         List<String> redirectChain,
         ScreenshotView screenshot,
-        VirusTotalView virusTotal) {
+        VirusTotalView virusTotal,
+        boolean notice) {
 }

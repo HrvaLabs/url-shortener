@@ -199,7 +199,7 @@ public class DefaultDestinationChangeService implements DestinationChangeService
         if (!held && (url.getThreatType() != null || url.getBlockReason() != null)) {
             missing.add(MissingRequirement.of(RequirementCode.LINK_NOT_BLOCKED, LINK_BLOCKED));
         }
-        if (held || linkReviewRepository.existsByUrl_IdAndResolvedAtIsNullAndSystemFlaggedTrue(url.getId())) {
+        if (held || linkReviewRepository.existsByUrl_IdAndResolvedAtIsNullAndSystemFlaggedTrueAndNoticeFalse(url.getId())) {
             missing.add(MissingRequirement.of(RequirementCode.LINK_NOT_BEING_CHECKED, LINK_BEING_CHECKED));
         }
         return List.copyOf(missing);
