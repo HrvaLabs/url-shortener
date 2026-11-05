@@ -822,6 +822,7 @@ public class DefaultUrlService implements UrlService {
             current.setFinalUrl(null);
             current.setRedirectChain(null);
             current.setChainCheckedAt(null);
+            current.setViaShortener(false);
             current.setDestinationCheckedAt(null);
             current.setDestinationDeadSince(null);
             current.setDestinationFailStreak(0);

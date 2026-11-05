@@ -222,17 +222,26 @@ public interface UrlRepository extends JpaRepository<Url, Long>, JpaSpecificatio
             + "order by u.chainCheckedAt asc nulls first, u.id")
     List<Long> findIdsDueForRedirectCheck(@Param("checkedBefore") LocalDateTime checkedBefore, Pageable pageable);
 
-    @Modifying
-    @Transactional
-    @Query("update Url u set u.finalUrl = :finalUrl, u.redirectChain = :redirectChain, u.chainCheckedAt = :checkedAt "
-            + "where u.id = :id and u.longUrl = :longUrl")
-    int recordRedirectChain(@Param("id") long id, @Param("longUrl") String longUrl, @Param("finalUrl") String finalUrl,
-            @Param("redirectChain") String redirectChain, @Param("checkedAt") LocalDateTime checkedAt);
+    @Query("select u.id from Url u where u.active = true and u.viaShortener = true and u.chainCheckedAt < :checkedBefore "
+            + "order by u.chainCheckedAt asc, u.id")
+    List<Long> findIdsOfShortenerLinksDueForRedirectCheck(@Param("checkedBefore") LocalDateTime checkedBefore, Pageable pageable);
+
+    @Query("select count(u) from Url u where u.active = true and u.viaShortener = true and u.chainCheckedAt < :checkedBefore")
+    long countShortenerLinksDueForRedirectCheck(@Param("checkedBefore") LocalDateTime checkedBefore);
 
     @Modifying
     @Transactional
-    @Query("update Url u set u.chainCheckedAt = :checkedAt where u.id = :id and u.longUrl = :longUrl")
-    int markRedirectChainChecked(@Param("id") long id, @Param("longUrl") String longUrl, @Param("checkedAt") LocalDateTime checkedAt);
+    @Query("update Url u set u.finalUrl = :finalUrl, u.redirectChain = :redirectChain, u.chainCheckedAt = :checkedAt, "
+            + "u.viaShortener = :viaShortener where u.id = :id and u.longUrl = :longUrl")
+    int recordRedirectChain(@Param("id") long id, @Param("longUrl") String longUrl, @Param("finalUrl") String finalUrl,
+            @Param("redirectChain") String redirectChain, @Param("checkedAt") LocalDateTime checkedAt,
+            @Param("viaShortener") boolean viaShortener);
+
+    @Modifying
+    @Transactional
+    @Query("update Url u set u.chainCheckedAt = :checkedAt, u.viaShortener = :viaShortener where u.id = :id and u.longUrl = :longUrl")
+    int markRedirectChainChecked(@Param("id") long id, @Param("longUrl") String longUrl, @Param("checkedAt") LocalDateTime checkedAt,
+            @Param("viaShortener") boolean viaShortener);
 
     @Modifying
     @Transactional

@@ -55,6 +55,7 @@ public class DefaultRedirectChainService implements RedirectChainService {
     private final SafeBrowsingService safeBrowsingService;
     private final ModerationService moderationService;
     private final ReviewQueueService reviewQueueService;
+    private final SuspiciousUrlService suspiciousUrlService;
     private final Clock clock;
 
     @Override
@@ -66,14 +67,15 @@ public class DefaultRedirectChainService implements RedirectChainService {
         }
 
         final var longUrl = url.get().getLongUrl();
+        final var viaShortener = suspiciousUrlService.isListedShortener(longUrl);
         final var chain = chainOf(url.get());
         if (chain.isEmpty()) {
-            urlRepository.markRedirectChainChecked(urlId, longUrl, now());
+            urlRepository.markRedirectChainChecked(urlId, longUrl, now(), viaShortener);
             return Result.UNREACHABLE;
         }
         if (!url.get().isActive()) {
             urlRepository.recordRedirectChain(urlId, longUrl, StringUtils.truncate(chain.get().getLast().original(), FINAL_URL_LENGTH),
-                    RedirectChains.join(chain.get()), now());
+                    RedirectChains.join(chain.get()), now(), viaShortener);
             log.info("Recorded where a held link ends without judging its hops urlId={}", urlId);
             return Result.CHECKED;
         }
@@ -95,7 +97,7 @@ public class DefaultRedirectChainService implements RedirectChainService {
             return Result.SAFE_BROWSING_UNAVAILABLE;
         }
         urlRepository.recordRedirectChain(urlId, longUrl, StringUtils.truncate(chain.get().getLast().original(), FINAL_URL_LENGTH),
-                RedirectChains.join(chain.get()), now());
+                RedirectChains.join(chain.get()), now(), viaShortener);
         return Result.CHECKED;
     }
 

@@ -22,7 +22,11 @@ import java.util.TreeMap;
 import java.util.stream.LongStream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.slf4j.LoggerFactory;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -383,6 +387,78 @@ class DefaultSafeBrowsingRecheckServiceTest {
         verify(redirectChainService).check(1L);
         verify(redirectChainService).check(2L);
         verify(redirectChainService, never()).check(3L);
+    }
+
+    @Test
+    void shortenerLinksAreFollowedOnTopOfTheWeeklyBudget() {
+        final var weekly = LongStream.rangeClosed(1000, 1499).boxed().toList();
+        when(urlRepository.findIdsDueForRedirectCheck(any(LocalDateTime.class), any(Pageable.class))).thenReturn(weekly);
+        when(urlRepository.findIdsOfShortenerLinksDueForRedirectCheck(any(LocalDateTime.class), any(Pageable.class))).thenReturn(List.of(7000L, 7001L, 7002L));
+        final var earliest = LocalDateTime.now().minusDays(1);
+
+        recheckService.recheckActiveUrls();
+
+        final var checkedBefore = ArgumentCaptor.forClass(LocalDateTime.class);
+        final var page = ArgumentCaptor.forClass(Pageable.class);
+        verify(urlRepository).findIdsOfShortenerLinksDueForRedirectCheck(checkedBefore.capture(), page.capture());
+        assertThat(checkedBefore.getValue()).isBetween(earliest, LocalDateTime.now().minusDays(1));
+        assertThat(page.getValue().getPageSize()).isEqualTo(500);
+        verify(redirectChainService, times(503)).check(anyLong());
+        verify(redirectChainService).check(7000L);
+        verify(redirectChainService).check(7002L);
+    }
+
+    @Test
+    void aLinkDueInBothListsIsFollowedOnce() {
+        when(urlRepository.findIdsDueForRedirectCheck(any(LocalDateTime.class), any(Pageable.class))).thenReturn(List.of(12L, 40L));
+        when(urlRepository.findIdsOfShortenerLinksDueForRedirectCheck(any(LocalDateTime.class), any(Pageable.class))).thenReturn(List.of(40L, 41L));
+
+        recheckService.recheckActiveUrls();
+
+        verify(redirectChainService, times(1)).check(40L);
+        verify(redirectChainService).check(12L);
+        verify(redirectChainService).check(41L);
+    }
+
+    @Test
+    void leftoverShortenerLinksAreLogged() {
+        final var ids = LongStream.rangeClosed(1000, 1499).boxed().toList();
+        when(urlRepository.findIdsOfShortenerLinksDueForRedirectCheck(any(LocalDateTime.class), any(Pageable.class))).thenReturn(ids);
+        when(urlRepository.countShortenerLinksDueForRedirectCheck(any(LocalDateTime.class))).thenReturn(600L);
+        final var logs = new ListAppender<ILoggingEvent>();
+        logs.start();
+        final var logger = (Logger) LoggerFactory.getLogger(DefaultSafeBrowsingRecheckService.class);
+        logger.addAppender(logs);
+
+        try {
+            recheckService.recheckActiveUrls();
+        } finally {
+            logger.detachAppender(logs);
+        }
+
+        assertThat(logs.list).extracting(ILoggingEvent::getFormattedMessage)
+                .contains("Nightly shortener redirect checks left 100 links for the next night");
+    }
+
+    @Test
+    void safeBrowsingGoingDownStopsTheShortenerChecksToo() {
+        when(urlRepository.findIdsDueForRedirectCheck(any(LocalDateTime.class), any(Pageable.class))).thenReturn(List.of(1L, 2L));
+        when(redirectChainService.check(2L)).thenReturn(RedirectChainService.Result.SAFE_BROWSING_UNAVAILABLE);
+
+        recheckService.recheckActiveUrls();
+
+        verify(urlRepository, never()).findIdsOfShortenerLinksDueForRedirectCheck(any(LocalDateTime.class), any(Pageable.class));
+    }
+
+    @Test
+    void shortenerChecksThatFindSafeBrowsingDownStopTheRest() {
+        when(urlRepository.findIdsOfShortenerLinksDueForRedirectCheck(any(LocalDateTime.class), any(Pageable.class))).thenReturn(List.of(8L, 9L, 10L));
+        when(redirectChainService.check(9L)).thenReturn(RedirectChainService.Result.SAFE_BROWSING_UNAVAILABLE);
+
+        recheckService.recheckActiveUrls();
+
+        verify(redirectChainService).check(8L);
+        verify(redirectChainService, never()).check(10L);
     }
 
     @Test

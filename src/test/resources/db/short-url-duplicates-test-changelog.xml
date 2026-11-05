@@ -56,5 +56,6 @@
     <include file="classpath:/db/changelog/049-link-inspection.xml"/>
     <include file="classpath:/db/changelog/050-virustotal.xml"/>
     <include file="classpath:/db/changelog/051-virustotal-submitted-id.xml"/>
+    <include file="classpath:/db/changelog/054-url-via-shortener.xml"/>
 
 </databaseChangeLog>

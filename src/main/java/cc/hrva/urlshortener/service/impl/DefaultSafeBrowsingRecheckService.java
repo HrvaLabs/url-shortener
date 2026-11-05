@@ -15,8 +15,10 @@ import cc.hrva.urlshortener.service.settings.SettingKey;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.EnumMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
@@ -33,6 +35,8 @@ public class DefaultSafeBrowsingRecheckService implements SafeBrowsingRecheckSer
 
     private static final int BATCH_SIZE = 20;
     private static final int REDIRECT_CHECKS_PER_RUN = 500;
+    private static final int SHORTENER_CHECKS_PER_RUN = 500;
+    private static final int SHORTENER_RECHECK_INTERVAL_DAYS = 1;
     private static final int REDIRECT_CHECK_INTERVAL_DAYS = 7;
     private static final String PERFORMED_BY = "system";
     private static final String VIA = "nightly";
@@ -96,19 +100,40 @@ public class DefaultSafeBrowsingRecheckService implements SafeBrowsingRecheckSer
     private void checkRedirectChains() {
         final var checkedBefore = LocalDateTime.now().minusDays(REDIRECT_CHECK_INTERVAL_DAYS);
         final var ids = urlRepository.findIdsDueForRedirectCheck(checkedBefore, PageRequest.ofSize(REDIRECT_CHECKS_PER_RUN));
-        var followed = 0;
+        final var followedIds = new HashSet<Long>();
+        final var safeBrowsingAvailable = follow(ids, followedIds);
+        log.info("Nightly redirect checks complete — {} of {} due links followed", followedIds.size(), ids.size());
+        if (safeBrowsingAvailable) {
+            checkShortenerLinks(Set.copyOf(ids));
+        }
+    }
+
+    private void checkShortenerLinks(final Set<Long> alreadyFollowed) {
+        final var checkedBefore = LocalDateTime.now().minusDays(SHORTENER_RECHECK_INTERVAL_DAYS);
+        final var ids = urlRepository.findIdsOfShortenerLinksDueForRedirectCheck(checkedBefore, PageRequest.ofSize(SHORTENER_CHECKS_PER_RUN));
+        final var due = ids.stream().filter(id -> !alreadyFollowed.contains(id)).toList();
+        final var followedIds = new HashSet<Long>();
+        follow(due, followedIds);
+        log.info("Nightly shortener redirect checks complete — {} of {} due links followed", followedIds.size(), due.size());
+        final var leftover = urlRepository.countShortenerLinksDueForRedirectCheck(checkedBefore) - ids.size();
+        if (leftover > 0) {
+            log.info("Nightly shortener redirect checks left {} links for the next night", leftover);
+        }
+    }
+
+    private boolean follow(final List<Long> ids, final Set<Long> followedIds) {
         for (final var id : ids) {
             try {
                 if (redirectChainService.check(id) == RedirectChainService.Result.SAFE_BROWSING_UNAVAILABLE) {
                     log.warn("Safe Browsing became unavailable, the remaining redirect checks wait for the next nightly scan urlId={}", id);
-                    break;
+                    return false;
                 }
-                followed++;
+                followedIds.add(id);
             } catch (final RuntimeException exception) {
                 log.warn("Redirect check of a link failed, continuing with the next one urlId={}", id, exception);
             }
         }
-        log.info("Nightly redirect checks complete — {} of {} due links followed", followed, ids.size());
+        return true;
     }
 
     private Optional<List<String>> threatsOf(final Url url, final AtomicBoolean safeBrowsingAvailable) {

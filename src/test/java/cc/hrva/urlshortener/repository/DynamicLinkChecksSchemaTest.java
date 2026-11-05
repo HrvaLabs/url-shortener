@@ -713,9 +713,9 @@ class DynamicLinkChecksSchemaTest {
         entityManager.clear();
 
         final var recorded = urlRepository.recordRedirectChain(blocked.getId(), "https://bit.example/abc", "https://njuskaio.cam/a",
-                "https://bit.example/abc\nhttps://njuskaio.cam/a", checkedAt);
+                "https://bit.example/abc\nhttps://njuskaio.cam/a", checkedAt, false);
         final var stale = urlRepository.recordRedirectChain(repointed.getId(), "https://old.example/", "https://old-landing.example/",
-                "https://old.example/\nhttps://old-landing.example/", checkedAt);
+                "https://old.example/\nhttps://old-landing.example/", checkedAt, false);
         entityManager.clear();
 
         assertThat(recorded).isEqualTo(1);
@@ -733,6 +733,54 @@ class DynamicLinkChecksSchemaTest {
             assertThat(stored.getRedirectChain()).isNull();
             assertThat(stored.getChainCheckedAt()).isNull();
         });
+    }
+
+    @Test
+    void shortenerLinksAreDueAfterADay() {
+        final var checkedBefore = LocalDateTime.of(2026, 11, 5, 3, 0);
+        final var due = savedShortenerLink("due", checkedBefore.minusDays(1), true);
+        final var dueOlder = savedShortenerLink("older", checkedBefore.minusDays(3), true);
+        savedShortenerLink("fresh", checkedBefore.plusHours(12), true);
+        savedShortenerLink("ordinary", checkedBefore.minusDays(2), false);
+        final var inactive = savedShortenerLink("inactive", checkedBefore.minusDays(2), true);
+        inactive.setActive(false);
+        entityManager.flush();
+        entityManager.clear();
+
+        assertThat(urlRepository.findIdsOfShortenerLinksDueForRedirectCheck(checkedBefore, PageRequest.ofSize(10)))
+                .containsExactly(dueOlder.getId(), due.getId());
+        assertThat(urlRepository.findIdsOfShortenerLinksDueForRedirectCheck(checkedBefore, PageRequest.ofSize(1)))
+                .containsExactly(dueOlder.getId());
+    }
+
+    @Test
+    void countMatchesTheDueShortenerLinks() {
+        final var checkedBefore = LocalDateTime.of(2026, 11, 5, 3, 0);
+        savedShortenerLink("one", checkedBefore.minusDays(2), true);
+        savedShortenerLink("two", checkedBefore.minusDays(4), true);
+        savedShortenerLink("fresh", checkedBefore.plusHours(12), true);
+        savedShortenerLink("ordinary", checkedBefore.minusDays(2), false);
+        entityManager.flush();
+        entityManager.clear();
+
+        assertThat(urlRepository.countShortenerLinksDueForRedirectCheck(checkedBefore)).isEqualTo(2);
+    }
+
+    @Test
+    void recordingAChainStoresWhetherTheLinkGoesThroughAShortener() {
+        final var checkedAt = LocalDateTime.of(2026, 11, 5, 4, 30);
+        final var url = savedLink("via", "https://bit.ly/abc", null);
+        final var other = savedLink("other", "https://bit.ly/def", null);
+        entityManager.flush();
+        entityManager.clear();
+
+        urlRepository.recordRedirectChain(url.getId(), "https://bit.ly/abc", "https://landing.example/", "https://bit.ly/abc\nhttps://landing.example/",
+                checkedAt, true);
+        urlRepository.markRedirectChainChecked(other.getId(), "https://bit.ly/def", checkedAt, true);
+        entityManager.clear();
+
+        assertThat(urlRepository.findById(url.getId())).hasValueSatisfying(stored -> assertThat(stored.isViaShortener()).isTrue());
+        assertThat(urlRepository.findById(other.getId())).hasValueSatisfying(stored -> assertThat(stored.isViaShortener()).isTrue());
     }
 
     @Test
@@ -755,8 +803,8 @@ class DynamicLinkChecksSchemaTest {
         entityManager.flush();
         entityManager.clear();
 
-        final var marked = urlRepository.markRedirectChainChecked(url.getId(), "https://bit.example/down", checkedAt);
-        final var stale = urlRepository.markRedirectChainChecked(url.getId(), "https://bit.example/other", checkedAt.plusDays(1));
+        final var marked = urlRepository.markRedirectChainChecked(url.getId(), "https://bit.example/down", checkedAt, false);
+        final var stale = urlRepository.markRedirectChainChecked(url.getId(), "https://bit.example/other", checkedAt.plusDays(1), false);
         entityManager.clear();
 
         assertThat(marked).isEqualTo(1);
@@ -776,6 +824,13 @@ class DynamicLinkChecksSchemaTest {
         assertThat(domainRuleRepository.findByType(DomainRuleType.BLOCK)).extracting(DomainRule::getDomain)
                 .contains("njuskaio.cam")
                 .doesNotContain("trusted.example");
+    }
+
+    private Url savedShortenerLink(final String shortUrl, final LocalDateTime checkedAt, final boolean viaShortener) {
+        final var url = savedLink(shortUrl, "https://example.org/" + shortUrl, null);
+        url.setChainCheckedAt(checkedAt);
+        url.setViaShortener(viaShortener);
+        return url;
     }
 
     private Url savedLink(final String shortUrl, final String longUrl, final User owner) {

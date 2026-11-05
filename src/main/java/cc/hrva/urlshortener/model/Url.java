@@ -79,6 +79,8 @@ public class Url {
 
     private LocalDateTime chainCheckedAt;
 
+    private boolean viaShortener;
+
     @Enumerated(EnumType.STRING)
     private CreatedVia createdVia;
 

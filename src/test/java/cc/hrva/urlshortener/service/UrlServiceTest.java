@@ -1143,6 +1143,21 @@ class UrlServiceTest {
     }
 
     @Test
+    void aChangedDestinationClearsViaShortener() {
+        final var url = Url.builder().id(7L).shortUrl("abc").longUrl("https://bit.ly/old").visits(0L).active(true).viaShortener(true).build();
+        final var update = UrlUpdateDto.builder().id(7L).longUrl("https://example.com/menu").build();
+        final var changed = Url.builder().id(7L).shortUrl("abc").longUrl("https://example.com/menu").visits(0L).active(true).viaShortener(true).build();
+        when(userService.getUserFromToken()).thenReturn(admin());
+        when(urlRepository.findById(7L)).thenReturn(Optional.of(url));
+        when(urlUpdateDtoToUrlConverter.convert(update)).thenReturn(changed);
+        when(urlRepository.save(any(Url.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        urlService.updateUrl(update, null);
+
+        assertThat(url.isViaShortener()).isFalse();
+    }
+
+    @Test
     void keepingTheDestinationKeepsTheChainAndChecksNoRedirects() {
         final var checkedAt = LocalDateTime.of(2026, 10, 20, 4, 30);
         final var url = Url.builder().id(7L).shortUrl("abc").longUrl("https://same.example").visits(0L).active(true)
