@@ -6,6 +6,7 @@ import cc.hrva.urlshortener.dto.BlocklistStatus;
 import cc.hrva.urlshortener.exception.BlocklistSourceNotFoundException;
 import cc.hrva.urlshortener.exception.UrlValidationException;
 import cc.hrva.urlshortener.model.BlocklistSource;
+import cc.hrva.urlshortener.model.enums.BlocklistAction;
 import cc.hrva.urlshortener.model.enums.SourceKind;
 import cc.hrva.urlshortener.repository.BlocklistSourceRepository;
 import cc.hrva.urlshortener.service.BlocklistSourceService;
@@ -66,12 +67,13 @@ public class DefaultBlocklistSourceService implements BlocklistSourceService {
     @Override
     @Transactional
     public BlocklistSourceResponse create(final BlocklistSourceDto blocklistSourceDto) {
-        validate(blocklistSourceDto);
+        final var kind = Objects.requireNonNullElse(blocklistSourceDto.kind(), SourceKind.DOMAINS);
+        validate(blocklistSourceDto, kind);
         final var source = blocklistSourceRepository.save(BlocklistSource.builder()
                 .name(blocklistSourceDto.name().strip())
                 .url(blocklistSourceDto.url().strip())
                 .action(blocklistSourceDto.action())
-                .kind(Objects.requireNonNullElse(blocklistSourceDto.kind(), SourceKind.DOMAINS))
+                .kind(kind)
                 .enabled(Objects.requireNonNullElse(blocklistSourceDto.enabled(), true))
                 .refreshIntervalHours(Objects.requireNonNullElse(blocklistSourceDto.refreshIntervalHours(), DEFAULT_REFRESH_INTERVAL_HOURS))
                 .fallbackUrls(fallbackUrlsOf(blocklistSourceDto).orElse(List.of()))
@@ -84,7 +86,7 @@ public class DefaultBlocklistSourceService implements BlocklistSourceService {
     @Transactional
     public BlocklistSourceResponse update(final long id, final BlocklistSourceDto blocklistSourceDto) {
         final var source = find(id);
-        validate(blocklistSourceDto);
+        validate(blocklistSourceDto, Objects.requireNonNullElse(blocklistSourceDto.kind(), source.getKind()));
         final var kindChanged = blocklistSourceDto.kind() != null && blocklistSourceDto.kind() != source.getKind();
         source.setName(blocklistSourceDto.name().strip());
         source.setUrl(blocklistSourceDto.url().strip());
@@ -216,7 +218,7 @@ public class DefaultBlocklistSourceService implements BlocklistSourceService {
         return BlocklistSourceResponse.from(source, blocklistStore.memoryBytes(source.getId()));
     }
 
-    private static void validate(final BlocklistSourceDto blocklistSourceDto) {
+    private static void validate(final BlocklistSourceDto blocklistSourceDto, final SourceKind kind) {
         if (StringUtils.isBlank(blocklistSourceDto.name())) {
             throw new UrlValidationException("Enter a name for the list");
         }
@@ -226,6 +228,12 @@ public class DefaultBlocklistSourceService implements BlocklistSourceService {
         validateListUrl(blocklistSourceDto.url(), "The list URL");
         if (blocklistSourceDto.action() == null) {
             throw new UrlValidationException("Choose whether the list blocks or flags links");
+        }
+        if (kind == SourceKind.TOP_SITES && blocklistSourceDto.action() != BlocklistAction.TRUST) {
+            throw new UrlValidationException("Top sites lists can only mark real sign-in pages");
+        }
+        if (kind != SourceKind.TOP_SITES && blocklistSourceDto.action() == BlocklistAction.TRUST) {
+            throw new UrlValidationException("Only a top sites list can mark real sign-in pages");
         }
         final var refreshIntervalHours = blocklistSourceDto.refreshIntervalHours();
         if (refreshIntervalHours != null && (refreshIntervalHours < 1 || refreshIntervalHours > MAX_REFRESH_INTERVAL_HOURS)) {

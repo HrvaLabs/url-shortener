@@ -115,6 +115,10 @@ class DefaultBlocklistSourceServiceTest {
     private static final String NO_DOMAINS = "No domains found. Use the list's domains, hosts or adblock format.";
     private static final String NO_LINKS = "No links found. Use a list with one link per line or a CSV with a url column.";
     private static final long MEGABYTE = 1024L * 1024L;
+    private static final long TRANCO = 10L;
+    private static final String TRANCO_API = "https://tranco-list.eu/api/lists/date/latest";
+    private static final String TOP_SITES_ONLY_TRUST = "Top sites lists can only mark real sign-in pages";
+    private static final String TRUST_ONLY_TOP_SITES = "Only a top sites list can mark real sign-in pages";
 
     @TempDir
     private Path downloads;
@@ -1054,6 +1058,71 @@ class DefaultBlocklistSourceServiceTest {
     }
 
     @Test
+    void aTopSitesListThatBlocksOrFlagsIsRefused() {
+        assertRefused(new BlocklistSourceDto("Tranco", TRANCO_API, SourceKind.TOP_SITES, BlocklistAction.BLOCK, null, 24, null), TOP_SITES_ONLY_TRUST);
+        assertRefused(new BlocklistSourceDto("Tranco", TRANCO_API, SourceKind.TOP_SITES, BlocklistAction.FLAG, null, 24, null), TOP_SITES_ONLY_TRUST);
+    }
+
+    @Test
+    void aListThatMarksRealSignInPagesMustBeATopSitesList() {
+        assertRefused(new BlocklistSourceDto("Trusted", MAIN, SourceKind.DOMAINS, BlocklistAction.TRUST, null, null, null), TRUST_ONLY_TOP_SITES);
+        assertRefused(new BlocklistSourceDto("Trusted", OPENPHISH, SourceKind.LINKS, BlocklistAction.TRUST, null, null, null), TRUST_ONLY_TOP_SITES);
+        assertRefused(new BlocklistSourceDto("Trusted", MAIN, null, BlocklistAction.TRUST, null, null, null), TRUST_ONLY_TOP_SITES);
+    }
+
+    @Test
+    void aTopSitesListThatMarksRealSignInPagesIsCreated() {
+        blocklistSourceService.create(new BlocklistSourceDto("Tranco top sites", TRANCO_API, SourceKind.TOP_SITES, BlocklistAction.TRUST, null, 24, null));
+
+        final var saved = ArgumentCaptor.forClass(BlocklistSource.class);
+        verify(blocklistSourceRepository).save(saved.capture());
+        assertThat(saved.getValue())
+                .extracting(BlocklistSource::getName, BlocklistSource::getUrl, BlocklistSource::getKind, BlocklistSource::getAction,
+                        BlocklistSource::getRefreshIntervalHours)
+                .containsExactly("Tranco top sites", TRANCO_API, SourceKind.TOP_SITES, BlocklistAction.TRUST, 24);
+    }
+
+    @Test
+    void anUpdateCantGiveTheTopSitesListAnotherActionOrKind() {
+        final var source = stored(tranco().build());
+
+        assertUpdateRefused(new BlocklistSourceDto("Tranco top sites", TRANCO_API, null, BlocklistAction.BLOCK, null, null, null), TOP_SITES_ONLY_TRUST);
+        assertUpdateRefused(new BlocklistSourceDto("Tranco top sites", TRANCO_API, SourceKind.DOMAINS, BlocklistAction.TRUST, null, null, null),
+                TRUST_ONLY_TOP_SITES);
+
+        assertThat(source)
+                .extracting(BlocklistSource::getKind, BlocklistSource::getAction, BlocklistSource::getDomainCount)
+                .containsExactly(SourceKind.TOP_SITES, BlocklistAction.TRUST, 10_000L);
+        verify(blocklistSourceRepository, never()).save(any(BlocklistSource.class));
+        verify(blocklistStore, never()).remove(anyLong());
+    }
+
+    @Test
+    void anUpdateCantMakeABlocklistMarkRealSignInPages() {
+        final var source = stored(source(1).build());
+
+        assertUpdateRefused(1, new BlocklistSourceDto("HaGeZi Fake", MAIN, null, BlocklistAction.TRUST, null, null, null), TRUST_ONLY_TOP_SITES);
+        assertUpdateRefused(1, new BlocklistSourceDto("HaGeZi Fake", MAIN, SourceKind.TOP_SITES, BlocklistAction.BLOCK, null, null, null),
+                TOP_SITES_ONLY_TRUST);
+
+        assertThat(source).extracting(BlocklistSource::getKind, BlocklistSource::getAction).containsExactly(SourceKind.DOMAINS, BlocklistAction.BLOCK);
+        verify(blocklistSourceRepository, never()).save(any(BlocklistSource.class));
+    }
+
+    @Test
+    void theTopSitesListCanBeEditedAsAListOfRealSignInPages() {
+        final var source = stored(tranco().build());
+
+        blocklistSourceService.update(TRANCO, new BlocklistSourceDto("Tranco top sites", TRANCO_API, null, BlocklistAction.TRUST, null, 48, null));
+
+        assertThat(source)
+                .extracting(BlocklistSource::getKind, BlocklistSource::getAction, BlocklistSource::getRefreshIntervalHours, BlocklistSource::getDomainCount)
+                .containsExactly(SourceKind.TOP_SITES, BlocklistAction.TRUST, 48, 10_000L);
+        verify(blocklistSourceRepository).save(source);
+        verify(blocklistStore, never()).remove(anyLong());
+    }
+
+    @Test
     void aNewSourceDefaultsToAnEnabledDomainListRefreshedEverySixHours() {
         final var response = blocklistSourceService.create(
                 new BlocklistSourceDto(" Phishing Army ", " https://phishing.army/download/phishing_army_blocklist.txt ",
@@ -1179,6 +1248,19 @@ class DefaultBlocklistSourceServiceTest {
         verify(blocklistSourceRepository, never()).save(any(BlocklistSource.class));
     }
 
+    private void assertRefused(final BlocklistSourceDto dto, final String message) {
+        assertThatThrownBy(() -> blocklistSourceService.create(dto)).isInstanceOf(UrlValidationException.class).hasMessage(message);
+        verify(blocklistSourceRepository, never()).save(any(BlocklistSource.class));
+    }
+
+    private void assertUpdateRefused(final BlocklistSourceDto dto, final String message) {
+        assertUpdateRefused(TRANCO, dto, message);
+    }
+
+    private void assertUpdateRefused(final long id, final BlocklistSourceDto dto, final String message) {
+        assertThatThrownBy(() -> blocklistSourceService.update(id, dto)).isInstanceOf(UrlValidationException.class).hasMessage(message);
+    }
+
     @Test
     void aSourceThatStartsFailingAlertsOnceAndNotOnTheNextFailure() {
         stored(source(1).build());
@@ -1271,6 +1353,11 @@ class DefaultBlocklistSourceServiceTest {
 
     private static BlocklistSource.BlocklistSourceBuilder source(final long id) {
         return BlocklistSource.builder().id(id).name("HaGeZi Fake").url(MAIN).action(BlocklistAction.BLOCK);
+    }
+
+    private static BlocklistSource.BlocklistSourceBuilder tranco() {
+        return BlocklistSource.builder().id(TRANCO).name("Tranco top sites").url(TRANCO_API).kind(SourceKind.TOP_SITES).action(BlocklistAction.TRUST)
+                .refreshIntervalHours(24).domainCount(10_000L);
     }
 
     private record Request(String url, String etag, String lastModified, long maxBytes, Duration requestTimeout) {}
