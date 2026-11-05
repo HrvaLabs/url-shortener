@@ -12,6 +12,7 @@ import cc.hrva.urlshortener.repository.ApiKeyRepository;
 import cc.hrva.urlshortener.repository.CampaignRepository;
 import cc.hrva.urlshortener.repository.DomainRuleRepository;
 import cc.hrva.urlshortener.repository.EmailLogRepository;
+import cc.hrva.urlshortener.repository.LinkReviewRepository;
 import cc.hrva.urlshortener.repository.PasskeyCredentialRepository;
 import cc.hrva.urlshortener.repository.ResetTokenRepository;
 import cc.hrva.urlshortener.repository.TwoFactorRecoveryCodeRepository;
@@ -115,6 +116,9 @@ class ModerationUserWritesTest {
 
     @MockitoBean
     private ReviewQueueService reviewQueueService;
+
+    @MockitoBean
+    private LinkReviewRepository linkReviewRepository;
 
     @MockitoBean
     private AuditLogService auditLogService;

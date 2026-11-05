@@ -29,6 +29,7 @@ import cc.hrva.urlshortener.model.enums.ReviewResolution;
 import cc.hrva.urlshortener.model.enums.ThreatType;
 import cc.hrva.urlshortener.repository.CampaignRepository;
 import cc.hrva.urlshortener.repository.DomainRuleRepository;
+import cc.hrva.urlshortener.repository.LinkReviewRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.repository.specification.DomainRuleSpecification;
@@ -151,6 +152,7 @@ public class DefaultModerationService implements ModerationService {
     private final CustomDomainModeration customDomainModeration;
     private final CampaignRepository campaignRepository;
     private final ReviewWarningPage reviewWarningPage;
+    private final LinkReviewRepository linkReviewRepository;
 
     @Override
     public UrlResponse blockLink(final long urlId, final BlockReason reason, final String detail, final String performedBy, final String via) {
@@ -215,7 +217,8 @@ public class DefaultModerationService implements ModerationService {
                 final var rulesBelow = rulesBelow(ruleDomain, scan.rules());
                 final var count = eachLink(scan.idsByDomain().getOrDefault(ruleDomain, List.of()), Long::longValue,
                         id -> blockOnDomain(id, ruleDomain, rulesBelow, performedBy, linksBlocked::add));
-                final var held = convertHeld(scan.heldIdsByDomain().getOrDefault(ruleDomain, List.of()), ruleDomain, rulesBelow, performedBy);
+                final var held = convertHeld(scan.heldIdsByDomain().getOrDefault(ruleDomain, List.of()), ruleDomain, rulesBelow, performedBy,
+                        linksBlocked::add);
                 blocked.add(new DomainBulkBlockResponse.Blocked(ruleDomain, count, domainsDisabled.orElse(0), held));
                 logBulkDomainBlock(ruleDomain, count, domainsDisabled, held, reason, performedBy, via);
             }
@@ -480,8 +483,10 @@ public class DefaultModerationService implements ModerationService {
     }
 
     private String blockLinkFromReview(final Url url, final Consumer<Url> tellOwner, final String performedBy, final String via) {
-        final var converted = convertHold(url.getId(), BlockReason.ADMIN, null).isPresent();
-        final var blocked = converted || blockAndTellOwner(url.getId(), BlockReason.ADMIN, null, performedBy, candidate -> true, tellOwner).isPresent();
+        final var converted = convertHold(url.getId(), BlockReason.ADMIN, null);
+        converted.ifPresent(tellOwner);
+        final var blocked = converted.isPresent()
+                || blockAndTellOwner(url.getId(), BlockReason.ADMIN, null, performedBy, candidate -> true, tellOwner).isPresent();
         return details(via, blocked ? 1 : 0, field(ACTION, ReviewAction.BLOCK_LINK));
     }
 
@@ -557,11 +562,12 @@ public class DefaultModerationService implements ModerationService {
         final var domains = customDomainModeration.disableMatching(domain, reason);
         final var blocked = new ArrayList<Url>();
         final var count = eachLink(ids, Long::longValue, id -> blockOnDomain(id, domain, rulesBelow, performedBy, blocked::add));
+        final var held = convertHeldOn(domain, rulesBelow, performedBy, blocked::add);
         notifyOwners(blocked);
-        return new Affected(count, domains, convertHeldOn(domain, rulesBelow, performedBy));
+        return new Affected(count, domains, held);
     }
 
-    private int convertHeldOn(final String domain, final List<DomainRule> rulesBelow, final String performedBy) {
+    private int convertHeldOn(final String domain, final List<DomainRule> rulesBelow, final String performedBy, final Consumer<Url> convertedLinks) {
         final List<Long> heldIds;
         try {
             heldIds = destinationsOn(domain, afterId -> urlRepository.findBlockedDestinationsAfter(HELD, afterId, FIRST_PAGE)).stream()
@@ -572,14 +578,16 @@ public class DefaultModerationService implements ModerationService {
             log.warn("Reading the held links of a blocked domain failed, continuing domain={}", domain, exception);
             return 0;
         }
-        return convertHeld(heldIds, domain, rulesBelow, performedBy);
+        return convertHeld(heldIds, domain, rulesBelow, performedBy, convertedLinks);
     }
 
-    private int convertHeld(final List<Long> heldIds, final String domain, final List<DomainRule> rulesBelow, final String performedBy) {
-        return eachLink(heldIds, Long::longValue, id -> convertHeldLink(id, domain, rulesBelow, performedBy));
+    private int convertHeld(final List<Long> heldIds, final String domain, final List<DomainRule> rulesBelow, final String performedBy,
+                            final Consumer<Url> convertedLinks) {
+        return eachLink(heldIds, Long::longValue, id -> convertHeldLink(id, domain, rulesBelow, performedBy, convertedLinks));
     }
 
-    private boolean convertHeldLink(final long urlId, final String domain, final List<DomainRule> rulesBelow, final String performedBy) {
+    private boolean convertHeldLink(final long urlId, final String domain, final List<DomainRule> rulesBelow, final String performedBy,
+                                    final Consumer<Url> convertedLinks) {
         final var converted = Optional.ofNullable(transactionOperations.execute(status -> urlRepository.findById(urlId)
                 .filter(url -> !url.isActive() && HELD.contains(url.getBlockReason()) && isBlockedBy(domain, rulesBelow, url.getLongUrl()))
                 .map(url -> {
@@ -594,6 +602,7 @@ public class DefaultModerationService implements ModerationService {
         converted.ifPresent(url -> {
             log.info("Held link blocked by a domain rule urlId={}", url.getId());
             urlCache.evictNowAndAgainLater(cacheKeyOf(url));
+            convertedLinks.accept(url);
         });
         return converted.isPresent();
     }
@@ -763,11 +772,7 @@ public class DefaultModerationService implements ModerationService {
                         && checkedUrl.equals(url.getLongUrl()))
                 .map(url -> {
                     reviewQueueService.flag(url, List.of(ReviewReasons.SIGN_IN_FORM));
-                    url.setActive(false);
-                    url.setBlockReason(BlockReason.SIGN_IN_FORM);
-                    url.setBlockDetail(StringUtils.abbreviate(evidence, MAX_COLUMN_LENGTH));
-                    url.setBlockedAt(LocalDateTime.now());
-                    return urlRepository.save(url);
+                    return heldForSignInForm(url, evidence);
                 })
                 .orElse(null)));
         held.ifPresent(url -> {
@@ -775,6 +780,37 @@ public class DefaultModerationService implements ModerationService {
             urlCache.evictNowAndAgainLater(cacheKeyOf(url));
         });
         return held.isPresent();
+    }
+
+    @Override
+    public boolean holdOwnedLinkForSignInForm(final long urlId, final String checkedUrl, final String evidence, final String reviewReason) {
+        final var held = Optional.ofNullable(transactionOperations.execute(status -> urlRepository.findById(urlId)
+                .filter(url -> url.isActive() && !isBlocked(url) && url.getOwner() != null && checkedUrl.equals(url.getLongUrl()))
+                .filter(url -> inReviewAfterFlagging(url, reviewReason))
+                .map(url -> heldForSignInForm(url, evidence))
+                .orElse(null)));
+        held.ifPresent(url -> {
+            log.info("Link from an account held for a sign-in form urlId={}", url.getId());
+            urlCache.evictNowAndAgainLater(cacheKeyOf(url));
+        });
+        return held.isPresent();
+    }
+
+    private boolean inReviewAfterFlagging(final Url url, final String reviewReason) {
+        reviewQueueService.flag(url, List.of(reviewReason));
+        if (linkReviewRepository.existsByUrl_IdAndResolvedAtIsNullAndSystemFlaggedTrueAndNoticeFalse(url.getId())) {
+            return true;
+        }
+        log.info("Link from an account not held for a sign-in form because no review is open urlId={}", url.getId());
+        return false;
+    }
+
+    private Url heldForSignInForm(final Url url, final String evidence) {
+        url.setActive(false);
+        url.setBlockReason(BlockReason.SIGN_IN_FORM);
+        url.setBlockDetail(StringUtils.abbreviate(evidence, MAX_COLUMN_LENGTH));
+        url.setBlockedAt(LocalDateTime.now());
+        return urlRepository.save(url);
     }
 
     @Override

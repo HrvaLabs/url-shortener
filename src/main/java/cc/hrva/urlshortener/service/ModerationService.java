@@ -33,6 +33,7 @@ public interface ModerationService {
     boolean holdForCampaign(long urlId, long campaignId, String shape);
     int restoreCampaignHolds(List<Long> urlIds);
     boolean holdForSignInForm(long urlId, String checkedUrl, String evidence);
+    boolean holdOwnedLinkForSignInForm(long urlId, String checkedUrl, String evidence, String reviewReason);
     UrlResponse clearWarningPage(long urlId, String performedBy);
 
 }

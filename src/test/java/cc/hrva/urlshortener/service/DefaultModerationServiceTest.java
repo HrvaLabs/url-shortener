@@ -29,9 +29,11 @@ import cc.hrva.urlshortener.model.enums.DomainDisableReason;
 import cc.hrva.urlshortener.model.enums.DomainRuleType;
 import cc.hrva.urlshortener.model.enums.ReviewAction;
 import cc.hrva.urlshortener.model.enums.ReviewResolution;
+import cc.hrva.urlshortener.model.enums.ThreatType;
 import cc.hrva.urlshortener.repository.CampaignRepository;
 import cc.hrva.urlshortener.repository.CustomDomainRepository;
 import cc.hrva.urlshortener.repository.DomainRuleRepository;
+import cc.hrva.urlshortener.repository.LinkReviewRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent;
@@ -171,6 +173,9 @@ class DefaultModerationServiceTest {
     @Mock
     private CampaignRepository campaignRepository;
 
+    @Mock
+    private LinkReviewRepository linkReviewRepository;
+
     private final Map<Long, Url> links = new TreeMap<>();
     private final Map<String, DomainRule> rules = new HashMap<>();
     private final List<List<Long>> savedPerTransaction = new ArrayList<>();
@@ -259,7 +264,7 @@ class DefaultModerationServiceTest {
         final var reviewWarningPage = new ReviewWarningPage(urlRepository, SettingsServiceFixtures.defaults(new AppProperties()), urlCache, transactions);
         moderationService = new DefaultModerationService(urlRepository, userRepository, domainRuleRepository, linkCheckService,
                 reviewQueueService, userService, sendingEmailService, auditLogService, urlCache, eventPublisher, transactions,
-                scammerSignalService, domainModeration, campaignRepository, reviewWarningPage);
+                scammerSignalService, domainModeration, campaignRepository, reviewWarningPage, linkReviewRepository);
     }
 
     @Test
@@ -844,6 +849,195 @@ class DefaultModerationServiceTest {
         moderationService.resolveReview(88L, ReviewAction.TRUST_DOMAIN, null, ADMIN, "admin");
 
         assertThat(url).extracting(Url::isActive, Url::getBlockReason).containsExactly(true, null);
+    }
+
+    @Test
+    void anOwnedLinkWithASignInFormIsHeldWithAnOpenReview() {
+        final var alice = user(1L, "alice@example.com");
+        final var url = link(100L, "https://verniqindexone.com/cache-trash/", alice);
+        final var evidence = "a sign-in field (" + "identificacion".repeat(20) + ")";
+        final var steps = new ArrayList<String>();
+        doAnswer(invocation -> {
+            steps.add("flag active=" + invocation.<Url>getArgument(0).isActive() + " transaction=" + (inTransaction ? savedPerTransaction.size() : 0));
+            return null;
+        }).when(reviewQueueService).flag(any(Url.class), anyList());
+        when(linkReviewRepository.existsByUrl_IdAndResolvedAtIsNullAndSystemFlaggedTrueAndNoticeFalse(100L)).thenAnswer(invocation -> {
+            steps.add("open review read transaction=" + (inTransaction ? savedPerTransaction.size() : 0));
+            return true;
+        });
+        final var eviction = ArgumentCaptor.forClass(Runnable.class);
+
+        assertThat(moderationService.holdOwnedLinkForSignInForm(100L, "https://verniqindexone.com/cache-trash/", evidence,
+                ReviewReasons.SIGN_IN_FORM_NEW_ACCOUNT)).isTrue();
+
+        verify(reviewQueueService).flag(url, List.of(ReviewReasons.SIGN_IN_FORM_NEW_ACCOUNT));
+        assertThat(steps).containsExactly("flag active=true transaction=1", "open review read transaction=1");
+        assertThat(url).extracting(Url::isActive, Url::getBlockReason, Url::isWarningPage).containsExactly(false, BlockReason.SIGN_IN_FORM, false);
+        assertThat(url.getBlockDetail()).hasSize(255).startsWith("a sign-in field (identificacion").endsWith("...");
+        assertThat(url.getBlockedAt()).isNotNull();
+        assertThat(savedPerTransaction).filteredOn(saved -> !saved.isEmpty()).containsExactly(List.of(100L));
+        verify(taskScheduler).schedule(eviction.capture(), any(Instant.class));
+        verify(cache).evict("s100");
+        eviction.getValue().run();
+        verify(cache, times(2)).evict("s100");
+        verify(userRepository, never()).recordLinkBlocked(anyLong(), any(LocalDateTime.class));
+        verify(reviewQueueService, never()).resolveOpen(any(Url.class), any(ReviewResolution.class), anyString());
+        verify(eventPublisher, never()).publishEvent(any(AdminAlertEvent.class));
+        verifyNoInteractions(sendingEmailService, auditLogService);
+        assertThat(outOfPlace).isEmpty();
+    }
+
+    @Test
+    void anOwnedLinkIsNotHeldWhenNoReviewOpens() {
+        final var url = link(101L, "https://verniqindexone.com/cache-trash/", user(1L, "alice@example.com"));
+
+        assertThat(moderationService.holdOwnedLinkForSignInForm(101L, "https://verniqindexone.com/cache-trash/", "a password field",
+                ReviewReasons.SIGN_IN_FORM_NEW_ACCOUNT)).isFalse();
+
+        verify(reviewQueueService).flag(url, List.of(ReviewReasons.SIGN_IN_FORM_NEW_ACCOUNT));
+        verify(linkReviewRepository).existsByUrl_IdAndResolvedAtIsNullAndSystemFlaggedTrueAndNoticeFalse(101L);
+        assertThat(url).extracting(Url::isActive, Url::getBlockReason, Url::getBlockDetail, Url::getBlockedAt).containsExactly(true, null, null, null);
+        verify(urlRepository, never()).save(any(Url.class));
+        verifyNoInteractions(cache, taskScheduler);
+    }
+
+    @Test
+    void aRepointedOwnedLinkIsNotHeld() {
+        final var url = link(102L, "https://verniqindexone.com/new", user(1L, "alice@example.com"));
+
+        assertThat(moderationService.holdOwnedLinkForSignInForm(102L, "https://verniqindexone.com/old", "a password field",
+                ReviewReasons.SIGN_IN_FORM_NEW_ACCOUNT)).isFalse();
+
+        assertThat(url).extracting(Url::isActive, Url::getBlockReason).containsExactly(true, null);
+        verify(urlRepository, never()).save(any(Url.class));
+        verifyNoInteractions(reviewQueueService, linkReviewRepository, cache);
+    }
+
+    @Test
+    void anInactiveOrBlockedOwnedLinkIsNotHeld() {
+        final var alice = user(1L, "alice@example.com");
+        final var reason = ReviewReasons.SIGN_IN_FORM_NEW_ACCOUNT;
+        link(103L, "https://a.example/login", alice).setActive(false);
+        blocked(104L, "https://b.example/login", BlockReason.ADMIN, alice);
+        blocked(105L, "https://c.example/login", BlockReason.SIGN_IN_FORM, alice);
+        link(106L, "https://d.example/login", alice).setThreatType(ThreatType.MALWARE);
+
+        assertThat(moderationService.holdOwnedLinkForSignInForm(103L, "https://a.example/login", "a password field", reason)).isFalse();
+        assertThat(moderationService.holdOwnedLinkForSignInForm(104L, "https://b.example/login", "a password field", reason)).isFalse();
+        assertThat(moderationService.holdOwnedLinkForSignInForm(105L, "https://c.example/login", "a password field", reason)).isFalse();
+        assertThat(moderationService.holdOwnedLinkForSignInForm(106L, "https://d.example/login", "a password field", reason)).isFalse();
+        assertThat(moderationService.holdOwnedLinkForSignInForm(107L, "https://e.example/login", "a password field", reason)).isFalse();
+
+        assertThat(links.get(104L)).extracting(Url::getBlockReason, Url::getBlockDetail).containsExactly(BlockReason.ADMIN, "detail");
+        assertThat(links.get(106L).isActive()).isTrue();
+        verify(urlRepository, never()).save(any(Url.class));
+        verifyNoInteractions(reviewQueueService, linkReviewRepository, cache);
+    }
+
+    @Test
+    void aLinkWithoutAnOwnerIsNotHeldAsAnAccountsLink() {
+        final var url = flaggedLink(108L, "https://verniqindexone.com/cache-trash/");
+
+        assertThat(moderationService.holdOwnedLinkForSignInForm(108L, "https://verniqindexone.com/cache-trash/", "a password field",
+                ReviewReasons.SIGN_IN_FORM_NEW_ACCOUNT)).isFalse();
+
+        assertThat(url.isActive()).isTrue();
+        verifyNoInteractions(reviewQueueService, linkReviewRepository, cache);
+    }
+
+    @Test
+    void blockingAnOwnedHoldFromTheQueueEmailsTheOwnerOnce() {
+        final var alice = user(1L, "alice@example.com");
+        final var url = blocked(110L, "https://verniqindexone.com/cache-trash/", BlockReason.SIGN_IN_FORM, alice);
+
+        moderationService.resolveReview(110L, ReviewAction.BLOCK_LINK, null, ADMIN, "admin");
+
+        assertThat(url).extracting(Url::isActive, Url::getBlockReason).containsExactly(false, BlockReason.ADMIN);
+        assertThat(url.getBlockedAt()).isAfter(BLOCKED_AT);
+        verify(userRepository).recordLinkBlocked(1L, url.getBlockedAt());
+        verify(sendingEmailService).sendEmailUrlBlocked(alice, url);
+        verifyNoMoreInteractions(sendingEmailService);
+        verify(reviewQueueService).resolveOpen(url, ReviewResolution.LINK_BLOCKED, ADMIN);
+        assertThat(outOfPlace).isEmpty();
+    }
+
+    @Test
+    void blockingAnOwnedHoldInBulkWithTheOwnersOtherLinkSendsOneEmail() {
+        final var alice = user(1L, "alice@example.com");
+        final var active = link(111L, "https://example.org/a", alice);
+        final var held = blocked(112L, "https://verniqindexone.com/cache-trash/", BlockReason.SIGN_IN_FORM, alice);
+        openReviews(111L, 112L);
+
+        final var result = moderationService.resolveReviews(List.of(111L, 112L), ReviewAction.BLOCK_LINK, ADMIN, "admin");
+
+        assertThat(result.resolved()).containsExactly(111L, 112L);
+        assertThat(held.getBlockReason()).isEqualTo(BlockReason.ADMIN);
+        verify(sendingEmailService).sendEmailUrlsBlocked(alice, List.of(active, held));
+        verifyNoMoreInteractions(sendingEmailService);
+    }
+
+    @Test
+    void aPlainBlockOfAnOwnedHoldEmailsTheOwnerOnce() {
+        final var alice = user(1L, "alice@example.com");
+        final var url = blocked(113L, "https://verniqindexone.com/cache-trash/", BlockReason.SIGN_IN_FORM, alice);
+
+        moderationService.blockLink(113L, BlockReason.ADMIN, "phishing", ADMIN, "mcp");
+
+        assertThat(url).extracting(Url::getBlockReason, Url::getBlockDetail).containsExactly(BlockReason.ADMIN, "phishing");
+        verify(userRepository).recordLinkBlocked(1L, url.getBlockedAt());
+        verify(sendingEmailService).sendEmailUrlBlocked(alice, url);
+        verifyNoMoreInteractions(sendingEmailService);
+    }
+
+    @Test
+    void aDomainBlockConvertingAnOwnedHoldEmailsTheOwner() {
+        final var alice = user(1L, "alice@example.com");
+        final var bob = user(2L, "bob@example.com");
+        final var aliceActive = link(120L, "https://verniqindexone.com/a", alice);
+        final var aliceHeld = blocked(121L, "https://verniqindexone.com/cache-trash/", BlockReason.SIGN_IN_FORM, alice);
+        final var bobHeld = blocked(122L, "https://login.verniqindexone.com/acceso", BlockReason.SIGN_IN_FORM, bob);
+        final var anonymousHeld = blocked(123L, "https://verniqindexone.com/b", BlockReason.SIGN_IN_FORM, null);
+
+        moderationService.resolveReview(121L, ReviewAction.BLOCK_DOMAIN, null, ADMIN, "admin");
+
+        assertThat(List.of(aliceActive, aliceHeld, bobHeld, anonymousHeld))
+                .allSatisfy(url -> assertThat(url.getBlockReason()).isEqualTo(BlockReason.DOMAIN_RULE));
+        verify(userRepository).recordLinkBlocked(2L, bobHeld.getBlockedAt());
+        verify(sendingEmailService).sendEmailUrlsBlocked(alice, List.of(aliceActive, aliceHeld));
+        verify(sendingEmailService).sendEmailUrlBlocked(bob, bobHeld);
+        verifyNoMoreInteractions(sendingEmailService);
+        assertThat(outOfPlace).isEmpty();
+    }
+
+    @Test
+    void aBulkDomainBlockConvertingOwnedHoldsEmailsEachOwnerOnce() {
+        final var alice = user(1L, "alice@example.com");
+        final var bob = user(2L, "bob@example.com");
+        final var aliceActive = link(130L, "https://omaehhm.com/a", alice);
+        final var aliceHeld = blocked(131L, "https://qq.omaehhm.com/login", BlockReason.SIGN_IN_FORM, alice);
+        final var aliceOtherHeld = blocked(132L, "https://fvvxctw.com/login", BlockReason.SIGN_IN_FORM, alice);
+        final var bobHeld = blocked(133L, "https://fvvxctw.com/acceso", BlockReason.SIGN_IN_FORM, bob);
+
+        final var result = moderationService.blockDomains(List.of("omaehhm.com", "fvvxctw.com"), "Phishing", ADMIN, "admin-bulk");
+
+        assertThat(result).extracting(DomainBulkBlockResponse::linksDeactivated, DomainBulkBlockResponse::heldLinksConverted).containsExactly(1, 3);
+        verify(userRepository).recordLinkBlocked(2L, bobHeld.getBlockedAt());
+        verify(sendingEmailService).sendEmailUrlsBlocked(alice, List.of(aliceActive, aliceHeld, aliceOtherHeld));
+        verify(sendingEmailService).sendEmailUrlBlocked(bob, bobHeld);
+        verifyNoMoreInteractions(sendingEmailService);
+        assertThat(outOfPlace).isEmpty();
+    }
+
+    @Test
+    void looksFineOnAnOwnedHoldReactivatesWithoutEmail() {
+        final var url = blocked(140L, "https://verniqindexone.com/cache-trash/", BlockReason.SIGN_IN_FORM, user(1L, "alice@example.com"));
+
+        moderationService.resolveReview(140L, ReviewAction.OK, null, ADMIN, "admin");
+
+        assertThat(url).extracting(Url::isActive, Url::getBlockReason, Url::getBlockDetail, Url::getBlockedAt).containsExactly(true, null, null, null);
+        verify(reviewQueueService).resolveOpen(url, ReviewResolution.OK, ADMIN);
+        verify(userRepository, never()).recordLinkBlocked(anyLong(), any(LocalDateTime.class));
+        verifyNoInteractions(sendingEmailService);
     }
 
     @Test
