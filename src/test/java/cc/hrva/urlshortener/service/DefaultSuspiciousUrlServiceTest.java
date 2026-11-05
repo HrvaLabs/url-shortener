@@ -123,7 +123,8 @@ class DefaultSuspiciousUrlServiceTest {
 
     @Test
     void flagsHighRiskDomainEndings() {
-        assertThat(suspiciousUrlService.findReasons("https://findfavoritedate.life/?u=f6yp608&o=mctw1k1&t=_free")).contains("high-risk domain ending .life");
+        assertThat(suspiciousUrlService.findReasons("https://findfavoritedate.life/?u=f6yp608&o=mctw1k1&t=_free"))
+                .contains(SuspiciousUrlService.RISKY_ENDING_PREFIX + "life");
     }
 
     @Test
@@ -133,15 +134,15 @@ class DefaultSuspiciousUrlServiceTest {
 
     @Test
     void flagsLinksThatHideTheirDestinationBehindAnotherShortener() {
-        assertThat(suspiciousUrlService.findReasons("https://t9y.me/_zPx")).contains("hides its destination behind another shortener");
-        assertThat(suspiciousUrlService.findReasons("https://l.linklyhq.com/l/1jjds")).contains("hides its destination behind another shortener");
-        assertThat(suspiciousUrlService.findReasons("https://hrva.cc/Pb1mG")).contains("hides its destination behind another shortener");
+        assertThat(suspiciousUrlService.findReasons("https://t9y.me/_zPx")).contains(SuspiciousUrlService.SHORTENER_REASON);
+        assertThat(suspiciousUrlService.findReasons("https://l.linklyhq.com/l/1jjds")).contains(SuspiciousUrlService.SHORTENER_REASON);
+        assertThat(suspiciousUrlService.findReasons("https://hrva.cc/Pb1mG")).contains(SuspiciousUrlService.SHORTENER_REASON);
     }
 
     @Test
     void stillFlagsPlatformShareShortenersForReview() {
-        assertThat(suspiciousUrlService.findReasons("https://t.co/AbC123")).contains("hides its destination behind another shortener");
-        assertThat(suspiciousUrlService.findReasons("https://lnkd.in/dX9yZ")).contains("hides its destination behind another shortener");
+        assertThat(suspiciousUrlService.findReasons("https://t.co/AbC123")).contains(SuspiciousUrlService.SHORTENER_REASON);
+        assertThat(suspiciousUrlService.findReasons("https://lnkd.in/dX9yZ")).contains(SuspiciousUrlService.SHORTENER_REASON);
     }
 
     @ParameterizedTest
@@ -278,7 +279,8 @@ class DefaultSuspiciousUrlServiceTest {
     @ParameterizedTest
     @ValueSource(strings = {"https://čokolada.top/login", "https://xn--okolada-i6a.top/login"})
     void readsAUnicodeHostInsteadOfSkippingEveryCheck(final String longUrl) {
-        assertThat(suspiciousUrlService.findReasons(longUrl)).containsExactly("login or verification lure", "high-risk domain ending .top");
+        assertThat(suspiciousUrlService.findReasons(longUrl))
+                .containsExactly("login or verification lure", SuspiciousUrlService.RISKY_ENDING_PREFIX + "top");
     }
 
     @Test
@@ -289,7 +291,7 @@ class DefaultSuspiciousUrlServiceTest {
     @Test
     void readsAFullWidthShortenerLikeABrowser() {
         assertThat(suspiciousUrlService.findReasons("https://\uff42\uff49\uff54\uff0e\uff4c\uff59/3abc"))
-                .containsExactly("hides its destination behind another shortener");
+                .containsExactly(SuspiciousUrlService.SHORTENER_REASON);
     }
 
     @ParameterizedTest

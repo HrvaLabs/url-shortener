@@ -146,7 +146,7 @@ public class DefaultSuspiciousUrlService implements SuspiciousUrlService {
         final var domain = DomainNames.registrableDomain(host);
 
         if (isShortenerHost(host) || matchesDomain(host, PLATFORM_SHARE_DOMAINS) && !matchesDomain(host, TRUSTED_SHARE_DOMAINS)) {
-            reasons.add("hides its destination behind another shortener");
+            reasons.add(SHORTENER_REASON);
         }
         if (matchesDomain(host, DYNAMIC_DNS_DOMAINS)) {
             reasons.add("free dynamic DNS host");
@@ -158,7 +158,7 @@ public class DefaultSuspiciousUrlService implements SuspiciousUrlService {
         }
         final var ending = labels[labels.length - 1];
         if (HIGH_RISK_ENDINGS.contains(ending)) {
-            reasons.add("high-risk domain ending ." + ending);
+            reasons.add(RISKY_ENDING_PREFIX + ending);
         }
 
         return reasons;

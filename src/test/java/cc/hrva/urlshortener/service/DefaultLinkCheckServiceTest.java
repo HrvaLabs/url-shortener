@@ -64,6 +64,7 @@ class DefaultLinkCheckServiceTest {
     private static final String TRANCO = "Tranco top sites";
     private static final String YOUNG = "domain registered in the last 30 days";
     private static final String LURE = "login or verification lure";
+    private static final String RISKY_TOP = SuspiciousUrlService.RISKY_ENDING_PREFIX + "top";
     private static final String SCAM_URL = "https://njuskalo-placanje.com/prijava";
     private static final String SCAM_HOST = "njuskalo-placanje.com";
     private static final LinkVerdict CLEAN = new LinkVerdict(Outcome.CLEAN, List.of(), null, null);
@@ -260,10 +261,47 @@ class DefaultLinkCheckServiceTest {
 
     @Test
     void aSingleHeuristicIsFlagged() {
-        final var url = "https://cheap-deals.life/";
-        heuristics(url, "high-risk domain ending .life");
+        final var url = "https://tradicsummer.work.gd/";
+        heuristics(url, "free dynamic DNS host");
 
-        assertThat(verdictOf(url)).isEqualTo(new LinkVerdict(Outcome.FLAG, List.of("high-risk domain ending .life"), null, null));
+        assertThat(verdictOf(url)).isEqualTo(new LinkVerdict(Outcome.FLAG, List.of("free dynamic DNS host"), null, null));
+    }
+
+    @Test
+    void aLinkWithOnlySupportingReasonsIsClean() {
+        final var url = "https://bit.ly/deals-top";
+        heuristics(url, SuspiciousUrlService.SHORTENER_REASON, RISKY_TOP);
+
+        assertThat(verdictOf(url)).isEqualTo(CLEAN);
+    }
+
+    @Test
+    void supportingReasonsFollowADecidingOne() {
+        final var url = "https://brand-new-shop.top/";
+        young("brand-new-shop.top");
+        heuristics(url, RISKY_TOP);
+
+        assertThat(verdictOf(url)).isEqualTo(new LinkVerdict(Outcome.FLAG, List.of(YOUNG, RISKY_TOP), null, null));
+    }
+
+    @Test
+    void supportingReasonsFollowAListMatch() {
+        final var url = "https://bit.ly/verify";
+        source(4, SUSPICIOUS_LINKS, SourceKind.LINKS, BlocklistAction.FLAG, "bit.ly/verify");
+        heuristics(url, SuspiciousUrlService.SHORTENER_REASON, LURE);
+
+        assertThat(verdictOf(url)).isEqualTo(new LinkVerdict(
+                Outcome.FLAG, List.of("on list Suspicious links", LURE, SuspiciousUrlService.SHORTENER_REASON), null, null));
+    }
+
+    @Test
+    void aYoungDomainWithOnlySupportingReasonsIsNotBlocked() {
+        final var url = "https://brand-new-shop.top/";
+        young("brand-new-shop.top");
+        heuristics(url, SuspiciousUrlService.SHORTENER_REASON, RISKY_TOP);
+
+        assertThat(verdictOf(url)).isEqualTo(new LinkVerdict(
+                Outcome.FLAG, List.of(YOUNG, SuspiciousUrlService.SHORTENER_REASON, RISKY_TOP), null, null));
     }
 
     @Test

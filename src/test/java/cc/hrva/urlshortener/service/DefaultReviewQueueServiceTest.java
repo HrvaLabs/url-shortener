@@ -379,6 +379,17 @@ class DefaultReviewQueueServiceTest {
     }
 
     @Test
+    void aNewSupportingReasonDoesNotReopenAReviewMarkedFine() {
+        when(linkReviewRepository.findFirstByUrlOrderByFlaggedAtDesc(url))
+                .thenReturn(Optional.of(resolved(ReviewResolution.OK, "imitates paypal")));
+
+        reviewQueueService.flag(url, List.of("imitates paypal", SuspiciousUrlService.RISKY_ENDING_PREFIX + "shop"));
+
+        verify(linkReviewRepository, never()).save(any());
+        verifyNoInteractions(reviewWarningPage, eventPublisher);
+    }
+
+    @Test
     void flaggingAfterAnOkWithANewReasonOpensANewEntry() {
         final var saved = ArgumentCaptor.forClass(LinkReview.class);
         when(linkReviewRepository.findFirstByUrlOrderByFlaggedAtDesc(url)).thenReturn(Optional.of(resolved(ReviewResolution.OK, YOUNG)));

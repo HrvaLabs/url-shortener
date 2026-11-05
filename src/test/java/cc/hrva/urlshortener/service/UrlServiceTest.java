@@ -4183,6 +4183,22 @@ class UrlServiceTest {
     }
 
     @Test
+    void theAdminListHidesReasonsThatOnlySupport() {
+        final var pageable = PageRequest.of(0, 20);
+        final var shortened = Url.builder().id(287L).shortUrl("deal").longUrl("https://bit.ly/3abc").build();
+        final var imitation = Url.builder().id(288L).shortUrl("pay").longUrl("https://bit.ly/paypal-login").build();
+        when(urlRepository.findAll(newestFirst(pageable))).thenReturn(new PageImpl<>(List.of(shortened, imitation)));
+        when(suspiciousUrlService.findReasons("https://bit.ly/3abc")).thenReturn(List.of(SuspiciousUrlService.SHORTENER_REASON));
+        when(suspiciousUrlService.findReasons("https://bit.ly/paypal-login"))
+                .thenReturn(List.of("imitates paypal", SuspiciousUrlService.SHORTENER_REASON));
+
+        final var rows = urlService.getAllUrls(pageable, new UrlSearchDto()).getContent();
+
+        assertThat(rows).extracting(UrlResponse::suspiciousReasons)
+                .containsExactly(List.of(), List.of("imitates paypal", SuspiciousUrlService.SHORTENER_REASON));
+    }
+
+    @Test
     void adminListShowsWhyALinkIsBlockedItsOpenReviewItsOwnersScammerSignalAndWhereItEnds() {
         final var pageable = PageRequest.of(0, 20);
         final var scammer = User.builder().id(27L).email("rhea@gmail.com").build();

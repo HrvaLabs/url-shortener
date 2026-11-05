@@ -12,6 +12,7 @@ import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.specification.LinkReviewSpecification;
 import cc.hrva.urlshortener.service.ReviewQueueService;
 import cc.hrva.urlshortener.service.ScammerSignalService;
+import cc.hrva.urlshortener.service.SuspiciousUrlService;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent;
 import cc.hrva.urlshortener.service.alert.AlertedLink;
 import cc.hrva.urlshortener.service.alert.LinkReviewOpened;
@@ -135,9 +136,10 @@ public class DefaultReviewQueueService implements ReviewQueueService {
     }
 
     private boolean reviewedFineFor(final Url url, final List<String> incoming) {
+        final var deciding = incoming.stream().filter(reason -> !SuspiciousUrlService.isSupporting(reason)).toList();
         return linkReviewRepository.findFirstByUrlOrderByFlaggedAtDesc(url)
                 .filter(review -> review.getResolution() == ReviewResolution.OK)
-                .filter(review -> reasonsOf(review).containsAll(incoming))
+                .filter(review -> reasonsOf(review).containsAll(deciding))
                 .filter(review -> incoming.stream().noneMatch(ReviewReasons::isSignInForm) || coversDestination(review, url))
                 .isPresent();
     }

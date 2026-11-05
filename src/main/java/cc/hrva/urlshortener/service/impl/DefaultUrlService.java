@@ -602,7 +602,7 @@ public class DefaultUrlService implements UrlService {
                 ? scammerSignalService.possibleScammerIds()
                 : Set.<Long>of();
         return urls.map(url -> UrlResponse.from(url)
-                .withSuspiciousReasons(suspiciousUrlService.findReasons(url.getLongUrl()))
+                .withSuspiciousReasons(SuspiciousUrlService.shown(suspiciousUrlService.findReasons(url.getLongUrl())))
                 .withBlockReason(url.getBlockReason())
                 .withModeration(inReview.contains(url.getId()),
                         url.getOwner() != null && possibleScammers.contains(url.getOwner().getId()),

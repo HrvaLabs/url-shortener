@@ -218,7 +218,7 @@ public class DefaultLinkCheckService implements LinkCheckService {
             if (reputation.verdict() == Verdict.BLOCK) {
                 return Optional.of(blocked(reasons, BlockReason.BLOCKLIST, SPAMHAUS + reputation.type()));
             }
-            final var scamSignals = heuristics.stream().filter(Signals::isScamSignal).toList();
+            final var scamSignals = deciding().stream().filter(Signals::isScamSignal).toList();
             if (young && !scamSignals.isEmpty()) {
                 final var detail = Stream.concat(Stream.of(YOUNG_DOMAIN), scamSignals.stream())
                         .collect(Collectors.joining(DETAIL_SEPARATOR));
@@ -238,8 +238,19 @@ public class DefaultLinkCheckService implements LinkCheckService {
             if (young) {
                 reasons.add(YOUNG_DOMAIN);
             }
-            reasons.addAll(heuristics);
+            reasons.addAll(deciding());
+            if (!reasons.isEmpty()) {
+                reasons.addAll(supporting());
+            }
             return List.copyOf(reasons);
+        }
+
+        private List<String> deciding() {
+            return heuristics.stream().filter(reason -> !SuspiciousUrlService.isSupporting(reason)).toList();
+        }
+
+        private List<String> supporting() {
+            return heuristics.stream().filter(SuspiciousUrlService::isSupporting).toList();
         }
 
         private static boolean isScamSignal(final String reason) {
