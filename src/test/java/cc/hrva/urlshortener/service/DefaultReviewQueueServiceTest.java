@@ -192,6 +192,8 @@ class DefaultReviewQueueServiceTest {
         verify(reviewWarningPage, times(ReviewResolution.values().length)).clearAfterReview(287L);
     }
 
+    private final List<LinkReview> openReviews = new ArrayList<>();
+
     private static final String SHORTENER_LIST = "on list HaGeZi URL shorteners";
     private static final String HIDES = "hides its destination behind another shortener";
 
@@ -203,8 +205,10 @@ class DefaultReviewQueueServiceTest {
     private LinkReview openReview(final long id, final boolean systemFlagged, final boolean notice, final String... reasons) {
         final var review = LinkReview.builder().id(id).url(url).reasons(String.join("\n", reasons)).systemFlagged(systemFlagged).notice(notice)
                 .flaggedAt(LocalDateTime.now()).build();
+        openReviews.add(review);
         when(linkReviewRepository.findByResolvedAtIsNullAndSystemFlaggedTrueAndNoticeFalse())
-                .thenReturn(systemFlagged && !notice ? List.of(review) : List.of());
+                .thenReturn(openReviews.stream().filter(open -> open.isSystemFlagged() && !open.isNotice()).toList());
+        lenient().when(linkReviewRepository.findByUrlAndResolvedAtIsNull(url)).thenReturn(List.copyOf(openReviews));
         return review;
     }
 
@@ -253,15 +257,38 @@ class DefaultReviewQueueServiceTest {
     }
 
     @Test
-    void keepsVisitorReportsAndNotices() {
+    void keepsAUrlWhenOneOfItsOpenReviewsStillDecides() {
         shortenerSourceExists();
-        final var report = openReview(1L, false, false, HIDES);
-        final var notice = openReview(2L, true, true, HIDES);
+        final var retiredOnly = openReview(1L, true, false, SHORTENER_LIST, HIDES);
+        final var deciding = openReview(2L, true, false, "imitates paypal");
 
         assertThat(reviewQueueService.resolveOpenWithOnlyRetiredReasons()).isZero();
+        assertThat(retiredOnly.getResolvedAt()).isNull();
+        assertThat(deciding.getResolvedAt()).isNull();
+        verifyNoInteractions(reviewWarningPage);
+    }
+
+    @Test
+    void keepsAUrlWhenAnotherOpenReviewIsAVisitorReportOrANotice() {
+        shortenerSourceExists();
+        final var retiredOnly = openReview(1L, true, false, HIDES);
+        final var report = openReview(2L, false, false, HIDES);
+        final var notice = openReview(3L, true, true, HIDES);
+
+        assertThat(reviewQueueService.resolveOpenWithOnlyRetiredReasons()).isZero();
+        assertThat(retiredOnly.getResolvedAt()).isNull();
         assertThat(report.getResolvedAt()).isNull();
         assertThat(notice.getResolvedAt()).isNull();
         verifyNoInteractions(reviewWarningPage);
+    }
+
+    @Test
+    void aReviewWithoutReasonsIsNotRetired() {
+        shortenerSourceExists();
+        final var empty = openReview(1L, true, false);
+
+        assertThat(reviewQueueService.resolveOpenWithOnlyRetiredReasons()).isZero();
+        assertThat(empty.getResolvedAt()).isNull();
     }
 
     @Test

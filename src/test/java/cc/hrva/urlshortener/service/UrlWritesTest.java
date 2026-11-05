@@ -497,6 +497,35 @@ class UrlWritesTest {
     }
 
     @Test
+    void theStartupCleanupResolvesOnlyTheLinkWhoseReviewsAreAllRetired() {
+        final var retiredOnly = "on list HaGeZi URL shorteners";
+        reviewedLink(LINK, "notice-link", retiredOnly, true, true);
+        reviewedLink(ON_HRVA, "report-link", retiredOnly, false, false);
+        reviewedLink(ON_DOMAIN, "system-link", retiredOnly, true, false);
+
+        assertThat(reviewQueueService.resolveOpenWithOnlyRetiredReasons()).isEqualTo(1);
+
+        assertThat(resolutionOf(LINK)).containsEntry("RESOLVED_AT", null);
+        assertThat(resolutionOf(ON_HRVA)).containsEntry("RESOLVED_AT", null);
+        assertThat(resolutionOf(ON_DOMAIN)).containsEntry("RESOLUTION", "OK").containsEntry("RESOLVED_BY", "system");
+        assertThat(resolutionOf(ON_DOMAIN).get("RESOLVED_AT")).isNotNull();
+        assertThat(reviewQueueService.resolveOpenWithOnlyRetiredReasons()).isZero();
+    }
+
+    private void reviewedLink(final long id, final String alias, final String reasons, final boolean systemFlagged, final boolean notice) {
+        jdbcTemplate.update("""
+                insert into url (id, long_url, short_url, visits, create_date, active)
+                values (?, ?, ?, 0, ?, true)""", id, "https://example.com/" + alias, alias, LocalDateTime.of(2026, 10, 1, 9, 0));
+        jdbcTemplate.update("""
+                insert into link_review (url_id, reasons, flagged_at, system_flagged, notice, checked_url)
+                values (?, ?, ?, ?, ?, ?)""", id, reasons, FLAGGED_AT, systemFlagged, notice, "https://example.com/" + alias);
+    }
+
+    private Map<String, Object> resolutionOf(final long urlId) {
+        return jdbcTemplate.queryForMap("select resolved_at, resolved_by, resolution from link_review where url_id = ?", urlId);
+    }
+
+    @Test
     void anEditKeepsAClickAndTheVisitLimitStopThatLandedAfterTheReRead() {
         link(4, 5L);
         visitMeanwhile = () -> {

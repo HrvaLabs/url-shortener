@@ -59,6 +59,7 @@ public class DefaultReviewQueueService implements ReviewQueueService {
 
     private static final String REASON_SEPARATOR = "\n";
     private static final int MAX_VISITOR_REPORTS_PER_REVIEW = 20;
+    private static final String SYSTEM = "system";
     private static final String ON_LIST = "on list ";
     private static final Set<String> RETIRED_REASONS = Set.of("hides its destination behind another shortener", "free dynamic DNS host");
     private static final String FLAGGED_AT = "flaggedAt";
@@ -221,11 +222,25 @@ public class DefaultReviewQueueService implements ReviewQueueService {
                 .map(BlocklistSource::getName)
                 .map(name -> ON_LIST + name)
                 .collect(Collectors.toSet());
-        final var retired = linkReviewRepository.findByResolvedAtIsNullAndSystemFlaggedTrueAndNoticeFalse().stream()
-                .filter(review -> reasonsOf(review).stream().allMatch(reason -> isRetired(reason, shortenerLists)))
+        final var urls = linkReviewRepository.findByResolvedAtIsNullAndSystemFlaggedTrueAndNoticeFalse().stream()
+                .map(LinkReview::getUrl)
+                .distinct()
                 .toList();
-        retired.forEach(review -> resolveOpen(review.getUrl(), ReviewResolution.OK, "system"));
-        return retired.size();
+        var resolved = 0;
+        for (final var url : urls) {
+            final var open = linkReviewRepository.findByUrlAndResolvedAtIsNull(url);
+            if (!open.isEmpty() && open.stream().allMatch(review -> onlyRetiredReasons(review, shortenerLists))) {
+                resolveOpen(url, ReviewResolution.OK, SYSTEM);
+                resolved += open.size();
+            }
+        }
+        return resolved;
+    }
+
+    private static boolean onlyRetiredReasons(final LinkReview review, final Set<String> shortenerLists) {
+        final var reasons = reasonsOf(review);
+        return review.isSystemFlagged() && !review.isNotice() && !reasons.isEmpty()
+                && reasons.stream().allMatch(reason -> isRetired(reason, shortenerLists));
     }
 
     private static boolean isRetired(final String reason, final Set<String> shortenerLists) {
