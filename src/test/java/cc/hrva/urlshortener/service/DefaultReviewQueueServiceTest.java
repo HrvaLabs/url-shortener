@@ -13,6 +13,9 @@ import cc.hrva.urlshortener.model.enums.BlockReason;
 import cc.hrva.urlshortener.model.enums.InspectionState;
 import cc.hrva.urlshortener.model.enums.ReportCategory;
 import cc.hrva.urlshortener.model.enums.ReviewResolution;
+import cc.hrva.urlshortener.model.BlocklistSource;
+import cc.hrva.urlshortener.model.enums.SourceKind;
+import cc.hrva.urlshortener.repository.BlocklistSourceRepository;
 import cc.hrva.urlshortener.repository.LinkReviewRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.specification.LinkReviewSpecification;
@@ -93,6 +96,9 @@ class DefaultReviewQueueServiceTest {
     @Mock
     private LinkInspectionService linkInspectionService;
 
+    @Mock
+    private BlocklistSourceRepository blocklistSourceRepository;
+
     private final Clock clock = Clock.fixed(Instant.parse("2026-10-21T10:00:00Z"), ZoneOffset.UTC);
 
     private ReviewQueueService reviewQueueService;
@@ -102,7 +108,7 @@ class DefaultReviewQueueServiceTest {
     @BeforeEach
     void setUp() {
         reviewQueueService = new DefaultReviewQueueService(linkReviewRepository, urlRepository, scammerSignalService, clock, eventPublisher, reviewWarningPage,
-                linkInspectionService);
+                linkInspectionService, blocklistSourceRepository);
         lenient().when(urlRepository.findById(287L)).thenReturn(Optional.of(url));
     }
 
@@ -184,6 +190,109 @@ class DefaultReviewQueueServiceTest {
         }
 
         verify(reviewWarningPage, times(ReviewResolution.values().length)).clearAfterReview(287L);
+    }
+
+    private static final String SHORTENER_LIST = "on list HaGeZi URL shorteners";
+    private static final String HIDES = "hides its destination behind another shortener";
+
+    private void shortenerSourceExists() {
+        when(blocklistSourceRepository.findByKind(SourceKind.SHORTENERS))
+                .thenReturn(List.of(BlocklistSource.builder().name("HaGeZi URL shorteners").kind(SourceKind.SHORTENERS).enabled(false).build()));
+    }
+
+    private LinkReview openReview(final long id, final boolean systemFlagged, final boolean notice, final String... reasons) {
+        final var review = LinkReview.builder().id(id).url(url).reasons(String.join("\n", reasons)).systemFlagged(systemFlagged).notice(notice)
+                .flaggedAt(LocalDateTime.now()).build();
+        when(linkReviewRepository.findByResolvedAtIsNullAndSystemFlaggedTrueAndNoticeFalse())
+                .thenReturn(systemFlagged && !notice ? List.of(review) : List.of());
+        return review;
+    }
+
+    @Test
+    void resolvesAnOpenReviewWhoseReasonsAreAllRetired() {
+        shortenerSourceExists();
+        final var open = openReview(1L, true, false, SHORTENER_LIST, HIDES);
+        when(linkReviewRepository.findByUrlAndResolvedAtIsNull(url)).thenReturn(List.of(open));
+
+        final var resolved = reviewQueueService.resolveOpenWithOnlyRetiredReasons();
+
+        assertThat(resolved).isEqualTo(1);
+        assertThat(open.getResolution()).isEqualTo(ReviewResolution.OK);
+        assertThat(open.getResolvedBy()).isEqualTo("system");
+        assertThat(open.getResolvedAt()).isNotNull();
+        verify(reviewWarningPage).clearAfterReview(287L);
+    }
+
+    @Test
+    void aHopWrappedRetiredReasonAloneIsResolved() {
+        shortenerSourceExists();
+        final var open = openReview(1L, true, false, "redirects to bit.ly: " + HIDES);
+        when(linkReviewRepository.findByUrlAndResolvedAtIsNull(url)).thenReturn(List.of(open));
+
+        assertThat(reviewQueueService.resolveOpenWithOnlyRetiredReasons()).isEqualTo(1);
+        assertThat(open.getResolution()).isEqualTo(ReviewResolution.OK);
+    }
+
+    @Test
+    void keepsAReviewWithAnyReasonThatStillDecides() {
+        shortenerSourceExists();
+        final var open = openReview(1L, true, false, SHORTENER_LIST, "imitates paypal");
+
+        assertThat(reviewQueueService.resolveOpenWithOnlyRetiredReasons()).isZero();
+        assertThat(open.getResolvedAt()).isNull();
+        verifyNoInteractions(reviewWarningPage);
+    }
+
+    @Test
+    void keepsAReviewThatAlsoCarriesAVisitorReport() {
+        shortenerSourceExists();
+        final var open = openReview(1L, true, false, SHORTENER_LIST, REPORTED_PHISHING);
+
+        assertThat(reviewQueueService.resolveOpenWithOnlyRetiredReasons()).isZero();
+        assertThat(open.getResolvedAt()).isNull();
+    }
+
+    @Test
+    void keepsVisitorReportsAndNotices() {
+        shortenerSourceExists();
+        final var report = openReview(1L, false, false, HIDES);
+        final var notice = openReview(2L, true, true, HIDES);
+
+        assertThat(reviewQueueService.resolveOpenWithOnlyRetiredReasons()).isZero();
+        assertThat(report.getResolvedAt()).isNull();
+        assertThat(notice.getResolvedAt()).isNull();
+        verifyNoInteractions(reviewWarningPage);
+    }
+
+    @Test
+    void retiredReasonsAre() {
+        shortenerSourceExists();
+        final var open = openReview(1L, true, false, SHORTENER_LIST, HIDES, SuspiciousUrlService.SHORTENER_REASON,
+                SuspiciousUrlService.RISKY_ENDING_PREFIX + "zip", "free dynamic DNS host");
+        when(linkReviewRepository.findByUrlAndResolvedAtIsNull(url)).thenReturn(List.of(open));
+
+        assertThat(reviewQueueService.resolveOpenWithOnlyRetiredReasons()).isEqualTo(1);
+    }
+
+    @Test
+    void anOnListReasonForANonShortenerSourceIsNotRetired() {
+        shortenerSourceExists();
+        final var open = openReview(1L, true, false, "on list HaGeZi DynDNS");
+
+        assertThat(reviewQueueService.resolveOpenWithOnlyRetiredReasons()).isZero();
+        assertThat(open.getResolvedAt()).isNull();
+    }
+
+    @Test
+    void aSecondRunResolvesNothing() {
+        shortenerSourceExists();
+        final var open = openReview(1L, true, false, SHORTENER_LIST, HIDES);
+        when(linkReviewRepository.findByUrlAndResolvedAtIsNull(url)).thenReturn(List.of(open));
+        assertThat(reviewQueueService.resolveOpenWithOnlyRetiredReasons()).isEqualTo(1);
+        when(linkReviewRepository.findByResolvedAtIsNullAndSystemFlaggedTrueAndNoticeFalse()).thenReturn(List.of());
+
+        assertThat(reviewQueueService.resolveOpenWithOnlyRetiredReasons()).isZero();
+        verify(reviewWarningPage, times(1)).clearAfterReview(287L);
     }
 
     @Test

@@ -13,6 +13,7 @@ import org.springframework.transaction.annotation.Transactional;
 public interface BlocklistSourceRepository extends JpaRepository<BlocklistSource, Long> {
 
     List<BlocklistSource> findByEnabledTrue();
+    List<BlocklistSource> findByKind(SourceKind kind);
 
     @Modifying
     @Transactional

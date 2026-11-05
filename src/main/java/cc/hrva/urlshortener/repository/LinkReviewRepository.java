@@ -23,6 +23,7 @@ public interface LinkReviewRepository extends JpaRepository<LinkReview, Long>, J
 
     Optional<LinkReview> findFirstByUrlAndResolvedAtIsNullOrderByFlaggedAtDesc(Url url);
     List<LinkReview> findByUrlAndResolvedAtIsNull(Url url);
+    List<LinkReview> findByResolvedAtIsNullAndSystemFlaggedTrueAndNoticeFalse();
     Optional<LinkReview> findFirstByUrlOrderByFlaggedAtDesc(Url url);
     long countByResolvedAtIsNull();
     long countByResolvedAtIsNullAndReasonsContaining(String reason);

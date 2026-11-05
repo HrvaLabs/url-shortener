@@ -122,7 +122,7 @@ class AdminPageQueriesTest {
         final var scammerSignalService = mock(ScammerSignalService.class);
         when(scammerSignalService.possibleScammerIds()).thenReturn(Set.of());
         final var reviewQueueService = new DefaultReviewQueueService(linkReviewRepository, urlRepository, scammerSignalService, Clock.systemUTC(),
-                mock(ApplicationEventPublisher.class), mock(ReviewWarningPage.class), linkInspectionService());
+                mock(ApplicationEventPublisher.class), mock(ReviewWarningPage.class), linkInspectionService(), mock(BlocklistSourceRepository.class));
 
         final var entries = reviewQueueService.openEntries(PageRequest.of(0, 10), null, null, null);
 
@@ -143,7 +143,7 @@ class AdminPageQueriesTest {
         final var scammerSignalService = mock(ScammerSignalService.class);
         when(scammerSignalService.possibleScammerIds()).thenReturn(Set.of());
         final var reviewQueueService = new DefaultReviewQueueService(linkReviewRepository, urlRepository, scammerSignalService, Clock.systemUTC(),
-                mock(ApplicationEventPublisher.class), mock(ReviewWarningPage.class), linkInspectionService());
+                mock(ApplicationEventPublisher.class), mock(ReviewWarningPage.class), linkInspectionService(), mock(BlocklistSourceRepository.class));
 
         final var entries = reviewQueueService.openEntries(PageRequest.of(0, 10), null, null, null);
 

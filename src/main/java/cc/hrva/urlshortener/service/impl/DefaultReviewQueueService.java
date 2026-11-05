@@ -7,6 +7,9 @@ import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.enums.ReportCategory;
 import cc.hrva.urlshortener.model.enums.ReviewResolution;
+import cc.hrva.urlshortener.model.BlocklistSource;
+import cc.hrva.urlshortener.model.enums.SourceKind;
+import cc.hrva.urlshortener.repository.BlocklistSourceRepository;
 import cc.hrva.urlshortener.repository.LinkReviewRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.specification.LinkReviewSpecification;
@@ -34,6 +37,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -55,6 +59,8 @@ public class DefaultReviewQueueService implements ReviewQueueService {
 
     private static final String REASON_SEPARATOR = "\n";
     private static final int MAX_VISITOR_REPORTS_PER_REVIEW = 20;
+    private static final String ON_LIST = "on list ";
+    private static final Set<String> RETIRED_REASONS = Set.of("hides its destination behind another shortener", "free dynamic DNS host");
     private static final String FLAGGED_AT = "flaggedAt";
     private static final Sort NEWEST_FIRST = Sort.by(Sort.Order.desc(FLAGGED_AT), Sort.Order.desc("id"));
     private static final SortWhitelist ENTRY_SORTS = SortWhitelist.of(FLAGGED_AT)
@@ -68,6 +74,7 @@ public class DefaultReviewQueueService implements ReviewQueueService {
     private final ApplicationEventPublisher eventPublisher;
     private final ReviewWarningPage reviewWarningPage;
     private final LinkInspectionService linkInspectionService;
+    private final BlocklistSourceRepository blocklistSourceRepository;
 
     @Override
     @Transactional
@@ -205,6 +212,25 @@ public class DefaultReviewQueueService implements ReviewQueueService {
         if (!open.isEmpty()) {
             reviewWarningPage.clearAfterReview(url.getId());
         }
+    }
+
+    @Override
+    @Transactional
+    public int resolveOpenWithOnlyRetiredReasons() {
+        final var shortenerLists = blocklistSourceRepository.findByKind(SourceKind.SHORTENERS).stream()
+                .map(BlocklistSource::getName)
+                .map(name -> ON_LIST + name)
+                .collect(Collectors.toSet());
+        final var retired = linkReviewRepository.findByResolvedAtIsNullAndSystemFlaggedTrueAndNoticeFalse().stream()
+                .filter(review -> reasonsOf(review).stream().allMatch(reason -> isRetired(reason, shortenerLists)))
+                .toList();
+        retired.forEach(review -> resolveOpen(review.getUrl(), ReviewResolution.OK, "system"));
+        return retired.size();
+    }
+
+    private static boolean isRetired(final String reason, final Set<String> shortenerLists) {
+        final var carried = SuspiciousUrlService.carriedReasonOf(reason);
+        return SuspiciousUrlService.isSupporting(reason) || RETIRED_REASONS.contains(carried) || shortenerLists.contains(carried);
     }
 
     @Override

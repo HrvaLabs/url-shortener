@@ -37,7 +37,7 @@ public interface SuspiciousUrlService {
         return REDIRECTS_TO + host + REDIRECT_SEPARATOR + reason;
     }
 
-    private static String carriedReasonOf(final String reason) {
+    static String carriedReasonOf(final String reason) {
         if (!reason.startsWith(REDIRECTS_TO)) {
             return reason;
         }

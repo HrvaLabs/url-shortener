@@ -17,6 +17,7 @@ public interface ReviewQueueService {
     void notice(Url url, List<String> reasons);
     void report(Url url, ReportCategory category, String details);
     void resolveOpen(Url url, ReviewResolution resolution, String resolvedBy);
+    int resolveOpenWithOnlyRetiredReasons();
     void inspectAgainIfOpen(Url url);
     Page<LinkReview> open(Pageable pageable, String reason);
     Page<ReviewEntryResponse> openEntries(Pageable pageable, String reason, Integer olderThanDays, String search);
