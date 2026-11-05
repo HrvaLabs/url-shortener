@@ -116,7 +116,7 @@ class DefaultBlocklistSourceServiceTest {
     private static final String NO_LINKS = "No links found. Use a list with one link per line or a CSV with a url column.";
     private static final long MEGABYTE = 1024L * 1024L;
     private static final long TRANCO = 10L;
-    private static final String TRANCO_API = "https://tranco-list.eu/api/lists/date/latest";
+    private static final String TRANCO_API = "https://tranco-list.eu/api/lists/date/latest?subdomains=true";
     private static final String TOP_SITES_ONLY_TRUST = "Top sites lists can only mark real sign-in pages";
     private static final String TRUST_ONLY_TOP_SITES = "Only a top sites list can mark real sign-in pages";
 

@@ -52,7 +52,7 @@ class AccountSignInCheckSchemaTest {
                 .extracting(BlocklistSource::getName, BlocklistSource::getUrl, BlocklistSource::getFallbackUrls, BlocklistSource::getAction,
                         BlocklistSource::isEnabled, BlocklistSource::getRefreshIntervalHours, BlocklistSource::getDomainCount,
                         BlocklistSource::getLastSuccessAt)
-                .containsExactly(tuple("Tranco top sites", "https://tranco-list.eu/api/lists/date/latest", List.of(), BlocklistAction.TRUST,
+                .containsExactly(tuple("Tranco top sites", "https://tranco-list.eu/api/lists/date/latest?subdomains=true", List.of(), BlocklistAction.TRUST,
                         true, 24, null, null));
         assertThat(blocklistSourceRepository.findAll())
                 .filteredOn(source -> source.getAction() == BlocklistAction.TRUST)

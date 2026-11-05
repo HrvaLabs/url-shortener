@@ -67,18 +67,35 @@ class RealSignInHostsTest {
     }
 
     @Test
-    void accountsGoogleComIsRealWhenGoogleComIsTrusted() {
-        trancoLists("google.com", "microsoftonline.com");
+    void accountsGoogleComIsRealWhenItIsListed() {
+        trancoLists("google.com", "accounts.google.com", "login.microsoftonline.com");
 
         assertThat(realSignInHosts.isRealSignInHost("accounts.google.com")).isTrue();
         assertThat(realSignInHosts.isRealSignInHost("login.microsoftonline.com")).isTrue();
         verify(blocklistStore, times(2)).matchingSources(keysBySource.capture());
-        assertThat(keysBySource.getAllValues().getFirst()).containsExactly(entry(TRANCO, List.of("google.com")));
+        assertThat(keysBySource.getAllValues().getFirst()).containsExactly(entry(TRANCO, List.of("accounts.google.com")));
+    }
+
+    @Test
+    void aSubdomainOfAListedDomainIsNotReal() {
+        trancoLists("sharepoint.com", "google.com", "accounts.google.com");
+
+        assertThat(realSignInHosts.isRealSignInHost("contoso.sharepoint.com")).isFalse();
+        assertThat(realSignInHosts.isRealSignInHost("script.google.com")).isFalse();
+        assertThat(realSignInHosts.isRealSignInHost("login.accounts.google.com")).isFalse();
+    }
+
+    @Test
+    void aHostIsLookedUpInItsListedForm() {
+        trancoLists("accounts.google.com", "xn--bcher-kva.de");
+
+        assertThat(realSignInHosts.isRealSignInHost("Accounts.Google.COM.")).isTrue();
+        assertThat(realSignInHosts.isRealSignInHost("bücher.de")).isTrue();
     }
 
     @Test
     void aGithubIoPageIsNeverReal() {
-        trancoLists("github.io", "foo.github.io", "github.com");
+        trancoLists("github.io", "foo.github.io", "login.foo.github.io");
 
         assertThat(realSignInHosts.isRealSignInHost("foo.github.io")).isFalse();
         assertThat(realSignInHosts.isRealSignInHost("login.foo.github.io")).isFalse();
@@ -87,7 +104,7 @@ class RealSignInHostsTest {
 
     @Test
     void anUnknownDomainIsNotReal() {
-        trancoLists("google.com");
+        trancoLists("accounts.google.com");
 
         assertThat(realSignInHosts.isRealSignInHost("accounts.google.com.orvexa.bet")).isFalse();
         assertThat(realSignInHosts.isRealSignInHost("namora.mobile")).isFalse();
@@ -95,9 +112,9 @@ class RealSignInHostsTest {
 
     @Test
     void onlyATrustSourceMakesASignInPageReal() {
-        trancoLists("google.com");
-        source(HAGEZI_FAKE, SourceKind.DOMAINS, BlocklistAction.BLOCK, "njuskaio.cam");
-        source(3L, SourceKind.DOMAINS, BlocklistAction.FLAG, "bulletproof-hosting.com");
+        trancoLists("accounts.google.com");
+        source(HAGEZI_FAKE, SourceKind.DOMAINS, BlocklistAction.BLOCK, "login.njuskaio.cam");
+        source(3L, SourceKind.DOMAINS, BlocklistAction.FLAG, "login.bulletproof-hosting.com");
 
         assertThat(realSignInHosts.isRealSignInHost("login.njuskaio.cam")).isFalse();
         assertThat(realSignInHosts.isRealSignInHost("login.bulletproof-hosting.com")).isFalse();
@@ -107,7 +124,7 @@ class RealSignInHostsTest {
 
     @Test
     void aRedisFailureCountsAsNotReal() {
-        trancoLists("google.com");
+        trancoLists("accounts.google.com");
         when(redisTemplate.executePipelined(any(RedisCallback.class))).thenThrow(new RedisConnectionFailureException("Unable to connect to Redis"));
         final var overFailingRedis = new RealSignInHosts(blocklistSourceRepository, new BlocklistStore(redisTemplate));
 
@@ -131,7 +148,7 @@ class RealSignInHostsTest {
 
     @Test
     void nothingIsRealWithoutATrustSource() {
-        source(HAGEZI_FAKE, SourceKind.DOMAINS, BlocklistAction.BLOCK, "google.com");
+        source(HAGEZI_FAKE, SourceKind.DOMAINS, BlocklistAction.BLOCK, "accounts.google.com");
 
         assertThat(realSignInHosts.isRealSignInHost("accounts.google.com")).isFalse();
     }
@@ -139,7 +156,7 @@ class RealSignInHostsTest {
     @ParameterizedTest
     @ValueSource(strings = {"142.250.180.14", "::1", "2001:db8::1"})
     void anIpIsNeverReal(final String host) {
-        trancoLists("142.250.180.14", "google.com");
+        trancoLists("142.250.180.14", "::1", "2001:db8::1");
 
         assertThat(realSignInHosts.isRealSignInHost(host)).isFalse();
         verifyNoInteractions(blocklistStore);
@@ -148,14 +165,14 @@ class RealSignInHostsTest {
     @ParameterizedTest
     @NullAndEmptySource
     void aMissingHostIsNeverReal(final String host) {
-        trancoLists("google.com");
+        trancoLists("accounts.google.com");
 
         assertThat(realSignInHosts.isRealSignInHost(host)).isFalse();
         verifyNoInteractions(blocklistStore);
     }
 
-    private void trancoLists(final String... domains) {
-        source(TRANCO, SourceKind.TOP_SITES, BlocklistAction.TRUST, domains);
+    private void trancoLists(final String... hosts) {
+        source(TRANCO, SourceKind.TOP_SITES, BlocklistAction.TRUST, hosts);
     }
 
     private void source(final long id, final SourceKind kind, final BlocklistAction action, final String... entries) {

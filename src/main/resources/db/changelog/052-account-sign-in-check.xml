@@ -8,7 +8,7 @@
     <changeSet author="khrvacic" id="052-blocklist-source-tranco">
         <insert tableName="blocklist_source">
             <column name="name" value="Tranco top sites"/>
-            <column name="url" value="https://tranco-list.eu/api/lists/date/latest"/>
+            <column name="url" value="https://tranco-list.eu/api/lists/date/latest?subdomains=true"/>
             <column name="kind" value="TOP_SITES"/>
             <column name="action" value="TRUST"/>
             <column name="enabled" valueBoolean="true"/>

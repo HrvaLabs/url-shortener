@@ -471,7 +471,7 @@ public class AppProperties {
 
         @Min(1000)
         @Max(100_000)
-        private int signInFormTopSites = 10_000;
+        private int signInFormTopSites = 20_000;
 
         @Min(1)
         @Max(3650)

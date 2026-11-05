@@ -321,14 +321,14 @@ class SettingValuesTest {
                         SettingKey::getDescription, SettingKey::getParent, SettingKey::isSafety, SettingKey::getMin, SettingKey::getMax, SettingKey::getUnit,
                         SettingKey::isNullable)
                 .containsExactly(SettingGroup.SAFETY, SettingType.NUMBER, "Real sign-in pages: top sites",
-                        "How many of the most-visited sites in the Tranco list count as real sign-in pages. The next refresh of the Tranco source "
-                                + "downloads that many.", null, false, 1000, 100_000, "sites", false);
+                        "How many of the most-visited hosts in Tranco's list with subdomains count as real sign-in pages. The next refresh of the "
+                                + "Tranco source downloads that many.", null, false, 1000, 100_000, "sites", false);
         assertThat(SettingKey.values()[SettingKey.values().length - 1]).isEqualTo(SettingKey.SIGN_IN_FORM_TOP_SITES);
-        assertThat(SettingValues.format(SettingKey.SIGN_IN_FORM_TOP_SITES, 10_000)).isEqualTo("10,000 sites");
+        assertThat(SettingValues.format(SettingKey.SIGN_IN_FORM_TOP_SITES, 20_000)).isEqualTo("20,000 sites");
         assertRefused(SettingKey.SIGN_IN_FORM_TOP_SITES, NODES.numberNode(999), "Use a number from 1,000 to 100,000.");
         final var appProperties = new AppProperties();
         final var defaults = new SettingDefaults(appProperties, SettingsServiceFixtures.bothProviders());
-        assertThat(defaults.defaultOf(SettingKey.SIGN_IN_FORM_TOP_SITES)).isEqualTo(10_000);
+        assertThat(defaults.defaultOf(SettingKey.SIGN_IN_FORM_TOP_SITES)).isEqualTo(20_000);
         appProperties.getModeration().setSignInFormTopSites(50_000);
         assertThat(defaults.defaultOf(SettingKey.SIGN_IN_FORM_TOP_SITES)).isEqualTo(50_000);
     }

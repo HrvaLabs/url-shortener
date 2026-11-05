@@ -49,14 +49,14 @@ class BlocklistRefresherTest {
 
     private static final long TRANCO = 10L;
     private static final String TRANCO_NAME = "Tranco top sites";
-    private static final String API = "https://tranco-list.eu/api/lists/date/latest";
+    private static final String API = "https://tranco-list.eu/api/lists/date/latest?subdomains=true";
     private static final String LATEST = """
-            {"list_id": "746WX", "available": true, "failed": false, "download": "https://tranco-list.eu/download/746WX/1000000",
-             "created_on": "2026-11-03T22:00:02.608284"}
+            {"list_id": "K9YXW", "available": true, "failed": false, "download": "https://tranco-list.eu/download/K9YXW/1000000",
+             "created_on": "2026-11-03T22:00:02.695114"}
             """;
-    private static final String TOP_10000 = "https://tranco-list.eu/download/746WX/10000";
-    private static final String TOP_1000 = "https://tranco-list.eu/download/746WX/1000";
-    private static final String ETAG = "\"746WX-10000\"";
+    private static final String TOP_20000 = "https://tranco-list.eu/download/K9YXW/20000";
+    private static final String TOP_1000 = "https://tranco-list.eu/download/K9YXW/1000";
+    private static final String ETAG = "\"K9YXW-20000\"";
     private static final String NO_DOWNLOAD_LINK = "No download link found. Use the Tranco API address of the latest list.";
     private static final long MEGABYTE = 1024L * 1024L;
     private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
@@ -94,16 +94,16 @@ class BlocklistRefresherTest {
     void aTopSitesSourceDownloadsTheLatestListAtTheConfiguredSize() {
         final var source = stored(tranco().build());
         serves(API, LATEST);
-        serves(TOP_10000, "1,google.com\r\n2,facebook.com\r\n3,microsoft.com\r\n");
+        serves(TOP_20000, "74,accounts.google.com\r\n94,login.microsoftonline.com\r\n359,m.facebook.com\r\n");
         loadsInto(source);
         redisHasRoom();
 
         blocklistRefresher.refresh(source, RefreshTrigger.MANUAL);
 
         verify(publicHttpFetcher).fetch(eq(API), anyLong(), isNull(), isNull(), any(Duration.class));
-        verify(publicHttpFetcher).fetch(eq(TOP_10000), eq(100L * MEGABYTE), isNull(), isNull(), eq(Duration.ofSeconds(60)));
-        verify(blocklistStore).replace(TRANCO, Set.of("google.com", "facebook.com", "microsoft.com"));
-        verify(blocklistSourceRepository).recordLoadedList(eq(TRANCO), eq(SourceKind.TOP_SITES), any(), isNull(), eq(TOP_10000), eq(3L), isNull(),
+        verify(publicHttpFetcher).fetch(eq(TOP_20000), eq(100L * MEGABYTE), isNull(), isNull(), eq(Duration.ofSeconds(60)));
+        verify(blocklistStore).replace(TRANCO, Set.of("accounts.google.com", "login.microsoftonline.com", "m.facebook.com"));
+        verify(blocklistSourceRepository).recordLoadedList(eq(TRANCO), eq(SourceKind.TOP_SITES), any(), isNull(), eq(TOP_20000), eq(3L), isNull(),
                 isNull(), isNull());
         verify(blocklistHealth).refreshed(TRANCO);
         assertThat(bodies).noneMatch(Files::exists);
@@ -126,7 +126,7 @@ class BlocklistRefresherTest {
     @Test
     void aScheduledRefreshAfterTheSizeWasLoweredLoadsTheSmallerList() {
         settingsService.change(SettingKey.SIGN_IN_FORM_TOP_SITES, NODES.numberNode(1000), "admin@hrva.cc");
-        final var source = stored(tranco().domainCount(10_000L).lastSuccessUrl(TOP_10000).build());
+        final var source = stored(tranco().domainCount(20_000L).lastSuccessUrl(TOP_20000).build());
         serves(API, LATEST);
         serves(TOP_1000, rankedDomains(1000));
         lenient().when(blocklistStore.exists(TRANCO)).thenReturn(true);
@@ -142,9 +142,9 @@ class BlocklistRefresherTest {
 
     @Test
     void aScheduledTopSitesDownloadOfLessThanHalfTheSitesKeepsTheOldList() {
-        final var source = stored(tranco().domainCount(10_000L).build());
+        final var source = stored(tranco().domainCount(20_000L).build());
         serves(API, LATEST);
-        serves(TOP_10000, rankedDomains(1200));
+        serves(TOP_20000, rankedDomains(1200));
         when(blocklistStore.exists(TRANCO)).thenReturn(true);
         when(blocklistSourceRepository.recordRefresh(anyLong(), any(), any(), any())).thenReturn(1);
 
@@ -152,16 +152,16 @@ class BlocklistRefresherTest {
 
         verify(blocklistStore, never()).replace(anyLong(), anySet());
         verify(blocklistSourceRepository).recordRefresh(eq(TRANCO), eq(SourceKind.TOP_SITES), any(),
-                eq("The new download has 1,200 entries, less than half of the 10,000 loaded before. Kept the old list."));
+                eq("The new download has 1,200 entries, less than half of the 20,000 loaded before. Kept the old list."));
     }
 
     @Test
     void theSameListAtTheSameSizeIsRevalidatedWhileTheApiAnswerIsAlwaysFetched() {
-        final var source = stored(tranco().domainCount(10_000L).lastSuccessUrl(TOP_10000).etag(ETAG).build());
+        final var source = stored(tranco().domainCount(20_000L).lastSuccessUrl(TOP_20000).etag(ETAG).build());
         serves(API, LATEST);
         when(blocklistStore.exists(TRANCO)).thenReturn(true);
-        when(publicHttpFetcher.fetch(eq(TOP_10000), anyLong(), eq(ETAG), isNull(), any(Duration.class)))
-                .thenReturn(new FetchResult(true, null, ETAG, null, TOP_10000));
+        when(publicHttpFetcher.fetch(eq(TOP_20000), anyLong(), eq(ETAG), isNull(), any(Duration.class)))
+                .thenReturn(new FetchResult(true, null, ETAG, null, TOP_20000));
         when(blocklistSourceRepository.recordUnchangedList(anyLong(), any(), any(), any())).thenReturn(1);
 
         blocklistRefresher.refresh(source, RefreshTrigger.SCHEDULED);
@@ -173,10 +173,10 @@ class BlocklistRefresherTest {
 
     @ParameterizedTest
     @ValueSource(strings = {
-            "{\"list_id\": \"746WX\", \"available\": true}",
+            "{\"list_id\": \"K9YXW\", \"available\": true}",
             "{\"download\": \"\"}",
             "{\"download\": 1000000}",
-            "[\"https://tranco-list.eu/download/746WX/1000000\"]",
+            "[\"https://tranco-list.eu/download/K9YXW/1000000\"]",
             "<html><head><title>502 Bad Gateway</title></head><body>nginx</body></html>",
             ""})
     void anApiAnswerWithoutADownloadLinkKeepsTheLastList(final String answer) {
@@ -185,11 +185,11 @@ class BlocklistRefresherTest {
 
     @Test
     void aDownloadLinkWithoutAListSizeKeepsTheLastList() {
-        assertTheRefreshFailsWith("{\"download\": \"https://tranco-list.eu/download/746WX/full\"}", "The download link doesn't end in a list size.");
+        assertTheRefreshFailsWith("{\"download\": \"https://tranco-list.eu/download/K9YXW/full\"}", "The download link doesn't end in a list size.");
     }
 
     private void assertTheRefreshFailsWith(final String answer, final String error) {
-        final var source = stored(tranco().domainCount(10_000L).lastSuccessUrl(TOP_10000).build());
+        final var source = stored(tranco().domainCount(20_000L).lastSuccessUrl(TOP_20000).build());
         serves(API, answer);
         when(blocklistSourceRepository.recordRefresh(anyLong(), any(), any(), any())).thenReturn(1);
 

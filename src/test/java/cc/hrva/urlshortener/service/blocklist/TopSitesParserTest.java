@@ -54,6 +54,15 @@ class TopSitesParserTest {
     }
 
     @Test
+    void keepsEachHostAsListedWithoutReducingItToItsDomain() {
+        final var parsed = topSitesParser.parse(csvOf(
+                "1,google.com\r\n74,accounts.google.com\r\n94,login.microsoftonline.com\r\n13759,WWW.Njuskalo.HR.\r\n15000,contoso.sharepoint.com\r\n"), 100);
+
+        assertThat(parsed.entries()).containsExactlyInAnyOrder(
+                "google.com", "accounts.google.com", "login.microsoftonline.com", "www.njuskalo.hr", "contoso.sharepoint.com");
+    }
+
+    @Test
     void aDownloadWithoutRankedDomainsIsRefused() {
         assertThatThrownBy(() -> topSitesParser.parse(csvOf("<html>\r\n<body>502 Bad Gateway</body>\r\n</html>\r\n"), 100))
                 .isInstanceOf(BlocklistFormatException.class)
