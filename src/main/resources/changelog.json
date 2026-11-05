@@ -2,7 +2,7 @@
   "releases": [
     {
       "version": "v2.33",
-      "date": "2026-11-05",
+      "date": "2026-11-06",
       "badge": "Latest",
       "badgeVariant": "default",
       "summary": "Links to other URL shorteners are accepted. hrva.cc follows them to where they end, checks that page and checks them again every night.",
