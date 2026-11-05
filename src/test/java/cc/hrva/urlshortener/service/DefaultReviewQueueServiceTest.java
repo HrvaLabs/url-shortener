@@ -29,6 +29,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -72,6 +73,7 @@ class DefaultReviewQueueServiceTest {
     private static final String ON_LIST = "on list Phishing.Database domains";
     private static final String REPORTED_PHISHING = "reported by a visitor: phishing: asks for my bank login";
     private static final String SIGN_IN_FORM = ReviewReasons.SIGN_IN_FORM_ACCOUNT;
+    private static final String REPOINTED = "https://sso.findfavoritedate.life/login";
 
     @Mock
     private LinkReviewRepository linkReviewRepository;
@@ -506,6 +508,47 @@ class DefaultReviewQueueServiceTest {
         reviewQueueService.flag(url, List.of(LURE));
 
         verify(linkReviewRepository, never()).save(any());
+    }
+
+    @Test
+    void resolvingRecordsTheDestinationTheLinkHasThenWhateverTheResolution() {
+        final var repointed = Url.builder().id(287L).shortUrl("v0DB3").longUrl(REPOINTED).active(true).build();
+        for (final var resolution : ReviewResolution.values()) {
+            final var open = LinkReview.builder().id(1L).url(repointed).reasons(SIGN_IN_FORM).systemFlagged(true).checkedUrl(url.getLongUrl())
+                    .flaggedAt(LocalDateTime.now()).build();
+            when(linkReviewRepository.findByUrlAndResolvedAtIsNull(url)).thenReturn(List.of(open));
+
+            reviewQueueService.resolveOpen(url, resolution, "admin@hrva.cc");
+
+            assertThat(open.getCheckedUrl()).isEqualTo(REPOINTED);
+        }
+    }
+
+    @Test
+    void anOkGivenWhileTheLinkPointedElsewhereDoesNotCoverTheFirstDestination() {
+        final var reviews = reviewsKeptInMemory();
+
+        reviewQueueService.notice(url, List.of(SIGN_IN_FORM));
+        url.setLongUrl(REPOINTED);
+        reviewQueueService.resolveOpen(url, ReviewResolution.OK, "admin@hrva.cc");
+        url.setLongUrl("https://findfavoritedate.life/?u=f6yp608");
+        reviewQueueService.notice(url, List.of(SIGN_IN_FORM));
+
+        assertThat(reviews).extracting(LinkReview::getCheckedUrl, LinkReview::getResolution).containsExactly(
+                tuple(REPOINTED, ReviewResolution.OK),
+                tuple("https://findfavoritedate.life/?u=f6yp608", null));
+    }
+
+    @Test
+    void anOkGivenWhileTheLinkPointedElsewhereCoversThatDestination() {
+        final var reviews = reviewsKeptInMemory();
+
+        reviewQueueService.notice(url, List.of(SIGN_IN_FORM));
+        url.setLongUrl(REPOINTED);
+        reviewQueueService.resolveOpen(url, ReviewResolution.OK, "admin@hrva.cc");
+        reviewQueueService.notice(url, List.of(SIGN_IN_FORM));
+
+        assertThat(reviews).extracting(LinkReview::getCheckedUrl, LinkReview::getResolution).containsExactly(tuple(REPOINTED, ReviewResolution.OK));
     }
 
     @Test
@@ -986,6 +1029,23 @@ class DefaultReviewQueueServiceTest {
     private static LinkReview openReview(final long id, final User owner) {
         final var link = Url.builder().id(id).shortUrl("s" + id).longUrl("https://example.org/" + id).owner(owner).createDate(LocalDateTime.now()).build();
         return LinkReview.builder().id(id).url(link).reasons(LURE).flaggedAt(LocalDateTime.now()).build();
+    }
+
+    private List<LinkReview> reviewsKeptInMemory() {
+        final var reviews = new ArrayList<LinkReview>();
+        when(linkReviewRepository.save(any(LinkReview.class))).thenAnswer(invocation -> {
+            final LinkReview review = invocation.getArgument(0);
+            if (!reviews.contains(review)) {
+                reviews.add(review);
+            }
+            return review;
+        });
+        when(linkReviewRepository.findFirstByUrlAndResolvedAtIsNullOrderByFlaggedAtDesc(url))
+                .thenAnswer(invocation -> reviews.stream().filter(review -> review.getResolvedAt() == null).reduce((first, second) -> second));
+        when(linkReviewRepository.findByUrlAndResolvedAtIsNull(url))
+                .thenAnswer(invocation -> reviews.stream().filter(review -> review.getResolvedAt() == null).toList());
+        when(linkReviewRepository.findFirstByUrlOrderByFlaggedAtDesc(url)).thenAnswer(invocation -> reviews.stream().reduce((first, second) -> second));
+        return reviews;
     }
 
     private LinkReview openNotice() {

@@ -196,6 +196,7 @@ public class DefaultReviewQueueService implements ReviewQueueService {
             review.setResolution(resolution);
             review.setResolvedBy(resolvedBy);
             review.setResolvedAt(resolvedAt);
+            review.setCheckedUrl(review.getUrl().getLongUrl());
             linkReviewRepository.save(review);
             log.info("Review resolved urlId={} reviewId={} resolution={}", url.getId(), review.getId(), resolution);
         });
