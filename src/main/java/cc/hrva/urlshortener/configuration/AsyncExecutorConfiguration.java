@@ -13,6 +13,7 @@ public class AsyncExecutorConfiguration {
 
     public static final String REDIRECT_CHECK_EXECUTOR = "redirectCheckExecutor";
     public static final String NOTIFICATION_TASK_EXECUTOR = "notificationTaskExecutor";
+    public static final String SIGN_IN_CHECK_EXECUTOR = "signInCheckExecutor";
     private static final int REDIRECT_CHECK_THREADS = 2;
     private static final int REDIRECT_CHECK_QUEUE_CAPACITY = 200;
     private static final String REDIRECT_CHECK_THREAD_PREFIX = "redirect-check-";
@@ -20,6 +21,10 @@ public class AsyncExecutorConfiguration {
     private static final int NOTIFICATION_TASK_THREADS = 4;
     private static final int NOTIFICATION_TASK_QUEUE_CAPACITY = 16;
     private static final String NOTIFICATION_TASK_THREAD_PREFIX = "notification-task-";
+    private static final int SIGN_IN_CHECK_THREADS = 2;
+    private static final int SIGN_IN_CHECK_QUEUE_CAPACITY = 500;
+    private static final String SIGN_IN_CHECK_THREAD_PREFIX = "sign-in-check-";
+    private static final Duration SIGN_IN_CHECK_SHUTDOWN_GRACE = Duration.ofSeconds(15);
 
     @Bean(name = {TaskExecutionAutoConfiguration.APPLICATION_TASK_EXECUTOR_BEAN_NAME, AsyncAnnotationBeanPostProcessor.DEFAULT_TASK_EXECUTOR_BEAN_NAME})
     public ThreadPoolTaskExecutor applicationTaskExecutor(final ThreadPoolTaskExecutorBuilder threadPoolTaskExecutorBuilder) {
@@ -35,6 +40,18 @@ public class AsyncExecutorConfiguration {
                 .threadNamePrefix(REDIRECT_CHECK_THREAD_PREFIX)
                 .awaitTermination(true)
                 .awaitTerminationPeriod(REDIRECT_CHECK_SHUTDOWN_GRACE)
+                .build();
+    }
+
+    @Bean(SIGN_IN_CHECK_EXECUTOR)
+    public ThreadPoolTaskExecutor signInCheckExecutor() {
+        return new ThreadPoolTaskExecutorBuilder()
+                .corePoolSize(SIGN_IN_CHECK_THREADS)
+                .maxPoolSize(SIGN_IN_CHECK_THREADS)
+                .queueCapacity(SIGN_IN_CHECK_QUEUE_CAPACITY)
+                .threadNamePrefix(SIGN_IN_CHECK_THREAD_PREFIX)
+                .awaitTermination(true)
+                .awaitTerminationPeriod(SIGN_IN_CHECK_SHUTDOWN_GRACE)
                 .build();
     }
 

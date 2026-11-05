@@ -4,11 +4,20 @@ import cc.hrva.urlshortener.client.Resolver;
 import cc.hrva.urlshortener.client.ScriptedFetchers;
 import cc.hrva.urlshortener.configuration.AsyncExecutorConfiguration;
 import cc.hrva.urlshortener.configuration.PublicHttpFetcherConfiguration;
+import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.User;
+import cc.hrva.urlshortener.model.codebook.Authorities;
+import cc.hrva.urlshortener.model.enums.BlockReason;
+import cc.hrva.urlshortener.model.enums.ThreatType;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.service.impl.DefaultSignInFormCheckService;
+import cc.hrva.urlshortener.service.settings.SettingKey;
+import cc.hrva.urlshortener.service.settings.SettingsServiceFixtures;
+import cc.hrva.urlshortener.service.signin.NewAccounts;
+import cc.hrva.urlshortener.service.signin.RealSignInHosts;
 import cc.hrva.urlshortener.util.PublicAddresses;
+import cc.hrva.urlshortener.util.ReviewReasons;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
@@ -19,10 +28,15 @@ import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.nio.charset.StandardCharsets;
+import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
@@ -33,18 +47,26 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Async;
+import org.springframework.transaction.support.TransactionOperations;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class DefaultSignInFormCheckServiceTest {
 
     private static final long LINK_ID = 41L;
+    private static final Instant NOW = Instant.parse("2026-11-05T10:15:30Z");
+    private static final LocalDateTime NOW_LOCAL = LocalDateTime.ofInstant(NOW, ZoneOffset.UTC);
+    private static final User NEW_ACCOUNT = User.builder().id(5L).createDate(NOW_LOCAL.minusDays(3)).build();
+    private static final User OLDER_ACCOUNT = User.builder().id(6L).createDate(NOW_LOCAL.minusYears(1)).build();
     private static final Predicate<InetAddress> LOOPBACK_OR_PUBLIC =
             address -> InetAddress.getLoopbackAddress().equals(address) || PublicAddresses.isPublicAddress(address);
     private static final String DAVIVIENDA_CLONE = """
@@ -61,6 +83,10 @@ class DefaultSignInFormCheckServiceTest {
 
     private final UrlRepository urlRepository = mock(UrlRepository.class);
     private final ModerationService moderationService = mock(ModerationService.class);
+    private final ReviewQueueService reviewQueueService = mock(ReviewQueueService.class);
+    private final RealSignInHosts realSignInHosts = mock(RealSignInHosts.class);
+    private final ScammerSignalService scammerSignalService = mock(ScammerSignalService.class);
+    private final SettingsService settingsService = SettingsServiceFixtures.defaults(new AppProperties());
     private final List<String> requests = new CopyOnWriteArrayList<>();
     private final Map<String, String> headers = new ConcurrentHashMap<>();
     private final Logger serviceLogger = (Logger) LoggerFactory.getLogger(DefaultSignInFormCheckService.class);
@@ -92,6 +118,14 @@ class DefaultSignInFormCheckServiceTest {
                     exchange.getResponseHeaders().add("Location", "http://internal.test:" + port + "/password");
                     send(exchange, 302, "");
                 }
+                case "/to-phish" -> {
+                    exchange.getResponseHeaders().add("Location", "http://phish.test:" + port + "/password");
+                    send(exchange, 302, "");
+                }
+                case "/to-real" -> {
+                    exchange.getResponseHeaders().add("Location", "http://accounts.real.test:" + port + "/password");
+                    send(exchange, 302, "");
+                }
                 default -> send(exchange, 500, "");
             }
         });
@@ -102,8 +136,12 @@ class DefaultSignInFormCheckServiceTest {
                 : InetAddress.getLoopbackAddress()};
         final var fetcher = ScriptedFetchers.resolvingWith(resolver, LOOPBACK_OR_PUBLIC);
         service = new DefaultSignInFormCheckService(urlRepository,
-                (url, maxBytes, timeout) -> fetcher.fetchFirst(url, maxBytes, PublicHttpFetcherConfiguration.BROWSER_HEADERS, timeout), moderationService);
+                (url, maxBytes, timeout) -> fetcher.fetchFirst(url, maxBytes, PublicHttpFetcherConfiguration.BROWSER_HEADERS, timeout), moderationService,
+                reviewQueueService, realSignInHosts, new NewAccounts(settingsService, scammerSignalService, Clock.fixed(NOW, ZoneOffset.UTC)), settingsService,
+                TransactionOperations.withoutTransaction());
         when(moderationService.holdForSignInForm(anyLong(), anyString(), anyString())).thenReturn(true);
+        when(moderationService.holdOwnedLinkForSignInForm(anyLong(), anyString(), anyString(), anyString())).thenReturn(true);
+        when(scammerSignalService.possibleScammers(anyCollection())).thenReturn(Set.of());
         logEvents.start();
         serviceLogger.addAppender(logEvents);
     }
@@ -200,6 +238,150 @@ class DefaultSignInFormCheckServiceTest {
                 .isEqualTo(AsyncExecutorConfiguration.REDIRECT_CHECK_EXECUTOR);
     }
 
+    @Test
+    void aNewAccountsLinkToASignInFormIsHeld() {
+        final var url = accountLink(LINK_ID, "http://shop.test:" + port + "/moved", NEW_ACCOUNT);
+
+        assertThat(service.checkAccountLink(LINK_ID)).isEqualTo(AccountCheckOutcome.HELD);
+
+        verify(moderationService).holdOwnedLinkForSignInForm(LINK_ID, url.getLongUrl(), "a password field", ReviewReasons.SIGN_IN_FORM_NEW_ACCOUNT);
+        verifyNoInteractions(reviewQueueService);
+        assertThat(requests).containsExactly("/moved", "/password");
+        assertThat(logEvents.list).extracting(ILoggingEvent::getFormattedMessage)
+                .containsExactly("Sign-in form on a link from a new account urlId=41 domain=shop.test held=true");
+    }
+
+    @Test
+    void aLinkThatIsNoLongerHeldWhenTheCheckEndsIsSkipped() {
+        accountLink(LINK_ID, "http://shop.test:" + port + "/password", NEW_ACCOUNT);
+        when(moderationService.holdOwnedLinkForSignInForm(anyLong(), anyString(), anyString(), anyString())).thenReturn(false);
+
+        assertThat(service.checkAccountLink(LINK_ID)).isEqualTo(AccountCheckOutcome.SKIPPED);
+
+        verifyNoInteractions(reviewQueueService);
+    }
+
+    @Test
+    void anOlderAccountsLinkGetsANoticeOnly() {
+        final var url = accountLink(LINK_ID, "http://verniqindexone.test:" + port + "/cache-trash/", OLDER_ACCOUNT);
+
+        assertThat(service.checkAccountLink(LINK_ID)).isEqualTo(AccountCheckOutcome.NOTICED);
+
+        verify(reviewQueueService).notice(url, List.of(ReviewReasons.SIGN_IN_FORM_ACCOUNT));
+        verify(moderationService, never()).holdOwnedLinkForSignInForm(anyLong(), anyString(), anyString(), anyString());
+        assertThat(logEvents.list).extracting(ILoggingEvent::getFormattedMessage)
+                .containsExactly("Sign-in form on a link from an account, a review notice is added urlId=41 domain=verniqindexone.test");
+    }
+
+    @Test
+    void aPossibleScammerIsTreatedAsNew() {
+        final var url = accountLink(LINK_ID, "http://shop.test:" + port + "/password", OLDER_ACCOUNT);
+        when(scammerSignalService.possibleScammers(List.of(OLDER_ACCOUNT))).thenReturn(Set.of(OLDER_ACCOUNT.getId()));
+
+        assertThat(service.checkAccountLink(LINK_ID)).isEqualTo(AccountCheckOutcome.HELD);
+
+        verify(moderationService).holdOwnedLinkForSignInForm(LINK_ID, url.getLongUrl(), "a password field", ReviewReasons.SIGN_IN_FORM_NEW_ACCOUNT);
+        verifyNoInteractions(reviewQueueService);
+    }
+
+    @Test
+    void aFormOnARealSignInHostCountsForNothing() {
+        accountLink(LINK_ID, "http://accounts.real.test:" + port + "/password", NEW_ACCOUNT);
+        when(realSignInHosts.isRealSignInHost("accounts.real.test")).thenReturn(true);
+
+        assertThat(service.checkAccountLink(LINK_ID)).isEqualTo(AccountCheckOutcome.REAL_SIGN_IN_PAGE);
+
+        verify(moderationService, never()).holdOwnedLinkForSignInForm(anyLong(), anyString(), anyString(), anyString());
+        verifyNoInteractions(reviewQueueService);
+    }
+
+    @Test
+    void aFormReachedThroughARedirectIsJudgedOnTheFinalHost() {
+        final var throughARealHost = accountLink(LINK_ID, "http://accounts.real.test:" + port + "/to-phish", NEW_ACCOUNT);
+        accountLink(42L, "http://phish.test:" + port + "/to-real", NEW_ACCOUNT);
+        when(realSignInHosts.isRealSignInHost("accounts.real.test")).thenReturn(true);
+
+        assertThat(service.checkAccountLink(LINK_ID)).isEqualTo(AccountCheckOutcome.HELD);
+        assertThat(service.checkAccountLink(42L)).isEqualTo(AccountCheckOutcome.REAL_SIGN_IN_PAGE);
+
+        verify(moderationService).holdOwnedLinkForSignInForm(LINK_ID, throughARealHost.getLongUrl(), "a password field",
+                ReviewReasons.SIGN_IN_FORM_NEW_ACCOUNT);
+        verify(moderationService, never()).holdOwnedLinkForSignInForm(eq(42L), anyString(), anyString(), anyString());
+        verify(realSignInHosts).isRealSignInHost("phish.test");
+        verify(realSignInHosts).isRealSignInHost("accounts.real.test");
+        assertThat(requests).containsExactly("/to-phish", "/password", "/to-real", "/password");
+    }
+
+    @Test
+    void aPageWithoutAFormDoesNothing() {
+        accountLink(LINK_ID, "http://news.test:" + port + "/article", NEW_ACCOUNT);
+
+        assertThat(service.checkAccountLink(LINK_ID)).isEqualTo(AccountCheckOutcome.NO_FORM);
+
+        verify(moderationService, never()).holdOwnedLinkForSignInForm(anyLong(), anyString(), anyString(), anyString());
+        verifyNoInteractions(reviewQueueService, realSignInHosts);
+    }
+
+    @Test
+    void aFailedFetchDoesNothing() {
+        accountLink(LINK_ID, "http://broken.test:" + port + "/secret-path?token=abc", NEW_ACCOUNT);
+
+        assertThat(service.checkAccountLink(LINK_ID)).isEqualTo(AccountCheckOutcome.FETCH_FAILED);
+
+        verify(moderationService, never()).holdOwnedLinkForSignInForm(anyLong(), anyString(), anyString(), anyString());
+        verifyNoInteractions(reviewQueueService, realSignInHosts);
+        assertThat(logEvents.list).singleElement().satisfies(event -> assertThat(event.getFormattedMessage())
+                .startsWith("Could not check the page for a sign-in form, the link stays as it is urlId=41 domain=broken.test ")
+                .doesNotContain("secret-path").doesNotContain("token"));
+    }
+
+    @Test
+    void theSwitchOffSkipsAccountLinks() {
+        accountLink(LINK_ID, "http://shop.test:" + port + "/password", NEW_ACCOUNT);
+        SettingsServiceFixtures.turnOff(settingsService, SettingKey.SIGN_IN_FORM_ACCOUNT_LINKS);
+
+        assertThat(service.checkAccountLink(LINK_ID)).isEqualTo(AccountCheckOutcome.SKIPPED);
+
+        assertThat(requests).isEmpty();
+        verify(moderationService, never()).holdOwnedLinkForSignInForm(anyLong(), anyString(), anyString(), anyString());
+    }
+
+    @Test
+    void anAdminsLinkIsSkipped() {
+        final var admin = User.builder().id(3L).createDate(NOW_LOCAL.minusDays(1)).twoStepEnabled(true)
+                .authorities(List.of(Authorities.builder().name("ROLE_ADMIN").build())).build();
+        accountLink(LINK_ID, "http://shop.test:" + port + "/password", admin);
+
+        assertThat(service.checkAccountLink(LINK_ID)).isEqualTo(AccountCheckOutcome.SKIPPED);
+
+        assertThat(requests).isEmpty();
+        verify(moderationService, never()).holdOwnedLinkForSignInForm(anyLong(), anyString(), anyString(), anyString());
+    }
+
+    @Test
+    void aLinkThatIsGoneOffBlockedOrWithoutAnOwnerIsNeverFetched() {
+        final var off = accountLink(LINK_ID, "http://shop.test:" + port + "/password", NEW_ACCOUNT);
+        off.setActive(false);
+        accountLink(43L, "http://shop.test:" + port + "/password", NEW_ACCOUNT).setBlockReason(BlockReason.SIGN_IN_FORM);
+        accountLink(44L, "http://shop.test:" + port + "/password", NEW_ACCOUNT).setThreatType(ThreatType.MALWARE);
+        accountLink(45L, "http://shop.test:" + port + "/password", null);
+
+        assertThat(service.checkAccountLink(LINK_ID)).isEqualTo(AccountCheckOutcome.SKIPPED);
+        assertThat(service.checkAccountLink(43L)).isEqualTo(AccountCheckOutcome.SKIPPED);
+        assertThat(service.checkAccountLink(44L)).isEqualTo(AccountCheckOutcome.SKIPPED);
+        assertThat(service.checkAccountLink(45L)).isEqualTo(AccountCheckOutcome.SKIPPED);
+        assertThat(service.checkAccountLink(46L)).isEqualTo(AccountCheckOutcome.SKIPPED);
+
+        assertThat(requests).isEmpty();
+        verifyNoInteractions(reviewQueueService);
+    }
+
+    @Test
+    void theAccountCheckRunsOnItsOwnThreads() throws NoSuchMethodException {
+        assertThat(DefaultSignInFormCheckService.class.getMethod("checkAccountLinkLater", long.class).getAnnotation(Async.class).value())
+                .isEqualTo(AsyncExecutorConfiguration.SIGN_IN_CHECK_EXECUTOR);
+    }
+
     private String warningPageLink(final String longUrl) {
         warningPageLink(LINK_ID, longUrl);
         return longUrl;
@@ -207,6 +389,12 @@ class DefaultSignInFormCheckServiceTest {
 
     private Url warningPageLink(final long id, final String longUrl) {
         final var url = Url.builder().id(id).shortUrl("s" + id).longUrl(longUrl).active(true).warningPage(true).build();
+        when(urlRepository.findById(id)).thenReturn(Optional.of(url));
+        return url;
+    }
+
+    private Url accountLink(final long id, final String longUrl, final User owner) {
+        final var url = Url.builder().id(id).shortUrl("s" + id).longUrl(longUrl).active(true).owner(owner).build();
         when(urlRepository.findById(id)).thenReturn(Optional.of(url));
         return url;
     }

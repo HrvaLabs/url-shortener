@@ -26,6 +26,7 @@ import org.springframework.cache.CacheManager;
 import org.springframework.cache.annotation.AnnotationCacheOperationSource;
 import org.springframework.cache.concurrent.ConcurrentMapCacheManager;
 import org.springframework.cache.interceptor.CacheInterceptor;
+import org.springframework.core.task.TaskRejectedException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
@@ -33,6 +34,7 @@ import org.springframework.data.domain.Sort;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
+import cc.hrva.urlshortener.configuration.AsyncExecutorConfiguration;
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.controller.LinkUnavailableView;
 import cc.hrva.urlshortener.controller.LinkWarningTemplates;
@@ -83,6 +85,7 @@ import cc.hrva.urlshortener.service.domain.CustomDomainRegistry;
 import cc.hrva.urlshortener.service.domain.DomainRoute;
 import cc.hrva.urlshortener.service.domain.UrlCache;
 import cc.hrva.urlshortener.service.impl.DefaultSettingsService;
+import cc.hrva.urlshortener.service.impl.DefaultSignInFormCheckService;
 import cc.hrva.urlshortener.service.impl.DefaultSuspiciousUrlService;
 import cc.hrva.urlshortener.service.impl.DefaultUrlService;
 import cc.hrva.urlshortener.service.inspection.LinkInspectionService;
@@ -91,6 +94,8 @@ import cc.hrva.urlshortener.service.ratelimit.RateLimiterUnavailableException;
 import cc.hrva.urlshortener.exception.ServiceBusyException;
 import cc.hrva.urlshortener.service.settings.SettingKey;
 import cc.hrva.urlshortener.service.settings.SettingsServiceFixtures;
+import cc.hrva.urlshortener.service.signin.NewAccounts;
+import cc.hrva.urlshortener.util.ReviewReasons;
 import cc.hrva.urlshortener.validator.ApiKeyValidator;
 import cc.hrva.urlshortener.validator.UrlValidator;
 import cc.hrva.urlshortener.validator.impl.DefaultUrlValidator;
@@ -112,6 +117,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.aop.framework.ProxyFactory;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.transaction.annotation.AnnotationTransactionAttributeSource;
 import org.springframework.transaction.interceptor.TransactionInterceptor;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -275,6 +281,12 @@ class UrlServiceTest {
     @Mock
     private LinkInspectionService linkInspectionService;
 
+    @Mock
+    private NewAccounts newAccounts;
+
+    @Mock
+    private ModerationService moderationService;
+
     private AnonymousLinkSignals anonymousLinkSignals;
 
     private UrlCache urlCache;
@@ -321,7 +333,7 @@ class UrlServiceTest {
                 settingsService,
                 withoutTransactions,
                 anonymousLinkSignals, LinkWarningTemplates.engine(), humanCheckService, signInFormCheckService,
-                destinationChangeService, linkInspectionService
+                destinationChangeService, linkInspectionService, newAccounts, moderationService
         );
     }
 
@@ -2046,14 +2058,192 @@ class UrlServiceTest {
     }
 
     @Test
-    void aSignedInOrMcpCreateIsNeverFetched() {
+    void aSignedInOrMcpCreateNeverGetsTheWarningPageCheck() {
         stubLinkCreation();
         when(userService.getUserFromToken()).thenReturn(User.builder().id(7L).build());
 
         urlService.saveUrlRouting(CreateUrlDto.builder().longUrl(RANDOM_LINK).build(), CLIENT_IP, CreatedVia.WEB, null);
         urlService.saveUrlRouting(CreateUrlDto.builder().longUrl(RANDOM_LINK).build(), null, CreatedVia.MCP);
 
+        verify(signInFormCheckService, never()).checkLater(anyLong());
+        verify(signInFormCheckService, times(2)).checkAccountLinkLater(1L);
+    }
+
+    @Test
+    void aSignedInCreateSchedulesTheAccountCheck() {
+        final var scheduledInTransaction = new AtomicReference<Boolean>();
+        final var createUrlDto = CreateUrlDto.builder().longUrl("https://example.com/menu").build();
+        when(userService.getUserFromToken()).thenReturn(OWNER);
+        when(appProperties.getShortUrlLength()).thenReturn(5L);
+        when(urlRepository.save(any(Url.class))).thenAnswer(invocation -> persisted(invocation.getArgument(0)));
+        when(linkCheckService.check("https://example.com/menu")).thenReturn(LinkVerdict.clean());
+        recordTransactionDuringAccountCheck(1L, scheduledInTransaction);
+
+        final var created = transactionalUrlService().saveUrlRouting(createUrlDto, CLIENT_IP, CreatedVia.WEB);
+
+        assertThat(created.id()).isEqualTo(1L);
+        assertThat(scheduledInTransaction).hasValue(false);
+        verify(signInFormCheckService, never()).checkLater(anyLong());
+    }
+
+    @Test
+    void anApiKeyCreateSchedulesIt() {
+        when(apiKeyService.fetchApiKeyByKey("apikey")).thenReturn(ApiKey.builder().owner(OWNER).build());
+        stubLinkCreation();
+
+        urlService.saveUrlWithApiKey(link(0), "apikey", CreatedVia.API_KEY);
+        urlService.saveUrlWithApiKey(link(1), "apikey", CreatedVia.BULK);
+
+        verify(signInFormCheckService, times(2)).checkAccountLinkLater(1L);
+        verify(signInFormCheckService, never()).checkLater(anyLong());
+    }
+
+    @Test
+    void anAllowedVerdictSkipsIt() {
+        stubLinkCreation();
+        when(userService.getUserFromToken()).thenReturn(OWNER);
+        when(apiKeyService.fetchApiKeyByKey("apikey")).thenReturn(ApiKey.builder().owner(OWNER).build());
+        when(urlValidator.checkIfLongUrlIsNotBlocklisted(any()))
+                .thenReturn(new LinkVerdict(Outcome.ALLOWED, List.of("allowed domain github.com"), null, null));
+
+        urlService.saveUrlRouting(link(0), CLIENT_IP, CreatedVia.WEB);
+        urlService.saveUrlWithApiKey(link(1), "apikey", CreatedVia.API_KEY);
+
         verifyNoInteractions(signInFormCheckService);
+    }
+
+    @Test
+    void theSwitchOffSchedulesNoAccountCheck() {
+        stubLinkCreation();
+        when(userService.getUserFromToken()).thenReturn(OWNER);
+        SettingsServiceFixtures.turnOff(settingsService, SettingKey.SIGN_IN_FORM_ACCOUNT_LINKS);
+
+        urlService.saveUrlRouting(link(0), CLIENT_IP, CreatedVia.WEB);
+
+        verifyNoInteractions(signInFormCheckService, newAccounts, moderationService);
+    }
+
+    @Test
+    void anAdminsCreateSchedulesNoAccountCheck() {
+        stubLinkCreation();
+        when(userService.getUserFromToken()).thenReturn(admin());
+
+        urlService.saveUrlRouting(link(0), CLIENT_IP, CreatedVia.WEB);
+
+        verifyNoInteractions(signInFormCheckService, newAccounts, moderationService);
+    }
+
+    @Test
+    void anOwnersDestinationChangeSchedulesIt() {
+        final var scheduledInTransaction = new AtomicReference<Boolean>();
+        final var url = Url.builder().id(7L).shortUrl("abc").longUrl("https://old.example").visits(0L).active(true).owner(OWNER).build();
+        final var update = UrlUpdateDto.builder().id(7L).longUrl("https://example.com/menu").build();
+        final var changed = Url.builder().id(7L).shortUrl("abc").longUrl("https://example.com/menu").visits(0L).active(true).build();
+        when(userService.getUserFromToken()).thenReturn(OWNER);
+        when(urlRepository.findById(7L)).thenReturn(Optional.of(url));
+        when(urlUpdateDtoToUrlConverter.convert(update)).thenReturn(changed);
+        when(urlRepository.save(any(Url.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(linkCheckService.check("https://example.com/menu")).thenReturn(LinkVerdict.clean());
+        recordTransactionDuringAccountCheck(7L, scheduledInTransaction);
+
+        transactionalUrlService().updateUrl(update, null);
+
+        assertThat(scheduledInTransaction).hasValue(false);
+        assertThat(url.getLongUrl()).isEqualTo("https://example.com/menu");
+    }
+
+    @Test
+    void anAllowedNewDestinationSkipsIt() {
+        final var url = Url.builder().id(7L).shortUrl("abc").longUrl("https://old.example").visits(0L).active(true).owner(OWNER).build();
+        final var update = UrlUpdateDto.builder().id(7L).longUrl("https://github.com/HrvaLabs").build();
+        final var changed = Url.builder().id(7L).shortUrl("abc").longUrl("https://github.com/HrvaLabs").visits(0L).active(true).build();
+        when(userService.getUserFromToken()).thenReturn(OWNER);
+        when(urlRepository.findById(7L)).thenReturn(Optional.of(url));
+        when(urlUpdateDtoToUrlConverter.convert(update)).thenReturn(changed);
+        when(urlRepository.save(url)).thenReturn(url);
+        when(urlValidator.checkIfLongUrlIsNotBlocklisted(changed))
+                .thenReturn(new LinkVerdict(Outcome.ALLOWED, List.of("allowed domain github.com"), null, null));
+
+        urlService.updateUrl(update, null);
+
+        verifyNoInteractions(signInFormCheckService);
+    }
+
+    @Test
+    void anAdminsChangeDoesNot() {
+        final var url = Url.builder().id(7L).shortUrl("abc").longUrl("https://old.example").visits(0L).active(true).owner(OWNER).build();
+        final var update = UrlUpdateDto.builder().id(7L).longUrl("https://new.example").build();
+        final var changed = Url.builder().id(7L).shortUrl("abc").longUrl("https://new.example").visits(0L).active(true).build();
+        when(userService.getUserFromToken()).thenReturn(admin());
+        when(urlRepository.findById(7L)).thenReturn(Optional.of(url));
+        when(urlUpdateDtoToUrlConverter.convert(update)).thenReturn(changed);
+        when(urlRepository.save(url)).thenReturn(url);
+
+        urlService.updateUrl(update, null);
+
+        verifyNoInteractions(signInFormCheckService);
+    }
+
+    @Test
+    void anEditThatKeepsTheDestinationSchedulesNoAccountCheck() {
+        final var url = Url.builder().id(7L).shortUrl("abc").longUrl("https://same.example").visits(0L).active(true).owner(OWNER).build();
+        final var update = UrlUpdateDto.builder().id(7L).longUrl("https://same.example").visitLimit(5L).build();
+        final var edited = Url.builder().id(7L).shortUrl("abc").longUrl("https://same.example").visitLimit(5L).visits(0L).active(true).build();
+        when(userService.getUserFromToken()).thenReturn(OWNER);
+        when(urlRepository.findById(7L)).thenReturn(Optional.of(url));
+        when(urlUpdateDtoToUrlConverter.convert(update)).thenReturn(edited);
+        when(urlRepository.save(url)).thenReturn(url);
+
+        urlService.updateUrl(update, null);
+
+        verifyNoInteractions(signInFormCheckService);
+    }
+
+    @Test
+    void aFullQueueHoldsANewAccountsLink() {
+        when(apiKeyService.fetchApiKeyByKey("apikey")).thenReturn(ApiKey.builder().owner(OWNER).build());
+        stubLinkCreation();
+        org.mockito.Mockito.doThrow(new TaskRejectedException("Executor did not accept the task"))
+                .when(signInFormCheckService).checkAccountLinkLater(1L);
+        when(newAccounts.isNew(OWNER)).thenReturn(true);
+        when(moderationService.holdOwnedLinkForSignInForm(anyLong(), anyString(), anyString(), anyString())).thenReturn(true);
+
+        final var created = urlService.saveUrlWithApiKey(link(0), "apikey", CreatedVia.BULK);
+
+        assertThat(created.id()).isEqualTo(1L);
+        verify(moderationService).holdOwnedLinkForSignInForm(1L, "https://example.com/0", "the check couldn't run",
+                ReviewReasons.SIGN_IN_CHECK_COULD_NOT_RUN);
+    }
+
+    @Test
+    @ExtendWith(OutputCaptureExtension.class)
+    void aFullQueueSkipsAnOlderAccountsLink(final CapturedOutput output) {
+        stubLinkCreation();
+        when(userService.getUserFromToken()).thenReturn(OWNER);
+        org.mockito.Mockito.doThrow(new TaskRejectedException("Executor did not accept the task"))
+                .when(signInFormCheckService).checkAccountLinkLater(1L);
+        when(newAccounts.isNew(OWNER)).thenReturn(false);
+
+        final var created = urlService.saveUrlRouting(CreateUrlDto.builder().longUrl("https://example.com/secret-path?token=abc").build(), CLIENT_IP,
+                CreatedVia.WEB);
+
+        assertThat(created.id()).isEqualTo(1L);
+        verifyNoInteractions(moderationService);
+        assertThat(output).contains("urlId=1 domain=example.com").doesNotContain("secret-path").doesNotContain("token=abc");
+    }
+
+    @Test
+    void anonymousChecksStillUseTheRedirectExecutor() throws NoSuchMethodException {
+        anonymousCreateOf(RANDOM_LINK, LinkVerdict.clean());
+        when(domainAgeService.registeredOn("xdvqnxj.com")).thenReturn(Optional.empty());
+
+        final var created = createAnonymously(RANDOM_LINK);
+
+        verify(signInFormCheckService).checkLater(created.id());
+        verify(signInFormCheckService, never()).checkAccountLinkLater(anyLong());
+        verifyNoInteractions(newAccounts, moderationService);
+        assertThat(DefaultSignInFormCheckService.class.getMethod("checkLater", long.class).getAnnotation(Async.class).value())
+                .isEqualTo(AsyncExecutorConfiguration.REDIRECT_CHECK_EXECUTOR);
     }
 
     @Test
@@ -2244,7 +2434,8 @@ class UrlServiceTest {
                 urlToPeekUrlConverter, createUrlToUrlConverter, urlUpdateDtoToUrlConverter, urlCache, objectMapper, meterRegistry,
                 passwordEncoder, suspiciousUrlService, rateLimiter, reviewQueueService, scammerSignalService, clickCheckService, redirectChainService,
                 transactionOperations, reservedAliasService, burstAlertService, destinationCheckRepository, customDomainRegistry, customDomainRepository,
-                campaignService, settingsService, withoutTransactions, anonymousLinkSignals, LinkWarningTemplates.engine(), humanCheckService, signInFormCheckService, destinationChangeService, linkInspectionService);
+                campaignService, settingsService, withoutTransactions, anonymousLinkSignals, LinkWarningTemplates.engine(), humanCheckService, signInFormCheckService, destinationChangeService, linkInspectionService,
+                newAccounts, moderationService);
     }
 
     private Url anonymousCreateOf(final String longUrl, final LinkVerdict verdict) {
@@ -5301,7 +5492,8 @@ class UrlServiceTest {
                 new io.micrometer.core.instrument.simple.SimpleMeterRegistry(), passwordEncoder, suspiciousUrlService, rateLimiter,
                 reviewQueueService, scammerSignalService, clickCheckService, redirectChainService, TransactionOperations.withoutTransaction(),
                 reservedAliasService, burstAlertService, destinationCheckRepository, customDomainRegistry, customDomainRepository, campaignService, settingsService,
-                withoutTransactions, anonymousLinkSignals, LinkWarningTemplates.engine(), humanCheckService, signInFormCheckService, destinationChangeService, linkInspectionService);
+                withoutTransactions, anonymousLinkSignals, LinkWarningTemplates.engine(), humanCheckService, signInFormCheckService, destinationChangeService, linkInspectionService,
+                newAccounts, moderationService);
     }
 
     private static UrlService withTheCacheAnnotations(final UrlService service, final CacheManager urls) {
@@ -5373,7 +5565,7 @@ class UrlServiceTest {
                 settingsService,
                 withoutTransactions,
                 anonymousLinkSignals, LinkWarningTemplates.engine(), humanCheckService, signInFormCheckService,
-                destinationChangeService, linkInspectionService
+                destinationChangeService, linkInspectionService, newAccounts, moderationService
         );
     }
 
@@ -5396,6 +5588,13 @@ class UrlServiceTest {
             transactionActive.set(TransactionSynchronizationManager.isActualTransactionActive());
             return null;
         }).when(redirectChainService).checkLater(urlId);
+    }
+
+    private void recordTransactionDuringAccountCheck(final long urlId, final AtomicReference<Boolean> transactionActive) {
+        org.mockito.Mockito.doAnswer(invocation -> {
+            transactionActive.set(TransactionSynchronizationManager.isActualTransactionActive());
+            return null;
+        }).when(signInFormCheckService).checkAccountLinkLater(urlId);
     }
 
     private static Url persisted(final Url url) {
@@ -5454,7 +5653,7 @@ class UrlServiceTest {
                 settingsService,
                 transactionManager,
                 anonymousLinkSignals, LinkWarningTemplates.engine(), humanCheckService, signInFormCheckService,
-                destinationChangeService, linkInspectionService
+                destinationChangeService, linkInspectionService, newAccounts, moderationService
         );
         final var proxyFactory = new ProxyFactory(service);
         proxyFactory.addAdvice(new TransactionInterceptor(transactionManager, new AnnotationTransactionAttributeSource()));
@@ -5494,7 +5693,7 @@ class UrlServiceTest {
                 settingsService,
                 withoutTransactions,
                 anonymousLinkSignals, LinkWarningTemplates.engine(), humanCheckService, signInFormCheckService,
-                destinationChangeService, linkInspectionService
+                destinationChangeService, linkInspectionService, newAccounts, moderationService
         );
     }
 
@@ -5530,7 +5729,7 @@ class UrlServiceTest {
                 settingsService,
                 withoutTransactions,
                 anonymousLinkSignals, LinkWarningTemplates.engine(), humanCheckService, signInFormCheckService,
-                destinationChangeService, linkInspectionService
+                destinationChangeService, linkInspectionService, newAccounts, moderationService
         );
     }
 

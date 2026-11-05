@@ -43,6 +43,7 @@ import cc.hrva.urlshortener.service.impl.DefaultUrlService;
 import cc.hrva.urlshortener.service.inspection.LinkInspectionService;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiter;
 import cc.hrva.urlshortener.service.settings.SettingsServiceFixtures;
+import cc.hrva.urlshortener.service.signin.NewAccounts;
 import cc.hrva.urlshortener.validator.ApiKeyValidator;
 import cc.hrva.urlshortener.validator.UrlValidator;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -194,7 +195,7 @@ class UrlControllerBlocklistTest {
                 destinationCheckRepository, customDomainRegistry, customDomainRepository, campaignService, settingsService,
                 mock(PlatformTransactionManager.class), mock(AnonymousLinkSignals.class), LinkWarningTemplates.engine(),
                 mock(HumanCheckService.class), mock(SignInFormCheckService.class), mock(DestinationChangeService.class),
-                mock(LinkInspectionService.class));
+                mock(LinkInspectionService.class), mock(NewAccounts.class), moderationService);
         mockMvc = MockMvcBuilders.standaloneSetup(new UrlController(urlService, qrCodeService, linkPreviewService, clientIpResolver,
                         new ClickRequestResolver(clientIpResolver), request, new ShortLinks(appProperties)))
                 .setControllerAdvice(new GlobalExceptionHandler())

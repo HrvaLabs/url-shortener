@@ -456,6 +456,7 @@ public class AppProperties {
         private boolean humanCheck = true;
         private boolean linkScreenshots = true;
         private boolean virusTotalLookups = true;
+        private boolean signInFormAccountLinks = true;
 
         @Min(1)
         @Max(90)
@@ -472,6 +473,10 @@ public class AppProperties {
         @Min(1000)
         @Max(100_000)
         private int signInFormTopSites = 20_000;
+
+        @Min(0)
+        @Max(365)
+        private int signInFormNewAccountDays = 30;
 
         @Min(1)
         @Max(3650)

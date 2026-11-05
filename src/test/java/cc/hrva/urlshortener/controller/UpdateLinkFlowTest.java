@@ -41,6 +41,7 @@ import cc.hrva.urlshortener.service.ClickCheckService;
 import cc.hrva.urlshortener.service.DomainAgeService;
 import cc.hrva.urlshortener.service.DomainReputationService;
 import cc.hrva.urlshortener.service.LinkPreviewService;
+import cc.hrva.urlshortener.service.ModerationService;
 import cc.hrva.urlshortener.service.QrCodeService;
 import cc.hrva.urlshortener.service.RedirectChainService;
 import cc.hrva.urlshortener.service.ReservedAliasService;
@@ -282,6 +283,9 @@ class UpdateLinkFlowTest {
 
     @MockitoBean
     private TaskScheduler taskScheduler;
+
+    @MockitoBean
+    private ModerationService moderationService;
 
     @Autowired
     private SettingsService settingsService;

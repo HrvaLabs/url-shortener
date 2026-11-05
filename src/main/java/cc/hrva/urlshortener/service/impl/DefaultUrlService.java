@@ -50,6 +50,7 @@ import cc.hrva.urlshortener.service.ClickAnalyticsService;
 import cc.hrva.urlshortener.service.ClickCheckService;
 import cc.hrva.urlshortener.service.DestinationChangeService;
 import cc.hrva.urlshortener.service.LinkEditor;
+import cc.hrva.urlshortener.service.ModerationService;
 import cc.hrva.urlshortener.service.RedirectChainService;
 import cc.hrva.urlshortener.service.ReservedAliasService;
 import cc.hrva.urlshortener.service.ReviewQueueService;
@@ -73,10 +74,12 @@ import cc.hrva.urlshortener.service.linksignal.AnonymousLinkSignals.Signals;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiter;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiterUnavailableException;
 import cc.hrva.urlshortener.service.settings.SettingKey;
+import cc.hrva.urlshortener.service.signin.NewAccounts;
 import cc.hrva.urlshortener.util.DatabaseOutages;
 import cc.hrva.urlshortener.util.DomainNames;
 import cc.hrva.urlshortener.util.ForwardedQueries;
 import cc.hrva.urlshortener.util.RedirectLocations;
+import cc.hrva.urlshortener.util.ReviewReasons;
 import cc.hrva.urlshortener.util.SortWhitelist;
 import cc.hrva.urlshortener.validator.ApiKeyValidator;
 import cc.hrva.urlshortener.validator.UrlValidator;
@@ -119,6 +122,7 @@ import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Stream;
 
@@ -174,6 +178,7 @@ public class DefaultUrlService implements UrlService {
     private static final String CUSTOM_ALIASES_OFF = "Custom aliases are turned off right now.";
     private static final String DOMAIN_FIELD = "domain";
     private static final String DOMAIN_NOT_ACTIVE = "This link's domain isn't active, so the link can't be turned on.";
+    private static final String SIGN_IN_CHECK_COULD_NOT_RUN = "the check couldn't run";
 
     private static final Duration DROPPED_QUERY_LOG_INTERVAL = Duration.ofMinutes(10);
     private static final int MAX_DROPPED_QUERY_LOGS = 10_000;
@@ -218,6 +223,8 @@ public class DefaultUrlService implements UrlService {
     private final SignInFormCheckService signInFormCheckService;
     private final DestinationChangeService destinationChangeService;
     private final LinkInspectionService linkInspectionService;
+    private final NewAccounts newAccounts;
+    private final ModerationService moderationService;
     private final Cache<Long, Boolean> droppedQueryLogs = CacheBuilder.newBuilder()
             .expireAfterWrite(DROPPED_QUERY_LOG_INTERVAL)
             .maximumSize(MAX_DROPPED_QUERY_LOGS)
@@ -262,6 +269,9 @@ public class DefaultUrlService implements UrlService {
                     : Optional.of(madeWithoutAnAccount(createUrlForAnonymousUser(url, verdict, signals), signals, newWarningPageLink));
         })).orElseGet(() -> saveNoLongerHeld(url, verdict, newWarningPageLink));
         checkRedirectsLater(created.id());
+        if (currentUser != null && !AdminTwoStep.hasAdminPowers(currentUser)) {
+            checkAccountSignInFormLater(created, verdict, currentUser);
+        }
         reportCreated(created, CreatedLink.creatorOf(currentUser != null ? currentUser.getId() : null, clientIP), verdict);
         if (currentUser == null) {
             reportAnonymousShape(created, verdict);
@@ -373,6 +383,9 @@ public class DefaultUrlService implements UrlService {
             return saveUrlForUser(url, apiKey.getOwner(), verdict);
         });
         checkRedirectsLater(created.id());
+        if (!AdminTwoStep.hasAdminPowers(apiKey.getOwner())) {
+            checkAccountSignInFormLater(created, verdict, apiKey.getOwner());
+        }
         reportCreated(created, CreatedLink.creatorOf(apiKey.getOwner().getId(), null), verdict);
         return created;
     }
@@ -729,6 +742,9 @@ public class DefaultUrlService implements UrlService {
         if (destinationChanged || turnOn) {
             checkRedirectsLater(updated.id());
         }
+        if (destinationChanged && !editor.admin()) {
+            checkAccountSignInFormLater(updated, verdict, editor.user());
+        }
         if (destinationChanged) {
             reportCreated(updated, CreatedLink.creatorOf(editor.user().getId(), null), verdict);
         }
@@ -833,6 +849,41 @@ public class DefaultUrlService implements UrlService {
         } catch (final RuntimeException exception) {
             log.warn("Could not schedule the sign-in form check urlId={} exception={}", urlId, exception.getClass().getName());
         }
+    }
+
+    private void checkAccountSignInFormLater(final UrlResponse link, final LinkVerdict verdict, final User owner) {
+        if (verdict.outcome() == LinkVerdict.Outcome.ALLOWED || !settingsService.isOn(SettingKey.SIGN_IN_FORM_ACCOUNT_LINKS)) {
+            return;
+        }
+        try {
+            signInFormCheckService.checkAccountLinkLater(link.id());
+        } catch (final RejectedExecutionException exception) {
+            accountCheckCouldNotRun(link, owner);
+        } catch (final RuntimeException exception) {
+            log.warn("Could not schedule the account sign-in form check urlId={} domain={} exception={}", link.id(), domainOf(link.longUrl()),
+                    exception.getClass().getName());
+        }
+    }
+
+    private void accountCheckCouldNotRun(final UrlResponse link, final User owner) {
+        try {
+            if (!newAccounts.isNew(owner)) {
+                log.warn("Sign-in form check queue is full, the link from an account stays as it is urlId={} domain={}", link.id(),
+                        domainOf(link.longUrl()));
+                return;
+            }
+            final var held = moderationService.holdOwnedLinkForSignInForm(link.id(), link.longUrl(), SIGN_IN_CHECK_COULD_NOT_RUN,
+                    ReviewReasons.SIGN_IN_CHECK_COULD_NOT_RUN);
+            log.warn("Sign-in form check queue is full, the link from a new account is held urlId={} domain={} held={}", link.id(),
+                    domainOf(link.longUrl()), held);
+        } catch (final RuntimeException exception) {
+            log.warn("Could not handle the full sign-in form check queue urlId={} domain={} exception={}", link.id(), domainOf(link.longUrl()),
+                    exception.getClass().getName());
+        }
+    }
+
+    private static String domainOf(final String url) {
+        return DomainNames.hostOf(url).orElse("-");
     }
 
     private void reportCreated(final UrlResponse created, final String creator, final LinkVerdict verdict) {

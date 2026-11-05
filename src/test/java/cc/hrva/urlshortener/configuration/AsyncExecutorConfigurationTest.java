@@ -107,6 +107,19 @@ class AsyncExecutorConfigurationTest {
     }
 
     @Test
+    void accountSignInChecksRunOnTheirOwnPoolOfTwoThreadsQueueingFiveHundred() {
+        contextRunner.run(context -> {
+            final var executor = context.getBean(AsyncExecutorConfiguration.SIGN_IN_CHECK_EXECUTOR, ThreadPoolTaskExecutor.class);
+
+            assertThat(context.getBean(AsyncProbe.class).signInCheck().get(5, TimeUnit.SECONDS)).startsWith("sign-in-check-");
+            assertThat(executor.getCorePoolSize()).isEqualTo(2);
+            assertThat(executor.getMaxPoolSize()).isEqualTo(2);
+            assertThat(executor.getQueueCapacity()).isEqualTo(500);
+            assertThat(executor).isNotSameAs(context.getBean(AsyncExecutorConfiguration.REDIRECT_CHECK_EXECUTOR));
+        });
+    }
+
+    @Test
     void notificationJobsRunOnTheirOwnPool() {
         contextRunner.run(context -> {
             final var probe = context.getBean(AsyncProbe.class);
@@ -201,6 +214,11 @@ class AsyncExecutorConfigurationTest {
 
         @Async(AsyncExecutorConfiguration.NOTIFICATION_TASK_EXECUTOR)
         public CompletableFuture<String> notificationTask() {
+            return CompletableFuture.completedFuture(Thread.currentThread().getName());
+        }
+
+        @Async(AsyncExecutorConfiguration.SIGN_IN_CHECK_EXECUTOR)
+        public CompletableFuture<String> signInCheck() {
             return CompletableFuture.completedFuture(Thread.currentThread().getName());
         }
 

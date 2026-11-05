@@ -280,7 +280,7 @@ class SettingValuesTest {
                 .containsExactly(SettingGroup.SAFETY, SettingType.SWITCH, "Screenshots of links in review",
                         "Cloudflare opens each link that enters the review queue and takes one phone-sized screenshot. The nightly cleanup deletes "
                                 + "a screenshot once it's 7 days old. Needs CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_BROWSER_API_TOKEN on the server.", null, true);
-        assertThat(SettingKey.values()[SettingKey.values().length - 3]).isEqualTo(SettingKey.LINK_SCREENSHOTS);
+        assertThat(SettingKey.values()[SettingKey.values().length - 5]).isEqualTo(SettingKey.LINK_SCREENSHOTS);
         final var appProperties = new AppProperties();
         final var defaults = new SettingDefaults(appProperties, SettingsServiceFixtures.bothProviders());
         assertThat(defaults.defaultOf(SettingKey.LINK_SCREENSHOTS)).isEqualTo(true);
@@ -301,7 +301,7 @@ class SettingValuesTest {
                 .containsExactly(SettingGroup.SAFETY, SettingType.SWITCH, "VirusTotal lookups for links in review",
                         "Looks up VirusTotal's existing report for each link that enters the review queue. Never sends a link to VirusTotal on its own. "
                                 + "Needs VIRUSTOTAL_API_KEY on the server.", null, true);
-        assertThat(SettingKey.values()[SettingKey.values().length - 2]).isEqualTo(SettingKey.VIRUSTOTAL_LOOKUPS);
+        assertThat(SettingKey.values()[SettingKey.values().length - 4]).isEqualTo(SettingKey.VIRUSTOTAL_LOOKUPS);
         final var appProperties = new AppProperties();
         final var defaults = new SettingDefaults(appProperties, SettingsServiceFixtures.bothProviders());
         assertThat(defaults.defaultOf(SettingKey.VIRUSTOTAL_LOOKUPS)).isEqualTo(true);
@@ -313,6 +313,35 @@ class SettingValuesTest {
         assertThat(defaults.unavailableReason(SettingKey.VIRUSTOTAL_LOOKUPS)).isEmpty();
         appProperties.getModeration().setVirusTotalLookups(false);
         assertThat(defaults.defaultOf(SettingKey.VIRUSTOTAL_LOOKUPS)).isEqualTo(false);
+    }
+
+    @Test
+    void theAccountSignInFormRows() {
+        assertThat(SettingKey.SIGN_IN_FORM_ACCOUNT_LINKS).extracting(SettingKey::getGroup, SettingKey::getType, SettingKey::getLabel,
+                        SettingKey::getDescription, SettingKey::getParent, SettingKey::isSafety)
+                .containsExactly(SettingGroup.SAFETY, SettingType.SWITCH, "Sign-in form check on links from accounts",
+                        "New and repointed links from accounts are opened and checked for a sign-in form. A new account's link is held for review; "
+                                + "an older account's link stays live and gets a review notice. Forms on real sign-in pages and admins' links don't count.",
+                        null, true);
+        assertThat(SettingKey.SIGN_IN_FORM_NEW_ACCOUNT_DAYS).extracting(SettingKey::getGroup, SettingKey::getType, SettingKey::getLabel,
+                        SettingKey::getDescription, SettingKey::getParent, SettingKey::isSafety, SettingKey::getMin, SettingKey::getMax, SettingKey::getUnit,
+                        SettingKey::isNullable)
+                .containsExactly(SettingGroup.SAFETY, SettingType.NUMBER, "Sign-in form check: new account age",
+                        "Accounts younger than this count as new, and so do possible scammers. 0 counts only possible scammers.",
+                        SettingKey.SIGN_IN_FORM_ACCOUNT_LINKS, false, 0, 365, "days", false);
+        assertThat(Arrays.asList(SettingKey.values()).subList(SettingKey.VIRUSTOTAL_LOOKUPS.ordinal() + 1, SettingKey.SIGN_IN_FORM_TOP_SITES.ordinal()))
+                .containsExactly(SettingKey.SIGN_IN_FORM_ACCOUNT_LINKS, SettingKey.SIGN_IN_FORM_NEW_ACCOUNT_DAYS);
+        assertThat(SettingValues.format(SettingKey.SIGN_IN_FORM_NEW_ACCOUNT_DAYS, 30)).isEqualTo("30 days");
+        assertThat(SettingValues.parse(SettingKey.SIGN_IN_FORM_NEW_ACCOUNT_DAYS, NODES.numberNode(0))).isEqualTo(0);
+        assertRefused(SettingKey.SIGN_IN_FORM_NEW_ACCOUNT_DAYS, NODES.numberNode(366), "Use a number from 0 to 365.");
+        final var appProperties = new AppProperties();
+        final var defaults = new SettingDefaults(appProperties, SettingsServiceFixtures.bothProviders());
+        assertThat(defaults.defaultOf(SettingKey.SIGN_IN_FORM_ACCOUNT_LINKS)).isEqualTo(true);
+        assertThat(defaults.defaultOf(SettingKey.SIGN_IN_FORM_NEW_ACCOUNT_DAYS)).isEqualTo(30);
+        appProperties.getModeration().setSignInFormAccountLinks(false);
+        appProperties.getModeration().setSignInFormNewAccountDays(0);
+        assertThat(defaults.defaultOf(SettingKey.SIGN_IN_FORM_ACCOUNT_LINKS)).isEqualTo(false);
+        assertThat(defaults.defaultOf(SettingKey.SIGN_IN_FORM_NEW_ACCOUNT_DAYS)).isEqualTo(0);
     }
 
     @Test
@@ -364,7 +393,8 @@ class SettingValuesTest {
                         "Unlimited");
         assertThat(Arrays.asList(SettingKey.values()).subList(SettingKey.HUMAN_CHECK.ordinal() + 1, SettingKey.values().length))
                 .containsExactly(SettingKey.ANONYMOUS_EXPIRY_DAYS, SettingKey.ANONYMOUS_VISIT_LIMIT, SettingKey.API_KEY_REQUESTS_PER_HOUR,
-                        SettingKey.LINK_SCREENSHOTS, SettingKey.VIRUSTOTAL_LOOKUPS, SettingKey.SIGN_IN_FORM_TOP_SITES);
+                        SettingKey.LINK_SCREENSHOTS, SettingKey.VIRUSTOTAL_LOOKUPS, SettingKey.SIGN_IN_FORM_ACCOUNT_LINKS,
+                        SettingKey.SIGN_IN_FORM_NEW_ACCOUNT_DAYS, SettingKey.SIGN_IN_FORM_TOP_SITES);
         final var appProperties = new AppProperties();
         final var defaults = new SettingDefaults(appProperties, SettingsServiceFixtures.bothProviders());
         assertThat(defaults.defaultOf(SettingKey.ANONYMOUS_EXPIRY_DAYS)).isNull();
