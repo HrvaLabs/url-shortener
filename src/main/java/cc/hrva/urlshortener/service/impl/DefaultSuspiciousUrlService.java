@@ -89,13 +89,14 @@ public class DefaultSuspiciousUrlService implements SuspiciousUrlService {
         final var unicodeLabels = hostName.unicode().split(LABEL_SEPARATOR);
         final var lookalikeLabels = Arrays.stream(unicodeLabels).map(DefaultSuspiciousUrlService::latinLookalike).toArray(String[]::new);
         final var listing = hostLists.lookup(host);
+        final var officialBrand = officialBrandOf(host, listing);
 
         if (listing.shortener()) {
             reasons.add(SHORTENER_REASON);
         }
         reasons.addAll(alphabetReasons(unicodeLabels));
-        imitatedBrand(lookalikeLabels, host, listing).ifPresent(brand -> reasons.add(IMITATES_PREFIX + brand));
-        if (!isOfficialBrandSite(host, listing) && hasLure(lookalikeLabels, longUrl)) {
+        imitatedBrand(lookalikeLabels, officialBrand).ifPresent(brand -> reasons.add(IMITATES_PREFIX + brand));
+        if (officialBrand.isEmpty() && hasLure(lookalikeLabels, longUrl)) {
             reasons.add(LOGIN_LURE);
         }
         if (listing.riskyEnding()) {
@@ -229,11 +230,11 @@ public class DefaultSuspiciousUrlService implements SuspiciousUrlService {
         return lookalike.toString();
     }
 
-    private static Optional<String> imitatedBrand(final String[] labels, final String host, final HostListing listing) {
+    private static Optional<String> imitatedBrand(final String[] labels, final Optional<String> officialBrand) {
         return Arrays.stream(labels)
                 .flatMap(label -> Arrays.stream(label.split("-")))
                 .flatMap(part -> BrandNames.ALL.stream().filter(brand -> resembles(part, brand)))
-                .filter(brand -> !isOfficialSiteOf(brand, host, listing))
+                .filter(brand -> officialBrand.filter(brand::equals).isEmpty())
                 .findFirst();
     }
 
@@ -241,13 +242,11 @@ public class DefaultSuspiciousUrlService implements SuspiciousUrlService {
         return part.equals(brand) || brand.length() >= DISTINCTIVE_BRAND_LENGTH && differsByOneLetter(part, brand);
     }
 
-    private static boolean isOfficialBrandSite(final String host, final HostListing listing) {
-        return BrandNames.ALL.stream().anyMatch(brand -> isOfficialSiteOf(brand, host, listing));
-    }
-
-    private static boolean isOfficialSiteOf(final String brand, final String host, final HostListing listing) {
-        final var trustedListing = listing.brandSite() == BrandSite.UNKNOWN || listing.brandSite() == BrandSite.LISTED && !listing.riskyEnding();
-        return trustedListing && DomainNames.isUnderRegistrySuffix(host) && DomainNames.registryNameOf(host).equals(brand);
+    private static Optional<String> officialBrandOf(final String host, final HostListing listing) {
+        if (listing.brandSite() == BrandSite.NOT_LISTED || listing.riskyEnding() || !DomainNames.isUnderRegistrySuffix(host)) {
+            return Optional.empty();
+        }
+        return Optional.of(DomainNames.registryNameOf(host)).filter(BrandNames.ALL::contains);
     }
 
     private static boolean hasLure(final String[] labels, final String longUrl) {

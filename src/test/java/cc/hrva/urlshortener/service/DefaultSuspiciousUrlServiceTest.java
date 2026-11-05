@@ -135,6 +135,14 @@ class DefaultSuspiciousUrlServiceTest {
         assertThat(suspiciousUrlService.findReasons("https://icloud.zip/")).contains("imitates icloud");
     }
 
+    @ParameterizedTest
+    @CsvSource({"icloud.zip, imitates icloud", "binance.click, imitates binance", "netflix.shop, imitates netflix", "whatsapp.cc, imitates whatsapp"})
+    void aBrandOnARiskyEndingImitatesWhileTheBrandListIsUnknown(final String host, final String reason) {
+        onLists(host, new HostListing(false, true, BrandSite.UNKNOWN));
+
+        assertThat(suspiciousUrlService.findReasons("https://" + host + "/login")).contains(reason, LURE);
+    }
+
     @Test
     void anUnknownBrandListTrustsExactBrandNamesOnly() {
         onLists("njuskalo.hr", HostListing.unknown());
