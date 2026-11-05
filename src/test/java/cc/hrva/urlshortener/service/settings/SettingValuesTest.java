@@ -320,8 +320,9 @@ class SettingValuesTest {
         assertThat(SettingKey.SIGN_IN_FORM_ACCOUNT_LINKS).extracting(SettingKey::getGroup, SettingKey::getType, SettingKey::getLabel,
                         SettingKey::getDescription, SettingKey::getParent, SettingKey::isSafety)
                 .containsExactly(SettingGroup.SAFETY, SettingType.SWITCH, "Sign-in form check on links from accounts",
-                        "New and repointed links from accounts are opened and checked for a sign-in form. A new account's link is held for review; "
-                                + "an older account's link stays live and gets a review notice. Forms on real sign-in pages and admins' links don't count.",
+                        "Links from accounts are opened and checked for a sign-in form when they're made, repointed or turned back on. A new "
+                                + "account's link is held for review; an older account's link stays live and gets a review notice. Forms on real sign-in "
+                                + "pages and admins' links don't count.",
                         null, true);
         assertThat(SettingKey.SIGN_IN_FORM_NEW_ACCOUNT_DAYS).extracting(SettingKey::getGroup, SettingKey::getType, SettingKey::getLabel,
                         SettingKey::getDescription, SettingKey::getParent, SettingKey::isSafety, SettingKey::getMin, SettingKey::getMax, SettingKey::getUnit,

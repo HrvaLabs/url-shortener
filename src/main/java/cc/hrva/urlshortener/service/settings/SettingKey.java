@@ -116,8 +116,9 @@ public enum SettingKey {
             "Looks up VirusTotal's existing report for each link that enters the review queue. Never sends a link to VirusTotal on its own. "
                     + "Needs VIRUSTOTAL_API_KEY on the server.", null, true),
     SIGN_IN_FORM_ACCOUNT_LINKS(SettingGroup.SAFETY, "Sign-in form check on links from accounts",
-            "New and repointed links from accounts are opened and checked for a sign-in form. A new account's link is held for review; an older "
-                    + "account's link stays live and gets a review notice. Forms on real sign-in pages and admins' links don't count.", null, true),
+            "Links from accounts are opened and checked for a sign-in form when they're made, repointed or turned back on. A new account's "
+                    + "link is held for review; an older account's link stays live and gets a review notice. Forms on real sign-in pages and "
+                    + "admins' links don't count.", null, true),
     SIGN_IN_FORM_NEW_ACCOUNT_DAYS(SettingGroup.SAFETY, "Sign-in form check: new account age",
             "Accounts younger than this count as new, and so do possible scammers. 0 counts only possible scammers.", SIGN_IN_FORM_ACCOUNT_LINKS, 0,
             365, "days"),

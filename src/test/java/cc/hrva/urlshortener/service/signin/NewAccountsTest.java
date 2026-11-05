@@ -9,6 +9,7 @@ import cc.hrva.urlshortener.service.settings.SettingsServiceFixtures;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Set;
@@ -29,7 +30,7 @@ import static org.mockito.Mockito.when;
 class NewAccountsTest {
 
     private static final Instant NOW = Instant.parse("2026-11-05T10:15:30Z");
-    private static final LocalDateTime NOW_LOCAL = LocalDateTime.ofInstant(NOW, ZoneOffset.UTC);
+    private static final LocalDateTime NOW_LOCAL = LocalDateTime.ofInstant(NOW, ZoneId.systemDefault());
 
     private final SettingsService settingsService = SettingsServiceFixtures.defaults(new AppProperties());
 
