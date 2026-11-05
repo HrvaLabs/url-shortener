@@ -171,11 +171,12 @@ class BlocklistStoreTest {
     }
 
     @Test
-    void matchingSourcesIsEmptyWhenRedisIsDown() {
+    void matchingSourcesLetsARedisFailureReachItsCaller() {
         when(redisTemplate.executePipelined(any(RedisCallback.class)))
                 .thenThrow(new RedisConnectionFailureException("Unable to connect to Redis"));
 
-        assertThat(blocklistStore.matchingSources(Map.of(1L, List.of("evil.example")))).isEmpty();
+        assertThatThrownBy(() -> blocklistStore.matchingSources(Map.of(1L, List.of("evil.example"))))
+                .isInstanceOf(RedisConnectionFailureException.class);
     }
 
     @Test

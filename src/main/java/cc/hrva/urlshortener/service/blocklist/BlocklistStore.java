@@ -91,22 +91,17 @@ public class BlocklistStore {
         if (lookups.isEmpty()) {
             return Set.of();
         }
-        try {
-            final var answers = redisTemplate.executePipelined((RedisCallback<Object>) connection -> {
-                lookups.forEach(lookup -> connection.setCommands().sMIsMember(bytesOf(keyOf(lookup.getKey())), bytesOf(lookup.getValue())));
-                return null;
-            });
-            final var matches = new HashSet<Long>();
-            for (int index = 0; index < lookups.size(); index++) {
-                if (((List<?>) answers.get(index)).contains(Boolean.TRUE)) {
-                    matches.add(lookups.get(index).getKey());
-                }
+        final var answers = redisTemplate.executePipelined((RedisCallback<Object>) connection -> {
+            lookups.forEach(lookup -> connection.setCommands().sMIsMember(bytesOf(keyOf(lookup.getKey())), bytesOf(lookup.getValue())));
+            return null;
+        });
+        final var matches = new HashSet<Long>();
+        for (int index = 0; index < lookups.size(); index++) {
+            if (((List<?>) answers.get(index)).contains(Boolean.TRUE)) {
+                matches.add(lookups.get(index).getKey());
             }
-            return matches;
-        } catch (final DataAccessException exception) {
-            log.warn("Blocklist lookup failed, skipping the source lists exception={}", exception.getClass().getName());
-            return Set.of();
         }
+        return matches;
     }
 
     private static void addInBatches(final RedisConnection connection, final byte[] key, final Set<String> entries) {

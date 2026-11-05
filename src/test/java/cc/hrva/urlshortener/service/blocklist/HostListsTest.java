@@ -18,6 +18,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Captor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.dao.QueryTimeoutException;
 import org.springframework.data.redis.RedisConnectionFailureException;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -122,6 +123,15 @@ class HostListsTest {
         when(blocklistStore.matchingSources(anyMap())).thenThrow(new RedisConnectionFailureException("down"));
 
         assertThat(hostLists.lookup("bit.ly")).isEqualTo(HostListing.unknown());
+    }
+
+    @Test
+    void aLookupFailingAfterTheBrandListWasFoundIsUnknown() {
+        source(BRANDS, SourceKind.BRAND_SITES, BlocklistAction.TRUST, "njuskalo.hr");
+        when(blocklistStore.matchingSources(anyMap())).thenThrow(new QueryTimeoutException("timeout"));
+
+        assertThat(hostLists.lookup("njuskalo-login.xyz")).isEqualTo(HostListing.unknown());
+        verify(blocklistStore).exists(BRANDS);
     }
 
     @Test
